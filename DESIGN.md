@@ -99,7 +99,34 @@ Layout rules are deliberately simpler than Haskell's (see [§5](#5-lexer-and-lay
 
 ### 3.5 MVP surface
 
-Single module. `Int`, `Float`, `String`, `Bool`; top-level definitions with optional annotations; `let … in`; lambdas (`\x -> …`) and curried application; `if/then/else`; `type` declarations with type parameters; `case` with nested patterns (constructors, literals, variables, `_`); operators `+ - * / == /= < > <= >= ++`; a `print` builtin. Numbers follow Elm: `+ - *` work at `Int` or `Float` (see [§7.3](#73-numbers-without-typeclasses)), `/` is `Float`-only.
+Single module. `Int`, `Float`, `String`, `Bool`; top-level definitions with optional annotations; statement-style declaration bodies with local bindings (§3.6); lambdas (`\x -> …`) and curried application; `if/then/else`; `type` declarations with type parameters; `case` with nested patterns (constructors, literals, variables, `_`); operators `+ - * / == /= < > <= >= ++`; a `print` builtin. Numbers follow Elm: `+ - *` work at `Int` or `Float` (see [§7.3](#73-numbers-without-typeclasses)), `/` is `Float`-only.
+
+### 3.6 Statement-style bodies — the first deliberate divergence from Elm
+
+**Decision (2026-09-02): fango has no `let … in`. A declaration body is either an inline expression, or an indented block of `name = expr` binding lines followed by exactly one result expression.**
+
+```elm
+normalize v =
+    len = sqrt (dot v v)
+    scale (1.0 / len) v
+```
+
+Rationale:
+
+1. **Effects are direct-style (§10), and this is their natural syntax.** When effects land, `line = readLine ()` is an ordinary binding whose right-hand side performs an effect — sequencing really is implicit, like the intuition behind Haskell's `do` without the monad. Statement bodies also give Unit-typed expression statements a home (stacking `print`s in `main`, S7); `let/in` handles that only as the self-defeating `let _ = e1 in e2`.
+2. **One scoping rule everywhere.** Block bindings follow the same source-order, use-after-define rule as the top level. Elm's `let` is mutually recursive within its block — a second scoping rule fango never has to implement or explain.
+3. **The machinery already exists.** The offside rule (§5) gives blocks their statement column, and the `name … =` line classifier is the same lookahead the REPL and top level already use.
+
+Semantics: sequential scoping with no forward references; **no shadowing** — a binding may not rebind any name already in scope (module level or earlier in the block); self-reference is the same undefined-name error as at the top level; bindings evaluate **eagerly in order** in both backends (top-level definitions keep the lazy-memo REPL model, §9.2). Local *function* bindings (`helper x = …` inside a block) arrive with functions (S3).
+
+Where blocks appear: declaration bodies from S2 (including REPL definitions); function and lambda bodies from S3 — where locals referencing parameters make blocks irreplaceable; `case` branches from S4. `if/then/else` branches stay expression-form (it is an expression).
+
+| Alternative | Why not |
+|---|---|
+| Elm's `let … in` | Expression-form and mutually recursive block scope: a second scoping rule, and no story for direct-style effect sequencing beyond `let _ = …`. |
+| `let`-keyword statements (Gleam `let x`, Koka `val x`) | The keyword's only real job is marking intentional shadowing — fango forbids shadowing instead. Precedents for keyword-less: Roc, F# lightweight syntax. |
+
+`let` and `in` remain reserved words (better errors for Elm/Haskell muscle memory, and the door stays open).
 
 ## 4. Compiler overview
 
@@ -149,7 +176,7 @@ The rules, in full:
 
 1. Top-level declarations start at column 1; any token at column 1 terminates the current declaration.
 2. `case … of`: the column of the first pattern after `of` defines branch alignment. A token at exactly that column starts a new branch; left of it ends the `case`; right of it continues the current branch.
-3. `let` bindings use the same alignment rule.
+3. Block statements (§3.6) use the same alignment rule: when a declaration's body starts on a later line, the first token's column defines the statement column — a token at exactly that column starts the next binding or the result expression, left of it ends the block.
 
 This is ~50 lines in `parser/layout.go`: a stack of indentation contexts plus two predicates (`atBranchCol`, `checkOffside`). Layout bugs are the classic failure mode of such languages, so layout-specific golden tests (misaligned branches, deep nesting, comments inside cases) exist from the earliest milestone that parses declarations.
 
@@ -163,7 +190,7 @@ The AST models sum types as sealed Go interfaces with marker methods:
 
 ```go
 type Expr interface { isExpr(); Span() source.Span }
-// IntLit, FloatLit, StringLit, Var, Ctor, App, Lambda, If, Let, Case, BinOp
+// IntLit, FloatLit, StringLit, Var, Ctor, App, Lambda, If, Block{Binds, Result}, Case, BinOp
 type Pattern interface { isPattern(); Span() source.Span }
 // PVar, PWildcard, PInt, PFloat, PString, PCtor{Name, Args []Pattern}
 type Decl interface { isDecl() }
@@ -198,7 +225,7 @@ This is deliberately *not* naive Algorithm W with inline unification — the exp
 
 1. **Constraint generation** (`constrain.go`): walk the AST with `Env map[string]Scheme`; assign a fresh `TVar` to every node; emit `Constraint{Left, Right, Span, Why}`. `Why` is a reason tag (`IfCondition`, `IfBranches`, `CaseBranches`, `CallArg{N}`, `Annotation`, `PatternType`, …) so every failure can say *why* two types had to match, pointing at the right span.
 2. **Solving** (`unify.go`, `solve.go`): unification over a substitution map, with occurs check. Signature: `Solve(cs []Constraint, ps []Pred) (Subst, []Pred, []diag.Error)`. The residual-predicate return is the exact place a typeclass solver slots in — dead weight today, on purpose.
-3. **Generalization** (`env.go`): **solve-at-let hybrid.** At each `let` binding and top-level definition, generate the RHS's constraints, solve them immediately, then generalize (quantify free vars not free in the environment); instantiate with fresh metas at each use site. Fully deferred solving would need implication constraints — a research-grade rabbit hole only justified once local typeclass evidence exists. fango is pure, so no value restriction is needed.
+3. **Generalization** (`env.go`): **solve-at-binding hybrid.** At each block binding and top-level definition, generate the RHS's constraints, solve them immediately, then generalize (quantify free vars not free in the environment); instantiate with fresh metas at each use site. Fully deferred solving would need implication constraints — a research-grade rabbit hole only justified once local typeclass evidence exists. fango is pure, so no value restriction is needed.
 
 Annotations (`area : Shape -> Float`) are checked by *skolemizing* their variables (fresh rigid constants) and unifying against the inferred type — so an annotation claiming more polymorphism than the body delivers errors correctly.
 
@@ -264,7 +291,7 @@ The type mapping is **curried and compositional**: `T⟦a -> b⟧ = func(T⟦a�
 4. **Partial application** (< n args): allocates exactly one closure at the site whose body calls the worker: `v_inc := func(y int64) int64 { return v_add(1, y) }`.
 5. **First-class use of a known worker** (passed as a value): a per-function **curried wrapper**, generated only on demand. Constructors get the same treatment; saturated constructor applications are struct literals.
 6. **Unknown callee** (function is a parameter/local/computed): a plain **typed indirect call** `e(a)` — Go func values are (code ptr, env ptr) pairs; still no `any` anywhere.
-7. **Lambdas** are typed func literals; a let-bound lambda used only saturated compiles to a directly-called local.
+7. **Lambdas** are typed func literals; a block-bound lambda used only saturated compiles to a directly-called local.
 
 There is **no runtime arity dispatch and no `fangort.Apply`**. `fangort` shrinks to print helpers, string builders for derived show, and the (future) Box seam.
 
@@ -314,7 +341,7 @@ func v_map[A, B any](v_f func(A) B, v_xs T_List[A]) T_List[B] {
 
 The HM ↔ Go-generics corner cases have been audited:
 
-- **Local let-polymorphism**: Go has no generic func literals, so any local binding whose generalized scheme quantifies a variable is **lambda-lifted** to a top-level generic function (free term variables become leading parameters; the enclosing definition's type params become leading type params). This is the classical equivalence; purity + strictness make capture-by-value trivially sound. Monomorphic locals stay ordinary Go locals — lifting applies only to generalized bindings, keeping output readable.
+- **Local binding polymorphism**: Go has no generic func literals, so any block binding whose generalized scheme quantifies a variable is **lambda-lifted** to a top-level generic function (free term variables become leading parameters; the enclosing definition's type params become leading type params). This is the classical equivalence; purity + strictness make capture-by-value trivially sound. Monomorphic locals stay ordinary Go locals — lifting applies only to generalized bindings, keeping output readable.
 - **Top-level polymorphic values**: Go has no generic package vars, so `empty : List a` compiles to a **nullary generic function** `func v_empty[A any]() T_List[A]`, instantiated and called per use. Cost rule to note: a polymorphic *value* re-evaluates per use — observationally transparent in a pure language, and trivial cases inline. Monomorphic top-level values remain package `var`s (Go's dependency-ordered init matches pure-value semantics); `main`'s effect is forced inside `func main()`.
 - **Polymorphic recursion**: rejected by the checker (HM can't infer it, and fango's skolemize-and-unify annotation checking doesn't enable it, unlike Haskell) — so Go's instantiation-cycle limit is never hit. **Non-regular (nested) recursive ADTs are rejected** for the same reason.
 - **Instantiation at enclosing type params**: Go permits `v_id[A](x)` and `case *C_Cons[A]:` where `A` is the enclosing function's type param — which covers every HM case after generalization. **Internal unconstrained variables** (e.g. `print (length Nil)`) are defaulted by the elaborator: Number-kinded → `Int`, general → `Unit` (parametricity guarantees unobservability). After defaulting, Core contains no metavariables — an asserted invariant.
@@ -340,7 +367,7 @@ Equality and show are **generated per type, no reflection**:
 The structural cost of type-directed codegen, paid explicitly: **Core** (`internal/core`), a small typed IR between inference and `go/ast`, produced by **elaboration** (`internal/elaborate`):
 
 - Every node carries its solved type; every variable/constructor occurrence carries explicit type arguments.
-- Elaboration performs: zonking; Number/Unit defaulting; lambda-lifting of polymorphic lets; hoisting polymorphic top-level values to nullary generic functions; collapsing curried application spines into `App{CalleeKind: Worker|Ctor|Value, Args}` with saturation analysis (§8.2); pattern-match compilation to decision trees; exhaustiveness diagnostics; (future) Box/Unbox insertion and eq-dictionary threading.
+- Elaboration performs: zonking; Number/Unit defaulting; lambda-lifting of polymorphic block bindings; hoisting polymorphic top-level values to nullary generic functions; collapsing curried application spines into `App{CalleeKind: Worker|Ctor|Value, Args}` with saturation analysis (§8.2); pattern-match compilation to decision trees; exhaustiveness diagnostics; (future) Box/Unbox insertion and eq-dictionary threading.
 - Asserted invariants after elaboration: no metavariables, no `TAny` (in MVP), every App consistent with its callee's Go arity. A Core re-typechecking "linter" runs under a debug flag and in tests.
 - Core prints as S-expressions → golden tests for defaulting, lifting, and match trees, independent of Go emission.
 
@@ -501,8 +528,8 @@ effect Console
 
 main : () ->{IO} ()
 main _ =
-    let a = readLine () in
-    let b = readLine () in
+    a = readLine ()
+    b = readLine ()
     case (parseInt a, parseInt b) of
         (Just x, Just y) ->
             print (showInt (x + y))
@@ -526,7 +553,7 @@ collect action =
 
 - Function arrows carry an effect row: `readLine : () ->{Console} String`; an empty row means *provably pure*. Effect polymorphism is **inferred** by ordinary HM generalization: `map : (a ->{e} b) -> List a ->{e} List b` — one `map` for pure and effectful functions alike, no annotation needed.
 - Handler clauses follow `case` layout ([§5](#5-lexer-and-layout) rules reuse unchanged). `resume` is a keyword-bound one-shot continuation.
-- Direct style needs sequencing: a **layout block** (Unison/Koka precedent) — consecutive same-column expressions in a body are sequenced, non-final ones must type as `()`, desugaring to `let _ = e1 in e2`. Pure parser sugar (~50 lines on the existing offside machinery).
+- Direct style needs sequencing: statement bodies (§3.6, in the language since S2) already provide it — effectful bindings sequence naturally, and S7 only adds the typing rule that non-final *expression* statements must be `()` (stacked `print`s in `main`).
 - **Exceptions**: a `Fail err` effect (`throw : err ->{Fail err} a`) subsumes them; stdlib `try : (() ->{Fail err, e} a) ->{e} Result err a` reflects effects into values. `Result` stays for data, `Fail` for control.
 
 ### 10.3 Type system: rows in the constraint solver
@@ -621,10 +648,10 @@ The repo is a **Nix flake** (`flake.nix`); all dependencies come from it — no 
 
 - **S0 — One integer through the whole machine.** Language: `main = <Int arithmetic expr>` — integer literals, `+ - *`, parens; nullary top-level values with use-after-define references (duplicates and cycles rejected — a value cycle would otherwise surface as a Go init-cycle build failure, i.e. an auto-ICE); comments; tab rejection; all future keywords reserved. `+ - *` are typed via **Number-kinded metavariables defaulted to Int in elaborate**, so the kind machinery is real and S1's Float is purely additive. Everything else in the repo layout exists by the end of S0: CLI (`build|run|check|repl|clean`, `--emit-go`), persistent `.fango/build` + embedded `fangort`, **the compile-latency benchmark and its CI gate**, golden suites (lex/parse/core) with `-update`, the Core linter, the differential e2e harness (compiled programs produce no output yet; a test-internal print-main codegen mode observes `main`'s value through the shared `fangort` formatter), interpreter, and REPL. Demo: `fango run` exits 0 in < 200 ms warm; the REPL evaluates `1 + 2 * 3` to `7 : Int`.
 - **S1 — Scalars complete, `if`, real output.** `Float`/`String` literals, unary minus, `/` (Float-only), `++`, comparisons at ground types, `Bool` as an ordinary checker ADT (native `bool` in codegen), `if/then/else` — and **the `print` builtin cheat lands here**, the only no-output→output transition. `fangort` float formatting (what `12.56636` depends on) is decided and golden-tested here, shared by both backends.
-- **S2 — `let … in` and annotations.** Layout rule 3 (binding-column alignment) gets its first real client; solve-at-let generalization mechanism lands (still monomorphic — the mechanism is final, the quantifier count is zero); skolemize-and-unify annotation checking; surface `TypeExpr` grammar. Layout torture goldens begin.
+- **S2 — Statement-style bodies and annotations.** Layout rule 3 (statement-column alignment, §3.6) gets its first real client; blocks in declaration bodies only (function bodies S3, case branches S4); solve-at-binding generalization call structure lands (still monomorphic — the mechanism is final, the quantifier count is zero); annotation checking shaped for S5 skolemization; surface `TypeExpr` grammar. Layout torture goldens begin.
 - **S3 — Functions.** Top-level functions, lambdas, curried application, recursion; the full [§8.2](#82-calling-convention) calling convention monomorphically — `App{CalleeKind}` spine collapsing, saturation analysis, workers, direct calls, partial-application closures, on-demand curried wrappers, typed indirect calls. The interpreter gains closures/partials off the same saturation metadata, so spine bugs surface as backend diffs. First runtime-ratio benchmark: naive fib vs. handwritten Go, ≤ 1.2× gate.
 - **S4 — ADTs, `case`, decision trees, exhaustiveness.** Monomorphic `type` decls → marker interfaces/structs, constructor table (keyed by `Unique`), case layout (rule 2), pattern constraints, **Maranget decision trees + exhaustiveness checking**, derived eq/show at ground types. **The reference program prints `12.56636` — MVP met, at native speed.**
-- **S5 — Polymorphism end-to-end.** Parameterized ADTs; generic workers with explicit instantiation; lambda-lifted polymorphic lets; nullary generic top-level values; polymorphic `==` via hidden eq parameters; polymorphic-recursion and non-regular-ADT rejection with negative tests; `map`/`filter`/`foldr` demo; **the full runtime perf suite vs. handwritten baselines lands here** (it needs lists and trees); self-tail-call → loop if benchmarks demand it.
+- **S5 — Polymorphism end-to-end.** Parameterized ADTs; generic workers with explicit instantiation; lambda-lifted polymorphic block bindings; nullary generic top-level values; polymorphic `==` via hidden eq parameters; polymorphic-recursion and non-regular-ADT rejection with negative tests; `map`/`filter`/`foldr` demo; **the full runtime perf suite vs. handwritten baselines lands here** (it needs lists and trees); self-tail-call → loop if benchmarks demand it.
 - **S6 — REPL hardening.** The REPL has existed since S0; this is the session model on top: generational redefinition (the `Unique` plumbing has been live since S0), `:load`/`:reload` reconciliation, cancellation UX, transcript goldens ([§9](#9-interactive-repl-fango-repl)).
 - **S7 — Effects & IO.** `effect`/`handle`/`->{}`/layout-block syntax; row unification, generalization, defaulting; evidence-passing elaboration + tail-resumptive analysis; `fangort` general-handler runtime; interpreter `handle`/`perform` sharing that runtime; `print` cheat replaced by the `IO` effect; top-level purity check; differential + goroutine-leak tests ([§10](#10-effects-and-io-algebraic-effects-with-handlers)).
 - **S8 — Polish.** Error-message quality pass (including row-error goldens), `--emit-go` UX, readline + history for the REPL, README with grammar sketch, bench-gate tuning.
@@ -637,9 +664,9 @@ The repo is a **Nix flake** (`flake.nix`); all dependencies come from it — no 
 2. **The Go generics ceiling** (no higher-kinded types, no method type params, no generic vars/literals) blocking typeclasses later → the `TAny`/Box seam and hidden-eq-parameter proto-dictionaries are specified now; dictionaries are structs of element-typed functions, which Go generics handle; only higher-kinded dictionaries ever box.
 3. **Generics build-time/code-size blowup** on instantiation-heavy programs → GC-shape stenciling bounds it structurally; the S0 latency gate detects it empirically; worst-case valve is boxing specific instantiations (all-pointer shapes share a stencil).
 4. **Higher-order/allocation overhead keeping list code >3× handwritten Go** → saturation analysis + demand-only curried wrappers in the base design; tail-call loops and flattened small-ADT structs queued behind benchmark evidence.
-5. **Layout correctness** (the classic failure mode of offside-rule languages) → isolate in `layout.go` with column-tracking predicates only; the predicates are unit-tested from S0 and layout goldens accrete with each rule's first client (S2 `let`, S4 `case`).
+5. **Layout correctness** (the classic failure mode of offside-rule languages) → isolate in `layout.go` with column-tracking predicates only; the predicates are unit-tested from S0 and layout goldens accrete with each rule's first client (S2 blocks, S4 `case`).
 6. **Semantic drift between the two backends** — two implementations of Core semantics, forever → the differential suite in CI from S0; one shared `fangort` formatting implementation (hard rule); a totality test asserting the interpreter's switch covers every Core node; divergence whitelisted to exactly the one documented case (top-level evaluation timing).
-7. **Generational type identity** (`Unique`-based unification, reload reconciliation) is subtle → `Unique` in `TCon` from day 0 with redefine-then-unify unit tests; transcript goldens exercising cross-generation errors. The elaborator must also tolerate *incremental* (per-input) operation — session-scoped fresh-name supply, tested with polymorphic lets and defaulting in transcripts.
+7. **Generational type identity** (`Unique`-based unification, reload reconciliation) is subtle → `Unique` in `TCon` from day 0 with redefine-then-unify unit tests; transcript goldens exercising cross-generation errors. The elaborator must also tolerate *incremental* (per-input) operation — session-scoped fresh-name supply, tested with polymorphic block bindings and defaulting in transcripts.
 8. **Row inference degrading error messages** (the Elm-quality goal) → dedicated `Why` tags for effect failures; empty rows and lone quantified tails hidden by the printer; negative goldens for every row-error shape from S7 day one.
 9. **Evidence escape and goroutine hygiene in the effect runtime** ([§10.7](#107-known-caveats-stated-not-hidden)) → one-shot/liveness runtime checks (error, never UB); `NumGoroutine` leak assertions in e2e; the interpreter shares the same runtime, so both backends exercise it differentially.
 
@@ -661,4 +688,4 @@ Deliberately unresolved — the agenda for iterating on this document:
 
 ---
 
-*Document history: initial draft 2026-09-02, distilled from the architecture-planning session that chose the Go-source backend. Revised same day: performance promoted to a day-0 goal — codegen redesigned from uniform-`any` boxing to type-directed unboxed compilation with Go generics, a typed Core IR, decision-tree matching in core scope, persistent cached builds, and CI-gated compile/runtime benchmarks. Second revision same day: interactive REPL added as a day-0 requirement — a Core-IR interpreter (GHCi model) with generational type identity (`TCon.Unique`), lazy-memoized module loading, `:reload` reconciliation, and differential testing between the two backends. Third revision same day: effects/IO decided — algebraic effects with one-shot handlers (Elm-style and monadic-IO rejected), row-typed functions, evidence-passing compilation with goroutine-backed general handlers, landing as milestone M7 with the `Eff` row field reserved in `TFun` from day 0. Fourth revision same day: milestones restructured from horizontal layers (M0–M8) to vertical slices (S0–S8) — the entire pipeline, interpreter, REPL, and perf gate land in S0 over an Int-only arithmetic subset, and the language grows feature-by-feature end-to-end from there.*
+*Document history: initial draft 2026-09-02, distilled from the architecture-planning session that chose the Go-source backend. Revised same day: performance promoted to a day-0 goal — codegen redesigned from uniform-`any` boxing to type-directed unboxed compilation with Go generics, a typed Core IR, decision-tree matching in core scope, persistent cached builds, and CI-gated compile/runtime benchmarks. Second revision same day: interactive REPL added as a day-0 requirement — a Core-IR interpreter (GHCi model) with generational type identity (`TCon.Unique`), lazy-memoized module loading, `:reload` reconciliation, and differential testing between the two backends. Third revision same day: effects/IO decided — algebraic effects with one-shot handlers (Elm-style and monadic-IO rejected), row-typed functions, evidence-passing compilation with goroutine-backed general handlers, landing as milestone M7 with the `Eff` row field reserved in `TFun` from day 0. Fourth revision same day: milestones restructured from horizontal layers (M0–M8) to vertical slices (S0–S8) — the entire pipeline, interpreter, REPL, and perf gate land in S0 over an Int-only arithmetic subset, and the language grows feature-by-feature end-to-end from there. Fifth revision same day: `let … in` replaced by keyword-less statement-style bodies (§3.6) — the first deliberate divergence from Elm surface syntax; rationale: direct-style effects (S7), one scoping rule shared with the top level, existing layout machinery. Elm's `let/in` and a `let`-keyword statement form were considered and declined; `let`/`in` stay reserved words.*
