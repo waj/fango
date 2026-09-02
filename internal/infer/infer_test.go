@@ -62,6 +62,15 @@ func TestPositive(t *testing.T) {
 		{"x =\n  r = 2.0\n  r * r", "x : Float"},
 		{"x : Int\nx = 1", "x : Int"},
 		{"x : Float\nx = 1", "x : Float"}, // annotation forces the literal
+		{"add x y = x + y", "add : number -> number -> number"},
+		{"inc n = n + 1\nmain = inc 41", "inc : number -> number, main : number"},
+		{"fib n = if n < 2 then n else fib (n - 1) + fib (n - 2)", "fib : number -> number"},
+		{"f = \\x -> x + 1", "f : number -> number"},
+		{"add : Int -> Int -> Int\nadd x y = x + y", "add : Int -> Int -> Int"},
+		{"add x y = x + y\ninc = add 1", "add : number -> number -> number, inc : number -> number"},
+		// Monomorphy across uses: a later use pins the definition.
+		{"id x = x\nmain = id 1 + 1", "id : number -> number, main : number"},
+		{"v =\n  go n = if n < 1 then 0 else go (n - 1)\n  go 3", "v : number"},
 	}
 	for _, c := range cases {
 		ck, infos, errs := check(t, c.src)
@@ -109,6 +118,14 @@ func TestNegative(t *testing.T) {
 		{"x : Foo\nx = 1", "NAMING ERROR", 1},                 // unknown type name
 		{"x : a\nx = 1", "UNSUPPORTED ANNOTATION", 1},         // type variable pre-S5
 		{"f : Int -> Int\nf = 1", "TYPE MISMATCH", 2},         // arrow annotation resolves, body mismatches
+		{"main x = x", "MAIN TAKES NO PARAMETERS", 1},
+		{"f x x = x", "SHADOWING", 1},                              // duplicate params
+		{"f f = f", "SHADOWING", 1},                                // param shadows the function itself
+		{"x = 1\nf x = x + 1", "SHADOWING", 2},                     // param shadows a top-level name
+		{"f = \\x -> \\x -> x", "SHADOWING", 1},                    // lambda param shadowing
+		{"f x = f", "TYPE MISMATCH", 1},                            // occurs check via the recursion var
+		{"id x = x\na = id 1\nb = id \"s\"", "TYPE MISMATCH", 3},   // monomorphy: two uses, two types
+		{"main = (\\x -> print x) 1", "PRINT NOT ALLOWED HERE", 1}, // no print inside lambdas
 	}
 	for _, c := range cases {
 		_, _, errs := check(t, c.src)

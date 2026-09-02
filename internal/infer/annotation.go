@@ -6,6 +6,39 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
+// FreeGeneralVar returns a General-kinded metavariable still free in t
+// after applying the checker's substitution, or nil. Non-nil means the
+// type is visibly polymorphic — rejected until S5 (Number vars are exempt:
+// they default to Int by design).
+func (ck *Checker) FreeGeneralVar(t types.Type) *types.TVar {
+	t = ck.Sub.Apply(t)
+	return freeGeneral(t)
+}
+
+func freeGeneral(t types.Type) *types.TVar {
+	switch t := t.(type) {
+	case *types.TVar:
+		if t.Kind == types.General {
+			return t
+		}
+		return nil
+	case *types.TCon:
+		for _, a := range t.Args {
+			if v := freeGeneral(a); v != nil {
+				return v
+			}
+		}
+		return nil
+	case *types.TFun:
+		if v := freeGeneral(t.Arg); v != nil {
+			return v
+		}
+		return freeGeneral(t.Ret)
+	default:
+		return nil
+	}
+}
+
 // ResolveTypeExpr converts a surface type expression into a checker type
 // via the session's type-name table. Returns nil (with diagnostics) if any
 // part fails to resolve.

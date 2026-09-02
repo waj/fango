@@ -26,6 +26,7 @@ const (
 	WhyNegate                     // a negated operand must be a number
 	WhyOpRequires                 // an operator fixes its operand type (/, ++)
 	WhyAnnotation                 // a definition must match its type annotation
+	WhyRecursion                  // recursive uses must match the definition
 )
 
 type Why struct {
@@ -81,6 +82,12 @@ type Checker struct {
 	// PrintCalls marks App nodes recognized as the print builtin cheat, so
 	// elaboration classifies them identically (one source of truth).
 	PrintCalls map[*ast.App]bool
+
+	// Workers maps top-level function names to their syntactic parameter
+	// count — the arity that drives §8.2 saturation analysis. Session
+	// state like Ctors: populated at inference time (complete before
+	// elaboration, which fib's self-call requires), extended by the REPL.
+	Workers map[string]int
 }
 
 func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
@@ -102,12 +109,14 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 			"()":     b.Unit,
 		},
 		PrintCalls: map[*ast.App]bool{},
+		Workers:    map[string]int{},
 	}
 }
 
 type DeclInfo struct {
 	Name     string
 	NameSpan source.Span
+	Params   []ast.Param
 	Type     types.Type // solved but not zonked; apply ck.Sub for the final type
 	Body     ast.Expr
 }
@@ -138,18 +147,45 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 // enforced ad hoc until effects land in S7).
 func (ck *Checker) Decl(d *ast.ValueDecl) (DeclInfo, []diag.Error) {
 	info, errs := ck.DeclWhere(d, d.Name == "main")
-	ck.Env.Bind(d.Name, types.Scheme{Body: info.Type})
+	ck.BindDecl(info)
 	return info, errs
 }
 
-// DeclWhere checks one declaration — annotation resolution, body inference,
+// BindDecl installs a checked declaration: the environment binding plus
+// worker-table upkeep (redefining a worker as a value evicts its arity).
+func (ck *Checker) BindDecl(info DeclInfo) {
+	ck.Env.Bind(info.Name, types.Scheme{Body: info.Type})
+	if len(info.Params) > 0 {
+		ck.Workers[info.Name] = len(info.Params)
+	} else {
+		delete(ck.Workers, info.Name)
+	}
+}
+
+// DeclWhere checks one declaration — annotation resolution, body inference
+// (with parameter scoping and self-recursion for function definitions),
 // and the annotation constraint — without binding it, so callers control
 // whether a failed definition enters the environment (the REPL does not
 // bind on error).
 func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []diag.Error) {
 	var errs []diag.Error
-	ty, exprErrs := ck.ExprWhere(d.Body, allowPrint)
-	errs = append(errs, exprErrs...)
+	if d.Name == "main" && len(d.Params) > 0 {
+		errs = append(errs, diag.Errorf(d.NameSpan, "MAIN TAKES NO PARAMETERS",
+			"Until effects land (S7), `main` is a value, not a function."))
+	}
+
+	g := &generator{ck: ck, allowPrint: allowPrint}
+	var ty types.Type
+	if len(d.Params) == 0 {
+		ty = g.expr(d.Body)
+	} else {
+		ty = g.function(d.Name, d.NameSpan, d.Params, d.Body)
+	}
+	sub, _, solveErrs := Solve(g.cs, nil, ck.Sub, ck.B)
+	ck.Sub = sub
+	errs = append(errs, g.errs...)
+	errs = append(errs, solveErrs...)
+
 	if d.Ann != nil {
 		annTy, annErrs := ck.ResolveTypeExpr(d.Ann.Type)
 		errs = append(errs, annErrs...)
@@ -164,7 +200,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []dia
 			ty = annTy
 		}
 	}
-	return DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Type: ty, Body: d.Body}, errs
+	return DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body}, errs
 }
 
 // Expr checks an expression with prompt semantics (print allowed) — the
@@ -302,11 +338,67 @@ func (g *generator) expr(e ast.Expr) types.Type {
 		ty = g.binOp(e)
 	case *ast.Block:
 		ty = g.block(e)
+	case *ast.Lambda:
+		// Functions are pure until effects land: print cannot be smuggled
+		// into a function value (§10.5).
+		saved := g.allowPrint
+		g.allowPrint = false
+		scope := &blockScope{parent: g.locals, names: map[string]types.Type{}}
+		g.locals = scope
+		paramTys := g.bindParams(scope, e.Params)
+		bodyTy := g.expr(e.Body)
+		g.locals = scope.parent
+		g.allowPrint = saved
+		funTy := bodyTy
+		for i := len(paramTys) - 1; i >= 0; i-- {
+			funTy = &types.TFun{Arg: paramTys[i], Ret: funTy}
+		}
+		ty = funTy
 	default:
 		panic("infer: unhandled expression node")
 	}
 	g.ck.ExprTypes[e] = ty
 	return ty
+}
+
+// function checks a function definition (top-level or block-local): the
+// name is pre-bound to a fresh monotype in the same scope as the params so
+// the body's self-references type — monomorphic recursion. The fresh var
+// lives in the block scope, never in Env, so failed REPL definitions need
+// no rollback and redefinition resolves self-references to the new body.
+func (g *generator) function(name string, nameSpan source.Span, params []ast.Param, body ast.Expr) types.Type {
+	self := g.ck.Sup.FreshVar(types.General)
+	scope := &blockScope{parent: g.locals, names: map[string]types.Type{name: self}}
+	g.locals = scope
+	defer func() { g.locals = scope.parent }()
+
+	paramTys := g.bindParams(scope, params)
+	bodyTy := g.expr(body)
+
+	funTy := bodyTy
+	for i := len(paramTys) - 1; i >= 0; i-- {
+		funTy = &types.TFun{Arg: paramTys[i], Ret: funTy}
+	}
+	g.cs = append(g.cs, Constraint{Left: self, Right: funTy, Span: nameSpan,
+		Why: Why{Kind: WhyRecursion, Name: name}})
+	return funTy
+}
+
+// bindParams enters parameters into scope with the no-shadowing rule:
+// duplicates in the list, the function's own name, enclosing locals, and
+// top-level names are all rejected.
+func (g *generator) bindParams(scope *blockScope, params []ast.Param) []types.Type {
+	tys := make([]types.Type, len(params))
+	for i, p := range params {
+		if _, dup := g.locals.lookup(p.Name); dup || g.ck.Env.Has(p.Name) {
+			g.errs = append(g.errs, diag.Errorf(p.Sp, "SHADOWING",
+				"The parameter `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", p.Name))
+		}
+		pv := g.ck.Sup.FreshVar(types.General)
+		scope.names[p.Name] = pv
+		tys[i] = pv
+	}
+	return tys
 }
 
 // block checks a statement body: each binding is a solve-at-binding point
@@ -326,7 +418,12 @@ func (g *generator) block(e *ast.Block) types.Type {
 			g.errs = append(g.errs, diag.Errorf(bind.NameSpan, "SHADOWING",
 				"The name `%s` is already defined %s — fango does not allow\nshadowing. Choose a different name.", bind.Name, where))
 		}
-		ty := g.expr(bind.Body)
+		var ty types.Type
+		if len(bind.Params) > 0 {
+			ty = g.function(bind.Name, bind.NameSpan, bind.Params, bind.Body)
+		} else {
+			ty = g.expr(bind.Body)
+		}
 		if bind.Ann != nil {
 			annTy, annErrs := g.ck.ResolveTypeExpr(bind.Ann.Type)
 			g.errs = append(g.errs, annErrs...)
