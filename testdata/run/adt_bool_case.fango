@@ -1,0 +1,13 @@
+label b = case b of
+    True -> "yes"
+    False -> "no"
+
+pick b n =
+    case b of
+        True ->
+            case n of
+                0 -> "zero"
+                _ -> "some"
+        False -> label b
+
+main = print (pick True 0 ++ pick True 3 ++ pick False 9)

@@ -1,0 +1,23 @@
+type Op = Add | Sub | Mul | Nop
+
+tick op =
+    case op of
+        Add -> Sub
+        Sub -> Mul
+        Mul -> Nop
+        Nop -> Add
+
+apply op n m =
+    case op of
+        Add -> n + m
+        Sub -> n - m
+        Mul -> n * m + 3
+        Nop -> n + 1
+
+crunch op n =
+    if n < 2 then
+        apply op n 1
+     else
+        apply op (crunch (tick op) (n - 1)) (crunch (tick (tick op)) (n - 2))
+
+main = print (crunch Add 37)

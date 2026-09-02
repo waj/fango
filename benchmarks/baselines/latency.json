@@ -1,5 +1,8 @@
 {
-  "cold_ms": 416.877,
-  "warm_unchanged_ms": 12.944,
-  "warm_changed_ms": 431.014
+  "cold_ms": 439.25,
+  "warm_unchanged_ms": 28.173,
+  "warm_changed_ms": 482.839,
+  "adt_cold_ms": 455.337,
+  "adt_warm_unchanged_ms": 29.559,
+  "adt_warm_changed_ms": 487.819
 }

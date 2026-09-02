@@ -1,0 +1,17 @@
+type MaybeInt = NothingI | JustI Int
+
+type Wrap = Wrap MaybeInt String
+
+flip m =
+    case m of
+        NothingI -> JustI 0
+        JustI n -> JustI (n + 1)
+
+main =
+    a = Wrap (JustI 41) "hi"
+    b = Wrap (flip (JustI 40)) "hi"
+    p1 = print (a == b)
+    p2 = print (a /= b)
+    p3 = print b
+    p4 = print (flip NothingI)
+    print (a == Wrap NothingI "hi")

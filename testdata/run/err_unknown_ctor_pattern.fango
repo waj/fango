@@ -1,0 +1,8 @@
+type MaybeInt = NothingI | JustI Int
+
+f m =
+    case m of
+        Just n -> n
+        _ -> 0
+
+main = f NothingI

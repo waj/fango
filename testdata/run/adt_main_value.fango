@@ -1,0 +1,3 @@
+type MaybeInt = NothingI | JustI Int
+
+main = JustI 3

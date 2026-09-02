@@ -1,0 +1,18 @@
+type Pair = Pair Int Int
+
+mk = Pair 1
+
+apply f x = f x
+
+swap p =
+    case p of
+        Pair a b -> Pair b a
+
+main =
+    p = apply mk 2
+    q = swap p
+    r = apply (Pair 9) 8
+    case q of
+        Pair a b ->
+            case r of
+                Pair c d -> print (a * 1000 + b * 100 + c * 10 + d)

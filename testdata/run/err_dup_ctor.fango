@@ -1,0 +1,4 @@
+type A = Mk Int
+type B = Mk Float
+
+main = 1

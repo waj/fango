@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -24,13 +25,22 @@ type baselines struct {
 	ColdMs          float64 `json:"cold_ms"`
 	WarmUnchangedMs float64 `json:"warm_unchanged_ms"`
 	WarmChangedMs   float64 `json:"warm_changed_ms"`
+
+	// The §11 ADT-heavy program (~500 lines of types and cases), added in S4.
+	ADTColdMs          float64 `json:"adt_cold_ms"`
+	ADTWarmUnchangedMs float64 `json:"adt_warm_unchanged_ms"`
+	ADTWarmChangedMs   float64 `json:"adt_warm_changed_ms"`
 }
 
 const (
 	budgetColdMs          = 3000
 	budgetWarmUnchangedMs = 200
 	budgetWarmChangedMs   = 500
-	regressionFactor      = 1.2
+	// The ADT-heavy program's warm-changed budget: dominated by `go build`
+	// of a ~1500-line generated main.go, legitimately above hello's 500 ms
+	// (§8.9 scopes the tighter budgets to hello).
+	budgetADTWarmChangedMs = 1000
+	regressionFactor       = 1.2
 	// Absolute slack under the regression check: at small medians (a warm
 	// no-op run is ~15ms) scheduler noise alone exceeds 20%, so a pure
 	// percentage gate flakes. Real regressions we care about are bigger
@@ -38,16 +48,11 @@ const (
 	regressionSlackMs = 30
 )
 
-func TestCompileLatency(t *testing.T) {
-	if testing.Short() {
-		t.Skip("latency gate skipped in -short mode")
-	}
-
-	fangoBin := buildCLI(t)
-	work := t.TempDir()
-	entry := filepath.Join(work, "hello.fango")
-	writeProgram(t, entry, 3)
-
+// measure runs one program through the three modes. write(lit) rewrites the
+// program with a distinguishing literal — warm-changed touches it per run.
+func measure(t *testing.T, fangoBin, entry, work string, write func(lit int)) (cold, warmUnchanged, warmChanged float64) {
+	t.Helper()
+	write(3)
 	runOnce := func() time.Duration {
 		start := time.Now()
 		cmd := exec.Command(fangoBin, "run", entry)
@@ -58,7 +63,7 @@ func TestCompileLatency(t *testing.T) {
 		return time.Since(start)
 	}
 
-	cold := medianMs(3, func() time.Duration {
+	cold = medianMs(3, func() time.Duration {
 		if err := os.RemoveAll(filepath.Join(work, ".fango")); err != nil {
 			t.Fatal(err)
 		}
@@ -66,21 +71,45 @@ func TestCompileLatency(t *testing.T) {
 	})
 
 	runOnce() // prime
-	warmUnchanged := medianMs(5, runOnce)
+	warmUnchanged = medianMs(5, runOnce)
 
 	lit := 4
-	warmChanged := medianMs(5, func() time.Duration {
-		writeProgram(t, entry, lit)
+	warmChanged = medianMs(5, func() time.Duration {
+		write(lit)
 		lit++
 		return runOnce()
 	})
+	return cold, warmUnchanged, warmChanged
+}
 
-	t.Logf("cold=%.0fms (budget %dms)  warm-unchanged=%.0fms (budget %dms)  warm-changed=%.0fms (budget %dms)",
-		cold, budgetColdMs, warmUnchanged, budgetWarmUnchangedMs, warmChanged, budgetWarmChangedMs)
+func TestCompileLatency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("latency gate skipped in -short mode")
+	}
+
+	fangoBin := buildCLI(t)
+
+	helloWork := t.TempDir()
+	helloEntry := filepath.Join(helloWork, "hello.fango")
+	cold, warmUnchanged, warmChanged := measure(t, fangoBin, helloEntry, helloWork, func(lit int) {
+		writeProgram(t, helloEntry, lit)
+	})
+
+	adtWork := t.TempDir()
+	adtEntry := filepath.Join(adtWork, "adt500.fango")
+	adtCold, adtWarmUnchanged, adtWarmChanged := measure(t, fangoBin, adtEntry, adtWork, func(lit int) {
+		writeADTProgram(t, adtEntry, lit)
+	})
+
+	t.Logf("hello: cold=%.0fms warm-unchanged=%.0fms warm-changed=%.0fms  adt500: cold=%.0fms warm-unchanged=%.0fms warm-changed=%.0fms",
+		cold, warmUnchanged, warmChanged, adtCold, adtWarmUnchanged, adtWarmChanged)
 
 	path := filepath.Join("baselines", "latency.json")
 	if *updateBaselines {
-		data, _ := json.MarshalIndent(baselines{cold, warmUnchanged, warmChanged}, "", "  ")
+		data, _ := json.MarshalIndent(baselines{
+			cold, warmUnchanged, warmChanged,
+			adtCold, adtWarmUnchanged, adtWarmChanged,
+		}, "", "  ")
 		if err := os.MkdirAll("baselines", 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -110,6 +139,9 @@ func TestCompileLatency(t *testing.T) {
 	check("cold", cold, base.ColdMs, budgetColdMs)
 	check("warm-unchanged", warmUnchanged, base.WarmUnchangedMs, budgetWarmUnchangedMs)
 	check("warm-changed", warmChanged, base.WarmChangedMs, budgetWarmChangedMs)
+	check("adt-cold", adtCold, base.ADTColdMs, budgetColdMs)
+	check("adt-warm-unchanged", adtWarmUnchanged, base.ADTWarmUnchangedMs, budgetWarmUnchangedMs)
+	check("adt-warm-changed", adtWarmChanged, base.ADTWarmChangedMs, budgetADTWarmChangedMs)
 }
 
 func buildCLI(t *testing.T) string {
@@ -127,6 +159,42 @@ func writeProgram(t *testing.T, path string, lit int) {
 	t.Helper()
 	src := fmt.Sprintf("main = 1 + 2 * %d\n", lit)
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeADTProgram writes the §11 ADT-heavy latency program: ~40 three-
+// constructor types, a case-dense function per type, and a main folding
+// them all — ~500 lines. warm-changed touches only main's literal.
+func writeADTProgram(t *testing.T, path string, lit int) {
+	t.Helper()
+	var b strings.Builder
+	const n = 40
+	for i := range n {
+		fmt.Fprintf(&b, "type T%d = A%d Int | B%d Int Int | C%d\n\n", i, i, i, i)
+		fmt.Fprintf(&b, "f%d : T%d -> Int\n", i, i)
+		fmt.Fprintf(&b, "f%d v =\n", i)
+		b.WriteString("    case v of\n")
+		fmt.Fprintf(&b, "        A%d x -> x + %d\n", i, i)
+		fmt.Fprintf(&b, "        B%d x y -> x * y - %d\n", i, i)
+		fmt.Fprintf(&b, "        C%d -> %d\n\n", i, i)
+		fmt.Fprintf(&b, "g%d n =\n", i)
+		b.WriteString("    case n of\n")
+		fmt.Fprintf(&b, "        0 -> f%d C%d\n", i, i)
+		fmt.Fprintf(&b, "        1 -> f%d (A%d n)\n", i, i)
+		fmt.Fprintf(&b, "        _ -> f%d (B%d n %d)\n\n", i, i, i)
+	}
+	b.WriteString("total =\n")
+	for i := range n {
+		fmt.Fprintf(&b, "    t%d = g%d %d\n", i, i, i%3)
+	}
+	b.WriteString("    t0")
+	for i := 1; i < n; i++ {
+		fmt.Fprintf(&b, " + t%d", i)
+	}
+	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "main = total + %d\n", lit)
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

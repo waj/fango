@@ -1,0 +1,7 @@
+type Pair = Pair Int Int
+
+f p =
+    case p of
+        Pair x x -> x
+
+main = f (Pair 1 2)

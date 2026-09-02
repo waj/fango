@@ -1,0 +1,13 @@
+type Nat = Zero | Succ Nat
+
+depth n =
+    case n of
+        Succ rest -> 1 + depth rest
+        Zero -> 0
+
+double n =
+    case n of
+        Zero -> Zero
+        Succ rest -> Succ (Succ (double rest))
+
+main = print (depth (double (Succ (Succ Zero))))

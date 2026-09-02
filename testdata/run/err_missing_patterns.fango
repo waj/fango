@@ -1,0 +1,8 @@
+type Nat = Zero | Succ Nat
+
+f n =
+    case n of
+        Succ (Succ rest) -> 2
+        Zero -> 0
+
+main = f Zero

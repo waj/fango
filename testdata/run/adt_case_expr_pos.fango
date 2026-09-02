@@ -1,0 +1,18 @@
+type MaybeInt = NothingI | JustI Int
+
+orZero m = (case m of
+    JustI n -> n
+    NothingI -> 0) * 10
+
+top = case JustI 4 of
+    JustI n -> n + 1
+    NothingI -> 0
+
+nested m =
+    case (case m of
+        NothingI -> JustI 1
+        JustI n -> JustI (n + 1)) of
+        JustI n -> n
+        NothingI -> 0
+
+main = print (orZero (JustI 3) + top + nested NothingI)

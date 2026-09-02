@@ -1,0 +1,9 @@
+type Shape = Circle Float | Rect Float Float
+
+area : Shape -> Float
+area shape =
+    case shape of
+        Circle r -> r * r * 3.14159
+        Rect w h -> w * h
+
+main = print (area (Circle 2.0))

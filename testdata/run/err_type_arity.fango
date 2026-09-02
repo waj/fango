@@ -1,0 +1,4 @@
+x : Int Int
+x = 1
+
+main = x

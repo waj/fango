@@ -1,0 +1,26 @@
+describe n =
+    case n of
+        0 -> "zero"
+        -1 -> "minus one"
+        _ -> "many"
+
+bucket f =
+    case f of
+        0 -> "origin"
+        2.5 -> "half"
+        _ -> "other"
+
+greet s =
+    case s of
+        "hi" -> 1
+        "bye" -> 2
+        _ -> 3
+
+main =
+    p1 = print (describe 0)
+    p2 = print (describe (-1))
+    p3 = print (describe 7)
+    p4 = print (bucket 0.0)
+    p5 = print (bucket 2.5)
+    p6 = print (greet "bye")
+    print (greet "what")
