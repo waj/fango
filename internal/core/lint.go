@@ -12,7 +12,10 @@ import (
 // (and under a debug flag later) — instantiation plumbing bugs are the
 // design's top risk, and this is the tripwire.
 func Lint(p *Prog, b *types.Builtins) []error {
-	l := &linter{b: b}
+	l := &linter{b: b, scope: map[string]bool{}}
+	for _, d := range p.Defs {
+		l.scope[d.Name] = true
+	}
 	for _, d := range p.Defs {
 		l.typ(d.Type, "def "+d.Name)
 		l.expr(d.Body, "def "+d.Name)
@@ -21,8 +24,9 @@ func Lint(p *Prog, b *types.Builtins) []error {
 }
 
 type linter struct {
-	b    *types.Builtins
-	errs []error
+	b     *types.Builtins
+	scope map[string]bool // def names + enclosing Let names: no shadowing
+	errs  []error
 }
 
 func (l *linter) errorf(format string, args ...any) {
@@ -77,6 +81,17 @@ func (l *linter) expr(e Expr, where string) {
 		l.expr(e.Cond, where)
 		l.expr(e.Then, where)
 		l.expr(e.Else, where)
+	case *Let:
+		if types.Show(e.Ty) != types.Show(e.Body.Type()) {
+			l.errorf("%s: Let type differs from its body", where)
+		}
+		if l.scope[e.Name] {
+			l.errorf("%s: Let shadows `%s` — the checker should have rejected this", where, e.Name)
+		}
+		l.scope[e.Name] = true
+		l.expr(e.Rhs, where)
+		l.expr(e.Body, where)
+		delete(l.scope, e.Name)
 	case *Print:
 		u := l.unique(e.Arg.Type())
 		if u != l.b.Int.Unique && u != l.b.Float.Unique && u != l.b.String.Unique && u != l.b.Bool.Unique {

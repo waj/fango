@@ -1,0 +1,3 @@
+(core
+  (def x Int (let a Int (int 40 Int) (binop + Int (var a Int) (int 2 Int))))
+  (def main Int (var x Int)))

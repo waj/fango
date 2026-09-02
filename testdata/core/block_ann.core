@@ -1,0 +1,3 @@
+(core
+  (def x Float (let a Float (float 1 Float) (var a Float)))
+  (def main Float (var x Float)))

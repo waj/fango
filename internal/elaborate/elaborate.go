@@ -109,6 +109,21 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		l, r := el.expr(e.L), el.expr(e.R)
 		el.checkOperands(e, l.Type())
 		return el.fold(&core.BinOp{Op: e.Op, Ty: ty, L: l, R: r})
+	case *ast.Block:
+		// Fold bindings into a right-nested Let chain; every level carries
+		// the block's (result) type. RHSs elaborate in source order so
+		// defaulting is deterministic.
+		lets := make([]*core.Let, len(e.Binds))
+		for i := range e.Binds {
+			lets[i] = &core.Let{Name: e.Binds[i].Name, Rhs: el.expr(e.Binds[i].Body)}
+		}
+		body := el.expr(e.Result)
+		for i := len(lets) - 1; i >= 0; i-- {
+			lets[i].Body = body
+			lets[i].Ty = body.Type()
+			body = lets[i]
+		}
+		return body
 	default:
 		panic(fmt.Sprintf("elaborate: unhandled AST node %T", e))
 	}

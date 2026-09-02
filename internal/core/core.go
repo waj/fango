@@ -61,6 +61,16 @@ type Print struct {
 	Ty  types.Type // always Unit
 }
 
+// Let is one block binding (§3.6): bind Name to Rhs, continue with Body.
+// Elaboration folds a Block's bindings into a right-nested Let chain;
+// bindings evaluate eagerly in order in both backends.
+type Let struct {
+	Name string
+	Rhs  Expr
+	Body Expr
+	Ty   types.Type // == Body.Type(), linted
+}
+
 type VarRef struct {
 	Name   string
 	Ty     types.Type
@@ -101,6 +111,7 @@ func (*Neg) isExpr()       {}
 func (*BinOp) isExpr()     {}
 func (*If) isExpr()        {}
 func (*Print) isExpr()     {}
+func (*Let) isExpr()       {}
 func (*App) isExpr()       {}
 
 func (e *IntLit) Type() types.Type    { return e.Ty }
@@ -112,4 +123,5 @@ func (e *Neg) Type() types.Type       { return e.Ty }
 func (e *BinOp) Type() types.Type     { return e.Ty }
 func (e *If) Type() types.Type        { return e.Ty }
 func (e *Print) Type() types.Type     { return e.Ty }
+func (e *Let) Type() types.Type       { return e.Ty }
 func (e *App) Type() types.Type       { return e.Ty }

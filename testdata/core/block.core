@@ -1,0 +1,3 @@
+(core
+  (def area Float (let r Float (float 2 Float) (let tau Float (binop + Float (var r Float) (var r Float)) (binop * Float (float 3.14159 Float) (var tau Float)))))
+  (def main Float (var area Float)))

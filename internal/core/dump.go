@@ -37,6 +37,8 @@ func DumpExpr(e Expr) string {
 		return fmt.Sprintf("(if %s %s %s %s)", types.Show(e.Ty), DumpExpr(e.Cond), DumpExpr(e.Then), DumpExpr(e.Else))
 	case *Print:
 		return fmt.Sprintf("(print %s)", DumpExpr(e.Arg))
+	case *Let:
+		return fmt.Sprintf("(let %s %s %s %s)", e.Name, types.Show(e.Ty), DumpExpr(e.Rhs), DumpExpr(e.Body))
 	case *VarRef:
 		if len(e.TyArgs) > 0 {
 			args := make([]string, len(e.TyArgs))
