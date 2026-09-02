@@ -1,0 +1,25 @@
+type MaybeInt = NothingI | JustI Int
+JustI 3
+NothingI
+JustI 1 == JustI 1
+:type JustI
+describe m =
+    case m of
+        JustI 0 -> "just zero"
+        JustI n -> "just something"
+        NothingI -> "nothing"
+
+describe (JustI 0)
+describe NothingI
+case JustI 4 of
+    JustI n -> n * 2
+    NothingI -> 0
+
+bad m =
+    case m of
+        JustI n -> n
+type Color = Red | Green
+Red == Green
+type Color = Red | Green | Blue
+Blue
+:quit

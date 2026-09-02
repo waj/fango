@@ -44,11 +44,24 @@ func NewSession(out io.Writer) *Session {
 const banner = "fango 0.1 — :help for commands"
 
 // Run drives the read-eval-print loop until :quit or EOF.
+//
+// Multi-line policy (DESIGN.md §9.2: input continues while the layout stack
+// is open): a first line that parses incomplete opens continuation mode;
+// indented lines then accumulate WITHOUT re-submitting on the first complete
+// parse — a `case` may grow another branch, a `type` another `|` line. A
+// blank line, a column-1 line (necessarily a new declaration or expression),
+// or EOF submits the buffer.
 func Run(in io.Reader, out io.Writer) {
 	s := NewSession(out)
 	fmt.Fprintln(out, banner)
 	scanner := bufio.NewScanner(in)
 	var buf strings.Builder
+	flush := func() {
+		if buf.Len() > 0 {
+			s.submit(buf.String())
+			buf.Reset()
+		}
+	}
 	for {
 		if buf.Len() == 0 {
 			fmt.Fprint(out, "> ")
@@ -57,29 +70,42 @@ func Run(in io.Reader, out io.Writer) {
 		}
 		if !scanner.Scan() {
 			fmt.Fprintln(out)
+			flush()
 			return
 		}
 		line := scanner.Text()
-		if buf.Len() == 0 && strings.TrimSpace(line) == "" {
+		trimmed := strings.TrimSpace(line)
+
+		if buf.Len() > 0 {
+			if trimmed == "" {
+				flush()
+				continue
+			}
+			// Indented lines always continue the construct. A column-1 line
+			// continues it only while the buffer still parses incomplete —
+			// the `name : T` / `name = …` annotation pair is the one
+			// construct spanning column-1 lines; a complete buffer means
+			// this line starts something new.
+			if line[0] == ' ' || !s.parsesComplete(buf.String()) {
+				buf.WriteByte('\n')
+				buf.WriteString(line)
+				continue
+			}
+			flush()
+		}
+
+		if trimmed == "" {
 			continue
 		}
-		if buf.Len() > 0 {
-			buf.WriteByte('\n')
-		}
-		buf.WriteString(line)
-		input := buf.String()
-
-		if buf.Len() == len(line) && strings.HasPrefix(strings.TrimSpace(input), ":") {
-			buf.Reset()
-			if quit := s.command(strings.TrimSpace(input)); quit {
+		if strings.HasPrefix(trimmed, ":") {
+			if quit := s.command(trimmed); quit {
 				return
 			}
 			continue
 		}
-		if s.input(input) == needMoreInput {
-			continue // keep buf, show the continuation prompt
+		if s.input(line, false) == needMoreInput {
+			buf.WriteString(line)
 		}
-		buf.Reset()
 	}
 }
 
@@ -108,8 +134,33 @@ func (s *Session) command(cmd string) (quit bool) {
 	return false
 }
 
-// input handles one (possibly still growing) declaration or expression.
-func (s *Session) input(text string) inputResult {
+// submit finalizes an accumulated multi-line input: run-out-of-input errors
+// render like any other (there is no more input coming).
+func (s *Session) submit(text string) {
+	s.input(text, true)
+}
+
+// parsesComplete reports whether the buffered input parses without running
+// out of input — a syntax-only probe (no type checking, no evaluation).
+func (s *Session) parsesComplete(text string) bool {
+	f := source.NewFile("<repl>", []byte(text))
+	toks, lexErrs := lexer.Lex(f)
+	if len(lexErrs) > 0 {
+		return true // hopeless input: let flush render it
+	}
+	var errs []diag.Error
+	if isDecl(toks) {
+		_, errs = parser.Parse(toks, f)
+	} else {
+		_, errs = parser.ParseExprInput(toks, f)
+	}
+	return !wantsMore(errs)
+}
+
+// input handles one declaration or expression. Unless force is set, a parse
+// that failed only by running out of input reports needMoreInput instead of
+// rendering errors — the continuation signal.
+func (s *Session) input(text string, force bool) inputResult {
 	f := source.NewFile("<repl>", []byte(text))
 	toks, lexErrs := lexer.Lex(f)
 	if len(lexErrs) > 0 {
@@ -117,16 +168,19 @@ func (s *Session) input(text string) inputResult {
 		return inputDone
 	}
 	if isDecl(toks) {
-		return s.declInput(toks, f)
+		return s.declInput(toks, f, force)
 	}
-	return s.exprInput(toks, f)
+	return s.exprInput(toks, f, force)
 }
 
-// isDecl: `name = …`, `name params… = …`, or `name : …` (an annotation
-// opening a definition) is a declaration; anything else is an expression.
-// `==` lexes as its own token, so comparisons still classify as
+// isDecl: `type …`, `name = …`, `name params… = …`, or `name : …` (an
+// annotation opening a definition) is a declaration; anything else is an
+// expression. `==` lexes as its own token, so comparisons still classify as
 // expressions, and `f x y` without `=` stays an application.
 func isDecl(toks []token.Token) bool {
+	if len(toks) >= 1 && toks[0].Kind == token.KwType {
+		return true
+	}
 	if len(toks) < 2 || toks[0].Kind != token.LIDENT {
 		return false
 	}
@@ -140,14 +194,17 @@ func isDecl(toks []token.Token) bool {
 	return i < len(toks) && toks[i].Kind == token.EQ
 }
 
-func (s *Session) declInput(toks []token.Token, f *source.File) inputResult {
+func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inputResult {
 	m, errs := parser.Parse(toks, f)
-	if wantsMore(errs) {
+	if !force && wantsMore(errs) {
 		return needMoreInput
 	}
 	if len(errs) > 0 {
 		diag.Render(s.out, errs)
 		return inputDone
+	}
+	if td, ok := m.Decls[0].(*ast.TypeDecl); ok {
+		return s.typeDeclInput(td)
 	}
 	vd := m.Decls[0].(*ast.ValueDecl)
 	redefining := s.ck.Env.Has(vd.Name)
@@ -191,9 +248,29 @@ func (s *Session) declInput(toks []token.Token, f *source.File) inputResult {
 	return inputDone
 }
 
-func (s *Session) exprInput(toks []token.Token, f *source.File) inputResult {
+// typeDeclInput installs a `type` declaration. Redefinition mints a fresh
+// generation (a new Unique), exactly like value redefinition (§9.3).
+func (s *Session) typeDeclInput(td *ast.TypeDecl) inputResult {
+	_, redefining := s.ck.TypeNames[td.Name]
+	if errs := s.ck.TypeDecl(td); len(errs) > 0 {
+		diag.Render(s.out, errs)
+		return inputDone
+	}
+	if redefining {
+		s.gen++
+	}
+	// Echo each constructor with its type, mirroring the `name : type` shape
+	// value definitions print.
+	adt := s.ck.ADTs[s.ck.TypeNames[td.Name].(*types.TCon).Unique]
+	for _, c := range adt.Ctors {
+		fmt.Fprintf(s.out, "%s : %s\n", c.Name, types.Show(c.ValueType()))
+	}
+	return inputDone
+}
+
+func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inputResult {
 	e, errs := parser.ParseExprInput(toks, f)
-	if wantsMore(errs) {
+	if !force && wantsMore(errs) {
 		return needMoreInput
 	}
 	if len(errs) > 0 {

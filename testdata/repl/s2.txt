@@ -1,24 +1,24 @@
 fango 0.1 — :help for commands
-> | | area : Float
-> 12.56636 : Float
-> | x : Int
-> Int
+> | | | area : Float
+12.56636 : Float
+> | | x : Int
+Int
 > r : Int
-> | | -- SHADOWING -------------------------------------------- <repl>
+> | | | -- SHADOWING -------------------------------------------- <repl>
 
 The name `r` is already defined at the top level — fango does not allow
 shadowing. Choose a different name.
 
 2|     r = 5.0
        ^
-> | | -- SHADOWING -------------------------------------------- <repl>
+| | | -- SHADOWING -------------------------------------------- <repl>
 
 The name `x` is already defined at the top level — fango does not allow
 shadowing. Choose a different name.
 
 2|     x = 9
        ^
-> | -- TYPE MISMATCH ---------------------------------------- <repl>
+| | -- TYPE MISMATCH ---------------------------------------- <repl>
 
 The type annotation for `y` says it is:
 
@@ -30,4 +30,3 @@ but the body I found is:
 
 2| y = "no"
        ^^^^
-> 

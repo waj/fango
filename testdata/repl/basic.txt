@@ -3,8 +3,8 @@ fango 0.1 — :help for commands
 > x : Int
 > 42 : Int
 > Int
-> | 3 : Int
-> -- NAMING ERROR ----------------------------------------- <repl>
+> | | 3 : Int
+-- NAMING ERROR ----------------------------------------- <repl>
 
 I don't know a value named `y`.
 

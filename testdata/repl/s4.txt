@@ -1,0 +1,30 @@
+fango 0.1 — :help for commands
+> NothingI : MaybeInt
+JustI : Int -> MaybeInt
+> JustI 3 : MaybeInt
+> NothingI : MaybeInt
+> True : Bool
+> Int -> MaybeInt
+> | | | | | describe : MaybeInt -> String
+> "just zero" : String
+> "nothing" : String
+> | | | 8 : Int
+> | | | -- MISSING PATTERNS ------------------------------------- <repl>
+
+This `case` does not cover every possible value. For example, it
+does not handle:
+
+    NothingI
+
+Add a branch for it (or a catch-all `_` branch).
+
+2|     case m of
+       ^^^^
+Red : Color
+Green : Color
+> False : Bool
+> Red : Color
+Green : Color
+Blue : Color
+> Blue : Color
+> 

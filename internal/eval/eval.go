@@ -9,6 +9,7 @@ import (
 	"io"
 
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/types"
 	"github.com/waj/fango/runtime/fangort"
 )
 
@@ -33,6 +34,14 @@ type Cell struct {
 	memo    Value
 	forced  bool
 	forcing bool
+}
+
+// CtorVal is a constructed ADT value: the constructor's table row plus its
+// field values — the interpreter's analogue of the compiled backend's
+// per-constructor struct.
+type CtorVal struct {
+	Ctor   *types.CtorInfo
+	Fields []Value
 }
 
 // Closure is the interpreter's only function value: one currying step,
@@ -212,6 +221,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			s = fangort.ShowString(v)
 		case bool:
 			s = fangort.ShowBool(v)
+		case *CtorVal:
+			s = showCtorVal(v, false)
 		default:
 			return nil, fmt.Errorf("eval: printing a %T", v)
 		}
@@ -259,11 +270,99 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				return nil, err
 			}
 			return in.eval(c.Body, &Frame{parent: c.Env, vars: map[string]Value{c.Param: v}})
+		case core.Ctor:
+			fields := make([]Value, len(e.Args))
+			for i, a := range e.Args {
+				v, err := in.eval(a, fr)
+				if err != nil {
+					return nil, err
+				}
+				fields[i] = v
+			}
+			return &CtorVal{Ctor: e.Ctor, Fields: fields}, nil
 		default:
-			return nil, fmt.Errorf("eval: App{Ctor} arrives in S4")
+			return nil, fmt.Errorf("eval: App with unknown CalleeKind")
 		}
+	case *core.Case:
+		v, err := in.eval(e.Scrut, fr)
+		if err != nil {
+			return nil, err
+		}
+		frame := &Frame{parent: fr, vars: map[string]Value{e.Bind: v}}
+		return in.tree(e.Tree, frame)
 	default:
 		return nil, fmt.Errorf("eval: unhandled Core node %T", e)
+	}
+}
+
+// tree walks a decision tree, mirroring the compiled backend's switches.
+func (in *interp) tree(t core.Tree, fr *Frame) (Value, error) {
+	switch t := t.(type) {
+	case *core.Leaf:
+		return in.eval(t.Body, fr)
+	case *core.SwitchCtor:
+		v, ok := fr.lookup(t.Scrut)
+		if !ok {
+			return nil, fmt.Errorf("eval: tree scrutinee `%s` unbound — the linter should have caught this", t.Scrut)
+		}
+		if b, isBool := v.(bool); isBool {
+			// Bool is an ordinary ADT in the checker but a native bool value
+			// here, exactly as in codegen (§8.1).
+			want := "False"
+			if b {
+				want = "True"
+			}
+			for _, c := range t.Cases {
+				if c.Ctor.Name == want {
+					return in.tree(c.Tree, fr)
+				}
+			}
+			return in.tree(t.Default, fr)
+		}
+		cv, isCtor := v.(*CtorVal)
+		if !isCtor {
+			return nil, fmt.Errorf("eval: SwitchCtor on a %T — the linter should have caught this", v)
+		}
+		for _, c := range t.Cases {
+			if c.Ctor.Index != cv.Ctor.Index {
+				continue
+			}
+			vars := map[string]Value{}
+			for i, bind := range c.Binds {
+				if bind != "" {
+					vars[bind] = cv.Fields[i]
+				}
+			}
+			return in.tree(c.Tree, &Frame{parent: fr, vars: vars})
+		}
+		if t.Default == nil {
+			return nil, fmt.Errorf("eval: no case for constructor `%s` and no default — exhaustiveness is broken", cv.Ctor.Name)
+		}
+		return in.tree(t.Default, fr)
+	case *core.SwitchLit:
+		v, ok := fr.lookup(t.Scrut)
+		if !ok {
+			return nil, fmt.Errorf("eval: tree scrutinee `%s` unbound — the linter should have caught this", t.Scrut)
+		}
+		for _, c := range t.Cases {
+			var match bool
+			switch lit := c.Lit.(type) {
+			case *core.IntLit:
+				match = v == lit.Val
+			case *core.FloatLit:
+				match = v == lit.Val
+			case *core.StringLit:
+				match = v == lit.Val
+			default:
+				return nil, fmt.Errorf("eval: SwitchLit case is %T — the linter should have caught this", c.Lit)
+			}
+			if match {
+				return in.tree(c.Tree, fr)
+			}
+		}
+		return in.tree(t.Default, fr)
+	default:
+		return nil, fmt.Errorf("eval: unhandled tree node %T", t)
 	}
 }
 
@@ -369,6 +468,33 @@ func applyBinOp(op string, l, r Value) (Value, error) {
 		case "/=":
 			return lv != rv, nil
 		}
+	case *CtorVal:
+		rv := r.(*CtorVal)
+		switch op {
+		case "==":
+			return eqValue(lv, rv), nil
+		case "/=":
+			return !eqValue(lv, rv), nil
+		}
 	}
 	return nil, fmt.Errorf("eval: (%s) on %T values — the linter should have rejected this", op, l)
+}
+
+// eqValue is structural equality — the interpreter's mirror of the derived
+// eqT_X functions (§8.6). Function-containing types were rejected by the
+// checker, so every reachable field compares.
+func eqValue(l, r Value) bool {
+	if lc, ok := l.(*CtorVal); ok {
+		rc := r.(*CtorVal)
+		if lc.Ctor.Index != rc.Ctor.Index {
+			return false
+		}
+		for i := range lc.Fields {
+			if !eqValue(lc.Fields[i], rc.Fields[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	return l == r // scalars: identical to the native Go operators
 }
