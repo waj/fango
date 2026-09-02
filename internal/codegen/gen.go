@@ -168,7 +168,14 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 	case *core.BoolLit:
 		return ident(strconv.FormatBool(e.Val))
 	case *core.VarRef:
+		// Unit is a singleton and Unit-typed locals are never emitted
+		// (their effects ran at binding time) — materialize the value.
+		if g.unique(e.Ty) == g.b.Unit.Unique {
+			return unitLit()
+		}
 		return ident(mangleValue(e.Name))
+	case *core.Let:
+		return g.letIIFE(e)
 	case *core.Neg:
 		operand := g.expr(e.Operand, unaryPrec)
 		// Guard `--x` (invalid Go) and precedence: parenthesize any
@@ -236,8 +243,75 @@ func (g *gen) floatLit(v float64) goast.Expr {
 	}
 }
 
+// letIIFE collapses a Let chain into one immediately-invoked closure:
+// `func() T { var v_r float64 = …; …; return result }()`. The expression-
+// context fallback; statement contexts (main's body, and function bodies
+// from S3) emit the bindings as plain Go statements instead.
+func (g *gen) letIIFE(e *core.Let) goast.Expr {
+	var body []goast.Stmt
+	var cur core.Expr = e
+	for {
+		let, ok := cur.(*core.Let)
+		if !ok {
+			break
+		}
+		body = append(body, g.letBindingStmts(let)...)
+		cur = let.Body
+	}
+	body = append(body, returnStmt(g.expr(cur, 0)))
+	return callExpr(funcLit(g.goType(e.Ty), body))
+}
+
+// letBindingStmts emits one binding: Unit-typed right-hand sides run as
+// statements (their value is the singleton; prints must still execute),
+// other bindings become `var` declarations, kept alive with `_ =` when the
+// rest of the chain never mentions them (Go rejects unused locals; fango
+// bindings still evaluate eagerly).
+func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
+	if g.unique(let.Rhs.Type()) == g.b.Unit.Unique {
+		return g.stmts(let.Rhs)
+	}
+	stmts := []goast.Stmt{varDeclStmt(mangleValue(let.Name), g.goType(let.Rhs.Type()), g.expr(let.Rhs, 0))}
+	if !mentions(let.Body, let.Name) {
+		stmts = append(stmts, assignBlank(ident(mangleValue(let.Name))))
+	}
+	return stmts
+}
+
+// mentions reports whether name occurs free-ish in e. No-shadowing makes a
+// plain occurrence check exact: an inner Let can never rebind name.
+func mentions(e core.Expr, name string) bool {
+	switch e := e.(type) {
+	case *core.VarRef:
+		return e.Name == name
+	case *core.Neg:
+		return mentions(e.Operand, name)
+	case *core.BinOp:
+		return mentions(e.L, name) || mentions(e.R, name)
+	case *core.If:
+		return mentions(e.Cond, name) || mentions(e.Then, name) || mentions(e.Else, name)
+	case *core.Print:
+		return mentions(e.Arg, name)
+	case *core.Let:
+		return mentions(e.Rhs, name) || mentions(e.Body, name)
+	case *core.App:
+		if mentions(e.Callee, name) {
+			return true
+		}
+		for _, a := range e.Args {
+			if mentions(a, name) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
 // stmts emits a Unit-typed expression in statement context — func main()'s
-// body. Prints become fangort calls; ifs become genuine Go if statements.
+// body. Prints become fangort calls; ifs become genuine Go if statements;
+// Let bindings become plain locals.
 func (g *gen) stmts(e core.Expr) []goast.Stmt {
 	switch e := e.(type) {
 	case *core.Print:
@@ -246,6 +320,8 @@ func (g *gen) stmts(e core.Expr) []goast.Stmt {
 			selector("fangort", g.printFn(e.Arg.Type())), g.expr(e.Arg, 0)))}
 	case *core.If:
 		return []goast.Stmt{ifStmt(g.expr(e.Cond, 0), g.stmts(e.Then), g.stmts(e.Else))}
+	case *core.Let:
+		return append(g.letBindingStmts(e), g.stmts(e.Body)...)
 	default:
 		// Unit-typed but effect-free — unreachable in S1 (Unit is only
 		// constructible via print); discard defensively.

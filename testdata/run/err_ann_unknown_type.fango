@@ -1,0 +1,3 @@
+x : Foo
+x = 1
+main = x

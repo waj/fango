@@ -35,9 +35,25 @@ type Cell struct {
 	forcing bool
 }
 
-// Env holds top-level cells. Local frames arrive with lambdas (S3).
+// Env holds top-level cells.
 type Env struct {
 	cells map[string]*Cell
+}
+
+// Frame holds block-local bindings (§3.6) — eager values, unlike the lazy
+// top-level cells. Function parameters (S3) extend the same chain.
+type Frame struct {
+	parent *Frame
+	vars   map[string]Value
+}
+
+func (f *Frame) lookup(name string) (Value, bool) {
+	for ; f != nil; f = f.parent {
+		if v, ok := f.vars[name]; ok {
+			return v, true
+		}
+	}
+	return nil, false
 }
 
 func NewEnv() *Env { return &Env{cells: map[string]*Cell{}} }
@@ -69,7 +85,7 @@ const pollEvery = 4096
 // Eval evaluates a Core expression under env. Print output goes to out —
 // the REPL passes its own writer, the differential harness a buffer.
 func Eval(ctx context.Context, e core.Expr, env *Env, out io.Writer) (Value, error) {
-	return (&interp{ctx: ctx, env: env, out: out}).eval(e)
+	return (&interp{ctx: ctx, env: env, out: out}).eval(e, nil)
 }
 
 // Force evaluates (and memoizes) the named top-level binding.
@@ -77,7 +93,7 @@ func Force(ctx context.Context, name string, env *Env, out io.Writer) (Value, er
 	return (&interp{ctx: ctx, env: env, out: out}).force(name)
 }
 
-func (in *interp) eval(e core.Expr) (Value, error) {
+func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 	in.steps++
 	if in.steps%pollEvery == 0 {
 		select {
@@ -96,9 +112,19 @@ func (in *interp) eval(e core.Expr) (Value, error) {
 	case *core.BoolLit:
 		return e.Val, nil
 	case *core.VarRef:
+		if v, ok := fr.lookup(e.Name); ok {
+			return v, nil
+		}
 		return in.force(e.Name)
+	case *core.Let:
+		// Eager, in order — identical to the compiled backend's locals.
+		v, err := in.eval(e.Rhs, fr)
+		if err != nil {
+			return nil, err
+		}
+		return in.eval(e.Body, &Frame{parent: fr, vars: map[string]Value{e.Name: v}})
 	case *core.Neg:
-		v, err := in.eval(e.Operand)
+		v, err := in.eval(e.Operand, fr)
 		if err != nil {
 			return nil, err
 		}
@@ -111,26 +137,26 @@ func (in *interp) eval(e core.Expr) (Value, error) {
 			return nil, fmt.Errorf("eval: negating a %T", v)
 		}
 	case *core.BinOp:
-		l, err := in.eval(e.L)
+		l, err := in.eval(e.L, fr)
 		if err != nil {
 			return nil, err
 		}
-		r, err := in.eval(e.R)
+		r, err := in.eval(e.R, fr)
 		if err != nil {
 			return nil, err
 		}
 		return applyBinOp(e.Op, l, r)
 	case *core.If:
-		cond, err := in.eval(e.Cond)
+		cond, err := in.eval(e.Cond, fr)
 		if err != nil {
 			return nil, err
 		}
 		if cond.(bool) {
-			return in.eval(e.Then)
+			return in.eval(e.Then, fr)
 		}
-		return in.eval(e.Else)
+		return in.eval(e.Else, fr)
 	case *core.Print:
-		v, err := in.eval(e.Arg)
+		v, err := in.eval(e.Arg, fr)
 		if err != nil {
 			return nil, err
 		}
@@ -173,7 +199,7 @@ func (in *interp) force(name string) (Value, error) {
 		return nil, fmt.Errorf("eval: `%s` depends on itself", name)
 	}
 	cell.forcing = true
-	v, err := in.eval(cell.Body)
+	v, err := in.eval(cell.Body, nil)
 	cell.forcing = false
 	if err != nil {
 		return nil, err

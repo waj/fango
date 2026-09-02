@@ -1,0 +1,3 @@
+x : Float
+x = 1
+main = print x

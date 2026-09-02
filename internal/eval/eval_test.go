@@ -104,6 +104,59 @@ func TestPrintWritesThroughFangort(t *testing.T) {
 	}
 }
 
+func TestLetFrames(t *testing.T) {
+	it := intTy()
+	// v = 40; w = v + 1; w * 2  →  82
+	e := &core.Let{Name: "v", Ty: it,
+		Rhs: &core.IntLit{Val: 40, Ty: it},
+		Body: &core.Let{Name: "w", Ty: it,
+			Rhs: &core.BinOp{Op: "+", Ty: it,
+				L: &core.VarRef{Name: "v", Ty: it},
+				R: &core.IntLit{Val: 1, Ty: it}},
+			Body: &core.BinOp{Op: "*", Ty: it,
+				L: &core.VarRef{Name: "w", Ty: it},
+				R: &core.IntLit{Val: 2, Ty: it}}}}
+	if v := run(t, e); v != int64(82) {
+		t.Errorf("got %v, want 82", v)
+	}
+}
+
+// A frame binding wins over a top-level cell of the same name — relevant
+// for the REPL, where a session name and a (batch-checked) local could
+// coincide textually even though the checker forbids user shadowing.
+func TestFrameBeatsCell(t *testing.T) {
+	it := intTy()
+	env := NewEnv()
+	env.Define("v", &core.IntLit{Val: 1, Ty: it})
+	e := &core.Let{Name: "v", Ty: it,
+		Rhs:  &core.IntLit{Val: 2, Ty: it},
+		Body: &core.VarRef{Name: "v", Ty: it}}
+	v, err := Eval(context.Background(), e, env, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != int64(2) {
+		t.Errorf("got %v, want the frame's 2", v)
+	}
+}
+
+// Bindings evaluate eagerly in order — print side effects prove it.
+func TestLetEagerOrder(t *testing.T) {
+	it, ut := intTy(), unitTy()
+	var buf bytes.Buffer
+	e := &core.Let{Name: "a", Ty: ut,
+		Rhs: &core.Print{Arg: &core.IntLit{Val: 1, Ty: it}, Ty: ut},
+		Body: &core.Let{Name: "b", Ty: ut,
+			Rhs:  &core.Print{Arg: &core.IntLit{Val: 2, Ty: it}, Ty: ut},
+			Body: &core.Print{Arg: &core.IntLit{Val: 3, Ty: it}, Ty: ut}}}
+	if _, err := Eval(context.Background(), e, NewEnv(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != "1\n2\n3\n" {
+		t.Errorf("printed %q, want 1 2 3 in order", got)
+	}
+}
+
 func TestLazyMemoCells(t *testing.T) {
 	ty := intTy()
 	env := NewEnv()
@@ -159,6 +212,7 @@ func TestSwitchTotality(t *testing.T) {
 		&core.BinOp{Op: "+", Ty: it, L: one, R: one},
 		&core.If{Cond: &core.BoolLit{Val: true, Ty: bt}, Then: one, Else: one, Ty: it},
 		&core.Print{Arg: one, Ty: ut},
+		&core.Let{Name: "v", Rhs: one, Body: one, Ty: it},
 		&core.App{CalleeKind: core.Worker, Ty: it},
 	}
 	for _, n := range nodes {

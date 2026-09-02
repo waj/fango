@@ -1,0 +1,4 @@
+area =
+    r = 2.0
+    3.14159 * r * r
+main = print area
