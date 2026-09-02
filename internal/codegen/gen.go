@@ -8,6 +8,7 @@ import (
 	gotoken "go/token"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/types"
@@ -40,6 +41,10 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 		d := &p.Defs[i]
 		if d == mainDef && mainIsUnit {
 			continue // no package var: the effect runs inside func main()
+		}
+		if len(d.Params) > 0 {
+			decls = append(decls, g.workerDef(d))
+			continue
 		}
 		decls = append(decls, varDecl(mangleValue(d.Name), g.goType(d.Type), g.expr(d.Body, 0)))
 	}
@@ -106,10 +111,43 @@ func (g *gen) printFn(t types.Type) string {
 	}
 }
 
+// workerDef emits a top-level function definition as an uncurried Go func
+// (§8.2 item 1): the parameter types peel off the curried fango type, the
+// body emits in return-position statement context.
+func (g *gen) workerDef(d *core.Def) goast.Decl {
+	argTys, ret := core.PeelFun(d.Type, len(d.Params))
+	params := make([]paramSpec, len(d.Params))
+	for i, name := range d.Params {
+		params[i] = paramSpec{name: mangleValue(name), typ: g.goType(argTys[i])}
+	}
+	return workerDecl(mangleValue(d.Name), params, g.goType(ret), g.retStmts(d.Body))
+}
+
+// retStmts emits an expression in return-position statement context —
+// worker and lambda bodies. Lets become locals, ifs become real Go
+// if/return (fib's hot path must not pay an IIFE closure), everything else
+// returns directly.
+func (g *gen) retStmts(e core.Expr) []goast.Stmt {
+	switch e := e.(type) {
+	case *core.Let:
+		return append(g.letBindingStmts(e), g.retStmts(e.Body)...)
+	case *core.If:
+		stmts := []goast.Stmt{&goast.IfStmt{
+			Cond: g.expr(e.Cond, 0),
+			Body: &goast.BlockStmt{List: g.retStmts(e.Then)},
+		}}
+		return append(stmts, g.retStmts(e.Else)...)
+	default:
+		return []goast.Stmt{returnStmt(g.expr(e, 0))}
+	}
+}
+
 // goType maps a fango type to its unboxed Go representation (DESIGN.md
 // §8.1). Int is int64, not int: identical overflow behavior on every GOARCH.
 func (g *gen) goType(t types.Type) goast.Expr {
 	switch t := t.(type) {
+	case *types.TFun:
+		return funcType(g.goType(t.Arg), g.goType(t.Ret))
 	case *types.TCon:
 		switch t.Unique {
 		case g.b.Int.Unique:
@@ -176,6 +214,33 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return ident(mangleValue(e.Name))
 	case *core.Let:
 		return g.letIIFE(e)
+	case *core.Lambda:
+		// A typed func literal. Go captures variables by reference, but
+		// fango bindings are immutable (the single letrec assignment
+		// happens-before any call), so by-reference and by-value are
+		// indistinguishable.
+		fn := e.Ty.(*types.TFun)
+		return funcLitParams(
+			[]paramSpec{{name: mangleValue(e.Param), typ: g.goType(fn.Arg)}},
+			g.goType(fn.Ret),
+			g.retStmts(e.Body))
+	case *core.App:
+		switch e.CalleeKind {
+		case core.Worker:
+			ref := e.Callee.(*core.VarRef)
+			args := make([]goast.Expr, len(e.Args))
+			for i, a := range e.Args {
+				args[i] = g.expr(a, 0)
+			}
+			return callExpr(ident(mangleValue(ref.Name)), args...)
+		case core.Value:
+			// One typed indirect call per application; chains render
+			// e(a)(b). Call is a Go primary expression — no parens needed,
+			// and a func-literal callee called in place is legal Go.
+			return callExpr(g.expr(e.Callee, 0), g.expr(e.Args[0], 0))
+		default:
+			panic("codegen: App{Ctor} arrives in S4")
+		}
 	case *core.Neg:
 		operand := g.expr(e.Operand, unaryPrec)
 		// Guard `--x` (invalid Go) and precedence: parenthesize any
@@ -268,45 +333,23 @@ func (g *gen) letIIFE(e *core.Let) goast.Expr {
 // rest of the chain never mentions them (Go rejects unused locals; fango
 // bindings still evaluate eagerly).
 func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
+	if let.Rec {
+		// A Go local is not in scope inside its own initializer:
+		// declare, then assign — the standard recursive-closure idiom.
+		name := mangleValue(let.Name)
+		return []goast.Stmt{
+			varDeclNoValue(name, g.goType(let.Rhs.Type())),
+			assignStmt(name, g.expr(let.Rhs, 0)),
+		}
+	}
 	if g.unique(let.Rhs.Type()) == g.b.Unit.Unique {
 		return g.stmts(let.Rhs)
 	}
 	stmts := []goast.Stmt{varDeclStmt(mangleValue(let.Name), g.goType(let.Rhs.Type()), g.expr(let.Rhs, 0))}
-	if !mentions(let.Body, let.Name) {
+	if !core.Mentions(let.Body, let.Name) {
 		stmts = append(stmts, assignBlank(ident(mangleValue(let.Name))))
 	}
 	return stmts
-}
-
-// mentions reports whether name occurs free-ish in e. No-shadowing makes a
-// plain occurrence check exact: an inner Let can never rebind name.
-func mentions(e core.Expr, name string) bool {
-	switch e := e.(type) {
-	case *core.VarRef:
-		return e.Name == name
-	case *core.Neg:
-		return mentions(e.Operand, name)
-	case *core.BinOp:
-		return mentions(e.L, name) || mentions(e.R, name)
-	case *core.If:
-		return mentions(e.Cond, name) || mentions(e.Then, name) || mentions(e.Else, name)
-	case *core.Print:
-		return mentions(e.Arg, name)
-	case *core.Let:
-		return mentions(e.Rhs, name) || mentions(e.Body, name)
-	case *core.App:
-		if mentions(e.Callee, name) {
-			return true
-		}
-		for _, a := range e.Args {
-			if mentions(a, name) {
-				return true
-			}
-		}
-		return false
-	default:
-		return false
-	}
 }
 
 // stmts emits a Unit-typed expression in statement context — func main()'s
@@ -330,5 +373,12 @@ func (g *gen) stmts(e core.Expr) []goast.Stmt {
 }
 
 // mangleValue maps a fango value name into the generated package's `v_`
-// namespace (constructors use C_, types T_).
-func mangleValue(name string) string { return "v_" + name }
+// namespace (constructors use C_, types T_). Elaboration temporaries start
+// with `_` — unlexable as fango identifiers — and land in a disjoint `t`
+// namespace (`_w0` → `t_w0`) so they can never collide with user names.
+func mangleValue(name string) string {
+	if strings.HasPrefix(name, "_") {
+		return "t" + name
+	}
+	return "v_" + name
+}

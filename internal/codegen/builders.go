@@ -40,6 +40,68 @@ func funcLit(result goast.Expr, body []goast.Stmt) goast.Expr {
 	}
 }
 
+type paramSpec struct {
+	name string
+	typ  goast.Expr
+}
+
+func paramFields(params []paramSpec) *goast.FieldList {
+	fields := make([]*goast.Field, len(params))
+	for i, p := range params {
+		fields[i] = &goast.Field{Names: []*goast.Ident{ident(p.name)}, Type: p.typ}
+	}
+	return &goast.FieldList{List: fields}
+}
+
+// funcType is the curried arrow mapping T⟦a->b⟧ = func(A) B (§8.1).
+func funcType(param, result goast.Expr) goast.Expr {
+	return &goast.FuncType{
+		Params:  &goast.FieldList{List: []*goast.Field{{Type: param}}},
+		Results: &goast.FieldList{List: []*goast.Field{{Type: result}}},
+	}
+}
+
+func funcLitParams(params []paramSpec, result goast.Expr, body []goast.Stmt) goast.Expr {
+	return &goast.FuncLit{
+		Type: &goast.FuncType{
+			Params:  paramFields(params),
+			Results: &goast.FieldList{List: []*goast.Field{{Type: result}}},
+		},
+		Body: &goast.BlockStmt{List: body},
+	}
+}
+
+// workerDecl is a top-level uncurried worker: func v_f(v_x T, …) R { … }.
+func workerDecl(name string, params []paramSpec, result goast.Expr, body []goast.Stmt) goast.Decl {
+	return &goast.FuncDecl{
+		Name: ident(name),
+		Type: &goast.FuncType{
+			Params:  paramFields(params),
+			Results: &goast.FieldList{List: []*goast.Field{{Type: result}}},
+		},
+		Body: &goast.BlockStmt{List: body},
+	}
+}
+
+// varDeclNoValue is `var name T` — the declare half of the letrec idiom.
+func varDeclNoValue(name string, typ goast.Expr) goast.Stmt {
+	return &goast.DeclStmt{Decl: &goast.GenDecl{
+		Tok: gotoken.VAR,
+		Specs: []goast.Spec{&goast.ValueSpec{
+			Names: []*goast.Ident{ident(name)},
+			Type:  typ,
+		}},
+	}}
+}
+
+func assignStmt(name string, rhs goast.Expr) goast.Stmt {
+	return &goast.AssignStmt{
+		Lhs: []goast.Expr{ident(name)},
+		Tok: gotoken.ASSIGN,
+		Rhs: []goast.Expr{rhs},
+	}
+}
+
 func ifStmt(cond goast.Expr, then, els []goast.Stmt) goast.Stmt {
 	return &goast.IfStmt{
 		Cond: cond,
