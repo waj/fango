@@ -12,21 +12,54 @@ import (
 // (and under a debug flag later) — instantiation plumbing bugs are the
 // design's top risk, and this is the tripwire.
 func Lint(p *Prog, b *types.Builtins) []error {
-	l := &linter{b: b, scope: map[string]bool{}}
-	for _, d := range p.Defs {
+	l := &linter{b: b, scope: map[string]bool{}, workers: map[string]*Def{}}
+	for i := range p.Defs {
+		d := &p.Defs[i]
 		l.scope[d.Name] = true
+		if len(d.Params) > 0 {
+			l.workers[d.Name] = d
+		}
 	}
-	for _, d := range p.Defs {
-		l.typ(d.Type, "def "+d.Name)
-		l.expr(d.Body, "def "+d.Name)
+	for i := range p.Defs {
+		d := &p.Defs[i]
+		where := "def " + d.Name
+		l.typ(d.Type, where)
+		if len(d.Params) > 0 {
+			// The worker's type must peel exactly arity arrows, with the
+			// body typed at the remainder; params enter the no-shadow scope.
+			t := d.Type
+			for _, param := range d.Params {
+				fn, ok := t.(*types.TFun)
+				if !ok {
+					l.errorf("%s: fewer arrows than parameters", where)
+					break
+				}
+				if l.scope[param] {
+					l.errorf("%s: parameter `%s` shadows — the checker should have rejected this", where, param)
+				}
+				l.scope[param] = true
+				t = fn.Ret
+			}
+			if types.Show(t) != types.Show(d.Body.Type()) {
+				l.errorf("%s: body type %s differs from peeled result %s",
+					where, types.Show(d.Body.Type()), types.Show(t))
+			}
+			l.expr(d.Body, where)
+			for _, param := range d.Params {
+				delete(l.scope, param)
+			}
+		} else {
+			l.expr(d.Body, where)
+		}
 	}
 	return l.errs
 }
 
 type linter struct {
-	b     *types.Builtins
-	scope map[string]bool // def names + enclosing Let names: no shadowing
-	errs  []error
+	b       *types.Builtins
+	scope   map[string]bool // def names + enclosing Let/param names: no shadowing
+	workers map[string]*Def
+	errs    []error
 }
 
 func (l *linter) errorf(format string, args ...any) {
@@ -61,6 +94,12 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: BoolLit typed %s", where, types.Show(e.Ty))
 		}
 	case *VarRef:
+		// A worker name may appear ONLY as an App{Worker} callee (that
+		// case does not recurse here): a bare reference means elaboration
+		// failed to eta-expand a first-class use.
+		if _, isWorker := l.workers[e.Name]; isWorker {
+			l.errorf("%s: bare reference to worker `%s` — first-class uses must be eta-expanded", where, e.Name)
+		}
 	case *Neg:
 		if u := l.unique(e.Ty); u != l.b.Int.Unique && u != l.b.Float.Unique {
 			l.errorf("%s: Neg typed %s, want Int or Float", where, types.Show(e.Ty))
@@ -88,10 +127,34 @@ func (l *linter) expr(e Expr, where string) {
 		if l.scope[e.Name] {
 			l.errorf("%s: Let shadows `%s` — the checker should have rejected this", where, e.Name)
 		}
-		l.scope[e.Name] = true
-		l.expr(e.Rhs, where)
+		if e.Rec {
+			if _, ok := e.Rhs.(*Lambda); !ok {
+				l.errorf("%s: recursive Let `%s` whose Rhs is not a Lambda", where, e.Name)
+			}
+			l.scope[e.Name] = true // in scope inside its own Rhs
+			l.expr(e.Rhs, where)
+		} else {
+			l.expr(e.Rhs, where)
+			l.scope[e.Name] = true
+		}
 		l.expr(e.Body, where)
 		delete(l.scope, e.Name)
+	case *Lambda:
+		fn, ok := e.Ty.(*types.TFun)
+		if !ok {
+			l.errorf("%s: Lambda typed %s, want a function type", where, types.Show(e.Ty))
+			return
+		}
+		if types.Show(fn.Ret) != types.Show(e.Body.Type()) {
+			l.errorf("%s: Lambda body type %s differs from arrow result %s",
+				where, types.Show(e.Body.Type()), types.Show(fn.Ret))
+		}
+		if l.scope[e.Param] {
+			l.errorf("%s: Lambda param `%s` shadows — the checker should have rejected this", where, e.Param)
+		}
+		l.scope[e.Param] = true
+		l.expr(e.Body, where)
+		delete(l.scope, e.Param)
 	case *Print:
 		u := l.unique(e.Arg.Type())
 		if u != l.b.Int.Unique && u != l.b.Float.Unique && u != l.b.String.Unique && u != l.b.Bool.Unique {
@@ -102,9 +165,58 @@ func (l *linter) expr(e Expr, where string) {
 		}
 		l.expr(e.Arg, where)
 	case *App:
-		l.expr(e.Callee, where)
-		for _, a := range e.Args {
-			l.expr(a, where)
+		switch e.CalleeKind {
+		case Worker:
+			ref, ok := e.Callee.(*VarRef)
+			if !ok {
+				l.errorf("%s: App{Worker} callee is %T, want a VarRef", where, e.Callee)
+				return
+			}
+			def, isWorker := l.workers[ref.Name]
+			if !isWorker {
+				l.errorf("%s: App{Worker} callee `%s` is not a worker", where, ref.Name)
+				return
+			}
+			if len(e.Args) != len(def.Params) {
+				l.errorf("%s: App{Worker} `%s` has %d args, arity is %d",
+					where, ref.Name, len(e.Args), len(def.Params))
+				return
+			}
+			argTys, ret := PeelFun(def.Type, len(def.Params))
+			for i, a := range e.Args {
+				if types.Show(a.Type()) != types.Show(argTys[i]) {
+					l.errorf("%s: App{Worker} `%s` arg %d typed %s, want %s",
+						where, ref.Name, i+1, types.Show(a.Type()), types.Show(argTys[i]))
+				}
+				l.expr(a, where)
+			}
+			if types.Show(e.Ty) != types.Show(ret) {
+				l.errorf("%s: App{Worker} `%s` typed %s, want %s",
+					where, ref.Name, types.Show(e.Ty), types.Show(ret))
+			}
+		case Value:
+			if len(e.Args) != 1 {
+				l.errorf("%s: App{Value} must apply exactly one argument, got %d", where, len(e.Args))
+				return
+			}
+			fn, ok := e.Callee.Type().(*types.TFun)
+			if !ok {
+				l.errorf("%s: App{Value} callee typed %s, want a function type",
+					where, types.Show(e.Callee.Type()))
+				return
+			}
+			if types.Show(e.Args[0].Type()) != types.Show(fn.Arg) {
+				l.errorf("%s: App{Value} arg typed %s, want %s",
+					where, types.Show(e.Args[0].Type()), types.Show(fn.Arg))
+			}
+			if types.Show(e.Ty) != types.Show(fn.Ret) {
+				l.errorf("%s: App{Value} typed %s, want %s",
+					where, types.Show(e.Ty), types.Show(fn.Ret))
+			}
+			l.expr(e.Callee, where)
+			l.expr(e.Args[0], where)
+		default:
+			l.errorf("%s: App{Ctor} arrives in S4", where)
 		}
 	default:
 		l.errorf("%s: unhandled Core node %T", where, e)

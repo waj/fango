@@ -35,6 +35,12 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 		def, declErrs := Decl(info, ck)
 		errs = append(errs, declErrs...)
 		p.Defs = append(p.Defs, def)
+		if def.Name == "main" && len(def.Params) == 0 {
+			if _, isFn := def.Type.(*types.TFun); isFn {
+				errs = append(errs, diag.Errorf(info.NameSpan, "BAD MAIN",
+					"For now `main` must produce an Int, Float, String, Bool, or ()\n— a function-typed `main` cannot run until effects land (S7)."))
+			}
+		}
 	}
 	return p, errs
 }
@@ -42,12 +48,32 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 // Decl elaborates one declaration — also the REPL's per-input entry point.
 func Decl(info infer.DeclInfo, ck *infer.Checker) (core.Def, []diag.Error) {
 	el := &elab{ck: ck}
+	// Visible polymorphism is rejected BEFORE defaulting (defaulting would
+	// destroy the evidence by writing General → Unit into the sub). This
+	// fires only for genuinely underdetermined definitions: batch checking
+	// solves the whole module first, so a later monomorphic use pins an
+	// unannotated helper.
+	if v := ck.FreeGeneralVar(info.Type); v != nil {
+		el.polyError(info.Name, info.NameSpan, info.Type)
+	}
+	params := make([]string, len(info.Params))
+	for i, p := range info.Params {
+		params[i] = p.Name
+	}
 	def := core.Def{
-		Name: info.Name,
-		Type: el.zonkDefault(info.Type),
-		Body: el.expr(info.Body),
+		Name:   info.Name,
+		Type:   el.zonkDefault(info.Type),
+		Params: params,
+		Body:   el.expr(info.Body),
 	}
 	return def, el.errs
+}
+
+func (el *elab) polyError(name string, sp source.Span, ty types.Type) {
+	p := types.NewPrinter()
+	el.errs = append(el.errs, diag.Errorf(sp, "UNSUPPORTED POLYMORPHISM",
+		"I inferred this type for `%s`:\n\n    %s\n\nType variables mean polymorphism, which arrives in S5. For now add\na concrete annotation, like `%s : Int -> Int`.",
+		name, p.Type(el.ck.Sub.Apply(ty)), name))
 }
 
 // Expr elaborates one expression against the checker's solved types.
@@ -60,6 +86,24 @@ func Expr(e ast.Expr, ck *infer.Checker) (core.Expr, []diag.Error) {
 type elab struct {
 	ck   *infer.Checker
 	errs []diag.Error
+	tmp  int // fresh-name counter for spine temporaries, per Decl/Expr
+}
+
+// lambda nests a multi-parameter surface lambda into single-param Core
+// Lambdas, peeling one arrow per parameter off the (ground) function type.
+func (el *elab) lambda(params []ast.Param, body ast.Expr, funTy types.Type) core.Expr {
+	if len(params) == 0 {
+		return el.expr(body)
+	}
+	fn, ok := funTy.(*types.TFun)
+	if !ok {
+		panic("elaborate: lambda type is not a function type")
+	}
+	return &core.Lambda{
+		Param: params[0].Name,
+		Body:  el.lambda(params[1:], body, fn.Ret),
+		Ty:    fn,
+	}
 }
 
 func (el *elab) expr(e ast.Expr) core.Expr {
@@ -77,6 +121,11 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 	case *ast.StringLit:
 		return &core.StringLit{Val: e.Value, Ty: ty}
 	case *ast.Var:
+		// A worker name in first-class position (not an application head —
+		// spine.go intercepts those) eta-expands into its curried wrapper.
+		if arity, isWorker := el.ck.Workers[e.Name]; isWorker {
+			return el.curriedWorkerRef(e.Name, ty, arity)
+		}
 		return &core.VarRef{Name: e.Name, Ty: ty}
 	case *ast.Ctor:
 		switch e.Name {
@@ -93,9 +142,7 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 			el.checkPrintable(arg.Type(), e.Arg.Span())
 			return &core.Print{Arg: arg, Ty: ty}
 		}
-		// Inference rejects every other application in S1 (nothing has a
-		// function type), and elaboration only runs on clean programs.
-		panic("elaborate: core.App production arrives in S3")
+		return el.app(e)
 	case *ast.Neg:
 		return el.fold(&core.Neg{Operand: el.expr(e.Operand), Ty: ty})
 	case *ast.If:
@@ -109,13 +156,31 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		l, r := el.expr(e.L), el.expr(e.R)
 		el.checkOperands(e, l.Type())
 		return el.fold(&core.BinOp{Op: e.Op, Ty: ty, L: l, R: r})
+	case *ast.Lambda:
+		return el.lambda(e.Params, e.Body, ty)
 	case *ast.Block:
 		// Fold bindings into a right-nested Let chain; every level carries
 		// the block's (result) type. RHSs elaborate in source order so
-		// defaulting is deterministic.
+		// defaulting is deterministic. Local functions become (possibly
+		// recursive) Lets of nested Lambdas.
 		lets := make([]*core.Let, len(e.Binds))
 		for i := range e.Binds {
-			lets[i] = &core.Let{Name: e.Binds[i].Name, Rhs: el.expr(e.Binds[i].Body)}
+			bind := &e.Binds[i]
+			bindTy := el.ck.BindTypes[bind]
+			if v := el.ck.FreeGeneralVar(bindTy); v != nil {
+				el.polyError(bind.Name, bind.NameSpan, bindTy)
+			}
+			var rhs core.Expr
+			if len(bind.Params) > 0 {
+				rhs = el.lambda(bind.Params, bind.Body, el.zonkDefault(bindTy))
+			} else {
+				rhs = el.expr(bind.Body)
+			}
+			lets[i] = &core.Let{
+				Name: bind.Name,
+				Rhs:  rhs,
+				Rec:  len(bind.Params) > 0 && core.Mentions(rhs, bind.Name),
+			}
 		}
 		body := el.expr(e.Result)
 		for i := len(lets) - 1; i >= 0; i-- {

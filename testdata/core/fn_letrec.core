@@ -1,0 +1,3 @@
+(core
+  (def v Int (letrec go Int (lam n Int -> Int (if Int (binop < Bool (var n Int) (int 1 Int)) (int 0 Int) (binop + Int (var n Int) (app/value (var go Int -> Int) (binop - Int (var n Int) (int 1 Int)) Int)))) (app/value (var go Int -> Int) (int 4 Int) Int)))
+  (def main Int (var v Int)))

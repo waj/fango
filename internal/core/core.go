@@ -11,9 +11,10 @@ type Prog struct {
 }
 
 type Def struct {
-	Name string
-	Type types.Type
-	Body Expr
+	Name   string
+	Type   types.Type // the full curried fango type
+	Params []string   // non-empty ⇒ worker (§8.2); uncurried Go signature = peeling len(Params) arrows off Type
+	Body   Expr
 }
 
 type Expr interface {
@@ -63,12 +64,24 @@ type Print struct {
 
 // Let is one block binding (§3.6): bind Name to Rhs, continue with Body.
 // Elaboration folds a Block's bindings into a right-nested Let chain;
-// bindings evaluate eagerly in order in both backends.
+// bindings evaluate eagerly in order in both backends. Rec marks a
+// self-recursive local function (Rhs must be a Lambda; codegen emits the
+// declare-then-assign idiom, eval ties the frame cycle).
 type Let struct {
 	Name string
 	Rhs  Expr
 	Body Expr
+	Rec  bool
 	Ty   types.Type // == Body.Type(), linted
+}
+
+// Lambda is one currying step: exactly one parameter, mirroring the
+// compositional type mapping T⟦a->b⟧ = func(A) B — one Go func literal,
+// one interpreter closure. Multi-parameter surface lambdas nest.
+type Lambda struct {
+	Param string
+	Body  Expr
+	Ty    types.Type // a TFun; Ty.Ret == Body type
 }
 
 type VarRef struct {
@@ -112,6 +125,7 @@ func (*BinOp) isExpr()     {}
 func (*If) isExpr()        {}
 func (*Print) isExpr()     {}
 func (*Let) isExpr()       {}
+func (*Lambda) isExpr()    {}
 func (*App) isExpr()       {}
 
 func (e *IntLit) Type() types.Type    { return e.Ty }
@@ -124,4 +138,54 @@ func (e *BinOp) Type() types.Type     { return e.Ty }
 func (e *If) Type() types.Type        { return e.Ty }
 func (e *Print) Type() types.Type     { return e.Ty }
 func (e *Let) Type() types.Type       { return e.Ty }
+func (e *Lambda) Type() types.Type    { return e.Ty }
 func (e *App) Type() types.Type       { return e.Ty }
+
+// Mentions reports whether name occurs in e. No-shadowing makes a plain
+// occurrence check exact: nothing inside e can rebind name. Used by the
+// elaborator (Rec detection) and codegen (unused-binding keep-alives).
+func Mentions(e Expr, name string) bool {
+	switch e := e.(type) {
+	case *VarRef:
+		return e.Name == name
+	case *Neg:
+		return Mentions(e.Operand, name)
+	case *BinOp:
+		return Mentions(e.L, name) || Mentions(e.R, name)
+	case *If:
+		return Mentions(e.Cond, name) || Mentions(e.Then, name) || Mentions(e.Else, name)
+	case *Print:
+		return Mentions(e.Arg, name)
+	case *Let:
+		return Mentions(e.Rhs, name) || Mentions(e.Body, name)
+	case *Lambda:
+		return Mentions(e.Body, name)
+	case *App:
+		if Mentions(e.Callee, name) {
+			return true
+		}
+		for _, a := range e.Args {
+			if Mentions(a, name) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// PeelFun splits n arrows off a curried type, returning the argument types
+// and the remainder. Panics if t has fewer arrows — a linted invariant.
+func PeelFun(t types.Type, n int) ([]types.Type, types.Type) {
+	args := make([]types.Type, 0, n)
+	for range n {
+		fn, ok := t.(*types.TFun)
+		if !ok {
+			panic("core.PeelFun: not enough arrows — arity out of sync with type")
+		}
+		args = append(args, fn.Arg)
+		t = fn.Ret
+	}
+	return args, t
+}

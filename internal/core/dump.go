@@ -15,7 +15,12 @@ func Dump(p *Prog) string {
 	var b strings.Builder
 	b.WriteString("(core")
 	for _, d := range p.Defs {
-		fmt.Fprintf(&b, "\n  (def %s %s %s)", d.Name, types.Show(d.Type), DumpExpr(d.Body))
+		if len(d.Params) > 0 {
+			fmt.Fprintf(&b, "\n  (def %s (params %s) %s %s)",
+				d.Name, strings.Join(d.Params, " "), types.Show(d.Type), DumpExpr(d.Body))
+		} else {
+			fmt.Fprintf(&b, "\n  (def %s %s %s)", d.Name, types.Show(d.Type), DumpExpr(d.Body))
+		}
 	}
 	b.WriteString(")\n")
 	return b.String()
@@ -38,7 +43,13 @@ func DumpExpr(e Expr) string {
 	case *Print:
 		return fmt.Sprintf("(print %s)", DumpExpr(e.Arg))
 	case *Let:
-		return fmt.Sprintf("(let %s %s %s %s)", e.Name, types.Show(e.Ty), DumpExpr(e.Rhs), DumpExpr(e.Body))
+		form := "let"
+		if e.Rec {
+			form = "letrec"
+		}
+		return fmt.Sprintf("(%s %s %s %s %s)", form, e.Name, types.Show(e.Ty), DumpExpr(e.Rhs), DumpExpr(e.Body))
+	case *Lambda:
+		return fmt.Sprintf("(lam %s %s %s)", e.Param, types.Show(e.Ty), DumpExpr(e.Body))
 	case *VarRef:
 		if len(e.TyArgs) > 0 {
 			args := make([]string, len(e.TyArgs))

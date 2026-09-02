@@ -1,0 +1,5 @@
+add x y = x + y
+inc = add 1
+w = 3
+compound = add (w * 2)
+main = compound 4

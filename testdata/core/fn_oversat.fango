@@ -1,0 +1,2 @@
+mk x = \y -> x + y
+main = mk 40 2

@@ -1,0 +1,3 @@
+(core
+  (def f Int -> Int (lam x Int -> Int (binop + Int (var x Int) (int 1 Int))))
+  (def main Int (app/value (var f Int -> Int) (int 41 Int) Int)))

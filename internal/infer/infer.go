@@ -88,6 +88,10 @@ type Checker struct {
 	// state like Ctors: populated at inference time (complete before
 	// elaboration, which fib's self-call requires), extended by the REPL.
 	Workers map[string]int
+
+	// BindTypes records each block binding's full solved type (a local
+	// function's curried type — ExprTypes only has its body's type).
+	BindTypes map[*ast.LocalBind]types.Type
 }
 
 func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
@@ -110,6 +114,7 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		},
 		PrintCalls: map[*ast.App]bool{},
 		Workers:    map[string]int{},
+		BindTypes:  map[*ast.LocalBind]types.Type{},
 	}
 }
 
@@ -434,6 +439,7 @@ func (g *generator) block(e *ast.Block) types.Type {
 				ty = annTy
 			}
 		}
+		g.ck.BindTypes[bind] = ty
 		g.locals.names[bind.Name] = ty
 	}
 	return g.expr(e.Result)

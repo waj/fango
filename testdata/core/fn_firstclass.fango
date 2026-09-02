@@ -1,0 +1,3 @@
+add x y = x + y
+apply2 f x = f (f x)
+main = apply2 (add 1) 5

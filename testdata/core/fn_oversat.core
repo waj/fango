@@ -1,0 +1,3 @@
+(core
+  (def mk (params x) Int -> Int -> Int (lam y Int -> Int (binop + Int (var x Int) (var y Int))))
+  (def main Int (app/value (app/worker (var mk Int -> Int -> Int) (int 40 Int) Int -> Int) (int 2 Int) Int)))
