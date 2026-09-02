@@ -1,0 +1,17 @@
+area =
+    r = 2.0
+    3.14159 * r * r
+area
+x : Int
+x = 4
+:type x
+r = 1
+area =
+    r = 5.0
+    r
+q =
+    x = 9
+    x + 1
+y : Float
+y = "no"
+:quit

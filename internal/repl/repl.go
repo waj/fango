@@ -122,9 +122,12 @@ func (s *Session) input(text string) inputResult {
 	return s.exprInput(toks, f)
 }
 
-// isDecl: `name = …` is a definition; anything else is an expression.
+// isDecl: `name = …` or `name : …` (an annotation opening a definition) is
+// a declaration; anything else is an expression. `==` lexes as its own
+// token, so comparisons still classify as expressions.
 func isDecl(toks []token.Token) bool {
-	return len(toks) >= 2 && toks[0].Kind == token.LIDENT && toks[1].Kind == token.EQ
+	return len(toks) >= 2 && toks[0].Kind == token.LIDENT &&
+		(toks[1].Kind == token.EQ || toks[1].Kind == token.COLON)
 }
 
 func (s *Session) declInput(toks []token.Token, f *source.File) inputResult {
@@ -141,18 +144,17 @@ func (s *Session) declInput(toks []token.Token, f *source.File) inputResult {
 	// Check the body BEFORE binding: a failed definition must not install
 	// a broken name into the session. REPL declarations never allow the
 	// print cheat — evaluate the expression at the prompt instead.
-	ty, inferErrs := s.ck.ExprWhere(vd.Body, false)
+	info, inferErrs := s.ck.DeclWhere(vd, false)
 	if len(inferErrs) > 0 {
 		diag.Render(s.out, inferErrs)
 		return inputDone
 	}
-	info := infer.DeclInfo{Name: vd.Name, NameSpan: vd.NameSpan, Type: ty, Body: vd.Body}
 	def, elabErrs := elaborate.Decl(info, s.ck)
 	if len(elabErrs) > 0 {
 		diag.Render(s.out, elabErrs)
 		return inputDone
 	}
-	s.ck.Env.Bind(vd.Name, types.Scheme{Body: ty})
+	s.ck.Env.Bind(vd.Name, types.Scheme{Body: info.Type})
 	s.env.Define(def.Name, def.Body)
 	if redefining {
 		s.gen++
