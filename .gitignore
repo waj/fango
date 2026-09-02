@@ -1,0 +1,10 @@
+# direnv
+.direnv/
+
+# Nix build outputs
+result
+result-*
+
+# Go
+/fango
+*.test
