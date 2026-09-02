@@ -37,13 +37,14 @@ func (p *Printer) Type(t Type) string {
 		if !t.Eff.Empty() {
 			arrow = "->{" + strings.Join(t.Eff.Labels, ", ") + "}"
 		}
-		return fmt.Sprintf("%s %s %s", p.atom(t.Arg), arrow, p.Type(t.Ret))
+		return fmt.Sprintf("%s %s %s", p.funArg(t.Arg), arrow, p.Type(t.Ret))
 	default:
 		panic(fmt.Sprintf("types.Printer: unhandled %T", t))
 	}
 }
 
-// atom parenthesizes types that would be ambiguous in argument position.
+// atom parenthesizes types that would be ambiguous as a type-application
+// argument: functions and nested applications (`Maybe (List a)`).
 func (p *Printer) atom(t Type) string {
 	switch t := t.(type) {
 	case *TFun:
@@ -52,6 +53,15 @@ func (p *Printer) atom(t Type) string {
 		if len(t.Args) > 0 {
 			return "(" + p.Type(t) + ")"
 		}
+	}
+	return p.Type(t)
+}
+
+// funArg parenthesizes only functions: type application binds tighter than
+// `->`, so `Maybe a -> a` needs no parens.
+func (p *Printer) funArg(t Type) string {
+	if _, ok := t.(*TFun); ok {
+		return "(" + p.Type(t) + ")"
 	}
 	return p.Type(t)
 }

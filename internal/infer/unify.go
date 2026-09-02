@@ -11,11 +11,13 @@ import (
 type Subst map[int]types.Type
 
 // walk resolves t through the substitution until it is not a bound
-// metavariable. It does not descend into structure.
+// metavariable. It does not descend into structure. Rigid vars are never
+// bound (their IDs are never Subst keys), and walk stops on them defensively
+// so a stray write could not silently solve a skolem.
 func (s Subst) walk(t types.Type) types.Type {
 	for {
 		v, ok := t.(*types.TVar)
-		if !ok {
+		if !ok || v.Rigid {
 			return t
 		}
 		bound, ok := s[v.ID]
@@ -63,11 +65,23 @@ type mismatch struct {
 func unify(a, b types.Type, sub Subst, bi *types.Builtins) *mismatch {
 	a, b = sub.walk(a), sub.walk(b)
 
-	if av, ok := a.(*types.TVar); ok {
+	// Metas bind; rigid vars (skolems, scheme-bound vars) are atomic: equal
+	// only to themselves, a mismatch against everything else — the direction
+	// that keeps an annotation's variables fully general (§7.2).
+	if av, ok := a.(*types.TVar); ok && !av.Rigid {
 		return bindVar(av, b, sub, bi)
 	}
-	if bv, ok := b.(*types.TVar); ok {
+	if bv, ok := b.(*types.TVar); ok && !bv.Rigid {
 		return bindVar(bv, a, sub, bi)
+	}
+	if av, ok := a.(*types.TVar); ok {
+		if bv, ok := b.(*types.TVar); ok && bv.ID == av.ID {
+			return nil
+		}
+		return &mismatch{a: a, b: b, note: "a type variable from an annotation must stay fully general"}
+	}
+	if _, ok := b.(*types.TVar); ok {
+		return &mismatch{a: a, b: b, note: "a type variable from an annotation must stay fully general"}
 	}
 
 	switch a := a.(type) {
@@ -117,11 +131,17 @@ func bindVar(v *types.TVar, t types.Type, sub Subst, bi *types.Builtins) *mismat
 		case *types.TVar:
 			if t.Kind == types.Number {
 				sub[v.ID] = t
-			} else {
-				// Keep the Number kind: bind the general var to the
-				// number var, not the other way around.
-				sub[t.ID] = v
+				return nil
 			}
+			if t.Rigid {
+				// A General rigid var is an annotation variable claiming
+				// full generality — a Number obligation cannot narrow it
+				// (the reverse binding would silently solve the skolem).
+				return &mismatch{a: v, b: t, note: "the annotation says this can be any type, but it is used as a number"}
+			}
+			// Keep the Number kind: bind the general var to the
+			// number var, not the other way around.
+			sub[t.ID] = v
 			return nil
 		case *types.TCon:
 			if t.Unique == bi.Int.Unique || t.Unique == bi.Float.Unique {
@@ -141,7 +161,7 @@ func occurs(v *types.TVar, t types.Type, sub Subst) bool {
 	t = sub.walk(t)
 	switch t := t.(type) {
 	case *types.TVar:
-		return t.ID == v.ID
+		return !t.Rigid && t.ID == v.ID
 	case *types.TCon:
 		for _, a := range t.Args {
 			if occurs(v, a, sub) {

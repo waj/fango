@@ -106,6 +106,17 @@ type Checker struct {
 	// needs pattern-variable types after solving, exactly as ExprTypes
 	// serves expressions.
 	PatTypes map[ast.Pattern]types.Type
+
+	// BindSchemes records each block binding's generalized scheme —
+	// elaboration lifts a binding whose scheme quantifies (§8.4).
+	BindSchemes map[*ast.LocalBind]types.Scheme
+
+	// AllowPoly is the S5 staging flag: the polymorphism machinery
+	// (generalization, parameterized types, annotation variables) is live
+	// only when set. Off, the checker behaves exactly as S4 shipped, and the
+	// staged "arrives with polymorphism (S5)" errors fire. The flag — and
+	// every staged error behind it — is deleted when S5 lights up end to end.
+	AllowPoly bool
 }
 
 func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
@@ -124,10 +135,11 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 			"Bool":   b.Bool,
 			"()":     b.Unit,
 		},
-		PrintCalls: map[*ast.App]bool{},
-		Workers:    map[string]int{},
-		BindTypes:  map[*ast.LocalBind]types.Type{},
-		PatTypes:   map[ast.Pattern]types.Type{},
+		PrintCalls:  map[*ast.App]bool{},
+		Workers:     map[string]int{},
+		BindTypes:   map[*ast.LocalBind]types.Type{},
+		PatTypes:    map[ast.Pattern]types.Type{},
+		BindSchemes: map[*ast.LocalBind]types.Scheme{},
 	}
 	// Bool is an ordinary ADT in the checker (§7.2) — patterns, case
 	// exhaustiveness, and the ctor table treat it like any declared type.
@@ -148,6 +160,13 @@ type DeclInfo struct {
 	Params   []ast.Param
 	Type     types.Type // solved but not zonked; apply ck.Sub for the final type
 	Body     ast.Expr
+
+	// Scheme is the declaration's generalized type: Scheme.Vars are the
+	// definition's type parameters (elaboration's Def.TyParams). Quantified
+	// metas were bound to Scheme.Vars in ck.Sub at generalization time, so
+	// zonked occurrence types mention the scheme's own rigid vars. With
+	// AllowPoly off this is always the trivial Scheme{Body}.
+	Scheme types.Scheme
 }
 
 // Module checks declarations: type headers first (so types may be mutually
@@ -180,6 +199,7 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 			}
 		}
 	}
+	errs = append(errs, ck.checkRegularity(adts)...)
 	for _, d := range m.Decls {
 		vd, ok := d.(*ast.ValueDecl)
 		if !ok {
@@ -205,23 +225,35 @@ func (ck *Checker) TypeDecl(td *ast.TypeDecl) []diag.Error {
 	if adt == nil {
 		return errs
 	}
-	return append(errs, ck.declareTypeCtors(td, adt, false)...)
+	errs = append(errs, ck.declareTypeCtors(td, adt, false)...)
+	return append(errs, ck.checkRegularity(map[*ast.TypeDecl]*types.ADTInfo{td: adt})...)
 }
 
-// declareTypeHeader registers the type's name and unique — before any
-// constructor field resolves, so recursive and mutually recursive types
-// work. Returns nil for declarations rejected wholesale (type parameters).
+// declareTypeHeader registers the type's name, unique, and parameters —
+// before any constructor field resolves, so recursive and mutually recursive
+// types work. Returns nil for declarations rejected wholesale.
 func (ck *Checker) declareTypeHeader(td *ast.TypeDecl) (*types.ADTInfo, []diag.Error) {
-	if len(td.Params) > 0 {
+	if len(td.Params) > 0 && !ck.AllowPoly {
 		return nil, []diag.Error{diag.Errorf(td.NameSpan, "UNSUPPORTED TYPE PARAMETERS",
 			"`%s` declares type parameters — parameterized types arrive with\npolymorphism (S5). For now types must be monomorphic.", td.Name)}
 	}
+	var errs []diag.Error
+	params := make([]*types.TVar, len(td.Params))
+	seen := map[string]bool{}
+	for i, p := range td.Params {
+		if seen[p.Name] {
+			errs = append(errs, diag.Errorf(p.Sp, "SHADOWING",
+				"The type parameter `%s` appears twice in `type %s` — parameters\nmust be distinct.", p.Name, td.Name))
+		}
+		seen[p.Name] = true
+		params[i] = ck.Sup.FreshRigid(types.General)
+	}
 	con := &types.TCon{Unique: ck.Sup.NextUnique(), Name: td.Name}
-	adt := &types.ADTInfo{Con: con}
+	adt := &types.ADTInfo{Con: con, Params: params}
 	ck.TypeNames[td.Name] = con
 	ck.ADTs[con.Unique] = adt
 	ck.ADTOrder = append(ck.ADTOrder, adt)
-	return adt, nil
+	return adt, errs
 }
 
 // declareTypeCtors resolves constructor fields and installs the
@@ -229,6 +261,22 @@ func (ck *Checker) declareTypeHeader(td *ast.TypeDecl) (*types.ADTInfo, []diag.E
 // REPL path rebinds them (generational, like values).
 func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch bool) []diag.Error {
 	var errs []diag.Error
+	// Field types resolve in the closed scope of the declaration's
+	// parameters; the constructors' result type is the type applied to its
+	// own parameters (`Just : a -> Maybe a`).
+	paramNames := make([]string, len(td.Params))
+	for i, p := range td.Params {
+		paramNames[i] = p.Name
+	}
+	scope := newCtorScope(paramNames, adt.Params)
+	result := adt.Con
+	if len(adt.Params) > 0 {
+		args := make([]types.Type, len(adt.Params))
+		for i, p := range adt.Params {
+			args[i] = p
+		}
+		result = &types.TCon{Unique: adt.Con.Unique, Name: adt.Con.Name, Args: args}
+	}
 	for _, c := range td.Ctors {
 		if prev, dup := ck.Ctors[c.Name]; dup && batch {
 			errs = append(errs, diag.Errorf(c.NameSpan, "MULTIPLE DEFINITIONS",
@@ -243,14 +291,14 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 		}
 		fields := make([]types.Type, len(c.Args))
 		for j, a := range c.Args {
-			t, fieldErrs := ck.ResolveTypeExpr(a)
+			t, fieldErrs := ck.ResolveTypeExpr(a, scope)
 			errs = append(errs, fieldErrs...)
 			if t == nil {
 				t = ck.B.Unit // hole: errs is non-empty, elaboration never runs
 			}
 			fields[j] = t
 		}
-		info := &types.CtorInfo{Name: c.Name, Index: len(adt.Ctors), Fields: fields, Result: adt.Con}
+		info := &types.CtorInfo{Name: c.Name, Index: len(adt.Ctors), Fields: fields, Result: result}
 		adt.Ctors = append(adt.Ctors, info)
 		ck.Ctors[c.Name] = info
 	}
@@ -270,7 +318,7 @@ func (ck *Checker) Decl(d *ast.ValueDecl) (DeclInfo, []diag.Error) {
 // BindDecl installs a checked declaration: the environment binding plus
 // worker-table upkeep (redefining a worker as a value evicts its arity).
 func (ck *Checker) BindDecl(info DeclInfo) {
-	ck.Env.Bind(info.Name, types.Scheme{Body: info.Type})
+	ck.Env.Bind(info.Name, info.Scheme)
 	if len(info.Params) > 0 {
 		ck.Workers[info.Name] = len(info.Params)
 	} else {
@@ -303,11 +351,12 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []dia
 	errs = append(errs, solveErrs...)
 
 	if d.Ann != nil {
-		annTy, annErrs := ck.ResolveTypeExpr(d.Ann.Type)
+		// Skolemize-and-unify (§7.2): the annotation's variables resolve to
+		// fresh rigid skolems, atomic in unification, so an annotation
+		// claiming more polymorphism than the body delivers errors here.
+		annTy, annErrs := ck.ResolveTypeExpr(d.Ann.Type, ck.NewAnnScope())
 		errs = append(errs, annErrs...)
 		if annTy != nil {
-			// S5: skolemize quantified annotation variables here before
-			// unifying (skolemize-and-unify checking, §7.2).
 			c := Constraint{Left: annTy, Right: ty, Span: d.Body.Span(),
 				Why: Why{Kind: WhyAnnotation, Name: d.Name}}
 			sub, _, solveErrs := Solve([]Constraint{c}, nil, ck.Sub, ck.B)
@@ -316,7 +365,13 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []dia
 			ty = annTy
 		}
 	}
-	return DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body}, errs
+	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body}
+	if ck.AllowPoly {
+		info.Scheme = ck.generalize(ty, nil)
+	} else {
+		info.Scheme = types.Scheme{Body: ty}
+	}
+	return info, errs
 }
 
 // Expr checks an expression with prompt semantics (print allowed) — the
@@ -345,20 +400,21 @@ type generator struct {
 	errs       []diag.Error
 }
 
-// blockScope is a block's local bindings. The parent pointer is S3
-// readiness (nested function bodies); S2 depth never exceeds one.
+// blockScope is a block's local bindings, as schemes: parameters and
+// pre-bound recursive names are trivial (monotype) schemes, while generalized
+// block bindings quantify (S5) and instantiate per use like top-level names.
 type blockScope struct {
 	parent *blockScope
-	names  map[string]types.Type
+	names  map[string]types.Scheme
 }
 
-func (s *blockScope) lookup(name string) (types.Type, bool) {
+func (s *blockScope) lookup(name string) (types.Scheme, bool) {
 	for ; s != nil; s = s.parent {
 		if t, ok := s.names[name]; ok {
 			return t, true
 		}
 	}
-	return nil, false
+	return types.Scheme{}, false
 }
 
 // isPrintCheat reports whether a Var is the print builtin: the name
@@ -390,8 +446,8 @@ func (g *generator) expr(e ast.Expr) types.Type {
 			ty = g.ck.Sup.FreshVar(types.General)
 			break
 		}
-		if localTy, ok := g.locals.lookup(e.Name); ok {
-			ty = localTy
+		if localScheme, ok := g.locals.lookup(e.Name); ok {
+			ty = g.instantiate(localScheme)
 			break
 		}
 		scheme, ok := g.ck.Env.Lookup(e.Name)
@@ -410,7 +466,11 @@ func (g *generator) expr(e ast.Expr) types.Type {
 			ty = g.ck.Sup.FreshVar(types.General)
 			break
 		}
-		ty = info.ValueType()
+		fields, result := g.instantiateCtor(info)
+		ty = result
+		for i := len(fields) - 1; i >= 0; i-- {
+			ty = &types.TFun{Arg: fields[i], Ret: ty}
+		}
 	case *ast.App:
 		if g.isPrintCheat(e.Fn) {
 			if !g.allowPrint {
@@ -461,7 +521,7 @@ func (g *generator) expr(e ast.Expr) types.Type {
 		// into a function value (§10.5).
 		saved := g.allowPrint
 		g.allowPrint = false
-		scope := &blockScope{parent: g.locals, names: map[string]types.Type{}}
+		scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
 		g.locals = scope
 		paramTys := g.bindParams(scope, e.Params)
 		bodyTy := g.expr(e.Body)
@@ -486,7 +546,7 @@ func (g *generator) expr(e ast.Expr) types.Type {
 // no rollback and redefinition resolves self-references to the new body.
 func (g *generator) function(name string, nameSpan source.Span, params []ast.Param, body ast.Expr) types.Type {
 	self := g.ck.Sup.FreshVar(types.General)
-	scope := &blockScope{parent: g.locals, names: map[string]types.Type{name: self}}
+	scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{name: {Body: self}}}
 	g.locals = scope
 	defer func() { g.locals = scope.parent }()
 
@@ -513,7 +573,7 @@ func (g *generator) bindParams(scope *blockScope, params []ast.Param) []types.Ty
 				"The parameter `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", p.Name))
 		}
 		pv := g.ck.Sup.FreshVar(types.General)
-		scope.names[p.Name] = pv
+		scope.names[p.Name] = types.Scheme{Body: pv}
 		tys[i] = pv
 	}
 	return tys
@@ -523,7 +583,7 @@ func (g *generator) bindParams(scope *blockScope, params []ast.Param) []types.Ty
 // in principle (monomorphic until S5), scoped sequentially, with shadowing
 // forbidden against both earlier bindings and the top level.
 func (g *generator) block(e *ast.Block) types.Type {
-	g.locals = &blockScope{parent: g.locals, names: map[string]types.Type{}}
+	g.locals = &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
 	defer func() { g.locals = g.locals.parent }()
 
 	for i := range e.Binds {
@@ -542,20 +602,66 @@ func (g *generator) block(e *ast.Block) types.Type {
 		} else {
 			ty = g.expr(bind.Body)
 		}
+		var annVars []*types.TVar
 		if bind.Ann != nil {
-			annTy, annErrs := g.ck.ResolveTypeExpr(bind.Ann.Type)
+			// Skolemize-and-unify, as at the top level.
+			annScope := g.ck.NewAnnScope()
+			annTy, annErrs := g.ck.ResolveTypeExpr(bind.Ann.Type, annScope)
 			g.errs = append(g.errs, annErrs...)
 			if annTy != nil {
-				// S5: skolemize here, as at the top level.
 				g.cs = append(g.cs, Constraint{Left: annTy, Right: ty,
 					Span: bind.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: bind.Name}})
 				ty = annTy
+				annVars = annScope.Minted()
 			}
 		}
+		scheme := types.Scheme{Body: ty}
+		if g.ck.AllowPoly {
+			// Solve-at-binding (§7.2): discharge this binding's constraints
+			// into the substitution now, so generalization sees solved types
+			// and later bindings can use this one polymorphically.
+			g.solveHere()
+			// Skolem escape: this annotation's variables must not leak into
+			// enclosing bindings (that would grant the enclosing definition
+			// polymorphism its body doesn't have).
+			for _, sk := range annVars {
+				if g.scopeMentions(sk.ID) {
+					g.errs = append(g.errs, diag.Errorf(bind.Ann.Type.Span(), "ANNOTATION TOO GENERAL",
+						"The annotation for `%s` claims a type variable that the enclosing\ndefinition pins down — the annotation is more general than the body\nallows.", bind.Name))
+				}
+			}
+			scheme = g.ck.generalize(ty, g.scopeFreeIDs())
+		}
 		g.ck.BindTypes[bind] = ty
-		g.locals.names[bind.Name] = ty
+		g.ck.BindSchemes[bind] = scheme
+		g.locals.names[bind.Name] = scheme
 	}
 	return g.expr(e.Result)
+}
+
+// solveHere discharges the accumulated constraints into the checker's
+// substitution — the solve-at-binding point.
+func (g *generator) solveHere() {
+	if len(g.cs) == 0 {
+		return
+	}
+	sub, _, errs := Solve(g.cs, nil, g.ck.Sub, g.ck.B)
+	g.ck.Sub = sub
+	g.errs = append(g.errs, errs...)
+	g.cs = nil
+}
+
+// scopeMentions reports whether any enclosing local binding's zonked type
+// mentions the variable id.
+func (g *generator) scopeMentions(id int) bool {
+	for s := g.locals; s != nil; s = s.parent {
+		for _, sch := range s.names {
+			if g.ck.mentionsVar(sch.Body, id) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // caseExpr constrains a case: every pattern matches the scrutinee's type,
@@ -566,7 +672,7 @@ func (g *generator) caseExpr(e *ast.Case) types.Type {
 	resultTy := g.ck.Sup.FreshVar(types.General)
 	for i := range e.Branches {
 		br := &e.Branches[i]
-		scope := &blockScope{parent: g.locals, names: map[string]types.Type{}}
+		scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
 		g.locals = scope
 		patTy := g.pattern(br.Pattern, scope)
 		g.cs = append(g.cs, Constraint{
@@ -599,7 +705,7 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 				"The pattern variable `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", p.Name))
 		}
 		pv := g.ck.Sup.FreshVar(types.General)
-		scope.names[p.Name] = pv
+		scope.names[p.Name] = types.Scheme{Body: pv}
 		return pv
 	case *ast.PInt:
 		// Like integer literals: a `number` pattern (Int or Float).
@@ -618,21 +724,22 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 			}
 			return g.ck.Sup.FreshVar(types.General)
 		}
-		if len(p.Args) != len(info.Fields) {
+		fields, result := g.instantiateCtor(info)
+		if len(p.Args) != len(fields) {
 			g.errs = append(g.errs, diag.Errorf(p.Span(), "PATTERN ARITY",
-				"The `%s` constructor takes %d argument(s), but this pattern\ngives it %d.", p.Name, len(info.Fields), len(p.Args)))
+				"The `%s` constructor takes %d argument(s), but this pattern\ngives it %d.", p.Name, len(fields), len(p.Args)))
 			for _, a := range p.Args {
 				g.pattern(a, scope)
 			}
-			return info.Result
+			return result
 		}
 		for i, a := range p.Args {
 			argTy := g.pattern(a, scope)
 			g.cs = append(g.cs, Constraint{
-				Left: argTy, Right: info.Fields[i], Span: a.Span(), Why: Why{Kind: WhyPattern},
+				Left: argTy, Right: fields[i], Span: a.Span(), Why: Why{Kind: WhyPattern},
 			})
 		}
-		return info.Result
+		return result
 	default:
 		panic("infer: unhandled pattern node")
 	}
@@ -675,9 +782,38 @@ func (g *generator) binOp(e *ast.BinOp) types.Type {
 	}
 }
 
+// instantiate replaces a scheme's quantified variables with fresh metas
+// (kinds preserved) — each use site of a polymorphic name gets its own copy.
 func (g *generator) instantiate(s types.Scheme) types.Type {
-	if s.NumVars == 0 {
+	if len(s.Vars) == 0 {
 		return s.Body
 	}
-	panic("infer: polymorphic instantiation arrives in S5")
+	m := make(map[int]types.Type, len(s.Vars))
+	for _, v := range s.Vars {
+		m[v.ID] = g.ck.Sup.FreshVar(v.Kind)
+	}
+	return types.SubstRigid(s.Body, m)
+}
+
+// instantiateCtor returns a constructor's field and result types with the
+// owning type's parameters replaced by fresh metas — `Just : ∀a. a -> Maybe a`
+// used at a fresh `a` per occurrence, in expressions and patterns alike.
+func (g *generator) instantiateCtor(info *types.CtorInfo) ([]types.Type, types.Type) {
+	adt := g.ck.ADTs[info.Result.Unique]
+	if adt == nil || len(adt.Params) == 0 {
+		return info.Fields, info.Result
+	}
+	m := make(map[int]types.Type, len(adt.Params))
+	args := make([]types.Type, len(adt.Params))
+	for i, p := range adt.Params {
+		f := g.ck.Sup.FreshVar(p.Kind)
+		m[p.ID] = f
+		args[i] = f
+	}
+	fields := make([]types.Type, len(info.Fields))
+	for i, f := range info.Fields {
+		fields[i] = types.SubstRigid(f, m)
+	}
+	result := &types.TCon{Unique: info.Result.Unique, Name: info.Result.Name, Args: args}
+	return fields, result
 }
