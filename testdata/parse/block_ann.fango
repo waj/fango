@@ -1,0 +1,4 @@
+area =
+    r : Float
+    r = 2.0
+    r * r

@@ -42,7 +42,7 @@ func TestCheckOffside(t *testing.T) {
 func TestAtBranchCol(t *testing.T) {
 	var l layout
 	l.push(ctxDecl, 1)
-	l.push(ctxLet, 7)
+	l.push(ctxBlock, 7)
 	if !l.atBranchCol(source.Pos{Line: 3, Col: 7}) {
 		t.Error("col 7 should be at the branch column")
 	}

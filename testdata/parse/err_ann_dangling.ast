@@ -1,0 +1,13 @@
+(module
+  (def bar (int 1)))
+-- errors --
+-- MISSING DEFINITION ------------------- err_ann_dangling.fango
+
+The type annotation for `foo` must sit directly above its
+definition, like:
+
+    foo : Int
+    foo = 42
+
+2| bar = 1
+   ^^^

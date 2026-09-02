@@ -23,11 +23,17 @@ type parser struct {
 	pos  int
 	errs []diag.Error
 	lay  layout
+
+	// stmtStart is the index of a token allowed to sit exactly at the
+	// innermost layout column: a block statement's opening token (and, in
+	// S4, a case branch's first pattern token). Everywhere else, a token
+	// at the column is a sibling boundary, not expression content.
+	stmtStart int
 }
 
 // Parse parses a whole module.
 func Parse(toks []token.Token, f *source.File) (*ast.Module, []diag.Error) {
-	p := &parser{f: f, toks: toks}
+	p := &parser{f: f, toks: toks, stmtStart: -1}
 	p.lay.push(ctxDecl, 1)
 	m := &ast.Module{}
 	m.Header = p.parseHeader()
@@ -42,7 +48,7 @@ func Parse(toks []token.Token, f *source.File) (*ast.Module, []diag.Error) {
 // ParseExprInput parses a single expression covering the whole input — the
 // REPL's expression entry point. No column discipline applies.
 func ParseExprInput(toks []token.Token, f *source.File) (ast.Expr, []diag.Error) {
-	p := &parser{f: f, toks: toks}
+	p := &parser{f: f, toks: toks, stmtStart: -1}
 	p.lay.push(ctxDecl, 0) // column 0: nothing is ever offside
 	e := p.parseExpr(1)
 	if t := p.peek(); t.Kind != token.EOF && len(p.errs) == 0 {
@@ -111,11 +117,38 @@ func (p *parser) parseDecl() ast.Decl {
 	}
 	name := t
 	p.next()
+
+	var ann *ast.TypeAnn
+	if p.peekInExpr().Kind == token.COLON {
+		colon := p.next()
+		te := p.parseTypeExpr()
+		if te == nil {
+			p.recoverToTopLevel(false)
+			return nil
+		}
+		ann = &ast.TypeAnn{Type: te, Sp: colon.Span.Merge(te.Span())}
+		// The annotated definition must sit directly below.
+		nt := p.peek()
+		if nt.Kind == token.EOF {
+			p.errorAt(name.Span, TitleUnexpectedEOF,
+				"I see a type annotation for `"+name.Text+"` but no definition for it yet.")
+			return nil
+		}
+		if nt.Kind != token.LIDENT || nt.Text != name.Text || nt.Pos().Col != 1 {
+			p.errorAt(nt.Span, "MISSING DEFINITION",
+				"The type annotation for `"+name.Text+"` must sit directly above its\ndefinition, like:\n\n    "+name.Text+" : Int\n    "+name.Text+" = 42")
+			p.recoverToTopLevel(false)
+			return nil
+		}
+		p.next() // the repeated name
+	}
+
+	eqTok := p.peekInExpr()
 	if !p.expect(token.EQ, "I expect `=` after the name in a declaration.") {
 		p.recoverToTopLevel(false)
 		return nil
 	}
-	body := p.parseExpr(1)
+	body := p.parseDeclBody(eqTok)
 	if body == nil {
 		p.recoverToTopLevel(false)
 		return nil
@@ -125,7 +158,227 @@ func (p *parser) parseDecl() ast.Decl {
 			"The expression seemed complete, but then I ran into this.")
 		p.recoverToTopLevel(false)
 	}
-	return &ast.ValueDecl{Name: name.Text, NameSpan: name.Span, Body: body}
+	return &ast.ValueDecl{Name: name.Text, NameSpan: name.Span, Ann: ann, Body: body}
+}
+
+// parseDeclBody dispatches on where the body's first token sits (§3.6): on
+// the `=`'s line → inline expression; on a later, indented line → a block
+// whose statement column is that token's column.
+func (p *parser) parseDeclBody(eqTok token.Token) ast.Expr {
+	t := p.peek()
+	switch {
+	case t.Kind == token.EOF:
+		p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
+			"I got to the end of the input while still expecting an expression.")
+		return nil
+	case t.Pos().Line == eqTok.Pos().Line:
+		return p.parseExpr(1)
+	case t.Pos().Col == 1:
+		p.errorAt(p.prevSpan(), "SYNTAX PROBLEM",
+			"This declaration has no body — the next line starts a new\ndeclaration.")
+		return nil
+	default:
+		return p.parseBlock(t.Pos().Col)
+	}
+}
+
+type stmtKind int
+
+const (
+	stmtResult stmtKind = iota
+	stmtBind
+	stmtAnn
+	stmtLocalFn
+)
+
+// classifyStmt inspects the statement starting at the current token. The
+// lookahead is bounded by the offside rule — it never scans past a token at
+// or left of the block column, or `y =` + result + next binding would
+// misread as a local function definition.
+func (p *parser) classifyStmt(col int) stmtKind {
+	inBounds := func(i int) bool {
+		t := p.toks[i]
+		return t.Kind != token.EOF && t.Span.StartPos().Col > col
+	}
+	i := p.pos
+	if p.toks[i].Kind != token.LIDENT {
+		return stmtResult
+	}
+	if !inBounds(i + 1) {
+		return stmtResult
+	}
+	switch p.toks[i+1].Kind {
+	case token.EQ:
+		return stmtBind
+	case token.COLON:
+		return stmtAnn
+	case token.LIDENT:
+		j := i + 1
+		for inBounds(j) && p.toks[j].Kind == token.LIDENT {
+			j++
+		}
+		if inBounds(j) && p.toks[j].Kind == token.EQ {
+			return stmtLocalFn
+		}
+	}
+	return stmtResult
+}
+
+// parseBlock parses a statement block at the given column: `name = expr`
+// bindings (optionally annotated) followed by exactly one result expression.
+// Zero-binding blocks collapse to the plain result expression.
+func (p *parser) parseBlock(col int) ast.Expr {
+	p.lay.push(ctxBlock, col)
+	defer p.lay.pop()
+
+	var binds []ast.LocalBind
+	var pendingAnn *ast.TypeAnn
+	var pendingAnnName token.Token
+
+	for {
+		t := p.peek()
+		if t.Kind == token.EOF {
+			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
+				"This block has no result expression yet. A block is zero or more\n`name = …` bindings followed by one final expression.")
+			return nil
+		}
+		if t.Pos().Col < col {
+			if pendingAnn != nil {
+				p.errorAt(t.Span, "MISSING DEFINITION",
+					"The type annotation for `"+pendingAnnName.Text+"` must sit directly\nabove its binding.")
+				return nil
+			}
+			p.errorAt(t.Span, "SYNTAX PROBLEM",
+				"This block ended without a result expression. A block is zero or\nmore `name = …` bindings followed by one final expression.")
+			return nil
+		}
+
+		switch p.classifyStmt(col) {
+		case stmtBind:
+			nameT := p.next()
+			eqT := p.next()
+			if pendingAnn != nil && pendingAnnName.Text != nameT.Text {
+				p.errorAt(nameT.Span, "MISSING DEFINITION",
+					"The type annotation for `"+pendingAnnName.Text+"` must sit directly\nabove its binding, but this binds `"+nameT.Text+"`.")
+				return nil
+			}
+			rt := p.peek()
+			if rt.Kind == token.EOF {
+				p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
+					"This binding has no expression yet.")
+				return nil
+			}
+			if rt.Pos().Line != eqT.Pos().Line {
+				p.errorAt(rt.Span, "SYNTAX PROBLEM",
+					"A binding's expression must start on the same line as its `=`.\n(Nested blocks arrive with local functions in S3.)")
+				return nil
+			}
+			rhs := p.parseExpr(1)
+			if rhs == nil {
+				return nil
+			}
+			binds = append(binds, ast.LocalBind{
+				Name: nameT.Text, NameSpan: nameT.Span, Ann: pendingAnn, Body: rhs,
+			})
+			pendingAnn = nil
+
+		case stmtAnn:
+			nameT := p.next()
+			colon := p.next()
+			if pendingAnn != nil {
+				p.errorAt(nameT.Span, "MISSING DEFINITION",
+					"The type annotation for `"+pendingAnnName.Text+"` must sit directly\nabove its binding.")
+				return nil
+			}
+			te := p.parseTypeExpr()
+			if te == nil {
+				return nil
+			}
+			pendingAnn = &ast.TypeAnn{Type: te, Sp: colon.Span.Merge(te.Span())}
+			pendingAnnName = nameT
+
+		case stmtLocalFn:
+			p.errorAt(t.Span, "SYNTAX PROBLEM",
+				"This looks like a local function definition — those arrive in S3.\nFor now block bindings take no parameters.")
+			return nil
+
+		case stmtResult:
+			if pendingAnn != nil {
+				p.errorAt(t.Span, "MISSING DEFINITION",
+					"The type annotation for `"+pendingAnnName.Text+"` must sit directly\nabove its binding.")
+				return nil
+			}
+			p.stmtStart = p.pos // the opener may sit exactly at the block column
+			result := p.parseExpr(1)
+			if result == nil {
+				return nil
+			}
+			if nt := p.peek(); nt.Kind != token.EOF && nt.Pos().Col == col {
+				p.errorAt(nt.Span, "SYNTAX PROBLEM",
+					"The result expression must be the last statement in a block.")
+				return nil
+			}
+			if len(binds) == 0 {
+				return result
+			}
+			return &ast.Block{Binds: binds, Result: result}
+		}
+	}
+}
+
+// parseTypeExpr parses the surface type grammar: atoms and right-assoc `->`.
+func (p *parser) parseTypeExpr() ast.TypeExpr {
+	atom := p.parseTypeAtom()
+	if atom == nil {
+		return nil
+	}
+	if p.peekInExpr().Kind == token.ARROW {
+		p.next()
+		ret := p.parseTypeExpr()
+		if ret == nil {
+			return nil
+		}
+		return &ast.TFunExpr{Arg: atom, Ret: ret}
+	}
+	return atom
+}
+
+func (p *parser) parseTypeAtom() ast.TypeExpr {
+	t := p.peekInExpr()
+	switch t.Kind {
+	case token.UIDENT:
+		p.next()
+		return &ast.TName{Name: t.Text, Sp: t.Span}
+	case token.LIDENT:
+		p.next()
+		return &ast.TVarName{Name: t.Text, Sp: t.Span}
+	case token.LPAREN:
+		p.next()
+		if p.peekInExpr().Kind == token.RPAREN {
+			rp := p.next()
+			return &ast.TName{Name: "()", Sp: t.Span.Merge(rp.Span)}
+		}
+		inner := p.parseTypeExpr()
+		if inner == nil {
+			return nil
+		}
+		if !p.expect(token.RPAREN, "I was expecting a closing `)` in this type.") {
+			return nil
+		}
+		return inner
+	case token.EOF:
+		if p.peek().Kind == token.EOF {
+			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
+				"I got to the end of the input while reading a type.")
+		} else {
+			p.errorAt(p.prevSpan(), "SYNTAX PROBLEM", "This type annotation is unfinished.")
+		}
+		return nil
+	default:
+		p.errorAt(t.Span, "SYNTAX PROBLEM",
+			"I was expecting a type here, like `Int` or `Int -> Float`.")
+		return nil
+	}
 }
 
 type assocKind int
@@ -314,7 +567,7 @@ func (p *parser) peekInExpr() token.Token {
 	if t.Kind == token.EOF {
 		return t
 	}
-	if p.lay.checkOffside(t.Pos()) != offContinue {
+	if p.pos != p.stmtStart && p.lay.checkOffside(t.Pos()) != offContinue {
 		return token.Token{Kind: token.EOF, Span: t.Span}
 	}
 	return t

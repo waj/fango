@@ -26,9 +26,25 @@ func Dump(m *Module) string {
 func dumpDecl(d Decl) string {
 	switch d := d.(type) {
 	case *ValueDecl:
+		if d.Ann != nil {
+			return fmt.Sprintf("(def %s (ann %s) %s)", d.Name, DumpTypeExpr(d.Ann.Type), DumpExpr(d.Body))
+		}
 		return fmt.Sprintf("(def %s %s)", d.Name, DumpExpr(d.Body))
 	default:
 		panic(fmt.Sprintf("ast.dumpDecl: unhandled %T", d))
+	}
+}
+
+func DumpTypeExpr(t TypeExpr) string {
+	switch t := t.(type) {
+	case *TName:
+		return t.Name
+	case *TVarName:
+		return t.Name
+	case *TFunExpr:
+		return fmt.Sprintf("(-> %s %s)", DumpTypeExpr(t.Arg), DumpTypeExpr(t.Ret))
+	default:
+		panic(fmt.Sprintf("ast.DumpTypeExpr: unhandled %T", t))
 	}
 }
 
@@ -52,6 +68,18 @@ func DumpExpr(e Expr) string {
 		return fmt.Sprintf("(binop %s %s %s)", e.Op, DumpExpr(e.L), DumpExpr(e.R))
 	case *If:
 		return fmt.Sprintf("(if %s %s %s)", DumpExpr(e.Cond), DumpExpr(e.Then), DumpExpr(e.Else))
+	case *Block:
+		var b strings.Builder
+		b.WriteString("(block")
+		for _, bind := range e.Binds {
+			if bind.Ann != nil {
+				fmt.Fprintf(&b, " (bind %s (ann %s) %s)", bind.Name, DumpTypeExpr(bind.Ann.Type), DumpExpr(bind.Body))
+			} else {
+				fmt.Fprintf(&b, " (bind %s %s)", bind.Name, DumpExpr(bind.Body))
+			}
+		}
+		fmt.Fprintf(&b, " %s)", DumpExpr(e.Result))
+		return b.String()
 	default:
 		panic(fmt.Sprintf("ast.DumpExpr: unhandled %T", e))
 	}

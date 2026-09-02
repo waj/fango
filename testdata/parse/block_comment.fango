@@ -1,0 +1,7 @@
+v =
+  -- leading comment
+  a = 1
+
+  {- between statements -}
+  b = 2
+  a + b -- trailing

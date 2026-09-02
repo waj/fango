@@ -1,0 +1,2 @@
+(module
+  (def area (block (bind r (ann Float) (float 2)) (binop * (var r) (var r)))))

@@ -1,0 +1,4 @@
+f : Int -> Int -> Float
+f = 1
+g : (Int -> Int) -> Int
+g = 2

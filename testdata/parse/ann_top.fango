@@ -1,0 +1,4 @@
+x : Int
+x = 42
+main : ()
+main = print x

@@ -1,0 +1,8 @@
+(module)
+-- errors --
+-- SYNTAX PROBLEM ----------------- err_block_after_result.fango
+
+The result expression must be the last statement in a block.
+
+4|     b = 2
+       ^

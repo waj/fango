@@ -54,6 +54,58 @@ type If struct {
 	Sp               source.Span // the `if` keyword
 }
 
+// Block is a statement-style body (§3.6): binding lines followed by one
+// result expression. The parser collapses zero-binding blocks to the plain
+// result expression, so a Block always has at least one binding.
+type Block struct {
+	Binds  []LocalBind
+	Result Expr
+}
+
+type LocalBind struct {
+	Name     string
+	NameSpan source.Span
+	Ann      *TypeAnn // nil when unannotated
+	Body     Expr
+}
+
+// TypeAnn is a `name : Type` annotation line attached to the definition
+// directly below it.
+type TypeAnn struct {
+	Type TypeExpr
+	Sp   source.Span // colon through the end of the type
+}
+
+// TypeExpr is the surface type grammar: ground names, `()`, `->` arrows
+// (right-associative), and type variables (parsed now, rejected until
+// polymorphism lands in S5).
+type TypeExpr interface {
+	isTypeExpr()
+	Span() source.Span
+}
+
+type TName struct {
+	Name string // "Int", "Bool", … — "()" for unit
+	Sp   source.Span
+}
+
+type TVarName struct {
+	Name string // lowercase: a type variable
+	Sp   source.Span
+}
+
+type TFunExpr struct {
+	Arg, Ret TypeExpr
+}
+
+func (*TName) isTypeExpr()    {}
+func (*TVarName) isTypeExpr() {}
+func (*TFunExpr) isTypeExpr() {}
+
+func (t *TName) Span() source.Span    { return t.Sp }
+func (t *TVarName) Span() source.Span { return t.Sp }
+func (t *TFunExpr) Span() source.Span { return t.Arg.Span().Merge(t.Ret.Span()) }
+
 // BinOp stays a distinct node rather than desugaring to App: inference
 // special-cases numeric operators, and errors should point at the operator.
 type BinOp struct {
@@ -71,6 +123,7 @@ func (*App) isExpr()       {}
 func (*Neg) isExpr()       {}
 func (*BinOp) isExpr()     {}
 func (*If) isExpr()        {}
+func (*Block) isExpr()     {}
 
 func (e *IntLit) Span() source.Span    { return e.Sp }
 func (e *FloatLit) Span() source.Span  { return e.Sp }
@@ -81,12 +134,14 @@ func (e *App) Span() source.Span       { return e.Fn.Span().Merge(e.Arg.Span()) 
 func (e *Neg) Span() source.Span       { return e.Sp }
 func (e *BinOp) Span() source.Span     { return e.L.Span().Merge(e.R.Span()) }
 func (e *If) Span() source.Span        { return e.Sp.Merge(e.Else.Span()) }
+func (e *Block) Span() source.Span     { return e.Binds[0].NameSpan.Merge(e.Result.Span()) }
 
 type Decl interface{ isDecl() }
 
 type ValueDecl struct {
 	Name     string
 	NameSpan source.Span
+	Ann      *TypeAnn // nil when unannotated
 	Body     Expr
 }
 
