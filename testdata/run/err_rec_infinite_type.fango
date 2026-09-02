@@ -1,0 +1,2 @@
+f x = f
+main = print (f 1)

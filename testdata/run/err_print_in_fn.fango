@@ -1,0 +1,2 @@
+shout s = print s
+main = shout "hi"

@@ -12,6 +12,9 @@ import (
 // backends (DESIGN.md §9.6 hard rule). Strings render as source literals
 // (quoted, escaped) at the prompt; `print` outputs them raw.
 func Show(v Value, ty types.Type, b *types.Builtins) string {
+	if _, isFn := ty.(*types.TFun); isFn {
+		return "<function>"
+	}
 	if con, ok := ty.(*types.TCon); ok && len(con.Args) == 0 {
 		switch con.Unique {
 		case b.Int.Unique:

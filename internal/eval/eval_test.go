@@ -213,13 +213,74 @@ func TestSwitchTotality(t *testing.T) {
 		&core.If{Cond: &core.BoolLit{Val: true, Ty: bt}, Then: one, Else: one, Ty: it},
 		&core.Print{Arg: one, Ty: ut},
 		&core.Let{Name: "v", Rhs: one, Body: one, Ty: it},
-		&core.App{CalleeKind: core.Worker, Ty: it},
+		&core.Lambda{Param: "x", Body: one, Ty: &types.TFun{Arg: it, Ret: it}},
+		&core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: "nope", Ty: it}, Ty: it},
 	}
 	for _, n := range nodes {
 		_, err := Eval(context.Background(), n, NewEnv(), io.Discard)
 		if err != nil && strings.Contains(err.Error(), "unhandled Core node") {
 			t.Errorf("%T hit the unhandled fallback — add it to the interpreter switch", n)
 		}
+	}
+}
+
+func TestWorkersAndClosures(t *testing.T) {
+	it := intTy()
+	fnTy := &types.TFun{Arg: it, Ret: it}
+	env := NewEnv()
+	// add x y = x + y (worker, arity 2)
+	env.DefineWorker(&core.Def{
+		Name: "add", Params: []string{"x", "y"},
+		Type: &types.TFun{Arg: it, Ret: fnTy},
+		Body: &core.BinOp{Op: "+", Ty: it,
+			L: &core.VarRef{Name: "x", Ty: it},
+			R: &core.VarRef{Name: "y", Ty: it}},
+	})
+	// Saturated direct call: add 40 2.
+	sat := &core.App{CalleeKind: core.Worker,
+		Callee: &core.VarRef{Name: "add", Ty: &types.TFun{Arg: it, Ret: fnTy}},
+		Args:   []core.Expr{&core.IntLit{Val: 40, Ty: it}, &core.IntLit{Val: 2, Ty: it}},
+		Ty:     it}
+	if v, err := Eval(context.Background(), sat, env, io.Discard); err != nil || v != int64(42) {
+		t.Errorf("saturated: got %v, %v", v, err)
+	}
+	// Partial via eta-expansion: (\_w0 -> add 1 _w0) applied to 41.
+	partial := &core.Lambda{Param: "_w0", Ty: fnTy,
+		Body: &core.App{CalleeKind: core.Worker,
+			Callee: &core.VarRef{Name: "add", Ty: &types.TFun{Arg: it, Ret: fnTy}},
+			Args:   []core.Expr{&core.IntLit{Val: 1, Ty: it}, &core.VarRef{Name: "_w0", Ty: it}},
+			Ty:     it}}
+	call := &core.App{CalleeKind: core.Value, Callee: partial,
+		Args: []core.Expr{&core.IntLit{Val: 41, Ty: it}}, Ty: it}
+	if v, err := Eval(context.Background(), call, env, io.Discard); err != nil || v != int64(42) {
+		t.Errorf("partial: got %v, %v", v, err)
+	}
+}
+
+func TestRecursiveLet(t *testing.T) {
+	it := intTy()
+	bt := boolTy()
+	fnTy := &types.TFun{Arg: it, Ret: it}
+	// go n = if n < 1 then 0 else n + go (n - 1);  go 4 == 10
+	lam := &core.Lambda{Param: "n", Ty: fnTy,
+		Body: &core.If{Ty: it,
+			Cond: &core.BinOp{Op: "<", Ty: bt,
+				L: &core.VarRef{Name: "n", Ty: it}, R: &core.IntLit{Val: 1, Ty: it}},
+			Then: &core.IntLit{Val: 0, Ty: it},
+			Else: &core.BinOp{Op: "+", Ty: it,
+				L: &core.VarRef{Name: "n", Ty: it},
+				R: &core.App{CalleeKind: core.Value,
+					Callee: &core.VarRef{Name: "go", Ty: fnTy},
+					Args: []core.Expr{&core.BinOp{Op: "-", Ty: it,
+						L: &core.VarRef{Name: "n", Ty: it},
+						R: &core.IntLit{Val: 1, Ty: it}}},
+					Ty: it}}}}
+	e := &core.Let{Name: "go", Rec: true, Rhs: lam, Ty: it,
+		Body: &core.App{CalleeKind: core.Value,
+			Callee: &core.VarRef{Name: "go", Ty: fnTy},
+			Args:   []core.Expr{&core.IntLit{Val: 4, Ty: it}}, Ty: it}}
+	if v := run(t, e); v != int64(10) {
+		t.Errorf("letrec: got %v, want 10", v)
 	}
 }
 

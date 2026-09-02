@@ -35,9 +35,20 @@ type Cell struct {
 	forcing bool
 }
 
-// Env holds top-level cells.
+// Closure is the interpreter's only function value: one currying step,
+// mirroring core.Lambda. Workers are applied directly (App{Worker}) and
+// never materialize as values — elaboration eta-expanded every first-class
+// use, so *Partial from the §9.5 sketch is not needed.
+type Closure struct {
+	Param string
+	Body  core.Expr
+	Env   *Frame
+}
+
+// Env holds top-level cells and workers.
 type Env struct {
-	cells map[string]*Cell
+	cells   map[string]*Cell
+	workers map[string]*core.Def
 }
 
 // Frame holds block-local bindings (§3.6) — eager values, unlike the lazy
@@ -56,17 +67,32 @@ func (f *Frame) lookup(name string) (Value, bool) {
 	return nil, false
 }
 
-func NewEnv() *Env { return &Env{cells: map[string]*Cell{}} }
+func NewEnv() *Env {
+	return &Env{cells: map[string]*Cell{}, workers: map[string]*core.Def{}}
+}
 
-// Define installs (or replaces — REPL redefinition) a top-level binding.
+// Define installs (or replaces — REPL redefinition) a top-level value
+// binding, evicting any worker of the same name.
 func (e *Env) Define(name string, body core.Expr) {
 	e.cells[name] = &Cell{Body: body}
+	delete(e.workers, name)
+}
+
+// DefineWorker installs (or replaces) a top-level function definition.
+func (e *Env) DefineWorker(d *core.Def) {
+	e.workers[d.Name] = d
+	delete(e.cells, d.Name)
 }
 
 // DefineProg installs every definition of a Core program.
 func (e *Env) DefineProg(p *core.Prog) {
-	for _, d := range p.Defs {
-		e.Define(d.Name, d.Body)
+	for i := range p.Defs {
+		d := &p.Defs[i]
+		if len(d.Params) > 0 {
+			e.DefineWorker(d)
+		} else {
+			e.Define(d.Name, d.Body)
+		}
 	}
 }
 
@@ -117,12 +143,26 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		}
 		return in.force(e.Name)
 	case *core.Let:
+		if e.Rec {
+			// A self-recursive local function: build the closure over its
+			// own frame, then install it — the frame ties the cycle,
+			// mirroring codegen's declare-then-assign idiom.
+			lam, ok := e.Rhs.(*core.Lambda)
+			if !ok {
+				return nil, fmt.Errorf("eval: recursive Let `%s` without a Lambda RHS", e.Name)
+			}
+			frame := &Frame{parent: fr, vars: map[string]Value{}}
+			frame.vars[e.Name] = &Closure{Param: lam.Param, Body: lam.Body, Env: frame}
+			return in.eval(e.Body, frame)
+		}
 		// Eager, in order — identical to the compiled backend's locals.
 		v, err := in.eval(e.Rhs, fr)
 		if err != nil {
 			return nil, err
 		}
 		return in.eval(e.Body, &Frame{parent: fr, vars: map[string]Value{e.Name: v}})
+	case *core.Lambda:
+		return &Closure{Param: e.Param, Body: e.Body, Env: fr}, nil
 	case *core.Neg:
 		v, err := in.eval(e.Operand, fr)
 		if err != nil {
@@ -180,8 +220,48 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		}
 		return struct{}{}, nil
 	case *core.App:
-		// Unreachable until elaboration produces App nodes.
-		return nil, fmt.Errorf("eval: core.App arrives in S3")
+		switch e.CalleeKind {
+		case core.Worker:
+			// Saturation was resolved in elaboration; anything off here is
+			// an internal error, not a user program's fault.
+			ref := e.Callee.(*core.VarRef)
+			def, ok := in.env.workers[ref.Name]
+			if !ok {
+				return nil, fmt.Errorf("eval: unknown worker `%s`", ref.Name)
+			}
+			if len(e.Args) != len(def.Params) {
+				return nil, fmt.Errorf("eval: worker `%s` arity mismatch — the linter should have caught this", ref.Name)
+			}
+			vars := make(map[string]Value, len(e.Args))
+			for i, a := range e.Args {
+				v, err := in.eval(a, fr)
+				if err != nil {
+					return nil, err
+				}
+				vars[def.Params[i]] = v
+			}
+			// Workers see no caller locals — matching compiled scoping.
+			return in.eval(def.Body, &Frame{vars: vars})
+		case core.Value:
+			calleeV, err := in.eval(e.Callee, fr)
+			if err != nil {
+				return nil, err
+			}
+			c, ok := calleeV.(*Closure)
+			if !ok {
+				return nil, fmt.Errorf("eval: applying a %T — the linter should have caught this", calleeV)
+			}
+			if len(e.Args) != 1 {
+				return nil, fmt.Errorf("eval: App{Value} with %d args — the linter should have caught this", len(e.Args))
+			}
+			v, err := in.eval(e.Args[0], fr)
+			if err != nil {
+				return nil, err
+			}
+			return in.eval(c.Body, &Frame{parent: c.Env, vars: map[string]Value{c.Param: v}})
+		default:
+			return nil, fmt.Errorf("eval: App{Ctor} arrives in S4")
+		}
 	default:
 		return nil, fmt.Errorf("eval: unhandled Core node %T", e)
 	}
@@ -190,6 +270,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 func (in *interp) force(name string) (Value, error) {
 	cell, ok := in.env.cells[name]
 	if !ok {
+		if _, isWorker := in.env.workers[name]; isWorker {
+			return nil, fmt.Errorf("eval: bare reference to worker `%s` — the linter should have caught this", name)
+		}
 		return nil, fmt.Errorf("eval: undefined name `%s` (checker should have caught this)", name)
 	}
 	if cell.forced {

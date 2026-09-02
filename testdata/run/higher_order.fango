@@ -1,0 +1,2 @@
+apply2 f x = f (f x)
+main = print (apply2 (\n -> n * 2) 5)

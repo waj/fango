@@ -1,0 +1,31 @@
+fango 0.1 — :help for commands
+> add : Int -> Int -> Int
+> Int -> Int -> Int
+> 5 : Int
+> inc : Int -> Int
+> 42 : Int
+> <function> : Int -> Int
+> fib : Int -> Int
+> 55 : Int
+> 4 : Int
+> -- UNSUPPORTED POLYMORPHISM ----------------------------- <repl>
+
+This expression's type is:
+
+    a -> a
+
+Type variables mean polymorphism, which arrives in S5. Apply it to
+concrete arguments instead.
+
+1| \x -> x
+   ^^^^^^^
+> add : Int -> Int
+> 40 : Int
+> -- SHADOWING -------------------------------------------- <repl>
+
+The parameter `y` shadows a name that is already defined —
+fango does not allow shadowing. Choose a different name.
+
+1| f y y = y
+       ^
+> 

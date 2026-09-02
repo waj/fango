@@ -1,0 +1,2 @@
+greet name = "hello " ++ name
+main = print (greet "fango")

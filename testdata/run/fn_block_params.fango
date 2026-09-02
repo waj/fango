@@ -1,0 +1,5 @@
+norm x y =
+    sx = x * x
+    sy = y * y
+    sx + sy
+main = print (norm 3 4)

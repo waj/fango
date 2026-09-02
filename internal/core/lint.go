@@ -13,9 +13,11 @@ import (
 // design's top risk, and this is the tripwire.
 func Lint(p *Prog, b *types.Builtins) []error {
 	l := &linter{b: b, scope: map[string]bool{}, workers: map[string]*Def{}}
+	// The worker table is complete up front (self-calls need it); the
+	// no-shadow scope fills in SOURCE ORDER, matching the checker — a
+	// param may legally coincide with a later definition's name.
 	for i := range p.Defs {
 		d := &p.Defs[i]
-		l.scope[d.Name] = true
 		if len(d.Params) > 0 {
 			l.workers[d.Name] = d
 		}
@@ -23,6 +25,7 @@ func Lint(p *Prog, b *types.Builtins) []error {
 	for i := range p.Defs {
 		d := &p.Defs[i]
 		where := "def " + d.Name
+		l.scope[d.Name] = true
 		l.typ(d.Type, where)
 		if len(d.Params) > 0 {
 			// The worker's type must peel exactly arity arrows, with the

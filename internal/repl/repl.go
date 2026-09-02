@@ -122,12 +122,22 @@ func (s *Session) input(text string) inputResult {
 	return s.exprInput(toks, f)
 }
 
-// isDecl: `name = …` or `name : …` (an annotation opening a definition) is
-// a declaration; anything else is an expression. `==` lexes as its own
-// token, so comparisons still classify as expressions.
+// isDecl: `name = …`, `name params… = …`, or `name : …` (an annotation
+// opening a definition) is a declaration; anything else is an expression.
+// `==` lexes as its own token, so comparisons still classify as
+// expressions, and `f x y` without `=` stays an application.
 func isDecl(toks []token.Token) bool {
-	return len(toks) >= 2 && toks[0].Kind == token.LIDENT &&
-		(toks[1].Kind == token.EQ || toks[1].Kind == token.COLON)
+	if len(toks) < 2 || toks[0].Kind != token.LIDENT {
+		return false
+	}
+	if toks[1].Kind == token.COLON {
+		return true
+	}
+	i := 1
+	for i < len(toks) && toks[i].Kind == token.LIDENT {
+		i++
+	}
+	return i < len(toks) && toks[i].Kind == token.EQ
 }
 
 func (s *Session) declInput(toks []token.Token, f *source.File) inputResult {
@@ -149,13 +159,31 @@ func (s *Session) declInput(toks []token.Token, f *source.File) inputResult {
 		diag.Render(s.out, inferErrs)
 		return inputDone
 	}
+	// The elaborator's spine analysis needs the worker table to include
+	// THIS definition (a prompt-defined fib must self-call directly), so
+	// install its arity before elaborating — and roll back on failure.
+	prevArity, hadWorker := s.ck.Workers[vd.Name]
+	if len(vd.Params) > 0 {
+		s.ck.Workers[vd.Name] = len(vd.Params)
+	} else {
+		delete(s.ck.Workers, vd.Name)
+	}
 	def, elabErrs := elaborate.Decl(info, s.ck)
 	if len(elabErrs) > 0 {
+		if hadWorker {
+			s.ck.Workers[vd.Name] = prevArity
+		} else {
+			delete(s.ck.Workers, vd.Name)
+		}
 		diag.Render(s.out, elabErrs)
 		return inputDone
 	}
-	s.ck.Env.Bind(vd.Name, types.Scheme{Body: info.Type})
-	s.env.Define(def.Name, def.Body)
+	s.ck.BindDecl(info)
+	if len(def.Params) > 0 {
+		s.env.DefineWorker(&def)
+	} else {
+		s.env.Define(def.Name, def.Body)
+	}
 	if redefining {
 		s.gen++
 	}
@@ -175,6 +203,9 @@ func (s *Session) exprInput(toks []token.Token, f *source.File) inputResult {
 	ty, inferErrs := s.ck.Expr(e)
 	if len(inferErrs) > 0 {
 		diag.Render(s.out, inferErrs)
+		return inputDone
+	}
+	if s.rejectPoly(e, ty) {
 		return inputDone
 	}
 	coreExpr, elabErrs := elaborate.Expr(e, s.ck)
@@ -209,8 +240,24 @@ func (s *Session) typeOf(src string) {
 		diag.Render(s.out, inferErrs)
 		return
 	}
+	if s.rejectPoly(e, ty) {
+		return
+	}
 	elaborate.Expr(e, s.ck) // force defaulting so the shown type is ground
 	fmt.Fprintln(s.out, types.Show(s.ck.Sub.Apply(ty)))
+}
+
+// rejectPoly rejects a prompt expression whose type is still visibly
+// polymorphic — the REPL elaborates per input, so unlike batch there is no
+// later use to pin it. Reports whether the input was rejected.
+func (s *Session) rejectPoly(e ast.Expr, ty types.Type) bool {
+	if s.ck.FreeGeneralVar(ty) == nil {
+		return false
+	}
+	p := types.NewPrinter()
+	diag.Render(s.out, []diag.Error{diag.Errorf(e.Span(), "UNSUPPORTED POLYMORPHISM",
+		"This expression's type is:\n\n    %s\n\nType variables mean polymorphism, which arrives in S5. Apply it to\nconcrete arguments instead.", p.Type(s.ck.Sub.Apply(ty)))})
+	return true
 }
 
 // wantsMore reports whether the parse failed only because input ran out —
