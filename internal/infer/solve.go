@@ -50,6 +50,10 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 	case WhyNegate:
 		e = diag.Errorf(c.Span, "TYPE MISMATCH",
 			"I can only negate numbers, but this is:\n\n    %s", left)
+	case WhyAnnotation:
+		e = diag.Errorf(c.Span, "TYPE MISMATCH",
+			"The type annotation for `%s` says it is:\n\n    %s\n\nbut the body I found is:\n\n    %s",
+			c.Why.Name, left, right)
 	case WhyOpRequires:
 		e = diag.Errorf(c.Span, "TYPE MISMATCH",
 			"fango's (%s) only works on %s, but this operand is:\n\n    %s",

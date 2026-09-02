@@ -58,6 +58,10 @@ func TestPositive(t *testing.T) {
 		{"x = -5", "x : number"},
 		{"x = -2.5", "x : Float"},
 		{"main = print (1 + 2)", "main : ()"},
+		{"x =\n  a = 1\n  b = a + 2\n  a * b", "x : number"},
+		{"x =\n  r = 2.0\n  r * r", "x : Float"},
+		{"x : Int\nx = 1", "x : Int"},
+		{"x : Float\nx = 1", "x : Float"}, // annotation forces the literal
 	}
 	for _, c := range cases {
 		ck, infos, errs := check(t, c.src)
@@ -98,6 +102,13 @@ func TestNegative(t *testing.T) {
 		{"x = Just", "NAMING ERROR", 1},                       // unknown constructor
 		{"x = print 1\nmain = x", "PRINT NOT ALLOWED HERE", 1},
 		{"main = print", "PRINT NEEDS AN ARGUMENT", 1},
+		{"x = 1\ny =\n  x = 2\n  x + 1", "SHADOWING", 3},
+		{"y =\n  a = 1\n  a = 2\n  a", "SHADOWING", 3},
+		{"y =\n  a = b + 1\n  b = 2\n  a", "NAMING ERROR", 2}, // use-before-define in block
+		{"x : String\nx = 1", "TYPE MISMATCH", 2},             // WhyAnnotation
+		{"x : Foo\nx = 1", "NAMING ERROR", 1},                 // unknown type name
+		{"x : a\nx = 1", "UNSUPPORTED ANNOTATION", 1},         // type variable pre-S5
+		{"f : Int -> Int\nf = 1", "TYPE MISMATCH", 2},         // arrow annotation resolves, body mismatches
 	}
 	for _, c := range cases {
 		_, _, errs := check(t, c.src)

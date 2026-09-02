@@ -25,12 +25,14 @@ const (
 	WhyCompare                    // both sides of a comparison must agree
 	WhyNegate                     // a negated operand must be a number
 	WhyOpRequires                 // an operator fixes its operand type (/, ++)
+	WhyAnnotation                 // a definition must match its type annotation
 )
 
 type Why struct {
 	Kind WhyKind
 	Op   string // operator text for operator-related kinds
 	Want string // required type name for WhyOpRequires
+	Name string // annotated name for WhyAnnotation
 }
 
 type Constraint struct {
@@ -70,6 +72,12 @@ type Checker struct {
 	// builtin Bool constructors exist.
 	Ctors map[string]types.Type
 
+	// TypeNames maps surface type names to their current types — the type
+	// table's embryo, exactly as Ctors is for constructors. `type`
+	// declarations (S4) and REPL generations extend it; identity stays the
+	// TCon Unique underneath.
+	TypeNames map[string]types.Type
+
 	// PrintCalls marks App nodes recognized as the print builtin cheat, so
 	// elaboration classifies them identically (one source of truth).
 	PrintCalls map[*ast.App]bool
@@ -85,6 +93,13 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		Ctors: map[string]types.Type{
 			"True":  b.Bool,
 			"False": b.Bool,
+		},
+		TypeNames: map[string]types.Type{
+			"Int":    b.Int,
+			"Float":  b.Float,
+			"String": b.String,
+			"Bool":   b.Bool,
+			"()":     b.Unit,
 		},
 		PrintCalls: map[*ast.App]bool{},
 	}
@@ -122,10 +137,33 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 // Only main's body may use the print cheat (§10.5's top-level purity,
 // enforced ad hoc until effects land in S7).
 func (ck *Checker) Decl(d *ast.ValueDecl) (DeclInfo, []diag.Error) {
+	info, errs := ck.DeclWhere(d, d.Name == "main")
+	ck.Env.Bind(d.Name, types.Scheme{Body: info.Type})
+	return info, errs
+}
+
+// DeclWhere checks one declaration — annotation resolution, body inference,
+// and the annotation constraint — without binding it, so callers control
+// whether a failed definition enters the environment (the REPL does not
+// bind on error).
+func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []diag.Error) {
 	var errs []diag.Error
-	ty, exprErrs := ck.ExprWhere(d.Body, d.Name == "main")
+	ty, exprErrs := ck.ExprWhere(d.Body, allowPrint)
 	errs = append(errs, exprErrs...)
-	ck.Env.Bind(d.Name, types.Scheme{Body: ty})
+	if d.Ann != nil {
+		annTy, annErrs := ck.ResolveTypeExpr(d.Ann.Type)
+		errs = append(errs, annErrs...)
+		if annTy != nil {
+			// S5: skolemize quantified annotation variables here before
+			// unifying (skolemize-and-unify checking, §7.2).
+			c := Constraint{Left: annTy, Right: ty, Span: d.Body.Span(),
+				Why: Why{Kind: WhyAnnotation, Name: d.Name}}
+			sub, _, solveErrs := Solve([]Constraint{c}, nil, ck.Sub, ck.B)
+			ck.Sub = sub
+			errs = append(errs, solveErrs...)
+			ty = annTy
+		}
+	}
 	return DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Type: ty, Body: d.Body}, errs
 }
 
@@ -150,15 +188,36 @@ func (ck *Checker) ExprWhere(e ast.Expr, allowPrint bool) (types.Type, []diag.Er
 type generator struct {
 	ck         *Checker
 	allowPrint bool
+	locals     *blockScope
 	cs         []Constraint
 	errs       []diag.Error
 }
 
+// blockScope is a block's local bindings. The parent pointer is S3
+// readiness (nested function bodies); S2 depth never exceeds one.
+type blockScope struct {
+	parent *blockScope
+	names  map[string]types.Type
+}
+
+func (s *blockScope) lookup(name string) (types.Type, bool) {
+	for ; s != nil; s = s.parent {
+		if t, ok := s.names[name]; ok {
+			return t, true
+		}
+	}
+	return nil, false
+}
+
 // isPrintCheat reports whether a Var is the print builtin: the name
-// `print`, not shadowed by a user binding.
+// `print`, not shadowed by a user binding (top-level or block-local).
 func (g *generator) isPrintCheat(e ast.Expr) bool {
 	v, ok := e.(*ast.Var)
-	return ok && v.Name == "print" && !g.ck.Env.Has("print")
+	if !ok || v.Name != "print" || g.ck.Env.Has("print") {
+		return false
+	}
+	_, local := g.locals.lookup("print")
+	return !local
 }
 
 func (g *generator) expr(e ast.Expr) types.Type {
@@ -177,6 +236,10 @@ func (g *generator) expr(e ast.Expr) types.Type {
 			g.errs = append(g.errs, diag.Errorf(e.Sp, "PRINT NEEDS AN ARGUMENT",
 				"`print` is a builtin that must be applied to exactly one\nargument, like `print (1 + 2)`. Using it as a value arrives with\neffects (S7)."))
 			ty = g.ck.Sup.FreshVar(types.General)
+			break
+		}
+		if localTy, ok := g.locals.lookup(e.Name); ok {
+			ty = localTy
 			break
 		}
 		scheme, ok := g.ck.Env.Lookup(e.Name)
@@ -237,11 +300,46 @@ func (g *generator) expr(e ast.Expr) types.Type {
 		ty = thenTy
 	case *ast.BinOp:
 		ty = g.binOp(e)
+	case *ast.Block:
+		ty = g.block(e)
 	default:
 		panic("infer: unhandled expression node")
 	}
 	g.ck.ExprTypes[e] = ty
 	return ty
+}
+
+// block checks a statement body: each binding is a solve-at-binding point
+// in principle (monomorphic until S5), scoped sequentially, with shadowing
+// forbidden against both earlier bindings and the top level.
+func (g *generator) block(e *ast.Block) types.Type {
+	g.locals = &blockScope{parent: g.locals, names: map[string]types.Type{}}
+	defer func() { g.locals = g.locals.parent }()
+
+	for i := range e.Binds {
+		bind := &e.Binds[i]
+		if _, dup := g.locals.lookup(bind.Name); dup || g.ck.Env.Has(bind.Name) {
+			where := "at the top level"
+			if dup {
+				where = "earlier in this block"
+			}
+			g.errs = append(g.errs, diag.Errorf(bind.NameSpan, "SHADOWING",
+				"The name `%s` is already defined %s — fango does not allow\nshadowing. Choose a different name.", bind.Name, where))
+		}
+		ty := g.expr(bind.Body)
+		if bind.Ann != nil {
+			annTy, annErrs := g.ck.ResolveTypeExpr(bind.Ann.Type)
+			g.errs = append(g.errs, annErrs...)
+			if annTy != nil {
+				// S5: skolemize here, as at the top level.
+				g.cs = append(g.cs, Constraint{Left: annTy, Right: ty,
+					Span: bind.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: bind.Name}})
+				ty = annTy
+			}
+		}
+		g.locals.names[bind.Name] = ty
+	}
+	return g.expr(e.Result)
 }
 
 func (g *generator) binOp(e *ast.BinOp) types.Type {
