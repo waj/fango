@@ -1,0 +1,8 @@
+(module)
+-- errors --
+-- UNFINISHED PROGRAM --------------------- err_incomplete.fango
+
+I got to the end of the input while still expecting an expression.
+
+1| main = 1 +
+            ^

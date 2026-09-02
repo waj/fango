@@ -1,0 +1,14 @@
+1:1 LIDENT main
+1:6 EQ =
+1:8 INT 1
+1:12 INT 2
+2:1 EOF
+-- errors --
+-- UNEXPECTED CHARACTER ------------------------- err_char.fango
+
+I do not recognize this character:
+
+    '?'
+
+1| main = 1 ? 2
+            ^

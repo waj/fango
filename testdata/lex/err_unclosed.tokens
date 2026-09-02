@@ -1,0 +1,12 @@
+1:1 LIDENT main
+1:6 EQ =
+1:8 INT 1
+2:1 EOF
+-- errors --
+-- UNCLOSED COMMENT ------------------------- err_unclosed.fango
+
+I got to the end of the file while looking for the `-}` that closes
+this comment.
+
+1| main = 1 {- comment that never ends
+            ^^

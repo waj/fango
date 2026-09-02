@@ -1,0 +1,17 @@
+fango 0.1 — :help for commands
+> 7 : Int
+> x : Int
+> 42 : Int
+> Int
+> | 3 : Int
+> -- NAMING ERROR ----------------------------------------- <repl>
+
+I don't know a value named `y`.
+
+1| y
+   ^
+> commands:
+  :type <expr>   show an expression's type without evaluating
+  :help          this message
+  :quit          leave the REPL (also Ctrl-D)
+> 

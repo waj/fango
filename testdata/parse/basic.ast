@@ -1,0 +1,2 @@
+(module
+  (def main (binop + (int 1) (binop * (int 2) (int 3)))))

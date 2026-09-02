@@ -1,0 +1,17 @@
+(module
+  (def x (int 2))
+  (def z (int 4)))
+-- errors --
+-- SYNTAX PROBLEM --------------------------- err_badstart.fango
+
+I was expecting a declaration here, like `name = expression`.
+
+1| = 1
+   ^
+
+-- SYNTAX PROBLEM --------------------------- err_badstart.fango
+
+The expression seemed complete, but then I ran into this.
+
+3|   y = 3
+     ^

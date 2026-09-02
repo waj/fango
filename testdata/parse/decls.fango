@@ -1,0 +1,5 @@
+module Main exposing (main, x)
+
+x = 40
+y = x + 2 -- comment after the body
+main = (y - 2) * 1

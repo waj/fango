@@ -1,0 +1,17 @@
+(module
+  (def y (int 5)))
+-- errors --
+-- SYNTAX PROBLEM ---------------------------- err_offside.fango
+
+This expression is unfinished — the next line starts a new
+declaration, so something is missing here.
+
+1| x = 1 +
+         ^
+
+-- SYNTAX PROBLEM ---------------------------- err_offside.fango
+
+I was expecting a declaration here, like `name = expression`.
+
+2| 2
+   ^

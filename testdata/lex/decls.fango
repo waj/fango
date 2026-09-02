@@ -1,0 +1,9 @@
+module Main exposing (main)
+
+-- a line comment
+x = 40
+{- a block comment
+   {- nested -}
+   still inside -}
+y = x + 2
+main = (y - 2) * 1

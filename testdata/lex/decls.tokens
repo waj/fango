@@ -1,0 +1,24 @@
+1:1 module module
+1:8 UIDENT Main
+1:13 exposing exposing
+1:22 LPAREN (
+1:23 LIDENT main
+1:27 RPAREN )
+4:1 LIDENT x
+4:3 EQ =
+4:5 INT 40
+8:1 LIDENT y
+8:3 EQ =
+8:5 LIDENT x
+8:7 PLUS +
+8:9 INT 2
+9:1 LIDENT main
+9:6 EQ =
+9:8 LPAREN (
+9:9 LIDENT y
+9:11 MINUS -
+9:13 INT 2
+9:14 RPAREN )
+9:16 STAR *
+9:18 INT 1
+10:1 EOF

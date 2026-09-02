@@ -1,0 +1,14 @@
+1:1 LIDENT main
+1:6 EQ =
+2:2 INT 1
+2:4 PLUS +
+2:6 INT 2
+3:1 EOF
+-- errors --
+-- TAB CHARACTER --------------------------------- err_tab.fango
+
+I found a tab character. fango indentation is column-sensitive, so
+tabs are not allowed — use spaces.
+
+2| 	1 + 2
+   ^

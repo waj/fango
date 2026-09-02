@@ -1,0 +1,4 @@
+(core
+  (def x Int (int 40 Int))
+  (def y Int (binop + Int (var x Int) (int 2 Int)))
+  (def main Int (binop * Int (binop - Int (var y Int) (int 2 Int)) (int 3 Int))))

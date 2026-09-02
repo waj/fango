@@ -8,3 +8,6 @@ result-*
 # Go
 /fango
 *.test
+
+# fango build directories
+.fango/

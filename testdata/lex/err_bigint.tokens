@@ -1,0 +1,13 @@
+1:1 LIDENT main
+1:6 EQ =
+1:8 INT 99999999999999999999
+2:1 EOF
+-- errors --
+-- NUMBER TOO BIG ----------------------------- err_bigint.fango
+
+This integer does not fit in 64 bits:
+
+    99999999999999999999
+
+1| main = 99999999999999999999
+          ^^^^^^^^^^^^^^^^^^^^

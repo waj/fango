@@ -1,0 +1,2 @@
+(core
+  (def main Int (binop + Int (int 1 Int) (binop * Int (int 2 Int) (int 3 Int)))))
