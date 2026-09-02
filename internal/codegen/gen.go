@@ -26,7 +26,15 @@ import (
 // Codegen is type-directed and deterministic: same Core in, byte-identical
 // Go out.
 func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
-	g := &gen{b: b}
+	g := &gen{
+		b:          b,
+		adts:       map[int]*types.ADTInfo{},
+		neededEq:   map[int]bool{},
+		neededShow: map[int]bool{},
+	}
+	for _, adt := range p.ADTs {
+		g.adts[adt.Con.Unique] = adt
+	}
 
 	var mainDef *core.Def
 	for i := range p.Defs {
@@ -36,7 +44,7 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 	}
 	mainIsUnit := mainDef != nil && g.unique(mainDef.Type) == b.Unit.Unique
 
-	var decls []goast.Decl
+	decls := g.adtDecls(p.ADTs)
 	for i := range p.Defs {
 		d := &p.Defs[i]
 		if d == mainDef && mainIsUnit {
@@ -53,12 +61,14 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 	case mainIsUnit:
 		decls = append(decls, funcDecl("main", g.stmts(mainDef.Body)...))
 	case printMain:
-		g.usesFangort = true
 		decls = append(decls, funcDecl("main",
-			exprStmt(callExpr(selector("fangort", g.printFn(mainDef.Type)), ident(mangleValue("main"))))))
+			exprStmt(g.printCall(ident(mangleValue("main")), mainDef.Type))))
 	default:
 		decls = append(decls, funcDecl("main", assignBlank(ident(mangleValue("main")))))
 	}
+
+	// Derived eq/show, discovered during emission (on demand, §8.6).
+	decls = append(decls, g.derivedDecls(p.ADTs)...)
 
 	// Imports come from emission (fangort for prints, math for float
 	// specials), so they are prepended last — in a fixed order, for
@@ -84,6 +94,10 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 
 type gen struct {
 	b           *types.Builtins
+	adts        map[int]*types.ADTInfo
+	neededEq    map[int]bool
+	neededShow  map[int]bool
+	tmp         int // type-switch binding counter (ts0, ts1, …)
 	usesFangort bool
 	usesMath    bool
 }
@@ -93,6 +107,18 @@ func (g *gen) unique(t types.Type) int {
 		return con.Unique
 	}
 	return -1
+}
+
+// printCall builds the print of a value: fangort.PrintX for scalars, the
+// derived show piped through fangort.PrintString for ADTs.
+func (g *gen) printCall(arg goast.Expr, t types.Type) goast.Expr {
+	g.usesFangort = true
+	if adt := g.adtOf(t); adt != nil {
+		g.needShow(adt)
+		return callExpr(selector("fangort", "PrintString"),
+			callExpr(ident(showFunc(adt.Con.Name)), arg, ident("false")))
+	}
+	return callExpr(selector("fangort", g.printFn(t)), arg)
 }
 
 // printFn picks the fangort printer for a ground scalar type.
@@ -137,6 +163,8 @@ func (g *gen) retStmts(e core.Expr) []goast.Stmt {
 			Body: &goast.BlockStmt{List: g.retStmts(e.Then)},
 		}}
 		return append(stmts, g.retStmts(e.Else)...)
+	case *core.Case:
+		return g.caseStmts(e, g.retStmts)
 	default:
 		return []goast.Stmt{returnStmt(g.expr(e, 0))}
 	}
@@ -161,7 +189,10 @@ func (g *gen) goType(t types.Type) goast.Expr {
 		case g.b.Unit.Unique:
 			return &goast.StructType{Fields: &goast.FieldList{}}
 		default:
-			panic(fmt.Sprintf("codegen: ADT types arrive in S4: %s", t.Name))
+			if adt, ok := g.adts[t.Unique]; ok {
+				return ident(mangleType(adt.Con.Name))
+			}
+			panic(fmt.Sprintf("codegen: unknown type constructor %s", t.Name))
 		}
 	default:
 		panic(fmt.Sprintf("codegen: unhandled type %s", types.Show(t)))
@@ -238,8 +269,10 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			// e(a)(b). Call is a Go primary expression — no parens needed,
 			// and a func-literal callee called in place is legal Go.
 			return callExpr(g.expr(e.Callee, 0), g.expr(e.Args[0], 0))
+		case core.Ctor:
+			return g.ctorLit(e)
 		default:
-			panic("codegen: App{Ctor} arrives in S4")
+			panic("codegen: App with unknown CalleeKind")
 		}
 	case *core.Neg:
 		operand := g.expr(e.Operand, unaryPrec)
@@ -251,6 +284,18 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		}
 		return parenIf(parentPrec > 0, &goast.UnaryExpr{Op: gotoken.SUB, X: operand})
 	case *core.BinOp:
+		// Equality at an ADT type calls the derived eq (§8.6); everything
+		// else compiles to a native Go operator.
+		if e.Op == "==" || e.Op == "/=" {
+			if adt := g.adtOf(e.L.Type()); adt != nil {
+				g.needEq(adt)
+				call := callExpr(ident(eqFunc(adt.Con.Name)), g.expr(e.L, 0), g.expr(e.R, 0))
+				if e.Op == "/=" {
+					return &goast.UnaryExpr{Op: gotoken.NOT, X: call}
+				}
+				return call
+			}
+		}
 		op, ok := goOps[e.Op]
 		if !ok {
 			panic(fmt.Sprintf("codegen: unhandled operator %q", e.Op))
@@ -274,6 +319,11 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			returnStmt(g.expr(e.Else, 0)),
 		}
 		return callExpr(funcLit(g.goType(e.Ty), body))
+	case *core.Case:
+		// Expression-context fallback (top-level initializers): an
+		// immediately-invoked typed closure, exactly like If above. Inside
+		// function bodies the elaborator's ANF hoisting bypasses this.
+		return callExpr(funcLit(g.goType(e.Ty), g.caseStmts(e, g.retStmts)))
 	case *core.Print:
 		panic("codegen: core.Print is statement-only — a Unit value reached expression context")
 	default:
@@ -345,9 +395,19 @@ func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
 	if g.unique(let.Rhs.Type()) == g.b.Unit.Unique {
 		return g.stmts(let.Rhs)
 	}
-	stmts := []goast.Stmt{varDeclStmt(mangleValue(let.Name), g.goType(let.Rhs.Type()), g.expr(let.Rhs, 0))}
+	name := mangleValue(let.Name)
+	var stmts []goast.Stmt
+	switch let.Rhs.(type) {
+	case *core.If, *core.Case:
+		// §8.5's ANF target shape: declare, then assign inside real Go
+		// statements — no IIFE closure on hot paths.
+		stmts = append([]goast.Stmt{varDeclNoValue(name, g.goType(let.Rhs.Type()))},
+			g.assignStmts(let.Rhs, name)...)
+	default:
+		stmts = []goast.Stmt{varDeclStmt(name, g.goType(let.Rhs.Type()), g.expr(let.Rhs, 0))}
+	}
 	if !core.Mentions(let.Body, let.Name) {
-		stmts = append(stmts, assignBlank(ident(mangleValue(let.Name))))
+		stmts = append(stmts, assignBlank(ident(name)))
 	}
 	return stmts
 }
@@ -358,11 +418,11 @@ func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
 func (g *gen) stmts(e core.Expr) []goast.Stmt {
 	switch e := e.(type) {
 	case *core.Print:
-		g.usesFangort = true
-		return []goast.Stmt{exprStmt(callExpr(
-			selector("fangort", g.printFn(e.Arg.Type())), g.expr(e.Arg, 0)))}
+		return []goast.Stmt{exprStmt(g.printCall(g.expr(e.Arg, 0), e.Arg.Type()))}
 	case *core.If:
 		return []goast.Stmt{ifStmt(g.expr(e.Cond, 0), g.stmts(e.Then), g.stmts(e.Else))}
+	case *core.Case:
+		return g.caseStmts(e, g.stmts)
 	case *core.Let:
 		return append(g.letBindingStmts(e), g.stmts(e.Body)...)
 	default:
