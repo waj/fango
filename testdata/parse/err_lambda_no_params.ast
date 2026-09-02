@@ -1,0 +1,8 @@
+(module)
+-- errors --
+-- SYNTAX PROBLEM ------------------- err_lambda_no_params.fango
+
+A lambda needs at least one parameter, like `\x -> x + 1`.
+
+1| f = \ -> 1
+         ^^

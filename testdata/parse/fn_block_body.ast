@@ -1,0 +1,2 @@
+(module
+  (def norm (params v) (block (bind scaled (binop * (var v) (int 2))) (bind helper (params a) (block (bind b (binop + (var a) (var scaled))) (binop * (var b) (var b)))) (app (var helper) (int 3)))))

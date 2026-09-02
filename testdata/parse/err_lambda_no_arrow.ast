@@ -1,0 +1,8 @@
+(module)
+-- errors --
+-- UNFINISHED PROGRAM ---------------- err_lambda_no_arrow.fango
+
+I got to the end of the input too soon. I expect `->` after the lambda parameters.
+
+1| f = \x x
+          ^

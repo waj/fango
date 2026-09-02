@@ -26,13 +26,32 @@ func Dump(m *Module) string {
 func dumpDecl(d Decl) string {
 	switch d := d.(type) {
 	case *ValueDecl:
-		if d.Ann != nil {
-			return fmt.Sprintf("(def %s (ann %s) %s)", d.Name, DumpTypeExpr(d.Ann.Type), DumpExpr(d.Body))
+		var b strings.Builder
+		fmt.Fprintf(&b, "(def %s", d.Name)
+		if p := dumpParams(d.Params); p != "" {
+			fmt.Fprintf(&b, " %s", p)
 		}
-		return fmt.Sprintf("(def %s %s)", d.Name, DumpExpr(d.Body))
+		if d.Ann != nil {
+			fmt.Fprintf(&b, " (ann %s)", DumpTypeExpr(d.Ann.Type))
+		}
+		fmt.Fprintf(&b, " %s)", DumpExpr(d.Body))
+		return b.String()
 	default:
 		panic(fmt.Sprintf("ast.dumpDecl: unhandled %T", d))
 	}
+}
+
+// dumpParams renders "(params x y)" or "" — the clause appears only when
+// non-empty, so every pre-S3 golden stays byte-identical.
+func dumpParams(ps []Param) string {
+	if len(ps) == 0 {
+		return ""
+	}
+	names := make([]string, len(ps))
+	for i, p := range ps {
+		names[i] = p.Name
+	}
+	return "(params " + strings.Join(names, " ") + ")"
 }
 
 func DumpTypeExpr(t TypeExpr) string {
@@ -72,14 +91,23 @@ func DumpExpr(e Expr) string {
 		var b strings.Builder
 		b.WriteString("(block")
 		for _, bind := range e.Binds {
-			if bind.Ann != nil {
-				fmt.Fprintf(&b, " (bind %s (ann %s) %s)", bind.Name, DumpTypeExpr(bind.Ann.Type), DumpExpr(bind.Body))
-			} else {
-				fmt.Fprintf(&b, " (bind %s %s)", bind.Name, DumpExpr(bind.Body))
+			fmt.Fprintf(&b, " (bind %s", bind.Name)
+			if p := dumpParams(bind.Params); p != "" {
+				fmt.Fprintf(&b, " %s", p)
 			}
+			if bind.Ann != nil {
+				fmt.Fprintf(&b, " (ann %s)", DumpTypeExpr(bind.Ann.Type))
+			}
+			fmt.Fprintf(&b, " %s)", DumpExpr(bind.Body))
 		}
 		fmt.Fprintf(&b, " %s)", DumpExpr(e.Result))
 		return b.String()
+	case *Lambda:
+		names := make([]string, len(e.Params))
+		for i, p := range e.Params {
+			names[i] = p.Name
+		}
+		return fmt.Sprintf("(lambda (%s) %s)", strings.Join(names, " "), DumpExpr(e.Body))
 	default:
 		panic(fmt.Sprintf("ast.DumpExpr: unhandled %T", e))
 	}

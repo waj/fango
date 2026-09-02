@@ -1,0 +1,4 @@
+(module
+  (def f (lambda (x) (binop + (var x) (int 1))))
+  (def g (lambda (x y) (binop * (var x) (var y))))
+  (def h (app (var f) (app (var g) (int 2)))))

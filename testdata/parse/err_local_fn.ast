@@ -1,9 +1,0 @@
-(module)
--- errors --
--- SYNTAX PROBLEM --------------------------- err_local_fn.fango
-
-This looks like a local function definition — those arrive in S3.
-For now block bindings take no parameters.
-
-2|     helper a b = a + b
-       ^^^^^^

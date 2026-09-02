@@ -1,0 +1,2 @@
+(module
+  (def f (lambda (x) (block (bind y (binop + (var x) (int 1))) (binop * (var y) (int 2))))))

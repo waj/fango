@@ -62,11 +62,28 @@ type Block struct {
 	Result Expr
 }
 
+// Param is one function parameter. Worker arity is the syntactic parameter
+// count (§8.2), which is why parameters stay explicit rather than
+// desugaring to lambdas.
+type Param struct {
+	Name string
+	Sp   source.Span
+}
+
 type LocalBind struct {
 	Name     string
 	NameSpan source.Span
-	Ann      *TypeAnn // nil when unannotated
+	Params   []Param // non-empty: a local function (S3)
+	Ann      *TypeAnn
 	Body     Expr
+}
+
+// Lambda is `\x -> e` / `\x y -> e` — multi-param in the AST for clean
+// spans and dumps; typing and elaboration treat it as curried.
+type Lambda struct {
+	Params []Param
+	Body   Expr
+	Sp     source.Span // the backslash
 }
 
 // TypeAnn is a `name : Type` annotation line attached to the definition
@@ -124,6 +141,7 @@ func (*Neg) isExpr()       {}
 func (*BinOp) isExpr()     {}
 func (*If) isExpr()        {}
 func (*Block) isExpr()     {}
+func (*Lambda) isExpr()    {}
 
 func (e *IntLit) Span() source.Span    { return e.Sp }
 func (e *FloatLit) Span() source.Span  { return e.Sp }
@@ -135,12 +153,14 @@ func (e *Neg) Span() source.Span       { return e.Sp }
 func (e *BinOp) Span() source.Span     { return e.L.Span().Merge(e.R.Span()) }
 func (e *If) Span() source.Span        { return e.Sp.Merge(e.Else.Span()) }
 func (e *Block) Span() source.Span     { return e.Binds[0].NameSpan.Merge(e.Result.Span()) }
+func (e *Lambda) Span() source.Span    { return e.Sp.Merge(e.Body.Span()) }
 
 type Decl interface{ isDecl() }
 
 type ValueDecl struct {
 	Name     string
 	NameSpan source.Span
+	Params   []Param  // non-empty: a function definition (worker, §8.2)
 	Ann      *TypeAnn // nil when unannotated
 	Body     Expr
 }

@@ -1,0 +1,2 @@
+(module
+  (def x (block (bind a (binop + (int 1) (int 2))) (var a))))

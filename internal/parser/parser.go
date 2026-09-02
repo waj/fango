@@ -143,12 +143,13 @@ func (p *parser) parseDecl() ast.Decl {
 		p.next() // the repeated name
 	}
 
+	params := p.parseParams()
 	eqTok := p.peekInExpr()
 	if !p.expect(token.EQ, "I expect `=` after the name in a declaration.") {
 		p.recoverToTopLevel(false)
 		return nil
 	}
-	body := p.parseDeclBody(eqTok)
+	body := p.parseBindBody(eqTok)
 	if body == nil {
 		p.recoverToTopLevel(false)
 		return nil
@@ -158,13 +159,24 @@ func (p *parser) parseDecl() ast.Decl {
 			"The expression seemed complete, but then I ran into this.")
 		p.recoverToTopLevel(false)
 	}
-	return &ast.ValueDecl{Name: name.Text, NameSpan: name.Span, Ann: ann, Body: body}
+	return &ast.ValueDecl{Name: name.Text, NameSpan: name.Span, Params: params, Ann: ann, Body: body}
 }
 
-// parseDeclBody dispatches on where the body's first token sits (§3.6): on
-// the `=`'s line → inline expression; on a later, indented line → a block
-// whose statement column is that token's column.
-func (p *parser) parseDeclBody(eqTok token.Token) ast.Expr {
+// parseParams consumes zero or more parameter identifiers.
+func (p *parser) parseParams() []ast.Param {
+	var params []ast.Param
+	for p.peekInExpr().Kind == token.LIDENT {
+		t := p.next()
+		params = append(params, ast.Param{Name: t.Text, Sp: t.Span})
+	}
+	return params
+}
+
+// parseBindBody dispatches on where a binding's body starts (§3.6): on the
+// `=`'s line → inline expression; on a later line, deeper than the current
+// layout column → a block at that column. Shared by top-level declarations,
+// block bindings, local functions, and lambda bodies.
+func (p *parser) parseBindBody(eqTok token.Token) ast.Expr {
 	t := p.peek()
 	switch {
 	case t.Kind == token.EOF:
@@ -173,12 +185,12 @@ func (p *parser) parseDeclBody(eqTok token.Token) ast.Expr {
 		return nil
 	case t.Pos().Line == eqTok.Pos().Line:
 		return p.parseExpr(1)
-	case t.Pos().Col == 1:
-		p.errorAt(p.prevSpan(), "SYNTAX PROBLEM",
-			"This declaration has no body — the next line starts a new\ndeclaration.")
-		return nil
-	default:
+	case p.lay.checkOffside(t.Pos()) == offContinue:
 		return p.parseBlock(t.Pos().Col)
+	default:
+		p.errorAt(p.prevSpan(), "SYNTAX PROBLEM",
+			"This binding has no expression — the next line does not belong\nto it.")
+		return nil
 	}
 }
 
@@ -254,31 +266,24 @@ func (p *parser) parseBlock(col int) ast.Expr {
 		}
 
 		switch p.classifyStmt(col) {
-		case stmtBind:
+		case stmtBind, stmtLocalFn:
 			nameT := p.next()
-			eqT := p.next()
+			params := p.parseParams()
+			eqT := p.peekInExpr()
+			if !p.expect(token.EQ, "I expect `=` after the binding name.") {
+				return nil
+			}
 			if pendingAnn != nil && pendingAnnName.Text != nameT.Text {
 				p.errorAt(nameT.Span, "MISSING DEFINITION",
 					"The type annotation for `"+pendingAnnName.Text+"` must sit directly\nabove its binding, but this binds `"+nameT.Text+"`.")
 				return nil
 			}
-			rt := p.peek()
-			if rt.Kind == token.EOF {
-				p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
-					"This binding has no expression yet.")
-				return nil
-			}
-			if rt.Pos().Line != eqT.Pos().Line {
-				p.errorAt(rt.Span, "SYNTAX PROBLEM",
-					"A binding's expression must start on the same line as its `=`.\n(Nested blocks arrive with local functions in S3.)")
-				return nil
-			}
-			rhs := p.parseExpr(1)
+			rhs := p.parseBindBody(eqT)
 			if rhs == nil {
 				return nil
 			}
 			binds = append(binds, ast.LocalBind{
-				Name: nameT.Text, NameSpan: nameT.Span, Ann: pendingAnn, Body: rhs,
+				Name: nameT.Text, NameSpan: nameT.Span, Params: params, Ann: pendingAnn, Body: rhs,
 			})
 			pendingAnn = nil
 
@@ -296,11 +301,6 @@ func (p *parser) parseBlock(col int) ast.Expr {
 			}
 			pendingAnn = &ast.TypeAnn{Type: te, Sp: colon.Span.Merge(te.Span())}
 			pendingAnnName = nameT
-
-		case stmtLocalFn:
-			p.errorAt(t.Span, "SYNTAX PROBLEM",
-				"This looks like a local function definition — those arrive in S3.\nFor now block bindings take no parameters.")
-			return nil
 
 		case stmtResult:
 			if pendingAnn != nil {
@@ -456,8 +456,11 @@ func (p *parser) parseUnary() ast.Expr {
 // then any number of argument atoms. `if` may head an expression but is
 // not an atom, so `print if …` needs parens (as in Elm).
 func (p *parser) parseApply() ast.Expr {
-	if p.peekInExpr().Kind == token.KwIf {
+	switch p.peekInExpr().Kind {
+	case token.KwIf:
 		return p.parseIf()
+	case token.BACKSLASH:
+		return p.parseLambda()
 	}
 	fn := p.parseAtom()
 	if fn == nil {
@@ -475,6 +478,28 @@ func (p *parser) parseApply() ast.Expr {
 			return fn
 		}
 	}
+}
+
+// parseLambda parses `\x -> body` / `\x y -> body`. Like `if`, a lambda
+// heads an expression but is not an atom: `f (\x -> x)` needs parens, and
+// the body extends maximally right (or opens an indented block).
+func (p *parser) parseLambda() ast.Expr {
+	bs := p.next() // the backslash
+	params := p.parseParams()
+	if len(params) == 0 {
+		p.errorAt(p.peek().Span, "SYNTAX PROBLEM",
+			"A lambda needs at least one parameter, like `\\x -> x + 1`.")
+		return nil
+	}
+	arrow := p.peekInExpr()
+	if !p.expect(token.ARROW, "I expect `->` after the lambda parameters.") {
+		return nil
+	}
+	body := p.parseBindBody(arrow)
+	if body == nil {
+		return nil
+	}
+	return &ast.Lambda{Params: params, Body: body, Sp: bs.Span}
 }
 
 func (p *parser) parseIf() ast.Expr {

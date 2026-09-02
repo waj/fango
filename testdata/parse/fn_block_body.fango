@@ -1,0 +1,6 @@
+norm v =
+    scaled = v * 2
+    helper a =
+        b = a + scaled
+        b * b
+    helper 3

@@ -1,0 +1,3 @@
+(module
+  (def add (params x y) (binop + (var x) (var y)))
+  (def main (app (var print) (app (app (var add) (int 1)) (int 2)))))

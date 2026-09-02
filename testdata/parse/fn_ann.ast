@@ -1,0 +1,2 @@
+(module
+  (def add (params x y) (ann (-> Int (-> Int Int))) (binop + (var x) (var y))))

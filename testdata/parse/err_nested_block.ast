@@ -1,9 +1,0 @@
-(module)
--- errors --
--- SYNTAX PROBLEM ----------------------- err_nested_block.fango
-
-A binding's expression must start on the same line as its `=`.
-(Nested blocks arrive with local functions in S3.)
-
-3|         1 + 2
-           ^
