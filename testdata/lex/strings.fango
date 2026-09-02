@@ -1,0 +1,3 @@
+a = "hello"
+b = "with \"quotes\" and \\ and \n\t\r"
+c = ""

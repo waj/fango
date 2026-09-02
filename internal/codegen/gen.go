@@ -6,34 +6,67 @@ import (
 	goast "go/ast"
 	"go/format"
 	gotoken "go/token"
+	"math"
+	"strconv"
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/types"
 )
 
-// Emit lowers a Core program to Go source: one package var per definition
-// (dependency-ordered by construction — fango's use-after-define rule), and
-// a main that either discards v_main or, in the test-internal print-main
-// mode, prints it through fangort — the differential harness's observation
-// channel for programs that produce no output yet.
+// Emit lowers a Core program to Go source. Definitions become package vars
+// in source order (dependency-ordered by construction — fango's
+// use-after-define rule). main's shape follows §8.4: a Unit-typed main has
+// its effect forced inside func main() in statement context (prints happen
+// at run time, in order — never in package init); any other main stays a
+// package var whose value func main() discards, or — in the test-internal
+// print-main mode — prints through fangort, the differential harness's
+// observation channel.
 //
 // Codegen is type-directed and deterministic: same Core in, byte-identical
 // Go out.
 func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 	g := &gen{b: b}
 
-	var decls []goast.Decl
-	if printMain {
-		decls = append(decls, importDecl("fangobuild/fangort"))
+	var mainDef *core.Def
+	for i := range p.Defs {
+		if p.Defs[i].Name == "main" {
+			mainDef = &p.Defs[i]
+		}
 	}
-	for _, d := range p.Defs {
+	mainIsUnit := mainDef != nil && g.unique(mainDef.Type) == b.Unit.Unique
+
+	var decls []goast.Decl
+	for i := range p.Defs {
+		d := &p.Defs[i]
+		if d == mainDef && mainIsUnit {
+			continue // no package var: the effect runs inside func main()
+		}
 		decls = append(decls, varDecl(mangleValue(d.Name), g.goType(d.Type), g.expr(d.Body, 0)))
 	}
-	if printMain {
+
+	switch {
+	case mainIsUnit:
+		decls = append(decls, funcDecl("main", g.stmts(mainDef.Body)...))
+	case printMain:
+		g.usesFangort = true
 		decls = append(decls, funcDecl("main",
-			exprStmt(callExpr(selector("fangort", "PrintInt"), ident(mangleValue("main"))))))
-	} else {
+			exprStmt(callExpr(selector("fangort", g.printFn(mainDef.Type)), ident(mangleValue("main"))))))
+	default:
 		decls = append(decls, funcDecl("main", assignBlank(ident(mangleValue("main")))))
+	}
+
+	// Imports come from emission (fangort for prints, math for float
+	// specials), so they are prepended last — in a fixed order, for
+	// deterministic output.
+	var paths []string
+	if g.usesFangort {
+		paths = append(paths, "fangobuild/fangort")
+	}
+	if g.usesMath {
+		paths = append(paths, "math")
+	}
+	if len(paths) > 0 {
+		decls = append([]goast.Decl{importDecl(paths...)}, decls...)
 	}
 
 	file := &goast.File{Name: ident("main"), Decls: decls}
@@ -45,7 +78,32 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 }
 
 type gen struct {
-	b *types.Builtins
+	b           *types.Builtins
+	usesFangort bool
+	usesMath    bool
+}
+
+func (g *gen) unique(t types.Type) int {
+	if con, ok := t.(*types.TCon); ok && len(con.Args) == 0 {
+		return con.Unique
+	}
+	return -1
+}
+
+// printFn picks the fangort printer for a ground scalar type.
+func (g *gen) printFn(t types.Type) string {
+	switch g.unique(t) {
+	case g.b.Int.Unique:
+		return "PrintInt"
+	case g.b.Float.Unique:
+		return "PrintFloat"
+	case g.b.String.Unique:
+		return "PrintString"
+	case g.b.Bool.Unique:
+		return "PrintBool"
+	default:
+		panic("codegen: no printer for type " + types.Show(t))
+	}
 }
 
 // goType maps a fango type to its unboxed Go representation (DESIGN.md
@@ -74,29 +132,52 @@ func (g *gen) goType(t types.Type) goast.Expr {
 
 var goOps = map[string]gotoken.Token{
 	"+": gotoken.ADD, "-": gotoken.SUB, "*": gotoken.MUL, "/": gotoken.QUO,
+	"++": gotoken.ADD, // String concat is Go's + on strings (§8.6)
+	"==": gotoken.EQL, "/=": gotoken.NEQ,
+	"<": gotoken.LSS, ">": gotoken.GTR, "<=": gotoken.LEQ, ">=": gotoken.GEQ,
 }
 
-// binPrec mirrors Go's precedence for the operators fango emits, so we can
-// parenthesize only where Go's grammar needs it.
+// goPrec mirrors Go's binary precedence for the operators fango emits
+// (comparisons 3, additive 4, multiplicative 5), so we parenthesize only
+// where Go's grammar needs it. Unary minus uses 6: above every binary op.
 func goPrec(op string) int {
 	switch op {
 	case "*", "/":
 		return 5
-	case "+", "-":
+	case "+", "-", "++":
 		return 4
+	case "==", "/=", "<", ">", "<=", ">=":
+		return 3
 	default:
 		return 0
 	}
 }
 
-// expr emits e; parentPrec is the precedence of the enclosing operator
-// context (0 = none) for minimal parenthesization.
+const unaryPrec = 6
+
+// expr emits e in expression context; parentPrec is the precedence of the
+// enclosing operator (0 = none) for minimal parenthesization.
 func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 	switch e := e.(type) {
 	case *core.IntLit:
 		return intLit(e.Val)
+	case *core.FloatLit:
+		return g.floatLit(e.Val)
+	case *core.StringLit:
+		return stringLit(e.Val)
+	case *core.BoolLit:
+		return ident(strconv.FormatBool(e.Val))
 	case *core.VarRef:
 		return ident(mangleValue(e.Name))
+	case *core.Neg:
+		operand := g.expr(e.Operand, unaryPrec)
+		// Guard `--x` (invalid Go) and precedence: parenthesize any
+		// non-atomic operand.
+		switch operand.(type) {
+		case *goast.UnaryExpr, *goast.BinaryExpr:
+			operand = &goast.ParenExpr{X: operand}
+		}
+		return parenIf(parentPrec > 0, &goast.UnaryExpr{Op: gotoken.SUB, X: operand})
 	case *core.BinOp:
 		op, ok := goOps[e.Op]
 		if !ok {
@@ -108,8 +189,67 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		l := g.expr(e.L, prec)
 		r := g.expr(e.R, prec+1)
 		return parenIf(prec < parentPrec, binExpr(op, l, r))
+	case *core.If:
+		// Go has no expression-if: an immediately-invoked typed closure
+		// preserves branch laziness and stays gofmt-clean. §8.5's ANF
+		// hoisting (S4) will bypass this inside function bodies; it
+		// remains the top-level-initializer fallback.
+		body := []goast.Stmt{
+			&goast.IfStmt{
+				Cond: g.expr(e.Cond, 0),
+				Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.expr(e.Then, 0))}},
+			},
+			returnStmt(g.expr(e.Else, 0)),
+		}
+		return callExpr(funcLit(g.goType(e.Ty), body))
+	case *core.Print:
+		panic("codegen: core.Print is statement-only — a Unit value reached expression context")
 	default:
 		panic(fmt.Sprintf("codegen: node %T arrives in a later slice", e))
+	}
+}
+
+// floatLit emits a Float literal. Finite non-negative-zero values round-trip
+// exactly through the shortest 'g' form; specials cannot be written as Go
+// constants and go through math (imported on demand).
+func (g *gen) floatLit(v float64) goast.Expr {
+	switch {
+	case math.IsNaN(v):
+		g.usesMath = true
+		return callExpr(selector("math", "NaN"))
+	case math.IsInf(v, 1):
+		g.usesMath = true
+		return callExpr(selector("math", "Inf"), intLit(1))
+	case math.IsInf(v, -1):
+		g.usesMath = true
+		return callExpr(selector("math", "Inf"), intLit(-1))
+	case v == 0 && math.Signbit(v):
+		g.usesMath = true
+		return callExpr(selector("math", "Copysign"), intLit(0), intLit(-1))
+	case v < 0:
+		return &goast.UnaryExpr{
+			Op: gotoken.SUB,
+			X:  &goast.BasicLit{Kind: gotoken.FLOAT, Value: strconv.FormatFloat(-v, 'g', -1, 64)},
+		}
+	default:
+		return &goast.BasicLit{Kind: gotoken.FLOAT, Value: strconv.FormatFloat(v, 'g', -1, 64)}
+	}
+}
+
+// stmts emits a Unit-typed expression in statement context — func main()'s
+// body. Prints become fangort calls; ifs become genuine Go if statements.
+func (g *gen) stmts(e core.Expr) []goast.Stmt {
+	switch e := e.(type) {
+	case *core.Print:
+		g.usesFangort = true
+		return []goast.Stmt{exprStmt(callExpr(
+			selector("fangort", g.printFn(e.Arg.Type())), g.expr(e.Arg, 0)))}
+	case *core.If:
+		return []goast.Stmt{ifStmt(g.expr(e.Cond, 0), g.stmts(e.Then), g.stmts(e.Else))}
+	default:
+		// Unit-typed but effect-free — unreachable in S1 (Unit is only
+		// constructible via print); discard defensively.
+		return []goast.Stmt{assignBlank(g.expr(e, 0))}
 	}
 }
 

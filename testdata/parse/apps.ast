@@ -1,0 +1,4 @@
+(module
+  (def main (app (var print) (binop + (int 1) (int 2))))
+  (def a (app (app (var f) (var x)) (var y)))
+  (def b (app (app (var g) (app (var h) (int 1))) (int 2))))

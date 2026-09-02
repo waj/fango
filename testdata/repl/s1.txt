@@ -1,0 +1,31 @@
+fango 0.1 — :help for commands
+> 2.5 : Float
+> "hi!" : String
+> True : Bool
+> False : Bool
+> Bool
+> "y" : String
+> 42
+() : ()
+> x : Int
+> -- TYPE MISMATCH ---------------------------------------- <repl>
+
+fango's (/) only works on Float, but this operand is:
+
+    Int
+
+1| x / 2
+   ^
+
+Note: there is no automatic Int-to-Float conversion — use a
+Float value here, like `2.0` instead of `2`.
+> -- PRINT NOT ALLOWED HERE ------------------------------- <repl>
+
+For now, only `main` can print — `print` inside other
+definitions arrives with effects (S7).
+
+1| x = print 1
+       ^^^^^
+> -2 : Int
+> | | "b" : String
+> 

@@ -35,6 +35,32 @@ func Golden(t *testing.T, path string, got string) {
 	}
 }
 
+// GlobFango lists the *.fango source files under a testdata directory,
+// skipping directories and dot-entries — a stray `.fango/` build directory
+// matches the glob otherwise.
+func GlobFango(t *testing.T, dir string) []string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(dir, "*.fango"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []string
+	for _, m := range matches {
+		base := filepath.Base(m)
+		if strings.HasPrefix(base, ".") {
+			continue
+		}
+		if info, err := os.Stat(m); err != nil || info.IsDir() {
+			continue
+		}
+		files = append(files, m)
+	}
+	if len(files) == 0 {
+		t.Fatalf("no *.fango files in %s", dir)
+	}
+	return files
+}
+
 // DumpErrors renders diagnostics for inclusion in golden files.
 func DumpErrors(errs []diag.Error) string {
 	var b strings.Builder

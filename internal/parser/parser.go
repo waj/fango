@@ -8,6 +8,7 @@ import (
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
+	"github.com/waj/fango/internal/lexer"
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/token"
 )
@@ -127,38 +128,126 @@ func (p *parser) parseDecl() ast.Decl {
 	return &ast.ValueDecl{Name: name.Text, NameSpan: name.Span, Body: body}
 }
 
-func binPrec(k token.Kind) int {
+type assocKind int
+
+const (
+	assocLeft assocKind = iota
+	assocRight
+	assocNon
+)
+
+// binOp is the operator table, Elm's precedences: `++` 5 right-assoc;
+// comparisons 4 non-associative; `+ -` 6 left; `* /` 7 left.
+func binOp(k token.Kind) (int, assocKind) {
 	switch k {
 	case token.PLUS, token.MINUS:
-		return 6
-	case token.STAR: // SLASH joins in S1: `/` is Float-only and S0 has no Float
-		return 7
+		return 6, assocLeft
+	case token.STAR, token.SLASH:
+		return 7, assocLeft
+	case token.PLUSPLUS:
+		return 5, assocRight
+	case token.EQEQ, token.SLASHEQ, token.LT, token.GT, token.LTEQ, token.GTEQ:
+		return 4, assocNon
 	default:
-		return 0
+		return 0, assocLeft
 	}
 }
 
 func (p *parser) parseExpr(minPrec int) ast.Expr {
-	left := p.parsePrimary()
+	left := p.parseUnary()
 	if left == nil {
 		return nil
 	}
 	for {
 		t := p.peekInExpr()
-		prec := binPrec(t.Kind)
+		prec, assoc := binOp(t.Kind)
 		if prec == 0 || prec < minPrec {
 			return left
 		}
 		p.next()
-		right := p.parseExpr(prec + 1) // all S0 operators are left-associative
+		rhsMin := prec + 1
+		if assoc == assocRight {
+			rhsMin = prec
+		}
+		right := p.parseExpr(rhsMin)
 		if right == nil {
 			return nil
 		}
 		left = &ast.BinOp{Op: t.Text, OpSpan: t.Span, L: left, R: right}
+		if assoc == assocNon {
+			if nextPrec, _ := binOp(p.peekInExpr().Kind); nextPrec == prec {
+				p.errorAt(p.peekInExpr().Span, "SYNTAX PROBLEM",
+					"I cannot parse chained comparisons like `a < b < c` — comparisons\ndo not associate. Add parentheses to say what you mean.")
+				return nil
+			}
+		}
 	}
 }
 
-func (p *parser) parsePrimary() ast.Expr {
+// parseUnary handles prefix minus. Any MINUS reaching here is in prefix
+// position (the Pratt loop consumes infix minus after a complete operand),
+// binding tighter than every binary operator, looser than application.
+func (p *parser) parseUnary() ast.Expr {
+	if t := p.peekInExpr(); t.Kind == token.MINUS {
+		p.next()
+		operand := p.parseUnary()
+		if operand == nil {
+			return nil
+		}
+		return &ast.Neg{Operand: operand, Sp: t.Span.Merge(operand.Span())}
+	}
+	return p.parseApply()
+}
+
+// parseApply parses juxtaposition application, left-associative: one head,
+// then any number of argument atoms. `if` may head an expression but is
+// not an atom, so `print if …` needs parens (as in Elm).
+func (p *parser) parseApply() ast.Expr {
+	if p.peekInExpr().Kind == token.KwIf {
+		return p.parseIf()
+	}
+	fn := p.parseAtom()
+	if fn == nil {
+		return nil
+	}
+	for {
+		switch p.peekInExpr().Kind {
+		case token.INT, token.FLOAT, token.STRING, token.LIDENT, token.UIDENT, token.LPAREN:
+			arg := p.parseAtom()
+			if arg == nil {
+				return nil
+			}
+			fn = &ast.App{Fn: fn, Arg: arg}
+		default:
+			return fn
+		}
+	}
+}
+
+func (p *parser) parseIf() ast.Expr {
+	ifTok := p.next()
+	cond := p.parseExpr(1)
+	if cond == nil {
+		return nil
+	}
+	if !p.expect(token.KwThen, "I expect `then` after an `if` condition.") {
+		return nil
+	}
+	thenE := p.parseExpr(1)
+	if thenE == nil {
+		return nil
+	}
+	if !p.expect(token.KwElse, "I expect `else` after the `then` branch — every `if` needs one.") {
+		return nil
+	}
+	elseE := p.parseExpr(1)
+	if elseE == nil {
+		return nil
+	}
+	return &ast.If{Cond: cond, Then: thenE, Else: elseE, Sp: ifTok.Span}
+}
+
+func (p *parser) parseAtom() ast.Expr {
 	t := p.peekInExpr()
 	switch t.Kind {
 	case token.INT:
@@ -169,9 +258,19 @@ func (p *parser) parsePrimary() ast.Expr {
 			v = 0
 		}
 		return &ast.IntLit{Value: v, Sp: t.Span}
+	case token.FLOAT:
+		p.next()
+		v, _ := strconv.ParseFloat(t.Text, 64) // range errors reported by the lexer
+		return &ast.FloatLit{Value: v, Sp: t.Span}
+	case token.STRING:
+		p.next()
+		return &ast.StringLit{Value: lexer.Unescape(t.Text), Sp: t.Span}
 	case token.LIDENT:
 		p.next()
 		return &ast.Var{Name: t.Text, Sp: t.Span}
+	case token.UIDENT:
+		p.next()
+		return &ast.Ctor{Name: t.Text, Sp: t.Span}
 	case token.LPAREN:
 		p.next()
 		e := p.parseExpr(1)

@@ -16,12 +16,40 @@ func ident(name string) *goast.Ident { return goast.NewIdent(name) }
 
 func intLit(v int64) goast.Expr {
 	if v < 0 {
+		// -v overflows for MinInt64; negate via uint64 instead. The
+		// resulting `-9223372036854775808` is a legal Go untyped constant.
 		return &goast.UnaryExpr{
 			Op: gotoken.SUB,
-			X:  &goast.BasicLit{Kind: gotoken.INT, Value: strconv.FormatInt(-v, 10)},
+			X:  &goast.BasicLit{Kind: gotoken.INT, Value: strconv.FormatUint(uint64(-(v+1))+1, 10)},
 		}
 	}
 	return &goast.BasicLit{Kind: gotoken.INT, Value: strconv.FormatInt(v, 10)}
+}
+
+func stringLit(s string) goast.Expr {
+	return &goast.BasicLit{Kind: gotoken.STRING, Value: strconv.Quote(s)}
+}
+
+func funcLit(result goast.Expr, body []goast.Stmt) goast.Expr {
+	return &goast.FuncLit{
+		Type: &goast.FuncType{
+			Params:  &goast.FieldList{},
+			Results: &goast.FieldList{List: []*goast.Field{{Type: result}}},
+		},
+		Body: &goast.BlockStmt{List: body},
+	}
+}
+
+func ifStmt(cond goast.Expr, then, els []goast.Stmt) goast.Stmt {
+	return &goast.IfStmt{
+		Cond: cond,
+		Body: &goast.BlockStmt{List: then},
+		Else: &goast.BlockStmt{List: els},
+	}
+}
+
+func returnStmt(e goast.Expr) goast.Stmt {
+	return &goast.ReturnStmt{Results: []goast.Expr{e}}
 }
 
 func binExpr(op gotoken.Token, l, r goast.Expr) goast.Expr {
@@ -62,13 +90,14 @@ func funcDecl(name string, body ...goast.Stmt) goast.Decl {
 	}
 }
 
-func importDecl(path string) goast.Decl {
-	return &goast.GenDecl{
-		Tok: gotoken.IMPORT,
-		Specs: []goast.Spec{&goast.ImportSpec{
-			Path: &goast.BasicLit{Kind: gotoken.STRING, Value: strconv.Quote(path)},
-		}},
+func importDecl(paths ...string) goast.Decl {
+	specs := make([]goast.Spec, len(paths))
+	for i, p := range paths {
+		specs[i] = &goast.ImportSpec{
+			Path: &goast.BasicLit{Kind: gotoken.STRING, Value: strconv.Quote(p)},
+		}
 	}
+	return &goast.GenDecl{Tok: gotoken.IMPORT, Specs: specs}
 }
 
 func assignBlank(rhs goast.Expr) goast.Stmt {

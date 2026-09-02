@@ -48,6 +48,16 @@ func TestPositive(t *testing.T) {
 		{"x = 1 + 2 * 3", "x : number"},
 		{"x = 40\ny = x + 2", "x : number, y : number"},
 		{"x = 1\ny = x\nmain = y - x", "x : number, y : number, main : number"},
+		{"x = 1.5", "x : Float"},
+		{"x = 1 + 0.5", "x : Float"},
+		{"f = 1 / 2", "f : Float"}, // number literals unify with Float (Elm)
+		{"s = \"a\" ++ \"b\"", "s : String"},
+		{"b = 1 <= 2", "b : Bool"},
+		{"t = True", "t : Bool"},
+		{"x = if True then 1 else 2", "x : number"},
+		{"x = -5", "x : number"},
+		{"x = -2.5", "x : Float"},
+		{"main = print (1 + 2)", "main : ()"},
 	}
 	for _, c := range cases {
 		ck, infos, errs := check(t, c.src)
@@ -77,6 +87,17 @@ func TestNegative(t *testing.T) {
 		{"x = z + 1\nmain = x", "NAMING ERROR", 1},
 		// Use-before-define is a naming error: source-order scoping.
 		{"main = x\nx = 1", "NAMING ERROR", 1},
+		{"x = 1 + \"a\"", "TYPE MISMATCH", 1},                 // WhyOperand
+		{"x = 1 2", "TYPE MISMATCH", 1},                       // WhyCall: not a function
+		{"x = if 1 then 2 else 3", "TYPE MISMATCH", 1},        // WhyIfCondition
+		{"x = if True then 1 else \"a\"", "TYPE MISMATCH", 1}, // WhyIfBranches
+		{"x = 1 == \"a\"", "TYPE MISMATCH", 1},                // WhyCompare
+		{"x = -\"a\"", "TYPE MISMATCH", 1},                    // WhyNegate
+		{"x = \"a\" / \"b\"", "TYPE MISMATCH", 1},             // WhyOpRequires
+		{"x = 1 ++ \"a\"", "TYPE MISMATCH", 1},                // WhyOpRequires ++
+		{"x = Just", "NAMING ERROR", 1},                       // unknown constructor
+		{"x = print 1\nmain = x", "PRINT NOT ALLOWED HERE", 1},
+		{"main = print", "PRINT NEEDS AN ARGUMENT", 1},
 	}
 	for _, c := range cases {
 		_, _, errs := check(t, c.src)

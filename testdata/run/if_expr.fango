@@ -1,0 +1,2 @@
+x = if True then 1 else 2
+main = x + 10

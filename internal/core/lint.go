@@ -7,60 +7,144 @@ import (
 )
 
 // Lint asserts the Core invariants: after elaboration there are no
-// metavariables anywhere, numeric operators have ground types, and every
-// effect row is empty. It runs in every test (and under a debug flag later)
-// — instantiation plumbing bugs are the design's top risk, and this is the
-// tripwire.
-func Lint(p *Prog) []error {
-	var errs []error
+// metavariables anywhere, every operator has the ground types its Go
+// emission requires, and every effect row is empty. It runs in every test
+// (and under a debug flag later) — instantiation plumbing bugs are the
+// design's top risk, and this is the tripwire.
+func Lint(p *Prog, b *types.Builtins) []error {
+	l := &linter{b: b}
 	for _, d := range p.Defs {
-		errs = append(errs, lintType(d.Type, "def "+d.Name)...)
-		errs = append(errs, lintExpr(d.Body, "def "+d.Name)...)
+		l.typ(d.Type, "def "+d.Name)
+		l.expr(d.Body, "def "+d.Name)
 	}
-	return errs
+	return l.errs
 }
 
-func lintExpr(e Expr, where string) []error {
-	var errs []error
-	errs = append(errs, lintType(e.Type(), where)...)
+type linter struct {
+	b    *types.Builtins
+	errs []error
+}
+
+func (l *linter) errorf(format string, args ...any) {
+	l.errs = append(l.errs, fmt.Errorf(format, args...))
+}
+
+// unique returns the TCon unique of a ground scalar type, or -1.
+func (l *linter) unique(t types.Type) int {
+	if con, ok := t.(*types.TCon); ok && len(con.Args) == 0 {
+		return con.Unique
+	}
+	return -1
+}
+
+func (l *linter) expr(e Expr, where string) {
+	l.typ(e.Type(), where)
 	switch e := e.(type) {
-	case *IntLit, *VarRef:
-	case *BinOp:
-		if con, ok := e.Ty.(*types.TCon); !ok || len(con.Args) != 0 {
-			errs = append(errs, fmt.Errorf("%s: BinOp %s has non-ground type %s", where, e.Op, types.Show(e.Ty)))
+	case *IntLit:
+		if l.unique(e.Ty) != l.b.Int.Unique {
+			l.errorf("%s: IntLit typed %s", where, types.Show(e.Ty))
 		}
-		errs = append(errs, lintExpr(e.L, where)...)
-		errs = append(errs, lintExpr(e.R, where)...)
+	case *FloatLit:
+		if l.unique(e.Ty) != l.b.Float.Unique {
+			l.errorf("%s: FloatLit typed %s", where, types.Show(e.Ty))
+		}
+	case *StringLit:
+		if l.unique(e.Ty) != l.b.String.Unique {
+			l.errorf("%s: StringLit typed %s", where, types.Show(e.Ty))
+		}
+	case *BoolLit:
+		if l.unique(e.Ty) != l.b.Bool.Unique {
+			l.errorf("%s: BoolLit typed %s", where, types.Show(e.Ty))
+		}
+	case *VarRef:
+	case *Neg:
+		if u := l.unique(e.Ty); u != l.b.Int.Unique && u != l.b.Float.Unique {
+			l.errorf("%s: Neg typed %s, want Int or Float", where, types.Show(e.Ty))
+		}
+		if l.unique(e.Operand.Type()) != l.unique(e.Ty) {
+			l.errorf("%s: Neg operand type differs from result", where)
+		}
+		l.expr(e.Operand, where)
+	case *BinOp:
+		l.binOp(e, where)
+	case *If:
+		if l.unique(e.Cond.Type()) != l.b.Bool.Unique {
+			l.errorf("%s: If condition typed %s, want Bool", where, types.Show(e.Cond.Type()))
+		}
+		if types.Show(e.Then.Type()) != types.Show(e.Ty) || types.Show(e.Else.Type()) != types.Show(e.Ty) {
+			l.errorf("%s: If branches disagree with result type", where)
+		}
+		l.expr(e.Cond, where)
+		l.expr(e.Then, where)
+		l.expr(e.Else, where)
+	case *Print:
+		u := l.unique(e.Arg.Type())
+		if u != l.b.Int.Unique && u != l.b.Float.Unique && u != l.b.String.Unique && u != l.b.Bool.Unique {
+			l.errorf("%s: Print argument typed %s, not printable", where, types.Show(e.Arg.Type()))
+		}
+		if l.unique(e.Ty) != l.b.Unit.Unique {
+			l.errorf("%s: Print typed %s, want ()", where, types.Show(e.Ty))
+		}
+		l.expr(e.Arg, where)
 	case *App:
-		errs = append(errs, lintExpr(e.Callee, where)...)
+		l.expr(e.Callee, where)
 		for _, a := range e.Args {
-			errs = append(errs, lintExpr(a, where)...)
+			l.expr(a, where)
 		}
 	default:
-		errs = append(errs, fmt.Errorf("%s: unhandled Core node %T", where, e))
+		l.errorf("%s: unhandled Core node %T", where, e)
 	}
-	return errs
 }
 
-func lintType(t types.Type, where string) []error {
+func (l *linter) binOp(e *BinOp, where string) {
+	lu, ru, res := l.unique(e.L.Type()), l.unique(e.R.Type()), l.unique(e.Ty)
+	numeric := func(u int) bool { return u == l.b.Int.Unique || u == l.b.Float.Unique }
+	orderable := func(u int) bool { return numeric(u) || u == l.b.String.Unique }
+	equatable := func(u int) bool { return orderable(u) || u == l.b.Bool.Unique }
+
+	switch e.Op {
+	case "+", "-", "*":
+		if !numeric(res) || lu != res || ru != res {
+			l.errorf("%s: BinOp %s has non-numeric or mismatched types", where, e.Op)
+		}
+	case "/":
+		if res != l.b.Float.Unique || lu != res || ru != res {
+			l.errorf("%s: BinOp / must be Float throughout", where)
+		}
+	case "++":
+		if res != l.b.String.Unique || lu != res || ru != res {
+			l.errorf("%s: BinOp ++ must be String throughout", where)
+		}
+	case "==", "/=":
+		if res != l.b.Bool.Unique || lu != ru || !equatable(lu) {
+			l.errorf("%s: BinOp %s wants matching equatable operands and Bool result", where, e.Op)
+		}
+	case "<", ">", "<=", ">=":
+		if res != l.b.Bool.Unique || lu != ru || !orderable(lu) {
+			l.errorf("%s: BinOp %s wants matching orderable operands and Bool result", where, e.Op)
+		}
+	default:
+		l.errorf("%s: unhandled operator %q", where, e.Op)
+	}
+	l.expr(e.L, where)
+	l.expr(e.R, where)
+}
+
+func (l *linter) typ(t types.Type, where string) {
 	switch t := t.(type) {
 	case *types.TVar:
-		return []error{fmt.Errorf("%s: metavariable survived elaboration", where)}
+		l.errorf("%s: metavariable survived elaboration", where)
 	case *types.TCon:
-		var errs []error
 		for _, a := range t.Args {
-			errs = append(errs, lintType(a, where)...)
+			l.typ(a, where)
 		}
-		return errs
 	case *types.TFun:
-		var errs []error
 		if !t.Eff.Empty() {
-			errs = append(errs, fmt.Errorf("%s: non-empty effect row before S7", where))
+			l.errorf("%s: non-empty effect row before S7", where)
 		}
-		errs = append(errs, lintType(t.Arg, where)...)
-		errs = append(errs, lintType(t.Ret, where)...)
-		return errs
+		l.typ(t.Arg, where)
+		l.typ(t.Ret, where)
 	default:
-		return []error{fmt.Errorf("%s: unhandled type %T", where, t)}
+		l.errorf("%s: unhandled type %T", where, t)
 	}
 }

@@ -1,0 +1,10 @@
+(module
+  (def b (int 7)))
+-- errors --
+-- SYNTAX PROBLEM -------------------------- err_cmp_chain.fango
+
+I cannot parse chained comparisons like `a < b < c` — comparisons
+do not associate. Add parentheses to say what you mean.
+
+1| a = 1 < 2 < 3
+             ^

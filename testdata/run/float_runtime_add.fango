@@ -1,0 +1,2 @@
+tenth = 0.1
+main = print (tenth + 0.2)

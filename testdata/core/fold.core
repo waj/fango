@@ -1,0 +1,5 @@
+(core
+  (def a Int (int -9223372036854775808 Int))
+  (def b Float (float +Inf Float))
+  (def c Int (int -5 Int))
+  (def main Int (var a Int)))

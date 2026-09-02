@@ -16,13 +16,7 @@ import (
 )
 
 func TestGoldens(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join("..", "..", "testdata", "core", "*.fango"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) == 0 {
-		t.Fatal("no testdata/core/*.fango files")
-	}
+	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "core"))
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			content, err := os.ReadFile(path)
@@ -50,7 +44,7 @@ func TestGoldens(t *testing.T) {
 				t.Fatalf("elaborate errors: %v", elabErrs)
 			}
 			// The Core linter runs on every elaborated program in tests.
-			if lintErrs := core.Lint(prog); len(lintErrs) > 0 {
+			if lintErrs := core.Lint(prog, b); len(lintErrs) > 0 {
 				t.Fatalf("core lint: %v", lintErrs)
 			}
 			testutil.Golden(t, strings.TrimSuffix(path, ".fango")+".core", core.Dump(prog))

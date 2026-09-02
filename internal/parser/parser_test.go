@@ -13,13 +13,7 @@ import (
 )
 
 func TestGoldens(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join("..", "..", "testdata", "parse", "*.fango"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) == 0 {
-		t.Fatal("no testdata/parse/*.fango files")
-	}
+	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "parse"))
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			content, err := os.ReadFile(path)

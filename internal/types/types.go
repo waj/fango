@@ -103,6 +103,6 @@ func NewBuiltins(s *Supply) *Builtins {
 		Float:  mk("Float"),
 		String: mk("String"),
 		Bool:   mk("Bool"),
-		Unit:   mk("Unit"),
+		Unit:   mk("()"), // displayed Elm-style; identity is the Unique, not the name
 	}
 }

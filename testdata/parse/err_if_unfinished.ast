@@ -1,0 +1,8 @@
+(module)
+-- errors --
+-- UNFINISHED PROGRAM ------------------ err_if_unfinished.fango
+
+I got to the end of the input too soon. I expect `else` after the `then` branch — every `if` needs one.
+
+1| x = if a then 1
+                 ^

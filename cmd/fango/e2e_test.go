@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/waj/fango/internal/eval"
+	"github.com/waj/fango/internal/testutil"
+	"github.com/waj/fango/internal/types"
 )
 
 // The differential end-to-end suite (DESIGN.md §11): every
@@ -44,13 +46,7 @@ func cliBinary(t *testing.T) string {
 }
 
 func TestDifferential(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join("..", "..", "testdata", "run", "*.fango"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) == 0 {
-		t.Fatal("no testdata/run/*.fango files")
-	}
+	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "run"))
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			base := strings.TrimSuffix(path, ".fango")
@@ -64,7 +60,9 @@ func TestDifferential(t *testing.T) {
 			}
 			expected := string(expData)
 
-			// Backend 1: the Core interpreter.
+			// Backend 1: the Core interpreter. A Unit-typed main is
+			// observed through its print output; any other main through
+			// its value, shown via the shared fangort formatter.
 			var stderr bytes.Buffer
 			prog, ck, ok := compileFile(path, &stderr)
 			if !ok {
@@ -72,7 +70,8 @@ func TestDifferential(t *testing.T) {
 			}
 			env := eval.NewEnv()
 			env.DefineProg(prog)
-			v, err := eval.Force(context.Background(), "main", env)
+			var printed bytes.Buffer
+			v, err := eval.Force(context.Background(), "main", env, &printed)
 			if err != nil {
 				t.Fatalf("eval: %v", err)
 			}
@@ -82,7 +81,12 @@ func TestDifferential(t *testing.T) {
 					mainTy = d.Type
 				}
 			}
-			evalOut := eval.Show(v, mainTy, ck.B) + "\n"
+			var evalOut string
+			if con, isCon := mainTy.(*types.TCon); isCon && con.Unique == ck.B.Unit.Unique {
+				evalOut = printed.String()
+			} else {
+				evalOut = eval.ShowForPrint(v, mainTy, ck.B) + "\n"
+			}
 			if evalOut != expected {
 				t.Errorf("interpreter output:\n%q\nwant:\n%q", evalOut, expected)
 			}
@@ -121,23 +125,26 @@ func runErrorCase(t *testing.T, path, wantSubstr string) {
 }
 
 // Determinism: compiling the same file twice yields byte-identical Go, and
-// the output is gofmt-idempotent (emitted via go/format.Node).
+// the output is gofmt-idempotent (emitted via go/format.Node). Covers a
+// value program, a printing (Unit main) program, and an IIFE-if program.
 func TestEmitDeterministicAndFormatted(t *testing.T) {
-	path := filepath.Join("..", "..", "testdata", "run", "arith0.fango")
-	var stderr bytes.Buffer
-	a, ok := emitGo(path, &stderr)
-	if !ok {
-		t.Fatalf("emit failed:\n%s", stderr.String())
-	}
-	b, _ := emitGo(path, &stderr)
-	if !bytes.Equal(a, b) {
-		t.Error("two compilations of the same file differ")
-	}
-	formatted, err := format.Source(a)
-	if err != nil {
-		t.Fatalf("generated Go does not parse: %v", err)
-	}
-	if !bytes.Equal(formatted, a) {
-		t.Errorf("generated Go is not gofmt-idempotent:\n%s", a)
+	for _, name := range []string{"arith0.fango", "print_float.fango", "if_expr.fango"} {
+		path := filepath.Join("..", "..", "testdata", "run", name)
+		var stderr bytes.Buffer
+		a, ok := emitGo(path, &stderr)
+		if !ok {
+			t.Fatalf("%s: emit failed:\n%s", name, stderr.String())
+		}
+		b, _ := emitGo(path, &stderr)
+		if !bytes.Equal(a, b) {
+			t.Errorf("%s: two compilations of the same file differ", name)
+		}
+		formatted, err := format.Source(a)
+		if err != nil {
+			t.Fatalf("%s: generated Go does not parse: %v", name, err)
+		}
+		if !bytes.Equal(formatted, a) {
+			t.Errorf("%s: generated Go is not gofmt-idempotent:\n%s", name, a)
+		}
 	}
 }

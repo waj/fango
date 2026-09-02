@@ -1,0 +1,8 @@
+(module
+  (def f (binop + (float 1.5) (binop * (float 2) (float 0.5))))
+  (def s (binop ++ (string "a") (binop ++ (string "b") (string "c"))))
+  (def t (ctor True))
+  (def u (ctor False))
+  (def c (binop <= (int 1) (int 2)))
+  (def e (binop == (string "x") (string "y")))
+  (def d (binop / (float 1) (float 2))))

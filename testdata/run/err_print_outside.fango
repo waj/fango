@@ -1,0 +1,2 @@
+x = print 1
+main = x

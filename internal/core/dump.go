@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/waj/fango/internal/types"
@@ -24,6 +25,18 @@ func DumpExpr(e Expr) string {
 	switch e := e.(type) {
 	case *IntLit:
 		return fmt.Sprintf("(int %d %s)", e.Val, types.Show(e.Ty))
+	case *FloatLit:
+		return fmt.Sprintf("(float %s %s)", strconv.FormatFloat(e.Val, 'g', -1, 64), types.Show(e.Ty))
+	case *StringLit:
+		return fmt.Sprintf("(string %q %s)", e.Val, types.Show(e.Ty))
+	case *BoolLit:
+		return fmt.Sprintf("(bool %t %s)", e.Val, types.Show(e.Ty))
+	case *Neg:
+		return fmt.Sprintf("(neg %s %s)", types.Show(e.Ty), DumpExpr(e.Operand))
+	case *If:
+		return fmt.Sprintf("(if %s %s %s %s)", types.Show(e.Ty), DumpExpr(e.Cond), DumpExpr(e.Then), DumpExpr(e.Else))
+	case *Print:
+		return fmt.Sprintf("(print %s)", DumpExpr(e.Arg))
 	case *VarRef:
 		if len(e.TyArgs) > 0 {
 			args := make([]string, len(e.TyArgs))

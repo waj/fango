@@ -1,0 +1,4 @@
+(module
+  (def x (if (var a) (int 1) (int 2)))
+  (def y (if (var a) (int 1) (if (var b) (int 2) (int 3))))
+  (def main (app (var print) (if (binop == (int 1) (int 1)) (string "y") (string "n")))))

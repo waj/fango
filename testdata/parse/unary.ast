@@ -1,0 +1,5 @@
+(module
+  (def a (binop - (neg (int 1)) (neg (int 2))))
+  (def b (neg (binop + (int 1) (int 2))))
+  (def c (binop * (neg (var x)) (int 3)))
+  (def d (binop - (int 1) (neg (var x)))))

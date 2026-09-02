@@ -1,5 +1,5 @@
 (module
-  (def x (int 2))
+  (def x (app (int 2) (var y)))
   (def z (int 4)))
 -- errors --
 -- SYNTAX PROBLEM --------------------------- err_badstart.fango
@@ -14,4 +14,4 @@ I was expecting a declaration here, like `name = expression`.
 The expression seemed complete, but then I ran into this.
 
 3|   y = 3
-     ^
+       ^

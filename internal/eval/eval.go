@@ -6,8 +6,10 @@ package eval
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/runtime/fangort"
 )
 
 // Value is the interpreter's uniform representation (DESIGN.md §9.5):
@@ -52,24 +54,27 @@ func (e *Env) DefineProg(p *core.Prog) {
 	}
 }
 
-// interp carries the cancellation context; ctx is polled every pollEvery
-// evaluation steps so Ctrl-C interrupts runaway REPL expressions.
+// interp carries the cancellation context and the print destination; ctx is
+// polled every pollEvery evaluation steps so Ctrl-C interrupts runaway REPL
+// expressions.
 type interp struct {
 	ctx   context.Context
 	env   *Env
+	out   io.Writer
 	steps int
 }
 
 const pollEvery = 4096
 
-// Eval evaluates a Core expression under env.
-func Eval(ctx context.Context, e core.Expr, env *Env) (Value, error) {
-	return (&interp{ctx: ctx, env: env}).eval(e)
+// Eval evaluates a Core expression under env. Print output goes to out —
+// the REPL passes its own writer, the differential harness a buffer.
+func Eval(ctx context.Context, e core.Expr, env *Env, out io.Writer) (Value, error) {
+	return (&interp{ctx: ctx, env: env, out: out}).eval(e)
 }
 
 // Force evaluates (and memoizes) the named top-level binding.
-func Force(ctx context.Context, name string, env *Env) (Value, error) {
-	return (&interp{ctx: ctx, env: env}).force(name)
+func Force(ctx context.Context, name string, env *Env, out io.Writer) (Value, error) {
+	return (&interp{ctx: ctx, env: env, out: out}).force(name)
 }
 
 func (in *interp) eval(e core.Expr) (Value, error) {
@@ -84,8 +89,27 @@ func (in *interp) eval(e core.Expr) (Value, error) {
 	switch e := e.(type) {
 	case *core.IntLit:
 		return e.Val, nil
+	case *core.FloatLit:
+		return e.Val, nil
+	case *core.StringLit:
+		return e.Val, nil
+	case *core.BoolLit:
+		return e.Val, nil
 	case *core.VarRef:
 		return in.force(e.Name)
+	case *core.Neg:
+		v, err := in.eval(e.Operand)
+		if err != nil {
+			return nil, err
+		}
+		switch v := v.(type) {
+		case int64:
+			return -v, nil
+		case float64:
+			return -v, nil
+		default:
+			return nil, fmt.Errorf("eval: negating a %T", v)
+		}
 	case *core.BinOp:
 		l, err := in.eval(e.L)
 		if err != nil {
@@ -96,6 +120,39 @@ func (in *interp) eval(e core.Expr) (Value, error) {
 			return nil, err
 		}
 		return applyBinOp(e.Op, l, r)
+	case *core.If:
+		cond, err := in.eval(e.Cond)
+		if err != nil {
+			return nil, err
+		}
+		if cond.(bool) {
+			return in.eval(e.Then)
+		}
+		return in.eval(e.Else)
+	case *core.Print:
+		v, err := in.eval(e.Arg)
+		if err != nil {
+			return nil, err
+		}
+		// The one shared formatting implementation (fangort), with only
+		// the newline added locally — mirroring fangort.PrintX.
+		var s string
+		switch v := v.(type) {
+		case int64:
+			s = fangort.ShowInt(v)
+		case float64:
+			s = fangort.ShowFloat(v)
+		case string:
+			s = fangort.ShowString(v)
+		case bool:
+			s = fangort.ShowBool(v)
+		default:
+			return nil, fmt.Errorf("eval: printing a %T", v)
+		}
+		if _, err := fmt.Fprintln(in.out, s); err != nil {
+			return nil, err
+		}
+		return struct{}{}, nil
 	case *core.App:
 		// Unreachable until elaboration produces App nodes.
 		return nil, fmt.Errorf("eval: core.App arrives in S3")
@@ -125,20 +182,84 @@ func (in *interp) force(name string) (Value, error) {
 	return v, nil
 }
 
+// applyBinOp dispatches on the left value's dynamic type — bijective with
+// the solved Core type. Int arithmetic wraps (int64), Float is IEEE (±Inf,
+// NaN, no panics) — the exact semantics elaborate's constant folder and the
+// compiled backend's native operators implement.
 func applyBinOp(op string, l, r Value) (Value, error) {
-	li, lok := l.(int64)
-	ri, rok := r.(int64)
-	if !lok || !rok {
-		return nil, fmt.Errorf("eval: (%s) on non-Int values %T, %T", op, l, r)
+	switch lv := l.(type) {
+	case int64:
+		rv := r.(int64)
+		switch op {
+		case "+":
+			return lv + rv, nil
+		case "-":
+			return lv - rv, nil
+		case "*":
+			return lv * rv, nil
+		case "==":
+			return lv == rv, nil
+		case "/=":
+			return lv != rv, nil
+		case "<":
+			return lv < rv, nil
+		case ">":
+			return lv > rv, nil
+		case "<=":
+			return lv <= rv, nil
+		case ">=":
+			return lv >= rv, nil
+		}
+	case float64:
+		rv := r.(float64)
+		switch op {
+		case "+":
+			return lv + rv, nil
+		case "-":
+			return lv - rv, nil
+		case "*":
+			return lv * rv, nil
+		case "/":
+			return lv / rv, nil
+		case "==":
+			return lv == rv, nil
+		case "/=":
+			return lv != rv, nil
+		case "<":
+			return lv < rv, nil
+		case ">":
+			return lv > rv, nil
+		case "<=":
+			return lv <= rv, nil
+		case ">=":
+			return lv >= rv, nil
+		}
+	case string:
+		rv := r.(string)
+		switch op {
+		case "++":
+			return lv + rv, nil
+		case "==":
+			return lv == rv, nil
+		case "/=":
+			return lv != rv, nil
+		case "<":
+			return lv < rv, nil
+		case ">":
+			return lv > rv, nil
+		case "<=":
+			return lv <= rv, nil
+		case ">=":
+			return lv >= rv, nil
+		}
+	case bool:
+		rv := r.(bool)
+		switch op {
+		case "==":
+			return lv == rv, nil
+		case "/=":
+			return lv != rv, nil
+		}
 	}
-	switch op {
-	case "+":
-		return li + ri, nil
-	case "-":
-		return li - ri, nil
-	case "*":
-		return li * ri, nil
-	default:
-		return nil, fmt.Errorf("eval: unhandled operator %q", op)
-	}
+	return nil, fmt.Errorf("eval: (%s) on %T values — the linter should have rejected this", op, l)
 }

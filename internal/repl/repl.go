@@ -139,15 +139,20 @@ func (s *Session) declInput(toks []token.Token, f *source.File) inputResult {
 	vd := m.Decls[0].(*ast.ValueDecl)
 	redefining := s.ck.Env.Has(vd.Name)
 	// Check the body BEFORE binding: a failed definition must not install
-	// a broken name into the session.
-	ty, inferErrs := s.ck.Expr(vd.Body)
+	// a broken name into the session. REPL declarations never allow the
+	// print cheat — evaluate the expression at the prompt instead.
+	ty, inferErrs := s.ck.ExprWhere(vd.Body, false)
 	if len(inferErrs) > 0 {
 		diag.Render(s.out, inferErrs)
 		return inputDone
 	}
-	s.ck.Env.Bind(vd.Name, types.Scheme{Body: ty})
 	info := infer.DeclInfo{Name: vd.Name, NameSpan: vd.NameSpan, Type: ty, Body: vd.Body}
-	def := elaborate.Decl(info, s.ck)
+	def, elabErrs := elaborate.Decl(info, s.ck)
+	if len(elabErrs) > 0 {
+		diag.Render(s.out, elabErrs)
+		return inputDone
+	}
+	s.ck.Env.Bind(vd.Name, types.Scheme{Body: ty})
 	s.env.Define(def.Name, def.Body)
 	if redefining {
 		s.gen++
@@ -170,8 +175,12 @@ func (s *Session) exprInput(toks []token.Token, f *source.File) inputResult {
 		diag.Render(s.out, inferErrs)
 		return inputDone
 	}
-	coreExpr := elaborate.Expr(e, s.ck)
-	v, err := eval.Eval(context.Background(), coreExpr, s.env)
+	coreExpr, elabErrs := elaborate.Expr(e, s.ck)
+	if len(elabErrs) > 0 {
+		diag.Render(s.out, elabErrs)
+		return inputDone
+	}
+	v, err := eval.Eval(context.Background(), coreExpr, s.env, s.out)
 	if err != nil {
 		fmt.Fprintf(s.out, "runtime error: %v\n", err)
 		return inputDone

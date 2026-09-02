@@ -6,6 +6,7 @@ package lexer
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/source"
@@ -38,7 +39,9 @@ func (l *lexer) run() {
 		c := l.f.Content[l.pos]
 		switch {
 		case isDigit(c):
-			l.lexInt(start)
+			l.lexNumber(start)
+		case c == '"':
+			l.lexString(start)
 		case isLower(c):
 			l.lexIdent(start, false)
 		case isUpper(c):
@@ -94,17 +97,125 @@ func (l *lexer) skipBlockComment() {
 		"I got to the end of the file while looking for the `-}` that closes\nthis comment."))
 }
 
-func (l *lexer) lexInt(start int) {
-	for l.pos < len(l.f.Content) && isDigit(l.f.Content[l.pos]) {
-		l.pos++
+// lexNumber scans an INT, promoting to FLOAT on `digits '.' digits [exp]`
+// or `digits exp` (Elm: `1e3` is a Float; `.5` and `1.` are not literals).
+func (l *lexer) lexNumber(start int) {
+	l.scanDigits()
+	isFloat := false
+	if l.peekAt(0) == '.' && isDigit(l.peekAt(1)) {
+		isFloat = true
+		l.pos++ // '.'
+		l.scanDigits()
+	}
+	if l.scanExponent() {
+		isFloat = true
 	}
 	text := string(l.f.Content[start:l.pos])
+	sp := source.Span{File: l.f, Start: start, End: l.pos}
+	if isFloat {
+		if v, err := strconv.ParseFloat(text, 64); err != nil || v > 1.7976931348623157e308 {
+			l.errs = append(l.errs, diag.Errorf(sp, "NUMBER TOO BIG",
+				"This number is too large for a 64-bit Float:\n\n    %s", text))
+		}
+		l.emit(token.FLOAT, start, l.pos)
+		return
+	}
 	if _, err := strconv.ParseInt(text, 10, 64); err != nil {
-		sp := source.Span{File: l.f, Start: start, End: l.pos}
 		l.errs = append(l.errs, diag.Errorf(sp, "NUMBER TOO BIG",
 			"This integer does not fit in 64 bits:\n\n    %s", text))
 	}
 	l.emit(token.INT, start, l.pos)
+}
+
+func (l *lexer) scanDigits() {
+	for l.pos < len(l.f.Content) && isDigit(l.f.Content[l.pos]) {
+		l.pos++
+	}
+}
+
+// scanExponent consumes `[eE][+-]?digits` if fully present.
+func (l *lexer) scanExponent() bool {
+	c := l.peekAt(0)
+	if c != 'e' && c != 'E' {
+		return false
+	}
+	next := l.peekAt(1)
+	if isDigit(next) {
+		l.pos += 2
+	} else if (next == '+' || next == '-') && isDigit(l.peekAt(2)) {
+		l.pos += 3
+	} else {
+		return false // `1e` alone: leave the e for the identifier lexer
+	}
+	l.scanDigits()
+	return true
+}
+
+// lexString scans a single-line string literal. The token Text keeps the
+// raw source including quotes; Unescape decodes it. An unclosed string is
+// its own error title — deliberately not the parser's unexpected-EOF, so
+// the REPL errors immediately instead of prompting for a continuation.
+func (l *lexer) lexString(start int) {
+	l.pos++ // opening quote
+	for l.pos < len(l.f.Content) {
+		switch c := l.f.Content[l.pos]; c {
+		case '"':
+			l.pos++
+			l.emit(token.STRING, start, l.pos)
+			return
+		case '\n':
+			sp := source.Span{File: l.f, Start: start, End: l.pos}
+			l.errs = append(l.errs, diag.Errorf(sp, "UNCLOSED STRING",
+				"This string never gets a closing double quote on its line.\nStrings cannot span lines."))
+			l.emit(token.STRING, start, l.pos)
+			return
+		case '\\':
+			switch l.peekAt(1) {
+			case '\\', '"', 'n', 't', 'r':
+				l.pos += 2
+			default:
+				sp := source.Span{File: l.f, Start: l.pos, End: l.pos + 2}
+				l.errs = append(l.errs, diag.Errorf(sp, "UNKNOWN ESCAPE",
+					"I do not recognize this escape sequence. Valid escapes are:\n\n    \\\\  \\\"  \\n  \\t  \\r"))
+				l.pos += 2
+			}
+		default:
+			l.pos++
+		}
+	}
+	sp := source.Span{File: l.f, Start: start, End: l.pos}
+	l.errs = append(l.errs, diag.Errorf(sp, "UNCLOSED STRING",
+		"I got to the end of the file while looking for the closing double\nquote of this string."))
+	l.emit(token.STRING, start, l.pos)
+}
+
+// Unescape decodes a raw STRING token text (including its quotes) into the
+// string value. The lexer has already validated the escapes.
+func Unescape(raw string) string {
+	raw = strings.TrimPrefix(raw, `"`)
+	raw = strings.TrimSuffix(raw, `"`)
+	if !strings.Contains(raw, `\`) {
+		return raw
+	}
+	var b strings.Builder
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '\\' || i+1 == len(raw) {
+			b.WriteByte(raw[i])
+			continue
+		}
+		i++
+		switch raw[i] {
+		case 'n':
+			b.WriteByte('\n')
+		case 't':
+			b.WriteByte('\t')
+		case 'r':
+			b.WriteByte('\r')
+		default: // \\ and \"
+			b.WriteByte(raw[i])
+		}
+	}
+	return b.String()
 }
 
 func (l *lexer) lexIdent(start int, upper bool) {
@@ -182,14 +293,14 @@ func isIdentChar(c byte) bool {
 // DumpTokens renders tokens in the golden-test format: one token per line,
 // "line:col KIND text".
 func DumpTokens(toks []token.Token) string {
-	out := ""
+	var b strings.Builder
 	for _, t := range toks {
 		p := t.Pos()
 		if t.Kind == token.EOF {
-			out += fmt.Sprintf("%d:%d EOF\n", p.Line, p.Col)
+			fmt.Fprintf(&b, "%d:%d EOF\n", p.Line, p.Col)
 		} else {
-			out += fmt.Sprintf("%d:%d %s %s\n", p.Line, p.Col, t.Kind, t.Text)
+			fmt.Fprintf(&b, "%d:%d %s %s\n", p.Line, p.Col, t.Kind, t.Text)
 		}
 	}
-	return out
+	return b.String()
 }

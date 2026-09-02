@@ -1,0 +1,5 @@
+a = 1 < 2
+b = "x" == "y"
+c = 1.5 >= 0.5
+d = True == False
+main = if a then 1 else 2

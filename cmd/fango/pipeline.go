@@ -48,7 +48,7 @@ func compileFile(entry string, stderr io.Writer) (*core.Prog, *infer.Checker, bo
 	if report(stderr, elabErrs) {
 		return nil, nil, false
 	}
-	if lintErrs := core.Lint(prog); len(lintErrs) > 0 {
+	if lintErrs := core.Lint(prog, ck.B); len(lintErrs) > 0 {
 		fmt.Fprintf(stderr, "fango: internal compiler error: Core invariants violated:\n")
 		for _, e := range lintErrs {
 			fmt.Fprintf(stderr, "  %v\n", e)

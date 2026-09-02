@@ -2,6 +2,7 @@ package ast
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -35,10 +36,22 @@ func DumpExpr(e Expr) string {
 	switch e := e.(type) {
 	case *IntLit:
 		return fmt.Sprintf("(int %d)", e.Value)
+	case *FloatLit:
+		return fmt.Sprintf("(float %s)", strconv.FormatFloat(e.Value, 'g', -1, 64))
+	case *StringLit:
+		return fmt.Sprintf("(string %q)", e.Value)
 	case *Var:
 		return fmt.Sprintf("(var %s)", e.Name)
+	case *Ctor:
+		return fmt.Sprintf("(ctor %s)", e.Name)
+	case *App:
+		return fmt.Sprintf("(app %s %s)", DumpExpr(e.Fn), DumpExpr(e.Arg))
+	case *Neg:
+		return fmt.Sprintf("(neg %s)", DumpExpr(e.Operand))
 	case *BinOp:
 		return fmt.Sprintf("(binop %s %s %s)", e.Op, DumpExpr(e.L), DumpExpr(e.R))
+	case *If:
+		return fmt.Sprintf("(if %s %s %s)", DumpExpr(e.Cond), DumpExpr(e.Then), DumpExpr(e.Else))
 	default:
 		panic(fmt.Sprintf("ast.DumpExpr: unhandled %T", e))
 	}

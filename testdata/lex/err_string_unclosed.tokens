@@ -1,0 +1,23 @@
+1:1 LIDENT x
+1:3 EQ =
+1:5 STRING "never closed
+2:1 LIDENT y
+2:3 EQ =
+2:5 STRING "eof one
+2:13 EOF
+-- errors --
+-- UNCLOSED STRING ------------------- err_string_unclosed.fango
+
+This string never gets a closing double quote on its line.
+Strings cannot span lines.
+
+1| x = "never closed
+       ^^^^^^^^^^^^^
+
+-- UNCLOSED STRING ------------------- err_string_unclosed.fango
+
+I got to the end of the file while looking for the closing double
+quote of this string.
+
+2| y = "eof one
+       ^^^^^^^^

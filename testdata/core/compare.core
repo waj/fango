@@ -1,0 +1,6 @@
+(core
+  (def a Bool (binop < Bool (int 1 Int) (int 2 Int)))
+  (def b Bool (binop == Bool (string "x" String) (string "y" String)))
+  (def c Bool (binop >= Bool (float 1.5 Float) (float 0.5 Float)))
+  (def d Bool (binop == Bool (bool true Bool) (bool false Bool)))
+  (def main Int (if Int (var a Bool) (int 1 Int) (int 2 Int))))

@@ -1,0 +1,13 @@
+1:1 LIDENT x
+1:3 EQ =
+1:5 STRING "bad \q escape"
+2:1 EOF
+-- errors --
+-- UNKNOWN ESCAPE ---------------------- err_string_escape.fango
+
+I do not recognize this escape sequence. Valid escapes are:
+
+    \\  \"  \n  \t  \r
+
+1| x = "bad \q escape"
+            ^^
