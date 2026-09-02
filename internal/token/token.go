@@ -35,10 +35,11 @@ const (
 	GTEQ     // >=
 	ARROW    // ->
 	BACKSLASH
-	COLON  // :
-	PIPE   // |
-	LBRACE // {
-	RBRACE // }
+	COLON      // :
+	PIPE       // |
+	LBRACE     // {
+	RBRACE     // }
+	UNDERSCORE // _ (wildcard pattern)
 
 	// Reserved keywords.
 	KwModule
@@ -64,7 +65,7 @@ var kindNames = map[Kind]string{
 	PLUSPLUS: "PLUSPLUS", EQEQ: "EQEQ", SLASHEQ: "SLASHEQ",
 	LT: "LT", GT: "GT", LTEQ: "LTEQ", GTEQ: "GTEQ",
 	ARROW: "ARROW", BACKSLASH: "BACKSLASH", COLON: "COLON", PIPE: "PIPE",
-	LBRACE: "LBRACE", RBRACE: "RBRACE",
+	LBRACE: "LBRACE", RBRACE: "RBRACE", UNDERSCORE: "UNDERSCORE",
 	KwModule: "module", KwExposing: "exposing", KwLet: "let", KwIn: "in",
 	KwIf: "if", KwThen: "then", KwElse: "else", KwCase: "case", KwOf: "of",
 	KwType: "type", KwEffect: "effect", KwHandle: "handle", KwResume: "resume",

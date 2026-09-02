@@ -1,0 +1,23 @@
+1:1 LIDENT f
+1:3 LIDENT x
+1:5 EQ =
+2:5 case case
+2:10 LIDENT x
+2:12 of of
+3:9 UNDERSCORE _
+3:11 ARROW ->
+3:14 INT 1
+5:1 LIDENT bad
+5:5 EQ =
+6:1 EOF
+-- errors --
+-- NAMING PROBLEM ----------------------------- underscore.fango
+
+Names cannot start with an underscore:
+
+    _name
+
+A lone `_` is the wildcard pattern; names must start with a letter.
+
+5| bad = _name
+         ^^^^^

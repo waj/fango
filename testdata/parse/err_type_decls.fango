@@ -1,0 +1,7 @@
+type shape = Circle Float
+
+type Shape2 = circle Float
+
+type Shape3 = Circle Float |
+
+type Shape4

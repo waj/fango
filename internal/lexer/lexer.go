@@ -46,6 +46,8 @@ func (l *lexer) run() {
 			l.lexIdent(start, false)
 		case isUpper(c):
 			l.lexIdent(start, true)
+		case c == '_':
+			l.lexUnderscore(start)
 		default:
 			l.lexOperator(start)
 		}
@@ -230,6 +232,23 @@ func (l *lexer) lexIdent(start int, upper bool) {
 	} else {
 		l.emit(token.LIDENT, start, l.pos)
 	}
+}
+
+// lexUnderscore scans `_` (the wildcard pattern). A leading underscore on a
+// name is rejected here, Elm-style, so the parser never sees one.
+func (l *lexer) lexUnderscore(start int) {
+	l.pos++
+	if l.pos < len(l.f.Content) && isIdentChar(l.f.Content[l.pos]) {
+		for l.pos < len(l.f.Content) && isIdentChar(l.f.Content[l.pos]) {
+			l.pos++
+		}
+		sp := source.Span{File: l.f, Start: start, End: l.pos}
+		l.errs = append(l.errs, diag.Errorf(sp, "NAMING PROBLEM",
+			"Names cannot start with an underscore:\n\n    %s\n\nA lone `_` is the wildcard pattern; names must start with a letter.",
+			string(l.f.Content[start:l.pos])))
+		return
+	}
+	l.emit(token.UNDERSCORE, start, l.pos)
 }
 
 var twoCharOps = []struct {

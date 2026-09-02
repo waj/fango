@@ -115,13 +115,23 @@ type TFunExpr struct {
 	Arg, Ret TypeExpr
 }
 
+// TApp is type application, `Maybe Int`. The head is always an uppercase
+// name — type variables cannot head applications (no higher kinds, §8.4).
+type TApp struct {
+	Name   string
+	NameSp source.Span
+	Args   []TypeExpr // non-empty
+}
+
 func (*TName) isTypeExpr()    {}
 func (*TVarName) isTypeExpr() {}
 func (*TFunExpr) isTypeExpr() {}
+func (*TApp) isTypeExpr()     {}
 
 func (t *TName) Span() source.Span    { return t.Sp }
 func (t *TVarName) Span() source.Span { return t.Sp }
 func (t *TFunExpr) Span() source.Span { return t.Arg.Span().Merge(t.Ret.Span()) }
+func (t *TApp) Span() source.Span     { return t.NameSp.Merge(t.Args[len(t.Args)-1].Span()) }
 
 // BinOp stays a distinct node rather than desugaring to App: inference
 // special-cases numeric operators, and errors should point at the operator.
@@ -129,6 +139,76 @@ type BinOp struct {
 	Op     string // "+", "-", "*", "/"
 	OpSpan source.Span
 	L, R   Expr
+}
+
+// Case is `case scrutinee of` followed by branches aligned at the column of
+// the first pattern token (layout rule 2, §5). Branch bodies are statement
+// blocks (§3.6) or inline expressions.
+type Case struct {
+	Scrutinee Expr
+	Branches  []CaseBranch
+	Sp        source.Span // the `case` keyword
+}
+
+type CaseBranch struct {
+	Pattern Pattern
+	Body    Expr
+}
+
+// Pattern is the surface pattern grammar (§6): variables, wildcard,
+// literals, and constructor patterns with nested argument patterns.
+type Pattern interface {
+	isPattern()
+	Span() source.Span
+}
+
+type PVar struct {
+	Name string
+	Sp   source.Span
+}
+
+type PWildcard struct {
+	Sp source.Span
+}
+
+type PInt struct {
+	Value int64
+	Sp    source.Span
+}
+
+type PFloat struct {
+	Value float64
+	Sp    source.Span
+}
+
+type PString struct {
+	Value string
+	Sp    source.Span
+}
+
+type PCtor struct {
+	Name     string
+	NameSpan source.Span
+	Args     []Pattern
+}
+
+func (*PVar) isPattern()      {}
+func (*PWildcard) isPattern() {}
+func (*PInt) isPattern()      {}
+func (*PFloat) isPattern()    {}
+func (*PString) isPattern()   {}
+func (*PCtor) isPattern()     {}
+
+func (p *PVar) Span() source.Span      { return p.Sp }
+func (p *PWildcard) Span() source.Span { return p.Sp }
+func (p *PInt) Span() source.Span      { return p.Sp }
+func (p *PFloat) Span() source.Span    { return p.Sp }
+func (p *PString) Span() source.Span   { return p.Sp }
+func (p *PCtor) Span() source.Span {
+	if len(p.Args) == 0 {
+		return p.NameSpan
+	}
+	return p.NameSpan.Merge(p.Args[len(p.Args)-1].Span())
 }
 
 func (*IntLit) isExpr()    {}
@@ -142,6 +222,7 @@ func (*BinOp) isExpr()     {}
 func (*If) isExpr()        {}
 func (*Block) isExpr()     {}
 func (*Lambda) isExpr()    {}
+func (*Case) isExpr()      {}
 
 func (e *IntLit) Span() source.Span    { return e.Sp }
 func (e *FloatLit) Span() source.Span  { return e.Sp }
@@ -154,6 +235,9 @@ func (e *BinOp) Span() source.Span     { return e.L.Span().Merge(e.R.Span()) }
 func (e *If) Span() source.Span        { return e.Sp.Merge(e.Else.Span()) }
 func (e *Block) Span() source.Span     { return e.Binds[0].NameSpan.Merge(e.Result.Span()) }
 func (e *Lambda) Span() source.Span    { return e.Sp.Merge(e.Body.Span()) }
+func (e *Case) Span() source.Span {
+	return e.Sp.Merge(e.Branches[len(e.Branches)-1].Body.Span())
+}
 
 type Decl interface{ isDecl() }
 
@@ -166,6 +250,26 @@ type ValueDecl struct {
 }
 
 func (*ValueDecl) isDecl() {}
+
+// TypeDecl is a custom-type declaration (§3.7). The RHS is always a list of
+// constructor alternatives being defined. Params parse from S4 but the
+// checker rejects them until S5.
+type TypeDecl struct {
+	Name     string
+	NameSpan source.Span
+	Params   []Param // type parameters (lowercase)
+	Ctors    []CtorDef
+}
+
+// CtorDef is one constructor alternative. Args are type atoms: named types
+// or parenthesized type expressions.
+type CtorDef struct {
+	Name     string
+	NameSpan source.Span
+	Args     []TypeExpr
+}
+
+func (*TypeDecl) isDecl() {}
 
 // ModuleHeader is parsed and ignored until the module system is designed.
 type ModuleHeader struct {

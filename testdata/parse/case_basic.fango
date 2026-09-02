@@ -1,0 +1,14 @@
+area shape =
+    case shape of
+        Circle r -> r * r * 3
+        Rect w h -> w * h
+
+describe n =
+    case n of
+        0 -> "zero"
+        -1 -> "minus one"
+        _ -> "many"
+
+label b = case b of
+    True -> "yes"
+    False -> "no"

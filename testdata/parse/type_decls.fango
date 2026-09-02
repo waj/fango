@@ -1,0 +1,20 @@
+type Shape = Circle Float | Rect Float Float
+
+type Geom
+    = Pt Float Float
+    | Line Shape Shape
+    | Ring Shape Float
+
+type Maybe a = Nothing | Just a
+
+type Fn a b = Fn (a -> b)
+
+type List a
+    = Nil
+    | Cons a (List a)
+
+area : Shape -> Float
+area s = 1.0
+
+find : Maybe Int -> Int
+find m = 0

@@ -1,0 +1,4 @@
+(module
+  (def area (params shape) (case (var shape) (branch (pctor Circle (pvar r)) (binop * (binop * (var r) (var r)) (int 3))) (branch (pctor Rect (pvar w) (pvar h)) (binop * (var w) (var h)))))
+  (def describe (params n) (case (var n) (branch (pint 0) (string "zero")) (branch (pint -1) (string "minus one")) (branch _ (string "many"))))
+  (def label (params b) (case (var b) (branch (pctor True) (string "yes")) (branch (pctor False) (string "no")))))

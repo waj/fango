@@ -1,0 +1,4 @@
+(module
+  (def depth (params g) (case (var g) (branch (pctor Line (pctor Pt (pvar x) _) (pctor Pt _ (pvar y))) (binop + (var x) (var y))) (branch (pctor Ring (pctor Circle (pvar r)) (pfloat 2)) (var r)) (branch (pctor Ring (pvar s) (pvar d)) (block (bind base (binop * (var d) (float 2))) (case (var s) (branch (pctor Circle (pvar r)) (binop + (var base) (var r))) (branch (pctor Rect (pvar w) (pvar h)) (binop + (binop + (var base) (var w)) (var h)))))) (branch (pctor Pt (pvar x) (pvar y)) (binop + (var x) (var y)))))
+  (def first (params m) (case (var m) (branch (pctor Just (pctor Just (pvar x))) (var x)) (branch (pctor Just (pctor Nothing)) (int 1)) (branch (pctor Nothing) (int 0))))
+  (def greet (params s) (case (var s) (branch (pstring "hi") (int 1)) (branch _ (int 0)))))

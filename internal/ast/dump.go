@@ -36,6 +36,21 @@ func dumpDecl(d Decl) string {
 		}
 		fmt.Fprintf(&b, " %s)", DumpExpr(d.Body))
 		return b.String()
+	case *TypeDecl:
+		var b strings.Builder
+		fmt.Fprintf(&b, "(type %s", d.Name)
+		if p := dumpParams(d.Params); p != "" {
+			fmt.Fprintf(&b, " %s", p)
+		}
+		for _, c := range d.Ctors {
+			fmt.Fprintf(&b, " (ctor %s", c.Name)
+			for _, a := range c.Args {
+				fmt.Fprintf(&b, " %s", DumpTypeExpr(a))
+			}
+			b.WriteString(")")
+		}
+		b.WriteString(")")
+		return b.String()
 	default:
 		panic(fmt.Sprintf("ast.dumpDecl: unhandled %T", d))
 	}
@@ -62,8 +77,43 @@ func DumpTypeExpr(t TypeExpr) string {
 		return t.Name
 	case *TFunExpr:
 		return fmt.Sprintf("(-> %s %s)", DumpTypeExpr(t.Arg), DumpTypeExpr(t.Ret))
+	case *TApp:
+		var b strings.Builder
+		fmt.Fprintf(&b, "(%s", t.Name)
+		for _, a := range t.Args {
+			fmt.Fprintf(&b, " %s", DumpTypeExpr(a))
+		}
+		b.WriteString(")")
+		return b.String()
 	default:
 		panic(fmt.Sprintf("ast.DumpTypeExpr: unhandled %T", t))
+	}
+}
+
+// DumpPattern renders a pattern: `_`, `(pvar x)`, `(pint 3)`, and
+// `(pctor Just (pvar x))`.
+func DumpPattern(p Pattern) string {
+	switch p := p.(type) {
+	case *PWildcard:
+		return "_"
+	case *PVar:
+		return fmt.Sprintf("(pvar %s)", p.Name)
+	case *PInt:
+		return fmt.Sprintf("(pint %d)", p.Value)
+	case *PFloat:
+		return fmt.Sprintf("(pfloat %s)", strconv.FormatFloat(p.Value, 'g', -1, 64))
+	case *PString:
+		return fmt.Sprintf("(pstring %q)", p.Value)
+	case *PCtor:
+		var b strings.Builder
+		fmt.Fprintf(&b, "(pctor %s", p.Name)
+		for _, a := range p.Args {
+			fmt.Fprintf(&b, " %s", DumpPattern(a))
+		}
+		b.WriteString(")")
+		return b.String()
+	default:
+		panic(fmt.Sprintf("ast.DumpPattern: unhandled %T", p))
 	}
 }
 
@@ -101,6 +151,14 @@ func DumpExpr(e Expr) string {
 			fmt.Fprintf(&b, " %s)", DumpExpr(bind.Body))
 		}
 		fmt.Fprintf(&b, " %s)", DumpExpr(e.Result))
+		return b.String()
+	case *Case:
+		var b strings.Builder
+		fmt.Fprintf(&b, "(case %s", DumpExpr(e.Scrutinee))
+		for _, br := range e.Branches {
+			fmt.Fprintf(&b, " (branch %s %s)", DumpPattern(br.Pattern), DumpExpr(br.Body))
+		}
+		b.WriteString(")")
 		return b.String()
 	case *Lambda:
 		names := make([]string, len(e.Params))

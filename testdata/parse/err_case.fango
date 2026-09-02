@@ -1,0 +1,12 @@
+bad1 x =
+    case x of
+        True -> 1
+          False -> 2
+
+bad2 x =
+    case x of
+        Just -1 -> 1
+        _ -> 0
+
+bad3 x =
+    case x of

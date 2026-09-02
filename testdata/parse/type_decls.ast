@@ -1,0 +1,8 @@
+(module
+  (type Shape (ctor Circle Float) (ctor Rect Float Float))
+  (type Geom (ctor Pt Float Float) (ctor Line Shape Shape) (ctor Ring Shape Float))
+  (type Maybe (params a) (ctor Nothing) (ctor Just a))
+  (type Fn (params a b) (ctor Fn (-> a b)))
+  (type List (params a) (ctor Nil) (ctor Cons a (List a)))
+  (def area (params s) (ann (-> Shape Float)) (float 1))
+  (def find (params m) (ann (-> (Maybe Int) Int)) (int 0)))

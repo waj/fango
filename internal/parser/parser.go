@@ -109,6 +109,9 @@ func (p *parser) parseDecl() ast.Decl {
 		p.recoverToTopLevel(false)
 		return nil
 	}
+	if t.Kind == token.KwType {
+		return p.parseTypeDecl()
+	}
 	if t.Kind != token.LIDENT {
 		p.errorAt(t.Span, "SYNTAX PROBLEM",
 			"I was expecting a declaration here, like `name = expression`.")
@@ -160,6 +163,79 @@ func (p *parser) parseDecl() ast.Decl {
 		p.recoverToTopLevel(false)
 	}
 	return &ast.ValueDecl{Name: name.Text, NameSpan: name.Span, Params: params, Ann: ann, Body: body}
+}
+
+// parseTypeDecl parses `type Name p1 … = C1 atoms | C2 atoms | …` (§3.7).
+// The RHS is always constructor alternatives; `|` may sit inline or lead a
+// continuation line (any indented token continues the declaration).
+func (p *parser) parseTypeDecl() ast.Decl {
+	p.next() // `type`
+	nameT := p.peekInExpr()
+	if nameT.Kind != token.UIDENT {
+		p.errorAt(nameT.Span, "SYNTAX PROBLEM",
+			"After `type` I expect a capitalized type name, like:\n\n    type Shape = Circle Float | Rect Float Float")
+		p.recoverToTopLevel(false)
+		return nil
+	}
+	p.next()
+	params := p.parseParams()
+	if !p.expect(token.EQ, "I expect `=` after the type name, then the constructors.") {
+		p.recoverToTopLevel(false)
+		return nil
+	}
+	var ctors []ast.CtorDef
+	for {
+		c, ok := p.parseCtorDef()
+		if !ok {
+			p.recoverToTopLevel(false)
+			return nil
+		}
+		ctors = append(ctors, c)
+		if p.peekInExpr().Kind != token.PIPE {
+			break
+		}
+		p.next()
+	}
+	if t := p.peekInExpr(); t.Kind != token.EOF {
+		p.errorAt(t.Span, "SYNTAX PROBLEM",
+			"I expect `|` between constructor alternatives.")
+		p.recoverToTopLevel(false)
+		return nil
+	}
+	return &ast.TypeDecl{Name: nameT.Text, NameSpan: nameT.Span, Params: params, Ctors: ctors}
+}
+
+// parseCtorDef parses one constructor alternative: a capitalized name
+// followed by zero or more type atoms (applications need parens: `Cons a (List a)`).
+func (p *parser) parseCtorDef() (ast.CtorDef, bool) {
+	t := p.peekInExpr()
+	if t.Kind != token.UIDENT {
+		switch {
+		case t.Kind == token.EOF && p.peek().Kind == token.EOF:
+			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
+				"I got to the end of the input while reading a constructor.")
+		case t.Kind == token.EOF:
+			// The declaration ended (offside) while a constructor was still
+			// expected — e.g. a trailing `|`. Point at the declaration, not
+			// at whatever happens to start the next one.
+			p.errorAt(p.prevSpan(), "SYNTAX PROBLEM",
+				"This `type` declaration ended while I was still expecting a\nconstructor, like `Circle Float`.")
+		default:
+			p.errorAt(t.Span, "SYNTAX PROBLEM",
+				"I expect a capitalized constructor name here, like `Circle Float`.")
+		}
+		return ast.CtorDef{}, false
+	}
+	p.next()
+	var args []ast.TypeExpr
+	for isTypeAtomStart(p.peekInExpr().Kind) {
+		a := p.parseTypeAtom()
+		if a == nil {
+			return ast.CtorDef{}, false
+		}
+		args = append(args, a)
+	}
+	return ast.CtorDef{Name: t.Text, NameSpan: t.Span, Args: args}, true
 }
 
 // parseParams consumes zero or more parameter identifiers.
@@ -326,9 +402,10 @@ func (p *parser) parseBlock(col int) ast.Expr {
 	}
 }
 
-// parseTypeExpr parses the surface type grammar: atoms and right-assoc `->`.
+// parseTypeExpr parses the surface type grammar: applications and
+// right-assoc `->`.
 func (p *parser) parseTypeExpr() ast.TypeExpr {
-	atom := p.parseTypeAtom()
+	atom := p.parseTypeApp()
 	if atom == nil {
 		return nil
 	}
@@ -341,6 +418,33 @@ func (p *parser) parseTypeExpr() ast.TypeExpr {
 		return &ast.TFunExpr{Arg: atom, Ret: ret}
 	}
 	return atom
+}
+
+// parseTypeApp parses type application (`Maybe Int`): a named head followed
+// by argument atoms. Only uppercase names head applications — type variables
+// cannot (no higher kinds, §8.4).
+func (p *parser) parseTypeApp() ast.TypeExpr {
+	atom := p.parseTypeAtom()
+	if atom == nil {
+		return nil
+	}
+	head, ok := atom.(*ast.TName)
+	if !ok || !isTypeAtomStart(p.peekInExpr().Kind) {
+		return atom
+	}
+	var args []ast.TypeExpr
+	for isTypeAtomStart(p.peekInExpr().Kind) {
+		a := p.parseTypeAtom()
+		if a == nil {
+			return nil
+		}
+		args = append(args, a)
+	}
+	return &ast.TApp{Name: head.Name, NameSp: head.Sp, Args: args}
+}
+
+func isTypeAtomStart(k token.Kind) bool {
+	return k == token.UIDENT || k == token.LIDENT || k == token.LPAREN
 }
 
 func (p *parser) parseTypeAtom() ast.TypeExpr {
@@ -461,6 +565,8 @@ func (p *parser) parseApply() ast.Expr {
 		return p.parseIf()
 	case token.BACKSLASH:
 		return p.parseLambda()
+	case token.KwCase:
+		return p.parseCase()
 	}
 	fn := p.parseAtom()
 	if fn == nil {
@@ -500,6 +606,148 @@ func (p *parser) parseLambda() ast.Expr {
 		return nil
 	}
 	return &ast.Lambda{Params: params, Body: body, Sp: bs.Span}
+}
+
+// parseCase parses `case scrutinee of` and its branches. The column of the
+// first pattern token after `of` defines branch alignment (layout rule 2,
+// §5): a token at exactly that column starts a new branch, left of it ends
+// the case. Branch bodies are statement blocks (§3.6) or inline expressions.
+func (p *parser) parseCase() ast.Expr {
+	caseTok := p.next()
+	scrut := p.parseExpr(1)
+	if scrut == nil {
+		return nil
+	}
+	if !p.expect(token.KwOf, "I expect `of` after the expression in a `case`.") {
+		return nil
+	}
+	first := p.peekInExpr()
+	if first.Kind == token.EOF {
+		if p.peek().Kind == token.EOF {
+			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
+				"I expect at least one branch after `of`, like `True -> 1`.")
+		} else {
+			p.errorAt(p.peek().Span, "SYNTAX PROBLEM",
+				"The branches of this `case` must be indented past the enclosing\nalignment column.")
+		}
+		return nil
+	}
+	p.lay.push(ctxCase, first.Pos().Col)
+	defer p.lay.pop()
+
+	var branches []ast.CaseBranch
+	for {
+		p.stmtStart = p.pos // the pattern may sit exactly at the branch column
+		pat := p.parsePattern()
+		if pat == nil {
+			return nil
+		}
+		arrowT := p.peekInExpr()
+		if !p.expect(token.ARROW, "I expect `->` after a case branch's pattern.") {
+			return nil
+		}
+		body := p.parseBindBody(arrowT)
+		if body == nil {
+			return nil
+		}
+		branches = append(branches, ast.CaseBranch{Pattern: pat, Body: body})
+		if nt := p.peek(); nt.Kind == token.EOF || !p.lay.atBranchCol(nt.Pos()) {
+			return &ast.Case{Scrutinee: scrut, Branches: branches, Sp: caseTok.Span}
+		}
+	}
+}
+
+// parsePattern parses a branch-level pattern: a constructor applied to
+// argument atoms, or a single atom. Nested applications need parens.
+func (p *parser) parsePattern() ast.Pattern {
+	t := p.peekInExpr()
+	if t.Kind == token.UIDENT {
+		p.next()
+		var args []ast.Pattern
+		for isPatternAtomStart(p.peekInExpr().Kind) {
+			a := p.parsePatternAtom()
+			if a == nil {
+				return nil
+			}
+			args = append(args, a)
+		}
+		return &ast.PCtor{Name: t.Text, NameSpan: t.Span, Args: args}
+	}
+	return p.parsePatternAtom()
+}
+
+func isPatternAtomStart(k token.Kind) bool {
+	switch k {
+	case token.UNDERSCORE, token.LIDENT, token.UIDENT,
+		token.INT, token.FLOAT, token.STRING, token.LPAREN:
+		return true
+	}
+	return false
+}
+
+func (p *parser) parsePatternAtom() ast.Pattern {
+	t := p.peekInExpr()
+	switch t.Kind {
+	case token.UNDERSCORE:
+		p.next()
+		return &ast.PWildcard{Sp: t.Span}
+	case token.LIDENT:
+		p.next()
+		return &ast.PVar{Name: t.Text, Sp: t.Span}
+	case token.UIDENT:
+		p.next()
+		return &ast.PCtor{Name: t.Text, NameSpan: t.Span}
+	case token.INT:
+		p.next()
+		v, _ := strconv.ParseInt(t.Text, 10, 64) // overflow reported by the lexer
+		return &ast.PInt{Value: v, Sp: t.Span}
+	case token.FLOAT:
+		p.next()
+		v, _ := strconv.ParseFloat(t.Text, 64)
+		return &ast.PFloat{Value: v, Sp: t.Span}
+	case token.STRING:
+		p.next()
+		return &ast.PString{Value: lexer.Unescape(t.Text), Sp: t.Span}
+	case token.MINUS:
+		p.next()
+		nt := p.peekInExpr()
+		switch nt.Kind {
+		case token.INT:
+			p.next()
+			v, _ := strconv.ParseInt(nt.Text, 10, 64)
+			return &ast.PInt{Value: -v, Sp: t.Span.Merge(nt.Span)}
+		case token.FLOAT:
+			p.next()
+			v, _ := strconv.ParseFloat(nt.Text, 64)
+			return &ast.PFloat{Value: -v, Sp: t.Span.Merge(nt.Span)}
+		}
+		p.errorAt(t.Span, "SYNTAX PROBLEM",
+			"In a pattern, `-` must be followed directly by a number literal.")
+		return nil
+	case token.LPAREN:
+		p.next()
+		pat := p.parsePattern()
+		if pat == nil {
+			return nil
+		}
+		if !p.expect(token.RPAREN, "I was expecting a closing `)` in this pattern.") {
+			return nil
+		}
+		return pat
+	case token.EOF:
+		if p.peek().Kind == token.EOF {
+			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
+				"I got to the end of the input while expecting a pattern.")
+		} else {
+			p.errorAt(p.prevSpan(), "SYNTAX PROBLEM",
+				"This case branch is unfinished — I was expecting a pattern.")
+		}
+		return nil
+	default:
+		p.errorAt(t.Span, "SYNTAX PROBLEM",
+			"I was expecting a pattern here, like `Just x`, a literal, or `_`.")
+		return nil
+	}
 }
 
 func (p *parser) parseIf() ast.Expr {

@@ -1,0 +1,32 @@
+(module)
+-- errors --
+-- SYNTAX PROBLEM ------------------------- err_type_decls.fango
+
+After `type` I expect a capitalized type name, like:
+
+    type Shape = Circle Float | Rect Float Float
+
+1| type shape = Circle Float
+        ^^^^^
+
+-- SYNTAX PROBLEM ------------------------- err_type_decls.fango
+
+I expect a capitalized constructor name here, like `Circle Float`.
+
+3| type Shape2 = circle Float
+                 ^^^^^^
+
+-- SYNTAX PROBLEM ------------------------- err_type_decls.fango
+
+This `type` declaration ended while I was still expecting a
+constructor, like `Circle Float`.
+
+5| type Shape3 = Circle Float |
+                              ^
+
+-- UNFINISHED PROGRAM --------------------- err_type_decls.fango
+
+I got to the end of the input too soon. I expect `=` after the type name, then the constructors.
+
+7| type Shape4
+        ^^^^^^

@@ -1,0 +1,21 @@
+depth g =
+    case g of
+        Line (Pt x _) (Pt _ y) -> x + y
+        Ring (Circle r) 2.0 -> r
+        Ring s d ->
+            base = d * 2.0
+            case s of
+                Circle r -> base + r
+                Rect w h -> base + w + h
+        Pt x y -> x + y
+
+first m =
+    case m of
+        Just (Just x) -> x
+        Just Nothing -> 1
+        Nothing -> 0
+
+greet s =
+    case s of
+        "hi" -> 1
+        _ -> 0

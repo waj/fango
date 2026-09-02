@@ -1,0 +1,5 @@
+f x =
+    case x of
+        _ -> 1
+
+bad = _name
