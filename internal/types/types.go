@@ -67,6 +67,42 @@ func (*TVar) isType() {}
 func (*TCon) isType() {}
 func (*TFun) isType() {}
 
+// CtorInfo is one constructor's row in the constructor table (§7.2), shared
+// by pattern checking, exhaustiveness checking, and codegen.
+type CtorInfo struct {
+	Name   string
+	Index  int    // declaration position; drives layout and tree ordering
+	Fields []Type // solved field types (ground in S4)
+	Result *TCon  // the ADT this constructor belongs to
+}
+
+// ValueType is the constructor used as a value: fields curried onto the
+// result (`Circle : Float -> Shape`).
+func (c *CtorInfo) ValueType() Type {
+	var t Type = c.Result
+	for i := len(c.Fields) - 1; i >= 0; i-- {
+		t = &TFun{Arg: c.Fields[i], Ret: t}
+	}
+	return t
+}
+
+// ADTInfo is one declared type's constructor-table entry, constructors in
+// declaration order.
+type ADTInfo struct {
+	Con   *TCon
+	Ctors []*CtorInfo
+}
+
+// CtorNamed returns the constructor with the given name, or nil.
+func (a *ADTInfo) CtorNamed(name string) *CtorInfo {
+	for _, c := range a.Ctors {
+		if c.Name == name {
+			return c
+		}
+	}
+	return nil
+}
+
 // Supply mints metavariable IDs and TCon uniques. It is session-scoped and
 // passed in explicitly (never a global): the REPL needs one supply across
 // many interactive inputs.

@@ -58,6 +58,13 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 		e = diag.Errorf(c.Span, "TYPE MISMATCH",
 			"The type annotation for `%s` says it is:\n\n    %s\n\nbut the body I found is:\n\n    %s",
 			c.Why.Name, left, right)
+	case WhyPattern:
+		e = diag.Errorf(c.Span, "TYPE MISMATCH",
+			"This pattern matches values of type:\n\n    %s\n\nbut it needs to match:\n\n    %s", left, right)
+	case WhyCaseBranches:
+		e = diag.Errorf(c.Span, "TYPE MISMATCH",
+			"The branches of this `case` do not match. This branch is:\n\n    %s\n\nbut the earlier branches are:\n\n    %s",
+			left, right)
 	case WhyOpRequires:
 		e = diag.Errorf(c.Span, "TYPE MISMATCH",
 			"fango's (%s) only works on %s, but this operand is:\n\n    %s",

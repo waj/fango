@@ -17,16 +17,18 @@ import (
 type WhyKind int
 
 const (
-	WhyOperand     WhyKind = iota // operands of a numeric operator must agree
-	WhyDeclBody                   // a declaration body must match its (future) annotation
-	WhyCall                       // a callee must be a function accepting the argument
-	WhyIfCondition                // an if condition must be Bool
-	WhyIfBranches                 // then/else branches must agree
-	WhyCompare                    // both sides of a comparison must agree
-	WhyNegate                     // a negated operand must be a number
-	WhyOpRequires                 // an operator fixes its operand type (/, ++)
-	WhyAnnotation                 // a definition must match its type annotation
-	WhyRecursion                  // recursive uses must match the definition
+	WhyOperand      WhyKind = iota // operands of a numeric operator must agree
+	WhyDeclBody                    // a declaration body must match its (future) annotation
+	WhyCall                        // a callee must be a function accepting the argument
+	WhyIfCondition                 // an if condition must be Bool
+	WhyIfBranches                  // then/else branches must agree
+	WhyCompare                     // both sides of a comparison must agree
+	WhyNegate                      // a negated operand must be a number
+	WhyOpRequires                  // an operator fixes its operand type (/, ++)
+	WhyAnnotation                  // a definition must match its type annotation
+	WhyRecursion                   // recursive uses must match the definition
+	WhyPattern                     // a pattern must match the scrutinee's type
+	WhyCaseBranches                // all case branches must produce the same type
 )
 
 type Why struct {
@@ -68,10 +70,17 @@ type Checker struct {
 	Sub       Subst
 	ExprTypes map[ast.Expr]types.Type
 
-	// Ctors is the constructor table's embryo (§7.2): S4 replaces the value
-	// types with real schemes from `type` declarations; until then only the
-	// builtin Bool constructors exist.
-	Ctors map[string]types.Type
+	// Ctors is the constructor table (§7.2), keyed by constructor name —
+	// names are unique per module (types and constructors live in separate
+	// namespaces, §3.7). Seeded with the builtin Bool constructors.
+	Ctors map[string]*types.CtorInfo
+
+	// ADTs maps a declared type's Unique to its constructor-table entry;
+	// ADTOrder keeps declaration order for deterministic codegen. Bool is
+	// predefined as an ordinary ADT (codegen special-cases it, §8.1) and is
+	// deliberately absent from ADTOrder — no Go type is ever emitted for it.
+	ADTs     map[int]*types.ADTInfo
+	ADTOrder []*types.ADTInfo
 
 	// TypeNames maps surface type names to their current types — the type
 	// table's embryo, exactly as Ctors is for constructors. `type`
@@ -92,19 +101,22 @@ type Checker struct {
 	// BindTypes records each block binding's full solved type (a local
 	// function's curried type — ExprTypes only has its body's type).
 	BindTypes map[*ast.LocalBind]types.Type
+
+	// PatTypes records each pattern node's type — decision-tree compilation
+	// needs pattern-variable types after solving, exactly as ExprTypes
+	// serves expressions.
+	PatTypes map[ast.Pattern]types.Type
 }
 
 func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
-	return &Checker{
+	ck := &Checker{
 		Sup:       sup,
 		B:         b,
 		Env:       env,
 		Sub:       Subst{},
 		ExprTypes: map[ast.Expr]types.Type{},
-		Ctors: map[string]types.Type{
-			"True":  b.Bool,
-			"False": b.Bool,
-		},
+		Ctors:     map[string]*types.CtorInfo{},
+		ADTs:      map[int]*types.ADTInfo{},
 		TypeNames: map[string]types.Type{
 			"Int":    b.Int,
 			"Float":  b.Float,
@@ -115,7 +127,19 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		PrintCalls: map[*ast.App]bool{},
 		Workers:    map[string]int{},
 		BindTypes:  map[*ast.LocalBind]types.Type{},
+		PatTypes:   map[ast.Pattern]types.Type{},
 	}
+	// Bool is an ordinary ADT in the checker (§7.2) — patterns, case
+	// exhaustiveness, and the ctor table treat it like any declared type.
+	boolADT := &types.ADTInfo{Con: b.Bool, Ctors: []*types.CtorInfo{
+		{Name: "True", Index: 0, Result: b.Bool},
+		{Name: "False", Index: 1, Result: b.Bool},
+	}}
+	ck.ADTs[b.Bool.Unique] = boolADT
+	for _, c := range boolADT.Ctors {
+		ck.Ctors[c.Name] = c
+	}
+	return ck
 }
 
 type DeclInfo struct {
@@ -126,13 +150,41 @@ type DeclInfo struct {
 	Body     ast.Expr
 }
 
-// Module checks declarations in source order — solve-at-definition, the
-// same call structure generalization will use from S2.
+// Module checks declarations: type headers first (so types may be mutually
+// recursive regardless of order), then constructor fields, then value
+// declarations in source order — solve-at-definition, the same call
+// structure generalization will use from S2.
 func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 	var infos []DeclInfo
 	var errs []diag.Error
+	adts := map[*ast.TypeDecl]*types.ADTInfo{}
 	for _, d := range m.Decls {
-		vd := d.(*ast.ValueDecl)
+		if td, ok := d.(*ast.TypeDecl); ok {
+			// Duplicate types are a batch-compilation error only: the REPL
+			// redefines types freely (generational uniques).
+			if _, dup := ck.TypeNames[td.Name]; dup {
+				errs = append(errs, diag.Errorf(td.NameSpan, "MULTIPLE DEFINITIONS",
+					"The type `%s` is defined more than once.", td.Name))
+			}
+			adt, headerErrs := ck.declareTypeHeader(td)
+			errs = append(errs, headerErrs...)
+			if adt != nil {
+				adts[td] = adt
+			}
+		}
+	}
+	for _, d := range m.Decls {
+		if td, ok := d.(*ast.TypeDecl); ok {
+			if adt := adts[td]; adt != nil {
+				errs = append(errs, ck.declareTypeCtors(td, adt, true)...)
+			}
+		}
+	}
+	for _, d := range m.Decls {
+		vd, ok := d.(*ast.ValueDecl)
+		if !ok {
+			continue
+		}
 		// Duplicate definitions are a batch-compilation error only: the
 		// REPL redefines names freely (generational cells).
 		if ck.Env.Has(vd.Name) {
@@ -144,6 +196,65 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 		infos = append(infos, info)
 	}
 	return infos, errs
+}
+
+// TypeDecl checks and installs one type declaration — the REPL's entry
+// point, where redefinition is allowed (a fresh generation, §9.3).
+func (ck *Checker) TypeDecl(td *ast.TypeDecl) []diag.Error {
+	adt, errs := ck.declareTypeHeader(td)
+	if adt == nil {
+		return errs
+	}
+	return append(errs, ck.declareTypeCtors(td, adt, false)...)
+}
+
+// declareTypeHeader registers the type's name and unique — before any
+// constructor field resolves, so recursive and mutually recursive types
+// work. Returns nil for declarations rejected wholesale (type parameters).
+func (ck *Checker) declareTypeHeader(td *ast.TypeDecl) (*types.ADTInfo, []diag.Error) {
+	if len(td.Params) > 0 {
+		return nil, []diag.Error{diag.Errorf(td.NameSpan, "UNSUPPORTED TYPE PARAMETERS",
+			"`%s` declares type parameters — parameterized types arrive with\npolymorphism (S5). For now types must be monomorphic.", td.Name)}
+	}
+	con := &types.TCon{Unique: ck.Sup.NextUnique(), Name: td.Name}
+	adt := &types.ADTInfo{Con: con}
+	ck.TypeNames[td.Name] = con
+	ck.ADTs[con.Unique] = adt
+	ck.ADTOrder = append(ck.ADTOrder, adt)
+	return adt, nil
+}
+
+// declareTypeCtors resolves constructor fields and installs the
+// constructors. batch reports duplicate constructor names as errors; the
+// REPL path rebinds them (generational, like values).
+func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch bool) []diag.Error {
+	var errs []diag.Error
+	for _, c := range td.Ctors {
+		if prev, dup := ck.Ctors[c.Name]; dup && batch {
+			errs = append(errs, diag.Errorf(c.NameSpan, "MULTIPLE DEFINITIONS",
+				"The constructor `%s` is already defined by type `%s` —\nconstructor names must be unique across a module.",
+				c.Name, prev.Result.Name))
+		}
+		if adt.CtorNamed(c.Name) != nil {
+			// Same-type duplicate: an error even in the REPL.
+			errs = append(errs, diag.Errorf(c.NameSpan, "MULTIPLE DEFINITIONS",
+				"The constructor `%s` appears twice in `type %s`.", c.Name, td.Name))
+			continue
+		}
+		fields := make([]types.Type, len(c.Args))
+		for j, a := range c.Args {
+			t, fieldErrs := ck.ResolveTypeExpr(a)
+			errs = append(errs, fieldErrs...)
+			if t == nil {
+				t = ck.B.Unit // hole: errs is non-empty, elaboration never runs
+			}
+			fields[j] = t
+		}
+		info := &types.CtorInfo{Name: c.Name, Index: len(adt.Ctors), Fields: fields, Result: adt.Con}
+		adt.Ctors = append(adt.Ctors, info)
+		ck.Ctors[c.Name] = info
+	}
+	return errs
 }
 
 // Decl checks one value declaration and binds it in the environment —
@@ -292,14 +403,14 @@ func (g *generator) expr(e ast.Expr) types.Type {
 		}
 		ty = g.instantiate(scheme)
 	case *ast.Ctor:
-		ctorTy, ok := g.ck.Ctors[e.Name]
+		info, ok := g.ck.Ctors[e.Name]
 		if !ok {
 			g.errs = append(g.errs, diag.Errorf(e.Sp, "NAMING ERROR",
-				"I don't know a constructor named `%s` — custom types arrive\nwith `type` declarations (S4).", e.Name))
+				"I don't know a constructor named `%s`.", e.Name))
 			ty = g.ck.Sup.FreshVar(types.General)
 			break
 		}
-		ty = ctorTy
+		ty = info.ValueType()
 	case *ast.App:
 		if g.isPrintCheat(e.Fn) {
 			if !g.allowPrint {
@@ -343,6 +454,8 @@ func (g *generator) expr(e ast.Expr) types.Type {
 		ty = g.binOp(e)
 	case *ast.Block:
 		ty = g.block(e)
+	case *ast.Case:
+		ty = g.caseExpr(e)
 	case *ast.Lambda:
 		// Functions are pure until effects land: print cannot be smuggled
 		// into a function value (§10.5).
@@ -443,6 +556,86 @@ func (g *generator) block(e *ast.Block) types.Type {
 		g.locals.names[bind.Name] = ty
 	}
 	return g.expr(e.Result)
+}
+
+// caseExpr constrains a case: every pattern matches the scrutinee's type,
+// every branch body matches the case's result type. Pattern variables scope
+// over their branch's body only.
+func (g *generator) caseExpr(e *ast.Case) types.Type {
+	scrutTy := g.expr(e.Scrutinee)
+	resultTy := g.ck.Sup.FreshVar(types.General)
+	for i := range e.Branches {
+		br := &e.Branches[i]
+		scope := &blockScope{parent: g.locals, names: map[string]types.Type{}}
+		g.locals = scope
+		patTy := g.pattern(br.Pattern, scope)
+		g.cs = append(g.cs, Constraint{
+			Left: patTy, Right: scrutTy, Span: br.Pattern.Span(), Why: Why{Kind: WhyPattern},
+		})
+		bodyTy := g.expr(br.Body)
+		g.locals = scope.parent
+		g.cs = append(g.cs, Constraint{
+			Left: bodyTy, Right: resultTy, Span: br.Body.Span(), Why: Why{Kind: WhyCaseBranches},
+		})
+	}
+	return resultTy
+}
+
+// pattern types one pattern, binding its variables into scope with the
+// no-shadowing rule (which also catches `Pair x x`).
+func (g *generator) pattern(p ast.Pattern, scope *blockScope) types.Type {
+	ty := g.patternInner(p, scope)
+	g.ck.PatTypes[p] = ty
+	return ty
+}
+
+func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
+	switch p := p.(type) {
+	case *ast.PWildcard:
+		return g.ck.Sup.FreshVar(types.General)
+	case *ast.PVar:
+		if _, dup := g.locals.lookup(p.Name); dup || g.ck.Env.Has(p.Name) {
+			g.errs = append(g.errs, diag.Errorf(p.Sp, "SHADOWING",
+				"The pattern variable `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", p.Name))
+		}
+		pv := g.ck.Sup.FreshVar(types.General)
+		scope.names[p.Name] = pv
+		return pv
+	case *ast.PInt:
+		// Like integer literals: a `number` pattern (Int or Float).
+		return g.ck.Sup.FreshVar(types.Number)
+	case *ast.PFloat:
+		return g.ck.B.Float
+	case *ast.PString:
+		return g.ck.B.String
+	case *ast.PCtor:
+		info, ok := g.ck.Ctors[p.Name]
+		if !ok {
+			g.errs = append(g.errs, diag.Errorf(p.NameSpan, "NAMING ERROR",
+				"I don't know a constructor named `%s`.", p.Name))
+			for _, a := range p.Args {
+				g.pattern(a, scope) // still bind their variables: fewer cascades
+			}
+			return g.ck.Sup.FreshVar(types.General)
+		}
+		if len(p.Args) != len(info.Fields) {
+			g.errs = append(g.errs, diag.Errorf(p.Span(), "PATTERN ARITY",
+				"The `%s` constructor takes %d argument(s), but this pattern\ngives it %d.", p.Name, len(info.Fields), len(p.Args)))
+			for _, a := range p.Args {
+				g.pattern(a, scope)
+			}
+			return info.Result
+		}
+		for i, a := range p.Args {
+			argTy := g.pattern(a, scope)
+			g.cs = append(g.cs, Constraint{
+				Left: argTy, Right: info.Fields[i], Span: a.Span(), Why: Why{Kind: WhyPattern},
+			})
+		}
+		return info.Result
+	default:
+		panic("infer: unhandled pattern node")
+	}
 }
 
 func (g *generator) binOp(e *ast.BinOp) types.Type {

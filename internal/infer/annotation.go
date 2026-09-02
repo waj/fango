@@ -61,7 +61,47 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr) (types.Type, []diag.Error) {
 			return nil, errs
 		}
 		return &types.TFun{Arg: arg, Eff: types.Row{}, Ret: ret}, errs
+	case *ast.TApp:
+		// Every type in scope is arity 0 until S5, so any application is an
+		// arity error (a known name) or a naming error.
+		if _, ok := ck.TypeNames[te.Name]; ok {
+			return nil, []diag.Error{diag.Errorf(te.Span(), "TYPE ARITY",
+				"`%s` is not a parameterized type, but it is applied to %d type\nargument(s) here. Parameterized types arrive with polymorphism (S5).",
+				te.Name, len(te.Args))}
+		}
+		return nil, []diag.Error{diag.Errorf(te.NameSp, "NAMING ERROR",
+			"I don't know a type named `%s`.", te.Name)}
 	default:
 		panic("infer: unhandled TypeExpr node")
+	}
+}
+
+// ContainsFunction reports whether t transitively contains a function type —
+// through ADT fields too. Feeds the `==`-at-function-types rejection (§8.6).
+func (ck *Checker) ContainsFunction(t types.Type) bool {
+	return ck.containsFunction(t, map[int]bool{})
+}
+
+func (ck *Checker) containsFunction(t types.Type, visiting map[int]bool) bool {
+	switch t := t.(type) {
+	case *types.TFun:
+		return true
+	case *types.TCon:
+		if visiting[t.Unique] {
+			return false // recursive occurrence: already being examined
+		}
+		visiting[t.Unique] = true
+		if adt, ok := ck.ADTs[t.Unique]; ok {
+			for _, c := range adt.Ctors {
+				for _, f := range c.Fields {
+					if ck.containsFunction(f, visiting) {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	default:
+		return false
 	}
 }
