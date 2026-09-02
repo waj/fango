@@ -14,6 +14,17 @@ import (
 func Dump(p *Prog) string {
 	var b strings.Builder
 	b.WriteString("(core")
+	for _, adt := range p.ADTs {
+		fmt.Fprintf(&b, "\n  (type %s", adt.Con.Name)
+		for _, c := range adt.Ctors {
+			fmt.Fprintf(&b, " (ctor %s", c.Name)
+			for _, f := range c.Fields {
+				fmt.Fprintf(&b, " %s", types.Show(f))
+			}
+			b.WriteString(")")
+		}
+		b.WriteString(")")
+	}
 	for _, d := range p.Defs {
 		if len(d.Params) > 0 {
 			fmt.Fprintf(&b, "\n  (def %s (params %s) %s %s)",
@@ -68,7 +79,46 @@ func DumpExpr(e Expr) string {
 			parts = append(parts, DumpExpr(a))
 		}
 		return strings.Join(parts, " ") + fmt.Sprintf(" %s)", types.Show(e.Ty))
+	case *Case:
+		return fmt.Sprintf("(case %s %s %s %s)",
+			types.Show(e.Ty), DumpExpr(e.Scrut), e.Bind, DumpTree(e.Tree))
 	default:
 		panic(fmt.Sprintf("core.DumpExpr: unhandled %T", e))
+	}
+}
+
+// DumpTree renders a decision tree in the golden S-expression format.
+func DumpTree(t Tree) string {
+	switch t := t.(type) {
+	case *Leaf:
+		return fmt.Sprintf("(leaf %s)", DumpExpr(t.Body))
+	case *SwitchCtor:
+		var b strings.Builder
+		fmt.Fprintf(&b, "(switchctor %s", t.Scrut)
+		for _, c := range t.Cases {
+			fmt.Fprintf(&b, " (%s", c.Ctor.Name)
+			for _, bind := range c.Binds {
+				if bind == "" {
+					bind = "_"
+				}
+				fmt.Fprintf(&b, " %s", bind)
+			}
+			fmt.Fprintf(&b, " %s)", DumpTree(c.Tree))
+		}
+		if t.Default != nil {
+			fmt.Fprintf(&b, " (default %s)", DumpTree(t.Default))
+		}
+		b.WriteString(")")
+		return b.String()
+	case *SwitchLit:
+		var b strings.Builder
+		fmt.Fprintf(&b, "(switchlit %s", t.Scrut)
+		for _, c := range t.Cases {
+			fmt.Fprintf(&b, " (%s %s)", DumpExpr(c.Lit), DumpTree(c.Tree))
+		}
+		fmt.Fprintf(&b, " (default %s))", DumpTree(t.Default))
+		return b.String()
+	default:
+		panic(fmt.Sprintf("core.DumpTree: unhandled %T", t))
 	}
 }

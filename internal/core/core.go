@@ -7,6 +7,10 @@ package core
 import "github.com/waj/fango/internal/types"
 
 type Prog struct {
+	// ADTs lists declared types in declaration order — codegen emits marker
+	// interfaces, constructor structs, and derived eq/show from it. Bool is
+	// absent (native Go bool forever, §8.1).
+	ADTs []*types.ADTInfo
 	Defs []Def
 }
 
@@ -113,7 +117,64 @@ type App struct {
 	Args       []Expr
 	TyArgs     []types.Type
 	Ty         types.Type
+
+	// Ctor identifies the constructor when CalleeKind == Ctor (always
+	// saturated: len(Args) == len(Ctor.Fields); partial applications were
+	// eta-expanded like workers, §8.2 item 5).
+	Ctor *types.CtorInfo
 }
+
+// Case evaluates Scrut once, binds it to Bind, and descends the decision
+// tree (§8.5). Elaboration compiled the branches: each scrutinee position
+// is examined once, pattern variables became Lets inside the leaves.
+type Case struct {
+	Scrut Expr
+	Bind  string
+	Tree  Tree
+	Ty    types.Type
+}
+
+// Tree is a decision-tree node: Maranget-compiled pattern matching.
+type Tree interface{ isTree() }
+
+// Leaf runs one branch body.
+type Leaf struct {
+	Body Expr
+}
+
+// SwitchCtor discriminates on the constructor held in the variable Scrut.
+// Cases appear in constructor-declaration order. Default is non-nil only
+// when Cases doesn't cover the ADT (a variable or wildcard took the rest);
+// with full coverage codegen turns the LAST case into Go's `default:`.
+type SwitchCtor struct {
+	Scrut   string
+	ADT     *types.ADTInfo
+	Cases   []CtorCase
+	Default Tree
+}
+
+type CtorCase struct {
+	Ctor  *types.CtorInfo
+	Binds []string // one per field; "" = unused in the subtree
+	Tree  Tree
+}
+
+// SwitchLit discriminates on literal equality (Int, Float, or String
+// scrutinee). Default is always non-nil: literals never exhaust a type.
+type SwitchLit struct {
+	Scrut   string
+	Cases   []LitCase
+	Default Tree
+}
+
+type LitCase struct {
+	Lit  Expr // *IntLit, *FloatLit, or *StringLit
+	Tree Tree
+}
+
+func (*Leaf) isTree()       {}
+func (*SwitchCtor) isTree() {}
+func (*SwitchLit) isTree()  {}
 
 func (*IntLit) isExpr()    {}
 func (*FloatLit) isExpr()  {}
@@ -127,6 +188,7 @@ func (*Print) isExpr()     {}
 func (*Let) isExpr()       {}
 func (*Lambda) isExpr()    {}
 func (*App) isExpr()       {}
+func (*Case) isExpr()      {}
 
 func (e *IntLit) Type() types.Type    { return e.Ty }
 func (e *FloatLit) Type() types.Type  { return e.Ty }
@@ -140,6 +202,7 @@ func (e *Print) Type() types.Type     { return e.Ty }
 func (e *Let) Type() types.Type       { return e.Ty }
 func (e *Lambda) Type() types.Type    { return e.Ty }
 func (e *App) Type() types.Type       { return e.Ty }
+func (e *Case) Type() types.Type      { return e.Ty }
 
 // Mentions reports whether name occurs in e. No-shadowing makes a plain
 // occurrence check exact: nothing inside e can rebind name. Used by the
@@ -170,6 +233,40 @@ func Mentions(e Expr, name string) bool {
 			}
 		}
 		return false
+	case *Case:
+		return Mentions(e.Scrut, name) || TreeMentions(e.Tree, name)
+	default:
+		return false
+	}
+}
+
+// TreeMentions reports whether name occurs in a decision tree — as a tested
+// scrutinee variable or anywhere in a leaf body. Codegen uses it to skip
+// emitting unused field binders (Go rejects unused locals).
+func TreeMentions(t Tree, name string) bool {
+	switch t := t.(type) {
+	case *Leaf:
+		return Mentions(t.Body, name)
+	case *SwitchCtor:
+		if t.Scrut == name {
+			return true
+		}
+		for _, c := range t.Cases {
+			if TreeMentions(c.Tree, name) {
+				return true
+			}
+		}
+		return t.Default != nil && TreeMentions(t.Default, name)
+	case *SwitchLit:
+		if t.Scrut == name {
+			return true
+		}
+		for _, c := range t.Cases {
+			if TreeMentions(c.Tree, name) {
+				return true
+			}
+		}
+		return TreeMentions(t.Default, name)
 	default:
 		return false
 	}

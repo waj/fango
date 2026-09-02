@@ -12,7 +12,10 @@ import (
 // (and under a debug flag later) — instantiation plumbing bugs are the
 // design's top risk, and this is the tripwire.
 func Lint(p *Prog, b *types.Builtins) []error {
-	l := &linter{b: b, scope: map[string]bool{}, workers: map[string]*Def{}}
+	l := &linter{b: b, scope: map[string]bool{}, workers: map[string]*Def{}, adts: map[int]bool{}}
+	for _, adt := range p.ADTs {
+		l.adts[adt.Con.Unique] = true
+	}
 	// The worker table is complete up front (self-calls need it); the
 	// no-shadow scope fills in SOURCE ORDER, matching the checker — a
 	// param may legally coincide with a later definition's name.
@@ -62,6 +65,7 @@ type linter struct {
 	b       *types.Builtins
 	scope   map[string]bool // def names + enclosing Let/param names: no shadowing
 	workers map[string]*Def
+	adts    map[int]bool // declared ADT uniques: equatable via derived eq
 	errs    []error
 }
 
@@ -160,7 +164,7 @@ func (l *linter) expr(e Expr, where string) {
 		delete(l.scope, e.Param)
 	case *Print:
 		u := l.unique(e.Arg.Type())
-		if u != l.b.Int.Unique && u != l.b.Float.Unique && u != l.b.String.Unique && u != l.b.Bool.Unique {
+		if u != l.b.Int.Unique && u != l.b.Float.Unique && u != l.b.String.Unique && u != l.b.Bool.Unique && !l.adts[u] {
 			l.errorf("%s: Print argument typed %s, not printable", where, types.Show(e.Arg.Type()))
 		}
 		if l.unique(e.Ty) != l.b.Unit.Unique {
@@ -218,11 +222,125 @@ func (l *linter) expr(e Expr, where string) {
 			}
 			l.expr(e.Callee, where)
 			l.expr(e.Args[0], where)
+		case Ctor:
+			if e.Ctor == nil {
+				l.errorf("%s: App{Ctor} without constructor info", where)
+				return
+			}
+			if len(e.Args) != len(e.Ctor.Fields) {
+				l.errorf("%s: App{Ctor} `%s` has %d args, constructor takes %d — partials must be eta-expanded",
+					where, e.Ctor.Name, len(e.Args), len(e.Ctor.Fields))
+				return
+			}
+			for i, a := range e.Args {
+				if types.Show(a.Type()) != types.Show(e.Ctor.Fields[i]) {
+					l.errorf("%s: App{Ctor} `%s` arg %d typed %s, want %s",
+						where, e.Ctor.Name, i+1, types.Show(a.Type()), types.Show(e.Ctor.Fields[i]))
+				}
+				l.expr(a, where)
+			}
+			if types.Show(e.Ty) != types.Show(e.Ctor.Result) {
+				l.errorf("%s: App{Ctor} `%s` typed %s, want %s",
+					where, e.Ctor.Name, types.Show(e.Ty), types.Show(e.Ctor.Result))
+			}
 		default:
-			l.errorf("%s: App{Ctor} arrives in S4", where)
+			l.errorf("%s: App with unknown CalleeKind %d", where, e.CalleeKind)
 		}
+	case *Case:
+		if e.Bind == "" {
+			l.errorf("%s: Case without a scrutinee binder", where)
+		}
+		if l.scope[e.Bind] {
+			l.errorf("%s: Case binder `%s` shadows", where, e.Bind)
+		}
+		l.expr(e.Scrut, where)
+		l.scope[e.Bind] = true
+		l.tree(e.Tree, e.Ty, where)
+		delete(l.scope, e.Bind)
 	default:
 		l.errorf("%s: unhandled Core node %T", where, e)
+	}
+}
+
+// tree checks decision-tree invariants: tested variables are in scope, ctor
+// cases belong to their ADT in strictly increasing declaration order,
+// coverage and Default agree, and every leaf produces the Case's type.
+func (l *linter) tree(t Tree, want types.Type, where string) {
+	switch t := t.(type) {
+	case *Leaf:
+		if types.Show(t.Body.Type()) != types.Show(want) {
+			l.errorf("%s: case leaf typed %s, want %s",
+				where, types.Show(t.Body.Type()), types.Show(want))
+		}
+		l.expr(t.Body, where)
+	case *SwitchCtor:
+		if !l.scope[t.Scrut] {
+			l.errorf("%s: SwitchCtor tests `%s`, which is not in scope", where, t.Scrut)
+		}
+		if len(t.Cases) == 0 {
+			l.errorf("%s: SwitchCtor with no cases", where)
+		}
+		prevIdx := -1
+		for _, c := range t.Cases {
+			if c.Ctor.Result.Unique != t.ADT.Con.Unique {
+				l.errorf("%s: SwitchCtor case `%s` belongs to `%s`, not `%s`",
+					where, c.Ctor.Name, c.Ctor.Result.Name, t.ADT.Con.Name)
+			}
+			if c.Ctor.Index <= prevIdx {
+				l.errorf("%s: SwitchCtor cases out of declaration order at `%s`", where, c.Ctor.Name)
+			}
+			prevIdx = c.Ctor.Index
+			if len(c.Binds) != len(c.Ctor.Fields) {
+				l.errorf("%s: SwitchCtor case `%s` has %d binders, constructor has %d fields",
+					where, c.Ctor.Name, len(c.Binds), len(c.Ctor.Fields))
+				continue
+			}
+			var bound []string
+			for _, bind := range c.Binds {
+				if bind == "" {
+					continue
+				}
+				if l.scope[bind] {
+					l.errorf("%s: field binder `%s` shadows", where, bind)
+				}
+				l.scope[bind] = true
+				bound = append(bound, bind)
+			}
+			l.tree(c.Tree, want, where)
+			for _, bind := range bound {
+				delete(l.scope, bind)
+			}
+		}
+		covered := len(t.Cases) == len(t.ADT.Ctors)
+		if covered && t.Default != nil {
+			l.errorf("%s: SwitchCtor covers `%s` fully but still has a Default", where, t.ADT.Con.Name)
+		}
+		if !covered && t.Default == nil {
+			l.errorf("%s: SwitchCtor covers `%s` partially and has no Default", where, t.ADT.Con.Name)
+		}
+		if t.Default != nil {
+			l.tree(t.Default, want, where)
+		}
+	case *SwitchLit:
+		if !l.scope[t.Scrut] {
+			l.errorf("%s: SwitchLit tests `%s`, which is not in scope", where, t.Scrut)
+		}
+		if t.Default == nil {
+			l.errorf("%s: SwitchLit without a Default — literals never exhaust a type", where)
+		}
+		for _, c := range t.Cases {
+			switch c.Lit.(type) {
+			case *IntLit, *FloatLit, *StringLit:
+			default:
+				l.errorf("%s: SwitchLit case is %T, want a literal", where, c.Lit)
+			}
+			l.tree(c.Tree, want, where)
+		}
+		if t.Default != nil {
+			l.tree(t.Default, want, where)
+		}
+	default:
+		l.errorf("%s: unhandled tree node %T", where, t)
 	}
 }
 
@@ -230,7 +348,7 @@ func (l *linter) binOp(e *BinOp, where string) {
 	lu, ru, res := l.unique(e.L.Type()), l.unique(e.R.Type()), l.unique(e.Ty)
 	numeric := func(u int) bool { return u == l.b.Int.Unique || u == l.b.Float.Unique }
 	orderable := func(u int) bool { return numeric(u) || u == l.b.String.Unique }
-	equatable := func(u int) bool { return orderable(u) || u == l.b.Bool.Unique }
+	equatable := func(u int) bool { return orderable(u) || u == l.b.Bool.Unique || l.adts[u] }
 
 	switch e.Op {
 	case "+", "-", "*":

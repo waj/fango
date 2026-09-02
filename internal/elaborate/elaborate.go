@@ -29,7 +29,7 @@ import (
 // returns without errors, Core contains no metavariables — asserted by
 // core.Lint.
 func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error) {
-	p := &core.Prog{}
+	p := &core.Prog{ADTs: ck.ADTOrder}
 	var errs []diag.Error
 	for _, info := range infos {
 		def, declErrs := Decl(info, ck)
@@ -64,7 +64,7 @@ func Decl(info infer.DeclInfo, ck *infer.Checker) (core.Def, []diag.Error) {
 		Name:   info.Name,
 		Type:   el.zonkDefault(info.Type),
 		Params: params,
-		Body:   el.expr(info.Body),
+		Body:   el.anf(el.expr(info.Body)),
 	}
 	return def, el.errs
 }
@@ -79,7 +79,7 @@ func (el *elab) polyError(name string, sp source.Span, ty types.Type) {
 // Expr elaborates one expression against the checker's solved types.
 func Expr(e ast.Expr, ck *infer.Checker) (core.Expr, []diag.Error) {
 	el := &elab{ck: ck}
-	ce := el.expr(e)
+	ce := el.anf(el.expr(e))
 	return ce, el.errs
 }
 
@@ -134,7 +134,11 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		case "False":
 			return &core.BoolLit{Val: false, Ty: ty}
 		default:
-			panic("elaborate: constructor values arrive in S4: " + e.Name)
+			info, ok := el.ck.Ctors[e.Name]
+			if !ok {
+				panic("elaborate: unknown constructor `" + e.Name + "` — the checker should have rejected this")
+			}
+			return el.ctorValue(info)
 		}
 	case *ast.App:
 		if el.ck.PrintCalls[e] {
@@ -158,6 +162,8 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		return el.fold(&core.BinOp{Op: e.Op, Ty: ty, L: l, R: r})
 	case *ast.Lambda:
 		return el.lambda(e.Params, e.Body, ty)
+	case *ast.Case:
+		return el.caseExpr(e, ty)
 	case *ast.Block:
 		// Fold bindings into a right-nested Let chain; every level carries
 		// the block's (result) type. RHSs elaborate in source order so
@@ -201,15 +207,25 @@ func (el *elab) unique(t types.Type) int {
 	return -1
 }
 
-// checkPrintable is the print cheat's ground check: only scalar types
-// print until derived show arrives (S4).
+// checkPrintable is the print cheat's ground check: scalars and declared
+// ADTs print (the latter via derived show, emitted on demand) — unless the
+// value can contain a function, which has no showable form.
 func (el *elab) checkPrintable(t types.Type, sp source.Span) {
 	switch el.unique(t) {
 	case el.ck.B.Int.Unique, el.ck.B.Float.Unique, el.ck.B.String.Unique, el.ck.B.Bool.Unique:
-	default:
-		el.errs = append(el.errs, diag.Errorf(sp, "TYPE MISMATCH",
-			"`print` can print Int, Float, String, and Bool values, but this\nis a `%s`.", types.Show(t)))
+		return
 	}
+	if con, ok := t.(*types.TCon); ok {
+		if _, isADT := el.ck.ADTs[con.Unique]; isADT {
+			if el.ck.ContainsFunction(t) {
+				el.errs = append(el.errs, diag.Errorf(sp, "TYPE MISMATCH",
+					"`print` cannot print a `%s` — its values can contain functions,\nwhich have no printable form.", types.Show(t)))
+			}
+			return
+		}
+	}
+	el.errs = append(el.errs, diag.Errorf(sp, "TYPE MISMATCH",
+		"`print` can print Int, Float, String, Bool, and custom-type values,\nbut this is a `%s`.", types.Show(t)))
 }
 
 // checkOperands is the post-defaulting equatable/orderable check — what
@@ -223,6 +239,18 @@ func (el *elab) checkOperands(e *ast.BinOp, operandTy types.Type) {
 		switch u {
 		case b.Int.Unique, b.Float.Unique, b.String.Unique, b.Bool.Unique:
 		default:
+			// Declared ADTs get derived structural equality (§8.6) — except
+			// where a payload can contain a function, rejected at compile
+			// time (decidable at ground types; Elm crashes at runtime here).
+			if con, ok := operandTy.(*types.TCon); ok {
+				if _, isADT := el.ck.ADTs[con.Unique]; isADT {
+					if el.ck.ContainsFunction(operandTy) {
+						el.errs = append(el.errs, diag.Errorf(e.OpSpan, "TYPE MISMATCH",
+							"I cannot check equality of `%s` values with (%s): they can\ncontain functions, and functions have no equality.", types.Show(operandTy), e.Op))
+					}
+					return
+				}
+			}
 			el.errs = append(el.errs, diag.Errorf(e.OpSpan, "TYPE MISMATCH",
 				"I cannot check equality of `%s` values with (%s).", types.Show(operandTy), e.Op))
 		}

@@ -1,0 +1,4 @@
+(core
+  (type Shape (ctor Circle Float) (ctor Rect Float Float))
+  (def area (params shape) Shape -> Float (case Float (var shape Shape) _s0 (switchctor _s0 (Circle _c1 (leaf (let r Float (var _c1 Float) (binop * Float (binop * Float (var r Float) (var r Float)) (float 3.14159 Float))))) (Rect _c2 _c3 (leaf (let w Float (var _c2 Float) (let h Float (var _c3 Float) (binop * Float (var w Float) (var h Float)))))))))
+  (def main Float (app/worker (var area Shape -> Float) (app/ctor (var Circle Float -> Shape) (float 2 Float) Shape) Float)))

@@ -1,0 +1,20 @@
+type MaybeInt = NothingI | JustI Int
+
+type Pair = Pair MaybeInt MaybeInt
+
+sum p =
+    case p of
+        Pair (JustI a) (JustI b) -> a + b
+        Pair (JustI a) NothingI -> a
+        Pair NothingI (JustI b) -> b
+        Pair NothingI NothingI -> 0
+
+firstOr d m =
+    case m of
+        JustI 0 -> d
+        JustI x -> x
+        _ -> d
+
+mk = JustI
+
+main = sum (Pair (mk 20) (JustI 22)) + firstOr 5 NothingI

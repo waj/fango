@@ -47,6 +47,15 @@ func (el *elab) app(e *ast.App) core.Expr {
 		}
 	}
 
+	// Constructor head? Same saturation discipline as workers (§8.2 item 5);
+	// True/False fall through (they are nullary BoolLits and a type-correct
+	// program never applies them).
+	if c, ok := head.(*ast.Ctor); ok {
+		if info, isCtor := el.ck.Ctors[c.Name]; isCtor && len(info.Fields) > 0 {
+			return el.ctorCall(info, args)
+		}
+	}
+
 	// Unknown callee: one typed indirect call per application.
 	res := el.expr(head)
 	for _, a := range args {
@@ -69,40 +78,76 @@ func (el *elab) valueApp(callee, arg core.Expr) core.Expr {
 	}
 }
 
+// callee is a known-arity application head: a top-level worker or a
+// constructor. Both get the same saturation analysis; only the emitted
+// App's kind differs.
+type callee struct {
+	kind  core.CalleeKind
+	name  string
+	ty    types.Type // full curried type
+	arity int
+	ctor  *types.CtorInfo // when kind == core.Ctor
+}
+
+func workerCallee(name string, workerTy types.Type, arity int) callee {
+	return callee{kind: core.Worker, name: name, ty: workerTy, arity: arity}
+}
+
+func ctorCallee(info *types.CtorInfo) callee {
+	return callee{kind: core.Ctor, name: info.Name, ty: info.ValueType(),
+		arity: len(info.Fields), ctor: info}
+}
+
+// saturatedApp builds the direct App for a fully applied callee.
+func (c callee) saturatedApp(args []core.Expr) *core.App {
+	_, ret := core.PeelFun(c.ty, c.arity)
+	return &core.App{
+		CalleeKind: c.kind,
+		Callee:     &core.VarRef{Name: c.name, Ty: c.ty},
+		Args:       args,
+		Ty:         ret,
+		Ctor:       c.ctor,
+	}
+}
+
 // workerCall classifies a call to a known worker by saturation.
 func (el *elab) workerCall(name string, workerTy types.Type, arity int, args []ast.Expr) core.Expr {
+	return el.calleeCall(workerCallee(name, workerTy, arity), args)
+}
+
+// ctorCall classifies a constructor application by saturation.
+func (el *elab) ctorCall(info *types.CtorInfo, args []ast.Expr) core.Expr {
+	return el.calleeCall(ctorCallee(info), args)
+}
+
+func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
 	switch {
-	case len(args) == arity: // saturated: a direct call
-		coreArgs := make([]core.Expr, arity)
+	case len(args) == c.arity: // saturated: a direct call / struct literal
+		coreArgs := make([]core.Expr, c.arity)
 		for i, a := range args {
 			coreArgs[i] = el.expr(a)
 		}
-		_, ret := core.PeelFun(workerTy, arity)
-		return &core.App{
-			CalleeKind: core.Worker,
-			Callee:     &core.VarRef{Name: name, Ty: workerTy},
-			Args:       coreArgs,
-			Ty:         ret,
-		}
+		return c.saturatedApp(coreArgs)
 
-	case len(args) > arity: // oversaturated: direct call, then indirect
-		res := el.workerCall(name, workerTy, arity, args[:arity])
-		for _, a := range args[arity:] {
+	case len(args) > c.arity: // oversaturated: direct call, then indirect
+		res := el.calleeCall(c, args[:c.arity])
+		for _, a := range args[c.arity:] {
 			res = el.valueApp(res, el.expr(a))
 		}
 		return res
 
-	default: // partial (including a bare reference via curriedWorkerRef)
-		return el.partialWorker(name, workerTy, arity, args)
+	default: // partial (including a bare reference via curried*Ref)
+		return el.partial(c, args)
 	}
 }
 
-// partialWorker eta-expands an unsaturated worker call into §8.2 item 4's
-// "exactly one closure whose body calls the worker": non-atomic given
-// arguments are hoisted into Lets (strictness — they must evaluate when the
-// partial is created, not per call), then nested Lambdas supply the missing
-// parameters around one saturated App{Worker}.
-func (el *elab) partialWorker(name string, workerTy types.Type, arity int, given []ast.Expr) core.Expr {
+// partial eta-expands an unsaturated worker or constructor application into
+// §8.2 item 4's "exactly one closure whose body calls the worker": non-atomic
+// given arguments are hoisted into Lets (strictness — they must evaluate when
+// the partial is created, not per call), then nested Lambdas supply the
+// missing parameters around one saturated App.
+func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
+	workerTy, arity := c.ty, c.arity
 	argTys, _ := core.PeelFun(workerTy, arity)
 
 	// Elaborate given args; hoist non-atoms into temps.
@@ -133,13 +178,7 @@ func (el *elab) partialWorker(name string, workerTy types.Type, arity int, given
 		coreArgs = append(coreArgs, &core.VarRef{Name: lamParams[i], Ty: argTys[len(given)+i]})
 	}
 
-	_, ret := core.PeelFun(workerTy, arity)
-	var body core.Expr = &core.App{
-		CalleeKind: core.Worker,
-		Callee:     &core.VarRef{Name: name, Ty: workerTy},
-		Args:       coreArgs,
-		Ty:         ret,
-	}
+	var body core.Expr = c.saturatedApp(coreArgs)
 
 	// Wrap lambdas innermost-out; each level's type is the remaining chain.
 	lamTy := workerTy
@@ -166,7 +205,17 @@ func (el *elab) partialWorker(name string, workerTy types.Type, arity int, given
 // curriedWorkerRef is the k=0 case: a worker used first-class expands to
 // its curried wrapper at the use site — demand-driven by construction.
 func (el *elab) curriedWorkerRef(name string, workerTy types.Type, arity int) core.Expr {
-	return el.partialWorker(name, workerTy, arity, nil)
+	return el.partial(workerCallee(name, workerTy, arity), nil)
+}
+
+// ctorValue is a constructor in value position: nullary constructors are the
+// saturated zero-arg App (a zero-field struct in codegen); field-taking ones
+// get the same curried-wrapper treatment as first-class workers.
+func (el *elab) ctorValue(info *types.CtorInfo) core.Expr {
+	if len(info.Fields) == 0 {
+		return ctorCallee(info).saturatedApp(nil)
+	}
+	return el.partial(ctorCallee(info), nil)
 }
 
 // isAtom reports whether re-evaluating e is free (no work, no effects):
