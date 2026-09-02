@@ -17,6 +17,7 @@
             go       # compiler implementation language and codegen backend
             gopls    # LSP for editors
             gotools  # goimports etc.
+            gnumake  # Makefile convenience targets
           ];
         };
       });
