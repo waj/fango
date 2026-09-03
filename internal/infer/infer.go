@@ -17,18 +17,20 @@ import (
 type WhyKind int
 
 const (
-	WhyOperand      WhyKind = iota // operands of a numeric operator must agree
-	WhyDeclBody                    // a declaration body must match its (future) annotation
-	WhyCall                        // a callee must be a function accepting the argument
-	WhyIfCondition                 // an if condition must be Bool
-	WhyIfBranches                  // then/else branches must agree
-	WhyCompare                     // both sides of a comparison must agree
-	WhyNegate                      // a negated operand must be a number
-	WhyOpRequires                  // an operator fixes its operand type (/, ++)
-	WhyAnnotation                  // a definition must match its type annotation
-	WhyRecursion                   // recursive uses must match the definition
-	WhyPattern                     // a pattern must match the scrutinee's type
-	WhyCaseBranches                // all case branches must produce the same type
+	WhyOperand        WhyKind = iota // operands of a numeric operator must agree
+	WhyDeclBody                      // a declaration body must match its (future) annotation
+	WhyCall                          // a callee must be a function accepting the argument
+	WhyIfCondition                   // an if condition must be Bool
+	WhyIfBranches                    // then/else branches must agree
+	WhyCompare                       // both sides of a comparison must agree
+	WhyNegate                        // a negated operand must be a number
+	WhyOpRequires                    // an operator fixes its operand type (/, ++)
+	WhyAnnotation                    // a definition must match its type annotation
+	WhyRecursion                     // recursive uses must match the definition
+	WhyPattern                       // a pattern must match the scrutinee's type
+	WhyCaseBranches                  // all case branches must produce the same type
+	WhyEffectEscapes                 // a top-level value performs an unhandled effect
+	WhyEffectMismatch                // an annotation's effect row disagrees with its body
 )
 
 type Why struct {
@@ -86,7 +88,9 @@ type Checker struct {
 	// table's embryo, exactly as Ctors is for constructors. `type`
 	// declarations (S4) and REPL generations extend it; identity stays the
 	// TCon Unique underneath.
-	TypeNames map[string]types.Type
+	TypeNames       map[string]types.Type
+	Effects         map[string]*types.EffectInfo
+	EffectsByUnique map[int]*types.EffectInfo
 
 	// PrintCalls marks App nodes recognized as the print builtin cheat, so
 	// elaboration classifies them identically (one source of truth).
@@ -141,11 +145,13 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 			"Bool":   b.Bool,
 			"()":     b.Unit,
 		},
-		PrintCalls:  map[*ast.App]bool{},
-		Workers:     map[string]int{},
-		BindTypes:   map[*ast.LocalBind]types.Type{},
-		PatTypes:    map[ast.Pattern]types.Type{},
-		BindSchemes: map[*ast.LocalBind]types.Scheme{},
+		Effects:         map[string]*types.EffectInfo{},
+		EffectsByUnique: map[int]*types.EffectInfo{},
+		PrintCalls:      map[*ast.App]bool{},
+		Workers:         map[string]int{},
+		BindTypes:       map[*ast.LocalBind]types.Type{},
+		PatTypes:        map[ast.Pattern]types.Type{},
+		BindSchemes:     map[*ast.LocalBind]types.Scheme{},
 	}
 	// Bool is an ordinary ADT in the checker (§7.2) — patterns, case
 	// exhaustiveness, and the ctor table treat it like any declared type.
@@ -184,7 +190,14 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 	var errs []diag.Error
 	adts := map[*ast.TypeDecl]*types.ADTInfo{}
 	for _, d := range m.Decls {
+		if ed, ok := d.(*ast.EffectDecl); ok {
+			errs = append(errs, ck.declareEffectHeader(ed, true)...)
+		}
 		if td, ok := d.(*ast.TypeDecl); ok {
+			if _, clash := ck.Effects[td.Name]; clash {
+				errs = append(errs, diag.Errorf(td.NameSpan, "MULTIPLE DEFINITIONS",
+					"The type `%s` collides with an effect of the same name.", td.Name))
+			}
 			// Duplicate types are a batch-compilation error only: the REPL
 			// redefines types freely (generational uniques).
 			if _, dup := ck.TypeNames[td.Name]; dup {
@@ -196,6 +209,11 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 			if adt != nil {
 				adts[td] = adt
 			}
+		}
+	}
+	for _, d := range m.Decls {
+		if ed, ok := d.(*ast.EffectDecl); ok {
+			errs = append(errs, ck.declareEffectOps(ed, true)...)
 		}
 	}
 	for _, d := range m.Decls {
@@ -222,6 +240,88 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 		infos = append(infos, info)
 	}
 	return infos, errs
+}
+
+func (ck *Checker) declareEffectHeader(ed *ast.EffectDecl, batch bool) []diag.Error {
+	var errs []diag.Error
+	if _, exists := ck.TypeNames[ed.Name]; exists {
+		errs = append(errs, diag.Errorf(ed.NameSpan, "MULTIPLE DEFINITIONS",
+			"The effect `%s` collides with a type of the same name.", ed.Name))
+	}
+	if _, exists := ck.Effects[ed.Name]; exists && batch {
+		errs = append(errs, diag.Errorf(ed.NameSpan, "MULTIPLE DEFINITIONS",
+			"The effect `%s` is defined more than once.", ed.Name))
+	}
+	seen := map[string]bool{}
+	params := make([]*types.TVar, len(ed.Params))
+	for i, p := range ed.Params {
+		if seen[p.Name] {
+			errs = append(errs, diag.Errorf(p.Sp, "SHADOWING", "The effect parameter `%s` appears twice.", p.Name))
+		}
+		seen[p.Name] = true
+		params[i] = ck.Sup.FreshRigid(types.General)
+	}
+	info := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: ed.Name, Params: params}
+	ck.Effects[ed.Name], ck.EffectsByUnique[info.Unique] = info, info
+	return errs
+}
+
+func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error {
+	info := ck.Effects[ed.Name]
+	if info == nil {
+		return nil
+	}
+	names := make([]string, len(ed.Params))
+	for i, p := range ed.Params {
+		names[i] = p.Name
+	}
+	seen := map[string]bool{}
+	var errs []diag.Error
+	for _, op := range ed.Ops {
+		if seen[op.Name] || (batch && ck.Env.Has(op.Name)) {
+			errs = append(errs, diag.Errorf(op.NameSpan, "MULTIPLE DEFINITIONS",
+				"The operation `%s` collides with another value in this module.", op.Name))
+			continue
+		}
+		seen[op.Name] = true
+		scope := newEffectScope(names, info.Params, ck.Sup)
+		ty, opErrs := ck.ResolveTypeExpr(op.Type, scope)
+		errs = append(errs, opErrs...)
+		if ty == nil {
+			continue
+		}
+		fn, ok := ty.(*types.TFun)
+		if !ok {
+			errs = append(errs, diag.Errorf(op.NameSpan, "EFFECT OPERATION TYPE",
+				"The operation `%s` must have a function type.", op.Name))
+			continue
+		}
+		labelArgs := make([]types.Type, len(info.Params))
+		for i, p := range info.Params {
+			labelArgs[i] = p
+		}
+		var arrows []*types.TFun
+		for cur := fn; ; {
+			arrows = append(arrows, cur)
+			next, ok := cur.Ret.(*types.TFun)
+			if !ok {
+				break
+			}
+			cur = next
+		}
+		rowVars := make([]*types.TVar, len(arrows))
+		for i, arrow := range arrows {
+			rowVars[i] = ck.Sup.FreshRigid(types.RowVar)
+			arrow.Eff = types.Row{Tail: rowVars[i]}
+		}
+		inner := arrows[len(arrows)-1]
+		inner.Eff.Labels = []types.EffLabel{{Unique: info.Unique, Name: info.Name, Args: labelArgs}}
+		vars := append([]*types.TVar(nil), info.Params...)
+		vars = append(vars, scope.Minted()...)
+		vars = append(vars, rowVars...)
+		ck.Env.Bind(op.Name, types.Scheme{Vars: vars, Body: ty})
+	}
+	return errs
 }
 
 // TypeDecl checks and installs one type declaration — the REPL's entry
@@ -337,17 +437,18 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []dia
 	var errs []diag.Error
 	if d.Name == "main" && len(d.Params) > 0 {
 		errs = append(errs, diag.Errorf(d.NameSpan, "MAIN TAKES NO PARAMETERS",
-			"Until effects land (S7), `main` is a value, not a function."))
+			"Until the S7 effect runtime lands, `main` is a value, not a function."))
 	}
 
-	g := &generator{ck: ck, allowPrint: allowPrint}
+	g := &generator{ck: ck, allowPrint: allowPrint, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	var ty types.Type
 	if len(d.Params) == 0 {
 		ty = g.expr(d.Body)
+		g.cs = append(g.cs, Constraint{Left: g.ambient, Right: types.Row{}, Span: d.Body.Span(), Why: Why{Kind: WhyEffectEscapes}})
 	} else {
 		ty = g.function(d.Name, d.NameSpan, d.Params, d.Body)
 	}
-	sub, _, solveErrs := Solve(g.cs, nil, ck.Sub, ck.B)
+	sub, _, solveErrs := Solve(g.cs, nil, ck.Sub, ck.B, ck.Sup)
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
 	errs = append(errs, solveErrs...)
@@ -359,9 +460,13 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []dia
 		annTy, annErrs := ck.ResolveTypeExpr(d.Ann.Type, ck.NewAnnScope())
 		errs = append(errs, annErrs...)
 		if annTy != nil {
+			if !sameKnownEffects(ck.Sub.Apply(annTy), ck.Sub.Apply(ty)) {
+				errs = append(errs, diag.Errorf(d.Ann.Sp, "EFFECT MISMATCH",
+					"The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", d.Name))
+			}
 			c := Constraint{Left: annTy, Right: ty, Span: d.Body.Span(),
 				Why: Why{Kind: WhyAnnotation, Name: d.Name}}
-			sub, _, solveErrs := Solve([]Constraint{c}, nil, ck.Sub, ck.B)
+			sub, _, solveErrs := Solve([]Constraint{c}, nil, ck.Sub, ck.B, ck.Sup)
 			ck.Sub = sub
 			errs = append(errs, solveErrs...)
 			ty = annTy
@@ -384,6 +489,24 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []dia
 	return info, errs
 }
 
+func sameKnownEffects(a, b types.Type) bool {
+	af, aok := a.(*types.TFun)
+	bf, bok := b.(*types.TFun)
+	if !aok || !bok {
+		return true
+	}
+	al, bl := types.SortedRow(af.Eff).Labels, types.SortedRow(bf.Eff).Labels
+	if len(al) != len(bl) {
+		return false
+	}
+	for i := range al {
+		if al[i].Unique != bl[i].Unique {
+			return false
+		}
+	}
+	return sameKnownEffects(af.Ret, bf.Ret)
+}
+
 // Expr checks an expression with prompt semantics (print allowed) — the
 // REPL's expression entry point.
 func (ck *Checker) Expr(e ast.Expr) (types.Type, []diag.Error) {
@@ -393,10 +516,10 @@ func (ck *Checker) Expr(e ast.Expr) (types.Type, []diag.Error) {
 // ExprWhere generates constraints for one expression and solves them into
 // the checker's substitution. allowPrint gates the print builtin cheat.
 func (ck *Checker) ExprWhere(e ast.Expr, allowPrint bool) (types.Type, []diag.Error) {
-	g := &generator{ck: ck, allowPrint: allowPrint}
+	g := &generator{ck: ck, allowPrint: allowPrint, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	ty := g.expr(e)
 	var preds []types.Pred // the typeclass seam: always empty in the MVP
-	sub, residual, solveErrs := Solve(g.cs, preds, ck.Sub, ck.B)
+	sub, residual, solveErrs := Solve(g.cs, preds, ck.Sub, ck.B, ck.Sup)
 	ck.Sub = sub
 	_ = residual // no typeclasses: nothing defers residual predicates yet
 	return ty, append(g.errs, solveErrs...)
@@ -408,6 +531,7 @@ type generator struct {
 	locals     *blockScope
 	cs         []Constraint
 	errs       []diag.Error
+	ambient    types.Row
 }
 
 // blockScope is a block's local bindings, as schemes: parameters and
@@ -479,7 +603,7 @@ func (g *generator) expr(e ast.Expr) types.Type {
 		fields, result := g.instantiateCtor(info)
 		ty = result
 		for i := len(fields) - 1; i >= 0; i-- {
-			ty = &types.TFun{Arg: fields[i], Ret: ty}
+			ty = &types.TFun{Arg: fields[i], Eff: types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}, Ret: ty}
 		}
 	case *ast.App:
 		if g.isPrintCheat(e.Fn) {
@@ -497,7 +621,7 @@ func (g *generator) expr(e ast.Expr) types.Type {
 		r := g.ck.Sup.FreshVar(types.General)
 		g.cs = append(g.cs, Constraint{
 			Left:  fnTy,
-			Right: &types.TFun{Arg: argTy, Ret: r},
+			Right: &types.TFun{Arg: argTy, Eff: g.ambient, Ret: r},
 			Span:  e.Fn.Span(),
 			Why:   Why{Kind: WhyCall},
 		})
@@ -534,13 +658,14 @@ func (g *generator) expr(e ast.Expr) types.Type {
 		scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
 		g.locals = scope
 		paramTys := g.bindParams(scope, e.Params)
+		savedAmbient := g.ambient
+		bodyAmbient := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
+		g.ambient = bodyAmbient
 		bodyTy := g.expr(e.Body)
+		g.ambient = savedAmbient
 		g.locals = scope.parent
 		g.allowPrint = saved
-		funTy := bodyTy
-		for i := len(paramTys) - 1; i >= 0; i-- {
-			funTy = &types.TFun{Arg: paramTys[i], Ret: funTy}
-		}
+		funTy := g.wrapFunction(paramTys, bodyTy, bodyAmbient)
 		ty = funTy
 	case *ast.Handle:
 		g.errs = append(g.errs, diag.Errorf(e.Sp, "HANDLERS NOT READY",
@@ -571,14 +696,27 @@ func (g *generator) function(name string, nameSpan source.Span, params []ast.Par
 	defer func() { g.locals = scope.parent }()
 
 	paramTys := g.bindParams(scope, params)
+	savedAmbient := g.ambient
+	bodyAmbient := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
+	g.ambient = bodyAmbient
 	bodyTy := g.expr(body)
+	g.ambient = savedAmbient
 
-	funTy := bodyTy
-	for i := len(paramTys) - 1; i >= 0; i-- {
-		funTy = &types.TFun{Arg: paramTys[i], Ret: funTy}
-	}
+	funTy := g.wrapFunction(paramTys, bodyTy, bodyAmbient)
 	g.cs = append(g.cs, Constraint{Left: self, Right: funTy, Span: nameSpan,
 		Why: Why{Kind: WhyRecursion, Name: name}})
+	return funTy
+}
+
+func (g *generator) wrapFunction(params []types.Type, ret types.Type, bodyRow types.Row) types.Type {
+	funTy := ret
+	for i := len(params) - 1; i >= 0; i-- {
+		eff := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
+		if i == len(params)-1 {
+			eff = bodyRow
+		}
+		funTy = &types.TFun{Arg: params[i], Eff: eff, Ret: funTy}
+	}
 	return funTy
 }
 
@@ -675,7 +813,7 @@ func (g *generator) solveHere() {
 	if len(g.cs) == 0 {
 		return
 	}
-	sub, _, errs := Solve(g.cs, nil, g.ck.Sub, g.ck.B)
+	sub, _, errs := Solve(g.cs, nil, g.ck.Sub, g.ck.B, g.ck.Sup)
 	g.ck.Sub = sub
 	g.errs = append(g.errs, errs...)
 	g.cs = nil

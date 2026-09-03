@@ -142,6 +142,71 @@ func TestNegative(t *testing.T) {
 	}
 }
 
+func TestEffectRows(t *testing.T) {
+	src := "effect Console\n    write : String -> ()\n\nsay text = write text"
+	ck, infos, errs := check(t, src)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("want one value declaration, got %d", len(infos))
+	}
+	if got := types.Show(ck.Sub.Apply(infos[0].Type)); got != "String ->{Console} ()" {
+		t.Fatalf("say type = %s, want String ->{Console} ()", got)
+	}
+	_, _, errs = check(t, "effect Console\n    write : String -> ()\n\nsay : String ->{Console | e} ()\nsay text = write text")
+	if len(errs) > 0 {
+		t.Fatalf("open effect annotation: %v", errs)
+	}
+
+	_, _, errs = check(t, "effect Console\n    write : String -> ()\n\nx = write \"hello\"")
+	if len(errs) == 0 || errs[0].(checkErr).title != "UNHANDLED EFFECT" {
+		t.Fatalf("top-level operation call: want UNHANDLED EFFECT, got %v", errs)
+	}
+
+	_, _, errs = check(t, "effect Console\n    write : String -> ()\n\nsay : String -> ()\nsay text = write text")
+	if len(errs) == 0 || errs[0].(checkErr).title != "EFFECT MISMATCH" {
+		t.Fatalf("pure annotation: want EFFECT MISMATCH, got %v", errs)
+	}
+	_, _, errs = check(t, "effect Console\n    write : String -> ()\n\nsay : String ->{Console} String\nsay text = text")
+	if len(errs) == 0 || errs[0].(checkErr).title != "EFFECT MISMATCH" {
+		t.Fatalf("overstated annotation: want EFFECT MISMATCH, got %v", errs)
+	}
+
+	ck, infos, errs = check(t, "effect Fail e\n    throw : e -> a\n\nfailString text = throw text")
+	if len(errs) > 0 {
+		t.Fatalf("parameterized effect: %v", errs)
+	}
+	if got := types.Show(ck.Sub.Apply(infos[0].Type)); got != "a ->{Fail a} b" {
+		t.Fatalf("failString type = %s", got)
+	}
+
+	ck, infos, errs = check(t, "effect Db\n    query : String -> Int -> String\n\nrun sql count = query sql count")
+	if len(errs) > 0 {
+		t.Fatalf("curried operation: %v", errs)
+	}
+	if got := types.Show(ck.Sub.Apply(infos[0].Type)); got != "String -> Int ->{Db} String" {
+		t.Fatalf("run type = %s", got)
+	}
+}
+
+func TestOpenRowUnification(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	e1, e2 := sup.FreshVar(types.RowVar), sup.FreshVar(types.RowVar)
+	a := types.EffLabel{Unique: 10, Name: "A"}
+	bb := types.EffLabel{Unique: 11, Name: "B"}
+	sub := Subst{}
+	if m := unify(types.Row{Labels: []types.EffLabel{a}, Tail: e1}, types.Row{Labels: []types.EffLabel{bb}, Tail: e2}, sub, b, sup); m != nil {
+		t.Fatalf("unify open rows: %v", m)
+	}
+	left := sub.Apply(types.Row{Labels: []types.EffLabel{a}, Tail: e1})
+	right := sub.Apply(types.Row{Labels: []types.EffLabel{bb}, Tail: e2})
+	if !types.Equal(left, right) {
+		t.Fatalf("rows did not converge: %v != %v", left, right)
+	}
+}
+
 // Direct unifier tests for paths S0 surface syntax cannot reach yet:
 // Number-kind rejection and the occurs check.
 func TestUnifyNumberKind(t *testing.T) {
@@ -150,22 +215,22 @@ func TestUnifyNumberKind(t *testing.T) {
 	sub := Subst{}
 
 	n := sup.FreshVar(types.Number)
-	if m := unify(n, b.Int, sub, b); m != nil {
+	if m := unify(n, b.Int, sub, b, &types.Supply{}); m != nil {
 		t.Errorf("number ~ Int should unify: %v", m.note)
 	}
 
 	n2 := sup.FreshVar(types.Number)
-	if m := unify(n2, b.String, sub, b); m == nil {
+	if m := unify(n2, b.String, sub, b, &types.Supply{}); m == nil {
 		t.Error("number ~ String should fail")
 	}
 
 	// A general var unified with a number var must keep the Number kind.
 	n3 := sup.FreshVar(types.Number)
 	g := sup.FreshVar(types.General)
-	if m := unify(g, n3, sub, b); m != nil {
+	if m := unify(g, n3, sub, b, &types.Supply{}); m != nil {
 		t.Fatalf("general ~ number should unify")
 	}
-	if m := unify(g, b.Bool, sub, b); m == nil {
+	if m := unify(g, b.Bool, sub, b, &types.Supply{}); m == nil {
 		t.Error("after merging with a number var, Bool should be rejected")
 	}
 }
@@ -176,7 +241,7 @@ func TestUnifyOccurs(t *testing.T) {
 	sub := Subst{}
 	v := sup.FreshVar(types.General)
 	fn := &types.TFun{Arg: v, Ret: b.Int}
-	if m := unify(v, fn, sub, b); m == nil {
+	if m := unify(v, fn, sub, b, &types.Supply{}); m == nil {
 		t.Error("occurs check should reject v ~ (v -> Int)")
 	}
 }
@@ -187,7 +252,7 @@ func TestUnifyTConIdentityIsUnique(t *testing.T) {
 	sub := Subst{}
 	// Same name, different unique — a redefined REPL type must not unify.
 	otherInt := &types.TCon{Unique: sup.NextUnique(), Name: "Int"}
-	if m := unify(b.Int, otherInt, sub, b); m == nil {
+	if m := unify(b.Int, otherInt, sub, b, &types.Supply{}); m == nil {
 		t.Error("TCons with equal names but different uniques must not unify")
 	}
 }

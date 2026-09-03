@@ -11,10 +11,10 @@ import (
 // shaped for them. sub is the substitution to extend (the session
 // substitution for REPL use); bi identifies the number types for
 // Number-kinded metavariable checks.
-func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins) (Subst, []types.Pred, []diag.Error) {
+func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup *types.Supply) (Subst, []types.Pred, []diag.Error) {
 	var errs []diag.Error
 	for _, c := range cs {
-		if m := unify(c.Left, c.Right, sub, bi); m != nil {
+		if m := unify(c.Left, c.Right, sub, bi, sup); m != nil {
 			errs = append(errs, mismatchError(c, m, sub))
 		}
 	}
@@ -22,6 +22,9 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins) (Sub
 }
 
 func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
+	if c.Why.Kind == WhyAnnotation && m.effect {
+		c.Why.Kind = WhyEffectMismatch
+	}
 	p := types.NewPrinter()
 	// The constraint's own sides give the top-level story; the mismatch
 	// pair (m) is the leaf that failed, surfaced via m.note when set.
@@ -73,6 +76,12 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 			e.Notes = append(e.Notes,
 				"Note: there is no automatic Int-to-Float conversion — use a\nFloat value here, like `2.0` instead of `2`.")
 		}
+	case WhyEffectEscapes:
+		e = diag.Errorf(c.Span, "UNHANDLED EFFECT",
+			"This top-level value performs an effect that is not handled.\nTop-level bindings must be pure; move the call into a function or add a handler.")
+	case WhyEffectMismatch:
+		e = diag.Errorf(c.Span, "EFFECT MISMATCH",
+			"The effect row in this annotation does not match the effects performed by its body.\nThe annotation says:\n\n    %s\n\nbut the body requires:\n\n    %s", left, right)
 	default:
 		e = diag.Errorf(c.Span, "TYPE MISMATCH",
 			"These types do not match:\n\n    %s\n\nand\n\n    %s", left, right)

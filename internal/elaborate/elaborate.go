@@ -176,7 +176,7 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		}
 		// A polymorphic top-level value compiled to a nullary generic worker
 		// (§8.4): every use is an instantiated zero-argument call.
-		if sch, ok := el.ck.Env.Lookup(e.Name); ok && len(sch.Vars) > 0 {
+		if sch, ok := el.ck.Env.Lookup(e.Name); ok && hasRuntimeVars(sch) {
 			return el.nullaryValueUse(e.Name, sch, ty)
 		}
 		return &core.VarRef{Name: e.Name, Ty: ty}
@@ -230,7 +230,7 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		for i := range e.Binds {
 			bind := &e.Binds[i]
 			bindTy := el.ck.BindTypes[bind]
-			if sch := el.ck.BindSchemes[bind]; len(sch.Vars) > 0 {
+			if sch := el.ck.BindSchemes[bind]; hasRuntimeVars(sch) {
 				el.liftBinding(bind, sch)
 				liftedHere = append(liftedHere, bind.Name)
 				continue
@@ -273,6 +273,15 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 	default:
 		panic(fmt.Sprintf("elaborate: unhandled AST node %T", e))
 	}
+}
+
+func hasRuntimeVars(s types.Scheme) bool {
+	for _, v := range s.Vars {
+		if v.Kind != types.RowVar {
+			return true
+		}
+	}
+	return false
 }
 
 func (el *elab) unique(t types.Type) int {
@@ -442,14 +451,38 @@ func (el *elab) fold(e core.Expr) core.Expr {
 }
 
 // zonkDefault applies the substitution, then defaults any metavariable
-// still free: Number-kinded → Int, general → Unit (DESIGN.md §7.3, §8.4).
+// still free: Number-kinded → Int, general → Unit, row tails → empty
+// (DESIGN.md §7.3, §8.4, §10.8). Effect rows are erased here at the
+// checkpoint-1 Core boundary.
 // Defaults are recorded in the checker's substitution so every other
 // occurrence of the same variable — including environment schemes held by
 // a live REPL session — resolves identically.
 func (el *elab) zonkDefault(t types.Type) types.Type {
 	t = el.ck.Sub.Apply(t)
 	el.defaultFree(t)
-	return el.ck.Sub.Apply(t)
+	return eraseRows(el.ck.Sub.Apply(t))
+}
+
+func eraseRows(t types.Type) types.Type {
+	switch t := t.(type) {
+	case *types.TVar:
+		return t
+	case *types.TCon:
+		if len(t.Args) == 0 {
+			return t
+		}
+		args := make([]types.Type, len(t.Args))
+		for i, a := range t.Args {
+			args[i] = eraseRows(a)
+		}
+		return &types.TCon{Unique: t.Unique, Name: t.Name, Args: args}
+	case *types.TFun:
+		return &types.TFun{Arg: eraseRows(t.Arg), Eff: types.Row{}, Ret: eraseRows(t.Ret)}
+	case types.Row:
+		return types.Row{}
+	default:
+		return t
+	}
 }
 
 func (el *elab) defaultFree(t types.Type) {
@@ -465,8 +498,8 @@ func (el *elab) defaultFree(t types.Type) {
 			el.ck.Sub[t.ID] = el.ck.B.Int
 		case types.General:
 			el.ck.Sub[t.ID] = el.ck.B.Unit
-		default:
-			panic("elaborate: row variables arrive in S7")
+		case types.RowVar:
+			el.ck.Sub[t.ID] = types.Row{}
 		}
 	case *types.TCon:
 		for _, a := range t.Args {
@@ -474,6 +507,16 @@ func (el *elab) defaultFree(t types.Type) {
 		}
 	case *types.TFun:
 		el.defaultFree(t.Arg)
+		el.defaultFree(t.Eff)
 		el.defaultFree(t.Ret)
+	case types.Row:
+		for _, l := range t.Labels {
+			for _, a := range l.Args {
+				el.defaultFree(a)
+			}
+		}
+		if t.Tail != nil {
+			el.defaultFree(t.Tail)
+		}
 	}
 }

@@ -35,7 +35,7 @@ func (ck *Checker) generalize(ty types.Type, avoid map[int]bool) types.Scheme {
 				vars = append(vars, t)
 				return
 			}
-			if t.Kind == types.General || t.Kind == types.Number {
+			if t.Kind == types.General || t.Kind == types.Number || t.Kind == types.RowVar {
 				r := ck.Sup.FreshRigid(t.Kind)
 				ck.Sub[t.ID] = r
 				vars = append(vars, r)
@@ -46,7 +46,17 @@ func (ck *Checker) generalize(ty types.Type, avoid map[int]bool) types.Scheme {
 			}
 		case *types.TFun:
 			walk(t.Arg)
+			walk(t.Eff)
 			walk(t.Ret)
+		case types.Row:
+			for _, l := range t.Labels {
+				for _, a := range l.Args {
+					walk(a)
+				}
+			}
+			if t.Tail != nil {
+				walk(t.Tail)
+			}
 		}
 	}
 	walk(ty)
@@ -80,7 +90,17 @@ func collectVarIDs(t types.Type, ids map[int]bool) {
 		}
 	case *types.TFun:
 		collectVarIDs(t.Arg, ids)
+		collectVarIDs(t.Eff, ids)
 		collectVarIDs(t.Ret, ids)
+	case types.Row:
+		for _, l := range t.Labels {
+			for _, a := range l.Args {
+				collectVarIDs(a, ids)
+			}
+		}
+		if t.Tail != nil {
+			collectVarIDs(t.Tail, ids)
+		}
 	}
 }
 

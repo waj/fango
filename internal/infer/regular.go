@@ -83,7 +83,14 @@ func collectBatchCons(t types.Type, members map[int]*types.ADTInfo, out map[int]
 		}
 	case *types.TFun:
 		collectBatchCons(t.Arg, members, out)
+		collectBatchCons(t.Eff, members, out)
 		collectBatchCons(t.Ret, members, out)
+	case types.Row:
+		for _, l := range t.Labels {
+			for _, a := range l.Args {
+				collectBatchCons(a, members, out)
+			}
+		}
 	}
 }
 
@@ -114,7 +121,14 @@ func (ck *Checker) checkRegularOccurrences(t types.Type, owner *types.ADTInfo,
 		}
 	case *types.TFun:
 		errs = append(errs, ck.checkRegularOccurrences(t.Arg, owner, members, reaches, sp)...)
+		errs = append(errs, ck.checkRegularOccurrences(t.Eff, owner, members, reaches, sp)...)
 		errs = append(errs, ck.checkRegularOccurrences(t.Ret, owner, members, reaches, sp)...)
+	case types.Row:
+		for _, l := range t.Labels {
+			for _, a := range l.Args {
+				errs = append(errs, ck.checkRegularOccurrences(a, owner, members, reaches, sp)...)
+			}
+		}
 	}
 	return errs
 }

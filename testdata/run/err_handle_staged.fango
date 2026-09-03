@@ -1,0 +1,3 @@
+main =
+    handle True of
+        choose value -> value

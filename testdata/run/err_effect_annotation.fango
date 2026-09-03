@@ -1,0 +1,5 @@
+effect Console
+    write : String -> ()
+
+say : String -> ()
+say text = write text

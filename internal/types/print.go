@@ -13,6 +13,8 @@ type Printer struct {
 	names   map[int]string
 	general int
 	number  int
+	row     int
+	rows    map[int]int
 }
 
 func NewPrinter() *Printer {
@@ -20,6 +22,12 @@ func NewPrinter() *Printer {
 }
 
 func (p *Printer) Type(t Type) string {
+	p.rows = map[int]int{}
+	p.countRows(t)
+	return p.render(t)
+}
+
+func (p *Printer) render(t Type) string {
 	switch t := t.(type) {
 	case *TVar:
 		return p.varName(t)
@@ -34,12 +42,65 @@ func (p *Printer) Type(t Type) string {
 		return strings.Join(parts, " ")
 	case *TFun:
 		arrow := "->"
-		if !t.Eff.Empty() {
-			arrow = "->{" + strings.Join(t.Eff.Labels, ", ") + "}"
+		if len(t.Eff.Labels) > 0 {
+			parts := make([]string, len(t.Eff.Labels))
+			for i, l := range t.Eff.Labels {
+				parts[i] = l.Name
+				for _, a := range l.Args {
+					parts[i] += " " + p.atom(a)
+				}
+			}
+			inside := strings.Join(parts, ", ")
+			if v, ok := t.Eff.Tail.(*TVar); ok && p.rows[v.ID] > 1 {
+				inside += " | " + p.varName(v)
+			}
+			arrow = "->{" + inside + "}"
 		}
-		return fmt.Sprintf("%s %s %s", p.funArg(t.Arg), arrow, p.Type(t.Ret))
+		return fmt.Sprintf("%s %s %s", p.funArg(t.Arg), arrow, p.render(t.Ret))
+	case Row:
+		return p.rowText(t)
 	default:
 		panic(fmt.Sprintf("types.Printer: unhandled %T", t))
+	}
+}
+
+func (p *Printer) rowText(r Row) string {
+	parts := make([]string, len(r.Labels))
+	for i, l := range r.Labels {
+		parts[i] = l.Name
+		for _, a := range l.Args {
+			parts[i] += " " + p.atom(a)
+		}
+	}
+	inside := strings.Join(parts, ", ")
+	if r.Tail != nil {
+		if inside != "" {
+			inside += " | "
+		}
+		inside += p.render(r.Tail)
+	}
+	return "{" + inside + "}"
+}
+
+func (p *Printer) countRows(t Type) {
+	switch t := t.(type) {
+	case *TCon:
+		for _, a := range t.Args {
+			p.countRows(a)
+		}
+	case *TFun:
+		p.countRows(t.Arg)
+		p.countRows(t.Eff)
+		p.countRows(t.Ret)
+	case Row:
+		for _, l := range t.Labels {
+			for _, a := range l.Args {
+				p.countRows(a)
+			}
+		}
+		if v, ok := t.Tail.(*TVar); ok {
+			p.rows[v.ID]++
+		}
 	}
 }
 
@@ -82,6 +143,13 @@ func (p *Printer) varName(v *TVar) string {
 			n = "number"
 		} else {
 			n = fmt.Sprintf("number%d", p.number)
+		}
+	case RowVar:
+		p.row++
+		if p.row == 1 {
+			n = "e"
+		} else {
+			n = fmt.Sprintf("e%d", p.row)
 		}
 	default:
 		n = string(rune('a' + p.general%26))

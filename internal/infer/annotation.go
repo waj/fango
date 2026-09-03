@@ -34,7 +34,22 @@ func freeGeneral(t types.Type) *types.TVar {
 		if v := freeGeneral(t.Arg); v != nil {
 			return v
 		}
+		if v := freeGeneral(t.Eff); v != nil {
+			return v
+		}
 		return freeGeneral(t.Ret)
+	case types.Row:
+		for _, l := range t.Labels {
+			for _, a := range l.Args {
+				if v := freeGeneral(a); v != nil {
+					return v
+				}
+			}
+		}
+		if t.Tail != nil {
+			return freeGeneral(t.Tail)
+		}
+		return nil
 	default:
 		return nil
 	}
@@ -64,6 +79,13 @@ func newCtorScope(names []string, vars []*types.TVar) *TypeVars {
 		m[n] = vars[i]
 	}
 	return &TypeVars{vars: m}
+}
+
+func newEffectScope(names []string, vars []*types.TVar, sup *types.Supply) *TypeVars {
+	tv := newCtorScope(names, vars)
+	tv.open = true
+	tv.sup = sup
+	return tv
 }
 
 // Minted returns the skolems an open scope created, in first-use order.
@@ -104,7 +126,9 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, [
 		if arg == nil || ret == nil {
 			return nil, errs
 		}
-		return &types.TFun{Arg: arg, Eff: types.Row{}, Ret: ret}, errs
+		row, rowErrs := ck.resolveEffRow(te.Eff, tv)
+		errs = append(errs, rowErrs...)
+		return &types.TFun{Arg: arg, Eff: row, Ret: ret}, errs
 	case *ast.TApp:
 		t, ok := ck.TypeNames[te.Name]
 		if !ok {
@@ -131,6 +155,55 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, [
 	default:
 		panic("infer: unhandled TypeExpr node")
 	}
+}
+
+func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []diag.Error) {
+	if row == nil {
+		return types.Row{}, nil
+	}
+	var result types.Row
+	var errs []diag.Error
+	seen := map[int]bool{}
+	for _, l := range row.Labels {
+		info := ck.Effects[l.Name]
+		if info == nil {
+			errs = append(errs, diag.Errorf(l.NameSp, "NAMING ERROR", "I don't know an effect named `%s`.", l.Name))
+			continue
+		}
+		if seen[info.Unique] {
+			errs = append(errs, diag.Errorf(l.NameSp, "DUPLICATE EFFECT", "The effect `%s` appears twice in this row; effect labels are distinct.", l.Name))
+			continue
+		}
+		seen[info.Unique] = true
+		if len(l.Args) != len(info.Params) {
+			errs = append(errs, diag.Errorf(l.NameSp, "EFFECT ARITY", "`%s` takes %d type argument(s), but %d are given.", l.Name, len(info.Params), len(l.Args)))
+			continue
+		}
+		args := make([]types.Type, len(l.Args))
+		for i, a := range l.Args {
+			at, aErrs := ck.ResolveTypeExpr(a, tv)
+			errs = append(errs, aErrs...)
+			args[i] = at
+		}
+		result.Labels = append(result.Labels, types.EffLabel{Unique: info.Unique, Name: info.Name, Args: args})
+	}
+	if row.Tail != "" {
+		if old, ok := tv.vars[row.Tail]; ok {
+			if old.Kind != types.RowVar {
+				errs = append(errs, diag.Errorf(row.TailSp, "KIND MISMATCH", "`%s` is already used as an ordinary type variable, not an effect row.", row.Tail))
+			} else {
+				result.Tail = old
+			}
+		} else if !tv.open {
+			errs = append(errs, diag.Errorf(row.TailSp, "NAMING ERROR", "The row variable `%s` is not declared here.", row.Tail))
+		} else {
+			v := tv.sup.FreshRigid(types.RowVar)
+			tv.vars[row.Tail] = v
+			tv.minted = append(tv.minted, v)
+			result.Tail = v
+		}
+	}
+	return types.SortedRow(result), errs
 }
 
 // typeArity is the declared parameter count of a named type (0 for scalars

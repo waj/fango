@@ -142,12 +142,13 @@ func TestPolySchemeVars(t *testing.T) {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 	constSch := infos[0].Scheme
-	if len(constSch.Vars) != 2 {
-		t.Fatalf("const: want 2 quantified vars, got %d", len(constSch.Vars))
+	if len(constSch.Vars) != 4 {
+		t.Fatalf("const: want 2 type vars and 2 row vars, got %d", len(constSch.Vars))
 	}
+	wantKinds := []types.VarKind{types.General, types.RowVar, types.General, types.RowVar}
 	for i, v := range constSch.Vars {
-		if !v.Rigid || v.Kind != types.General {
-			t.Errorf("const var %d: want rigid General, got %+v", i, v)
+		if !v.Rigid || v.Kind != wantKinds[i] {
+			t.Errorf("const var %d: want rigid kind %v, got %+v", i, wantKinds[i], v)
 		}
 	}
 	// First-occurrence order: the result var (x's) is Vars[0].
@@ -160,7 +161,7 @@ func TestPolySchemeVars(t *testing.T) {
 	}
 
 	doubleSch := infos[1].Scheme
-	if len(doubleSch.Vars) != 1 || !doubleSch.Vars[0].Rigid || doubleSch.Vars[0].Kind != types.Number {
-		t.Errorf("double: want one rigid Number var, got %+v", doubleSch.Vars)
+	if len(doubleSch.Vars) != 2 || !doubleSch.Vars[0].Rigid || doubleSch.Vars[0].Kind != types.Number || doubleSch.Vars[1].Kind != types.RowVar {
+		t.Errorf("double: want a rigid Number and RowVar, got %+v", doubleSch.Vars)
 	}
 }

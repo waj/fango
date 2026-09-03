@@ -1,0 +1,5 @@
+effect Fail error
+    throw : error -> value
+
+work : () ->{Fail} ()
+work unit = unit

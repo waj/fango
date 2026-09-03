@@ -2,6 +2,7 @@ package infer
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/waj/fango/internal/types"
 )
@@ -44,25 +45,45 @@ func (s Subst) Apply(t types.Type) types.Type {
 		}
 		return &types.TCon{Unique: t.Unique, Name: t.Name, Args: args}
 	case *types.TFun:
-		if !t.Eff.Empty() {
-			panic("infer: non-empty effect row before S7")
-		}
-		return &types.TFun{Arg: s.Apply(t.Arg), Eff: t.Eff, Ret: s.Apply(t.Ret)}
+		return &types.TFun{Arg: s.Apply(t.Arg), Eff: s.applyRow(t.Eff), Ret: s.Apply(t.Ret)}
+	case types.Row:
+		return s.applyRow(t)
 	default:
 		panic(fmt.Sprintf("infer.Subst.Apply: unhandled %T", t))
 	}
 }
 
+func (s Subst) applyRow(r types.Row) types.Row {
+	labels := make([]types.EffLabel, len(r.Labels))
+	for i, l := range r.Labels {
+		args := make([]types.Type, len(l.Args))
+		for j, a := range l.Args {
+			args[j] = s.Apply(a)
+		}
+		labels[i] = types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args}
+	}
+	var tail types.Type
+	if r.Tail != nil {
+		tail = s.Apply(r.Tail)
+		if extra, ok := tail.(types.Row); ok {
+			labels = append(labels, extra.Labels...)
+			tail = extra.Tail
+		}
+	}
+	return types.SortedRow(types.Row{Labels: labels, Tail: tail})
+}
+
 // mismatch is a leaf unification failure; Solve dresses it in a diagnostic
 // using the constraint's Why and Span.
 type mismatch struct {
-	a, b types.Type
-	note string // extra context, e.g. "a Number literal cannot be String"
+	a, b   types.Type
+	note   string // extra context, e.g. "a Number literal cannot be String"
+	effect bool
 }
 
 // unify makes a and b equal under sub, binding metavariables in place.
 // Returns nil on success.
-func unify(a, b types.Type, sub Subst, bi *types.Builtins) *mismatch {
+func unify(a, b types.Type, sub Subst, bi *types.Builtins, sup *types.Supply) *mismatch {
 	a, b = sub.walk(a), sub.walk(b)
 
 	// Metas bind; rigid vars (skolems, scheme-bound vars) are atomic: equal
@@ -91,7 +112,7 @@ func unify(a, b types.Type, sub Subst, bi *types.Builtins) *mismatch {
 			return &mismatch{a: a, b: b}
 		}
 		for i := range a.Args {
-			if m := unify(a.Args[i], bcon.Args[i], sub, bi); m != nil {
+			if m := unify(a.Args[i], bcon.Args[i], sub, bi, sup); m != nil {
 				return m
 			}
 		}
@@ -101,13 +122,19 @@ func unify(a, b types.Type, sub Subst, bi *types.Builtins) *mismatch {
 		if !ok {
 			return &mismatch{a: a, b: b}
 		}
-		if !a.Eff.Empty() || !bfun.Eff.Empty() {
-			panic("infer: row unification arrives in S7")
-		}
-		if m := unify(a.Arg, bfun.Arg, sub, bi); m != nil {
+		if m := unify(a.Arg, bfun.Arg, sub, bi, sup); m != nil {
 			return m
 		}
-		return unify(a.Ret, bfun.Ret, sub, bi)
+		if m := unifyRows(a.Eff, bfun.Eff, sub, bi, sup); m != nil {
+			return m
+		}
+		return unify(a.Ret, bfun.Ret, sub, bi, sup)
+	case types.Row:
+		br, ok := b.(types.Row)
+		if !ok {
+			return &mismatch{a: a, b: b}
+		}
+		return unifyRows(a, br, sub, bi, sup)
 	default:
 		panic(fmt.Sprintf("infer.unify: unhandled %T", a))
 	}
@@ -124,11 +151,20 @@ func bindVar(v *types.TVar, t types.Type, sub Subst, bi *types.Builtins) *mismat
 	}
 	switch v.Kind {
 	case types.General:
+		if tv, ok := t.(*types.TVar); ok && tv.Kind == types.RowVar {
+			return &mismatch{a: v, b: t, note: "an effect row cannot be used as a value type"}
+		}
+		if _, ok := t.(types.Row); ok {
+			return &mismatch{a: v, b: t, note: "an effect row cannot be used as a value type"}
+		}
 		sub[v.ID] = t
 		return nil
 	case types.Number:
 		switch t := t.(type) {
 		case *types.TVar:
+			if t.Kind == types.RowVar {
+				return &mismatch{a: v, b: t, note: "an effect row cannot be used as a number type"}
+			}
 			if t.Kind == types.Number {
 				sub[v.ID] = t
 				return nil
@@ -152,8 +188,22 @@ func bindVar(v *types.TVar, t types.Type, sub Subst, bi *types.Builtins) *mismat
 		default:
 			return &mismatch{a: v, b: t, note: "only Int and Float are number types"}
 		}
+	case types.RowVar:
+		switch t := t.(type) {
+		case *types.TVar:
+			if t.Kind != types.RowVar {
+				return &mismatch{a: v, b: t, note: "an effect row cannot be a value type"}
+			}
+			sub[v.ID] = t
+			return nil
+		case types.Row:
+			sub[v.ID] = t
+			return nil
+		default:
+			return &mismatch{a: v, b: t, note: "an effect row cannot be a value type"}
+		}
 	default:
-		panic("infer: row variables arrive in S7")
+		panic("infer: unknown variable kind")
 	}
 }
 
@@ -170,8 +220,99 @@ func occurs(v *types.TVar, t types.Type, sub Subst) bool {
 		}
 		return false
 	case *types.TFun:
-		return occurs(v, t.Arg, sub) || occurs(v, t.Ret, sub)
+		return occurs(v, t.Arg, sub) || occurs(v, t.Eff, sub) || occurs(v, t.Ret, sub)
+	case types.Row:
+		for _, l := range t.Labels {
+			for _, a := range l.Args {
+				if occurs(v, a, sub) {
+					return true
+				}
+			}
+		}
+		return t.Tail != nil && occurs(v, t.Tail, sub)
 	default:
 		return false
+	}
+}
+
+func unifyRows(a, b types.Row, sub Subst, bi *types.Builtins, sup *types.Supply) *mismatch {
+	a, b = sub.applyRow(a), sub.applyRow(b)
+	am, bm := map[int]types.EffLabel{}, map[int]types.EffLabel{}
+	for _, l := range a.Labels {
+		if _, dup := am[l.Unique]; dup {
+			return &mismatch{a: a, b: b, effect: true, note: "an effect may appear at most once in a row (distinct-label rule)"}
+		}
+		am[l.Unique] = l
+	}
+	for _, l := range b.Labels {
+		if _, dup := bm[l.Unique]; dup {
+			return &mismatch{a: a, b: b, effect: true, note: "an effect may appear at most once in a row (distinct-label rule)"}
+		}
+		bm[l.Unique] = l
+	}
+	var left, right []types.EffLabel
+	for u, al := range am {
+		if bl, ok := bm[u]; ok {
+			if len(al.Args) != len(bl.Args) {
+				return &mismatch{a: a, b: b, effect: true, note: "the same effect label has different arity"}
+			}
+			for i := range al.Args {
+				if m := unify(al.Args[i], bl.Args[i], sub, bi, sup); m != nil {
+					m.effect = true
+					m.note = "a parameterized effect may appear only once in a row, with one consistent set of arguments (distinct-label rule)"
+					return m
+				}
+			}
+		} else {
+			left = append(left, al)
+		}
+	}
+	for u, bl := range bm {
+		if _, ok := am[u]; !ok {
+			right = append(right, bl)
+		}
+	}
+	sort.Slice(left, func(i, j int) bool { return left[i].Unique < left[j].Unique })
+	sort.Slice(right, func(i, j int) bool { return right[i].Unique < right[j].Unique })
+	lt, rt := a.Tail, b.Tail
+	if len(left) == 0 && len(right) == 0 {
+		switch {
+		case lt == nil && rt == nil:
+			return nil
+		case lt == nil:
+			return unify(rt, types.Row{}, sub, bi, sup)
+		case rt == nil:
+			return unify(lt, types.Row{}, sub, bi, sup)
+		default:
+			return unify(lt, rt, sub, bi, sup)
+		}
+	}
+	if lv, lok := lt.(*types.TVar); lok {
+		if rv, rok := rt.(*types.TVar); rok && lv.ID == rv.ID {
+			return &mismatch{a: a, b: b, effect: true, note: "the same open row cannot contain conflicting effect labels"}
+		}
+	}
+	switch {
+	case lt == nil && rt == nil:
+		if len(left) > 0 || len(right) > 0 {
+			return &mismatch{a: a, b: b, effect: true, note: "these closed effect rows contain different effects"}
+		}
+		return nil
+	case lt == nil:
+		if len(right) > 0 {
+			return &mismatch{a: a, b: b, effect: true, note: "a closed effect row cannot absorb additional effects"}
+		}
+		return unify(rt, types.Row{Labels: left}, sub, bi, sup)
+	case rt == nil:
+		if len(left) > 0 {
+			return &mismatch{a: a, b: b, effect: true, note: "a closed effect row cannot absorb additional effects"}
+		}
+		return unify(lt, types.Row{Labels: right}, sub, bi, sup)
+	default:
+		rho := sup.FreshVar(types.RowVar)
+		if m := unify(lt, types.Row{Labels: right, Tail: rho}, sub, bi, sup); m != nil {
+			return m
+		}
+		return unify(rt, types.Row{Labels: left, Tail: rho}, sub, bi, sup)
 	}
 }
