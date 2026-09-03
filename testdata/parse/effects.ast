@@ -1,0 +1,4 @@
+(module
+  (effect Fail (params e) (op throw (-> e a)))
+  (effect Console (op print (-> String ())) (op readLine (-> () String)))
+  (def program (params unit) (ann (-> () (effects (Console) (Fail String) (tail e)) String)) (handle (app (var readLine) (ctor True)) (clause print (params text) (app (resume) (ctor True))) (return value (var value)))))

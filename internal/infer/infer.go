@@ -542,6 +542,16 @@ func (g *generator) expr(e ast.Expr) types.Type {
 			funTy = &types.TFun{Arg: paramTys[i], Ret: funTy}
 		}
 		ty = funTy
+	case *ast.Handle:
+		g.errs = append(g.errs, diag.Errorf(e.Sp, "HANDLERS NOT READY",
+			"`handle` syntax is available, but handler checking and execution arrive\nin S7 checkpoint 2."))
+		// Keep walking the body so ordinary naming/type errors are still useful.
+		g.expr(e.Body)
+		ty = g.ck.Sup.FreshVar(types.General)
+	case *ast.Resume:
+		g.errs = append(g.errs, diag.Errorf(e.Sp, "RESUME OUTSIDE A HANDLER",
+			"`resume` is only available while checking an operation clause; handler\nchecking arrives in S7 checkpoint 2."))
+		ty = g.ck.Sup.FreshVar(types.General)
 	default:
 		panic("infer: unhandled expression node")
 	}

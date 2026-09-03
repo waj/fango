@@ -1,0 +1,12 @@
+effect Fail e
+    throw : e -> a
+
+effect Console
+    print : String -> ()
+    readLine : () -> String
+
+program : () ->{Console, Fail String | e} String
+program unit =
+    handle readLine True of
+        print text -> resume True
+        return value -> value

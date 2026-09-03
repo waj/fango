@@ -51,6 +51,17 @@ func dumpDecl(d Decl) string {
 		}
 		b.WriteString(")")
 		return b.String()
+	case *EffectDecl:
+		var b strings.Builder
+		fmt.Fprintf(&b, "(effect %s", d.Name)
+		if p := dumpParams(d.Params); p != "" {
+			fmt.Fprintf(&b, " %s", p)
+		}
+		for _, op := range d.Ops {
+			fmt.Fprintf(&b, " (op %s %s)", op.Name, DumpTypeExpr(op.Type))
+		}
+		b.WriteString(")")
+		return b.String()
 	default:
 		panic(fmt.Sprintf("ast.dumpDecl: unhandled %T", d))
 	}
@@ -76,6 +87,22 @@ func DumpTypeExpr(t TypeExpr) string {
 	case *TVarName:
 		return t.Name
 	case *TFunExpr:
+		if t.Eff != nil {
+			var row strings.Builder
+			row.WriteString("(effects")
+			for _, label := range t.Eff.Labels {
+				fmt.Fprintf(&row, " (%s", label.Name)
+				for _, arg := range label.Args {
+					fmt.Fprintf(&row, " %s", DumpTypeExpr(arg))
+				}
+				row.WriteString(")")
+			}
+			if t.Eff.Tail != "" {
+				fmt.Fprintf(&row, " (tail %s)", t.Eff.Tail)
+			}
+			row.WriteString(")")
+			return fmt.Sprintf("(-> %s %s %s)", DumpTypeExpr(t.Arg), row.String(), DumpTypeExpr(t.Ret))
+		}
 		return fmt.Sprintf("(-> %s %s)", DumpTypeExpr(t.Arg), DumpTypeExpr(t.Ret))
 	case *TApp:
 		var b strings.Builder
@@ -166,6 +193,23 @@ func DumpExpr(e Expr) string {
 			names[i] = p.Name
 		}
 		return fmt.Sprintf("(lambda (%s) %s)", strings.Join(names, " "), DumpExpr(e.Body))
+	case *Handle:
+		var b strings.Builder
+		fmt.Fprintf(&b, "(handle %s", DumpExpr(e.Body))
+		for _, clause := range e.Clauses {
+			fmt.Fprintf(&b, " (clause %s", clause.Op)
+			if p := dumpParams(clause.Params); p != "" {
+				fmt.Fprintf(&b, " %s", p)
+			}
+			fmt.Fprintf(&b, " %s)", DumpExpr(clause.Body))
+		}
+		if e.Return != nil {
+			fmt.Fprintf(&b, " (return %s %s)", e.Return.Param.Name, DumpExpr(e.Return.Body))
+		}
+		b.WriteString(")")
+		return b.String()
+	case *Resume:
+		return "(resume)"
 	default:
 		panic(fmt.Sprintf("ast.DumpExpr: unhandled %T", e))
 	}

@@ -112,6 +112,9 @@ func (p *parser) parseDecl() ast.Decl {
 	if t.Kind == token.KwType {
 		return p.parseTypeDecl()
 	}
+	if t.Kind == token.KwEffect {
+		return p.parseEffectDecl()
+	}
 	if t.Kind != token.LIDENT {
 		p.errorAt(t.Span, "SYNTAX PROBLEM",
 			"I was expecting a declaration here, like `name = expression`.")
@@ -163,6 +166,63 @@ func (p *parser) parseDecl() ast.Decl {
 		p.recoverToTopLevel(false)
 	}
 	return &ast.ValueDecl{Name: name.Text, NameSpan: name.Span, Params: params, Ann: ann, Body: body}
+}
+
+// parseEffectDecl parses an effect header followed by an indented block of
+// operation signatures. The first operation establishes the block column.
+func (p *parser) parseEffectDecl() ast.Decl {
+	p.next() // `effect`
+	nameT := p.peekInExpr()
+	if nameT.Kind != token.UIDENT {
+		p.errorAt(nameT.Span, "SYNTAX PROBLEM", "After `effect` I expect a capitalized effect name, like `Console`.")
+		p.recoverToTopLevel(false)
+		return nil
+	}
+	p.next()
+	var params []ast.Param
+	for t := p.peekInExpr(); t.Kind == token.LIDENT && t.Pos().Line == nameT.Pos().Line; t = p.peekInExpr() {
+		p.next()
+		params = append(params, ast.Param{Name: t.Text, Sp: t.Span})
+	}
+	first := p.peek()
+	if first.Kind == token.EOF {
+		p.errorAt(nameT.Span, TitleUnexpectedEOF, "This effect declaration needs at least one operation signature.")
+		return nil
+	}
+	if first.Pos().Col <= 1 {
+		p.errorAt(first.Span, "SYNTAX PROBLEM", "Effect operations must be indented below the effect name.")
+		return nil
+	}
+	col := first.Pos().Col
+	p.lay.push(ctxBlock, col)
+	defer p.lay.pop()
+	var ops []ast.OpSig
+	for {
+		p.stmtStart = p.pos
+		opT := p.peekInExpr()
+		if opT.Kind != token.LIDENT {
+			p.errorAt(opT.Span, "SYNTAX PROBLEM", "I expect an operation name here, like `print : String -> ()`.")
+			return nil
+		}
+		p.next()
+		if !p.expect(token.COLON, "I expect `:` after the operation name.") {
+			return nil
+		}
+		ty := p.parseTypeExpr()
+		if ty == nil {
+			return nil
+		}
+		ops = append(ops, ast.OpSig{Name: opT.Text, NameSpan: opT.Span, Type: ty})
+		nt := p.peek()
+		if nt.Kind == token.EOF || nt.Pos().Col < col {
+			break
+		}
+		if nt.Pos().Col != col {
+			p.errorAt(nt.Span, "SYNTAX PROBLEM", "Effect operation signatures must line up at the same column.")
+			return nil
+		}
+	}
+	return &ast.EffectDecl{Name: nameT.Text, NameSpan: nameT.Span, Params: params, Ops: ops}
 }
 
 // parseTypeDecl parses `type Name p1 … = C1 atoms | C2 atoms | …` (§3.7).
@@ -411,13 +471,75 @@ func (p *parser) parseTypeExpr() ast.TypeExpr {
 	}
 	if p.peekInExpr().Kind == token.ARROW {
 		p.next()
+		var eff *ast.EffRow
+		if p.peekInExpr().Kind == token.LBRACE {
+			eff = p.parseEffRow()
+			if eff == nil {
+				return nil
+			}
+		}
 		ret := p.parseTypeExpr()
 		if ret == nil {
 			return nil
 		}
-		return &ast.TFunExpr{Arg: atom, Ret: ret}
+		return &ast.TFunExpr{Arg: atom, Eff: eff, Ret: ret}
 	}
 	return atom
+}
+
+func (p *parser) parseEffRow() *ast.EffRow {
+	lb := p.next()
+	r := &ast.EffRow{}
+	if p.peekInExpr().Kind == token.RBRACE {
+		rp := p.next()
+		r.Sp = lb.Span.Merge(rp.Span)
+		return r
+	}
+	for {
+		t := p.peekInExpr()
+		if t.Kind == token.PIPE {
+			p.next()
+			tail := p.peekInExpr()
+			if tail.Kind != token.LIDENT {
+				p.errorAt(tail.Span, "SYNTAX PROBLEM", "After `|` I expect a lowercase row variable, like `e`.")
+				return nil
+			}
+			p.next()
+			r.Tail, r.TailSp = tail.Text, tail.Span
+			break
+		}
+		if t.Kind != token.UIDENT {
+			p.errorAt(t.Span, "SYNTAX PROBLEM", "I expect a capitalized effect name in this row.")
+			return nil
+		}
+		p.next()
+		label := ast.EffLabelExpr{Name: t.Text, NameSp: t.Span}
+		for isTypeAtomStart(p.peekInExpr().Kind) {
+			arg := p.parseTypeAtom()
+			if arg == nil {
+				return nil
+			}
+			label.Args = append(label.Args, arg)
+		}
+		r.Labels = append(r.Labels, label)
+		switch p.peekInExpr().Kind {
+		case token.COMMA:
+			p.next()
+			continue
+		case token.PIPE:
+			continue
+		case token.RBRACE:
+		default:
+			p.errorAt(p.peek().Span, "SYNTAX PROBLEM", "I expect `,`, `|`, or `}` after this effect label.")
+			return nil
+		}
+		break
+	}
+	if !p.expect(token.RBRACE, "I expect `}` to close this effect row.") {
+		return nil
+	}
+	r.Sp = lb.Span.Merge(p.prevSpan())
+	return r
 }
 
 // parseTypeApp parses type application (`Maybe Int`): a named head followed
@@ -567,6 +689,8 @@ func (p *parser) parseApply() ast.Expr {
 		return p.parseLambda()
 	case token.KwCase:
 		return p.parseCase()
+	case token.KwHandle:
+		return p.parseHandle()
 	}
 	fn := p.parseAtom()
 	if fn == nil {
@@ -574,7 +698,7 @@ func (p *parser) parseApply() ast.Expr {
 	}
 	for {
 		switch p.peekInExpr().Kind {
-		case token.INT, token.FLOAT, token.STRING, token.LIDENT, token.UIDENT, token.LPAREN:
+		case token.INT, token.FLOAT, token.STRING, token.LIDENT, token.UIDENT, token.LPAREN, token.KwResume:
 			arg := p.parseAtom()
 			if arg == nil {
 				return nil
@@ -584,6 +708,65 @@ func (p *parser) parseApply() ast.Expr {
 			return fn
 		}
 	}
+}
+
+func (p *parser) parseHandle() ast.Expr {
+	h := p.next()
+	body := p.parseExpr(1)
+	if body == nil {
+		return nil
+	}
+	if !p.expect(token.KwOf, "I expect `of` after the expression being handled.") {
+		return nil
+	}
+	first := p.peekInExpr()
+	if first.Kind == token.EOF {
+		p.errorAt(p.prevSpan(), TitleUnexpectedEOF, "I expect at least one handler clause after `of`.")
+		return nil
+	}
+	p.lay.push(ctxCase, first.Pos().Col)
+	defer p.lay.pop()
+	result := &ast.Handle{Body: body, Sp: h.Span}
+	for {
+		p.stmtStart = p.pos
+		op := p.peekInExpr()
+		if op.Kind != token.LIDENT {
+			p.errorAt(op.Span, "SYNTAX PROBLEM", "I expect a handler clause like `print value -> expression`.")
+			return nil
+		}
+		p.next()
+		params := p.parseParams()
+		arrow := p.peekInExpr()
+		if !p.expect(token.ARROW, "I expect `->` after the handler clause parameters.") {
+			return nil
+		}
+		clauseBody := p.parseBindBody(arrow)
+		if clauseBody == nil {
+			return nil
+		}
+		if op.Text == "return" {
+			if len(params) != 1 {
+				p.errorAt(op.Span, "SYNTAX PROBLEM", "A `return` clause needs exactly one parameter.")
+				return nil
+			}
+			if result.Return != nil {
+				p.errorAt(op.Span, "SYNTAX PROBLEM", "A handler can have only one `return` clause.")
+				return nil
+			}
+			result.Return = &ast.ReturnClause{Param: params[0], Body: clauseBody, Sp: op.Span}
+		} else {
+			result.Clauses = append(result.Clauses, ast.HandleClause{Op: op.Text, OpSpan: op.Span, Params: params, Body: clauseBody})
+		}
+		nt := p.peek()
+		if nt.Kind == token.EOF || !p.lay.atBranchCol(nt.Pos()) {
+			break
+		}
+	}
+	if len(result.Clauses) == 0 {
+		p.errorAt(h.Span, "SYNTAX PROBLEM", "A handler needs at least one operation clause.")
+		return nil
+	}
+	return result
 }
 
 // parseLambda parses `\x -> body` / `\x y -> body`. Like `if`, a lambda
@@ -797,6 +980,9 @@ func (p *parser) parseAtom() ast.Expr {
 	case token.UIDENT:
 		p.next()
 		return &ast.Ctor{Name: t.Text, Sp: t.Span}
+	case token.KwResume:
+		p.next()
+		return &ast.Resume{Sp: t.Span}
 	case token.LPAREN:
 		p.next()
 		e := p.parseExpr(1)

@@ -111,9 +111,32 @@ type TVarName struct {
 	Sp   source.Span
 }
 
+// TFunExpr is a function arrow. Eff is nil for a plain `->` — pure as
+// written — and non-nil only for `->{…}` (§10.2). The dumper omits a nil
+// row, so pre-S7 goldens stay byte-identical.
 type TFunExpr struct {
 	Arg, Ret TypeExpr
+	Eff      *EffRow
 }
+
+// EffRow is the surface effect row on an arrow: `->{Console}`,
+// `->{Db, Fail String}`, or `->{Console | e}` with an explicit open tail.
+type EffRow struct {
+	Labels []EffLabelExpr
+	Tail   string      // "" when closed; a lowercase row variable otherwise
+	TailSp source.Span // zero when Tail is ""
+	Sp     source.Span // the `{` through the `}`
+}
+
+// EffLabelExpr is one label in a surface row: an effect name plus type
+// arguments, `Fail String`. Args are type atoms, as in constructor payloads.
+type EffLabelExpr struct {
+	Name   string
+	NameSp source.Span
+	Args   []TypeExpr
+}
+
+func (r *EffRow) Span() source.Span { return r.Sp }
 
 // TApp is type application, `Maybe Int`. The head is always an uppercase
 // name — type variables cannot head applications (no higher kinds, §8.4).
@@ -153,6 +176,41 @@ type Case struct {
 type CaseBranch struct {
 	Pattern Pattern
 	Body    Expr
+}
+
+// Handle is `handle <expr> of` followed by operation clauses aligned at the
+// column of the first clause token — layout rule 2, shared with `case`
+// (§10.2). Parsed from S7 checkpoint 1; the checker rejects it until the
+// evidence runtime lands in checkpoint 2.
+type Handle struct {
+	Body    Expr
+	Clauses []HandleClause
+	Return  *ReturnClause // optional `return x -> …`
+	Sp      source.Span   // the `handle` keyword
+}
+
+// HandleClause is one operation clause, `print s -> …`. Params bind the
+// operation's arguments; `resume` is in scope in the body.
+type HandleClause struct {
+	Op     string
+	OpSpan source.Span
+	Params []Param
+	Body   Expr
+}
+
+// ReturnClause is the optional `return x -> …` clause wrapping the handled
+// body's normal result. `return` is a *contextual* keyword — it is not
+// reserved, so it stays usable as an ordinary name everywhere else.
+type ReturnClause struct {
+	Param Param
+	Body  Expr
+	Sp    source.Span // the `return` token
+}
+
+// Resume is the one-shot continuation bound inside a handler clause. It
+// parses as an expression head, so `resume ()` is ordinary application.
+type Resume struct {
+	Sp source.Span
 }
 
 // Pattern is the surface pattern grammar (§6): variables, wildcard,
@@ -223,6 +281,8 @@ func (*If) isExpr()        {}
 func (*Block) isExpr()     {}
 func (*Lambda) isExpr()    {}
 func (*Case) isExpr()      {}
+func (*Handle) isExpr()    {}
+func (*Resume) isExpr()    {}
 
 func (e *IntLit) Span() source.Span    { return e.Sp }
 func (e *FloatLit) Span() source.Span  { return e.Sp }
@@ -238,6 +298,13 @@ func (e *Lambda) Span() source.Span    { return e.Sp.Merge(e.Body.Span()) }
 func (e *Case) Span() source.Span {
 	return e.Sp.Merge(e.Branches[len(e.Branches)-1].Body.Span())
 }
+func (e *Handle) Span() source.Span {
+	if e.Return != nil {
+		return e.Sp.Merge(e.Return.Body.Span())
+	}
+	return e.Sp.Merge(e.Clauses[len(e.Clauses)-1].Body.Span())
+}
+func (e *Resume) Span() source.Span { return e.Sp }
 
 type Decl interface{ isDecl() }
 
@@ -270,6 +337,31 @@ type CtorDef struct {
 }
 
 func (*TypeDecl) isDecl() {}
+
+// EffectDecl declares an effect and its operations (§10.2):
+//
+//	effect Console
+//	    print    : String -> ()
+//	    readLine : () -> String
+//
+// Params are the effect's type parameters (`effect Fail e`), mirroring
+// TypeDecl.Params. Operation signatures are ordinary type expressions; the
+// checker attaches the effect's own label to the operation's arrow.
+type EffectDecl struct {
+	Name     string
+	NameSpan source.Span
+	Params   []Param
+	Ops      []OpSig
+}
+
+// OpSig is one operation signature line inside an `effect` declaration.
+type OpSig struct {
+	Name     string
+	NameSpan source.Span
+	Type     TypeExpr
+}
+
+func (*EffectDecl) isDecl() {}
 
 // ModuleHeader is parsed and ignored until the module system is designed.
 type ModuleHeader struct {

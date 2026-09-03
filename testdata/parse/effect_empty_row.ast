@@ -1,0 +1,2 @@
+(module
+  (def identity (params x) (ann (-> a (effects) a)) (var x)))

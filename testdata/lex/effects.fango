@@ -1,0 +1,5 @@
+effect Console
+    print : String ->{Console} ()
+
+handle program of
+    print text -> resume ()

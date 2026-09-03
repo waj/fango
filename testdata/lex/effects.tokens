@@ -1,0 +1,21 @@
+1:1 effect effect
+1:8 UIDENT Console
+2:5 LIDENT print
+2:11 COLON :
+2:13 UIDENT String
+2:20 ARROW ->
+2:22 LBRACE {
+2:23 UIDENT Console
+2:30 RBRACE }
+2:32 LPAREN (
+2:33 RPAREN )
+4:1 handle handle
+4:8 LIDENT program
+4:16 of of
+5:5 LIDENT print
+5:11 LIDENT text
+5:16 ARROW ->
+5:19 resume resume
+5:26 LPAREN (
+5:27 RPAREN )
+6:1 EOF
