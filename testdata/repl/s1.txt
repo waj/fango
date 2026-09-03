@@ -19,12 +19,14 @@ fango's (/) only works on Float, but this operand is:
 
 Note: there is no automatic Int-to-Float conversion — use a
 Float value here, like `2.0` instead of `2`.
-> -- PRINT NOT ALLOWED HERE ------------------------------- <repl>
+> -- UNHANDLED EFFECT ------------------------------------- <repl>
 
-For now, only `main` can print — `print` inside other
-definitions arrives with effects (S7).
+This top-level value performs an effect that is not handled.
+Top-level bindings must be pure; move the call into a function or add a handler.
 
 1| x = print 1
-       ^^^^^
+       ^^^^^^^
+
+Note: a closed effect row cannot absorb additional effects
 > -2 : number
 > | | | "b" : String

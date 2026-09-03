@@ -1,0 +1,9 @@
+effect Choose
+    choose : () -> Bool
+
+pick _ = choose ()
+
+main =
+    print
+        (handle pick () of
+            choose () -> resume True)

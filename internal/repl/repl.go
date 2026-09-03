@@ -25,10 +25,11 @@ import (
 )
 
 type Session struct {
-	ck  *infer.Checker
-	env *eval.Env
-	gen int // generation counter: incremented on redefinition (plumbing for S6)
-	out io.Writer
+	ck    *infer.Checker
+	env   *eval.Env
+	gen   int // generation counter: incremented on redefinition (plumbing for S6)
+	out   io.Writer
+	ioctx *eval.IOContext
 }
 
 func NewSession(out io.Writer) *Session {
@@ -40,9 +41,10 @@ func NewSession(out io.Writer) *Session {
 	// Functions and lambdas still generalize.
 	ck.MonoValues = true
 	return &Session{
-		ck:  ck,
-		env: eval.NewEnv(),
-		out: out,
+		ck:    ck,
+		env:   eval.NewEnv(),
+		out:   out,
+		ioctx: eval.NewIOContext(strings.NewReader(""), out),
 	}
 }
 
@@ -59,7 +61,8 @@ const banner = "fango 0.1 — :help for commands"
 func Run(in io.Reader, out io.Writer) {
 	s := NewSession(out)
 	fmt.Fprintln(out, banner)
-	scanner := bufio.NewScanner(in)
+	reader := bufio.NewReader(in)
+	s.ioctx = &eval.IOContext{Reader: reader, Writer: out}
 	var buf strings.Builder
 	flush := func() {
 		if buf.Len() > 0 {
@@ -73,12 +76,14 @@ func Run(in io.Reader, out io.Writer) {
 		} else {
 			fmt.Fprint(out, "| ")
 		}
-		if !scanner.Scan() {
+		line, err := reader.ReadString('\n')
+		if err != nil && len(line) == 0 {
 			fmt.Fprintln(out)
 			flush()
 			return
 		}
-		line := scanner.Text()
+		line = strings.TrimSuffix(line, "\n")
+		line = strings.TrimSuffix(line, "\r")
 		trimmed := strings.TrimSpace(line)
 
 		if buf.Len() > 0 {
@@ -183,7 +188,7 @@ func (s *Session) input(text string, force bool) inputResult {
 // expression. `==` lexes as its own token, so comparisons still classify as
 // expressions, and `f x y` without `=` stays an application.
 func isDecl(toks []token.Token) bool {
-	if len(toks) >= 1 && toks[0].Kind == token.KwType {
+	if len(toks) >= 1 && (toks[0].Kind == token.KwType || toks[0].Kind == token.KwEffect) {
 		return true
 	}
 	if len(toks) < 2 || toks[0].Kind != token.LIDENT {
@@ -193,7 +198,7 @@ func isDecl(toks []token.Token) bool {
 		return true
 	}
 	i := 1
-	for i < len(toks) && toks[i].Kind == token.LIDENT {
+	for i < len(toks) && (toks[i].Kind == token.LIDENT || toks[i].Kind == token.UNDERSCORE) {
 		i++
 	}
 	return i < len(toks) && toks[i].Kind == token.EQ
@@ -210,6 +215,14 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	}
 	if td, ok := m.Decls[0].(*ast.TypeDecl); ok {
 		return s.typeDeclInput(td)
+	}
+	if ed, ok := m.Decls[0].(*ast.EffectDecl); ok {
+		if errs := s.ck.EffectDecl(ed); len(errs) > 0 {
+			diag.Render(s.out, errs)
+		} else {
+			fmt.Fprintf(s.out, "%s : effect\n", ed.Name)
+		}
+		return inputDone
 	}
 	vd := m.Decls[0].(*ast.ValueDecl)
 	redefining := s.ck.Env.Has(vd.Name)
@@ -304,7 +317,7 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 	for i := range aux {
 		s.env.DefineWorker(&aux[i])
 	}
-	v, err := eval.Eval(context.Background(), coreExpr, s.env, s.out)
+	v, err := eval.EvalIO(context.Background(), coreExpr, s.env, s.ioctx)
 	if err != nil {
 		fmt.Fprintf(s.out, "runtime error: %v\n", err)
 		return inputDone

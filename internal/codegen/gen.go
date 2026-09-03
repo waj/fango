@@ -34,6 +34,7 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 		scalarEq:   map[int]bool{},
 		scalarShow: map[int]bool{},
 		caseVarTys: map[string]types.Type{},
+		evidence:   map[int][]goast.Expr{},
 	}
 	for _, adt := range p.ADTs {
 		g.adts[adt.Con.Unique] = adt
@@ -46,8 +47,9 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 		}
 	}
 	mainIsUnit := mainDef != nil && g.unique(mainDef.Type) == b.Unit.Unique
+	mainIsFn := mainDef != nil && len(mainDef.Params) == 1
 
-	decls := g.adtDecls(p.ADTs)
+	decls := append(g.effectDecls(p.Effects), g.adtDecls(p.ADTs)...)
 	for i := range p.Defs {
 		d := &p.Defs[i]
 		if d == mainDef && mainIsUnit {
@@ -66,6 +68,8 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 	switch {
 	case mainIsUnit:
 		decls = append(decls, funcDecl("main", g.stmts(mainDef.Body)...))
+	case mainIsFn:
+		decls = append(decls, funcDecl("main", assignBlank(callExpr(ident(mangleValue("main")), unitLit()))))
 	case printMain:
 		decls = append(decls, funcDecl("main",
 			exprStmt(g.printCall(ident(mangleValue("main")), mainDef.Type))))
@@ -128,6 +132,7 @@ type gen struct {
 	// and field temporaries, so nested constructor switches know their
 	// column's type arguments.
 	caseVarTys map[string]types.Type
+	evidence   map[int][]goast.Expr
 }
 
 func (g *gen) unique(t types.Type) int {
@@ -172,11 +177,22 @@ func (g *gen) printFn(t types.Type) string {
 func (g *gen) workerDef(d *core.Def) goast.Decl {
 	g.tyParamNames = tyParamNames(d.TyParams)
 	argTys, ret := core.PeelFun(d.Type, len(d.Params))
-	params := make([]paramSpec, len(d.Params))
+	params := make([]paramSpec, 0, len(d.EffectParams)+len(d.Params))
+	for _, ev := range d.EffectParams {
+		name := fmt.Sprintf("ev_%d", ev.Unique)
+		params = append(params, paramSpec{name: name, typ: g.effectType(ev)})
+		g.evidence[ev.Unique] = append(g.evidence[ev.Unique], ident(name))
+	}
 	for i, name := range d.Params {
-		params[i] = paramSpec{name: mangleValue(name), typ: g.goType(argTys[i])}
+		if name != "_" {
+			name = mangleValue(name)
+		}
+		params = append(params, paramSpec{name: name, typ: g.goType(argTys[i])})
 	}
 	decl := workerDecl(mangleValue(d.Name), params, g.goType(ret), g.retStmts(d.Body)).(*goast.FuncDecl)
+	for _, ev := range d.EffectParams {
+		g.evidence[ev.Unique] = g.evidence[ev.Unique][:len(g.evidence[ev.Unique])-1]
+	}
 	decl.Type.TypeParams = g.typeParamFields(d.TyParams)
 	return decl
 }
@@ -327,6 +343,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return g.floatLit(e.Val)
 	case *core.StringLit:
 		return stringLit(e.Val)
+	case *core.UnitLit:
+		return unitLit()
 	case *core.BoolLit:
 		return ident(strconv.FormatBool(e.Val))
 	case *core.VarRef:
@@ -345,16 +363,28 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		// indistinguishable.
 		fn := e.Ty.(*types.TFun)
 		return funcLitParams(
-			[]paramSpec{{name: mangleValue(e.Param), typ: g.goType(fn.Arg)}},
+			[]paramSpec{{name: func() string {
+				if e.Param == "_" {
+					return "_"
+				}
+				return mangleValue(e.Param)
+			}(), typ: g.goType(fn.Arg)}},
 			g.goType(fn.Ret),
 			g.retStmts(e.Body))
 	case *core.App:
 		switch e.CalleeKind {
 		case core.Worker:
 			ref := e.Callee.(*core.VarRef)
-			args := make([]goast.Expr, len(e.Args))
-			for i, a := range e.Args {
-				args[i] = g.expr(a, 0)
+			args := make([]goast.Expr, 0, len(e.EvidenceArgs)+len(e.Args))
+			for _, ev := range e.EvidenceArgs {
+				stack := g.evidence[ev.Unique]
+				if len(stack) == 0 {
+					panic("codegen: missing lexical evidence")
+				}
+				args = append(args, stack[len(stack)-1])
+			}
+			for _, a := range e.Args {
+				args = append(args, g.expr(a, 0))
 			}
 			// Explicit instantiation, always — never Go's own inference (§8.4).
 			return callExpr(indexExpr(ident(mangleValue(ref.Name)), g.goTypes(e.TyArgs)), args...)
@@ -420,9 +450,112 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return callExpr(funcLit(g.goType(e.Ty), g.caseStmts(e, g.retStmts)))
 	case *core.Print:
 		panic("codegen: core.Print is statement-only — a Unit value reached expression context")
+	case *core.Perform:
+		if e.Op.Owner.Name == "IO" {
+			g.usesFangort = true
+			if e.Op.Name == "print" {
+				return callExpr(funcLit(g.goType(e.Ty), []goast.Stmt{exprStmt(g.printCall(g.expr(e.Args[0], 0), e.Args[0].Type())), returnStmt(unitLit())}))
+			}
+			if e.Op.Name == "readLine" {
+				return callExpr(selector("fangort", "ReadLine"))
+			}
+		}
+		stack := g.evidence[e.Effect.Unique]
+		if len(stack) == 0 {
+			panic("codegen: custom Perform without evidence")
+		}
+		args := make([]goast.Expr, len(e.Args))
+		for i, a := range e.Args {
+			args[i] = g.expr(a, 0)
+		}
+		return callExpr(&goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Op_" + e.Op.Name)}, args...)
+	case *core.Resume:
+		return g.expr(e.Value, parentPrec)
+	case *core.Seq:
+		return callExpr(funcLit(g.goType(e.Ty), append(g.stmts(e.First), returnStmt(g.expr(e.Then, 0)))))
+	case *core.Handle:
+		return g.handleExpr(e)
 	default:
 		panic(fmt.Sprintf("codegen: node %T arrives in a later slice", e))
 	}
+}
+
+func (g *gen) handleExpr(e *core.Handle) goast.Expr {
+	fields := make([]*goast.Field, len(e.Clauses))
+	elts := make([]goast.Expr, len(e.Clauses))
+	for i, c := range e.Clauses {
+		params := make([]paramSpec, len(c.Params))
+		for j, p := range c.Params {
+			if p == "()" || p == "_" {
+				p = "_"
+			} else {
+				p = mangleValue(p)
+			}
+			params[j] = paramSpec{name: p, typ: g.goType(c.ParamTypes[j])}
+		}
+		ft := &goast.FuncType{Params: paramFields(params), Results: &goast.FieldList{List: []*goast.Field{{Type: g.goType(c.ResultType)}}}}
+		fields[i] = &goast.Field{Names: []*goast.Ident{ident("Op_" + c.Op.Name)}, Type: ft}
+		fn := &goast.FuncLit{Type: ft, Body: &goast.BlockStmt{List: g.retStmts(c.Body)}}
+		elts[i] = &goast.KeyValueExpr{Key: ident("Op_" + c.Op.Name), Value: fn}
+	}
+	_ = fields
+	st := g.effectType(e.Effect)
+	name := fmt.Sprintf("ev%d", g.tmp)
+	g.tmp++
+	decl := varDeclStmt(name, st, &goast.CompositeLit{Type: st, Elts: elts})
+	g.evidence[e.Effect.Unique] = append(g.evidence[e.Effect.Unique], ident(name))
+	body := g.expr(e.Body, 0)
+	g.evidence[e.Effect.Unique] = g.evidence[e.Effect.Unique][:len(g.evidence[e.Effect.Unique])-1]
+	stmts := []goast.Stmt{decl}
+	if e.Return == nil {
+		stmts = append(stmts, returnStmt(body))
+		return callExpr(funcLit(g.goType(e.Ty), stmts))
+	}
+	p := e.Return.Param
+	if p == "_" || p == "()" {
+		stmts = append(stmts, assignBlank(body))
+	} else {
+		stmts = append(stmts, varDeclStmt(mangleValue(p), g.goType(e.Body.Type()), body))
+	}
+	stmts = append(stmts, returnStmt(g.expr(e.Return.Body, 0)))
+	return callExpr(funcLit(g.goType(e.Ty), stmts))
+}
+
+func (g *gen) effectType(e core.EffectInstance) goast.Expr {
+	return indexExpr(ident("Eff_"+e.Name), g.goTypes(e.Args))
+}
+
+func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
+	var out []goast.Decl
+	for _, eff := range effects {
+		if eff.Name == "IO" {
+			continue
+		}
+		old := g.tyParamNames
+		g.tyParamNames = map[int]string{}
+		fields := make([]*goast.Field, len(eff.Ops))
+		for i, p := range eff.Params {
+			g.tyParamNames[p.ID] = fmt.Sprintf("E%d", i)
+		}
+		for i, op := range eff.Ops {
+			ps := make([]paramSpec, len(op.ParamTypes))
+			for j, t := range op.ParamTypes {
+				ps[j] = paramSpec{typ: g.goType(t)}
+			}
+			fields[i] = &goast.Field{Names: []*goast.Ident{ident("Op_" + op.Name)}, Type: &goast.FuncType{Params: paramFields(ps), Results: &goast.FieldList{List: []*goast.Field{{Type: g.goType(op.ResultType)}}}}}
+		}
+		spec := &goast.TypeSpec{Name: ident("Eff_" + eff.Name), Type: &goast.StructType{Fields: &goast.FieldList{List: fields}}}
+		if len(eff.Params) > 0 {
+			fs := make([]*goast.Field, len(eff.Params))
+			for i := range fs {
+				fs[i] = &goast.Field{Names: []*goast.Ident{ident(fmt.Sprintf("E%d", i))}, Type: ident("any")}
+			}
+			spec.TypeParams = &goast.FieldList{List: fs}
+		}
+		out = append(out, &goast.GenDecl{Tok: gotoken.TYPE, Specs: []goast.Spec{spec}})
+		g.tyParamNames = old
+	}
+	return out
 }
 
 // floatLit emits a Float literal. Finite non-negative-zero values round-trip
@@ -513,6 +646,10 @@ func (g *gen) stmts(e core.Expr) []goast.Stmt {
 	switch e := e.(type) {
 	case *core.Print:
 		return []goast.Stmt{exprStmt(g.printCall(g.expr(e.Arg, 0), e.Arg.Type()))}
+	case *core.Perform:
+		return []goast.Stmt{assignBlank(g.expr(e, 0))}
+	case *core.Seq:
+		return append(g.stmts(e.First), g.stmts(e.Then)...)
 	case *core.If:
 		return []goast.Stmt{ifStmt(g.expr(e.Cond, 0), g.stmts(e.Then), g.stmts(e.Else))}
 	case *core.Case:

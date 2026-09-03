@@ -5,11 +5,40 @@
 package fangort
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 )
+
+// ReadLine reads one line without its line ending. EOF after data returns
+// that final line; EOF before data is the empty string.
+func ReadLineFrom(r *bufio.Reader) (string, error) {
+	s, err := r.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	if len(s) > 0 && s[len(s)-1] == '\n' {
+		s = s[:len(s)-1]
+		if len(s) > 0 && s[len(s)-1] == '\r' {
+			s = s[:len(s)-1]
+		}
+	}
+	return s, nil
+}
+
+var stdin = bufio.NewReader(os.Stdin)
+
+func ReadLine() string {
+	s, err := ReadLineFrom(stdin)
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
 
 // Number is the Go type-set constraint compiling fango's Number-kinded type
 // variables (§7.3): `double : number -> number` emits as

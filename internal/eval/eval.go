@@ -4,9 +4,11 @@
 package eval
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/types"
@@ -49,9 +51,29 @@ type CtorVal struct {
 // never materialize as values — elaboration eta-expanded every first-class
 // use, so *Partial from the §9.5 sketch is not needed.
 type Closure struct {
-	Param string
-	Body  core.Expr
-	Env   *Frame
+	Param    string
+	Body     core.Expr
+	Env      *Frame
+	Evidence map[int]*evidence
+}
+
+type IOContext struct {
+	Reader *bufio.Reader
+	Writer io.Writer
+}
+
+func NewIOContext(r io.Reader, w io.Writer) *IOContext {
+	br, ok := r.(*bufio.Reader)
+	if !ok {
+		br = bufio.NewReader(r)
+	}
+	return &IOContext{Reader: br, Writer: w}
+}
+
+type evidence struct {
+	handler *core.Handle
+	frame   *Frame
+	outer   map[int]*evidence
 }
 
 // Env holds top-level cells and workers.
@@ -111,10 +133,12 @@ func (e *Env) DefineProg(p *core.Prog) {
 // polled every pollEvery evaluation steps so Ctrl-C interrupts runaway REPL
 // expressions.
 type interp struct {
-	ctx   context.Context
-	env   *Env
-	out   io.Writer
-	steps int
+	ctx      context.Context
+	env      *Env
+	out      io.Writer
+	ioctx    *IOContext
+	evidence map[int]*evidence
+	steps    int
 }
 
 const pollEvery = 4096
@@ -122,12 +146,20 @@ const pollEvery = 4096
 // Eval evaluates a Core expression under env. Print output goes to out —
 // the REPL passes its own writer, the differential harness a buffer.
 func Eval(ctx context.Context, e core.Expr, env *Env, out io.Writer) (Value, error) {
-	return (&interp{ctx: ctx, env: env, out: out}).eval(e, nil)
+	return EvalIO(ctx, e, env, NewIOContext(strings.NewReader(""), out))
+}
+
+func EvalIO(ctx context.Context, e core.Expr, env *Env, ioctx *IOContext) (Value, error) {
+	return (&interp{ctx: ctx, env: env, out: ioctx.Writer, ioctx: ioctx, evidence: map[int]*evidence{}}).eval(e, nil)
 }
 
 // Force evaluates (and memoizes) the named top-level binding.
 func Force(ctx context.Context, name string, env *Env, out io.Writer) (Value, error) {
-	return (&interp{ctx: ctx, env: env, out: out}).force(name)
+	return ForceIO(ctx, name, env, NewIOContext(strings.NewReader(""), out))
+}
+
+func ForceIO(ctx context.Context, name string, env *Env, ioctx *IOContext) (Value, error) {
+	return (&interp{ctx: ctx, env: env, out: ioctx.Writer, ioctx: ioctx, evidence: map[int]*evidence{}}).force(name)
 }
 
 func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
@@ -146,6 +178,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		return e.Val, nil
 	case *core.StringLit:
 		return e.Val, nil
+	case *core.UnitLit:
+		return struct{}{}, nil
 	case *core.BoolLit:
 		return e.Val, nil
 	case *core.VarRef:
@@ -173,7 +207,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		}
 		return in.eval(e.Body, &Frame{parent: fr, vars: map[string]Value{e.Name: v}})
 	case *core.Lambda:
-		return &Closure{Param: e.Param, Body: e.Body, Env: fr}, nil
+		return &Closure{Param: e.Param, Body: e.Body, Env: fr, Evidence: cloneEvidence(in.evidence)}, nil
 	case *core.Neg:
 		v, err := in.eval(e.Operand, fr)
 		if err != nil {
@@ -232,6 +266,70 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			return nil, err
 		}
 		return struct{}{}, nil
+	case *core.Perform:
+		args := make([]Value, len(e.Args))
+		for i, a := range e.Args {
+			v, err := in.eval(a, fr)
+			if err != nil {
+				return nil, err
+			}
+			args[i] = v
+		}
+		if ev := in.evidence[e.Effect.Unique]; ev != nil && ev.handler != nil {
+			var clause *core.HandlerClause
+			for i := range ev.handler.Clauses {
+				if ev.handler.Clauses[i].Op.Name == e.Op.Name {
+					clause = &ev.handler.Clauses[i]
+					break
+				}
+			}
+			if clause == nil {
+				return nil, fmt.Errorf("eval: handler missing operation `%s`", e.Op.Name)
+			}
+			vars := map[string]Value{}
+			for i, p := range clause.Params {
+				if p != "_" && p != "()" {
+					vars[p] = args[i]
+				}
+			}
+			saved := in.evidence
+			in.evidence = cloneEvidence(ev.outer)
+			v, err := in.eval(clause.Body, &Frame{parent: ev.frame, vars: vars})
+			in.evidence = saved
+			return v, err
+		}
+		switch e.Op.Name {
+		case "print":
+			return in.printValue(args[0])
+		case "readLine":
+			s, err := fangort.ReadLineFrom(in.ioctx.Reader)
+			return s, err
+		default:
+			return nil, fmt.Errorf("eval: unhandled effect operation `%s.%s`", e.Effect.Name, e.Op.Name)
+		}
+	case *core.Resume:
+		return in.eval(e.Value, fr)
+	case *core.Seq:
+		if _, err := in.eval(e.First, fr); err != nil {
+			return nil, err
+		}
+		return in.eval(e.Then, fr)
+	case *core.Handle:
+		outer := cloneEvidence(in.evidence)
+		in.evidence[e.Effect.Unique] = &evidence{handler: e, frame: fr, outer: outer}
+		v, err := in.eval(e.Body, fr)
+		in.evidence = outer
+		if err != nil {
+			return nil, err
+		}
+		if e.Return == nil {
+			return v, nil
+		}
+		vars := map[string]Value{}
+		if e.Return.Param != "_" && e.Return.Param != "()" {
+			vars[e.Return.Param] = v
+		}
+		return in.eval(e.Return.Body, &Frame{parent: fr, vars: vars})
 	case *core.App:
 		switch e.CalleeKind {
 		case core.Worker:
@@ -271,7 +369,11 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
-			return in.eval(c.Body, &Frame{parent: c.Env, vars: map[string]Value{c.Param: v}})
+			saved := in.evidence
+			in.evidence = cloneEvidence(c.Evidence)
+			out, err := in.eval(c.Body, &Frame{parent: c.Env, vars: map[string]Value{c.Param: v}})
+			in.evidence = saved
+			return out, err
 		case core.Ctor:
 			fields := make([]Value, len(e.Args))
 			for i, a := range e.Args {
@@ -295,6 +397,34 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 	default:
 		return nil, fmt.Errorf("eval: unhandled Core node %T", e)
 	}
+}
+
+func cloneEvidence(src map[int]*evidence) map[int]*evidence {
+	dst := make(map[int]*evidence, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+func (in *interp) printValue(v Value) (Value, error) {
+	var s string
+	switch v := v.(type) {
+	case int64:
+		s = fangort.ShowInt(v)
+	case float64:
+		s = fangort.ShowFloat(v)
+	case string:
+		s = fangort.ShowString(v)
+	case bool:
+		s = fangort.ShowBool(v)
+	case *CtorVal:
+		s = showCtorVal(v, false)
+	default:
+		return nil, fmt.Errorf("eval: printing a %T", v)
+	}
+	_, err := fmt.Fprintln(in.out, s)
+	return struct{}{}, err
 }
 
 // tree walks a decision tree, mirroring the compiled backend's switches.
@@ -378,7 +508,10 @@ func (in *interp) tree(t core.Tree, fr *Frame) (Value, error) {
 func (in *interp) force(name string) (Value, error) {
 	cell, ok := in.env.cells[name]
 	if !ok {
-		if _, isWorker := in.env.workers[name]; isWorker {
+		if d, isWorker := in.env.workers[name]; isWorker {
+			if name == "main" && len(d.Params) == 1 {
+				return in.eval(d.Body, &Frame{vars: map[string]Value{d.Params[0]: struct{}{}}})
+			}
 			return nil, fmt.Errorf("eval: bare reference to worker `%s` — the linter should have caught this", name)
 		}
 		return nil, fmt.Errorf("eval: undefined name `%s` (checker should have caught this)", name)

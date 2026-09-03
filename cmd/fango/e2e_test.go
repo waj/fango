@@ -82,7 +82,8 @@ func TestDifferential(t *testing.T) {
 				}
 			}
 			var evalOut string
-			if con, isCon := mainTy.(*types.TCon); isCon && con.Unique == ck.B.Unit.Unique {
+			_, functionMain := mainTy.(*types.TFun)
+			if con, isCon := mainTy.(*types.TCon); (isCon && con.Unique == ck.B.Unit.Unique) || functionMain {
 				evalOut = printed.String()
 			} else {
 				evalOut = eval.ShowForPrint(v, mainTy, ck.B) + "\n"

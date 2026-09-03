@@ -474,7 +474,7 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 // Only main's body may use the print cheat (§10.5's top-level purity,
 // enforced ad hoc until effects land in S7).
 func (ck *Checker) Decl(d *ast.ValueDecl) (DeclInfo, []diag.Error) {
-	info, errs := ck.DeclWhere(d, d.Name == "main")
+	info, errs := ck.DeclWhere(d, true)
 	ck.BindDecl(info)
 	return info, errs
 }
@@ -523,6 +523,9 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []dia
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
 	errs = append(errs, solveErrs...)
+	if !allowPrint && typeHasEffects(ck.Sub.Apply(ty)) {
+		errs = append(errs, diag.Errorf(d.Body.Span(), "EFFECTFUL PROMPT DECLARATION", "Effectful declarations are not installed at the prompt; run the expression directly."))
+	}
 	if d.Name == "main" && len(d.Params) == 0 {
 		row := ck.Sub.Apply(g.ambient).(types.Row)
 		for _, l := range row.Labels {
@@ -566,6 +569,13 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []dia
 		info.Scheme = ck.generalize(ty, nil)
 	}
 	return info, errs
+}
+
+func typeHasEffects(t types.Type) bool {
+	if f, ok := t.(*types.TFun); ok {
+		return len(f.Eff.Labels) > 0 || typeHasEffects(f.Ret)
+	}
+	return false
 }
 
 func sameKnownEffects(a, b types.Type) bool {
