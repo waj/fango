@@ -29,7 +29,6 @@ func elabPoly(t *testing.T, src string) *core.Prog {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
-	ck.AllowPoly = true
 	infos, inferErrs := ck.Module(m)
 	if len(inferErrs) > 0 {
 		t.Fatalf("infer errors: %v", inferErrs)
@@ -52,7 +51,6 @@ func elabPolyErr(t *testing.T, src string) string {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
-	ck.AllowPoly = true
 	infos, inferErrs := ck.Module(m)
 	if len(inferErrs) > 0 {
 		return inferErrs[0].Title
@@ -210,12 +208,27 @@ main = print (member 1 2)
 	}
 }
 
-// TestPolyBadMain: main must be concrete.
+// TestPolyBadMain: main never generalizes — a function-valued main is
+// rejected (its underdetermined variables default, so `main = id` lands at
+// () -> () and hits the function-typed-main error).
 func TestPolyBadMain(t *testing.T) {
-	title := elabPolyErr(t, `type Maybe a = Nothing | Just a
-main = Nothing
+	title := elabPolyErr(t, `id x = x
+main = id
 `)
 	if title != "BAD MAIN" {
 		t.Errorf("got %q", title)
+	}
+}
+
+// TestPolyMainDefaults: main's unconstrained type variables default like
+// interior ones (`main = Nothing` is a Maybe () program), keeping
+// `main = 1 + 2` an Int program.
+func TestPolyMainDefaults(t *testing.T) {
+	prog := elabPoly(t, `type Maybe a = Nothing | Just a
+main = Nothing
+`)
+	dump := core.Dump(prog)
+	if !strings.Contains(dump, "(def main Maybe ()") {
+		t.Errorf("main should default to Maybe ():\n%s", dump)
 	}
 }

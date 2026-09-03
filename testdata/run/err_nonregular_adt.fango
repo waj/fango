@@ -1,0 +1,4 @@
+type Pair a b = MkPair a b
+type T a = Leaf | Node (T (Pair a a))
+
+main = 1

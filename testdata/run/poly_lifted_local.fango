@@ -1,0 +1,6 @@
+main =
+    k = 30
+    id2 y = y
+    keep y = k + id2 y
+    a = id2 12
+    print (keep a)

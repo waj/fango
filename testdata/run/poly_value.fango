@@ -1,0 +1,10 @@
+type Maybe a = Nothing | Just a
+
+none = Nothing
+
+pick m d =
+    case m of
+        Nothing -> d
+        Just x -> x
+
+main = print (pick none 7)

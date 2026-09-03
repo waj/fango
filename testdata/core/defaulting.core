@@ -1,4 +1,4 @@
 (core
-  (def x Int (int 40 Int))
-  (def y Int (binop + Int (var x Int) (int 2 Int)))
-  (def main Int (binop * Int (binop - Int (var y Int) (int 2 Int)) (int 3 Int))))
+  (def x (typarams number) number (int 40 number))
+  (def y (typarams number) number (binop + number (app/worker @[number] (var x number) number) (int 2 number)))
+  (def main Int (binop * Int (binop - Int (app/worker @[Int] (var y Int) Int) (int 2 Int)) (int 3 Int))))

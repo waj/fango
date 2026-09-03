@@ -1,0 +1,6 @@
+type Maybe a = Nothing | Just a
+
+x : Maybe
+x = Nothing
+
+main = 1

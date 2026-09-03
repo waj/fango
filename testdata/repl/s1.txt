@@ -26,5 +26,5 @@ definitions arrives with effects (S7).
 
 1| x = print 1
        ^^^^^
-> -2 : Int
+> -2 : number
 > | | | "b" : String

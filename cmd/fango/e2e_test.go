@@ -128,7 +128,9 @@ func runErrorCase(t *testing.T, path, wantSubstr string) {
 // the output is gofmt-idempotent (emitted via go/format.Node). Covers a
 // value program, a printing (Unit main) program, and an IIFE-if program.
 func TestEmitDeterministicAndFormatted(t *testing.T) {
-	for _, name := range []string{"arith0.fango", "print_float.fango", "if_expr.fango", "block_area.fango", "block_print_order.fango", "fib.fango", "partial.fango"} {
+	// poly_map_filter_foldr covers generic emission — instantiation
+	// plumbing is where nondeterminism would first appear (risk #1).
+	for _, name := range []string{"arith0.fango", "print_float.fango", "if_expr.fango", "block_area.fango", "block_print_order.fango", "fib.fango", "partial.fango", "poly_map_filter_foldr.fango", "poly_eq_nested.fango"} {
 		path := filepath.Join("..", "..", "testdata", "run", name)
 		var stderr bytes.Buffer
 		a, ok := emitGo(path, &stderr)

@@ -1,0 +1,17 @@
+type Maybe a = Nothing | Just a
+type List a = Nil | Cons a (List a)
+
+heads : List (Maybe Int) -> Int
+heads xs =
+    case xs of
+        Nil -> 0
+        Cons (Just n) rest -> n + heads rest
+        Cons Nothing rest -> heads rest
+
+main =
+    xs = Cons (Just 40) (Cons Nothing (Cons (Just 2) Nil))
+    same = xs == Cons (Just 40) (Cons Nothing (Cons (Just 2) Nil))
+    if same then
+            print (heads xs)
+        else
+            print 0

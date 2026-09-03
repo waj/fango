@@ -1,0 +1,3 @@
+member x y = x == y
+
+main = print (member 1 2)

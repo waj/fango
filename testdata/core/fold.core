@@ -1,5 +1,5 @@
 (core
-  (def a Int (int -9223372036854775808 Int))
+  (def a (typarams number) number (int -9223372036854775808 number))
   (def b Float (float +Inf Float))
-  (def c Int (int -5 Int))
-  (def main Int (var a Int)))
+  (def c (typarams number) number (int -5 number))
+  (def main Int (app/worker @[Int] (var a Int) Int)))

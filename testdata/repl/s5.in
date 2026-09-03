@@ -1,0 +1,29 @@
+type Maybe a = Nothing | Just a
+Just 3
+:type Just
+id x = x
+id "hi"
+id 1.5
+double x = x + x
+double 4
+double 0.5
+withDefault d m =
+    case m of
+        Nothing -> d
+        Just x -> x
+
+withDefault 9 Nothing
+withDefault 9 (Just 5)
+none = Nothing
+:type none
+v =
+    id2 y = y
+    a = id2 1
+    b = id2 "s"
+    a + 10
+
+v
+Just 1 == Just 1
+type Maybe a = Nothing | Just a
+Just 2
+:quit

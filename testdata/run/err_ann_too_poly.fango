@@ -1,0 +1,4 @@
+f : a -> b
+f x = x
+
+main = 1

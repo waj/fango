@@ -1,6 +1,6 @@
 (core
-  (def add (params x y) Int -> Int -> Int (binop + Int (var x Int) (var y Int)))
-  (def inc Int -> Int (lam _w0 Int -> Int (app/worker (var add Int -> Int -> Int) (int 1 Int) (var _w0 Int) Int)))
-  (def w Int (int 3 Int))
-  (def compound Int -> Int (let _a0 Int -> Int (binop * Int (var w Int) (int 2 Int)) (lam _w1 Int -> Int (app/worker (var add Int -> Int -> Int) (var _a0 Int) (var _w1 Int) Int))))
-  (def main Int (app/value (var compound Int -> Int) (int 4 Int) Int)))
+  (def add (typarams number) (params x y) number -> number -> number (binop + number (var x number) (var y number)))
+  (def inc (typarams number) number -> number (lam _w0 number -> number (app/worker @[number] (var add number -> number -> number) (int 1 number) (var _w0 number) number)))
+  (def w (typarams number) number (int 3 number))
+  (def compound (typarams number) number -> number (let _a0 number -> number (binop * number (app/worker @[number] (var w number) number) (int 2 number)) (lam _w1 number -> number (app/worker @[number] (var add number -> number -> number) (var _a0 number) (var _w1 number) number))))
+  (def main Int (app/value (app/worker @[Int] (var compound Int -> Int) Int -> Int) (int 4 Int) Int)))

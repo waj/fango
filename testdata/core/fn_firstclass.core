@@ -1,4 +1,4 @@
 (core
-  (def add (params x y) Int -> Int -> Int (binop + Int (var x Int) (var y Int)))
-  (def apply2 (params f x) (Int -> Int) -> Int -> Int (app/value (var f Int -> Int) (app/value (var f Int -> Int) (var x Int) Int) Int))
-  (def main Int (app/worker (var apply2 (Int -> Int) -> Int -> Int) (lam _w0 Int -> Int (app/worker (var add Int -> Int -> Int) (int 1 Int) (var _w0 Int) Int)) (int 5 Int) Int)))
+  (def add (typarams number) (params x y) number -> number -> number (binop + number (var x number) (var y number)))
+  (def apply2 (typarams a) (params f x) (a -> a) -> a -> a (app/value (var f a -> a) (app/value (var f a -> a) (var x a) a) a))
+  (def main Int (app/worker @[Int] (var apply2 (Int -> Int) -> Int -> Int) (lam _w0 Int -> Int (app/worker @[Int] (var add Int -> Int -> Int) (int 1 Int) (var _w0 Int) Int)) (int 5 Int) Int)))

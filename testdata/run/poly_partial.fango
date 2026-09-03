@@ -1,0 +1,8 @@
+type Maybe a = Nothing | Just a
+
+wrap : a -> Maybe a
+wrap x = Just x
+
+apply f x = f x
+
+main = print (apply wrap 3)

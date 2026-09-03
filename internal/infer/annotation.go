@@ -86,10 +86,6 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, [
 		}
 		return t, nil
 	case *ast.TVarName:
-		if !ck.AllowPoly {
-			return nil, []diag.Error{diag.Errorf(te.Sp, "UNSUPPORTED ANNOTATION",
-				"Type variables in annotations arrive with polymorphism (S5).\nFor now annotations must be concrete: Int, Float, String, Bool, ().")}
-		}
 		if v, ok := tv.vars[te.Name]; ok {
 			return v, nil
 		}
@@ -110,17 +106,6 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, [
 		}
 		return &types.TFun{Arg: arg, Eff: types.Row{}, Ret: ret}, errs
 	case *ast.TApp:
-		if !ck.AllowPoly {
-			// Every type in scope is arity 0 until S5, so any application is an
-			// arity error (a known name) or a naming error.
-			if _, ok := ck.TypeNames[te.Name]; ok {
-				return nil, []diag.Error{diag.Errorf(te.Span(), "TYPE ARITY",
-					"`%s` is not a parameterized type, but it is applied to %d type\nargument(s) here. Parameterized types arrive with polymorphism (S5).",
-					te.Name, len(te.Args))}
-			}
-			return nil, []diag.Error{diag.Errorf(te.NameSp, "NAMING ERROR",
-				"I don't know a type named `%s`.", te.Name)}
-		}
 		t, ok := ck.TypeNames[te.Name]
 		if !ok {
 			return nil, []diag.Error{diag.Errorf(te.NameSp, "NAMING ERROR",

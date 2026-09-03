@@ -1,3 +1,2 @@
 type Maybe a = Nothing | Just a
-
-main = 1
+main = print (Just (Just 1))

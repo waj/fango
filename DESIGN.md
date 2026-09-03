@@ -477,6 +477,8 @@ The REPL grammar is the module grammar minus the header, plus bare expressions �
 
 Definitions and `:type` echo **generalized schemes** (`id : a -> a`, `double : number -> number`) — from S5, the REPL is where polymorphism is most visible, so the printer shows quantified variables normalized to `a, b, …` (`number, number2, …` for Number-kinded) rather than the elaborator's defaulted monotypes. Bare-expression echo likewise generalizes for display; evaluation is unaffected.
 
+One session-specific rule *(2026-09-02, S5 implementation)*: **prompt value declarations follow the block-binding monomorphism restriction** — functions and lambdas generalize, plain values stay monotypes (their unconstrained variables default, so `none = Nothing` is `Maybe ()` at the prompt). A prompt value is a lazy memo cell, evaluated once; a *generalized* value is a nullary generic worker re-evaluated per use, which would observably interact with redefinition (`y = x + 1; x = 10` must not change a forced `y`, §9.3). Batch modules are immutable, so top-level values there generalize per §8.4. S6 (REPL hardening) may lift this by capturing definition-time environments.
+
 ### 9.3 Redefinition semantics
 
 - **Values**: redefinition installs a new cell; the name resolves to the new generation. Closures created earlier captured the old value — sound in a pure language, and documented: redefinition does not retroactively rewrite old closures (GHCi behaves identically).

@@ -1,3 +1,3 @@
 (core
-  (def fib (params n) Int -> Int (if Int (binop < Bool (var n Int) (int 2 Int)) (var n Int) (binop + Int (app/worker (var fib Int -> Int) (binop - Int (var n Int) (int 1 Int)) Int) (app/worker (var fib Int -> Int) (binop - Int (var n Int) (int 2 Int)) Int))))
-  (def main Int (app/worker (var fib Int -> Int) (int 10 Int) Int)))
+  (def fib (typarams number) (params n) number -> number (if number (binop < Bool (var n number) (int 2 number)) (var n number) (binop + number (app/worker @[number] (var fib number -> number) (binop - number (var n number) (int 1 number)) number) (app/worker @[number] (var fib number -> number) (binop - number (var n number) (int 2 number)) number))))
+  (def main Int (app/worker @[Int] (var fib Int -> Int) (int 10 Int) Int)))

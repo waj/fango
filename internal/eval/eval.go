@@ -350,7 +350,14 @@ func (in *interp) tree(t core.Tree, fr *Frame) (Value, error) {
 			var match bool
 			switch lit := c.Lit.(type) {
 			case *core.IntLit:
-				match = v == lit.Val
+				// An integer literal at a Number type parameter meets a
+				// float64 scrutinee at Float instantiations — promote,
+				// mirroring the compiled backend's conversion (§9.5).
+				if f, isFloat := v.(float64); isFloat {
+					match = f == float64(lit.Val)
+				} else {
+					match = v == lit.Val
+				}
 			case *core.FloatLit:
 				match = v == lit.Val
 			case *core.StringLit:
@@ -397,6 +404,7 @@ func (in *interp) force(name string) (Value, error) {
 // NaN, no panics) — the exact semantics elaborate's constant folder and the
 // compiled backend's native operators implement.
 func applyBinOp(op string, l, r Value) (Value, error) {
+	l, r = promote(l, r)
 	switch lv := l.(type) {
 	case int64:
 		rv := r.(int64)
@@ -498,5 +506,25 @@ func eqValue(l, r Value) bool {
 		}
 		return true
 	}
+	l, r = promote(l, r)
 	return l == r // scalars: identical to the native Go operators
+}
+
+// promote widens int64 to float64 when the other operand is a float —
+// numeric promotion (§9.5). Erased integer literals in Number-generic
+// bodies evaluate as int64 while the compiled backend converts them at the
+// instantiated type; Go's conversion semantics (rounding) match, keeping
+// the backends bit-identical for every operated value.
+func promote(l, r Value) (Value, Value) {
+	if li, ok := l.(int64); ok {
+		if _, isFloat := r.(float64); isFloat {
+			return float64(li), r
+		}
+	}
+	if ri, ok := r.(int64); ok {
+		if _, isFloat := l.(float64); isFloat {
+			return l, float64(ri)
+		}
+	}
+	return l, r
 }

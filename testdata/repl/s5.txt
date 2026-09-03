@@ -1,0 +1,23 @@
+fango 0.1 — :help for commands
+> Nothing : Maybe a
+Just : a -> Maybe a
+> Just 3 : Maybe number
+> a -> Maybe a
+> id : a -> a
+> "hi" : String
+> 1.5 : Float
+> double : number -> number
+> 8 : number
+> 1 : Float
+> | | | | withDefault : a -> Maybe a -> a
+> 9 : number
+> 5 : number
+> none : Maybe ()
+> Maybe ()
+> | | | | | v : Int
+> 11 : Int
+> True : Bool
+> Nothing : Maybe a
+Just : a -> Maybe a
+> Just 2 : Maybe number
+> 

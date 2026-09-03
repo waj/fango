@@ -54,17 +54,6 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 // lambda-lifted polymorphic block bindings (§8.4, lift.go).
 func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
 	el := newElab(ck, info.Name, info.Scheme)
-	if !ck.AllowPoly {
-		// Visible polymorphism is rejected BEFORE defaulting (defaulting
-		// would destroy the evidence by writing General → Unit into the
-		// sub). This fires only for genuinely underdetermined definitions:
-		// batch checking solves the whole module first, so a later
-		// monomorphic use pins an unannotated helper. Deleted with the S5
-		// staging flag.
-		if v := ck.FreeGeneralVar(info.Type); v != nil {
-			el.polyError(info.Name, info.NameSpan, info.Type)
-		}
-	}
 	defType := el.zonkDefault(info.Type)
 	params := make([]string, len(info.Params))
 	if len(info.Params) > 0 {
@@ -82,13 +71,6 @@ func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
 		Body:     el.anf(el.expr(info.Body)),
 	}
 	return append([]core.Def{def}, el.aux...), el.errs
-}
-
-func (el *elab) polyError(name string, sp source.Span, ty types.Type) {
-	p := types.NewPrinter()
-	el.errs = append(el.errs, diag.Errorf(sp, "UNSUPPORTED POLYMORPHISM",
-		"I inferred this type for `%s`:\n\n    %s\n\nType variables mean polymorphism, which arrives in S5. For now add\na concrete annotation, like `%s : Int -> Int`.",
-		name, p.Type(el.ck.Sub.Apply(ty)), name))
 }
 
 // Expr elaborates one expression against the checker's solved types. The
@@ -248,11 +230,6 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		for i := range e.Binds {
 			bind := &e.Binds[i]
 			bindTy := el.ck.BindTypes[bind]
-			if !el.ck.AllowPoly {
-				if v := el.ck.FreeGeneralVar(bindTy); v != nil {
-					el.polyError(bind.Name, bind.NameSpan, bindTy)
-				}
-			}
 			if sch := el.ck.BindSchemes[bind]; len(sch.Vars) > 0 {
 				el.liftBinding(bind, sch)
 				liftedHere = append(liftedHere, bind.Name)

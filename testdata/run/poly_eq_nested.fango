@@ -1,0 +1,3 @@
+type Maybe a = Nothing | Just a
+type List a = Nil | Cons a (List a)
+main = print (Cons (Just 1) Nil /= Cons Nothing Nil)

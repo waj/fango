@@ -1,0 +1,9 @@
+type Maybe a = Nothing | Just a
+
+withDefault : a -> Maybe a -> a
+withDefault d m =
+    case m of
+        Nothing -> d
+        Just x -> x
+
+main = print (withDefault 0 (Just 42))

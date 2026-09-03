@@ -46,8 +46,10 @@ func TestPositive(t *testing.T) {
 	}{
 		{"x = 1", "x : number"},
 		{"x = 1 + 2 * 3", "x : number"},
-		{"x = 40\ny = x + 2", "x : number, y : number"},
-		{"x = 1\ny = x\nmain = y - x", "x : number, y : number, main : number"},
+		// Generalization at each binding (S5): later decls instantiate
+		// fresh number vars, which the shared test printer numbers.
+		{"x = 40\ny = x + 2", "x : number, y : number2"},
+		{"x = 1\ny = x\nmain = y - x", "x : number, y : number2, main : number3"},
 		{"x = 1.5", "x : Float"},
 		{"x = 1 + 0.5", "x : Float"},
 		{"f = 1 / 2", "f : Float"}, // number literals unify with Float (Elm)
@@ -63,13 +65,13 @@ func TestPositive(t *testing.T) {
 		{"x : Int\nx = 1", "x : Int"},
 		{"x : Float\nx = 1", "x : Float"}, // annotation forces the literal
 		{"add x y = x + y", "add : number -> number -> number"},
-		{"inc n = n + 1\nmain = inc 41", "inc : number -> number, main : number"},
+		{"inc n = n + 1\nmain = inc 41", "inc : number -> number, main : number2"},
 		{"fib n = if n < 2 then n else fib (n - 1) + fib (n - 2)", "fib : number -> number"},
 		{"f = \\x -> x + 1", "f : number -> number"},
 		{"add : Int -> Int -> Int\nadd x y = x + y", "add : Int -> Int -> Int"},
-		{"add x y = x + y\ninc = add 1", "add : number -> number -> number, inc : number -> number"},
-		// Monomorphy across uses: a later use pins the definition.
-		{"id x = x\nmain = id 1 + 1", "id : number -> number, main : number"},
+		{"add x y = x + y\ninc = add 1", "add : number -> number -> number, inc : number2 -> number2"},
+		// Generalization: uses no longer pin the definition (S5).
+		{"id x = x\nmain = id 1 + 1", "id : a -> a, main : number"},
 		{"v =\n  go n = if n < 1 then 0 else go (n - 1)\n  go 3", "v : number"},
 	}
 	for _, c := range cases {
@@ -116,7 +118,7 @@ func TestNegative(t *testing.T) {
 		{"y =\n  a = b + 1\n  b = 2\n  a", "NAMING ERROR", 2}, // use-before-define in block
 		{"x : String\nx = 1", "TYPE MISMATCH", 2},             // WhyAnnotation
 		{"x : Foo\nx = 1", "NAMING ERROR", 1},                 // unknown type name
-		{"x : a\nx = 1", "UNSUPPORTED ANNOTATION", 1},         // type variable pre-S5
+		{"x : a\nx = 1", "TYPE MISMATCH", 2},                  // annotation more general than the number body
 		{"f : Int -> Int\nf = 1", "TYPE MISMATCH", 2},         // arrow annotation resolves, body mismatches
 		{"main x = x", "MAIN TAKES NO PARAMETERS", 1},
 		{"f x x = x", "SHADOWING", 1},                              // duplicate params
@@ -124,7 +126,6 @@ func TestNegative(t *testing.T) {
 		{"x = 1\nf x = x + 1", "SHADOWING", 2},                     // param shadows a top-level name
 		{"f = \\x -> \\x -> x", "SHADOWING", 1},                    // lambda param shadowing
 		{"f x = f", "TYPE MISMATCH", 1},                            // occurs check via the recursion var
-		{"id x = x\na = id 1\nb = id \"s\"", "TYPE MISMATCH", 3},   // monomorphy: two uses, two types
 		{"main = (\\x -> print x) 1", "PRINT NOT ALLOWED HERE", 1}, // no print inside lambdas
 	}
 	for _, c := range cases {

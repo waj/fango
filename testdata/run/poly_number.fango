@@ -1,0 +1,9 @@
+double x = x + x
+
+addOne x = x + 1
+
+main =
+    a = double 20 + addOne 1
+    b = double 0.75
+    c = addOne 1.5
+    print (b + c)

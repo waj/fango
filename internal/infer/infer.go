@@ -115,12 +115,14 @@ type Checker struct {
 	// inputs across a session never collide (elaborate/lift.go).
 	LiftGen int
 
-	// AllowPoly is the S5 staging flag: the polymorphism machinery
-	// (generalization, parameterized types, annotation variables) is live
-	// only when set. Off, the checker behaves exactly as S4 shipped, and the
-	// staged "arrives with polymorphism (S5)" errors fire. The flag — and
-	// every staged error behind it — is deleted when S5 lights up end to end.
-	AllowPoly bool
+	// MonoValues applies the block-binding monomorphism restriction to
+	// top-level value declarations too. The REPL sets it: a prompt value is
+	// a lazy memo cell (§9.2), evaluated once, so its type must stay a
+	// monotype — a generalized value re-evaluates per use, which would
+	// observably interact with redefinition (breaking §9.3's "old closures
+	// keep old values"). Batch modules are immutable, so re-evaluation is
+	// unobservable there and top-level values generalize per §8.4.
+	MonoValues bool
 }
 
 func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
@@ -237,10 +239,6 @@ func (ck *Checker) TypeDecl(td *ast.TypeDecl) []diag.Error {
 // before any constructor field resolves, so recursive and mutually recursive
 // types work. Returns nil for declarations rejected wholesale.
 func (ck *Checker) declareTypeHeader(td *ast.TypeDecl) (*types.ADTInfo, []diag.Error) {
-	if len(td.Params) > 0 && !ck.AllowPoly {
-		return nil, []diag.Error{diag.Errorf(td.NameSpan, "UNSUPPORTED TYPE PARAMETERS",
-			"`%s` declares type parameters — parameterized types arrive with\npolymorphism (S5). For now types must be monomorphic.", td.Name)}
-	}
 	var errs []diag.Error
 	params := make([]*types.TVar, len(td.Params))
 	seen := map[string]bool{}
@@ -370,10 +368,18 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []dia
 		}
 	}
 	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body}
-	if ck.AllowPoly {
-		info.Scheme = ck.generalize(ty, nil)
-	} else {
+	_, isLambda := d.Body.(*ast.Lambda)
+	switch {
+	case d.Name == "main":
+		// main is the program's ground entry point (§8.4: its effect is
+		// forced inside func main()) — it never generalizes. Unconstrained
+		// variables in its type default like interior ones (Number → Int,
+		// General → Unit), so `main = 1 + 2` stays an Int program.
 		info.Scheme = types.Scheme{Body: ty}
+	case ck.MonoValues && len(d.Params) == 0 && !isLambda:
+		info.Scheme = types.Scheme{Body: ty}
+	default:
+		info.Scheme = ck.generalize(ty, nil)
 	}
 	return info, errs
 }
@@ -630,7 +636,7 @@ func (g *generator) block(e *ast.Block) types.Type {
 		// accepts nullary generic values; S7's purity check keeps
 		// re-evaluation unobservable).
 		_, isLambda := bind.Body.(*ast.Lambda)
-		if g.ck.AllowPoly && (len(bind.Params) > 0 || isLambda) {
+		if len(bind.Params) > 0 || isLambda {
 			// Solve-at-binding (§7.2): discharge this binding's constraints
 			// into the substitution now, so generalization sees solved types
 			// and later bindings can use this one polymorphically.

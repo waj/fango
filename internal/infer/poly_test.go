@@ -26,7 +26,6 @@ func checkPoly(t *testing.T, src string) (*Checker, []DeclInfo, []error) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := NewChecker(sup, b, NewEnv())
-	ck.AllowPoly = true
 	infos, errs := ck.Module(m)
 	var out []error
 	for _, e := range errs {

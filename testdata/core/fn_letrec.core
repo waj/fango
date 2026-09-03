@@ -1,3 +1,4 @@
 (core
-  (def v Int (letrec go Int (lam n Int -> Int (if Int (binop < Bool (var n Int) (int 1 Int)) (int 0 Int) (binop + Int (var n Int) (app/value (var go Int -> Int) (binop - Int (var n Int) (int 1 Int)) Int)))) (app/value (var go Int -> Int) (int 4 Int) Int)))
-  (def main Int (var v Int)))
+  (def v (typarams number) number (app/worker @[number] (var _lift1_go number -> number) (int 4 number) number))
+  (def _lift1_go (typarams number) (params n) number -> number (if number (binop < Bool (var n number) (int 1 number)) (int 0 number) (binop + number (var n number) (app/worker @[number] (var _lift1_go number -> number) (binop - number (var n number) (int 1 number)) number))))
+  (def main Int (app/worker @[Int] (var v Int) Int)))

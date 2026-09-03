@@ -34,8 +34,13 @@ type Session struct {
 func NewSession(out io.Writer) *Session {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
+	ck := infer.NewChecker(sup, b, infer.NewEnv())
+	// Prompt values are lazy memo cells (§9.2) — evaluated once, so their
+	// types stay monotypes (the block-binding monomorphism restriction).
+	// Functions and lambdas still generalize.
+	ck.MonoValues = true
 	return &Session{
-		ck:  infer.NewChecker(sup, b, infer.NewEnv()),
+		ck:  ck,
 		env: eval.NewEnv(),
 		out: out,
 	}
@@ -286,9 +291,11 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 		diag.Render(s.out, inferErrs)
 		return inputDone
 	}
-	if s.rejectPoly(e, ty) {
-		return inputDone
-	}
+	// The displayed type is the pre-defaulting one — free variables print
+	// as the generalized scheme would (`\x -> x` echoes `a -> a`), §9.2.
+	// Elaboration then defaults for evaluation; the value renders at the
+	// defaulted (ground) type.
+	shownTy := types.Show(s.ck.Sub.Apply(ty))
 	coreExpr, aux, elabErrs := elaborate.Expr(e, s.ck)
 	if len(elabErrs) > 0 {
 		diag.Render(s.out, elabErrs)
@@ -303,7 +310,7 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	finalTy := s.ck.Sub.Apply(ty)
-	fmt.Fprintf(s.out, "%s : %s\n", eval.Show(v, finalTy, s.ck.B), types.Show(finalTy))
+	fmt.Fprintf(s.out, "%s : %s\n", eval.Show(v, finalTy, s.ck.B), shownTy)
 	return inputDone
 }
 
@@ -324,24 +331,9 @@ func (s *Session) typeOf(src string) {
 		diag.Render(s.out, inferErrs)
 		return
 	}
-	if s.rejectPoly(e, ty) {
-		return
-	}
-	_, _, _ = elaborate.Expr(e, s.ck) // force defaulting so the shown type is ground
+	// Show the generalized view: free variables print as the scheme would
+	// (`:type \x -> x` says `a -> a`), no defaulting forced (§9.2).
 	fmt.Fprintln(s.out, types.Show(s.ck.Sub.Apply(ty)))
-}
-
-// rejectPoly rejects a prompt expression whose type is still visibly
-// polymorphic — the REPL elaborates per input, so unlike batch there is no
-// later use to pin it. Reports whether the input was rejected.
-func (s *Session) rejectPoly(e ast.Expr, ty types.Type) bool {
-	if s.ck.FreeGeneralVar(ty) == nil {
-		return false
-	}
-	p := types.NewPrinter()
-	diag.Render(s.out, []diag.Error{diag.Errorf(e.Span(), "UNSUPPORTED POLYMORPHISM",
-		"This expression's type is:\n\n    %s\n\nType variables mean polymorphism, which arrives in S5. Apply it to\nconcrete arguments instead.", p.Type(s.ck.Sub.Apply(ty)))})
-	return true
 }
 
 // wantsMore reports whether the parse failed only because input ran out —

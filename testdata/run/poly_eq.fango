@@ -1,0 +1,2 @@
+type List a = Nil | Cons a (List a)
+main = print (Cons 1 (Cons 2 Nil) == Cons 1 (Cons 2 Nil))

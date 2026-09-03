@@ -1,9 +1,9 @@
 fango 0.1 — :help for commands
-> 7 : Int
+> 7 : number
 > x : Int
 > 42 : Int
 > Int
-> | | 3 : Int
+> | | 3 : number
 -- NAMING ERROR ----------------------------------------- <repl>
 
 I don't know a value named `y`.

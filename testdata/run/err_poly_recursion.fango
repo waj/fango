@@ -1,0 +1,5 @@
+type Box a = MkBox a
+
+f b = f (MkBox b)
+
+main = 1

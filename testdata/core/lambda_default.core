@@ -1,3 +1,3 @@
 (core
-  (def f Int -> Int (lam x Int -> Int (binop + Int (var x Int) (int 1 Int))))
-  (def main Int (app/value (var f Int -> Int) (int 41 Int) Int)))
+  (def f (typarams number) number -> number (lam x number -> number (binop + number (var x number) (int 1 number))))
+  (def main Int (app/value (app/worker @[Int] (var f Int -> Int) Int -> Int) (int 41 Int) Int)))
