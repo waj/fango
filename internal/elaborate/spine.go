@@ -38,6 +38,14 @@ func (el *elab) app(e *ast.App) core.Expr {
 	for i, a := range rev {
 		args[len(rev)-1-i] = a
 	}
+	if _, ok := head.(*ast.Resume); ok {
+		return &core.Resume{Value: el.expr(args[0]), Ty: el.zonkDefault(el.ck.ExprTypes[e])}
+	}
+	if v, ok := head.(*ast.Var); ok {
+		if op := el.ck.Operations[v.Name]; op != nil {
+			return el.operationCall(op, el.zonkDefault(el.ck.ExprTypes[head]), el.ck.Sub.Apply(el.ck.ExprTypes[head]), args)
+		}
+	}
 
 	// Lifted local head? Its frees become leading arguments (lift.go).
 	if v, ok := head.(*ast.Var); ok {
@@ -51,7 +59,7 @@ func (el *elab) app(e *ast.App) core.Expr {
 	if v, ok := head.(*ast.Var); ok {
 		if arity, isWorker := el.ck.Workers[v.Name]; isWorker {
 			workerTy := el.zonkDefault(el.ck.ExprTypes[head])
-			return el.workerCall(v.Name, workerTy, arity, args)
+			return el.workerCall(v.Name, workerTy, el.ck.Sub.Apply(el.ck.ExprTypes[head]), arity, args)
 		}
 	}
 
@@ -73,6 +81,57 @@ func (el *elab) app(e *ast.App) core.Expr {
 	return res
 }
 
+func effectInstance(op *types.EffectOp, ty types.Type) core.EffectInstance {
+	t := ty
+	for i := 0; i < op.Arity; i++ {
+		f := t.(*types.TFun)
+		if i == op.Arity-1 && len(f.Eff.Labels) > 0 {
+			l := f.Eff.Labels[0]
+			return core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args}
+		}
+		t = f.Ret
+	}
+	return core.EffectInstance{Unique: op.Owner.Unique, Name: op.Owner.Name}
+}
+
+func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args []ast.Expr) core.Expr {
+	if len(args) > op.Arity {
+		res := el.operationCall(op, opTy, rawTy, args[:op.Arity])
+		for _, a := range args[op.Arity:] {
+			res = el.valueApp(res, el.expr(a))
+		}
+		return res
+	}
+	argTys, ret := core.PeelFun(opTy, op.Arity)
+	coreArgs := make([]core.Expr, 0, op.Arity)
+	for _, a := range args {
+		coreArgs = append(coreArgs, el.expr(a))
+	}
+	if op.Owner == el.ck.IO && op.Name == "print" && len(coreArgs) > 0 {
+		el.checkPrintable(coreArgs[0].Type(), args[0].Span())
+	}
+	for i := len(args); i < op.Arity; i++ {
+		n := fmt.Sprintf("_op%d", el.tmp)
+		el.tmp++
+		coreArgs = append(coreArgs, &core.VarRef{Name: n, Ty: argTys[i]})
+	}
+	var body core.Expr = &core.Perform{Op: op, Effect: effectInstance(op, rawTy), Args: coreArgs, Ty: ret}
+	for i := op.Arity - 1; i >= len(args); i-- {
+		body = &core.Lambda{Param: coreArgs[i].(*core.VarRef).Name, Body: body, Ty: arrowAt(opTy, i)}
+	}
+	return body
+}
+
+func arrowAt(t types.Type, n int) types.Type {
+	for i := 0; i < n; i++ {
+		t = t.(*types.TFun).Ret
+	}
+	return t
+}
+func (el *elab) operationValue(op *types.EffectOp, ty, raw types.Type) core.Expr {
+	return el.operationCall(op, ty, raw, nil)
+}
+
 // valueApp is one typed indirect application: callee(arg).
 func (el *elab) valueApp(callee, arg core.Expr) core.Expr {
 	fn, ok := callee.Type().(*types.TFun)
@@ -91,13 +150,14 @@ func (el *elab) valueApp(callee, arg core.Expr) core.Expr {
 // constructor, or a lifted local. All get the same saturation analysis; only
 // the emitted App's kind and leading arguments differ.
 type callee struct {
-	kind   core.CalleeKind
-	name   string
-	ty     types.Type      // full curried type AT THIS OCCURRENCE (instantiated)
-	arity  int             // total parameters, including pre
-	ctor   *types.CtorInfo // when kind == core.Ctor
-	tyArgs []types.Type    // explicit instantiation (§8.4); nil when monomorphic
-	pre    []core.Expr     // lifted locals: the captured frees, already-atomic leading args
+	kind     core.CalleeKind
+	name     string
+	ty       types.Type      // full curried type AT THIS OCCURRENCE (instantiated)
+	arity    int             // total parameters, including pre
+	ctor     *types.CtorInfo // when kind == core.Ctor
+	tyArgs   []types.Type    // explicit instantiation (§8.4); nil when monomorphic
+	pre      []core.Expr     // lifted locals: the captured frees, already-atomic leading args
+	evidence []core.EffectInstance
 }
 
 func (el *elab) workerCallee(name string, workerTy types.Type, arity int) callee {
@@ -208,18 +268,21 @@ func (el *elab) nullaryValueUse(name string, sch types.Scheme, occTy types.Type)
 func (c callee) saturatedApp(args []core.Expr) *core.App {
 	_, ret := core.PeelFun(c.ty, c.arity)
 	return &core.App{
-		CalleeKind: c.kind,
-		Callee:     &core.VarRef{Name: c.name, Ty: c.ty},
-		Args:       append(append([]core.Expr{}, c.pre...), args...),
-		TyArgs:     c.tyArgs,
-		Ty:         ret,
-		Ctor:       c.ctor,
+		CalleeKind:   c.kind,
+		Callee:       &core.VarRef{Name: c.name, Ty: c.ty},
+		Args:         append(append([]core.Expr{}, c.pre...), args...),
+		TyArgs:       c.tyArgs,
+		Ty:           ret,
+		EvidenceArgs: c.evidence,
+		Ctor:         c.ctor,
 	}
 }
 
 // workerCall classifies a call to a known worker by saturation.
-func (el *elab) workerCall(name string, workerTy types.Type, arity int, args []ast.Expr) core.Expr {
-	return el.calleeCall(el.workerCallee(name, workerTy, arity), args)
+func (el *elab) workerCall(name string, workerTy, rawTy types.Type, arity int, args []ast.Expr) core.Expr {
+	c := el.workerCallee(name, workerTy, arity)
+	c.evidence = executingEffects(rawTy, arity)
+	return el.calleeCall(c, args)
 }
 
 func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
@@ -310,8 +373,10 @@ func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 
 // curriedWorkerRef is the k=0 case: a worker used first-class expands to
 // its curried wrapper at the use site — demand-driven by construction.
-func (el *elab) curriedWorkerRef(name string, workerTy types.Type, arity int) core.Expr {
-	return el.partial(el.workerCallee(name, workerTy, arity), nil)
+func (el *elab) curriedWorkerRef(name string, workerTy, rawTy types.Type, arity int) core.Expr {
+	c := el.workerCallee(name, workerTy, arity)
+	c.evidence = executingEffects(rawTy, arity)
+	return el.partial(c, nil)
 }
 
 // ctorValue is a constructor in value position at its occurrence type:
@@ -329,7 +394,7 @@ func (el *elab) ctorValue(info *types.CtorInfo, occTy types.Type) core.Expr {
 // literals and variable references skip ANF hoisting.
 func isAtom(e core.Expr) bool {
 	switch e.(type) {
-	case *core.IntLit, *core.FloatLit, *core.StringLit, *core.BoolLit, *core.VarRef:
+	case *core.IntLit, *core.FloatLit, *core.StringLit, *core.BoolLit, *core.UnitLit, *core.VarRef:
 		return true
 	default:
 		return false

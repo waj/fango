@@ -41,6 +41,18 @@ func (el *elab) anf(e core.Expr) core.Expr {
 	case *core.Print:
 		arg, hoists := el.anfSlot(e.Arg)
 		return wrapHoists(hoists, &core.Print{Arg: arg, Ty: e.Ty})
+	case *core.Handle:
+		clauses := make([]core.HandlerClause, len(e.Clauses))
+		for i, c := range e.Clauses {
+			clauses[i] = core.HandlerClause{Op: c.Op, Params: c.Params, ParamTypes: c.ParamTypes, ResultType: c.ResultType, Body: el.anf(c.Body)}
+		}
+		var ret *core.ReturnClause
+		if e.Return != nil {
+			ret = &core.ReturnClause{Param: e.Return.Param, Body: el.anf(e.Return.Body)}
+		}
+		return &core.Handle{Body: el.anf(e.Body), Effect: e.Effect, Clauses: clauses, Return: ret, TailResumptive: e.TailResumptive, Ty: e.Ty}
+	case *core.Seq:
+		return &core.Seq{First: el.anf(e.First), Then: el.anf(e.Then), Ty: e.Ty}
 	default:
 		out, hoists := el.anfExprChildren(e)
 		return wrapHoists(hoists, out)
@@ -91,6 +103,8 @@ func (el *elab) anfSlot(e core.Expr) (core.Expr, []hoist) {
 		return el.anf(e), nil
 	case *core.Lambda:
 		return &core.Lambda{Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty}, nil
+	case *core.Handle, *core.Seq:
+		return el.anf(e), nil
 	default:
 		return el.anfExprChildren(e)
 	}
@@ -106,7 +120,7 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		return out
 	}
 	switch e := e.(type) {
-	case *core.IntLit, *core.FloatLit, *core.StringLit, *core.BoolLit, *core.VarRef:
+	case *core.IntLit, *core.FloatLit, *core.StringLit, *core.BoolLit, *core.UnitLit, *core.VarRef:
 		return e, nil
 	case *core.Neg:
 		return &core.Neg{Operand: slot(e.Operand), Ty: e.Ty}, hoists
@@ -116,6 +130,14 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		return &core.BinOp{Op: e.Op, Ty: e.Ty, L: l, R: r}, hoists
 	case *core.Print:
 		return &core.Print{Arg: slot(e.Arg), Ty: e.Ty}, hoists
+	case *core.Perform:
+		args := make([]core.Expr, len(e.Args))
+		for i, a := range e.Args {
+			args[i] = slot(a)
+		}
+		return &core.Perform{Op: e.Op, Effect: e.Effect, Args: args, Ty: e.Ty}, hoists
+	case *core.Resume:
+		return &core.Resume{Value: slot(e.Value), Ty: e.Ty}, hoists
 	case *core.App:
 		callee := e.Callee
 		if e.CalleeKind == core.Value {
@@ -126,7 +148,7 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 			args[i] = slot(a)
 		}
 		return &core.App{CalleeKind: e.CalleeKind, Callee: callee, Args: args,
-			TyArgs: e.TyArgs, Ty: e.Ty, Ctor: e.Ctor}, hoists
+			TyArgs: e.TyArgs, Ty: e.Ty, Ctor: e.Ctor, EvidenceArgs: e.EvidenceArgs}, hoists
 	default:
 		panic(fmt.Sprintf("elaborate: anf unhandled node %T", e))
 	}

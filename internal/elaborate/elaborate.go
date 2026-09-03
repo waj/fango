@@ -16,6 +16,7 @@ package elaborate
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
@@ -29,7 +30,12 @@ import (
 // returns without errors, Core contains no metavariables — asserted by
 // core.Lint.
 func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error) {
-	p := &core.Prog{ADTs: ck.ADTOrder}
+	effects := make([]*types.EffectInfo, 0, len(ck.Effects))
+	for _, eff := range ck.Effects {
+		effects = append(effects, eff)
+	}
+	sort.Slice(effects, func(i, j int) bool { return effects[i].Unique < effects[j].Unique })
+	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effects}
 	var errs []diag.Error
 	for _, info := range infos {
 		defs, declErrs := Decl(info, ck)
@@ -54,23 +60,48 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 // lambda-lifted polymorphic block bindings (§8.4, lift.go).
 func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
 	el := newElab(ck, info.Name, info.Scheme)
-	defType := el.zonkDefault(info.Type)
+	rawType := ck.Sub.Apply(info.Type)
+	el.defaultFree(rawType)
+	rawType = ck.Sub.Apply(rawType)
+	defType := eraseRows(rawType)
 	params := make([]string, len(info.Params))
 	if len(info.Params) > 0 {
 		argTys, _ := core.PeelFun(defType, len(info.Params))
 		for i, p := range info.Params {
 			params[i] = p.Name
-			el.pushScope(p.Name, argTys[i])
+			if p.Name != "_" {
+				el.pushScope(p.Name, argTys[i])
+			}
 		}
 	}
 	def := core.Def{
-		Name:     info.Name,
-		Type:     defType,
-		TyParams: types.RigidVarsIn(defType),
-		Params:   params,
-		Body:     el.anf(el.expr(info.Body)),
+		Name:         info.Name,
+		Type:         defType,
+		TyParams:     types.RigidVarsIn(defType),
+		Params:       params,
+		EffectParams: executingEffects(rawType, len(params)),
+		Body:         el.anf(el.expr(info.Body)),
 	}
 	return append([]core.Def{def}, el.aux...), el.errs
+}
+
+func executingEffects(t types.Type, arity int) []core.EffectInstance {
+	if arity == 0 {
+		return nil
+	}
+	var f *types.TFun
+	for i := 0; i < arity; i++ {
+		f = t.(*types.TFun)
+		t = f.Ret
+	}
+	row := types.SortedRow(f.Eff)
+	out := make([]core.EffectInstance, 0, len(row.Labels))
+	for _, l := range row.Labels {
+		if l.Name != "IO" {
+			out = append(out, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args})
+		}
+	}
+	return out
 }
 
 // Expr elaborates one expression against the checker's solved types. The
@@ -139,9 +170,13 @@ func (el *elab) lambda(params []ast.Param, body ast.Expr, funTy types.Type) core
 	if !ok {
 		panic("elaborate: lambda type is not a function type")
 	}
-	el.pushScope(params[0].Name, fn.Arg)
+	if params[0].Name != "_" {
+		el.pushScope(params[0].Name, fn.Arg)
+	}
 	inner := el.lambda(params[1:], body, fn.Ret)
-	el.popScope(1)
+	if params[0].Name != "_" {
+		el.popScope(1)
+	}
 	return &core.Lambda{
 		Param: params[0].Name,
 		Body:  inner,
@@ -163,7 +198,12 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		return &core.FloatLit{Val: e.Value, Ty: ty}
 	case *ast.StringLit:
 		return &core.StringLit{Val: e.Value, Ty: ty}
+	case *ast.UnitLit:
+		return &core.UnitLit{Ty: ty}
 	case *ast.Var:
+		if op := el.ck.Operations[e.Name]; op != nil {
+			return el.operationValue(op, ty, el.ck.Sub.Apply(el.ck.ExprTypes[e]))
+		}
 		// A lifted local in first-class position gets the same curried-
 		// wrapper treatment as a worker (its frees are the leading args).
 		if lf := el.lifted[e.Name]; lf != nil {
@@ -172,7 +212,7 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		// A worker name in first-class position (not an application head —
 		// spine.go intercepts those) eta-expands into its curried wrapper.
 		if arity, isWorker := el.ck.Workers[e.Name]; isWorker {
-			return el.curriedWorkerRef(e.Name, ty, arity)
+			return el.curriedWorkerRef(e.Name, ty, el.ck.Sub.Apply(el.ck.ExprTypes[e]), arity)
 		}
 		// A polymorphic top-level value compiled to a nullary generic worker
 		// (§8.4): every use is an instantiated zero-argument call.
@@ -194,11 +234,6 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 			return el.ctorValue(info, ty)
 		}
 	case *ast.App:
-		if el.ck.PrintCalls[e] {
-			arg := el.expr(e.Arg)
-			el.checkPrintable(arg.Type(), e.Arg.Span())
-			return &core.Print{Arg: arg, Ty: ty}
-		}
 		return el.app(e)
 	case *ast.Neg:
 		return el.fold(&core.Neg{Operand: el.expr(e.Operand), Ty: ty})
@@ -217,6 +252,10 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		return el.lambda(e.Params, e.Body, ty)
 	case *ast.Case:
 		return el.caseExpr(e, ty)
+	case *ast.Handle:
+		return el.handleExpr(e, ty)
+	case *ast.Resume:
+		panic("elaborate: bare resume")
 	case *ast.Block:
 		// Fold bindings into a right-nested Let chain; every level carries
 		// the block's (result) type. RHSs elaborate in source order so
@@ -224,11 +263,21 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		// recursive) Lets of nested Lambdas. Generalized bindings do not
 		// become Lets at all: they lambda-lift to top-level generic
 		// definitions (§8.4, lift.go) and their uses rewrite to calls.
-		var lets []*core.Let
+		var order []any
 		pushed := 0
 		var liftedHere []string
-		for i := range e.Binds {
-			bind := &e.Binds[i]
+		items := e.Items
+		if len(items) == 0 {
+			for i := range e.Binds {
+				items = append(items, ast.BlockItem{BindIndex: i})
+			}
+		}
+		for _, item := range items {
+			if item.Expr != nil {
+				order = append(order, el.expr(item.Expr))
+				continue
+			}
+			bind := &e.Binds[item.BindIndex]
 			bindTy := el.ck.BindTypes[bind]
 			if sch := el.ck.BindSchemes[bind]; hasRuntimeVars(sch) {
 				el.liftBinding(bind, sch)
@@ -253,26 +302,74 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 				el.pushScope(bind.Name, zonked)
 				pushed++
 			}
-			lets = append(lets, &core.Let{
+			let := &core.Let{
 				Name: bind.Name,
 				Rhs:  rhs,
 				Rec:  isFn && core.Mentions(rhs, bind.Name),
-			})
+			}
+			order = append(order, let)
 		}
 		body := el.expr(e.Result)
 		el.popScope(pushed)
 		for _, name := range liftedHere {
 			delete(el.lifted, name)
 		}
-		for i := len(lets) - 1; i >= 0; i-- {
-			lets[i].Body = body
-			lets[i].Ty = body.Type()
-			body = lets[i]
+		for i := len(order) - 1; i >= 0; i-- {
+			switch x := order[i].(type) {
+			case *core.Let:
+				x.Body = body
+				x.Ty = body.Type()
+				body = x
+			case core.Expr:
+				body = &core.Seq{First: x, Then: body, Ty: body.Type()}
+			}
 		}
 		return body
 	default:
 		panic(fmt.Sprintf("elaborate: unhandled AST node %T", e))
 	}
+}
+
+func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
+	info := el.ck.HandleInfos[e]
+	if info == nil {
+		panic("elaborate: missing handler info")
+	}
+	clauses := make([]core.HandlerClause, len(e.Clauses))
+	for i := range e.Clauses {
+		cl, ci := &e.Clauses[i], info.Clauses[i]
+		params := make([]string, len(cl.Params))
+		pushed := 0
+		for j, p := range cl.Params {
+			params[j] = p.Name
+			if p.Name != "_" && p.Name != "()" {
+				el.pushScope(p.Name, el.zonkDefault(ci.ParamTypes[j]))
+				pushed++
+			}
+		}
+		pts := make([]types.Type, len(ci.ParamTypes))
+		for j, p := range ci.ParamTypes {
+			pts[j] = el.zonkDefault(p)
+		}
+		clauses[i] = core.HandlerClause{Op: ci.Op, Params: params, ParamTypes: pts, ResultType: ty, Body: el.expr(cl.Body)}
+		el.popScope(pushed)
+	}
+	var ret *core.ReturnClause
+	if e.Return != nil {
+		name := e.Return.Param.Name
+		if name != "_" && name != "()" {
+			el.pushScope(name, el.zonkDefault(info.BodyResult))
+		}
+		ret = &core.ReturnClause{Param: name, Body: el.expr(e.Return.Body)}
+		if name != "_" && name != "()" {
+			el.popScope(1)
+		}
+	}
+	inst := core.EffectInstance{Unique: info.Effect.Unique, Name: info.Effect.Name}
+	for _, a := range info.Effect.Args {
+		inst.Args = append(inst.Args, el.zonkDefault(a))
+	}
+	return &core.Handle{Body: el.expr(e.Body), Effect: inst, Clauses: clauses, Return: ret, TailResumptive: true, Ty: ty}
 }
 
 func hasRuntimeVars(s types.Scheme) bool {

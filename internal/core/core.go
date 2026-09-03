@@ -10,8 +10,15 @@ type Prog struct {
 	// ADTs lists declared types in declaration order — codegen emits marker
 	// interfaces, constructor structs, and derived eq/show from it. Bool is
 	// absent (native Go bool forever, §8.1).
-	ADTs []*types.ADTInfo
-	Defs []Def
+	ADTs    []*types.ADTInfo
+	Effects []*types.EffectInfo
+	Defs    []Def
+}
+
+type EffectInstance struct {
+	Unique int
+	Name   string
+	Args   []types.Type
 }
 
 type Def struct {
@@ -24,8 +31,9 @@ type Def struct {
 	// as a function, re-evaluated per use.
 	TyParams []*types.TVar
 
-	Params []string // non-empty ⇒ worker (§8.2); uncurried Go signature = peeling len(Params) arrows off Type
-	Body   Expr
+	Params       []string // non-empty ⇒ worker (§8.2); uncurried Go signature = peeling len(Params) arrows off Type
+	EffectParams []EffectInstance
+	Body         Expr
 }
 
 // IsWorker reports whether the definition emits as a function: it has term
@@ -52,6 +60,8 @@ type StringLit struct {
 	Ty  types.Type
 }
 
+type UnitLit struct{ Ty types.Type }
+
 // BoolLit is permanent, not an interim ADT stand-in: §8.1 special-cases
 // Bool in codegen forever (native Go bool), and eval's Value stays bool.
 type BoolLit struct {
@@ -75,6 +85,40 @@ type If struct {
 type Print struct {
 	Arg Expr
 	Ty  types.Type // always Unit
+}
+
+type Perform struct {
+	Op     *types.EffectOp
+	Effect EffectInstance
+	Args   []Expr
+	Ty     types.Type
+}
+type HandlerClause struct {
+	Op         *types.EffectOp
+	Params     []string
+	ParamTypes []types.Type
+	ResultType types.Type
+	Body       Expr
+}
+type ReturnClause struct {
+	Param string
+	Body  Expr
+}
+type Handle struct {
+	Body           Expr
+	Effect         EffectInstance
+	Clauses        []HandlerClause
+	Return         *ReturnClause
+	TailResumptive bool
+	Ty             types.Type
+}
+type Resume struct {
+	Value Expr
+	Ty    types.Type
+}
+type Seq struct {
+	First, Then Expr
+	Ty          types.Type
 }
 
 // Let is one block binding (§3.6): bind Name to Rhs, continue with Body.
@@ -123,11 +167,12 @@ const (
 )
 
 type App struct {
-	CalleeKind CalleeKind
-	Callee     Expr
-	Args       []Expr
-	TyArgs     []types.Type
-	Ty         types.Type
+	CalleeKind   CalleeKind
+	Callee       Expr
+	Args         []Expr
+	TyArgs       []types.Type
+	Ty           types.Type
+	EvidenceArgs []EffectInstance
 
 	// Ctor identifies the constructor when CalleeKind == Ctor (always
 	// saturated: len(Args) == len(Ctor.Fields); partial applications were
@@ -190,12 +235,17 @@ func (*SwitchLit) isTree()  {}
 func (*IntLit) isExpr()    {}
 func (*FloatLit) isExpr()  {}
 func (*StringLit) isExpr() {}
+func (*UnitLit) isExpr()   {}
 func (*BoolLit) isExpr()   {}
 func (*VarRef) isExpr()    {}
 func (*Neg) isExpr()       {}
 func (*BinOp) isExpr()     {}
 func (*If) isExpr()        {}
 func (*Print) isExpr()     {}
+func (*Perform) isExpr()   {}
+func (*Handle) isExpr()    {}
+func (*Resume) isExpr()    {}
+func (*Seq) isExpr()       {}
 func (*Let) isExpr()       {}
 func (*Lambda) isExpr()    {}
 func (*App) isExpr()       {}
@@ -204,12 +254,17 @@ func (*Case) isExpr()      {}
 func (e *IntLit) Type() types.Type    { return e.Ty }
 func (e *FloatLit) Type() types.Type  { return e.Ty }
 func (e *StringLit) Type() types.Type { return e.Ty }
+func (e *UnitLit) Type() types.Type   { return e.Ty }
 func (e *BoolLit) Type() types.Type   { return e.Ty }
 func (e *VarRef) Type() types.Type    { return e.Ty }
 func (e *Neg) Type() types.Type       { return e.Ty }
 func (e *BinOp) Type() types.Type     { return e.Ty }
 func (e *If) Type() types.Type        { return e.Ty }
 func (e *Print) Type() types.Type     { return e.Ty }
+func (e *Perform) Type() types.Type   { return e.Ty }
+func (e *Handle) Type() types.Type    { return e.Ty }
+func (e *Resume) Type() types.Type    { return e.Ty }
+func (e *Seq) Type() types.Type       { return e.Ty }
 func (e *Let) Type() types.Type       { return e.Ty }
 func (e *Lambda) Type() types.Type    { return e.Ty }
 func (e *App) Type() types.Type       { return e.Ty }
@@ -230,6 +285,27 @@ func Mentions(e Expr, name string) bool {
 		return Mentions(e.Cond, name) || Mentions(e.Then, name) || Mentions(e.Else, name)
 	case *Print:
 		return Mentions(e.Arg, name)
+	case *Perform:
+		for _, a := range e.Args {
+			if Mentions(a, name) {
+				return true
+			}
+		}
+		return false
+	case *Handle:
+		if Mentions(e.Body, name) {
+			return true
+		}
+		for _, c := range e.Clauses {
+			if Mentions(c.Body, name) {
+				return true
+			}
+		}
+		return e.Return != nil && Mentions(e.Return.Body, name)
+	case *Resume:
+		return Mentions(e.Value, name)
+	case *Seq:
+		return Mentions(e.First, name) || Mentions(e.Then, name)
 	case *Let:
 		return Mentions(e.Rhs, name) || Mentions(e.Body, name)
 	case *Lambda:

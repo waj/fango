@@ -36,6 +36,16 @@ func Dump(p *Prog) string {
 		}
 		b.WriteString(")")
 	}
+	for _, eff := range p.Effects {
+		if eff.Name == "IO" {
+			continue
+		}
+		fmt.Fprintf(&b, "\n  (effect %s", eff.Name)
+		for _, op := range eff.Ops {
+			fmt.Fprintf(&b, " (op %s %s)", op.Name, types.NewPrinter().Type(op.Scheme.Body))
+		}
+		b.WriteString(")")
+	}
 	for i := range p.Defs {
 		d := &p.Defs[i]
 		pr := types.NewPrinter()
@@ -49,6 +59,13 @@ func Dump(p *Prog) string {
 		}
 		if len(d.Params) > 0 {
 			fmt.Fprintf(&b, " (params %s)", strings.Join(d.Params, " "))
+		}
+		if len(d.EffectParams) > 0 {
+			b.WriteString(" (effects")
+			for _, e := range d.EffectParams {
+				fmt.Fprintf(&b, " %s", e.Name)
+			}
+			b.WriteString(")")
 		}
 		fmt.Fprintf(&b, " %s %s)", pr.Type(d.Type), dumpExpr(d.Body, pr))
 	}
@@ -71,6 +88,8 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		return fmt.Sprintf("(float %s %s)", strconv.FormatFloat(e.Val, 'g', -1, 64), pr.Type(e.Ty))
 	case *StringLit:
 		return fmt.Sprintf("(string %q %s)", e.Val, pr.Type(e.Ty))
+	case *UnitLit:
+		return "(unit ())"
 	case *BoolLit:
 		return fmt.Sprintf("(bool %t %s)", e.Val, pr.Type(e.Ty))
 	case *Neg:
@@ -79,6 +98,27 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		return fmt.Sprintf("(if %s %s %s %s)", pr.Type(e.Ty), dumpExpr(e.Cond, pr), dumpExpr(e.Then, pr), dumpExpr(e.Else, pr))
 	case *Print:
 		return fmt.Sprintf("(print %s)", dumpExpr(e.Arg, pr))
+	case *Perform:
+		parts := []string{fmt.Sprintf("(perform %s/%s", e.Effect.Name, e.Op.Name)}
+		for _, a := range e.Args {
+			parts = append(parts, dumpExpr(a, pr))
+		}
+		return strings.Join(parts, " ") + " " + pr.Type(e.Ty) + ")"
+	case *Resume:
+		return fmt.Sprintf("(resume %s %s)", pr.Type(e.Ty), dumpExpr(e.Value, pr))
+	case *Seq:
+		return fmt.Sprintf("(seq %s %s %s)", pr.Type(e.Ty), dumpExpr(e.First, pr), dumpExpr(e.Then, pr))
+	case *Handle:
+		var b strings.Builder
+		fmt.Fprintf(&b, "(handle %s %s", e.Effect.Name, dumpExpr(e.Body, pr))
+		for _, c := range e.Clauses {
+			fmt.Fprintf(&b, " (%s (%s) %s)", c.Op.Name, strings.Join(c.Params, " "), dumpExpr(c.Body, pr))
+		}
+		if e.Return != nil {
+			fmt.Fprintf(&b, " (return %s %s)", e.Return.Param, dumpExpr(e.Return.Body, pr))
+		}
+		fmt.Fprintf(&b, " %s)", pr.Type(e.Ty))
+		return b.String()
 	case *Let:
 		form := "let"
 		if e.Rec {
@@ -99,6 +139,16 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		head := "(app/" + kinds[e.CalleeKind]
 		if len(e.TyArgs) > 0 {
 			head += fmt.Sprintf(" @[%s]", dumpTypes(e.TyArgs, pr))
+		}
+		if len(e.EvidenceArgs) > 0 {
+			head += " evidence["
+			for i, v := range e.EvidenceArgs {
+				if i > 0 {
+					head += " "
+				}
+				head += v.Name
+			}
+			head += "]"
 		}
 		parts := []string{head + " " + dumpExpr(e.Callee, pr)}
 		for _, a := range e.Args {

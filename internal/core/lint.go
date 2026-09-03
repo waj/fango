@@ -55,10 +55,12 @@ func Lint(p *Prog, b *types.Builtins) []error {
 					l.errorf("%s: fewer arrows than parameters", where)
 					break
 				}
-				if l.scope[param] {
+				if param != "_" && l.scope[param] {
 					l.errorf("%s: parameter `%s` shadows — the checker should have rejected this", where, param)
 				}
-				l.scope[param] = true
+				if param != "_" {
+					l.scope[param] = true
+				}
 				t = fn.Ret
 			}
 			if !types.Equal(t, d.Body.Type()) {
@@ -67,7 +69,9 @@ func Lint(p *Prog, b *types.Builtins) []error {
 			}
 			l.expr(d.Body, where)
 			for _, param := range d.Params {
-				delete(l.scope, param)
+				if param != "_" {
+					delete(l.scope, param)
+				}
 			}
 		} else {
 			if !types.Equal(d.Type, d.Body.Type()) {
@@ -174,6 +178,10 @@ func (l *linter) expr(e Expr, where string) {
 		if l.unique(e.Ty) != l.b.String.Unique {
 			l.errorf("%s: StringLit typed %s", where, types.Show(e.Ty))
 		}
+	case *UnitLit:
+		if l.unique(e.Ty) != l.b.Unit.Unique {
+			l.errorf("%s: UnitLit typed %s", where, types.Show(e.Ty))
+		}
 	case *BoolLit:
 		if l.unique(e.Ty) != l.b.Bool.Unique {
 			l.errorf("%s: BoolLit typed %s", where, types.Show(e.Ty))
@@ -234,12 +242,16 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: Lambda body type %s differs from arrow result %s",
 				where, types.Show(e.Body.Type()), types.Show(fn.Ret))
 		}
-		if l.scope[e.Param] {
+		if e.Param != "_" && l.scope[e.Param] {
 			l.errorf("%s: Lambda param `%s` shadows — the checker should have rejected this", where, e.Param)
 		}
-		l.scope[e.Param] = true
+		if e.Param != "_" {
+			l.scope[e.Param] = true
+		}
 		l.expr(e.Body, where)
-		delete(l.scope, e.Param)
+		if e.Param != "_" {
+			delete(l.scope, e.Param)
+		}
 	case *Print:
 		if !l.printable(e.Arg.Type()) {
 			l.errorf("%s: Print argument typed %s, not printable", where, types.Show(e.Arg.Type()))
@@ -248,6 +260,53 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: Print typed %s, want ()", where, types.Show(e.Ty))
 		}
 		l.expr(e.Arg, where)
+	case *Perform:
+		if e.Op == nil || e.Op.Owner.Unique != e.Effect.Unique {
+			l.errorf("%s: malformed Perform evidence", where)
+		}
+		if e.Op != nil && len(e.Args) != e.Op.Arity {
+			l.errorf("%s: Perform `%s` arity mismatch", where, e.Op.Name)
+		}
+		for _, a := range e.Args {
+			l.expr(a, where)
+		}
+	case *Resume:
+		l.expr(e.Value, where)
+	case *Seq:
+		if l.unique(e.First.Type()) != l.b.Unit.Unique {
+			l.errorf("%s: Seq first expression is not Unit", where)
+		}
+		l.expr(e.First, where)
+		l.expr(e.Then, where)
+	case *Handle:
+		if !e.TailResumptive {
+			l.errorf("%s: checkpoint-2 Handle is not tail resumptive", where)
+		}
+		l.expr(e.Body, where)
+		seen := map[string]bool{}
+		for _, c := range e.Clauses {
+			if c.Op == nil || c.Op.Owner.Unique != e.Effect.Unique {
+				l.errorf("%s: handler clause has wrong effect", where)
+				continue
+			}
+			seen[c.Op.Name] = true
+			for _, p := range c.Params {
+				if p != "_" && p != "()" {
+					l.scope[p] = true
+				}
+			}
+			l.expr(c.Body, where)
+			for _, p := range c.Params {
+				delete(l.scope, p)
+			}
+		}
+		if e.Return != nil {
+			if e.Return.Param != "_" && e.Return.Param != "()" {
+				l.scope[e.Return.Param] = true
+			}
+			l.expr(e.Return.Body, where)
+			delete(l.scope, e.Return.Param)
+		}
 	case *App:
 		switch e.CalleeKind {
 		case Worker:
