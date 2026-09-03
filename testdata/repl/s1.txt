@@ -19,14 +19,11 @@ fango's (/) only works on Float, but this operand is:
 
 Note: there is no automatic Int-to-Float conversion — use a
 Float value here, like `2.0` instead of `2`.
-> -- UNHANDLED EFFECT ------------------------------------- <repl>
+> -- EFFECTFUL PROMPT DECLARATION ------------------------- <repl>
 
-This top-level value performs an effect that is not handled.
-Top-level bindings must be pure; move the call into a function or add a handler.
+Effectful declarations are not installed at the prompt; run the expression directly.
 
 1| x = print 1
        ^^^^^^^
-
-Note: a closed effect row cannot absorb additional effects
 > -2 : number
 > | | | "b" : String

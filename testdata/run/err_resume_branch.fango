@@ -1,0 +1,6 @@
+effect Ask
+    ask : () -> Int
+
+main =
+    handle ask () of
+        ask () -> if True then resume 1 else 2

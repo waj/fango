@@ -448,8 +448,6 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		// immediately-invoked typed closure, exactly like If above. Inside
 		// function bodies the elaborator's ANF hoisting bypasses this.
 		return callExpr(funcLit(g.goType(e.Ty), g.caseStmts(e, g.retStmts)))
-	case *core.Print:
-		panic("codegen: core.Print is statement-only — a Unit value reached expression context")
 	case *core.Perform:
 		if e.Op.Owner.Name == "IO" {
 			g.usesFangort = true
@@ -495,7 +493,7 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 		}
 		ft := &goast.FuncType{Params: paramFields(params), Results: &goast.FieldList{List: []*goast.Field{{Type: g.goType(c.ResultType)}}}}
 		fields[i] = &goast.Field{Names: []*goast.Ident{ident("Op_" + c.Op.Name)}, Type: ft}
-		fn := &goast.FuncLit{Type: ft, Body: &goast.BlockStmt{List: g.retStmts(c.Body)}}
+		fn := &goast.FuncLit{Type: ft, Body: &goast.BlockStmt{List: g.resumeStmts(c.Body)}}
 		elts[i] = &goast.KeyValueExpr{Key: ident("Op_" + c.Op.Name), Value: fn}
 	}
 	_ = fields
@@ -521,6 +519,27 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	return callExpr(funcLit(g.goType(e.Ty), stmts))
 }
 
+// resumeStmts lowers a proven tail-resumptive clause. A tail `resume v`
+// becomes a direct return of v from the evidence operation field; the
+// caller's ordinary Go continuation then proceeds with that operation
+// result. No continuation object or non-local control transfer is needed.
+func (g *gen) resumeStmts(e core.Expr) []goast.Stmt {
+	switch e := e.(type) {
+	case *core.Resume:
+		return []goast.Stmt{returnStmt(g.expr(e.Value, 0))}
+	case *core.Let:
+		return append(g.letBindingStmts(e), g.resumeStmts(e.Body)...)
+	case *core.Seq:
+		return append(g.stmts(e.First), g.resumeStmts(e.Then)...)
+	case *core.If:
+		return []goast.Stmt{ifStmt(g.expr(e.Cond, 0), g.resumeStmts(e.Then), g.resumeStmts(e.Else))}
+	case *core.Case:
+		return g.caseStmts(e, g.resumeStmts)
+	default:
+		panic(fmt.Sprintf("codegen: non-tail-resumptive clause node %T", e))
+	}
+}
+
 func (g *gen) effectType(e core.EffectInstance) goast.Expr {
 	return indexExpr(ident("Eff_"+e.Name), g.goTypes(e.Args))
 }
@@ -536,6 +555,14 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 		fields := make([]*goast.Field, len(eff.Ops))
 		for i, p := range eff.Params {
 			g.tyParamNames[p.ID] = fmt.Sprintf("E%d", i)
+		}
+		// Operation-local polymorphism is rejected at every runtime use in
+		// checkpoint 2. Keeping its otherwise-unrepresentable field slots as
+		// any lets unused declarations still have deterministic named structs.
+		for _, op := range eff.Ops {
+			for _, v := range op.LocalVars {
+				g.tyParamNames[v.ID] = "any"
+			}
 		}
 		for i, op := range eff.Ops {
 			ps := make([]paramSpec, len(op.ParamTypes))
@@ -644,9 +671,10 @@ func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
 // Let bindings become plain locals.
 func (g *gen) stmts(e core.Expr) []goast.Stmt {
 	switch e := e.(type) {
-	case *core.Print:
-		return []goast.Stmt{exprStmt(g.printCall(g.expr(e.Arg, 0), e.Arg.Type()))}
 	case *core.Perform:
+		if e.Op.Owner.Name == "IO" && e.Op.Name == "print" {
+			return []goast.Stmt{exprStmt(g.printCall(g.expr(e.Args[0], 0), e.Args[0].Type()))}
+		}
 		return []goast.Stmt{assignBlank(g.expr(e, 0))}
 	case *core.Seq:
 		return append(g.stmts(e.First), g.stmts(e.Then)...)

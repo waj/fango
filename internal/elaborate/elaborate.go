@@ -45,7 +45,7 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 		if def.Name == "main" && len(def.Params) == 0 {
 			if _, isFn := def.Type.(*types.TFun); isFn {
 				errs = append(errs, diag.Errorf(info.NameSpan, "BAD MAIN",
-					"For now `main` must produce an Int, Float, String, Bool, or ()\n— a function-typed `main` cannot run until effects land (S7)."))
+					"`main` must be a value, or use the supported function form `main _ : () ->{IO} ()`."))
 			} else if len(def.TyParams) > 0 {
 				errs = append(errs, diag.Errorf(info.NameSpan, "BAD MAIN",
 					"`main` must be a concrete value, but its type `%s` still has\ntype variables in it.", types.Show(def.Type)))
@@ -77,12 +77,47 @@ func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
 	def := core.Def{
 		Name:         info.Name,
 		Type:         defType,
-		TyParams:     types.RigidVarsIn(defType),
+		TyParams:     runtimeRigidVars(rawType),
 		Params:       params,
 		EffectParams: executingEffects(rawType, len(params)),
 		Body:         el.anf(el.expr(info.Body)),
 	}
 	return append([]core.Def{def}, el.aux...), el.errs
+}
+
+// runtimeRigidVars includes value-type variables and variables appearing
+// only in effect-label arguments, while excluding erased row-tail variables.
+// The former still parameterize typed evidence even when an effect parameter
+// is phantom in every operation signature.
+func runtimeRigidVars(t types.Type) []*types.TVar {
+	var out []*types.TVar
+	seen := map[int]bool{}
+	var walk func(types.Type)
+	walk = func(t types.Type) {
+		switch t := t.(type) {
+		case *types.TVar:
+			if t.Rigid && t.Kind != types.RowVar && !seen[t.ID] {
+				seen[t.ID] = true
+				out = append(out, t)
+			}
+		case *types.TCon:
+			for _, a := range t.Args {
+				walk(a)
+			}
+		case *types.TFun:
+			walk(t.Arg)
+			walk(t.Eff)
+			walk(t.Ret)
+		case types.Row:
+			for _, l := range t.Labels {
+				for _, a := range l.Args {
+					walk(a)
+				}
+			}
+		}
+	}
+	walk(t)
+	return out
 }
 
 func executingEffects(t types.Type, arity int) []core.EffectInstance {
@@ -96,9 +131,11 @@ func executingEffects(t types.Type, arity int) []core.EffectInstance {
 	}
 	row := types.SortedRow(f.Eff)
 	out := make([]core.EffectInstance, 0, len(row.Labels))
+	seen := map[int]bool{}
 	for _, l := range row.Labels {
-		if l.Name != "IO" {
-			out = append(out, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args})
+		if l.Name != "IO" && !seen[l.Unique] {
+			out = append(out, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...)})
+			seen[l.Unique] = true
 		}
 	}
 	return out
@@ -202,12 +239,16 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		return &core.UnitLit{Ty: ty}
 	case *ast.Var:
 		if op := el.ck.Operations[e.Name]; op != nil {
+			if op.Owner == el.ck.IO && op.Name == "print" {
+				args, _ := core.PeelFun(ty, op.Arity)
+				el.checkPrintable(args[0], e.Sp)
+			}
 			return el.operationValue(op, ty, el.ck.Sub.Apply(el.ck.ExprTypes[e]))
 		}
 		// A lifted local in first-class position gets the same curried-
 		// wrapper treatment as a worker (its frees are the leading args).
 		if lf := el.lifted[e.Name]; lf != nil {
-			return el.partial(el.liftedCallee(lf, ty), nil)
+			return el.partial(el.liftedCallee(lf, ty, el.ck.Sub.Apply(el.ck.ExprTypes[e])), nil)
 		}
 		// A worker name in first-class position (not an application head —
 		// spine.go intercepts those) eta-expands into its curried wrapper.
@@ -351,7 +392,8 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 		for j, p := range ci.ParamTypes {
 			pts[j] = el.zonkDefault(p)
 		}
-		clauses[i] = core.HandlerClause{Op: ci.Op, Params: params, ParamTypes: pts, ResultType: ty, Body: el.expr(cl.Body)}
+		clauses[i] = core.HandlerClause{Op: ci.Op, Params: params, ParamTypes: pts,
+			ResultType: el.zonkDefault(ci.OpResult), Body: el.expr(cl.Body)}
 		el.popScope(pushed)
 	}
 	var ret *core.ReturnClause
@@ -423,7 +465,7 @@ func generalVarIn(t types.Type) *types.TVar {
 	}
 }
 
-// checkPrintable is the print cheat's ground check: scalars and declared
+// checkPrintable is builtin IO.print's ground check: scalars and declared
 // ADTs print (the latter via derived show, emitted on demand) — unless the
 // value can contain a function, which has no showable form.
 func (el *elab) checkPrintable(t types.Type, sp source.Span) {

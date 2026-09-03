@@ -1,0 +1,8 @@
+effect Tag value
+    ping : () -> ()
+
+run _ = ping ()
+
+main =
+    handle run () of
+        ping () -> resume ()

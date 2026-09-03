@@ -48,7 +48,11 @@ type paramSpec struct {
 func paramFields(params []paramSpec) *goast.FieldList {
 	fields := make([]*goast.Field, len(params))
 	for i, p := range params {
-		fields[i] = &goast.Field{Names: []*goast.Ident{ident(p.name)}, Type: p.typ}
+		var names []*goast.Ident
+		if p.name != "" {
+			names = []*goast.Ident{ident(p.name)}
+		}
+		fields[i] = &goast.Field{Names: names, Type: p.typ}
 	}
 	return &goast.FieldList{List: fields}
 }

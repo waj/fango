@@ -40,9 +40,17 @@ func Dump(p *Prog) string {
 		if eff.Name == "IO" {
 			continue
 		}
+		pr := types.NewPrinter()
 		fmt.Fprintf(&b, "\n  (effect %s", eff.Name)
+		if len(eff.Params) > 0 {
+			params := make([]string, len(eff.Params))
+			for i, p := range eff.Params {
+				params[i] = pr.Type(p)
+			}
+			fmt.Fprintf(&b, " (params %s)", strings.Join(params, " "))
+		}
 		for _, op := range eff.Ops {
-			fmt.Fprintf(&b, " (op %s %s)", op.Name, types.NewPrinter().Type(op.Scheme.Body))
+			fmt.Fprintf(&b, " (op %s %s)", op.Name, pr.Type(op.Scheme.Body))
 		}
 		b.WriteString(")")
 	}
@@ -63,7 +71,7 @@ func Dump(p *Prog) string {
 		if len(d.EffectParams) > 0 {
 			b.WriteString(" (effects")
 			for _, e := range d.EffectParams {
-				fmt.Fprintf(&b, " %s", e.Name)
+				fmt.Fprintf(&b, " %s", dumpEffect(e, pr))
 			}
 			b.WriteString(")")
 		}
@@ -96,10 +104,8 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		return fmt.Sprintf("(neg %s %s)", pr.Type(e.Ty), dumpExpr(e.Operand, pr))
 	case *If:
 		return fmt.Sprintf("(if %s %s %s %s)", pr.Type(e.Ty), dumpExpr(e.Cond, pr), dumpExpr(e.Then, pr), dumpExpr(e.Else, pr))
-	case *Print:
-		return fmt.Sprintf("(print %s)", dumpExpr(e.Arg, pr))
 	case *Perform:
-		parts := []string{fmt.Sprintf("(perform %s/%s", e.Effect.Name, e.Op.Name)}
+		parts := []string{fmt.Sprintf("(perform %s/%s", dumpEffect(e.Effect, pr), e.Op.Name)}
 		for _, a := range e.Args {
 			parts = append(parts, dumpExpr(a, pr))
 		}
@@ -110,7 +116,7 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		return fmt.Sprintf("(seq %s %s %s)", pr.Type(e.Ty), dumpExpr(e.First, pr), dumpExpr(e.Then, pr))
 	case *Handle:
 		var b strings.Builder
-		fmt.Fprintf(&b, "(handle %s %s", e.Effect.Name, dumpExpr(e.Body, pr))
+		fmt.Fprintf(&b, "(handle %s %s", dumpEffect(e.Effect, pr), dumpExpr(e.Body, pr))
 		for _, c := range e.Clauses {
 			fmt.Fprintf(&b, " (%s (%s) %s)", c.Op.Name, strings.Join(c.Params, " "), dumpExpr(c.Body, pr))
 		}
@@ -146,7 +152,7 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 				if i > 0 {
 					head += " "
 				}
-				head += v.Name
+				head += dumpEffect(v, pr)
 			}
 			head += "]"
 		}
@@ -161,6 +167,13 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 	default:
 		panic(fmt.Sprintf("core.DumpExpr: unhandled %T", e))
 	}
+}
+
+func dumpEffect(e EffectInstance, pr *types.Printer) string {
+	if len(e.Args) == 0 {
+		return e.Name
+	}
+	return e.Name + "[" + dumpTypes(e.Args, pr) + "]"
 }
 
 func dumpTypes(ts []types.Type, pr *types.Printer) string {

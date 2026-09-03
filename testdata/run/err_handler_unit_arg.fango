@@ -1,0 +1,6 @@
+effect Log
+    log : String -> ()
+
+main =
+    handle log "hi" of
+        log () -> resume ()

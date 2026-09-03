@@ -44,6 +44,10 @@ type Constraint struct {
 	Left, Right types.Type
 	Span        source.Span
 	Why         Why
+	// Include is used only for effect rows: Left must be a subset of Right.
+	// It expresses composition without claiming the surrounding computation
+	// performs exactly the callee's effects.
+	Include bool
 }
 
 // Env maps names to schemes. S0 has a single flat scope (top level); local
@@ -94,9 +98,6 @@ type Checker struct {
 	Operations      map[string]*types.EffectOp
 	IO              *types.EffectInfo
 
-	// PrintCalls marks App nodes recognized as the print builtin cheat, so
-	// elaboration classifies them identically (one source of truth).
-	PrintCalls  map[*ast.App]bool
 	OpCalls     map[*ast.App]*types.EffectOp
 	HandleInfos map[*ast.Handle]*HandlerInfo
 	ResumeCalls map[*ast.App]bool
@@ -153,7 +154,6 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		Effects:         map[string]*types.EffectInfo{},
 		EffectsByUnique: map[int]*types.EffectInfo{},
 		Operations:      map[string]*types.EffectOp{},
-		PrintCalls:      map[*ast.App]bool{},
 		OpCalls:         map[*ast.App]*types.EffectOp{},
 		HandleInfos:     map[*ast.Handle]*HandlerInfo{},
 		ResumeCalls:     map[*ast.App]bool{},
@@ -471,8 +471,6 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 
 // Decl checks one value declaration and binds it in the environment —
 // rebinding an existing name is allowed (the REPL's redefinition path).
-// Only main's body may use the print cheat (§10.5's top-level purity,
-// enforced ad hoc until effects land in S7).
 func (ck *Checker) Decl(d *ast.ValueDecl) (DeclInfo, []diag.Error) {
 	info, errs := ck.DeclWhere(d, true)
 	ck.BindDecl(info)
@@ -495,7 +493,7 @@ func (ck *Checker) BindDecl(info DeclInfo) {
 // and the annotation constraint — without binding it, so callers control
 // whether a failed definition enters the environment (the REPL does not
 // bind on error).
-func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []diag.Error) {
+func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []diag.Error) {
 	var errs []diag.Error
 	if d.Name == "main" && len(d.Params) > 1 {
 		errs = append(errs, diag.Errorf(d.NameSpan, "MAIN TAKES NO PARAMETERS",
@@ -505,11 +503,11 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []dia
 		errs = append(errs, diag.Errorf(d.Params[0].Sp, "MAIN TAKES NO PARAMETERS", "Function-style `main` must discard its Unit argument with `_`."))
 	}
 
-	g := &generator{ck: ck, allowPrint: allowPrint, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
+	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	var ty types.Type
 	if len(d.Params) == 0 {
 		ty = g.expr(d.Body)
-		if d.Name != "main" {
+		if d.Name != "main" && allowEffects {
 			g.cs = append(g.cs, Constraint{Left: g.ambient, Right: types.Row{}, Span: d.Body.Span(), Why: Why{Kind: WhyEffectEscapes}})
 		}
 	} else {
@@ -523,7 +521,11 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []dia
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
 	errs = append(errs, solveErrs...)
-	if !allowPrint && typeHasEffects(ck.Sub.Apply(ty)) {
+	promptEffects := typeHasEffects(ck.Sub.Apply(ty))
+	if row, ok := ck.Sub.Apply(g.ambient).(types.Row); ok && len(row.Labels) > 0 {
+		promptEffects = true
+	}
+	if !allowEffects && promptEffects {
 		errs = append(errs, diag.Errorf(d.Body.Span(), "EFFECTFUL PROMPT DECLARATION", "Effectful declarations are not installed at the prompt; run the expression directly."))
 	}
 	if d.Name == "main" && len(d.Params) == 0 {
@@ -603,9 +605,10 @@ func (ck *Checker) Expr(e ast.Expr) (types.Type, []diag.Error) {
 }
 
 // ExprWhere generates constraints for one expression and solves them into
-// the checker's substitution. allowPrint gates the print builtin cheat.
-func (ck *Checker) ExprWhere(e ast.Expr, allowPrint bool) (types.Type, []diag.Error) {
-	g := &generator{ck: ck, allowPrint: allowPrint, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
+// the checker's substitution. allowEffects controls the REPL declaration
+// policy; expression checking itself always uses ordinary effect rows.
+func (ck *Checker) ExprWhere(e ast.Expr, _ bool) (types.Type, []diag.Error) {
+	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	ty := g.expr(e)
 	var preds []types.Pred // the typeclass seam: always empty in the MVP
 	sub, residual, solveErrs := Solve(g.cs, preds, ck.Sub, ck.B, ck.Sup)
@@ -616,7 +619,6 @@ func (ck *Checker) ExprWhere(e ast.Expr, allowPrint bool) (types.Type, []diag.Er
 
 type generator struct {
 	ck         *Checker
-	allowPrint bool
 	locals     *blockScope
 	cs         []Constraint
 	errs       []diag.Error
@@ -641,17 +643,6 @@ func (s *blockScope) lookup(name string) (types.Scheme, bool) {
 	return types.Scheme{}, false
 }
 
-// isPrintCheat reports whether a Var is the print builtin: the name
-// `print`, not shadowed by a user binding (top-level or block-local).
-func (g *generator) isPrintCheat(e ast.Expr) bool {
-	v, ok := e.(*ast.Var)
-	if !ok || v.Name != "print" || g.ck.Env.Has("print") {
-		return false
-	}
-	_, local := g.locals.lookup("print")
-	return !local
-}
-
 func (g *generator) expr(e ast.Expr) types.Type {
 	var ty types.Type
 	switch e := e.(type) {
@@ -666,12 +657,6 @@ func (g *generator) expr(e ast.Expr) types.Type {
 	case *ast.UnitLit:
 		ty = g.ck.B.Unit
 	case *ast.Var:
-		if g.isPrintCheat(e) {
-			g.errs = append(g.errs, diag.Errorf(e.Sp, "PRINT NEEDS AN ARGUMENT",
-				"`print` is a builtin that must be applied to exactly one\nargument, like `print (1 + 2)`. Using it as a value arrives with\neffects (S7)."))
-			ty = g.ck.Sup.FreshVar(types.General)
-			break
-		}
 		if localScheme, ok := g.locals.lookup(e.Name); ok {
 			ty = g.instantiate(localScheme)
 			break
@@ -684,6 +669,9 @@ func (g *generator) expr(e ast.Expr) types.Type {
 			break
 		}
 		ty = g.instantiate(scheme)
+		if op := g.ck.Operations[e.Name]; op != nil && len(op.LocalVars) > 0 && !(op.Owner == g.ck.IO && op.Name == "print") {
+			g.errs = append(g.errs, diag.Errorf(e.Sp, "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has operation-local polymorphism that cannot be used at runtime until checkpoint 3.", op.Name))
+		}
 	case *ast.Ctor:
 		info, ok := g.ck.Ctors[e.Name]
 		if !ok {
@@ -713,7 +701,7 @@ func (g *generator) expr(e ast.Expr) types.Type {
 				last = cur.(*types.TFun)
 				cur = last.Ret
 			}
-			g.cs = append(g.cs, Constraint{Left: last.Eff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}})
+			g.cs = append(g.cs, Constraint{Left: last.Eff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
 			g.ck.OpCalls[e] = op
 			if len(op.LocalVars) > 0 && !(op.Owner == g.ck.IO && op.Name == "print") {
 				g.errs = append(g.errs, diag.Errorf(e.Span(), "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has result polymorphism that is staged until checkpoint 3.", op.Name))
@@ -721,38 +709,19 @@ func (g *generator) expr(e ast.Expr) types.Type {
 			ty = result
 			break
 		}
-		if g.isPrintCheat(e.Fn) {
-			if !g.allowPrint {
-				g.errs = append(g.errs, diag.Errorf(e.Fn.Span(), "PRINT NOT ALLOWED HERE",
-					"For now, only `main` can print — `print` inside other\ndefinitions arrives with effects (S7)."))
-			}
-			g.expr(e.Arg) // type the argument; showability checked post-defaulting
-			g.ck.PrintCalls[e] = true
-			ty = g.ck.B.Unit
-			break
-		}
 		fnTy := g.expr(e.Fn)
 		argTy := g.expr(e.Arg)
 		r := g.ck.Sup.FreshVar(types.General)
-		callEff := types.Row{}
-		if f, ok := g.ck.Sub.Apply(fnTy).(*types.TFun); ok && len(f.Eff.Labels) > 0 {
-			callEff = g.ambient
-		}
-		if _, isLambda := e.Fn.(*ast.Lambda); isLambda {
-			callEff = g.ambient
-		}
+		callEff := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
 		g.cs = append(g.cs, Constraint{
 			Left:  fnTy,
 			Right: &types.TFun{Arg: argTy, Eff: callEff, Ret: r},
 			Span:  e.Fn.Span(),
 			Why:   Why{Kind: WhyCall},
 		})
-		if op, n := g.operationSpine(e); op != nil && n == op.Arity {
+		g.cs = append(g.cs, Constraint{Left: callEff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
+		if op, n := g.operationSpine(e); op != nil && n < op.Arity {
 			g.ck.OpCalls[e] = op
-			if len(op.LocalVars) > 0 && !(op.Owner == g.ck.IO && op.Name == "print") {
-				g.errs = append(g.errs, diag.Errorf(e.Span(), "OPERATION POLYMORPHISM NOT READY",
-					"The operation `%s` has result polymorphism that is staged until checkpoint 3.", op.Name))
-			}
 		}
 		if _, ok := e.Fn.(*ast.Resume); ok {
 			g.ck.ResumeCalls[e] = true
@@ -783,10 +752,6 @@ func (g *generator) expr(e ast.Expr) types.Type {
 	case *ast.Case:
 		ty = g.caseExpr(e)
 	case *ast.Lambda:
-		// Functions are pure until effects land: print cannot be smuggled
-		// into a function value (§10.5).
-		saved := g.allowPrint
-		g.allowPrint = false
 		scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
 		g.locals = scope
 		paramTys := g.bindParams(scope, e.Params)
@@ -796,7 +761,6 @@ func (g *generator) expr(e ast.Expr) types.Type {
 		bodyTy := g.expr(e.Body)
 		g.ambient = savedAmbient
 		g.locals = scope.parent
-		g.allowPrint = saved
 		funTy := g.wrapFunction(paramTys, bodyTy, bodyAmbient)
 		ty = funTy
 	case *ast.Handle:
@@ -881,6 +845,9 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "MIXED HANDLER EFFECTS", "All clauses in a handler must belong to `%s`.", first.Owner.Name))
 			continue
 		}
+		if len(op.LocalVars) > 0 && !(op.Owner == g.ck.IO && op.Name == "print") {
+			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has operation-local polymorphism that cannot be used at runtime until checkpoint 3.", op.Name))
+		}
 		if seen[op.Name] {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "DUPLICATE HANDLER CLAUSE", "The operation `%s` is handled more than once.", op.Name))
 			continue
@@ -914,6 +881,9 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			if p.Name == "()" {
 				g.cs = append(g.cs, Constraint{Left: pt, Right: g.ck.B.Unit, Span: p.Sp, Why: Why{Kind: WhyPattern}})
 			} else if p.Name != "_" {
+				if _, dup := g.locals.lookup(p.Name); dup || g.ck.Env.Has(p.Name) {
+					g.errs = append(g.errs, diag.Errorf(p.Sp, "SHADOWING", "The handler parameter `%s` shadows a name that is already defined.", p.Name))
+				}
 				scope.names[p.Name] = types.Scheme{Body: pt}
 			}
 		}
@@ -939,6 +909,9 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		if e.Return.Param.Name == "()" {
 			g.cs = append(g.cs, Constraint{Left: bodyTy, Right: g.ck.B.Unit, Span: e.Return.Param.Sp, Why: Why{Kind: WhyPattern}})
 		} else if e.Return.Param.Name != "_" {
+			if _, dup := g.locals.lookup(e.Return.Param.Name); dup || g.ck.Env.Has(e.Return.Param.Name) {
+				g.errs = append(g.errs, diag.Errorf(e.Return.Param.Sp, "SHADOWING", "The handler return parameter `%s` shadows a name that is already defined.", e.Return.Param.Name))
+			}
 			scope.names[e.Return.Param.Name] = types.Scheme{Body: bodyTy}
 		}
 		rt := g.expr(e.Return.Body)
@@ -947,6 +920,9 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	} else {
 		g.cs = append(g.cs, Constraint{Left: bodyTy, Right: result, Span: e.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
 	}
+	// Only the handled label is removed. Any residual effects from the body,
+	// clauses, or return clause compose into the surrounding computation.
+	g.cs = append(g.cs, Constraint{Left: residual, Right: savedAmbient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
 	g.ambient = savedAmbient
 	g.ck.HandleInfos[e] = info
 	return result
@@ -966,72 +942,117 @@ func peelOperation(t types.Type, n int) ([]types.Type, types.Type) {
 }
 
 func tailResume(e ast.Expr, tail bool) string {
-	if a, ok := e.(*ast.App); ok {
-		if _, yes := a.Fn.(*ast.Resume); yes {
-			if s := tailResume(a.Arg, false); s != "" {
-				return s
-			}
-			if !tail {
-				return "`resume` must be the final action on every reachable clause path."
-			}
-			return ""
-		}
+	resumes, err := resumePaths(e, tail)
+	if err != "" {
+		return err
 	}
-	switch x := e.(type) {
-	case *ast.If:
-		if s := tailResume(x.Cond, false); s != "" {
-			return s
-		}
-		if s := tailResume(x.Then, tail); s != "" {
-			return s
-		}
-		return tailResume(x.Else, tail)
-	case *ast.Case:
-		if s := tailResume(x.Scrutinee, false); s != "" {
-			return s
-		}
-		for _, b := range x.Branches {
-			if s := tailResume(b.Body, tail); s != "" {
-				return s
-			}
-		}
-		return ""
-	case *ast.Block:
-		if len(x.Items) > 0 {
-			for _, item := range x.Items {
-				var q ast.Expr
-				if item.Expr != nil {
-					q = item.Expr
-				} else {
-					q = x.Binds[item.BindIndex].Body
-				}
-				if s := tailResume(q, false); s != "" {
-					return s
-				}
-			}
-		} else {
-			for _, b := range x.Binds {
-				if s := tailResume(b.Body, false); s != "" {
-					return s
-				}
-			}
-		}
-		return tailResume(x.Result, tail)
-	case *ast.App:
-		if s := tailResume(x.Fn, false); s != "" {
-			return s
-		}
-		return tailResume(x.Arg, false)
-	case *ast.BinOp:
-		if s := tailResume(x.L, false); s != "" {
-			return s
-		}
-		return tailResume(x.R, false)
-	}
-	if tail {
+	if tail && !resumes {
 		return "Every operation-clause path must end with exactly one call to `resume`."
 	}
 	return ""
+}
+
+// resumePaths proves the checkpoint-2 discipline structurally. The bool is
+// true only when every normal path through e terminates in one tail resume;
+// any resume encountered in an evaluated subexpression is rejected. Nested
+// lambdas are traversed too, so staging a resume in a closure cannot evade
+// the check.
+func resumePaths(e ast.Expr, tail bool) (bool, string) {
+	if a, ok := e.(*ast.App); ok {
+		if _, yes := a.Fn.(*ast.Resume); yes {
+			if _, err := resumePaths(a.Arg, false); err != "" {
+				return false, err
+			}
+			if !tail {
+				return false, "`resume` must be the final action on every reachable clause path."
+			}
+			return true, ""
+		}
+	}
+	nontail := func(q ast.Expr) string {
+		_, err := resumePaths(q, false)
+		return err
+	}
+	switch x := e.(type) {
+	case *ast.If:
+		if err := nontail(x.Cond); err != "" {
+			return false, err
+		}
+		a, err := resumePaths(x.Then, tail)
+		if err != "" {
+			return false, err
+		}
+		b, err := resumePaths(x.Else, tail)
+		return a && b, err
+	case *ast.Case:
+		if err := nontail(x.Scrutinee); err != "" {
+			return false, err
+		}
+		all := len(x.Branches) > 0
+		for _, b := range x.Branches {
+			ok, err := resumePaths(b.Body, tail)
+			if err != "" {
+				return false, err
+			}
+			all = all && ok
+		}
+		return all, ""
+	case *ast.Block:
+		items := x.Items
+		if len(items) == 0 {
+			for i := range x.Binds {
+				items = append(items, ast.BlockItem{BindIndex: i})
+			}
+		}
+		for _, item := range items {
+			q := item.Expr
+			if q == nil {
+				q = x.Binds[item.BindIndex].Body
+			}
+			if err := nontail(q); err != "" {
+				return false, err
+			}
+		}
+		return resumePaths(x.Result, tail)
+	case *ast.App:
+		if err := nontail(x.Fn); err != "" {
+			return false, err
+		}
+		if err := nontail(x.Arg); err != "" {
+			return false, err
+		}
+	case *ast.BinOp:
+		if err := nontail(x.L); err != "" {
+			return false, err
+		}
+		if err := nontail(x.R); err != "" {
+			return false, err
+		}
+	case *ast.Neg:
+		if err := nontail(x.Operand); err != "" {
+			return false, err
+		}
+	case *ast.Lambda:
+		// A resume in a closure is never the current clause's tail action.
+		if err := nontail(x.Body); err != "" {
+			return false, err
+		}
+	case *ast.Handle:
+		// Its handled expression and return clause are evaluated as parts of
+		// this expression. Inner operation clauses bind their own resume and
+		// are checked independently by handle().
+		if err := nontail(x.Body); err != "" {
+			return false, err
+		}
+		if x.Return != nil {
+			if err := nontail(x.Return.Body); err != "" {
+				return false, err
+			}
+		}
+	case *ast.Resume:
+		return false, "`resume` must be applied to exactly one value."
+	}
+	return false, ""
 }
 
 func (g *generator) operationSpine(e *ast.App) (*types.EffectOp, int) {

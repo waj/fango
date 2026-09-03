@@ -38,20 +38,18 @@ func (el *elab) app(e *ast.App) core.Expr {
 	for i, a := range rev {
 		args[len(rev)-1-i] = a
 	}
-	if _, ok := head.(*ast.Resume); ok {
+	if el.ck.ResumeCalls[e] {
 		return &core.Resume{Value: el.expr(args[0]), Ty: el.zonkDefault(el.ck.ExprTypes[e])}
 	}
-	if v, ok := head.(*ast.Var); ok {
-		if op := el.ck.Operations[v.Name]; op != nil {
-			return el.operationCall(op, el.zonkDefault(el.ck.ExprTypes[head]), el.ck.Sub.Apply(el.ck.ExprTypes[head]), args)
-		}
+	if op := el.ck.OpCalls[e]; op != nil {
+		return el.operationCall(op, el.zonkDefault(el.ck.ExprTypes[head]), el.ck.Sub.Apply(el.ck.ExprTypes[head]), args)
 	}
 
 	// Lifted local head? Its frees become leading arguments (lift.go).
 	if v, ok := head.(*ast.Var); ok {
 		if lf := el.lifted[v.Name]; lf != nil {
 			occTy := el.zonkDefault(el.ck.ExprTypes[head])
-			return el.calleeCall(el.liftedCallee(lf, occTy), args)
+			return el.calleeCall(el.liftedCallee(lf, occTy, el.ck.Sub.Apply(el.ck.ExprTypes[head])), args)
 		}
 	}
 
@@ -85,9 +83,12 @@ func effectInstance(op *types.EffectOp, ty types.Type) core.EffectInstance {
 	t := ty
 	for i := 0; i < op.Arity; i++ {
 		f := t.(*types.TFun)
-		if i == op.Arity-1 && len(f.Eff.Labels) > 0 {
-			l := f.Eff.Labels[0]
-			return core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args}
+		if i == op.Arity-1 {
+			for _, l := range f.Eff.Labels {
+				if l.Unique == op.Owner.Unique {
+					return core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...)}
+				}
+			}
 		}
 		t = f.Ret
 	}
@@ -160,9 +161,9 @@ type callee struct {
 	evidence []core.EffectInstance
 }
 
-func (el *elab) workerCallee(name string, workerTy types.Type, arity int) callee {
+func (el *elab) workerCallee(name string, workerTy, rawTy types.Type, arity int) callee {
 	return callee{kind: core.Worker, name: name, ty: workerTy, arity: arity,
-		tyArgs: el.workerTyArgs(name, workerTy)}
+		tyArgs: el.workerTyArgs(name, rawTy)}
 }
 
 // ctorCallee builds a constructor callee at its occurrence type — the
@@ -180,12 +181,12 @@ func (el *elab) ctorCallee(info *types.CtorInfo, occTy types.Type) callee {
 // matching the callee's generic type against the occurrence type (§8.4).
 // Matching — not recording at instantiate-time — is what also covers
 // self-recursive calls, which never pass through the scheme.
-func (el *elab) workerTyArgs(name string, occTy types.Type) []types.Type {
+func (el *elab) workerTyArgs(name string, rawOccTy types.Type) []types.Type {
 	genTy, vars := el.calleeGeneric(name)
 	if len(vars) == 0 {
 		return nil
 	}
-	return matchTyArgs(genTy, vars, occTy)
+	return matchTyArgs(genTy, vars, rawOccTy)
 }
 
 // calleeGeneric is a callee's generic type and type parameters. The
@@ -200,8 +201,8 @@ func (el *elab) calleeGeneric(name string) (types.Type, []*types.TVar) {
 	} else {
 		panic("elaborate: unknown callee `" + name + "`")
 	}
-	genTy := el.zonkDefault(sch.Body)
-	return genTy, types.RigidVarsIn(genTy)
+	genTy := el.ck.Sub.Apply(sch.Body)
+	return genTy, runtimeRigidVars(genTy)
 }
 
 // matchTyArgs reads an occurrence's explicit type arguments off its type:
@@ -247,7 +248,24 @@ func matchType(gen, occ types.Type, m map[int]types.Type) {
 				types.Show(occ), types.Show(gen)))
 		}
 		matchType(g.Arg, o.Arg, m)
+		matchType(g.Eff, o.Eff, m)
 		matchType(g.Ret, o.Ret, m)
+	case types.Row:
+		o, ok := occ.(types.Row)
+		if !ok {
+			panic(fmt.Sprintf("elaborate: occurrence type %s does not match generic %s", types.Show(occ), types.Show(gen)))
+		}
+		for _, gl := range g.Labels {
+			for _, ol := range o.Labels {
+				if gl.Unique != ol.Unique || len(gl.Args) != len(ol.Args) {
+					continue
+				}
+				for i := range gl.Args {
+					matchType(gl.Args[i], ol.Args[i], m)
+				}
+				break
+			}
+		}
 	}
 }
 
@@ -280,9 +298,37 @@ func (c callee) saturatedApp(args []core.Expr) *core.App {
 
 // workerCall classifies a call to a known worker by saturation.
 func (el *elab) workerCall(name string, workerTy, rawTy types.Type, arity int, args []ast.Expr) core.Expr {
-	c := el.workerCallee(name, workerTy, arity)
-	c.evidence = executingEffects(rawTy, arity)
+	c := el.workerCallee(name, workerTy, rawTy, arity)
+	c.evidence = el.workerEvidence(name, arity, c.tyArgs)
 	return el.calleeCall(c, args)
+}
+
+func (el *elab) workerEvidence(name string, arity int, tyArgs []types.Type) []core.EffectInstance {
+	var sch types.Scheme
+	if name == el.declName {
+		sch = el.declScheme
+	} else {
+		var ok bool
+		sch, ok = el.ck.Env.Lookup(name)
+		if !ok {
+			panic("elaborate: missing worker scheme `" + name + "`")
+		}
+	}
+	raw := el.ck.Sub.Apply(sch.Body)
+	effects := executingEffects(raw, arity)
+	vars := runtimeRigidVars(raw)
+	if len(vars) == len(tyArgs) && len(vars) > 0 {
+		m := make(map[int]types.Type, len(vars))
+		for i, v := range vars {
+			m[v.ID] = tyArgs[i]
+		}
+		for i := range effects {
+			for j, a := range effects[i].Args {
+				effects[i].Args[j] = types.SubstRigid(a, m)
+			}
+		}
+	}
+	return effects
 }
 
 func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
@@ -374,8 +420,8 @@ func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 // curriedWorkerRef is the k=0 case: a worker used first-class expands to
 // its curried wrapper at the use site — demand-driven by construction.
 func (el *elab) curriedWorkerRef(name string, workerTy, rawTy types.Type, arity int) core.Expr {
-	c := el.workerCallee(name, workerTy, arity)
-	c.evidence = executingEffects(rawTy, arity)
+	c := el.workerCallee(name, workerTy, rawTy, arity)
+	c.evidence = el.workerEvidence(name, arity, c.tyArgs)
 	return el.partial(c, nil)
 }
 

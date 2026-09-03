@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	goast "go/ast"
 	"go/format"
+	goparser "go/parser"
+	gotoken "go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -71,7 +74,7 @@ func TestDifferential(t *testing.T) {
 			env := eval.NewEnv()
 			env.DefineProg(prog)
 			var printed bytes.Buffer
-			v, err := eval.Force(context.Background(), "main", env, &printed)
+			v, err := eval.ForceIO(context.Background(), "main", env, eval.NewIOContext(strings.NewReader(""), &printed))
 			if err != nil {
 				t.Fatalf("eval: %v", err)
 			}
@@ -131,7 +134,7 @@ func runErrorCase(t *testing.T, path, wantSubstr string) {
 func TestEmitDeterministicAndFormatted(t *testing.T) {
 	// poly_map_filter_foldr covers generic emission — instantiation
 	// plumbing is where nondeterminism would first appear (risk #1).
-	for _, name := range []string{"arith0.fango", "print_float.fango", "if_expr.fango", "block_area.fango", "block_print_order.fango", "fib.fango", "partial.fango", "poly_map_filter_foldr.fango", "poly_eq_nested.fango"} {
+	for _, name := range []string{"arith0.fango", "print_float.fango", "if_expr.fango", "block_area.fango", "block_print_order.fango", "fib.fango", "partial.fango", "poly_map_filter_foldr.fango", "poly_eq_nested.fango", "effect_translate_return.fango", "effect_nested_restore.fango", "effect_partial_capture.fango", "effect_row_union.fango"} {
 		path := filepath.Join("..", "..", "testdata", "run", name)
 		var stderr bytes.Buffer
 		a, ok := emitGo(path, &stderr)
@@ -149,5 +152,42 @@ func TestEmitDeterministicAndFormatted(t *testing.T) {
 		if !bytes.Equal(formatted, a) {
 			t.Errorf("%s: generated Go is not gofmt-idempotent:\n%s", name, a)
 		}
+	}
+}
+
+func TestCheckpoint2GeneratedGoHasNoContinuationRuntime(t *testing.T) {
+	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "run"))
+	for _, path := range files {
+		if _, err := os.Stat(strings.TrimSuffix(path, ".fango") + ".error"); err == nil {
+			continue
+		}
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			var stderr bytes.Buffer
+			src, ok := emitGo(path, &stderr)
+			if !ok {
+				t.Fatalf("emit failed:\n%s", stderr.String())
+			}
+			file, err := goparser.ParseFile(gotoken.NewFileSet(), path+".go", src, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			goast.Inspect(file, func(n goast.Node) bool {
+				switch n := n.(type) {
+				case *goast.GoStmt:
+					t.Error("generated a goroutine")
+				case *goast.ChanType, *goast.SendStmt:
+					t.Errorf("generated channel syntax %T", n)
+				case *goast.CallExpr:
+					if id, ok := n.Fun.(*goast.Ident); ok && id.Name == "panic" {
+						t.Error("generated a panic sentinel")
+					}
+				case *goast.TypeSpec:
+					if strings.Contains(strings.ToLower(n.Name.Name), "continuation") {
+						t.Errorf("generated continuation type %q", n.Name.Name)
+					}
+				}
+				return true
+			})
+		})
 	}
 }

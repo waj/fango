@@ -1,0 +1,16 @@
+effect Ask
+    ask : () -> String
+
+get _ = ask ()
+
+program _ =
+    first =
+        handle get () of
+            ask () -> resume "inner"
+    second = get ()
+    first ++ second
+
+main =
+    print
+        (handle program () of
+            ask () -> resume "outer")

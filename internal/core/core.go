@@ -79,14 +79,6 @@ type If struct {
 	Ty               types.Type
 }
 
-// Print is the builtin cheat (through S6; S7 replaces it with the IO
-// effect). Statement-only by construction: its Unit result is neither
-// printable nor equatable, so no expression position can contain it.
-type Print struct {
-	Arg Expr
-	Ty  types.Type // always Unit
-}
-
 type Perform struct {
 	Op     *types.EffectOp
 	Effect EffectInstance
@@ -241,7 +233,6 @@ func (*VarRef) isExpr()    {}
 func (*Neg) isExpr()       {}
 func (*BinOp) isExpr()     {}
 func (*If) isExpr()        {}
-func (*Print) isExpr()     {}
 func (*Perform) isExpr()   {}
 func (*Handle) isExpr()    {}
 func (*Resume) isExpr()    {}
@@ -260,7 +251,6 @@ func (e *VarRef) Type() types.Type    { return e.Ty }
 func (e *Neg) Type() types.Type       { return e.Ty }
 func (e *BinOp) Type() types.Type     { return e.Ty }
 func (e *If) Type() types.Type        { return e.Ty }
-func (e *Print) Type() types.Type     { return e.Ty }
 func (e *Perform) Type() types.Type   { return e.Ty }
 func (e *Handle) Type() types.Type    { return e.Ty }
 func (e *Resume) Type() types.Type    { return e.Ty }
@@ -283,8 +273,6 @@ func Mentions(e Expr, name string) bool {
 		return Mentions(e.L, name) || Mentions(e.R, name)
 	case *If:
 		return Mentions(e.Cond, name) || Mentions(e.Then, name) || Mentions(e.Else, name)
-	case *Print:
-		return Mentions(e.Arg, name)
 	case *Perform:
 		for _, a := range e.Args {
 			if Mentions(a, name) {

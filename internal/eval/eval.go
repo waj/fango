@@ -197,7 +197,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				return nil, fmt.Errorf("eval: recursive Let `%s` without a Lambda RHS", e.Name)
 			}
 			frame := &Frame{parent: fr, vars: map[string]Value{}}
-			frame.vars[e.Name] = &Closure{Param: lam.Param, Body: lam.Body, Env: frame}
+			frame.vars[e.Name] = &Closure{Param: lam.Param, Body: lam.Body, Env: frame, Evidence: cloneEvidence(in.evidence)}
 			return in.eval(e.Body, frame)
 		}
 		// Eager, in order — identical to the compiled backend's locals.
@@ -240,32 +240,6 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			return in.eval(e.Then, fr)
 		}
 		return in.eval(e.Else, fr)
-	case *core.Print:
-		v, err := in.eval(e.Arg, fr)
-		if err != nil {
-			return nil, err
-		}
-		// The one shared formatting implementation (fangort), with only
-		// the newline added locally — mirroring fangort.PrintX.
-		var s string
-		switch v := v.(type) {
-		case int64:
-			s = fangort.ShowInt(v)
-		case float64:
-			s = fangort.ShowFloat(v)
-		case string:
-			s = fangort.ShowString(v)
-		case bool:
-			s = fangort.ShowBool(v)
-		case *CtorVal:
-			s = showCtorVal(v, false)
-		default:
-			return nil, fmt.Errorf("eval: printing a %T", v)
-		}
-		if _, err := fmt.Fprintln(in.out, s); err != nil {
-			return nil, err
-		}
-		return struct{}{}, nil
 	case *core.Perform:
 		args := make([]Value, len(e.Args))
 		for i, a := range e.Args {
@@ -351,8 +325,24 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				}
 				vars[def.Params[i]] = v
 			}
+			// Evidence arguments are explicit Core even though the interpreter
+			// represents their values as a map. Restricting the worker to that
+			// map gives it the same lexical (not dynamically scoped) behavior
+			// as the generated Go parameters.
+			callEvidence := make(map[int]*evidence, len(e.EvidenceArgs))
+			for _, arg := range e.EvidenceArgs {
+				ev := in.evidence[arg.Unique]
+				if ev == nil {
+					return nil, fmt.Errorf("eval: missing evidence `%s` for worker `%s`", arg.Name, ref.Name)
+				}
+				callEvidence[arg.Unique] = ev
+			}
+			saved := in.evidence
+			in.evidence = callEvidence
 			// Workers see no caller locals — matching compiled scoping.
-			return in.eval(def.Body, &Frame{vars: vars})
+			out, err := in.eval(def.Body, &Frame{vars: vars})
+			in.evidence = saved
+			return out, err
 		case core.Value:
 			calleeV, err := in.eval(e.Callee, fr)
 			if err != nil {

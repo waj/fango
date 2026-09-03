@@ -18,6 +18,18 @@ func stringTy() *types.TCon { return &types.TCon{Unique: 2, Name: "String"} }
 func boolTy() *types.TCon   { return &types.TCon{Unique: 3, Name: "Bool"} }
 func unitTy() *types.TCon   { return &types.TCon{Unique: 4, Name: "()"} }
 
+func printExpr(arg core.Expr) core.Expr {
+	eff := &types.EffectInfo{Unique: 5, Name: "IO"}
+	op := &types.EffectOp{Owner: eff, Name: "print", Arity: 1, ParamTypes: []types.Type{arg.Type()}, ResultType: unitTy(), Builtin: true}
+	return &core.Perform{Op: op, Effect: core.EffectInstance{Unique: eff.Unique, Name: eff.Name}, Args: []core.Expr{arg}, Ty: unitTy()}
+}
+
+func readLineExpr() core.Expr {
+	eff := &types.EffectInfo{Unique: 5, Name: "IO"}
+	op := &types.EffectOp{Owner: eff, Name: "readLine", Arity: 1, ParamTypes: []types.Type{unitTy()}, ResultType: stringTy(), Builtin: true}
+	return &core.Perform{Op: op, Effect: core.EffectInstance{Unique: eff.Unique, Name: eff.Name}, Args: []core.Expr{&core.UnitLit{Ty: unitTy()}}, Ty: stringTy()}
+}
+
 func run(t *testing.T, e core.Expr) Value {
 	t.Helper()
 	v, err := Eval(context.Background(), e, NewEnv(), io.Discard)
@@ -92,10 +104,9 @@ func TestIfBranchLaziness(t *testing.T) {
 func TestPrintWritesThroughFangort(t *testing.T) {
 	ft := floatTy()
 	var buf bytes.Buffer
-	e := &core.Print{Ty: unitTy(),
-		Arg: &core.BinOp{Op: "*", Ty: ft,
-			L: &core.FloatLit{Val: 3.14159, Ty: ft},
-			R: &core.FloatLit{Val: 4.0, Ty: ft}}}
+	e := printExpr(&core.BinOp{Op: "*", Ty: ft,
+		L: &core.FloatLit{Val: 3.14159, Ty: ft},
+		R: &core.FloatLit{Val: 4.0, Ty: ft}})
 	if _, err := Eval(context.Background(), e, NewEnv(), &buf); err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +114,25 @@ func TestPrintWritesThroughFangort(t *testing.T) {
 		t.Errorf("printed %q, want %q", got, "12.56636\n")
 	}
 }
+
+func TestEvalIOReadLine(t *testing.T) {
+	ioctx := NewIOContext(strings.NewReader("hello\r\nlast"), io.Discard)
+	for _, want := range []string{"hello", "last", ""} {
+		got, err := EvalIO(context.Background(), readLineExpr(), NewEnv(), ioctx)
+		if err != nil || got != want {
+			t.Fatalf("readLine = %q, %v; want %q, nil", got, err, want)
+		}
+	}
+	wantErr := io.ErrUnexpectedEOF
+	_, err := EvalIO(context.Background(), readLineExpr(), NewEnv(), NewIOContext(failingReader{wantErr}, io.Discard))
+	if err != wantErr {
+		t.Fatalf("readLine error = %v, want %v", err, wantErr)
+	}
+}
+
+type failingReader struct{ err error }
+
+func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
 
 func TestLetFrames(t *testing.T) {
 	it := intTy()
@@ -145,10 +175,10 @@ func TestLetEagerOrder(t *testing.T) {
 	it, ut := intTy(), unitTy()
 	var buf bytes.Buffer
 	e := &core.Let{Name: "a", Ty: ut,
-		Rhs: &core.Print{Arg: &core.IntLit{Val: 1, Ty: it}, Ty: ut},
+		Rhs: printExpr(&core.IntLit{Val: 1, Ty: it}),
 		Body: &core.Let{Name: "b", Ty: ut,
-			Rhs:  &core.Print{Arg: &core.IntLit{Val: 2, Ty: it}, Ty: ut},
-			Body: &core.Print{Arg: &core.IntLit{Val: 3, Ty: it}, Ty: ut}}}
+			Rhs:  printExpr(&core.IntLit{Val: 2, Ty: it}),
+			Body: printExpr(&core.IntLit{Val: 3, Ty: it})}}
 	if _, err := Eval(context.Background(), e, NewEnv(), &buf); err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +230,7 @@ func TestSelfDependency(t *testing.T) {
 // slices answer with a deliberate "arrives in Sn" error, never the generic
 // unhandled fallback.
 func TestSwitchTotality(t *testing.T) {
-	it, ft, st, bt, ut := intTy(), floatTy(), stringTy(), boolTy(), unitTy()
+	it, ft, st, bt := intTy(), floatTy(), stringTy(), boolTy()
 	one := &core.IntLit{Val: 1, Ty: it}
 	nodes := []core.Expr{
 		one,
@@ -211,7 +241,7 @@ func TestSwitchTotality(t *testing.T) {
 		&core.Neg{Operand: one, Ty: it},
 		&core.BinOp{Op: "+", Ty: it, L: one, R: one},
 		&core.If{Cond: &core.BoolLit{Val: true, Ty: bt}, Then: one, Else: one, Ty: it},
-		&core.Print{Arg: one, Ty: ut},
+		printExpr(one),
 		&core.Let{Name: "v", Rhs: one, Body: one, Ty: it},
 		&core.Lambda{Param: "x", Body: one, Ty: &types.TFun{Arg: it, Ret: it}},
 		&core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: "nope", Ty: it}, Ty: it},

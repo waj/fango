@@ -1,0 +1,11 @@
+effect Console
+    write : String -> ()
+
+send f = f "hello"
+program _ = send write
+
+main =
+    handle program () of
+        write text ->
+            print text
+            resume ()

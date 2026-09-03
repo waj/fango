@@ -1,7 +1,11 @@
 package fangort
 
 import (
+	"bufio"
+	"errors"
+	"io"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -69,3 +73,37 @@ func TestShowBoolUnit(t *testing.T) {
 		t.Error("ShowUnit wrong")
 	}
 }
+
+func TestReadLineFrom(t *testing.T) {
+	cases := []struct {
+		name, input, first, second string
+	}{
+		{"lf", "one\ntwo\n", "one", "two"},
+		{"crlf", "one\r\ntwo\r\n", "one", "two"},
+		{"unterminated", "last", "last", ""},
+		{"clean eof", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := bufio.NewReader(strings.NewReader(tc.input))
+			got, err := ReadLineFrom(r)
+			if err != nil || got != tc.first {
+				t.Fatalf("first read = %q, %v; want %q, nil", got, err, tc.first)
+			}
+			got, err = ReadLineFrom(r)
+			if err != nil || got != tc.second {
+				t.Fatalf("second read = %q, %v; want %q, nil", got, err, tc.second)
+			}
+		})
+	}
+
+	want := errors.New("broken input")
+	r := bufio.NewReader(io.MultiReader(strings.NewReader("partial"), errorReader{want}))
+	if got, err := ReadLineFrom(r); !errors.Is(err, want) || got != "" {
+		t.Fatalf("non-EOF read = %q, %v; want empty string and %v", got, err, want)
+	}
+}
+
+type errorReader struct{ err error }
+
+func (r errorReader) Read([]byte) (int, error) { return 0, r.err }

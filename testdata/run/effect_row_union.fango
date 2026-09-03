@@ -1,0 +1,15 @@
+effect Left
+    left : () -> Int
+
+effect Right
+    right : () -> Int
+
+both _ = left () + right ()
+
+main =
+    print
+        (handle
+            handle both () of
+                left () -> resume 20
+         of
+            right () -> resume 22)

@@ -17,11 +17,13 @@ import (
 // make capture-by-value trivially sound.
 
 type liftedLocal struct {
-	defName string
-	frees   []scopeVar // captured enclosing locals, in scope order
-	genTy   types.Type // the lifted definition's full generic type: frees curried onto the local's scheme body
-	vars    []*types.TVar
-	arity   int // len(frees) + the binding's own parameter count
+	defName  string
+	frees    []scopeVar // captured enclosing locals, in scope order
+	genTy    types.Type // the lifted definition's full generic type: frees curried onto the local's scheme body
+	rawGenTy types.Type
+	vars     []*types.TVar
+	arity    int // len(frees) + the binding's own parameter count
+	effects  []core.EffectInstance
 }
 
 // liftBinding lifts one generalized block binding into el.aux and registers
@@ -29,19 +31,26 @@ type liftedLocal struct {
 // later — including self-calls, registered before the body elaborates)
 // rewrite to calls.
 func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
-	localGenTy := el.zonkDefault(sch.Body)
+	rawLocalGenTy := el.ck.Sub.Apply(sch.Body)
+	el.defaultFree(rawLocalGenTy)
+	rawLocalGenTy = el.ck.Sub.Apply(rawLocalGenTy)
+	localGenTy := eraseRows(rawLocalGenTy)
 	frees := el.freeLocals(bind)
 	genTy := localGenTy
+	rawGenTy := rawLocalGenTy
 	for i := len(frees) - 1; i >= 0; i-- {
 		genTy = &types.TFun{Arg: frees[i].ty, Eff: types.Row{}, Ret: genTy}
+		rawGenTy = &types.TFun{Arg: frees[i].ty, Eff: types.Row{}, Ret: rawGenTy}
 	}
 	el.ck.LiftGen++
 	lf := &liftedLocal{
-		defName: fmt.Sprintf("_lift%d_%s", el.ck.LiftGen, bind.Name),
-		frees:   frees,
-		genTy:   genTy,
-		vars:    types.RigidVarsIn(genTy),
-		arity:   len(frees) + len(bind.Params),
+		defName:  fmt.Sprintf("_lift%d_%s", el.ck.LiftGen, bind.Name),
+		frees:    frees,
+		genTy:    genTy,
+		rawGenTy: rawGenTy,
+		vars:     runtimeRigidVars(rawGenTy),
+		arity:    len(frees) + len(bind.Params),
+		effects:  executingEffects(rawGenTy, len(frees)+len(bind.Params)),
 	}
 	el.lifted[bind.Name] = lf
 
@@ -62,11 +71,12 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 		body = el.expr(bind.Body)
 	}
 	el.aux = append(el.aux, core.Def{
-		Name:     lf.defName,
-		Type:     genTy,
-		TyParams: lf.vars,
-		Params:   params,
-		Body:     el.anf(body),
+		Name:         lf.defName,
+		Type:         genTy,
+		TyParams:     lf.vars,
+		Params:       params,
+		EffectParams: executingEffects(rawGenTy, lf.arity),
+		Body:         el.anf(body),
 	})
 }
 
@@ -75,21 +85,36 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 // and the instantiation is matched against the lifted definition's generic
 // type (which quantifies the enclosing definition's variables too, when the
 // frees' types mention them).
-func (el *elab) liftedCallee(lf *liftedLocal, occTy types.Type) callee {
+func (el *elab) liftedCallee(lf *liftedLocal, occTy, rawOccTy types.Type) callee {
 	ty := occTy
+	rawTy := rawOccTy
 	for i := len(lf.frees) - 1; i >= 0; i-- {
 		ty = &types.TFun{Arg: lf.frees[i].ty, Eff: types.Row{}, Ret: ty}
+		rawTy = &types.TFun{Arg: lf.frees[i].ty, Eff: types.Row{}, Ret: rawTy}
 	}
 	pre := make([]core.Expr, len(lf.frees))
 	for i, f := range lf.frees {
 		pre[i] = &core.VarRef{Name: f.name, Ty: f.ty}
 	}
 	var tyArgs []types.Type
+	evidence := append([]core.EffectInstance(nil), lf.effects...)
+	for i := range evidence {
+		evidence[i].Args = append([]types.Type(nil), evidence[i].Args...)
+	}
 	if len(lf.vars) > 0 {
-		tyArgs = matchTyArgs(lf.genTy, lf.vars, ty)
+		tyArgs = matchTyArgs(lf.rawGenTy, lf.vars, rawTy)
+		m := make(map[int]types.Type, len(lf.vars))
+		for i, v := range lf.vars {
+			m[v.ID] = tyArgs[i]
+		}
+		for i := range evidence {
+			for j, a := range evidence[i].Args {
+				evidence[i].Args[j] = types.SubstRigid(a, m)
+			}
+		}
 	}
 	return callee{kind: core.Worker, name: lf.defName, ty: ty,
-		arity: lf.arity, tyArgs: tyArgs, pre: pre}
+		arity: lf.arity, tyArgs: tyArgs, pre: pre, evidence: evidence}
 }
 
 // freeLocals computes the enclosing locals a binding's body mentions, in
@@ -141,6 +166,16 @@ func (el *elab) freeLocals(bind *ast.LocalBind) []scopeVar {
 			for i := range e.Branches {
 				visit(e.Branches[i].Body)
 			}
+		case *ast.Handle:
+			visit(e.Body)
+			for i := range e.Clauses {
+				visit(e.Clauses[i].Body)
+			}
+			if e.Return != nil {
+				visit(e.Return.Body)
+			}
+		case *ast.Resume:
+			// No value child; applications containing it are handled above.
 		}
 	}
 	visit(bind.Body)

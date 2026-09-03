@@ -70,7 +70,31 @@ func (s Subst) applyRow(r types.Row) types.Row {
 			tail = extra.Tail
 		}
 	}
-	return types.SortedRow(types.Row{Labels: labels, Tail: tail})
+	sorted := types.SortedRow(types.Row{Labels: labels, Tail: tail})
+	// Row-tail expansion can expose the same label through both the prefix
+	// and the substituted tail. Canonicalize identical occurrences; retain
+	// conflicting parameterizations so unifyRows can diagnose them.
+	canonical := sorted.Labels[:0]
+	for _, label := range sorted.Labels {
+		if len(canonical) > 0 && equalEffLabel(canonical[len(canonical)-1], label) {
+			continue
+		}
+		canonical = append(canonical, label)
+	}
+	sorted.Labels = canonical
+	return sorted
+}
+
+func equalEffLabel(a, b types.EffLabel) bool {
+	if a.Unique != b.Unique || len(a.Args) != len(b.Args) {
+		return false
+	}
+	for i := range a.Args {
+		if !types.Equal(a.Args[i], b.Args[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // mismatch is a leaf unification failure; Solve dresses it in a diagnostic
@@ -315,4 +339,28 @@ func unifyRows(a, b types.Row, sub Subst, bi *types.Builtins, sup *types.Supply)
 		}
 		return unify(rt, types.Row{Labels: left, Tail: rho}, sub, bi, sup)
 	}
+}
+
+// includeRows constrains every effect in subrow to occur in superrow while
+// preserving any effects already present in superrow. An open subrow may be
+// weakened to the complete surrounding row; a closed subrow contributes
+// only its explicit labels.
+func includeRows(subrow, superrow types.Row, sub Subst, bi *types.Builtins, sup *types.Supply) *mismatch {
+	subrow, superrow = sub.applyRow(subrow), sub.applyRow(superrow)
+	if subrow.Tail != nil {
+		return unifyRows(subrow, superrow, sub, bi, sup)
+	}
+	seen := map[int]bool{}
+	for _, label := range subrow.Labels {
+		if seen[label.Unique] {
+			return &mismatch{a: subrow, b: superrow, effect: true, note: "an effect may appear at most once in a row (distinct-label rule)"}
+		}
+		seen[label.Unique] = true
+		rest := sup.FreshVar(types.RowVar)
+		if m := unifyRows(superrow, types.Row{Labels: []types.EffLabel{label}, Tail: rest}, sub, bi, sup); m != nil {
+			return m
+		}
+		superrow = sub.applyRow(superrow)
+	}
+	return nil
 }

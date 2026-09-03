@@ -227,8 +227,8 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	vd := m.Decls[0].(*ast.ValueDecl)
 	redefining := s.ck.Env.Has(vd.Name)
 	// Check the body BEFORE binding: a failed definition must not install
-	// a broken name into the session. REPL declarations never allow the
-	// print cheat — evaluate the expression at the prompt instead.
+	// a broken name into the session. REPL declarations are required to be
+	// pure; effectful expressions can be evaluated directly at the prompt.
 	info, inferErrs := s.ck.DeclWhere(vd, false)
 	if len(inferErrs) > 0 {
 		diag.Render(s.out, inferErrs)

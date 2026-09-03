@@ -57,3 +57,22 @@ func TestRedefinition(t *testing.T) {
 		t.Errorf("expected x + 1 = 11 after redefinition:\n%s", got)
 	}
 }
+
+func TestPromptAndReadLineShareReader(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader("readLine ()\nhello\n:quit\n"), &out)
+	if !strings.Contains(out.String(), `"hello" : String`) {
+		t.Fatalf("readLine did not consume the line following the prompt expression:\n%s", out.String())
+	}
+}
+
+func TestEffectfulPromptDeclarationRejected(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader("x = print 1\n40 + 2\n:quit\n"), &out)
+	if !strings.Contains(out.String(), "EFFECTFUL PROMPT DECLARATION") {
+		t.Fatalf("effectful declaration was installed:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "42 : number") {
+		t.Fatalf("session did not recover after rejecting declaration:\n%s", out.String())
+	}
+}

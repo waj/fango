@@ -15,9 +15,16 @@ import (
 // design's top risk, and this is the tripwire.
 func Lint(p *Prog, b *types.Builtins) []error {
 	l := &linter{b: b, scope: map[string]bool{}, workers: map[string]*Def{},
-		adts: map[int]*types.ADTInfo{}, tyParams: map[int]bool{}}
+		adts: map[int]*types.ADTInfo{}, effects: map[int]*types.EffectInfo{},
+		tyParams: map[int]bool{}, evidence: map[int]int{}}
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
+	}
+	for _, eff := range p.Effects {
+		if old := l.effects[eff.Unique]; old != nil {
+			l.errorf("effect unique %d is shared by `%s` and `%s`", eff.Unique, old.Name, eff.Name)
+		}
+		l.effects[eff.Unique] = eff
 	}
 	// The worker table is complete up front (self-calls need it); the
 	// no-shadow scope fills in SOURCE ORDER, matching the checker — a
@@ -37,13 +44,38 @@ func Lint(p *Prog, b *types.Builtins) []error {
 			if !v.Rigid {
 				l.errorf("%s: TyParams contains a non-rigid variable", where)
 			}
+			if l.tyParams[v.ID] {
+				l.errorf("%s: TyParams contains duplicate variable %d", where, v.ID)
+			}
 			l.tyParams[v.ID] = true
 		}
 		l.typ(d.Type, where)
-		// Every rigid var in the def's type must be declared — TyParams is
-		// exactly RigidVarsIn(Type), asserted both directions.
-		if got := types.RigidVarsIn(d.Type); len(got) != len(d.TyParams) {
-			l.errorf("%s: TyParams has %d vars, the type mentions %d", where, len(d.TyParams), len(got))
+		lastEffect := -1
+		for _, ev := range d.EffectParams {
+			l.effectInstance(ev, where)
+			if ev.Unique <= lastEffect {
+				l.errorf("%s: evidence parameters are not in increasing effect-Unique order", where)
+			}
+			lastEffect = ev.Unique
+			l.evidence[ev.Unique]++
+		}
+		// Every declared type parameter must be used by the value type or by
+		// typed evidence (phantom effect parameters need not occur in Type).
+		usedTyParams := map[int]bool{}
+		for _, v := range types.RigidVarsIn(d.Type) {
+			usedTyParams[v.ID] = true
+		}
+		for _, ev := range d.EffectParams {
+			for _, a := range ev.Args {
+				for _, v := range types.RigidVarsIn(a) {
+					usedTyParams[v.ID] = true
+				}
+			}
+		}
+		for _, v := range d.TyParams {
+			if !usedTyParams[v.ID] {
+				l.errorf("%s: TyParams variable %d is unused", where, v.ID)
+			}
 		}
 		if len(d.Params) > 0 {
 			// The worker's type must peel exactly arity arrows, with the
@@ -80,17 +112,24 @@ func Lint(p *Prog, b *types.Builtins) []error {
 			}
 			l.expr(d.Body, where)
 		}
+		for _, ev := range d.EffectParams {
+			l.evidence[ev.Unique]--
+		}
 	}
 	return l.errs
 }
 
 type linter struct {
-	b        *types.Builtins
-	scope    map[string]bool // def names + enclosing Let/param names: no shadowing
-	workers  map[string]*Def
-	adts     map[int]*types.ADTInfo // declared ADTs: equatable via derived eq
-	tyParams map[int]bool           // the enclosing def's declared rigid vars
-	errs     []error
+	b         *types.Builtins
+	scope     map[string]bool // def names + enclosing Let/param names: no shadowing
+	workers   map[string]*Def
+	adts      map[int]*types.ADTInfo // declared ADTs: equatable via derived eq
+	effects   map[int]*types.EffectInfo
+	tyParams  map[int]bool // the enclosing def's declared rigid vars
+	evidence  map[int]int
+	resumeArg types.Type
+	resumeRet types.Type
+	errs      []error
 }
 
 func (l *linter) errorf(format string, args ...any) {
@@ -252,29 +291,59 @@ func (l *linter) expr(e Expr, where string) {
 		if e.Param != "_" {
 			delete(l.scope, e.Param)
 		}
-	case *Print:
-		if !l.printable(e.Arg.Type()) {
-			l.errorf("%s: Print argument typed %s, not printable", where, types.Show(e.Arg.Type()))
-		}
-		if l.unique(e.Ty) != l.b.Unit.Unique {
-			l.errorf("%s: Print typed %s, want ()", where, types.Show(e.Ty))
-		}
-		l.expr(e.Arg, where)
 	case *Perform:
 		if e.Op == nil || e.Op.Owner.Unique != e.Effect.Unique {
 			l.errorf("%s: malformed Perform evidence", where)
+		} else if !l.operationBelongs(e.Op) {
+			l.errorf("%s: Perform operation `%s` is not declared by its effect", where, e.Op.Name)
+		}
+		l.effectInstance(e.Effect, where)
+		if e.Op != nil && !e.Op.Builtin && l.evidence[e.Effect.Unique] == 0 {
+			l.errorf("%s: Perform `%s` has no lexical evidence", where, e.Op.Name)
 		}
 		if e.Op != nil && len(e.Args) != e.Op.Arity {
 			l.errorf("%s: Perform `%s` arity mismatch", where, e.Op.Name)
+		}
+		if e.Op != nil && len(e.Args) == e.Op.Arity {
+			wantArgs, wantResult := l.operationTypes(e.Op, e.Effect)
+			isPrint := e.Op.Owner.Name == "IO" && e.Op.Name == "print"
+			for i, a := range e.Args {
+				if !isPrint && i < len(wantArgs) && !types.Equal(a.Type(), wantArgs[i]) {
+					l.errorf("%s: Perform `%s` arg %d typed %s, want %s", where, e.Op.Name, i+1, types.Show(a.Type()), types.Show(wantArgs[i]))
+				}
+			}
+			if isPrint {
+				if len(e.Args) == 1 && !l.printable(e.Args[0].Type()) {
+					l.errorf("%s: IO.print argument typed %s, not printable", where, types.Show(e.Args[0].Type()))
+				}
+			} else if len(e.Op.LocalVars) > 0 {
+				l.errorf("%s: operation-local polymorphism survived into Core for `%s`", where, e.Op.Name)
+			}
+			if wantResult != nil && !types.Equal(e.Ty, wantResult) {
+				l.errorf("%s: Perform `%s` typed %s, want %s", where, e.Op.Name, types.Show(e.Ty), types.Show(wantResult))
+			}
 		}
 		for _, a := range e.Args {
 			l.expr(a, where)
 		}
 	case *Resume:
+		if l.resumeArg == nil || l.resumeRet == nil {
+			l.errorf("%s: Resume outside a handler clause", where)
+		} else {
+			if !types.Equal(e.Value.Type(), l.resumeArg) {
+				l.errorf("%s: Resume argument typed %s, want %s", where, types.Show(e.Value.Type()), types.Show(l.resumeArg))
+			}
+			if !types.Equal(e.Ty, l.resumeRet) {
+				l.errorf("%s: Resume typed %s, want handler result %s", where, types.Show(e.Ty), types.Show(l.resumeRet))
+			}
+		}
 		l.expr(e.Value, where)
 	case *Seq:
 		if l.unique(e.First.Type()) != l.b.Unit.Unique {
 			l.errorf("%s: Seq first expression is not Unit", where)
+		}
+		if !types.Equal(e.Ty, e.Then.Type()) {
+			l.errorf("%s: Seq type differs from its final expression", where)
 		}
 		l.expr(e.First, where)
 		l.expr(e.Then, where)
@@ -282,29 +351,78 @@ func (l *linter) expr(e Expr, where string) {
 		if !e.TailResumptive {
 			l.errorf("%s: checkpoint-2 Handle is not tail resumptive", where)
 		}
+		l.effectInstance(e.Effect, where)
+		l.evidence[e.Effect.Unique]++
 		l.expr(e.Body, where)
+		l.evidence[e.Effect.Unique]--
 		seen := map[string]bool{}
 		for _, c := range e.Clauses {
 			if c.Op == nil || c.Op.Owner.Unique != e.Effect.Unique {
 				l.errorf("%s: handler clause has wrong effect", where)
 				continue
 			}
+			if !l.operationBelongs(c.Op) {
+				l.errorf("%s: handler clause operation `%s` is not declared by its effect", where, c.Op.Name)
+				continue
+			}
+			if seen[c.Op.Name] {
+				l.errorf("%s: duplicate handler clause for `%s`", where, c.Op.Name)
+			}
 			seen[c.Op.Name] = true
+			wantParams, opResult := l.operationTypes(c.Op, e.Effect)
+			if len(c.Params) != c.Op.Arity || len(c.ParamTypes) != c.Op.Arity {
+				l.errorf("%s: handler clause `%s` arity mismatch", where, c.Op.Name)
+			}
+			for i, pt := range c.ParamTypes {
+				if i < len(wantParams) && !types.Equal(pt, wantParams[i]) {
+					l.errorf("%s: handler clause `%s` param %d typed %s, want %s", where, c.Op.Name, i+1, types.Show(pt), types.Show(wantParams[i]))
+				}
+			}
+			for i, p := range c.Params {
+				if p == "()" && i < len(c.ParamTypes) && l.unique(c.ParamTypes[i]) != l.b.Unit.Unique {
+					l.errorf("%s: handler clause `%s` uses () for a non-Unit parameter", where, c.Op.Name)
+				}
+			}
+			if !types.Equal(c.ResultType, opResult) {
+				l.errorf("%s: handler clause `%s` evidence result typed %s, want operation result %s", where, c.Op.Name, types.Show(c.ResultType), types.Show(opResult))
+			}
+			if !types.Equal(c.Body.Type(), e.Ty) {
+				l.errorf("%s: handler clause `%s` body does not exactly match the handler type", where, c.Op.Name)
+			}
 			for _, p := range c.Params {
 				if p != "_" && p != "()" {
+					if l.scope[p] {
+						l.errorf("%s: handler parameter `%s` shadows", where, p)
+					}
 					l.scope[p] = true
 				}
 			}
+			oldArg, oldRet := l.resumeArg, l.resumeRet
+			l.resumeArg, l.resumeRet = opResult, e.Ty
 			l.expr(c.Body, where)
+			l.resumeArg, l.resumeRet = oldArg, oldRet
 			for _, p := range c.Params {
 				delete(l.scope, p)
 			}
 		}
+		if eff := l.effects[e.Effect.Unique]; eff != nil {
+			for _, op := range eff.Ops {
+				if !seen[op.Name] {
+					l.errorf("%s: handler is missing a clause for `%s`", where, op.Name)
+				}
+			}
+		}
 		if e.Return != nil {
+			if e.Return.Param == "()" && l.unique(e.Body.Type()) != l.b.Unit.Unique {
+				l.errorf("%s: handler return clause uses () for a non-Unit result", where)
+			}
 			if e.Return.Param != "_" && e.Return.Param != "()" {
 				l.scope[e.Return.Param] = true
 			}
 			l.expr(e.Return.Body, where)
+			if !types.Equal(e.Return.Body.Type(), e.Ty) {
+				l.errorf("%s: handler return clause does not exactly match the handler type", where)
+			}
 			delete(l.scope, e.Return.Param)
 		}
 	case *App:
@@ -330,6 +448,9 @@ func (l *linter) expr(e Expr, where string) {
 					where, ref.Name, len(e.TyArgs), len(def.TyParams))
 				return
 			}
+			if len(e.EvidenceArgs) != len(def.EffectParams) {
+				l.errorf("%s: App{Worker} `%s` has %d evidence args, callee declares %d", where, ref.Name, len(e.EvidenceArgs), len(def.EffectParams))
+			}
 			// Check against the callee's type INSTANTIATED at this call's
 			// explicit type arguments — the §8.4 invariant.
 			calleeTy := def.Type
@@ -339,6 +460,26 @@ func (l *linter) expr(e Expr, where string) {
 					m[v.ID] = e.TyArgs[i]
 				}
 				calleeTy = types.SubstRigid(calleeTy, m)
+			}
+			for i, ev := range e.EvidenceArgs {
+				l.effectInstance(ev, where)
+				if i >= len(def.EffectParams) {
+					continue
+				}
+				want := def.EffectParams[i]
+				if len(e.TyArgs) > 0 {
+					m := make(map[int]types.Type, len(def.TyParams))
+					for j, v := range def.TyParams {
+						m[v.ID] = e.TyArgs[j]
+					}
+					want = substEffectInstance(want, m)
+				}
+				if !equalEffectInstance(ev, want) {
+					l.errorf("%s: App{Worker} `%s` evidence arg %d disagrees with the callee", where, ref.Name, i+1)
+				}
+				if l.evidence[ev.Unique] == 0 {
+					l.errorf("%s: App{Worker} `%s` passes unavailable lexical evidence `%s`", where, ref.Name, ev.Name)
+				}
 			}
 			argTys, ret := PeelFun(calleeTy, len(def.Params))
 			for i, a := range e.Args {
@@ -550,6 +691,62 @@ func (l *linter) binOp(e *BinOp, where string) {
 	l.expr(e.R, where)
 }
 
+func (l *linter) effectInstance(e EffectInstance, where string) {
+	eff := l.effects[e.Unique]
+	if eff == nil {
+		l.errorf("%s: evidence names unknown effect `%s` (%d)", where, e.Name, e.Unique)
+		return
+	}
+	if e.Name != eff.Name {
+		l.errorf("%s: evidence name `%s` disagrees with effect `%s`", where, e.Name, eff.Name)
+	}
+	if len(e.Args) != len(eff.Params) {
+		l.errorf("%s: evidence `%s` has %d type args, effect declares %d", where, e.Name, len(e.Args), len(eff.Params))
+	}
+	for _, a := range e.Args {
+		l.typ(a, where)
+	}
+}
+
+func (l *linter) operationTypes(op *types.EffectOp, inst EffectInstance) ([]types.Type, types.Type) {
+	m := make(map[int]types.Type, len(op.Owner.Params))
+	for i, p := range op.Owner.Params {
+		if i < len(inst.Args) {
+			m[p.ID] = inst.Args[i]
+		}
+	}
+	args := make([]types.Type, len(op.ParamTypes))
+	for i, p := range op.ParamTypes {
+		args[i] = types.SubstRigid(p, m)
+	}
+	return args, types.SubstRigid(op.ResultType, m)
+}
+
+func (l *linter) operationBelongs(op *types.EffectOp) bool {
+	eff := l.effects[op.Owner.Unique]
+	return eff != nil && op.Index >= 0 && op.Index < len(eff.Ops) && eff.Ops[op.Index] == op
+}
+
+func substEffectInstance(e EffectInstance, m map[int]types.Type) EffectInstance {
+	out := EffectInstance{Unique: e.Unique, Name: e.Name, Args: make([]types.Type, len(e.Args))}
+	for i, a := range e.Args {
+		out.Args[i] = types.SubstRigid(a, m)
+	}
+	return out
+}
+
+func equalEffectInstance(a, b EffectInstance) bool {
+	if a.Unique != b.Unique || a.Name != b.Name || len(a.Args) != len(b.Args) {
+		return false
+	}
+	for i := range a.Args {
+		if !types.Equal(a.Args[i], b.Args[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 func (l *linter) typ(t types.Type, where string) {
 	switch t := t.(type) {
 	case *types.TVar:
@@ -564,7 +761,7 @@ func (l *linter) typ(t types.Type, where string) {
 		}
 	case *types.TFun:
 		if !t.Eff.Empty() {
-			l.errorf("%s: non-empty effect row before S7", where)
+			l.errorf("%s: source effect row survived elaboration", where)
 		}
 		l.typ(t.Arg, where)
 		l.typ(t.Ret, where)

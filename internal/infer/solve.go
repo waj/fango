@@ -14,7 +14,19 @@ import (
 func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup *types.Supply) (Subst, []types.Pred, []diag.Error) {
 	var errs []diag.Error
 	for _, c := range cs {
-		if m := unify(c.Left, c.Right, sub, bi, sup); m != nil {
+		var m *mismatch
+		if c.Include {
+			left, lok := sub.Apply(c.Left).(types.Row)
+			right, rok := sub.Apply(c.Right).(types.Row)
+			if !lok || !rok {
+				m = &mismatch{a: c.Left, b: c.Right, effect: true, note: "effect inclusion requires two rows"}
+			} else {
+				m = includeRows(left, right, sub, bi, sup)
+			}
+		} else {
+			m = unify(c.Left, c.Right, sub, bi, sup)
+		}
+		if m != nil {
 			errs = append(errs, mismatchError(c, m, sub))
 		}
 	}

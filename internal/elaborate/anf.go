@@ -13,9 +13,8 @@ import (
 // that used it — codegen then emits `var tmp τ; switch … { tmp = … }` — and
 // leaves tail positions (worker bodies, Let bodies, branch tails) alone.
 //
-// Hoisting can reorder evaluation between sibling slots (`f (g x) (case …)`
-// evaluates the case first once hoisted). fango is pure through S6, so the
-// reordering is unobservable; revisit when effects land (S7).
+// Hoists accumulate left to right and wrap in the same order, preserving
+// source evaluation order now that expression slots may perform effects.
 //
 // The IIFE fallback remains for Lets in expression slots (top-level value
 // initializers have no statement context).
@@ -38,9 +37,6 @@ func (el *elab) anf(e core.Expr) core.Expr {
 		return wrapHoists(hoists, out)
 	case *core.Lambda:
 		return &core.Lambda{Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty}
-	case *core.Print:
-		arg, hoists := el.anfSlot(e.Arg)
-		return wrapHoists(hoists, &core.Print{Arg: arg, Ty: e.Ty})
 	case *core.Handle:
 		clauses := make([]core.HandlerClause, len(e.Clauses))
 		for i, c := range e.Clauses {
@@ -128,8 +124,6 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		l := slot(e.L)
 		r := slot(e.R)
 		return &core.BinOp{Op: e.Op, Ty: e.Ty, L: l, R: r}, hoists
-	case *core.Print:
-		return &core.Print{Arg: slot(e.Arg), Ty: e.Ty}, hoists
 	case *core.Perform:
 		args := make([]core.Expr, len(e.Args))
 		for i, a := range e.Args {
