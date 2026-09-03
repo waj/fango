@@ -11,6 +11,11 @@ import (
 	"strings"
 )
 
+// Number is the Go type-set constraint compiling fango's Number-kinded type
+// variables (§7.3): `double : number -> number` emits as
+// `func v_double[A Number](x A) A` with native operators.
+type Number interface{ ~int64 | ~float64 }
+
 // ShowInt renders an Int exactly as the surface language shows it.
 func ShowInt(v int64) string { return strconv.FormatInt(v, 10) }
 

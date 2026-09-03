@@ -23,16 +23,24 @@ func showFunc(name string) string     { return "showT_" + name }
 func fieldName(i int) string { return fmt.Sprintf("F%d", i) }
 
 // adtDecls emits the marker interface, constructor structs, and marker
-// methods for every declared type, in declaration order.
+// methods for every declared type, in declaration order. Parameterized types
+// emit as Go generics (`type T_List[A0 any] interface{ isT_List() }`,
+// `func (C_Cons[A0]) isT_List() {}`), §8.4.
 func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 	var decls []goast.Decl
 	for _, adt := range adts {
+		g.tyParamNames = tyParamNames(adt.Params)
+		paramIdents := make([]goast.Expr, len(adt.Params))
+		for i, v := range adt.Params {
+			paramIdents[i] = ident(g.tyParamNames[v.ID])
+		}
 		iface := mangleType(adt.Con.Name)
 		marker := markerMethod(adt.Con.Name)
 		decls = append(decls, &goast.GenDecl{
 			Tok: gotoken.TYPE,
 			Specs: []goast.Spec{&goast.TypeSpec{
-				Name: ident(iface),
+				Name:       ident(iface),
+				TypeParams: g.typeParamFields(adt.Params),
 				Type: &goast.InterfaceType{Methods: &goast.FieldList{List: []*goast.Field{{
 					Names: []*goast.Ident{ident(marker)},
 					Type:  &goast.FuncType{Params: &goast.FieldList{}},
@@ -48,32 +56,38 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 				&goast.GenDecl{
 					Tok: gotoken.TYPE,
 					Specs: []goast.Spec{&goast.TypeSpec{
-						Name: ident(mangleCtor(c.Name)),
-						Type: &goast.StructType{Fields: &goast.FieldList{List: fields}},
+						Name:       ident(mangleCtor(c.Name)),
+						TypeParams: g.typeParamFields(adt.Params),
+						Type:       &goast.StructType{Fields: &goast.FieldList{List: fields}},
 					}},
 				},
 				&goast.FuncDecl{
-					Recv: &goast.FieldList{List: []*goast.Field{{Type: ident(mangleCtor(c.Name))}}},
+					Recv: &goast.FieldList{List: []*goast.Field{{
+						Type: indexExpr(ident(mangleCtor(c.Name)), paramIdents),
+					}}},
 					Name: ident(marker),
 					Type: &goast.FuncType{Params: &goast.FieldList{}},
 					Body: &goast.BlockStmt{},
 				})
 		}
 	}
+	g.tyParamNames = nil
 	return decls
 }
 
 // ctorLit is a saturated constructor application: `&C_Name{args…}` —
 // construction by pointer (§8.1: value receivers make the pointer implement
-// the marker; zero-field constructors hit Go's zerobase).
+// the marker; zero-field constructors hit Go's zerobase). Parameterized
+// constructors instantiate at the result type's arguments.
 func (g *gen) ctorLit(e *core.App) goast.Expr {
 	args := make([]goast.Expr, len(e.Args))
 	for i, a := range e.Args {
 		args[i] = g.expr(a, 0)
 	}
+	litType := indexExpr(ident(mangleCtor(e.Ctor.Name)), g.goTypes(e.TyArgs))
 	return &goast.UnaryExpr{
 		Op: gotoken.AND,
-		X:  &goast.CompositeLit{Type: ident(mangleCtor(e.Ctor.Name)), Elts: args},
+		X:  &goast.CompositeLit{Type: litType, Elts: args},
 	}
 }
 
@@ -83,6 +97,9 @@ func (g *gen) ctorLit(e *core.App) goast.Expr {
 
 func (g *gen) caseStmts(e *core.Case, leaf func(core.Expr) []goast.Stmt) []goast.Stmt {
 	bind := mangleValue(e.Bind)
+	// Record the binder's (instantiated) type: nested constructor switches
+	// read their column's type arguments from here.
+	g.caseVarTys[e.Bind] = e.Scrut.Type()
 	stmts := []goast.Stmt{varDeclStmt(bind, g.goType(e.Scrut.Type()), g.expr(e.Scrut, 0))}
 	return append(stmts, g.treeStmts(e.Tree, leaf)...)
 }
@@ -126,6 +143,18 @@ func (g *gen) ctorSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) 
 	scrut := ident(mangleValue(t.Scrut))
 	full := t.Default == nil
 
+	// The scrutinee's instantiation drives the case tags (`*C_Cons[int64]`)
+	// and the field types — declaration-level Fields are over the ADT's own
+	// params and must be instantiated per occurrence.
+	scrutTy, ok := g.caseVarTys[t.Scrut].(*types.TCon)
+	if !ok {
+		panic("codegen: SwitchCtor scrutinee type unknown")
+	}
+	tagArgs := g.goTypes(scrutTy.Args)
+	ctorTag := func(name string) goast.Expr {
+		return &goast.StarExpr{X: indexExpr(ident(mangleCtor(name)), tagArgs)}
+	}
+
 	// The type-switch binding is only legal Go if some clause uses it.
 	tsVar := fmt.Sprintf("ts%d", g.tmp)
 	g.tmp++
@@ -144,23 +173,25 @@ func (g *gen) ctorSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) 
 				body = append(body, &goast.AssignStmt{
 					Lhs: []goast.Expr{ident(src)},
 					Tok: gotoken.DEFINE,
-					Rhs: []goast.Expr{&goast.TypeAssertExpr{X: scrut, Type: starCtor(c.Ctor.Name)}},
+					Rhs: []goast.Expr{&goast.TypeAssertExpr{X: scrut, Type: ctorTag(c.Ctor.Name)}},
 				})
 			}
 		} else if anyBind(c.Binds) {
 			tsUsed = true
 		}
+		fields := t.ADT.InstFields(c.Ctor, scrutTy.Args)
 		for i, b := range c.Binds {
 			if b == "" {
 				continue
 			}
-			body = append(body, varDeclStmt(mangleValue(b), g.goType(c.Ctor.Fields[i]),
+			g.caseVarTys[b] = fields[i]
+			body = append(body, varDeclStmt(mangleValue(b), g.goType(fields[i]),
 				&goast.SelectorExpr{X: ident(src), Sel: ident(fieldName(i))}))
 		}
 		body = append(body, g.treeStmts(c.Tree, leaf)...)
 		var list []goast.Expr
 		if !isDefault {
-			list = []goast.Expr{starCtor(c.Ctor.Name)}
+			list = []goast.Expr{ctorTag(c.Ctor.Name)}
 		}
 		clauses = append(clauses, &goast.CaseClause{List: list, Body: body})
 	}
@@ -202,10 +233,6 @@ func anyBind(binds []string) bool {
 	return false
 }
 
-func starCtor(name string) goast.Expr {
-	return &goast.StarExpr{X: ident(mangleCtor(name))}
-}
-
 // litSwitch emits a value switch (works for int64, float64, and string).
 func (g *gen) litSwitch(t *core.SwitchLit, leaf func(core.Expr) []goast.Stmt) []goast.Stmt {
 	var clauses []goast.Stmt
@@ -244,34 +271,6 @@ func (g *gen) assignStmts(e core.Expr, name string) []goast.Stmt {
 // program uses `==`/`print` at that type; needs propagate through ADT-typed
 // fields.
 
-func (g *gen) needEq(adt *types.ADTInfo) {
-	if g.neededEq[adt.Con.Unique] {
-		return
-	}
-	g.neededEq[adt.Con.Unique] = true
-	for _, c := range adt.Ctors {
-		for _, f := range c.Fields {
-			if sub := g.adtOf(f); sub != nil {
-				g.needEq(sub)
-			}
-		}
-	}
-}
-
-func (g *gen) needShow(adt *types.ADTInfo) {
-	if g.neededShow[adt.Con.Unique] {
-		return
-	}
-	g.neededShow[adt.Con.Unique] = true
-	for _, c := range adt.Ctors {
-		for _, f := range c.Fields {
-			if sub := g.adtOf(f); sub != nil {
-				g.needShow(sub)
-			}
-		}
-	}
-}
-
 func (g *gen) adtOf(t types.Type) *types.ADTInfo {
 	if con, ok := t.(*types.TCon); ok {
 		return g.adts[con.Unique]
@@ -295,10 +294,24 @@ func (g *gen) derivedDecls(adts []*types.ADTInfo) []goast.Decl {
 	return decls
 }
 
-// eqDecl: func eqT_X(a, b T_X) bool — type switch on a, checked assertion on
-// b, field-wise comparison.
+// eqDecl: func eqT_X[A0 any](eq0 func(A0, A0) bool, a, b T_X[A0]) bool —
+// type switch on a, checked assertion on b, field-wise comparison. Type-
+// parameter fields compare via the element-op parameters; monomorphic types
+// take no element ops and keep the S4 shape exactly.
 func (g *gen) eqDecl(adt *types.ADTInfo) goast.Decl {
-	iface := ident(mangleType(adt.Con.Name))
+	g.tyParamNames = tyParamNames(adt.Params)
+	g.eqParamNames = map[int]string{}
+	paramIdents := make([]goast.Expr, len(adt.Params))
+	for i, v := range adt.Params {
+		g.eqParamNames[v.ID] = eqParamName(i)
+		paramIdents[i] = ident(g.tyParamNames[v.ID])
+	}
+	defer func() { g.eqParamNames = nil }()
+	iface := indexExpr(ident(mangleType(adt.Con.Name)), paramIdents)
+	ctorTag := func(name string) goast.Expr {
+		return &goast.StarExpr{X: indexExpr(ident(mangleCtor(name)), paramIdents)}
+	}
+
 	var clauses []goast.Stmt
 	usesBinding := false
 	for _, c := range adt.Ctors {
@@ -309,7 +322,7 @@ func (g *gen) eqDecl(adt *types.ADTInfo) goast.Decl {
 				&goast.AssignStmt{
 					Lhs: []goast.Expr{ident("_"), ident("ok")},
 					Tok: gotoken.DEFINE,
-					Rhs: []goast.Expr{&goast.TypeAssertExpr{X: ident("b"), Type: starCtor(c.Name)}},
+					Rhs: []goast.Expr{&goast.TypeAssertExpr{X: ident("b"), Type: ctorTag(c.Name)}},
 				},
 				returnStmt(ident("ok")),
 			}
@@ -318,24 +331,18 @@ func (g *gen) eqDecl(adt *types.ADTInfo) goast.Decl {
 			body = []goast.Stmt{&goast.AssignStmt{
 				Lhs: []goast.Expr{ident("bv"), ident("ok")},
 				Tok: gotoken.DEFINE,
-				Rhs: []goast.Expr{&goast.TypeAssertExpr{X: ident("b"), Type: starCtor(c.Name)}},
+				Rhs: []goast.Expr{&goast.TypeAssertExpr{X: ident("b"), Type: ctorTag(c.Name)}},
 			}}
 			cond := goast.Expr(ident("ok"))
 			for i, f := range c.Fields {
 				af := &goast.SelectorExpr{X: ident("av"), Sel: ident(fieldName(i))}
 				bf := &goast.SelectorExpr{X: ident("bv"), Sel: ident(fieldName(i))}
-				var fieldEq goast.Expr
-				if sub := g.adtOf(f); sub != nil {
-					fieldEq = callExpr(ident(eqFunc(sub.Con.Name)), af, bf)
-				} else {
-					fieldEq = binExpr(gotoken.EQL, af, bf)
-				}
-				cond = binExpr(gotoken.LAND, cond, fieldEq)
+				cond = binExpr(gotoken.LAND, cond, g.eqField(f, af, bf))
 			}
 			body = append(body, returnStmt(cond))
 		}
 		clauses = append(clauses, &goast.CaseClause{
-			List: []goast.Expr{starCtor(c.Name)},
+			List: []goast.Expr{ctorTag(c.Name)},
 			Body: body,
 		})
 	}
@@ -353,16 +360,39 @@ func (g *gen) eqDecl(adt *types.ADTInfo) goast.Decl {
 		&goast.TypeSwitchStmt{Assign: tag, Body: &goast.BlockStmt{List: clauses}},
 		returnStmt(ident("false")), // unreachable: the switch is total
 	}
+	params := make([]*goast.Field, 0, len(adt.Params)+1)
+	for i, v := range adt.Params {
+		pv := ident(g.tyParamNames[v.ID])
+		params = append(params, &goast.Field{
+			Names: []*goast.Ident{ident(eqParamName(i))},
+			Type:  &goast.FuncType{Params: &goast.FieldList{List: []*goast.Field{{Type: pv}, {Type: ident(g.tyParamNames[v.ID])}}}, Results: &goast.FieldList{List: []*goast.Field{{Type: ident("bool")}}}},
+		})
+	}
+	params = append(params, &goast.Field{
+		Names: []*goast.Ident{ident("a"), ident("b")}, Type: iface,
+	})
 	return &goast.FuncDecl{
 		Name: ident(eqFunc(adt.Con.Name)),
 		Type: &goast.FuncType{
-			Params: &goast.FieldList{List: []*goast.Field{{
-				Names: []*goast.Ident{ident("a"), ident("b")}, Type: iface,
-			}}},
-			Results: &goast.FieldList{List: []*goast.Field{{Type: ident("bool")}}},
+			TypeParams: g.typeParamFields(adt.Params),
+			Params:     &goast.FieldList{List: params},
+			Results:    &goast.FieldList{List: []*goast.Field{{Type: ident("bool")}}},
 		},
 		Body: &goast.BlockStmt{List: body},
 	}
+}
+
+// eqField compares one constructor field: element-op param at a type
+// parameter, derived (possibly instantiated) eq at an ADT, native == at a
+// scalar.
+func (g *gen) eqField(f types.Type, af, bf goast.Expr) goast.Expr {
+	if v, ok := f.(*types.TVar); ok && v.Rigid {
+		return callExpr(ident(g.eqParamNames[v.ID]), af, bf)
+	}
+	if g.adtOf(f) != nil {
+		return g.eqCall(f, af, bf)
+	}
+	return binExpr(gotoken.EQL, af, bf)
 }
 
 // showDecl: func showT_X(v T_X, nested bool) string — `Circle 2.5`, nested
@@ -370,12 +400,24 @@ func (g *gen) eqDecl(adt *types.ADTInfo) goast.Decl {
 // fields as source literals. Both backends must format identically; the
 // interpreter mirrors this in eval's show.
 func (g *gen) showDecl(adt *types.ADTInfo) goast.Decl {
+	g.tyParamNames = tyParamNames(adt.Params)
+	g.showParamNames = map[int]string{}
+	paramIdents := make([]goast.Expr, len(adt.Params))
+	for i, v := range adt.Params {
+		g.showParamNames[v.ID] = showParamName(i)
+		paramIdents[i] = ident(g.tyParamNames[v.ID])
+	}
+	defer func() { g.showParamNames = nil }()
+	ctorTag := func(name string) goast.Expr {
+		return &goast.StarExpr{X: indexExpr(ident(mangleCtor(name)), paramIdents)}
+	}
+
 	var clauses []goast.Stmt
 	usesBinding := false
 	for _, c := range adt.Ctors {
 		if len(c.Fields) == 0 {
 			clauses = append(clauses, &goast.CaseClause{
-				List: []goast.Expr{starCtor(c.Name)},
+				List: []goast.Expr{ctorTag(c.Name)},
 				Body: []goast.Stmt{returnStmt(stringLit(c.Name))},
 			})
 			continue
@@ -398,7 +440,7 @@ func (g *gen) showDecl(adt *types.ADTInfo) goast.Decl {
 			returnStmt(ident("s")),
 		}
 		clauses = append(clauses, &goast.CaseClause{
-			List: []goast.Expr{starCtor(c.Name)},
+			List: []goast.Expr{ctorTag(c.Name)},
 			Body: body,
 		})
 	}
@@ -416,23 +458,41 @@ func (g *gen) showDecl(adt *types.ADTInfo) goast.Decl {
 		&goast.TypeSwitchStmt{Assign: tag, Body: &goast.BlockStmt{List: clauses}},
 		returnStmt(stringLit("")), // unreachable: the switch is total
 	}
+	params := make([]*goast.Field, 0, len(adt.Params)+2)
+	for i, v := range adt.Params {
+		params = append(params, &goast.Field{
+			Names: []*goast.Ident{ident(showParamName(i))},
+			Type: &goast.FuncType{
+				Params: &goast.FieldList{List: []*goast.Field{
+					{Type: ident(g.tyParamNames[v.ID])}, {Type: ident("bool")},
+				}},
+				Results: &goast.FieldList{List: []*goast.Field{{Type: ident("string")}}},
+			},
+		})
+	}
+	params = append(params,
+		&goast.Field{Names: []*goast.Ident{ident("v")}, Type: indexExpr(ident(mangleType(adt.Con.Name)), paramIdents)},
+		&goast.Field{Names: []*goast.Ident{ident("nested")}, Type: ident("bool")})
 	return &goast.FuncDecl{
 		Name: ident(showFunc(adt.Con.Name)),
 		Type: &goast.FuncType{
-			Params: &goast.FieldList{List: []*goast.Field{
-				{Names: []*goast.Ident{ident("v")}, Type: ident(mangleType(adt.Con.Name))},
-				{Names: []*goast.Ident{ident("nested")}, Type: ident("bool")},
-			}},
-			Results: &goast.FieldList{List: []*goast.Field{{Type: ident("string")}}},
+			TypeParams: g.typeParamFields(adt.Params),
+			Params:     &goast.FieldList{List: params},
+			Results:    &goast.FieldList{List: []*goast.Field{{Type: ident("string")}}},
 		},
 		Body: &goast.BlockStmt{List: body},
 	}
 }
 
-// showField renders one constructor field by its type.
+// showField renders one constructor field by its type: element-op param at a
+// type parameter, derived (possibly instantiated) show at an ADT, fangort at
+// a scalar.
 func (g *gen) showField(t types.Type, field goast.Expr) goast.Expr {
-	if sub := g.adtOf(t); sub != nil {
-		return callExpr(ident(showFunc(sub.Con.Name)), field, ident("true"))
+	if v, ok := t.(*types.TVar); ok && v.Rigid {
+		return callExpr(ident(g.showParamNames[v.ID]), field, ident("true"))
+	}
+	if g.adtOf(t) != nil {
+		return g.showCall(t, field, ident("true"))
 	}
 	g.usesFangort = true
 	switch g.unique(t) {

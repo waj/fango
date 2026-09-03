@@ -93,11 +93,13 @@ func (e *Env) DefineWorker(d *core.Def) {
 	delete(e.cells, d.Name)
 }
 
-// DefineProg installs every definition of a Core program.
+// DefineProg installs every definition of a Core program. Nullary generic
+// workers (polymorphic values, §8.4) register as workers: their zero-arg
+// calls re-evaluate the body per use, matching the compiled cost rule.
 func (e *Env) DefineProg(p *core.Prog) {
 	for i := range p.Defs {
 		d := &p.Defs[i]
-		if len(d.Params) > 0 {
+		if d.IsWorker() {
 			e.DefineWorker(d)
 		} else {
 			e.Define(d.Name, d.Body)

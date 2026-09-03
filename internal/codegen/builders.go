@@ -140,6 +140,17 @@ func callExpr(fn goast.Expr, args ...goast.Expr) goast.Expr {
 	return &goast.CallExpr{Fun: fn, Args: args}
 }
 
+// indexExpr is an explicit generic instantiation: `x[A]` / `x[A, B]`.
+func indexExpr(x goast.Expr, args []goast.Expr) goast.Expr {
+	if len(args) == 0 {
+		return x
+	}
+	if len(args) == 1 {
+		return &goast.IndexExpr{X: x, Index: args[0]}
+	}
+	return &goast.IndexListExpr{X: x, Indices: args}
+}
+
 func selector(pkg, name string) goast.Expr {
 	return &goast.SelectorExpr{X: ident(pkg), Sel: ident(name)}
 }

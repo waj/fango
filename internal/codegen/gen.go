@@ -31,6 +31,9 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 		adts:       map[int]*types.ADTInfo{},
 		neededEq:   map[int]bool{},
 		neededShow: map[int]bool{},
+		scalarEq:   map[int]bool{},
+		scalarShow: map[int]bool{},
+		caseVarTys: map[string]types.Type{},
 	}
 	for _, adt := range p.ADTs {
 		g.adts[adt.Con.Unique] = adt
@@ -50,10 +53,13 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 		if d == mainDef && mainIsUnit {
 			continue // no package var: the effect runs inside func main()
 		}
-		if len(d.Params) > 0 {
+		if d.IsWorker() {
+			// Includes nullary generic workers — polymorphic values emit as
+			// zero-parameter generic functions (§8.4).
 			decls = append(decls, g.workerDef(d))
 			continue
 		}
+		g.tyParamNames = nil
 		decls = append(decls, varDecl(mangleValue(d.Name), g.goType(d.Type), g.expr(d.Body, 0)))
 	}
 
@@ -67,8 +73,10 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 		decls = append(decls, funcDecl("main", assignBlank(ident(mangleValue("main")))))
 	}
 
-	// Derived eq/show, discovered during emission (on demand, §8.6).
+	// Derived eq/show, discovered during emission (on demand, §8.6), plus
+	// the scalar element-op helpers their synthesis demanded.
 	decls = append(decls, g.derivedDecls(p.ADTs)...)
+	decls = append(decls, g.scalarHelperDecls()...)
 
 	// Imports come from emission (fangort for prints, math for float
 	// specials), so they are prepended last — in a fixed order, for
@@ -100,6 +108,26 @@ type gen struct {
 	tmp         int // type-switch binding counter (ts0, ts1, …)
 	usesFangort bool
 	usesMath    bool
+
+	// tyParamNames maps the rigid vars of the definition (or derived
+	// function) currently being emitted to their Go type-parameter names
+	// (positional: A0, A1, …). Reset per definition.
+	tyParamNames map[int]string
+
+	// eqParamNames/showParamNames map an ADT's rigid params to the element-
+	// operation parameters of the derived eq/show being emitted (§8.6).
+	eqParamNames   map[int]string
+	showParamNames map[int]string
+
+	// scalarEq/scalarShow track which scalar element-op helpers (eqInt,
+	// showInt, …) call-site synthesis demanded.
+	scalarEq   map[int]bool
+	scalarShow map[int]bool
+
+	// caseVarTys records the (instantiated) types of case scrutinee binders
+	// and field temporaries, so nested constructor switches know their
+	// column's type arguments.
+	caseVarTys map[string]types.Type
 }
 
 func (g *gen) unique(t types.Type) int {
@@ -113,10 +141,9 @@ func (g *gen) unique(t types.Type) int {
 // derived show piped through fangort.PrintString for ADTs.
 func (g *gen) printCall(arg goast.Expr, t types.Type) goast.Expr {
 	g.usesFangort = true
-	if adt := g.adtOf(t); adt != nil {
-		g.needShow(adt)
+	if g.adtOf(t) != nil {
 		return callExpr(selector("fangort", "PrintString"),
-			callExpr(ident(showFunc(adt.Con.Name)), arg, ident("false")))
+			g.showCall(t, arg, ident("false")))
 	}
 	return callExpr(selector("fangort", g.printFn(t)), arg)
 }
@@ -139,14 +166,52 @@ func (g *gen) printFn(t types.Type) string {
 
 // workerDef emits a top-level function definition as an uncurried Go func
 // (§8.2 item 1): the parameter types peel off the curried fango type, the
-// body emits in return-position statement context.
+// body emits in return-position statement context. A generic definition's
+// TyParams become Go type parameters — `any` for General vars,
+// fangort.Number for Number-kinded ones (§7.3, §8.4).
 func (g *gen) workerDef(d *core.Def) goast.Decl {
+	g.tyParamNames = tyParamNames(d.TyParams)
 	argTys, ret := core.PeelFun(d.Type, len(d.Params))
 	params := make([]paramSpec, len(d.Params))
 	for i, name := range d.Params {
 		params[i] = paramSpec{name: mangleValue(name), typ: g.goType(argTys[i])}
 	}
-	return workerDecl(mangleValue(d.Name), params, g.goType(ret), g.retStmts(d.Body))
+	decl := workerDecl(mangleValue(d.Name), params, g.goType(ret), g.retStmts(d.Body)).(*goast.FuncDecl)
+	decl.Type.TypeParams = g.typeParamFields(d.TyParams)
+	return decl
+}
+
+// tyParamNames assigns positional Go names (A0, A1, …) to a definition's
+// rigid type variables.
+func tyParamNames(vars []*types.TVar) map[int]string {
+	if len(vars) == 0 {
+		return nil
+	}
+	m := make(map[int]string, len(vars))
+	for i, v := range vars {
+		m[v.ID] = fmt.Sprintf("A%d", i)
+	}
+	return m
+}
+
+// typeParamFields builds the [A0 any, A1 fangort.Number] type-parameter list.
+func (g *gen) typeParamFields(vars []*types.TVar) *goast.FieldList {
+	if len(vars) == 0 {
+		return nil
+	}
+	fields := make([]*goast.Field, len(vars))
+	for i, v := range vars {
+		var constraint goast.Expr = ident("any")
+		if v.Kind == types.Number {
+			g.usesFangort = true
+			constraint = selector("fangort", "Number")
+		}
+		fields[i] = &goast.Field{
+			Names: []*goast.Ident{ident(g.tyParamNames[v.ID])},
+			Type:  constraint,
+		}
+	}
+	return &goast.FieldList{List: fields}
 }
 
 // retStmts emits an expression in return-position statement context —
@@ -172,8 +237,17 @@ func (g *gen) retStmts(e core.Expr) []goast.Stmt {
 
 // goType maps a fango type to its unboxed Go representation (DESIGN.md
 // §8.1). Int is int64, not int: identical overflow behavior on every GOARCH.
+// Rigid type variables map to the enclosing definition's Go type parameters;
+// parameterized ADTs to instantiated generic types (§8.4).
 func (g *gen) goType(t types.Type) goast.Expr {
 	switch t := t.(type) {
+	case *types.TVar:
+		if t.Rigid {
+			if name, ok := g.tyParamNames[t.ID]; ok {
+				return ident(name)
+			}
+		}
+		panic("codegen: type variable outside its definition's type parameters")
 	case *types.TFun:
 		return funcType(g.goType(t.Arg), g.goType(t.Ret))
 	case *types.TCon:
@@ -190,13 +264,24 @@ func (g *gen) goType(t types.Type) goast.Expr {
 			return &goast.StructType{Fields: &goast.FieldList{}}
 		default:
 			if adt, ok := g.adts[t.Unique]; ok {
-				return ident(mangleType(adt.Con.Name))
+				return indexExpr(ident(mangleType(adt.Con.Name)), g.goTypes(t.Args))
 			}
 			panic(fmt.Sprintf("codegen: unknown type constructor %s", t.Name))
 		}
 	default:
 		panic(fmt.Sprintf("codegen: unhandled type %s", types.Show(t)))
 	}
+}
+
+func (g *gen) goTypes(ts []types.Type) []goast.Expr {
+	if len(ts) == 0 {
+		return nil
+	}
+	out := make([]goast.Expr, len(ts))
+	for i, t := range ts {
+		out[i] = g.goType(t)
+	}
+	return out
 }
 
 var goOps = map[string]gotoken.Token{
@@ -229,6 +314,14 @@ const unaryPrec = 6
 func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 	switch e := e.(type) {
 	case *core.IntLit:
+		// At a Number-kinded type parameter, convert explicitly: Go does not
+		// implicitly convert untyped constants in operations whose other
+		// operand has a type-parameter type. The conversion also pins the
+		// §9.6 semantics — at a float64 instantiation the constant rounds,
+		// exactly like the interpreter's numeric promotion.
+		if v, ok := e.Ty.(*types.TVar); ok && v.Rigid {
+			return callExpr(ident(g.tyParamNames[v.ID]), intLit(e.Val))
+		}
 		return intLit(e.Val)
 	case *core.FloatLit:
 		return g.floatLit(e.Val)
@@ -263,7 +356,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			for i, a := range e.Args {
 				args[i] = g.expr(a, 0)
 			}
-			return callExpr(ident(mangleValue(ref.Name)), args...)
+			// Explicit instantiation, always — never Go's own inference (§8.4).
+			return callExpr(indexExpr(ident(mangleValue(ref.Name)), g.goTypes(e.TyArgs)), args...)
 		case core.Value:
 			// One typed indirect call per application; chains render
 			// e(a)(b). Call is a Go primary expression — no parens needed,
@@ -285,11 +379,11 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return parenIf(parentPrec > 0, &goast.UnaryExpr{Op: gotoken.SUB, X: operand})
 	case *core.BinOp:
 		// Equality at an ADT type calls the derived eq (§8.6); everything
-		// else compiles to a native Go operator.
+		// else — including Number-kinded type params (§7.3) — compiles to a
+		// native Go operator.
 		if e.Op == "==" || e.Op == "/=" {
-			if adt := g.adtOf(e.L.Type()); adt != nil {
-				g.needEq(adt)
-				call := callExpr(ident(eqFunc(adt.Con.Name)), g.expr(e.L, 0), g.expr(e.R, 0))
+			if g.adtOf(e.L.Type()) != nil {
+				call := g.eqCall(e.L.Type(), g.expr(e.L, 0), g.expr(e.R, 0))
 				if e.Op == "/=" {
 					return &goast.UnaryExpr{Op: gotoken.NOT, X: call}
 				}
