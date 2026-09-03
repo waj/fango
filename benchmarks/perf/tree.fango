@@ -1,0 +1,15 @@
+type Tree a = Leaf | Node (Tree a) a (Tree a)
+
+build : Int -> Int -> Tree Int
+build d x = if d < 1 then Leaf else Node (build (d - 1) (x * 2)) x (build (d - 1) (x * 2 + 1))
+
+total : Tree Int -> Int
+total t =
+    case t of
+        Leaf -> 0
+        Node l x r -> total l + x + total r
+
+loop : Int -> Int -> Int
+loop i acc = if i < 1 then acc else loop (i - 1) (acc + total (build 16 1))
+
+main = print (loop 20 0)

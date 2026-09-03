@@ -30,6 +30,13 @@ type baselines struct {
 	ADTColdMs          float64 `json:"adt_cold_ms"`
 	ADTWarmUnchangedMs float64 `json:"adt_warm_unchanged_ms"`
 	ADTWarmChangedMs   float64 `json:"adt_warm_changed_ms"`
+
+	// The §11 generics-heavy program (~500 lines, many distinct
+	// instantiations), added in S5 — the empirical detector for risk #3's
+	// Go-generics build blowup.
+	PolyColdMs          float64 `json:"poly_cold_ms"`
+	PolyWarmUnchangedMs float64 `json:"poly_warm_unchanged_ms"`
+	PolyWarmChangedMs   float64 `json:"poly_warm_changed_ms"`
 }
 
 const (
@@ -101,14 +108,22 @@ func TestCompileLatency(t *testing.T) {
 		writeADTProgram(t, adtEntry, lit)
 	})
 
-	t.Logf("hello: cold=%.0fms warm-unchanged=%.0fms warm-changed=%.0fms  adt500: cold=%.0fms warm-unchanged=%.0fms warm-changed=%.0fms",
-		cold, warmUnchanged, warmChanged, adtCold, adtWarmUnchanged, adtWarmChanged)
+	polyWork := t.TempDir()
+	polyEntry := filepath.Join(polyWork, "poly500.fango")
+	polyCold, polyWarmUnchanged, polyWarmChanged := measure(t, fangoBin, polyEntry, polyWork, func(lit int) {
+		writePolyProgram(t, polyEntry, lit)
+	})
+
+	t.Logf("hello: cold=%.0fms warm-unchanged=%.0fms warm-changed=%.0fms  adt500: cold=%.0fms warm-unchanged=%.0fms warm-changed=%.0fms  poly500: cold=%.0fms warm-unchanged=%.0fms warm-changed=%.0fms",
+		cold, warmUnchanged, warmChanged, adtCold, adtWarmUnchanged, adtWarmChanged,
+		polyCold, polyWarmUnchanged, polyWarmChanged)
 
 	path := filepath.Join("baselines", "latency.json")
 	if *updateBaselines {
 		data, _ := json.MarshalIndent(baselines{
 			cold, warmUnchanged, warmChanged,
 			adtCold, adtWarmUnchanged, adtWarmChanged,
+			polyCold, polyWarmUnchanged, polyWarmChanged,
 		}, "", "  ")
 		if err := os.MkdirAll("baselines", 0o755); err != nil {
 			t.Fatal(err)
@@ -142,6 +157,9 @@ func TestCompileLatency(t *testing.T) {
 	check("adt-cold", adtCold, base.ADTColdMs, budgetColdMs)
 	check("adt-warm-unchanged", adtWarmUnchanged, base.ADTWarmUnchangedMs, budgetWarmUnchangedMs)
 	check("adt-warm-changed", adtWarmChanged, base.ADTWarmChangedMs, budgetADTWarmChangedMs)
+	check("poly-cold", polyCold, base.PolyColdMs, budgetColdMs)
+	check("poly-warm-unchanged", polyWarmUnchanged, base.PolyWarmUnchangedMs, budgetWarmUnchangedMs)
+	check("poly-warm-changed", polyWarmChanged, base.PolyWarmChangedMs, budgetADTWarmChangedMs)
 }
 
 func buildCLI(t *testing.T) string {
@@ -191,6 +209,45 @@ func writeADTProgram(t *testing.T, path string, lit int) {
 	b.WriteString("    t0")
 	for i := 1; i < n; i++ {
 		fmt.Fprintf(&b, " + t%d", i)
+	}
+	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "main = total + %d\n", lit)
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writePolyProgram writes the §11 generics-heavy latency program: ~25
+// parameterized two-ctor types, a generic case function and a generic
+// builder per type, and a main instantiating every one at Int, Float, and
+// String — many distinct instantiations, the Go-generics build-blowup
+// detector (risk #3). warm-changed touches only main's literal.
+func writePolyProgram(t *testing.T, path string, lit int) {
+	t.Helper()
+	var b strings.Builder
+	const n = 25
+	for i := range n {
+		fmt.Fprintf(&b, "type T%d a = A%d a | B%d a (T%d a)\n\n", i, i, i, i)
+		fmt.Fprintf(&b, "depth%d : T%d a -> Int\n", i, i)
+		fmt.Fprintf(&b, "depth%d v =\n", i)
+		b.WriteString("    case v of\n")
+		fmt.Fprintf(&b, "        A%d _ -> 1\n", i)
+		fmt.Fprintf(&b, "        B%d _ rest -> 1 + depth%d rest\n\n", i, i)
+		fmt.Fprintf(&b, "mk%d : Int -> a -> T%d a\n", i, i)
+		fmt.Fprintf(&b, "mk%d n x = if n < 1 then A%d x else B%d x (mk%d (n - 1) x)\n\n", i, i, i, i)
+	}
+	b.WriteString("total =\n")
+	for i := range n {
+		fmt.Fprintf(&b, "    i%d = depth%d (mk%d %d 1)\n", i, i, i, i%4)
+		fmt.Fprintf(&b, "    f%d = depth%d (mk%d %d 1.5)\n", i, i, i, (i+1)%4)
+		fmt.Fprintf(&b, "    s%d = depth%d (mk%d %d \"s\")\n", i, i, i, (i+2)%4)
+	}
+	b.WriteString("    i0")
+	for i := range n {
+		if i > 0 {
+			fmt.Fprintf(&b, " + i%d", i)
+		}
+		fmt.Fprintf(&b, " + f%d + s%d", i, i)
 	}
 	b.WriteString("\n\n")
 	fmt.Fprintf(&b, "main = total + %d\n", lit)

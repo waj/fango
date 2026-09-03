@@ -1,0 +1,7 @@
+rep : Int -> String -> String
+rep n s = if n < 1 then "" else s ++ rep (n - 1) s
+
+main =
+    a = rep 20000 "abcdefgh"
+    b = rep 20000 "abcdefgh"
+    print (a == b)

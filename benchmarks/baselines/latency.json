@@ -1,8 +1,11 @@
 {
-  "cold_ms": 439.25,
-  "warm_unchanged_ms": 28.173,
-  "warm_changed_ms": 482.839,
-  "adt_cold_ms": 455.337,
-  "adt_warm_unchanged_ms": 29.559,
-  "adt_warm_changed_ms": 487.819
+  "cold_ms": 434.376,
+  "warm_unchanged_ms": 14.454,
+  "warm_changed_ms": 460.218,
+  "adt_cold_ms": 434.751,
+  "adt_warm_unchanged_ms": 25.466,
+  "adt_warm_changed_ms": 477.448,
+  "poly_cold_ms": 439.002,
+  "poly_warm_unchanged_ms": 26.372,
+  "poly_warm_changed_ms": 510.099
 }
