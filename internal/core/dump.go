@@ -9,89 +9,122 @@ import (
 )
 
 // Dump renders Core as S-expressions with explicit types — the golden
-// format for testdata/core. Frozen: it is what makes defaulting (and later
-// lifting and decision trees) visible in review.
+// format for testdata/core. Frozen: it is what makes defaulting, lifting,
+// instantiation plumbing, and decision trees visible in review. Each type
+// declaration and each definition dumps through one shared printer, so its
+// rigid type variables get consistent positional names (a, b, …) across
+// every type in that definition.
 func Dump(p *Prog) string {
 	var b strings.Builder
 	b.WriteString("(core")
 	for _, adt := range p.ADTs {
+		pr := types.NewPrinter()
 		fmt.Fprintf(&b, "\n  (type %s", adt.Con.Name)
+		if len(adt.Params) > 0 {
+			names := make([]string, len(adt.Params))
+			for i, v := range adt.Params {
+				names[i] = pr.Type(v)
+			}
+			fmt.Fprintf(&b, " (params %s)", strings.Join(names, " "))
+		}
 		for _, c := range adt.Ctors {
 			fmt.Fprintf(&b, " (ctor %s", c.Name)
 			for _, f := range c.Fields {
-				fmt.Fprintf(&b, " %s", types.Show(f))
+				fmt.Fprintf(&b, " %s", pr.Atom(f))
 			}
 			b.WriteString(")")
 		}
 		b.WriteString(")")
 	}
-	for _, d := range p.Defs {
-		if len(d.Params) > 0 {
-			fmt.Fprintf(&b, "\n  (def %s (params %s) %s %s)",
-				d.Name, strings.Join(d.Params, " "), types.Show(d.Type), DumpExpr(d.Body))
-		} else {
-			fmt.Fprintf(&b, "\n  (def %s %s %s)", d.Name, types.Show(d.Type), DumpExpr(d.Body))
+	for i := range p.Defs {
+		d := &p.Defs[i]
+		pr := types.NewPrinter()
+		fmt.Fprintf(&b, "\n  (def %s", d.Name)
+		if len(d.TyParams) > 0 {
+			names := make([]string, len(d.TyParams))
+			for i, v := range d.TyParams {
+				names[i] = pr.Type(v)
+			}
+			fmt.Fprintf(&b, " (typarams %s)", strings.Join(names, " "))
 		}
+		if len(d.Params) > 0 {
+			fmt.Fprintf(&b, " (params %s)", strings.Join(d.Params, " "))
+		}
+		fmt.Fprintf(&b, " %s %s)", pr.Type(d.Type), dumpExpr(d.Body, pr))
 	}
 	b.WriteString(")\n")
 	return b.String()
 }
 
-func DumpExpr(e Expr) string {
+// DumpExpr renders one expression with a fresh printer — single-expression
+// contexts (tests, literal dedup keys).
+func DumpExpr(e Expr) string { return dumpExpr(e, types.NewPrinter()) }
+
+// DumpTree renders a decision tree with a fresh printer.
+func DumpTree(t Tree) string { return dumpTree(t, types.NewPrinter()) }
+
+func dumpExpr(e Expr, pr *types.Printer) string {
 	switch e := e.(type) {
 	case *IntLit:
-		return fmt.Sprintf("(int %d %s)", e.Val, types.Show(e.Ty))
+		return fmt.Sprintf("(int %d %s)", e.Val, pr.Type(e.Ty))
 	case *FloatLit:
-		return fmt.Sprintf("(float %s %s)", strconv.FormatFloat(e.Val, 'g', -1, 64), types.Show(e.Ty))
+		return fmt.Sprintf("(float %s %s)", strconv.FormatFloat(e.Val, 'g', -1, 64), pr.Type(e.Ty))
 	case *StringLit:
-		return fmt.Sprintf("(string %q %s)", e.Val, types.Show(e.Ty))
+		return fmt.Sprintf("(string %q %s)", e.Val, pr.Type(e.Ty))
 	case *BoolLit:
-		return fmt.Sprintf("(bool %t %s)", e.Val, types.Show(e.Ty))
+		return fmt.Sprintf("(bool %t %s)", e.Val, pr.Type(e.Ty))
 	case *Neg:
-		return fmt.Sprintf("(neg %s %s)", types.Show(e.Ty), DumpExpr(e.Operand))
+		return fmt.Sprintf("(neg %s %s)", pr.Type(e.Ty), dumpExpr(e.Operand, pr))
 	case *If:
-		return fmt.Sprintf("(if %s %s %s %s)", types.Show(e.Ty), DumpExpr(e.Cond), DumpExpr(e.Then), DumpExpr(e.Else))
+		return fmt.Sprintf("(if %s %s %s %s)", pr.Type(e.Ty), dumpExpr(e.Cond, pr), dumpExpr(e.Then, pr), dumpExpr(e.Else, pr))
 	case *Print:
-		return fmt.Sprintf("(print %s)", DumpExpr(e.Arg))
+		return fmt.Sprintf("(print %s)", dumpExpr(e.Arg, pr))
 	case *Let:
 		form := "let"
 		if e.Rec {
 			form = "letrec"
 		}
-		return fmt.Sprintf("(%s %s %s %s %s)", form, e.Name, types.Show(e.Ty), DumpExpr(e.Rhs), DumpExpr(e.Body))
+		return fmt.Sprintf("(%s %s %s %s %s)", form, e.Name, pr.Type(e.Ty), dumpExpr(e.Rhs, pr), dumpExpr(e.Body, pr))
 	case *Lambda:
-		return fmt.Sprintf("(lam %s %s %s)", e.Param, types.Show(e.Ty), DumpExpr(e.Body))
+		return fmt.Sprintf("(lam %s %s %s)", e.Param, pr.Type(e.Ty), dumpExpr(e.Body, pr))
 	case *VarRef:
 		if len(e.TyArgs) > 0 {
-			args := make([]string, len(e.TyArgs))
-			for i, t := range e.TyArgs {
-				args[i] = types.Show(t)
-			}
-			return fmt.Sprintf("(var %s @[%s] %s)", e.Name, strings.Join(args, " "), types.Show(e.Ty))
+			return fmt.Sprintf("(var %s @[%s] %s)", e.Name, dumpTypes(e.TyArgs, pr), pr.Type(e.Ty))
 		}
-		return fmt.Sprintf("(var %s %s)", e.Name, types.Show(e.Ty))
+		return fmt.Sprintf("(var %s %s)", e.Name, pr.Type(e.Ty))
 	case *BinOp:
-		return fmt.Sprintf("(binop %s %s %s %s)", e.Op, types.Show(e.Ty), DumpExpr(e.L), DumpExpr(e.R))
+		return fmt.Sprintf("(binop %s %s %s %s)", e.Op, pr.Type(e.Ty), dumpExpr(e.L, pr), dumpExpr(e.R, pr))
 	case *App:
 		kinds := map[CalleeKind]string{Worker: "worker", Ctor: "ctor", Value: "value"}
-		parts := []string{fmt.Sprintf("(app/%s %s", kinds[e.CalleeKind], DumpExpr(e.Callee))}
-		for _, a := range e.Args {
-			parts = append(parts, DumpExpr(a))
+		head := "(app/" + kinds[e.CalleeKind]
+		if len(e.TyArgs) > 0 {
+			head += fmt.Sprintf(" @[%s]", dumpTypes(e.TyArgs, pr))
 		}
-		return strings.Join(parts, " ") + fmt.Sprintf(" %s)", types.Show(e.Ty))
+		parts := []string{head + " " + dumpExpr(e.Callee, pr)}
+		for _, a := range e.Args {
+			parts = append(parts, dumpExpr(a, pr))
+		}
+		return strings.Join(parts, " ") + fmt.Sprintf(" %s)", pr.Type(e.Ty))
 	case *Case:
 		return fmt.Sprintf("(case %s %s %s %s)",
-			types.Show(e.Ty), DumpExpr(e.Scrut), e.Bind, DumpTree(e.Tree))
+			pr.Type(e.Ty), dumpExpr(e.Scrut, pr), e.Bind, dumpTree(e.Tree, pr))
 	default:
 		panic(fmt.Sprintf("core.DumpExpr: unhandled %T", e))
 	}
 }
 
-// DumpTree renders a decision tree in the golden S-expression format.
-func DumpTree(t Tree) string {
+func dumpTypes(ts []types.Type, pr *types.Printer) string {
+	out := make([]string, len(ts))
+	for i, t := range ts {
+		out[i] = pr.Type(t)
+	}
+	return strings.Join(out, " ")
+}
+
+func dumpTree(t Tree, pr *types.Printer) string {
 	switch t := t.(type) {
 	case *Leaf:
-		return fmt.Sprintf("(leaf %s)", DumpExpr(t.Body))
+		return fmt.Sprintf("(leaf %s)", dumpExpr(t.Body, pr))
 	case *SwitchCtor:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(switchctor %s", t.Scrut)
@@ -103,10 +136,10 @@ func DumpTree(t Tree) string {
 				}
 				fmt.Fprintf(&b, " %s", bind)
 			}
-			fmt.Fprintf(&b, " %s)", DumpTree(c.Tree))
+			fmt.Fprintf(&b, " %s)", dumpTree(c.Tree, pr))
 		}
 		if t.Default != nil {
-			fmt.Fprintf(&b, " (default %s)", DumpTree(t.Default))
+			fmt.Fprintf(&b, " (default %s)", dumpTree(t.Default, pr))
 		}
 		b.WriteString(")")
 		return b.String()
@@ -114,9 +147,9 @@ func DumpTree(t Tree) string {
 		var b strings.Builder
 		fmt.Fprintf(&b, "(switchlit %s", t.Scrut)
 		for _, c := range t.Cases {
-			fmt.Fprintf(&b, " (%s %s)", DumpExpr(c.Lit), DumpTree(c.Tree))
+			fmt.Fprintf(&b, " (%s %s)", dumpExpr(c.Lit, pr), dumpTree(c.Tree, pr))
 		}
-		fmt.Fprintf(&b, " (default %s))", DumpTree(t.Default))
+		fmt.Fprintf(&b, " (default %s))", dumpTree(t.Default, pr))
 		return b.String()
 	default:
 		panic(fmt.Sprintf("core.DumpTree: unhandled %T", t))

@@ -37,7 +37,9 @@ func (el *elab) caseExpr(e *ast.Case, ty types.Type) core.Expr {
 	witnessMatrix := make([][]ast.Pattern, len(e.Branches))
 	for i := range e.Branches {
 		br := &e.Branches[i]
+		n := el.pushPatternVars(br.Pattern)
 		m.bodies[i] = el.expr(br.Body)
+		el.popScope(n)
 		m.spans[i] = br.Pattern.Span()
 		rows[i] = row{pats: []ast.Pattern{br.Pattern}, idx: i}
 		witnessMatrix[i] = []ast.Pattern{br.Pattern}
@@ -107,6 +109,41 @@ func (m *matcher) adtOf(t types.Type) *types.ADTInfo {
 	return nil
 }
 
+// instFields is a constructor's field types instantiated at the column
+// type's arguments — the occurrence-level view a parameterized scrutinee
+// (`List Int`) demands.
+func instFields(adt *types.ADTInfo, c *types.CtorInfo, colTy types.Type) []types.Type {
+	if len(adt.Params) == 0 {
+		return c.Fields
+	}
+	con, ok := colTy.(*types.TCon)
+	if !ok {
+		panic("elaborate: constructor pattern at a non-constructor type")
+	}
+	return adt.InstFields(c, con.Args)
+}
+
+// pushPatternVars enters a branch pattern's variables (with zonked types)
+// into the elaborator's scope — the free-variable universe for lifting —
+// returning how many were pushed.
+func (el *elab) pushPatternVars(p ast.Pattern) int {
+	n := 0
+	var walk func(ast.Pattern)
+	walk = func(p ast.Pattern) {
+		switch p := p.(type) {
+		case *ast.PVar:
+			el.pushScope(p.Name, el.zonkDefault(el.ck.PatTypes[p]))
+			n++
+		case *ast.PCtor:
+			for _, a := range p.Args {
+				walk(a)
+			}
+		}
+	}
+	walk(p)
+	return n
+}
+
 // ---------------------------------------------------------------------------
 // Exhaustiveness: usefulness of the all-wildcard vector, with witness
 // reconstruction (Maranget's U/I algorithm specialized to q = _…_).
@@ -133,7 +170,8 @@ func (m *matcher) witness(tys []types.Type, matrix [][]ast.Pattern) []string {
 		// Complete signature: a witness must hide under some constructor.
 		for _, c := range adt.Ctors {
 			spec := specializeWitness(c, matrix)
-			if w := m.witness(append(append([]types.Type{}, c.Fields...), tys[1:]...), spec); w != nil {
+			fields := instFields(adt, c, tys[0])
+			if w := m.witness(append(append([]types.Type{}, fields...), tys[1:]...), spec); w != nil {
 				head := renderCtor(c.Name, w[:len(c.Fields)])
 				return append([]string{head}, w[len(c.Fields):]...)
 			}
@@ -272,9 +310,11 @@ func (m *matcher) switchCtor(occs []occurrence, rows []row, col int, adt *types.
 		if !present[ctor.Name] {
 			continue
 		}
-		// Field occurrences: fresh temps spliced in place of the column.
-		fieldOccs := make([]occurrence, len(ctor.Fields))
-		for j, ft := range ctor.Fields {
+		// Field occurrences: fresh temps spliced in place of the column,
+		// typed at the scrutinee's instantiation.
+		fields := instFields(adt, ctor, occs[col].ty)
+		fieldOccs := make([]occurrence, len(fields))
+		for j, ft := range fields {
 			fieldOccs[j] = occurrence{name: fmt.Sprintf("_c%d", m.el.tmp), ty: ft}
 			m.el.tmp++
 		}

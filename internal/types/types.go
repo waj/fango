@@ -101,6 +101,33 @@ func SubstRigid(t Type, m map[int]Type) Type {
 	}
 }
 
+// RigidVarsIn collects the rigid variables free in t, deduplicated, in
+// first-occurrence order — a definition's type parameters, in the order
+// codegen emits them and call sites instantiate them.
+func RigidVarsIn(t Type) []*TVar {
+	var vars []*TVar
+	seen := map[int]bool{}
+	var walk func(Type)
+	walk = func(t Type) {
+		switch t := t.(type) {
+		case *TVar:
+			if t.Rigid && !seen[t.ID] {
+				seen[t.ID] = true
+				vars = append(vars, t)
+			}
+		case *TCon:
+			for _, a := range t.Args {
+				walk(a)
+			}
+		case *TFun:
+			walk(t.Arg)
+			walk(t.Ret)
+		}
+	}
+	walk(t)
+	return vars
+}
+
 // Equal is structural type equality. String comparison via Show is not a
 // substitute: the printer normalizes variables per printer instance, so two
 // different types can print alike (and vice versa) once TVars are legal in

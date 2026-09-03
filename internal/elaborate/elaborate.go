@@ -32,13 +32,17 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 	p := &core.Prog{ADTs: ck.ADTOrder}
 	var errs []diag.Error
 	for _, info := range infos {
-		def, declErrs := Decl(info, ck)
+		defs, declErrs := Decl(info, ck)
 		errs = append(errs, declErrs...)
-		p.Defs = append(p.Defs, def)
+		p.Defs = append(p.Defs, defs...)
+		def := &defs[0]
 		if def.Name == "main" && len(def.Params) == 0 {
 			if _, isFn := def.Type.(*types.TFun); isFn {
 				errs = append(errs, diag.Errorf(info.NameSpan, "BAD MAIN",
 					"For now `main` must produce an Int, Float, String, Bool, or ()\n— a function-typed `main` cannot run until effects land (S7)."))
+			} else if len(def.TyParams) > 0 {
+				errs = append(errs, diag.Errorf(info.NameSpan, "BAD MAIN",
+					"`main` must be a concrete value, but its type `%s` still has\ntype variables in it.", types.Show(def.Type)))
 			}
 		}
 	}
@@ -46,27 +50,38 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 }
 
 // Decl elaborates one declaration — also the REPL's per-input entry point.
-func Decl(info infer.DeclInfo, ck *infer.Checker) (core.Def, []diag.Error) {
-	el := &elab{ck: ck}
-	// Visible polymorphism is rejected BEFORE defaulting (defaulting would
-	// destroy the evidence by writing General → Unit into the sub). This
-	// fires only for genuinely underdetermined definitions: batch checking
-	// solves the whole module first, so a later monomorphic use pins an
-	// unannotated helper.
-	if v := ck.FreeGeneralVar(info.Type); v != nil {
-		el.polyError(info.Name, info.NameSpan, info.Type)
+// The first returned Def is the declaration itself; any further Defs are
+// lambda-lifted polymorphic block bindings (§8.4, lift.go).
+func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
+	el := newElab(ck, info.Name, info.Scheme)
+	if !ck.AllowPoly {
+		// Visible polymorphism is rejected BEFORE defaulting (defaulting
+		// would destroy the evidence by writing General → Unit into the
+		// sub). This fires only for genuinely underdetermined definitions:
+		// batch checking solves the whole module first, so a later
+		// monomorphic use pins an unannotated helper. Deleted with the S5
+		// staging flag.
+		if v := ck.FreeGeneralVar(info.Type); v != nil {
+			el.polyError(info.Name, info.NameSpan, info.Type)
+		}
 	}
+	defType := el.zonkDefault(info.Type)
 	params := make([]string, len(info.Params))
-	for i, p := range info.Params {
-		params[i] = p.Name
+	if len(info.Params) > 0 {
+		argTys, _ := core.PeelFun(defType, len(info.Params))
+		for i, p := range info.Params {
+			params[i] = p.Name
+			el.pushScope(p.Name, argTys[i])
+		}
 	}
 	def := core.Def{
-		Name:   info.Name,
-		Type:   el.zonkDefault(info.Type),
-		Params: params,
-		Body:   el.anf(el.expr(info.Body)),
+		Name:     info.Name,
+		Type:     defType,
+		TyParams: types.RigidVarsIn(defType),
+		Params:   params,
+		Body:     el.anf(el.expr(info.Body)),
 	}
-	return def, el.errs
+	return append([]core.Def{def}, el.aux...), el.errs
 }
 
 func (el *elab) polyError(name string, sp source.Span, ty types.Type) {
@@ -76,17 +91,60 @@ func (el *elab) polyError(name string, sp source.Span, ty types.Type) {
 		name, p.Type(el.ck.Sub.Apply(ty)), name))
 }
 
-// Expr elaborates one expression against the checker's solved types.
-func Expr(e ast.Expr, ck *infer.Checker) (core.Expr, []diag.Error) {
-	el := &elab{ck: ck}
+// Expr elaborates one expression against the checker's solved types. The
+// returned aux Defs are lambda-lifted polymorphic block bindings (REPL
+// inputs can contain blocks); the caller must install them before
+// evaluating the expression.
+func Expr(e ast.Expr, ck *infer.Checker) (core.Expr, []core.Def, []diag.Error) {
+	el := newElab(ck, "", types.Scheme{})
 	ce := el.anf(el.expr(e))
-	return ce, el.errs
+	return ce, el.aux, el.errs
 }
 
 type elab struct {
 	ck   *infer.Checker
 	errs []diag.Error
 	tmp  int // fresh-name counter for spine temporaries, per Decl/Expr
+
+	// declName/declScheme identify the declaration being elaborated: its
+	// self-references must instantiate against THIS scheme (the REPL
+	// elaborates before binding, so the environment may hold a previous
+	// generation).
+	declName   string
+	declScheme types.Scheme
+
+	// scope tracks the AST-level locals in scope (params, block bindings,
+	// pattern variables) with zonked types — the free-variable universe for
+	// lambda-lifting (lift.go).
+	scope    []scopeVar
+	scopeIdx map[string]int
+
+	// lifted maps a generalized block binding's source name to its lifted
+	// top-level definition; aux accumulates those definitions.
+	lifted map[string]*liftedLocal
+	aux    []core.Def
+}
+
+func newElab(ck *infer.Checker, declName string, declScheme types.Scheme) *elab {
+	return &elab{ck: ck, declName: declName, declScheme: declScheme,
+		scopeIdx: map[string]int{}, lifted: map[string]*liftedLocal{}}
+}
+
+type scopeVar struct {
+	name string
+	ty   types.Type // zonked at binding time
+}
+
+func (el *elab) pushScope(name string, ty types.Type) {
+	el.scopeIdx[name] = len(el.scope)
+	el.scope = append(el.scope, scopeVar{name, ty})
+}
+
+func (el *elab) popScope(n int) {
+	for i := len(el.scope) - n; i < len(el.scope); i++ {
+		delete(el.scopeIdx, el.scope[i].name)
+	}
+	el.scope = el.scope[:len(el.scope)-n]
 }
 
 // lambda nests a multi-parameter surface lambda into single-param Core
@@ -99,9 +157,12 @@ func (el *elab) lambda(params []ast.Param, body ast.Expr, funTy types.Type) core
 	if !ok {
 		panic("elaborate: lambda type is not a function type")
 	}
+	el.pushScope(params[0].Name, fn.Arg)
+	inner := el.lambda(params[1:], body, fn.Ret)
+	el.popScope(1)
 	return &core.Lambda{
 		Param: params[0].Name,
-		Body:  el.lambda(params[1:], body, fn.Ret),
+		Body:  inner,
 		Ty:    fn,
 	}
 }
@@ -121,10 +182,20 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 	case *ast.StringLit:
 		return &core.StringLit{Val: e.Value, Ty: ty}
 	case *ast.Var:
+		// A lifted local in first-class position gets the same curried-
+		// wrapper treatment as a worker (its frees are the leading args).
+		if lf := el.lifted[e.Name]; lf != nil {
+			return el.partial(el.liftedCallee(lf, ty), nil)
+		}
 		// A worker name in first-class position (not an application head —
 		// spine.go intercepts those) eta-expands into its curried wrapper.
 		if arity, isWorker := el.ck.Workers[e.Name]; isWorker {
 			return el.curriedWorkerRef(e.Name, ty, arity)
+		}
+		// A polymorphic top-level value compiled to a nullary generic worker
+		// (§8.4): every use is an instantiated zero-argument call.
+		if sch, ok := el.ck.Env.Lookup(e.Name); ok && len(sch.Vars) > 0 {
+			return el.nullaryValueUse(e.Name, sch, ty)
 		}
 		return &core.VarRef{Name: e.Name, Ty: ty}
 	case *ast.Ctor:
@@ -138,7 +209,7 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 			if !ok {
 				panic("elaborate: unknown constructor `" + e.Name + "` — the checker should have rejected this")
 			}
-			return el.ctorValue(info)
+			return el.ctorValue(info, ty)
 		}
 	case *ast.App:
 		if el.ck.PrintCalls[e] {
@@ -168,27 +239,54 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		// Fold bindings into a right-nested Let chain; every level carries
 		// the block's (result) type. RHSs elaborate in source order so
 		// defaulting is deterministic. Local functions become (possibly
-		// recursive) Lets of nested Lambdas.
-		lets := make([]*core.Let, len(e.Binds))
+		// recursive) Lets of nested Lambdas. Generalized bindings do not
+		// become Lets at all: they lambda-lift to top-level generic
+		// definitions (§8.4, lift.go) and their uses rewrite to calls.
+		var lets []*core.Let
+		pushed := 0
+		var liftedHere []string
 		for i := range e.Binds {
 			bind := &e.Binds[i]
 			bindTy := el.ck.BindTypes[bind]
-			if v := el.ck.FreeGeneralVar(bindTy); v != nil {
-				el.polyError(bind.Name, bind.NameSpan, bindTy)
+			if !el.ck.AllowPoly {
+				if v := el.ck.FreeGeneralVar(bindTy); v != nil {
+					el.polyError(bind.Name, bind.NameSpan, bindTy)
+				}
+			}
+			if sch := el.ck.BindSchemes[bind]; len(sch.Vars) > 0 {
+				el.liftBinding(bind, sch)
+				liftedHere = append(liftedHere, bind.Name)
+				continue
+			}
+			zonked := el.zonkDefault(bindTy)
+			isFn := len(bind.Params) > 0
+			if isFn {
+				// In scope inside its own body (recursion) — and inside any
+				// lift the body contains.
+				el.pushScope(bind.Name, zonked)
+				pushed++
 			}
 			var rhs core.Expr
-			if len(bind.Params) > 0 {
-				rhs = el.lambda(bind.Params, bind.Body, el.zonkDefault(bindTy))
+			if isFn {
+				rhs = el.lambda(bind.Params, bind.Body, zonked)
 			} else {
 				rhs = el.expr(bind.Body)
 			}
-			lets[i] = &core.Let{
+			if !isFn {
+				el.pushScope(bind.Name, zonked)
+				pushed++
+			}
+			lets = append(lets, &core.Let{
 				Name: bind.Name,
 				Rhs:  rhs,
-				Rec:  len(bind.Params) > 0 && core.Mentions(rhs, bind.Name),
-			}
+				Rec:  isFn && core.Mentions(rhs, bind.Name),
+			})
 		}
 		body := el.expr(e.Result)
+		el.popScope(pushed)
+		for _, name := range liftedHere {
+			delete(el.lifted, name)
+		}
 		for i := len(lets) - 1; i >= 0; i-- {
 			lets[i].Body = body
 			lets[i].Ty = body.Type()
@@ -207,12 +305,54 @@ func (el *elab) unique(t types.Type) int {
 	return -1
 }
 
+// numberVar reports whether t is a Number-kinded rigid variable — numeric
+// operators and comparisons compile natively on its Go type-set constraint
+// (§7.3), so it needs no equality staging.
+func numberVar(t types.Type) bool {
+	v, ok := t.(*types.TVar)
+	return ok && v.Rigid && v.Kind == types.Number
+}
+
+// generalVarIn returns a General-kinded rigid variable occurring anywhere in
+// t, or nil — the `==`-at-a-type-variable staging check (§8.6): equality at
+// such a type needs typeclass evidence, which arrives later.
+func generalVarIn(t types.Type) *types.TVar {
+	switch t := t.(type) {
+	case *types.TVar:
+		if t.Kind == types.General {
+			return t
+		}
+		return nil
+	case *types.TCon:
+		for _, a := range t.Args {
+			if v := generalVarIn(a); v != nil {
+				return v
+			}
+		}
+		return nil
+	case *types.TFun:
+		if v := generalVarIn(t.Arg); v != nil {
+			return v
+		}
+		return generalVarIn(t.Ret)
+	default:
+		return nil
+	}
+}
+
 // checkPrintable is the print cheat's ground check: scalars and declared
 // ADTs print (the latter via derived show, emitted on demand) — unless the
 // value can contain a function, which has no showable form.
 func (el *elab) checkPrintable(t types.Type, sp source.Span) {
 	switch el.unique(t) {
 	case el.ck.B.Int.Unique, el.ck.B.Float.Unique, el.ck.B.String.Unique, el.ck.B.Bool.Unique:
+		return
+	}
+	if len(types.RigidVarsIn(t)) > 0 {
+		// Unreachable today (print lives in ground main and defaulted REPL
+		// inputs), but the invariant is cheap to keep honest.
+		el.errs = append(el.errs, diag.Errorf(sp, "TYPE MISMATCH",
+			"`print` needs a concrete type, but this is a `%s`.", types.Show(t)))
 		return
 	}
 	if con, ok := t.(*types.TCon); ok {
@@ -239,6 +379,17 @@ func (el *elab) checkOperands(e *ast.BinOp, operandTy types.Type) {
 		switch u {
 		case b.Int.Unique, b.Float.Unique, b.String.Unique, b.Bool.Unique:
 		default:
+			// Number-kinded variables compare natively on their Go type-set
+			// constraint (§7.3); General type variables need typeclass
+			// evidence — staged until open question #3 is decided (§8.6).
+			if numberVar(operandTy) {
+				return
+			}
+			if v := generalVarIn(operandTy); v != nil {
+				el.errs = append(el.errs, diag.Errorf(e.OpSpan, "EQUALITY AT A TYPE VARIABLE",
+					"This (%s) compares values typed `%s` — equality at a type\nvariable arrives with typeclasses. For now, use (%s) only where the\ntype is concrete.", e.Op, types.Show(operandTy), e.Op))
+				return
+			}
 			// Declared ADTs get derived structural equality (§8.6) — except
 			// where a payload can contain a function, rejected at compile
 			// time (decidable at ground types; Elm crashes at runtime here).
@@ -258,6 +409,9 @@ func (el *elab) checkOperands(e *ast.BinOp, operandTy types.Type) {
 		switch u {
 		case b.Int.Unique, b.Float.Unique, b.String.Unique:
 		default:
+			if numberVar(operandTy) {
+				return
+			}
 			el.errs = append(el.errs, diag.Errorf(e.OpSpan, "TYPE MISMATCH",
 				"I cannot use (%s) with `%s` values. (%s) works on Int, Float,\nand String.", e.Op, types.Show(operandTy), e.Op))
 		}
@@ -324,6 +478,11 @@ func (el *elab) zonkDefault(t types.Type) types.Type {
 func (el *elab) defaultFree(t types.Type) {
 	switch t := t.(type) {
 	case *types.TVar:
+		if t.Rigid {
+			// Scheme-bound: the definition's own type parameter, not a
+			// residual meta. Defaulting it would poison the substitution.
+			return
+		}
 		switch t.Kind {
 		case types.Number:
 			el.ck.Sub[t.ID] = el.ck.B.Int

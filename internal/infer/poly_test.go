@@ -114,9 +114,11 @@ func TestPolyNegative(t *testing.T) {
 		// Constructor fields resolve in the closed parameter scope.
 		{"type T a = MkT b", "NAMING ERROR", 1},
 		{"type T a a = MkT a", "SHADOWING", 1},
-		// A block annotation must not claim a variable the enclosing
-		// definition pins down.
-		{"outer x =\n  y : a\n  y = x\n  y", "ANNOTATION TOO GENERAL", 2},
+		// A generalized block binding's annotation must not claim a variable
+		// the enclosing definition pins down. (Value bindings don't
+		// generalize — the monomorphism restriction — so the check applies
+		// to function and lambda bindings.)
+		{"outer x =\n  y : a -> a\n  y = \\z -> x\n  y", "ANNOTATION TOO GENERAL", 2},
 	}
 	for _, c := range cases {
 		_, _, errs := checkPoly(t, c.src)

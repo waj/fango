@@ -43,6 +43,10 @@ func (p *Printer) Type(t Type) string {
 	}
 }
 
+// Atom renders t parenthesized when it would be ambiguous in argument
+// position — constructor-field dumps and similar atom contexts.
+func (p *Printer) Atom(t Type) string { return p.atom(t) }
+
 // atom parenthesizes types that would be ambiguous as a type-application
 // argument: functions and nested applications (`Maybe (List a)`).
 func (p *Printer) atom(t Type) string {

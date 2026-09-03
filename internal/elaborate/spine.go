@@ -39,6 +39,14 @@ func (el *elab) app(e *ast.App) core.Expr {
 		args[len(rev)-1-i] = a
 	}
 
+	// Lifted local head? Its frees become leading arguments (lift.go).
+	if v, ok := head.(*ast.Var); ok {
+		if lf := el.lifted[v.Name]; lf != nil {
+			occTy := el.zonkDefault(el.ck.ExprTypes[head])
+			return el.calleeCall(el.liftedCallee(lf, occTy), args)
+		}
+	}
+
 	// Known worker head?
 	if v, ok := head.(*ast.Var); ok {
 		if arity, isWorker := el.ck.Workers[v.Name]; isWorker {
@@ -52,7 +60,8 @@ func (el *elab) app(e *ast.App) core.Expr {
 	// program never applies them).
 	if c, ok := head.(*ast.Ctor); ok {
 		if info, isCtor := el.ck.Ctors[c.Name]; isCtor && len(info.Fields) > 0 {
-			return el.ctorCall(info, args)
+			occTy := el.zonkDefault(el.ck.ExprTypes[head])
+			return el.calleeCall(el.ctorCallee(info, occTy), args)
 		}
 	}
 
@@ -78,24 +87,121 @@ func (el *elab) valueApp(callee, arg core.Expr) core.Expr {
 	}
 }
 
-// callee is a known-arity application head: a top-level worker or a
-// constructor. Both get the same saturation analysis; only the emitted
-// App's kind differs.
+// callee is a known-arity application head: a top-level worker, a
+// constructor, or a lifted local. All get the same saturation analysis; only
+// the emitted App's kind and leading arguments differ.
 type callee struct {
-	kind  core.CalleeKind
-	name  string
-	ty    types.Type // full curried type
-	arity int
-	ctor  *types.CtorInfo // when kind == core.Ctor
+	kind   core.CalleeKind
+	name   string
+	ty     types.Type      // full curried type AT THIS OCCURRENCE (instantiated)
+	arity  int             // total parameters, including pre
+	ctor   *types.CtorInfo // when kind == core.Ctor
+	tyArgs []types.Type    // explicit instantiation (§8.4); nil when monomorphic
+	pre    []core.Expr     // lifted locals: the captured frees, already-atomic leading args
 }
 
-func workerCallee(name string, workerTy types.Type, arity int) callee {
-	return callee{kind: core.Worker, name: name, ty: workerTy, arity: arity}
+func (el *elab) workerCallee(name string, workerTy types.Type, arity int) callee {
+	return callee{kind: core.Worker, name: name, ty: workerTy, arity: arity,
+		tyArgs: el.workerTyArgs(name, workerTy)}
 }
 
-func ctorCallee(info *types.CtorInfo) callee {
-	return callee{kind: core.Ctor, name: info.Name, ty: info.ValueType(),
+// ctorCallee builds a constructor callee at its occurrence type — the
+// constructor's generic ValueType instantiated at this use.
+func (el *elab) ctorCallee(info *types.CtorInfo, occTy types.Type) callee {
+	c := callee{kind: core.Ctor, name: info.Name, ty: occTy,
 		arity: len(info.Fields), ctor: info}
+	if adt := el.ck.ADTs[info.Result.Unique]; adt != nil && len(adt.Params) > 0 {
+		c.tyArgs = matchTyArgs(info.ValueType(), adt.Params, occTy)
+	}
+	return c
+}
+
+// workerTyArgs derives a worker occurrence's explicit instantiation by
+// matching the callee's generic type against the occurrence type (§8.4).
+// Matching — not recording at instantiate-time — is what also covers
+// self-recursive calls, which never pass through the scheme.
+func (el *elab) workerTyArgs(name string, occTy types.Type) []types.Type {
+	genTy, vars := el.calleeGeneric(name)
+	if len(vars) == 0 {
+		return nil
+	}
+	return matchTyArgs(genTy, vars, occTy)
+}
+
+// calleeGeneric is a callee's generic type and type parameters. The
+// declaration being elaborated answers for itself: the REPL elaborates
+// before binding, and a redefinition must not see its previous generation.
+func (el *elab) calleeGeneric(name string) (types.Type, []*types.TVar) {
+	var sch types.Scheme
+	if name == el.declName {
+		sch = el.declScheme
+	} else if s, ok := el.ck.Env.Lookup(name); ok {
+		sch = s
+	} else {
+		panic("elaborate: unknown callee `" + name + "`")
+	}
+	genTy := el.zonkDefault(sch.Body)
+	return genTy, types.RigidVarsIn(genTy)
+}
+
+// matchTyArgs reads an occurrence's explicit type arguments off its type:
+// matching the callee's generic type against the (instantiated) occurrence
+// type assigns each of the callee's type parameters. Total by construction —
+// every type parameter occurs in the generic type it was collected from.
+func matchTyArgs(genTy types.Type, vars []*types.TVar, occTy types.Type) []types.Type {
+	m := map[int]types.Type{}
+	matchType(genTy, occTy, m)
+	out := make([]types.Type, len(vars))
+	for i, v := range vars {
+		t, ok := m[v.ID]
+		if !ok {
+			panic("elaborate: type parameter not determined by the occurrence type")
+		}
+		out[i] = t
+	}
+	return out
+}
+
+func matchType(gen, occ types.Type, m map[int]types.Type) {
+	switch g := gen.(type) {
+	case *types.TVar:
+		if !g.Rigid {
+			panic("elaborate: metavariable in a generic callee type")
+		}
+		if _, seen := m[g.ID]; !seen {
+			m[g.ID] = occ
+		}
+	case *types.TCon:
+		o, ok := occ.(*types.TCon)
+		if !ok || len(o.Args) != len(g.Args) {
+			panic(fmt.Sprintf("elaborate: occurrence type %s does not match generic %s",
+				types.Show(occ), types.Show(gen)))
+		}
+		for i := range g.Args {
+			matchType(g.Args[i], o.Args[i], m)
+		}
+	case *types.TFun:
+		o, ok := occ.(*types.TFun)
+		if !ok {
+			panic(fmt.Sprintf("elaborate: occurrence type %s does not match generic %s",
+				types.Show(occ), types.Show(gen)))
+		}
+		matchType(g.Arg, o.Arg, m)
+		matchType(g.Ret, o.Ret, m)
+	}
+}
+
+// nullaryValueUse is a use of a polymorphic top-level value — a nullary
+// generic worker (§8.4), instantiated and called per use.
+func (el *elab) nullaryValueUse(name string, sch types.Scheme, occTy types.Type) core.Expr {
+	genTy := el.zonkDefault(sch.Body)
+	vars := types.RigidVarsIn(genTy)
+	return &core.App{
+		CalleeKind: core.Worker,
+		Callee:     &core.VarRef{Name: name, Ty: occTy},
+		TyArgs:     matchTyArgs(genTy, vars, occTy),
+		Ty:         occTy,
+	}
 }
 
 // saturatedApp builds the direct App for a fully applied callee.
@@ -104,7 +210,8 @@ func (c callee) saturatedApp(args []core.Expr) *core.App {
 	return &core.App{
 		CalleeKind: c.kind,
 		Callee:     &core.VarRef{Name: c.name, Ty: c.ty},
-		Args:       args,
+		Args:       append(append([]core.Expr{}, c.pre...), args...),
+		TyArgs:     c.tyArgs,
 		Ty:         ret,
 		Ctor:       c.ctor,
 	}
@@ -112,26 +219,22 @@ func (c callee) saturatedApp(args []core.Expr) *core.App {
 
 // workerCall classifies a call to a known worker by saturation.
 func (el *elab) workerCall(name string, workerTy types.Type, arity int, args []ast.Expr) core.Expr {
-	return el.calleeCall(workerCallee(name, workerTy, arity), args)
-}
-
-// ctorCall classifies a constructor application by saturation.
-func (el *elab) ctorCall(info *types.CtorInfo, args []ast.Expr) core.Expr {
-	return el.calleeCall(ctorCallee(info), args)
+	return el.calleeCall(el.workerCallee(name, workerTy, arity), args)
 }
 
 func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
+	missing := c.arity - len(c.pre)
 	switch {
-	case len(args) == c.arity: // saturated: a direct call / struct literal
-		coreArgs := make([]core.Expr, c.arity)
+	case len(args) == missing: // saturated: a direct call / struct literal
+		coreArgs := make([]core.Expr, len(args))
 		for i, a := range args {
 			coreArgs[i] = el.expr(a)
 		}
 		return c.saturatedApp(coreArgs)
 
-	case len(args) > c.arity: // oversaturated: direct call, then indirect
-		res := el.calleeCall(c, args[:c.arity])
-		for _, a := range args[c.arity:] {
+	case len(args) > missing: // oversaturated: direct call, then indirect
+		res := el.calleeCall(c, args[:missing])
+		for _, a := range args[missing:] {
 			res = el.valueApp(res, el.expr(a))
 		}
 		return res
@@ -149,8 +252,11 @@ func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
 func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 	workerTy, arity := c.ty, c.arity
 	argTys, _ := core.PeelFun(workerTy, arity)
+	taken := len(c.pre) + len(given)
 
-	// Elaborate given args; hoist non-atoms into temps.
+	// Elaborate given args; hoist non-atoms into temps. (The pre args — a
+	// lifted local's captured frees — are VarRefs by construction and were
+	// prepended by saturatedApp.)
 	type hoist struct {
 		name string
 		rhs  core.Expr
@@ -170,19 +276,19 @@ func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 	}
 
 	// Missing parameters become nested lambda params.
-	missing := arity - len(given)
+	missing := arity - taken
 	lamParams := make([]string, missing)
 	for i := range missing {
 		lamParams[i] = fmt.Sprintf("_w%d", el.tmp)
 		el.tmp++
-		coreArgs = append(coreArgs, &core.VarRef{Name: lamParams[i], Ty: argTys[len(given)+i]})
+		coreArgs = append(coreArgs, &core.VarRef{Name: lamParams[i], Ty: argTys[taken+i]})
 	}
 
 	var body core.Expr = c.saturatedApp(coreArgs)
 
 	// Wrap lambdas innermost-out; each level's type is the remaining chain.
 	lamTy := workerTy
-	for range given {
+	for range taken {
 		lamTy = lamTy.(*types.TFun).Ret
 	}
 	tys := make([]types.Type, missing)
@@ -205,17 +311,18 @@ func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 // curriedWorkerRef is the k=0 case: a worker used first-class expands to
 // its curried wrapper at the use site — demand-driven by construction.
 func (el *elab) curriedWorkerRef(name string, workerTy types.Type, arity int) core.Expr {
-	return el.partial(workerCallee(name, workerTy, arity), nil)
+	return el.partial(el.workerCallee(name, workerTy, arity), nil)
 }
 
-// ctorValue is a constructor in value position: nullary constructors are the
-// saturated zero-arg App (a zero-field struct in codegen); field-taking ones
-// get the same curried-wrapper treatment as first-class workers.
-func (el *elab) ctorValue(info *types.CtorInfo) core.Expr {
+// ctorValue is a constructor in value position at its occurrence type:
+// nullary constructors are the saturated zero-arg App (a zero-field struct
+// in codegen); field-taking ones get the same curried-wrapper treatment as
+// first-class workers.
+func (el *elab) ctorValue(info *types.CtorInfo, occTy types.Type) core.Expr {
 	if len(info.Fields) == 0 {
-		return ctorCallee(info).saturatedApp(nil)
+		return el.ctorCallee(info, occTy).saturatedApp(nil)
 	}
-	return el.partial(ctorCallee(info), nil)
+	return el.partial(el.ctorCallee(info, occTy), nil)
 }
 
 // isAtom reports whether re-evaluating e is free (no work, no effects):

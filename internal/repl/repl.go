@@ -225,7 +225,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	} else {
 		delete(s.ck.Workers, vd.Name)
 	}
-	def, elabErrs := elaborate.Decl(info, s.ck)
+	defs, elabErrs := elaborate.Decl(info, s.ck)
 	if len(elabErrs) > 0 {
 		if hadWorker {
 			s.ck.Workers[vd.Name] = prevArity
@@ -236,8 +236,12 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	s.ck.BindDecl(info)
-	if len(def.Params) > 0 {
-		s.env.DefineWorker(&def)
+	def := &defs[0]
+	for i := range defs[1:] {
+		s.env.DefineWorker(&defs[1+i]) // lambda-lifted locals (§8.4)
+	}
+	if def.IsWorker() {
+		s.env.DefineWorker(def)
 	} else {
 		s.env.Define(def.Name, def.Body)
 	}
@@ -285,10 +289,13 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 	if s.rejectPoly(e, ty) {
 		return inputDone
 	}
-	coreExpr, elabErrs := elaborate.Expr(e, s.ck)
+	coreExpr, aux, elabErrs := elaborate.Expr(e, s.ck)
 	if len(elabErrs) > 0 {
 		diag.Render(s.out, elabErrs)
 		return inputDone
+	}
+	for i := range aux {
+		s.env.DefineWorker(&aux[i])
 	}
 	v, err := eval.Eval(context.Background(), coreExpr, s.env, s.out)
 	if err != nil {
@@ -320,7 +327,7 @@ func (s *Session) typeOf(src string) {
 	if s.rejectPoly(e, ty) {
 		return
 	}
-	elaborate.Expr(e, s.ck) // force defaulting so the shown type is ground
+	_, _, _ = elaborate.Expr(e, s.ck) // force defaulting so the shown type is ground
 	fmt.Fprintln(s.out, types.Show(s.ck.Sub.Apply(ty)))
 }
 

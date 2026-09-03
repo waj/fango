@@ -15,11 +15,22 @@ type Prog struct {
 }
 
 type Def struct {
-	Name   string
-	Type   types.Type // the full curried fango type
-	Params []string   // non-empty ⇒ worker (§8.2); uncurried Go signature = peeling len(Params) arrows off Type
+	Name string
+	Type types.Type // the full curried fango type
+
+	// TyParams are the definition's quantified type variables (rigid, first
+	// occurrence order in Type) — Go type parameters at codegen. Non-empty
+	// TyParams with empty Params is a nullary generic worker (§8.4): emitted
+	// as a function, re-evaluated per use.
+	TyParams []*types.TVar
+
+	Params []string // non-empty ⇒ worker (§8.2); uncurried Go signature = peeling len(Params) arrows off Type
 	Body   Expr
 }
+
+// IsWorker reports whether the definition emits as a function: it has term
+// parameters, or it is a polymorphic value (nullary generic worker, §8.4).
+func (d *Def) IsWorker() bool { return len(d.Params) > 0 || len(d.TyParams) > 0 }
 
 type Expr interface {
 	isExpr()

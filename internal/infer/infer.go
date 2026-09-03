@@ -111,6 +111,10 @@ type Checker struct {
 	// elaboration lifts a binding whose scheme quantifies (§8.4).
 	BindSchemes map[*ast.LocalBind]types.Scheme
 
+	// LiftGen numbers lambda-lifted definitions session-wide, so REPL
+	// inputs across a session never collide (elaborate/lift.go).
+	LiftGen int
+
 	// AllowPoly is the S5 staging flag: the polymorphism machinery
 	// (generalization, parameterized types, annotation variables) is live
 	// only when set. Off, the checker behaves exactly as S4 shipped, and the
@@ -616,7 +620,17 @@ func (g *generator) block(e *ast.Block) types.Type {
 			}
 		}
 		scheme := types.Scheme{Body: ty}
-		if g.ck.AllowPoly {
+		// Monomorphism restriction for block bindings: only syntactic
+		// functions and lambda literals generalize locally. A generalized
+		// binding lambda-lifts and re-evaluates per use (§8.4) — fine for
+		// function values, but a *value* binding's whole point is §3.6's
+		// eager evaluate-once-at-its-line semantics, which Number-kinded
+		// generalization (`k = 10 : number`) would otherwise silently break
+		// for every numeric local. Top-level values still generalize (§8.4
+		// accepts nullary generic values; S7's purity check keeps
+		// re-evaluation unobservable).
+		_, isLambda := bind.Body.(*ast.Lambda)
+		if g.ck.AllowPoly && (len(bind.Params) > 0 || isLambda) {
 			// Solve-at-binding (§7.2): discharge this binding's constraints
 			// into the substitution now, so generalization sees solved types
 			// and later bindings can use this one polymorphically.
