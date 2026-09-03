@@ -25,6 +25,9 @@ type StringLit struct {
 	Sp    source.Span
 }
 
+// UnitLit is the sole value of the Unit type, written ().
+type UnitLit struct{ Sp source.Span }
+
 type Var struct {
 	Name string
 	Sp   source.Span
@@ -59,14 +62,20 @@ type If struct {
 // result expression, so a Block always has at least one binding.
 type Block struct {
 	Binds  []LocalBind
+	Items  []BlockItem // ordered; nil for legacy binding-only blocks
 	Result Expr
+}
+
+type BlockItem struct {
+	BindIndex int
+	Expr      Expr
 }
 
 // Param is one function parameter. Worker arity is the syntactic parameter
 // count (§8.2), which is why parameters stay explicit rather than
 // desugaring to lambdas.
 type Param struct {
-	Name string
+	Name string // "_" discards; "()" is a Unit pattern in handler clauses
 	Sp   source.Span
 }
 
@@ -272,6 +281,7 @@ func (p *PCtor) Span() source.Span {
 func (*IntLit) isExpr()    {}
 func (*FloatLit) isExpr()  {}
 func (*StringLit) isExpr() {}
+func (*UnitLit) isExpr()   {}
 func (*Var) isExpr()       {}
 func (*Ctor) isExpr()      {}
 func (*App) isExpr()       {}
@@ -287,14 +297,20 @@ func (*Resume) isExpr()    {}
 func (e *IntLit) Span() source.Span    { return e.Sp }
 func (e *FloatLit) Span() source.Span  { return e.Sp }
 func (e *StringLit) Span() source.Span { return e.Sp }
+func (e *UnitLit) Span() source.Span   { return e.Sp }
 func (e *Var) Span() source.Span       { return e.Sp }
 func (e *Ctor) Span() source.Span      { return e.Sp }
 func (e *App) Span() source.Span       { return e.Fn.Span().Merge(e.Arg.Span()) }
 func (e *Neg) Span() source.Span       { return e.Sp }
 func (e *BinOp) Span() source.Span     { return e.L.Span().Merge(e.R.Span()) }
 func (e *If) Span() source.Span        { return e.Sp.Merge(e.Else.Span()) }
-func (e *Block) Span() source.Span     { return e.Binds[0].NameSpan.Merge(e.Result.Span()) }
-func (e *Lambda) Span() source.Span    { return e.Sp.Merge(e.Body.Span()) }
+func (e *Block) Span() source.Span {
+	if len(e.Items) > 0 && e.Items[0].Expr != nil {
+		return e.Items[0].Expr.Span().Merge(e.Result.Span())
+	}
+	return e.Binds[0].NameSpan.Merge(e.Result.Span())
+}
+func (e *Lambda) Span() source.Span { return e.Sp.Merge(e.Body.Span()) }
 func (e *Case) Span() source.Span {
 	return e.Sp.Merge(e.Branches[len(e.Branches)-1].Body.Span())
 }

@@ -91,10 +91,15 @@ type Checker struct {
 	TypeNames       map[string]types.Type
 	Effects         map[string]*types.EffectInfo
 	EffectsByUnique map[int]*types.EffectInfo
+	Operations      map[string]*types.EffectOp
+	IO              *types.EffectInfo
 
 	// PrintCalls marks App nodes recognized as the print builtin cheat, so
 	// elaboration classifies them identically (one source of truth).
-	PrintCalls map[*ast.App]bool
+	PrintCalls  map[*ast.App]bool
+	OpCalls     map[*ast.App]*types.EffectOp
+	HandleInfos map[*ast.Handle]*HandlerInfo
+	ResumeCalls map[*ast.App]bool
 
 	// Workers maps top-level function names to their syntactic parameter
 	// count — the arity that drives §8.2 saturation analysis. Session
@@ -147,7 +152,11 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		},
 		Effects:         map[string]*types.EffectInfo{},
 		EffectsByUnique: map[int]*types.EffectInfo{},
+		Operations:      map[string]*types.EffectOp{},
 		PrintCalls:      map[*ast.App]bool{},
+		OpCalls:         map[*ast.App]*types.EffectOp{},
+		HandleInfos:     map[*ast.Handle]*HandlerInfo{},
+		ResumeCalls:     map[*ast.App]bool{},
 		Workers:         map[string]int{},
 		BindTypes:       map[*ast.LocalBind]types.Type{},
 		PatTypes:        map[ast.Pattern]types.Type{},
@@ -163,7 +172,32 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 	for _, c := range boolADT.Ctors {
 		ck.Ctors[c.Name] = c
 	}
+	ck.seedIO()
 	return ck
+}
+
+func (ck *Checker) seedIO() {
+	ioEff := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: "IO"}
+	ck.IO = ioEff
+	ck.Effects[ioEff.Name], ck.EffectsByUnique[ioEff.Unique] = ioEff, ioEff
+	label := types.EffLabel{Unique: ioEff.Unique, Name: ioEff.Name}
+	row := func() types.Row {
+		return types.Row{Labels: []types.EffLabel{label}, Tail: ck.Sup.FreshRigid(types.RowVar)}
+	}
+	readTy := &types.TFun{Arg: ck.B.Unit, Eff: row(), Ret: ck.B.String}
+	read := &types.EffectOp{Owner: ioEff, Index: 0, Name: "readLine", Arity: 1,
+		ParamTypes: []types.Type{ck.B.Unit}, ResultType: ck.B.String, Builtin: true}
+	read.Scheme = types.Scheme{Vars: []*types.TVar{readTy.Eff.Tail.(*types.TVar)}, Body: readTy}
+	a := ck.Sup.FreshRigid(types.General)
+	printTy := &types.TFun{Arg: a, Eff: row(), Ret: ck.B.Unit}
+	print := &types.EffectOp{Owner: ioEff, Index: 1, Name: "print", Arity: 1,
+		ParamTypes: []types.Type{a}, ResultType: ck.B.Unit, LocalVars: []*types.TVar{a}, Builtin: true}
+	print.Scheme = types.Scheme{Vars: []*types.TVar{a, printTy.Eff.Tail.(*types.TVar)}, Body: printTy}
+	ioEff.Ops = []*types.EffectOp{read, print}
+	for _, op := range ioEff.Ops {
+		ck.Operations[op.Name] = op
+		ck.Env.Bind(op.Name, op.Scheme)
+	}
 }
 
 type DeclInfo struct {
@@ -179,6 +213,19 @@ type DeclInfo struct {
 	// zonked occurrence types mention the scheme's own rigid vars. With
 	// AllowPoly off this is always the trivial Scheme{Body}.
 	Scheme types.Scheme
+}
+
+type HandlerClauseInfo struct {
+	Op         *types.EffectOp
+	ParamTypes []types.Type
+	OpResult   types.Type
+}
+
+type HandlerInfo struct {
+	Effect     types.EffLabel
+	Result     types.Type
+	BodyResult types.Type
+	Clauses    []HandlerClauseInfo
 }
 
 // Module checks declarations: type headers first (so types may be mutually
@@ -319,7 +366,17 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 		vars := append([]*types.TVar(nil), info.Params...)
 		vars = append(vars, scope.Minted()...)
 		vars = append(vars, rowVars...)
-		ck.Env.Bind(op.Name, types.Scheme{Vars: vars, Body: ty})
+		sch := types.Scheme{Vars: vars, Body: ty}
+		params := make([]types.Type, len(arrows))
+		for i, a := range arrows {
+			params[i] = a.Arg
+		}
+		local := append([]*types.TVar(nil), scope.Minted()...)
+		meta := &types.EffectOp{Owner: info, Index: len(info.Ops), Name: op.Name, Scheme: sch,
+			Arity: len(arrows), ParamTypes: params, ResultType: arrows[len(arrows)-1].Ret, LocalVars: local}
+		info.Ops = append(info.Ops, meta)
+		ck.Operations[op.Name] = meta
+		ck.Env.Bind(op.Name, sch)
 	}
 	return errs
 }
@@ -333,6 +390,11 @@ func (ck *Checker) TypeDecl(td *ast.TypeDecl) []diag.Error {
 	}
 	errs = append(errs, ck.declareTypeCtors(td, adt, false)...)
 	return append(errs, ck.checkRegularity(map[*ast.TypeDecl]*types.ADTInfo{td: adt})...)
+}
+
+func (ck *Checker) EffectDecl(ed *ast.EffectDecl) []diag.Error {
+	errs := ck.declareEffectHeader(ed, false)
+	return append(errs, ck.declareEffectOps(ed, false)...)
 }
 
 // declareTypeHeader registers the type's name, unique, and parameters —
@@ -435,23 +497,40 @@ func (ck *Checker) BindDecl(info DeclInfo) {
 // bind on error).
 func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowPrint bool) (DeclInfo, []diag.Error) {
 	var errs []diag.Error
-	if d.Name == "main" && len(d.Params) > 0 {
+	if d.Name == "main" && len(d.Params) > 1 {
 		errs = append(errs, diag.Errorf(d.NameSpan, "MAIN TAKES NO PARAMETERS",
-			"Until the S7 effect runtime lands, `main` is a value, not a function."))
+			"`main` may be a value or a one-argument Unit function."))
+	}
+	if d.Name == "main" && len(d.Params) == 1 && d.Params[0].Name != "_" {
+		errs = append(errs, diag.Errorf(d.Params[0].Sp, "MAIN TAKES NO PARAMETERS", "Function-style `main` must discard its Unit argument with `_`."))
 	}
 
 	g := &generator{ck: ck, allowPrint: allowPrint, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	var ty types.Type
 	if len(d.Params) == 0 {
 		ty = g.expr(d.Body)
-		g.cs = append(g.cs, Constraint{Left: g.ambient, Right: types.Row{}, Span: d.Body.Span(), Why: Why{Kind: WhyEffectEscapes}})
+		if d.Name != "main" {
+			g.cs = append(g.cs, Constraint{Left: g.ambient, Right: types.Row{}, Span: d.Body.Span(), Why: Why{Kind: WhyEffectEscapes}})
+		}
 	} else {
 		ty = g.function(d.Name, d.NameSpan, d.Params, d.Body)
+		if d.Name == "main" && len(d.Params) == 1 {
+			want := &types.TFun{Arg: ck.B.Unit, Eff: types.Row{Labels: []types.EffLabel{{Unique: ck.IO.Unique, Name: ck.IO.Name}}}, Ret: ck.B.Unit}
+			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
+		}
 	}
 	sub, _, solveErrs := Solve(g.cs, nil, ck.Sub, ck.B, ck.Sup)
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
 	errs = append(errs, solveErrs...)
+	if d.Name == "main" && len(d.Params) == 0 {
+		row := ck.Sub.Apply(g.ambient).(types.Row)
+		for _, l := range row.Labels {
+			if l.Unique != ck.IO.Unique {
+				errs = append(errs, diag.Errorf(d.Body.Span(), "UNHANDLED EFFECT", "Legacy `main` may perform IO, but `%s` is not handled.", l.Name))
+			}
+		}
+	}
 
 	if d.Ann != nil {
 		// Skolemize-and-unify (§7.2): the annotation's variables resolve to
@@ -532,6 +611,7 @@ type generator struct {
 	cs         []Constraint
 	errs       []diag.Error
 	ambient    types.Row
+	resumeType types.Type
 }
 
 // blockScope is a block's local bindings, as schemes: parameters and
@@ -573,6 +653,8 @@ func (g *generator) expr(e ast.Expr) types.Type {
 		ty = g.ck.B.Float
 	case *ast.StringLit:
 		ty = g.ck.B.String
+	case *ast.UnitLit:
+		ty = g.ck.B.Unit
 	case *ast.Var:
 		if g.isPrintCheat(e) {
 			g.errs = append(g.errs, diag.Errorf(e.Sp, "PRINT NEEDS AN ARGUMENT",
@@ -606,6 +688,29 @@ func (g *generator) expr(e ast.Expr) types.Type {
 			ty = &types.TFun{Arg: fields[i], Eff: types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}, Ret: ty}
 		}
 	case *ast.App:
+		if op, n := g.operationSpine(e); op != nil && n == op.Arity {
+			inst := g.instantiate(op.Scheme)
+			g.ck.ExprTypes[appHead(e)] = inst
+			params, result := peelOperation(inst, op.Arity)
+			args := appArgs(e)
+			for i, a := range args {
+				at := g.expr(a)
+				g.cs = append(g.cs, Constraint{Left: at, Right: params[i], Span: a.Span(), Why: Why{Kind: WhyCall}})
+			}
+			cur := inst
+			var last *types.TFun
+			for range op.Arity {
+				last = cur.(*types.TFun)
+				cur = last.Ret
+			}
+			g.cs = append(g.cs, Constraint{Left: last.Eff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}})
+			g.ck.OpCalls[e] = op
+			if len(op.LocalVars) > 0 && !(op.Owner == g.ck.IO && op.Name == "print") {
+				g.errs = append(g.errs, diag.Errorf(e.Span(), "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has result polymorphism that is staged until checkpoint 3.", op.Name))
+			}
+			ty = result
+			break
+		}
 		if g.isPrintCheat(e.Fn) {
 			if !g.allowPrint {
 				g.errs = append(g.errs, diag.Errorf(e.Fn.Span(), "PRINT NOT ALLOWED HERE",
@@ -619,12 +724,29 @@ func (g *generator) expr(e ast.Expr) types.Type {
 		fnTy := g.expr(e.Fn)
 		argTy := g.expr(e.Arg)
 		r := g.ck.Sup.FreshVar(types.General)
+		callEff := types.Row{}
+		if f, ok := g.ck.Sub.Apply(fnTy).(*types.TFun); ok && len(f.Eff.Labels) > 0 {
+			callEff = g.ambient
+		}
+		if _, isLambda := e.Fn.(*ast.Lambda); isLambda {
+			callEff = g.ambient
+		}
 		g.cs = append(g.cs, Constraint{
 			Left:  fnTy,
-			Right: &types.TFun{Arg: argTy, Eff: g.ambient, Ret: r},
+			Right: &types.TFun{Arg: argTy, Eff: callEff, Ret: r},
 			Span:  e.Fn.Span(),
 			Why:   Why{Kind: WhyCall},
 		})
+		if op, n := g.operationSpine(e); op != nil && n == op.Arity {
+			g.ck.OpCalls[e] = op
+			if len(op.LocalVars) > 0 && !(op.Owner == g.ck.IO && op.Name == "print") {
+				g.errs = append(g.errs, diag.Errorf(e.Span(), "OPERATION POLYMORPHISM NOT READY",
+					"The operation `%s` has result polymorphism that is staged until checkpoint 3.", op.Name))
+			}
+		}
+		if _, ok := e.Fn.(*ast.Resume); ok {
+			g.ck.ResumeCalls[e] = true
+		}
 		ty = r
 	case *ast.Neg:
 		opTy := g.expr(e.Operand)
@@ -668,20 +790,259 @@ func (g *generator) expr(e ast.Expr) types.Type {
 		funTy := g.wrapFunction(paramTys, bodyTy, bodyAmbient)
 		ty = funTy
 	case *ast.Handle:
-		g.errs = append(g.errs, diag.Errorf(e.Sp, "HANDLERS NOT READY",
-			"`handle` syntax is available, but handler checking and execution arrive\nin S7 checkpoint 2."))
-		// Keep walking the body so ordinary naming/type errors are still useful.
-		g.expr(e.Body)
-		ty = g.ck.Sup.FreshVar(types.General)
+		ty = g.handle(e)
 	case *ast.Resume:
-		g.errs = append(g.errs, diag.Errorf(e.Sp, "RESUME OUTSIDE A HANDLER",
-			"`resume` is only available while checking an operation clause; handler\nchecking arrives in S7 checkpoint 2."))
-		ty = g.ck.Sup.FreshVar(types.General)
+		if g.resumeType == nil {
+			g.errs = append(g.errs, diag.Errorf(e.Sp, "RESUME OUTSIDE A HANDLER", "`resume` is only available inside an operation clause."))
+			ty = g.ck.Sup.FreshVar(types.General)
+		} else {
+			ty = g.resumeType
+		}
 	default:
 		panic("infer: unhandled expression node")
 	}
 	g.ck.ExprTypes[e] = ty
 	return ty
+}
+
+func appArgs(e *ast.App) []ast.Expr {
+	var rev []ast.Expr
+	var cur ast.Expr = e
+	for {
+		a, ok := cur.(*ast.App)
+		if !ok {
+			break
+		}
+		rev = append(rev, a.Arg)
+		cur = a.Fn
+	}
+	out := make([]ast.Expr, len(rev))
+	for i, a := range rev {
+		out[len(rev)-1-i] = a
+	}
+	return out
+}
+func appHead(e *ast.App) ast.Expr {
+	var cur ast.Expr = e
+	for {
+		a, ok := cur.(*ast.App)
+		if !ok {
+			return cur
+		}
+		cur = a.Fn
+	}
+}
+
+func (g *generator) handle(e *ast.Handle) types.Type {
+	result := g.ck.Sup.FreshVar(types.General)
+	if len(e.Clauses) == 0 {
+		return result
+	}
+	first := g.ck.Operations[e.Clauses[0].Op]
+	if first == nil {
+		g.errs = append(g.errs, diag.Errorf(e.Clauses[0].OpSpan, "UNKNOWN OPERATION", "I don't know an operation named `%s`.", e.Clauses[0].Op))
+		g.expr(e.Body)
+		return result
+	}
+	if first.Owner == g.ck.IO {
+		g.errs = append(g.errs, diag.Errorf(e.Sp, "BUILTIN IO HANDLING NOT READY", "Handlers for builtin IO are staged until polymorphic print evidence is available."))
+	}
+	residualVar := g.ck.Sup.FreshVar(types.RowVar)
+	residual := types.Row{Tail: residualVar}
+	labelArgs := make([]types.Type, len(first.Owner.Params))
+	for i := range labelArgs {
+		labelArgs[i] = g.ck.Sup.FreshVar(types.General)
+	}
+	label := types.EffLabel{Unique: first.Owner.Unique, Name: first.Owner.Name, Args: labelArgs}
+	savedAmbient := g.ambient
+	g.ambient = types.Row{Labels: []types.EffLabel{label}, Tail: residualVar}
+	bodyTy := g.expr(e.Body)
+	g.ambient = residual
+	info := &HandlerInfo{Effect: label, Result: result, BodyResult: bodyTy}
+	seen := map[string]bool{}
+	for i := range e.Clauses {
+		cl := &e.Clauses[i]
+		op := g.ck.Operations[cl.Op]
+		if op == nil {
+			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "UNKNOWN OPERATION", "I don't know an operation named `%s`.", cl.Op))
+			continue
+		}
+		if op.Owner != first.Owner {
+			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "MIXED HANDLER EFFECTS", "All clauses in a handler must belong to `%s`.", first.Owner.Name))
+			continue
+		}
+		if seen[op.Name] {
+			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "DUPLICATE HANDLER CLAUSE", "The operation `%s` is handled more than once.", op.Name))
+			continue
+		}
+		seen[op.Name] = true
+		inst := g.instantiate(op.Scheme)
+		paramTys, opResult := peelOperation(inst, op.Arity)
+		cur := inst
+		var last *types.TFun
+		for range op.Arity {
+			last = cur.(*types.TFun)
+			cur = last.Ret
+		}
+		if len(last.Eff.Labels) > 0 {
+			for j, a := range last.Eff.Labels[0].Args {
+				if j < len(label.Args) {
+					g.cs = append(g.cs, Constraint{Left: a, Right: label.Args[j], Span: cl.OpSpan, Why: Why{Kind: WhyEffectMismatch}})
+				}
+			}
+		}
+		if len(cl.Params) != op.Arity {
+			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "HANDLER ARITY", "The operation `%s` takes %d argument(s), but this clause has %d.", op.Name, op.Arity, len(cl.Params)))
+		}
+		scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
+		g.locals = scope
+		for j, p := range cl.Params {
+			var pt types.Type = g.ck.Sup.FreshVar(types.General)
+			if j < len(paramTys) {
+				pt = paramTys[j]
+			}
+			if p.Name == "()" {
+				g.cs = append(g.cs, Constraint{Left: pt, Right: g.ck.B.Unit, Span: p.Sp, Why: Why{Kind: WhyPattern}})
+			} else if p.Name != "_" {
+				scope.names[p.Name] = types.Scheme{Body: pt}
+			}
+		}
+		oldResume := g.resumeType
+		g.resumeType = &types.TFun{Arg: opResult, Eff: residual, Ret: result}
+		clTy := g.expr(cl.Body)
+		g.resumeType = oldResume
+		g.locals = scope.parent
+		g.cs = append(g.cs, Constraint{Left: clTy, Right: result, Span: cl.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
+		if err := tailResume(cl.Body, true); err != "" {
+			g.errs = append(g.errs, diag.Errorf(cl.Body.Span(), "GENERAL CONTINUATIONS NOT READY", "%s", err))
+		}
+		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, ParamTypes: paramTys, OpResult: opResult})
+	}
+	for _, op := range first.Owner.Ops {
+		if !seen[op.Name] {
+			g.errs = append(g.errs, diag.Errorf(e.Sp, "INCOMPLETE HANDLER", "The handler is missing a clause for `%s`.", op.Name))
+		}
+	}
+	if e.Return != nil {
+		scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
+		g.locals = scope
+		if e.Return.Param.Name == "()" {
+			g.cs = append(g.cs, Constraint{Left: bodyTy, Right: g.ck.B.Unit, Span: e.Return.Param.Sp, Why: Why{Kind: WhyPattern}})
+		} else if e.Return.Param.Name != "_" {
+			scope.names[e.Return.Param.Name] = types.Scheme{Body: bodyTy}
+		}
+		rt := g.expr(e.Return.Body)
+		g.locals = scope.parent
+		g.cs = append(g.cs, Constraint{Left: rt, Right: result, Span: e.Return.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
+	} else {
+		g.cs = append(g.cs, Constraint{Left: bodyTy, Right: result, Span: e.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
+	}
+	g.ambient = savedAmbient
+	g.ck.HandleInfos[e] = info
+	return result
+}
+
+func peelOperation(t types.Type, n int) ([]types.Type, types.Type) {
+	args := make([]types.Type, 0, n)
+	for range n {
+		f, ok := t.(*types.TFun)
+		if !ok {
+			return args, t
+		}
+		args = append(args, f.Arg)
+		t = f.Ret
+	}
+	return args, t
+}
+
+func tailResume(e ast.Expr, tail bool) string {
+	if a, ok := e.(*ast.App); ok {
+		if _, yes := a.Fn.(*ast.Resume); yes {
+			if s := tailResume(a.Arg, false); s != "" {
+				return s
+			}
+			if !tail {
+				return "`resume` must be the final action on every reachable clause path."
+			}
+			return ""
+		}
+	}
+	switch x := e.(type) {
+	case *ast.If:
+		if s := tailResume(x.Cond, false); s != "" {
+			return s
+		}
+		if s := tailResume(x.Then, tail); s != "" {
+			return s
+		}
+		return tailResume(x.Else, tail)
+	case *ast.Case:
+		if s := tailResume(x.Scrutinee, false); s != "" {
+			return s
+		}
+		for _, b := range x.Branches {
+			if s := tailResume(b.Body, tail); s != "" {
+				return s
+			}
+		}
+		return ""
+	case *ast.Block:
+		if len(x.Items) > 0 {
+			for _, item := range x.Items {
+				var q ast.Expr
+				if item.Expr != nil {
+					q = item.Expr
+				} else {
+					q = x.Binds[item.BindIndex].Body
+				}
+				if s := tailResume(q, false); s != "" {
+					return s
+				}
+			}
+		} else {
+			for _, b := range x.Binds {
+				if s := tailResume(b.Body, false); s != "" {
+					return s
+				}
+			}
+		}
+		return tailResume(x.Result, tail)
+	case *ast.App:
+		if s := tailResume(x.Fn, false); s != "" {
+			return s
+		}
+		return tailResume(x.Arg, false)
+	case *ast.BinOp:
+		if s := tailResume(x.L, false); s != "" {
+			return s
+		}
+		return tailResume(x.R, false)
+	}
+	if tail {
+		return "Every operation-clause path must end with exactly one call to `resume`."
+	}
+	return ""
+}
+
+func (g *generator) operationSpine(e *ast.App) (*types.EffectOp, int) {
+	n := 0
+	var cur ast.Expr = e
+	for {
+		a, ok := cur.(*ast.App)
+		if !ok {
+			break
+		}
+		n++
+		cur = a.Fn
+	}
+	v, ok := cur.(*ast.Var)
+	if !ok {
+		return nil, n
+	}
+	if _, local := g.locals.lookup(v.Name); local {
+		return nil, n
+	}
+	return g.ck.Operations[v.Name], n
 }
 
 // function checks a function definition (top-level or block-local): the
@@ -726,6 +1087,10 @@ func (g *generator) wrapFunction(params []types.Type, ret types.Type, bodyRow ty
 func (g *generator) bindParams(scope *blockScope, params []ast.Param) []types.Type {
 	tys := make([]types.Type, len(params))
 	for i, p := range params {
+		if p.Name == "_" {
+			tys[i] = g.ck.Sup.FreshVar(types.General)
+			continue
+		}
 		if _, dup := g.locals.lookup(p.Name); dup || g.ck.Env.Has(p.Name) {
 			g.errs = append(g.errs, diag.Errorf(p.Sp, "SHADOWING",
 				"The parameter `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", p.Name))
@@ -744,8 +1109,19 @@ func (g *generator) block(e *ast.Block) types.Type {
 	g.locals = &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
 	defer func() { g.locals = g.locals.parent }()
 
-	for i := range e.Binds {
-		bind := &e.Binds[i]
+	items := e.Items
+	if len(items) == 0 {
+		for i := range e.Binds {
+			items = append(items, ast.BlockItem{BindIndex: i})
+		}
+	}
+	for _, item := range items {
+		if item.Expr != nil {
+			st := g.expr(item.Expr)
+			g.cs = append(g.cs, Constraint{Left: st, Right: g.ck.B.Unit, Span: item.Expr.Span(), Why: Why{Kind: WhyDeclBody}})
+			continue
+		}
+		bind := &e.Binds[item.BindIndex]
 		if _, dup := g.locals.lookup(bind.Name); dup || g.ck.Env.Has(bind.Name) {
 			where := "at the top level"
 			if dup {

@@ -256,6 +256,22 @@ type EffectInfo struct {
 	Unique int
 	Name   string
 	Params []*TVar
+	Ops    []*EffectOp
+}
+
+// EffectOp is the runtime-relevant, declaration-ordered description of an
+// operation. Scheme includes effect parameters, operation-local variables,
+// and row variables; Params/Result describe its fully saturated call.
+type EffectOp struct {
+	Owner      *EffectInfo
+	Index      int
+	Name       string
+	Scheme     Scheme
+	Arity      int
+	ParamTypes []Type
+	ResultType Type
+	LocalVars  []*TVar
+	Builtin    bool
 }
 
 // ParamSubst builds the rigid-var substitution instantiating the type's

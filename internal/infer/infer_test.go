@@ -111,8 +111,7 @@ func TestNegative(t *testing.T) {
 		{"x = \"a\" / \"b\"", "TYPE MISMATCH", 1},             // WhyOpRequires
 		{"x = 1 ++ \"a\"", "TYPE MISMATCH", 1},                // WhyOpRequires ++
 		{"x = Just", "NAMING ERROR", 1},                       // unknown constructor
-		{"x = print 1\nmain = x", "PRINT NOT ALLOWED HERE", 1},
-		{"main = print", "PRINT NEEDS AN ARGUMENT", 1},
+		{"x = print 1\nmain = x", "UNHANDLED EFFECT", 1},
 		{"x = 1\ny =\n  x = 2\n  x + 1", "SHADOWING", 3},
 		{"y =\n  a = 1\n  a = 2\n  a", "SHADOWING", 3},
 		{"y =\n  a = b + 1\n  b = 2\n  a", "NAMING ERROR", 2}, // use-before-define in block
@@ -121,12 +120,11 @@ func TestNegative(t *testing.T) {
 		{"x : a\nx = 1", "TYPE MISMATCH", 2},                  // annotation more general than the number body
 		{"f : Int -> Int\nf = 1", "TYPE MISMATCH", 2},         // arrow annotation resolves, body mismatches
 		{"main x = x", "MAIN TAKES NO PARAMETERS", 1},
-		{"f x x = x", "SHADOWING", 1},                              // duplicate params
-		{"f f = f", "SHADOWING", 1},                                // param shadows the function itself
-		{"x = 1\nf x = x + 1", "SHADOWING", 2},                     // param shadows a top-level name
-		{"f = \\x -> \\x -> x", "SHADOWING", 1},                    // lambda param shadowing
-		{"f x = f", "TYPE MISMATCH", 1},                            // occurs check via the recursion var
-		{"main = (\\x -> print x) 1", "PRINT NOT ALLOWED HERE", 1}, // no print inside lambdas
+		{"f x x = x", "SHADOWING", 1},           // duplicate params
+		{"f f = f", "SHADOWING", 1},             // param shadows the function itself
+		{"x = 1\nf x = x + 1", "SHADOWING", 2},  // param shadows a top-level name
+		{"f = \\x -> \\x -> x", "SHADOWING", 1}, // lambda param shadowing
+		{"f x = f", "TYPE MISMATCH", 1},         // occurs check via the recursion var
 	}
 	for _, c := range cases {
 		_, _, errs := check(t, c.src)
@@ -173,12 +171,9 @@ func TestEffectRows(t *testing.T) {
 		t.Fatalf("overstated annotation: want EFFECT MISMATCH, got %v", errs)
 	}
 
-	ck, infos, errs = check(t, "effect Fail e\n    throw : e -> a\n\nfailString text = throw text")
-	if len(errs) > 0 {
-		t.Fatalf("parameterized effect: %v", errs)
-	}
-	if got := types.Show(ck.Sub.Apply(infos[0].Type)); got != "a ->{Fail a} b" {
-		t.Fatalf("failString type = %s", got)
+	_, _, errs = check(t, "effect Fail e\n    throw : e -> a\n\nfailString text = throw text")
+	if len(errs) == 0 || errs[0].(checkErr).title != "OPERATION POLYMORPHISM NOT READY" {
+		t.Fatalf("parameterized effect runtime staging: %v", errs)
 	}
 
 	ck, infos, errs = check(t, "effect Db\n    query : String -> Int -> String\n\nrun sql count = query sql count")

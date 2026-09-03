@@ -152,6 +152,8 @@ func DumpExpr(e Expr) string {
 		return fmt.Sprintf("(float %s)", strconv.FormatFloat(e.Value, 'g', -1, 64))
 	case *StringLit:
 		return fmt.Sprintf("(string %q)", e.Value)
+	case *UnitLit:
+		return "(unit)"
 	case *Var:
 		return fmt.Sprintf("(var %s)", e.Name)
 	case *Ctor:
@@ -167,15 +169,26 @@ func DumpExpr(e Expr) string {
 	case *Block:
 		var b strings.Builder
 		b.WriteString("(block")
-		for _, bind := range e.Binds {
-			fmt.Fprintf(&b, " (bind %s", bind.Name)
-			if p := dumpParams(bind.Params); p != "" {
-				fmt.Fprintf(&b, " %s", p)
+		if len(e.Items) > 0 {
+			for _, item := range e.Items {
+				if item.Expr != nil {
+					fmt.Fprintf(&b, " (expr %s)", DumpExpr(item.Expr))
+					continue
+				}
+				bind := e.Binds[item.BindIndex]
+				fmt.Fprintf(&b, " (bind %s %s)", bind.Name, DumpExpr(bind.Body))
 			}
-			if bind.Ann != nil {
-				fmt.Fprintf(&b, " (ann %s)", DumpTypeExpr(bind.Ann.Type))
+		} else {
+			for _, bind := range e.Binds {
+				fmt.Fprintf(&b, " (bind %s", bind.Name)
+				if p := dumpParams(bind.Params); p != "" {
+					fmt.Fprintf(&b, " %s", p)
+				}
+				if bind.Ann != nil {
+					fmt.Fprintf(&b, " (ann %s)", DumpTypeExpr(bind.Ann.Type))
+				}
+				fmt.Fprintf(&b, " %s)", DumpExpr(bind.Body))
 			}
-			fmt.Fprintf(&b, " %s)", DumpExpr(bind.Body))
 		}
 		fmt.Fprintf(&b, " %s)", DumpExpr(e.Result))
 		return b.String()

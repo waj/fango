@@ -1,8 +1,9 @@
 (module)
 -- errors --
--- SYNTAX PROBLEM ----------------- err_block_after_result.fango
+-- UNFINISHED PROGRAM ------------- err_block_after_result.fango
 
-The result expression must be the last statement in a block.
+This block has no result expression yet. A block is zero or more
+`name = …` bindings followed by one final expression.
 
 4|     b = 2
-       ^
+           ^

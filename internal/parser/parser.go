@@ -301,7 +301,7 @@ func (p *parser) parseCtorDef() (ast.CtorDef, bool) {
 // parseParams consumes zero or more parameter identifiers.
 func (p *parser) parseParams() []ast.Param {
 	var params []ast.Param
-	for p.peekInExpr().Kind == token.LIDENT {
+	for p.peekInExpr().Kind == token.LIDENT || p.peekInExpr().Kind == token.UNDERSCORE {
 		t := p.next()
 		params = append(params, ast.Param{Name: t.Text, Sp: t.Span})
 	}
@@ -380,6 +380,8 @@ func (p *parser) parseBlock(col int) ast.Expr {
 	defer p.lay.pop()
 
 	var binds []ast.LocalBind
+	var items []ast.BlockItem
+	hasExprStmt := false
 	var pendingAnn *ast.TypeAnn
 	var pendingAnnName token.Token
 
@@ -421,6 +423,7 @@ func (p *parser) parseBlock(col int) ast.Expr {
 			binds = append(binds, ast.LocalBind{
 				Name: nameT.Text, NameSpan: nameT.Span, Params: params, Ann: pendingAnn, Body: rhs,
 			})
+			items = append(items, ast.BlockItem{BindIndex: len(binds) - 1})
 			pendingAnn = nil
 
 		case stmtAnn:
@@ -450,14 +453,17 @@ func (p *parser) parseBlock(col int) ast.Expr {
 				return nil
 			}
 			if nt := p.peek(); nt.Kind != token.EOF && nt.Pos().Col == col {
-				p.errorAt(nt.Span, "SYNTAX PROBLEM",
-					"The result expression must be the last statement in a block.")
-				return nil
+				items = append(items, ast.BlockItem{BindIndex: -1, Expr: result})
+				hasExprStmt = true
+				continue
 			}
-			if len(binds) == 0 {
+			if len(binds) == 0 && !hasExprStmt {
 				return result
 			}
-			return &ast.Block{Binds: binds, Result: result}
+			if !hasExprStmt {
+				items = nil
+			}
+			return &ast.Block{Binds: binds, Items: items, Result: result}
 		}
 	}
 }
@@ -735,7 +741,7 @@ func (p *parser) parseHandle() ast.Expr {
 			return nil
 		}
 		p.next()
-		params := p.parseParams()
+		params := p.parseClauseParams()
 		arrow := p.peekInExpr()
 		if !p.expect(token.ARROW, "I expect `->` after the handler clause parameters.") {
 			return nil
@@ -767,6 +773,24 @@ func (p *parser) parseHandle() ast.Expr {
 		return nil
 	}
 	return result
+}
+
+func (p *parser) parseClauseParams() []ast.Param {
+	var params []ast.Param
+	for {
+		if p.peekInExpr().Kind == token.LIDENT || p.peekInExpr().Kind == token.UNDERSCORE {
+			t := p.next()
+			params = append(params, ast.Param{Name: t.Text, Sp: t.Span})
+			continue
+		}
+		if p.peekInExpr().Kind == token.LPAREN && p.pos+1 < len(p.toks) && p.toks[p.pos+1].Kind == token.RPAREN {
+			lp := p.next()
+			rp := p.next()
+			params = append(params, ast.Param{Name: "()", Sp: lp.Span.Merge(rp.Span)})
+			continue
+		}
+		return params
+	}
 }
 
 // parseLambda parses `\x -> body` / `\x y -> body`. Like `if`, a lambda
@@ -984,7 +1008,11 @@ func (p *parser) parseAtom() ast.Expr {
 		p.next()
 		return &ast.Resume{Sp: t.Span}
 	case token.LPAREN:
-		p.next()
+		lp := p.next()
+		if p.peekInExpr().Kind == token.RPAREN {
+			rp := p.next()
+			return &ast.UnitLit{Sp: lp.Span.Merge(rp.Span)}
+		}
 		e := p.parseExpr(1)
 		if e == nil {
 			return nil
