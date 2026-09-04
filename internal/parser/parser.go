@@ -719,8 +719,10 @@ func (p *parser) parseUnary() ast.Expr {
 }
 
 // parseApply parses juxtaposition application, left-associative: one head,
-// then any number of argument atoms. `if` may head an expression but is
-// not an atom, so `print if …` needs parens (as in Elm).
+// then any number of argument atoms. An immediately attached empty `()` is
+// folded into its atom first, so `f x()` is `f (x ())`, while `f x ()`
+// remains `(f x) ()`. `if` may head an expression but is not an atom, so
+// `print if …` needs parens (as in Elm).
 func (p *parser) parseApply() ast.Expr {
 	switch p.peekInExpr().Kind {
 	case token.KwIf:
@@ -732,14 +734,14 @@ func (p *parser) parseApply() ast.Expr {
 	case token.KwHandle:
 		return p.parseHandle()
 	}
-	fn := p.parseAtom()
+	fn := p.parsePostfixAtom()
 	if fn == nil {
 		return nil
 	}
 	for {
 		switch p.peekInExpr().Kind {
 		case token.INT, token.FLOAT, token.STRING, token.LIDENT, token.UIDENT, token.LPAREN, token.KwResume:
-			arg := p.parseAtom()
+			arg := p.parsePostfixAtom()
 			if arg == nil {
 				return nil
 			}
@@ -748,6 +750,26 @@ func (p *parser) parseApply() ast.Expr {
 			return fn
 		}
 	}
+}
+
+// parsePostfixAtom consumes immediately adjacent empty Unit-call suffixes.
+// Token spans, rather than token adjacency alone, distinguish `f()` from
+// `f ()` and from `f{- comment -}()`.
+func (p *parser) parsePostfixAtom() ast.Expr {
+	expr := p.parseAtom()
+	if expr == nil {
+		return nil
+	}
+	for p.pos > 0 && p.pos+1 < len(p.toks) {
+		lp := p.peekInExpr()
+		if lp.Kind != token.LPAREN || p.toks[p.pos+1].Kind != token.RPAREN || p.toks[p.pos-1].Span.End != lp.Span.Start {
+			return expr
+		}
+		p.next()
+		rp := p.next()
+		expr = &ast.App{Fn: expr, Arg: &ast.UnitLit{Sp: lp.Span.Merge(rp.Span)}}
+	}
+	return expr
 }
 
 func (p *parser) parseHandle() ast.Expr {

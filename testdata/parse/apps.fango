@@ -1,3 +1,8 @@
 main = print (1 + 2)
 a = f x y
 b = g (h 1) 2
+postfixArg = print foo()
+spacedUnit = print foo ()
+nonempty = print foo(1)
+chained = foo()()
+parenthesized = (factory x)()

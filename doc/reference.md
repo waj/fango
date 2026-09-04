@@ -96,8 +96,16 @@ main = square 3.0
 Arrows associate to the right. Type application uses spaces, such as
 `Maybe Int`. User type constructors must always be fully applied.
 
-Functions are curried and application uses whitespace: `f x y`. Partial
-application and functions as values are supported. Lambdas use
+Functions are curried and application uses whitespace: `f x y`. An attached
+empty `()` is a postfix Unit call and binds tighter than whitespace
+application: `print foo()` means `print (foo ())`. This applies repeatedly and
+after parentheses, as in `foo()()` and `(factory x)()`. Spaced `foo ()` remains
+ordinary whitespace application, so `print foo ()` means `(print foo) ()`.
+Only empty attached parentheses have this precedence; `print foo(1)` retains
+the ordinary whitespace-application grouping `(print foo) 1`. Whitespace or a
+comment before `()` makes it an ordinary application.
+
+Partial application and functions as values are supported. Lambdas use
 `\x y -> expression`; parenthesize a lambda when passing it as an argument.
 `_` discards a function parameter. Functions may have indented block bodies,
 and local function bindings are supported.

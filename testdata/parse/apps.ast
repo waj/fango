@@ -1,4 +1,9 @@
 (module
   (def main (app (var print) (binop + (int 1) (int 2))))
   (def a (app (app (var f) (var x)) (var y)))
-  (def b (app (app (var g) (app (var h) (int 1))) (int 2))))
+  (def b (app (app (var g) (app (var h) (int 1))) (int 2)))
+  (def postfixArg (app (var print) (app (var foo) (unit))))
+  (def spacedUnit (app (app (var print) (var foo)) (unit)))
+  (def nonempty (app (app (var print) (var foo)) (int 1)))
+  (def chained (app (app (var foo) (unit)) (unit)))
+  (def parenthesized (app (app (var factory) (var x)) (unit))))
