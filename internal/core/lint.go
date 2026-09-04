@@ -10,7 +10,8 @@ import (
 // metavariables anywhere (rigid variables are legal only when declared by
 // the enclosing definition's TyParams), every operator has the types its Go
 // emission requires, every application is consistent with its callee's
-// instantiated type, and every effect row is empty. It runs in every test
+// instantiated type, and every effect row is empty except the concrete row
+// retained on a nullary computation as its force-time evidence ABI. It runs in every test
 // (and under a debug flag later) — instantiation plumbing bugs are the
 // design's top risk, and this is the tripwire.
 func Lint(p *Prog, b *types.Builtins) []error {
@@ -287,7 +288,14 @@ func (l *linter) expr(e Expr, where string) {
 		if e.Param != "_" {
 			l.scope[e.Param] = true
 		}
+		for _, ev := range rowEvidence(fn.Eff) {
+			l.effectInstance(ev, where)
+			l.evidence[ev.Unique]++
+		}
 		l.expr(e.Body, where)
+		for _, ev := range rowEvidence(fn.Eff) {
+			l.evidence[ev.Unique]--
+		}
 		if e.Param != "_" {
 			delete(l.scope, e.Param)
 		}
@@ -511,6 +519,19 @@ func (l *linter) expr(e Expr, where string) {
 			if !types.Equal(e.Ty, fn.Ret) {
 				l.errorf("%s: App{Value} typed %s, want %s",
 					where, types.Show(e.Ty), types.Show(fn.Ret))
+			}
+			wantEvidence := rowEvidence(fn.Eff)
+			if len(e.EvidenceArgs) != len(wantEvidence) {
+				l.errorf("%s: App{Value} has %d evidence args, computation requires %d", where, len(e.EvidenceArgs), len(wantEvidence))
+			}
+			for i, ev := range e.EvidenceArgs {
+				l.effectInstance(ev, where)
+				if i < len(wantEvidence) && !equalEffectInstance(ev, wantEvidence[i]) {
+					l.errorf("%s: App{Value} evidence arg %d disagrees with its computation type", where, i+1)
+				}
+				if l.evidence[ev.Unique] == 0 {
+					l.errorf("%s: App{Value} passes unavailable lexical evidence `%s`", where, ev.Name)
+				}
 			}
 			l.expr(e.Callee, where)
 			l.expr(e.Args[0], where)
@@ -760,12 +781,26 @@ func (l *linter) typ(t types.Type, where string) {
 			l.typ(a, where)
 		}
 	case *types.TFun:
-		if !t.Eff.Empty() {
+		unit, isUnit := t.Arg.(*types.TCon)
+		if !t.Eff.Empty() && (!isUnit || unit.Name != "()" || t.Eff.Tail != nil) {
 			l.errorf("%s: source effect row survived elaboration", where)
+		}
+		for _, ev := range rowEvidence(t.Eff) {
+			l.effectInstance(ev, where)
 		}
 		l.typ(t.Arg, where)
 		l.typ(t.Ret, where)
 	default:
 		l.errorf("%s: unhandled type %T", where, t)
 	}
+}
+
+func rowEvidence(r types.Row) []EffectInstance {
+	var out []EffectInstance
+	for _, l := range types.SortedRow(r).Labels {
+		if l.Name != "IO" {
+			out = append(out, EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...)})
+		}
+	}
+	return out
 }

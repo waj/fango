@@ -73,6 +73,10 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 		e = diag.Errorf(c.Span, "TYPE MISMATCH",
 			"The type annotation for `%s` says it is:\n\n    %s\n\nbut the body I found is:\n\n    %s",
 			c.Why.Name, left, right)
+	case WhyAnnotationDelay:
+		e = diag.Errorf(c.Span, "TYPE MISMATCH",
+			"The annotation for `%s` stores an unexecuted computation, but its body yields:\n\n    %s\n\nThe delayed computation must yield:\n\n    %s",
+			c.Why.Name, left, right)
 	case WhyPattern:
 		e = diag.Errorf(c.Span, "TYPE MISMATCH",
 			"This pattern matches values of type:\n\n    %s\n\nbut it needs to match:\n\n    %s", left, right)

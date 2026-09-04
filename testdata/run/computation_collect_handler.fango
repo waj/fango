@@ -1,0 +1,15 @@
+effect Console
+    write : String -> ()
+
+program : {Console} ()
+program = write "handled"
+
+collect : {Console} () -> {IO} ()
+collect action =
+    handle action of
+        write text ->
+            print text
+            resume ()
+
+main : {IO} ()
+main = collect program

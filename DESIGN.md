@@ -81,7 +81,7 @@ Precedent: Grumpy (Python→Go), GopherJS (Go→JS, inverse direction), Gleam (F
 
 ### 3.2 Purity
 
-fango is pure: no mutation, no side effects in ordinary functions. The effects story is decided: **algebraic effects with handlers** ([§10](#10-effects-and-io-algebraic-effects-with-handlers)) — effect rows in function types, direct-style code, `main : () ->{IO} ()`. For the MVP milestones before effects land, `print` remains an honest cheat (a builtin with an unsound type, like `Debug.log`).
+fango is pure: no mutation, no side effects in ordinary functions. The effects story is decided: **algebraic effects with handlers** ([§10](#10-effects-and-io-algebraic-effects-with-handlers)) — effect rows in computation types, direct-style code, `main : {IO} ()`. For the MVP milestones before effects land, `print` remains an honest cheat (a builtin with an unsound type, like `Debug.log`).
 
 ### 3.3 Type system: Elm-level now, typeclass-ready later
 
@@ -560,15 +560,26 @@ kept: c, area (re-checked against reloaded module)
 
 ### 10.2 Surface design
 
+**Decision (2026-09-03): nullary effectful work is a computation, and mentioning it runs it unless the expected type asks for the computation itself.** The surface type `{e} T` means “a delayed computation which performs `e` and yields `T`”; `A ->{e} B` and `A -> {e} B` are the same type, with the former retained as the compact spelling. Bare braces are deliberate (`{IO} T`, not `'{IO} T`). `{} T` is legal and remains distinct from `T`: it is a delayed pure computation, needed to keep row-polymorphic handler results uniform when their residual row becomes empty. There is no implicit coercion in the other direction from `T` to `{e} T`.
+
+The **mention-runs decision** is exactly four rules:
+
+1. **Top-level computation bindings define, but do not execute.** A zero-parameter equation with a computation annotation constructs the same nullary worker that `\_ -> body` constructs today. Package initialization remains pure.
+2. **An unannotated local `=` executes its computation RHS and binds the result.** Thus `line = readLine` gives `line : String`. An explicit computation annotation delays the *entire* RHS: `line : {IO} String; line = if cached then cachedLine else readLine` stores an unexecuted computation. Nested subexpressions still follow Rule 3. This applies to every computation-type annotation, including the equivalent legacy nullary-arrow spelling; a plain value cannot be implicitly lifted into a computation. The annotation deliberately changes runtime meaning, and diagnostics must say so.
+3. **Force insertion is type-directed.** When an expression of type `{e} T` occurs where `T` is expected, elaboration inserts a force if the enclosing function or handler's ambient row admits `e`. Where `{e} T` is expected, it stays delayed. The force lowers to the same saturated Unit call used today, with evidence supplied at that force site; Core and the evidence machinery do not change.
+4. **Computations are second-class in v1.** Computation types may be the type of a top-level or annotated local binding, a parameter, or a return. They may not occur inside data or instantiate a bare type variable. Consequently `identity doSomething` forces before instantiating `a := ()`, while a parameter explicitly typed `{IO} ()` receives `doSomething` unforced. Rejection uses a dedicated diagnostic explaining this Rule 4 restriction.
+
+These rules make bare mention the run marker and annotation/context the delay marker. Each mention re-executes the computation; computations are not memoized. Statement position is an ordinary expected-type case of Rule 3, so block order remains effect order without a second evaluation model.
+
 ```elm
 effect Console
     print    : String -> ()
     readLine : () -> String
 
-main : () ->{IO} ()
-main _ =
-    a = readLine ()
-    b = readLine ()
+main : {IO} ()
+main =
+    a = readLine
+    b = readLine
     case (parseInt a, parseInt b) of
         (Just x, Just y) ->
             print (showInt (x + y))
@@ -577,9 +588,9 @@ main _ =
             print "not numbers"
 
 -- A handler: run Console purely (e.g. in tests).
-collect : (() ->{Console, e} a) ->{e} ( a, List String )
+collect : {Console, e} a ->{e} ( a, List String )
 collect action =
-    handle action () of
+    handle action of
         print s ->
             resume ()          -- resume: the (one-shot) continuation, implicitly bound
 
@@ -592,8 +603,8 @@ collect action =
 
 - Function arrows carry an effect row: `readLine : () ->{Console} String`; an empty row means *provably pure*. Effect polymorphism is **inferred** by ordinary HM generalization: `map : (a ->{e} b) -> List a ->{e} List b` — one `map` for pure and effectful functions alike, no annotation needed.
 - Handler clauses follow `case` layout ([§5](#5-lexer-and-layout) rules reuse unchanged). `resume` is a keyword-bound one-shot continuation.
-- Direct style needs sequencing: statement bodies (§3.6, in the language since S2) already provide it — effectful bindings sequence naturally, and S7 only adds the typing rule that non-final *expression* statements must be `()` (stacked `print`s in `main`).
-- **Exceptions**: a `Fail err` effect (`throw : err ->{Fail err} a`) subsumes them; stdlib `try : (() ->{Fail err, e} a) ->{e} Result err a` reflects effects into values. `Result` stays for data, `Fail` for control.
+- Direct style needs sequencing: statement bodies (§3.6, in the language since S2) already provide it. Non-final computation statements are forced in source order and must yield `()`; unannotated bindings force and bind their yielded values. A final expression is forced or preserved according to its expected type.
+- **Exceptions**: a `Fail err` effect (`throw : err ->{Fail err} a`) subsumes them; stdlib `try : {Fail err, e} a ->{e} Result err a` reflects effects into values. `Result` stays for data, `Fail` for control.
 
 **The load-bearing idiom is effect *translation*, not effect elimination.** `collect` above discharges `Console` into purity, which is the tutorial shape; the shape real code uses discharges an application-level effect into `IO`, with the handler itself running in an effectful context:
 
@@ -603,20 +614,20 @@ effect Db
     execute : String -> Int
 
 -- Business logic names a capability, not a technology — and no IO.
-listActive : () ->{Db} List User
-listActive _ =
+listActive : {Db} List User
+listActive =
     rows = query "select id, name from users where active"
     List.filterMap rowToUser rows
 
 -- Production interpretation: Db becomes IO. The connection is captured, not threaded.
-withPostgres : Conn -> (() ->{Db, IO, e} a) ->{IO, e} a
+withPostgres : Conn -> {Db, IO, e} a ->{IO, e} a
 withPostgres conn action =
-    handle action () of
+    handle action of
         query sql   -> resume (pgQuery conn sql)
         execute sql -> resume (pgExec conn sql)
 
 -- Test interpretation: the residual row is empty — the test is a pure function.
-withFakeDb : Dict String (List Row) -> (() ->{Db, e} a) ->{e} a
+withFakeDb : Dict String (List Row) -> {Db, e} a ->{e} a
 ```
 
 This is the concrete form of the §10.1 argument against a monadic `IO a`: there, `listActive` is permanently marked IO and stubbing is hand-rolled dependency injection; here the *same source text* has its capability reinterpreted and its row shrinks to empty.
@@ -624,10 +635,10 @@ This is the concrete form of the §10.1 argument against a monadic `IO a`: there
 A handler that abandons its continuation is the other everyday shape, and the one that decides the compilation strategy (§10.4):
 
 ```elm
-transactionally : (() ->{Db, Fail e, i} a) ->{Db, i} Result e a
+transactionally : {Db, Fail e, i} a ->{Db, i} Result e a
 transactionally action =
     execute "begin"
-    handle action () of
+    handle action of
         throw err ->
             execute "rollback"      -- resume never called: the body is abandoned
             Err err
@@ -637,21 +648,21 @@ transactionally action =
             Ok x
 ```
 
-**Handlers are row transformers** — every one has the shape `(() ->{R1} a) ->{R2} a` — so a whole stack is packaged once, in a library, and `main` stays one line:
+**Handlers are row transformers** — every one has the shape `{R1} a ->{R2} a` — so a whole stack is packaged once, in a library, and `main` stays one line:
 
 ```elm
-withInfra : Config -> (() ->{Db, Cache, Http, IO, e} a) ->{IO, e} a
+withInfra : Config -> {Db, Cache, Http, IO, e} a ->{IO, e} a
 withInfra cfg action =
-    withPostgres (pgConnect cfg.pg) (\_ ->
-    withRedis (redisDial cfg.redis) (\_ ->
-    withRealHttp action))
+    withPostgres (pgConnect cfg.pg)
+        (withRedis (redisDial cfg.redis)
+            (withRealHttp action))
 
-main : () ->{IO} ()
-main _ =
-    withInfra (loadConfig ()) (\_ -> app ())
+main : {IO} ()
+main =
+    withInfra loadConfig app
 ```
 
-Handlers also compose as ordinary values: `via outer inner action = outer (\_ -> inner action)` types under plain HM — each handler argument is used once, and `via` generalizes and re-instantiates per use. What does **not** work is folding over a `List` of handlers: the elements have different row types, so a middleware-list API needs rank-2 polymorphism and stays out of scope. Nesting and `via` are the two supported spellings.
+Handlers also compose as ordinary values: `via outer inner action = outer (inner action)` types under plain HM — each handler argument is used once, and `via` generalizes and re-instantiates per use. What does **not** work is folding over a `List` of handlers: the elements have different row types, so a middleware-list API needs rank-2 polymorphism and stays out of scope. Nesting and `via` are the two supported spellings.
 
 ### 10.3 Type system: rows in the constraint solver
 
@@ -668,7 +679,7 @@ type Row struct {
 - **Simple rows with distinct labels** (Rémy-style, as in Unison), not Koka's scoped labels — duplicates exist to type masking/shadowing and roughly double unification subtlety; nested same-effect handlers still work operationally (innermost evidence wins). Masking can come later.
 - **Consequence of distinct labels, stated because it reads like a bug when first hit: a parameterized effect appears at most once per row.** `{Db Postgres, Db MySQL}` is not representable — the common label would force `Postgres ~ MySQL`. An app running two stores of the same shape names two effects (`Primary`, `Replica`), which is the better modeling anyway (§10.5). The diagnostic for this must name the rule, not just report the arg mismatch.
 - **Row unification**: partition labels into common/left-only/right-only; unify type args of common labels (`State Int ~ State a` ⇒ `a := Int`); closed rows reject extras; open tails absorb them (fresh ρ when both open); occurs check extends to row vars. One new case in the existing solver, ~300 lines; `RowVar` joins the existing `VarKind` (precedent: `Number`).
-- Curried functions carry a row per arrow; effects sit on the arrow whose call performs them — partial application is pure.
+- A function arrow with a row is a function returning a computation: `A ->{e} B` is identified with `A -> {e} B`. Effects occur only when the final computation is forced, so partial application is pure.
 - **Defaulting** (elaboration, beside Number defaulting): residual row vars at monomorphic top levels and on `main` close to their known labels. **Top-level bindings must be pure (empty row)** — see §10.5.
 - **Error quality**: empty rows print as plain `->`; a quantified tail appearing nowhere else prints as `{Console}` not `{Console | e}` (Unison's convention); new `Why` tags (`EffectEscapes`, `EffectMismatch`, `HandlerRemoves`) with dedicated negative-test goldens.
 - **Honest cost: +40–50% checker complexity** (row type ~100 loc, unification ~300, generalization/defaulting ~200, printing/diagnostics ~200, syntax ~300). Less than typeclasses would cost, and with a payoff elsewhere: Elm-style records (open question #4) want the *same* row engine — one engine, two clients.
@@ -704,10 +715,10 @@ Core IR grows three nodes: `Perform{Effect, Op, Args}`, `Handle{Body, Clauses, R
 
 ### 10.5 The IO story, `main`, and top-level purity
 
-- **MVP: one builtin effect, `IO`** — `print`, `readLine`, later files/net/random/time. `main : () ->{IO} ()`; the compiled entry point wraps `v_main` in the runtime's IO evidence (direct calls into `fangort` — tail-resumptive, so a plain program compiles with **zero goroutines**: hello-world is still [§8.3](#83-the-reference-program-compiled)'s Go). Fine-grained effects (`Console`, `FS`, `Net`) come later, once a stdlib exists to inform the granularity; the row machinery makes splitting `IO` a widening, not a rewrite.
+- **MVP: one builtin effect, `IO`** — `print`, `readLine`, later files/net/random/time. The effectful entry point is exactly `main : {IO} ()`; non-Unit computation mains are rejected. During migration, `main : () ->{IO} ()` remains an equivalent spelling. The compiled entry point forces `main` under the runtime's IO evidence (direct calls into `fangort` — tail-resumptive, so a plain program compiles with **zero goroutines**: hello-world is still [§8.3](#83-the-reference-program-compiled)'s Go). Legacy pure value mains retain their existing display behavior. Fine-grained effects (`Console`, `FS`, `Net`) come later, once a stdlib exists to inform the granularity; the row machinery makes splitting `IO` a widening, not a rewrite.
 - **Top-level bindings must be pure** (empty row, checked at defaulting). Consequence: strict package init (compiled) vs lazy memo (REPL) becomes unobservable except through pure divergence — **the [§9.6](#96-consistency-with-the-compiled-backend) whitelisted divergence dissolves**, exactly as flagged.
 - **REPL**: prompt expressions with row `{IO}` evaluate under a default handler stack (IO → real stdio); pure expressions as before. The interpreter reuses the *same* `fangort` goroutine runtime for general handlers and evidence environments for tail-resumptive ones — so the differential suite exercises the effect runtime itself through both backends.
-- **REPL, prompt *declarations*: effectful ones are rejected at S7.** Top-level purity applies to prompt bindings too, so `name = readLine ()` is an effect error while `readLine ()` as a bare expression runs fine. The reason is not merely uniformity: prompt values are lazy memo cells (§9.2), so an effectful binding would perform its effect at *force* time — typing the binding would read nothing, and the read would fire whenever the name was first mentioned. GHCi's `x <- readLine` has no honest analogue without eager forcing for `{IO}` bindings, which is a session-model change and belongs to S6.
+- **REPL, prompt declarations:** ordinary effectful value declarations remain rejected, so `name = readLine` is an effect error while `readLine` as a bare expression runs immediately. An explicitly annotated computation declaration (`name : {IO} String`) is allowed: it installs a worker, performs nothing at definition time, and each later mention forces it. This avoids the lazy-memo ambiguity that motivated S7's original restriction because computations are definitions rather than memo cells.
 
 **Where to draw effect boundaries** — the guidance that keeps rows short, and the answer to "won't real apps have ten labels in every signature":
 
@@ -719,7 +730,7 @@ Core IR grows three nodes: `Perform{Effect, Op, Args}`, `Handle{Body, Clauses, R
 ### 10.6 Synergies
 
 1. **The HKT/boxing cliff is never approached** — no `Monad` class needed, ever; direct style composes effects by row union; everything stays unboxed. Given fango's backend, this is the single strongest argument for effects.
-2. **Concurrency (Q2) gets its direction**: an `Async` effect (`fork : (() ->{Async, e} a) ->{Async} Future a`, `await : Future a ->{Async} a`) handled by goroutines, with the `handle` scope as a structured-concurrency nursery. A sketch, not yet a design — but the general-handler runtime *is already* the machinery it needs.
+2. **Concurrency (Q2) gets its direction**: an `Async` effect (`fork : {Async, e} a ->{Async} Future a`, `await : Future a ->{Async} a`) handled by goroutines, with the `handle` scope as a structured-concurrency nursery. A sketch, not yet a design — but the general-handler runtime *is already* the machinery it needs.
 3. **Go FFI (Q6)**: imported Go functions type as `->{IO}` (pure ones with empty rows) — the purity hazard is answered by the type system.
 4. **Effects weaken the case for typeclasses** (Q3): the main motivation for `Functor`/`Monad` disappears, strengthening the Elm-restraint option.
 
@@ -804,4 +815,4 @@ Deliberately unresolved — the agenda for iterating on this document:
 
 ---
 
-*Document history: initial draft 2026-09-02, distilled from the architecture-planning session that chose the Go-source backend. Revised same day: performance promoted to a day-0 goal — codegen redesigned from uniform-`any` boxing to type-directed unboxed compilation with Go generics, a typed Core IR, decision-tree matching in core scope, persistent cached builds, and CI-gated compile/runtime benchmarks. Second revision same day: interactive REPL added as a day-0 requirement — a Core-IR interpreter (GHCi model) with generational type identity (`TCon.Unique`), lazy-memoized module loading, `:reload` reconciliation, and differential testing between the two backends. Third revision same day: effects/IO decided — algebraic effects with one-shot handlers (Elm-style and monadic-IO rejected), row-typed functions, evidence-passing compilation with goroutine-backed general handlers, landing as milestone M7 with the `Eff` row field reserved in `TFun` from day 0. Fourth revision same day: milestones restructured from horizontal layers (M0–M8) to vertical slices (S0–S8) — the entire pipeline, interpreter, REPL, and perf gate land in S0 over an Int-only arithmetic subset, and the language grows feature-by-feature end-to-end from there. Fifth revision same day: `let … in` replaced by keyword-less statement-style bodies (§3.6) — the first deliberate divergence from Elm surface syntax; rationale: direct-style effects (S7), one scoping rule shared with the top level, existing layout machinery. Elm's `let/in` and a `let`-keyword statement form were considered and declined; `let`/`in` stay reserved words. Sixth revision same day, from the S4 design pass: `type`-declaration surface rules pinned down (§3.7) — RHS is constructors-only (no alias-flavored `type`), separate type/constructor namespaces with per-module uniqueness, full-application arity checking, function payloads allowed with `==` rejected at compile time for function-containing types (§8.6); type parameters parse in S4 but are checker-rejected until S5; records confirmed out of S4 with inline record payloads excluded from constructor syntax; an `alias` keyword considered and declined for now. Seventh revision same day, from the S5 design pass: eq/show staging pinned — S5 ships derived generic eq/show with element-operation parameters at ground instantiations only, `==` at type variables deferred to the typeclass decision (§8.6); Number-kinded variables generalize (Elm's `number` polymorphism) and compile to Go type params constrained by `fangort.Number` (§7.3, §8.4); skolems represented as rigid type variables with atomic unification rules (§7.2); interpreter numeric promotion plus a second whitelisted divergence for unoperated ≥2⁵³ literals at Float instantiations (§9.5, §9.6); runtime perf gates made per-case (1.2× scalar, 3.0× list-heavy) with idiomatic monomorphic Go baselines, and a generics-heavy compile-latency program added (§11). Eighth revision same day, from the S7 design pass: **S7 reordered ahead of S6** with the rationale and its accepted costs recorded in §13, and an internal three-checkpoint build order for S7 added (§10.8); §10.2 gained the effect-*translation* idiom (an app effect discharged into `IO`, with the pure-test counterpart), the continuation-abandoning transaction handler, and the row-transformer/`withInfra` composition story including the rank-2 limit on handler lists; §10.3 recorded that distinct labels make a parameterized effect single-occurrence per row (`{Db Postgres, Db MySQL}` is unrepresentable); §10.5 gained the effect-boundary rule (one effect per reinterpretable capability, not per dependency; `{IO}` + values as the opt-out default), the ruling that effectful REPL prompt *declarations* are rejected under top-level purity, and the honest gap that rows have no abbreviation — reopening the `alias` question (§3.7, open question #4) through the effects door.*
+*Document history: initial draft 2026-09-02, distilled from the architecture-planning session that chose the Go-source backend. Revised same day: performance promoted to a day-0 goal — codegen redesigned from uniform-`any` boxing to type-directed unboxed compilation with Go generics, a typed Core IR, decision-tree matching in core scope, persistent cached builds, and CI-gated compile/runtime benchmarks. Second revision same day: interactive REPL added as a day-0 requirement — a Core-IR interpreter (GHCi model) with generational type identity (`TCon.Unique`), lazy-memoized module loading, `:reload` reconciliation, and differential testing between the two backends. Third revision same day: effects/IO decided — algebraic effects with one-shot handlers (Elm-style and monadic-IO rejected), row-typed functions, evidence-passing compilation with goroutine-backed general handlers, landing as milestone M7 with the `Eff` row field reserved in `TFun` from day 0. Fourth revision same day: milestones restructured from horizontal layers (M0–M8) to vertical slices (S0–S8) — the entire pipeline, interpreter, REPL, and perf gate land in S0 over an Int-only arithmetic subset, and the language grows feature-by-feature end-to-end from there. Fifth revision same day: `let … in` replaced by keyword-less statement-style bodies (§3.6) — the first deliberate divergence from Elm surface syntax; rationale: direct-style effects (S7), one scoping rule shared with the top level, existing layout machinery. Elm's `let/in` and a `let`-keyword statement form were considered and declined; `let`/`in` stay reserved words. Sixth revision same day, from the S4 design pass: `type`-declaration surface rules pinned down (§3.7) — RHS is constructors-only (no alias-flavored `type`), separate type/constructor namespaces with per-module uniqueness, full-application arity checking, function payloads allowed with `==` rejected at compile time for function-containing types (§8.6); type parameters parse in S4 but are checker-rejected until S5; records confirmed out of S4 with inline record payloads excluded from constructor syntax; an `alias` keyword considered and declined for now. Seventh revision same day, from the S5 design pass: eq/show staging pinned — S5 ships derived generic eq/show with element-operation parameters at ground instantiations only, `==` at type variables deferred to the typeclass decision (§8.6); Number-kinded variables generalize (Elm's `number` polymorphism) and compile to Go type params constrained by `fangort.Number` (§7.3, §8.4); skolems represented as rigid type variables with atomic unification rules (§7.2); interpreter numeric promotion plus a second whitelisted divergence for unoperated ≥2⁵³ literals at Float instantiations (§9.5, §9.6); runtime perf gates made per-case (1.2× scalar, 3.0× list-heavy) with idiomatic monomorphic Go baselines, and a generics-heavy compile-latency program added (§11). Eighth revision same day, from the S7 design pass: **S7 reordered ahead of S6** with the rationale and its accepted costs recorded in §13, and an internal three-checkpoint build order for S7 added (§10.8); §10.2 gained the effect-*translation* idiom (an app effect discharged into `IO`, with the pure-test counterpart), the continuation-abandoning transaction handler, and the row-transformer/`withInfra` composition story including the rank-2 limit on handler lists; §10.3 recorded that distinct labels make a parameterized effect single-occurrence per row (`{Db Postgres, Db MySQL}` is unrepresentable); §10.5 gained the effect-boundary rule (one effect per reinterpretable capability, not per dependency; `{IO}` + values as the opt-out default), the ruling that effectful REPL prompt *declarations* are rejected under top-level purity, and the honest gap that rows have no abbreviation — reopening the `alias` question (§3.7, open question #4) through the effects door. Ninth revision (2026-09-03): computation types and the four mention-runs rules added to §10.2; `{IO} ()` became the effectful `main` form, annotated computation definitions became legal pure top-level bindings, and computations were restricted to second-class use in v1.*

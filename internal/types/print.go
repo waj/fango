@@ -41,8 +41,15 @@ func (p *Printer) render(t Type) string {
 		}
 		return strings.Join(parts, " ")
 	case *TFun:
+		if c, ok := t.Arg.(*TCon); ok && c.Name == "()" && (len(t.Eff.Labels) > 0 || t.Eff.Tail != nil) {
+			return p.rowText(t.Eff) + " " + p.render(t.Ret)
+		}
 		arrow := "->"
-		if len(t.Eff.Labels) > 0 {
+		showEff := len(t.Eff.Labels) > 0
+		if v, ok := t.Eff.Tail.(*TVar); ok && p.rows[v.ID] > 1 {
+			showEff = true
+		}
+		if showEff {
 			parts := make([]string, len(t.Eff.Labels))
 			for i, l := range t.Eff.Labels {
 				parts[i] = l.Name
@@ -52,7 +59,10 @@ func (p *Printer) render(t Type) string {
 			}
 			inside := strings.Join(parts, ", ")
 			if v, ok := t.Eff.Tail.(*TVar); ok && p.rows[v.ID] > 1 {
-				inside += " | " + p.varName(v)
+				if inside != "" {
+					inside += " | "
+				}
+				inside += p.varName(v)
 			}
 			arrow = "->{" + inside + "}"
 		}

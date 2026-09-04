@@ -38,8 +38,9 @@ type TCon struct {
 	Args   []Type
 }
 
-// TFun is a function arrow. Eff describes the effects performed when this
-// particular arrow is called; curried functions therefore carry one per arrow.
+// TFun is the shared internal representation for function arrows and
+// computations. A computation is the nullary shape `TFun{Arg: Unit, Eff: e,
+// Ret: T}`; surface `A -> {e} B` normalizes to the same `TFun` as `A ->{e} B`.
 type TFun struct {
 	Arg Type
 	Eff Row

@@ -514,6 +514,13 @@ func (p *parser) parseEffRow() *ast.EffRow {
 			r.Tail, r.TailSp = tail.Text, tail.Span
 			break
 		}
+		// A lone lowercase name, or one after a comma, is the compact row-tail
+		// spelling used by computation types: `{e}` / `{Console, e}`.
+		if t.Kind == token.LIDENT {
+			p.next()
+			r.Tail, r.TailSp = t.Text, t.Span
+			break
+		}
 		if t.Kind != token.UIDENT {
 			p.errorAt(t.Span, "SYNTAX PROBLEM", "I expect a capitalized effect name in this row.")
 			return nil
@@ -572,7 +579,7 @@ func (p *parser) parseTypeApp() ast.TypeExpr {
 }
 
 func isTypeAtomStart(k token.Kind) bool {
-	return k == token.UIDENT || k == token.LIDENT || k == token.LPAREN
+	return k == token.UIDENT || k == token.LIDENT || k == token.LPAREN || k == token.LBRACE
 }
 
 func (p *parser) parseTypeAtom() ast.TypeExpr {
@@ -598,6 +605,16 @@ func (p *parser) parseTypeAtom() ast.TypeExpr {
 			return nil
 		}
 		return inner
+	case token.LBRACE:
+		eff := p.parseEffRow()
+		if eff == nil {
+			return nil
+		}
+		ret := p.parseTypeApp()
+		if ret == nil {
+			return nil
+		}
+		return &ast.TCompExpr{Eff: eff, Ret: ret}
 	case token.EOF:
 		if p.peek().Kind == token.EOF {
 			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,

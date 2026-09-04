@@ -360,7 +360,15 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				return nil, err
 			}
 			saved := in.evidence
-			in.evidence = cloneEvidence(c.Evidence)
+			callEvidence := cloneEvidence(c.Evidence)
+			for _, arg := range e.EvidenceArgs {
+				ev := in.evidence[arg.Unique]
+				if ev == nil {
+					return nil, fmt.Errorf("eval: missing evidence `%s` for computation force", arg.Name)
+				}
+				callEvidence[arg.Unique] = ev
+			}
+			in.evidence = callEvidence
 			out, err := in.eval(c.Body, &Frame{parent: c.Env, vars: map[string]Value{c.Param: v}})
 			in.evidence = saved
 			return out, err

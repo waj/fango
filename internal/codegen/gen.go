@@ -265,7 +265,15 @@ func (g *gen) goType(t types.Type) goast.Expr {
 		}
 		panic("codegen: type variable outside its definition's type parameters")
 	case *types.TFun:
-		return funcType(g.goType(t.Arg), g.goType(t.Ret))
+		params := make([]paramSpec, 0, len(t.Eff.Labels)+1)
+		for _, l := range types.SortedRow(t.Eff).Labels {
+			if l.Name == "IO" {
+				continue
+			}
+			params = append(params, paramSpec{typ: g.effectType(core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args})})
+		}
+		params = append(params, paramSpec{typ: g.goType(t.Arg)})
+		return &goast.FuncType{Params: paramFields(params), Results: &goast.FieldList{List: []*goast.Field{{Type: g.goType(t.Ret)}}}}
 	case *types.TCon:
 		switch t.Unique {
 		case g.b.Int.Unique:
@@ -362,15 +370,29 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		// happens-before any call), so by-reference and by-value are
 		// indistinguishable.
 		fn := e.Ty.(*types.TFun)
-		return funcLitParams(
-			[]paramSpec{{name: func() string {
-				if e.Param == "_" {
-					return "_"
-				}
-				return mangleValue(e.Param)
-			}(), typ: g.goType(fn.Arg)}},
-			g.goType(fn.Ret),
-			g.retStmts(e.Body))
+		params := make([]paramSpec, 0, len(fn.Eff.Labels)+1)
+		var pushed []int
+		for _, l := range types.SortedRow(fn.Eff).Labels {
+			if l.Name == "IO" {
+				continue
+			}
+			name := fmt.Sprintf("ev_%d", l.Unique)
+			inst := core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args}
+			params = append(params, paramSpec{name: name, typ: g.effectType(inst)})
+			g.evidence[l.Unique] = append(g.evidence[l.Unique], ident(name))
+			pushed = append(pushed, l.Unique)
+		}
+		params = append(params, paramSpec{name: func() string {
+			if e.Param == "_" {
+				return "_"
+			}
+			return mangleValue(e.Param)
+		}(), typ: g.goType(fn.Arg)})
+		body := g.retStmts(e.Body)
+		for _, unique := range pushed {
+			g.evidence[unique] = g.evidence[unique][:len(g.evidence[unique])-1]
+		}
+		return funcLitParams(params, g.goType(fn.Ret), body)
 	case *core.App:
 		switch e.CalleeKind {
 		case core.Worker:
@@ -392,7 +414,16 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			// One typed indirect call per application; chains render
 			// e(a)(b). Call is a Go primary expression — no parens needed,
 			// and a func-literal callee called in place is legal Go.
-			return callExpr(g.expr(e.Callee, 0), g.expr(e.Args[0], 0))
+			args := make([]goast.Expr, 0, len(e.EvidenceArgs)+1)
+			for _, ev := range e.EvidenceArgs {
+				stack := g.evidence[ev.Unique]
+				if len(stack) == 0 {
+					panic("codegen: missing lexical evidence")
+				}
+				args = append(args, stack[len(stack)-1])
+			}
+			args = append(args, g.expr(e.Args[0], 0))
+			return callExpr(g.expr(e.Callee, 0), args...)
 		case core.Ctor:
 			return g.ctorLit(e)
 		default:
@@ -504,7 +535,10 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	g.evidence[e.Effect.Unique] = append(g.evidence[e.Effect.Unique], ident(name))
 	body := g.expr(e.Body, 0)
 	g.evidence[e.Effect.Unique] = g.evidence[e.Effect.Unique][:len(g.evidence[e.Effect.Unique])-1]
-	stmts := []goast.Stmt{decl}
+	// A handler whose subject does not perform the handled effect still
+	// constructs valid lexical evidence; keep the local legal in Go even
+	// when no generated operation call refers to it.
+	stmts := []goast.Stmt{decl, assignBlank(ident(name))}
 	if e.Return == nil {
 		stmts = append(stmts, returnStmt(body))
 		return callExpr(funcLit(g.goType(e.Ty), stmts))

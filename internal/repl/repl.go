@@ -238,7 +238,9 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	// THIS definition (a prompt-defined fib must self-call directly), so
 	// install its arity before elaborating — and roll back on failure.
 	prevArity, hadWorker := s.ck.Workers[vd.Name]
-	if len(vd.Params) > 0 {
+	if info.Computation {
+		s.ck.Workers[vd.Name] = 1
+	} else if len(vd.Params) > 0 {
 		s.ck.Workers[vd.Name] = len(vd.Params)
 	} else {
 		delete(s.ck.Workers, vd.Name)

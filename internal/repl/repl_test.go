@@ -76,3 +76,11 @@ func TestEffectfulPromptDeclarationRejected(t *testing.T) {
 		t.Fatalf("session did not recover after rejecting declaration:\n%s", out.String())
 	}
 }
+
+func TestPromptComputationDefinitionRunsPerMention(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader("say : {IO} ()\nsay = print \"ok\"\nsay\nsay\n:quit\n"), &out)
+	if strings.Count(out.String(), "ok\n") != 2 {
+		t.Fatalf("annotated computation should define without running, then run per mention:\n%s", out.String())
+	}
+}

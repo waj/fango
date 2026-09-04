@@ -65,6 +65,9 @@ func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
 	rawType = ck.Sub.Apply(rawType)
 	defType := eraseRows(rawType)
 	params := make([]string, len(info.Params))
+	if info.Computation {
+		params = []string{"_"}
+	}
 	if len(info.Params) > 0 {
 		argTys, _ := core.PeelFun(defType, len(info.Params))
 		for i, p := range info.Params {
@@ -222,6 +225,15 @@ func (el *elab) lambda(params []ast.Param, body ast.Expr, funTy types.Type) core
 }
 
 func (el *elab) expr(e ast.Expr) core.Expr {
+	if raw, forced := el.ck.ForceTypes[e]; forced {
+		return el.forceMention(e, raw)
+	}
+	if app, ok := e.(*ast.App); ok {
+		if comp, delayed := el.ck.DelayedApps[app]; delayed {
+			ct := el.zonkDefault(comp)
+			return &core.Lambda{Param: "_", Body: el.app(app), Ty: ct}
+		}
+	}
 	ty := el.zonkDefault(el.ck.ExprTypes[e])
 	switch e := e.(type) {
 	case *ast.IntLit:
@@ -326,7 +338,7 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 				continue
 			}
 			zonked := el.zonkDefault(bindTy)
-			isFn := len(bind.Params) > 0
+			isFn := len(bind.Params) > 0 || el.ck.DelayedBinds[bind]
 			if isFn {
 				// In scope inside its own body (recursion) — and inside any
 				// lift the body contains.
@@ -334,8 +346,10 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 				pushed++
 			}
 			var rhs core.Expr
-			if isFn {
+			if len(bind.Params) > 0 {
 				rhs = el.lambda(bind.Params, bind.Body, zonked)
+			} else if el.ck.DelayedBinds[bind] {
+				rhs = &core.Lambda{Param: "_", Body: el.expr(bind.Body), Ty: zonked}
 			} else {
 				rhs = el.expr(bind.Body)
 			}
@@ -369,6 +383,28 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 	default:
 		panic(fmt.Sprintf("elaborate: unhandled AST node %T", e))
 	}
+}
+
+func (el *elab) forceMention(e ast.Expr, raw types.Type) core.Expr {
+	rawZonk := el.zonkDefault(raw)
+	unit := &core.UnitLit{Ty: el.ck.B.Unit}
+	if x, ok := e.(*ast.If); ok {
+		comp := &core.If{Cond: el.expr(x.Cond), Then: el.expr(x.Then), Else: el.expr(x.Else), Ty: rawZonk}
+		return el.valueApp(comp, unit)
+	}
+	v, ok := e.(*ast.Var)
+	if !ok {
+		panic("elaborate: Rule 3 force recorded on unsupported expression")
+	}
+	if op := el.ck.Operations[v.Name]; op != nil {
+		return &core.Perform{Op: op, Effect: effectInstance(op, el.ck.Sub.Apply(raw)), Args: []core.Expr{unit}, Ty: rawZonk.(*types.TFun).Ret}
+	}
+	if arity, worker := el.ck.Workers[v.Name]; worker && arity == 1 {
+		c := el.workerCallee(v.Name, rawZonk, el.ck.Sub.Apply(raw), 1)
+		c.evidence = el.workerEvidence(v.Name, 1, c.tyArgs)
+		return c.saturatedApp([]core.Expr{unit})
+	}
+	return el.valueApp(&core.VarRef{Name: v.Name, Ty: rawZonk}, unit)
 }
 
 func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
@@ -591,8 +627,9 @@ func (el *elab) fold(e core.Expr) core.Expr {
 
 // zonkDefault applies the substitution, then defaults any metavariable
 // still free: Number-kinded → Int, general → Unit, row tails → empty
-// (DESIGN.md §7.3, §8.4, §10.8). Effect rows are erased here at the
-// checkpoint-1 Core boundary.
+// (DESIGN.md §7.3, §8.4, §10.8). Ordinary arrow rows are erased here;
+// concrete rows on nullary computations remain as force-time evidence ABI
+// metadata on the existing TFun shape.
 // Defaults are recorded in the checker's substitution so every other
 // occurrence of the same variable — including environment schemes held by
 // a live REPL session — resolves identically.
@@ -616,7 +653,21 @@ func eraseRows(t types.Type) types.Type {
 		}
 		return &types.TCon{Unique: t.Unique, Name: t.Name, Args: args}
 	case *types.TFun:
-		return &types.TFun{Arg: eraseRows(t.Arg), Eff: types.Row{}, Ret: eraseRows(t.Ret)}
+		arg, ret := eraseRows(t.Arg), eraseRows(t.Ret)
+		var eff types.Row
+		// Computation closures receive concrete evidence at force time. Keep
+		// that ABI metadata on the existing nullary TFun shape; ordinary
+		// function arrows still erase their source rows as before.
+		if c, ok := arg.(*types.TCon); ok && c.Name == "()" {
+			for _, l := range types.SortedRow(t.Eff).Labels {
+				args := make([]types.Type, len(l.Args))
+				for i, a := range l.Args {
+					args[i] = eraseRows(a)
+				}
+				eff.Labels = append(eff.Labels, types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args})
+			}
+		}
+		return &types.TFun{Arg: arg, Eff: eff, Ret: ret}
 	case types.Row:
 		return types.Row{}
 	default:

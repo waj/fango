@@ -1,0 +1,6 @@
+type Box a = Box a
+
+bad : Box ({IO} Int)
+bad = Box readLine
+
+main = ()

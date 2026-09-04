@@ -1,0 +1,3 @@
+delay : ({e} a) ->{e} a
+empty : () -> Int
+force 2:16 : {e} a => a

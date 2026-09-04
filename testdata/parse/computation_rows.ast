@@ -1,0 +1,3 @@
+(module
+  (def delay (params action) (ann (-> (comp (effects (tail e)) a) (effects (tail e)) a)) (var action))
+  (def empty (ann (comp (effects) Int)) (int 1)))

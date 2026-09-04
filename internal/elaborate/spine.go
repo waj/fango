@@ -139,12 +139,18 @@ func (el *elab) valueApp(callee, arg core.Expr) core.Expr {
 	if !ok {
 		panic(fmt.Sprintf("elaborate: applying a non-function type %s", types.Show(callee.Type())))
 	}
-	return &core.App{
+	app := &core.App{
 		CalleeKind: core.Value,
 		Callee:     callee,
 		Args:       []core.Expr{arg},
 		Ty:         fn.Ret,
 	}
+	for _, l := range types.SortedRow(fn.Eff).Labels {
+		if l.Name != "IO" {
+			app.EvidenceArgs = append(app.EvidenceArgs, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...)})
+		}
+	}
+	return app
 }
 
 // callee is a known-arity application head: a top-level worker, a

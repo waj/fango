@@ -1,0 +1,7 @@
+(module
+  (def doSomething (ann (comp (effects (IO)) ())) (app (var print) (string "do")))
+  (def doNothing (ann (comp (effects (IO)) ())) (unit))
+  (def register (params action) (ann (-> (comp (effects (IO)) ()) (effects (IO)) ())) (var action))
+  (def identity (params x) (var x))
+  (def collect (params program) (ann (-> (comp (effects (IO)) ()) (effects (IO)) ())) (var program))
+  (def main (ann (comp (effects (IO)) ())) (block (expr (app (var register) (var doSomething))) (expr (app (var identity) (var doSomething))) (expr (app (var collect) (var doSomething))) (expr (app (var print) (var readLine))) (if (ctor True) (var doSomething) (var doNothing)))))
