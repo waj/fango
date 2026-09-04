@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 
@@ -15,8 +14,7 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// Checker goldens include the inferred declarations and the Rule 3 choices;
-// unlike Core goldens, they expose a force before row erasure.
+// Checker goldens include the inferred declarations and diagnostics.
 func TestCheckerGoldens(t *testing.T) {
 	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "check"))
 	for _, path := range files {
@@ -41,29 +39,6 @@ func TestCheckerGoldens(t *testing.T) {
 			var out strings.Builder
 			for _, info := range infos {
 				fmt.Fprintf(&out, "%s : %s\n", info.Name, types.Show(ck.Sub.Apply(info.Type)))
-			}
-			type choice struct {
-				line, col int
-				text      string
-			}
-			var choices []choice
-			for e, raw := range ck.ForceTypes {
-				p := e.Span().StartPos()
-				comp := ck.Sub.Apply(raw).(*types.TFun)
-				choices = append(choices, choice{p.Line, p.Col, fmt.Sprintf("force %d:%d : %s => %s", p.Line, p.Col, types.Show(comp), types.Show(ck.Sub.Apply(comp.Ret)))})
-			}
-			for e, raw := range ck.DelayedApps {
-				p := e.Span().StartPos()
-				choices = append(choices, choice{p.Line, p.Col, fmt.Sprintf("delay %d:%d : %s", p.Line, p.Col, types.Show(ck.Sub.Apply(raw)))})
-			}
-			sort.Slice(choices, func(i, j int) bool {
-				if choices[i].line != choices[j].line {
-					return choices[i].line < choices[j].line
-				}
-				return choices[i].col < choices[j].col
-			})
-			for _, c := range choices {
-				out.WriteString(c.text + "\n")
 			}
 			if len(errs) > 0 {
 				out.WriteString("-- errors --\n" + testutil.DumpErrors(errs))

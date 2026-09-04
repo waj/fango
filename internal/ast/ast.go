@@ -101,7 +101,7 @@ type TypeAnn struct {
 }
 
 // TypeExpr is the surface type grammar: ground names, `()`, `->` arrows,
-// computation types `{e} T` (right-associative), and type variables.
+// effect rows attached to arrows, and type variables.
 type TypeExpr interface {
 	isTypeExpr()
 	Span() source.Span
@@ -118,19 +118,11 @@ type TVarName struct {
 }
 
 // TFunExpr is a function arrow. Eff is nil for a plain `->` — pure as
-// written — and non-nil only for `->{…}` (doc/design.md, "Computations and effects"). The dumper omits a nil
+// written — and non-nil only for `->{…}` (doc/design.md, "Functions and effects"). The dumper omits a nil
 // row, keeping pure-arrow dumps compact and stable.
 type TFunExpr struct {
 	Arg, Ret TypeExpr
 	Eff      *EffRow
-}
-
-// TCompExpr is a delayed computation, `{IO} String`. Inference normalizes
-// it to the existing Unit-argument effectful function representation, so it
-// adds no runtime or Core type form.
-type TCompExpr struct {
-	Eff *EffRow
-	Ret TypeExpr
 }
 
 // EffRow is the surface effect row on an arrow: `->{Console}`,
@@ -160,17 +152,15 @@ type TApp struct {
 	Args   []TypeExpr // non-empty
 }
 
-func (*TName) isTypeExpr()     {}
-func (*TVarName) isTypeExpr()  {}
-func (*TFunExpr) isTypeExpr()  {}
-func (*TCompExpr) isTypeExpr() {}
-func (*TApp) isTypeExpr()      {}
+func (*TName) isTypeExpr()    {}
+func (*TVarName) isTypeExpr() {}
+func (*TFunExpr) isTypeExpr() {}
+func (*TApp) isTypeExpr()     {}
 
-func (t *TName) Span() source.Span     { return t.Sp }
-func (t *TVarName) Span() source.Span  { return t.Sp }
-func (t *TFunExpr) Span() source.Span  { return t.Arg.Span().Merge(t.Ret.Span()) }
-func (t *TCompExpr) Span() source.Span { return t.Eff.Span().Merge(t.Ret.Span()) }
-func (t *TApp) Span() source.Span      { return t.NameSp.Merge(t.Args[len(t.Args)-1].Span()) }
+func (t *TName) Span() source.Span    { return t.Sp }
+func (t *TVarName) Span() source.Span { return t.Sp }
+func (t *TFunExpr) Span() source.Span { return t.Arg.Span().Merge(t.Ret.Span()) }
+func (t *TApp) Span() source.Span     { return t.NameSp.Merge(t.Args[len(t.Args)-1].Span()) }
 
 // BinOp stays a distinct node rather than desugaring to App: inference
 // special-cases numeric operators, and errors should point at the operator.
@@ -196,7 +186,7 @@ type CaseBranch struct {
 
 // Handle is `handle <expr> of` followed by operation clauses aligned at the
 // column of the first clause token — layout rule 2, shared with `case`
-// (see doc/design.md, "Computations and effects").
+// (see doc/design.md, "Functions and effects").
 type Handle struct {
 	Body    Expr
 	Clauses []HandleClause
@@ -359,7 +349,7 @@ type CtorDef struct {
 
 func (*TypeDecl) isDecl() {}
 
-// EffectDecl declares an effect and its operations (doc/design.md, "Computations and effects"):
+// EffectDecl declares an effect and its operations (doc/design.md, "Functions and effects"):
 //
 //	effect Console
 //	    print    : String -> ()

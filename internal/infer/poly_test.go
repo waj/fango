@@ -102,7 +102,7 @@ func TestPolyNegative(t *testing.T) {
 		{"type Box a = MkBox a\nf b = f (MkBox b)", "TYPE MISMATCH", 2},
 		// ... and an annotation does not re-enable it (self stays the meta;
 		// the occurs failure surfaces at the annotation unification).
-		{"type Box a = MkBox a\nf : Box a -> Int\nf b = f (MkBox b)", "TYPE MISMATCH", 2},
+		{"type Box a = MkBox a\nf : Box a -> Int\nf b = f (MkBox b)", "TYPE MISMATCH", 3},
 		// Non-regular recursive types.
 		{"type Pair a b = MkPair a b\ntype T a = Leaf | Node (T (Pair a a))", "NON-REGULAR TYPE", 2},
 		{"type A a = MkA (B (A a)) | EndA\ntype B a = MkB (A a)", "NON-REGULAR TYPE", 1},
@@ -142,10 +142,10 @@ func TestPolySchemeVars(t *testing.T) {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 	constSch := infos[0].Scheme
-	if len(constSch.Vars) != 4 {
-		t.Fatalf("const: want 2 type vars and 2 row vars, got %d", len(constSch.Vars))
+	if len(constSch.Vars) != 2 {
+		t.Fatalf("const: want 2 type vars, got %d", len(constSch.Vars))
 	}
-	wantKinds := []types.VarKind{types.General, types.RowVar, types.General, types.RowVar}
+	wantKinds := []types.VarKind{types.General, types.General}
 	for i, v := range constSch.Vars {
 		if !v.Rigid || v.Kind != wantKinds[i] {
 			t.Errorf("const var %d: want rigid kind %v, got %+v", i, wantKinds[i], v)
@@ -161,7 +161,7 @@ func TestPolySchemeVars(t *testing.T) {
 	}
 
 	doubleSch := infos[1].Scheme
-	if len(doubleSch.Vars) != 2 || !doubleSch.Vars[0].Rigid || doubleSch.Vars[0].Kind != types.Number || doubleSch.Vars[1].Kind != types.RowVar {
-		t.Errorf("double: want a rigid Number and RowVar, got %+v", doubleSch.Vars)
+	if len(doubleSch.Vars) != 1 || !doubleSch.Vars[0].Rigid || doubleSch.Vars[0].Kind != types.Number {
+		t.Errorf("double: want one rigid Number, got %+v", doubleSch.Vars)
 	}
 }

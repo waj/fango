@@ -1,5 +1,0 @@
-delay : {e} a -> {e} a
-delay action = action
-
-empty : {} Int
-empty = 1

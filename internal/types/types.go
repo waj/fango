@@ -38,9 +38,8 @@ type TCon struct {
 	Args   []Type
 }
 
-// TFun is the shared internal representation for function arrows and
-// computations. A computation is the nullary shape `TFun{Arg: Unit, Eff: e,
-// Ret: T}`; surface `A -> {e} B` normalizes to the same `TFun` as `A ->{e} B`.
+// TFun is the shared internal representation for function arrows. Effects
+// belong to the individual arrow whose application performs them.
 type TFun struct {
 	Arg Type
 	Eff Row

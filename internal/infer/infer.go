@@ -17,21 +17,20 @@ import (
 type WhyKind int
 
 const (
-	WhyOperand         WhyKind = iota // operands of a numeric operator must agree
-	WhyDeclBody                       // a declaration body must match its (future) annotation
-	WhyCall                           // a callee must be a function accepting the argument
-	WhyIfCondition                    // an if condition must be Bool
-	WhyIfBranches                     // then/else branches must agree
-	WhyCompare                        // both sides of a comparison must agree
-	WhyNegate                         // a negated operand must be a number
-	WhyOpRequires                     // an operator fixes its operand type (/, ++)
-	WhyAnnotation                     // a definition must match its type annotation
-	WhyRecursion                      // recursive uses must match the definition
-	WhyPattern                        // a pattern must match the scrutinee's type
-	WhyCaseBranches                   // all case branches must produce the same type
-	WhyEffectEscapes                  // a top-level value performs an unhandled effect
-	WhyEffectMismatch                 // an annotation's effect row disagrees with its body
-	WhyAnnotationDelay                // a computation annotation delays the binding RHS
+	WhyOperand        WhyKind = iota // operands of a numeric operator must agree
+	WhyDeclBody                      // a declaration body must match its (future) annotation
+	WhyCall                          // a callee must be a function accepting the argument
+	WhyIfCondition                   // an if condition must be Bool
+	WhyIfBranches                    // then/else branches must agree
+	WhyCompare                       // both sides of a comparison must agree
+	WhyNegate                        // a negated operand must be a number
+	WhyOpRequires                    // an operator fixes its operand type (/, ++)
+	WhyAnnotation                    // a definition must match its type annotation
+	WhyRecursion                     // recursive uses must match the definition
+	WhyPattern                       // a pattern must match the scrutinee's type
+	WhyCaseBranches                  // all case branches must produce the same type
+	WhyEffectEscapes                 // a top-level value performs an unhandled effect
+	WhyEffectMismatch                // an annotation's effect row disagrees with its body
 )
 
 type Why struct {
@@ -46,7 +45,7 @@ type Constraint struct {
 	Span        source.Span
 	Why         Why
 	// Include is used only for effect rows: Left must be a subset of Right.
-	// It expresses composition without claiming the surrounding computation
+	// It expresses composition without claiming the surrounding function call
 	// performs exactly the callee's effects.
 	Include bool
 }
@@ -103,12 +102,6 @@ type Checker struct {
 	HandleInfos map[*ast.Handle]*HandlerInfo
 	ResumeCalls map[*ast.App]bool
 
-	// ForceTypes records Rule 3 insertions. The value is the computation's
-	// pre-force type; ExprTypes records the yielded type seen by its context.
-	ForceTypes   map[ast.Expr]types.Type
-	DelayedApps  map[*ast.App]types.Type
-	DelayedBinds map[*ast.LocalBind]bool
-
 	// Workers maps top-level function names to their syntactic parameter
 	// count — the arity that drives doc/design.md, "Go backend and runtime" saturation analysis. Session
 	// state like Ctors: populated at inference time (complete before
@@ -164,9 +157,6 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		OpCalls:         map[*ast.App]*types.EffectOp{},
 		HandleInfos:     map[*ast.Handle]*HandlerInfo{},
 		ResumeCalls:     map[*ast.App]bool{},
-		ForceTypes:      map[ast.Expr]types.Type{},
-		DelayedApps:     map[*ast.App]types.Type{},
-		DelayedBinds:    map[*ast.LocalBind]bool{},
 		Workers:         map[string]int{},
 		BindTypes:       map[*ast.LocalBind]types.Type{},
 		PatTypes:        map[ast.Pattern]types.Type{},
@@ -211,12 +201,11 @@ func (ck *Checker) seedIO() {
 }
 
 type DeclInfo struct {
-	Name        string
-	NameSpan    source.Span
-	Params      []ast.Param
-	Type        types.Type // solved but not zonked; apply ck.Sub for the final type
-	Body        ast.Expr
-	Computation bool // zero-parameter surface definition lowered as a Unit worker
+	Name     string
+	NameSpan source.Span
+	Params   []ast.Param
+	Type     types.Type // solved but not zonked; apply ck.Sub for the final type
+	Body     ast.Expr
 
 	// Scheme is the declaration's generalized type: Scheme.Vars are the
 	// definition's type parameters (elaboration's Def.TyParams). Quantified
@@ -466,11 +455,6 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 		}
 		fields := make([]types.Type, len(c.Args))
 		for j, a := range c.Args {
-			if surfaceContainsComputation(a) {
-				errs = append(errs, computationSecondClassError(a.Span(), "stored in constructor `"+c.Name+"`"))
-				fields[j] = ck.B.Unit
-				continue
-			}
 			t, fieldErrs := ck.ResolveTypeExpr(a, scope)
 			errs = append(errs, fieldErrs...)
 			if t == nil {
@@ -497,11 +481,7 @@ func (ck *Checker) Decl(d *ast.ValueDecl) (DeclInfo, []diag.Error) {
 // worker-table upkeep (redefining a worker as a value evicts its arity).
 func (ck *Checker) BindDecl(info DeclInfo) {
 	ck.Env.Bind(info.Name, info.Scheme)
-	if len(info.Params) > 0 || info.Computation {
-		if info.Computation {
-			ck.Workers[info.Name] = 1
-			return
-		}
+	if len(info.Params) > 0 {
 		ck.Workers[info.Name] = len(info.Params)
 	} else {
 		delete(ck.Workers, info.Name)
@@ -519,8 +499,8 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 		errs = append(errs, diag.Errorf(d.NameSpan, "MAIN TAKES NO PARAMETERS",
 			"`main` may be a value or a one-argument Unit function."))
 	}
-	if d.Name == "main" && len(d.Params) == 1 && d.Params[0].Name != "_" {
-		errs = append(errs, diag.Errorf(d.Params[0].Sp, "MAIN TAKES NO PARAMETERS", "Function-style `main` must discard its Unit argument with `_`."))
+	if d.Name == "main" && len(d.Params) == 1 && d.Params[0].Name != "_" && d.Params[0].Name != "()" {
+		errs = append(errs, diag.Errorf(d.Params[0].Sp, "MAIN TAKES NO PARAMETERS", "Function-style `main` must use `main()` or discard its Unit argument with `_`."))
 	}
 
 	var annTy types.Type
@@ -531,20 +511,15 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 		annTy, annErrs = ck.ResolveTypeExpr(d.Ann.Type, annScope)
 		errs = append(errs, annErrs...)
 	}
-	comp, computation := computationType(annTy, ck.B)
-	computation = computation && len(d.Params) == 0
-
 	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	var ty types.Type
-	if computation {
-		ty = g.computation(d.Name, d.NameSpan, comp, d.Body)
-	} else if len(d.Params) == 0 {
+	if len(d.Params) == 0 {
 		ty = g.expr(d.Body)
 		if d.Name != "main" && allowEffects {
 			g.cs = append(g.cs, Constraint{Left: g.ambient, Right: types.Row{}, Span: d.Body.Span(), Why: Why{Kind: WhyEffectEscapes}})
 		}
-	} else if annTy != nil && surfaceMentionsComputation(d.Ann.Type) {
-		ty = g.functionAgainst(d.Name, d.NameSpan, d.Params, d.Body, annTy)
+	} else if annTy != nil {
+		ty = g.functionWithAnnotatedParams(d.Name, d.NameSpan, d.Params, d.Body, annTy)
 		if d.Name == "main" && len(d.Params) == 1 {
 			want := &types.TFun{Arg: ck.B.Unit, Eff: types.Row{Labels: []types.EffLabel{{Unique: ck.IO.Unique, Name: ck.IO.Name}}}, Ret: ck.B.Unit}
 			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
@@ -560,14 +535,17 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
 	errs = append(errs, solveErrs...)
-	promptEffects := !computation && typeHasEffects(ck.Sub.Apply(ty))
+	if d.Ann == nil && d.Name != "main" {
+		ck.closeSingleRows(ty)
+	}
+	promptEffects := false
 	if row, ok := ck.Sub.Apply(g.ambient).(types.Row); ok && len(row.Labels) > 0 {
 		promptEffects = true
 	}
 	if !allowEffects && promptEffects {
 		errs = append(errs, diag.Errorf(d.Body.Span(), "EFFECTFUL PROMPT DECLARATION", "Effectful declarations are not installed at the prompt; run the expression directly."))
 	}
-	if d.Name == "main" && len(d.Params) == 0 && !computation {
+	if d.Name == "main" && len(d.Params) == 0 {
 		row := ck.Sub.Apply(g.ambient).(types.Row)
 		for _, l := range row.Labels {
 			if l.Unique != ck.IO.Unique {
@@ -580,32 +558,22 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 		// Skolemize-and-unify (doc/design.md, "Type inference"): the annotation's variables resolve to
 		// fresh rigid skolems, atomic in unification, so an annotation
 		// claiming more polymorphism than the body delivers errors here.
-		if !computation {
-			if !sameKnownEffects(ck.Sub.Apply(annTy), ck.Sub.Apply(ty)) {
-				errs = append(errs, diag.Errorf(d.Ann.Sp, "EFFECT MISMATCH",
-					"The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", d.Name))
-			}
-			c := Constraint{Left: annTy, Right: ty, Span: d.Body.Span(),
-				Why: Why{Kind: WhyAnnotation, Name: d.Name}}
-			sub, _, solveErrs := Solve([]Constraint{c}, nil, ck.Sub, ck.B, ck.Sup)
-			ck.Sub = sub
-			errs = append(errs, solveErrs...)
-			ty = annTy
+		if !sameKnownEffects(ck.Sub.Apply(annTy), ck.Sub.Apply(ty)) {
+			errs = append(errs, diag.Errorf(d.Ann.Sp, "EFFECT MISMATCH",
+				"The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", d.Name))
 		}
-	}
-	if d.Name == "main" && computation {
-		want := &types.TFun{Arg: ck.B.Unit, Eff: types.Row{Labels: []types.EffLabel{{Unique: ck.IO.Unique, Name: ck.IO.Name}}}, Ret: ck.B.Unit}
-		c := Constraint{Left: ty, Right: want, Span: d.Ann.Sp, Why: Why{Kind: WhyAnnotation, Name: "main"}}
+		c := Constraint{Left: annTy, Right: ty, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: d.Name}}
 		sub, _, solveErrs := Solve([]Constraint{c}, nil, ck.Sub, ck.B, ck.Sup)
 		ck.Sub = sub
 		errs = append(errs, solveErrs...)
+		ty = annTy
 	}
-	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body, Computation: computation}
+	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body}
 	_, isLambda := d.Body.(*ast.Lambda)
 	switch {
 	case d.Name == "main":
-		// main is the program's ground entry point (doc/design.md, "Go backend and runtime": its effect is
-		// forced inside func main()) — it never generalizes. Unconstrained
+		// main is the program's ground entry point (doc/design.md, "Go backend and runtime": a function form is
+		// invoked inside func main()) — it never generalizes. Unconstrained
 		// variables in its type default like interior ones (Number → Int,
 		// General → Unit), so `main = 1 + 2` stays an Int program.
 		info.Scheme = types.Scheme{Body: ty}
@@ -615,13 +583,6 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 		info.Scheme = ck.generalize(ty, nil)
 	}
 	return info, errs
-}
-
-func typeHasEffects(t types.Type) bool {
-	if f, ok := t.(*types.TFun); ok {
-		return len(f.Eff.Labels) > 0 || typeHasEffects(f.Ret)
-	}
-	return false
 }
 
 func sameKnownEffects(a, b types.Type) bool {
@@ -640,6 +601,46 @@ func sameKnownEffects(a, b types.Type) bool {
 		}
 	}
 	return sameKnownEffects(af.Ret, bf.Ret)
+}
+
+// closeSingleRows makes an inferred arrow pure when its open row occurs only
+// once in the type. A row shared between a callback and the surrounding call
+// remains quantified, preserving inferred higher-order effect polymorphism.
+func (ck *Checker) closeSingleRows(t types.Type) {
+	t = ck.Sub.Apply(t)
+	counts := map[int]int{}
+	var count func(types.Type)
+	count = func(t types.Type) {
+		switch t := t.(type) {
+		case *types.TVar:
+			if t.Kind == types.RowVar && !t.Rigid {
+				counts[t.ID]++
+			}
+		case *types.TCon:
+			for _, a := range t.Args {
+				count(a)
+			}
+		case *types.TFun:
+			count(t.Arg)
+			count(t.Eff)
+			count(t.Ret)
+		case types.Row:
+			for _, l := range t.Labels {
+				for _, a := range l.Args {
+					count(a)
+				}
+			}
+			if t.Tail != nil {
+				count(t.Tail)
+			}
+		}
+	}
+	count(t)
+	for id, n := range counts {
+		if n == 1 {
+			ck.Sub[id] = types.Row{}
+		}
+	}
 }
 
 // Expr checks an expression with prompt semantics (print allowed) — the
@@ -668,7 +669,6 @@ type generator struct {
 	errs       []diag.Error
 	ambient    types.Row
 	resumeType types.Type
-	preserve   ast.Expr // one expression root kept unforced by its parent
 }
 
 // blockScope is a block's local bindings, as schemes: parameters and
@@ -719,9 +719,6 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 				g.errs = append(g.errs, diag.Errorf(e.Sp, "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has operation-local polymorphism that cannot be used at runtime until checkpoint 3.", op.Name))
 			}
 		}
-		if g.preserve != e {
-			ty = g.forceMention(e, ty, want)
-		}
 	case *ast.Ctor:
 		info, ok := g.ck.Ctors[e.Name]
 		if !ok {
@@ -741,7 +738,6 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			g.ck.ExprTypes[appHead(e)] = inst
 			params, result := peelOperation(inst, op.Arity)
 			args := appArgs(e)
-			delayed := wantsComputation(want, g.ck.B)
 			for i, a := range args {
 				at := g.exprWant(a, params[i])
 				g.cs = append(g.cs, Constraint{Left: at, Right: params[i], Span: a.Span(), Why: Why{Kind: WhyCall}})
@@ -752,27 +748,15 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 				last = cur.(*types.TFun)
 				cur = last.Ret
 			}
-			if delayed {
-				wc, _ := computationType(want, g.ck.B)
-				g.cs = append(g.cs,
-					Constraint{Left: result, Right: wc.Ret, Span: e.Span(), Why: Why{Kind: WhyCall}},
-					Constraint{Left: last.Eff, Right: wc.Eff, Span: e.Span(), Why: Why{Kind: WhyCall}})
-				g.ck.DelayedApps[e] = want
-				ty = want
-			} else {
-				g.cs = append(g.cs, Constraint{Left: last.Eff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
-				ty = result
-			}
+			g.cs = append(g.cs, Constraint{Left: last.Eff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
+			ty = result
 			g.ck.OpCalls[e] = op
 			if len(op.LocalVars) > 0 && !(op.Owner == g.ck.IO && op.Name == "print") {
 				g.errs = append(g.errs, diag.Errorf(e.Span(), "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has result polymorphism that is staged until checkpoint 3.", op.Name))
 			}
 			break
 		}
-		savedPreserve := g.preserve
-		g.preserve = e.Fn
 		fnTy := g.expr(e.Fn)
-		g.preserve = savedPreserve
 		var argWant types.Type
 		if fn, ok := g.ck.Sub.Apply(fnTy).(*types.TFun); ok {
 			argWant = fn.Arg
@@ -786,17 +770,8 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			Span:  e.Fn.Span(),
 			Why:   Why{Kind: WhyCall},
 		})
-		if wantsComputation(want, g.ck.B) {
-			wc, _ := computationType(want, g.ck.B)
-			g.cs = append(g.cs,
-				Constraint{Left: r, Right: wc.Ret, Span: e.Span(), Why: Why{Kind: WhyCall}},
-				Constraint{Left: callEff, Right: wc.Eff, Span: e.Span(), Why: Why{Kind: WhyCall}})
-			g.ck.DelayedApps[e] = want
-			ty = want
-		} else {
-			g.cs = append(g.cs, Constraint{Left: callEff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
-			ty = r
-		}
+		g.cs = append(g.cs, Constraint{Left: callEff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
+		ty = r
 		if op, n := g.operationSpine(e); op != nil && n < op.Arity {
 			g.ck.OpCalls[e] = op
 		}
@@ -815,34 +790,12 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		g.cs = append(g.cs, Constraint{
 			Left: condTy, Right: g.ck.B.Bool, Span: e.Cond.Span(), Why: Why{Kind: WhyIfCondition},
 		})
-		if wantsComputation(want, g.ck.B) {
-			thenTy := g.exprWant(e.Then, want)
-			elseTy := g.exprWant(e.Else, want)
-			g.cs = append(g.cs, Constraint{
-				Left: elseTy, Right: thenTy, Span: e.Else.Span(), Why: Why{Kind: WhyIfBranches},
-			})
-			ty = thenTy
-			break
-		}
-		// Infer branches without forcing first. If they agree on a
-		// computation, Rule 3 forces the selected computation at the `if`
-		// boundary rather than forcing both branch expressions independently.
-		savedPreserve := g.preserve
-		g.preserve = e.Then
 		thenTy := g.expr(e.Then)
-		g.preserve = e.Else
 		elseTy := g.expr(e.Else)
-		g.preserve = savedPreserve
 		g.cs = append(g.cs, Constraint{
 			Left: elseTy, Right: thenTy, Span: e.Else.Span(), Why: Why{Kind: WhyIfBranches},
 		})
-		if comp, ok := computationType(g.ck.Sub.Apply(thenTy), g.ck.B); ok {
-			g.ck.ForceTypes[e] = thenTy
-			g.cs = append(g.cs, Constraint{Left: comp.Eff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
-			ty = comp.Ret
-		} else {
-			ty = thenTy
-		}
+		ty = thenTy
 	case *ast.BinOp:
 		ty = g.binOp(e)
 	case *ast.Block:
@@ -875,32 +828,6 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 	}
 	g.ck.ExprTypes[e] = ty
 	return ty
-}
-
-func computationType(t types.Type, b *types.Builtins) (*types.TFun, bool) {
-	f, ok := t.(*types.TFun)
-	if !ok || !isUnitType(f.Arg, b) {
-		return nil, false
-	}
-	return f, true
-}
-
-func wantsComputation(t types.Type, b *types.Builtins) bool {
-	_, ok := computationType(t, b)
-	return ok
-}
-
-func (g *generator) forceMention(e ast.Expr, t, want types.Type) types.Type {
-	comp, ok := computationType(g.ck.Sub.Apply(t), g.ck.B)
-	if !ok {
-		return t
-	}
-	if want != nil && wantsComputation(g.ck.Sub.Apply(want), g.ck.B) {
-		return t
-	}
-	g.ck.ForceTypes[e] = t
-	g.cs = append(g.cs, Constraint{Left: comp.Eff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
-	return comp.Ret
 }
 
 func appArgs(e *ast.App) []ast.Expr {
@@ -1045,7 +972,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		g.cs = append(g.cs, Constraint{Left: bodyTy, Right: result, Span: e.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
 	}
 	// Only the handled label is removed. Any residual effects from the body,
-	// clauses, or return clause compose into the surrounding computation.
+	// clauses, or return clause compose into the surrounding expression.
 	g.cs = append(g.cs, Constraint{Left: residual, Right: savedAmbient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
 	g.ambient = savedAmbient
 	g.ck.HandleInfos[e] = info
@@ -1206,36 +1133,45 @@ func (g *generator) operationSpine(e *ast.App) (*types.EffectOp, int) {
 // lives in the block scope, never in Env, so failed REPL definitions need
 // no rollback and redefinition resolves self-references to the new body.
 func (g *generator) function(name string, nameSpan source.Span, params []ast.Param, body ast.Expr) types.Type {
-	self := g.ck.Sup.FreshVar(types.General)
-	scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{name: {Body: self}}}
+	scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{name: {Body: g.ck.Sup.FreshVar(types.General)}}}
 	g.locals = scope
 	defer func() { g.locals = scope.parent }()
 
 	paramTys := g.bindParams(scope, params)
 	savedAmbient := g.ambient
 	bodyAmbient := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
+	resultTy := g.ck.Sup.FreshVar(types.General)
+	funTy := g.wrapFunction(paramTys, resultTy, bodyAmbient)
+	scope.names[name] = types.Scheme{Body: funTy}
 	g.ambient = bodyAmbient
 	bodyTy := g.expr(body)
 	g.ambient = savedAmbient
 
-	funTy := g.wrapFunction(paramTys, bodyTy, bodyAmbient)
-	g.cs = append(g.cs, Constraint{Left: self, Right: funTy, Span: nameSpan,
+	g.cs = append(g.cs, Constraint{Left: resultTy, Right: bodyTy, Span: nameSpan,
 		Why: Why{Kind: WhyRecursion, Name: name}})
 	return funTy
 }
 
-func (g *generator) functionAgainst(name string, nameSpan source.Span, params []ast.Param, body ast.Expr, want types.Type) types.Type {
-	scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{name: {Body: want}}}
+// functionWithAnnotatedParams uses only the annotation's argument types while
+// independently inferring every arrow's effects. This lets callback effects
+// flow into a higher-order body without allowing an overstated result row to
+// manufacture effects the body never performs.
+func (g *generator) functionWithAnnotatedParams(name string, nameSpan source.Span, params []ast.Param, body ast.Expr, ann types.Type) types.Type {
+	scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{name: {Body: g.ck.Sup.FreshVar(types.General)}}}
 	g.locals = scope
 	defer func() { g.locals = scope.parent }()
-	cur := want
-	for _, p := range params {
+	cur := ann
+	paramTys := make([]types.Type, len(params))
+	for i, p := range params {
 		fn, ok := cur.(*types.TFun)
 		if !ok {
 			g.errs = append(g.errs, diag.Errorf(nameSpan, "TYPE MISMATCH", "The annotation for `%s` has fewer function parameters than its definition.", name))
-			return want
+			return ann
 		}
-		if p.Name != "_" {
+		paramTys[i] = fn.Arg
+		if p.Name == "()" {
+			g.cs = append(g.cs, Constraint{Left: fn.Arg, Right: g.ck.B.Unit, Span: p.Sp, Why: Why{Kind: WhyAnnotation, Name: name}})
+		} else if p.Name != "_" {
 			if _, dup := g.locals.lookup(p.Name); dup || g.ck.Env.Has(p.Name) {
 				g.errs = append(g.errs, diag.Errorf(p.Sp, "SHADOWING", "The parameter `%s` shadows a name that is already defined.", p.Name))
 			}
@@ -1243,43 +1179,22 @@ func (g *generator) functionAgainst(name string, nameSpan source.Span, params []
 		}
 		cur = fn.Ret
 	}
-	last := want
-	for range params {
-		last = last.(*types.TFun).Ret
-	}
-	final := want
-	var arrow *types.TFun
-	for range params {
-		arrow = final.(*types.TFun)
-		final = arrow.Ret
-	}
 	savedAmbient := g.ambient
-	g.ambient = arrow.Eff
-	bodyTy := g.exprWant(body, last)
+	bodyAmbient := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
+	resultTy := g.ck.Sup.FreshVar(types.General)
+	funTy := g.wrapFunction(paramTys, resultTy, bodyAmbient)
+	scope.names[name] = types.Scheme{Body: funTy}
+	g.ambient = bodyAmbient
+	bodyTy := g.expr(body)
 	g.ambient = savedAmbient
-	g.cs = append(g.cs, Constraint{Left: bodyTy, Right: last, Span: body.Span(), Why: Why{Kind: WhyAnnotation, Name: name}})
-	return want
-}
-
-// computation checks a zero-parameter computation definition as the body of
-// its implicit Unit worker. Effects are admitted by the annotated row, but
-// occur only when that worker is forced.
-func (g *generator) computation(name string, nameSpan source.Span, comp *types.TFun, body ast.Expr) types.Type {
-	scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{name: {Body: comp}}}
-	g.locals = scope
-	defer func() { g.locals = scope.parent }()
-	savedAmbient := g.ambient
-	g.ambient = comp.Eff
-	bodyTy := g.exprWant(body, comp.Ret)
-	g.ambient = savedAmbient
-	g.cs = append(g.cs, Constraint{Left: bodyTy, Right: comp.Ret, Span: body.Span(), Why: Why{Kind: WhyAnnotationDelay, Name: name}})
-	return comp
+	g.cs = append(g.cs, Constraint{Left: resultTy, Right: bodyTy, Span: nameSpan, Why: Why{Kind: WhyRecursion, Name: name}})
+	return funTy
 }
 
 func (g *generator) wrapFunction(params []types.Type, ret types.Type, bodyRow types.Row) types.Type {
 	funTy := ret
 	for i := len(params) - 1; i >= 0; i-- {
-		eff := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
+		eff := types.Row{}
 		if i == len(params)-1 {
 			eff = bodyRow
 		}
@@ -1294,6 +1209,10 @@ func (g *generator) wrapFunction(params []types.Type, ret types.Type, bodyRow ty
 func (g *generator) bindParams(scope *blockScope, params []ast.Param) []types.Type {
 	tys := make([]types.Type, len(params))
 	for i, p := range params {
+		if p.Name == "()" {
+			tys[i] = g.ck.B.Unit
+			continue
+		}
 		if p.Name == "_" {
 			tys[i] = g.ck.Sup.FreshVar(types.General)
 			continue
@@ -1347,19 +1266,14 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 			g.errs = append(g.errs, annErrs...)
 			annVars = annScope.Minted()
 		}
-		comp, delayed := computationType(annTy, g.ck.B)
-		delayed = delayed && len(bind.Params) == 0
-		if delayed {
-			ty = g.computation(bind.Name, bind.NameSpan, comp, bind.Body)
-			g.ck.DelayedBinds[bind] = true
-		} else if len(bind.Params) > 0 && annTy != nil && surfaceMentionsComputation(bind.Ann.Type) {
-			ty = g.functionAgainst(bind.Name, bind.NameSpan, bind.Params, bind.Body, annTy)
+		if len(bind.Params) > 0 && annTy != nil {
+			ty = g.functionWithAnnotatedParams(bind.Name, bind.NameSpan, bind.Params, bind.Body, annTy)
 		} else if len(bind.Params) > 0 {
 			ty = g.function(bind.Name, bind.NameSpan, bind.Params, bind.Body)
 		} else {
 			ty = g.expr(bind.Body)
 		}
-		if bind.Ann != nil && annTy != nil && !delayed {
+		if bind.Ann != nil && annTy != nil {
 			// Skolemize-and-unify, as at the top level.
 			g.cs = append(g.cs, Constraint{Left: annTy, Right: ty,
 				Span: bind.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: bind.Name}})
@@ -1381,6 +1295,9 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 			// into the substitution now, so generalization sees solved types
 			// and later bindings can use this one polymorphically.
 			g.solveHere()
+			if bind.Ann == nil {
+				g.ck.closeSingleRows(ty)
+			}
 			// Skolem escape: this annotation's variables must not leak into
 			// enclosing bindings (that would grant the enclosing definition
 			// polymorphism its body doesn't have).

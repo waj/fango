@@ -1,0 +1,9 @@
+doSomething : () ->{IO} ()
+doSomething() = print "saved"
+
+main : () ->{IO} ()
+main() =
+    saved : () ->{IO} ()
+    saved() = if True then doSomething() else doSomething()
+    saved()
+    saved()

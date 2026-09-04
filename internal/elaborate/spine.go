@@ -339,11 +339,12 @@ func (el *elab) workerEvidence(name string, arity int, tyArgs []types.Type) []co
 
 func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
 	missing := c.arity - len(c.pre)
+	argTys, _ := core.PeelFun(c.ty, c.arity)
 	switch {
 	case len(args) == missing: // saturated: a direct call / struct literal
 		coreArgs := make([]core.Expr, len(args))
 		for i, a := range args {
-			coreArgs[i] = el.expr(a)
+			coreArgs[i] = adaptFunctionValue(el.expr(a), argTys[len(c.pre)+i])
 		}
 		return c.saturatedApp(coreArgs)
 
@@ -357,6 +358,27 @@ func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
 	default: // partial (including a bare reference via curried*Ref)
 		return el.partial(c, args)
 	}
+}
+
+// adaptFunctionValue retags an eta-expanded callback to a generic callee's
+// erased row ABI. Its concrete handler evidence remains captured by the
+// wrapper at the creation site.
+func adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
+	if types.Equal(e.Type(), want) {
+		return e
+	}
+	if _, ok := want.(*types.TFun); !ok {
+		return e
+	}
+	switch e := e.(type) {
+	case *core.Lambda:
+		e.Ty = want
+	case *core.If:
+		e.Then = adaptFunctionValue(e.Then, want)
+		e.Else = adaptFunctionValue(e.Else, want)
+		e.Ty = want
+	}
+	return e
 }
 
 // partial eta-expands an unsaturated worker or constructor application into
@@ -378,8 +400,8 @@ func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 	}
 	var hoists []hoist
 	coreArgs := make([]core.Expr, 0, arity)
-	for _, a := range given {
-		ca := el.expr(a)
+	for i, a := range given {
+		ca := adaptFunctionValue(el.expr(a), argTys[len(c.pre)+i])
 		if isAtom(ca) {
 			coreArgs = append(coreArgs, ca)
 			continue

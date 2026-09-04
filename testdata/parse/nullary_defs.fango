@@ -1,0 +1,7 @@
+compact() = 1
+
+spaced () = 2
+
+main() =
+    local() = compact()
+    local()

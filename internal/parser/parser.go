@@ -149,7 +149,7 @@ func (p *parser) parseDecl() ast.Decl {
 		p.next() // the repeated name
 	}
 
-	params := p.parseParams()
+	params := p.parseValueParams()
 	eqTok := p.peekInExpr()
 	if !p.expect(token.EQ, "I expect `=` after the name in a declaration.") {
 		p.recoverToTopLevel(false)
@@ -308,6 +308,25 @@ func (p *parser) parseParams() []ast.Param {
 	return params
 }
 
+// parseValueParams also accepts the nullary spelling `()`, represented by
+// the same single discarded Unit parameter as the compatible `f _` form.
+// It must be the declaration's sole syntactic parameter group.
+func (p *parser) parseValueParams() []ast.Param {
+	if p.peekInExpr().Kind == token.LPAREN && p.pos+1 < len(p.toks) && p.toks[p.pos+1].Kind == token.RPAREN {
+		lp := p.next()
+		rp := p.next()
+		if k := p.peekInExpr().Kind; k == token.LIDENT || k == token.UNDERSCORE || k == token.LPAREN {
+			p.errorAt(p.peekInExpr().Span, "NULLARY PARAMETER LIST",
+				"An empty Unit parameter list must be the only parameter group in a definition.")
+			for p.peekInExpr().Kind != token.EQ && p.peekInExpr().Kind != token.EOF && p.peekInExpr().Pos().Line == lp.Pos().Line {
+				p.next()
+			}
+		}
+		return []ast.Param{{Name: "()", Sp: lp.Span.Merge(rp.Span)}}
+	}
+	return p.parseParams()
+}
+
 // parseBindBody dispatches on where a binding's body starts (doc/design.md, "Language semantics"): on the
 // `=`'s line → inline expression; on a later line, deeper than the current
 // layout column → a block at that column. Shared by top-level declarations,
@@ -368,6 +387,10 @@ func (p *parser) classifyStmt(col int) stmtKind {
 		if inBounds(j) && p.toks[j].Kind == token.EQ {
 			return stmtLocalFn
 		}
+	case token.LPAREN:
+		if inBounds(i+2) && p.toks[i+2].Kind == token.RPAREN && inBounds(i+3) && p.toks[i+3].Kind == token.EQ {
+			return stmtLocalFn
+		}
 	}
 	return stmtResult
 }
@@ -406,7 +429,7 @@ func (p *parser) parseBlock(col int) ast.Expr {
 		switch p.classifyStmt(col) {
 		case stmtBind, stmtLocalFn:
 			nameT := p.next()
-			params := p.parseParams()
+			params := p.parseValueParams()
 			eqT := p.peekInExpr()
 			if !p.expect(token.EQ, "I expect `=` after the binding name.") {
 				return nil
@@ -483,6 +506,10 @@ func (p *parser) parseTypeExpr() ast.TypeExpr {
 			if eff == nil {
 				return nil
 			}
+			if len(eff.Labels) == 0 && eff.Tail == "" {
+				p.errorAt(eff.Sp, "REDUNDANT EFFECT ROW",
+					"A pure arrow is written `->`; remove the empty effect row `{}`.")
+			}
 		}
 		ret := p.parseTypeExpr()
 		if ret == nil {
@@ -515,7 +542,7 @@ func (p *parser) parseEffRow() *ast.EffRow {
 			break
 		}
 		// A lone lowercase name, or one after a comma, is the compact row-tail
-		// spelling used by computation types: `{e}` / `{Console, e}`.
+		// spelling: `{e}` / `{Console, e}`.
 		if t.Kind == token.LIDENT {
 			p.next()
 			r.Tail, r.TailSp = t.Text, t.Span
@@ -579,7 +606,7 @@ func (p *parser) parseTypeApp() ast.TypeExpr {
 }
 
 func isTypeAtomStart(k token.Kind) bool {
-	return k == token.UIDENT || k == token.LIDENT || k == token.LPAREN || k == token.LBRACE
+	return k == token.UIDENT || k == token.LIDENT || k == token.LPAREN
 }
 
 func (p *parser) parseTypeAtom() ast.TypeExpr {
@@ -605,16 +632,6 @@ func (p *parser) parseTypeAtom() ast.TypeExpr {
 			return nil
 		}
 		return inner
-	case token.LBRACE:
-		eff := p.parseEffRow()
-		if eff == nil {
-			return nil
-		}
-		ret := p.parseTypeApp()
-		if ret == nil {
-			return nil
-		}
-		return &ast.TCompExpr{Eff: eff, Ret: ret}
 	case token.EOF:
 		if p.peek().Kind == token.EOF {
 			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,

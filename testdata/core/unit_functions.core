@@ -1,0 +1,4 @@
+(core
+  (def doSomething (params _) () ->{IO} () (perform IO/print (string "do" String) ()))
+  (def register (params action) (() ->{IO} ()) ->{IO} () (app/value (var action () ->{IO} ()) (unit ()) ()))
+  (def main (params _) () ->{IO} () (let saved () (lam _ () ->{IO} () (app/worker (var doSomething () ->{IO} ()) (unit ()) ())) (app/worker (var register (() ->{IO} ()) ->{IO} ()) (var saved () ->{IO} ()) ()))))

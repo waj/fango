@@ -39,24 +39,24 @@ namespace. Pattern matching is exhaustive, and redundant branches are rejected.
 `Bool` behaves as the predefined `True | False` ADT to the checker while using
 native Go booleans in generated code.
 
-## Computations and effects
+## Functions and effects
 
-The internal function type is `TFun{Arg, Eff, Ret}`. Surface `A ->{e} B` and
-`A -> {e} B` normalize to the same form. A computation `{e} T` normalizes to a
-Unit-argument `TFun`; it introduces no separate Core or runtime representation.
+The internal function type is `TFun{Arg, Eff, Ret}`. Effects belong exclusively
+to individual arrows: applying `A ->{e} B` performs `e`, while applying
+`A -> B` is pure. Every curried arrow has independent timing. In
+`A ->{IO} (B -> C)`, IO occurs at the first application; in
+`A -> (B ->{IO} C)`, it occurs at the second.
 
-Computation definitions and uses follow these invariants:
+Function values, including effectful Unit functions, are first-class and
+execute only through explicit application. `f()` is surface sugar for applying
+`f` to Unit, and a definition `f() = body` uses the existing one-parameter
+worker representation with a discarded Unit parameter.
 
-- a zero-parameter binding annotated with `{e} T` defines a delayed
-  computation and does not execute its body;
-- an unannotated local binding executes a computation-valued RHS and binds its
-  result;
-- an annotated local computation binding stores the delayed computation;
-- elaboration inserts a force when `{e} T` appears where `T` is expected and
-  the ambient row admits `e`;
-- computations are second-class: they may be definition, parameter, or return
-  types, but may not instantiate an unconstrained type variable or be stored in
-  an ADT.
+A syntactic multi-parameter worker executes its body only after its final
+parameter, so inferred effects belong to the final arrow and earlier partial
+applications are pure. A one-parameter function whose body returns a lambda is
+different: effects before constructing the lambda belong to the outer arrow,
+while effects in the lambda body belong to the returned arrow.
 
 Effect rows contain distinct, nominal effect labels and an optional open tail.
 Row solving supports inclusion and union for nested and higher-order calls.
@@ -107,7 +107,7 @@ rule from token columns and uses precedence climbing for operators. AST and
 diagnostic dump formats are stable golden-test interfaces.
 
 Inference and elaboration are separate because code generation is
-type-directed. Elaboration resolves defaulting, inserts computation forces,
+type-directed. Elaboration resolves defaulting,
 derives evidence requirements, collapses application spines, chooses direct or
 indirect calls, lambda-lifts polymorphic locals, compiles matches to decision
 trees, and puts expression-shaped control flow into ANF where Go needs
@@ -141,13 +141,14 @@ explicit type arguments. Application nodes record whether their callee is a
 worker, constructor, primitive, operation, or indirect function. Matches are
 decision trees rather than surface branch lists.
 
-Effectful Core uses `Perform`, `Handle`, `Resume`, and `Seq`. Source rows and row
-variables are erased only after evidence requirements have been derived.
+Effectful Core uses `Perform`, `Handle`, `Resume`, and `Seq`. Open source row
+tails are erased after evidence requirements have been derived; concrete labels
+remain on first-class arrows as their indirect-call evidence ABI.
 Hidden evidence parameters precede ordinary worker parameters in deterministic
 effect-identity order, and calls supply matching lexical evidence. The Core
 linter rejects unsolved metavariables, malformed generic applications,
 callee/evidence disagreements, invalid handler coverage or types, and residual
-surface effect information before either backend runs.
+open rows before either backend runs.
 
 ## Go backend and runtime
 
@@ -182,8 +183,8 @@ reader/writer across inputs. Prompt definitions become lazy memo cells;
 functions become workers. Redefinition installs a new generation, and existing
 memoized values and closures keep their old bindings. Multiline input is driven
 by parser incompleteness and layout. Effectful ordinary prompt declarations
-are rejected, while effectful expressions run directly and annotated
-computation definitions may be installed and forced per mention.
+are rejected, while effectful expressions run directly. Function definitions
+are installed without executing their bodies and run only when applied.
 
 Loading, reloading, cancellation, and interactive line history are not yet
 implemented; see [REPL hardening](roadmap.md#repl-hardening).
@@ -208,6 +209,6 @@ work. Cons-list allocation remains the main known structural performance cost.
 The implementation currently has one source module, no imports, FFI, package
 manager, standard library, records, aliases, typeclasses, formatter, or LSP.
 Integer values are signed 64-bit; broader numeric semantics are not settled.
-There is no tail-call optimization guarantee. Computations are second-class,
-custom handlers have the restrictions described above, and builtin IO cannot
+There is no tail-call optimization guarantee. Custom handlers have the
+restrictions described above, and builtin IO cannot
 be re-handled. REPL loading/reloading and cancellation remain unfinished.

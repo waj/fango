@@ -77,10 +77,10 @@ func TestEffectfulPromptDeclarationRejected(t *testing.T) {
 	}
 }
 
-func TestPromptComputationDefinitionRunsPerMention(t *testing.T) {
+func TestPromptNullaryFunctionRunsOnlyWhenCalled(t *testing.T) {
 	var out strings.Builder
-	Run(strings.NewReader("say : {IO} ()\nsay = print \"ok\"\nsay\nsay\n:quit\n"), &out)
+	Run(strings.NewReader("say : () ->{IO} ()\nsay() = print \"ok\"\n:type say\nsay()\nsay()\n:quit\n"), &out)
 	if strings.Count(out.String(), "ok\n") != 2 {
-		t.Fatalf("annotated computation should define without running, then run per mention:\n%s", out.String())
+		t.Fatalf("nullary function should run only on its two explicit calls:\n%s", out.String())
 	}
 }

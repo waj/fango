@@ -17,7 +17,7 @@ import (
 // Emit lowers a Core program to Go source. Definitions become package vars
 // in source order (dependency-ordered by construction — fango's
 // use-after-define rule). main's shape follows doc/design.md, "Go backend and runtime": a Unit-typed main has
-// its effect forced inside func main() in statement context (prints happen
+// its function form invoked inside func main() in statement context (prints happen
 // at run time, in order — never in package init); any other main stays a
 // package var whose value func main() discards, or — in the test-internal
 // print-main mode — prints through fangort, the differential harness's

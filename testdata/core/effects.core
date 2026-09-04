@@ -1,4 +1,4 @@
 (core
-  (effect Ask (op ask {Ask | e} String))
-  (def query (typarams a number) (params _) (effects Ask) a -> number (if number (binop == Bool (perform Ask/ask (unit ()) String) (string "yes" String)) (int 40 number) (int 0 number)))
-  (def main () (perform IO/print (handle Ask (app/worker @[() Int] evidence[Ask] (var query {IO, Ask} Int) (unit ()) Int) (ask (()) (resume Int (string "yes" String))) (return n (binop + Int (var n Int) (int 2 Int))) Int) ())))
+  (effect Ask (op ask () ->{Ask} String))
+  (def query (typarams a number) (params _) (effects Ask) a ->{Ask} number (if number (binop == Bool (perform Ask/ask (unit ()) String) (string "yes" String)) (int 40 number) (int 0 number)))
+  (def main () (perform IO/print (handle Ask (app/worker @[() Int] evidence[Ask] (var query () ->{Ask} Int) (unit ()) Int) (ask (()) (resume Int (string "yes" String))) (return n (binop + Int (var n Int) (int 2 Int))) Int) ())))

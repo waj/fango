@@ -102,6 +102,12 @@ application and functions as values are supported. Lambdas use
 `_` discards a function parameter. Functions may have indented block bodies,
 and local function bindings are supported.
 
+A Unit function is canonically called as `f()`; `f ()` remains equivalent.
+Definitions accept the matching `f() = body` and `f () = body` spellings,
+which introduce one discarded Unit parameter. The empty parameter list must be
+the definition's only syntactic parameter group. The compatible `f _ = body`
+form remains available.
+
 Top-level functions can recurse and Hindley-Milner inference generalizes their
 types. Polymorphic values and parameterized ADTs are supported. Numeric
 polymorphism prints as `number` and ranges over `Int` and `Float`. Polymorphic
@@ -133,40 +139,45 @@ variables, and `_`. Branch bodies may be inline expressions or blocks. Matches
 must be exhaustive and non-redundant, patterns must have the constructor's
 exact arity, and a pattern cannot bind the same variable twice.
 
-## Computation types
+## Effectful function types
 
-`{IO} String` is a delayed computation that may perform `IO` and return a
-`String`. `{}` is a closed empty row; `{Console, Fail String | e}` has two
-known labels and an open tail. The compact forms `{e}` and `{Console, e}` also
-denote open rows. `A ->{IO} B` and `A -> {IO} B` are equivalent spellings for
-an effectful function.
+Effects appear only on function arrows. `A ->{IO} B` applies an `A` argument,
+performs `IO`, and returns a `B`. `{Console, Fail String | e}` is a row with two
+known labels and an open tail; `{e}` is the compact open-tail spelling. Pure
+arrows omit a row, so `A ->{} B` is rejected as redundant. The spaced
+`A -> {IO} B` spelling is equivalent to `A ->{IO} B`.
 
-A bare mention of a computation runs it when the surrounding context expects
-its result:
+Every curried arrow owns its execution effects. `A ->{IO} (B -> C)` performs
+when applied to the `A`; `A -> (B ->{IO} C)` performs only when the returned
+function is applied to the `B`.
+
+There is no implicit execution. Expected types, annotations, bare mentions,
+bindings, conditionals, and higher-order arguments never apply a function.
+Unit functions must be called explicitly:
 
 ```fango
-say : {IO} ()
-say = print "hello"       -- defines the computation; does not print yet
+say : () ->{IO} ()
+say() = print "hello"
 
-main : {IO} ()
-main =
-    say                   -- runs it
-    line = readLine       -- runs and binds the resulting String
+main() =
+    action = say
+    action()
+    line = readLine()
     print line
 ```
 
-An unannotated local `=` runs a computation-valued RHS. An explicit
-computation annotation stores it without running:
+Function values are first-class and may be stored in ADTs. Partial operation
+application remains a pure function; an operation performs only when
+saturated.
+
+Rows may be shared across higher-order arrows. For example:
 
 ```fango
-saved : {IO} ()
-saved = say
+map : (a ->{e} b) -> List a ->{e} List b
 ```
 
-Computation values may be used as definition, parameter, and return types. They
-cannot instantiate an unconstrained type variable or be stored in an ADT.
-Partial operation application remains a pure function; an operation performs
-only when saturated.
+A pure callback instantiates `e` to empty; an effectful callback propagates its
+row to the traversal call.
 
 ## Effects and handlers
 
@@ -187,14 +198,13 @@ main =
 
 The compiler adds the declaring effect to each operation's type. Functions may
 annotate closed or open effect rows. An operation with a Unit argument is
-called with `()`; the mention-runs rule also permits bare computation-typed
-builtins such as `readLine`.
+called explicitly with `()`.
 
 A handler handles one effect, must contain exactly one clause for every
 operation of that effect, and may include one `return value -> expression`
 clause. All clauses align like `case` branches. Operation parameters may use
 names, `_`, or `()` where the declared parameter is Unit. `resume value`
-continues the handled computation.
+continues from the handled operation.
 
 Current handlers are deliberately restricted: every reachable operation-clause
 path must end in exactly one tail call to `resume`. Aborting clauses, non-tail
@@ -204,7 +214,7 @@ the surrounding row.
 
 Builtin `print : a ->{IO} ()` displays supported ground values and ADTs.
 `readLine : () ->{IO} String` reads one line and returns the text without its
-line ending; bare `readLine` also runs through computation forcing.
+line ending. Call it as `readLine()` (or equivalently `readLine ()`).
 
 ## Entry points
 
@@ -221,25 +231,18 @@ main : ()
 main = print 42
 ```
 
-The preferred effectful form is a computation:
-
-```fango
-main : {IO} ()
-main = print "hello"
-```
-
-The Unit-function spelling is also accepted:
+The recommended effectful form is a nullary function:
 
 ```fango
 main : () ->{IO} ()
-main _ = print "hello"
+main() = print "hello"
 ```
 
 A value-style `main` may perform builtin IO but no unhandled custom effect. A
-computation-style or function-style effectful `main` must have exactly the
-shown IO/Unit shape. Function-style `main` accepts only one discarded Unit
-parameter. Non-Unit pure `main` values are primarily observable in the REPL and
-test harness; an ordinary built executable exits without printing them.
+function-style effectful `main` must have exactly the shown IO/Unit shape and
+one discarded Unit parameter; `main _ = ...` remains compatible. Non-Unit pure
+`main` values are primarily observable in the REPL and test harness; an
+ordinary built executable exits without printing them.
 
 ## REPL
 
@@ -250,8 +253,8 @@ session. Redefinition is allowed at the prompt, while existing memoized values
 and closures retain earlier bindings.
 
 Effectful expressions run directly. Ordinary effectful declarations such as
-`x = print 1` are rejected, but annotated computation definitions are accepted
-and execute on each mention.
+`x = print 1` are rejected. Effectful function definitions are accepted and
+execute only when explicitly applied.
 
 Supported commands are:
 

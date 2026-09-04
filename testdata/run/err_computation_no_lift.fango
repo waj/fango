@@ -1,5 +1,0 @@
-register : {IO} () -> {IO} ()
-register action = action
-
-main : {IO} ()
-main = register ()

@@ -3,7 +3,6 @@ package infer
 import (
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
-	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -129,22 +128,7 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, [
 		}
 		row, rowErrs := ck.resolveEffRow(te.Eff, tv)
 		errs = append(errs, rowErrs...)
-		// `A -> {e} B` and `A ->{e} B` normalize to the same existing
-		// row-carrying arrow. A computation itself is the nullary case.
-		if te.Eff == nil {
-			if comp, ok := ret.(*types.TFun); ok && isUnitType(comp.Arg, ck.B) {
-				return &types.TFun{Arg: arg, Eff: comp.Eff, Ret: comp.Ret}, errs
-			}
-		}
 		return &types.TFun{Arg: arg, Eff: row, Ret: ret}, errs
-	case *ast.TCompExpr:
-		ret, retErrs := ck.ResolveTypeExpr(te.Ret, tv)
-		row, rowErrs := ck.resolveEffRow(te.Eff, tv)
-		errs := append(retErrs, rowErrs...)
-		if ret == nil {
-			return nil, errs
-		}
-		return &types.TFun{Arg: ck.B.Unit, Eff: row, Ret: ret}, errs
 	case *ast.TApp:
 		t, ok := ck.TypeNames[te.Name]
 		if !ok {
@@ -160,11 +144,6 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, [
 		args := make([]types.Type, len(te.Args))
 		var errs []diag.Error
 		for i, a := range te.Args {
-			if surfaceContainsComputation(a) {
-				errs = append(errs, computationSecondClassError(a.Span(), "stored inside `"+te.Name+"`"))
-				args[i] = ck.B.Unit
-				continue
-			}
 			at, aErrs := ck.ResolveTypeExpr(a, tv)
 			errs = append(errs, aErrs...)
 			if at == nil {
@@ -176,51 +155,6 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, [
 	default:
 		panic("infer: unhandled TypeExpr node")
 	}
-}
-
-func isUnitType(t types.Type, b *types.Builtins) bool {
-	c, ok := t.(*types.TCon)
-	return ok && c.Unique == b.Unit.Unique
-}
-
-func surfaceContainsComputation(te ast.TypeExpr) bool {
-	switch te := te.(type) {
-	case *ast.TCompExpr:
-		return true
-	case *ast.TFunExpr:
-		return surfaceContainsComputation(te.Arg) || surfaceContainsComputation(te.Ret)
-	case *ast.TApp:
-		for _, a := range te.Args {
-			if surfaceContainsComputation(a) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func surfaceMentionsComputation(te ast.TypeExpr) bool {
-	switch te := te.(type) {
-	case *ast.TCompExpr:
-		return true
-	case *ast.TFunExpr:
-		if u, ok := te.Arg.(*ast.TName); ok && u.Name == "()" && te.Eff != nil {
-			return true
-		}
-		return surfaceMentionsComputation(te.Arg) || surfaceMentionsComputation(te.Ret)
-	case *ast.TApp:
-		for _, a := range te.Args {
-			if surfaceMentionsComputation(a) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func computationSecondClassError(sp source.Span, where string) diag.Error {
-	return diag.Errorf(sp, "SECOND-CLASS COMPUTATION",
-		"A computation type cannot be %s. Computations may only be binding, parameter, or return types (Rule 4).", where)
 }
 
 func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []diag.Error) {
@@ -247,11 +181,6 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 		}
 		args := make([]types.Type, len(l.Args))
 		for i, a := range l.Args {
-			if surfaceContainsComputation(a) {
-				errs = append(errs, computationSecondClassError(a.Span(), "used to instantiate effect parameter `"+l.Name+"`"))
-				args[i] = ck.B.Unit
-				continue
-			}
 			at, aErrs := ck.ResolveTypeExpr(a, tv)
 			errs = append(errs, aErrs...)
 			args[i] = at

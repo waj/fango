@@ -69,6 +69,11 @@ func TestPositive(t *testing.T) {
 		{"fib n = if n < 2 then n else fib (n - 1) + fib (n - 2)", "fib : number -> number"},
 		{"f = \\x -> x + 1", "f : number -> number"},
 		{"add : Int -> Int -> Int\nadd x y = x + y", "add : Int -> Int -> Int"},
+		{"pure() = 1", "pure : () -> number"},
+		{"saved = readLine", "saved : () ->{IO} String"},
+		{"main = print (readLine())", "main : ()"},
+		{"make : () ->{IO} (() -> ())\nmake() =\n  print \"now\"\n  \\_ -> ()", "make : () ->{IO} () -> ()"},
+		{"later : () -> (() ->{IO} ())\nlater() = \\_ -> print \"later\"", "later : () -> () ->{IO} ()"},
 		{"add x y = x + y\ninc = add 1", "add : number -> number -> number, inc : number2 -> number2"},
 		// Generalization: uses no longer pin the definition.
 		{"id x = x\nmain = id 1 + 1", "id : a -> a, main : number"},
@@ -114,11 +119,12 @@ func TestNegative(t *testing.T) {
 		{"x = print 1\nmain = x", "UNHANDLED EFFECT", 1},
 		{"x = 1\ny =\n  x = 2\n  x + 1", "SHADOWING", 3},
 		{"y =\n  a = 1\n  a = 2\n  a", "SHADOWING", 3},
-		{"y =\n  a = b + 1\n  b = 2\n  a", "NAMING ERROR", 2}, // use-before-define in block
-		{"x : String\nx = 1", "TYPE MISMATCH", 2},             // WhyAnnotation
-		{"x : Foo\nx = 1", "NAMING ERROR", 1},                 // unknown type name
-		{"x : a\nx = 1", "TYPE MISMATCH", 2},                  // annotation more general than the number body
-		{"f : Int -> Int\nf = 1", "TYPE MISMATCH", 2},         // arrow annotation resolves, body mismatches
+		{"y =\n  a = b + 1\n  b = 2\n  a", "NAMING ERROR", 2},    // use-before-define in block
+		{"x : String\nx = 1", "TYPE MISMATCH", 2},                // WhyAnnotation
+		{"x : Foo\nx = 1", "NAMING ERROR", 1},                    // unknown type name
+		{"x : a\nx = 1", "TYPE MISMATCH", 2},                     // annotation more general than the number body
+		{"f : Int -> Int\nf = 1", "TYPE MISMATCH", 2},            // arrow annotation resolves, body mismatches
+		{"saved : String\nsaved = readLine", "TYPE MISMATCH", 2}, // bare Unit function is not forced
 		{"main x = x", "MAIN TAKES NO PARAMETERS", 1},
 		{"f x x = x", "SHADOWING", 1},           // duplicate params
 		{"f f = f", "SHADOWING", 1},             // param shadows the function itself

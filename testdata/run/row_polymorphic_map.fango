@@ -1,0 +1,20 @@
+type List a = Nil | Cons a (List a)
+
+map : (a ->{e} b) -> List a ->{e} List b
+map fn values =
+    case values of
+        Nil -> Nil
+        Cons x xs -> Cons (fn x) (map fn xs)
+
+increment x = x + 1
+
+announce : Int ->{IO} Int
+announce x =
+    print x
+    x + 10
+
+numbers = Cons 1 (Cons 2 Nil)
+
+main() =
+    print (map increment numbers)
+    print (map announce numbers)

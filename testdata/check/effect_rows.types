@@ -1,0 +1,3 @@
+delay : (() ->{e} a) -> () ->{e} a
+pure : () -> number
+map : (a ->{e} b) -> List a ->{e} List b

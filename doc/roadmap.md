@@ -42,8 +42,7 @@ abandonment and the compiler diagnostics for invalid liveness transitions.
 ## Product polish
 
 - Improve diagnostic specificity and source presentation, especially for row
-  inclusion, implicit computation forcing, delayed annotated bindings, and
-  handler restrictions.
+  inclusion and handler restrictions.
 - Refine `--emit-go` discovery, output routing, and diagnostics.
 - Add interactive editing and persistent history to the REPL.
 - Expand introductory and task-oriented documentation without duplicating the

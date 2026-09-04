@@ -41,9 +41,6 @@ func (p *Printer) render(t Type) string {
 		}
 		return strings.Join(parts, " ")
 	case *TFun:
-		if c, ok := t.Arg.(*TCon); ok && c.Name == "()" && (len(t.Eff.Labels) > 0 || t.Eff.Tail != nil) {
-			return p.rowText(t.Eff) + " " + p.render(t.Ret)
-		}
 		arrow := "->"
 		showEff := len(t.Eff.Labels) > 0
 		if v, ok := t.Eff.Tail.(*TVar); ok && p.rows[v.ID] > 1 {
@@ -123,22 +120,22 @@ func (p *Printer) Atom(t Type) string { return p.atom(t) }
 func (p *Printer) atom(t Type) string {
 	switch t := t.(type) {
 	case *TFun:
-		return "(" + p.Type(t) + ")"
+		return "(" + p.render(t) + ")"
 	case *TCon:
 		if len(t.Args) > 0 {
-			return "(" + p.Type(t) + ")"
+			return "(" + p.render(t) + ")"
 		}
 	}
-	return p.Type(t)
+	return p.render(t)
 }
 
 // funArg parenthesizes only functions: type application binds tighter than
 // `->`, so `Maybe a -> a` needs no parens.
 func (p *Printer) funArg(t Type) string {
 	if _, ok := t.(*TFun); ok {
-		return "(" + p.Type(t) + ")"
+		return "(" + p.render(t) + ")"
 	}
-	return p.Type(t)
+	return p.render(t)
 }
 
 func (p *Printer) varName(v *TVar) string {

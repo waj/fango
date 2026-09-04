@@ -1,0 +1,9 @@
+(module
+  (def bad (params ()) (var x)))
+-- errors --
+-- NULLARY PARAMETER LIST ------------- err_nullary_params.fango
+
+An empty Unit parameter list must be the only parameter group in a definition.
+
+1| bad() x = x
+         ^

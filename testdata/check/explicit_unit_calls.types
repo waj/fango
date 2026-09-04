@@ -1,0 +1,6 @@
+doSomething : () ->{IO} ()
+doNothing : () -> ()
+register : (() ->{IO} ()) ->{IO} ()
+identity : a -> a
+collect : (() ->{IO} ()) ->{IO} ()
+main : () ->{IO} ()

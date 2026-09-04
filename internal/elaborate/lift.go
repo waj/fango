@@ -61,12 +61,16 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 	var body core.Expr
 	if len(bind.Params) > 0 {
 		argTys, _ := core.PeelFun(localGenTy, len(bind.Params))
+		bound := 0
 		for i, p := range bind.Params {
-			params = append(params, p.Name)
-			el.pushScope(p.Name, argTys[i])
+			params = append(params, coreParamName(p))
+			if p.Name != "_" && p.Name != "()" {
+				el.pushScope(p.Name, argTys[i])
+				bound++
+			}
 		}
 		body = el.expr(bind.Body)
-		el.popScope(len(bind.Params))
+		el.popScope(bound)
 	} else {
 		body = el.expr(bind.Body)
 	}

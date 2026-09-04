@@ -11,7 +11,8 @@ func TestEffectRowPrinting(t *testing.T) {
 	}{
 		{&TFun{Arg: &TCon{Name: "Int"}, Eff: Row{Tail: e}, Ret: &TCon{Name: "Int"}}, "Int -> Int"},
 		{&TFun{Arg: &TCon{Name: "Int"}, Eff: Row{Labels: []EffLabel{console}, Tail: e}, Ret: &TCon{Name: "Int"}}, "Int ->{Console} Int"},
-		{&TFun{Arg: &TCon{Name: "Int"}, Eff: Row{Labels: []EffLabel{console}, Tail: e}, Ret: &TFun{Arg: &TCon{Name: "Int"}, Eff: Row{Tail: e}, Ret: &TCon{Name: "Int"}}}, "Int ->{Console | e} Int -> Int"},
+		{&TFun{Arg: &TCon{Name: "Int"}, Eff: Row{Labels: []EffLabel{console}, Tail: e}, Ret: &TFun{Arg: &TCon{Name: "Int"}, Eff: Row{Tail: e}, Ret: &TCon{Name: "Int"}}}, "Int ->{Console | e} Int ->{e} Int"},
+		{&TFun{Arg: &TCon{Name: "()"}, Eff: Row{Labels: []EffLabel{console}}, Ret: &TCon{Name: "String"}}, "() ->{Console} String"},
 	}
 	for _, c := range cases {
 		if got := Show(c.ty); got != c.want {

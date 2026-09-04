@@ -1,0 +1,22 @@
+doSomething : () ->{IO} ()
+doSomething() = print "do"
+
+doNothing : () -> ()
+doNothing () = ()
+
+register : (() ->{IO} ()) ->{IO} ()
+register action = action()
+
+identity x = x
+
+collect : (() ->{IO} ()) ->{IO} ()
+collect program = program()
+
+main : () ->{IO} ()
+main() =
+    register doSomething
+    saved = identity doSomething
+    saved()
+    collect doSomething
+    print (readLine())
+    if True then doSomething() else doNothing()

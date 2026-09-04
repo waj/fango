@@ -1,0 +1,4 @@
+(module
+  (def compact (params ()) (int 1))
+  (def spaced (params ()) (int 2))
+  (def main (params ()) (block (bind local (params ()) (app (var compact) (unit))) (app (var local) (unit)))))

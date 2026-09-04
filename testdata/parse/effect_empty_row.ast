@@ -1,2 +1,9 @@
 (module
   (def identity (params x) (ann (-> a (effects) a)) (var x)))
+-- errors --
+-- REDUNDANT EFFECT ROW ----------------- effect_empty_row.fango
+
+A pure arrow is written `->`; remove the empty effect row `{}`.
+
+1| identity : a ->{} a
+                  ^^

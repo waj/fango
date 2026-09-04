@@ -11,7 +11,7 @@ import (
 // the enclosing definition's TyParams), every operator has the types its Go
 // emission requires, every application is consistent with its callee's
 // instantiated type, and every effect row is empty except the concrete row
-// retained on a nullary computation as its force-time evidence ABI. It runs in every test
+// retained on function arrows as their call-time evidence ABI. It runs in every test
 // (and under a debug flag later) — instantiation plumbing bugs are the
 // design's top risk, and this is the tripwire.
 func Lint(p *Prog, b *types.Builtins) []error {
@@ -522,12 +522,12 @@ func (l *linter) expr(e Expr, where string) {
 			}
 			wantEvidence := rowEvidence(fn.Eff)
 			if len(e.EvidenceArgs) != len(wantEvidence) {
-				l.errorf("%s: App{Value} has %d evidence args, computation requires %d", where, len(e.EvidenceArgs), len(wantEvidence))
+				l.errorf("%s: App{Value} has %d evidence args, function requires %d", where, len(e.EvidenceArgs), len(wantEvidence))
 			}
 			for i, ev := range e.EvidenceArgs {
 				l.effectInstance(ev, where)
 				if i < len(wantEvidence) && !equalEffectInstance(ev, wantEvidence[i]) {
-					l.errorf("%s: App{Value} evidence arg %d disagrees with its computation type", where, i+1)
+					l.errorf("%s: App{Value} evidence arg %d disagrees with its function type", where, i+1)
 				}
 				if l.evidence[ev.Unique] == 0 {
 					l.errorf("%s: App{Value} passes unavailable lexical evidence `%s`", where, ev.Name)
@@ -781,8 +781,7 @@ func (l *linter) typ(t types.Type, where string) {
 			l.typ(a, where)
 		}
 	case *types.TFun:
-		unit, isUnit := t.Arg.(*types.TCon)
-		if !t.Eff.Empty() && (!isUnit || unit.Name != "()" || t.Eff.Tail != nil) {
+		if t.Eff.Tail != nil {
 			l.errorf("%s: source effect row survived elaboration", where)
 		}
 		for _, ev := range rowEvidence(t.Eff) {

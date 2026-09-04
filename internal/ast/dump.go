@@ -104,21 +104,6 @@ func DumpTypeExpr(t TypeExpr) string {
 			return fmt.Sprintf("(-> %s %s %s)", DumpTypeExpr(t.Arg), row.String(), DumpTypeExpr(t.Ret))
 		}
 		return fmt.Sprintf("(-> %s %s)", DumpTypeExpr(t.Arg), DumpTypeExpr(t.Ret))
-	case *TCompExpr:
-		var row strings.Builder
-		row.WriteString("(effects")
-		for _, label := range t.Eff.Labels {
-			fmt.Fprintf(&row, " (%s", label.Name)
-			for _, arg := range label.Args {
-				fmt.Fprintf(&row, " %s", DumpTypeExpr(arg))
-			}
-			row.WriteString(")")
-		}
-		if t.Eff.Tail != "" {
-			fmt.Fprintf(&row, " (tail %s)", t.Eff.Tail)
-		}
-		row.WriteString(")")
-		return fmt.Sprintf("(comp %s %s)", row.String(), DumpTypeExpr(t.Ret))
 	case *TApp:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(%s", t.Name)

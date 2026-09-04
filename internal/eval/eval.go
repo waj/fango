@@ -364,7 +364,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			for _, arg := range e.EvidenceArgs {
 				ev := in.evidence[arg.Unique]
 				if ev == nil {
-					return nil, fmt.Errorf("eval: missing evidence `%s` for computation force", arg.Name)
+					return nil, fmt.Errorf("eval: missing evidence `%s` for function call", arg.Name)
 				}
 				callEvidence[arg.Unique] = ev
 			}
