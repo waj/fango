@@ -1,18 +1,22 @@
-// Package build owns the persistent build directory: a tiny Go module
-// (`module fangobuild`, zero dependencies) holding the generated main.go and
-// a materialized copy of fangort. Every write goes through WriteIfChanged so
-// the Go build cache and our own skip-build check stay effective.
+// Package build owns the persistent build directory: a private Go module
+// containing one package per Fango module and a materialized copy of fangort.
+// Every write goes through WriteIfChanged so the Go build cache and our own
+// skip-build check stay effective.
 package build
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	fango "github.com/waj/fango"
+	"github.com/waj/fango/internal/codegen"
 )
 
 // Dir returns (creating if needed) the build directory for an entry file:
@@ -61,6 +65,96 @@ func WriteIfChanged(path string, data []byte) (bool, error) {
 }
 
 const goModContent = "module fangobuild\n\ngo 1.26\n"
+const generatedManifestName = ".fango-generated.json"
+
+type generatedManifest struct {
+	Files []string `json:"files"`
+}
+
+// ValidateExportDir accepts a missing, empty, or previously Fango-managed
+// directory. It refuses to adopt a non-empty arbitrary directory because
+// project synchronization removes stale generated files recorded in its
+// manifest.
+func ValidateExportDir(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(dir, generatedManifestName)); err == nil {
+		return nil
+	}
+	return fmt.Errorf("refusing to replace non-empty directory %s because it is not a Fango-generated project", dir)
+}
+
+// SyncGenerated writes package sources and removes only stale files listed by
+// an earlier generated manifest. It never recursively removes an unmanaged
+// path.
+func SyncGenerated(dir string, files []codegen.File) (changed bool, err error) {
+	manifestPath := filepath.Join(dir, generatedManifestName)
+	var old generatedManifest
+	if data, readErr := os.ReadFile(manifestPath); readErr == nil {
+		if err := json.Unmarshal(data, &old); err != nil {
+			return false, fmt.Errorf("read generated manifest: %w", err)
+		}
+	}
+
+	wanted := make(map[string]bool, len(files))
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		rel := filepath.Clean(filepath.FromSlash(file.Path))
+		if !validGeneratedSourcePath(rel) {
+			return false, fmt.Errorf("invalid generated path %q", file.Path)
+		}
+		wanted[filepath.ToSlash(rel)] = true
+		paths = append(paths, filepath.ToSlash(rel))
+		wrote, writeErr := WriteIfChanged(filepath.Join(dir, rel), file.Data)
+		if writeErr != nil {
+			return changed, writeErr
+		}
+		changed = changed || wrote
+	}
+	sort.Strings(paths)
+	for _, oldPath := range old.Files {
+		if wanted[oldPath] {
+			continue
+		}
+		rel := filepath.Clean(filepath.FromSlash(oldPath))
+		if !validGeneratedSourcePath(rel) {
+			return changed, fmt.Errorf("invalid path %q in generated manifest", oldPath)
+		}
+		full := filepath.Join(dir, rel)
+		if removeErr := os.Remove(full); removeErr != nil && !os.IsNotExist(removeErr) {
+			return changed, removeErr
+		}
+		changed = true
+		for parent := filepath.Dir(full); parent != dir; parent = filepath.Dir(parent) {
+			if removeErr := os.Remove(parent); removeErr != nil {
+				break
+			}
+		}
+	}
+	data, err := json.MarshalIndent(generatedManifest{Files: paths}, "", "  ")
+	if err != nil {
+		return changed, err
+	}
+	data = append(data, '\n')
+	wrote, err := WriteIfChanged(manifestPath, data)
+	return changed || wrote, err
+}
+
+func validGeneratedSourcePath(rel string) bool {
+	if rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	slash := filepath.ToSlash(rel)
+	return slash == "main.go" || strings.HasPrefix(slash, "modules/") && strings.HasSuffix(slash, "/module.go")
+}
 
 // Materialize ensures go.mod and the embedded fangort sources exist in dir,
 // reporting whether anything changed.

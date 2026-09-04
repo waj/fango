@@ -17,6 +17,7 @@ package elaborate
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
@@ -38,7 +39,11 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effects, Entry: ck.EntryName}
 	var errs []diag.Error
 	for _, info := range infos {
-		defs, declErrs := Decl(info, ck)
+		owner := symbolOwner(info.Name)
+		defs, declErrs := decl(info, ck, owner != "")
+		for i := range defs {
+			defs[i].Owner = owner
+		}
 		errs = append(errs, declErrs...)
 		p.Defs = append(p.Defs, defs...)
 		def := &defs[0]
@@ -59,7 +64,12 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 // The first returned Def is the declaration itself; any further Defs are
 // lambda-lifted polymorphic block bindings (doc/design.md, "Go backend and runtime", lift.go).
 func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
+	return decl(info, ck, false)
+}
+
+func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def, []diag.Error) {
 	el := newElab(ck, info.Name, info.Scheme)
+	el.stableLifts = stableLifts
 	rawType := ck.Sub.Apply(info.Type)
 	el.defaultFree(rawType)
 	rawType = ck.Sub.Apply(rawType)
@@ -83,6 +93,13 @@ func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
 		Body:         el.anf(el.expr(info.Body)),
 	}
 	return append([]core.Def{def}, el.aux...), el.errs
+}
+
+func symbolOwner(name string) string {
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		return name[:i]
+	}
+	return ""
 }
 
 // runtimeRigidVars includes value-type variables and variables appearing
@@ -173,6 +190,9 @@ type elab struct {
 	// top-level definition; aux accumulates those definitions.
 	lifted map[string]*liftedLocal
 	aux    []core.Def
+
+	stableLifts bool
+	liftSeq     int
 }
 
 func newElab(ck *infer.Checker, declName string, declScheme types.Scheme) *elab {

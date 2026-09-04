@@ -42,6 +42,16 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 	if len(r.Module.Decls) != 4 {
 		t.Fatalf("merged %d declarations", len(r.Module.Decls))
 	}
+	var units []string
+	for _, unit := range r.Units {
+		units = append(units, unit.Name+":"+strings.Join(unit.Imports, "+"))
+	}
+	if strings.Join(units, ",") != "B:,A:B,Z:,Main:Z+A" {
+		t.Fatalf("units %v", units)
+	}
+	if !r.Units[len(r.Units)-1].Entry {
+		t.Fatal("last dependency-first unit is not the entry")
+	}
 }
 
 func TestGraphDiagnostics(t *testing.T) {

@@ -39,7 +39,6 @@ and configurable source roots remain deferred.
 
 - Improve diagnostic specificity and source presentation, especially for row
   inclusion and handler restrictions.
-- Refine `--emit-go` discovery, output routing, and diagnostics.
 - Add interactive editing and persistent history to the REPL.
 - Expand introductory and task-oriented documentation without duplicating the
   normative reference.

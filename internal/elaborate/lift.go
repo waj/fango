@@ -42,9 +42,16 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 		genTy = &types.TFun{Arg: frees[i].ty, Eff: types.Row{}, Ret: genTy}
 		rawGenTy = &types.TFun{Arg: frees[i].ty, Eff: types.Row{}, Ret: rawGenTy}
 	}
-	el.ck.LiftGen++
+	var defName string
+	if el.stableLifts {
+		el.liftSeq++
+		defName = fmt.Sprintf("_lift_%s_%d_%s", el.declName, el.liftSeq, bind.Name)
+	} else {
+		el.ck.LiftGen++
+		defName = fmt.Sprintf("_lift%d_%s", el.ck.LiftGen, bind.Name)
+	}
 	lf := &liftedLocal{
-		defName:  fmt.Sprintf("_lift%d_%s", el.ck.LiftGen, bind.Name),
+		defName:  defName,
 		frees:    frees,
 		genTy:    genTy,
 		rawGenTy: rawGenTy,

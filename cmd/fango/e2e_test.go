@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/testutil"
 	"github.com/waj/fango/internal/types"
@@ -136,6 +137,27 @@ func runErrorCase(t *testing.T, path, wantSubstr string) {
 	}
 }
 
+func emittedProject(t *testing.T, path string) []codegen.File {
+	t.Helper()
+	var stderr bytes.Buffer
+	files, _, ok := emitProjectManifest(path, &stderr)
+	if !ok {
+		t.Fatalf("emit failed:\n%s", stderr.String())
+	}
+	return files
+}
+
+func generatedFile(t *testing.T, files []codegen.File, path string) []byte {
+	t.Helper()
+	for _, file := range files {
+		if file.Path == path {
+			return file.Data
+		}
+	}
+	t.Fatalf("generated project has no %s", path)
+	return nil
+}
+
 // Determinism: compiling the same file twice yields byte-identical Go, and
 // the output is gofmt-idempotent (emitted via go/format.Node). Covers a
 // value program, a printing (Unit main) program, and an IIFE-if program.
@@ -144,22 +166,56 @@ func TestEmitDeterministicAndFormatted(t *testing.T) {
 	// plumbing is where nondeterminism would first appear (risk #1).
 	for _, name := range []string{"arith0.fango", "print_float.fango", "if_expr.fango", "block_area.fango", "block_print_order.fango", "fib.fango", "partial.fango", "poly_map_filter_foldr.fango", "poly_eq_nested.fango", "effect_translate_return.fango", "effect_nested_restore.fango", "effect_partial_capture.fango", "effect_row_union.fango"} {
 		path := filepath.Join("..", "..", "testdata", "run", name)
-		var stderr bytes.Buffer
-		a, ok := emitGo(path, &stderr)
-		if !ok {
-			t.Fatalf("%s: emit failed:\n%s", name, stderr.String())
+		a := emittedProject(t, path)
+		b := emittedProject(t, path)
+		if len(a) != len(b) {
+			t.Fatalf("%s: two compilations changed file count", name)
 		}
-		b, _ := emitGo(path, &stderr)
-		if !bytes.Equal(a, b) {
-			t.Errorf("%s: two compilations of the same file differ", name)
+		for i := range a {
+			if a[i].Path != b[i].Path || !bytes.Equal(a[i].Data, b[i].Data) {
+				t.Errorf("%s: generated project differs at file %d", name, i)
+			}
+			formatted, err := format.Source(a[i].Data)
+			if err != nil {
+				t.Fatalf("%s: generated %s does not parse: %v", name, a[i].Path, err)
+			}
+			if !bytes.Equal(formatted, a[i].Data) {
+				t.Errorf("%s: generated %s is not gofmt-idempotent:\n%s", name, a[i].Path, a[i].Data)
+			}
 		}
-		formatted, err := format.Source(a)
-		if err != nil {
-			t.Fatalf("%s: generated Go does not parse: %v", name, err)
-		}
-		if !bytes.Equal(formatted, a) {
-			t.Errorf("%s: generated Go is not gofmt-idempotent:\n%s", name, a)
-		}
+	}
+}
+
+func TestProjectEmitDeterministicAndFormatted(t *testing.T) {
+	paths := []string{
+		filepath.Join("..", "..", "testdata", "run", "poly_eq_nested.fango"),
+		filepath.Join("..", "..", "testdata", "modules", "basic", "Main.fango"),
+		filepath.Join("..", "..", "testdata", "modules", "effects", "Main.fango"),
+	}
+	for _, path := range paths {
+		t.Run(filepath.Base(filepath.Dir(path))+"/"+filepath.Base(path), func(t *testing.T) {
+			var stderr bytes.Buffer
+			a, _, ok := emitProjectManifest(path, &stderr)
+			if !ok {
+				t.Fatalf("first emit failed:\n%s", stderr.String())
+			}
+			b, _, ok := emitProjectManifest(path, &stderr)
+			if !ok || len(a) != len(b) {
+				t.Fatalf("second emit failed or changed file count: %s", stderr.String())
+			}
+			for i := range a {
+				if a[i].Path != b[i].Path || !bytes.Equal(a[i].Data, b[i].Data) {
+					t.Errorf("generated project differs at file %d", i)
+				}
+				formatted, err := format.Source(a[i].Data)
+				if err != nil {
+					t.Fatalf("%s does not parse: %v", a[i].Path, err)
+				}
+				if !bytes.Equal(formatted, a[i].Data) {
+					t.Errorf("%s is not gofmt-idempotent", a[i].Path)
+				}
+			}
+		})
 	}
 }
 
@@ -170,36 +226,33 @@ func TestCheckpoint2GeneratedGoHasNoContinuationRuntime(t *testing.T) {
 			continue
 		}
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			var stderr bytes.Buffer
-			src, ok := emitGo(path, &stderr)
-			if !ok {
-				t.Fatalf("emit failed:\n%s", stderr.String())
-			}
-			file, err := goparser.ParseFile(gotoken.NewFileSet(), path+".go", src, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			goast.Inspect(file, func(n goast.Node) bool {
-				switch n := n.(type) {
-				case *goast.GoStmt:
-					t.Error("generated a goroutine")
-				case *goast.ChanType, *goast.SendStmt:
-					t.Errorf("generated channel syntax %T", n)
-				case *goast.CallExpr:
-					if id, ok := n.Fun.(*goast.Ident); ok && id.Name == "panic" {
-						t.Error("generated a panic sentinel")
-					}
-				case *goast.TypeSpec:
-					if strings.Contains(strings.ToLower(n.Name.Name), "continuation") {
-						t.Errorf("generated continuation type %q", n.Name.Name)
-					}
-				case *goast.CompositeLit:
-					if st, ok := n.Type.(*goast.StructType); ok && len(st.Fields.List) == 0 {
-						t.Errorf("generated anonymous empty-struct Unit literal")
-					}
+			for _, generated := range emittedProject(t, path) {
+				file, err := goparser.ParseFile(gotoken.NewFileSet(), generated.Path, generated.Data, 0)
+				if err != nil {
+					t.Fatal(err)
 				}
-				return true
-			})
+				goast.Inspect(file, func(n goast.Node) bool {
+					switch n := n.(type) {
+					case *goast.GoStmt:
+						t.Errorf("%s: generated a goroutine", generated.Path)
+					case *goast.ChanType, *goast.SendStmt:
+						t.Errorf("%s: generated channel syntax %T", generated.Path, n)
+					case *goast.CallExpr:
+						if id, ok := n.Fun.(*goast.Ident); ok && id.Name == "panic" {
+							t.Errorf("%s: generated a panic sentinel", generated.Path)
+						}
+					case *goast.TypeSpec:
+						if strings.Contains(strings.ToLower(n.Name.Name), "continuation") {
+							t.Errorf("%s: generated continuation type %q", generated.Path, n.Name.Name)
+						}
+					case *goast.CompositeLit:
+						if st, ok := n.Type.(*goast.StructType); ok && len(st.Fields.List) == 0 {
+							t.Errorf("%s: generated anonymous empty-struct Unit literal", generated.Path)
+						}
+					}
+					return true
+				})
+			}
 		})
 	}
 }
@@ -207,11 +260,7 @@ func TestCheckpoint2GeneratedGoHasNoContinuationRuntime(t *testing.T) {
 func TestGeneratedGoUsesImplicitConcreteUnitABI(t *testing.T) {
 	for _, name := range []string{"explicit_unit_calls.fango", "effect_handler.fango"} {
 		path := filepath.Join("..", "..", "testdata", "run", name)
-		var stderr bytes.Buffer
-		src, ok := emitGo(path, &stderr)
-		if !ok {
-			t.Fatalf("%s: emit failed:\n%s", name, stderr.String())
-		}
+		src := generatedFile(t, emittedProject(t, path), "main.go")
 		file, err := goparser.ParseFile(gotoken.NewFileSet(), path+".go", src, 0)
 		if err != nil {
 			t.Fatalf("%s: generated Go does not parse: %v", name, err)
@@ -226,7 +275,7 @@ func TestGeneratedGoUsesImplicitConcreteUnitABI(t *testing.T) {
 		})
 		if name == "explicit_unit_calls.fango" {
 			text := string(src)
-			if !strings.Contains(text, "func v_doSomething()") || strings.Contains(text, "v_doSomething(unitValue)") {
+			if !strings.Contains(text, "func V_doSomething()") || strings.Contains(text, "V_doSomething(fangort.UnitValue)") {
 				t.Errorf("%s: concrete Unit worker ABI was not erased:\n%s", name, text)
 			}
 		} else if name == "effect_handler.fango" && !strings.Contains(string(src), "Op_choose func() bool") {

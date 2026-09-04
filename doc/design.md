@@ -128,8 +128,9 @@ their source names. The resolved modules are merged in graph order and checked
 with one graph-wide fresh-name supply and one set of builtin identities. This
 shares nominal ADT and effect identities safely across module boundaries while
 an import can seed only its direct dependency's declared public interface.
-Core contains no module syntax, and `Prog.Entry` identifies the selected entry
-definition independently of its printed name.
+Core contains no import syntax, but top-level definitions retain their source
+module owner so the Go backend can recover compilation boundaries. `Prog.Entry`
+identifies the selected entry definition independently of its printed name.
 
 Inference and elaboration are separate because code generation is
 type-directed. Elaboration resolves defaulting,
@@ -193,24 +194,40 @@ Concrete Unit parameters and results at direct worker and operation boundaries
 are implicit in generated Go: the parameter is omitted and the result is a
 void result. Unit remains a represented, runtime zero-sized value at
 first-class-function, polymorphic, and ADT boundaries, where Go's type system
-requires a value; the backend emits one on-demand named `unit` type and
-`unitValue` singleton instead of repeating anonymous composite literals.
+requires a value; `fangort.Unit` and `fangort.UnitValue` give every generated
+package the same nominal representation instead of repeating anonymous
+composite literals.
 Erasing a Unit argument never erases its evaluation: expression lowering keeps
 strict left-to-right order, materializing the singleton only when a value is
 required. Functions are typed Go functions, and ADTs use typed interfaces and
 constructor structs. Parameterized definitions map to Go generics with
-explicit instantiation. Generated derived equality and display functions
-receive typed element operations where required.
+explicit instantiation. Each structurally eligible ADT's owning package exports
+compiler-internal derived equality and display functions; they receive typed
+element operations where required. Emitting these independently of downstream
+uses keeps a module package stable when only a consumer changes.
 
-The build driver materializes an embedded `fangort` package and generated
-`main.go` beneath a persistent `.fango/build` directory, writing only changed
-files. It also writes `sources.json`, a deterministic dependency-first manifest
-of logical names, local root-relative or `<stdlib>/...` paths, and SHA-256
-content hashes, so every source edit and graph change invalidates the cached
-build even if generated Go is unchanged. `build` copies the resulting
-executable; `run` reuses it while inputs are unchanged. `fangort` owns shared
-formatting and IO behavior, including newline-free string writes, used by the
-compiled and interpreted backends.
+The backend emits one Go package per Fango module beneath a single generated Go
+module. The entry module is the root `package main`; local and bundled
+dependencies use their logical layout below `modules/`. Cross-package values,
+workers, ADTs, constructors, effect evidence, and derived operations use a
+typed compiler-internal exported ABI. Direct source imports remain Go import
+edges even when unused, and generated types may add an import of a transitive
+type owner. Package aliases and batch lambda-lifted names are deterministic and
+independent of graph-wide identity allocation, so unchanged source units emit
+byte-identical Go. Project emission is the backend's only generation path;
+tests inspect the same package files used by `build`, `run`, and `--emit-go`.
+
+The build driver materializes the package tree and embedded `fangort` beneath a
+persistent `.fango/build` directory, writing only changed files and removing
+only stale package-source paths recorded in its generated-file manifest. It
+also writes `sources.json`, a deterministic dependency-first manifest of
+logical names, local root-relative or `<stdlib>/...` paths, and SHA-256 content
+hashes. Every source edit and graph change triggers a Go build even if
+generated Go is unchanged. Go's package cache then reuses unchanged compilation
+units. `build` copies the resulting executable; `run` reuses it while inputs
+are unchanged.
+`fangort` owns shared representations, formatting, and IO behavior, including
+newline-free string writes, used by the compiled and interpreted backends.
 
 ## Interpreter and REPL
 

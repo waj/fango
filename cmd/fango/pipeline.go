@@ -17,14 +17,14 @@ import (
 // compileFile runs source → tokens → AST → typed AST → Core. Diagnostics go
 // to stderr; ok is false if any stage failed.
 func compileFile(entry string, stderr io.Writer) (*core.Prog, *infer.Checker, bool) {
-	prog, ck, _, ok := compileFileManifest(entry, stderr)
+	prog, ck, _, _, ok := compileFileGraph(entry, stderr)
 	return prog, ck, ok
 }
 
-func compileFileManifest(entry string, stderr io.Writer) (*core.Prog, *infer.Checker, []modules.ManifestEntry, bool) {
+func compileFileGraph(entry string, stderr io.Writer) (*core.Prog, *infer.Checker, []modules.ManifestEntry, []modules.Unit, bool) {
 	loaded, loadErrs := modules.Load(entry)
 	if report(stderr, loadErrs) {
-		return nil, nil, nil, false
+		return nil, nil, nil, nil, false
 	}
 
 	sup := &types.Supply{}
@@ -33,27 +33,27 @@ func compileFileManifest(entry string, stderr io.Writer) (*core.Prog, *infer.Che
 	for _, name := range loaded.NativeOperations {
 		if !ck.EnableNativeOperation(name) {
 			fmt.Fprintf(stderr, "fango: internal compiler error: unknown bundled native operation %q\n", name)
-			return nil, nil, nil, false
+			return nil, nil, nil, nil, false
 		}
 	}
 	ck.EntryName = loaded.Entry
 	infos, inferErrs := ck.Module(loaded.Module)
 	if report(stderr, inferErrs) {
-		return nil, nil, nil, false
+		return nil, nil, nil, nil, false
 	}
 
 	prog, elabErrs := elaborate.Module(infos, ck)
 	if report(stderr, elabErrs) {
-		return nil, nil, nil, false
+		return nil, nil, nil, nil, false
 	}
 	if lintErrs := core.Lint(prog, ck.B); len(lintErrs) > 0 {
 		fmt.Fprintf(stderr, "fango: internal compiler error: Core invariants violated:\n")
 		for _, e := range lintErrs {
 			fmt.Fprintf(stderr, "  %v\n", e)
 		}
-		return nil, nil, nil, false
+		return nil, nil, nil, nil, false
 	}
-	return prog, ck, loaded.Manifest, true
+	return prog, ck, loaded.Manifest, loaded.Units, true
 }
 
 func report(stderr io.Writer, errs []diag.Error) bool {
@@ -77,16 +77,10 @@ func hasMain(p *core.Prog) bool {
 	return false
 }
 
-// emitGo runs the front half of the pipeline and returns generated Go
-// source. FANGO_INTERNAL_PRINT_MAIN=1 switches codegen into the
-// differential harness's print-main mode.
-func emitGo(entry string, stderr io.Writer) ([]byte, bool) {
-	src, _, ok := emitGoManifest(entry, stderr)
-	return src, ok
-}
-
-func emitGoManifest(entry string, stderr io.Writer) ([]byte, []modules.ManifestEntry, bool) {
-	prog, ck, manifest, ok := compileFileManifest(entry, stderr)
+// emitProjectManifest emits the complete multi-package Go project used by
+// build, run, --emit-go, and backend structural tests.
+func emitProjectManifest(entry string, stderr io.Writer) ([]codegen.File, []modules.ManifestEntry, bool) {
+	prog, ck, manifest, loadedUnits, ok := compileFileGraph(entry, stderr)
 	if !ok {
 		return nil, nil, false
 	}
@@ -94,13 +88,17 @@ func emitGoManifest(entry string, stderr io.Writer) ([]byte, []modules.ManifestE
 		fmt.Fprintf(stderr, "fango: %s has no `main` — a program needs `main = ...`\n", entry)
 		return nil, nil, false
 	}
+	units := make([]codegen.Unit, len(loadedUnits))
+	for i, unit := range loadedUnits {
+		units[i] = codegen.Unit{Name: unit.Name, Imports: unit.Imports, Entry: unit.Entry}
+	}
 	printMain := os.Getenv("FANGO_INTERNAL_PRINT_MAIN") == "1"
-	src, err := codegen.Emit(prog, ck.B, printMain)
+	files, err := codegen.EmitProject(prog, ck.B, units, printMain)
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", err)
 		return nil, nil, false
 	}
-	return src, manifest, true
+	return files, manifest, true
 }
 
 // cmdCheck parses and typechecks only: quiet on success (exit 0),

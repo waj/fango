@@ -17,8 +17,6 @@ import (
 func mangleType(name string) string   { return "T_" + linkName(name) }
 func mangleCtor(name string) string   { return "C_" + linkName(name) }
 func markerMethod(name string) string { return "isT_" + linkName(name) }
-func eqFunc(name string) string       { return "eqT_" + linkName(name) }
-func showFunc(name string) string     { return "showT_" + linkName(name) }
 
 func fieldName(i int) string { return fmt.Sprintf("F%d", i) }
 
@@ -84,7 +82,7 @@ func (g *gen) ctorLit(e *core.App) goast.Expr {
 	for i, a := range e.Args {
 		args[i] = g.expr(a, 0)
 	}
-	litType := indexExpr(ident(mangleCtor(e.Ctor.Name)), g.goTypes(e.TyArgs))
+	litType := indexExpr(g.ctorRef(e.Ctor), g.goTypes(e.TyArgs))
 	return &goast.UnaryExpr{
 		Op: gotoken.AND,
 		X:  &goast.CompositeLit{Type: litType, Elts: args},
@@ -152,7 +150,8 @@ func (g *gen) ctorSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) 
 	}
 	tagArgs := g.goTypes(scrutTy.Args)
 	ctorTag := func(name string) goast.Expr {
-		return &goast.StarExpr{X: indexExpr(ident(mangleCtor(name)), tagArgs)}
+		ctor := t.ADT.CtorNamed(name)
+		return &goast.StarExpr{X: indexExpr(g.ctorRef(ctor), tagArgs)}
 	}
 
 	// The type-switch binding is only legal Go if some clause uses it.
@@ -308,9 +307,9 @@ func (g *gen) eqDecl(adt *types.ADTInfo) goast.Decl {
 		paramIdents[i] = ident(g.tyParamNames[v.ID])
 	}
 	defer func() { g.eqParamNames = nil }()
-	iface := indexExpr(ident(mangleType(adt.Con.Name)), paramIdents)
+	iface := indexExpr(g.typeRef(adt), paramIdents)
 	ctorTag := func(name string) goast.Expr {
-		return &goast.StarExpr{X: indexExpr(ident(mangleCtor(name)), paramIdents)}
+		return &goast.StarExpr{X: indexExpr(g.ctorRef(adt.CtorNamed(name)), paramIdents)}
 	}
 
 	var clauses []goast.Stmt
@@ -373,7 +372,7 @@ func (g *gen) eqDecl(adt *types.ADTInfo) goast.Decl {
 		Names: []*goast.Ident{ident("a"), ident("b")}, Type: iface,
 	})
 	return &goast.FuncDecl{
-		Name: ident(eqFunc(adt.Con.Name)),
+		Name: ident(g.eqName(adt)),
 		Type: &goast.FuncType{
 			TypeParams: g.typeParamFields(adt.Params),
 			Params:     &goast.FieldList{List: params},
@@ -410,7 +409,7 @@ func (g *gen) showDecl(adt *types.ADTInfo) goast.Decl {
 	}
 	defer func() { g.showParamNames = nil }()
 	ctorTag := func(name string) goast.Expr {
-		return &goast.StarExpr{X: indexExpr(ident(mangleCtor(name)), paramIdents)}
+		return &goast.StarExpr{X: indexExpr(g.ctorRef(adt.CtorNamed(name)), paramIdents)}
 	}
 
 	var clauses []goast.Stmt
@@ -472,10 +471,10 @@ func (g *gen) showDecl(adt *types.ADTInfo) goast.Decl {
 		})
 	}
 	params = append(params,
-		&goast.Field{Names: []*goast.Ident{ident("v")}, Type: indexExpr(ident(mangleType(adt.Con.Name)), paramIdents)},
+		&goast.Field{Names: []*goast.Ident{ident("v")}, Type: indexExpr(g.typeRef(adt), paramIdents)},
 		&goast.Field{Names: []*goast.Ident{ident("nested")}, Type: ident("bool")})
 	return &goast.FuncDecl{
-		Name: ident(showFunc(adt.Con.Name)),
+		Name: ident(g.showName(adt)),
 		Type: &goast.FuncType{
 			TypeParams: g.typeParamFields(adt.Params),
 			Params:     &goast.FieldList{List: params},

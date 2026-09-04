@@ -45,6 +45,14 @@ func ReadLine() string {
 // `func v_double[A Number](x A) A` with native operators.
 type Number interface{ ~int64 | ~float64 }
 
+// Unit is the shared represented form of Fango's Unit type. Direct concrete
+// worker and operation boundaries erase Unit, but package boundaries that
+// carry first-class functions, polymorphic values, or ADTs need one nominal
+// Go type shared by every generated package.
+type Unit struct{}
+
+var UnitValue Unit
+
 // ShowInt renders an Int exactly as the surface language shows it.
 func ShowInt(v int64) string { return strconv.FormatInt(v, 10) }
 

@@ -24,7 +24,7 @@ make ci         # formatting, vet, correctness, and performance gates
 The CLI accepts one `.fango` source file:
 
 ```text
-fango build main.fango [-o out] [--emit-go]
+fango build [-o out] [--emit-go] main.fango
 fango run main.fango
 fango check main.fango
 fango repl
@@ -32,10 +32,19 @@ fango clean main.fango
 ```
 
 `build` writes a native executable (defaulting to the source basename without
-`.fango`). `--emit-go` prints generated Go instead. `run` builds if needed and
-runs the cached executable. `check` runs through parsing, inference,
-elaboration, and Core validation without generating Go. `clean` removes the
-source file's persistent `.fango/build` artifacts.
+`.fango`). `run` builds if needed and runs the cached executable. `check` runs
+through parsing, inference, elaboration, and Core validation without generating
+Go. `clean` removes the source file's persistent `.fango/build` artifacts.
+
+`build --emit-go` writes a complete Go project instead of an executable. For
+`Main.fango`, its default destination is the `Main.out` directory in the
+current working directory; `-o DIR` selects another directory. The project has
+one `go.mod`, a root `main.go`, the shared `fangort` package, and one package per
+imported Fango module beneath `modules/`. It can be compiled by running
+`go build .` inside the directory without network access. Emission is quiet on
+success. A missing, empty, or previously Fango-generated destination is
+accepted; a non-empty unmanaged directory is rejected. Exported `.out`
+directories are output artifacts and are not removed by `fango clean`.
 
 ## Modules, imports, and source layout
 
@@ -81,9 +90,11 @@ There is no implicit standard-library prelude.
 an ordinary declaration. `check` does not require `main`. Imports expose only
 the direct module's declared public interface, never its dependencies. Import
 cycles are rejected with the complete cycle chain. The generated build
-directory includes `sources.json`, containing each transitive source's logical
-name, path, and SHA-256 hash for build invalidation. Local paths are relative
-to the source root; bundled paths begin with `<stdlib>/`.
+directory compiles each Fango module as a separate Go package within one
+private Go module, allowing unchanged packages to use Go's build cache. It
+includes `sources.json`, containing each transitive source's logical name,
+path, and SHA-256 hash for build invalidation. Local paths are relative to the
+source root; bundled paths begin with `<stdlib>/`.
 
 Top-level declarations begin in column 1 and are visible only to declarations
 below them within their module. Tabs are rejected; indent with spaces. `--`

@@ -25,7 +25,7 @@ func (g *gen) eqCall(t types.Type, a, b goast.Expr) goast.Expr {
 	g.needEqType(t)
 	con := t.(*types.TCon)
 	adt := g.adts[con.Unique]
-	fn := indexExpr(ident(eqFunc(adt.Con.Name)), g.goTypes(con.Args))
+	fn := indexExpr(g.eqRef(adt), g.goTypes(con.Args))
 	args := make([]goast.Expr, 0, len(con.Args)+2)
 	for _, ta := range con.Args {
 		args = append(args, g.eqArg(ta))
@@ -38,7 +38,7 @@ func (g *gen) showCall(t types.Type, v, nested goast.Expr) goast.Expr {
 	g.needShowType(t)
 	con := t.(*types.TCon)
 	adt := g.adts[con.Unique]
-	fn := indexExpr(ident(showFunc(adt.Con.Name)), g.goTypes(con.Args))
+	fn := indexExpr(g.showRef(adt), g.goTypes(con.Args))
 	args := make([]goast.Expr, 0, len(con.Args)+2)
 	for _, ta := range con.Args {
 		args = append(args, g.showArg(ta))
@@ -62,7 +62,7 @@ func (g *gen) eqArg(t types.Type) goast.Expr {
 	con := t.(*types.TCon)
 	if adt, ok := g.adts[con.Unique]; ok {
 		if len(con.Args) == 0 {
-			return ident(eqFunc(adt.Con.Name)) // signature matches exactly
+			return g.eqRef(adt) // signature matches exactly
 		}
 		return funcLitParams(
 			[]paramSpec{{name: "x", typ: g.goType(t)}, {name: "y", typ: g.goType(t)}},
@@ -84,7 +84,7 @@ func (g *gen) showArg(t types.Type) goast.Expr {
 	con := t.(*types.TCon)
 	if adt, ok := g.adts[con.Unique]; ok {
 		if len(con.Args) == 0 {
-			return ident(showFunc(adt.Con.Name))
+			return g.showRef(adt)
 		}
 		return funcLitParams(
 			[]paramSpec{{name: "x", typ: g.goType(t)}, {name: "nested", typ: ident("bool")}},

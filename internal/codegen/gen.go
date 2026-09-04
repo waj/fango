@@ -7,6 +7,8 @@ import (
 	"go/format"
 	gotoken "go/token"
 	"math"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -14,18 +16,70 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// Emit lowers a Core program to Go source. Definitions become package vars
-// in source order (dependency-ordered by construction — fango's
-// use-after-define rule). main's shape follows doc/design.md, "Go backend and runtime": a Unit-typed main has
-// its function form invoked inside func main() in statement context (prints happen
-// at run time, in order — never in package init); any other main stays a
-// package var whose value func main() discards, or — in the test-internal
-// print-main mode — prints through fangort, the differential harness's
-// observation channel.
-//
-// Codegen is type-directed and deterministic: same Core in, byte-identical
-// Go out.
-func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
+// Unit describes one Fango source module for package emission. Units must be
+// dependency-first and contain exactly one entry.
+type Unit struct {
+	Name    string
+	Imports []string
+	Entry   bool
+}
+
+// File is one path relative to the generated Go module root.
+type File struct {
+	Path string
+	Data []byte
+}
+
+// EmitProject lowers a whole Core program into one Go package per Fango
+// module. The entry module is package main at the project root; dependencies
+// live below modules/ in their logical source layout.
+func EmitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
+	var files []File
+	entryCount := 0
+	owners := make(map[string]bool, len(units))
+	for _, unit := range units {
+		if owners[unit.Name] {
+			return nil, fmt.Errorf("codegen: duplicate module unit %q", unit.Name)
+		}
+		owners[unit.Name] = true
+		if unit.Entry {
+			entryCount++
+		}
+		data, err := emitUnit(p, b, unit, printMain)
+		if err != nil {
+			return nil, err
+		}
+		path := "main.go"
+		if !unit.Entry {
+			path = filepath.ToSlash(filepath.Join("modules", strings.ReplaceAll(unit.Name, ".", "/"), "module.go"))
+		}
+		files = append(files, File{Path: path, Data: data})
+	}
+	if entryCount != 1 {
+		return nil, fmt.Errorf("codegen: module graph has %d entry units, want 1", entryCount)
+	}
+	for _, def := range p.Defs {
+		if !owners[def.Owner] {
+			return nil, fmt.Errorf("codegen: definition %q has no module unit for owner %q", def.Name, def.Owner)
+		}
+	}
+	for _, adt := range p.ADTs {
+		owner := symbolOwner(adt.Con.Name)
+		if !owners[owner] {
+			return nil, fmt.Errorf("codegen: type %q has no module unit for owner %q", adt.Con.Name, owner)
+		}
+	}
+	for _, eff := range p.Effects {
+		owner := symbolOwner(eff.Name)
+		if eff.Name != "IO" && !owners[owner] {
+			return nil, fmt.Errorf("codegen: effect %q has no module unit for owner %q", eff.Name, owner)
+		}
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	return files, nil
+}
+
+func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byte, error) {
 	g := &gen{
 		b:          b,
 		adts:       map[int]*types.ADTInfo{},
@@ -36,6 +90,12 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 		caseVarTys: map[string]types.Type{},
 		evidence:   map[int][]goast.Expr{},
 		defs:       map[string]*core.Def{},
+		unit:       unit.Name,
+		imports:    map[string]bool{},
+		direct:     map[string]bool{},
+	}
+	for _, name := range unit.Imports {
+		g.direct[name] = true
 	}
 	for i := range p.Defs {
 		g.defs[p.Defs[i].Name] = &p.Defs[i]
@@ -50,16 +110,32 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 		entry = "main"
 	}
 	for i := range p.Defs {
-		if p.Defs[i].Name == entry {
+		if p.Defs[i].Name == entry && p.Defs[i].Owner == unit.Name {
 			mainDef = &p.Defs[i]
 		}
+	}
+	if !unit.Entry {
+		mainDef = nil
+	}
+	if unit.Entry && mainDef == nil {
+		return nil, fmt.Errorf("codegen: entry definition %q is not owned by entry module %q", entry, unit.Name)
 	}
 	mainIsUnit := mainDef != nil && g.unique(mainDef.Type) == b.Unit.Unique
 	mainIsFn := mainDef != nil && len(mainDef.Params) == 1
 
-	decls := append(g.effectDecls(p.Effects), g.adtDecls(p.ADTs)...)
+	adts, effects := g.ownedADTs(p.ADTs), g.ownedEffects(p.Effects)
+	for _, adt := range adts {
+		if g.derivable(adt.Con, map[int]bool{}) {
+			g.neededEq[adt.Con.Unique] = true
+			g.neededShow[adt.Con.Unique] = true
+		}
+	}
+	decls := append(g.effectDecls(effects), g.adtDecls(adts)...)
 	for i := range p.Defs {
 		d := &p.Defs[i]
+		if d.Owner != unit.Name {
+			continue
+		}
 		if d == mainDef && mainIsUnit {
 			continue // no package var: the effect runs inside func main()
 		}
@@ -70,7 +146,7 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 			continue
 		}
 		g.tyParamNames = nil
-		decls = append(decls, varDecl(mangleValue(d.Name), g.goType(d.Type), g.expr(d.Body, 0)))
+		decls = append(decls, varDecl(g.topValueName(d.Name), g.goType(d.Type), g.expr(d.Body, 0)))
 	}
 
 	switch {
@@ -78,34 +154,31 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 		decls = append(decls, funcDecl("main", g.stmts(mainDef.Body)...))
 	case mainIsFn:
 		decls = append(decls, funcDecl("main", g.workerCallStmts(entry, nil)...))
-	case printMain:
+	case printMain && unit.Entry:
 		decls = append(decls, funcDecl("main",
-			exprStmt(g.printCall(ident(mangleValue(entry)), mainDef.Type))))
+			exprStmt(g.printCall(g.topValueRef(entry), mainDef.Type))))
 	default:
-		decls = append(decls, funcDecl("main", assignBlank(ident(mangleValue(entry)))))
+		if mainDef != nil {
+			decls = append(decls, funcDecl("main", assignBlank(g.topValueRef(entry))))
+		}
 	}
 
 	// Derived eq/show, discovered during emission (on demand, doc/design.md, "Go backend and runtime"), plus
 	// the scalar element-op helpers their synthesis demanded.
-	decls = append(decls, g.derivedDecls(p.ADTs)...)
+	decls = append(decls, g.derivedDecls(adts)...)
 	decls = append(decls, g.scalarHelperDecls()...)
-	decls = append(g.unitDecls(), decls...)
-
 	// Imports come from emission (fangort for prints, math for float
 	// specials), so they are prepended last — in a fixed order, for
 	// deterministic output.
-	var paths []string
-	if g.usesFangort {
-		paths = append(paths, "fangobuild/fangort")
-	}
-	if g.usesMath {
-		paths = append(paths, "math")
-	}
-	if len(paths) > 0 {
-		decls = append([]goast.Decl{importDecl(paths...)}, decls...)
+	if imports := g.importsDecl(); imports != nil {
+		decls = append([]goast.Decl{imports}, decls...)
 	}
 
-	file := &goast.File{Name: ident("main"), Decls: decls}
+	packageName := "main"
+	if !unit.Entry {
+		packageName = "fangomod"
+	}
+	file := &goast.File{Name: ident(packageName), Decls: decls}
 	var buf bytes.Buffer
 	if err := format.Node(&buf, gotoken.NewFileSet(), file); err != nil {
 		return nil, fmt.Errorf("codegen: printing generated Go: %w", err)
@@ -140,11 +213,182 @@ type gen struct {
 	// caseVarTys records the (instantiated) types of case scrutinee binders
 	// and field temporaries, so nested constructor switches know their
 	// column's type arguments.
-	caseVarTys    map[string]types.Type
-	evidence      map[int][]goast.Expr
-	defs          map[string]*core.Def
-	usesUnitType  bool
-	usesUnitValue bool
+	caseVarTys map[string]types.Type
+	evidence   map[int][]goast.Expr
+	defs       map[string]*core.Def
+	unit       string
+	imports    map[string]bool
+	direct     map[string]bool
+}
+
+func symbolOwner(name string) string {
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		return name[:i]
+	}
+	return ""
+}
+
+func moduleAlias(name string) string {
+	var b strings.Builder
+	b.WriteString("m_")
+	for i := 0; i < len(name); i++ {
+		switch name[i] {
+		case '.':
+			b.WriteString("_d")
+		case '_':
+			b.WriteString("_u")
+		default:
+			b.WriteByte(name[i])
+		}
+	}
+	return b.String()
+}
+
+func moduleImportPath(name string) string {
+	return "fangobuild/modules/" + strings.ReplaceAll(name, ".", "/")
+}
+
+func (g *gen) qualified(owner, name string) goast.Expr {
+	if owner == "" || owner == g.unit {
+		return ident(name)
+	}
+	g.imports[owner] = true
+	return selector(moduleAlias(owner), name)
+}
+
+func (g *gen) topValueName(name string) string {
+	return "V_" + linkName(name)
+}
+
+func (g *gen) topValueRef(name string) goast.Expr {
+	owner := symbolOwner(name)
+	if d := g.defs[name]; d != nil {
+		owner = d.Owner
+	}
+	return g.qualified(owner, g.topValueName(name))
+}
+
+func (g *gen) typeRef(adt *types.ADTInfo) goast.Expr {
+	return g.qualified(symbolOwner(adt.Con.Name), mangleType(adt.Con.Name))
+}
+
+func (g *gen) ctorRef(ctor *types.CtorInfo) goast.Expr {
+	return g.qualified(symbolOwner(ctor.Result.Name), mangleCtor(ctor.Name))
+}
+
+func (g *gen) eqName(adt *types.ADTInfo) string {
+	return "EqT_" + linkName(adt.Con.Name)
+}
+
+func (g *gen) showName(adt *types.ADTInfo) string {
+	return "ShowT_" + linkName(adt.Con.Name)
+}
+
+func (g *gen) eqRef(adt *types.ADTInfo) goast.Expr {
+	return g.qualified(symbolOwner(adt.Con.Name), g.eqName(adt))
+}
+
+func (g *gen) showRef(adt *types.ADTInfo) goast.Expr {
+	return g.qualified(symbolOwner(adt.Con.Name), g.showName(adt))
+}
+
+func (g *gen) evidenceName(name string) string {
+	return "ev_" + linkName(name)
+}
+
+func (g *gen) ownedADTs(in []*types.ADTInfo) []*types.ADTInfo {
+	var out []*types.ADTInfo
+	for _, adt := range in {
+		if symbolOwner(adt.Con.Name) == g.unit {
+			out = append(out, adt)
+		}
+	}
+	return out
+}
+
+func (g *gen) ownedEffects(in []*types.EffectInfo) []*types.EffectInfo {
+	var out []*types.EffectInfo
+	for _, eff := range in {
+		if eff.Name != "IO" && symbolOwner(eff.Name) == g.unit {
+			out = append(out, eff)
+		}
+	}
+	return out
+}
+
+func (g *gen) derivable(t types.Type, visiting map[int]bool) bool {
+	switch t := t.(type) {
+	case *types.TVar:
+		return true
+	case *types.TFun:
+		return false
+	case *types.TCon:
+		for _, arg := range t.Args {
+			if !g.derivable(arg, visiting) {
+				return false
+			}
+		}
+		adt := g.adts[t.Unique]
+		if adt == nil || visiting[t.Unique] {
+			return true
+		}
+		visiting[t.Unique] = true
+		defer delete(visiting, t.Unique)
+		for _, ctor := range adt.Ctors {
+			for _, field := range ctor.Fields {
+				if !g.derivable(field, visiting) {
+					return false
+				}
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func (g *gen) importsDecl() goast.Decl {
+	type spec struct{ alias, path string }
+	var specs []spec
+	if g.usesFangort {
+		specs = append(specs, spec{path: "fangobuild/fangort"})
+	}
+	if g.usesMath {
+		specs = append(specs, spec{path: "math"})
+	}
+	owners := make(map[string]bool, len(g.direct)+len(g.imports))
+	for name := range g.direct {
+		owners[name] = true
+	}
+	for name := range g.imports {
+		owners[name] = true
+	}
+	names := make([]string, 0, len(owners))
+	for name := range owners {
+		if name != "" && name != g.unit {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		alias := "_"
+		if g.imports[name] {
+			alias = moduleAlias(name)
+		}
+		specs = append(specs, spec{alias: alias, path: moduleImportPath(name)})
+	}
+	if len(specs) == 0 {
+		return nil
+	}
+	goSpecs := make([]goast.Spec, len(specs))
+	for i, s := range specs {
+		is := &goast.ImportSpec{Path: &goast.BasicLit{Kind: gotoken.STRING, Value: strconv.Quote(s.path)}}
+		if s.alias != "" {
+			is.Name = ident(s.alias)
+		}
+		goSpecs[i] = is
+	}
+	return &goast.GenDecl{Tok: gotoken.IMPORT, Specs: goSpecs}
 }
 
 func (g *gen) unique(t types.Type) int {
@@ -157,29 +401,13 @@ func (g *gen) unique(t types.Type) int {
 func (g *gen) isUnit(t types.Type) bool { return g.unique(t) == g.b.Unit.Unique }
 
 func (g *gen) unitType() goast.Expr {
-	g.usesUnitType = true
-	return ident("unit")
+	g.usesFangort = true
+	return selector("fangort", "Unit")
 }
 
 func (g *gen) unitValue() goast.Expr {
-	g.usesUnitType = true
-	g.usesUnitValue = true
-	return ident("unitValue")
-}
-
-func (g *gen) unitDecls() []goast.Decl {
-	if !g.usesUnitType {
-		return nil
-	}
-	decls := []goast.Decl{&goast.GenDecl{Tok: gotoken.TYPE, Specs: []goast.Spec{&goast.TypeSpec{
-		Name: ident("unit"), Type: &goast.StructType{Fields: &goast.FieldList{}},
-	}}}}
-	if g.usesUnitValue {
-		decls = append(decls, &goast.GenDecl{Tok: gotoken.VAR, Specs: []goast.Spec{&goast.ValueSpec{
-			Names: []*goast.Ident{ident("unitValue")}, Type: ident("unit"),
-		}}})
-	}
-	return decls
+	g.usesFangort = true
+	return selector("fangort", "UnitValue")
 }
 
 // printCall builds the print of a value: fangort.PrintX for scalars, the
@@ -219,7 +447,7 @@ func (g *gen) workerDef(d *core.Def) goast.Decl {
 	argTys, ret := core.PeelFun(d.Type, len(d.Params))
 	params := make([]paramSpec, 0, len(d.EffectParams)+len(d.Params))
 	for _, ev := range d.EffectParams {
-		name := fmt.Sprintf("ev_%d", ev.Unique)
+		name := g.evidenceName(ev.Name)
 		params = append(params, paramSpec{name: name, typ: g.effectType(ev)})
 		g.evidence[ev.Unique] = append(g.evidence[ev.Unique], ident(name))
 	}
@@ -236,7 +464,7 @@ func (g *gen) workerDef(d *core.Def) goast.Decl {
 	if g.isUnit(ret) {
 		result = nil
 	}
-	decl := workerDecl(mangleValue(d.Name), params, result, g.retStmtsFor(d.Body, g.isUnit(ret))).(*goast.FuncDecl)
+	decl := workerDecl(g.topValueName(d.Name), params, result, g.retStmtsFor(d.Body, g.isUnit(ret))).(*goast.FuncDecl)
 	for _, ev := range d.EffectParams {
 		g.evidence[ev.Unique] = g.evidence[ev.Unique][:len(g.evidence[ev.Unique])-1]
 	}
@@ -254,9 +482,9 @@ func (g *gen) workerABI(name string) ([]types.Type, bool) {
 }
 
 func (g *gen) workerCallStmts(name string, args []goast.Expr) []goast.Stmt {
-	call := callExpr(ident(mangleValue(name)), args...)
+	call := callExpr(g.topValueRef(name), args...)
 	if args == nil {
-		call = callExpr(ident(mangleValue(name)))
+		call = callExpr(g.topValueRef(name))
 	}
 	return []goast.Stmt{exprStmt(call)}
 }
@@ -286,7 +514,7 @@ func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
 		}
 		args = append(args, g.expr(a, 0))
 	}
-	return exprStmt(callExpr(indexExpr(ident(mangleValue(ref.Name)), g.goTypes(e.TyArgs)), args...))
+	return exprStmt(callExpr(indexExpr(g.topValueRef(ref.Name), g.goTypes(e.TyArgs)), args...))
 }
 
 // tyParamNames assigns positional Go names (A0, A1, …) to a definition's
@@ -388,7 +616,7 @@ func (g *gen) goType(t types.Type) goast.Expr {
 			return g.unitType()
 		default:
 			if adt, ok := g.adts[t.Unique]; ok {
-				return indexExpr(ident(mangleType(adt.Con.Name)), g.goTypes(t.Args))
+				return indexExpr(g.typeRef(adt), g.goTypes(t.Args))
 			}
 			panic(fmt.Sprintf("codegen: unknown type constructor %s", t.Name))
 		}
@@ -461,6 +689,9 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		if g.unique(e.Ty) == g.b.Unit.Unique {
 			return g.unitValue()
 		}
+		if g.defs[e.Name] != nil {
+			return g.topValueRef(e.Name)
+		}
 		return ident(mangleValue(e.Name))
 	case *core.Let:
 		return g.letIIFE(e)
@@ -476,7 +707,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			if l.Name == "IO" {
 				continue
 			}
-			name := fmt.Sprintf("ev_%d", l.Unique)
+			name := g.evidenceName(l.Name)
 			inst := core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args}
 			params = append(params, paramSpec{name: name, typ: g.effectType(inst)})
 			g.evidence[l.Unique] = append(g.evidence[l.Unique], ident(name))
@@ -671,7 +902,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 			body = append(body, varDeclStmt(name, g.goType(a.Type()), g.expr(a, 0)))
 			args = append(args, ident(name))
 		}
-		call := callExpr(indexExpr(ident(mangleValue(ref.Name)), g.goTypes(e.TyArgs)), args...)
+		call := callExpr(indexExpr(g.topValueRef(ref.Name), g.goTypes(e.TyArgs)), args...)
 		if voidResult {
 			body = append(body, exprStmt(call), returnStmt(g.unitValue()))
 		} else {
@@ -679,7 +910,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 		}
 		return callExpr(funcLit(g.goType(e.Ty), body))
 	}
-	call := callExpr(indexExpr(ident(mangleValue(ref.Name)), g.goTypes(e.TyArgs)), args...)
+	call := callExpr(indexExpr(g.topValueRef(ref.Name), g.goTypes(e.TyArgs)), args...)
 	if voidResult {
 		return callExpr(funcLit(g.goType(e.Ty), []goast.Stmt{exprStmt(call), returnStmt(g.unitValue())}))
 	}
@@ -775,7 +1006,7 @@ func (g *gen) resumeStmtsFor(e core.Expr, unitResult bool) []goast.Stmt {
 }
 
 func (g *gen) effectType(e core.EffectInstance) goast.Expr {
-	return indexExpr(ident("Eff_"+linkName(e.Name)), g.goTypes(e.Args))
+	return indexExpr(g.qualified(symbolOwner(e.Name), "Eff_"+linkName(e.Name)), g.goTypes(e.Args))
 }
 
 func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {

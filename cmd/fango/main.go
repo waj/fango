@@ -42,7 +42,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func usage(w io.Writer) {
 	fmt.Fprint(w, `usage:
-  fango build main.fango [-o out] [--emit-go]
+  fango build [-o out] [--emit-go] main.fango
   fango run main.fango
   fango check main.fango
   fango repl
@@ -53,7 +53,7 @@ func usage(w io.Writer) {
 // compileToDir runs the pipeline for entry and leaves a ready-to-build main.go
 // in the build directory, reporting whether any input changed.
 func compileToDir(entry, dir string, stderr io.Writer) (changed bool, ok bool) {
-	gosrc, manifest, ok := emitGoManifest(entry, stderr)
+	files, manifest, ok := emitProjectManifest(entry, stderr)
 	if !ok {
 		return false, false
 	}
@@ -62,7 +62,7 @@ func compileToDir(entry, dir string, stderr io.Writer) (changed bool, ok bool) {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
 		return false, false
 	}
-	wrote, err := build.WriteIfChanged(filepath.Join(dir, "main.go"), gosrc)
+	wrote, err := build.SyncGenerated(dir, files)
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
 		return false, false
@@ -94,22 +94,28 @@ func ensureBuilt(entry string, stderr io.Writer) (dir string, ok bool) {
 	return dir, true
 }
 
-func cmdBuild(args []string, stdout, stderr io.Writer) int {
+func cmdBuild(args []string, _ io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("build", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	out := fs.String("o", "", "output binary path")
-	emit := fs.Bool("emit-go", false, "print the generated Go source and exit")
+	out := fs.String("o", "", "output binary path, or project directory with --emit-go")
+	emit := fs.Bool("emit-go", false, "write the generated Go project and exit")
 	if fs.Parse(args) != nil || fs.NArg() != 1 {
 		usage(stderr)
 		return 2
 	}
 	entry := fs.Arg(0)
 	if *emit {
-		gosrc, ok := emitGo(entry, stderr)
-		if !ok {
+		dest := *out
+		if dest == "" {
+			dest = strings.TrimSuffix(filepath.Base(entry), ".fango") + ".out"
+		}
+		if err := build.ValidateExportDir(dest); err != nil {
+			fmt.Fprintf(stderr, "fango: %v\n", err)
 			return 1
 		}
-		fmt.Fprint(stdout, string(gosrc))
+		if _, ok := compileToDir(entry, dest, stderr); !ok {
+			return 1
+		}
 		return 0
 	}
 	dir, ok := ensureBuilt(entry, stderr)

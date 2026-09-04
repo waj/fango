@@ -94,7 +94,16 @@ type Result struct {
 	Module           *ast.Module
 	Entry            string
 	Manifest         []ManifestEntry
+	Units            []Unit
 	NativeOperations []string
+}
+
+// Unit is one source module in dependency-first build order. Name is empty
+// for a headerless entry file; imports always contain logical named modules.
+type Unit struct {
+	Name    string
+	Imports []string
+	Entry   bool
 }
 
 type node struct {
@@ -136,7 +145,12 @@ func Load(entry string) (*Result, []diag.Error) {
 	}
 	if m.Header == nil && len(m.Imports) == 0 {
 		h := sha256.Sum256(content)
-		return &Result{Module: m, Entry: "main", Manifest: []ManifestEntry{{Module: "<entry>", Path: filepath.Base(abs), SHA256: hex.EncodeToString(h[:])}}}, nil
+		return &Result{
+			Module:   m,
+			Entry:    "main",
+			Manifest: []ManifestEntry{{Module: "<entry>", Path: filepath.Base(abs), SHA256: hex.EncodeToString(h[:])}},
+			Units:    []Unit{{Entry: true}},
+		}, nil
 	}
 	entryName, private := "<entry>", m.Header == nil
 	if !private {
@@ -278,6 +292,7 @@ func Load(entry string) (*Result, []diag.Error) {
 		return nil, errs
 	}
 	manifest := make([]ManifestEntry, 0, len(order))
+	units := make([]Unit, 0, len(order))
 	var nativeOps []string
 	for _, name := range order {
 		n := nodes[name]
@@ -286,12 +301,17 @@ func Load(entry string) (*Result, []diag.Error) {
 		for _, op := range n.nativeOps {
 			nativeOps = append(nativeOps, canonical(name, op))
 		}
+		unitName := name
+		if n.private {
+			unitName = ""
+		}
+		units = append(units, Unit{Name: unitName, Imports: dependencyNames(n), Entry: name == entryName})
 	}
 	entrySymbol := "main"
 	if !private {
 		entrySymbol = canonical(entryName, "main")
 	}
-	return &Result{Module: merged, Entry: entrySymbol, Manifest: manifest, NativeOperations: nativeOps}, nil
+	return &Result{Module: merged, Entry: entrySymbol, Manifest: manifest, Units: units, NativeOperations: nativeOps}, nil
 }
 
 func parse(f *source.File) (*ast.Module, []diag.Error) {
