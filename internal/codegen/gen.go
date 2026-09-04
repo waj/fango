@@ -35,6 +35,10 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 		scalarShow: map[int]bool{},
 		caseVarTys: map[string]types.Type{},
 		evidence:   map[int][]goast.Expr{},
+		defs:       map[string]*core.Def{},
+	}
+	for i := range p.Defs {
+		g.defs[p.Defs[i].Name] = &p.Defs[i]
 	}
 	for _, adt := range p.ADTs {
 		g.adts[adt.Con.Unique] = adt
@@ -69,7 +73,7 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 	case mainIsUnit:
 		decls = append(decls, funcDecl("main", g.stmts(mainDef.Body)...))
 	case mainIsFn:
-		decls = append(decls, funcDecl("main", assignBlank(callExpr(ident(mangleValue("main")), unitLit()))))
+		decls = append(decls, funcDecl("main", g.workerCallStmts("main", nil)...))
 	case printMain:
 		decls = append(decls, funcDecl("main",
 			exprStmt(g.printCall(ident(mangleValue("main")), mainDef.Type))))
@@ -81,6 +85,7 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 	// the scalar element-op helpers their synthesis demanded.
 	decls = append(decls, g.derivedDecls(p.ADTs)...)
 	decls = append(decls, g.scalarHelperDecls()...)
+	decls = append(g.unitDecls(), decls...)
 
 	// Imports come from emission (fangort for prints, math for float
 	// specials), so they are prepended last — in a fixed order, for
@@ -131,8 +136,11 @@ type gen struct {
 	// caseVarTys records the (instantiated) types of case scrutinee binders
 	// and field temporaries, so nested constructor switches know their
 	// column's type arguments.
-	caseVarTys map[string]types.Type
-	evidence   map[int][]goast.Expr
+	caseVarTys    map[string]types.Type
+	evidence      map[int][]goast.Expr
+	defs          map[string]*core.Def
+	usesUnitType  bool
+	usesUnitValue bool
 }
 
 func (g *gen) unique(t types.Type) int {
@@ -140,6 +148,34 @@ func (g *gen) unique(t types.Type) int {
 		return con.Unique
 	}
 	return -1
+}
+
+func (g *gen) isUnit(t types.Type) bool { return g.unique(t) == g.b.Unit.Unique }
+
+func (g *gen) unitType() goast.Expr {
+	g.usesUnitType = true
+	return ident("unit")
+}
+
+func (g *gen) unitValue() goast.Expr {
+	g.usesUnitType = true
+	g.usesUnitValue = true
+	return ident("unitValue")
+}
+
+func (g *gen) unitDecls() []goast.Decl {
+	if !g.usesUnitType {
+		return nil
+	}
+	decls := []goast.Decl{&goast.GenDecl{Tok: gotoken.TYPE, Specs: []goast.Spec{&goast.TypeSpec{
+		Name: ident("unit"), Type: &goast.StructType{Fields: &goast.FieldList{}},
+	}}}}
+	if g.usesUnitValue {
+		decls = append(decls, &goast.GenDecl{Tok: gotoken.VAR, Specs: []goast.Spec{&goast.ValueSpec{
+			Names: []*goast.Ident{ident("unitValue")}, Type: ident("unit"),
+		}}})
+	}
+	return decls
 }
 
 // printCall builds the print of a value: fangort.PrintX for scalars, the
@@ -184,17 +220,69 @@ func (g *gen) workerDef(d *core.Def) goast.Decl {
 		g.evidence[ev.Unique] = append(g.evidence[ev.Unique], ident(name))
 	}
 	for i, name := range d.Params {
+		if g.isUnit(argTys[i]) {
+			continue
+		}
 		if name != "_" {
 			name = mangleValue(name)
 		}
 		params = append(params, paramSpec{name: name, typ: g.goType(argTys[i])})
 	}
-	decl := workerDecl(mangleValue(d.Name), params, g.goType(ret), g.retStmts(d.Body)).(*goast.FuncDecl)
+	var result goast.Expr = g.goType(ret)
+	if g.isUnit(ret) {
+		result = nil
+	}
+	decl := workerDecl(mangleValue(d.Name), params, result, g.retStmtsFor(d.Body, g.isUnit(ret))).(*goast.FuncDecl)
 	for _, ev := range d.EffectParams {
 		g.evidence[ev.Unique] = g.evidence[ev.Unique][:len(g.evidence[ev.Unique])-1]
 	}
 	decl.Type.TypeParams = g.typeParamFields(d.TyParams)
 	return decl
+}
+
+func (g *gen) workerABI(name string) ([]types.Type, bool) {
+	d := g.defs[name]
+	if d == nil {
+		return nil, false
+	}
+	args, ret := core.PeelFun(d.Type, len(d.Params))
+	return args, g.isUnit(ret)
+}
+
+func (g *gen) workerCallStmts(name string, args []goast.Expr) []goast.Stmt {
+	call := callExpr(ident(mangleValue(name)), args...)
+	if args == nil {
+		call = callExpr(ident(mangleValue(name)))
+	}
+	return []goast.Stmt{exprStmt(call)}
+}
+
+func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
+	ref := e.Callee.(*core.VarRef)
+	formal, voidResult := g.workerABI(ref.Name)
+	if !voidResult {
+		return assignBlank(g.workerCallExpr(e))
+	}
+	for i, a := range e.Args {
+		if i < len(formal) && g.isUnit(formal[i]) && !unitAtom(a) {
+			return exprStmt(g.workerCallExpr(e))
+		}
+	}
+	args := make([]goast.Expr, 0, len(e.EvidenceArgs)+len(e.Args))
+	for _, ev := range e.EvidenceArgs {
+		stack := g.evidence[ev.Unique]
+		if len(stack) == 0 {
+			panic("codegen: missing lexical evidence")
+		}
+		args = append(args, stack[len(stack)-1])
+	}
+	for i, a := range e.Args {
+		if i < len(formal) && g.isUnit(formal[i]) {
+			continue
+		}
+		args = append(args, g.expr(a, 0))
+	}
+	return exprStmt(callExpr(indexExpr(ident(mangleValue(ref.Name)), g.goTypes(e.TyArgs)), args...))
 }
 
 // tyParamNames assigns positional Go names (A0, A1, …) to a definition's
@@ -235,18 +323,25 @@ func (g *gen) typeParamFields(vars []*types.TVar) *goast.FieldList {
 // if/return (fib's hot path must not pay an IIFE closure), everything else
 // returns directly.
 func (g *gen) retStmts(e core.Expr) []goast.Stmt {
+	return g.retStmtsFor(e, false)
+}
+
+func (g *gen) retStmtsFor(e core.Expr, unitResult bool) []goast.Stmt {
 	switch e := e.(type) {
 	case *core.Let:
-		return append(g.letBindingStmts(e), g.retStmts(e.Body)...)
+		return append(g.letBindingStmts(e), g.retStmtsFor(e.Body, unitResult)...)
 	case *core.If:
 		stmts := []goast.Stmt{&goast.IfStmt{
 			Cond: g.expr(e.Cond, 0),
-			Body: &goast.BlockStmt{List: g.retStmts(e.Then)},
+			Body: &goast.BlockStmt{List: g.retStmtsFor(e.Then, unitResult)},
 		}}
-		return append(stmts, g.retStmts(e.Else)...)
+		return append(stmts, g.retStmtsFor(e.Else, unitResult)...)
 	case *core.Case:
-		return g.caseStmts(e, g.retStmts)
+		return g.caseStmts(e, func(x core.Expr) []goast.Stmt { return g.retStmtsFor(x, unitResult) })
 	default:
+		if unitResult {
+			return append(g.stmts(e), bareReturnStmt())
+		}
 		return []goast.Stmt{returnStmt(g.expr(e, 0))}
 	}
 }
@@ -286,7 +381,7 @@ func (g *gen) goType(t types.Type) goast.Expr {
 		case g.b.Bool.Unique:
 			return ident("bool")
 		case g.b.Unit.Unique:
-			return &goast.StructType{Fields: &goast.FieldList{}}
+			return g.unitType()
 		default:
 			if adt, ok := g.adts[t.Unique]; ok {
 				return indexExpr(ident(mangleType(adt.Con.Name)), g.goTypes(t.Args))
@@ -353,14 +448,14 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 	case *core.StringLit:
 		return stringLit(e.Val)
 	case *core.UnitLit:
-		return unitLit()
+		return g.unitValue()
 	case *core.BoolLit:
 		return ident(strconv.FormatBool(e.Val))
 	case *core.VarRef:
 		// Unit is a singleton and Unit-typed locals are never emitted
 		// (their effects ran at binding time) — materialize the value.
 		if g.unique(e.Ty) == g.b.Unit.Unique {
-			return unitLit()
+			return g.unitValue()
 		}
 		return ident(mangleValue(e.Name))
 	case *core.Let:
@@ -397,20 +492,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 	case *core.App:
 		switch e.CalleeKind {
 		case core.Worker:
-			ref := e.Callee.(*core.VarRef)
-			args := make([]goast.Expr, 0, len(e.EvidenceArgs)+len(e.Args))
-			for _, ev := range e.EvidenceArgs {
-				stack := g.evidence[ev.Unique]
-				if len(stack) == 0 {
-					panic("codegen: missing lexical evidence")
-				}
-				args = append(args, stack[len(stack)-1])
-			}
-			for _, a := range e.Args {
-				args = append(args, g.expr(a, 0))
-			}
-			// Explicit instantiation, always — never Go's own inference (doc/design.md, "Go backend and runtime").
-			return callExpr(indexExpr(ident(mangleValue(ref.Name)), g.goTypes(e.TyArgs)), args...)
+			return g.workerCallExpr(e)
 		case core.Value:
 			// One typed indirect call per application; chains render
 			// e(a)(b). Call is a Go primary expression — no parens needed,
@@ -484,9 +566,14 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		if e.Op.Owner.Name == "IO" {
 			g.usesFangort = true
 			if e.Op.Name == "print" {
-				return callExpr(funcLit(g.goType(e.Ty), []goast.Stmt{exprStmt(g.printCall(g.expr(e.Args[0], 0), e.Args[0].Type())), returnStmt(unitLit())}))
+				return callExpr(funcLit(g.goType(e.Ty), []goast.Stmt{exprStmt(g.printCall(g.expr(e.Args[0], 0), e.Args[0].Type())), returnStmt(g.unitValue())}))
 			}
 			if e.Op.Name == "readLine" {
+				for _, a := range e.Args {
+					if !unitAtom(a) {
+						return callExpr(funcLit(g.goType(e.Ty), append(g.stmts(a), returnStmt(callExpr(selector("fangort", "ReadLine"))))))
+					}
+				}
 				return callExpr(selector("fangort", "ReadLine"))
 			}
 		}
@@ -494,11 +581,44 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		if len(stack) == 0 {
 			panic("codegen: custom Perform without evidence")
 		}
-		args := make([]goast.Expr, len(e.Args))
+		args := make([]goast.Expr, 0, len(e.Args))
+		needPrelude := false
 		for i, a := range e.Args {
-			args[i] = g.expr(a, 0)
+			if i < len(e.Op.ParamTypes) && g.isUnit(e.Op.ParamTypes[i]) {
+				if !unitAtom(a) {
+					needPrelude = true
+				}
+				continue
+			}
+			args = append(args, g.expr(a, 0))
 		}
-		return callExpr(&goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Op_" + e.Op.Name)}, args...)
+		callOp := func(as []goast.Expr) goast.Expr {
+			return callExpr(&goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Op_" + e.Op.Name)}, as...)
+		}
+		call := callOp(args)
+		if needPrelude {
+			body := []goast.Stmt{}
+			args = args[:0]
+			for i, a := range e.Args {
+				if i < len(e.Op.ParamTypes) && g.isUnit(e.Op.ParamTypes[i]) {
+					body = append(body, g.stmts(a)...)
+					continue
+				}
+				name := fmt.Sprintf("t_u%d", g.tmp)
+				g.tmp++
+				body = append(body, varDeclStmt(name, g.goType(a.Type()), g.expr(a, 0)))
+				args = append(args, ident(name))
+			}
+			call = callOp(args)
+			if g.isUnit(e.Op.ResultType) {
+				return callExpr(funcLit(g.goType(e.Ty), append(body, exprStmt(call), returnStmt(g.unitValue()))))
+			}
+			return callExpr(funcLit(g.goType(e.Ty), append(body, returnStmt(call))))
+		}
+		if g.isUnit(e.Op.ResultType) {
+			return callExpr(funcLit(g.goType(e.Ty), []goast.Stmt{exprStmt(call), returnStmt(g.unitValue())}))
+		}
+		return call
 	case *core.Resume:
 		return g.expr(e.Value, parentPrec)
 	case *core.Seq:
@@ -510,22 +630,87 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 	}
 }
 
+func (g *gen) workerCallExpr(e *core.App) goast.Expr {
+	ref := e.Callee.(*core.VarRef)
+	formal, voidResult := g.workerABI(ref.Name)
+	args := make([]goast.Expr, 0, len(e.EvidenceArgs)+len(e.Args))
+	for _, ev := range e.EvidenceArgs {
+		stack := g.evidence[ev.Unique]
+		if len(stack) == 0 {
+			panic("codegen: missing lexical evidence")
+		}
+		args = append(args, stack[len(stack)-1])
+	}
+	needPrelude := false
+	for i, a := range e.Args {
+		if i < len(formal) && g.isUnit(formal[i]) {
+			if !unitAtom(a) {
+				needPrelude = true
+			}
+			continue
+		}
+		args = append(args, g.expr(a, 0))
+	}
+	if needPrelude {
+		var body []goast.Stmt
+		args = args[:len(e.EvidenceArgs)]
+		for i, a := range e.Args {
+			if i < len(formal) && g.isUnit(formal[i]) {
+				body = append(body, g.stmts(a)...)
+				continue
+			}
+			name := fmt.Sprintf("t_u%d", g.tmp)
+			g.tmp++
+			body = append(body, varDeclStmt(name, g.goType(a.Type()), g.expr(a, 0)))
+			args = append(args, ident(name))
+		}
+		call := callExpr(indexExpr(ident(mangleValue(ref.Name)), g.goTypes(e.TyArgs)), args...)
+		if voidResult {
+			body = append(body, exprStmt(call), returnStmt(g.unitValue()))
+		} else {
+			body = append(body, returnStmt(call))
+		}
+		return callExpr(funcLit(g.goType(e.Ty), body))
+	}
+	call := callExpr(indexExpr(ident(mangleValue(ref.Name)), g.goTypes(e.TyArgs)), args...)
+	if voidResult {
+		return callExpr(funcLit(g.goType(e.Ty), []goast.Stmt{exprStmt(call), returnStmt(g.unitValue())}))
+	}
+	return call
+}
+
+func unitAtom(e core.Expr) bool {
+	switch e.(type) {
+	case *core.UnitLit, *core.VarRef:
+		return true
+	default:
+		return false
+	}
+}
+
 func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	fields := make([]*goast.Field, len(e.Clauses))
 	elts := make([]goast.Expr, len(e.Clauses))
 	for i, c := range e.Clauses {
-		params := make([]paramSpec, len(c.Params))
+		params := make([]paramSpec, 0, len(c.Params))
 		for j, p := range c.Params {
 			if p == "()" || p == "_" {
 				p = "_"
 			} else {
 				p = mangleValue(p)
 			}
-			params[j] = paramSpec{name: p, typ: g.goType(c.ParamTypes[j])}
+			if g.isUnit(c.Op.ParamTypes[j]) {
+				continue
+			}
+			params = append(params, paramSpec{name: p, typ: g.goType(c.ParamTypes[j])})
 		}
-		ft := &goast.FuncType{Params: paramFields(params), Results: &goast.FieldList{List: []*goast.Field{{Type: g.goType(c.ResultType)}}}}
+		results := &goast.FieldList{}
+		if !g.isUnit(c.Op.ResultType) {
+			results = &goast.FieldList{List: []*goast.Field{{Type: g.goType(c.ResultType)}}}
+		}
+		ft := &goast.FuncType{Params: paramFields(params), Results: results}
 		fields[i] = &goast.Field{Names: []*goast.Ident{ident("Op_" + c.Op.Name)}, Type: ft}
-		fn := &goast.FuncLit{Type: ft, Body: &goast.BlockStmt{List: g.resumeStmts(c.Body)}}
+		fn := &goast.FuncLit{Type: ft, Body: &goast.BlockStmt{List: g.resumeStmtsFor(c.Body, g.isUnit(c.Op.ResultType))}}
 		elts[i] = &goast.KeyValueExpr{Key: ident("Op_" + c.Op.Name), Value: fn}
 	}
 	_ = fields
@@ -559,17 +744,24 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 // caller's ordinary Go continuation then proceeds with that operation
 // result. No continuation object or non-local control transfer is needed.
 func (g *gen) resumeStmts(e core.Expr) []goast.Stmt {
+	return g.resumeStmtsFor(e, false)
+}
+
+func (g *gen) resumeStmtsFor(e core.Expr, unitResult bool) []goast.Stmt {
 	switch e := e.(type) {
 	case *core.Resume:
+		if unitResult {
+			return append(g.stmts(e.Value), bareReturnStmt())
+		}
 		return []goast.Stmt{returnStmt(g.expr(e.Value, 0))}
 	case *core.Let:
-		return append(g.letBindingStmts(e), g.resumeStmts(e.Body)...)
+		return append(g.letBindingStmts(e), g.resumeStmtsFor(e.Body, unitResult)...)
 	case *core.Seq:
-		return append(g.stmts(e.First), g.resumeStmts(e.Then)...)
+		return append(g.stmts(e.First), g.resumeStmtsFor(e.Then, unitResult)...)
 	case *core.If:
-		return []goast.Stmt{ifStmt(g.expr(e.Cond, 0), g.resumeStmts(e.Then), g.resumeStmts(e.Else))}
+		return []goast.Stmt{ifStmt(g.expr(e.Cond, 0), g.resumeStmtsFor(e.Then, unitResult), g.resumeStmtsFor(e.Else, unitResult))}
 	case *core.Case:
-		return g.caseStmts(e, g.resumeStmts)
+		return g.caseStmts(e, func(x core.Expr) []goast.Stmt { return g.resumeStmtsFor(x, unitResult) })
 	default:
 		panic(fmt.Sprintf("codegen: non-tail-resumptive clause node %T", e))
 	}
@@ -600,11 +792,18 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 			}
 		}
 		for i, op := range eff.Ops {
-			ps := make([]paramSpec, len(op.ParamTypes))
-			for j, t := range op.ParamTypes {
-				ps[j] = paramSpec{typ: g.goType(t)}
+			ps := make([]paramSpec, 0, len(op.ParamTypes))
+			for _, t := range op.ParamTypes {
+				if g.isUnit(t) {
+					continue
+				}
+				ps = append(ps, paramSpec{typ: g.goType(t)})
 			}
-			fields[i] = &goast.Field{Names: []*goast.Ident{ident("Op_" + op.Name)}, Type: &goast.FuncType{Params: paramFields(ps), Results: &goast.FieldList{List: []*goast.Field{{Type: g.goType(op.ResultType)}}}}}
+			results := &goast.FieldList{}
+			if !g.isUnit(op.ResultType) {
+				results = &goast.FieldList{List: []*goast.Field{{Type: g.goType(op.ResultType)}}}
+			}
+			fields[i] = &goast.Field{Names: []*goast.Ident{ident("Op_" + op.Name)}, Type: &goast.FuncType{Params: paramFields(ps), Results: results}}
 		}
 		spec := &goast.TypeSpec{Name: ident("Eff_" + eff.Name), Type: &goast.StructType{Fields: &goast.FieldList{List: fields}}}
 		if len(eff.Params) > 0 {
@@ -706,6 +905,11 @@ func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
 // Let bindings become plain locals.
 func (g *gen) stmts(e core.Expr) []goast.Stmt {
 	switch e := e.(type) {
+	case *core.App:
+		if e.CalleeKind == core.Worker {
+			return []goast.Stmt{g.workerCallStmt(e)}
+		}
+		return []goast.Stmt{assignBlank(g.expr(e, 0))}
 	case *core.Perform:
 		if e.Op.Owner.Name == "IO" && e.Op.Name == "print" {
 			return []goast.Stmt{exprStmt(g.printCall(g.expr(e.Args[0], 0), e.Args[0].Type()))}
@@ -722,6 +926,14 @@ func (g *gen) stmts(e core.Expr) []goast.Stmt {
 	default:
 		// Unit-typed but effect-free — normally unreachable because Unit is
 		// constructible via print); discard defensively.
+		if g.isUnit(e.Type()) {
+			if _, ok := e.(*core.UnitLit); ok {
+				return nil
+			}
+			if _, ok := e.(*core.VarRef); ok {
+				return nil
+			}
+		}
 		return []goast.Stmt{assignBlank(g.expr(e, 0))}
 	}
 }

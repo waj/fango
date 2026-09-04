@@ -158,11 +158,19 @@ avoided: its ABI, stack maps, barriers, and scheduler metadata are compiler
 implementation details.
 
 Representations are type-directed rather than uniformly boxed: `Int` is
-`int64`, `Float` is `float64`, `String` is `string`, `Bool` is `bool`, Unit is a
-runtime zero-sized value, functions are typed Go functions, and ADTs use typed
-interfaces and constructor structs. Parameterized definitions map to Go
-generics with explicit instantiation. Generated derived equality and display
-functions receive typed element operations where required.
+`int64`, `Float` is `float64`, `String` is `string`, and `Bool` is `bool`.
+Concrete Unit parameters and results at direct worker and operation boundaries
+are implicit in generated Go: the parameter is omitted and the result is a
+void result. Unit remains a represented, runtime zero-sized value at
+first-class-function, polymorphic, and ADT boundaries, where Go's type system
+requires a value; the backend emits one on-demand named `unit` type and
+`unitValue` singleton instead of repeating anonymous composite literals.
+Erasing a Unit argument never erases its evaluation: expression lowering keeps
+strict left-to-right order, materializing the singleton only when a value is
+required. Functions are typed Go functions, and ADTs use typed interfaces and
+constructor structs. Parameterized definitions map to Go generics with
+explicit instantiation. Generated derived equality and display functions
+receive typed element operations where required.
 
 The build driver materializes an embedded `fangort` package and generated
 `main.go` beneath a persistent `.fango/build` directory, writing only changed

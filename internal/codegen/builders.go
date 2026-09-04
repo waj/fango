@@ -77,15 +77,21 @@ func funcLitParams(params []paramSpec, result goast.Expr, body []goast.Stmt) goa
 
 // workerDecl is a top-level uncurried worker: func v_f(v_x T, …) R { … }.
 func workerDecl(name string, params []paramSpec, result goast.Expr, body []goast.Stmt) goast.Decl {
+	results := &goast.FieldList{}
+	if result != nil {
+		results = &goast.FieldList{List: []*goast.Field{{Type: result}}}
+	}
 	return &goast.FuncDecl{
 		Name: ident(name),
 		Type: &goast.FuncType{
 			Params:  paramFields(params),
-			Results: &goast.FieldList{List: []*goast.Field{{Type: result}}},
+			Results: results,
 		},
 		Body: &goast.BlockStmt{List: body},
 	}
 }
+
+func bareReturnStmt() goast.Stmt { return &goast.ReturnStmt{} }
 
 // varDeclNoValue is `var name T` — the declare half of the letrec idiom.
 func varDeclNoValue(name string, typ goast.Expr) goast.Stmt {
@@ -123,10 +129,6 @@ func returnStmt(e goast.Expr) goast.Stmt {
 // is an int, not int64) and would silently mistype fango locals.
 func varDeclStmt(name string, typ, value goast.Expr) goast.Stmt {
 	return &goast.DeclStmt{Decl: varDecl(name, typ, value)}
-}
-
-func unitLit() goast.Expr {
-	return &goast.CompositeLit{Type: &goast.StructType{Fields: &goast.FieldList{}}}
 }
 
 func binExpr(op gotoken.Token, l, r goast.Expr) goast.Expr {

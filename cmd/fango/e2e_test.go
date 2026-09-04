@@ -185,9 +185,44 @@ func TestCheckpoint2GeneratedGoHasNoContinuationRuntime(t *testing.T) {
 					if strings.Contains(strings.ToLower(n.Name.Name), "continuation") {
 						t.Errorf("generated continuation type %q", n.Name.Name)
 					}
+				case *goast.CompositeLit:
+					if st, ok := n.Type.(*goast.StructType); ok && len(st.Fields.List) == 0 {
+						t.Errorf("generated anonymous empty-struct Unit literal")
+					}
 				}
 				return true
 			})
 		})
+	}
+}
+
+func TestGeneratedGoUsesImplicitConcreteUnitABI(t *testing.T) {
+	for _, name := range []string{"explicit_unit_calls.fango", "effect_handler.fango"} {
+		path := filepath.Join("..", "..", "testdata", "run", name)
+		var stderr bytes.Buffer
+		src, ok := emitGo(path, &stderr)
+		if !ok {
+			t.Fatalf("%s: emit failed:\n%s", name, stderr.String())
+		}
+		file, err := goparser.ParseFile(gotoken.NewFileSet(), path+".go", src, 0)
+		if err != nil {
+			t.Fatalf("%s: generated Go does not parse: %v", name, err)
+		}
+		goast.Inspect(file, func(n goast.Node) bool {
+			if lit, ok := n.(*goast.CompositeLit); ok {
+				if st, ok := lit.Type.(*goast.StructType); ok && len(st.Fields.List) == 0 {
+					t.Errorf("%s: emitted anonymous empty-struct Unit literal", name)
+				}
+			}
+			return true
+		})
+		if name == "explicit_unit_calls.fango" {
+			text := string(src)
+			if !strings.Contains(text, "func v_doSomething()") || strings.Contains(text, "v_doSomething(unitValue)") {
+				t.Errorf("%s: concrete Unit worker ABI was not erased:\n%s", name, text)
+			}
+		} else if name == "effect_handler.fango" && !strings.Contains(string(src), "Op_choose func() bool") {
+			t.Errorf("%s: concrete Unit operation ABI was not erased:\n%s", name, src)
+		}
 	}
 }

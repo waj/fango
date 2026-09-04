@@ -165,10 +165,13 @@ func (g *gen) scalarHelperDecls() []goast.Decl {
 		{g.b.Float.Unique, ident("float64"), "ShowFloat"},
 		{g.b.String.Unique, ident("string"), "ShowStringLiteral"},
 		{g.b.Bool.Unique, ident("bool"), "ShowBool"},
-		{g.b.Unit.Unique, &goast.StructType{Fields: &goast.FieldList{}}, "ShowUnit"},
+		{g.b.Unit.Unique, nil, "ShowUnit"},
 	}
 	for _, s := range order {
 		if g.scalarEq[s.unique] {
+			if s.unique == g.b.Unit.Unique {
+				s.goTy = g.unitType()
+			}
 			decls = append(decls, &goast.FuncDecl{
 				Name: ident(g.scalarName("eq", s.unique)),
 				Type: &goast.FuncType{
@@ -185,6 +188,9 @@ func (g *gen) scalarHelperDecls() []goast.Decl {
 	}
 	for _, s := range order {
 		if g.scalarShow[s.unique] {
+			if s.unique == g.b.Unit.Unique {
+				s.goTy = g.unitType()
+			}
 			g.usesFangort = true
 			var call goast.Expr
 			if s.unique == g.b.Unit.Unique {
