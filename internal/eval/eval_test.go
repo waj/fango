@@ -225,10 +225,9 @@ func TestSelfDependency(t *testing.T) {
 	}
 }
 
-// Switch totality (DESIGN.md §13 risk: semantic drift): every Core node
-// kind must be *named* in the interpreter's switch — nodes from future
-// slices answer with a deliberate "arrives in Sn" error, never the generic
-// unhandled fallback.
+// Switch totality (see doc/design.md, "Testing and performance"): every
+// current Core node kind must be named in the interpreter's switch rather
+// than reaching the generic unhandled fallback.
 func TestSwitchTotality(t *testing.T) {
 	it, ft, st, bt := intTy(), floatTy(), stringTy(), boolTy()
 	one := &core.IntLit{Val: 1, Ty: it}

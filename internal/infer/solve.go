@@ -6,7 +6,7 @@ import (
 )
 
 // Solve is the constraint solver. The signature is the reserved typeclass
-// seam from DESIGN.md §7.2: predicates flow in and residual predicates flow
+// seam from doc/design.md, "Type inference": predicates flow in and residual predicates flow
 // out — always empty until typeclasses exist, but every caller is already
 // shaped for them. sub is the substitution to extend (the session
 // substitution for REPL use); bi identifies the number types for

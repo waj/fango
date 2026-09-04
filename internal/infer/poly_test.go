@@ -10,7 +10,7 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// checkPoly is check with the S5 staging flag on: generalization,
+// checkPoly exercises generalization,
 // parameterized types, and annotation variables are live.
 func checkPoly(t *testing.T, src string) (*Checker, []DeclInfo, []error) {
 	t.Helper()
@@ -44,7 +44,7 @@ func TestPolyPositive(t *testing.T) {
 		{"double x = x + x", "double : number -> number"},
 		// Generalization at each binding: two uses at two types both check.
 		{"id x = x\na = id 1\nb = id \"s\"", "id : a -> a, a : number, b : String"},
-		// Number vars generalize (§7.3): usable at Int and Float.
+		// Number vars generalize (doc/design.md, "Type inference"): usable at Int and Float.
 		// a's number var is a fresh instantiation, distinct from double's —
 		// the shared printer numbers it number2.
 		{"double x = x + x\na = double 2\nb = double 1.5", "double : number -> number, a : number2, b : Float"},

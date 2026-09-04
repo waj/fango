@@ -8,7 +8,7 @@ import (
 // Printer renders types for humans and goldens. Metavariables are
 // normalized to a, b, c… in first-appearance order (Number-kinded ones
 // print as `number`, `number2`, …); empty effect rows and empty Pred lists
-// are omitted — the DESIGN.md §10.8 golden-stability discipline.
+// are omitted — the doc/design.md, "Core and evidence invariants" golden-stability discipline.
 type Printer struct {
 	names   map[int]string
 	general int

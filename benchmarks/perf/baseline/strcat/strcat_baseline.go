@@ -1,6 +1,6 @@
 // Go at strcat.fango's own algorithm: right-associated naive concatenation,
 // gating fango's per-operation string overhead at equal asymptotics. A
-// strings.Builder version is the future arbiter for §8.6's builder-based
+// strings.Builder version is the future arbiter for builder-based
 // derived show, once show is user-callable.
 package main
 

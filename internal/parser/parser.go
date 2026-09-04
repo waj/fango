@@ -26,7 +26,7 @@ type parser struct {
 
 	// stmtStart is the index of a token allowed to sit exactly at the
 	// innermost layout column: a block statement's opening token (and, in
-	// S4, a case branch's first pattern token). Everywhere else, a token
+	// a case branch's first pattern token). Everywhere else, a token
 	// at the column is a sibling boundary, not expression content.
 	stmtStart int
 }
@@ -225,7 +225,7 @@ func (p *parser) parseEffectDecl() ast.Decl {
 	return &ast.EffectDecl{Name: nameT.Text, NameSpan: nameT.Span, Params: params, Ops: ops}
 }
 
-// parseTypeDecl parses `type Name p1 … = C1 atoms | C2 atoms | …` (§3.7).
+// parseTypeDecl parses `type Name p1 … = C1 atoms | C2 atoms | …` (doc/reference.md, "Algebraic data types and matching").
 // The RHS is always constructor alternatives; `|` may sit inline or lead a
 // continuation line (any indented token continues the declaration).
 func (p *parser) parseTypeDecl() ast.Decl {
@@ -308,7 +308,7 @@ func (p *parser) parseParams() []ast.Param {
 	return params
 }
 
-// parseBindBody dispatches on where a binding's body starts (§3.6): on the
+// parseBindBody dispatches on where a binding's body starts (doc/design.md, "Language semantics"): on the
 // `=`'s line → inline expression; on a later line, deeper than the current
 // layout column → a block at that column. Shared by top-level declarations,
 // block bindings, local functions, and lambda bodies.
@@ -557,7 +557,7 @@ func (p *parser) parseEffRow() *ast.EffRow {
 
 // parseTypeApp parses type application (`Maybe Int`): a named head followed
 // by argument atoms. Only uppercase names head applications — type variables
-// cannot (no higher kinds, §8.4).
+// cannot (no higher kinds, doc/design.md, "Go backend and runtime").
 func (p *parser) parseTypeApp() ast.TypeExpr {
 	atom := p.parseTypeAtom()
 	if atom == nil {
@@ -834,8 +834,8 @@ func (p *parser) parseLambda() ast.Expr {
 
 // parseCase parses `case scrutinee of` and its branches. The column of the
 // first pattern token after `of` defines branch alignment (layout rule 2,
-// §5): a token at exactly that column starts a new branch, left of it ends
-// the case. Branch bodies are statement blocks (§3.6) or inline expressions.
+// doc/reference.md, "Source layout and names"): a token at exactly that column starts a new branch, left of it ends
+// the case. Branch bodies are statement blocks (doc/design.md, "Language semantics") or inline expressions.
 func (p *parser) parseCase() ast.Expr {
 	caseTok := p.next()
 	scrut := p.parseExpr(1)

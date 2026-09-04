@@ -57,7 +57,7 @@ func paramFields(params []paramSpec) *goast.FieldList {
 	return &goast.FieldList{List: fields}
 }
 
-// funcType is the curried arrow mapping T⟦a->b⟧ = func(A) B (§8.1).
+// funcType is the curried arrow mapping T⟦a->b⟧ = func(A) B (doc/design.md, "Go backend and runtime").
 func funcType(param, result goast.Expr) goast.Expr {
 	return &goast.FuncType{
 		Params:  &goast.FieldList{List: []*goast.Field{{Type: param}}},

@@ -1,8 +1,9 @@
-// The runtime-ratio gate (DESIGN.md §11): fango programs vs handwritten Go
-// baselines. The Go binary IS the baseline — the ratio self-calibrates per
+// The runtime-ratio gate compares fango programs with handwritten Go
+// baselines; see doc/design.md, "Testing and performance". The Go binary IS
+// the baseline — the ratio self-calibrates per
 // machine, unlike the latency gate's absolute budgets. Scalar/first-order
-// target: ≤ 1.2× (§11's ratio table is the arbiter for every future
-// "do we need that optimization yet?" question).
+// target: ≤ 1.2×. The ratio table is the arbiter for every future
+// "do we need that optimization yet?" question.
 package benchmarks
 
 import (
@@ -20,26 +21,26 @@ const (
 
 // ratioCases pairs each perf program with its handwritten-Go baseline
 // package, the output both must print (a free differential check at depth),
-// and its per-case ratio limit (§11: 1.2× on scalar/first-order code, 3.0×
-// on ADT/list-heavy code — cons lists and pointer trees race slices and
-// loops, the honest idiomatic-Go ceiling).
+// and its per-case ratio limit. Scalar/first-order cases use 1.2×; data
+// representation cases use measured ceilings because cons lists and pointer
+// trees race slices and loops.
 //
-// fib gates call overhead (S3, number-generic since S5); match gates
-// decision-tree/enum dispatch — its baseline is the int-enum shape §8.10's
-// enum-as-int upgrade would emit, so that ratio is the upgrade's arbiter.
-// sum/mapfilter/tree land with S5 (§13: the full perf suite needs lists and
-// trees): generic cons lists vs slices, generic map/filter/foldr chains vs
+// fib gates call overhead for number-generic workers; match gates
+// decision-tree/enum dispatch, using an int-enum Go baseline, so that ratio
+// is the arbiter for any representation change.
+// sum/mapfilter/tree cover polymorphic data representations: generic cons
+// lists vs slices, generic map/filter/foldr chains vs
 // staged slice loops, generic tree build+fold (GC pressure) vs pointer
 // structs. strcat gates per-operation string overhead at the same
 // asymptotics; a strings.Builder-shaped baseline is the future arbiter for
-// §8.6's builder-based derived show, once show is user-callable.
+// builder-based derived display once display is user-callable.
 //
-// Limits are measured-informed ceilings (S5 measurements in parentheses):
+// Limits are measurement-informed ceilings (recorded ratios in parentheses):
 // where the baseline allocates like fango does, the 2–3× target holds with
 // room (tree 1.13×, strcat 1.04×); where a slice replaces a cons list
 // wholesale, the per-cell allocation tax is structural — sum (6.8×) and
 // mapfilter (3.8×) gate at that reality plus headroom, and are the arbiters
-// for any future unboxed/fused list representation (§11).
+// for any future unboxed/fused list representation.
 var ratioCases = []struct {
 	name     string
 	program  string

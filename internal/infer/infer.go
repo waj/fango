@@ -51,8 +51,8 @@ type Constraint struct {
 	Include bool
 }
 
-// Env maps names to schemes. S0 has a single flat scope (top level); local
-// scopes arrive with let (S2) and lambdas (S3).
+// Env maps top-level names to schemes; block scopes and function parameters
+// are tracked separately by the constraint generator.
 type Env struct {
 	vars map[string]types.Scheme
 }
@@ -77,21 +77,21 @@ type Checker struct {
 	Sub       Subst
 	ExprTypes map[ast.Expr]types.Type
 
-	// Ctors is the constructor table (§7.2), keyed by constructor name —
+	// Ctors is the constructor table (doc/design.md, "Type inference"), keyed by constructor name —
 	// names are unique per module (types and constructors live in separate
-	// namespaces, §3.7). Seeded with the builtin Bool constructors.
+	// namespaces, doc/reference.md, "Algebraic data types and matching"). Seeded with the builtin Bool constructors.
 	Ctors map[string]*types.CtorInfo
 
 	// ADTs maps a declared type's Unique to its constructor-table entry;
 	// ADTOrder keeps declaration order for deterministic codegen. Bool is
-	// predefined as an ordinary ADT (codegen special-cases it, §8.1) and is
+	// predefined as an ordinary ADT (codegen special-cases it, doc/design.md, "Go backend and runtime") and is
 	// deliberately absent from ADTOrder — no Go type is ever emitted for it.
 	ADTs     map[int]*types.ADTInfo
 	ADTOrder []*types.ADTInfo
 
 	// TypeNames maps surface type names to their current types — the type
 	// table's embryo, exactly as Ctors is for constructors. `type`
-	// declarations (S4) and REPL generations extend it; identity stays the
+	// declarations and REPL generations extend it; identity stays the
 	// TCon Unique underneath.
 	TypeNames       map[string]types.Type
 	Effects         map[string]*types.EffectInfo
@@ -110,7 +110,7 @@ type Checker struct {
 	DelayedBinds map[*ast.LocalBind]bool
 
 	// Workers maps top-level function names to their syntactic parameter
-	// count — the arity that drives §8.2 saturation analysis. Session
+	// count — the arity that drives doc/design.md, "Go backend and runtime" saturation analysis. Session
 	// state like Ctors: populated at inference time (complete before
 	// elaboration, which fib's self-call requires), extended by the REPL.
 	Workers map[string]int
@@ -125,7 +125,7 @@ type Checker struct {
 	PatTypes map[ast.Pattern]types.Type
 
 	// BindSchemes records each block binding's generalized scheme —
-	// elaboration lifts a binding whose scheme quantifies (§8.4).
+	// elaboration lifts a binding whose scheme quantifies (doc/design.md, "Go backend and runtime").
 	BindSchemes map[*ast.LocalBind]types.Scheme
 
 	// LiftGen numbers lambda-lifted definitions session-wide, so REPL
@@ -134,11 +134,11 @@ type Checker struct {
 
 	// MonoValues applies the block-binding monomorphism restriction to
 	// top-level value declarations too. The REPL sets it: a prompt value is
-	// a lazy memo cell (§9.2), evaluated once, so its type must stay a
+	// a lazy memo cell (doc/design.md, "Interpreter and REPL"), evaluated once, so its type must stay a
 	// monotype — a generalized value re-evaluates per use, which would
-	// observably interact with redefinition (breaking §9.3's "old closures
-	// keep old values"). Batch modules are immutable, so re-evaluation is
-	// unobservable there and top-level values generalize per §8.4.
+	// observably interact with redefinition (breaking the "old closures keep
+	// old values" rule in doc/design.md, "Interpreter and REPL"). Batch modules are immutable, so re-evaluation is
+	// unobservable there and top-level values generalize per doc/design.md, "Go backend and runtime".
 	MonoValues bool
 }
 
@@ -172,7 +172,7 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		PatTypes:        map[ast.Pattern]types.Type{},
 		BindSchemes:     map[*ast.LocalBind]types.Scheme{},
 	}
-	// Bool is an ordinary ADT in the checker (§7.2) — patterns, case
+	// Bool is an ordinary ADT in the checker (doc/design.md, "Type inference") — patterns, case
 	// exhaustiveness, and the ctor table treat it like any declared type.
 	boolADT := &types.ADTInfo{Con: b.Bool, Ctors: []*types.CtorInfo{
 		{Name: "True", Index: 0, Result: b.Bool},
@@ -242,7 +242,7 @@ type HandlerInfo struct {
 // Module checks declarations: type headers first (so types may be mutually
 // recursive regardless of order), then constructor fields, then value
 // declarations in source order — solve-at-definition, the same call
-// structure generalization will use from S2.
+// structure used by binding-boundary generalization.
 func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 	var infos []DeclInfo
 	var errs []diag.Error
@@ -393,7 +393,7 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 }
 
 // TypeDecl checks and installs one type declaration — the REPL's entry
-// point, where redefinition is allowed (a fresh generation, §9.3).
+// point, where redefinition is allowed (a fresh generation, doc/design.md, "Interpreter and REPL").
 func (ck *Checker) TypeDecl(td *ast.TypeDecl) []diag.Error {
 	adt, errs := ck.declareTypeHeader(td)
 	if adt == nil {
@@ -577,7 +577,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	}
 
 	if d.Ann != nil && annTy != nil {
-		// Skolemize-and-unify (§7.2): the annotation's variables resolve to
+		// Skolemize-and-unify (doc/design.md, "Type inference"): the annotation's variables resolve to
 		// fresh rigid skolems, atomic in unification, so an annotation
 		// claiming more polymorphism than the body delivers errors here.
 		if !computation {
@@ -604,7 +604,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	_, isLambda := d.Body.(*ast.Lambda)
 	switch {
 	case d.Name == "main":
-		// main is the program's ground entry point (§8.4: its effect is
+		// main is the program's ground entry point (doc/design.md, "Go backend and runtime": its effect is
 		// forced inside func main()) — it never generalizes. Unconstrained
 		// variables in its type default like interior ones (Number → Int,
 		// General → Unit), so `main = 1 + 2` stays an Int program.
@@ -673,7 +673,7 @@ type generator struct {
 
 // blockScope is a block's local bindings, as schemes: parameters and
 // pre-bound recursive names are trivial (monotype) schemes, while generalized
-// block bindings quantify (S5) and instantiate per use like top-level names.
+// generalized block bindings instantiate per use like top-level names.
 type blockScope struct {
 	parent *blockScope
 	names  map[string]types.Scheme
@@ -1076,7 +1076,7 @@ func tailResume(e ast.Expr, tail bool) string {
 	return ""
 }
 
-// resumePaths proves the checkpoint-2 discipline structurally. The bool is
+// resumePaths proves the current tail-resumptive discipline structurally. The bool is
 // true only when every normal path through e terminates in one tail resume;
 // any resume encountered in an evaluated subexpression is rejected. Nested
 // lambdas are traversed too, so staging a resume in a closure cannot evade
@@ -1310,7 +1310,7 @@ func (g *generator) bindParams(scope *blockScope, params []ast.Param) []types.Ty
 }
 
 // block checks a statement body: each binding is a solve-at-binding point
-// in principle (monomorphic until S5), scoped sequentially, with shadowing
+// in principle, scoped sequentially, with shadowing
 // forbidden against both earlier bindings and the top level.
 func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 	g.locals = &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
@@ -1368,16 +1368,16 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 		scheme := types.Scheme{Body: ty}
 		// Monomorphism restriction for block bindings: only syntactic
 		// functions and lambda literals generalize locally. A generalized
-		// binding lambda-lifts and re-evaluates per use (§8.4) — fine for
-		// function values, but a *value* binding's whole point is §3.6's
-		// eager evaluate-once-at-its-line semantics, which Number-kinded
+		// binding lambda-lifts and re-evaluates per use (doc/design.md, "Go backend and runtime") — fine for
+		// function values, but a *value* binding must keep the eager
+		// evaluate-once semantics in doc/design.md, "Language semantics", which Number-kinded
 		// generalization (`k = 10 : number`) would otherwise silently break
-		// for every numeric local. Top-level values still generalize (§8.4
-		// accepts nullary generic values; S7's purity check keeps
+		// for every numeric local. Top-level values still generalize (doc/design.md, "Go backend and runtime"
+		// accepts nullary generic values; the top-level purity check keeps
 		// re-evaluation unobservable).
 		_, isLambda := bind.Body.(*ast.Lambda)
 		if len(bind.Params) > 0 || isLambda {
-			// Solve-at-binding (§7.2): discharge this binding's constraints
+			// Solve-at-binding (doc/design.md, "Type inference"): discharge this binding's constraints
 			// into the substitution now, so generalization sees solved types
 			// and later bindings can use this one polymorphically.
 			g.solveHere()

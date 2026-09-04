@@ -1,6 +1,6 @@
-// Package types is the type representation from DESIGN.md §7.1, final in
-// shape from S0: the Pred typeclass seam (always empty until typeclasses),
-// the Eff Row field in TFun, and
+// Package types implements the representation described in doc/design.md,
+// "Type inference": the Pred typeclass seam (currently always empty), the
+// Eff Row field in TFun, and
 // Unique-based TCon identity (load-bearing for REPL redefinition and the
 // future module system).
 package types
@@ -19,7 +19,7 @@ type Type interface{ isType() }
 
 // TVar is a type variable. Non-rigid TVars are metavariables minted during
 // inference; none survive elaboration (a linted Core invariant). Rigid TVars
-// (§7.2) are annotation skolems and scheme-bound variables: atomic in
+// (doc/design.md, "Type inference") are annotation skolems and scheme-bound variables: atomic in
 // unification, invisible to substitution and defaulting, and legal in Core
 // when declared by the enclosing definition's type parameters. Rigid vars
 // share the Supply's ID space with metas, so IDs never collide.
@@ -50,7 +50,7 @@ type TFun struct {
 // Row is a distinct-label effect row, optionally ending in an open tail.
 type Row struct {
 	Labels []EffLabel
-	Tail   Type // nil for a closed row; *TVar{Kind: RowVar} when open (S7)
+	Tail   Type // nil for a closed row; *TVar{Kind: RowVar} when open
 }
 
 // EffLabel identifies an effect by its generation-stable Unique. Name is
@@ -221,12 +221,12 @@ func Equal(a, b Type) bool {
 	}
 }
 
-// CtorInfo is one constructor's row in the constructor table (§7.2), shared
+// CtorInfo is one constructor's row in the constructor table (doc/design.md, "Type inference"), shared
 // by pattern checking, exhaustiveness checking, and codegen.
 type CtorInfo struct {
 	Name   string
 	Index  int    // declaration position; drives layout and tree ordering
-	Fields []Type // solved field types (ground in S4)
+	Fields []Type // solved constructor field types
 	Result *TCon  // the ADT this constructor belongs to
 }
 
@@ -341,7 +341,7 @@ func (s *Supply) NextUnique() int {
 }
 
 // Builtins holds the predefined type constructors, uniques minted from the
-// session supply. Only Int is reachable from S0 surface syntax; the rest
+// session supply. The builtins are all reachable from current surface syntax;
 // exist so the registry's shape is final.
 type Builtins struct {
 	Int, Float, String, Bool, Unit *TCon

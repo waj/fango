@@ -9,7 +9,7 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// ADT lowering (DESIGN.md §8.1): one marker interface per declared type, one
+// ADT lowering (doc/design.md, "Go backend and runtime"): one marker interface per declared type, one
 // struct per constructor with typed fields, construction by pointer,
 // discrimination by type switch (no tag field), derived eq/show emitted on
 // demand only.
@@ -25,7 +25,7 @@ func fieldName(i int) string { return fmt.Sprintf("F%d", i) }
 // adtDecls emits the marker interface, constructor structs, and marker
 // methods for every declared type, in declaration order. Parameterized types
 // emit as Go generics (`type T_List[A0 any] interface{ isT_List() }`,
-// `func (C_Cons[A0]) isT_List() {}`), §8.4.
+// `func (C_Cons[A0]) isT_List() {}`), doc/design.md, "Go backend and runtime".
 func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 	var decls []goast.Decl
 	for _, adt := range adts {
@@ -76,7 +76,7 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 }
 
 // ctorLit is a saturated constructor application: `&C_Name{args…}` —
-// construction by pointer (§8.1: value receivers make the pointer implement
+// construction by pointer (doc/design.md, "Go backend and runtime": value receivers make the pointer implement
 // the marker; zero-field constructors hit Go's zerobase). Parameterized
 // constructors instantiate at the result type's arguments.
 func (g *gen) ctorLit(e *core.App) goast.Expr {
@@ -120,7 +120,7 @@ func (g *gen) treeStmts(t core.Tree, leaf func(core.Expr) []goast.Stmt) []goast.
 	}
 }
 
-// boolSwitch: `case` on Bool compiles to if/else (§8.1) — Bool stays native.
+// boolSwitch: `case` on Bool compiles to if/else (doc/design.md, "Go backend and runtime") — Bool stays native.
 func (g *gen) boolSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) []goast.Stmt {
 	pick := func(name string) core.Tree {
 		for _, c := range t.Cases {
@@ -138,7 +138,7 @@ func (g *gen) boolSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) 
 // ctorSwitch emits a Go type switch. Full coverage turns the LAST case into
 // `default:` with a checked assertion instead of a type-switch binding —
 // exhaustiveness proved there is no other constructor, so no panic path is
-// reachable (§8.5).
+// reachable (doc/design.md, "Core and evidence invariants").
 func (g *gen) ctorSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) []goast.Stmt {
 	scrut := ident(mangleValue(t.Scrut))
 	full := t.Default == nil
@@ -250,7 +250,8 @@ func (g *gen) litSwitch(t *core.SwitchLit, leaf func(core.Expr) []goast.Stmt) []
 }
 
 // assignStmts emits e in assign-to-variable statement context: `name = …`
-// at the leaves of Lets, Ifs, and Cases — §8.5's ANF target shape.
+// at the leaves of Lets, Ifs, and Cases — the ANF target shape documented in
+// doc/design.md, "Core and evidence invariants".
 func (g *gen) assignStmts(e core.Expr, name string) []goast.Stmt {
 	switch e := e.(type) {
 	case *core.Let:
@@ -267,7 +268,7 @@ func (g *gen) assignStmts(e core.Expr, name string) []goast.Stmt {
 }
 
 // ---------------------------------------------------------------------------
-// Derived operations (§8.6): eq and show per ADT, generated only when a
+// Derived operations (doc/design.md, "Go backend and runtime"): eq and show per ADT, generated only when a
 // program uses `==`/`print` at that type; needs propagate through ADT-typed
 // fields.
 
@@ -297,7 +298,7 @@ func (g *gen) derivedDecls(adts []*types.ADTInfo) []goast.Decl {
 // eqDecl: func eqT_X[A0 any](eq0 func(A0, A0) bool, a, b T_X[A0]) bool —
 // type switch on a, checked assertion on b, field-wise comparison. Type-
 // parameter fields compare via the element-op parameters; monomorphic types
-// take no element ops and keep the S4 shape exactly.
+// take no element operations and keep the monomorphic shape exactly.
 func (g *gen) eqDecl(adt *types.ADTInfo) goast.Decl {
 	g.tyParamNames = tyParamNames(adt.Params)
 	g.eqParamNames = map[int]string{}

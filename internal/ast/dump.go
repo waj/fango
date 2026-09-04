@@ -68,7 +68,7 @@ func dumpDecl(d Decl) string {
 }
 
 // dumpParams renders "(params x y)" or "" — the clause appears only when
-// non-empty, so every pre-S3 golden stays byte-identical.
+// non-empty, keeping nullary declarations' golden form compact.
 func dumpParams(ps []Param) string {
 	if len(ps) == 0 {
 		return ""

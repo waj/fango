@@ -2,17 +2,17 @@ package parser
 
 import "github.com/waj/fango/internal/source"
 
-// The offside rule, isolated per DESIGN.md §5. This is the full, final API:
+// The offside rule, isolated per doc/reference.md, "Source layout and names". This is the full, final API:
 // a stack of indentation contexts plus two predicates: top-level
-// declarations (column 1), block statements (S2, §3.6), and case branches
-// (S4) push contexts at their statement/branch columns.
+// declarations (column 1), block statements (see doc/design.md, "Language
+// semantics"), and case branches push contexts at their alignment columns.
 
 type ctxKind int
 
 const (
 	ctxDecl  ctxKind = iota // top-level declarations, column 1
-	ctxBlock                // block statement alignment (§3.6)
-	ctxCase                 // case-branch alignment (first client: S4)
+	ctxBlock                // block statement alignment (doc/design.md, "Language semantics")
+	ctxCase                 // case-branch alignment
 )
 
 type layoutCtx struct {

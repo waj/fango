@@ -1,6 +1,5 @@
 // Package token defines the token kinds produced by the lexer. All keywords
-// of the full language are reserved from S0 so programs never break when
-// features land.
+// of the language are reserved so their spelling cannot be used as names.
 package token
 
 import "github.com/waj/fango/internal/source"
@@ -10,8 +9,8 @@ type Kind int
 const (
 	EOF Kind = iota
 	INT
-	FLOAT  // reserved: lexed from S1
-	STRING // reserved: lexed from S1
+	FLOAT
+	STRING
 	LIDENT // lower-case identifier
 	UIDENT // upper-case identifier (constructors, types, module names)
 
@@ -25,7 +24,7 @@ const (
 	RPAREN // )
 	COMMA  // ,
 
-	// Reserved operators (S1+).
+	// Remaining operators.
 	PLUSPLUS // ++
 	EQEQ     // ==
 	SLASHEQ  // /=

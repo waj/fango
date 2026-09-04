@@ -112,7 +112,7 @@ func unify(a, b types.Type, sub Subst, bi *types.Builtins, sup *types.Supply) *m
 
 	// Metas bind; rigid vars (skolems, scheme-bound vars) are atomic: equal
 	// only to themselves, a mismatch against everything else — the direction
-	// that keeps an annotation's variables fully general (§7.2).
+	// that keeps an annotation's variables fully general (doc/design.md, "Type inference").
 	if av, ok := a.(*types.TVar); ok && !av.Rigid {
 		return bindVar(av, b, sub, bi)
 	}

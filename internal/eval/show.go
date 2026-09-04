@@ -9,7 +9,7 @@ import (
 
 // Show renders a value for the REPL, dispatching on its solved type. It
 // calls into fangort — the single shared formatting implementation for both
-// backends (DESIGN.md §9.6 hard rule). Strings render as source literals
+// backends (doc/design.md, "Testing and performance" hard rule). Strings render as source literals
 // (quoted, escaped) at the prompt; `print` outputs them raw.
 func Show(v Value, ty types.Type, b *types.Builtins) string {
 	if _, isFn := ty.(*types.TFun); isFn {
@@ -36,7 +36,7 @@ func Show(v Value, ty types.Type, b *types.Builtins) string {
 }
 
 // showCtorVal renders an ADT value exactly as the compiled backend's derived
-// showT_X does (§8.6): `Circle 2.5`, nested field-taking constructors
+// showT_X does (doc/design.md, "Go backend and runtime"): `Circle 2.5`, nested field-taking constructors
 // parenthesized, String fields as source literals. Dispatch is on the
 // field's dynamic value type — bijective with its solved static type.
 func showCtorVal(v *CtorVal, nested bool) string {

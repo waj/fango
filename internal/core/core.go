@@ -9,7 +9,7 @@ import "github.com/waj/fango/internal/types"
 type Prog struct {
 	// ADTs lists declared types in declaration order — codegen emits marker
 	// interfaces, constructor structs, and derived eq/show from it. Bool is
-	// absent (native Go bool forever, §8.1).
+	// absent (native Go bool forever, doc/design.md, "Go backend and runtime").
 	ADTs    []*types.ADTInfo
 	Effects []*types.EffectInfo
 	Defs    []Def
@@ -27,17 +27,17 @@ type Def struct {
 
 	// TyParams are the definition's quantified type variables (rigid, first
 	// occurrence order in Type) — Go type parameters at codegen. Non-empty
-	// TyParams with empty Params is a nullary generic worker (§8.4): emitted
+	// TyParams with empty Params is a nullary generic worker (doc/design.md, "Go backend and runtime"): emitted
 	// as a function, re-evaluated per use.
 	TyParams []*types.TVar
 
-	Params       []string // non-empty ⇒ worker (§8.2); uncurried Go signature = peeling len(Params) arrows off Type
+	Params       []string // non-empty ⇒ worker (doc/design.md, "Go backend and runtime"); uncurried Go signature = peeling len(Params) arrows off Type
 	EffectParams []EffectInstance
 	Body         Expr
 }
 
 // IsWorker reports whether the definition emits as a function: it has term
-// parameters, or it is a polymorphic value (nullary generic worker, §8.4).
+// parameters, or it is a polymorphic value (nullary generic worker, doc/design.md, "Go backend and runtime").
 func (d *Def) IsWorker() bool { return len(d.Params) > 0 || len(d.TyParams) > 0 }
 
 type Expr interface {
@@ -62,7 +62,7 @@ type StringLit struct {
 
 type UnitLit struct{ Ty types.Type }
 
-// BoolLit is permanent, not an interim ADT stand-in: §8.1 special-cases
+// BoolLit is permanent, not an interim ADT stand-in: doc/design.md, "Go backend and runtime" special-cases
 // Bool in codegen forever (native Go bool), and eval's Value stays bool.
 type BoolLit struct {
 	Val bool
@@ -113,7 +113,7 @@ type Seq struct {
 	Ty          types.Type
 }
 
-// Let is one block binding (§3.6): bind Name to Rhs, continue with Body.
+// Let is one block binding (doc/design.md, "Language semantics"): bind Name to Rhs, continue with Body.
 // Elaboration folds a Block's bindings into a right-nested Let chain;
 // bindings evaluate eagerly in order in both backends. Rec marks a
 // self-recursive local function (Rhs must be a Lambda; codegen emits the
@@ -138,7 +138,7 @@ type Lambda struct {
 type VarRef struct {
 	Name   string
 	Ty     types.Type
-	TyArgs []types.Type // explicit instantiation; empty until S5
+	TyArgs []types.Type // explicit generic instantiation; empty when monomorphic
 }
 
 type BinOp struct {
@@ -148,13 +148,13 @@ type BinOp struct {
 }
 
 // CalleeKind classifies application spines after saturation analysis
-// (DESIGN.md §8.7). Declared in S0 so the shape is frozen; the first
-// producer is elaboration of function applications in S3.
+// (see doc/design.md, "Core and evidence invariants"). Elaboration of
+// function applications produces this distinction.
 type CalleeKind int
 
 const (
 	Worker CalleeKind = iota // saturated call to a known top-level worker
-	Ctor                     // constructor application (S4)
+	Ctor                     // constructor application
 	Value                    // typed indirect call through a function value
 )
 
@@ -168,12 +168,12 @@ type App struct {
 
 	// Ctor identifies the constructor when CalleeKind == Ctor (always
 	// saturated: len(Args) == len(Ctor.Fields); partial applications were
-	// eta-expanded like workers, §8.2 item 5).
+	// eta-expanded like workers, doc/design.md, "Go backend and runtime" item 5).
 	Ctor *types.CtorInfo
 }
 
 // Case evaluates Scrut once, binds it to Bind, and descends the decision
-// tree (§8.5). Elaboration compiled the branches: each scrutinee position
+// tree (doc/design.md, "Core and evidence invariants"). Elaboration compiled the branches: each scrutinee position
 // is examined once, pattern variables became Lets inside the leaves.
 type Case struct {
 	Scrut Expr

@@ -1,5 +1,6 @@
 # Convenience wrappers only — every target is a one-liner delegating to go.
-# CI remains one command: `go test ./...` (DESIGN.md §11).
+# CI remains one command: `go test ./...`; see doc/design.md,
+# "Testing and performance".
 
 .PHONY: build test test-short update-goldens update-baselines fmt vet ci clean
 
@@ -8,8 +9,8 @@ build:
 
 # The benchmark gates run AFTER the other packages: `go test ./...` runs
 # packages in parallel, and the build-heavy differential suite skews the
-# latency/ratio measurements (DESIGN.md §11 sanctions "go test ./... plus
-# the bench gate" as separate steps).
+# latency/ratio measurements. The separate gates are documented in
+# doc/design.md, "Testing and performance".
 test:
 	go test $$(go list ./... | grep -v benchmarks)
 	go test ./benchmarks

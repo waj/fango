@@ -19,13 +19,13 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// The differential end-to-end suite (DESIGN.md §11): every
+// The differential end-to-end suite (doc/design.md, "Testing and performance"): every
 // testdata/run/*.fango runs through BOTH backends — the Core interpreter
 // in-process and the compiled binary via the real CLI — and stdout is
 // diffed byte-exact against the .expected file AND between the backends.
 // Programs with a .error file instead assert a compile-error substring.
 //
-// S0 programs produce no output, so the compiled leg runs under
+// Pure value programs produce no output, so the compiled leg runs under
 // FANGO_INTERNAL_PRINT_MAIN=1 and the eval leg shows main's value through
 // the same shared fangort formatter.
 

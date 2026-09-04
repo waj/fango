@@ -3,7 +3,7 @@
 // Int, General → Unit), the post-defaulting ground checks that Elm's
 // `comparable` kind flag would otherwise do (equatable/orderable/printable),
 // and constant folding. Lambda-lifting, saturation analysis, and decision
-// trees join in later slices (lift.go, match.go).
+// trees are implemented by the focused helpers in lift.go and match.go.
 //
 // Constant folding here is a correctness requirement, not an optimization:
 // Go evaluates constant expressions exactly (arbitrary precision), so
@@ -57,7 +57,7 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 
 // Decl elaborates one declaration — also the REPL's per-input entry point.
 // The first returned Def is the declaration itself; any further Defs are
-// lambda-lifted polymorphic block bindings (§8.4, lift.go).
+// lambda-lifted polymorphic block bindings (doc/design.md, "Go backend and runtime", lift.go).
 func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
 	el := newElab(ck, info.Name, info.Scheme)
 	rawType := ck.Sub.Apply(info.Type)
@@ -268,7 +268,7 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 			return el.curriedWorkerRef(e.Name, ty, el.ck.Sub.Apply(el.ck.ExprTypes[e]), arity)
 		}
 		// A polymorphic top-level value compiled to a nullary generic worker
-		// (§8.4): every use is an instantiated zero-argument call.
+		// (doc/design.md, "Go backend and runtime"): every use is an instantiated zero-argument call.
 		if sch, ok := el.ck.Env.Lookup(e.Name); ok && hasRuntimeVars(sch) {
 			return el.nullaryValueUse(e.Name, sch, ty)
 		}
@@ -315,7 +315,7 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		// defaulting is deterministic. Local functions become (possibly
 		// recursive) Lets of nested Lambdas. Generalized bindings do not
 		// become Lets at all: they lambda-lift to top-level generic
-		// definitions (§8.4, lift.go) and their uses rewrite to calls.
+		// definitions (doc/design.md, "Go backend and runtime", lift.go) and their uses rewrite to calls.
 		var order []any
 		pushed := 0
 		var liftedHere []string
@@ -468,14 +468,14 @@ func (el *elab) unique(t types.Type) int {
 
 // numberVar reports whether t is a Number-kinded rigid variable — numeric
 // operators and comparisons compile natively on its Go type-set constraint
-// (§7.3), so it needs no equality staging.
+// (doc/design.md, "Type inference"), so it needs no equality staging.
 func numberVar(t types.Type) bool {
 	v, ok := t.(*types.TVar)
 	return ok && v.Rigid && v.Kind == types.Number
 }
 
 // generalVarIn returns a General-kinded rigid variable occurring anywhere in
-// t, or nil — the `==`-at-a-type-variable staging check (§8.6): equality at
+// t, or nil — the `==`-at-a-type-variable staging check (doc/design.md, "Go backend and runtime"): equality at
 // such a type needs typeclass evidence, which arrives later.
 func generalVarIn(t types.Type) *types.TVar {
 	switch t := t.(type) {
@@ -541,8 +541,9 @@ func (el *elab) checkOperands(e *ast.BinOp, operandTy types.Type) {
 		case b.Int.Unique, b.Float.Unique, b.String.Unique, b.Bool.Unique:
 		default:
 			// Number-kinded variables compare natively on their Go type-set
-			// constraint (§7.3); General type variables need typeclass
-			// evidence — staged until open question #3 is decided (§8.6).
+			// constraint (doc/design.md, "Type inference"); General type variables need typeclass
+			// evidence, which remains unsupported without typeclasses; see
+			// doc/design.md, "Type inference".
 			if numberVar(operandTy) {
 				return
 			}
@@ -551,7 +552,7 @@ func (el *elab) checkOperands(e *ast.BinOp, operandTy types.Type) {
 					"This (%s) compares values typed `%s` — equality at a type\nvariable arrives with typeclasses. For now, use (%s) only where the\ntype is concrete.", e.Op, types.Show(operandTy), e.Op))
 				return
 			}
-			// Declared ADTs get derived structural equality (§8.6) — except
+			// Declared ADTs get derived structural equality (doc/design.md, "Go backend and runtime") — except
 			// where a payload can contain a function, rejected at compile
 			// time (decidable at ground types; Elm crashes at runtime here).
 			if con, ok := operandTy.(*types.TCon); ok {
@@ -627,7 +628,8 @@ func (el *elab) fold(e core.Expr) core.Expr {
 
 // zonkDefault applies the substitution, then defaults any metavariable
 // still free: Number-kinded → Int, general → Unit, row tails → empty
-// (DESIGN.md §7.3, §8.4, §10.8). Ordinary arrow rows are erased here;
+// (see doc/design.md, "Type inference", "Go backend and runtime", and
+// "Core and evidence invariants"). Ordinary arrow rows are erased here;
 // concrete rows on nullary computations remain as force-time evidence ABI
 // metadata on the existing TFun shape.
 // Defaults are recorded in the checker's substitution so every other

@@ -15,20 +15,20 @@ import (
 	"github.com/waj/fango/runtime/fangort"
 )
 
-// Value is the interpreter's uniform representation (DESIGN.md §9.5):
+// Value is the interpreter's uniform representation (doc/design.md, "Interpreter and REPL"):
 //
 //	Int          int64
-//	Float        float64   (S1)
-//	String       string    (S1)
-//	Bool         bool      (S1)
-//	constructors *CtorVal  (S4)
-//	functions    *Closure, *Partial (S3)
+//	Float        float64
+//	String       string
+//	Bool         bool
+//	constructors *CtorVal
+//	functions    *Closure, *Partial
 //
 // The switch in Eval and the compiled backend's unboxed representations
 // must agree; the differential suite is the referee.
 type Value = any
 
-// Cell is a lazily-memoized top-level binding (DESIGN.md §9.2) — the final
+// Cell is a lazily-memoized top-level binding (doc/design.md, "Interpreter and REPL") — the final
 // session model, not a shortcut: the REPL's generational redefinition
 // replaces cells wholesale.
 type Cell struct {
@@ -49,7 +49,7 @@ type CtorVal struct {
 // Closure is the interpreter's only function value: one currying step,
 // mirroring core.Lambda. Workers are applied directly (App{Worker}) and
 // never materialize as values — elaboration eta-expanded every first-class
-// use, so *Partial from the §9.5 sketch is not needed.
+// use, so *Partial from the doc/design.md, "Interpreter and REPL" sketch is not needed.
 type Closure struct {
 	Param    string
 	Body     core.Expr
@@ -82,8 +82,8 @@ type Env struct {
 	workers map[string]*core.Def
 }
 
-// Frame holds block-local bindings (§3.6) — eager values, unlike the lazy
-// top-level cells. Function parameters (S3) extend the same chain.
+// Frame holds block-local bindings (doc/design.md, "Language semantics") — eager values, unlike the lazy
+// top-level cells. Function parameters extend the same chain.
 type Frame struct {
 	parent *Frame
 	vars   map[string]Value
@@ -116,7 +116,7 @@ func (e *Env) DefineWorker(d *core.Def) {
 }
 
 // DefineProg installs every definition of a Core program. Nullary generic
-// workers (polymorphic values, §8.4) register as workers: their zero-arg
+// workers (polymorphic values, doc/design.md, "Go backend and runtime") register as workers: their zero-arg
 // calls re-evaluate the body per use, matching the compiled cost rule.
 func (e *Env) DefineProg(p *core.Prog) {
 	for i := range p.Defs {
@@ -437,7 +437,7 @@ func (in *interp) tree(t core.Tree, fr *Frame) (Value, error) {
 		}
 		if b, isBool := v.(bool); isBool {
 			// Bool is an ordinary ADT in the checker but a native bool value
-			// here, exactly as in codegen (§8.1).
+			// here, exactly as in codegen (doc/design.md, "Go backend and runtime").
 			want := "False"
 			if b {
 				want = "True"
@@ -480,7 +480,7 @@ func (in *interp) tree(t core.Tree, fr *Frame) (Value, error) {
 			case *core.IntLit:
 				// An integer literal at a Number type parameter meets a
 				// float64 scrutinee at Float instantiations — promote,
-				// mirroring the compiled backend's conversion (§9.5).
+				// mirroring the compiled backend's conversion (doc/design.md, "Interpreter and REPL").
 				if f, isFloat := v.(float64); isFloat {
 					match = f == float64(lit.Val)
 				} else {
@@ -622,7 +622,7 @@ func applyBinOp(op string, l, r Value) (Value, error) {
 }
 
 // eqValue is structural equality — the interpreter's mirror of the derived
-// eqT_X functions (§8.6). Function-containing types were rejected by the
+// eqT_X functions (doc/design.md, "Go backend and runtime"). Function-containing types were rejected by the
 // checker, so every reachable field compares.
 func eqValue(l, r Value) bool {
 	if lc, ok := l.(*CtorVal); ok {
@@ -642,7 +642,7 @@ func eqValue(l, r Value) bool {
 }
 
 // promote widens int64 to float64 when the other operand is a float —
-// numeric promotion (§9.5). Erased integer literals in Number-generic
+// numeric promotion (doc/design.md, "Interpreter and REPL"). Erased integer literals in Number-generic
 // bodies evaluate as int64 while the compiled backend converts them at the
 // instantiated type; Go's conversion semantics (rounding) match, keeping
 // the backends bit-identical for every operated value.

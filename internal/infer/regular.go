@@ -7,11 +7,11 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// checkRegularity rejects non-regular (nested) recursive ADTs (§7.2): within
+// checkRegularity rejects non-regular (nested) recursive ADTs (doc/design.md, "Type inference"): within
 // a recursive group, every occurrence of a group member in a constructor
 // field must be applied to exactly the declaring type's own parameters, in
 // order. `type T a = Node (T (Pair a a))` and mutual variants would demand
-// unboundedly growing Go-generics instantiations (§8.4). The group is
+// unboundedly growing Go-generics instantiations (doc/design.md, "Go backend and runtime"). The group is
 // computed from the declared batch: an occurrence of C inside A is recursive
 // iff C's fields reach back to A.
 func (ck *Checker) checkRegularity(batch map[*ast.TypeDecl]*types.ADTInfo) []diag.Error {

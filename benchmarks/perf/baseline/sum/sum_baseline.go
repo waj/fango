@@ -1,6 +1,6 @@
 // Idiomatic Go for sum.fango's job: build a collection of n ints, sum it,
 // twenty times. A Go programmer reaches for a slice — this is the honest
-// ceiling a cons list races (§11: list-heavy code gates at 3.0x).
+// ceiling a cons list races; see doc/design.md, "Testing and performance".
 package main
 
 import "fmt"

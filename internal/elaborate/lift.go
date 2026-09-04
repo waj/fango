@@ -8,7 +8,7 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// Lambda-lifting of polymorphic block bindings (§8.4): Go has no generic
+// Lambda-lifting of polymorphic block bindings (doc/design.md, "Go backend and runtime"): Go has no generic
 // func literals, so a block binding whose generalized scheme quantifies a
 // variable becomes an auxiliary top-level generic definition. Its free local
 // variables become leading parameters, and every use rewrites to a call

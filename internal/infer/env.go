@@ -5,11 +5,11 @@ import (
 )
 
 // generalize quantifies ty's free variables that are not free in the
-// enclosing scopes (avoid, keyed by var ID) — the §7.2 solve-at-binding
+// enclosing scopes (avoid, keyed by var ID) — the doc/design.md, "Type inference" solve-at-binding
 // hybrid's second half. Two variable flavors quantify:
 //
 //   - free metavariables (General and Number kinds — Number generalizes per
-//     the §7.3 ruling): each is bound in ck.Sub to a fresh rigid var, so
+//     the doc/design.md, "Type inference" ruling): each is bound in ck.Sub to a fresh rigid var, so
 //     every recorded occurrence type zonks to the scheme's own variables —
 //     this is what hands elaboration rigid-typed occurrences with no extra
 //     mapping pass;

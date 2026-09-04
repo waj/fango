@@ -12,7 +12,7 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// elabPoly runs the pipeline with the S5 staging flag on and lints the
+// elabPoly runs the polymorphic pipeline and lints the
 // result — the flag-on counterpart of TestGoldens, inline until the flag is
 // deleted and testdata/core grows real poly programs.
 func elabPoly(t *testing.T, src string) *core.Prog {
@@ -62,7 +62,7 @@ func elabPolyErr(t *testing.T, src string) string {
 	return elabErrs[0].Title
 }
 
-// TestPolyGenericWorker pins the §8.4 shapes: TyParams on the def, explicit
+// TestPolyGenericWorker pins the doc/design.md, "Go backend and runtime" shapes: TyParams on the def, explicit
 // TyArgs on every call — including the self-recursive one — and instantiated
 // constructor applications.
 func TestPolyGenericWorker(t *testing.T) {
@@ -78,7 +78,7 @@ main = print (len (Cons 1 Nil))
 	dump := core.Dump(prog)
 	for _, want := range []string{
 		"(type List (params a) (ctor Nil) (ctor Cons a (List a)))",
-		// The result generalizes as `number` too — Elm semantics (§7.3).
+		// The result generalizes as `number` too — Elm semantics (doc/design.md, "Type inference").
 		"(def len (typarams a number) (params xs) List a -> number",
 		// The recursive call instantiates at the def's own type params.
 		"(app/worker @[a number] (var len List a -> number)",
@@ -157,7 +157,7 @@ v =
 	}
 }
 
-// TestPolyNumberGeneric: Number-kinded quantification (§7.3) — the def
+// TestPolyNumberGeneric: Number-kinded quantification (doc/design.md, "Type inference") — the def
 // carries a number typaram; calls at Int and Float instantiate it.
 func TestPolyNumberGeneric(t *testing.T) {
 	prog := elabPoly(t, `double x = x + x
@@ -179,7 +179,8 @@ main =
 	}
 }
 
-// TestPolyInteriorDefaulting: §8.4's internal-unconstrained-variable rule —
+// TestPolyInteriorDefaulting pins the internal-unconstrained-variable rule
+// from doc/design.md, "Go backend and runtime":
 // `len Nil` at an undetermined element type defaults it to Unit in the
 // instantiation.
 func TestPolyInteriorDefaulting(t *testing.T) {
@@ -198,7 +199,8 @@ main = print (len Nil)
 	}
 }
 
-// TestPolyEqStaged: == at a type variable stays a staged error (§8.6).
+// TestPolyEqStaged pins the unsupported == at a type variable diagnostic;
+// see doc/design.md, "Type inference".
 func TestPolyEqStaged(t *testing.T) {
 	title := elabPolyErr(t, `member x y = x == y
 main = print (member 1 2)

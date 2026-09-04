@@ -8,7 +8,7 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// Derived-operation synthesis at generic types (§8.6): a generic ADT's
+// Derived-operation synthesis at generic types (doc/design.md, "Go backend and runtime"): a generic ADT's
 // derived eq/show take one element operation per type parameter
 // (`eqT_List[A0 any](eq0 func(A0, A0) bool, a, b T_List[A0]) bool`), and
 // call sites synthesize those arguments from the ground instantiation —

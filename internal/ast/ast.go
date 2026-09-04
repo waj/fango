@@ -1,6 +1,5 @@
 // Package ast is the surface syntax tree: sealed interfaces with marker
-// methods, every node carrying a Span. Nodes for later slices (lambdas,
-// let, case, type decls) are added when their features land.
+// methods, every node carrying a Span.
 package ast
 
 import "github.com/waj/fango/internal/source"
@@ -33,8 +32,7 @@ type Var struct {
 	Sp   source.Span
 }
 
-// Ctor is a constructor reference. Until `type` declarations land (S4) the
-// only constructors are the builtin True and False.
+// Ctor is a constructor reference, including builtin True and False.
 type Ctor struct {
 	Name string
 	Sp   source.Span
@@ -57,7 +55,7 @@ type If struct {
 	Sp               source.Span // the `if` keyword
 }
 
-// Block is a statement-style body (§3.6): binding lines followed by one
+// Block is a statement-style body (doc/design.md, "Language semantics"): binding lines followed by one
 // result expression. The parser collapses zero-binding blocks to the plain
 // result expression, so a Block always has at least one binding.
 type Block struct {
@@ -72,7 +70,7 @@ type BlockItem struct {
 }
 
 // Param is one function parameter. Worker arity is the syntactic parameter
-// count (§8.2), which is why parameters stay explicit rather than
+// count (doc/design.md, "Go backend and runtime"), which is why parameters stay explicit rather than
 // desugaring to lambdas.
 type Param struct {
 	Name string // "_" discards; "()" is a Unit pattern in handler clauses
@@ -82,7 +80,7 @@ type Param struct {
 type LocalBind struct {
 	Name     string
 	NameSpan source.Span
-	Params   []Param // non-empty: a local function (S3)
+	Params   []Param // non-empty: a local function
 	Ann      *TypeAnn
 	Body     Expr
 }
@@ -120,8 +118,8 @@ type TVarName struct {
 }
 
 // TFunExpr is a function arrow. Eff is nil for a plain `->` — pure as
-// written — and non-nil only for `->{…}` (§10.2). The dumper omits a nil
-// row, so pre-S7 goldens stay byte-identical.
+// written — and non-nil only for `->{…}` (doc/design.md, "Computations and effects"). The dumper omits a nil
+// row, keeping pure-arrow dumps compact and stable.
 type TFunExpr struct {
 	Arg, Ret TypeExpr
 	Eff      *EffRow
@@ -155,7 +153,7 @@ type EffLabelExpr struct {
 func (r *EffRow) Span() source.Span { return r.Sp }
 
 // TApp is type application, `Maybe Int`. The head is always an uppercase
-// name — type variables cannot head applications (no higher kinds, §8.4).
+// name — type variables cannot head applications (no higher kinds, doc/design.md, "Go backend and runtime").
 type TApp struct {
 	Name   string
 	NameSp source.Span
@@ -183,8 +181,8 @@ type BinOp struct {
 }
 
 // Case is `case scrutinee of` followed by branches aligned at the column of
-// the first pattern token (layout rule 2, §5). Branch bodies are statement
-// blocks (§3.6) or inline expressions.
+// the first pattern token (layout rule 2, doc/reference.md, "Source layout and names"). Branch bodies are statement
+// blocks (doc/design.md, "Language semantics") or inline expressions.
 type Case struct {
 	Scrutinee Expr
 	Branches  []CaseBranch
@@ -198,8 +196,7 @@ type CaseBranch struct {
 
 // Handle is `handle <expr> of` followed by operation clauses aligned at the
 // column of the first clause token — layout rule 2, shared with `case`
-// (§10.2). Parsed from S7 checkpoint 1; the checker rejects it until the
-// evidence runtime lands in checkpoint 2.
+// (see doc/design.md, "Computations and effects").
 type Handle struct {
 	Body    Expr
 	Clauses []HandleClause
@@ -231,7 +228,7 @@ type Resume struct {
 	Sp source.Span
 }
 
-// Pattern is the surface pattern grammar (§6): variables, wildcard,
+// Pattern is the surface pattern grammar (doc/reference.md, "Algebraic data types and matching"): variables, wildcard,
 // literals, and constructor patterns with nested argument patterns.
 type Pattern interface {
 	isPattern()
@@ -336,16 +333,15 @@ type Decl interface{ isDecl() }
 type ValueDecl struct {
 	Name     string
 	NameSpan source.Span
-	Params   []Param  // non-empty: a function definition (worker, §8.2)
+	Params   []Param  // non-empty: a function definition (worker; see doc/design.md, "Go backend and runtime")
 	Ann      *TypeAnn // nil when unannotated
 	Body     Expr
 }
 
 func (*ValueDecl) isDecl() {}
 
-// TypeDecl is a custom-type declaration (§3.7). The RHS is always a list of
-// constructor alternatives being defined. Params parse from S4 but the
-// checker rejects them until S5.
+// TypeDecl is a custom-type declaration (doc/reference.md, "Algebraic data types and matching"). The RHS is always a list of
+// constructor alternatives being defined. Params declare polymorphic ADTs.
 type TypeDecl struct {
 	Name     string
 	NameSpan source.Span
@@ -363,7 +359,7 @@ type CtorDef struct {
 
 func (*TypeDecl) isDecl() {}
 
-// EffectDecl declares an effect and its operations (§10.2):
+// EffectDecl declares an effect and its operations (doc/design.md, "Computations and effects"):
 //
 //	effect Console
 //	    print    : String -> ()

@@ -8,7 +8,7 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// Spine collapsing and saturation analysis (DESIGN.md §8.2, §8.7).
+// Spine collapsing and saturation analysis (doc/design.md, "Go backend and runtime", doc/design.md, "Core and evidence invariants").
 // Saturation is resolved exactly once, here. Core after elaboration
 // contains only:
 //
@@ -61,7 +61,7 @@ func (el *elab) app(e *ast.App) core.Expr {
 		}
 	}
 
-	// Constructor head? Same saturation discipline as workers (§8.2 item 5);
+	// Constructor head? Same saturation discipline as workers (doc/design.md, "Go backend and runtime" item 5);
 	// True/False fall through (they are nullary BoolLits and a type-correct
 	// program never applies them).
 	if c, ok := head.(*ast.Ctor); ok {
@@ -162,7 +162,7 @@ type callee struct {
 	ty       types.Type      // full curried type AT THIS OCCURRENCE (instantiated)
 	arity    int             // total parameters, including pre
 	ctor     *types.CtorInfo // when kind == core.Ctor
-	tyArgs   []types.Type    // explicit instantiation (§8.4); nil when monomorphic
+	tyArgs   []types.Type    // explicit instantiation (doc/design.md, "Go backend and runtime"); nil when monomorphic
 	pre      []core.Expr     // lifted locals: the captured frees, already-atomic leading args
 	evidence []core.EffectInstance
 }
@@ -184,7 +184,7 @@ func (el *elab) ctorCallee(info *types.CtorInfo, occTy types.Type) callee {
 }
 
 // workerTyArgs derives a worker occurrence's explicit instantiation by
-// matching the callee's generic type against the occurrence type (§8.4).
+// matching the callee's generic type against the occurrence type (doc/design.md, "Go backend and runtime").
 // Matching — not recording at instantiate-time — is what also covers
 // self-recursive calls, which never pass through the scheme.
 func (el *elab) workerTyArgs(name string, rawOccTy types.Type) []types.Type {
@@ -276,7 +276,7 @@ func matchType(gen, occ types.Type, m map[int]types.Type) {
 }
 
 // nullaryValueUse is a use of a polymorphic top-level value — a nullary
-// generic worker (§8.4), instantiated and called per use.
+// generic worker (doc/design.md, "Go backend and runtime"), instantiated and called per use.
 func (el *elab) nullaryValueUse(name string, sch types.Scheme, occTy types.Type) core.Expr {
 	genTy := el.zonkDefault(sch.Body)
 	vars := types.RigidVarsIn(genTy)
@@ -360,7 +360,7 @@ func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
 }
 
 // partial eta-expands an unsaturated worker or constructor application into
-// §8.2 item 4's "exactly one closure whose body calls the worker": non-atomic
+// doc/design.md, "Go backend and runtime" item 4's "exactly one closure whose body calls the worker": non-atomic
 // given arguments are hoisted into Lets (strictness — they must evaluate when
 // the partial is created, not per call), then nested Lambdas supply the
 // missing parameters around one saturated App.

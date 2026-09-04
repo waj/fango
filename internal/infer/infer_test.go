@@ -46,7 +46,7 @@ func TestPositive(t *testing.T) {
 	}{
 		{"x = 1", "x : number"},
 		{"x = 1 + 2 * 3", "x : number"},
-		// Generalization at each binding (S5): later decls instantiate
+		// Generalization at each binding: later declarations instantiate
 		// fresh number vars, which the shared test printer numbers.
 		{"x = 40\ny = x + 2", "x : number, y : number2"},
 		{"x = 1\ny = x\nmain = y - x", "x : number, y : number2, main : number3"},
@@ -70,7 +70,7 @@ func TestPositive(t *testing.T) {
 		{"f = \\x -> x + 1", "f : number -> number"},
 		{"add : Int -> Int -> Int\nadd x y = x + y", "add : Int -> Int -> Int"},
 		{"add x y = x + y\ninc = add 1", "add : number -> number -> number, inc : number2 -> number2"},
-		// Generalization: uses no longer pin the definition (S5).
+		// Generalization: uses no longer pin the definition.
 		{"id x = x\nmain = id 1 + 1", "id : a -> a, main : number"},
 		{"v =\n  go n = if n < 1 then 0 else go (n - 1)\n  go 3", "v : number"},
 	}
@@ -202,7 +202,8 @@ func TestOpenRowUnification(t *testing.T) {
 	}
 }
 
-// Direct unifier tests for paths S0 surface syntax cannot reach yet:
+// Direct unifier tests for constraint-solver paths awkward to isolate through
+// surface syntax:
 // Number-kind rejection and the occurs check.
 func TestUnifyNumberKind(t *testing.T) {
 	sup := &types.Supply{}

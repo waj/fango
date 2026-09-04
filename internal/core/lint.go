@@ -146,7 +146,7 @@ func (l *linter) unique(t types.Type) int {
 }
 
 // numberVar reports whether t is a (declared) Number-kinded rigid variable —
-// numeric operators compile natively on its Go type-set constraint (§7.3).
+// numeric operators compile natively on its Go type-set constraint (doc/design.md, "Type inference").
 func (l *linter) numberVar(t types.Type) bool {
 	v, ok := t.(*types.TVar)
 	return ok && v.Rigid && v.Kind == types.Number
@@ -163,7 +163,7 @@ func (l *linter) orderable(t types.Type) bool {
 
 // equatable: scalars, Number rigid vars, and declared ADTs whose type
 // arguments are themselves equatable. Functions and General rigid vars are
-// not (§8.6 — the latter until typeclasses).
+// not (doc/design.md, "Go backend and runtime" — the latter until typeclasses).
 func (l *linter) equatable(t types.Type) bool {
 	if l.orderable(t) || l.unique(t) == l.b.Bool.Unique {
 		return true
@@ -206,7 +206,7 @@ func (l *linter) expr(e Expr, where string) {
 	case *IntLit:
 		// An integer literal in a Number-generic body stays at the rigid
 		// var's type: Go untyped constants are assignable to the type-set
-		// param, the interpreter promotes (§9.5).
+		// param, the interpreter promotes (doc/design.md, "Interpreter and REPL").
 		if l.unique(e.Ty) != l.b.Int.Unique && !l.numberVar(e.Ty) {
 			l.errorf("%s: IntLit typed %s", where, types.Show(e.Ty))
 		}
@@ -460,7 +460,7 @@ func (l *linter) expr(e Expr, where string) {
 				l.errorf("%s: App{Worker} `%s` has %d evidence args, callee declares %d", where, ref.Name, len(e.EvidenceArgs), len(def.EffectParams))
 			}
 			// Check against the callee's type INSTANTIATED at this call's
-			// explicit type arguments — the §8.4 invariant.
+			// explicit type arguments — the doc/design.md, "Go backend and runtime" invariant.
 			calleeTy := def.Type
 			if len(e.TyArgs) > 0 {
 				m := make(map[int]types.Type, len(def.TyParams))

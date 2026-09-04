@@ -16,7 +16,7 @@ import (
 
 // Emit lowers a Core program to Go source. Definitions become package vars
 // in source order (dependency-ordered by construction — fango's
-// use-after-define rule). main's shape follows §8.4: a Unit-typed main has
+// use-after-define rule). main's shape follows doc/design.md, "Go backend and runtime": a Unit-typed main has
 // its effect forced inside func main() in statement context (prints happen
 // at run time, in order — never in package init); any other main stays a
 // package var whose value func main() discards, or — in the test-internal
@@ -57,7 +57,7 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 		}
 		if d.IsWorker() {
 			// Includes nullary generic workers — polymorphic values emit as
-			// zero-parameter generic functions (§8.4).
+			// zero-parameter generic functions (doc/design.md, "Go backend and runtime").
 			decls = append(decls, g.workerDef(d))
 			continue
 		}
@@ -77,7 +77,7 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 		decls = append(decls, funcDecl("main", assignBlank(ident(mangleValue("main")))))
 	}
 
-	// Derived eq/show, discovered during emission (on demand, §8.6), plus
+	// Derived eq/show, discovered during emission (on demand, doc/design.md, "Go backend and runtime"), plus
 	// the scalar element-op helpers their synthesis demanded.
 	decls = append(decls, g.derivedDecls(p.ADTs)...)
 	decls = append(decls, g.scalarHelperDecls()...)
@@ -119,7 +119,7 @@ type gen struct {
 	tyParamNames map[int]string
 
 	// eqParamNames/showParamNames map an ADT's rigid params to the element-
-	// operation parameters of the derived eq/show being emitted (§8.6).
+	// operation parameters of the derived eq/show being emitted (doc/design.md, "Go backend and runtime").
 	eqParamNames   map[int]string
 	showParamNames map[int]string
 
@@ -170,10 +170,10 @@ func (g *gen) printFn(t types.Type) string {
 }
 
 // workerDef emits a top-level function definition as an uncurried Go func
-// (§8.2 item 1): the parameter types peel off the curried fango type, the
+// (doc/design.md, "Go backend and runtime" item 1): the parameter types peel off the curried fango type, the
 // body emits in return-position statement context. A generic definition's
 // TyParams become Go type parameters — `any` for General vars,
-// fangort.Number for Number-kinded ones (§7.3, §8.4).
+// fangort.Number for Number-kinded ones (doc/design.md, "Type inference", doc/design.md, "Go backend and runtime").
 func (g *gen) workerDef(d *core.Def) goast.Decl {
 	g.tyParamNames = tyParamNames(d.TyParams)
 	argTys, ret := core.PeelFun(d.Type, len(d.Params))
@@ -251,10 +251,11 @@ func (g *gen) retStmts(e core.Expr) []goast.Stmt {
 	}
 }
 
-// goType maps a fango type to its unboxed Go representation (DESIGN.md
-// §8.1). Int is int64, not int: identical overflow behavior on every GOARCH.
+// goType maps a fango type to its unboxed Go representation (see
+// doc/design.md, "Go backend and runtime"). Int is int64, not int: identical
+// overflow behavior on every GOARCH.
 // Rigid type variables map to the enclosing definition's Go type parameters;
-// parameterized ADTs to instantiated generic types (§8.4).
+// parameterized ADTs to instantiated generic types (doc/design.md, "Go backend and runtime").
 func (g *gen) goType(t types.Type) goast.Expr {
 	switch t := t.(type) {
 	case *types.TVar:
@@ -310,7 +311,7 @@ func (g *gen) goTypes(ts []types.Type) []goast.Expr {
 
 var goOps = map[string]gotoken.Token{
 	"+": gotoken.ADD, "-": gotoken.SUB, "*": gotoken.MUL, "/": gotoken.QUO,
-	"++": gotoken.ADD, // String concat is Go's + on strings (§8.6)
+	"++": gotoken.ADD, // String concat is Go's + on strings (doc/design.md, "Go backend and runtime")
 	"==": gotoken.EQL, "/=": gotoken.NEQ,
 	"<": gotoken.LSS, ">": gotoken.GTR, "<=": gotoken.LEQ, ">=": gotoken.GEQ,
 }
@@ -341,7 +342,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		// At a Number-kinded type parameter, convert explicitly: Go does not
 		// implicitly convert untyped constants in operations whose other
 		// operand has a type-parameter type. The conversion also pins the
-		// §9.6 semantics — at a float64 instantiation the constant rounds,
+		// doc/design.md, "Testing and performance" semantics — at a float64 instantiation the constant rounds,
 		// exactly like the interpreter's numeric promotion.
 		if v, ok := e.Ty.(*types.TVar); ok && v.Rigid {
 			return callExpr(ident(g.tyParamNames[v.ID]), intLit(e.Val))
@@ -408,7 +409,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			for _, a := range e.Args {
 				args = append(args, g.expr(a, 0))
 			}
-			// Explicit instantiation, always — never Go's own inference (§8.4).
+			// Explicit instantiation, always — never Go's own inference (doc/design.md, "Go backend and runtime").
 			return callExpr(indexExpr(ident(mangleValue(ref.Name)), g.goTypes(e.TyArgs)), args...)
 		case core.Value:
 			// One typed indirect call per application; chains render
@@ -439,8 +440,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		}
 		return parenIf(parentPrec > 0, &goast.UnaryExpr{Op: gotoken.SUB, X: operand})
 	case *core.BinOp:
-		// Equality at an ADT type calls the derived eq (§8.6); everything
-		// else — including Number-kinded type params (§7.3) — compiles to a
+		// Equality at an ADT type calls the derived eq (doc/design.md, "Go backend and runtime"); everything
+		// else — including Number-kinded type params (doc/design.md, "Type inference") — compiles to a
 		// native Go operator.
 		if e.Op == "==" || e.Op == "/=" {
 			if g.adtOf(e.L.Type()) != nil {
@@ -463,8 +464,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return parenIf(prec < parentPrec, binExpr(op, l, r))
 	case *core.If:
 		// Go has no expression-if: an immediately-invoked typed closure
-		// preserves branch laziness and stays gofmt-clean. §8.5's ANF
-		// hoisting (S4) will bypass this inside function bodies; it
+		// preserves branch laziness and stays gofmt-clean. ANF hoisting, as
+		// documented in doc/design.md, "Core and evidence invariants", bypasses this inside function bodies; it
 		// remains the top-level-initializer fallback.
 		body := []goast.Stmt{
 			&goast.IfStmt{
@@ -591,7 +592,7 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 			g.tyParamNames[p.ID] = fmt.Sprintf("E%d", i)
 		}
 		// Operation-local polymorphism is rejected at every runtime use in
-		// checkpoint 2. Keeping its otherwise-unrepresentable field slots as
+		// the current tail-resumptive handler runtime. Keeping its otherwise-unrepresentable field slots as
 		// any lets unused declarations still have deterministic named structs.
 		for _, op := range eff.Ops {
 			for _, v := range op.LocalVars {
@@ -649,7 +650,7 @@ func (g *gen) floatLit(v float64) goast.Expr {
 // letIIFE collapses a Let chain into one immediately-invoked closure:
 // `func() T { var v_r float64 = …; …; return result }()`. The expression-
 // context fallback; statement contexts (main's body, and function bodies
-// from S3) emit the bindings as plain Go statements instead.
+// emit the bindings as plain Go statements instead.
 func (g *gen) letIIFE(e *core.Let) goast.Expr {
 	var body []goast.Stmt
 	var cur core.Expr = e
@@ -687,7 +688,7 @@ func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
 	var stmts []goast.Stmt
 	switch let.Rhs.(type) {
 	case *core.If, *core.Case:
-		// §8.5's ANF target shape: declare, then assign inside real Go
+		// The ANF target shape from doc/design.md, "Core and evidence invariants": declare, then assign inside real Go
 		// statements — no IIFE closure on hot paths.
 		stmts = append([]goast.Stmt{varDeclNoValue(name, g.goType(let.Rhs.Type()))},
 			g.assignStmts(let.Rhs, name)...)
@@ -719,7 +720,7 @@ func (g *gen) stmts(e core.Expr) []goast.Stmt {
 	case *core.Let:
 		return append(g.letBindingStmts(e), g.stmts(e.Body)...)
 	default:
-		// Unit-typed but effect-free — unreachable in S1 (Unit is only
+		// Unit-typed but effect-free — normally unreachable because Unit is
 		// constructible via print); discard defensively.
 		return []goast.Stmt{assignBlank(g.expr(e, 0))}
 	}

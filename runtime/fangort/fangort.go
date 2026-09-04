@@ -41,7 +41,7 @@ func ReadLine() string {
 }
 
 // Number is the Go type-set constraint compiling fango's Number-kinded type
-// variables (§7.3): `double : number -> number` emits as
+// variables (doc/design.md, "Type inference"): `double : number -> number` emits as
 // `func v_double[A Number](x A) A` with native operators.
 type Number interface{ ~int64 | ~float64 }
 

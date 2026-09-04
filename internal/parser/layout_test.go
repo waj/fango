@@ -7,7 +7,8 @@ import (
 )
 
 // Direct unit tests on the layout predicates: rules 2 and 3 have no parser
-// client until S4/S2, so the predicates are pinned down here (DESIGN.md §13,
+// client, so the predicates are pinned down here (see doc/design.md,
+// "Testing and performance",
 // honest costs).
 func TestCheckOffside(t *testing.T) {
 	var l layout

@@ -57,7 +57,7 @@ func freeGeneral(t types.Type) *types.TVar {
 }
 
 // TypeVars scopes the type variables of one type expression. Annotations use
-// an open scope: the first use of a name mints a fresh rigid skolem (§7.2).
+// an open scope: the first use of a name mints a fresh rigid skolem (doc/design.md, "Type inference").
 // Constructor fields use a closed scope holding exactly the declaration's
 // parameters — an unknown variable there is an error, not a fresh skolem.
 type TypeVars struct {
@@ -292,7 +292,7 @@ func (ck *Checker) typeArity(t types.Type) int {
 
 // ContainsFunction reports whether t transitively contains a function type —
 // through ADT fields too, instantiated at the occurrence's type arguments.
-// Feeds the `==`-at-function-types rejection (§8.6).
+// Feeds the `==`-at-function-types rejection (doc/design.md, "Go backend and runtime").
 func (ck *Checker) ContainsFunction(t types.Type) bool {
 	return ck.containsFunction(t, map[int]bool{})
 }

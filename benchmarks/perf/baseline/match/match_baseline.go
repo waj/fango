@@ -1,6 +1,6 @@
 // The handwritten-Go baseline for benchmarks/perf/match.fango — the
 // idiomatic Go shape for an enum: int constants and value switches (what
-// §8.10's enum-as-int upgrade would emit; this ratio is its arbiter).
+// an enum-as-int representation would emit; this ratio is its arbiter).
 package main
 
 import "fmt"

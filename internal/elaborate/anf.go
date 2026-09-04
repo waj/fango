@@ -6,7 +6,7 @@ import (
 	"github.com/waj/fango/internal/core"
 )
 
-// ANF hoisting (DESIGN.md §8.5): Case and If are statement-shaped in Go, so
+// ANF hoisting (doc/design.md, "Core and evidence invariants"): Case and If are statement-shaped in Go, so
 // inside function bodies they must not sit in expression slots (an argument,
 // an operand, a condition) where codegen's only recourse is an IIFE closure.
 // This pass floats each such node into a Let directly above the statement

@@ -27,7 +27,7 @@ import (
 type Session struct {
 	ck    *infer.Checker
 	env   *eval.Env
-	gen   int // generation counter: incremented on redefinition (plumbing for S6)
+	gen   int // generation counter incremented on redefinition
 	out   io.Writer
 	ioctx *eval.IOContext
 }
@@ -36,7 +36,7 @@ func NewSession(out io.Writer) *Session {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
-	// Prompt values are lazy memo cells (§9.2) — evaluated once, so their
+	// Prompt values are lazy memo cells (doc/design.md, "Interpreter and REPL") — evaluated once, so their
 	// types stay monotypes (the block-binding monomorphism restriction).
 	// Functions and lambdas still generalize.
 	ck.MonoValues = true
@@ -52,7 +52,7 @@ const banner = "fango 0.1 — :help for commands"
 
 // Run drives the read-eval-print loop until :quit or EOF.
 //
-// Multi-line policy (DESIGN.md §9.2: input continues while the layout stack
+// Multi-line policy (doc/design.md, "Interpreter and REPL": input continues while the layout stack
 // is open): a first line that parses incomplete opens continuation mode;
 // indented lines then accumulate WITHOUT re-submitting on the first complete
 // parse — a `case` may grow another branch, a `type` another `|` line. A
@@ -258,7 +258,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	s.ck.BindDecl(info)
 	def := &defs[0]
 	for i := range defs[1:] {
-		s.env.DefineWorker(&defs[1+i]) // lambda-lifted locals (§8.4)
+		s.env.DefineWorker(&defs[1+i]) // lambda-lifted locals (doc/design.md, "Go backend and runtime")
 	}
 	if def.IsWorker() {
 		s.env.DefineWorker(def)
@@ -273,7 +273,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 }
 
 // typeDeclInput installs a `type` declaration. Redefinition mints a fresh
-// generation (a new Unique), exactly like value redefinition (§9.3).
+// generation (a new Unique), exactly like value redefinition (doc/design.md, "Interpreter and REPL").
 func (s *Session) typeDeclInput(td *ast.TypeDecl) inputResult {
 	_, redefining := s.ck.TypeNames[td.Name]
 	if errs := s.ck.TypeDecl(td); len(errs) > 0 {
@@ -307,7 +307,7 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	// The displayed type is the pre-defaulting one — free variables print
-	// as the generalized scheme would (`\x -> x` echoes `a -> a`), §9.2.
+	// as the generalized scheme would (`\x -> x` echoes `a -> a`), doc/design.md, "Interpreter and REPL".
 	// Elaboration then defaults for evaluation; the value renders at the
 	// defaulted (ground) type.
 	shownTy := types.Show(s.ck.Sub.Apply(ty))
@@ -347,7 +347,7 @@ func (s *Session) typeOf(src string) {
 		return
 	}
 	// Show the generalized view: free variables print as the scheme would
-	// (`:type \x -> x` says `a -> a`), no defaulting forced (§9.2).
+	// (`:type \x -> x` says `a -> a`), no defaulting forced (doc/design.md, "Interpreter and REPL").
 	fmt.Fprintln(s.out, types.Show(s.ck.Sub.Apply(ty)))
 }
 

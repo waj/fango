@@ -11,7 +11,7 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// Decision-tree compilation (DESIGN.md §8.5): Maranget-style — each
+// Decision-tree compilation (doc/design.md, "Core and evidence invariants"): Maranget-style — each
 // scrutinee position is examined at most once per path. Exhaustiveness is
 // checked FIRST via the usefulness algorithm (which reconstructs a witness
 // like `Just Nothing`, not just the leaf constructor); tree compilation then

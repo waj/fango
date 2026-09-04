@@ -1,7 +1,8 @@
 // Package benchmarks holds the compile-latency gate: `fango run` medians in
 // three modes (cold, warm-unchanged, warm-changed) compared against
 // checked-in baselines. A >20% median regression fails, as does exceeding
-// the absolute budgets from DESIGN.md §8.9. Re-record baselines with
+// the absolute budgets in doc/design.md, "Testing and performance".
+// Re-record baselines with
 //
 //	go test ./benchmarks -update-baselines
 package benchmarks
@@ -26,14 +27,14 @@ type baselines struct {
 	WarmUnchangedMs float64 `json:"warm_unchanged_ms"`
 	WarmChangedMs   float64 `json:"warm_changed_ms"`
 
-	// The §11 ADT-heavy program (~500 lines of types and cases), added in S4.
+	// The ADT-heavy latency program (~500 lines of types and cases); see
+	// doc/design.md, "Testing and performance".
 	ADTColdMs          float64 `json:"adt_cold_ms"`
 	ADTWarmUnchangedMs float64 `json:"adt_warm_unchanged_ms"`
 	ADTWarmChangedMs   float64 `json:"adt_warm_changed_ms"`
 
-	// The §11 generics-heavy program (~500 lines, many distinct
-	// instantiations), added in S5 — the empirical detector for risk #3's
-	// Go-generics build blowup.
+	// The generics-heavy program (~500 lines, many distinct instantiations)
+	// detects generic build-time and code-size regressions.
 	PolyColdMs          float64 `json:"poly_cold_ms"`
 	PolyWarmUnchangedMs float64 `json:"poly_warm_unchanged_ms"`
 	PolyWarmChangedMs   float64 `json:"poly_warm_changed_ms"`
@@ -45,7 +46,7 @@ const (
 	budgetWarmChangedMs   = 500
 	// The ADT-heavy program's warm-changed budget: dominated by `go build`
 	// of a ~1500-line generated main.go, legitimately above hello's 500 ms
-	// (§8.9 scopes the tighter budgets to hello).
+	// (the tighter budgets apply only to the small hello program).
 	budgetADTWarmChangedMs = 1000
 	regressionFactor       = 1.2
 	// Absolute slack under the regression check: at small medians (a warm
@@ -181,7 +182,7 @@ func writeProgram(t *testing.T, path string, lit int) {
 	}
 }
 
-// writeADTProgram writes the §11 ADT-heavy latency program: ~40 three-
+// writeADTProgram writes the ADT-heavy latency program: ~40 three-
 // constructor types, a case-dense function per type, and a main folding
 // them all — ~500 lines. warm-changed touches only main's literal.
 func writeADTProgram(t *testing.T, path string, lit int) {
@@ -217,7 +218,7 @@ func writeADTProgram(t *testing.T, path string, lit int) {
 	}
 }
 
-// writePolyProgram writes the §11 generics-heavy latency program: ~25
+// writePolyProgram writes the generics-heavy latency program: ~25
 // parameterized two-ctor types, a generic case function and a generic
 // builder per type, and a main instantiating every one at Int, Float, and
 // String — many distinct instantiations, the Go-generics build-blowup
