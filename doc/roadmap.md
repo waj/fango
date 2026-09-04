@@ -6,27 +6,6 @@ available to users belongs in [the reference](reference.md). Completed work is
 removed after durable results are promoted to those documents; Git history is
 the archive.
 
-## Modules and imports
-
-This is the next language and build-system checkpoint. Start with local source
-modules; package distribution and dependency fetching are separate problems.
-
-- Define module and import syntax, name visibility, qualification, and stable
-  diagnostics for missing modules, missing exports, duplicate names, and
-  import cycles.
-- Extend parsing, inference, elaboration, and nominal identity across a module
-  graph without weakening source-order rules within each module.
-- Make the build driver discover all transitive source inputs, invalidate
-  cached output when any input changes, and retain deterministic generated Go.
-- Preserve the current single-file CLI as the entry-point interface while a
-  local module graph supplies its dependencies.
-- Add multi-file functional fixtures and run them through the Core
-  interpreter/compiler differential suite and Core linter.
-
-Open decisions include whether module names are declared or path-derived,
-whether the first increment has explicit export lists, whether imports are
-qualified by default, and whether one module maps to one file or a directory.
-
 ## Standard library
 
 Build the first standard library on the module system so it exercises the same
@@ -42,8 +21,10 @@ language and import rules as user code.
 - Give library modules the same differential, diagnostic, and documentation
   coverage as user programs.
 
-Open decisions include the prelude policy, API stability expectations, and the
-boundary between compiler primitives and ordinary fango modules.
+Open decisions include provider precedence when bundled and local modules have
+the same name, the prelude policy, API stability expectations, and the boundary
+between compiler primitives and ordinary fango modules. Package distribution,
+dependency fetching, and configurable source roots remain deferred.
 
 ## REPL hardening
 

@@ -80,6 +80,7 @@ type evidence struct {
 type Env struct {
 	cells   map[string]*Cell
 	workers map[string]*core.Def
+	entry   string
 }
 
 // Frame holds block-local bindings (doc/design.md, "Language semantics") — eager values, unlike the lazy
@@ -119,6 +120,10 @@ func (e *Env) DefineWorker(d *core.Def) {
 // workers (polymorphic values, doc/design.md, "Go backend and runtime") register as workers: their zero-arg
 // calls re-evaluate the body per use, matching the compiled cost rule.
 func (e *Env) DefineProg(p *core.Prog) {
+	e.entry = p.Entry
+	if e.entry == "" {
+		e.entry = "main"
+	}
 	for i := range p.Defs {
 		d := &p.Defs[i]
 		if d.IsWorker() {
@@ -507,7 +512,7 @@ func (in *interp) force(name string) (Value, error) {
 	cell, ok := in.env.cells[name]
 	if !ok {
 		if d, isWorker := in.env.workers[name]; isWorker {
-			if name == "main" && len(d.Params) == 1 {
+			if name == in.env.entry && len(d.Params) == 1 {
 				return in.eval(d.Body, &Frame{vars: map[string]Value{d.Params[0]: struct{}{}}})
 			}
 			return nil, fmt.Errorf("eval: bare reference to worker `%s` — the linter should have caught this", name)

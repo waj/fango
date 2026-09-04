@@ -14,6 +14,37 @@ func Dump(m *Module) string {
 	b.WriteString("(module")
 	if m.Header != nil {
 		fmt.Fprintf(&b, " %s", m.Header.Name)
+		b.WriteString(" (exposing")
+		if m.Header.Exposing.All {
+			b.WriteString(" ..")
+		}
+		for _, item := range m.Header.Exposing.Items {
+			fmt.Fprintf(&b, " %s", item.Name)
+			if item.All {
+				b.WriteString("(..)")
+			}
+		}
+		b.WriteString(")")
+	}
+	for _, im := range m.Imports {
+		fmt.Fprintf(&b, "\n  (import %s", im.Module)
+		if im.Alias != "" {
+			fmt.Fprintf(&b, " (as %s)", im.Alias)
+		}
+		if im.Exposing != nil {
+			b.WriteString(" (exposing")
+			if im.Exposing.All {
+				b.WriteString(" ..")
+			}
+			for _, item := range im.Exposing.Items {
+				fmt.Fprintf(&b, " %s", item.Name)
+				if item.All {
+					b.WriteString("(..)")
+				}
+			}
+			b.WriteString(")")
+		}
+		b.WriteString(")")
 	}
 	for _, d := range m.Decls {
 		b.WriteString("\n  ")

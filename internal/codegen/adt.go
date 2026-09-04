@@ -14,11 +14,11 @@ import (
 // discrimination by type switch (no tag field), derived eq/show emitted on
 // demand only.
 
-func mangleType(name string) string   { return "T_" + name }
-func mangleCtor(name string) string   { return "C_" + name }
-func markerMethod(name string) string { return "isT_" + name }
-func eqFunc(name string) string       { return "eqT_" + name }
-func showFunc(name string) string     { return "showT_" + name }
+func mangleType(name string) string   { return "T_" + linkName(name) }
+func mangleCtor(name string) string   { return "C_" + linkName(name) }
+func markerMethod(name string) string { return "isT_" + linkName(name) }
+func eqFunc(name string) string       { return "eqT_" + linkName(name) }
+func showFunc(name string) string     { return "showT_" + linkName(name) }
 
 func fieldName(i int) string { return fmt.Sprintf("F%d", i) }
 
@@ -419,12 +419,12 @@ func (g *gen) showDecl(adt *types.ADTInfo) goast.Decl {
 		if len(c.Fields) == 0 {
 			clauses = append(clauses, &goast.CaseClause{
 				List: []goast.Expr{ctorTag(c.Name)},
-				Body: []goast.Stmt{returnStmt(stringLit(c.Name))},
+				Body: []goast.Stmt{returnStmt(stringLit(types.SurfaceName(c.Name)))},
 			})
 			continue
 		}
 		usesBinding = true
-		s := goast.Expr(stringLit(c.Name))
+		s := goast.Expr(stringLit(types.SurfaceName(c.Name)))
 		for i, f := range c.Fields {
 			field := &goast.SelectorExpr{X: ident("v"), Sel: ident(fieldName(i))}
 			s = binExpr(gotoken.ADD, s, stringLit(" "))

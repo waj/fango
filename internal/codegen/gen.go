@@ -45,8 +45,12 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 	}
 
 	var mainDef *core.Def
+	entry := p.Entry
+	if entry == "" {
+		entry = "main"
+	}
 	for i := range p.Defs {
-		if p.Defs[i].Name == "main" {
+		if p.Defs[i].Name == entry {
 			mainDef = &p.Defs[i]
 		}
 	}
@@ -73,12 +77,12 @@ func Emit(p *core.Prog, b *types.Builtins, printMain bool) ([]byte, error) {
 	case mainIsUnit:
 		decls = append(decls, funcDecl("main", g.stmts(mainDef.Body)...))
 	case mainIsFn:
-		decls = append(decls, funcDecl("main", g.workerCallStmts("main", nil)...))
+		decls = append(decls, funcDecl("main", g.workerCallStmts(entry, nil)...))
 	case printMain:
 		decls = append(decls, funcDecl("main",
-			exprStmt(g.printCall(ident(mangleValue("main")), mainDef.Type))))
+			exprStmt(g.printCall(ident(mangleValue(entry)), mainDef.Type))))
 	default:
-		decls = append(decls, funcDecl("main", assignBlank(ident(mangleValue("main")))))
+		decls = append(decls, funcDecl("main", assignBlank(ident(mangleValue(entry)))))
 	}
 
 	// Derived eq/show, discovered during emission (on demand, doc/design.md, "Go backend and runtime"), plus
@@ -593,7 +597,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			args = append(args, g.expr(a, 0))
 		}
 		callOp := func(as []goast.Expr) goast.Expr {
-			return callExpr(&goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Op_" + e.Op.Name)}, as...)
+			return callExpr(&goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Op_" + linkName(e.Op.Name))}, as...)
 		}
 		call := callOp(args)
 		if needPrelude {
@@ -709,9 +713,9 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 			results = &goast.FieldList{List: []*goast.Field{{Type: g.goType(c.ResultType)}}}
 		}
 		ft := &goast.FuncType{Params: paramFields(params), Results: results}
-		fields[i] = &goast.Field{Names: []*goast.Ident{ident("Op_" + c.Op.Name)}, Type: ft}
+		fields[i] = &goast.Field{Names: []*goast.Ident{ident("Op_" + linkName(c.Op.Name))}, Type: ft}
 		fn := &goast.FuncLit{Type: ft, Body: &goast.BlockStmt{List: g.resumeStmtsFor(c.Body, g.isUnit(c.Op.ResultType))}}
-		elts[i] = &goast.KeyValueExpr{Key: ident("Op_" + c.Op.Name), Value: fn}
+		elts[i] = &goast.KeyValueExpr{Key: ident("Op_" + linkName(c.Op.Name)), Value: fn}
 	}
 	_ = fields
 	st := g.effectType(e.Effect)
@@ -768,7 +772,7 @@ func (g *gen) resumeStmtsFor(e core.Expr, unitResult bool) []goast.Stmt {
 }
 
 func (g *gen) effectType(e core.EffectInstance) goast.Expr {
-	return indexExpr(ident("Eff_"+e.Name), g.goTypes(e.Args))
+	return indexExpr(ident("Eff_"+linkName(e.Name)), g.goTypes(e.Args))
 }
 
 func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
@@ -803,9 +807,9 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 			if !g.isUnit(op.ResultType) {
 				results = &goast.FieldList{List: []*goast.Field{{Type: g.goType(op.ResultType)}}}
 			}
-			fields[i] = &goast.Field{Names: []*goast.Ident{ident("Op_" + op.Name)}, Type: &goast.FuncType{Params: paramFields(ps), Results: results}}
+			fields[i] = &goast.Field{Names: []*goast.Ident{ident("Op_" + linkName(op.Name))}, Type: &goast.FuncType{Params: paramFields(ps), Results: results}}
 		}
-		spec := &goast.TypeSpec{Name: ident("Eff_" + eff.Name), Type: &goast.StructType{Fields: &goast.FieldList{List: fields}}}
+		spec := &goast.TypeSpec{Name: ident("Eff_" + linkName(eff.Name)), Type: &goast.StructType{Fields: &goast.FieldList{List: fields}}}
 		if len(eff.Params) > 0 {
 			fs := make([]*goast.Field, len(eff.Params))
 			for i := range fs {
@@ -946,5 +950,7 @@ func mangleValue(name string) string {
 	if strings.HasPrefix(name, "_") {
 		return "t" + name
 	}
-	return "v_" + name
+	return "v_" + linkName(name)
 }
+
+func linkName(name string) string { return strings.ReplaceAll(name, ".", "_dot_") }

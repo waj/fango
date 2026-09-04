@@ -1,0 +1,5 @@
+(module Geometry.Shape (exposing Shape(..) area)
+  (import Geometry.Point)
+  (import Geometry.Point (as P) (exposing Point origin))
+  (type Shape (ctor At Point))
+  (def area (params point) (ann (-> P.Point (effects (P.Trace)) Int)) (case (var point) (branch (pctor P.Point (pvar x) (pvar y)) (binop + (var x) (var y))))))

@@ -1,0 +1,11 @@
+module Geometry.Shape exposing (Shape(..), area)
+
+import Geometry.Point
+import Geometry.Point as P exposing (Point, origin)
+
+type Shape = At Point
+
+area : P.Point ->{P.Trace} Int
+area point =
+    case point of
+        P.Point x y -> x + y

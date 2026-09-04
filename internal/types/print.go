@@ -5,6 +5,13 @@ import (
 	"strings"
 )
 
+func SurfaceName(name string) string {
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		return name[i+1:]
+	}
+	return name
+}
+
 // Printer renders types for humans and goldens. Metavariables are
 // normalized to a, b, c… in first-appearance order (Number-kinded ones
 // print as `number`, `number2`, …); empty effect rows and empty Pred lists
@@ -33,9 +40,9 @@ func (p *Printer) render(t Type) string {
 		return p.varName(t)
 	case *TCon:
 		if len(t.Args) == 0 {
-			return t.Name
+			return SurfaceName(t.Name)
 		}
-		parts := []string{t.Name}
+		parts := []string{SurfaceName(t.Name)}
 		for _, a := range t.Args {
 			parts = append(parts, p.atom(a))
 		}
@@ -49,7 +56,7 @@ func (p *Printer) render(t Type) string {
 		if showEff {
 			parts := make([]string, len(t.Eff.Labels))
 			for i, l := range t.Eff.Labels {
-				parts[i] = l.Name
+				parts[i] = SurfaceName(l.Name)
 				for _, a := range l.Args {
 					parts[i] += " " + p.atom(a)
 				}
@@ -74,7 +81,7 @@ func (p *Printer) render(t Type) string {
 func (p *Printer) rowText(r Row) string {
 	parts := make([]string, len(r.Labels))
 	for i, l := range r.Labels {
-		parts[i] = l.Name
+		parts[i] = SurfaceName(l.Name)
 		for _, a := range l.Args {
 			parts[i] += " " + p.atom(a)
 		}

@@ -1,0 +1,10 @@
+module Main exposing (main)
+
+import Geometry.Point as P exposing (Point, origin)
+
+sum : Point -> Int
+sum point =
+    case point of
+        P.Point x y -> x + y
+
+main = sum origin

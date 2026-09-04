@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/waj/fango/internal/build"
+	"github.com/waj/fango/internal/modules"
 )
 
 func main() {
@@ -52,7 +53,7 @@ func usage(w io.Writer) {
 // compileToDir runs the pipeline for entry and leaves a ready-to-build main.go
 // in the build directory, reporting whether any input changed.
 func compileToDir(entry, dir string, stderr io.Writer) (changed bool, ok bool) {
-	gosrc, ok := emitGo(entry, stderr)
+	gosrc, manifest, ok := emitGoManifest(entry, stderr)
 	if !ok {
 		return false, false
 	}
@@ -66,7 +67,12 @@ func compileToDir(entry, dir string, stderr io.Writer) (changed bool, ok bool) {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
 		return false, false
 	}
-	return materialized || wrote, true
+	manifestWrote, err := build.WriteIfChanged(filepath.Join(dir, "sources.json"), modules.ManifestJSON(manifest))
+	if err != nil {
+		fmt.Fprintf(stderr, "fango: %v\n", err)
+		return false, false
+	}
+	return materialized || wrote || manifestWrote, true
 }
 
 func ensureBuilt(entry string, stderr io.Writer) (dir string, ok bool) {

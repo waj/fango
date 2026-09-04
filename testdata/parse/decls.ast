@@ -1,4 +1,4 @@
-(module Main
+(module Main (exposing main x)
   (def x (int 40))
   (def y (binop + (var x) (int 2)))
   (def main (binop * (binop - (var y) (int 2)) (int 1))))

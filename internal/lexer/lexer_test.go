@@ -25,6 +25,20 @@ func TestUnescape(t *testing.T) {
 	}
 }
 
+func TestModulePunctuationAndKeywords(t *testing.T) {
+	f := source.NewFile("modules.fango", []byte("import Geometry.Point as P exposing (Point(..))"))
+	toks, errs := Lex(f)
+	if len(errs) != 0 {
+		t.Fatalf("lex: %v", errs)
+	}
+	got := DumpTokens(toks)
+	for _, want := range []string{"import import", "DOT .", "as as", "exposing exposing", "DOTDOT .."} {
+		if !strings.Contains(got, want) {
+			t.Errorf("tokens missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestGoldens(t *testing.T) {
 	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "lex"))
 	for _, path := range files {

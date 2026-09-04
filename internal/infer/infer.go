@@ -133,6 +133,10 @@ type Checker struct {
 	// old values" rule in doc/design.md, "Interpreter and REPL"). Batch modules are immutable, so re-evaluation is
 	// unobservable there and top-level values generalize per doc/design.md, "Go backend and runtime".
 	MonoValues bool
+
+	// EntryName is the canonical symbol selected by the batch graph loader.
+	// It remains "main" for the REPL and headerless single-file programs.
+	EntryName string
 }
 
 func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
@@ -161,6 +165,7 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		BindTypes:       map[*ast.LocalBind]types.Type{},
 		PatTypes:        map[ast.Pattern]types.Type{},
 		BindSchemes:     map[*ast.LocalBind]types.Scheme{},
+		EntryName:       "main",
 	}
 	// Bool is an ordinary ADT in the checker (doc/design.md, "Type inference") — patterns, case
 	// exhaustiveness, and the ctor table treat it like any declared type.
@@ -495,11 +500,12 @@ func (ck *Checker) BindDecl(info DeclInfo) {
 // bind on error).
 func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []diag.Error) {
 	var errs []diag.Error
-	if d.Name == "main" && len(d.Params) > 1 {
+	isMain := d.Name == ck.EntryName
+	if isMain && len(d.Params) > 1 {
 		errs = append(errs, diag.Errorf(d.NameSpan, "MAIN TAKES NO PARAMETERS",
 			"`main` may be a value or a one-argument Unit function."))
 	}
-	if d.Name == "main" && len(d.Params) == 1 && d.Params[0].Name != "_" && d.Params[0].Name != "()" {
+	if isMain && len(d.Params) == 1 && d.Params[0].Name != "_" && d.Params[0].Name != "()" {
 		errs = append(errs, diag.Errorf(d.Params[0].Sp, "MAIN TAKES NO PARAMETERS", "Function-style `main` must use `main()` or discard its Unit argument with `_`."))
 	}
 
@@ -515,18 +521,18 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	var ty types.Type
 	if len(d.Params) == 0 {
 		ty = g.expr(d.Body)
-		if d.Name != "main" && allowEffects {
+		if !isMain && allowEffects {
 			g.cs = append(g.cs, Constraint{Left: g.ambient, Right: types.Row{}, Span: d.Body.Span(), Why: Why{Kind: WhyEffectEscapes}})
 		}
 	} else if annTy != nil {
 		ty = g.functionWithAnnotatedParams(d.Name, d.NameSpan, d.Params, d.Body, annTy)
-		if d.Name == "main" && len(d.Params) == 1 {
+		if isMain && len(d.Params) == 1 {
 			want := &types.TFun{Arg: ck.B.Unit, Eff: types.Row{Labels: []types.EffLabel{{Unique: ck.IO.Unique, Name: ck.IO.Name}}}, Ret: ck.B.Unit}
 			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
 		}
 	} else {
 		ty = g.function(d.Name, d.NameSpan, d.Params, d.Body)
-		if d.Name == "main" && len(d.Params) == 1 {
+		if isMain && len(d.Params) == 1 {
 			want := &types.TFun{Arg: ck.B.Unit, Eff: types.Row{Labels: []types.EffLabel{{Unique: ck.IO.Unique, Name: ck.IO.Name}}}, Ret: ck.B.Unit}
 			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
 		}
@@ -535,7 +541,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
 	errs = append(errs, solveErrs...)
-	if d.Ann == nil && d.Name != "main" {
+	if d.Ann == nil && !isMain {
 		ck.closeSingleRows(ty)
 	}
 	promptEffects := false
@@ -545,7 +551,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	if !allowEffects && promptEffects {
 		errs = append(errs, diag.Errorf(d.Body.Span(), "EFFECTFUL PROMPT DECLARATION", "Effectful declarations are not installed at the prompt; run the expression directly."))
 	}
-	if d.Name == "main" && len(d.Params) == 0 {
+	if isMain && len(d.Params) == 0 {
 		row := ck.Sub.Apply(g.ambient).(types.Row)
 		for _, l := range row.Labels {
 			if l.Unique != ck.IO.Unique {
@@ -571,7 +577,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body}
 	_, isLambda := d.Body.(*ast.Lambda)
 	switch {
-	case d.Name == "main":
+	case isMain:
 		// main is the program's ground entry point (doc/design.md, "Go backend and runtime": a function form is
 		// invoked inside func main()) — it never generalizes. Unconstrained
 		// variables in its type default like interior ones (Number → Int,

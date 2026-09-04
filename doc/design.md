@@ -13,7 +13,7 @@ builds, and generated programs whose representation and calls are close to
 ordinary Go.
 
 The implementation stays deliberately small: one Go toolchain, no compiler
-framework dependencies, and a single-module source model. Laziness,
+framework dependencies, and a local source-module model. Laziness,
 self-hosting, a package manager, and a general optimizer are not current
 features.
 
@@ -106,6 +106,22 @@ not synthesize layout tokens. The recursive-descent parser applies the offside
 rule from token columns and uses precedence climbing for operators. AST and
 diagnostic dump formats are stable golden-test interfaces.
 
+Batch compilation first discovers the complete local module graph. The entry
+directory is the source root, and `Foo.Bar` maps only to `Foo/Bar.fango`.
+Modules are parsed and their declared public interfaces validated before a
+deterministic dependency-first topological order is chosen, with lexical
+tie-breaking. A source-provider interface isolates discovery policy; the only
+implemented provider is the entry-directory filesystem.
+
+Name resolution rewrites module-level declarations and imported references to
+opaque, collision-free canonical symbols before inference. Local binders keep
+their source names. The resolved modules are merged in graph order and checked
+with one graph-wide fresh-name supply and one set of builtin identities. This
+shares nominal ADT and effect identities safely across module boundaries while
+an import can seed only its direct dependency's declared public interface.
+Core contains no module syntax, and `Prog.Entry` identifies the selected entry
+definition independently of its printed name.
+
 Inference and elaboration are separate because code generation is
 type-directed. Elaboration resolves defaulting,
 derives evidence requirements, collapses application spines, chooses direct or
@@ -174,9 +190,12 @@ receive typed element operations where required.
 
 The build driver materializes an embedded `fangort` package and generated
 `main.go` beneath a persistent `.fango/build` directory, writing only changed
-files. `build` copies the resulting executable; `run` reuses it while inputs
-are unchanged. `fangort` owns shared formatting and IO behavior used by the
-compiled and interpreted backends.
+files. It also writes `sources.json`, a deterministic dependency-first manifest
+of logical names, root-relative paths, and SHA-256 content hashes, so every
+source edit and graph change invalidates the cached build even if generated Go
+is unchanged. `build` copies the resulting executable; `run` reuses it while
+inputs are unchanged. `fangort` owns shared formatting and IO behavior used by
+the compiled and interpreted backends.
 
 ## Interpreter and REPL
 
@@ -217,8 +236,10 @@ allocation remains the main known structural performance cost.
 
 ## Known limitations
 
-The implementation currently has one source module, no imports, FFI, package
-manager, standard library, records, aliases, typeclasses, formatter, or LSP.
+The implementation has local modules but no FFI, package manager, standard
+library, records, aliases, typeclasses, formatter, or LSP. There are no
+source-path flags, bundled-module provider, implicit prelude, or package
+resolution.
 Integer values are signed 64-bit; broader numeric semantics are not settled.
 There is no tail-call optimization guarantee. Custom handlers have the
 restrictions described above, and builtin IO cannot

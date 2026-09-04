@@ -4,58 +4,50 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/elaborate"
 	"github.com/waj/fango/internal/infer"
-	"github.com/waj/fango/internal/lexer"
-	"github.com/waj/fango/internal/parser"
-	"github.com/waj/fango/internal/source"
+	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/types"
 )
 
 // compileFile runs source → tokens → AST → typed AST → Core. Diagnostics go
 // to stderr; ok is false if any stage failed.
 func compileFile(entry string, stderr io.Writer) (*core.Prog, *infer.Checker, bool) {
-	content, err := os.ReadFile(entry)
-	if err != nil {
-		fmt.Fprintf(stderr, "fango: %v\n", err)
-		return nil, nil, false
-	}
-	f := source.NewFile(filepath.Base(entry), content)
+	prog, ck, _, ok := compileFileManifest(entry, stderr)
+	return prog, ck, ok
+}
 
-	toks, lexErrs := lexer.Lex(f)
-	if report(stderr, lexErrs) {
-		return nil, nil, false
-	}
-	m, parseErrs := parser.Parse(toks, f)
-	if report(stderr, parseErrs) {
-		return nil, nil, false
+func compileFileManifest(entry string, stderr io.Writer) (*core.Prog, *infer.Checker, []modules.ManifestEntry, bool) {
+	loaded, loadErrs := modules.Load(entry)
+	if report(stderr, loadErrs) {
+		return nil, nil, nil, false
 	}
 
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
-	infos, inferErrs := ck.Module(m)
+	ck.EntryName = loaded.Entry
+	infos, inferErrs := ck.Module(loaded.Module)
 	if report(stderr, inferErrs) {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 
 	prog, elabErrs := elaborate.Module(infos, ck)
 	if report(stderr, elabErrs) {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	if lintErrs := core.Lint(prog, ck.B); len(lintErrs) > 0 {
 		fmt.Fprintf(stderr, "fango: internal compiler error: Core invariants violated:\n")
 		for _, e := range lintErrs {
 			fmt.Fprintf(stderr, "  %v\n", e)
 		}
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	return prog, ck, true
+	return prog, ck, loaded.Manifest, true
 }
 
 func report(stderr io.Writer, errs []diag.Error) bool {
@@ -67,8 +59,12 @@ func report(stderr io.Writer, errs []diag.Error) bool {
 }
 
 func hasMain(p *core.Prog) bool {
+	entry := p.Entry
+	if entry == "" {
+		entry = "main"
+	}
 	for _, d := range p.Defs {
-		if d.Name == "main" {
+		if d.Name == entry {
 			return true
 		}
 	}
@@ -79,21 +75,26 @@ func hasMain(p *core.Prog) bool {
 // source. FANGO_INTERNAL_PRINT_MAIN=1 switches codegen into the
 // differential harness's print-main mode.
 func emitGo(entry string, stderr io.Writer) ([]byte, bool) {
-	prog, ck, ok := compileFile(entry, stderr)
+	src, _, ok := emitGoManifest(entry, stderr)
+	return src, ok
+}
+
+func emitGoManifest(entry string, stderr io.Writer) ([]byte, []modules.ManifestEntry, bool) {
+	prog, ck, manifest, ok := compileFileManifest(entry, stderr)
 	if !ok {
-		return nil, false
+		return nil, nil, false
 	}
 	if !hasMain(prog) {
 		fmt.Fprintf(stderr, "fango: %s has no `main` — a program needs `main = ...`\n", entry)
-		return nil, false
+		return nil, nil, false
 	}
 	printMain := os.Getenv("FANGO_INTERNAL_PRINT_MAIN") == "1"
 	src, err := codegen.Emit(prog, ck.B, printMain)
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", err)
-		return nil, false
+		return nil, nil, false
 	}
-	return src, true
+	return src, manifest, true
 }
 
 // cmdCheck parses and typechecks only: quiet on success (exit 0),

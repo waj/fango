@@ -37,11 +37,50 @@ runs the cached executable. `check` runs through parsing, inference,
 elaboration, and Core validation without generating Go. `clean` removes the
 source file's persistent `.fango/build` artifacts.
 
-## Source layout and names
+## Modules, imports, and source layout
 
-A program is currently one source file. Top-level declarations begin in column
-1 and are visible only to declarations below them. Tabs are rejected; indent
-with spaces. `--` starts a line comment, and `{- ... -}` comments may nest.
+A program may consist of local modules. A named file begins with a module
+header, followed by all imports, followed by declarations:
+
+```fango
+module Geometry.Shape exposing (Shape(..), area)
+
+import Geometry.Point
+import Geometry.Point as Point
+import Geometry.Point exposing (Point, origin)
+import Geometry.Point as P exposing (Point, origin)
+```
+
+Every import permits qualified access through the full module name and, when
+present, its single-capitalized-name alias. An import `exposing` list also
+introduces selected names unqualified; it does not remove qualified access.
+Imports cannot be interspersed with declarations, and duplicate module imports
+or qualifier aliases are rejected.
+
+An exposing list is either `(..)` by itself or a non-empty comma-separated
+list. A lowercase item exports/imports a value or one effect operation. `Type`
+or `Effect` exposes the abstract type/effect label; `Type(..)` also exposes all
+constructors and `Effect(..)` all operations. Constructors cannot be selected
+individually, member lists cannot be partial, and imported declarations cannot
+be re-exported. Qualified names are accepted for values, operations,
+constructors, patterns, types, effect rows, and handler clauses.
+
+The entry file's directory is the source root. `Foo.Bar` resolves exactly to
+`Foo/Bar.fango` beneath it. Imported files require a header whose module name
+and casing match that path. A named entry must match its top-level filename,
+so `Main.fango` declares `Main`. Headerless entry files remain compatible,
+receive a private synthetic identity, and cannot themselves be imported.
+
+`build` and `run` use only the entry module's `main`; a dependency's `main` is
+an ordinary declaration. `check` does not require `main`. Imports expose only
+the direct module's declared public interface, never its dependencies. Import
+cycles are rejected with the complete cycle chain. The generated build
+directory includes `sources.json`, containing each transitive source's logical
+name, root-relative path, and SHA-256 hash for build invalidation.
+
+Top-level declarations begin in column 1 and are visible only to declarations
+below them within their module. Tabs are rejected; indent with spaces. `--`
+starts a line comment, and `{- ... -}` comments may nest.
 
 Lowercase names identify values, parameters, type variables, operations, and
 effect-row tails. Uppercase names identify types, effects, and constructors.

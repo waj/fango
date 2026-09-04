@@ -1,0 +1,5 @@
+module Geometry.Point exposing (Point(..), origin)
+
+type Point = Point Int Int
+
+origin = Point 20 22

@@ -257,6 +257,7 @@ var twoCharOps = []struct {
 }{
 	{"++", token.PLUSPLUS}, {"==", token.EQEQ}, {"/=", token.SLASHEQ},
 	{"<=", token.LTEQ}, {">=", token.GTEQ}, {"->", token.ARROW},
+	{"..", token.DOTDOT},
 }
 
 var oneCharOps = map[byte]token.Kind{
@@ -264,6 +265,7 @@ var oneCharOps = map[byte]token.Kind{
 	'/': token.SLASH, '(': token.LPAREN, ')': token.RPAREN, ',': token.COMMA,
 	'<': token.LT, '>': token.GT, ':': token.COLON, '|': token.PIPE,
 	'{': token.LBRACE, '}': token.RBRACE, '\\': token.BACKSLASH,
+	'.': token.DOT,
 }
 
 func (l *lexer) lexOperator(start int) {

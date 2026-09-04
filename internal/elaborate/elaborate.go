@@ -35,14 +35,14 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 		effects = append(effects, eff)
 	}
 	sort.Slice(effects, func(i, j int) bool { return effects[i].Unique < effects[j].Unique })
-	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effects}
+	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effects, Entry: ck.EntryName}
 	var errs []diag.Error
 	for _, info := range infos {
 		defs, declErrs := Decl(info, ck)
 		errs = append(errs, declErrs...)
 		p.Defs = append(p.Defs, defs...)
 		def := &defs[0]
-		if def.Name == "main" && len(def.Params) == 0 {
+		if def.Name == ck.EntryName && len(def.Params) == 0 {
 			if _, isFn := def.Type.(*types.TFun); isFn {
 				errs = append(errs, diag.Errorf(info.NameSpan, "BAD MAIN",
 					"`main` must be a value, or use the supported function form `main _ : () ->{IO} ()`."))

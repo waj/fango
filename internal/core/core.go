@@ -13,6 +13,8 @@ type Prog struct {
 	ADTs    []*types.ADTInfo
 	Effects []*types.EffectInfo
 	Defs    []Def
+	// Entry selects the entry module's main definition by canonical symbol.
+	Entry string
 }
 
 type EffectInstance struct {

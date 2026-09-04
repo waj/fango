@@ -37,6 +37,11 @@ func Parse(toks []token.Token, f *source.File) (*ast.Module, []diag.Error) {
 	p.lay.push(ctxDecl, 1)
 	m := &ast.Module{}
 	m.Header = p.parseHeader()
+	for p.peek().Kind == token.KwImport {
+		if im, ok := p.parseImport(); ok {
+			m.Imports = append(m.Imports, im)
+		}
+	}
 	for p.peek().Kind != token.EOF {
 		if d := p.parseDecl(); d != nil {
 			m.Decls = append(m.Decls, d)
@@ -63,10 +68,10 @@ func (p *parser) parseHeader() *ast.ModuleHeader {
 	}
 	p.next()
 	h := &ast.ModuleHeader{}
-	if t := p.peek(); t.Kind == token.UIDENT {
-		h.Name = t.Text
-		p.next()
+	if name, sp, ok := p.parseModuleName(); ok {
+		h.Name, h.NameSpan = name, sp
 	} else {
+		t := p.peek()
 		p.errorAt(t.Span, "SYNTAX PROBLEM", "After `module` I expect a capitalized module name.")
 		p.recoverToTopLevel(false)
 		return h
@@ -79,26 +84,126 @@ func (p *parser) parseHeader() *ast.ModuleHeader {
 		p.recoverToTopLevel(false)
 		return h
 	}
-	for {
-		t := p.peek()
-		if t.Kind == token.LIDENT || t.Kind == token.UIDENT {
-			h.Exposing = append(h.Exposing, t.Text)
-			p.next()
-		} else {
-			p.errorAt(t.Span, "SYNTAX PROBLEM", "I expect a name in the `exposing` list.")
-			p.recoverToTopLevel(false)
-			return h
-		}
-		if p.peek().Kind == token.COMMA {
-			p.next()
-			continue
-		}
-		break
-	}
-	if !p.expect(token.RPAREN, "I expect a closing `)` for the `exposing` list.") {
+	ex, ok := p.parseExposingBody()
+	h.Exposing = ex
+	if !ok {
 		p.recoverToTopLevel(false)
 	}
 	return h
+}
+
+func (p *parser) parseModuleName() (string, source.Span, bool) {
+	t := p.peek()
+	if t.Kind != token.UIDENT {
+		return "", t.Span, false
+	}
+	p.next()
+	name, sp := t.Text, t.Span
+	for p.peek().Kind == token.DOT {
+		p.next()
+		part := p.peek()
+		if part.Kind != token.UIDENT {
+			return "", part.Span, false
+		}
+		p.next()
+		name, sp = name+"."+part.Text, sp.Merge(part.Span)
+	}
+	return name, sp, true
+}
+
+// parseQualifiedName consumes `A.B.name` or `A.B.Name`. The caller has
+// already established that the first token is capitalized.
+func (p *parser) parseQualifiedName() (string, token.Kind, source.Span) {
+	first := p.next()
+	return p.parseQualifiedNameAfterFirst(first)
+}
+
+func (p *parser) parseQualifiedNameAfterFirst(first token.Token) (string, token.Kind, source.Span) {
+	name, final, sp := first.Text, first.Kind, first.Span
+	for p.peek().Kind == token.DOT {
+		p.next()
+		part := p.peek()
+		if part.Kind != token.UIDENT && part.Kind != token.LIDENT {
+			p.errorAt(part.Span, "SYNTAX PROBLEM", "I expect a name after `.`.")
+			return name, final, sp
+		}
+		p.next()
+		name, final, sp = name+"."+part.Text, part.Kind, sp.Merge(part.Span)
+		if final == token.LIDENT {
+			break
+		}
+	}
+	return name, final, sp
+}
+
+func (p *parser) parseExposingBody() (ast.Exposing, bool) {
+	var ex ast.Exposing
+	if p.peek().Kind == token.DOTDOT {
+		p.next()
+		ex.All = true
+		return ex, p.expect(token.RPAREN, "I expect a closing `)` for the `exposing` list.")
+	}
+	if p.peek().Kind == token.RPAREN {
+		p.errorAt(p.peek().Span, "EMPTY EXPOSING LIST", "An `exposing` list cannot be empty; use `(..)` or list at least one name.")
+		p.next()
+		return ex, false
+	}
+	for {
+		t := p.peek()
+		if t.Kind != token.LIDENT && t.Kind != token.UIDENT {
+			p.errorAt(t.Span, "SYNTAX PROBLEM", "I expect a name in the `exposing` list.")
+			return ex, false
+		}
+		p.next()
+		item := ast.ExposeItem{Name: t.Text, Sp: t.Span}
+		if t.Kind == token.UIDENT && p.peek().Kind == token.LPAREN {
+			p.next()
+			if !p.expect(token.DOTDOT, "Only `(..)` is supported after a type or effect name.") ||
+				!p.expect(token.RPAREN, "I expect `)` after `..`.") {
+				return ex, false
+			}
+			item.All = true
+		}
+		ex.Items = append(ex.Items, item)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.next()
+	}
+	return ex, p.expect(token.RPAREN, "I expect a closing `)` for the `exposing` list.")
+}
+
+func (p *parser) parseImport() (ast.Import, bool) {
+	p.next()
+	name, sp, ok := p.parseModuleName()
+	if !ok {
+		p.errorAt(p.peek().Span, "SYNTAX PROBLEM", "After `import` I expect a module name like `Geometry.Point`.")
+		p.recoverToTopLevel(false)
+		return ast.Import{}, false
+	}
+	im := ast.Import{Module: name, ModuleSpan: sp}
+	if p.peek().Kind == token.KwAs {
+		p.next()
+		a := p.peek()
+		if a.Kind != token.UIDENT {
+			p.errorAt(a.Span, "SYNTAX PROBLEM", "An import alias must be one capitalized identifier.")
+			return im, false
+		}
+		p.next()
+		im.Alias, im.AliasSpan = a.Text, a.Span
+	}
+	if p.peek().Kind == token.KwExposing {
+		p.next()
+		if !p.expect(token.LPAREN, "I expect a parenthesized list after `exposing`.") {
+			return im, false
+		}
+		ex, ok := p.parseExposingBody()
+		im.Exposing = &ex
+		if !ok {
+			return im, false
+		}
+	}
+	return im, true
 }
 
 func (p *parser) parseDecl() ast.Decl {
@@ -553,7 +658,12 @@ func (p *parser) parseEffRow() *ast.EffRow {
 			return nil
 		}
 		p.next()
-		label := ast.EffLabelExpr{Name: t.Text, NameSp: t.Span}
+		name, final, sp := p.parseQualifiedNameAfterFirst(t)
+		if final != token.UIDENT {
+			p.errorAt(sp, "SYNTAX PROBLEM", "An effect name must end in a capitalized identifier.")
+			return nil
+		}
+		label := ast.EffLabelExpr{Name: name, NameSp: sp}
 		for isTypeAtomStart(p.peekInExpr().Kind) {
 			arg := p.parseTypeAtom()
 			if arg == nil {
@@ -613,8 +723,12 @@ func (p *parser) parseTypeAtom() ast.TypeExpr {
 	t := p.peekInExpr()
 	switch t.Kind {
 	case token.UIDENT:
-		p.next()
-		return &ast.TName{Name: t.Text, Sp: t.Span}
+		name, final, sp := p.parseQualifiedName()
+		if final != token.UIDENT {
+			p.errorAt(sp, "SYNTAX PROBLEM", "A type name must end in a capitalized identifier.")
+			return nil
+		}
+		return &ast.TName{Name: name, Sp: sp}
 	case token.LIDENT:
 		p.next()
 		return &ast.TVarName{Name: t.Text, Sp: t.Span}
@@ -792,11 +906,23 @@ func (p *parser) parseHandle() ast.Expr {
 	for {
 		p.stmtStart = p.pos
 		op := p.peekInExpr()
-		if op.Kind != token.LIDENT {
+		if op.Kind != token.LIDENT && op.Kind != token.UIDENT {
 			p.errorAt(op.Span, "SYNTAX PROBLEM", "I expect a handler clause like `print value -> expression`.")
 			return nil
 		}
-		p.next()
+		var opName string
+		var opSpan source.Span
+		if op.Kind == token.UIDENT {
+			var final token.Kind
+			opName, final, opSpan = p.parseQualifiedName()
+			if final != token.LIDENT {
+				p.errorAt(opSpan, "SYNTAX PROBLEM", "A qualified handler operation must end in a lowercase name.")
+				return nil
+			}
+		} else {
+			p.next()
+			opName, opSpan = op.Text, op.Span
+		}
 		params := p.parseClauseParams()
 		arrow := p.peekInExpr()
 		if !p.expect(token.ARROW, "I expect `->` after the handler clause parameters.") {
@@ -806,7 +932,7 @@ func (p *parser) parseHandle() ast.Expr {
 		if clauseBody == nil {
 			return nil
 		}
-		if op.Text == "return" {
+		if opName == "return" {
 			if len(params) != 1 {
 				p.errorAt(op.Span, "SYNTAX PROBLEM", "A `return` clause needs exactly one parameter.")
 				return nil
@@ -817,7 +943,7 @@ func (p *parser) parseHandle() ast.Expr {
 			}
 			result.Return = &ast.ReturnClause{Param: params[0], Body: clauseBody, Sp: op.Span}
 		} else {
-			result.Clauses = append(result.Clauses, ast.HandleClause{Op: op.Text, OpSpan: op.Span, Params: params, Body: clauseBody})
+			result.Clauses = append(result.Clauses, ast.HandleClause{Op: opName, OpSpan: opSpan, Params: params, Body: clauseBody})
 		}
 		nt := p.peek()
 		if nt.Kind == token.EOF || !p.lay.atBranchCol(nt.Pos()) {
@@ -925,7 +1051,11 @@ func (p *parser) parseCase() ast.Expr {
 func (p *parser) parsePattern() ast.Pattern {
 	t := p.peekInExpr()
 	if t.Kind == token.UIDENT {
-		p.next()
+		name, final, sp := p.parseQualifiedName()
+		if final != token.UIDENT {
+			p.errorAt(sp, "SYNTAX PROBLEM", "A constructor pattern must end in a capitalized name.")
+			return nil
+		}
 		var args []ast.Pattern
 		for isPatternAtomStart(p.peekInExpr().Kind) {
 			a := p.parsePatternAtom()
@@ -934,7 +1064,7 @@ func (p *parser) parsePattern() ast.Pattern {
 			}
 			args = append(args, a)
 		}
-		return &ast.PCtor{Name: t.Text, NameSpan: t.Span, Args: args}
+		return &ast.PCtor{Name: name, NameSpan: sp, Args: args}
 	}
 	return p.parsePatternAtom()
 }
@@ -958,8 +1088,12 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 		p.next()
 		return &ast.PVar{Name: t.Text, Sp: t.Span}
 	case token.UIDENT:
-		p.next()
-		return &ast.PCtor{Name: t.Text, NameSpan: t.Span}
+		name, final, sp := p.parseQualifiedName()
+		if final != token.UIDENT {
+			p.errorAt(sp, "SYNTAX PROBLEM", "A constructor pattern must end in a capitalized name.")
+			return nil
+		}
+		return &ast.PCtor{Name: name, NameSpan: sp}
 	case token.INT:
 		p.next()
 		v, _ := strconv.ParseInt(t.Text, 10, 64) // overflow reported by the lexer
@@ -1058,8 +1192,11 @@ func (p *parser) parseAtom() ast.Expr {
 		p.next()
 		return &ast.Var{Name: t.Text, Sp: t.Span}
 	case token.UIDENT:
-		p.next()
-		return &ast.Ctor{Name: t.Text, Sp: t.Span}
+		name, final, sp := p.parseQualifiedName()
+		if final == token.LIDENT {
+			return &ast.Var{Name: name, Sp: sp}
+		}
+		return &ast.Ctor{Name: name, Sp: sp}
 	case token.KwResume:
 		p.next()
 		return &ast.Resume{Sp: t.Span}

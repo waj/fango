@@ -16,16 +16,8 @@
 6:1 LIDENT f
 6:3 EQ =
 6:5 INT 1
+6:6 DOT .
 7:1 LIDENT g
 7:3 EQ =
 7:5 LIDENT x1e2
 8:1 EOF
--- errors --
--- UNEXPECTED CHARACTER --------------------------- floats.fango
-
-I do not recognize this character:
-
-    '.'
-
-6| f = 1.
-        ^

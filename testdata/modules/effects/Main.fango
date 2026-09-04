@@ -1,0 +1,9 @@
+module Main exposing (main)
+
+import Support.Pick as P exposing (Pick)
+
+chosen =
+    handle P.pick() of
+        P.pick () -> resume True
+
+main = if chosen then 42 else 0

@@ -41,9 +41,9 @@ func Show(v Value, ty types.Type, b *types.Builtins) string {
 // field's dynamic value type — bijective with its solved static type.
 func showCtorVal(v *CtorVal, nested bool) string {
 	if len(v.Fields) == 0 {
-		return v.Ctor.Name
+		return types.SurfaceName(v.Ctor.Name)
 	}
-	s := v.Ctor.Name
+	s := types.SurfaceName(v.Ctor.Name)
 	for _, f := range v.Fields {
 		s += " " + showFieldValue(f)
 	}

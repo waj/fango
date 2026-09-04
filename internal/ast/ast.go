@@ -374,13 +374,33 @@ type OpSig struct {
 
 func (*EffectDecl) isDecl() {}
 
-// ModuleHeader is parsed and ignored until the module system is designed.
 type ModuleHeader struct {
 	Name     string
-	Exposing []string
+	NameSpan source.Span
+	Exposing Exposing
+}
+
+type Exposing struct {
+	All   bool
+	Items []ExposeItem
+}
+
+type ExposeItem struct {
+	Name string
+	All  bool
+	Sp   source.Span
+}
+
+type Import struct {
+	Module     string
+	ModuleSpan source.Span
+	Alias      string
+	AliasSpan  source.Span
+	Exposing   *Exposing
 }
 
 type Module struct {
-	Header *ModuleHeader
-	Decls  []Decl
+	Header  *ModuleHeader
+	Imports []Import
+	Decls   []Decl
 }

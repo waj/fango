@@ -23,6 +23,8 @@ const (
 	LPAREN // (
 	RPAREN // )
 	COMMA  // ,
+	DOT    // .
+	DOTDOT // ..
 
 	// Remaining operators.
 	PLUSPLUS // ++
@@ -42,6 +44,8 @@ const (
 
 	// Reserved keywords.
 	KwModule
+	KwImport
+	KwAs
 	KwExposing
 	KwLet
 	KwIn
@@ -60,12 +64,12 @@ var kindNames = map[Kind]string{
 	EOF: "EOF", INT: "INT", FLOAT: "FLOAT", STRING: "STRING",
 	LIDENT: "LIDENT", UIDENT: "UIDENT",
 	EQ: "EQ", PLUS: "PLUS", MINUS: "MINUS", STAR: "STAR", SLASH: "SLASH",
-	LPAREN: "LPAREN", RPAREN: "RPAREN", COMMA: "COMMA",
+	LPAREN: "LPAREN", RPAREN: "RPAREN", COMMA: "COMMA", DOT: "DOT", DOTDOT: "DOTDOT",
 	PLUSPLUS: "PLUSPLUS", EQEQ: "EQEQ", SLASHEQ: "SLASHEQ",
 	LT: "LT", GT: "GT", LTEQ: "LTEQ", GTEQ: "GTEQ",
 	ARROW: "ARROW", BACKSLASH: "BACKSLASH", COLON: "COLON", PIPE: "PIPE",
 	LBRACE: "LBRACE", RBRACE: "RBRACE", UNDERSCORE: "UNDERSCORE",
-	KwModule: "module", KwExposing: "exposing", KwLet: "let", KwIn: "in",
+	KwModule: "module", KwImport: "import", KwAs: "as", KwExposing: "exposing", KwLet: "let", KwIn: "in",
 	KwIf: "if", KwThen: "then", KwElse: "else", KwCase: "case", KwOf: "of",
 	KwType: "type", KwEffect: "effect", KwHandle: "handle", KwResume: "resume",
 }
@@ -74,7 +78,7 @@ func (k Kind) String() string { return kindNames[k] }
 
 // Keywords maps source text to reserved-keyword kinds.
 var Keywords = map[string]Kind{
-	"module": KwModule, "exposing": KwExposing,
+	"module": KwModule, "import": KwImport, "as": KwAs, "exposing": KwExposing,
 	"let": KwLet, "in": KwIn,
 	"if": KwIf, "then": KwThen, "else": KwElse,
 	"case": KwCase, "of": KwOf,
