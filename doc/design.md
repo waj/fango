@@ -72,6 +72,26 @@ is currently rejected. These restrictions let both backends implement handlers
 with stack-local evidence and direct returns, without goroutines, channels,
 panic sentinels, or continuation objects.
 
+The shared runtime also provides a dormant general-handler engine for generated
+code in a later compiler increment. `RunGeneral` runs a handled body in one
+goroutine. `Perform` parks that goroutine on private channels and presents the
+handler with an opaque operation payload and continuation. Resuming transfers
+control back to the body and drives later operations or completion; the normal
+return transformation runs exactly once. A continuation is concurrency-safe
+and strictly one-shot: its single terminal action is either `Resume` or
+`Discard`. `Discard` unwinds the parked body and waits for its deferred cleanup,
+leaving the operation clause responsible for the handled result.
+
+A pending general continuation may outlive the handler callback that received
+it and remains live until explicitly resumed or discarded. Handler failure
+expires pending work and waits for body cleanup. Stable runtime errors
+distinguish consumed continuations, expired continuations, and operations on a
+closed handler. Panics in bodies, handler clauses, and return clauses are
+recovered at runtime boundaries and reported as structured errors; private
+unwind values do not escape as user-visible panics. Termination is centralized
+in the parked-body protocol so cancellation can later share its shutdown path.
+The compiler and interpreter do not yet emit or call this general engine.
+
 ## Compiler pipeline
 
 The batch pipeline is:

@@ -10,11 +10,9 @@ the archive.
 
 This is the next compiler/runtime checkpoint.
 
-- Add a continuation runtime for general one-shot handlers, including
-  continuation escape and explicit abandonment (`Discard` or its eventual
-  equivalent).
 - Permit aborting operation clauses and non-tail continuation use with precise
-  one-shot and liveness checks.
+  one-shot and liveness checks, and choose the fango surface spelling for
+  explicit continuation abandonment.
 - Support operation-local and result polymorphism through inference,
   elaboration, generated Go, and the interpreter.
 - Preserve deterministic evidence passing and lexical restoration across
@@ -26,8 +24,7 @@ This is the next compiler/runtime checkpoint.
   remains valid; use benchmark evidence before changing its representation.
 
 Open decisions include the surface spelling and semantics of continuation
-abandonment, whether continuations remain strictly one-shot, and how runtime
-failure is reported for invalid liveness transitions.
+abandonment and the compiler diagnostics for invalid liveness transitions.
 
 ## REPL hardening
 
