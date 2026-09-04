@@ -8,3 +8,6 @@ import "embed"
 
 //go:embed runtime/fangort/*.go
 var FangortFS embed.FS
+
+//go:embed stdlib/*.fango
+var StdlibFS embed.FS

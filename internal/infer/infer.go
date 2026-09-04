@@ -205,6 +205,34 @@ func (ck *Checker) seedIO() {
 	}
 }
 
+// EnableNativeOperation installs a compiler-bundled operation selected by the
+// loaded module graph. Unlike print and readLine, these operations are not in
+// the implicit surface environment and cannot be reached without an import.
+func (ck *Checker) EnableNativeOperation(name string) bool {
+	if name != "IO.write" {
+		return false
+	}
+	if ck.Operations[name] != nil {
+		return true
+	}
+	label := types.EffLabel{Unique: ck.IO.Unique, Name: ck.IO.Name}
+	tail := ck.Sup.FreshRigid(types.RowVar)
+	ty := &types.TFun{
+		Arg: ck.B.String,
+		Eff: types.Row{Labels: []types.EffLabel{label}, Tail: tail},
+		Ret: ck.B.Unit,
+	}
+	op := &types.EffectOp{
+		Owner: ck.IO, Index: len(ck.IO.Ops), Name: name, Arity: 1,
+		ParamTypes: []types.Type{ck.B.String}, ResultType: ck.B.Unit, Builtin: true,
+		Scheme: types.Scheme{Vars: []*types.TVar{tail}, Body: ty},
+	}
+	ck.IO.Ops = append(ck.IO.Ops, op)
+	ck.Operations[name] = op
+	ck.Env.Bind(name, op.Scheme)
+	return true
+}
+
 type DeclInfo struct {
 	Name     string
 	NameSpan source.Span

@@ -146,3 +146,16 @@ func PrintInt(v int64)     { fmt.Println(ShowInt(v)) }
 func PrintFloat(v float64) { fmt.Println(ShowFloat(v)) }
 func PrintString(v string) { fmt.Println(ShowString(v)) }
 func PrintBool(v bool)     { fmt.Println(ShowBool(v)) }
+
+// WriteStringTo writes a String verbatim without adding a line ending.
+func WriteStringTo(w io.Writer, v string) error {
+	_, err := io.WriteString(w, v)
+	return err
+}
+
+// WriteString is the compiled backend implementation of IO.write.
+func WriteString(v string) {
+	if err := WriteStringTo(os.Stdout, v); err != nil {
+		panic(err)
+	}
+}

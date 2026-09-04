@@ -344,7 +344,7 @@ func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
 	case len(args) == missing: // saturated: a direct call / struct literal
 		coreArgs := make([]core.Expr, len(args))
 		for i, a := range args {
-			coreArgs[i] = adaptFunctionValue(el.expr(a), argTys[len(c.pre)+i])
+			coreArgs[i] = el.adaptFunctionValue(el.expr(a), argTys[len(c.pre)+i])
 		}
 		return c.saturatedApp(coreArgs)
 
@@ -363,22 +363,44 @@ func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
 // adaptFunctionValue retags an eta-expanded callback to a generic callee's
 // erased row ABI. Its concrete handler evidence remains captured by the
 // wrapper at the creation site.
-func adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
+func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 	if types.Equal(e.Type(), want) {
 		return e
 	}
-	if _, ok := want.(*types.TFun); !ok {
+	wantFn, wantOK := want.(*types.TFun)
+	_, actualOK := e.Type().(*types.TFun)
+	if !wantOK || !actualOK {
 		return e
 	}
 	switch e := e.(type) {
 	case *core.Lambda:
+		e.Body = el.adaptFunctionValue(e.Body, wantFn.Ret)
 		e.Ty = want
+		return e
 	case *core.If:
-		e.Then = adaptFunctionValue(e.Then, want)
-		e.Else = adaptFunctionValue(e.Else, want)
+		e.Then = el.adaptFunctionValue(e.Then, want)
+		e.Else = el.adaptFunctionValue(e.Else, want)
 		e.Ty = want
+		return e
 	}
-	return e
+	if !isAtom(e) {
+		name := fmt.Sprintf("_adaptValue%d", el.tmp)
+		el.tmp++
+		body := el.adaptFunctionValue(&core.VarRef{Name: name, Ty: e.Type()}, want)
+		return &core.Let{Name: name, Rhs: e, Body: body, Ty: want}
+	}
+
+	// A local function reference cannot itself be retagged: its VarRef must
+	// retain the binding's concrete arrow. Eta-expand it and retag the new
+	// wrapper instead. This is representation-safe because erased open-row
+	// effects are executed by the wrapped call (and any custom evidence is
+	// supplied there), while the generic callee receives its row-erased ABI.
+	name := fmt.Sprintf("_adapt%d", el.tmp)
+	el.tmp++
+	arg := &core.VarRef{Name: name, Ty: wantFn.Arg}
+	body := el.valueApp(e, arg)
+	body = el.adaptFunctionValue(body, wantFn.Ret)
+	return &core.Lambda{Param: name, Body: body, Ty: &types.TFun{Arg: wantFn.Arg, Eff: wantFn.Eff, Ret: wantFn.Ret}}
 }
 
 // partial eta-expands an unsaturated worker or constructor application into
@@ -401,7 +423,7 @@ func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 	var hoists []hoist
 	coreArgs := make([]core.Expr, 0, arity)
 	for i, a := range given {
-		ca := adaptFunctionValue(el.expr(a), argTys[len(c.pre)+i])
+		ca := el.adaptFunctionValue(el.expr(a), argTys[len(c.pre)+i])
 		if isAtom(ca) {
 			coreArgs = append(coreArgs, ca)
 			continue

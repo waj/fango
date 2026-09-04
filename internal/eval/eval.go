@@ -283,6 +283,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		case "readLine":
 			s, err := fangort.ReadLineFrom(in.ioctx.Reader)
 			return s, err
+		case "IO.write":
+			err := fangort.WriteStringTo(in.ioctx.Writer, args[0].(string))
+			return struct{}{}, err
 		default:
 			return nil, fmt.Errorf("eval: unhandled effect operation `%s.%s`", e.Effect.Name, e.Op.Name)
 		}

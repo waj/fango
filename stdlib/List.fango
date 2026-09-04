@@ -1,0 +1,14 @@
+module List exposing (List(..), range, each)
+
+type List a = Nil | Cons a (List a)
+
+range start end =
+    if start > end then Nil else Cons start (range (start + 1) end)
+
+each : (a ->{e} ()) -> List a ->{e} ()
+each action values =
+    case values of
+        Nil -> ()
+        Cons value rest ->
+            action value
+            each action rest

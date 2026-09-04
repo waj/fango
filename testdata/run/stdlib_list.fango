@@ -1,0 +1,23 @@
+import IO exposing (write)
+import List
+
+mark value = if value < 2 then IO.write "a" else IO.write "b"
+
+ints : List.List Int
+ints = List.range 0 2
+
+floats : List.List Float
+floats = List.range 0 2
+
+empty : List.List Int
+empty = List.range 3 2
+
+main() =
+    List.each mark ints
+    IO.write "|"
+    List.each mark floats
+    write "|"
+    List.each (\_ -> IO.write "bad") empty
+    IO.write ""
+    IO.write "二"
+    print "done"

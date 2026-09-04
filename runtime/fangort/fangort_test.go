@@ -104,6 +104,28 @@ func TestReadLineFrom(t *testing.T) {
 	}
 }
 
+func TestWriteStringTo(t *testing.T) {
+	var out strings.Builder
+	if err := WriteStringTo(&out, "one"); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteStringTo(&out, " 二"); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); got != "one 二" {
+		t.Fatalf("WriteStringTo output = %q", got)
+	}
+
+	want := errors.New("broken output")
+	if err := WriteStringTo(errorWriter{want}, "x"); !errors.Is(err, want) {
+		t.Fatalf("WriteStringTo error = %v, want %v", err, want)
+	}
+}
+
 type errorReader struct{ err error }
 
 func (r errorReader) Read([]byte) (int, error) { return 0, r.err }
+
+type errorWriter struct{ err error }
+
+func (w errorWriter) Write([]byte) (int, error) { return 0, w.err }

@@ -6,12 +6,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	fango "github.com/waj/fango"
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/lexer"
@@ -19,8 +22,8 @@ import (
 	"github.com/waj/fango/internal/source"
 )
 
-// Provider is the package-resolution seam. This checkpoint wires only the
-// entry-directory filesystem implementation.
+// Provider is the package-resolution seam shared by local and compiler-bundled
+// modules.
 type Provider interface {
 	Source(module string) (path string, content []byte, err error)
 }
@@ -66,6 +69,21 @@ func (p FSProvider) Source(module string) (string, []byte, error) {
 	return filepath.ToSlash(rel), b, err
 }
 
+type BundledProvider struct{}
+
+func (BundledProvider) Source(module string) (string, []byte, error) {
+	rel := strings.ReplaceAll(module, ".", "/") + ".fango"
+	b, err := fs.ReadFile(fango.StdlibFS, "stdlib/"+rel)
+	return "<stdlib>/" + rel, b, err
+}
+
+func nativeOperations(module string) []string {
+	if module == "IO" {
+		return []string{"write"}
+	}
+	return nil
+}
+
 type ManifestEntry struct {
 	Module string `json:"module"`
 	Path   string `json:"path"`
@@ -73,9 +91,10 @@ type ManifestEntry struct {
 }
 
 type Result struct {
-	Module   *ast.Module
-	Entry    string
-	Manifest []ManifestEntry
+	Module           *ast.Module
+	Entry            string
+	Manifest         []ManifestEntry
+	NativeOperations []string
 }
 
 type node struct {
@@ -84,6 +103,7 @@ type node struct {
 	mod        *ast.Module
 	iface      *iface
 	private    bool
+	nativeOps  []string
 }
 
 type iface struct {
@@ -122,6 +142,12 @@ func Load(entry string) (*Result, []diag.Error) {
 	if !private {
 		entryName = m.Header.Name
 	}
+	bundledProvider := BundledProvider{}
+	if !private {
+		if path, _, bundleErr := bundledProvider.Source(entryName); bundleErr == nil {
+			return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "RESERVED MODULE", "Module `%s` is bundled with fango as `%s`; local modules cannot use bundled names.", entryName, path)}
+		}
+	}
 	wantEntry := strings.TrimSuffix(filepath.Base(abs), filepath.Ext(abs))
 	if !private && m.Header.Name != wantEntry {
 		return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "MODULE/PATH MISMATCH", "The entry file `%s` must declare module `%s`, but declares `%s`.", filepath.Base(abs), wantEntry, m.Header.Name)}
@@ -133,7 +159,24 @@ func Load(entry string) (*Result, []diag.Error) {
 		if nodes[name] != nil {
 			return
 		}
-		path, b, readErr := provider.Source(name)
+		localPath, localContent, localErr := provider.Source(name)
+		bundlePath, bundleContent, bundleErr := bundledProvider.Source(name)
+		path, b, readErr, bundled := localPath, localContent, localErr, false
+		if bundleErr == nil {
+			if localErr == nil {
+				errs = append(errs, diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with fango as `%s`; remove or rename the local `%s`.", name, bundlePath, localPath))
+				return
+			}
+			if _, caseCollision := localErr.(pathCaseError); caseCollision {
+				errs = append(errs, diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with fango as `%s`; a case-insensitive local path also conflicts with that reserved name.", name, bundlePath))
+				return
+			}
+			if !errors.Is(localErr, fs.ErrNotExist) {
+				errs = append(errs, diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with fango as `%s`; the local `%s` also occupies that reserved path.", name, bundlePath, localPath))
+				return
+			}
+			path, b, readErr, bundled = bundlePath, bundleContent, nil, true
+		}
 		if readErr != nil {
 			if ce, ok := readErr.(pathCaseError); ok {
 				errs = append(errs, diag.Errorf(at, "MODULE PATH CASING", "Module `%s` requires exact path casing; expected `%s` but found `%s`.", name, ce.want, ce.found))
@@ -157,6 +200,9 @@ func Load(entry string) (*Result, []diag.Error) {
 			return
 		}
 		n := &node{name: name, path: path, content: b, mod: mm}
+		if bundled {
+			n.nativeOps = nativeOperations(name)
+		}
 		nodes[name] = n
 		for _, im := range mm.Imports {
 			load(im.Module, im.ModuleSpan)
@@ -232,16 +278,20 @@ func Load(entry string) (*Result, []diag.Error) {
 		return nil, errs
 	}
 	manifest := make([]ManifestEntry, 0, len(order))
+	var nativeOps []string
 	for _, name := range order {
 		n := nodes[name]
 		h := sha256.Sum256(n.content)
 		manifest = append(manifest, ManifestEntry{Module: name, Path: n.path, SHA256: hex.EncodeToString(h[:])})
+		for _, op := range n.nativeOps {
+			nativeOps = append(nativeOps, canonical(name, op))
+		}
 	}
 	entrySymbol := "main"
 	if !private {
 		entrySymbol = canonical(entryName, "main")
 	}
-	return &Result{Module: merged, Entry: entrySymbol, Manifest: manifest}, nil
+	return &Result{Module: merged, Entry: entrySymbol, Manifest: manifest, NativeOperations: nativeOps}, nil
 }
 
 func parse(f *source.File) (*ast.Module, []diag.Error) {
@@ -297,6 +347,10 @@ func buildInterface(n *node, errs []diag.Error) (*iface, []diag.Error) {
 		return newIface(), errs
 	}
 	all := newIface()
+	for _, name := range n.nativeOps {
+		all.values[name] = canonical(n.name, name)
+		all.ops[name] = canonical(n.name, name)
+	}
 	for _, d := range n.mod.Decls {
 		switch d := d.(type) {
 		case *ast.ValueDecl:

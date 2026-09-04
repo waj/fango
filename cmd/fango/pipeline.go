@@ -30,6 +30,12 @@ func compileFileManifest(entry string, stderr io.Writer) (*core.Prog, *infer.Che
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
+	for _, name := range loaded.NativeOperations {
+		if !ck.EnableNativeOperation(name) {
+			fmt.Fprintf(stderr, "fango: internal compiler error: unknown bundled native operation %q\n", name)
+			return nil, nil, nil, false
+		}
+	}
 	ck.EntryName = loaded.Entry
 	infos, inferErrs := ck.Module(loaded.Module)
 	if report(stderr, inferErrs) {

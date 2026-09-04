@@ -65,18 +65,25 @@ individually, member lists cannot be partial, and imported declarations cannot
 be re-exported. Qualified names are accepted for values, operations,
 constructors, patterns, types, effect rows, and handler clauses.
 
-The entry file's directory is the source root. `Foo.Bar` resolves exactly to
-`Foo/Bar.fango` beneath it. Imported files require a header whose module name
-and casing match that path. A named entry must match its top-level filename,
-so `Main.fango` declares `Main`. Headerless entry files remain compatible,
-receive a private synthetic identity, and cannot themselves be imported.
+The entry file's directory is the source root. A non-bundled `Foo.Bar` resolves
+exactly to `Foo/Bar.fango` beneath it. Imported files require a header whose
+module name and casing match that path. A named entry must match its top-level
+filename, so `Main.fango` declares `Main`. Headerless entry files remain
+compatible, receive a private synthetic identity, and cannot themselves be
+imported.
+
+The compiler also contains explicitly imported standard-library modules.
+Their names are reserved: a named entry or local module that has the same name
+is rejected with `RESERVED MODULE`, rather than replacing the bundled module.
+There is no implicit standard-library prelude.
 
 `build` and `run` use only the entry module's `main`; a dependency's `main` is
 an ordinary declaration. `check` does not require `main`. Imports expose only
 the direct module's declared public interface, never its dependencies. Import
 cycles are rejected with the complete cycle chain. The generated build
 directory includes `sources.json`, containing each transitive source's logical
-name, root-relative path, and SHA-256 hash for build invalidation.
+name, path, and SHA-256 hash for build invalidation. Local paths are relative
+to the source root; bundled paths begin with `<stdlib>/`.
 
 Top-level declarations begin in column 1 and are visible only to declarations
 below them within their module. Tabs are rejected; indent with spaces. `--`
@@ -100,6 +107,45 @@ hypotenuse =
 Bindings are eager and sequential. Unit-valued expression statements may be
 placed before the final result, which is how effectful work is sequenced.
 There is no `let ... in` expression.
+
+## Bundled standard library
+
+The standard library ships with the compiler, has no separately selected
+version, and is experimental: its API may evolve before a future stability
+milestone. Every module must be imported explicitly.
+
+`List` exposes the following algebraic type:
+
+```fango
+module List exposing (List(..), range, each)
+
+type List a = Nil | Cons a (List a)
+```
+
+Its inferred public function types are
+`range : number -> number -> List number` and
+`each : (a ->{e} ()) -> List a ->{e} ()`.
+
+`range start end` produces ascending values by adding one, including `end`
+when that value is reached, and returns `Nil` immediately when `start > end`.
+It works at both `Int` and `Float`; callers must use finite bounds because the
+ordinary recursive implementation is not guaranteed to terminate for `NaN`
+or positive infinity. `each action values` applies `action` from left to right
+and propagates its effects.
+
+`IO` currently exposes newline-free string output:
+
+```fango
+import IO
+
+main() =
+    IO.write "same line"
+    print " then newline"
+```
+
+`IO.write : String ->{IO} ()` writes the string exactly as provided without a
+trailing newline. It is a native operation available only through an `IO`
+import. The existing global `print` and `readLine` names remain available.
 
 ## Values and operators
 
@@ -269,7 +315,9 @@ the surrounding row.
 
 Builtin `print : a ->{IO} ()` displays supported ground values and ADTs.
 `readLine : () ->{IO} String` reads one line and returns the text without its
-line ending. Call it as `readLine()` (or equivalently `readLine ()`).
+line ending. Call it as `readLine()` (or equivalently `readLine ()`). The
+explicitly imported `IO.write` operation is described under the bundled
+standard library.
 
 ## Entry points
 

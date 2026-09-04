@@ -6,25 +6,21 @@ available to users belongs in [the reference](reference.md). Completed work is
 removed after durable results are promoted to those documents; Git history is
 the archive.
 
-## Standard library
+## Standard library expansion
 
-Build the first standard library on the module system so it exercises the same
-language and import rules as user code.
+Continue selecting APIs from concrete programs rather than attempting broad
+coverage.
 
-- Choose a small initial API from concrete programs rather than attempting
-  broad coverage: foundational `List`, `Maybe`, and `Result` operations plus
-  the text and IO utilities needed by those programs.
-- Decide how bundled library modules are discovered and versioned, and whether
-  any prelude names are implicit or every dependency is imported explicitly.
-- Prefer fango implementations where they are adequate; add native primitives
-  only where semantics or benchmark evidence justify them.
-- Give library modules the same differential, diagnostic, and documentation
-  coverage as user programs.
+- Add `Maybe` and `Result`, and expand `List`, text, numeric, and IO operations
+  only as subsequent examples require them.
+- Prefer fango implementations; extend the imported native-export catalog only
+  for semantics source code cannot express or when benchmark evidence demands
+  it.
+- Keep adding differential, diagnostic, documentation, and performance
+  coverage with each library increment.
 
-Open decisions include provider precedence when bundled and local modules have
-the same name, the prelude policy, API stability expectations, and the boundary
-between compiler primitives and ordinary fango modules. Package distribution,
-dependency fetching, and configurable source roots remain deferred.
+Independent library versioning, package distribution, dependency fetching,
+and configurable source roots remain deferred.
 
 ## REPL hardening
 

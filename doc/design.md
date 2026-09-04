@@ -13,7 +13,8 @@ builds, and generated programs whose representation and calls are close to
 ordinary Go.
 
 The implementation stays deliberately small: one Go toolchain, no compiler
-framework dependencies, and a local source-module model. Laziness,
+framework dependencies, a local source-module model, and a compiler-bundled
+experimental standard library. Laziness,
 self-hosting, a package manager, and a general optimizer are not current
 features.
 
@@ -106,12 +107,20 @@ not synthesize layout tokens. The recursive-descent parser applies the offside
 rule from token columns and uses precedence climbing for operators. AST and
 diagnostic dump formats are stable golden-test interfaces.
 
-Batch compilation first discovers the complete local module graph. The entry
-directory is the source root, and `Foo.Bar` maps only to `Foo/Bar.fango`.
-Modules are parsed and their declared public interfaces validated before a
+Batch compilation first discovers the complete module graph. The entry
+directory provides local modules, where `Foo.Bar` maps to `Foo/Bar.fango`, and
+an embedded provider supplies standard-library modules. Bundled names are
+reserved rather than silently shadowed by local files. Modules from both
+providers are parsed and their declared public interfaces validated before a
 deterministic dependency-first topological order is chosen, with lexical
-tie-breaking. A source-provider interface isolates discovery policy; the only
-implemented provider is the entry-directory filesystem.
+tie-breaking.
+
+Most bundled modules are ordinary fango source. A catalog may additionally
+declare native operation exports for behavior source code cannot implement.
+Such exports still pass through the normal module interface and name resolver,
+and the checker enables them only when their module is in the loaded graph.
+The initial example is `IO.write`, which is an operation of builtin `IO` but is
+not an implicit global or a REPL builtin.
 
 Name resolution rewrites module-level declarations and imported references to
 opaque, collision-free canonical symbols before inference. Local binders keep
@@ -166,6 +175,11 @@ linter rejects unsolved metavariables, malformed generic applications,
 callee/evidence disagreements, invalid handler coverage or types, and residual
 open rows before either backend runs.
 
+An effect-polymorphic higher-order worker has its open callback row erased from
+the runtime ABI. Passing a concrete callback therefore adapts it to that ABI;
+local function references are eta-expanded so their binding keeps its concrete
+type while the wrapper retains the callback's execution and evidence behavior.
+
 ## Go backend and runtime
 
 The compiler emits formatted Go source and invokes the supported `go build`
@@ -191,11 +205,12 @@ receive typed element operations where required.
 The build driver materializes an embedded `fangort` package and generated
 `main.go` beneath a persistent `.fango/build` directory, writing only changed
 files. It also writes `sources.json`, a deterministic dependency-first manifest
-of logical names, root-relative paths, and SHA-256 content hashes, so every
-source edit and graph change invalidates the cached build even if generated Go
-is unchanged. `build` copies the resulting executable; `run` reuses it while
-inputs are unchanged. `fangort` owns shared formatting and IO behavior used by
-the compiled and interpreted backends.
+of logical names, local root-relative or `<stdlib>/...` paths, and SHA-256
+content hashes, so every source edit and graph change invalidates the cached
+build even if generated Go is unchanged. `build` copies the resulting
+executable; `run` reuses it while inputs are unchanged. `fangort` owns shared
+formatting and IO behavior, including newline-free string writes, used by the
+compiled and interpreted backends.
 
 ## Interpreter and REPL
 
@@ -236,10 +251,11 @@ allocation remains the main known structural performance cost.
 
 ## Known limitations
 
-The implementation has local modules but no FFI, package manager, standard
-library, records, aliases, typeclasses, formatter, or LSP. There are no
-source-path flags, bundled-module provider, implicit prelude, or package
-resolution.
+The implementation has local and bundled modules but no FFI, package manager,
+records, aliases, typeclasses, formatter, or LSP. There are no source-path
+flags, implicit prelude, external library version selection, or package
+resolution. The bundled standard library is intentionally small and
+experimental.
 Integer values are signed 64-bit; broader numeric semantics are not settled.
 There is no tail-call optimization guarantee. Custom handlers have the
 restrictions described above, and builtin IO cannot

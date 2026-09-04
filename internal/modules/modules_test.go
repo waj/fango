@@ -73,3 +73,43 @@ func TestGraphDiagnostics(t *testing.T) {
 		}
 	})
 }
+
+func TestBundledModules(t *testing.T) {
+	d := t.TempDir()
+	entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport IO\nimport List\nmain = 0\n")
+	r, errs := Load(entry)
+	if len(errs) > 0 {
+		t.Fatalf("Load: %v", errs)
+	}
+	var got []string
+	for _, m := range r.Manifest {
+		got = append(got, m.Module+":"+m.Path)
+	}
+	want := "IO:<stdlib>/IO.fango,List:<stdlib>/List.fango,Main:Main.fango"
+	if strings.Join(got, ",") != want {
+		t.Fatalf("manifest = %v, want %s", got, want)
+	}
+	if strings.Join(r.NativeOperations, ",") != "IO.write" {
+		t.Fatalf("native operations = %v", r.NativeOperations)
+	}
+}
+
+func TestBundledModuleNamesAreReserved(t *testing.T) {
+	t.Run("import", func(t *testing.T) {
+		d := t.TempDir()
+		entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport List\nmain = 0\n")
+		write(t, d, "List.fango", "module List exposing (answer)\nanswer = 42\n")
+		_, errs := Load(entry)
+		if len(errs) == 0 || errs[0].Title != "RESERVED MODULE" {
+			t.Fatalf("errors: %#v", errs)
+		}
+	})
+	t.Run("entry", func(t *testing.T) {
+		d := t.TempDir()
+		entry := write(t, d, "List.fango", "module List exposing (main)\nmain = 0\n")
+		_, errs := Load(entry)
+		if len(errs) == 0 || errs[0].Title != "RESERVED MODULE" {
+			t.Fatalf("errors: %#v", errs)
+		}
+	})
+}

@@ -572,6 +572,9 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			if e.Op.Name == "print" {
 				return callExpr(funcLit(g.goType(e.Ty), []goast.Stmt{exprStmt(g.printCall(g.expr(e.Args[0], 0), e.Args[0].Type())), returnStmt(g.unitValue())}))
 			}
+			if e.Op.Name == "IO.write" {
+				return callExpr(funcLit(g.goType(e.Ty), []goast.Stmt{exprStmt(callExpr(selector("fangort", "WriteString"), g.expr(e.Args[0], 0))), returnStmt(g.unitValue())}))
+			}
 			if e.Op.Name == "readLine" {
 				for _, a := range e.Args {
 					if !unitAtom(a) {
@@ -917,6 +920,10 @@ func (g *gen) stmts(e core.Expr) []goast.Stmt {
 	case *core.Perform:
 		if e.Op.Owner.Name == "IO" && e.Op.Name == "print" {
 			return []goast.Stmt{exprStmt(g.printCall(g.expr(e.Args[0], 0), e.Args[0].Type()))}
+		}
+		if e.Op.Owner.Name == "IO" && e.Op.Name == "IO.write" {
+			g.usesFangort = true
+			return []goast.Stmt{exprStmt(callExpr(selector("fangort", "WriteString"), g.expr(e.Args[0], 0)))}
 		}
 		return []goast.Stmt{assignBlank(g.expr(e, 0))}
 	case *core.Seq:

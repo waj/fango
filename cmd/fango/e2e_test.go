@@ -52,69 +52,77 @@ func TestDifferential(t *testing.T) {
 	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "run"))
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			base := strings.TrimSuffix(path, ".fango")
-			if errData, err := os.ReadFile(base + ".error"); err == nil {
-				runErrorCase(t, path, strings.TrimSpace(string(errData)))
-				return
-			}
-			expData, err := os.ReadFile(base + ".expected")
-			if err != nil {
-				t.Fatalf("missing %s.expected (or .error): %v", base, err)
-			}
-			expected := string(expData)
-
-			// Backend 1: the Core interpreter. A Unit-typed main is
-			// observed through its print output; any other main through
-			// its value, shown via the shared fangort formatter.
-			var stderr bytes.Buffer
-			prog, ck, ok := compileFile(path, &stderr)
-			if !ok {
-				t.Fatalf("compile failed:\n%s", stderr.String())
-			}
-			env := eval.NewEnv()
-			env.DefineProg(prog)
-			var printed bytes.Buffer
-			v, err := eval.ForceIO(context.Background(), "main", env, eval.NewIOContext(strings.NewReader(""), &printed))
-			if err != nil {
-				t.Fatalf("eval: %v", err)
-			}
-			var mainTy = prog.Defs[len(prog.Defs)-1].Type
-			for _, d := range prog.Defs {
-				if d.Name == "main" {
-					mainTy = d.Type
-				}
-			}
-			var evalOut string
-			_, functionMain := mainTy.(*types.TFun)
-			if con, isCon := mainTy.(*types.TCon); (isCon && con.Unique == ck.B.Unit.Unique) || functionMain {
-				evalOut = printed.String()
-			} else {
-				evalOut = eval.ShowForPrint(v, mainTy, ck.B) + "\n"
-			}
-			if evalOut != expected {
-				t.Errorf("interpreter output:\n%q\nwant:\n%q", evalOut, expected)
-			}
-
-			// Backend 2: the compiled binary, via the real CLI.
-			if testing.Short() {
-				t.Skip("compiled leg skipped in -short mode")
-			}
-			cmd := exec.Command(cliBinary(t), "run", path)
-			cmd.Env = append(os.Environ(),
-				"FANGO_INTERNAL_PRINT_MAIN=1",
-				"FANGO_BUILD_DIR="+t.TempDir())
-			var stdout, runErr bytes.Buffer
-			cmd.Stdout, cmd.Stderr = &stdout, &runErr
-			if err := cmd.Run(); err != nil {
-				t.Fatalf("fango run: %v\n%s", err, runErr.String())
-			}
-			if stdout.String() != expected {
-				t.Errorf("compiled output:\n%q\nwant:\n%q", stdout.String(), expected)
-			}
-			if stdout.String() != evalOut {
-				t.Errorf("backends disagree: compiled %q vs interpreted %q", stdout.String(), evalOut)
-			}
+			runDifferentialCase(t, path)
 		})
+	}
+}
+
+func TestMandelbrotExample(t *testing.T) {
+	runDifferentialCase(t, filepath.Join("..", "..", "examples", "mandelbrot.fango"))
+}
+
+func runDifferentialCase(t *testing.T, path string) {
+	t.Helper()
+	base := strings.TrimSuffix(path, ".fango")
+	if errData, err := os.ReadFile(base + ".error"); err == nil {
+		runErrorCase(t, path, strings.TrimSpace(string(errData)))
+		return
+	}
+	expData, err := os.ReadFile(base + ".expected")
+	if err != nil {
+		t.Fatalf("missing %s.expected (or .error): %v", base, err)
+	}
+	expected := string(expData)
+
+	// Backend 1: the Core interpreter. A Unit-typed main is observed through
+	// its print output; any other main through its value and shared formatter.
+	var stderr bytes.Buffer
+	prog, ck, ok := compileFile(path, &stderr)
+	if !ok {
+		t.Fatalf("compile failed:\n%s", stderr.String())
+	}
+	env := eval.NewEnv()
+	env.DefineProg(prog)
+	var printed bytes.Buffer
+	v, err := eval.ForceIO(context.Background(), "main", env, eval.NewIOContext(strings.NewReader(""), &printed))
+	if err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	var mainTy = prog.Defs[len(prog.Defs)-1].Type
+	for _, d := range prog.Defs {
+		if d.Name == "main" {
+			mainTy = d.Type
+		}
+	}
+	var evalOut string
+	_, functionMain := mainTy.(*types.TFun)
+	if con, isCon := mainTy.(*types.TCon); (isCon && con.Unique == ck.B.Unit.Unique) || functionMain {
+		evalOut = printed.String()
+	} else {
+		evalOut = eval.ShowForPrint(v, mainTy, ck.B) + "\n"
+	}
+	if evalOut != expected {
+		t.Errorf("interpreter output:\n%q\nwant:\n%q", evalOut, expected)
+	}
+
+	// Backend 2: the compiled binary, via the real CLI.
+	if testing.Short() {
+		t.Skip("compiled leg skipped in -short mode")
+	}
+	cmd := exec.Command(cliBinary(t), "run", path)
+	cmd.Env = append(os.Environ(),
+		"FANGO_INTERNAL_PRINT_MAIN=1",
+		"FANGO_BUILD_DIR="+t.TempDir())
+	var stdout, runErr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &runErr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("fango run: %v\n%s", err, runErr.String())
+	}
+	if stdout.String() != expected {
+		t.Errorf("compiled output:\n%q\nwant:\n%q", stdout.String(), expected)
+	}
+	if stdout.String() != evalOut {
+		t.Errorf("backends disagree: compiled %q vs interpreted %q", stdout.String(), evalOut)
 	}
 }
 
