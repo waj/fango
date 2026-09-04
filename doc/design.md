@@ -210,7 +210,10 @@ Compile-latency benchmarks track cold and warm paths against recorded,
 machine-specific baselines. Runtime benchmarks compare representative scalar,
 match, string, list, and tree programs with handwritten Go and use per-case
 ratio ceilings. These measurements arbitrate representation or optimization
-work. Cons-list allocation remains the main known structural performance cost.
+work. They run separately from the default correctness test loop because they
+are comparatively slow and sensitive to host load; `make test-perf` runs them
+explicitly, while `make ci` retains them as verification gates. Cons-list
+allocation remains the main known structural performance cost.
 
 ## Known limitations
 

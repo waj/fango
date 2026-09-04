@@ -13,6 +13,14 @@ nix develop
 go build -o fango ./cmd/fango
 ```
 
+Repository verification is split between correctness and performance:
+
+```sh
+make test       # correctness and interpreter/compiler differential tests
+make test-perf  # compile-latency and runtime-ratio gates
+make ci         # formatting, vet, correctness, and performance gates
+```
+
 The CLI accepts one `.fango` source file:
 
 ```text

@@ -1,18 +1,18 @@
-# Convenience wrappers only — every target is a one-liner delegating to go.
-# CI remains one command: `go test ./...`; see doc/design.md,
-# "Testing and performance".
+# Convenience wrappers for the repository verification gates; see
+# doc/design.md, "Testing and performance".
 
-.PHONY: build test test-short update-goldens update-baselines fmt vet ci clean
+.PHONY: build test test-short test-perf update-goldens update-baselines fmt vet ci clean
 
 build:
 	go build -o fango ./cmd/fango
 
-# The benchmark gates run AFTER the other packages: `go test ./...` runs
-# packages in parallel, and the build-heavy differential suite skews the
-# latency/ratio measurements. The separate gates are documented in
-# doc/design.md, "Testing and performance".
+# Keep the default development loop deterministic and reasonably quick. This
+# includes the full compiler/interpreter differential suite, but leaves noisy
+# compile-latency and runtime-ratio gates to test-perf and ci.
 test:
 	go test $$(go list ./... | grep -v benchmarks)
+
+test-perf:
 	go test ./benchmarks
 
 test-short:
