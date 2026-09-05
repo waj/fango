@@ -58,6 +58,8 @@ const (
 	KwEffect
 	KwHandle
 	KwResume
+	KwNative
+	KwInfix
 )
 
 var kindNames = map[Kind]string{
@@ -72,6 +74,7 @@ var kindNames = map[Kind]string{
 	KwModule: "module", KwImport: "import", KwAs: "as", KwExposing: "exposing", KwLet: "let", KwIn: "in",
 	KwIf: "if", KwThen: "then", KwElse: "else", KwCase: "case", KwOf: "of",
 	KwType: "type", KwEffect: "effect", KwHandle: "handle", KwResume: "resume",
+	KwNative: "native", KwInfix: "infix",
 }
 
 func (k Kind) String() string { return kindNames[k] }
@@ -83,6 +86,7 @@ var Keywords = map[string]Kind{
 	"if": KwIf, "then": KwThen, "else": KwElse,
 	"case": KwCase, "of": KwOf,
 	"type": KwType, "effect": KwEffect, "handle": KwHandle, "resume": KwResume,
+	"native": KwNative, "infix": KwInfix,
 }
 
 type Token struct {

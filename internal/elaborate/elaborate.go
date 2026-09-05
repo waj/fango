@@ -23,6 +23,7 @@ import (
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/infer"
+	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
 )
@@ -32,11 +33,16 @@ import (
 // core.Lint.
 func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error) {
 	effects := make([]*types.EffectInfo, 0, len(ck.Effects))
+	seenEffects := map[int]bool{}
 	for _, eff := range ck.Effects {
+		if seenEffects[eff.Unique] {
+			continue
+		}
+		seenEffects[eff.Unique] = true
 		effects = append(effects, eff)
 	}
 	sort.Slice(effects, func(i, j int) bool { return effects[i].Unique < effects[j].Unique })
-	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effects, Entry: ck.EntryName}
+	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effects, Entry: ck.EntryName, Natives: ck.Natives}
 	var errs []diag.Error
 	for _, info := range infos {
 		owner := symbolOwner(info.Name)
@@ -150,7 +156,7 @@ func executingEffects(t types.Type, arity int) []core.EffectInstance {
 	out := make([]core.EffectInstance, 0, len(row.Labels))
 	seen := map[int]bool{}
 	for _, l := range row.Labels {
-		if l.Name != "IO" && !seen[l.Unique] {
+		if types.SurfaceName(l.Name) != "IO" && !seen[l.Unique] {
 			out = append(out, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...)})
 			seen[l.Unique] = true
 		}
@@ -266,11 +272,14 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		return &core.UnitLit{Ty: ty}
 	case *ast.Var:
 		if op := el.ck.Operations[e.Name]; op != nil {
-			if op.Owner == el.ck.IO && op.Name == "print" {
+			if op.Owner == el.ck.IO && types.SurfaceName(op.Name) == "print" {
 				args, _ := core.PeelFun(ty, op.Arity)
 				el.checkPrintable(args[0], e.Sp)
 			}
 			return el.operationValue(op, ty, el.ck.Sub.Apply(el.ck.ExprTypes[e]))
+		}
+		if n := el.ck.Natives[e.Name]; n != nil {
+			return el.nativeValue(n, ty)
 		}
 		// A lifted local in first-class position gets the same curried-
 		// wrapper treatment as a worker (its frees are the leading args).
@@ -314,6 +323,9 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		}
 	case *ast.BinOp:
 		l, r := el.expr(e.L), el.expr(e.R)
+		if n := el.ck.BinNatives[e]; n != nil {
+			return el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Ty: ty, Args: []core.Expr{l, r}})
+		}
 		el.checkOperands(e, l.Type())
 		return el.fold(&core.BinOp{Op: e.Op, Ty: ty, L: l, R: r})
 	case *ast.Lambda:
@@ -586,31 +598,44 @@ func (el *elab) fold(e core.Expr) core.Expr {
 		}
 		return e
 	case *core.BinOp:
-		if li, ok := e.L.(*core.IntLit); ok {
-			if ri, ok := e.R.(*core.IntLit); ok {
-				switch e.Op {
-				case "+":
-					return &core.IntLit{Val: li.Val + ri.Val, Ty: e.Ty}
-				case "-":
-					return &core.IntLit{Val: li.Val - ri.Val, Ty: e.Ty}
-				case "*":
-					return &core.IntLit{Val: li.Val * ri.Val, Ty: e.Ty}
-				}
+		name := map[string]string{"+": "Basics.add", "-": "Basics.sub", "*": "Basics.mul", "/": "Basics.fdiv"}[e.Op]
+		if name != "" {
+			folded := el.fold(&core.NativeCall{Name: name, Module: "Basics", Args: []core.Expr{e.L, e.R}, Ty: e.Ty})
+			switch folded.(type) {
+			case *core.IntLit, *core.FloatLit:
+				return folded
 			}
 		}
-		if lf, ok := e.L.(*core.FloatLit); ok {
-			if rf, ok := e.R.(*core.FloatLit); ok {
-				switch e.Op {
-				case "+":
-					return &core.FloatLit{Val: lf.Val + rf.Val, Ty: e.Ty}
-				case "-":
-					return &core.FloatLit{Val: lf.Val - rf.Val, Ty: e.Ty}
-				case "*":
-					return &core.FloatLit{Val: lf.Val * rf.Val, Ty: e.Ty}
-				case "/":
-					return &core.FloatLit{Val: lf.Val / rf.Val, Ty: e.Ty}
-				}
+		return e
+	case *core.NativeCall:
+		spec, ok := natives.Lookup(e.Name)
+		if !ok || !spec.Foldable || len(e.Args) != 2 {
+			return e
+		}
+		literal := func(x core.Expr) (any, bool) {
+			switch x := x.(type) {
+			case *core.IntLit:
+				return x.Val, true
+			case *core.FloatLit:
+				return x.Val, true
+			default:
+				return nil, false
 			}
+		}
+		l, lok := literal(e.Args[0])
+		r, rok := literal(e.Args[1])
+		if !lok || !rok {
+			return e
+		}
+		v, err := spec.Eval(&natives.Runtime{}, []any{l, r})
+		if err != nil {
+			return e
+		}
+		switch v := v.(type) {
+		case int64:
+			return &core.IntLit{Val: v, Ty: e.Ty}
+		case float64:
+			return &core.FloatLit{Val: v, Ty: e.Ty}
 		}
 		return e
 	default:

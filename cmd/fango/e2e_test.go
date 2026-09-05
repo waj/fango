@@ -283,3 +283,14 @@ func TestGeneratedGoUsesImplicitConcreteUnitABI(t *testing.T) {
 		}
 	}
 }
+
+func TestGeneratedGoMaterializesNativeUnitOnlyInValueContext(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "mandelbrot.fango")
+	src := string(generatedFile(t, emittedProject(t, path), "main.go"))
+	if strings.Contains(src, "fangort.WriteString(\" \")\n\t\t\treturn fangort.UnitValue") {
+		t.Fatalf("statement-position IO.write unnecessarily materialized Unit:\n%s", src)
+	}
+	if !strings.Contains(src, "fangort.WriteString(\" \")") {
+		t.Fatalf("statement-position IO.write was not emitted directly:\n%s", src)
+	}
+}

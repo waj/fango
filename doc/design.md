@@ -115,12 +115,24 @@ providers are parsed and their declared public interfaces validated before a
 deterministic dependency-first topological order is chosen, with lexical
 tie-breaking.
 
-Most bundled modules are ordinary fango source. A catalog may additionally
-declare native operation exports for behavior source code cannot implement.
-Such exports still pass through the normal module interface and name resolver,
-and the checker enables them only when their module is in the loaded graph.
-The initial example is `IO.write`, which is an operation of builtin `IO` but is
-not an implicit global or a REPL builtin.
+Primitives are declarations rather than a compiler catalog. Every ordinary
+module implicitly loads the hidden `Basics` module, whose native values define
+the fixed operator tokens, and the bundled `IO` module declares the ambient IO
+effect and its operations. `infix` declarations bind the parser's closed set of
+operator tokens to native values; only bundled modules may contain them.
+`native "..."` templates are likewise bundled-only. The loader validates each
+template as a Go expression, requires every positional argument exactly once,
+and permits only placeholders, compiler intrinsics, Go predeclared names, and
+the `fangort` qualifier. Code generation reparses and position-scrubs the
+template, then substitutes typed Go AST expressions with precedence preserved.
+
+An ordinary module can instead declare a pure call-form native and place a
+`<Module>.native.go` sidecar beside its source. The loader validates the
+sidecar's `package native`, standard-library-only imports, bidirectional
+declaration/function correspondence, and closed scalar, Unit-erased ABI. Its
+content hash joins `sources.json`; the build synchronizer materializes it as a
+separate package below `native/`, so edits and removal invalidate the build and
+prune stale generated files. Go compilation remains the final body/type check.
 
 Name resolution rewrites module-level declarations and imported references to
 opaque, collision-free canonical symbols before inference. Local binders keep
@@ -154,10 +166,14 @@ evaluate-once semantics are not changed by lambda lifting. `main` is ground and
 never generalized. Numeric variables range over `Int` and `Float`; unresolved
 numeric types default to `Int`, while `/` is always `Float`.
 
-`Scheme.Preds` is a reserved typeclass seam and remains empty. Consequently,
-operations requiring typeclass evidence are deliberately limited: structural
-equality and display are synthesized only when the concrete type supports
-them, and equality at an unconstrained general type variable is rejected.
+`Scheme.Preds` carries compiler-owned `Eq`, `Ord`, and `Show` obligations for
+native declarations. Annotation variable prefixes `equatable`, `comparable`,
+and `printable` create those predicates only in native declarations; they do
+not add capability kinds or become general user constraints. Instantiation
+substitutes predicate types alongside the declared type. The current compiler
+discharges only concrete scalar, numeric, and function-free ADT obligations;
+residual general predicates are rejected until typeclasses provide evidence
+passing.
 
 ## Core and evidence invariants
 
@@ -166,6 +182,12 @@ explicitly typed; generic definitions declare type parameters and uses carry
 explicit type arguments. Application nodes record whether their callee is a
 worker, constructor, primitive, operation, or indirect function. Matches are
 decision trees rather than surface branch lists.
+
+Saturated pure primitives are `NativeCall` nodes keyed by canonical declaration
+name. `Prog.Natives` holds their schemes, arities, templates, modules, and
+effect ownership; the linter checks arity and declaration instantiation rather
+than switching on operator spelling. Effect primitives remain `Perform`, so a
+lexical handler can intercept them before their native boundary default.
 
 Effectful Core uses `Perform`, `Handle`, `Resume`, and `Seq`. Open source row
 tails are erased after evidence requirements have been derived; concrete labels
@@ -229,6 +251,14 @@ are unchanged.
 `fangort` owns shared representations, formatting, and IO behavior, including
 newline-free string writes, used by the compiled and interpreted backends.
 
+Bundled native interpreter behavior lives in one registry backed by the
+stdlib's Go sidecars. Pure `NativeCall`, unhandled native `Perform`, and the
+constant folder dispatch through that registry; only integer and floating
+arithmetic retain foldable status. User sidecars are deliberately compiled-only
+because dynamically loading Go would break the persistent REPL model. The
+interpreter reports that limitation instead of attempting execution. Native Go
+panics currently propagate unchanged.
+
 ## Interpreter and REPL
 
 `internal/eval` executes Core, not the surface AST. Values have a uniform Go
@@ -254,6 +284,8 @@ Lexer, parser, inference, elaboration, and REPL behavior use unit tests and
 goldens. Every runnable fixture is evaluated through Core and, outside short
 mode, compiled through the real CLI; output is compared byte-for-byte with its
 expected file and between backends. Invalid fixtures pin diagnostic substrings.
+Focused inference and elaboration harnesses install the actual embedded
+`Basics` and `IO` declarations rather than a parallel test-only environment.
 Generated Go is checked for deterministic, gofmt-idempotent output. The Core
 linter runs in every batch compilation.
 
@@ -268,12 +300,12 @@ allocation remains the main known structural performance cost.
 
 ## Known limitations
 
-The implementation has local and bundled modules but no FFI, package manager,
-records, aliases, typeclasses, formatter, or LSP. There are no source-path
-flags, implicit prelude, external library version selection, or package
-resolution. The bundled standard library is intentionally small and
-experimental.
+The implementation has a deliberately narrow, pure Go sidecar FFI but no
+package manager, records, aliases, typeclasses, formatter, or LSP. There are no source-path
+flags, external library version selection, or package resolution. The implicit
+prelude is fixed to hidden `Basics` plus ambient `IO`; the bundled standard
+library is intentionally small and experimental.
 Integer values are signed 64-bit; broader numeric semantics are not settled.
 There is no tail-call optimization guarantee. Custom handlers have the
-restrictions described above, and builtin IO cannot
-be re-handled. REPL loading/reloading and cancellation remain unfinished.
+restrictions described above, and ambient IO cannot be re-handled yet. REPL
+loading/reloading and cancellation remain unfinished.

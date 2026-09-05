@@ -37,7 +37,7 @@ func Dump(p *Prog) string {
 		b.WriteString(")")
 	}
 	for _, eff := range p.Effects {
-		if eff.Name == "IO" {
+		if types.SurfaceName(eff.Name) == "IO" {
 			continue
 		}
 		pr := types.NewPrinter()
@@ -140,6 +140,12 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		return fmt.Sprintf("(var %s %s)", e.Name, pr.Type(e.Ty))
 	case *BinOp:
 		return fmt.Sprintf("(binop %s %s %s %s)", e.Op, pr.Type(e.Ty), dumpExpr(e.L, pr), dumpExpr(e.R, pr))
+	case *NativeCall:
+		parts := []string{"(native " + e.Name}
+		for _, a := range e.Args {
+			parts = append(parts, dumpExpr(a, pr))
+		}
+		return strings.Join(parts, " ") + " " + pr.Type(e.Ty) + ")"
 	case *App:
 		kinds := map[CalleeKind]string{Worker: "worker", Ctor: "ctor", Value: "value"}
 		head := "(app/" + kinds[e.CalleeKind]

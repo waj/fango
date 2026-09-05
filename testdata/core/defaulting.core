@@ -1,4 +1,4 @@
 (core
   (def x (typarams number) number (int 40 number))
-  (def y (typarams number) number (binop + number (app/worker @[number] (var x number) number) (int 2 number)))
-  (def main Int (binop * Int (binop - Int (app/worker @[Int] (var y Int) Int) (int 2 Int)) (int 3 Int))))
+  (def y (typarams number) number (native Basics.add (app/worker @[number] (var x number) number) (int 2 number) number))
+  (def main Int (native Basics.mul (native Basics.sub (app/worker @[Int] (var y Int) Int) (int 2 Int) Int) (int 3 Int) Int)))

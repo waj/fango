@@ -17,7 +17,7 @@ import (
 func Lint(p *Prog, b *types.Builtins) []error {
 	l := &linter{b: b, scope: map[string]bool{}, workers: map[string]*Def{},
 		adts: map[int]*types.ADTInfo{}, effects: map[int]*types.EffectInfo{},
-		tyParams: map[int]bool{}, evidence: map[int]int{}}
+		tyParams: map[int]bool{}, evidence: map[int]int{}, natives: p.Natives}
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
 	}
@@ -128,6 +128,7 @@ type linter struct {
 	effects   map[int]*types.EffectInfo
 	tyParams  map[int]bool // the enclosing def's declared rigid vars
 	evidence  map[int]int
+	natives   map[string]*types.NativeInfo
 	resumeArg types.Type
 	resumeRet types.Type
 	errs      []error
@@ -243,6 +244,30 @@ func (l *linter) expr(e Expr, where string) {
 		l.expr(e.Operand, where)
 	case *BinOp:
 		l.binOp(e, where)
+	case *NativeCall:
+		n := l.natives[e.Name]
+		if n == nil {
+			l.errorf("%s: unknown native `%s`", where, e.Name)
+		} else if len(e.Args) != n.Arity {
+			l.errorf("%s: native `%s` arity mismatch", where, e.Name)
+		} else {
+			decl := n.Scheme.Body
+			sub := map[int]types.Type{}
+			for i, arg := range e.Args {
+				fn, ok := decl.(*types.TFun)
+				if !ok || !matchNativeType(fn.Arg, arg.Type(), sub) {
+					l.errorf("%s: native `%s` argument %d does not instantiate its declaration", where, e.Name, i+1)
+					break
+				}
+				decl = fn.Ret
+			}
+			if !matchNativeType(decl, e.Ty, sub) {
+				l.errorf("%s: native `%s` result does not instantiate its declaration", where, e.Name)
+			}
+		}
+		for _, a := range e.Args {
+			l.expr(a, where)
+		}
 	case *If:
 		if l.unique(e.Cond.Type()) != l.b.Bool.Unique {
 			l.errorf("%s: If condition typed %s, want Bool", where, types.Show(e.Cond.Type()))
@@ -306,7 +331,7 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: Perform operation `%s` is not declared by its effect", where, e.Op.Name)
 		}
 		l.effectInstance(e.Effect, where)
-		if e.Op != nil && !e.Op.Builtin && l.evidence[e.Effect.Unique] == 0 {
+		if e.Op != nil && !e.Op.Builtin && e.Op.Native == nil && l.evidence[e.Effect.Unique] == 0 {
 			l.errorf("%s: Perform `%s` has no lexical evidence", where, e.Op.Name)
 		}
 		if e.Op != nil && len(e.Args) != e.Op.Arity {
@@ -314,7 +339,7 @@ func (l *linter) expr(e Expr, where string) {
 		}
 		if e.Op != nil && len(e.Args) == e.Op.Arity {
 			wantArgs, wantResult := l.operationTypes(e.Op, e.Effect)
-			isPrint := e.Op.Owner.Name == "IO" && e.Op.Name == "print"
+			isPrint := types.SurfaceName(e.Op.Owner.Name) == "IO" && types.SurfaceName(e.Op.Name) == "print"
 			for i, a := range e.Args {
 				if !isPrint && i < len(wantArgs) && !types.Equal(a.Type(), wantArgs[i]) {
 					l.errorf("%s: Perform `%s` arg %d typed %s, want %s", where, e.Op.Name, i+1, types.Show(a.Type()), types.Show(wantArgs[i]))
@@ -598,6 +623,52 @@ func (l *linter) expr(e Expr, where string) {
 	}
 }
 
+func matchNativeType(pattern, actual types.Type, sub map[int]types.Type) bool {
+	switch p := pattern.(type) {
+	case *types.TVar:
+		if old := sub[p.ID]; old != nil {
+			return types.Equal(old, actual)
+		}
+		sub[p.ID] = actual
+		return true
+	case *types.TCon:
+		a, ok := actual.(*types.TCon)
+		if !ok || p.Unique != a.Unique || len(p.Args) != len(a.Args) {
+			return false
+		}
+		for i := range p.Args {
+			if !matchNativeType(p.Args[i], a.Args[i], sub) {
+				return false
+			}
+		}
+		return true
+	case *types.TFun:
+		a, ok := actual.(*types.TFun)
+		return ok && matchNativeType(p.Arg, a.Arg, sub) && matchNativeType(p.Eff, a.Eff, sub) && matchNativeType(p.Ret, a.Ret, sub)
+	case types.Row:
+		a, ok := actual.(types.Row)
+		if !ok || len(p.Labels) != len(a.Labels) {
+			return false
+		}
+		for i := range p.Labels {
+			if p.Labels[i].Unique != a.Labels[i].Unique || len(p.Labels[i].Args) != len(a.Labels[i].Args) {
+				return false
+			}
+			for j := range p.Labels[i].Args {
+				if !matchNativeType(p.Labels[i].Args[j], a.Labels[i].Args[j], sub) {
+					return false
+				}
+			}
+		}
+		if p.Tail == nil {
+			return a.Tail == nil
+		}
+		return a.Tail != nil && matchNativeType(p.Tail, a.Tail, sub)
+	default:
+		return false
+	}
+}
+
 // tree checks decision-tree invariants: tested variables are in scope, ctor
 // cases belong to their ADT in strictly increasing declaration order,
 // coverage and Default agree, and every leaf produces the Case's type.
@@ -797,7 +868,7 @@ func (l *linter) typ(t types.Type, where string) {
 func rowEvidence(r types.Row) []EffectInstance {
 	var out []EffectInstance
 	for _, l := range types.SortedRow(r).Labels {
-		if l.Name != "IO" {
+		if types.SurfaceName(l.Name) != "IO" {
 			out = append(out, EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...)})
 		}
 	}

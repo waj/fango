@@ -5,6 +5,7 @@ import (
 	"fmt"
 	goast "go/ast"
 	"go/format"
+	goparser "go/parser"
 	gotoken "go/token"
 	"math"
 	"path/filepath"
@@ -71,7 +72,7 @@ func EmitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) 
 	}
 	for _, eff := range p.Effects {
 		owner := symbolOwner(eff.Name)
-		if eff.Name != "IO" && !owners[owner] {
+		if types.SurfaceName(eff.Name) != "IO" && !owners[owner] {
 			return nil, fmt.Errorf("codegen: effect %q has no module unit for owner %q", eff.Name, owner)
 		}
 	}
@@ -81,18 +82,20 @@ func EmitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) 
 
 func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byte, error) {
 	g := &gen{
-		b:          b,
-		adts:       map[int]*types.ADTInfo{},
-		neededEq:   map[int]bool{},
-		neededShow: map[int]bool{},
-		scalarEq:   map[int]bool{},
-		scalarShow: map[int]bool{},
-		caseVarTys: map[string]types.Type{},
-		evidence:   map[int][]goast.Expr{},
-		defs:       map[string]*core.Def{},
-		unit:       unit.Name,
-		imports:    map[string]bool{},
-		direct:     map[string]bool{},
+		b:             b,
+		adts:          map[int]*types.ADTInfo{},
+		neededEq:      map[int]bool{},
+		neededShow:    map[int]bool{},
+		scalarEq:      map[int]bool{},
+		scalarShow:    map[int]bool{},
+		caseVarTys:    map[string]types.Type{},
+		evidence:      map[int][]goast.Expr{},
+		defs:          map[string]*core.Def{},
+		unit:          unit.Name,
+		imports:       map[string]bool{},
+		nativeImports: map[string]bool{},
+		direct:        map[string]bool{},
+		natives:       p.Natives,
 	}
 	for _, name := range unit.Imports {
 		g.direct[name] = true
@@ -102,6 +105,13 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 	}
 	for _, adt := range p.ADTs {
 		g.adts[adt.Con.Unique] = adt
+	}
+	if unit.Entry {
+		for _, native := range p.Natives {
+			if native.Template == nil {
+				g.nativeImports[native.Module] = false // force sidecar compilation even when unused
+			}
+		}
 	}
 
 	var mainDef *core.Def
@@ -213,12 +223,14 @@ type gen struct {
 	// caseVarTys records the (instantiated) types of case scrutinee binders
 	// and field temporaries, so nested constructor switches know their
 	// column's type arguments.
-	caseVarTys map[string]types.Type
-	evidence   map[int][]goast.Expr
-	defs       map[string]*core.Def
-	unit       string
-	imports    map[string]bool
-	direct     map[string]bool
+	caseVarTys    map[string]types.Type
+	evidence      map[int][]goast.Expr
+	defs          map[string]*core.Def
+	unit          string
+	imports       map[string]bool
+	nativeImports map[string]bool
+	direct        map[string]bool
+	natives       map[string]*types.NativeInfo
 }
 
 func symbolOwner(name string) string {
@@ -242,6 +254,17 @@ func moduleAlias(name string) string {
 		}
 	}
 	return b.String()
+}
+
+func nativeAlias(name string) string { return "n_" + NativeLinkName(name) }
+
+func nativeImportPath(name string) string { return "fangobuild/native/" + NativeLinkName(name) }
+
+// NativeLinkName is a reversible-enough filesystem/package component for a
+// logical module name: underscores are escaped before dots, avoiding the
+// A.B/A_dB collision a plain replacement would create.
+func NativeLinkName(name string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(name, "_", "_u"), ".", "_d")
 }
 
 func moduleImportPath(name string) string {
@@ -309,7 +332,7 @@ func (g *gen) ownedADTs(in []*types.ADTInfo) []*types.ADTInfo {
 func (g *gen) ownedEffects(in []*types.EffectInfo) []*types.EffectInfo {
 	var out []*types.EffectInfo
 	for _, eff := range in {
-		if eff.Name != "IO" && symbolOwner(eff.Name) == g.unit {
+		if types.SurfaceName(eff.Name) != "IO" && symbolOwner(eff.Name) == g.unit {
 			out = append(out, eff)
 		}
 	}
@@ -355,6 +378,18 @@ func (g *gen) importsDecl() goast.Decl {
 	}
 	if g.usesMath {
 		specs = append(specs, spec{path: "math"})
+	}
+	nativeNames := make([]string, 0, len(g.nativeImports))
+	for name := range g.nativeImports {
+		nativeNames = append(nativeNames, name)
+	}
+	sort.Strings(nativeNames)
+	for _, name := range nativeNames {
+		alias := "_"
+		if g.nativeImports[name] {
+			alias = nativeAlias(name)
+		}
+		specs = append(specs, spec{alias: alias, path: nativeImportPath(name)})
 	}
 	owners := make(map[string]bool, len(g.direct)+len(g.imports))
 	for name := range g.direct {
@@ -595,7 +630,7 @@ func (g *gen) goType(t types.Type) goast.Expr {
 	case *types.TFun:
 		params := make([]paramSpec, 0, len(t.Eff.Labels)+1)
 		for _, l := range types.SortedRow(t.Eff).Labels {
-			if l.Name == "IO" {
+			if types.SurfaceName(l.Name) == "IO" {
 				continue
 			}
 			params = append(params, paramSpec{typ: g.effectType(core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args})})
@@ -659,6 +694,162 @@ func goPrec(op string) int {
 	}
 }
 
+// nativeSidecarCall lowers a sidecar invocation without deciding whether its
+// result is needed as a value. Unit arguments are erased from the Go ABI, but
+// a non-atomic Unit argument must still run in source order; prelude contains
+// the statements (and any temporaries) needed to preserve that order.
+func (g *gen) nativeSidecarCall(call *core.NativeCall, n *types.NativeInfo) ([]goast.Stmt, goast.Expr) {
+	g.nativeImports[n.Module] = true
+	args := make([]goast.Expr, 0, len(call.Args))
+	needsSequence := false
+	for _, arg := range call.Args {
+		needsSequence = needsSequence || g.isUnit(arg.Type()) && !unitAtom(arg)
+	}
+	var prelude []goast.Stmt
+	for _, arg := range call.Args {
+		if g.isUnit(arg.Type()) {
+			if needsSequence {
+				prelude = append(prelude, g.stmts(arg)...)
+			}
+			continue
+		}
+		if needsSequence {
+			name := fmt.Sprintf("t_native%d", g.tmp)
+			g.tmp++
+			prelude = append(prelude, varDeclStmt(name, g.goType(arg.Type()), g.expr(arg, 0)))
+			args = append(args, ident(name))
+		} else {
+			args = append(args, g.expr(arg, 0))
+		}
+	}
+	fn := selector(nativeAlias(n.Module), exportNativeName(types.SurfaceName(n.Name)))
+	return prelude, callExpr(fn, args...)
+}
+
+func (g *gen) nativeTemplateExpr(call *core.NativeCall, template string, parentPrec int) goast.Expr {
+	s := strings.ReplaceAll(strings.ReplaceAll(template, "$eq", "__fango_eq"), "$show", "__fango_show")
+	for i := len(call.Args); i >= 1; i-- {
+		s = strings.ReplaceAll(s, fmt.Sprintf("$%d", i), fmt.Sprintf("__fango_p%d", i))
+	}
+	x, err := goparser.ParseExpr(s)
+	if err != nil {
+		panic("codegen: invalid validated native template: " + err.Error())
+	}
+	var splice func(goast.Expr, int) goast.Expr
+	splice = func(x goast.Expr, ctx int) goast.Expr {
+		switch x := x.(type) {
+		case *goast.Ident:
+			if strings.HasPrefix(x.Name, "__fango_p") {
+				i, _ := strconv.Atoi(strings.TrimPrefix(x.Name, "__fango_p"))
+				return g.expr(call.Args[i-1], ctx)
+			}
+			return ident(x.Name)
+		case *goast.BinaryExpr:
+			prec := x.Op.Precedence()
+			return parenIf(prec < ctx, &goast.BinaryExpr{X: splice(x.X, prec), Op: x.Op, Y: splice(x.Y, prec+1)})
+		case *goast.UnaryExpr:
+			return parenIf(6 < ctx, &goast.UnaryExpr{Op: x.Op, X: splice(x.X, 6)})
+		case *goast.ParenExpr:
+			return &goast.ParenExpr{X: splice(x.X, 0)}
+		case *goast.SelectorExpr:
+			if id, ok := x.X.(*goast.Ident); ok && id.Name == "fangort" {
+				g.usesFangort = true
+			}
+			return &goast.SelectorExpr{X: splice(x.X, 0), Sel: ident(x.Sel.Name)}
+		case *goast.CallExpr:
+			if id, ok := x.Fun.(*goast.Ident); ok && id.Name == "__fango_eq" {
+				a, b := splice(x.Args[0], 0), splice(x.Args[1], 0)
+				i := nativePlaceholderIndex(x.Args[0])
+				if g.adtOf(call.Args[i].Type()) != nil {
+					return g.eqCall(call.Args[i].Type(), a, b)
+				}
+				return binExpr(gotoken.EQL, a, b)
+			}
+			if id, ok := x.Fun.(*goast.Ident); ok && id.Name == "__fango_show" {
+				i := nativePlaceholderIndex(x.Args[0])
+				return g.nativeShow(call.Args[i].Type(), splice(x.Args[0], 0))
+			}
+			args := make([]goast.Expr, len(x.Args))
+			for i, a := range x.Args {
+				args[i] = splice(a, 0)
+			}
+			return &goast.CallExpr{Fun: splice(x.Fun, 0), Args: args}
+		case *goast.BasicLit:
+			return &goast.BasicLit{Kind: x.Kind, Value: x.Value}
+		default:
+			panic(fmt.Sprintf("codegen: unsupported native template node %T", x))
+		}
+	}
+	return splice(x, parentPrec)
+}
+
+func (g *gen) nativeExpr(call *core.NativeCall, parentPrec int) goast.Expr {
+	n := g.natives[call.Name]
+	if n == nil {
+		panic("codegen: unknown native call: " + call.Name)
+	}
+	if n.Template == nil {
+		prelude, invoke := g.nativeSidecarCall(call, n)
+		if g.isUnit(call.Ty) {
+			prelude = append(prelude, exprStmt(invoke), returnStmt(g.unitValue()))
+			return callExpr(funcLit(g.goType(call.Ty), prelude))
+		}
+		if len(prelude) != 0 {
+			prelude = append(prelude, returnStmt(invoke))
+			return callExpr(funcLit(g.goType(call.Ty), prelude))
+		}
+		return invoke
+	}
+	result := g.nativeTemplateExpr(call, *n.Template, parentPrec)
+	if g.isUnit(call.Ty) {
+		return callExpr(funcLit(g.goType(call.Ty), []goast.Stmt{exprStmt(result), returnStmt(g.unitValue())}))
+	}
+	return result
+}
+
+// nativeStmts emits a native call whose Unit result is not demanded. The Go
+// operation stays void; UnitValue is introduced only by nativeExpr when an
+// enclosing value context actually needs the singleton.
+func (g *gen) nativeStmts(call *core.NativeCall) []goast.Stmt {
+	n := g.natives[call.Name]
+	if n == nil {
+		panic("codegen: unknown native call: " + call.Name)
+	}
+	if n.Template != nil {
+		return []goast.Stmt{exprStmt(g.nativeTemplateExpr(call, *n.Template, 0))}
+	}
+	prelude, invoke := g.nativeSidecarCall(call, n)
+	return append(prelude, exprStmt(invoke))
+}
+
+func nativePlaceholderIndex(x goast.Expr) int {
+	id := x.(*goast.Ident) // validated by modules.validateTemplate
+	i, _ := strconv.Atoi(strings.TrimPrefix(id.Name, "__fango_p"))
+	return i - 1
+}
+
+func (g *gen) nativeShow(t types.Type, value goast.Expr) goast.Expr {
+	g.usesFangort = true
+	if g.adtOf(t) != nil {
+		return g.showCall(t, value, ident("false"))
+	}
+	name := map[int]string{
+		g.b.Int.Unique: "ShowInt", g.b.Float.Unique: "ShowFloat",
+		g.b.String.Unique: "ShowString", g.b.Bool.Unique: "ShowBool",
+	}[g.unique(t)]
+	if name == "" {
+		panic("codegen: no native show implementation for " + types.Show(t))
+	}
+	return callExpr(selector("fangort", name), value)
+}
+
+func exportNativeName(name string) string {
+	if name == "" {
+		return ""
+	}
+	return strings.ToUpper(name[:1]) + name[1:]
+}
+
 const unaryPrec = 6
 
 // expr emits e in expression context; parentPrec is the precedence of the
@@ -704,7 +895,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		params := make([]paramSpec, 0, len(fn.Eff.Labels)+1)
 		var pushed []int
 		for _, l := range types.SortedRow(fn.Eff).Labels {
-			if l.Name == "IO" {
+			if types.SurfaceName(l.Name) == "IO" {
 				continue
 			}
 			name := g.evidenceName(l.Name)
@@ -779,6 +970,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		l := g.expr(e.L, prec)
 		r := g.expr(e.R, prec+1)
 		return parenIf(prec < parentPrec, binExpr(op, l, r))
+	case *core.NativeCall:
+		return g.nativeExpr(e, parentPrec)
 	case *core.If:
 		// Go has no expression-if: an immediately-invoked typed closure
 		// preserves branch laziness and stays gofmt-clean. ANF hoisting, as
@@ -798,22 +991,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		// function bodies the elaborator's ANF hoisting bypasses this.
 		return callExpr(funcLit(g.goType(e.Ty), g.caseStmts(e, g.retStmts)))
 	case *core.Perform:
-		if e.Op.Owner.Name == "IO" {
-			g.usesFangort = true
-			if e.Op.Name == "print" {
-				return callExpr(funcLit(g.goType(e.Ty), []goast.Stmt{exprStmt(g.printCall(g.expr(e.Args[0], 0), e.Args[0].Type())), returnStmt(g.unitValue())}))
-			}
-			if e.Op.Name == "IO.write" {
-				return callExpr(funcLit(g.goType(e.Ty), []goast.Stmt{exprStmt(callExpr(selector("fangort", "WriteString"), g.expr(e.Args[0], 0))), returnStmt(g.unitValue())}))
-			}
-			if e.Op.Name == "readLine" {
-				for _, a := range e.Args {
-					if !unitAtom(a) {
-						return callExpr(funcLit(g.goType(e.Ty), append(g.stmts(a), returnStmt(callExpr(selector("fangort", "ReadLine"))))))
-					}
-				}
-				return callExpr(selector("fangort", "ReadLine"))
-			}
+		if e.Op.Native != nil && types.SurfaceName(e.Op.Owner.Name) == "IO" {
+			return g.nativeExpr(&core.NativeCall{Name: e.Op.Native.Name, Module: e.Op.Native.Module, Args: e.Args, Ty: e.Ty}, parentPrec)
 		}
 		stack := g.evidence[e.Effect.Unique]
 		if len(stack) == 0 {
@@ -1012,7 +1191,7 @@ func (g *gen) effectType(e core.EffectInstance) goast.Expr {
 func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 	var out []goast.Decl
 	for _, eff := range effects {
-		if eff.Name == "IO" {
+		if types.SurfaceName(eff.Name) == "IO" {
 			continue
 		}
 		old := g.tyParamNames
@@ -1149,12 +1328,8 @@ func (g *gen) stmts(e core.Expr) []goast.Stmt {
 		}
 		return []goast.Stmt{assignBlank(g.expr(e, 0))}
 	case *core.Perform:
-		if e.Op.Owner.Name == "IO" && e.Op.Name == "print" {
-			return []goast.Stmt{exprStmt(g.printCall(g.expr(e.Args[0], 0), e.Args[0].Type()))}
-		}
-		if e.Op.Owner.Name == "IO" && e.Op.Name == "IO.write" {
-			g.usesFangort = true
-			return []goast.Stmt{exprStmt(callExpr(selector("fangort", "WriteString"), g.expr(e.Args[0], 0)))}
+		if e.Op.Native != nil && types.SurfaceName(e.Op.Owner.Name) == "IO" {
+			return g.nativeStmts(&core.NativeCall{Name: e.Op.Native.Name, Module: e.Op.Native.Module, Args: e.Args, Ty: e.Ty})
 		}
 		return []goast.Stmt{assignBlank(g.expr(e, 0))}
 	case *core.Seq:

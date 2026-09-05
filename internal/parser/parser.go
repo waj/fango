@@ -144,9 +144,8 @@ func (p *parser) parseExposingBody() (ast.Exposing, bool) {
 		return ex, p.expect(token.RPAREN, "I expect a closing `)` for the `exposing` list.")
 	}
 	if p.peek().Kind == token.RPAREN {
-		p.errorAt(p.peek().Span, "EMPTY EXPOSING LIST", "An `exposing` list cannot be empty; use `(..)` or list at least one name.")
 		p.next()
-		return ex, false
+		return ex, true
 	}
 	for {
 		t := p.peek()
@@ -220,6 +219,9 @@ func (p *parser) parseDecl() ast.Decl {
 	if t.Kind == token.KwEffect {
 		return p.parseEffectDecl()
 	}
+	if t.Kind == token.KwInfix {
+		return p.parseInfixDecl()
+	}
 	if t.Kind != token.LIDENT {
 		p.errorAt(t.Span, "SYNTAX PROBLEM",
 			"I was expecting a declaration here, like `name = expression`.")
@@ -260,6 +262,16 @@ func (p *parser) parseDecl() ast.Decl {
 		p.recoverToTopLevel(false)
 		return nil
 	}
+	if p.peekInExpr().Kind == token.KwNative {
+		n := p.parseNativeBody()
+		if ann == nil {
+			p.errorAt(name.Span, "NATIVE DECLARATION", "A native declaration requires a type annotation.")
+		}
+		if len(params) > 0 {
+			p.errorAt(name.Span, "NATIVE DECLARATION", "A native declaration cannot have source parameters; put its complete function type in the annotation.")
+		}
+		return &ast.ValueDecl{Name: name.Text, NameSpan: name.Span, Params: params, Ann: ann, Native: n}
+	}
 	body := p.parseBindBody(eqTok)
 	if body == nil {
 		p.recoverToTopLevel(false)
@@ -271,6 +283,44 @@ func (p *parser) parseDecl() ast.Decl {
 		p.recoverToTopLevel(false)
 	}
 	return &ast.ValueDecl{Name: name.Text, NameSpan: name.Span, Params: params, Ann: ann, Body: body}
+}
+
+func (p *parser) parseNativeBody() *ast.NativeBody {
+	kw := p.next()
+	n := &ast.NativeBody{Sp: kw.Span}
+	if p.peekInExpr().Kind == token.STRING {
+		t := p.next()
+		s := lexer.Unescape(t.Text)
+		n.Template = &s
+		n.Sp = n.Sp.Merge(t.Span)
+	}
+	if t := p.peekInExpr(); t.Kind != token.EOF {
+		p.errorAt(t.Span, "SYNTAX PROBLEM", "A native declaration ends after `native` or its template string.")
+	}
+	return n
+}
+
+func (p *parser) parseInfixDecl() ast.Decl {
+	p.next()
+	if !p.expect(token.LPAREN, "I expect `(` after `infix`.") {
+		return nil
+	}
+	op := p.peekInExpr()
+	if prec, _ := binOp(op.Kind); prec == 0 {
+		p.errorAt(op.Span, "NATIVE DECLARATION", "I expect one of fango's fixed binary operators here.")
+		return nil
+	}
+	p.next()
+	if !p.expect(token.RPAREN, "I expect `)` after the operator.") || !p.expect(token.EQ, "I expect `=` after the operator binding.") {
+		return nil
+	}
+	target := p.peekInExpr()
+	if target.Kind != token.LIDENT {
+		p.errorAt(target.Span, "NATIVE DECLARATION", "An infix binding must name a native value.")
+		return nil
+	}
+	p.next()
+	return &ast.InfixDecl{Op: op.Text, Target: target.Text, OpSpan: op.Span, TargetSpan: target.Span}
 }
 
 // parseEffectDecl parses an effect header followed by an indented block of
@@ -317,7 +367,16 @@ func (p *parser) parseEffectDecl() ast.Decl {
 		if ty == nil {
 			return nil
 		}
-		ops = append(ops, ast.OpSig{Name: opT.Text, NameSpan: opT.Span, Type: ty})
+		var native *ast.NativeBody
+		if p.peekInExpr().Kind == token.EQ {
+			p.next()
+			if p.peekInExpr().Kind != token.KwNative {
+				p.errorAt(p.peekInExpr().Span, "SYNTAX PROBLEM", "An effect operation implementation must use `native`.")
+				return nil
+			}
+			native = p.parseNativeBody()
+		}
+		ops = append(ops, ast.OpSig{Name: opT.Text, NameSpan: opT.Span, Type: ty, Native: native})
 		nt := p.peek()
 		if nt.Kind == token.EOF || nt.Pos().Col < col {
 			break

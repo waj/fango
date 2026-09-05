@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/types"
 	"github.com/waj/fango/runtime/fangort"
 )
@@ -236,6 +237,26 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			return nil, err
 		}
 		return applyBinOp(e.Op, l, r)
+	case *core.NativeCall:
+		args := make([]Value, len(e.Args))
+		for i, a := range e.Args {
+			v, err := in.eval(a, fr)
+			if err != nil {
+				return nil, err
+			}
+			args[i] = v
+		}
+		if spec, ok := natives.Lookup(e.Name); ok && !spec.Effect {
+			return spec.Eval(in.nativeRuntime(), args)
+		}
+		module := e.Module
+		if module == "" {
+			module = e.Name
+		}
+		if i := strings.LastIndexByte(module, '.'); i >= 0 {
+			module = module[:i]
+		}
+		return nil, fmt.Errorf("module `%s` ships native Go; native modules run only in compiled mode", module)
 	case *core.If:
 		cond, err := in.eval(e.Cond, fr)
 		if err != nil {
@@ -277,18 +298,11 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			in.evidence = saved
 			return v, err
 		}
-		switch e.Op.Name {
-		case "print":
-			return in.printValue(args[0])
-		case "readLine":
-			s, err := fangort.ReadLineFrom(in.ioctx.Reader)
-			return s, err
-		case "IO.write":
-			err := fangort.WriteStringTo(in.ioctx.Writer, args[0].(string))
-			return struct{}{}, err
-		default:
-			return nil, fmt.Errorf("eval: unhandled effect operation `%s.%s`", e.Effect.Name, e.Op.Name)
+		key := types.SurfaceName(e.Op.Owner.Name) + "." + types.SurfaceName(e.Op.Name)
+		if spec, ok := natives.Lookup(key); ok && spec.Effect {
+			return spec.Eval(in.nativeRuntime(), args)
 		}
+		return nil, fmt.Errorf("eval: unhandled effect operation `%s.%s`", e.Effect.Name, e.Op.Name)
 	case *core.Resume:
 		return in.eval(e.Value, fr)
 	case *core.Seq:
@@ -413,7 +427,7 @@ func cloneEvidence(src map[int]*evidence) map[int]*evidence {
 	return dst
 }
 
-func (in *interp) printValue(v Value) (Value, error) {
+func (in *interp) showValue(v Value) (string, error) {
 	var s string
 	switch v := v.(type) {
 	case int64:
@@ -427,10 +441,13 @@ func (in *interp) printValue(v Value) (Value, error) {
 	case *CtorVal:
 		s = showCtorVal(v, false)
 	default:
-		return nil, fmt.Errorf("eval: printing a %T", v)
+		return "", fmt.Errorf("eval: printing a %T", v)
 	}
-	_, err := fmt.Fprintln(in.out, s)
-	return struct{}{}, err
+	return s, nil
+}
+
+func (in *interp) nativeRuntime() *natives.Runtime {
+	return &natives.Runtime{Reader: in.ioctx.Reader, Writer: in.ioctx.Writer, Equal: eqValue, Show: in.showValue}
 }
 
 // tree walks a decision tree, mirroring the compiled backend's switches.
@@ -538,95 +555,14 @@ func (in *interp) force(name string) (Value, error) {
 	return v, nil
 }
 
-// applyBinOp dispatches on the left value's dynamic type — bijective with
-// the solved Core type. Int arithmetic wraps (int64), Float is IEEE (±Inf,
-// NaN, no panics) — the exact semantics elaborate's constant folder and the
-// compiled backend's native operators implement.
+// applyBinOp is the compatibility path for legacy Core unit tests. It maps to
+// the same declared-native registry used by NativeCall and constant folding.
 func applyBinOp(op string, l, r Value) (Value, error) {
-	l, r = promote(l, r)
-	switch lv := l.(type) {
-	case int64:
-		rv := r.(int64)
-		switch op {
-		case "+":
-			return lv + rv, nil
-		case "-":
-			return lv - rv, nil
-		case "*":
-			return lv * rv, nil
-		case "==":
-			return lv == rv, nil
-		case "/=":
-			return lv != rv, nil
-		case "<":
-			return lv < rv, nil
-		case ">":
-			return lv > rv, nil
-		case "<=":
-			return lv <= rv, nil
-		case ">=":
-			return lv >= rv, nil
-		}
-	case float64:
-		rv := r.(float64)
-		switch op {
-		case "+":
-			return lv + rv, nil
-		case "-":
-			return lv - rv, nil
-		case "*":
-			return lv * rv, nil
-		case "/":
-			return lv / rv, nil
-		case "==":
-			return lv == rv, nil
-		case "/=":
-			return lv != rv, nil
-		case "<":
-			return lv < rv, nil
-		case ">":
-			return lv > rv, nil
-		case "<=":
-			return lv <= rv, nil
-		case ">=":
-			return lv >= rv, nil
-		}
-	case string:
-		rv := r.(string)
-		switch op {
-		case "++":
-			return lv + rv, nil
-		case "==":
-			return lv == rv, nil
-		case "/=":
-			return lv != rv, nil
-		case "<":
-			return lv < rv, nil
-		case ">":
-			return lv > rv, nil
-		case "<=":
-			return lv <= rv, nil
-		case ">=":
-			return lv >= rv, nil
-		}
-	case bool:
-		rv := r.(bool)
-		switch op {
-		case "==":
-			return lv == rv, nil
-		case "/=":
-			return lv != rv, nil
-		}
-	case *CtorVal:
-		rv := r.(*CtorVal)
-		switch op {
-		case "==":
-			return eqValue(lv, rv), nil
-		case "/=":
-			return !eqValue(lv, rv), nil
-		}
+	if name := map[string]string{"+": "add", "-": "sub", "*": "mul", "/": "fdiv", "++": "append", "==": "eq", "/=": "neq", "<": "lt", ">": "gt", "<=": "le", ">=": "ge"}[op]; name != "" {
+		spec := natives.Table["Basics."+name]
+		return spec.Eval(&natives.Runtime{Equal: eqValue}, []any{l, r})
 	}
-	return nil, fmt.Errorf("eval: (%s) on %T values — the linter should have rejected this", op, l)
+	return nil, fmt.Errorf("eval: unknown operator %q", op)
 }
 
 // eqValue is structural equality — the interpreter's mirror of the derived

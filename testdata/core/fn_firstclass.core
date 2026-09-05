@@ -1,4 +1,4 @@
 (core
-  (def add (typarams number) (params x y) number -> number -> number (binop + number (var x number) (var y number)))
+  (def add (typarams number) (params x y) number -> number -> number (native Basics.add (var x number) (var y number) number))
   (def apply2 (typarams a) (params f x) (a -> a) -> a -> a (app/value (var f a -> a) (app/value (var f a -> a) (var x a) a) a))
   (def main Int (app/worker @[Int] (var apply2 (Int -> Int) -> Int -> Int) (lam _w0 Int -> Int (app/worker @[Int] (var add Int -> Int -> Int) (int 1 Int) (var _w0 Int) Int)) (int 5 Int) Int)))

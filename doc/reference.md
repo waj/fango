@@ -66,8 +66,8 @@ introduces selected names unqualified; it does not remove qualified access.
 Imports cannot be interspersed with declarations, and duplicate module imports
 or qualifier aliases are rejected.
 
-An exposing list is either `(..)` by itself or a non-empty comma-separated
-list. A lowercase item exports/imports a value or one effect operation. `Type`
+An exposing list is `(..)`, empty `()`, or a comma-separated list. A lowercase
+item exports/imports a value or one effect operation. `Type`
 or `Effect` exposes the abstract type/effect label; `Type(..)` also exposes all
 constructors and `Effect(..)` all operations. Constructors cannot be selected
 individually, member lists cannot be partial, and imported declarations cannot
@@ -81,10 +81,12 @@ filename, so `Main.fango` declares `Main`. Headerless entry files remain
 compatible, receive a private synthetic identity, and cannot themselves be
 imported.
 
-The compiler also contains explicitly imported standard-library modules.
+The compiler also contains standard-library modules.
 Their names are reserved: a named entry or local module that has the same name
 is rejected with `RESERVED MODULE`, rather than replacing the bundled module.
-There is no implicit standard-library prelude.
+Every ordinary module implicitly loads hidden `Basics` operator declarations
+and receives the `IO` effect plus unqualified `print` and `readLine`. Other
+standard-library APIs still require explicit imports.
 
 `build` and `run` use only the entry module's `main`; a dependency's `main` is
 an ordinary declaration. `check` does not require `main`. Imports expose only
@@ -92,9 +94,9 @@ the direct module's declared public interface, never its dependencies. Import
 cycles are rejected with the complete cycle chain. The generated build
 directory compiles each Fango module as a separate Go package within one
 private Go module, allowing unchanged packages to use Go's build cache. It
-includes `sources.json`, containing each transitive source's logical name,
-path, and SHA-256 hash for build invalidation. Local paths are relative to the
-source root; bundled paths begin with `<stdlib>/`.
+includes `sources.json`, containing each transitive Fango source and native
+sidecar's logical name, path, and SHA-256 hash for build invalidation. Local
+paths are relative to the source root; bundled paths begin with `<stdlib>/`.
 
 Top-level declarations begin in column 1 and are visible only to declarations
 below them within their module. Tabs are rejected; indent with spaces. `--`
@@ -123,7 +125,8 @@ There is no `let ... in` expression.
 
 The standard library ships with the compiler, has no separately selected
 version, and is experimental: its API may evolve before a future stability
-milestone. Every module must be imported explicitly.
+milestone. `Basics` and the ambient portion of `IO` are implicit; other modules
+and APIs must be imported explicitly.
 
 `List` exposes the following algebraic type:
 
@@ -156,7 +159,52 @@ main() =
 
 `IO.write : String ->{IO} ()` writes the string exactly as provided without a
 trailing newline. It is a native operation available only through an `IO`
-import. The existing global `print` and `readLine` names remain available.
+import. The global `print : printable ->{IO} ()` and
+`readLine : () ->{IO} String` names come from ambient IO.
+
+## Native Go sidecars
+
+A module may implement an annotated, pure value in adjacent Go:
+
+```fango
+module Hash exposing (crc32)
+
+crc32 : String -> Int
+crc32 = native
+```
+
+`Hash.native.go` must declare `package native` and export the corresponding
+capitalized function. Imported dotted modules follow their source layout
+(`Foo/Bar.fango` and `Foo/Bar.native.go`); a headerless entry uses its source
+basename.
+
+```go
+package native
+
+import "hash/crc32"
+
+func Crc32(text string) int64 {
+    return int64(crc32.ChecksumIEEE([]byte(text)))
+}
+```
+
+The supported boundary types are `Int`/`int64`, `Float`/`float64`,
+`String`/`string`, `Bool`/`bool`, and Unit. Unit parameters are omitted from
+the Go function and a Unit result is represented by no Go result. Functions,
+ADTs, polymorphic variables, effectful arrows, Go type parameters, multiple
+results, and `error` results are rejected. Sidecars may import only Go
+standard-library packages. Every call-form declaration needs its matching
+exported function, and every exported sidecar function needs a declaration.
+
+Native sidecars participate in `check`, build manifests, incremental rebuilds,
+`build`, `run`, and `--emit-go`. They execute only in compiled programs; the
+Core interpreter and REPL report “native modules run only in compiled mode.”
+Panics cross the boundary unchanged.
+
+The words `native` and `infix` are reserved. Inline
+`native "Go expression"` templates and `infix (op) = value` bindings are
+compiler-bundled syntax and are rejected in user modules. The operator token
+set, precedence, and associativity remain fixed as listed below.
 
 ## Values and operators
 
@@ -338,7 +386,7 @@ A file passed to `build` or `run` must define `main`. A pure value is valid:
 main = 42
 ```
 
-A value-style `main` may perform builtin IO:
+A value-style `main` may perform ambient IO:
 
 ```fango
 main : ()
@@ -352,7 +400,7 @@ main : () ->{IO} ()
 main() = print "hello"
 ```
 
-A value-style `main` may perform builtin IO but no unhandled custom effect. A
+A value-style `main` may perform ambient IO but no unhandled custom effect. A
 function-style effectful `main` must have exactly the shown IO/Unit shape and
 one discarded Unit parameter; `main _ = ...` remains compatible. Non-Unit pure
 `main` values are primarily observable in the REPL and test harness; an

@@ -44,6 +44,11 @@ func (el *elab) app(e *ast.App) core.Expr {
 	if op := el.ck.OpCalls[e]; op != nil {
 		return el.operationCall(op, el.zonkDefault(el.ck.ExprTypes[head]), el.ck.Sub.Apply(el.ck.ExprTypes[head]), args)
 	}
+	if v, ok := head.(*ast.Var); ok {
+		if n := el.ck.Natives[v.Name]; n != nil && n.Effect == nil {
+			return el.nativeApply(n, el.zonkDefault(el.ck.ExprTypes[head]), args)
+		}
+	}
 
 	// Lifted local head? Its frees become leading arguments (lift.go).
 	if v, ok := head.(*ast.Var); ok {
@@ -108,7 +113,7 @@ func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args [
 	for _, a := range args {
 		coreArgs = append(coreArgs, el.expr(a))
 	}
-	if op.Owner == el.ck.IO && op.Name == "print" && len(coreArgs) > 0 {
+	if op.Owner == el.ck.IO && types.SurfaceName(op.Name) == "print" && len(coreArgs) > 0 {
 		el.checkPrintable(coreArgs[0].Type(), args[0].Span())
 	}
 	for i := len(args); i < op.Arity; i++ {
@@ -133,6 +138,35 @@ func (el *elab) operationValue(op *types.EffectOp, ty, raw types.Type) core.Expr
 	return el.operationCall(op, ty, raw, nil)
 }
 
+func (el *elab) nativeApply(n *types.NativeInfo, nativeTy types.Type, args []ast.Expr) core.Expr {
+	if len(args) > n.Arity {
+		res := el.nativeApply(n, nativeTy, args[:n.Arity])
+		for _, a := range args[n.Arity:] {
+			res = el.valueApp(res, el.expr(a))
+		}
+		return res
+	}
+	argTys, ret := core.PeelFun(nativeTy, n.Arity)
+	coreArgs := make([]core.Expr, 0, n.Arity)
+	for _, a := range args {
+		coreArgs = append(coreArgs, el.expr(a))
+	}
+	for i := len(args); i < n.Arity; i++ {
+		name := fmt.Sprintf("_native%d", el.tmp)
+		el.tmp++
+		coreArgs = append(coreArgs, &core.VarRef{Name: name, Ty: argTys[i]})
+	}
+	var body core.Expr = &core.NativeCall{Name: n.Name, Module: n.Module, Args: coreArgs, Ty: ret}
+	for i := n.Arity - 1; i >= len(args); i-- {
+		body = &core.Lambda{Param: coreArgs[i].(*core.VarRef).Name, Body: body, Ty: arrowAt(nativeTy, i)}
+	}
+	return body
+}
+
+func (el *elab) nativeValue(n *types.NativeInfo, ty types.Type) core.Expr {
+	return el.nativeApply(n, ty, nil)
+}
+
 // valueApp is one typed indirect application: callee(arg).
 func (el *elab) valueApp(callee, arg core.Expr) core.Expr {
 	fn, ok := callee.Type().(*types.TFun)
@@ -146,7 +180,7 @@ func (el *elab) valueApp(callee, arg core.Expr) core.Expr {
 		Ty:         fn.Ret,
 	}
 	for _, l := range types.SortedRow(fn.Eff).Labels {
-		if l.Name != "IO" {
+		if types.SurfaceName(l.Name) != "IO" {
 			app.EvidenceArgs = append(app.EvidenceArgs, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...)})
 		}
 	}

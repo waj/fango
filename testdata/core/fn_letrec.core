@@ -1,4 +1,4 @@
 (core
   (def v (typarams number) number (app/worker @[number] (var _lift1_go number -> number) (int 4 number) number))
-  (def _lift1_go (typarams number) (params n) number -> number (if number (binop < Bool (var n number) (int 1 number)) (int 0 number) (binop + number (var n number) (app/worker @[number] (var _lift1_go number -> number) (binop - number (var n number) (int 1 number)) number))))
+  (def _lift1_go (typarams number) (params n) number -> number (if number (native Basics.lt (var n number) (int 1 number) Bool) (int 0 number) (native Basics.add (var n number) (app/worker @[number] (var _lift1_go number -> number) (native Basics.sub (var n number) (int 1 number) number) number) number)))
   (def main Int (app/worker @[Int] (var v Int) Int)))

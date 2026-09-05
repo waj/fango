@@ -35,6 +35,9 @@ func TestCheckerGoldens(t *testing.T) {
 			sup := &types.Supply{}
 			b := types.NewBuiltins(sup)
 			ck := NewChecker(sup, b, NewEnv())
+			if errs := ck.InstallPrelude(); len(errs) > 0 {
+				t.Fatalf("prelude errors: %v", errs)
+			}
 			infos, errs := ck.Module(m)
 			var out strings.Builder
 			for _, info := range infos {

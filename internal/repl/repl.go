@@ -36,6 +36,9 @@ func NewSession(out io.Writer) *Session {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
+	if errs := ck.InstallPrelude(); len(errs) > 0 {
+		panic("invalid embedded prelude: " + errs[0].Body)
+	}
 	// Prompt values are lazy memo cells (doc/design.md, "Interpreter and REPL") — evaluated once, so their
 	// types stay monotypes (the block-binding monomorphism restriction).
 	// Functions and lambdas still generalize.
@@ -225,6 +228,10 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	vd := m.Decls[0].(*ast.ValueDecl)
+	if vd.Native != nil {
+		diag.Render(s.out, []diag.Error{diag.Errorf(vd.Native.Sp, "NATIVE MODULE REQUIRED", "Native declarations belong in source modules with a sidecar and cannot be entered directly at the REPL.")})
+		return inputDone
+	}
 	redefining := s.ck.Env.Has(vd.Name)
 	// Check the body BEFORE binding: a failed definition must not install
 	// a broken name into the session. REPL declarations are required to be

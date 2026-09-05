@@ -40,6 +40,11 @@ func ReadLine() string {
 	return s
 }
 
+// ReadLineUnit is the declaration-template adapter for Fango's explicit Unit
+// argument. Keeping the argument in the generated call preserves strict
+// evaluation when readLine is applied to a non-atomic Unit expression.
+func ReadLineUnit(_ Unit) string { return ReadLine() }
+
 // Number is the Go type-set constraint compiling fango's Number-kinded type
 // variables (doc/design.md, "Type inference"): `double : number -> number` emits as
 // `func v_double[A Number](x A) A` with native operators.

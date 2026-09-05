@@ -8,16 +8,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	goast "go/ast"
+	goparser "go/parser"
+	gotoken "go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	fango "github.com/waj/fango"
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/lexer"
+	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/parser"
 	"github.com/waj/fango/internal/source"
 )
@@ -26,6 +32,7 @@ import (
 // modules.
 type Provider interface {
 	Source(module string) (path string, content []byte, err error)
+	Native(module string) (path string, content []byte, err error)
 }
 
 type FSProvider struct{ Root string }
@@ -69,6 +76,12 @@ func (p FSProvider) Source(module string) (string, []byte, error) {
 	return filepath.ToSlash(rel), b, err
 }
 
+func (p FSProvider) Native(module string) (string, []byte, error) {
+	rel := filepath.FromSlash(strings.ReplaceAll(module, ".", "/") + ".native.go")
+	b, err := os.ReadFile(filepath.Join(p.Root, rel))
+	return filepath.ToSlash(rel), b, err
+}
+
 type BundledProvider struct{}
 
 func (BundledProvider) Source(module string) (string, []byte, error) {
@@ -76,12 +89,10 @@ func (BundledProvider) Source(module string) (string, []byte, error) {
 	b, err := fs.ReadFile(fango.StdlibFS, "stdlib/"+rel)
 	return "<stdlib>/" + rel, b, err
 }
-
-func nativeOperations(module string) []string {
-	if module == "IO" {
-		return []string{"write"}
-	}
-	return nil
+func (BundledProvider) Native(module string) (string, []byte, error) {
+	rel := strings.ReplaceAll(module, ".", "/") + ".native.go"
+	b, err := fs.ReadFile(fango.StdlibFS, "stdlib/"+rel)
+	return "<stdlib>/" + rel, b, err
 }
 
 type ManifestEntry struct {
@@ -91,11 +102,18 @@ type ManifestEntry struct {
 }
 
 type Result struct {
-	Module           *ast.Module
-	Entry            string
-	Manifest         []ManifestEntry
-	Units            []Unit
-	NativeOperations []string
+	Module    *ast.Module
+	Entry     string
+	Manifest  []ManifestEntry
+	Units     []Unit
+	Operators map[string]string
+	Natives   []NativeSource
+}
+
+type NativeSource struct {
+	Module, Path string
+	Content      []byte
+	Bundled      bool
 }
 
 // Unit is one source module in dependency-first build order. Name is empty
@@ -107,12 +125,16 @@ type Unit struct {
 }
 
 type node struct {
-	name, path string
-	content    []byte
-	mod        *ast.Module
-	iface      *iface
-	private    bool
-	nativeOps  []string
+	name, path   string
+	content      []byte
+	mod          *ast.Module
+	iface        *iface
+	private      bool
+	bundled      bool
+	deps         []string
+	nativePath   string
+	native       []byte
+	nativeModule string
 }
 
 type iface struct {
@@ -143,15 +165,6 @@ func Load(entry string) (*Result, []diag.Error) {
 	if len(errs) > 0 {
 		return nil, errs
 	}
-	if m.Header == nil && len(m.Imports) == 0 {
-		h := sha256.Sum256(content)
-		return &Result{
-			Module:   m,
-			Entry:    "main",
-			Manifest: []ManifestEntry{{Module: "<entry>", Path: filepath.Base(abs), SHA256: hex.EncodeToString(h[:])}},
-			Units:    []Unit{{Entry: true}},
-		}, nil
-	}
 	entryName, private := "<entry>", m.Header == nil
 	if !private {
 		entryName = m.Header.Name
@@ -166,7 +179,12 @@ func Load(entry string) (*Result, []diag.Error) {
 	if !private && m.Header.Name != wantEntry {
 		return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "MODULE/PATH MISMATCH", "The entry file `%s` must declare module `%s`, but declares `%s`.", filepath.Base(abs), wantEntry, m.Header.Name)}
 	}
-	nodes := map[string]*node{entryName: {name: entryName, path: filepath.Base(abs), content: content, mod: m, private: private}}
+	rootNode := &node{name: entryName, path: filepath.Base(abs), content: content, mod: m, private: private, deps: []string{"Basics", "IO"}, nativeModule: wantEntry}
+	rootNativePath := wantEntry + ".native.go"
+	if nb, ne := os.ReadFile(filepath.Join(root, rootNativePath)); ne == nil {
+		rootNode.nativePath, rootNode.native = rootNativePath, nb
+	}
+	nodes := map[string]*node{entryName: rootNode}
 	provider := FSProvider{Root: root}
 	var load func(string, source.Span)
 	load = func(name string, at source.Span) {
@@ -213,17 +231,40 @@ func Load(entry string) (*Result, []diag.Error) {
 			errs = append(errs, diag.Errorf(mm.Header.NameSpan, "MODULE/PATH MISMATCH", "File `%s` must declare module `%s`, but declares `%s`.", path, name, mm.Header.Name))
 			return
 		}
-		n := &node{name: name, path: path, content: b, mod: mm}
+		n := &node{name: name, path: path, content: b, mod: mm, bundled: bundled, nativeModule: name}
+		if !bundled {
+			n.deps = []string{"Basics", "IO"}
+		}
+		var np string
+		var nb []byte
+		var ne error
 		if bundled {
-			n.nativeOps = nativeOperations(name)
+			np, nb, ne = bundledProvider.Native(name)
+		} else {
+			np, nb, ne = provider.Native(name)
+		}
+		if ne == nil {
+			n.nativePath, n.native = np, nb
 		}
 		nodes[name] = n
 		for _, im := range mm.Imports {
 			load(im.Module, im.ModuleSpan)
 		}
+		for _, dep := range n.deps {
+			load(dep, at)
+		}
 	}
 	for _, im := range m.Imports {
 		load(im.Module, im.ModuleSpan)
+	}
+	for _, dep := range nodes[entryName].deps {
+		load(dep, source.Span{})
+	}
+	if len(errs) > 0 {
+		return nil, errs
+	}
+	for _, n := range nodes {
+		errs = append(errs, validateNatives(n)...)
 	}
 	if len(errs) > 0 {
 		return nil, errs
@@ -293,25 +334,37 @@ func Load(entry string) (*Result, []diag.Error) {
 	}
 	manifest := make([]ManifestEntry, 0, len(order))
 	units := make([]Unit, 0, len(order))
-	var nativeOps []string
+	operators := map[string]string{}
+	var natives []NativeSource
 	for _, name := range order {
 		n := nodes[name]
 		h := sha256.Sum256(n.content)
 		manifest = append(manifest, ManifestEntry{Module: name, Path: n.path, SHA256: hex.EncodeToString(h[:])})
-		for _, op := range n.nativeOps {
-			nativeOps = append(nativeOps, canonical(name, op))
+		if n.native != nil {
+			nh := sha256.Sum256(n.native)
+			manifest = append(manifest, ManifestEntry{Module: name, Path: n.nativePath, SHA256: hex.EncodeToString(nh[:])})
+			natives = append(natives, NativeSource{Module: n.nativeModule, Path: n.nativePath, Content: n.native, Bundled: n.bundled})
+		}
+		for _, d := range n.mod.Decls {
+			if inf, ok := d.(*ast.InfixDecl); ok {
+				target := inf.Target
+				if !strings.Contains(target, ".") {
+					target = canonical(name, target)
+				}
+				operators[inf.Op] = target
+			}
 		}
 		unitName := name
 		if n.private {
 			unitName = ""
 		}
-		units = append(units, Unit{Name: unitName, Imports: dependencyNames(n), Entry: name == entryName})
+		units = append(units, Unit{Name: unitName, Imports: explicitDependencyNames(n), Entry: name == entryName})
 	}
 	entrySymbol := "main"
 	if !private {
 		entrySymbol = canonical(entryName, "main")
 	}
-	return &Result{Module: merged, Entry: entrySymbol, Manifest: manifest, Units: units, NativeOperations: nativeOps}, nil
+	return &Result{Module: merged, Entry: entrySymbol, Manifest: manifest, Units: units, Operators: operators, Natives: natives}, nil
 }
 
 func parse(f *source.File) (*ast.Module, []diag.Error) {
@@ -322,10 +375,339 @@ func parse(f *source.File) (*ast.Module, []diag.Error) {
 	return parser.Parse(toks, f)
 }
 
+var nativePlaceholder = regexp.MustCompile(`\$([0-9]+)`)
+
+// validateNatives keeps the Go boundary deliberately small. Bundled modules
+// may use inline templates; ordinary modules may only use sidecar call form
+// with a closed scalar ABI that can be checked without running Go tooling.
+func validateNatives(n *node) []diag.Error {
+	var errs []diag.Error
+	callDecls := map[string]*ast.ValueDecl{}
+	templateTargets := map[string]bool{}
+	infixes := map[string]source.Span{}
+	for _, d := range n.mod.Decls {
+		switch d := d.(type) {
+		case *ast.ValueDecl:
+			if d.Native == nil {
+				continue
+			}
+			if d.Native.Template != nil {
+				if !n.bundled {
+					errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE TEMPLATE NOT ALLOWED", "Inline native templates are reserved for compiler-bundled modules; use `native` with a sidecar function."))
+					continue
+				}
+				errs = append(errs, validateTemplate(*d.Native.Template, nativeArity(d.Ann), d.Native.Sp)...)
+				templateTargets[d.Name] = true
+				if spec, ok := natives.Lookup(canonical(n.name, d.Name)); !ok || spec.Arity != nativeArity(d.Ann) || spec.Effect {
+					errs = append(errs, diag.Errorf(d.Native.Sp, "INVALID BUNDLED NATIVE", "Bundled native `%s.%s` does not match the interpreter registry.", n.name, d.Name))
+				}
+			} else {
+				callDecls[d.Name] = d
+			}
+		case *ast.EffectDecl:
+			for _, op := range d.Ops {
+				if op.Native == nil {
+					continue
+				}
+				if !n.bundled {
+					errs = append(errs, diag.Errorf(op.Native.Sp, "NATIVE EFFECT NOT ALLOWED", "User sidecars implement pure native values; native effect operations are reserved for bundled modules."))
+					continue
+				}
+				if op.Native.Template == nil {
+					errs = append(errs, diag.Errorf(op.Native.Sp, "NATIVE EFFECT TEMPLATE", "Bundled native effect operations require an inline template."))
+				} else {
+					errs = append(errs, validateTemplate(*op.Native.Template, typeArity(op.Type), op.Native.Sp)...)
+					if spec, ok := natives.Lookup(canonical(n.name, op.Name)); !ok || spec.Arity != typeArity(op.Type) || !spec.Effect {
+						errs = append(errs, diag.Errorf(op.Native.Sp, "INVALID BUNDLED NATIVE", "Bundled native `%s.%s` does not match the interpreter registry.", n.name, op.Name))
+					}
+				}
+			}
+		case *ast.InfixDecl:
+			if !n.bundled {
+				errs = append(errs, diag.Errorf(d.OpSpan, "INFIX NOT ALLOWED", "Operator bindings are reserved for compiler-bundled modules."))
+				continue
+			}
+			if _, exists := infixes[d.Op]; exists {
+				errs = append(errs, diag.Errorf(d.OpSpan, "DUPLICATE INFIX", "Operator `%s` already has a binding in this module.", d.Op))
+			}
+			infixes[d.Op] = d.OpSpan
+		}
+	}
+	for _, d := range n.mod.Decls {
+		if inf, ok := d.(*ast.InfixDecl); ok && n.bundled && !templateTargets[inf.Target] {
+			errs = append(errs, diag.Errorf(inf.TargetSpan, "INVALID INFIX TARGET", "Operator `%s` must name a template-form native value in the same bundled module.", inf.Op))
+		}
+	}
+	if n.bundled {
+		return errs
+	}
+	if len(callDecls) == 0 {
+		if n.native != nil {
+			errs = append(errs, diag.Errorf(source.Span{}, "ORPHAN NATIVE SIDECAR", "Module `%s` has `%s`, but declares no call-form native values.", n.name, n.nativePath))
+		}
+		return errs
+	}
+	if n.native == nil {
+		for _, d := range callDecls {
+			errs = append(errs, diag.Errorf(d.Native.Sp, "MISSING NATIVE SIDECAR", "Native `%s` requires `%s.native.go` beside the module source.", d.Name, n.name))
+		}
+		return errs
+	}
+	return append(errs, validateSidecar(n, callDecls)...)
+}
+
+func nativeArity(ann *ast.TypeAnn) int {
+	if ann == nil {
+		return 0
+	}
+	return typeArity(ann.Type)
+}
+
+func typeArity(t ast.TypeExpr) int {
+	n := 0
+	for {
+		f, ok := t.(*ast.TFunExpr)
+		if !ok {
+			return n
+		}
+		n++
+		t = f.Ret
+	}
+}
+
+func validateTemplate(template string, arity int, sp source.Span) []diag.Error {
+	var errs []diag.Error
+	counts := make([]int, arity)
+	for _, m := range nativePlaceholder.FindAllStringSubmatch(template, -1) {
+		i, _ := strconv.Atoi(m[1])
+		if i < 1 || i > arity {
+			errs = append(errs, diag.Errorf(sp, "NATIVE TEMPLATE PLACEHOLDER", "Template placeholder `$%d` is outside this native's arity %d.", i, arity))
+		} else {
+			counts[i-1]++
+		}
+	}
+	for i, count := range counts {
+		if count != 1 {
+			errs = append(errs, diag.Errorf(sp, "NATIVE TEMPLATE PLACEHOLDER", "Template must use `$%d` exactly once; found %d uses.", i+1, count))
+		}
+	}
+	s := strings.ReplaceAll(strings.ReplaceAll(template, "$eq", "__fango_eq"), "$show", "__fango_show")
+	for i := arity; i >= 1; i-- {
+		s = strings.ReplaceAll(s, fmt.Sprintf("$%d", i), fmt.Sprintf("__fango_p%d", i))
+	}
+	x, err := goparser.ParseExpr(s)
+	if err != nil {
+		return append(errs, diag.Errorf(sp, "INVALID NATIVE TEMPLATE", "The native template is not a Go expression: %v.", err))
+	}
+	selectorNames := map[*goast.Ident]bool{}
+	goast.Inspect(x, func(node goast.Node) bool {
+		if s, ok := node.(*goast.SelectorExpr); ok {
+			selectorNames[s.Sel] = true
+			if id, ok := s.X.(*goast.Ident); !ok || id.Name != "fangort" {
+				errs = append(errs, diag.Errorf(sp, "NATIVE TEMPLATE IDENTIFIER", "Only the `fangort` qualifier is allowed in a native template."))
+			}
+		}
+		if call, ok := node.(*goast.CallExpr); ok {
+			if id, ok := call.Fun.(*goast.Ident); ok {
+				want := -1
+				if id.Name == "__fango_eq" {
+					want = 2
+				} else if id.Name == "__fango_show" {
+					want = 1
+				}
+				if want >= 0 && len(call.Args) != want {
+					errs = append(errs, diag.Errorf(sp, "NATIVE TEMPLATE INTRINSIC", "Template intrinsic requires %d argument(s).", want))
+				} else if want >= 0 {
+					for _, arg := range call.Args {
+						placeholder, ok := arg.(*goast.Ident)
+						if !ok || !strings.HasPrefix(placeholder.Name, "__fango_p") {
+							errs = append(errs, diag.Errorf(sp, "NATIVE TEMPLATE INTRINSIC", "Template intrinsics accept positional placeholders directly."))
+							break
+						}
+					}
+				}
+			}
+		}
+		return true
+	})
+	allowed := map[string]bool{
+		"fangort": true, "__fango_eq": true, "__fango_show": true,
+		"true": true, "false": true, "nil": true,
+		"append": true, "cap": true, "clear": true, "close": true, "complex": true,
+		"copy": true, "delete": true, "imag": true, "len": true, "make": true,
+		"max": true, "min": true, "new": true, "panic": true, "print": true,
+		"println": true, "real": true, "recover": true,
+	}
+	goast.Inspect(x, func(node goast.Node) bool {
+		id, ok := node.(*goast.Ident)
+		if !ok || selectorNames[id] || allowed[id.Name] || strings.HasPrefix(id.Name, "__fango_p") {
+			return true
+		}
+		errs = append(errs, diag.Errorf(sp, "NATIVE TEMPLATE IDENTIFIER", "Identifier `%s` is not allowed in a native template.", id.Name))
+		return true
+	})
+	return errs
+}
+
+func validateSidecar(n *node, decls map[string]*ast.ValueDecl) []diag.Error {
+	f, err := goparser.ParseFile(gotoken.NewFileSet(), n.nativePath, n.native, 0)
+	if err != nil {
+		return []diag.Error{diag.Errorf(source.Span{}, "INVALID NATIVE SIDECAR", "%s does not parse as Go: %v.", n.nativePath, err)}
+	}
+	var errs []diag.Error
+	if f.Name.Name != "native" {
+		errs = append(errs, diag.Errorf(source.Span{}, "NATIVE PACKAGE NAME", "%s must declare `package native`.", n.nativePath))
+	}
+	for _, im := range f.Imports {
+		path, _ := strconv.Unquote(im.Path.Value)
+		first := strings.Split(path, "/")[0]
+		if strings.Contains(first, ".") {
+			errs = append(errs, diag.Errorf(source.Span{}, "NATIVE IMPORT NOT ALLOWED", "User sidecar %s may import only Go standard-library packages; `%s` is external.", n.nativePath, path))
+		}
+	}
+	funcs := map[string]*goast.FuncDecl{}
+	for _, d := range f.Decls {
+		if fn, ok := d.(*goast.FuncDecl); ok && fn.Recv == nil && goast.IsExported(fn.Name.Name) {
+			funcs[fn.Name.Name] = fn
+		}
+	}
+	used := map[string]bool{}
+	for name, d := range decls {
+		goName := exportNativeName(name)
+		fn := funcs[goName]
+		if fn == nil {
+			errs = append(errs, diag.Errorf(d.Native.Sp, "MISSING NATIVE FUNCTION", "Native `%s` requires exported function `%s` in %s.", name, goName, n.nativePath))
+			continue
+		}
+		used[goName] = true
+		errs = append(errs, validateNativeShape(d, fn)...)
+	}
+	for name := range funcs {
+		if !used[name] {
+			errs = append(errs, diag.Errorf(source.Span{}, "ORPHAN NATIVE FUNCTION", "Exported function `%s` in %s has no call-form native declaration.", name, n.nativePath))
+		}
+	}
+	return errs
+}
+
+func exportNativeName(name string) string {
+	if name == "" {
+		return ""
+	}
+	return strings.ToUpper(name[:1]) + name[1:]
+}
+
+func validateNativeShape(d *ast.ValueDecl, fn *goast.FuncDecl) []diag.Error {
+	if d.Ann == nil {
+		return nil // parser already diagnoses the missing annotation
+	}
+	var params []ast.TypeExpr
+	t := d.Ann.Type
+	for {
+		f, ok := t.(*ast.TFunExpr)
+		if !ok {
+			break
+		}
+		if f.Eff != nil && (len(f.Eff.Labels) > 0 || f.Eff.Tail != "") {
+			return []diag.Error{diag.Errorf(d.Native.Sp, "NATIVE ABI", "User native `%s` must be pure.", d.Name)}
+		}
+		if !isUnitType(f.Arg) {
+			params = append(params, f.Arg)
+		}
+		t = f.Ret
+	}
+	got := fieldCount(fn.Type.Params)
+	if got != len(params) {
+		return []diag.Error{diag.Errorf(d.Native.Sp, "NATIVE ABI", "Function `%s` has %d parameter(s); native `%s` requires %d after Unit erasure.", fn.Name.Name, got, d.Name, len(params))}
+	}
+	var errs []diag.Error
+	i := 0
+	for _, field := range fn.Type.Params.List {
+		count := len(field.Names)
+		if count == 0 {
+			count = 1
+		}
+		for range count {
+			if want := nativeGoType(params[i]); want == "" || goTypeName(field.Type) != want {
+				errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Parameter %d of `%s` must use the scalar Go type for its Fango annotation.", i+1, fn.Name.Name))
+			}
+			i++
+		}
+	}
+	if isUnitType(t) {
+		if fieldCount(fn.Type.Results) != 0 {
+			errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Function `%s` must return no value for Fango Unit.", fn.Name.Name))
+		}
+	} else if fieldCount(fn.Type.Results) != 1 || len(fn.Type.Results.List) != 1 || goTypeName(fn.Type.Results.List[0].Type) != nativeGoType(t) {
+		errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Function `%s` must return exactly the scalar Go type in native `%s`'s annotation.", fn.Name.Name, d.Name))
+	}
+	if fn.Type.TypeParams != nil {
+		errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Function `%s` cannot declare Go type parameters.", fn.Name.Name))
+	}
+	return errs
+}
+
+func fieldCount(fs *goast.FieldList) int {
+	if fs == nil {
+		return 0
+	}
+	n := 0
+	for _, f := range fs.List {
+		if len(f.Names) == 0 {
+			n++
+		} else {
+			n += len(f.Names)
+		}
+	}
+	return n
+}
+
+func isUnitType(t ast.TypeExpr) bool {
+	n, ok := t.(*ast.TName)
+	return ok && n.Name == "()"
+}
+
+func nativeGoType(t ast.TypeExpr) string {
+	n, ok := t.(*ast.TName)
+	if !ok {
+		return ""
+	}
+	return map[string]string{"Int": "int64", "Float": "float64", "String": "string", "Bool": "bool"}[n.Name]
+}
+
+func goTypeName(e goast.Expr) string {
+	if id, ok := e.(*goast.Ident); ok {
+		return id.Name
+	}
+	return ""
+}
+
 func dependencyNames(n *node) []string {
-	out := make([]string, len(n.mod.Imports))
-	for i, im := range n.mod.Imports {
-		out[i] = im.Module
+	seen := map[string]bool{}
+	var out []string
+	for _, dep := range n.deps {
+		if dep != n.name && !seen[dep] {
+			seen[dep] = true
+			out = append(out, dep)
+		}
+	}
+	for _, im := range n.mod.Imports {
+		if !seen[im.Module] {
+			seen[im.Module] = true
+			out = append(out, im.Module)
+		}
+	}
+	return out
+}
+
+func explicitDependencyNames(n *node) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, im := range n.mod.Imports {
+		if im.Module != n.name && !seen[im.Module] {
+			seen[im.Module] = true
+			out = append(out, im.Module)
+		}
 	}
 	return out
 }
@@ -333,9 +715,10 @@ func dependencyNames(n *node) []string {
 func topo(nodes map[string]*node) []string {
 	indegree, users := map[string]int{}, map[string][]string{}
 	for name, n := range nodes {
-		indegree[name] = len(n.mod.Imports)
-		for _, im := range n.mod.Imports {
-			users[im.Module] = append(users[im.Module], name)
+		deps := dependencyNames(n)
+		indegree[name] = len(deps)
+		for _, dep := range deps {
+			users[dep] = append(users[dep], name)
 		}
 	}
 	var ready []string
@@ -367,10 +750,6 @@ func buildInterface(n *node, errs []diag.Error) (*iface, []diag.Error) {
 		return newIface(), errs
 	}
 	all := newIface()
-	for _, name := range n.nativeOps {
-		all.values[name] = canonical(n.name, name)
-		all.ops[name] = canonical(n.name, name)
-	}
 	for _, d := range n.mod.Decls {
 		switch d := d.(type) {
 		case *ast.ValueDecl:
@@ -533,10 +912,23 @@ func (r *resolver) canon(name string) string {
 }
 
 func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
-	r.vals = map[string]string{"print": "print", "readLine": "readLine"}
-	r.tys = map[string]string{"Int": "Int", "Float": "Float", "String": "String", "Bool": "Bool", "()": "()", "IO": "IO"}
+	r.vals = map[string]string{}
+	r.tys = map[string]string{"Int": "Int", "Float": "Float", "String": "String", "Bool": "Bool", "()": "()"}
 	r.ctors = map[string]string{"True": "True", "False": "False"}
-	r.ops = map[string]string{"print": "print", "readLine": "readLine"}
+	r.ops = map[string]string{}
+	if !r.node.bundled {
+		if ioNode := r.nodes["IO"]; ioNode != nil && ioNode.iface != nil {
+			for _, name := range []string{"print", "readLine"} {
+				if v := ioNode.iface.values[name]; v != "" {
+					r.vals[name] = v
+					r.ops[name] = ioNode.iface.ops[name]
+				}
+			}
+			if v := ioNode.iface.types["IO"]; v != "" {
+				r.tys["IO"] = v
+			}
+		}
+	}
 	r.quals = map[string]*iface{}
 	seenModules, aliases, fullQualifiers := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, im := range r.node.mod.Imports {
@@ -596,6 +988,9 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 				visible[surface] = canon
 			}
 			r.typeAnn(d.Ann)
+			if d.Native != nil {
+				d.Native.Module = r.node.nativeModule
+			}
 			locals := map[string]bool{}
 			for _, p := range d.Params {
 				if p.Name != "_" && p.Name != "()" {
@@ -606,6 +1001,9 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 			r.expr(d.Body, visible, locals)
 			d.Name = canon
 			r.vals[surface] = canon
+			out = append(out, d)
+		case *ast.InfixDecl:
+			d.Target = r.canon(d.Target)
 			out = append(out, d)
 		case *ast.TypeDecl:
 			d.Name = r.canon(d.Name)
@@ -636,7 +1034,10 @@ func clone(m map[string]string) map[string]string {
 	return n
 }
 func (r *resolver) add(m map[string]string, k, v string, sp source.Span) {
-	if _, ok := m[k]; ok {
+	if old, ok := m[k]; ok {
+		if old == v {
+			return
+		}
 		r.errs = append(r.errs, diag.Errorf(sp, "UNQUALIFIED COLLISION", "The name `%s` collides with an exposed import or builtin.", k))
 		return
 	}
@@ -676,7 +1077,7 @@ func (r *resolver) qualified(name string, ns map[string]string, kind string, sp 
 		}
 	}
 	if in == nil {
-		r.errs = append(r.errs, diag.Errorf(sp, "UNKNOWN QUALIFIER", "No imported module has qualifier `%s`.", name[:strings.LastIndex(name, ".")]))
+		r.errs = append(r.errs, diag.Errorf(sp, "UNKNOWN QUALIFIER", "I don't know a value named `%s`: no imported module has qualifier `%s`.", name, name[:strings.LastIndex(name, ".")]))
 		return name
 	}
 	member := strings.TrimPrefix(name, best+".")

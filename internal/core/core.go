@@ -13,6 +13,7 @@ type Prog struct {
 	ADTs    []*types.ADTInfo
 	Effects []*types.EffectInfo
 	Defs    []Def
+	Natives map[string]*types.NativeInfo
 	// Entry selects the entry module's main definition by canonical symbol.
 	Entry string
 }
@@ -150,6 +151,14 @@ type BinOp struct {
 	L, R Expr
 }
 
+// NativeCall is a saturated call to a declaration-backed primitive.
+type NativeCall struct {
+	Name   string
+	Module string
+	Args   []Expr
+	Ty     types.Type
+}
+
 // CalleeKind classifies application spines after saturation analysis
 // (see doc/design.md, "Core and evidence invariants"). Elaboration of
 // function applications produces this distinction.
@@ -227,41 +236,43 @@ func (*Leaf) isTree()       {}
 func (*SwitchCtor) isTree() {}
 func (*SwitchLit) isTree()  {}
 
-func (*IntLit) isExpr()    {}
-func (*FloatLit) isExpr()  {}
-func (*StringLit) isExpr() {}
-func (*UnitLit) isExpr()   {}
-func (*BoolLit) isExpr()   {}
-func (*VarRef) isExpr()    {}
-func (*Neg) isExpr()       {}
-func (*BinOp) isExpr()     {}
-func (*If) isExpr()        {}
-func (*Perform) isExpr()   {}
-func (*Handle) isExpr()    {}
-func (*Resume) isExpr()    {}
-func (*Seq) isExpr()       {}
-func (*Let) isExpr()       {}
-func (*Lambda) isExpr()    {}
-func (*App) isExpr()       {}
-func (*Case) isExpr()      {}
+func (*IntLit) isExpr()     {}
+func (*FloatLit) isExpr()   {}
+func (*StringLit) isExpr()  {}
+func (*UnitLit) isExpr()    {}
+func (*BoolLit) isExpr()    {}
+func (*VarRef) isExpr()     {}
+func (*Neg) isExpr()        {}
+func (*BinOp) isExpr()      {}
+func (*NativeCall) isExpr() {}
+func (*If) isExpr()         {}
+func (*Perform) isExpr()    {}
+func (*Handle) isExpr()     {}
+func (*Resume) isExpr()     {}
+func (*Seq) isExpr()        {}
+func (*Let) isExpr()        {}
+func (*Lambda) isExpr()     {}
+func (*App) isExpr()        {}
+func (*Case) isExpr()       {}
 
-func (e *IntLit) Type() types.Type    { return e.Ty }
-func (e *FloatLit) Type() types.Type  { return e.Ty }
-func (e *StringLit) Type() types.Type { return e.Ty }
-func (e *UnitLit) Type() types.Type   { return e.Ty }
-func (e *BoolLit) Type() types.Type   { return e.Ty }
-func (e *VarRef) Type() types.Type    { return e.Ty }
-func (e *Neg) Type() types.Type       { return e.Ty }
-func (e *BinOp) Type() types.Type     { return e.Ty }
-func (e *If) Type() types.Type        { return e.Ty }
-func (e *Perform) Type() types.Type   { return e.Ty }
-func (e *Handle) Type() types.Type    { return e.Ty }
-func (e *Resume) Type() types.Type    { return e.Ty }
-func (e *Seq) Type() types.Type       { return e.Ty }
-func (e *Let) Type() types.Type       { return e.Ty }
-func (e *Lambda) Type() types.Type    { return e.Ty }
-func (e *App) Type() types.Type       { return e.Ty }
-func (e *Case) Type() types.Type      { return e.Ty }
+func (e *IntLit) Type() types.Type     { return e.Ty }
+func (e *FloatLit) Type() types.Type   { return e.Ty }
+func (e *StringLit) Type() types.Type  { return e.Ty }
+func (e *UnitLit) Type() types.Type    { return e.Ty }
+func (e *BoolLit) Type() types.Type    { return e.Ty }
+func (e *VarRef) Type() types.Type     { return e.Ty }
+func (e *Neg) Type() types.Type        { return e.Ty }
+func (e *BinOp) Type() types.Type      { return e.Ty }
+func (e *NativeCall) Type() types.Type { return e.Ty }
+func (e *If) Type() types.Type         { return e.Ty }
+func (e *Perform) Type() types.Type    { return e.Ty }
+func (e *Handle) Type() types.Type     { return e.Ty }
+func (e *Resume) Type() types.Type     { return e.Ty }
+func (e *Seq) Type() types.Type        { return e.Ty }
+func (e *Let) Type() types.Type        { return e.Ty }
+func (e *Lambda) Type() types.Type     { return e.Ty }
+func (e *App) Type() types.Type        { return e.Ty }
+func (e *Case) Type() types.Type       { return e.Ty }
 
 // Mentions reports whether name occurs in e. No-shadowing makes a plain
 // occurrence check exact: nothing inside e can rebind name. Used by the
@@ -274,6 +285,13 @@ func Mentions(e Expr, name string) bool {
 		return Mentions(e.Operand, name)
 	case *BinOp:
 		return Mentions(e.L, name) || Mentions(e.R, name)
+	case *NativeCall:
+		for _, a := range e.Args {
+			if Mentions(a, name) {
+				return true
+			}
+		}
+		return false
 	case *If:
 		return Mentions(e.Cond, name) || Mentions(e.Then, name) || Mentions(e.Else, name)
 	case *Perform:

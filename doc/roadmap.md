@@ -13,9 +13,8 @@ coverage.
 
 - Add `Maybe` and `Result`, and expand `List`, text, numeric, and IO operations
   only as subsequent examples require them.
-- Prefer fango implementations; extend the imported native-export catalog only
-  for semantics source code cannot express or when benchmark evidence demands
-  it.
+- Prefer fango implementations; use declared bundled natives only for semantics
+  source code cannot express or when benchmark evidence demands it.
 - Keep adding differential, diagnostic, documentation, and performance
   coverage with each library increment.
 
@@ -74,11 +73,14 @@ These are directions, not commitments or an ordering after the work above.
 
 - Structured concurrency built on effects: nursery scope, futures,
   cancellation, channels, and select semantics.
-- A Go FFI with explicit purity/effect boundaries and panic/error translation.
+- Extend the deliberately narrow Go sidecar FFI only from concrete needs:
+  richer safe boundary types, explicit effectful imports, interpreter strategy,
+  and panic/error translation are all still open.
 - Records and transparent aliases, including whether records are nominal or
   structural and whether aliases can abbreviate effect rows.
 - Numeric semantics beyond the current `Int`/`Float` model: overflow, integer
   division, conversions, and possible arbitrary precision.
-- Typeclasses versus a smaller set of built-in capability kinds; if adopted,
-  define coherence and the boxing boundary for higher-kinded abstractions.
+- Typeclasses for general `Eq`, `Ord`, and `Show` evidence. Native declaration
+  predicates reserve this seam without introducing temporary capability kinds;
+  coherence and representation remain open.
 - A canonical formatter for the layout syntax and an LSP for editor support.

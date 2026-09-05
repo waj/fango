@@ -29,6 +29,9 @@ func elabPoly(t *testing.T, src string) *core.Prog {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
+	if errs := ck.InstallPrelude(); len(errs) > 0 {
+		t.Fatalf("prelude errors: %v", errs)
+	}
 	infos, inferErrs := ck.Module(m)
 	if len(inferErrs) > 0 {
 		t.Fatalf("infer errors: %v", inferErrs)
@@ -51,6 +54,9 @@ func elabPolyErr(t *testing.T, src string) string {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
+	if errs := ck.InstallPrelude(); len(errs) > 0 {
+		t.Fatalf("prelude errors: %v", errs)
+	}
 	infos, inferErrs := ck.Module(m)
 	if len(inferErrs) > 0 {
 		return inferErrs[0].Title

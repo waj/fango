@@ -26,6 +26,9 @@ func checkPoly(t *testing.T, src string) (*Checker, []DeclInfo, []error) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := NewChecker(sup, b, NewEnv())
+	if errs := ck.InstallPrelude(); len(errs) > 0 {
+		t.Fatalf("prelude errors: %v", errs)
+	}
 	infos, errs := ck.Module(m)
 	var out []error
 	for _, e := range errs {

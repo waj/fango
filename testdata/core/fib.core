@@ -1,3 +1,3 @@
 (core
-  (def fib (typarams number) (params n) number -> number (if number (binop < Bool (var n number) (int 2 number)) (var n number) (binop + number (app/worker @[number] (var fib number -> number) (binop - number (var n number) (int 1 number)) number) (app/worker @[number] (var fib number -> number) (binop - number (var n number) (int 2 number)) number))))
+  (def fib (typarams number) (params n) number -> number (if number (native Basics.lt (var n number) (int 2 number) Bool) (var n number) (native Basics.add (app/worker @[number] (var fib number -> number) (native Basics.sub (var n number) (int 1 number) number) number) (app/worker @[number] (var fib number -> number) (native Basics.sub (var n number) (int 2 number) number) number) number)))
   (def main Int (app/worker @[Int] (var fib Int -> Int) (int 10 Int) Int)))

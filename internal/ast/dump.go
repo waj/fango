@@ -65,7 +65,16 @@ func dumpDecl(d Decl) string {
 		if d.Ann != nil {
 			fmt.Fprintf(&b, " (ann %s)", DumpTypeExpr(d.Ann.Type))
 		}
-		fmt.Fprintf(&b, " %s)", DumpExpr(d.Body))
+		if d.Native != nil {
+			b.WriteString(" (native")
+			if d.Native.Template != nil {
+				fmt.Fprintf(&b, " %q", *d.Native.Template)
+			}
+			b.WriteString(")")
+		} else {
+			fmt.Fprintf(&b, " %s", DumpExpr(d.Body))
+		}
+		b.WriteString(")")
 		return b.String()
 	case *TypeDecl:
 		var b strings.Builder
@@ -89,10 +98,20 @@ func dumpDecl(d Decl) string {
 			fmt.Fprintf(&b, " %s", p)
 		}
 		for _, op := range d.Ops {
-			fmt.Fprintf(&b, " (op %s %s)", op.Name, DumpTypeExpr(op.Type))
+			fmt.Fprintf(&b, " (op %s %s", op.Name, DumpTypeExpr(op.Type))
+			if op.Native != nil {
+				b.WriteString(" (native")
+				if op.Native.Template != nil {
+					fmt.Fprintf(&b, " %q", *op.Native.Template)
+				}
+				b.WriteString(")")
+			}
+			b.WriteString(")")
 		}
 		b.WriteString(")")
 		return b.String()
+	case *InfixDecl:
+		return fmt.Sprintf("(infix %s %s)", d.Op, d.Target)
 	default:
 		panic(fmt.Sprintf("ast.dumpDecl: unhandled %T", d))
 	}

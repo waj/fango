@@ -1,0 +1,46 @@
+module Basics exposing ()
+
+add : number -> number -> number
+add = native "$1 + $2"
+
+sub : number -> number -> number
+sub = native "$1 - $2"
+
+mul : number -> number -> number
+mul = native "$1 * $2"
+
+fdiv : Float -> Float -> Float
+fdiv = native "$1 / $2"
+
+append : String -> String -> String
+append = native "$1 + $2"
+
+eq : equatable -> equatable -> Bool
+eq = native "$eq($1, $2)"
+
+neq : equatable -> equatable -> Bool
+neq = native "!$eq($1, $2)"
+
+lt : comparable -> comparable -> Bool
+lt = native "$1 < $2"
+
+gt : comparable -> comparable -> Bool
+gt = native "$1 > $2"
+
+le : comparable -> comparable -> Bool
+le = native "$1 <= $2"
+
+ge : comparable -> comparable -> Bool
+ge = native "$1 >= $2"
+
+infix (+) = add
+infix (-) = sub
+infix (*) = mul
+infix (/) = fdiv
+infix (++) = append
+infix (==) = eq
+infix (/=) = neq
+infix (<) = lt
+infix (>) = gt
+infix (<=) = le
+infix (>=) = ge

@@ -9,5 +9,5 @@ import "embed"
 //go:embed runtime/fangort/*.go
 var FangortFS embed.FS
 
-//go:embed stdlib/*.fango
+//go:embed stdlib/*.fango stdlib/*.native.go
 var StdlibFS embed.FS

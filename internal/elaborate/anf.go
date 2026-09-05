@@ -124,6 +124,12 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		l := slot(e.L)
 		r := slot(e.R)
 		return &core.BinOp{Op: e.Op, Ty: e.Ty, L: l, R: r}, hoists
+	case *core.NativeCall:
+		args := make([]core.Expr, len(e.Args))
+		for i, a := range e.Args {
+			args[i] = slot(a)
+		}
+		return &core.NativeCall{Name: e.Name, Module: e.Module, Args: args, Ty: e.Ty}, hoists
 	case *core.Perform:
 		args := make([]core.Expr, len(e.Args))
 		for i, a := range e.Args {

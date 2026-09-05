@@ -5,6 +5,9 @@
 package infer
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/source"
@@ -97,6 +100,9 @@ type Checker struct {
 	EffectsByUnique map[int]*types.EffectInfo
 	Operations      map[string]*types.EffectOp
 	IO              *types.EffectInfo
+	Natives         map[string]*types.NativeInfo
+	Operators       map[string]string
+	BinNatives      map[*ast.BinOp]*types.NativeInfo
 
 	OpCalls     map[*ast.App]*types.EffectOp
 	HandleInfos map[*ast.Handle]*HandlerInfo
@@ -158,6 +164,9 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		Effects:         map[string]*types.EffectInfo{},
 		EffectsByUnique: map[int]*types.EffectInfo{},
 		Operations:      map[string]*types.EffectOp{},
+		Natives:         map[string]*types.NativeInfo{},
+		Operators:       map[string]string{},
+		BinNatives:      map[*ast.BinOp]*types.NativeInfo{},
 		OpCalls:         map[*ast.App]*types.EffectOp{},
 		HandleInfos:     map[*ast.Handle]*HandlerInfo{},
 		ResumeCalls:     map[*ast.App]bool{},
@@ -177,60 +186,7 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 	for _, c := range boolADT.Ctors {
 		ck.Ctors[c.Name] = c
 	}
-	ck.seedIO()
 	return ck
-}
-
-func (ck *Checker) seedIO() {
-	ioEff := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: "IO"}
-	ck.IO = ioEff
-	ck.Effects[ioEff.Name], ck.EffectsByUnique[ioEff.Unique] = ioEff, ioEff
-	label := types.EffLabel{Unique: ioEff.Unique, Name: ioEff.Name}
-	row := func() types.Row {
-		return types.Row{Labels: []types.EffLabel{label}, Tail: ck.Sup.FreshRigid(types.RowVar)}
-	}
-	readTy := &types.TFun{Arg: ck.B.Unit, Eff: row(), Ret: ck.B.String}
-	read := &types.EffectOp{Owner: ioEff, Index: 0, Name: "readLine", Arity: 1,
-		ParamTypes: []types.Type{ck.B.Unit}, ResultType: ck.B.String, Builtin: true}
-	read.Scheme = types.Scheme{Vars: []*types.TVar{readTy.Eff.Tail.(*types.TVar)}, Body: readTy}
-	a := ck.Sup.FreshRigid(types.General)
-	printTy := &types.TFun{Arg: a, Eff: row(), Ret: ck.B.Unit}
-	print := &types.EffectOp{Owner: ioEff, Index: 1, Name: "print", Arity: 1,
-		ParamTypes: []types.Type{a}, ResultType: ck.B.Unit, LocalVars: []*types.TVar{a}, Builtin: true}
-	print.Scheme = types.Scheme{Vars: []*types.TVar{a, printTy.Eff.Tail.(*types.TVar)}, Body: printTy}
-	ioEff.Ops = []*types.EffectOp{read, print}
-	for _, op := range ioEff.Ops {
-		ck.Operations[op.Name] = op
-		ck.Env.Bind(op.Name, op.Scheme)
-	}
-}
-
-// EnableNativeOperation installs a compiler-bundled operation selected by the
-// loaded module graph. Unlike print and readLine, these operations are not in
-// the implicit surface environment and cannot be reached without an import.
-func (ck *Checker) EnableNativeOperation(name string) bool {
-	if name != "IO.write" {
-		return false
-	}
-	if ck.Operations[name] != nil {
-		return true
-	}
-	label := types.EffLabel{Unique: ck.IO.Unique, Name: ck.IO.Name}
-	tail := ck.Sup.FreshRigid(types.RowVar)
-	ty := &types.TFun{
-		Arg: ck.B.String,
-		Eff: types.Row{Labels: []types.EffLabel{label}, Tail: tail},
-		Ret: ck.B.Unit,
-	}
-	op := &types.EffectOp{
-		Owner: ck.IO, Index: len(ck.IO.Ops), Name: name, Arity: 1,
-		ParamTypes: []types.Type{ck.B.String}, ResultType: ck.B.Unit, Builtin: true,
-		Scheme: types.Scheme{Vars: []*types.TVar{tail}, Body: ty},
-	}
-	ck.IO.Ops = append(ck.IO.Ops, op)
-	ck.Operations[name] = op
-	ck.Env.Bind(name, op.Scheme)
-	return true
 }
 
 type DeclInfo struct {
@@ -304,9 +260,38 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 		}
 	}
 	errs = append(errs, ck.checkRegularity(adts)...)
+	// Native schemes and operator bindings are graph-wide metadata and must
+	// be available before ordinary definitions are inferred.
 	for _, d := range m.Decls {
 		vd, ok := d.(*ast.ValueDecl)
+		if !ok || vd.Native == nil {
+			continue
+		}
+		if ck.Env.Has(vd.Name) {
+			errs = append(errs, diag.Errorf(vd.NameSpan, "MULTIPLE DEFINITIONS", "`%s` is defined more than once.", vd.Name))
+			continue
+		}
+		errs = append(errs, ck.declareNative(vd)...)
+	}
+	for _, d := range m.Decls {
+		inf, ok := d.(*ast.InfixDecl)
 		if !ok {
+			continue
+		}
+		n := ck.Natives[inf.Target]
+		if n == nil || n.Effect != nil {
+			errs = append(errs, diag.Errorf(inf.TargetSpan, "NATIVE DECLARATION", "The infix target `%s` is not a pure native value.", inf.Target))
+			continue
+		}
+		if old := ck.Operators[inf.Op]; old != "" && old != inf.Target {
+			errs = append(errs, diag.Errorf(inf.OpSpan, "NATIVE DECLARATION", "The operator (%s) is bound more than once.", inf.Op))
+			continue
+		}
+		ck.Operators[inf.Op] = inf.Target
+	}
+	for _, d := range m.Decls {
+		vd, ok := d.(*ast.ValueDecl)
+		if !ok || vd.Native != nil {
 			continue
 		}
 		// Duplicate definitions are a batch-compilation error only: the
@@ -320,6 +305,47 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 		infos = append(infos, info)
 	}
 	return infos, errs
+}
+
+func (ck *Checker) declareNative(d *ast.ValueDecl) []diag.Error {
+	if d.Ann == nil {
+		return []diag.Error{diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "A native declaration requires a type annotation.")}
+	}
+	scope := ck.newNativeAnnScope()
+	ty, errs := ck.ResolveTypeExpr(d.Ann.Type, scope)
+	if ty == nil {
+		return errs
+	}
+	arity := 0
+	for t := ty; ; {
+		f, ok := t.(*types.TFun)
+		if !ok {
+			break
+		}
+		arity++
+		t = f.Ret
+	}
+	if arity == 0 {
+		errs = append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "A native declaration must have a function type."))
+	}
+	vars := scope.Minted()
+	sch := types.Scheme{Vars: vars, Preds: scope.Preds(), Body: ty}
+	module := symbolModule(d.Name)
+	if d.Native.Module != "" {
+		module = d.Native.Module
+	}
+	n := &types.NativeInfo{Name: d.Name, Module: module, Scheme: sch, Arity: arity, Template: d.Native.Template}
+	ck.Natives[d.Name] = n
+	ck.Env.Bind(d.Name, sch)
+	ck.Workers[d.Name] = arity
+	return errs
+}
+
+func symbolModule(name string) string {
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		return name[:i]
+	}
+	return ""
 }
 
 func (ck *Checker) declareEffectHeader(ed *ast.EffectDecl, batch bool) []diag.Error {
@@ -343,6 +369,9 @@ func (ck *Checker) declareEffectHeader(ed *ast.EffectDecl, batch bool) []diag.Er
 	}
 	info := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: ed.Name, Params: params}
 	ck.Effects[ed.Name], ck.EffectsByUnique[info.Unique] = info, info
+	if ed.Name == "IO.IO" || ed.Name == "IO" {
+		ck.IO = info
+	}
 	return errs
 }
 
@@ -365,6 +394,9 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 		}
 		seen[op.Name] = true
 		scope := newEffectScope(names, info.Params, ck.Sup)
+		if op.Native != nil {
+			scope.native = true
+		}
 		ty, opErrs := ck.ResolveTypeExpr(op.Type, scope)
 		errs = append(errs, opErrs...)
 		if ty == nil {
@@ -399,7 +431,7 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 		vars := append([]*types.TVar(nil), info.Params...)
 		vars = append(vars, scope.Minted()...)
 		vars = append(vars, rowVars...)
-		sch := types.Scheme{Vars: vars, Body: ty}
+		sch := types.Scheme{Vars: vars, Preds: scope.Preds(), Body: ty}
 		params := make([]types.Type, len(arrows))
 		for i, a := range arrows {
 			params[i] = a.Arg
@@ -407,6 +439,11 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 		local := append([]*types.TVar(nil), scope.Minted()...)
 		meta := &types.EffectOp{Owner: info, Index: len(info.Ops), Name: op.Name, Scheme: sch,
 			Arity: len(arrows), ParamTypes: params, ResultType: arrows[len(arrows)-1].Ret, LocalVars: local}
+		if op.Native != nil {
+			n := &types.NativeInfo{Name: op.Name, Module: symbolModule(op.Name), Scheme: sch, Arity: len(arrows), Template: op.Native.Template, Effect: info}
+			meta.Native = n
+			ck.Natives[op.Name] = n
+		}
 		info.Ops = append(info.Ops, meta)
 		ck.Operations[op.Name] = meta
 		ck.Env.Bind(op.Name, sch)
@@ -569,6 +606,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
 	errs = append(errs, solveErrs...)
+	errs = append(errs, ck.checkPredicates(g.preds)...)
 	if d.Ann == nil && !isMain {
 		ck.closeSingleRows(ty)
 	}
@@ -692,8 +730,15 @@ func (ck *Checker) ExprWhere(e ast.Expr, _ bool) (types.Type, []diag.Error) {
 	var preds []types.Pred // the typeclass seam: always empty in the MVP
 	sub, residual, solveErrs := Solve(g.cs, preds, ck.Sub, ck.B, ck.Sup)
 	ck.Sub = sub
-	_ = residual // no typeclasses: nothing defers residual predicates yet
-	return ty, append(g.errs, solveErrs...)
+	_ = residual
+	errs := append(g.errs, solveErrs...)
+	return ty, append(errs, ck.checkPredicates(g.preds)...)
+}
+
+type predObligation struct {
+	pred types.Pred
+	span source.Span
+	op   string
 }
 
 type generator struct {
@@ -703,6 +748,11 @@ type generator struct {
 	errs       []diag.Error
 	ambient    types.Row
 	resumeType types.Type
+	preds      []predObligation
+}
+
+func (g *generator) isDefaultPrint(op *types.EffectOp) bool {
+	return op.Owner == g.ck.IO && types.SurfaceName(op.Name) == "print"
 }
 
 // blockScope is a block's local bindings, as schemes: parameters and
@@ -748,8 +798,15 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 				ty = g.ck.Sup.FreshVar(types.General) // recover with a hole
 				break
 			}
-			ty = g.instantiate(scheme)
-			if op := g.ck.Operations[e.Name]; op != nil && len(op.LocalVars) > 0 && !(op.Owner == g.ck.IO && op.Name == "print") {
+			// An operation in value position is not yet being performed. Its
+			// predicates are checked when a saturated operation spine is formed;
+			// this also lets main's ordinary shape check diagnose `main = print`.
+			if op := g.ck.Operations[e.Name]; op != nil {
+				ty = g.instantiate(scheme)
+			} else {
+				ty = g.instantiateAt(scheme, e.Sp, e.Name)
+			}
+			if op := g.ck.Operations[e.Name]; op != nil && len(op.LocalVars) > 0 && op.Native == nil && !g.isDefaultPrint(op) {
 				g.errs = append(g.errs, diag.Errorf(e.Sp, "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has operation-local polymorphism that cannot be used at runtime until checkpoint 3.", op.Name))
 			}
 		}
@@ -768,7 +825,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		}
 	case *ast.App:
 		if op, n := g.operationSpine(e); op != nil && n == op.Arity {
-			inst := g.instantiate(op.Scheme)
+			inst := g.instantiateAt(op.Scheme, e.Span(), op.Name)
 			g.ck.ExprTypes[appHead(e)] = inst
 			params, result := peelOperation(inst, op.Arity)
 			args := appArgs(e)
@@ -785,7 +842,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			g.cs = append(g.cs, Constraint{Left: last.Eff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
 			ty = result
 			g.ck.OpCalls[e] = op
-			if len(op.LocalVars) > 0 && !(op.Owner == g.ck.IO && op.Name == "print") {
+			if len(op.LocalVars) > 0 && op.Native == nil && !g.isDefaultPrint(op) {
 				g.errs = append(g.errs, diag.Errorf(e.Span(), "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has result polymorphism that is staged until checkpoint 3.", op.Name))
 			}
 			break
@@ -930,7 +987,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "MIXED HANDLER EFFECTS", "All clauses in a handler must belong to `%s`.", first.Owner.Name))
 			continue
 		}
-		if len(op.LocalVars) > 0 && !(op.Owner == g.ck.IO && op.Name == "print") {
+		if len(op.LocalVars) > 0 && op.Native == nil && !g.isDefaultPrint(op) {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has operation-local polymorphism that cannot be used at runtime until checkpoint 3.", op.Name))
 		}
 		if seen[op.Name] {
@@ -1457,6 +1514,27 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 }
 
 func (g *generator) binOp(e *ast.BinOp) types.Type {
+	if name := g.ck.Operators[e.Op]; name != "" {
+		n := g.ck.Natives[name]
+		if n == nil {
+			panic("infer: missing native for operator " + e.Op)
+		}
+		inst := g.instantiateAt(n.Scheme, e.OpSpan, e.Op)
+		args, ret := peelOperation(inst, n.Arity)
+		if len(args) != 2 {
+			panic("infer: binary native does not have arity two")
+		}
+		lt, rt := g.exprWant(e.L, args[0]), g.exprWant(e.R, args[1])
+		why := Why{Kind: WhyOperand, Op: e.Op}
+		if e.Op == "/" || e.Op == "++" {
+			why = Why{Kind: WhyOpRequires, Op: e.Op, Want: types.Show(args[0])}
+		}
+		g.cs = append(g.cs,
+			Constraint{Left: lt, Right: args[0], Span: e.L.Span(), Why: why},
+			Constraint{Left: rt, Right: args[1], Span: e.R.Span(), Why: why})
+		g.ck.BinNatives[e] = n
+		return ret
+	}
 	lt := g.expr(e.L)
 	rt := g.expr(e.R)
 	switch e.Op {
@@ -1504,6 +1582,82 @@ func (g *generator) instantiate(s types.Scheme) types.Type {
 		m[v.ID] = g.ck.Sup.FreshVar(v.Kind)
 	}
 	return types.SubstRigid(s.Body, m)
+}
+
+func (g *generator) instantiateAt(s types.Scheme, sp source.Span, op string) types.Type {
+	if len(s.Vars) == 0 {
+		for _, p := range s.Preds {
+			g.preds = append(g.preds, predObligation{pred: p, span: sp, op: op})
+		}
+		return s.Body
+	}
+	m := make(map[int]types.Type, len(s.Vars))
+	for _, v := range s.Vars {
+		m[v.ID] = g.ck.Sup.FreshVar(v.Kind)
+	}
+	for _, p := range types.SubstPreds(s.Preds, m) {
+		g.preds = append(g.preds, predObligation{pred: p, span: sp, op: op})
+	}
+	return types.SubstRigid(s.Body, m)
+}
+
+func (ck *Checker) checkPredicates(obs []predObligation) []diag.Error {
+	var errs []diag.Error
+	for _, o := range obs {
+		t := ck.Sub.Apply(o.pred.Ty)
+		if ck.satisfiesPredicate(o.pred.Class, t) {
+			continue
+		}
+		title := "TYPE MISMATCH"
+		body := fmt.Sprintf("This operation requires %s support, but `%s` does not provide it.", o.pred.Class, types.Show(t))
+		if o.pred.Class == "Eq" {
+			body = fmt.Sprintf("I cannot check equality of `%s` values: they can contain functions, and functions have no equality.", types.Show(t))
+		}
+		if o.pred.Class == "Show" && ck.ContainsFunction(t) {
+			body = fmt.Sprintf("`print` cannot print a `%s` — its values can contain functions, which have no printable form.", types.Show(t))
+		}
+		if _, ok := t.(*types.TVar); ok {
+			if o.pred.Class == "Eq" {
+				title = "EQUALITY AT A TYPE VARIABLE"
+			}
+			body = fmt.Sprintf("This operation requires concrete %s evidence; generic evidence arrives with typeclasses.", o.pred.Class)
+		}
+		errs = append(errs, diag.Errorf(o.span, title, "%s", body))
+	}
+	return errs
+}
+
+func (ck *Checker) satisfiesPredicate(class string, t types.Type) bool {
+	if v, ok := t.(*types.TVar); ok {
+		// A ground Number metavariable defaults to Int during elaboration, so
+		// it has all three compiler-owned scalar capabilities. General type
+		// variables remain residual and require future typeclass evidence.
+		return v.Kind == types.Number && (class == "Eq" || class == "Ord" || class == "Show")
+	}
+	u := -1
+	if c, ok := t.(*types.TCon); ok && len(c.Args) == 0 {
+		u = c.Unique
+	}
+	if class == "Ord" {
+		return u == ck.B.Int.Unique || u == ck.B.Float.Unique || u == ck.B.String.Unique
+	}
+	if class != "Eq" && class != "Show" {
+		return false
+	}
+	if u == ck.B.Int.Unique || u == ck.B.Float.Unique || u == ck.B.String.Unique || u == ck.B.Bool.Unique {
+		return true
+	}
+	if c, ok := t.(*types.TCon); ok {
+		if _, yes := ck.ADTs[c.Unique]; yes && !ck.ContainsFunction(t) {
+			for _, a := range c.Args {
+				if !ck.satisfiesPredicate(class, a) {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // instantiateCtor returns a constructor's field and result types with the

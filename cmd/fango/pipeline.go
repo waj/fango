@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"go/format"
 	"io"
 	"os"
 
@@ -17,43 +18,38 @@ import (
 // compileFile runs source → tokens → AST → typed AST → Core. Diagnostics go
 // to stderr; ok is false if any stage failed.
 func compileFile(entry string, stderr io.Writer) (*core.Prog, *infer.Checker, bool) {
-	prog, ck, _, _, ok := compileFileGraph(entry, stderr)
+	prog, ck, _, _, _, ok := compileFileGraph(entry, stderr)
 	return prog, ck, ok
 }
 
-func compileFileGraph(entry string, stderr io.Writer) (*core.Prog, *infer.Checker, []modules.ManifestEntry, []modules.Unit, bool) {
+func compileFileGraph(entry string, stderr io.Writer) (*core.Prog, *infer.Checker, []modules.ManifestEntry, []modules.Unit, []modules.NativeSource, bool) {
 	loaded, loadErrs := modules.Load(entry)
 	if report(stderr, loadErrs) {
-		return nil, nil, nil, nil, false
+		return nil, nil, nil, nil, nil, false
 	}
 
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
-	for _, name := range loaded.NativeOperations {
-		if !ck.EnableNativeOperation(name) {
-			fmt.Fprintf(stderr, "fango: internal compiler error: unknown bundled native operation %q\n", name)
-			return nil, nil, nil, nil, false
-		}
-	}
+	ck.Operators = loaded.Operators
 	ck.EntryName = loaded.Entry
 	infos, inferErrs := ck.Module(loaded.Module)
 	if report(stderr, inferErrs) {
-		return nil, nil, nil, nil, false
+		return nil, nil, nil, nil, nil, false
 	}
 
 	prog, elabErrs := elaborate.Module(infos, ck)
 	if report(stderr, elabErrs) {
-		return nil, nil, nil, nil, false
+		return nil, nil, nil, nil, nil, false
 	}
 	if lintErrs := core.Lint(prog, ck.B); len(lintErrs) > 0 {
 		fmt.Fprintf(stderr, "fango: internal compiler error: Core invariants violated:\n")
 		for _, e := range lintErrs {
 			fmt.Fprintf(stderr, "  %v\n", e)
 		}
-		return nil, nil, nil, nil, false
+		return nil, nil, nil, nil, nil, false
 	}
-	return prog, ck, loaded.Manifest, loaded.Units, true
+	return prog, ck, loaded.Manifest, loaded.Units, loaded.Natives, true
 }
 
 func report(stderr io.Writer, errs []diag.Error) bool {
@@ -80,7 +76,7 @@ func hasMain(p *core.Prog) bool {
 // emitProjectManifest emits the complete multi-package Go project used by
 // build, run, --emit-go, and backend structural tests.
 func emitProjectManifest(entry string, stderr io.Writer) ([]codegen.File, []modules.ManifestEntry, bool) {
-	prog, ck, manifest, loadedUnits, ok := compileFileGraph(entry, stderr)
+	prog, ck, manifest, loadedUnits, nativeSources, ok := compileFileGraph(entry, stderr)
 	if !ok {
 		return nil, nil, false
 	}
@@ -97,6 +93,16 @@ func emitProjectManifest(entry string, stderr io.Writer) ([]codegen.File, []modu
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", err)
 		return nil, nil, false
+	}
+	for _, native := range nativeSources {
+		if native.Bundled {
+			continue // bundled templates inline; their sidecars feed the compiler registry
+		}
+		data := native.Content
+		if formatted, err := format.Source(data); err == nil {
+			data = formatted
+		}
+		files = append(files, codegen.File{Path: "native/" + codegen.NativeLinkName(native.Module) + "/native.go", Data: data})
 	}
 	return files, manifest, true
 }

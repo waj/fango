@@ -73,17 +73,28 @@ func SortedRow(r Row) Row {
 // in first-occurrence order. Row variables are erased before Core; the
 // remaining variables become Go type parameters in this same order.
 // Instantiation replaces them with fresh metas (SubstRigid); Preds is the
-// typeclass seam, empty until typeclasses.
+// typeclass seam currently used by compiler-owned native obligations.
 type Scheme struct {
 	Vars  []*TVar
 	Preds []Pred
 	Body  Type
 }
 
-// Pred is a typeclass predicate — the reserved seam. Always empty in the MVP.
+// Pred is a typeclass-shaped obligation. Eq, Ord, and Show are currently
+// introduced only by native declarations and discharged statically.
 type Pred struct {
 	Class string
 	Ty    Type
+}
+
+// NativeInfo is declaration metadata shared by inference, Core, and both
+// backends. Template is nil for a Go-sidecar call.
+type NativeInfo struct {
+	Name, Module string
+	Scheme       Scheme
+	Arity        int
+	Template     *string
+	Effect       *EffectInfo
 }
 
 func (*TVar) isType() {}
@@ -272,6 +283,15 @@ type EffectOp struct {
 	ResultType Type
 	LocalVars  []*TVar
 	Builtin    bool
+	Native     *NativeInfo
+}
+
+func SubstPreds(ps []Pred, m map[int]Type) []Pred {
+	out := make([]Pred, len(ps))
+	for i, p := range ps {
+		out[i] = Pred{Class: p.Class, Ty: SubstRigid(p.Ty, m)}
+	}
+	return out
 }
 
 // ParamSubst builds the rigid-var substitution instantiating the type's

@@ -153,7 +153,8 @@ func validGeneratedSourcePath(rel string) bool {
 		return false
 	}
 	slash := filepath.ToSlash(rel)
-	return slash == "main.go" || strings.HasPrefix(slash, "modules/") && strings.HasSuffix(slash, "/module.go")
+	return slash == "main.go" || strings.HasPrefix(slash, "modules/") && strings.HasSuffix(slash, "/module.go") ||
+		strings.HasPrefix(slash, "native/") && strings.HasSuffix(slash, "/native.go")
 }
 
 // Materialize ensures go.mod and the embedded fangort sources exist in dir,
@@ -200,6 +201,18 @@ func GoBuild(dir string) error {
 	if err != nil {
 		if _, lookErr := exec.LookPath("go"); lookErr != nil {
 			return fmt.Errorf("cannot find the `go` tool — enter the dev shell (`nix develop` or direnv) and retry")
+		}
+		if _, nativeErr := os.Stat(filepath.Join(dir, "native")); nativeErr == nil {
+			return fmt.Errorf(`-- NATIVE GO BUILD ERROR ---------------------------------------
+
+Go rejected the generated project containing a user native sidecar. Check the
+sidecar body and its standard-library imports. The build directory is preserved:
+
+    %s
+
+go build said:
+
+%s`, dir, out)
 		}
 		return fmt.Errorf(`-- INTERNAL COMPILER ERROR ------------------------------------
 

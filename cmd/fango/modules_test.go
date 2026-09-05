@@ -262,6 +262,82 @@ main() =
 	}
 }
 
+func TestUserNativeCompiledAndInterpreterRefuses(t *testing.T) {
+	root := t.TempDir()
+	writeModuleFile(t, root, "Hash.fango", `module Hash exposing (twice, tick)
+
+twice : Int -> Int
+twice = native
+
+tick : () -> Int
+tick = native
+`)
+	writeModuleFile(t, root, "Hash.native.go", `package native
+
+func Twice(x int64) int64 { return x * 2 }
+func Tick() int64 { return 42 }
+`)
+	entry := writeModuleFile(t, root, "Main.fango", `module Main exposing (main)
+import Hash
+main() = print (Hash.twice (Hash.tick (print "before")))
+`)
+	var stderr bytes.Buffer
+	prog, _, ok := compileFile(entry, &stderr)
+	if !ok {
+		t.Fatalf("compile: %s", stderr.String())
+	}
+	env := eval.NewEnv()
+	env.DefineProg(prog)
+	if _, err := eval.ForceIO(context.Background(), prog.Entry, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{})); err == nil || !strings.Contains(err.Error(), "native modules run only in compiled mode") {
+		t.Fatalf("interpreter error = %v", err)
+	}
+
+	buildDir := filepath.Join(root, "build")
+	t.Setenv("FANGO_BUILD_DIR", buildDir)
+	t.Setenv("FANGO_INTERNAL_PRINT_MAIN", "1")
+	dir, ok := ensureBuilt(entry, &stderr)
+	if !ok {
+		t.Fatalf("build: %s", stderr.String())
+	}
+	out, err := exec.Command(build.BinaryPath(dir)).Output()
+	if err != nil || string(out) != "before\n84\n" {
+		t.Fatalf("compiled output %q, err %v", out, err)
+	}
+	if _, err := os.Stat(filepath.Join(buildDir, "native", "Hash", "native.go")); err != nil {
+		t.Fatalf("sidecar was not materialized: %v", err)
+	}
+	writeModuleFile(t, root, "Hash.native.go", `package native
+
+func Twice(x int64) int64 { return x * 3 }
+func Tick() int64 { return 42 }
+`)
+	if changed, ok := compileToDir(entry, buildDir, &stderr); !ok || !changed {
+		t.Fatalf("sidecar edit changed=%v ok=%v: %s", changed, ok, stderr.String())
+	}
+	if err := build.GoBuild(buildDir); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	out, err = exec.Command(build.BinaryPath(dir)).Output()
+	if err != nil || string(out) != "before\n126\n" {
+		t.Fatalf("rebuilt output %q, err %v", out, err)
+	}
+
+	writeModuleFile(t, root, "Hash.fango", `module Hash exposing (twice, tick)
+
+twice x = x * 2
+tick _ = 42
+`)
+	if err := os.Remove(filepath.Join(root, "Hash.native.go")); err != nil {
+		t.Fatal(err)
+	}
+	if changed, ok := compileToDir(entry, buildDir, &stderr); !ok || !changed {
+		t.Fatalf("sidecar removal changed=%v ok=%v: %s", changed, ok, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(buildDir, "native", "Hash", "native.go")); !os.IsNotExist(err) {
+		t.Fatalf("stale sidecar remains: %v", err)
+	}
+}
+
 func writeModuleFile(t *testing.T, root, rel, contents string) string {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))

@@ -24,6 +24,9 @@ func check(t *testing.T, src string) (*Checker, []DeclInfo, []error) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := NewChecker(sup, b, NewEnv())
+	if errs := ck.InstallPrelude(); len(errs) > 0 {
+		t.Fatalf("prelude errors: %v", errs)
+	}
 	infos, errs := ck.Module(m)
 	var out []error
 	for _, e := range errs {
@@ -38,6 +41,29 @@ type checkErr struct {
 }
 
 func (e checkErr) Error() string { return e.title }
+
+func TestInstallPreludeUsesDeclaredMetadata(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	ck := NewChecker(sup, b, NewEnv())
+	if errs := ck.InstallPrelude(); len(errs) > 0 {
+		t.Fatalf("prelude errors: %v", errs)
+	}
+	if ck.Natives["Basics.add"] == nil {
+		t.Fatal("embedded Basics.add native metadata was not installed")
+	}
+	print := ck.Operations["print"]
+	if print == nil || print.Native == nil || print.Native.Name != "IO.print" {
+		t.Fatalf("ambient print does not reference its declared native: %+v", print)
+	}
+	if len(print.Scheme.Preds) != 1 || print.Scheme.Preds[0].Class != "Show" {
+		t.Fatalf("print predicates = %+v, want one Show obligation", print.Scheme.Preds)
+	}
+	write := ck.Operations["IO.write"]
+	if write == nil || write.Native == nil || write.Native.Name != "IO.write" {
+		t.Fatalf("IO.write does not reference its declared native: %+v", write)
+	}
+}
 
 func TestPositive(t *testing.T) {
 	cases := []struct {

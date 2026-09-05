@@ -326,6 +326,7 @@ type ValueDecl struct {
 	Params   []Param  // non-empty: a function definition (worker; see doc/design.md, "Go backend and runtime")
 	Ann      *TypeAnn // nil when unannotated
 	Body     Expr
+	Native   *NativeBody
 }
 
 func (*ValueDecl) isDecl() {}
@@ -370,7 +371,24 @@ type OpSig struct {
 	Name     string
 	NameSpan source.Span
 	Type     TypeExpr
+	Native   *NativeBody
 }
+
+// NativeBody marks a declaration implemented outside ordinary fango source.
+// Template is nil for sidecar call form and non-nil for bundled inline form.
+type NativeBody struct {
+	Template *string
+	Module   string // sidecar link module, filled by module resolution
+	Sp       source.Span
+}
+
+// InfixDecl binds one of the parser's fixed binary tokens to a bundled native.
+type InfixDecl struct {
+	Op, Target         string
+	OpSpan, TargetSpan source.Span
+}
+
+func (*InfixDecl) isDecl() {}
 
 func (*EffectDecl) isDecl() {}
 

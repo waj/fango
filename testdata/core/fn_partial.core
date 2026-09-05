@@ -1,6 +1,6 @@
 (core
-  (def add (typarams number) (params x y) number -> number -> number (binop + number (var x number) (var y number)))
+  (def add (typarams number) (params x y) number -> number -> number (native Basics.add (var x number) (var y number) number))
   (def inc (typarams number) number -> number (lam _w0 number -> number (app/worker @[number] (var add number -> number -> number) (int 1 number) (var _w0 number) number)))
   (def w (typarams number) number (int 3 number))
-  (def compound (typarams number) number -> number (let _a0 number -> number (binop * number (app/worker @[number] (var w number) number) (int 2 number)) (lam _w1 number -> number (app/worker @[number] (var add number -> number -> number) (var _a0 number) (var _w1 number) number))))
+  (def compound (typarams number) number -> number (let _a0 number -> number (native Basics.mul (app/worker @[number] (var w number) number) (int 2 number) number) (lam _w1 number -> number (app/worker @[number] (var add number -> number -> number) (var _a0 number) (var _w1 number) number))))
   (def main Int (app/value (app/worker @[Int] (var compound Int -> Int) Int -> Int) (int 4 Int) Int)))
