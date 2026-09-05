@@ -16,6 +16,17 @@ the roadmap. When roadmap work is complete, promote durable results into design
 or reference and remove the completed item; do not create implementation
 diaries or completed plan files. Git history is the archive.
 
+The VS Code extension in `editors/vscode/` is part of the language's
+user-visible surface. When changing the surface syntax — keywords, operators,
+literal forms, comment syntax, or declaration shapes (see `internal/token/`,
+`internal/lexer/`, `internal/parser/`) — update the TextMate grammar in
+`editors/vscode/syntaxes/fango.tmLanguage.json` (and, when comment or bracket
+behavior changes, `editors/vscode/language-configuration.json`) in the same
+change. Verify by tokenizing representative `.fango` files (stdlib, testdata,
+and examples exercising the new syntax) with `vscode-textmate`; the grammar's
+regexes encode exact lexer rules (escape set, float forms, reserved words), so
+keep them in lockstep rather than approximating.
+
 When code and documentation disagree, determine deliberately whether the code
 is wrong or the document is stale. Preserve the existing verification gates,
 including the Core linter, interpreter/compiler differential suite, functional

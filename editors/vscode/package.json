@@ -1,0 +1,36 @@
+{
+  "name": "fango-lang",
+  "displayName": "Fango",
+  "description": "Syntax highlighting for the Fango programming language",
+  "version": "0.1.0",
+  "publisher": "fango",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "fango",
+        "aliases": [
+          "Fango",
+          "fango"
+        ],
+        "extensions": [
+          ".fango"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "fango",
+        "scopeName": "source.fango",
+        "path": "./syntaxes/fango.tmLanguage.json"
+      }
+    ]
+  }
+}

@@ -1,0 +1,411 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Fango",
+  "scopeName": "source.fango",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#module_decl" },
+    { "include": "#import_decl" },
+    { "include": "#type_decl" },
+    { "include": "#class_decl" },
+    { "include": "#instance_decl" },
+    { "include": "#effect_decl" },
+    { "include": "#infix_decl" },
+    { "include": "#annotation" },
+    { "include": "#function_definition" },
+    { "include": "#binding" },
+    { "include": "#expressions" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "include": "#block_comment" },
+        {
+          "name": "comment.line.double-dash.fango",
+          "match": "--.*$"
+        }
+      ]
+    },
+    "block_comment": {
+      "name": "comment.block.fango",
+      "begin": "\\{-",
+      "end": "-\\}",
+      "patterns": [
+        { "include": "#block_comment" }
+      ]
+    },
+    "module_decl": {
+      "match": "^(module)\\s+([A-Z][A-Za-z0-9_]*(?:\\.[A-Z][A-Za-z0-9_]*)*)",
+      "captures": {
+        "1": { "name": "keyword.other.module.fango" },
+        "2": { "name": "entity.name.namespace.fango" }
+      }
+    },
+    "import_decl": {
+      "match": "^(import)\\s+([A-Z][A-Za-z0-9_]*(?:\\.[A-Z][A-Za-z0-9_]*)*)(?:\\s+(as)\\s+([A-Z][A-Za-z0-9_]*))?",
+      "captures": {
+        "1": { "name": "keyword.other.import.fango" },
+        "2": { "name": "entity.name.namespace.fango" },
+        "3": { "name": "keyword.other.as.fango" },
+        "4": { "name": "entity.name.namespace.fango" }
+      }
+    },
+    "type_decl": {
+      "begin": "^(type)\\s+([A-Z][A-Za-z0-9_]*)",
+      "end": "^(?=\\S)",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.type.fango" },
+        "2": { "name": "entity.name.type.fango" }
+      },
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#deriving" },
+        {
+          "name": "keyword.operator.assignment.fango",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.pipe.fango",
+          "match": "\\|"
+        },
+        { "include": "#qualified_module" },
+        {
+          "name": "entity.name.type.fango",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "variable.other.generic-type.fango",
+          "match": "\\b[a-z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "deriving": {
+      "begin": "\\b(deriving)\\s*(\\()",
+      "end": "\\)",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.deriving.fango" },
+        "2": { "name": "punctuation.section.parens.begin.fango" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.section.parens.end.fango" }
+      },
+      "patterns": [
+        {
+          "name": "entity.name.type.class.fango",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "punctuation.separator.comma.fango",
+          "match": ","
+        }
+      ]
+    },
+    "class_decl": {
+      "match": "^(class)\\s+([A-Z][A-Za-z0-9_]*)((?:\\s+[a-z][A-Za-z0-9_]*)*)",
+      "captures": {
+        "1": { "name": "keyword.other.class.fango" },
+        "2": { "name": "entity.name.type.class.fango" },
+        "3": { "name": "variable.other.generic-type.fango" }
+      }
+    },
+    "instance_decl": {
+      "begin": "^(instance)\\b",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.instance.fango" }
+      },
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "name": "keyword.operator.big-arrow.fango",
+          "match": "=>"
+        },
+        { "include": "#qualified_module" },
+        {
+          "name": "entity.name.type.fango",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "variable.other.generic-type.fango",
+          "match": "\\b[a-z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "effect_decl": {
+      "match": "^(effect)\\s+([A-Z][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.other.effect.fango" },
+        "2": { "name": "entity.name.type.effect.fango" }
+      }
+    },
+    "infix_decl": {
+      "match": "^(infix)\\s*(\\()\\s*(\\+\\+|==|/=|<=|>=|[+\\-*/<>])\\s*(\\))",
+      "captures": {
+        "1": { "name": "keyword.other.infix.fango" },
+        "2": { "name": "punctuation.section.parens.begin.fango" },
+        "3": { "name": "entity.name.function.operator.fango" },
+        "4": { "name": "punctuation.section.parens.end.fango" }
+      }
+    },
+    "annotation": {
+      "begin": "^(\\s*)([a-z][A-Za-z0-9_]*)\\s*(:)",
+      "end": "$",
+      "beginCaptures": {
+        "2": { "name": "entity.name.function.fango" },
+        "3": { "name": "keyword.operator.type-annotation.fango" }
+      },
+      "patterns": [
+        { "include": "#type_expression" },
+        {
+          "begin": "(=)\\s*(native)\\b",
+          "end": "(?=$)",
+          "beginCaptures": {
+            "1": { "name": "keyword.operator.assignment.fango" },
+            "2": { "name": "keyword.other.native.fango" }
+          },
+          "patterns": [
+            { "include": "#native_string" }
+          ]
+        }
+      ]
+    },
+    "type_expression": {
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "name": "keyword.operator.arrow.fango",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.big-arrow.fango",
+          "match": "=>"
+        },
+        { "include": "#effect_row" },
+        { "include": "#qualified_module" },
+        {
+          "name": "constant.language.unit.fango",
+          "match": "\\(\\)"
+        },
+        {
+          "name": "entity.name.type.fango",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "variable.other.generic-type.fango",
+          "match": "\\b[a-z][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "punctuation.separator.comma.fango",
+          "match": ","
+        }
+      ]
+    },
+    "effect_row": {
+      "begin": "\\{",
+      "end": "\\}",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.effect-row.begin.fango" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.effect-row.end.fango" }
+      },
+      "patterns": [
+        { "include": "#qualified_module" },
+        {
+          "name": "entity.name.type.effect.fango",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "variable.other.generic-type.fango",
+          "match": "\\b[a-z][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "keyword.operator.pipe.fango",
+          "match": "\\|"
+        },
+        {
+          "name": "punctuation.separator.comma.fango",
+          "match": ","
+        }
+      ]
+    },
+    "function_definition": {
+      "match": "^\\s*([a-z][A-Za-z0-9_]*)(?=(?:\\(\\)|(?:\\s+(?:[a-z][A-Za-z0-9_]*|_|\\(\\)))+)\\s*=(?![=>]))",
+      "captures": {
+        "1": { "name": "entity.name.function.fango" }
+      }
+    },
+    "binding": {
+      "match": "^\\s*([a-z][A-Za-z0-9_]*)(?=\\s*=(?![=>]))",
+      "captures": {
+        "1": { "name": "variable.other.definition.fango" }
+      }
+    },
+    "expressions": {
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#native_expr" },
+        { "include": "#string" },
+        { "include": "#keywords" },
+        { "include": "#return_clause" },
+        { "include": "#booleans" },
+        { "include": "#numbers" },
+        { "include": "#qualified_module" },
+        {
+          "name": "entity.name.type.fango",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+        },
+        { "include": "#operators" },
+        {
+          "name": "variable.language.wildcard.fango",
+          "match": "(?<![A-Za-z0-9_])_(?![A-Za-z0-9_])"
+        },
+        {
+          "name": "constant.language.unit.fango",
+          "match": "\\(\\)"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.fango",
+          "match": "\\b(if|then|else|case|of|handle|resume)\\b"
+        },
+        {
+          "name": "keyword.other.fango",
+          "match": "\\b(module|import|as|exposing|type|effect|native|infix|class|instance|deriving)\\b"
+        },
+        {
+          "name": "invalid.deprecated.reserved.fango",
+          "match": "\\b(let|in)\\b"
+        }
+      ]
+    },
+    "return_clause": {
+      "name": "keyword.control.return.fango",
+      "match": "^\\s*(return)\\b(?=\\s+\\S+\\s*->)"
+    },
+    "booleans": {
+      "name": "constant.language.boolean.fango",
+      "match": "\\b(True|False)\\b"
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.fango",
+          "match": "\\b\\d+(?:\\.\\d+(?:[eE][+-]?\\d+)?|[eE][+-]?\\d+)\\b"
+        },
+        {
+          "name": "constant.numeric.integer.fango",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "qualified_module": {
+      "match": "\\b([A-Z][A-Za-z0-9_]*)(\\.)(?=[A-Za-z])",
+      "captures": {
+        "1": { "name": "support.other.module.fango" },
+        "2": { "name": "punctuation.accessor.fango" }
+      }
+    },
+    "string": {
+      "name": "string.quoted.double.fango",
+      "begin": "\"",
+      "end": "\"|$",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.fango" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.fango" }
+      },
+      "patterns": [
+        { "include": "#string_escapes" }
+      ]
+    },
+    "string_escapes": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.fango",
+          "match": "\\\\[\\\\\"ntr]"
+        },
+        {
+          "name": "invalid.illegal.escape.fango",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "native_expr": {
+      "begin": "\\b(native)\\b",
+      "end": "(?=$)|(?<=\")",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.native.fango" }
+      },
+      "patterns": [
+        { "include": "#native_string" }
+      ]
+    },
+    "native_string": {
+      "name": "string.quoted.double.native.fango",
+      "begin": "\"",
+      "end": "\"|$",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.fango" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.fango" }
+      },
+      "patterns": [
+        {
+          "name": "constant.other.placeholder.fango",
+          "match": "\\$\\d+"
+        },
+        { "include": "#string_escapes" }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arrow.fango",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.big-arrow.fango",
+          "match": "=>"
+        },
+        {
+          "name": "keyword.operator.range.fango",
+          "match": "\\.\\."
+        },
+        {
+          "name": "keyword.operator.concat.fango",
+          "match": "\\+\\+"
+        },
+        {
+          "name": "keyword.operator.comparison.fango",
+          "match": "==|/=|<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.assignment.fango",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.arithmetic.fango",
+          "match": "[+\\-*/]"
+        },
+        {
+          "name": "keyword.operator.pipe.fango",
+          "match": "\\|"
+        },
+        {
+          "name": "keyword.operator.lambda.fango",
+          "match": "\\\\"
+        },
+        {
+          "name": "keyword.operator.type-annotation.fango",
+          "match": ":"
+        }
+      ]
+    }
+  }
+}
