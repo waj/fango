@@ -1,0 +1,9 @@
+module Range exposing (each)
+
+each : (number ->{e} ()) -> number -> number ->{e} ()
+each action start end =
+    case start > end of
+        True -> ()
+        False ->
+            action start
+            each action (start + 1) end

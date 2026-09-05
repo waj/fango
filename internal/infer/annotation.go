@@ -126,10 +126,11 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, [
 		}
 		kind := types.General
 		class := ""
+		if strings.HasPrefix(te.Name, "number") {
+			kind = types.Number
+		}
 		if tv.native {
 			switch {
-			case strings.HasPrefix(te.Name, "number"):
-				kind = types.Number
 			case strings.HasPrefix(te.Name, "equatable"):
 				class = "Eq"
 			case strings.HasPrefix(te.Name, "comparable"):

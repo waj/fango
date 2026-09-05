@@ -147,6 +147,13 @@ ordinary recursive implementation is not guaranteed to terminate for `NaN`
 or positive infinity. `each action values` applies `action` from left to right
 and propagates its effects.
 
+`Range.each : (number ->{e} ()) -> number -> number ->{e} ()` traverses an
+inclusive ascending numeric range without constructing a `List`. For example,
+`Range.each drawPoint 0 78` calls `drawPoint` with every value from `0` through
+`78`. It does nothing when the start is greater than the end, works with both
+`Int` and `Float`, and has the same finite-bound requirement as `List.range`.
+The callback runs in ascending order and its effects are propagated.
+
 `IO` currently exposes newline-free string output:
 
 ```fango
@@ -270,9 +277,11 @@ form remains available.
 
 Top-level functions can recurse and Hindley-Milner inference generalizes their
 types. Polymorphic values and parameterized ADTs are supported. Numeric
-polymorphism prints as `number` and ranges over `Int` and `Float`. Polymorphic
-recursion and non-regular recursive ADTs are rejected. Local value bindings are
-monomorphic; local functions and lambda bindings may generalize.
+polymorphism ranges over `Int` and `Float`; it prints as `number` and can be
+written in annotations with a variable whose name starts with `number` (for
+example, `double : number -> number`). Polymorphic recursion and non-regular
+recursive ADTs are rejected. Local value bindings are monomorphic; local
+functions and lambda bindings may generalize.
 
 ## Algebraic data types and matching
 

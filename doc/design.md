@@ -158,7 +158,8 @@ effect rows, and three variable kinds: general, numeric, and row. It generates
 reason-tagged equality/inclusion constraints, solves them by unification with
 an occurs check, and generalizes at binding boundaries. Annotation variables
 are rigid skolems, preventing an annotation from claiming more polymorphism
-than its body supplies.
+than its body supplies. Variables whose names begin with `number` have the
+numeric kind in both ordinary and native annotations.
 
 Top-level values and functions generalize. Local syntactic functions and
 lambdas generalize, while local values remain monomorphic so their strict,

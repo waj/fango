@@ -119,7 +119,7 @@ func TestGraphDiagnostics(t *testing.T) {
 
 func TestBundledModules(t *testing.T) {
 	d := t.TempDir()
-	entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport IO\nimport List\nmain = 0\n")
+	entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport IO\nimport List\nimport Range\nmain = 0\n")
 	r, errs := Load(entry)
 	if len(errs) > 0 {
 		t.Fatalf("Load: %v", errs)
@@ -128,7 +128,7 @@ func TestBundledModules(t *testing.T) {
 	for _, m := range r.Manifest {
 		got = append(got, m.Module+":"+m.Path)
 	}
-	want := "Basics:<stdlib>/Basics.fango,Basics:<stdlib>/Basics.native.go,IO:<stdlib>/IO.fango,IO:<stdlib>/IO.native.go,List:<stdlib>/List.fango,Main:Main.fango"
+	want := "Basics:<stdlib>/Basics.fango,Basics:<stdlib>/Basics.native.go,IO:<stdlib>/IO.fango,IO:<stdlib>/IO.native.go,List:<stdlib>/List.fango,Range:<stdlib>/Range.fango,Main:Main.fango"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("manifest = %v, want %s", got, want)
 	}

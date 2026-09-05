@@ -54,6 +54,7 @@ func TestPolyPositive(t *testing.T) {
 		// Annotated polymorphism, checked by skolemize-and-unify.
 		{"id : a -> a\nid x = x", "id : a -> a"},
 		{"apply : (a -> b) -> a -> b\napply f x = f x", "apply : (a -> b) -> a -> b"},
+		{"double : number -> number\ndouble x = x + x", "double : number -> number"},
 		// An annotation may be less general than the body.
 		{"idInt : Int -> Int\nidInt x = x", "idInt : Int -> Int"},
 		// Parameterized ADTs: constructor instantiation per occurrence.

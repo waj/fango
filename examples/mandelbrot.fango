@@ -1,5 +1,5 @@
 import IO
-import List
+import Range
 
 printDensity density =
     if density > 8 then IO.write " " else
@@ -19,20 +19,14 @@ mandelConverger real imaginary iterations constantReal constantImaginary =
 mandelConverge real imaginary =
     mandelConverger real imaginary 0 real imaginary
 
-columns : List.List Float
-columns = List.range 0 78
-
-rows : List.List Float
-rows = List.range 0 40
-
 mandel realStart imaginaryStart realMagnitude imaginaryMagnitude =
     drawRow row =
         drawPoint column =
             real = realStart + column * realMagnitude
             imaginary = imaginaryStart + row * imaginaryMagnitude
             printDensity (mandelConverge real imaginary)
-        List.each drawPoint columns
+        Range.each drawPoint 0 78
         print ""
-    List.each drawRow rows
+    Range.each drawRow 0 40
 
 main() = mandel (-2.3) (-1.3) 0.05 0.07
