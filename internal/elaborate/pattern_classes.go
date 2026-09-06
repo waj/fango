@@ -48,7 +48,9 @@ func (m *matcher) orderedPattern(p ast.Pattern, occ occurrence, success, failure
 	case *ast.PWildcard:
 		return success
 	case *ast.PVar:
-		if !core.TreeMentions(success, p.Name) { return success }
+		if !core.TreeMentions(success, p.Name) {
+			return success
+		}
 		// A one-field irrefutable binding is represented as a Case with a
 		// leaf, so the success tree can retain its constructor occurrences.
 		ty := m.bodies[0].Type()
@@ -72,7 +74,9 @@ func (m *matcher) orderedPattern(p ast.Pattern, occ occurrence, success, failure
 			}
 		}
 		var fallback core.Tree = failure
-		if len(adt.Ctors) == 1 { fallback = nil }
+		if len(adt.Ctors) == 1 {
+			fallback = nil
+		}
 		return &core.SwitchCtor{Scrut: occ.name, ADT: adt, Cases: []core.CtorCase{{Ctor: ctor, Binds: binds, Tree: success}}, Default: fallback}
 	case *ast.PInt:
 		fromTy := &types.TFun{Arg: el.ck.B.Int, Ret: occ.ty}
@@ -87,18 +91,29 @@ func (m *matcher) orderedPattern(p ast.Pattern, occ occurrence, success, failure
 }
 
 func patternSubsumes(a, b ast.Pattern) bool {
-	if irrefutable(a) { return true }
+	if irrefutable(a) {
+		return true
+	}
 	switch a := a.(type) {
 	case *ast.PInt:
-		b, ok := b.(*ast.PInt); return ok && a.Value == b.Value
+		b, ok := b.(*ast.PInt)
+		return ok && a.Value == b.Value
 	case *ast.PFloat:
-		b, ok := b.(*ast.PFloat); return ok && a.Value == b.Value
+		b, ok := b.(*ast.PFloat)
+		return ok && a.Value == b.Value
 	case *ast.PString:
-		b, ok := b.(*ast.PString); return ok && a.Value == b.Value
+		b, ok := b.(*ast.PString)
+		return ok && a.Value == b.Value
 	case *ast.PCtor:
 		b, ok := b.(*ast.PCtor)
-		if !ok || a.Name != b.Name || len(a.Args) != len(b.Args) { return false }
-		for i := range a.Args { if !patternSubsumes(a.Args[i], b.Args[i]) { return false } }
+		if !ok || a.Name != b.Name || len(a.Args) != len(b.Args) {
+			return false
+		}
+		for i := range a.Args {
+			if !patternSubsumes(a.Args[i], b.Args[i]) {
+				return false
+			}
+		}
 		return true
 	}
 	return false

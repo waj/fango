@@ -1,12 +1,12 @@
 package infer
 
 import (
-	"testing"
 	"github.com/waj/fango/internal/types"
+	"testing"
 )
 
 func TestClassConstraints(t *testing.T) {
-	for _, tc := range []struct{src, want string}{
+	for _, tc := range []struct{ src, want string }{
 		{"same x y = x == y", "Eq a => a -> a -> Bool"},
 		{"text x = show x", "Show a => a -> String"},
 		{"twice : Num number => number -> number\ntwice x = x + x", "Num a => a -> a"},
@@ -14,7 +14,10 @@ func TestClassConstraints(t *testing.T) {
 		{"outer x =\n    same : Eq a => a -> a -> Bool\n    same l r = l == r\n    same x x", "Eq a => a -> Bool"},
 	} {
 		ck, infos, errs := check(t, tc.src)
-		if len(errs) > 0 { t.Errorf("%s: %v", tc.src, errs); continue }
+		if len(errs) > 0 {
+			t.Errorf("%s: %v", tc.src, errs)
+			continue
+		}
 		if got := types.ShowScheme(checkedScheme(ck, infos[len(infos)-1])); got != tc.want {
 			t.Errorf("%s: got %s, want %s", tc.src, got, tc.want)
 		}
@@ -52,7 +55,7 @@ func TestStructuralInstanceHeads(t *testing.T) {
 }
 
 func TestClassDiagnostics(t *testing.T) {
-	for _, tc := range []struct{name, src, title string}{
+	for _, tc := range []struct{ name, src, title string }{
 		{"missing context", "same : a -> a -> Bool\nsame x y = x == y", "MISSING CONSTRAINT"},
 		{"number is ordinary", "twice : number -> number\ntwice x = x + x", "MISSING CONSTRAINT"},
 		{"no automatic equality", "type T = T\nmain = T == T", "MISSING INSTANCE"},
@@ -77,7 +80,9 @@ func TestClassDiagnostics(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, errs := check(t, tc.src)
-			if len(errs) == 0 || errs[0].(checkErr).title != tc.title { t.Fatalf("got %v, want %s", errs, tc.title) }
+			if len(errs) == 0 || errs[0].(checkErr).title != tc.title {
+				t.Fatalf("got %v, want %s", errs, tc.title)
+			}
 		})
 	}
 }

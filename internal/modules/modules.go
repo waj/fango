@@ -452,7 +452,7 @@ func validateNatives(n *node) []diag.Error {
 	}
 	for _, d := range n.mod.Decls {
 		if inf, ok := d.(*ast.InfixDecl); ok && n.bundled && !templateTargets[inf.Target] {
-		errs = append(errs, diag.Errorf(inf.TargetSpan, "INVALID INFIX TARGET", "Operator `%s` must name a value or class method in the same bundled module.", inf.Op))
+			errs = append(errs, diag.Errorf(inf.TargetSpan, "INVALID INFIX TARGET", "Operator `%s` must name a value or class method in the same bundled module.", inf.Op))
 		}
 	}
 	if n.bundled {
@@ -846,7 +846,9 @@ func buildInterface(n *node, errs []diag.Error) (*iface, []diag.Error) {
 					pub.effectMembers[item.Name] = ms
 					pub.openEffects[item.Name] = true
 					for _, x := range ms {
-						if op := all.ops[x]; op != "" { pub.ops[x] = op }
+						if op := all.ops[x]; op != "" {
+							pub.ops[x] = op
+						}
 						pub.values[x] = all.values[x]
 					}
 					continue
@@ -907,7 +909,9 @@ func (i *iface) selection(ex *ast.Exposing, at source.Span) (*iface, []diag.Erro
 				if i.openEffects[item.Name] {
 					out.openEffects[item.Name] = true
 					for _, x := range i.effectMembers[item.Name] {
-						if op := i.ops[x]; op != "" { out.ops[x] = op }
+						if op := i.ops[x]; op != "" {
+							out.ops[x] = op
+						}
 						out.values[x] = i.values[x]
 					}
 				}
@@ -1101,18 +1105,30 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 func (r *resolver) instanceMethodsVisible(d *ast.InstanceDecl) {
 	class := d.Head.Class
 	i := strings.LastIndexByte(class, '.')
-	if i < 0 || class[:i] == r.node.name || class[:i] == "Basics" { return }
+	if i < 0 || class[:i] == r.node.name || class[:i] == "Basics" {
+		return
+	}
 	n := r.nodes[class[:i]]
-	if n == nil { return }
+	if n == nil {
+		return
+	}
 	for _, decl := range n.mod.Decls {
 		cl, ok := decl.(*ast.ClassDecl)
-		if !ok || (cl.Name != class && canonical(n.name, cl.Name) != class) { continue }
+		if !ok || (cl.Name != class && canonical(n.name, cl.Name) != class) {
+			continue
+		}
 		for _, m := range cl.Methods {
 			name := m.Name
-			if !strings.Contains(name, ".") { name = canonical(n.name, name) }
+			if !strings.Contains(name, ".") {
+				name = canonical(n.name, name)
+			}
 			visible := false
 			for _, iface := range r.quals {
-				for _, value := range iface.values { if value == name { visible = true } }
+				for _, value := range iface.values {
+					if value == name {
+						visible = true
+					}
+				}
 			}
 			if !visible {
 				r.errs = append(r.errs, diag.Errorf(d.Head.Sp, "NON-PUBLIC METHOD", "An instance of `%s` requires access to method `%s`; import a public class interface exposing all methods.", class, name))

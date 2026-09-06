@@ -38,7 +38,9 @@ func testMultiModule(t *testing.T, fixture string) {
 	}
 	_ = ck
 	shown, err := eval.EvalIO(context.Background(), prog.EntryDisplay, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{}))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := strings.TrimSpace(shown.(string)); got != strings.TrimSpace(string(want)) {
 		t.Fatalf("interpreter got %q, want %q", got, want)
 	}
