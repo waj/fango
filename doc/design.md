@@ -156,7 +156,10 @@ statements.
 Inference is Hindley-Milner with parameterized ADTs, qualified schemes, explicit
 annotations, effect rows, and two variable kinds: general and row. It generates
 reason-tagged equality/inclusion constraints, solves them by unification with
-an occurs check, and generalizes at binding boundaries. Annotation variables
+an occurs check, and generalizes at binding boundaries. A label-free open row
+normalizes to its tail during unification, so an annotation's rigid row
+variable unifies with the fresh row a call site mints — this is what lets a
+handler wrapper carry an explicit open-tail annotation. Annotation variables
 are rigid skolems, preventing an annotation from claiming more polymorphism
 than its body supplies. Variable spelling never grants numeric or other
 capabilities.

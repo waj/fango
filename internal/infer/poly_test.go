@@ -72,6 +72,10 @@ func TestPolyPositive(t *testing.T) {
 		{"v =\n  id2 y = y\n  a = id2 1\n  b = id2 \"s\"\n  a", "v : Num a => a"},
 		// Mutually recursive parameterized types, regular.
 		{"type A a = MkA (B a) | EndA\ntype B a = MkB (A a)\nf x = MkA (MkB x)", "f : A a -> A a"},
+		// An annotated handler wrapper with an open effect-row tail: the
+		// annotation's rigid row variable unifies with the fresh row a call
+		// site mints, because a label-free open row normalizes to its tail.
+		{"effect Ask\n    ask : () -> String\nrun : (() ->{Ask | e} a) ->{e} a\nrun action =\n    handle action() of\n        ask () -> resume \"yes\"", "run : (() ->{Ask | e} a) ->{e} a"},
 	}
 	for _, c := range cases {
 		ck, infos, errs := checkPoly(t, c.src)

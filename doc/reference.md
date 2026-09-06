@@ -381,6 +381,17 @@ or escaping continuations, operation-local/result polymorphism, and handlers
 for builtin `IO` are rejected. Effects other than the handled label remain in
 the surrounding row.
 
+A reusable handler wrapper may annotate that residual flow with an open row
+tail. The handled label disappears from the callback's row while every other
+effect the callback performs passes through the wrapper's own row:
+
+```fango
+run : (() ->{Ask | e} a) ->{e} a
+run action =
+    handle action() of
+        ask () -> resume "yes"
+```
+
 Builtin `print : a ->{IO} ()` displays supported ground values and ADTs.
 `readLine : () ->{IO} String` reads one line and returns the text without its
 line ending. Call it as `readLine()` (or equivalently `readLine ()`). The

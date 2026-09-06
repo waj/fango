@@ -110,6 +110,17 @@ type mismatch struct {
 func unify(a, b types.Type, sub Subst, bi *types.Builtins, sup *types.Supply) *mismatch {
 	a, b = sub.walk(a), sub.walk(b)
 
+	// A row with no labels and an open tail is just its tail. Normalizing
+	// here lets a fresh row metavariable wrapped by unifyRows bind against a
+	// rigid annotation tail (e.g. the `e` in `(() ->{Ask | e} a) ->{e} a`)
+	// instead of tripping the rigid-vs-structure mismatch below.
+	if ar, ok := a.(types.Row); ok && len(ar.Labels) == 0 && ar.Tail != nil {
+		return unify(ar.Tail, b, sub, bi, sup)
+	}
+	if br, ok := b.(types.Row); ok && len(br.Labels) == 0 && br.Tail != nil {
+		return unify(a, br.Tail, sub, bi, sup)
+	}
+
 	// Metas bind; rigid vars (skolems, scheme-bound vars) are atomic: equal
 	// only to themselves, a mismatch against everything else — the direction
 	// that keeps an annotation's variables fully general (doc/design.md, "Type inference").

@@ -1,0 +1,16 @@
+-- An explicitly annotated handler wrapper with an open effect-row tail: the
+-- handled body's residual IO flows through the annotation's row variable.
+effect Ask
+    ask : () -> String
+
+run : (() ->{Ask | e} a) ->{e} a
+run action =
+    handle action() of
+        ask () -> resume "yes"
+
+query() =
+    answer = ask()
+    print answer
+    if answer == "yes" then 40 else 0
+
+main() = print (run query + 2)
