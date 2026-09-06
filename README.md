@@ -18,7 +18,7 @@ stay close to ordinary Go.
 fango requires Go 1.26. Build the compiler, then run a program:
 
 ```sh
-go build -o fango ./cmd/fango
+make
 ./fango run examples/guess.fango
 ```
 
