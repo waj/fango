@@ -1,0 +1,17 @@
+-- Unit-result tail loop whose self call sits in Seq tail position under a
+-- case leaf: pins the statement emission path (leaves end with statements
+-- plus a bare return; the jump is reached through a decision tree).
+type Step = Emit Int | Stop
+
+next : Int -> Step
+next n = if n > 0 then Emit n else Stop
+
+countdown : Int ->{IO} ()
+countdown n =
+    case next n of
+        Emit k ->
+            print k
+            countdown (k - 1)
+        Stop -> print 0
+
+main() = countdown 3

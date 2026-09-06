@@ -25,7 +25,10 @@ const (
 // representation cases use measured ceilings because cons lists and pointer
 // trees race slices and loops.
 //
-// fib gates call overhead for number-generic workers; match gates
+// fib gates call overhead for number-generic workers; loop gates the
+// self-tail-call loop rewrite — a tight scalar tail loop against a
+// handwritten Go for statement (sum's tail loop is NOT a TCO witness: it
+// runs 20 iterations and its ratio is cons-allocation tax); match gates
 // decision-tree/enum dispatch, using an int-enum Go baseline, so that ratio
 // is the arbiter for any representation change.
 // sum/mapfilter/tree cover polymorphic data representations: generic cons
@@ -49,6 +52,7 @@ var ratioCases = []struct {
 	limit    float64
 }{
 	{"fib", "perf/fib.fango", "perf/baseline/fib", "9227465\n", 1.2},
+	{"loop", "perf/loop.fango", "perf/baseline/loop", "125000000250000000\n", 1.2},
 	{"match", "perf/match.fango", "perf/baseline/match", "-2834052877137561537\n", 1.2},
 	{"sum", "perf/sum.fango", "perf/baseline/sum", "100001000000\n", 8.0},
 	{"mapfilter", "perf/mapfilter.fango", "perf/baseline/mapfilter", "26999100000\n", 4.5},

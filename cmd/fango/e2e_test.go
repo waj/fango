@@ -270,6 +270,55 @@ func TestCheckpoint2GeneratedGoHasNoContinuationRuntime(t *testing.T) {
 	}
 }
 
+// Self tail calls compile to loops (doc/design.md, "Go backend and runtime"):
+// an eligible worker's FuncDecl contains a ForStmt and no self call, while a
+// capture-excluded worker keeps the self call and gains no ForStmt. Codegen
+// emits ForStmts nowhere else, so the signal is unambiguous.
+func TestTailLoopGeneratedShape(t *testing.T) {
+	cases := []struct {
+		fixture, fn string
+		loop        bool
+	}{
+		{"tail_loop_deep.fango", "V_loop", true},
+		{"tail_loop_unit.fango", "V_countdown", true},
+		{"tail_capture.fango", "V_applyAll", true},
+		{"tail_capture.fango", "V_build", false},
+	}
+	for _, tc := range cases {
+		path := filepath.Join("..", "..", "testdata", "run", tc.fixture)
+		src := generatedFile(t, emittedProject(t, path), "main.go")
+		file, err := goparser.ParseFile(gotoken.NewFileSet(), tc.fixture+".go", src, 0)
+		if err != nil {
+			t.Fatalf("%s: generated Go does not parse: %v", tc.fixture, err)
+		}
+		var fn *goast.FuncDecl
+		for _, decl := range file.Decls {
+			if d, ok := decl.(*goast.FuncDecl); ok && d.Name.Name == tc.fn {
+				fn = d
+			}
+		}
+		if fn == nil {
+			t.Fatalf("%s: generated Go has no func %s:\n%s", tc.fixture, tc.fn, src)
+		}
+		hasFor, hasSelfCall := false, false
+		goast.Inspect(fn.Body, func(n goast.Node) bool {
+			switch n := n.(type) {
+			case *goast.ForStmt:
+				hasFor = true
+			case *goast.CallExpr:
+				if id, ok := n.Fun.(*goast.Ident); ok && id.Name == tc.fn {
+					hasSelfCall = true
+				}
+			}
+			return true
+		})
+		if hasFor != tc.loop || hasSelfCall == tc.loop {
+			t.Errorf("%s: func %s has ForStmt=%v selfCall=%v, want ForStmt=%v selfCall=%v:\n%s",
+				tc.fixture, tc.fn, hasFor, hasSelfCall, tc.loop, !tc.loop, src)
+		}
+	}
+}
+
 func TestGeneratedGoUsesImplicitConcreteUnitABI(t *testing.T) {
 	for _, name := range []string{"explicit_unit_calls.fango", "effect_handler.fango"} {
 		path := filepath.Join("..", "..", "testdata", "run", name)

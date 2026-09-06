@@ -351,6 +351,32 @@ polymorphism uses ordinary class constraints, for example
 recursive ADTs are rejected. Local value bindings are monomorphic; local
 functions and lambda bindings may generalize.
 
+### Tail-call guarantee
+
+Recursion is the language's loop, and self tail calls are guaranteed to run
+in constant stack in both backends. A recursive call is optimized when all of
+the following hold; programs may rely on it, and arbitrarily deep tail
+recursion of this shape never overflows:
+
+- the call invokes the *same* top-level function it appears in (a local
+  function that generalizes counts: it is hoisted to the top level), directly
+  and with all its arguments;
+- the call is in tail position: the returned expression of the body, of an
+  `if` branch, of a `case` branch, or the final expression of a block,
+  including through any nesting of those — but not inside a lambda body, not
+  under a `handle` expression, and not as an operand or argument of anything
+  else;
+- the function calls itself at its own type (polymorphic recursion at a
+  different instantiation is not optimized);
+- no lambda or handler clause anywhere in the body captures a parameter that
+  the recursion changes; parameters passed through unchanged (such as a
+  callback threaded through a driver loop) are always safe to capture.
+
+Mutually recursive functions (`f` calls `g` calls `f`) and monomorphic local
+recursive bindings are *not* optimized and consume stack proportional to
+depth. A tail call that never terminates, such as `f x = f x`, spins instead
+of eventually overflowing.
+
 ## Type classes and instances
 
 A class has exactly one type parameter and an indented block of method

@@ -1,0 +1,8 @@
+-- A non-atomic effectful argument to a Unit parameter: the Go ABI erases the
+-- parameter but must not erase the argument's evaluation, and the print must
+-- observe the CURRENT n — before the loop reassigns it. Pins the jump's
+-- ordered temporary prelude.
+pump : Int -> () ->{IO} ()
+pump n u = if n < 1 then u else pump (n - 1) (print n)
+
+main() = pump 3 ()

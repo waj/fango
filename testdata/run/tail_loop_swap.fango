@@ -1,0 +1,7 @@
+-- Interdependent permuted arguments: y flows into x while x + y flows into
+-- y, so the jump must reassign simultaneously (evaluate every argument
+-- before updating any parameter). A sequential rewrite would corrupt x.
+step : Int -> Int -> Int -> Int
+step n x y = if n < 1 then x else step (n - 1) y (x + y)
+
+main = print (step 50 0 1)

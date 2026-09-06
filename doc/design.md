@@ -313,6 +313,34 @@ independent of graph-wide identity allocation, so unchanged source units emit
 byte-identical Go. Project emission is the backend's only generation path;
 tests inspect the same package files used by `build`, `run`, and `--emit-go`.
 
+A self-recursive tail call of a top-level worker compiles to a loop: when the
+shared predicate in `internal/core` accepts a definition, its body emits as
+one `for` statement whose rewritable self calls become a simultaneous tuple
+reassignment of the changed parameters plus `continue`, giving the
+loop-by-recursion idiom constant stack. Eligibility is a pure function of the
+definition and call node — no Core marker exists: the call must be reached
+exclusively through the tail skeleton (Let bodies, If branches, Case leaf
+bodies, Seq tails; never lambda bodies, handles, right-hand sides, scrutinees,
+or guard conditions), name the worker itself at the identity type
+instantiation (polymorphic recursion is unsound to reuse frames for), and pass
+the worker's own evidence parameters through unchanged — structurally
+guaranteed because the skeleton never crosses a Handle, so evidence needs no
+per-iteration work. The soundness core is capture exclusion: generated Go
+closures capture locals by reference, so a definition is ineligible when any
+lambda body or handler clause/return mentions a parameter the recursion
+mutates; parameters passed through unchanged stay capturable, which keeps
+eta-expansion wrappers around threaded callbacks from disqualifying driver
+loops. The loop body comes from a dedicated walker that mirrors the ordinary
+return-position emitter — ineligible leaves and non-tail subtrees emit
+identically, and a `continue` can never leak into a func literal — while
+handling `Seq` tails directly (no IIFE inside loops) and erased Unit
+arguments through the same ordered temporary prelude as saturated calls, so
+argument evaluation order survives the rewrite. Trivial arguments (a
+parameter passed to itself, including passed-through dictionaries) elide from
+the jump; a fully-trivial jump is a bare `continue`, and a `for` with no
+`break` is a terminating Go statement, so infinite loops need no unreachable
+trailing return.
+
 The build driver materializes the package tree and embedded `fangort` beneath a
 persistent `.fango/build` directory, writing only changed files and removing
 only stale package-source paths recorded in its generated-file manifest. It
@@ -342,6 +370,20 @@ representation in the interpreter, while environments distinguish typed
 workers from lazy memoized top-level cells and eager block frames. `EvalIO` and
 `ForceIO` are the explicit IO entry points. The interpreter and generated Go
 share observable formatting rules.
+
+The interpreter shares the compiled backend's tail-call predicate: applying a
+worker the predicate accepts runs a frame-reuse loop instead of recursing
+through Go `eval` frames. A tail-skeleton walker either produces the
+iteration's final value or the next iteration's parameter frame, built by
+evaluating a rewritable call's arguments in the current frame; the decision
+tree evaluator takes a leaf callback so both paths share dispatch. Fresh
+per-iteration frames would make interpreter closures safe without the capture
+exclusion, but the shared predicate keeps both backends optimizing the same
+set of definitions — the set the reference documents — with the differential
+suite as referee. The loop polls cancellation each iteration, since a
+fully-trivial spin (`f x = f x`) would otherwise never reach the every-N-evals
+poll. Eligibility is cached per definition pointer, so REPL redefinition
+invalidates naturally.
 
 `print` is an ordinary `Show`-constrained function implemented using `show` and
 the native `IO.write` operation. Tooling observes values through the same Show
@@ -396,6 +438,7 @@ flags, external library version selection, or package resolution. The implicit
 prelude is fixed to hidden `Basics` plus ambient `IO`; the bundled standard
 library is intentionally small and experimental.
 Integer values are signed 64-bit; broader numeric semantics are not settled.
-There is no tail-call optimization guarantee. Custom handlers have the
+Self tail calls run in constant stack, but mutual recursion and monomorphic
+local recursive closures do not. Custom handlers have the
 restrictions described above, and ambient IO cannot be re-handled yet. REPL
 loading/reloading and cancellation remain unfinished.

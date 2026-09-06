@@ -51,6 +51,28 @@ and configurable source roots remain deferred.
 - Make benchmark baselines easier to reproduce and less sensitive to machine
   load while retaining meaningful regression gates.
 
+## Tail calls beyond the self-call loop
+
+Self tail calls of top-level workers compile to loops in both backends (see
+the design and reference). Deliberately deferred, each awaiting a concrete
+program that needs it:
+
+- **Mutual recursion** (`f` → `g` → `f`): needs fused dispatch loops or a
+  trampoline, changes the emitted shape of several defs at once, and
+  cross-module workers live in different Go packages that cannot share a
+  loop.
+- **Monomorphic local recursive closures**: emitted as declare-then-assign Go
+  closures with indirect curried calls — a different transform over captured
+  mutable locals with no worker ABI to anchor it. Workaround exists: annotate
+  so the local generalizes and lambda lifting hoists it, or write it
+  top-level.
+- **Capture-excluded workers**: definitions rejected only because a closure
+  captures a mutated parameter could be re-enabled by copying mutated params
+  into per-iteration locals inside the loop; not worth the extra output shape
+  until a real program is excluded.
+- A diagnostic (or LSP hint) when a loop-shaped function narrowly misses
+  eligibility — e.g. via the capture exclusion — is open tooling territory.
+
 ## General and aborting handlers
 
 Resume this work when a concrete language feature needs early exit, non-tail

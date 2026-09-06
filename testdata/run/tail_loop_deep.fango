@@ -1,0 +1,6 @@
+-- Value-result tail loop, deep enough (~2M) to overflow any backend that
+-- burns a stack frame per recursive call. Pins the constant-stack guarantee.
+loop : Int -> Int -> Int
+loop i acc = if i < 1 then acc else loop (i - 1) (acc + i)
+
+main = print (loop 2000000 0)

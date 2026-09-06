@@ -1,0 +1,17 @@
+-- The negative witness for the loop rewrite's capture exclusion: build's
+-- lambda captures n, and the recursion mutates n. Compiled Go closures
+-- capture locals by reference, so a loop rewrite would make every stored
+-- closure observe n's final value (0) and print 0 instead of 6. build must
+-- stay a plain recursive call; applyAll (no closures) still loops.
+type Fns = Done | Push (Int -> Int) Fns
+
+build : Int -> Fns -> Fns
+build n acc = if n < 1 then acc else build (n - 1) (Push (\k -> k + n) acc)
+
+applyAll : Fns -> Int -> Int
+applyAll fs x =
+    case fs of
+        Done -> x
+        Push f rest -> applyAll rest (f x)
+
+main = print (applyAll (build 3 Done) 0)

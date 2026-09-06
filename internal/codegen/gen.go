@@ -494,7 +494,18 @@ func (g *gen) workerDef(d *core.Def) goast.Decl {
 	if !g.isUnit(ret) {
 		result = g.goType(ret)
 	}
-	decl := workerDecl(g.topValueName(d.Name), params, result, g.retStmtsFor(d.Body, g.isUnit(ret))).(*goast.FuncDecl)
+	// Self tail calls compile to loops (doc/design.md, "Go backend and
+	// runtime"): an eligible body emits as one `for` statement whose leaves
+	// either return or jump. A `for` with no break is a terminating
+	// statement in Go, so no trailing return is needed in either result
+	// shape.
+	var body []goast.Stmt
+	if _, ok := core.DetectTailLoop(d); ok {
+		body = []goast.Stmt{&goast.ForStmt{Body: &goast.BlockStmt{List: g.loopStmts(d, d.Body, g.isUnit(ret))}}}
+	} else {
+		body = g.retStmtsFor(d.Body, g.isUnit(ret))
+	}
+	decl := workerDecl(g.topValueName(d.Name), params, result, body).(*goast.FuncDecl)
 	for _, ev := range d.EffectParams {
 		g.evidence[ev.Unique] = g.evidence[ev.Unique][:len(g.evidence[ev.Unique])-1]
 	}

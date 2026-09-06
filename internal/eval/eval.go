@@ -82,6 +82,10 @@ type Env struct {
 	cells   map[string]*Cell
 	workers map[string]*core.Def
 	entry   string
+	// tails caches core.DetectTailLoop per *core.Def (nil = ineligible).
+	// Pointer identity means REPL redefinition invalidates naturally: a new
+	// generation is a new *core.Def.
+	tails map[*core.Def]*core.TailLoop
 }
 
 // Frame holds block-local bindings (doc/design.md, "Language semantics") — eager values, unlike the lazy
@@ -101,7 +105,20 @@ func (f *Frame) lookup(name string) (Value, bool) {
 }
 
 func NewEnv() *Env {
-	return &Env{cells: map[string]*Cell{}, workers: map[string]*core.Def{}}
+	return &Env{cells: map[string]*Cell{}, workers: map[string]*core.Def{}, tails: map[*core.Def]*core.TailLoop{}}
+}
+
+// tailLoop reports (and caches) whether def executes as a frame-reuse loop.
+// The interpreter shares the compiled backend's predicate — including the
+// capture exclusion its own fresh frames would not need — so both backends
+// optimize the same set of definitions.
+func (e *Env) tailLoop(def *core.Def) *core.TailLoop {
+	if tl, ok := e.tails[def]; ok {
+		return tl
+	}
+	tl, _ := core.DetectTailLoop(def)
+	e.tails[def] = tl
+	return tl
 }
 
 // Define installs (or replaces — REPL redefinition) a top-level value
@@ -362,7 +379,16 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			saved := in.evidence
 			in.evidence = callEvidence
 			// Workers see no caller locals — matching compiled scoping.
-			out, err := in.eval(def.Body, &Frame{vars: vars})
+			var out Value
+			var err error
+			if in.env.tailLoop(def) != nil {
+				// Self tail calls run as a frame-reuse loop (doc/design.md,
+				// "Interpreter and REPL") — constant Go stack, like the
+				// compiled backend's for-loop rewrite.
+				out, err = in.evalTailLoop(def, vars)
+			} else {
+				out, err = in.eval(def.Body, &Frame{vars: vars})
+			}
 			in.evidence = saved
 			return out, err
 		case core.Value:
@@ -413,7 +439,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			return nil, err
 		}
 		frame := &Frame{parent: fr, vars: map[string]Value{e.Bind: v}}
-		return in.tree(e.Tree, frame)
+		return in.tree(e.Tree, frame, in.eval)
 	default:
 		return nil, fmt.Errorf("eval: unhandled Core node %T", e)
 	}
@@ -451,7 +477,10 @@ func (in *interp) nativeRuntime() *natives.Runtime {
 }
 
 // tree walks a decision tree, mirroring the compiled backend's switches.
-func (in *interp) tree(t core.Tree, fr *Frame) (Value, error) {
+// The leaf callback decides what a matched branch does with its body: plain
+// evaluation (in.eval) everywhere except inside a tail-call loop, where
+// tailStep keeps walking the tail skeleton.
+func (in *interp) tree(t core.Tree, fr *Frame, leaf func(core.Expr, *Frame) (Value, error)) (Value, error) {
 	switch t := t.(type) {
 	case *core.Unreachable:
 		return nil, fmt.Errorf("unreachable pattern match")
@@ -461,11 +490,11 @@ func (in *interp) tree(t core.Tree, fr *Frame) (Value, error) {
 			return nil, err
 		}
 		if v.(bool) {
-			return in.tree(t.Then, fr)
+			return in.tree(t.Then, fr, leaf)
 		}
-		return in.tree(t.Else, fr)
+		return in.tree(t.Else, fr, leaf)
 	case *core.Leaf:
-		return in.eval(t.Body, fr)
+		return leaf(t.Body, fr)
 	case *core.SwitchCtor:
 		v, ok := fr.lookup(t.Scrut)
 		if !ok {
@@ -480,10 +509,10 @@ func (in *interp) tree(t core.Tree, fr *Frame) (Value, error) {
 			}
 			for _, c := range t.Cases {
 				if c.Ctor.Name == want {
-					return in.tree(c.Tree, fr)
+					return in.tree(c.Tree, fr, leaf)
 				}
 			}
-			return in.tree(t.Default, fr)
+			return in.tree(t.Default, fr, leaf)
 		}
 		cv, isCtor := v.(*CtorVal)
 		if !isCtor {
@@ -499,12 +528,12 @@ func (in *interp) tree(t core.Tree, fr *Frame) (Value, error) {
 					vars[bind] = cv.Fields[i]
 				}
 			}
-			return in.tree(c.Tree, &Frame{parent: fr, vars: vars})
+			return in.tree(c.Tree, &Frame{parent: fr, vars: vars}, leaf)
 		}
 		if t.Default == nil {
 			return nil, fmt.Errorf("eval: no case for constructor `%s` and no default — exhaustiveness is broken", cv.Ctor.Name)
 		}
-		return in.tree(t.Default, fr)
+		return in.tree(t.Default, fr, leaf)
 	case *core.SwitchLit:
 		v, ok := fr.lookup(t.Scrut)
 		if !ok {
@@ -523,10 +552,10 @@ func (in *interp) tree(t core.Tree, fr *Frame) (Value, error) {
 				return nil, fmt.Errorf("eval: SwitchLit case is %T — the linter should have caught this", c.Lit)
 			}
 			if match {
-				return in.tree(c.Tree, fr)
+				return in.tree(c.Tree, fr, leaf)
 			}
 		}
-		return in.tree(t.Default, fr)
+		return in.tree(t.Default, fr, leaf)
 	default:
 		return nil, fmt.Errorf("eval: unhandled tree node %T", t)
 	}
