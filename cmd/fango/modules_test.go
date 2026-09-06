@@ -348,3 +348,34 @@ func writeModuleFile(t *testing.T, root, rel, contents string) string {
 	}
 	return path
 }
+
+func TestScalarSpecializationModuleStability(t *testing.T) {
+	root := t.TempDir()
+	writeModuleFile(t, root, "Dep.fango", `module Dep exposing (double)
+double value = value + value
+`)
+	entry := writeModuleFile(t, root, "Main.fango", `module Main exposing (main)
+import Dep
+main = print (Dep.double 2)
+`)
+	before := generatedFile(t, emittedProject(t, entry), "modules/Dep/module.go")
+	for _, scalar := range []string{"scalar_Int", "scalar_Float"} {
+		if !bytes.Contains(before, []byte(scalar)) {
+			t.Fatalf("dependency lacks %s variant:\n%s", scalar, before)
+		}
+	}
+	// A new preceding dependency shifts type identities, while the changed
+	// use requests the other scalar variant. Neither changes Dep's package.
+	writeModuleFile(t, root, "Added.fango", `module Added exposing (Box(..))
+type Box a = Box a
+`)
+	writeModuleFile(t, root, "Main.fango", `module Main exposing (main)
+import Added
+import Dep
+main = print (Dep.double 2.5)
+`)
+	after := generatedFile(t, emittedProject(t, entry), "modules/Dep/module.go")
+	if !bytes.Equal(before, after) {
+		t.Fatalf("downstream edit changed dependency package:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}

@@ -1,0 +1,33 @@
+type Count = Count Int deriving (Show)
+unwrap count = case count of
+    Count value -> value
+instance Num Count
+    fromInt value = Count value
+    add x y = Count (unwrap x + unwrap y + 100)
+    sub x y = Count (unwrap x - unwrap y)
+    mul x y = Count (unwrap x * unwrap y)
+    negate x = Count (0 - unwrap x)
+
+double x = x + x
+combine x y = x * y + 3
+next : Int ->{IO} Int
+next value =
+    print value
+    value
+
+type Box a = Box a
+instance Show a => Show (Box a)
+    show box = case box of
+        Box value -> "generic " ++ show value
+instance Show (Box Int)
+    show box = "specific"
+render : (Num a, Show a) => a -> String
+render value = show (Box (value + 1))
+
+main =
+    print (double (Count 2))
+    print (double 2)
+    print (double 2.5)
+    print (combine (next 6) (next 7))
+    print (render 2)
+    print (render 2.5)

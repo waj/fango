@@ -1,0 +1,10 @@
+type Choice a = Left a | Right a
+type Pair a = Pair Bool (Choice a)
+f : (Num a, Eq a) => Pair a -> String
+f pair = case pair of
+    Pair True (Left 0) -> "zero"
+    Pair True (Left _) -> "left"
+    Pair False (Left _) -> "left"
+    Pair _ (Right _) -> "right"
+    Pair _ (Left _) -> "unreachable"
+main = print (f (Pair True (Left 1)))

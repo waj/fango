@@ -1,0 +1,17 @@
+type Unit = Unit
+type Box a = Box a
+class Label a
+    label : a -> String
+instance Label ()
+    label value = "builtin"
+instance Label Unit
+    label value = "custom"
+instance Label (Box ())
+    label value = "boxed builtin"
+instance Label (Box Unit)
+    label value = "boxed custom"
+main =
+    print (label ())
+    print (label Unit)
+    print (label (Box ()))
+    print (label (Box Unit))

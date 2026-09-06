@@ -93,4 +93,7 @@ These are directions, not commitments or an ordering after the work above.
 - Extend type classes only from concrete needs: superclasses, method-local
   polymorphism, higher kinds, and default methods remain deferred. Mutually
   recursive deriving groups and richer precedence-aware display are also open.
+- Broaden the bounded scalar worker specialization only when benchmarks justify
+  it; multiple numeric parameters, effectful workers, and custom dictionaries
+  currently retain the generic evidence-passing path.
 - A canonical formatter for the layout syntax and an LSP for editor support.

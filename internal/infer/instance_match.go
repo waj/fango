@@ -172,7 +172,7 @@ func headAtLeastAsSpecific(a, b *types.TCon) bool {
 }
 
 // canonicalHeadKey renders an instance head deterministically for name
-// mangling: fully-qualified constructor names ("()" as Unit), arguments in
+// mangling: fully-qualified constructor names (including the distinct "()"), arguments in
 // parentheses only when present, and variables as $<i> by first occurrence,
 // so alpha-equivalent heads share a key and a bare constructor keeps the
 // pre-structural-heads key. types.Show is unsuitable here — its variable
@@ -194,9 +194,6 @@ func canonicalHeadKey(head *types.TCon) string {
 			b.WriteString(strconv.Itoa(i))
 		case *types.TCon:
 			name := t.Name
-			if name == "()" {
-				name = "Unit"
-			}
 			b.WriteString(name)
 			if len(t.Args) > 0 {
 				b.WriteString("(")

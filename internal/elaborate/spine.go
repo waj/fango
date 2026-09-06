@@ -57,7 +57,8 @@ func (el *elab) app(e *ast.App) core.Expr {
 		if method := el.ck.Methods[v.Name]; method != nil {
 			raw := el.ck.Sub.Apply(el.ck.ExprTypes[head])
 			ta := matchTyArgs(method.Type, []*types.TVar{method.Class.Param}, raw)
-			if in, _, _ := el.ck.MatchInstance(types.Pred{Class: method.Class.Name, Ty: ta[0]}, el.owner); in != nil {
+			pred := types.Pred{Class: method.Class.Name, Ty: ta[0]}
+			if in, _, _ := el.ck.MatchInstance(pred, el.owner); el.givenDictionary(pred) == nil && in != nil {
 				if in.IdentityMethods[method.Index] && len(args) == 1 {
 					return el.expr(args[0])
 				}

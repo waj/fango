@@ -28,11 +28,13 @@ func (m *matcher) ordered(e *ast.Case, occ occurrence, i int) core.Tree {
 	}
 	m.used[i] = true
 	p := e.Branches[i].Pattern
+	var previous [][]ast.Pattern
 	for j := 0; j < i; j++ {
-		if patternSubsumes(e.Branches[j].Pattern, p) {
-			m.used[i] = false
-			return m.ordered(e, occ, i+1)
-		}
+		previous = append(previous, []ast.Pattern{e.Branches[j].Pattern})
+	}
+	if !m.useful([]types.Type{occ.ty}, previous, []ast.Pattern{p}) {
+		m.used[i] = false
+		return m.ordered(e, occ, i+1)
 	}
 	if irrefutable(p) {
 		return m.orderedPattern(p, occ, &core.Leaf{Body: m.bodies[i]}, &core.Unreachable{})
@@ -90,31 +92,53 @@ func (m *matcher) orderedPattern(p ast.Pattern, occ occurrence, success, failure
 	panic("unknown ordered pattern")
 }
 
-func patternSubsumes(a, b ast.Pattern) bool {
-	if irrefutable(a) {
+// useful tests coverage by the entire preceding matrix, not by individual
+// rows. Numeric equality is opaque: distinct overloaded literals may overlap,
+// but only identical literal tests can prove redundancy statically.
+func (m *matcher) useful(tys []types.Type, matrix [][]ast.Pattern, q []ast.Pattern) bool {
+	if len(matrix) == 0 {
 		return true
 	}
-	switch a := a.(type) {
-	case *ast.PInt:
-		b, ok := b.(*ast.PInt)
-		return ok && a.Value == b.Value
-	case *ast.PFloat:
-		b, ok := b.(*ast.PFloat)
-		return ok && a.Value == b.Value
-	case *ast.PString:
-		b, ok := b.(*ast.PString)
-		return ok && a.Value == b.Value
-	case *ast.PCtor:
-		b, ok := b.(*ast.PCtor)
-		if !ok || a.Name != b.Name || len(a.Args) != len(b.Args) {
-			return false
-		}
-		for i := range a.Args {
-			if !patternSubsumes(a.Args[i], b.Args[i]) {
-				return false
+	if len(q) == 0 {
+		return false
+	}
+	if p, ok := q[0].(*ast.PCtor); ok {
+		ctor := m.el.ck.Ctors[p.Name]
+		adt := m.el.ck.ADTs[ctor.Result.Unique]
+		fts := instFields(adt, ctor, tys[0])
+		return m.useful(append(fts, tys[1:]...), specializeWitness(ctor, matrix), splicePats(q, 0, p.Args))
+	}
+	if !irrefutable(q[0]) {
+		var selected [][]ast.Pattern
+		for _, row := range matrix {
+			if irrefutable(row[0]) || ast.DumpPattern(row[0]) == ast.DumpPattern(q[0]) {
+				selected = append(selected, row[1:])
 			}
 		}
-		return true
+		return m.useful(tys[1:], selected, q[1:])
 	}
-	return false
+	heads := map[string]bool{}
+	for _, row := range matrix {
+		if p, ok := row[0].(*ast.PCtor); ok {
+			heads[p.Name] = true
+		}
+	}
+	// Expand only a complete constructor signature. Expanding a wildcard
+	// column unconditionally would recurse forever on recursive ADTs.
+	if adt := m.adtOf(tys[0]); adt != nil && len(heads) > 0 && len(heads) == len(adt.Ctors) {
+		for _, ctor := range adt.Ctors {
+			fts := instFields(adt, ctor, tys[0])
+			if m.useful(append(fts, tys[1:]...), specializeWitness(ctor, matrix), splicePats(q, 0, wildcards(len(fts)))) {
+				return true
+			}
+		}
+		return false
+	}
+	var defaults [][]ast.Pattern
+	for _, row := range matrix {
+		if irrefutable(row[0]) {
+			defaults = append(defaults, row[1:])
+		}
+	}
+	return m.useful(tys[1:], defaults, q[1:])
 }

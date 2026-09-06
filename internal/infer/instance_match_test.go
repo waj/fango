@@ -75,6 +75,15 @@ func TestHeadsUnify(t *testing.T) {
 	}
 }
 
+func TestInstanceKeyDistinguishesBuiltinUnit(t *testing.T) {
+	box, _, _, _, _, _ := matchTestTypes()
+	builtin := &types.TCon{Unique: 1, Name: "()"}
+	user := &types.TCon{Unique: 2, Name: "Unit"}
+	if canonicalHeadKey(builtin) == canonicalHeadKey(user) || canonicalHeadKey(box(builtin)) == canonicalHeadKey(box(user)) {
+		t.Fatal("builtin Unit and a nominal type named Unit share an instance symbol")
+	}
+}
+
 func TestHeadSpecificity(t *testing.T) {
 	box, pair, intT, _, rigid, _ := matchTestTypes()
 	a, b, c, d := rigid(10), rigid(11), rigid(12), rigid(13)

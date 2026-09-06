@@ -232,6 +232,9 @@ func (ck *Checker) instanceMethod(d *ast.ValueDecl, ty types.Type, given []types
 		inferred = g.functionWithAnnotatedParams(d.Name, d.NameSpan, d.Params, d.Body, ty)
 	} else {
 		inferred = g.expr(d.Body)
+		// Constructing the method value must be pure. Effects belong to its
+		// arrows and may execute only when the method is applied.
+		g.cs = append(g.cs, Constraint{Left: g.ambient, Right: types.Row{}, Span: d.Body.Span(), Why: Why{Kind: WhyEffectEscapes}})
 	}
 	g.cs = append(g.cs, Constraint{Left: inferred, Right: ty, Span: d.NameSpan, Why: Why{Kind: WhyAnnotation, Name: d.Name}})
 	sub, _, errs := Solve(g.cs, nil, ck.Sub, ck.B, ck.Sup)

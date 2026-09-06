@@ -73,6 +73,9 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 			p.EntryDisplay = Display(&core.VarRef{Name: d.Name, Ty: d.Type}, ck, d.Owner)
 		}
 	}
+	if len(errs) == 0 {
+		specializeScalars(p, infos, ck)
+	}
 	return p, errs
 }
 

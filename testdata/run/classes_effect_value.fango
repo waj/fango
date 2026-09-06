@@ -1,0 +1,11 @@
+class Echo a
+    echo : a ->{IO} a
+instance Echo Int
+    echo = \value ->
+        print "called"
+        value
+argument : Int
+argument = 42
+main =
+    print "start"
+    print (echo argument)

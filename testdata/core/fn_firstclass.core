@@ -1,4 +1,6 @@
 (core
   (def add (typarams a) (params _dict0 x y) _dictionary_Num a -> a -> a -> a (let _h3 a (case a -> a -> a (var _dict0 _dictionary_Num a) _dictionary1 (switchctor _dictionary1 (Basics._dictionary_NumValue _ _method2 _ _ _ (leaf (var _method2 a -> a -> a))))) (app/value (app/value (var _h3 a -> a -> a) (var x a) a -> a) (var y a) a)))
   (def apply2 (typarams a) (params f x) (a -> a) -> a -> a (app/value (var f a -> a) (app/value (var f a -> a) (var x a) a) a))
-  (def main Int (app/worker @[Int] (var apply2 (Int -> Int) -> Int -> Int) (lam _w0 Int -> Int (app/worker @[Int] (var add _dictionary_Num Int -> Int -> Int -> Int) (var Basics._instance_4261736963732e4e756d_496e74 _dictionary_Num Int) (int 1 Int) (var _w0 Int) Int)) (int 5 Int) Int)))
+  (def main Int (app/worker @[Int] (var apply2 (Int -> Int) -> Int -> Int) (lam _w0 Int -> Int (app/worker (var _scalar_Int_616464 Int -> Int -> Int) (int 1 Int) (var _w0 Int) Int)) (int 5 Int) Int))
+  (def _scalar_Int_616464 (params x y) Int -> Int -> Int (native Basics.intAdd (var x Int) (var y Int) Int))
+  (def _scalar_Float_616464 (params x y) Float -> Float -> Float (native Basics.floatAdd (var x Float) (var y Float) Float)))

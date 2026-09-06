@@ -176,8 +176,8 @@ main =
 	dump := core.Dump(prog)
 	for _, want := range []string{
 		"(def double (typarams a) (params _dict0 x) _dictionary_Num a -> a -> a",
-		"(app/worker @[Int] (var double _dictionary_Num Int -> Int -> Int)",
-		"(app/worker @[Float] (var double _dictionary_Num Float -> Float -> Float)",
+		"(app/worker (var _scalar_Int_646f75626c65 Int -> Int)",
+		"(app/worker (var _scalar_Float_646f75626c65 Float -> Float)",
 	} {
 		if !strings.Contains(dump, want) {
 			t.Errorf("dump missing %q:\n%s", want, dump)

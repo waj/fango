@@ -1,0 +1,16 @@
+type Box a = Box a
+instance Show a => Show (Box a)
+    show box = case box of
+        Box value -> "generic " ++ show value
+instance Show (Box Int)
+    show box = "specific"
+
+render : Show (Box a) => Box a -> String
+render box = show box
+renderer : Show (Box a) => Box a -> String
+renderer = show
+
+main =
+    print (render (Box "hi"))
+    print (render (Box 1))
+    print (renderer (Box 2))

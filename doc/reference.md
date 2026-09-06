@@ -69,7 +69,10 @@ or qualifier aliases are rejected.
 An exposing list is `(..)`, empty `()`, or a comma-separated list. A lowercase
 item exports/imports a value or one effect operation. `Type`
 or `Effect` exposes the abstract type/effect label; `Type(..)` also exposes all
-constructors and `Effect(..)` all operations. Constructors cannot be selected
+constructors and `Effect(..)` all operations. `Class` exposes a class name;
+`Class(..)` also exposes all its methods. Individual methods can be exposed as
+lowercase values. Declaring an instance requires access to all class methods
+(qualified access counts). Constructors cannot be selected
 individually, member lists cannot be partial, and imported declarations cannot
 be re-exported. Qualified names are accepted for values, operations,
 constructors, patterns, types, effect rows, and handler clauses.
@@ -85,7 +88,8 @@ The compiler also contains standard-library modules.
 Their names are reserved: a named entry or local module that has the same name
 is rejected with `RESERVED MODULE`, rather than replacing the bundled module.
 Every ordinary module implicitly loads hidden `Basics` operator declarations
-and receives the `IO` effect plus unqualified `print` and `readLine`. Other
+and receives the classes `Num`, `Eq`, `Ord`, and `Show`, the `IO` effect, and
+unqualified `show`, `print`, and `readLine`. Other
 standard-library APIs still require explicit imports.
 
 `build` and `run` use only the entry module's `main`; a dependency's `main` is
@@ -133,11 +137,11 @@ and APIs must be imported explicitly.
 ```fango
 module List exposing (List(..), range, each)
 
-type List a = Nil | Cons a (List a)
+type List a = Nil | Cons a (List a) deriving (Eq, Show)
 ```
 
 Its inferred public function types are
-`range : number -> number -> List number` and
+`range : (Num a, Ord a) => a -> a -> List a` and
 `each : (a ->{e} ()) -> List a ->{e} ()`.
 
 `range start end` produces ascending values by adding one, including `end`
@@ -147,7 +151,7 @@ ordinary recursive implementation is not guaranteed to terminate for `NaN`
 or positive infinity. `each action values` applies `action` from left to right
 and propagates its effects.
 
-`Range.each : (number ->{e} ()) -> number -> number ->{e} ()` traverses an
+`Range.each : (Num a, Ord a) => (a ->{e} ()) -> a -> a ->{e} ()` traverses an
 inclusive ascending numeric range without constructing a `List`. For example,
 `Range.each drawPoint 0 78` calls `drawPoint` with every value from `0` through
 `78`. It does nothing when the start is greater than the end, works with both
@@ -166,7 +170,7 @@ main() =
 
 `IO.write : String ->{IO} ()` writes the string exactly as provided without a
 trailing newline. It is a native operation available only through an `IO`
-import. The global `print : printable ->{IO} ()` and
+import. The global `print : Show a => a ->{IO} ()` and
 `readLine : () ->{IO} String` names come from ambient IO.
 
 `Basics` also declares two explicitly importable integer functions (the
@@ -261,7 +265,7 @@ func Crc32(text string) int64 {
 The supported boundary types are `Int`/`int64`, `Float`/`float64`,
 `String`/`string`, `Bool`/`bool`, and Unit. Unit parameters are omitted from
 the Go function and a Unit result is represented by no Go result. Functions,
-ADTs, polymorphic variables, effectful arrows, Go type parameters, multiple
+ADTs, polymorphic variables, class constraints, effectful arrows, Go type parameters, multiple
 results, and `error` results are rejected. Sidecars may import only Go
 standard-library packages. Every call-form declaration needs its matching
 exported function, and every exported sidecar function needs a declaration.
@@ -294,12 +298,13 @@ Operators, from tighter to looser precedence, are:
 | `++` | string concatenation | right |
 | `==`, `/=`, `<`, `>`, `<=`, `>=` | comparison | non-associative |
 
-`+`, `-`, and `*` accept `Int` or `Float`; `/` accepts only `Float` and there
-is no implicit integer-to-float conversion. Ordering is available for numeric
-values and strings, not booleans. Equality is available for supported ground
-values and structurally for supported ADTs; functions and types transitively
-containing functions cannot be compared. Chained comparisons require
-parentheses.
+`+`, `-`, `*`, and unary negation require `Num`; equality requires `Eq`, and
+ordering requires `Ord`. These classes have standard scalar instances and can
+be implemented for custom types. `/` accepts only `Float`, `++` only `String`,
+and there is no implicit conversion of an existing `Int` value to `Float`.
+Integer literals use `fromInt` and can therefore inhabit any type with a `Num`
+instance; decimal literals always have type `Float`. Chained comparisons
+require parentheses.
 
 `if condition then a else b` is an expression. Its condition is `Bool` and both
 branches have the same type.
@@ -340,11 +345,98 @@ form remains available.
 
 Top-level functions can recurse and Hindley-Milner inference generalizes their
 types. Polymorphic values and parameterized ADTs are supported. Numeric
-polymorphism ranges over `Int` and `Float`; it prints as `number` and can be
-written in annotations with a variable whose name starts with `number` (for
-example, `double : number -> number`). Polymorphic recursion and non-regular
+polymorphism uses ordinary class constraints, for example
+`double : Num a => a -> a`. Variable names such as `number`, `equatable`, or
+`printable` have no special meaning. Polymorphic recursion and non-regular
 recursive ADTs are rejected. Local value bindings are monomorphic; local
 functions and lambda bindings may generalize.
+
+## Type classes and instances
+
+A class has exactly one type parameter and an indented block of method
+signatures. An instance supplies every method exactly once:
+
+```fango
+class Label a
+    label : a -> String
+
+type Item = Item String
+
+instance Label Item
+    label item = case item of
+        Item text -> text
+
+describe : Label a => a -> String
+describe value = label value
+```
+
+Each method must be a function mentioning the class parameter. Additional
+method type variables, open effect rows, superclasses, higher kinds, and
+default methods are unsupported. Closed effect rows are allowed: a method
+`read : a ->{Ask} Int` performs `Ask` when applied. Constructing a method
+value must be pure, including implementations written as `method = expression`;
+IO during construction is rejected with `UNHANDLED EFFECT`.
+
+Qualified annotations put constraints before `=>`; multiple constraints use
+parentheses, as in `(Num a, Ord a) => a -> a`. Inference retains required
+constraints on generalized functions and values. An annotation omitting one
+reports `MISSING CONSTRAINT`. Explicit constraints provide evidence to the
+body, including structural constraints such as `Show (Box a)`; method calls
+use that evidence. A constraint variable absent from the annotated type is
+ambiguous. Local syntactic functions can generalize constraints; ordinary
+local values remain monomorphic.
+
+Instance heads must be fully applied named types, not bare variables or
+functions. Applied heads are parenthesized. Their arguments can be variables,
+repeated variables, concrete types, or nested applications. Conditional
+instances require constraints on variables occurring in the head:
+
+```fango
+type Box a = Box a
+
+instance Show a => Show (Box a)
+    show box = case box of
+        Box value -> "Box " ++ show value
+
+instance Show (Box Int)
+    show box = "integer box"
+```
+
+Matching selects the most specific visible head. Overlap is allowed only when
+one head is strictly more specific than the other; duplicate heads and
+incomparable overlapping heads report `OVERLAPPING INSTANCE`. An unresolved
+type is never guessed from the set of instances. In a polymorphic body a
+quantified variable is atomic, so a use resolved to the general instance stays
+general even when a caller later supplies a more specific type. Explicitly
+passed evidence takes precedence over instance selection.
+
+Classes, instances, and ordinary definitions are checked in source order.
+Instances may live outside both the class's and the type's defining module
+(orphan instances). Resolution sees the defining module and its transitive
+imports; exposing lists do not hide instances. Overlap checking covers the
+entire loaded module graph. A missing concrete implementation reports
+`MISSING INSTANCE`.
+
+The standard classes are independent (in particular, `Ord` does not imply
+`Eq`):
+
+| Class | Methods | Standard instances |
+| --- | --- | --- |
+| `Num a` | `fromInt : Int -> a`, `add`, `sub`, `mul : a -> a -> a`, `negate : a -> a` | `Int`, `Float` |
+| `Eq a` | `eq : a -> a -> Bool` | `Int`, `Float`, `String`, `Bool`, `()` |
+| `Ord a` | `lt`, `gt`, `le`, `ge : a -> a -> Bool` | `Int`, `Float`, `String` |
+| `Show a` | `show : a -> String` | `Int`, `Float`, `String`, `Bool`, `()` |
+
+Other than ambient `show`, named methods require an explicit `Basics` import;
+operators provide their usual unqualified spelling. `print` is an ordinary
+Show-constrained function that writes `show value` followed by a newline.
+Strings display raw, not quoted.
+
+When evaluation requires a concrete type, an unresolved variable defaults to
+`Int` only if its constraints include standard `Num` and no classes outside
+standard `Num`, `Eq`, `Ord`, and `Show`. Other unresolved constraints report
+`AMBIGUOUS CONSTRAINT`. Decimal literals do not default. An unconstrained
+runtime type variable defaults to Unit.
 
 ## Algebraic data types and matching
 
@@ -365,11 +457,32 @@ Constructor arguments are type atoms. Parenthesize applied or function types,
 as in `Cons a (List a)` or `Fn (a -> b)`. Constructors are ordinary curried
 values and can be partially applied.
 
+Equality and display are opt-in, either handwritten instances or an explicit
+deriving clause:
+
+```fango
+type Tree a = Leaf a | Branch (Tree a) (Tree a) deriving (Eq, Show)
+```
+
+Only standard `Eq` and `Show` can be derived. Generated instances require the
+field instances they use, including conditional evidence for type parameters;
+phantom parameters add no constraint. Recursive fields reuse the instance
+being derived. Deriving a function field fails unless its enclosing field
+type has a suitable explicit instance. Mutually recursive deriving groups
+are not supported. Derived equality compares constructors and corresponding
+fields. Derived display concatenates the constructor name and field displays
+with spaces, without added parentheses or string quotes.
+
 `case` branches align with the first pattern after `of`. Patterns support
 constructors, nested constructor patterns, integer/float/string literals,
 variables, and `_`. Branch bodies may be inline expressions or blocks. Matches
 must be exhaustive and non-redundant, patterns must have the constructor's
 exact arity, and a pattern cannot bind the same variable twice.
+Integer patterns require both `Num` and `Eq`: the scrutinee is compared with
+the pattern's `fromInt` value. Branch order is preserved even when different
+integer literals compare equal under a custom instance. Redundancy checking
+accounts for collective constructor coverage and identical literal tests;
+it does not attempt to prove laws of user-defined equality.
 
 ## Effectful function types
 
@@ -455,7 +568,7 @@ run action =
         ask () -> resume "yes"
 ```
 
-Builtin `print : a ->{IO} ()` displays supported ground values and ADTs.
+Ambient `print : Show a => a ->{IO} ()` displays values through their instance.
 `readLine : () ->{IO} String` reads one line and returns the text without its
 line ending. Call it as `readLine()` (or equivalently `readLine ()`). The
 explicitly imported `IO.write` operation is described under the bundled
@@ -491,11 +604,17 @@ ordinary built executable exits without printing them.
 
 ## REPL
 
-`fango repl` evaluates expressions, installs value/function/type/effect
+`fango repl` evaluates expressions, installs value/function/type/effect/class/instance
 declarations, and accepts multiline layout-sensitive input. Definitions echo
 their inferred types; expressions print a value and type. Errors do not end the
 session. Redefinition is allowed at the prompt, while existing memoized values
 and closures retain earlier bindings.
+Classes cannot be redefined. Type redefinition creates a fresh identity and
+can install fresh instances for that identity. Failed instance and deriving
+declarations do not modify the persistent declaration environment. Types are
+printed with their class contexts. Expression display uses available `Show`
+evidence; otherwise it prints `<value : T>` or `<function>` without adding a
+Show constraint to the expression.
 
 Effectful expressions run directly. Ordinary effectful declarations such as
 `x = print 1` are rejected. Effectful function definitions are accepted and

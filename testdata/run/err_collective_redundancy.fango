@@ -1,0 +1,8 @@
+type Pair a = Pair Bool a
+f : (Num a, Eq a) => Pair a -> String
+f pair = case pair of
+    Pair True 0 -> "zero"
+    Pair True _ -> "true"
+    Pair False _ -> "false"
+    _ -> "unreachable"
+main = print (f (Pair True 1))

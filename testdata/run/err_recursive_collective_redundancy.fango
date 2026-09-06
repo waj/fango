@@ -1,0 +1,9 @@
+type Chain = End | Link Chain
+type Triple a = Triple Chain Bool a
+f : (Num a, Eq a) => Triple a -> String
+f value = case value of
+    Triple _ True 0 -> "zero"
+    Triple _ True _ -> "true"
+    Triple _ True 1 -> "unreachable"
+    Triple _ False _ -> "false"
+main = print (f (Triple End True 1))

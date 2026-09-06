@@ -191,7 +191,8 @@ a final reduction commits, and an obligation still undecided afterwards is
 ambiguous. A quantified (rigid) variable is atomic: it definitively fails any
 concrete head position, so a polymorphic body commits to the general instance
 even if a caller later instantiates the variable to a type with a more
-specific one. Conditional instance contexts reduce to constraints on
+specific one. Explicit given evidence takes precedence over instance lookup,
+including when the given predicate has a structural argument. Conditional instance contexts reduce to constraints on
 variables of the head — proper subterms — keeping resolution decreasing, with
 a fixed reduction-depth limit as backstop. Residual obligations on
 generalized variables become dictionary parameters; an annotation must
@@ -205,6 +206,8 @@ module that cannot see a more specific instance resolves through the general
 one. Instances are not selected by import exposing lists. Canonical class
 symbols and generation-stable type identities determine coherence, not
 display names.
+Instance symbols retain the distinct spelling of builtin `()` rather than
+collapsing it into the user-definable name `Unit`.
 
 Explicit `deriving (Eq, Show)` generates ordinary instance ASTs, checked through
 the same inference and elaboration path as handwritten methods. Their contexts
@@ -231,11 +234,28 @@ arithmetic and constant folding without a compiler-owned numeric capability.
 Effect evidence precedes ordinary parameters in the Go ABI; dictionary
 parameters then precede source arguments. Effects on a method arrow execute
 when that arrow is applied, not when its dictionary is constructed.
+An instance implementation without syntactic parameters is checked for a pure
+construction effect row; producing a function cannot conceal eager IO.
+
+After evidence elaboration, a bounded Core specialization pass emits Int and
+Float variants of effect-free source workers with one numeric type parameter
+and only standard scalar constraints on that parameter. Workers with internal
+handlers also stay generic to preserve lexical evidence capture. Both variants are emitted
+by the defining module independently of downstream uses. The pass substitutes
+typed dictionaries in already-resolved Core, simplifies known projections and
+native forwarding, and redirects only calls passing those exact dictionaries.
+It never reruns instance selection or replaces arbitrary supplied evidence.
+Generic workers remain available for custom instances and other uses. Strict
+Let bindings preserve evaluation order and prevent argument duplication during
+beta reduction; the final specialized program passes the same Core linter.
 
 Integer patterns require `Num` and `Eq`. Int/Float patterns retain literal
 decision trees; generic and custom numeric patterns use ordered guards calling
 `fromInt` and `eq`. These preserve first-match semantics even when distinct
 integer literals compare equal in a custom instance.
+Their redundancy check uses the full preceding pattern matrix, conservatively
+treating distinct overloaded literal tests as opaque; constructor coverage may
+collectively make a branch redundant.
 
 Saturated pure primitives are `NativeCall` nodes keyed by canonical declaration
 name. `Prog.Natives` holds their schemes, arities, templates, modules, and
@@ -370,7 +390,7 @@ allocation remains the main known structural performance cost.
 
 The implementation has a deliberately narrow, pure Go sidecar FFI but no
 package manager, records, aliases, formatter, or LSP. Type classes have one
-parameter, no superclasses, higher kinds, default methods, overlapping heads,
+parameter, no superclasses, higher kinds, default methods, ambiguous overlapping heads,
 or method-local polymorphism. There are no source-path
 flags, external library version selection, or package resolution. The implicit
 prelude is fixed to hidden `Basics` plus ambient `IO`; the bundled standard

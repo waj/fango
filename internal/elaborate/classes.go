@@ -68,13 +68,21 @@ func (el *elab) addEvidence(c callee, s types.Scheme, raw types.Type) callee {
 	return c
 }
 
-func (el *elab) dictionary(p types.Pred) core.Expr {
+func (el *elab) givenDictionary(p types.Pred) core.Expr {
 	p.Ty = el.ck.Sub.Apply(p.Ty)
 	for i := len(el.dicts) - 1; i >= 0; i-- {
 		d := el.dicts[i]
 		if d.pred.Class == p.Class && types.Equal(el.ck.Sub.Apply(d.pred.Ty), p.Ty) {
 			return d.value
 		}
+	}
+	return nil
+}
+
+func (el *elab) dictionary(p types.Pred) core.Expr {
+	p.Ty = el.ck.Sub.Apply(p.Ty)
+	if d := el.givenDictionary(p); d != nil {
+		return d
 	}
 	in, _, _ := el.ck.MatchInstance(p, el.owner)
 	if in == nil {
@@ -93,13 +101,16 @@ func (el *elab) dictionary(p types.Pred) core.Expr {
 func (el *elab) methodValue(method *types.MethodInfo, raw types.Type) core.Expr {
 	args := matchTyArgs(method.Type, []*types.TVar{method.Class.Param}, el.ck.Sub.Apply(raw))
 	p := types.Pred{Class: method.Class.Name, Ty: args[0]}
-	if in, m, _ := el.ck.MatchInstance(p, el.owner); in != nil {
+	d := el.givenDictionary(p)
+	if in, m, _ := el.ck.MatchInstance(p, el.owner); d == nil && in != nil {
 		n := in.Methods[method.Index]
 		s, _ := el.ck.Env.Lookup(n)
 		mt := types.SubstRigid(s.Body, m)
 		return el.valueReference(n, mt)
 	}
-	d := el.dictionary(p)
+	if d == nil {
+		d = el.dictionary(p)
+	}
 	bind := fmt.Sprintf("_dictionary%d", el.tmp)
 	el.tmp++
 	field := fmt.Sprintf("_method%d", el.tmp)

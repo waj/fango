@@ -109,6 +109,33 @@ func TestEffectfulPromptDeclarationRejected(t *testing.T) {
 	}
 }
 
+func TestEffectfulInstanceConstructionRollsBack(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader(`class C a
+    c : a -> a
+
+instance C Int
+    c =
+        print "must not run"
+        \value -> value
+
+instance C Int
+    c value = value
+
+answer : Int
+answer = c 42
+answer
+:quit
+`), &out)
+	got := out.String()
+	if !strings.Contains(got, "UNHANDLED EFFECT") || strings.Contains(got, "OVERLAPPING INSTANCE") || !strings.Contains(got, "42 : Int") {
+		t.Fatalf("failed instance construction poisoned the session: %s", got)
+	}
+	if strings.Contains(got, "\n> must not run\n") {
+		t.Fatal("instance construction executed IO")
+	}
+}
+
 func TestPromptNullaryFunctionRunsOnlyWhenCalled(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader("say : () ->{IO} ()\nsay() = print \"ok\"\n:type say\nsay()\nsay()\n:quit\n"), &out)
