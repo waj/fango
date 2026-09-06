@@ -20,6 +20,11 @@ coverage.
 - Keep adding differential, diagnostic, documentation, and performance
   coverage with each library increment.
 
+Unify bundled natives around the user-sidecar mechanism so a stdlib module's
+native code lives in its own `<Module>.native.go` and runs in both backends,
+instead of accreting in fangort behind templates and delegators. The proposal
+under iteration is in [roadmap-natives.md](roadmap-natives.md).
+
 Independent library versioning, package distribution, dependency fetching,
 and configurable source roots remain deferred.
 
