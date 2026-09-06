@@ -62,6 +62,10 @@ func TestMandelbrotExample(t *testing.T) {
 	runDifferentialCase(t, filepath.Join("..", "..", "examples", "mandelbrot.fango"))
 }
 
+func TestGuessingGameExample(t *testing.T) {
+	runDifferentialCase(t, filepath.Join("..", "..", "examples", "guess.fango"))
+}
+
 func runDifferentialCase(t *testing.T, path string) {
 	t.Helper()
 	base := strings.TrimSuffix(path, ".fango")
@@ -74,6 +78,10 @@ func runDifferentialCase(t *testing.T, path string) {
 		t.Fatalf("missing %s.expected (or .error): %v", base, err)
 	}
 	expected := string(expData)
+	stdin := ""
+	if stdinData, err := os.ReadFile(base + ".stdin"); err == nil {
+		stdin = string(stdinData)
+	}
 
 	// Backend 1: the Core interpreter. A Unit-typed main is observed through
 	// its print output; any other main through its value and shared formatter.
@@ -85,7 +93,7 @@ func runDifferentialCase(t *testing.T, path string) {
 	env := eval.NewEnv()
 	env.DefineProg(prog)
 	var printed bytes.Buffer
-	_, err = eval.ForceIO(context.Background(), "main", env, eval.NewIOContext(strings.NewReader(""), &printed))
+	_, err = eval.ForceIO(context.Background(), "main", env, eval.NewIOContext(strings.NewReader(stdin), &printed))
 	if err != nil {
 		t.Fatalf("eval: %v", err)
 	}
@@ -100,7 +108,7 @@ func runDifferentialCase(t *testing.T, path string) {
 	if con, isCon := mainTy.(*types.TCon); (isCon && con.Unique == ck.B.Unit.Unique) || functionMain {
 		evalOut = printed.String()
 	} else {
-		shown, err := eval.EvalIO(context.Background(), prog.EntryDisplay, env, eval.NewIOContext(strings.NewReader(""), &printed))
+		shown, err := eval.EvalIO(context.Background(), prog.EntryDisplay, env, eval.NewIOContext(strings.NewReader(stdin), &printed))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,6 +127,7 @@ func runDifferentialCase(t *testing.T, path string) {
 		"FANGO_INTERNAL_PRINT_MAIN=1",
 		"FANGO_BUILD_DIR="+t.TempDir())
 	var stdout, runErr bytes.Buffer
+	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Stdout, cmd.Stderr = &stdout, &runErr
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("fango run: %v\n%s", err, runErr.String())

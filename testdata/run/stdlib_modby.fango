@@ -1,0 +1,12 @@
+import Basics exposing (modBy, remainderBy)
+
+main() =
+    print (modBy 3 7)
+    print (modBy 3 (-4))
+    print (modBy (-3) 4)
+    print (modBy (-3) (-4))
+    print (modBy 4 8)
+    print (remainderBy 3 7)
+    print (remainderBy 3 (-4))
+    print (remainderBy (-3) 4)
+    print (remainderBy (-3) (-4))

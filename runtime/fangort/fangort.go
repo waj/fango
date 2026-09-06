@@ -6,6 +6,8 @@ package fangort
 
 import (
 	"bufio"
+	cryptorand "crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
@@ -52,6 +54,58 @@ func ReadLineUnit(_ Unit) string { return ReadLine() }
 type Unit struct{}
 
 var UnitValue Unit
+
+// randomState is the shared PRNG cell behind Random.runSeeded/runSystem.
+// It is deliberately process-global: fango has no concurrency yet, and the
+// stdlib handler wrappers swap/restore it around each handled body so nested
+// uses behave lexically.
+var randomState int64 = 5489
+
+// RandomSwap replaces the PRNG state and returns the previous state.
+func RandomSwap(seed int64) int64 {
+	old := randomState
+	randomState = seed
+	return old
+}
+
+// RandomInt advances a glibc-constant 31-bit linear congruential generator
+// and returns a draw in [lo, hi], swapping reversed bounds. Distribution is
+// modulo-biased and non-cryptographic, and the generator has 2^31 states, so
+// a span wider than 2^31 only reaches lo + [0, 2^31). Span arithmetic is
+// unsigned so any Int bounds stay total.
+func RandomInt(lo, hi int64) int64 {
+	if hi < lo {
+		lo, hi = hi, lo
+	}
+	randomState = (1103515245*randomState + 12345) % 2147483648
+	span := uint64(hi) - uint64(lo) + 1
+	if span == 0 { // the full Int range
+		return lo + randomState
+	}
+	return lo + int64(uint64(randomState)%span)
+}
+
+// RandomEntropy returns a nondeterministic seed for Random.runSystem.
+func RandomEntropy(_ Unit) int64 {
+	var b [8]byte
+	if _, err := cryptorand.Read(b[:]); err != nil {
+		panic(err)
+	}
+	return int64(binary.LittleEndian.Uint64(b[:]))
+}
+
+// StringLength returns a String's length in bytes.
+func StringLength(s string) int64 { return int64(len(s)) }
+
+// ByteAt returns the byte value at a 0-based index, or -1 when the index is
+// out of range. The in-band sentinel lets pure fango code probe positions
+// without a separate bounds check crossing the native boundary.
+func ByteAt(i int64, s string) int64 {
+	if i < 0 || i >= int64(len(s)) {
+		return -1
+	}
+	return int64(s[i])
+}
 
 // ShowInt renders an Int exactly as the surface language shows it.
 func ShowInt(v int64) string { return strconv.FormatInt(v, 10) }

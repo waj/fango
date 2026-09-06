@@ -303,7 +303,9 @@ generated Go is unchanged. Go's package cache then reuses unchanged compilation
 units. `build` copies the resulting executable; `run` reuses it while inputs
 are unchanged.
 `fangort` owns shared representations, formatting, and IO behavior, including
-newline-free string writes, used by the compiled and interpreted backends.
+newline-free string writes, used by the compiled and interpreted backends. It
+also owns the process-global PRNG cell behind the bundled `Random` handlers,
+so seeded draw sequences are identical across backends.
 
 Bundled native interpreter behavior lives in one registry backed by the
 stdlib's Go sidecars. Pure `NativeCall`, unhandled native `Perform`, and the
@@ -347,7 +349,9 @@ implemented; see [REPL hardening](roadmap.md#repl-hardening).
 Lexer, parser, inference, elaboration, and REPL behavior use unit tests and
 goldens. Every runnable fixture is evaluated through Core and, outside short
 mode, compiled through the real CLI; output is compared byte-for-byte with its
-expected file and between backends. Invalid fixtures pin diagnostic substrings.
+expected file and between backends. A fixture or example may carry a `.stdin`
+transcript beside its source; both backends receive it as scripted standard
+input. Invalid fixtures pin diagnostic substrings.
 Focused inference and elaboration harnesses install the actual embedded
 `Basics` and `IO` declarations rather than a parallel test-only environment.
 Generated Go is checked for deterministic, gofmt-idempotent output. The Core

@@ -1,5 +1,10 @@
 package native
 
+// RemainderBy is the interpreter implementation of the Basics.remainderBy
+// template: Go's truncated `%`, with the divisor first (Elm argument order).
+// A zero divisor panics, matching the compiled backend.
+func RemainderBy(divisor, dividend int64) int64 { return dividend % divisor }
+
 // EvalBasics is the interpreter implementation of the inline Basics
 // templates. equal supplies structural equality for interpreter ADT values.
 func EvalBasics(name string, left, right any, equal func(any, any) bool) any {

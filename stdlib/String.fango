@@ -1,0 +1,44 @@
+module String exposing (length, toInt)
+
+import Basics
+import Maybe exposing (Maybe(..))
+
+-- length counts bytes, not characters.
+length : String -> Int
+length = native "fangort.StringLength($1)"
+
+-- byteAt is private: the byte at a 0-based index, or -1 out of range.
+byteAt : Int -> String -> Int
+byteAt = native "fangort.ByteAt($1, $2)"
+
+-- Digits accumulate as a non-positive value so the most negative Int parses.
+-- finish rejects a non-negative result that only fits when negative; the
+-- most negative Int is not writable as a literal, so compare beyond -maxInt.
+finish : Bool -> Int -> Maybe Int
+finish negative acc =
+    case negative of
+        True -> Just acc
+        False -> if acc < -9223372036854775807 then Nothing else Just (0 - acc)
+
+toIntHelp : String -> Int -> Int -> Bool -> Int -> Maybe Int
+toIntHelp text index size negative acc =
+    case index >= size of
+        True -> finish negative acc
+        False ->
+            digit = byteAt index text - 48
+            next = acc * 10 - digit
+            if digit < 0 then Nothing
+                else if digit > 9 then Nothing
+                    else if acc < -922337203685477580 then Nothing
+                        else if next > 0 then Nothing
+                            else toIntHelp text (index + 1) size negative next
+
+-- toInt parses an optional +/- sign followed by base-10 digits. Anything
+-- else, an empty digit sequence, or a value outside Int's 64-bit range is
+-- Nothing.
+toInt : String -> Maybe Int
+toInt text =
+    size = length text
+    first = byteAt 0 text
+    start = if first == 45 then 1 else if first == 43 then 1 else 0
+    if start >= size then Nothing else toIntHelp text start size (first == 45) 0

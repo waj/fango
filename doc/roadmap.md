@@ -11,8 +11,10 @@ the archive.
 Continue selecting APIs from concrete programs rather than attempting broad
 coverage.
 
-- Add `Maybe` and `Result`, and expand `List`, text, numeric, and IO operations
-  only as subsequent examples require them.
+- Add `Result`, and expand `List`, text, numeric, and IO operations only as
+  subsequent examples require them.
+- `String` APIs are byte-oriented (`length` counts bytes); Unicode-aware text
+  semantics remain an open decision.
 - Prefer fango implementations; use declared bundled natives only for semantics
   source code cannot express or when benchmark evidence demands it.
 - Keep adding differential, diagnostic, documentation, and performance
@@ -49,6 +51,9 @@ and configurable source roots remain deferred.
 Resume this work when a concrete language feature needs early exit, non-tail
 resumption, or escaping continuations. The runtime foundation exists, but the
 compiler and interpreter integration should not grow ahead of a consumer.
+A second concrete consumer is parameterized handler state (state threaded
+through `resume`): it would let `Random.runSeeded` be a pure-fango state
+handler instead of advancing a native PRNG cell.
 
 - Permit aborting operation clauses and non-tail continuation use with precise
   one-shot and liveness checks, and choose the fango surface spelling for

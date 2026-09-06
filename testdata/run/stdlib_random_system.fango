@@ -1,0 +1,7 @@
+import Random
+
+inRange value = if value < 1 then False else value <= 6
+
+main() =
+    print (Random.runSystem (\_ -> inRange (Random.int 1 6)))
+    print (Random.runSystem (\_ -> inRange (Random.int 6 1)))

@@ -1,4 +1,4 @@
-module Basics exposing (Num(..), Eq(..), Ord(..), Show(..))
+module Basics exposing (Num(..), Eq(..), Ord(..), Show(..), modBy, remainderBy)
 
 class Num a
     fromInt : Int -> a
@@ -188,3 +188,15 @@ infix (<) = lt
 infix (>) = gt
 infix (<=) = le
 infix (>=) = ge
+
+-- Truncated remainder (Go's %): the result has the dividend's sign.
+-- A zero divisor crashes the program.
+remainderBy : Int -> Int -> Int
+remainderBy = native "$2 % $1"
+
+-- Floored modulus: the result has the modulus's sign.
+-- A zero modulus crashes the program.
+modBy : Int -> Int -> Int
+modBy modulus x =
+    r = remainderBy modulus x
+    if r == 0 then r else if (r < 0) == (modulus < 0) then r else r + modulus

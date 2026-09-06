@@ -1,0 +1,4 @@
+main() =
+    first = readLine()
+    second = readLine()
+    print (first ++ "|" ++ second)

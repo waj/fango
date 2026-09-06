@@ -1,0 +1,15 @@
+import Maybe exposing (Maybe(..), withDefault)
+
+just : Maybe Int
+just = Just 42
+
+none : Maybe Int
+none = Nothing
+
+main() =
+    print just
+    print none
+    print (just == Just 42)
+    print (none == Just 1)
+    print (withDefault 0 (Just 7))
+    print (withDefault 0 none)

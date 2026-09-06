@@ -37,6 +37,24 @@ var Table = func() map[string]Spec {
 			return stdlib.EvalBasics(name, args[0], args[1], rt.Equal), nil
 		}}
 	}
+	t["Basics.remainderBy"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.RemainderBy(args[0].(int64), args[1].(int64)), nil
+	}}
+	t["String.length"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.StringLength(args[0].(string)), nil
+	}}
+	t["String.byteAt"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.ByteAt(args[0].(int64), args[1].(string)), nil
+	}}
+	t["Random.swapSeed"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.RandomSwap(args[0].(int64)), nil
+	}}
+	t["Random.nextInt"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.RandomInt(args[0].(int64), args[1].(int64)), nil
+	}}
+	t["Random.entropySeed"] = Spec{Arity: 1, Eval: func(_ *Runtime, _ []any) (any, error) {
+		return stdlib.RandomEntropy(), nil
+	}}
 	t["IO.print"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
 		text, err := rt.Show(args[0])
 		if err != nil {

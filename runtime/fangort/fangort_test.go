@@ -74,6 +74,78 @@ func TestShowBoolUnit(t *testing.T) {
 	}
 }
 
+func TestStringLengthByteAt(t *testing.T) {
+	if got := StringLength(""); got != 0 {
+		t.Errorf("StringLength(\"\") = %d", got)
+	}
+	if got := StringLength("hello"); got != 5 {
+		t.Errorf("StringLength(\"hello\") = %d", got)
+	}
+	// Byte semantics: one CJK character is three UTF-8 bytes.
+	if got := StringLength("二"); got != 3 {
+		t.Errorf("StringLength(\"二\") = %d", got)
+	}
+	cases := []struct {
+		i    int64
+		s    string
+		want int64
+	}{
+		{0, "A9", 'A'},
+		{1, "A9", '9'},
+		{2, "A9", -1},
+		{-1, "A9", -1},
+		{0, "", -1},
+		{0, "二", 0xE4},
+	}
+	for _, c := range cases {
+		if got := ByteAt(c.i, c.s); got != c.want {
+			t.Errorf("ByteAt(%d, %q) = %d, want %d", c.i, c.s, got, c.want)
+		}
+	}
+}
+
+func TestRandom(t *testing.T) {
+	old := RandomSwap(42)
+	defer RandomSwap(old)
+
+	first := []int64{RandomInt(1, 100), RandomInt(1, 100), RandomInt(1, 100)}
+	if got := RandomSwap(42); got == 42 {
+		t.Fatal("state did not advance across draws")
+	}
+	second := []int64{RandomInt(1, 100), RandomInt(1, 100), RandomInt(1, 100)}
+	if first[0] != second[0] || first[1] != second[1] || first[2] != second[2] {
+		t.Errorf("same seed gave %v then %v", first, second)
+	}
+
+	RandomSwap(7)
+	for range 1000 {
+		if v := RandomInt(1, 6); v < 1 || v > 6 {
+			t.Fatalf("RandomInt(1, 6) = %d out of range", v)
+		}
+		if v := RandomInt(6, 1); v < 1 || v > 6 {
+			t.Fatalf("RandomInt(6, 1) = %d out of range", v)
+		}
+		if v := RandomInt(-3, 3); v < -3 || v > 3 {
+			t.Fatalf("RandomInt(-3, 3) = %d out of range", v)
+		}
+	}
+	if v := RandomInt(5, 5); v != 5 {
+		t.Errorf("RandomInt(5, 5) = %d", v)
+	}
+
+	RandomSwap(1)
+	if prev := RandomSwap(9); prev != 1 {
+		t.Errorf("RandomSwap returned %d, want the previous state 1", prev)
+	}
+
+	// Two entropy seeds colliding is astronomically unlikely.
+	e1 := RandomEntropy(UnitValue)
+	e2 := RandomEntropy(UnitValue)
+	if e1 == e2 {
+		t.Error("RandomEntropy returned the same seed twice")
+	}
+}
+
 func TestReadLineFrom(t *testing.T) {
 	cases := []struct {
 		name, input, first, second string

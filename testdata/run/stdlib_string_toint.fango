@@ -1,0 +1,20 @@
+import String
+
+main() =
+    print (String.toInt "007")
+    print (String.toInt "0")
+    print (String.toInt "-42")
+    print (String.toInt "+17")
+    print (String.toInt "")
+    print (String.toInt "-")
+    print (String.toInt "+")
+    print (String.toInt "12x")
+    print (String.toInt " 1")
+    print (String.toInt "9223372036854775807")
+    print (String.toInt "9223372036854775808")
+    print (String.toInt "-9223372036854775808")
+    print (String.toInt "-9223372036854775809")
+    print (String.toInt "92233720368547758070")
+    print (String.length "")
+    print (String.length "hello")
+    print (String.length "二")

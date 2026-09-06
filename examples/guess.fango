@@ -1,0 +1,36 @@
+-- Number guessing game: guess a number between 1 and 100 with higher/lower
+-- feedback, then play again. The game asks the Random effect for each
+-- round's secret without knowing where randomness comes from; main picks
+-- the interpretation by installing a handler.
+
+import IO
+import Maybe exposing (Maybe(..))
+import Random
+import String
+
+guessLoop secret =
+    IO.write "Your guess: "
+    line = readLine()
+    case String.toInt line of
+        Nothing ->
+            print "Please enter a number."
+            guessLoop secret
+        Just guess ->
+            case guess == secret of
+                True -> print "Correct!"
+                False ->
+                    print (if guess < secret then "Too low." else "Too high.")
+                    guessLoop secret
+
+playRound() =
+    secret = Random.int 1 100
+    print "I picked a number between 1 and 100."
+    guessLoop secret
+    IO.write "Play again? (y/n): "
+    answer = readLine()
+    case answer == "y" of
+        True -> playRound()
+        False -> print "Goodbye!"
+
+-- Swap runSeeded for Random.runSystem to play against real randomness.
+main() = Random.runSeeded 42 playRound

@@ -169,6 +169,69 @@ trailing newline. It is a native operation available only through an `IO`
 import. The global `print : printable ->{IO} ()` and
 `readLine : () ->{IO} String` names come from ambient IO.
 
+`Basics` also declares two explicitly importable integer functions (the
+implicit prelude exposes only the operators, `print`, `readLine`, and `show`):
+
+```fango
+import Basics exposing (modBy, remainderBy)
+```
+
+`modBy : Int -> Int -> Int` is the floored modulus: `modBy modulus x` has the
+modulus's sign, so `modBy 3 (-4)` is `2` and `modBy (-3) 4` is `-2`.
+`remainderBy : Int -> Int -> Int` is the truncated remainder:
+`remainderBy divisor x` has the dividend's sign, so `remainderBy 3 (-4)` is
+`-1`. A zero modulus or divisor crashes the program in both backends.
+
+`Maybe` exposes the optional-value type:
+
+```fango
+module Maybe exposing (Maybe(..), withDefault)
+
+type Maybe a = Nothing | Just a deriving (Eq, Show)
+```
+
+`withDefault : a -> Maybe a -> a` returns the contained value or the
+fallback.
+
+`String` exposes `length : String -> Int`, which counts bytes (a multi-byte
+UTF-8 character counts each byte), and `toInt : String -> Maybe Int`, which
+parses an optional `+`/`-` sign followed by base-10 digits. An empty digit
+sequence, any other character, and values outside the signed 64-bit range all
+produce `Nothing`; `String.toInt "007"` is `Just 7` and
+`String.toInt "-9223372036854775808"` parses the most negative Int.
+
+`Random` declares a randomness effect and two ready-made handlers:
+
+```fango
+module Random exposing (Random(..), int, runSeeded, runSystem)
+
+effect Random
+    int : Int -> Int -> Int
+```
+
+`int lo hi` requests a draw in `[lo, hi]` (reversed bounds are swapped). It
+has no default handler; a program chooses an interpretation by wrapping the
+effectful computation in one of
+
+```fango
+runSeeded : Int -> (() ->{Random | e} a) ->{e} a
+runSystem : (() ->{Random | e} a) ->{e} a
+```
+
+`runSeeded seed action` answers every draw from a deterministic 31-bit
+linear congruential generator (glibc constants; modulo-biased and not
+cryptographic) started at `seed`: the same seed always yields the same
+draws, in both the interpreter and compiled programs. `runSystem action`
+seeds the same generator from system entropy, so every run draws a fresh
+sequence. `examples/guess.fango` performs `Random.int` opaquely and picks
+the interpretation with one line in `main`.
+
+Because current handlers are tail-resumptive, a handler cannot carry state
+of its own across resumes; the bundled handlers instead advance a native
+generator cell inside the runtime, and they swap and restore that cell
+around the handled computation so nested `runSeeded`/`runSystem` uses behave
+lexically. That cell is process state reachable only through these handlers.
+
 ## Native Go sidecars
 
 A module may implement an annotated, pure value in adjacent Go:
@@ -289,13 +352,13 @@ A `type` declaration defines one or more constructors; its right-hand side is
 never a type alias:
 
 ```fango
-type Maybe a = Nothing | Just a
+type Status a = Pending | Done a
 
-withDefault : a -> Maybe a -> a
-withDefault fallback value =
-    case value of
-        Nothing -> fallback
-        Just x -> x
+orPending : a -> Status a -> a
+orPending fallback status =
+    case status of
+        Pending -> fallback
+        Done x -> x
 ```
 
 Constructor arguments are type atoms. Parenthesize applied or function types,

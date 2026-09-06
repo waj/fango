@@ -17,10 +17,11 @@ Mark an example `[x]` when it runs end-to-end and its coverage is in place.
 
 Forces the core stdlib: strings, `Maybe`, list combinators.
 
-- [ ] **Number-guessing game** — interactive higher/lower loop. Forces
-  `Maybe`, `String.toInt`, and a `Random` effect handled by a pure-fango PRNG
-  state handler — a real use of the existing tail-resumptive handlers — plus
-  loop-by-recursion ergonomics.
+- [x] **Number-guessing game** — interactive higher/lower loop. Forced
+  `Maybe`, `String.toInt`, and a `Random` effect with swappable
+  seeded/system handlers (the game performs `Random.int` opaquely; the
+  handlers advance a native PRNG cell, since a pure-fango state handler
+  awaits parameterized handler state), plus loop-by-recursion ergonomics.
 - [ ] **Word/line/char count (`wc` clone) over stdin** — pipe any text through
   it. Forces an end-of-input story for `readLine` (likely `Maybe String`),
   `String.words`/`split`/`length`, `List.foldl`/`map`/`filter`, and immediate
