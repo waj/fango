@@ -1,0 +1,18 @@
+module Instances exposing (Box(..), render)
+
+import Capability
+
+type Box a = Box a
+
+instance Capability.Label Capability.Token
+    label x = "token"
+
+instance Capability.Label a => Capability.Label (Box a)
+    label box = case box of
+        Box value -> "box " ++ Capability.label value
+
+instance Capability.Label (Box Capability.Token)
+    label box = "token box"
+
+render : Capability.Label a => a -> String
+render value = Capability.label value

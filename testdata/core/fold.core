@@ -1,5 +1,5 @@
 (core
-  (def a (typarams number) number (int -9223372036854775808 number))
+  (def a (typarams a) (params _dict0) _dictionary_Num a -> a (let _h7 a (case a -> a -> a (var _dict0 _dictionary_Num a) _dictionary1 (switchctor _dictionary1 (Basics._dictionary_NumValue _ _method2 _ _ _ (leaf (var _method2 a -> a -> a))))) (let _h8 a (case Int -> a (var _dict0 _dictionary_Num a) _dictionary3 (switchctor _dictionary3 (Basics._dictionary_NumValue _method4 _ _ _ _ (leaf (var _method4 Int -> a))))) (let _h9 a (case Int -> a (var _dict0 _dictionary_Num a) _dictionary5 (switchctor _dictionary5 (Basics._dictionary_NumValue _method6 _ _ _ _ (leaf (var _method6 Int -> a))))) (app/value (app/value (var _h7 a -> a -> a) (app/value (var _h8 Int -> a) (int 9223372036854775807 Int) a) a -> a) (app/value (var _h9 Int -> a) (int 1 Int) a) a)))))
   (def b Float (float +Inf Float))
-  (def c (typarams number) number (int -5 number))
-  (def main Int (app/worker @[Int] (var a Int) Int)))
+  (def c (typarams a) (params _dict0) _dictionary_Num a -> a (let _h5 a (case a -> a (var _dict0 _dictionary_Num a) _dictionary1 (switchctor _dictionary1 (Basics._dictionary_NumValue _ _ _ _ _method2 (leaf (var _method2 a -> a))))) (let _h6 a (case Int -> a (var _dict0 _dictionary_Num a) _dictionary3 (switchctor _dictionary3 (Basics._dictionary_NumValue _method4 _ _ _ _ (leaf (var _method4 Int -> a))))) (app/value (var _h5 a -> a) (app/value (var _h6 Int -> a) (int 5 Int) a) a))))
+  (def main Int (app/worker @[Int] (var a _dictionary_Num Int -> Int) (var Basics._instance_4261736963732e4e756d_496e74 _dictionary_Num Int) Int)))

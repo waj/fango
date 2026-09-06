@@ -35,7 +35,7 @@ func (ck *Checker) generalize(ty types.Type, avoid map[int]bool) types.Scheme {
 				vars = append(vars, t)
 				return
 			}
-			if t.Kind == types.General || t.Kind == types.Number || t.Kind == types.RowVar {
+			if t.Kind == types.General || t.Kind == types.RowVar {
 				r := ck.Sup.FreshRigid(t.Kind)
 				ck.Sub[t.ID] = r
 				vars = append(vars, r)
@@ -75,6 +75,9 @@ func (g *generator) scopeFreeIDs() map[int]bool {
 	for s := g.locals; s != nil; s = s.parent {
 		for _, sch := range s.names {
 			collectVarIDs(g.ck.Sub.Apply(sch.Body), ids)
+			for _, p := range sch.Preds {
+				collectVarIDs(g.ck.Sub.Apply(p.Ty), ids)
+			}
 		}
 	}
 	return ids

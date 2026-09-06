@@ -1,4 +1,4 @@
-type MaybeInt = NothingI | JustI Int
+type MaybeInt = NothingI | JustI Int deriving (Eq, Show)
 
 orZero m = (case m of
     JustI n -> n

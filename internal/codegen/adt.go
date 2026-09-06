@@ -104,6 +104,10 @@ func (g *gen) caseStmts(e *core.Case, leaf func(core.Expr) []goast.Stmt) []goast
 
 func (g *gen) treeStmts(t core.Tree, leaf func(core.Expr) []goast.Stmt) []goast.Stmt {
 	switch t := t.(type) {
+	case *core.Unreachable:
+		return []goast.Stmt{exprStmt(callExpr(ident("panic"), stringLit("unreachable pattern match")))}
+	case *core.Guard:
+		return []goast.Stmt{ifStmt(g.expr(t.Cond, 0), g.treeStmts(t.Then, leaf), g.treeStmts(t.Else, leaf))}
 	case *core.Leaf:
 		return leaf(t.Body)
 	case *core.SwitchCtor:

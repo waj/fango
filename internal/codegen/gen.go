@@ -134,12 +134,6 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 	mainIsFn := mainDef != nil && len(mainDef.Params) == 1
 
 	adts, effects := g.ownedADTs(p.ADTs), g.ownedEffects(p.Effects)
-	for _, adt := range adts {
-		if g.derivable(adt.Con, map[int]bool{}) {
-			g.neededEq[adt.Con.Unique] = true
-			g.neededShow[adt.Con.Unique] = true
-		}
-	}
 	decls := append(g.effectDecls(effects), g.adtDecls(adts)...)
 	for i := range p.Defs {
 		d := &p.Defs[i]
@@ -165,8 +159,9 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 	case mainIsFn:
 		decls = append(decls, funcDecl("main", g.workerCallStmts(entry, nil)...))
 	case printMain && unit.Entry:
+		g.usesFangort = true
 		decls = append(decls, funcDecl("main",
-			exprStmt(g.printCall(g.topValueRef(entry), mainDef.Type))))
+			exprStmt(callExpr(selector("fangort", "PrintString"), g.expr(p.EntryDisplay, 0)))))
 	default:
 		if mainDef != nil {
 			decls = append(decls, funcDecl("main", assignBlank(g.topValueRef(entry))))
@@ -495,9 +490,9 @@ func (g *gen) workerDef(d *core.Def) goast.Decl {
 		}
 		params = append(params, paramSpec{name: name, typ: g.goType(argTys[i])})
 	}
-	var result goast.Expr = g.goType(ret)
-	if g.isUnit(ret) {
-		result = nil
+	var result goast.Expr
+	if !g.isUnit(ret) {
+		result = g.goType(ret)
 	}
 	decl := workerDecl(g.topValueName(d.Name), params, result, g.retStmtsFor(d.Body, g.isUnit(ret))).(*goast.FuncDecl)
 	for _, ev := range d.EffectParams {
@@ -573,10 +568,6 @@ func (g *gen) typeParamFields(vars []*types.TVar) *goast.FieldList {
 	fields := make([]*goast.Field, len(vars))
 	for i, v := range vars {
 		var constraint goast.Expr = ident("any")
-		if v.Kind == types.Number {
-			g.usesFangort = true
-			constraint = selector("fangort", "Number")
-		}
 		fields[i] = &goast.Field{
 			Names: []*goast.Ident{ident(g.tyParamNames[v.ID])},
 			Type:  constraint,
@@ -857,14 +848,6 @@ const unaryPrec = 6
 func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 	switch e := e.(type) {
 	case *core.IntLit:
-		// At a Number-kinded type parameter, convert explicitly: Go does not
-		// implicitly convert untyped constants in operations whose other
-		// operand has a type-parameter type. The conversion also pins the
-		// doc/design.md, "Testing and performance" semantics — at a float64 instantiation the constant rounds,
-		// exactly like the interpreter's numeric promotion.
-		if v, ok := e.Ty.(*types.TVar); ok && v.Rigid {
-			return callExpr(ident(g.tyParamNames[v.ID]), intLit(e.Val))
-		}
 		return intLit(e.Val)
 	case *core.FloatLit:
 		return g.floatLit(e.Val)
@@ -880,7 +863,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		if g.unique(e.Ty) == g.b.Unit.Unique {
 			return g.unitValue()
 		}
-		if g.defs[e.Name] != nil {
+		if !e.Local && g.defs[e.Name] != nil {
 			return g.topValueRef(e.Name)
 		}
 		return ident(mangleValue(e.Name))

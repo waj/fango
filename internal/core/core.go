@@ -15,7 +15,8 @@ type Prog struct {
 	Defs    []Def
 	Natives map[string]*types.NativeInfo
 	// Entry selects the entry module's main definition by canonical symbol.
-	Entry string
+	Entry        string
+	EntryDisplay Expr // optional, pure String observation used by tests and tooling
 }
 
 type EffectInstance struct {
@@ -141,6 +142,7 @@ type Lambda struct {
 
 type VarRef struct {
 	Name   string
+	Local  bool // resolves a lexical binding even if a later global shares its spelling
 	Ty     types.Type
 	TyArgs []types.Type // explicit generic instantiation; empty when monomorphic
 }
@@ -196,6 +198,15 @@ type Case struct {
 
 // Tree is a decision-tree node: Maranget-compiled pattern matching.
 type Tree interface{ isTree() }
+
+type Guard struct {
+	Cond       Expr
+	Then, Else Tree
+}
+type Unreachable struct{}
+
+func (*Guard) isTree()       {}
+func (*Unreachable) isTree() {}
 
 // Leaf runs one branch body.
 type Leaf struct {
@@ -341,6 +352,8 @@ func Mentions(e Expr, name string) bool {
 // emitting unused field binders (Go rejects unused locals).
 func TreeMentions(t Tree, name string) bool {
 	switch t := t.(type) {
+	case *Guard:
+		return Mentions(t.Cond, name) || TreeMentions(t.Then, name) || TreeMentions(t.Else, name)
 	case *Leaf:
 		return Mentions(t.Body, name)
 	case *SwitchCtor:

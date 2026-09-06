@@ -1,0 +1,9 @@
+type Pair a b = Pair a b
+
+instance Show a => Show (Pair a a)
+    show p = case p of
+        Pair x y -> "twins " ++ show x ++ " " ++ show y
+
+main =
+    print (Pair 1 2)
+    print (Pair "x" "y")

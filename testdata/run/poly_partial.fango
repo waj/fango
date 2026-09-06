@@ -1,4 +1,4 @@
-type Maybe a = Nothing | Just a
+type Maybe a = Nothing | Just a deriving (Eq, Show)
 
 wrap : a -> Maybe a
 wrap x = Just x

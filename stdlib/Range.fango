@@ -1,6 +1,6 @@
 module Range exposing (each)
 
-each : (number ->{e} ()) -> number -> number ->{e} ()
+each : (Num a, Ord a) => (a ->{e} ()) -> a -> a ->{e} ()
 each action start end =
     case start > end of
         True -> ()

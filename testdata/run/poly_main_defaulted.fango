@@ -1,3 +1,3 @@
-type Maybe a = Nothing | Just a
+type Maybe a = Nothing | Just a deriving (Eq, Show)
 
 main = Nothing

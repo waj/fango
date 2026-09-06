@@ -117,9 +117,9 @@ tie-breaking.
 
 Primitives are declarations rather than a compiler catalog. Every ordinary
 module implicitly loads the hidden `Basics` module, whose native values define
-the fixed operator tokens, and the bundled `IO` module declares the ambient IO
+the scalar implementations of class methods, and the bundled `IO` module declares the ambient IO
 effect and its operations. `infix` declarations bind the parser's closed set of
-operator tokens to native values; only bundled modules may contain them.
+operator tokens to values or class methods; only bundled modules may contain them.
 `native "..."` templates are likewise bundled-only. The loader validates each
 template as a Go expression, requires every positional argument exactly once,
 and permits only placeholders, compiler intrinsics, Go predeclared names, and
@@ -153,28 +153,61 @@ statements.
 
 ## Type inference
 
-Inference is Hindley-Milner with parameterized ADTs, explicit annotations,
-effect rows, and three variable kinds: general, numeric, and row. It generates
+Inference is Hindley-Milner with parameterized ADTs, qualified schemes, explicit
+annotations, effect rows, and two variable kinds: general and row. It generates
 reason-tagged equality/inclusion constraints, solves them by unification with
 an occurs check, and generalizes at binding boundaries. Annotation variables
 are rigid skolems, preventing an annotation from claiming more polymorphism
-than its body supplies. Variables whose names begin with `number` have the
-numeric kind in both ordinary and native annotations.
+than its body supplies. Variable spelling never grants numeric or other
+capabilities.
 
 Top-level values and functions generalize. Local syntactic functions and
 lambdas generalize, while local values remain monomorphic so their strict,
 evaluate-once semantics are not changed by lambda lifting. `main` is ground and
-never generalized. Numeric variables range over `Int` and `Float`; unresolved
-numeric types default to `Int`, while `/` is always `Float`.
+never generalized. Integer expressions elaborate through `Num.fromInt`;
+decimal literals and `/` remain `Float`. Unresolved variables default to `Int`
+only when their obligations include standard `Num` and contain no classes
+outside standard `Num`, `Eq`, `Ord`, and `Show`. Other unresolved constrained
+variables are ambiguous; unconstrained runtime metavariables default to Unit.
 
-`Scheme.Preds` carries compiler-owned `Eq`, `Ord`, and `Show` obligations for
-native declarations. Annotation variable prefixes `equatable`, `comparable`,
-and `printable` create those predicates only in native declarations; they do
-not add capability kinds or become general user constraints. Instantiation
-substitutes predicate types alongside the declared type. The current compiler
-discharges only concrete scalar, numeric, and function-free ADT obligations;
-residual general predicates are rejected until typeclasses provide evidence
-passing.
+`Scheme.Preds` carries nominal, single-parameter class obligations.
+Instantiation substitutes predicate types alongside the body. An instance head
+is a named constructor applied to arbitrary argument types — variables
+(possibly repeated), ground types, or nested applications — but never a bare
+variable or an open effect row. Two instances of a class whose heads unify are
+permitted only when one is strictly more specific (its head is an instance of
+the other's); duplicates and incomparable-unifiable pairs are rejected at
+declaration, so every use site has a unique most-specific match, independent
+of declaration order.
+
+Resolution is directional: it structurally matches instance heads against a
+known type without guessing a metavariable from available instances. When an
+unsolved metavariable leaves a match — or the choice among matches —
+undecided, the obligation is deferred; defaulting may solve the variable and
+a final reduction commits, and an obligation still undecided afterwards is
+ambiguous. A quantified (rigid) variable is atomic: it definitively fails any
+concrete head position, so a polymorphic body commits to the general instance
+even if a caller later instantiates the variable to a type with a more
+specific one. Conditional instance contexts reduce to constraints on
+variables of the head — proper subterms — keeping resolution decreasing, with
+a fixed reduction-depth limit as backstop. Residual obligations on
+generalized variables become dictionary parameters; an annotation must
+explicitly provide the required context. Constraints whose variables do not
+occur in the annotated type are rejected as ambiguous.
+
+Classes and instances are checked in source order. All instances in the loaded
+graph participate in overlap checking, including orphan instances, while
+resolution uses only the defining module and its transitive dependencies — a
+module that cannot see a more specific instance resolves through the general
+one. Instances are not selected by import exposing lists. Canonical class
+symbols and generation-stable type identities determine coherence, not
+display names.
+
+Explicit `deriving (Eq, Show)` generates ordinary instance ASTs, checked through
+the same inference and elaboration path as handwritten methods. Their contexts
+are computed from fields and available conditional instances; phantom parameters
+need no evidence. Recursive fields reuse the instance being checked. There is
+no automatic structural equality or display for a source ADT without an instance.
 
 ## Core and evidence invariants
 
@@ -183,6 +216,23 @@ explicitly typed; generic definitions declare type parameters and uses carry
 explicit type arguments. Application nodes record whether their callee is a
 worker, constructor, primitive, operation, or indirect function. Matches are
 decision trees rather than surface branch lists.
+
+Class dictionaries are compiler-internal single-constructor ADTs with typed
+method-function fields. Qualified workers receive leading dictionary
+parameters, and conditional instance factories receive their context's
+dictionaries. Projection is an ordinary typed Core case; construction and
+calls are validated by the existing constructor and application linter rules.
+Known instances call their method workers directly. Exact scalar native
+forwarders and identity implementations bypass the wrapper, preserving native
+arithmetic and constant folding without a compiler-owned numeric capability.
+Effect evidence precedes ordinary parameters in the Go ABI; dictionary
+parameters then precede source arguments. Effects on a method arrow execute
+when that arrow is applied, not when its dictionary is constructed.
+
+Integer patterns require `Num` and `Eq`. Int/Float patterns retain literal
+decision trees; generic and custom numeric patterns use ordered guards calling
+`fromInt` and `eq`. These preserve first-match semantics even when distinct
+integer literals compare equal in a custom instance.
 
 Saturated pure primitives are `NativeCall` nodes keyed by canonical declaration
 name. `Prog.Natives` holds their schemes, arities, templates, modules, and
@@ -224,10 +274,10 @@ Erasing a Unit argument never erases its evaluation: expression lowering keeps
 strict left-to-right order, materializing the singleton only when a value is
 required. Functions are typed Go functions, and ADTs use typed interfaces and
 constructor structs. Parameterized definitions map to Go generics with
-explicit instantiation. Each structurally eligible ADT's owning package exports
-compiler-internal derived equality and display functions; they receive typed
-element operations where required. Emitting these independently of downstream
-uses keeps a module package stable when only a consumer changes.
+explicit instantiation. Class dictionaries, instance factories, and generated
+deriving methods use the same typed, exported internal ABI as ordinary ADTs
+and workers. Definitions belong to their source module, so adding a downstream
+consumer does not change the dependency's generated package.
 
 The backend emits one Go package per Fango module beneath a single generated Go
 module. The entry module is the root `package main`; local and bundled
@@ -268,6 +318,12 @@ workers from lazy memoized top-level cells and eager block frames. `EvalIO` and
 `ForceIO` are the explicit IO entry points. The interpreter and generated Go
 share observable formatting rules.
 
+`print` is an ordinary `Show`-constrained function implemented using `show` and
+the native `IO.write` operation. Tooling observes values through the same Show
+evidence, evaluating the observed expression once. Values with no resolvable
+Show instance have an opaque typed placeholder; functions show `<function>`.
+Strings are displayed raw, including inside explicitly derived ADT displays.
+
 The REPL retains one checker, type/name supply, evaluator environment, and IO
 reader/writer across inputs. Prompt definitions become lazy memo cells;
 functions become workers. Redefinition installs a new generation, and existing
@@ -275,6 +331,10 @@ memoized values and closures keep their old bindings. Multiline input is driven
 by parser incompleteness and layout. Effectful ordinary prompt declarations
 are rejected, while effectful expressions run directly. Function definitions
 are installed without executing their bodies and run only when applied.
+Class and instance declarations are supported. Failed instance or deriving
+declarations roll back the persistent environment, without reusing allocated
+identities. Class redefinition is rejected; type redefinition creates a new
+generation with independently installed instances.
 
 Loading, reloading, cancellation, and interactive line history are not yet
 implemented; see [REPL hardening](roadmap.md#repl-hardening).
@@ -302,7 +362,9 @@ allocation remains the main known structural performance cost.
 ## Known limitations
 
 The implementation has a deliberately narrow, pure Go sidecar FFI but no
-package manager, records, aliases, typeclasses, formatter, or LSP. There are no source-path
+package manager, records, aliases, formatter, or LSP. Type classes have one
+parameter, no superclasses, higher kinds, default methods, overlapping heads,
+or method-local polymorphism. There are no source-path
 flags, external library version selection, or package resolution. The implicit
 prelude is fixed to hidden `Basics` plus ambient `IO`; the bundled standard
 library is intentionally small and experimental.

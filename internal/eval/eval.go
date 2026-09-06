@@ -453,6 +453,17 @@ func (in *interp) nativeRuntime() *natives.Runtime {
 // tree walks a decision tree, mirroring the compiled backend's switches.
 func (in *interp) tree(t core.Tree, fr *Frame) (Value, error) {
 	switch t := t.(type) {
+	case *core.Unreachable:
+		return nil, fmt.Errorf("unreachable pattern match")
+	case *core.Guard:
+		v, err := in.eval(t.Cond, fr)
+		if err != nil {
+			return nil, err
+		}
+		if v.(bool) {
+			return in.tree(t.Then, fr)
+		}
+		return in.tree(t.Else, fr)
 	case *core.Leaf:
 		return in.eval(t.Body, fr)
 	case *core.SwitchCtor:
@@ -503,14 +514,7 @@ func (in *interp) tree(t core.Tree, fr *Frame) (Value, error) {
 			var match bool
 			switch lit := c.Lit.(type) {
 			case *core.IntLit:
-				// An integer literal at a Number type parameter meets a
-				// float64 scrutinee at Float instantiations — promote,
-				// mirroring the compiled backend's conversion (doc/design.md, "Interpreter and REPL").
-				if f, isFloat := v.(float64); isFloat {
-					match = f == float64(lit.Val)
-				} else {
-					match = v == lit.Val
-				}
+				match = v == lit.Val
 			case *core.FloatLit:
 				match = v == lit.Val
 			case *core.StringLit:
@@ -581,25 +585,5 @@ func eqValue(l, r Value) bool {
 		}
 		return true
 	}
-	l, r = promote(l, r)
 	return l == r // scalars: identical to the native Go operators
-}
-
-// promote widens int64 to float64 when the other operand is a float —
-// numeric promotion (doc/design.md, "Interpreter and REPL"). Erased integer literals in Number-generic
-// bodies evaluate as int64 while the compiled backend converts them at the
-// instantiated type; Go's conversion semantics (rounding) match, keeping
-// the backends bit-identical for every operated value.
-func promote(l, r Value) (Value, Value) {
-	if li, ok := l.(int64); ok {
-		if _, isFloat := r.(float64); isFloat {
-			return float64(li), r
-		}
-	}
-	if ri, ok := r.(int64); ok {
-		if _, isFloat := l.(float64); isFloat {
-			return l, float64(ri)
-		}
-	}
-	return l, r
 }

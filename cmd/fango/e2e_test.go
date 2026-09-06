@@ -85,7 +85,7 @@ func runDifferentialCase(t *testing.T, path string) {
 	env := eval.NewEnv()
 	env.DefineProg(prog)
 	var printed bytes.Buffer
-	v, err := eval.ForceIO(context.Background(), "main", env, eval.NewIOContext(strings.NewReader(""), &printed))
+	_, err = eval.ForceIO(context.Background(), "main", env, eval.NewIOContext(strings.NewReader(""), &printed))
 	if err != nil {
 		t.Fatalf("eval: %v", err)
 	}
@@ -100,7 +100,11 @@ func runDifferentialCase(t *testing.T, path string) {
 	if con, isCon := mainTy.(*types.TCon); (isCon && con.Unique == ck.B.Unit.Unique) || functionMain {
 		evalOut = printed.String()
 	} else {
-		evalOut = eval.ShowForPrint(v, mainTy, ck.B) + "\n"
+		shown, err := eval.EvalIO(context.Background(), prog.EntryDisplay, env, eval.NewIOContext(strings.NewReader(""), &printed))
+		if err != nil {
+			t.Fatal(err)
+		}
+		evalOut = shown.(string) + "\n"
 	}
 	if evalOut != expected {
 		t.Errorf("interpreter output:\n%q\nwant:\n%q", evalOut, expected)

@@ -1,4 +1,4 @@
 (core
-  (def x (typarams number) number (int 40 number))
-  (def y (typarams number) number (native Basics.add (app/worker @[number] (var x number) number) (int 2 number) number))
-  (def main Int (native Basics.mul (native Basics.sub (app/worker @[Int] (var y Int) Int) (int 2 Int) Int) (int 3 Int) Int)))
+  (def x (typarams a) (params _dict0) _dictionary_Num a -> a (let _h3 a (case Int -> a (var _dict0 _dictionary_Num a) _dictionary1 (switchctor _dictionary1 (Basics._dictionary_NumValue _method2 _ _ _ _ (leaf (var _method2 Int -> a))))) (app/value (var _h3 Int -> a) (int 40 Int) a)))
+  (def y (typarams a) (params _dict0) _dictionary_Num a -> a (let _h5 a (case a -> a -> a (var _dict0 _dictionary_Num a) _dictionary1 (switchctor _dictionary1 (Basics._dictionary_NumValue _ _method2 _ _ _ (leaf (var _method2 a -> a -> a))))) (let _h6 a (case Int -> a (var _dict0 _dictionary_Num a) _dictionary3 (switchctor _dictionary3 (Basics._dictionary_NumValue _method4 _ _ _ _ (leaf (var _method4 Int -> a))))) (app/value (app/value (var _h5 a -> a -> a) (app/worker @[a] (var x _dictionary_Num a -> a) (var _dict0 _dictionary_Num a) a) a -> a) (app/value (var _h6 Int -> a) (int 2 Int) a) a))))
+  (def main Int (native Basics.intMul (native Basics.intSub (app/worker @[Int] (var y _dictionary_Num Int -> Int) (var Basics._instance_4261736963732e4e756d_496e74 _dictionary_Num Int) Int) (int 2 Int) Int) (int 3 Int) Int)))

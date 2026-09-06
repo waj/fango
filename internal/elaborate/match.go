@@ -51,7 +51,18 @@ func (el *elab) caseExpr(e *ast.Case, ty types.Type) core.Expr {
 		return scrut // errors abort before lint/codegen; keep the shape sane
 	}
 
-	tree := m.compile([]occurrence{{name: bind, ty: scrut.Type()}}, rows)
+	var tree core.Tree
+	ordered := false
+	for _, br := range e.Branches {
+		if el.overloadedPattern(br.Pattern) {
+			ordered = true
+		}
+	}
+	if ordered {
+		tree = m.ordered(e, occurrence{name: bind, ty: scrut.Type()}, 0)
+	} else {
+		tree = m.compile([]occurrence{{name: bind, ty: scrut.Type()}}, rows)
+	}
 	for i, u := range m.used {
 		if !u {
 			el.errs = append(el.errs, diag.Errorf(m.spans[i], "REDUNDANT PATTERN",

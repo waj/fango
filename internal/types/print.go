@@ -19,7 +19,6 @@ func SurfaceName(name string) string {
 type Printer struct {
 	names   map[int]string
 	general int
-	number  int
 	row     int
 	rows    map[int]int
 }
@@ -151,13 +150,6 @@ func (p *Printer) varName(v *TVar) string {
 	}
 	var n string
 	switch v.Kind {
-	case Number:
-		p.number++
-		if p.number == 1 {
-			n = "number"
-		} else {
-			n = fmt.Sprintf("number%d", p.number)
-		}
 	case RowVar:
 		p.row++
 		if p.row == 1 {
@@ -175,3 +167,21 @@ func (p *Printer) varName(v *TVar) string {
 
 // Show renders one type with a fresh printer (single-type contexts).
 func Show(t Type) string { return NewPrinter().Type(t) }
+
+func (p *Printer) Scheme(s Scheme) string {
+	body := p.Type(s.Body)
+	if len(s.Preds) == 0 {
+		return body
+	}
+	parts := make([]string, len(s.Preds))
+	for i, pred := range s.Preds {
+		parts[i] = SurfaceName(pred.Class) + " " + p.atom(pred.Ty)
+	}
+	context := strings.Join(parts, ", ")
+	if len(parts) > 1 {
+		context = "(" + context + ")"
+	}
+	return context + " => " + body
+}
+
+func ShowScheme(s Scheme) string { return NewPrinter().Scheme(s) }

@@ -45,11 +45,6 @@ func ReadLine() string {
 // evaluation when readLine is applied to a non-atomic Unit expression.
 func ReadLineUnit(_ Unit) string { return ReadLine() }
 
-// Number is the Go type-set constraint compiling fango's Number-kinded type
-// variables (doc/design.md, "Type inference"): `double : number -> number` emits as
-// `func v_double[A Number](x A) A` with native operators.
-type Number interface{ ~int64 | ~float64 }
-
 // Unit is the shared represented form of Fango's Unit type. Direct concrete
 // worker and operation boundaries erase Unit, but package boundaries that
 // carry first-class functions, polymorphic values, or ADTs need one nominal

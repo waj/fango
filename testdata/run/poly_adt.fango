@@ -1,4 +1,4 @@
-type Maybe a = Nothing | Just a
+type Maybe a = Nothing | Just a deriving (Eq, Show)
 
 withDefault : a -> Maybe a -> a
 withDefault d m =

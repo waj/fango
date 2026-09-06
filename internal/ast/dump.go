@@ -56,6 +56,18 @@ func Dump(m *Module) string {
 
 func dumpDecl(d Decl) string {
 	switch d := d.(type) {
+	case *ClassDecl:
+		parts := []string{"(class", d.Name, d.Param.Name}
+		for _, m := range d.Methods {
+			parts = append(parts, "("+m.Name+" "+DumpTypeExpr(m.Type)+")")
+		}
+		return strings.Join(parts, " ") + ")"
+	case *InstanceDecl:
+		parts := []string{"(instance", dumpPreds(d.Preds), d.Head.Class, DumpTypeExpr(d.Head.Ty)}
+		for _, m := range d.Methods {
+			parts = append(parts, dumpDecl(m))
+		}
+		return strings.Join(parts, " ") + ")"
 	case *ValueDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(def %s", d.Name)
@@ -63,7 +75,7 @@ func dumpDecl(d Decl) string {
 			fmt.Fprintf(&b, " %s", p)
 		}
 		if d.Ann != nil {
-			fmt.Fprintf(&b, " (ann %s)", DumpTypeExpr(d.Ann.Type))
+			fmt.Fprintf(&b, " (ann %s%s)", dumpPreds(d.Ann.Preds), DumpTypeExpr(d.Ann.Type))
 		}
 		if d.Native != nil {
 			b.WriteString(" (native")
@@ -81,6 +93,13 @@ func dumpDecl(d Decl) string {
 		fmt.Fprintf(&b, "(type %s", d.Name)
 		if p := dumpParams(d.Params); p != "" {
 			fmt.Fprintf(&b, " %s", p)
+		}
+		if len(d.Deriving) > 0 {
+			b.WriteString(" (deriving")
+			for _, c := range d.Deriving {
+				fmt.Fprintf(&b, " %s", c.Name)
+			}
+			b.WriteString(")")
 		}
 		for _, c := range d.Ctors {
 			fmt.Fprintf(&b, " (ctor %s", c.Name)
@@ -235,7 +254,7 @@ func DumpExpr(e Expr) string {
 					fmt.Fprintf(&b, " %s", p)
 				}
 				if bind.Ann != nil {
-					fmt.Fprintf(&b, " (ann %s)", DumpTypeExpr(bind.Ann.Type))
+					fmt.Fprintf(&b, " (ann %s%s)", dumpPreds(bind.Ann.Preds), DumpTypeExpr(bind.Ann.Type))
 				}
 				fmt.Fprintf(&b, " %s)", DumpExpr(bind.Body))
 			}

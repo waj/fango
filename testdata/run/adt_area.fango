@@ -1,4 +1,4 @@
-type Shape = Circle Float | Rect Float Float
+type Shape = Circle Float | Rect Float Float deriving (Eq, Show)
 
 area : Shape -> Float
 area shape =

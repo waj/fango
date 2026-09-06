@@ -1,6 +1,10 @@
-module IO exposing (IO(..))
+module IO exposing (IO(..), print)
+
+import Basics
 
 effect IO
-    print : printable -> () = native "fangort.PrintString($show($1))"
     readLine : () -> String = native "fangort.ReadLineUnit($1)"
     write : String -> () = native "fangort.WriteString($1)"
+
+print : Show a => a ->{IO} ()
+print value = write (show value ++ "\n")

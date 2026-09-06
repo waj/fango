@@ -1,2 +1,3 @@
+shout : a ->{IO} ()
 shout s = print s
 main = shout "hi"

@@ -1,5 +1,5 @@
-type Maybe a = Nothing | Just a
-type List a = Nil | Cons a (List a)
+type Maybe a = Nothing | Just a deriving (Eq, Show)
+type List a = Nil | Cons a (List a) deriving (Eq, Show)
 
 heads : List (Maybe Int) -> Int
 heads xs =

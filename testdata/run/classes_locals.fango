@@ -1,0 +1,17 @@
+type Box a = Box a deriving (Eq, Show)
+type Phantom a = Phantom deriving (Eq, Show)
+
+make x =
+    same : Eq a => a -> a -> Bool
+    same l r = l == r
+    captured y = same x y
+    captured
+
+render p = show p
+
+main =
+    compare = make (Box "hello")
+    print (compare (Box "hello"))
+    print (compare (Box "bye"))
+    print (render (Box (Box "text")))
+    print Phantom

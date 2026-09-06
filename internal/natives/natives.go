@@ -27,6 +27,7 @@ type Spec struct {
 
 var Table = func() map[string]Spec {
 	t := map[string]Spec{}
+	installScalarInstances(t)
 	for _, name := range []string{"add", "sub", "mul", "fdiv", "append", "eq", "neq", "lt", "gt", "le", "ge"} {
 		name := name
 		t["Basics."+name] = Spec{Arity: 2, Foldable: name == "add" || name == "sub" || name == "mul" || name == "fdiv", Eval: func(rt *Runtime, args []any) (any, error) {

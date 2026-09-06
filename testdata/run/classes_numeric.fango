@@ -1,0 +1,24 @@
+type Count = Count Int deriving (Eq, Show)
+
+unwrap x = case x of
+    Count n -> n
+
+instance Num Count
+    fromInt x = Count x
+    add x y = Count (unwrap x + unwrap y)
+    sub x y = Count (unwrap x - unwrap y)
+    mul x y = Count (unwrap x * unwrap y)
+    negate x = Count (0 - unwrap x)
+
+describe : (Num a, Eq a) => a -> String
+describe n = case n of
+    0 -> "zero"
+    _ -> "nonzero"
+
+value : Count
+value = 21 + 21
+
+main =
+    print value
+    print (describe value)
+    print (describe (Count 0))

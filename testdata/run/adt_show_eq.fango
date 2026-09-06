@@ -1,6 +1,6 @@
-type MaybeInt = NothingI | JustI Int
+type MaybeInt = NothingI | JustI Int deriving (Eq, Show)
 
-type Wrap = Wrap MaybeInt String
+type Wrap = Wrap MaybeInt String deriving (Eq, Show)
 
 flip m =
     case m of

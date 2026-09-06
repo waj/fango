@@ -12,6 +12,7 @@ type Expr interface {
 type IntLit struct {
 	Value int64
 	Sp    source.Span
+	Raw   bool // compiler-internal Int payload for Num.fromInt
 }
 
 type FloatLit struct {
@@ -96,9 +97,33 @@ type Lambda struct {
 // TypeAnn is a `name : Type` annotation line attached to the definition
 // directly below it.
 type TypeAnn struct {
-	Type TypeExpr
-	Sp   source.Span // colon through the end of the type
+	Type  TypeExpr
+	Preds []PredExpr
+	Sp    source.Span // colon through the end of the type
 }
+
+type PredExpr struct {
+	Class string
+	Ty    TypeExpr
+	Sp    source.Span
+}
+
+type ClassDecl struct {
+	Name     string
+	NameSpan source.Span
+	Param    Param
+	Methods  []OpSig
+}
+
+type InstanceDecl struct {
+	Head    PredExpr
+	Preds   []PredExpr
+	Methods []*ValueDecl
+	Owner   string
+}
+
+func (*ClassDecl) isDecl()    {}
+func (*InstanceDecl) isDecl() {}
 
 // TypeExpr is the surface type grammar: ground names, `()`, `->` arrows,
 // effect rows attached to arrows, and type variables.
@@ -338,6 +363,7 @@ type TypeDecl struct {
 	NameSpan source.Span
 	Params   []Param // type parameters (lowercase)
 	Ctors    []CtorDef
+	Deriving []TName
 }
 
 // CtorDef is one constructor alternative. Args are type atoms: named types
@@ -418,7 +444,8 @@ type Import struct {
 }
 
 type Module struct {
-	Header  *ModuleHeader
-	Imports []Import
-	Decls   []Decl
+	InstanceImports map[string]map[string]bool
+	Header          *ModuleHeader
+	Imports         []Import
+	Decls           []Decl
 }

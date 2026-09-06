@@ -44,32 +44,32 @@ func TestPolyPositive(t *testing.T) {
 	}{
 		{"id x = x", "id : a -> a"},
 		{"const x y = x", "const : a -> b -> a"},
-		{"double x = x + x", "double : number -> number"},
+		{"double x = x + x", "double : Num a => a -> a"},
 		// Generalization at each binding: two uses at two types both check.
-		{"id x = x\na = id 1\nb = id \"s\"", "id : a -> a, a : number, b : String"},
+		{"id x = x\na = id 1\nb = id \"s\"", "id : a -> a, a : Num b => b, b : String"},
 		// Number vars generalize (doc/design.md, "Type inference"): usable at Int and Float.
 		// a's number var is a fresh instantiation, distinct from double's —
 		// the shared printer numbers it number2.
-		{"double x = x + x\na = double 2\nb = double 1.5", "double : number -> number, a : number2, b : Float"},
+		{"double x = x + x\na = double 2\nb = double 1.5", "double : Num a => a -> a, a : Num b => b, b : Float"},
 		// Annotated polymorphism, checked by skolemize-and-unify.
 		{"id : a -> a\nid x = x", "id : a -> a"},
 		{"apply : (a -> b) -> a -> b\napply f x = f x", "apply : (a -> b) -> a -> b"},
-		{"double : number -> number\ndouble x = x + x", "double : number -> number"},
+		{"double : Num a => a -> a\ndouble x = x + x", "double : Num a => a -> a"},
 		// An annotation may be less general than the body.
 		{"idInt : Int -> Int\nidInt x = x", "idInt : Int -> Int"},
 		// Parameterized ADTs: constructor instantiation per occurrence.
-		{"type Maybe a = Nothing | Just a\nx = Just 1\ny = Just \"s\"", "x : Maybe number, y : Maybe String"},
+		{"type Maybe a = Nothing | Just a\nx = Just 1\ny = Just \"s\"", "x : Num a => Maybe a, y : Maybe String"},
 		{"type Maybe a = Nothing | Just a\nn = Nothing", "n : Maybe a"},
 		// Patterns instantiate constructors too.
-		{"type Maybe a = Nothing | Just a\nf m = case m of\n    Nothing -> 0\n    Just n -> n + 1", "f : Maybe number -> number"},
+		{"type Maybe a = Nothing | Just a\nf m = case m of\n    Nothing -> 0\n    Just n -> n + 1", "f : Num a => Maybe a -> a"},
 		{"type Box a = MkBox a\nunbox b = case b of\n    MkBox x -> x", "unbox : Box a -> a"},
 		// Applied types in annotations.
 		{"type Maybe a = Nothing | Just a\nx : Maybe Int\nx = Just 1", "x : Maybe Int"},
 		{"type Maybe a = Nothing | Just a\nf : Maybe a -> Maybe a\nf m = m", "f : Maybe a -> Maybe a"},
 		// A recursive parameterized type, regular occurrences only.
-		{"type List a = Nil | Cons a (List a)\nlen xs = case xs of\n    Nil -> 0\n    Cons _ rest -> 1 + len rest", "len : List a -> number"},
+		{"type List a = Nil | Cons a (List a)\nlen xs = case xs of\n    Nil -> 0\n    Cons _ rest -> 1 + len rest", "len : Num b => List a -> b"},
 		// Local (block) polymorphism: one local used at two types.
-		{"v =\n  id2 y = y\n  a = id2 1\n  b = id2 \"s\"\n  a", "v : number"},
+		{"v =\n  id2 y = y\n  a = id2 1\n  b = id2 \"s\"\n  a", "v : Num a => a"},
 		// Mutually recursive parameterized types, regular.
 		{"type A a = MkA (B a) | EndA\ntype B a = MkB (A a)\nf x = MkA (MkB x)", "f : A a -> A a"},
 	}
@@ -82,7 +82,7 @@ func TestPolyPositive(t *testing.T) {
 		var parts []string
 		p := types.NewPrinter()
 		for _, info := range infos {
-			parts = append(parts, info.Name+" : "+p.Type(ck.Sub.Apply(info.Scheme.Body)))
+			parts = append(parts, info.Name+" : "+p.Scheme(checkedScheme(ck, info)))
 		}
 		if got := strings.Join(parts, ", "); got != c.want {
 			t.Errorf("%q: got %q, want %q", c.src, got, c.want)
@@ -100,7 +100,7 @@ func TestPolyNegative(t *testing.T) {
 		{"f : a -> b\nf x = x", "TYPE MISMATCH", 2},
 		{"f : a -> Int\nf x = x", "TYPE MISMATCH", 2},
 		// A Number obligation cannot narrow a General annotation variable.
-		{"f : a -> a\nf x = x + 1", "TYPE MISMATCH", 2},
+		{"f : a -> a\nf x = x + 1", "MISSING CONSTRAINT", 1},
 		// Polymorphic recursion is rejected by construction: the recursive
 		// occurrence is the pre-bound monomorphic self, so nesting occurs.
 		{"type Box a = MkBox a\nf b = f (MkBox b)", "TYPE MISMATCH", 2},
@@ -165,7 +165,7 @@ func TestPolySchemeVars(t *testing.T) {
 	}
 
 	doubleSch := infos[1].Scheme
-	if len(doubleSch.Vars) != 1 || !doubleSch.Vars[0].Rigid || doubleSch.Vars[0].Kind != types.Number {
-		t.Errorf("double: want one rigid Number, got %+v", doubleSch.Vars)
+	if len(doubleSch.Vars) != 1 || !doubleSch.Vars[0].Rigid || doubleSch.Vars[0].Kind != types.General || len(doubleSch.Preds) != 1 || doubleSch.Preds[0].Class != "Basics.Num" {
+		t.Errorf("double: want one ordinary variable constrained by Num, got %+v", doubleSch)
 	}
 }

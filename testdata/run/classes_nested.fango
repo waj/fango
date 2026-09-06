@@ -1,0 +1,7 @@
+type Wrap a = Wrap a
+type Box a = Box a
+
+instance Show (Box (Wrap Int))
+    show b = "box of wrapped ints"
+
+main = print (Box (Wrap 1))

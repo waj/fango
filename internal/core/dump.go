@@ -192,6 +192,10 @@ func dumpTypes(ts []types.Type, pr *types.Printer) string {
 
 func dumpTree(t Tree, pr *types.Printer) string {
 	switch t := t.(type) {
+	case *Unreachable:
+		return "(unreachable)"
+	case *Guard:
+		return fmt.Sprintf("(guard %s %s %s)", dumpExpr(t.Cond, pr), dumpTree(t.Then, pr), dumpTree(t.Else, pr))
 	case *Leaf:
 		return fmt.Sprintf("(leaf %s)", dumpExpr(t.Body, pr))
 	case *SwitchCtor:

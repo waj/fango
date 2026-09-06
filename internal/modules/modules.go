@@ -322,8 +322,20 @@ func Load(entry string) (*Result, []diag.Error) {
 		return nil, errs
 	}
 	order := topo(nodes)
-	merged := &ast.Module{}
+	merged := &ast.Module{InstanceImports: map[string]map[string]bool{}}
 	for _, name := range order {
+		owner := name
+		if nodes[name].private {
+			owner = ""
+		}
+		visible := map[string]bool{}
+		for _, dep := range dependencyNames(nodes[name]) {
+			visible[dep] = true
+			for trans := range merged.InstanceImports[dep] {
+				visible[trans] = true
+			}
+		}
+		merged.InstanceImports[owner] = visible
 		r := resolver{node: nodes[name], nodes: nodes}
 		decls, es := r.resolve()
 		errs = append(errs, es...)
@@ -387,7 +399,12 @@ func validateNatives(n *node) []diag.Error {
 	infixes := map[string]source.Span{}
 	for _, d := range n.mod.Decls {
 		switch d := d.(type) {
+		case *ast.ClassDecl:
+			for _, m := range d.Methods {
+				templateTargets[m.Name] = true
+			}
 		case *ast.ValueDecl:
+			templateTargets[d.Name] = true
 			if d.Native == nil {
 				continue
 			}
@@ -435,7 +452,7 @@ func validateNatives(n *node) []diag.Error {
 	}
 	for _, d := range n.mod.Decls {
 		if inf, ok := d.(*ast.InfixDecl); ok && n.bundled && !templateTargets[inf.Target] {
-			errs = append(errs, diag.Errorf(inf.TargetSpan, "INVALID INFIX TARGET", "Operator `%s` must name a template-form native value in the same bundled module.", inf.Op))
+		errs = append(errs, diag.Errorf(inf.TargetSpan, "INVALID INFIX TARGET", "Operator `%s` must name a value or class method in the same bundled module.", inf.Op))
 		}
 	}
 	if n.bundled {
@@ -536,7 +553,7 @@ func validateTemplate(template string, arity int, sp source.Span) []diag.Error {
 		"append": true, "cap": true, "clear": true, "close": true, "complex": true,
 		"copy": true, "delete": true, "imag": true, "len": true, "make": true,
 		"max": true, "min": true, "new": true, "panic": true, "print": true,
-		"println": true, "real": true, "recover": true,
+		"println": true, "real": true, "recover": true, "float64": true,
 	}
 	goast.Inspect(x, func(node goast.Node) bool {
 		id, ok := node.(*goast.Ident)
@@ -752,6 +769,12 @@ func buildInterface(n *node, errs []diag.Error) (*iface, []diag.Error) {
 	all := newIface()
 	for _, d := range n.mod.Decls {
 		switch d := d.(type) {
+		case *ast.ClassDecl:
+			all.types[d.Name] = canonical(n.name, d.Name)
+			for _, m := range d.Methods {
+				all.effectMembers[d.Name] = append(all.effectMembers[d.Name], m.Name)
+				all.values[m.Name] = canonical(n.name, m.Name)
+			}
 		case *ast.ValueDecl:
 			all.values[d.Name] = canonical(n.name, d.Name)
 		case *ast.TypeDecl:
@@ -823,7 +846,7 @@ func buildInterface(n *node, errs []diag.Error) (*iface, []diag.Error) {
 					pub.effectMembers[item.Name] = ms
 					pub.openEffects[item.Name] = true
 					for _, x := range ms {
-						pub.ops[x] = all.ops[x]
+						if op := all.ops[x]; op != "" { pub.ops[x] = op }
 						pub.values[x] = all.values[x]
 					}
 					continue
@@ -884,7 +907,7 @@ func (i *iface) selection(ex *ast.Exposing, at source.Span) (*iface, []diag.Erro
 				if i.openEffects[item.Name] {
 					out.openEffects[item.Name] = true
 					for _, x := range i.effectMembers[item.Name] {
-						out.ops[x] = i.ops[x]
+						if op := i.ops[x]; op != "" { out.ops[x] = op }
 						out.values[x] = i.values[x]
 					}
 				}
@@ -916,6 +939,18 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 	r.tys = map[string]string{"Int": "Int", "Float": "Float", "String": "String", "Bool": "Bool", "()": "()"}
 	r.ctors = map[string]string{"True": "True", "False": "False"}
 	r.ops = map[string]string{}
+	if r.node.name != "Basics" {
+		if basics := r.nodes["Basics"]; basics != nil {
+			for _, name := range []string{"Num", "Eq", "Ord", "Show"} {
+				if v := basics.iface.types[name]; v != "" {
+					r.tys[name] = v
+				}
+			}
+			if v := basics.iface.values["show"]; v != "" {
+				r.vals["show"] = v
+			}
+		}
+	}
 	if !r.node.bundled {
 		if ioNode := r.nodes["IO"]; ioNode != nil && ioNode.iface != nil {
 			for _, name := range []string{"print", "readLine"} {
@@ -977,6 +1012,38 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 	var out []ast.Decl
 	for _, d := range r.node.mod.Decls {
 		switch d := d.(type) {
+		case *ast.ClassDecl:
+			r.add(r.tys, d.Name, r.canon(d.Name), d.NameSpan)
+			for _, m := range d.Methods {
+				r.add(r.vals, m.Name, r.canon(m.Name), m.NameSpan)
+			}
+			d.Name = r.canon(d.Name)
+			for i := range d.Methods {
+				d.Methods[i].Name = r.canon(d.Methods[i].Name)
+				r.typ(d.Methods[i].Type)
+			}
+			out = append(out, d)
+		case *ast.InstanceDecl:
+			d.Owner = ""
+			if !r.node.private {
+				d.Owner = r.node.name
+			}
+			r.predicate(&d.Head)
+			r.instanceMethodsVisible(d)
+			for i := range d.Preds {
+				r.predicate(&d.Preds[i])
+			}
+			for _, m := range d.Methods {
+				locals := map[string]bool{}
+				for _, p := range m.Params {
+					if p.Name != "_" && p.Name != "()" {
+						r.checkBinder(p.Name, p.Sp, r.vals)
+						locals[p.Name] = true
+					}
+				}
+				r.expr(m.Body, r.vals, locals)
+			}
+			out = append(out, d)
 		case *ast.ValueDecl:
 			surface := d.Name
 			canon := r.canon(surface)
@@ -1007,6 +1074,9 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 			out = append(out, d)
 		case *ast.TypeDecl:
 			d.Name = r.canon(d.Name)
+			for i := range d.Deriving {
+				d.Deriving[i].Name = r.qualified(d.Deriving[i].Name, r.tys, "type", d.Deriving[i].Sp)
+			}
 			for i := range d.Ctors {
 				d.Ctors[i].Name = r.canon(d.Ctors[i].Name)
 				for _, a := range d.Ctors[i].Args {
@@ -1024,6 +1094,31 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 		}
 	}
 	return out, r.errs
+}
+
+// An abstract exported class can constrain clients, but an instance needs
+// access to every method. Qualified access counts, independently of exposing.
+func (r *resolver) instanceMethodsVisible(d *ast.InstanceDecl) {
+	class := d.Head.Class
+	i := strings.LastIndexByte(class, '.')
+	if i < 0 || class[:i] == r.node.name || class[:i] == "Basics" { return }
+	n := r.nodes[class[:i]]
+	if n == nil { return }
+	for _, decl := range n.mod.Decls {
+		cl, ok := decl.(*ast.ClassDecl)
+		if !ok || (cl.Name != class && canonical(n.name, cl.Name) != class) { continue }
+		for _, m := range cl.Methods {
+			name := m.Name
+			if !strings.Contains(name, ".") { name = canonical(n.name, name) }
+			visible := false
+			for _, iface := range r.quals {
+				for _, value := range iface.values { if value == name { visible = true } }
+			}
+			if !visible {
+				r.errs = append(r.errs, diag.Errorf(d.Head.Sp, "NON-PUBLIC METHOD", "An instance of `%s` requires access to method `%s`; import a public class interface exposing all methods.", class, name))
+			}
+		}
+	}
 }
 
 func clone(m map[string]string) map[string]string {
@@ -1125,7 +1220,15 @@ func (r *resolver) typ(t ast.TypeExpr) {
 func (r *resolver) typeAnn(a *ast.TypeAnn) {
 	if a != nil {
 		r.typ(a.Type)
+		for i := range a.Preds {
+			r.predicate(&a.Preds[i])
+		}
 	}
+}
+
+func (r *resolver) predicate(p *ast.PredExpr) {
+	p.Class = r.qualified(p.Class, r.tys, "type", p.Sp)
+	r.typ(p.Ty)
 }
 
 func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bool) {

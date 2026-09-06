@@ -1,0 +1,10 @@
+fango 0.1 — :help for commands
+> Box : a -> Box a
+> | | instance Show (Box a)
+> | | instance Show (Box Int)
+> specific : String
+> generic : String
+> Box : a -> Box a
+> | | instance Show (Box a)
+> regenerated : String
+> 

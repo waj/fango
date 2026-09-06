@@ -80,7 +80,7 @@ These are directions, not commitments or an ordering after the work above.
   structural and whether aliases can abbreviate effect rows.
 - Numeric semantics beyond the current `Int`/`Float` model: overflow, integer
   division, conversions, and possible arbitrary precision.
-- Typeclasses for general `Eq`, `Ord`, and `Show` evidence. Native declaration
-  predicates reserve this seam without introducing temporary capability kinds;
-  coherence and representation remain open.
+- Extend type classes only from concrete needs: superclasses, method-local
+  polymorphism, higher kinds, and default methods remain deferred. Mutually
+  recursive deriving groups and richer precedence-aware display are also open.
 - A canonical formatter for the layout syntax and an LSP for editor support.

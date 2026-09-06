@@ -17,6 +17,7 @@ import (
 // make capture-by-value trivially sound.
 
 type liftedLocal struct {
+	scheme   types.Scheme
 	defName  string
 	frees    []scopeVar // captured enclosing locals, in scope order
 	genTy    types.Type // the lifted definition's full generic type: frees curried onto the local's scheme body
@@ -36,8 +37,11 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 	rawLocalGenTy = el.ck.Sub.Apply(rawLocalGenTy)
 	localGenTy := eraseRows(rawLocalGenTy)
 	frees := el.freeLocals(bind)
-	genTy := localGenTy
-	rawGenTy := rawLocalGenTy
+	savedDicts := len(el.dicts)
+	dictNames, dictTypes := el.bindDictionaries(sch.Preds)
+	defer func() { el.dicts = el.dicts[:savedDicts]; el.popScope(len(dictNames)) }()
+	genTy := prependTypes(dictTypes, localGenTy)
+	rawGenTy := prependTypes(dictTypes, rawLocalGenTy)
 	for i := len(frees) - 1; i >= 0; i-- {
 		genTy = &types.TFun{Arg: frees[i].ty, Eff: types.Row{}, Ret: genTy}
 		rawGenTy = &types.TFun{Arg: frees[i].ty, Eff: types.Row{}, Ret: rawGenTy}
@@ -51,13 +55,14 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 		defName = fmt.Sprintf("_lift%d_%s", el.ck.LiftGen, bind.Name)
 	}
 	lf := &liftedLocal{
+		scheme:   sch,
 		defName:  defName,
 		frees:    frees,
 		genTy:    genTy,
 		rawGenTy: rawGenTy,
 		vars:     runtimeRigidVars(rawGenTy),
-		arity:    len(frees) + len(bind.Params),
-		effects:  executingEffects(rawGenTy, len(frees)+len(bind.Params)),
+		arity:    len(frees) + len(dictNames) + len(bind.Params),
+		effects:  executingEffects(rawGenTy, len(frees)+len(dictNames)+len(bind.Params)),
 	}
 	el.lifted[bind.Name] = lf
 
@@ -65,6 +70,7 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 	for _, f := range frees {
 		params = append(params, f.name)
 	}
+	params = append(params, dictNames...)
 	var body core.Expr
 	if len(bind.Params) > 0 {
 		argTys, _ := core.PeelFun(localGenTy, len(bind.Params))
@@ -97,8 +103,15 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 // type (which quantifies the enclosing definition's variables too, when the
 // frees' types mention them).
 func (el *elab) liftedCallee(lf *liftedLocal, occTy, rawOccTy types.Type) callee {
-	ty := occTy
-	rawTy := rawOccTy
+	var dictArgs []core.Expr
+	var dictTypes []types.Type
+	for _, p := range el.instantiatedPreds(lf.scheme, rawOccTy) {
+		d := el.dictionary(p)
+		dictArgs = append(dictArgs, d)
+		dictTypes = append(dictTypes, d.Type())
+	}
+	ty := prependTypes(dictTypes, occTy)
+	rawTy := prependTypes(dictTypes, rawOccTy)
 	for i := len(lf.frees) - 1; i >= 0; i-- {
 		ty = &types.TFun{Arg: lf.frees[i].ty, Eff: types.Row{}, Ret: ty}
 		rawTy = &types.TFun{Arg: lf.frees[i].ty, Eff: types.Row{}, Ret: rawTy}
@@ -107,6 +120,7 @@ func (el *elab) liftedCallee(lf *liftedLocal, occTy, rawOccTy types.Type) callee
 	for i, f := range lf.frees {
 		pre[i] = &core.VarRef{Name: f.name, Ty: f.ty}
 	}
+	pre = append(pre, dictArgs...)
 	var tyArgs []types.Type
 	evidence := append([]core.EffectInstance(nil), lf.effects...)
 	for i := range evidence {
@@ -134,6 +148,11 @@ func (el *elab) liftedCallee(lf *liftedLocal, occTy, rawOccTy types.Type) callee
 // contributes that sibling's frees instead (the use site will pass them).
 func (el *elab) freeLocals(bind *ast.LocalBind) []scopeVar {
 	need := map[string]bool{}
+	for _, d := range el.dicts {
+		if v, ok := d.value.(*core.VarRef); ok {
+			need[v.Name] = true
+		}
+	}
 	var visit func(e ast.Expr)
 	visitVar := func(name string) {
 		if name == bind.Name {

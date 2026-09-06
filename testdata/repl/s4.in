@@ -1,4 +1,4 @@
-type MaybeInt = NothingI | JustI Int
+type MaybeInt = NothingI | JustI Int deriving (Eq, Show)
 JustI 3
 NothingI
 JustI 1 == JustI 1
@@ -18,8 +18,8 @@ case JustI 4 of
 bad m =
     case m of
         JustI n -> n
-type Color = Red | Green
+type Color = Red | Green deriving (Eq, Show)
 Red == Green
-type Color = Red | Green | Blue
+type Color = Red | Green | Blue deriving (Eq, Show)
 Blue
 :quit

@@ -1,3 +1,3 @@
 (core
-  (def area Float (let r Float (float 2 Float) (let tau Float (native Basics.add (var r Float) (var r Float) Float) (native Basics.mul (float 3.14159 Float) (var tau Float) Float))))
+  (def area Float (let r Float (float 2 Float) (let tau Float (native Basics.floatAdd (var r Float) (var r Float) Float) (native Basics.floatMul (float 3.14159 Float) (var tau Float) Float))))
   (def main Float (var area Float)))

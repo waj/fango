@@ -49,15 +49,15 @@ func TestInstallPreludeUsesDeclaredMetadata(t *testing.T) {
 	if errs := ck.InstallPrelude(); len(errs) > 0 {
 		t.Fatalf("prelude errors: %v", errs)
 	}
-	if ck.Natives["Basics.add"] == nil {
-		t.Fatal("embedded Basics.add native metadata was not installed")
+	if ck.Natives["Basics.intAdd"] == nil || ck.Methods["Basics.add"].Class != ck.Classes["Basics.Num"] {
+		t.Fatal("embedded scalar natives and Num methods were not installed")
 	}
-	print := ck.Operations["print"]
-	if print == nil || print.Native == nil || print.Native.Name != "IO.print" {
-		t.Fatalf("ambient print does not reference its declared native: %+v", print)
+	print, ok := ck.Env.Lookup("print")
+	if !ok || ck.Operations["print"] != nil {
+		t.Fatal("ambient print must be an ordinary constrained function")
 	}
-	if len(print.Scheme.Preds) != 1 || print.Scheme.Preds[0].Class != "Show" {
-		t.Fatalf("print predicates = %+v, want one Show obligation", print.Scheme.Preds)
+	if len(print.Preds) != 1 || print.Preds[0].Class != "Basics.Show" {
+		t.Fatalf("print predicates = %+v, want one Show obligation", print.Preds)
 	}
 	write := ck.Operations["IO.write"]
 	if write == nil || write.Native == nil || write.Native.Name != "IO.write" {
@@ -70,40 +70,40 @@ func TestPositive(t *testing.T) {
 		src  string
 		want string // "name : type" per decl, comma-separated, zonked
 	}{
-		{"x = 1", "x : number"},
-		{"x = 1 + 2 * 3", "x : number"},
+		{"x = 1", "x : Num a => a"},
+		{"x = 1 + 2 * 3", "x : Num a => a"},
 		// Generalization at each binding: later declarations instantiate
 		// fresh number vars, which the shared test printer numbers.
-		{"x = 40\ny = x + 2", "x : number, y : number2"},
-		{"x = 1\ny = x\nmain = y - x", "x : number, y : number2, main : number3"},
+		{"x = 40\ny = x + 2", "x : Num a => a, y : Num b => b"},
+		{"x = 1\ny = x\nmain = y - x", "x : Num a => a, y : Num b => b, main : Int"},
 		{"x = 1.5", "x : Float"},
 		{"x = 1 + 0.5", "x : Float"},
 		{"f = 1 / 2", "f : Float"}, // number literals unify with Float (Elm)
 		{"s = \"a\" ++ \"b\"", "s : String"},
 		{"b = 1 <= 2", "b : Bool"},
 		{"t = True", "t : Bool"},
-		{"x = if True then 1 else 2", "x : number"},
-		{"x = -5", "x : number"},
+		{"x = if True then 1 else 2", "x : Num a => a"},
+		{"x = -5", "x : Num a => a"},
 		{"x = -2.5", "x : Float"},
 		{"main = print (1 + 2)", "main : ()"},
-		{"x =\n  a = 1\n  b = a + 2\n  a * b", "x : number"},
+		{"x =\n  a = 1\n  b = a + 2\n  a * b", "x : Num a => a"},
 		{"x =\n  r = 2.0\n  r * r", "x : Float"},
 		{"x : Int\nx = 1", "x : Int"},
 		{"x : Float\nx = 1", "x : Float"}, // annotation forces the literal
-		{"add x y = x + y", "add : number -> number -> number"},
-		{"inc n = n + 1\nmain = inc 41", "inc : number -> number, main : number2"},
-		{"fib n = if n < 2 then n else fib (n - 1) + fib (n - 2)", "fib : number -> number"},
-		{"f = \\x -> x + 1", "f : number -> number"},
+		{"add x y = x + y", "add : Num a => a -> a -> a"},
+		{"inc n = n + 1\nmain = inc 41", "inc : Num a => a -> a, main : Int"},
+		{"fib n = if n < 2 then n else fib (n - 1) + fib (n - 2)", "fib : (Num a, Ord a) => a -> a"},
+		{"f = \\x -> x + 1", "f : Num a => a -> a"},
 		{"add : Int -> Int -> Int\nadd x y = x + y", "add : Int -> Int -> Int"},
-		{"pure() = 1", "pure : () -> number"},
+		{"pure() = 1", "pure : Num a => () -> a"},
 		{"saved = readLine", "saved : () ->{IO} String"},
 		{"main = print (readLine())", "main : ()"},
 		{"make : () ->{IO} (() -> ())\nmake() =\n  print \"now\"\n  \\_ -> ()", "make : () ->{IO} () -> ()"},
 		{"later : () -> (() ->{IO} ())\nlater() = \\_ -> print \"later\"", "later : () -> () ->{IO} ()"},
-		{"add x y = x + y\ninc = add 1", "add : number -> number -> number, inc : number2 -> number2"},
+		{"add x y = x + y\ninc = add 1", "add : Num a => a -> a -> a, inc : Num b => b -> b"},
 		// Generalization: uses no longer pin the definition.
-		{"id x = x\nmain = id 1 + 1", "id : a -> a, main : number"},
-		{"v =\n  go n = if n < 1 then 0 else go (n - 1)\n  go 3", "v : number"},
+		{"id x = x\nmain = id 1 + 1", "id : a -> a, main : Int"},
+		{"v =\n  go n = if n < 1 then 0 else go (n - 1)\n  go 3", "v : Num a => a"},
 	}
 	for _, c := range cases {
 		ck, infos, errs := check(t, c.src)
@@ -114,12 +114,19 @@ func TestPositive(t *testing.T) {
 		var parts []string
 		p := types.NewPrinter()
 		for _, info := range infos {
-			parts = append(parts, info.Name+" : "+p.Type(ck.Sub.Apply(info.Type)))
+			parts = append(parts, info.Name+" : "+p.Scheme(checkedScheme(ck, info)))
 		}
 		if got := strings.Join(parts, ", "); got != c.want {
 			t.Errorf("%q: got %q, want %q", c.src, got, c.want)
 		}
 	}
+}
+
+func checkedScheme(ck *Checker, info DeclInfo) types.Scheme {
+	s := info.Scheme
+	s.Body = ck.Sub.Apply(s.Body)
+	s.Preds = ck.NormalizePreds(s.Preds)
+	return s
 }
 
 func TestNegative(t *testing.T) {
@@ -133,23 +140,23 @@ func TestNegative(t *testing.T) {
 		{"x = z + 1\nmain = x", "NAMING ERROR", 1},
 		// Use-before-define is a naming error: source-order scoping.
 		{"main = x\nx = 1", "NAMING ERROR", 1},
-		{"x = 1 + \"a\"", "TYPE MISMATCH", 1},                 // WhyOperand
-		{"x = 1 2", "TYPE MISMATCH", 1},                       // WhyCall: not a function
-		{"x = if 1 then 2 else 3", "TYPE MISMATCH", 1},        // WhyIfCondition
-		{"x = if True then 1 else \"a\"", "TYPE MISMATCH", 1}, // WhyIfBranches
-		{"x = 1 == \"a\"", "TYPE MISMATCH", 1},                // WhyCompare
-		{"x = -\"a\"", "TYPE MISMATCH", 1},                    // WhyNegate
-		{"x = \"a\" / \"b\"", "TYPE MISMATCH", 1},             // WhyOpRequires
-		{"x = 1 ++ \"a\"", "TYPE MISMATCH", 1},                // WhyOpRequires ++
-		{"x = Just", "NAMING ERROR", 1},                       // unknown constructor
+		{"x = 1 + \"a\"", "MISSING INSTANCE", 1},                 // WhyOperand
+		{"x = 1 2", "MISSING INSTANCE", 1},                       // WhyCall: not a function
+		{"x = if 1 then 2 else 3", "MISSING INSTANCE", 1},        // WhyIfCondition
+		{"x = if True then 1 else \"a\"", "MISSING INSTANCE", 1}, // WhyIfBranches
+		{"x = 1 == \"a\"", "MISSING INSTANCE", 1},                // WhyCompare
+		{"x = -\"a\"", "MISSING INSTANCE", 1},                    // WhyNegate
+		{"x = \"a\" / \"b\"", "TYPE MISMATCH", 1},                // WhyOpRequires
+		{"x = 1 ++ \"a\"", "MISSING INSTANCE", 1},                // WhyOpRequires ++
+		{"x = Just", "NAMING ERROR", 1},                          // unknown constructor
 		{"x = print 1\nmain = x", "UNHANDLED EFFECT", 1},
 		{"x = 1\ny =\n  x = 2\n  x + 1", "SHADOWING", 3},
 		{"y =\n  a = 1\n  a = 2\n  a", "SHADOWING", 3},
 		{"y =\n  a = b + 1\n  b = 2\n  a", "NAMING ERROR", 2},    // use-before-define in block
-		{"x : String\nx = 1", "TYPE MISMATCH", 2},                // WhyAnnotation
+		{"x : String\nx = 1", "MISSING INSTANCE", 2},             // WhyAnnotation
 		{"x : Foo\nx = 1", "NAMING ERROR", 1},                    // unknown type name
-		{"x : a\nx = 1", "TYPE MISMATCH", 2},                     // annotation more general than the number body
-		{"f : Int -> Int\nf = 1", "TYPE MISMATCH", 2},            // arrow annotation resolves, body mismatches
+		{"x : a\nx = 1", "MISSING CONSTRAINT", 1},                // annotation more general than the number body
+		{"f : Int -> Int\nf = 1", "MISSING INSTANCE", 2},         // arrow annotation resolves, body mismatches
 		{"saved : String\nsaved = readLine", "TYPE MISMATCH", 2}, // bare Unit function is not forced
 		{"main x = x", "MAIN TAKES NO PARAMETERS", 1},
 		{"f x x = x", "SHADOWING", 1},           // duplicate params
@@ -234,32 +241,14 @@ func TestOpenRowUnification(t *testing.T) {
 	}
 }
 
-// Direct unifier tests for constraint-solver paths awkward to isolate through
-// surface syntax:
-// Number-kind rejection and the occurs check.
-func TestUnifyNumberKind(t *testing.T) {
+// Class constraints are independent of unification's ordinary type kind.
+func TestOrdinaryVariablesHaveNoNumericKind(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
-	sub := Subst{}
-
-	n := sup.FreshVar(types.Number)
-	if m := unify(n, b.Int, sub, b, &types.Supply{}); m != nil {
-		t.Errorf("number ~ Int should unify: %v", m.note)
-	}
-
-	n2 := sup.FreshVar(types.Number)
-	if m := unify(n2, b.String, sub, b, &types.Supply{}); m == nil {
-		t.Error("number ~ String should fail")
-	}
-
-	// A general var unified with a number var must keep the Number kind.
-	n3 := sup.FreshVar(types.Number)
-	g := sup.FreshVar(types.General)
-	if m := unify(g, n3, sub, b, &types.Supply{}); m != nil {
-		t.Fatalf("general ~ number should unify")
-	}
-	if m := unify(g, b.Bool, sub, b, &types.Supply{}); m == nil {
-		t.Error("after merging with a number var, Bool should be rejected")
+	for _, ty := range []types.Type{b.Int, b.Float, b.String, b.Bool} {
+		if m := unify(sup.FreshVar(types.General), ty, Subst{}, b, sup); m != nil {
+			t.Errorf("ordinary variable should unify with %s", types.Show(ty))
+		}
 	}
 }
 

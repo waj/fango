@@ -24,7 +24,6 @@ import (
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/natives"
-	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -32,6 +31,7 @@ import (
 // returns without errors, Core contains no metavariables — asserted by
 // core.Lint.
 func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error) {
+	infos = append(append([]infer.DeclInfo{}, ck.PreludeInfos...), infos...)
 	effects := make([]*types.EffectInfo, 0, len(ck.Effects))
 	seenEffects := map[int]bool{}
 	for _, eff := range ck.Effects {
@@ -44,6 +44,11 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 	sort.Slice(effects, func(i, j int) bool { return effects[i].Unique < effects[j].Unique })
 	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effects, Entry: ck.EntryName, Natives: ck.Natives}
 	var errs []diag.Error
+	for _, inst := range ck.Instances {
+		d, es := instanceDefinition(inst, ck)
+		p.Defs = append(p.Defs, d)
+		errs = append(errs, es...)
+	}
 	for _, info := range infos {
 		owner := symbolOwner(info.Name)
 		defs, declErrs := decl(info, ck, owner != "")
@@ -63,6 +68,11 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 			}
 		}
 	}
+	for _, d := range p.Defs {
+		if d.Name == p.Entry && len(d.Params) == 0 {
+			p.EntryDisplay = Display(&core.VarRef{Name: d.Name, Ty: d.Type}, ck, d.Owner)
+		}
+	}
 	return p, errs
 }
 
@@ -80,6 +90,7 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 	el.defaultFree(rawType)
 	rawType = ck.Sub.Apply(rawType)
 	defType := eraseRows(rawType)
+	dictNames, dictTypes := el.bindDictionaries(info.Scheme.Preds)
 	params := make([]string, len(info.Params))
 	if len(info.Params) > 0 {
 		argTys, _ := core.PeelFun(defType, len(info.Params))
@@ -92,9 +103,9 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 	}
 	def := core.Def{
 		Name:         info.Name,
-		Type:         defType,
+		Type:         prependTypes(dictTypes, defType),
 		TyParams:     runtimeRigidVars(rawType),
-		Params:       params,
+		Params:       append(dictNames, params...),
 		EffectParams: executingEffects(rawType, len(params)),
 		Body:         el.anf(el.expr(info.Body)),
 	}
@@ -169,15 +180,20 @@ func executingEffects(t types.Type, arity int) []core.EffectInstance {
 // inputs can contain blocks); the caller must install them before
 // evaluating the expression.
 func Expr(e ast.Expr, ck *infer.Checker) (core.Expr, []core.Def, []diag.Error) {
+	if errs := ck.DefaultPreds(ck.PendingPreds, e.Span()); len(errs) > 0 {
+		return nil, nil, errs
+	}
 	el := newElab(ck, "", types.Scheme{})
 	ce := el.anf(el.expr(e))
 	return ce, el.aux, el.errs
 }
 
 type elab struct {
-	ck   *infer.Checker
-	errs []diag.Error
-	tmp  int // fresh-name counter for spine temporaries, per Decl/Expr
+	dicts []dictionary
+	owner string
+	ck    *infer.Checker
+	errs  []diag.Error
+	tmp   int // fresh-name counter for spine temporaries, per Decl/Expr
 
 	// declName/declScheme identify the declaration being elaborated: its
 	// self-references must instantiate against THIS scheme (the REPL
@@ -203,6 +219,7 @@ type elab struct {
 
 func newElab(ck *infer.Checker, declName string, declScheme types.Scheme) *elab {
 	return &elab{ck: ck, declName: declName, declScheme: declScheme,
+		owner:    symbolOwner(declName),
 		scopeIdx: map[string]int{}, lifted: map[string]*liftedLocal{}}
 }
 
@@ -255,6 +272,9 @@ func coreParamName(p ast.Param) string {
 }
 
 func (el *elab) expr(e ast.Expr) core.Expr {
+	if desugared := el.ck.Desugared[e]; desugared != nil {
+		return el.expr(desugared)
+	}
 	ty := el.zonkDefault(el.ck.ExprTypes[e])
 	switch e := e.(type) {
 	case *ast.IntLit:
@@ -271,11 +291,14 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 	case *ast.UnitLit:
 		return &core.UnitLit{Ty: ty}
 	case *ast.Var:
+		if _, local := el.scopeIdx[e.Name]; local {
+			return &core.VarRef{Name: e.Name, Ty: ty, Local: true}
+		}
+		if method := el.ck.Methods[e.Name]; method != nil {
+			return el.methodValue(method, el.ck.ExprTypes[e])
+		}
 		if op := el.ck.Operations[e.Name]; op != nil {
-			if op.Owner == el.ck.IO && types.SurfaceName(op.Name) == "print" {
-				args, _ := core.PeelFun(ty, op.Arity)
-				el.checkPrintable(args[0], e.Sp)
-			}
+
 			return el.operationValue(op, ty, el.ck.Sub.Apply(el.ck.ExprTypes[e]))
 		}
 		if n := el.ck.Natives[e.Name]; n != nil {
@@ -326,7 +349,6 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		if n := el.ck.BinNatives[e]; n != nil {
 			return el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Ty: ty, Args: []core.Expr{l, r}})
 		}
-		el.checkOperands(e, l.Type())
 		return el.fold(&core.BinOp{Op: e.Op, Ty: ty, L: l, R: r})
 	case *ast.Lambda:
 		el.defaultFree(el.ck.Sub.Apply(el.ck.ExprTypes[e]))
@@ -470,120 +492,6 @@ func (el *elab) unique(t types.Type) int {
 	return -1
 }
 
-// numberVar reports whether t is a Number-kinded rigid variable — numeric
-// operators and comparisons compile natively on its Go type-set constraint
-// (doc/design.md, "Type inference"), so it needs no equality staging.
-func numberVar(t types.Type) bool {
-	v, ok := t.(*types.TVar)
-	return ok && v.Rigid && v.Kind == types.Number
-}
-
-// generalVarIn returns a General-kinded rigid variable occurring anywhere in
-// t, or nil — the `==`-at-a-type-variable staging check (doc/design.md, "Go backend and runtime"): equality at
-// such a type needs typeclass evidence, which arrives later.
-func generalVarIn(t types.Type) *types.TVar {
-	switch t := t.(type) {
-	case *types.TVar:
-		if t.Kind == types.General {
-			return t
-		}
-		return nil
-	case *types.TCon:
-		for _, a := range t.Args {
-			if v := generalVarIn(a); v != nil {
-				return v
-			}
-		}
-		return nil
-	case *types.TFun:
-		if v := generalVarIn(t.Arg); v != nil {
-			return v
-		}
-		return generalVarIn(t.Ret)
-	default:
-		return nil
-	}
-}
-
-// checkPrintable is builtin IO.print's ground check: scalars and declared
-// ADTs print (the latter via derived show, emitted on demand) — unless the
-// value can contain a function, which has no showable form.
-func (el *elab) checkPrintable(t types.Type, sp source.Span) {
-	switch el.unique(t) {
-	case el.ck.B.Int.Unique, el.ck.B.Float.Unique, el.ck.B.String.Unique, el.ck.B.Bool.Unique:
-		return
-	}
-	if len(types.RigidVarsIn(t)) > 0 {
-		// Unreachable today (print lives in ground main and defaulted REPL
-		// inputs), but the invariant is cheap to keep honest.
-		el.errs = append(el.errs, diag.Errorf(sp, "TYPE MISMATCH",
-			"`print` needs a concrete type, but this is a `%s`.", types.Show(t)))
-		return
-	}
-	if con, ok := t.(*types.TCon); ok {
-		if _, isADT := el.ck.ADTs[con.Unique]; isADT {
-			if el.ck.ContainsFunction(t) {
-				el.errs = append(el.errs, diag.Errorf(sp, "TYPE MISMATCH",
-					"`print` cannot print a `%s` — its values can contain functions,\nwhich have no printable form.", types.Show(t)))
-			}
-			return
-		}
-	}
-	el.errs = append(el.errs, diag.Errorf(sp, "TYPE MISMATCH",
-		"`print` can print Int, Float, String, Bool, and custom-type values,\nbut this is a `%s`.", types.Show(t)))
-}
-
-// checkOperands is the post-defaulting equatable/orderable check — what
-// Elm's `comparable` kind flag does, done where types are finally ground.
-// Migrates into Pred residuals when typeclasses land.
-func (el *elab) checkOperands(e *ast.BinOp, operandTy types.Type) {
-	u := el.unique(operandTy)
-	b := el.ck.B
-	switch e.Op {
-	case "==", "/=":
-		switch u {
-		case b.Int.Unique, b.Float.Unique, b.String.Unique, b.Bool.Unique:
-		default:
-			// Number-kinded variables compare natively on their Go type-set
-			// constraint (doc/design.md, "Type inference"); General type variables need typeclass
-			// evidence, which remains unsupported without typeclasses; see
-			// doc/design.md, "Type inference".
-			if numberVar(operandTy) {
-				return
-			}
-			if v := generalVarIn(operandTy); v != nil {
-				el.errs = append(el.errs, diag.Errorf(e.OpSpan, "EQUALITY AT A TYPE VARIABLE",
-					"This (%s) compares values typed `%s` — equality at a type\nvariable arrives with typeclasses. For now, use (%s) only where the\ntype is concrete.", e.Op, types.Show(operandTy), e.Op))
-				return
-			}
-			// Declared ADTs get derived structural equality (doc/design.md, "Go backend and runtime") — except
-			// where a payload can contain a function, rejected at compile
-			// time (decidable at ground types; Elm crashes at runtime here).
-			if con, ok := operandTy.(*types.TCon); ok {
-				if _, isADT := el.ck.ADTs[con.Unique]; isADT {
-					if el.ck.ContainsFunction(operandTy) {
-						el.errs = append(el.errs, diag.Errorf(e.OpSpan, "TYPE MISMATCH",
-							"I cannot check equality of `%s` values with (%s): they can\ncontain functions, and functions have no equality.", types.Show(operandTy), e.Op))
-					}
-					return
-				}
-			}
-			el.errs = append(el.errs, diag.Errorf(e.OpSpan, "TYPE MISMATCH",
-				"I cannot check equality of `%s` values with (%s).", types.Show(operandTy), e.Op))
-		}
-	case "<", ">", "<=", ">=":
-		switch u {
-		case b.Int.Unique, b.Float.Unique, b.String.Unique:
-		default:
-			if numberVar(operandTy) {
-				return
-			}
-			el.errs = append(el.errs, diag.Errorf(e.OpSpan, "TYPE MISMATCH",
-				"I cannot use (%s) with `%s` values. (%s) works on Int, Float,\nand String.", e.Op, types.Show(operandTy), e.Op))
-		}
-	}
-}
-
 // fold constant-folds arithmetic over literal operands with the exact
 // operations eval uses (wrapping int64, IEEE float64) — see the package
 // comment for why this is load-bearing.
@@ -609,7 +517,7 @@ func (el *elab) fold(e core.Expr) core.Expr {
 		return e
 	case *core.NativeCall:
 		spec, ok := natives.Lookup(e.Name)
-		if !ok || !spec.Foldable || len(e.Args) != 2 {
+		if !ok || !spec.Foldable || len(e.Args) != spec.Arity {
 			return e
 		}
 		literal := func(x core.Expr) (any, bool) {
@@ -622,12 +530,15 @@ func (el *elab) fold(e core.Expr) core.Expr {
 				return nil, false
 			}
 		}
-		l, lok := literal(e.Args[0])
-		r, rok := literal(e.Args[1])
-		if !lok || !rok {
-			return e
+		args := make([]any, len(e.Args))
+		for i, a := range e.Args {
+			var ok bool
+			args[i], ok = literal(a)
+			if !ok {
+				return e
+			}
 		}
-		v, err := spec.Eval(&natives.Runtime{}, []any{l, r})
+		v, err := spec.Eval(&natives.Runtime{}, args)
 		if err != nil {
 			return e
 		}
@@ -724,8 +635,6 @@ func (el *elab) defaultFree(t types.Type) {
 			return
 		}
 		switch t.Kind {
-		case types.Number:
-			el.ck.Sub[t.ID] = el.ck.B.Int
 		case types.General:
 			el.ck.Sub[t.ID] = el.ck.B.Unit
 		case types.RowVar:

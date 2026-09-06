@@ -183,35 +183,6 @@ func bindVar(v *types.TVar, t types.Type, sub Subst, bi *types.Builtins) *mismat
 		}
 		sub[v.ID] = t
 		return nil
-	case types.Number:
-		switch t := t.(type) {
-		case *types.TVar:
-			if t.Kind == types.RowVar {
-				return &mismatch{a: v, b: t, note: "an effect row cannot be used as a number type"}
-			}
-			if t.Kind == types.Number {
-				sub[v.ID] = t
-				return nil
-			}
-			if t.Rigid {
-				// A General rigid var is an annotation variable claiming
-				// full generality — a Number obligation cannot narrow it
-				// (the reverse binding would silently solve the skolem).
-				return &mismatch{a: v, b: t, note: "the annotation says this can be any type, but it is used as a number"}
-			}
-			// Keep the Number kind: bind the general var to the
-			// number var, not the other way around.
-			sub[t.ID] = v
-			return nil
-		case *types.TCon:
-			if t.Unique == bi.Int.Unique || t.Unique == bi.Float.Unique {
-				sub[v.ID] = t
-				return nil
-			}
-			return &mismatch{a: v, b: t, note: fmt.Sprintf("`%s` is not a number type", t.Name)}
-		default:
-			return &mismatch{a: v, b: t, note: "only Int and Float are number types"}
-		}
 	case types.RowVar:
 		switch t := t.(type) {
 		case *types.TVar:

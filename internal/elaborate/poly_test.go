@@ -43,7 +43,7 @@ func elabPoly(t *testing.T, src string) *core.Prog {
 	if lintErrs := core.Lint(prog, b); len(lintErrs) > 0 {
 		t.Fatalf("core lint: %v\n%s", lintErrs, core.Dump(prog))
 	}
-	return prog
+	return fixtureProgram(prog)
 }
 
 func elabPolyErr(t *testing.T, src string) string {
@@ -85,11 +85,11 @@ main = print (len (Cons 1 Nil))
 	for _, want := range []string{
 		"(type List (params a) (ctor Nil) (ctor Cons a (List a)))",
 		// The result generalizes as `number` too — Elm semantics (doc/design.md, "Type inference").
-		"(def len (typarams a number) (params xs) List a -> number",
+		"(def len (typarams a b) (params _dict0 xs) _dictionary_Num b -> List a -> b",
 		// The recursive call instantiates at the def's own type params.
-		"(app/worker @[a number] (var len List a -> number)",
+		"(app/worker @[a b] (var len _dictionary_Num b -> List a -> b)",
 		// main's call instantiates at the defaulted ground types.
-		"(app/worker @[Int Int] (var len List Int -> Int)",
+		"(app/worker @[Int Int] (var len _dictionary_Num Int -> List Int -> Int)",
 		"(app/ctor @[Int]",
 	} {
 		if !strings.Contains(dump, want) {
@@ -147,15 +147,15 @@ v =
 	}
 	for _, want := range []string{
 		// The monomorphism restriction keeps the value bindings as Lets…
-		"(let k number (int 10 number)",
+		"(let k a (app/value",
 		// …while the function bindings lift.
-		"(def _lift1_wrap (typarams a) (params y) a -> Box a",
+		"(def _lift1_wrap (typarams a b) (params _dict0 y) _dictionary_Num a -> b -> Box b",
 		// keep captures k as a leading param; k's type is v's own number
 		// var (v generalizes it at top level), so keep quantifies it too.
-		"(def _lift2_keep (typarams number a) (params k y) number -> a -> number",
+		"(def _lift2_keep (typarams a b) (params _dict0 k y) _dictionary_Num a -> a -> b -> a",
 		// Uses instantiate per occurrence: wrap at Float and at number.
-		"(app/worker @[Float] (var _lift1_wrap Float -> Box Float)",
-		"(app/worker @[number] (var _lift1_wrap number -> Box number)",
+		"(app/worker @[a Float] (var _lift1_wrap _dictionary_Num a -> Float -> Box Float)",
+		"(app/worker @[a a] (var _lift1_wrap _dictionary_Num a -> a -> Box a)",
 	} {
 		if !strings.Contains(dump, want) {
 			t.Errorf("dump missing %q:\n%s", want, dump)
@@ -175,9 +175,9 @@ main =
 `)
 	dump := core.Dump(prog)
 	for _, want := range []string{
-		"(def double (typarams number) (params x) number -> number",
-		"(app/worker @[Int] (var double Int -> Int)",
-		"(app/worker @[Float] (var double Float -> Float)",
+		"(def double (typarams a) (params _dict0 x) _dictionary_Num a -> a -> a",
+		"(app/worker @[Int] (var double _dictionary_Num Int -> Int -> Int)",
+		"(app/worker @[Float] (var double _dictionary_Num Float -> Float -> Float)",
 	} {
 		if !strings.Contains(dump, want) {
 			t.Errorf("dump missing %q:\n%s", want, dump)
@@ -200,19 +200,19 @@ len xs =
 main = print (len Nil)
 `)
 	dump := core.Dump(prog)
-	if !strings.Contains(dump, "(app/worker @[() Int] (var len List () -> Int)") {
+	if !strings.Contains(dump, "(app/worker @[() Int] (var len _dictionary_Num Int -> List () -> Int)") {
 		t.Errorf("dump missing Unit-defaulted instantiation:\n%s", dump)
 	}
 }
 
 // TestPolyEqStaged pins the unsupported == at a type variable diagnostic;
 // see doc/design.md, "Type inference".
-func TestPolyEqStaged(t *testing.T) {
-	title := elabPolyErr(t, `member x y = x == y
+func TestPolyEqEvidence(t *testing.T) {
+	prog := elabPoly(t, `member x y = x == y
 main = print (member 1 2)
 `)
-	if title != "EQUALITY AT A TYPE VARIABLE" {
-		t.Errorf("got %q", title)
+	if !strings.Contains(core.Dump(prog), "_dictionary_Eq a -> a -> a -> Bool") {
+		t.Errorf("generic equality lacks dictionary evidence: %s", core.Dump(prog))
 	}
 }
 

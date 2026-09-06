@@ -1,0 +1,8 @@
+module Capability exposing (Label(..), Token, token)
+
+class Label a
+    label : a -> String
+
+type Token = Token String
+
+token = Token "hidden"

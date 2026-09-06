@@ -1,4 +1,4 @@
-Cons 2 (Cons 3 Nil)
+Cons 2 Cons 3 Nil
 1
 2
-Cons 11 (Cons 12 Nil)
+Cons 11 Cons 12 Nil

@@ -1,6 +1,6 @@
 (core
-  (def a Bool (native Basics.lt (int 1 Int) (int 2 Int) Bool))
-  (def b Bool (native Basics.eq (string "x" String) (string "y" String) Bool))
-  (def c Bool (native Basics.ge (float 1.5 Float) (float 0.5 Float) Bool))
-  (def d Bool (native Basics.eq (bool true Bool) (bool false Bool) Bool))
+  (def a Bool (native Basics.intLt (int 1 Int) (int 2 Int) Bool))
+  (def b Bool (native Basics.stringEq (string "x" String) (string "y" String) Bool))
+  (def c Bool (native Basics.floatGe (float 1.5 Float) (float 0.5 Float) Bool))
+  (def d Bool (native Basics.boolEq (bool true Bool) (bool false Bool) Bool))
   (def main Int (if Int (var a Bool) (int 1 Int) (int 2 Int))))

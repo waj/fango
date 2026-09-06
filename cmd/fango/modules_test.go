@@ -14,7 +14,7 @@ import (
 )
 
 func TestMultiModuleDifferential(t *testing.T) {
-	for _, fixture := range []string{"basic", "effects"} {
+	for _, fixture := range []string{"basic", "effects", "classes"} {
 		t.Run(fixture, func(t *testing.T) { testMultiModule(t, fixture) })
 	}
 }
@@ -32,17 +32,14 @@ func testMultiModule(t *testing.T, fixture string) {
 	}
 	env := eval.NewEnv()
 	env.DefineProg(prog)
-	v, err := eval.ForceIO(context.Background(), prog.Entry, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{}))
+	_, err = eval.ForceIO(context.Background(), prog.Entry, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var entryType = prog.Defs[len(prog.Defs)-1].Type
-	for i := range prog.Defs {
-		if prog.Defs[i].Name == prog.Entry {
-			entryType = prog.Defs[i].Type
-		}
-	}
-	if got := strings.TrimSpace(eval.Show(v, entryType, ck.B)); got != strings.TrimSpace(string(want)) {
+	_ = ck
+	shown, err := eval.EvalIO(context.Background(), prog.EntryDisplay, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{}))
+	if err != nil { t.Fatal(err) }
+	if got := strings.TrimSpace(shown.(string)); got != strings.TrimSpace(string(want)) {
 		t.Fatalf("interpreter got %q, want %q", got, want)
 	}
 
@@ -205,7 +202,7 @@ func TestModularCrossPackageABI(t *testing.T) {
 	root := t.TempDir()
 	writeModuleFile(t, root, "Base.fango", `module Base exposing (Token, token)
 
-type Token = Token Int
+type Token = Token Int deriving (Eq, Show)
 
 token = Token 42
 `)
@@ -213,7 +210,7 @@ token = Token 42
 
 import Base
 
-type Box a = Box a
+type Box a = Box a deriving (Eq, Show)
 
 boxed = Box Base.token
 unitBox = Box ()
@@ -249,7 +246,7 @@ main() =
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Token 42\nTrue\nBox (Token 42)\n"
+	want := "Token 42\nTrue\nBox Token 42\n"
 	if string(stdout) != want {
 		t.Fatalf("output %q, want %q", stdout, want)
 	}

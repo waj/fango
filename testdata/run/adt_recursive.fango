@@ -1,4 +1,4 @@
-type Nat = Zero | Succ Nat
+type Nat = Zero | Succ Nat deriving (Eq, Show)
 
 depth n =
     case n of

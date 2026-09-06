@@ -1,0 +1,8 @@
+type Box a = Box a deriving (Eq, Show)
+
+equalBoxes : Eq a => Box a -> Box a -> Bool
+equalBoxes x y = x == y
+
+main =
+    print (equalBoxes (Box 2) (Box 2))
+    print (Box "hello")

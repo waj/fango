@@ -11,7 +11,6 @@ type VarKind int
 
 const (
 	General VarKind = iota
-	Number          // Elm-style `number` kind flag: Int or Float
 	RowVar          // effect-row tail variable
 )
 
@@ -85,6 +84,26 @@ type Scheme struct {
 type Pred struct {
 	Class string
 	Ty    Type
+}
+
+// ClassInfo owns a nominal, compiler-internal single-constructor dictionary.
+// Its fields are the declared methods, in declaration order.
+type ClassInfo struct {
+	Name    string
+	Param   *TVar
+	Dict    *ADTInfo
+	Methods []MethodInfo
+}
+
+type MethodInfo struct {
+	Name  string
+	Type  Type
+	Class *ClassInfo
+	Index int
+}
+
+func (c *ClassInfo) DictType(t Type) *TCon {
+	return &TCon{Unique: c.Dict.Con.Unique, Name: c.Dict.Con.Name, Args: []Type{t}}
 }
 
 // NativeInfo is declaration metadata shared by inference, Core, and both

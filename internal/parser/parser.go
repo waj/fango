@@ -222,6 +222,12 @@ func (p *parser) parseDecl() ast.Decl {
 	if t.Kind == token.KwInfix {
 		return p.parseInfixDecl()
 	}
+	if t.Kind == token.KwClass {
+		return p.parseClassDecl()
+	}
+	if t.Kind == token.KwInstance {
+		return p.parseInstanceDecl()
+	}
 	if t.Kind != token.LIDENT {
 		p.errorAt(t.Span, "SYNTAX PROBLEM",
 			"I was expecting a declaration here, like `name = expression`.")
@@ -234,12 +240,13 @@ func (p *parser) parseDecl() ast.Decl {
 	var ann *ast.TypeAnn
 	if p.peekInExpr().Kind == token.COLON {
 		colon := p.next()
+		preds := p.parseContext()
 		te := p.parseTypeExpr()
 		if te == nil {
 			p.recoverToTopLevel(false)
 			return nil
 		}
-		ann = &ast.TypeAnn{Type: te, Sp: colon.Span.Merge(te.Span())}
+		ann = &ast.TypeAnn{Type: te, Preds: preds, Sp: colon.Span.Merge(te.Span())}
 		// The annotated definition must sit directly below.
 		nt := p.peek()
 		if nt.Kind == token.EOF {
@@ -420,13 +427,35 @@ func (p *parser) parseTypeDecl() ast.Decl {
 		}
 		p.next()
 	}
+	var deriving []ast.TName
+	if p.peekInExpr().Kind == token.KwDeriving {
+		p.next()
+		if !p.expect(token.LPAREN, "I expect `(Eq, Show)` after `deriving`.") {
+			return nil
+		}
+		for {
+			if p.peekInExpr().Kind != token.UIDENT {
+				p.errorAt(p.peek().Span, "DERIVING", "I expect a class name.")
+				return nil
+			}
+			name, _, sp := p.parseQualifiedName()
+			deriving = append(deriving, ast.TName{Name: name, Sp: sp})
+			if p.peekInExpr().Kind != token.COMMA {
+				break
+			}
+			p.next()
+		}
+		if !p.expect(token.RPAREN, "I expect `)` after the derived classes.") {
+			return nil
+		}
+	}
 	if t := p.peekInExpr(); t.Kind != token.EOF {
 		p.errorAt(t.Span, "SYNTAX PROBLEM",
 			"I expect `|` between constructor alternatives.")
 		p.recoverToTopLevel(false)
 		return nil
 	}
-	return &ast.TypeDecl{Name: nameT.Text, NameSpan: nameT.Span, Params: params, Ctors: ctors}
+	return &ast.TypeDecl{Name: nameT.Text, NameSpan: nameT.Span, Params: params, Ctors: ctors, Deriving: deriving}
 }
 
 // parseCtorDef parses one constructor alternative: a capitalized name
@@ -621,11 +650,12 @@ func (p *parser) parseBlock(col int) ast.Expr {
 					"The type annotation for `"+pendingAnnName.Text+"` must sit directly\nabove its binding.")
 				return nil
 			}
+			preds := p.parseContext()
 			te := p.parseTypeExpr()
 			if te == nil {
 				return nil
 			}
-			pendingAnn = &ast.TypeAnn{Type: te, Sp: colon.Span.Merge(te.Span())}
+			pendingAnn = &ast.TypeAnn{Type: te, Preds: preds, Sp: colon.Span.Merge(te.Span())}
 			pendingAnnName = nameT
 
 		case stmtResult:

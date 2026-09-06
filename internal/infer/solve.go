@@ -49,8 +49,11 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 			"I cannot use (%s) with this operand:\n\n    %s\n\nIt does not match the other side:\n\n    %s",
 			c.Why.Op, left, right)
 	case WhyCall:
-		e = diag.Errorf(c.Span, "TYPE MISMATCH",
-			"This is not a function, so I cannot give it an argument.\nIt has type:\n\n    %s", left)
+		if _, ok := sub.Apply(c.Left).(*types.TFun); ok {
+			e = diag.Errorf(c.Span, "TYPE MISMATCH", "This function's argument type does not match this application.\nThe function has type:\n\n    %s\n\nbut this application requires:\n\n    %s", left, right)
+		} else {
+			e = diag.Errorf(c.Span, "TYPE MISMATCH", "This is not a function, so I cannot give it an argument.\nIt has type:\n\n    %s", left)
+		}
 	case WhyIfCondition:
 		e = diag.Errorf(c.Span, "TYPE MISMATCH",
 			"An `if` condition must be a Bool, but this one is:\n\n    %s", left)

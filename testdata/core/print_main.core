@@ -1,2 +1,2 @@
 (core
-  (def main () (perform IO.IO/IO.print (float 12.56636 Float) ())))
+  (def main () (app/worker @[Float] (var IO.print _dictionary_Show Float -> Float ->{IO} ()) (var Basics._instance_4261736963732e53686f77_466c6f6174 _dictionary_Show Float) (float 12.56636 Float) ())))

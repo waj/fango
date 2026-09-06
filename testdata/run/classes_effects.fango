@@ -1,0 +1,17 @@
+effect Ask
+    ask : () -> Int
+
+class Read a
+    read : a ->{Ask} Int
+
+instance Read Int
+    read x = x + ask()
+
+query : Read a => a ->{Ask} Int
+query x = read x
+
+argument : Int
+argument = 2
+
+main = print (handle query argument of
+    ask () -> resume 40)

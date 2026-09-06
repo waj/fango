@@ -157,6 +157,10 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 // anfTree normalizes every leaf body as a tail.
 func (el *elab) anfTree(t core.Tree) core.Tree {
 	switch t := t.(type) {
+	case *core.Unreachable:
+		return t
+	case *core.Guard:
+		return &core.Guard{Cond: el.anf(t.Cond), Then: el.anfTree(t.Then), Else: el.anfTree(t.Else)}
 	case *core.Leaf:
 		return &core.Leaf{Body: el.anf(t.Body)}
 	case *core.SwitchCtor:

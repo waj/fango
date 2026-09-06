@@ -1,4 +1,4 @@
-type Maybe a = Nothing | Just a
+type Maybe a = Nothing | Just a deriving (Eq, Show)
 Just 3
 :type Just
 id x = x
@@ -24,6 +24,6 @@ v =
 
 v
 Just 1 == Just 1
-type Maybe a = Nothing | Just a
+type Maybe a = Nothing | Just a deriving (Eq, Show)
 Just 2
 :quit

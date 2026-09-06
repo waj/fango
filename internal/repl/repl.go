@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
+	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/elaborate"
 	"github.com/waj/fango/internal/eval"
@@ -43,9 +44,15 @@ func NewSession(out io.Writer) *Session {
 	// types stay monotypes (the block-binding monomorphism restriction).
 	// Functions and lambdas still generalize.
 	ck.MonoValues = true
+	prelude, errs := elaborate.Module(nil, ck)
+	if len(errs) > 0 {
+		panic("invalid elaborated prelude: " + errs[0].Body)
+	}
+	env := eval.NewEnv()
+	env.DefineProg(prelude)
 	return &Session{
 		ck:    ck,
-		env:   eval.NewEnv(),
+		env:   env,
 		out:   out,
 		ioctx: eval.NewIOContext(strings.NewReader(""), out),
 	}
@@ -191,7 +198,7 @@ func (s *Session) input(text string, force bool) inputResult {
 // expression. `==` lexes as its own token, so comparisons still classify as
 // expressions, and `f x y` without `=` stays an application.
 func isDecl(toks []token.Token) bool {
-	if len(toks) >= 1 && (toks[0].Kind == token.KwType || toks[0].Kind == token.KwEffect) {
+	if len(toks) >= 1 && (toks[0].Kind == token.KwType || toks[0].Kind == token.KwEffect || toks[0].Kind == token.KwClass || toks[0].Kind == token.KwInstance) {
 		return true
 	}
 	if len(toks) < 2 || toks[0].Kind != token.LIDENT {
@@ -201,6 +208,9 @@ func isDecl(toks []token.Token) bool {
 		return true
 	}
 	i := 1
+	if i+1 < len(toks) && toks[i].Kind == token.LPAREN && toks[i+1].Kind == token.RPAREN {
+		i += 2
+	}
 	for i < len(toks) && (toks[i].Kind == token.LIDENT || toks[i].Kind == token.UNDERSCORE) {
 		i++
 	}
@@ -214,6 +224,29 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	}
 	if len(errs) > 0 {
 		diag.Render(s.out, errs)
+		return inputDone
+	}
+	if cl, ok := m.Decls[0].(*ast.ClassDecl); ok {
+		if errs := s.ck.ClassDecl(cl); len(errs) > 0 {
+			diag.Render(s.out, errs)
+		} else {
+			fmt.Fprintf(s.out, "%s : class\n", cl.Name)
+		}
+		return inputDone
+	}
+	if in, ok := m.Decls[0].(*ast.InstanceDecl); ok {
+		rollback := s.ck.Checkpoint()
+		start := len(s.ck.Instances)
+		infos, errs := s.ck.InstanceDecl(in)
+		if len(errs) == 0 {
+			errs = s.installInstances(infos, start)
+		}
+		if len(errs) > 0 {
+			rollback()
+			diag.Render(s.out, errs)
+		} else {
+			fmt.Fprintf(s.out, "instance %s %s\n", types.SurfaceName(in.Head.Class), ast.DumpTypeExpr(in.Head.Ty))
+		}
 		return inputDone
 	}
 	if td, ok := m.Decls[0].(*ast.TypeDecl); ok {
@@ -273,15 +306,30 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	if redefining {
 		s.gen++
 	}
-	fmt.Fprintf(s.out, "%s : %s\n", def.Name, types.Show(def.Type))
+	sch := info.Scheme
+	sch.Body = s.ck.Sub.Apply(sch.Body)
+	sch.Preds = s.ck.NormalizePreds(sch.Preds)
+	fmt.Fprintf(s.out, "%s : %s\n", def.Name, types.ShowScheme(sch))
 	return inputDone
 }
 
 // typeDeclInput installs a `type` declaration. Redefinition mints a fresh
 // generation (a new Unique), exactly like value redefinition (doc/design.md, "Interpreter and REPL").
 func (s *Session) typeDeclInput(td *ast.TypeDecl) inputResult {
+	rollback := s.ck.Checkpoint()
+	start := len(s.ck.Instances)
 	_, redefining := s.ck.TypeNames[td.Name]
 	if errs := s.ck.TypeDecl(td); len(errs) > 0 {
+		rollback()
+		diag.Render(s.out, errs)
+		return inputDone
+	}
+	infos, errs := s.ck.DeriveDecl(td)
+	if len(errs) == 0 {
+		errs = s.installInstances(infos, start)
+	}
+	if len(errs) > 0 {
+		rollback()
 		diag.Render(s.out, errs)
 		return inputDone
 	}
@@ -315,7 +363,7 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 	// as the generalized scheme would (`\x -> x` echoes `a -> a`), doc/design.md, "Interpreter and REPL".
 	// Elaboration then defaults for evaluation; the value renders at the
 	// defaulted (ground) type.
-	shownTy := types.Show(s.ck.Sub.Apply(ty))
+	shownTy := types.ShowScheme(types.Scheme{Body: s.ck.Sub.Apply(ty), Preds: s.ck.PendingPreds})
 	coreExpr, aux, elabErrs := elaborate.Expr(e, s.ck)
 	if len(elabErrs) > 0 {
 		diag.Render(s.out, elabErrs)
@@ -324,13 +372,12 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 	for i := range aux {
 		s.env.DefineWorker(&aux[i])
 	}
-	v, err := eval.EvalIO(context.Background(), coreExpr, s.env, s.ioctx)
+	v, err := eval.EvalIO(context.Background(), elaborate.Display(coreExpr, s.ck, ""), s.env, s.ioctx)
 	if err != nil {
 		fmt.Fprintf(s.out, "runtime error: %v\n", err)
 		return inputDone
 	}
-	finalTy := s.ck.Sub.Apply(ty)
-	fmt.Fprintf(s.out, "%s : %s\n", eval.Show(v, finalTy, s.ck.B), shownTy)
+	fmt.Fprintf(s.out, "%s : %s\n", v.(string), shownTy)
 	return inputDone
 }
 
@@ -353,7 +400,21 @@ func (s *Session) typeOf(src string) {
 	}
 	// Show the generalized view: free variables print as the scheme would
 	// (`:type \x -> x` says `a -> a`), no defaulting forced (doc/design.md, "Interpreter and REPL").
-	fmt.Fprintln(s.out, types.Show(s.ck.Sub.Apply(ty)))
+	fmt.Fprintln(s.out, types.ShowScheme(types.Scheme{Body: s.ck.Sub.Apply(ty), Preds: s.ck.PendingPreds}))
+}
+
+func (s *Session) installInstances(infos []infer.DeclInfo, start int) []diag.Error {
+	defs, errs := elaborate.Instances(s.ck.Instances[start:], s.ck)
+	for _, info := range infos {
+		ds, es := elaborate.Decl(info, s.ck)
+		defs = append(defs, ds...)
+		errs = append(errs, es...)
+	}
+	if len(errs) > 0 {
+		return errs
+	}
+	s.env.DefineProg(&core.Prog{Defs: defs})
+	return nil
 }
 
 // wantsMore reports whether the parse failed only because input ran out —

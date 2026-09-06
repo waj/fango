@@ -79,7 +79,7 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 	for _, unit := range r.Units {
 		units = append(units, unit.Name+":"+strings.Join(unit.Imports, "+"))
 	}
-	if strings.Join(units, ",") != "Basics:,IO:,B:,A:B,Z:,Main:Z+A" {
+	if strings.Join(units, ",") != "Basics:,IO:Basics,B:,A:B,Z:,Main:Z+A" {
 		t.Fatalf("units %v", units)
 	}
 	if !r.Units[len(r.Units)-1].Entry {

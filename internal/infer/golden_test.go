@@ -41,7 +41,7 @@ func TestCheckerGoldens(t *testing.T) {
 			infos, errs := ck.Module(m)
 			var out strings.Builder
 			for _, info := range infos {
-				fmt.Fprintf(&out, "%s : %s\n", info.Name, types.Show(ck.Sub.Apply(info.Type)))
+				fmt.Fprintf(&out, "%s : %s\n", info.Name, types.ShowScheme(checkedScheme(ck, info)))
 			}
 			if len(errs) > 0 {
 				out.WriteString("-- errors --\n" + testutil.DumpErrors(errs))

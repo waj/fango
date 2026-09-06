@@ -35,6 +35,7 @@ const (
 	LTEQ     // <=
 	GTEQ     // >=
 	ARROW    // ->
+	DARROW   // =>
 	BACKSLASH
 	COLON      // :
 	PIPE       // |
@@ -60,6 +61,9 @@ const (
 	KwResume
 	KwNative
 	KwInfix
+	KwClass
+	KwInstance
+	KwDeriving
 )
 
 var kindNames = map[Kind]string{
@@ -75,6 +79,7 @@ var kindNames = map[Kind]string{
 	KwIf: "if", KwThen: "then", KwElse: "else", KwCase: "case", KwOf: "of",
 	KwType: "type", KwEffect: "effect", KwHandle: "handle", KwResume: "resume",
 	KwNative: "native", KwInfix: "infix",
+	KwClass: "class", KwInstance: "instance", KwDeriving: "deriving", DARROW: "DARROW",
 }
 
 func (k Kind) String() string { return kindNames[k] }
@@ -87,6 +92,7 @@ var Keywords = map[string]Kind{
 	"case": KwCase, "of": KwOf,
 	"type": KwType, "effect": KwEffect, "handle": KwHandle, "resume": KwResume,
 	"native": KwNative, "infix": KwInfix,
+	"class": KwClass, "instance": KwInstance, "deriving": KwDeriving,
 }
 
 type Token struct {

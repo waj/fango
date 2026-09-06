@@ -1,0 +1,9 @@
+type Tag a b = Tag a b
+
+instance Show b => Show (Tag Int b)
+    show t = case t of
+        Tag n x -> "tag " ++ show n ++ " " ++ show x
+
+main =
+    print (Tag 1 "payload")
+    print (Tag 2 True)

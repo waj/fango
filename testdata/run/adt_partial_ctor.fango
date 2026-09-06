@@ -1,4 +1,4 @@
-type Pair = Pair Int Int
+type Pair = Pair Int Int deriving (Eq, Show)
 
 mk = Pair 1
 

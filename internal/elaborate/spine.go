@@ -38,6 +38,15 @@ func (el *elab) app(e *ast.App) core.Expr {
 	for i, a := range rev {
 		args[len(rev)-1-i] = a
 	}
+	if v, ok := head.(*ast.Var); ok {
+		if _, local := el.scopeIdx[v.Name]; local {
+			res := el.expr(head)
+			for _, a := range args {
+				res = el.valueApp(res, el.expr(a))
+			}
+			return res
+		}
+	}
 	if el.ck.ResumeCalls[e] {
 		return &core.Resume{Value: el.expr(args[0]), Ty: el.zonkDefault(el.ck.ExprTypes[e])}
 	}
@@ -45,6 +54,22 @@ func (el *elab) app(e *ast.App) core.Expr {
 		return el.operationCall(op, el.zonkDefault(el.ck.ExprTypes[head]), el.ck.Sub.Apply(el.ck.ExprTypes[head]), args)
 	}
 	if v, ok := head.(*ast.Var); ok {
+		if method := el.ck.Methods[v.Name]; method != nil {
+			raw := el.ck.Sub.Apply(el.ck.ExprTypes[head])
+			ta := matchTyArgs(method.Type, []*types.TVar{method.Class.Param}, raw)
+			if in, _, _ := el.ck.MatchInstance(types.Pred{Class: method.Class.Name, Ty: ta[0]}, el.owner); in != nil {
+				if in.IdentityMethods[method.Index] && len(args) == 1 {
+					return el.expr(args[0])
+				}
+				if name := in.NativeMethods[method.Index]; name != "" {
+					return el.nativeApply(el.ck.Natives[name], el.zonkDefault(raw), args)
+				}
+				name := in.Methods[method.Index]
+				if arity, ok := el.ck.Workers[name]; ok {
+					return el.workerCall(name, el.zonkDefault(raw), raw, arity, args)
+				}
+			}
+		}
 		if n := el.ck.Natives[v.Name]; n != nil && n.Effect == nil {
 			return el.nativeApply(n, el.zonkDefault(el.ck.ExprTypes[head]), args)
 		}
@@ -113,9 +138,7 @@ func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args [
 	for _, a := range args {
 		coreArgs = append(coreArgs, el.expr(a))
 	}
-	if op.Owner == el.ck.IO && types.SurfaceName(op.Name) == "print" && len(coreArgs) > 0 {
-		el.checkPrintable(coreArgs[0].Type(), args[0].Span())
-	}
+
 	for i := len(args); i < op.Arity; i++ {
 		n := fmt.Sprintf("_op%d", el.tmp)
 		el.tmp++
@@ -156,7 +179,7 @@ func (el *elab) nativeApply(n *types.NativeInfo, nativeTy types.Type, args []ast
 		el.tmp++
 		coreArgs = append(coreArgs, &core.VarRef{Name: name, Ty: argTys[i]})
 	}
-	var body core.Expr = &core.NativeCall{Name: n.Name, Module: n.Module, Args: coreArgs, Ty: ret}
+	var body core.Expr = el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Args: coreArgs, Ty: ret})
 	for i := n.Arity - 1; i >= len(args); i-- {
 		body = &core.Lambda{Param: coreArgs[i].(*core.VarRef).Name, Body: body, Ty: arrowAt(nativeTy, i)}
 	}
@@ -202,8 +225,12 @@ type callee struct {
 }
 
 func (el *elab) workerCallee(name string, workerTy, rawTy types.Type, arity int) callee {
-	return callee{kind: core.Worker, name: name, ty: workerTy, arity: arity,
-		tyArgs: el.workerTyArgs(name, rawTy)}
+	c := callee{kind: core.Worker, name: name, ty: workerTy, arity: arity, tyArgs: el.workerTyArgs(name, rawTy)}
+	sch, _ := el.ck.Env.Lookup(name)
+	if name == el.declName {
+		sch = el.declScheme
+	}
+	return el.addEvidence(c, sch, rawTy)
 }
 
 // ctorCallee builds a constructor callee at its occurrence type — the
@@ -314,12 +341,9 @@ func matchType(gen, occ types.Type, m map[int]types.Type) {
 func (el *elab) nullaryValueUse(name string, sch types.Scheme, occTy types.Type) core.Expr {
 	genTy := el.zonkDefault(sch.Body)
 	vars := types.RigidVarsIn(genTy)
-	return &core.App{
-		CalleeKind: core.Worker,
-		Callee:     &core.VarRef{Name: name, Ty: occTy},
-		TyArgs:     matchTyArgs(genTy, vars, occTy),
-		Ty:         occTy,
-	}
+	c := callee{kind: core.Worker, name: name, ty: occTy, tyArgs: matchTyArgs(genTy, vars, occTy)}
+	c = el.addEvidence(c, sch, occTy)
+	return c.saturatedApp(nil)
 }
 
 // saturatedApp builds the direct App for a fully applied callee.

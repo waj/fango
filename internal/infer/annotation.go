@@ -1,8 +1,6 @@
 package infer
 
 import (
-	"strings"
-
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/types"
@@ -124,27 +122,9 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, [
 			return nil, []diag.Error{diag.Errorf(te.Sp, "NAMING ERROR",
 				"The type variable `%s` is not declared by this type's parameters.", te.Name)}
 		}
-		kind := types.General
-		class := ""
-		if strings.HasPrefix(te.Name, "number") {
-			kind = types.Number
-		}
-		if tv.native {
-			switch {
-			case strings.HasPrefix(te.Name, "equatable"):
-				class = "Eq"
-			case strings.HasPrefix(te.Name, "comparable"):
-				class = "Ord"
-			case strings.HasPrefix(te.Name, "printable"):
-				class = "Show"
-			}
-		}
-		v := tv.sup.FreshRigid(kind)
+		v := tv.sup.FreshRigid(types.General)
 		tv.vars[te.Name] = v
 		tv.minted = append(tv.minted, v)
-		if class != "" {
-			tv.preds = append(tv.preds, types.Pred{Class: class, Ty: v})
-		}
 		return v, nil
 	case *ast.TFunExpr:
 		arg, argErrs := ck.ResolveTypeExpr(te.Arg, tv)

@@ -1,0 +1,15 @@
+type Box a = Box a
+instance Show (Box a)
+    show b = "generic"
+
+instance Show (Box Int)
+    show b = "specific"
+
+show (Box 1)
+show (Box "s")
+type Box a = Box a
+instance Show (Box a)
+    show b = "regenerated"
+
+show (Box 2)
+:quit

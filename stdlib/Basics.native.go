@@ -3,16 +3,6 @@ package native
 // EvalBasics is the interpreter implementation of the inline Basics
 // templates. equal supplies structural equality for interpreter ADT values.
 func EvalBasics(name string, left, right any, equal func(any, any) bool) any {
-	if l, ok := left.(int64); ok {
-		if _, float := right.(float64); float {
-			left = float64(l)
-		}
-	}
-	if r, ok := right.(int64); ok {
-		if _, float := left.(float64); float {
-			right = float64(r)
-		}
-	}
 	switch l := left.(type) {
 	case int64:
 		r := right.(int64)

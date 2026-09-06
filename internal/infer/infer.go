@@ -5,7 +5,6 @@
 package infer
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
@@ -73,11 +72,21 @@ func (e *Env) Has(name string) bool             { _, ok := e.vars[name]; return 
 // supply, the accumulated substitution, and per-node solved types. The REPL
 // keeps one Checker across many inputs; batch compilation uses one per run.
 type Checker struct {
-	Sup       *types.Supply
-	B         *types.Builtins
-	Env       *Env
-	Sub       Subst
-	ExprTypes map[ast.Expr]types.Type
+	Classes         map[string]*types.ClassInfo
+	Methods         map[string]*types.MethodInfo
+	Instances       []*InstanceInfo
+	InstanceImports map[string]map[string]bool
+	CurrentOwner    string
+	PendingPreds    []types.Pred
+	ExprSchemes     map[ast.Expr]types.Scheme
+	Desugared       map[ast.Expr]ast.Expr
+	PreludeInfos    []DeclInfo
+	Aliases         map[string]string
+	Sup             *types.Supply
+	B               *types.Builtins
+	Env             *Env
+	Sub             Subst
+	ExprTypes       map[ast.Expr]types.Type
 
 	// Ctors is the constructor table (doc/design.md, "Type inference"), keyed by constructor name —
 	// names are unique per module (types and constructors live in separate
@@ -147,13 +156,17 @@ type Checker struct {
 
 func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 	ck := &Checker{
-		Sup:       sup,
-		B:         b,
-		Env:       env,
-		Sub:       Subst{},
-		ExprTypes: map[ast.Expr]types.Type{},
-		Ctors:     map[string]*types.CtorInfo{},
-		ADTs:      map[int]*types.ADTInfo{},
+		Classes: map[string]*types.ClassInfo{}, Methods: map[string]*types.MethodInfo{},
+		ExprSchemes: map[ast.Expr]types.Scheme{},
+		Desugared:   map[ast.Expr]ast.Expr{},
+		Aliases:     map[string]string{},
+		Sup:         sup,
+		B:           b,
+		Env:         env,
+		Sub:         Subst{},
+		ExprTypes:   map[ast.Expr]types.Type{},
+		Ctors:       map[string]*types.CtorInfo{},
+		ADTs:        map[int]*types.ADTInfo{},
 		TypeNames: map[string]types.Type{
 			"Int":    b.Int,
 			"Float":  b.Float,
@@ -222,6 +235,9 @@ type HandlerInfo struct {
 // declarations in source order — solve-at-definition, the same call
 // structure used by binding-boundary generalization.
 func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
+	if m.InstanceImports != nil {
+		ck.InstanceImports = m.InstanceImports
+	}
 	var infos []DeclInfo
 	var errs []diag.Error
 	adts := map[*ast.TypeDecl]*types.ADTInfo{}
@@ -278,11 +294,6 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 		if !ok {
 			continue
 		}
-		n := ck.Natives[inf.Target]
-		if n == nil || n.Effect != nil {
-			errs = append(errs, diag.Errorf(inf.TargetSpan, "NATIVE DECLARATION", "The infix target `%s` is not a pure native value.", inf.Target))
-			continue
-		}
 		if old := ck.Operators[inf.Op]; old != "" && old != inf.Target {
 			errs = append(errs, diag.Errorf(inf.OpSpan, "NATIVE DECLARATION", "The operator (%s) is bound more than once.", inf.Op))
 			continue
@@ -290,6 +301,24 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 		ck.Operators[inf.Op] = inf.Target
 	}
 	for _, d := range m.Decls {
+		if cl, ok := d.(*ast.ClassDecl); ok {
+			errs = append(errs, ck.ClassDecl(cl)...)
+			continue
+		}
+		if td, ok := d.(*ast.TypeDecl); ok && len(td.Deriving) > 0 {
+			ck.CurrentOwner = symbolModule(td.Name)
+			ds, es := ck.DeriveDecl(td)
+			infos = append(infos, ds...)
+			errs = append(errs, es...)
+			continue
+		}
+		if in, ok := d.(*ast.InstanceDecl); ok {
+			ck.CurrentOwner = in.Owner
+			ds, es := ck.InstanceDecl(in)
+			infos = append(infos, ds...)
+			errs = append(errs, es...)
+			continue
+		}
 		vd, ok := d.(*ast.ValueDecl)
 		if !ok || vd.Native != nil {
 			continue
@@ -300,6 +329,7 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 			errs = append(errs, diag.Errorf(vd.NameSpan, "MULTIPLE DEFINITIONS",
 				"`%s` is defined more than once.", vd.Name))
 		}
+		ck.CurrentOwner = symbolModule(vd.Name)
 		info, declErrs := ck.Decl(vd)
 		errs = append(errs, declErrs...)
 		infos = append(infos, info)
@@ -310,6 +340,9 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 func (ck *Checker) declareNative(d *ast.ValueDecl) []diag.Error {
 	if d.Ann == nil {
 		return []diag.Error{diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "A native declaration requires a type annotation.")}
+	}
+	if len(d.Ann.Preds) > 0 {
+		return []diag.Error{diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "Native declarations cannot require class constraints; use an ordinary constrained wrapper.")}
 	}
 	scope := ck.newNativeAnnScope()
 	ty, errs := ck.ResolveTypeExpr(d.Ann.Type, scope)
@@ -565,6 +598,7 @@ func (ck *Checker) BindDecl(info DeclInfo) {
 // bind on error).
 func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []diag.Error) {
 	var errs []diag.Error
+	var given []types.Pred
 	isMain := d.Name == ck.EntryName
 	if isMain && len(d.Params) > 1 {
 		errs = append(errs, diag.Errorf(d.NameSpan, "MAIN TAKES NO PARAMETERS",
@@ -580,6 +614,8 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 		annScope = ck.NewAnnScope()
 		var annErrs []diag.Error
 		annTy, annErrs = ck.ResolveTypeExpr(d.Ann.Type, annScope)
+		errs = append(errs, annErrs...)
+		given, annErrs = ck.ResolvePreds(d.Ann.Preds, annScope)
 		errs = append(errs, annErrs...)
 	}
 	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
@@ -606,7 +642,6 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
 	errs = append(errs, solveErrs...)
-	errs = append(errs, ck.checkPredicates(g.preds)...)
 	if d.Ann == nil && !isMain {
 		ck.closeSingleRows(ty)
 	}
@@ -654,6 +689,9 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	default:
 		info.Scheme = ck.generalize(ty, nil)
 	}
+	var predErrs []diag.Error
+	info.Scheme, predErrs = ck.qualify(info.Scheme, g.preds, given, d.Ann != nil, d.NameSpan)
+	errs = append(errs, predErrs...)
 	return info, errs
 }
 
@@ -732,7 +770,28 @@ func (ck *Checker) ExprWhere(e ast.Expr, _ bool) (types.Type, []diag.Error) {
 	ck.Sub = sub
 	_ = residual
 	errs := append(g.errs, solveErrs...)
-	return ty, append(errs, ck.checkPredicates(g.preds)...)
+	left, es := ck.reduceObligations(g.preds, nil)
+	ids := map[int]bool{}
+	collectVarIDs(ck.Sub.Apply(ty), ids)
+	var ambiguous, visible []types.Pred
+	for _, p := range left {
+		if v, ok := p.Ty.(*types.TVar); ok && !ids[v.ID] {
+			ambiguous = append(ambiguous, p)
+		} else {
+			visible = append(visible, p)
+		}
+	}
+	es = append(es, ck.DefaultPreds(ambiguous, e.Span())...)
+	// Defaulting may have solved metavariables a structural pred was blocked
+	// on; reduce once more so the choice lands before the prompt reports it.
+	var vobs []predObligation
+	for _, p := range visible {
+		vobs = append(vobs, predObligation{pred: p, span: e.Span()})
+	}
+	visible, ves := ck.reduceObligations(vobs, nil)
+	es = append(es, ves...)
+	ck.PendingPreds = ck.NormalizePreds(visible)
+	return ty, append(errs, es...)
 }
 
 type predObligation struct {
@@ -778,9 +837,13 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 	var ty types.Type
 	switch e := e.(type) {
 	case *ast.IntLit:
-		// Elm's rule: an integer literal is `number` (Int or Float).
-		// Unconstrained numbers default to Int during elaboration.
-		ty = g.ck.Sup.FreshVar(types.Number)
+		if e.Raw {
+			ty = g.ck.B.Int
+			break
+		}
+		app := &ast.App{Fn: &ast.Var{Name: "Basics.fromInt", Sp: e.Sp}, Arg: &ast.IntLit{Value: e.Value, Sp: e.Sp, Raw: true}}
+		g.ck.Desugared[e] = app
+		ty = g.expr(app)
 	case *ast.FloatLit:
 		ty = g.ck.B.Float
 	case *ast.StringLit:
@@ -788,8 +851,12 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 	case *ast.UnitLit:
 		ty = g.ck.B.Unit
 	case *ast.Var:
+		if name := g.ck.Aliases[e.Name]; name != "" {
+			e.Name = name
+		}
 		if localScheme, ok := g.locals.lookup(e.Name); ok {
-			ty = g.instantiate(localScheme)
+			g.ck.ExprSchemes[e] = localScheme
+			ty = g.instantiateAt(localScheme, e.Sp, e.Name)
 		} else {
 			scheme, ok := g.ck.Env.Lookup(e.Name)
 			if !ok {
@@ -798,6 +865,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 				ty = g.ck.Sup.FreshVar(types.General) // recover with a hole
 				break
 			}
+			g.ck.ExprSchemes[e] = scheme
 			// An operation in value position is not yet being performed. Its
 			// predicates are checked when a saturated operation spine is formed;
 			// this also lets main's ordinary shape check diagnose `main = print`.
@@ -870,12 +938,9 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			g.ck.ResumeCalls[e] = true
 		}
 	case *ast.Neg:
-		opTy := g.expr(e.Operand)
-		n := g.ck.Sup.FreshVar(types.Number)
-		g.cs = append(g.cs, Constraint{
-			Left: opTy, Right: n, Span: e.Operand.Span(), Why: Why{Kind: WhyNegate},
-		})
-		ty = n
+		app := &ast.App{Fn: &ast.Var{Name: "Basics.negate", Sp: e.Sp}, Arg: e.Operand}
+		g.ck.Desugared[e] = app
+		ty = g.expr(app)
 	case *ast.If:
 		condTy := g.expr(e.Cond)
 		g.cs = append(g.cs, Constraint{
@@ -1349,11 +1414,15 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 		}
 		var ty types.Type
 		var annVars []*types.TVar
+		var given []types.Pred
+		predStart := len(g.preds)
 		var annTy types.Type
 		if bind.Ann != nil {
 			annScope := g.ck.NewAnnScope()
 			var annErrs []diag.Error
 			annTy, annErrs = g.ck.ResolveTypeExpr(bind.Ann.Type, annScope)
+			g.errs = append(g.errs, annErrs...)
+			given, annErrs = g.ck.ResolvePreds(bind.Ann.Preds, annScope)
 			g.errs = append(g.errs, annErrs...)
 			annVars = annScope.Minted()
 		}
@@ -1399,6 +1468,30 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 				}
 			}
 			scheme = g.ck.generalize(ty, g.scopeFreeIDs())
+			// Only obligations involving this binding's quantified variables
+			// move into its scheme; captured obligations stay with the parent.
+			quant := map[int]bool{}
+			for _, v := range scheme.Vars {
+				quant[v.ID] = true
+			}
+			left, es := g.ck.reduceObligations(g.preds[predStart:], given)
+			g.errs = append(g.errs, es...)
+			g.preds = g.preds[:predStart]
+			for _, p := range left {
+				if v, ok := p.Ty.(*types.TVar); ok && quant[v.ID] {
+					if bind.Ann != nil {
+						g.errs = append(g.errs, diag.Errorf(bind.NameSpan, "MISSING CONSTRAINT", "Add `%s %s` to the annotation.", types.SurfaceName(p.Class), types.Show(p.Ty)))
+					} else {
+						scheme.Preds = append(scheme.Preds, p)
+					}
+				} else {
+					g.preds = append(g.preds, predObligation{pred: p, span: bind.NameSpan})
+				}
+			}
+			if bind.Ann != nil {
+				scheme.Preds = given
+			}
+			scheme.Preds = g.ck.NormalizePreds(scheme.Preds)
 		}
 		g.ck.BindTypes[bind] = ty
 		g.ck.BindSchemes[bind] = scheme
@@ -1476,8 +1569,9 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 		scope.names[p.Name] = types.Scheme{Body: pv}
 		return pv
 	case *ast.PInt:
-		// Like integer literals: a `number` pattern (Int or Float).
-		return g.ck.Sup.FreshVar(types.Number)
+		v := g.ck.Sup.FreshVar(types.General)
+		g.preds = append(g.preds, predObligation{pred: g.ck.StandardPred("Num", v), span: p.Sp}, predObligation{pred: g.ck.StandardPred("Eq", v), span: p.Sp})
+		return v
 	case *ast.PFloat:
 		return g.ck.B.Float
 	case *ast.PString:
@@ -1514,61 +1608,14 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 }
 
 func (g *generator) binOp(e *ast.BinOp) types.Type {
-	if name := g.ck.Operators[e.Op]; name != "" {
-		n := g.ck.Natives[name]
-		if n == nil {
-			panic("infer: missing native for operator " + e.Op)
-		}
-		inst := g.instantiateAt(n.Scheme, e.OpSpan, e.Op)
-		args, ret := peelOperation(inst, n.Arity)
-		if len(args) != 2 {
-			panic("infer: binary native does not have arity two")
-		}
-		lt, rt := g.exprWant(e.L, args[0]), g.exprWant(e.R, args[1])
-		why := Why{Kind: WhyOperand, Op: e.Op}
-		if e.Op == "/" || e.Op == "++" {
-			why = Why{Kind: WhyOpRequires, Op: e.Op, Want: types.Show(args[0])}
-		}
-		g.cs = append(g.cs,
-			Constraint{Left: lt, Right: args[0], Span: e.L.Span(), Why: why},
-			Constraint{Left: rt, Right: args[1], Span: e.R.Span(), Why: why})
-		g.ck.BinNatives[e] = n
-		return ret
+	name := g.ck.Operators[e.Op]
+	if name == "" {
+		g.errs = append(g.errs, diag.Errorf(e.OpSpan, "MISSING OPERATOR", "No declaration implements (%s).", e.Op))
+		return g.ck.Sup.FreshVar(types.General)
 	}
-	lt := g.expr(e.L)
-	rt := g.expr(e.R)
-	switch e.Op {
-	case "+", "-", "*":
-		n := g.ck.Sup.FreshVar(types.Number)
-		why := Why{Kind: WhyOperand, Op: e.Op}
-		g.cs = append(g.cs,
-			Constraint{Left: lt, Right: n, Span: e.L.Span(), Why: why},
-			Constraint{Left: rt, Right: n, Span: e.R.Span(), Why: why})
-		return n
-	case "/":
-		why := Why{Kind: WhyOpRequires, Op: e.Op, Want: "Float"}
-		g.cs = append(g.cs,
-			Constraint{Left: lt, Right: g.ck.B.Float, Span: e.L.Span(), Why: why},
-			Constraint{Left: rt, Right: g.ck.B.Float, Span: e.R.Span(), Why: why})
-		return g.ck.B.Float
-	case "++":
-		why := Why{Kind: WhyOpRequires, Op: e.Op, Want: "String"}
-		g.cs = append(g.cs,
-			Constraint{Left: lt, Right: g.ck.B.String, Span: e.L.Span(), Why: why},
-			Constraint{Left: rt, Right: g.ck.B.String, Span: e.R.Span(), Why: why})
-		return g.ck.B.String
-	case "==", "/=", "<", ">", "<=", ">=":
-		// Operands must agree; the equatable/orderable check happens
-		// post-defaulting in elaborate, where the type is ground.
-		a := g.ck.Sup.FreshVar(types.General)
-		why := Why{Kind: WhyCompare, Op: e.Op}
-		g.cs = append(g.cs,
-			Constraint{Left: lt, Right: a, Span: e.L.Span(), Why: why},
-			Constraint{Left: rt, Right: a, Span: e.R.Span(), Why: why})
-		return g.ck.B.Bool
-	default:
-		panic("infer: unhandled operator " + e.Op)
-	}
+	app := &ast.App{Fn: &ast.App{Fn: &ast.Var{Name: name, Sp: e.OpSpan}, Arg: e.L}, Arg: e.R}
+	g.ck.Desugared[e] = app
+	return g.expr(app)
 }
 
 // instantiate replaces a scheme's quantified variables with fresh metas
@@ -1599,65 +1646,6 @@ func (g *generator) instantiateAt(s types.Scheme, sp source.Span, op string) typ
 		g.preds = append(g.preds, predObligation{pred: p, span: sp, op: op})
 	}
 	return types.SubstRigid(s.Body, m)
-}
-
-func (ck *Checker) checkPredicates(obs []predObligation) []diag.Error {
-	var errs []diag.Error
-	for _, o := range obs {
-		t := ck.Sub.Apply(o.pred.Ty)
-		if ck.satisfiesPredicate(o.pred.Class, t) {
-			continue
-		}
-		title := "TYPE MISMATCH"
-		body := fmt.Sprintf("This operation requires %s support, but `%s` does not provide it.", o.pred.Class, types.Show(t))
-		if o.pred.Class == "Eq" {
-			body = fmt.Sprintf("I cannot check equality of `%s` values: they can contain functions, and functions have no equality.", types.Show(t))
-		}
-		if o.pred.Class == "Show" && ck.ContainsFunction(t) {
-			body = fmt.Sprintf("`print` cannot print a `%s` — its values can contain functions, which have no printable form.", types.Show(t))
-		}
-		if _, ok := t.(*types.TVar); ok {
-			if o.pred.Class == "Eq" {
-				title = "EQUALITY AT A TYPE VARIABLE"
-			}
-			body = fmt.Sprintf("This operation requires concrete %s evidence; generic evidence arrives with typeclasses.", o.pred.Class)
-		}
-		errs = append(errs, diag.Errorf(o.span, title, "%s", body))
-	}
-	return errs
-}
-
-func (ck *Checker) satisfiesPredicate(class string, t types.Type) bool {
-	if v, ok := t.(*types.TVar); ok {
-		// A ground Number metavariable defaults to Int during elaboration, so
-		// it has all three compiler-owned scalar capabilities. General type
-		// variables remain residual and require future typeclass evidence.
-		return v.Kind == types.Number && (class == "Eq" || class == "Ord" || class == "Show")
-	}
-	u := -1
-	if c, ok := t.(*types.TCon); ok && len(c.Args) == 0 {
-		u = c.Unique
-	}
-	if class == "Ord" {
-		return u == ck.B.Int.Unique || u == ck.B.Float.Unique || u == ck.B.String.Unique
-	}
-	if class != "Eq" && class != "Show" {
-		return false
-	}
-	if u == ck.B.Int.Unique || u == ck.B.Float.Unique || u == ck.B.String.Unique || u == ck.B.Bool.Unique {
-		return true
-	}
-	if c, ok := t.(*types.TCon); ok {
-		if _, yes := ck.ADTs[c.Unique]; yes && !ck.ContainsFunction(t) {
-			for _, a := range c.Args {
-				if !ck.satisfiesPredicate(class, a) {
-					return false
-				}
-			}
-			return true
-		}
-	}
-	return false
 }
 
 // instantiateCtor returns a constructor's field and result types with the

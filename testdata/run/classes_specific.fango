@@ -1,0 +1,15 @@
+type Box a = Box a
+
+instance Show (Box a)
+    show b = "generic box"
+
+instance Show (Box Int)
+    show b = "int box"
+
+viaGeneric : Show a => Box a -> String
+viaGeneric b = show b
+
+main =
+    print (Box 1)
+    print (Box "s")
+    print (viaGeneric (Box 3))

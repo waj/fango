@@ -1,4 +1,4 @@
-type Box a = Box a
+type Box a = Box a deriving (Eq, Show)
 
 boxed : Box (() ->{IO} String)
 boxed = Box readLine

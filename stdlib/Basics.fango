@@ -1,37 +1,181 @@
-module Basics exposing ()
+module Basics exposing (Num(..), Eq(..), Ord(..), Show(..))
 
-add : number -> number -> number
-add = native "$1 + $2"
+class Num a
+    fromInt : Int -> a
+    add : a -> a -> a
+    sub : a -> a -> a
+    mul : a -> a -> a
+    negate : a -> a
 
-sub : number -> number -> number
-sub = native "$1 - $2"
+class Eq a
+    eq : a -> a -> Bool
 
-mul : number -> number -> number
-mul = native "$1 * $2"
+class Ord a
+    lt : a -> a -> Bool
+    gt : a -> a -> Bool
+    le : a -> a -> Bool
+    ge : a -> a -> Bool
+
+class Show a
+    show : a -> String
+
+intAdd : Int -> Int -> Int
+intAdd = native "$1 + $2"
+
+intSub : Int -> Int -> Int
+intSub = native "$1 - $2"
+
+intMul : Int -> Int -> Int
+intMul = native "$1 * $2"
+
+intEq : Int -> Int -> Bool
+intEq = native "$1 == $2"
+
+intLt : Int -> Int -> Bool
+intLt = native "$1 < $2"
+
+intGt : Int -> Int -> Bool
+intGt = native "$1 > $2"
+
+intLe : Int -> Int -> Bool
+intLe = native "$1 <= $2"
+
+intGe : Int -> Int -> Bool
+intGe = native "$1 >= $2"
+
+intNegate : Int -> Int
+intNegate = native "-$1"
+
+intShow : Int -> String
+intShow = native "fangort.ShowInt($1)"
+
+floatAdd : Float -> Float -> Float
+floatAdd = native "$1 + $2"
+
+floatSub : Float -> Float -> Float
+floatSub = native "$1 - $2"
+
+floatMul : Float -> Float -> Float
+floatMul = native "$1 * $2"
+
+floatEq : Float -> Float -> Bool
+floatEq = native "$1 == $2"
+
+floatLt : Float -> Float -> Bool
+floatLt = native "$1 < $2"
+
+floatGt : Float -> Float -> Bool
+floatGt = native "$1 > $2"
+
+floatLe : Float -> Float -> Bool
+floatLe = native "$1 <= $2"
+
+floatGe : Float -> Float -> Bool
+floatGe = native "$1 >= $2"
+
+floatNegate : Float -> Float
+floatNegate = native "-$1"
+
+floatShow : Float -> String
+floatShow = native "fangort.ShowFloat($1)"
+
+stringEq : String -> String -> Bool
+stringEq = native "$1 == $2"
+
+stringLt : String -> String -> Bool
+stringLt = native "$1 < $2"
+
+stringGt : String -> String -> Bool
+stringGt = native "$1 > $2"
+
+stringLe : String -> String -> Bool
+stringLe = native "$1 <= $2"
+
+stringGe : String -> String -> Bool
+stringGe = native "$1 >= $2"
+
+stringShow : String -> String
+stringShow = native "fangort.ShowString($1)"
+
+boolEq : Bool -> Bool -> Bool
+boolEq = native "$1 == $2"
+
+boolShow : Bool -> String
+boolShow = native "fangort.ShowBool($1)"
+
+floatFromInt : Int -> Float
+floatFromInt = native "float64($1)"
+
+instance Num Int
+    fromInt x = x
+    add x y = intAdd x y
+    sub x y = intSub x y
+    mul x y = intMul x y
+    negate x = intNegate x
+
+instance Num Float
+    fromInt x = floatFromInt x
+    add x y = floatAdd x y
+    sub x y = floatSub x y
+    mul x y = floatMul x y
+    negate x = floatNegate x
+
+instance Eq Int
+    eq x y = intEq x y
+
+instance Ord Int
+    lt x y = intLt x y
+    gt x y = intGt x y
+    le x y = intLe x y
+    ge x y = intGe x y
+
+instance Show Int
+    show x = intShow x
+
+instance Eq Float
+    eq x y = floatEq x y
+
+instance Ord Float
+    lt x y = floatLt x y
+    gt x y = floatGt x y
+    le x y = floatLe x y
+    ge x y = floatGe x y
+
+instance Show Float
+    show x = floatShow x
+
+instance Eq String
+    eq x y = stringEq x y
+
+instance Ord String
+    lt x y = stringLt x y
+    gt x y = stringGt x y
+    le x y = stringLe x y
+    ge x y = stringGe x y
+
+instance Show String
+    show x = stringShow x
+
+instance Eq Bool
+    eq x y = boolEq x y
+
+instance Show Bool
+    show x = boolShow x
+
+instance Eq ()
+    eq x y = True
+
+instance Show ()
+    show x = "()"
+
+neq : Eq a => a -> a -> Bool
+neq x y = if eq x y then False else True
 
 fdiv : Float -> Float -> Float
 fdiv = native "$1 / $2"
 
 append : String -> String -> String
 append = native "$1 + $2"
-
-eq : equatable -> equatable -> Bool
-eq = native "$eq($1, $2)"
-
-neq : equatable -> equatable -> Bool
-neq = native "!$eq($1, $2)"
-
-lt : comparable -> comparable -> Bool
-lt = native "$1 < $2"
-
-gt : comparable -> comparable -> Bool
-gt = native "$1 > $2"
-
-le : comparable -> comparable -> Bool
-le = native "$1 <= $2"
-
-ge : comparable -> comparable -> Bool
-ge = native "$1 >= $2"
 
 infix (+) = add
 infix (-) = sub

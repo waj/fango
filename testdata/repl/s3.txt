@@ -1,16 +1,16 @@
 fango 0.1 — :help for commands
-> add : number -> number -> number
-> number -> number -> number
-> 5 : number
+> add : Num a => a -> a -> a
+> Num a => a -> a -> a
+> 5 : Num a => a
 > inc : Int -> Int
 > 42 : Int
-> <function> : number -> number
-> fib : number -> number
-> 55 : number
-> 4 : number
+> <function> : Num a => a -> a
+> fib : (Num a, Ord a) => a -> a
+> 55 : (Num a, Ord a) => a
+> 4 : Num a => a
 > <function> : a -> a
-> add : number -> number
-> 40 : number
+> add : Num a => a -> a
+> 40 : Num a => a
 > -- SHADOWING -------------------------------------------- <repl>
 
 The parameter `y` shadows a name that is already defined —

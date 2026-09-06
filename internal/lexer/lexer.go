@@ -255,7 +255,7 @@ var twoCharOps = []struct {
 	text string
 	kind token.Kind
 }{
-	{"++", token.PLUSPLUS}, {"==", token.EQEQ}, {"/=", token.SLASHEQ},
+	{"++", token.PLUSPLUS}, {"==", token.EQEQ}, {"=>", token.DARROW}, {"/=", token.SLASHEQ},
 	{"<=", token.LTEQ}, {">=", token.GTEQ}, {"->", token.ARROW},
 	{"..", token.DOTDOT},
 }

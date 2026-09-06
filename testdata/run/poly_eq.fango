@@ -1,2 +1,2 @@
-type List a = Nil | Cons a (List a)
+type List a = Nil | Cons a (List a) deriving (Eq, Show)
 main = print (Cons 1 (Cons 2 Nil) == Cons 1 (Cons 2 Nil))

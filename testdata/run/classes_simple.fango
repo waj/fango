@@ -1,0 +1,13 @@
+class Twice a
+    twice : a -> a
+
+instance Twice Int
+    twice x = x + x
+
+applyTwice : Twice a => a -> a
+applyTwice x = twice x
+
+answer : Int
+answer = applyTwice 21
+
+main = print answer

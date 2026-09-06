@@ -117,6 +117,13 @@ func Lint(p *Prog, b *types.Builtins) []error {
 			l.evidence[ev.Unique]--
 		}
 	}
+	if p.EntryDisplay != nil {
+		l.tyParams = map[int]bool{}
+		l.expr(p.EntryDisplay, "entry display")
+		if !types.Equal(p.EntryDisplay.Type(), b.String) {
+			l.errorf("entry display must return String")
+		}
+	}
 	return l.errs
 }
 
@@ -146,16 +153,9 @@ func (l *linter) unique(t types.Type) int {
 	return -1
 }
 
-// numberVar reports whether t is a (declared) Number-kinded rigid variable —
-// numeric operators compile natively on its Go type-set constraint (doc/design.md, "Type inference").
-func (l *linter) numberVar(t types.Type) bool {
-	v, ok := t.(*types.TVar)
-	return ok && v.Rigid && v.Kind == types.Number
-}
-
 func (l *linter) numeric(t types.Type) bool {
 	u := l.unique(t)
-	return u == l.b.Int.Unique || u == l.b.Float.Unique || l.numberVar(t)
+	return u == l.b.Int.Unique || u == l.b.Float.Unique
 }
 
 func (l *linter) orderable(t types.Type) bool {
@@ -208,7 +208,7 @@ func (l *linter) expr(e Expr, where string) {
 		// An integer literal in a Number-generic body stays at the rigid
 		// var's type: Go untyped constants are assignable to the type-set
 		// param, the interpreter promotes (doc/design.md, "Interpreter and REPL").
-		if l.unique(e.Ty) != l.b.Int.Unique && !l.numberVar(e.Ty) {
+		if l.unique(e.Ty) != l.b.Int.Unique {
 			l.errorf("%s: IntLit typed %s", where, types.Show(e.Ty))
 		}
 	case *FloatLit:
@@ -231,7 +231,10 @@ func (l *linter) expr(e Expr, where string) {
 		// A worker name may appear ONLY as an App{Worker} callee (that
 		// case does not recurse here): a bare reference means elaboration
 		// failed to eta-expand a first-class use.
-		if _, isWorker := l.workers[e.Name]; isWorker {
+		if e.Local && !l.scope[e.Name] {
+			l.errorf("%s: local reference `%s` is unbound", where, e.Name)
+		}
+		if _, isWorker := l.workers[e.Name]; isWorker && !e.Local {
 			l.errorf("%s: bare reference to worker `%s` — first-class uses must be eta-expanded", where, e.Name)
 		}
 	case *Neg:
@@ -674,6 +677,14 @@ func matchNativeType(pattern, actual types.Type, sub map[int]types.Type) bool {
 // coverage and Default agree, and every leaf produces the Case's type.
 func (l *linter) tree(t Tree, want types.Type, where string) {
 	switch t := t.(type) {
+	case *Unreachable:
+	case *Guard:
+		l.expr(t.Cond, where)
+		if !types.Equal(t.Cond.Type(), l.b.Bool) {
+			l.errorf("%s: pattern guard must be Bool", where)
+		}
+		l.tree(t.Then, want, where)
+		l.tree(t.Else, want, where)
 	case *Leaf:
 		if !types.Equal(t.Body.Type(), want) {
 			l.errorf("%s: case leaf typed %s, want %s",

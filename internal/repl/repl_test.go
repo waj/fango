@@ -61,8 +61,40 @@ func TestRedefinition(t *testing.T) {
 func TestPromptAndReadLineShareReader(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader("readLine ()\nhello\n:quit\n"), &out)
-	if !strings.Contains(out.String(), `"hello" : String`) {
+	if !strings.Contains(out.String(), `hello : String`) {
 		t.Fatalf("readLine did not consume the line following the prompt expression:\n%s", out.String())
+	}
+}
+
+func TestClassInstanceTransactions(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader(`class Twice a
+    twice : a -> a
+
+instance Twice Int
+    twice x = "wrong"
+
+instance Twice Int
+    twice x = x + x
+
+answer : Int
+answer = twice 21
+answer
+class Twice a
+    twice : a -> a
+
+answer
+type T = T (Int -> Int) deriving (Show)
+type T = T Int deriving (Show)
+T 42
+:quit
+`), &out)
+	got := out.String()
+	if !strings.Contains(got, "TYPE MISMATCH") || !strings.Contains(got, "MULTIPLE DEFINITIONS") || !strings.Contains(got, "MISSING INSTANCE") {
+		t.Fatalf("missing intended diagnostics: %s", got)
+	}
+	if strings.Contains(got, "OVERLAPPING INSTANCE") || !strings.Contains(got, "T 42 : T") || strings.Count(got, "42 : Int") != 2 {
+		t.Fatalf("failed declaration poisoned the session: %s", got)
 	}
 }
 
@@ -72,7 +104,7 @@ func TestEffectfulPromptDeclarationRejected(t *testing.T) {
 	if !strings.Contains(out.String(), "EFFECTFUL PROMPT DECLARATION") {
 		t.Fatalf("effectful declaration was installed:\n%s", out.String())
 	}
-	if !strings.Contains(out.String(), "42 : number") {
+	if !strings.Contains(out.String(), "42 : Num a => a") {
 		t.Fatalf("session did not recover after rejecting declaration:\n%s", out.String())
 	}
 }
