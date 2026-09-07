@@ -1,6 +1,7 @@
-package infer
+package infer_test
 
 import (
+	"github.com/waj/fango/internal/infer"
 	"strings"
 	"testing"
 
@@ -32,24 +33,6 @@ type Box a = Box a
 	}
 }
 
-func TestContextIdentityAndInclusion(t *testing.T) {
-	_, pair, _, _, rigid, _ := matchTestTypes()
-	a, b, c, d := rigid(100), rigid(101), rigid(102), rigid(103)
-	head, renamed := pair(a, b), pair(c, d)
-	left := []types.Pred{{Class: "Show", Ty: a}}
-	right := []types.Pred{{Class: "Show", Ty: b}}
-	both := append(append([]types.Pred{}, left...), right...)
-	if canonicalContextKey(head, left) == canonicalContextKey(head, right) {
-		t.Fatal("different head variables share a context symbol")
-	}
-	if canonicalContextKey(head, both) != canonicalContextKey(renamed, []types.Pred{{Class: "Show", Ty: d}, {Class: "Show", Ty: c}}) {
-		t.Fatal("alpha-renaming or context order changed identity")
-	}
-	if !contextIncludes(head, both, renamed, []types.Pred{{Class: "Show", Ty: c}}) || contextIncludes(head, left, head, both) {
-		t.Fatal("incorrect subset ordering")
-	}
-}
-
 func TestInstanceVisibilityAndGivenContext(t *testing.T) {
 	ck, infos, errs := check(t, `class Inspect a
     inspect : a -> String
@@ -65,7 +48,7 @@ forward x = inspect x
 		t.Fatal(errs)
 	}
 	p := types.Pred{Class: "Inspect", Ty: ck.TypeNames["Foo"]}
-	var before DeclInfo
+	var before infer.DeclInfo
 	for _, info := range infos {
 		if info.Name == "before" {
 			before = info

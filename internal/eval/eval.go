@@ -11,6 +11,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/internal/natives"
@@ -88,6 +89,20 @@ type Env struct {
 	// Pointer identity means REPL redefinition invalidates naturally: a new
 	// generation is a new *core.Def.
 	tails map[*core.Def]*core.TailLoop
+
+	// Templates is the compiler's quote table, installed only for the
+	// compile-time environment. The Meta natives that assemble generated
+	// code need their arguments as trees, and expanding one needs the table.
+	Templates *meta.Table
+}
+
+// Expand renders a compile-time code value. It answers nil outside the
+// compiler's own evaluator, where no quote table exists.
+func (e *Env) Expand(c *meta.Code) ast.Expr {
+	if e == nil || e.Templates == nil {
+		return nil
+	}
+	return e.Templates.Expand(c)
 }
 
 // Frame holds block-local bindings (doc/design.md, "Language semantics") — eager values, unlike the lazy
@@ -543,7 +558,7 @@ func (in *interp) showValue(v Value) (string, error) {
 }
 
 func (in *interp) nativeRuntime() *natives.Runtime {
-	return &natives.Runtime{Reader: in.ioctx.Reader, Writer: in.ioctx.Writer, Equal: eqValue, Show: in.showValue}
+	return &natives.Runtime{Reader: in.ioctx.Reader, Writer: in.ioctx.Writer, Equal: eqValue, Show: in.showValue, Expand: in.env.Expand}
 }
 
 // tree walks a decision tree, mirroring the compiled backend's switches.

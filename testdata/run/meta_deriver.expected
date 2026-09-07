@@ -1,0 +1,6 @@
+Red
+Green/Int
+Blue/Int/String
+Pair/Int/String
+Pair { left = 0, right = - }
+True

@@ -1,11 +1,13 @@
-package elaborate
+package elaborate_test
 
 import (
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/elaborate"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/lexer"
 	"github.com/waj/fango/internal/parser"
 	"github.com/waj/fango/internal/source"
+	"github.com/waj/fango/internal/staging"
 	"github.com/waj/fango/internal/types"
 	"testing"
 )
@@ -35,6 +37,7 @@ main = applyTwice 21
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
+	staging.Install(ck)
 	if errs = ck.InstallPrelude(); len(errs) > 0 {
 		t.Fatal(errs)
 	}
@@ -42,7 +45,7 @@ main = applyTwice 21
 	if len(errs) > 0 {
 		t.Fatal(errs)
 	}
-	p, errs := Module(infos, ck)
+	p, errs := elaborate.Module(infos, ck)
 	if len(errs) > 0 {
 		t.Fatal(errs)
 	}

@@ -20,7 +20,20 @@ import (
 // REPL call it, so a deriver behaves the same at the prompt as in a build.
 func Install(ck *infer.Checker) {
 	ev := &evaluator{ck: ck, env: eval.NewEnv()}
+	ev.env.Templates = ck.Templates
 	ck.CompileTime = ev.run
+	// A failed expansion rolls the checker back past declarations this
+	// environment already holds, so the environment is rebuilt from the
+	// restored prefix rather than left describing a program that no longer
+	// exists.
+	ck.CompileTimeRollback = func(checked, instances int) {
+		if ev.installedDecls <= checked && ev.installedInstances <= instances {
+			return // nothing this environment holds was discarded
+		}
+		ev.env = eval.NewEnv()
+		ev.env.Templates = ck.Templates
+		ev.installedDecls, ev.installedInstances = 0, 0
+	}
 }
 
 type evaluator struct {

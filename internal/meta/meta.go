@@ -10,14 +10,52 @@
 package meta
 
 import "github.com/waj/fango/internal/ast"
+import "github.com/waj/fango/internal/source"
 import "github.com/waj/fango/internal/types"
+
+// Schema reads the declaration table a reflected type belongs to. The checker
+// implements it, which keeps this package below inference while still letting
+// a TypeRepr answer questions about its own constructors.
+type Schema interface {
+	ADT(unique int) *types.ADTInfo
+}
 
 // TypeRepr is the compiler-owned value produced by typeOf. Identity comes
 // from TCon.Unique and structural children; Name is only presentation data.
-// Visible is captured at the reflection site for later schema inspection.
+// Visible is captured at the reflection site: it holds the uniques whose
+// schemas that site could have read by hand, so an abstract type stays
+// abstract at compile time exactly as it does at run time. A nil Visible
+// means every schema is readable — the REPL and headerless files, which have
+// no export boundary to respect.
 type TypeRepr struct {
 	Type    types.Type
 	Visible map[int]bool
+	Schema  Schema
+}
+
+// Con returns the reflected nominal type, or nil for a variable or an arrow.
+func (r *TypeRepr) Con() *types.TCon {
+	con, _ := r.Type.(*types.TCon)
+	return con
+}
+
+// ADT returns the reflected type's declaration, or nil when the type is not
+// nominal, has no declaration, or hides its schema from the reflection site.
+func (r *TypeRepr) ADT() *types.ADTInfo {
+	con := r.Con()
+	if con == nil || r.Schema == nil {
+		return nil
+	}
+	if r.Visible != nil && !r.Visible[con.Unique] {
+		return nil
+	}
+	return r.Schema.ADT(con.Unique)
+}
+
+// Derive reflects t with this site's visibility, so walking into a type
+// argument or a constructor field never widens what the deriver may read.
+func (r *TypeRepr) Derive(t types.Type) *TypeRepr {
+	return &TypeRepr{Type: t, Visible: r.Visible, Schema: r.Schema}
 }
 
 // Template is one `quote` occurrence: the resolved expression it describes
@@ -47,18 +85,32 @@ func (t *Table) Get(i int) *Template {
 // Code is the compile-time value of a quote: a template index plus one Code
 // per hole, already evaluated. It is opaque to fango — no constructor, no
 // projection — and never reaches generated Go.
+//
+// Direct carries a compiler-built fragment instead of a template: scalar
+// lifting, and the traversal skeleton `Meta.match` and `Meta.construct`
+// build. Pattern is set instead of Direct while a constructor pattern is
+// under construction, and Pending names the record fields a partial
+// construction still expects.
 type Code struct {
 	Template int
 	Holes    []*Code
 	Direct   ast.Expr
+	Pattern  ast.Pattern
+	Pending  []string
 }
 
 // Expand renders code as surface AST ready to be checked at the splice site.
 // Each hole expands first, so a Code built from other Code produces one tree
 // with no splices left in it.
 func (t *Table) Expand(c *Code) ast.Expr {
-	if c != nil && c.Direct != nil {
+	if c == nil {
+		return nil
+	}
+	if c.Direct != nil {
 		return copyExpr(c.Direct, nil)
+	}
+	if c.Pattern != nil {
+		return nil // a half-built pattern is not an expression
 	}
 	tmpl := t.Get(c.Template)
 	if tmpl == nil {
@@ -85,6 +137,11 @@ func (t *Table) Expand(c *Code) ast.Expr {
 func Rewrite(e ast.Expr, f func(ast.Expr) ast.Expr) ast.Expr {
 	return copyWith(e, f)
 }
+
+// CopyPattern duplicates a pattern the compiler built for generated code.
+// Two branches of one generated case must not share pattern nodes, because
+// inference keys solved types by node pointer.
+func CopyPattern(p ast.Pattern) ast.Pattern { return copyPattern(p) }
 
 func copyExpr(e ast.Expr, subst map[*ast.Splice]ast.Expr) ast.Expr {
 	return copyWith(e, func(n ast.Expr) ast.Expr {
@@ -287,5 +344,147 @@ func copyPattern(p ast.Pattern) ast.Pattern {
 		return &n
 	default:
 		panic("meta: unhandled pattern node in copy")
+	}
+}
+
+// FillSpans gives compiler-built nodes a source position. The traversal
+// skeleton `Meta.match` assembles has no source of its own, so a type error
+// inside a derived method would otherwise have nowhere to point; quoted
+// fragments keep the spans they were written with.
+func FillSpans(e ast.Expr, sp source.Span) {
+	if e == nil {
+		return
+	}
+	rec := func(children ...ast.Expr) {
+		for _, c := range children {
+			FillSpans(c, sp)
+		}
+	}
+	fill := func(at *source.Span) {
+		if at.File == nil {
+			*at = sp
+		}
+	}
+	switch e := e.(type) {
+	case *ast.IntLit:
+		fill(&e.Sp)
+	case *ast.FloatLit:
+		fill(&e.Sp)
+	case *ast.StringLit:
+		fill(&e.Sp)
+	case *ast.CharLit:
+		fill(&e.Sp)
+	case *ast.UnitLit:
+		fill(&e.Sp)
+	case *ast.Var:
+		fill(&e.Sp)
+	case *ast.Ctor:
+		fill(&e.Sp)
+	case *ast.Resume:
+		fill(&e.Sp)
+	case *ast.RecordLit:
+		fill(&e.Sp)
+		fill(&e.NameSpan)
+		for i := range e.Fields {
+			fill(&e.Fields[i].NameSpan)
+			rec(e.Fields[i].Value)
+		}
+	case *ast.RecordGet:
+		fill(&e.FieldSpan)
+		rec(e.Record)
+	case *ast.RecordUpdate:
+		fill(&e.Sp)
+		for i := range e.Fields {
+			fill(&e.Fields[i].NameSpan)
+			rec(e.Fields[i].Value)
+		}
+		rec(e.Record)
+	case *ast.App:
+		rec(e.Fn, e.Arg)
+	case *ast.Neg:
+		fill(&e.Sp)
+		rec(e.Operand)
+	case *ast.BinOp:
+		fill(&e.OpSpan)
+		rec(e.L, e.R)
+	case *ast.If:
+		fill(&e.Sp)
+		rec(e.Cond, e.Then, e.Else)
+	case *ast.Lambda:
+		fill(&e.Sp)
+		for i := range e.Params {
+			fill(&e.Params[i].Sp)
+		}
+		rec(e.Body)
+	case *ast.Block:
+		for i := range e.Binds {
+			fill(&e.Binds[i].NameSpan)
+			rec(e.Binds[i].Body)
+		}
+		for _, it := range e.Items {
+			rec(it.Expr)
+		}
+		rec(e.Result)
+	case *ast.Case:
+		fill(&e.Sp)
+		rec(e.Scrutinee)
+		for _, br := range e.Branches {
+			fillPatternSpans(br.Pattern, sp)
+			rec(br.Body)
+		}
+	case *ast.Handle:
+		fill(&e.Sp)
+		rec(e.Body)
+		for i := range e.Clauses {
+			rec(e.Clauses[i].Body)
+		}
+		if e.Return != nil {
+			rec(e.Return.Body)
+		}
+	case *ast.Quote:
+		fill(&e.Sp)
+		rec(e.Body)
+	case *ast.Splice:
+		fill(&e.Sp)
+		rec(e.Operand)
+	case *ast.TypeOf:
+		fill(&e.Sp)
+	case *ast.MetaValue:
+		fill(&e.Sp)
+	}
+}
+
+func fillPatternSpans(p ast.Pattern, sp source.Span) {
+	fill := func(at *source.Span) {
+		if at.File == nil {
+			*at = sp
+		}
+	}
+	switch p := p.(type) {
+	case *ast.PVar:
+		fill(&p.Sp)
+	case *ast.PWildcard:
+		fill(&p.Sp)
+	case *ast.PInt:
+		fill(&p.Sp)
+	case *ast.PFloat:
+		fill(&p.Sp)
+	case *ast.PString:
+		fill(&p.Sp)
+	case *ast.PChar:
+		fill(&p.Sp)
+	case *ast.PPin:
+		fill(&p.Sp)
+	case *ast.PRecord:
+		fill(&p.Sp)
+		for i := range p.Fields {
+			fill(&p.Fields[i].NameSpan)
+			fillPatternSpans(p.Fields[i].Pattern, sp)
+		}
+	case *ast.PCtor:
+		fill(&p.NameSpan)
+		for _, a := range p.Args {
+			fillPatternSpans(a, sp)
+		}
 	}
 }

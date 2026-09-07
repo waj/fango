@@ -1,0 +1,51 @@
+-- A user-defined class becomes derivable through a `deriver` declaration.
+-- Nothing about Eq, Ord, and Show is privileged: they are written the same
+-- way, in the bundled `Derive` module.
+import Meta exposing (Bound(..), BoundField(..), Code, Ctor(..), Field(..), Items(..), Lift(..), TypeInfo(..))
+
+class Tag a
+    tag : a -> String
+
+class Blank a
+    blank : () -> a
+
+-- The compiler owns the traversal: `Meta.match` builds the exhaustive case
+-- and binds every field, so a deriver never invents a binder.
+labelOf : Bound -> Code
+labelOf bound =
+    Meta.lift (Meta.foldItems (\text field -> text ++ "/" ++ Meta.typeName field.ty) bound.ctor.name bound.fields)
+
+deriver Tag
+    tag subject valueCode = Meta.match subject valueCode labelOf
+
+-- `Meta.construct` is the other direction, for a method that produces an `a`.
+-- A field's reflected type decides the value, by identity rather than name.
+zeroFor : Field -> Code
+zeroFor field =
+    if Meta.sameType field.ty (typeOf Int) then
+        quote 0
+    else if Meta.sameType field.ty (typeOf String) then
+        quote "-"
+    else
+        Meta.fail "Blank only handles Int and String fields"
+
+deriver Blank
+    blank subject unitCode =
+        case Meta.ctorsIn subject of
+            NoItems -> Meta.fail "a type with no constructors"
+            Item ctor _ -> Meta.construct ctor (Meta.mapItems zeroFor ctor.fields)
+
+type Colour = Red | Green Int | Blue Int String deriving (Tag)
+
+type Pair = { left : Int, right : String } deriving (Blank, Tag, Show, Eq)
+
+empty : Pair
+empty = blank ()
+
+main() =
+    print (tag Red)
+    print (tag (Green 1))
+    print (tag (Blue 1 "x"))
+    print (tag empty)
+    print empty
+    print (empty == Pair { left = 0, right = "-" })

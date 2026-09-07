@@ -306,7 +306,12 @@ func (p *parser) parseDeriverDecl() ast.Decl {
 	class, _, sp := p.parseQualifiedName()
 	d := &ast.DeriverDecl{Class: class, ClassSpan: start.Span.Merge(sp)}
 	first := p.peek()
-	if first.Kind == token.EOF || first.Pos().Col <= 1 {
+	if first.Kind == token.EOF {
+		// The prompt's continuation signal: the block may still arrive.
+		p.errorAt(d.ClassSpan, TitleUnexpectedEOF, "This deriver needs method definitions.")
+		return nil
+	}
+	if first.Pos().Col <= 1 {
 		p.errorAt(first.Span, "DERIVER METHOD", "A deriver needs indented method definitions.")
 		return nil
 	}

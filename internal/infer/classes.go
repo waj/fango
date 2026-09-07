@@ -277,12 +277,39 @@ func (ck *Checker) instanceMethod(d *ast.ValueDecl, ty types.Type, inst *Instanc
 	sub, _, errs := Solve(g.cs, nil, ck.Sub, ck.B, ck.Sup)
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
+	g.errs = nil
+	g.resolveRecords(true)
+	errs = append(errs, g.errs...)
 	sch := ck.generalize(ty, nil)
 	sch.Preds = ck.NormalizePreds(given)
 	var es []diag.Error
 	sch, es = ck.qualify(sch, g.preds, given, true, d.NameSpan)
 	errs = append(errs, es...)
 	return DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body, Scheme: sch, Instance: inst, InstanceLimit: inst.Limit}, errs
+}
+
+// annotatedDecl checks a declaration against a signature the compiler
+// supplies rather than one the author wrote. Deriver methods are the only
+// such declaration: their type is dictated by the class they generate for.
+func (ck *Checker) annotatedDecl(d *ast.ValueDecl, ty types.Type) (DeclInfo, []diag.Error) {
+	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
+	var inferred types.Type
+	if len(d.Params) > 0 {
+		inferred = g.functionWithAnnotatedParams(d.Name, d.NameSpan, d.Params, d.Body, ty)
+	} else {
+		inferred = g.expr(d.Body)
+		g.cs = append(g.cs, Constraint{Left: g.ambient, Right: types.Row{}, Span: d.Body.Span(), Why: Why{Kind: WhyEffectEscapes}})
+	}
+	g.cs = append(g.cs, Constraint{Left: inferred, Right: ty, Span: d.NameSpan, Why: Why{Kind: WhyAnnotation, Name: types.SurfaceName(d.Name)}})
+	sub, _, errs := Solve(g.cs, nil, ck.Sub, ck.B, ck.Sup)
+	ck.Sub = sub
+	errs = append(errs, g.errs...)
+	g.errs = nil
+	g.resolveRecords(true)
+	errs = append(errs, g.errs...)
+	sch, es := ck.qualify(ck.generalize(ty, nil), g.preds, nil, true, d.NameSpan)
+	errs = append(errs, es...)
+	return DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body, Scheme: sch, InstanceLimit: len(ck.Instances)}, errs
 }
 
 func (ck *Checker) NormalizePreds(ps []types.Pred) []types.Pred {
@@ -352,7 +379,11 @@ func (ck *Checker) qualify(sch types.Scheme, obs []predObligation, given []types
 	var ground []types.Pred
 	for _, p := range left {
 		if mentionsAny(p.Ty, quant) {
-			if annotated {
+			if ck.inferringContext != nil {
+				// A generated instance adopts what its body actually needs
+				// rather than declaring a context up front.
+				*ck.inferringContext = append(*ck.inferringContext, p)
+			} else if annotated {
 				errs = append(errs, diag.Errorf(sp, "MISSING CONSTRAINT", "The annotation requires the additional constraint `%s %s`.", types.SurfaceName(p.Class), types.Show(p.Ty)))
 			} else {
 				sch.Preds = append(sch.Preds, p)

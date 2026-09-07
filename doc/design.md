@@ -250,17 +250,38 @@ user-definable name `Unit`. Each declaration emits its workers and dictionary
 factory only in its defining module; blanket instances do not generate copies
 for every matching type or importing module.
 
-Explicit `deriving (Eq, Show)` generates ordinary instance ASTs, checked through
-the same inference and elaboration path as handwritten methods. Their contexts
-retain predicates for polymorphic fields, including structural field types,
-so callers select field specializations; phantom parameters need no evidence.
-Direct recursive fields reuse the instance being checked. Other cyclic context
-chains follow the ordinary use-site rejection rule. There is
-no automatic structural equality or display for a source ADT without an instance.
+Explicit `deriving (C)` runs C's *deriver* — a compile-time generator written
+in ordinary fango — and installs the instance it produces. Generated methods
+are checked and elaborated through the same path as handwritten ones, so
+nothing downstream knows a method was derived. The compiler owns the instance
+head, so derived instances go through the same whole-graph overlap check as
+handwritten ones; it owns the method parameters, which it hands to the deriver
+as `Code`; and it owns the traversal skeleton, so a deriver never invents a
+binder and exhaustiveness is structural. The deriver owns only the bodies.
+
+Instance contexts are use-driven rather than syntactic. A first pass checks
+the generated methods with no declared context and records the predicates they
+leave residual; a second pass declares exactly those and is otherwise an
+ordinary `InstanceDecl`. A field the generator never touched, and a phantom
+parameter that appears in no field at all, therefore demand no evidence.
+Direct recursive fields reuse the instance being checked, because the probe
+runs with the instance already installed. Other cyclic context chains follow
+the ordinary use-site rejection rule. There is no automatic structural
+equality or display for a source ADT without an instance.
+
+The bundled `Derive` module supplies the derivers for `Eq`, `Ord`, and
+`Show`, written the same way a library would write its own. It sits above
+`Basics` and `Meta` and below everything else: a file that writes `deriving`
+gets a loader edge to it, exactly as a file that writes `quote` gets one to
+`Meta`. That edge is also what makes the deriver visible under the ordinary
+instance-visibility rule.
 Nominal records use the same type identity, schemes, and deriving machinery as
 single-constructor ADTs. Field projection and update are deferred until the
 receiver has unified to a known record type, then checked against the resolved
-visible schema. Elaboration lowers literals, projections, and functional
+visible schema. Deferred accesses resolve to a fixed point rather than in one
+pass, because one access's receiver is often another's result: `ctor.fields`
+decides the element type a later `field.index` reads. Only obligations that
+survive a pass learning nothing are genuinely ambiguous. Elaboration lowers literals, projections, and functional
 updates to the existing constructor, `Let`, and exhaustive one-constructor
 `Case` Core forms. This keeps Core and both backends free of a second record
 representation while preserving single evaluation and source-order effects.
@@ -279,6 +300,26 @@ arguments and function effects without consulting display names. `typeOf` is
 an explicit compile-time Core operation; the Core linter rejects one that
 survives into runtime code. Scalar lifting creates compiler-built AST
 fragments alongside quote templates, and expansion copies either form.
+
+A `TypeRepr` also carries the schemas its reflection site was allowed to read
+and a narrow interface back to the checker's declaration table. That is what
+makes `Meta.info` answer `Opaque` for a type imported as `T` and `Visible` for
+the same type imported as `T(..)`: reflection introduces no new visibility
+rule, it reuses the one that already governs constructors and record fields.
+Walking into a type argument or a constructor field carries the same
+visibility along, so an abstract type stays abstract at compile time exactly
+as it does at run time. There is deliberately no `reify`: a splice cannot ask
+the compiler about a name it did not itself name, and cannot ask whether an
+instance exists. A generator emits a method call and lets ordinary instance
+resolution answer.
+
+The reflection and code-building primitives are pure natives that never
+construct a fango value: they answer counts, indices, names, and opaque
+handles, and `Meta`'s own fango code assembles the records and lists a deriver
+walks. That is what keeps `internal/natives` below the interpreter in the
+package graph. `Meta` therefore carries its own small `Items` list rather than
+importing `List`, which derives its instances and so depends on `Derive`,
+which depends on `Meta`.
 
 There is one representation, and it is deliberately not a fango-level mirror
 of `internal/ast`: a quote compiles to a compiler-side template — the quoting
@@ -346,9 +387,18 @@ evaluation. Together these keep generated Go byte-identical across builds.
 
 The bundled `Meta` module is a dependency only of files that use the syntax:
 the parser records whether it built a quote, splice, or `typeOf`, and the
-loader adds the edge from that. `Meta` imports nothing. Its compile-time-only
-types, class dictionaries, instances, and helpers are excluded transitively
-from runtime Core.
+loader adds the edge from that; a `deriving` clause adds the same kind of edge
+to `Derive`. `Meta` imports only `Basics`, which imports nothing, so neither
+edge can close a cycle. Their compile-time-only types, class dictionaries,
+instances, and helpers are excluded transitively from runtime Core; `Derive`
+emits nothing at all, and what survives of `Meta` is its `Items` list and the
+folds over it, which are ordinary polymorphic code.
+
+A failed expansion rolls back. `(*Checker).Checkpoint` restores the checked
+prefix along with the rest of the declaration environment, and tells the
+compile-time evaluator to discard an environment that no longer describes it —
+which is why a REPL `deriving` clause whose deriver fails leaves no type
+behind.
 
 ## Core and evidence invariants
 
@@ -600,9 +650,12 @@ flags, external library version selection, or package resolution. The implicit
 prelude is fixed to hidden `Basics` plus ambient `IO`, with `Meta` added only
 for files that use the staging syntax; the bundled standard
 library is intentionally small and experimental.
-Compile-time metaprogramming is limited to quotes and splices: `deriving`
-remains closed to `Eq` and `Show`, there is no type reflection, and there are
-no declaration splices.
+Compile-time metaprogramming has quotes, splices, type reflection, and
+derivers, but no declaration splices, so generation that must introduce a
+top-level name is not expressible. Reflection reads a schema and compares type
+identities; it cannot ask whether an instance exists. A stdlib parameter name
+that collides with an entry file's effect operation is rejected as shadowing,
+because effect operations are declared before any module's values.
 Integer values are signed 64-bit; broader numeric semantics are not settled.
 Self tail calls run in constant stack, but mutual recursion and monomorphic
 local recursive closures do not. Custom handlers have the

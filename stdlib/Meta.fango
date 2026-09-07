@@ -1,17 +1,52 @@
-module Meta exposing (Code, TypeRepr, Lift(..), sameType, head, isVar, typeName, fail)
+module Meta exposing
+    ( Code, TypeRepr, Items(..), Field(..), Ctor(..), Shape(..), TypeInfo(..)
+    , Reflected(..), Bound(..), BoundField(..), Lift(..)
+    , sameType, head, args, isVar, typeName, info
+    , match, construct, ctorsIn
+    , foldItems, mapItems, lengthItems
+    , fail
+    )
 
-{- The compile-time stage's one representation.
+import Basics
+
+{- The compile-time stage's representations.
 
 `Code` is abstract: it has no constructor here, and the only way to build one
-is a `quote`. Its values exist only while the compiler is running, so a
-definition whose type mentions `Code` is never emitted.
+is a `quote` or the traversal skeleton below. Its values exist only while the
+compiler is running, so a definition whose type mentions `Code` — or
+`TypeRepr`, or anything reachable from one — is never emitted.
 
-Meta deliberately imports nothing. Derivers will live in `Basics`, which every
-module already loads, so anything Meta depended on would close a cycle. -}
+Meta imports only Basics, which imports nothing. Derivers live in `Derive`,
+above this module, so nothing here has to reach a collection module: `List`
+derives its own instances, and would therefore depend on the module that
+depends on this one. `Items` is the small list that avoids the cycle.
+
+The natives below have Go templates that are never emitted, because every one
+of them has a compile-time-only type. They exist so the interpreter registry
+and the surface declaration agree on arity. -}
 
 type Code = Code
 
 type TypeRepr = TypeRepr
+
+type Items a = NoItems | Item a (Items a)
+
+foldItems : (b -> a -> b) -> b -> Items a -> b
+foldItems combine start items =
+    case items of
+        NoItems -> start
+        Item value rest -> foldItems combine (combine start value) rest
+
+mapItems : (a -> b) -> Items a -> Items b
+mapItems change items =
+    case items of
+        NoItems -> NoItems
+        Item value rest -> Item (change value) (mapItems change rest)
+
+lengthItems : Items a -> Int
+lengthItems items = foldItems (\total _ -> total + 1) 0 items
+
+-- Lifting a scalar builds a literal that keeps its own type.
 
 class Lift a
     lift : a -> Code
@@ -52,6 +87,8 @@ instance Lift Bool
 instance Lift ()
     lift value = liftUnit value
 
+-- Reflected types compare by compiler identity, never by name.
+
 sameType : TypeRepr -> TypeRepr -> Bool
 sameType = native "$1 == $2"
 
@@ -59,10 +96,196 @@ head : TypeRepr -> TypeRepr
 head = native "$1"
 
 isVar : TypeRepr -> Bool
-isVar = native "false == $1"
+isVar = native "$1"
 
+-- typeName is for display only. Identity is sameType.
 typeName : TypeRepr -> String
-typeName = native "\"\" + $1"
+typeName = native "$1"
 
+argCount : TypeRepr -> Int
+argCount = native "$1"
+
+argAt : TypeRepr -> Int -> TypeRepr
+argAt = native "$1 == $2"
+
+schemaVisible : TypeRepr -> Bool
+schemaVisible = native "$1"
+
+typeSurfaceName : TypeRepr -> String
+typeSurfaceName = native "$1"
+
+typeModuleName : TypeRepr -> String
+typeModuleName = native "$1"
+
+isRecordType : TypeRepr -> Bool
+isRecordType = native "$1"
+
+ctorCount : TypeRepr -> Int
+ctorCount = native "$1"
+
+ctorSymbol : TypeRepr -> Int -> String
+ctorSymbol = native "$1 == $2"
+
+ctorName : TypeRepr -> Int -> String
+ctorName = native "$1 == $2"
+
+fieldCount : TypeRepr -> Int -> Int
+fieldCount = native "$1 == $2"
+
+fieldName : TypeRepr -> Int -> Int -> String
+fieldName = native "$1 == $2 == $3"
+
+fieldType : TypeRepr -> Int -> Int -> TypeRepr
+fieldType = native "$1 == $2 == $3"
+
+-- A schema: one field, one constructor, and the type as a whole. A union
+-- constructor's fields are positional, so their names are empty.
+
+type Field = { name : String, index : Int, ty : TypeRepr }
+
+type Ctor = { name : String, symbol : String, index : Int, owner : TypeRepr, fields : Items Field }
+
+type Shape = Union (Items Ctor) | Record Ctor
+
+type TypeInfo = { name : String, moduleName : String, ty : TypeRepr, params : Items TypeRepr, shape : Shape }
+
+-- info answers Opaque unless the type's schema is visible where `typeOf` was
+-- written: `exposing (T)` reflects opaque and `exposing (T(..))` reflects in
+-- full, exactly as those forms already govern patterns and field access.
+type Reflected = Opaque | Visible TypeInfo
+
+argsFrom : TypeRepr -> Int -> Items TypeRepr
+argsFrom repr index =
+    if index >= argCount repr then
+        NoItems
+    else
+        Item (argAt repr index) (argsFrom repr (index + 1))
+
+args : TypeRepr -> Items TypeRepr
+args repr = argsFrom repr 0
+
+fieldsFrom : TypeRepr -> Int -> Int -> Items Field
+fieldsFrom repr ctorIndex index =
+    if index >= fieldCount repr ctorIndex then
+        NoItems
+    else
+        Item
+            (Field { name = fieldName repr ctorIndex index, index = index, ty = fieldType repr ctorIndex index })
+            (fieldsFrom repr ctorIndex (index + 1))
+
+ctorFor : TypeRepr -> Int -> Ctor
+ctorFor repr index =
+    Ctor
+        { name = ctorName repr index
+        , symbol = ctorSymbol repr index
+        , index = index
+        , owner = repr
+        , fields = fieldsFrom repr index 0
+        }
+
+ctorsFrom : TypeRepr -> Int -> Items Ctor
+ctorsFrom repr index =
+    if index >= ctorCount repr then
+        NoItems
+    else
+        Item (ctorFor repr index) (ctorsFrom repr (index + 1))
+
+shapeOf : TypeRepr -> Shape
+shapeOf repr =
+    if isRecordType repr then
+        Record (ctorFor repr 0)
+    else
+        Union (ctorsFrom repr 0)
+
+-- infoOf reads a schema the caller already knows is visible. The compiler
+-- calls it when it invokes a deriver for a type it is declaring.
+infoOf : TypeRepr -> TypeInfo
+infoOf repr =
+    TypeInfo
+        { name = typeSurfaceName repr
+        , moduleName = typeModuleName repr
+        , ty = repr
+        , params = args repr
+        , shape = shapeOf repr
+        }
+
+info : TypeRepr -> Reflected
+info repr = if schemaVisible repr then Visible (infoOf repr) else Opaque
+
+-- ctorsIn flattens the two shapes: a record is a single constructor whose
+-- fields carry names.
+ctorsIn : TypeInfo -> Items Ctor
+ctorsIn subject =
+    case subject.shape of
+        Union ctors -> ctors
+        Record ctor -> Item ctor NoItems
+
+-- The traversal skeleton. The compiler owns every binder a generated method
+-- introduces, so a deriver never invents a name and exhaustiveness is
+-- structural rather than checked after the fact.
+
+type BoundField = { name : String, index : Int, ty : TypeRepr, value : Code }
+
+type Bound = { ctor : Ctor, fields : Items BoundField }
+
+binderName : Code -> Int -> Int -> String
+binderName = native "$1 == $2 == $3"
+
+varCode : String -> Code
+varCode = native "$1"
+
+matchStart : Code -> Code
+matchStart = native "$1"
+
+patternStart : String -> Code
+patternStart = native "$1"
+
+patternBind : Code -> String -> Code
+patternBind = native "$1 == $2"
+
+matchBranch : Code -> Code -> Code -> Code
+matchBranch = native "$1 == $2 == $3"
+
+constructStart : TypeRepr -> Int -> Code
+constructStart = native "$1 == $2"
+
+constructPush : Code -> Code -> Code
+constructPush = native "$1 == $2"
+
+bindField : Code -> Ctor -> Field -> BoundField
+bindField scrutinee ctor field =
+    BoundField
+        { name = field.name
+        , index = field.index
+        , ty = field.ty
+        , value = varCode (binderName scrutinee ctor.index field.index)
+        }
+
+boundOf : Code -> Ctor -> Bound
+boundOf scrutinee ctor =
+    Bound { ctor = ctor, fields = mapItems (bindField scrutinee ctor) ctor.fields }
+
+patternOf : Code -> Ctor -> Code
+patternOf scrutinee ctor =
+    foldItems
+        (\sofar field -> patternBind sofar (binderName scrutinee ctor.index field.index))
+        (patternStart ctor.symbol)
+        ctor.fields
+
+-- match builds the exhaustive case over subject's constructors and binds
+-- every field, handing each branch's bindings to build. Nesting two calls
+-- produces the nested case a two-argument method needs.
+match : TypeInfo -> Code -> (Bound -> Code) -> Code
+match subject scrutinee build =
+    foldItems
+        (\sofar ctor -> matchBranch sofar (patternOf scrutinee ctor) (build (boundOf scrutinee ctor)))
+        (matchStart scrutinee)
+        (ctorsIn subject)
+
+-- construct is the other direction, for a method that produces an `a`.
+construct : Ctor -> Items Code -> Code
+construct ctor values = foldItems constructPush (constructStart ctor.owner ctor.index) values
+
+-- fail stops expansion and reports COMPILE-TIME FAILURE at the splice site.
 fail : String -> Code
 fail = native "$1"

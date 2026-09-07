@@ -1,6 +1,6 @@
 module Maybe exposing (Maybe(..), withDefault)
 
-type Maybe a = Nothing | Just a deriving (Eq, Show)
+type Maybe a = Nothing | Just a deriving (Eq, Ord, Show)
 
 withDefault : a -> Maybe a -> a
 withDefault fallback maybe =

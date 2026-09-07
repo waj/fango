@@ -8,4 +8,25 @@ fango 0.1 — :help for commands
 > 20 : Int
 > no
 () : ()
+> | | Tag : class
+| | deriver Tag
+Red : Colour
+Blue : Colour
+> Blue : String
+> | | Never : class
+| | deriver Never
+-- COMPILE-TIME FAILURE --------------------------------- <repl>
+
+This splice failed while the compiler was running it:
+
+    this class is not derivable
+
+1| type Nope = Nope Int deriving (Never)
+                                  ^^^^^
+> -- NAMING ERROR ----------------------------------------- <repl>
+
+I don't know a constructor named `Nope`.
+
+1| Nope 1
+   ^^^^
 > 

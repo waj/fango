@@ -1,0 +1,20 @@
+-- Ord derives all four comparisons at once: constructors order by
+-- declaration position, then fields lexicographically.
+type Suit = Clubs | Diamonds | Hearts | Spades deriving (Eq, Ord, Show)
+
+type Card = { suit : Suit, rank : Int } deriving (Eq, Ord, Show)
+
+type Wrapper a = Wrapper a Int deriving (Eq, Ord, Show)
+
+main() =
+    print (Clubs < Spades)
+    print (Spades < Clubs)
+    print (Hearts <= Hearts)
+    print (Hearts >= Spades)
+    print (Diamonds > Clubs)
+    print (Card { suit = Clubs, rank = 9 } < Card { suit = Clubs, rank = 10 })
+    print (Card { suit = Hearts, rank = 2 } < Card { suit = Clubs, rank = 10 })
+    print (Card { suit = Hearts, rank = 2 } == Card { suit = Hearts, rank = 2 })
+    print (Wrapper "a" 2 < Wrapper "a" 3)
+    print (Wrapper "b" 1 <= Wrapper "a" 9)
+    print (Wrapper 'x' 1)

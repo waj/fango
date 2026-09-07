@@ -1,0 +1,28 @@
+module Main exposing (main)
+
+import Meta exposing (Code, Ctor(..), Field(..), Items(..), Reflected(..), TypeInfo(..))
+import Shapes exposing (Hidden, Open(..), Public(..), Sealed)
+
+-- `Meta.info` answers Opaque unless the schema is visible where `typeOf` was
+-- written. That is not a new rule: it is `exposing (T)` versus
+-- `exposing (T(..))`, the same one that already governs patterns and fields.
+fields : TypeInfo -> String
+fields schema =
+    case Meta.ctorsIn schema of
+        NoItems -> "-"
+        Item ctor _ ->
+            Meta.foldItems (\text field -> text ++ Meta.typeName field.ty ++ " ") (ctor.name ++ ":") ctor.fields
+
+describe : Meta.TypeRepr -> Code
+describe repr =
+    case Meta.info repr of
+        Opaque -> Meta.lift ("opaque " ++ Meta.typeName repr)
+        Visible schema ->
+            Meta.lift (schema.moduleName ++ "." ++ schema.name ++ " " ++ fields schema)
+
+main : String
+main =
+    $(describe (typeOf Hidden))
+        ++ " | " ++ $(describe (typeOf Open))
+        ++ " | " ++ $(describe (typeOf Sealed))
+        ++ " | " ++ $(describe (typeOf Public))

@@ -27,7 +27,32 @@ import (
 
 // CodeTypeName is the canonical symbol of the bundled abstract code type.
 const CodeTypeName = "Meta.Code"
-const TypeReprName = "Meta.TypeRepr"
+
+// The reflection surface: an opaque nominal identity, the schema record a
+// deriver walks, and the compiler-only projection from one to the other.
+const (
+	TypeReprName = "Meta.TypeRepr"
+	TypeInfoName = "Meta.TypeInfo"
+	InfoOfName   = "Meta.infoOf"
+)
+
+// Reflect builds the compile-time value of a reflected type. visible names
+// the schemas the reflection site may read, as module resolution recorded
+// them; nil means every schema is readable, which is the REPL and a
+// headerless file, neither of which has an export boundary to respect.
+func (ck *Checker) Reflect(t types.Type, visible map[string]bool) *meta.TypeRepr {
+	repr := &meta.TypeRepr{Type: t, Schema: ck}
+	if visible == nil {
+		return repr
+	}
+	repr.Visible = map[int]bool{}
+	for name := range visible {
+		if con, ok := ck.TypeNames[name].(*types.TCon); ok {
+			repr.Visible[con.Unique] = true
+		}
+	}
+	return repr
+}
 
 // codeType returns the compile-time code type. A quote or splice can only
 // appear in a module that pulled `Meta` in, which the module loader arranges

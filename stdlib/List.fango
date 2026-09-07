@@ -1,6 +1,6 @@
 module List exposing (List(..), range, each, foldl)
 
-type List a = Nil | Cons a (List a) deriving (Eq, Show)
+type List a = Nil | Cons a (List a) deriving (Eq, Ord, Show)
 
 range start end =
     if start > end then Nil else Cons start (range (start + 1) end)

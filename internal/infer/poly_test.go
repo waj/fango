@@ -1,6 +1,8 @@
-package infer
+package infer_test
 
 import (
+	"github.com/waj/fango/internal/infer"
+	"github.com/waj/fango/internal/staging"
 	"strings"
 	"testing"
 
@@ -12,7 +14,7 @@ import (
 
 // checkPoly exercises generalization,
 // parameterized types, and annotation variables are live.
-func checkPoly(t *testing.T, src string) (*Checker, []DeclInfo, []error) {
+func checkPoly(t *testing.T, src string) (*infer.Checker, []infer.DeclInfo, []error) {
 	t.Helper()
 	f := source.NewFile("<test>", []byte(src))
 	toks, lexErrs := lexer.Lex(f)
@@ -25,7 +27,8 @@ func checkPoly(t *testing.T, src string) (*Checker, []DeclInfo, []error) {
 	}
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
-	ck := NewChecker(sup, b, NewEnv())
+	ck := infer.NewChecker(sup, b, infer.NewEnv())
+	staging.Install(ck)
 	if errs := ck.InstallPrelude(); len(errs) > 0 {
 		t.Fatalf("prelude errors: %v", errs)
 	}

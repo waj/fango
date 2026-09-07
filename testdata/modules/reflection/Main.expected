@@ -1,0 +1,1 @@
+opaque Hidden | Shapes.Open Open:Int  | opaque Sealed | Shapes.Public Public:Int 

@@ -31,16 +31,16 @@ and configurable source roots remain deferred.
 
 ## Compile-time metaprogramming
 
-The compile-time stage and the first reflection primitives exist: `typeOf`,
-opaque identity-based representations, scalar `Lift`, and explicit
-compile-time failure are implemented. Schema reflection and traversal remain
-unfinished. `deriving` is still closed to `Eq` and `Show`, and its generator
-is a Go function rather than something a library can extend. `Ord` cannot be derived at all, and the
-Tier-2 Todo CLI's serialize/parse round trip has no way to produce a codec per
-type. The remaining phases — schema reflection bounded by ordinary export
-visibility, metadata collections, `deriver` declarations that open `deriving`
-to user classes, and declaration splices — are in
-[roadmap-meta.md](roadmap-meta.md).
+The compile-time stage, type reflection, and derivers exist: quotes, splices,
+`typeOf`, schema reflection bounded by ordinary export visibility, and
+`deriver` declarations that open `deriving` to any class are implemented and
+documented in the design and the reference. The standard `Eq`, `Ord`, and
+`Show` derivers are ordinary fango in the bundled `Derive` module.
+
+What remains is declaration splices — generating a definition rather than an
+expression — and the driving consumer for them: the Tier-2 Todo CLI's
+serialize/parse round trip still has no `Json` module to encode into. Both are
+in [roadmap-meta.md](roadmap-meta.md).
 
 It deliberately avoids a `Generic`-style structural representation, which
 one-parameter classes without higher kinds cannot express, and avoids Template
@@ -141,9 +141,9 @@ These are directions, not commitments or an ordering after the work above.
   division, conversions, and possible arbitrary precision.
 - Extend type classes only from concrete needs: superclasses, method-local
   polymorphism, higher kinds, and default methods remain deferred. Mutually
-  recursive deriving groups and richer precedence-aware display are also open;
-  both get cheaper once deriving is user-extensible, so they wait on
-  [roadmap-meta.md](roadmap-meta.md).
+  recursive deriving groups and richer precedence-aware display are also open.
+  Deriving is user-extensible now, so richer display is a change to the `Show`
+  deriver in the bundled `Derive` module rather than to the compiler.
 - Broaden the bounded scalar worker specialization only when benchmarks justify
   it; multiple numeric parameters, effectful workers, and custom dictionaries
   currently retain the generic evidence-passing path.

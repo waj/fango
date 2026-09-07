@@ -1,4 +1,4 @@
-package infer
+package infer_test
 
 import (
 	"testing"

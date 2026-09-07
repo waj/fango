@@ -11,7 +11,6 @@ import (
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/meta"
-	"github.com/waj/fango/internal/types"
 	stdlib "github.com/waj/fango/stdlib"
 )
 
@@ -20,6 +19,12 @@ type Runtime struct {
 	Writer io.Writer
 	Equal  func(any, any) bool
 	Show   func(any) (string, error)
+
+	// Expand renders a compile-time code value as surface AST. Only the
+	// compiler's own evaluator supplies it: the Meta natives that build code
+	// need their arguments as trees, and the template table lives with the
+	// checker (doc/design.md, "Compile-time metaprogramming").
+	Expand func(*meta.Code) ast.Expr
 }
 
 type Spec struct {
@@ -39,37 +44,7 @@ type Spec struct {
 
 var Table = func() map[string]Spec {
 	t := map[string]Spec{}
-	t["Meta.liftInt"] = liftSpec(func(v any) ast.Expr { return &ast.IntLit{Value: v.(int64), Raw: true} })
-	t["Meta.liftFloat"] = liftSpec(func(v any) ast.Expr { return &ast.FloatLit{Value: v.(float64)} })
-	t["Meta.liftString"] = liftSpec(func(v any) ast.Expr { return &ast.StringLit{Value: v.(string)} })
-	t["Meta.liftChar"] = liftSpec(func(v any) ast.Expr { return &ast.CharLit{Value: v.(rune)} })
-	t["Meta.liftBool"] = liftSpec(func(v any) ast.Expr {
-		if v.(bool) {
-			return &ast.Ctor{Name: "True"}
-		}
-		return &ast.Ctor{Name: "False"}
-	})
-	t["Meta.liftUnit"] = liftSpec(func(any) ast.Expr { return &ast.UnitLit{} })
-	t["Meta.sameType"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
-		return types.Equal(args[0].(*meta.TypeRepr).Type, args[1].(*meta.TypeRepr).Type), nil
-	}}
-	t["Meta.head"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
-		r := args[0].(*meta.TypeRepr)
-		if c, ok := r.Type.(*types.TCon); ok && len(c.Args) > 0 {
-			return &meta.TypeRepr{Type: &types.TCon{Unique: c.Unique, Name: c.Name}, Visible: r.Visible}, nil
-		}
-		return r, nil
-	}}
-	t["Meta.isVar"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
-		_, ok := args[0].(*meta.TypeRepr).Type.(*types.TVar)
-		return ok, nil
-	}}
-	t["Meta.typeName"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
-		return types.Show(args[0].(*meta.TypeRepr).Type), nil
-	}}
-	t["Meta.fail"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
-		return nil, fmt.Errorf("%s", args[0].(string))
-	}}
+	installMeta(t)
 	installScalarInstances(t)
 	for _, name := range []string{"add", "sub", "mul", "fdiv", "append", "eq", "neq", "lt", "gt", "le", "ge"} {
 		name := name
@@ -139,11 +114,5 @@ var Table = func() map[string]Spec {
 	}
 	return t
 }()
-
-func liftSpec(makeExpr func(any) ast.Expr) Spec {
-	return Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
-		return &meta.Code{Template: -1, Direct: makeExpr(args[0])}, nil
-	}}
-}
 
 func Lookup(name string) (Spec, bool) { spec, ok := Table[name]; return spec, ok }

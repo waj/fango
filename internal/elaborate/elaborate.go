@@ -23,7 +23,6 @@ import (
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/infer"
-	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/types"
 )
@@ -383,7 +382,7 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		}
 		return &core.Quote{Template: template, Holes: holes, Ty: ty}
 	case *ast.TypeOf:
-		return &core.TypeOf{Repr: &meta.TypeRepr{Type: el.ck.Sub.Apply(e.Value)}, Ty: ty}
+		return &core.TypeOf{Repr: el.ck.Reflect(el.ck.Sub.Apply(e.Value), e.Visible), Ty: ty}
 	case *ast.MetaValue:
 		return &core.TypeOf{Repr: e.Value, Ty: ty}
 	case *ast.RecordLit:

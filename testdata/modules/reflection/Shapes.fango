@@ -1,0 +1,18 @@
+module Shapes exposing (Hidden, Open(..), Sealed, Public(..), hidden, sealed)
+
+-- Hidden exposes its name but not its constructors; Open exposes both.
+type Hidden = Hidden Int
+
+type Open = Open Int
+
+-- The same distinction for records: Sealed's fields are private, Public's
+-- are not.
+type Sealed = { secret : Int }
+
+type Public = { shown : Int }
+
+hidden : Hidden
+hidden = Hidden 1
+
+sealed : Sealed
+sealed = Sealed { secret = 2 }

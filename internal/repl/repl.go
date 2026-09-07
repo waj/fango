@@ -236,6 +236,19 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		}
 		return inputDone
 	}
+	if dr, ok := m.Decls[0].(*ast.DeriverDecl); ok {
+		// A deriver is compile-time-only, so nothing installs into the
+		// evaluation environment: the compile-time evaluator elaborates it
+		// from the checked prefix when a `deriving` clause first runs it.
+		rollback := s.ck.Checkpoint()
+		if errs := s.ck.DeriverDecl(dr); len(errs) > 0 {
+			rollback()
+			diag.Render(s.out, errs)
+		} else {
+			fmt.Fprintf(s.out, "deriver %s\n", types.SurfaceName(dr.Class))
+		}
+		return inputDone
+	}
 	if in, ok := m.Decls[0].(*ast.InstanceDecl); ok {
 		rollback := s.ck.Checkpoint()
 		start := len(s.ck.Instances)
@@ -277,7 +290,11 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	redefining := s.ck.Env.Has(vd.Name)
+	// A failed input leaves nothing behind, expansion included: a splice that
+	// fails half way through has already checked whatever preceded it.
+	rollback := s.ck.Checkpoint()
 	if stageErrs := s.ck.StageDecl(vd); len(stageErrs) > 0 {
+		rollback()
 		diag.Render(s.out, stageErrs)
 		return inputDone
 	}
@@ -286,6 +303,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	// pure; effectful expressions can be evaluated directly at the prompt.
 	info, inferErrs := s.ck.DeclWhere(vd, false)
 	if len(inferErrs) > 0 {
+		rollback()
 		diag.Render(s.out, inferErrs)
 		return inputDone
 	}
@@ -305,6 +323,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		} else {
 			delete(s.ck.Workers, vd.Name)
 		}
+		rollback()
 		diag.Render(s.out, elabErrs)
 		return inputDone
 	}

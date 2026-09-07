@@ -100,3 +100,21 @@ func TestHeadSpecificity(t *testing.T) {
 		t.Error("alpha-equivalent heads should be equally specific")
 	}
 }
+
+func TestContextIdentityAndInclusion(t *testing.T) {
+	_, pair, _, _, rigid, _ := matchTestTypes()
+	a, b, c, d := rigid(100), rigid(101), rigid(102), rigid(103)
+	head, renamed := pair(a, b), pair(c, d)
+	left := []types.Pred{{Class: "Show", Ty: a}}
+	right := []types.Pred{{Class: "Show", Ty: b}}
+	both := append(append([]types.Pred{}, left...), right...)
+	if canonicalContextKey(head, left) == canonicalContextKey(head, right) {
+		t.Fatal("different head variables share a context symbol")
+	}
+	if canonicalContextKey(head, both) != canonicalContextKey(renamed, []types.Pred{{Class: "Show", Ty: d}, {Class: "Show", Ty: c}}) {
+		t.Fatal("alpha-renaming or context order changed identity")
+	}
+	if !contextIncludes(head, both, renamed, []types.Pred{{Class: "Show", Ty: c}}) || contextIncludes(head, left, head, both) {
+		t.Fatal("incorrect subset ordering")
+	}
+}

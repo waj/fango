@@ -387,16 +387,38 @@ func Load(entry string) (*Result, []diag.Error) {
 // rather than taxing every program with it.
 const MetaModule = "Meta"
 
+// DeriveModule supplies the derivers for the standard classes. A file that
+// writes `deriving` needs them in the graph for the same reason a file that
+// writes `quote` needs Meta: the loader adds the edge where the syntax
+// appears rather than taxing every program with it.
+const DeriveModule = "Derive"
+
 func stagingDeps(m *ast.Module, deps []string, self string) []string {
-	if !m.UsesStaging || self == MetaModule {
-		return deps
+	if m.UsesStaging && self != MetaModule {
+		deps = addDep(deps, MetaModule)
 	}
+	if self != DeriveModule && usesDeriving(m) {
+		deps = addDep(deps, DeriveModule)
+	}
+	return deps
+}
+
+func usesDeriving(m *ast.Module) bool {
+	for _, d := range m.Decls {
+		if td, ok := d.(*ast.TypeDecl); ok && len(td.Deriving) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func addDep(deps []string, name string) []string {
 	for _, d := range deps {
-		if d == MetaModule {
+		if d == name {
 			return deps
 		}
 	}
-	return append(deps, MetaModule)
+	return append(deps, name)
 }
 
 func parse(f *source.File) (*ast.Module, []diag.Error) {
@@ -972,6 +994,13 @@ type resolver struct {
 	vals, tys, ctors, ops, records map[string]string
 	recordLabels                   map[string][]string
 	quals                          map[string]*iface
+
+	// schemas holds the canonical types whose constructors or record fields
+	// this module may read. `typeOf` copies it, which is the whole modularity
+	// story for reflection: `exposing (T)` reflects opaque and
+	// `exposing (T(..))` reflects in full, exactly as those two forms
+	// already govern patterns and field access.
+	schemas map[string]bool
 }
 
 func (r *resolver) canon(name string) string {
@@ -988,6 +1017,7 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 	r.ops = map[string]string{}
 	r.records = map[string]string{}
 	r.recordLabels = map[string][]string{}
+	r.schemas = map[string]bool{"Bool": true}
 	if r.node.name != "Basics" {
 		if basics := r.nodes["Basics"]; basics != nil {
 			for _, name := range []string{"Num", "Eq", "Ord", "Show"} {
@@ -1029,6 +1059,9 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 			continue
 		}
 		r.quals[im.Module] = dep.iface
+		// Qualified access reaches a public schema without an exposing entry,
+		// so reflection follows the same reach.
+		r.exposeSchemas(dep.iface)
 		for record, canonicalName := range dep.iface.records {
 			for _, field := range dep.iface.recordFields[record] {
 				r.recordLabels[field] = append(r.recordLabels[field], canonicalName)
@@ -1052,6 +1085,7 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 		switch d := d.(type) {
 		case *ast.TypeDecl:
 			r.add(r.tys, d.Name, r.canon(d.Name), d.NameSpan)
+			r.schemas[r.canon(d.Name)] = true
 			if d.RecordFields != nil {
 				r.add(r.records, d.Name, r.canon(d.Name), d.NameSpan)
 				for _, f := range d.RecordFields {
@@ -1081,6 +1115,26 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 			for i := range d.Methods {
 				d.Methods[i].Name = r.canon(d.Methods[i].Name)
 				r.typ(d.Methods[i].Type)
+			}
+			out = append(out, d)
+		case *ast.DeriverDecl:
+			// A deriver resolves in its own module's scope, exactly as an
+			// instance does: the code it quotes is the quoting module's, so
+			// the splice site can neither capture nor be captured.
+			d.Owner = ""
+			if !r.node.private {
+				d.Owner = r.node.name
+			}
+			d.Class = r.qualified(d.Class, r.tys, "type", d.ClassSpan)
+			for _, m := range d.Methods {
+				locals := map[string]bool{}
+				for _, p := range m.Params {
+					if p.Name != "_" && p.Name != "()" {
+						r.checkBinder(p.Name, p.Sp, r.vals)
+						locals[p.Name] = true
+					}
+				}
+				r.expr(m.Body, r.vals, locals)
 			}
 			out = append(out, d)
 		case *ast.InstanceDecl:
@@ -1213,7 +1267,21 @@ func (r *resolver) add(m map[string]string, k, v string, sp source.Span) {
 	}
 	m[k] = v
 }
+
+// exposeSchemas records the types i lets a reader see the insides of.
+func (r *resolver) exposeSchemas(i *iface) {
+	for name := range i.openTypes {
+		if v := i.types[name]; v != "" {
+			r.schemas[v] = true
+		}
+	}
+	for _, v := range i.records {
+		r.schemas[v] = true
+	}
+}
+
 func (r *resolver) merge(i *iface, sp source.Span) {
+	r.exposeSchemas(i)
 	for k, v := range i.values {
 		r.add(r.vals, k, v, sp)
 	}
@@ -1351,6 +1419,7 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 		r.expr(e.Operand, vals, locals)
 	case *ast.TypeOf:
 		r.typ(e.Ty)
+		e.Visible = r.schemas
 	case *ast.Neg:
 		r.expr(e.Operand, vals, locals)
 	case *ast.If:

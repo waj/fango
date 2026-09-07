@@ -1,6 +1,8 @@
-package elaborate
+package elaborate_test
 
 import (
+	"github.com/waj/fango/internal/elaborate"
+	"github.com/waj/fango/internal/staging"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +37,7 @@ func TestGoldens(t *testing.T) {
 			sup := &types.Supply{}
 			b := types.NewBuiltins(sup)
 			ck := infer.NewChecker(sup, b, infer.NewEnv())
+			staging.Install(ck)
 			if errs := ck.InstallPrelude(); len(errs) > 0 {
 				t.Fatalf("prelude errors: %v", errs)
 			}
@@ -42,7 +45,7 @@ func TestGoldens(t *testing.T) {
 			if len(inferErrs) > 0 {
 				t.Fatalf("infer errors: %v", inferErrs)
 			}
-			prog, elabErrs := Module(infos, ck)
+			prog, elabErrs := elaborate.Module(infos, ck)
 			if len(elabErrs) > 0 {
 				t.Fatalf("elaborate errors: %v", elabErrs)
 			}
@@ -62,12 +65,12 @@ func fixtureProgram(prog *core.Prog) *core.Prog {
 	result.Defs = nil
 	result.ADTs = nil
 	for _, d := range prog.Defs {
-		if d.Owner != "Basics" && d.Owner != "Maybe" && d.Owner != "IO" {
+		if d.Owner != "Basics" && d.Owner != "Meta" && d.Owner != "Derive" && d.Owner != "Maybe" && d.Owner != "IO" {
 			result.Defs = append(result.Defs, d)
 		}
 	}
 	for _, a := range prog.ADTs {
-		if !strings.HasPrefix(a.Con.Name, "Basics.") && !strings.HasPrefix(a.Con.Name, "Maybe.") && !strings.HasPrefix(a.Con.Name, "IO.") {
+		if !strings.HasPrefix(a.Con.Name, "Basics.") && !strings.HasPrefix(a.Con.Name, "Meta.") && !strings.HasPrefix(a.Con.Name, "Derive.") && !strings.HasPrefix(a.Con.Name, "Maybe.") && !strings.HasPrefix(a.Con.Name, "IO.") {
 			result.ADTs = append(result.ADTs, a)
 		}
 	}

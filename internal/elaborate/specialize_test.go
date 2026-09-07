@@ -1,4 +1,4 @@
-package elaborate
+package elaborate_test
 
 import (
 	"strings"

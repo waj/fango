@@ -1,0 +1,6 @@
+class Countable a
+    count : a -> Int
+
+type Box = Box Int deriving (Countable)
+
+main = 0

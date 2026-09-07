@@ -1,0 +1,54 @@
+import List exposing (List(..))
+import Meta exposing (Code, Ctor(..), Field(..), Items(..), Reflected(..), TypeInfo(..))
+
+type Point = { x : Int, y : Int }
+
+type Tree = Leaf | Node Tree Int Tree
+
+-- `typeOf T` reflects a closed type. Identity is the compiler's, not a name:
+-- `sameType` compares nominal identity and structure together.
+sameInt : Code
+sameInt = Meta.lift (Meta.sameType (typeOf Int) (typeOf Int))
+
+listVersusMaybe : Code
+listVersusMaybe = Meta.lift (Meta.sameType (typeOf (List Int)) (typeOf (List Bool)))
+
+sameHead : Code
+sameHead =
+    Meta.lift (Meta.sameType (Meta.head (typeOf (List Int))) (Meta.head (typeOf (List Bool))))
+
+-- args walks into a type application; head drops the arguments.
+firstArg : Code
+firstArg =
+    case Meta.args (typeOf (List Int)) of
+        NoItems -> Meta.lift "none"
+        Item arg _ -> Meta.lift (Meta.typeName arg)
+
+-- info reads the schema. A scalar has none, so it reflects as Opaque.
+summary : Meta.TypeRepr -> Code
+summary repr =
+    case Meta.info repr of
+        Opaque -> Meta.lift ("opaque " ++ Meta.typeName repr)
+        Visible schema ->
+            Meta.lift (schema.name ++ "/" ++ show (Meta.lengthItems (Meta.ctorsIn schema)))
+
+fieldNames : Meta.TypeRepr -> Code
+fieldNames repr =
+    case Meta.info repr of
+        Opaque -> Meta.lift "opaque"
+        Visible schema ->
+            case Meta.ctorsIn schema of
+                NoItems -> Meta.lift "none"
+                Item ctor _ ->
+                    Meta.lift (Meta.foldItems (\text field -> text ++ field.name ++ ":" ++ Meta.typeName field.ty ++ " ") "" ctor.fields)
+
+main() =
+    print $(sameInt)
+    print $(listVersusMaybe)
+    print $(sameHead)
+    print $(firstArg)
+    print $(summary (typeOf Point))
+    print $(summary (typeOf Tree))
+    print $(summary (typeOf Int))
+    print $(fieldNames (typeOf Point))
+    print $(Meta.lift (Meta.isVar (typeOf Int)))

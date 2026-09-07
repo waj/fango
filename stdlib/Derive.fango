@@ -1,0 +1,125 @@
+module Derive exposing (..)
+
+import Basics
+import Meta exposing (Bound(..), BoundField(..), Code, Ctor(..), Field(..), Items(..), Lift(..), Shape(..), TypeInfo(..))
+
+{- The derivers for the standard classes.
+
+`deriving (Eq)` runs the `deriver Eq` block below: the compiler hands it the
+type's schema plus one `Code` per method parameter, and it answers with the
+method's body. Nothing here is privileged — this module is what any library
+writes to open `deriving` to its own class.
+
+Derive sits above Meta and Basics and below everything else. A module that
+uses `deriving` depends on it, which is how the standard derivers are in
+scope for `List` and `Maybe`, neither of which imports anything. -}
+
+-- Small quoted fragments, composed rather than written as one large quote.
+-- Each keeps the span it was written with, so a type error in a derived
+-- method points at the line here that generated it.
+
+appendCode : Code -> Code -> Code
+appendCode lhs rhs = quote ($(lhs) ++ $(rhs))
+
+showCode : Code -> Code
+showCode value = quote (show $(value))
+
+equalsCode : Code -> Code -> Code
+equalsCode lhs rhs = quote ($(lhs) == $(rhs))
+
+lessCode : Code -> Code -> Code
+lessCode lhs rhs = quote ($(lhs) < $(rhs))
+
+ifCode : Code -> Code -> Code -> Code
+ifCode condition yes no = quote (if $(condition) then $(yes) else $(no))
+
+-- Eq: constructors must agree, then every field pair must.
+
+eqFields : Items BoundField -> Items BoundField -> Code
+eqFields lhs rhs =
+    case lhs of
+        NoItems -> lift True
+        Item lhsField lhsRest ->
+            case rhs of
+                NoItems -> lift True
+                Item rhsField rhsRest -> ifCode (equalsCode lhsField.value rhsField.value) (eqFields lhsRest rhsRest) (lift False)
+
+eqBound : Bound -> Bound -> Code
+eqBound lhs rhs =
+    if lhs.ctor.index == rhs.ctor.index then
+        eqFields lhs.fields rhs.fields
+    else
+        lift False
+
+deriver Eq
+    eq subject leftCode rightCode =
+        Meta.match subject leftCode (\lhs -> Meta.match subject rightCode (\rhs -> eqBound lhs rhs))
+
+-- Show: a union constructor prints its name then its fields; a record prints
+-- its type name then `field = value` pairs.
+
+unionShow : Bound -> Code
+unionShow bound =
+    Meta.foldItems
+        (\sofar field -> appendCode sofar (appendCode (lift " ") (showCode field.value)))
+        (lift bound.ctor.name)
+        bound.fields
+
+recordShow : Bound -> Code
+recordShow bound =
+    appendCode
+        (Meta.foldItems
+            (\sofar field ->
+                appendCode sofar
+                    (appendCode
+                        (lift ((if field.index == 0 then " " else ", ") ++ field.name ++ " = "))
+                        (showCode field.value)))
+            (lift (bound.ctor.name ++ " {"))
+            bound.fields)
+        (lift " }")
+
+showBound : TypeInfo -> Bound -> Code
+showBound subject bound =
+    case subject.shape of
+        Record _ -> recordShow bound
+        Union _ -> unionShow bound
+
+deriver Show
+    show subject valueCode =
+        Meta.match subject valueCode (\bound -> showBound subject bound)
+
+-- Ord: constructors order by declaration position, then fields
+-- lexicographically. The three outcomes — less, greater, and equal — are what
+-- separate the four methods, so one generator serves all of them.
+
+ordFields : Bool -> Bool -> Bool -> Items BoundField -> Items BoundField -> Code
+ordFields whenLess whenGreater whenEqual lhs rhs =
+    case lhs of
+        NoItems -> lift whenEqual
+        Item lhsField lhsRest ->
+            case rhs of
+                NoItems -> lift whenEqual
+                Item rhsField rhsRest ->
+                    ifCode (lessCode lhsField.value rhsField.value) (lift whenLess)
+                        (ifCode (lessCode rhsField.value lhsField.value) (lift whenGreater)
+                            (ordFields whenLess whenGreater whenEqual lhsRest rhsRest))
+
+ordBound : Bool -> Bool -> Bool -> Bound -> Bound -> Code
+ordBound whenLess whenGreater whenEqual lhs rhs =
+    if lhs.ctor.index < rhs.ctor.index then
+        lift whenLess
+    else if lhs.ctor.index > rhs.ctor.index then
+        lift whenGreater
+    else
+        ordFields whenLess whenGreater whenEqual lhs.fields rhs.fields
+
+ordering : Bool -> Bool -> Bool -> TypeInfo -> Code -> Code -> Code
+ordering whenLess whenGreater whenEqual subject leftCode rightCode =
+    Meta.match subject leftCode
+        (\lhs -> Meta.match subject rightCode (\rhs -> ordBound whenLess whenGreater whenEqual lhs rhs))
+
+deriver Ord
+    lt subject leftCode rightCode = ordering True False False subject leftCode rightCode
+    gt subject leftCode rightCode = ordering False True False subject leftCode rightCode
+    le subject leftCode rightCode = ordering True False True subject leftCode rightCode
+    ge subject leftCode rightCode = ordering False True True subject leftCode rightCode

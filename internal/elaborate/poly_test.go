@@ -1,6 +1,8 @@
-package elaborate
+package elaborate_test
 
 import (
+	"github.com/waj/fango/internal/elaborate"
+	"github.com/waj/fango/internal/staging"
 	"strings"
 	"testing"
 
@@ -29,6 +31,7 @@ func elabPoly(t *testing.T, src string) *core.Prog {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
+	staging.Install(ck)
 	if errs := ck.InstallPrelude(); len(errs) > 0 {
 		t.Fatalf("prelude errors: %v", errs)
 	}
@@ -36,7 +39,7 @@ func elabPoly(t *testing.T, src string) *core.Prog {
 	if len(inferErrs) > 0 {
 		t.Fatalf("infer errors: %v", inferErrs)
 	}
-	prog, elabErrs := Module(infos, ck)
+	prog, elabErrs := elaborate.Module(infos, ck)
 	if len(elabErrs) > 0 {
 		t.Fatalf("elaborate errors: %v", elabErrs)
 	}
@@ -54,6 +57,7 @@ func elabPolyErr(t *testing.T, src string) string {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
+	staging.Install(ck)
 	if errs := ck.InstallPrelude(); len(errs) > 0 {
 		t.Fatalf("prelude errors: %v", errs)
 	}
@@ -61,7 +65,7 @@ func elabPolyErr(t *testing.T, src string) string {
 	if len(inferErrs) > 0 {
 		return inferErrs[0].Title
 	}
-	_, elabErrs := Module(infos, ck)
+	_, elabErrs := elaborate.Module(infos, ck)
 	if len(elabErrs) == 0 {
 		t.Fatalf("%q: expected an elaboration error", src)
 	}

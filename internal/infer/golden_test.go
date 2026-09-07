@@ -1,7 +1,9 @@
-package infer
+package infer_test
 
 import (
 	"fmt"
+	"github.com/waj/fango/internal/infer"
+	"github.com/waj/fango/internal/staging"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +16,7 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// Checker goldens include the inferred declarations and diagnostics.
+// infer.Checker goldens include the inferred declarations and diagnostics.
 func TestCheckerGoldens(t *testing.T) {
 	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "check"))
 	for _, path := range files {
@@ -34,7 +36,8 @@ func TestCheckerGoldens(t *testing.T) {
 			}
 			sup := &types.Supply{}
 			b := types.NewBuiltins(sup)
-			ck := NewChecker(sup, b, NewEnv())
+			ck := infer.NewChecker(sup, b, infer.NewEnv())
+			staging.Install(ck)
 			if errs := ck.InstallPrelude(); len(errs) > 0 {
 				t.Fatalf("prelude errors: %v", errs)
 			}

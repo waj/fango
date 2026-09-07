@@ -6,4 +6,16 @@ $(big)
 n = $(twice (quote 10))
 n
 $(quote (print "no"))
+class Tag a
+    tag : a -> String
+deriver Tag
+    tag subject valueCode = Meta.match subject valueCode (\bound -> Meta.lift bound.ctor.name)
+type Colour = Red | Blue deriving (Tag)
+tag Blue
+class Never a
+    never : a -> String
+deriver Never
+    never subject valueCode = Meta.fail "this class is not derivable"
+type Nope = Nope Int deriving (Never)
+Nope 1
 :quit

@@ -1,4 +1,4 @@
-package infer
+package infer_test
 
 import (
 	"github.com/waj/fango/internal/types"
@@ -75,7 +75,10 @@ func TestClassDiagnostics(t *testing.T) {
 		{"ambiguous annotation", "f : Eq a => Int -> Int\nf x = x", "AMBIGUOUS CONSTRAINT"},
 		{"class source order", "f : C a => a -> a\nf x = x\nclass C a\n    c : a -> a", "UNKNOWN CLASS"},
 		{"no custom default", "class C a\n    c : a -> Bool\nf = c 1", "AMBIGUOUS CONSTRAINT"},
-		{"unsupported deriving", "type T = T deriving (Ord)", "CANNOT DERIVE"},
+		{"deriving a class with no deriver", "class C a\n    c : a -> Bool\ntype T = T deriving (C)", "CANNOT DERIVE"},
+		{"deriver for an unknown class", "deriver Missing\n    m info x = x", "UNKNOWN CLASS"},
+		{"deriver missing a method", "class C a\n    c : a -> Bool\n    d : a -> Bool\nderiver C\n    c info x = x", "MISSING METHOD"},
+		{"deriver for an unknown method", "class C a\n    c : a -> Bool\nderiver C\n    c info x = x\n    d info x = x", "UNKNOWN METHOD"},
 		{"function deriving", "type T = T (Int -> Int) deriving (Show)", "MISSING INSTANCE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

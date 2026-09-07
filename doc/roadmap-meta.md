@@ -1,214 +1,64 @@
 # Roadmap: compile-time metaprogramming
 
 This is a [roadmap](roadmap.md) proposal under iteration. The compile-time
-stage itself — quotes, splices, the depth rules, and the compile-time
-evaluator — is implemented and documented in [the design](design.md,
-"Compile-time metaprogramming") and [the reference](reference.md,
-"Compile-time metaprogramming"). What remains here is everything built on top
-of it: reflection, derivers, and declaration splices.
+stage, type reflection, and derivers are implemented and documented in
+[the design](design.md, "Compile-time metaprogramming") and
+[the reference](reference.md, "Compile-time metaprogramming"). What remains
+here is declaration splices and the consumer that forces them.
 
 ## Problem
 
-`deriving` is still closed. It is implemented by `(*Checker).DeriveDecl` in
-`internal/infer/derive.go`, a Go function that synthesizes `*ast.InstanceDecl`
-nodes with local `ref`/`call`/`str`/`pattern` combinators and routes them
-through `ck.InstanceDecl`. Its architecture is right — generated code is
-checked and elaborated through exactly the same path as handwritten methods —
-but its class list is a literal `cl.Name != "Basics.Eq" && cl.Name !=
-"Basics.Show"`, and everything else gets `CANNOT DERIVE`.
+`deriving` is open and reflection exists, so a library can generate one
+*instance* per type. It still cannot generate a *definition*. The Tier-2 Todo
+CLI in [roadmap-examples.md](roadmap-examples.md) wants a serialize/parse round
+trip, which needs a bundled `Json` module with a derivable `Encode` — that much
+is expressible today — but a codec built around named accessors, or any
+generator whose output is a top-level name rather than an instance method, is
+not.
 
-The cost is visible in the tree:
+## What P1 and P2 settled
 
-- `Ord` has four independent methods (`lt`, `gt`, `le`, `ge`; there is no
-  `compare` and no `Ordering`), so every custom ordering is four near-duplicate
-  hand-written methods — and `Ord` cannot be derived at all.
-- `stdlib/Basics.fango` writes out the scalar instances of the standard classes
-  longhand, one method at a time, for every scalar type.
-- None of the types in `examples/markdown.fango` derive anything, so they have
-  no equality and no display. That is a reasonable local choice precisely
-  because deriving is not extensible: there is nothing to derive them *into*.
-- `doc/roadmap-examples.md` puts a serialize/parse round trip in the Tier-2
-  Todo CLI. There is no JSON module, and no way to generate a codec per type
-  without writing it out by hand for each one.
+Five design choices changed while reflection and derivers were built, and each
+one is worth recording because declaration splices inherit it.
 
-The missing capability is now narrow: **inspect a type at compile time** and
-hand the resulting description to a generator that already knows how to emit
-code.
+**Natives never construct a fango value.** `internal/natives` sits below the
+interpreter in the package graph, so it cannot build the `CtorVal` a list or
+record would need. The reflection primitives therefore answer counts, indices,
+names, and opaque handles, and `Meta`'s own fango code assembles the records a
+deriver walks. This turned out to be a better boundary than the alternative —
+every structural decision is visible in `stdlib/Meta.fango` rather than in Go.
 
-## Why not a `Generic`-style structural representation
+**`Meta` carries its own list.** `List` derives its instances, so it depends on
+the module that supplies the derivers, which depends on `Meta`. `Meta.Items` is
+the small list that avoids that cycle. `Meta` imports only `Basics`.
 
-Haskell's `Generic` maps a type to a sum-of-products representation and writes
-one generic function over that representation. Two independent reasons rule it
-out here.
+**The standard derivers are a bundled module, not `Basics`.** The original
+plan put `Eq`/`Show`/`Ord` derivers in `Basics`, which every module already
+loads. That closes the same cycle from the other side: `Basics` would import
+`Meta`, and `Meta` needs arithmetic. `Derive` sits above both and below
+everything else, and a file that writes `deriving` gets a loader edge to it —
+the same mechanism that gives a file that writes `quote` an edge to `Meta`.
 
-**It is not expressible.** A structural representation needs classes over type
-constructors — `Rep` is an associated type of kind `* -> *`, and the generic
-combinators are instances over `:+:` and `:*:`. fango's classes have exactly
-one parameter and no higher kinds (`doc/design.md`, "Known limitations"), so
-there is nothing to write the representation in.
+**Instance contexts are inferred by probing.** Adopting residual predicates
+inside `InstanceDecl` was invasive: the instance's symbol embeds a hash of its
+context, and the instance is installed before its methods are checked. A probe
+pass under `(*Checker).Checkpoint` — check with no context, collect what stays
+residual, roll back, then declare exactly those — needed one new flag on the
+checker and no change to instance identity.
 
-**It would move a correctness-shaped burden onto an optimizer.** Erasing a
-`Rep` back into direct field access depends on aggressive inlining. fango's
-only partial evaluator is `specializeScalars` in
-`internal/elaborate/specialize.go`, deliberately bounded to effect-free workers
-with one numeric type parameter, and `doc/design.md` is explicit that
-`(*elab).fold` exists as a correctness requirement rather than an optimization.
-Making generic-representation erasure load-bearing for performance would invert
-that stance.
-
-Emitting the specialized code directly, at compile time, needs no type-system
-extension and no optimizer.
-
-## What P0 settled
-
-Three design choices changed while the stage was built, and each is worth
-recording because the later phases inherit them.
-
-**A quote is a Core node, not a bundled primitive.** The original plan lowered
-a quote to `Meta.makeCode : Int -> List Code -> Code` as a saturated
-`NativeCall`, on the theory that reusing the linter's native checks was
-cheaper than a new node. It is not: `Meta` must import nothing, because
-derivers will live in `Basics` and every module already loads `Basics`, so a
-`List Code` argument would close an import cycle. The remaining shape — a
-bundled native with a Go template that must never be emitted — was worse than
-the node it avoided. `core.Quote` also buys a real invariant: the linter
-rejects one outright, so "no compile-time value reaches generated Go" is
-checked rather than argued.
-
-**Two counters, not one signed depth.** Quote depth decides whether `$(…)` is
-a hole; stage depth decides whether code runs at run time or compile time.
-Collapsing them into a single depth made the rule for a quote inside a splice
-operand ambiguous. Tracking them separately makes every case fall out.
-
-**The native restriction is dynamic.** The plan called for a Core reachability
-walk against a compile-time-safe flag on `natives.Spec`. The flag exists, but
-the check happens in the interpreter's compile-time mode instead: it is
-equally deterministic, has no false positives on paths a splice never takes,
-and needs no walk over the reachable definition set.
-
-## Type reflection
-
-One new expression form, `typeOf T`, yields a `Meta.TypeRepr`: an opaque
-nominal identity backed by `types.TCon.Unique` — never a name string — plus its
-arguments. On top of it:
-
-- `Meta.sameType`, `Meta.head`, `Meta.args`, `Meta.isVar`
-- `Meta.typeName`, for display only
-- `Meta.info : TypeRepr -> Maybe TypeInfo`
-
-`Meta.info` returns `Just` **only when the type's schema is visible where
-`typeOf` was written**. This is the whole modularity story for reflection, and
-it introduces no new rule: `exposing (Type)` reflects as an opaque `TypeRepr`,
-`exposing (Type(..))` reflects as a full `TypeInfo`, exactly as those forms
-already govern constructors and record field schemas
-(`(*iface).selection` in `internal/modules/modules.go`). An abstract type stays
-abstract at compile time precisely as it does at runtime.
-
-`TypeInfo` exposes `{ name, module, params, shape }` with
-`Shape = Union (List Ctor) | Record (List Field)`, read out of
-`types.ADTInfo`, `types.CtorInfo`, and `types.RecordFieldInfo`. Because records
-are already single-constructor ADTs sharing one type identity and one deriving
-path, reflection needs no second representation either.
-
-Identity-based comparison is what makes specialization modular. A deriver that
-wants a fast path for `Int` writes `Meta.sameType f.ty (typeOf Int)` — naming a
-type its own module already depends on — rather than matching a name string it
-does not own.
-
-**There is deliberately no `reify`.** A splice cannot ask the compiler about a
-name it did not itself name, and cannot ask whether some instance exists. That
-query is what breaks modularity in Template Haskell, because its answer depends
-on what happens to be in scope where the splice runs. A deriver instead *emits
-a method call* and lets ordinary instance resolution handle it, which is what
-`DeriveDecl` already does today when it emits `Basics.show` on a field.
-
-`TypeRepr` and `TypeInfo` join `Code` as compile-time-only types, so the
-emission rule already implemented covers them without change.
-
-## Derivers
-
-A `deriver` declaration opens `deriving` to user classes:
-
-```fango
-class Encode a
-    encode : a -> Json
-
-deriver Encode
-    encode info value =
-        Meta.match info value (\bound ->
-            List.foldl
-                (\acc f -> quote (Json.push $(acc) (encode $(f.value))))
-                (quote (Json.start $(Meta.lift bound.ctor.name)))
-                bound.fields)
-```
-
-`type Point = { x : Int, y : Int } deriving (Encode)` then runs it.
-
-Two rules keep this small.
-
-**The deriver signature is mechanical.** For a class method with `n` arrows,
-its deriver method takes a `TypeInfo` plus `n` `Code` arguments and returns
-`Code`:
-
-| method | deriver method |
-| --- | --- |
-| `encode : a -> Json` | `TypeInfo -> Code -> Code` |
-| `show : a -> String` | `TypeInfo -> Code -> Code` |
-| `eq : a -> a -> Bool` | `TypeInfo -> Code -> Code -> Code` |
-| `fromInt : Int -> a` | `TypeInfo -> Code -> Code` |
-
-There is no type erasure story and no new type-system machinery; a deriver is
-an ordinary fango function checked by ordinary inference.
-
-**The compiler owns the traversal skeleton.** `Meta.match info scrutinee f`
-builds the exhaustive case and binds the fields, handing the callback a
-`Bound { ctor, fields }` whose fields carry `{ name, index, ty, value : Code }`.
-`Meta.construct ctor codes` builds the other direction, for methods that
-produce an `a`.
-
-A deriver therefore **never invents a binder**. That removes the other half of
-Template Haskell's complexity — `newName`/`mkName`, and the capture questions
-that follow from them — and it makes exhaustiveness structural rather than
-checked after the fact. Nesting two `Meta.match` calls produces exactly the
-nested-case shape `derive.go` builds for `Eq` today, so no `match2` primitive
-is needed.
-
-The instance head stays compiler-owned (`C (T a b ...)`), so derived instances
-land in the existing whole-graph overlap check unchanged and coherence is not
-affected.
-
-Instance **contexts become use-driven**. Today `DeriveDecl` scans every
-constructor field and adds a predicate for each polymorphic one — a syntactic
-over-approximation. Under this proposal the residual predicates inference
-already produces from the generated body become the instance context, so a
-field the deriver never touches and a phantom parameter stop demanding
-evidence. The machinery mostly exists: `(*Checker).qualify` already retains
-residual predicates, `hasTypeVars` already defers polymorphic ones, and
-`ck.checkingInstance` already supplies self-evidence for direct recursion. What
-is new is a mode in which `InstanceDecl` accepts an undeclared context and
-adopts the residuals instead of reporting `MISSING CONSTRAINT`. This is the one
-piece of real type-system work left in the proposal.
-
-Two ordering consequences are worth stating outright, because they are the
-cases a user will hit first:
-
-- **A `deriver` must precede, in source order, any `deriving` clause that uses
-  it** — including on a type declared earlier in the same file.
-  `(*Checker).Module` declares type *headers* and constructor fields in early
-  loops, so types may be mutually recursive regardless of order, but it
-  processes `ClassDecl`, `deriving`, `InstanceDecl`, and value declarations in
-  one source-order loop. A `deriving` clause is reached at its type's position
-  in that loop, not before the file's values.
-- `x = $(f x)` is rejected by the existing no-self-reference rule, not by a new
-  staging check.
+**Binder names come from the scrutinee.** A generated `case` needs binders that
+do not collide when two traversals nest, and fango forbids shadowing. Deriving
+the name from a hash of the scrutinee's own rendering is pure, deterministic,
+and needs no counter, which would have made expansion order-dependent and put
+the determinism gate at risk.
 
 ## Declaration splices
 
-An expression splice already generates an expression. A declaration splice
-generates a *group* of definitions. **There is no `splice` keyword**: `$(...)`
-stays the only escape, and a declaration splice is a `$(...)` in the body
-position of a top-level definition. Here modularity needs one real rule,
-because generated top-level names are the only thing that can escape a splice:
+An expression splice generates an expression. A declaration splice generates a
+*group* of definitions. **There is no `splice` keyword**: `$(...)` stays the
+only escape, and a declaration splice is a `$(...)` in the body position of a
+top-level definition. Here modularity needs one real rule, because generated
+top-level names are the only thing that can escape a splice:
 
 > **Every name a module defines appears literally in that module's source.**
 
@@ -259,62 +109,50 @@ see the open questions.
 
 ## Modularity threat model
 
-The threats P0 answered are recorded in the design. The ones the remaining
-phases must answer:
+The threats P0, P1, and P2 answered are recorded in the design. The one the
+remaining phase must answer:
 
 | Threat | Answer |
 | --- | --- |
-| A splice queries the compiler about names it has no import edge to | No `reify`. Reflection starts from `typeOf T` at a site that could have written `T` by hand. |
-| A splice sees through an abstract type | `Meta.info` returns `Nothing` unless the schema is visible, following the existing `Type` versus `Type(..)` rule. |
-| A deriver dispatches on a type it does not own | Comparison is `TCon.Unique` identity against a `typeOf` the deriver's module can name — never a name string. |
-| Derived instances weaken coherence | The instance head stays compiler-owned, so derived instances go through the same whole-graph overlap check as handwritten ones. |
 | A reader cannot tell what names a module defines | Declaration splices bind names the author wrote, to the left of `=`. Exporting still requires an `exposing` entry. |
 
 ## Diagnostics
 
 `STAGE ERROR`, `COMPILE-TIME EFFECT`, `COMPILE-TIME NATIVE`,
-`COMPILE-TIME LIMIT`, and `COMPILE-TIME FAILURE` exist. Still to add:
+`COMPILE-TIME LIMIT`, `COMPILE-TIME FAILURE`, `CANNOT DERIVE`,
+`DUPLICATE DERIVER`, and `REFLECTION ERROR` exist. Still to add:
 
-- `CANNOT DERIVE` — extended: no deriver for this class.
 - `SPLICE ARITY` — a declaration splice produced a different number of
   definitions than the binder list names.
 - `INVALID SPLICE DECLARATION` — generated a `module`, `import`, `infix`, or
   `native` declaration.
-- `TYPE NOT VISIBLE` — reserved for the case where a clearer message than
-  `Meta.info` returning `Nothing` is warranted.
 
 ## Phases
 
-**P0 — quote and splice plumbing. Done.** See the design and reference.
+**P0 — quote and splice plumbing. Done.**
 
-**P1 — reflection.** `typeOf`, `TypeRepr`, `TypeInfo`, `Meta.info` and its
-visibility rule, and `Meta.lift` as a real `class Lift` with scalar instances.
-First fixture: a `testdata/modules/` case proving `Meta.info` is `Nothing` for
-a type exposed as `Type` and `Just` for the same type exposed as `Type(..)`.
+**P1 — reflection. Done.** `typeOf`, `TypeRepr`, `TypeInfo`, `Meta.info` and
+its visibility rule, and `Meta.lift` as a real `class Lift`. The
+`testdata/modules/reflection/` fixture pins `Opaque` for a type exposed as
+`Type` and `Visible` for the same type exposed as `Type(..)`.
 
-**P2 — derivers.** `deriver` declarations, `Meta.match` and `Meta.construct`,
-and use-driven instance contexts. Port `Eq` and `Show` off
-`internal/infer/derive.go` onto fango-level derivers in `Basics`, then add
-`Ord`. First fixture: the existing `testdata/run/classes_derive.fango` goldens
-must be **unchanged** by the port — that is the strongest available evidence
-the port is faithful — followed by a new `Ord` deriving case. This is the
-phase that makes `Basics` import `Meta`, so `Meta` becomes a dependency of
-every program and the demand-driven loader edge becomes moot.
+**P2 — derivers. Done.** `deriver` declarations, `Meta.match` and
+`Meta.construct`, and use-driven instance contexts. `Eq` and `Show` moved off
+`internal/infer/derive.go` onto fango-level derivers in the bundled `Derive`
+module with the `classes_derive` goldens unchanged, and `Ord` joined them.
 
 **P3 — declaration splices.** `Meta.Decls`, declaration quotes, the
 comma-separated binder list and its arity check. First fixture: a
 `testdata/parse/` golden for the new declaration shape, plus a `SPLICE ARITY`
-case.
+case. P3 adds surface syntax and therefore carries the
+`editors/vscode/syntaxes/fango.tmLanguage.json` obligation in the same change,
+per the repository instructions.
 
 **P4 — the driving consumer.** A bundled `Json` module with a derivable
 `Encode`, used by the Tier-2 Todo CLI in `doc/roadmap-examples.md`. `Decode` is
 deliberately deferred: it needs a failure story, which means `Result` or the
 gated aborting handlers, so the Todo CLI's parse half stays hand-written for
 now and becomes a second forcing case for `Result`.
-
-P1 and P3 add surface syntax and therefore carry the
-`editors/vscode/syntaxes/fango.tmLanguage.json` obligation in the same change,
-per the repository instructions.
 
 ## Alternatives considered
 
@@ -347,13 +185,10 @@ all.
 away from `Point`'s declaration would be no worse than the orphan instances
 fango already permits, provided the schema is visible at that site — which
 `Meta.info` already decides. Deferred rather than rejected; it adds no new
-mechanism once P1 and P2 exist.
+mechanism now that P1 and P2 exist.
 
 ## Open questions
 
-- Whether use-driven instance contexts or an explicit `context` clause on the
-  deriver is the right default. The clause is the fallback if adopting residual
-  predicates in `InstanceDecl` proves invasive.
 - The spelling of anonymous binders and type holes inside declaration quotes.
   `_` reads well for the binder but collides with the wildcard pattern; type
   holes need a way to splice a `TypeRepr` into type position, which the
@@ -366,26 +201,25 @@ mechanism once P1 and P2 exist.
   fine, but it interacts with `checkRegularity` and with generation-stable
   `Unique` allocation.
 - Whether the compile-time-only-type rule should also bar such definitions from
-  a module's `exposing` list. P2 needs the opposite for `Basics`, whose
-  derivers must be reachable from every module that derives, so the rule is
-  probably about emission only — but the interaction with `buildInterface` and
-  with orphan derivers is unexamined.
-- Whether a quote should be allowed to introduce its own binders at all.
-  P0 permits `quote (\y -> …)` and rejects using `y` from a hole, but P2's
-  compiler-owned traversal means no deriver needs to write one.
-- `Meta.fail : String -> Code`, turning into a diagnostic at the splice site,
-  as the deriver's error channel. This is a stopgap for the absence of
+  a module's `exposing` list. It is about emission only today, which is what
+  lets `Meta` expose `Code`; the interaction with orphan derivers is
+  unexamined.
+- `Meta.fail` is the deriver's only error channel and reports
+  `COMPILE-TIME FAILURE` at the splice site. It is a stopgap for the absence of
   `Result`; revisit once `Result` lands.
 - The compile-time evaluator re-elaborates the prefix on demand rather than
   reusing the main pass's Core. Re-elaboration is deterministic and therefore
-  safe, and a program with no splices pays nothing, but a module full of
-  derivers elaborates its prefix twice. Reuse requires interleaving elaboration
-  with inference, which is a larger change to `cmd/fango/pipeline.go`; measure
+  safe, and a program with no splices pays nothing, but every program now
+  derives something, so the prefix through `Derive` is elaborated twice in
+  essentially every build. Reuse requires interleaving elaboration with
+  inference, which is a larger change to `cmd/fango/pipeline.go`; measure
   before doing it.
-- Whether a failed expansion should roll back through `(*Checker).Checkpoint()`
-  the way the REPL's `installInstances` does, or whether batch compilation can
-  simply stop. Batch stops today; the REPL rolls back for declarations but a
-  failed splice inside one leaves its checked prefix in place.
+- A stdlib parameter name that collides with an entry file's *effect
+  operation* name is rejected as shadowing, because effect operations are
+  declared before any module's values while ordinary values are declared in
+  source order. The inference-level shadowing check is module-blind; the
+  resolver's is not. Deciding whether the inference check should consult
+  module visibility, or whether it is redundant in batch mode, is unfinished.
 
 ## Verification
 
@@ -398,16 +232,16 @@ surface AST rather than Core:
 - Because expansion happens during inference — before Core — both backends see
   identical generated code, so the interpreter/compiler differential suite
   applies unchanged and is the referee for derived behavior.
-- The `classes_derive` goldens pin the `Eq`/`Show` port in P2.
 - `TestEmitDeterministicAndFormatted` in `cmd/fango/e2e_test.go` covers the
   determinism claim: pure, bounded, native-restricted compile-time evaluation
   must keep generated Go byte-identical.
 - The REPL keeps one `Checker` and one `eval.Env`, so derivers and splices work
   at the prompt with no extra mechanism; `testdata/repl/staging.in` covers
-  quotes and splices, and P2 should extend it to a deriver definition followed
-  by a `deriving` use, and rollback after a failed expansion.
+  quotes, splices, a deriver definition followed by a `deriving` use, and
+  rollback after a failed expansion.
 - Diagnostic fixtures pin each new title.
 - Compile-latency benchmarks are the honest risk here: compile-time evaluation
-  moves work into the compiler. The cold and warm latency cases should be read
-  before and after P2, with the caveat already recorded in the roadmap that
-  neither performance gate is reproducible enough to run unattended.
+  moves work into the compiler, and `Meta` plus `Derive` are now in every
+  program's graph. The cold and warm latency cases should be read before and
+  after P3, with the caveat already recorded in the roadmap that neither
+  performance gate is reproducible enough to run unattended.

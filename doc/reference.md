@@ -174,7 +174,7 @@ and APIs must be imported explicitly.
 ```fango
 module List exposing (List(..), range, each, foldl)
 
-type List a = Nil | Cons a (List a) deriving (Eq, Show)
+type List a = Nil | Cons a (List a) deriving (Eq, Ord, Show)
 ```
 
 Its inferred public function types are
@@ -236,23 +236,24 @@ modulus's sign, so `modBy 3 (-4)` is `2` and `modBy (-3) 4` is `-2`.
 ```fango
 module Maybe exposing (Maybe(..), withDefault)
 
-type Maybe a = Nothing | Just a deriving (Eq, Show)
+type Maybe a = Nothing | Just a deriving (Eq, Ord, Show)
 ```
 
 `withDefault : a -> Maybe a -> a` returns the contained value or the
 fallback.
 
-`Meta` exposes the abstract compile-time code type:
-
-```fango
-module Meta exposing (Code)
-```
-
-`Code` has no constructors: the only way to build one is a `quote`. See
+`Meta` exposes the compile-time stage's representations: the abstract `Code`
+type, the reflected `TypeRepr` and its schema records, the `Lift` class, and
+the traversal a deriver walks. `Code` has no constructors: the only way to
+build one is a `quote` or `Meta`'s own builders. See
 [Compile-time metaprogramming](#compile-time-metaprogramming). A file that
-uses `quote` or `$(…)` gets `Meta` in its module graph automatically, but
-naming `Code` in an annotation requires the ordinary
+uses `quote`, `$(…)`, or `typeOf` gets `Meta` in its module graph
+automatically, but naming `Code` in an annotation requires the ordinary
 `import Meta exposing (Code)`.
+
+`Derive` supplies the derivers for `Eq`, `Ord`, and `Show`. It exposes nothing
+a program calls: a file that writes `deriving` gets it in the module graph
+automatically, and `deriving` is the only way to reach it.
 
 Strings are always valid UTF-8 sequences and are not normalized. `Char` is one
 Unicode scalar value. `String` exposes the nominal record
@@ -715,16 +716,27 @@ deriving clause:
 type Tree a = Leaf a | Branch (Tree a) (Tree a) deriving (Eq, Show)
 ```
 
-Only standard `Eq` and `Show` can be derived. Generated instances require the
-field instances they use, retaining structural constraints for polymorphic
-fields so callers supply field specializations; phantom parameters add no
-constraint. Direct recursive fields reuse the instance being derived. Other
-cyclic context chains follow the ordinary resolution error rules. Concrete
-function fields require suitable blanket evidence; polymorphic function
-fields retain their class constraint. Mutually recursive deriving groups
-are not supported. Derived equality compares constructors and corresponding
-fields. Derived display concatenates the constructor name and field displays
-with spaces, without added parentheses or string quotes.
+`Eq`, `Ord`, and `Show` are derivable out of the box, and any class becomes
+derivable through a `deriver` declaration (see
+[Compile-time metaprogramming](#compile-time-metaprogramming)). Deriving a
+class with no deriver is `CANNOT DERIVE`.
+
+A generated instance's context is exactly what its generated methods need: a
+field the generator never reads, and a phantom parameter that appears in no
+field, add no constraint. Direct recursive fields reuse the instance being
+derived. Other cyclic context chains follow the ordinary resolution error
+rules. Concrete function fields require suitable blanket evidence; polymorphic
+function fields retain their class constraint. Mutually recursive deriving
+groups are not supported. A type error inside generated code points at the
+line of the generator that produced it, with a note naming the `deriving`
+clause that ran it.
+
+Derived equality compares constructors and corresponding fields. Derived
+display concatenates the constructor name and field displays with spaces,
+without added parentheses or string quotes; a record displays as
+`Name { field = value, … }`. Derived ordering compares constructors by
+declaration position, then fields left to right; all four of `<`, `>`, `<=`,
+and `>=` are generated together.
 
 `case` branches align with the first pattern after `of`. Patterns support
 constructors, nominal records, integer/float/string/Char literals, variables,
@@ -841,12 +853,80 @@ reserved word; `$` is a token only as part of `$(`.
 `typeOf T` produces an opaque `Meta.TypeRepr` for a closed, fully applied
 type. Nominal types compare by compiler identity, while applications and
 function arrows compare structurally, including the effects on each arrow.
-`Meta.sameType`, `Meta.head`, `Meta.isVar`, and `Meta.typeName` inspect this
-representation; display text never determines identity.
+`Meta.sameType`, `Meta.head`, `Meta.args`, `Meta.isVar`, and `Meta.typeName`
+inspect this representation; display text never determines identity.
 
 `Meta.Lift` provides `lift : a -> Code` for `Int`, `Float`, `String`, `Char`,
 `Bool`, and `()`. The generated literal retains its scalar type. `Meta.fail`
 stops expansion and reports `COMPILE-TIME FAILURE` at the splice site.
+
+`Meta.info : TypeRepr -> Reflected` reads a type's schema:
+
+```fango
+type Reflected = Opaque | Visible TypeInfo
+```
+
+It answers `Visible` only when the type's schema is readable where `typeOf`
+was written. That is not a new rule: `exposing (T)` reflects as `Opaque` and
+`exposing (T(..))` reflects in full, exactly as those two forms already govern
+constructor patterns and record fields. A type variable and a scalar are
+`Opaque` too — neither has a schema to read.
+
+```fango
+type TypeInfo = { name : String, moduleName : String, ty : TypeRepr, params : Items TypeRepr, shape : Shape }
+type Shape = Union (Items Ctor) | Record Ctor
+type Ctor = { name : String, symbol : String, index : Int, owner : TypeRepr, fields : Items Field }
+type Field = { name : String, index : Int, ty : TypeRepr }
+```
+
+A union constructor's fields are positional, so their `name` is empty; a
+record's sole constructor carries the type's own name and its fields' names.
+Field types come back instantiated at the reflected type's arguments, so a
+generator sees `Int` rather than the declaration's parameter.
+`Meta.ctorsIn` flattens the two shapes into one constructor list.
+
+`Items` is `Meta`'s own list — `NoItems | Item a (Items a)`, with
+`Meta.foldItems`, `Meta.mapItems`, and `Meta.lengthItems`. `Meta` cannot import
+`List`, because `List` derives its own instances and so depends on the module
+that depends on `Meta`.
+
+### Derivers
+
+A `deriver` declaration opens `deriving` to a class:
+
+```fango
+class Tag a
+    tag : a -> String
+
+deriver Tag
+    tag subject valueCode =
+        Meta.match subject valueCode (\bound -> Meta.lift bound.ctor.name)
+
+type Colour = Red | Green Int deriving (Tag)
+```
+
+A deriver method's type is dictated by the class: for a class method with *n*
+arrows, its deriver method takes a `TypeInfo` plus *n* `Code` arguments and
+returns `Code`. A deriver is otherwise an ordinary fango function, checked by
+ordinary inference. It must supply exactly the class's methods
+(`MISSING METHOD`, `UNKNOWN METHOD`), a class may have only one deriver
+(`DUPLICATE DERIVER`), and — like an instance — it is visible by dependency.
+
+The compiler owns the traversal, so a deriver never invents a binder:
+
+- `Meta.match : TypeInfo -> Code -> (Bound -> Code) -> Code` builds the
+  exhaustive case over the type's constructors and binds every field, handing
+  each branch a `Bound { ctor : Ctor, fields : Items BoundField }` whose
+  fields carry `{ name, index, ty, value : Code }`. Nesting two calls produces
+  the nested case a two-argument method needs.
+- `Meta.construct : Ctor -> Items Code -> Code` goes the other way, for a
+  method that produces an `a`. A record constructor produces a record literal.
+
+A `deriver` must precede, in source order, any `deriving` clause that uses it
+— including on a type declared earlier in the same file. The bundled `Derive`
+module supplies the derivers for `Eq`, `Ord`, and `Show`; a file that writes
+`deriving` depends on it automatically, the way a file that writes `quote`
+depends on `Meta`.
 
 `quote atom` builds a value of the abstract type `Meta.Code`. It does not
 evaluate the quoted expression — it describes it. The quoted text is ordinary
@@ -913,8 +993,13 @@ repeat n c = if n <= 1 then c else twice (repeat (n - 1) c)
 Quotes and splices work at the REPL with no extra mechanism, since the session
 keeps one checker and one evaluator.
 
-`deriving` is still limited to the standard `Eq` and `Show`; opening it to
-user classes is the next increment (see the roadmap).
+Quotes, splices, derivers, and `deriving` all work at the prompt. A failed
+input leaves nothing behind: a `deriving` clause whose deriver fails does not
+install its type, and a declaration whose splice fails does not install its
+name.
+
+Declaration splices — generating a whole definition rather than an expression
+— are the next increment (see the roadmap).
 
 ## Entry points
 
@@ -946,16 +1031,18 @@ ordinary built executable exits without printing them.
 
 ## REPL
 
-`fango repl` evaluates expressions, installs value/function/type/effect/class/instance
-declarations, and accepts multiline layout-sensitive input. Definitions echo
+`fango repl` evaluates expressions, installs
+value/function/type/effect/class/instance/deriver declarations, and accepts
+multiline layout-sensitive input. Definitions echo
 their inferred types; expressions print a value and type. Errors do not end the
 session. Redefinition is allowed at the prompt, while existing memoized values
 and closures retain earlier bindings.
 Record type declarations echo `Name : record`; their synthetic internal
 constructor is not part of the surface namespace.
 Classes cannot be redefined. Type redefinition creates a fresh identity and
-can install fresh instances for that identity. Failed instance and deriving
-declarations do not modify the persistent declaration environment. Types are
+can install fresh instances for that identity. Failed instance, deriver, and
+deriving declarations do not modify the persistent declaration environment,
+and neither does a declaration whose splice fails part way through. Types are
 printed with their class contexts. Expression display uses available `Show`
 evidence; otherwise it prints `<value : T>` or `<function>` without adding a
 Show constraint to the expression.

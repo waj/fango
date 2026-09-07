@@ -178,7 +178,25 @@ type Checker struct {
 	// (internal/staging): inference cannot, because running a splice needs
 	// elaboration and the interpreter, both of which depend on this package.
 	CompileTime CompileTimeEval
+
+	// CompileTimeRollback discards the compile-time environment after a
+	// Checkpoint restores an earlier prefix, so the next splice rebuilds it
+	// from the declarations that actually survived.
+	CompileTimeRollback func(checked, instances int)
+
+	// Derivers maps a class to the compile-time generator that implements
+	// `deriving` for it (doc/design.md, "Compile-time metaprogramming").
+	Derivers map[string]*DeriverInfo
+
+	// inferringContext is non-nil while a generated instance is being probed
+	// for the context its own body needs. A residual predicate that would
+	// otherwise be MISSING CONSTRAINT is collected here instead.
+	inferringContext *[]types.Pred
 }
+
+// ADT implements meta.Schema, which is how a reflected type reaches its own
+// declaration without the compile-time evaluator carrying the checker around.
+func (ck *Checker) ADT(unique int) *types.ADTInfo { return ck.ADTs[unique] }
 
 // CompileTimeEval elaborates and evaluates one already-checked splice
 // operand, returning the *meta.Code it produced.
@@ -225,6 +243,7 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		Templates:       &meta.Table{},
 		QuoteTemplates:  map[*ast.Quote]int{},
 		QuoteHoles:      map[*ast.Quote][]*ast.Splice{},
+		Derivers:        map[string]*DeriverInfo{},
 	}
 	// Bool is an ordinary ADT in the checker (doc/design.md, "Type inference") — patterns, case
 	// exhaustiveness, and the ctor table treat it like any declared type.
@@ -346,7 +365,8 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 			continue
 		}
 		if dr, ok := d.(*ast.DeriverDecl); ok {
-			errs = append(errs, diag.Errorf(dr.ClassSpan, "DERIVER NOT READY", "User-defined derivers are not available in this compiler build."))
+			ck.CurrentOwner = dr.Owner
+			errs = append(errs, ck.DeriverDecl(dr)...)
 			continue
 		}
 		if td, ok := d.(*ast.TypeDecl); ok && len(td.Deriving) > 0 {
@@ -1752,7 +1772,22 @@ func (g *generator) solveHere() {
 	g.resolveRecords(true)
 }
 
+// resolveRecords discharges field obligations to a fixed point. One
+// obligation's receiver is often another's result — `ctor.fields` decides the
+// element type a later `field.index` reads — so a single pass would make
+// resolution depend on the order the obligations were collected in. Each pass
+// solves what it learned, which is what lets the next one make progress;
+// only when a pass learns nothing are the survivors genuinely ambiguous.
 func (g *generator) resolveRecords(final bool) {
+	for g.recordPass(false) > 0 {
+	}
+	if final {
+		g.recordPass(true)
+	}
+}
+
+func (g *generator) recordPass(final bool) int {
+	resolved := 0
 	var constraints []Constraint
 	for _, ob := range g.records {
 		if ob.resolved {
@@ -1764,6 +1799,7 @@ func (g *generator) resolveRecords(final bool) {
 			if final {
 				g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "AMBIGUOUS FIELD", "The record type is not known here; add a type annotation or provide a contextual record type."))
 				ob.resolved = true
+				resolved++
 			}
 			continue
 		}
@@ -1771,6 +1807,7 @@ func (g *generator) resolveRecords(final bool) {
 		if adt == nil || !adt.IsRecord() {
 			g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "NOT A RECORD", "A value of type `%s` has no record fields.", types.Show(t)))
 			ob.resolved = true
+			resolved++
 			continue
 		}
 		visible := func(candidates []string) bool {
@@ -1812,12 +1849,14 @@ func (g *generator) resolveRecords(final bool) {
 		}
 		g.ck.RecordUses[ob.node] = adt
 		ob.resolved = true
+		resolved++
 	}
 	if len(constraints) > 0 {
 		sub, _, errs := Solve(constraints, nil, g.ck.Sub, g.ck.B, g.ck.Sup)
 		g.ck.Sub = sub
 		g.errs = append(g.errs, errs...)
 	}
+	return resolved
 }
 
 // scopeMentions reports whether any enclosing local binding's zonked type
