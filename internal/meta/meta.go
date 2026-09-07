@@ -40,7 +40,10 @@ func (r *TypeRepr) Con() *types.TCon {
 }
 
 // ADT returns the reflected type's declaration, or nil when the type is not
-// nominal, has no declaration, or hides its schema from the reflection site.
+// nominal, has no declaration, hides its schema from the reflection site, or
+// is not fully applied. A partial application has no readable schema because
+// its constructor fields cannot be instantiated: `Meta.head` produces one,
+// and it is for comparing identities rather than for reading a shape.
 func (r *TypeRepr) ADT() *types.ADTInfo {
 	con := r.Con()
 	if con == nil || r.Schema == nil {
@@ -49,7 +52,11 @@ func (r *TypeRepr) ADT() *types.ADTInfo {
 	if r.Visible != nil && !r.Visible[con.Unique] {
 		return nil
 	}
-	return r.Schema.ADT(con.Unique)
+	adt := r.Schema.ADT(con.Unique)
+	if adt == nil || len(con.Args) != len(adt.Params) {
+		return nil
+	}
+	return adt
 }
 
 // Derive reflects t with this site's visibility, so walking into a type

@@ -24,7 +24,8 @@ firstArg =
         NoItems -> Meta.lift "none"
         Item arg _ -> Meta.lift (Meta.typeName arg)
 
--- info reads the schema. A scalar has none, so it reflects as Opaque.
+-- info reads the schema. A scalar has none, and neither does a partial
+-- application: `head` is for comparing identities, not for reading a shape.
 summary : Meta.TypeRepr -> Code
 summary repr =
     case Meta.info repr of
@@ -51,4 +52,5 @@ main() =
     print $(summary (typeOf Tree))
     print $(summary (typeOf Int))
     print $(fieldNames (typeOf Point))
+    print $(summary (Meta.head (typeOf (List Int))))
     print $(Meta.lift (Meta.isVar (typeOf Int)))

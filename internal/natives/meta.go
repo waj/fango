@@ -145,9 +145,9 @@ func installMeta(t map[string]Spec) {
 	// — from colliding, without a mutable counter that would make expansion
 	// order-dependent.
 	t["Meta.binderName"] = Spec{Arity: 3, Eval: func(rt *Runtime, args []any) (any, error) {
-		tree := rt.Expand(args[0].(*meta.Code))
-		if tree == nil {
-			return nil, fmt.Errorf("Meta.match needs a scrutinee that is an expression")
+		tree, err := expand(rt, args[0])
+		if err != nil {
+			return nil, err
 		}
 		text := ast.DumpExpr(tree)
 		h := fnv.New32a()
@@ -175,8 +175,11 @@ func installMeta(t map[string]Spec) {
 	t["Meta.matchBranch"] = Spec{Arity: 3, Eval: func(rt *Runtime, args []any) (any, error) {
 		sofar, ok := args[0].(*meta.Code).Direct.(*ast.Case)
 		pat, isPat := args[1].(*meta.Code).Pattern.(*ast.PCtor)
-		body := rt.Expand(args[2].(*meta.Code))
-		if !ok || !isPat || body == nil {
+		body, err := expand(rt, args[2])
+		if err != nil {
+			return nil, err
+		}
+		if !ok || !isPat {
 			return nil, fmt.Errorf("Meta.match built a malformed branch")
 		}
 		next := *sofar
@@ -204,8 +207,11 @@ func installMeta(t map[string]Spec) {
 	})
 	t["Meta.constructPush"] = Spec{Arity: 2, Eval: func(rt *Runtime, args []any) (any, error) {
 		partial := args[0].(*meta.Code)
-		value := rt.Expand(args[1].(*meta.Code))
-		if partial.Direct == nil || value == nil {
+		value, err := expand(rt, args[1])
+		if err != nil {
+			return nil, err
+		}
+		if partial.Direct == nil {
 			return nil, fmt.Errorf("Meta.construct built a malformed value")
 		}
 		if lit, ok := partial.Direct.(*ast.RecordLit); ok {
@@ -217,7 +223,11 @@ func installMeta(t map[string]Spec) {
 				ast.RecordExprField{Name: partial.Pending[0], Value: value})
 			return &meta.Code{Template: -1, Direct: &next, Pending: partial.Pending[1:]}, nil
 		}
-		return &meta.Code{Template: -1, Direct: &ast.App{Fn: rt.Expand(partial), Arg: value}}, nil
+		fn, err := expand(rt, partial)
+		if err != nil {
+			return nil, err
+		}
+		return &meta.Code{Template: -1, Direct: &ast.App{Fn: fn, Arg: value}}, nil
 	}}
 	t["Meta.fail"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return nil, fmt.Errorf("%s", args[0].(string))
@@ -277,10 +287,24 @@ func pure3(f func(a, b, c any) any) Spec {
 
 func expand1(f func(ast.Expr) (any, error)) Spec {
 	return Spec{Arity: 1, Eval: func(rt *Runtime, args []any) (any, error) {
-		tree := rt.Expand(args[0].(*meta.Code))
-		if tree == nil {
-			return nil, fmt.Errorf("this compile-time value is not an expression")
+		tree, err := expand(rt, args[0])
+		if err != nil {
+			return nil, err
 		}
 		return f(tree)
 	}}
+}
+
+// expand renders one code argument as a tree. Only the compiler's evaluator
+// supplies Expand, and only it ever runs these natives, so a missing one is
+// an internal error rather than something a program can provoke.
+func expand(rt *Runtime, arg any) (ast.Expr, error) {
+	if rt.Expand == nil {
+		return nil, fmt.Errorf("code can only be assembled while the compiler is running")
+	}
+	tree := rt.Expand(arg.(*meta.Code))
+	if tree == nil {
+		return nil, fmt.Errorf("this compile-time value is not an expression")
+	}
+	return tree, nil
 }
