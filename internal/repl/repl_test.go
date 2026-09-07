@@ -146,6 +146,48 @@ forward 42
 	}
 }
 
+func TestContextPrecedenceTransactions(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader(`class Inspect a
+    inspect : a -> String
+
+instance Inspect a
+    inspect x = "fallback"
+
+old() = inspect True
+forward x = inspect x
+instance Show a => Inspect a
+    inspect x = 42
+
+instance Show a => Inspect a
+    inspect x = "show"
+
+old()
+forward True
+instance Eq a => Inspect a
+    inspect x = "eq"
+
+old()
+forward True
+instance Show b => Inspect b
+    inspect x = "duplicate"
+
+forward True
+:quit
+`), &out)
+	got := out.String()
+	for _, want := range []string{"MISSING INSTANCE", "OVERLAPPING INSTANCE", "Inspect a => a -> String"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q:\n%s", want, got)
+		}
+	}
+	for value, count := range map[string]int{"fallback : String": 2, "show : String": 1, "eq : String": 2} {
+		if strings.Count(got, value) != count {
+			t.Fatalf("wrong count for %q:\n%s", value, got)
+		}
+	}
+}
+
 func TestEffectfulPromptDeclarationRejected(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader("x = print 1\n40 + 2\n:quit\n"), &out)

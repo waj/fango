@@ -553,15 +553,55 @@ a polymorphic body. The same rule applies to structured types:
 `render x = show (Box x)` infers `Show (Box a) => a -> String`, preserving the
 caller's `Show (Box Int)` specialization.
 
-Matching selects the most specific visible head. Overlap is allowed only when
-one head is strictly more specific than the other; duplicate heads and
-incomparable overlapping heads report `OVERLAPPING INSTANCE`. An unresolved
+Matching first selects the most specific visible head. Equivalent heads may
+have different contexts. Duplicate head/context pairs and incomparable
+overlapping heads report `OVERLAPPING INSTANCE`; renaming variables, reordering
+constraints, or repeating a constraint does not make a distinct instance.
+
+Within the selected head group, only candidates whose contexts are satisfied
+are applicable. A strict superset of constraints takes precedence over its
+subset. This compares predicate sets, not logical implications through other
+instances. Among the remaining candidates, the latest declaration in each
+module wins. If candidates from multiple modules remain, the use reports
+`AMBIGUOUS INSTANCE` with their declaration locations and contexts.
+
+For example, a conditional blanket overrides an unconditional fallback when
+its context is available, regardless of their declaration order:
+
+```fango
+class Inspect a
+    inspect : a -> String
+
+instance Inspect a
+    inspect _ = "<inspect not implemented>"
+
+instance Show a => Inspect a
+    inspect x = show x
+
+instance Inspect String
+    inspect x = "\"" ++ x ++ "\""
+
+type Foo = Foo
+
+main() =
+    print (inspect 42)
+    print (inspect "Hola")
+    print (inspect Foo)
+```
+
+This prints `42`, `"Hola"`, and `<inspect not implemented>`. With incomparable
+contexts such as `Show a` and `Eq a`, the later declaration wins when both
+apply in the same module. A `(Show a, Eq a)` context beats either one when
+applicable.
+
+An unresolved
 type is never guessed from the set of instances. Predicates containing any
 unresolved or quantified variable retain their evidence requirement, even
 when only one instance currently matches. Concrete predicates resolve through
-instances; explicitly passed evidence takes precedence. Contexts do not affect
-specificity, and a selected instance with an unsatisfied context does not fall
-back to a less specific instance.
+instances; explicitly passed evidence takes precedence. If no context in the
+most-specific head group is satisfied, resolution does not fall back to a
+less-specific head. Cycles, nesting-limit failures, and ambiguity encountered
+while checking a context are errors, not reasons to try a fallback.
 
 Structured contexts need not be smaller than their heads. For example,
 `Show (Box a) => Show (Wrapper a)` can delegate to a wrapper's `Box a` field.
@@ -578,6 +618,8 @@ the instance's declared context. This permits direct recursive implementations
 without requiring callers to supply a circular self constraint.
 
 Classes, instances, and ordinary definitions are checked in source order.
+Later instances do not change earlier concrete calls; a polymorphic function
+still uses the evidence supplied by its caller.
 Instances may live outside both the class's and the type's defining module
 (orphan instances). Resolution sees the defining module and its transitive
 imports; exposing lists do not hide instances. Overlap checking covers the

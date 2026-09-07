@@ -139,7 +139,18 @@ func (el *elab) matchInstance(p types.Pred) (*infer.InstanceInfo, map[int]types.
 		}
 		return in, m, false
 	}
-	return el.ck.MatchInstance(p, el.owner)
+	var given []types.Pred
+	for _, d := range el.dicts {
+		given = append(given, d.pred)
+	}
+	if in := el.selfInstance; in != nil {
+		given = append(given, types.Pred{Class: in.Class.Name, Ty: in.Head})
+	}
+	r := el.ck.ResolveInstance(p, el.owner, el.instanceLimit, given)
+	if r.Error != nil {
+		el.errs = append(el.errs, *r.Error)
+	}
+	return r.Instance, r.Bindings, r.Blocked
 }
 
 func (el *elab) valueReference(name string, raw types.Type) core.Expr {
@@ -161,6 +172,7 @@ func instanceDefinition(in *infer.InstanceInfo, ck *infer.Checker) (core.Def, []
 	sch, _ := ck.Env.Lookup(in.Name)
 	el := newElab(ck, in.Name, sch)
 	el.owner = in.Owner
+	el.instanceLimit = in.Limit
 	params, dictTypes := el.bindDictionaries(in.Preds)
 	ty := in.Class.DictType(in.Head)
 	ctor := in.Class.Dict.Ctors[0]

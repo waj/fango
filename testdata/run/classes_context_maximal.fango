@@ -1,0 +1,22 @@
+class Inspect a
+    inspect : a -> String
+instance (Eq a, Show a) => Inspect a
+    inspect x = "both"
+instance Ord a => Inspect a
+    inspect x = "ord"
+instance Show a => Inspect a
+    inspect x = "show"
+instance Inspect a
+    inspect x = "default"
+
+class Label a
+    label : a -> String
+instance Eq a => Label a
+    label x = "eq"
+instance Show a => Label a
+    label x = "show"
+
+main() =
+    print (inspect 42)
+    print (inspect True)
+    print (label 42)

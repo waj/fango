@@ -49,7 +49,7 @@ type Wrap a = Wrap a
 		{"annotation must name class", "instance Show a => A a\n    aa x = show x\nf : Show a => a -> String\nf x = aa x", "MISSING CONSTRAINT"},
 		{"structural annotation", "instance Show a => Show (Box a)\n    show x = \"box\"\nf : Show a => Box a -> String\nf x = show x", "MISSING CONSTRAINT"},
 		{"local annotation", "instance A a\n    aa x = \"a\"\nf x =\n    local : Show a => a -> String\n    local y = aa y\n    local x", "MISSING CONSTRAINT"},
-		{"duplicate blanket", "instance A a\n    aa x = \"a\"\ninstance Show b => A b\n    aa x = show x", "OVERLAPPING INSTANCE"},
+		{"duplicate blanket", "instance Show a => A a\n    aa x = show x\ninstance Show b => A b\n    aa x = show x", "OVERLAPPING INSTANCE"},
 		{"self blanket cycle", "instance A a => A a\n    aa x = \"a\"", "INSTANCE CONTEXT"},
 		{"indirect blanket cycle", "instance B a => A a\n    aa x = bb x\ninstance A a => B a\n    bb x = aa x", "INSTANCE CONTEXT"},
 		{"blanket cycle despite escape", "instance A Int\n    aa x = \"int\"\ninstance B a => A a\n    aa x = bb x\ninstance A a => B a\n    bb x = aa x", "INSTANCE CONTEXT"},

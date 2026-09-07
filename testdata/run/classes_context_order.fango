@@ -1,0 +1,25 @@
+class Inspect a
+    inspect : a -> String
+instance Show a => Inspect a
+    inspect x = "show"
+
+before() = inspect True
+forward x = inspect x
+
+instance Eq a => Inspect a
+    inspect x = "eq"
+afterEq() = inspect True
+
+instance (Eq a, Show a) => Inspect a
+    inspect x = "both"
+afterBoth() = inspect True
+
+instance Ord a => Inspect a
+    inspect x = "ord"
+
+main() =
+    print before()
+    print afterEq()
+    print afterBoth()
+    print (forward 42)
+    print (forward True)

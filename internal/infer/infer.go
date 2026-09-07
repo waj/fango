@@ -253,7 +253,8 @@ type DeclInfo struct {
 	// AllowPoly off this is always the trivial Scheme{Body}.
 	Scheme types.Scheme
 	// Instance supplies self evidence inside an instance method.
-	Instance *InstanceInfo
+	Instance      *InstanceInfo
+	InstanceLimit int
 }
 
 type HandlerClauseInfo struct {
@@ -756,7 +757,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 		errs = append(errs, solveErrs...)
 		ty = annTy
 	}
-	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body}
+	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body, InstanceLimit: len(ck.Instances)}
 	_, isLambda := d.Body.(*ast.Lambda)
 	switch {
 	case isMain:

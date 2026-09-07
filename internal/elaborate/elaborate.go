@@ -110,6 +110,7 @@ func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
 func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def, []diag.Error) {
 	el := newElab(ck, info.Name, info.Scheme)
 	el.selfInstance = info.Instance
+	el.instanceLimit = info.InstanceLimit
 	el.stableLifts = stableLifts
 	rawType := ck.Sub.Apply(info.Type)
 	el.defaultFree(rawType)
@@ -214,13 +215,14 @@ func Expr(e ast.Expr, ck *infer.Checker) (core.Expr, []core.Def, []diag.Error) {
 }
 
 type elab struct {
-	selfInstance *infer.InstanceInfo
-	evidencePath []types.Pred
-	dicts        []dictionary
-	owner        string
-	ck           *infer.Checker
-	errs         []diag.Error
-	tmp          int // fresh-name counter for spine temporaries, per Decl/Expr
+	selfInstance  *infer.InstanceInfo
+	instanceLimit int
+	evidencePath  []types.Pred
+	dicts         []dictionary
+	owner         string
+	ck            *infer.Checker
+	errs          []diag.Error
+	tmp           int // fresh-name counter for spine temporaries, per Decl/Expr
 
 	// declName/declScheme identify the declaration being elaborated: its
 	// self-references must instantiate against THIS scheme (the REPL
@@ -246,8 +248,9 @@ type elab struct {
 
 func newElab(ck *infer.Checker, declName string, declScheme types.Scheme) *elab {
 	return &elab{ck: ck, declName: declName, declScheme: declScheme,
-		owner:    symbolOwner(declName),
-		scopeIdx: map[string]int{}, lifted: map[string]*liftedLocal{}}
+		instanceLimit: len(ck.Instances),
+		owner:         symbolOwner(declName),
+		scopeIdx:      map[string]int{}, lifted: map[string]*liftedLocal{}}
 }
 
 type scopeVar struct {

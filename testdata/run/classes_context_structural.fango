@@ -1,0 +1,23 @@
+type Box a = Box a
+instance Show (Box a)
+    show x = "box fallback"
+instance Show a => Show (Box a)
+    show x = case x of
+        Box value -> "box " ++ show value
+type Wrapper a = Wrapper (Box a) deriving (Show)
+type Foo = Foo
+
+render x = show (Box x)
+localRender x =
+    inner y = show (Box y)
+    inner x
+method : Show (Box a) => Box a -> String
+method = show
+
+main() =
+    print (render 42)
+    print (render Foo)
+    print (localRender Foo)
+    print (method (Box Foo))
+    print (Wrapper (Box 42))
+    print (Wrapper (Box Foo))

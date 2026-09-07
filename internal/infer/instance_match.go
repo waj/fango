@@ -179,8 +179,11 @@ func headAtLeastAsSpecific(a, b types.Type) bool {
 // naming is per-printer. The caller hex-encodes the key, so its character
 // set is unconstrained.
 func canonicalHeadKey(head types.Type) string {
+	return canonicalTypeKey(head, map[int]int{})
+}
+
+func canonicalTypeKey(head types.Type, vars map[int]int) string {
 	var b strings.Builder
-	vars := map[int]int{}
 	var render func(types.Type)
 	render = func(t types.Type) {
 		switch t := t.(type) {

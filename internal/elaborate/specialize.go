@@ -63,8 +63,9 @@ func specializeScalars(p *core.Prog, infos []infer.DeclInfo, ck *infer.Checker) 
 		for _, scalar := range []*types.TCon{ck.B.Int, ck.B.Float} {
 			variant := &scalarVariant{def: d, bindings: map[string]core.Expr{}, types: map[int]types.Type{v.ID: scalar}}
 			for i, pred := range info.Scheme.Preds {
-				in, _, blocked := ck.MatchInstance(types.Pred{Class: pred.Class, Ty: scalar}, d.Owner)
-				if blocked || in == nil || s.dictionaries[in.Name] == nil {
+				r := ck.ResolveInstance(types.Pred{Class: pred.Class, Ty: scalar}, d.Owner, info.InstanceLimit, nil)
+				in := r.Instance
+				if r.Blocked || r.Error != nil || in == nil || s.dictionaries[in.Name] == nil {
 					eligible = false
 					break
 				}

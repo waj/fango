@@ -1,0 +1,20 @@
+class Inspect a
+    inspect : a -> String
+
+instance Inspect String
+    inspect x = "\"" ++ x ++ "\""
+instance Show a => Inspect a
+    inspect x = show x
+instance Inspect a
+    inspect _ = "<inspect not implemented>"
+
+type Foo = Foo
+forward x = inspect x
+method = inspect
+
+main() =
+    print (inspect 42)
+    print (inspect "Hola")
+    print (inspect Foo)
+    print (forward "SECRET")
+    print (method Foo)

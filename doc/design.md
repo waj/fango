@@ -193,11 +193,19 @@ Instantiation substitutes predicate types alongside the body. An instance head
 is either a bare variable (a blanket instance) or a named constructor applied
 to arbitrary argument types — variables (possibly repeated), ground types,
 or nested applications. Direct function heads and open effect rows are rejected.
-Blanket heads can match any value type, including functions. Two instances of a class whose heads unify are
-permitted only when one is strictly more specific (its head is an instance of
-the other's); duplicates and incomparable-unifiable pairs are rejected at
-declaration, so every use site has a unique most-specific match, independent
-of declaration order.
+Blanket heads can match any value type, including functions. Unifiable heads
+must be comparable by directional matching. Equivalent heads may coexist with
+distinct contexts; equal head/context pairs and incomparable-unifiable heads
+are rejected at declaration. Context identity is a predicate set aligned by
+head variables, independent of variable names, repetition, and predicate order.
+
+Concrete resolution first chooses the most-specific equivalent head group,
+then checks each candidate's context. Missing evidence makes a candidate
+inapplicable; cycles, nesting-limit failures, and ambiguity remain errors.
+Among applicable candidates, strict context supersets dominate subsets without
+inferring implication through other instances. Among the remaining maxima,
+the latest declaration per module wins. Multiple remaining modules report
+`AMBIGUOUS INSTANCE`, never a winner based on module load order.
 
 Resolution is directional and selects instances only for concrete predicates.
 Every predicate containing a metavariable or quantified variable is deferred,
@@ -209,7 +217,7 @@ discharge `Inspect a` merely because a blanket instance relates the classes.
 Constraints whose variables do not occur in the annotated type are ambiguous.
 
 Numeric default eligibility may inspect general instance contexts without
-choosing evidence. In particular, `Num a, Inspect a` can qualify through a
+choosing evidence, considering alternative contexts independently. In particular, `Num a, Inspect a` can qualify through a
 `Show a => Inspect a` blanket. The original predicates are resolved again
 after defaulting, preserving concrete specializations. Custom bare constraints
 without an eligible blanket still prevent numeric defaulting.
@@ -217,22 +225,30 @@ without an eligible blanket still prevent numeric defaulting.
 Named instances permit structural contexts using only variables of the head,
 without open effect rows or a decreasing-size requirement. Blanket contexts
 must constrain their single head variable. Their class-dependency graph must
-be acyclic across all loaded modules; declarations closing a cycle are rejected.
+be acyclic across all loaded modules; edges include every alternative context,
+and declarations closing a cycle are rejected.
 Structured context cycles are checked at use sites: repeated active predicates
 report their resolution chain, and growing chains hit a fixed nesting limit.
 Inference, evidence availability probes, and elaboration all bound recursion;
 repeated sibling requirements are not cycles. Instance selection never falls
 back to a less specific head when the selected context fails.
 
-Classes and instances are checked in source order. All instances in the loaded
+Classes and instances are checked in source order. Typed declarations and
+instance factories retain an instance-environment cutoff, replayed during
+elaboration and scalar specialization, so later declarations cannot alter
+earlier concrete evidence. Polymorphic calls still receive caller evidence.
+All instances in the loaded
 graph participate in overlap checking, including orphan instances, while
 resolution uses only the defining module and its transitive dependencies — a
 module that cannot see a more specific instance resolves through the general
 one. Instances are not selected by import exposing lists. Canonical class
 symbols and generation-stable type identities determine coherence, not
 display names.
-Instance symbols retain the distinct spelling of builtin `()` rather than
-collapsing it into the user-definable name `Unit`.
+Instance symbols include canonical head and context identities and retain the
+distinct spelling of builtin `()` rather than collapsing it into the
+user-definable name `Unit`. Each declaration emits its workers and dictionary
+factory only in its defining module; blanket instances do not generate copies
+for every matching type or importing module.
 
 Explicit `deriving (Eq, Show)` generates ordinary instance ASTs, checked through
 the same inference and elaboration path as handwritten methods. Their contexts
@@ -305,8 +321,9 @@ elaborates nothing twice.
 fango needs no equivalent of Template Haskell's stage restriction. Top-level
 declarations are scoped in source order and forward references are rejected,
 so a splice can only name declarations that are already checked, and
-`(*Checker).InstanceDecl` appends in source order, so a splice operand and the
-final elaboration pass select the same evidence. A splice at depth 0 is
+`(*Checker).InstanceDecl` appends in source order. Declaration cutoffs preserve
+the same concrete evidence in prefix and final elaboration, while splice
+operands use the instances visible at the splice site. A splice at depth 0 is
 expanded before Core exists, so prefix elaboration cannot re-enter the
 evaluator and needs no reentrancy guard.
 

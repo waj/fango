@@ -39,6 +39,11 @@ func testMultiModule(t *testing.T, fixture string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	testMultiModuleEntry(t, entry, string(want))
+}
+
+func testMultiModuleEntry(t *testing.T, entry, want string) {
+	t.Helper()
 	var stderr bytes.Buffer
 	prog, ck, ok := compileFile(entry, &stderr)
 	if !ok {
@@ -46,7 +51,7 @@ func testMultiModule(t *testing.T, fixture string) {
 	}
 	env := eval.NewEnv()
 	env.DefineProg(prog)
-	_, err = eval.ForceIO(context.Background(), prog.Entry, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{}))
+	_, err := eval.ForceIO(context.Background(), prog.Entry, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +80,58 @@ func testMultiModule(t *testing.T, fixture string) {
 	}
 	if strings.TrimSpace(string(stdout)) != strings.TrimSpace(string(want)) {
 		t.Fatalf("compiled got %q, want %q", stdout, want)
+	}
+}
+
+func TestCrossModuleContextPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name, extra, value, want, diagnostic string
+	}{
+		{name: "applicable", value: "True", want: "show/show/show"},
+		{name: "fallback", extra: "type Foo = Foo\n", value: "Foo", want: "fallback/fallback/show"},
+		{name: "ambiguous", value: "1", diagnostic: "AMBIGUOUS INSTANCE"},
+		{name: "stronger", extra: "instance (Show a, Num a) => Base.Inspect a\n    inspect _ = \"both\"\n", value: "1", want: "both/both/show"},
+		{name: "concrete", extra: "instance Base.Inspect Int\n    inspect _ = \"int\"\n", value: "1", want: "int/int/show"},
+		{name: "duplicate", extra: "instance Show b => Base.Inspect b\n    inspect _ = \"duplicate\"\n", value: "True", diagnostic: "OVERLAPPING INSTANCE"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeModuleFile(t, root, "Base.fango", `module Base exposing (Inspect(..), forward)
+class Inspect a
+    inspect : a -> String
+instance Inspect a
+    inspect _ = "fallback"
+forward : Inspect a => a -> String
+forward x = inspect x
+`)
+			writeModuleFile(t, root, "Display.fango", `module Display exposing (early)
+import Base
+instance Show a => Base.Inspect a
+    inspect _ = "show"
+early() = Base.inspect 1
+`)
+			writeModuleFile(t, root, "Number.fango", `module Number exposing ()
+import Base
+instance Num a => Base.Inspect a
+    inspect _ = "num"
+`)
+			entry := writeModuleFile(t, root, "Main.fango", "module Main exposing (main)\nimport Base\nimport Display\nimport Number\n"+tc.extra+"main = Base.inspect "+tc.value+" ++ \"/\" ++ Base.forward "+tc.value+" ++ \"/\" ++ Display.early()\n")
+			if tc.diagnostic != "" {
+				var stderr bytes.Buffer
+				if _, _, ok := compileFile(entry, &stderr); ok || !strings.Contains(stderr.String(), tc.diagnostic) {
+					t.Fatalf("wanted %s, got: %s", tc.diagnostic, stderr.String())
+				}
+				if tc.diagnostic == "AMBIGUOUS INSTANCE" {
+					for _, location := range []string{"Display.fango:3:", "Number.fango:3:"} {
+						if !strings.Contains(stderr.String(), location) {
+							t.Errorf("missing candidate %s: %s", location, stderr.String())
+						}
+					}
+				}
+				return
+			}
+			testMultiModuleEntry(t, entry, tc.want)
+		})
 	}
 }
 
