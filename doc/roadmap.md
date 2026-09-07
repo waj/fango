@@ -26,8 +26,55 @@ native code lives in its own `<Module>.native.go` and runs in both backends,
 instead of accreting in fangort behind templates and delegators. The proposal
 under iteration is in [roadmap-natives.md](roadmap-natives.md).
 
-Independent library versioning, package distribution, dependency fetching,
-and configurable source roots remain deferred.
+Independent library versioning, package distribution, and dependency fetching
+remain deferred; configurable source roots are entangled with the question
+below.
+
+## Unembedding the bundled sources
+
+`stdlib/*.fango`, `stdlib/*.native.go`, and `runtime/fangort/*.go` are
+compiled into the binary with `go:embed` and read back through
+`modules.BundledProvider`. Editing a bundled module therefore has no effect
+until the compiler is rebuilt. `go test` rebuilds from source and never sees
+it, so the friction lands entirely on manual iteration — and now that
+`Derive` is a bundled module an author has reason to open, that is a routine
+cost rather than a rare one. Embedding source should go.
+
+Two properties currently rest on it and need somewhere else to live. The
+compiler hard-codes canonical stdlib symbols — `Meta.Code`, `Meta.TypeInfo`,
+`Meta.infoOf`, `Basics.Eq`/`Ord`/`Show`/`Num`, `IO.print`/`readLine` — and
+`validateNatives` cross-checks every bundled `native` template against the
+interpreter registry, so a stdlib one version away from its binary is an
+internal error rather than a behavioral difference. Embedding makes that skew
+unrepresentable; anything else has to make it *detectable*, which means a
+version stamp and a real diagnostic. The `RESERVED MODULE` rule, which today
+rejects a local file named after a bundled module, needs rethinking at the
+same time: it exists to enforce the same invariant from the other side.
+
+There is a second cost worth collecting while the mechanism is open. Embedded
+source is still *source*: every invocation re-lexes, re-parses, re-resolves,
+re-infers, and re-elaborates the whole bundled prelude, and since P2 it also
+runs the derivers for every bundled type that derives. That work is identical
+on every run and is the floor under cold compile latency.
+
+The open decisions:
+
+- Whether bundled sources move to files beside the binary — restoring the
+  edit-and-run loop directly — or to a precompiled artifact of serialized
+  interfaces and Core that is loaded instead of re-checked, which also removes
+  the per-invocation re-check. The two are not exclusive: source on disk for
+  development, precompiled for distribution, is a third shape.
+- Whether `fangort` follows the same rule. It is a different case: generated
+  Go imports it, so the compiler must be able to materialize its source into
+  an arbitrary build directory, which is an argument for keeping that one
+  embedded whatever happens to the stdlib.
+- How a source root is spelled, and whether it is a development-only escape
+  hatch or the same mechanism the deferred package work will need. Answering
+  it as a product feature is more work; answering it as a debug flag risks
+  building the wrong thing twice.
+- What replaces the lockstep invariant: a version stamp checked at load, a
+  hash of the bundled tree recorded in `sources.json` alongside the per-file
+  hashes already there, or something stricter.
 
 ## Compile-time metaprogramming
 
