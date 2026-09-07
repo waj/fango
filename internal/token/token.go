@@ -11,6 +11,7 @@ const (
 	INT
 	FLOAT
 	STRING
+	CHAR
 	LIDENT // lower-case identifier
 	UIDENT // upper-case identifier (constructors, types, module names)
 
@@ -44,6 +45,7 @@ const (
 	LBRACE     // {
 	RBRACE     // }
 	UNDERSCORE // _ (wildcard pattern)
+	CARET      // ^ (pinned value pattern)
 
 	// Reserved keywords.
 	KwModule
@@ -69,7 +71,7 @@ const (
 )
 
 var kindNames = map[Kind]string{
-	EOF: "EOF", INT: "INT", FLOAT: "FLOAT", STRING: "STRING",
+	EOF: "EOF", INT: "INT", FLOAT: "FLOAT", STRING: "STRING", CHAR: "CHAR",
 	LIDENT: "LIDENT", UIDENT: "UIDENT",
 	EQ: "EQ", PLUS: "PLUS", MINUS: "MINUS", STAR: "STAR", SLASH: "SLASH",
 	LPAREN: "LPAREN", RPAREN: "RPAREN", COMMA: "COMMA", DOT: "DOT", DOTDOT: "DOTDOT",
@@ -77,7 +79,7 @@ var kindNames = map[Kind]string{
 	LT: "LT", GT: "GT", LTEQ: "LTEQ", GTEQ: "GTEQ",
 	ANDAND: "ANDAND", OROR: "OROR",
 	ARROW: "ARROW", BACKSLASH: "BACKSLASH", COLON: "COLON", PIPE: "PIPE",
-	LBRACE: "LBRACE", RBRACE: "RBRACE", UNDERSCORE: "UNDERSCORE",
+	LBRACE: "LBRACE", RBRACE: "RBRACE", UNDERSCORE: "UNDERSCORE", CARET: "CARET",
 	KwModule: "module", KwImport: "import", KwAs: "as", KwExposing: "exposing", KwLet: "let", KwIn: "in",
 	KwIf: "if", KwThen: "then", KwElse: "else", KwCase: "case", KwOf: "of",
 	KwType: "type", KwEffect: "effect", KwHandle: "handle", KwResume: "resume",

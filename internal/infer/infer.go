@@ -73,22 +73,24 @@ func (e *Env) Has(name string) bool             { _, ok := e.vars[name]; return 
 // supply, the accumulated substitution, and per-node solved types. The REPL
 // keeps one Checker across many inputs; batch compilation uses one per run.
 type Checker struct {
-	Classes         map[string]*types.ClassInfo
-	Methods         map[string]*types.MethodInfo
-	Instances       []*InstanceInfo
-	InstanceImports map[string]map[string]bool
-	CurrentOwner    string
-	PendingPreds    []types.Pred
-	ExprSchemes     map[ast.Expr]types.Scheme
-	Desugared       map[ast.Expr]ast.Expr
-	PreludeInfos    []DeclInfo
-	Aliases         map[string]string
-	Sup             *types.Supply
-	B               *types.Builtins
-	Env             *Env
-	Sub             Subst
-	ExprTypes       map[ast.Expr]types.Type
-	RecordUses      map[ast.Expr]*types.ADTInfo
+	Classes           map[string]*types.ClassInfo
+	Methods           map[string]*types.MethodInfo
+	Instances         []*InstanceInfo
+	InstanceImports   map[string]map[string]bool
+	CurrentOwner      string
+	PendingPreds      []types.Pred
+	ExprSchemes       map[ast.Expr]types.Scheme
+	Desugared         map[ast.Expr]ast.Expr
+	PreludeInfos      []DeclInfo
+	Aliases           map[string]string
+	Sup               *types.Supply
+	B                 *types.Builtins
+	Env               *Env
+	Sub               Subst
+	ExprTypes         map[ast.Expr]types.Type
+	RecordUses        map[ast.Expr]*types.ADTInfo
+	RecordPatternUses map[*ast.PRecord]*types.ADTInfo
+	PinExprs          map[*ast.PPin]*ast.Var
 
 	// Ctors is the constructor table (doc/design.md, "Type inference"), keyed by constructor name —
 	// names are unique per module (types and constructors live in separate
@@ -159,21 +161,24 @@ type Checker struct {
 func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 	ck := &Checker{
 		Classes: map[string]*types.ClassInfo{}, Methods: map[string]*types.MethodInfo{},
-		ExprSchemes: map[ast.Expr]types.Scheme{},
-		Desugared:   map[ast.Expr]ast.Expr{},
-		Aliases:     map[string]string{},
-		Sup:         sup,
-		B:           b,
-		Env:         env,
-		Sub:         Subst{},
-		ExprTypes:   map[ast.Expr]types.Type{},
-		RecordUses:  map[ast.Expr]*types.ADTInfo{},
-		Ctors:       map[string]*types.CtorInfo{},
-		ADTs:        map[int]*types.ADTInfo{},
+		ExprSchemes:       map[ast.Expr]types.Scheme{},
+		Desugared:         map[ast.Expr]ast.Expr{},
+		Aliases:           map[string]string{},
+		Sup:               sup,
+		B:                 b,
+		Env:               env,
+		Sub:               Subst{},
+		ExprTypes:         map[ast.Expr]types.Type{},
+		RecordUses:        map[ast.Expr]*types.ADTInfo{},
+		RecordPatternUses: map[*ast.PRecord]*types.ADTInfo{},
+		PinExprs:          map[*ast.PPin]*ast.Var{},
+		Ctors:             map[string]*types.CtorInfo{},
+		ADTs:              map[int]*types.ADTInfo{},
 		TypeNames: map[string]types.Type{
 			"Int":    b.Int,
 			"Float":  b.Float,
 			"String": b.String,
+			"Char":   b.Char,
 			"Bool":   b.Bool,
 			"()":     b.Unit,
 		},
@@ -849,14 +854,15 @@ type recordUpdateObligation struct {
 }
 
 type generator struct {
-	ck         *Checker
-	locals     *blockScope
-	cs         []Constraint
-	errs       []diag.Error
-	ambient    types.Row
-	resumeType types.Type
-	preds      []predObligation
-	records    []*recordObligation
+	ck          *Checker
+	locals      *blockScope
+	cs          []Constraint
+	errs        []diag.Error
+	ambient     types.Row
+	resumeType  types.Type
+	preds       []predObligation
+	records     []*recordObligation
+	patternPins *blockScope
 }
 
 func (g *generator) isDefaultPrint(op *types.EffectOp) bool {
@@ -897,6 +903,8 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		ty = g.ck.B.Float
 	case *ast.StringLit:
 		ty = g.ck.B.String
+	case *ast.CharLit:
+		ty = g.ck.B.Char
 	case *ast.UnitLit:
 		ty = g.ck.B.Unit
 	case *ast.Var:
@@ -1732,7 +1740,10 @@ func (g *generator) caseExpr(e *ast.Case) types.Type {
 		br := &e.Branches[i]
 		scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
 		g.locals = scope
+		oldPins := g.patternPins
+		g.patternPins = scope.parent
 		patTy := g.pattern(br.Pattern, scope)
+		g.patternPins = oldPins
 		g.cs = append(g.cs, Constraint{
 			Left: patTy, Right: scrutTy, Span: br.Pattern.Span(), Why: Why{Kind: WhyPattern},
 		})
@@ -1773,6 +1784,56 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 		return g.ck.B.Float
 	case *ast.PString:
 		return g.ck.B.String
+	case *ast.PChar:
+		return g.ck.B.Char
+	case *ast.PPin:
+		var sch types.Scheme
+		var ok bool
+		if g.patternPins != nil {
+			sch, ok = g.patternPins.lookup(p.Name)
+		}
+		if !ok {
+			sch, ok = g.ck.Env.Lookup(p.Name)
+		}
+		if !ok {
+			g.errs = append(g.errs, diag.Errorf(p.NameSpan, "NAMING ERROR", "I don't know an existing value named `%s` to pin here.", types.SurfaceName(p.Name)))
+			return g.ck.Sup.FreshVar(types.General)
+		}
+		v := &ast.Var{Name: p.Name, Sp: p.NameSpan}
+		ty := g.instantiateAt(sch, p.Sp, p.Name)
+		g.ck.ExprSchemes[v], g.ck.ExprTypes[v], g.ck.PinExprs[p] = sch, ty, v
+		g.preds = append(g.preds, predObligation{pred: g.ck.StandardPred("Eq", ty), span: p.Sp})
+		return ty
+	case *ast.PRecord:
+		named, ok := g.ck.TypeNames[p.Name].(*types.TCon)
+		var adt *types.ADTInfo
+		if ok {
+			adt = g.ck.ADTs[named.Unique]
+		}
+		if adt == nil || !adt.IsRecord() {
+			g.errs = append(g.errs, diag.Errorf(p.NameSpan, "UNKNOWN RECORD", "I don't know an exposed record type named `%s`.", types.SurfaceName(p.Name)))
+			for _, f := range p.Fields {
+				g.pattern(f.Pattern, scope)
+			}
+			return g.ck.Sup.FreshVar(types.General)
+		}
+		fieldTys, result := g.instantiateCtor(adt.Ctors[0])
+		seen := map[string]bool{}
+		for _, f := range p.Fields {
+			if seen[f.Name] {
+				g.errs = append(g.errs, diag.Errorf(f.NameSpan, "RECORD FIELDS", "The field `%s` appears more than once in this record pattern.", f.Name))
+			}
+			seen[f.Name] = true
+			ft := g.pattern(f.Pattern, scope)
+			idx, _ := adt.RecordField(f.Name)
+			if idx < 0 {
+				g.errs = append(g.errs, diag.Errorf(f.NameSpan, "UNKNOWN FIELD", "Record `%s` has no field named `%s`.", types.SurfaceName(adt.Con.Name), f.Name))
+			} else {
+				g.cs = append(g.cs, Constraint{Left: ft, Right: fieldTys[idx], Span: f.Pattern.Span(), Why: Why{Kind: WhyPattern}})
+			}
+		}
+		g.ck.RecordPatternUses[p] = adt
+		return result
 	case *ast.PCtor:
 		info, ok := g.ck.Ctors[p.Name]
 		if !ok {

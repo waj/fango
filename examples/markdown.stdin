@@ -1,0 +1,10 @@
+# Fango & records
+
+Unicode: café 二.
+This is *small* and <safe>.
+
+- first *item*
+- second & final
+
+###### Done
+unmatched * stays literal

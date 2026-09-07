@@ -401,7 +401,7 @@ func (s *Supply) NextUnique() int {
 // session supply. The builtins are all reachable from current surface syntax;
 // exist so the registry's shape is final.
 type Builtins struct {
-	Int, Float, String, Bool, Unit *TCon
+	Int, Float, String, Char, Bool, Unit *TCon
 }
 
 func NewBuiltins(s *Supply) *Builtins {
@@ -412,6 +412,7 @@ func NewBuiltins(s *Supply) *Builtins {
 		Int:    mk("Int"),
 		Float:  mk("Float"),
 		String: mk("String"),
+		Char:   mk("Char"),
 		Bool:   mk("Bool"),
 		Unit:   mk("()"), // displayed Elm-style; identity is the Unique, not the name
 	}

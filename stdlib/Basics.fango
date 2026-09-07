@@ -103,6 +103,24 @@ boolEq = native "$1 == $2"
 boolShow : Bool -> String
 boolShow = native "fangort.ShowBool($1)"
 
+charEq : Char -> Char -> Bool
+charEq = native "$1 == $2"
+
+charLt : Char -> Char -> Bool
+charLt = native "$1 < $2"
+
+charGt : Char -> Char -> Bool
+charGt = native "$1 > $2"
+
+charLe : Char -> Char -> Bool
+charLe = native "$1 <= $2"
+
+charGe : Char -> Char -> Bool
+charGe = native "$1 >= $2"
+
+charShow : Char -> String
+charShow = native "fangort.ShowChar($1)"
+
 floatFromInt : Int -> Float
 floatFromInt = native "float64($1)"
 
@@ -161,6 +179,18 @@ instance Eq Bool
 
 instance Show Bool
     show x = boolShow x
+
+instance Eq Char
+    eq x y = charEq x y
+
+instance Ord Char
+    lt x y = charLt x y
+    gt x y = charGt x y
+    le x y = charLe x y
+    ge x y = charGe x y
+
+instance Show Char
+    show x = charShow x
 
 instance Eq ()
     eq x y = True

@@ -1,0 +1,16 @@
+import Maybe exposing (Maybe(..))
+import String
+
+main() =
+    print (String.length "aλ二")
+    print (String.byteLength "aλ二")
+    print (String.slice 1 3 "aλ二z")
+    print (String.slice (-4) 99 "aλ二")
+    print (String.startsWith "aλ" "aλ二")
+    print (String.fromChar '二')
+    case String.uncons "λ二" of
+        Nothing -> print "missing"
+        Just (String.Uncons { first = first, rest = remaining }) ->
+            print first
+            print remaining
+            ()

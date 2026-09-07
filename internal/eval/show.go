@@ -26,6 +26,8 @@ func Show(v Value, ty types.Type, b *types.Builtins) string {
 			return fangort.ShowFloat(v.(float64))
 		case b.String.Unique:
 			return fangort.ShowStringLiteral(v.(string))
+		case b.Char.Unique:
+			return fangort.ShowCharLiteral(v.(rune))
 		case b.Bool.Unique:
 			return fangort.ShowBool(v.(bool))
 		case b.Unit.Unique:
@@ -61,6 +63,8 @@ func showFieldValue(f Value) string {
 		return fangort.ShowFloat(f)
 	case string:
 		return fangort.ShowStringLiteral(f)
+	case rune:
+		return fangort.ShowCharLiteral(f)
 	case bool:
 		return fangort.ShowBool(f)
 	case struct{}:
@@ -79,6 +83,9 @@ func showFieldValue(f Value) string {
 func ShowForPrint(v Value, ty types.Type, b *types.Builtins) string {
 	if con, ok := ty.(*types.TCon); ok && con.Unique == b.String.Unique {
 		return fangort.ShowString(v.(string))
+	}
+	if con, ok := ty.(*types.TCon); ok && con.Unique == b.Char.Unique {
+		return fangort.ShowChar(v.(rune))
 	}
 	return Show(v, ty, b)
 }

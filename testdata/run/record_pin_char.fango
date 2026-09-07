@@ -1,0 +1,16 @@
+type Item = { marker : Char, count : Int, label : String } deriving (Eq, Show)
+
+expected = 'λ'
+
+classify : Item -> String
+classify item =
+    case item of
+        Item { count = 0 } -> "empty"
+        Item { marker = ^expected } -> item.label
+        _ -> "other"
+
+main() =
+    print (classify (Item { marker = 'x', count = 0, label = "zero" }))
+    print (classify (Item { label = "unicode", marker = 'λ', count = 2 }))
+    print (classify (Item { marker = '二', count = 1, label = "two" }))
+    print (show (Item { marker = 'λ', count = 3, label = "line" }))

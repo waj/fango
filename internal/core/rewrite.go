@@ -48,6 +48,10 @@ func (r rewriter) expr(e Expr) Expr {
 		n := *e
 		n.Ty = r.typ(e.Ty)
 		out = &n
+	case *CharLit:
+		n := *e
+		n.Ty = r.typ(e.Ty)
+		out = &n
 	case *BoolLit:
 		n := *e
 		n.Ty = r.typ(e.Ty)

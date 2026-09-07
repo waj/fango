@@ -1,0 +1,3 @@
+empty = ''
+many = 'ab'
+escape = '\q'

@@ -25,6 +25,14 @@ func TestUnescape(t *testing.T) {
 	}
 }
 
+func TestInvalidUTF8Source(t *testing.T) {
+	f := source.NewFile("bad.fango", []byte{'x', ' ', '=', ' ', 0xff})
+	_, errs := Lex(f)
+	if len(errs) != 1 || errs[0].Title != "INVALID UTF-8" {
+		t.Fatalf("Lex invalid UTF-8 errors = %#v", errs)
+	}
+}
+
 func TestModulePunctuationAndKeywords(t *testing.T) {
 	f := source.NewFile("modules.fango", []byte("import Geometry.Point as P exposing (Point(..))"))
 	toks, errs := Lex(f)

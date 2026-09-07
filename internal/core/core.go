@@ -65,6 +65,11 @@ type StringLit struct {
 	Ty  types.Type
 }
 
+type CharLit struct {
+	Val rune
+	Ty  types.Type
+}
+
 type UnitLit struct{ Ty types.Type }
 
 // BoolLit is permanent, not an interim ADT stand-in: doc/design.md, "Go backend and runtime" special-cases
@@ -230,7 +235,7 @@ type CtorCase struct {
 	Tree  Tree
 }
 
-// SwitchLit discriminates on literal equality (Int, Float, or String
+// SwitchLit discriminates on literal equality (Int, Float, String, or Char
 // scrutinee). Default is always non-nil: literals never exhaust a type.
 type SwitchLit struct {
 	Scrut   string
@@ -239,7 +244,7 @@ type SwitchLit struct {
 }
 
 type LitCase struct {
-	Lit  Expr // *IntLit, *FloatLit, or *StringLit
+	Lit  Expr // *IntLit, *FloatLit, *StringLit, or *CharLit
 	Tree Tree
 }
 
@@ -250,6 +255,7 @@ func (*SwitchLit) isTree()  {}
 func (*IntLit) isExpr()     {}
 func (*FloatLit) isExpr()   {}
 func (*StringLit) isExpr()  {}
+func (*CharLit) isExpr()    {}
 func (*UnitLit) isExpr()    {}
 func (*BoolLit) isExpr()    {}
 func (*VarRef) isExpr()     {}
@@ -269,6 +275,7 @@ func (*Case) isExpr()       {}
 func (e *IntLit) Type() types.Type     { return e.Ty }
 func (e *FloatLit) Type() types.Type   { return e.Ty }
 func (e *StringLit) Type() types.Type  { return e.Ty }
+func (e *CharLit) Type() types.Type    { return e.Ty }
 func (e *UnitLit) Type() types.Type    { return e.Ty }
 func (e *BoolLit) Type() types.Type    { return e.Ty }
 func (e *VarRef) Type() types.Type     { return e.Ty }

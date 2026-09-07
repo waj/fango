@@ -207,6 +207,18 @@ func DumpPattern(p Pattern) string {
 		return fmt.Sprintf("(pfloat %s)", strconv.FormatFloat(p.Value, 'g', -1, 64))
 	case *PString:
 		return fmt.Sprintf("(pstring %q)", p.Value)
+	case *PChar:
+		return fmt.Sprintf("(pchar %q)", p.Value)
+	case *PPin:
+		return fmt.Sprintf("(ppin %s)", p.Name)
+	case *PRecord:
+		var b strings.Builder
+		fmt.Fprintf(&b, "(precord %s", p.Name)
+		for _, f := range p.Fields {
+			fmt.Fprintf(&b, " (%s %s)", f.Name, DumpPattern(f.Pattern))
+		}
+		b.WriteString(")")
+		return b.String()
 	case *PCtor:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(pctor %s", p.Name)
@@ -228,6 +240,8 @@ func DumpExpr(e Expr) string {
 		return fmt.Sprintf("(float %s)", strconv.FormatFloat(e.Value, 'g', -1, 64))
 	case *StringLit:
 		return fmt.Sprintf("(string %q)", e.Value)
+	case *CharLit:
+		return fmt.Sprintf("(char %q)", e.Value)
 	case *UnitLit:
 		return "(unit)"
 	case *Var:

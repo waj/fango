@@ -200,7 +200,7 @@ func (s *scalarSpecializer) redirect(e core.Expr) core.Expr {
 // Calls and global cells retain strict, evaluate-once Let bindings.
 func duplicable(e core.Expr) bool {
 	switch e := e.(type) {
-	case *core.IntLit, *core.FloatLit, *core.StringLit, *core.BoolLit, *core.UnitLit, *core.Lambda:
+	case *core.IntLit, *core.FloatLit, *core.StringLit, *core.CharLit, *core.BoolLit, *core.UnitLit, *core.Lambda:
 		return true
 	case *core.VarRef:
 		return e.Local

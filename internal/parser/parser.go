@@ -1028,7 +1028,7 @@ func (p *parser) parseApply() ast.Expr {
 	}
 	for {
 		switch p.peekInExpr().Kind {
-		case token.INT, token.FLOAT, token.STRING, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.KwResume:
+		case token.INT, token.FLOAT, token.STRING, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.KwResume:
 			arg := p.parsePostfixAtom()
 			if arg == nil {
 				return nil
@@ -1244,6 +1244,13 @@ func (p *parser) parsePattern() ast.Pattern {
 			p.errorAt(sp, "SYNTAX PROBLEM", "A constructor pattern must end in a capitalized name.")
 			return nil
 		}
+		if p.peekInExpr().Kind == token.LBRACE {
+			fields, end, ok := p.parseRecordPatternFields()
+			if !ok {
+				return nil
+			}
+			return &ast.PRecord{Name: name, NameSpan: sp, Fields: fields, Sp: sp.Merge(end)}
+		}
 		var args []ast.Pattern
 		for isPatternAtomStart(p.peekInExpr().Kind) {
 			a := p.parsePatternAtom()
@@ -1259,8 +1266,8 @@ func (p *parser) parsePattern() ast.Pattern {
 
 func isPatternAtomStart(k token.Kind) bool {
 	switch k {
-	case token.UNDERSCORE, token.LIDENT, token.UIDENT,
-		token.INT, token.FLOAT, token.STRING, token.LPAREN:
+	case token.UNDERSCORE, token.CARET, token.LIDENT, token.UIDENT,
+		token.INT, token.FLOAT, token.STRING, token.CHAR, token.LPAREN:
 		return true
 	}
 	return false
@@ -1281,6 +1288,13 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 			p.errorAt(sp, "SYNTAX PROBLEM", "A constructor pattern must end in a capitalized name.")
 			return nil
 		}
+		if p.peekInExpr().Kind == token.LBRACE {
+			fields, end, ok := p.parseRecordPatternFields()
+			if !ok {
+				return nil
+			}
+			return &ast.PRecord{Name: name, NameSpan: sp, Fields: fields, Sp: sp.Merge(end)}
+		}
 		return &ast.PCtor{Name: name, NameSpan: sp}
 	case token.INT:
 		p.next()
@@ -1293,6 +1307,24 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 	case token.STRING:
 		p.next()
 		return &ast.PString{Value: lexer.Unescape(t.Text), Sp: t.Span}
+	case token.CHAR:
+		p.next()
+		return &ast.PChar{Value: lexer.UnescapeChar(t.Text), Sp: t.Span}
+	case token.CARET:
+		caret := p.next()
+		n := p.peekInExpr()
+		if n.Kind == token.LIDENT {
+			p.next()
+			return &ast.PPin{Name: n.Text, NameSpan: n.Span, Sp: caret.Span.Merge(n.Span)}
+		}
+		if n.Kind == token.UIDENT {
+			name, final, sp := p.parseQualifiedName()
+			if final == token.LIDENT {
+				return &ast.PPin{Name: name, NameSpan: sp, Sp: caret.Span.Merge(sp)}
+			}
+		}
+		p.errorAt(n.Span, "SYNTAX PROBLEM", "A pinned pattern needs an existing lowercase value name after `^`.")
+		return nil
 	case token.MINUS:
 		p.next()
 		nt := p.peekInExpr()
@@ -1333,6 +1365,41 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 			"I was expecting a pattern here, like `Just x`, a literal, or `_`.")
 		return nil
 	}
+}
+
+func (p *parser) parseRecordPatternFields() ([]ast.RecordPatternField, source.Span, bool) {
+	p.next()
+	if p.peek().Kind == token.RBRACE {
+		rb := p.next()
+		return nil, rb.Span, true
+	}
+	var fields []ast.RecordPatternField
+	for {
+		name := p.peekInExpr()
+		if name.Kind != token.LIDENT {
+			p.errorAt(name.Span, "SYNTAX PROBLEM", "I expect a lowercase record field name.")
+			return nil, source.Span{}, false
+		}
+		p.next()
+		if !p.expect(token.EQ, "I expect `=` after the record field name in this pattern.") {
+			return nil, source.Span{}, false
+		}
+		pat := p.parsePattern()
+		if pat == nil {
+			return nil, source.Span{}, false
+		}
+		fields = append(fields, ast.RecordPatternField{Name: name.Text, NameSpan: name.Span, Pattern: pat})
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.next()
+	}
+	if p.peek().Kind != token.RBRACE {
+		p.errorAt(p.peek().Span, "SYNTAX PROBLEM", "I expect `}` to close this record pattern.")
+		return nil, source.Span{}, false
+	}
+	rb := p.next()
+	return fields, rb.Span, true
 }
 
 // parseIf parses `if condition then a else b`. The `if` token's column
@@ -1407,6 +1474,9 @@ func (p *parser) parseAtom() ast.Expr {
 	case token.STRING:
 		p.next()
 		return &ast.StringLit{Value: lexer.Unescape(t.Text), Sp: t.Span}
+	case token.CHAR:
+		p.next()
+		return &ast.CharLit{Value: lexer.UnescapeChar(t.Text), Sp: t.Span}
 	case token.LIDENT:
 		p.next()
 		return &ast.Var{Name: t.Text, Sp: t.Span}

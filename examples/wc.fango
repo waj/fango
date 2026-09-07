@@ -22,7 +22,7 @@ count counts =
             next = { counts |
                 lines = counts.lines + lineCount line,
                 words = counts.words + wordsIn line,
-                bytes = counts.bytes + String.length line.text + String.length line.ending
+                bytes = counts.bytes + String.byteLength line.text + String.byteLength line.ending
             }
             count next
 

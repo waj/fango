@@ -1,0 +1,13 @@
+1:1 LIDENT newline
+1:9 EQ =
+1:11 CHAR '\n'
+2:1 LIDENT quote
+2:7 EQ =
+2:9 CHAR '\''
+3:1 LIDENT slash
+3:7 EQ =
+3:9 CHAR '\\'
+4:1 LIDENT lambda
+4:8 EQ =
+4:10 CHAR 'λ'
+5:1 EOF

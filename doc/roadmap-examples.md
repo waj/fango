@@ -24,12 +24,12 @@ Forces the core stdlib: strings, `Maybe`, list combinators.
   awaits parameterized handler state), plus loop-by-recursion ergonomics.
 - [x] **Word/line/byte count (`wc` clone) over stdin** — pipe any text through
   it. Forced `readLine : () ->{IO} Maybe IO.Line` with exact terminators,
-  ASCII-whitespace `String.words`, byte-oriented `String.length`,
+  ASCII-whitespace `String.words`, `String.byteLength`,
   `List.foldl`, and nominal records with projection and functional update for
   carrying the three counters.
-- [ ] **Markdown-lite to HTML converter** — headings, emphasis, lists,
-  paragraphs. Forces substring and prefix operations, character-level string
-  processing, and efficient string building.
+- [x] **Markdown-lite to HTML converter** — headings, emphasis, lists,
+  paragraphs. Forced Unicode-scalar `Char`, substring and prefix operations,
+  partial record and pinned-value patterns, and an immutable chunk builder.
 
 ## Tier 2 — data structures, files, and OS surface
 

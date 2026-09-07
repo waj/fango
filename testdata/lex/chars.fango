@@ -1,0 +1,4 @@
+newline = '\n'
+quote = '\''
+slash = '\\'
+lambda = 'λ'

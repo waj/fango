@@ -34,5 +34,11 @@ func installScalarInstances(t map[string]Spec) {
 	t["Basics.stringShow"] = Spec{Arity: 1, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return fangort.ShowString(args[0].(string)), nil }}
 	t["Basics.boolEq"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.EvalBasics("eq", args[0], args[1], nil), nil }}
 	t["Basics.boolShow"] = Spec{Arity: 1, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return fangort.ShowBool(args[0].(bool)), nil }}
+	t["Basics.charEq"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return args[0].(rune) == args[1].(rune), nil }}
+	t["Basics.charLt"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return args[0].(rune) < args[1].(rune), nil }}
+	t["Basics.charGt"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return args[0].(rune) > args[1].(rune), nil }}
+	t["Basics.charLe"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return args[0].(rune) <= args[1].(rune), nil }}
+	t["Basics.charGe"] = Spec{Arity: 2, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return args[0].(rune) >= args[1].(rune), nil }}
+	t["Basics.charShow"] = Spec{Arity: 1, Foldable: false, Eval: func(_ *Runtime, args []any) (any, error) { return fangort.ShowChar(args[0].(rune)), nil }}
 	t["Basics.floatFromInt"] = Spec{Arity: 1, Foldable: true, Eval: func(_ *Runtime, args []any) (any, error) { return float64(args[0].(int64)), nil }}
 }

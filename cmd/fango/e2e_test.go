@@ -90,6 +90,11 @@ func TestWcExample(t *testing.T) {
 	runDifferentialCase(t, filepath.Join("..", "..", "examples", "wc.fango"))
 }
 
+func TestMarkdownExample(t *testing.T) {
+	t.Parallel()
+	runDifferentialCase(t, filepath.Join("..", "..", "examples", "markdown.fango"))
+}
+
 // The Core interpreter runs fango programs inside this process, against the
 // same fangort globals a compiled program owns outright — the PRNG cell
 // behind Random above all, which is process-global by design because one

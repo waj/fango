@@ -37,6 +37,7 @@ func (el *elab) caseExpr(e *ast.Case, ty types.Type) core.Expr {
 	witnessMatrix := make([][]ast.Pattern, len(e.Branches))
 	for i := range e.Branches {
 		br := &e.Branches[i]
+		br.Pattern = el.lowerRecordPattern(br.Pattern)
 		n := el.pushPatternVars(br.Pattern)
 		m.bodies[i] = el.expr(br.Body)
 		el.popScope(n)
@@ -75,6 +76,36 @@ func (el *elab) caseExpr(e *ast.Case, ty types.Type) core.Expr {
 		return &core.Let{Name: bind, Rhs: scrut, Body: leaf.Body, Ty: leaf.Body.Type()}
 	}
 	return &core.Case{Scrut: scrut, Bind: bind, Tree: tree, Ty: ty}
+}
+
+func (el *elab) lowerRecordPattern(p ast.Pattern) ast.Pattern {
+	switch p := p.(type) {
+	case *ast.PCtor:
+		args := make([]ast.Pattern, len(p.Args))
+		for i, a := range p.Args {
+			args[i] = el.lowerRecordPattern(a)
+		}
+		return &ast.PCtor{Name: p.Name, NameSpan: p.NameSpan, Args: args}
+	case *ast.PRecord:
+		adt := el.ck.RecordPatternUses[p]
+		if adt == nil {
+			return p
+		}
+		provided := map[string]ast.Pattern{}
+		for _, f := range p.Fields {
+			provided[f.Name] = el.lowerRecordPattern(f.Pattern)
+		}
+		args := make([]ast.Pattern, len(adt.RecordFields))
+		for i, f := range adt.RecordFields {
+			args[i] = provided[f.Name]
+			if args[i] == nil {
+				args[i] = &ast.PWildcard{Sp: p.Sp}
+			}
+		}
+		return &ast.PCtor{Name: adt.Ctors[0].Name, NameSpan: p.NameSpan, Args: args}
+	default:
+		return p
+	}
 }
 
 // occurrence is one already-bound scrutinee position: a variable name the
@@ -149,6 +180,10 @@ func (el *elab) pushPatternVars(p ast.Pattern) int {
 			for _, a := range p.Args {
 				walk(a)
 			}
+		case *ast.PRecord:
+			for _, f := range p.Fields {
+				walk(f.Pattern)
+			}
 		}
 	}
 	walk(p)
@@ -183,7 +218,7 @@ func (m *matcher) witness(tys []types.Type, matrix [][]ast.Pattern) []string {
 			spec := specializeWitness(c, matrix)
 			fields := instFields(adt, c, tys[0])
 			if w := m.witness(append(append([]types.Type{}, fields...), tys[1:]...), spec); w != nil {
-				head := renderCtor(c.Name, w[:len(c.Fields)])
+				head := renderCtor(adt, c, w[:len(c.Fields)])
 				return append([]string{head}, w[len(c.Fields):]...)
 			}
 		}
@@ -206,7 +241,7 @@ func (m *matcher) witness(tys []types.Type, matrix [][]ast.Pattern) []string {
 	if adt != nil {
 		for _, c := range adt.Ctors {
 			if !heads[c.Name] {
-				head = renderCtor(c.Name, underscores(len(c.Fields)))
+				head = renderCtor(adt, c, underscores(len(c.Fields)))
 				break
 			}
 		}
@@ -231,7 +266,15 @@ func specializeWitness(c *types.CtorInfo, matrix [][]ast.Pattern) [][]ast.Patter
 	return out
 }
 
-func renderCtor(name string, fields []string) string {
+func renderCtor(adt *types.ADTInfo, ctor *types.CtorInfo, fields []string) string {
+	if adt.IsRecord() {
+		parts := make([]string, len(fields))
+		for i, field := range fields {
+			parts[i] = adt.RecordFields[i].Name + " = " + field
+		}
+		return types.SurfaceName(adt.Con.Name) + " { " + strings.Join(parts, ", ") + " }"
+	}
+	name := ctor.Name
 	if len(fields) == 0 {
 		return name
 	}
@@ -456,6 +499,8 @@ func (m *matcher) litExpr(p ast.Pattern, ty types.Type) core.Expr {
 		return &core.FloatLit{Val: p.Value, Ty: ty}
 	case *ast.PString:
 		return &core.StringLit{Val: p.Value, Ty: ty}
+	case *ast.PChar:
+		return &core.CharLit{Val: p.Value, Ty: ty}
 	default:
 		panic(fmt.Sprintf("elaborate: pattern %T is not a literal", p))
 	}

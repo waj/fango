@@ -291,6 +291,8 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		return &core.FloatLit{Val: e.Value, Ty: ty}
 	case *ast.StringLit:
 		return &core.StringLit{Val: e.Value, Ty: ty}
+	case *ast.CharLit:
+		return &core.CharLit{Val: e.Value, Ty: ty}
 	case *ast.UnitLit:
 		return &core.UnitLit{Ty: ty}
 	case *ast.Var:

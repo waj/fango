@@ -1,20 +1,48 @@
-module String exposing (length, toInt, words)
+module String exposing (Uncons(..), byteLength, fromChar, length, slice, startsWith, toInt, uncons, words)
 
 import Basics
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 
--- length counts bytes, not characters.
+type Uncons = { first : Char, rest : String }
+
+-- length counts Unicode scalar values.
 length : String -> Int
 length = native "fangort.StringLength($1)"
+
+byteLength : String -> Int
+byteLength = native "fangort.StringByteLength($1)"
 
 -- byteAt is private: the byte at a 0-based index, or -1 out of range.
 byteAt : Int -> String -> Int
 byteAt = native "fangort.ByteAt($1, $2)"
 
--- slice is private and uses validated half-open byte indices.
+-- byteSlice is private and uses validated half-open byte indices.
+byteSlice : Int -> Int -> String -> String
+byteSlice = native "fangort.StringByteSlice($1, $2, $3)"
+
+-- slice uses clamped half-open Unicode-scalar indices.
 slice : Int -> Int -> String -> String
 slice = native "fangort.StringSlice($1, $2, $3)"
+
+firstChar : String -> Char
+firstChar = native "fangort.StringFirst($1)"
+
+restString : String -> String
+restString = native "fangort.StringRest($1)"
+
+fromChar : Char -> String
+fromChar = native "fangort.StringFromChar($1)"
+
+uncons : String -> Maybe Uncons
+uncons text =
+    if text == "" then
+        Nothing
+    else
+        Just (Uncons { first = firstChar text, rest = restString text })
+
+startsWith : String -> String -> Bool
+startsWith prefix text = slice 0 (length prefix) text == prefix
 
 -- Space, tab, newline, carriage return, vertical tab, and form feed.
 isSpace : Int -> Bool
@@ -53,11 +81,11 @@ wordsHelp text index size result =
     if start >= size then
         reverseWords result Nil
     else
-        wordsHelp text end size (Cons (slice start end text) result)
+        wordsHelp text end size (Cons (byteSlice start end text) result)
 
 -- words splits on ASCII whitespace while preserving every non-whitespace byte.
 words : String -> List String
-words text = wordsHelp text 0 (length text) Nil
+words text = wordsHelp text 0 (byteLength text) Nil
 
 -- Digits accumulate as a non-positive value so the most negative Int parses.
 -- finish rejects a non-negative result that only fits when negative; the
@@ -89,7 +117,7 @@ toIntHelp text index size negative acc =
 -- Nothing.
 toInt : String -> Maybe Int
 toInt text =
-    size = length text
+    size = byteLength text
     first = byteAt 0 text
     start =
         if first == 45 || first == 43 then

@@ -1,0 +1,5 @@
+type Item = { count : Int }
+
+main =
+    case Item { count = 1 } of
+        Item { missing = _ } -> 1

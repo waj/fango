@@ -2,6 +2,7 @@ package elaborate
 
 import (
 	"fmt"
+
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/types"
@@ -12,9 +13,17 @@ func (el *elab) overloadedPattern(p ast.Pattern) bool {
 	case *ast.PInt:
 		t := el.ck.Sub.Apply(el.ck.PatTypes[p])
 		return el.unique(t) != el.ck.B.Int.Unique && el.unique(t) != el.ck.B.Float.Unique
+	case *ast.PPin:
+		return true
 	case *ast.PCtor:
 		for _, a := range p.Args {
 			if el.overloadedPattern(a) {
+				return true
+			}
+		}
+	case *ast.PRecord:
+		for _, f := range p.Fields {
+			if el.overloadedPattern(f.Pattern) {
 				return true
 			}
 		}
@@ -86,7 +95,12 @@ func (m *matcher) orderedPattern(p ast.Pattern, occ occurrence, success, failure
 		eqTy := &types.TFun{Arg: occ.ty, Ret: &types.TFun{Arg: occ.ty, Ret: el.ck.B.Bool}}
 		cond := el.valueApp(el.valueApp(el.methodValue(el.ck.Methods["Basics.eq"], eqTy), ref), lit)
 		return &core.Guard{Cond: cond, Then: success, Else: failure}
-	case *ast.PFloat, *ast.PString:
+	case *ast.PPin:
+		pinned := el.expr(el.ck.PinExprs[p])
+		eqTy := &types.TFun{Arg: occ.ty, Ret: &types.TFun{Arg: occ.ty, Ret: el.ck.B.Bool}}
+		cond := el.valueApp(el.valueApp(el.methodValue(el.ck.Methods["Basics.eq"], eqTy), ref), pinned)
+		return &core.Guard{Cond: cond, Then: success, Else: failure}
+	case *ast.PFloat, *ast.PString, *ast.PChar:
 		return &core.SwitchLit{Scrut: occ.name, Cases: []core.LitCase{{Lit: m.litExpr(p, occ.ty), Tree: success}}, Default: failure}
 	}
 	panic("unknown ordered pattern")

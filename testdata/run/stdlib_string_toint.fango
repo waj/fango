@@ -18,3 +18,4 @@ main() =
     print (String.length "")
     print (String.length "hello")
     print (String.length "二")
+    print (String.byteLength "二")

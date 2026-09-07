@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/source"
@@ -23,6 +24,19 @@ type lexer struct {
 // Lex scans the entire file. The returned slice always ends with an EOF
 // token, even when there are errors.
 func Lex(f *source.File) ([]token.Token, []diag.Error) {
+	if !utf8.Valid(f.Content) {
+		at := 0
+		for at < len(f.Content) {
+			_, size := utf8.DecodeRune(f.Content[at:])
+			if size == 1 && f.Content[at] >= utf8.RuneSelf {
+				break
+			}
+			at += size
+		}
+		sp := source.Span{File: f, Start: at, End: at + 1}
+		return []token.Token{{Kind: token.EOF, Span: source.Span{File: f, Start: len(f.Content), End: len(f.Content)}}},
+			[]diag.Error{diag.Errorf(sp, "INVALID UTF-8", "Fango source files must be valid UTF-8.")}
+	}
 	l := &lexer{f: f}
 	l.run()
 	return l.toks, l.errs
@@ -42,6 +56,8 @@ func (l *lexer) run() {
 			l.lexNumber(start)
 		case c == '"':
 			l.lexString(start)
+		case c == '\'':
+			l.lexChar(start)
 		case isLower(c):
 			l.lexIdent(start, false)
 		case isUpper(c):
@@ -52,6 +68,54 @@ func (l *lexer) run() {
 			l.lexOperator(start)
 		}
 	}
+}
+
+func (l *lexer) lexChar(start int) {
+	l.pos++ // opening quote
+	if l.pos >= len(l.f.Content) || l.f.Content[l.pos] == '\n' || l.f.Content[l.pos] == '\r' {
+		l.charError(start, "A Char literal must contain exactly one Unicode scalar.")
+		return
+	}
+	if l.f.Content[l.pos] == '\\' {
+		l.pos++
+		if l.pos >= len(l.f.Content) || !strings.ContainsRune(`\\'ntr`, rune(l.f.Content[l.pos])) {
+			if l.pos < len(l.f.Content) {
+				l.pos++
+			}
+			for l.pos < len(l.f.Content) && l.f.Content[l.pos] != '\n' && l.f.Content[l.pos] != '\r' && l.f.Content[l.pos] != '\'' {
+				l.pos++
+			}
+			if l.pos < len(l.f.Content) && l.f.Content[l.pos] == '\'' {
+				l.pos++
+			}
+			l.charError(start, "Valid Char escapes are: \\\\  \\'  \\n  \\t  \\r")
+			return
+		}
+		l.pos++
+	} else {
+		_, size := utf8.DecodeRune(l.f.Content[l.pos:])
+		l.pos += size
+	}
+	if l.pos >= len(l.f.Content) || l.f.Content[l.pos] != '\'' {
+		for l.pos < len(l.f.Content) && l.f.Content[l.pos] != '\n' && l.f.Content[l.pos] != '\r' && l.f.Content[l.pos] != '\'' {
+			l.pos++
+		}
+		if l.pos < len(l.f.Content) && l.f.Content[l.pos] == '\'' {
+			l.pos++
+		}
+		l.charError(start, "A Char literal must contain exactly one Unicode scalar.")
+		return
+	}
+	l.pos++
+	l.emit(token.CHAR, start, l.pos)
+}
+
+func (l *lexer) charError(start int, message string) {
+	end := l.pos
+	if end <= start {
+		end = start + 1
+	}
+	l.errs = append(l.errs, diag.Errorf(source.Span{File: l.f, Start: start, End: end}, "INVALID CHAR", "%s", message))
 }
 
 func (l *lexer) skipSpaceAndComments() {
@@ -267,7 +331,25 @@ var oneCharOps = map[byte]token.Kind{
 	'/': token.SLASH, '(': token.LPAREN, ')': token.RPAREN, ',': token.COMMA,
 	'<': token.LT, '>': token.GT, ':': token.COLON, '|': token.PIPE,
 	'{': token.LBRACE, '}': token.RBRACE, '\\': token.BACKSLASH,
-	'.': token.DOT,
+	'.': token.DOT, '^': token.CARET,
+}
+
+func UnescapeChar(raw string) rune {
+	inside := raw[1 : len(raw)-1]
+	if inside[0] != '\\' {
+		r, _ := utf8.DecodeRuneInString(inside)
+		return r
+	}
+	switch inside[1] {
+	case 'n':
+		return '\n'
+	case 't':
+		return '\t'
+	case 'r':
+		return '\r'
+	default:
+		return rune(inside[1])
+	}
 }
 
 func (l *lexer) lexOperator(start int) {

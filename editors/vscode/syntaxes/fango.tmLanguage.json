@@ -261,6 +261,8 @@
         { "include": "#comments" },
         { "include": "#native_expr" },
         { "include": "#string" },
+        { "include": "#char" },
+        { "include": "#pin_pattern" },
         { "include": "#keywords" },
         { "include": "#return_clause" },
         { "include": "#booleans" },
@@ -335,6 +337,14 @@
         "2": { "name": "variable.other.member.fango" }
       }
     },
+    "pin_pattern": {
+      "match": "(\\^)((?:[A-Z][A-Za-z0-9_]*\\.)*)([a-z][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.operator.pin.fango" },
+        "2": { "name": "support.other.module.fango" },
+        "3": { "name": "variable.other.readwrite.fango" }
+      }
+    },
     "keywords": {
       "patterns": [
         {
@@ -401,6 +411,18 @@
         {
           "name": "invalid.illegal.escape.fango",
           "match": "\\\\."
+        }
+      ]
+    },
+    "char": {
+      "patterns": [
+        {
+          "name": "constant.character.fango",
+          "match": "'(?:\\\\[\\\\'ntr]|[^\\\\'\\r\\n])'"
+        },
+        {
+          "name": "invalid.illegal.char.fango",
+          "match": "'[^'\\r\\n]*'"
         }
       ]
     },

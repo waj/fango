@@ -43,12 +43,19 @@ var Table = func() map[string]Spec {
 	t["String.length"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return stdlib.StringLength(args[0].(string)), nil
 	}}
+	t["String.byteLength"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.StringByteLength(args[0].(string)), nil }}
 	t["String.byteAt"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
 		return stdlib.ByteAt(args[0].(int64), args[1].(string)), nil
 	}}
 	t["String.slice"] = Spec{Arity: 3, Eval: func(_ *Runtime, args []any) (any, error) {
 		return stdlib.StringSlice(args[0].(int64), args[1].(int64), args[2].(string)), nil
 	}}
+	t["String.byteSlice"] = Spec{Arity: 3, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.StringByteSlice(args[0].(int64), args[1].(int64), args[2].(string)), nil
+	}}
+	t["String.firstChar"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.StringFirst(args[0].(string)), nil }}
+	t["String.restString"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.StringRest(args[0].(string)), nil }}
+	t["String.fromChar"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.StringFromChar(args[0].(rune)), nil }}
 	t["IO.lineText"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return stdlib.LineText(args[0].(string)), nil
 	}}

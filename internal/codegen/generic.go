@@ -104,6 +104,8 @@ func (g *gen) scalarName(prefix string, unique int) string {
 		return prefix + "Float"
 	case g.b.String.Unique:
 		return prefix + "String"
+	case g.b.Char.Unique:
+		return prefix + "Char"
 	case g.b.Bool.Unique:
 		return prefix + "Bool"
 	case g.b.Unit.Unique:
@@ -164,6 +166,7 @@ func (g *gen) scalarHelperDecls() []goast.Decl {
 		{g.b.Int.Unique, ident("int64"), "ShowInt"},
 		{g.b.Float.Unique, ident("float64"), "ShowFloat"},
 		{g.b.String.Unique, ident("string"), "ShowStringLiteral"},
+		{g.b.Char.Unique, ident("rune"), "ShowCharLiteral"},
 		{g.b.Bool.Unique, ident("bool"), "ShowBool"},
 		{g.b.Unit.Unique, nil, "ShowUnit"},
 	}

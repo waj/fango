@@ -1,0 +1,28 @@
+1:1 LIDENT empty
+1:7 EQ =
+2:1 LIDENT many
+2:6 EQ =
+3:1 LIDENT escape
+3:8 EQ =
+4:1 EOF
+-- errors --
+-- INVALID CHAR ------------------------- err_invalid_char.fango
+
+A Char literal must contain exactly one Unicode scalar.
+
+1| empty = ''
+           ^^
+
+-- INVALID CHAR ------------------------- err_invalid_char.fango
+
+A Char literal must contain exactly one Unicode scalar.
+
+2| many = 'ab'
+          ^^^^
+
+-- INVALID CHAR ------------------------- err_invalid_char.fango
+
+Valid Char escapes are: \\  \'  \n  \t  \r
+
+3| escape = '\q'
+            ^^^^

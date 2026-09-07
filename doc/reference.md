@@ -216,7 +216,7 @@ ambient IO. `IO` also exposes the nominal record
 `readLine : () ->{IO} Maybe IO.Line`
 returns `Nothing` at clean end of input and otherwise preserves the line
 terminator separately as `"\n"`, `"\r\n"`, or `""` for an unterminated final
-line.
+line. Malformed UTF-8 input sequences are replaced with U+FFFD.
 
 `Basics` also declares two explicitly importable integer functions (the
 implicit prelude exposes only the operators, `print`, `readLine`, and `show`):
@@ -242,9 +242,26 @@ type Maybe a = Nothing | Just a deriving (Eq, Show)
 `withDefault : a -> Maybe a -> a` returns the contained value or the
 fallback.
 
-`String` exposes `length : String -> Int`, which counts bytes (a multi-byte
-UTF-8 character counts each byte), `words : String -> List String`, which
-splits on ASCII space, tab, LF, CR, vertical tab, and form feed, and
+Strings are always valid UTF-8 sequences and are not normalized. `Char` is one
+Unicode scalar value. `String` exposes the nominal record
+`type Uncons = { first : Char, rest : String }` and these operations:
+
+```fango
+length : String -> Int
+byteLength : String -> Int
+slice : Int -> Int -> String -> String
+startsWith : String -> String -> Bool
+uncons : String -> Maybe String.Uncons
+fromChar : Char -> String
+```
+
+`length` counts Unicode scalars and `byteLength` counts UTF-8 bytes. `slice`
+uses clamped half-open scalar indices and returns `""` when its end is not
+greater than its start. `startsWith prefix text` tests an exact prefix;
+`uncons` returns the first scalar and remaining string, or `Nothing` for the
+empty string. `fromChar` makes the corresponding one-scalar string.
+`String.words : String -> List String` splits on ASCII space, tab, LF, CR,
+vertical tab, and form feed, and
 `toInt : String -> Maybe Int`, which
 parses an optional `+`/`-` sign followed by base-10 digits. An empty digit
 sequence, any other character, and values outside the signed 64-bit range all
@@ -310,7 +327,9 @@ func Crc32(text string) int64 {
 ```
 
 The supported boundary types are `Int`/`int64`, `Float`/`float64`,
-`String`/`string`, `Bool`/`bool`, and Unit. Unit parameters are omitted from
+`String`/`string`, `Char`/`rune`, `Bool`/`bool`, and Unit. String and Char
+results are validated, and an invalid UTF-8 string or non-scalar rune panics at
+the native boundary. Unit parameters are omitted from
 the Go function and a Unit result is represented by no Go result. Functions,
 ADTs, polymorphic variables, class constraints, effectful arrows, Go type parameters, multiple
 results, and `error` results are rejected. Sidecars may import only Go
@@ -329,11 +348,13 @@ set, precedence, and associativity remain fixed as listed below.
 
 ## Values and operators
 
-Built-in value types are `Int`, `Float`, `String`, `Bool`, and Unit `()`.
+Built-in value types are `Int`, `Float`, `String`, `Char`, `Bool`, and Unit `()`.
 Integers are signed 64-bit decimal literals. Floats include `1.25`, `1e3`, and
 `1.0e-2`; `.5` and `1.` are not float literals. Strings are single-line,
-double-quoted values with `\\`, `\"`, `\n`, `\t`, and `\r` escapes. Booleans are
-the constructors `True` and `False`.
+double-quoted values with `\\`, `\"`, `\n`, `\t`, and `\r` escapes. A Char
+literal contains exactly one Unicode scalar between single quotes and accepts
+`\\`, `\'`, `\n`, `\t`, and `\r` escapes; examples are `'x'`, `'二'`, and
+`'\n'`. Booleans are the constructors `True` and `False`.
 
 Operators, from tighter to looser precedence, are:
 
@@ -506,9 +527,9 @@ The standard classes are independent (in particular, `Ord` does not imply
 | Class | Methods | Standard instances |
 | --- | --- | --- |
 | `Num a` | `fromInt : Int -> a`, `add`, `sub`, `mul : a -> a -> a`, `negate : a -> a` | `Int`, `Float` |
-| `Eq a` | `eq : a -> a -> Bool` | `Int`, `Float`, `String`, `Bool`, `()` |
-| `Ord a` | `lt`, `gt`, `le`, `ge : a -> a -> Bool` | `Int`, `Float`, `String` |
-| `Show a` | `show : a -> String` | `Int`, `Float`, `String`, `Bool`, `()` |
+| `Eq a` | `eq : a -> a -> Bool` | `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
+| `Ord a` | `lt`, `gt`, `le`, `ge : a -> a -> Bool` | `Int`, `Float`, `String`, `Char` |
+| `Show a` | `show : a -> String` | `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
 
 Other than ambient `show`, named methods require an explicit `Basics` import;
 operators provide their usual unqualified spelling. `print` is an ordinary
@@ -539,7 +560,19 @@ field, and `{ value | field = expression, ... }` produces a new value of the
 same nominal type. Update expressions are evaluated left to right and the
 original value is evaluated once. A projection or update receiver must already
 have a known nominal record type; field labels do not drive structural type
-inference. Record patterns are not supported.
+inference.
+
+A nominal record pattern names its type and any fields to inspect:
+
+```fango
+case line of
+    IO.Line { text = "", ending = ending } -> ending
+    IO.Line { text = text } -> text
+```
+
+Fields are keyed and may be reordered. Omitted fields are implicit wildcards,
+so `IO.Line {}` is irrefutable. Duplicate and unknown fields are rejected, and
+matching requires the field schema exposed by `Type(..)`.
 
 Records participate in module abstraction. An exposing item `Counts` makes
 only the type name available, while `Counts(..)` additionally exposes its field
@@ -582,8 +615,11 @@ fields. Derived display concatenates the constructor name and field displays
 with spaces, without added parentheses or string quotes.
 
 `case` branches align with the first pattern after `of`. Patterns support
-constructors, nested constructor patterns, integer/float/string literals,
-variables, and `_`. Branch bodies may be inline expressions or blocks. Matches
+constructors, nominal records, integer/float/string/Char literals, variables,
+pinned values, and `_`. `^expected` compares with an existing local, top-level,
+imported, or qualified value and requires `Eq`; it does not bind a name. Pins
+cannot refer to a binder introduced by the same pattern. Branch bodies may be
+inline expressions or blocks. Matches
 must be exhaustive and non-redundant, patterns must have the constructor's
 exact arity, and a pattern cannot bind the same variable twice.
 Integer patterns require both `Num` and `Eq`: the scrutinee is compared with
@@ -591,6 +627,9 @@ the pattern's `fromInt` value. Branch order is preserved even when different
 integer literals compare equal under a custom instance. Redundancy checking
 accounts for collective constructor coverage and identical literal tests;
 it does not attempt to prove laws of user-defined equality.
+Pins are conservatively refutable, so pinned branches need structural or
+catch-all coverage after them. Identical pins can make a later branch
+redundant, but different pins are never assumed to cover a type collectively.
 
 ## Effectful function types
 

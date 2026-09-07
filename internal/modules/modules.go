@@ -690,7 +690,7 @@ func nativeGoType(t ast.TypeExpr) string {
 	if !ok {
 		return ""
 	}
-	return map[string]string{"Int": "int64", "Float": "float64", "String": "string", "Bool": "bool"}[n.Name]
+	return map[string]string{"Int": "int64", "Float": "float64", "String": "string", "Char": "rune", "Bool": "bool"}[n.Name]
 }
 
 func goTypeName(e goast.Expr) string {
@@ -964,7 +964,7 @@ func (r *resolver) canon(name string) string {
 
 func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 	r.vals = map[string]string{}
-	r.tys = map[string]string{"Int": "Int", "Float": "Float", "String": "String", "Bool": "Bool", "()": "()"}
+	r.tys = map[string]string{"Int": "Int", "Float": "Float", "String": "String", "Char": "Char", "Bool": "Bool", "()": "()"}
 	r.ctors = map[string]string{"True": "True", "False": "False"}
 	r.ops = map[string]string{}
 	r.records = map[string]string{}
@@ -1409,14 +1409,28 @@ func (r *resolver) checkBinder(name string, sp source.Span, vals map[string]stri
 }
 
 func (r *resolver) pattern(p ast.Pattern, locals map[string]bool, vals map[string]string) {
+	outer := copySet(locals)
+	r.patternInner(p, locals, outer, vals)
+}
+
+func (r *resolver) patternInner(p ast.Pattern, locals, outer map[string]bool, vals map[string]string) {
 	switch p := p.(type) {
 	case *ast.PVar:
 		r.checkBinder(p.Name, p.Sp, vals)
 		locals[p.Name] = true
+	case *ast.PPin:
+		if !outer[p.Name] {
+			p.Name = r.qualified(p.Name, vals, "value", p.NameSpan)
+		}
 	case *ast.PCtor:
 		p.Name = r.qualified(p.Name, r.ctors, "ctor", p.NameSpan)
 		for _, a := range p.Args {
-			r.pattern(a, locals, vals)
+			r.patternInner(a, locals, outer, vals)
+		}
+	case *ast.PRecord:
+		p.Name = r.qualified(p.Name, r.records, "record", p.NameSpan)
+		for _, f := range p.Fields {
+			r.patternInner(f.Pattern, locals, outer, vals)
 		}
 	}
 }

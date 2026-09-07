@@ -460,6 +460,8 @@ func (g *gen) printFn(t types.Type) string {
 		return "PrintFloat"
 	case g.b.String.Unique:
 		return "PrintString"
+	case g.b.Char.Unique:
+		return "PrintChar"
 	case g.b.Bool.Unique:
 		return "PrintBool"
 	default:
@@ -647,6 +649,8 @@ func (g *gen) goType(t types.Type) goast.Expr {
 			return ident("float64")
 		case g.b.String.Unique:
 			return ident("string")
+		case g.b.Char.Unique:
+			return ident("rune")
 		case g.b.Bool.Unique:
 			return ident("bool")
 		case g.b.Unit.Unique:
@@ -725,7 +729,16 @@ func (g *gen) nativeSidecarCall(call *core.NativeCall, n *types.NativeInfo) ([]g
 		}
 	}
 	fn := selector(nativeAlias(n.Module), exportNativeName(types.SurfaceName(n.Name)))
-	return prelude, callExpr(fn, args...)
+	var result goast.Expr = callExpr(fn, args...)
+	switch g.unique(call.Ty) {
+	case g.b.String.Unique:
+		g.usesFangort = true
+		result = callExpr(selector("fangort", "RequireValidString"), stringLit(n.Name), result)
+	case g.b.Char.Unique:
+		g.usesFangort = true
+		result = callExpr(selector("fangort", "RequireValidChar"), stringLit(n.Name), result)
+	}
+	return prelude, result
 }
 
 func (g *gen) nativeTemplateExpr(call *core.NativeCall, template string, parentPrec int) goast.Expr {
@@ -838,6 +851,7 @@ func (g *gen) nativeShow(t types.Type, value goast.Expr) goast.Expr {
 	name := map[int]string{
 		g.b.Int.Unique: "ShowInt", g.b.Float.Unique: "ShowFloat",
 		g.b.String.Unique: "ShowString", g.b.Bool.Unique: "ShowBool",
+		g.b.Char.Unique: "ShowChar",
 	}[g.unique(t)]
 	if name == "" {
 		panic("codegen: no native show implementation for " + types.Show(t))
@@ -864,6 +878,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return g.floatLit(e.Val)
 	case *core.StringLit:
 		return stringLit(e.Val)
+	case *core.CharLit:
+		return &goast.BasicLit{Kind: gotoken.CHAR, Value: strconv.QuoteRune(e.Val)}
 	case *core.UnitLit:
 		return g.unitValue()
 	case *core.BoolLit:

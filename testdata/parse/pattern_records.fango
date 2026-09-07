@@ -1,0 +1,8 @@
+type Item = { marker : Char, count : Int }
+
+expected = '*'
+
+main item =
+    case item of
+        Item { marker = ^expected, count = 1 } -> 'y'
+        Item {} -> 'n'

@@ -1,0 +1,4 @@
+(module
+  (type Item (record (field marker Char) (field count Int)))
+  (def expected (char '*'))
+  (def main (params item) (case (var item) (branch (precord Item (marker (ppin expected)) (count (pint 1))) (char 'y')) (branch (precord Item) (char 'n')))))

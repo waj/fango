@@ -1,0 +1,144 @@
+-- Convert a deliberately small, line-oriented Markdown dialect to HTML.
+
+import IO
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import String
+
+type Builder = EmptyBuilder | Chunk String | Join Builder Builder
+type Block = NoBlock | Paragraph Builder | Bullets Builder
+type State = { block : Block, document : Builder }
+type Emphasis = { content : Builder, remaining : String }
+type LineKind = Blank | Heading Int String | Bullet String | Ordinary String
+
+emphasisMarker = '*'
+
+appendBuilder : Builder -> Builder -> Builder
+appendBuilder left right =
+    case left of
+        EmptyBuilder -> right
+        _ ->
+            case right of
+                EmptyBuilder -> left
+                _ -> Join left right
+
+around : String -> Builder -> String -> Builder
+around before content after = appendBuilder (Chunk before) (appendBuilder content (Chunk after))
+
+escapeChar : Char -> Builder
+escapeChar character =
+    case character of
+        '&' -> Chunk "&amp;"
+        '<' -> Chunk "&lt;"
+        '>' -> Chunk "&gt;"
+        _ -> Chunk (String.fromChar character)
+
+contains : Char -> String -> Bool
+contains target input =
+    case String.uncons input of
+        Nothing -> False
+        Just (String.Uncons { first = ^target }) -> True
+        Just (String.Uncons { rest = remaining }) -> contains target remaining
+
+takeEmphasis : String -> Builder -> Emphasis
+takeEmphasis input content =
+    case String.uncons input of
+        Nothing -> Emphasis { content = content, remaining = "" }
+        Just (String.Uncons { first = ^emphasisMarker, rest = remaining }) ->
+            Emphasis { content = content, remaining = remaining }
+        Just (String.Uncons { first = character, rest = remaining }) ->
+            takeEmphasis remaining (appendBuilder content (escapeChar character))
+
+inline : String -> Builder
+inline input =
+    case String.uncons input of
+        Nothing -> EmptyBuilder
+        Just (String.Uncons { first = ^emphasisMarker, rest = remaining }) ->
+            if contains emphasisMarker remaining then
+                part = takeEmphasis remaining EmptyBuilder
+                appendBuilder (around "<em>" part.content "</em>") (inline part.remaining)
+            else
+                appendBuilder (escapeChar emphasisMarker) (inline remaining)
+        Just (String.Uncons { first = character, rest = remaining }) ->
+            appendBuilder (escapeChar character) (inline remaining)
+
+heading : Int -> Int -> String -> LineKind
+heading level prefixLength input =
+    Heading level (String.slice prefixLength (String.length input) input)
+
+classify : String -> LineKind
+classify input =
+    if input == "" then Blank
+    else if String.startsWith "###### " input then heading 6 7 input
+    else if String.startsWith "##### " input then heading 5 6 input
+    else if String.startsWith "#### " input then heading 4 5 input
+    else if String.startsWith "### " input then heading 3 4 input
+    else if String.startsWith "## " input then heading 2 3 input
+    else if String.startsWith "# " input then heading 1 2 input
+    else if String.startsWith "- " input then Bullet (String.slice 2 (String.length input) input)
+    else Ordinary input
+
+flush : State -> State
+flush state =
+    case state of
+        State { block = NoBlock } -> state
+        State { block = Paragraph content } ->
+            State {
+                block = NoBlock,
+                document = appendBuilder state.document (around "<p>" content "</p>\n")
+            }
+        State { block = Bullets items } ->
+            State {
+                block = NoBlock,
+                document = appendBuilder state.document (around "<ul>\n" items "</ul>\n")
+            }
+
+listItem : String -> Builder
+listItem input = around "<li>" (inline input) "</li>\n"
+
+step : String -> State -> State
+step input state =
+    case classify input of
+        Blank -> flush state
+        Heading level body ->
+            cleared = flush state
+            tag = show level
+            html = around ("<h" ++ tag ++ ">") (inline body) ("</h" ++ tag ++ ">\n")
+            { cleared | document = appendBuilder cleared.document html }
+        Bullet body ->
+            case state of
+                State { block = Bullets items } ->
+                    { state | block = Bullets (appendBuilder items (listItem body)) }
+                _ ->
+                    cleared = flush state
+                    { cleared | block = Bullets (listItem body) }
+        Ordinary body ->
+            case state of
+                State { block = Paragraph content } ->
+                    joined = appendBuilder content (appendBuilder (Chunk " ") (inline body))
+                    { state | block = Paragraph joined }
+                _ ->
+                    cleared = flush state
+                    { cleared | block = Paragraph (inline body) }
+
+writePending : List Builder ->{IO} ()
+writePending pending =
+    case pending of
+        Nil -> ()
+        Cons builder remaining ->
+            case builder of
+                EmptyBuilder -> writePending remaining
+                Chunk value ->
+                    IO.write value
+                    writePending remaining
+                Join left right -> writePending (Cons left (Cons right remaining))
+
+convert : State ->{IO} ()
+convert state =
+    case readLine() of
+        Nothing ->
+            finished = flush state
+            writePending (Cons finished.document Nil)
+        Just (IO.Line { text = input }) -> convert (step input state)
+
+main() = convert (State { block = NoBlock, document = EmptyBuilder })

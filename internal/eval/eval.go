@@ -201,6 +201,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		return e.Val, nil
 	case *core.StringLit:
 		return e.Val, nil
+	case *core.CharLit:
+		return e.Val, nil
 	case *core.UnitLit:
 		return struct{}{}, nil
 	case *core.BoolLit:
@@ -462,6 +464,8 @@ func (in *interp) showValue(v Value) (string, error) {
 		s = fangort.ShowFloat(v)
 	case string:
 		s = fangort.ShowString(v)
+	case rune:
+		s = fangort.ShowChar(v)
 	case bool:
 		s = fangort.ShowBool(v)
 	case *CtorVal:
@@ -547,6 +551,8 @@ func (in *interp) tree(t core.Tree, fr *Frame, leaf func(core.Expr, *Frame) (Val
 			case *core.FloatLit:
 				match = v == lit.Val
 			case *core.StringLit:
+				match = v == lit.Val
+			case *core.CharLit:
 				match = v == lit.Val
 			default:
 				return nil, fmt.Errorf("eval: SwitchLit case is %T — the linter should have caught this", c.Lit)

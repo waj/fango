@@ -1,0 +1,5 @@
+type Flag = { enabled : Bool, label : String }
+
+main =
+    case Flag { enabled = True, label = "x" } of
+        Flag { enabled = True } -> 1

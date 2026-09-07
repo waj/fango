@@ -42,8 +42,11 @@ and the Core linter rejects one.
 Custom types are nominal and identified internally by a generation-stable
 integer `Unique`, not their printed name. Constructors inhabit a separate
 namespace. Pattern matching is exhaustive, and redundant branches are rejected.
-`Bool` behaves as the predefined `True | False` ADT to the checker while using
-native Go booleans in generated code.
+Pinned patterns compare against an existing immutable value through `Eq` and
+are conservatively refutable for coverage. Nominal record patterns are keyed,
+partial views of a visible schema. `Bool` behaves as the predefined
+`True | False` ADT to the checker while using native Go booleans in generated
+code.
 
 ## Functions and effects
 
@@ -233,6 +236,9 @@ visible schema. Elaboration lowers literals, projections, and functional
 updates to the existing constructor, `Let`, and exhaustive one-constructor
 `Case` Core forms. This keeps Core and both backends free of a second record
 representation while preserving single evaluation and source-order effects.
+Record patterns follow the same lowering: omitted fields become wildcards and
+provided patterns are reordered into schema order. Hidden record constructors
+never appear in source diagnostics.
 
 ## Core and evidence invariants
 
@@ -275,6 +281,9 @@ integer literals compare equal in a custom instance.
 Their redundancy check uses the full preceding pattern matrix, conservatively
 treating distinct overloaded literal tests as opaque; constructor coverage may
 collectively make a branch redundant.
+Pinned named values use the same ordered-guard path, require `Eq`, and never
+claim coverage; identical pins are stable repeated tests and can establish
+redundancy.
 
 Saturated pure primitives are `NativeCall` nodes keyed by canonical declaration
 name. `Prog.Natives` holds their schemes, arities, templates, modules, and
@@ -304,7 +313,8 @@ avoided: its ABI, stack maps, barriers, and scheduler metadata are compiler
 implementation details.
 
 Representations are type-directed rather than uniformly boxed: `Int` is
-`int64`, `Float` is `float64`, `String` is `string`, and `Bool` is `bool`.
+`int64`, `Float` is `float64`, `String` is a valid UTF-8 `string`, `Char` is a
+Unicode-scalar Go `rune`, and `Bool` is `bool`.
 Concrete Unit parameters and results at direct worker and operation boundaries
 are implicit in generated Go: the parameter is omitted and the result is a
 void result. Unit remains a represented, runtime zero-sized value at
@@ -409,7 +419,8 @@ invalidates naturally.
 the native `IO.write` operation. Tooling observes values through the same Show
 evidence, evaluating the observed expression once. Values with no resolvable
 Show instance have an opaque typed placeholder; functions show `<function>`.
-Strings are displayed raw, including inside explicitly derived ADT displays.
+Strings and Chars are displayed raw through `Show`, including inside explicitly
+derived ADT displays; tooling uses quoted source-literal forms.
 
 The REPL retains one checker, type/name supply, evaluator environment, and IO
 reader/writer across inputs. Prompt definitions become lazy memo cells;
@@ -465,7 +476,7 @@ dependence: the ratio moves with whatever else is competing for the CPU.
 ## Known limitations
 
 The implementation has a deliberately narrow, pure Go sidecar FFI but no
-package manager, transparent aliases, record patterns, formatter, or LSP. Type classes have one
+package manager, transparent aliases, formatter, or LSP. Type classes have one
 parameter, no superclasses, higher kinds, default methods, ambiguous overlapping heads,
 or method-local polymorphism. There are no source-path
 flags, external library version selection, or package resolution. The implicit

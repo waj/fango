@@ -105,6 +105,8 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		return fmt.Sprintf("(float %s %s)", strconv.FormatFloat(e.Val, 'g', -1, 64), pr.Type(e.Ty))
 	case *StringLit:
 		return fmt.Sprintf("(string %q %s)", e.Val, pr.Type(e.Ty))
+	case *CharLit:
+		return fmt.Sprintf("(char %q %s)", e.Val, pr.Type(e.Ty))
 	case *UnitLit:
 		return "(unit ())"
 	case *BoolLit:

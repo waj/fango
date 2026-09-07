@@ -13,8 +13,9 @@ coverage.
 
 - Add `Result`, and expand `List`, text, numeric, and IO operations only as
   subsequent examples require them.
-- `String` APIs are byte-oriented (`length` counts bytes); Unicode-aware text
-  semantics remain an open decision.
+- Strings use valid UTF-8 storage and Unicode-scalar `Char`, indexing, and
+  length. Normalization, grapheme segmentation, and Unicode-aware word or case
+  operations remain deferred until an example requires them.
 - Prefer fango implementations; use declared bundled natives only for semantics
   source code cannot express or when benchmark evidence demands it.
 - Keep adding differential, diagnostic, documentation, and performance

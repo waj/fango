@@ -81,8 +81,7 @@ func TestStringLengthByteAt(t *testing.T) {
 	if got := StringLength("hello"); got != 5 {
 		t.Errorf("StringLength(\"hello\") = %d", got)
 	}
-	// Byte semantics: one CJK character is three UTF-8 bytes.
-	if got := StringLength("二"); got != 3 {
+	if got := StringLength("二"); got != 1 {
 		t.Errorf("StringLength(\"二\") = %d", got)
 	}
 	cases := []struct {
@@ -102,8 +101,39 @@ func TestStringLengthByteAt(t *testing.T) {
 			t.Errorf("ByteAt(%d, %q) = %d, want %d", c.i, c.s, got, c.want)
 		}
 	}
-	if got := StringSlice(1, 4, "a二z"); got != "二" {
-		t.Errorf("StringSlice over UTF-8 bytes = %q, want %q", got, "二")
+	if got := StringSlice(1, 2, "a二z"); got != "二" {
+		t.Errorf("StringSlice over Unicode scalars = %q, want %q", got, "二")
+	}
+	if got := StringByteLength("二"); got != 3 {
+		t.Errorf("StringByteLength(二) = %d, want 3", got)
+	}
+	if first, rest := StringFirst("λ二"), StringRest("λ二"); first != 'λ' || rest != "二" {
+		t.Errorf("String first/rest = %q, %q", first, rest)
+	}
+	if got := StringSlice(-2, 99, "a二z"); got != "a二z" {
+		t.Errorf("clamped StringSlice = %q", got)
+	}
+}
+
+func TestUnicodeBoundaryValidation(t *testing.T) {
+	if got, err := ReadRawLineFrom(bufio.NewReader(strings.NewReader("a\xffb\n"))); err != nil || got != "a�b\n" {
+		t.Fatalf("invalid UTF-8 replacement = %q, %v", got, err)
+	}
+	if RequireValidString("ok", "二") != "二" || RequireValidChar("ok", 'λ') != 'λ' {
+		t.Fatal("valid Unicode rejected")
+	}
+	for name, invalid := range map[string]func(){
+		"string": func() { RequireValidString("bad", "\xff") },
+		"char":   func() { RequireValidChar("bad", rune(0xD800)) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("invalid native result was accepted")
+				}
+			}()
+			invalid()
+		})
 	}
 }
 

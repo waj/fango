@@ -1,0 +1,8 @@
+<h1>Fango &amp; records</h1>
+<p>Unicode: café 二. This is <em>small</em> and &lt;safe&gt;.</p>
+<ul>
+<li>first <em>item</em></li>
+<li>second &amp; final</li>
+</ul>
+<h6>Done</h6>
+<p>unmatched * stays literal</p>

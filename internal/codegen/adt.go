@@ -506,6 +506,8 @@ func (g *gen) showField(t types.Type, field goast.Expr) goast.Expr {
 		return callExpr(selector("fangort", "ShowFloat"), field)
 	case g.b.String.Unique:
 		return callExpr(selector("fangort", "ShowStringLiteral"), field)
+	case g.b.Char.Unique:
+		return callExpr(selector("fangort", "ShowCharLiteral"), field)
 	case g.b.Bool.Unique:
 		return callExpr(selector("fangort", "ShowBool"), field)
 	case g.b.Unit.Unique:

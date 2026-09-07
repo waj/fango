@@ -25,6 +25,11 @@ type StringLit struct {
 	Sp    source.Span
 }
 
+type CharLit struct {
+	Value rune
+	Sp    source.Span
+}
+
 // UnitLit is the sole value of the Unit type, written ().
 type UnitLit struct{ Sp source.Span }
 
@@ -304,6 +309,30 @@ type PString struct {
 	Sp    source.Span
 }
 
+type PChar struct {
+	Value rune
+	Sp    source.Span
+}
+
+// PPin compares the matched value with an existing lexical or global value.
+type PPin struct {
+	Name         string
+	NameSpan, Sp source.Span
+}
+
+type PRecord struct {
+	Name     string
+	NameSpan source.Span
+	Fields   []RecordPatternField
+	Sp       source.Span
+}
+
+type RecordPatternField struct {
+	Name     string
+	NameSpan source.Span
+	Pattern  Pattern
+}
+
 type PCtor struct {
 	Name     string
 	NameSpan source.Span
@@ -315,6 +344,9 @@ func (*PWildcard) isPattern() {}
 func (*PInt) isPattern()      {}
 func (*PFloat) isPattern()    {}
 func (*PString) isPattern()   {}
+func (*PChar) isPattern()     {}
+func (*PPin) isPattern()      {}
+func (*PRecord) isPattern()   {}
 func (*PCtor) isPattern()     {}
 
 func (p *PVar) Span() source.Span      { return p.Sp }
@@ -322,6 +354,9 @@ func (p *PWildcard) Span() source.Span { return p.Sp }
 func (p *PInt) Span() source.Span      { return p.Sp }
 func (p *PFloat) Span() source.Span    { return p.Sp }
 func (p *PString) Span() source.Span   { return p.Sp }
+func (p *PChar) Span() source.Span     { return p.Sp }
+func (p *PPin) Span() source.Span      { return p.Sp }
+func (p *PRecord) Span() source.Span   { return p.Sp }
 func (p *PCtor) Span() source.Span {
 	if len(p.Args) == 0 {
 		return p.NameSpan
@@ -332,6 +367,7 @@ func (p *PCtor) Span() source.Span {
 func (*IntLit) isExpr()       {}
 func (*FloatLit) isExpr()     {}
 func (*StringLit) isExpr()    {}
+func (*CharLit) isExpr()      {}
 func (*UnitLit) isExpr()      {}
 func (*Var) isExpr()          {}
 func (*Ctor) isExpr()         {}
@@ -351,6 +387,7 @@ func (*Resume) isExpr()       {}
 func (e *IntLit) Span() source.Span       { return e.Sp }
 func (e *FloatLit) Span() source.Span     { return e.Sp }
 func (e *StringLit) Span() source.Span    { return e.Sp }
+func (e *CharLit) Span() source.Span      { return e.Sp }
 func (e *UnitLit) Span() source.Span      { return e.Sp }
 func (e *Var) Span() source.Span          { return e.Sp }
 func (e *Ctor) Span() source.Span         { return e.Sp }

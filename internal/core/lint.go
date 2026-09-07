@@ -159,7 +159,7 @@ func (l *linter) numeric(t types.Type) bool {
 }
 
 func (l *linter) orderable(t types.Type) bool {
-	return l.numeric(t) || l.unique(t) == l.b.String.Unique
+	return l.numeric(t) || l.unique(t) == l.b.String.Unique || l.unique(t) == l.b.Char.Unique
 }
 
 // equatable: scalars, Number rigid vars, and declared ADTs whose type
@@ -185,7 +185,7 @@ func (l *linter) equatable(t types.Type) bool {
 // printable mirrors elaborate.checkPrintable at the type level.
 func (l *linter) printable(t types.Type) bool {
 	switch l.unique(t) {
-	case l.b.Int.Unique, l.b.Float.Unique, l.b.String.Unique, l.b.Bool.Unique:
+	case l.b.Int.Unique, l.b.Float.Unique, l.b.String.Unique, l.b.Char.Unique, l.b.Bool.Unique:
 		return true
 	}
 	if con, ok := t.(*types.TCon); ok {
@@ -218,6 +218,10 @@ func (l *linter) expr(e Expr, where string) {
 	case *StringLit:
 		if l.unique(e.Ty) != l.b.String.Unique {
 			l.errorf("%s: StringLit typed %s", where, types.Show(e.Ty))
+		}
+	case *CharLit:
+		if l.unique(e.Ty) != l.b.Char.Unique {
+			l.errorf("%s: CharLit typed %s", where, types.Show(e.Ty))
 		}
 	case *UnitLit:
 		if l.unique(e.Ty) != l.b.Unit.Unique {
@@ -748,7 +752,7 @@ func (l *linter) tree(t Tree, want types.Type, where string) {
 		}
 		for _, c := range t.Cases {
 			switch c.Lit.(type) {
-			case *IntLit, *FloatLit, *StringLit:
+			case *IntLit, *FloatLit, *StringLit, *CharLit:
 			default:
 				l.errorf("%s: SwitchLit case is %T, want a literal", where, c.Lit)
 			}

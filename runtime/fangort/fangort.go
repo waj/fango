@@ -14,6 +14,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // HasInputFrom blocks until input or clean EOF can be distinguished without
@@ -33,7 +34,7 @@ func ReadRawLineFrom(r *bufio.Reader) (string, error) {
 	if err != nil && err != io.EOF {
 		return "", err
 	}
-	return s, nil
+	return strings.ToValidUTF8(s, "\uFFFD"), nil
 }
 
 func LineEnding(s string) string {
@@ -136,11 +137,50 @@ func RandomEntropy(_ Unit) int64 {
 	return int64(binary.LittleEndian.Uint64(b[:]))
 }
 
-// StringLength returns a String's length in bytes.
-func StringLength(s string) int64 { return int64(len(s)) }
+// StringLength returns a String's length in Unicode scalar values.
+func StringLength(s string) int64 { return int64(utf8.RuneCountInString(s)) }
 
-// StringSlice returns a byte slice over valid internal indices.
-func StringSlice(start, end int64, s string) string { return s[start:end] }
+func StringByteLength(s string) int64                   { return int64(len(s)) }
+func StringByteSlice(start, end int64, s string) string { return s[start:end] }
+
+// StringSlice uses clamped half-open Unicode-scalar indices.
+func StringSlice(start, end int64, s string) string {
+	runes := []rune(s)
+	if start < 0 {
+		start = 0
+	}
+	if end < 0 {
+		end = 0
+	}
+	if start > int64(len(runes)) {
+		start = int64(len(runes))
+	}
+	if end > int64(len(runes)) {
+		end = int64(len(runes))
+	}
+	if end <= start {
+		return ""
+	}
+	return string(runes[start:end])
+}
+
+func StringFirst(s string) rune    { r, _ := utf8.DecodeRuneInString(s); return r }
+func StringRest(s string) string   { _, n := utf8.DecodeRuneInString(s); return s[n:] }
+func StringFromChar(r rune) string { return string(r) }
+
+func RequireValidString(name, s string) string {
+	if !utf8.ValidString(s) {
+		panic("native " + name + " returned invalid UTF-8")
+	}
+	return s
+}
+
+func RequireValidChar(name string, r rune) rune {
+	if !utf8.ValidRune(r) {
+		panic("native " + name + " returned invalid Char")
+	}
+	return r
+}
 
 // ByteAt returns the byte value at a 0-based index, or -1 when the index is
 // out of range. The in-band sentinel lets pure fango code probe positions
@@ -207,6 +247,14 @@ func ShowFloat(f float64) string {
 // all formatting, even trivial, lives in fangort.
 func ShowString(s string) string { return s }
 
+func ShowChar(r rune) string { return string(r) }
+
+func ShowCharLiteral(r rune) string {
+	s := ShowStringLiteral(string(r))
+	inside := strings.ReplaceAll(s[1:len(s)-1], `'`, `\'`)
+	return "'" + inside + "'"
+}
+
 // ShowStringLiteral renders a String as a fango source literal — the REPL's
 // at-the-prompt form. Escapes: \\ \" \n \t \r; other control characters as
 // \u{XXXX}; everything else (including non-ASCII) passes through.
@@ -252,6 +300,7 @@ func ShowUnit() string { return "()" }
 func PrintInt(v int64)     { fmt.Println(ShowInt(v)) }
 func PrintFloat(v float64) { fmt.Println(ShowFloat(v)) }
 func PrintString(v string) { fmt.Println(ShowString(v)) }
+func PrintChar(v rune)     { fmt.Println(ShowChar(v)) }
 func PrintBool(v bool)     { fmt.Println(ShowBool(v)) }
 
 // WriteStringTo writes a String verbatim without adding a line ending.
