@@ -29,6 +29,20 @@ under iteration is in [roadmap-natives.md](roadmap-natives.md).
 Independent library versioning, package distribution, dependency fetching,
 and configurable source roots remain deferred.
 
+## Compile-time metaprogramming
+
+`deriving` is closed to `Eq` and `Show`, and its generator is a Go function
+rather than something a library can extend. `Ord` cannot be derived at all, and
+the Tier-2 Todo CLI's serialize/parse round trip has no way to produce a codec
+per type. The proposal under iteration is a compile-time stage — an opaque
+`Code` type built only by hygienic quotes, type reflection bounded by ordinary
+export visibility, and `deriver` declarations that open `deriving` to user
+classes — in [roadmap-meta.md](roadmap-meta.md).
+
+It deliberately avoids a `Generic`-style structural representation, which
+one-parameter classes without higher kinds cannot express, and avoids Template
+Haskell's ambient reification, which is what breaks modularity there.
+
 ## REPL hardening
 
 - Implement `:load` and `:reload` for complete source files.
@@ -124,7 +138,9 @@ These are directions, not commitments or an ordering after the work above.
   division, conversions, and possible arbitrary precision.
 - Extend type classes only from concrete needs: superclasses, method-local
   polymorphism, higher kinds, and default methods remain deferred. Mutually
-  recursive deriving groups and richer precedence-aware display are also open.
+  recursive deriving groups and richer precedence-aware display are also open;
+  both get cheaper once deriving is user-extensible, so they wait on
+  [roadmap-meta.md](roadmap-meta.md).
 - Broaden the bounded scalar worker specialization only when benchmarks justify
   it; multiple numeric parameters, effectful workers, and custom dictionaries
   currently retain the generic evidence-passing path.
