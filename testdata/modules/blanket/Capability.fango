@@ -1,0 +1,3 @@
+module Capability exposing (LogValue(..))
+class LogValue a
+    logValue : a -> String

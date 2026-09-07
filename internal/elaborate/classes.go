@@ -84,7 +84,13 @@ func (el *elab) dictionary(p types.Pred) core.Expr {
 	if d := el.givenDictionary(p); d != nil {
 		return d
 	}
-	in, _, _ := el.ck.MatchInstance(p, el.owner)
+	if err := infer.ResolutionPathError(el.evidencePath, p, source.Span{}); err != nil {
+		el.errs = append(el.errs, *err)
+		return &core.VarRef{Name: "_missingDictionary", Ty: el.ck.Classes[p.Class].DictType(p.Ty)}
+	}
+	el.evidencePath = append(el.evidencePath, p)
+	defer func() { el.evidencePath = el.evidencePath[:len(el.evidencePath)-1] }()
+	in, _, _ := el.matchInstance(p)
 	if in == nil {
 		el.errs = append(el.errs, diag.Errorf(source.Span{}, "MISSING INSTANCE", "No evidence for `%s %s`.", p.Class, types.Show(p.Ty)))
 		cl := el.ck.Classes[p.Class]
@@ -102,7 +108,7 @@ func (el *elab) methodValue(method *types.MethodInfo, raw types.Type) core.Expr 
 	args := matchTyArgs(method.Type, []*types.TVar{method.Class.Param}, el.ck.Sub.Apply(raw))
 	p := types.Pred{Class: method.Class.Name, Ty: args[0]}
 	d := el.givenDictionary(p)
-	if in, m, _ := el.ck.MatchInstance(p, el.owner); d == nil && in != nil {
+	if in, m, _ := el.matchInstance(p); d == nil && in != nil {
 		n := in.Methods[method.Index]
 		s, _ := el.ck.Env.Lookup(n)
 		mt := types.SubstRigid(s.Body, m)
@@ -119,6 +125,21 @@ func (el *elab) methodValue(method *types.MethodInfo, raw types.Type) core.Expr 
 	binds[method.Index] = field
 	ty := el.zonkDefault(raw)
 	return &core.Case{Scrut: d, Bind: bind, Ty: ty, Tree: &core.SwitchCtor{Scrut: bind, ADT: method.Class.Dict, Cases: []core.CtorCase{{Ctor: method.Class.Dict.Ctors[0], Binds: binds, Tree: &core.Leaf{Body: &core.VarRef{Name: field, Ty: ty}}}}}}
+}
+
+// An instance method knows its own dictionary independently of lookup.
+// Referring to that factory with its existing context preserves recursive
+// methods without selecting an instance for an arbitrary polymorphic type.
+func (el *elab) matchInstance(p types.Pred) (*infer.InstanceInfo, map[int]types.Type, bool) {
+	p.Ty = el.ck.Sub.Apply(p.Ty)
+	if in := el.selfInstance; in != nil && p.Class == in.Class.Name && types.Equal(p.Ty, in.Head) {
+		m := map[int]types.Type{}
+		for _, v := range in.Vars {
+			m[v.ID] = v
+		}
+		return in, m, false
+	}
+	return el.ck.MatchInstance(p, el.owner)
 }
 
 func (el *elab) valueReference(name string, raw types.Type) core.Expr {

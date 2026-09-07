@@ -106,6 +106,46 @@ T 42
 	}
 }
 
+func TestBlanketInstanceTransactions(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader(`class Label a
+    label : a -> String
+
+class Other a
+    other : a -> String
+
+instance Other a => Label a
+    label x = other x
+
+instance Label a => Other a
+    other x = label x
+
+instance Other a
+    other x = "fallback"
+
+instance Label String
+    label x = "special"
+
+forward x = label x
+forward "secret"
+forward True
+forward 42
+:type forward
+:quit
+`), &out)
+	got := out.String()
+	for _, want := range []string{"INSTANCE CONTEXT", "Other -> Label -> Other", "special", "fallback", "Label a => a -> String"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"OVERLAPPING INSTANCE", "MISSING INSTANCE", "AMBIGUOUS CONSTRAINT"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("failed declaration poisoned session:\n%s", got)
+		}
+	}
+}
+
 func TestEffectfulPromptDeclarationRejected(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader("x = print 1\n40 + 2\n:quit\n"), &out)

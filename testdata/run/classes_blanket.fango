@@ -1,0 +1,20 @@
+import List
+import Random
+
+class Inspect a
+    inspect : a -> String
+
+instance Show a => Inspect a
+    inspect x = show x
+
+instance Inspect String
+    inspect x = "\"" ++ x ++ "\""
+
+forward x = inspect x
+method = inspect
+
+main() =
+    print (inspect 42)
+    print (inspect "Hola")
+    print (forward "STRING")
+    print (method "VALUE")

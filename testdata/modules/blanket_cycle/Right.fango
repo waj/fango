@@ -1,0 +1,4 @@
+module Right exposing ()
+import Capability exposing (A(..), B(..))
+instance A a => B a
+    bb x = aa x

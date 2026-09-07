@@ -167,7 +167,7 @@ func containsMeta(t types.Type) bool {
 // specific as b: every type b's pattern covers via a is covered by b, i.e.
 // b's pattern matches a. Heads contain no metavariables, so the match is
 // always definite.
-func headAtLeastAsSpecific(a, b *types.TCon) bool {
+func headAtLeastAsSpecific(a, b types.Type) bool {
 	return matchHead(b, a, map[int]types.Type{}) == headYes
 }
 
@@ -178,7 +178,7 @@ func headAtLeastAsSpecific(a, b *types.TCon) bool {
 // pre-structural-heads key. types.Show is unsuitable here — its variable
 // naming is per-printer. The caller hex-encodes the key, so its character
 // set is unconstrained.
-func canonicalHeadKey(head *types.TCon) string {
+func canonicalHeadKey(head types.Type) string {
 	var b strings.Builder
 	vars := map[int]int{}
 	var render func(types.Type)
@@ -235,7 +235,7 @@ func canonicalHeadKey(head *types.TCon) string {
 // headUniques collects the Uniques of every type constructor in the head in
 // preorder — the REPL's `_generation_` disambiguator, so an instance name
 // changes when any constructor mentioned in the head is redefined.
-func headUniques(head *types.TCon) []int {
+func headUniques(head types.Type) []int {
 	var out []int
 	var walk func(types.Type)
 	walk = func(t types.Type) {

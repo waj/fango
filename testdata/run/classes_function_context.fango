@@ -1,0 +1,11 @@
+class Label a
+    label : a -> String
+instance Label a
+    label value = "label"
+type Function a = Function (a -> a)
+instance Label (a -> a) => Label (Function a)
+    label function = case function of
+        Function f -> label f
+identity : Int -> Int
+identity x = x
+main = print (label (Function identity))

@@ -1,0 +1,7 @@
+class LogValue a
+    logValue : a -> String
+instance Show a => LogValue a
+    logValue x = show x
+forward : Show a => a -> String
+forward x = logValue x
+main = forward "secret"

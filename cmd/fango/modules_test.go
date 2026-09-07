@@ -14,9 +14,14 @@ import (
 )
 
 func TestMultiModuleDifferential(t *testing.T) {
-	for _, fixture := range []string{"basic", "effects", "classes", "records"} {
+	for _, fixture := range []string{"basic", "effects", "classes", "records", "blanket"} {
 		t.Run(fixture, func(t *testing.T) { testMultiModule(t, fixture) })
 	}
+}
+
+func TestCrossModuleBlanketCycle(t *testing.T) {
+	entry := filepath.Join("..", "..", "testdata", "modules", "blanket_cycle", "Main.fango")
+	runErrorCase(t, entry, "Circular blanket instance requirements")
 }
 
 func TestPrivateRecordFields(t *testing.T) {

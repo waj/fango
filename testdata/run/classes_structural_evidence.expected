@@ -1,0 +1,10 @@
+special string box
+special string box
+special string box!
+special string box
+special string box
+Derived special string box
+Record { value = special string box }
+box 42
+Branch Leaf 1 Leaf 2
+True

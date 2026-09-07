@@ -76,6 +76,7 @@ type Checker struct {
 	Classes           map[string]*types.ClassInfo
 	Methods           map[string]*types.MethodInfo
 	Instances         []*InstanceInfo
+	checkingInstance  *InstanceInfo
 	InstanceImports   map[string]map[string]bool
 	CurrentOwner      string
 	PendingPreds      []types.Pred
@@ -223,6 +224,8 @@ type DeclInfo struct {
 	// zonked occurrence types mention the scheme's own rigid vars. With
 	// AllowPoly off this is always the trivial Scheme{Body}.
 	Scheme types.Scheme
+	// Instance supplies self evidence inside an instance method.
+	Instance *InstanceInfo
 }
 
 type HandlerClauseInfo struct {
@@ -810,7 +813,7 @@ func (ck *Checker) ExprWhere(e ast.Expr, _ bool) (types.Type, []diag.Error) {
 	collectVarIDs(ck.Sub.Apply(ty), ids)
 	var ambiguous, visible []types.Pred
 	for _, p := range left {
-		if v, ok := p.Ty.(*types.TVar); ok && !ids[v.ID] {
+		if !mentionsAny(p.Ty, ids) {
 			ambiguous = append(ambiguous, p)
 		} else {
 			visible = append(visible, p)
@@ -1613,7 +1616,7 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 			g.errs = append(g.errs, es...)
 			g.preds = g.preds[:predStart]
 			for _, p := range left {
-				if v, ok := p.Ty.(*types.TVar); ok && quant[v.ID] {
+				if mentionsAny(p.Ty, quant) {
 					if bind.Ann != nil {
 						g.errs = append(g.errs, diag.Errorf(bind.NameSpan, "MISSING CONSTRAINT", "Add `%s %s` to the annotation.", types.SurfaceName(p.Class), types.Show(p.Ty)))
 					} else {

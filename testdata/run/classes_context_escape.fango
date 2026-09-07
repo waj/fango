@@ -1,0 +1,22 @@
+type LeftBox a = LeftBox a
+type RightBox a = RightBox a
+instance Show (RightBox a) => Show (LeftBox a)
+    show left = case left of
+        LeftBox value -> show (RightBox value)
+instance Show (LeftBox a) => Show (RightBox a)
+    show right = case right of
+        RightBox value -> show (LeftBox value)
+instance Show (RightBox Bool)
+    show value = "escape"
+
+class Label a
+    label : a -> String
+instance Label a
+    label value = "anything"
+
+identity : Int -> Int
+identity x = x
+
+main() =
+    print (LeftBox True)
+    print (label identity)

@@ -9,6 +9,7 @@ import (
 // syntax. Parenthesized function arguments therefore remain unambiguous.
 func (p *parser) parseContext() []ast.PredExpr {
 	found := false
+	parens := 0
 	for i := p.pos; i < len(p.toks); i++ {
 		t := p.toks[i]
 		if t.Kind == token.EOF || (i > p.pos && t.Pos().Col <= p.lay.innermost().col) {
@@ -18,8 +19,14 @@ func (p *parser) parseContext() []ast.PredExpr {
 			found = true
 			break
 		}
-		if t.Kind == token.ARROW || t.Kind == token.EQ {
+		if t.Kind == token.EQ || (t.Kind == token.ARROW && parens == 0) {
 			break
+		}
+		if t.Kind == token.LPAREN {
+			parens++
+		}
+		if t.Kind == token.RPAREN {
+			parens--
 		}
 	}
 	if !found {

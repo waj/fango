@@ -1,6 +1,6 @@
 type Box a = Box a deriving (Eq, Show)
 
-equalBoxes : Eq a => Box a -> Box a -> Bool
+equalBoxes : Eq (Box a) => Box a -> Box a -> Bool
 equalBoxes x y = x == y
 
 main =

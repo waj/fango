@@ -184,35 +184,45 @@ lambdas generalize, while local values remain monomorphic so their strict,
 evaluate-once semantics are not changed by lambda lifting. `main` is ground and
 never generalized. Integer expressions elaborate through `Num.fromInt`;
 decimal literals and `/` remain `Float`. Unresolved variables default to `Int`
-only when their obligations include standard `Num` and contain no classes
+only when their default-eligibility requirements include standard `Num` and contain no classes
 outside standard `Num`, `Eq`, `Ord`, and `Show`. Other unresolved constrained
 variables are ambiguous; unconstrained runtime metavariables default to Unit.
 
 `Scheme.Preds` carries nominal, single-parameter class obligations.
 Instantiation substitutes predicate types alongside the body. An instance head
-is a named constructor applied to arbitrary argument types — variables
-(possibly repeated), ground types, or nested applications — but never a bare
-variable or an open effect row. Two instances of a class whose heads unify are
+is either a bare variable (a blanket instance) or a named constructor applied
+to arbitrary argument types — variables (possibly repeated), ground types,
+or nested applications. Direct function heads and open effect rows are rejected.
+Blanket heads can match any value type, including functions. Two instances of a class whose heads unify are
 permitted only when one is strictly more specific (its head is an instance of
 the other's); duplicates and incomparable-unifiable pairs are rejected at
 declaration, so every use site has a unique most-specific match, independent
 of declaration order.
 
-Resolution is directional: it structurally matches instance heads against a
-known type without guessing a metavariable from available instances. When an
-unsolved metavariable leaves a match — or the choice among matches —
-undecided, the obligation is deferred; defaulting may solve the variable and
-a final reduction commits, and an obligation still undecided afterwards is
-ambiguous. A quantified (rigid) variable is atomic: it definitively fails any
-concrete head position, so a polymorphic body commits to the general instance
-even if a caller later instantiates the variable to a type with a more
-specific one. Explicit given evidence takes precedence over instance lookup,
-including when the given predicate has a structural argument. Conditional instance contexts reduce to constraints on
-variables of the head — proper subterms — keeping resolution decreasing, with
-a fixed reduction-depth limit as backstop. Residual obligations on
-generalized variables become dictionary parameters; an annotation must
-explicitly provide the required context. Constraints whose variables do not
-occur in the annotated type are rejected as ambiguous.
+Resolution is directional and selects instances only for concrete predicates.
+Every predicate containing a metavariable or quantified variable is deferred,
+including structural arguments such as `Show (Box a)`. Generalization retains
+the whole predicate as a dictionary parameter, so a caller supplies evidence
+for its specialization. Explicit given evidence takes precedence over lookup.
+An annotation must supply the actual required predicate: `Show a` does not
+discharge `Inspect a` merely because a blanket instance relates the classes.
+Constraints whose variables do not occur in the annotated type are ambiguous.
+
+Numeric default eligibility may inspect general instance contexts without
+choosing evidence. In particular, `Num a, Inspect a` can qualify through a
+`Show a => Inspect a` blanket. The original predicates are resolved again
+after defaulting, preserving concrete specializations. Custom bare constraints
+without an eligible blanket still prevent numeric defaulting.
+
+Named instances permit structural contexts using only variables of the head,
+without open effect rows or a decreasing-size requirement. Blanket contexts
+must constrain their single head variable. Their class-dependency graph must
+be acyclic across all loaded modules; declarations closing a cycle are rejected.
+Structured context cycles are checked at use sites: repeated active predicates
+report their resolution chain, and growing chains hit a fixed nesting limit.
+Inference, evidence availability probes, and elaboration all bound recursion;
+repeated sibling requirements are not cycles. Instance selection never falls
+back to a less specific head when the selected context fails.
 
 Classes and instances are checked in source order. All instances in the loaded
 graph participate in overlap checking, including orphan instances, while
@@ -226,8 +236,10 @@ collapsing it into the user-definable name `Unit`.
 
 Explicit `deriving (Eq, Show)` generates ordinary instance ASTs, checked through
 the same inference and elaboration path as handwritten methods. Their contexts
-are computed from fields and available conditional instances; phantom parameters
-need no evidence. Recursive fields reuse the instance being checked. There is
+retain predicates for polymorphic fields, including structural field types,
+so callers select field specializations; phantom parameters need no evidence.
+Direct recursive fields reuse the instance being checked. Other cyclic context
+chains follow the ordinary use-site rejection rule. There is
 no automatic structural equality or display for a source ADT without an instance.
 Nominal records use the same type identity, schemes, and deriving machinery as
 single-constructor ADTs. Field projection and update are deferred until the
@@ -261,6 +273,13 @@ parameters then precede source arguments. Effects on a method arrow execute
 when that arrow is applied, not when its dictionary is constructed.
 An instance implementation without syntactic parameters is checked for a pure
 construction effect row; producing a function cannot conceal eager IO.
+Instance methods carry their owning instance identity through the typed AST.
+Its head is available as self evidence while checking the method; elaboration
+can call that instance's workers or factory with its existing context without
+performing polymorphic lookup or adding a public self constraint. Other
+polymorphic method calls use given dictionary projections, including partial
+applications and lifted locals. Scalar specialization never replaces them
+with newly selected instance evidence.
 
 After evidence elaboration, a bounded Core specialization pass emits Int and
 Float variants of effect-free source workers with one numeric type parameter

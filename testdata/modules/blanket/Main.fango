@@ -1,0 +1,4 @@
+module Main exposing (main)
+import Defaults
+import Specialized
+main = Defaults.forward "secret" ++ "/" ++ Defaults.fixed()

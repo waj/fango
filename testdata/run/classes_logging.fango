@@ -1,0 +1,41 @@
+class LogValue a
+    logValue : a -> String
+
+type Credentials = Credentials String String deriving (Show)
+
+instance LogValue Credentials
+    logValue credentials = case credentials of
+        Credentials username _ -> username ++ " [password omitted]"
+
+instance Show a => LogValue a
+    logValue x = show x
+
+instance LogValue Int
+    logValue x = "integer " ++ show x
+
+type Hidden = Hidden String
+instance LogValue Hidden
+    logValue x = "hidden"
+
+class Audit a
+    audit : a -> String
+instance LogValue a => Audit a
+    audit x = logValue x
+
+log : LogValue a => a ->{IO} ()
+log x = print (logValue x)
+
+forward x = logValue x
+localForward x =
+    render y = logValue y
+    render x
+
+main() =
+    credentials = Credentials "alice" "secret"
+    log 42
+    log credentials
+    print (forward credentials)
+    print (localForward credentials)
+    print (audit 7)
+    print (audit credentials)
+    log (Hidden "not showable")

@@ -130,20 +130,7 @@
         "1": { "name": "keyword.other.instance.fango" }
       },
       "patterns": [
-        { "include": "#comments" },
-        {
-          "name": "keyword.operator.big-arrow.fango",
-          "match": "=>"
-        },
-        { "include": "#qualified_module" },
-        {
-          "name": "entity.name.type.fango",
-          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
-        },
-        {
-          "name": "variable.other.generic-type.fango",
-          "match": "\\b[a-z][A-Za-z0-9_]*\\b"
-        }
+        { "include": "#type_expression" }
       ]
     },
     "effect_decl": {

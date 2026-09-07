@@ -1,0 +1,6 @@
+module Defaults exposing (forward, fixed)
+import Capability exposing (LogValue(..))
+instance Show a => LogValue a
+    logValue x = show x
+forward x = logValue x
+fixed() = logValue "secret"

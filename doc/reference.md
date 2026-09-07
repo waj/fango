@@ -490,10 +490,12 @@ use that evidence. A constraint variable absent from the annotated type is
 ambiguous. Local syntactic functions can generalize constraints; ordinary
 local values remain monomorphic.
 
-Instance heads must be fully applied named types, not bare variables or
-functions. Applied heads are parenthesized. Their arguments can be variables,
-repeated variables, concrete types, or nested applications. Conditional
-instances require constraints on variables occurring in the head:
+Instance heads are either a bare type variable (a blanket instance) or a fully
+applied named type. Direct function heads are unsupported, but a blanket can
+match a function type. Applied heads are parenthesized. Their arguments can be
+variables, repeated variables, concrete types, or nested applications.
+Conditional instances may require structural constraints; every context
+variable must occur in the head, and open effect rows are rejected:
 
 ```fango
 type Box a = Box a
@@ -506,13 +508,62 @@ instance Show (Box Int)
     show box = "integer box"
 ```
 
+Blanket instances provide implementations for types satisfying their context.
+For example, an application can use ordinary display as its logging default
+and specialize particular domain types:
+
+```fango
+class LogValue a
+    logValue : a -> String
+
+instance Show a => LogValue a
+    logValue x = show x
+
+type Credentials = Credentials String String deriving (Show)
+
+instance LogValue Credentials
+    logValue credentials = case credentials of
+        Credentials username _ -> username ++ " [password omitted]"
+
+log : LogValue a => a ->{IO} ()
+log x = print (logValue x)
+
+main() =
+    log 42
+    log (Credentials "alice" "secret")
+```
+
+This prints `42` and `alice [password omitted]`. An unannotated
+`forward x = logValue x` infers `LogValue a => a -> String`, so its caller
+supplies the specialized dictionary. Annotating it with only `Show a` instead
+reports `MISSING CONSTRAINT`: the blanket does not imply `LogValue a` inside
+a polymorphic body. The same rule applies to structured types:
+`render x = show (Box x)` infers `Show (Box a) => a -> String`, preserving the
+caller's `Show (Box Int)` specialization.
+
 Matching selects the most specific visible head. Overlap is allowed only when
 one head is strictly more specific than the other; duplicate heads and
 incomparable overlapping heads report `OVERLAPPING INSTANCE`. An unresolved
-type is never guessed from the set of instances. In a polymorphic body a
-quantified variable is atomic, so a use resolved to the general instance stays
-general even when a caller later supplies a more specific type. Explicitly
-passed evidence takes precedence over instance selection.
+type is never guessed from the set of instances. Predicates containing any
+unresolved or quantified variable retain their evidence requirement, even
+when only one instance currently matches. Concrete predicates resolve through
+instances; explicitly passed evidence takes precedence. Contexts do not affect
+specificity, and a selected instance with an unsatisfied context does not fall
+back to a less specific instance.
+
+Structured contexts need not be smaller than their heads. For example,
+`Show (Box a) => Show (Wrapper a)` can delegate to a wrapper's `Box a` field.
+A circular requirement encountered at a concrete use reports
+`INSTANCE RESOLUTION` with its cycle; a growing chain reports the nesting
+limit instead. Declarations with such structural cycles are allowed, and a
+concrete specialization can break a cycle. Blanket contexts must constrain
+only their head variable, and cycles between their class requirements are
+rejected at declaration time with `INSTANCE CONTEXT`, even when a concrete
+specialization could break the cycle for some types.
+
+Inside an instance method, its own head is available as self evidence using
+the instance's declared context. This permits direct recursive implementations
+without requiring callers to supply a circular self constraint.
 
 Classes, instances, and ordinary definitions are checked in source order.
 Instances may live outside both the class's and the type's defining module
@@ -537,8 +588,13 @@ Show-constrained function that writes `show value` followed by a newline.
 Strings display raw, not quoted.
 
 When evaluation requires a concrete type, an unresolved variable defaults to
-`Int` only if its constraints include standard `Num` and no classes outside
-standard `Num`, `Eq`, `Ord`, and `Show`. Other unresolved constraints report
+`Int` only if its defaulting requirements include standard `Num` and no classes
+outside standard `Num`, `Eq`, `Ord`, and `Show`. Eligibility may expand general
+instance contexts: `Num a, LogValue a` qualifies through `Num a, Show a` in the
+example above. This does not choose evidence; the original constraints are
+resolved after defaulting, so concrete specializations still win. A custom
+bare constraint without an eligible blanket prevents defaulting.
+Other unresolved constraints, including undetermined phantom types, report
 `AMBIGUOUS CONSTRAINT`. Decimal literals do not default. An unconstrained
 runtime type variable defaults to Unit.
 
@@ -606,10 +662,12 @@ type Tree a = Leaf a | Branch (Tree a) (Tree a) deriving (Eq, Show)
 ```
 
 Only standard `Eq` and `Show` can be derived. Generated instances require the
-field instances they use, including conditional evidence for type parameters;
-phantom parameters add no constraint. Recursive fields reuse the instance
-being derived. Deriving a function field fails unless its enclosing field
-type has a suitable explicit instance. Mutually recursive deriving groups
+field instances they use, retaining structural constraints for polymorphic
+fields so callers supply field specializations; phantom parameters add no
+constraint. Direct recursive fields reuse the instance being derived. Other
+cyclic context chains follow the ordinary resolution error rules. Concrete
+function fields require suitable blanket evidence; polymorphic function
+fields retain their class constraint. Mutually recursive deriving groups
 are not supported. Derived equality compares constructors and corresponding
 fields. Derived display concatenates the constructor name and field displays
 with spaces, without added parentheses or string quotes.

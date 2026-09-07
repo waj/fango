@@ -6,10 +6,10 @@ instance Show (Box a)
 instance Show (Box Int)
     show b = "int box"
 
-viaGeneric : Show a => Box a -> String
-viaGeneric b = show b
+viaEvidence : Show (Box a) => Box a -> String
+viaEvidence b = show b
 
 main =
     print (Box 1)
     print (Box "s")
-    print (viaGeneric (Box 3))
+    print (viaEvidence (Box 3))

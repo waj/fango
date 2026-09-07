@@ -1,0 +1,5 @@
+module Capability exposing (A(..), B(..))
+class A a
+    aa : a -> String
+class B a
+    bb : a -> String

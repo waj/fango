@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
@@ -13,7 +14,7 @@ import (
 
 type InstanceInfo struct {
 	Class       *types.ClassInfo
-	Head        *types.TCon
+	Head        types.Type
 	Vars        []*types.TVar
 	Preds       []types.Pred
 	Name, Owner string
@@ -79,7 +80,18 @@ func (ck *Checker) ClassDecl(d *ast.ClassDecl) []diag.Error {
 func hasOpenRow(t types.Type) bool {
 	switch t := t.(type) {
 	case *types.TFun:
-		return t.Eff.Tail != nil || hasOpenRow(t.Arg) || hasOpenRow(t.Ret)
+		return hasOpenRow(t.Eff) || hasOpenRow(t.Arg) || hasOpenRow(t.Ret)
+	case types.Row:
+		if t.Tail != nil {
+			return true
+		}
+		for _, l := range t.Labels {
+			for _, a := range l.Args {
+				if hasOpenRow(a) {
+					return true
+				}
+			}
+		}
 	case *types.TCon:
 		for _, a := range t.Args {
 			if hasOpenRow(a) {
@@ -114,10 +126,11 @@ func (ck *Checker) InstanceDecl(d *ast.InstanceDecl) ([]DeclInfo, []diag.Error) 
 		return nil, []diag.Error{diag.Errorf(d.Head.Sp, "UNKNOWN CLASS", "I don't know class `%s`.", d.Head.Class)}
 	}
 	scope := ck.NewAnnScope()
-	ty, errs := ck.ResolveTypeExpr(d.Head.Ty, scope)
-	head, ok := ty.(*types.TCon)
-	if !ok {
-		return nil, append(errs, diag.Errorf(d.Head.Sp, "INSTANCE HEAD", "An instance head must be a fully applied named type."))
+	head, errs := ck.ResolveTypeExpr(d.Head.Ty, scope)
+	switch head.(type) {
+	case *types.TCon, *types.TVar:
+	default:
+		return nil, append(errs, diag.Errorf(d.Head.Sp, "INSTANCE HEAD", "An instance head must be a type variable or a fully applied named type."))
 	}
 	if hasOpenRow(head) {
 		return nil, append(errs, diag.Errorf(d.Head.Sp, "INSTANCE HEAD", "An instance head may not contain open effect rows."))
@@ -128,13 +141,17 @@ func (ck *Checker) InstanceDecl(d *ast.InstanceDecl) ([]DeclInfo, []diag.Error) 
 	ps, es := ck.ResolvePreds(d.Preds, scope)
 	errs = append(errs, es...)
 	for _, p := range ps {
-		v, ok := p.Ty.(*types.TVar)
-		if !ok || !seen[v.ID] {
-			errs = append(errs, diag.Errorf(d.Head.Sp, "INSTANCE CONTEXT", "Instance constraints must apply to type variables of the instance head."))
+		if hasOpenRow(p.Ty) {
+			errs = append(errs, diag.Errorf(d.Head.Sp, "INSTANCE CONTEXT", "Instance constraints may not contain open effect rows."))
+		}
+		if _, blanket := head.(*types.TVar); blanket {
+			if v, ok := p.Ty.(*types.TVar); !ok || !seen[v.ID] {
+				errs = append(errs, diag.Errorf(d.Head.Sp, "INSTANCE CONTEXT", "Blanket instance constraints must apply to the head's type variable."))
+			}
 		}
 	}
 	for _, old := range ck.Instances {
-		if old.Class != cl || old.Head.Unique != head.Unique {
+		if old.Class != cl {
 			continue
 		}
 		oldGeq := headAtLeastAsSpecific(old.Head, head)
@@ -144,6 +161,11 @@ func (ck *Checker) InstanceDecl(d *ast.InstanceDecl) ([]DeclInfo, []diag.Error) 
 			errs = append(errs, diag.Errorf(d.Head.Sp, "OVERLAPPING INSTANCE", "Instance `%s %s` duplicates the instance declared at %v.", types.SurfaceName(cl.Name), types.Show(head), old.Span.StartPos()))
 		case !oldGeq && !newGeq && headsUnify(old.Head, head):
 			errs = append(errs, diag.Errorf(d.Head.Sp, "OVERLAPPING INSTANCE", "Instance `%s %s` overlaps the instance declared at %v; neither is more specific, so some uses would be ambiguous.", types.SurfaceName(cl.Name), types.Show(head), old.Span.StartPos()))
+		}
+	}
+	if _, blanket := head.(*types.TVar); blanket {
+		if cycle := ck.blanketCycle(cl.Name, ps); len(cycle) > 0 {
+			errs = append(errs, diag.Errorf(d.Head.Sp, "INSTANCE CONTEXT", "Circular blanket instance requirements: %s.", strings.Join(cycle, " -> ")))
 		}
 	}
 	methods := map[string]*ast.ValueDecl{}
@@ -196,7 +218,7 @@ func (ck *Checker) InstanceDecl(d *ast.InstanceDecl) ([]DeclInfo, []diag.Error) 
 		m := methods[types.SurfaceName(cm.Name)]
 		m.Name = name + "_" + types.SurfaceName(cm.Name)
 		mt := types.SubstRigid(cm.Type, map[int]types.Type{cl.Param.ID: head})
-		info, es := ck.instanceMethod(m, mt, inst.Preds)
+		info, es := ck.instanceMethod(m, mt, inst)
 		errs = append(errs, es...)
 		ck.BindDecl(info)
 		infos = append(infos, info)
@@ -225,7 +247,11 @@ func (ck *Checker) InstanceDecl(d *ast.InstanceDecl) ([]DeclInfo, []diag.Error) 
 	return infos, errs
 }
 
-func (ck *Checker) instanceMethod(d *ast.ValueDecl, ty types.Type, given []types.Pred) (DeclInfo, []diag.Error) {
+func (ck *Checker) instanceMethod(d *ast.ValueDecl, ty types.Type, inst *InstanceInfo) (DeclInfo, []diag.Error) {
+	previous := ck.checkingInstance
+	ck.checkingInstance = inst
+	defer func() { ck.checkingInstance = previous }()
+	given := inst.Preds
 	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	var inferred types.Type
 	if len(d.Params) > 0 {
@@ -245,24 +271,30 @@ func (ck *Checker) instanceMethod(d *ast.ValueDecl, ty types.Type, given []types
 	var es []diag.Error
 	sch, es = ck.qualify(sch, g.preds, given, true, d.NameSpan)
 	errs = append(errs, es...)
-	return DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body, Scheme: sch}, errs
+	return DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body, Scheme: sch, Instance: inst}, errs
 }
 
 // MatchInstance selects the unique most-specific visible instance matching p.
-// Resolution is directional: it never guesses a metavariable's type from the
-// set of available instances. blocked reports that an unsolved metavariable
-// left a match — or the choice among matches — undecided, so the caller must
-// defer the predicate rather than commit.
+// Evidence selection requires a concrete type, including every nested value
+// and row variable. A polymorphic predicate stays deferred even if only one
+// currently visible head could match: its caller must supply the dictionary.
 func (ck *Checker) MatchInstance(p types.Pred, owner string) (in *InstanceInfo, m map[int]types.Type, blocked bool) {
-	t, ok := ck.Sub.Apply(p.Ty).(*types.TCon)
-	if !ok {
-		return nil, nil, false
+	t := ck.Sub.Apply(p.Ty)
+	if hasTypeVars(t) {
+		return nil, nil, true
 	}
+	return ck.matchInstanceHead(types.Pred{Class: p.Class, Ty: t}, owner)
+}
+
+// matchInstanceHead is also used for default eligibility, never to choose
+// evidence for a polymorphic predicate.
+func (ck *Checker) matchInstanceHead(p types.Pred, owner string) (in *InstanceInfo, m map[int]types.Type, blocked bool) {
+	t := p.Ty
 	var best *InstanceInfo
 	var bestBinds map[int]types.Type
-	var blockedHeads []*types.TCon
+	var blockedHeads []types.Type
 	for _, in := range ck.Instances {
-		if in.Class.Name != p.Class || in.Head.Unique != t.Unique {
+		if in.Class.Name != p.Class {
 			continue
 		}
 		if ck.InstanceImports != nil && in.Owner != owner && !ck.InstanceImports[owner][in.Owner] {
@@ -311,19 +343,23 @@ func (ck *Checker) NormalizePreds(ps []types.Pred) []types.Pred {
 func (ck *Checker) reduceObligations(obs []predObligation, given []types.Pred) ([]types.Pred, []diag.Error) {
 	var residual []types.Pred
 	var errs []diag.Error
-	var reduce func(types.Pred, source.Span, int)
-	reduce = func(p types.Pred, sp source.Span, depth int) {
+	var reduce func(types.Pred, source.Span)
+	var path []types.Pred
+	reduce = func(p types.Pred, sp source.Span) {
 		p.Ty = ck.Sub.Apply(p.Ty)
 		for _, q := range given {
 			if p.Class == q.Class && types.Equal(p.Ty, ck.Sub.Apply(q.Ty)) {
 				return
 			}
 		}
-		if depth > 100 {
-			errs = append(errs, diag.Errorf(sp, "INSTANCE RESOLUTION", "Instance resolution exceeded its nesting limit."))
+		if in := ck.checkingInstance; in != nil && in.Class.Name == p.Class && types.Equal(in.Head, p.Ty) {
 			return
 		}
-		if _, ok := p.Ty.(*types.TVar); ok {
+		if err := ResolutionPathError(path, p, sp); err != nil {
+			errs = append(errs, *err)
+			return
+		}
+		if hasTypeVars(p.Ty) {
 			residual = append(residual, p)
 			return
 		}
@@ -333,22 +369,24 @@ func (ck *Checker) reduceObligations(obs []predObligation, given []types.Pred) (
 			return
 		}
 		if in != nil {
+			path = append(path, p)
 			for _, q := range types.SubstPreds(in.Preds, m) {
-				reduce(q, sp, depth+1)
+				reduce(q, sp)
 			}
+			path = path[:len(path)-1]
 			return
 		}
 		errs = append(errs, diag.Errorf(sp, "MISSING INSTANCE", "No instance provides `%s %s`.", types.SurfaceName(p.Class), types.Show(p.Ty)))
 	}
 	for _, o := range obs {
-		reduce(o.pred, o.span, 0)
+		reduce(o.pred, o.span)
 	}
 	return ck.NormalizePreds(residual), errs
 }
 
 func (ck *Checker) DefaultPreds(ps []types.Pred, sp source.Span) []diag.Error {
 	groups := map[int][]types.Pred{}
-	for _, p := range ck.NormalizePreds(ps) {
+	for _, p := range ck.defaultRequirements(ps) {
 		if v, ok := p.Ty.(*types.TVar); ok && !v.Rigid {
 			groups[v.ID] = append(groups[v.ID], p)
 		}
@@ -391,8 +429,7 @@ func (ck *Checker) qualify(sch types.Scheme, obs []predObligation, given []types
 	}
 	var ground []types.Pred
 	for _, p := range left {
-		v, ok := p.Ty.(*types.TVar)
-		if ok && quant[v.ID] {
+		if mentionsAny(p.Ty, quant) {
 			if annotated {
 				errs = append(errs, diag.Errorf(sp, "MISSING CONSTRAINT", "The annotation requires the additional constraint `%s %s`.", types.SurfaceName(p.Class), types.Show(p.Ty)))
 			} else {
@@ -426,14 +463,168 @@ func (ck *Checker) qualify(sch types.Scheme, obs []predObligation, given []types
 }
 
 func (ck *Checker) CanResolve(p types.Pred, owner string) bool {
+	return ck.canResolve(p, owner, nil)
+}
+
+func (ck *Checker) canResolve(p types.Pred, owner string, path []types.Pred) bool {
+	p.Ty = ck.Sub.Apply(p.Ty)
+	if ResolutionPathError(path, p, source.Span{}) != nil {
+		return false
+	}
 	in, m, blocked := ck.MatchInstance(p, owner)
 	if in == nil || blocked {
 		return false
 	}
 	for _, q := range types.SubstPreds(in.Preds, m) {
-		if !ck.CanResolve(q, owner) {
+		if !ck.canResolve(q, owner, append(path, p)) {
 			return false
 		}
 	}
 	return true
+}
+
+func hasTypeVars(t types.Type) bool {
+	ids := map[int]bool{}
+	collectVarIDs(t, ids)
+	return len(ids) != 0
+}
+
+func mentionsAny(t types.Type, vars map[int]bool) bool {
+	ids := map[int]bool{}
+	collectVarIDs(t, ids)
+	for id := range ids {
+		if vars[id] {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolutionPathError bounds all recursive evidence consumers. Only active
+// ancestors count as cycles: sibling requirements may legitimately repeat.
+func ResolutionPathError(path []types.Pred, p types.Pred, sp source.Span) *diag.Error {
+	for i, q := range path {
+		if p.Class == q.Class && types.Equal(p.Ty, q.Ty) {
+			var names []string
+			for _, r := range append(append([]types.Pred{}, path[i:]...), p) {
+				names = append(names, types.SurfaceName(r.Class)+" "+types.Show(r.Ty))
+			}
+			err := diag.Errorf(sp, "INSTANCE RESOLUTION", "Circular instance requirements: %s.", strings.Join(names, " -> "))
+			return &err
+		}
+	}
+	if len(path) > 100 {
+		err := diag.Errorf(sp, "INSTANCE RESOLUTION", "Instance resolution exceeded its nesting limit.")
+		return &err
+	}
+	return nil
+}
+
+func (ck *Checker) blanketCycle(class string, ps []types.Pred) []string {
+	edges := map[string][]types.Pred{class: ps}
+	for _, in := range ck.Instances {
+		if _, ok := in.Head.(*types.TVar); ok {
+			edges[in.Class.Name] = in.Preds
+		}
+	}
+	// The candidate replaces an old duplicate only for checking; overlap
+	// validation independently rejects the duplicate.
+	edges[class] = ps
+	done := map[string]bool{}
+	var visit func(string, []string) []string
+	visit = func(n string, path []string) []string {
+		for i, old := range path {
+			if old == n {
+				cycle := append(append([]string{}, path[i:]...), n)
+				for j := range cycle {
+					cycle[j] = types.SurfaceName(cycle[j])
+				}
+				return cycle
+			}
+		}
+		if done[n] {
+			return nil
+		}
+		for _, p := range edges[n] {
+			if cycle := visit(p.Class, append(path, n)); cycle != nil {
+				return cycle
+			}
+		}
+		done[n] = true
+		return nil
+	}
+	return visit(class, nil)
+}
+
+// defaultRequirements expands general heads solely to discover numeric
+// default eligibility. Specializations are deliberately not committed here;
+// the original predicates are resolved after defaulting. A blocked structural
+// predicate stays deferred, as before, while an unsupported bare custom class
+// disqualifies its variable from defaulting.
+func (ck *Checker) defaultRequirements(ps []types.Pred) []types.Pred {
+	var out []types.Pred
+	var expand func(types.Pred, []types.Pred)
+	expand = func(p types.Pred, path []types.Pred) {
+		p.Ty = ck.Sub.Apply(p.Ty)
+		if ResolutionPathError(path, p, source.Span{}) != nil {
+			out = append(out, p)
+			return
+		}
+		if _, variable := p.Ty.(*types.TVar); variable {
+			switch p.Class {
+			case "Basics.Num", "Basics.Eq", "Basics.Ord", "Basics.Show":
+				out = append(out, p)
+				return
+			}
+		}
+		// Rigidify only this eligibility probe: concrete specializations
+		// must not block inspecting the general head's requirements.
+		ids := map[int]bool{}
+		collectVarIDs(p.Ty, ids)
+		sub := Subst{}
+		for id := range ids {
+			sub[id] = &types.TVar{ID: id, Rigid: true, Kind: types.General}
+		}
+		probe := types.Pred{Class: p.Class, Ty: sub.Apply(p.Ty)}
+		in, m, _ := ck.matchInstanceHead(probe, ck.CurrentOwner)
+		if in == nil {
+			out = append(out, p)
+			return
+		}
+		// Restore the actual variables in the matched context.
+		restore := map[int]types.Type{}
+		collectVariables(p.Ty, restore)
+		for _, q := range types.SubstPreds(in.Preds, m) {
+			q.Ty = types.SubstRigid(q.Ty, restore)
+			expand(q, append(path, p))
+		}
+	}
+	for _, p := range ps {
+		expand(p, nil)
+	}
+	return ck.NormalizePreds(out)
+}
+
+func collectVariables(t types.Type, out map[int]types.Type) {
+	switch t := t.(type) {
+	case *types.TVar:
+		out[t.ID] = t
+	case *types.TCon:
+		for _, a := range t.Args {
+			collectVariables(a, out)
+		}
+	case *types.TFun:
+		collectVariables(t.Arg, out)
+		collectVariables(t.Eff, out)
+		collectVariables(t.Ret, out)
+	case types.Row:
+		for _, l := range t.Labels {
+			for _, a := range l.Args {
+				collectVariables(a, out)
+			}
+		}
+		if t.Tail != nil {
+			collectVariables(t.Tail, out)
+		}
+	}
 }

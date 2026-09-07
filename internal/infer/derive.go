@@ -19,38 +19,30 @@ func (ck *Checker) DeriveDecl(td *ast.TypeDecl) ([]DeclInfo, []diag.Error) {
 			errs = append(errs, diag.Errorf(derive.Sp, "CANNOT DERIVE", "Only the standard Eq and Show classes can be derived."))
 			continue
 		}
-		needed := map[int]bool{}
-		var fields func(types.Type, int)
-		fields = func(t types.Type, depth int) {
-			if depth > 100 {
-				return
-			}
-			if v, ok := t.(*types.TVar); ok {
-				needed[v.ID] = true
-				return
-			}
-			if c, ok := t.(*types.TCon); ok && c.Unique == adt.Con.Unique {
-				return
-			}
-			if in, m, _ := ck.MatchInstance(types.Pred{Class: cl.Name, Ty: t}, ck.CurrentOwner); in != nil {
-				for _, p := range types.SubstPreds(in.Preds, m) {
-					fields(p.Ty, depth+1)
-				}
-			}
-		}
-		for _, c := range adt.Ctors {
-			for _, f := range c.Fields {
-				fields(f, 0)
-			}
-		}
 		var ctx []ast.PredExpr
+		// Keep polymorphic field evidence intact, so the caller selects
+		// specializations. Direct recursive fields use the instance itself.
+		for i, c := range adt.Ctors {
+			for j, f := range c.Fields {
+				if !hasTypeVars(f) {
+					continue
+				}
+				if self, ok := f.(*types.TCon); ok && self.Unique == adt.Con.Unique {
+					continue
+				}
+				var te ast.TypeExpr
+				if adt.IsRecord() {
+					te = td.RecordFields[j].Type
+				} else {
+					te = td.Ctors[i].Args[j]
+				}
+				ctx = append(ctx, ast.PredExpr{Class: cl.Name, Ty: te, Sp: derive.Sp})
+			}
+		}
 		var args []ast.TypeExpr
-		for i, p := range td.Params {
+		for _, p := range td.Params {
 			v := &ast.TVarName{Name: p.Name, Sp: p.Sp}
 			args = append(args, v)
-			if needed[adt.Params[i].ID] {
-				ctx = append(ctx, ast.PredExpr{Class: cl.Name, Ty: v, Sp: derive.Sp})
-			}
 		}
 		var head ast.TypeExpr = &ast.TName{Name: td.Name, Sp: td.NameSpan}
 		if len(args) > 0 {

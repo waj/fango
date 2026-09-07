@@ -21,7 +21,7 @@ instance Show a => Show (Box a)
         Box value -> "generic " ++ show value
 instance Show (Box Int)
     show box = "specific"
-render : (Num a, Show a) => a -> String
+render : (Num a, Show (Box a)) => a -> String
 render value = show (Box (value + 1))
 
 main =

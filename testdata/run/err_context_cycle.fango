@@ -1,0 +1,9 @@
+type LeftBox a = LeftBox a
+type RightBox a = RightBox a
+instance Show (RightBox a) => Show (LeftBox a)
+    show left = case left of
+        LeftBox value -> show (RightBox value)
+instance Show (LeftBox a) => Show (RightBox a)
+    show right = case right of
+        RightBox value -> show (LeftBox value)
+main = show (LeftBox True)

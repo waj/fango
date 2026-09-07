@@ -154,7 +154,7 @@ func TestNegative(t *testing.T) {
 		// Use-before-define is a naming error: source-order scoping.
 		{"main = x\nx = 1", "NAMING ERROR", 1},
 		{"x = 1 + \"a\"", "MISSING INSTANCE", 1},                 // WhyOperand
-		{"x = 1 2", "MISSING INSTANCE", 1},                       // WhyCall: not a function
+		{"main = 1 2", "AMBIGUOUS CONSTRAINT", 1},                // A function-shaped numeric obligation cannot default.
 		{"x = if 1 then 2 else 3", "MISSING INSTANCE", 1},        // WhyIfCondition
 		{"x = if True then 1 else \"a\"", "MISSING INSTANCE", 1}, // WhyIfBranches
 		{"x = 1 == \"a\"", "MISSING INSTANCE", 1},                // WhyCompare

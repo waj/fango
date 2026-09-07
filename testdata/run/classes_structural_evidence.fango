@@ -1,0 +1,37 @@
+type Box a = Box a
+instance Show a => Show (Box a)
+    show box = case box of
+        Box value -> "box " ++ show value
+instance Show (Box String)
+    show box = "special string box"
+
+type Wrapper a = Wrapper (Box a)
+instance Show (Box a) => Show (Wrapper a)
+    show wrapper = case wrapper of
+        Wrapper box -> show box
+
+type Derived a = Derived (Box a) deriving (Show)
+type Record a = { value : Box a } deriving (Show)
+type Tree a = Leaf a | Branch (Tree a) (Tree a) deriving (Eq, Show)
+
+render x = show (Box x)
+method : Show (Box a) => Box a -> String
+method = show
+localRender x =
+    renderLocal y = show (Box y)
+    renderLocal x
+captured x =
+    renderCaptured suffix = show (Box x) ++ suffix
+    renderCaptured "!"
+
+main() =
+    print (render "value")
+    print (localRender "value")
+    print (captured "value")
+    print (method (Box "value"))
+    print (Wrapper (Box "value"))
+    print (Derived (Box "value"))
+    print (Record { value = Box "value" })
+    print (Wrapper (Box 42))
+    print (Branch (Leaf 1) (Leaf 2))
+    print (Branch (Leaf True) (Leaf False) == Branch (Leaf True) (Leaf False))

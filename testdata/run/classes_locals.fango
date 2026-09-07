@@ -9,9 +9,12 @@ make x =
 
 render p = show p
 
+phantom : Phantom ()
+phantom = Phantom
+
 main =
     compare = make (Box "hello")
     print (compare (Box "hello"))
     print (compare (Box "bye"))
     print (render (Box (Box "text")))
-    print Phantom
+    print phantom

@@ -1,0 +1,4 @@
+module Specialized exposing ()
+import Capability exposing (LogValue(..))
+instance LogValue String
+    logValue x = "special"
