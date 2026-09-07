@@ -709,11 +709,11 @@ Constructor arguments are type atoms. Parenthesize applied or function types,
 as in `Cons a (List a)` or `Fn (a -> b)`. Constructors are ordinary curried
 values and can be partially applied.
 
-Equality and display are opt-in, either handwritten instances or an explicit
-deriving clause:
+Equality, ordering, and display are opt-in, either handwritten instances or an
+explicit deriving clause:
 
 ```fango
-type Tree a = Leaf a | Branch (Tree a) (Tree a) deriving (Eq, Show)
+type Tree a = Leaf a | Branch (Tree a) (Tree a) deriving (Eq, Ord, Show)
 ```
 
 `Eq`, `Ord`, and `Show` are derivable out of the box, and any class becomes

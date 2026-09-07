@@ -1,0 +1,17 @@
+module Main exposing (main)
+
+import Encode exposing (Encode(..))
+
+-- Field evidence is ordinary instance resolution, so a hand-written instance
+-- and a derived one compose without either knowing about the other.
+instance Encode Int
+    encode n = show n
+
+-- The quoted `encode` calls resolve in Encode, not here, so generated code
+-- cannot capture or be captured by anything at this site.
+type Colour = Red | Blue deriving (Encode)
+
+type Point = { x : Int, y : Colour } deriving (Encode)
+
+main : String
+main = encode (Point { x = 3, y = Blue }) ++ " " ++ encode Red

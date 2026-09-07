@@ -1,4 +1,4 @@
-module Derive exposing (..)
+module Derive exposing ()
 
 import Basics
 import Meta exposing (Bound(..), BoundField(..), Code, Ctor(..), Field(..), Items(..), Lift(..), Shape(..), TypeInfo(..))

@@ -113,23 +113,6 @@ func (ck *Checker) IsCompileTimeOnly(t types.Type) bool {
 	return visit(t, map[int]bool{})
 }
 
-func mentionsCon(t types.Type, unique int) bool {
-	switch t := t.(type) {
-	case *types.TCon:
-		if t.Unique == unique {
-			return true
-		}
-		for _, a := range t.Args {
-			if mentionsCon(a, unique) {
-				return true
-			}
-		}
-	case *types.TFun:
-		return mentionsCon(t.Arg, unique) || mentionsCon(t.Ret, unique)
-	}
-	return false
-}
-
 func (ck *Checker) reflectionClosed(t types.Type) bool {
 	switch t := t.(type) {
 	case *types.TVar:

@@ -1,0 +1,32 @@
+-- A derived instance's context is what its generated methods actually need.
+-- `Phantom`'s parameter appears in no field, so `Ord (Phantom Bool)` holds
+-- even though `Bool` has no `Ord` instance at all.
+import Meta exposing (Bound(..), BoundField(..), Code, Ctor(..), Items(..), Lift(..), TypeInfo(..))
+
+type Phantom a = Phantom Int deriving (Eq, Ord, Show)
+
+before : Phantom Bool -> Phantom Bool -> Bool
+before x y = x < y
+
+seven : Phantom Bool
+seven = Phantom 7
+
+-- A deriver that reads only the first field demands evidence only for it.
+class Head a
+    headOf : a -> String
+
+firstField : Bound -> Code
+firstField bound =
+    case bound.fields of
+        NoItems -> Meta.lift bound.ctor.name
+        Item field _ -> quote (show $(field.value))
+
+deriver Head
+    headOf subject valueCode = Meta.match subject valueCode firstField
+
+type Fn = Fn Int (Int -> Int) deriving (Head)
+
+main() =
+    print (before (Phantom 1) (Phantom 2))
+    print seven
+    print (headOf (Fn 5 (\n -> n)))

@@ -35,14 +35,19 @@ deriver Blank
             NoItems -> Meta.fail "a type with no constructors"
             Item ctor _ -> Meta.construct ctor (Meta.mapItems zeroFor ctor.fields)
 
-type Colour = Red | Green Int | Blue Int String deriving (Tag)
+type Colour = Red | Green Int | Blue Int String deriving (Tag, Blank, Show, Eq)
 
 type Pair = { left : Int, right : String } deriving (Blank, Tag, Show, Eq)
 
 empty : Pair
 empty = blank ()
 
+nothing : Colour
+nothing = blank ()
+
 main() =
+    print nothing
+    print (nothing == Red)
     print (tag Red)
     print (tag (Green 1))
     print (tag (Blue 1 "x"))

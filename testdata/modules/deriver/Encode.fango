@@ -1,0 +1,19 @@
+module Encode exposing (Encode(..))
+
+import Basics
+import Meta exposing (Bound(..), BoundField(..), Code, Ctor(..), Items(..), Lift(..), TypeInfo(..))
+
+-- A library class with its own deriver. Nothing here is privileged: the
+-- bundled Eq, Ord, and Show derivers are written exactly this way.
+class Encode a
+    encode : a -> String
+
+field : Code -> BoundField -> Code
+field sofar bound = quote ($(sofar) ++ " " ++ encode $(bound.value))
+
+body : Bound -> Code
+body bound = Meta.foldItems field (Meta.lift ("(" ++ bound.ctor.name)) bound.fields
+
+deriver Encode
+    encode subject valueCode =
+        quote ($(Meta.match subject valueCode body) ++ ")")
