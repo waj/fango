@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	goast "go/ast"
 	"go/format"
 	goparser "go/parser"
@@ -30,45 +31,72 @@ import (
 // FANGO_INTERNAL_PRINT_MAIN=1 and the eval leg shows main's value through
 // the same shared fangort formatter.
 
-var buildOnce sync.Once
-var fangoBin string
+// The CLI is built once, lazily, so short mode never pays for it. The Once
+// records the failure rather than calling t.Fatal, because the goroutine that
+// wins the race belongs to an arbitrary parallel case.
+var (
+	buildOnce sync.Once
+	fangoBin  string
+	buildErr  error
+)
 
 func cliBinary(t *testing.T) string {
 	t.Helper()
 	buildOnce.Do(func() {
 		dir, err := os.MkdirTemp("", "fango-e2e")
 		if err != nil {
-			t.Fatal(err)
+			buildErr = err
+			return
 		}
-		fangoBin = filepath.Join(dir, "fango")
-		cmd := exec.Command("go", "build", "-o", fangoBin, ".")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("building CLI: %v\n%s", err, out)
+		bin := filepath.Join(dir, "fango")
+		if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+			buildErr = fmt.Errorf("building CLI: %v\n%s", err, out)
+			return
 		}
+		fangoBin = bin
 	})
+	if buildErr != nil {
+		t.Fatal(buildErr)
+	}
 	return fangoBin
 }
 
+// The compiled leg is subprocess work — a `go build` of generated Go and a
+// run of the result — and each case compiles into its own FANGO_BUILD_DIR, so
+// the suite runs in parallel. The interpreter leg is the exception; see
+// interpret below.
 func TestDifferential(t *testing.T) {
 	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "run"))
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
+			t.Parallel()
 			runDifferentialCase(t, path)
 		})
 	}
 }
 
 func TestMandelbrotExample(t *testing.T) {
+	t.Parallel()
 	runDifferentialCase(t, filepath.Join("..", "..", "examples", "mandelbrot.fango"))
 }
 
 func TestGuessingGameExample(t *testing.T) {
+	t.Parallel()
 	runDifferentialCase(t, filepath.Join("..", "..", "examples", "guess.fango"))
 }
 
 func TestWcExample(t *testing.T) {
+	t.Parallel()
 	runDifferentialCase(t, filepath.Join("..", "..", "examples", "wc.fango"))
 }
+
+// The Core interpreter runs fango programs inside this process, against the
+// same fangort globals a compiled program owns outright — the PRNG cell
+// behind Random above all, which is process-global by design because one
+// compiled program owns one process. A test binary hosting many programs
+// breaks that assumption, so interpreter legs take turns. The compiled leg,
+// where the time actually goes, stays parallel.
+var interpret sync.Mutex
 
 func runDifferentialCase(t *testing.T, path string) {
 	t.Helper()
@@ -94,30 +122,32 @@ func runDifferentialCase(t *testing.T, path string) {
 	if !ok {
 		t.Fatalf("compile failed:\n%s", stderr.String())
 	}
-	env := eval.NewEnv()
-	env.DefineProg(prog)
-	var printed bytes.Buffer
-	_, err = eval.ForceIO(context.Background(), "main", env, eval.NewIOContext(strings.NewReader(stdin), &printed))
-	if err != nil {
-		t.Fatalf("eval: %v", err)
-	}
-	var mainTy = prog.Defs[len(prog.Defs)-1].Type
-	for _, d := range prog.Defs {
-		if d.Name == "main" {
-			mainTy = d.Type
+	evalOut := func() string {
+		interpret.Lock()
+		defer interpret.Unlock()
+
+		env := eval.NewEnv()
+		env.DefineProg(prog)
+		var printed bytes.Buffer
+		if _, err := eval.ForceIO(context.Background(), "main", env, eval.NewIOContext(strings.NewReader(stdin), &printed)); err != nil {
+			t.Fatalf("eval: %v", err)
 		}
-	}
-	var evalOut string
-	_, functionMain := mainTy.(*types.TFun)
-	if con, isCon := mainTy.(*types.TCon); (isCon && con.Unique == ck.B.Unit.Unique) || functionMain {
-		evalOut = printed.String()
-	} else {
+		mainTy := prog.Defs[len(prog.Defs)-1].Type
+		for _, d := range prog.Defs {
+			if d.Name == "main" {
+				mainTy = d.Type
+			}
+		}
+		_, functionMain := mainTy.(*types.TFun)
+		if con, isCon := mainTy.(*types.TCon); (isCon && con.Unique == ck.B.Unit.Unique) || functionMain {
+			return printed.String()
+		}
 		shown, err := eval.EvalIO(context.Background(), prog.EntryDisplay, env, eval.NewIOContext(strings.NewReader(stdin), &printed))
 		if err != nil {
 			t.Fatal(err)
 		}
-		evalOut = shown.(string) + "\n"
-	}
+		return shown.(string) + "\n"
+	}()
 	if evalOut != expected {
 		t.Errorf("interpreter output:\n%q\nwant:\n%q", evalOut, expected)
 	}

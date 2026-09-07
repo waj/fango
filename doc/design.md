@@ -439,6 +439,13 @@ Focused inference and elaboration harnesses install the actual embedded
 Generated Go is checked for deterministic, gofmt-idempotent output. The Core
 linter runs in every batch compilation.
 
+The differential cases run in parallel, since each compiles into its own
+build directory and the compiled leg is subprocess work. Their interpreter
+legs are serialized against each other: hosting many programs in one process
+is the test harness's privilege, not a language capability, and the
+interpreter shares the same process-global fangort state a compiled program
+owns outright — the PRNG cell behind Random in particular.
+
 Compile-latency benchmarks track cold and warm paths against recorded,
 machine-specific baselines. Runtime benchmarks compare representative scalar,
 match, string, list, and tree programs with handwritten Go and use per-case
