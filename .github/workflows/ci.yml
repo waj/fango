@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    env:
+      # The end-to-end suite compiles every fixture serially, each with a full
+      # `go build` of generated Go, so the default 10m per-package test timeout
+      # is too tight on a shared runner. `go` ignores GOFLAGS entries a
+      # subcommand does not accept, so `go vet` is unaffected.
+      GOFLAGS: -timeout=30m
+      # The compile-latency baselines in benchmarks/baselines/latency.json are
+      # recorded on a developer machine; see doc/design.md, "Testing and
+      # performance". CI measures and logs them but does not enforce them. The
+      # runtime-ratio gate self-calibrates and stays enforced here.
+      FANGO_LATENCY_GATE: "off"
+    steps:
+      - uses: actions/checkout@v4
+
+      # GOTOOLCHAIN=local in internal/build means the runner's own go must
+      # satisfy the go directive in go.mod; it will not download a toolchain.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          # setup-go's cache keys off go.sum, which this dependency-free repo
+          # does not have. The build cache is what matters here and is handled
+          # below.
+          cache: false
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-gobuild-
+
+      - run: make ci

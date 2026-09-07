@@ -448,6 +448,14 @@ are comparatively slow and sensitive to host load; `make test-perf` runs them
 explicitly, while `make ci` retains them as verification gates. Cons-list
 allocation remains the main known structural performance cost.
 
+The two performance gates differ in where they can be enforced. Compile
+latency is checked against recorded absolute numbers, so it is only meaningful
+on the machine that recorded them, and `FANGO_LATENCY_GATE=off` reduces it to
+measurement without assertion. The runtime-ratio gate builds its handwritten Go
+baseline on whatever host is running it and compares a ratio, so it
+self-calibrates and stays enforced everywhere, including continuous
+integration.
+
 ## Known limitations
 
 The implementation has a deliberately narrow, pure Go sidecar FFI but no

@@ -49,7 +49,10 @@ and configurable source roots remain deferred.
 - Expand introductory and task-oriented documentation without duplicating the
   normative reference.
 - Make benchmark baselines easier to reproduce and less sensitive to machine
-  load while retaining meaningful regression gates.
+  load while retaining meaningful regression gates. Continuous integration
+  currently measures compile latency without enforcing it, because the
+  baselines belong to one machine; enforcing it there needs either per-host
+  baselines or a host-independent formulation of the gate.
 
 ## Tail calls beyond the self-call loop
 

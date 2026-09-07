@@ -135,6 +135,14 @@ func TestCompileLatency(t *testing.T) {
 		return
 	}
 
+	// The baselines are host-specific, so comparing them against another
+	// machine's numbers is not a signal. FANGO_LATENCY_GATE=off measures and
+	// logs without asserting, which is what CI runs.
+	if os.Getenv("FANGO_LATENCY_GATE") == "off" {
+		t.Log("FANGO_LATENCY_GATE=off: measured only, baselines not enforced")
+		return
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("missing %s (run with -update-baselines to record): %v", path, err)
