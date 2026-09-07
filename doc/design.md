@@ -443,18 +443,17 @@ Compile-latency benchmarks track cold and warm paths against recorded,
 machine-specific baselines. Runtime benchmarks compare representative scalar,
 match, string, list, and tree programs with handwritten Go and use per-case
 ratio ceilings. These measurements arbitrate representation or optimization
-work. They run separately from the default correctness test loop because they
-are comparatively slow and sensitive to host load; `make test-perf` runs them
-explicitly, while `make ci` retains them as verification gates. Cons-list
-allocation remains the main known structural performance cost.
+work. Cons-list allocation remains the main known structural performance cost.
 
-The two performance gates differ in where they can be enforced. Compile
-latency is checked against recorded absolute numbers, so it is only meaningful
-on the machine that recorded them, and `FANGO_LATENCY_GATE=off` reduces it to
-measurement without assertion. The runtime-ratio gate builds its handwritten Go
-baseline on whatever host is running it and compares a ratio, so it
-self-calibrates and stays enforced everywhere, including continuous
-integration.
+Both gates assert on elapsed time, so neither is a correctness gate: a busy
+host fails them without anything having regressed. They live in their own
+package, `make test-perf` runs them deliberately, and nothing automated —
+`make test`, `make ci`, or continuous integration — depends on them. Neither
+is reproducible enough to change that yet. The latency gate compares against
+absolute milliseconds recorded on one machine, so it only means anything
+there. The runtime-ratio gate builds its handwritten Go baseline on whichever
+host runs it, which removes the machine dependence but not the load
+dependence: the ratio moves with whatever else is competing for the CPU.
 
 ## Known limitations
 

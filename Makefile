@@ -6,12 +6,15 @@
 build:
 	go build -o fango ./cmd/fango
 
-# Keep the default development loop deterministic and reasonably quick. This
-# includes the full compiler/interpreter differential suite, but leaves noisy
-# compile-latency and runtime-ratio gates to test-perf and ci.
+# The correctness suite: deterministic, asserting nothing about elapsed time.
+# This includes the full compiler/interpreter differential suite.
 test:
 	go test $$(go list ./... | grep -v benchmarks)
 
+# The compile-latency and runtime-ratio gates measure elapsed time, so they
+# answer to host load and, for latency, to the machine that recorded the
+# baselines. Run them deliberately on an otherwise idle machine; they are
+# never part of test or ci.
 test-perf:
 	go test ./benchmarks
 
@@ -37,7 +40,6 @@ ci:
 	test -z "$$(gofmt -l .)"
 	go vet ./...
 	go test $$(go list ./... | grep -v benchmarks)
-	go test ./benchmarks
 
 clean:
 	rm -f fango

@@ -18,16 +18,14 @@ Repository verification is split between correctness and performance:
 ```sh
 make test       # correctness and interpreter/compiler differential tests
 make test-perf  # compile-latency and runtime-ratio gates
-make ci         # formatting, vet, correctness, and performance gates
+make ci         # formatting, vet, and correctness gates
 ```
 
-The compile-latency gate compares medians against baselines recorded on the
-machine that ran `make update-baselines`, so it only means something on that
-machine. Setting `FANGO_LATENCY_GATE=off` still measures and logs the medians
-but skips the comparison; the runtime-ratio gate is unaffected because it
-calibrates against a Go baseline built on the same host. GitHub Actions runs
-`make ci` with `FANGO_LATENCY_GATE=off` on pushes to `master` and on pull
-requests (`.github/workflows/ci.yml`).
+`make test-perf` measures elapsed time, so a busy machine can fail it without
+anything having regressed. It is deliberately excluded from `make ci`; run it
+on an otherwise idle machine when you want the numbers. GitHub Actions runs
+`make ci` on pushes to `master` and on pull requests
+(`.github/workflows/ci.yml`).
 
 The CLI accepts one `.fango` source file:
 

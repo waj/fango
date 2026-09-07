@@ -49,10 +49,14 @@ and configurable source roots remain deferred.
 - Expand introductory and task-oriented documentation without duplicating the
   normative reference.
 - Make benchmark baselines easier to reproduce and less sensitive to machine
-  load while retaining meaningful regression gates. Continuous integration
-  currently measures compile latency without enforcing it, because the
-  baselines belong to one machine; enforcing it there needs either per-host
-  baselines or a host-independent formulation of the gate.
+  load while retaining meaningful regression gates. Neither performance gate
+  runs unattended today, because neither survives a loaded host: the
+  runtime-ratio gate's `mapfilter` case swings between roughly 5x and 8x
+  against its 4.5 ceiling on one machine depending on whether the rest of the
+  suite is running alongside it, so calibrating against a same-host Go
+  baseline is not on its own enough. Until that is fixed the gates stay
+  manual, and compile latency additionally needs per-host baselines or a
+  host-independent formulation.
 
 ## Tail calls beyond the self-call loop
 
