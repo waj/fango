@@ -1,0 +1,29 @@
+class Inspect a
+    inspect : a -> String
+
+class Shift a
+    shift : a -> a
+
+type Point = { x : Float, y : Float } deriving (Show)
+type Named = { label : String, point : Point } deriving (Show)
+
+quoted : String -> String
+quoted text = "\"" ++ text ++ "\""
+
+instance Inspect Point
+    inspect point = "Point { x = " ++ show point.x ++ ", y = " ++ show point.y ++ " }"
+
+instance Inspect Named
+    inspect named = quoted named.label ++ " at " ++ inspect named.point
+
+instance Shift Point
+    shift point = { point | x = point.x + 1.0 }
+
+instance Shift Named
+    shift named = { named | point = shift named.point }
+
+main() =
+    print (inspect Point { x = 1.0, y = 2.0 })
+    print (inspect Named { label = "origin", point = Point { x = 0.0, y = 0.0 } })
+    print (inspect (shift Point { x = 1.0, y = 2.0 }))
+    print (show (shift Named { label = "a", point = Point { x = 1.0, y = 2.0 } }))

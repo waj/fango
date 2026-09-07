@@ -54,6 +54,33 @@ func TestStructuralInstanceHeads(t *testing.T) {
 	}
 }
 
+// Deferred record obligations are discharged inside instance method bodies
+// too, so a projected field has a known type before the method's predicate
+// obligations are reduced.
+func TestInstanceMethodRecordFields(t *testing.T) {
+	for _, tc := range []struct{ name, src, want string }{
+		{"projection feeds another class",
+			"type Point = { x : Float }\nclass C a\n    c : a -> String\ninstance C Point\n    c p = show p.x\nf : Point -> String\nf p = c p",
+			"Point -> String"},
+		{"projection feeds an ordinary function",
+			"type Point = { x : Float }\nclass C a\n    c : a -> Float\ninstance C Point\n    c p = p.x\nf : Point -> Float\nf p = c p",
+			"Point -> Float"},
+		{"functional update in a method body",
+			"type Point = { x : Float }\nclass C a\n    c : a -> a\ninstance C Point\n    c p = { p | x = p.x }\nf : Point -> Point\nf p = c p",
+			"Point -> Point"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ck, infos, errs := check(t, tc.src)
+			if len(errs) > 0 {
+				t.Fatalf("unexpected errors: %v", errs)
+			}
+			if got := types.ShowScheme(checkedScheme(ck, infos[len(infos)-1])); got != tc.want {
+				t.Errorf("got %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestClassDiagnostics(t *testing.T) {
 	for _, tc := range []struct{ name, src, title string }{
 		{"missing context", "same : a -> a -> Bool\nsame x y = x == y", "MISSING CONSTRAINT"},
@@ -75,6 +102,7 @@ func TestClassDiagnostics(t *testing.T) {
 		{"ambiguous annotation", "f : Eq a => Int -> Int\nf x = x", "AMBIGUOUS CONSTRAINT"},
 		{"class source order", "f : C a => a -> a\nf x = x\nclass C a\n    c : a -> a", "UNKNOWN CLASS"},
 		{"no custom default", "class C a\n    c : a -> Bool\nf = c 1", "AMBIGUOUS CONSTRAINT"},
+		{"unknown projection receiver in a method", "opaque : (a -> Int) -> String\nopaque _ = \"opaque\"\nclass C a\n    c : a -> String\ninstance C Int\n    c n = opaque (\\r -> r.field)", "AMBIGUOUS FIELD"},
 		{"deriving a class with no deriver", "class C a\n    c : a -> Bool\ntype T = T deriving (C)", "CANNOT DERIVE"},
 		{"deriver for an unknown class", "deriver Missing\n    m info x = x", "UNKNOWN CLASS"},
 		{"deriver missing a method", "class C a\n    c : a -> Bool\n    d : a -> Bool\nderiver C\n    c info x = x", "MISSING METHOD"},

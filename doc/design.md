@@ -281,7 +281,12 @@ receiver has unified to a known record type, then checked against the resolved
 visible schema. Deferred accesses resolve to a fixed point rather than in one
 pass, because one access's receiver is often another's result: `ctor.fields`
 decides the element type a later `field.index` reads. Only obligations that
-survive a pass learning nothing are genuinely ambiguous. Elaboration lowers literals, projections, and functional
+survive a pass learning nothing are genuinely ambiguous. Every checker that
+generalizes a body — top-level values, prompt expressions, local function
+bindings, instance methods, and deriver methods — resolves them before
+reducing predicate obligations, so a constraint on a field's type names a type
+rather than an unsolved variable.
+Elaboration lowers literals, projections, and functional
 updates to the existing constructor, `Let`, and exhaustive one-constructor
 `Case` Core forms. This keeps Core and both backends free of a second record
 representation while preserving single evaluation and source-order effects.
