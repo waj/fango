@@ -309,8 +309,8 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	}
 	// The elaborator's spine analysis needs the worker table to include
 	// THIS definition (a prompt-defined fib must self-call directly), so
-	// install its arity before elaborating — and roll back on failure.
-	prevArity, hadWorker := s.ck.Workers[vd.Name]
+	// install its arity before elaborating; the checkpoint above restores it
+	// on failure along with everything else.
 	if len(vd.Params) > 0 {
 		s.ck.Workers[vd.Name] = len(vd.Params)
 	} else {
@@ -318,11 +318,6 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	}
 	defs, elabErrs := elaborate.Decl(info, s.ck)
 	if len(elabErrs) > 0 {
-		if hadWorker {
-			s.ck.Workers[vd.Name] = prevArity
-		} else {
-			delete(s.ck.Workers, vd.Name)
-		}
 		rollback()
 		diag.Render(s.out, elabErrs)
 		return inputDone

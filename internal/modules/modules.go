@@ -180,7 +180,7 @@ func Load(entry string) (*Result, []diag.Error) {
 	if !private && m.Header.Name != wantEntry {
 		return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "MODULE/PATH MISMATCH", "The entry file `%s` must declare module `%s`, but declares `%s`.", filepath.Base(abs), wantEntry, m.Header.Name)}
 	}
-	rootNode := &node{name: entryName, path: filepath.Base(abs), content: content, mod: m, private: private, deps: stagingDeps(m, []string{"Basics", "IO"}, entryName), nativeModule: wantEntry}
+	rootNode := &node{name: entryName, path: filepath.Base(abs), content: content, mod: m, private: private, deps: implicitDeps(m, []string{"Basics", "IO"}, entryName), nativeModule: wantEntry}
 	rootNativePath := wantEntry + ".native.go"
 	if nb, ne := os.ReadFile(filepath.Join(root, rootNativePath)); ne == nil {
 		rootNode.nativePath, rootNode.native = rootNativePath, nb
@@ -236,7 +236,7 @@ func Load(entry string) (*Result, []diag.Error) {
 		if !bundled {
 			n.deps = []string{"Basics", "IO"}
 		}
-		n.deps = stagingDeps(mm, n.deps, name)
+		n.deps = implicitDeps(mm, n.deps, name)
 		var np string
 		var nb []byte
 		var ne error
@@ -393,7 +393,9 @@ const MetaModule = "Meta"
 // appears rather than taxing every program with it.
 const DeriveModule = "Derive"
 
-func stagingDeps(m *ast.Module, deps []string, self string) []string {
+// implicitDeps adds the bundled modules a file needs because of the syntax it
+// used rather than because it imported them.
+func implicitDeps(m *ast.Module, deps []string, self string) []string {
 	if m.UsesStaging && self != MetaModule {
 		deps = addDep(deps, MetaModule)
 	}
