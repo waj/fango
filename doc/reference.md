@@ -125,6 +125,37 @@ Bindings are eager and sequential. Unit-valued expression statements may be
 placed before the final result, which is how effectful work is sequenced.
 There is no `let ... in` expression.
 
+An `if` anchors its `then` and `else` at the column of its own `if`. Both may
+align with it, or lead their own line further right, and an `else if` on the
+`else`'s line continues the same chain, so every arm aligns with the first
+`if`:
+
+```fango
+classify byte =
+    if byte == 32 then
+        "space"
+    else if byte == 9 then
+        "tab"
+    else
+        "other"
+```
+
+Either branch may be an indented block, including under a keyword-led line:
+
+```fango
+describe verbose byte =
+    if verbose
+      then
+        label = classify byte
+        print label
+        label
+      else
+        classify byte
+```
+
+Because neither keyword can begin a statement, a branch block ends at the
+following `then` or `else` even when the block sits at that keyword's column.
+
 ## Bundled standard library
 
 The standard library ships with the compiler, has no separately selected
@@ -307,6 +338,8 @@ Operators, from tighter to looser precedence, are:
 | `+`, `-` | addition, subtraction | left |
 | `++` | string concatenation | right |
 | `==`, `/=`, `<`, `>`, `<=`, `>=` | comparison | non-associative |
+| `&&` | logical and, short-circuiting | right |
+| `\|\|` | logical or, short-circuiting | right |
 
 `+`, `-`, `*`, and unary negation require `Num`; equality requires `Eq`, and
 ordering requires `Ord`. These classes have standard scalar instances and can
@@ -316,8 +349,16 @@ Integer literals use `fromInt` and can therefore inhabit any type with a `Num`
 instance; decimal literals always have type `Float`. Chained comparisons
 require parentheses.
 
+`&&` and `||` take `Bool` operands and produce a `Bool`. They short-circuit:
+the right operand is not evaluated when the left one already decides the
+result, so its effects do not happen either. They are fixed syntax rather
+than values — there is no `(&&)` function to pass or bind — because a called
+value would have to evaluate both operands.
+
 `if condition then a else b` is an expression. Its condition is `Bool` and both
-branches have the same type.
+branches have the same type. `then` and `else` may align with their own `if`
+or lead their own line, and each branch may be an indented block; see
+[the layout rules](#modules-imports-and-source-layout).
 
 ## Declarations, annotations, and functions
 

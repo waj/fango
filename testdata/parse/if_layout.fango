@@ -1,0 +1,79 @@
+-- `then` and `else` may align with their own `if`.
+aligned n =
+    if n > 10 then
+        "big"
+    else
+        "small"
+
+-- `else if` on the `else`'s line continues one chain, so every arm of the
+-- chain aligns with the first `if`.
+chained n =
+    if n > 10 then
+        "big"
+    else if n > 5 then
+        "medium"
+    else
+        "small"
+
+-- Either keyword may also lead its own line, at or right of the `if`.
+keywordLed n =
+    if n > 10
+      then "big"
+      else "small"
+
+anchoredKeywords n =
+    if n > 10
+    then "big"
+    else "small"
+
+-- A branch may be a statement block.
+blocks n =
+    if n > 10 then
+        label = "big"
+        label
+    else
+        label = "small"
+        label
+
+blockUnderKeyword n =
+    if n > 10
+      then
+        label = "big"
+        label
+      else
+        label = "small"
+        label
+
+-- A block body level with its own keyword still ends at the next keyword.
+blockLevelWithKeyword n =
+    if n > 10
+      then
+      "big"
+      else
+      "small"
+
+nested n m =
+    if n > 10 then
+        if m > 10 then
+            "both"
+        else
+            "one"
+    else
+        "none"
+
+inBinding n =
+    label =
+        if n > 10 then
+            "big"
+        else
+            "small"
+    label
+
+inBranch value n =
+    case value of
+        Nothing ->
+            if n > 10 then
+                "big"
+            else
+                "small"
+        Just x -> x

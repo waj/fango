@@ -226,7 +226,7 @@ type BinOp struct {
 }
 
 // Case is `case scrutinee of` followed by branches aligned at the column of
-// the first pattern token (layout rule 2, doc/reference.md, "Source layout and names"). Branch bodies are statement
+// the first pattern token (layout rule 2, doc/reference.md, "Modules, imports, and source layout"). Branch bodies are statement
 // blocks (doc/design.md, "Language semantics") or inline expressions.
 type Case struct {
 	Scrutinee Expr

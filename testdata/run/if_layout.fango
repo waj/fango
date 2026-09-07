@@ -1,0 +1,26 @@
+-- Aligned `else if` chains, keyword-led branches, and block branches all run
+-- the same in both backends.
+describe : Int ->{IO} String
+describe n =
+    if n > 10 then
+        label = "big"
+        print "classified"
+        label
+    else if n > 5 then
+        "medium"
+    else
+        "small"
+
+sumTo : Int -> Int -> Int
+sumTo total n =
+    if n <= 0
+      then
+        total
+      else
+        sumTo (total + n) (n - 1)
+
+main() =
+    print (describe 20)
+    print (describe 7)
+    print (describe 1)
+    print (sumTo 0 4)

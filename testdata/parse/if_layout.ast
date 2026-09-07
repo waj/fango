@@ -1,0 +1,11 @@
+(module
+  (def aligned (params n) (if (binop > (var n) (int 10)) (string "big") (string "small")))
+  (def chained (params n) (if (binop > (var n) (int 10)) (string "big") (if (binop > (var n) (int 5)) (string "medium") (string "small"))))
+  (def keywordLed (params n) (if (binop > (var n) (int 10)) (string "big") (string "small")))
+  (def anchoredKeywords (params n) (if (binop > (var n) (int 10)) (string "big") (string "small")))
+  (def blocks (params n) (if (binop > (var n) (int 10)) (block (bind label (string "big")) (var label)) (block (bind label (string "small")) (var label))))
+  (def blockUnderKeyword (params n) (if (binop > (var n) (int 10)) (block (bind label (string "big")) (var label)) (block (bind label (string "small")) (var label))))
+  (def blockLevelWithKeyword (params n) (if (binop > (var n) (int 10)) (string "big") (string "small")))
+  (def nested (params n m) (if (binop > (var n) (int 10)) (if (binop > (var m) (int 10)) (string "both") (string "one")) (string "none")))
+  (def inBinding (params n) (block (bind label (if (binop > (var n) (int 10)) (string "big") (string "small"))) (var label)))
+  (def inBranch (params value n) (case (var value) (branch (pctor Nothing) (if (binop > (var n) (int 10)) (string "big") (string "small"))) (branch (pctor Just (pvar x)) (var x)))))

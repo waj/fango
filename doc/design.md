@@ -34,6 +34,11 @@ Functions are curried at the language level. A syntactic multi-parameter
 function nevertheless has a known worker arity, allowing saturated calls to
 compile directly while partial applications allocate typed closures.
 
+Operators other than `&&` and `||` are applications of declared values, so
+both operands are evaluated. `&&` and `||` are surface syntax that elaborates
+to `If`, which is what makes them short-circuit; Core has no boolean operator
+and the Core linter rejects one.
+
 Custom types are nominal and identified internally by a generation-stable
 integer `Unique`, not their printed name. Constructors inhabit a separate
 namespace. Pattern matching is exhaustive, and redundant branches are rejected.
@@ -104,8 +109,12 @@ source -> lexer -> parser -> AST -> inference -> typed AST
 
 The hand-written lexer records byte spans and line/column positions but does
 not synthesize layout tokens. The recursive-descent parser applies the offside
-rule from token columns and uses precedence climbing for operators. AST and
-diagnostic dump formats are stable golden-test interfaces.
+rule from token columns and uses precedence climbing for operators. A token at
+the innermost layout column normally ends the current construct; the parser
+exempts single tokens that open a construct, and an `if` additionally exempts
+its own `then` and `else` at the column of its `if`, so a chain of arms can
+align under one `if` rather than staircasing rightward. AST and diagnostic
+dump formats are stable golden-test interfaces.
 
 Batch compilation first discovers the complete module graph. The entry
 directory provides local modules, where `Foo.Bar` maps to `Foo/Bar.fango`, and

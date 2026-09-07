@@ -61,6 +61,10 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 		e = diag.Errorf(c.Span, "TYPE MISMATCH",
 			"The branches of this `if` do not match. The `else` branch is:\n\n    %s\n\nbut the `then` branch is:\n\n    %s",
 			left, right)
+	case WhyBoolOperand:
+		e = diag.Errorf(c.Span, "TYPE MISMATCH",
+			"Both sides of (%s) must be a Bool, but this one is:\n\n    %s",
+			c.Why.Op, left)
 	case WhyCompare:
 		e = diag.Errorf(c.Span, "TYPE MISMATCH",
 			"Both sides of (%s) must be the same type, but this side is:\n\n    %s\n\nand the other side is:\n\n    %s",

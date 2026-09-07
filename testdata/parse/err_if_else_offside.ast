@@ -1,0 +1,8 @@
+(module)
+-- errors --
+-- SYNTAX PROBLEM -------------------- err_if_else_offside.fango
+
+I expect `else` after the `then` branch — every `if` needs one.
+
+4|   else
+     ^^^^

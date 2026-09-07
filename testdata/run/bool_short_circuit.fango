@@ -1,0 +1,12 @@
+-- The right operand of `&&`/`||` is not evaluated when the left operand
+-- already decides the result, so its effects do not happen either.
+loud : Bool ->{IO} Bool
+loud value =
+    print "evaluated"
+    value
+
+main() =
+    print (False && loud True)
+    print (True || loud False)
+    print (True && loud False)
+    print (False || loud True)

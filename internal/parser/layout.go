@@ -2,7 +2,7 @@ package parser
 
 import "github.com/waj/fango/internal/source"
 
-// The offside rule, isolated per doc/reference.md, "Source layout and names". This is the full, final API:
+// The offside rule, isolated per doc/reference.md, "Modules, imports, and source layout". This is the full, final API:
 // a stack of indentation contexts plus two predicates: top-level
 // declarations (column 1), block statements (see doc/design.md, "Language
 // semantics"), and case branches push contexts at their alignment columns.

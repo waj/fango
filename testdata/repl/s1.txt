@@ -28,4 +28,14 @@ Effectful declarations are not installed at the prompt; run the expression direc
 1| x = print 1
        ^^^^^^^
 > -2 : Num a => a
+> False : Bool
+> True : Bool
+> -- TYPE MISMATCH ---------------------------------------- <repl>
+
+Both sides of (&&) must be a Bool, but this one is:
+
+    String
+
+1| "a" && True
+   ^^^
 > | | | b : String

@@ -1,0 +1,19 @@
+-- `&&` binds tighter than `||`, and both bind looser than comparisons.
+mixed : Int -> Bool
+mixed n = n > 0 && n < 10 || n == 100
+
+isVowel : Int -> Bool
+isVowel byte =
+    byte == 97 || byte == 101 || byte == 105 || byte == 111 || byte == 117
+
+main() =
+    print (True && True)
+    print (True && False)
+    print (False || True)
+    print (False || False)
+    print (mixed 5)
+    print (mixed 100)
+    print (mixed 50)
+    print (isVowel 101)
+    print (isVowel 98)
+    print (if isVowel 97 && mixed 5 then "both" else "not both")

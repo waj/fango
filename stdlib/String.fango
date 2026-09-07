@@ -16,14 +16,29 @@ byteAt = native "fangort.ByteAt($1, $2)"
 slice : Int -> Int -> String -> String
 slice = native "fangort.StringSlice($1, $2, $3)"
 
+-- Space, tab, newline, carriage return, vertical tab, and form feed.
 isSpace : Int -> Bool
-isSpace byte = if byte == 32 then True else if byte == 9 then True else if byte == 10 then True else if byte == 13 then True else if byte == 11 then True else byte == 12
+isSpace byte =
+    byte == 32 || byte == 9 || byte == 10
+        || byte == 13 || byte == 11 || byte == 12
 
 skipSpace : String -> Int -> Int -> Int
-skipSpace text index size = if index >= size then index else if isSpace (byteAt index text) then skipSpace text (index + 1) size else index
+skipSpace text index size =
+    if index >= size then
+        index
+    else if isSpace (byteAt index text) then
+        skipSpace text (index + 1) size
+    else
+        index
 
 scanWord : String -> Int -> Int -> Int
-scanWord text index size = if index >= size then index else if isSpace (byteAt index text) then index else scanWord text (index + 1) size
+scanWord text index size =
+    if index >= size then
+        index
+    else if isSpace (byteAt index text) then
+        index
+    else
+        scanWord text (index + 1) size
 
 reverseWords : List String -> List String -> List String
 reverseWords remaining result =
@@ -35,8 +50,10 @@ wordsHelp : String -> Int -> Int -> List String -> List String
 wordsHelp text index size result =
     start = skipSpace text index size
     end = scanWord text start size
-    if start >= size then reverseWords result Nil
-        else wordsHelp text end size (Cons (slice start end text) result)
+    if start >= size then
+        reverseWords result Nil
+    else
+        wordsHelp text end size (Cons (slice start end text) result)
 
 -- words splits on ASCII whitespace while preserving every non-whitespace byte.
 words : String -> List String
@@ -58,11 +75,14 @@ toIntHelp text index size negative acc =
         False ->
             digit = byteAt index text - 48
             next = acc * 10 - digit
-            if digit < 0 then Nothing
-                else if digit > 9 then Nothing
-                    else if acc < -922337203685477580 then Nothing
-                        else if next > 0 then Nothing
-                            else toIntHelp text (index + 1) size negative next
+            -- A non-digit byte, or an accumulator that would overflow past
+            -- the most negative Int, stops the parse.
+            if digit < 0 || digit > 9 then
+                Nothing
+            else if acc < -922337203685477580 || next > 0 then
+                Nothing
+            else
+                toIntHelp text (index + 1) size negative next
 
 -- toInt parses an optional +/- sign followed by base-10 digits. Anything
 -- else, an empty digit sequence, or a value outside Int's 64-bit range is
@@ -71,5 +91,12 @@ toInt : String -> Maybe Int
 toInt text =
     size = length text
     first = byteAt 0 text
-    start = if first == 45 then 1 else if first == 43 then 1 else 0
-    if start >= size then Nothing else toIntHelp text start size (first == 45) 0
+    start =
+        if first == 45 || first == 43 then
+            1
+        else
+            0
+    if start >= size then
+        Nothing
+    else
+        toIntHelp text start size (first == 45) 0

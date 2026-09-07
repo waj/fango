@@ -28,18 +28,6 @@ under iteration is in [roadmap-natives.md](roadmap-natives.md).
 Independent library versioning, package distribution, dependency fetching,
 and configurable source roots remain deferred.
 
-## Syntax and boolean operators
-
-- Fix the offside-rule interaction with multiline `if` expressions so `else`
-  and `else if` may align naturally with their `if`, including nested chains;
-  add parser goldens for the accepted layout and keep the editor grammar in
-  sync.
-- Add short-circuiting boolean operators `&&` and `||`. Reserve and tokenize
-  both spellings, define right-associative precedence below comparisons, and
-  desugar them to `if` expressions so the right operand is not evaluated when
-  the left operand determines the result. Cover effectful right operands,
-  type diagnostics, interpreter/compiler agreement, and documentation.
-
 ## REPL hardening
 
 - Implement `:load` and `:reload` for complete source files.

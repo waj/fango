@@ -1,0 +1,4 @@
+(core
+  (def x Bool (if Bool (bool true Bool) (bool false Bool) (bool false Bool)))
+  (def y Bool (if Bool (bool false Bool) (bool true Bool) (bool true Bool)))
+  (def main Bool (if Bool (var x Bool) (bool true Bool) (if Bool (var y Bool) (bool true Bool) (bool false Bool)))))

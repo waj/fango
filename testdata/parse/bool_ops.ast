@@ -1,0 +1,11 @@
+(module
+  (def a (binop && (ctor True) (ctor False)))
+  (def b (binop || (ctor True) (ctor False)))
+  (def c (binop || (binop && (binop < (int 1) (int 2)) (binop < (int 2) (int 3))) (binop < (int 4) (int 5))))
+  (def d (binop && (var p) (binop && (var q) (var r))))
+  (def e (binop || (var p) (binop || (var q) (var r))))
+  (def f (binop || (var p) (binop && (var q) (var r))))
+  (def g (binop && (binop || (var p) (var q)) (var r)))
+  (def h (binop && (var p) (binop == (var q) (var r))))
+  (def i (binop || (binop && (var p) (var q)) (var r)))
+  (def j (binop || (var p) (binop && (var q) (var r)))))

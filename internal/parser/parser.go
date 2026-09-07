@@ -26,8 +26,9 @@ type parser struct {
 
 	// stmtStart is the index of a token allowed to sit exactly at the
 	// innermost layout column: a block statement's opening token (and, in
-	// a case branch's first pattern token). Everywhere else, a token
-	// at the column is a sibling boundary, not expression content.
+	// a case branch's first pattern token), or a `then`/`else` at its own
+	// `if` chain's anchor column. Everywhere else, a token at the column is
+	// a sibling boundary, not expression content.
 	stmtStart int
 }
 
@@ -307,23 +308,36 @@ func (p *parser) parseNativeBody() *ast.NativeBody {
 	return n
 }
 
+// parseInfixDecl parses `infix (op) = value`. A rejected binding recovers to
+// the next declaration rather than leaving the parser mid-line, where the
+// unconsumed operator would also be reported as a stray declaration.
 func (p *parser) parseInfixDecl() ast.Decl {
 	p.next()
 	if !p.expect(token.LPAREN, "I expect `(` after `infix`.") {
+		p.recoverToTopLevel(false)
 		return nil
 	}
 	op := p.peekInExpr()
 	if prec, _ := binOp(op.Kind); prec == 0 {
 		p.errorAt(op.Span, "NATIVE DECLARATION", "I expect one of fango's fixed binary operators here.")
+		p.recoverToTopLevel(false)
+		return nil
+	}
+	if shortCircuit(op.Kind) {
+		p.errorAt(op.Span, "NATIVE DECLARATION",
+			"("+op.Text+") is short-circuiting syntax elaborated to an `if`, not a\ncall, so it cannot be bound to a value.")
+		p.recoverToTopLevel(false)
 		return nil
 	}
 	p.next()
 	if !p.expect(token.RPAREN, "I expect `)` after the operator.") || !p.expect(token.EQ, "I expect `=` after the operator binding.") {
+		p.recoverToTopLevel(false)
 		return nil
 	}
 	target := p.peekInExpr()
 	if target.Kind != token.LIDENT {
 		p.errorAt(target.Span, "NATIVE DECLARATION", "An infix binding must name a native value.")
+		p.recoverToTopLevel(false)
 		return nil
 	}
 	p.next()
@@ -570,19 +584,26 @@ func (p *parser) parseValueParams() []ast.Param {
 // layout column → a block at that column. Shared by top-level declarations,
 // block bindings, local functions, and lambda bodies.
 func (p *parser) parseBindBody(eqTok token.Token) ast.Expr {
+	return p.parseBodyAfter(eqTok, "This binding has no expression — the next line does not belong\nto it.")
+}
+
+// parseBodyAfter is the shared inline-or-indented-block body rule for the
+// tokens that introduce a body: `=`, `->`, `then`, and `else`. missing is the
+// diagnostic for a following line that is offside, so a construct with no
+// binding to name can describe itself instead.
+func (p *parser) parseBodyAfter(introTok token.Token, missing string) ast.Expr {
 	t := p.peek()
 	switch {
 	case t.Kind == token.EOF:
 		p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
 			"I got to the end of the input while still expecting an expression.")
 		return nil
-	case t.Pos().Line == eqTok.Pos().Line:
+	case t.Pos().Line == introTok.Pos().Line:
 		return p.parseExpr(1)
 	case p.lay.checkOffside(t.Pos()) == offContinue:
 		return p.parseBlock(t.Pos().Col)
 	default:
-		p.errorAt(p.prevSpan(), "SYNTAX PROBLEM",
-			"This binding has no expression — the next line does not belong\nto it.")
+		p.errorAt(p.prevSpan(), "SYNTAX PROBLEM", missing)
 		return nil
 	}
 }
@@ -631,6 +652,14 @@ func (p *parser) classifyStmt(col int) stmtKind {
 		}
 	}
 	return stmtResult
+}
+
+// closesBlock reports whether a token at a block's own column ends the block
+// instead of starting another statement. An `if` branch body indented level
+// with its own `then`/`else` puts that keyword at the body block's column,
+// and neither keyword can begin a statement.
+func closesBlock(k token.Kind) bool {
+	return k == token.KwThen || k == token.KwElse
 }
 
 // parseBlock parses a statement block at the given column: `name = expr`
@@ -714,7 +743,7 @@ func (p *parser) parseBlock(col int) ast.Expr {
 			if result == nil {
 				return nil
 			}
-			if nt := p.peek(); nt.Kind != token.EOF && nt.Pos().Col == col {
+			if nt := p.peek(); nt.Kind != token.EOF && nt.Pos().Col == col && !closesBlock(nt.Kind) {
 				items = append(items, ast.BlockItem{BindIndex: -1, Expr: result})
 				hasExprStmt = true
 				continue
@@ -903,8 +932,9 @@ const (
 	assocNon
 )
 
-// binOp is the operator table, Elm's precedences: `++` 5 right-assoc;
-// comparisons 4 non-associative; `+ -` 6 left; `* /` 7 left.
+// binOp is the operator table, Elm's precedences: `||` 2 right-assoc;
+// `&&` 3 right-assoc; comparisons 4 non-associative; `++` 5 right-assoc;
+// `+ -` 6 left; `* /` 7 left.
 func binOp(k token.Kind) (int, assocKind) {
 	switch k {
 	case token.PLUS, token.MINUS:
@@ -915,9 +945,19 @@ func binOp(k token.Kind) (int, assocKind) {
 		return 5, assocRight
 	case token.EQEQ, token.SLASHEQ, token.LT, token.GT, token.LTEQ, token.GTEQ:
 		return 4, assocNon
+	case token.ANDAND:
+		return 3, assocRight
+	case token.OROR:
+		return 2, assocRight
 	default:
 		return 0, assocLeft
 	}
+}
+
+// shortCircuit reports the operators that elaborate to an `if` rather than to
+// a called value, so they cannot be bound by an `infix` declaration.
+func shortCircuit(k token.Kind) bool {
+	return k == token.ANDAND || k == token.OROR
 }
 
 func (p *parser) parseExpr(minPrec int) ast.Expr {
@@ -1147,7 +1187,7 @@ func (p *parser) parseLambda() ast.Expr {
 
 // parseCase parses `case scrutinee of` and its branches. The column of the
 // first pattern token after `of` defines branch alignment (layout rule 2,
-// doc/reference.md, "Source layout and names"): a token at exactly that column starts a new branch, left of it ends
+// doc/reference.md, "Modules, imports, and source layout"): a token at exactly that column starts a new branch, left of it ends
 // the case. Branch bodies are statement blocks (doc/design.md, "Language semantics") or inline expressions.
 func (p *parser) parseCase() ast.Expr {
 	caseTok := p.next()
@@ -1295,27 +1335,58 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 	}
 }
 
+// parseIf parses `if condition then a else b`. The `if` token's column
+// anchors the whole chain (doc/reference.md, "Modules, imports, and source layout"): `then` and `else` may sit
+// exactly there even when that is the innermost layout column, and an
+// `else if` on the `else`'s line keeps the same anchor, so every arm of a
+// chain aligns under one `if`. Branches are inline expressions or indented
+// statement blocks (doc/design.md, "Language semantics").
 func (p *parser) parseIf() ast.Expr {
+	return p.parseIfChain(p.peek().Pos().Col)
+}
+
+func (p *parser) parseIfChain(anchor int) ast.Expr {
 	ifTok := p.next()
 	cond := p.parseExpr(1)
 	if cond == nil {
 		return nil
 	}
+	p.allowAtAnchor(anchor, token.KwThen)
+	thenTok := p.peekInExpr()
 	if !p.expect(token.KwThen, "I expect `then` after an `if` condition.") {
 		return nil
 	}
-	thenE := p.parseExpr(1)
+	thenE := p.parseBodyAfter(thenTok, "This `then` has no expression — the next line does not belong\nto it.")
 	if thenE == nil {
 		return nil
 	}
+	p.allowAtAnchor(anchor, token.KwElse)
+	elseTok := p.peekInExpr()
 	if !p.expect(token.KwElse, "I expect `else` after the `then` branch — every `if` needs one.") {
 		return nil
 	}
-	elseE := p.parseExpr(1)
+	var elseE ast.Expr
+	// `else if` on one line is one chain, not a nested `if` re-anchored at
+	// the inner `if`: the arms that follow still align with the outer one.
+	if t := p.peekInExpr(); t.Kind == token.KwIf && t.Pos().Line == elseTok.Pos().Line {
+		elseE = p.parseIfChain(anchor)
+	} else {
+		elseE = p.parseBodyAfter(elseTok, "This `else` has no expression — the next line does not belong\nto it.")
+	}
 	if elseE == nil {
 		return nil
 	}
 	return &ast.If{Cond: cond, Then: thenE, Else: elseE, Sp: ifTok.Span}
+}
+
+// allowAtAnchor exempts one `then`/`else` token sitting exactly at its `if`
+// chain's anchor column, which peekInExpr would otherwise read as a sibling
+// boundary. Neither keyword can start a statement or a branch, so the
+// exemption cannot swallow a following construct.
+func (p *parser) allowAtAnchor(anchor int, k token.Kind) {
+	if t := p.peek(); t.Kind == k && t.Pos().Col == anchor {
+		p.stmtStart = p.pos
+	}
 }
 
 func (p *parser) parseAtom() ast.Expr {

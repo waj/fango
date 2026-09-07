@@ -2,19 +2,25 @@ import IO
 import Range
 
 printDensity density =
-    if density > 8 then IO.write " " else
-        if density > 4 then IO.write "." else
-            if density > 2 then IO.write "*" else IO.write "+"
+    if density > 8 then
+        IO.write " "
+    else if density > 4 then
+        IO.write "."
+    else if density > 2 then
+        IO.write "*"
+    else
+        IO.write "+"
 
 mandelConverger real imaginary iterations constantReal constantImaginary =
-    if iterations > 255 then iterations else
-        if real * real + imaginary * imaginary >= 4 then iterations else
-            mandelConverger
-                (real * real - imaginary * imaginary + constantReal)
-                (2 * real * imaginary + constantImaginary)
-                (iterations + 1)
-                constantReal
-                constantImaginary
+    if iterations > 255 || real * real + imaginary * imaginary >= 4 then
+        iterations
+    else
+        mandelConverger
+            (real * real - imaginary * imaginary + constantReal)
+            (2 * real * imaginary + constantImaginary)
+            (iterations + 1)
+            constantReal
+            constantImaginary
 
 mandelConverge real imaginary =
     mandelConverger real imaginary 0 real imaginary

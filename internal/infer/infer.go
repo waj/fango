@@ -25,6 +25,7 @@ const (
 	WhyIfCondition                   // an if condition must be Bool
 	WhyIfBranches                    // then/else branches must agree
 	WhyCompare                       // both sides of a comparison must agree
+	WhyBoolOperand                   // both sides of && / || must be Bool
 	WhyNegate                        // a negated operand must be a number
 	WhyOpRequires                    // an operator fixes its operand type (/, ++)
 	WhyAnnotation                    // a definition must match its type annotation
@@ -1803,7 +1804,21 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 	}
 }
 
+// binOp types an operator application. `&&` and `||` are the exception to
+// the operator-is-a-call rule: they have no implementing value because
+// elaboration turns them into an `if` that leaves the right operand
+// unevaluated (doc/reference.md, "Values and operators").
 func (g *generator) binOp(e *ast.BinOp) types.Type {
+	if e.Op == "&&" || e.Op == "||" {
+		for _, side := range []ast.Expr{e.L, e.R} {
+			ty := g.expr(side)
+			g.cs = append(g.cs, Constraint{
+				Left: ty, Right: g.ck.B.Bool, Span: side.Span(),
+				Why: Why{Kind: WhyBoolOperand, Op: e.Op},
+			})
+		}
+		return g.ck.B.Bool
+	}
 	name := g.ck.Operators[e.Op]
 	if name == "" {
 		g.errs = append(g.errs, diag.Errorf(e.OpSpan, "MISSING OPERATOR", "No declaration implements (%s).", e.Op))

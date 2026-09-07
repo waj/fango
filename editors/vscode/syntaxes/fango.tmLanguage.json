@@ -455,6 +455,10 @@
           "match": "==|/=|<=|>=|<|>"
         },
         {
+          "name": "keyword.operator.logical.fango",
+          "match": "&&|\\|\\|"
+        },
+        {
           "name": "keyword.operator.assignment.fango",
           "match": "="
         },

@@ -34,6 +34,8 @@ const (
 	GT       // >
 	LTEQ     // <=
 	GTEQ     // >=
+	ANDAND   // &&
+	OROR     // ||
 	ARROW    // ->
 	DARROW   // =>
 	BACKSLASH
@@ -73,6 +75,7 @@ var kindNames = map[Kind]string{
 	LPAREN: "LPAREN", RPAREN: "RPAREN", COMMA: "COMMA", DOT: "DOT", DOTDOT: "DOTDOT",
 	PLUSPLUS: "PLUSPLUS", EQEQ: "EQEQ", SLASHEQ: "SLASHEQ",
 	LT: "LT", GT: "GT", LTEQ: "LTEQ", GTEQ: "GTEQ",
+	ANDAND: "ANDAND", OROR: "OROR",
 	ARROW: "ARROW", BACKSLASH: "BACKSLASH", COLON: "COLON", PIPE: "PIPE",
 	LBRACE: "LBRACE", RBRACE: "RBRACE", UNDERSCORE: "UNDERSCORE",
 	KwModule: "module", KwImport: "import", KwAs: "as", KwExposing: "exposing", KwLet: "let", KwIn: "in",

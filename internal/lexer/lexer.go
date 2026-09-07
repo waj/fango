@@ -258,6 +258,8 @@ var twoCharOps = []struct {
 	{"++", token.PLUSPLUS}, {"==", token.EQEQ}, {"=>", token.DARROW}, {"/=", token.SLASHEQ},
 	{"<=", token.LTEQ}, {">=", token.GTEQ}, {"->", token.ARROW},
 	{"..", token.DOTDOT},
+	// Ahead of the one-char table, so `||` is one token and `|` still is one.
+	{"&&", token.ANDAND}, {"||", token.OROR},
 }
 
 var oneCharOps = map[byte]token.Kind{

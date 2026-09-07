@@ -354,6 +354,16 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 			Ty:   ty,
 		}
 	case *ast.BinOp:
+		// `&&` and `||` are the short-circuiting pair: they become an `if`,
+		// so the right operand — and its effects — only run when the left
+		// operand does not decide the result. Core has no boolean operator.
+		if e.Op == "&&" || e.Op == "||" {
+			cond := el.expr(e.L)
+			if e.Op == "&&" {
+				return &core.If{Cond: cond, Then: el.expr(e.R), Else: &core.BoolLit{Val: false, Ty: ty}, Ty: ty}
+			}
+			return &core.If{Cond: cond, Then: &core.BoolLit{Val: true, Ty: ty}, Else: el.expr(e.R), Ty: ty}
+		}
 		l, r := el.expr(e.L), el.expr(e.R)
 		if n := el.ck.BinNatives[e]; n != nil {
 			return el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Ty: ty, Args: []core.Expr{l, r}})

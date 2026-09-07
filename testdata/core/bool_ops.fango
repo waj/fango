@@ -1,0 +1,3 @@
+x = True && False
+y = False || True
+main = x || y && True

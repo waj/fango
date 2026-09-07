@@ -1,0 +1,18 @@
+a = True && False
+b = True || False
+c = 1 < 2 && 2 < 3 || 4 < 5
+d = p && q && r
+e = p || q || r
+f = p || q && r
+g = (p || q) && r
+h = p && q == r
+
+-- A long chain wraps like any other expression: the continuation is
+-- indented past the layout column, with the operator on either side.
+i =
+    p && q
+        || r
+
+j =
+    p ||
+        q && r
