@@ -59,3 +59,19 @@ func TestParseExprInputUnfinished(t *testing.T) {
 		}
 	}
 }
+
+func TestParseReflectionAndDeriver(t *testing.T) {
+	f := source.NewFile("<test>", []byte("deriver Show\n    show info value = quote value\nx = typeOf (List Int)\n"))
+	toks, lexErrs := lexer.Lex(f)
+	if len(lexErrs) > 0 {
+		t.Fatal(lexErrs)
+	}
+	m, errs := Parse(toks, f)
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	got := ast.Dump(m)
+	if !strings.Contains(got, "(deriver Show") || !strings.Contains(got, "(typeOf (List Int))") {
+		t.Fatalf("unexpected dump:\n%s", got)
+	}
+}

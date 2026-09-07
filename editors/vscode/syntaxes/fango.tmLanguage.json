@@ -336,11 +336,11 @@
       "patterns": [
         {
           "name": "keyword.control.fango",
-          "match": "\\b(if|then|else|case|of|handle|resume|quote)\\b"
+          "match": "\\b(if|then|else|case|of|handle|resume|quote|typeOf)\\b"
         },
         {
           "name": "keyword.other.fango",
-          "match": "\\b(module|import|as|exposing|type|effect|native|infix|class|instance|deriving)\\b"
+          "match": "\\b(module|import|as|exposing|type|effect|native|infix|class|instance|deriver|deriving)\\b"
         },
         {
           "name": "invalid.deprecated.reserved.fango",

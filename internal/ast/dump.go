@@ -68,6 +68,12 @@ func dumpDecl(d Decl) string {
 			parts = append(parts, dumpDecl(m))
 		}
 		return strings.Join(parts, " ") + ")"
+	case *DeriverDecl:
+		parts := []string{"(deriver", d.Class}
+		for _, m := range d.Methods {
+			parts = append(parts, dumpDecl(m))
+		}
+		return strings.Join(parts, " ") + ")"
 	case *ValueDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(def %s", d.Name)
@@ -333,6 +339,10 @@ func DumpExpr(e Expr) string {
 		return fmt.Sprintf("(quote %s)", DumpExpr(e.Body))
 	case *Splice:
 		return fmt.Sprintf("(splice %s)", DumpExpr(e.Operand))
+	case *TypeOf:
+		return fmt.Sprintf("(typeOf %s)", DumpTypeExpr(e.Ty))
+	case *MetaValue:
+		return "(meta-value)"
 	default:
 		panic(fmt.Sprintf("ast.DumpExpr: unhandled %T", e))
 	}

@@ -1349,6 +1349,8 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 		r.expr(e.Body, vals, locals)
 	case *ast.Splice:
 		r.expr(e.Operand, vals, locals)
+	case *ast.TypeOf:
+		r.typ(e.Ty)
 	case *ast.Neg:
 		r.expr(e.Operand, vals, locals)
 	case *ast.If:

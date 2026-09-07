@@ -1,4 +1,4 @@
-module Meta exposing (Code)
+module Meta exposing (Code, TypeRepr, Lift(..), sameType, head, isVar, typeName, fail)
 
 {- The compile-time stage's one representation.
 
@@ -10,3 +10,59 @@ Meta deliberately imports nothing. Derivers will live in `Basics`, which every
 module already loads, so anything Meta depended on would close a cycle. -}
 
 type Code = Code
+
+type TypeRepr = TypeRepr
+
+class Lift a
+    lift : a -> Code
+
+liftInt : Int -> Code
+liftInt = native "$1"
+
+liftFloat : Float -> Code
+liftFloat = native "$1"
+
+liftString : String -> Code
+liftString = native "$1"
+
+liftChar : Char -> Code
+liftChar = native "$1"
+
+liftBool : Bool -> Code
+liftBool = native "$1"
+
+liftUnit : () -> Code
+liftUnit = native "$1"
+
+instance Lift Int
+    lift value = liftInt value
+
+instance Lift Float
+    lift value = liftFloat value
+
+instance Lift String
+    lift value = liftString value
+
+instance Lift Char
+    lift value = liftChar value
+
+instance Lift Bool
+    lift value = liftBool value
+
+instance Lift ()
+    lift value = liftUnit value
+
+sameType : TypeRepr -> TypeRepr -> Bool
+sameType = native "$1 == $2"
+
+head : TypeRepr -> TypeRepr
+head = native "$1"
+
+isVar : TypeRepr -> Bool
+isVar = native "false == $1"
+
+typeName : TypeRepr -> String
+typeName = native "\"\" + $1"
+
+fail : String -> Code
+fail = native "$1"

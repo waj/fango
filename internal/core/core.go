@@ -169,6 +169,12 @@ type Quote struct {
 	Ty       types.Type
 }
 
+// TypeOf is a compile-time-only reflected type value.
+type TypeOf struct {
+	Repr any
+	Ty   types.Type
+}
+
 // NativeCall is a saturated call to a declaration-backed primitive.
 type NativeCall struct {
 	Name   string
@@ -274,6 +280,7 @@ func (*Neg) isExpr()        {}
 func (*BinOp) isExpr()      {}
 func (*NativeCall) isExpr() {}
 func (*Quote) isExpr()      {}
+func (*TypeOf) isExpr()     {}
 func (*If) isExpr()         {}
 func (*Perform) isExpr()    {}
 func (*Handle) isExpr()     {}
@@ -295,6 +302,7 @@ func (e *Neg) Type() types.Type        { return e.Ty }
 func (e *BinOp) Type() types.Type      { return e.Ty }
 func (e *NativeCall) Type() types.Type { return e.Ty }
 func (e *Quote) Type() types.Type      { return e.Ty }
+func (e *TypeOf) Type() types.Type     { return e.Ty }
 func (e *If) Type() types.Type         { return e.Ty }
 func (e *Perform) Type() types.Type    { return e.Ty }
 func (e *Handle) Type() types.Type     { return e.Ty }

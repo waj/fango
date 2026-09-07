@@ -273,6 +273,13 @@ never appear in source diagnostics.
 Splices are expanded during inference, before Core exists, so both backends
 see identical generated code and every existing gate applies to it unchanged.
 
+Reflected types are compiler-owned `Meta.TypeRepr` values. They retain nominal
+identities and the complete structural type, so equality includes type
+arguments and function effects without consulting display names. `typeOf` is
+an explicit compile-time Core operation; the Core linter rejects one that
+survives into runtime code. Scalar lifting creates compiler-built AST
+fragments alongside quote templates, and expansion copies either form.
+
 There is one representation, and it is deliberately not a fango-level mirror
 of `internal/ast`: a quote compiles to a compiler-side template — the quoting
 module's own resolved AST, retaining its original spans — plus an ordered list
@@ -338,9 +345,10 @@ reason they always were: the interpreter cannot load Go. A step budget bounds
 evaluation. Together these keep generated Go byte-identical across builds.
 
 The bundled `Meta` module is a dependency only of files that use the syntax:
-the parser records whether it built a quote or a splice, and the loader adds
-the edge from that. `Meta` imports nothing, so it can become a dependency of
-`Basics` when derivers land without closing a cycle.
+the parser records whether it built a quote, splice, or `typeOf`, and the
+loader adds the edge from that. `Meta` imports nothing. Its compile-time-only
+types, class dictionaries, instances, and helpers are excluded transitively
+from runtime Core.
 
 ## Core and evidence invariants
 

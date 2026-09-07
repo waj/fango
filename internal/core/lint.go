@@ -256,6 +256,8 @@ func (l *linter) expr(e Expr, where string) {
 		// linted, so a surviving Quote means the emission rule let one
 		// through (doc/design.md, "Compile-time metaprogramming").
 		l.errorf("%s: quote in emitted code — a compile-time-only value escaped", where)
+	case *TypeOf:
+		l.errorf("%s: typeOf in emitted code — a compile-time-only value escaped", where)
 	case *NativeCall:
 		n := l.natives[e.Name]
 		if n == nil {

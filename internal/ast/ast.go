@@ -2,7 +2,10 @@
 // methods, every node carrying a Span.
 package ast
 
-import "github.com/waj/fango/internal/source"
+import (
+	"github.com/waj/fango/internal/source"
+	"github.com/waj/fango/internal/types"
+)
 
 type Expr interface {
 	isExpr()
@@ -157,8 +160,18 @@ type InstanceDecl struct {
 	Owner   string
 }
 
+// DeriverDecl supplies compile-time generators for every method of one class.
+// It is visible by dependency, like an instance, and is never emitted.
+type DeriverDecl struct {
+	Class     string
+	ClassSpan source.Span
+	Methods   []*ValueDecl
+	Owner     string
+}
+
 func (*ClassDecl) isDecl()    {}
 func (*InstanceDecl) isDecl() {}
+func (*DeriverDecl) isDecl()  {}
 
 // TypeExpr is the surface type grammar: ground names, `()`, `->` arrows,
 // effect rows attached to arrows, and type variables.
@@ -295,6 +308,24 @@ type Splice struct {
 	Sp      source.Span // `$(` through `)`
 }
 
+// TypeOf reflects one closed, fully-applied type at compile time. Visible is
+// filled by module resolution and records which nominal schemas the writing
+// module may inspect through local or qualified access.
+type TypeOf struct {
+	Ty      TypeExpr
+	Value   types.Type
+	Visible map[string]bool
+	Sp      source.Span
+}
+
+// MetaValue is an internal expression fragment used to invoke a deriver. It
+// never appears in parsed source and is rejected if it survives staging.
+type MetaValue struct {
+	Value any
+	Ty    types.Type
+	Sp    source.Span
+}
+
 // Pattern is the surface pattern grammar (doc/reference.md, "Algebraic data types and matching"): variables, wildcard,
 // literals, and constructor patterns with nested argument patterns.
 type Pattern interface {
@@ -402,6 +433,8 @@ func (*Handle) isExpr()       {}
 func (*Resume) isExpr()       {}
 func (*Quote) isExpr()        {}
 func (*Splice) isExpr()       {}
+func (*TypeOf) isExpr()       {}
+func (*MetaValue) isExpr()    {}
 
 func (e *IntLit) Span() source.Span       { return e.Sp }
 func (e *FloatLit) Span() source.Span     { return e.Sp }
@@ -433,9 +466,11 @@ func (e *Handle) Span() source.Span {
 	}
 	return e.Sp.Merge(e.Clauses[len(e.Clauses)-1].Body.Span())
 }
-func (e *Resume) Span() source.Span { return e.Sp }
-func (e *Quote) Span() source.Span  { return e.Sp }
-func (e *Splice) Span() source.Span { return e.Sp }
+func (e *Resume) Span() source.Span    { return e.Sp }
+func (e *Quote) Span() source.Span     { return e.Sp }
+func (e *Splice) Span() source.Span    { return e.Sp }
+func (e *TypeOf) Span() source.Span    { return e.Sp }
+func (e *MetaValue) Span() source.Span { return e.Sp }
 
 type Decl interface{ isDecl() }
 
@@ -460,6 +495,9 @@ type TypeDecl struct {
 	Ctors        []CtorDef
 	RecordFields []RecordFieldDef // non-nil for `type T = { field : Type }`
 	Deriving     []TName
+	// ReflectionVisible is a resolver snapshot of nominal schemas accessible
+	// where this declaration was written. Derived metadata inherits it.
+	ReflectionVisible map[string]bool
 }
 
 type RecordFieldDef struct {

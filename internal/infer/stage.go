@@ -27,6 +27,7 @@ import (
 
 // CodeTypeName is the canonical symbol of the bundled abstract code type.
 const CodeTypeName = "Meta.Code"
+const TypeReprName = "Meta.TypeRepr"
 
 // codeType returns the compile-time code type. A quote or splice can only
 // appear in a module that pulled `Meta` in, which the module loader arranges
@@ -45,11 +46,46 @@ func (ck *Checker) codeType(sp source.Span) (types.Type, []diag.Error) {
 // expression may have such a type — one rule, checked purely on types, that
 // keeps code values out of generated Go without any reachability analysis.
 func (ck *Checker) IsCompileTimeOnly(t types.Type) bool {
-	con, _ := ck.TypeNames[CodeTypeName].(*types.TCon)
-	if con == nil || t == nil {
+	if t == nil {
 		return false
 	}
-	return mentionsCon(t, con.Unique)
+	roots := map[int]bool{}
+	for _, name := range []string{CodeTypeName, TypeReprName} {
+		if con, ok := ck.TypeNames[name].(*types.TCon); ok {
+			roots[con.Unique] = true
+		}
+	}
+	var visit func(types.Type, map[int]bool) bool
+	visit = func(t types.Type, seen map[int]bool) bool {
+		switch t := t.(type) {
+		case *types.TCon:
+			if roots[t.Unique] {
+				return true
+			}
+			for _, a := range t.Args {
+				if visit(a, seen) {
+					return true
+				}
+			}
+			if seen[t.Unique] {
+				return false
+			}
+			seen[t.Unique] = true
+			if adt := ck.ADTs[t.Unique]; adt != nil {
+				for _, c := range adt.Ctors {
+					for _, f := range c.Fields {
+						if visit(f, seen) {
+							return true
+						}
+					}
+				}
+			}
+		case *types.TFun:
+			return visit(t.Arg, seen) || visit(t.Ret, seen)
+		}
+		return false
+	}
+	return visit(t, map[int]bool{})
 }
 
 func mentionsCon(t types.Type, unique int) bool {
@@ -67,6 +103,37 @@ func mentionsCon(t types.Type, unique int) bool {
 		return mentionsCon(t.Arg, unique) || mentionsCon(t.Ret, unique)
 	}
 	return false
+}
+
+func (ck *Checker) reflectionClosed(t types.Type) bool {
+	switch t := t.(type) {
+	case *types.TVar:
+		return false
+	case *types.TCon:
+		if adt := ck.ADTs[t.Unique]; adt != nil && len(t.Args) != len(adt.Params) {
+			return false
+		}
+		for _, arg := range t.Args {
+			if !ck.reflectionClosed(arg) {
+				return false
+			}
+		}
+		return true
+	case *types.TFun:
+		if !ck.reflectionClosed(t.Arg) || !ck.reflectionClosed(t.Ret) || t.Eff.Tail != nil {
+			return false
+		}
+		for _, label := range t.Eff.Labels {
+			for _, arg := range label.Args {
+				if !ck.reflectionClosed(arg) {
+					return false
+				}
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 // checkStageLeaks enforces the other half of the compile-time-only rule. A

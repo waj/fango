@@ -10,6 +10,15 @@
 package meta
 
 import "github.com/waj/fango/internal/ast"
+import "github.com/waj/fango/internal/types"
+
+// TypeRepr is the compiler-owned value produced by typeOf. Identity comes
+// from TCon.Unique and structural children; Name is only presentation data.
+// Visible is captured at the reflection site for later schema inspection.
+type TypeRepr struct {
+	Type    types.Type
+	Visible map[int]bool
+}
 
 // Template is one `quote` occurrence: the resolved expression it describes
 // plus its holes in source order. Holes are the `$(…)` nodes inside Body;
@@ -41,12 +50,16 @@ func (t *Table) Get(i int) *Template {
 type Code struct {
 	Template int
 	Holes    []*Code
+	Direct   ast.Expr
 }
 
 // Expand renders code as surface AST ready to be checked at the splice site.
 // Each hole expands first, so a Code built from other Code produces one tree
 // with no splices left in it.
 func (t *Table) Expand(c *Code) ast.Expr {
+	if c != nil && c.Direct != nil {
+		return copyExpr(c.Direct, nil)
+	}
 	tmpl := t.Get(c.Template)
 	if tmpl == nil {
 		return nil
@@ -199,9 +212,27 @@ func copyWith(e ast.Expr, f func(ast.Expr) ast.Expr) ast.Expr {
 		n := *e
 		n.Operand = rec(e.Operand)
 		return &n
+	case *ast.TypeOf:
+		n := *e
+		n.Visible = cloneVisible(e.Visible)
+		return &n
+	case *ast.MetaValue:
+		n := *e
+		return &n
 	default:
 		panic("meta: unhandled expression node in copy")
 	}
+}
+
+func cloneVisible(in map[string]bool) map[string]bool {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]bool, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func copyFields(fs []ast.RecordExprField, f func(ast.Expr) ast.Expr) []ast.RecordExprField {

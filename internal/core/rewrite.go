@@ -85,6 +85,10 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Ty = r.typ(e.Ty)
 		n.Holes = r.exprs(e.Holes)
 		out = &n
+	case *TypeOf:
+		n := *e
+		n.Ty = r.typ(e.Ty)
+		out = &n
 	case *If:
 		n := *e
 		n.Ty = r.typ(e.Ty)

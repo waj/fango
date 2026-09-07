@@ -234,6 +234,9 @@ func (p *parser) parseDecl() ast.Decl {
 	if t.Kind == token.KwInstance {
 		return p.parseInstanceDecl()
 	}
+	if t.Kind == token.KwDeriver {
+		return p.parseDeriverDecl()
+	}
 	if t.Kind != token.LIDENT {
 		p.errorAt(t.Span, "SYNTAX PROBLEM",
 			"I was expecting a declaration here, like `name = expression`.")
@@ -296,6 +299,34 @@ func (p *parser) parseDecl() ast.Decl {
 		p.recoverToTopLevel(false)
 	}
 	return &ast.ValueDecl{Name: name.Text, NameSpan: name.Span, Params: params, Ann: ann, Body: body}
+}
+
+func (p *parser) parseDeriverDecl() ast.Decl {
+	start := p.next()
+	class, _, sp := p.parseQualifiedName()
+	d := &ast.DeriverDecl{Class: class, ClassSpan: start.Span.Merge(sp)}
+	first := p.peek()
+	if first.Kind == token.EOF || first.Pos().Col <= 1 {
+		p.errorAt(first.Span, "DERIVER METHOD", "A deriver needs indented method definitions.")
+		return nil
+	}
+	col := first.Pos().Col
+	p.lay.push(ctxBlock, col)
+	defer p.lay.pop()
+	for p.peek().Kind != token.EOF && p.peek().Pos().Col >= col {
+		name := p.peek()
+		p.next()
+		params := p.parseValueParams()
+		if !p.expect(token.EQ, "I expect `=` after the deriver method parameters.") {
+			return nil
+		}
+		body := p.parseBindBody(p.peek())
+		if body == nil {
+			return nil
+		}
+		d.Methods = append(d.Methods, &ast.ValueDecl{Name: name.Text, NameSpan: name.Span, Params: params, Body: body})
+	}
+	return d
 }
 
 func (p *parser) parseNativeBody() *ast.NativeBody {
@@ -1523,6 +1554,14 @@ func (p *parser) parseAtom() ast.Expr {
 			return nil
 		}
 		return &ast.Quote{Body: body, Sp: t.Span.Merge(body.Span())}
+	case token.KwTypeOf:
+		p.usesStaging = true
+		p.next()
+		ty := p.parseTypeExpr()
+		if ty == nil {
+			return nil
+		}
+		return &ast.TypeOf{Ty: ty, Sp: t.Span.Merge(ty.Span())}
 	case token.DOLLARPAREN:
 		p.next()
 		p.usesStaging = true

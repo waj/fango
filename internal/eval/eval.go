@@ -311,6 +311,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			holes[i] = code
 		}
 		return &meta.Code{Template: e.Template, Holes: holes}, nil
+	case *core.TypeOf:
+		return e.Repr, nil
 	case *core.NativeCall:
 		args := make([]Value, len(e.Args))
 		for i, a := range e.Args {

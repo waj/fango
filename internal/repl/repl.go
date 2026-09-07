@@ -200,7 +200,7 @@ func (s *Session) input(text string, force bool) inputResult {
 // expression. `==` lexes as its own token, so comparisons still classify as
 // expressions, and `f x y` without `=` stays an application.
 func isDecl(toks []token.Token) bool {
-	if len(toks) >= 1 && (toks[0].Kind == token.KwType || toks[0].Kind == token.KwEffect || toks[0].Kind == token.KwClass || toks[0].Kind == token.KwInstance) {
+	if len(toks) >= 1 && (toks[0].Kind == token.KwType || toks[0].Kind == token.KwEffect || toks[0].Kind == token.KwClass || toks[0].Kind == token.KwInstance || toks[0].Kind == token.KwDeriver) {
 		return true
 	}
 	if len(toks) < 2 || toks[0].Kind != token.LIDENT {

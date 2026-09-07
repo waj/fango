@@ -345,6 +345,10 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 			errs = append(errs, ck.ClassDecl(cl)...)
 			continue
 		}
+		if dr, ok := d.(*ast.DeriverDecl); ok {
+			errs = append(errs, diag.Errorf(dr.ClassSpan, "DERIVER NOT READY", "User-defined derivers are not available in this compiler build."))
+			continue
+		}
 		if td, ok := d.(*ast.TypeDecl); ok && len(td.Deriving) > 0 {
 			ck.CurrentOwner = symbolModule(td.Name)
 			ds, es := ck.DeriveDecl(td)
@@ -367,7 +371,17 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 			ck.Checked = append(ck.Checked, ds...)
 			errs = append(errs, es...)
 			for i, m := range in.Methods {
-				errs = append(errs, ck.checkStageLeaks(m, nil, methodNames[i])...)
+				compileTimeMethod := false
+				if cl := ck.Classes[in.Head.Class]; cl != nil {
+					for _, cm := range cl.Methods {
+						if types.SurfaceName(cm.Name) == methodNames[i] && ck.IsCompileTimeOnly(cm.Type) {
+							compileTimeMethod = true
+						}
+					}
+				}
+				if !compileTimeMethod {
+					errs = append(errs, ck.checkStageLeaks(m, nil, methodNames[i])...)
+				}
 			}
 			continue
 		}
@@ -1168,6 +1182,22 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		// Staging replaced every splice before checking began, so one
 		// reaching inference is a splice the stage rules already rejected.
 		ty = g.ck.Sup.FreshVar(types.General)
+	case *ast.TypeOf:
+		repr := g.ck.TypeNames[TypeReprName]
+		if repr == nil {
+			g.errs = append(g.errs, diag.Errorf(e.Sp, "REFLECTION ERROR", "I cannot find the bundled `Meta.TypeRepr` type."))
+			ty = g.ck.Sup.FreshVar(types.General)
+			break
+		}
+		reflected, errs := g.ck.ResolveTypeExpr(e.Ty, g.ck.NewAnnScope())
+		g.errs = append(g.errs, errs...)
+		if !g.ck.reflectionClosed(reflected) {
+			g.errs = append(g.errs, diag.Errorf(e.Sp, "REFLECTION ERROR", "`typeOf` requires a closed, fully applied type."))
+		}
+		e.Value = reflected
+		ty = repr
+	case *ast.MetaValue:
+		ty = e.Ty
 	default:
 		panic("infer: unhandled expression node")
 	}

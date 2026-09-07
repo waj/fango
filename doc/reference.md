@@ -838,6 +838,16 @@ fango has one compile-time stage. `quote` goes up a stage and `$(…)` comes
 back down, and together they are the whole staging surface. `quote` is a
 reserved word; `$` is a token only as part of `$(`.
 
+`typeOf T` produces an opaque `Meta.TypeRepr` for a closed, fully applied
+type. Nominal types compare by compiler identity, while applications and
+function arrows compare structurally, including the effects on each arrow.
+`Meta.sameType`, `Meta.head`, `Meta.isVar`, and `Meta.typeName` inspect this
+representation; display text never determines identity.
+
+`Meta.Lift` provides `lift : a -> Code` for `Int`, `Float`, `String`, `Char`,
+`Bool`, and `()`. The generated literal retains its scalar type. `Meta.fail`
+stops expansion and reports `COMPILE-TIME FAILURE` at the splice site.
+
 `quote atom` builds a value of the abstract type `Meta.Code`. It does not
 evaluate the quoted expression — it describes it. The quoted text is ordinary
 fango and takes exactly one atom, so anything larger is parenthesized:
