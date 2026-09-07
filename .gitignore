@@ -11,3 +11,6 @@ result-*
 
 # fango build directories
 .fango/
+
+# Claude
+/.claude
