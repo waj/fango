@@ -10,7 +10,8 @@ import (
 func Prelude() (*ast.Module, []diag.Error) {
 	nodes := map[string]*node{}
 	var errs []diag.Error
-	order := []string{"Basics", "Maybe", "IO"}
+	// The prompt can contain a quote, so the REPL always has Meta available.
+	order := []string{"Basics", "Meta", "Maybe", "IO"}
 	for _, name := range order {
 		path, data, err := (BundledProvider{}).Source(name)
 		if err != nil {

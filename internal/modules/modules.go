@@ -180,7 +180,7 @@ func Load(entry string) (*Result, []diag.Error) {
 	if !private && m.Header.Name != wantEntry {
 		return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "MODULE/PATH MISMATCH", "The entry file `%s` must declare module `%s`, but declares `%s`.", filepath.Base(abs), wantEntry, m.Header.Name)}
 	}
-	rootNode := &node{name: entryName, path: filepath.Base(abs), content: content, mod: m, private: private, deps: []string{"Basics", "IO"}, nativeModule: wantEntry}
+	rootNode := &node{name: entryName, path: filepath.Base(abs), content: content, mod: m, private: private, deps: stagingDeps(m, []string{"Basics", "IO"}, entryName), nativeModule: wantEntry}
 	rootNativePath := wantEntry + ".native.go"
 	if nb, ne := os.ReadFile(filepath.Join(root, rootNativePath)); ne == nil {
 		rootNode.nativePath, rootNode.native = rootNativePath, nb
@@ -236,6 +236,7 @@ func Load(entry string) (*Result, []diag.Error) {
 		if !bundled {
 			n.deps = []string{"Basics", "IO"}
 		}
+		n.deps = stagingDeps(mm, n.deps, name)
 		var np string
 		var nb []byte
 		var ne error
@@ -378,6 +379,24 @@ func Load(entry string) (*Result, []diag.Error) {
 		entrySymbol = canonical(entryName, "main")
 	}
 	return &Result{Module: merged, Entry: entrySymbol, Manifest: manifest, Units: units, Operators: operators, Natives: natives}, nil
+}
+
+// MetaModule is the bundled module that owns the abstract compile-time code
+// type. A file using `quote` or `$(…)` needs it in the graph to have a type
+// for its quotes, so the loader adds the dependency where the syntax appears
+// rather than taxing every program with it.
+const MetaModule = "Meta"
+
+func stagingDeps(m *ast.Module, deps []string, self string) []string {
+	if !m.UsesStaging || self == MetaModule {
+		return deps
+	}
+	for _, d := range deps {
+		if d == MetaModule {
+			return deps
+		}
+	}
+	return append(deps, MetaModule)
 }
 
 func parse(f *source.File) (*ast.Module, []diag.Error) {
@@ -1323,6 +1342,13 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 	case *ast.App:
 		r.expr(e.Fn, vals, locals)
 		r.expr(e.Arg, vals, locals)
+	case *ast.Quote:
+		// A quote resolves in the quoting module's scope, always. That is the
+		// whole hygiene story: canonical symbols are fixed here, before
+		// inference, so a splice site can neither capture nor be captured.
+		r.expr(e.Body, vals, locals)
+	case *ast.Splice:
+		r.expr(e.Operand, vals, locals)
 	case *ast.Neg:
 		r.expr(e.Operand, vals, locals)
 	case *ast.If:

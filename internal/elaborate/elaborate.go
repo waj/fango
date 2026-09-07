@@ -42,13 +42,34 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 		effects = append(effects, eff)
 	}
 	sort.Slice(effects, func(i, j int) bool { return effects[i].Unique < effects[j].Unique })
-	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effects, Entry: ck.EntryName, Natives: ck.Natives}
+	// A compile-time-only type is not emitted, for the same reason Bool is
+	// not: no Go type corresponds to it. Code exists only inside the
+	// compiler, so nothing downstream can name it.
+	adts := make([]*types.ADTInfo, 0, len(ck.ADTOrder))
+	for _, adt := range ck.ADTOrder {
+		if !ck.IsCompileTimeOnly(adt.Con) {
+			adts = append(adts, adt)
+		}
+	}
+	p := &core.Prog{ADTs: adts, Effects: effects, Entry: ck.EntryName, Natives: ck.Natives}
 	var errs []diag.Error
 	for _, inst := range ck.Instances {
 		d, es := instanceDefinition(inst, ck)
 		p.Defs = append(p.Defs, d)
 		errs = append(errs, es...)
 	}
+	kept := infos[:0:0]
+	for _, info := range infos {
+		// A compile-time-only definition is not emitted: it exists only for
+		// the compiler's own evaluator, which elaborates it separately
+		// (doc/design.md, "Compile-time metaprogramming"). Nothing runtime
+		// can reference it, because no runtime expression may have its type.
+		if ck.IsCompileTimeOnly(ck.Sub.Apply(info.Type)) {
+			continue
+		}
+		kept = append(kept, info)
+	}
+	infos = kept
 	for _, info := range infos {
 		owner := symbolOwner(info.Name)
 		defs, declErrs := decl(info, ck, owner != "")
@@ -341,6 +362,19 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 			}
 			return el.ctorValue(info, ty)
 		}
+	case *ast.Quote:
+		holes := make([]core.Expr, 0, len(el.ck.QuoteHoles[e]))
+		for _, hole := range el.ck.QuoteHoles[e] {
+			holes = append(holes, el.expr(hole.Operand))
+		}
+		// A quote with no template was never staged, which happens only after
+		// staging already reported an error. Index -1 keeps it from silently
+		// expanding as some other quote's template.
+		template, staged := el.ck.QuoteTemplates[e]
+		if !staged {
+			template = -1
+		}
+		return &core.Quote{Template: template, Holes: holes, Ty: ty}
 	case *ast.RecordLit:
 		return el.recordLiteral(e, ty)
 	case *ast.RecordGet:

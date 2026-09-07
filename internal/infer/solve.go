@@ -95,6 +95,9 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 			e.Notes = append(e.Notes,
 				"Note: there is no automatic Int-to-Float conversion — use a\nFloat value here, like `2.0` instead of `2`.")
 		}
+	case WhySpliceOperand:
+		e = diag.Errorf(c.Span, "TYPE MISMATCH",
+			"A splice pastes generated code, so `$(…)` needs an operand that builds\ncode with `quote`, but this one is:\n\n    %s", left)
 	case WhyEffectEscapes:
 		e = diag.Errorf(c.Span, "UNHANDLED EFFECT",
 			"This top-level value performs an effect that is not handled.\nTop-level bindings must be pure; move the call into a function or add a handler.")

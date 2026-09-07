@@ -1,9 +1,9 @@
 1:1 LIDENT newline
 1:9 EQ =
 1:11 CHAR '\n'
-2:1 LIDENT quote
-2:7 EQ =
-2:9 CHAR '\''
+2:1 LIDENT apostrophe
+2:12 EQ =
+2:14 CHAR '\''
 3:1 LIDENT slash
 3:7 EQ =
 3:9 CHAR '\\'

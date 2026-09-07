@@ -9,6 +9,7 @@ import (
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
+	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
 )
@@ -34,6 +35,7 @@ const (
 	WhyCaseBranches                  // all case branches must produce the same type
 	WhyEffectEscapes                 // a top-level value performs an unhandled effect
 	WhyEffectMismatch                // an annotation's effect row disagrees with its body
+	WhySpliceOperand                 // `$(…)` needs an operand that evaluates to code
 )
 
 type Why struct {
@@ -157,7 +159,30 @@ type Checker struct {
 	// EntryName is the canonical symbol selected by the batch graph loader.
 	// It remains "main" for the REPL and headerless single-file programs.
 	EntryName string
+
+	// Templates numbers this compilation's quotes; QuoteTemplates and
+	// QuoteHoles index back into it from the surface nodes elaboration and
+	// constraint generation see (doc/design.md, "Compile-time
+	// metaprogramming").
+	Templates      *meta.Table
+	QuoteTemplates map[*ast.Quote]int
+	QuoteHoles     map[*ast.Quote][]*ast.Splice
+
+	// Checked accumulates every declaration this checker has finished, in
+	// source order. The compile-time evaluator elaborates the prefix on
+	// demand from it, which is the same "already-inferred prefix" the REPL
+	// works from.
+	Checked []DeclInfo
+
+	// CompileTime runs a splice operand. The driver installs it
+	// (internal/staging): inference cannot, because running a splice needs
+	// elaboration and the interpreter, both of which depend on this package.
+	CompileTime CompileTimeEval
 }
+
+// CompileTimeEval elaborates and evaluates one already-checked splice
+// operand, returning the *meta.Code it produced.
+type CompileTimeEval func(operand ast.Expr) (any, []diag.Error)
 
 func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 	ck := &Checker{
@@ -197,6 +222,9 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		PatTypes:        map[ast.Pattern]types.Type{},
 		BindSchemes:     map[*ast.LocalBind]types.Scheme{},
 		EntryName:       "main",
+		Templates:       &meta.Table{},
+		QuoteTemplates:  map[*ast.Quote]int{},
+		QuoteHoles:      map[*ast.Quote][]*ast.Splice{},
 	}
 	// Bool is an ordinary ADT in the checker (doc/design.md, "Type inference") — patterns, case
 	// exhaustiveness, and the ctor table treat it like any declared type.
@@ -320,14 +348,26 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 			ck.CurrentOwner = symbolModule(td.Name)
 			ds, es := ck.DeriveDecl(td)
 			infos = append(infos, ds...)
+			ck.Checked = append(ck.Checked, ds...)
 			errs = append(errs, es...)
 			continue
 		}
 		if in, ok := d.(*ast.InstanceDecl); ok {
 			ck.CurrentOwner = in.Owner
+			// InstanceDecl renames methods to their instance symbols, so keep
+			// the surface spelling for diagnostics.
+			methodNames := make([]string, len(in.Methods))
+			for i, m := range in.Methods {
+				methodNames[i] = types.SurfaceName(m.Name)
+				errs = append(errs, ck.StageDecl(m)...)
+			}
 			ds, es := ck.InstanceDecl(in)
 			infos = append(infos, ds...)
+			ck.Checked = append(ck.Checked, ds...)
 			errs = append(errs, es...)
+			for i, m := range in.Methods {
+				errs = append(errs, ck.checkStageLeaks(m, nil, methodNames[i])...)
+			}
 			continue
 		}
 		vd, ok := d.(*ast.ValueDecl)
@@ -341,9 +381,15 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 				"`%s` is defined more than once.", vd.Name))
 		}
 		ck.CurrentOwner = symbolModule(vd.Name)
+		// Staging runs first and in source order, so a splice can only name
+		// declarations that are already checked — fango's existing
+		// forward-reference rule doing duty as the stage discipline.
+		errs = append(errs, ck.StageDecl(vd)...)
 		info, declErrs := ck.Decl(vd)
 		errs = append(errs, declErrs...)
+		errs = append(errs, ck.checkStageLeaks(vd, info.Type, types.SurfaceName(vd.Name))...)
 		infos = append(infos, info)
+		ck.Checked = append(ck.Checked, info)
 	}
 	return infos, errs
 }
@@ -795,9 +841,10 @@ func (ck *Checker) Expr(e ast.Expr) (types.Type, []diag.Error) {
 }
 
 // ExprWhere generates constraints for one expression and solves them into
-// the checker's substitution. allowEffects controls the REPL declaration
-// policy; expression checking itself always uses ordinary effect rows.
-func (ck *Checker) ExprWhere(e ast.Expr, _ bool) (types.Type, []diag.Error) {
+// the checker's substitution. With allowEffects off the expression must type
+// with an empty effect row — the rule that makes "no IO during compilation" a
+// consequence of the effect system rather than a convention.
+func (ck *Checker) ExprWhere(e ast.Expr, allowEffects bool) (types.Type, []diag.Error) {
 	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	ty := g.expr(e)
 	var preds []types.Pred // the typeclass seam: always empty in the MVP
@@ -829,6 +876,12 @@ func (ck *Checker) ExprWhere(e ast.Expr, _ bool) (types.Type, []diag.Error) {
 	visible, ves := ck.reduceObligations(vobs, nil)
 	es = append(es, ves...)
 	ck.PendingPreds = ck.NormalizePreds(visible)
+	if !allowEffects {
+		if row, ok := ck.Sub.Apply(g.ambient).(types.Row); ok && len(row.Labels) > 0 {
+			es = append(es, diag.Errorf(e.Span(), "COMPILE-TIME EFFECT",
+				"Compile-time code runs inside the compiler, so it must be pure, but\nthis performs `%s`.", types.SurfaceName(row.Labels[0].Name)))
+		}
+	}
 	return ty, append(errs, es...)
 }
 
@@ -1098,6 +1151,22 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		} else {
 			ty = g.resumeType
 		}
+	case *ast.Quote:
+		// The quoted body is not checked here — its holes have no type yet.
+		// It is checked when spliced, at the splice site. Only the holes,
+		// which are evaluated with the quote, are checked now.
+		code, codeErrs := g.ck.codeType(e.Sp)
+		g.errs = append(g.errs, codeErrs...)
+		for _, hole := range g.ck.QuoteHoles[e] {
+			holeTy := g.expr(hole.Operand)
+			g.cs = append(g.cs, Constraint{Left: holeTy, Right: code, Span: hole.Sp, Why: Why{Kind: WhySpliceOperand}})
+			g.ck.ExprTypes[hole] = code
+		}
+		ty = code
+	case *ast.Splice:
+		// Staging replaced every splice before checking began, so one
+		// reaching inference is a splice the stage rules already rejected.
+		ty = g.ck.Sup.FreshVar(types.General)
 	default:
 		panic("infer: unhandled expression node")
 	}

@@ -329,6 +329,10 @@ func DumpExpr(e Expr) string {
 		return b.String()
 	case *Resume:
 		return "(resume)"
+	case *Quote:
+		return fmt.Sprintf("(quote %s)", DumpExpr(e.Body))
+	case *Splice:
+		return fmt.Sprintf("(splice %s)", DumpExpr(e.Operand))
 	default:
 		panic(fmt.Sprintf("ast.DumpExpr: unhandled %T", e))
 	}

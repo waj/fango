@@ -336,7 +336,7 @@
       "patterns": [
         {
           "name": "keyword.control.fango",
-          "match": "\\b(if|then|else|case|of|handle|resume)\\b"
+          "match": "\\b(if|then|else|case|of|handle|resume|quote)\\b"
         },
         {
           "name": "keyword.other.fango",
@@ -443,6 +443,10 @@
     },
     "operators": {
       "patterns": [
+        {
+          "name": "keyword.operator.splice.fango",
+          "match": "\\$\\("
+        },
         {
           "name": "keyword.operator.arrow.fango",
           "match": "->"

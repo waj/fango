@@ -1,22 +1,23 @@
 # Roadmap: compile-time metaprogramming
 
-This is a [roadmap](roadmap.md) proposal under iteration; nothing here is
-implemented. When accepted and built, durable results move to
-[the design](design.md) and [the reference](reference.md) and this file is
-removed.
+This is a [roadmap](roadmap.md) proposal under iteration. The compile-time
+stage itself — quotes, splices, the depth rules, and the compile-time
+evaluator — is implemented and documented in [the design](design.md,
+"Compile-time metaprogramming") and [the reference](reference.md,
+"Compile-time metaprogramming"). What remains here is everything built on top
+of it: reflection, derivers, and declaration splices.
 
 ## Problem
 
-fango has exactly one code-generation mechanism, and it is closed. `deriving`
-is implemented by `(*Checker).DeriveDecl` in `internal/infer/derive.go`, a Go
-function that synthesizes `*ast.InstanceDecl` nodes with local `ref`/`call`/
-`str`/`pattern` combinators and routes them through `ck.InstanceDecl`. Its
-architecture is right — generated code is checked and elaborated through
-exactly the same path as handwritten methods — but its class list is a literal
-`cl.Name != "Basics.Eq" && cl.Name != "Basics.Show"`, and everything else gets
-`CANNOT DERIVE`.
+`deriving` is still closed. It is implemented by `(*Checker).DeriveDecl` in
+`internal/infer/derive.go`, a Go function that synthesizes `*ast.InstanceDecl`
+nodes with local `ref`/`call`/`str`/`pattern` combinators and routes them
+through `ck.InstanceDecl`. Its architecture is right — generated code is
+checked and elaborated through exactly the same path as handwritten methods —
+but its class list is a literal `cl.Name != "Basics.Eq" && cl.Name !=
+"Basics.Show"`, and everything else gets `CANNOT DERIVE`.
 
-The cost is already visible in the tree:
+The cost is visible in the tree:
 
 - `Ord` has four independent methods (`lt`, `gt`, `le`, `ge`; there is no
   `compare` and no `Ordering`), so every custom ordering is four near-duplicate
@@ -30,9 +31,9 @@ The cost is already visible in the tree:
   Todo CLI. There is no JSON module, and no way to generate a codec per type
   without writing it out by hand for each one.
 
-The general shape of the missing capability: **inspect a type at compile time
-and emit specialized code for it**, without a runtime reflection mechanism and
-without breaking modularity.
+The missing capability is now narrow: **inspect a type at compile time** and
+hand the resulting description to a generator that already knows how to emit
+code.
 
 ## Why not a `Generic`-style structural representation
 
@@ -55,143 +56,37 @@ with one numeric type parameter, and `doc/design.md` is explicit that
 Making generic-representation erasure load-bearing for performance would invert
 that stance.
 
-The alternative direction — emit the specialized code directly, at compile
-time — needs no type-system extension and no optimizer.
+Emitting the specialized code directly, at compile time, needs no type-system
+extension and no optimizer.
 
-## Why fango can afford staged code generation cheaply
+## What P0 settled
 
-Template Haskell is the reference point for "emit code at compile time", and
-most of what makes it complicated is already solved here by existing
-architecture rather than by new machinery.
+Three design choices changed while the stage was built, and each is worth
+recording because the later phases inherit them.
 
-1. **Name resolution produces canonical symbols before inference.** The
-   resolver in `internal/modules/modules.go` (`(*resolver).canon`) rewrites
-   every module-level declaration and imported reference to an opaque
-   `Module.name` symbol, and merges all modules into one declaration list in
-   graph order. A quote compiled in module `J` therefore already holds
-   fully-resolved identities. Splicing it into module `M` cannot capture `M`'s
-   names and cannot be captured by them. **Hygiene is close to free**, and it
-   is the good kind: a quote sees the *quoting* module's scope, never the
-   splice site's.
+**A quote is a Core node, not a bundled primitive.** The original plan lowered
+a quote to `Meta.makeCode : Int -> List Code -> Code` as a saturated
+`NativeCall`, on the theory that reusing the linter's native checks was
+cheaper than a new node. It is not: `Meta` must import nothing, because
+derivers will live in `Basics` and every module already loads `Basics`, so a
+`List Code` argument would close an import cycle. The remaining shape — a
+bundled native with a Go template that must never be emitted — was worse than
+the node it avoided. `core.Quote` also buys a real invariant: the linter
+rejects one outright, so "no compile-time value reaches generated Go" is
+checked rather than argued.
 
-2. **Compilation is whole-graph, dependency-first, and source-ordered.**
-   Top-level declarations are scoped in source order and forward references are
-   rejected (`doc/design.md`, "Language semantics"). That is already a stage
-   discipline: anything a splice can name has already been checked. There is no
-   need for Template Haskell's rule that a splice's function must live in
-   another module, no cross-stage persistence problem, and no
-   recompilation-avoidance problem — the graph is re-checked on every batch
-   build and `sources.json` already hashes every input.
+**Two counters, not one signed depth.** Quote depth decides whether `$(…)` is
+a hole; stage depth decides whether code runs at run time or compile time.
+Collapsing them into a single depth made the rule for a quote inside a splice
+operand ambiguous. Tracking them separately makes every case fall out.
 
-3. **Purity is checkable, not conventional.** Compile-time code is ordinary
-   fango and must type with an empty effect row. "No IO during compilation" is
-   enforced by the effect system, not by a `Q`-monad honor system, so
-   reproducible builds follow from the type checker rather than from
-   discipline.
+**The native restriction is dynamic.** The plan called for a Core reachability
+walk against a compile-time-safe flag on `natives.Spec`. The flag exists, but
+the check happens in the interpreter's compile-time mode instead: it is
+equally deterministic, has no false positives on paths a splice never takes,
+and needs no walk over the reachable definition set.
 
-There is also direct precedent for running the evaluator inside the compiler:
-`(*elab).fold` in `internal/elaborate/elaborate.go` dispatches `NativeCall`
-through `natives.Lookup` and calls `spec.Eval` during compilation, and
-`internal/repl` runs the full check → `elaborate.Decl` → `eval` loop
-incrementally against a persistent `Checker` and `eval.Env`.
-
-## Proposal
-
-Add a compile-time stage to the existing pipeline, with three pieces:
-
-- an opaque `Code` type whose only constructor is a **quote**;
-- **type reflection** bounded by ordinary export visibility;
-- **derivers**, which open `deriving` to user classes, plus general splices.
-
-Compile-time code is ordinary fango, evaluated by `internal/eval` during
-inference.
-
-### One representation: opaque `Code`
-
-`Meta.Code` is abstract. There are no constructors, and deliberately no ADT
-mirroring `internal/ast`. The only way to build a `Code` is a quote containing
-real fango syntax, with `$(...)` holes:
-
-```fango
-quote (Json.push $(acc) (encode $(f.value)))
-```
-
-Internally a quote compiles to a compiler-side template — a resolved
-`ast.Expr` retaining its original `source.Span`s — plus an ordered list of hole
-expressions. The interpreter value is opaque (`Value = any` already permits
-this), so nothing about the AST leaks into the language and the AST can evolve
-without a matching fango-level ADT to keep in lockstep.
-
-Because templates keep the quoting module's spans, a type error in generated
-code can point at **the deriver author's own source line** rather than at a
-synthesized position.
-
-Quotes are not type-checked where they are written — holes have no known type
-yet. They are checked when spliced, reported at the splice site with a
-"while expanding" frame naming the deriver and the type. This is the main
-honest cost of the design, and the span retention is what keeps it tolerable.
-
-A quote needs **no new Core node**. It lowers to
-`Meta.makeCode : Int -> List Code -> Code` — a compiler-side template index
-plus the evaluated holes — as a saturated `NativeCall`, whose arity and
-declaration instantiation `core.Lint` already checks against `Prog.Natives`.
-Because the language is strict, holes evaluate eagerly and in source order.
-
-`Code` is one of four **compile-time-only types**, alongside `Decls`,
-`TypeInfo`, and `TypeRepr`:
-
-> A definition whose type mentions a compile-time-only type is not emitted, and
-> no runtime-reachable expression may have such a type.
-
-This rule is load-bearing rather than tidy. `internal/codegen` has no
-dead-code elimination — every `Prog.Def` is emitted, deliberately, so that
-adding a downstream consumer does not change a dependency's generated package
-— so without it a deriver body would reach Go codegen and `Meta.makeCode` would
-need a runtime implementation that has no meaning. The rule does double duty by
-also keeping `Code` values from leaking into the running program, and it is a
-purely type-directed test, so it needs no reachability analysis.
-
-### Two stage operators, one inequality
-
-`quote` and `$(...)` are inverses, and together they are the entire staging
-surface:
-
-- `quote (e)` goes **up** a stage. It does not evaluate `e`; it builds a `Code`
-  describing it.
-- `$(e)` goes **down** a stage. It evaluates `e` now and pastes the resulting
-  `Code` where it stands.
-
-These are one operation at two depths, not two rules. Track a quote depth:
-ordinary program text is depth 0, `quote` is +1, `$` is −1, and **depth −1 is
-compile time**. So `$(...)` inside a quote fills a hole, while `$(...)` in
-ordinary program text runs during compilation and pastes generated code into
-the program being compiled. The first increment permits depths −1 and 0 only:
-depth 1 is a nested quote and depth −2 is a second compile-time stage, both
-rejected.
-
-One inequality then subsumes several rules that would otherwise be ad hoc, but
-it applies to **local** binders only: **a local binder introduced at depth −1 is
-usable only at depth −1, and one introduced at depth 0 only at depth 0.** Local
-binders are lambda parameters, block bindings, and case binders.
-
-**Top-level definitions are stage-polymorphic** — usable at either depth. That
-is what lets a splice operand name ordinary definitions at all, and it is the
-one piece of cross-stage persistence the design keeps from Template Haskell.
-So `helper = $(precompute 10)` is an ordinary runtime value that a later
-deriver may also consult at depth −1.
-
-The local-binder restriction is why a splice cannot see the splice site's
-locals — they live at depth 0 while the operand runs at depth −1 — so staged
-code that needs runtime values is applied as a function:
-
-```fango
-addThree = $(mkAdder 3)
-```
-
-It is also what rejects a deriver leaking a compile-time value into generated
-code without `Meta.lift`.
-
-### Type reflection, bounded by visibility
+## Type reflection
 
 One new expression form, `typeOf T`, yields a `Meta.TypeRepr`: an opaque
 nominal identity backed by `types.TCon.Unique` — never a name string — plus its
@@ -227,7 +122,10 @@ on what happens to be in scope where the splice runs. A deriver instead *emits
 a method call* and lets ordinary instance resolution handle it, which is what
 `DeriveDecl` already does today when it emits `Basics.show` on a field.
 
-### Derivers
+`TypeRepr` and `TypeInfo` join `Code` as compile-time-only types, so the
+emission rule already implemented covers them without change.
+
+## Derivers
 
 A `deriver` declaration opens `deriving` to user classes:
 
@@ -289,20 +187,28 @@ residual predicates, `hasTypeVars` already defers polymorphic ones, and
 `ck.checkingInstance` already supplies self-evidence for direct recursion. What
 is new is a mode in which `InstanceDecl` accepts an undeclared context and
 adopts the residuals instead of reporting `MISSING CONSTRAINT`. This is the one
-piece of real type-system work in the proposal.
+piece of real type-system work left in the proposal.
 
-### Splices
+Two ordering consequences are worth stating outright, because they are the
+cases a user will hit first:
 
-An expression splice is a `$(...)` at depth 0. It evaluates its operand at
-compile time and checks the resulting `Code` in place — a compile-time computed
-table, a matcher specialized to a literal pattern, a codec chosen from a
-`TypeInfo`.
+- **A `deriver` must precede, in source order, any `deriving` clause that uses
+  it** — including on a type declared earlier in the same file.
+  `(*Checker).Module` declares type *headers* and constructor fields in early
+  loops, so types may be mutually recursive regardless of order, but it
+  processes `ClassDecl`, `deriving`, `InstanceDecl`, and value declarations in
+  one source-order loop. A `deriving` clause is reached at its type's position
+  in that loop, not before the file's values.
+- `x = $(f x)` is rejected by the existing no-self-reference rule, not by a new
+  staging check.
 
-A declaration splice generates a *group* of definitions. **There is no `splice`
-keyword**: `$(...)` is the only escape, and a declaration splice is a `$(...)`
-in the body position of a top-level definition. Here modularity needs one real
-rule, because generated top-level names are the only thing that can escape a
-splice:
+## Declaration splices
+
+An expression splice already generates an expression. A declaration splice
+generates a *group* of definitions. **There is no `splice` keyword**: `$(...)`
+stays the only escape, and a declaration splice is a `$(...)` in the body
+position of a top-level definition. Here modularity needs one real rule,
+because generated top-level names are the only thing that can escape a splice:
 
 > **Every name a module defines appears literally in that module's source.**
 
@@ -336,8 +242,6 @@ A declaration splice may generate `ValueDecl`, `TypeDecl`, `ClassDecl`, and
 those four are precisely the declarations that change graph or global
 structure, and `infix` and `native` are bundled-only besides.
 
-### Declaration quotes
-
 A declaration quote is a `quote` followed by an indented block, delimited by
 the offside rule like every other fango construct:
 
@@ -355,93 +259,23 @@ see the open questions.
 
 ## Modularity threat model
 
-Each threat, and the existing mechanism that answers it.
+The threats P0 answered are recorded in the design. The ones the remaining
+phases must answer:
 
 | Threat | Answer |
 | --- | --- |
-| Generated code captures, or is captured by, splice-site names | Quotes hold canonical symbols produced by `(*resolver).canon` before inference. A quote resolves in its own module, always. |
 | A splice queries the compiler about names it has no import edge to | No `reify`. Reflection starts from `typeOf T` at a site that could have written `T` by hand. |
 | A splice sees through an abstract type | `Meta.info` returns `Nothing` unless the schema is visible, following the existing `Type` versus `Type(..)` rule. |
 | A deriver dispatches on a type it does not own | Comparison is `TCon.Unique` identity against a `typeOf` the deriver's module can name — never a name string. |
-| Compile-time code observes the world, so builds stop being reproducible | Compile-time code must type with an empty effect row; the effect system rejects IO. |
-| Compile-time code observes process-global state | Reachable natives must be marked compile-time-safe. `Random` is the concrete exclusion: `runSeeded` handles its effect away to a pure row but advances fangort's process-global PRNG cell, which the compiler shares. |
-| Staging cycles: a deriver used before it exists | The existing source-order rule. Forward references are already rejected, so a splice can only name what is already checked. |
 | Derived instances weaken coherence | The instance head stays compiler-owned, so derived instances go through the same whole-graph overlap check as handwritten ones. |
 | A reader cannot tell what names a module defines | Declaration splices bind names the author wrote, to the left of `=`. Exporting still requires an `exposing` entry. |
-| Non-termination at compile time | A step budget on the compile-time evaluator, reusing the existing every-N-evals poll. |
-
-## Staging, purity, and reproducibility
-
-- A splice operand may name any top-level definition earlier in graph and
-  source order — fango's existing scoping rule reused verbatim. See
-  "Same-module staging" below for why no cross-module restriction is needed.
-- Compile-time code must type with an empty effect row.
-- It may not transitively reach a **user Go sidecar**. The interpreter cannot
-  load Go dynamically and already reports that limitation
-  (`doc/design.md`, "Go backend and runtime"), so this is a diagnostic rather
-  than a new restriction.
-- It may not reach a bundled native that touches process-global state. The
-  check is a Core reachability walk against a new compile-time-safe flag on
-  `natives.Spec`, alongside the existing `Foldable`.
-- Evaluation is bounded by a step budget.
-
-Together these keep generated Go byte-identical across builds, preserving the
-determinism invariant that unchanged source units emit unchanged Go.
-
-### Same-module staging
-
-Template Haskell's stage restriction forbids a splice from using a function
-defined in the same module, because GHC compiles a module as a unit. **fango
-has no such restriction**: a function returning `Code` may be defined and
-spliced in one module, bounded only by source order. Three existing properties
-give this, and none of them are new machinery.
-
-**Source-order scoping is already the stage discipline.** Top-level
-declarations are scoped in source order and forward references are rejected,
-so a splice can only name declarations that are already checked. Running one
-therefore means elaborating the already-inferred prefix on demand, which
-`elaborate.Decl` already supports per declaration — it is what
-`internal/repl` does on every prompt.
-
-**Instance resolution agrees between the two stages.** This is the load-bearing
-property. `(*Checker).InstanceDecl` appends to `ck.Instances` in source order,
-`MatchInstance` searches that list, and `reduceObligations` discharges concrete
-predicates during inference. An instance declared later in a module is
-therefore already invisible to an earlier declaration, so a splice operand and
-the final elaboration pass select the same evidence. There is no "this function
-behaved differently at compile time than at runtime" hazard to rule out;
-fango's existing ordering rule closed it before this proposal existed.
-
-**The evaluator cannot re-enter itself.** A splice is a `$(...)` at depth 0 and
-is expanded during inference, so by the time the prefix is elaborated its Core
-is already splice-free. A `$(...)` at depth −1 would be depth −2, which the
-depth rule rejects. Prefix elaboration therefore terminates without a
-reentrancy guard.
-
-Two ordering consequences are worth stating outright, because they are the
-cases a user will hit first:
-
-- **A `deriver` must precede, in source order, any `deriving` clause that uses
-  it** — including on a type declared earlier in the same file. `(*Checker).Module`
-  declares type *headers* and constructor fields in early loops, so types may
-  be mutually recursive regardless of order, but it processes `ClassDecl`,
-  `deriving`, `InstanceDecl`, and value declarations in one source-order loop.
-  A `deriving` clause is reached at its type's position in that loop, not
-  before the file's values.
-- `x = $(f x)` is rejected by the existing no-self-reference rule, not by a new
-  staging check.
 
 ## Diagnostics
 
-New titles, following the existing convention:
+`STAGE ERROR`, `COMPILE-TIME EFFECT`, `COMPILE-TIME NATIVE`,
+`COMPILE-TIME LIMIT`, and `COMPILE-TIME FAILURE` exist. Still to add:
 
 - `CANNOT DERIVE` — extended: no deriver for this class.
-- `COMPILE-TIME EFFECT` — a splice operand or deriver body is not pure.
-- `COMPILE-TIME NATIVE` — reaches a user sidecar or a native that is not
-  compile-time-safe.
-- `COMPILE-TIME LIMIT` — step budget exhausted.
-- `STAGE ERROR` — quote depth out of range, or a binder used at the wrong
-  depth.
 - `SPLICE ARITY` — a declaration splice produced a different number of
   definitions than the binder list names.
 - `INVALID SPLICE DECLARATION` — generated a `module`, `import`, `infix`, or
@@ -451,17 +285,7 @@ New titles, following the existing convention:
 
 ## Phases
 
-Sequenced so each is independently verifiable, and each names its first
-fixture.
-
-**P0 — quote and splice plumbing.** A bundled `Meta` module with opaque `Code`;
-the `quote`/`$(...)` pair with the depth rule and its stage-correctness check;
-a compile-time evaluator following the `internal/repl` pattern (`ck.Decl` →
-`elaborate.Decl` → `eval.Env.DefineWorker`), driven from the
-`ClassDecl`/`DeriveDecl`/`InstanceDecl` dispatch loop in
-`(*Checker).Module`. First fixture: `testdata/run/` case whose value comes from
-a splice that computes a constant, plus `testdata/check/` cases for
-`COMPILE-TIME EFFECT` and `STAGE ERROR`.
+**P0 — quote and splice plumbing. Done.** See the design and reference.
 
 **P1 — reflection.** `typeOf`, `TypeRepr`, `TypeInfo`, `Meta.info` and its
 visibility rule, and `Meta.lift` as a real `class Lift` with scalar instances.
@@ -473,7 +297,9 @@ and use-driven instance contexts. Port `Eq` and `Show` off
 `internal/infer/derive.go` onto fango-level derivers in `Basics`, then add
 `Ord`. First fixture: the existing `testdata/run/classes_derive.fango` goldens
 must be **unchanged** by the port — that is the strongest available evidence
-the port is faithful — followed by a new `Ord` deriving case.
+the port is faithful — followed by a new `Ord` deriving case. This is the
+phase that makes `Basics` import `Meta`, so `Meta` becomes a dependency of
+every program and the demand-driven loader edge becomes moot.
 
 **P3 — declaration splices.** `Meta.Decls`, declaration quotes, the
 comma-separated binder list and its arity check. First fixture: a
@@ -486,10 +312,9 @@ deliberately deferred: it needs a failure story, which means `Result` or the
 gated aborting handlers, so the Todo CLI's parse half stays hand-written for
 now and becomes a second forcing case for `Result`.
 
-Each of P0 through P3 adds surface syntax and therefore carries the
+P1 and P3 add surface syntax and therefore carry the
 `editors/vscode/syntaxes/fango.tmLanguage.json` obligation in the same change,
-per the repository instructions; `$(` and the quote block also affect bracket
-behavior in `editors/vscode/language-configuration.json`.
+per the repository instructions.
 
 ## Alternatives considered
 
@@ -510,16 +335,13 @@ of one-parameter classes with no higher kinds. It buys better errors at the
 cost of a type-system extension larger than the feature.
 
 **Bracketed quotes, `[| ... |]`.** fango has neither `[` nor `]` tokens, so
-this is available. Rejected because the parser derives structure from token
+this was available. Rejected because the parser derives structure from token
 columns rather than from closing delimiters: every construct is introduced by a
 word and delimited by the offside rule, so a multi-line bracketed quote would
 require the layout algorithm to exempt a closing `|]`. Declaration quotes make
 that mandatory rather than optional — exactly where TH needs a second bracket
 flavor, `[d| ... |]`, while a keyword-introduced block needs no delimiter at
-all. `$(...)` *is* taken from TH: `$` is unused in the closed operator set, it
-is instantly recognizable, and it is terse where density matters, since deriver
-bodies are mostly holes. Reserving `quote` as an identifier is inside the
-budget the language already spends on `in` and `as`.
+all.
 
 **Standalone deriving in another module.** `deriving Encode for Point` written
 away from `Point`'s declaration would be no worse than the orphan instances
@@ -548,23 +370,27 @@ mechanism once P1 and P2 exist.
   derivers must be reachable from every module that derives, so the rule is
   probably about emission only — but the interaction with `buildInterface` and
   with orphan derivers is unexamined.
-- Whether nested quotes are ever needed, and what a second compile-time stage
-  would mean for a language with no cross-stage persistence beyond `Meta.lift`.
+- Whether a quote should be allowed to introduce its own binders at all.
+  P0 permits `quote (\y -> …)` and rejects using `y` from a hole, but P2's
+  compiler-owned traversal means no deriver needs to write one.
 - `Meta.fail : String -> Code`, turning into a diagnostic at the splice site,
   as the deriver's error channel. This is a stopgap for the absence of
   `Result`; revisit once `Result` lands.
-- Whether the compile-time evaluator should reuse elaborated Core from the main
-  pass or re-elaborate on demand. Re-elaboration is deterministic and therefore
-  safe, but duplicates work; reuse requires interleaving elaboration with
-  inference, which is a larger change to `cmd/fango/pipeline.go`.
+- The compile-time evaluator re-elaborates the prefix on demand rather than
+  reusing the main pass's Core. Re-elaboration is deterministic and therefore
+  safe, and a program with no splices pays nothing, but a module full of
+  derivers elaborates its prefix twice. Reuse requires interleaving elaboration
+  with inference, which is a larger change to `cmd/fango/pipeline.go`; measure
+  before doing it.
 - Whether a failed expansion should roll back through `(*Checker).Checkpoint()`
   the way the REPL's `installInstances` does, or whether batch compilation can
-  simply stop.
+  simply stop. Batch stops today; the REPL rolls back for declarations but a
+  failed splice inside one leaves its checked prefix in place.
 
 ## Verification
 
-The existing gates cover most of this, which is a deliberate property of
-generating surface AST rather than Core:
+The existing gates cover this, which is a deliberate property of generating
+surface AST rather than Core:
 
 - Generated instances go through `ck.InstanceDecl`, ordinary inference, and
   ordinary elaboration, so `core.Lint` remains the safety net for every
@@ -577,9 +403,9 @@ generating surface AST rather than Core:
   determinism claim: pure, bounded, native-restricted compile-time evaluation
   must keep generated Go byte-identical.
 - The REPL keeps one `Checker` and one `eval.Env`, so derivers and splices work
-  at the prompt with no extra mechanism; REPL transcripts should cover a
-  deriver definition followed by a `deriving` use, and rollback after a failed
-  expansion.
+  at the prompt with no extra mechanism; `testdata/repl/staging.in` covers
+  quotes and splices, and P2 should extend it to a deriver definition followed
+  by a `deriving` use, and rollback after a failed expansion.
 - Diagnostic fixtures pin each new title.
 - Compile-latency benchmarks are the honest risk here: compile-time evaluation
   moves work into the compiler. The cold and warm latency cases should be read

@@ -130,6 +130,12 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 			args[i] = slot(a)
 		}
 		return &core.NativeCall{Name: e.Name, Module: e.Module, Args: args, Ty: e.Ty}, hoists
+	case *core.Quote:
+		holes := make([]core.Expr, len(e.Holes))
+		for i, h := range e.Holes {
+			holes[i] = slot(h)
+		}
+		return &core.Quote{Template: e.Template, Holes: holes, Ty: e.Ty}, hoists
 	case *core.Perform:
 		args := make([]core.Expr, len(e.Args))
 		for i, a := range e.Args {

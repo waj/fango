@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"strings"
 
 	stdlib "github.com/waj/fango/stdlib"
 )
@@ -22,7 +23,15 @@ type Spec struct {
 	Arity    int
 	Effect   bool
 	Foldable bool
-	Eval     func(*Runtime, []any) (any, error)
+
+	// CompileTimeSafe permits the compiler's own evaluator to run this
+	// native while expanding a splice. Purity is not enough: `Random`'s
+	// draws are pure in the effect row after `runSeeded` handles them away,
+	// but they advance fangort's process-global PRNG cell, which the
+	// compiler shares with the program it is compiling.
+	CompileTimeSafe bool
+
+	Eval func(*Runtime, []any) (any, error)
 }
 
 var Table = func() map[string]Spec {
@@ -87,6 +96,13 @@ var Table = func() map[string]Spec {
 	t["IO.write"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
 		return struct{}{}, stdlib.WriteTo(rt.Writer, args[0].(string))
 	}}
+	// Bundled natives are compile-time-safe by default: they are pure
+	// functions of their arguments. Random is the exclusion — its draws read
+	// and advance a process-global cell the compiler shares.
+	for name, spec := range t {
+		spec.CompileTimeSafe = !spec.Effect && !strings.HasPrefix(name, "Random.")
+		t[name] = spec
+	}
 	return t
 }()
 

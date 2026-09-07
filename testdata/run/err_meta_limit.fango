@@ -1,0 +1,6 @@
+import Meta exposing (Code)
+
+spin : Int -> Code
+spin n = spin (n + 1)
+
+main = print $(spin 0)

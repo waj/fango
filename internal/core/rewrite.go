@@ -80,6 +80,11 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Ty = r.typ(e.Ty)
 		n.Args = r.exprs(e.Args)
 		out = &n
+	case *Quote:
+		n := *e
+		n.Ty = r.typ(e.Ty)
+		n.Holes = r.exprs(e.Holes)
+		out = &n
 	case *If:
 		n := *e
 		n.Ty = r.typ(e.Ty)

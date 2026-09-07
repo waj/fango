@@ -12,6 +12,7 @@ import (
 	"github.com/waj/fango/internal/elaborate"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/modules"
+	"github.com/waj/fango/internal/staging"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -33,6 +34,7 @@ func compileFileGraph(entry string, stderr io.Writer) (*core.Prog, *infer.Checke
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
 	ck.Operators = loaded.Operators
 	ck.EntryName = loaded.Entry
+	staging.Install(ck)
 	infos, inferErrs := ck.Module(loaded.Module)
 	if report(stderr, inferErrs) {
 		return nil, nil, nil, nil, nil, false

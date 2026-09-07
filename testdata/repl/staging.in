@@ -1,0 +1,9 @@
+answer = quote (6 * 7)
+$(answer)
+twice c = quote ($(c) + $(c))
+big = twice answer
+$(big)
+n = $(twice (quote 10))
+n
+$(quote (print "no"))
+:quit

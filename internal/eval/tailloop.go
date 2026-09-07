@@ -34,6 +34,9 @@ func (in *interp) evalTailLoop(def *core.Def, vars map[string]Value) (Value, err
 				return nil, fmt.Errorf("interrupted")
 			default:
 			}
+			if in.budget > 0 && in.steps > in.budget {
+				return nil, ErrStepBudget
+			}
 		}
 		v, err := in.tailStep(def, def.Body, &Frame{vars: vars})
 		if err != nil {

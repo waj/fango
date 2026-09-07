@@ -1,0 +1,4 @@
+(module
+  (def answer (quote (binop * (int 6) (int 7))))
+  (def twice (params c) (quote (binop + (splice (var c)) (splice (var c)))))
+  (def main (app (var print) (splice (app (var twice) (var answer))))))

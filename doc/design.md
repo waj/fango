@@ -252,6 +252,79 @@ Record patterns follow the same lowering: omitted fields become wildcards and
 provided patterns are reordered into schema order. Hidden record constructors
 never appear in source diagnostics.
 
+## Compile-time metaprogramming
+
+Splices are expanded during inference, before Core exists, so both backends
+see identical generated code and every existing gate applies to it unchanged.
+
+There is one representation, and it is deliberately not a fango-level mirror
+of `internal/ast`: a quote compiles to a compiler-side template — the quoting
+module's own resolved AST, retaining its original spans — plus an ordered list
+of hole expressions. `internal/meta` owns the template table and the opaque
+`Code` value the compile-time evaluator produces. Retaining the quoting
+module's spans is what lets a type error in generated code point at the line
+the generator's author wrote.
+
+Hygiene is close to free, and it is the good kind: name resolution rewrites
+every module-level declaration and imported reference to a canonical
+`Module.name` symbol before inference, so a quote already holds fully-resolved
+identities and resolves in the quoting module's scope, never the splice
+site's.
+
+Two positions are tracked rather than one signed depth, because they answer
+different questions. Quote depth decides whether a `$(…)` is a hole; stage
+depth decides whether code runs when the program runs or while the compiler
+runs. Each reaches exactly one. Local binders belong to the position they were
+introduced at and may be used only there; top-level definitions are
+stage-polymorphic, which is the one piece of cross-stage persistence the
+design keeps.
+
+A quote is a Core node rather than a call to a bundled primitive. Only the
+interpreter ever executes one, and only while a splice is running: the Core
+linter rejects a quote outright, which turns "compile-time values do not reach
+generated Go" into a checked invariant rather than a convention.
+
+That invariant rests on the compile-time-only type rule: a definition whose
+type mentions `Meta.Code` is not emitted, and no expression in any other
+definition may have such a type. The rule is load-bearing rather than tidy,
+because `internal/codegen` has no dead-code elimination — every `Prog.Def` is
+emitted so that adding a downstream consumer cannot change a dependency's
+generated package. It is purely type-directed, so it needs no reachability
+analysis, and it does double duty by keeping code values out of the running
+program. The type itself is not emitted either, for the same reason `Bool` is
+absent from `ADTOrder`: no Go type corresponds to it.
+
+Running a splice needs elaboration and the interpreter, which both sit above
+inference in the package graph, while the splice must be expanded during
+inference. `internal/staging` fills that seam: the checker holds a hook, and
+both the batch pipeline and the REPL install the same evaluator. It
+elaborates the already-inferred prefix on demand — the same per-declaration
+path `internal/repl` uses at every prompt — so a program with no splices
+elaborates nothing twice.
+
+fango needs no equivalent of Template Haskell's stage restriction. Top-level
+declarations are scoped in source order and forward references are rejected,
+so a splice can only name declarations that are already checked, and
+`(*Checker).InstanceDecl` appends in source order, so a splice operand and the
+final elaboration pass select the same evidence. A splice at depth 0 is
+expanded before Core exists, so prefix elaboration cannot re-enter the
+evaluator and needs no reentrancy guard.
+
+Reproducibility is enforced rather than assumed. Compile-time code must type
+with an empty effect row, so "no IO during compilation" follows from the
+effect system. Beyond purity, the interpreter runs splices in a restricted
+mode: natives carry a compile-time-safe flag, and `Random` is the concrete
+exclusion — its draws are pure once `runSeeded` handles the effect away, but
+they advance fangort's process-global PRNG cell, which the compiler shares
+with the program it is compiling. User Go sidecars are unavailable for the
+reason they always were: the interpreter cannot load Go. A step budget bounds
+evaluation. Together these keep generated Go byte-identical across builds.
+
+The bundled `Meta` module is a dependency only of files that use the syntax:
+the parser records whether it built a quote or a splice, and the loader adds
+the edge from that. `Meta` imports nothing, so it can become a dependency of
+`Basics` when derivers land without closing a cycle.
+
 ## Core and evidence invariants
 
 Core is the compiler/interpreter contract. Every definition and expression is
@@ -499,8 +572,12 @@ package manager, transparent aliases, formatter, or LSP. Type classes have one
 parameter, no superclasses, higher kinds, default methods, ambiguous overlapping heads,
 or method-local polymorphism. There are no source-path
 flags, external library version selection, or package resolution. The implicit
-prelude is fixed to hidden `Basics` plus ambient `IO`; the bundled standard
+prelude is fixed to hidden `Basics` plus ambient `IO`, with `Meta` added only
+for files that use the staging syntax; the bundled standard
 library is intentionally small and experimental.
+Compile-time metaprogramming is limited to quotes and splices: `deriving`
+remains closed to `Eq` and `Show`, there is no type reflection, and there are
+no declaration splices.
 Integer values are signed 64-bit; broader numeric semantics are not settled.
 Self tail calls run in constant stack, but mutual recursion and monomorphic
 local recursive closures do not. Custom handlers have the

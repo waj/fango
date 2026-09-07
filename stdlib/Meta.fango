@@ -1,0 +1,12 @@
+module Meta exposing (Code)
+
+{- The compile-time stage's one representation.
+
+`Code` is abstract: it has no constructor here, and the only way to build one
+is a `quote`. Its values exist only while the compiler is running, so a
+definition whose type mentions `Code` is never emitted.
+
+Meta deliberately imports nothing. Derivers will live in `Basics`, which every
+module already loads, so anything Meta depended on would close a cycle. -}
+
+type Code = Code

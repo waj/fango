@@ -278,6 +278,23 @@ type Resume struct {
 	Sp source.Span
 }
 
+// Quote goes up a stage: it does not evaluate Body, it describes it. Body is
+// resolved in the quoting module's scope but never checked where it is
+// written — its holes have no type yet (doc/design.md, "Compile-time
+// metaprogramming").
+type Quote struct {
+	Body Expr
+	Sp   source.Span // the `quote` keyword through the quoted atom
+}
+
+// Splice goes down a stage. At quote depth 0 it evaluates Operand during
+// compilation and pastes the resulting code in its place; inside a quote it
+// marks a hole.
+type Splice struct {
+	Operand Expr
+	Sp      source.Span // `$(` through `)`
+}
+
 // Pattern is the surface pattern grammar (doc/reference.md, "Algebraic data types and matching"): variables, wildcard,
 // literals, and constructor patterns with nested argument patterns.
 type Pattern interface {
@@ -383,6 +400,8 @@ func (*Lambda) isExpr()       {}
 func (*Case) isExpr()         {}
 func (*Handle) isExpr()       {}
 func (*Resume) isExpr()       {}
+func (*Quote) isExpr()        {}
+func (*Splice) isExpr()       {}
 
 func (e *IntLit) Span() source.Span       { return e.Sp }
 func (e *FloatLit) Span() source.Span     { return e.Sp }
@@ -415,6 +434,8 @@ func (e *Handle) Span() source.Span {
 	return e.Sp.Merge(e.Clauses[len(e.Clauses)-1].Body.Span())
 }
 func (e *Resume) Span() source.Span { return e.Sp }
+func (e *Quote) Span() source.Span  { return e.Sp }
+func (e *Splice) Span() source.Span { return e.Sp }
 
 type Decl interface{ isDecl() }
 
@@ -529,4 +550,9 @@ type Module struct {
 	Header          *ModuleHeader
 	Imports         []Import
 	Decls           []Decl
+
+	// UsesStaging records whether the parser built a Quote or a Splice. The
+	// module loader adds the bundled `Meta` dependency only for files that
+	// need it, so an ordinary program's graph is unchanged.
+	UsesStaging bool
 }

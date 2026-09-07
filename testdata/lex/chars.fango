@@ -1,4 +1,4 @@
 newline = '\n'
-quote = '\''
+apostrophe = '\''
 slash = '\\'
 lambda = 'λ'

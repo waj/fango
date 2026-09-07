@@ -322,6 +322,9 @@ var twoCharOps = []struct {
 	{"++", token.PLUSPLUS}, {"==", token.EQEQ}, {"=>", token.DARROW}, {"/=", token.SLASHEQ},
 	{"<=", token.LTEQ}, {">=", token.GTEQ}, {"->", token.ARROW},
 	{"..", token.DOTDOT},
+	// `$(` is one token: a splice always opens with it, and `$` alone is not
+	// an operator, so nothing else can consume the dollar.
+	{"$(", token.DOLLARPAREN},
 	// Ahead of the one-char table, so `||` is one token and `|` still is one.
 	{"&&", token.ANDAND}, {"||", token.OROR},
 }
@@ -365,6 +368,13 @@ func (l *lexer) lexOperator(start int) {
 	if kind, ok := oneCharOps[c]; ok {
 		l.pos++
 		l.emit(kind, start, l.pos)
+		return
+	}
+	if c == '$' {
+		l.pos++
+		sp := source.Span{File: l.f, Start: start, End: l.pos}
+		l.errs = append(l.errs, diag.Errorf(sp, "UNEXPECTED CHARACTER",
+			"`$` only appears as part of a splice, written `$(expression)`."))
 		return
 	}
 	l.pos++

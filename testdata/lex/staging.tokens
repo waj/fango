@@ -1,0 +1,31 @@
+1:1 LIDENT answer
+1:8 EQ =
+1:10 quote quote
+1:16 LPAREN (
+1:17 INT 6
+1:19 STAR *
+1:21 INT 7
+1:22 RPAREN )
+2:1 LIDENT twice
+2:7 LIDENT c
+2:9 EQ =
+2:11 quote quote
+2:17 LPAREN (
+2:18 DOLLARPAREN $(
+2:20 LIDENT c
+2:21 RPAREN )
+2:23 PLUS +
+2:25 DOLLARPAREN $(
+2:27 LIDENT c
+2:28 RPAREN )
+2:29 RPAREN )
+3:1 LIDENT bare
+3:6 EQ =
+4:1 EOF
+-- errors --
+-- UNEXPECTED CHARACTER -------------------------- staging.fango
+
+`$` only appears as part of a splice, written `$(expression)`.
+
+3| bare = $
+          ^

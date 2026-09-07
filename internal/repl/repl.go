@@ -21,6 +21,7 @@ import (
 	"github.com/waj/fango/internal/lexer"
 	"github.com/waj/fango/internal/parser"
 	"github.com/waj/fango/internal/source"
+	"github.com/waj/fango/internal/staging"
 	"github.com/waj/fango/internal/token"
 	"github.com/waj/fango/internal/types"
 )
@@ -37,6 +38,7 @@ func NewSession(out io.Writer) *Session {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
+	staging.Install(ck)
 	if errs := ck.InstallPrelude(); len(errs) > 0 {
 		panic("invalid embedded prelude: " + errs[0].Body)
 	}
@@ -237,6 +239,15 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	if in, ok := m.Decls[0].(*ast.InstanceDecl); ok {
 		rollback := s.ck.Checkpoint()
 		start := len(s.ck.Instances)
+		var errs []diag.Error
+		for _, method := range in.Methods {
+			errs = append(errs, s.ck.StageDecl(method)...)
+		}
+		if len(errs) > 0 {
+			rollback()
+			diag.Render(s.out, errs)
+			return inputDone
+		}
 		infos, errs := s.ck.InstanceDecl(in)
 		if len(errs) == 0 {
 			errs = s.installInstances(infos, start)
@@ -266,6 +277,10 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	redefining := s.ck.Env.Has(vd.Name)
+	if stageErrs := s.ck.StageDecl(vd); len(stageErrs) > 0 {
+		diag.Render(s.out, stageErrs)
+		return inputDone
+	}
 	// Check the body BEFORE binding: a failed definition must not install
 	// a broken name into the session. REPL declarations are required to be
 	// pure; effectful expressions can be evaluated directly at the prompt.
@@ -294,6 +309,9 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	s.ck.BindDecl(info)
+	// A later splice may name this definition, so the compile-time
+	// evaluator's prefix has to grow with the session.
+	s.ck.Checked = append(s.ck.Checked, info)
 	def := &defs[0]
 	for i := range defs[1:] {
 		s.env.DefineWorker(&defs[1+i]) // lambda-lifted locals (doc/design.md, "Go backend and runtime")
@@ -354,6 +372,11 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 	if !force && wantsMore(errs) {
 		return needMoreInput
 	}
+	if len(errs) > 0 {
+		diag.Render(s.out, errs)
+		return inputDone
+	}
+	e, errs = s.ck.StageExpr(e)
 	if len(errs) > 0 {
 		diag.Render(s.out, errs)
 		return inputDone

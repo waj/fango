@@ -242,6 +242,18 @@ type Maybe a = Nothing | Just a deriving (Eq, Show)
 `withDefault : a -> Maybe a -> a` returns the contained value or the
 fallback.
 
+`Meta` exposes the abstract compile-time code type:
+
+```fango
+module Meta exposing (Code)
+```
+
+`Code` has no constructors: the only way to build one is a `quote`. See
+[Compile-time metaprogramming](#compile-time-metaprogramming). A file that
+uses `quote` or `$(…)` gets `Meta` in its module graph automatically, but
+naming `Code` in an annotation requires the ordinary
+`import Meta exposing (Code)`.
+
 Strings are always valid UTF-8 sequences and are not normalized. `Char` is one
 Unicode scalar value. `String` exposes the nominal record
 `type Uncons = { first : Char, rest : String }` and these operations:
@@ -777,6 +789,80 @@ Ambient `print : Show a => a ->{IO} ()` displays values through their instance.
 `readLine : () ->{IO} Maybe IO.Line` distinguishes clean EOF from a line and
 preserves the exact line ending as described under the bundled standard
 library. Call it as `readLine()` (or equivalently `readLine ()`).
+
+## Compile-time metaprogramming
+
+fango has one compile-time stage. `quote` goes up a stage and `$(…)` comes
+back down, and together they are the whole staging surface. `quote` is a
+reserved word; `$` is a token only as part of `$(`.
+
+`quote atom` builds a value of the abstract type `Meta.Code`. It does not
+evaluate the quoted expression — it describes it. The quoted text is ordinary
+fango and takes exactly one atom, so anything larger is parenthesized:
+
+```fango
+import Meta exposing (Code)
+
+answer : Code
+answer = quote (6 * 7)
+```
+
+`$(expression)` inside a quote is a **hole**: the expression is evaluated
+along with the quote, in source order like any other argument, and must
+produce `Code`, which is pasted into the quoted text:
+
+```fango
+twice : Code -> Code
+twice c = quote ($(c) + $(c))
+```
+
+`$(expression)` in ordinary program text is a **splice**: the compiler
+evaluates the expression while compiling, and the code it produces takes the
+splice's place and is checked there:
+
+```fango
+main() = print $(twice answer)     -- prints 84
+```
+
+Nesting is limited to one level in each direction. A quote inside a quote and
+a splice inside a splice are both `STAGE ERROR`.
+
+Quoted code is resolved in the module that wrote it and checked at the site
+that splices it. Because names are resolved before inference, generated code
+can neither capture nor be captured by names at the splice site.
+
+A splice operand may name any top-level definition earlier in graph and source
+order — the ordinary scoping rule, which is also the stage discipline: a
+splice can only name what is already checked. **Top-level definitions are
+available at both stages.** Local binders are not: a lambda parameter, block
+binding, or case binder belongs to the stage it was introduced at, and using
+one at the other stage is a `STAGE ERROR`. Staged code that needs a runtime
+value takes it as a function argument instead.
+
+Compile-time code runs inside the compiler and is restricted accordingly:
+
+- it must type with an empty effect row (`COMPILE-TIME EFFECT`);
+- it may not reach a Go sidecar or a bundled native that observes
+  process-global state, which today means `Random` (`COMPILE-TIME NATIVE`);
+- it is bounded by an evaluation-step budget (`COMPILE-TIME LIMIT`).
+
+Together these make generated Go reproducible.
+
+`Code` is a **compile-time-only type**: a definition whose type mentions it is
+not emitted, and no expression in an ordinary definition may have such a type.
+Both halves report `STAGE ERROR`. In practice a code-producing helper is an
+ordinary definition that simply never reaches the executable:
+
+```fango
+repeat : Int -> Code -> Code
+repeat n c = if n <= 1 then c else twice (repeat (n - 1) c)
+```
+
+Quotes and splices work at the REPL with no extra mechanism, since the session
+keeps one checker and one evaluator.
+
+`deriving` is still limited to the standard `Eq` and `Show`; opening it to
+user classes is the next increment (see the roadmap).
 
 ## Entry points
 

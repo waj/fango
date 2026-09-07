@@ -1,0 +1,9 @@
+import Meta exposing (Code)
+
+one : Code
+one = quote 1
+
+size : Code -> Int
+size _ = 1
+
+main = print (size one)

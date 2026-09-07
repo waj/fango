@@ -31,13 +31,15 @@ and configurable source roots remain deferred.
 
 ## Compile-time metaprogramming
 
-`deriving` is closed to `Eq` and `Show`, and its generator is a Go function
-rather than something a library can extend. `Ord` cannot be derived at all, and
-the Tier-2 Todo CLI's serialize/parse round trip has no way to produce a codec
-per type. The proposal under iteration is a compile-time stage — an opaque
-`Code` type built only by hygienic quotes, type reflection bounded by ordinary
-export visibility, and `deriver` declarations that open `deriving` to user
-classes — in [roadmap-meta.md](roadmap-meta.md).
+The compile-time stage exists: quotes, splices, and a bounded, pure
+compile-time evaluator are implemented and documented in the design and the
+reference. What it does not yet have is anything to inspect. `deriving` is
+still closed to `Eq` and `Show`, and its generator is a Go function rather
+than something a library can extend. `Ord` cannot be derived at all, and the
+Tier-2 Todo CLI's serialize/parse round trip has no way to produce a codec per
+type. The remaining phases — type reflection bounded by ordinary export
+visibility, `deriver` declarations that open `deriving` to user classes, and
+declaration splices — are in [roadmap-meta.md](roadmap-meta.md).
 
 It deliberately avoids a `Generic`-style structural representation, which
 one-parameter classes without higher kinds cannot express, and avoids Template

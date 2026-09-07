@@ -251,6 +251,11 @@ func (l *linter) expr(e Expr, where string) {
 		l.expr(e.Operand, where)
 	case *BinOp:
 		l.binOp(e, where)
+	case *Quote:
+		// Compile-time-only definitions are dropped before the program is
+		// linted, so a surviving Quote means the emission rule let one
+		// through (doc/design.md, "Compile-time metaprogramming").
+		l.errorf("%s: quote in emitted code — a compile-time-only value escaped", where)
 	case *NativeCall:
 		n := l.natives[e.Name]
 		if n == nil {

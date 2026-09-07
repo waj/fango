@@ -884,6 +884,10 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return g.unitValue()
 	case *core.BoolLit:
 		return ident(strconv.FormatBool(e.Val))
+	case *core.Quote:
+		// Compile-time-only definitions are never emitted and the Core linter
+		// runs before this, so reaching here means both rules were bypassed.
+		panic("codegen: quote in emitted code — a compile-time-only value escaped")
 	case *core.VarRef:
 		// Unit is a singleton and Unit-typed locals are never emitted
 		// (their effects ran at binding time) — materialize the value.

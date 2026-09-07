@@ -40,12 +40,13 @@ const (
 	ARROW    // ->
 	DARROW   // =>
 	BACKSLASH
-	COLON      // :
-	PIPE       // |
-	LBRACE     // {
-	RBRACE     // }
-	UNDERSCORE // _ (wildcard pattern)
-	CARET      // ^ (pinned value pattern)
+	COLON       // :
+	PIPE        // |
+	LBRACE      // {
+	RBRACE      // }
+	UNDERSCORE  // _ (wildcard pattern)
+	CARET       // ^ (pinned value pattern)
+	DOLLARPAREN // $( — opens a splice; `$` is never a token on its own
 
 	// Reserved keywords.
 	KwModule
@@ -68,6 +69,7 @@ const (
 	KwClass
 	KwInstance
 	KwDeriving
+	KwQuote
 )
 
 var kindNames = map[Kind]string{
@@ -80,11 +82,13 @@ var kindNames = map[Kind]string{
 	ANDAND: "ANDAND", OROR: "OROR",
 	ARROW: "ARROW", BACKSLASH: "BACKSLASH", COLON: "COLON", PIPE: "PIPE",
 	LBRACE: "LBRACE", RBRACE: "RBRACE", UNDERSCORE: "UNDERSCORE", CARET: "CARET",
-	KwModule: "module", KwImport: "import", KwAs: "as", KwExposing: "exposing", KwLet: "let", KwIn: "in",
+	DOLLARPAREN: "DOLLARPAREN",
+	KwModule:    "module", KwImport: "import", KwAs: "as", KwExposing: "exposing", KwLet: "let", KwIn: "in",
 	KwIf: "if", KwThen: "then", KwElse: "else", KwCase: "case", KwOf: "of",
 	KwType: "type", KwEffect: "effect", KwHandle: "handle", KwResume: "resume",
 	KwNative: "native", KwInfix: "infix",
 	KwClass: "class", KwInstance: "instance", KwDeriving: "deriving", DARROW: "DARROW",
+	KwQuote: "quote",
 }
 
 func (k Kind) String() string { return kindNames[k] }
@@ -98,6 +102,7 @@ var Keywords = map[string]Kind{
 	"type": KwType, "effect": KwEffect, "handle": KwHandle, "resume": KwResume,
 	"native": KwNative, "infix": KwInfix,
 	"class": KwClass, "instance": KwInstance, "deriving": KwDeriving,
+	"quote": KwQuote,
 }
 
 type Token struct {

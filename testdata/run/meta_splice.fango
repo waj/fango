@@ -1,0 +1,25 @@
+import Meta exposing (Code)
+
+-- `quote` goes up a stage: it describes code instead of running it.
+answer : Code
+answer = quote (6 * 7)
+
+-- A hole comes back down: `$(c)` pastes the code `c` evaluated to.
+twice : Code -> Code
+twice c = quote ($(c) + $(c))
+
+-- Compile-time code is ordinary fango, recursion included.
+repeat : Int -> Code -> Code
+repeat n c =
+    if n <= 1 then c else twice (repeat (n - 1) c)
+
+one : Code
+one = quote 1
+
+-- `$(...)` in ordinary program text runs during compilation and pastes the
+-- generated code here, where it is checked like anything else.
+main() =
+    print $(answer)
+    print $(twice answer)
+    print $(repeat 3 one)
+    print ($(twice (quote 20)) + 2)

@@ -158,6 +158,17 @@ type BinOp struct {
 	L, R Expr
 }
 
+// Quote builds a compile-time-only code value: a template index into the
+// compilation's quote table plus one expression per hole, evaluated eagerly
+// in source order. Only the interpreter ever executes one, and only while
+// the compiler is running a splice — a Quote reaching the Core linter means
+// a compile-time-only value leaked into emitted code.
+type Quote struct {
+	Template int
+	Holes    []Expr
+	Ty       types.Type
+}
+
 // NativeCall is a saturated call to a declaration-backed primitive.
 type NativeCall struct {
 	Name   string
@@ -262,6 +273,7 @@ func (*VarRef) isExpr()     {}
 func (*Neg) isExpr()        {}
 func (*BinOp) isExpr()      {}
 func (*NativeCall) isExpr() {}
+func (*Quote) isExpr()      {}
 func (*If) isExpr()         {}
 func (*Perform) isExpr()    {}
 func (*Handle) isExpr()     {}
@@ -282,6 +294,7 @@ func (e *VarRef) Type() types.Type     { return e.Ty }
 func (e *Neg) Type() types.Type        { return e.Ty }
 func (e *BinOp) Type() types.Type      { return e.Ty }
 func (e *NativeCall) Type() types.Type { return e.Ty }
+func (e *Quote) Type() types.Type      { return e.Ty }
 func (e *If) Type() types.Type         { return e.Ty }
 func (e *Perform) Type() types.Type    { return e.Ty }
 func (e *Handle) Type() types.Type     { return e.Ty }
@@ -306,6 +319,13 @@ func Mentions(e Expr, name string) bool {
 	case *NativeCall:
 		for _, a := range e.Args {
 			if Mentions(a, name) {
+				return true
+			}
+		}
+		return false
+	case *Quote:
+		for _, h := range e.Holes {
+			if Mentions(h, name) {
 				return true
 			}
 		}

@@ -6,11 +6,13 @@ package eval
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/types"
 	"github.com/waj/fango/runtime/fangort"
@@ -162,9 +164,43 @@ type interp struct {
 	ioctx    *IOContext
 	evidence map[int]*evidence
 	steps    int
+
+	// compileTime restricts the interpreter to what a compiler may run: a
+	// step budget, and no native that observes process-global state or lives
+	// in a Go sidecar the interpreter cannot load (doc/design.md,
+	// "Compile-time metaprogramming").
+	compileTime bool
+	budget      int
 }
 
 const pollEvery = 4096
+
+// ErrStepBudget and UnsafeNativeError are the two ways compile-time
+// evaluation stops short. Callers turn them into diagnostics at the splice
+// site.
+var ErrStepBudget = errors.New("compile-time step budget exhausted")
+
+// UnsafeNativeError names a native the compiler declined to run while
+// expanding a splice, and why.
+type UnsafeNativeError struct{ Name, Reason string }
+
+func (e *UnsafeNativeError) Error() string {
+	return fmt.Sprintf("native `%s` %s", e.Name, e.Reason)
+}
+
+// DefaultBudget bounds compile-time evaluation. It is deliberately generous:
+// the point is to turn a non-terminating deriver into a diagnostic rather
+// than a hung build, not to ration ordinary generation.
+const DefaultBudget = 10_000_000
+
+// EvalCompileTime runs e with the compile-time restrictions. It is how the
+// compiler executes a splice operand; ordinary programs never take this path.
+func EvalCompileTime(ctx context.Context, e core.Expr, env *Env, budget int) (Value, error) {
+	ioctx := NewIOContext(strings.NewReader(""), io.Discard)
+	in := &interp{ctx: ctx, env: env, out: ioctx.Writer, ioctx: ioctx,
+		evidence: map[int]*evidence{}, compileTime: true, budget: budget}
+	return in.eval(e, nil)
+}
 
 // Eval evaluates a Core expression under env. Print output goes to out —
 // the REPL passes its own writer, the differential harness a buffer.
@@ -192,6 +228,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		case <-in.ctx.Done():
 			return nil, fmt.Errorf("interrupted")
 		default:
+		}
+		if in.budget > 0 && in.steps > in.budget {
+			return nil, ErrStepBudget
 		}
 	}
 	switch e := e.(type) {
@@ -256,6 +295,22 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			return nil, err
 		}
 		return applyBinOp(e.Op, l, r)
+	case *core.Quote:
+		// Strict, so holes evaluate eagerly and in source order — the same
+		// rule every other argument list follows.
+		holes := make([]*meta.Code, len(e.Holes))
+		for i, h := range e.Holes {
+			v, err := in.eval(h, fr)
+			if err != nil {
+				return nil, err
+			}
+			code, ok := v.(*meta.Code)
+			if !ok {
+				return nil, fmt.Errorf("eval: quote hole evaluated to a %T, want code", v)
+			}
+			holes[i] = code
+		}
+		return &meta.Code{Template: e.Template, Holes: holes}, nil
 	case *core.NativeCall:
 		args := make([]Value, len(e.Args))
 		for i, a := range e.Args {
@@ -266,7 +321,13 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			args[i] = v
 		}
 		if spec, ok := natives.Lookup(e.Name); ok && !spec.Effect {
+			if in.compileTime && !spec.CompileTimeSafe {
+				return nil, &UnsafeNativeError{Name: e.Name, Reason: "observes process-global state the compiler shares"}
+			}
 			return spec.Eval(in.nativeRuntime(), args)
+		}
+		if in.compileTime {
+			return nil, &UnsafeNativeError{Name: e.Name, Reason: "is implemented by a Go sidecar the interpreter cannot load"}
 		}
 		module := e.Module
 		if module == "" {
@@ -319,6 +380,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		}
 		key := types.SurfaceName(e.Op.Owner.Name) + "." + types.SurfaceName(e.Op.Name)
 		if spec, ok := natives.Lookup(key); ok && spec.Effect {
+			if in.compileTime {
+				return nil, &UnsafeNativeError{Name: key, Reason: "performs an effect"}
+			}
 			return spec.Eval(in.nativeRuntime(), args)
 		}
 		return nil, fmt.Errorf("eval: unhandled effect operation `%s.%s`", e.Effect.Name, e.Op.Name)

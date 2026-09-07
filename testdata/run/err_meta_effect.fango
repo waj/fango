@@ -1,0 +1,11 @@
+import Meta exposing (Code)
+
+message : Code
+message = quote "hi"
+
+noisy : () ->{IO} Code
+noisy() =
+    print "compiling"
+    message
+
+main() = print $(noisy())

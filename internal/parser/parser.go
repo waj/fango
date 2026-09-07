@@ -30,6 +30,10 @@ type parser struct {
 	// `if` chain's anchor column. Everywhere else, a token at the column is
 	// a sibling boundary, not expression content.
 	stmtStart int
+
+	// usesStaging records that this file built a quote or a splice, so the
+	// module loader knows to pull in the bundled `Meta` module.
+	usesStaging bool
 }
 
 // Parse parses a whole module.
@@ -48,6 +52,7 @@ func Parse(toks []token.Token, f *source.File) (*ast.Module, []diag.Error) {
 			m.Decls = append(m.Decls, d)
 		}
 	}
+	m.UsesStaging = p.usesStaging
 	return m, p.errs
 }
 
@@ -1028,7 +1033,7 @@ func (p *parser) parseApply() ast.Expr {
 	}
 	for {
 		switch p.peekInExpr().Kind {
-		case token.INT, token.FLOAT, token.STRING, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.KwResume:
+		case token.INT, token.FLOAT, token.STRING, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.KwResume, token.KwQuote, token.DOLLARPAREN:
 			arg := p.parsePostfixAtom()
 			if arg == nil {
 				return nil
@@ -1507,6 +1512,35 @@ func (p *parser) parseAtom() ast.Expr {
 	case token.KwResume:
 		p.next()
 		return &ast.Resume{Sp: t.Span}
+	case token.KwQuote:
+		// `quote` takes exactly one atom, so `quote (f x)` needs its parens
+		// the way every other argument position does. Nothing about the
+		// quoted text is parsed differently — it is ordinary fango syntax.
+		p.next()
+		p.usesStaging = true
+		body := p.parsePostfixAtom()
+		if body == nil {
+			return nil
+		}
+		return &ast.Quote{Body: body, Sp: t.Span.Merge(body.Span())}
+	case token.DOLLARPAREN:
+		p.next()
+		p.usesStaging = true
+		operand := p.parseExpr(1)
+		if operand == nil {
+			return nil
+		}
+		if inner := p.peekInExpr(); inner.Kind == token.RPAREN {
+			p.next()
+		} else if inner.Kind == token.EOF && p.peek().Kind == token.EOF {
+			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
+				"I got to the end of the input while looking for the `)` that closes this splice.")
+			return nil
+		} else {
+			p.errorAt(inner.Span, "SYNTAX PROBLEM", "I was expecting the `)` that closes this splice.")
+			return nil
+		}
+		return &ast.Splice{Operand: operand, Sp: t.Span.Merge(p.prevSpan())}
 	case token.LPAREN:
 		lp := p.next()
 		if p.peekInExpr().Kind == token.RPAREN {
