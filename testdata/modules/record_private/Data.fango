@@ -1,0 +1,5 @@
+module Data exposing (Secret, make)
+
+type Secret = { value : Int }
+
+make = Secret { value = 42 }

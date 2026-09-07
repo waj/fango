@@ -16,20 +16,46 @@ import (
 	"strings"
 )
 
-// ReadLine reads one line without its line ending. EOF after data returns
-// that final line; EOF before data is the empty string.
-func ReadLineFrom(r *bufio.Reader) (string, error) {
+// HasInputFrom blocks until input or clean EOF can be distinguished without
+// consuming the first byte.
+func HasInputFrom(r *bufio.Reader) (bool, error) {
+	_, err := r.Peek(1)
+	if err == io.EOF {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// ReadRawLineFrom reads through LF and preserves the exact terminator. EOF
+// after data returns that unterminated final line.
+func ReadRawLineFrom(r *bufio.Reader) (string, error) {
 	s, err := r.ReadString('\n')
 	if err != nil && err != io.EOF {
 		return "", err
 	}
-	if len(s) > 0 && s[len(s)-1] == '\n' {
-		s = s[:len(s)-1]
-		if len(s) > 0 && s[len(s)-1] == '\r' {
-			s = s[:len(s)-1]
-		}
-	}
 	return s, nil
+}
+
+func LineEnding(s string) string {
+	if strings.HasSuffix(s, "\r\n") {
+		return "\r\n"
+	}
+	if strings.HasSuffix(s, "\n") {
+		return "\n"
+	}
+	return ""
+}
+
+func LineText(s string) string { return strings.TrimSuffix(s, LineEnding(s)) }
+
+// ReadLineFrom retains the former Go helper behavior for callers outside the
+// Fango API.
+func ReadLineFrom(r *bufio.Reader) (string, error) {
+	s, err := ReadRawLineFrom(r)
+	if err != nil {
+		return "", err
+	}
+	return LineText(s), nil
 }
 
 var stdin = bufio.NewReader(os.Stdin)
@@ -46,6 +72,22 @@ func ReadLine() string {
 // argument. Keeping the argument in the generated call preserves strict
 // evaluation when readLine is applied to a non-atomic Unit expression.
 func ReadLineUnit(_ Unit) string { return ReadLine() }
+
+func HasInputUnit(_ Unit) bool {
+	ok, err := HasInputFrom(stdin)
+	if err != nil {
+		panic(err)
+	}
+	return ok
+}
+
+func ReadRawLineUnit(_ Unit) string {
+	s, err := ReadRawLineFrom(stdin)
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
 
 // Unit is the shared represented form of Fango's Unit type. Direct concrete
 // worker and operation boundaries erase Unit, but package boundaries that
@@ -96,6 +138,9 @@ func RandomEntropy(_ Unit) int64 {
 
 // StringLength returns a String's length in bytes.
 func StringLength(s string) int64 { return int64(len(s)) }
+
+// StringSlice returns a byte slice over valid internal indices.
+func StringSlice(start, end int64, s string) string { return s[start:end] }
 
 // ByteAt returns the byte value at a 0-based index, or -1 when the index is
 // out of range. The in-band sentinel lets pure fango code probe positions

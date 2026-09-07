@@ -1,11 +1,17 @@
+import IO
+import Maybe exposing (Maybe(..))
+
 type Box a = Box a deriving (Eq, Show)
 
-boxed : Box (() ->{IO} String)
+boxed : Box (() ->{IO} Maybe IO.Line)
 boxed = Box readLine
 
-run : Box (() ->{IO} String) ->{IO} ()
+run : Box (() ->{IO} Maybe IO.Line) ->{IO} ()
 run box =
     case box of
-        Box callback -> print (callback())
+        Box callback ->
+            case callback() of
+                Nothing -> print ""
+                Just line -> print line.text
 
 main() = run boxed

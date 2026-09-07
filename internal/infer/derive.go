@@ -88,9 +88,22 @@ func (ck *Checker) DeriveDecl(td *ast.TypeDecl) ([]DeclInfo, []diag.Error) {
 		for _, c := range adt.Ctors {
 			var branch ast.Expr
 			if cl.Name == "Basics.Show" {
-				branch = str(types.SurfaceName(c.Name))
-				for i := range c.Fields {
-					branch = call("Basics.append", branch, call("Basics.append", str(" "), call("Basics.show", ref(fmt.Sprintf("_fieldX%d", i)))))
+				if adt.IsRecord() {
+					branch = str(types.SurfaceName(adt.Con.Name) + " {")
+					for i, field := range adt.RecordFields {
+						sep := " "
+						if i > 0 {
+							sep = ", "
+						}
+						prefix := sep + field.Name + " = "
+						branch = call("Basics.append", branch, call("Basics.append", str(prefix), call("Basics.show", ref(fmt.Sprintf("_fieldX%d", i)))))
+					}
+					branch = call("Basics.append", branch, str(" }"))
+				} else {
+					branch = str(types.SurfaceName(c.Name))
+					for i := range c.Fields {
+						branch = call("Basics.append", branch, call("Basics.append", str(" "), call("Basics.show", ref(fmt.Sprintf("_fieldX%d", i)))))
+					}
 				}
 			} else {
 				inner := &ast.Case{Scrutinee: ref("_derivedY"), Sp: sp}

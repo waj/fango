@@ -1,4 +1,4 @@
-module List exposing (List(..), range, each)
+module List exposing (List(..), range, each, foldl)
 
 type List a = Nil | Cons a (List a) deriving (Eq, Show)
 
@@ -12,3 +12,9 @@ each action values =
         Cons value rest ->
             action value
             each action rest
+
+foldl : (a -> b ->{e} b) -> b -> List a ->{e} b
+foldl combine result values =
+    case values of
+        Nil -> result
+        Cons value rest -> foldl combine (combine value result) rest

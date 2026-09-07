@@ -14,9 +14,18 @@ import (
 )
 
 func TestMultiModuleDifferential(t *testing.T) {
-	for _, fixture := range []string{"basic", "effects", "classes"} {
+	for _, fixture := range []string{"basic", "effects", "classes", "records"} {
 		t.Run(fixture, func(t *testing.T) { testMultiModule(t, fixture) })
 	}
+}
+
+func TestPrivateRecordFields(t *testing.T) {
+	entry := filepath.Join("..", "..", "testdata", "modules", "record_private", "Main.fango")
+	want, err := os.ReadFile(strings.TrimSuffix(entry, ".fango") + ".error")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runErrorCase(t, entry, strings.TrimSpace(string(want)))
 }
 
 func testMultiModule(t *testing.T, fixture string) {

@@ -87,6 +87,7 @@ type Checker struct {
 	Env             *Env
 	Sub             Subst
 	ExprTypes       map[ast.Expr]types.Type
+	RecordUses      map[ast.Expr]*types.ADTInfo
 
 	// Ctors is the constructor table (doc/design.md, "Type inference"), keyed by constructor name —
 	// names are unique per module (types and constructors live in separate
@@ -165,6 +166,7 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		Env:         env,
 		Sub:         Subst{},
 		ExprTypes:   map[ast.Expr]types.Type{},
+		RecordUses:  map[ast.Expr]*types.ADTInfo{},
 		Ctors:       map[string]*types.CtorInfo{},
 		ADTs:        map[int]*types.ADTInfo{},
 		TypeNames: map[string]types.Type{
@@ -544,6 +546,27 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 		}
 		result = &types.TCon{Unique: adt.Con.Unique, Name: adt.Con.Name, Args: args}
 	}
+	if td.RecordFields != nil {
+		seenFields := map[string]bool{}
+		fields := make([]types.Type, len(td.RecordFields))
+		for i, f := range td.RecordFields {
+			if seenFields[f.Name] {
+				errs = append(errs, diag.Errorf(f.NameSpan, "RECORD FIELDS", "The field `%s` appears more than once in record `%s`.", f.Name, types.SurfaceName(td.Name)))
+			}
+			seenFields[f.Name] = true
+			ty, fieldErrs := ck.ResolveTypeExpr(f.Type, scope)
+			errs = append(errs, fieldErrs...)
+			if ty == nil {
+				ty = ck.B.Unit
+			}
+			fields[i] = ty
+			adt.RecordFields = append(adt.RecordFields, types.RecordFieldInfo{Name: f.Name, Type: ty})
+		}
+		ctor := &types.CtorInfo{Name: td.Name + ".__record", Index: 0, Fields: fields, Result: result}
+		adt.Ctors = append(adt.Ctors, ctor)
+		ck.Ctors[ctor.Name] = ctor
+		return errs
+	}
 	for _, c := range td.Ctors {
 		if prev, dup := ck.Ctors[c.Name]; dup && batch {
 			errs = append(errs, diag.Errorf(c.NameSpan, "MULTIPLE DEFINITIONS",
@@ -642,6 +665,9 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
 	errs = append(errs, solveErrs...)
+	g.errs = nil
+	g.resolveRecords(true)
+	errs = append(errs, g.errs...)
 	if d.Ann == nil && !isMain {
 		ck.closeSingleRows(ty)
 	}
@@ -770,6 +796,9 @@ func (ck *Checker) ExprWhere(e ast.Expr, _ bool) (types.Type, []diag.Error) {
 	ck.Sub = sub
 	_ = residual
 	errs := append(g.errs, solveErrs...)
+	g.errs = nil
+	g.resolveRecords(true)
+	errs = append(errs, g.errs...)
 	left, es := ck.reduceObligations(g.preds, nil)
 	ids := map[int]bool{}
 	collectVarIDs(ck.Sub.Apply(ty), ids)
@@ -800,6 +829,24 @@ type predObligation struct {
 	op   string
 }
 
+type recordObligation struct {
+	node       ast.Expr
+	receiver   types.Type
+	result     types.Type
+	field      string
+	fieldSpan  source.Span
+	candidates []string
+	updates    []recordUpdateObligation
+	resolved   bool
+}
+
+type recordUpdateObligation struct {
+	name       string
+	span       source.Span
+	ty         types.Type
+	candidates []string
+}
+
 type generator struct {
 	ck         *Checker
 	locals     *blockScope
@@ -808,6 +855,7 @@ type generator struct {
 	ambient    types.Row
 	resumeType types.Type
 	preds      []predObligation
+	records    []*recordObligation
 }
 
 func (g *generator) isDefaultPrint(op *types.EffectOp) bool {
@@ -891,6 +939,65 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		for i := len(fields) - 1; i >= 0; i-- {
 			ty = &types.TFun{Arg: fields[i], Eff: types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}, Ret: ty}
 		}
+	case *ast.RecordLit:
+		named, ok := g.ck.TypeNames[e.Name].(*types.TCon)
+		adt := (*types.ADTInfo)(nil)
+		if ok {
+			adt = g.ck.ADTs[named.Unique]
+		}
+		if adt == nil || !adt.IsRecord() {
+			g.errs = append(g.errs, diag.Errorf(e.NameSpan, "UNKNOWN RECORD", "I don't know an exposed record type named `%s`.", types.SurfaceName(e.Name)))
+			ty = g.ck.Sup.FreshVar(types.General)
+			for _, f := range e.Fields {
+				g.expr(f.Value)
+			}
+			break
+		}
+		fieldTys, result := g.instantiateCtor(adt.Ctors[0])
+		seen := map[string]bool{}
+		provided := map[string]ast.RecordExprField{}
+		for _, f := range e.Fields {
+			if seen[f.Name] {
+				g.errs = append(g.errs, diag.Errorf(f.NameSpan, "RECORD FIELDS", "The field `%s` is provided more than once.", f.Name))
+			}
+			seen[f.Name] = true
+			provided[f.Name] = f
+			ft := g.expr(f.Value)
+			idx, _ := adt.RecordField(f.Name)
+			if idx < 0 {
+				g.errs = append(g.errs, diag.Errorf(f.NameSpan, "UNKNOWN FIELD", "Record `%s` has no field named `%s`.", types.SurfaceName(adt.Con.Name), f.Name))
+			} else {
+				g.cs = append(g.cs, Constraint{Left: ft, Right: fieldTys[idx], Span: f.Value.Span(), Why: Why{Kind: WhyCall}})
+			}
+		}
+		for _, f := range adt.RecordFields {
+			if _, ok := provided[f.Name]; !ok {
+				g.errs = append(g.errs, diag.Errorf(e.NameSpan, "RECORD FIELDS", "Record `%s` is missing field `%s`.", types.SurfaceName(adt.Con.Name), f.Name))
+			}
+		}
+		g.ck.RecordUses[e] = adt
+		ty = result
+	case *ast.RecordGet:
+		receiver := g.expr(e.Record)
+		result := g.ck.Sup.FreshVar(types.General)
+		g.records = append(g.records, &recordObligation{node: e, receiver: receiver, result: result, field: e.Field, fieldSpan: e.FieldSpan, candidates: e.Records})
+		ty = result
+	case *ast.RecordUpdate:
+		receiver := g.expr(e.Record)
+		ob := &recordObligation{node: e, receiver: receiver, result: receiver, fieldSpan: e.Sp}
+		seen := map[string]bool{}
+		for _, f := range e.Fields {
+			if seen[f.Name] {
+				g.errs = append(g.errs, diag.Errorf(f.NameSpan, "RECORD FIELDS", "The field `%s` is updated more than once.", f.Name))
+			}
+			seen[f.Name] = true
+			ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, ty: g.expr(f.Value), candidates: f.Records})
+		}
+		if len(e.Fields) == 0 {
+			g.errs = append(g.errs, diag.Errorf(e.Sp, "RECORD FIELDS", "A record update needs at least one replacement field."))
+		}
+		g.records = append(g.records, ob)
+		ty = receiver
 	case *ast.App:
 		if op, n := g.operationSpine(e); op != nil && n == op.Arity {
 			inst := g.instantiateAt(op.Scheme, e.Span(), op.Name)
@@ -1239,6 +1346,25 @@ func resumePaths(e ast.Expr, tail bool) (bool, string) {
 		if err := nontail(x.Operand); err != "" {
 			return false, err
 		}
+	case *ast.RecordLit:
+		for _, f := range x.Fields {
+			if err := nontail(f.Value); err != "" {
+				return false, err
+			}
+		}
+	case *ast.RecordGet:
+		if err := nontail(x.Record); err != "" {
+			return false, err
+		}
+	case *ast.RecordUpdate:
+		if err := nontail(x.Record); err != "" {
+			return false, err
+		}
+		for _, f := range x.Fields {
+			if err := nontail(f.Value); err != "" {
+				return false, err
+			}
+		}
 	case *ast.Lambda:
 		// A resume in a closure is never the current clause's tail action.
 		if err := nontail(x.Body); err != "" {
@@ -1504,12 +1630,82 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 // substitution — the solve-at-binding point.
 func (g *generator) solveHere() {
 	if len(g.cs) == 0 {
+		g.resolveRecords(true)
 		return
 	}
 	sub, _, errs := Solve(g.cs, nil, g.ck.Sub, g.ck.B, g.ck.Sup)
 	g.ck.Sub = sub
 	g.errs = append(g.errs, errs...)
 	g.cs = nil
+	g.resolveRecords(true)
+}
+
+func (g *generator) resolveRecords(final bool) {
+	var constraints []Constraint
+	for _, ob := range g.records {
+		if ob.resolved {
+			continue
+		}
+		t := g.ck.Sub.Apply(ob.receiver)
+		con, ok := t.(*types.TCon)
+		if !ok {
+			if final {
+				g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "AMBIGUOUS FIELD", "The record type is not known here; add a type annotation or provide a contextual record type."))
+				ob.resolved = true
+			}
+			continue
+		}
+		adt := g.ck.ADTs[con.Unique]
+		if adt == nil || !adt.IsRecord() {
+			g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "NOT A RECORD", "A value of type `%s` has no record fields.", types.Show(t)))
+			ob.resolved = true
+			continue
+		}
+		visible := func(candidates []string) bool {
+			// Parser-only clients such as the REPL have no module abstraction
+			// boundary. The batch resolver marks even an inaccessible label with
+			// a non-nil empty slice, preserving the distinction here.
+			if candidates == nil {
+				return true
+			}
+			for _, name := range candidates {
+				if name == adt.Con.Name {
+					return true
+				}
+			}
+			return false
+		}
+		fieldTypes := adt.InstFields(adt.Ctors[0], con.Args)
+		if ob.field != "" {
+			idx, _ := adt.RecordField(ob.field)
+			switch {
+			case !visible(ob.candidates):
+				g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "PRIVATE RECORD FIELD", "The fields of record `%s` are not exposed to this module.", types.SurfaceName(adt.Con.Name)))
+			case idx < 0:
+				g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "UNKNOWN FIELD", "Record `%s` has no field named `%s`.", types.SurfaceName(adt.Con.Name), ob.field))
+			default:
+				constraints = append(constraints, Constraint{Left: ob.result, Right: fieldTypes[idx], Span: ob.fieldSpan, Why: Why{Kind: WhyCall}})
+			}
+		}
+		for _, u := range ob.updates {
+			idx, _ := adt.RecordField(u.name)
+			switch {
+			case !visible(u.candidates):
+				g.errs = append(g.errs, diag.Errorf(u.span, "PRIVATE RECORD FIELD", "The fields of record `%s` are not exposed to this module.", types.SurfaceName(adt.Con.Name)))
+			case idx < 0:
+				g.errs = append(g.errs, diag.Errorf(u.span, "UNKNOWN FIELD", "Record `%s` has no field named `%s`.", types.SurfaceName(adt.Con.Name), u.name))
+			default:
+				constraints = append(constraints, Constraint{Left: u.ty, Right: fieldTypes[idx], Span: u.span, Why: Why{Kind: WhyCall}})
+			}
+		}
+		g.ck.RecordUses[ob.node] = adt
+		ob.resolved = true
+	}
+	if len(constraints) > 0 {
+		sub, _, errs := Solve(constraints, nil, g.ck.Sub, g.ck.B, g.ck.Sup)
+		g.ck.Sub = sub
+		g.errs = append(g.errs, errs...)
+	}
 }
 
 // scopeMentions reports whether any enclosing local binding's zonked type

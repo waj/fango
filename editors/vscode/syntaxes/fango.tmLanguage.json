@@ -68,7 +68,22 @@
           "name": "keyword.operator.pipe.fango",
           "match": "\\|"
         },
+        {
+          "name": "punctuation.separator.comma.fango",
+          "match": ","
+        },
+        {
+          "name": "punctuation.section.braces.fango",
+          "match": "[{}]"
+        },
         { "include": "#qualified_module" },
+        {
+          "match": "\\b([a-z][A-Za-z0-9_]*)(\\s*)(:)",
+          "captures": {
+            "1": { "name": "variable.other.member.fango" },
+            "3": { "name": "keyword.operator.type-annotation.fango" }
+          }
+        },
         {
           "name": "entity.name.type.fango",
           "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
@@ -250,7 +265,9 @@
         { "include": "#return_clause" },
         { "include": "#booleans" },
         { "include": "#numbers" },
+        { "include": "#record_expression" },
         { "include": "#qualified_module" },
+        { "include": "#record_accessor" },
         {
           "name": "entity.name.type.fango",
           "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
@@ -265,6 +282,58 @@
           "match": "\\(\\)"
         }
       ]
+    },
+    "record_expression": {
+      "patterns": [
+        {
+          "begin": "\\b((?:[A-Z][A-Za-z0-9_]*\\.)*)([A-Z][A-Za-z0-9_]*)(\\s*)(\\{)",
+          "end": "\\}",
+          "beginCaptures": {
+            "1": { "name": "support.other.module.fango" },
+            "2": { "name": "entity.name.type.fango" },
+            "4": { "name": "punctuation.section.braces.begin.fango" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.section.braces.end.fango" }
+          },
+          "patterns": [ { "include": "#record_body" } ]
+        },
+        {
+          "begin": "(\\{)(?=[^{}\\n]*\\|)",
+          "end": "\\}",
+          "beginCaptures": {
+            "1": { "name": "punctuation.section.braces.begin.fango" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.section.braces.end.fango" }
+          },
+          "patterns": [ { "include": "#record_body" } ]
+        }
+      ]
+    },
+    "record_body": {
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "match": "\\b([a-z][A-Za-z0-9_]*)(\\s*)(=)(?!=|>)",
+          "captures": {
+            "1": { "name": "variable.other.member.fango" },
+            "3": { "name": "keyword.operator.assignment.fango" }
+          }
+        },
+        {
+          "name": "punctuation.separator.comma.fango",
+          "match": ","
+        },
+        { "include": "#expressions" }
+      ]
+    },
+    "record_accessor": {
+      "match": "(\\.)([a-z][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "punctuation.accessor.fango" },
+        "2": { "name": "variable.other.member.fango" }
+      }
     },
     "keywords": {
       "patterns": [

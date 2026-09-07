@@ -339,6 +339,10 @@ func (s *Session) typeDeclInput(td *ast.TypeDecl) inputResult {
 	// Echo each constructor with its type, mirroring the `name : type` shape
 	// value definitions print.
 	adt := s.ck.ADTs[s.ck.TypeNames[td.Name].(*types.TCon).Unique]
+	if adt.IsRecord() {
+		fmt.Fprintf(s.out, "%s : record\n", td.Name)
+		return inputDone
+	}
 	for _, c := range adt.Ctors {
 		fmt.Fprintf(s.out, "%s : %s\n", c.Name, types.Show(c.ValueType()))
 	}

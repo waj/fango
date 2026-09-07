@@ -24,10 +24,10 @@ func printExpr(arg core.Expr) core.Expr {
 	return &core.Perform{Op: op, Effect: core.EffectInstance{Unique: eff.Unique, Name: eff.Name}, Args: []core.Expr{arg}, Ty: unitTy()}
 }
 
-func readLineExpr() core.Expr {
+func ioReadExpr(name string, result types.Type) core.Expr {
 	eff := &types.EffectInfo{Unique: 5, Name: "IO"}
-	op := &types.EffectOp{Owner: eff, Name: "readLine", Arity: 1, ParamTypes: []types.Type{unitTy()}, ResultType: stringTy(), Builtin: true}
-	return &core.Perform{Op: op, Effect: core.EffectInstance{Unique: eff.Unique, Name: eff.Name}, Args: []core.Expr{&core.UnitLit{Ty: unitTy()}}, Ty: stringTy()}
+	op := &types.EffectOp{Owner: eff, Name: name, Arity: 1, ParamTypes: []types.Type{unitTy()}, ResultType: result, Builtin: true}
+	return &core.Perform{Op: op, Effect: core.EffectInstance{Unique: eff.Unique, Name: eff.Name}, Args: []core.Expr{&core.UnitLit{Ty: unitTy()}}, Ty: result}
 }
 
 func run(t *testing.T, e core.Expr) Value {
@@ -117,14 +117,22 @@ func TestPrintWritesThroughFangort(t *testing.T) {
 
 func TestEvalIOReadLine(t *testing.T) {
 	ioctx := NewIOContext(strings.NewReader("hello\r\nlast"), io.Discard)
-	for _, want := range []string{"hello", "last", ""} {
-		got, err := EvalIO(context.Background(), readLineExpr(), NewEnv(), ioctx)
+	for _, want := range []string{"hello\r\n", "last"} {
+		has, err := EvalIO(context.Background(), ioReadExpr("hasInput", boolTy()), NewEnv(), ioctx)
+		if err != nil || has != true {
+			t.Fatalf("hasInput = %v, %v; want true, nil", has, err)
+		}
+		got, err := EvalIO(context.Background(), ioReadExpr("readRawLine", stringTy()), NewEnv(), ioctx)
 		if err != nil || got != want {
-			t.Fatalf("readLine = %q, %v; want %q, nil", got, err, want)
+			t.Fatalf("readRawLine = %q, %v; want %q, nil", got, err, want)
 		}
 	}
+	got, err := EvalIO(context.Background(), ioReadExpr("hasInput", boolTy()), NewEnv(), ioctx)
+	if err != nil || got != false {
+		t.Fatalf("hasInput at EOF = %v, %v; want false, nil", got, err)
+	}
 	wantErr := io.ErrUnexpectedEOF
-	_, err := EvalIO(context.Background(), readLineExpr(), NewEnv(), NewIOContext(failingReader{wantErr}, io.Discard))
+	_, err = EvalIO(context.Background(), ioReadExpr("hasInput", boolTy()), NewEnv(), NewIOContext(failingReader{wantErr}, io.Discard))
 	if err != wantErr {
 		t.Fatalf("readLine error = %v, want %v", err, wantErr)
 	}

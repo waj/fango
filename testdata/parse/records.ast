@@ -1,0 +1,4 @@
+(module
+  (type Pair (params a) (deriving Eq Show) (record (field first a) (field second a)))
+  (def replace (params pair) (ann (-> (Pair Int) (Pair Int))) (update (var pair) (first (field second (var pair))) (second (int 42))))
+  (def main (record Pair (second (app (var replace) (field first (record Pair (first (int 1)) (second (int 2)))))) (first (int 0)))))

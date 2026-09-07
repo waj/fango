@@ -28,6 +28,18 @@ under iteration is in [roadmap-natives.md](roadmap-natives.md).
 Independent library versioning, package distribution, dependency fetching,
 and configurable source roots remain deferred.
 
+## Syntax and boolean operators
+
+- Fix the offside-rule interaction with multiline `if` expressions so `else`
+  and `else if` may align naturally with their `if`, including nested chains;
+  add parser goldens for the accepted layout and keep the editor grammar in
+  sync.
+- Add short-circuiting boolean operators `&&` and `||`. Reserve and tokenize
+  both spellings, define right-associative precedence below comparisons, and
+  desugar them to `if` expressions so the right operand is not evaluated when
+  the left operand determines the result. Cover effectful right operands,
+  type diagnostics, interpreter/compiler agreement, and documentation.
+
 ## REPL hardening
 
 - Implement `:load` and `:reload` for complete source files.
@@ -108,8 +120,10 @@ These are directions, not commitments or an ordering after the work above.
 - Extend the deliberately narrow Go sidecar FFI only from concrete needs:
   richer safe boundary types, explicit effectful imports, interpreter strategy,
   and panic/error translation are all still open.
-- Records and transparent aliases, including whether records are nominal or
-  structural and whether aliases can abbreviate effect rows.
+- Transparent aliases, including whether aliases can abbreviate effect rows.
+- Extend nominal records to inline record payloads on variant constructors
+  when an example needs named fields on one alternative; the surface syntax,
+  construction, matching, and field visibility remain open together.
 - Numeric semantics beyond the current `Int`/`Float` model: overflow, integer
   division, conversions, and possible arbitrary precision.
 - Extend type classes only from concrete needs: superclasses, method-local

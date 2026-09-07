@@ -184,6 +184,17 @@ func (el *elab) freeLocals(bind *ast.LocalBind) []scopeVar {
 		case *ast.BinOp:
 			visit(e.L)
 			visit(e.R)
+		case *ast.RecordLit:
+			for _, f := range e.Fields {
+				visit(f.Value)
+			}
+		case *ast.RecordGet:
+			visit(e.Record)
+		case *ast.RecordUpdate:
+			visit(e.Record)
+			for _, f := range e.Fields {
+				visit(f.Value)
+			}
 		case *ast.Lambda:
 			visit(e.Body)
 		case *ast.Block:

@@ -65,6 +65,19 @@ func TestInstallPreludeUsesDeclaredMetadata(t *testing.T) {
 	}
 }
 
+func TestParserOnlyNominalRecords(t *testing.T) {
+	_, _, errs := check(t, `type Box a = { value : a }
+
+unbox : Box a -> a
+unbox box = box.value
+
+main = unbox (Box { value = 42 })
+`)
+	if len(errs) > 0 {
+		t.Fatalf("record errors: %v", errs)
+	}
+}
+
 func TestPositive(t *testing.T) {
 	cases := []struct {
 		src  string
@@ -96,7 +109,7 @@ func TestPositive(t *testing.T) {
 		{"f = \\x -> x + 1", "f : Num a => a -> a"},
 		{"add : Int -> Int -> Int\nadd x y = x + y", "add : Int -> Int -> Int"},
 		{"pure() = 1", "pure : Num a => () -> a"},
-		{"saved = readLine", "saved : () ->{IO} String"},
+		{"saved = readLine", "saved : () ->{IO} Maybe Line"},
 		{"main = print (readLine())", "main : ()"},
 		{"make : () ->{IO} (() -> ())\nmake() =\n  print \"now\"\n  \\_ -> ()", "make : () ->{IO} () -> ()"},
 		{"later : () -> (() ->{IO} ())\nlater() = \\_ -> print \"later\"", "later : () -> () ->{IO} ()"},
@@ -164,6 +177,11 @@ func TestNegative(t *testing.T) {
 		{"x = 1\nf x = x + 1", "SHADOWING", 2},  // param shadows a top-level name
 		{"f = \\x -> \\x -> x", "SHADOWING", 1}, // lambda param shadowing
 		{"f x = f", "TYPE MISMATCH", 1},         // occurs check via the recursion var
+		{"type R = { value : Int }\nx = R {}", "RECORD FIELDS", 2},
+		{"type R = { value : Int }\nget : R -> Int\nget r = r.missing", "UNKNOWN FIELD", 3},
+		{"type R = { value : Int }\nget r = r.value", "AMBIGUOUS FIELD", 2},
+		{"x = \"text\".value", "NOT A RECORD", 1},
+		{"type R = { value : Int, value : Int }\nx = 1", "RECORD FIELDS", 1},
 	}
 	for _, c := range cases {
 		_, _, errs := check(t, c.src)

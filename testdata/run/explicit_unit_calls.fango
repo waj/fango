@@ -1,3 +1,6 @@
+import IO
+import Maybe exposing (Maybe(..))
+
 doSomething : () ->{IO} ()
 doSomething() = print "do"
 
@@ -18,5 +21,7 @@ main() =
     saved = identity doSomething
     saved()
     collect doSomething
-    print (readLine())
+    case readLine() of
+        Nothing -> print ""
+        Just line -> print line.text
     if True then doSomething() else doNothing()

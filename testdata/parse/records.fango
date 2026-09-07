@@ -1,0 +1,15 @@
+type Pair a = {
+    first : a,
+    second : a
+} deriving (Eq, Show)
+
+replace : Pair Int -> Pair Int
+replace pair = { pair |
+    first = pair.second,
+    second = 42
+}
+
+main = Pair {
+    second = replace (Pair { first = 1, second = 2 }).first,
+    first = 0
+}

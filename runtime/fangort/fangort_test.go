@@ -102,6 +102,9 @@ func TestStringLengthByteAt(t *testing.T) {
 			t.Errorf("ByteAt(%d, %q) = %d, want %d", c.i, c.s, got, c.want)
 		}
 	}
+	if got := StringSlice(1, 4, "a二z"); got != "二" {
+		t.Errorf("StringSlice over UTF-8 bytes = %q, want %q", got, "二")
+	}
 }
 
 func TestRandom(t *testing.T) {
@@ -173,6 +176,38 @@ func TestReadLineFrom(t *testing.T) {
 	r := bufio.NewReader(io.MultiReader(strings.NewReader("partial"), errorReader{want}))
 	if got, err := ReadLineFrom(r); !errors.Is(err, want) || got != "" {
 		t.Fatalf("non-EOF read = %q, %v; want empty string and %v", got, err, want)
+	}
+}
+
+func TestRawLineAndEOF(t *testing.T) {
+	r := bufio.NewReader(strings.NewReader("one\r\ntwo\nlast"))
+	for _, want := range []struct {
+		raw, text, ending string
+	}{
+		{"one\r\n", "one", "\r\n"},
+		{"two\n", "two", "\n"},
+		{"last", "last", ""},
+	} {
+		has, err := HasInputFrom(r)
+		if err != nil || !has {
+			t.Fatalf("HasInputFrom = %v, %v; want true, nil", has, err)
+		}
+		raw, err := ReadRawLineFrom(r)
+		if err != nil || raw != want.raw {
+			t.Fatalf("ReadRawLineFrom = %q, %v; want %q, nil", raw, err, want.raw)
+		}
+		if text, ending := LineText(raw), LineEnding(raw); text != want.text || ending != want.ending {
+			t.Fatalf("split %q = (%q, %q); want (%q, %q)", raw, text, ending, want.text, want.ending)
+		}
+	}
+	if has, err := HasInputFrom(r); err != nil || has {
+		t.Fatalf("clean EOF = %v, %v; want false, nil", has, err)
+	}
+
+	wantErr := errors.New("broken input")
+	broken := bufio.NewReader(errorReader{wantErr})
+	if has, err := HasInputFrom(broken); has || !errors.Is(err, wantErr) {
+		t.Fatalf("broken input = %v, %v; want false, %v", has, err, wantErr)
 	}
 }
 

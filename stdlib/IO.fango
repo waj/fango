@@ -1,10 +1,28 @@
-module IO exposing (IO(..), print)
+module IO exposing (IO, Line(..), print, readLine, write)
 
 import Basics
+import Maybe exposing (Maybe(..))
+
+type Line = { text : String, ending : String } deriving (Eq, Show)
 
 effect IO
-    readLine : () -> String = native "fangort.ReadLineUnit($1)"
+    hasInput : () -> Bool = native "fangort.HasInputUnit($1)"
+    readRawLine : () -> String = native "fangort.ReadRawLineUnit($1)"
     write : String -> () = native "fangort.WriteString($1)"
+
+lineText : String -> String
+lineText = native "fangort.LineText($1)"
+
+lineEnding : String -> String
+lineEnding = native "fangort.LineEnding($1)"
+
+readLine : () ->{IO} Maybe Line
+readLine() =
+    case hasInput() of
+        False -> Nothing
+        True ->
+            raw = readRawLine()
+            Just (Line { text = lineText raw, ending = lineEnding raw })
 
 print : Show a => a ->{IO} ()
 print value = write (show value ++ "\n")

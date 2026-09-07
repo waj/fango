@@ -1,0 +1,15 @@
+type Counts = { lines : Int, words : Int, bytes : Int } deriving (Eq, Show)
+type Box a = { value : a } deriving (Eq, Show)
+
+bump : Counts -> Counts
+bump counts = { counts | lines = counts.lines + 1, bytes = counts.bytes + 2 }
+
+unbox : Box a -> a
+unbox box = box.value
+
+main() =
+    zero = Counts { words = 2, lines = 0, bytes = 3 }
+    next = bump zero
+    print next
+    print (next == Counts { lines = 1, words = 2, bytes = 5 })
+    print (unbox (Box { value = "generic" }))

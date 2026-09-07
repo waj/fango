@@ -1,6 +1,7 @@
-module String exposing (length, toInt)
+module String exposing (length, toInt, words)
 
 import Basics
+import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 
 -- length counts bytes, not characters.
@@ -10,6 +11,36 @@ length = native "fangort.StringLength($1)"
 -- byteAt is private: the byte at a 0-based index, or -1 out of range.
 byteAt : Int -> String -> Int
 byteAt = native "fangort.ByteAt($1, $2)"
+
+-- slice is private and uses validated half-open byte indices.
+slice : Int -> Int -> String -> String
+slice = native "fangort.StringSlice($1, $2, $3)"
+
+isSpace : Int -> Bool
+isSpace byte = if byte == 32 then True else if byte == 9 then True else if byte == 10 then True else if byte == 13 then True else if byte == 11 then True else byte == 12
+
+skipSpace : String -> Int -> Int -> Int
+skipSpace text index size = if index >= size then index else if isSpace (byteAt index text) then skipSpace text (index + 1) size else index
+
+scanWord : String -> Int -> Int -> Int
+scanWord text index size = if index >= size then index else if isSpace (byteAt index text) then index else scanWord text (index + 1) size
+
+reverseWords : List String -> List String -> List String
+reverseWords remaining result =
+    case remaining of
+        Nil -> result
+        Cons word rest -> reverseWords rest (Cons word result)
+
+wordsHelp : String -> Int -> Int -> List String -> List String
+wordsHelp text index size result =
+    start = skipSpace text index size
+    end = scanWord text start size
+    if start >= size then reverseWords result Nil
+        else wordsHelp text end size (Cons (slice start end text) result)
+
+-- words splits on ASCII whitespace while preserving every non-whitespace byte.
+words : String -> List String
+words text = wordsHelp text 0 (length text) Nil
 
 -- Digits accumulate as a non-positive value so the most negative Int parses.
 -- finish rejects a non-negative result that only fits when negative; the

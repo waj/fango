@@ -101,6 +101,13 @@ func dumpDecl(d Decl) string {
 			}
 			b.WriteString(")")
 		}
+		if d.RecordFields != nil {
+			b.WriteString(" (record")
+			for _, f := range d.RecordFields {
+				fmt.Fprintf(&b, " (field %s %s)", f.Name, DumpTypeExpr(f.Type))
+			}
+			b.WriteString(")")
+		}
 		for _, c := range d.Ctors {
 			fmt.Fprintf(&b, " (ctor %s", c.Name)
 			for _, a := range c.Args {
@@ -227,6 +234,22 @@ func DumpExpr(e Expr) string {
 		return fmt.Sprintf("(var %s)", e.Name)
 	case *Ctor:
 		return fmt.Sprintf("(ctor %s)", e.Name)
+	case *RecordLit:
+		var b strings.Builder
+		fmt.Fprintf(&b, "(record %s", e.Name)
+		for _, f := range e.Fields {
+			fmt.Fprintf(&b, " (%s %s)", f.Name, DumpExpr(f.Value))
+		}
+		return b.String() + ")"
+	case *RecordGet:
+		return fmt.Sprintf("(field %s %s)", e.Field, DumpExpr(e.Record))
+	case *RecordUpdate:
+		var b strings.Builder
+		fmt.Fprintf(&b, "(update %s", DumpExpr(e.Record))
+		for _, f := range e.Fields {
+			fmt.Fprintf(&b, " (%s %s)", f.Name, DumpExpr(f.Value))
+		}
+		return b.String() + ")"
 	case *App:
 		return fmt.Sprintf("(app %s %s)", DumpExpr(e.Fn), DumpExpr(e.Arg))
 	case *Neg:

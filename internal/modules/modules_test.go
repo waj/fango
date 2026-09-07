@@ -66,7 +66,7 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 	for _, m := range r.Manifest {
 		got = append(got, m.Module)
 	}
-	if strings.Join(got, ",") != "Basics,Basics,IO,IO,B,A,Z,Main" {
+	if strings.Join(got, ",") != "Basics,Basics,Maybe,IO,IO,B,A,Z,Main" {
 		t.Fatalf("order %v", got)
 	}
 	if r.Entry != "Main.main" {
@@ -79,7 +79,7 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 	for _, unit := range r.Units {
 		units = append(units, unit.Name+":"+strings.Join(unit.Imports, "+"))
 	}
-	if strings.Join(units, ",") != "Basics:,IO:Basics,B:,A:B,Z:,Main:Z+A" {
+	if strings.Join(units, ",") != "Basics:,Maybe:,IO:Basics+Maybe,B:,A:B,Z:,Main:Z+A" {
 		t.Fatalf("units %v", units)
 	}
 	if !r.Units[len(r.Units)-1].Entry {
@@ -128,7 +128,7 @@ func TestBundledModules(t *testing.T) {
 	for _, m := range r.Manifest {
 		got = append(got, m.Module+":"+m.Path)
 	}
-	want := "Basics:<stdlib>/Basics.fango,Basics:<stdlib>/Basics.native.go,IO:<stdlib>/IO.fango,IO:<stdlib>/IO.native.go,List:<stdlib>/List.fango,Range:<stdlib>/Range.fango,Main:Main.fango"
+	want := "Basics:<stdlib>/Basics.fango,Basics:<stdlib>/Basics.native.go,List:<stdlib>/List.fango,Maybe:<stdlib>/Maybe.fango,IO:<stdlib>/IO.fango,IO:<stdlib>/IO.native.go,Range:<stdlib>/Range.fango,Main:Main.fango"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("manifest = %v, want %s", got, want)
 	}

@@ -15,4 +15,12 @@ func PrintTo(w io.Writer, text string) error {
 
 func ReadLineFrom(r *bufio.Reader) (string, error) { return fangort.ReadLineFrom(r) }
 
+func HasInputFrom(r *bufio.Reader) (bool, error) { return fangort.HasInputFrom(r) }
+
+func ReadRawLineFrom(r *bufio.Reader) (string, error) { return fangort.ReadRawLineFrom(r) }
+
+func LineText(text string) string { return fangort.LineText(text) }
+
+func LineEnding(text string) string { return fangort.LineEnding(text) }
+
 func WriteTo(w io.Writer, text string) error { return fangort.WriteStringTo(w, text) }

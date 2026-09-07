@@ -27,6 +27,15 @@ func Dump(p *Prog) string {
 			}
 			fmt.Fprintf(&b, " (params %s)", strings.Join(names, " "))
 		}
+		if adt.IsRecord() {
+			b.WriteString(" (record")
+			for _, f := range adt.RecordFields {
+				fmt.Fprintf(&b, " (field %s %s)", f.Name, pr.Atom(f.Type))
+			}
+			b.WriteString(")")
+			b.WriteString(")")
+			continue
+		}
 		for _, c := range adt.Ctors {
 			fmt.Fprintf(&b, " (ctor %s", c.Name)
 			for _, f := range c.Fields {

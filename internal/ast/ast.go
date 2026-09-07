@@ -39,6 +39,36 @@ type Ctor struct {
 	Sp   source.Span
 }
 
+// RecordLit is keyed construction of a nominal record, `Counts { lines = 1 }`.
+type RecordLit struct {
+	Name     string
+	NameSpan source.Span
+	Fields   []RecordExprField
+	Sp       source.Span
+}
+
+type RecordExprField struct {
+	Name     string
+	NameSpan source.Span
+	Value    Expr
+	Records  []string // resolver-visible nominal record candidates for this label
+}
+
+// RecordGet is tight-binding field projection, `value.field`.
+type RecordGet struct {
+	Record    Expr
+	Field     string
+	FieldSpan source.Span
+	Records   []string // resolver-visible nominal record candidates
+}
+
+// RecordUpdate copies a nominal record while replacing named fields.
+type RecordUpdate struct {
+	Record Expr
+	Fields []RecordExprField
+	Sp     source.Span
+}
+
 // App is curried application: `f x y` is App(App(f, x), y).
 type App struct {
 	Fn, Arg Expr
@@ -299,32 +329,38 @@ func (p *PCtor) Span() source.Span {
 	return p.NameSpan.Merge(p.Args[len(p.Args)-1].Span())
 }
 
-func (*IntLit) isExpr()    {}
-func (*FloatLit) isExpr()  {}
-func (*StringLit) isExpr() {}
-func (*UnitLit) isExpr()   {}
-func (*Var) isExpr()       {}
-func (*Ctor) isExpr()      {}
-func (*App) isExpr()       {}
-func (*Neg) isExpr()       {}
-func (*BinOp) isExpr()     {}
-func (*If) isExpr()        {}
-func (*Block) isExpr()     {}
-func (*Lambda) isExpr()    {}
-func (*Case) isExpr()      {}
-func (*Handle) isExpr()    {}
-func (*Resume) isExpr()    {}
+func (*IntLit) isExpr()       {}
+func (*FloatLit) isExpr()     {}
+func (*StringLit) isExpr()    {}
+func (*UnitLit) isExpr()      {}
+func (*Var) isExpr()          {}
+func (*Ctor) isExpr()         {}
+func (*RecordLit) isExpr()    {}
+func (*RecordGet) isExpr()    {}
+func (*RecordUpdate) isExpr() {}
+func (*App) isExpr()          {}
+func (*Neg) isExpr()          {}
+func (*BinOp) isExpr()        {}
+func (*If) isExpr()           {}
+func (*Block) isExpr()        {}
+func (*Lambda) isExpr()       {}
+func (*Case) isExpr()         {}
+func (*Handle) isExpr()       {}
+func (*Resume) isExpr()       {}
 
-func (e *IntLit) Span() source.Span    { return e.Sp }
-func (e *FloatLit) Span() source.Span  { return e.Sp }
-func (e *StringLit) Span() source.Span { return e.Sp }
-func (e *UnitLit) Span() source.Span   { return e.Sp }
-func (e *Var) Span() source.Span       { return e.Sp }
-func (e *Ctor) Span() source.Span      { return e.Sp }
-func (e *App) Span() source.Span       { return e.Fn.Span().Merge(e.Arg.Span()) }
-func (e *Neg) Span() source.Span       { return e.Sp }
-func (e *BinOp) Span() source.Span     { return e.L.Span().Merge(e.R.Span()) }
-func (e *If) Span() source.Span        { return e.Sp.Merge(e.Else.Span()) }
+func (e *IntLit) Span() source.Span       { return e.Sp }
+func (e *FloatLit) Span() source.Span     { return e.Sp }
+func (e *StringLit) Span() source.Span    { return e.Sp }
+func (e *UnitLit) Span() source.Span      { return e.Sp }
+func (e *Var) Span() source.Span          { return e.Sp }
+func (e *Ctor) Span() source.Span         { return e.Sp }
+func (e *RecordLit) Span() source.Span    { return e.Sp }
+func (e *RecordGet) Span() source.Span    { return e.Record.Span().Merge(e.FieldSpan) }
+func (e *RecordUpdate) Span() source.Span { return e.Sp }
+func (e *App) Span() source.Span          { return e.Fn.Span().Merge(e.Arg.Span()) }
+func (e *Neg) Span() source.Span          { return e.Sp }
+func (e *BinOp) Span() source.Span        { return e.L.Span().Merge(e.R.Span()) }
+func (e *If) Span() source.Span           { return e.Sp.Merge(e.Else.Span()) }
 func (e *Block) Span() source.Span {
 	if len(e.Items) > 0 && e.Items[0].Expr != nil {
 		return e.Items[0].Expr.Span().Merge(e.Result.Span())
@@ -356,14 +392,22 @@ type ValueDecl struct {
 
 func (*ValueDecl) isDecl() {}
 
-// TypeDecl is a custom-type declaration (doc/reference.md, "Algebraic data types and matching"). The RHS is always a list of
-// constructor alternatives being defined. Params declare polymorphic ADTs.
+// TypeDecl is a nominal type declaration (doc/reference.md, "Algebraic data
+// types and matching"). Its RHS is either constructor alternatives or a
+// standalone record schema. Params declare polymorphic types.
 type TypeDecl struct {
+	Name         string
+	NameSpan     source.Span
+	Params       []Param // type parameters (lowercase)
+	Ctors        []CtorDef
+	RecordFields []RecordFieldDef // non-nil for `type T = { field : Type }`
+	Deriving     []TName
+}
+
+type RecordFieldDef struct {
 	Name     string
 	NameSpan source.Span
-	Params   []Param // type parameters (lowercase)
-	Ctors    []CtorDef
-	Deriving []TName
+	Type     TypeExpr
 }
 
 // CtorDef is one constructor alternative. Args are type atoms: named types

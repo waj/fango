@@ -61,8 +61,16 @@ func TestRedefinition(t *testing.T) {
 func TestPromptAndReadLineShareReader(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader("readLine ()\nhello\n:quit\n"), &out)
-	if !strings.Contains(out.String(), `hello : String`) {
+	if !strings.Contains(out.String(), `Just Line { text = hello`) {
 		t.Fatalf("readLine did not consume the line following the prompt expression:\n%s", out.String())
+	}
+}
+
+func TestNominalRecords(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader("type Box a = { value : a }\nBox { value = 42 }.value\n:quit\n"), &out)
+	if !strings.Contains(out.String(), "Box : record") || !strings.Contains(out.String(), "42 : Num a => a") {
+		t.Fatalf("record construction and projection failed in the REPL:\n%s", out.String())
 	}
 }
 

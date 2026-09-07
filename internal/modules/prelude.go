@@ -10,7 +10,8 @@ import (
 func Prelude() (*ast.Module, []diag.Error) {
 	nodes := map[string]*node{}
 	var errs []diag.Error
-	for _, name := range []string{"Basics", "IO"} {
+	order := []string{"Basics", "Maybe", "IO"}
+	for _, name := range order {
 		path, data, err := (BundledProvider{}).Source(name)
 		if err != nil {
 			return nil, []diag.Error{{Title: "INVALID EMBEDDED PRELUDE", Body: err.Error()}}
@@ -22,11 +23,11 @@ func Prelude() (*ast.Module, []diag.Error) {
 	if len(errs) > 0 {
 		return nil, errs
 	}
-	for _, name := range []string{"Basics", "IO"} {
+	for _, name := range order {
 		nodes[name].iface, errs = buildInterface(nodes[name], errs)
 	}
 	m := &ast.Module{}
-	for _, name := range []string{"Basics", "IO"} {
+	for _, name := range order {
 		r := resolver{node: nodes[name], nodes: nodes}
 		ds, es := r.resolve()
 		m.Decls = append(m.Decls, ds...)

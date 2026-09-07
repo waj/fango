@@ -22,10 +22,11 @@ Forces the core stdlib: strings, `Maybe`, list combinators.
   seeded/system handlers (the game performs `Random.int` opaquely; the
   handlers advance a native PRNG cell, since a pure-fango state handler
   awaits parameterized handler state), plus loop-by-recursion ergonomics.
-- [ ] **Word/line/char count (`wc` clone) over stdin** — pipe any text through
-  it. Forces an end-of-input story for `readLine` (likely `Maybe String`),
-  `String.words`/`split`/`length`, `List.foldl`/`map`/`filter`, and immediate
-  tuple/record pressure for carrying the three counters.
+- [x] **Word/line/byte count (`wc` clone) over stdin** — pipe any text through
+  it. Forced `readLine : () ->{IO} Maybe IO.Line` with exact terminators,
+  ASCII-whitespace `String.words`, byte-oriented `String.length`,
+  `List.foldl`, and nominal records with projection and functional update for
+  carrying the three counters.
 - [ ] **Markdown-lite to HTML converter** — headings, emphasis, lists,
   paragraphs. Forces substring and prefix operations, character-level string
   processing, and efficient string building.

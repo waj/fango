@@ -277,6 +277,25 @@ type ADTInfo struct {
 	Con    *TCon
 	Params []*TVar
 	Ctors  []*CtorInfo
+	// RecordFields is non-nil for a standalone nominal record. The sole
+	// synthetic constructor remains an internal representation detail.
+	RecordFields []RecordFieldInfo
+}
+
+type RecordFieldInfo struct {
+	Name string
+	Type Type
+}
+
+func (a *ADTInfo) IsRecord() bool { return a.RecordFields != nil }
+
+func (a *ADTInfo) RecordField(name string) (int, *RecordFieldInfo) {
+	for i := range a.RecordFields {
+		if a.RecordFields[i].Name == name {
+			return i, &a.RecordFields[i]
+		}
+	}
+	return -1, nil
 }
 
 // EffectInfo is one declared algebraic effect. Params are rigid variables

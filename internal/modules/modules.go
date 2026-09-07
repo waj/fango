@@ -138,14 +138,15 @@ type node struct {
 }
 
 type iface struct {
-	values, types, ctors, ops  map[string]string
-	typeMembers, effectMembers map[string][]string
-	openTypes, openEffects     map[string]bool
+	values, types, ctors, ops, records map[string]string
+	typeMembers, effectMembers         map[string][]string
+	recordFields                       map[string][]string
+	openTypes, openEffects             map[string]bool
 }
 
 func newIface() *iface {
-	return &iface{values: map[string]string{}, types: map[string]string{}, ctors: map[string]string{}, ops: map[string]string{},
-		typeMembers: map[string][]string{}, effectMembers: map[string][]string{}, openTypes: map[string]bool{}, openEffects: map[string]bool{}}
+	return &iface{values: map[string]string{}, types: map[string]string{}, ctors: map[string]string{}, ops: map[string]string{}, records: map[string]string{},
+		typeMembers: map[string][]string{}, effectMembers: map[string][]string{}, recordFields: map[string][]string{}, openTypes: map[string]bool{}, openEffects: map[string]bool{}}
 }
 
 // Load uses the entry file's directory as the sole source root and returns a
@@ -779,6 +780,12 @@ func buildInterface(n *node, errs []diag.Error) (*iface, []diag.Error) {
 			all.values[d.Name] = canonical(n.name, d.Name)
 		case *ast.TypeDecl:
 			all.types[d.Name] = canonical(n.name, d.Name)
+			if d.RecordFields != nil {
+				all.records[d.Name] = canonical(n.name, d.Name)
+				for _, f := range d.RecordFields {
+					all.recordFields[d.Name] = append(all.recordFields[d.Name], f.Name)
+				}
+			}
 			for _, c := range d.Ctors {
 				all.typeMembers[d.Name] = append(all.typeMembers[d.Name], c.Name)
 				all.ctors[c.Name] = canonical(n.name, c.Name)
@@ -807,6 +814,10 @@ func buildInterface(n *node, errs []diag.Error) (*iface, []diag.Error) {
 		for k, v := range all.ops {
 			pub.ops[k] = v
 		}
+		for k, v := range all.records {
+			pub.records[k] = v
+			pub.recordFields[k] = append([]string(nil), all.recordFields[k]...)
+		}
 		for k, v := range all.typeMembers {
 			pub.typeMembers[k] = v
 			pub.openTypes[k] = true
@@ -834,6 +845,12 @@ func buildInterface(n *node, errs []diag.Error) (*iface, []diag.Error) {
 		if v, ok := all.types[item.Name]; ok {
 			pub.types[item.Name] = v
 			if item.All {
+				if rv, ok := all.records[item.Name]; ok {
+					pub.records[item.Name] = rv
+					pub.recordFields[item.Name] = append([]string(nil), all.recordFields[item.Name]...)
+					pub.openTypes[item.Name] = true
+					continue
+				}
 				if ms, ok := all.typeMembers[item.Name]; ok {
 					pub.typeMembers[item.Name] = ms
 					pub.openTypes[item.Name] = true
@@ -896,6 +913,12 @@ func (i *iface) selection(ex *ast.Exposing, at source.Span) (*iface, []diag.Erro
 		if v, ok := i.types[item.Name]; ok {
 			out.types[item.Name] = v
 			if item.All {
+				if rv, ok := i.records[item.Name]; ok {
+					out.records[item.Name] = rv
+					out.recordFields[item.Name] = append([]string(nil), i.recordFields[item.Name]...)
+					out.openTypes[item.Name] = true
+					continue
+				}
 				if !i.openTypes[item.Name] && !i.openEffects[item.Name] {
 					errs = append(errs, diag.Errorf(item.Sp, "NON-PUBLIC IMPORT", "Module does not publicly expose the members of `%s`.", item.Name))
 					continue
@@ -924,11 +947,12 @@ func (i *iface) selection(ex *ast.Exposing, at source.Span) (*iface, []diag.Erro
 }
 
 type resolver struct {
-	node                  *node
-	nodes                 map[string]*node
-	errs                  []diag.Error
-	vals, tys, ctors, ops map[string]string
-	quals                 map[string]*iface
+	node                           *node
+	nodes                          map[string]*node
+	errs                           []diag.Error
+	vals, tys, ctors, ops, records map[string]string
+	recordLabels                   map[string][]string
+	quals                          map[string]*iface
 }
 
 func (r *resolver) canon(name string) string {
@@ -943,6 +967,8 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 	r.tys = map[string]string{"Int": "Int", "Float": "Float", "String": "String", "Bool": "Bool", "()": "()"}
 	r.ctors = map[string]string{"True": "True", "False": "False"}
 	r.ops = map[string]string{}
+	r.records = map[string]string{}
+	r.recordLabels = map[string][]string{}
 	if r.node.name != "Basics" {
 		if basics := r.nodes["Basics"]; basics != nil {
 			for _, name := range []string{"Num", "Eq", "Ord", "Show"} {
@@ -984,6 +1010,11 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 			continue
 		}
 		r.quals[im.Module] = dep.iface
+		for record, canonicalName := range dep.iface.records {
+			for _, field := range dep.iface.recordFields[record] {
+				r.recordLabels[field] = append(r.recordLabels[field], canonicalName)
+			}
+		}
 		if im.Alias != "" {
 			if aliases[im.Alias] || fullQualifiers[im.Alias] || r.quals[im.Alias] != nil {
 				r.errs = append(r.errs, diag.Errorf(im.AliasSpan, "DUPLICATE IMPORT ALIAS", "The qualifier `%s` is already in use.", im.Alias))
@@ -1002,6 +1033,12 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 		switch d := d.(type) {
 		case *ast.TypeDecl:
 			r.add(r.tys, d.Name, r.canon(d.Name), d.NameSpan)
+			if d.RecordFields != nil {
+				r.add(r.records, d.Name, r.canon(d.Name), d.NameSpan)
+				for _, f := range d.RecordFields {
+					r.recordLabels[f.Name] = append(r.recordLabels[f.Name], r.canon(d.Name))
+				}
+			}
 			for _, c := range d.Ctors {
 				r.add(r.ctors, c.Name, r.canon(c.Name), c.NameSpan)
 			}
@@ -1087,6 +1124,9 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 					r.typ(a)
 				}
 			}
+			for i := range d.RecordFields {
+				r.typ(d.RecordFields[i].Type)
+			}
 			out = append(out, d)
 		case *ast.EffectDecl:
 			d.Name = r.canon(d.Name)
@@ -1171,6 +1211,12 @@ func (r *resolver) merge(i *iface, sp source.Span) {
 			r.ops[k] = v
 		}
 	}
+	for k, v := range i.records {
+		r.add(r.records, k, v, sp)
+		for _, field := range i.recordFields[k] {
+			r.recordLabels[field] = append(r.recordLabels[field], v)
+		}
+	}
 }
 
 func (r *resolver) qualified(name string, ns map[string]string, kind string, sp source.Span) string {
@@ -1202,6 +1248,8 @@ func (r *resolver) qualified(name string, ns map[string]string, kind string, sp 
 		v = in.ctors[member]
 	case "op":
 		v = in.ops[member]
+	case "record":
+		v = in.records[member]
 	}
 	if v == "" {
 		r.errs = append(r.errs, diag.Errorf(sp, "PRIVATE OR UNKNOWN NAME", "Module qualifier `%s` does not publicly expose `%s`.", best, member))
@@ -1255,6 +1303,23 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 		}
 	case *ast.Ctor:
 		e.Name = r.qualified(e.Name, r.ctors, "ctor", e.Sp)
+	case *ast.RecordLit:
+		e.Name = r.qualified(e.Name, r.records, "record", e.NameSpan)
+		for i := range e.Fields {
+			f := &e.Fields[i]
+			f.Records = append([]string{}, r.recordLabels[f.Name]...)
+			r.expr(f.Value, vals, locals)
+		}
+	case *ast.RecordGet:
+		e.Records = append([]string{}, r.recordLabels[e.Field]...)
+		r.expr(e.Record, vals, locals)
+	case *ast.RecordUpdate:
+		r.expr(e.Record, vals, locals)
+		for i := range e.Fields {
+			f := &e.Fields[i]
+			f.Records = append([]string{}, r.recordLabels[f.Name]...)
+			r.expr(f.Value, vals, locals)
+		}
 	case *ast.App:
 		r.expr(e.Fn, vals, locals)
 		r.expr(e.Arg, vals, locals)

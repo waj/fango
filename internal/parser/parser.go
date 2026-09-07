@@ -415,17 +415,27 @@ func (p *parser) parseTypeDecl() ast.Decl {
 		return nil
 	}
 	var ctors []ast.CtorDef
-	for {
-		c, ok := p.parseCtorDef()
+	var recordFields []ast.RecordFieldDef
+	if p.peekInExpr().Kind == token.LBRACE {
+		var ok bool
+		recordFields, ok = p.parseRecordTypeFields()
 		if !ok {
 			p.recoverToTopLevel(false)
 			return nil
 		}
-		ctors = append(ctors, c)
-		if p.peekInExpr().Kind != token.PIPE {
-			break
+	} else {
+		for {
+			c, ok := p.parseCtorDef()
+			if !ok {
+				p.recoverToTopLevel(false)
+				return nil
+			}
+			ctors = append(ctors, c)
+			if p.peekInExpr().Kind != token.PIPE {
+				break
+			}
+			p.next()
 		}
-		p.next()
 	}
 	var deriving []ast.TName
 	if p.peekInExpr().Kind == token.KwDeriving {
@@ -455,7 +465,42 @@ func (p *parser) parseTypeDecl() ast.Decl {
 		p.recoverToTopLevel(false)
 		return nil
 	}
-	return &ast.TypeDecl{Name: nameT.Text, NameSpan: nameT.Span, Params: params, Ctors: ctors, Deriving: deriving}
+	return &ast.TypeDecl{Name: nameT.Text, NameSpan: nameT.Span, Params: params, Ctors: ctors, RecordFields: recordFields, Deriving: deriving}
+}
+
+func (p *parser) parseRecordTypeFields() ([]ast.RecordFieldDef, bool) {
+	p.next() // {
+	if p.peek().Kind == token.RBRACE {
+		p.errorAt(p.peek().Span, "RECORD FIELDS", "A record type needs at least one field.")
+		return nil, false
+	}
+	var fields []ast.RecordFieldDef
+	for {
+		name := p.peekInExpr()
+		if name.Kind != token.LIDENT {
+			p.errorAt(name.Span, "SYNTAX PROBLEM", "I expect a lowercase record field name.")
+			return nil, false
+		}
+		p.next()
+		if !p.expect(token.COLON, "I expect `:` after the record field name.") {
+			return nil, false
+		}
+		ty := p.parseTypeExpr()
+		if ty == nil {
+			return nil, false
+		}
+		fields = append(fields, ast.RecordFieldDef{Name: name.Text, NameSpan: name.Span, Type: ty})
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.next()
+	}
+	if p.peek().Kind != token.RBRACE {
+		p.errorAt(p.peek().Span, "SYNTAX PROBLEM", "I expect `}` to close this record type.")
+		return nil, false
+	}
+	p.next()
+	return fields, true
 }
 
 // parseCtorDef parses one constructor alternative: a capitalized name
@@ -943,7 +988,7 @@ func (p *parser) parseApply() ast.Expr {
 	}
 	for {
 		switch p.peekInExpr().Kind {
-		case token.INT, token.FLOAT, token.STRING, token.LIDENT, token.UIDENT, token.LPAREN, token.KwResume:
+		case token.INT, token.FLOAT, token.STRING, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.KwResume:
 			arg := p.parsePostfixAtom()
 			if arg == nil {
 				return nil
@@ -963,7 +1008,21 @@ func (p *parser) parsePostfixAtom() ast.Expr {
 	if expr == nil {
 		return nil
 	}
-	for p.pos > 0 && p.pos+1 < len(p.toks) {
+	for p.pos > 0 && p.pos < len(p.toks) {
+		if p.peekInExpr().Kind == token.DOT {
+			p.next()
+			field := p.peekInExpr()
+			if field.Kind != token.LIDENT {
+				p.errorAt(field.Span, "SYNTAX PROBLEM", "I expect a lowercase field name after `.`.")
+				return nil
+			}
+			p.next()
+			expr = &ast.RecordGet{Record: expr, Field: field.Text, FieldSpan: field.Span}
+			continue
+		}
+		if p.pos+1 >= len(p.toks) {
+			return expr
+		}
 		lp := p.peekInExpr()
 		if lp.Kind != token.LPAREN || p.toks[p.pos+1].Kind != token.RPAREN || p.toks[p.pos-1].Span.End != lp.Span.Start {
 			return expr
@@ -1282,10 +1341,28 @@ func (p *parser) parseAtom() ast.Expr {
 		return &ast.Var{Name: t.Text, Sp: t.Span}
 	case token.UIDENT:
 		name, final, sp := p.parseQualifiedName()
+		if final == token.UIDENT && p.peekInExpr().Kind == token.LBRACE {
+			fields, end, ok := p.parseRecordExprFields()
+			if !ok {
+				return nil
+			}
+			return &ast.RecordLit{Name: name, NameSpan: sp, Fields: fields, Sp: sp.Merge(end)}
+		}
 		if final == token.LIDENT {
 			return &ast.Var{Name: name, Sp: sp}
 		}
 		return &ast.Ctor{Name: name, Sp: sp}
+	case token.LBRACE:
+		lb := p.next()
+		record := p.parseExpr(1)
+		if record == nil || !p.expect(token.PIPE, "I expect `|` after the record being updated.") {
+			return nil
+		}
+		fields, end, ok := p.parseRecordExprFieldsAfterOpen()
+		if !ok {
+			return nil
+		}
+		return &ast.RecordUpdate{Record: record, Fields: fields, Sp: lb.Span.Merge(end)}
 	case token.KwResume:
 		p.next()
 		return &ast.Resume{Sp: t.Span}
@@ -1323,6 +1400,45 @@ func (p *parser) parseAtom() ast.Expr {
 		p.errorAt(t.Span, "SYNTAX PROBLEM", "I was expecting an expression here.")
 		return nil
 	}
+}
+
+func (p *parser) parseRecordExprFields() ([]ast.RecordExprField, source.Span, bool) {
+	p.next() // {
+	return p.parseRecordExprFieldsAfterOpen()
+}
+
+func (p *parser) parseRecordExprFieldsAfterOpen() ([]ast.RecordExprField, source.Span, bool) {
+	if p.peek().Kind == token.RBRACE {
+		rb := p.next()
+		return nil, rb.Span, true
+	}
+	var fields []ast.RecordExprField
+	for {
+		name := p.peekInExpr()
+		if name.Kind != token.LIDENT {
+			p.errorAt(name.Span, "SYNTAX PROBLEM", "I expect a lowercase record field name.")
+			return nil, source.Span{}, false
+		}
+		p.next()
+		if !p.expect(token.EQ, "I expect `=` after the record field name.") {
+			return nil, source.Span{}, false
+		}
+		value := p.parseExpr(1)
+		if value == nil {
+			return nil, source.Span{}, false
+		}
+		fields = append(fields, ast.RecordExprField{Name: name.Text, NameSpan: name.Span, Value: value})
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.next()
+	}
+	if p.peek().Kind != token.RBRACE {
+		p.errorAt(p.peek().Span, "SYNTAX PROBLEM", "I expect `}` to close these record fields.")
+		return nil, source.Span{}, false
+	}
+	p.next()
+	return fields, p.prevSpan(), true
 }
 
 // peek returns the current token, ignoring layout.

@@ -62,12 +62,12 @@ func fixtureProgram(prog *core.Prog) *core.Prog {
 	result.Defs = nil
 	result.ADTs = nil
 	for _, d := range prog.Defs {
-		if d.Owner != "Basics" && d.Owner != "IO" {
+		if d.Owner != "Basics" && d.Owner != "Maybe" && d.Owner != "IO" {
 			result.Defs = append(result.Defs, d)
 		}
 	}
 	for _, a := range prog.ADTs {
-		if !strings.HasPrefix(a.Con.Name, "Basics.") && !strings.HasPrefix(a.Con.Name, "IO.") {
+		if !strings.HasPrefix(a.Con.Name, "Basics.") && !strings.HasPrefix(a.Con.Name, "Maybe.") && !strings.HasPrefix(a.Con.Name, "IO.") {
 			result.ADTs = append(result.ADTs, a)
 		}
 	}

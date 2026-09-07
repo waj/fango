@@ -135,21 +135,24 @@ and APIs must be imported explicitly.
 `List` exposes the following algebraic type:
 
 ```fango
-module List exposing (List(..), range, each)
+module List exposing (List(..), range, each, foldl)
 
 type List a = Nil | Cons a (List a) deriving (Eq, Show)
 ```
 
 Its inferred public function types are
-`range : (Num a, Ord a) => a -> a -> List a` and
-`each : (a ->{e} ()) -> List a ->{e} ()`.
+`range : (Num a, Ord a) => a -> a -> List a`,
+`each : (a ->{e} ()) -> List a ->{e} ()`, and
+`foldl : (a -> b ->{e} b) -> b -> List a ->{e} b`.
 
 `range start end` produces ascending values by adding one, including `end`
 when that value is reached, and returns `Nil` immediately when `start > end`.
 It works at both `Int` and `Float`; callers must use finite bounds because the
 ordinary recursive implementation is not guaranteed to terminate for `NaN`
 or positive infinity. `each action values` applies `action` from left to right
-and propagates its effects.
+and propagates its effects. `foldl combine initial values` visits values from
+left to right, passing the current element first and the accumulator second to
+`combine`; callback effects are propagated.
 
 `Range.each : (Num a, Ord a) => (a ->{e} ()) -> a -> a ->{e} ()` traverses an
 inclusive ascending numeric range without constructing a `List`. For example,
@@ -170,8 +173,13 @@ main() =
 
 `IO.write : String ->{IO} ()` writes the string exactly as provided without a
 trailing newline. It is a native operation available only through an `IO`
-import. The global `print : Show a => a ->{IO} ()` and
-`readLine : () ->{IO} String` names come from ambient IO.
+import. The names `print : Show a => a ->{IO} ()` and `readLine` come from
+ambient IO. `IO` also exposes the nominal record
+`type Line = { text : String, ending : String }`;
+`readLine : () ->{IO} Maybe IO.Line`
+returns `Nothing` at clean end of input and otherwise preserves the line
+terminator separately as `"\n"`, `"\r\n"`, or `""` for an unterminated final
+line.
 
 `Basics` also declares two explicitly importable integer functions (the
 implicit prelude exposes only the operators, `print`, `readLine`, and `show`):
@@ -198,7 +206,9 @@ type Maybe a = Nothing | Just a deriving (Eq, Show)
 fallback.
 
 `String` exposes `length : String -> Int`, which counts bytes (a multi-byte
-UTF-8 character counts each byte), and `toInt : String -> Maybe Int`, which
+UTF-8 character counts each byte), `words : String -> List String`, which
+splits on ASCII space, tab, LF, CR, vertical tab, and form feed, and
+`toInt : String -> Maybe Int`, which
 parses an optional `+`/`-` sign followed by base-10 digits. An empty digit
 sequence, any other character, and values outside the signed 64-bit range all
 produce `Nothing`; `String.toInt "007"` is `Just 7` and
@@ -466,8 +476,33 @@ runtime type variable defaults to Unit.
 
 ## Algebraic data types and matching
 
-A `type` declaration defines one or more constructors; its right-hand side is
-never a type alias:
+A nominal record declares a named type and a fixed ordered field schema:
+
+```fango
+type Counts = { lines : Int, words : Int, bytes : Int } deriving (Eq, Show)
+
+zero = Counts { words = 0, lines = 0, bytes = 0 }
+bump : Counts -> Counts
+bump counts = { counts | lines = counts.lines + 1 }
+```
+
+A record literal must name its type and provide every declared field exactly
+once; source field order does not affect its type. `value.field` projects a
+field, and `{ value | field = expression, ... }` produces a new value of the
+same nominal type. Update expressions are evaluated left to right and the
+original value is evaluated once. A projection or update receiver must already
+have a known nominal record type; field labels do not drive structural type
+inference. Record patterns are not supported.
+
+Records participate in module abstraction. An exposing item `Counts` makes
+only the type name available, while `Counts(..)` additionally exposes its field
+schema for construction, projection, and update. Derived equality
+compares fields in declaration order. Derived display has the form
+`Counts { lines = 1, words = 2, bytes = 3 }`.
+
+A `type` declaration defines a nominal type. Its right-hand side is either a
+record schema or one or more constructor alternatives; it is never a type
+alias:
 
 ```fango
 type Status a = Pending | Done a
@@ -533,8 +568,8 @@ say() = print "hello"
 main() =
     action = say
     action()
-    line = readLine()
-    print line
+    input = readLine()
+    print input
 ```
 
 Function values are first-class and may be stored in ADTs. Partial operation
@@ -595,10 +630,9 @@ run action =
 ```
 
 Ambient `print : Show a => a ->{IO} ()` displays values through their instance.
-`readLine : () ->{IO} String` reads one line and returns the text without its
-line ending. Call it as `readLine()` (or equivalently `readLine ()`). The
-explicitly imported `IO.write` operation is described under the bundled
-standard library.
+`readLine : () ->{IO} Maybe IO.Line` distinguishes clean EOF from a line and
+preserves the exact line ending as described under the bundled standard
+library. Call it as `readLine()` (or equivalently `readLine ()`).
 
 ## Entry points
 
@@ -635,6 +669,8 @@ declarations, and accepts multiline layout-sensitive input. Definitions echo
 their inferred types; expressions print a value and type. Errors do not end the
 session. Redefinition is allowed at the prompt, while existing memoized values
 and closures retain earlier bindings.
+Record type declarations echo `Name : record`; their synthetic internal
+constructor is not part of the surface namespace.
 Classes cannot be redefined. Type redefinition creates a fresh identity and
 can install fresh instances for that identity. Failed instance and deriving
 declarations do not modify the persistent declaration environment. Types are

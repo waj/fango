@@ -1,1 +1,1 @@
-main = print ("[" ++ readLine () ++ "]")
+main = print (readLine())

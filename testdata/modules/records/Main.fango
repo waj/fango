@@ -1,0 +1,8 @@
+module Main exposing (main)
+
+import Data as D exposing (Counts, zero)
+
+bump : Counts -> Counts
+bump counts = { counts | lines = counts.lines + 1 }
+
+main = bump D.zero == D.Counts { words = 0, lines = 1 }

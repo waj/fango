@@ -336,6 +336,12 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 			}
 			return el.ctorValue(info, ty)
 		}
+	case *ast.RecordLit:
+		return el.recordLiteral(e, ty)
+	case *ast.RecordGet:
+		return el.recordGet(e, ty)
+	case *ast.RecordUpdate:
+		return el.recordUpdate(e, ty)
 	case *ast.App:
 		return el.app(e)
 	case *ast.Neg:
@@ -434,6 +440,93 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 	default:
 		panic(fmt.Sprintf("elaborate: unhandled AST node %T", e))
 	}
+}
+
+func (el *elab) recordCtorApp(adt *types.ADTInfo, args []core.Expr, result types.Type) core.Expr {
+	ctor := adt.Ctors[0]
+	con := result.(*types.TCon)
+	fieldTypes := adt.InstFields(ctor, con.Args)
+	var calleeTy types.Type = result
+	for i := len(fieldTypes) - 1; i >= 0; i-- {
+		calleeTy = &types.TFun{Arg: fieldTypes[i], Ret: calleeTy}
+	}
+	return &core.App{CalleeKind: core.Ctor, Callee: &core.VarRef{Name: ctor.Name, Ty: calleeTy}, Args: args, TyArgs: append([]types.Type(nil), con.Args...), Ty: result, Ctor: ctor}
+}
+
+func (el *elab) recordLiteral(e *ast.RecordLit, ty types.Type) core.Expr {
+	adt := el.ck.RecordUses[e]
+	values := map[string]core.Expr{}
+	var binds []struct {
+		name  string
+		value core.Expr
+	}
+	for _, f := range e.Fields {
+		name := fmt.Sprintf("_record%d", el.tmp)
+		el.tmp++
+		value := el.expr(f.Value)
+		values[f.Name] = &core.VarRef{Name: name, Ty: value.Type(), Local: true}
+		binds = append(binds, struct {
+			name  string
+			value core.Expr
+		}{name, value})
+	}
+	args := make([]core.Expr, len(adt.RecordFields))
+	for i, f := range adt.RecordFields {
+		args[i] = values[f.Name]
+	}
+	body := el.recordCtorApp(adt, args, ty)
+	for i := len(binds) - 1; i >= 0; i-- {
+		body = &core.Let{Name: binds[i].name, Rhs: binds[i].value, Body: body, Ty: ty}
+	}
+	return body
+}
+
+func (el *elab) recordGet(e *ast.RecordGet, ty types.Type) core.Expr {
+	adt := el.ck.RecordUses[e]
+	bind := fmt.Sprintf("_record%d", el.tmp)
+	el.tmp++
+	binds := make([]string, len(adt.RecordFields))
+	idx, _ := adt.RecordField(e.Field)
+	field := fmt.Sprintf("_field%d", el.tmp)
+	el.tmp++
+	binds[idx] = field
+	return &core.Case{Scrut: el.expr(e.Record), Bind: bind, Ty: ty, Tree: &core.SwitchCtor{Scrut: bind, ADT: adt, Cases: []core.CtorCase{{Ctor: adt.Ctors[0], Binds: binds, Tree: &core.Leaf{Body: &core.VarRef{Name: field, Ty: ty, Local: true}}}}}}
+}
+
+func (el *elab) recordUpdate(e *ast.RecordUpdate, ty types.Type) core.Expr {
+	adt := el.ck.RecordUses[e]
+	bind := fmt.Sprintf("_record%d", el.tmp)
+	el.tmp++
+	old := make([]string, len(adt.RecordFields))
+	args := make([]core.Expr, len(adt.RecordFields))
+	con := ty.(*types.TCon)
+	fieldTypes := adt.InstFields(adt.Ctors[0], con.Args)
+	for i := range old {
+		old[i] = fmt.Sprintf("_field%d", el.tmp)
+		el.tmp++
+		args[i] = &core.VarRef{Name: old[i], Ty: fieldTypes[i], Local: true}
+	}
+	var lets []struct {
+		name  string
+		value core.Expr
+	}
+	for _, f := range e.Fields {
+		name := fmt.Sprintf("_record%d", el.tmp)
+		el.tmp++
+		value := el.expr(f.Value)
+		idx, _ := adt.RecordField(f.Name)
+		old[idx] = ""
+		args[idx] = &core.VarRef{Name: name, Ty: value.Type(), Local: true}
+		lets = append(lets, struct {
+			name  string
+			value core.Expr
+		}{name, value})
+	}
+	leaf := el.recordCtorApp(adt, args, ty)
+	for i := len(lets) - 1; i >= 0; i-- {
+		leaf = &core.Let{Name: lets[i].name, Rhs: lets[i].value, Body: leaf, Ty: ty}
+	}
+	return &core.Case{Scrut: el.expr(e.Record), Bind: bind, Ty: ty, Tree: &core.SwitchCtor{Scrut: bind, ADT: adt, Cases: []core.CtorCase{{Ctor: adt.Ctors[0], Binds: old, Tree: &core.Leaf{Body: leaf}}}}}
 }
 
 func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {

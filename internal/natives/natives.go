@@ -46,6 +46,15 @@ var Table = func() map[string]Spec {
 	t["String.byteAt"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
 		return stdlib.ByteAt(args[0].(int64), args[1].(string)), nil
 	}}
+	t["String.slice"] = Spec{Arity: 3, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.StringSlice(args[0].(int64), args[1].(int64), args[2].(string)), nil
+	}}
+	t["IO.lineText"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.LineText(args[0].(string)), nil
+	}}
+	t["IO.lineEnding"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.LineEnding(args[0].(string)), nil
+	}}
 	t["Random.swapSeed"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return stdlib.RandomSwap(args[0].(int64)), nil
 	}}
@@ -62,8 +71,11 @@ var Table = func() map[string]Spec {
 		}
 		return struct{}{}, stdlib.PrintTo(rt.Writer, text)
 	}}
-	t["IO.readLine"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
-		return stdlib.ReadLineFrom(rt.Reader)
+	t["IO.hasInput"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
+		return stdlib.HasInputFrom(rt.Reader)
+	}}
+	t["IO.readRawLine"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
+		return stdlib.ReadRawLineFrom(rt.Reader)
 	}}
 	t["IO.write"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
 		return struct{}{}, stdlib.WriteTo(rt.Writer, args[0].(string))

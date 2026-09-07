@@ -143,6 +143,9 @@ an import can seed only its direct dependency's declared public interface.
 Core contains no import syntax, but top-level definitions retain their source
 module owner so the Go backend can recover compilation boundaries. `Prog.Entry`
 identifies the selected entry definition independently of its printed name.
+Nominal record schemas follow type visibility, while field visibility follows
+`Type(..)`. Resolution records the visible nominal candidates for each field
+use; inference never treats a label as a structural type constraint.
 
 Inference and elaboration are separate because code generation is
 type-directed. Elaboration resolves defaulting,
@@ -214,6 +217,13 @@ the same inference and elaboration path as handwritten methods. Their contexts
 are computed from fields and available conditional instances; phantom parameters
 need no evidence. Recursive fields reuse the instance being checked. There is
 no automatic structural equality or display for a source ADT without an instance.
+Nominal records use the same type identity, schemes, and deriving machinery as
+single-constructor ADTs. Field projection and update are deferred until the
+receiver has unified to a known record type, then checked against the resolved
+visible schema. Elaboration lowers literals, projections, and functional
+updates to the existing constructor, `Let`, and exhaustive one-constructor
+`Case` Core forms. This keeps Core and both backends free of a second record
+representation while preserving single evaluation and source-order effects.
 
 ## Core and evidence invariants
 
@@ -351,7 +361,8 @@ generated Go is unchanged. Go's package cache then reuses unchanged compilation
 units. `build` copies the resulting executable; `run` reuses it while inputs
 are unchanged.
 `fangort` owns shared representations, formatting, and IO behavior, including
-newline-free string writes, used by the compiled and interpreted backends. It
+newline-free string writes and raw line reads that distinguish clean EOF and
+preserve LF/CRLF terminators, used by the compiled and interpreted backends. It
 also owns the process-global PRNG cell behind the bundled `Random` handlers,
 so seeded draw sequences are identical across backends.
 
@@ -431,7 +442,7 @@ allocation remains the main known structural performance cost.
 ## Known limitations
 
 The implementation has a deliberately narrow, pure Go sidecar FFI but no
-package manager, records, aliases, formatter, or LSP. Type classes have one
+package manager, transparent aliases, record patterns, formatter, or LSP. Type classes have one
 parameter, no superclasses, higher kinds, default methods, ambiguous overlapping heads,
 or method-local polymorphism. There are no source-path
 flags, external library version selection, or package resolution. The implicit

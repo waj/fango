@@ -66,6 +66,10 @@ func TestGuessingGameExample(t *testing.T) {
 	runDifferentialCase(t, filepath.Join("..", "..", "examples", "guess.fango"))
 }
 
+func TestWcExample(t *testing.T) {
+	runDifferentialCase(t, filepath.Join("..", "..", "examples", "wc.fango"))
+}
+
 func runDifferentialCase(t *testing.T, path string) {
 	t.Helper()
 	base := strings.TrimSuffix(path, ".fango")

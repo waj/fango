@@ -1,0 +1,34 @@
+-- Count newline characters, ASCII-whitespace-delimited words, and bytes from
+-- standard input, matching the default three columns of Unix wc.
+
+import IO
+import List
+import Maybe exposing (Maybe(..))
+import String
+
+type Counts = { lines : Int, words : Int, bytes : Int }
+
+wordsIn : IO.Line -> Int
+wordsIn line = List.foldl (\_ total -> total + 1) 0 (String.words line.text)
+
+lineCount : IO.Line -> Int
+lineCount line = if line.ending == "" then 0 else 1
+
+count : Counts ->{IO} Counts
+count counts =
+    case readLine() of
+        Nothing -> counts
+        Just line ->
+            next = { counts |
+                lines = counts.lines + lineCount line,
+                words = counts.words + wordsIn line,
+                bytes = counts.bytes + String.length line.text + String.length line.ending
+            }
+            count next
+
+render : Counts -> String
+render counts = show counts.lines ++ " " ++ show counts.words ++ " " ++ show counts.bytes
+
+main() =
+    result = count (Counts { lines = 0, words = 0, bytes = 0 })
+    print (render result)

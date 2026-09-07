@@ -1,0 +1,5 @@
+module Data exposing (Counts(..), zero)
+
+type Counts = { lines : Int, words : Int } deriving (Eq, Show)
+
+zero = Counts { lines = 0, words = 0 }

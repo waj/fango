@@ -1,4 +1,12 @@
+import IO
+import Maybe exposing (Maybe(..))
+
 main() =
     first = readLine()
     second = readLine()
-    print (first ++ "|" ++ second)
+    case first of
+        Nothing -> print "missing first"
+        Just firstLine ->
+            case second of
+                Nothing -> print "missing second"
+                Just secondLine -> print (firstLine.text ++ "|" ++ secondLine.text)
