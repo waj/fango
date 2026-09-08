@@ -12,6 +12,7 @@ import (
 	"github.com/waj/fango/internal/elaborate"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/modules"
+	"github.com/waj/fango/internal/runtimefiles"
 	"github.com/waj/fango/internal/staging"
 	"github.com/waj/fango/internal/types"
 )
@@ -96,6 +97,11 @@ func emitProjectManifest(entry string, stderr io.Writer) ([]codegen.File, []modu
 		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", err)
 		return nil, nil, false
 	}
+	hostSource, err := runtimefiles.NativeHost()
+	if err != nil {
+		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", err)
+		return nil, nil, false
+	}
 	for _, native := range nativeSources {
 		data := native.Content
 		if formatted, err := format.Source(data); err == nil {
@@ -104,7 +110,7 @@ func emitProjectManifest(entry string, stderr io.Writer) ([]codegen.File, []modu
 		dir := "native/" + codegen.NativeLinkName(native.Module) + "/"
 		files = append(files,
 			codegen.File{Path: dir + "native.go", Data: data},
-			codegen.File{Path: dir + "host.go", Data: codegen.NativeHostSource()})
+			codegen.File{Path: dir + "host.go", Data: hostSource})
 	}
 	return files, manifest, true
 }

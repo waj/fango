@@ -80,13 +80,6 @@ func EmitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) 
 	return files, nil
 }
 
-// NativeHostSource is compiled beside each native sidecar. Keeping the host
-// binding in a generated companion lets sidecar functions use the same source
-// in a system process and in the interpreter's native worker.
-func NativeHostSource() []byte {
-	return []byte("package native\n\nimport \"fangobuild/fangort\"\n\ntype FangoNativeHost = fangort.NativeHost\n\nvar FangoHost FangoNativeHost = fangort.SystemNativeHost\n")
-}
-
 func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byte, error) {
 	g := &gen{
 		b:             b,

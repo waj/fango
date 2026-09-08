@@ -27,13 +27,15 @@ below.
 
 ## Unembedding the bundled sources
 
-`stdlib/*.fango`, `stdlib/*.native.go`, and `runtime/fangort/*.go` are
-compiled into the binary with `go:embed` and read back through
-`modules.BundledProvider`. Editing a bundled module therefore has no effect
-until the compiler is rebuilt. `go test` rebuilds from source and never sees
-it, so the friction lands entirely on manual iteration — and now that
-`Derive` is a bundled module an author has reason to open, that is a routine
-cost rather than a rare one. Embedding source should go.
+`stdlib/*.fango`, `stdlib/*.native.go`, the native support sources, and
+`runtime/*/*.go` packages materialized into generated modules are compiled into
+the binary with `go:embed`. Bundled Fango sources are read back through
+`modules.BundledProvider`; Go support sources are copied into compiled projects
+or interpreter workers. Editing a bundled module therefore has no effect until
+the compiler is rebuilt. `go test` rebuilds from source and never sees it, so
+the friction lands entirely on manual iteration — and now that `Derive` is a
+bundled module an author has reason to open, that is a routine cost rather than
+a rare one. Embedding source should go.
 
 Two properties currently rest on it and need somewhere else to live. The
 compiler hard-codes canonical stdlib symbols — `Meta.Code`, `Meta.TypeInfo`,
@@ -59,10 +61,10 @@ The open decisions:
   interfaces and Core that is loaded instead of re-checked, which also removes
   the per-invocation re-check. The two are not exclusive: source on disk for
   development, precompiled for distribution, is a third shape.
-- Whether `fangort` follows the same rule. It is a different case: generated
-  Go imports it, so the compiler must be able to materialize its source into
-  an arbitrary build directory, which is an argument for keeping that one
-  embedded whatever happens to the stdlib.
+- Whether the Go runtime support follows the same rule. It is a different
+  case: generated programs and interpreter workers import it, so the compiler
+  must be able to materialize its source into arbitrary build directories,
+  which is an argument for keeping it embedded whatever happens to the stdlib.
 - How a source root is spelled, and whether it is a development-only escape
   hatch or the same mechanism the deferred package work will need. Answering
   it as a product feature is more work; answering it as a debug flag risks

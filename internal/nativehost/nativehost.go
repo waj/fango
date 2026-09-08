@@ -6,13 +6,13 @@ package nativehost
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/gob"
 	"errors"
 	"fmt"
 	goast "go/ast"
 	goparser "go/parser"
 	gotoken "go/token"
-	"io"
 	"io/fs"
 	"net"
 	"os"
@@ -26,6 +26,8 @@ import (
 
 	fango "github.com/waj/fango"
 	"github.com/waj/fango/internal/codegen"
+	"github.com/waj/fango/internal/runtimefiles"
+	"github.com/waj/fango/runtime/nativewire"
 )
 
 type Source struct {
@@ -46,33 +48,19 @@ type ExitError struct{ Code int }
 
 func (e *ExitError) Error() string { return fmt.Sprintf("program exited with status %d", e.Code) }
 
-type wireValue struct {
-	Kind string
-	I    int64
-	F    float64
-	S    string
-	R    int32
-	B    bool
-}
+type wireValue = nativewire.Value
+type message = nativewire.Message
 
-type message struct {
-	Kind   string
-	Name   string
-	Auth   string
-	Error  string
-	Panic  string
-	Code   int
-	Args   []wireValue
-	Value  wireValue
-	Data   []byte
-	Values []string
-	Bool   bool
+type workerFile struct {
+	Path string
+	Data []byte
 }
 
 type Executor struct {
 	sources []Source
 	names   map[string]bool
 	digest  string
+	files   []workerFile
 
 	mu   sync.Mutex
 	cmd  *exec.Cmd
@@ -82,15 +70,13 @@ type Executor struct {
 }
 
 func New(sources []Source) (*Executor, error) {
-	copySources := append([]Source(nil), sources...)
+	copySources := make([]Source, len(sources))
+	for i, source := range sources {
+		copySources[i] = Source{Module: source.Module, Content: append([]byte(nil), source.Content...)}
+	}
 	sort.Slice(copySources, func(i, j int) bool { return copySources[i].Module < copySources[j].Module })
 	names := map[string]bool{}
-	h := sha256.New()
-	io.WriteString(h, "native-worker-v1\x00")
 	for _, source := range copySources {
-		io.WriteString(h, source.Module)
-		h.Write([]byte{0})
-		h.Write(source.Content)
 		f, err := goparser.ParseFile(gotoken.NewFileSet(), source.Module+".native.go", source.Content, 0)
 		if err != nil {
 			return nil, err
@@ -108,28 +94,56 @@ func New(sources []Source) (*Executor, error) {
 		}
 	}
 	probe := &Executor{sources: copySources, names: names}
-	generated, err := probe.workerSource()
+	files, err := probe.workerFiles()
 	if err != nil {
 		return nil, err
 	}
-	h.Write(generated)
-	h.Write(codegen.NativeHostSource())
-	runtimeFiles, err := fs.Glob(fango.FangortFS, "runtime/fangort/*.go")
-	if err != nil {
-		return nil, err
-	}
-	for _, path := range runtimeFiles {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		data, err := fs.ReadFile(fango.FangortFS, path)
-		if err != nil {
-			return nil, err
-		}
-		h.Write(data)
-	}
-	probe.digest = fmt.Sprintf("%x", h.Sum(nil))
+	probe.files = files
+	probe.digest = digestWorkerFiles(files)
 	return probe, nil
+}
+
+func (e *Executor) workerFiles() ([]workerFile, error) {
+	files := []workerFile{{Path: "go.mod", Data: []byte("module fangobuild\n\ngo 1.26\n")}}
+	runtimeSources, err := runtimefiles.Packages("fangort", "nativewire", "nativeworker")
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range runtimeSources {
+		files = append(files, workerFile{Path: file.Path, Data: file.Data})
+	}
+	hostSource, err := runtimefiles.NativeHost()
+	if err != nil {
+		return nil, err
+	}
+	for _, source := range e.sources {
+		dir := filepath.ToSlash(filepath.Join("native", codegen.NativeLinkName(source.Module)))
+		files = append(files,
+			workerFile{Path: dir + "/native.go", Data: source.Content},
+			workerFile{Path: dir + "/host.go", Data: hostSource})
+	}
+	mainSource, err := e.workerSource()
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, workerFile{Path: "main.go", Data: mainSource})
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	return files, nil
+}
+
+func digestWorkerFiles(files []workerFile) string {
+	h := sha256.New()
+	h.Write([]byte("native-worker-v2\x00"))
+	var size [8]byte
+	for _, file := range files {
+		binary.LittleEndian.PutUint64(size[:], uint64(len(file.Path)))
+		h.Write(size[:])
+		h.Write([]byte(file.Path))
+		binary.LittleEndian.PutUint64(size[:], uint64(len(file.Data)))
+		h.Write(size[:])
+		h.Write(file.Data)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func (e *Executor) Has(name string) bool { return e != nil && e.names[name] }
@@ -411,46 +425,14 @@ func (e *Executor) build() (string, error) {
 			return binary, nil
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fangobuild\n\ngo 1.26\n"), 0o644); err != nil {
-		return "", err
-	}
-	entries, err := fs.ReadDir(fango.FangortFS, "runtime/fangort")
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "fangort"), 0o755); err != nil {
-		return "", err
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || strings.HasSuffix(entry.Name(), "_test.go") {
-			continue
-		}
-		data, err := fs.ReadFile(fango.FangortFS, "runtime/fangort/"+entry.Name())
-		if err != nil {
+	for _, file := range e.files {
+		path := filepath.Join(dir, filepath.FromSlash(file.Path))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return "", err
 		}
-		if err := os.WriteFile(filepath.Join(dir, "fangort", entry.Name()), data, 0o644); err != nil {
+		if err := os.WriteFile(path, file.Data, 0o644); err != nil {
 			return "", err
 		}
-	}
-	for _, source := range e.sources {
-		pkg := filepath.Join(dir, "native", codegen.NativeLinkName(source.Module))
-		if err := os.MkdirAll(pkg, 0o755); err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(filepath.Join(pkg, "native.go"), source.Content, 0o644); err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(filepath.Join(pkg, "host.go"), codegen.NativeHostSource(), 0o644); err != nil {
-			return "", err
-		}
-	}
-	mainSource, err := e.workerSource()
-	if err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "main.go"), mainSource, 0o644); err != nil {
-		return "", err
 	}
 	cmd := exec.Command("go", "build", "-o", binary, ".")
 	cmd.Dir = dir

@@ -165,6 +165,10 @@ same ABI and are eligible only when no Fango handler handles the operation.
 Generated sidecar packages also receive a reserved `FangoHost` process-global
 whose interface covers input, output, arguments, working directory, and exit;
 there is no hidden function parameter or module-specific calling convention.
+That binding has one ordinary Go source in the standard-library tree. Project
+and worker materialization copy it beside every sidecar and rewrite its runtime
+import for the private generated module, so the repository build and generated
+packages compile the same declaration.
 
 Fixity resolution runs between parsing and name resolution. Because a fixity
 is declared in source and may live in any module of the graph, the parser
@@ -610,9 +614,15 @@ and each compiled program therefore have the same single-cell, per-process
 behavior and execute the same implementation.
 
 During ordinary interpretation, every call-form sidecar runs in one persistent
-native worker per sidecar set. The worker is a cached generated Go executable;
-a framed scalar protocol carries calls and reverse `FangoHost` requests over a
-dedicated loopback connection, leaving process stdio outside the control
+native worker per sidecar set. Its protocol and execution loop are ordinary Go
+packages shared with the interpreter; generation supplies only the sidecar
+imports, function registry, and assignments to each package's `FangoHost`.
+Those support sources are embedded and materialized into the worker's private
+Go module, with their repository imports rewritten through the Go AST. The
+worker cache hashes the sorted destination paths and exact bytes of that whole
+module, so a change to fixed support code invalidates it just like a sidecar
+change. A framed scalar protocol carries calls and reverse `FangoHost` requests
+over a dedicated loopback connection, leaving process stdio outside the control
 channel. One process preserves package-global state across calls. The active
 interpreter IO context answers host requests, so the REPL's prompt and native IO
 share one buffered reader. The same mechanism accepts bundled and user

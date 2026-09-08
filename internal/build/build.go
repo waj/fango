@@ -8,15 +8,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	fango "github.com/waj/fango"
 	"github.com/waj/fango/internal/codegen"
+	"github.com/waj/fango/internal/runtimefiles"
 )
 
 // Dir returns (creating if needed) the build directory for an entry file:
@@ -166,16 +165,12 @@ func Materialize(dir string) (changed bool, err error) {
 	}
 	changed = changed || w
 
-	entries, err := fs.ReadDir(fango.FangortFS, "runtime/fangort")
+	files, err := runtimefiles.Packages("fangort")
 	if err != nil {
 		return changed, err
 	}
-	for _, e := range entries {
-		data, err := fs.ReadFile(fango.FangortFS, "runtime/fangort/"+e.Name())
-		if err != nil {
-			return changed, err
-		}
-		w, err := WriteIfChanged(filepath.Join(dir, "fangort", e.Name()), data)
+	for _, file := range files {
+		w, err := WriteIfChanged(filepath.Join(dir, filepath.FromSlash(file.Path)), file.Data)
 		if err != nil {
 			return changed, err
 		}

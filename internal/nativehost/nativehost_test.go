@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"strings"
@@ -34,6 +35,7 @@ var total int64
 func Add(n int64) int64 { total += n; return total }
 func Inf() float64 { return math.Inf(1) }
 func Echo(s string) string { return s }
+func Boom() { panic("broken") }
 func Emit(s string) { if err := FangoHost.WriteOutput([]byte(s)); err != nil { panic(err) } }
 func Environment() string { return FangoHost.Arguments()[1] + FangoHost.WorkingDirectory() }
 func Quit(code int64) { FangoHost.Exit(int(code)) }
@@ -57,6 +59,17 @@ func Quit(code int64) { FangoHost.Exit(int(code)) }
 	if got, err := executor.Call(context.Background(), host, "Probe.echo", []any{"λ"}); err != nil || got != "λ" {
 		t.Fatalf("unicode = %v, %v", got, err)
 	}
+	func() {
+		defer func() {
+			if got := fmt.Sprint(recover()); got != "native Probe.boom panicked: broken" {
+				t.Fatalf("panic = %q", got)
+			}
+		}()
+		_, _ = executor.Call(context.Background(), host, "Probe.boom", nil)
+	}()
+	if got, err := executor.Call(context.Background(), host, "Probe.echo", []any{"after"}); err != nil || got != "after" {
+		t.Fatalf("call after panic = %v, %v", got, err)
+	}
 	if _, err := executor.Call(context.Background(), host, "Probe.emit", []any{"ok"}); err != nil || host.out.String() != "ok" {
 		t.Fatalf("host output = %q, %v", host.out.String(), err)
 	}
@@ -67,5 +80,56 @@ func Quit(code int64) { FangoHost.Exit(int(code)) }
 	var exit *ExitError
 	if !errors.As(err, &exit) || exit.Code != 7 {
 		t.Fatalf("exit = %v", err)
+	}
+}
+
+func TestWorkerManifestDeterministicAndComplete(t *testing.T) {
+	a := Source{Module: "A", Content: []byte("package native\nfunc One() int64 { return 1 }\n")}
+	b := Source{Module: "B", Content: []byte("package native\nfunc Two() int64 { return 2 }\n")}
+	first, err := New([]Source{b, a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := New([]Source{a, b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.digest != second.digest {
+		t.Fatalf("reordered sources changed digest: %s != %s", first.digest, second.digest)
+	}
+	wanted := map[string]bool{
+		"go.mod":                 false,
+		"main.go":                false,
+		"native/A/host.go":       false,
+		"native/A/native.go":     false,
+		"native/B/host.go":       false,
+		"native/B/native.go":     false,
+		"nativewire/wire.go":     false,
+		"nativeworker/worker.go": false,
+	}
+	for _, file := range first.files {
+		if _, ok := wanted[file.Path]; ok {
+			wanted[file.Path] = true
+		}
+	}
+	for path, found := range wanted {
+		if !found {
+			t.Errorf("worker manifest missing %s", path)
+		}
+	}
+	changed := append([]workerFile(nil), first.files...)
+	changed[0].Data = append(append([]byte(nil), changed[0].Data...), '\n')
+	if digestWorkerFiles(changed) == first.digest {
+		t.Fatal("support source change did not invalidate digest")
+	}
+	mainSource, err := first.workerSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(mainSource), "encoding/gob") ||
+		!strings.Contains(string(mainSource), "nativeworker.Run") ||
+		!strings.Contains(string(mainSource), "native0.FangoHost = host") ||
+		!strings.Contains(string(mainSource), "native1.FangoHost = host") {
+		t.Fatalf("generated main contains worker implementation:\n%s", mainSource)
 	}
 }
