@@ -353,9 +353,10 @@ the interpretation with one line in `main`.
 
 Because current handlers are tail-resumptive, a handler cannot carry state
 of its own across resumes; the bundled handlers instead advance a native
-generator cell inside the runtime, and they swap and restore that cell
-around the handled computation so nested `runSeeded`/`runSystem` uses behave
-lexically. That cell is process state reachable only through these handlers.
+generator cell private to `Random`'s sidecar, and they swap and restore that
+cell around the handled computation so nested `runSeeded`/`runSystem` uses
+behave lexically. That cell is process state reachable only through these
+handlers.
 
 ## Native Go sidecars
 
@@ -394,12 +395,19 @@ standard-library packages. Every call-form declaration needs its matching
 exported function, and every exported sidecar function needs a declaration.
 
 Native sidecars participate in `check`, build manifests, incremental rebuilds,
-`build`, `run`, and `--emit-go`. They execute only in compiled programs; the
-Core interpreter and REPL report “native modules run only in compiled mode.”
-Panics cross the boundary unchanged.
+`build`, `run`, and `--emit-go`. Bundled standard-library modules use the same
+sidecar form and ABI for pure scalar natives; their sidecars are materialized
+into generated projects just like user sidecars. Because those bundled
+functions are also linked into the compiler and registered there, they run in
+the Core interpreter and REPL as well as in compiled programs. User sidecars
+execute only in compiled programs; the Core interpreter and REPL report
+“native modules run only in compiled mode.” Panics cross the boundary
+unchanged.
 
 The word `native` is reserved. Inline `native "Go expression"` templates are
-compiler-bundled syntax and are rejected in user modules.
+compiler-bundled syntax and are rejected in user modules. The standard library
+keeps templates for inlined scalar primitives, runtime-dependent IO operations,
+and compiler-only metaprogramming representations.
 
 ## Values and operators
 

@@ -21,11 +21,6 @@ coverage.
 - Keep adding differential, diagnostic, documentation, and performance
   coverage with each library increment.
 
-Unify bundled natives around the user-sidecar mechanism so a stdlib module's
-native code lives in its own `<Module>.native.go` and runs in both backends,
-instead of accreting in fangort behind templates and delegators. The proposal
-under iteration is in [roadmap-natives.md](roadmap-natives.md).
-
 Independent library versioning, package distribution, and dependency fetching
 remain deferred; configurable source roots are entangled with the question
 below.
@@ -43,7 +38,7 @@ cost rather than a rare one. Embedding source should go.
 Two properties currently rest on it and need somewhere else to live. The
 compiler hard-codes canonical stdlib symbols — `Meta.Code`, `Meta.TypeInfo`,
 `Meta.infoOf`, `Basics.Eq`/`Ord`/`Show`/`Num`, `IO.print`/`readLine` — and
-`validateNatives` cross-checks every bundled `native` template against the
+native validation cross-checks every bundled `native` declaration against the
 interpreter registry, so a stdlib one version away from its binary is an
 internal error rather than a behavioral difference. Embedding makes that skew
 unrepresentable; anything else has to make it *detectable*, which means a
@@ -193,6 +188,12 @@ These are directions, not commitments or an ordering after the work above.
   recursive deriving groups and richer precedence-aware display are also open.
   Deriving is user-extensible now, so richer display is a change to the `Show`
   deriver in the bundled `Derive` module rather than to the compiler.
+- Allow compiler-bundled instances to implement a method with an inline native
+  template, eliminating private forwarders such as `Basics.intAdd` while
+  preserving direct `NativeCall` lowering. This needs a stable native identity
+  per instance method, an ABI derived from the class-specialized method type,
+  load-time agreement with the interpreter registry, and a syntax decision
+  between `(+) = native "$1 + $2"` and a parameter-bearing form.
 - Broaden the bounded scalar worker specialization only when benchmarks justify
   it; multiple numeric parameters, effectful workers, and custom dictionaries
   currently retain the generic evidence-passing path.

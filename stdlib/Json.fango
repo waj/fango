@@ -17,10 +17,10 @@ class Encode a
     encode : a -> String
 
 jsonString : String -> String
-jsonString = native "fangort.JSONString($1)"
+jsonString = native
 
 jsonFloat : Float -> String
-jsonFloat = native "fangort.JSONFloat($1)"
+jsonFloat = native
 
 instance Encode Int
     encode value = show value
@@ -107,10 +107,10 @@ deriver Encode
 type StringToken = { value : String, rest : String }
 
 stringTokenLength : String -> Int
-stringTokenLength = native "fangort.JSONStringTokenLength($1)"
+stringTokenLength = native
 
 stringTokenValue : String -> String
-stringTokenValue = native "fangort.JSONStringValue($1)"
+stringTokenValue = native
 
 parseString : String -> Maybe StringToken
 parseString text =

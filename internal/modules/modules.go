@@ -115,7 +115,6 @@ type Result struct {
 type NativeSource struct {
 	Module, Path string
 	Content      []byte
-	Bundled      bool
 }
 
 // Unit is one source module in dependency-first build order. Name is empty
@@ -377,7 +376,7 @@ func Load(entry string) (*Result, []diag.Error) {
 		if n.native != nil {
 			nh := sha256.Sum256(n.native)
 			manifest = append(manifest, ManifestEntry{Module: name, Path: n.nativePath, SHA256: hex.EncodeToString(nh[:])})
-			natives = append(natives, NativeSource{Module: n.nativeModule, Path: n.nativePath, Content: n.native, Bundled: n.bundled})
+			natives = append(natives, NativeSource{Module: n.nativeModule, Path: n.nativePath, Content: n.native})
 		}
 		unitName := name
 		if n.private {
@@ -448,14 +447,13 @@ var nativePlaceholder = regexp.MustCompile(`\$([0-9]+)`)
 // rather than graph-wide.
 //
 // The Go boundary stays deliberately small: bundled modules may use inline
-// templates; ordinary modules may only use sidecar call form with a closed
-// scalar ABI that can be checked without running Go tooling. Fixity is
-// checked here too, because a fixity must accompany the operator its own
-// module declares.
+// templates, while both bundled and ordinary modules may use sidecar call
+// form with a closed scalar ABI that can be checked without running Go
+// tooling. Fixity is checked here too, because a fixity must accompany the
+// operator its own module declares.
 func validateModuleDecls(n *node) []diag.Error {
 	var errs []diag.Error
 	callDecls := map[string]*ast.ValueDecl{}
-	templateTargets := map[string]bool{}
 	// declared is every value name this module introduces — the names its
 	// own fixity declarations may refer to.
 	declared := map[string]bool{}
@@ -464,11 +462,9 @@ func validateModuleDecls(n *node) []diag.Error {
 		switch d := d.(type) {
 		case *ast.ClassDecl:
 			for _, m := range d.Methods {
-				templateTargets[m.Name] = true
 				declared[m.Name] = true
 			}
 		case *ast.ValueDecl:
-			templateTargets[d.Name] = true
 			declared[d.Name] = true
 			if d.Native == nil {
 				continue
@@ -479,12 +475,16 @@ func validateModuleDecls(n *node) []diag.Error {
 					continue
 				}
 				errs = append(errs, validateTemplate(*d.Native.Template, nativeArity(d.Ann), d.Native.Sp)...)
-				templateTargets[d.Name] = true
 				if spec, ok := natives.Lookup(canonical(n.name, d.Name)); !ok || spec.Arity != nativeArity(d.Ann) || spec.Effect {
 					errs = append(errs, diag.Errorf(d.Native.Sp, "INVALID BUNDLED NATIVE", "Bundled native `%s.%s` does not match the interpreter registry.", n.name, d.Name))
 				}
 			} else {
 				callDecls[d.Name] = d
+				if n.bundled {
+					if spec, ok := natives.Lookup(canonical(n.name, d.Name)); !ok || spec.Arity != nativeArity(d.Ann) || spec.Effect {
+						errs = append(errs, diag.Errorf(d.Native.Sp, "INVALID BUNDLED NATIVE", "Bundled native `%s.%s` does not match the interpreter registry.", n.name, d.Name))
+					}
+				}
 			}
 		case *ast.EffectDecl:
 			for _, op := range d.Ops {
@@ -523,9 +523,6 @@ func validateModuleDecls(n *node) []diag.Error {
 		}
 		errs = append(errs, diag.Errorf(fd.OpSpan, "FIXITY WITHOUT DEFINITION",
 			"Module `%s` does not declare `(%s)`, so it cannot declare its fixity.\nFixity belongs with the operator's own declaration.", n.name, fd.Op))
-	}
-	if n.bundled {
-		return errs
 	}
 	if len(callDecls) == 0 {
 		if n.native != nil {
@@ -648,7 +645,7 @@ func validateSidecar(n *node, decls map[string]*ast.ValueDecl) []diag.Error {
 		path, _ := strconv.Unquote(im.Path.Value)
 		first := strings.Split(path, "/")[0]
 		if strings.Contains(first, ".") {
-			errs = append(errs, diag.Errorf(source.Span{}, "NATIVE IMPORT NOT ALLOWED", "User sidecar %s may import only Go standard-library packages; `%s` is external.", n.nativePath, path))
+			errs = append(errs, diag.Errorf(source.Span{}, "NATIVE IMPORT NOT ALLOWED", "Native sidecar %s may import only Go standard-library packages; `%s` is external.", n.nativePath, path))
 		}
 	}
 	funcs := map[string]*goast.FuncDecl{}
@@ -695,7 +692,7 @@ func validateNativeShape(d *ast.ValueDecl, fn *goast.FuncDecl) []diag.Error {
 			break
 		}
 		if f.Eff != nil && (len(f.Eff.Labels) > 0 || f.Eff.Tail != "") {
-			return []diag.Error{diag.Errorf(d.Native.Sp, "NATIVE ABI", "User native `%s` must be pure.", d.Name)}
+			return []diag.Error{diag.Errorf(d.Native.Sp, "NATIVE ABI", "Native `%s` must be pure.", d.Name)}
 		}
 		if !isUnitType(f.Arg) {
 			params = append(params, f.Arg)

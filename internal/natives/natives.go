@@ -52,7 +52,7 @@ type Spec struct {
 	// CompileTimeSafe permits the compiler's own evaluator to run this
 	// native while expanding a splice. Purity is not enough: `Random`'s
 	// draws are pure in the effect row after `runSeeded` handles them away,
-	// but they advance fangort's process-global PRNG cell, which the
+	// but they advance the bundled sidecar's process-global PRNG cell, which the
 	// compiler shares with the program it is compiling.
 	CompileTimeSafe bool
 
@@ -64,7 +64,7 @@ var Table = func() map[string]Spec {
 	installMeta(t)
 	installScalarInstances(t)
 	// The operator-named Basics values. The registry key is the canonical
-	// symbol, so it wears the operator spelling; the EvalBasics tag stays
+	// symbol, so it wears the operator spelling; the evaluator tag stays
 	// the alphabetic name of the scalar operation it dispatches to.
 	for spelling, op := range map[string]string{
 		"+": "add", "-": "sub", "*": "mul", "/": "fdiv", "++": "append",
@@ -75,77 +75,77 @@ var Table = func() map[string]Spec {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("native Basics.%s expects 2 arguments", op)
 			}
-			return stdlib.EvalBasics(op, args[0], args[1], rt.Equal), nil
+			return evalBasics(op, args[0], args[1], rt.Equal), nil
 		}}
 	}
 	t["Basics.remainderBy"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
-		return stdlib.RemainderBy(args[0].(int64), args[1].(int64)), nil
+		return args[1].(int64) % args[0].(int64), nil
 	}}
 	t["String.length"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
-		return stdlib.StringLength(args[0].(string)), nil
+		return stdlib.Length(args[0].(string)), nil
 	}}
-	t["String.byteLength"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.StringByteLength(args[0].(string)), nil }}
+	t["String.byteLength"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.ByteLength(args[0].(string)), nil }}
 	t["String.byteAt"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
 		return stdlib.ByteAt(args[0].(int64), args[1].(string)), nil
 	}}
 	t["String.slice"] = Spec{Arity: 3, Eval: func(_ *Runtime, args []any) (any, error) {
-		return stdlib.StringSlice(args[0].(int64), args[1].(int64), args[2].(string)), nil
+		return stdlib.Slice(args[0].(int64), args[1].(int64), args[2].(string)), nil
 	}}
 	t["String.byteSlice"] = Spec{Arity: 3, Eval: func(_ *Runtime, args []any) (any, error) {
-		return stdlib.StringByteSlice(args[0].(int64), args[1].(int64), args[2].(string)), nil
+		return stdlib.ByteSlice(args[0].(int64), args[1].(int64), args[2].(string)), nil
 	}}
-	t["String.firstChar"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.StringFirst(args[0].(string)), nil }}
-	t["String.restString"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.StringRest(args[0].(string)), nil }}
-	t["String.fromChar"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.StringFromChar(args[0].(rune)), nil }}
-	t["Json.jsonString"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.JSONString(args[0].(string)), nil }}
-	t["Json.jsonFloat"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.JSONFloat(args[0].(float64)), nil }}
-	t["Json.stringTokenLength"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.JSONStringTokenLength(args[0].(string)), nil }}
-	t["Json.stringTokenValue"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.JSONStringValue(args[0].(string)), nil }}
+	t["String.firstChar"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.FirstChar(args[0].(string)), nil }}
+	t["String.restString"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.RestString(args[0].(string)), nil }}
+	t["String.fromChar"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.FromChar(args[0].(rune)), nil }}
+	t["Json.jsonString"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.JsonString(args[0].(string)), nil }}
+	t["Json.jsonFloat"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.JsonFloat(args[0].(float64)), nil }}
+	t["Json.stringTokenLength"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.StringTokenLength(args[0].(string)), nil }}
+	t["Json.stringTokenValue"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.StringTokenValue(args[0].(string)), nil }}
 	t["IO.lineText"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
-		return stdlib.LineText(args[0].(string)), nil
+		return lineText(args[0].(string)), nil
 	}}
 	t["IO.lineEnding"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
-		return stdlib.LineEnding(args[0].(string)), nil
+		return lineEnding(args[0].(string)), nil
 	}}
 	t["Random.swapSeed"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
-		return stdlib.RandomSwap(args[0].(int64)), nil
+		return stdlib.SwapSeed(args[0].(int64)), nil
 	}}
 	t["Random.nextInt"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
-		return stdlib.RandomInt(args[0].(int64), args[1].(int64)), nil
+		return stdlib.NextInt(args[0].(int64), args[1].(int64)), nil
 	}}
 	t["Random.entropySeed"] = Spec{Arity: 1, Eval: func(_ *Runtime, _ []any) (any, error) {
-		return stdlib.RandomEntropy(), nil
+		return stdlib.EntropySeed(), nil
 	}}
 	t["IO.print"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
 		text, err := rt.Show(args[0])
 		if err != nil {
 			return nil, err
 		}
-		return struct{}{}, stdlib.PrintTo(rt.Writer, text)
+		return struct{}{}, printTo(rt.Writer, text)
 	}}
 	t["IO.hasInput"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
-		return stdlib.HasInputFrom(rt.Reader)
+		return hasInputFrom(rt.Reader)
 	}}
 	t["IO.readRawLine"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
-		return stdlib.ReadRawLineFrom(rt.Reader)
+		return readRawLineFrom(rt.Reader)
 	}}
 	t["IO.write"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		return struct{}{}, stdlib.WriteTo(rt.Writer, args[0].(string))
+		return struct{}{}, writeTo(rt.Writer, args[0].(string))
 	}}
 	t["IO.argCount"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
 		return int64(len(rt.Args)), nil
 	}}
 	t["IO.argAt"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		return stdlib.ArgAt(rt.Args, args[0].(int64))
+		return argAt(rt.Args, args[0].(int64))
 	}}
 	t["IO.pathExists"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		return stdlib.PathExists(runtimePath(rt, args[0].(string)))
+		return pathExists(runtimePath(rt, args[0].(string)))
 	}}
 	t["IO.readFileText"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		return stdlib.ReadFileText(runtimePath(rt, args[0].(string)))
+		return readFileText(runtimePath(rt, args[0].(string)))
 	}}
 	t["IO.writeFile"] = Spec{Arity: 2, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		return struct{}{}, stdlib.WriteFileText(runtimePath(rt, args[0].(string)), args[1].(string))
+		return struct{}{}, writeFileText(runtimePath(rt, args[0].(string)), args[1].(string))
 	}}
 	t["IO.exit"] = Spec{Arity: 1, Effect: true, Eval: func(_ *Runtime, args []any) (any, error) {
 		return nil, &ExitError{Code: int(args[0].(int64))}

@@ -6,9 +6,6 @@ package fangort
 
 import (
 	"bufio"
-	cryptorand "crypto/rand"
-	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -17,64 +14,6 @@ import (
 	"strings"
 	"unicode/utf8"
 )
-
-// JSONString renders a valid JSON string literal. Fango Strings are already
-// valid UTF-8, so encoding/json is used here only for JSON's escaping rules.
-func JSONString(s string) string {
-	b, err := json.Marshal(s)
-	if err != nil {
-		panic(err)
-	}
-	return string(b)
-}
-
-// JSONFloat renders a finite Float as a JSON number. JSON has no NaN or
-// infinity values, so those fail at the boundary instead of producing text
-// that a JSON reader would reject.
-func JSONFloat(v float64) string {
-	b, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
-	}
-	return string(b)
-}
-
-// JSONStringTokenLength returns the Unicode-scalar length of the valid JSON
-// string token at the start of text, or -1 when no such token is present.
-// The scalar length is the unit String.slice consumes in Fango.
-func JSONStringTokenLength(text string) int64 {
-	if len(text) == 0 || text[0] != '"' {
-		return -1
-	}
-	escaped := false
-	for i := 1; i < len(text); i++ {
-		if escaped {
-			escaped = false
-			continue
-		}
-		switch text[i] {
-		case '\\':
-			escaped = true
-		case '"':
-			token := text[:i+1]
-			var value string
-			if json.Unmarshal([]byte(token), &value) != nil {
-				return -1
-			}
-			return int64(utf8.RuneCountInString(token))
-		}
-	}
-	return -1
-}
-
-// JSONStringValue decodes one already-validated JSON string token.
-func JSONStringValue(token string) string {
-	var value string
-	if err := json.Unmarshal([]byte(token), &value); err != nil {
-		panic(err)
-	}
-	return value
-}
 
 // HasInputFrom blocks until input or clean EOF can be distinguished without
 // consuming the first byte.
@@ -157,76 +96,6 @@ type Unit struct{}
 
 var UnitValue Unit
 
-// randomState is the shared PRNG cell behind Random.runSeeded/runSystem.
-// It is deliberately process-global: fango has no concurrency yet, and the
-// stdlib handler wrappers swap/restore it around each handled body so nested
-// uses behave lexically.
-var randomState int64 = 5489
-
-// RandomSwap replaces the PRNG state and returns the previous state.
-func RandomSwap(seed int64) int64 {
-	old := randomState
-	randomState = seed
-	return old
-}
-
-// RandomInt advances a glibc-constant 31-bit linear congruential generator
-// and returns a draw in [lo, hi], swapping reversed bounds. Distribution is
-// modulo-biased and non-cryptographic, and the generator has 2^31 states, so
-// a span wider than 2^31 only reaches lo + [0, 2^31). Span arithmetic is
-// unsigned so any Int bounds stay total.
-func RandomInt(lo, hi int64) int64 {
-	if hi < lo {
-		lo, hi = hi, lo
-	}
-	randomState = (1103515245*randomState + 12345) % 2147483648
-	span := uint64(hi) - uint64(lo) + 1
-	if span == 0 { // the full Int range
-		return lo + randomState
-	}
-	return lo + int64(uint64(randomState)%span)
-}
-
-// RandomEntropy returns a nondeterministic seed for Random.runSystem.
-func RandomEntropy(_ Unit) int64 {
-	var b [8]byte
-	if _, err := cryptorand.Read(b[:]); err != nil {
-		panic(err)
-	}
-	return int64(binary.LittleEndian.Uint64(b[:]))
-}
-
-// StringLength returns a String's length in Unicode scalar values.
-func StringLength(s string) int64 { return int64(utf8.RuneCountInString(s)) }
-
-func StringByteLength(s string) int64                   { return int64(len(s)) }
-func StringByteSlice(start, end int64, s string) string { return s[start:end] }
-
-// StringSlice uses clamped half-open Unicode-scalar indices.
-func StringSlice(start, end int64, s string) string {
-	runes := []rune(s)
-	if start < 0 {
-		start = 0
-	}
-	if end < 0 {
-		end = 0
-	}
-	if start > int64(len(runes)) {
-		start = int64(len(runes))
-	}
-	if end > int64(len(runes)) {
-		end = int64(len(runes))
-	}
-	if end <= start {
-		return ""
-	}
-	return string(runes[start:end])
-}
-
-func StringFirst(s string) rune    { r, _ := utf8.DecodeRuneInString(s); return r }
-func StringRest(s string) string   { _, n := utf8.DecodeRuneInString(s); return s[n:] }
-func StringFromChar(r rune) string { return string(r) }
-
 func RequireValidString(name, s string) string {
 	if !utf8.ValidString(s) {
 		panic("native " + name + " returned invalid UTF-8")
@@ -239,16 +108,6 @@ func RequireValidChar(name string, r rune) rune {
 		panic("native " + name + " returned invalid Char")
 	}
 	return r
-}
-
-// ByteAt returns the byte value at a 0-based index, or -1 when the index is
-// out of range. The in-band sentinel lets pure fango code probe positions
-// without a separate bounds check crossing the native boundary.
-func ByteAt(i int64, s string) int64 {
-	if i < 0 || i >= int64(len(s)) {
-		return -1
-	}
-	return int64(s[i])
 }
 
 // ShowInt renders an Int exactly as the surface language shows it.

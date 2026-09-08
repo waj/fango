@@ -8,31 +8,31 @@ type Uncons = { first : Char, rest : String }
 
 -- length counts Unicode scalar values.
 length : String -> Int
-length = native "fangort.StringLength($1)"
+length = native
 
 byteLength : String -> Int
-byteLength = native "fangort.StringByteLength($1)"
+byteLength = native
 
 -- byteAt is private: the byte at a 0-based index, or -1 out of range.
 byteAt : Int -> String -> Int
-byteAt = native "fangort.ByteAt($1, $2)"
+byteAt = native
 
 -- byteSlice is private and uses validated half-open byte indices.
 byteSlice : Int -> Int -> String -> String
-byteSlice = native "fangort.StringByteSlice($1, $2, $3)"
+byteSlice = native
 
 -- slice uses clamped half-open Unicode-scalar indices.
 slice : Int -> Int -> String -> String
-slice = native "fangort.StringSlice($1, $2, $3)"
+slice = native
 
 firstChar : String -> Char
-firstChar = native "fangort.StringFirst($1)"
+firstChar = native
 
 restString : String -> String
-restString = native "fangort.StringRest($1)"
+restString = native
 
 fromChar : Char -> String
-fromChar = native "fangort.StringFromChar($1)"
+fromChar = native
 
 uncons : String -> Maybe Uncons
 uncons text =

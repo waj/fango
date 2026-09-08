@@ -3,22 +3,22 @@ module Random exposing (Random(..), int, runSeeded, runSystem)
 effect Random
     int : Int -> Int -> Int
 
--- The private natives share one PRNG cell in the runtime; the handler
+-- The private natives share one PRNG cell in this module's sidecar; the handler
 -- wrappers below swap and restore it so nested uses behave lexically.
 
 swapSeed : Int -> Int
-swapSeed = native "fangort.RandomSwap($1)"
+swapSeed = native
 
 nextInt : Int -> Int -> Int
-nextInt = native "fangort.RandomInt($1, $2)"
+nextInt = native
 
 entropySeed : () -> Int
-entropySeed = native "fangort.RandomEntropy($1)"
+entropySeed = native
 
 -- runSeeded answers every `int lo hi` draw from a deterministic generator
 -- started at seed: the same seed always produces the same draws. Under the
 -- current tail-resumptive restriction a handler cannot carry state of its
--- own across resumes, so the state lives in the runtime cell the natives
+-- own across resumes, so the state lives in the sidecar cell the natives
 -- advance.
 runSeeded : Int -> (() ->{Random | e} a) ->{e} a
 runSeeded seed action =

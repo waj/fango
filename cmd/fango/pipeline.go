@@ -97,9 +97,6 @@ func emitProjectManifest(entry string, stderr io.Writer) ([]codegen.File, []modu
 		return nil, nil, false
 	}
 	for _, native := range nativeSources {
-		if native.Bundled {
-			continue // bundled templates inline; their sidecars feed the compiler registry
-		}
 		data := native.Content
 		if formatted, err := format.Source(data); err == nil {
 			data = formatted

@@ -235,7 +235,7 @@ func TestTodoExampleFailures(t *testing.T) {
 }
 
 // The Core interpreter runs fango programs inside this process, against the
-// same fangort globals a compiled program owns outright — the PRNG cell
+// same bundled-native globals a compiled program owns outright — the PRNG cell
 // behind Random above all, which is process-global by design because one
 // compiled program owns one process. A test binary hosting many programs
 // breaks that assumption, so interpreter legs take turns. The compiled leg,
@@ -413,6 +413,29 @@ func TestProjectEmitDeterministicAndFormatted(t *testing.T) {
 	}
 }
 
+func TestProjectMaterializesBundledNativeSidecars(t *testing.T) {
+	jsonPath := filepath.Join("..", "..", "testdata", "run", "json_encode.fango")
+	files := emittedProject(t, jsonPath)
+	again := emittedProject(t, jsonPath)
+	for _, path := range []string{"native/Json/native.go", "native/String/native.go"} {
+		src := generatedFile(t, files, path)
+		if !bytes.HasPrefix(src, []byte("package native\n")) {
+			t.Errorf("%s was not materialized as package native:\n%s", path, src)
+		}
+		if !bytes.Equal(src, generatedFile(t, again, path)) {
+			t.Errorf("%s changed between identical emissions", path)
+		}
+		if formatted, err := format.Source(src); err != nil || !bytes.Equal(formatted, src) {
+			t.Errorf("%s is not gofmt-idempotent: %v", path, err)
+		}
+	}
+
+	files = emittedProject(t, filepath.Join("..", "..", "testdata", "run", "stdlib_random.fango"))
+	if src := generatedFile(t, files, "native/Random/native.go"); !bytes.Contains(src, []byte("func SwapSeed")) {
+		t.Errorf("Random sidecar did not contain its implementation:\n%s", src)
+	}
+}
+
 func TestCheckpoint2GeneratedGoHasNoContinuationRuntime(t *testing.T) {
 	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "run"))
 	for _, path := range files {
@@ -421,6 +444,11 @@ func TestCheckpoint2GeneratedGoHasNoContinuationRuntime(t *testing.T) {
 		}
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			for _, generated := range emittedProject(t, path) {
+				// Native sidecars are library-authored Go, not compiler-emitted
+				// control flow; panics are explicitly allowed to cross their ABI.
+				if strings.HasPrefix(generated.Path, "native/") {
+					continue
+				}
 				file, err := goparser.ParseFile(gotoken.NewFileSet(), generated.Path, generated.Data, 0)
 				if err != nil {
 					t.Fatal(err)
