@@ -1,6 +1,7 @@
-module IO exposing (IO, Line(..), print, readLine, write)
+module IO exposing (IO, Line(..), args, exit, print, readFile, readLine, write, writeFile)
 
 import Basics
+import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 
 type Line = { text : String, ending : String } deriving (Eq, Show)
@@ -9,6 +10,12 @@ effect IO
     hasInput : () -> Bool = native "fangort.HasInputUnit($1)"
     readRawLine : () -> String = native "fangort.ReadRawLineUnit($1)"
     write : String -> () = native "fangort.WriteString($1)"
+    argCount : () -> Int = native "fangort.ArgCountUnit($1)"
+    argAt : Int -> String = native "fangort.ArgAt($1)"
+    pathExists : String -> Bool = native "fangort.PathExists($1)"
+    readFileText : String -> String = native "fangort.ReadFileText($1)"
+    writeFile : String -> String -> () = native "fangort.WriteFileText($1, $2)"
+    exit : Int -> () = native "fangort.Exit($1)"
 
 lineText : String -> String
 lineText = native "fangort.LineText($1)"
@@ -26,3 +33,16 @@ readLine() =
 
 print : Show a => a ->{IO} ()
 print value = write (show value ++ "\n")
+
+argsFrom : Int -> Int ->{IO} List String
+argsFrom index count =
+    if index >= count then
+        Nil
+    else
+        Cons (argAt index) (argsFrom (index + 1) count)
+
+args : () ->{IO} List String
+args() = argsFrom 0 (argCount())
+
+readFile : String ->{IO} Maybe String
+readFile path = if pathExists path then Just (readFileText path) else Nothing

@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
@@ -17,6 +18,8 @@ import (
 type Runtime struct {
 	Reader *bufio.Reader
 	Writer io.Writer
+	Args   []string
+	Dir    string
 	Equal  func(any, any) bool
 	Show   func(any) (string, error)
 
@@ -25,6 +28,20 @@ type Runtime struct {
 	// need their arguments as trees, and the template table lives with the
 	// checker (doc/design.md, "Compile-time metaprogramming").
 	Expand func(*meta.Code) ast.Expr
+}
+
+// ExitError is how the interpreter represents IO.exit without terminating
+// the compiler or test process that hosts it. A compiled program calls
+// os.Exit through fangort and therefore has the same observable status.
+type ExitError struct{ Code int }
+
+func (e *ExitError) Error() string { return fmt.Sprintf("program exited with status %d", e.Code) }
+
+func runtimePath(rt *Runtime, path string) string {
+	if filepath.IsAbs(path) || rt.Dir == "" {
+		return path
+	}
+	return filepath.Join(rt.Dir, path)
 }
 
 type Spec struct {
@@ -80,6 +97,10 @@ var Table = func() map[string]Spec {
 	t["String.firstChar"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.StringFirst(args[0].(string)), nil }}
 	t["String.restString"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.StringRest(args[0].(string)), nil }}
 	t["String.fromChar"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.StringFromChar(args[0].(rune)), nil }}
+	t["Json.jsonString"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.JSONString(args[0].(string)), nil }}
+	t["Json.jsonFloat"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.JSONFloat(args[0].(float64)), nil }}
+	t["Json.stringTokenLength"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.JSONStringTokenLength(args[0].(string)), nil }}
+	t["Json.stringTokenValue"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.JSONStringValue(args[0].(string)), nil }}
 	t["IO.lineText"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return stdlib.LineText(args[0].(string)), nil
 	}}
@@ -110,6 +131,24 @@ var Table = func() map[string]Spec {
 	}}
 	t["IO.write"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
 		return struct{}{}, stdlib.WriteTo(rt.Writer, args[0].(string))
+	}}
+	t["IO.argCount"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
+		return int64(len(rt.Args)), nil
+	}}
+	t["IO.argAt"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
+		return stdlib.ArgAt(rt.Args, args[0].(int64))
+	}}
+	t["IO.pathExists"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
+		return stdlib.PathExists(runtimePath(rt, args[0].(string)))
+	}}
+	t["IO.readFileText"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
+		return stdlib.ReadFileText(runtimePath(rt, args[0].(string)))
+	}}
+	t["IO.writeFile"] = Spec{Arity: 2, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
+		return struct{}{}, stdlib.WriteFileText(runtimePath(rt, args[0].(string)), args[1].(string))
+	}}
+	t["IO.exit"] = Spec{Arity: 1, Effect: true, Eval: func(_ *Runtime, args []any) (any, error) {
+		return nil, &ExitError{Code: int(args[0].(int64))}
 	}}
 	// Bundled natives are compile-time-safe by default: they are pure
 	// functions of their arguments. Random is the exclusion — its draws read

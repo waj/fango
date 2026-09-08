@@ -51,7 +51,7 @@ func elabPoly(t *testing.T, src string) *core.Prog {
 	if lintErrs := core.Lint(prog, b); len(lintErrs) > 0 {
 		t.Fatalf("core lint: %v\n%s", lintErrs, core.Dump(prog))
 	}
-	return fixtureProgram(prog)
+	return fixtureProgram(prog, ck.PreludeOwners)
 }
 
 func elabPolyErr(t *testing.T, src string) string {

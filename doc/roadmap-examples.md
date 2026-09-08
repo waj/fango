@@ -33,9 +33,10 @@ Forces the core stdlib: strings, `Maybe`, list combinators.
 
 ## Tier 2 — data structures, files, and OS surface
 
-- [ ] **Todo CLI with persistence** — `todo add "buy milk"`, `todo list`,
-  `todo done 2`. Forces command-line arguments, file read/write, exit codes,
-  a serialize/parse round trip, and records for the todo item.
+- [x] **Todo CLI with persistence** — `todo add "buy milk"`, `todo list`,
+  `todo done 2`. Forced command-line arguments, current-directory file
+  read/write, exit codes, records for todo items, and a bundled `Json.Encode`
+  deriver. Encoding is derived; the exact-schema decoder is hand-written.
 - [ ] **CSV expense report** — read a CSV, aggregate by category, print an
   aligned table with totals. Forces file IO, `Dict` insert/update/fold, and
   number formatting (`String.padLeft`, float precision).

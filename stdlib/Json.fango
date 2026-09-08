@@ -1,0 +1,125 @@
+module Json exposing (Encode(..), StringToken(..), parseString)
+
+import Basics
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Meta exposing (Bound(..), BoundField(..), Code, Items(..), Lift(..), Shape(..), TypeInfo(..))
+import String
+
+{- Compact, deterministic JSON encoding.
+
+Records encode as objects in field declaration order. Ordinary union types
+encode uniformly as {"$tag": "Ctor", "$fields": [...]}; the dollar-prefixed
+keys cannot collide with Fango record fields. List and Maybe have the familiar
+JSON array/null representations through their handwritten instances. -}
+
+class Encode a
+    encode : a -> String
+
+jsonString : String -> String
+jsonString = native "fangort.JSONString($1)"
+
+jsonFloat : Float -> String
+jsonFloat = native "fangort.JSONFloat($1)"
+
+instance Encode Int
+    encode value = show value
+
+instance Encode Float
+    encode value = jsonFloat value
+
+instance Encode String
+    encode value = jsonString value
+
+instance Encode Char
+    encode value = jsonString (String.fromChar value)
+
+instance Encode Bool
+    encode value = if value then "true" else "false"
+
+instance Encode ()
+    encode _ = "null"
+
+encodeListItems : Encode a => List a -> String
+encodeListItems values =
+    case values of
+        Nil -> ""
+        Cons value Nil -> encode value
+        Cons value rest -> encode value ++ "," ++ encodeListItems rest
+
+instance Encode a => Encode (List a)
+    encode values = "[" ++ encodeListItems values ++ "]"
+
+instance Encode a => Encode (Maybe a)
+    encode value =
+        case value of
+            Nothing -> "null"
+            Just present -> encode present
+
+appendCode : Code -> Code -> Code
+appendCode lhs rhs = quote ($(lhs) ++ $(rhs))
+
+encodeCode : Code -> Code
+encodeCode value = quote (encode $(value))
+
+recordField : Code -> BoundField -> Code
+recordField sofar field =
+    separator = if field.index == 0 then "" else ","
+    appendCode sofar
+        (appendCode
+            (lift (separator ++ jsonString field.name ++ ":"))
+            (encodeCode field.value))
+
+recordBody : Bound -> Code
+recordBody bound =
+    appendCode
+        (Meta.foldItems recordField (lift "{") bound.fields)
+        (lift "}")
+
+unionField : Code -> BoundField -> Code
+unionField sofar field =
+    separator = if field.index == 0 then "" else ","
+    appendCode sofar (appendCode (lift separator) (encodeCode field.value))
+
+unionBody : Bound -> Code
+unionBody bound =
+    appendCode
+        (appendCode
+            (appendCode
+                (lift ("{\"$tag\":" ++ jsonString bound.ctor.name ++ ",\"$fields\":["))
+                (Meta.foldItems unionField (lift "") bound.fields))
+            (lift "]}"))
+        (lift "")
+
+derivedBody : TypeInfo -> Bound -> Code
+derivedBody subject bound =
+    case subject.shape of
+        Record _ -> recordBody bound
+        Union _ -> unionBody bound
+
+deriver Encode
+    encode subject valueCode =
+        Meta.match subject valueCode (derivedBody subject)
+
+-- A deliberately small decoding aid, not a Decode class. Todo owns its
+-- schema parser by hand; this helper only applies JSON's string escape rules.
+
+type StringToken = { value : String, rest : String }
+
+stringTokenLength : String -> Int
+stringTokenLength = native "fangort.JSONStringTokenLength($1)"
+
+stringTokenValue : String -> String
+stringTokenValue = native "fangort.JSONStringValue($1)"
+
+parseString : String -> Maybe StringToken
+parseString text =
+    size = stringTokenLength text
+    if size < 0 then
+        Nothing
+    else
+        token = String.slice 0 size text
+        Just (StringToken
+            { value = stringTokenValue token
+            , rest = String.slice size (String.length text) text
+            })

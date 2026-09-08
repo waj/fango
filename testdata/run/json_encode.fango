@@ -1,0 +1,12 @@
+import Json exposing (Encode(..))
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+
+type Colour = Red | RGB Int Int Int deriving (Encode)
+
+type Person = { name : String, active : Bool, favourite : Maybe Colour } deriving (Encode)
+
+main =
+    encode (Person { name = "A \"friend\"", active = True, favourite = Just (RGB 3 4 5) })
+        ++ "\n"
+        ++ encode (Cons Red (Cons (RGB 1 2 3) Nil))

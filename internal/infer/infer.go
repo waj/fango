@@ -106,6 +106,7 @@ type Checker struct {
 	ExprSchemes       map[ast.Expr]types.Scheme
 	Desugared         map[ast.Expr]ast.Expr
 	PreludeInfos      []DeclInfo
+	PreludeOwners     map[string]bool
 	Aliases           map[string]string
 	Sup               *types.Supply
 	B                 *types.Builtins

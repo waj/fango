@@ -1,250 +1,108 @@
-# Roadmap: compile-time metaprogramming
+# Roadmap: declaration metaprogramming
 
-This is a [roadmap](roadmap.md) proposal under iteration. The compile-time
-stage, type reflection, and derivers are implemented and documented in
-[the design](design.md, "Compile-time metaprogramming") and
-[the reference](reference.md, "Compile-time metaprogramming"). What remains
-here is declaration splices and the consumer that forces them.
+Expression quotes, expression splices, type reflection, and open `deriving`
+are implemented and documented in [the design](design.md) and
+[the reference](reference.md). Declaration generation is deferred until an
+example genuinely needs it; the Todo CLI did not, because deriving `Encode`
+only generates an instance.
 
-## Problem
+The future increment should preserve a property the module system has today:
+a reader can determine a module's public names without executing compile-time
+code. It should also permit generators whose useful result is inherently a
+declaration group, including generated types.
 
-`deriving` is open and reflection exists, so a library can generate one
-*instance* per type. It still cannot generate a *definition*. The Tier-2 Todo
-CLI in [roadmap-examples.md](roadmap-examples.md) wants a serialize/parse round
-trip, which needs a bundled `Json` module with a derivable `Encode` — that much
-is expressible today — but a codec built around named accessors, or any
-generator whose output is a top-level name rather than an instance method, is
-not.
+## Proposed surface
 
-## What P1 and P2 settled
+A declaration quote is `quote` followed by an indented declaration block. The
+block shape distinguishes it from the existing `quote atom`: the former
+produces `Meta.Decls`, while the latter continues to produce `Meta.Code`.
 
-Five design choices changed while reflection and derivers were built, and each
-one is worth recording because declaration splices inherit it.
-
-**Natives never construct a fango value.** `internal/natives` sits below the
-interpreter in the package graph, so it cannot build the `CtorVal` a list or
-record would need. The reflection primitives therefore answer counts, indices,
-names, and opaque handles, and `Meta`'s own fango code assembles the records a
-deriver walks. This turned out to be a better boundary than the alternative —
-every structural decision is visible in `stdlib/Meta.fango` rather than in Go.
-
-**`Meta` carries its own list.** `List` derives its instances, so it depends on
-the module that supplies the derivers, which depends on `Meta`. `Meta.Items` is
-the small list that avoids that cycle. `Meta` imports only `Basics`.
-
-**The standard derivers are a bundled module, not `Basics`.** The original
-plan put `Eq`/`Show`/`Ord` derivers in `Basics`, which every module already
-loads. That closes the same cycle from the other side: `Basics` would import
-`Meta`, and `Meta` needs arithmetic. `Derive` sits above both and below
-everything else, and a file that writes `deriving` gets a loader edge to it —
-the same mechanism that gives a file that writes `quote` an edge to `Meta`.
-
-**Instance contexts are inferred by probing.** Adopting residual predicates
-inside `InstanceDecl` was invasive: the instance's symbol embeds a hash of its
-context, and the instance is installed before its methods are checked. A probe
-pass under `(*Checker).Checkpoint` — check with no context, collect what stays
-residual, roll back, then declare exactly those — needed one new flag on the
-checker and no change to instance identity.
-
-**Binder names come from the scrutinee.** A generated `case` needs binders that
-do not collide when two traversals nest, and fango forbids shadowing. Deriving
-the name from a hash of the scrutinee's own rendering is pure, deterministic,
-and needs no counter, which would have made expansion order-dependent and put
-the determinism gate at risk.
-
-## Declaration splices
-
-An expression splice generates an expression. A declaration splice generates a
-*group* of definitions. **There is no `splice` keyword**: `$(...)` stays the
-only escape, and a declaration splice is a `$(...)` in the body position of a
-top-level definition. Here modularity needs one real rule, because generated
-top-level names are the only thing that can escape a splice:
-
-> **Every name a module defines appears literally in that module's source.**
-
-So declaration quotes have *anonymous* top-level binders, and the definition
-site names them positionally with an arity check. A single generated definition
-needs no new syntax at all; a group extends the binder to a comma-separated
-list:
+Names introduced by a declaration quote are explicit `Meta.Name` values. A
+generator creates public names from strings and splices them wherever a name
+is required:
 
 ```fango
-getX = $(Meta.accessor (typeOf Point) "x")          -- no new form
-getX, getY = $(Meta.accessors (typeOf Point))       -- one new form
-```
-
-That is one new declaration shape — a comma-separated binder list, legal only
-when the body is a splice — and zero new keywords, and it puts generated names
-exactly where every other fango definition puts them: to the left of `=`. The
-invariant above becomes visually obvious rather than a rule to remember.
-
-Generated declarations then behave exactly like handwritten ones from that
-point in the file: the same source-order scoping, the same no-shadowing rule,
-and exporting one still requires listing it in `module ... exposing (...)`,
-which `buildInterface` already validates. `grep` and a future LSP stay honest.
-
-Variadic generation — one definition per field, count unknown — is
-deliberately *not* served by this form. That is what derivers are for, and the
-split is the point: **variadic generation goes through instances; named
-generation goes through names the author wrote.**
-
-A declaration splice may generate `ValueDecl`, `TypeDecl`, `ClassDecl`, and
-`InstanceDecl` only. `module`, `import`, a fixity declaration, and `native`
-are rejected: those four are precisely the declarations that change graph or
-global structure. A generated fixity is rejected for the same reason as a
-generated import — the operator table is built before expansion, and a
-fixity changes how already-parsed text groups. `native` is bundled-only
-besides.
-
-A declaration quote is a `quote` followed by an indented block, delimited by
-the offside rule like every other fango construct:
-
-```fango
-accessors : Meta.TypeInfo -> Meta.Decls
-accessors info =
+makeChoice : String -> Meta.Decls
+makeChoice stem =
+    ty = Meta.publicName stem
+    yes = Meta.publicName (stem ++ "Yes")
+    no = Meta.publicName (stem ++ "No")
     quote
-        _ : $(Meta.typeCode info) -> Int
-        _ r = $(Meta.projection info "x")
+        type $(ty) = $(yes) | $(no)
+
+$(makeChoice "Choice")
+    exposing (Choice, ChoiceYes, ChoiceNo)
 ```
 
-Its top-level binders are anonymous, per the rule above. The exact spelling of
-anonymous binders and of type holes inside a declaration quote is unsettled;
-see the open questions.
+The `exposing` manifest belongs to the standalone declaration splice. It
+states, literally at the splice site, every public name the generated group
+may introduce. Expansion fails if the public names produced by the group and
+the manifest differ. Generated private names use compiler-fresh `Meta.Name`
+values and do not appear in the manifest. This gives generators stable handles
+for referring to their own types, constructors, and values without making
+their identity depend on text substitution.
 
-## Modularity threat model
+The name-building operations are `Meta.publicName : String -> Name` for a
+manifest-visible name and `Meta.freshName : String -> Name` for a hygienic
+private name; the string passed to `freshName` is only a diagnostic hint.
 
-The threats P0, P1, and P2 answered are recorded in the design. The one the
-remaining phase must answer:
+`$(...)` is context-sensitive inside a declaration quote:
 
-| Threat | Answer |
-| --- | --- |
-| A reader cannot tell what names a module defines | Declaration splices bind names the author wrote, to the left of `=`. Exporting still requires an `exposing` entry. |
+- in expression position it accepts `Meta.Code`, as it does today;
+- in a declaration-name position it accepts `Meta.Name`;
+- in type position it accepts `Meta.TypeRepr`;
+- in declaration position it accepts `Meta.Decls`, allowing groups to be
+  composed.
 
-## Diagnostics
+A standalone `$(...)` at declaration indentation accepts `Meta.Decls`.
+Expression splices remain unchanged, so code such as
+`getX = $(generateAccessor "x")` continues to generate the right-hand-side
+expression and does not introduce a declaration.
 
-`STAGE ERROR`, `COMPILE-TIME EFFECT`, `COMPILE-TIME NATIVE`,
-`COMPILE-TIME LIMIT`, `COMPILE-TIME FAILURE`, `CANNOT DERIVE`,
-`DUPLICATE DERIVER`, and `REFLECTION ERROR` exist. Still to add:
+The first increment should allow value, type, class, and instance
+declarations. In particular, generated `TypeDecl` is part of the feature, not
+a later extension. Module headers, imports, fixity declarations, effects, and
+native declarations remain source structure and cannot be generated.
 
-- `SPLICE ARITY` — a declaration splice produced a different number of
-  definitions than the binder list names.
-- `INVALID SPLICE DECLARATION` — generated a `module`, `import`, fixity, or
-  `native` declaration.
+## Expansion model
 
-## Phases
+Declaration splices require Haskell-style declaration groups: expand a group,
+install all of its names and nominal identities together, then check later
+source against the expanded group. A group may refer to names generated within
+that same group through its `Meta.Name` handles. It may only use earlier
+ordinary declarations or earlier expanded groups, retaining fango's existing
+source-order stage discipline.
 
-**P0 — quote and splice plumbing. Done.**
+Expansion must happen before resolving or inferring declarations that follow
+the splice. Generated declarations then pass through the ordinary resolver,
+inference, elaboration, and Core linter; both execution backends continue to
+receive the same Core.
 
-**P1 — reflection. Done.** `typeOf`, `TypeRepr`, `TypeInfo`, `Meta.info` and
-its visibility rule, and `Meta.lift` as a real `class Lift`. The
-`testdata/modules/reflection/` fixture pins `Opaque` for a type exposed as
-`Type` and `Visible` for the same type exposed as `Type(..)`.
+The existing visibility rule still applies after expansion. Public generated
+names must be listed by the splice's manifest and may then be listed in the
+module header. Private generated names remain inaccessible outside the module.
 
-**P2 — derivers. Done.** `deriver` declarations, `Meta.match` and
-`Meta.construct`, and use-driven instance contexts. `Eq` and `Show` moved off
-`internal/infer/derive.go` onto fango-level derivers in the bundled `Derive`
-module with the `classes_derive` goldens unchanged, and `Ord` joined them.
+## Required diagnostics
 
-**P3 — declaration splices.** `Meta.Decls`, declaration quotes, the
-comma-separated binder list and its arity check. First fixture: a
-`testdata/parse/` golden for the new declaration shape, plus a `SPLICE ARITY`
-case. P3 adds surface syntax and therefore carries the
-`editors/vscode/syntaxes/fango.tmLanguage.json` obligation in the same change,
-per the repository instructions.
+- `SPLICE EXPORT MISMATCH` — the generated public names do not exactly match
+  the standalone splice's `exposing` manifest.
+- `INVALID SPLICE DECLARATION` — a generated group contains a module header,
+  import, fixity, effect, or native declaration.
+- Existing staging, compile-time effect/native/limit, duplicate-name, and
+  ordinary type diagnostics apply unchanged.
 
-**P4 — the driving consumer.** A bundled `Json` module with a derivable
-`Encode`, used by the Tier-2 Todo CLI in `doc/roadmap-examples.md`. `Decode` is
-deliberately deferred: it needs a failure story, which means `Result` or the
-gated aborting handlers, so the Todo CLI's parse half stays hand-written for
-now and becomes a second forcing case for `Result`.
+## Delivery obligations
 
-## Alternatives considered
+This increment changes declaration syntax, so it must update the TextMate
+grammar and tokenize representative generated-declaration fixtures with
+`vscode-textmate`. Parser and diagnostic goldens must cover declaration and
+type/name holes, generated types whose constructors refer to the generated
+type, declaration-group scoping, manifest mismatches, forbidden declaration
+kinds, hygiene, rollback, and deterministic emission. The full Core linter,
+interpreter/compiler differential suite, functional tests, and `go vet` remain
+release gates.
 
-**A fango-level AST ADT, Template Haskell style.** A `Meta` module mirroring
-`internal/ast` as ordinary constructors is more flexible and is what TH does.
-Rejected: it is a second copy of the AST to keep in lockstep with the first,
-generated code can be structurally ill-formed, and name construction
-reintroduces exactly the hygiene problem that compiler-owned binders remove.
-The opaque-`Code` surface can be widened later if a real deriver cannot be
-written without it.
-
-**Typed quotes, `Code a`.** Indexing `Code` by the type it produces would catch
-generation errors where the deriver is compiled rather than where it is
-spliced. Rejected for now: a deriver walks a `TypeInfo` that is a runtime value
-of the compile-time stage, so the index has nothing static to be indexed by
-without a type-level representation of types — dependent-ish machinery on top
-of one-parameter classes with no higher kinds. It buys better errors at the
-cost of a type-system extension larger than the feature.
-
-**Bracketed quotes, `[| ... |]`.** fango has neither `[` nor `]` tokens, so
-this was available. Rejected because the parser derives structure from token
-columns rather than from closing delimiters: every construct is introduced by a
-word and delimited by the offside rule, so a multi-line bracketed quote would
-require the layout algorithm to exempt a closing `|]`. Declaration quotes make
-that mandatory rather than optional — exactly where TH needs a second bracket
-flavor, `[d| ... |]`, while a keyword-introduced block needs no delimiter at
-all.
-
-**Standalone deriving in another module.** `deriving Encode for Point` written
-away from `Point`'s declaration would be no worse than the orphan instances
-fango already permits, provided the schema is visible at that site — which
-`Meta.info` already decides. Deferred rather than rejected; it adds no new
-mechanism now that P1 and P2 exist.
-
-## Open questions
-
-- The spelling of anonymous binders and type holes inside declaration quotes.
-  `_` reads well for the binder but collides with the wildcard pattern; type
-  holes need a way to splice a `TypeRepr` into type position, which the
-  expression-only `$(...)` does not currently cover.
-- Whether `typeOf` can avoid being a keyword. It takes a type rather than a
-  value, so it cannot be an ordinary function, but a `quote`-based spelling may
-  exist.
-- Whether declaration splices may generate `TypeDecl` in the first increment.
-  Generating a new nominal identity from a splice is powerful and probably
-  fine, but it interacts with `checkRegularity` and with generation-stable
-  `Unique` allocation.
-- Whether the compile-time-only-type rule should also bar such definitions from
-  a module's `exposing` list. It is about emission only today, which is what
-  lets `Meta` expose `Code`; the interaction with orphan derivers is
-  unexamined.
-- `Meta.fail` is the deriver's only error channel and reports
-  `COMPILE-TIME FAILURE` at the splice site. It is a stopgap for the absence of
-  `Result`; revisit once `Result` lands.
-- The compile-time evaluator re-elaborates the prefix on demand rather than
-  reusing the main pass's Core. Re-elaboration is deterministic and therefore
-  safe, and a program with no splices pays nothing, but every program now
-  derives something, so the prefix through `Derive` is elaborated twice in
-  essentially every build. Reuse requires interleaving elaboration with
-  inference, which is a larger change to `cmd/fango/pipeline.go`; measure
-  before doing it.
-- A stdlib parameter name that collides with an entry file's *effect
-  operation* name is rejected as shadowing, because effect operations are
-  declared before any module's values while ordinary values are declared in
-  source order. The inference-level shadowing check is module-blind; the
-  resolver's is not. Deciding whether the inference check should consult
-  module visibility, or whether it is redundant in batch mode, is unfinished.
-
-## Verification
-
-The existing gates cover this, which is a deliberate property of generating
-surface AST rather than Core:
-
-- Generated instances go through `ck.InstanceDecl`, ordinary inference, and
-  ordinary elaboration, so `core.Lint` remains the safety net for every
-  expansion.
-- Because expansion happens during inference — before Core — both backends see
-  identical generated code, so the interpreter/compiler differential suite
-  applies unchanged and is the referee for derived behavior.
-- `TestEmitDeterministicAndFormatted` in `cmd/fango/e2e_test.go` covers the
-  determinism claim: pure, bounded, native-restricted compile-time evaluation
-  must keep generated Go byte-identical.
-- The REPL keeps one `Checker` and one `eval.Env`, so derivers and splices work
-  at the prompt with no extra mechanism; `testdata/repl/staging.in` covers
-  quotes, splices, a deriver definition followed by a `deriving` use, and
-  rollback after a failed expansion.
-- Diagnostic fixtures pin each new title.
-- Compile-latency benchmarks are the honest risk here: compile-time evaluation
-  moves work into the compiler, and `Meta` plus `Derive` are now in every
-  program's graph. The cold and warm latency cases should be read before and
-  after P3, with the caveat already recorded in the roadmap that neither
-  performance gate is reproducible enough to run unattended.
+`Meta.fail` remains the generator's only structured failure escape until the
+language gains `Result` or aborting handlers. Prefix re-elaboration is still a
+compile-latency risk to measure when a forcing consumer makes this milestone
+worth implementing.

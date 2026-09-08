@@ -8,6 +8,7 @@ import (
 	"bufio"
 	cryptorand "crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -16,6 +17,64 @@ import (
 	"strings"
 	"unicode/utf8"
 )
+
+// JSONString renders a valid JSON string literal. Fango Strings are already
+// valid UTF-8, so encoding/json is used here only for JSON's escaping rules.
+func JSONString(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+// JSONFloat renders a finite Float as a JSON number. JSON has no NaN or
+// infinity values, so those fail at the boundary instead of producing text
+// that a JSON reader would reject.
+func JSONFloat(v float64) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+// JSONStringTokenLength returns the Unicode-scalar length of the valid JSON
+// string token at the start of text, or -1 when no such token is present.
+// The scalar length is the unit String.slice consumes in Fango.
+func JSONStringTokenLength(text string) int64 {
+	if len(text) == 0 || text[0] != '"' {
+		return -1
+	}
+	escaped := false
+	for i := 1; i < len(text); i++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch text[i] {
+		case '\\':
+			escaped = true
+		case '"':
+			token := text[:i+1]
+			var value string
+			if json.Unmarshal([]byte(token), &value) != nil {
+				return -1
+			}
+			return int64(utf8.RuneCountInString(token))
+		}
+	}
+	return -1
+}
+
+// JSONStringValue decodes one already-validated JSON string token.
+func JSONStringValue(token string) string {
+	var value string
+	if err := json.Unmarshal([]byte(token), &value); err != nil {
+		panic(err)
+	}
+	return value
+}
 
 // HasInputFrom blocks until input or clean EOF can be distinguished without
 // consuming the first byte.
@@ -314,4 +373,48 @@ func WriteString(v string) {
 	if err := WriteStringTo(os.Stdout, v); err != nil {
 		panic(err)
 	}
+}
+
+// ProgramArgs exposes arguments after argv[0].
+func ProgramArgs() []string { return os.Args[1:] }
+
+func ArgCountUnit(_ Unit) int64 { return int64(len(ProgramArgs())) }
+
+func ArgAt(index int64) string {
+	args := ProgramArgs()
+	if index < 0 || index >= int64(len(args)) {
+		panic(fmt.Sprintf("argument index %d is out of range", index))
+	}
+	return args[index]
+}
+
+func PathExists(path string) bool {
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return false
+	}
+	if err != nil {
+		panic(err)
+	}
+	return true
+}
+
+func ReadFileText(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+	return strings.ToValidUTF8(string(data), "\uFFFD")
+}
+
+func WriteFileText(path, text string) Unit {
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		panic(err)
+	}
+	return UnitValue
+}
+
+func Exit(code int64) Unit {
+	os.Exit(int(code))
+	return UnitValue
 }

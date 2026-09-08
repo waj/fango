@@ -31,14 +31,16 @@ The CLI accepts one `.fango` source file:
 
 ```text
 fango build [-o out] [--emit-go] main.fango
-fango run main.fango
+fango run main.fango [--] [args...]
 fango check main.fango
 fango repl
 fango clean main.fango
 ```
 
 `build` writes a native executable (defaulting to the source basename without
-`.fango`). `run` builds if needed and runs the cached executable. `check` runs
+`.fango`). `run` builds if needed and runs the cached executable, forwarding
+every argument after the source path to the program; an optional `--` is
+removed first. `check` runs
 through parsing, inference, elaboration, and Core validation without generating
 Go. `clean` removes the source file's persistent `.fango/build` artifacts.
 
@@ -198,7 +200,7 @@ inclusive ascending numeric range without constructing a `List`. For example,
 `Int` and `Float`, and has the same finite-bound requirement as `List.range`.
 The callback runs in ascending order and its effects are propagated.
 
-`IO` currently exposes newline-free string output:
+`IO` exposes console IO, process arguments, files, and explicit process exit:
 
 ```fango
 import IO
@@ -211,7 +213,26 @@ main() =
 `IO.write : String ->{IO} ()` writes the string exactly as provided without a
 trailing newline. It is a native operation available only through an `IO`
 import. The names `print : Show a => a ->{IO} ()` and `readLine` come from
-ambient IO. `IO` also exposes the nominal record
+ambient IO. `IO` also exposes:
+
+```fango
+args : () ->{IO} List String
+readFile : String ->{IO} Maybe String
+writeFile : String -> String ->{IO} ()
+exit : Int ->{IO} ()
+```
+
+`args()` returns the program arguments after the source path (and optional
+`--`) when launched with `fango run`, using the ordinary `List` type. Import
+`List exposing (List(..))` to pattern-match its constructors unqualified.
+Relative file paths are resolved from
+the running program's current working directory. `readFile` returns `Nothing`
+when the path does not exist and `Just contents` otherwise; malformed UTF-8
+bytes in a file are replaced with U+FFFD. Other read errors fail the program.
+`writeFile path contents` creates or replaces the file, and `exit status`
+terminates with that status.
+
+`IO` also exposes the nominal record
 `type Line = { text : String, ending : String }`;
 `readLine : () ->{IO} Maybe IO.Line`
 returns `Nothing` at clean end of input and otherwise preserves the line
@@ -241,6 +262,29 @@ type Maybe a = Nothing | Just a deriving (Eq, Ord, Show)
 
 `withDefault : a -> Maybe a -> a` returns the contained value or the
 fallback.
+
+`Json` exposes a derivable encoding class:
+
+```fango
+module Json exposing (Encode(..), StringToken(..), parseString)
+
+class Encode a
+    encode : a -> String
+```
+
+`Encode` has bundled instances for `Int`, `Float`, `String`, `Char`, `Bool`,
+`()`, `List a`, and `Maybe a`. `deriving (Encode)` supports records and union
+types. Records become JSON objects whose keys follow field declaration order.
+Ordinary unions use the uniform representation
+`{"$tag":"Constructor","$fields":[...]}`. Lists are arrays; `Nothing` and
+Unit are `null`; `Just value` uses the value's representation. Output is
+compact and deterministic. Encoding a non-finite `Float` fails because JSON
+has no representation for it.
+
+There is intentionally no `Decode` class yet. `parseString : String -> Maybe
+Json.StringToken` is a small aid for hand-written decoders: it consumes one
+leading JSON string, applies JSON escape rules, and returns its decoded value
+and the unconsumed suffix.
 
 `Meta` exposes the compile-time stage's representations: the abstract `Code`
 type, the reflected `TypeRepr` and its schema records, the `Lift` class, and
@@ -1057,8 +1101,9 @@ input leaves nothing behind: a `deriving` clause whose deriver fails does not
 install its type, and a declaration whose splice fails does not install its
 name.
 
-Declaration splices — generating a whole definition rather than an expression
-— are the next increment (see the roadmap).
+Only expressions can currently be quoted and spliced. Generating a declaration
+group, including a type declaration, remains a future milestone described in
+the roadmap.
 
 ## Entry points
 

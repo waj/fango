@@ -43,7 +43,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 func usage(w io.Writer) {
 	fmt.Fprint(w, `usage:
   fango build [-o out] [--emit-go] main.fango
-  fango run main.fango
+  fango run main.fango [--] [args...]
   fango check main.fango
   fango repl
   fango clean main.fango
@@ -139,7 +139,7 @@ func cmdBuild(args []string, _ io.Writer, stderr io.Writer) int {
 }
 
 func cmdRun(args []string, stderr io.Writer) int {
-	if len(args) != 1 {
+	if len(args) < 1 {
 		usage(stderr)
 		return 2
 	}
@@ -147,7 +147,11 @@ func cmdRun(args []string, stderr io.Writer) int {
 	if !ok {
 		return 1
 	}
-	code, err := build.RunBinary(dir)
+	programArgs := args[1:]
+	if len(programArgs) > 0 && programArgs[0] == "--" {
+		programArgs = programArgs[1:]
+	}
+	code, err := build.RunBinary(dir, programArgs...)
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
 		return 1

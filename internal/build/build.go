@@ -232,8 +232,8 @@ go build said:
 
 // RunBinary executes the compiled program with inherited stdio and returns
 // its exit code.
-func RunBinary(dir string) (int, error) {
-	cmd := exec.Command(BinaryPath(dir))
+func RunBinary(dir string, args ...string) (int, error) {
+	cmd := exec.Command(BinaryPath(dir), args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	err := cmd.Run()
 	if err == nil {

@@ -1,0 +1,166 @@
+-- A small persistent Todo CLI.
+--
+--     todo add "buy milk"
+--     todo list
+--     todo done 2
+--
+-- State is compact JSON in todo.json in the current working directory.
+
+import IO
+import Json exposing (Encode(..))
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import String
+
+type Todo = { text : String, done : Bool } deriving (Encode)
+
+type TodoToken = { todo : Todo, rest : String }
+
+type TodosToken = { todos : List Todo, rest : String }
+
+storagePath : String
+storagePath = "todo.json"
+
+dropPrefix : String -> String -> Maybe String
+dropPrefix prefix text =
+    if String.startsWith prefix text then
+        Just (String.slice (String.length prefix) (String.length text) text)
+    else
+        Nothing
+
+parseTodo : String -> Maybe TodoToken
+parseTodo input =
+    case dropPrefix "{\"text\":" input of
+        Nothing -> Nothing
+        Just afterKey ->
+            case Json.parseString afterKey of
+                Nothing -> Nothing
+                Just (Json.StringToken { value = text, rest = afterText }) ->
+                    case dropPrefix ",\"done\":true}" afterText of
+                        Just rest -> Just (TodoToken { todo = Todo { text = text, done = True }, rest = rest })
+                        Nothing ->
+                            case dropPrefix ",\"done\":false}" afterText of
+                                Just rest -> Just (TodoToken { todo = Todo { text = text, done = False }, rest = rest })
+                                Nothing -> Nothing
+
+parseTodos : String -> Maybe TodosToken
+parseTodos input =
+    case dropPrefix "]" input of
+        Just rest -> Just (TodosToken { todos = Nil, rest = rest })
+        Nothing ->
+            case parseTodo input of
+                Nothing -> Nothing
+                Just (TodoToken { todo = todo, rest = afterTodo }) ->
+                    case dropPrefix "]" afterTodo of
+                        Just rest -> Just (TodosToken { todos = Cons todo Nil, rest = rest })
+                        Nothing ->
+                            case dropPrefix "," afterTodo of
+                                Nothing -> Nothing
+                                Just afterComma ->
+                                    case parseTodos afterComma of
+                                        Nothing -> Nothing
+                                        Just (TodosToken { todos = restTodos, rest = rest }) ->
+                                            Just (TodosToken { todos = Cons todo restTodos, rest = rest })
+
+decodeTodos : String -> Maybe (List Todo)
+decodeTodos input =
+    case dropPrefix "[" input of
+        Nothing -> Nothing
+        Just body ->
+            case parseTodos body of
+                Just (TodosToken { todos = todos, rest = "" }) -> Just todos
+                _ -> Nothing
+
+load : () ->{IO} Maybe (List Todo)
+load() =
+    case IO.readFile storagePath of
+        Nothing -> Just Nil
+        Just text -> decodeTodos text
+
+save : List Todo ->{IO} ()
+save todos = IO.writeFile storagePath (encode todos)
+
+append : List Todo -> Todo -> List Todo
+append todos todo =
+    case todos of
+        Nil -> Cons todo Nil
+        Cons first rest -> Cons first (append rest todo)
+
+count : List a -> Int
+count values =
+    case values of
+        Nil -> 0
+        Cons _ rest -> 1 + count rest
+
+completeAt : Int -> Int -> List Todo -> Maybe (List Todo)
+completeAt wanted index todos =
+    case todos of
+        Nil -> Nothing
+        Cons todo rest ->
+            if wanted == index then
+                Just (Cons (Todo { text = todo.text, done = True }) rest)
+            else
+                case completeAt wanted (index + 1) rest of
+                    Nothing -> Nothing
+                    Just changed -> Just (Cons todo changed)
+
+printTodos : Int -> List Todo ->{IO} ()
+printTodos index todos =
+    case todos of
+        Nil -> ()
+        Cons todo rest ->
+            marker = if todo.done then "[x]" else "[ ]"
+            print (show index ++ " " ++ marker ++ " " ++ todo.text)
+            printTodos (index + 1) rest
+
+storageFailure : () ->{IO} ()
+storageFailure() =
+    print "Invalid todo.json."
+    IO.exit 1
+
+usage : () ->{IO} ()
+usage() =
+    print "Usage: todo add TEXT | todo list | todo done NUMBER"
+    IO.exit 2
+
+addTodo : String ->{IO} ()
+addTodo text =
+    case load() of
+        Nothing -> storageFailure()
+        Just todos ->
+            updated = append todos (Todo { text = text, done = False })
+            save updated
+            print ("Added " ++ show (count updated) ++ ": " ++ text)
+
+listTodos : () ->{IO} ()
+listTodos() =
+    case load() of
+        Nothing -> storageFailure()
+        Just Nil -> print "No todos."
+        Just todos -> printTodos 1 todos
+
+completeTodo : String ->{IO} ()
+completeTodo raw =
+    case String.toInt raw of
+        Nothing -> usage()
+        Just wanted ->
+            if wanted < 1 then
+                usage()
+            else
+                case load() of
+                    Nothing -> storageFailure()
+                    Just todos ->
+                        case completeAt wanted 1 todos of
+                            Nothing ->
+                                print ("No todo at index " ++ show wanted ++ ".")
+                                IO.exit 2
+                            Just updated ->
+                                save updated
+                                print ("Completed " ++ show wanted ++ ".")
+
+main() =
+    case IO.args() of
+        Cons "add" (Cons text Nil) -> addTodo text
+        Cons "list" Nil -> listTodos()
+        Cons "done" (Cons raw Nil) -> completeTodo raw
+        _ -> usage()

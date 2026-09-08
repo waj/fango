@@ -7,6 +7,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // The float formatting golden table: ECMA-262 Number::toString semantics
@@ -71,6 +72,63 @@ func TestShowBoolUnit(t *testing.T) {
 	}
 	if ShowUnit() != "()" {
 		t.Error("ShowUnit wrong")
+	}
+}
+
+func TestJSONStrings(t *testing.T) {
+	cases := []struct {
+		value, encoded string
+	}{
+		{"plain", `"plain"`},
+		{`quote " and slash \`, `"quote \" and slash \\"`},
+		{"line\n\tend", `"line\n\tend"`},
+		{"λ二", `"λ二"`},
+	}
+	for _, tc := range cases {
+		if got := JSONString(tc.value); got != tc.encoded {
+			t.Errorf("JSONString(%q) = %q, want %q", tc.value, got, tc.encoded)
+		}
+		if got := JSONStringValue(tc.encoded); got != tc.value {
+			t.Errorf("JSONStringValue(%q) = %q, want %q", tc.encoded, got, tc.value)
+		}
+		if got := JSONStringTokenLength(tc.encoded + "tail"); got != int64(utf8.RuneCountInString(tc.encoded)) {
+			t.Errorf("JSONStringTokenLength(%q) = %d", tc.encoded+"tail", got)
+		}
+	}
+
+	if got := JSONStringValue(`"\ud83d\ude00"`); got != "😀" {
+		t.Errorf("surrogate pair decoded as %q", got)
+	}
+	for _, invalid := range []string{"", "plain", `"unterminated`, `"bad\q"`, "\"line\nbreak\""} {
+		if got := JSONStringTokenLength(invalid); got != -1 {
+			t.Errorf("JSONStringTokenLength(%q) = %d, want -1", invalid, got)
+		}
+	}
+}
+
+func TestJSONFloat(t *testing.T) {
+	for _, tc := range []struct {
+		value float64
+		want  string
+	}{
+		{0, "0"},
+		{-2.5, "-2.5"},
+		{1e21, "1e+21"},
+	} {
+		if got := JSONFloat(tc.value); got != tc.want {
+			t.Errorf("JSONFloat(%v) = %q, want %q", tc.value, got, tc.want)
+		}
+	}
+
+	for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("JSONFloat(%v) did not panic", value)
+				}
+			}()
+			JSONFloat(value)
+		}()
 	}
 }
 

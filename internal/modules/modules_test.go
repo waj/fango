@@ -4,6 +4,7 @@ import (
 	"github.com/waj/fango/internal/ast"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -67,7 +68,7 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 	for _, m := range r.Manifest {
 		got = append(got, m.Module)
 	}
-	if strings.Join(got, ",") != "Basics,Basics,Meta,Derive,Maybe,IO,IO,B,A,Z,Main" {
+	if strings.Join(got, ",") != "Basics,Basics,Meta,Derive,List,Maybe,IO,IO,B,A,Z,Main" {
 		t.Fatalf("order %v", got)
 	}
 	if r.Entry != "Main.main" {
@@ -80,11 +81,36 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 	for _, unit := range r.Units {
 		units = append(units, unit.Name+":"+strings.Join(unit.Imports, "+"))
 	}
-	if strings.Join(units, ",") != "Basics:,Meta:Basics,Derive:Basics+Meta,Maybe:,IO:Basics+Maybe,B:,A:B,Z:,Main:Z+A" {
+	if strings.Join(units, ",") != "Basics:,Meta:Basics,Derive:Basics+Meta,List:,Maybe:,IO:Basics+List+Maybe,B:,A:B,Z:,Main:Z+A" {
 		t.Fatalf("units %v", units)
 	}
 	if !r.Units[len(r.Units)-1].Entry {
 		t.Fatal("last dependency-first unit is not the entry")
+	}
+}
+
+func TestPreludeFollowsBundledImports(t *testing.T) {
+	m, _, owners, errs := Prelude()
+	if len(errs) > 0 {
+		t.Fatalf("Prelude: %v", errs)
+	}
+	wantOwners := []string{"Basics", "Derive", "IO", "List", "Maybe", "Meta"}
+	var gotOwners []string
+	for owner := range owners {
+		gotOwners = append(gotOwners, owner)
+	}
+	slices.Sort(gotOwners)
+	if !slices.Equal(gotOwners, wantOwners) {
+		t.Fatalf("owners %v, want %v", gotOwners, wantOwners)
+	}
+	listDecls := 0
+	for _, decl := range m.Decls {
+		if d, ok := decl.(*ast.TypeDecl); ok && d.Name == "List.List" {
+			listDecls++
+		}
+	}
+	if listDecls != 1 {
+		t.Fatalf("resolved prelude contains %d List declarations, want 1", listDecls)
 	}
 }
 

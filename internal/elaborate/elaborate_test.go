@@ -58,24 +58,25 @@ func TestGoldens(t *testing.T) {
 			if lintErrs := core.Lint(prog, b); len(lintErrs) > 0 {
 				t.Fatalf("core lint: %v", lintErrs)
 			}
-			testutil.Golden(t, strings.TrimSuffix(path, ".fango")+".core", core.Dump(fixtureProgram(prog)))
+			testutil.Golden(t, strings.TrimSuffix(path, ".fango")+".core", core.Dump(fixtureProgram(prog, ck.PreludeOwners)))
 		})
 	}
 }
 
 // Keep fixture dumps focused on their source. The complete executable prelude
 // is still elaborated and linted above, including all dictionary definitions.
-func fixtureProgram(prog *core.Prog) *core.Prog {
+func fixtureProgram(prog *core.Prog, preludeOwners map[string]bool) *core.Prog {
 	result := *prog
 	result.Defs = nil
 	result.ADTs = nil
 	for _, d := range prog.Defs {
-		if d.Owner != "Basics" && d.Owner != "Meta" && d.Owner != "Derive" && d.Owner != "Maybe" && d.Owner != "IO" {
+		if !preludeOwners[d.Owner] {
 			result.Defs = append(result.Defs, d)
 		}
 	}
 	for _, a := range prog.ADTs {
-		if !strings.HasPrefix(a.Con.Name, "Basics.") && !strings.HasPrefix(a.Con.Name, "Meta.") && !strings.HasPrefix(a.Con.Name, "Derive.") && !strings.HasPrefix(a.Con.Name, "Maybe.") && !strings.HasPrefix(a.Con.Name, "IO.") {
+		owner, _, qualified := strings.Cut(a.Con.Name, ".")
+		if !qualified || !preludeOwners[owner] {
 			result.ADTs = append(result.ADTs, a)
 		}
 	}

@@ -9,11 +9,12 @@ import (
 
 // InstallPrelude shares the batch resolver and retains executable definitions.
 func (ck *Checker) InstallPrelude() []diag.Error {
-	m, fixities, errs := modules.Prelude()
+	m, fixities, owners, errs := modules.Prelude()
 	if len(errs) > 0 {
 		return errs
 	}
 	ck.Fixity = fixities
+	ck.PreludeOwners = owners
 	infos, errs := ck.Module(m)
 	if len(errs) > 0 {
 		return errs

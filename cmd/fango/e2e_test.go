@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	goast "go/ast"
 	"go/format"
 	goparser "go/parser"
 	gotoken "go/token"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/eval"
+	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/testutil"
 	"github.com/waj/fango/internal/types"
 )
@@ -93,6 +96,142 @@ func TestWcExample(t *testing.T) {
 func TestMarkdownExample(t *testing.T) {
 	t.Parallel()
 	runDifferentialCase(t, filepath.Join("..", "..", "examples", "markdown.fango"))
+}
+
+func TestTodoExample(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "todo.fango")
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(strings.TrimSuffix(path, ".fango") + ".expected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := [][]string{
+		{"list"},
+		{"add", "buy milk"},
+		{"add", `write "tests"`},
+		{"list"},
+		{"done", "2"},
+		{"list"},
+	}
+
+	prog, _, ok := compileFile(path, io.Discard)
+	if !ok {
+		t.Fatal("compile failed")
+	}
+	interpDir := t.TempDir()
+	var interpreted bytes.Buffer
+	for _, args := range commands {
+		env := eval.NewEnv()
+		env.DefineProg(prog)
+		ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
+		ioctx.Args, ioctx.Dir = args, interpDir
+		if _, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx); err != nil {
+			t.Fatalf("interpreter %v: %v", args, err)
+		}
+	}
+	if interpreted.String() != string(want) {
+		t.Fatalf("interpreter output:\n%q\nwant:\n%q", interpreted.String(), want)
+	}
+
+	if testing.Short() {
+		return
+	}
+	compiledDir := t.TempDir()
+	buildDir := t.TempDir()
+	var compiled bytes.Buffer
+	for _, args := range commands {
+		cliArgs := append([]string{"run", absPath, "--"}, args...)
+		cmd := exec.Command(cliBinary(t), cliArgs...)
+		var stderr bytes.Buffer
+		cmd.Env = append(os.Environ(), "FANGO_BUILD_DIR="+buildDir)
+		cmd.Dir, cmd.Stdout, cmd.Stderr = compiledDir, &compiled, &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("compiled %v: %v\n%s", args, err, stderr.String())
+		}
+	}
+	if compiled.String() != string(want) {
+		t.Fatalf("compiled output:\n%q\nwant:\n%q", compiled.String(), want)
+	}
+	if compiled.String() != interpreted.String() {
+		t.Fatalf("backends disagree: compiled %q vs interpreted %q", compiled.String(), interpreted.String())
+	}
+}
+
+func TestTodoExampleFailures(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "todo.fango")
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog, _, ok := compileFile(path, io.Discard)
+	if !ok {
+		t.Fatal("compile failed")
+	}
+
+	type failure struct {
+		name       string
+		args       []string
+		store      string
+		wantStatus int
+		wantOutput string
+	}
+	cases := []failure{
+		{"malformed store", []string{"list"}, "not json", 1, "Invalid todo.json.\n"},
+		{"usage", nil, "", 2, "Usage: todo add TEXT | todo list | todo done NUMBER\n"},
+		{"missing index", []string{"done", "1"}, "[]", 2, "No todo at index 1.\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name+"/interpreter", func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.store != "" {
+				if err := os.WriteFile(filepath.Join(dir, "todo.json"), []byte(tc.store), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			env := eval.NewEnv()
+			env.DefineProg(prog)
+			var output bytes.Buffer
+			ioctx := eval.NewIOContext(strings.NewReader(""), &output)
+			ioctx.Args, ioctx.Dir = tc.args, dir
+			_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
+			var exitErr *natives.ExitError
+			if !errors.As(err, &exitErr) || exitErr.Code != tc.wantStatus {
+				t.Fatalf("exit = %v, want status %d", err, tc.wantStatus)
+			}
+			if output.String() != tc.wantOutput {
+				t.Fatalf("output = %q, want %q", output.String(), tc.wantOutput)
+			}
+		})
+
+		if testing.Short() {
+			continue
+		}
+		t.Run(tc.name+"/compiled", func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.store != "" {
+				if err := os.WriteFile(filepath.Join(dir, "todo.json"), []byte(tc.store), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			args := append([]string{"run", absPath, "--"}, tc.args...)
+			cmd := exec.Command(cliBinary(t), args...)
+			var stdout, stderr bytes.Buffer
+			cmd.Env = append(os.Environ(), "FANGO_BUILD_DIR="+t.TempDir())
+			cmd.Dir, cmd.Stdout, cmd.Stderr = dir, &stdout, &stderr
+			err := cmd.Run()
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != tc.wantStatus {
+				t.Fatalf("exit = %v, want status %d; stderr: %s", err, tc.wantStatus, stderr.String())
+			}
+			if stdout.String() != tc.wantOutput {
+				t.Fatalf("output = %q, want %q", stdout.String(), tc.wantOutput)
+			}
+		})
+	}
 }
 
 // The Core interpreter runs fango programs inside this process, against the

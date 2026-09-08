@@ -131,6 +131,15 @@ providers are parsed and their declared public interfaces validated before a
 deterministic dependency-first topological order is chosen, with lexical
 tie-breaking.
 
+The embedded prelude used by the REPL and focused checker tests follows the
+same bundled dependency closure instead of maintaining a parallel module
+list. Its roots are `Basics`, `Meta`, `Derive`, and ambient `IO`; ordinary
+imports and syntax-driven `Meta`/`Derive` edges recursively add modules such
+as `List` and `Maybe`. The checker retains that resolved owner set so fixture
+projections can omit the whole prelude while still elaborating and linting it.
+Bundled modules therefore use the public standard-library types rather than
+private substitutes.
+
 Primitives are declarations rather than a compiler catalog. Every ordinary
 module implicitly loads the hidden `Basics` module, whose native values define
 the scalar implementations of class methods, and the bundled `IO` module declares the ambient IO
@@ -419,6 +428,14 @@ instances, and helpers are excluded transitively from runtime Core; `Derive`
 emits nothing at all, and what survives of `Meta` is its `Items` list and the
 folds over it, which are ordinary polymorphic code.
 
+The bundled `Json` module exercises that boundary without declaration
+generation. Its `Encode` deriver is ordinary fango over `Meta.TypeInfo` and
+quoted expressions; only JSON string escaping, finite-float formatting, and
+leading-string-token validation cross the native boundary. Derived records
+emit fields in schema order, and derived unions use one tagged representation,
+so emitted text is deterministic. Decoding remains schema-specific fango code
+in the Todo example rather than a compiler facility.
+
 A failed expansion rolls back. `(*Checker).Checkpoint` restores the checked
 prefix along with the rest of the declaration environment, and tells the
 compile-time evaluator to discard an environment that no longer describes it —
@@ -641,9 +658,13 @@ goldens. Every runnable fixture is evaluated through Core and, outside short
 mode, compiled through the real CLI; output is compared byte-for-byte with its
 expected file and between backends. A fixture or example may carry a `.stdin`
 transcript beside its source; both backends receive it as scripted standard
-input. Invalid fixtures pin diagnostic substrings.
+input. Stateful command examples run a sequence against isolated working
+directories, with the interpreter's explicit argument/directory context
+matching the compiled process's argv and working directory. Invalid fixtures
+pin diagnostic substrings.
 Focused inference and elaboration harnesses install the actual embedded
-`Basics` and `IO` declarations rather than a parallel test-only environment.
+prelude and its transitive bundled dependencies rather than a parallel
+test-only environment.
 Generated Go is checked for deterministic, gofmt-idempotent output. The Core
 linter runs in every batch compilation.
 

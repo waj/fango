@@ -64,6 +64,8 @@ type Closure struct {
 type IOContext struct {
 	Reader *bufio.Reader
 	Writer io.Writer
+	Args   []string
+	Dir    string
 }
 
 func NewIOContext(r io.Reader, w io.Writer) *IOContext {
@@ -71,7 +73,7 @@ func NewIOContext(r io.Reader, w io.Writer) *IOContext {
 	if !ok {
 		br = bufio.NewReader(r)
 	}
-	return &IOContext{Reader: br, Writer: w}
+	return &IOContext{Reader: br, Writer: w, Dir: "."}
 }
 
 type evidence struct {
@@ -548,7 +550,7 @@ func (in *interp) showValue(v Value) (string, error) {
 }
 
 func (in *interp) nativeRuntime() *natives.Runtime {
-	return &natives.Runtime{Reader: in.ioctx.Reader, Writer: in.ioctx.Writer, Equal: eqValue, Show: in.showValue, Expand: in.env.Expand}
+	return &natives.Runtime{Reader: in.ioctx.Reader, Writer: in.ioctx.Writer, Args: in.ioctx.Args, Dir: in.ioctx.Dir, Equal: eqValue, Show: in.showValue, Expand: in.env.Expand}
 }
 
 // tree walks a decision tree, mirroring the compiled backend's switches.

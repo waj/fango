@@ -84,10 +84,12 @@ The compile-time stage, type reflection, and derivers exist: quotes, splices,
 documented in the design and the reference. The standard `Eq`, `Ord`, and
 `Show` derivers are ordinary fango in the bundled `Derive` module.
 
-What remains is declaration splices — generating a definition rather than an
-expression — and the driving consumer for them: the Tier-2 Todo CLI's
-serialize/parse round trip still has no `Json` module to encode into. Both are
-in [roadmap-meta.md](roadmap-meta.md).
+The bundled `Json` module now uses an ordinary fango deriver for `Encode`, and
+the persistent Tier-2 Todo CLI consumes it while keeping its decoder
+hand-written. That example did not need declaration splices: deriving an
+instance is already supported. Generating declaration groups remains deferred
+until a consumer forces it; [roadmap-meta.md](roadmap-meta.md) records the
+intended named-declaration surface.
 
 It deliberately avoids a `Generic`-style structural representation, which
 one-parameter classes without higher kinds cannot express, and avoids Template
