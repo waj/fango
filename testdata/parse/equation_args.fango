@@ -1,0 +1,25 @@
+-- Every pattern atom is a legal function argument. Applied constructors need
+-- parentheses; lists, records, and `()` delimit themselves.
+type Shape = Dot | Line Int Int
+type Point = { x : Int, y : Int }
+
+limit = 3
+
+area Dot = 0
+area (Line a b) = a * b
+
+first [] = 0
+first [only] = only
+first [head | _] = head
+
+corner Point { x = a, y = b } = a + b
+
+grade 0 = "none"
+grade 1.5 = "half"
+grade "s" = "string"
+grade 'c' = "char"
+grade ^limit = "pinned"
+grade _ = "other"
+
+ready () = True
+ready2() = True

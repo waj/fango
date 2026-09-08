@@ -74,16 +74,10 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 	var body core.Expr
 	if len(bind.Params) > 0 {
 		argTys, _ := core.PeelFun(localGenTy, len(bind.Params))
-		bound := 0
-		for i, p := range bind.Params {
-			params = append(params, coreParamName(p))
-			if p.Name != "_" && p.Name != "()" {
-				el.pushScope(p.Name, argTys[i])
-				bound++
-			}
-		}
-		body = el.expr(bind.Body)
-		el.popScope(bound)
+		eqs := equationRows(bind.Equations, bind.Params, bind.Body, bind.NameSpan)
+		var worker []string
+		worker, body = el.workerBody(eqs, argTys, bind.NameSpan, "local function")
+		params = append(params, worker...)
 	} else {
 		body = el.expr(bind.Body)
 	}
@@ -154,6 +148,8 @@ func (el *elab) freeLocals(bind *ast.LocalBind) []scopeVar {
 		}
 	}
 	var visit func(e ast.Expr)
+	var visitPatterns func(ps []ast.Pattern)
+	var visitRows func(eqs []ast.Equation, params []ast.Pattern, body ast.Expr)
 	visitVar := func(name string) {
 		if name == bind.Name {
 			return // self-recursion: becomes top-level recursion
@@ -196,30 +192,63 @@ func (el *elab) freeLocals(bind *ast.LocalBind) []scopeVar {
 				visit(f.Value)
 			}
 		case *ast.Lambda:
+			visitPatterns(e.Params)
 			visit(e.Body)
 		case *ast.Block:
 			for i := range e.Binds {
-				visit(e.Binds[i].Body)
+				b := &e.Binds[i]
+				if b.Pattern != nil {
+					visitPatterns([]ast.Pattern{b.Pattern})
+				}
+				visitRows(b.Equations, b.Params, b.Body)
 			}
 			visit(e.Result)
 		case *ast.Case:
 			visit(e.Scrutinee)
 			for i := range e.Branches {
+				visitPatterns([]ast.Pattern{e.Branches[i].Pattern})
 				visit(e.Branches[i].Body)
 			}
 		case *ast.Handle:
 			visit(e.Body)
 			for i := range e.Clauses {
-				visit(e.Clauses[i].Body)
+				c := &e.Clauses[i]
+				visitRows(c.Equations, c.Params, c.Body)
 			}
 			if e.Return != nil {
-				visit(e.Return.Body)
+				var param []ast.Pattern
+				if e.Return.Param != nil {
+					param = []ast.Pattern{e.Return.Param}
+				}
+				visitRows(e.Return.Equations, param, e.Return.Body)
 			}
 		case *ast.Resume:
 			// No value child; applications containing it are handled above.
 		}
 	}
-	visit(bind.Body)
+	// A pin names an existing value, so a pinned local is captured like any
+	// other reference. Every other pattern form only binds.
+	visitPatterns = func(ps []ast.Pattern) {
+		for _, p := range ps {
+			walkPatternPins(p, visitVar)
+		}
+	}
+	// Each row of an equation group contributes its own captures; an
+	// ungrouped definition has the one parameter vector and body.
+	visitRows = func(eqs []ast.Equation, params []ast.Pattern, body ast.Expr) {
+		if len(eqs) == 0 {
+			visitPatterns(params)
+			if body != nil {
+				visit(body)
+			}
+			return
+		}
+		for _, eq := range eqs {
+			visitPatterns(eq.Params)
+			visit(eq.Body)
+		}
+	}
+	visitRows(bind.Equations, bind.Params, bind.Body)
 	var frees []scopeVar
 	for _, sv := range el.scope { // scope order: deterministic parameter order
 		if need[sv.name] {
@@ -227,4 +256,20 @@ func (el *elab) freeLocals(bind *ast.LocalBind) []scopeVar {
 		}
 	}
 	return frees
+}
+
+// walkPatternPins reports every value a pattern names rather than binds.
+func walkPatternPins(p ast.Pattern, found func(string)) {
+	switch p := p.(type) {
+	case *ast.PPin:
+		found(p.Name)
+	case *ast.PCtor:
+		for _, a := range p.Args {
+			walkPatternPins(a, found)
+		}
+	case *ast.PRecord:
+		for _, f := range p.Fields {
+			walkPatternPins(f.Pattern, found)
+		}
+	}
 }

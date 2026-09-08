@@ -215,9 +215,10 @@ type gen struct {
 	scalarEq   map[int]bool
 	scalarShow map[int]bool
 
-	// caseVarTys records the (instantiated) types of case scrutinee binders
-	// and field temporaries, so nested constructor switches know their
-	// column's type arguments.
+	// caseVarTys records the (instantiated) types of locals visible to a
+	// decision tree: worker/lambda parameters, case scrutinee binders, and
+	// constructor field temporaries. Multi-column pattern matrices may test
+	// any parameter directly, so constructor switches need all of them here.
 	caseVarTys    map[string]types.Type
 	evidence      map[int][]goast.Expr
 	defs          map[string]*core.Def
@@ -478,6 +479,14 @@ func (g *gen) printFn(t types.Type) string {
 func (g *gen) workerDef(d *core.Def) goast.Decl {
 	g.tyParamNames = tyParamNames(d.TyParams)
 	argTys, ret := core.PeelFun(d.Type, len(d.Params))
+	for i, name := range d.Params {
+		g.caseVarTys[name] = argTys[i]
+	}
+	defer func() {
+		for _, name := range d.Params {
+			delete(g.caseVarTys, name)
+		}
+	}()
 	params := make([]paramSpec, 0, len(d.EffectParams)+len(d.Params))
 	for _, ev := range d.EffectParams {
 		name := g.evidenceName(ev.Name)
@@ -902,7 +911,14 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			}
 			return mangleValue(e.Param)
 		}(), typ: g.goType(fn.Arg)})
+		oldParamTy, hadParamTy := g.caseVarTys[e.Param]
+		g.caseVarTys[e.Param] = fn.Arg
 		body := g.retStmts(e.Body)
+		if hadParamTy {
+			g.caseVarTys[e.Param] = oldParamTy
+		} else {
+			delete(g.caseVarTys, e.Param)
+		}
 		for _, unique := range pushed {
 			g.evidence[unique] = g.evidence[unique][:len(g.evidence[unique])-1]
 		}

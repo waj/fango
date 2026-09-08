@@ -1,0 +1,11 @@
+-- A lambda has one pattern row, so an irrefutable record pattern is enough.
+type Point = { x : Int, y : Int } deriving (Show)
+
+shift : Int -> Point -> Point
+shift by Point { x = a, y = b } = Point { x = a + by, y = b + by }
+
+main : () ->{IO} ()
+main() =
+    area = \Point { x = a, y = b } -> a * b
+    print (area (Point { x = 3, y = 4 }))
+    print (shift 1 (Point { x = 3, y = 4 }))

@@ -1,0 +1,5 @@
+type Pair = Pair Int Int
+
+same (Pair x ^x) = x
+
+main = same (Pair 1 1)

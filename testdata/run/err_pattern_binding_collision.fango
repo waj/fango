@@ -1,0 +1,7 @@
+type Pair = Pair Int Int
+
+taken = 1
+
+Pair taken other = Pair 1 2
+
+main = taken + other

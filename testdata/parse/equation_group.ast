@@ -1,0 +1,5 @@
+(module
+  (type Choice (ctor Yes) (ctor No))
+  (def flip (ann (-> Choice Choice)) (equations (equation (patterns (pctor Yes)) (ctor No)) (equation (patterns (pctor No)) (ctor Yes))))
+  (def <+> (ann (-> Choice (-> Choice Int))) (equations (equation (patterns (pctor Yes) _) (int 1)) (equation (patterns (pctor No) _) (int 0))))
+  (def main (block (bind-group local (equation (patterns (pctor Yes)) (int 1)) (equation (patterns (pctor No)) (int 2))) (app (var local) (ctor Yes)))))

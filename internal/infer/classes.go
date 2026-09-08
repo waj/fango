@@ -234,9 +234,11 @@ func (ck *Checker) InstanceDecl(d *ast.InstanceDecl) ([]DeclInfo, []diag.Error) 
 		ck.BindDecl(info)
 		infos = append(infos, info)
 		inst.Methods = append(inst.Methods, m.Name)
-		if len(inst.Vars) == 0 && len(inst.Preds) == 0 {
-			if v, ok := m.Body.(*ast.Var); ok && len(m.Params) == 1 && v.Name == m.Params[0].Name {
-				inst.IdentityMethods[cm.Index] = true
+		if len(inst.Vars) == 0 && len(inst.Preds) == 0 && len(m.Equations) == 0 {
+			if v, ok := m.Body.(*ast.Var); ok && len(m.Params) == 1 {
+				if p, ok := m.Params[0].(*ast.PVar); ok && v.Name == p.Name {
+					inst.IdentityMethods[cm.Index] = true
+				}
 			}
 			if body, ok := m.Body.(*ast.App); ok {
 				args := appArgs(body)
@@ -244,8 +246,9 @@ func (ck *Checker) InstanceDecl(d *ast.InstanceDecl) ([]DeclInfo, []diag.Error) 
 					if n := ck.Natives[v.Name]; n != nil && n.Effect == nil && n.Arity == len(args) {
 						forward := true
 						for i, a := range args {
-							v, ok := a.(*ast.Var)
-							forward = forward && ok && v.Name == m.Params[i].Name
+							v, vok := a.(*ast.Var)
+							p, pok := m.Params[i].(*ast.PVar)
+							forward = forward && vok && pok && v.Name == p.Name
 						}
 						if forward {
 							inst.NativeMethods[cm.Index] = n.Name
@@ -266,7 +269,7 @@ func (ck *Checker) instanceMethod(d *ast.ValueDecl, ty types.Type, inst *Instanc
 	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	var inferred types.Type
 	if len(d.Params) > 0 {
-		inferred = g.functionWithAnnotatedParams(d.Name, d.NameSpan, d.Params, d.Body, ty)
+		inferred = g.functionEquations(d.Name, d.NameSpan, declEquations(d), ty)
 	} else {
 		inferred = g.expr(d.Body)
 		// Constructing the method value must be pure. Effects belong to its
@@ -285,7 +288,7 @@ func (ck *Checker) instanceMethod(d *ast.ValueDecl, ty types.Type, inst *Instanc
 	var es []diag.Error
 	sch, es = ck.qualify(sch, g.preds, given, true, d.NameSpan)
 	errs = append(errs, es...)
-	return DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body, Scheme: sch, Instance: inst, InstanceLimit: inst.Limit}, errs
+	return DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Equations: d.Equations, Type: ty, Body: d.Body, Scheme: sch, Instance: inst, InstanceLimit: inst.Limit}, errs
 }
 
 // annotatedDecl checks a declaration against a signature the compiler
@@ -295,7 +298,7 @@ func (ck *Checker) annotatedDecl(d *ast.ValueDecl, ty types.Type) (DeclInfo, []d
 	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	var inferred types.Type
 	if len(d.Params) > 0 {
-		inferred = g.functionWithAnnotatedParams(d.Name, d.NameSpan, d.Params, d.Body, ty)
+		inferred = g.functionEquations(d.Name, d.NameSpan, declEquations(d), ty)
 	} else {
 		inferred = g.expr(d.Body)
 		g.cs = append(g.cs, Constraint{Left: g.ambient, Right: types.Row{}, Span: d.Body.Span(), Why: Why{Kind: WhyEffectEscapes}})
@@ -309,7 +312,7 @@ func (ck *Checker) annotatedDecl(d *ast.ValueDecl, ty types.Type) (DeclInfo, []d
 	errs = append(errs, g.errs...)
 	sch, es := ck.qualify(ck.generalize(ty, nil), g.preds, nil, true, d.NameSpan)
 	errs = append(errs, es...)
-	return DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body, Scheme: sch, InstanceLimit: len(ck.Instances)}, errs
+	return DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Equations: d.Equations, Type: ty, Body: d.Body, Scheme: sch, InstanceLimit: len(ck.Instances)}, errs
 }
 
 func (ck *Checker) NormalizePreds(ps []types.Pred) []types.Pred {

@@ -118,17 +118,19 @@ type Param struct {
 }
 
 type LocalBind struct {
-	Name     string
-	NameSpan source.Span
-	Params   []Param // non-empty: a local function
-	Ann      *TypeAnn
-	Body     Expr
+	Name      string
+	NameSpan  source.Span
+	Params    []Pattern  // non-empty: a local function equation
+	Equations []Equation // non-nil only for a grouped local function
+	Pattern   Pattern    // non-nil for a destructuring value binding
+	Ann       *TypeAnn
+	Body      Expr
 }
 
 // Lambda is `\x -> e` / `\x y -> e` — multi-param in the AST for clean
 // spans and dumps; typing and elaboration treat it as curried.
 type Lambda struct {
-	Params []Param
+	Params []Pattern
 	Body   Expr
 	Sp     source.Span // the backslash
 }
@@ -289,19 +291,21 @@ type Handle struct {
 // HandleClause is one operation clause, `print s -> …`. Params bind the
 // operation's arguments; `resume` is in scope in the body.
 type HandleClause struct {
-	Op     string
-	OpSpan source.Span
-	Params []Param
-	Body   Expr
+	Op        string
+	OpSpan    source.Span
+	Params    []Pattern
+	Equations []Equation
+	Body      Expr
 }
 
 // ReturnClause is the optional `return x -> …` clause wrapping the handled
 // body's normal result. `return` is a *contextual* keyword — it is not
 // reserved, so it stays usable as an ordinary name everywhere else.
 type ReturnClause struct {
-	Param Param
-	Body  Expr
-	Sp    source.Span // the `return` token
+	Param     Pattern
+	Equations []Equation
+	Body      Expr
+	Sp        source.Span // the `return` token
 }
 
 // Resume is the one-shot continuation bound inside a handler clause. It
@@ -352,12 +356,28 @@ type Pattern interface {
 	Span() source.Span
 }
 
+// Equation is one source row of a named function, method, or handler clause.
+// Single-row definitions continue to use the owning node's Params and Body
+// fields so their stable AST dump stays unchanged; Equations is populated
+// when adjacent rows have been grouped.
+type Equation struct {
+	Params   []Pattern
+	Body     Expr
+	NameSpan source.Span
+}
+
 type PVar struct {
 	Name string
 	Sp   source.Span
 }
 
 type PWildcard struct {
+	Sp source.Span
+}
+
+// PUnit is the proper Unit pattern. It is distinct from a discarded binder:
+// Unit has one inhabitant, so this pattern is exhaustive for Unit values.
+type PUnit struct {
 	Sp source.Span
 }
 
@@ -409,6 +429,7 @@ type PCtor struct {
 
 func (*PVar) isPattern()      {}
 func (*PWildcard) isPattern() {}
+func (*PUnit) isPattern()     {}
 func (*PInt) isPattern()      {}
 func (*PFloat) isPattern()    {}
 func (*PString) isPattern()   {}
@@ -419,6 +440,7 @@ func (*PCtor) isPattern()     {}
 
 func (p *PVar) Span() source.Span      { return p.Sp }
 func (p *PWildcard) Span() source.Span { return p.Sp }
+func (p *PUnit) Span() source.Span     { return p.Sp }
 func (p *PInt) Span() source.Span      { return p.Sp }
 func (p *PFloat) Span() source.Span    { return p.Sp }
 func (p *PString) Span() source.Span   { return p.Sp }
@@ -499,15 +521,26 @@ func (e *MetaValue) Span() source.Span { return e.Sp }
 type Decl interface{ isDecl() }
 
 type ValueDecl struct {
-	Name     string
-	NameSpan source.Span
-	Params   []Param  // non-empty: a function definition (worker; see doc/design.md, "Go backend and runtime")
-	Ann      *TypeAnn // nil when unannotated
-	Body     Expr
-	Native   *NativeBody
+	Name      string
+	NameSpan  source.Span
+	Params    []Pattern  // non-empty: a function definition (worker; see doc/design.md, "Go backend and runtime")
+	Equations []Equation // non-nil for adjacent same-name equations
+	Ann       *TypeAnn   // nil when unannotated
+	Body      Expr
+	Native    *NativeBody
 }
 
 func (*ValueDecl) isDecl() {}
+
+// PatternDecl is a strict, monomorphic top-level destructuring binding. The
+// RHS is checked and evaluated once before all names in Pattern become
+// visible.
+type PatternDecl struct {
+	Pattern Pattern
+	Body    Expr
+}
+
+func (*PatternDecl) isDecl() {}
 
 // TypeDecl is a nominal type declaration (doc/reference.md, "Algebraic data
 // types and matching"). Its RHS is either constructor alternatives or a

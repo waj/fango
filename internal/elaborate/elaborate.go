@@ -24,6 +24,7 @@ import (
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/natives"
+	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -120,15 +121,14 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 	rawType = ck.Sub.Apply(rawType)
 	defType := eraseRows(rawType)
 	dictNames, dictTypes := el.bindDictionaries(info.Scheme.Preds)
-	params := make([]string, len(info.Params))
+	var params []string
+	var body core.Expr
 	if len(info.Params) > 0 {
 		argTys, _ := core.PeelFun(defType, len(info.Params))
-		for i, p := range info.Params {
-			params[i] = coreParamName(p)
-			if p.Name != "_" && p.Name != "()" {
-				el.pushScope(p.Name, argTys[i])
-			}
-		}
+		eqs := equationRows(info.Equations, info.Params, info.Body, info.NameSpan)
+		params, body = el.workerBody(eqs, argTys, info.NameSpan, "function")
+	} else {
+		body = el.expr(info.Body)
 	}
 	def := core.Def{
 		Name:         info.Name,
@@ -136,7 +136,7 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 		TyParams:     runtimeRigidVars(rawType),
 		Params:       append(dictNames, params...),
 		EffectParams: executingEffects(rawType, len(params)),
-		Body:         el.anf(el.expr(info.Body)),
+		Body:         el.anf(body),
 	}
 	return append([]core.Def{def}, el.aux...), el.errs
 }
@@ -261,6 +261,13 @@ type scopeVar struct {
 	ty   types.Type // zonked at binding time
 }
 
+type localPatternLet struct {
+	pattern ast.Pattern
+	rhs     core.Expr
+	subject string
+	ty      types.Type
+}
+
 func (el *elab) pushScope(name string, ty types.Type) {
 	el.scopeIdx[name] = len(el.scope)
 	el.scope = append(el.scope, scopeVar{name, ty})
@@ -275,33 +282,163 @@ func (el *elab) popScope(n int) {
 
 // lambda nests a multi-parameter surface lambda into single-param Core
 // Lambdas, peeling one arrow per parameter off the (ground) function type.
-func (el *elab) lambda(params []ast.Param, body ast.Expr, funTy types.Type) core.Expr {
-	if len(params) == 0 {
-		return el.expr(body)
+func (el *elab) lambda(params []ast.Pattern, body ast.Expr, funTy types.Type) core.Expr {
+	argTys, _ := core.PeelFun(funTy, len(params))
+	names := make([]string, len(params))
+	var inner core.Expr
+	if plainPatterns(params) {
+		bound := 0
+		for i, p := range params {
+			names[i] = corePatternParam(p)
+			if v, ok := p.(*ast.PVar); ok {
+				el.pushScope(v.Name, argTys[i])
+				bound++
+			}
+		}
+		inner = el.expr(body)
+		el.popScope(bound)
+	} else {
+		occs := make([]occurrence, len(params))
+		for i := range params {
+			names[i] = fmt.Sprintf("_arg%d", el.tmp)
+			el.tmp++
+			occs[i] = occurrence{name: names[i], ty: argTys[i]}
+		}
+		inner = el.matchPatternRows([][]ast.Pattern{params}, []ast.Expr{body}, []source.Span{params[0].Span()}, occs, params[0].Span(), "lambda")
 	}
-	fn, ok := funTy.(*types.TFun)
-	if !ok {
-		panic("elaborate: lambda type is not a function type")
+	cur := funTy
+	funs := make([]*types.TFun, len(params))
+	for i := range params {
+		funs[i] = cur.(*types.TFun)
+		cur = funs[i].Ret
 	}
-	if params[0].Name != "_" && params[0].Name != "()" {
-		el.pushScope(params[0].Name, fn.Arg)
+	for i := len(params) - 1; i >= 0; i-- {
+		inner = &core.Lambda{Param: names[i], Body: inner, Ty: funs[i]}
 	}
-	inner := el.lambda(params[1:], body, fn.Ret)
-	if params[0].Name != "_" && params[0].Name != "()" {
-		el.popScope(1)
-	}
-	return &core.Lambda{
-		Param: coreParamName(params[0]),
-		Body:  inner,
-		Ty:    fn,
-	}
+	return inner
 }
 
-func coreParamName(p ast.Param) string {
-	if p.Name == "()" {
-		return "_"
+func (el *elab) lambdaEquations(eqs []ast.Equation, funTy types.Type, at source.Span, context string) core.Expr {
+	argTys, _ := core.PeelFun(funTy, len(eqs[0].Params))
+	names := make([]string, len(argTys))
+	occs := make([]occurrence, len(argTys))
+	for i, ty := range argTys {
+		names[i] = fmt.Sprintf("_arg%d", el.tmp)
+		el.tmp++
+		occs[i] = occurrence{name: names[i], ty: ty}
 	}
-	return p.Name
+	patterns := make([][]ast.Pattern, len(eqs))
+	bodies := make([]ast.Expr, len(eqs))
+	spans := make([]source.Span, len(eqs))
+	for i, eq := range eqs {
+		patterns[i], bodies[i], spans[i] = eq.Params, eq.Body, eq.NameSpan
+	}
+	inner := el.matchPatternRows(patterns, bodies, spans, occs, at, context)
+	cur := funTy
+	funs := make([]*types.TFun, len(names))
+	for i := range names {
+		funs[i] = cur.(*types.TFun)
+		cur = funs[i].Ret
+	}
+	for i := len(names) - 1; i >= 0; i-- {
+		inner = &core.Lambda{Param: names[i], Body: inner, Ty: funs[i]}
+	}
+	return inner
+}
+
+// equationRows normalizes a definition's rows: an ungrouped definition is the
+// one-row group its single parameter vector and body describe.
+func equationRows(eqs []ast.Equation, params []ast.Pattern, body ast.Expr, at source.Span) []ast.Equation {
+	if len(eqs) > 0 {
+		return eqs
+	}
+	return []ast.Equation{{Params: params, Body: body, NameSpan: at}}
+}
+
+// workerBody lowers one equation group into a worker's parameter names and
+// body. A lone identifier-only row keeps its source parameter names, so
+// single-equation functions retain their current Core shape and the
+// optimizations that read it; anything else binds deterministic hidden
+// parameters and dispatches through one decision tree.
+func (el *elab) workerBody(eqs []ast.Equation, argTys []types.Type, at source.Span, context string) ([]string, core.Expr) {
+	params := make([]string, len(argTys))
+	if len(eqs) == 1 && plainPatterns(eqs[0].Params) {
+		bound := 0
+		for i, p := range eqs[0].Params {
+			params[i] = corePatternParam(p)
+			if v, ok := p.(*ast.PVar); ok {
+				el.pushScope(v.Name, argTys[i])
+				bound++
+			}
+		}
+		body := el.expr(eqs[0].Body)
+		el.popScope(bound)
+		return params, body
+	}
+	occs := make([]occurrence, len(params))
+	for i := range params {
+		params[i] = fmt.Sprintf("_arg%d", el.tmp)
+		el.tmp++
+		occs[i] = occurrence{name: params[i], ty: argTys[i]}
+	}
+	patterns := make([][]ast.Pattern, len(eqs))
+	bodies := make([]ast.Expr, len(eqs))
+	spans := make([]source.Span, len(eqs))
+	for i, eq := range eqs {
+		patterns[i], bodies[i], spans[i] = eq.Params, eq.Body, eq.NameSpan
+	}
+	return params, el.matchPatternRows(patterns, bodies, spans, occs, at, context)
+}
+
+func plainPatterns(ps []ast.Pattern) bool {
+	for _, p := range ps {
+		switch p.(type) {
+		case *ast.PVar, *ast.PWildcard, *ast.PUnit:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func corePatternParam(p ast.Pattern) string {
+	if v, ok := p.(*ast.PVar); ok {
+		return v.Name
+	}
+	return "_"
+}
+
+func handlerPatternParam(p ast.Pattern) string {
+	if _, ok := p.(*ast.PUnit); ok {
+		return "()"
+	}
+	return corePatternParam(p)
+}
+
+type patternName struct {
+	name    string
+	pattern ast.Pattern
+}
+
+func inferPatternNames(p ast.Pattern) []patternName {
+	var out []patternName
+	var walk func(ast.Pattern)
+	walk = func(p ast.Pattern) {
+		switch p := p.(type) {
+		case *ast.PVar:
+			out = append(out, patternName{name: p.Name, pattern: p})
+		case *ast.PCtor:
+			for _, a := range p.Args {
+				walk(a)
+			}
+		case *ast.PRecord:
+			for _, f := range p.Fields {
+				walk(f.Pattern)
+			}
+		}
+	}
+	walk(p)
+	return out
 }
 
 func (el *elab) expr(e ast.Expr) core.Expr {
@@ -447,6 +584,17 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 				continue
 			}
 			bind := &e.Binds[item.BindIndex]
+			if bind.Pattern != nil {
+				rhs := el.expr(bind.Body)
+				subject := fmt.Sprintf("_bind%d", el.tmp)
+				el.tmp++
+				for _, name := range inferPatternNames(bind.Pattern) {
+					el.pushScope(name.name, el.zonkDefault(el.ck.PatTypes[name.pattern]))
+					pushed++
+				}
+				order = append(order, localPatternLet{pattern: bind.Pattern, rhs: rhs, subject: subject, ty: rhs.Type()})
+				continue
+			}
 			bindTy := el.ck.BindTypes[bind]
 			if sch := el.ck.BindSchemes[bind]; hasRuntimeVars(sch) {
 				el.liftBinding(bind, sch)
@@ -463,7 +611,11 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 			}
 			var rhs core.Expr
 			if len(bind.Params) > 0 {
-				rhs = el.lambda(bind.Params, bind.Body, zonked)
+				if len(bind.Equations) > 0 {
+					rhs = el.lambdaEquations(bind.Equations, zonked, bind.NameSpan, "local function")
+				} else {
+					rhs = el.lambda(bind.Params, bind.Body, zonked)
+				}
 			} else {
 				rhs = el.expr(bind.Body)
 			}
@@ -491,6 +643,8 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 				body = x
 			case core.Expr:
 				body = &core.Seq{First: x, Then: body, Ty: body.Type()}
+			case localPatternLet:
+				body = el.bindPatternCore(x.pattern, x.rhs, x.subject, x.ty, body)
 			}
 		}
 		return body
@@ -595,32 +749,71 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 	for i := range e.Clauses {
 		cl, ci := &e.Clauses[i], info.Clauses[i]
 		params := make([]string, len(cl.Params))
-		pushed := 0
-		for j, p := range cl.Params {
-			params[j] = p.Name
-			if p.Name != "_" && p.Name != "()" {
-				el.pushScope(p.Name, el.zonkDefault(ci.ParamTypes[j]))
-				pushed++
-			}
-		}
 		pts := make([]types.Type, len(ci.ParamTypes))
 		for j, p := range ci.ParamTypes {
 			pts[j] = el.zonkDefault(p)
 		}
+		var clauseBody core.Expr
+		if len(cl.Equations) == 0 && plainPatterns(cl.Params) {
+			pushed := 0
+			for j, p := range cl.Params {
+				params[j] = handlerPatternParam(p)
+				if v, ok := p.(*ast.PVar); ok {
+					el.pushScope(v.Name, pts[j])
+					pushed++
+				}
+			}
+			clauseBody = el.expr(cl.Body)
+			el.popScope(pushed)
+		} else {
+			occs := make([]occurrence, len(params))
+			for j := range params {
+				params[j] = fmt.Sprintf("_arg%d", el.tmp)
+				el.tmp++
+				occs[j] = occurrence{name: params[j], ty: pts[j]}
+			}
+			eqs := cl.Equations
+			if len(eqs) == 0 {
+				eqs = []ast.Equation{{Params: cl.Params, Body: cl.Body, NameSpan: cl.OpSpan}}
+			}
+			patterns := make([][]ast.Pattern, len(eqs))
+			bodies := make([]ast.Expr, len(eqs))
+			spans := make([]source.Span, len(eqs))
+			for j, eq := range eqs {
+				patterns[j], bodies[j], spans[j] = eq.Params, eq.Body, eq.NameSpan
+			}
+			clauseBody = el.matchPatternRows(patterns, bodies, spans, occs, cl.OpSpan, "handler clause")
+		}
 		clauses[i] = core.HandlerClause{Op: ci.Op, Params: params, ParamTypes: pts,
-			ResultType: el.zonkDefault(ci.OpResult), Body: el.expr(cl.Body)}
-		el.popScope(pushed)
+			ResultType: el.zonkDefault(ci.OpResult), Body: clauseBody}
 	}
 	var ret *core.ReturnClause
 	if e.Return != nil {
-		name := e.Return.Param.Name
-		if name != "_" && name != "()" {
-			el.pushScope(name, el.zonkDefault(info.BodyResult))
-		}
-		ret = &core.ReturnClause{Param: name, Body: el.expr(e.Return.Body)}
-		if name != "_" && name != "()" {
+		bodyTy := el.zonkDefault(info.BodyResult)
+		name := corePatternParam(e.Return.Param)
+		var retBody core.Expr
+		if v, ok := e.Return.Param.(*ast.PVar); ok && len(e.Return.Equations) == 0 {
+			el.pushScope(v.Name, bodyTy)
+			retBody = el.expr(e.Return.Body)
 			el.popScope(1)
+		} else if plainPatterns([]ast.Pattern{e.Return.Param}) && len(e.Return.Equations) == 0 {
+			retBody = el.expr(e.Return.Body)
+		} else {
+			name = fmt.Sprintf("_arg%d", el.tmp)
+			el.tmp++
+			eqs := e.Return.Equations
+			if len(eqs) == 0 {
+				eqs = []ast.Equation{{Params: []ast.Pattern{e.Return.Param}, Body: e.Return.Body, NameSpan: e.Return.Sp}}
+			}
+			patterns := make([][]ast.Pattern, len(eqs))
+			bodies := make([]ast.Expr, len(eqs))
+			spans := make([]source.Span, len(eqs))
+			for j, eq := range eqs {
+				patterns[j], bodies[j], spans[j] = eq.Params, eq.Body, eq.NameSpan
+			}
+			retBody = el.matchPatternRows(patterns, bodies, spans, []occurrence{{name: name, ty: bodyTy}}, e.Return.Sp, "handler return clause")
 		}
+		ret = &core.ReturnClause{Param: name, Body: retBody}
 	}
 	inst := core.EffectInstance{Unique: info.Effect.Unique, Name: info.Effect.Name}
 	for _, a := range info.Effect.Args {

@@ -197,11 +197,24 @@ func (ck *Checker) checkStageLeaks(d *ast.ValueDecl, declType types.Type, name s
 // before checking the declaration; after it returns without errors the body
 // contains no splices.
 func (ck *Checker) StageDecl(d *ast.ValueDecl) []diag.Error {
+	var errs []diag.Error
+	if len(d.Equations) > 0 {
+		for i := range d.Equations {
+			eq := &d.Equations[i]
+			if !usesStaging(eq.Body) {
+				continue
+			}
+			if es := stageCheck(eq.Params, eq.Body); len(es) > 0 {
+				errs = append(errs, es...)
+				continue
+			}
+			eq.Body, _ = ck.stageExpand(eq.Body)
+		}
+		return errs
+	}
 	if d.Body == nil || !usesStaging(d.Body) {
 		return nil
 	}
-	// Expansion only runs on a body whose stages are sound: a splice the
-	// rules already rejected would otherwise be handed to the evaluator.
 	if errs := stageCheck(d.Params, d.Body); len(errs) > 0 {
 		return errs
 	}
@@ -246,7 +259,7 @@ type stageChecker struct {
 	stage, quoted int
 }
 
-func stageCheck(params []ast.Param, e ast.Expr) []diag.Error {
+func stageCheck(params []ast.Pattern, e ast.Expr) []diag.Error {
 	s := &stageChecker{binders: map[string]binderStage{}}
 	restore := s.bind(paramNames(params))
 	s.expr(e)
@@ -254,12 +267,10 @@ func stageCheck(params []ast.Param, e ast.Expr) []diag.Error {
 	return s.errs
 }
 
-func paramNames(ps []ast.Param) []string {
+func paramNames(ps []ast.Pattern) []string {
 	var out []string
 	for _, p := range ps {
-		if p.Name != "_" && p.Name != "()" {
-			out = append(out, p.Name)
-		}
+		out = patternNames(p, out)
 	}
 	return out
 }
@@ -338,6 +349,20 @@ func (s *stageChecker) expr(e ast.Expr) {
 		var undo []func()
 		for i := range e.Binds {
 			b := &e.Binds[i]
+			if b.Pattern != nil {
+				s.expr(b.Body)
+				undo = append(undo, s.bind(patternNames(b.Pattern, nil)))
+				continue
+			}
+			if len(b.Equations) > 0 {
+				for _, eq := range b.Equations {
+					restore := s.bind(append([]string{b.Name}, paramNames(eq.Params)...))
+					s.expr(eq.Body)
+					restore()
+				}
+				undo = append(undo, s.bind([]string{b.Name}))
+				continue
+			}
 			inner := s.bind(paramNames(b.Params))
 			if len(b.Params) > 0 {
 				inner2 := s.bind([]string{b.Name})
@@ -368,14 +393,30 @@ func (s *stageChecker) expr(e ast.Expr) {
 	case *ast.Handle:
 		s.expr(e.Body)
 		for _, c := range e.Clauses {
-			restore := s.bind(paramNames(c.Params))
-			s.expr(c.Body)
-			restore()
+			if len(c.Equations) > 0 {
+				for _, eq := range c.Equations {
+					restore := s.bind(paramNames(eq.Params))
+					s.expr(eq.Body)
+					restore()
+				}
+			} else {
+				restore := s.bind(paramNames(c.Params))
+				s.expr(c.Body)
+				restore()
+			}
 		}
 		if e.Return != nil {
-			restore := s.bind(paramNames([]ast.Param{e.Return.Param}))
-			s.expr(e.Return.Body)
-			restore()
+			if len(e.Return.Equations) > 0 {
+				for _, eq := range e.Return.Equations {
+					restore := s.bind(paramNames(eq.Params))
+					s.expr(eq.Body)
+					restore()
+				}
+			} else {
+				restore := s.bind(patternNames(e.Return.Param, nil))
+				s.expr(e.Return.Body)
+				restore()
+			}
 		}
 		return
 	}
@@ -573,6 +614,9 @@ func visitChildren(e ast.Expr, f func(ast.Expr)) {
 	case *ast.Block:
 		for i := range e.Binds {
 			each(e.Binds[i].Body)
+			for _, eq := range e.Binds[i].Equations {
+				each(eq.Body)
+			}
 		}
 		for _, it := range e.Items {
 			each(it.Expr)
@@ -587,9 +631,15 @@ func visitChildren(e ast.Expr, f func(ast.Expr)) {
 		each(e.Body)
 		for _, c := range e.Clauses {
 			each(c.Body)
+			for _, eq := range c.Equations {
+				each(eq.Body)
+			}
 		}
 		if e.Return != nil {
 			each(e.Return.Body)
+			for _, eq := range e.Return.Equations {
+				each(eq.Body)
+			}
 		}
 	case *ast.Quote:
 		each(e.Body)

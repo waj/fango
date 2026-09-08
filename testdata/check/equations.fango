@@ -1,0 +1,32 @@
+-- One argument vector, result type, and final-arrow effect row are shared by
+-- every row of a group; each row scopes its own binders.
+type Choice = Yes | No
+type Pair a = Pair a a
+
+limit = 3
+
+flip : Choice -> Choice
+flip Yes = No
+flip No = Yes
+
+-- Inferred without an annotation, and generalized across the group.
+swap (Pair a b) = Pair b a
+
+-- The effect row is shared even though only one row performs the effect.
+announce : Choice ->{IO} ()
+announce Yes = print "yes"
+announce No = ()
+
+-- Literal and pinned patterns carry the same class obligations as in `case`.
+classify 0 = "zero"
+classify ^limit = "limit"
+classify _ = "other"
+
+-- A patterned lambda has one row, so the row must be exhaustive.
+unwrap = \(Pair a _) -> a
+
+main : () ->{IO} ()
+main() =
+    announce (flip Yes)
+    print (classify limit)
+    print (unwrap (swap (Pair 1 2)))

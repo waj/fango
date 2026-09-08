@@ -1,0 +1,11 @@
+module Main exposing (main)
+
+import Shapes.Corner as C exposing (Corner(..), width, height, describe)
+
+total : Corner -> Int
+total (C.Corner x y) = x + y
+
+label : Corner -> String
+label corner = describe corner
+
+main = label (C.Corner width height) ++ "/" ++ show (total (C.Corner width height))

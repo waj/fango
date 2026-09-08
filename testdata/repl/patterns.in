@@ -1,0 +1,10 @@
+type Pair = Pair Int Int
+unpair (Pair a b) = a + b
+unpair (Pair 3 4)
+Pair left right = Pair 1 2
+left
+right
+unpair (Pair left right)
+type Choice = Yes | No
+flip Yes = No
+:quit

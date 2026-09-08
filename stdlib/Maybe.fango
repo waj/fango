@@ -3,7 +3,5 @@ module Maybe exposing (Maybe(..), withDefault)
 type Maybe a = Nothing | Just a deriving (Eq, Ord, Show)
 
 withDefault : a -> Maybe a -> a
-withDefault fallback maybe =
-    case maybe of
-        Nothing -> fallback
-        Just value -> value
+withDefault fallback Nothing = fallback
+withDefault _ (Just value) = value

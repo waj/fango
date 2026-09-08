@@ -1,0 +1,7 @@
+_pattern_1 : Pair Int
+leftCount : Int
+rightCount : Int
+_pattern_2 : Point
+originX : Int
+originY : Int
+main : () ->{IO} ()

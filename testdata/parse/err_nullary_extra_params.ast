@@ -1,0 +1,9 @@
+(module
+  (def ready (params ()) (var extra)))
+-- errors --
+-- NULLARY PARAMETER LIST ------- err_nullary_extra_params.fango
+
+An empty Unit parameter list must be the only parameter group in a definition.
+
+2| ready() extra = extra
+           ^^^^^

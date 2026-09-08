@@ -1,0 +1,6 @@
+type Choice = Yes | No
+
+flip : Choice -> Choice
+flip Yes = No
+
+main = flip Yes

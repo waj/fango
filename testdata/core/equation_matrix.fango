@@ -1,0 +1,11 @@
+-- Multiple columns compile to one decision tree entered after the last
+-- argument. Rows are tried in source order.
+type Choice = Yes | No
+
+both : Choice -> Choice -> Int
+both Yes Yes = 3
+both Yes No = 2
+both No Yes = 1
+both No No = 0
+
+main = both Yes No

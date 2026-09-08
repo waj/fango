@@ -1,0 +1,11 @@
+module Shapes.Corner exposing (Corner(..), width, height, describe)
+
+-- Names introduced by a top-level destructuring group are ordinary exported
+-- values, and equations may span a module boundary like any definition.
+type Corner = Corner Int Int
+
+Corner width height = Corner 20 22
+
+describe : Corner -> String
+describe (Corner 0 0) = "origin"
+describe (Corner _ _) = "corner"

@@ -5,6 +5,7 @@
 package infer
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -170,6 +171,9 @@ type Checker struct {
 	// LiftGen numbers lambda-lifted definitions session-wide, so REPL
 	// inputs across a session never collide (elaborate/lift.go).
 	LiftGen int
+	// PatternGen gives shared top-level destructuring subjects deterministic,
+	// collision-proof names and keeps REPL generations isolated.
+	PatternGen int
 
 	// MonoValues applies the block-binding monomorphism restriction to
 	// top-level value declarations too. The REPL sets it: a prompt value is
@@ -282,11 +286,12 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 }
 
 type DeclInfo struct {
-	Name     string
-	NameSpan source.Span
-	Params   []ast.Param
-	Type     types.Type // solved but not zonked; apply ck.Sub for the final type
-	Body     ast.Expr
+	Name      string
+	NameSpan  source.Span
+	Params    []ast.Pattern
+	Equations []ast.Equation
+	Type      types.Type // solved but not zonked; apply ck.Sub for the final type
+	Body      ast.Expr
 
 	// Scheme is the declaration's generalized type: Scheme.Vars are the
 	// definition's type parameters (elaboration's Def.TyParams). Quantified
@@ -425,6 +430,13 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 			}
 			continue
 		}
+		if pd, ok := d.(*ast.PatternDecl); ok {
+			ds, es := ck.patternDecl(pd, true)
+			infos = append(infos, ds...)
+			ck.Checked = append(ck.Checked, ds...)
+			errs = append(errs, es...)
+			continue
+		}
 		vd, ok := d.(*ast.ValueDecl)
 		if !ok || vd.Native != nil {
 			continue
@@ -447,6 +459,116 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 		ck.Checked = append(ck.Checked, info)
 	}
 	return infos, errs
+}
+
+// PatternDecl checks and installs one top-level destructuring group. It is
+// also the REPL entry point; callers use allowEffects=false there.
+func (ck *Checker) PatternDecl(d *ast.PatternDecl, allowEffects bool) ([]DeclInfo, []diag.Error) {
+	return ck.patternDecl(d, allowEffects)
+}
+
+func (ck *Checker) patternDecl(d *ast.PatternDecl, allowEffects bool) ([]DeclInfo, []diag.Error) {
+	names := patternNames(d.Pattern, nil)
+	if len(names) == 0 {
+		return nil, []diag.Error{diag.Errorf(d.Pattern.Span(), "PATTERN BINDING", "A destructuring binding must bind at least one name.")}
+	}
+	var errs []diag.Error
+	for _, name := range names {
+		if types.SurfaceName(name) == "main" {
+			errs = append(errs, diag.Errorf(d.Pattern.Span(), "BAD MAIN", "`main` must be a direct declaration, not nested inside a destructuring pattern."))
+		}
+		if ck.Env.Has(name) {
+			errs = append(errs, diag.Errorf(d.Pattern.Span(), "MULTIPLE DEFINITIONS", "`%s` is defined more than once.", types.SurfaceName(name)))
+		}
+	}
+	if expanded, es := ck.StageExpr(d.Body); len(es) > 0 {
+		errs = append(errs, es...)
+	} else {
+		d.Body = expanded
+	}
+	owner := symbolModule(names[0])
+	ck.PatternGen++
+	subject := fmt.Sprintf("_pattern_%d", ck.PatternGen)
+	if owner != "" {
+		subject = owner + "." + subject
+	}
+	savedMono := ck.MonoValues
+	ck.MonoValues = true
+	defer func() { ck.MonoValues = savedMono }()
+	subjectDecl := &ast.ValueDecl{Name: subject, NameSpan: d.Pattern.Span(), Body: d.Body}
+	subjectInfo, es := ck.DeclWhere(subjectDecl, allowEffects)
+	errs = append(errs, es...)
+	ck.BindDecl(subjectInfo)
+	infos := []DeclInfo{subjectInfo}
+	var projected []DeclInfo
+	for i, name := range names {
+		pat, aliases := projectionPattern(d.Pattern)
+		body := &ast.Case{Scrutinee: &ast.Var{Name: subject, Sp: d.Pattern.Span()}, Branches: []ast.CaseBranch{{Pattern: pat, Body: &ast.Var{Name: aliases[name], Sp: d.Pattern.Span()}}}, Sp: d.Pattern.Span()}
+		vd := &ast.ValueDecl{Name: name, NameSpan: d.Pattern.Span(), Body: body}
+		info, es := ck.DeclWhere(vd, allowEffects)
+		// Every projection re-checks the same pattern against the same
+		// subject, so only the first copy of a pattern diagnostic is news.
+		if i == 0 {
+			errs = append(errs, es...)
+		}
+		projected = append(projected, info)
+	}
+	for _, info := range projected {
+		ck.BindDecl(info)
+		infos = append(infos, info)
+	}
+	return infos, errs
+}
+
+func projectionPattern(p ast.Pattern) (ast.Pattern, map[string]string) {
+	aliases := map[string]string{}
+	n := 0
+	var copy func(ast.Pattern) ast.Pattern
+	copy = func(p ast.Pattern) ast.Pattern {
+		switch p := p.(type) {
+		case *ast.PVar:
+			name := fmt.Sprintf("_pattern_var_%d", n)
+			n++
+			aliases[p.Name] = name
+			return &ast.PVar{Name: name, Sp: p.Sp}
+		case *ast.PWildcard:
+			return &ast.PWildcard{Sp: p.Sp}
+		case *ast.PUnit:
+			return &ast.PUnit{Sp: p.Sp}
+		case *ast.PInt:
+			q := *p
+			return &q
+		case *ast.PFloat:
+			q := *p
+			return &q
+		case *ast.PString:
+			q := *p
+			return &q
+		case *ast.PChar:
+			q := *p
+			return &q
+		case *ast.PPin:
+			q := *p
+			return &q
+		case *ast.PCtor:
+			q := *p
+			q.Args = make([]ast.Pattern, len(p.Args))
+			for i, a := range p.Args {
+				q.Args[i] = copy(a)
+			}
+			return &q
+		case *ast.PRecord:
+			q := *p
+			q.Fields = append([]ast.RecordPatternField(nil), p.Fields...)
+			for i := range q.Fields {
+				q.Fields[i].Pattern = copy(q.Fields[i].Pattern)
+			}
+			return &q
+		default:
+			panic("infer: unknown pattern in top-level projection")
+		}
+	}
+	return copy(p), aliases
 }
 
 func (ck *Checker) declareNative(d *ast.ValueDecl) []diag.Error {
@@ -737,8 +859,12 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 		errs = append(errs, diag.Errorf(d.NameSpan, "MAIN TAKES NO PARAMETERS",
 			"`main` may be a value or a one-argument Unit function."))
 	}
-	if isMain && len(d.Params) == 1 && d.Params[0].Name != "_" && d.Params[0].Name != "()" {
-		errs = append(errs, diag.Errorf(d.Params[0].Sp, "MAIN TAKES NO PARAMETERS", "Function-style `main` must use `main()` or discard its Unit argument with `_`."))
+	if isMain && len(d.Params) == 1 {
+		switch d.Params[0].(type) {
+		case *ast.PUnit, *ast.PWildcard:
+		default:
+			errs = append(errs, diag.Errorf(d.Params[0].Span(), "MAIN TAKES NO PARAMETERS", "Function-style `main` must use `main()` or discard its Unit argument with `_`."))
+		}
 	}
 
 	var annTy types.Type
@@ -759,13 +885,13 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 			g.cs = append(g.cs, Constraint{Left: g.ambient, Right: types.Row{}, Span: d.Body.Span(), Why: Why{Kind: WhyEffectEscapes}})
 		}
 	} else if annTy != nil {
-		ty = g.functionWithAnnotatedParams(d.Name, d.NameSpan, d.Params, d.Body, annTy)
+		ty = g.functionEquations(d.Name, d.NameSpan, declEquations(d), annTy)
 		if isMain && len(d.Params) == 1 {
 			want := &types.TFun{Arg: ck.B.Unit, Eff: types.Row{Labels: []types.EffLabel{{Unique: ck.IO.Unique, Name: ck.IO.Name}}}, Ret: ck.B.Unit}
 			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
 		}
 	} else {
-		ty = g.function(d.Name, d.NameSpan, d.Params, d.Body)
+		ty = g.functionEquations(d.Name, d.NameSpan, declEquations(d), nil)
 		if isMain && len(d.Params) == 1 {
 			want := &types.TFun{Arg: ck.B.Unit, Eff: types.Row{Labels: []types.EffLabel{{Unique: ck.IO.Unique, Name: ck.IO.Name}}}, Ret: ck.B.Unit}
 			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
@@ -811,7 +937,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 		errs = append(errs, solveErrs...)
 		ty = annTy
 	}
-	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Type: ty, Body: d.Body, InstanceLimit: len(ck.Instances)}
+	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Equations: d.Equations, Type: ty, Body: d.Body, InstanceLimit: len(ck.Instances)}
 	_, isLambda := d.Body.(*ast.Lambda)
 	switch {
 	case isMain:
@@ -965,15 +1091,16 @@ type recordUpdateObligation struct {
 }
 
 type generator struct {
-	ck          *Checker
-	locals      *blockScope
-	cs          []Constraint
-	errs        []diag.Error
-	ambient     types.Row
-	resumeType  types.Type
-	preds       []predObligation
-	records     []*recordObligation
-	patternPins *blockScope
+	ck            *Checker
+	locals        *blockScope
+	cs            []Constraint
+	errs          []diag.Error
+	ambient       types.Row
+	resumeType    types.Type
+	preds         []predObligation
+	records       []*recordObligation
+	patternPins   *blockScope
+	patternBinder string
 }
 
 func (g *generator) isDefaultPrint(op *types.EffectOp) bool {
@@ -1188,7 +1315,13 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 	case *ast.Lambda:
 		scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
 		g.locals = scope
+		oldPins := g.patternPins
+		g.patternPins = scope.parent
+		oldBinder := g.patternBinder
+		g.patternBinder = "parameter"
 		paramTys := g.bindParams(scope, e.Params)
+		g.patternBinder = oldBinder
+		g.patternPins = oldPins
 		savedAmbient := g.ambient
 		bodyAmbient := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
 		g.ambient = bodyAmbient
@@ -1337,30 +1470,33 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		if len(cl.Params) != op.Arity {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "HANDLER ARITY", "The operation `%s` takes %d argument(s), but this clause has %d.", op.Name, op.Arity, len(cl.Params)))
 		}
-		scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
-		g.locals = scope
-		for j, p := range cl.Params {
-			var pt types.Type = g.ck.Sup.FreshVar(types.General)
-			if j < len(paramTys) {
-				pt = paramTys[j]
-			}
-			if p.Name == "()" {
-				g.cs = append(g.cs, Constraint{Left: pt, Right: g.ck.B.Unit, Span: p.Sp, Why: Why{Kind: WhyPattern}})
-			} else if p.Name != "_" {
-				if _, dup := g.locals.lookup(p.Name); dup || g.ck.Env.Has(p.Name) {
-					g.errs = append(g.errs, diag.Errorf(p.Sp, "SHADOWING", "The handler parameter `%s` shadows a name that is already defined.", p.Name))
-				}
-				scope.names[p.Name] = types.Scheme{Body: pt}
-			}
+		eqs := cl.Equations
+		if len(eqs) == 0 {
+			eqs = []ast.Equation{{Params: cl.Params, Body: cl.Body, NameSpan: cl.OpSpan}}
 		}
-		oldResume := g.resumeType
-		g.resumeType = &types.TFun{Arg: opResult, Eff: residual, Ret: result}
-		clTy := g.expr(cl.Body)
-		g.resumeType = oldResume
-		g.locals = scope.parent
-		g.cs = append(g.cs, Constraint{Left: clTy, Right: result, Span: cl.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
-		if err := tailResume(cl.Body, true); err != "" {
-			g.errs = append(g.errs, diag.Errorf(cl.Body.Span(), "GENERAL CONTINUATIONS NOT READY", "%s", err))
+		for _, eq := range eqs {
+			scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
+			g.locals = scope
+			oldPins := g.patternPins
+			g.patternPins = scope.parent
+			for j, p := range eq.Params {
+				var pt types.Type = g.ck.Sup.FreshVar(types.General)
+				if j < len(paramTys) {
+					pt = paramTys[j]
+				}
+				patTy := g.pattern(p, scope)
+				g.cs = append(g.cs, Constraint{Left: patTy, Right: pt, Span: p.Span(), Why: Why{Kind: WhyPattern}})
+			}
+			g.patternPins = oldPins
+			oldResume := g.resumeType
+			g.resumeType = &types.TFun{Arg: opResult, Eff: residual, Ret: result}
+			clTy := g.expr(eq.Body)
+			g.resumeType = oldResume
+			g.locals = scope.parent
+			g.cs = append(g.cs, Constraint{Left: clTy, Right: result, Span: eq.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
+			if err := tailResume(eq.Body, true); err != "" {
+				g.errs = append(g.errs, diag.Errorf(eq.Body.Span(), "GENERAL CONTINUATIONS NOT READY", "%s", err))
+			}
 		}
 		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, ParamTypes: paramTys, OpResult: opResult})
 	}
@@ -1370,19 +1506,22 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		}
 	}
 	if e.Return != nil {
-		scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
-		g.locals = scope
-		if e.Return.Param.Name == "()" {
-			g.cs = append(g.cs, Constraint{Left: bodyTy, Right: g.ck.B.Unit, Span: e.Return.Param.Sp, Why: Why{Kind: WhyPattern}})
-		} else if e.Return.Param.Name != "_" {
-			if _, dup := g.locals.lookup(e.Return.Param.Name); dup || g.ck.Env.Has(e.Return.Param.Name) {
-				g.errs = append(g.errs, diag.Errorf(e.Return.Param.Sp, "SHADOWING", "The handler return parameter `%s` shadows a name that is already defined.", e.Return.Param.Name))
-			}
-			scope.names[e.Return.Param.Name] = types.Scheme{Body: bodyTy}
+		eqs := e.Return.Equations
+		if len(eqs) == 0 {
+			eqs = []ast.Equation{{Params: []ast.Pattern{e.Return.Param}, Body: e.Return.Body, NameSpan: e.Return.Sp}}
 		}
-		rt := g.expr(e.Return.Body)
-		g.locals = scope.parent
-		g.cs = append(g.cs, Constraint{Left: rt, Right: result, Span: e.Return.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
+		for _, eq := range eqs {
+			scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
+			g.locals = scope
+			oldPins := g.patternPins
+			g.patternPins = scope.parent
+			patTy := g.pattern(eq.Params[0], scope)
+			g.patternPins = oldPins
+			g.cs = append(g.cs, Constraint{Left: patTy, Right: bodyTy, Span: eq.Params[0].Span(), Why: Why{Kind: WhyPattern}})
+			rt := g.expr(eq.Body)
+			g.locals = scope.parent
+			g.cs = append(g.cs, Constraint{Left: rt, Right: result, Span: eq.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
+		}
 	} else {
 		g.cs = append(g.cs, Constraint{Left: bodyTy, Right: result, Span: e.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
 	}
@@ -1566,62 +1705,74 @@ func (g *generator) operationSpine(e *ast.App) (*types.EffectOp, int) {
 // the body's self-references type — monomorphic recursion. The fresh var
 // lives in the block scope, never in Env, so failed REPL definitions need
 // no rollback and redefinition resolves self-references to the new body.
-func (g *generator) function(name string, nameSpan source.Span, params []ast.Param, body ast.Expr) types.Type {
-	scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{name: {Body: g.ck.Sup.FreshVar(types.General)}}}
-	g.locals = scope
-	defer func() { g.locals = scope.parent }()
-
-	paramTys := g.bindParams(scope, params)
-	savedAmbient := g.ambient
-	bodyAmbient := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
-	resultTy := g.ck.Sup.FreshVar(types.General)
-	funTy := g.wrapFunction(paramTys, resultTy, bodyAmbient)
-	scope.names[name] = types.Scheme{Body: funTy}
-	g.ambient = bodyAmbient
-	bodyTy := g.expr(body)
-	g.ambient = savedAmbient
-
-	g.cs = append(g.cs, Constraint{Left: resultTy, Right: bodyTy, Span: nameSpan,
-		Why: Why{Kind: WhyRecursion, Name: name}})
-	return funTy
+func (g *generator) function(name string, nameSpan source.Span, params []ast.Pattern, body ast.Expr) types.Type {
+	return g.functionEquations(name, nameSpan, []ast.Equation{{Params: params, Body: body, NameSpan: nameSpan}}, nil)
 }
 
 // functionWithAnnotatedParams uses only the annotation's argument types while
 // independently inferring every arrow's effects. This lets callback effects
 // flow into a higher-order body without allowing an overstated result row to
 // manufacture effects the body never performs.
-func (g *generator) functionWithAnnotatedParams(name string, nameSpan source.Span, params []ast.Param, body ast.Expr, ann types.Type) types.Type {
-	scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{name: {Body: g.ck.Sup.FreshVar(types.General)}}}
-	g.locals = scope
-	defer func() { g.locals = scope.parent }()
-	cur := ann
-	paramTys := make([]types.Type, len(params))
-	for i, p := range params {
-		fn, ok := cur.(*types.TFun)
-		if !ok {
-			g.errs = append(g.errs, diag.Errorf(nameSpan, "TYPE MISMATCH", "The annotation for `%s` has fewer function parameters than its definition.", name))
-			return ann
-		}
-		paramTys[i] = fn.Arg
-		if p.Name == "()" {
-			g.cs = append(g.cs, Constraint{Left: fn.Arg, Right: g.ck.B.Unit, Span: p.Sp, Why: Why{Kind: WhyAnnotation, Name: name}})
-		} else if p.Name != "_" {
-			if _, dup := g.locals.lookup(p.Name); dup || g.ck.Env.Has(p.Name) {
-				g.errs = append(g.errs, diag.Errorf(p.Sp, "SHADOWING", "The parameter `%s` shadows a name that is already defined.", p.Name))
-			}
-			scope.names[p.Name] = types.Scheme{Body: fn.Arg}
-		}
-		cur = fn.Ret
+func (g *generator) functionWithAnnotatedParams(name string, nameSpan source.Span, params []ast.Pattern, body ast.Expr, ann types.Type) types.Type {
+	return g.functionEquations(name, nameSpan, []ast.Equation{{Params: params, Body: body, NameSpan: nameSpan}}, ann)
+}
+
+func declEquations(d *ast.ValueDecl) []ast.Equation {
+	if len(d.Equations) > 0 {
+		return d.Equations
 	}
-	savedAmbient := g.ambient
+	return []ast.Equation{{Params: d.Params, Body: d.Body, NameSpan: d.NameSpan}}
+}
+
+// functionEquations infers one shared worker type while giving each equation
+// an independent pattern scope. All bodies contribute to the final arrow's
+// effect row and must agree on one result type.
+func (g *generator) functionEquations(name string, nameSpan source.Span, eqs []ast.Equation, ann types.Type) types.Type {
+	outer := g.locals
+	paramTys := make([]types.Type, len(eqs[0].Params))
+	if ann != nil {
+		cur := ann
+		for i := range paramTys {
+			fn, ok := cur.(*types.TFun)
+			if !ok {
+				g.errs = append(g.errs, diag.Errorf(nameSpan, "TYPE MISMATCH", "The annotation for `%s` has fewer function parameters than its definition.", name))
+				return ann
+			}
+			paramTys[i] = fn.Arg
+			cur = fn.Ret
+		}
+	} else {
+		for i := range paramTys {
+			paramTys[i] = g.ck.Sup.FreshVar(types.General)
+		}
+	}
 	bodyAmbient := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
 	resultTy := g.ck.Sup.FreshVar(types.General)
 	funTy := g.wrapFunction(paramTys, resultTy, bodyAmbient)
-	scope.names[name] = types.Scheme{Body: funTy}
-	g.ambient = bodyAmbient
-	bodyTy := g.expr(body)
-	g.ambient = savedAmbient
-	g.cs = append(g.cs, Constraint{Left: resultTy, Right: bodyTy, Span: nameSpan, Why: Why{Kind: WhyRecursion, Name: name}})
+	for _, eq := range eqs {
+		if len(eq.Params) != len(paramTys) {
+			g.errs = append(g.errs, diag.Errorf(eq.NameSpan, "INCONSISTENT ARITY", "All equations for `%s` must have %d argument(s).", types.SurfaceName(name), len(paramTys)))
+			continue
+		}
+		scope := &blockScope{parent: outer, names: map[string]types.Scheme{name: {Body: funTy}}}
+		g.locals = scope
+		oldPins := g.patternPins
+		g.patternPins = outer
+		oldBinder := g.patternBinder
+		g.patternBinder = "parameter"
+		for i, p := range eq.Params {
+			pt := g.pattern(p, scope)
+			g.cs = append(g.cs, Constraint{Left: pt, Right: paramTys[i], Span: p.Span(), Why: Why{Kind: WhyPattern}})
+		}
+		g.patternBinder = oldBinder
+		g.patternPins = oldPins
+		savedAmbient := g.ambient
+		g.ambient = bodyAmbient
+		bodyTy := g.expr(eq.Body)
+		g.ambient = savedAmbient
+		g.cs = append(g.cs, Constraint{Left: resultTy, Right: bodyTy, Span: eq.NameSpan, Why: Why{Kind: WhyRecursion, Name: name}})
+	}
+	g.locals = outer
 	return funTy
 }
 
@@ -1640,24 +1791,10 @@ func (g *generator) wrapFunction(params []types.Type, ret types.Type, bodyRow ty
 // bindParams enters parameters into scope with the no-shadowing rule:
 // duplicates in the list, the function's own name, enclosing locals, and
 // top-level names are all rejected.
-func (g *generator) bindParams(scope *blockScope, params []ast.Param) []types.Type {
+func (g *generator) bindParams(scope *blockScope, params []ast.Pattern) []types.Type {
 	tys := make([]types.Type, len(params))
 	for i, p := range params {
-		if p.Name == "()" {
-			tys[i] = g.ck.B.Unit
-			continue
-		}
-		if p.Name == "_" {
-			tys[i] = g.ck.Sup.FreshVar(types.General)
-			continue
-		}
-		if _, dup := g.locals.lookup(p.Name); dup || g.ck.Env.Has(p.Name) {
-			g.errs = append(g.errs, diag.Errorf(p.Sp, "SHADOWING",
-				"The parameter `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", p.Name))
-		}
-		pv := g.ck.Sup.FreshVar(types.General)
-		scope.names[p.Name] = types.Scheme{Body: pv}
-		tys[i] = pv
+		tys[i] = g.pattern(p, scope)
 	}
 	return tys
 }
@@ -1682,6 +1819,20 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 			continue
 		}
 		bind := &e.Binds[item.BindIndex]
+		if bind.Pattern != nil {
+			if len(patternNames(bind.Pattern, nil)) == 0 {
+				g.errs = append(g.errs, diag.Errorf(bind.Pattern.Span(), "PATTERN BINDING", "A destructuring binding must bind at least one name."))
+			}
+			rhsTy := g.expr(bind.Body)
+			oldPins := g.patternPins
+			g.patternPins = g.locals
+			patTy := g.pattern(bind.Pattern, g.locals)
+			g.patternPins = oldPins
+			g.cs = append(g.cs, Constraint{Left: patTy, Right: rhsTy, Span: bind.Pattern.Span(), Why: Why{Kind: WhyPattern}})
+			g.ck.BindTypes[bind] = rhsTy
+			g.ck.BindSchemes[bind] = types.Scheme{Body: rhsTy}
+			continue
+		}
 		if _, dup := g.locals.lookup(bind.Name); dup || g.ck.Env.Has(bind.Name) {
 			where := "at the top level"
 			if dup {
@@ -1705,9 +1856,17 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 			annVars = annScope.Minted()
 		}
 		if len(bind.Params) > 0 && annTy != nil {
-			ty = g.functionWithAnnotatedParams(bind.Name, bind.NameSpan, bind.Params, bind.Body, annTy)
+			eqs := bind.Equations
+			if len(eqs) == 0 {
+				eqs = []ast.Equation{{Params: bind.Params, Body: bind.Body, NameSpan: bind.NameSpan}}
+			}
+			ty = g.functionEquations(bind.Name, bind.NameSpan, eqs, annTy)
 		} else if len(bind.Params) > 0 {
-			ty = g.function(bind.Name, bind.NameSpan, bind.Params, bind.Body)
+			eqs := bind.Equations
+			if len(eqs) == 0 {
+				eqs = []ast.Equation{{Params: bind.Params, Body: bind.Body, NameSpan: bind.NameSpan}}
+			}
+			ty = g.functionEquations(bind.Name, bind.NameSpan, eqs, nil)
 		} else {
 			ty = g.expr(bind.Body)
 		}
@@ -1930,10 +2089,16 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 	switch p := p.(type) {
 	case *ast.PWildcard:
 		return g.ck.Sup.FreshVar(types.General)
+	case *ast.PUnit:
+		return g.ck.B.Unit
 	case *ast.PVar:
 		if _, dup := g.locals.lookup(p.Name); dup || g.ck.Env.Has(p.Name) {
+			kind := g.patternBinder
+			if kind == "" {
+				kind = "pattern variable"
+			}
 			g.errs = append(g.errs, diag.Errorf(p.Sp, "SHADOWING",
-				"The pattern variable `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", p.Name))
+				"The %s `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", kind, p.Name))
 		}
 		pv := g.ck.Sup.FreshVar(types.General)
 		scope.names[p.Name] = types.Scheme{Body: pv}

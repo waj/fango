@@ -1,0 +1,11 @@
+(module
+  (type Choice (ctor Yes) (ctor No))
+  (def pickOne (patterns (pctor Yes)) (int 1))
+  (def pickOne (patterns (pctor No) (pvar extra)) (var extra)))
+-- errors --
+-- INCONSISTENT ARITY ----------------- err_equation_arity.fango
+
+Adjacent equations for `pickOne` must have the same number of arguments.
+
+5| pickOne No extra = extra
+   ^^^^^^^

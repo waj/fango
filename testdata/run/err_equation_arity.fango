@@ -1,0 +1,6 @@
+type Choice = Yes | No
+
+pick Yes = 1
+pick No extra = extra
+
+main = pick Yes

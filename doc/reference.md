@@ -574,14 +574,33 @@ comment before `()` makes it an ordinary application.
 
 Partial application and functions as values are supported. Lambdas use
 `\x y -> expression`; parenthesize a lambda when passing it as an argument.
-`_` discards a function parameter. Functions may have indented block bodies,
-and local function bindings are supported.
+Function and lambda arguments are patterns. Constructor applications must be
+parenthesized in an argument position (`map f (Cons x xs)`), while record and
+list patterns delimit themselves. `_` discards an argument. A lambda has one
+pattern row, so that row must be exhaustive.
+
+Adjacent definitions with the same name and arity form source-ordered
+equations for one function:
+
+```fango
+withDefault fallback Nothing = fallback
+withDefault _ (Just value) = value
+```
+
+Blank lines and comments do not split a group; another declaration does. One
+annotation immediately above the first equation applies to the group, so a row
+carrying its own annotation starts a new definition instead of joining the one
+above it. Rows in a group must agree on how many arguments they take, and the
+group must be exhaustive and non-redundant. Top-level, local, operator,
+instance-method, and deriver-method equations use the same rule. Only
+definitions with arguments group: a repeated zero-argument value remains a
+duplicate definition. Functions may have indented block bodies, and local
+function bindings are supported.
 
 A Unit function is canonically called as `f()`; `f ()` remains equivalent.
-Definitions accept the matching `f() = body` and `f () = body` spellings,
-which introduce one discarded Unit parameter. The empty parameter list must be
-the definition's only syntactic parameter group. The compatible `f _ = body`
-form remains available.
+An attached definition `f() = body` retains the sole-argument Unit-function
+spelling. Spaced Unit is an ordinary exhaustive pattern, so `f () x = body`
+has two arguments. The compatible `f _ = body` form remains available.
 
 Top-level functions can recurse and Hindley-Milner inference generalizes their
 types. Polymorphic values and parameterized ADTs are supported. Numeric
@@ -905,7 +924,8 @@ and `>=` are generated together.
 
 `case` branches align with the first pattern after `of`. Patterns support
 constructors, nominal records, integer/float/string/Char literals, variables,
-pinned values, and `_`. `^expected` compares with an existing local, top-level,
+pinned values, `()`, and `_`. Unit has exactly one inhabitant, so `()` is an
+exhaustive Unit pattern. `^expected` compares with an existing local, top-level,
 imported, or qualified value and requires `Eq`; it does not bind a name. Pins
 cannot refer to a binder introduced by the same pattern. Branch bodies may be
 inline expressions or blocks. Matches
@@ -934,6 +954,22 @@ matches the remaining list, so `[first | rest]` is the bracket spelling of
 `Cons first rest`. List patterns participate in the same exhaustiveness,
 redundancy, nesting, pinning, and duplicate-binder checks as constructor
 patterns.
+
+The same patterns may appear on the left of strict local or top-level value
+bindings:
+
+```fango
+Pair first second = pair
+```
+
+Such a binding must bind at least one name and its single row must be
+exhaustive. It has no direct annotation syntax; an annotation directly above one
+is a `DESTRUCTURING ANNOTATION` error, so annotate a named subject and
+destructure that subject on the following declaration. The RHS is checked and
+evaluated once, then every bound name becomes visible simultaneously. A
+top-level destructuring group is monomorphic and all its names participate in
+ordinary collision and export checks. `main` must be a direct declaration and
+cannot be introduced inside such a pattern.
 
 ## Effectful function types
 
@@ -996,10 +1032,12 @@ The compiler adds the declaring effect to each operation's type. Functions may
 annotate closed or open effect rows. An operation with a Unit argument is
 called explicitly with `()`.
 
-A handler handles one effect, must contain exactly one clause for every
-operation of that effect, and may include one `return value -> expression`
-clause. All clauses align like `case` branches. Operation parameters may use
-names, `_`, or `()` where the declared parameter is Unit. `resume value`
+A handler handles one effect and must contain a clause group for every
+operation of that effect. Adjacent repetitions of an operation form one
+source-ordered, exhaustive, non-redundant pattern group; a noncontiguous repeat
+is a duplicate-clause error. An optional adjacent `return` group matches the
+handled computation's normal result under the same rules. All clauses align
+like `case` branches and accept full argument patterns. `resume value`
 continues from the handled operation.
 
 Current handlers are deliberately restricted: every reachable operation-clause
@@ -1218,6 +1256,9 @@ multiline layout-sensitive input. Definitions echo
 their inferred types; expressions print a value and type. Errors do not end the
 session. Redefinition is allowed at the prompt, while existing memoized values
 and closures retain earlier bindings.
+The prompt accepts a single exhaustive patterned function equation and
+top-level destructuring bindings. It does not collect multiple function
+equations into a grouped input; use a source file for those.
 Record type declarations echo `Name : record`; their synthetic internal
 constructor is not part of the surface namespace.
 Classes cannot be redefined. Type redefinition creates a fresh identity and

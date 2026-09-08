@@ -1,0 +1,7 @@
+limit : Num a => a
+flip : Choice -> Choice
+swap : Pair a -> Pair a
+announce : Choice ->{IO} ()
+classify : (Eq a, Num a) => a -> String
+unwrap : Pair a -> a
+main : () ->{IO} ()

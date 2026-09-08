@@ -497,6 +497,10 @@ func TestTailLoopGeneratedShape(t *testing.T) {
 	}{
 		{"tail_loop_deep.fango", "V_loop", true},
 		{"tail_loop_unit.fango", "V_countdown", true},
+		// Equation dispatch happens inside the worker, so a grouped
+		// definition is still eligible for the loop rewrite.
+		{"tail_loop_equations.fango", "V_total", true},
+		{"tail_loop_equations.fango", "V_build", true},
 		{"tail_capture.fango", "V_applyAll", true},
 		{"tail_capture.fango", "V_build", false},
 	}

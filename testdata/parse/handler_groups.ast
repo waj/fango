@@ -1,0 +1,4 @@
+(module
+  (type Choice (ctor Yes) (ctor No))
+  (effect Ask (op ask (-> Choice Int)))
+  (def main (handle (app (var ask) (ctor Yes)) (clause-group ask (equation (patterns (pctor Yes)) (app (resume) (int 1))) (equation (patterns (pctor No)) (app (resume) (int 0)))) (return-group (equation (patterns (pint 1)) (ctor Yes)) (equation (patterns _) (ctor No))))))

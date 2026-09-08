@@ -1,0 +1,14 @@
+-- Instance and deriver methods take the same adjacent-equation rows as
+-- top-level definitions.
+type Choice = Yes | No
+
+class Label a
+    label : a -> String
+
+instance Label Choice
+    label Yes = "yes"
+    label No = "no"
+
+deriver Label
+    label subject (Wrapped code) = code
+    label subject _ = subject

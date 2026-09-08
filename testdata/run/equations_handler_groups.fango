@@ -1,0 +1,31 @@
+-- Each operation and `return` may repeat contiguously; every group must be
+-- exhaustive. Core handler cardinality is unchanged: one clause per operation.
+type Choice = Yes | No deriving (Show)
+
+effect Ask
+    ask : Choice -> Int
+    weigh : Choice -> Int -> Int
+    note : Choice -> ()
+
+program : () ->{Ask} Int
+program() =
+    note Yes
+    note No
+    ask Yes + ask No + weigh Yes 1 + weigh No 2
+
+main : () ->{IO} ()
+main() =
+    print (handle program() of
+        ask Yes -> resume 10
+        ask No -> resume 1
+        weigh Yes n -> resume (n * 10)
+        weigh No n -> resume n
+        note Yes -> resume ()
+        note No -> resume ()
+        return 23 -> 100
+        return other -> other)
+    -- Omitting `return` keeps the identity transformation.
+    print (handle program() of
+        ask _ -> resume 2
+        weigh _ n -> resume n
+        note _ -> resume ())

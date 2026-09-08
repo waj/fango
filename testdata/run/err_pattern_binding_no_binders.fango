@@ -1,0 +1,5 @@
+type Pair = Pair Int Int
+
+Pair _ _ = Pair 1 2
+
+main = 0

@@ -1,0 +1,13 @@
+-- A top-level destructuring group is monomorphic: the shared subject is
+-- checked and defaulted once, then every binder becomes visible.
+type Pair a = Pair a a
+type Point = { x : Int, y : Int }
+
+Pair leftCount rightCount = Pair 1 2
+
+Point { x = originX, y = originY } = Point { x = 0, y = 1 }
+
+main : () ->{IO} ()
+main() =
+    Pair localLeft localRight = Pair leftCount rightCount
+    print (localLeft + localRight + originX + originY)

@@ -31,32 +31,39 @@ func (el *elab) overloadedPattern(p ast.Pattern) bool {
 	return false
 }
 
-func (m *matcher) ordered(e *ast.Case, occ occurrence, i int) core.Tree {
-	if i == len(e.Branches) {
+func (m *matcher) ordered(patterns [][]ast.Pattern, occs []occurrence, i int) core.Tree {
+	if i == len(patterns) {
 		return &core.Unreachable{}
 	}
-	m.used[i] = true
-	p := e.Branches[i].Pattern
-	var previous [][]ast.Pattern
-	for j := 0; j < i; j++ {
-		previous = append(previous, []ast.Pattern{e.Branches[j].Pattern})
+	tys := make([]types.Type, len(occs))
+	for j := range occs {
+		tys[j] = occs[j].ty
 	}
-	if !m.useful([]types.Type{occ.ty}, previous, []ast.Pattern{p}) {
+	if !m.useful(tys, patterns[:i], patterns[i]) {
 		m.used[i] = false
-		return m.ordered(e, occ, i+1)
+		return m.ordered(patterns, occs, i+1)
 	}
-	if irrefutable(p) {
-		return m.orderedPattern(p, occ, &core.Leaf{Body: m.bodies[i]}, &core.Unreachable{})
+	m.used[i] = true
+	success := core.Tree(&core.Leaf{Body: m.bodies[i]})
+	failure := core.Tree(&core.Unreachable{})
+	allIrrefutable := true
+	for _, p := range patterns[i] {
+		allIrrefutable = allIrrefutable && irrefutable(p)
 	}
-	failure := m.ordered(e, occ, i+1)
-	return m.orderedPattern(p, occ, &core.Leaf{Body: m.bodies[i]}, failure)
+	if !allIrrefutable {
+		failure = m.ordered(patterns, occs, i+1)
+	}
+	for j := len(patterns[i]) - 1; j >= 0; j-- {
+		success = m.orderedPattern(patterns[i][j], occs[j], success, failure)
+	}
+	return success
 }
 
 func (m *matcher) orderedPattern(p ast.Pattern, occ occurrence, success, failure core.Tree) core.Tree {
 	el := m.el
 	ref := &core.VarRef{Name: occ.name, Ty: occ.ty, Local: true}
 	switch p := p.(type) {
-	case *ast.PWildcard:
+	case *ast.PWildcard, *ast.PUnit:
 		return success
 	case *ast.PVar:
 		if !core.TreeMentions(success, p.Name) {

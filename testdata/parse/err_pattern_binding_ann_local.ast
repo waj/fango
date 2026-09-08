@@ -1,0 +1,9 @@
+(module
+  (type Pair (ctor Pair Int Int)))
+-- errors --
+-- DESTRUCTURING ANNOTATION ---- err_pattern_binding_ann_local.fango
+
+A destructuring binding cannot have a direct type annotation; annotate a named subject first.
+
+5|     Pair first second = Pair 1 2
+       ^^^^

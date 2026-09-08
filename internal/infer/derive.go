@@ -200,7 +200,7 @@ func (ck *Checker) derivedInstance(td *ast.TypeDecl, adt *types.ADTInfo, cl *typ
 		surface := types.SurfaceName(cm.Name)
 		generator := deriver.Methods[surface]
 		arity := methodArity(cm.Type)
-		params := make([]ast.Param, arity)
+		params := make([]ast.Pattern, arity)
 		var operand ast.Expr = &ast.Var{Name: generator, Sp: sp}
 		operand = &ast.App{Fn: operand, Arg: &ast.App{
 			Fn:  &ast.Var{Name: InfoOfName, Sp: sp},
@@ -210,7 +210,7 @@ func (ck *Checker) derivedInstance(td *ast.TypeDecl, adt *types.ADTInfo, cl *typ
 		errs = append(errs, codeErrs...)
 		for i := range params {
 			name := fmt.Sprintf("_derived%d", i)
-			params[i] = ast.Param{Name: name, Sp: sp}
+			params[i] = &ast.PVar{Name: name, Sp: sp}
 			operand = &ast.App{Fn: operand, Arg: &ast.MetaValue{
 				Value: &meta.Code{Template: -1, Direct: &ast.Var{Name: name, Sp: sp}},
 				Ty:    codeType, Sp: sp,
@@ -309,7 +309,7 @@ func copyMethods(ms []*ast.ValueDecl) []*ast.ValueDecl {
 	out := make([]*ast.ValueDecl, len(ms))
 	for i, m := range ms {
 		n := *m
-		n.Params = append([]ast.Param(nil), m.Params...)
+		n.Params = append([]ast.Pattern(nil), m.Params...)
 		n.Body = meta.Rewrite(m.Body, func(ast.Expr) ast.Expr { return nil })
 		out[i] = &n
 	}

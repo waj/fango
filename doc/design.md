@@ -30,6 +30,13 @@ statements eagerly in order, then evaluates exactly one result expression.
 Top-level functions may recurse; local function bindings may recurse, but
 ordinary value self-reference is an undefined-name error.
 
+Contiguous same-name, same-arity function rows are one equation group. Each row
+gets an independent pattern scope, while the recursive function name,
+annotation, argument vector, result type, and final-arrow effect row are
+shared. Handler operation and return groups obey the same row semantics.
+Single-row lambdas and destructuring bindings pass through the identical
+coverage invariant rather than introducing a runtime match-failure path.
+
 Functions are curried at the language level. A syntactic multi-parameter
 function nevertheless has a known worker arity, allowing saturated calls to
 compile directly while partial applications allocate typed closures.
@@ -338,6 +345,12 @@ Record patterns follow the same lowering: omitted fields become wildcards and
 provided patterns are reordered into schema order. Hidden record constructors
 never appear in source diagnostics.
 
+Top-level destructuring is represented by one private monomorphic subject
+definition and one projection definition per binder. All projections reference
+that subject, so the RHS is evaluated once and the binders become visible as a
+group. Local destructuring uses the same subject-plus-decision-tree shape in a
+strict `Let`/`Case` chain.
+
 ## Compile-time metaprogramming
 
 Splices are expanded during inference, before Core exists, so both backends
@@ -464,7 +477,16 @@ Core is the compiler/interpreter contract. Every definition and expression is
 explicitly typed; generic definitions declare type parameters and uses carry
 explicit type arguments. Application nodes record whether their callee is a
 worker, constructor, primitive, operation, or indirect function. Matches are
-decision trees rather than surface branch lists.
+decision trees rather than surface branch lists. One reusable pattern-matrix
+compiler handles `case`, function equations, lambdas, handler groups, and
+destructuring. It accepts multiple argument columns, preserves source order for
+overloaded literals and pins, reports witnesses and redundant rows before Core
+is emitted, and lowers record views into constructor columns. Function and
+lambda workers bind deterministic hidden parameters and enter the tree only
+after the final syntactic application, preserving partial-application and
+effect timing. A definition of one identifier-only row is the exception: it
+keeps its source parameter names and needs no tree, so existing Core output
+and the optimizations that require plain forwarding parameters are unchanged.
 
 Class dictionaries are compiler-internal single-constructor ADTs with typed
 method-function fields. Qualified workers receive leading dictionary

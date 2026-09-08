@@ -1,0 +1,17 @@
+-- `()` is an exhaustive Unit pattern. The attached `f()` spelling still means
+-- a sole Unit argument; a spaced `()` is an ordinary first parameter.
+attached() = 1
+
+spaced : () -> Int -> Int
+spaced () n = n + 1
+
+both : () -> () -> Int
+both () () = 2
+
+main : () ->{IO} ()
+main() =
+    print attached()
+    print (spaced () 41)
+    print (both () ())
+    print (case () of
+        () -> 9)

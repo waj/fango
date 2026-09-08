@@ -122,7 +122,7 @@ func (p *parser) parseInstanceDecl() ast.Decl {
 			p.recoverToTopLevel(false)
 			return nil
 		}
-		params := p.parseValueParams()
+		params := p.parseValueParams(nameSpan)
 		eq := p.peekInExpr()
 		if !p.expect(token.EQ, "I expect `=` after the method parameters.") {
 			p.recoverToTopLevel(false)
@@ -133,7 +133,7 @@ func (p *parser) parseInstanceDecl() ast.Decl {
 			p.recoverToTopLevel(false)
 			return nil
 		}
-		d.Methods = append(d.Methods, &ast.ValueDecl{Name: name, NameSpan: nameSpan, Params: params, Body: body})
+		d.Methods = p.groupMethod(d.Methods, &ast.ValueDecl{Name: name, NameSpan: nameSpan, Params: params, Body: body})
 	}
 	return d
 }

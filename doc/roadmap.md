@@ -94,6 +94,8 @@ Haskell's ambient reification, which is what breaks modularity there.
 
 ## REPL hardening
 
+- Add a grouped-input mechanism for multiple top-level function equations;
+  today the prompt accepts only one exhaustive equation per input.
 - Implement `:load` and `:reload` for complete source files.
 - Reconcile values, custom types, constructors, and effects by generation so
   unchanged declarations retain identity while changed generative declarations

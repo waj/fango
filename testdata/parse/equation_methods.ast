@@ -1,0 +1,5 @@
+(module
+  (type Choice (ctor Yes) (ctor No))
+  (class Label a (label (-> a String)))
+  (instance  Label Choice (def label (equations (equation (patterns (pctor Yes)) (string "yes")) (equation (patterns (pctor No)) (string "no")))))
+  (deriver Label (def label (equations (equation (patterns (pvar subject) (pctor Wrapped (pvar code))) (var code)) (equation (patterns (pvar subject) _) (var subject))))))

@@ -77,7 +77,7 @@ func dumpDecl(d Decl) string {
 	case *ValueDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(def %s", d.Name)
-		if p := dumpParams(d.Params); p != "" {
+		if p := dumpPatternParams(d.Params); p != "" && len(d.Equations) == 0 {
 			fmt.Fprintf(&b, " %s", p)
 		}
 		if d.Ann != nil {
@@ -89,11 +89,19 @@ func dumpDecl(d Decl) string {
 				fmt.Fprintf(&b, " %q", *d.Native.Template)
 			}
 			b.WriteString(")")
+		} else if len(d.Equations) > 0 {
+			b.WriteString(" (equations")
+			for _, eq := range d.Equations {
+				fmt.Fprintf(&b, " (equation %s %s)", dumpEquationParams(eq.Params), DumpExpr(eq.Body))
+			}
+			b.WriteString(")")
 		} else {
 			fmt.Fprintf(&b, " %s", DumpExpr(d.Body))
 		}
 		b.WriteString(")")
 		return b.String()
+	case *PatternDecl:
+		return fmt.Sprintf("(pattern-def %s %s)", DumpPattern(d.Pattern), DumpExpr(d.Body))
 	case *TypeDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(type %s", d.Name)
@@ -162,6 +170,73 @@ func dumpParams(ps []Param) string {
 	return "(params " + strings.Join(names, " ") + ")"
 }
 
+func dumpPatternParams(ps []Pattern) string {
+	if len(ps) == 0 {
+		return ""
+	}
+	legacy := true
+	names := make([]string, len(ps))
+	for i, p := range ps {
+		switch p := p.(type) {
+		case *PVar:
+			names[i] = p.Name
+		case *PWildcard:
+			names[i] = "_"
+		case *PUnit:
+			names[i] = "()"
+		default:
+			legacy = false
+		}
+	}
+	if legacy {
+		return "(params " + strings.Join(names, " ") + ")"
+	}
+	return dumpEquationParams(ps)
+}
+
+// dumpEquationParams renders one row of an equation group. Groups always take
+// the explicit pattern form: only an ungrouped definition keeps the historical
+// identifier-only `(params …)` spelling.
+func dumpEquationParams(ps []Pattern) string {
+	if len(ps) == 0 {
+		return ""
+	}
+	parts := make([]string, len(ps))
+	for i, p := range ps {
+		parts[i] = DumpPattern(p)
+	}
+	return "(patterns " + strings.Join(parts, " ") + ")"
+}
+
+// dumpLocalBind renders one block statement. Identifier-only single bindings
+// keep their historical shape; groups and destructuring get their own forms.
+func dumpLocalBind(bind LocalBind) string {
+	if bind.Pattern != nil {
+		return fmt.Sprintf("(pattern-bind %s %s)", DumpPattern(bind.Pattern), DumpExpr(bind.Body))
+	}
+	var b strings.Builder
+	if len(bind.Equations) > 0 {
+		fmt.Fprintf(&b, "(bind-group %s", bind.Name)
+		if bind.Ann != nil {
+			fmt.Fprintf(&b, " (ann %s%s)", dumpPreds(bind.Ann.Preds), DumpTypeExpr(bind.Ann.Type))
+		}
+		for _, eq := range bind.Equations {
+			fmt.Fprintf(&b, " (equation %s %s)", dumpEquationParams(eq.Params), DumpExpr(eq.Body))
+		}
+		b.WriteString(")")
+		return b.String()
+	}
+	fmt.Fprintf(&b, "(bind %s", bind.Name)
+	if p := dumpPatternParams(bind.Params); p != "" {
+		fmt.Fprintf(&b, " %s", p)
+	}
+	if bind.Ann != nil {
+		fmt.Fprintf(&b, " (ann %s%s)", dumpPreds(bind.Ann.Preds), DumpTypeExpr(bind.Ann.Type))
+	}
+	fmt.Fprintf(&b, " %s)", DumpExpr(bind.Body))
+	return b.String()
+}
+
 func DumpTypeExpr(t TypeExpr) string {
 	switch t := t.(type) {
 	case *TName:
@@ -205,6 +280,8 @@ func DumpPattern(p Pattern) string {
 	switch p := p.(type) {
 	case *PWildcard:
 		return "_"
+	case *PUnit:
+		return "(punit)"
 	case *PVar:
 		return fmt.Sprintf("(pvar %s)", p.Name)
 	case *PInt:
@@ -292,25 +369,19 @@ func DumpExpr(e Expr) string {
 	case *Block:
 		var b strings.Builder
 		b.WriteString("(block")
+		// A block whose statements are all bindings carries no Items; the
+		// two spellings dump identically.
 		if len(e.Items) > 0 {
 			for _, item := range e.Items {
 				if item.Expr != nil {
 					fmt.Fprintf(&b, " (expr %s)", DumpExpr(item.Expr))
 					continue
 				}
-				bind := e.Binds[item.BindIndex]
-				fmt.Fprintf(&b, " (bind %s %s)", bind.Name, DumpExpr(bind.Body))
+				b.WriteString(" " + dumpLocalBind(e.Binds[item.BindIndex]))
 			}
 		} else {
 			for _, bind := range e.Binds {
-				fmt.Fprintf(&b, " (bind %s", bind.Name)
-				if p := dumpParams(bind.Params); p != "" {
-					fmt.Fprintf(&b, " %s", p)
-				}
-				if bind.Ann != nil {
-					fmt.Fprintf(&b, " (ann %s%s)", dumpPreds(bind.Ann.Preds), DumpTypeExpr(bind.Ann.Type))
-				}
-				fmt.Fprintf(&b, " %s)", DumpExpr(bind.Body))
+				b.WriteString(" " + dumpLocalBind(bind))
 			}
 		}
 		fmt.Fprintf(&b, " %s)", DumpExpr(e.Result))
@@ -324,23 +395,47 @@ func DumpExpr(e Expr) string {
 		b.WriteString(")")
 		return b.String()
 	case *Lambda:
-		names := make([]string, len(e.Params))
-		for i, p := range e.Params {
-			names[i] = p.Name
+		p := dumpPatternParams(e.Params)
+		if strings.HasPrefix(p, "(params ") {
+			p = "(" + strings.TrimSuffix(strings.TrimPrefix(p, "(params "), ")") + ")"
 		}
-		return fmt.Sprintf("(lambda (%s) %s)", strings.Join(names, " "), DumpExpr(e.Body))
+		return fmt.Sprintf("(lambda %s %s)", p, DumpExpr(e.Body))
 	case *Handle:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(handle %s", DumpExpr(e.Body))
 		for _, clause := range e.Clauses {
-			fmt.Fprintf(&b, " (clause %s", clause.Op)
-			if p := dumpParams(clause.Params); p != "" {
-				fmt.Fprintf(&b, " %s", p)
+			if len(clause.Equations) > 0 {
+				fmt.Fprintf(&b, " (clause-group %s", clause.Op)
+				for _, eq := range clause.Equations {
+					fmt.Fprintf(&b, " (equation %s %s)", dumpEquationParams(eq.Params), DumpExpr(eq.Body))
+				}
+				b.WriteString(")")
+			} else {
+				fmt.Fprintf(&b, " (clause %s", clause.Op)
+				if p := dumpPatternParams(clause.Params); p != "" {
+					fmt.Fprintf(&b, " %s", p)
+				}
+				fmt.Fprintf(&b, " %s)", DumpExpr(clause.Body))
 			}
-			fmt.Fprintf(&b, " %s)", DumpExpr(clause.Body))
 		}
 		if e.Return != nil {
-			fmt.Fprintf(&b, " (return %s %s)", e.Return.Param.Name, DumpExpr(e.Return.Body))
+			if len(e.Return.Equations) > 0 {
+				b.WriteString(" (return-group")
+				for _, eq := range e.Return.Equations {
+					fmt.Fprintf(&b, " (equation %s %s)", dumpEquationParams(eq.Params), DumpExpr(eq.Body))
+				}
+				b.WriteString(")")
+			} else {
+				name := DumpPattern(e.Return.Param)
+				if v, ok := e.Return.Param.(*PVar); ok {
+					name = v.Name
+				} else if _, ok := e.Return.Param.(*PWildcard); ok {
+					name = "_"
+				} else if _, ok := e.Return.Param.(*PUnit); ok {
+					name = "()"
+				}
+				fmt.Fprintf(&b, " (return %s %s)", name, DumpExpr(e.Return.Body))
+			}
 		}
 		b.WriteString(")")
 		return b.String()

@@ -1,0 +1,19 @@
+-- Adjacent same-arity rows form one group. Blank lines and comments do not
+-- split it; the annotation above the first row governs the whole group.
+type Choice = Yes | No
+
+flip : Choice -> Choice
+
+-- a comment inside the group
+flip Yes = No
+
+flip No = Yes
+
+(<+>) : Choice -> Choice -> Int
+(<+>) Yes _ = 1
+(<+>) No _ = 0
+
+main =
+    local Yes = 1
+    local No = 2
+    local Yes

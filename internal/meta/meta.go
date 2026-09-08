@@ -226,7 +226,7 @@ func copyWith(e ast.Expr, f func(ast.Expr) ast.Expr) ast.Expr {
 		return &n
 	case *ast.Lambda:
 		n := *e
-		n.Params = append([]ast.Param(nil), e.Params...)
+		n.Params = copyPatterns(e.Params)
 		n.Body = rec(e.Body)
 		return &n
 	case *ast.Block:
@@ -234,7 +234,9 @@ func copyWith(e ast.Expr, f func(ast.Expr) ast.Expr) ast.Expr {
 		n.Binds = make([]ast.LocalBind, len(e.Binds))
 		for i, b := range e.Binds {
 			nb := b
-			nb.Params = append([]ast.Param(nil), b.Params...)
+			nb.Params = copyPatterns(b.Params)
+			nb.Pattern = copyPattern(b.Pattern)
+			nb.Equations = copyEquations(b.Equations, rec)
 			nb.Body = rec(b.Body)
 			n.Binds[i] = nb
 		}
@@ -258,12 +260,15 @@ func copyWith(e ast.Expr, f func(ast.Expr) ast.Expr) ast.Expr {
 		n.Clauses = make([]ast.HandleClause, len(e.Clauses))
 		for i, c := range e.Clauses {
 			nc := c
-			nc.Params = append([]ast.Param(nil), c.Params...)
+			nc.Params = copyPatterns(c.Params)
+			nc.Equations = copyEquations(c.Equations, rec)
 			nc.Body = rec(c.Body)
 			n.Clauses[i] = nc
 		}
 		if e.Return != nil {
 			ret := *e.Return
+			ret.Param = copyPattern(e.Return.Param)
+			ret.Equations = copyEquations(e.Return.Equations, rec)
 			ret.Body = rec(e.Return.Body)
 			n.Return = &ret
 		}
@@ -311,11 +316,17 @@ func copyFields(fs []ast.RecordExprField, f func(ast.Expr) ast.Expr) []ast.Recor
 }
 
 func copyPattern(p ast.Pattern) ast.Pattern {
+	if p == nil {
+		return nil
+	}
 	switch p := p.(type) {
 	case *ast.PVar:
 		n := *p
 		return &n
 	case *ast.PWildcard:
+		n := *p
+		return &n
+	case *ast.PUnit:
 		n := *p
 		return &n
 	case *ast.PInt:
@@ -352,6 +363,22 @@ func copyPattern(p ast.Pattern) ast.Pattern {
 	default:
 		panic("meta: unhandled pattern node in copy")
 	}
+}
+
+func copyPatterns(ps []ast.Pattern) []ast.Pattern {
+	out := make([]ast.Pattern, len(ps))
+	for i, p := range ps {
+		out[i] = copyPattern(p)
+	}
+	return out
+}
+
+func copyEquations(eqs []ast.Equation, rec func(ast.Expr) ast.Expr) []ast.Equation {
+	out := make([]ast.Equation, len(eqs))
+	for i, eq := range eqs {
+		out[i] = ast.Equation{Params: copyPatterns(eq.Params), Body: rec(eq.Body), NameSpan: eq.NameSpan}
+	}
+	return out
 }
 
 // FillSpans gives compiler-built nodes a source position. The traversal
@@ -420,13 +447,19 @@ func FillSpans(e ast.Expr, sp source.Span) {
 	case *ast.Lambda:
 		fill(&e.Sp)
 		for i := range e.Params {
-			fill(&e.Params[i].Sp)
+			fillPatternSpans(e.Params[i], sp)
 		}
 		rec(e.Body)
 	case *ast.Block:
 		for i := range e.Binds {
-			fill(&e.Binds[i].NameSpan)
-			rec(e.Binds[i].Body)
+			b := &e.Binds[i]
+			fill(&b.NameSpan)
+			for _, param := range b.Params {
+				fillPatternSpans(param, sp)
+			}
+			fillPatternSpans(b.Pattern, sp)
+			fillEquationSpans(b.Equations, sp, rec)
+			rec(b.Body)
 		}
 		for _, it := range e.Items {
 			rec(it.Expr)
@@ -443,9 +476,16 @@ func FillSpans(e ast.Expr, sp source.Span) {
 		fill(&e.Sp)
 		rec(e.Body)
 		for i := range e.Clauses {
-			rec(e.Clauses[i].Body)
+			c := &e.Clauses[i]
+			for _, param := range c.Params {
+				fillPatternSpans(param, sp)
+			}
+			fillEquationSpans(c.Equations, sp, rec)
+			rec(c.Body)
 		}
 		if e.Return != nil {
+			fillPatternSpans(e.Return.Param, sp)
+			fillEquationSpans(e.Return.Equations, sp, rec)
 			rec(e.Return.Body)
 		}
 	case *ast.Quote:
@@ -461,7 +501,19 @@ func FillSpans(e ast.Expr, sp source.Span) {
 	}
 }
 
+func fillEquationSpans(eqs []ast.Equation, sp source.Span, rec func(...ast.Expr)) {
+	for i := range eqs {
+		for _, param := range eqs[i].Params {
+			fillPatternSpans(param, sp)
+		}
+		rec(eqs[i].Body)
+	}
+}
+
 func fillPatternSpans(p ast.Pattern, sp source.Span) {
+	if p == nil {
+		return
+	}
 	fill := func(at *source.Span) {
 		if at.File == nil {
 			*at = sp
@@ -471,6 +523,8 @@ func fillPatternSpans(p ast.Pattern, sp source.Span) {
 	case *ast.PVar:
 		fill(&p.Sp)
 	case *ast.PWildcard:
+		fill(&p.Sp)
+	case *ast.PUnit:
 		fill(&p.Sp)
 	case *ast.PInt:
 		fill(&p.Sp)

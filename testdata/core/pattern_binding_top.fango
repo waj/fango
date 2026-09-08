@@ -1,0 +1,7 @@
+-- One private subject holds the shared right-hand side; each public binder is
+-- a projection out of that single definition.
+type Pair = Pair Int Int
+
+Pair leftCount rightCount = Pair 1 2
+
+main = leftCount + rightCount

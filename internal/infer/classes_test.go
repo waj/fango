@@ -95,7 +95,7 @@ func TestClassDiagnostics(t *testing.T) {
 		{"incomparable overlap", "type Pair a b = Pair a b\nclass C a\n    c : a -> a\ninstance C (Pair Int a)\n    c x = x\ninstance C (Pair a Int)\n    c x = x", "OVERLAPPING INSTANCE"},
 		{"undetermined instance choice", "type Box a = Box\nclass C a\n    c : a -> Bool\ninstance C (Box Int)\n    c x = True\ninstance C (Box a)\n    c x = False\nf = c Box", "AMBIGUOUS CONSTRAINT"},
 		{"missing method", "class C a\n    c : a -> a\n    d : a -> a\ninstance C Int\n    c x = x", "MISSING METHOD"},
-		{"duplicate method", "class C a\n    c : a -> a\ninstance C Int\n    c x = x\n    c y = y", "DUPLICATE METHOD"},
+		{"duplicate method", "class C a\n    c : a -> a\n    d : a -> a\ninstance C Int\n    c x = x\n    d x = x\n    c y = y", "DUPLICATE METHOD"},
 		{"unknown method", "class C a\n    c : a -> a\ninstance C Int\n    c x = x\n    d x = x", "UNKNOWN METHOD"},
 		{"overlap", "instance Eq Int\n    (==) x y = True", "OVERLAPPING INSTANCE"},
 		{"unknown class", "f : Missing a => a -> a\nf x = x", "UNKNOWN CLASS"},

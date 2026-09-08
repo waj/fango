@@ -213,21 +213,32 @@ func isDecl(toks []token.Token) bool {
 	i := 1
 	switch {
 	case len(toks) >= 2 && toks[0].Kind == token.LIDENT:
+	case len(toks) >= 2 && (toks[0].Kind == token.UIDENT || toks[0].Kind == token.LBRACKET || toks[0].Kind == token.LPAREN):
+		i = 0
 	case len(toks) >= 4 && toks[0].Kind == token.LPAREN && toks[1].Kind == token.OP && toks[2].Kind == token.RPAREN:
 		i = 3
 	default:
 		return false
 	}
-	if toks[i].Kind == token.COLON {
+	if i < len(toks) && toks[i].Kind == token.COLON {
 		return true
 	}
-	if i+1 < len(toks) && toks[i].Kind == token.LPAREN && toks[i+1].Kind == token.RPAREN {
-		i += 2
+	depth := 0
+	for ; i < len(toks); i++ {
+		switch toks[i].Kind {
+		case token.LPAREN, token.LBRACKET, token.LBRACE:
+			depth++
+		case token.RPAREN, token.RBRACKET, token.RBRACE:
+			if depth > 0 {
+				depth--
+			}
+		case token.EQ:
+			if depth == 0 {
+				return true
+			}
+		}
 	}
-	for i < len(toks) && (toks[i].Kind == token.LIDENT || toks[i].Kind == token.UNDERSCORE) {
-		i++
-	}
-	return i < len(toks) && toks[i].Kind == token.EQ
+	return false
 }
 
 func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inputResult {
@@ -310,7 +321,45 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		fmt.Fprintf(s.out, "%s %d (%s)\n", fd.Assoc, fd.Prec, fd.Op)
 		return inputDone
 	}
+	if pd, ok := m.Decls[0].(*ast.PatternDecl); ok {
+		rollback := s.ck.Checkpoint()
+		infos, inferErrs := s.ck.PatternDecl(pd, false)
+		if len(inferErrs) > 0 {
+			rollback()
+			diag.Render(s.out, inferErrs)
+			return inputDone
+		}
+		var allDefs []core.Def
+		for _, info := range infos {
+			defs, es := elaborate.Decl(info, s.ck)
+			if len(es) > 0 {
+				rollback()
+				diag.Render(s.out, es)
+				return inputDone
+			}
+			allDefs = append(allDefs, defs...)
+		}
+		for i := range allDefs {
+			def := &allDefs[i]
+			if def.IsWorker() {
+				s.env.DefineWorker(def)
+			} else {
+				s.env.Define(def.Name, def.Body)
+			}
+		}
+		s.ck.Checked = append(s.ck.Checked, infos...)
+		for _, info := range infos[1:] {
+			sch := info.Scheme
+			sch.Body = s.ck.Sub.Apply(sch.Body)
+			fmt.Fprintf(s.out, "%s : %s\n", types.SurfaceName(info.Name), types.ShowScheme(sch))
+		}
+		return inputDone
+	}
 	vd := m.Decls[0].(*ast.ValueDecl)
+	if len(vd.Equations) > 0 {
+		diag.Render(s.out, []diag.Error{diag.Errorf(vd.NameSpan, "GROUPED INPUT", "Multiple function equations are supported in source files; enter one exhaustive equation at the REPL.")})
+		return inputDone
+	}
 	if vd.Native != nil {
 		diag.Render(s.out, []diag.Error{diag.Errorf(vd.Native.Sp, "NATIVE MODULE REQUIRED", "Native declarations belong in source modules with a sidecar and cannot be entered directly at the REPL.")})
 		return inputDone

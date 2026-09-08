@@ -1,0 +1,10 @@
+(module
+  (type Pair (ctor Pair Int Int))
+  (pattern-def (pctor Pair (pvar first) (pvar second)) (app (app (ctor Pair) (int 1)) (int 2))))
+-- errors --
+-- DESTRUCTURING ANNOTATION ------ err_pattern_binding_ann.fango
+
+A destructuring binding cannot have a direct type annotation; annotate a named subject first.
+
+5| Pair first second = Pair 1 2
+   ^^^^

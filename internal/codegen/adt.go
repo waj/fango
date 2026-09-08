@@ -98,7 +98,17 @@ func (g *gen) caseStmts(e *core.Case, leaf func(core.Expr) []goast.Stmt) []goast
 	// Record the binder's (instantiated) type: nested constructor switches
 	// read their column's type arguments from here.
 	g.caseVarTys[e.Bind] = e.Scrut.Type()
-	stmts := []goast.Stmt{varDeclStmt(bind, g.goType(e.Scrut.Type()), g.expr(e.Scrut, 0))}
+	// A multi-column tree tests worker parameters directly, so its binder can
+	// go unmentioned — and Go rejects an unused variable. Discard the value
+	// instead, or emit nothing at all when the scrutinee is a bound local and
+	// re-reading it could not have an effect.
+	var stmts []goast.Stmt
+	switch {
+	case core.TreeMentions(e.Tree, e.Bind):
+		stmts = append(stmts, varDeclStmt(bind, g.goType(e.Scrut.Type()), g.expr(e.Scrut, 0)))
+	case !isLocalVarRef(e.Scrut):
+		stmts = append(stmts, assignStmt("_", g.expr(e.Scrut, 0)))
+	}
 	return append(stmts, g.treeStmts(e.Tree, leaf)...)
 }
 
@@ -225,6 +235,13 @@ func (g *gen) ctorSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) 
 		Assign: tag,
 		Body:   &goast.BlockStmt{List: clauses},
 	}}
+}
+
+// isLocalVarRef reports whether e is already a bound local, so re-evaluating
+// it would be a no-op.
+func isLocalVarRef(e core.Expr) bool {
+	v, ok := e.(*core.VarRef)
+	return ok && v.Local
 }
 
 func anyBind(binds []string) bool {

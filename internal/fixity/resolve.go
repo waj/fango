@@ -109,19 +109,30 @@ func (r *resolver) ambiguous(stacked ast.OpRef, f Fixity, incoming ast.OpRef, g 
 func (r *resolver) decl(d ast.Decl) {
 	switch d := d.(type) {
 	case *ast.ValueDecl:
+		r.value(d)
+	case *ast.PatternDecl:
 		d.Body = r.expr(d.Body)
 	case *ast.InstanceDecl:
 		for _, m := range d.Methods {
-			m.Body = r.expr(m.Body)
+			r.value(m)
 		}
 	case *ast.DeriverDecl:
 		for _, m := range d.Methods {
-			m.Body = r.expr(m.Body)
+			r.value(m)
 		}
 	case *ast.ClassDecl, *ast.EffectDecl, *ast.TypeDecl, *ast.FixityDecl:
 		// Signatures and type declarations hold no expressions.
 	default:
 		panic(fmt.Sprintf("fixity: unhandled declaration %T", d))
+	}
+}
+
+func (r *resolver) value(d *ast.ValueDecl) {
+	if d.Body != nil {
+		d.Body = r.expr(d.Body)
+	}
+	for i := range d.Equations {
+		d.Equations[i].Body = r.expr(d.Equations[i].Body)
 	}
 }
 
@@ -150,6 +161,9 @@ func (r *resolver) expr(e ast.Expr) ast.Expr {
 	case *ast.Block:
 		for i := range e.Binds {
 			e.Binds[i].Body = r.expr(e.Binds[i].Body)
+			for j := range e.Binds[i].Equations {
+				e.Binds[i].Equations[j].Body = r.expr(e.Binds[i].Equations[j].Body)
+			}
 		}
 		for i := range e.Items {
 			e.Items[i].Expr = r.expr(e.Items[i].Expr)
@@ -164,9 +178,15 @@ func (r *resolver) expr(e ast.Expr) ast.Expr {
 		e.Body = r.expr(e.Body)
 		for i := range e.Clauses {
 			e.Clauses[i].Body = r.expr(e.Clauses[i].Body)
+			for j := range e.Clauses[i].Equations {
+				e.Clauses[i].Equations[j].Body = r.expr(e.Clauses[i].Equations[j].Body)
+			}
 		}
 		if e.Return != nil {
 			e.Return.Body = r.expr(e.Return.Body)
+			for i := range e.Return.Equations {
+				e.Return.Equations[i].Body = r.expr(e.Return.Equations[i].Body)
+			}
 		}
 	case *ast.RecordLit:
 		for i := range e.Fields {

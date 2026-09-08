@@ -870,6 +870,10 @@ func buildInterface(n *node, errs []diag.Error) (*iface, []diag.Error) {
 			}
 		case *ast.ValueDecl:
 			all.values[d.Name] = canonical(n.name, d.Name)
+		case *ast.PatternDecl:
+			for _, b := range patternBinders(d.Pattern) {
+				all.values[b.Name] = canonical(n.name, b.Name)
+			}
 		case *ast.TypeDecl:
 			all.types[d.Name] = canonical(n.name, d.Name)
 			if d.RecordFields != nil {
@@ -1187,14 +1191,7 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 			}
 			d.Class = r.qualified(d.Class, r.tys, "type", d.ClassSpan)
 			for _, m := range d.Methods {
-				locals := map[string]bool{}
-				for _, p := range m.Params {
-					if p.Name != "_" && p.Name != "()" {
-						r.checkBinder(p.Name, p.Sp, r.vals)
-						locals[p.Name] = true
-					}
-				}
-				r.expr(m.Body, r.vals, locals)
+				r.resolveValueRows(m, r.vals)
 			}
 			out = append(out, d)
 		case *ast.InstanceDecl:
@@ -1208,14 +1205,7 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 				r.predicate(&d.Preds[i])
 			}
 			for _, m := range d.Methods {
-				locals := map[string]bool{}
-				for _, p := range m.Params {
-					if p.Name != "_" && p.Name != "()" {
-						r.checkBinder(p.Name, p.Sp, r.vals)
-						locals[p.Name] = true
-					}
-				}
-				r.expr(m.Body, r.vals, locals)
+				r.resolveValueRows(m, r.vals)
 			}
 			out = append(out, d)
 		case *ast.ValueDecl:
@@ -1232,16 +1222,25 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 			if d.Native != nil {
 				d.Native.Module = r.node.nativeModule
 			}
-			locals := map[string]bool{}
-			for _, p := range d.Params {
-				if p.Name != "_" && p.Name != "()" {
-					r.checkBinder(p.Name, p.Sp, visible)
-					locals[p.Name] = true
-				}
-			}
-			r.expr(d.Body, visible, locals)
+			r.resolveValueRows(d, visible)
 			d.Name = canon
 			r.vals[surface] = canon
+			out = append(out, d)
+		case *ast.PatternDecl:
+			// Pins and the RHS see only the outer scope. Binders are installed
+			// simultaneously after both have been resolved.
+			r.expr(d.Body, r.vals, map[string]bool{})
+			locals := map[string]bool{}
+			r.pattern(d.Pattern, locals, r.vals)
+			for _, b := range patternBinders(d.Pattern) {
+				if _, exists := r.vals[b.Name]; exists {
+					r.errs = append(r.errs, diag.Errorf(b.Sp, "UNQUALIFIED COLLISION", "The value `%s` collides with an exposed import or existing declaration.", b.Name))
+				}
+				surface := b.Name
+				canon := r.canon(surface)
+				b.Name = canon
+				r.vals[surface] = canon
+			}
 			out = append(out, d)
 		case *ast.FixityDecl:
 			// A fixity binds a spelling, not a value, so Op is never
@@ -1504,30 +1503,34 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 		r.expr(e.R, vals, locals)
 	case *ast.Lambda:
 		ls := copySet(locals)
-		for _, p := range e.Params {
-			if p.Name != "_" {
-				r.checkBinder(p.Name, p.Sp, vals)
-				ls[p.Name] = true
-			}
-		}
+		r.patternVector(e.Params, ls, vals)
 		r.expr(e.Body, vals, ls)
 	case *ast.Block:
 		ls := copySet(locals)
 		for i := range e.Binds {
 			b := &e.Binds[i]
+			if b.Pattern != nil {
+				r.expr(b.Body, vals, ls)
+				r.pattern(b.Pattern, ls, vals)
+				continue
+			}
 			r.checkBinder(b.Name, b.NameSpan, vals)
 			r.typeAnn(b.Ann)
 			inner := copySet(ls)
-			for _, p := range b.Params {
-				if p.Name != "_" {
-					r.checkBinder(p.Name, p.Sp, vals)
-					inner[p.Name] = true
+			if len(b.Equations) > 0 {
+				for _, eq := range b.Equations {
+					row := copySet(ls)
+					row[b.Name] = true
+					r.patternVector(eq.Params, row, vals)
+					r.expr(eq.Body, vals, row)
 				}
+			} else {
+				r.patternVector(b.Params, inner, vals)
+				if len(b.Params) > 0 {
+					inner[b.Name] = true
+				}
+				r.expr(b.Body, vals, inner)
 			}
-			if len(b.Params) > 0 {
-				inner[b.Name] = true
-			}
-			r.expr(b.Body, vals, inner)
 			ls[b.Name] = true
 		}
 		for _, it := range e.Items {
@@ -1548,20 +1551,30 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 		for i := range e.Clauses {
 			c := &e.Clauses[i]
 			c.Op = r.qualified(c.Op, r.ops, "op", c.OpSpan)
-			ls := copySet(locals)
-			for _, p := range c.Params {
-				if p.Name != "_" && p.Name != "()" {
-					r.checkBinder(p.Name, p.Sp, vals)
-					ls[p.Name] = true
+			if len(c.Equations) > 0 {
+				for _, eq := range c.Equations {
+					ls := copySet(locals)
+					r.patternVector(eq.Params, ls, vals)
+					r.expr(eq.Body, vals, ls)
 				}
+			} else {
+				ls := copySet(locals)
+				r.patternVector(c.Params, ls, vals)
+				r.expr(c.Body, vals, ls)
 			}
-			r.expr(c.Body, vals, ls)
 		}
 		if e.Return != nil {
-			ls := copySet(locals)
-			r.checkBinder(e.Return.Param.Name, e.Return.Param.Sp, vals)
-			ls[e.Return.Param.Name] = true
-			r.expr(e.Return.Body, vals, ls)
+			if len(e.Return.Equations) > 0 {
+				for _, eq := range e.Return.Equations {
+					ls := copySet(locals)
+					r.patternVector(eq.Params, ls, vals)
+					r.expr(eq.Body, vals, ls)
+				}
+			} else {
+				ls := copySet(locals)
+				r.pattern(e.Return.Param, ls, vals)
+				r.expr(e.Return.Body, vals, ls)
+			}
 		}
 	}
 }
@@ -1578,9 +1591,54 @@ func (r *resolver) checkBinder(name string, sp source.Span, vals map[string]stri
 	}
 }
 
+func patternBinders(p ast.Pattern) []*ast.PVar {
+	var out []*ast.PVar
+	var walk func(ast.Pattern)
+	walk = func(p ast.Pattern) {
+		switch p := p.(type) {
+		case *ast.PVar:
+			out = append(out, p)
+		case *ast.PCtor:
+			for _, a := range p.Args {
+				walk(a)
+			}
+		case *ast.PRecord:
+			for _, f := range p.Fields {
+				walk(f.Pattern)
+			}
+		}
+	}
+	walk(p)
+	return out
+}
+
+func (r *resolver) resolveValueRows(d *ast.ValueDecl, vals map[string]string) {
+	if len(d.Equations) == 0 {
+		locals := map[string]bool{}
+		r.patternVector(d.Params, locals, vals)
+		if d.Body != nil {
+			r.expr(d.Body, vals, locals)
+		}
+		return
+	}
+	for i := range d.Equations {
+		eq := &d.Equations[i]
+		locals := map[string]bool{}
+		r.patternVector(eq.Params, locals, vals)
+		r.expr(eq.Body, vals, locals)
+	}
+}
+
 func (r *resolver) pattern(p ast.Pattern, locals map[string]bool, vals map[string]string) {
 	outer := copySet(locals)
 	r.patternInner(p, locals, outer, vals)
+}
+
+func (r *resolver) patternVector(ps []ast.Pattern, locals map[string]bool, vals map[string]string) {
+	outer := copySet(locals)
+	for _, p := range ps {
+		r.patternInner(p, locals, outer, vals)
+	}
 }
 
 func (r *resolver) patternInner(p ast.Pattern, locals, outer map[string]bool, vals map[string]string) {

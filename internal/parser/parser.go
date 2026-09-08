@@ -54,6 +54,12 @@ func Parse(toks []token.Token, f *source.File) (*ast.Module, []diag.Error) {
 	}
 	for p.peek().Kind != token.EOF {
 		if d := p.parseDecl(); d != nil {
+			if vd, ok := d.(*ast.ValueDecl); ok && len(m.Decls) > 0 {
+				prev, _ := m.Decls[len(m.Decls)-1].(*ast.ValueDecl)
+				if p.appendEquation(prev, vd) {
+					continue
+				}
+			}
 			m.Decls = append(m.Decls, d)
 		}
 	}
@@ -260,11 +266,12 @@ func (p *parser) parseDecl() ast.Decl {
 	// by the `(op)` spelling.
 	var declName string
 	var nameSpan source.Span
+	_, startsOpName := p.opNameAt(p.pos)
 	switch {
 	case t.Kind == token.LIDENT:
 		declName, nameSpan = t.Text, t.Span
 		p.next()
-	case t.Kind == token.LPAREN:
+	case t.Kind == token.LPAREN && startsOpName:
 		var ok bool
 		if declName, nameSpan, ok = p.parseOpName(); !ok {
 			// The `(` sits at column 1, so recovery must consume it or the
@@ -273,6 +280,21 @@ func (p *parser) parseDecl() ast.Decl {
 			return nil
 		}
 	default:
+		if startsPatternDecl(t.Kind) {
+			p.stmtStart = p.pos
+			pat := p.parsePattern()
+			eq := p.peekInExpr()
+			if !p.expect(token.EQ, "I expect `=` after the binding pattern.") {
+				p.recoverToTopLevel(false)
+				return nil
+			}
+			body := p.parseBindBody(eq)
+			if body == nil {
+				p.recoverToTopLevel(false)
+				return nil
+			}
+			return &ast.PatternDecl{Pattern: pat, Body: body}
+		}
 		p.errorAt(t.Span, "SYNTAX PROBLEM",
 			"I was expecting a declaration here, like `name = expression`.")
 		p.recoverToTopLevel(true) // the bad token sits at column 1: must consume it
@@ -302,6 +324,12 @@ func (p *parser) parseDecl() ast.Decl {
 			repeated = nt.Text
 			isOpName = nt.Kind == token.LIDENT
 		}
+		if !isOpName && nt.Pos().Col == 1 && startsPatternDecl(nt.Kind) {
+			p.errorAt(nt.Span, "DESTRUCTURING ANNOTATION",
+				"A destructuring binding cannot have a direct type annotation; annotate a named subject first.")
+			p.recoverToTopLevel(false)
+			return nil
+		}
 		if !isOpName || repeated != declName || nt.Pos().Col != 1 {
 			p.errorAt(nt.Span, "MISSING DEFINITION",
 				"The type annotation for `"+shown+"` must sit directly above its\ndefinition, like:\n\n    "+shown+" : Int\n    "+shown+" = 42")
@@ -316,7 +344,7 @@ func (p *parser) parseDecl() ast.Decl {
 		p.next()
 	}
 
-	params := p.parseValueParams()
+	params := p.parseValueParams(nameSpan)
 	eqTok := p.peekInExpr()
 	if !p.expect(token.EQ, "I expect `=` after the name in a declaration.") {
 		p.recoverToTopLevel(false)
@@ -345,6 +373,12 @@ func (p *parser) parseDecl() ast.Decl {
 	return &ast.ValueDecl{Name: declName, NameSpan: nameSpan, Params: params, Ann: ann, Body: body}
 }
 
+// startsPatternDecl reports whether a token at column 1 can begin a top-level
+// destructuring binding rather than a named declaration.
+func startsPatternDecl(k token.Kind) bool {
+	return k == token.UIDENT || k == token.LBRACKET || k == token.LPAREN
+}
+
 func (p *parser) parseDeriverDecl() ast.Decl {
 	start := p.next()
 	class, _, sp := p.parseQualifiedName()
@@ -368,7 +402,7 @@ func (p *parser) parseDeriverDecl() ast.Decl {
 		if !ok {
 			return nil
 		}
-		params := p.parseValueParams()
+		params := p.parseValueParams(nameSpan)
 		if !p.expect(token.EQ, "I expect `=` after the deriver method parameters.") {
 			return nil
 		}
@@ -376,9 +410,43 @@ func (p *parser) parseDeriverDecl() ast.Decl {
 		if body == nil {
 			return nil
 		}
-		d.Methods = append(d.Methods, &ast.ValueDecl{Name: name, NameSpan: nameSpan, Params: params, Body: body})
+		d.Methods = p.groupMethod(d.Methods, &ast.ValueDecl{Name: name, NameSpan: nameSpan, Params: params, Body: body})
 	}
 	return d
+}
+
+func (p *parser) groupMethod(methods []*ast.ValueDecl, next *ast.ValueDecl) []*ast.ValueDecl {
+	var prev *ast.ValueDecl
+	if len(methods) > 0 {
+		prev = methods[len(methods)-1]
+	}
+	if p.appendEquation(prev, next) {
+		return methods
+	}
+	return append(methods, next)
+}
+
+// appendEquation folds next into prev's equation group when the two are
+// contiguous rows of one definition, reporting whether it did. Only definitions
+// with arguments form groups: a repeated zero-argument value is a duplicate
+// definition, and one annotation governs a whole group, so a row carrying its
+// own annotation starts a new definition instead.
+func (p *parser) appendEquation(prev, next *ast.ValueDecl) bool {
+	if prev == nil || next.Ann != nil || next.Native != nil || prev.Native != nil {
+		return false
+	}
+	if prev.Name != next.Name || len(prev.Params) == 0 || len(next.Params) == 0 {
+		return false
+	}
+	if len(prev.Params) != len(next.Params) {
+		p.errorAt(next.NameSpan, "INCONSISTENT ARITY", "Adjacent equations for `"+ast.Spelling(next.Name)+"` must have the same number of arguments.")
+		return false
+	}
+	if len(prev.Equations) == 0 {
+		prev.Equations = []ast.Equation{{Params: prev.Params, Body: prev.Body, NameSpan: prev.NameSpan}}
+	}
+	prev.Equations = append(prev.Equations, ast.Equation{Params: next.Params, Body: next.Body, NameSpan: next.NameSpan})
+	return true
 }
 
 func (p *parser) parseNativeBody() *ast.NativeBody {
@@ -734,20 +802,33 @@ func (p *parser) parseParams() []ast.Param {
 // parseValueParams also accepts the nullary spelling `()`, represented by
 // the same single discarded Unit parameter as the compatible `f _` form.
 // It must be the declaration's sole syntactic parameter group.
-func (p *parser) parseValueParams() []ast.Param {
+func (p *parser) parseValueParams(nameSpan source.Span) []ast.Pattern {
 	if p.peekInExpr().Kind == token.LPAREN && p.pos+1 < len(p.toks) && p.toks[p.pos+1].Kind == token.RPAREN {
 		lp := p.next()
 		rp := p.next()
-		if k := p.peekInExpr().Kind; k == token.LIDENT || k == token.UNDERSCORE || k == token.LPAREN {
-			p.errorAt(p.peekInExpr().Span, "NULLARY PARAMETER LIST",
-				"An empty Unit parameter list must be the only parameter group in a definition.")
-			for p.peekInExpr().Kind != token.EQ && p.peekInExpr().Kind != token.EOF && p.peekInExpr().Pos().Line == lp.Pos().Line {
-				p.next()
+		// Attached f() remains the sole-argument Unit-function spelling. With
+		// whitespace, () is an ordinary Unit pattern and more arguments follow.
+		if nameSpan.End == lp.Span.Start {
+			if isPatternAtomStart(p.peekInExpr().Kind) {
+				p.errorAt(p.peekInExpr().Span, "NULLARY PARAMETER LIST",
+					"An empty Unit parameter list must be the only parameter group in a definition.")
+				for p.peekInExpr().Kind != token.EQ && p.peekInExpr().Kind != token.EOF && p.peekInExpr().Pos().Line == lp.Pos().Line {
+					p.next()
+				}
 			}
+			return []ast.Pattern{&ast.PUnit{Sp: lp.Span.Merge(rp.Span)}}
 		}
-		return []ast.Param{{Name: "()", Sp: lp.Span.Merge(rp.Span)}}
+		params := []ast.Pattern{&ast.PUnit{Sp: lp.Span.Merge(rp.Span)}}
+		for isPatternAtomStart(p.peekInExpr().Kind) {
+			params = append(params, p.parsePatternAtom())
+		}
+		return params
 	}
-	return p.parseParams()
+	var params []ast.Pattern
+	for isPatternAtomStart(p.peekInExpr().Kind) {
+		params = append(params, p.parsePatternAtom())
+	}
+	return params
 }
 
 // parseBindBody dispatches on where a binding's body starts (doc/design.md, "Language semantics"): on the
@@ -786,6 +867,7 @@ const (
 	stmtBind
 	stmtAnn
 	stmtLocalFn
+	stmtPatternBind
 	// stmtLocalOp is `(op) params… =` in a block: not a supported binding,
 	// but recognized so it gets its own diagnostic rather than the generic
 	// "expression seemed complete" one.
@@ -815,6 +897,9 @@ func (p *parser) classifyStmt(col int) stmtKind {
 		return stmtResult
 	}
 	if p.toks[i].Kind != token.LIDENT {
+		if isPatternAtomStart(p.toks[i].Kind) && hasStatementEqual(p.toks, i, col) {
+			return stmtPatternBind
+		}
 		return stmtResult
 	}
 	if !inBounds(i + 1) {
@@ -825,20 +910,34 @@ func (p *parser) classifyStmt(col int) stmtKind {
 		return stmtBind
 	case token.COLON:
 		return stmtAnn
-	case token.LIDENT:
-		j := i + 1
-		for inBounds(j) && p.toks[j].Kind == token.LIDENT {
-			j++
-		}
-		if inBounds(j) && p.toks[j].Kind == token.EQ {
-			return stmtLocalFn
-		}
-	case token.LPAREN:
-		if inBounds(i+2) && p.toks[i+2].Kind == token.RPAREN && inBounds(i+3) && p.toks[i+3].Kind == token.EQ {
-			return stmtLocalFn
-		}
+	}
+	if hasStatementEqual(p.toks, i+1, col) {
+		return stmtLocalFn
 	}
 	return stmtResult
+}
+
+func hasStatementEqual(toks []token.Token, start, col int) bool {
+	depth := 0
+	for i := start; i < len(toks); i++ {
+		t := toks[i]
+		if t.Kind == token.EOF || (i > start && depth == 0 && t.Pos().Col <= col) {
+			return false
+		}
+		switch t.Kind {
+		case token.LPAREN, token.LBRACKET, token.LBRACE:
+			depth++
+		case token.RPAREN, token.RBRACKET, token.RBRACE:
+			if depth > 0 {
+				depth--
+			}
+		case token.EQ:
+			if depth == 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // closesBlock reports whether a token at a block's own column ends the block
@@ -888,7 +987,7 @@ func (p *parser) parseBlock(col int) ast.Expr {
 			return nil
 		case stmtBind, stmtLocalFn:
 			nameT := p.next()
-			params := p.parseValueParams()
+			params := p.parseValueParams(nameT.Span)
 			eqT := p.peekInExpr()
 			if !p.expect(token.EQ, "I expect `=` after the binding name.") {
 				return nil
@@ -902,11 +1001,44 @@ func (p *parser) parseBlock(col int) ast.Expr {
 			if rhs == nil {
 				return nil
 			}
-			binds = append(binds, ast.LocalBind{
+			next := ast.LocalBind{
 				Name: nameT.Text, NameSpan: nameT.Span, Params: params, Ann: pendingAnn, Body: rhs,
-			})
+			}
+			if len(params) > 0 && pendingAnn == nil && len(binds) > 0 && len(items) > 0 && items[len(items)-1].Expr == nil {
+				prev := &binds[len(binds)-1]
+				if prev.Name == next.Name && len(prev.Params) > 0 {
+					if len(prev.Params) != len(next.Params) {
+						p.errorAt(nameT.Span, "INCONSISTENT ARITY", "Adjacent equations for `"+nameT.Text+"` must have the same number of arguments.")
+					} else {
+						if len(prev.Equations) == 0 {
+							prev.Equations = []ast.Equation{{Params: prev.Params, Body: prev.Body, NameSpan: prev.NameSpan}}
+						}
+						prev.Equations = append(prev.Equations, ast.Equation{Params: next.Params, Body: next.Body, NameSpan: next.NameSpan})
+						continue
+					}
+				}
+			}
+			binds = append(binds, next)
 			items = append(items, ast.BlockItem{BindIndex: len(binds) - 1})
 			pendingAnn = nil
+
+		case stmtPatternBind:
+			if pendingAnn != nil {
+				p.errorAt(t.Span, "DESTRUCTURING ANNOTATION", "A destructuring binding cannot have a direct type annotation; annotate a named subject first.")
+				return nil
+			}
+			p.stmtStart = p.pos
+			pat := p.parsePattern()
+			eqT := p.peekInExpr()
+			if !p.expect(token.EQ, "I expect `=` after the binding pattern.") {
+				return nil
+			}
+			rhs := p.parseBindBody(eqT)
+			if rhs == nil {
+				return nil
+			}
+			binds = append(binds, ast.LocalBind{Pattern: pat, Body: rhs})
+			items = append(items, ast.BlockItem{BindIndex: len(binds) - 1})
 
 		case stmtAnn:
 			nameT := p.next()
@@ -1248,6 +1380,7 @@ func (p *parser) parseHandle() ast.Expr {
 	p.lay.push(ctxCase, first.Pos().Col)
 	defer p.lay.pop()
 	result := &ast.Handle{Body: body, Sp: h.Span}
+	lastClause := ""
 	for {
 		p.stmtStart = p.pos
 		op := p.peekInExpr()
@@ -1282,14 +1415,34 @@ func (p *parser) parseHandle() ast.Expr {
 				p.errorAt(op.Span, "SYNTAX PROBLEM", "A `return` clause needs exactly one parameter.")
 				return nil
 			}
-			if result.Return != nil {
+			if result.Return != nil && lastClause != "return" {
 				p.errorAt(op.Span, "SYNTAX PROBLEM", "A handler can have only one `return` clause.")
 				return nil
 			}
-			result.Return = &ast.ReturnClause{Param: params[0], Body: clauseBody, Sp: op.Span}
+			if result.Return == nil {
+				result.Return = &ast.ReturnClause{Param: params[0], Body: clauseBody, Sp: op.Span}
+			} else {
+				if len(result.Return.Equations) == 0 {
+					result.Return.Equations = []ast.Equation{{Params: []ast.Pattern{result.Return.Param}, Body: result.Return.Body, NameSpan: result.Return.Sp}}
+				}
+				result.Return.Equations = append(result.Return.Equations, ast.Equation{Params: params, Body: clauseBody, NameSpan: op.Span})
+			}
 		} else {
-			result.Clauses = append(result.Clauses, ast.HandleClause{Op: opName, OpSpan: opSpan, Params: params, Body: clauseBody})
+			if lastClause == opName && len(result.Clauses) > 0 && result.Clauses[len(result.Clauses)-1].Op == opName {
+				prev := &result.Clauses[len(result.Clauses)-1]
+				if len(prev.Params) != len(params) {
+					p.errorAt(opSpan, "INCONSISTENT ARITY", "Adjacent clauses for `"+opName+"` must have the same number of arguments.")
+				} else {
+					if len(prev.Equations) == 0 {
+						prev.Equations = []ast.Equation{{Params: prev.Params, Body: prev.Body, NameSpan: prev.OpSpan}}
+					}
+					prev.Equations = append(prev.Equations, ast.Equation{Params: params, Body: clauseBody, NameSpan: opSpan})
+				}
+			} else {
+				result.Clauses = append(result.Clauses, ast.HandleClause{Op: opName, OpSpan: opSpan, Params: params, Body: clauseBody})
+			}
 		}
+		lastClause = opName
 		nt := p.peek()
 		if nt.Kind == token.EOF || !p.lay.atBranchCol(nt.Pos()) {
 			break
@@ -1302,22 +1455,12 @@ func (p *parser) parseHandle() ast.Expr {
 	return result
 }
 
-func (p *parser) parseClauseParams() []ast.Param {
-	var params []ast.Param
-	for {
-		if p.peekInExpr().Kind == token.LIDENT || p.peekInExpr().Kind == token.UNDERSCORE {
-			t := p.next()
-			params = append(params, ast.Param{Name: t.Text, Sp: t.Span})
-			continue
-		}
-		if p.peekInExpr().Kind == token.LPAREN && p.pos+1 < len(p.toks) && p.toks[p.pos+1].Kind == token.RPAREN {
-			lp := p.next()
-			rp := p.next()
-			params = append(params, ast.Param{Name: "()", Sp: lp.Span.Merge(rp.Span)})
-			continue
-		}
-		return params
+func (p *parser) parseClauseParams() []ast.Pattern {
+	var params []ast.Pattern
+	for isPatternAtomStart(p.peekInExpr().Kind) {
+		params = append(params, p.parsePatternAtom())
 	}
+	return params
 }
 
 // parseLambda parses `\x -> body` / `\x y -> body`. Like `if`, a lambda
@@ -1325,7 +1468,10 @@ func (p *parser) parseClauseParams() []ast.Param {
 // the body extends maximally right (or opens an indented block).
 func (p *parser) parseLambda() ast.Expr {
 	bs := p.next() // the backslash
-	params := p.parseParams()
+	var params []ast.Pattern
+	for isPatternAtomStart(p.peekInExpr().Kind) {
+		params = append(params, p.parsePatternAtom())
+	}
 	if len(params) == 0 {
 		p.errorAt(p.peek().Span, "SYNTAX PROBLEM",
 			"A lambda needs at least one parameter, like `\\x -> x + 1`.")
@@ -1505,7 +1651,11 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 			"In a pattern, `-` must be followed directly by a number literal.")
 		return nil
 	case token.LPAREN:
-		p.next()
+		lp := p.next()
+		if p.peekInExpr().Kind == token.RPAREN {
+			rp := p.next()
+			return &ast.PUnit{Sp: lp.Span.Merge(rp.Span)}
+		}
 		pat := p.parsePattern()
 		if pat == nil {
 			return nil

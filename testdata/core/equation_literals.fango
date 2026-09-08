@@ -1,0 +1,7 @@
+-- Overlapping literal rows keep source order; the last row is the default.
+grade : Int -> String
+grade 0 = "zero"
+grade 1 = "one"
+grade _ = "many"
+
+main = grade 1

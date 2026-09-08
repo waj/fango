@@ -1,0 +1,5 @@
+-- Destructuring has no direct annotation, at the top level or in a block.
+type Pair = Pair Int Int
+
+first : Int
+Pair first second = Pair 1 2

@@ -1,0 +1,27 @@
+-- Destructuring bindings at the top level and inside a block. The shared
+-- right-hand side runs once and all binders appear together.
+import List exposing (List)
+
+type Pair = Pair Int Int
+type Point = { x : Int, y : Int }
+type Wrap a = Wrap a
+
+Pair topLeft topRight = Pair 1 2
+
+Point { x = originX, y = originY } = Point { x = 10, y = 20 }
+
+Wrap (Pair nestedLeft nestedRight) = Wrap (Pair 5 6)
+
+count : List Int -> Int
+count [] = 0
+count [_ | rest] = 1 + count rest
+
+main : () ->{IO} ()
+main() =
+    Pair localLeft localRight = Pair (topLeft + originX) (topRight + originY)
+    Point { x = localX } = Point { x = 7, y = 8 }
+    print localLeft
+    print localRight
+    print localX
+    print (nestedLeft + nestedRight)
+    print (count [localLeft, localRight])

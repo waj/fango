@@ -1,0 +1,2 @@
+-- The attached `()` spelling must be a definition's only parameter group.
+ready() extra = extra

@@ -1,0 +1,15 @@
+-- Equation dispatch happens inside the worker, so a grouped definition stays
+-- eligible for the loop rewrite: both a literal column and a constructor
+-- column run in constant stack, deep enough to overflow a per-call backend.
+import List exposing (List)
+
+build : Int -> List Int -> List Int
+build 0 acc = acc
+build n acc = build (n - 1) [n | acc]
+
+total : List Int -> Int -> Int
+total [] acc = acc
+total [n | rest] acc = total rest (acc + n)
+
+main : () ->{IO} ()
+main() = print (total (build 200000 []) 0)

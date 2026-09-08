@@ -1,0 +1,3 @@
+(core
+  (def grade (params _arg0) Int -> String (case String (var _arg0 Int) _match1 (switchlit _match1 ((int 0 Int) (leaf (string "zero" String))) ((int 1 Int) (leaf (string "one" String))) (default (leaf (string "many" String))))))
+  (def main String (app/worker (var grade Int -> String) (int 1 Int) String)))

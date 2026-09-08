@@ -1,0 +1,5 @@
+-- Adjacent rows must agree on how many arguments they take.
+type Choice = Yes | No
+
+pickOne Yes = 1
+pickOne No extra = extra

@@ -1,0 +1,12 @@
+-- A left-hand pattern destructures, at the top level and inside a block.
+type Pair = Pair Int Int
+type Point = { x : Int, y : Int }
+
+Pair topLeft topRight = Pair 1 2
+
+Point { x = originX, y = originY } = Point { x = 0, y = 0 }
+
+main =
+    Pair localLeft localRight = Pair topLeft topRight
+    [head | rest] = [originX, originY]
+    localLeft + localRight + head

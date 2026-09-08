@@ -1,0 +1,6 @@
+(module
+  (type Pair (ctor Pair Int Int))
+  (type Point (record (field x Int) (field y Int)))
+  (pattern-def (pctor Pair (pvar topLeft) (pvar topRight)) (app (app (ctor Pair) (int 1)) (int 2)))
+  (pattern-def (precord Point (x (pvar originX)) (y (pvar originY))) (record Point (x (int 0)) (y (int 0))))
+  (def main (block (pattern-bind (pctor Pair (pvar localLeft) (pvar localRight)) (app (app (ctor Pair) (var topLeft)) (var topRight))) (pattern-bind (pctor List.Cons (pvar head) (pvar rest)) (app (app (ctor List.Cons) (var originX)) (app (app (ctor List.Cons) (var originY)) (ctor List.Nil)))) (binop + (binop + (var localLeft) (var localRight)) (var head)))))

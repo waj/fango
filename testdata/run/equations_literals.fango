@@ -1,0 +1,26 @@
+-- Overlapping rows are selected in source order, pins included.
+limit = 3
+
+grade : Int -> String
+grade 0 = "zero"
+grade ^limit = "limit"
+grade 1 = "one"
+grade _ = "many"
+
+sign : Float -> String
+sign 0.0 = "zero"
+sign _ = "other"
+
+initial : Char -> String
+initial 'a' = "first"
+initial _ = "later"
+
+main : () ->{IO} ()
+main() =
+    print (grade 0)
+    print (grade 1)
+    print (grade 3)
+    print (grade 9)
+    print (sign 0.0)
+    print (initial 'a')
+    print (initial 'z')

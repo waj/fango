@@ -60,7 +60,7 @@ func (el *elab) caseExpr(e *ast.Case, ty types.Type) core.Expr {
 		}
 	}
 	if ordered {
-		tree = m.ordered(e, occurrence{name: bind, ty: scrut.Type()}, 0)
+		tree = m.ordered(witnessMatrix, []occurrence{{name: bind, ty: scrut.Type()}}, 0)
 	} else {
 		tree = m.compile([]occurrence{{name: bind, ty: scrut.Type()}}, rows)
 	}
@@ -76,6 +76,107 @@ func (el *elab) caseExpr(e *ast.Case, ty types.Type) core.Expr {
 		return &core.Let{Name: bind, Rhs: scrut, Body: leaf.Body, Ty: leaf.Body.Type()}
 	}
 	return &core.Case{Scrut: scrut, Bind: bind, Tree: tree, Ty: ty}
+}
+
+// matchPatternRows is the reusable multi-column entry point used by function
+// equations, patterned lambdas, grouped handler clauses, and destructuring
+// bindings. The occurrences are already-bound worker parameters; dispatch is
+// therefore inserted only in the final worker body.
+func (el *elab) matchPatternRows(patterns [][]ast.Pattern, bodies []ast.Expr, spans []source.Span, occs []occurrence, at source.Span, context string) core.Expr {
+	m := &matcher{el: el, bodies: make([]core.Expr, len(patterns)), spans: spans, used: make([]bool, len(patterns))}
+	rows := make([]row, len(patterns))
+	matrix := make([][]ast.Pattern, len(patterns))
+	tys := make([]types.Type, len(occs))
+	for i := range occs {
+		tys[i] = occs[i].ty
+	}
+	for i := range patterns {
+		matrix[i] = make([]ast.Pattern, len(patterns[i]))
+		for j, p := range patterns[i] {
+			matrix[i][j] = el.lowerRecordPattern(p)
+		}
+		n := 0
+		for _, p := range matrix[i] {
+			n += el.pushPatternVars(p)
+		}
+		m.bodies[i] = el.expr(bodies[i])
+		el.popScope(n)
+		rows[i] = row{pats: matrix[i], idx: i}
+	}
+	if w := m.witness(tys, matrix); w != nil {
+		example := strings.Join(w, " ")
+		el.errs = append(el.errs, diag.Errorf(at, "MISSING PATTERNS",
+			"This %s does not cover every possible argument. For example, it does not handle:\n\n    %s", context, example))
+		return m.bodies[0]
+	}
+	ordered := false
+	for _, ps := range matrix {
+		for _, p := range ps {
+			ordered = ordered || el.overloadedPattern(p)
+		}
+	}
+	var tree core.Tree
+	if ordered {
+		tree = m.ordered(matrix, occs, 0)
+	} else {
+		tree = m.compile(occs, rows)
+	}
+	for i, used := range m.used {
+		if !used {
+			el.errs = append(el.errs, diag.Errorf(spans[i], "REDUNDANT PATTERN", "This equation can never match because earlier equations already cover it."))
+		}
+	}
+	if leaf, ok := tree.(*core.Leaf); ok {
+		return leaf.Body
+	}
+	// Core `Case` binds its scrutinee once and the tree tests that binder.
+	// The tree here tests worker parameters directly, so the wrapper adopts
+	// whichever column the root node examines: rebinding it keeps the Core
+	// shape (and the Go backend's caseVarTys) honest and leaves no unused
+	// binding behind.
+	bind := fmt.Sprintf("_match%d", el.tmp)
+	el.tmp++
+	root := rootScrutinee(tree, bind)
+	scrut := occs[0]
+	for _, occ := range occs {
+		if occ.name == root {
+			scrut = occ
+			break
+		}
+	}
+	return &core.Case{Scrut: &core.VarRef{Name: scrut.name, Ty: scrut.ty, Local: true}, Bind: bind, Tree: tree, Ty: m.bodies[0].Type()}
+}
+
+// rootScrutinee renames the occurrence tested at the tree's root to bind and
+// reports the original name. A root that tests nothing leaves the tree alone
+// and reports "".
+func rootScrutinee(tree core.Tree, bind string) string {
+	switch t := tree.(type) {
+	case *core.SwitchCtor:
+		name := t.Scrut
+		t.Scrut = bind
+		return name
+	case *core.SwitchLit:
+		name := t.Scrut
+		t.Scrut = bind
+		return name
+	}
+	return ""
+}
+
+func (el *elab) bindPatternCore(pattern ast.Pattern, rhs core.Expr, subject string, subjectTy types.Type, body core.Expr) core.Expr {
+	p := el.lowerRecordPattern(pattern)
+	m := &matcher{el: el, bodies: []core.Expr{body}, spans: []source.Span{pattern.Span()}, used: []bool{false}}
+	if w := m.witness([]types.Type{subjectTy}, [][]ast.Pattern{{p}}); w != nil {
+		el.errs = append(el.errs, diag.Errorf(pattern.Span(), "MISSING PATTERNS",
+			"This destructuring binding is refutable. For example, it does not handle:\n\n    %s", w[0]))
+		return &core.Let{Name: subject, Rhs: rhs, Body: body, Ty: body.Type()}
+	}
+	tree := m.compile([]occurrence{{name: subject, ty: subjectTy}}, []row{{pats: []ast.Pattern{p}, idx: 0}})
+	if leaf, ok := tree.(*core.Leaf); ok {
+		return &core.Let{Name: subject, Rhs: rhs, Body: leaf.Body, Ty: body.Type()}
+	}
+	return &core.Case{Scrut: rhs, Bind: subject, Tree: tree, Ty: body.Type()}
 }
 
 func (el *elab) lowerRecordPattern(p ast.Pattern) ast.Pattern {
@@ -138,7 +239,7 @@ type matcher struct {
 
 func irrefutable(p ast.Pattern) bool {
 	switch p.(type) {
-	case *ast.PVar, *ast.PWildcard:
+	case *ast.PVar, *ast.PWildcard, *ast.PUnit:
 		return true
 	}
 	return false
@@ -259,7 +360,7 @@ func specializeWitness(c *types.CtorInfo, matrix [][]ast.Pattern) [][]ast.Patter
 			if p.Name == c.Name {
 				out = append(out, splicePats(r, 0, p.Args))
 			}
-		case *ast.PVar, *ast.PWildcard:
+		case *ast.PVar, *ast.PWildcard, *ast.PUnit:
 			out = append(out, splicePats(r, 0, wildcards(len(c.Fields))))
 		}
 	}
@@ -392,7 +493,7 @@ func (m *matcher) switchCtor(occs []occurrence, rows []row, col int, adt *types.
 					binds: append(append([]patBind{}, r.binds...), patBind{name: p.Name, occ: occs[col].name, ty: occs[col].ty}),
 					idx:   r.idx,
 				})
-			case *ast.PWildcard:
+			case *ast.PWildcard, *ast.PUnit:
 				spec = append(spec, row{
 					pats:  splicePats(r.pats, col, wildcards(len(ctor.Fields))),
 					binds: r.binds,
@@ -422,7 +523,7 @@ func (m *matcher) switchCtor(occs []occurrence, rows []row, col int, adt *types.
 					binds: append(append([]patBind{}, r.binds...), patBind{name: p.Name, occ: occs[col].name, ty: occs[col].ty}),
 					idx:   r.idx,
 				})
-			case *ast.PWildcard:
+			case *ast.PWildcard, *ast.PUnit:
 				defRows = append(defRows, row{pats: removePat(r.pats, col), binds: r.binds, idx: r.idx})
 			}
 		}
@@ -465,7 +566,7 @@ func (m *matcher) switchLit(occs []occurrence, rows []row, col int) core.Tree {
 				specs[k] = append(specs[k], nr)
 			}
 			specs["_default"] = append(specs["_default"], nr)
-		case *ast.PWildcard:
+		case *ast.PWildcard, *ast.PUnit:
 			nr := row{pats: removePat(r.pats, col), binds: r.binds, idx: r.idx}
 			for _, k := range caseKeys {
 				specs[k] = append(specs[k], nr)

@@ -1,0 +1,5 @@
+type Choice = Yes Int | No
+
+main =
+    Yes n = Yes 1
+    n

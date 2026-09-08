@@ -1,0 +1,6 @@
+type Pair = Pair Int Int
+
+main =
+    first : Int
+    Pair first second = Pair 1 2
+    first

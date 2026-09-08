@@ -1,0 +1,9 @@
+type Choice = Yes | No
+
+effect Ask
+    ask : Choice -> Int
+
+main =
+    handle ask Yes of
+        ask _ -> resume 1
+        ask Yes -> resume 2

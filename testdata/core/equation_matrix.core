@@ -1,0 +1,4 @@
+(core
+  (type Choice (ctor Yes) (ctor No))
+  (def both (params _arg0 _arg1) Choice -> Choice -> Int (case Int (var _arg0 Choice) _match2 (switchctor _match2 (Yes (switchctor _arg1 (Yes (leaf (int 3 Int))) (No (leaf (int 2 Int))))) (No (switchctor _arg1 (Yes (leaf (int 1 Int))) (No (leaf (int 0 Int))))))))
+  (def main Int (app/worker (var both Choice -> Choice -> Int) (app/ctor (var Yes Choice) Choice) (app/ctor (var No Choice) Choice) Int)))

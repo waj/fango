@@ -1,0 +1,10 @@
+(module
+  (type Shape (ctor Dot) (ctor Line Int Int))
+  (type Point (record (field x Int) (field y Int)))
+  (def limit (int 3))
+  (def area (equations (equation (patterns (pctor Dot)) (int 0)) (equation (patterns (pctor Line (pvar a) (pvar b))) (binop * (var a) (var b)))))
+  (def first (equations (equation (patterns (pctor List.Nil)) (int 0)) (equation (patterns (pctor List.Cons (pvar only) (pctor List.Nil))) (var only)) (equation (patterns (pctor List.Cons (pvar head) _)) (var head))))
+  (def corner (patterns (precord Point (x (pvar a)) (y (pvar b)))) (binop + (var a) (var b)))
+  (def grade (equations (equation (patterns (pint 0)) (string "none")) (equation (patterns (pfloat 1.5)) (string "half")) (equation (patterns (pstring "s")) (string "string")) (equation (patterns (pchar 'c')) (string "char")) (equation (patterns (ppin limit)) (string "pinned")) (equation (patterns _) (string "other"))))
+  (def ready (params ()) (ctor True))
+  (def ready2 (params ()) (ctor True)))

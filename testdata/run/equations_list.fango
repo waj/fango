@@ -1,0 +1,19 @@
+-- Recursive list equations: one group, three rows, source order.
+import List exposing (List, range)
+
+count : List Int -> Int
+count [] = 0
+count [_] = 1
+count [_ | rest] = 1 + count rest
+
+sumOf : List Int -> Int
+sumOf [] = 0
+sumOf [only] = only
+sumOf [first | rest] = first + sumOf rest
+
+main : () ->{IO} ()
+main() =
+    print (count [])
+    print (count [7])
+    print (count (range 1 5))
+    print (sumOf (range 1 5))
