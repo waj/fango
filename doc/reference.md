@@ -19,6 +19,7 @@ Repository verification is split between correctness and performance:
 make test       # correctness and interpreter/compiler differential tests
 make test-perf  # compile-latency and runtime-ratio gates
 make ci         # formatting, vet, and correctness gates
+make clean      # repository build artifacts and Go test cache
 ```
 
 `make test-perf` measures elapsed time, so a busy machine can fail it without
@@ -26,6 +27,11 @@ anything having regressed. It is deliberately excluded from `make ci`; run it
 on an otherwise idle machine when you want the numbers. GitHub Actions runs
 `make ci` on pushes to `master` and on pull requests
 (`.github/workflows/ci.yml`).
+
+`make clean` removes the repository-local `fango` executable, every `.fango/`
+build directory beneath the checkout (including those created under examples
+and test fixtures), and the Go test cache. It does not remove exported `.out`
+projects or other ignored application data.
 
 The CLI accepts one `.fango` source file:
 

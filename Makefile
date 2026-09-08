@@ -43,4 +43,5 @@ ci:
 
 clean:
 	rm -f fango
+	find . -path ./.git -prune -o -type d -name .fango -prune -exec rm -rf -- {} +
 	go clean -testcache
