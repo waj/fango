@@ -48,7 +48,9 @@ Pinned patterns compare against an existing immutable value through `Eq` and
 are conservatively refutable for coverage. Nominal record patterns are keyed,
 partial views of a visible schema. `Bool` behaves as the predefined
 `True | False` ADT to the checker while using native Go booleans in generated
-code.
+code. Bracket list expressions and patterns are parser sugar for the bundled
+`List.Nil` and `List.Cons` constructors, so they use the same inference,
+coverage, representation, and evaluation rules as explicit constructor code.
 
 ## Functions and effects
 
@@ -120,8 +122,10 @@ graph exists; internal/fixity groups them afterwards. A token at
 the innermost layout column normally ends the current construct; the parser
 exempts single tokens that open a construct, and an `if` additionally exempts
 its own `then` and `else` at the column of its `if`, so a chain of arms can
-align under one `if` rather than staircasing rightward. AST and diagnostic
-dump formats are stable golden-test interfaces.
+align under one `if` rather than staircasing rightward. Bracket lists lower
+immediately to right-nested constructor applications or patterns; an omitted
+tail lowers to `List.Nil`. AST and diagnostic dump formats are stable
+golden-test interfaces.
 
 Batch compilation first discovers the complete module graph. The entry
 directory provides local modules, where `Foo.Bar` maps to `Foo/Bar.fango`, and
@@ -134,8 +138,8 @@ tie-breaking.
 The embedded prelude used by the REPL and focused checker tests follows the
 same bundled dependency closure instead of maintaining a parallel module
 list. Its roots are `Basics`, `Meta`, `Derive`, and ambient `IO`; ordinary
-imports and syntax-driven `Meta`/`Derive` edges recursively add modules such
-as `List` and `Maybe`. The checker retains that resolved owner set so fixture
+imports and syntax-driven `Meta`, `Derive`, and `List` edges recursively add
+their dependencies. The checker retains that resolved owner set so fixture
 projections can omit the whole prelude while still elaborating and linting it.
 Bundled modules therefore use the public standard-library types rather than
 private substitutes.

@@ -6,23 +6,26 @@
   "brackets": [
     ["(", ")"],
     ["{", "}"],
+    ["[", "]"],
     ["$(", ")"]
   ],
   "autoClosingPairs": [
     { "open": "(", "close": ")" },
     { "open": "$(", "close": ")", "notIn": ["string", "comment"] },
     { "open": "{", "close": "}" },
+    { "open": "[", "close": "]" },
     { "open": "\"", "close": "\"", "notIn": ["string", "comment"] },
     { "open": "{-", "close": "-}", "notIn": ["string"] }
   ],
   "surroundingPairs": [
     ["(", ")"],
     ["{", "}"],
+    ["[", "]"],
     ["\"", "\""]
   ],
   "wordPattern": "[A-Za-z][A-Za-z0-9_]*|[!#%&*+\\-/:<=>?@^|~]+",
   "indentationRules": {
     "increaseIndentPattern": "((?<![!#%&*+\\-/:<=>?@^|~])(=|->)|\\b(of|then|else)\\b)\\s*(--.*)?$",
-    "decreaseIndentPattern": "^\\s+\\}"
+    "decreaseIndentPattern": "^\\s+[}\\]]"
   }
 }

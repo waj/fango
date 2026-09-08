@@ -64,12 +64,34 @@ func TestParseExprInput(t *testing.T) {
 }
 
 func TestParseExprInputUnfinished(t *testing.T) {
-	for _, src := range []string{"1 +", "(1 + 2"} {
+	for _, src := range []string{"1 +", "(1 + 2", "[1, 2", "[head |"} {
 		f := source.NewFile("<repl>", []byte(src))
 		toks, _ := lexer.Lex(f)
 		_, errs := ParseExprInput(toks, f)
 		if len(errs) == 0 || errs[len(errs)-1].Title != TitleUnexpectedEOF {
 			t.Errorf("%q: expected %s error, got %v", src, TitleUnexpectedEOF, errs)
+		}
+	}
+}
+
+func TestMalformedLists(t *testing.T) {
+	for _, src := range []string{"[1,]", "[1, | xs]", "[1 | ]", "[1 | xs | ys]"} {
+		f := source.NewFile("<test>", []byte(src))
+		toks, _ := lexer.Lex(f)
+		_, errs := ParseExprInput(toks, f)
+		if len(errs) == 0 {
+			t.Errorf("%q: expected a syntax error", src)
+		}
+	}
+	for _, src := range []string{
+		"main xs = case xs of\n  [x,] -> x\n  _ -> 0",
+		"main xs = case xs of\n  [x | ] -> x\n  _ -> 0",
+	} {
+		f := source.NewFile("<test>", []byte(src))
+		toks, _ := lexer.Lex(f)
+		_, errs := Parse(toks, f)
+		if len(errs) == 0 {
+			t.Errorf("%q: expected a syntax error", src)
 		}
 	}
 }

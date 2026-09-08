@@ -1,0 +1,26 @@
+type LocalList = Nil | Cons Int LocalList
+
+sum values =
+    case values of
+        [] -> 0
+        [value | rest] -> value + sum rest
+
+drop values =
+    case values of
+        [] -> []
+        [_ | rest] -> rest
+
+tail() = [print "tail"]
+
+main() =
+    print [1, 2, 3]
+    print (drop [1])
+    print [[1], [2, 3]]
+    print [0 | [1, 2, 3]]
+    print (sum [1, 2, 3, 4])
+    print
+        (case [1, 2, 3] of
+            [] -> 0
+            [one] -> one
+            [first, second | rest] -> first + second + sum rest)
+    print [print "head" | tail()]

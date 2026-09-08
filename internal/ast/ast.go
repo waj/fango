@@ -43,8 +43,9 @@ type Var struct {
 
 // Ctor is a constructor reference, including builtin True and False.
 type Ctor struct {
-	Name string
-	Sp   source.Span
+	Name       string
+	Sp         source.Span
+	ListSyntax bool // parser-generated List.Nil/List.Cons; bypasses import lookup
 }
 
 // RecordLit is keyed construction of a nominal record, `Counts { lines = 1 }`.
@@ -400,9 +401,10 @@ type RecordPatternField struct {
 }
 
 type PCtor struct {
-	Name     string
-	NameSpan source.Span
-	Args     []Pattern
+	Name       string
+	NameSpan   source.Span
+	Args       []Pattern
+	ListSyntax bool // parser-generated List.Nil/List.Cons; bypasses import lookup
 }
 
 func (*PVar) isPattern()      {}
@@ -641,6 +643,10 @@ type Module struct {
 	// module loader adds the bundled `Meta` dependency only for files that
 	// need it, so an ordinary program's graph is unchanged.
 	UsesStaging bool
+
+	// UsesLists records bracket list syntax. The module loader adds List as a
+	// syntax dependency without exposing its ordinary names.
+	UsesLists bool
 }
 
 // Spelling renders a declaration name the way it is written in source: an

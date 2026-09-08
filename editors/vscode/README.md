@@ -9,7 +9,7 @@ Syntax highlighting for the [Fango](../../README.md) programming language (`.fan
 - Comments: `--` line comments and nesting `{- … -}` block comments
 - Strings with the exact Fango escape set (`\\ \" \n \t \r`; anything else is flagged as invalid)
 - `native "…"` bodies with `$1`-style placeholders highlighted
-- Type annotations, effect rows (`->{IO}`, `{Fail String | e}`), ADT declarations, qualified names (`List.range`), numeric literals, operator and fixity declarations (`(<+>) a b = …`, `infixl 6 (<+>)`), and user-declared operators
+- Type annotations, effect rows (`->{IO}`, `{Fail String | e}`), ADT declarations, list expressions and patterns (`[one, two | rest]`), qualified names (`List.range`), numeric literals, operator and fixity declarations (`(<+>) a b = …`, `infixl 6 (<+>)`), and user-declared operators
 - Editing affordances: comment toggling, bracket matching/auto-closing, indent heuristics
 
 ## Install (local)

@@ -38,6 +38,7 @@ type parser struct {
 	// usesStaging records that this file built a quote or a splice, so the
 	// module loader knows to pull in the bundled `Meta` module.
 	usesStaging bool
+	usesLists   bool
 }
 
 // Parse parses a whole module.
@@ -57,6 +58,7 @@ func Parse(toks []token.Token, f *source.File) (*ast.Module, []diag.Error) {
 		}
 	}
 	m.UsesStaging = p.usesStaging
+	m.UsesLists = p.usesLists
 	return m, p.errs
 }
 
@@ -1183,7 +1185,7 @@ func (p *parser) parseApply() ast.Expr {
 	}
 	for {
 		switch p.peekInExpr().Kind {
-		case token.INT, token.FLOAT, token.STRING, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.KwResume, token.KwQuote, token.DOLLARPAREN:
+		case token.INT, token.FLOAT, token.STRING, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.LBRACKET, token.KwResume, token.KwQuote, token.DOLLARPAREN:
 			arg := p.parsePostfixAtom()
 			if arg == nil {
 				return nil
@@ -1422,7 +1424,7 @@ func (p *parser) parsePattern() ast.Pattern {
 func isPatternAtomStart(k token.Kind) bool {
 	switch k {
 	case token.UNDERSCORE, token.CARET, token.LIDENT, token.UIDENT,
-		token.INT, token.FLOAT, token.STRING, token.CHAR, token.LPAREN:
+		token.INT, token.FLOAT, token.STRING, token.CHAR, token.LPAREN, token.LBRACKET:
 		return true
 	}
 	return false
@@ -1512,6 +1514,8 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 			return nil
 		}
 		return pat
+	case token.LBRACKET:
+		return p.parseListPattern()
 	case token.EOF:
 		if p.peek().Kind == token.EOF {
 			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
@@ -1526,6 +1530,82 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 			"I was expecting a pattern here, like `Just x`, a literal, or `_`.")
 		return nil
 	}
+}
+
+// parseListPattern lowers bracket syntax directly to the standard List
+// constructors. Keeping the surface sugar out of later phases lets ordinary
+// constructor inference, exhaustiveness, and decision-tree compilation apply.
+func (p *parser) parseListPattern() ast.Pattern {
+	lb := p.next()
+	p.usesLists = true
+	if p.peek().Kind == token.RBRACKET {
+		rb := p.next()
+		sp := lb.Span.Merge(rb.Span)
+		return &ast.PCtor{Name: "List.Nil", NameSpan: sp, ListSyntax: true}
+	}
+
+	var elems []ast.Pattern
+	var tail ast.Pattern
+	for {
+		if p.peek().Kind == token.EOF {
+			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
+				"I got to the end of the input while looking for the `]` that closes this list pattern.")
+			return nil
+		}
+		elem := p.parsePattern()
+		if elem == nil {
+			return nil
+		}
+		elems = append(elems, elem)
+		switch p.peek().Kind {
+		case token.COMMA:
+			comma := p.next()
+			if next := p.peek(); next.Kind == token.RBRACKET || next.Kind == token.PIPE {
+				p.errorAt(comma.Span, "SYNTAX PROBLEM", "A comma in a list pattern must be followed by another pattern.")
+				return nil
+			}
+		case token.PIPE:
+			pipe := p.next()
+			if p.peek().Kind == token.EOF {
+				p.errorAt(pipe.Span, TitleUnexpectedEOF,
+					"I got to the end of the input while expecting a tail pattern after `|`.")
+				return nil
+			}
+			if p.peek().Kind == token.RBRACKET {
+				p.errorAt(pipe.Span, "SYNTAX PROBLEM", "The `|` in a list pattern must be followed by a tail pattern.")
+				return nil
+			}
+			tail = p.parsePattern()
+			if tail == nil {
+				return nil
+			}
+			if p.peek().Kind != token.RBRACKET {
+				p.errorAt(p.peek().Span, "SYNTAX PROBLEM", "I expect `]` after the tail of this list pattern.")
+				return nil
+			}
+			goto done
+		case token.RBRACKET:
+			goto done
+		case token.EOF:
+			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
+				"I got to the end of the input while looking for the `]` that closes this list pattern.")
+			return nil
+		default:
+			p.errorAt(p.peek().Span, "SYNTAX PROBLEM", "I expect `,`, `|`, or `]` after this list pattern element.")
+			return nil
+		}
+	}
+
+done:
+	rb := p.next()
+	sp := lb.Span.Merge(rb.Span)
+	if tail == nil {
+		tail = &ast.PCtor{Name: "List.Nil", NameSpan: sp, ListSyntax: true}
+	}
+	for i := len(elems) - 1; i >= 0; i-- {
+		tail = &ast.PCtor{Name: "List.Cons", NameSpan: sp, Args: []ast.Pattern{elems[i], tail}, ListSyntax: true}
+	}
+	return tail
 }
 
 func (p *parser) parseRecordPatternFields() ([]ast.RecordPatternField, source.Span, bool) {
@@ -1665,6 +1745,8 @@ func (p *parser) parseAtom() ast.Expr {
 			return nil
 		}
 		return &ast.RecordUpdate{Record: record, Fields: fields, Sp: lb.Span.Merge(end)}
+	case token.LBRACKET:
+		return p.parseListExpr()
 	case token.KwResume:
 		p.next()
 		return &ast.Resume{Sp: t.Span}
@@ -1756,6 +1838,82 @@ func (p *parser) parseAtom() ast.Expr {
 func (p *parser) parseRecordExprFields() ([]ast.RecordExprField, source.Span, bool) {
 	p.next() // {
 	return p.parseRecordExprFieldsAfterOpen()
+}
+
+// parseListExpr lowers list syntax to right-nested List.Cons applications.
+// Constructor evaluation is left-to-right, so this also gives list elements
+// and an explicit tail the source evaluation order without a special runtime.
+func (p *parser) parseListExpr() ast.Expr {
+	lb := p.next()
+	p.usesLists = true
+	if p.peek().Kind == token.RBRACKET {
+		rb := p.next()
+		return &ast.Ctor{Name: "List.Nil", Sp: lb.Span.Merge(rb.Span), ListSyntax: true}
+	}
+
+	var elems []ast.Expr
+	var tail ast.Expr
+	for {
+		if p.peek().Kind == token.EOF {
+			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
+				"I got to the end of the input while looking for the `]` that closes this list.")
+			return nil
+		}
+		elem := p.parseExpr()
+		if elem == nil {
+			return nil
+		}
+		elems = append(elems, elem)
+		switch p.peek().Kind {
+		case token.COMMA:
+			comma := p.next()
+			if next := p.peek(); next.Kind == token.RBRACKET || next.Kind == token.PIPE {
+				p.errorAt(comma.Span, "SYNTAX PROBLEM", "A comma in a list must be followed by another expression.")
+				return nil
+			}
+		case token.PIPE:
+			pipe := p.next()
+			if p.peek().Kind == token.EOF {
+				p.errorAt(pipe.Span, TitleUnexpectedEOF,
+					"I got to the end of the input while expecting a tail expression after `|`.")
+				return nil
+			}
+			if p.peek().Kind == token.RBRACKET {
+				p.errorAt(pipe.Span, "SYNTAX PROBLEM", "The `|` in a list must be followed by a tail expression.")
+				return nil
+			}
+			tail = p.parseExpr()
+			if tail == nil {
+				return nil
+			}
+			if p.peek().Kind != token.RBRACKET {
+				p.errorAt(p.peek().Span, "SYNTAX PROBLEM", "I expect `]` after the tail of this list.")
+				return nil
+			}
+			goto done
+		case token.RBRACKET:
+			goto done
+		case token.EOF:
+			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
+				"I got to the end of the input while looking for the `]` that closes this list.")
+			return nil
+		default:
+			p.errorAt(p.peek().Span, "SYNTAX PROBLEM", "I expect `,`, `|`, or `]` after this list element.")
+			return nil
+		}
+	}
+
+done:
+	rb := p.next()
+	sp := lb.Span.Merge(rb.Span)
+	if tail == nil {
+		tail = &ast.Ctor{Name: "List.Nil", Sp: sp, ListSyntax: true}
+	}
+	for i := len(elems) - 1; i >= 0; i-- {
+		cons := &ast.Ctor{Name: "List.Cons", Sp: sp, ListSyntax: true}
+		tail = &ast.App{Fn: &ast.App{Fn: cons, Arg: elems[i]}, Arg: tail}
+	}
+	return tail
 }
 
 func (p *parser) parseRecordExprFieldsAfterOpen() ([]ast.RecordExprField, source.Span, bool) {

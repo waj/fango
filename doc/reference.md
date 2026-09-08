@@ -106,6 +106,11 @@ Every ordinary module implicitly loads `Basics`, receiving the classes
 effect, and unqualified `show`, `print`, and `readLine`. Other
 standard-library APIs still require explicit imports.
 
+Bracket list syntax is also implicit. A module that uses it automatically
+depends on the bundled `List` module, but this does not expose the names
+`List`, `Nil`, `Cons`, or the module's functions. Those names still follow the
+ordinary import rules.
+
 `build` and `run` use only the entry module's `main`; a dependency's `main` is
 an ordinary declaration. `check` does not require `main`. Imports expose only
 the direct module's declared public interface, never its dependencies. Import
@@ -182,13 +187,16 @@ and APIs must be imported explicitly.
 ```fango
 module List exposing (List(..), range, each, foldl)
 
-type List a = Nil | Cons a (List a) deriving (Eq, Ord, Show)
+type List a = Nil | Cons a (List a) deriving (Eq, Ord)
 ```
 
 Its inferred public function types are
 `range : (Num a, Ord a) => a -> a -> List a`,
 `each : (a ->{e} ()) -> List a ->{e} ()`, and
 `foldl : (a -> b ->{e} b) -> b -> List a ->{e} b`.
+
+Its handwritten `Show a => Show (List a)` instance displays lists with bracket
+syntax, using each element's `Show` instance: `[]`, `[1]`, and `[1, 2, 3]`.
 
 `range start end` produces ascending values by adding one, including `end`
 when that value is reached, and returns `Nil` immediately when `start > end`.
@@ -850,6 +858,22 @@ Constructor arguments are type atoms. Parenthesize applied or function types,
 as in `Cons a (List a)` or `Fn (a -> b)`. Constructors are ordinary curried
 values and can be partially applied.
 
+Lists have construction syntax backed by the bundled `List` type:
+
+```fango
+empty = []
+numbers = [1, 2, 3]
+extended = [0, 1 | numbers]
+```
+
+`[a, b]` is `Cons a (Cons b Nil)`, and `[a, b | tail]` is
+`Cons a (Cons b tail)`. Elements are evaluated from left to right, followed
+by the tail, and the existing tail is shared. All elements have one type and
+the tail must be a list of that type. A trailing comma is not accepted, and
+`|` requires at least one element on its left and one tail expression on its
+right. Bracket syntax selects the bundled constructors directly and needs no
+import; naming `List`, `Nil`, or `Cons` still does.
+
 Equality, ordering, and display are opt-in, either handwritten instances or an
 explicit deriving clause:
 
@@ -895,6 +919,21 @@ it does not attempt to prove laws of user-defined equality.
 Pins are conservatively refutable, so pinned branches need structural or
 catch-all coverage after them. Identical pins can make a later branch
 redundant, but different pins are never assumed to cover a type collectively.
+
+List patterns use the same bracket forms:
+
+```fango
+case values of
+    [] -> "empty"
+    [only] -> "singleton"
+    [first, second | rest] -> "two or more"
+```
+
+A pattern without `|` matches exactly its written length. A tail pattern
+matches the remaining list, so `[first | rest]` is the bracket spelling of
+`Cons first rest`. List patterns participate in the same exhaustiveness,
+redundancy, nesting, pinning, and duplicate-binder checks as constructor
+patterns.
 
 ## Effectful function types
 

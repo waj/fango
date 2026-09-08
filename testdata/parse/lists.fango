@@ -1,0 +1,14 @@
+empty = []
+values = [1, 2, 3]
+extended = [0, 1 | values]
+nested = [[1], []]
+multiline =
+    [1,
+     2
+    ]
+
+describe values =
+    case values of
+        [] -> 0
+        [one] -> one
+        [first, second | rest] -> first + second

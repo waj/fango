@@ -24,13 +24,15 @@ const (
 
 	// Punctuation. None of these characters is an operator character, so
 	// none of them ever takes part in an operator run.
-	LPAREN // (
-	RPAREN // )
-	COMMA  // ,
-	DOT    // .
-	DOTDOT // ..
-	LBRACE // {
-	RBRACE // }
+	LPAREN   // (
+	RPAREN   // )
+	COMMA    // ,
+	DOT      // .
+	DOTDOT   // ..
+	LBRACE   // {
+	RBRACE   // }
+	LBRACKET // [
+	RBRACKET // ]
 	BACKSLASH
 	UNDERSCORE  // _ (wildcard pattern)
 	DOLLARPAREN // $( — opens a splice; `$` is never a token on its own
@@ -78,7 +80,7 @@ var kindNames = map[Kind]string{
 	LIDENT: "LIDENT", UIDENT: "UIDENT",
 	OP:     "OP",
 	LPAREN: "LPAREN", RPAREN: "RPAREN", COMMA: "COMMA", DOT: "DOT", DOTDOT: "DOTDOT",
-	LBRACE: "LBRACE", RBRACE: "RBRACE", BACKSLASH: "BACKSLASH",
+	LBRACE: "LBRACE", RBRACE: "RBRACE", LBRACKET: "LBRACKET", RBRACKET: "RBRACKET", BACKSLASH: "BACKSLASH",
 	UNDERSCORE: "UNDERSCORE", DOLLARPAREN: "DOLLARPAREN",
 	EQ: "EQ", ARROW: "ARROW", DARROW: "DARROW", COLON: "COLON", PIPE: "PIPE", CARET: "CARET",
 	KwModule: "module", KwImport: "import", KwAs: "as", KwExposing: "exposing", KwLet: "let", KwIn: "in",

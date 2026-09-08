@@ -403,6 +403,9 @@ const MetaModule = "Meta"
 // appears rather than taxing every program with it.
 const DeriveModule = "Derive"
 
+// ListModule owns the List.Nil/List.Cons constructors used by bracket syntax.
+const ListModule = "List"
+
 // implicitDeps adds the bundled modules a file needs because of the syntax it
 // used rather than because it imported them.
 func implicitDeps(m *ast.Module, deps []string, self string) []string {
@@ -411,6 +414,9 @@ func implicitDeps(m *ast.Module, deps []string, self string) []string {
 	}
 	if self != DeriveModule && usesDeriving(m) {
 		deps = addDep(deps, DeriveModule)
+	}
+	if m.UsesLists && self != ListModule {
+		deps = addDep(deps, ListModule)
 	}
 	return deps
 }
@@ -1448,7 +1454,9 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 			e.Name = r.qualified(e.Name, vals, "value", e.Sp)
 		}
 	case *ast.Ctor:
-		e.Name = r.qualified(e.Name, r.ctors, "ctor", e.Sp)
+		if !e.ListSyntax {
+			e.Name = r.qualified(e.Name, r.ctors, "ctor", e.Sp)
+		}
 	case *ast.RecordLit:
 		e.Name = r.qualified(e.Name, r.records, "record", e.NameSpan)
 		for i := range e.Fields {
@@ -1585,7 +1593,9 @@ func (r *resolver) patternInner(p ast.Pattern, locals, outer map[string]bool, va
 			p.Name = r.qualified(p.Name, vals, "value", p.NameSpan)
 		}
 	case *ast.PCtor:
-		p.Name = r.qualified(p.Name, r.ctors, "ctor", p.NameSpan)
+		if !p.ListSyntax {
+			p.Name = r.qualified(p.Name, r.ctors, "ctor", p.NameSpan)
+		}
 		for _, a := range p.Args {
 			r.patternInner(a, locals, outer, vals)
 		}

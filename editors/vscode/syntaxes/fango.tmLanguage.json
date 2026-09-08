@@ -297,6 +297,7 @@
         { "include": "#return_clause" },
         { "include": "#booleans" },
         { "include": "#numbers" },
+        { "include": "#list_expression" },
         { "include": "#record_expression" },
         { "include": "#qualified_module" },
         { "include": "#record_accessor" },
@@ -314,6 +315,28 @@
           "name": "constant.language.unit.fango",
           "match": "\\(\\)"
         }
+      ]
+    },
+    "list_expression": {
+      "begin": "\\[",
+      "end": "\\]",
+      "beginCaptures": {
+        "0": { "name": "punctuation.section.brackets.begin.fango" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.section.brackets.end.fango" }
+      },
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "name": "punctuation.separator.comma.fango",
+          "match": ","
+        },
+        {
+          "name": "keyword.operator.list-tail.fango",
+          "match": "(?<![!#%&*+\\-/:<=>?@^|~])\\|(?![!#%&*+\\-/:<=>?@^|~])"
+        },
+        { "include": "#expressions" }
       ]
     },
     "record_expression": {

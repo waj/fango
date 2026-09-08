@@ -114,6 +114,20 @@ func TestPreludeFollowsBundledImports(t *testing.T) {
 	}
 }
 
+func TestListSyntaxAddsDependency(t *testing.T) {
+	f := source.NewFile("Lists.fango", []byte("values = [1, 2]\n"))
+	m, errs := parse(f)
+	if len(errs) > 0 {
+		t.Fatalf("parse: %v", errs)
+	}
+	if !slices.Contains(implicitDeps(m, nil, "Example"), ListModule) {
+		t.Fatal("list syntax did not add the bundled List dependency")
+	}
+	if slices.Contains(implicitDeps(m, nil, ListModule), ListModule) {
+		t.Fatal("list syntax added a self-dependency to List")
+	}
+}
+
 func TestGraphDiagnostics(t *testing.T) {
 	t.Run("cycle", func(t *testing.T) {
 		d := t.TempDir()

@@ -160,7 +160,7 @@ completeTodo raw =
 
 main() =
     case IO.args() of
-        Cons "add" (Cons text Nil) -> addTodo text
-        Cons "list" Nil -> listTodos()
-        Cons "done" (Cons raw Nil) -> completeTodo raw
+        ["add", text] -> addTodo text
+        ["list"] -> listTodos()
+        ["done", raw] -> completeTodo raw
         _ -> usage()

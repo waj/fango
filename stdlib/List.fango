@@ -1,20 +1,30 @@
 module List exposing (List(..), range, each, foldl)
 
-type List a = Nil | Cons a (List a) deriving (Eq, Ord, Show)
+type List a = Nil | Cons a (List a) deriving (Eq, Ord)
+
+showItems : Show a => List a -> String
+showItems values =
+    case values of
+        [] -> "]"
+        [value] -> show value ++ "]"
+        [value | rest] -> show value ++ ", " ++ showItems rest
+
+instance Show a => Show (List a)
+    show values = "[" ++ showItems values
 
 range start end =
-    if start > end then Nil else Cons start (range (start + 1) end)
+    if start > end then [] else [start | range (start + 1) end]
 
 each : (a ->{e} ()) -> List a ->{e} ()
 each action values =
     case values of
-        Nil -> ()
-        Cons value rest ->
+        [] -> ()
+        [value | rest] ->
             action value
             each action rest
 
 foldl : (a -> b ->{e} b) -> b -> List a ->{e} b
 foldl combine result values =
     case values of
-        Nil -> result
-        Cons value rest -> foldl combine (combine value result) rest
+        [] -> result
+        [value | rest] -> foldl combine (combine value result) rest

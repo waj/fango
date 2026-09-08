@@ -74,6 +74,14 @@ func TestNominalRecords(t *testing.T) {
 	}
 }
 
+func TestListSyntax(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader("[1, 2]\n:quit\n"), &out)
+	if !strings.Contains(out.String(), "[1, 2] : Num a => List a") {
+		t.Fatalf("list construction or display failed in the REPL:\n%s", out.String())
+	}
+}
+
 func TestClassInstanceTransactions(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader(`class Twice a

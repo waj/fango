@@ -123,6 +123,7 @@ func TestPositive(t *testing.T) {
 		{"make : () ->{IO} (() -> ())\nmake() =\n  print \"now\"\n  \\_ -> ()", "make : () ->{IO} () -> ()"},
 		{"later : () -> (() ->{IO} ())\nlater() = \\_ -> print \"later\"", "later : () -> () ->{IO} ()"},
 		{"add x y = x + y\ninc = add 1", "add : Num a => a -> a -> a, inc : Num b => b -> b"},
+		{"values = [1, 2]\nfirstOf xs = case xs of\n  [] -> 0\n  [first | _] -> first", "values : Num a => List a, firstOf : Num b => List b -> b"},
 		// Generalization: uses no longer pin the definition.
 		{"id x = x\nmain = id 1 + 1", "id : a -> a, main : Int"},
 		{"v =\n  go n = if n < 1 then 0 else go (n - 1)\n  go 3", "v : Num a => a"},
@@ -170,6 +171,8 @@ func TestNegative(t *testing.T) {
 		{"x = -\"a\"", "MISSING INSTANCE", 1},                    // WhyNegate
 		{"x = \"a\" / \"b\"", "TYPE MISMATCH", 1},                // WhyOpRequires
 		{"x = 1 ++ \"a\"", "MISSING INSTANCE", 1},                // WhyOpRequires ++
+		{"x = [1, True]", "MISSING INSTANCE", 1},                 // every list element has one type
+		{"x = [1 | True]", "TYPE MISMATCH", 1},                   // tail must be a List
 		{"x = Just", "NAMING ERROR", 1},                          // unknown constructor
 		{"x = print 1\nmain = x", "UNHANDLED EFFECT", 1},
 		{"x = 1\ny =\n  x = 2\n  x + 1", "SHADOWING", 3},

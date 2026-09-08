@@ -320,6 +320,7 @@ func (l *lexer) lexUnderscore(start int) {
 var punctuation = map[byte]token.Kind{
 	'(': token.LPAREN, ')': token.RPAREN, ',': token.COMMA,
 	'{': token.LBRACE, '}': token.RBRACE, '\\': token.BACKSLASH,
+	'[': token.LBRACKET, ']': token.RBRACKET,
 }
 
 func UnescapeChar(raw string) rune {

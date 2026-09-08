@@ -1,0 +1,7 @@
+(module
+  (def empty (ctor List.Nil))
+  (def values (app (app (ctor List.Cons) (int 1)) (app (app (ctor List.Cons) (int 2)) (app (app (ctor List.Cons) (int 3)) (ctor List.Nil)))))
+  (def extended (app (app (ctor List.Cons) (int 0)) (app (app (ctor List.Cons) (int 1)) (var values))))
+  (def nested (app (app (ctor List.Cons) (app (app (ctor List.Cons) (int 1)) (ctor List.Nil))) (app (app (ctor List.Cons) (ctor List.Nil)) (ctor List.Nil))))
+  (def multiline (app (app (ctor List.Cons) (int 1)) (app (app (ctor List.Cons) (int 2)) (ctor List.Nil))))
+  (def describe (params values) (case (var values) (branch (pctor List.Nil) (int 0)) (branch (pctor List.Cons (pvar one) (pctor List.Nil)) (var one)) (branch (pctor List.Cons (pvar first) (pctor List.Cons (pvar second) (pvar rest))) (binop + (var first) (var second))))))
