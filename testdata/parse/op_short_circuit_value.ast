@@ -1,0 +1,9 @@
+(module)
+-- errors --
+-- RESERVED OPERATOR -------------- op_short_circuit_value.fango
+
+(&&) is short-circuiting syntax elaborated to an `if`, not a
+call, so there is no (&&) value to name.
+
+1| x = both (&&) True
+             ^^

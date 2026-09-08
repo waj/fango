@@ -1,10 +1,13 @@
 (module
-  (def b (int 7)))
+  (def a (binop < (binop < (int 1) (int 2)) (int 3)))
+  (def b (int 7))
+  (def < (params x y) (ann (-> Int (-> Int Bool))) (ctor True))
+  (infix 4 <))
 -- errors --
--- SYNTAX PROBLEM -------------------------- err_cmp_chain.fango
+-- OPERATOR GROUPING ----------------------- err_cmp_chain.fango
 
-I cannot parse chained comparisons like `a < b < c` — comparisons
-do not associate. Add parentheses to say what you mean.
+(<) is declared `infix 4`, which does not associate, so I cannot tell
+how `a < b < c` should group. Add parentheses to say what you mean.
 
 1| a = 1 < 2 < 3
              ^

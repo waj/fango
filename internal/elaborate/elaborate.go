@@ -403,21 +403,19 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 			Ty:   ty,
 		}
 	case *ast.BinOp:
-		// `&&` and `||` are the short-circuiting pair: they become an `if`,
-		// so the right operand — and its effects — only run when the left
-		// operand does not decide the result. Core has no boolean operator.
-		if e.Op == "&&" || e.Op == "||" {
-			cond := el.expr(e.L)
-			if e.Op == "&&" {
-				return &core.If{Cond: cond, Then: el.expr(e.R), Else: &core.BoolLit{Val: false, Ty: ty}, Ty: ty}
-			}
-			return &core.If{Cond: cond, Then: &core.BoolLit{Val: true, Ty: ty}, Else: el.expr(e.R), Ty: ty}
+		// `&&` and `||` are the only operators that reach here: they become
+		// an `if`, so the right operand — and its effects — only run when
+		// the left operand does not decide the result. Core has no boolean
+		// operator, and no operator node at all.
+		//
+		// Every other operator is an ordinary value, so inference desugared
+		// it to an application and the Desugared lookup above already took
+		// that branch.
+		cond := el.expr(e.L)
+		if e.Op == "&&" {
+			return &core.If{Cond: cond, Then: el.expr(e.R), Else: &core.BoolLit{Val: false, Ty: ty}, Ty: ty}
 		}
-		l, r := el.expr(e.L), el.expr(e.R)
-		if n := el.ck.BinNatives[e]; n != nil {
-			return el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Ty: ty, Args: []core.Expr{l, r}})
-		}
-		return el.fold(&core.BinOp{Op: e.Op, Ty: ty, L: l, R: r})
+		return &core.If{Cond: cond, Then: &core.BoolLit{Val: true, Ty: ty}, Else: el.expr(e.R), Ty: ty}
 	case *ast.Lambda:
 		el.defaultFree(el.ck.Sub.Apply(el.ck.ExprTypes[e]))
 		return el.lambda(e.Params, e.Body, eraseRows(el.ck.Sub.Apply(el.ck.ExprTypes[e])))
@@ -658,16 +656,6 @@ func (el *elab) fold(e core.Expr) core.Expr {
 			return &core.IntLit{Val: -op.Val, Ty: e.Ty}
 		case *core.FloatLit:
 			return &core.FloatLit{Val: -op.Val, Ty: e.Ty}
-		}
-		return e
-	case *core.BinOp:
-		name := map[string]string{"+": "Basics.add", "-": "Basics.sub", "*": "Basics.mul", "/": "Basics.fdiv"}[e.Op]
-		if name != "" {
-			folded := el.fold(&core.NativeCall{Name: name, Module: "Basics", Args: []core.Expr{e.L, e.R}, Ty: e.Ty})
-			switch folded.(type) {
-			case *core.IntLit, *core.FloatLit:
-				return folded
-			}
 		}
 		return e
 	case *core.NativeCall:

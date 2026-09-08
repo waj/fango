@@ -1,0 +1,23 @@
+module Ops exposing ((<+>), (|>), Semi(..))
+
+-- An operator names a value wherever an identifier can.
+(<+>) : Int -> Int -> Int
+(<+>) a b = a * 10 + b
+infixl 5 (<+>)
+
+(|>) : a -> (a -> b) -> b
+(|>) x f = f x
+infixl 1 (|>)
+
+class Semi a
+    (<>) : a -> a -> a
+
+instance Semi Int
+    (<>) x y = x <+> y
+
+deriver Semi
+    (<>) subject left right = left
+
+-- An operator is also a value, so it can be passed and partially applied.
+sum = fold (<+>) 0
+mixed = 1 <+> 2 |> negate

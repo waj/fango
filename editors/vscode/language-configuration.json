@@ -20,9 +20,9 @@
     ["{", "}"],
     ["\"", "\""]
   ],
-  "wordPattern": "[A-Za-z][A-Za-z0-9_]*",
+  "wordPattern": "[A-Za-z][A-Za-z0-9_]*|[!#%&*+\\-/:<=>?@^|~]+",
   "indentationRules": {
-    "increaseIndentPattern": "(=|->|\\bof|\\bthen|\\belse)\\s*(--.*)?$",
+    "increaseIndentPattern": "((?<![!#%&*+\\-/:<=>?@^|~])(=|->)|\\b(of|then|else)\\b)\\s*(--.*)?$",
     "decreaseIndentPattern": "^\\s+\\}"
   }
 }

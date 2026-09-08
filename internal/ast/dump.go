@@ -142,8 +142,8 @@ func dumpDecl(d Decl) string {
 		}
 		b.WriteString(")")
 		return b.String()
-	case *InfixDecl:
-		return fmt.Sprintf("(infix %s %s)", d.Op, d.Target)
+	case *FixityDecl:
+		return fmt.Sprintf("(%s %d %s)", d.Assoc, d.Prec, d.Op)
 	default:
 		panic(fmt.Sprintf("ast.dumpDecl: unhandled %T", d))
 	}
@@ -276,6 +276,17 @@ func DumpExpr(e Expr) string {
 		return fmt.Sprintf("(neg %s)", DumpExpr(e.Operand))
 	case *BinOp:
 		return fmt.Sprintf("(binop %s %s %s)", e.Op, DumpExpr(e.L), DumpExpr(e.R))
+	case *OpChain:
+		// An unresolved chain only reaches a dump when fixity resolution was
+		// skipped, so it prints its flat shape rather than pretending to be
+		// a tree.
+		var b strings.Builder
+		b.WriteString("(opchain " + DumpExpr(e.Operands[0]))
+		for i, op := range e.Ops {
+			b.WriteString(" " + op.Op + " " + DumpExpr(e.Operands[i+1]))
+		}
+		b.WriteString(")")
+		return b.String()
 	case *If:
 		return fmt.Sprintf("(if %s %s %s)", DumpExpr(e.Cond), DumpExpr(e.Then), DumpExpr(e.Else))
 	case *Block:

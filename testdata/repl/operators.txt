@@ -1,0 +1,42 @@
+fango 0.1 — :help for commands
+> 7 : Num a => a
+> <+> : Num a => a -> a -> a
+> infixl 5 (<+>)
+> 123 : Num a => a
+> 33 : Num a => a
+> Num a => a -> a -> a
+> Num a => a -> a -> a
+> 5 : Num a => a
+> <function> : Num a => a -> a
+> -- OPERATOR GROUPING ------------------------------------ <repl>
+
+(<) is declared `infix 4`, which does not associate, so I cannot tell
+how `a < b < c` should group. Add parentheses to say what you mean.
+
+1| 1 < 2 < 3
+         ^
+> -- RESERVED OPERATOR ------------------------------------ <repl>
+
+(&&) is short-circuiting syntax elaborated to an `if`, not a
+call, so there is no (&&) value to name.
+
+1| (&&)
+    ^^
+> -- RESERVED OPERATOR ------------------------------------ <repl>
+
+(&&) is short-circuiting syntax elaborated to an `if`, not a
+call, so there is no (&&) value to name.
+
+1| infixl 3 (&&)
+             ^^
+> -- FIXITY DECLARATION ----------------------------------- <repl>
+
+After `infixl` I expect a precedence level from 0 through 9,
+then the operator, like `infixl 6 (+)`.
+
+1| infixl 12 (<?>)
+          ^^
+> Money : Int -> Money
+> | | instance Eq Money
+True : Bool
+> 

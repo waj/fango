@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/waj/fango/internal/ast"
+	"github.com/waj/fango/internal/fixity"
 	"github.com/waj/fango/internal/lexer"
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/testutil"
@@ -26,6 +27,13 @@ func TestGoldens(t *testing.T) {
 				t.Fatalf("unexpected lex errors: %v", lexErrs)
 			}
 			m, errs := Parse(toks, f)
+			// Grouping is internal/fixity's job, and a flat chain is not
+			// what any later phase sees, so the goldens record the grouped
+			// tree. Each fixture declares the fixities it depends on, which
+			// keeps what it is testing readable in the fixture itself.
+			table := fixity.Builtin()
+			errs = append(errs, table.Collect(m.Decls)...)
+			errs = append(errs, table.Resolve(m)...)
 			out := ast.Dump(m)
 			if len(errs) > 0 {
 				out += "-- errors --\n" + testutil.DumpErrors(errs)
@@ -41,6 +49,12 @@ func TestParseExprInput(t *testing.T) {
 	e, errs := ParseExprInput(toks, f)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
+	}
+	// A prompt entry is parsed on its own, so the caller groups it — the
+	// REPL does the same against its session table.
+	e, errs = fixity.Builtin().ResolveExpr(e)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected grouping errors: %v", errs)
 	}
 	got := ast.DumpExpr(e)
 	want := "(binop * (binop + (int 1) (int 2)) (int 3))"

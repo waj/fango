@@ -1,0 +1,10 @@
+<+> : Int -> Int -> Int
+|> : a -> (a -> b) -> b
+infix_use : Int
+as_value : Int -> Int -> Int
+partial : Int -> Int
+twice : Int -> Int
+piped : Int
+joinAll : Semi a => a -> a -> a -> a
+method_value : Semi a => a -> a -> a
+mixed : Int

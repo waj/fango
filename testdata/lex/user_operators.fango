@@ -1,0 +1,43 @@
+-- Operator runs munch maximally, so a novel operator is one token.
+a = x <+> y
+b = xs |> map f
+c = m >>= k
+d = p ::: q
+e = i !! j
+f = r ?? s
+g = n %% o
+h = u ~> v
+i = w @@ z
+j = c ^^ d
+
+-- `$` is not an operator character, so `$(` stays the splice opener alone
+-- and `<$>` is three tokens rather than one operator.
+k = f <$> v
+
+-- `&&` and `||` are ordinary operator runs; only their fixity is built in.
+l = e && f || g
+
+-- A dot is never an operator character: field access, module qualification,
+-- and `..` lex exactly as they always did.
+m = value.field
+n = List.foldl step 0 items
+
+-- A run may not begin with `--`, which is a line comment. `<--` may.
+o = a <-- b
+p = q --> r
+
+-- Reserved lexemes keep their own kinds, and are not OP.
+q : Int
+r = \x -> x
+s = ^pinned
+t = { rec | field = 1 }
+u = Eq a => a
+
+-- `(op)` names the operator as a value.
+plus = (+)
+concat = (++)
+atMost = (<=)
+
+infixl 6 (<+>)
+infixr 1 (>>=)
+infix 4 (:::)

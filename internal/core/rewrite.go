@@ -70,11 +70,6 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Ty = r.typ(e.Ty)
 		n.Operand = r.expr(e.Operand)
 		out = &n
-	case *BinOp:
-		n := *e
-		n.Ty = r.typ(e.Ty)
-		n.L, n.R = r.expr(e.L), r.expr(e.R)
-		out = &n
 	case *NativeCall:
 		n := *e
 		n.Ty = r.typ(e.Ty)

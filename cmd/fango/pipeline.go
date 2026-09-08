@@ -32,7 +32,7 @@ func compileFileGraph(entry string, stderr io.Writer) (*core.Prog, *infer.Checke
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
-	ck.Operators = loaded.Operators
+	ck.Fixity = loaded.Fixity
 	ck.EntryName = loaded.Entry
 	staging.Install(ck)
 	infos, inferErrs := ck.Module(loaded.Module)

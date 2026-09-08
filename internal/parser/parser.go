@@ -1,6 +1,9 @@
-// Package parser is a hand-written recursive-descent parser with a Pratt
-// loop for operator expressions. It enforces the offside rule via token
-// columns (layout.go); the lexer is layout-oblivious.
+// Package parser is a hand-written recursive-descent parser. It enforces the
+// offside rule via token columns (layout.go); the lexer is layout-oblivious.
+//
+// Operator expressions parse into a flat ast.OpChain rather than a tree:
+// fixity is declared in source and a file is parsed before the module graph
+// exists, so internal/fixity groups the runs afterwards.
 package parser
 
 import (
@@ -8,6 +11,7 @@ import (
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
+	"github.com/waj/fango/internal/fixity"
 	"github.com/waj/fango/internal/lexer"
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/token"
@@ -61,7 +65,7 @@ func Parse(toks []token.Token, f *source.File) (*ast.Module, []diag.Error) {
 func ParseExprInput(toks []token.Token, f *source.File) (ast.Expr, []diag.Error) {
 	p := &parser{f: f, toks: toks, stmtStart: -1}
 	p.lay.push(ctxDecl, 0) // column 0: nothing is ever offside
-	e := p.parseExpr(1)
+	e := p.parseExpr()
 	if t := p.peek(); t.Kind != token.EOF && len(p.errs) == 0 {
 		p.errorAt(t.Span, "SYNTAX PROBLEM", "I parsed a complete expression but then ran into this.")
 	}
@@ -155,6 +159,19 @@ func (p *parser) parseExposingBody() (ast.Exposing, bool) {
 	}
 	for {
 		t := p.peek()
+		// An operator is exposed by its `(op)` spelling: `exposing ((++))`.
+		if t.Kind == token.LPAREN {
+			op, sp, ok := p.parseOpName()
+			if !ok {
+				return ex, false
+			}
+			ex.Items = append(ex.Items, ast.ExposeItem{Name: op, Sp: sp})
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.next()
+			continue
+		}
 		if t.Kind != token.LIDENT && t.Kind != token.UIDENT {
 			p.errorAt(t.Span, "SYNTAX PROBLEM", "I expect a name in the `exposing` list.")
 			return ex, false
@@ -225,8 +242,8 @@ func (p *parser) parseDecl() ast.Decl {
 	if t.Kind == token.KwEffect {
 		return p.parseEffectDecl()
 	}
-	if t.Kind == token.KwInfix {
-		return p.parseInfixDecl()
+	if t.Kind == token.KwInfix || t.Kind == token.KwInfixL || t.Kind == token.KwInfixR {
+		return p.parseFixityDecl()
 	}
 	if t.Kind == token.KwClass {
 		return p.parseClassDecl()
@@ -237,14 +254,29 @@ func (p *parser) parseDecl() ast.Decl {
 	if t.Kind == token.KwDeriver {
 		return p.parseDeriverDecl()
 	}
-	if t.Kind != token.LIDENT {
+	// A declaration is named by a lowercase identifier or, for an operator,
+	// by the `(op)` spelling.
+	var declName string
+	var nameSpan source.Span
+	switch {
+	case t.Kind == token.LIDENT:
+		declName, nameSpan = t.Text, t.Span
+		p.next()
+	case t.Kind == token.LPAREN:
+		var ok bool
+		if declName, nameSpan, ok = p.parseOpName(); !ok {
+			// The `(` sits at column 1, so recovery must consume it or the
+			// declaration loop would spin on it.
+			p.recoverToTopLevel(true)
+			return nil
+		}
+	default:
 		p.errorAt(t.Span, "SYNTAX PROBLEM",
 			"I was expecting a declaration here, like `name = expression`.")
 		p.recoverToTopLevel(true) // the bad token sits at column 1: must consume it
 		return nil
 	}
-	name := t
-	p.next()
+	shown := ast.Spelling(declName)
 
 	var ann *ast.TypeAnn
 	if p.peekInExpr().Kind == token.COLON {
@@ -259,17 +291,27 @@ func (p *parser) parseDecl() ast.Decl {
 		// The annotated definition must sit directly below.
 		nt := p.peek()
 		if nt.Kind == token.EOF {
-			p.errorAt(name.Span, TitleUnexpectedEOF,
-				"I see a type annotation for `"+name.Text+"` but no definition for it yet.")
+			p.errorAt(nameSpan, TitleUnexpectedEOF,
+				"I see a type annotation for `"+shown+"` but no definition for it yet.")
 			return nil
 		}
-		if nt.Kind != token.LIDENT || nt.Text != name.Text || nt.Pos().Col != 1 {
+		repeated, isOpName := p.opNameAt(p.pos)
+		if !isOpName {
+			repeated = nt.Text
+			isOpName = nt.Kind == token.LIDENT
+		}
+		if !isOpName || repeated != declName || nt.Pos().Col != 1 {
 			p.errorAt(nt.Span, "MISSING DEFINITION",
-				"The type annotation for `"+name.Text+"` must sit directly above its\ndefinition, like:\n\n    "+name.Text+" : Int\n    "+name.Text+" = 42")
+				"The type annotation for `"+shown+"` must sit directly above its\ndefinition, like:\n\n    "+shown+" : Int\n    "+shown+" = 42")
 			p.recoverToTopLevel(false)
 			return nil
 		}
-		p.next() // the repeated name
+		// Consume the repeated name: one token, or three for `(op)`.
+		if nt.Kind == token.LPAREN {
+			p.next()
+			p.next()
+		}
+		p.next()
 	}
 
 	params := p.parseValueParams()
@@ -281,12 +323,12 @@ func (p *parser) parseDecl() ast.Decl {
 	if p.peekInExpr().Kind == token.KwNative {
 		n := p.parseNativeBody()
 		if ann == nil {
-			p.errorAt(name.Span, "NATIVE DECLARATION", "A native declaration requires a type annotation.")
+			p.errorAt(nameSpan, "NATIVE DECLARATION", "A native declaration requires a type annotation.")
 		}
 		if len(params) > 0 {
-			p.errorAt(name.Span, "NATIVE DECLARATION", "A native declaration cannot have source parameters; put its complete function type in the annotation.")
+			p.errorAt(nameSpan, "NATIVE DECLARATION", "A native declaration cannot have source parameters; put its complete function type in the annotation.")
 		}
-		return &ast.ValueDecl{Name: name.Text, NameSpan: name.Span, Params: params, Ann: ann, Native: n}
+		return &ast.ValueDecl{Name: declName, NameSpan: nameSpan, Params: params, Ann: ann, Native: n}
 	}
 	body := p.parseBindBody(eqTok)
 	if body == nil {
@@ -298,7 +340,7 @@ func (p *parser) parseDecl() ast.Decl {
 			"The expression seemed complete, but then I ran into this.")
 		p.recoverToTopLevel(false)
 	}
-	return &ast.ValueDecl{Name: name.Text, NameSpan: name.Span, Params: params, Ann: ann, Body: body}
+	return &ast.ValueDecl{Name: declName, NameSpan: nameSpan, Params: params, Ann: ann, Body: body}
 }
 
 func (p *parser) parseDeriverDecl() ast.Decl {
@@ -319,8 +361,11 @@ func (p *parser) parseDeriverDecl() ast.Decl {
 	p.lay.push(ctxBlock, col)
 	defer p.lay.pop()
 	for p.peek().Kind != token.EOF && p.peek().Pos().Col >= col {
-		name := p.peek()
-		p.next()
+		name, nameSpan, ok := p.parseMethodName("DERIVER METHOD",
+			"I expect a method name here, like `show` or `(==)`.")
+		if !ok {
+			return nil
+		}
 		params := p.parseValueParams()
 		if !p.expect(token.EQ, "I expect `=` after the deriver method parameters.") {
 			return nil
@@ -329,7 +374,7 @@ func (p *parser) parseDeriverDecl() ast.Decl {
 		if body == nil {
 			return nil
 		}
-		d.Methods = append(d.Methods, &ast.ValueDecl{Name: name.Text, NameSpan: name.Span, Params: params, Body: body})
+		d.Methods = append(d.Methods, &ast.ValueDecl{Name: name, NameSpan: nameSpan, Params: params, Body: body})
 	}
 	return d
 }
@@ -349,41 +394,123 @@ func (p *parser) parseNativeBody() *ast.NativeBody {
 	return n
 }
 
-// parseInfixDecl parses `infix (op) = value`. A rejected binding recovers to
-// the next declaration rather than leaving the parser mid-line, where the
-// unconsumed operator would also be reported as a stray declaration.
-func (p *parser) parseInfixDecl() ast.Decl {
-	p.next()
-	if !p.expect(token.LPAREN, "I expect `(` after `infix`.") {
-		p.recoverToTopLevel(false)
-		return nil
+// parseOpName consumes the `(op)` spelling that names an operator wherever a
+// declaration names a value: top-level definitions and annotations, class
+// and effect signatures, instance and deriver methods, fixity declarations,
+// and exposing lists. The span covers the whole `(op)`, so a diagnostic
+// underlines the form the author wrote.
+// Token positions are read raw rather than through peekInExpr: a `(op)` in a
+// naming position sits at its construct's own layout column, where
+// peekInExpr would synthesize EOF. Whether that column is the right one is
+// the caller's check.
+func (p *parser) parseOpName() (string, source.Span, bool) {
+	lp := p.at(p.pos)
+	op := p.at(p.pos + 1)
+	if lp.Kind != token.LPAREN || op.Kind != token.OP || p.at(p.pos+2).Kind != token.RPAREN {
+		p.errorAt(lp.Span, "SYNTAX PROBLEM", "I expect an operator in parentheses here, like `(+)`.")
+		return "", lp.Span, false
 	}
-	op := p.peekInExpr()
-	if prec, _ := binOp(op.Kind); prec == 0 {
-		p.errorAt(op.Span, "NATIVE DECLARATION", "I expect one of fango's fixed binary operators here.")
-		p.recoverToTopLevel(false)
-		return nil
-	}
-	if shortCircuit(op.Kind) {
-		p.errorAt(op.Span, "NATIVE DECLARATION",
-			"("+op.Text+") is short-circuiting syntax elaborated to an `if`, not a\ncall, so it cannot be bound to a value.")
-		p.recoverToTopLevel(false)
-		return nil
+	if !p.bindableOp(op) {
+		return "", op.Span, false
 	}
 	p.next()
-	if !p.expect(token.RPAREN, "I expect `)` after the operator.") || !p.expect(token.EQ, "I expect `=` after the operator binding.") {
-		p.recoverToTopLevel(false)
-		return nil
-	}
-	target := p.peekInExpr()
-	if target.Kind != token.LIDENT {
-		p.errorAt(target.Span, "NATIVE DECLARATION", "An infix binding must name a native value.")
-		p.recoverToTopLevel(false)
-		return nil
-	}
 	p.next()
-	return &ast.InfixDecl{Op: op.Text, Target: target.Text, OpSpan: op.Span, TargetSpan: target.Span}
+	rp := p.next()
+	return op.Text, lp.Span.Merge(rp.Span), true
 }
+
+// parseMethodName consumes the name of a class signature, an instance
+// method, or a deriver method: a lowercase identifier, or `(op)` when the
+// class method is an operator. A class that declares `(+)` needs its
+// instances and derivers to spell the method the same way.
+func (p *parser) parseMethodName(title, expected string) (string, source.Span, bool) {
+	t := p.at(p.pos)
+	switch t.Kind {
+	case token.LIDENT:
+		p.next()
+		return t.Text, t.Span, true
+	case token.LPAREN:
+		return p.parseOpName()
+	}
+	p.errorAt(t.Span, title, expected)
+	return "", t.Span, false
+}
+
+// opNameAt reports the `(op)` starting at token i without consuming it. The
+// annotation adjacency check needs the next declaration's name before it
+// decides to consume anything.
+func (p *parser) opNameAt(i int) (string, bool) {
+	if p.at(i).Kind == token.LPAREN && p.at(i+1).Kind == token.OP && p.at(i+2).Kind == token.RPAREN {
+		return p.at(i + 1).Text, true
+	}
+	return "", false
+}
+
+// at returns the token at an absolute index, or EOF past the end.
+func (p *parser) at(i int) token.Token {
+	if i < 0 || i >= len(p.toks) {
+		return p.toks[len(p.toks)-1]
+	}
+	return p.toks[i]
+}
+
+// bindableOp rejects the operators that cannot name a value: `&&` and `||`
+// are elaborated to an `if` rather than called, so there is nothing to name.
+// Reserved lexemes never reach here — they have their own token kinds and so
+// never appear as OP.
+func (p *parser) bindableOp(op token.Token) bool {
+	if fixity.IsShortCircuit(op.Text) {
+		p.errorAt(op.Span, "RESERVED OPERATOR",
+			"("+op.Text+") is short-circuiting syntax elaborated to an `if`, not a\ncall, so there is no ("+op.Text+") value to name.")
+		return false
+	}
+	return true
+}
+
+// parseFixityDecl parses `infixl 6 (+)`, declaring one operator's precedence
+// and associativity. A rejected declaration recovers to the next top-level
+// declaration rather than leaving the parser mid-line, where the unconsumed
+// operator would also be reported as a stray declaration.
+func (p *parser) parseFixityDecl() ast.Decl {
+	kw := p.next()
+	assoc := ast.AssocNone
+	switch kw.Kind {
+	case token.KwInfixL:
+		assoc = ast.AssocLeft
+	case token.KwInfixR:
+		assoc = ast.AssocRight
+	}
+	level := p.peekInExpr()
+	prec, ok := fixityLevel(level)
+	if !ok {
+		p.errorAt(level.Span, "FIXITY DECLARATION",
+			"After `"+kw.Text+"` I expect a precedence level from "+itoa(fixity.MinPrec)+" through "+itoa(fixity.MaxPrec)+",\nthen the operator, like `"+kw.Text+" 6 (+)`.")
+		p.recoverToTopLevel(false)
+		return nil
+	}
+	p.next()
+	op, opSpan, ok := p.parseOpName()
+	if !ok {
+		p.recoverToTopLevel(false)
+		return nil
+	}
+	return &ast.FixityDecl{Op: op, Assoc: assoc, Prec: prec, OpSpan: opSpan, Sp: kw.Span.Merge(opSpan)}
+}
+
+// fixityLevel reads a precedence level, which must be a plain integer
+// literal within the declared range.
+func fixityLevel(t token.Token) (int, bool) {
+	if t.Kind != token.INT {
+		return 0, false
+	}
+	n, err := strconv.Atoi(t.Text)
+	if err != nil || n < fixity.MinPrec || n > fixity.MaxPrec {
+		return 0, false
+	}
+	return n, true
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
 
 // parseEffectDecl parses an effect header followed by an indented block of
 // operation signatures. The first operation establishes the block column.
@@ -416,12 +543,13 @@ func (p *parser) parseEffectDecl() ast.Decl {
 	var ops []ast.OpSig
 	for {
 		p.stmtStart = p.pos
-		opT := p.peekInExpr()
-		if opT.Kind != token.LIDENT {
-			p.errorAt(opT.Span, "SYNTAX PROBLEM", "I expect an operation name here, like `print : String -> ()`.")
+		// Class declarations share this loop, and a class method may be an
+		// operator: `class Num a` declares `(+) : a -> a -> a`.
+		opName, opSpan, ok := p.parseMethodName("SYNTAX PROBLEM",
+			"I expect an operation name here, like `print : String -> ()`.")
+		if !ok {
 			return nil
 		}
-		p.next()
 		if !p.expect(token.COLON, "I expect `:` after the operation name.") {
 			return nil
 		}
@@ -438,7 +566,7 @@ func (p *parser) parseEffectDecl() ast.Decl {
 			}
 			native = p.parseNativeBody()
 		}
-		ops = append(ops, ast.OpSig{Name: opT.Text, NameSpan: opT.Span, Type: ty, Native: native})
+		ops = append(ops, ast.OpSig{Name: opName, NameSpan: opSpan, Type: ty, Native: native})
 		nt := p.peek()
 		if nt.Kind == token.EOF || nt.Pos().Col < col {
 			break
@@ -640,7 +768,7 @@ func (p *parser) parseBodyAfter(introTok token.Token, missing string) ast.Expr {
 			"I got to the end of the input while still expecting an expression.")
 		return nil
 	case t.Pos().Line == introTok.Pos().Line:
-		return p.parseExpr(1)
+		return p.parseExpr()
 	case p.lay.checkOffside(t.Pos()) == offContinue:
 		return p.parseBlock(t.Pos().Col)
 	default:
@@ -656,6 +784,10 @@ const (
 	stmtBind
 	stmtAnn
 	stmtLocalFn
+	// stmtLocalOp is `(op) params… =` in a block: not a supported binding,
+	// but recognized so it gets its own diagnostic rather than the generic
+	// "expression seemed complete" one.
+	stmtLocalOp
 )
 
 // classifyStmt inspects the statement starting at the current token. The
@@ -668,6 +800,18 @@ func (p *parser) classifyStmt(col int) stmtKind {
 		return t.Kind != token.EOF && t.Span.StartPos().Col > col
 	}
 	i := p.pos
+	if _, isOpName := p.opNameAt(i); isOpName {
+		// `(+) 1 2` is an application; only a following `=` makes it a
+		// definition attempt.
+		j := i + 3
+		for inBounds(j) && (p.toks[j].Kind == token.LIDENT || p.toks[j].Kind == token.UNDERSCORE) {
+			j++
+		}
+		if inBounds(j) && p.toks[j].Kind == token.EQ {
+			return stmtLocalOp
+		}
+		return stmtResult
+	}
 	if p.toks[i].Kind != token.LIDENT {
 		return stmtResult
 	}
@@ -735,6 +879,11 @@ func (p *parser) parseBlock(col int) ast.Expr {
 		}
 
 		switch p.classifyStmt(col) {
+		case stmtLocalOp:
+			op, _ := p.opNameAt(p.pos)
+			p.errorAt(p.at(p.pos).Span.Merge(p.at(p.pos+2).Span), "OPERATOR DEFINITION",
+				"An operator can only be defined at the top level, in a class, or in\nan instance, so its fixity has one home. `("+op+")` here needs a name\ninstead.")
+			return nil
 		case stmtBind, stmtLocalFn:
 			nameT := p.next()
 			params := p.parseValueParams()
@@ -780,7 +929,7 @@ func (p *parser) parseBlock(col int) ast.Expr {
 				return nil
 			}
 			p.stmtStart = p.pos // the opener may sit exactly at the block column
-			result := p.parseExpr(1)
+			result := p.parseExpr()
 			if result == nil {
 				return nil
 			}
@@ -965,78 +1114,43 @@ func (p *parser) parseTypeAtom() ast.TypeExpr {
 	}
 }
 
-type assocKind int
-
-const (
-	assocLeft assocKind = iota
-	assocRight
-	assocNon
-)
-
-// binOp is the operator table, Elm's precedences: `||` 2 right-assoc;
-// `&&` 3 right-assoc; comparisons 4 non-associative; `++` 5 right-assoc;
-// `+ -` 6 left; `* /` 7 left.
-func binOp(k token.Kind) (int, assocKind) {
-	switch k {
-	case token.PLUS, token.MINUS:
-		return 6, assocLeft
-	case token.STAR, token.SLASH:
-		return 7, assocLeft
-	case token.PLUSPLUS:
-		return 5, assocRight
-	case token.EQEQ, token.SLASHEQ, token.LT, token.GT, token.LTEQ, token.GTEQ:
-		return 4, assocNon
-	case token.ANDAND:
-		return 3, assocRight
-	case token.OROR:
-		return 2, assocRight
-	default:
-		return 0, assocLeft
-	}
+// isOp reports whether t is the operator lexeme text. Operators are one
+// token kind carrying their spelling, so the parser matches text where it
+// used to match a kind.
+func isOp(t token.Token, text string) bool {
+	return t.Kind == token.OP && t.Text == text
 }
 
-// shortCircuit reports the operators that elaborate to an `if` rather than to
-// a called value, so they cannot be bound by an `infix` declaration.
-func shortCircuit(k token.Kind) bool {
-	return k == token.ANDAND || k == token.OROR
-}
-
-func (p *parser) parseExpr(minPrec int) ast.Expr {
-	left := p.parseUnary()
-	if left == nil {
-		return nil
+// parseExpr parses an operator expression as the flat run it is written as.
+// Grouping belongs to internal/fixity: fixity is declared in source and a
+// file is parsed before the module graph exists, so the parser cannot know a
+// run's shape while reading it. A run with no operator collapses to its one
+// operand, so only real operator expressions allocate a chain.
+func (p *parser) parseExpr() ast.Expr {
+	first := p.parseUnary()
+	if first == nil || p.peekInExpr().Kind != token.OP {
+		return first
 	}
-	for {
-		t := p.peekInExpr()
-		prec, assoc := binOp(t.Kind)
-		if prec == 0 || prec < minPrec {
-			return left
-		}
-		p.next()
-		rhsMin := prec + 1
-		if assoc == assocRight {
-			rhsMin = prec
-		}
-		right := p.parseExpr(rhsMin)
-		if right == nil {
+	chain := &ast.OpChain{Operands: []ast.Expr{first}}
+	for p.peekInExpr().Kind == token.OP {
+		op := p.next()
+		operand := p.parseUnary()
+		if operand == nil {
 			return nil
 		}
-		left = &ast.BinOp{Op: t.Text, OpSpan: t.Span, L: left, R: right}
-		if assoc == assocNon {
-			if nextPrec, _ := binOp(p.peekInExpr().Kind); nextPrec == prec {
-				p.errorAt(p.peekInExpr().Span, "SYNTAX PROBLEM",
-					"I cannot parse chained comparisons like `a < b < c` — comparisons\ndo not associate. Add parentheses to say what you mean.")
-				return nil
-			}
-		}
+		chain.Ops = append(chain.Ops, ast.OpRef{Op: op.Text, Sp: op.Span})
+		chain.Operands = append(chain.Operands, operand)
 	}
+	return chain
 }
 
-// parseUnary handles prefix minus. Any MINUS reaching here is in prefix
-// position (the Pratt loop consumes infix minus after a complete operand),
-// binding tighter than every binary operator, looser than application.
+// parseUnary handles prefix minus. Any `-` reaching here is in prefix
+// position — parseExpr's chain loop consumes an infix `-` after a complete
+// operand — and binds tighter than every binary operator, looser than
+// application. Because each chain operand comes from here, prefix minus
+// never enters a chain as an operator and so has no fixity at all.
 func (p *parser) parseUnary() ast.Expr {
-	if t := p.peekInExpr(); t.Kind == token.MINUS {
+	if t := p.peekInExpr(); isOp(t, "-") {
 		p.next()
 		operand := p.parseUnary()
 		if operand == nil {
@@ -1117,7 +1231,7 @@ func (p *parser) parsePostfixAtom() ast.Expr {
 
 func (p *parser) parseHandle() ast.Expr {
 	h := p.next()
-	body := p.parseExpr(1)
+	body := p.parseExpr()
 	if body == nil {
 		return nil
 	}
@@ -1232,7 +1346,7 @@ func (p *parser) parseLambda() ast.Expr {
 // the case. Branch bodies are statement blocks (doc/design.md, "Language semantics") or inline expressions.
 func (p *parser) parseCase() ast.Expr {
 	caseTok := p.next()
-	scrut := p.parseExpr(1)
+	scrut := p.parseExpr()
 	if scrut == nil {
 		return nil
 	}
@@ -1366,7 +1480,13 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 		}
 		p.errorAt(n.Span, "SYNTAX PROBLEM", "A pinned pattern needs an existing lowercase value name after `^`.")
 		return nil
-	case token.MINUS:
+	case token.OP:
+		// `-` before a literal is the only operator a pattern can hold.
+		if t.Text != "-" {
+			p.errorAt(t.Span, "SYNTAX PROBLEM",
+				"I was expecting a pattern here, like `Just x`, a literal, or `_`.")
+			return nil
+		}
 		p.next()
 		nt := p.peekInExpr()
 		switch nt.Kind {
@@ -1455,7 +1575,7 @@ func (p *parser) parseIf() ast.Expr {
 
 func (p *parser) parseIfChain(anchor int) ast.Expr {
 	ifTok := p.next()
-	cond := p.parseExpr(1)
+	cond := p.parseExpr()
 	if cond == nil {
 		return nil
 	}
@@ -1536,7 +1656,7 @@ func (p *parser) parseAtom() ast.Expr {
 		return &ast.Ctor{Name: name, Sp: sp}
 	case token.LBRACE:
 		lb := p.next()
-		record := p.parseExpr(1)
+		record := p.parseExpr()
 		if record == nil || !p.expect(token.PIPE, "I expect `|` after the record being updated.") {
 			return nil
 		}
@@ -1570,7 +1690,7 @@ func (p *parser) parseAtom() ast.Expr {
 	case token.DOLLARPAREN:
 		p.next()
 		p.usesStaging = true
-		operand := p.parseExpr(1)
+		operand := p.parseExpr()
 		if operand == nil {
 			return nil
 		}
@@ -1591,7 +1711,19 @@ func (p *parser) parseAtom() ast.Expr {
 			rp := p.next()
 			return &ast.UnitLit{Sp: lp.Span.Merge(rp.Span)}
 		}
-		e := p.parseExpr(1)
+		// `(+)` names the operator, so `List.foldl (+) 0 xs` works. Checked
+		// before the parenthesized-expression path, or `(-)` would start
+		// down parseUnary's prefix-minus branch and find no operand.
+		if _, ok := p.opNameAt(p.pos - 1); ok {
+			op := p.peekInExpr()
+			if !p.bindableOp(op) {
+				return nil
+			}
+			p.next()
+			rp := p.next()
+			return &ast.Var{Name: op.Text, Sp: lp.Span.Merge(rp.Span)}
+		}
+		e := p.parseExpr()
 		if e == nil {
 			return nil
 		}
@@ -1642,7 +1774,7 @@ func (p *parser) parseRecordExprFieldsAfterOpen() ([]ast.RecordExprField, source
 		if !p.expect(token.EQ, "I expect `=` after the record field name.") {
 			return nil, source.Span{}, false
 		}
-		value := p.parseExpr(1)
+		value := p.parseExpr()
 		if value == nil {
 			return nil, source.Span{}, false
 		}

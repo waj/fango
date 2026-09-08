@@ -12,6 +12,14 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
+// binOp builds an operator application the way elaboration does: a call to
+// the operator's declared native, named by its canonical symbol. Core has no
+// operator node — once fixity resolution has grouped a run, an operator is
+// an ordinary value and `1 + 2` reaches Core as a call.
+func binOp(op string, ty types.Type, l, r core.Expr) core.Expr {
+	return &core.NativeCall{Name: "Basics." + op, Module: "Basics", Ty: ty, Args: []core.Expr{l, r}}
+}
+
 func intTy() *types.TCon    { return &types.TCon{Unique: 0, Name: "Int"} }
 func floatTy() *types.TCon  { return &types.TCon{Unique: 1, Name: "Float"} }
 func stringTy() *types.TCon { return &types.TCon{Unique: 2, Name: "String"} }
@@ -42,11 +50,7 @@ func run(t *testing.T, e core.Expr) Value {
 func TestArith(t *testing.T) {
 	ty := intTy()
 	// 1 + 2 * 3
-	e := &core.BinOp{Op: "+", Ty: ty,
-		L: &core.IntLit{Val: 1, Ty: ty},
-		R: &core.BinOp{Op: "*", Ty: ty,
-			L: &core.IntLit{Val: 2, Ty: ty},
-			R: &core.IntLit{Val: 3, Ty: ty}}}
+	e := binOp("+", ty, &core.IntLit{Val: 1, Ty: ty}, binOp("*", ty, &core.IntLit{Val: 2, Ty: ty}, &core.IntLit{Val: 3, Ty: ty}))
 	if v := run(t, e); v != int64(7) {
 		t.Errorf("got %v, want 7", v)
 	}
@@ -59,22 +63,12 @@ func TestTypedOps(t *testing.T) {
 		want Value
 	}{
 		// Int wraps like int64.
-		{&core.BinOp{Op: "+", Ty: it,
-			L: &core.IntLit{Val: 9223372036854775807, Ty: it},
-			R: &core.IntLit{Val: 1, Ty: it}}, int64(-9223372036854775808)},
+		{binOp("+", it, &core.IntLit{Val: 9223372036854775807, Ty: it}, &core.IntLit{Val: 1, Ty: it}), int64(-9223372036854775808)},
 		// Float division is IEEE: no panic, +Inf.
-		{&core.BinOp{Op: "/", Ty: ft,
-			L: &core.FloatLit{Val: 1.0, Ty: ft},
-			R: &core.FloatLit{Val: 0.0, Ty: ft}}, math.Inf(1)},
-		{&core.BinOp{Op: "++", Ty: st,
-			L: &core.StringLit{Val: "foo", Ty: st},
-			R: &core.StringLit{Val: "bar", Ty: st}}, "foobar"},
-		{&core.BinOp{Op: "<", Ty: bt,
-			L: &core.StringLit{Val: "a", Ty: st},
-			R: &core.StringLit{Val: "b", Ty: st}}, true},
-		{&core.BinOp{Op: "==", Ty: bt,
-			L: &core.BoolLit{Val: true, Ty: bt},
-			R: &core.BoolLit{Val: false, Ty: bt}}, false},
+		{binOp("/", ft, &core.FloatLit{Val: 1.0, Ty: ft}, &core.FloatLit{Val: 0.0, Ty: ft}), math.Inf(1)},
+		{binOp("++", st, &core.StringLit{Val: "foo", Ty: st}, &core.StringLit{Val: "bar", Ty: st}), "foobar"},
+		{binOp("<", bt, &core.StringLit{Val: "a", Ty: st}, &core.StringLit{Val: "b", Ty: st}), true},
+		{binOp("==", bt, &core.BoolLit{Val: true, Ty: bt}, &core.BoolLit{Val: false, Ty: bt}), false},
 		{&core.Neg{Operand: &core.FloatLit{Val: 2.5, Ty: ft}, Ty: ft}, -2.5},
 		{&core.If{Ty: it,
 			Cond: &core.BoolLit{Val: true, Ty: bt},
@@ -104,9 +98,7 @@ func TestIfBranchLaziness(t *testing.T) {
 func TestPrintWritesThroughFangort(t *testing.T) {
 	ft := floatTy()
 	var buf bytes.Buffer
-	e := printExpr(&core.BinOp{Op: "*", Ty: ft,
-		L: &core.FloatLit{Val: 3.14159, Ty: ft},
-		R: &core.FloatLit{Val: 4.0, Ty: ft}})
+	e := printExpr(binOp("*", ft, &core.FloatLit{Val: 3.14159, Ty: ft}, &core.FloatLit{Val: 4.0, Ty: ft}))
 	if _, err := Eval(context.Background(), e, NewEnv(), &buf); err != nil {
 		t.Fatal(err)
 	}
@@ -148,12 +140,8 @@ func TestLetFrames(t *testing.T) {
 	e := &core.Let{Name: "v", Ty: it,
 		Rhs: &core.IntLit{Val: 40, Ty: it},
 		Body: &core.Let{Name: "w", Ty: it,
-			Rhs: &core.BinOp{Op: "+", Ty: it,
-				L: &core.VarRef{Name: "v", Ty: it},
-				R: &core.IntLit{Val: 1, Ty: it}},
-			Body: &core.BinOp{Op: "*", Ty: it,
-				L: &core.VarRef{Name: "w", Ty: it},
-				R: &core.IntLit{Val: 2, Ty: it}}}}
+			Rhs:  binOp("+", it, &core.VarRef{Name: "v", Ty: it}, &core.IntLit{Val: 1, Ty: it}),
+			Body: binOp("*", it, &core.VarRef{Name: "w", Ty: it}, &core.IntLit{Val: 2, Ty: it})}}
 	if v := run(t, e); v != int64(82) {
 		t.Errorf("got %v, want 82", v)
 	}
@@ -199,9 +187,7 @@ func TestLazyMemoCells(t *testing.T) {
 	ty := intTy()
 	env := NewEnv()
 	env.Define("x", &core.IntLit{Val: 40, Ty: ty})
-	env.Define("y", &core.BinOp{Op: "+", Ty: ty,
-		L: &core.VarRef{Name: "x", Ty: ty},
-		R: &core.IntLit{Val: 2, Ty: ty}})
+	env.Define("y", binOp("+", ty, &core.VarRef{Name: "x", Ty: ty}, &core.IntLit{Val: 2, Ty: ty}))
 	v, err := Force(context.Background(), "y", env, io.Discard)
 	if err != nil {
 		t.Fatal(err)
@@ -225,9 +211,7 @@ func TestLazyMemoCells(t *testing.T) {
 func TestSelfDependency(t *testing.T) {
 	ty := intTy()
 	env := NewEnv()
-	env.Define("x", &core.BinOp{Op: "+", Ty: ty,
-		L: &core.VarRef{Name: "x", Ty: ty},
-		R: &core.IntLit{Val: 1, Ty: ty}})
+	env.Define("x", binOp("+", ty, &core.VarRef{Name: "x", Ty: ty}, &core.IntLit{Val: 1, Ty: ty}))
 	if _, err := Force(context.Background(), "x", env, io.Discard); err == nil {
 		t.Error("expected a self-dependency error")
 	}
@@ -246,7 +230,7 @@ func TestSwitchTotality(t *testing.T) {
 		&core.BoolLit{Val: true, Ty: bt},
 		&core.VarRef{Name: "missing", Ty: it},
 		&core.Neg{Operand: one, Ty: it},
-		&core.BinOp{Op: "+", Ty: it, L: one, R: one},
+		binOp("+", it, one, one),
 		&core.If{Cond: &core.BoolLit{Val: true, Ty: bt}, Then: one, Else: one, Ty: it},
 		printExpr(one),
 		&core.Let{Name: "v", Rhs: one, Body: one, Ty: it},
@@ -269,9 +253,7 @@ func TestWorkersAndClosures(t *testing.T) {
 	env.DefineWorker(&core.Def{
 		Name: "add", Params: []string{"x", "y"},
 		Type: &types.TFun{Arg: it, Ret: fnTy},
-		Body: &core.BinOp{Op: "+", Ty: it,
-			L: &core.VarRef{Name: "x", Ty: it},
-			R: &core.VarRef{Name: "y", Ty: it}},
+		Body: binOp("+", it, &core.VarRef{Name: "x", Ty: it}, &core.VarRef{Name: "y", Ty: it}),
 	})
 	// Saturated direct call: add 40 2.
 	sat := &core.App{CalleeKind: core.Worker,
@@ -301,17 +283,12 @@ func TestRecursiveLet(t *testing.T) {
 	// go n = if n < 1 then 0 else n + go (n - 1);  go 4 == 10
 	lam := &core.Lambda{Param: "n", Ty: fnTy,
 		Body: &core.If{Ty: it,
-			Cond: &core.BinOp{Op: "<", Ty: bt,
-				L: &core.VarRef{Name: "n", Ty: it}, R: &core.IntLit{Val: 1, Ty: it}},
+			Cond: binOp("<", bt, &core.VarRef{Name: "n", Ty: it}, &core.IntLit{Val: 1, Ty: it}),
 			Then: &core.IntLit{Val: 0, Ty: it},
-			Else: &core.BinOp{Op: "+", Ty: it,
-				L: &core.VarRef{Name: "n", Ty: it},
-				R: &core.App{CalleeKind: core.Value,
-					Callee: &core.VarRef{Name: "go", Ty: fnTy},
-					Args: []core.Expr{&core.BinOp{Op: "-", Ty: it,
-						L: &core.VarRef{Name: "n", Ty: it},
-						R: &core.IntLit{Val: 1, Ty: it}}},
-					Ty: it}}}}
+			Else: binOp("+", it, &core.VarRef{Name: "n", Ty: it}, &core.App{CalleeKind: core.Value,
+				Callee: &core.VarRef{Name: "go", Ty: fnTy},
+				Args:   []core.Expr{binOp("-", it, &core.VarRef{Name: "n", Ty: it}, &core.IntLit{Val: 1, Ty: it})},
+				Ty:     it})}}
 	e := &core.Let{Name: "go", Rec: true, Rhs: lam, Ty: it,
 		Body: &core.App{CalleeKind: core.Value,
 			Callee: &core.VarRef{Name: "go", Ty: fnTy},
@@ -328,7 +305,7 @@ func TestCancellation(t *testing.T) {
 	// Deep enough to cross the poll interval.
 	var e core.Expr = &core.IntLit{Val: 0, Ty: ty}
 	for i := 0; i < pollEvery+8; i++ {
-		e = &core.BinOp{Op: "+", Ty: ty, L: e, R: &core.IntLit{Val: 1, Ty: ty}}
+		e = binOp("+", ty, e, &core.IntLit{Val: 1, Ty: ty})
 	}
 	if _, err := Eval(ctx, e, NewEnv(), io.Discard); err == nil {
 		t.Error("expected interruption")

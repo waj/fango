@@ -1,0 +1,19 @@
+module Main exposing (main)
+
+import Vec.Ops as V exposing (Vec(..), (|+|), (|*|), (~=))
+
+-- The imported fixities apply here: `|*|` binds tighter than `|+|`, so this
+-- is `(2 |*| Vec 1 2) |+| Vec 10 10`.
+combined : Vec
+combined = 2 |*| Vec 1 2 |+| Vec 10 10
+
+-- An imported operator is also an ordinary value.
+shift : Vec -> Vec
+shift = V.translate (Vec 1 1)
+
+main : String
+main =
+    show combined ++ "/"
+        ++ show (2 |*| Vec 1 2 ~= Vec 2 4)
+        ++ "/" ++ show (V.scale 3 (Vec 1 1))
+        ++ "/" ++ show (shift (Vec 5 5))

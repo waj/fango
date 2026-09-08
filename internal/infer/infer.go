@@ -5,12 +5,15 @@
 package infer
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
+	"github.com/waj/fango/internal/fixity"
 	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/internal/source"
+	"github.com/waj/fango/internal/token"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -71,6 +74,24 @@ func (e *Env) Lookup(name string) (types.Scheme, bool) {
 func (e *Env) Bind(name string, s types.Scheme) { e.vars[name] = s }
 func (e *Env) Has(name string) bool             { _, ok := e.vars[name]; return ok }
 
+// Names returns the bound names in sorted order, so a caller that scans the
+// environment does deterministic work.
+func (e *Env) Names() []string {
+	out := make([]string, 0, len(e.vars))
+	for name := range e.vars {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// isOperatorName reports whether a surface name is an operator spelling
+// rather than an identifier. The character sets are disjoint, so the first
+// byte settles it.
+func isOperatorName(name string) bool {
+	return name != "" && token.IsOpChar(name[0])
+}
+
 // Checker carries the session-scoped inference state: the fresh-variable
 // supply, the accumulated substitution, and per-node solved types. The REPL
 // keeps one Checker across many inputs; batch compilation uses one per run.
@@ -117,8 +138,10 @@ type Checker struct {
 	Operations      map[string]*types.EffectOp
 	IO              *types.EffectInfo
 	Natives         map[string]*types.NativeInfo
-	Operators       map[string]string
-	BinNatives      map[*ast.BinOp]*types.NativeInfo
+	// Fixity is the graph-wide operator table. Module loading fills it and
+	// resolves every operator run before inference; the REPL extends it as
+	// the session declares operators.
+	Fixity fixity.Table
 
 	OpCalls     map[*ast.App]*types.EffectOp
 	HandleInfos map[*ast.Handle]*HandlerInfo
@@ -230,8 +253,7 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		EffectsByUnique: map[int]*types.EffectInfo{},
 		Operations:      map[string]*types.EffectOp{},
 		Natives:         map[string]*types.NativeInfo{},
-		Operators:       map[string]string{},
-		BinNatives:      map[*ast.BinOp]*types.NativeInfo{},
+		Fixity:          fixity.Builtin(),
 		OpCalls:         map[*ast.App]*types.EffectOp{},
 		HandleInfos:     map[*ast.Handle]*HandlerInfo{},
 		ResumeCalls:     map[*ast.App]bool{},
@@ -348,16 +370,13 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 		}
 		errs = append(errs, ck.declareNative(vd)...)
 	}
+	// Fixity declarations carry no type and bind no name; the graph-wide
+	// table is built during module loading. They reach here only so the
+	// REPL can rebuild its table from the merged prelude.
 	for _, d := range m.Decls {
-		inf, ok := d.(*ast.InfixDecl)
-		if !ok {
-			continue
+		if fd, ok := d.(*ast.FixityDecl); ok && ck.Fixity != nil {
+			errs = append(errs, ck.Fixity.Add(fd)...)
 		}
-		if old := ck.Operators[inf.Op]; old != "" && old != inf.Target {
-			errs = append(errs, diag.Errorf(inf.OpSpan, "NATIVE DECLARATION", "The operator (%s) is bound more than once.", inf.Op))
-			continue
-		}
-		ck.Operators[inf.Op] = inf.Target
 	}
 	for _, d := range m.Decls {
 		if cl, ok := d.(*ast.ClassDecl); ok {
@@ -2007,12 +2026,16 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 	}
 }
 
-// binOp types an operator application. `&&` and `||` are the exception to
-// the operator-is-a-call rule: they have no implementing value because
-// elaboration turns them into an `if` that leaves the right operand
-// unevaluated (doc/reference.md, "Values and operators").
+// binOp types an operator application as the call it is: the operator is an
+// ordinary value name, already canonical by the time inference runs, so
+// `a + b` types exactly as `(+) a b`.
+//
+// `&&` and `||` are the exception to the operator-is-a-call rule: they have
+// no implementing value because elaboration turns them into an `if` that
+// leaves the right operand unevaluated (doc/reference.md, "Values and
+// operators").
 func (g *generator) binOp(e *ast.BinOp) types.Type {
-	if e.Op == "&&" || e.Op == "||" {
+	if fixity.IsShortCircuit(e.Op) {
 		for _, side := range []ast.Expr{e.L, e.R} {
 			ty := g.expr(side)
 			g.cs = append(g.cs, Constraint{
@@ -2022,12 +2045,7 @@ func (g *generator) binOp(e *ast.BinOp) types.Type {
 		}
 		return g.ck.B.Bool
 	}
-	name := g.ck.Operators[e.Op]
-	if name == "" {
-		g.errs = append(g.errs, diag.Errorf(e.OpSpan, "MISSING OPERATOR", "No declaration implements (%s).", e.Op))
-		return g.ck.Sup.FreshVar(types.General)
-	}
-	app := &ast.App{Fn: &ast.App{Fn: &ast.Var{Name: name, Sp: e.OpSpan}, Arg: e.L}, Arg: e.R}
+	app := &ast.App{Fn: &ast.App{Fn: &ast.Var{Name: e.Op, Sp: e.OpSpan}, Arg: e.L}, Arg: e.R}
 	g.ck.Desugared[e] = app
 	return g.expr(app)
 }

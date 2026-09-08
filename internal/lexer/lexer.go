@@ -315,26 +315,11 @@ func (l *lexer) lexUnderscore(start int) {
 	l.emit(token.UNDERSCORE, start, l.pos)
 }
 
-var twoCharOps = []struct {
-	text string
-	kind token.Kind
-}{
-	{"++", token.PLUSPLUS}, {"==", token.EQEQ}, {"=>", token.DARROW}, {"/=", token.SLASHEQ},
-	{"<=", token.LTEQ}, {">=", token.GTEQ}, {"->", token.ARROW},
-	{"..", token.DOTDOT},
-	// `$(` is one token: a splice always opens with it, and `$` alone is not
-	// an operator, so nothing else can consume the dollar.
-	{"$(", token.DOLLARPAREN},
-	// Ahead of the one-char table, so `||` is one token and `|` still is one.
-	{"&&", token.ANDAND}, {"||", token.OROR},
-}
-
-var oneCharOps = map[byte]token.Kind{
-	'=': token.EQ, '+': token.PLUS, '-': token.MINUS, '*': token.STAR,
-	'/': token.SLASH, '(': token.LPAREN, ')': token.RPAREN, ',': token.COMMA,
-	'<': token.LT, '>': token.GT, ':': token.COLON, '|': token.PIPE,
+// punctuation maps the single characters that are not operator characters
+// but still stand alone as tokens.
+var punctuation = map[byte]token.Kind{
+	'(': token.LPAREN, ')': token.RPAREN, ',': token.COMMA,
 	'{': token.LBRACE, '}': token.RBRACE, '\\': token.BACKSLASH,
-	'.': token.DOT, '^': token.CARET,
 }
 
 func UnescapeChar(raw string) rune {
@@ -355,26 +340,55 @@ func UnescapeChar(raw string) rune {
 	}
 }
 
+// lexOperator scans punctuation, `.`/`..`, `$(`, and operator runs.
+//
+// Operator runs use maximal munch: the longest run of operator characters is
+// one token, so `<+>` is a single operator rather than three. The run's
+// spelling then decides its kind — reserved lexemes like `->` get their own,
+// everything else becomes OP and is a name the program can declare.
+//
+// The cost of maximal munch is that adjacency matters: `x =-1` scans `=-`,
+// one operator, and reports an unknown name rather than an assignment. Fango
+// accepts that for the same reason Haskell does — without it, no operator
+// beyond a fixed table could be lexed at all.
 func (l *lexer) lexOperator(start int) {
-	rest := l.f.Content[l.pos:]
-	for _, op := range twoCharOps {
-		if len(rest) >= 2 && string(rest[:2]) == op.text {
+	c := l.f.Content[l.pos]
+	// `$(` is one token: a splice always opens with it, and `$` is not an
+	// operator character, so nothing else can consume the dollar.
+	if c == '$' {
+		if l.peekAt(1) == '(' {
 			l.pos += 2
-			l.emit(op.kind, start, l.pos)
+			l.emit(token.DOLLARPAREN, start, l.pos)
 			return
 		}
-	}
-	c := l.f.Content[l.pos]
-	if kind, ok := oneCharOps[c]; ok {
-		l.pos++
-		l.emit(kind, start, l.pos)
-		return
-	}
-	if c == '$' {
 		l.pos++
 		sp := source.Span{File: l.f, Start: start, End: l.pos}
 		l.errs = append(l.errs, diag.Errorf(sp, "UNEXPECTED CHARACTER",
 			"`$` only appears as part of a splice, written `$(expression)`."))
+		return
+	}
+	// `.` and `..` are not operator characters: a dot always means field
+	// access, module qualification, or the `exposing (..)` ellipsis.
+	if c == '.' {
+		l.pos++
+		if l.pos < len(l.f.Content) && l.f.Content[l.pos] == '.' {
+			l.pos++
+			l.emit(token.DOTDOT, start, l.pos)
+			return
+		}
+		l.emit(token.DOT, start, l.pos)
+		return
+	}
+	if kind, ok := punctuation[c]; ok {
+		l.pos++
+		l.emit(kind, start, l.pos)
+		return
+	}
+	if token.IsOpChar(c) {
+		for l.pos < len(l.f.Content) && token.IsOpChar(l.f.Content[l.pos]) {
+			l.pos++
+		}
+		l.emit(token.OpKind(string(l.f.Content[start:l.pos])), start, l.pos)
 		return
 	}
 	l.pos++

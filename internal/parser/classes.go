@@ -111,12 +111,17 @@ func (p *parser) parseInstanceDecl() ast.Decl {
 	for p.peek().Kind != token.EOF && p.peek().Pos().Col >= col {
 		p.stmtStart = p.pos
 		n := p.peekInExpr()
-		if n.Kind != token.LIDENT || n.Pos().Col != col {
+		if (n.Kind != token.LIDENT && n.Kind != token.LPAREN) || n.Pos().Col != col {
 			p.errorAt(n.Span, "INSTANCE METHOD", "I expect aligned method definitions.")
 			p.recoverToTopLevel(false)
 			return nil
 		}
-		p.next()
+		name, nameSpan, ok := p.parseMethodName("INSTANCE METHOD",
+			"I expect a method name here, like `show` or `(==)`.")
+		if !ok {
+			p.recoverToTopLevel(false)
+			return nil
+		}
 		params := p.parseValueParams()
 		eq := p.peekInExpr()
 		if !p.expect(token.EQ, "I expect `=` after the method parameters.") {
@@ -128,7 +133,7 @@ func (p *parser) parseInstanceDecl() ast.Decl {
 			p.recoverToTopLevel(false)
 			return nil
 		}
-		d.Methods = append(d.Methods, &ast.ValueDecl{Name: n.Text, NameSpan: n.Span, Params: params, Body: body})
+		d.Methods = append(d.Methods, &ast.ValueDecl{Name: name, NameSpan: nameSpan, Params: params, Body: body})
 	}
 	return d
 }

@@ -149,8 +149,6 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 			return fmt.Sprintf("(var %s @[%s] %s)", e.Name, dumpTypes(e.TyArgs, pr), pr.Type(e.Ty))
 		}
 		return fmt.Sprintf("(var %s %s)", e.Name, pr.Type(e.Ty))
-	case *BinOp:
-		return fmt.Sprintf("(binop %s %s %s %s)", e.Op, pr.Type(e.Ty), dumpExpr(e.L, pr), dumpExpr(e.R, pr))
 	case *Quote:
 		parts := []string{fmt.Sprintf("(quote %d", e.Template)}
 		for _, h := range e.Holes {

@@ -1,0 +1,10 @@
+(module
+  (def x (int 1)))
+-- errors --
+-- RESERVED OPERATOR ------------ err_fixity_short_circuit.fango
+
+(&&) is short-circuiting syntax elaborated to an `if`, not a
+call, so there is no (&&) value to name.
+
+1| infixl 3 (&&)
+             ^^

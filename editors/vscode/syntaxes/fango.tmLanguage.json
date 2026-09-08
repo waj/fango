@@ -10,7 +10,9 @@
     { "include": "#class_decl" },
     { "include": "#instance_decl" },
     { "include": "#effect_decl" },
-    { "include": "#infix_decl" },
+    { "include": "#fixity_decl" },
+    { "include": "#operator_annotation" },
+    { "include": "#operator_definition" },
     { "include": "#annotation" },
     { "include": "#function_definition" },
     { "include": "#binding" },
@@ -140,13 +142,54 @@
         "2": { "name": "entity.name.type.effect.fango" }
       }
     },
-    "infix_decl": {
-      "match": "^(infix)\\s*(\\()\\s*(\\+\\+|==|/=|<=|>=|[+\\-*/<>])\\s*(\\))",
+    "operator_name": {
+      "match": "(\\()\\s*([!#%&*+\\-/:<=>?@^|~]+)\\s*(\\))",
       "captures": {
-        "1": { "name": "keyword.other.infix.fango" },
+        "1": { "name": "punctuation.section.parens.begin.fango" },
+        "2": { "name": "entity.name.function.operator.fango" },
+        "3": { "name": "punctuation.section.parens.end.fango" }
+      }
+    },
+    "fixity_decl": {
+      "match": "^(infixl|infixr|infix)\\s+([0-9])\\s*(\\()\\s*([!#%&*+\\-/:<=>?@^|~]+)\\s*(\\))",
+      "captures": {
+        "1": { "name": "keyword.other.fixity.fango" },
+        "2": { "name": "constant.numeric.fango" },
+        "3": { "name": "punctuation.section.parens.begin.fango" },
+        "4": { "name": "entity.name.function.operator.fango" },
+        "5": { "name": "punctuation.section.parens.end.fango" }
+      }
+    },
+    "operator_annotation": {
+      "begin": "^(\\s*)(\\()\\s*([!#%&*+\\-/:<=>?@^|~]+)\\s*(\\))\\s*(:)",
+      "end": "$",
+      "beginCaptures": {
         "2": { "name": "punctuation.section.parens.begin.fango" },
         "3": { "name": "entity.name.function.operator.fango" },
-        "4": { "name": "punctuation.section.parens.end.fango" }
+        "4": { "name": "punctuation.section.parens.end.fango" },
+        "5": { "name": "keyword.operator.type-annotation.fango" }
+      },
+      "patterns": [
+        { "include": "#type_expression" },
+        {
+          "begin": "(=)\\s*(native)\\b",
+          "end": "(?=$)",
+          "beginCaptures": {
+            "1": { "name": "keyword.operator.assignment.fango" },
+            "2": { "name": "keyword.other.native.fango" }
+          },
+          "patterns": [
+            { "include": "#native_string" }
+          ]
+        }
+      ]
+    },
+    "operator_definition": {
+      "match": "^\\s*(\\()\\s*([!#%&*+\\-/:<=>?@^|~]+)\\s*(\\))(?=(?:\\s+(?:[a-z][A-Za-z0-9_]*|_|\\(\\)))*\\s*=(?![!#%&*+\\-/:<=>?@^|~]))",
+      "captures": {
+        "1": { "name": "punctuation.section.parens.begin.fango" },
+        "2": { "name": "entity.name.function.operator.fango" },
+        "3": { "name": "punctuation.section.parens.end.fango" }
       }
     },
     "annotation": {
@@ -232,13 +275,13 @@
       ]
     },
     "function_definition": {
-      "match": "^\\s*([a-z][A-Za-z0-9_]*)(?=(?:\\(\\)|(?:\\s+(?:[a-z][A-Za-z0-9_]*|_|\\(\\)))+)\\s*=(?![=>]))",
+      "match": "^\\s*([a-z][A-Za-z0-9_]*)(?=(?:\\(\\)|(?:\\s+(?:[a-z][A-Za-z0-9_]*|_|\\(\\)))+)\\s*=(?![!#%&*+\\-/:<=>?@^|~]))",
       "captures": {
         "1": { "name": "entity.name.function.fango" }
       }
     },
     "binding": {
-      "match": "^\\s*([a-z][A-Za-z0-9_]*)(?=\\s*=(?![=>]))",
+      "match": "^\\s*([a-z][A-Za-z0-9_]*)(?=\\s*=(?![!#%&*+\\-/:<=>?@^|~]))",
       "captures": {
         "1": { "name": "variable.other.definition.fango" }
       }
@@ -261,6 +304,7 @@
           "name": "entity.name.type.fango",
           "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
         },
+        { "include": "#operator_name" },
         { "include": "#operators" },
         {
           "name": "variable.language.wildcard.fango",
@@ -340,7 +384,7 @@
         },
         {
           "name": "keyword.other.fango",
-          "match": "\\b(module|import|as|exposing|type|effect|native|infix|class|instance|deriver|deriving)\\b"
+          "match": "\\b(module|import|as|exposing|type|effect|native|infixl|infixr|infix|class|instance|deriver|deriving)\\b"
         },
         {
           "name": "invalid.deprecated.reserved.fango",
@@ -442,54 +486,51 @@
       ]
     },
     "operators": {
+      "comment": "Operator runs munch maximally in the lexer, so every reserved lexeme is bounded by non-operator characters — otherwise `-->` would highlight an arrow inside a comment and `|>` a pipe. The final catch-all carries user-declared operators, which have no fixed meaning to scope.",
       "patterns": [
         {
           "name": "keyword.operator.splice.fango",
           "match": "\\$\\("
         },
         {
-          "name": "keyword.operator.arrow.fango",
-          "match": "->"
-        },
-        {
-          "name": "keyword.operator.big-arrow.fango",
-          "match": "=>"
-        },
-        {
           "name": "keyword.operator.range.fango",
           "match": "\\.\\."
         },
         {
-          "name": "keyword.operator.concat.fango",
-          "match": "\\+\\+"
+          "name": "keyword.operator.arrow.fango",
+          "match": "(?<![!#%&*+\\-/:<=>?@^|~])->(?![!#%&*+\\-/:<=>?@^|~])"
         },
         {
-          "name": "keyword.operator.comparison.fango",
-          "match": "==|/=|<=|>=|<|>"
-        },
-        {
-          "name": "keyword.operator.logical.fango",
-          "match": "&&|\\|\\|"
+          "name": "keyword.operator.big-arrow.fango",
+          "match": "(?<![!#%&*+\\-/:<=>?@^|~])=>(?![!#%&*+\\-/:<=>?@^|~])"
         },
         {
           "name": "keyword.operator.assignment.fango",
-          "match": "="
+          "match": "(?<![!#%&*+\\-/:<=>?@^|~])=(?![!#%&*+\\-/:<=>?@^|~])"
         },
         {
-          "name": "keyword.operator.arithmetic.fango",
-          "match": "[+\\-*/]"
+          "name": "keyword.operator.type-annotation.fango",
+          "match": "(?<![!#%&*+\\-/:<=>?@^|~]):(?![!#%&*+\\-/:<=>?@^|~])"
         },
         {
           "name": "keyword.operator.pipe.fango",
-          "match": "\\|"
+          "match": "(?<![!#%&*+\\-/:<=>?@^|~])\\|(?![!#%&*+\\-/:<=>?@^|~])"
+        },
+        {
+          "name": "keyword.operator.pin.fango",
+          "match": "(?<![!#%&*+\\-/:<=>?@^|~])\\^(?![!#%&*+\\-/:<=>?@^|~])"
+        },
+        {
+          "name": "keyword.operator.logical.fango",
+          "match": "(?<![!#%&*+\\-/:<=>?@^|~])(?:&&|\\|\\|)(?![!#%&*+\\-/:<=>?@^|~])"
         },
         {
           "name": "keyword.operator.lambda.fango",
           "match": "\\\\"
         },
         {
-          "name": "keyword.operator.type-annotation.fango",
-          "match": ":"
+          "name": "keyword.operator.fango",
+          "match": "[!#%&*+\\-/:<=>?@^|~]+"
         }
       ]
     }

@@ -34,10 +34,12 @@ Functions are curried at the language level. A syntactic multi-parameter
 function nevertheless has a known worker arity, allowing saturated calls to
 compile directly while partial applications allocate typed closures.
 
-Operators other than `&&` and `||` are applications of declared values, so
-both operands are evaluated. `&&` and `||` are surface syntax that elaborates
-to `If`, which is what makes them short-circuit; Core has no boolean operator
-and the Core linter rejects one.
+An operator is an ordinary value whose name is punctuation, so every operator
+other than `&&` and `||` is an application of a declared value and both
+operands are evaluated. `&&` and `||` are surface syntax that elaborates to
+`If`, which is what makes them short-circuit. Core has no operator node at
+all: after fixity resolution an operator application is a call, so nothing
+downstream switches on an operator spelling.
 
 Custom types are nominal and identified internally by a generation-stable
 integer `Unique`, not their printed name. Constructors inhabit a separate
@@ -112,7 +114,9 @@ source -> lexer -> parser -> AST -> inference -> typed AST
 
 The hand-written lexer records byte spans and line/column positions but does
 not synthesize layout tokens. The recursive-descent parser applies the offside
-rule from token columns and uses precedence climbing for operators. A token at
+rule from token columns. Operator runs parse flat rather than into a tree,
+because fixity is declared in source and a file is parsed before the module
+graph exists; internal/fixity groups them afterwards. A token at
 the innermost layout column normally ends the current construct; the parser
 exempts single tokens that open a construct, and an `if` additionally exempts
 its own `then` and `else` at the column of its `if`, so a chain of arms can
@@ -130,9 +134,9 @@ tie-breaking.
 Primitives are declarations rather than a compiler catalog. Every ordinary
 module implicitly loads the hidden `Basics` module, whose native values define
 the scalar implementations of class methods, and the bundled `IO` module declares the ambient IO
-effect and its operations. `infix` declarations bind the parser's closed set of
-operator tokens to values or class methods; only bundled modules may contain them.
-`native "..."` templates are likewise bundled-only. The loader validates each
+effect and its operations. Basics also declares the standard operators and
+their fixities, which any module may do — there is no privileged operator
+set. `native "..."` templates remain bundled-only. The loader validates each
 template as a Go expression, requires every positional argument exactly once,
 and permits only placeholders, compiler intrinsics, Go predeclared names, and
 the `fangort` qualifier. Code generation reparses and position-scrubs the
@@ -146,9 +150,25 @@ content hash joins `sources.json`; the build synchronizer materializes it as a
 separate package below `native/`, so edits and removal invalidate the build and
 prune stale generated files. Go compilation remains the final body/type check.
 
+Fixity resolution runs between parsing and name resolution. Because a fixity
+is declared in source and may live in any module of the graph, the parser
+cannot shape an operator run as it reads one; it records the run flat and
+`internal/fixity` rebuilds it into operator applications once every file is
+parsed. Resolution happens before name resolution, so the operators it
+produces are canonicalized like any other reference, and it covers quoted
+code, so a quote groups the way it would have written inline. The invariant
+that pays for the split: no unresolved run survives module loading, so
+inference, elaboration, and staging only ever see operator applications.
+Fixity binds a spelling rather than a value — a class declares an operator
+and its instances implement it — so the table is graph-wide, and a run's
+shape does not depend on which module it is written in. Module-scoped
+fixity, where an import could change how a run parses, is deferred.
+
 Name resolution rewrites module-level declarations and imported references to
 opaque, collision-free canonical symbols before inference. Local binders keep
-their source names. The resolved modules are merged in graph order and checked
+their source names. An operator is an ordinary name here too: it resolves
+through the same scope, and the implicit prelude injects the ones `Basics`
+exposes so arithmetic needs no import. The resolved modules are merged in graph order and checked
 with one graph-wide fresh-name supply and one set of builtin identities. This
 shares nominal ADT and effect identities safely across module boundaries while
 an import can seed only its direct dependency's declared public interface.
@@ -511,7 +531,12 @@ typed compiler-internal exported ABI. Direct source imports remain Go import
 edges even when unused, and generated types may add an import of a transitive
 type owner. Package aliases and batch lambda-lifted names are deterministic and
 independent of graph-wide identity allocation, so unchanged source units emit
-byte-identical Go. Project emission is the backend's only generation path;
+byte-identical Go. Module separators and operator characters are the only
+characters a canonical symbol can hold that a Go identifier cannot, so symbol
+mangling spells each as a word: `Basics.++` emits as `v_Basics_dot__plus__plus_`.
+Words rather than a hash because generated Go is meant to stay readable, and
+the substitution cannot collide with an ordinary name because identifier and
+operator characters are disjoint sets and a fango name may not begin with `_`. Project emission is the backend's only generation path;
 tests inspect the same package files used by `build`, `run`, and `--emit-go`.
 
 A self-recursive tail call of a top-level worker compiles to a loop: when the

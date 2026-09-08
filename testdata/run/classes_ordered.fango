@@ -5,14 +5,14 @@ unwrap x = case x of
 
 instance Num Count
     fromInt x = Count x
-    add x y = Count (unwrap x + unwrap y)
-    sub x y = Count (unwrap x - unwrap y)
-    mul x y = Count (unwrap x * unwrap y)
+    (+) x y = Count (unwrap x + unwrap y)
+    (-) x y = Count (unwrap x - unwrap y)
+    (*) x y = Count (unwrap x * unwrap y)
     negate x = Count (0 - unwrap x)
 
 -- Both literal patterns match. The first branch must win.
 instance Eq Count
-    eq x y = True
+    (==) x y = True
 
 type Pair a = Pair Bool a
 

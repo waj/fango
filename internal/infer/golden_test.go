@@ -41,6 +41,11 @@ func TestCheckerGoldens(t *testing.T) {
 			if errs := ck.InstallPrelude(); len(errs) > 0 {
 				t.Fatalf("prelude errors: %v", errs)
 			}
+			// Module loading normally groups operator runs; these tests parse
+			// directly, so they group against the prelude's table themselves.
+			if errs := ck.Fixity.Resolve(m); len(errs) > 0 {
+				t.Fatalf("fixity errors: %v", errs)
+			}
 			infos, errs := ck.Module(m)
 			var out strings.Builder
 			for _, info := range infos {

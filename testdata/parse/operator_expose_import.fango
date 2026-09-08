@@ -1,0 +1,5 @@
+module Client exposing (main)
+
+import Ops exposing ((<+>), (|>))
+
+main = 1 <+> 2 |> negate

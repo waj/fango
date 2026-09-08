@@ -1,8 +1,8 @@
 1:1 LIDENT main
 1:6 EQ =
 1:8 INT 1
-1:10 PLUS +
+1:10 OP +
 1:12 INT 2
-1:14 STAR *
+1:14 OP *
 1:16 INT 3
 2:1 EOF

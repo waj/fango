@@ -1,20 +1,20 @@
-module Basics exposing (Num(..), Eq(..), Ord(..), Show(..), modBy, remainderBy)
+module Basics exposing (Num(..), Eq(..), Ord(..), Show(..), (/), (++), (/=), modBy, remainderBy)
 
 class Num a
     fromInt : Int -> a
-    add : a -> a -> a
-    sub : a -> a -> a
-    mul : a -> a -> a
+    (+) : a -> a -> a
+    (-) : a -> a -> a
+    (*) : a -> a -> a
     negate : a -> a
 
 class Eq a
-    eq : a -> a -> Bool
+    (==) : a -> a -> Bool
 
 class Ord a
-    lt : a -> a -> Bool
-    gt : a -> a -> Bool
-    le : a -> a -> Bool
-    ge : a -> a -> Bool
+    (<) : a -> a -> Bool
+    (>) : a -> a -> Bool
+    (<=) : a -> a -> Bool
+    (>=) : a -> a -> Bool
 
 class Show a
     show : a -> String
@@ -126,98 +126,100 @@ floatFromInt = native "float64($1)"
 
 instance Num Int
     fromInt x = x
-    add x y = intAdd x y
-    sub x y = intSub x y
-    mul x y = intMul x y
+    (+) x y = intAdd x y
+    (-) x y = intSub x y
+    (*) x y = intMul x y
     negate x = intNegate x
 
 instance Num Float
     fromInt x = floatFromInt x
-    add x y = floatAdd x y
-    sub x y = floatSub x y
-    mul x y = floatMul x y
+    (+) x y = floatAdd x y
+    (-) x y = floatSub x y
+    (*) x y = floatMul x y
     negate x = floatNegate x
 
 instance Eq Int
-    eq x y = intEq x y
+    (==) x y = intEq x y
 
 instance Ord Int
-    lt x y = intLt x y
-    gt x y = intGt x y
-    le x y = intLe x y
-    ge x y = intGe x y
+    (<) x y = intLt x y
+    (>) x y = intGt x y
+    (<=) x y = intLe x y
+    (>=) x y = intGe x y
 
 instance Show Int
     show x = intShow x
 
 instance Eq Float
-    eq x y = floatEq x y
+    (==) x y = floatEq x y
 
 instance Ord Float
-    lt x y = floatLt x y
-    gt x y = floatGt x y
-    le x y = floatLe x y
-    ge x y = floatGe x y
+    (<) x y = floatLt x y
+    (>) x y = floatGt x y
+    (<=) x y = floatLe x y
+    (>=) x y = floatGe x y
 
 instance Show Float
     show x = floatShow x
 
 instance Eq String
-    eq x y = stringEq x y
+    (==) x y = stringEq x y
 
 instance Ord String
-    lt x y = stringLt x y
-    gt x y = stringGt x y
-    le x y = stringLe x y
-    ge x y = stringGe x y
+    (<) x y = stringLt x y
+    (>) x y = stringGt x y
+    (<=) x y = stringLe x y
+    (>=) x y = stringGe x y
 
 instance Show String
     show x = stringShow x
 
 instance Eq Bool
-    eq x y = boolEq x y
+    (==) x y = boolEq x y
 
 instance Show Bool
     show x = boolShow x
 
 instance Eq Char
-    eq x y = charEq x y
+    (==) x y = charEq x y
 
 instance Ord Char
-    lt x y = charLt x y
-    gt x y = charGt x y
-    le x y = charLe x y
-    ge x y = charGe x y
+    (<) x y = charLt x y
+    (>) x y = charGt x y
+    (<=) x y = charLe x y
+    (>=) x y = charGe x y
 
 instance Show Char
     show x = charShow x
 
 instance Eq ()
-    eq x y = True
+    (==) x y = True
 
 instance Show ()
     show x = "()"
 
-neq : Eq a => a -> a -> Bool
-neq x y = if eq x y then False else True
+(/=) : Eq a => a -> a -> Bool
+(/=) x y = if x == y then False else True
 
-fdiv : Float -> Float -> Float
-fdiv = native "$1 / $2"
+(/) : Float -> Float -> Float
+(/) = native "$1 / $2"
 
-append : String -> String -> String
-append = native "$1 + $2"
+(++) : String -> String -> String
+(++) = native "$1 + $2"
 
-infix (+) = add
-infix (-) = sub
-infix (*) = mul
-infix (/) = fdiv
-infix (++) = append
-infix (==) = eq
-infix (/=) = neq
-infix (<) = lt
-infix (>) = gt
-infix (<=) = le
-infix (>=) = ge
+-- The precedences the language used to fix in its parser, now declared
+-- like any other operator's.
+infixl 7 (*)
+infixl 7 (/)
+infixl 6 (+)
+infixl 6 (-)
+infixr 5 (++)
+infix 4 (==)
+infix 4 (/=)
+infix 4 (<)
+infix 4 (>)
+infix 4 (<=)
+infix 4 (>=)
 
 -- Truncated remainder (Go's %): the result has the dividend's sign.
 -- A zero divisor crashes the program.

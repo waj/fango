@@ -1,6 +1,7 @@
 package modules
 
 import (
+	"github.com/waj/fango/internal/ast"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,8 +133,8 @@ func TestBundledModules(t *testing.T) {
 	if strings.Join(got, ",") != want {
 		t.Fatalf("manifest = %v, want %s", got, want)
 	}
-	if r.Operators["+"] != "Basics.add" || len(r.Natives) != 2 {
-		t.Fatalf("declared native metadata: operators=%v natives=%v", r.Operators, r.Natives)
+	if f := r.Fixity.Lookup("+"); f.Prec != 6 || f.Assoc != ast.AssocLeft || len(r.Natives) != 2 {
+		t.Fatalf("declared native metadata: fixity of (+)=%v %d natives=%v", f.Assoc, f.Prec, r.Natives)
 	}
 }
 
@@ -178,7 +179,8 @@ func TestNativeSidecarValidation(t *testing.T) {
 		{"external import", "value : Int -> Int\nvalue = native\n", "package native\nimport _ \"example.com/nope\"\nfunc Value(x int64) int64 { return x }\n", "NATIVE IMPORT NOT ALLOWED"},
 		{"shape", "value : Int -> Int\nvalue = native\n", "package native\nfunc Value(x string) int64 { return 0 }\n", "NATIVE ABI"},
 		{"template", "value : Int -> Int\nvalue = native \"$1\"\n", "", "NATIVE TEMPLATE NOT ALLOWED"},
-		{"infix", "value = 1\ninfix (+) = value\n", "", "INFIX NOT ALLOWED"},
+		{"fixity without definition", "value = 1\ninfixl 6 (<+>)\n", "", "FIXITY WITHOUT DEFINITION"},
+		{"duplicate fixity", "(<+>) : Int -> Int -> Int\n(<+>) a b = a\ninfixl 6 (<+>)\ninfixl 6 (<+>)\n", "", "DUPLICATE FIXITY"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -188,6 +190,47 @@ func TestNativeSidecarValidation(t *testing.T) {
 				write(t, d, "Main.native.go", tt.sidecar)
 			}
 			_, errs := Load(entry)
+			if len(errs) == 0 || errs[0].Title != tt.title {
+				t.Fatalf("errors: %#v", errs)
+			}
+		})
+	}
+}
+
+// Fixity is graph-wide, so it is the one operator property two modules can
+// disagree about. Declaring the same operator in both is fine; only a
+// conflicting fixity, or importing both spellings unqualified, is an error.
+func TestCrossModuleOperators(t *testing.T) {
+	const opA = "module A exposing ((<+>))\n(<+>) : Int -> Int -> Int\n(<+>) a b = a\n"
+	for _, tt := range []struct{ name, a, b, main, title string }{
+		{"conflicting fixity",
+			opA + "infixl 6 (<+>)\n",
+			"module B exposing ((<+>))\n(<+>) : Int -> Int -> Int\n(<+>) a b = b\ninfixr 3 (<+>)\n",
+			"import A\nimport B\n", "CONFLICTING FIXITY"},
+		{"same fixity in both",
+			opA + "infixl 6 (<+>)\n",
+			"module B exposing ((<+>))\n(<+>) : Int -> Int -> Int\n(<+>) a b = b\ninfixl 6 (<+>)\n",
+			"import A\nimport B\n", ""},
+		{"both exposed unqualified",
+			opA + "infixl 6 (<+>)\n",
+			"module B exposing ((<+>))\n(<+>) : Int -> Int -> Int\n(<+>) a b = b\ninfixl 6 (<+>)\n",
+			"import A exposing ((<+>))\nimport B exposing ((<+>))\n", "UNQUALIFIED COLLISION"},
+		{"imported operator used infix",
+			opA + "infixl 6 (<+>)\n", "module B exposing ()\nunused = 1\n",
+			"import A exposing ((<+>))\nvalue = 1 <+> 2\n", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d := t.TempDir()
+			entry := write(t, d, "Main.fango", "module Main exposing (main)\n"+tt.main+"main = 0\n")
+			write(t, d, "A.fango", tt.a)
+			write(t, d, "B.fango", tt.b)
+			_, errs := Load(entry)
+			if tt.title == "" {
+				if len(errs) > 0 {
+					t.Fatalf("unexpected errors: %#v", errs)
+				}
+				return
+			}
 			if len(errs) == 0 || errs[0].Title != tt.title {
 				t.Fatalf("errors: %#v", errs)
 			}

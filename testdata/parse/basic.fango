@@ -1,1 +1,15 @@
 main = 1 + 2 * 3
+
+-- The fixities these expressions rely on. Parse goldens carry their own,
+-- rather than inheriting Basics', so a fixture says what it tests.
+(+) : Int -> Int -> Int
+(+) a b = a
+infixl 6 (+)
+
+(-) : Int -> Int -> Int
+(-) a b = a
+infixl 6 (-)
+
+(*) : Int -> Int -> Int
+(*) a b = a
+infixl 7 (*)

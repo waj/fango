@@ -195,21 +195,32 @@ func (s *Session) input(text string, force bool) inputResult {
 	return s.exprInput(toks, f, force)
 }
 
-// isDecl: `type …`, `name = …`, `name params… = …`, or `name : …` (an
-// annotation opening a definition) is a declaration; anything else is an
-// expression. `==` lexes as its own token, so comparisons still classify as
-// expressions, and `f x y` without `=` stays an application.
+// isDecl: `type …`, `name = …`, `name params… = …`, `name : …` (an
+// annotation opening a definition), or a fixity declaration is a
+// declaration; anything else is an expression. `==` lexes as one token, so
+// comparisons still classify as expressions, and `f x y` without `=` stays
+// an application.
+//
+// An operator declaration opens with `(op)`, which also opens the
+// expression `(+) 1 2`; the `=` scan below is what separates them.
 func isDecl(toks []token.Token) bool {
 	if len(toks) >= 1 && (toks[0].Kind == token.KwType || toks[0].Kind == token.KwEffect || toks[0].Kind == token.KwClass || toks[0].Kind == token.KwInstance || toks[0].Kind == token.KwDeriver) {
 		return true
 	}
-	if len(toks) < 2 || toks[0].Kind != token.LIDENT {
-		return false
-	}
-	if toks[1].Kind == token.COLON {
+	if len(toks) >= 1 && (toks[0].Kind == token.KwInfix || toks[0].Kind == token.KwInfixL || toks[0].Kind == token.KwInfixR) {
 		return true
 	}
 	i := 1
+	switch {
+	case len(toks) >= 2 && toks[0].Kind == token.LIDENT:
+	case len(toks) >= 4 && toks[0].Kind == token.LPAREN && toks[1].Kind == token.OP && toks[2].Kind == token.RPAREN:
+		i = 3
+	default:
+		return false
+	}
+	if toks[i].Kind == token.COLON {
+		return true
+	}
 	if i+1 < len(toks) && toks[i].Kind == token.LPAREN && toks[i+1].Kind == token.RPAREN {
 		i += 2
 	}
@@ -224,6 +235,15 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	if !force && wantsMore(errs) {
 		return needMoreInput
 	}
+	if len(errs) > 0 {
+		diag.Render(s.out, errs)
+		return inputDone
+	}
+	// The prompt is parsed one entry at a time, so grouping happens here
+	// against the session table rather than during module loading. A fixity
+	// declaration extends the table for later entries.
+	errs = append(errs, s.ck.Fixity.Collect(m.Decls)...)
+	errs = append(errs, s.ck.Fixity.Resolve(m)...)
 	if len(errs) > 0 {
 		diag.Render(s.out, errs)
 		return inputDone
@@ -282,6 +302,12 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		} else {
 			fmt.Fprintf(s.out, "%s : effect\n", ed.Name)
 		}
+		return inputDone
+	}
+	if fd, ok := m.Decls[0].(*ast.FixityDecl); ok {
+		// Collect above already recorded it, so later entries group by it.
+		// A fixity binds no name and has no type to report.
+		fmt.Fprintf(s.out, "%s %d (%s)\n", fd.Assoc, fd.Prec, fd.Op)
 		return inputDone
 	}
 	vd := m.Decls[0].(*ast.ValueDecl)
@@ -390,6 +416,11 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 		diag.Render(s.out, errs)
 		return inputDone
 	}
+	e, errs = s.ck.Fixity.ResolveExpr(e)
+	if len(errs) > 0 {
+		diag.Render(s.out, errs)
+		return inputDone
+	}
 	e, errs = s.ck.StageExpr(e)
 	if len(errs) > 0 {
 		diag.Render(s.out, errs)
@@ -431,6 +462,10 @@ func (s *Session) typeOf(src string) {
 	}
 	e, errs := parser.ParseExprInput(toks, f)
 	if len(errs) > 0 {
+		diag.Render(s.out, errs)
+		return
+	}
+	if e, errs = s.ck.Fixity.ResolveExpr(e); len(errs) > 0 {
 		diag.Render(s.out, errs)
 		return
 	}

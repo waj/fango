@@ -93,9 +93,9 @@ imported.
 The compiler also contains standard-library modules.
 Their names are reserved: a named entry or local module that has the same name
 is rejected with `RESERVED MODULE`, rather than replacing the bundled module.
-Every ordinary module implicitly loads hidden `Basics` operator declarations
-and receives the classes `Num`, `Eq`, `Ord`, and `Show`, the `IO` effect, and
-unqualified `show`, `print`, and `readLine`. Other
+Every ordinary module implicitly loads `Basics`, receiving the classes
+`Num`, `Eq`, `Ord`, and `Show`, every operator `Basics` exposes, the `IO`
+effect, and unqualified `show`, `print`, and `readLine`. Other
 standard-library APIs still require explicit imports.
 
 `build` and `run` use only the entry module's `main`; a dependency's `main` is
@@ -354,10 +354,8 @@ Native sidecars participate in `check`, build manifests, incremental rebuilds,
 Core interpreter and REPL report “native modules run only in compiled mode.”
 Panics cross the boundary unchanged.
 
-The words `native` and `infix` are reserved. Inline
-`native "Go expression"` templates and `infix (op) = value` bindings are
-compiler-bundled syntax and are rejected in user modules. The operator token
-set, precedence, and associativity remain fixed as listed below.
+The word `native` is reserved. Inline `native "Go expression"` templates are
+compiler-bundled syntax and are rejected in user modules.
 
 ## Values and operators
 
@@ -369,17 +367,19 @@ literal contains exactly one Unicode scalar between single quotes and accepts
 `\\`, `\'`, `\n`, `\t`, and `\r` escapes; examples are `'x'`, `'二'`, and
 `'\n'`. Booleans are the constructors `True` and `False`.
 
-Operators, from tighter to looser precedence, are:
+An operator is an ordinary value whose name is punctuation, so the operators
+below are declarations in `Basics` rather than built-in syntax. These are the
+fixities it declares, from tighter to looser:
 
-| Operators | Meaning | Associativity |
+| Operators | Meaning | Fixity |
 | --- | --- | --- |
 | unary `-` | numeric negation | prefix |
-| `*`, `/` | multiplication, floating division | left |
-| `+`, `-` | addition, subtraction | left |
-| `++` | string concatenation | right |
-| `==`, `/=`, `<`, `>`, `<=`, `>=` | comparison | non-associative |
-| `&&` | logical and, short-circuiting | right |
-| `\|\|` | logical or, short-circuiting | right |
+| `*`, `/` | multiplication, floating division | `infixl 7` |
+| `+`, `-` | addition, subtraction | `infixl 6` |
+| `++` | string concatenation | `infixr 5` |
+| `==`, `/=`, `<`, `>`, `<=`, `>=` | comparison | `infix 4` |
+| `&&` | logical and, short-circuiting | `infixr 3` |
+| `\|\|` | logical or, short-circuiting | `infixr 2` |
 
 `+`, `-`, `*`, and unary negation require `Num`; equality requires `Eq`, and
 ordering requires `Ord`. These classes have standard scalar instances and can
@@ -389,11 +389,70 @@ Integer literals use `fromInt` and can therefore inhabit any type with a `Num`
 instance; decimal literals always have type `Float`. Chained comparisons
 require parentheses.
 
+Unary minus is prefix syntax rather than an operator name: it binds tighter
+than every operator and looser than application, always, and desugars to the
+`Num` method `negate`. There is no `(-)` prefix section.
+
 `&&` and `||` take `Bool` operands and produce a `Bool`. They short-circuit:
 the right operand is not evaluated when the left one already decides the
-result, so its effects do not happen either. They are fixed syntax rather
-than values — there is no `(&&)` function to pass or bind — because a called
-value would have to evaluate both operands.
+result, so its effects do not happen either. They are the one exception to
+"an operator is a value": they are fixed syntax with fixed fixity, and there
+is no `(&&)` function to pass, bind, or redeclare, because a called value
+would have to evaluate both operands.
+
+### Declaring operators
+
+An operator is named by its spelling in parentheses, and that spelling names
+a value wherever an identifier can — a top-level definition and its
+annotation, a class signature, an instance or deriver method, an `exposing`
+list, and an expression:
+
+```fango
+(<+>) : Int -> Int -> Int
+(<+>) a b = a * 10 + b
+
+sum = List.foldl (<+>) 0 items
+```
+
+An operator name is a run of one or more of these characters:
+
+```
+! # % & * + - / : < = > ? @ ^ | ~
+```
+
+The runs `=`, `->`, `=>`, `:`, `|`, and `^` are reserved by the grammar and
+cannot be declared. Four plausible characters are deliberately excluded: `.`
+is field access, module qualification, and `..`; `$` belongs to the splice
+opener `$(`; `\` is the lambda; and `,` `(` `)` `{` `}` are punctuation. So
+`(.)`, `($)`, and `(<$>)` are unavailable, while `(<+>)`, `(|>)`, `(>>=)`,
+and `(:::)` are all ordinary names.
+
+Operator characters group greedily: the longest run is one operator. So
+`a<-b` is the operator `<-` rather than `a < -b`, and `x =-1` is the operator
+`=-` rather than an assignment — put spaces around operators. A run may not
+begin with `--`, which starts a line comment, so `-->` is a comment while
+`<--` is an operator.
+
+A fixity declaration gives an operator its precedence, 0 through 9, and its
+associativity. It may sit above or below the operator's own declaration, but
+must live in the module that declares it:
+
+```fango
+infixl 6 (<+>)
+infixr 5 (++)
+infix  4 (==)
+```
+
+An operator with no fixity declaration is `infixl 9`: the tightest level,
+still looser than application. Fixity belongs to the spelling rather than to
+any one definition, because a class declares an operator and its instances
+implement it; it is therefore shared across a whole program, and two modules
+declaring the same operator's fixity differently is an error. Operators that
+share a precedence must share an associativity to be mixed without
+parentheses.
+
+Operators are declared at the top level, in a class, or in an instance —
+never in a function body, where a fixity would have no home.
 
 `if condition then a else b` is an expression. Its condition is `Bool` and both
 branches have the same type. `then` and `else` may align with their own `if`
@@ -632,13 +691,13 @@ The standard classes are independent (in particular, `Ord` does not imply
 
 | Class | Methods | Standard instances |
 | --- | --- | --- |
-| `Num a` | `fromInt : Int -> a`, `add`, `sub`, `mul : a -> a -> a`, `negate : a -> a` | `Int`, `Float` |
-| `Eq a` | `eq : a -> a -> Bool` | `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
-| `Ord a` | `lt`, `gt`, `le`, `ge : a -> a -> Bool` | `Int`, `Float`, `String`, `Char` |
+| `Num a` | `fromInt : Int -> a`, `(+)`, `(-)`, `(*) : a -> a -> a`, `negate : a -> a` | `Int`, `Float` |
+| `Eq a` | `(==) : a -> a -> Bool` | `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
+| `Ord a` | `(<)`, `(>)`, `(<=)`, `(>=) : a -> a -> Bool` | `Int`, `Float`, `String`, `Char` |
 | `Show a` | `show : a -> String` | `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
 
-Other than ambient `show`, named methods require an explicit `Basics` import;
-operators provide their usual unqualified spelling. `print` is an ordinary
+Their operator-named methods are ambient, as is `show`. The named ones —
+`fromInt` and `negate` — require an explicit `Basics` import. `print` is an ordinary
 Show-constrained function that writes `show value` followed by a newline.
 Strings display raw, not quoted.
 

@@ -2,3 +2,17 @@ a = 1 - 2 - 3
 b = 1 + 2 * 3 - 4
 c = (1 + 2) * 3
 d = 2 * 3 * 4 - 5
+
+-- The fixities these expressions rely on. Parse goldens carry their own,
+-- rather than inheriting Basics', so a fixture says what it tests.
+(+) : Int -> Int -> Int
+(+) a b = a
+infixl 6 (+)
+
+(-) : Int -> Int -> Int
+(-) a b = a
+infixl 6 (-)
+
+(*) : Int -> Int -> Int
+(*) a b = a
+infixl 7 (*)

@@ -24,7 +24,7 @@ test-short:
 # Regenerate golden files after an intentional output change. Review the
 # diff before committing.
 update-goldens:
-	go test ./internal/lexer ./internal/parser ./internal/elaborate ./internal/repl -update
+	go test ./internal/lexer ./internal/parser ./internal/infer ./internal/elaborate ./internal/repl -update
 
 # Re-record compile-latency baselines (machine-specific).
 update-baselines:

@@ -1,0 +1,10 @@
+(module)
+-- errors --
+-- OPERATOR DEFINITION ---------------- err_local_operator.fango
+
+An operator can only be defined at the top level, in a class, or in
+an instance, so its fixity has one home. `(<+>)` here needs a name
+instead.
+
+2|     (<+>) a b = a + b
+       ^^^^^

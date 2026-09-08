@@ -1,0 +1,34 @@
+module Vec.Ops exposing (Vec(..), (|+|), (|*|), (~=), scale, translate)
+
+-- An operator is part of a module's public interface like any other value,
+-- exported and imported by its `(op)` spelling.
+type Vec = Vec Int Int deriving (Show)
+
+(|+|) : Vec -> Vec -> Vec
+(|+|) a b =
+    case a of
+        Vec ax ay ->
+            case b of
+                Vec bx by -> Vec (ax + bx) (ay + by)
+infixl 6 (|+|)
+
+(|*|) : Int -> Vec -> Vec
+(|*|) k v =
+    case v of
+        Vec x y -> Vec (k * x) (k * y)
+infixl 7 (|*|)
+
+(~=) : Vec -> Vec -> Bool
+(~=) a b =
+    case a of
+        Vec ax ay ->
+            case b of
+                Vec bx by -> ax == bx && ay == by
+infix 4 (~=)
+
+scale : Int -> Vec -> Vec
+scale k v = k |*| v
+
+-- Passing an operator declared in this module as a value.
+translate : Vec -> Vec -> Vec
+translate offset v = offset |+| v

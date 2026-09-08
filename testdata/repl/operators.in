@@ -1,0 +1,18 @@
+1 + 2 * 3
+(<+>) a b = a * 10 + b
+infixl 5 (<+>)
+1 <+> 2 <+> 3
+1 + 2 <+> 3
+:type (<+>)
+:type (+)
+(+) 2 3
+(<+>) 1
+1 < 2 < 3
+(&&)
+infixl 3 (&&)
+infixl 12 (<?>)
+type Money = Money Int deriving (Show)
+instance Eq Money
+    (==) x y = True
+Money 1 == Money 2
+:quit

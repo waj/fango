@@ -88,9 +88,12 @@ split is the point: **variadic generation goes through instances; named
 generation goes through names the author wrote.**
 
 A declaration splice may generate `ValueDecl`, `TypeDecl`, `ClassDecl`, and
-`InstanceDecl` only. `module`, `import`, `infix`, and `native` are rejected:
-those four are precisely the declarations that change graph or global
-structure, and `infix` and `native` are bundled-only besides.
+`InstanceDecl` only. `module`, `import`, a fixity declaration, and `native`
+are rejected: those four are precisely the declarations that change graph or
+global structure. A generated fixity is rejected for the same reason as a
+generated import — the operator table is built before expansion, and a
+fixity changes how already-parsed text groups. `native` is bundled-only
+besides.
 
 A declaration quote is a `quote` followed by an indented block, delimited by
 the offside rule like every other fango construct:
@@ -124,7 +127,7 @@ remaining phase must answer:
 
 - `SPLICE ARITY` — a declaration splice produced a different number of
   definitions than the binder list names.
-- `INVALID SPLICE DECLARATION` — generated a `module`, `import`, `infix`, or
+- `INVALID SPLICE DECLARATION` — generated a `module`, `import`, fixity, or
   `native` declaration.
 
 ## Phases

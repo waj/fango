@@ -1,2 +1,6 @@
 a = 1 < 2 < 3
 b = 7
+
+(<) : Int -> Int -> Bool
+(<) x y = True
+infix 4 (<)

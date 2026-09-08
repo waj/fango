@@ -1,0 +1,32 @@
+-- An operator's declared type is its type wherever it is used: infix, as a
+-- value, and partially applied.
+(<+>) : Int -> Int -> Int
+(<+>) a b = a * 10 + b
+infixl 5 (<+>)
+
+(|>) : a -> (a -> b) -> b
+(|>) x f = f x
+infixl 1 (|>)
+
+infix_use = 1 <+> 2
+
+as_value = (<+>)
+
+partial = (<+>) 1
+
+twice : Int -> Int
+twice n = n * 2
+
+piped = 3 |> twice |> twice
+
+-- A class method spelled as an operator carries its constraint.
+class Semi a
+    (<>) : a -> a -> a
+
+joinAll : Semi a => a -> a -> a -> a
+joinAll x y z = x <> y <> z
+
+method_value = (<>)
+
+-- Operators mix with the standard ones at their declared precedences.
+mixed = 1 + 2 <+> 3 * 4

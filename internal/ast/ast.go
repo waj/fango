@@ -235,12 +235,30 @@ func (t *TVarName) Span() source.Span { return t.Sp }
 func (t *TFunExpr) Span() source.Span { return t.Arg.Span().Merge(t.Ret.Span()) }
 func (t *TApp) Span() source.Span     { return t.NameSp.Merge(t.Args[len(t.Args)-1].Span()) }
 
-// BinOp stays a distinct node rather than desugaring to App: inference
-// special-cases numeric operators, and errors should point at the operator.
+// BinOp stays a distinct node rather than desugaring to App: errors should
+// point at the operator, and `&&`/`||` are surface syntax with no value.
+// Op holds the operator's name — a spelling before name resolution, a
+// canonical symbol after it.
 type BinOp struct {
-	Op     string // "+", "-", "*", "/"
+	Op     string
 	OpSpan source.Span
 	L, R   Expr
+}
+
+// OpChain is the parser's shape for a run of infix operators. Fixity is
+// declared in source and is not known until the whole module graph is
+// loaded, so the parser records the run flat and internal/fixity rebuilds it
+// into BinOp trees before name resolution. No OpChain survives module
+// loading, so later phases only ever see BinOp.
+type OpChain struct {
+	Operands []Expr // len(Operands) == len(Ops)+1
+	Ops      []OpRef
+}
+
+// OpRef is one operator occurrence inside an OpChain.
+type OpRef struct {
+	Op string
+	Sp source.Span
 }
 
 // Case is `case scrutinee of` followed by branches aligned at the column of
@@ -425,6 +443,7 @@ func (*RecordUpdate) isExpr() {}
 func (*App) isExpr()          {}
 func (*Neg) isExpr()          {}
 func (*BinOp) isExpr()        {}
+func (*OpChain) isExpr()      {}
 func (*If) isExpr()           {}
 func (*Block) isExpr()        {}
 func (*Lambda) isExpr()       {}
@@ -449,7 +468,10 @@ func (e *RecordUpdate) Span() source.Span { return e.Sp }
 func (e *App) Span() source.Span          { return e.Fn.Span().Merge(e.Arg.Span()) }
 func (e *Neg) Span() source.Span          { return e.Sp }
 func (e *BinOp) Span() source.Span        { return e.L.Span().Merge(e.R.Span()) }
-func (e *If) Span() source.Span           { return e.Sp.Merge(e.Else.Span()) }
+func (e *OpChain) Span() source.Span {
+	return e.Operands[0].Span().Merge(e.Operands[len(e.Operands)-1].Span())
+}
+func (e *If) Span() source.Span { return e.Sp.Merge(e.Else.Span()) }
 func (e *Block) Span() source.Span {
 	if len(e.Items) > 0 && e.Items[0].Expr != nil {
 		return e.Items[0].Expr.Span().Merge(e.Result.Span())
@@ -548,13 +570,39 @@ type NativeBody struct {
 	Sp       source.Span
 }
 
-// InfixDecl binds one of the parser's fixed binary tokens to a bundled native.
-type InfixDecl struct {
-	Op, Target         string
-	OpSpan, TargetSpan source.Span
+// Assoc is an operator's associativity, declared by `infixl`, `infixr`, or
+// bare `infix`.
+type Assoc int
+
+const (
+	AssocLeft Assoc = iota
+	AssocRight
+	AssocNone
+)
+
+func (a Assoc) String() string {
+	switch a {
+	case AssocLeft:
+		return "infixl"
+	case AssocRight:
+		return "infixr"
+	default:
+		return "infix"
+	}
 }
 
-func (*InfixDecl) isDecl() {}
+// FixityDecl declares one operator's precedence and associativity, as in
+// `infixl 6 (+)`. Fixity is a property of the operator's spelling rather
+// than of the value it names, so Op is never canonicalized.
+type FixityDecl struct {
+	Op     string
+	Assoc  Assoc
+	Prec   int
+	OpSpan source.Span
+	Sp     source.Span
+}
+
+func (*FixityDecl) isDecl() {}
 
 func (*EffectDecl) isDecl() {}
 
@@ -593,4 +641,17 @@ type Module struct {
 	// module loader adds the bundled `Meta` dependency only for files that
 	// need it, so an ordinary program's graph is unchanged.
 	UsesStaging bool
+}
+
+// Spelling renders a declaration name the way it is written in source: an
+// operator wears the parentheses that name it.
+func Spelling(name string) string {
+	if name == "" || isIdentStart(name[0]) {
+		return name
+	}
+	return "(" + name + ")"
+}
+
+func isIdentStart(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_'
 }

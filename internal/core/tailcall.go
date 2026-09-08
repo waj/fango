@@ -162,8 +162,6 @@ func capturesMutated(e Expr, mutated map[string]bool) bool {
 			return walk(e.Body)
 		case *Neg:
 			return walk(e.Operand)
-		case *BinOp:
-			return walk(e.L) || walk(e.R)
 		case *NativeCall:
 			for _, a := range e.Args {
 				if walk(a) {

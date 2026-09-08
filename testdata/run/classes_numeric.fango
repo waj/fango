@@ -5,9 +5,9 @@ unwrap x = case x of
 
 instance Num Count
     fromInt x = Count x
-    add x y = Count (unwrap x + unwrap y)
-    sub x y = Count (unwrap x - unwrap y)
-    mul x y = Count (unwrap x * unwrap y)
+    (+) x y = Count (unwrap x + unwrap y)
+    (-) x y = Count (unwrap x - unwrap y)
+    (*) x y = Count (unwrap x * unwrap y)
     negate x = Count (0 - unwrap x)
 
 describe : (Num a, Eq a) => a -> String

@@ -1,3 +1,0 @@
-infix (&&) = both
-
-x = 1

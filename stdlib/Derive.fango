@@ -52,7 +52,7 @@ eqBound lhs rhs =
         lift False
 
 deriver Eq
-    eq subject leftCode rightCode =
+    (==) subject leftCode rightCode =
         Meta.match subject leftCode (\lhs -> Meta.match subject rightCode (\rhs -> eqBound lhs rhs))
 
 -- Show: a union constructor prints its name then its fields; a record prints
@@ -119,7 +119,7 @@ ordering whenLess whenGreater whenEqual subject leftCode rightCode =
         (\lhs -> Meta.match subject rightCode (\rhs -> ordBound whenLess whenGreater whenEqual lhs rhs))
 
 deriver Ord
-    lt subject leftCode rightCode = ordering True False False subject leftCode rightCode
-    gt subject leftCode rightCode = ordering False True False subject leftCode rightCode
-    le subject leftCode rightCode = ordering True False True subject leftCode rightCode
-    ge subject leftCode rightCode = ordering False True True subject leftCode rightCode
+    (<) subject leftCode rightCode = ordering True False False subject leftCode rightCode
+    (>) subject leftCode rightCode = ordering False True False subject leftCode rightCode
+    (<=) subject leftCode rightCode = ordering True False True subject leftCode rightCode
+    (>=) subject leftCode rightCode = ordering False True True subject leftCode rightCode

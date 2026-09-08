@@ -6,7 +6,5 @@ twice = native
 add : number -> number -> number
 add = native "$1 + $2"
 
-infix (+) = add
-
 effect Console
     write : String -> () = native "sink($1)"

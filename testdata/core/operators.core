@@ -1,0 +1,7 @@
+(core
+  (def <+> (params a b) Int -> Int -> Int (native Basics.intAdd (native Basics.intMul (var a Int) (int 10 Int) Int) (var b Int) Int))
+  (def chained Int (app/worker (var <+> Int -> Int -> Int) (app/worker (var <+> Int -> Int -> Int) (int 1 Int) (int 2 Int) Int) (int 3 Int) Int))
+  (def folded Int (int 10 Int))
+  (def shortCircuit (params p q) Bool -> Bool -> Bool (let _h0 Bool (if Bool (var p Bool) (var q Bool) (bool false Bool)) (if Bool (var _h0 Bool) (bool true Bool) (bool false Bool))))
+  (def asValue Int -> Int (lam _w0 Int -> Int (app/worker (var <+> Int -> Int -> Int) (int 7 Int) (var _w0 Int) Int)))
+  (def main Int (var chained Int)))

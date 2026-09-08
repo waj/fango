@@ -3,9 +3,9 @@ unwrap count = case count of
     Count value -> value
 instance Num Count
     fromInt value = Count value
-    add x y = Count (unwrap x + unwrap y + 100)
-    sub x y = Count (unwrap x - unwrap y)
-    mul x y = Count (unwrap x * unwrap y)
+    (+) x y = Count (unwrap x + unwrap y + 100)
+    (-) x y = Count (unwrap x - unwrap y)
+    (*) x y = Count (unwrap x * unwrap y)
     negate x = Count (0 - unwrap x)
 
 double x = x + x

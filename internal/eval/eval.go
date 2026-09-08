@@ -300,16 +300,6 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		default:
 			return nil, fmt.Errorf("eval: negating a %T", v)
 		}
-	case *core.BinOp:
-		l, err := in.eval(e.L, fr)
-		if err != nil {
-			return nil, err
-		}
-		r, err := in.eval(e.R, fr)
-		if err != nil {
-			return nil, err
-		}
-		return applyBinOp(e.Op, l, r)
 	case *core.Quote:
 		// Strict, so holes evaluate eagerly and in source order — the same
 		// rule every other argument list follows.
@@ -673,16 +663,6 @@ func (in *interp) force(name string) (Value, error) {
 	}
 	cell.memo, cell.forced = v, true
 	return v, nil
-}
-
-// applyBinOp is the compatibility path for legacy Core unit tests. It maps to
-// the same declared-native registry used by NativeCall and constant folding.
-func applyBinOp(op string, l, r Value) (Value, error) {
-	if name := map[string]string{"+": "add", "-": "sub", "*": "mul", "/": "fdiv", "++": "append", "==": "eq", "/=": "neq", "<": "lt", ">": "gt", "<=": "le", ">=": "ge"}[op]; name != "" {
-		spec := natives.Table["Basics."+name]
-		return spec.Eval(&natives.Runtime{Equal: eqValue}, []any{l, r})
-	}
-	return nil, fmt.Errorf("eval: unknown operator %q", op)
 }
 
 // eqValue is structural equality — the interpreter's mirror of the derived

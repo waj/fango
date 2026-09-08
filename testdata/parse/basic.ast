@@ -1,2 +1,8 @@
 (module
-  (def main (binop + (int 1) (binop * (int 2) (int 3)))))
+  (def main (binop + (int 1) (binop * (int 2) (int 3))))
+  (def + (params a b) (ann (-> Int (-> Int Int))) (var a))
+  (infixl 6 +)
+  (def - (params a b) (ann (-> Int (-> Int Int))) (var a))
+  (infixl 6 -)
+  (def * (params a b) (ann (-> Int (-> Int Int))) (var a))
+  (infixl 7 *))

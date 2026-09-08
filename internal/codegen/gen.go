@@ -677,29 +677,6 @@ func (g *gen) goTypes(ts []types.Type) []goast.Expr {
 	return out
 }
 
-var goOps = map[string]gotoken.Token{
-	"+": gotoken.ADD, "-": gotoken.SUB, "*": gotoken.MUL, "/": gotoken.QUO,
-	"++": gotoken.ADD, // String concat is Go's + on strings (doc/design.md, "Go backend and runtime")
-	"==": gotoken.EQL, "/=": gotoken.NEQ,
-	"<": gotoken.LSS, ">": gotoken.GTR, "<=": gotoken.LEQ, ">=": gotoken.GEQ,
-}
-
-// goPrec mirrors Go's binary precedence for the operators fango emits
-// (comparisons 3, additive 4, multiplicative 5), so we parenthesize only
-// where Go's grammar needs it. Unary minus uses 6: above every binary op.
-func goPrec(op string) int {
-	switch op {
-	case "*", "/":
-		return 5
-	case "+", "-", "++":
-		return 4
-	case "==", "/=", "<", ">", "<=", ">=":
-		return 3
-	default:
-		return 0
-	}
-}
-
 // nativeSidecarCall lowers a sidecar invocation without deciding whether its
 // result is needed as a value. Unit arguments are erased from the Go ABI, but
 // a non-atomic Unit argument must still run in source order; prelude contains
@@ -961,29 +938,6 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			operand = &goast.ParenExpr{X: operand}
 		}
 		return parenIf(parentPrec > 0, &goast.UnaryExpr{Op: gotoken.SUB, X: operand})
-	case *core.BinOp:
-		// Equality at an ADT type calls the derived eq (doc/design.md, "Go backend and runtime"); everything
-		// else — including Number-kinded type params (doc/design.md, "Type inference") — compiles to a
-		// native Go operator.
-		if e.Op == "==" || e.Op == "/=" {
-			if g.adtOf(e.L.Type()) != nil {
-				call := g.eqCall(e.L.Type(), g.expr(e.L, 0), g.expr(e.R, 0))
-				if e.Op == "/=" {
-					return &goast.UnaryExpr{Op: gotoken.NOT, X: call}
-				}
-				return call
-			}
-		}
-		op, ok := goOps[e.Op]
-		if !ok {
-			panic(fmt.Sprintf("codegen: unhandled operator %q", e.Op))
-		}
-		prec := goPrec(e.Op)
-		// Left child may share our precedence (left associativity);
-		// right child needs parens at equal precedence.
-		l := g.expr(e.L, prec)
-		r := g.expr(e.R, prec+1)
-		return parenIf(prec < parentPrec, binExpr(op, l, r))
 	case *core.NativeCall:
 		return g.nativeExpr(e, parentPrec)
 	case *core.If:
@@ -1380,4 +1334,46 @@ func mangleValue(name string) string {
 	return "v_" + linkName(name)
 }
 
-func linkName(name string) string { return strings.ReplaceAll(name, ".", "_dot_") }
+// linkOps spells the operator characters Go cannot hold in an identifier.
+// Words rather than a hash because generated Go is meant to be readable:
+// `Basics.++` becomes `v_Basics_dot__plus__plus_`, which can be traced back
+// to its source by eye.
+var linkOps = map[byte]string{
+	'!': "_bang_", '#': "_hash_", '%': "_pct_", '&': "_amp_", '*': "_star_",
+	'+': "_plus_", '-': "_dash_", '/': "_slash_", ':': "_colon_", '<': "_lt_",
+	'=': "_eq_", '>': "_gt_", '?': "_qmark_", '@': "_at_", '^': "_hat_",
+	'|': "_bar_", '~': "_tilde_",
+}
+
+// linkName maps a canonical fango symbol to a Go identifier. Module
+// separators and operator characters are the only characters a fango symbol
+// can hold that Go cannot.
+//
+// The substitution is injective against ordinary names: identifier
+// characters and operator characters are disjoint sets, a fango name may
+// not begin with `_`, and the character after a `_dot_` is always a letter —
+// so no identifier can spell one of these words in the position where an
+// operator's would appear. It is a pure function of the name, which is what
+// the byte-identical-Go requirement needs.
+func linkName(name string) string {
+	if !strings.ContainsFunc(name, func(r rune) bool {
+		_, isOp := linkOps[byte(r)]
+		return r == '.' || (r < 0x80 && isOp)
+	}) {
+		return name
+	}
+	var b strings.Builder
+	for i := 0; i < len(name); i++ {
+		switch c := name[i]; {
+		case c == '.':
+			b.WriteString("_dot_")
+		default:
+			if word, isOp := linkOps[c]; isOp {
+				b.WriteString(word)
+				continue
+			}
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}

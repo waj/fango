@@ -120,10 +120,6 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		return e, nil
 	case *core.Neg:
 		return &core.Neg{Operand: slot(e.Operand), Ty: e.Ty}, hoists
-	case *core.BinOp:
-		l := slot(e.L)
-		r := slot(e.R)
-		return &core.BinOp{Op: e.Op, Ty: e.Ty, L: l, R: r}, hoists
 	case *core.NativeCall:
 		args := make([]core.Expr, len(e.Args))
 		for i, a := range e.Args {

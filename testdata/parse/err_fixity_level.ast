@@ -1,0 +1,10 @@
+(module
+  (def x (int 1)))
+-- errors --
+-- FIXITY DECLARATION ------------------- err_fixity_level.fango
+
+After `infixl` I expect a precedence level from 0 through 9,
+then the operator, like `infixl 6 (+)`.
+
+1| infixl 12 (<+>)
+          ^^

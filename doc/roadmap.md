@@ -195,3 +195,12 @@ These are directions, not commitments or an ordering after the work above.
   it; multiple numeric parameters, effectful workers, and custom dictionaries
   currently retain the generic evidence-passing path.
 - A canonical formatter for the layout syntax and an LSP for editor support.
+- Operator surface beyond declaration and fixity: module-scoped fixity, so two
+  libraries could give the same spelling different precedences; sections
+  (`(+ 1)`, `(1 +)`); operators bound inside a function body, which today have
+  nowhere to put a fixity; qualified infix use (`a Mod.<+> b`); and a way for
+  a module to hide a prelude operator so it can declare its own.
+- Widen the operator character class if a concrete need appears. `.` is
+  excluded because a dot in a name means "module separator" everywhere in
+  name resolution, `$` because `$(` opens a splice, and an operator may not
+  begin with `--`, which costs `(.)`, `($)`, `(<$>)`, and `(-->)`.

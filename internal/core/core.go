@@ -152,12 +152,6 @@ type VarRef struct {
 	TyArgs []types.Type // explicit generic instantiation; empty when monomorphic
 }
 
-type BinOp struct {
-	Op   string
-	Ty   types.Type // ground result type: the operator compiles natively
-	L, R Expr
-}
-
 // Quote builds a compile-time-only code value: a template index into the
 // compilation's quote table plus one expression per hole, evaluated eagerly
 // in source order. Only the interpreter ever executes one, and only while
@@ -277,7 +271,6 @@ func (*UnitLit) isExpr()    {}
 func (*BoolLit) isExpr()    {}
 func (*VarRef) isExpr()     {}
 func (*Neg) isExpr()        {}
-func (*BinOp) isExpr()      {}
 func (*NativeCall) isExpr() {}
 func (*Quote) isExpr()      {}
 func (*TypeOf) isExpr()     {}
@@ -299,7 +292,6 @@ func (e *UnitLit) Type() types.Type    { return e.Ty }
 func (e *BoolLit) Type() types.Type    { return e.Ty }
 func (e *VarRef) Type() types.Type     { return e.Ty }
 func (e *Neg) Type() types.Type        { return e.Ty }
-func (e *BinOp) Type() types.Type      { return e.Ty }
 func (e *NativeCall) Type() types.Type { return e.Ty }
 func (e *Quote) Type() types.Type      { return e.Ty }
 func (e *TypeOf) Type() types.Type     { return e.Ty }
@@ -322,8 +314,6 @@ func Mentions(e Expr, name string) bool {
 		return e.Name == name
 	case *Neg:
 		return Mentions(e.Operand, name)
-	case *BinOp:
-		return Mentions(e.L, name) || Mentions(e.R, name)
 	case *NativeCall:
 		for _, a := range e.Args {
 			if Mentions(a, name) {

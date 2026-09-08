@@ -1,5 +1,4 @@
 (module Native (exposing)
   (def twice (ann (-> Int Int)) (native))
   (def add (ann (-> number (-> number number))) (native "$1 + $2"))
-  (infix + add)
   (effect Console (op write (-> String ()) (native "sink($1)"))))

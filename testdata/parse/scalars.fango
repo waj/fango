@@ -5,3 +5,28 @@ u = False
 c = 1 <= 2
 e = "x" == "y"
 d = 1.0 / 2.0
+
+-- The fixities these expressions rely on; see precedence.fango.
+(+) : Float -> Float -> Float
+(+) a b = a
+infixl 6 (+)
+
+(*) : Float -> Float -> Float
+(*) a b = a
+infixl 7 (*)
+
+(/) : Float -> Float -> Float
+(/) a b = a
+infixl 7 (/)
+
+(++) : String -> String -> String
+(++) a b = a
+infixr 5 (++)
+
+(==) : String -> String -> Bool
+(==) a b = True
+infix 4 (==)
+
+(<=) : Int -> Int -> Bool
+(<=) a b = True
+infix 4 (<=)

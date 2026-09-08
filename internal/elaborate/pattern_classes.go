@@ -93,12 +93,12 @@ func (m *matcher) orderedPattern(p ast.Pattern, occ occurrence, success, failure
 		fromTy := &types.TFun{Arg: el.ck.B.Int, Ret: occ.ty}
 		lit := el.valueApp(el.methodValue(el.ck.Methods["Basics.fromInt"], fromTy), &core.IntLit{Val: p.Value, Ty: el.ck.B.Int})
 		eqTy := &types.TFun{Arg: occ.ty, Ret: &types.TFun{Arg: occ.ty, Ret: el.ck.B.Bool}}
-		cond := el.valueApp(el.valueApp(el.methodValue(el.ck.Methods["Basics.eq"], eqTy), ref), lit)
+		cond := el.valueApp(el.valueApp(el.methodValue(el.ck.Methods["Basics.=="], eqTy), ref), lit)
 		return &core.Guard{Cond: cond, Then: success, Else: failure}
 	case *ast.PPin:
 		pinned := el.expr(el.ck.PinExprs[p])
 		eqTy := &types.TFun{Arg: occ.ty, Ret: &types.TFun{Arg: occ.ty, Ret: el.ck.B.Bool}}
-		cond := el.valueApp(el.valueApp(el.methodValue(el.ck.Methods["Basics.eq"], eqTy), ref), pinned)
+		cond := el.valueApp(el.valueApp(el.methodValue(el.ck.Methods["Basics.=="], eqTy), ref), pinned)
 		return &core.Guard{Cond: cond, Then: success, Else: failure}
 	case *ast.PFloat, *ast.PString, *ast.PChar:
 		return &core.SwitchLit{Scrut: occ.name, Cases: []core.LitCase{{Lit: m.litExpr(p, occ.ty), Tree: success}}, Default: failure}

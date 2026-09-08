@@ -46,13 +46,19 @@ var Table = func() map[string]Spec {
 	t := map[string]Spec{}
 	installMeta(t)
 	installScalarInstances(t)
-	for _, name := range []string{"add", "sub", "mul", "fdiv", "append", "eq", "neq", "lt", "gt", "le", "ge"} {
-		name := name
-		t["Basics."+name] = Spec{Arity: 2, Foldable: name == "add" || name == "sub" || name == "mul" || name == "fdiv", Eval: func(rt *Runtime, args []any) (any, error) {
+	// The operator-named Basics values. The registry key is the canonical
+	// symbol, so it wears the operator spelling; the EvalBasics tag stays
+	// the alphabetic name of the scalar operation it dispatches to.
+	for spelling, op := range map[string]string{
+		"+": "add", "-": "sub", "*": "mul", "/": "fdiv", "++": "append",
+		"==": "eq", "/=": "neq", "<": "lt", ">": "gt", "<=": "le", ">=": "ge",
+	} {
+		op := op
+		t["Basics."+spelling] = Spec{Arity: 2, Foldable: op == "add" || op == "sub" || op == "mul" || op == "fdiv", Eval: func(rt *Runtime, args []any) (any, error) {
 			if len(args) != 2 {
-				return nil, fmt.Errorf("native Basics.%s expects 2 arguments", name)
+				return nil, fmt.Errorf("native Basics.%s expects 2 arguments", op)
 			}
-			return stdlib.EvalBasics(name, args[0], args[1], rt.Equal), nil
+			return stdlib.EvalBasics(op, args[0], args[1], rt.Equal), nil
 		}}
 	}
 	t["Basics.remainderBy"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {

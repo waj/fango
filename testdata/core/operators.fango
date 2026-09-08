@@ -1,0 +1,19 @@
+-- Core has no operator node: an operator application elaborates to a call
+-- to the operator's value, and `&&`/`||` to an `if`.
+(<+>) : Int -> Int -> Int
+(<+>) a b = a * 10 + b
+infixl 5 (<+>)
+
+chained : Int
+chained = 1 <+> 2 <+> 3
+
+folded : Int
+folded = 2 * 3 + 4
+
+shortCircuit : Bool -> Bool -> Bool
+shortCircuit p q = p && q || False
+
+asValue : Int -> Int
+asValue = (<+>) 7
+
+main = chained

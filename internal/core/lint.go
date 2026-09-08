@@ -158,30 +158,6 @@ func (l *linter) numeric(t types.Type) bool {
 	return u == l.b.Int.Unique || u == l.b.Float.Unique
 }
 
-func (l *linter) orderable(t types.Type) bool {
-	return l.numeric(t) || l.unique(t) == l.b.String.Unique || l.unique(t) == l.b.Char.Unique
-}
-
-// equatable: scalars, Number rigid vars, and declared ADTs whose type
-// arguments are themselves equatable. Functions and General rigid vars are
-// not (doc/design.md, "Go backend and runtime" — the latter until typeclasses).
-func (l *linter) equatable(t types.Type) bool {
-	if l.orderable(t) || l.unique(t) == l.b.Bool.Unique {
-		return true
-	}
-	if con, ok := t.(*types.TCon); ok {
-		if _, isADT := l.adts[con.Unique]; isADT {
-			for _, a := range con.Args {
-				if !l.equatable(a) {
-					return false
-				}
-			}
-			return true
-		}
-	}
-	return false
-}
-
 // printable mirrors elaborate.checkPrintable at the type level.
 func (l *linter) printable(t types.Type) bool {
 	switch l.unique(t) {
@@ -249,8 +225,6 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: Neg operand type differs from result", where)
 		}
 		l.expr(e.Operand, where)
-	case *BinOp:
-		l.binOp(e, where)
 	case *Quote:
 		// Compile-time-only definitions are dropped before the program is
 		// linted, so a surviving Quote means the emission rule let one
@@ -771,38 +745,6 @@ func (l *linter) tree(t Tree, want types.Type, where string) {
 	default:
 		l.errorf("%s: unhandled tree node %T", where, t)
 	}
-}
-
-func (l *linter) binOp(e *BinOp, where string) {
-	lt, rt := e.L.Type(), e.R.Type()
-	operandsAgree := types.Equal(lt, rt)
-
-	switch e.Op {
-	case "+", "-", "*":
-		if !l.numeric(e.Ty) || !types.Equal(lt, e.Ty) || !types.Equal(rt, e.Ty) {
-			l.errorf("%s: BinOp %s has non-numeric or mismatched types", where, e.Op)
-		}
-	case "/":
-		if l.unique(e.Ty) != l.b.Float.Unique || !types.Equal(lt, e.Ty) || !types.Equal(rt, e.Ty) {
-			l.errorf("%s: BinOp / must be Float throughout", where)
-		}
-	case "++":
-		if l.unique(e.Ty) != l.b.String.Unique || !types.Equal(lt, e.Ty) || !types.Equal(rt, e.Ty) {
-			l.errorf("%s: BinOp ++ must be String throughout", where)
-		}
-	case "==", "/=":
-		if l.unique(e.Ty) != l.b.Bool.Unique || !operandsAgree || !l.equatable(lt) {
-			l.errorf("%s: BinOp %s wants matching equatable operands and Bool result", where, e.Op)
-		}
-	case "<", ">", "<=", ">=":
-		if l.unique(e.Ty) != l.b.Bool.Unique || !operandsAgree || !l.orderable(lt) {
-			l.errorf("%s: BinOp %s wants matching orderable operands and Bool result", where, e.Op)
-		}
-	default:
-		l.errorf("%s: unhandled operator %q", where, e.Op)
-	}
-	l.expr(e.L, where)
-	l.expr(e.R, where)
 }
 
 func (l *linter) effectInstance(e EffectInstance, where string) {

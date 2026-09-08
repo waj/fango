@@ -22,10 +22,12 @@ import (
 	fango "github.com/waj/fango"
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
+	"github.com/waj/fango/internal/fixity"
 	"github.com/waj/fango/internal/lexer"
 	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/parser"
 	"github.com/waj/fango/internal/source"
+	"github.com/waj/fango/internal/token"
 )
 
 // Provider is the package-resolution seam shared by local and compiler-bundled
@@ -102,12 +104,12 @@ type ManifestEntry struct {
 }
 
 type Result struct {
-	Module    *ast.Module
-	Entry     string
-	Manifest  []ManifestEntry
-	Units     []Unit
-	Operators map[string]string
-	Natives   []NativeSource
+	Module   *ast.Module
+	Entry    string
+	Manifest []ManifestEntry
+	Units    []Unit
+	Fixity   fixity.Table
+	Natives  []NativeSource
 }
 
 type NativeSource struct {
@@ -266,7 +268,7 @@ func Load(entry string) (*Result, []diag.Error) {
 		return nil, errs
 	}
 	for _, n := range nodes {
-		errs = append(errs, validateNatives(n)...)
+		errs = append(errs, validateModuleDecls(n)...)
 	}
 	if len(errs) > 0 {
 		return nil, errs
@@ -317,6 +319,25 @@ func Load(entry string) (*Result, []diag.Error) {
 		}
 	}
 
+	// Fixity is graph-wide, so the table needs every parsed file; the
+	// rewrite has to finish before name resolution, whose expression walk
+	// would otherwise skip the unresolved chains and leave their operands
+	// uncanonicalized. `names` is already sorted, so the table and its
+	// diagnostics are deterministic.
+	fixities := fixity.Builtin()
+	for _, name := range names {
+		errs = append(errs, fixities.Collect(nodes[name].mod.Decls)...)
+	}
+	if len(errs) > 0 {
+		return nil, errs
+	}
+	for _, name := range names {
+		errs = append(errs, fixities.Resolve(nodes[name].mod)...)
+	}
+	if len(errs) > 0 {
+		return nil, errs
+	}
+
 	for _, n := range nodes {
 		n.iface, errs = buildInterface(n, errs)
 	}
@@ -348,7 +369,6 @@ func Load(entry string) (*Result, []diag.Error) {
 	}
 	manifest := make([]ManifestEntry, 0, len(order))
 	units := make([]Unit, 0, len(order))
-	operators := map[string]string{}
 	var natives []NativeSource
 	for _, name := range order {
 		n := nodes[name]
@@ -358,15 +378,6 @@ func Load(entry string) (*Result, []diag.Error) {
 			nh := sha256.Sum256(n.native)
 			manifest = append(manifest, ManifestEntry{Module: name, Path: n.nativePath, SHA256: hex.EncodeToString(nh[:])})
 			natives = append(natives, NativeSource{Module: n.nativeModule, Path: n.nativePath, Content: n.native, Bundled: n.bundled})
-		}
-		for _, d := range n.mod.Decls {
-			if inf, ok := d.(*ast.InfixDecl); ok {
-				target := inf.Target
-				if !strings.Contains(target, ".") {
-					target = canonical(name, target)
-				}
-				operators[inf.Op] = target
-			}
 		}
 		unitName := name
 		if n.private {
@@ -378,7 +389,7 @@ func Load(entry string) (*Result, []diag.Error) {
 	if !private {
 		entrySymbol = canonical(entryName, "main")
 	}
-	return &Result{Module: merged, Entry: entrySymbol, Manifest: manifest, Units: units, Operators: operators, Natives: natives}, nil
+	return &Result{Module: merged, Entry: entrySymbol, Manifest: manifest, Units: units, Fixity: fixities, Natives: natives}, nil
 }
 
 // MetaModule is the bundled module that owns the abstract compile-time code
@@ -433,22 +444,32 @@ func parse(f *source.File) (*ast.Module, []diag.Error) {
 
 var nativePlaceholder = regexp.MustCompile(`\$([0-9]+)`)
 
-// validateNatives keeps the Go boundary deliberately small. Bundled modules
-// may use inline templates; ordinary modules may only use sidecar call form
-// with a closed scalar ABI that can be checked without running Go tooling.
-func validateNatives(n *node) []diag.Error {
+// validateModuleDecls checks the declarations whose rules are per-module
+// rather than graph-wide.
+//
+// The Go boundary stays deliberately small: bundled modules may use inline
+// templates; ordinary modules may only use sidecar call form with a closed
+// scalar ABI that can be checked without running Go tooling. Fixity is
+// checked here too, because a fixity must accompany the operator its own
+// module declares.
+func validateModuleDecls(n *node) []diag.Error {
 	var errs []diag.Error
 	callDecls := map[string]*ast.ValueDecl{}
 	templateTargets := map[string]bool{}
-	infixes := map[string]source.Span{}
+	// declared is every value name this module introduces — the names its
+	// own fixity declarations may refer to.
+	declared := map[string]bool{}
+	fixities := map[string]source.Span{}
 	for _, d := range n.mod.Decls {
 		switch d := d.(type) {
 		case *ast.ClassDecl:
 			for _, m := range d.Methods {
 				templateTargets[m.Name] = true
+				declared[m.Name] = true
 			}
 		case *ast.ValueDecl:
 			templateTargets[d.Name] = true
+			declared[d.Name] = true
 			if d.Native == nil {
 				continue
 			}
@@ -467,6 +488,7 @@ func validateNatives(n *node) []diag.Error {
 			}
 		case *ast.EffectDecl:
 			for _, op := range d.Ops {
+				declared[op.Name] = true
 				if op.Native == nil {
 					continue
 				}
@@ -483,21 +505,24 @@ func validateNatives(n *node) []diag.Error {
 					}
 				}
 			}
-		case *ast.InfixDecl:
-			if !n.bundled {
-				errs = append(errs, diag.Errorf(d.OpSpan, "INFIX NOT ALLOWED", "Operator bindings are reserved for compiler-bundled modules."))
-				continue
+		case *ast.FixityDecl:
+			if _, exists := fixities[d.Op]; exists {
+				errs = append(errs, diag.Errorf(d.OpSpan, "DUPLICATE FIXITY", "Operator `(%s)` already has a fixity in this module.", d.Op))
 			}
-			if _, exists := infixes[d.Op]; exists {
-				errs = append(errs, diag.Errorf(d.OpSpan, "DUPLICATE INFIX", "Operator `%s` already has a binding in this module.", d.Op))
-			}
-			infixes[d.Op] = d.OpSpan
+			fixities[d.Op] = d.OpSpan
 		}
 	}
+	// A fixity must sit with the operator's own declaration. That keeps one
+	// declarer per operator, which is what makes the graph-wide table
+	// unambiguous, and it lets the declaration appear above or below the
+	// definition without a visibility question.
 	for _, d := range n.mod.Decls {
-		if inf, ok := d.(*ast.InfixDecl); ok && n.bundled && !templateTargets[inf.Target] {
-			errs = append(errs, diag.Errorf(inf.TargetSpan, "INVALID INFIX TARGET", "Operator `%s` must name a value or class method in the same bundled module.", inf.Op))
+		fd, ok := d.(*ast.FixityDecl)
+		if !ok || declared[fd.Op] {
+			continue
 		}
+		errs = append(errs, diag.Errorf(fd.OpSpan, "FIXITY WITHOUT DEFINITION",
+			"Module `%s` does not declare `(%s)`, so it cannot declare its fixity.\nFixity belongs with the operator's own declaration.", n.name, fd.Op))
 	}
 	if n.bundled {
 		return errs
@@ -1030,6 +1055,15 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 			if v := basics.iface.values["show"]; v != "" {
 				r.vals["show"] = v
 			}
+			// Every operator Basics exposes is ambient. Operators are
+			// ordinary names now, so without this `1 + 2` would need an
+			// explicit `import Basics exposing ((+))` in every module.
+			// Named methods still require the import, as before.
+			for name, v := range basics.iface.values {
+				if isOperatorName(name) {
+					r.vals[name] = v
+				}
+			}
 		}
 	}
 	if !r.node.bundled {
@@ -1185,8 +1219,10 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 			d.Name = canon
 			r.vals[surface] = canon
 			out = append(out, d)
-		case *ast.InfixDecl:
-			d.Target = r.canon(d.Target)
+		case *ast.FixityDecl:
+			// A fixity binds a spelling, not a value, so Op is never
+			// canonicalized. It survives resolution so the REPL can rebuild
+			// its table from the merged prelude.
 			out = append(out, d)
 		case *ast.TypeDecl:
 			d.Name = r.canon(d.Name)
@@ -1429,6 +1465,12 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 		r.expr(e.Then, vals, locals)
 		r.expr(e.Else, vals, locals)
 	case *ast.BinOp:
+		// An operator is an ordinary value name, so it resolves like one.
+		// `&&` and `||` are the exception: they are surface syntax that
+		// elaborates to an `if`, and name nothing.
+		if !fixity.IsShortCircuit(e.Op) {
+			e.Op = r.qualified(e.Op, vals, "value", e.OpSpan)
+		}
 		r.expr(e.L, vals, locals)
 		r.expr(e.R, vals, locals)
 	case *ast.Lambda:
@@ -1537,4 +1579,11 @@ func (r *resolver) patternInner(p ast.Pattern, locals, outer map[string]bool, va
 func ManifestJSON(entries []ManifestEntry) []byte {
 	b, _ := json.MarshalIndent(entries, "", "  ")
 	return append(b, '\n')
+}
+
+// isOperatorName reports whether a surface name is an operator spelling
+// rather than an identifier. The two character sets are disjoint, so the
+// first byte settles it.
+func isOperatorName(name string) bool {
+	return name != "" && token.IsOpChar(name[0])
 }
