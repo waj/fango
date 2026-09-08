@@ -154,7 +154,7 @@ func validGeneratedSourcePath(rel string) bool {
 	}
 	slash := filepath.ToSlash(rel)
 	return slash == "main.go" || strings.HasPrefix(slash, "modules/") && strings.HasSuffix(slash, "/module.go") ||
-		strings.HasPrefix(slash, "native/") && strings.HasSuffix(slash, "/native.go")
+		strings.HasPrefix(slash, "native/") && (strings.HasSuffix(slash, "/native.go") || strings.HasSuffix(slash, "/host.go"))
 }
 
 // Materialize ensures go.mod and the embedded fangort sources exist in dir,

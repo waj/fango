@@ -1,11 +1,7 @@
 package fangort
 
 import (
-	"bufio"
-	"errors"
-	"io"
 	"math"
-	"strings"
 	"testing"
 )
 
@@ -75,9 +71,6 @@ func TestShowBoolUnit(t *testing.T) {
 }
 
 func TestUnicodeBoundaryValidation(t *testing.T) {
-	if got, err := ReadRawLineFrom(bufio.NewReader(strings.NewReader("a\xffb\n"))); err != nil || got != "a�b\n" {
-		t.Fatalf("invalid UTF-8 replacement = %q, %v", got, err)
-	}
 	if RequireValidString("ok", "二") != "二" || RequireValidChar("ok", 'λ') != 'λ' {
 		t.Fatal("valid Unicode rejected")
 	}
@@ -95,91 +88,3 @@ func TestUnicodeBoundaryValidation(t *testing.T) {
 		})
 	}
 }
-
-func TestReadLineFrom(t *testing.T) {
-	cases := []struct {
-		name, input, first, second string
-	}{
-		{"lf", "one\ntwo\n", "one", "two"},
-		{"crlf", "one\r\ntwo\r\n", "one", "two"},
-		{"unterminated", "last", "last", ""},
-		{"clean eof", "", "", ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := bufio.NewReader(strings.NewReader(tc.input))
-			got, err := ReadLineFrom(r)
-			if err != nil || got != tc.first {
-				t.Fatalf("first read = %q, %v; want %q, nil", got, err, tc.first)
-			}
-			got, err = ReadLineFrom(r)
-			if err != nil || got != tc.second {
-				t.Fatalf("second read = %q, %v; want %q, nil", got, err, tc.second)
-			}
-		})
-	}
-
-	want := errors.New("broken input")
-	r := bufio.NewReader(io.MultiReader(strings.NewReader("partial"), errorReader{want}))
-	if got, err := ReadLineFrom(r); !errors.Is(err, want) || got != "" {
-		t.Fatalf("non-EOF read = %q, %v; want empty string and %v", got, err, want)
-	}
-}
-
-func TestRawLineAndEOF(t *testing.T) {
-	r := bufio.NewReader(strings.NewReader("one\r\ntwo\nlast"))
-	for _, want := range []struct {
-		raw, text, ending string
-	}{
-		{"one\r\n", "one", "\r\n"},
-		{"two\n", "two", "\n"},
-		{"last", "last", ""},
-	} {
-		has, err := HasInputFrom(r)
-		if err != nil || !has {
-			t.Fatalf("HasInputFrom = %v, %v; want true, nil", has, err)
-		}
-		raw, err := ReadRawLineFrom(r)
-		if err != nil || raw != want.raw {
-			t.Fatalf("ReadRawLineFrom = %q, %v; want %q, nil", raw, err, want.raw)
-		}
-		if text, ending := LineText(raw), LineEnding(raw); text != want.text || ending != want.ending {
-			t.Fatalf("split %q = (%q, %q); want (%q, %q)", raw, text, ending, want.text, want.ending)
-		}
-	}
-	if has, err := HasInputFrom(r); err != nil || has {
-		t.Fatalf("clean EOF = %v, %v; want false, nil", has, err)
-	}
-
-	wantErr := errors.New("broken input")
-	broken := bufio.NewReader(errorReader{wantErr})
-	if has, err := HasInputFrom(broken); has || !errors.Is(err, wantErr) {
-		t.Fatalf("broken input = %v, %v; want false, %v", has, err, wantErr)
-	}
-}
-
-func TestWriteStringTo(t *testing.T) {
-	var out strings.Builder
-	if err := WriteStringTo(&out, "one"); err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteStringTo(&out, " 二"); err != nil {
-		t.Fatal(err)
-	}
-	if got := out.String(); got != "one 二" {
-		t.Fatalf("WriteStringTo output = %q", got)
-	}
-
-	want := errors.New("broken output")
-	if err := WriteStringTo(errorWriter{want}, "x"); !errors.Is(err, want) {
-		t.Fatalf("WriteStringTo error = %v, want %v", err, want)
-	}
-}
-
-type errorReader struct{ err error }
-
-func (r errorReader) Read([]byte) (int, error) { return 0, r.err }
-
-type errorWriter struct{ err error }
-
-func (w errorWriter) Write([]byte) (int, error) { return 0, w.err }

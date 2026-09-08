@@ -101,7 +101,10 @@ func emitProjectManifest(entry string, stderr io.Writer) ([]codegen.File, []modu
 		if formatted, err := format.Source(data); err == nil {
 			data = formatted
 		}
-		files = append(files, codegen.File{Path: "native/" + codegen.NativeLinkName(native.Module) + "/native.go", Data: data})
+		dir := "native/" + codegen.NativeLinkName(native.Module) + "/"
+		files = append(files,
+			codegen.File{Path: dir + "native.go", Data: data},
+			codegen.File{Path: dir + "host.go", Data: codegen.NativeHostSource()})
 	}
 	return files, manifest, true
 }

@@ -38,6 +38,9 @@ func Prelude() (*ast.Module, fixity.Table, map[string]bool, []diag.Error) {
 			return
 		}
 		n := &node{name: name, path: path, content: data, mod: m, bundled: true, nativeModule: name}
+		if nativePath, native, nativeErr := provider.Native(name); nativeErr == nil {
+			n.nativePath, n.native = nativePath, native
+		}
 		n.deps = implicitDeps(m, nil, name)
 		nodes[name] = n
 		for _, im := range m.Imports {

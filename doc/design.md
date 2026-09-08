@@ -146,25 +146,25 @@ the scalar implementations of class methods, and the bundled `IO` module declare
 effect and its operations. Basics also declares the standard operators and
 their fixities, which any module may do — there is no privileged operator
 set. `native "..."` templates remain bundled-only. They are retained for
-inlined Basics scalar primitives, runtime-dependent IO operations, and Meta's
-compiler-only representations. The loader validates each template as a Go
+inlined Basics scalar primitives and Meta's compiler-only representations. The
+loader validates each template as a Go
 expression, requires every positional argument exactly once, and permits only
 placeholders, compiler intrinsics, Go predeclared names, and the `fangort`
 qualifier. Code generation reparses and position-scrubs the template, then
 substitutes typed Go AST expressions with precedence preserved.
 
-Both ordinary and bundled modules can instead declare a pure call-form native
+Both ordinary and bundled modules can instead declare a call-form native
 and place a `<Module>.native.go` sidecar beside the source. The loader applies
 the same rules to both: `package native`, standard-library-only imports,
 bidirectional declaration/function correspondence, and a closed scalar,
 Unit-erased ABI. Each content hash joins `sources.json`; the build synchronizer
 materializes each loaded sidecar as a separate package below `native/`, so
 edits and removal invalidate the build and prune stale generated files. Go
-compilation remains the final body/type check. Bundled sidecars are also linked
-statically into the compiler and registered through typed interpreter wrappers;
-the loader checks every call-form bundled declaration against that registry.
-User sidecars remain compiled-only because a running interpreter cannot load
-arbitrary Go code.
+compilation remains the final body/type check. Native effect operations use the
+same ABI and are eligible only when no Fango handler handles the operation.
+Generated sidecar packages also receive a reserved `FangoHost` process-global
+whose interface covers input, output, arguments, working directory, and exit;
+there is no hidden function parameter or module-specific calling convention.
 
 Fixity resolution runs between parsing and name resolution. Because a fixity
 is declared in source and may live in any module of the graph, the parser
@@ -602,23 +602,29 @@ generated Go is unchanged. Go's package cache then reuses unchanged compilation
 units. `build` copies the resulting executable; `run` reuses it while inputs
 are unchanged.
 `fangort` owns genuinely shared runtime facilities: represented Unit,
-formatting, the general-handler engine, and IO behavior including newline-free
-string writes and raw line reads that distinguish clean EOF and preserve
-LF/CRLF terminators. Module-specific pure native logic lives in the owning
-stdlib sidecar instead. In particular, `Random.native.go` owns its
-process-global PRNG cell; the statically linked interpreter package and each
-compiled program's materialized package therefore have the same single-cell,
-per-process behavior and execute the same implementation.
+formatting, the general-handler engine, and the generic native-host contract.
+Module-specific native logic lives in the owning stdlib sidecar instead. In
+particular, `IO.native.go` owns IO operations and line semantics, while
+`Random.native.go` owns its process-global PRNG cell; the interpreter worker
+and each compiled program therefore have the same single-cell, per-process
+behavior and execute the same implementation.
 
-Bundled native interpreter behavior lives in one registry whose call-form
-entries invoke the statically linked stdlib sidecar functions. Pure
-`NativeCall`, unhandled native `Perform`, and the constant folder dispatch
-through that registry; only integer and floating arithmetic retain foldable
-status. Interpreter-only adapters for Basics templates and session-dependent IO
-live in `internal/natives`, rather than masquerading as sidecars. User sidecars
-are deliberately compiled-only because dynamically loading Go would break the
-persistent REPL model. The interpreter reports that limitation instead of
-attempting execution. Native Go panics currently propagate unchanged.
+During ordinary interpretation, every call-form sidecar runs in one persistent
+native worker per sidecar set. The worker is a cached generated Go executable;
+a framed scalar protocol carries calls and reverse `FangoHost` requests over a
+dedicated loopback connection, leaving process stdio outside the control
+channel. One process preserves package-global state across calls. The active
+interpreter IO context answers host requests, so the REPL's prompt and native IO
+share one buffered reader. The same mechanism accepts bundled and user
+sidecars; bundled sidecars deliberately use it in the REPL. Native code is
+trusted and retains the user's OS privileges—the worker is lifecycle isolation,
+not a security sandbox. It recovers a panic only to report and reproduce it in
+the interpreter; a host exit becomes the interpreter's exit error.
+
+The in-process native registry is limited to inline templates, compiler-only
+representations, and explicitly safe bundled behavior needed during splice
+evaluation. Compile-time evaluation still rejects user sidecars, effects, and
+process-state-observing natives.
 
 ## Interpreter and REPL
 
@@ -685,8 +691,8 @@ The differential cases run in parallel, since each compiles into its own
 build directory and the compiled leg is subprocess work. Their interpreter
 legs are serialized against each other: hosting many programs in one process
 is the test harness's privilege, not a language capability, and the
-interpreter shares the same process-global bundled-sidecar state a compiled
-program owns outright — the PRNG cell behind Random in particular.
+interpreter shares the same process-global worker state that a compiled program
+owns outright — the PRNG cell behind Random in particular.
 
 Compile-latency benchmarks track cold and warm paths against recorded,
 machine-specific baselines. Runtime benchmarks compare representative scalar,
@@ -706,7 +712,7 @@ dependence: the ratio moves with whatever else is competing for the CPU.
 
 ## Known limitations
 
-The implementation has a deliberately narrow, pure Go sidecar FFI but no
+The implementation has a deliberately narrow scalar Go sidecar FFI but no
 package manager, transparent aliases, formatter, or LSP. Type classes have one
 parameter, no superclasses, higher kinds, default methods, ambiguous overlapping heads,
 or method-local polymorphism. There are no source-path

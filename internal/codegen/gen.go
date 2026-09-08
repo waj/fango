@@ -80,6 +80,13 @@ func EmitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) 
 	return files, nil
 }
 
+// NativeHostSource is compiled beside each native sidecar. Keeping the host
+// binding in a generated companion lets sidecar functions use the same source
+// in a system process and in the interpreter's native worker.
+func NativeHostSource() []byte {
+	return []byte("package native\n\nimport \"fangobuild/fangort\"\n\ntype FangoNativeHost = fangort.NativeHost\n\nvar FangoHost FangoNativeHost = fangort.SystemNativeHost\n")
+}
+
 func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byte, error) {
 	g := &gen{
 		b:             b,
@@ -407,6 +414,7 @@ func (g *gen) importsDecl() goast.Decl {
 		}
 		specs = append(specs, spec{alias: alias, path: moduleImportPath(name)})
 	}
+	sort.Slice(specs, func(i, j int) bool { return specs[i].path < specs[j].path })
 	if len(specs) == 0 {
 		return nil
 	}
@@ -959,7 +967,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		// function bodies the elaborator's ANF hoisting bypasses this.
 		return callExpr(funcLit(g.goType(e.Ty), g.caseStmts(e, g.retStmts)))
 	case *core.Perform:
-		if e.Op.Native != nil && types.SurfaceName(e.Op.Owner.Name) == "IO" {
+		if e.Op.Native != nil && len(g.evidence[e.Effect.Unique]) == 0 {
 			return g.nativeExpr(&core.NativeCall{Name: e.Op.Native.Name, Module: e.Op.Native.Module, Args: e.Args, Ty: e.Ty}, parentPrec)
 		}
 		stack := g.evidence[e.Effect.Unique]
@@ -1296,7 +1304,7 @@ func (g *gen) stmts(e core.Expr) []goast.Stmt {
 		}
 		return []goast.Stmt{assignBlank(g.expr(e, 0))}
 	case *core.Perform:
-		if e.Op.Native != nil && types.SurfaceName(e.Op.Owner.Name) == "IO" {
+		if e.Op.Native != nil && len(g.evidence[e.Effect.Unique]) == 0 {
 			return g.nativeStmts(&core.NativeCall{Name: e.Op.Native.Name, Module: e.Op.Native.Module, Args: e.Args, Ty: e.Ty})
 		}
 		return []goast.Stmt{assignBlank(g.expr(e, 0))}

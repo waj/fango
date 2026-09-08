@@ -366,7 +366,7 @@ handlers.
 
 ## Native Go sidecars
 
-A module may implement an annotated, pure value in adjacent Go:
+A module may implement an annotated value or effect operation in adjacent Go:
 
 ```fango
 module Hash exposing (crc32)
@@ -395,25 +395,49 @@ The supported boundary types are `Int`/`int64`, `Float`/`float64`,
 results are validated, and an invalid UTF-8 string or non-scalar rune panics at
 the native boundary. Unit parameters are omitted from
 the Go function and a Unit result is represented by no Go result. Functions,
-ADTs, polymorphic variables, class constraints, effectful arrows, Go type parameters, multiple
+ADTs, polymorphic variables, class constraints, explicit effect rows on native
+value types, Go type parameters, multiple
 results, and `error` results are rejected. Sidecars may import only Go
 standard-library packages. Every call-form declaration needs its matching
 exported function, and every exported sidecar function needs a declaration.
 
+An operation in an `effect` declaration may also use call form:
+
+```fango
+effect Clock
+    tick : () -> Int = native
+```
+
+Its Go function follows the same scalar and Unit-erased ABI. A Fango handler
+takes precedence; the native function supplies an otherwise unhandled native
+operation.
+
+Every materialized sidecar package receives the reserved process-global
+`FangoHost`. Its `HasInput`, `ReadInputLine`, `WriteOutput`, `Arguments`,
+`WorkingDirectory`, and `Exit` methods expose the surrounding Fango process.
+Compiled programs install the system host; the interpreter worker installs a
+proxy to the active interpreter session. Native function signatures never gain
+a hidden context argument. Sidecars may use `FangoHost` only during a native
+call and must not replace it or retain it for asynchronous work.
+
 Native sidecars participate in `check`, build manifests, incremental rebuilds,
 `build`, `run`, and `--emit-go`. Bundled standard-library modules use the same
-sidecar form and ABI for pure scalar natives; their sidecars are materialized
-into generated projects just like user sidecars. Because those bundled
-functions are also linked into the compiler and registered there, they run in
-the Core interpreter and REPL as well as in compiled programs. User sidecars
-execute only in compiled programs; the Core interpreter and REPL report
-“native modules run only in compiled mode.” Panics cross the boundary
-unchanged.
+sidecar form, host, and ABI; their sidecars are materialized into generated
+projects just like user sidecars. During ordinary interpreter and REPL
+evaluation, call-form sidecars run in a cached persistent worker process.
+Package globals persist for the session. Panics are reported across the worker
+boundary and reproduced as native panics; `FangoHost.Exit` becomes a
+program-exit error instead of terminating the REPL. Native sidecars are trusted
+code and are not sandboxed.
+
+The interpreter API accepts user sidecars now. The CLI REPL still has no module
+loading command, so there is not yet a CLI path for bringing a user module into
+an interactive session.
 
 The word `native` is reserved. Inline `native "Go expression"` templates are
 compiler-bundled syntax and are rejected in user modules. The standard library
-keeps templates for inlined scalar primitives, runtime-dependent IO operations,
-and compiler-only metaprogramming representations.
+keeps templates for inlined scalar primitives and compiler-only metaprogramming
+representations. `IO` uses its ordinary sidecar.
 
 ## Values and operators
 

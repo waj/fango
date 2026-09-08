@@ -1,17 +1,17 @@
-// Package natives is the interpreter-side registry for compiler-bundled
-// native declarations. User sidecars deliberately do not enter this table:
-// they run only through the compiled backend.
+// Package natives is the in-process registry for inline compiler-bundled
+// primitives and compile-time-safe adapters. Ordinary call-form sidecars run
+// through internal/nativehost instead.
 package natives
 
 import (
 	"bufio"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/meta"
+	"github.com/waj/fango/internal/nativehost"
 	stdlib "github.com/waj/fango/stdlib"
 )
 
@@ -33,16 +33,7 @@ type Runtime struct {
 // ExitError is how the interpreter represents IO.exit without terminating
 // the compiler or test process that hosts it. A compiled program calls
 // os.Exit through fangort and therefore has the same observable status.
-type ExitError struct{ Code int }
-
-func (e *ExitError) Error() string { return fmt.Sprintf("program exited with status %d", e.Code) }
-
-func runtimePath(rt *Runtime, path string) string {
-	if filepath.IsAbs(path) || rt.Dir == "" {
-		return path
-	}
-	return filepath.Join(rt.Dir, path)
-}
+type ExitError = nativehost.ExitError
 
 type Spec struct {
 	Arity    int
@@ -115,40 +106,6 @@ var Table = func() map[string]Spec {
 	}}
 	t["Random.entropySeed"] = Spec{Arity: 1, Eval: func(_ *Runtime, _ []any) (any, error) {
 		return stdlib.EntropySeed(), nil
-	}}
-	t["IO.print"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		text, err := rt.Show(args[0])
-		if err != nil {
-			return nil, err
-		}
-		return struct{}{}, printTo(rt.Writer, text)
-	}}
-	t["IO.hasInput"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
-		return hasInputFrom(rt.Reader)
-	}}
-	t["IO.readRawLine"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
-		return readRawLineFrom(rt.Reader)
-	}}
-	t["IO.write"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		return struct{}{}, writeTo(rt.Writer, args[0].(string))
-	}}
-	t["IO.argCount"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
-		return int64(len(rt.Args)), nil
-	}}
-	t["IO.argAt"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		return argAt(rt.Args, args[0].(int64))
-	}}
-	t["IO.pathExists"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		return pathExists(runtimePath(rt, args[0].(string)))
-	}}
-	t["IO.readFileText"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		return readFileText(runtimePath(rt, args[0].(string)))
-	}}
-	t["IO.writeFile"] = Spec{Arity: 2, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
-		return struct{}{}, writeFileText(runtimePath(rt, args[0].(string)), args[1].(string))
-	}}
-	t["IO.exit"] = Spec{Arity: 1, Effect: true, Eval: func(_ *Runtime, args []any) (any, error) {
-		return nil, &ExitError{Code: int(args[0].(int64))}
 	}}
 	// Bundled natives are compile-time-safe by default: they are pure
 	// functions of their arguments. Random is the exclusion — its draws read

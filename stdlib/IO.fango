@@ -7,21 +7,21 @@ import Maybe exposing (Maybe(..))
 type Line = { text : String, ending : String } deriving (Eq, Show)
 
 effect IO
-    hasInput : () -> Bool = native "fangort.HasInputUnit($1)"
-    readRawLine : () -> String = native "fangort.ReadRawLineUnit($1)"
-    write : String -> () = native "fangort.WriteString($1)"
-    argCount : () -> Int = native "fangort.ArgCountUnit($1)"
-    argAt : Int -> String = native "fangort.ArgAt($1)"
-    pathExists : String -> Bool = native "fangort.PathExists($1)"
-    readFileText : String -> String = native "fangort.ReadFileText($1)"
-    writeFile : String -> String -> () = native "fangort.WriteFileText($1, $2)"
-    exit : Int -> () = native "fangort.Exit($1)"
+    hasInput : () -> Bool = native
+    readRawLine : () -> String = native
+    write : String -> () = native
+    argCount : () -> Int = native
+    argAt : Int -> String = native
+    pathExists : String -> Bool = native
+    readFileText : String -> String = native
+    writeFile : String -> String -> () = native
+    exit : Int -> () = native
 
 lineText : String -> String
-lineText = native "fangort.LineText($1)"
+lineText = native
 
 lineEnding : String -> String
-lineEnding = native "fangort.LineEnding($1)"
+lineEnding = native
 
 readLine : () ->{IO} Maybe Line
 readLine() =

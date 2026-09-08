@@ -3,6 +3,7 @@ package eval
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"math"
 	"strings"
@@ -26,15 +27,17 @@ func stringTy() *types.TCon { return &types.TCon{Unique: 2, Name: "String"} }
 func boolTy() *types.TCon   { return &types.TCon{Unique: 3, Name: "Bool"} }
 func unitTy() *types.TCon   { return &types.TCon{Unique: 4, Name: "()"} }
 
-func printExpr(arg core.Expr) core.Expr {
+func writeExpr(text string) core.Expr {
 	eff := &types.EffectInfo{Unique: 5, Name: "IO"}
-	op := &types.EffectOp{Owner: eff, Name: "print", Arity: 1, ParamTypes: []types.Type{arg.Type()}, ResultType: unitTy(), Builtin: true}
-	return &core.Perform{Op: op, Effect: core.EffectInstance{Unique: eff.Unique, Name: eff.Name}, Args: []core.Expr{arg}, Ty: unitTy()}
+	native := &types.NativeInfo{Name: "IO.write", Module: "IO", Arity: 1, Effect: eff}
+	op := &types.EffectOp{Owner: eff, Name: "write", Arity: 1, ParamTypes: []types.Type{stringTy()}, ResultType: unitTy(), Native: native}
+	return &core.Perform{Op: op, Effect: core.EffectInstance{Unique: eff.Unique, Name: eff.Name}, Args: []core.Expr{&core.StringLit{Val: text, Ty: stringTy()}}, Ty: unitTy()}
 }
 
 func ioReadExpr(name string, result types.Type) core.Expr {
 	eff := &types.EffectInfo{Unique: 5, Name: "IO"}
-	op := &types.EffectOp{Owner: eff, Name: name, Arity: 1, ParamTypes: []types.Type{unitTy()}, ResultType: result, Builtin: true}
+	native := &types.NativeInfo{Name: "IO." + name, Module: "IO", Arity: 1, Effect: eff}
+	op := &types.EffectOp{Owner: eff, Name: name, Arity: 1, ParamTypes: []types.Type{unitTy()}, ResultType: result, Native: native}
 	return &core.Perform{Op: op, Effect: core.EffectInstance{Unique: eff.Unique, Name: eff.Name}, Args: []core.Expr{&core.UnitLit{Ty: unitTy()}}, Ty: result}
 }
 
@@ -96,9 +99,8 @@ func TestIfBranchLaziness(t *testing.T) {
 }
 
 func TestPrintWritesThroughFangort(t *testing.T) {
-	ft := floatTy()
 	var buf bytes.Buffer
-	e := printExpr(binOp("*", ft, &core.FloatLit{Val: 3.14159, Ty: ft}, &core.FloatLit{Val: 4.0, Ty: ft}))
+	e := writeExpr("12.56636\n")
 	if _, err := Eval(context.Background(), e, NewEnv(), &buf); err != nil {
 		t.Fatal(err)
 	}
@@ -124,10 +126,14 @@ func TestEvalIOReadLine(t *testing.T) {
 		t.Fatalf("hasInput at EOF = %v, %v; want false, nil", got, err)
 	}
 	wantErr := io.ErrUnexpectedEOF
-	_, err = EvalIO(context.Background(), ioReadExpr("hasInput", boolTy()), NewEnv(), NewIOContext(failingReader{wantErr}, io.Discard))
-	if err != wantErr {
-		t.Fatalf("readLine error = %v, want %v", err, wantErr)
-	}
+	func() {
+		defer func() {
+			if got := fmt.Sprint(recover()); !strings.Contains(got, wantErr.Error()) {
+				t.Fatalf("readLine panic = %q, want %q", got, wantErr)
+			}
+		}()
+		_, _ = EvalIO(context.Background(), ioReadExpr("hasInput", boolTy()), NewEnv(), NewIOContext(failingReader{wantErr}, io.Discard))
+	}()
 }
 
 type failingReader struct{ err error }
@@ -168,13 +174,13 @@ func TestFrameBeatsCell(t *testing.T) {
 
 // Bindings evaluate eagerly in order — print side effects prove it.
 func TestLetEagerOrder(t *testing.T) {
-	it, ut := intTy(), unitTy()
+	ut := unitTy()
 	var buf bytes.Buffer
 	e := &core.Let{Name: "a", Ty: ut,
-		Rhs: printExpr(&core.IntLit{Val: 1, Ty: it}),
+		Rhs: writeExpr("1\n"),
 		Body: &core.Let{Name: "b", Ty: ut,
-			Rhs:  printExpr(&core.IntLit{Val: 2, Ty: it}),
-			Body: printExpr(&core.IntLit{Val: 3, Ty: it})}}
+			Rhs:  writeExpr("2\n"),
+			Body: writeExpr("3\n")}}
 	if _, err := Eval(context.Background(), e, NewEnv(), &buf); err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +238,7 @@ func TestSwitchTotality(t *testing.T) {
 		&core.Neg{Operand: one, Ty: it},
 		binOp("+", it, one, one),
 		&core.If{Cond: &core.BoolLit{Val: true, Ty: bt}, Then: one, Else: one, Ty: it},
-		printExpr(one),
+		writeExpr("1\n"),
 		&core.Let{Name: "v", Rhs: one, Body: one, Ty: it},
 		&core.Lambda{Param: "x", Body: one, Ty: &types.TFun{Arg: it, Ret: it}},
 		&core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: "nope", Ty: it}, Ty: it},

@@ -10,7 +10,9 @@ import (
 	"testing"
 
 	"github.com/waj/fango/internal/build"
+	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/eval"
+	"github.com/waj/fango/internal/nativehost"
 )
 
 func TestMultiModuleDifferential(t *testing.T) {
@@ -332,34 +334,59 @@ main() =
 	}
 }
 
-func TestUserNativeCompiledAndInterpreterRefuses(t *testing.T) {
+func TestUserNativeCompiledAndInterpreted(t *testing.T) {
 	root := t.TempDir()
-	writeModuleFile(t, root, "Hash.fango", `module Hash exposing (twice, tick)
+	writeModuleFile(t, root, "Hash.fango", `module Hash exposing (Clock(..), twice, constant, probe)
 
 twice : Int -> Int
 twice = native
 
-tick : () -> Int
-tick = native
+constant : () -> Int
+constant = native
+
+effect Clock
+    tick : () -> Int = native
+
+probe : () ->{Clock} Int
+probe() = tick()
 `)
 	writeModuleFile(t, root, "Hash.native.go", `package native
 
 func Twice(x int64) int64 { return x * 2 }
+func Constant() int64 { return 42 }
 func Tick() int64 { return 42 }
 `)
 	entry := writeModuleFile(t, root, "Main.fango", `module Main exposing (main)
 import Hash
-main() = print (Hash.twice (Hash.tick (print "before")))
+main() = print (Hash.twice (Hash.constant (print "before")))
 `)
 	var stderr bytes.Buffer
-	prog, _, ok := compileFile(entry, &stderr)
+	prog, ck, _, _, sources, ok := compileFileGraph(entry, &stderr)
 	if !ok {
 		t.Fatalf("compile: %s", stderr.String())
 	}
 	env := eval.NewEnv()
 	env.DefineProg(prog)
-	if _, err := eval.ForceIO(context.Background(), prog.Entry, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{})); err == nil || !strings.Contains(err.Error(), "native modules run only in compiled mode") {
-		t.Fatalf("interpreter error = %v", err)
+	workerSources := make([]nativehost.Source, len(sources))
+	for i, source := range sources {
+		workerSources[i] = nativehost.Source{Module: source.Module, Content: source.Content}
+	}
+	executor, err := nativehost.New(workerSources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer executor.Close()
+	var interpreted bytes.Buffer
+	ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
+	ioctx.Natives = executor
+	if _, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx); err != nil || interpreted.String() != "before\n84\n" {
+		t.Fatalf("interpreter output %q, err %v", interpreted.String(), err)
+	}
+	probe := &core.App{CalleeKind: core.Worker,
+		Callee: &core.VarRef{Name: "Hash.probe", Ty: ck.Natives["Hash.tick"].Scheme.Body},
+		Args:   []core.Expr{&core.UnitLit{Ty: ck.B.Unit}}, Ty: ck.B.Int}
+	if got, err := eval.EvalIO(context.Background(), probe, env, ioctx); err != nil || got != int64(42) {
+		t.Fatalf("native effect = %v, %v", got, err)
 	}
 
 	buildDir := filepath.Join(root, "build")
@@ -379,6 +406,7 @@ main() = print (Hash.twice (Hash.tick (print "before")))
 	writeModuleFile(t, root, "Hash.native.go", `package native
 
 func Twice(x int64) int64 { return x * 3 }
+func Constant() int64 { return 42 }
 func Tick() int64 { return 42 }
 `)
 	if changed, ok := compileToDir(entry, buildDir, &stderr); !ok || !changed {
@@ -392,10 +420,10 @@ func Tick() int64 { return 42 }
 		t.Fatalf("rebuilt output %q, err %v", out, err)
 	}
 
-	writeModuleFile(t, root, "Hash.fango", `module Hash exposing (twice, tick)
+	writeModuleFile(t, root, "Hash.fango", `module Hash exposing (twice, constant)
 
 twice x = x * 2
-tick _ = 42
+constant _ = 42
 `)
 	if err := os.Remove(filepath.Join(root, "Hash.native.go")); err != nil {
 		t.Fatal(err)

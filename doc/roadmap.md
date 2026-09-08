@@ -175,8 +175,12 @@ These are directions, not commitments or an ordering after the work above.
 - Structured concurrency built on effects: nursery scope, futures,
   cancellation, channels, and select semantics.
 - Extend the deliberately narrow Go sidecar FFI only from concrete needs:
-  richer safe boundary types, explicit effectful imports, interpreter strategy,
-  and panic/error translation are all still open.
+  richer safe boundary types and richer panic/error translation remain open.
+- Add a CLI path for loading and reloading module graphs in `fango repl`; the
+  interpreter's native worker already accepts user sidecars, but the current
+  REPL still starts from bundled modules only.
+- Replace panic-based failures in `IO` with explicit `Result` values once error
+  types and a compatible standard-library API are designed.
 - Transparent aliases, including whether aliases can abbreviate effect rows.
 - Extend nominal records to inline record payloads on variant constructors
   when an example needs named fields on one alternative; the surface syntax,

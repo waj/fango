@@ -492,13 +492,14 @@ func validateModuleDecls(n *node) []diag.Error {
 				if op.Native == nil {
 					continue
 				}
-				if !n.bundled {
-					errs = append(errs, diag.Errorf(op.Native.Sp, "NATIVE EFFECT NOT ALLOWED", "User sidecars implement pure native values; native effect operations are reserved for bundled modules."))
-					continue
-				}
 				if op.Native.Template == nil {
-					errs = append(errs, diag.Errorf(op.Native.Sp, "NATIVE EFFECT TEMPLATE", "Bundled native effect operations require an inline template."))
+					callDecls[op.Name] = &ast.ValueDecl{Name: op.Name, NameSpan: op.NameSpan,
+						Ann: &ast.TypeAnn{Type: op.Type}, Native: op.Native}
 				} else {
+					if !n.bundled {
+						errs = append(errs, diag.Errorf(op.Native.Sp, "NATIVE TEMPLATE NOT ALLOWED", "Inline native templates are reserved for compiler-bundled modules; use `native` with a sidecar function."))
+						continue
+					}
 					errs = append(errs, validateTemplate(*op.Native.Template, typeArity(op.Type), op.Native.Sp)...)
 					if spec, ok := natives.Lookup(canonical(n.name, op.Name)); !ok || spec.Arity != typeArity(op.Type) || !spec.Effect {
 						errs = append(errs, diag.Errorf(op.Native.Sp, "INVALID BUNDLED NATIVE", "Bundled native `%s.%s` does not match the interpreter registry.", n.name, op.Name))
@@ -526,7 +527,7 @@ func validateModuleDecls(n *node) []diag.Error {
 	}
 	if len(callDecls) == 0 {
 		if n.native != nil {
-			errs = append(errs, diag.Errorf(source.Span{}, "ORPHAN NATIVE SIDECAR", "Module `%s` has `%s`, but declares no call-form native values.", n.name, n.nativePath))
+			errs = append(errs, diag.Errorf(source.Span{}, "ORPHAN NATIVE SIDECAR", "Module `%s` has `%s`, but declares no call-form natives.", n.name, n.nativePath))
 		}
 		return errs
 	}
@@ -650,7 +651,27 @@ func validateSidecar(n *node, decls map[string]*ast.ValueDecl) []diag.Error {
 	}
 	funcs := map[string]*goast.FuncDecl{}
 	for _, d := range f.Decls {
+		if gd, ok := d.(*goast.GenDecl); ok {
+			for _, raw := range gd.Specs {
+				switch spec := raw.(type) {
+				case *goast.TypeSpec:
+					if spec.Name.Name == "FangoHost" || spec.Name.Name == "FangoNativeHost" {
+						errs = append(errs, diag.Errorf(source.Span{}, "RESERVED NATIVE IDENTIFIER", "%s declares generated identifier `%s`.", n.nativePath, spec.Name.Name))
+					}
+				case *goast.ValueSpec:
+					for _, name := range spec.Names {
+						if name.Name == "FangoHost" || name.Name == "FangoNativeHost" {
+							errs = append(errs, diag.Errorf(source.Span{}, "RESERVED NATIVE IDENTIFIER", "%s declares generated identifier `%s`.", n.nativePath, name.Name))
+						}
+					}
+				}
+			}
+		}
 		if fn, ok := d.(*goast.FuncDecl); ok && fn.Recv == nil && goast.IsExported(fn.Name.Name) {
+			if fn.Name.Name == "FangoHost" || fn.Name.Name == "FangoNativeHost" {
+				errs = append(errs, diag.Errorf(source.Span{}, "RESERVED NATIVE IDENTIFIER", "%s declares generated identifier `%s`.", n.nativePath, fn.Name.Name))
+				continue
+			}
 			funcs[fn.Name.Name] = fn
 		}
 	}
@@ -692,7 +713,7 @@ func validateNativeShape(d *ast.ValueDecl, fn *goast.FuncDecl) []diag.Error {
 			break
 		}
 		if f.Eff != nil && (len(f.Eff.Labels) > 0 || f.Eff.Tail != "") {
-			return []diag.Error{diag.Errorf(d.Native.Sp, "NATIVE ABI", "Native `%s` must be pure.", d.Name)}
+			return []diag.Error{diag.Errorf(d.Native.Sp, "NATIVE ABI", "Native `%s` cannot include an explicit effect row in its boundary type.", d.Name)}
 		}
 		if !isUnitType(f.Arg) {
 			params = append(params, f.Arg)
@@ -1239,6 +1260,9 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 		case *ast.EffectDecl:
 			d.Name = r.canon(d.Name)
 			for i := range d.Ops {
+				if d.Ops[i].Native != nil {
+					d.Ops[i].Native.Module = r.node.nativeModule
+				}
 				d.Ops[i].Name = r.canon(d.Ops[i].Name)
 				r.typ(d.Ops[i].Type)
 			}

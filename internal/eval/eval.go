@@ -14,6 +14,7 @@ import (
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/meta"
+	"github.com/waj/fango/internal/nativehost"
 	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/types"
 	"github.com/waj/fango/runtime/fangort"
@@ -66,6 +67,9 @@ type IOContext struct {
 	Writer io.Writer
 	Args   []string
 	Dir    string
+	// Natives selects the sidecar worker for this session. Nil uses the
+	// bundled standard-library worker lazily.
+	Natives *nativehost.Executor
 }
 
 func NewIOContext(r io.Reader, w io.Writer) *IOContext {
@@ -74,6 +78,32 @@ func NewIOContext(r io.Reader, w io.Writer) *IOContext {
 		br = bufio.NewReader(r)
 	}
 	return &IOContext{Reader: br, Writer: w, Dir: "."}
+}
+
+func (c *IOContext) HasInput() (bool, error) {
+	_, err := c.Reader.Peek(1)
+	if err == io.EOF {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (c *IOContext) ReadInputLine() ([]byte, error) { return c.Reader.ReadBytes('\n') }
+
+func (c *IOContext) WriteOutput(data []byte) error {
+	_, err := c.Writer.Write(data)
+	return err
+}
+
+func (c *IOContext) Arguments() []string { return c.Args }
+
+func (c *IOContext) WorkingDirectory() string { return c.Dir }
+
+func (c *IOContext) nativeExecutor() (*nativehost.Executor, error) {
+	if c.Natives != nil {
+		return c.Natives, nil
+	}
+	return nativehost.Bundled()
 }
 
 type evidence struct {
@@ -329,6 +359,15 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			args[i] = v
 		}
+		if !in.compileTime {
+			executor, err := in.ioctx.nativeExecutor()
+			if err != nil {
+				return nil, err
+			}
+			if executor.Has(e.Name) {
+				return executor.Call(in.ctx, in.ioctx, e.Name, args)
+			}
+		}
 		if spec, ok := natives.Lookup(e.Name); ok && !spec.Effect {
 			if in.compileTime && !spec.CompileTimeSafe {
 				return nil, &UnsafeNativeError{Name: e.Name, Reason: "observes process-global state the compiler shares"}
@@ -345,7 +384,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		if i := strings.LastIndexByte(module, '.'); i >= 0 {
 			module = module[:i]
 		}
-		return nil, fmt.Errorf("module `%s` ships native Go; native modules run only in compiled mode", module)
+		return nil, fmt.Errorf("native sidecar for module `%s` is not installed in this interpreter session", module)
 	case *core.If:
 		cond, err := in.eval(e.Cond, fr)
 		if err != nil {
@@ -388,6 +427,18 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			return v, err
 		}
 		key := types.SurfaceName(e.Op.Owner.Name) + "." + types.SurfaceName(e.Op.Name)
+		if e.Op.Native != nil {
+			key = e.Op.Native.Name
+		}
+		if !in.compileTime && e.Op.Native != nil && e.Op.Native.Template == nil {
+			executor, err := in.ioctx.nativeExecutor()
+			if err != nil {
+				return nil, err
+			}
+			if executor.Has(key) {
+				return executor.Call(in.ctx, in.ioctx, key, args)
+			}
+		}
 		if spec, ok := natives.Lookup(key); ok && spec.Effect {
 			if in.compileTime {
 				return nil, &UnsafeNativeError{Name: key, Reason: "performs an effect"}

@@ -417,7 +417,7 @@ func TestProjectMaterializesBundledNativeSidecars(t *testing.T) {
 	jsonPath := filepath.Join("..", "..", "testdata", "run", "json_encode.fango")
 	files := emittedProject(t, jsonPath)
 	again := emittedProject(t, jsonPath)
-	for _, path := range []string{"native/Json/native.go", "native/String/native.go"} {
+	for _, path := range []string{"native/IO/native.go", "native/Json/native.go", "native/String/native.go"} {
 		src := generatedFile(t, files, path)
 		if !bytes.HasPrefix(src, []byte("package native\n")) {
 			t.Errorf("%s was not materialized as package native:\n%s", path, src)
@@ -428,6 +428,13 @@ func TestProjectMaterializesBundledNativeSidecars(t *testing.T) {
 		if formatted, err := format.Source(src); err != nil || !bytes.Equal(formatted, src) {
 			t.Errorf("%s is not gofmt-idempotent: %v", path, err)
 		}
+		host := generatedFile(t, files, strings.TrimSuffix(path, "native.go")+"host.go")
+		if !bytes.Contains(host, []byte("var FangoHost")) {
+			t.Errorf("%s has no generated host binding:\n%s", path, host)
+		}
+	}
+	if src := generatedFile(t, files, "native/IO/native.go"); !bytes.Contains(src, []byte("func Write")) || bytes.Contains(src, []byte("fangort.")) {
+		t.Errorf("IO sidecar does not own its implementation:\n%s", src)
 	}
 
 	files = emittedProject(t, filepath.Join("..", "..", "testdata", "run", "stdlib_random.fango"))
@@ -558,10 +565,10 @@ func TestGeneratedGoUsesImplicitConcreteUnitABI(t *testing.T) {
 func TestGeneratedGoMaterializesNativeUnitOnlyInValueContext(t *testing.T) {
 	path := filepath.Join("..", "..", "examples", "mandelbrot.fango")
 	src := string(generatedFile(t, emittedProject(t, path), "main.go"))
-	if strings.Contains(src, "fangort.WriteString(\" \")\n\t\t\treturn fangort.UnitValue") {
+	if strings.Contains(src, "n_IO.Write(\" \")\n\t\t\treturn fangort.UnitValue") {
 		t.Fatalf("statement-position IO.write unnecessarily materialized Unit:\n%s", src)
 	}
-	if !strings.Contains(src, "fangort.WriteString(\" \")") {
+	if !strings.Contains(src, "n_IO.Write(\" \")") {
 		t.Fatalf("statement-position IO.write was not emitted directly:\n%s", src)
 	}
 }

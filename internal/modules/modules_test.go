@@ -68,7 +68,7 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 	for _, m := range r.Manifest {
 		got = append(got, m.Module)
 	}
-	if strings.Join(got, ",") != "Basics,Meta,Derive,List,Maybe,IO,B,A,Z,Main" {
+	if strings.Join(got, ",") != "Basics,Meta,Derive,List,Maybe,IO,IO,B,A,Z,Main" {
 		t.Fatalf("order %v", got)
 	}
 	if r.Entry != "Main.main" {
@@ -155,11 +155,11 @@ func TestBundledModules(t *testing.T) {
 	for _, m := range r.Manifest {
 		got = append(got, m.Module+":"+m.Path)
 	}
-	want := "Basics:<stdlib>/Basics.fango,Meta:<stdlib>/Meta.fango,Derive:<stdlib>/Derive.fango,List:<stdlib>/List.fango,Maybe:<stdlib>/Maybe.fango,IO:<stdlib>/IO.fango,Range:<stdlib>/Range.fango,Main:Main.fango"
+	want := "Basics:<stdlib>/Basics.fango,Meta:<stdlib>/Meta.fango,Derive:<stdlib>/Derive.fango,List:<stdlib>/List.fango,Maybe:<stdlib>/Maybe.fango,IO:<stdlib>/IO.fango,IO:<stdlib>/IO.native.go,Range:<stdlib>/Range.fango,Main:Main.fango"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("manifest = %v, want %s", got, want)
 	}
-	if f := r.Fixity.Lookup("+"); f.Prec != 6 || f.Assoc != ast.AssocLeft || len(r.Natives) != 0 {
+	if f := r.Fixity.Lookup("+"); f.Prec != 6 || f.Assoc != ast.AssocLeft || len(r.Natives) != 1 {
 		t.Fatalf("declared native metadata: fixity of (+)=%v %d natives=%v", f.Assoc, f.Prec, r.Natives)
 	}
 }
@@ -176,6 +176,7 @@ func TestBundledPureNativeSidecars(t *testing.T) {
 		got = append(got, native.Module+":"+native.Path)
 	}
 	want := []string{
+		"IO:<stdlib>/IO.native.go",
 		"Random:<stdlib>/Random.native.go",
 		"String:<stdlib>/String.native.go",
 		"Json:<stdlib>/Json.native.go",
@@ -215,7 +216,11 @@ func TestNativeSidecarValidation(t *testing.T) {
 		if len(errs) > 0 {
 			t.Fatalf("Load: %v", errs)
 		}
-		if len(r.Natives) != 1 || r.Natives[0].Module != "Hash" {
+		found := false
+		for _, native := range r.Natives {
+			found = found || native.Module == "Hash"
+		}
+		if !found {
 			t.Fatalf("native sources: %#v", r.Natives)
 		}
 	})
@@ -244,24 +249,17 @@ func TestNativeSidecarValidation(t *testing.T) {
 	}
 }
 
-func TestBundledCallNativeRequiresInterpreterRegistration(t *testing.T) {
-	f := source.NewFile("Missing.fango", []byte("module Missing exposing (value)\nvalue : Int -> Int\nvalue = native\n"))
-	m, errs := parse(f)
-	if len(errs) > 0 {
-		t.Fatalf("parse: %v", errs)
+func TestNativeEffectAndReservedHostValidation(t *testing.T) {
+	d := t.TempDir()
+	entry := write(t, d, "Main.fango", "module Main exposing (main)\neffect Clock\n    tick : () -> Int = native\nmain = tick()\n")
+	write(t, d, "Main.native.go", "package native\nfunc Tick() int64 { return 42 }\n")
+	if _, errs := Load(entry); len(errs) > 0 {
+		t.Fatalf("native effect: %v", errs)
 	}
-	n := &node{
-		name:         "Missing",
-		path:         "<stdlib>/Missing.fango",
-		mod:          m,
-		bundled:      true,
-		nativePath:   "<stdlib>/Missing.native.go",
-		native:       []byte("package native\nfunc Value(x int64) int64 { return x }\n"),
-		nativeModule: "Missing",
-	}
-	errs = validateModuleDecls(n)
-	if len(errs) == 0 || errs[0].Title != "INVALID BUNDLED NATIVE" {
-		t.Fatalf("errors: %#v", errs)
+	write(t, d, "Main.native.go", "package native\nvar FangoHost any\nfunc Tick() int64 { return 42 }\n")
+	_, errs := Load(entry)
+	if len(errs) == 0 || errs[0].Title != "RESERVED NATIVE IDENTIFIER" {
+		t.Fatalf("reserved host errors: %#v", errs)
 	}
 }
 

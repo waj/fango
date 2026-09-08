@@ -5,88 +5,12 @@
 package fangort
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 )
-
-// HasInputFrom blocks until input or clean EOF can be distinguished without
-// consuming the first byte.
-func HasInputFrom(r *bufio.Reader) (bool, error) {
-	_, err := r.Peek(1)
-	if err == io.EOF {
-		return false, nil
-	}
-	return err == nil, err
-}
-
-// ReadRawLineFrom reads through LF and preserves the exact terminator. EOF
-// after data returns that unterminated final line.
-func ReadRawLineFrom(r *bufio.Reader) (string, error) {
-	s, err := r.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return "", err
-	}
-	return strings.ToValidUTF8(s, "\uFFFD"), nil
-}
-
-func LineEnding(s string) string {
-	if strings.HasSuffix(s, "\r\n") {
-		return "\r\n"
-	}
-	if strings.HasSuffix(s, "\n") {
-		return "\n"
-	}
-	return ""
-}
-
-func LineText(s string) string { return strings.TrimSuffix(s, LineEnding(s)) }
-
-// ReadLineFrom retains the former Go helper behavior for callers outside the
-// Fango API.
-func ReadLineFrom(r *bufio.Reader) (string, error) {
-	s, err := ReadRawLineFrom(r)
-	if err != nil {
-		return "", err
-	}
-	return LineText(s), nil
-}
-
-var stdin = bufio.NewReader(os.Stdin)
-
-func ReadLine() string {
-	s, err := ReadLineFrom(stdin)
-	if err != nil {
-		panic(err)
-	}
-	return s
-}
-
-// ReadLineUnit is the declaration-template adapter for Fango's explicit Unit
-// argument. Keeping the argument in the generated call preserves strict
-// evaluation when readLine is applied to a non-atomic Unit expression.
-func ReadLineUnit(_ Unit) string { return ReadLine() }
-
-func HasInputUnit(_ Unit) bool {
-	ok, err := HasInputFrom(stdin)
-	if err != nil {
-		panic(err)
-	}
-	return ok
-}
-
-func ReadRawLineUnit(_ Unit) string {
-	s, err := ReadRawLineFrom(stdin)
-	if err != nil {
-		panic(err)
-	}
-	return s
-}
 
 // Unit is the shared represented form of Fango's Unit type. Direct concrete
 // worker and operation boundaries erase Unit, but package boundaries that
@@ -220,60 +144,3 @@ func PrintFloat(v float64) { fmt.Println(ShowFloat(v)) }
 func PrintString(v string) { fmt.Println(ShowString(v)) }
 func PrintChar(v rune)     { fmt.Println(ShowChar(v)) }
 func PrintBool(v bool)     { fmt.Println(ShowBool(v)) }
-
-// WriteStringTo writes a String verbatim without adding a line ending.
-func WriteStringTo(w io.Writer, v string) error {
-	_, err := io.WriteString(w, v)
-	return err
-}
-
-// WriteString is the compiled backend implementation of IO.write.
-func WriteString(v string) {
-	if err := WriteStringTo(os.Stdout, v); err != nil {
-		panic(err)
-	}
-}
-
-// ProgramArgs exposes arguments after argv[0].
-func ProgramArgs() []string { return os.Args[1:] }
-
-func ArgCountUnit(_ Unit) int64 { return int64(len(ProgramArgs())) }
-
-func ArgAt(index int64) string {
-	args := ProgramArgs()
-	if index < 0 || index >= int64(len(args)) {
-		panic(fmt.Sprintf("argument index %d is out of range", index))
-	}
-	return args[index]
-}
-
-func PathExists(path string) bool {
-	_, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return false
-	}
-	if err != nil {
-		panic(err)
-	}
-	return true
-}
-
-func ReadFileText(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		panic(err)
-	}
-	return strings.ToValidUTF8(string(data), "\uFFFD")
-}
-
-func WriteFileText(path, text string) Unit {
-	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
-		panic(err)
-	}
-	return UnitValue
-}
-
-func Exit(code int64) Unit {
-	os.Exit(int(code))
-	return UnitValue
-}
