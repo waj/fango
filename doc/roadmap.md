@@ -11,8 +11,9 @@ the archive.
 Continue selecting APIs from concrete programs rather than attempting broad
 coverage.
 
-- Add `Result`, and expand `List`, text, numeric, and IO operations only as
-  subsequent examples require them.
+- Expand `List`, text, numeric, and IO operations as subsequent examples require
+  them. `Result` and structured IO failures are coordinated in the
+  [effects roadmap](roadmap-effects.md#e4-abort-only-effects-result-and-statefailure-composition).
 - Strings use valid UTF-8 storage and Unicode-scalar `Char`, indexing, and
   length. Normalization, grapheme segmentation, and Unicode-aware word or case
   operations remain deferred until an example requires them.
@@ -102,15 +103,19 @@ Haskell's ambient reification, which is what breaks modularity there.
   cannot be confused with old values or closures.
 - Decide dependency invalidation and whether removed declarations remain
   addressable by existing closures only.
-- Connect Ctrl-C to evaluator cancellation without corrupting the session or
-  consuming input intended for `readLine`.
+- Connect Ctrl-C to the cleanup and cancellation protocol in
+  [effects E9](roadmap-effects.md#e9-structured-async-cancellation-and-repl-integration)
+  without corrupting the session or consuming input intended for `readLine`.
+  Basic prompt cancellation may ship earlier once its active execution path
+  has the corresponding cleanup guarantees.
 - Add transcript coverage for load/reload, cross-generation errors,
   cancellation, handler interaction, and recovery after failures.
 
 ## Product polish
 
 - Improve diagnostic specificity and source presentation, especially for row
-  inclusion and handler restrictions.
+  inclusion. Resume-discipline diagnostics are owned by
+  [effects E0](roadmap-effects.md#e0-prove-the-existing-resume-discipline).
 - Add interactive editing and persistent history to the REPL.
 - Expand introductory and task-oriented documentation without duplicating the
   normative reference.
@@ -146,45 +151,35 @@ program that needs it:
 - A diagnostic (or LSP hint) when a loop-shaped function narrowly misses
   eligibility — e.g. via the capture exclusion — is open tooling territory.
 
-## General and aborting handlers
+## Effects, state, and resource scopes
 
-Resume this work when a concrete language feature needs early exit, non-tail
-resumption, or escaping continuations. The runtime foundation exists, but the
-compiler and interpreter integration should not grow ahead of a consumer.
-A second concrete consumer is parameterized handler state (state threaded
-through `resume`): it would let `Random.runSeeded` be a pure-fango state
-handler instead of advancing a native PRNG cell.
+[roadmap-effects.md](roadmap-effects.md) owns the detailed milestones, proposed
+examples, compiler representations, static checks, and delivery gates. Two
+requirements govern that work: effects compile to ordinary calls or explicit
+state machines without goroutine-based continuations or stack-copy capture;
+resume discipline is enforced at compile time.
 
-- Permit aborting operation clauses and non-tail continuation use with precise
-  one-shot and liveness checks, and choose the fango surface spelling for
-  explicit continuation abandonment.
-- Support operation-local and result polymorphism through inference,
-  elaboration, generated Go, and the interpreter.
-- Preserve deterministic evidence passing and lexical restoration across
-  nested handlers, closures, translations, and return clauses.
-- Define and test cancellation/liveness behavior. Add goroutine-leak tests and
-  prove every completion, abort, error, and cancellation path releases any
-  continuation runtime resources.
-- Keep the current direct, allocation-light tail-resumptive path where it
-  remains valid; use benchmark evidence before changing its representation.
+Start by proving the existing tail-resumptive discipline, then add scoped
+evidence and parameterized State handlers. Introduce control-aware calling
+conventions before abort-only effects and generic cleanup scopes. Resource
+management is exposed through ordinary `Scope.bracket`/`withFile` calls rather
+than requiring new cleanup syntax. These increments can ship without suspension.
 
-Open decisions include the motivating first use case, the surface spelling and
-semantics of continuation abandonment, and diagnostics for invalid liveness
-transitions.
+The same roadmap owns retirement of the dormant general-handler engine,
+per-handler Random state, `Result`, structured IO failures, resource/native ABI
+work, and the open decisions for operation polymorphism and builtin IO handling.
+Owned iterators, scoped non-tail resumption, structured async, and cancellation
+are later milestones, gated by a concrete consumer and static ownership checks.
 
 ## Longer-term candidates
 
 These are directions, not commitments or an ordering after the work above.
 
-- Structured concurrency built on effects: nursery scope, futures,
-  cancellation, channels, and select semantics.
 - Extend the deliberately narrow Go sidecar FFI only from concrete needs:
   richer safe boundary types and richer panic/error translation remain open.
 - Add a CLI path for loading and reloading module graphs in `fango repl`; the
   interpreter's native worker already accepts user sidecars, but the current
   REPL still starts from bundled modules only.
-- Replace panic-based failures in `IO` with explicit `Result` values once error
-  types and a compatible standard-library API are designed.
 - Transparent aliases, including whether aliases can abbreviate effect rows.
 - Extend nominal records to inline record payloads on variant constructors
   when an example needs named fields on one alternative; the surface syntax,
