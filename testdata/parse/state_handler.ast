@@ -1,0 +1,3 @@
+(module
+  (effect Cell (params s) (op get (-> () s)) (op put (-> s ())))
+  (def run (params initial action) (handle (app (var action) (unit)) (state current (var initial)) (clause get (params ()) (app (resume-with (var current)) (var current))) (clause put (params next) (app (resume-with (var next)) (unit))) (return value (var value)))))

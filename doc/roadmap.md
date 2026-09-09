@@ -158,14 +158,14 @@ requirements govern that work: effects compile to ordinary calls or explicit
 state machines without goroutine-based continuations or stack-copy capture;
 resume discipline is enforced at compile time.
 
-The existing tail-resumptive discipline is proved in source checking and Core,
-and scoped capture metadata is checked during elaboration and again in Core.
-Next add parameterized State handlers. Introduce control-aware calling
+The tail-resumptive discipline and parameterized State handlers are proved in
+source checking and Core, and scoped capture metadata is checked during
+elaboration and again in Core. Next introduce control-aware calling
 conventions before abort-only effects and generic cleanup scopes. Resource
 management is exposed through ordinary `Scope.bracket`/`withFile` calls rather
 than requiring new cleanup syntax. These increments can ship without suspension.
 
-The same roadmap owns per-handler Random state, `Result`, structured IO failures, resource/native ABI
+The same roadmap owns `Result`, structured IO failures, resource/native ABI
 work, and the open decisions for operation polymorphism and builtin IO handling.
 Owned iterators, scoped non-tail resumption, structured async, and cancellation
 are later milestones, gated by a concrete consumer and static ownership checks.

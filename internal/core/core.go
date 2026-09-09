@@ -110,8 +110,14 @@ type ReturnClause struct {
 	Param string
 	Body  Expr
 }
+type HandlerState struct {
+	Name    string
+	Initial Expr
+	Ty      types.Type
+}
 type Handle struct {
 	Body    Expr
+	State   *HandlerState
 	Effect  EffectInstance
 	Scope   types.ScopeID
 	Scoped  bool
@@ -122,6 +128,7 @@ type Handle struct {
 type ResumeTail struct {
 	Owner        types.ResumeID
 	Value        Expr
+	NextState    Expr
 	ClauseResult types.Type
 }
 type Seq struct {
@@ -348,6 +355,9 @@ func Mentions(e Expr, name string) bool {
 		}
 		return false
 	case *Handle:
+		if e.State != nil && Mentions(e.State.Initial, name) {
+			return true
+		}
 		if Mentions(e.Body, name) {
 			return true
 		}
@@ -358,7 +368,7 @@ func Mentions(e Expr, name string) bool {
 		}
 		return e.Return != nil && Mentions(e.Return.Body, name)
 	case *ResumeTail:
-		return Mentions(e.Value, name)
+		return Mentions(e.Value, name) || Mentions(e.NextState, name)
 	case *Seq:
 		return Mentions(e.First, name) || Mentions(e.Then, name)
 	case *Let:

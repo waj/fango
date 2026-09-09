@@ -13,8 +13,8 @@ and invariants into design/reference and remove the completed work here. Do not
 turn this file into an implementation diary.
 
 Fango snippets illustrate intended programs. Unless explicitly described as an
-existing reproducer, they may use proposed APIs. State-handler notation and
-control/ownership annotations are marked as provisional. Go and Core snippets
+existing reproducer, they may use proposed APIs. Control/ownership annotations
+are marked as provisional. Go and Core snippets
 are representation sketches, not exact generated identifiers or code to paste
 into the implementation. Examples omit routine module imports where appropriate.
 
@@ -77,7 +77,6 @@ Consequences:
 | --- | --- |
 | Preserve direct evidence passing | Fits the current typed Go ABI; avoids search and continuation allocation (P). |
 | Default clauses end in exactly one tail resume | Makes continuation materialization unnecessary and admits a local structural proof (P, S). |
-| Add state parameters to handlers | Express State/Writer/Random without general continuations or global native cells (P). |
 | Check captures and scope identities before erasure | Prevent hidden state/resource access from escaping behind closures or generic values (S). |
 | Distinguish abort-only effects from resumptive effects | Gives exception ordering without executing a handler before its inner scopes unwind (P, S). |
 | Track control transport through evidence and arrows | A callback or handler clause can abort/suspend even if its visible operation returns normally (P, S). |
@@ -131,7 +130,7 @@ the implemented tail-resume discipline with compiler-only clause identities.
 | Existing loops | `internal/codegen/tailloop.go`, `internal/eval/tailloop.go`; shared eligibility predicate |
 | Interpreter | `internal/eval/eval.go`; explicit evidence environment, no general continuation execution |
 | Runtime distribution | `internal/runtimefiles/`, build materialization, `runtime/nativeworker/`, `runtime/nativewire/` |
-| Concrete State consumer | `stdlib/Random.fango`, `Random.native.go`; currently a process-global PRNG cell |
+| Concrete State consumers | Bundled `State`, `Writer`, and handler-local seeded `Random` are implemented; extend their checked Core contracts |
 | Host effects / FFI | `stdlib/IO.fango`, `IO.native.go`, `internal/natives/`, native declaration validation and worker protocol |
 | Verification | `cmd/fango/e2e_test.go`, `testdata/run`, Core/checker goldens, REPL tests, `benchmarks/` |
 | Editor surface | `editors/vscode/syntaxes/fango.tmLanguage.json`, `language-configuration.json` |
@@ -159,167 +158,20 @@ prefix elaboration or an interpreter-only convenience path.
 
 | Milestone | Depends on | Shippable result |
 | --- | --- | --- |
-| E2: parameterized tail-resumptive state | Scoped capture Core | State, Writer, seeded Random, stateful examples |
 | E3: control-aware calls and callback ABIs | Proven tail-resume and scoped capture Core | Stable direct/exit transport and higher-order calls |
-| E4: abort-only effects and Result | E3 | Failure handlers; integrate E2 for State/failure examples |
+| E4: abort-only effects and Result | E3 | Failure handlers; integrate implemented State for State/failure examples |
 | E5: synchronous cleanup scopes | Scoped capture Core, E4 | `Scope.bracket` / `finally`, generic cleanup across exits |
 | E6: resource APIs and native error boundaries | E5 | Useful file/resource examples and structured IO failures |
 | E7: selective execution machines | E3, E5 | Internal one-shot suspension and cleanup frames |
 | E8: owned iterators and scoped non-tail handlers | Scoped capture Core, E7 | Pull traversal and checked non-tail resumption |
 | E9: structured async and cancellation | E6, E8 | Cooperative tasks, cancellation, nursery cleanup |
 
-E2 and E3 can be developed as independent increments after their prerequisites,
-but no implementation should erase information the other needs. E2 forms a
-useful release with no new non-local control flow. E2–E6 form a useful release
-with state, exceptions, and resources but no general continuation objects.
+E3 builds on the shipped tail-resume and scoped-state Core without changing
+their direct fast path. E3–E6 form a useful release with state, exceptions, and
+resources but no general continuation objects.
 E7–E9 are explicitly deferred until a concrete suspension consumer warrants
 their compiler and type-system cost. No milestone requires implementing the
 whole table at once.
-
-## E2. Parameterized tail-resumptive handlers
-
-### Deliverable and proposed surface
-
-Implement State first, then move deterministic Random state into each handler
-activation. State is not a reason to enable non-tail resume: explicit handler
-parameters preserve the P fast path.
-
-The following state notation is a candidate, not accepted syntax. Resolve it
-with parser experiments before implementation; retain the semantics below even
-if the spelling changes. `with` here would be contextual, and the state binder
-is visible in operation and return clauses, not the handled body.
-
-```fango
-effect State s
-    get : () -> s
-    put : s -> ()
-
-type StateResult s a = { value : a, state : s }
-
-runState initial action =
-    handle action() with current = initial of
-        get () -> resume current with current
-        put next -> resume () with next
-        return value -> StateResult { value = value, state = current }
-
-incrementAndSum() =
-    before = get()
-    put (before + 1)
-    after = get()
-    before + after
-
-main() =
-    result = runState 10 incrementAndSum
-    print result.value
-    print result.state
-```
-
-Expected output is `21` and `11`. Start with one handler parameter; a nominal
-record can carry several fields. Avoid committing to a multi-parameter resume
-syntax before one state value has a consumer.
-
-The user-level type shape is:
-
-```text
-runState : s -> (() ->{State s | e} a) ->{e} StateResult s a
-```
-
-The capture checker adds hidden scope/capture obligations; this ordinary-looking type alone
-does not prove local-cell non-escape.
-
-### Semantics and lowering
-
-1. Evaluate initial state once before entering the handled body.
-2. Each clause receives a snapshot binding for its current state. Ordinary
-   source bindings remain immutable; the compiler owns the changing cell.
-3. Evaluate the operation result and next-state expressions left to right,
-   exactly once, under the clause's outer evidence environment.
-4. Commit the next state immediately before the successful tail resume.
-   If evaluation exits before that point, do not commit an unevaluated update.
-5. Subsequent operations see the committed state. The return clause sees the
-   final state once, after normal body completion.
-
-Conceptual operation implementation:
-
-```text
-clause(arguments, stateSnapshot) -> (operationResult, nextState)
-```
-
-Illustrative direct Go ABI, with Unit erased at operation boundaries:
-
-```go
-type StateEvidence[S any] struct {
-    Get func() S
-    Put func(S)
-}
-
-func runState[S, A any](initial S, body func(StateEvidence[S]) A) StateResult[S, A] {
-    current := initial
-    ev := StateEvidence[S]{
-        Get: func() S { return current },
-        Put: func(next S) { current = next },
-    }
-    value := body(ev)
-    return StateResult[S, A]{Value: value, State: current}
-}
-```
-
-There is no continuation. The body continues when `Get` or `Put` returns.
-Closure/cell allocations, if any, belong to handler setup, not each operation.
-Do not promise stack allocation through an unknown Go function value. Optional
-specialization can use an explicit `*StateCell[S]` environment and known
-workers, or inline accesses; benchmark before making that representation
-mandatory. Never use a process-global current-state pointer.
-
-Nested handlers allocate distinct cells even with identical `State Int` types.
-Same-label forwarding inside a clause resolves to outer evidence. Explicit
-simultaneous access to two independent instances is a later named-capability
-design; nominal labels alone do not supply it.
-
-E3 must subsequently allow a State clause to invoke aborting outer evidence.
-Tail-resumptive discipline describes its use of resume, not a guarantee that
-every operation callback can use a plain-return ABI under every interpretation.
-
-### Consumers and implementation tasks
-
-- Add `State` and `StateResult` as ordinary bundled definitions where possible.
-  Handler state is a compiler feature; the operations themselves need no native
-  implementation.
-- Implement Writer using an immutable accumulator initially. A private mutable
-  Go builder is a later representation optimization that needs an ownership
-  proof before returning its contents.
-- Rewrite `Random.runSeeded` to carry the PRNG state in the handler; preserve
-  the existing deterministic algorithm, inclusive/reversed range behavior,
-  and golden output. Keep entropy acquisition separate in `runSystem`.
-- Remove the process-global `SwapSeed`/advance machinery only when both
-  backends can use the replacement. Audit the native registry, worker protocol,
-  and staging exception that currently rejects process-state-observing Random.
-  Deterministic seeded computation can become stage-safe after that audit;
-  system entropy must not become compile-time observable accidentally.
-- Update AST/checker state binding, handler metadata, Core state cell/parameter
-  representation, clause termination, interpreter evidence, and Go emission.
-- Preserve state snapshots captured by legal local closures; a reference to a
-  mutable Go parameter must not change the meaning of a source snapshot. Apply
-  the existing tail-loop capture discipline to the new environment as well.
-
-### Examples and acceptance
-
-Build a running counter, Writer-based diagnostic collector, deterministic
-guessing-game test, and a small evaluator with an environment and state. Verify
-nested seeded runs do not disturb outer draws. Once E4 permits abandonment,
-verify that discarding an inner local state does not implicitly commit it to
-the outer cell; explicitly forwarded outer effects still have their specified
-observable consequences. Test parameterized ADT state, callback traversals,
-grouped operation patterns, and state expressions with residual effects.
-
-Benchmark many `get`/`put` pairs separately from handler setup: direct operations
-must add no allocations proportional to operation count. Retain the full
-existing runtime and compile-latency benchmark gates. Update the TextMate
-grammar and tokenize representative fixtures if state syntax is introduced.
-
-At this milestone's completion, correct the reference's statement that tail
-resumption itself prevents state: the old limitation was absence of handler
-parameters, not the tail-resumptive execution strategy.
 
 ## E3. Control-aware calls and stable callback ABIs
 
@@ -548,8 +400,9 @@ that keep normal results unboxed and measure whether failure payloads allocate.
 
 ### State and transaction examples
 
-With E2, implement a parser carrying its cursor in State and failing with a
-structured parse error. Use nested handlers to make state visibility explicit:
+Using the implemented State runner, implement a parser carrying its cursor in
+State and failing with a structured parse error. Use nested handlers to make
+state visibility explicit:
 
 ```text
 runState initial (attempt action)
@@ -860,7 +713,7 @@ worker process infrastructure is not a suspended Fango continuation engine.
 
 Build the internal suspension backend with private Core fixtures first. Do not
 enable source-level general resume merely because the machine can run it.
-E8 supplies its static ownership contract. E2–E6 remain useful without E7.
+E8 supplies its static ownership contract. State and E3–E6 remain useful without E7.
 
 Use an ANF-to-control-flow lowering, optionally expressed through selective CPS
 internally, followed by defunctionalization. Emitting chains of Go closures
@@ -1285,8 +1138,8 @@ numbers from another language's native backend as a Fango performance promise.
 | Use case | Earliest support / limitation |
 | --- | --- |
 | Reader/configuration, direct effect translation | Existing proved direct path |
-| State, Writer, per-run deterministic Random | E2, with scoped capture checking |
-| Local memoization | E2; cache pure computations or explicitly define skipped-effect semantics |
+| State, Writer, per-run deterministic Random | Implemented, with scoped capture checking |
+| Local memoization | State is implemented; cache pure computations or explicitly define skipped-effect semantics |
 | Failure, early return, parser alternatives | E4; fresh attempts, no continuation cloning |
 | Scoped files, locks, temporary resources | E5 mechanism, E6 concrete APIs |
 | State rollback | E4 with private immutable state; not automatic external rollback |
@@ -1310,9 +1163,6 @@ attempts. Do not describe all nondeterministic algorithms as impossible.
 
 These are bounded open decisions for their named milestones.
 
-- **E2 state spelling:** finalize contextual binder/resume syntax, evaluation
-  order, and diagnostic spans. One record-valued parameter is sufficient
-  initially. No state-syntax choice implies a need for cleanup syntax.
 - **E3 ABI families:** validate the joined-mode strategy against recursive
   higher-order functions and per-module determinism. Document exactly when a
   Direct/Exit adapter is generated and what metadata survives erasure.
@@ -1342,7 +1192,7 @@ These are bounded open decisions for their named milestones.
 - **Multiple named instances:** distinct activation identities are already
   required internally. Public named State instances, resource-addressed
   operations, and duplicate labels in rows need separate resolution/row rules.
-  Do not introduce them incidentally while implementing E2 nesting.
+  Do not introduce them incidentally through existing nested handlers.
 - **E8 ownership surface:** start with scoped combinators; freeze any consuming
   iterator/task API before permitting escape of owning computation objects.
   Scoped non-tail resume and moving an owned machine are different features.

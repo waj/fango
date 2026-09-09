@@ -167,7 +167,11 @@ func VerifyResumeStructure(e Expr) []error {
 				} else {
 					l.resumeIDs[c.ResumeID] = true
 				}
-				l.tailResume(c.Body, c.ResumeID, c.ResultType, x.Ty, "handler clause")
+				var state types.Type
+				if x.State != nil {
+					state = x.State.Ty
+				}
+				l.tailResume(c.Body, c.ResumeID, c.ResultType, x.Ty, state, "handler clause")
 			}
 		case *ResumeTail:
 			resumes = append(resumes, x)
@@ -199,6 +203,7 @@ type linter struct {
 	resumeIDs        map[types.ResumeID]bool
 	resumeArg        types.Type
 	resumeRet        types.Type
+	resumeState      types.Type
 	errs             []error
 }
 
@@ -436,6 +441,16 @@ func (l *linter) expr(e Expr, where string) {
 			}
 		}
 		l.expr(e.Value, where)
+		if l.resumeState == nil && e.NextState != nil {
+			l.errorf("%s: stateless ResumeTail has a next state", where)
+		} else if l.resumeState != nil && e.NextState == nil {
+			l.errorf("%s: stateful ResumeTail has no next state", where)
+		} else if e.NextState != nil {
+			if !types.Equal(e.NextState.Type(), l.resumeState) {
+				l.errorf("%s: next handler state typed %s, want %s", where, types.Show(e.NextState.Type()), types.Show(l.resumeState))
+			}
+			l.expr(e.NextState, where)
+		}
 	case *Seq:
 		if l.unique(e.First.Type()) != l.b.Unit.Unique {
 			l.errorf("%s: Seq first expression is not Unit", where)
@@ -447,6 +462,16 @@ func (l *linter) expr(e Expr, where string) {
 		l.expr(e.Then, where)
 	case *Handle:
 		l.effectInstance(e.Effect, where)
+		if e.State != nil {
+			if e.State.Name == "" || e.State.Ty == nil || e.State.Initial == nil {
+				l.errorf("%s: parameterized handler has incomplete state metadata", where)
+			} else {
+				if !types.Equal(e.State.Initial.Type(), e.State.Ty) {
+					l.errorf("%s: initial handler state typed %s, want %s", where, types.Show(e.State.Initial.Type()), types.Show(e.State.Ty))
+				}
+				l.expr(e.State.Initial, where)
+			}
+		}
 		if e.Scope == 0 || l.scopeIDs[e.Scope] {
 			l.errorf("%s: handler has invalid or reused scope identity %d", where, e.Scope)
 		}
@@ -454,7 +479,7 @@ func (l *linter) expr(e Expr, where string) {
 		if !types.EqualCaptures(e.Effect.Captures, types.ScopeCapture(e.Scope)) {
 			l.errorf("%s: handler evidence does not name its scope identity", where)
 		}
-		if eff := l.effects[e.Effect.Unique]; eff != nil && e.Scoped != eff.Scoped {
+		if eff := l.effects[e.Effect.Unique]; eff != nil && e.Scoped != (eff.Scoped || e.State != nil) {
 			l.errorf("%s: handler scoped policy disagrees with effect `%s`", where, eff.Name)
 		}
 		l.activeScopes[e.Scope] = true
@@ -498,6 +523,12 @@ func (l *linter) expr(e Expr, where string) {
 			if !types.Equal(c.Body.Type(), e.Ty) {
 				l.errorf("%s: handler clause `%s` body does not exactly match the handler type", where, c.Op.Name)
 			}
+			if e.State != nil {
+				if l.scope[e.State.Name] {
+					l.errorf("%s: handler state `%s` shadows", where, e.State.Name)
+				}
+				l.scope[e.State.Name] = true
+			}
 			for _, p := range c.Params {
 				if p != "_" && p != "()" {
 					if l.scope[p] {
@@ -513,13 +544,20 @@ func (l *linter) expr(e Expr, where string) {
 			} else {
 				l.resumeIDs[c.ResumeID] = true
 			}
-			l.tailResume(c.Body, c.ResumeID, opResult, e.Ty, where)
-			oldOwner, oldArg, oldRet := l.resumeOwner, l.resumeArg, l.resumeRet
-			l.resumeOwner, l.resumeArg, l.resumeRet = c.ResumeID, opResult, e.Ty
+			var state types.Type
+			if e.State != nil {
+				state = e.State.Ty
+			}
+			l.tailResume(c.Body, c.ResumeID, opResult, e.Ty, state, where)
+			oldOwner, oldArg, oldRet, oldState := l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState
+			l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = c.ResumeID, opResult, e.Ty, state
 			l.expr(c.Body, where)
-			l.resumeOwner, l.resumeArg, l.resumeRet = oldOwner, oldArg, oldRet
+			l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = oldOwner, oldArg, oldRet, oldState
 			for _, p := range c.Params {
 				delete(l.scope, p)
+			}
+			if e.State != nil {
+				delete(l.scope, e.State.Name)
 			}
 		}
 		if eff := l.effects[e.Effect.Unique]; eff != nil {
@@ -530,6 +568,9 @@ func (l *linter) expr(e Expr, where string) {
 			}
 		}
 		if e.Return != nil {
+			if e.State != nil {
+				l.scope[e.State.Name] = true
+			}
 			if e.Return.Param == "()" && l.unique(e.Body.Type()) != l.b.Unit.Unique {
 				l.errorf("%s: handler return clause uses () for a non-Unit result", where)
 			}
@@ -541,6 +582,9 @@ func (l *linter) expr(e Expr, where string) {
 				l.errorf("%s: handler return clause does not exactly match the handler type", where)
 			}
 			delete(l.scope, e.Return.Param)
+			if e.State != nil {
+				delete(l.scope, e.State.Name)
+			}
 		}
 	case *App:
 		switch e.CalleeKind {
@@ -714,7 +758,7 @@ func (l *linter) expr(e Expr, where string) {
 // tailResume independently proves the lowering contract consumed by both
 // backends. Only control-flow tails may contain the clause's ResumeTail; all
 // evaluated operands must be free of that owner.
-func (l *linter) tailResume(e Expr, owner types.ResumeID, arg, result types.Type, where string) {
+func (l *linter) tailResume(e Expr, owner types.ResumeID, arg, result, state types.Type, where string) {
 	noResume := func(x Expr, slot string) bool {
 		if hasResumeOwner(x, owner) {
 			l.errorf("%s: NON-TAIL RESUME: clause owner %d occurs in %s", where, owner, slot)
@@ -732,11 +776,21 @@ func (l *linter) tailResume(e Expr, owner types.ResumeID, arg, result types.Type
 				return
 			}
 			noResume(x.Value, "a resume argument")
+			if x.NextState != nil {
+				noResume(x.NextState, "a next-state expression")
+			}
 			if !types.Equal(x.Value.Type(), arg) {
 				l.errorf("%s: ResumeTail argument typed %s, want %s", where, types.Show(x.Value.Type()), types.Show(arg))
 			}
 			if !types.Equal(x.ClauseResult, result) {
 				l.errorf("%s: ResumeTail clause result typed %s, want %s", where, types.Show(x.ClauseResult), types.Show(result))
+			}
+			if state == nil && x.NextState != nil {
+				l.errorf("%s: stateless clause owner %d supplies next state", where, owner)
+			} else if state != nil && x.NextState == nil {
+				l.errorf("%s: stateful clause owner %d omits next state", where, owner)
+			} else if x.NextState != nil && !types.Equal(x.NextState.Type(), state) {
+				l.errorf("%s: next state typed %s, want %s", where, types.Show(x.NextState.Type()), types.Show(state))
 			}
 		case *Let:
 			noResume(x.Rhs, "a Let right-hand side")

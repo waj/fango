@@ -234,12 +234,10 @@ func TestTodoExampleFailures(t *testing.T) {
 	}
 }
 
-// The Core interpreter runs fango programs inside this process, against the
-// same bundled-native globals a compiled program owns outright — the PRNG cell
-// behind Random above all, which is process-global by design because one
-// compiled program owns one process. A test binary hosting many programs
-// breaks that assumption, so interpreter legs take turns. The compiled leg,
-// where the time actually goes, stays parallel.
+// The Core interpreter runs fango programs inside this process and shares its
+// persistent native-worker host infrastructure across cases. Interpreter legs
+// therefore take turns; the compiled leg, where the time actually goes, stays
+// parallel. Handler-local Random state itself needs no serialization.
 var interpret sync.Mutex
 
 func runDifferentialCase(t *testing.T, path string) {
@@ -438,8 +436,8 @@ func TestProjectMaterializesBundledNativeSidecars(t *testing.T) {
 	}
 
 	files = emittedProject(t, filepath.Join("..", "..", "testdata", "run", "stdlib_random.fango"))
-	if src := generatedFile(t, files, "native/Random/native.go"); !bytes.Contains(src, []byte("func SwapSeed")) {
-		t.Errorf("Random sidecar did not contain its implementation:\n%s", src)
+	if src := generatedFile(t, files, "native/Random/native.go"); !bytes.Contains(src, []byte("func NextState")) || !bytes.Contains(src, []byte("func ValueAt")) || bytes.Contains(src, []byte("randomState")) {
+		t.Errorf("Random sidecar did not contain the pure state-transition implementation:\n%s", src)
 	}
 }
 

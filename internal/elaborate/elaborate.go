@@ -281,6 +281,8 @@ func captureDiagnostics(errs []error, ck *infer.Checker, fallback source.Span) [
 				sp = fallback
 			}
 			out = append(out, diag.Errorf(sp, "RESOURCE ESCAPES", "%s", escape.Detail()))
+		} else if _, ok := err.(core.StateResultEscapeError); ok {
+			out = append(out, diag.Errorf(fallback, "STATE RESULT ESCAPES", "%s", core.StateResultEscapeError{}.Detail()))
 		} else {
 			out = append(out, diag.Errorf(fallback, "CAPTURE CHECK ERROR", "%v", err))
 		}
@@ -873,8 +875,12 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 			pts[j] = el.zonkDefault(p)
 		}
 		var clauseBody core.Expr
+		pushed := 0
+		if e.State != nil {
+			el.pushScope(e.State.Name, el.zonkDefault(info.StateType))
+			pushed++
+		}
 		if len(cl.Equations) == 0 && plainPatterns(cl.Params) {
-			pushed := 0
 			for j, p := range cl.Params {
 				params[j] = handlerPatternParam(p)
 				if v, ok := p.(*ast.PVar); ok {
@@ -883,7 +889,6 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 				}
 			}
 			clauseBody = el.expr(cl.Body)
-			el.popScope(pushed)
 		} else {
 			occs := make([]occurrence, len(params))
 			for j := range params {
@@ -903,6 +908,7 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 			}
 			clauseBody = el.matchPatternRows(patterns, bodies, spans, occs, cl.OpSpan, "handler clause")
 		}
+		el.popScope(pushed)
 		clauses[i] = core.HandlerClause{Op: ci.Op, ResumeID: ci.ResumeID, Params: params, ParamTypes: pts,
 			ResultType: el.zonkDefault(ci.OpResult), Body: clauseBody}
 	}
@@ -911,10 +917,15 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 		bodyTy := el.zonkDefault(info.BodyResult)
 		name := corePatternParam(e.Return.Param)
 		var retBody core.Expr
+		pushed := 0
+		if e.State != nil {
+			el.pushScope(e.State.Name, el.zonkDefault(info.StateType))
+			pushed++
+		}
 		if v, ok := e.Return.Param.(*ast.PVar); ok && len(e.Return.Equations) == 0 {
 			el.pushScope(v.Name, bodyTy)
 			retBody = el.expr(e.Return.Body)
-			el.popScope(1)
+			pushed++
 		} else if plainPatterns([]ast.Pattern{e.Return.Param}) && len(e.Return.Equations) == 0 {
 			retBody = el.expr(e.Return.Body)
 		} else {
@@ -932,6 +943,7 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 			}
 			retBody = el.matchPatternRows(patterns, bodies, spans, []occurrence{{name: name, ty: bodyTy}}, e.Return.Sp, "handler return clause")
 		}
+		el.popScope(pushed)
 		ret = &core.ReturnClause{Param: name, Body: retBody}
 	}
 	inst := core.EffectInstance{Unique: info.Effect.Unique, Name: info.Effect.Name, Captures: types.ScopeCapture(info.Scope)}
@@ -941,7 +953,11 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 	el.pushEvidence([]core.EffectInstance{inst})
 	body := el.expr(e.Body)
 	el.popEvidence([]core.EffectInstance{inst})
-	return &core.Handle{Body: body, Effect: inst, Scope: info.Scope, Scoped: info.Scoped, Clauses: clauses, Return: ret, Ty: ty}
+	var state *core.HandlerState
+	if e.State != nil {
+		state = &core.HandlerState{Name: e.State.Name, Initial: el.expr(e.State.Initial), Ty: el.zonkDefault(info.StateType)}
+	}
+	return &core.Handle{Body: body, State: state, Effect: inst, Scope: info.Scope, Scoped: info.Scoped, Clauses: clauses, Return: ret, Ty: ty}
 }
 
 func hasRuntimeVars(s types.Scheme) bool {

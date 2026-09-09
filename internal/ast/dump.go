@@ -403,6 +403,9 @@ func DumpExpr(e Expr) string {
 	case *Handle:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(handle %s", DumpExpr(e.Body))
+		if e.State != nil {
+			fmt.Fprintf(&b, " (state %s %s)", e.State.Name, DumpExpr(e.State.Initial))
+		}
 		for _, clause := range e.Clauses {
 			if len(clause.Equations) > 0 {
 				fmt.Fprintf(&b, " (clause-group %s", clause.Op)
@@ -440,6 +443,9 @@ func DumpExpr(e Expr) string {
 		b.WriteString(")")
 		return b.String()
 	case *Resume:
+		if e.NextState != nil {
+			return fmt.Sprintf("(resume-with %s)", DumpExpr(e.NextState))
+		}
 		return "(resume)"
 	case *Quote:
 		return fmt.Sprintf("(quote %s)", DumpExpr(e.Body))

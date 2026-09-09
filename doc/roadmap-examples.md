@@ -20,8 +20,8 @@ Forces the core stdlib: strings, `Maybe`, list combinators.
 - [x] **Number-guessing game** — interactive higher/lower loop. Forced
   `Maybe`, `String.toInt`, and a `Random` effect with swappable
   seeded/system handlers (the game performs `Random.int` opaquely; the
-  handlers advance a native PRNG cell, since a pure-fango state handler
-  awaits parameterized handler state), plus loop-by-recursion ergonomics.
+  seeded handler advances handler-local state while the system handler only
+  obtains its initial seed from entropy), plus loop-by-recursion ergonomics.
 - [x] **Word/line/byte count (`wc` clone) over stdin** — pipe any text through
   it. Forced `readLine : () ->{IO} Maybe IO.Line` with exact terminators,
   ASCII-whitespace `String.words`, `String.byteLength`,

@@ -1,0 +1,6 @@
+effect Cell
+    get : () -> Int
+
+main() =
+    handle get() with current = 0 of
+        get () -> resume current

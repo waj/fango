@@ -110,6 +110,7 @@ type evidence struct {
 	handler *core.Handle
 	frame   *Frame
 	outer   map[int]*evidence
+	state   Value
 }
 
 // Env holds top-level cells and workers.
@@ -213,8 +214,8 @@ type interp struct {
 	steps    int
 
 	// compileTime restricts the interpreter to what a compiler may run: a
-	// step budget, and no native that observes process-global state or lives
-	// in a Go sidecar the interpreter cannot load (doc/design.md,
+	// step budget, and no native that observes external state or lives in a Go
+	// sidecar the interpreter cannot load (doc/design.md,
 	// "Compile-time metaprogramming").
 	compileTime bool
 	budget      int
@@ -370,7 +371,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		}
 		if spec, ok := natives.Lookup(e.Name); ok && !spec.Effect {
 			if in.compileTime && !spec.CompileTimeSafe {
-				return nil, &UnsafeNativeError{Name: e.Name, Reason: "observes process-global state the compiler shares"}
+				return nil, &UnsafeNativeError{Name: e.Name, Reason: "observes external or nondeterministic state"}
 			}
 			return spec.Eval(in.nativeRuntime(), args)
 		}
@@ -415,6 +416,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				return nil, fmt.Errorf("eval: handler missing operation `%s`", e.Op.Name)
 			}
 			vars := map[string]Value{}
+			if ev.handler.State != nil {
+				vars[ev.handler.State.Name] = ev.state
+			}
 			for i, p := range clause.Params {
 				if p != "_" && p != "()" {
 					vars[p] = args[i]
@@ -422,7 +426,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			saved := in.evidence
 			in.evidence = cloneEvidence(ev.outer)
-			v, err := in.evalResumeTail(clause.Body, &Frame{parent: ev.frame, vars: vars}, clause.ResumeID)
+			v, err := in.evalResumeTail(clause.Body, &Frame{parent: ev.frame, vars: vars}, clause.ResumeID, ev)
 			in.evidence = saved
 			return v, err
 		}
@@ -454,8 +458,17 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		}
 		return in.eval(e.Then, fr)
 	case *core.Handle:
+		var state Value
+		var err error
+		if e.State != nil {
+			state, err = in.eval(e.State.Initial, fr)
+			if err != nil {
+				return nil, err
+			}
+		}
 		outer := cloneEvidence(in.evidence)
-		in.evidence[e.Effect.Unique] = &evidence{handler: e, frame: fr, outer: outer}
+		in.evidence[e.Effect.Unique] = &evidence{handler: e, frame: fr, outer: outer, state: state}
+		installed := in.evidence[e.Effect.Unique]
 		v, err := in.eval(e.Body, fr)
 		in.evidence = outer
 		if err != nil {
@@ -465,6 +478,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			return v, nil
 		}
 		vars := map[string]Value{}
+		if e.State != nil {
+			vars[e.State.Name] = installed.state
+		}
 		if e.Return.Param != "_" && e.Return.Param != "()" {
 			vars[e.Return.Param] = v
 		}
@@ -574,13 +590,24 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 // evalResumeTail is the interpreter counterpart of codegen's clause emitter.
 // It accepts only the control skeleton proved by Core lint and returns the
 // operation result carried by the terminal ResumeTail.
-func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID) (Value, error) {
+func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID, ev *evidence) (Value, error) {
 	switch e := e.(type) {
 	case *core.ResumeTail:
 		if e.Owner != owner {
 			return nil, fmt.Errorf("eval: ResumeTail owner %d does not match handler clause %d", e.Owner, owner)
 		}
-		return in.eval(e.Value, fr)
+		value, err := in.eval(e.Value, fr)
+		if err != nil {
+			return nil, err
+		}
+		if e.NextState != nil {
+			next, err := in.eval(e.NextState, fr)
+			if err != nil {
+				return nil, err
+			}
+			ev.state = next
+		}
+		return value, nil
 	case *core.Let:
 		if e.Rec {
 			lam, ok := e.Rhs.(*core.Lambda)
@@ -589,27 +616,27 @@ func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID) (
 			}
 			frame := &Frame{parent: fr, vars: map[string]Value{}}
 			frame.vars[e.Name] = &Closure{Param: lam.Param, Body: lam.Body, Env: frame, Evidence: cloneEvidence(in.evidence)}
-			return in.evalResumeTail(e.Body, frame, owner)
+			return in.evalResumeTail(e.Body, frame, owner, ev)
 		}
 		v, err := in.eval(e.Rhs, fr)
 		if err != nil {
 			return nil, err
 		}
-		return in.evalResumeTail(e.Body, &Frame{parent: fr, vars: map[string]Value{e.Name: v}}, owner)
+		return in.evalResumeTail(e.Body, &Frame{parent: fr, vars: map[string]Value{e.Name: v}}, owner, ev)
 	case *core.Seq:
 		if _, err := in.eval(e.First, fr); err != nil {
 			return nil, err
 		}
-		return in.evalResumeTail(e.Then, fr, owner)
+		return in.evalResumeTail(e.Then, fr, owner, ev)
 	case *core.If:
 		cond, err := in.eval(e.Cond, fr)
 		if err != nil {
 			return nil, err
 		}
 		if cond.(bool) {
-			return in.evalResumeTail(e.Then, fr, owner)
+			return in.evalResumeTail(e.Then, fr, owner, ev)
 		}
-		return in.evalResumeTail(e.Else, fr, owner)
+		return in.evalResumeTail(e.Else, fr, owner, ev)
 	case *core.Case:
 		v, err := in.eval(e.Scrut, fr)
 		if err != nil {
@@ -617,7 +644,7 @@ func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID) (
 		}
 		frame := &Frame{parent: fr, vars: map[string]Value{e.Bind: v}}
 		return in.tree(e.Tree, frame, func(body core.Expr, leafFrame *Frame) (Value, error) {
-			return in.evalResumeTail(body, leafFrame, owner)
+			return in.evalResumeTail(body, leafFrame, owner, ev)
 		})
 	default:
 		return nil, fmt.Errorf("eval: non-tail-resumptive handler clause node %T", e)

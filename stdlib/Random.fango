@@ -3,31 +3,23 @@ module Random exposing (Random(..), int, runSeeded, runSystem)
 effect Random
     int : Int -> Int -> Int
 
--- The private natives share one PRNG cell in this module's sidecar; the handler
--- wrappers below swap and restore it so nested uses behave lexically.
+nextState : Int -> Int
+nextState = native
 
-swapSeed : Int -> Int
-swapSeed = native
-
-nextInt : Int -> Int -> Int
-nextInt = native
+valueAt : Int -> Int -> Int -> Int
+valueAt = native
 
 entropySeed : () -> Int
 entropySeed = native
 
 -- runSeeded answers every `int lo hi` draw from a deterministic generator
 -- started at seed: the same seed always produces the same draws. Under the
--- current tail-resumptive restriction a handler cannot carry state of its
--- own across resumes, so the state lives in the sidecar cell the natives
--- advance.
 runSeeded : Int -> (() ->{Random | e} a) ->{e} a
 runSeeded seed action =
-    old = swapSeed seed
-    result =
-        handle action() of
-            int lo hi -> resume (nextInt lo hi)
-    restored = swapSeed old
-    result
+    handle action() with current = seed of
+        int lo hi ->
+            next = nextState current
+            resume (valueAt next lo hi) with next
 
 -- runSystem answers draws from a system-entropy seed: a fresh sequence on
 -- every run.

@@ -36,7 +36,9 @@ const (
 // staged slice loops, generic tree build+fold (GC pressure) vs pointer
 // structs. strcat gates per-operation string overhead at the same
 // asymptotics; a strings.Builder-shaped baseline is the future arbiter for
-// builder-based derived display once display is user-callable.
+// builder-based derived display once display is user-callable. state compares
+// five million get/put pairs against the same closure-cell evidence shape in
+// handwritten Go, separating per-operation cost from one handler setup.
 //
 // Limits are measurement-informed ceilings (recorded ratios in parentheses):
 // where the baseline allocates like fango does, the 2–3× target holds with
@@ -58,6 +60,7 @@ var ratioCases = []struct {
 	{"mapfilter", "perf/mapfilter.fango", "perf/baseline/mapfilter", "26999100000\n", 4.5},
 	{"tree", "perf/tree.fango", "perf/baseline/tree", "42949017600\n", 3.0},
 	{"strcat", "perf/strcat.fango", "perf/baseline/strcat", "True\n", 3.0},
+	{"state", "perf/stateops.fango", "perf/baseline/state", "5000000\n", 2.5},
 }
 
 func TestRuntimeRatio(t *testing.T) {

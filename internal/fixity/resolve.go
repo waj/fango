@@ -176,6 +176,9 @@ func (r *resolver) expr(e ast.Expr) ast.Expr {
 		}
 	case *ast.Handle:
 		e.Body = r.expr(e.Body)
+		if e.State != nil {
+			e.State.Initial = r.expr(e.State.Initial)
+		}
 		for i := range e.Clauses {
 			e.Clauses[i].Body = r.expr(e.Clauses[i].Body)
 			for j := range e.Clauses[i].Equations {
@@ -203,8 +206,12 @@ func (r *resolver) expr(e ast.Expr) ast.Expr {
 		e.Body = r.expr(e.Body)
 	case *ast.Splice:
 		e.Operand = r.expr(e.Operand)
+	case *ast.Resume:
+		if e.NextState != nil {
+			e.NextState = r.expr(e.NextState)
+		}
 	case *ast.Var, *ast.Ctor, *ast.IntLit, *ast.FloatLit, *ast.StringLit,
-		*ast.CharLit, *ast.UnitLit, *ast.Resume, *ast.TypeOf:
+		*ast.CharLit, *ast.UnitLit, *ast.TypeOf:
 		// Leaves, or heads whose arguments arrive as App wrappers.
 	default:
 		panic(fmt.Sprintf("fixity: unhandled expression %T", e))

@@ -98,6 +98,17 @@ is currently rejected. These restrictions let both backends implement handlers
 with stack-local evidence and direct returns, without goroutines, channels,
 panic sentinels, or continuation objects.
 
+A handler may own one parameterized state cell. The initial expression runs
+once before evidence installation. Operation and return clauses receive an
+immutable snapshot binding; the handled body does not. A stateful tail resume
+evaluates its operation result and next state left to right, commits the update,
+then returns the operation result through the existing direct evidence call.
+Core keeps the state binder, initial expression, type, and every next-state
+expression until both lint and capture analysis have checked them. The
+interpreter stores the cell on its evidence activation; Go emission uses one
+closure-captured local per handler setup. Neither backend allocates or captures
+a continuation, and nested same-effect handlers own distinct cells.
+
 Every handler activation also has a compiler-only `ScopeID`. Evidence in Core
 therefore names both its nominal effect and the activation (or an abstract
 capture variable when a worker or lambda receives the evidence from its
@@ -118,8 +129,10 @@ capture-capable arguments. Concrete scalar and Unit results cannot carry a
 capture, and nominal ADT schemas are inspected transitively so ordinary
 synchronous traversals returning immutable data are admitted.
 
-Source-declared effects remain durable by default, preserving existing Reader
-closures. Compiler-owned state/resource APIs may mark evidence scoped, mark an
+Source-declared stateless effects remain durable by default, preserving
+existing Reader closures. A parameterized handler is scoped regardless of its
+nominal effect's default policy. Compiler-owned state/resource APIs may also
+mark evidence scoped, mark an
 operation result as borrowing its evidence, or mark an operation as retaining
 arguments. A scoped handler rejects a result that transitively retains its
 activation, including a closure hidden in an ADT or one passed through another
@@ -127,6 +140,10 @@ worker. A retaining operation also rejects storing an inner scoped capture in
 different evidence. Core lint independently recomputes summaries, checks
 scope introduction and exact evidence-stack availability, and repeats the
 non-escape proof after ANF, lifting, callback adaptation, and specialization.
+The bundled polymorphic State, Writer, and seeded-Random runners carry a hidden
+capture boundary: calls whose instantiated result can carry their local
+capability are conservatively rejected; immutable scalar and transitively
+capture-free ADT results are admitted.
 
 ## Compiler pipeline
 
@@ -456,13 +473,11 @@ evaluator and needs no reentrancy guard.
 Reproducibility is enforced rather than assumed. Compile-time code must type
 with an empty effect row, so "no IO during compilation" follows from the
 effect system. Beyond purity, the interpreter runs splices in a restricted
-mode: natives carry a compile-time-safe flag, and `Random` is the concrete
-exclusion — its draws are pure once `runSeeded` handles the effect away, but
-they advance its bundled sidecar's process-global PRNG cell, which the compiler
-shares with the program it is compiling. User Go sidecars are unavailable for
-the reason they always were: the interpreter cannot load Go. A step budget
-bounds evaluation. Together these keep generated Go byte-identical across
-builds.
+mode: natives carry a compile-time-safe flag. Seeded `Random` transitions are
+pure over handler-local state and are safe at compile time; system entropy is
+not. User Go sidecars are unavailable for the reason they always were: the
+interpreter cannot load Go. A step budget bounds evaluation. Together these
+keep generated Go byte-identical across builds.
 
 The bundled `Meta` module is a dependency only of files that use the syntax:
 the parser records whether it built a quote, splice, or `typeOf`, and the
@@ -658,9 +673,9 @@ are unchanged.
 formatting and the generic native-host contract.
 Module-specific native logic lives in the owning stdlib sidecar instead. In
 particular, `IO.native.go` owns IO operations and line semantics, while
-`Random.native.go` owns its process-global PRNG cell; the interpreter worker
-and each compiled program therefore have the same single-cell, per-process
-behavior and execute the same implementation.
+`Random.native.go` supplies pure PRNG transition/range functions and entropy
+acquisition. The changing deterministic seed belongs to each Fango handler
+activation rather than to a native process global.
 
 During ordinary interpretation, every call-form sidecar runs in one persistent
 native worker per sidecar set. Its protocol and execution loop are ordinary Go
@@ -748,16 +763,18 @@ linter runs in every batch compilation.
 
 The differential cases run in parallel, since each compiles into its own
 build directory and the compiled leg is subprocess work. Their interpreter
-legs are serialized against each other: hosting many programs in one process
-is the test harness's privilege, not a language capability, and the
-interpreter shares the same process-global worker state that a compiled program
-owns outright — the PRNG cell behind Random in particular.
+legs are serialized because native workers and host contexts are process-level
+test infrastructure. Handler-local State, Writer, and seeded Random
+activations themselves do not share mutable process state.
 
 Compile-latency benchmarks track cold and warm paths against recorded,
 machine-specific baselines. Runtime benchmarks compare representative scalar,
-match, string, list, and tree programs with handwritten Go and use per-case
-ratio ceilings. These measurements arbitrate representation or optimization
-work. Cons-list allocation remains the main known structural performance cost.
+match, string, list, tree, and repeated handler-state operations with
+handwritten Go and use per-case ratio ceilings. The State baseline uses the
+same one-cell/two-closure setup so its timed loop isolates per-operation
+overhead from handler setup. These measurements arbitrate representation or
+optimization work. Cons-list allocation remains the main known structural
+performance cost.
 
 Both gates assert on elapsed time, so neither is a correctness gate: a busy
 host fails them without anything having regressed. They live in their own

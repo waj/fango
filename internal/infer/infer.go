@@ -361,6 +361,7 @@ type HandlerInfo struct {
 	Scoped     bool
 	Result     types.Type
 	BodyResult types.Type
+	StateType  types.Type
 	Clauses    []HandlerClauseInfo
 }
 
@@ -1157,6 +1158,7 @@ type generator struct {
 	errs          []diag.Error
 	ambient       types.Row
 	resumeType    types.Type
+	resumeState   types.Type
 	resumeID      types.ResumeID
 	preds         []predObligation
 	records       []*recordObligation
@@ -1400,6 +1402,17 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			g.errs = append(g.errs, diag.Errorf(e.Sp, "RESUME OUTSIDE A HANDLER", "`resume` is only available inside an operation clause."))
 			ty = g.ck.Sup.FreshVar(types.General)
 		} else {
+			if e.NextState != nil {
+				if g.resumeState == nil {
+					g.errs = append(g.errs, diag.Errorf(e.NextState.Span(), "STATELESS RESUME", "`resume value with nextState` is only available in a parameterized handler."))
+					g.expr(e.NextState)
+				} else {
+					nextTy := g.exprWant(e.NextState, g.resumeState)
+					g.cs = append(g.cs, Constraint{Left: nextTy, Right: g.resumeState, Span: e.NextState.Span(), Why: Why{Kind: WhyCall}})
+				}
+			} else if g.resumeState != nil {
+				g.errs = append(g.errs, diag.Errorf(e.Sp, "MISSING NEXT STATE", "A parameterized handler must resume with its next state, like `resume value with current`."))
+			}
 			ty = g.resumeType
 			g.ck.ResumeOwners[e] = g.resumeID
 		}
@@ -1492,10 +1505,14 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	}
 	label := types.EffLabel{Unique: first.Owner.Unique, Name: first.Owner.Name, Args: labelArgs}
 	savedAmbient := g.ambient
+	var stateTy types.Type
+	if e.State != nil {
+		stateTy = g.expr(e.State.Initial)
+	}
 	g.ambient = types.Row{Labels: []types.EffLabel{label}, Tail: residualVar}
 	bodyTy := g.expr(e.Body)
 	g.ambient = residual
-	info := &HandlerInfo{Effect: label, Scope: g.ck.Sup.FreshScope(), Scoped: first.Owner.Scoped, Result: result, BodyResult: bodyTy}
+	info := &HandlerInfo{Effect: label, Scope: g.ck.Sup.FreshScope(), Scoped: first.Owner.Scoped || e.State != nil, Result: result, BodyResult: bodyTy, StateType: stateTy}
 	g.ck.ScopeSpans[info.Scope] = e.Sp
 	seen := map[string]bool{}
 	for i := range e.Clauses {
@@ -1544,6 +1561,13 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		for _, eq := range eqs {
 			scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
 			g.locals = scope
+			if e.State != nil {
+				if _, dup := scope.parent.lookup(e.State.Name); dup || g.ck.Env.Has(e.State.Name) {
+					g.errs = append(g.errs, diag.Errorf(e.State.NameSpan, "SHADOWING",
+						"The handler state `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", e.State.Name))
+				}
+				scope.names[e.State.Name] = types.Scheme{Body: stateTy}
+			}
 			oldPins := g.patternPins
 			g.patternPins = scope.parent
 			for j, p := range eq.Params {
@@ -1557,11 +1581,14 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			g.patternPins = oldPins
 			oldResume := g.resumeType
 			oldResumeID := g.resumeID
+			oldResumeState := g.resumeState
 			g.resumeType = &types.TFun{Arg: opResult, Eff: residual, Ret: result}
 			g.resumeID = resumeID
+			g.resumeState = stateTy
 			clTy := g.expr(eq.Body)
 			g.resumeType = oldResume
 			g.resumeID = oldResumeID
+			g.resumeState = oldResumeState
 			g.locals = scope.parent
 			g.cs = append(g.cs, Constraint{Left: clTy, Right: result, Span: eq.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
 			if failure := g.tailResume(resumeID, eq.Body, true); failure != nil {
@@ -1585,6 +1612,13 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		for _, eq := range eqs {
 			scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
 			g.locals = scope
+			if e.State != nil {
+				if _, dup := scope.parent.lookup(e.State.Name); dup || g.ck.Env.Has(e.State.Name) {
+					g.errs = append(g.errs, diag.Errorf(e.State.NameSpan, "SHADOWING",
+						"The handler state `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", e.State.Name))
+				}
+				scope.names[e.State.Name] = types.Scheme{Body: stateTy}
+			}
 			oldPins := g.patternPins
 			g.patternPins = scope.parent
 			patTy := g.pattern(eq.Params[0], scope)
@@ -1631,6 +1665,11 @@ func (g *generator) tailResume(owner types.ResumeID, e ast.Expr, tail bool) *res
 		if r, yes := a.Fn.(*ast.Resume); yes && g.ck.ResumeOwners[r] == owner {
 			if failure := g.tailResume(owner, a.Arg, false); failure != nil {
 				return failure
+			}
+			if r.NextState != nil {
+				if failure := g.tailResume(owner, r.NextState, false); failure != nil {
+					return failure
+				}
 			}
 			if !tail {
 				return &resumeFailure{"NON-TAIL RESUME", "`resume` must be the final action on every reachable clause path.", a.Span()}
@@ -1725,6 +1764,11 @@ func (g *generator) tailResume(owner types.ResumeID, e ast.Expr, tail bool) *res
 		if failure := nontail(x.Body); failure != nil {
 			return failure
 		}
+		if x.State != nil {
+			if failure := nontail(x.State.Initial); failure != nil {
+				return failure
+			}
+		}
 		for i := range x.Clauses {
 			cl := &x.Clauses[i]
 			if len(cl.Equations) == 0 {
@@ -1753,6 +1797,11 @@ func (g *generator) tailResume(owner types.ResumeID, e ast.Expr, tail bool) *res
 			}
 		}
 	case *ast.Resume:
+		if x.NextState != nil {
+			if failure := nontail(x.NextState); failure != nil {
+				return failure
+			}
+		}
 		if g.ck.ResumeOwners[x] == owner {
 			return &resumeFailure{"RESUME ESCAPES", "`resume` must be applied directly to exactly one value.", x.Sp}
 		}

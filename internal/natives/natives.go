@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/meta"
@@ -41,10 +40,8 @@ type Spec struct {
 	Foldable bool
 
 	// CompileTimeSafe permits the compiler's own evaluator to run this
-	// native while expanding a splice. Purity is not enough: `Random`'s
-	// draws are pure in the effect row after `runSeeded` handles them away,
-	// but they advance the bundled sidecar's process-global PRNG cell, which the
-	// compiler shares with the program it is compiling.
+	// native while expanding a splice. Entropy remains excluded; deterministic
+	// Random transitions are pure functions over handler-local state.
 	CompileTimeSafe bool
 
 	Eval func(*Runtime, []any) (any, error)
@@ -98,20 +95,20 @@ var Table = func() map[string]Spec {
 	t["IO.lineEnding"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return lineEnding(args[0].(string)), nil
 	}}
-	t["Random.swapSeed"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
-		return stdlib.SwapSeed(args[0].(int64)), nil
+	t["Random.nextState"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.NextState(args[0].(int64)), nil
 	}}
-	t["Random.nextInt"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
-		return stdlib.NextInt(args[0].(int64), args[1].(int64)), nil
+	t["Random.valueAt"] = Spec{Arity: 3, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.ValueAt(args[0].(int64), args[1].(int64), args[2].(int64)), nil
 	}}
 	t["Random.entropySeed"] = Spec{Arity: 1, Eval: func(_ *Runtime, _ []any) (any, error) {
 		return stdlib.EntropySeed(), nil
 	}}
 	// Bundled natives are compile-time-safe by default: they are pure
-	// functions of their arguments. Random is the exclusion — its draws read
-	// and advance a process-global cell the compiler shares.
+	// functions of their arguments. System entropy is Random's one exclusion;
+	// seeded draws now use explicit handler-local state.
 	for name, spec := range t {
-		spec.CompileTimeSafe = !spec.Effect && !strings.HasPrefix(name, "Random.")
+		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed"
 		t[name] = spec
 	}
 	return t

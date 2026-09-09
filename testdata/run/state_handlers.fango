@@ -1,0 +1,105 @@
+import State
+import Writer
+import List
+
+type Counter = { count : Int }
+
+type Expr = Lit Int | Add Expr Expr | Env
+
+counterProgram() =
+    before = State.get()
+    State.put (Counter { count = before.count + 1 })
+    after = State.get()
+    before.count + after.count
+
+writerProgram() =
+    Writer.tell "alpha"
+    Writer.tell "-beta"
+    7
+
+increment _ =
+    value = State.get()
+    State.put (value + 1)
+
+evaluate base expression =
+    steps = State.get()
+    State.put (steps + 1)
+    case expression of
+        Lit value -> value
+        Add left right -> evaluate base left + evaluate base right
+        Env -> base
+
+effect Flag
+    choose : Bool -> Int
+
+chooseBoth() = choose True + choose False
+
+runFlags action =
+    handle action() with count = 0 of
+        choose True -> resume count with count + 1
+        choose False -> resume 99 with count + 1
+        return value -> value + count
+
+effect Tick
+    tick : () -> ()
+
+logNext next =
+    print next
+    next
+
+ticks() =
+    tick()
+    tick()
+
+runTicks() =
+    handle ticks() with count = 0 of
+        tick () -> resume () with logNext (count + 1)
+        return _ -> count
+
+effect Order
+    draw : () -> Int
+
+mark label value =
+    print label
+    value
+
+runOrder() =
+    handle draw() with current = 0 of
+        draw () -> resume (mark "value" 7) with mark "state" 1
+        return value -> value + current
+
+type Saved = Saved (() -> Int)
+
+effect Snapshot
+    take : () -> Saved
+
+readSaved saved =
+    case saved of
+        Saved read -> read()
+
+useSnapshots() =
+    first = take()
+    second = take()
+    readSaved first + readSaved second
+
+runSnapshots() =
+    handle useSnapshots() with current = 3 of
+        take () -> resume (Saved (\_ -> current)) with current + 1
+        return value -> value + current
+
+main() =
+    counter = State.run (Counter { count = 10 }) counterProgram
+    written = Writer.run (++) "" writerProgram
+    traversed = State.run 0 (\_ -> List.each increment [1, 2, 3])
+    evaluated = State.run 0 (\_ -> evaluate 10 (Add Env (Lit 2)))
+    print counter.value
+    print counter.state.count
+    print written.value
+    print written.output
+    print traversed.state
+    print evaluated.value
+    print evaluated.state
+    print (runFlags chooseBoth)
+    print (runTicks())
+    print (runOrder())
+    print (runSnapshots())

@@ -195,6 +195,7 @@ func copyWith(e ast.Expr, f func(ast.Expr) ast.Expr) ast.Expr {
 		return &n
 	case *ast.Resume:
 		n := *e
+		n.NextState = rec(e.NextState)
 		return &n
 	case *ast.RecordLit:
 		n := *e
@@ -257,6 +258,11 @@ func copyWith(e ast.Expr, f func(ast.Expr) ast.Expr) ast.Expr {
 	case *ast.Handle:
 		n := *e
 		n.Body = rec(e.Body)
+		if e.State != nil {
+			state := *e.State
+			state.Initial = rec(e.State.Initial)
+			n.State = &state
+		}
 		n.Clauses = make([]ast.HandleClause, len(e.Clauses))
 		for i, c := range e.Clauses {
 			nc := c
@@ -416,6 +422,7 @@ func FillSpans(e ast.Expr, sp source.Span) {
 		fill(&e.Sp)
 	case *ast.Resume:
 		fill(&e.Sp)
+		rec(e.NextState)
 	case *ast.RecordLit:
 		fill(&e.Sp)
 		fill(&e.NameSpan)
@@ -475,6 +482,10 @@ func FillSpans(e ast.Expr, sp source.Span) {
 	case *ast.Handle:
 		fill(&e.Sp)
 		rec(e.Body)
+		if e.State != nil {
+			fill(&e.State.NameSpan)
+			rec(e.State.Initial)
+		}
 		for i := range e.Clauses {
 			c := &e.Clauses[i]
 			for _, param := range c.Params {

@@ -74,6 +74,29 @@ func TestLintRejectsMalformedResumeCore(t *testing.T) {
 	}
 }
 
+func TestLintChecksParameterizedHandlerState(t *testing.T) {
+	valid := func(b *types.Builtins) Expr {
+		return &ResumeTail{
+			Owner:        1,
+			Value:        &IntLit{Val: 1, Ty: b.Int},
+			NextState:    &IntLit{Val: 2, Ty: b.Int},
+			ClauseResult: b.Int,
+		}
+	}
+	p, b := resumeFixture(valid)
+	h := p.Defs[0].Body.(*Handle)
+	h.State = &HandlerState{Name: "current", Initial: &IntLit{Val: 0, Ty: b.Int}, Ty: b.Int}
+	h.Scoped = true
+	if got := lintText(p, b); got != "" {
+		t.Fatalf("Lint rejected valid parameterized handler:\n%s", got)
+	}
+
+	h.Clauses[0].Body.(*ResumeTail).NextState = nil
+	if got := lintText(p, b); !strings.Contains(got, "has no next state") {
+		t.Fatalf("Lint errors = %q, want missing next-state error", got)
+	}
+}
+
 func scopedCaptureFixture(capturing bool) (*Prog, *types.Builtins) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)

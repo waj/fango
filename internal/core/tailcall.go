@@ -151,6 +151,9 @@ func capturesMutated(e Expr, mutated map[string]bool) bool {
 		case *Lambda:
 			return mentionsAny(e.Body)
 		case *Handle:
+			if e.State != nil && mentionsAny(e.State.Initial) {
+				return true
+			}
 			for _, c := range e.Clauses {
 				if mentionsAny(c.Body) {
 					return true
@@ -177,7 +180,7 @@ func capturesMutated(e Expr, mutated map[string]bool) bool {
 				}
 			}
 		case *ResumeTail:
-			return walk(e.Value)
+			return walk(e.Value) || walk(e.NextState)
 		case *Seq:
 			return walk(e.First) || walk(e.Then)
 		case *Let:

@@ -1091,6 +1091,11 @@ func unitAtom(e core.Expr) bool {
 }
 
 func (g *gen) handleExpr(e *core.Handle) goast.Expr {
+	stateCell := ""
+	if e.State != nil {
+		stateCell = fmt.Sprintf("t_state%d", g.tmp)
+		g.tmp++
+	}
 	fields := make([]*goast.Field, len(e.Clauses))
 	elts := make([]goast.Expr, len(e.Clauses))
 	for i, c := range e.Clauses {
@@ -1112,7 +1117,19 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 		}
 		ft := &goast.FuncType{Params: paramFields(params), Results: results}
 		fields[i] = &goast.Field{Names: []*goast.Ident{ident("Op_" + linkName(c.Op.Name))}, Type: ft}
-		fn := &goast.FuncLit{Type: ft, Body: &goast.BlockStmt{List: g.resumeStmtsFor(c.Body, c.ResumeID, g.isUnit(c.Op.ResultType))}}
+		var clausePrefix []goast.Stmt
+		if e.State != nil {
+			clausePrefix = append(clausePrefix,
+				varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), ident(stateCell)),
+				assignBlank(ident(mangleValue(e.State.Name))))
+		}
+		clauseBody := g.resumeStmtsFor(c.Body, c.ResumeID, g.isUnit(c.Op.ResultType), stateCell, func() types.Type {
+			if e.State != nil {
+				return e.State.Ty
+			}
+			return nil
+		}())
+		fn := &goast.FuncLit{Type: ft, Body: &goast.BlockStmt{List: append(clausePrefix, clauseBody...)}}
 		elts[i] = &goast.KeyValueExpr{Key: ident("Op_" + linkName(c.Op.Name)), Value: fn}
 	}
 	_ = fields
@@ -1126,7 +1143,11 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	// A handler whose subject does not perform the handled effect still
 	// constructs valid lexical evidence; keep the local legal in Go even
 	// when no generated operation call refers to it.
-	stmts := []goast.Stmt{decl, assignBlank(ident(name))}
+	var stmts []goast.Stmt
+	if e.State != nil {
+		stmts = append(stmts, varDeclStmt(stateCell, g.goType(e.State.Ty), g.expr(e.State.Initial, 0)))
+	}
+	stmts = append(stmts, decl, assignBlank(ident(name)))
 	if e.Return == nil {
 		stmts = append(stmts, returnStmt(body))
 		return callExpr(funcLit(g.goType(e.Ty), stmts))
@@ -1137,6 +1158,9 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	} else {
 		stmts = append(stmts, varDeclStmt(mangleValue(p), g.goType(e.Body.Type()), body))
 	}
+	if e.State != nil {
+		stmts = append(stmts, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), ident(stateCell)))
+	}
 	stmts = append(stmts, returnStmt(g.expr(e.Return.Body, 0)))
 	return callExpr(funcLit(g.goType(e.Ty), stmts))
 }
@@ -1145,24 +1169,43 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 // becomes a direct return of v from the evidence operation field; the
 // caller's ordinary Go continuation then proceeds with that operation
 // result. No continuation object or non-local control transfer is needed.
-func (g *gen) resumeStmtsFor(e core.Expr, owner types.ResumeID, unitResult bool) []goast.Stmt {
+func (g *gen) resumeStmtsFor(e core.Expr, owner types.ResumeID, unitResult bool, stateCell string, stateType types.Type) []goast.Stmt {
 	switch e := e.(type) {
 	case *core.ResumeTail:
 		if e.Owner != owner {
 			panic("codegen: ResumeTail owner does not match handler clause")
+		}
+		if e.NextState != nil {
+			resultName := fmt.Sprintf("t_resume%d", g.tmp)
+			g.tmp++
+			nextName := fmt.Sprintf("t_next%d", g.tmp)
+			g.tmp++
+			var stmts []goast.Stmt
+			if unitResult {
+				stmts = append(stmts, g.stmts(e.Value)...)
+			} else {
+				stmts = append(stmts, varDeclStmt(resultName, g.goType(e.Value.Type()), g.expr(e.Value, 0)))
+			}
+			stmts = append(stmts,
+				varDeclStmt(nextName, g.goType(stateType), g.expr(e.NextState, 0)),
+				assignStmt(stateCell, ident(nextName)))
+			if unitResult {
+				return append(stmts, bareReturnStmt())
+			}
+			return append(stmts, returnStmt(ident(resultName)))
 		}
 		if unitResult {
 			return append(g.stmts(e.Value), bareReturnStmt())
 		}
 		return []goast.Stmt{returnStmt(g.expr(e.Value, 0))}
 	case *core.Let:
-		return append(g.letBindingStmts(e), g.resumeStmtsFor(e.Body, owner, unitResult)...)
+		return append(g.letBindingStmts(e), g.resumeStmtsFor(e.Body, owner, unitResult, stateCell, stateType)...)
 	case *core.Seq:
-		return append(g.stmts(e.First), g.resumeStmtsFor(e.Then, owner, unitResult)...)
+		return append(g.stmts(e.First), g.resumeStmtsFor(e.Then, owner, unitResult, stateCell, stateType)...)
 	case *core.If:
-		return []goast.Stmt{ifStmt(g.expr(e.Cond, 0), g.resumeStmtsFor(e.Then, owner, unitResult), g.resumeStmtsFor(e.Else, owner, unitResult))}
+		return []goast.Stmt{ifStmt(g.expr(e.Cond, 0), g.resumeStmtsFor(e.Then, owner, unitResult, stateCell, stateType), g.resumeStmtsFor(e.Else, owner, unitResult, stateCell, stateType))}
 	case *core.Case:
-		return g.caseStmts(e, func(x core.Expr) []goast.Stmt { return g.resumeStmtsFor(x, owner, unitResult) })
+		return g.caseStmts(e, func(x core.Expr) []goast.Stmt { return g.resumeStmtsFor(x, owner, unitResult, stateCell, stateType) })
 	default:
 		panic(fmt.Sprintf("codegen: non-tail-resumptive clause node %T", e))
 	}
@@ -1314,6 +1357,25 @@ func (g *gen) stmts(e core.Expr) []goast.Stmt {
 	case *core.Perform:
 		if e.Op.Native != nil && len(g.evidence[e.Effect.Unique]) == 0 {
 			return g.nativeStmts(&core.NativeCall{Name: e.Op.Native.Name, Module: e.Op.Native.Module, Args: e.Args, Ty: e.Ty})
+		}
+		if g.isUnit(e.Op.ResultType) {
+			stack := g.evidence[e.Effect.Unique]
+			if len(stack) == 0 {
+				panic("codegen: custom Perform without evidence")
+			}
+			var args []goast.Expr
+			needPrelude := false
+			for i, a := range e.Args {
+				if i < len(e.Op.ParamTypes) && g.isUnit(e.Op.ParamTypes[i]) {
+					needPrelude = needPrelude || !unitAtom(a)
+					continue
+				}
+				args = append(args, g.expr(a, 0))
+			}
+			if !needPrelude {
+				call := callExpr(&goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Op_" + linkName(e.Op.Name))}, args...)
+				return []goast.Stmt{exprStmt(call)}
+			}
 		}
 		return []goast.Stmt{assignBlank(g.expr(e, 0))}
 	case *core.Seq:

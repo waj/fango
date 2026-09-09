@@ -49,7 +49,11 @@ func (el *elab) app(e *ast.App) core.Expr {
 	}
 	if el.ck.ResumeCalls[e] {
 		r := head.(*ast.Resume)
-		return &core.ResumeTail{Owner: el.ck.ResumeOwners[r], Value: el.expr(args[0]), ClauseResult: el.zonkDefault(el.ck.ExprTypes[e])}
+		var next core.Expr
+		if r.NextState != nil {
+			next = el.expr(r.NextState)
+		}
+		return &core.ResumeTail{Owner: el.ck.ResumeOwners[r], Value: el.expr(args[0]), NextState: next, ClauseResult: el.zonkDefault(el.ck.ExprTypes[e])}
 	}
 	if op := el.ck.OpCalls[e]; op != nil {
 		return el.operationCall(op, el.zonkDefault(el.ck.ExprTypes[head]), el.ck.Sub.Apply(el.ck.ExprTypes[head]), args)

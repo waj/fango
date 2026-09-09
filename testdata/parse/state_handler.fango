@@ -1,0 +1,9 @@
+effect Cell s
+    get : () -> s
+    put : s -> ()
+
+run initial action =
+    handle action() with current = initial of
+        get () -> resume current with current
+        put next -> resume () with next
+        return value -> value

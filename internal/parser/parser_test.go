@@ -63,6 +63,21 @@ func TestParseExprInput(t *testing.T) {
 	}
 }
 
+func TestWithRemainsAnOrdinaryIdentifier(t *testing.T) {
+	f := source.NewFile("<repl>", []byte("with 1"))
+	toks, lexErrs := lexer.Lex(f)
+	if len(lexErrs) > 0 {
+		t.Fatal(lexErrs)
+	}
+	e, errs := ParseExprInput(toks, f)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if got, want := ast.DumpExpr(e), "(app (var with) (int 1))"; got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
 func TestParseExprInputUnfinished(t *testing.T) {
 	for _, src := range []string{"1 +", "(1 + 2", "[1, 2", "[head |"} {
 		f := source.NewFile("<repl>", []byte(src))

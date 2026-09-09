@@ -1,0 +1,9 @@
+import Random
+
+leakingAction() =
+    ignored = Random.int 1 2
+    Random.int 1
+
+leak = Random.runSeeded 0 leakingAction
+
+main = 0

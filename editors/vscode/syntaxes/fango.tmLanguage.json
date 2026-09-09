@@ -293,6 +293,8 @@
         { "include": "#string" },
         { "include": "#char" },
         { "include": "#pin_pattern" },
+        { "include": "#handler_state" },
+        { "include": "#resume_expression" },
         { "include": "#keywords" },
         { "include": "#return_clause" },
         { "include": "#booleans" },
@@ -418,6 +420,31 @@
     "return_clause": {
       "name": "keyword.control.return.fango",
       "match": "^\\s*(return)\\b(?=(?:[ \\t]+(?:\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\]|\\{[^{}]*\\}|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:\\\\.|[^'\\\\])'|-?[0-9][0-9_]*(?:\\.[0-9]+)?(?:[eE][-+]?[0-9]+)?|\\^?[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)*))+[ \\t]*->)"
+    },
+    "handler_state": {
+      "name": "keyword.control.with.fango",
+      "match": "(?<=\\bhandle\\b[^\\n]*)\\bwith\\b(?=[ \\t]+[a-z][A-Za-z0-9_]*[ \\t]*=(?![!#%&*+\\-/:<=>?@^|~]))"
+    },
+    "resume_expression": {
+      "begin": "\\b(resume)\\b",
+      "end": "(?:(\\bwith\\b)(?=[ \\t]+[^\\n]+))|(?=$)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.fango" }
+      },
+      "endCaptures": {
+        "1": { "name": "keyword.control.with.fango" }
+      },
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#string" },
+        { "include": "#char" },
+        { "include": "#numbers" },
+        { "include": "#booleans" },
+        { "include": "#qualified_module" },
+        { "include": "#record_accessor" },
+        { "include": "#operator_name" },
+        { "include": "#operators" }
+      ]
     },
     "booleans": {
       "name": "constant.language.boolean.fango",

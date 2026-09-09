@@ -283,9 +283,19 @@ type CaseBranch struct {
 // (see doc/design.md, "Functions and effects").
 type Handle struct {
 	Body    Expr
+	State   *HandlerState
 	Clauses []HandleClause
 	Return  *ReturnClause // optional `return x -> …`
 	Sp      source.Span   // the `handle` keyword
+}
+
+// HandlerState is the optional compiler-owned cell introduced by
+// `handle body with name = initial of`. Name denotes an immutable snapshot in
+// operation and return clauses; it is deliberately not in scope in Body.
+type HandlerState struct {
+	Name     string
+	NameSpan source.Span
+	Initial  Expr
 }
 
 // HandleClause is one operation clause, `print s -> …`. Params bind the
@@ -311,7 +321,8 @@ type ReturnClause struct {
 // Resume is the one-shot continuation bound inside a handler clause. It
 // parses as an expression head, so `resume ()` is ordinary application.
 type Resume struct {
-	Sp source.Span
+	Sp        source.Span
+	NextState Expr // non-nil for `resume value with nextState`
 }
 
 // Quote goes up a stage: it does not evaluate Body, it describes it. Body is

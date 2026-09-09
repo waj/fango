@@ -339,6 +339,41 @@ sequence, any other character, and values outside the signed 64-bit range all
 produce `Nothing`; `String.toInt "007"` is `Just 7` and
 `String.toInt "-9223372036854775808"` parses the most negative Int.
 
+`State` provides a parameterized state effect and its standard runner:
+
+```fango
+module State exposing (State(..), StateResult(..), run)
+
+effect State s
+    get : () -> s
+    put : s -> ()
+
+type StateResult s a = { value : a, state : s }
+
+run : s -> (() ->{State s | e} a) ->{e} StateResult s a
+```
+
+`State.run initial action` evaluates `initial` once, runs `action` with a
+private cell, and returns both the action value and final state. `get()` reads
+the current state and `put next` replaces it. Cells belong to handler
+activations, so nested runs—including two runs of the same `State s`—are
+independent.
+
+`Writer` packages the same mechanism as an immutable accumulator:
+
+```fango
+effect Writer w
+    tell : w -> ()
+
+type WriterResult w a = { value : a, output : w }
+
+run : (w -> w -> w) -> w
+    -> (() ->{Writer w | e} a) ->{e} WriterResult w a
+```
+
+`Writer.run combine empty action` updates the accumulator with
+`combine output item` for each `tell item`, preserving source order.
+
 `Random` declares a randomness effect and two ready-made handlers:
 
 ```fango
@@ -365,12 +400,10 @@ seeds the same generator from system entropy, so every run draws a fresh
 sequence. `examples/guess.fango` performs `Random.int` opaquely and picks
 the interpretation with one line in `main`.
 
-Because current handlers are tail-resumptive, a handler cannot carry state
-of its own across resumes; the bundled handlers instead advance a native
-generator cell private to `Random`'s sidecar, and they swap and restore that
-cell around the handled computation so nested `runSeeded`/`runSystem` uses
-behave lexically. That cell is process state reachable only through these
-handlers.
+The seed is handler-local state. Nested seeded or system runs do not disturb
+an outer sequence, and independent runs share no PRNG cell. Deterministic
+`runSeeded` computations are allowed during compile-time staging; `runSystem`
+is rejected with `COMPILE-TIME NATIVE` because entropy is observable.
 
 ## Native Go sidecars
 
@@ -1040,6 +1073,24 @@ handled computation's normal result under the same rules. All clauses align
 like `case` branches and accept full argument patterns. `resume value`
 continues from the handled operation.
 
+A parameterized handler inserts `with snapshot = initial` between its subject
+and `of`:
+
+```fango
+handle action() with current = initial of
+    get () -> resume current with current
+    put next -> resume () with next
+    return value -> StateResult { value = value, state = current }
+```
+
+`with` is contextual and remains an ordinary lowercase name elsewhere. The
+initial state is evaluated once before entering the handled body. `current` is
+an immutable snapshot visible in operation and `return` clauses, but not in the
+handled body. Every operation path must use `resume value with nextState`;
+ordinary handlers continue to use `resume value`. The value and next-state
+expressions evaluate left to right exactly once, and the state is committed
+only after both finish successfully. The `return` clause sees the final state.
+
 Current handlers are deliberately restricted: every reachable operation-clause
 path must end in exactly one tail call to `resume`. Aborting clauses, non-tail
 or escaping continuations, operation-local/result polymorphism, and handlers
@@ -1052,12 +1103,15 @@ the owning operation clause's location. Nested operation clauses bind their own
 resume, while nested handled bodies and return groups retain the surrounding
 resume binding.
 
-Ordinary user-declared effects have durable evidence: returning a pure closure
+Ordinary stateless user-declared effects have durable evidence: returning a pure closure
 that captures an immutable Reader-style handler remains legal. There is no
-scope annotation in source syntax, and no current standard-library API exposes
-a scoped capability. Scoped lifetime policy is compiler-owned foundation for
-the later state and resource APIs, so this release does not shorten the
-lifetime of any existing source value.
+scope annotation in source syntax. Parameterized handlers are scoped: a result
+that can retain their local capability is rejected with `STATE RESULT ESCAPES`
+or `RESOURCE ESCAPES`. The bundled polymorphic runners conservatively require
+an instantiated result made only from scalars and transitively capture-free
+ADTs; returning a function or an ADT that can contain one is rejected even when
+a particular value would be pure. This does not shorten the lifetime of
+existing stateless handler values.
 
 A reusable handler wrapper may annotate that residual flow with an open row
 tail. The handled label disappears from the callback's row while every other
@@ -1205,8 +1259,9 @@ value takes it as a function argument instead.
 Compile-time code runs inside the compiler and is restricted accordingly:
 
 - it must type with an empty effect row (`COMPILE-TIME EFFECT`);
-- it may not reach a Go sidecar or a bundled native that observes
-  process-global state, which today means `Random` (`COMPILE-TIME NATIVE`);
+- it may not reach a Go sidecar or a bundled native that observes external
+  state; deterministic `Random.runSeeded` is safe, while system entropy from
+  `Random.runSystem` reports `COMPILE-TIME NATIVE`;
 - it is bounded by an evaluation-step budget (`COMPILE-TIME LIMIT`).
 
 Together these make generated Go reproducible.

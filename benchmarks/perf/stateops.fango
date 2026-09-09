@@ -1,0 +1,12 @@
+import State
+
+advance : Int ->{State.State Int} Int
+advance n =
+    if n <= 0 then State.get() else
+        current = State.get()
+        State.put (current + 1)
+        advance (n - 1)
+
+main() =
+    result = State.run 0 (\_ -> advance 5000000)
+    print result.state

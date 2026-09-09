@@ -392,15 +392,26 @@ func (s *stageChecker) expr(e ast.Expr) {
 		return
 	case *ast.Handle:
 		s.expr(e.Body)
+		if e.State != nil {
+			s.expr(e.State.Initial)
+		}
 		for _, c := range e.Clauses {
 			if len(c.Equations) > 0 {
 				for _, eq := range c.Equations {
-					restore := s.bind(paramNames(eq.Params))
+					names := paramNames(eq.Params)
+					if e.State != nil {
+						names = append(names, e.State.Name)
+					}
+					restore := s.bind(names)
 					s.expr(eq.Body)
 					restore()
 				}
 			} else {
-				restore := s.bind(paramNames(c.Params))
+				names := paramNames(c.Params)
+				if e.State != nil {
+					names = append(names, e.State.Name)
+				}
+				restore := s.bind(names)
 				s.expr(c.Body)
 				restore()
 			}
@@ -408,12 +419,20 @@ func (s *stageChecker) expr(e ast.Expr) {
 		if e.Return != nil {
 			if len(e.Return.Equations) > 0 {
 				for _, eq := range e.Return.Equations {
-					restore := s.bind(paramNames(eq.Params))
+					names := paramNames(eq.Params)
+					if e.State != nil {
+						names = append(names, e.State.Name)
+					}
+					restore := s.bind(names)
 					s.expr(eq.Body)
 					restore()
 				}
 			} else {
-				restore := s.bind(patternNames(e.Return.Param, nil))
+				names := patternNames(e.Return.Param, nil)
+				if e.State != nil {
+					names = append(names, e.State.Name)
+				}
+				restore := s.bind(names)
 				s.expr(e.Return.Body)
 				restore()
 			}
@@ -629,6 +648,9 @@ func visitChildren(e ast.Expr, f func(ast.Expr)) {
 		}
 	case *ast.Handle:
 		each(e.Body)
+		if e.State != nil {
+			each(e.State.Initial)
+		}
 		for _, c := range e.Clauses {
 			each(c.Body)
 			for _, eq := range c.Equations {
@@ -645,5 +667,7 @@ func visitChildren(e ast.Expr, f func(ast.Expr)) {
 		each(e.Body)
 	case *ast.Splice:
 		each(e.Operand)
+	case *ast.Resume:
+		each(e.NextState)
 	}
 }

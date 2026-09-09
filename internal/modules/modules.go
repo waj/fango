@@ -1483,6 +1483,10 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 		r.expr(e.Body, vals, locals)
 	case *ast.Splice:
 		r.expr(e.Operand, vals, locals)
+	case *ast.Resume:
+		if e.NextState != nil {
+			r.expr(e.NextState, vals, locals)
+		}
 	case *ast.TypeOf:
 		r.typ(e.Ty)
 		e.Visible = r.schemas
@@ -1548,17 +1552,26 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 		}
 	case *ast.Handle:
 		r.expr(e.Body, vals, locals)
+		if e.State != nil {
+			r.expr(e.State.Initial, vals, locals)
+		}
 		for i := range e.Clauses {
 			c := &e.Clauses[i]
 			c.Op = r.qualified(c.Op, r.ops, "op", c.OpSpan)
 			if len(c.Equations) > 0 {
 				for _, eq := range c.Equations {
 					ls := copySet(locals)
+					if e.State != nil {
+						ls[e.State.Name] = true
+					}
 					r.patternVector(eq.Params, ls, vals)
 					r.expr(eq.Body, vals, ls)
 				}
 			} else {
 				ls := copySet(locals)
+				if e.State != nil {
+					ls[e.State.Name] = true
+				}
 				r.patternVector(c.Params, ls, vals)
 				r.expr(c.Body, vals, ls)
 			}
@@ -1567,11 +1580,17 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 			if len(e.Return.Equations) > 0 {
 				for _, eq := range e.Return.Equations {
 					ls := copySet(locals)
+					if e.State != nil {
+						ls[e.State.Name] = true
+					}
 					r.patternVector(eq.Params, ls, vals)
 					r.expr(eq.Body, vals, ls)
 				}
 			} else {
 				ls := copySet(locals)
+				if e.State != nil {
+					ls[e.State.Name] = true
+				}
 				r.pattern(e.Return.Param, ls, vals)
 				r.expr(e.Return.Body, vals, ls)
 			}

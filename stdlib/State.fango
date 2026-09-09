@@ -1,0 +1,14 @@
+module State exposing (State(..), StateResult(..), run)
+
+effect State s
+    get : () -> s
+    put : s -> ()
+
+type StateResult s a = { value : a, state : s }
+
+run : s -> (() ->{State s | e} a) ->{e} StateResult s a
+run initial action =
+    handle action() with current = initial of
+        get () -> resume current with current
+        put next -> resume () with next
+        return value -> StateResult { value = value, state = current }

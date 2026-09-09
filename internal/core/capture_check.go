@@ -39,14 +39,16 @@ type captureResult struct {
 }
 
 type captureAnalyzer struct {
-	p        *Prog
-	b        *types.Builtins
-	defs     map[string]*Def
-	adts     map[int]*types.ADTInfo
-	nextVar  types.CaptureVar
-	escapes  map[types.ScopeID]bool
-	scoped   map[types.ScopeID]bool
-	checking bool
+	p              *Prog
+	b              *types.Builtins
+	defs           map[string]*Def
+	adts           map[int]*types.ADTInfo
+	nextVar        types.CaptureVar
+	escapes        map[types.ScopeID]bool
+	scoped         map[types.ScopeID]bool
+	checking       bool
+	current        *Def
+	badStateResult bool
 }
 
 func newCaptureAnalyzer(p *Prog, b *types.Builtins) *captureAnalyzer {
@@ -120,10 +122,23 @@ func (a *captureAnalyzer) checkScopes() []error {
 	for _, scope := range scopes {
 		errs = append(errs, ScopeEscapeError{Scope: scope})
 	}
+	if a.badStateResult {
+		errs = append(errs, StateResultEscapeError{})
+	}
 	return errs
 }
 
 type ScopeEscapeError struct{ Scope types.ScopeID }
+
+type StateResultEscapeError struct{}
+
+func (StateResultEscapeError) Error() string {
+	return "a parameterized handler result may retain its local state capability"
+}
+
+func (StateResultEscapeError) Detail() string {
+	return "This call returns a capture-capable value, so the compiler cannot prove that handler-local state stays inside its activation. Return immutable data instead."
+}
 
 func (e ScopeEscapeError) Error() string {
 	return fmt.Sprintf("RESOURCE ESCAPES: the result retains scoped capability %d after its lifetime ends", e.Scope)
@@ -134,6 +149,9 @@ func (e ScopeEscapeError) Detail() string {
 }
 
 func (a *captureAnalyzer) definition(d *Def) captureResult {
+	oldCurrent := a.current
+	a.current = d
+	defer func() { a.current = oldCurrent }()
 	env := map[string]types.CaptureSet{}
 	for i, name := range d.Params {
 		if name != "_" && i < len(d.ParamCaptures) {
@@ -260,7 +278,11 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		if e.Op != nil && e.Op.BorrowsEvidence {
 			r.value = types.UnionCaptures(r.value, ev)
 		}
-		if a.checking && e.Op != nil && e.Op.RetainsArguments {
+		retains := e.Op != nil && e.Op.RetainsArguments
+		for _, scope := range ev.Scopes {
+			retains = retains || a.scoped[scope]
+		}
+		if a.checking && retains {
 			for _, arg := range argResults {
 				for _, scope := range arg.value.Scopes {
 					if a.scoped[scope] && !ev.HasScope(scope) {
@@ -275,6 +297,10 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		return r
 	case *ResumeTail:
 		r := a.expr(e.Value, env, evidence)
+		if e.NextState != nil {
+			next := a.expr(e.NextState, env, evidence)
+			r.uses = types.UnionCaptures(r.uses, next.uses)
+		}
 		if !a.canCarry(e.ClauseResult, nil) {
 			r.value = types.CaptureSet{}
 		}
@@ -300,6 +326,9 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			matched := false
 			if ref, ok := e.Callee.(*VarRef); ok {
 				if d := a.defs[ref.Name]; d != nil {
+					if a.checking && trustedStateRunner(d.Name) && a.canCarry(e.Ty, nil) && !trustedStateForwarder(a.current, d) {
+						a.badStateResult = true
+					}
 					matched = true
 					m := map[types.CaptureVar]types.CaptureSet{}
 					for i, v := range d.ParamCaptures {
@@ -336,12 +365,20 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		}
 		return captureResult{value: value, uses: uses}
 	case *Handle:
+		var initial captureResult
+		if e.State != nil {
+			initial = a.expr(e.State.Initial, env, evidence)
+		}
 		innerEvidence := cloneCaptureEvidence(evidence)
 		innerEvidence[e.Effect.Unique] = append(innerEvidence[e.Effect.Unique], e.Effect.Captures)
 		body := a.expr(e.Body, env, innerEvidence)
 		result := body
+		result.uses = types.UnionCaptures(initial.uses, result.uses)
 		if e.Return != nil {
 			inner := cloneCaptureEnv(env)
+			if e.State != nil {
+				inner[e.State.Name] = initial.value
+			}
 			if e.Return.Param != "_" && e.Return.Param != "()" {
 				inner[e.Return.Param] = body.value
 			}
@@ -351,6 +388,9 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		}
 		for _, clause := range e.Clauses {
 			inner := cloneCaptureEnv(env)
+			if e.State != nil {
+				inner[e.State.Name] = initial.value
+			}
 			for _, p := range clause.Params {
 				if p != "_" && p != "()" {
 					inner[p] = types.VarCapture(a.fresh())
@@ -359,8 +399,12 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			cl := a.expr(clause.Body, inner, evidence)
 			result.uses = types.UnionCaptures(result.uses, cl.uses)
 		}
-		if a.checking && e.Scoped && result.value.HasScope(e.Scope) {
-			a.escapes[e.Scope] = true
+		if e.Scoped && result.value.HasScope(e.Scope) {
+			if e.State != nil && trustedStateRunnerName(a.current) {
+				result.value = result.value.Without(map[types.ScopeID]bool{e.Scope: true}, nil)
+			} else if a.checking {
+				a.escapes[e.Scope] = true
+			}
 		}
 		result.uses = result.uses.Without(map[types.ScopeID]bool{e.Scope: true}, nil)
 		return result
@@ -373,6 +417,23 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 	default:
 		return captureResult{}
 	}
+}
+
+func trustedStateRunnerName(d *Def) bool {
+	return d != nil && trustedStateRunner(d.Name)
+}
+
+func trustedStateRunner(name string) bool {
+	switch name {
+	case "State.run", "Writer.run", "Random.runSeeded", "Random.runSystem":
+		return true
+	default:
+		return false
+	}
+}
+
+func trustedStateForwarder(current, callee *Def) bool {
+	return current != nil && current.Name == "Random.runSystem" && callee != nil && callee.Name == "Random.runSeeded"
 }
 
 func (a *captureAnalyzer) tree(t Tree, env map[string]types.CaptureSet, evidence map[int][]types.CaptureSet, scrut types.CaptureSet) captureResult {

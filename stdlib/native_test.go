@@ -105,37 +105,24 @@ func TestStringNatives(t *testing.T) {
 }
 
 func TestRandomNatives(t *testing.T) {
-	old := SwapSeed(42)
-	defer SwapSeed(old)
-
-	first := []int64{NextInt(1, 100), NextInt(1, 100), NextInt(1, 100)}
-	if got := SwapSeed(42); got == 42 {
-		t.Fatal("state did not advance across draws")
-	}
-	second := []int64{NextInt(1, 100), NextInt(1, 100), NextInt(1, 100)}
-	if first[0] != second[0] || first[1] != second[1] || first[2] != second[2] {
-		t.Errorf("same seed gave %v then %v", first, second)
-	}
-
-	SwapSeed(7)
+	state := int64(7)
 	for range 1000 {
-		if v := NextInt(1, 6); v < 1 || v > 6 {
-			t.Fatalf("NextInt(1, 6) = %d out of range", v)
+		state = NextState(state)
+		if v := ValueAt(state, 1, 6); v < 1 || v > 6 {
+			t.Fatalf("ValueAt(state, 1, 6) = %d out of range", v)
 		}
-		if v := NextInt(6, 1); v < 1 || v > 6 {
-			t.Fatalf("NextInt(6, 1) = %d out of range", v)
+		if v := ValueAt(state, 6, 1); v < 1 || v > 6 {
+			t.Fatalf("ValueAt(state, 6, 1) = %d out of range", v)
 		}
-		if v := NextInt(-3, 3); v < -3 || v > 3 {
-			t.Fatalf("NextInt(-3, 3) = %d out of range", v)
+		if v := ValueAt(state, -3, 3); v < -3 || v > 3 {
+			t.Fatalf("ValueAt(state, -3, 3) = %d out of range", v)
 		}
 	}
-	if v := NextInt(5, 5); v != 5 {
-		t.Errorf("NextInt(5, 5) = %d", v)
+	if v := ValueAt(NextState(42), 5, 5); v != 5 {
+		t.Errorf("ValueAt(state, 5, 5) = %d", v)
 	}
-
-	SwapSeed(1)
-	if prev := SwapSeed(9); prev != 1 {
-		t.Errorf("SwapSeed returned %d, want the previous state 1", prev)
+	if NextState(42) != NextState(42) {
+		t.Error("explicit transition is not deterministic")
 	}
 
 	// Two entropy seeds colliding is astronomically unlikely.

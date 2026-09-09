@@ -39,6 +39,10 @@ type parser struct {
 	// module loader knows to pull in the bundled `Meta` module.
 	usesStaging bool
 	usesLists   bool
+
+	// stopWith makes the contextual word `with` terminate only the subject
+	// of a handle expression. It remains an ordinary identifier elsewhere.
+	stopWith int
 }
 
 // Parse parses a whole module.
@@ -1323,6 +1327,17 @@ func (p *parser) parseApply() ast.Expr {
 				return nil
 			}
 			fn = &ast.App{Fn: fn, Arg: arg}
+			if app, ok := fn.(*ast.App); ok {
+				if r, ok := app.Fn.(*ast.Resume); ok && p.peek().Kind == token.LIDENT && p.peek().Text == "with" {
+					p.next()
+					r.NextState = p.parseExpr()
+					if r.NextState == nil {
+						p.errorAt(p.prevSpan(), "SYNTAX PROBLEM", "I expect the next handler state after `with`.")
+						return nil
+					}
+					return fn
+				}
+			}
 		default:
 			return fn
 		}
@@ -1365,9 +1380,29 @@ func (p *parser) parsePostfixAtom() ast.Expr {
 
 func (p *parser) parseHandle() ast.Expr {
 	h := p.next()
+	p.stopWith++
 	body := p.parseExpr()
+	p.stopWith--
 	if body == nil {
 		return nil
+	}
+	var state *ast.HandlerState
+	if t := p.peek(); t.Kind == token.LIDENT && t.Text == "with" {
+		p.next()
+		name := p.peekInExpr()
+		if name.Kind != token.LIDENT {
+			p.errorAt(name.Span, "SYNTAX PROBLEM", "I expect a lowercase state snapshot name after `with`.")
+			return nil
+		}
+		p.next()
+		if !p.expect(token.EQ, "I expect `=` after the handler state name.") {
+			return nil
+		}
+		initial := p.parseExpr()
+		if initial == nil {
+			return nil
+		}
+		state = &ast.HandlerState{Name: name.Text, NameSpan: name.Span, Initial: initial}
 	}
 	if !p.expect(token.KwOf, "I expect `of` after the expression being handled.") {
 		return nil
@@ -1379,7 +1414,7 @@ func (p *parser) parseHandle() ast.Expr {
 	}
 	p.lay.push(ctxCase, first.Pos().Col)
 	defer p.lay.pop()
-	result := &ast.Handle{Body: body, Sp: h.Span}
+	result := &ast.Handle{Body: body, State: state, Sp: h.Span}
 	lastClause := ""
 	for {
 		p.stmtStart = p.pos
@@ -2110,6 +2145,10 @@ func (p *parser) peekInExpr() token.Token {
 	t := p.toks[p.pos]
 	if t.Kind == token.EOF {
 		return t
+	}
+	if p.stopWith > 0 && t.Kind == token.LIDENT && t.Text == "with" &&
+		p.pos+2 < len(p.toks) && p.toks[p.pos+1].Kind == token.LIDENT && p.toks[p.pos+2].Kind == token.EQ {
+		return token.Token{Kind: token.EOF, Span: t.Span}
 	}
 	if p.pos != p.stmtStart && p.lay.checkOffside(t.Pos()) != offContinue {
 		return token.Token{Kind: token.EOF, Span: t.Span}

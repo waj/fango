@@ -108,6 +108,7 @@ func (r rewriter) expr(e Expr) Expr {
 		n := *e
 		n.ClauseResult = r.typ(e.ClauseResult)
 		n.Value = r.expr(e.Value)
+		n.NextState = r.expr(e.NextState)
 		out = &n
 	case *Perform:
 		n := *e
@@ -120,6 +121,9 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Ty = r.typ(e.Ty)
 		n.Effect = r.effect(e.Effect)
 		n.Body = r.expr(e.Body)
+		if e.State != nil {
+			n.State = &HandlerState{Name: e.State.Name, Initial: r.expr(e.State.Initial), Ty: r.typ(e.State.Ty)}
+		}
 		n.Clauses = make([]HandlerClause, len(e.Clauses))
 		for i, c := range e.Clauses {
 			c.Params = append([]string(nil), c.Params...)

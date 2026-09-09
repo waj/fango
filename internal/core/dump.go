@@ -122,12 +122,18 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		}
 		return strings.Join(parts, " ") + " " + pr.Type(e.Ty) + ")"
 	case *ResumeTail:
+		if e.NextState != nil {
+			return fmt.Sprintf("(resume-tail %d %s %s (next-state %s))", e.Owner, pr.Type(e.ClauseResult), dumpExpr(e.Value, pr), dumpExpr(e.NextState, pr))
+		}
 		return fmt.Sprintf("(resume-tail %d %s %s)", e.Owner, pr.Type(e.ClauseResult), dumpExpr(e.Value, pr))
 	case *Seq:
 		return fmt.Sprintf("(seq %s %s %s)", pr.Type(e.Ty), dumpExpr(e.First, pr), dumpExpr(e.Then, pr))
 	case *Handle:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(handle %s %s", dumpEffect(e.Effect, pr), dumpExpr(e.Body, pr))
+		if e.State != nil {
+			fmt.Fprintf(&b, " (state %s %s %s)", e.State.Name, pr.Type(e.State.Ty), dumpExpr(e.State.Initial, pr))
+		}
 		for _, c := range e.Clauses {
 			fmt.Fprintf(&b, " (%s (%s) %s)", c.Op.Name, strings.Join(c.Params, " "), dumpExpr(c.Body, pr))
 		}

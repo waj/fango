@@ -218,6 +218,9 @@ func (el *elab) freeLocals(bind *ast.LocalBind) []scopeVar {
 			}
 		case *ast.Handle:
 			visit(e.Body)
+			if e.State != nil {
+				visit(e.State.Initial)
+			}
 			for i := range e.Clauses {
 				c := &e.Clauses[i]
 				visitRows(c.Equations, c.Params, c.Body)
@@ -230,7 +233,7 @@ func (el *elab) freeLocals(bind *ast.LocalBind) []scopeVar {
 				visitRows(e.Return.Equations, param, e.Return.Body)
 			}
 		case *ast.Resume:
-			// No value child; applications containing it are handled above.
+			visit(e.NextState)
 		}
 	}
 	// A pin names an existing value, so a pinned local is captured like any

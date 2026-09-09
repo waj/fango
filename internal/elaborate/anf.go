@@ -47,7 +47,11 @@ func (el *elab) anf(e core.Expr) core.Expr {
 		if e.Return != nil {
 			ret = &core.ReturnClause{Param: e.Return.Param, Body: el.anf(e.Return.Body)}
 		}
-		return &core.Handle{Body: el.anf(e.Body), Effect: e.Effect, Scope: e.Scope, Scoped: e.Scoped, Clauses: clauses, Return: ret, Ty: e.Ty}
+		var state *core.HandlerState
+		if e.State != nil {
+			state = &core.HandlerState{Name: e.State.Name, Initial: el.anf(e.State.Initial), Ty: e.State.Ty}
+		}
+		return &core.Handle{Body: el.anf(e.Body), State: state, Effect: e.Effect, Scope: e.Scope, Scoped: e.Scoped, Clauses: clauses, Return: ret, Ty: e.Ty}
 	case *core.Seq:
 		return &core.Seq{First: el.anf(e.First), Then: el.anf(e.Then), Ty: e.Ty}
 	default:
@@ -141,7 +145,14 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		}
 		return &core.Perform{Op: e.Op, Effect: e.Effect, Args: args, Ty: e.Ty}, hoists
 	case *core.ResumeTail:
-		return &core.ResumeTail{Owner: e.Owner, Value: slot(e.Value), ClauseResult: e.ClauseResult}, hoists
+		var next core.Expr
+		if e.NextState != nil {
+			// Keep the next-state computation beneath ResumeTail. Codegen must
+			// evaluate the operation result first, even when the update is
+			// statement-shaped control flow.
+			next = el.anf(e.NextState)
+		}
+		return &core.ResumeTail{Owner: e.Owner, Value: slot(e.Value), NextState: next, ClauseResult: e.ClauseResult}, hoists
 	case *core.App:
 		callee := e.Callee
 		if e.CalleeKind == core.Value {
