@@ -36,7 +36,8 @@ func (el *elab) anf(e core.Expr) core.Expr {
 		out := core.Expr(&core.Case{Scrut: scrut, Bind: e.Bind, Tree: el.anfTree(e.Tree), Ty: e.Ty})
 		return wrapHoists(hoists, out)
 	case *core.Lambda:
-		return &core.Lambda{Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty}
+		return &core.Lambda{Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty,
+			ParamCapture: e.ParamCapture, EffectParams: e.EffectParams}
 	case *core.Handle:
 		clauses := make([]core.HandlerClause, len(e.Clauses))
 		for i, c := range e.Clauses {
@@ -46,7 +47,7 @@ func (el *elab) anf(e core.Expr) core.Expr {
 		if e.Return != nil {
 			ret = &core.ReturnClause{Param: e.Return.Param, Body: el.anf(e.Return.Body)}
 		}
-		return &core.Handle{Body: el.anf(e.Body), Effect: e.Effect, Clauses: clauses, Return: ret, Ty: e.Ty}
+		return &core.Handle{Body: el.anf(e.Body), Effect: e.Effect, Scope: e.Scope, Scoped: e.Scoped, Clauses: clauses, Return: ret, Ty: e.Ty}
 	case *core.Seq:
 		return &core.Seq{First: el.anf(e.First), Then: el.anf(e.Then), Ty: e.Ty}
 	default:
@@ -98,7 +99,8 @@ func (el *elab) anfSlot(e core.Expr) (core.Expr, []hoist) {
 		// normalize inside without leaking hoists across the binding.
 		return el.anf(e), nil
 	case *core.Lambda:
-		return &core.Lambda{Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty}, nil
+		return &core.Lambda{Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty,
+			ParamCapture: e.ParamCapture, EffectParams: e.EffectParams}, nil
 	case *core.Handle, *core.Seq:
 		return el.anf(e), nil
 	default:

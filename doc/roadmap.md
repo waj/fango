@@ -158,8 +158,9 @@ requirements govern that work: effects compile to ordinary calls or explicit
 state machines without goroutine-based continuations or stack-copy capture;
 resume discipline is enforced at compile time.
 
-The existing tail-resumptive discipline is now proved in source checking and
-Core. Next add scoped evidence and parameterized State handlers. Introduce control-aware calling
+The existing tail-resumptive discipline is proved in source checking and Core,
+and scoped capture metadata is checked during elaboration and again in Core.
+Next add parameterized State handlers. Introduce control-aware calling
 conventions before abort-only effects and generic cleanup scopes. Resource
 management is exposed through ordinary `Scope.bracket`/`withFile` calls rather
 than requiring new cleanup syntax. These increments can ship without suspension.

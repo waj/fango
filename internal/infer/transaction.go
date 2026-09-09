@@ -13,12 +13,16 @@ func (ck *Checker) Checkpoint() func() {
 	// Restoring it without telling that evaluator would leave it holding
 	// definitions the checker has forgotten, so the two move together.
 	derivers, checked := maps.Clone(ck.Derivers), ck.Checked
+	captures := maps.Clone(ck.CaptureSummaries)
+	scopeSpans := maps.Clone(ck.ScopeSpans)
 	return func() {
 		ck.Classes, ck.Methods = classes, methods
 		ck.ADTs, ck.Ctors, ck.TypeNames = adts, ctors, types
 		ck.Env.vars, ck.Workers, ck.Sub = vars, workers, sub
 		ck.Instances, ck.ADTOrder, ck.PendingPreds = instances, order, pending
 		ck.Derivers, ck.Checked = derivers, checked
+		ck.CaptureSummaries = captures
+		ck.ScopeSpans = scopeSpans
 		if ck.CompileTimeRollback != nil {
 			ck.CompileTimeRollback(len(checked), len(instances))
 		}

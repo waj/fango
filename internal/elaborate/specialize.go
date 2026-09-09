@@ -82,6 +82,7 @@ func specializeScalars(p *core.Prog, infos []infer.DeclInfo, ck *infer.Checker) 
 			variant.def.Name = name
 			variant.def.TyParams = nil
 			variant.def.Params = append([]string(nil), d.Params[len(variant.dictionaries):]...)
+			variant.def.ParamCaptures = append([]types.CaptureVar(nil), d.ParamCaptures[len(variant.dictionaries):]...)
 			_, bodyType := core.PeelFun(d.Type, len(variant.dictionaries))
 			variant.def.Type = types.SubstRigid(bodyType, variant.types)
 			if s.variants[d.Name] == nil {
@@ -297,7 +298,7 @@ func (s *scalarSpecializer) methodValue(method scalarMethod, ty types.Type) core
 		body = &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: method.instance.Methods[method.index], Ty: ty}, Args: args, Ty: ret}
 	}
 	for i := len(args) - 1; i >= 0; i-- {
-		body = &core.Lambda{Param: args[i].(*core.VarRef).Name, Body: body, Ty: arrows[i]}
+		body = &core.Lambda{Param: args[i].(*core.VarRef).Name, Body: body, Ty: arrows[i], ParamCapture: s.ck.Sup.FreshCapture()}
 	}
 	return body
 }

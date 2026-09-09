@@ -15,6 +15,7 @@
 package elaborate
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -100,6 +101,8 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 	}
 	if len(errs) == 0 {
 		specializeScalars(p, infos, ck)
+		errs = append(errs, captureDiagnostics(core.InferCaptures(p, ck.B), ck, source.Span{})...)
+		installCaptureSummaries(p.Defs, ck)
 	}
 	return p, errs
 }
@@ -110,6 +113,9 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
 	defs, errs := decl(info, ck, false)
 	if len(errs) == 0 {
+		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
+		errs = append(errs, captureDiagnostics(core.InferCaptures(p, ck.B), ck, info.NameSpan)...)
+		installCaptureSummaries(defs, ck)
 		for i := range defs {
 			for _, err := range core.VerifyResumeStructure(defs[i].Body) {
 				errs = append(errs, diag.Errorf(info.NameSpan, "INTERNAL RESUME INVARIANT", "%v", err))
@@ -128,6 +134,7 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 	el.defaultFree(rawType)
 	rawType = ck.Sub.Apply(rawType)
 	defType := eraseRows(rawType)
+	effectParams := el.bindEffectParams(executingEffects(rawType, len(info.Params)))
 	dictNames, dictTypes := el.bindDictionaries(info.Scheme.Preds)
 	var params []string
 	var body core.Expr
@@ -138,13 +145,19 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 	} else {
 		body = el.expr(info.Body)
 	}
+	allParams := append(dictNames, params...)
+	paramCaptures := make([]types.CaptureVar, len(allParams))
+	for i := range paramCaptures {
+		paramCaptures[i] = ck.Sup.FreshCapture()
+	}
 	def := core.Def{
-		Name:         info.Name,
-		Type:         prependTypes(dictTypes, defType),
-		TyParams:     runtimeRigidVars(rawType),
-		Params:       append(dictNames, params...),
-		EffectParams: executingEffects(rawType, len(params)),
-		Body:         el.anf(body),
+		Name:          info.Name,
+		Type:          prependTypes(dictTypes, defType),
+		TyParams:      runtimeRigidVars(rawType),
+		Params:        allParams,
+		ParamCaptures: paramCaptures,
+		EffectParams:  effectParams,
+		Body:          el.anf(body),
 	}
 	return append([]core.Def{def}, el.aux...), el.errs
 }
@@ -223,6 +236,10 @@ func Expr(e ast.Expr, ck *infer.Checker) (core.Expr, []core.Def, []diag.Error) {
 	el := newElab(ck, "", types.Scheme{})
 	ce := el.anf(el.expr(e))
 	if len(el.errs) == 0 {
+		defs := append([]core.Def(nil), el.aux...)
+		defs = append(defs, core.Def{Name: "_expression", Type: ce.Type(), Body: ce})
+		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
+		el.errs = append(el.errs, captureDiagnostics(core.InferCaptures(p, ck.B), ck, e.Span())...)
 		for _, err := range core.VerifyResumeStructure(ce) {
 			el.errs = append(el.errs, diag.Errorf(e.Span(), "INTERNAL RESUME INVARIANT", "%v", err))
 		}
@@ -233,6 +250,42 @@ func Expr(e ast.Expr, ck *infer.Checker) (core.Expr, []core.Def, []diag.Error) {
 		}
 	}
 	return ce, el.aux, el.errs
+}
+
+func effectList(ck *infer.Checker) []*types.EffectInfo {
+	out := make([]*types.EffectInfo, 0, len(ck.EffectsByUnique))
+	for _, eff := range ck.EffectsByUnique {
+		out = append(out, eff)
+	}
+	return out
+}
+
+func installCaptureSummaries(defs []core.Def, ck *infer.Checker) {
+	for i := range defs {
+		d := &defs[i]
+		vars := append([]types.CaptureVar(nil), d.ParamCaptures...)
+		for _, ev := range d.EffectParams {
+			vars = append(vars, ev.Captures.Vars...)
+		}
+		ck.SetCaptureSummary(d.Name, vars, d.ResultCaptures)
+	}
+}
+
+func captureDiagnostics(errs []error, ck *infer.Checker, fallback source.Span) []diag.Error {
+	out := make([]diag.Error, 0, len(errs))
+	for _, err := range errs {
+		var escape core.ScopeEscapeError
+		if errors.As(err, &escape) {
+			sp := ck.ScopeSpans[escape.Scope]
+			if sp == (source.Span{}) {
+				sp = fallback
+			}
+			out = append(out, diag.Errorf(sp, "RESOURCE ESCAPES", "%s", escape.Detail()))
+		} else {
+			out = append(out, diag.Errorf(fallback, "CAPTURE CHECK ERROR", "%v", err))
+		}
+	}
+	return out
 }
 
 type elab struct {
@@ -265,13 +318,49 @@ type elab struct {
 
 	stableLifts bool
 	liftSeq     int
+
+	// evidence is a lexical stack per nominal effect. Concrete handler
+	// activations carry a scope identity; function/lambda parameters carry a
+	// capture variable. This metadata is erased by both runtime backends.
+	evidence map[int][]types.CaptureSet
 }
 
 func newElab(ck *infer.Checker, declName string, declScheme types.Scheme) *elab {
 	return &elab{ck: ck, declName: declName, declScheme: declScheme,
 		instanceLimit: len(ck.Instances),
 		owner:         symbolOwner(declName),
-		scopeIdx:      map[string]int{}, lifted: map[string]*liftedLocal{}}
+		scopeIdx:      map[string]int{}, lifted: map[string]*liftedLocal{}, evidence: map[int][]types.CaptureSet{}}
+}
+
+func (el *elab) bindEffectParams(effects []core.EffectInstance) []core.EffectInstance {
+	out := make([]core.EffectInstance, len(effects))
+	for i, ev := range effects {
+		ev.Captures = types.VarCapture(el.ck.Sup.FreshCapture())
+		out[i] = ev
+		el.evidence[ev.Unique] = append(el.evidence[ev.Unique], ev.Captures)
+	}
+	return out
+}
+
+func (el *elab) pushEvidence(effects []core.EffectInstance) {
+	for _, ev := range effects {
+		el.evidence[ev.Unique] = append(el.evidence[ev.Unique], ev.Captures)
+	}
+}
+
+func (el *elab) popEvidence(effects []core.EffectInstance) {
+	for i := len(effects) - 1; i >= 0; i-- {
+		u := effects[i].Unique
+		el.evidence[u] = el.evidence[u][:len(el.evidence[u])-1]
+	}
+}
+
+func (el *elab) evidenceCaptures(unique int) types.CaptureSet {
+	stack := el.evidence[unique]
+	if len(stack) == 0 {
+		return types.CaptureSet{}
+	}
+	return stack[len(stack)-1]
 }
 
 type scopeVar struct {
@@ -302,6 +391,7 @@ func (el *elab) popScope(n int) {
 // Lambdas, peeling one arrow per parameter off the (ground) function type.
 func (el *elab) lambda(params []ast.Pattern, body ast.Expr, funTy types.Type) core.Expr {
 	argTys, _ := core.PeelFun(funTy, len(params))
+	effectParams := el.bindEffectParams(executingEffects(funTy, len(params)))
 	names := make([]string, len(params))
 	var inner core.Expr
 	if plainPatterns(params) {
@@ -324,6 +414,7 @@ func (el *elab) lambda(params []ast.Pattern, body ast.Expr, funTy types.Type) co
 		}
 		inner = el.matchPatternRows([][]ast.Pattern{params}, []ast.Expr{body}, []source.Span{params[0].Span()}, occs, params[0].Span(), "lambda")
 	}
+	el.popEvidence(effectParams)
 	cur := funTy
 	funs := make([]*types.TFun, len(params))
 	for i := range params {
@@ -331,13 +422,18 @@ func (el *elab) lambda(params []ast.Pattern, body ast.Expr, funTy types.Type) co
 		cur = funs[i].Ret
 	}
 	for i := len(params) - 1; i >= 0; i-- {
-		inner = &core.Lambda{Param: names[i], Body: inner, Ty: funs[i]}
+		lam := &core.Lambda{Param: names[i], Body: inner, Ty: funs[i], ParamCapture: el.ck.Sup.FreshCapture()}
+		if i == len(params)-1 {
+			lam.EffectParams = effectParams
+		}
+		inner = lam
 	}
 	return inner
 }
 
 func (el *elab) lambdaEquations(eqs []ast.Equation, funTy types.Type, at source.Span, context string) core.Expr {
 	argTys, _ := core.PeelFun(funTy, len(eqs[0].Params))
+	effectParams := el.bindEffectParams(executingEffects(funTy, len(eqs[0].Params)))
 	names := make([]string, len(argTys))
 	occs := make([]occurrence, len(argTys))
 	for i, ty := range argTys {
@@ -352,6 +448,7 @@ func (el *elab) lambdaEquations(eqs []ast.Equation, funTy types.Type, at source.
 		patterns[i], bodies[i], spans[i] = eq.Params, eq.Body, eq.NameSpan
 	}
 	inner := el.matchPatternRows(patterns, bodies, spans, occs, at, context)
+	el.popEvidence(effectParams)
 	cur := funTy
 	funs := make([]*types.TFun, len(names))
 	for i := range names {
@@ -359,7 +456,11 @@ func (el *elab) lambdaEquations(eqs []ast.Equation, funTy types.Type, at source.
 		cur = funs[i].Ret
 	}
 	for i := len(names) - 1; i >= 0; i-- {
-		inner = &core.Lambda{Param: names[i], Body: inner, Ty: funs[i]}
+		lam := &core.Lambda{Param: names[i], Body: inner, Ty: funs[i], ParamCapture: el.ck.Sup.FreshCapture()}
+		if i == len(names)-1 {
+			lam.EffectParams = effectParams
+		}
+		inner = lam
 	}
 	return inner
 }
@@ -833,11 +934,14 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 		}
 		ret = &core.ReturnClause{Param: name, Body: retBody}
 	}
-	inst := core.EffectInstance{Unique: info.Effect.Unique, Name: info.Effect.Name}
+	inst := core.EffectInstance{Unique: info.Effect.Unique, Name: info.Effect.Name, Captures: types.ScopeCapture(info.Scope)}
 	for _, a := range info.Effect.Args {
 		inst.Args = append(inst.Args, el.zonkDefault(a))
 	}
-	return &core.Handle{Body: el.expr(e.Body), Effect: inst, Clauses: clauses, Return: ret, Ty: ty}
+	el.pushEvidence([]core.EffectInstance{inst})
+	body := el.expr(e.Body)
+	el.popEvidence([]core.EffectInstance{inst})
+	return &core.Handle{Body: body, Effect: inst, Scope: info.Scope, Scoped: info.Scoped, Clauses: clauses, Return: ret, Ty: ty}
 }
 
 func hasRuntimeVars(s types.Scheme) bool {

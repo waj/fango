@@ -57,7 +57,7 @@ Consequences:
 - Reject unsupported programs before either backend executes them.
 - Keep `resume` a compiler control construct, not an ordinary copyable function.
 - Validate source programs and independently validate lowered control flow.
-- Add scope/capture checking before introducing hidden mutable state or scoped
+- Keep scope/capture checking ahead of hidden mutable state or scoped
   resources. Resume checking alone cannot prove that a resource does not escape.
 - Introduce ownership checking before exposing iterators or task handles that
   own suspended computation. Garbage collection is not deterministic cleanup.
@@ -159,110 +159,22 @@ prefix elaboration or an interpreter-only convenience path.
 
 | Milestone | Depends on | Shippable result |
 | --- | --- | --- |
-| E1: scoped evidence and capture checking | Proven tail-resume Core | Compiler foundation for local state/resources |
-| E2: parameterized tail-resumptive state | E1 | State, Writer, seeded Random, stateful examples |
-| E3: control-aware calls and callback ABIs | Proven tail-resume Core; integrate E1 metadata | Stable direct/exit transport and higher-order calls |
+| E2: parameterized tail-resumptive state | Scoped capture Core | State, Writer, seeded Random, stateful examples |
+| E3: control-aware calls and callback ABIs | Proven tail-resume and scoped capture Core | Stable direct/exit transport and higher-order calls |
 | E4: abort-only effects and Result | E3 | Failure handlers; integrate E2 for State/failure examples |
-| E5: synchronous cleanup scopes | E1, E4 | `Scope.bracket` / `finally`, generic cleanup across exits |
+| E5: synchronous cleanup scopes | Scoped capture Core, E4 | `Scope.bracket` / `finally`, generic cleanup across exits |
 | E6: resource APIs and native error boundaries | E5 | Useful file/resource examples and structured IO failures |
 | E7: selective execution machines | E3, E5 | Internal one-shot suspension and cleanup frames |
-| E8: owned iterators and scoped non-tail handlers | E1, E7 | Pull traversal and checked non-tail resumption |
+| E8: owned iterators and scoped non-tail handlers | Scoped capture Core, E7 | Pull traversal and checked non-tail resumption |
 | E9: structured async and cancellation | E6, E8 | Cooperative tasks, cancellation, nursery cleanup |
 
 E2 and E3 can be developed as independent increments after their prerequisites,
-but no implementation should erase information the other needs. E1–E2 form a
-useful release with no new non-local control flow. E1–E6 form a useful release
+but no implementation should erase information the other needs. E2 forms a
+useful release with no new non-local control flow. E2–E6 form a useful release
 with state, exceptions, and resources but no general continuation objects.
 E7–E9 are explicitly deferred until a concrete suspension consumer warrants
 their compiler and type-system cost. No milestone requires implementing the
 whole table at once.
-
-## E1. Scoped evidence and capture checking
-
-### Deliverable and rationale
-
-Add compiler-only scope identities and capture summaries while preserving
-ordinary function syntax. Do not expose mutable handler cells or scoped file
-handles until this check can prove their valid lifetime (S).
-
-An effect row says which operations execution may perform. A capture summary
-says which particular local capabilities a value retains. One cannot replace
-the other, especially because Fango currently adapts callbacks to erased-row
-ABIs by closing over evidence. See
-[Effekt's capture checking](https://effekt-lang.org/tour/captures) for the
-distinction; the implementation below is a proposed restricted application.
-
-### Proposed compiler metadata
-
-```text
-ScopeId                    -- fresh static binder, instantiated per activation
-CaptureSet = set<ScopeId> | capture variables for generic value parameters
-ValueInfo  = { type, captures }
-Evidence   = { nominalEffect, typeArguments, scope, captures, control }
-```
-
-Introduce each local state's or resource's identity as a fresh skolem during
-checking. Preserve its relation to runtime evidence without emitting a runtime
-"is this scope still live?" check. The static binder and runtime activation
-token serve different purposes; reentrant calls instantiate new activations.
-
-At a scope boundary, require that the local identity is absent from the
-escaping result and its transitive captures. Forbid writing a value capturing
-that identity into an outer state cell, native storage, or retained callback.
-Track captures through records, ADTs, function composition, dictionary method
-values, partial operations, eta expansion, and generalized locals. A returned
-function may require fresh caller-supplied evidence later without capturing
-this activation; do not reject it merely because its arrow mentions an effect.
-
-Do not impose short lifetimes on every immutable evidence value. A pure Reader
-closure whose environment is durable and contains no local resource/state
-obligation may remain first-class. Scope restrictions follow the capabilities
-actually captured. Preserve existing legal pure evidence captures unless a
-specific new lifetime rule applies, and test that compatibility explicitly.
-
-Initial scope checking may conservatively reject some safe higher-order
-programs. It must still admit standard traversals whose callbacks are used
-synchronously and not retained. Add capture-polymorphic summaries for these
-workers rather than silently trusting arbitrary callbacks.
-
-An example rejection, in provisional scoped-API notation:
-
-```fango
-saved = File.withFile "input.txt" (\file -> \_ -> File.readAll file)
-```
-
-```text
-RESOURCE ESCAPES
-The returned function captures `file`, whose scope ends at this withFile call.
-Return the contents, or use the function within the file's scope.
-```
-
-The same diagnostic must arise if the closure is hidden inside an ADT or
-stored through an outer State effect. Returning immutable data read from the
-file remains valid. Do not solve this by turning the returned function's hidden
-resource access into an apparently pure closure on the Go heap.
-
-### Implementation sequence and acceptance
-
-1. Add metadata and constraints in inference, substitution, generalization,
-   instantiation, and annotation checking. Keep scope names out of normal
-   printed types unless needed to explain an error.
-2. Propagate through module interfaces, instances and dictionaries, elaboration,
-   lambda lifting, and callback adaptation. Check before open-row erasure.
-3. Carry enough evidence into Core for lint to check scope introduction,
-   availability, and non-escape after rewrites.
-4. Apply the same checks to REPL inputs and generated/staged code. Checkpoints
-   must roll back new scope/capture metadata on a failed input.
-5. Test higher-order pass-through, enclosing-scope captures, legal returned
-   pure closures, nested same-type scopes, records containing callbacks,
-   cross-module wrappers, and deliberate escape through outer state.
-
-Do not add a general public rank-N type language just for this milestone.
-Scope-polymorphic intrinsic signatures can be compiler-owned initially. The
-open implementation choice is how much capture polymorphism ordinary user
-wrappers need; settle it with `runState`, `withFile`, and List traversal tests
-before freezing metadata. A blanket ban on all escaping functions is not an
-acceptable substitute for tracking the relevant captures.
 
 ## E2. Parameterized tail-resumptive handlers
 
@@ -312,7 +224,7 @@ The user-level type shape is:
 runState : s -> (() ->{State s | e} a) ->{e} StateResult s a
 ```
 
-E1 adds the hidden scope/capture obligations; this ordinary-looking type alone
+The capture checker adds hidden scope/capture obligations; this ordinary-looking type alone
 does not prove local-cell non-escape.
 
 ### Semantics and lowering
@@ -490,7 +402,7 @@ exit, or a diagnostic. Machine adapters obey the same rule later.
    requirements are known. Derive an explicit call convention for every Core
    definition, lambda, operation slot, and application.
 2. Extend `adaptFunctionValue` and eta expansion to adapt transport as well as
-   evidence. Preserve E1 captures, partial application, and per-arrow timing.
+   evidence. Preserve scoped captures, partial application, and per-arrow timing.
 3. Represent Exit results as a tagged sum conceptually:
 
    ```text
@@ -737,7 +649,7 @@ The union notation is explanatory, not source row syntax. Scope introduction
 also constrains `a` and its captures not to retain a borrowed resource identity.
 For a resource-owning bracket, acquisition transfers ownership to the scope,
 the body borrows it, and release is its sole terminal disposal authority.
-The body must not manually close the borrowed handle. Abstract APIs and E1's
+The body must not manually close the borrowed handle. Abstract APIs and the capture checker's
 scope checking must enforce that distinction; non-escape alone does not prevent
 double-close inside the scope.
 
@@ -948,7 +860,7 @@ worker process infrastructure is not a suspended Fango continuation engine.
 
 Build the internal suspension backend with private Core fixtures first. Do not
 enable source-level general resume merely because the machine can run it.
-E8 supplies its static ownership contract. E1–E6 remain useful without E7.
+E8 supplies its static ownership contract. E2–E6 remain useful without E7.
 
 Use an ANF-to-control-flow lowering, optionally expressed through selective CPS
 internally, followed by defunctionalization. Emitting chains of Go closures
@@ -1373,7 +1285,7 @@ numbers from another language's native backend as a Fango performance promise.
 | Use case | Earliest support / limitation |
 | --- | --- |
 | Reader/configuration, direct effect translation | Existing proved direct path |
-| State, Writer, per-run deterministic Random | E2, with E1 scope/capture checking |
+| State, Writer, per-run deterministic Random | E2, with scoped capture checking |
 | Local memoization | E2; cache pure computations or explicitly define skipped-effect semantics |
 | Failure, early return, parser alternatives | E4; fresh attempts, no continuation cloning |
 | Scoped files, locks, temporary resources | E5 mechanism, E6 concrete APIs |
@@ -1398,9 +1310,6 @@ attempts. Do not describe all nondeterministic algorithms as impossible.
 
 These are bounded open decisions for their named milestones.
 
-- **E1 capture polymorphism:** choose the minimal summary language that permits
-  synchronous higher-order wrappers and prevents hidden capability escape.
-  Prove it on ADT/dictionary/eta-adaptation examples before row erasure changes.
 - **E2 state spelling:** finalize contextual binder/resume syntax, evaluation
   order, and diagnostic spans. One record-valued parameter is sufficient
   initially. No state-syntax choice implies a need for cleanup syntax.
@@ -1453,8 +1362,8 @@ to reproduce another language's runtime or surface syntax.
   Use for E5/E7 scope lifetime and abandonment questions; multi-shot initializer
   machinery is not required by the chosen one-shot model.
 - [Effekt: Captures](https://effekt-lang.org/tour/captures).
-  Useful for E1's distinction between execution effects and values retaining
-  capabilities. E1 still needs its own Fango-specific rules and implementation.
+  Informs the implemented distinction between execution effects and values
+  retaining capabilities; Fango uses its own restricted summary rules.
 - [Continuation Passing Style for Effect Handlers — Hillerström and colleagues](https://dhil.net/research/papers/cps-handlers-draft-april2017.pdf).
   Useful for specifying E7's control translation before choosing frame layout.
 - [Defunctionalization at Work — Danvy and Nielsen](https://www.brics.dk/RS/01/23/).

@@ -98,6 +98,36 @@ is currently rejected. These restrictions let both backends implement handlers
 with stack-local evidence and direct returns, without goroutines, channels,
 panic sentinels, or continuation objects.
 
+Every handler activation also has a compiler-only `ScopeID`. Evidence in Core
+therefore names both its nominal effect and the activation (or an abstract
+capture variable when a worker or lambda receives the evidence from its
+caller). This distinction is load-bearing for nested handlers of the same
+effect: operation selection remains nominal, while capture and availability
+checks distinguish the two lexical capabilities. Scope and capture identities
+are erased by both runtime backends; they are not liveness flags.
+
+Capture summaries are separate from effect rows. Each worker parameter and
+caller-supplied evidence parameter binds a capture variable, and a fixed-point
+analysis records which of those variables or concrete scopes may occur in the
+worker's result. Calls substitute actual argument/evidence captures into that
+summary. Lambdas retain the captures used by their body after removing their
+own term and evidence binders; constructors and records retain field captures;
+matches, partial applications, dictionary values, lifted locals, and callback
+row adapters propagate them. Unknown indirect calls conservatively retain
+capture-capable arguments. Concrete scalar and Unit results cannot carry a
+capture, and nominal ADT schemas are inspected transitively so ordinary
+synchronous traversals returning immutable data are admitted.
+
+Source-declared effects remain durable by default, preserving existing Reader
+closures. Compiler-owned state/resource APIs may mark evidence scoped, mark an
+operation result as borrowing its evidence, or mark an operation as retaining
+arguments. A scoped handler rejects a result that transitively retains its
+activation, including a closure hidden in an ADT or one passed through another
+worker. A retaining operation also rejects storing an inner scoped capture in
+different evidence. Core lint independently recomputes summaries, checks
+scope introduction and exact evidence-stack availability, and repeats the
+non-escape proof after ANF, lifting, callback adaptation, and specialization.
+
 ## Compiler pipeline
 
 The batch pipeline is:
@@ -452,7 +482,8 @@ so emitted text is deterministic. Decoding remains schema-specific fango code
 in the Todo example rather than a compiler facility.
 
 A failed expansion rolls back. `(*Checker).Checkpoint` restores the checked
-prefix along with the rest of the declaration environment, and tells the
+prefix and installed capture summaries along with the rest of the declaration
+environment, and tells the
 compile-time evaluator to discard an environment that no longer describes it —
 which is why a REPL `deriving` clause whose deriver fails leaves no type
 behind.
@@ -485,6 +516,12 @@ arithmetic and constant folding without a compiler-owned numeric capability.
 Effect evidence precedes ordinary parameters in the Go ABI; dictionary
 parameters then precede source arguments. Effects on a method arrow execute
 when that arrow is applied, not when its dictionary is constructed.
+Evidence arguments additionally carry erased capture metadata. A definition's
+effect parameters bind symbolic captures; a handler body receives the concrete
+scope capture; and callback adaptation substitutes a concrete capture before
+erasing an open-row ABI. Core lint compares the complete lexical evidence
+stack, so two active instances of the same nominal effect are not
+interchangeable.
 An instance implementation without syntactic parameters is checked for a pure
 construction effect row; producing a function cannot conceal eager IO.
 Instance methods carry their owning instance identity through the typed AST.

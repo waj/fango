@@ -111,20 +111,20 @@ func (el *elab) app(e *ast.App) core.Expr {
 	return res
 }
 
-func effectInstance(op *types.EffectOp, ty types.Type) core.EffectInstance {
+func (el *elab) effectInstance(op *types.EffectOp, ty types.Type) core.EffectInstance {
 	t := ty
 	for i := 0; i < op.Arity; i++ {
 		f := t.(*types.TFun)
 		if i == op.Arity-1 {
 			for _, l := range f.Eff.Labels {
 				if l.Unique == op.Owner.Unique {
-					return core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...)}
+					return core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Captures: el.evidenceCaptures(l.Unique)}
 				}
 			}
 		}
 		t = f.Ret
 	}
-	return core.EffectInstance{Unique: op.Owner.Unique, Name: op.Owner.Name}
+	return core.EffectInstance{Unique: op.Owner.Unique, Name: op.Owner.Name, Captures: el.evidenceCaptures(op.Owner.Unique)}
 }
 
 func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args []ast.Expr) core.Expr {
@@ -146,9 +146,20 @@ func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args [
 		el.tmp++
 		coreArgs = append(coreArgs, &core.VarRef{Name: n, Ty: argTys[i]})
 	}
-	var body core.Expr = &core.Perform{Op: op, Effect: effectInstance(op, rawTy), Args: coreArgs, Ty: ret}
+	var effectParams []core.EffectInstance
+	if len(args) < op.Arity {
+		effectParams = el.bindEffectParams(executingEffects(arrowAt(opTy, len(args)), op.Arity-len(args)))
+	}
+	var body core.Expr = &core.Perform{Op: op, Effect: el.effectInstance(op, rawTy), Args: coreArgs, Ty: ret}
+	if len(effectParams) > 0 {
+		el.popEvidence(effectParams)
+	}
 	for i := op.Arity - 1; i >= len(args); i-- {
-		body = &core.Lambda{Param: coreArgs[i].(*core.VarRef).Name, Body: body, Ty: arrowAt(opTy, i)}
+		lam := &core.Lambda{Param: coreArgs[i].(*core.VarRef).Name, Body: body, Ty: arrowAt(opTy, i), ParamCapture: el.ck.Sup.FreshCapture()}
+		if i == op.Arity-1 {
+			lam.EffectParams = effectParams
+		}
+		body = lam
 	}
 	return body
 }
@@ -183,7 +194,7 @@ func (el *elab) nativeApply(n *types.NativeInfo, nativeTy types.Type, args []ast
 	}
 	var body core.Expr = el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Args: coreArgs, Ty: ret})
 	for i := n.Arity - 1; i >= len(args); i-- {
-		body = &core.Lambda{Param: coreArgs[i].(*core.VarRef).Name, Body: body, Ty: arrowAt(nativeTy, i)}
+		body = &core.Lambda{Param: coreArgs[i].(*core.VarRef).Name, Body: body, Ty: arrowAt(nativeTy, i), ParamCapture: el.ck.Sup.FreshCapture()}
 	}
 	return body
 }
@@ -206,7 +217,7 @@ func (el *elab) valueApp(callee, arg core.Expr) core.Expr {
 	}
 	for _, l := range types.SortedRow(fn.Eff).Labels {
 		if types.SurfaceName(l.Name) != "IO" {
-			app.EvidenceArgs = append(app.EvidenceArgs, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...)})
+			app.EvidenceArgs = append(app.EvidenceArgs, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Captures: el.evidenceCaptures(l.Unique)})
 		}
 	}
 	return app
@@ -394,6 +405,9 @@ func (el *elab) workerEvidence(name string, arity int, tyArgs []types.Type) []co
 			}
 		}
 	}
+	for i := range effects {
+		effects[i].Captures = el.evidenceCaptures(effects[i].Unique)
+	}
 	return effects
 }
 
@@ -434,6 +448,26 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 	}
 	switch e := e.(type) {
 	case *core.Lambda:
+		var kept []core.EffectInstance
+		sub := map[types.CaptureVar]types.CaptureSet{}
+		for _, ev := range e.EffectParams {
+			retained := false
+			for _, label := range wantFn.Eff.Labels {
+				if label.Unique == ev.Unique {
+					retained = true
+					break
+				}
+			}
+			if retained {
+				kept = append(kept, ev)
+				continue
+			}
+			for _, v := range ev.Captures.Vars {
+				sub[v] = el.evidenceCaptures(ev.Unique)
+			}
+		}
+		e.Body = core.SubstituteCaptureVars(e.Body, sub)
+		e.EffectParams = kept
 		e.Body = el.adaptFunctionValue(e.Body, wantFn.Ret)
 		e.Ty = want
 		return e
@@ -458,9 +492,12 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 	name := fmt.Sprintf("_adapt%d", el.tmp)
 	el.tmp++
 	arg := &core.VarRef{Name: name, Ty: wantFn.Arg}
+	effectParams := el.bindEffectParams(executingEffects(want, 1))
 	body := el.valueApp(e, arg)
+	el.popEvidence(effectParams)
 	body = el.adaptFunctionValue(body, wantFn.Ret)
-	return &core.Lambda{Param: name, Body: body, Ty: &types.TFun{Arg: wantFn.Arg, Eff: wantFn.Eff, Ret: wantFn.Ret}}
+	return &core.Lambda{Param: name, Body: body, Ty: &types.TFun{Arg: wantFn.Arg, Eff: wantFn.Eff, Ret: wantFn.Ret},
+		ParamCapture: el.ck.Sup.FreshCapture(), EffectParams: effectParams}
 }
 
 // partial eta-expands an unsaturated worker or constructor application into
@@ -503,12 +540,25 @@ func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 		coreArgs = append(coreArgs, &core.VarRef{Name: lamParams[i], Ty: argTys[taken+i]})
 	}
 
-	var body core.Expr = c.saturatedApp(coreArgs)
-
 	// Wrap lambdas innermost-out; each level's type is the remaining chain.
 	lamTy := workerTy
 	for range taken {
 		lamTy = lamTy.(*types.TFun).Ret
+	}
+	var effectParams []core.EffectInstance
+	if missing > 0 {
+		effectParams = el.bindEffectParams(executingEffects(lamTy, missing))
+		for i := range c.evidence {
+			for _, ev := range effectParams {
+				if c.evidence[i].Unique == ev.Unique {
+					c.evidence[i].Captures = ev.Captures
+				}
+			}
+		}
+	}
+	var body core.Expr = c.saturatedApp(coreArgs)
+	if missing > 0 {
+		el.popEvidence(effectParams)
 	}
 	tys := make([]types.Type, missing)
 	t := lamTy
@@ -517,7 +567,11 @@ func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 		t = t.(*types.TFun).Ret
 	}
 	for i := missing - 1; i >= 0; i-- {
-		body = &core.Lambda{Param: lamParams[i], Body: body, Ty: tys[i]}
+		lam := &core.Lambda{Param: lamParams[i], Body: body, Ty: tys[i], ParamCapture: el.ck.Sup.FreshCapture()}
+		if i == missing-1 {
+			lam.EffectParams = effectParams
+		}
+		body = lam
 	}
 
 	// Hoisted args evaluate at partial-creation time: Lets wrap outside.

@@ -105,6 +105,7 @@ type Checker struct {
 	CurrentOwner      string
 	PendingPreds      []types.Pred
 	ExprSchemes       map[ast.Expr]types.Scheme
+	ExprCaptures      map[ast.Expr]types.CaptureSet
 	Desugared         map[ast.Expr]ast.Expr
 	PreludeInfos      []DeclInfo
 	PreludeOwners     map[string]bool
@@ -147,6 +148,7 @@ type Checker struct {
 
 	OpCalls      map[*ast.App]*types.EffectOp
 	HandleInfos  map[*ast.Handle]*HandlerInfo
+	ScopeSpans   map[types.ScopeID]source.Span
 	ResumeCalls  map[*ast.App]bool
 	ResumeOwners map[*ast.Resume]types.ResumeID
 	ResumeGen    types.ResumeID
@@ -168,7 +170,8 @@ type Checker struct {
 
 	// BindSchemes records each block binding's generalized scheme —
 	// elaboration lifts a binding whose scheme quantifies (doc/design.md, "Go backend and runtime").
-	BindSchemes map[*ast.LocalBind]types.Scheme
+	BindSchemes      map[*ast.LocalBind]types.Scheme
+	CaptureSummaries map[string]types.CaptureSummary
 
 	// LiftGen numbers lambda-lifted definitions session-wide, so REPL
 	// inputs across a session never collide (elaborate/lift.go).
@@ -228,6 +231,41 @@ type Checker struct {
 // declaration without the compile-time evaluator carrying the checker around.
 func (ck *Checker) ADT(unique int) *types.ADTInfo { return ck.ADTs[unique] }
 
+// MarkEffectScoped applies compiler-owned lifetime policy to an effect. The
+// surface language deliberately has no annotation for this: State and resource
+// APIs opt in when installed by the compiler/standard library.
+func (ck *Checker) MarkEffectScoped(name string) bool {
+	eff := ck.Effects[name]
+	if eff == nil {
+		return false
+	}
+	eff.Scoped = true
+	for _, info := range ck.HandleInfos {
+		if info.Effect.Unique == eff.Unique {
+			info.Scoped = true
+		}
+	}
+	return true
+}
+
+func (ck *Checker) MarkOperationBorrowsEvidence(name string) bool {
+	op := ck.Operations[name]
+	if op == nil {
+		return false
+	}
+	op.BorrowsEvidence = true
+	return true
+}
+
+func (ck *Checker) MarkOperationRetainsArguments(name string) bool {
+	op := ck.Operations[name]
+	if op == nil {
+		return false
+	}
+	op.RetainsArguments = true
+	return true
+}
+
 // CompileTimeEval elaborates and evaluates one already-checked splice
 // operand, returning the *meta.Code it produced.
 type CompileTimeEval func(operand ast.Expr) (any, []diag.Error)
@@ -236,6 +274,7 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 	ck := &Checker{
 		Classes: map[string]*types.ClassInfo{}, Methods: map[string]*types.MethodInfo{},
 		ExprSchemes:       map[ast.Expr]types.Scheme{},
+		ExprCaptures:      map[ast.Expr]types.CaptureSet{},
 		Desugared:         map[ast.Expr]ast.Expr{},
 		Aliases:           map[string]string{},
 		Sup:               sup,
@@ -256,24 +295,26 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 			"Bool":   b.Bool,
 			"()":     b.Unit,
 		},
-		Effects:         map[string]*types.EffectInfo{},
-		EffectsByUnique: map[int]*types.EffectInfo{},
-		Operations:      map[string]*types.EffectOp{},
-		Natives:         map[string]*types.NativeInfo{},
-		Fixity:          fixity.Builtin(),
-		OpCalls:         map[*ast.App]*types.EffectOp{},
-		HandleInfos:     map[*ast.Handle]*HandlerInfo{},
-		ResumeCalls:     map[*ast.App]bool{},
-		ResumeOwners:    map[*ast.Resume]types.ResumeID{},
-		Workers:         map[string]int{},
-		BindTypes:       map[*ast.LocalBind]types.Type{},
-		PatTypes:        map[ast.Pattern]types.Type{},
-		BindSchemes:     map[*ast.LocalBind]types.Scheme{},
-		EntryName:       "main",
-		Templates:       &meta.Table{},
-		QuoteTemplates:  map[*ast.Quote]int{},
-		QuoteHoles:      map[*ast.Quote][]*ast.Splice{},
-		Derivers:        map[string]*DeriverInfo{},
+		Effects:          map[string]*types.EffectInfo{},
+		EffectsByUnique:  map[int]*types.EffectInfo{},
+		Operations:       map[string]*types.EffectOp{},
+		Natives:          map[string]*types.NativeInfo{},
+		Fixity:           fixity.Builtin(),
+		OpCalls:          map[*ast.App]*types.EffectOp{},
+		HandleInfos:      map[*ast.Handle]*HandlerInfo{},
+		ScopeSpans:       map[types.ScopeID]source.Span{},
+		ResumeCalls:      map[*ast.App]bool{},
+		ResumeOwners:     map[*ast.Resume]types.ResumeID{},
+		Workers:          map[string]int{},
+		BindTypes:        map[*ast.LocalBind]types.Type{},
+		PatTypes:         map[ast.Pattern]types.Type{},
+		BindSchemes:      map[*ast.LocalBind]types.Scheme{},
+		CaptureSummaries: map[string]types.CaptureSummary{},
+		EntryName:        "main",
+		Templates:        &meta.Table{},
+		QuoteTemplates:   map[*ast.Quote]int{},
+		QuoteHoles:       map[*ast.Quote][]*ast.Splice{},
+		Derivers:         map[string]*DeriverInfo{},
 	}
 	// Bool is an ordinary ADT in the checker (doc/design.md, "Type inference") — patterns, case
 	// exhaustiveness, and the ctor table treat it like any declared type.
@@ -316,6 +357,8 @@ type HandlerClauseInfo struct {
 
 type HandlerInfo struct {
 	Effect     types.EffLabel
+	Scope      types.ScopeID
+	Scoped     bool
 	Result     types.Type
 	BodyResult types.Type
 	Clauses    []HandlerClauseInfo
@@ -842,11 +885,24 @@ func (ck *Checker) Decl(d *ast.ValueDecl) (DeclInfo, []diag.Error) {
 // BindDecl installs a checked declaration: the environment binding plus
 // worker-table upkeep (redefining a worker as a value evicts its arity).
 func (ck *Checker) BindDecl(info DeclInfo) {
+	if summary, ok := ck.CaptureSummaries[info.Name]; ok {
+		info.Scheme.CaptureVars = append([]types.CaptureVar(nil), summary.Vars...)
+		info.Scheme.Captures = summary.Captures
+	}
 	ck.Env.Bind(info.Name, info.Scheme)
 	if len(info.Params) > 0 {
 		ck.Workers[info.Name] = len(info.Params)
 	} else {
 		delete(ck.Workers, info.Name)
+	}
+}
+
+func (ck *Checker) SetCaptureSummary(name string, vars []types.CaptureVar, captures types.CaptureSet) {
+	summary := types.CaptureSummary{Vars: append([]types.CaptureVar(nil), vars...), Captures: captures}
+	ck.CaptureSummaries[name] = summary
+	if sch, ok := ck.Env.Lookup(name); ok {
+		sch.CaptureVars, sch.Captures = summary.Vars, summary.Captures
+		ck.Env.Bind(name, sch)
 	}
 }
 
@@ -1156,6 +1212,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		}
 		if localScheme, ok := g.locals.lookup(e.Name); ok {
 			g.ck.ExprSchemes[e] = localScheme
+			g.ck.ExprCaptures[e] = g.instantiateCaptures(localScheme)
 			ty = g.instantiateAt(localScheme, e.Sp, e.Name)
 		} else {
 			scheme, ok := g.ck.Env.Lookup(e.Name)
@@ -1166,6 +1223,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 				break
 			}
 			g.ck.ExprSchemes[e] = scheme
+			g.ck.ExprCaptures[e] = g.instantiateCaptures(scheme)
 			// An operation in value position is not yet being performed. Its
 			// predicates are checked when a saturated operation spine is formed;
 			// this also lets main's ordinary shape check diagnose `main = print`.
@@ -1437,7 +1495,8 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	g.ambient = types.Row{Labels: []types.EffLabel{label}, Tail: residualVar}
 	bodyTy := g.expr(e.Body)
 	g.ambient = residual
-	info := &HandlerInfo{Effect: label, Result: result, BodyResult: bodyTy}
+	info := &HandlerInfo{Effect: label, Scope: g.ck.Sup.FreshScope(), Scoped: first.Owner.Scoped, Result: result, BodyResult: bodyTy}
+	g.ck.ScopeSpans[info.Scope] = e.Sp
 	seen := map[string]bool{}
 	for i := range e.Clauses {
 		cl := &e.Clauses[i]
@@ -2179,6 +2238,7 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 		v := &ast.Var{Name: p.Name, Sp: p.NameSpan}
 		ty := g.instantiateAt(sch, p.Sp, p.Name)
 		g.ck.ExprSchemes[v], g.ck.ExprTypes[v], g.ck.PinExprs[p] = sch, ty, v
+		g.ck.ExprCaptures[v] = g.instantiateCaptures(sch)
 		g.preds = append(g.preds, predObligation{pred: g.ck.StandardPred("Eq", ty), span: p.Sp})
 		return ty
 	case *ast.PRecord:
@@ -2277,6 +2337,17 @@ func (g *generator) instantiate(s types.Scheme) types.Type {
 		m[v.ID] = g.ck.Sup.FreshVar(v.Kind)
 	}
 	return types.SubstRigid(s.Body, m)
+}
+
+func (g *generator) instantiateCaptures(s types.Scheme) types.CaptureSet {
+	if len(s.CaptureVars) == 0 {
+		return s.Captures
+	}
+	m := make(map[types.CaptureVar]types.CaptureVar, len(s.CaptureVars))
+	for _, v := range s.CaptureVars {
+		m[v] = g.ck.Sup.FreshCapture()
+	}
+	return types.SubstCaptureVars(s.Captures, m)
 }
 
 func (g *generator) instantiateAt(s types.Scheme, sp source.Span, op string) types.Type {

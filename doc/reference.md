@@ -1052,6 +1052,13 @@ the owning operation clause's location. Nested operation clauses bind their own
 resume, while nested handled bodies and return groups retain the surrounding
 resume binding.
 
+Ordinary user-declared effects have durable evidence: returning a pure closure
+that captures an immutable Reader-style handler remains legal. There is no
+scope annotation in source syntax, and no current standard-library API exposes
+a scoped capability. Scoped lifetime policy is compiler-owned foundation for
+the later state and resource APIs, so this release does not shorten the
+lifetime of any existing source value.
+
 A reusable handler wrapper may annotate that residual flow with an open row
 tail. The handled label disappears from the callback's row while every other
 effect the callback performs passes through the wrapper's own row:

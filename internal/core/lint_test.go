@@ -16,7 +16,8 @@ func resumeFixture(body func(*types.Builtins) Expr) (*Prog, *types.Builtins) {
 	eff.Ops = []*types.EffectOp{op}
 	h := &Handle{
 		Body:   &IntLit{Val: 0, Ty: b.Int},
-		Effect: EffectInstance{Unique: eff.Unique, Name: eff.Name},
+		Effect: EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(1)},
+		Scope:  1,
 		Clauses: []HandlerClause{{Op: op, ResumeID: 1, Params: []string{"()"},
 			ParamTypes: []types.Type{b.Unit}, ResultType: b.Int, Body: body(b)}},
 		Ty: b.Int,
@@ -70,5 +71,103 @@ func TestLintRejectsMalformedResumeCore(t *testing.T) {
 				t.Fatalf("Lint errors = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func scopedCaptureFixture(capturing bool) (*Prog, *types.Builtins) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	eff := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Borrow", Scoped: true}
+	op := &types.EffectOp{Owner: eff, Index: 0, Name: "read", Arity: 1,
+		ParamTypes: []types.Type{b.Unit}, ResultType: b.Int}
+	eff.Ops = []*types.EffectOp{op}
+	scope := types.ScopeID(1)
+	fn := &types.TFun{Arg: b.Unit, Ret: b.Int}
+	body := Expr(&Lambda{Param: "_", ParamCapture: 1, Ty: fn, Body: &IntLit{Val: 1, Ty: b.Int}})
+	if capturing {
+		body = &Lambda{Param: "_", ParamCapture: 1, Ty: fn, Body: &Perform{
+			Op: op, Effect: EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(scope)},
+			Args: []Expr{&UnitLit{Ty: b.Unit}}, Ty: b.Int}}
+	}
+	h := &Handle{Body: body, Effect: EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(scope)},
+		Scope: scope, Scoped: true, Ty: fn,
+		Clauses: []HandlerClause{{Op: op, ResumeID: 1, Params: []string{"()"}, ParamTypes: []types.Type{b.Unit}, ResultType: b.Int,
+			Body: &ResumeTail{Owner: 1, Value: &IntLit{Val: 1, Ty: b.Int}, ClauseResult: fn}}}}
+	return &Prog{Effects: []*types.EffectInfo{eff}, Defs: []Def{{Name: "main", Type: fn, Body: h}}}, b
+}
+
+func TestLintRejectsScopedEvidenceCapturedByResult(t *testing.T) {
+	p, b := scopedCaptureFixture(true)
+	InferCaptures(p, b)
+	if got := lintText(p, b); !strings.Contains(got, "RESOURCE ESCAPES") {
+		t.Fatalf("Lint error = %q, want RESOURCE ESCAPES", got)
+	}
+}
+
+func TestLintAllowsReturnedPureClosureFromScopedHandler(t *testing.T) {
+	p, b := scopedCaptureFixture(false)
+	InferCaptures(p, b)
+	if got := lintText(p, b); got != "" {
+		t.Fatalf("Lint rejected pure returned closure:\n%s", got)
+	}
+}
+
+func TestCaptureSummaryPropagatesThroughWorker(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	fn := &types.TFun{Arg: b.Unit, Ret: b.Int}
+	idTy := &types.TFun{Arg: fn, Ret: fn}
+	id := Def{Name: "id", Type: idTy, Params: []string{"x"}, ParamCaptures: []types.CaptureVar{1},
+		Body: &VarRef{Name: "x", Local: true, Ty: fn}}
+	eff := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Borrow", Scoped: true}
+	op := &types.EffectOp{Owner: eff, Index: 0, Name: "read", Arity: 1, ParamTypes: []types.Type{b.Unit}, ResultType: b.Int}
+	eff.Ops = []*types.EffectOp{op}
+	scope := types.ScopeID(1)
+	callback := &Lambda{Param: "_", ParamCapture: 2, Ty: fn, Body: &Perform{Op: op,
+		Effect: EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(scope)},
+		Args:   []Expr{&UnitLit{Ty: b.Unit}}, Ty: b.Int}}
+	call := &App{CalleeKind: Worker, Callee: &VarRef{Name: "id", Ty: idTy}, Args: []Expr{callback}, Ty: fn}
+	h := &Handle{Body: call, Effect: EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(scope)},
+		Scope: scope, Scoped: true, Ty: fn, Clauses: []HandlerClause{{Op: op, ResumeID: 1, Params: []string{"()"},
+			ParamTypes: []types.Type{b.Unit}, ResultType: b.Int,
+			Body: &ResumeTail{Owner: 1, Value: &IntLit{Val: 1, Ty: b.Int}, ClauseResult: fn}}}}
+	p := &Prog{Effects: []*types.EffectInfo{eff}, Defs: []Def{id, {Name: "main", Type: fn, Body: h}}}
+	InferCaptures(p, b)
+	if !p.Defs[0].ResultCaptures.HasVar(1) {
+		t.Fatalf("id summary = %#v, want parameter capture", p.Defs[0].ResultCaptures)
+	}
+	if got := lintText(p, b); !strings.Contains(got, "RESOURCE ESCAPES") {
+		t.Fatalf("Lint error = %q, want propagated RESOURCE ESCAPES", got)
+	}
+}
+
+func TestLintRejectsScopedCaptureStoredThroughOuterEvidence(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	borrow := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Borrow", Scoped: true}
+	read := &types.EffectOp{Owner: borrow, Index: 0, Name: "read", Arity: 1, ParamTypes: []types.Type{b.Unit}, ResultType: b.Int}
+	borrow.Ops = []*types.EffectOp{read}
+	fn := &types.TFun{Arg: b.Unit, Ret: b.Int}
+	store := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Store"}
+	put := &types.EffectOp{Owner: store, Index: 0, Name: "put", Arity: 1, ParamTypes: []types.Type{fn}, ResultType: b.Unit, RetainsArguments: true}
+	store.Ops = []*types.EffectOp{put}
+	outerScope, innerScope := types.ScopeID(1), types.ScopeID(2)
+	callback := &Lambda{Param: "_", ParamCapture: 1, Ty: fn, Body: &Perform{Op: read,
+		Effect: EffectInstance{Unique: borrow.Unique, Name: borrow.Name, Captures: types.ScopeCapture(innerScope)},
+		Args:   []Expr{&UnitLit{Ty: b.Unit}}, Ty: b.Int}}
+	storeCall := &Perform{Op: put, Effect: EffectInstance{Unique: store.Unique, Name: store.Name, Captures: types.ScopeCapture(outerScope)},
+		Args: []Expr{callback}, Ty: b.Unit}
+	inner := &Handle{Body: storeCall, Effect: EffectInstance{Unique: borrow.Unique, Name: borrow.Name, Captures: types.ScopeCapture(innerScope)},
+		Scope: innerScope, Scoped: true, Ty: b.Unit, Clauses: []HandlerClause{{Op: read, ResumeID: 1, Params: []string{"()"},
+			ParamTypes: []types.Type{b.Unit}, ResultType: b.Int,
+			Body: &ResumeTail{Owner: 1, Value: &IntLit{Val: 1, Ty: b.Int}, ClauseResult: b.Unit}}}}
+	outer := &Handle{Body: inner, Effect: EffectInstance{Unique: store.Unique, Name: store.Name, Captures: types.ScopeCapture(outerScope)},
+		Scope: outerScope, Ty: b.Unit, Clauses: []HandlerClause{{Op: put, ResumeID: 2, Params: []string{"f"},
+			ParamTypes: []types.Type{fn}, ResultType: b.Unit,
+			Body: &ResumeTail{Owner: 2, Value: &UnitLit{Ty: b.Unit}, ClauseResult: b.Unit}}}}
+	p := &Prog{Effects: []*types.EffectInfo{borrow, store}, Defs: []Def{{Name: "main", Type: b.Unit, Body: outer}}}
+	InferCaptures(p, b)
+	if got := lintText(p, b); !strings.Contains(got, "RESOURCE ESCAPES") {
+		t.Fatalf("Lint error = %q, want RESOURCE ESCAPES", got)
 	}
 }

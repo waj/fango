@@ -20,9 +20,10 @@ type Prog struct {
 }
 
 type EffectInstance struct {
-	Unique int
-	Name   string
-	Args   []types.Type
+	Unique   int
+	Name     string
+	Args     []types.Type
+	Captures types.CaptureSet
 }
 
 type Def struct {
@@ -36,9 +37,11 @@ type Def struct {
 	// as a function, re-evaluated per use.
 	TyParams []*types.TVar
 
-	Params       []string // non-empty ⇒ worker (doc/design.md, "Go backend and runtime"); uncurried Go signature = peeling len(Params) arrows off Type
-	EffectParams []EffectInstance
-	Body         Expr
+	Params         []string // non-empty ⇒ worker (doc/design.md, "Go backend and runtime"); uncurried Go signature = peeling len(Params) arrows off Type
+	ParamCaptures  []types.CaptureVar
+	EffectParams   []EffectInstance
+	ResultCaptures types.CaptureSet
+	Body           Expr
 }
 
 // IsWorker reports whether the definition emits as a function: it has term
@@ -110,6 +113,8 @@ type ReturnClause struct {
 type Handle struct {
 	Body    Expr
 	Effect  EffectInstance
+	Scope   types.ScopeID
+	Scoped  bool
 	Clauses []HandlerClause
 	Return  *ReturnClause
 	Ty      types.Type
@@ -144,6 +149,10 @@ type Lambda struct {
 	Param string
 	Body  Expr
 	Ty    types.Type // a TFun; Ty.Ret == Body type
+	// ParamCapture and EffectParams bind symbolic captures used by Core's
+	// non-escape analysis. They have no runtime representation.
+	ParamCapture types.CaptureVar
+	EffectParams []EffectInstance
 }
 
 type VarRef struct {

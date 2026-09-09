@@ -62,7 +62,7 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 		rawGenTy: rawGenTy,
 		vars:     runtimeRigidVars(rawGenTy),
 		arity:    len(frees) + len(dictNames) + len(bind.Params),
-		effects:  executingEffects(rawGenTy, len(frees)+len(dictNames)+len(bind.Params)),
+		effects:  el.bindEffectParams(executingEffects(rawGenTy, len(frees)+len(dictNames)+len(bind.Params))),
 	}
 	el.lifted[bind.Name] = lf
 
@@ -81,13 +81,19 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 	} else {
 		body = el.expr(bind.Body)
 	}
+	el.popEvidence(lf.effects)
+	paramCaptures := make([]types.CaptureVar, len(params))
+	for i := range paramCaptures {
+		paramCaptures[i] = el.ck.Sup.FreshCapture()
+	}
 	el.aux = append(el.aux, core.Def{
-		Name:         lf.defName,
-		Type:         genTy,
-		TyParams:     lf.vars,
-		Params:       params,
-		EffectParams: executingEffects(rawGenTy, lf.arity),
-		Body:         el.anf(body),
+		Name:          lf.defName,
+		Type:          genTy,
+		TyParams:      lf.vars,
+		Params:        params,
+		ParamCaptures: paramCaptures,
+		EffectParams:  lf.effects,
+		Body:          el.anf(body),
 	})
 }
 
@@ -119,6 +125,7 @@ func (el *elab) liftedCallee(lf *liftedLocal, occTy, rawOccTy types.Type) callee
 	evidence := append([]core.EffectInstance(nil), lf.effects...)
 	for i := range evidence {
 		evidence[i].Args = append([]types.Type(nil), evidence[i].Args...)
+		evidence[i].Captures = el.evidenceCaptures(evidence[i].Unique)
 	}
 	if len(lf.vars) > 0 {
 		tyArgs = matchTyArgs(lf.rawGenTy, lf.vars, rawTy)

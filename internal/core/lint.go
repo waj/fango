@@ -17,7 +17,9 @@ import (
 func Lint(p *Prog, b *types.Builtins) []error {
 	l := &linter{b: b, scope: map[string]bool{}, workers: map[string]*Def{},
 		adts: map[int]*types.ADTInfo{}, effects: map[int]*types.EffectInfo{},
-		tyParams: map[int]bool{}, evidence: map[int]int{}, resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives}
+		tyParams: map[int]bool{}, evidence: map[int]int{}, evidenceCaptures: map[int][]types.CaptureSet{},
+		captureVars: map[types.CaptureVar]bool{}, scopeIDs: map[types.ScopeID]bool{}, activeScopes: map[types.ScopeID]bool{},
+		resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives}
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
 	}
@@ -51,6 +53,15 @@ func Lint(p *Prog, b *types.Builtins) []error {
 			l.tyParams[v.ID] = true
 		}
 		l.typ(d.Type, where)
+		if len(d.ParamCaptures) != len(d.Params) {
+			l.errorf("%s: has %d parameter capture binders, want %d", where, len(d.ParamCaptures), len(d.Params))
+		}
+		for _, v := range d.ParamCaptures {
+			if v == 0 || l.captureVars[v] {
+				l.errorf("%s: invalid or duplicate capture variable %d", where, v)
+			}
+			l.captureVars[v] = true
+		}
 		lastEffect := -1
 		for _, ev := range d.EffectParams {
 			l.effectInstance(ev, where)
@@ -59,6 +70,7 @@ func Lint(p *Prog, b *types.Builtins) []error {
 			}
 			lastEffect = ev.Unique
 			l.evidence[ev.Unique]++
+			l.bindEvidenceCaptures(ev, where)
 		}
 		// Every declared type parameter must be used by the value type or by
 		// typed evidence (phantom effect parameters need not occur in Type).
@@ -113,8 +125,17 @@ func Lint(p *Prog, b *types.Builtins) []error {
 			}
 			l.expr(d.Body, where)
 		}
+		for _, v := range d.ResultCaptures.Vars {
+			if !l.captureVars[v] {
+				l.errorf("%s: result capture summary references unbound variable %d", where, v)
+			}
+		}
 		for _, ev := range d.EffectParams {
 			l.evidence[ev.Unique]--
+			l.unbindEvidenceCaptures(ev)
+		}
+		for _, v := range d.ParamCaptures {
+			delete(l.captureVars, v)
 		}
 	}
 	if p.EntryDisplay != nil {
@@ -124,6 +145,7 @@ func Lint(p *Prog, b *types.Builtins) []error {
 			l.errorf("entry display must return String")
 		}
 	}
+	l.errs = append(l.errs, verifyCaptures(p, b)...)
 	return l.errs
 }
 
@@ -161,19 +183,23 @@ func VerifyResumeStructure(e Expr) []error {
 }
 
 type linter struct {
-	b           *types.Builtins
-	scope       map[string]bool // def names + enclosing Let/param names: no shadowing
-	workers     map[string]*Def
-	adts        map[int]*types.ADTInfo // declared ADTs: equatable via derived eq
-	effects     map[int]*types.EffectInfo
-	tyParams    map[int]bool // the enclosing def's declared rigid vars
-	evidence    map[int]int
-	natives     map[string]*types.NativeInfo
-	resumeOwner types.ResumeID
-	resumeIDs   map[types.ResumeID]bool
-	resumeArg   types.Type
-	resumeRet   types.Type
-	errs        []error
+	b                *types.Builtins
+	scope            map[string]bool // def names + enclosing Let/param names: no shadowing
+	workers          map[string]*Def
+	adts             map[int]*types.ADTInfo // declared ADTs: equatable via derived eq
+	effects          map[int]*types.EffectInfo
+	tyParams         map[int]bool // the enclosing def's declared rigid vars
+	evidence         map[int]int
+	evidenceCaptures map[int][]types.CaptureSet
+	captureVars      map[types.CaptureVar]bool
+	scopeIDs         map[types.ScopeID]bool
+	activeScopes     map[types.ScopeID]bool
+	natives          map[string]*types.NativeInfo
+	resumeOwner      types.ResumeID
+	resumeIDs        map[types.ResumeID]bool
+	resumeArg        types.Type
+	resumeRet        types.Type
+	errs             []error
 }
 
 func (l *linter) errorf(format string, args ...any) {
@@ -336,14 +362,28 @@ func (l *linter) expr(e Expr, where string) {
 		if e.Param != "_" {
 			l.scope[e.Param] = true
 		}
-		for _, ev := range rowEvidence(fn.Eff) {
+		if e.ParamCapture == 0 || l.captureVars[e.ParamCapture] {
+			l.errorf("%s: Lambda has invalid capture parameter %d", where, e.ParamCapture)
+		}
+		l.captureVars[e.ParamCapture] = true
+		wantEvidence := rowEvidence(fn.Eff)
+		if len(e.EffectParams) != len(wantEvidence) {
+			l.errorf("%s: Lambda has %d evidence capture binders, want %d", where, len(e.EffectParams), len(wantEvidence))
+		}
+		for i, ev := range e.EffectParams {
 			l.effectInstance(ev, where)
+			if i < len(wantEvidence) && !equalEffectInstance(ev, wantEvidence[i]) {
+				l.errorf("%s: Lambda evidence parameter %d disagrees with its function type", where, i+1)
+			}
 			l.evidence[ev.Unique]++
+			l.bindEvidenceCaptures(ev, where)
 		}
 		l.expr(e.Body, where)
-		for _, ev := range rowEvidence(fn.Eff) {
+		for _, ev := range e.EffectParams {
 			l.evidence[ev.Unique]--
+			l.unbindEvidenceCaptures(ev)
 		}
+		delete(l.captureVars, e.ParamCapture)
 		if e.Param != "_" {
 			delete(l.scope, e.Param)
 		}
@@ -356,6 +396,8 @@ func (l *linter) expr(e Expr, where string) {
 		l.effectInstance(e.Effect, where)
 		if e.Op != nil && !e.Op.Builtin && e.Op.Native == nil && l.evidence[e.Effect.Unique] == 0 {
 			l.errorf("%s: Perform `%s` has no lexical evidence", where, e.Op.Name)
+		} else if e.Op != nil && !e.Op.Builtin && e.Op.Native == nil {
+			l.evidenceAvailable(e.Effect, where)
 		}
 		if e.Op != nil && len(e.Args) != e.Op.Arity {
 			l.errorf("%s: Perform `%s` arity mismatch", where, e.Op.Name)
@@ -405,9 +447,23 @@ func (l *linter) expr(e Expr, where string) {
 		l.expr(e.Then, where)
 	case *Handle:
 		l.effectInstance(e.Effect, where)
+		if e.Scope == 0 || l.scopeIDs[e.Scope] {
+			l.errorf("%s: handler has invalid or reused scope identity %d", where, e.Scope)
+		}
+		l.scopeIDs[e.Scope] = true
+		if !types.EqualCaptures(e.Effect.Captures, types.ScopeCapture(e.Scope)) {
+			l.errorf("%s: handler evidence does not name its scope identity", where)
+		}
+		if eff := l.effects[e.Effect.Unique]; eff != nil && e.Scoped != eff.Scoped {
+			l.errorf("%s: handler scoped policy disagrees with effect `%s`", where, eff.Name)
+		}
+		l.activeScopes[e.Scope] = true
 		l.evidence[e.Effect.Unique]++
+		l.evidenceCaptures[e.Effect.Unique] = append(l.evidenceCaptures[e.Effect.Unique], e.Effect.Captures)
 		l.expr(e.Body, where)
 		l.evidence[e.Effect.Unique]--
+		l.evidenceCaptures[e.Effect.Unique] = l.evidenceCaptures[e.Effect.Unique][:len(l.evidenceCaptures[e.Effect.Unique])-1]
+		delete(l.activeScopes, e.Scope)
 		seen := map[string]bool{}
 		for _, c := range e.Clauses {
 			if c.Op == nil || c.Op.Owner.Unique != e.Effect.Unique {
@@ -540,6 +596,8 @@ func (l *linter) expr(e Expr, where string) {
 				}
 				if l.evidence[ev.Unique] == 0 {
 					l.errorf("%s: App{Worker} `%s` passes unavailable lexical evidence `%s`", where, ref.Name, ev.Name)
+				} else {
+					l.evidenceAvailable(ev, where)
 				}
 			}
 			argTys, ret := PeelFun(calleeTy, len(def.Params))
@@ -584,6 +642,8 @@ func (l *linter) expr(e Expr, where string) {
 				}
 				if l.evidence[ev.Unique] == 0 {
 					l.errorf("%s: App{Value} passes unavailable lexical evidence `%s`", where, ev.Name)
+				} else {
+					l.evidenceAvailable(ev, where)
 				}
 			}
 			l.expr(e.Callee, where)
@@ -892,6 +952,46 @@ func (l *linter) effectInstance(e EffectInstance, where string) {
 	for _, a := range e.Args {
 		l.typ(a, where)
 	}
+	for i, id := range e.Captures.Scopes {
+		if id == 0 || i > 0 && e.Captures.Scopes[i-1] >= id {
+			l.errorf("%s: malformed evidence scope captures", where)
+		}
+	}
+	for i, id := range e.Captures.Vars {
+		if id == 0 || i > 0 && e.Captures.Vars[i-1] >= id {
+			l.errorf("%s: malformed evidence capture variables", where)
+		}
+	}
+}
+
+func (l *linter) bindEvidenceCaptures(e EffectInstance, where string) {
+	if len(e.Captures.Scopes) != 0 || len(e.Captures.Vars) != 1 {
+		l.errorf("%s: evidence parameter `%s` must bind one capture variable", where, e.Name)
+	}
+	for _, v := range e.Captures.Vars {
+		if l.captureVars[v] {
+			l.errorf("%s: duplicate capture variable %d", where, v)
+		}
+		l.captureVars[v] = true
+	}
+	l.evidenceCaptures[e.Unique] = append(l.evidenceCaptures[e.Unique], e.Captures)
+}
+
+func (l *linter) unbindEvidenceCaptures(e EffectInstance) {
+	stack := l.evidenceCaptures[e.Unique]
+	if len(stack) > 0 {
+		l.evidenceCaptures[e.Unique] = stack[:len(stack)-1]
+	}
+	for _, v := range e.Captures.Vars {
+		delete(l.captureVars, v)
+	}
+}
+
+func (l *linter) evidenceAvailable(e EffectInstance, where string) {
+	stack := l.evidenceCaptures[e.Unique]
+	if len(stack) == 0 || !types.EqualCaptures(stack[len(stack)-1], e.Captures) {
+		l.errorf("%s: evidence `%s` names an unavailable scope/capture", where, e.Name)
+	}
 }
 
 func (l *linter) operationTypes(op *types.EffectOp, inst EffectInstance) ([]types.Type, types.Type) {
@@ -914,7 +1014,7 @@ func (l *linter) operationBelongs(op *types.EffectOp) bool {
 }
 
 func substEffectInstance(e EffectInstance, m map[int]types.Type) EffectInstance {
-	out := EffectInstance{Unique: e.Unique, Name: e.Name, Args: make([]types.Type, len(e.Args))}
+	out := EffectInstance{Unique: e.Unique, Name: e.Name, Args: make([]types.Type, len(e.Args)), Captures: e.Captures}
 	for i, a := range e.Args {
 		out.Args[i] = types.SubstRigid(a, m)
 	}

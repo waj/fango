@@ -186,7 +186,12 @@ func instanceDefinition(in *infer.InstanceInfo, ck *infer.Checker) (core.Def, []
 		ct = &types.TFun{Arg: fields[i].Type(), Ret: ct}
 	}
 	body := &core.App{CalleeKind: core.Ctor, Callee: &core.VarRef{Name: ctor.Name, Ty: ct}, Args: fields, Ty: ty, TyArgs: []types.Type{in.Head}, Ctor: ctor}
-	return core.Def{Name: in.Name, Owner: in.Owner, Type: prependTypes(dictTypes, ty), TyParams: in.Vars, Params: params, Body: el.anf(body)}, el.errs
+	paramCaptures := make([]types.CaptureVar, len(params))
+	for i := range paramCaptures {
+		paramCaptures[i] = ck.Sup.FreshCapture()
+	}
+	return core.Def{Name: in.Name, Owner: in.Owner, Type: prependTypes(dictTypes, ty), TyParams: in.Vars,
+		Params: params, ParamCaptures: paramCaptures, Body: el.anf(body)}, el.errs
 }
 
 // Display evaluates its argument once and renders through the ordinary Show

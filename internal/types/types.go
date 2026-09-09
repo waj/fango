@@ -73,15 +73,19 @@ func SortedRow(r Row) Row {
 	return Row{Labels: labels, Tail: r.Tail}
 }
 
-// Scheme is a ∀-quantified type. Vars holds the quantified rigid variables
-// in first-occurrence order. Row variables are erased before Core; the
+// Scheme is a ∀-quantified type and its compiler-only capture summary.
+// Vars holds the quantified rigid variables in first-occurrence order. Row variables are erased before Core; the
 // remaining variables become Go type parameters in this same order.
 // Instantiation replaces them with fresh metas (SubstRigid); Preds is the
 // typeclass seam currently used by compiler-owned native obligations.
+// CaptureVars are independently freshened at a value occurrence; they never
+// appear in user-facing type printing.
 type Scheme struct {
-	Vars  []*TVar
-	Preds []Pred
-	Body  Type
+	Vars        []*TVar
+	Preds       []Pred
+	Body        Type
+	CaptureVars []CaptureVar
+	Captures    CaptureSet
 }
 
 // Pred is a typeclass-shaped obligation. Eq, Ord, and Show are currently
@@ -311,6 +315,10 @@ type EffectInfo struct {
 	Name   string
 	Params []*TVar
 	Ops    []*EffectOp
+	// Scoped is compiler-owned policy. Source effect declarations are durable
+	// by default; State/resource milestones mark the capabilities whose
+	// handler activation must not escape.
+	Scoped bool
 }
 
 // EffectOp is the runtime-relevant, declaration-ordered description of an
@@ -327,6 +335,13 @@ type EffectOp struct {
 	LocalVars  []*TVar
 	Builtin    bool
 	Native     *NativeInfo
+	// BorrowsEvidence says the operation result retains the current scoped
+	// evidence activation. It is reserved for compiler-owned resource APIs.
+	BorrowsEvidence bool
+	// RetainsArguments marks compiler-owned store operations (for example
+	// State.put). Passing a value to one transfers that value's captures into
+	// the destination evidence scope and is checked for cross-scope escape.
+	RetainsArguments bool
 }
 
 func SubstPreds(ps []Pred, m map[int]Type) []Pred {
@@ -378,8 +393,10 @@ func (a *ADTInfo) CtorNamed(name string) *CtorInfo {
 // passed in explicitly (never a global): the REPL needs one supply across
 // many interactive inputs.
 type Supply struct {
-	nextVar    int
-	nextUnique int
+	nextVar     int
+	nextUnique  int
+	nextScope   ScopeID
+	nextCapture CaptureVar
 }
 
 func (s *Supply) FreshVar(kind VarKind) *TVar {
@@ -400,6 +417,16 @@ func (s *Supply) NextUnique() int {
 	u := s.nextUnique
 	s.nextUnique++
 	return u
+}
+
+func (s *Supply) FreshScope() ScopeID {
+	s.nextScope++
+	return s.nextScope
+}
+
+func (s *Supply) FreshCapture() CaptureVar {
+	s.nextCapture++
+	return s.nextCapture
 }
 
 // Builtins holds the predefined type constructors, uniques minted from the

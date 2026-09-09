@@ -1,18 +1,18 @@
 package elaborate_test
 
 import (
-	"github.com/waj/fango/internal/elaborate"
-	"github.com/waj/fango/internal/staging"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/elaborate"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/lexer"
 	"github.com/waj/fango/internal/parser"
 	"github.com/waj/fango/internal/source"
+	"github.com/waj/fango/internal/staging"
 	"github.com/waj/fango/internal/testutil"
 	"github.com/waj/fango/internal/types"
 )
@@ -60,6 +60,54 @@ func TestGoldens(t *testing.T) {
 			}
 			testutil.Golden(t, strings.TrimSuffix(path, ".fango")+".core", core.Dump(fixtureProgram(prog, ck.PreludeOwners)))
 		})
+	}
+}
+
+func TestScopedCallbackAdapterCannotEscape(t *testing.T) {
+	src := `effect Borrow
+    read : () -> Int
+
+identity : (() ->{e} Int) -> (() ->{e} Int)
+identity action = action
+
+saved =
+    handle identity (\_ -> read()) of
+        read () -> resume 1
+
+main = 0
+`
+	f := source.NewFile("<capture>", []byte(src))
+	toks, lexErrs := lexer.Lex(f)
+	if len(lexErrs) > 0 {
+		t.Fatalf("lex errors: %v", lexErrs)
+	}
+	m, parseErrs := parser.Parse(toks, f)
+	if len(parseErrs) > 0 {
+		t.Fatalf("parse errors: %v", parseErrs)
+	}
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	ck := infer.NewChecker(sup, b, infer.NewEnv())
+	staging.Install(ck)
+	if errs := ck.InstallPrelude(); len(errs) > 0 {
+		t.Fatalf("prelude errors: %v", errs)
+	}
+	if errs := ck.Fixity.Resolve(m); len(errs) > 0 {
+		t.Fatalf("fixity errors: %v", errs)
+	}
+	infos, inferErrs := ck.Module(m)
+	if len(inferErrs) > 0 {
+		t.Fatalf("infer errors: %v", inferErrs)
+	}
+	if !ck.MarkEffectScoped("Borrow") {
+		t.Fatal("Borrow effect was not installed")
+	}
+	_, elabErrs := elaborate.Module(infos, ck)
+	if len(elabErrs) != 1 || elabErrs[0].Title != "RESOURCE ESCAPES" {
+		t.Fatalf("elaboration errors = %v, want RESOURCE ESCAPES", elabErrs)
+	}
+	if line := elabErrs[0].Span.StartPos().Line; line != 8 {
+		t.Fatalf("RESOURCE ESCAPES points at line %d, want handler line 8", line)
 	}
 }
 
