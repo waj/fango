@@ -1,0 +1,10 @@
+type Choice = Yes | No
+
+effect Ask
+    ask : Choice -> Int
+
+main =
+    print
+        (handle ask Yes of
+            ask Yes -> resume 1
+            ask No -> 0)

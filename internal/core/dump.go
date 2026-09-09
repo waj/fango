@@ -121,8 +121,8 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 			parts = append(parts, dumpExpr(a, pr))
 		}
 		return strings.Join(parts, " ") + " " + pr.Type(e.Ty) + ")"
-	case *Resume:
-		return fmt.Sprintf("(resume %s %s)", pr.Type(e.Ty), dumpExpr(e.Value, pr))
+	case *ResumeTail:
+		return fmt.Sprintf("(resume-tail %d %s %s)", e.Owner, pr.Type(e.ClauseResult), dumpExpr(e.Value, pr))
 	case *Seq:
 		return fmt.Sprintf("(seq %s %s %s)", pr.Type(e.Ty), dumpExpr(e.First, pr), dumpExpr(e.Then, pr))
 	case *Handle:

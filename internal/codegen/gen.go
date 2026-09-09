@@ -1021,8 +1021,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			return callExpr(funcLit(g.goType(e.Ty), []goast.Stmt{exprStmt(call), returnStmt(g.unitValue())}))
 		}
 		return call
-	case *core.Resume:
-		return g.expr(e.Value, parentPrec)
+	case *core.ResumeTail:
+		panic("codegen: ResumeTail outside verified handler-clause emission")
 	case *core.Seq:
 		return callExpr(funcLit(g.goType(e.Ty), append(g.stmts(e.First), returnStmt(g.expr(e.Then, 0)))))
 	case *core.Handle:
@@ -1112,7 +1112,7 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 		}
 		ft := &goast.FuncType{Params: paramFields(params), Results: results}
 		fields[i] = &goast.Field{Names: []*goast.Ident{ident("Op_" + linkName(c.Op.Name))}, Type: ft}
-		fn := &goast.FuncLit{Type: ft, Body: &goast.BlockStmt{List: g.resumeStmtsFor(c.Body, g.isUnit(c.Op.ResultType))}}
+		fn := &goast.FuncLit{Type: ft, Body: &goast.BlockStmt{List: g.resumeStmtsFor(c.Body, c.ResumeID, g.isUnit(c.Op.ResultType))}}
 		elts[i] = &goast.KeyValueExpr{Key: ident("Op_" + linkName(c.Op.Name)), Value: fn}
 	}
 	_ = fields
@@ -1145,25 +1145,24 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 // becomes a direct return of v from the evidence operation field; the
 // caller's ordinary Go continuation then proceeds with that operation
 // result. No continuation object or non-local control transfer is needed.
-func (g *gen) resumeStmts(e core.Expr) []goast.Stmt {
-	return g.resumeStmtsFor(e, false)
-}
-
-func (g *gen) resumeStmtsFor(e core.Expr, unitResult bool) []goast.Stmt {
+func (g *gen) resumeStmtsFor(e core.Expr, owner types.ResumeID, unitResult bool) []goast.Stmt {
 	switch e := e.(type) {
-	case *core.Resume:
+	case *core.ResumeTail:
+		if e.Owner != owner {
+			panic("codegen: ResumeTail owner does not match handler clause")
+		}
 		if unitResult {
 			return append(g.stmts(e.Value), bareReturnStmt())
 		}
 		return []goast.Stmt{returnStmt(g.expr(e.Value, 0))}
 	case *core.Let:
-		return append(g.letBindingStmts(e), g.resumeStmtsFor(e.Body, unitResult)...)
+		return append(g.letBindingStmts(e), g.resumeStmtsFor(e.Body, owner, unitResult)...)
 	case *core.Seq:
-		return append(g.stmts(e.First), g.resumeStmtsFor(e.Then, unitResult)...)
+		return append(g.stmts(e.First), g.resumeStmtsFor(e.Then, owner, unitResult)...)
 	case *core.If:
-		return []goast.Stmt{ifStmt(g.expr(e.Cond, 0), g.resumeStmtsFor(e.Then, unitResult), g.resumeStmtsFor(e.Else, unitResult))}
+		return []goast.Stmt{ifStmt(g.expr(e.Cond, 0), g.resumeStmtsFor(e.Then, owner, unitResult), g.resumeStmtsFor(e.Else, owner, unitResult))}
 	case *core.Case:
-		return g.caseStmts(e, func(x core.Expr) []goast.Stmt { return g.resumeStmtsFor(x, unitResult) })
+		return g.caseStmts(e, func(x core.Expr) []goast.Stmt { return g.resumeStmtsFor(x, owner, unitResult) })
 	default:
 		panic(fmt.Sprintf("codegen: non-tail-resumptive clause node %T", e))
 	}

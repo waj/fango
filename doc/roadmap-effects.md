@@ -29,9 +29,9 @@ tail-resumptive execution takes priority over multi-shot expressiveness.
 
 Consequences for this roadmap:
 
-- Do not integrate the dormant goroutine/channel general-handler engine as a
-  fallback. Moving the goroutine boundary from each operation to each handled
-  body still does not provide the requested call/state-machine execution model.
+- Do not add a goroutine/channel general-handler engine as a fallback. Moving
+  the goroutine boundary from each operation to each handled body still does
+  not provide the requested call/state-machine execution model.
 - Ordinary resumptive handlers need no continuation object. A proven tail
   `resume value` becomes an operation callback's return of `value`.
 - Aborting effects propagate tagged exits without preserving abandoned work.
@@ -115,13 +115,13 @@ but the calling conventions below are proposals specific to Fango and Go.
 
 ## 3. Current implementation and integration map
 
-The existing fast path is worth retaining. Its source checker is not yet a
-complete proof of the documented discipline; E0 addresses a concrete hole.
+The existing fast path is worth retaining. Source checking and Core lint prove
+the implemented tail-resume discipline with compiler-only clause identities.
 
 | Area | Existing implementation / work to extend |
 | --- | --- |
 | Function types and rows | `internal/types/`, `internal/infer/infer.go`, `solve.go`, `unify.go`, `annotation.go` |
-| Resume checking | `tailResume` / `resumePaths` in `internal/infer/infer.go` |
+| Resume checking | owner-aware `tailResume` in `internal/infer/infer.go` |
 | Staging | `internal/infer/stage.go`, `internal/staging/staging.go`; expanded source must get the same checks |
 | Handler elaboration | `internal/elaborate/elaborate.go`; equation groups become decision trees |
 | Calls and callback adaptation | `internal/elaborate/spine.go`; open callback rows are currently erased with captured evidence |
@@ -130,18 +130,11 @@ complete proof of the documented discipline; E0 addresses a concrete hole.
 | Go emission | `internal/codegen/gen.go`: `handleExpr`, `resumeStmtsFor`, operation and function type emission |
 | Existing loops | `internal/codegen/tailloop.go`, `internal/eval/tailloop.go`; shared eligibility predicate |
 | Interpreter | `internal/eval/eval.go`; explicit evidence environment, no general continuation execution |
-| Dormant runtime | `runtime/fangort/general.go` and tests; one goroutine per handled body, channels per operation, dynamic continuation checks |
 | Runtime distribution | `internal/runtimefiles/`, build materialization, `runtime/nativeworker/`, `runtime/nativewire/` |
 | Concrete State consumer | `stdlib/Random.fango`, `Random.native.go`; currently a process-global PRNG cell |
 | Host effects / FFI | `stdlib/IO.fango`, `IO.native.go`, `internal/natives/`, native declaration validation and worker protocol |
 | Verification | `cmd/fango/e2e_test.go`, `testdata/run`, Core/checker goldens, REPL tests, `benchmarks/` |
 | Editor surface | `editors/vscode/syntaxes/fango.tmLanguage.json`, `language-configuration.json` |
-
-The general engine is dormant, not an existing user language capability. Its
-runtime continuation API and its runtime-error goldens are not the desired
-semantics for this roadmap. Preserve useful lifecycle scenarios by translating
-them into static rejection or new execution tests, rather than preserving the
-old architecture simply because it has tests.
 
 The eventual pipeline should make its proof boundaries visible:
 
@@ -166,10 +159,9 @@ prefix elaboration or an interpreter-only convenience path.
 
 | Milestone | Depends on | Shippable result |
 | --- | --- | --- |
-| E0: prove the existing resume discipline | None | Sound direct handlers; retire the dormant fallback |
-| E1: scoped evidence and capture checking | E0 | Compiler foundation for local state/resources |
+| E1: scoped evidence and capture checking | Proven tail-resume Core | Compiler foundation for local state/resources |
 | E2: parameterized tail-resumptive state | E1 | State, Writer, seeded Random, stateful examples |
-| E3: control-aware calls and callback ABIs | E0; integrate E1 metadata | Stable direct/exit transport and higher-order calls |
+| E3: control-aware calls and callback ABIs | Proven tail-resume Core; integrate E1 metadata | Stable direct/exit transport and higher-order calls |
 | E4: abort-only effects and Result | E3 | Failure handlers; integrate E2 for State/failure examples |
 | E5: synchronous cleanup scopes | E1, E4 | `Scope.bracket` / `finally`, generic cleanup across exits |
 | E6: resource APIs and native error boundaries | E5 | Useful file/resource examples and structured IO failures |
@@ -178,128 +170,12 @@ prefix elaboration or an interpreter-only convenience path.
 | E9: structured async and cancellation | E6, E8 | Cooperative tasks, cancellation, nursery cleanup |
 
 E2 and E3 can be developed as independent increments after their prerequisites,
-but no implementation should erase information the other needs. E0–E2 form a
-useful release with no new non-local control flow. E0–E6 form a useful release
+but no implementation should erase information the other needs. E1–E2 form a
+useful release with no new non-local control flow. E1–E6 form a useful release
 with state, exceptions, and resources but no general continuation objects.
 E7–E9 are explicitly deferred until a concrete suspension consumer warrants
 their compiler and type-system cost. No milestone requires implementing the
 whole table at once.
-
-## E0. Prove the existing resume discipline
-
-### Deliverable and rationale
-
-Close the source-checking hole, make the Core invariant independently checked,
-and keep the current direct lowering. This is required by S before widening
-accepted handler programs; it also protects P because code generation may
-erase continuations only after a proof.
-
-The current traversal of a nested `Handle` checks `Return.Body` but not all
-`Return.Equations`. This existing-syntax program was accepted during the design
-review and its compiled output was `2`:
-
-```fango
-effect Ask
-    ask : () -> Int
-
-effect Pick
-    pick : () -> Bool
-
-main =
-    print
-        (handle ask () of
-            ask () ->
-                ignored =
-                    handle pick () of
-                        pick () -> resume False
-                        return True -> 0
-                        return False -> resume 1
-                resume 2)
-```
-
-The `resume 1` belongs to the outer Ask clause. It is evaluated in a binding's
-RHS and followed by another resume on that path. It must be a compile-time
-error. The present general expression lowering silently treats it as `1`.
-Reproduce against the checkout at implementation time and install a permanent
-negative fixture; a passing differential test alone is insufficient when both
-backends share the same wrong erasure.
-
-### Static mechanism
-
-Give each operation clause a fresh `ResumeId`, distinct from handler identity.
-Bind a resume occurrence to its owner during checking; preserve ownership in
-Core. Nested operation clauses introduce a new identity. Nested bodies and
-return groups do not make a non-tail outer resume legal.
-
-Use two structural judgments over expanded, typed expressions:
-
-```text
-NoResume(k, e)          -- no occurrence/capture of this resume identity
-TailResume(k, e, A, H)  -- every normal path ends in resume of A; clause type H
-
-TailResume(k, resume v)      requires NoResume(k, v) and v : A
-TailResume(k, let x = r; b)  requires NoResume(k, r) and TailResume(k, b)
-TailResume(k, if c then a else b)
-                            requires NoResume(k, c), TailResume(k, a/b)
-TailResume(k, case v of branches)
-                            requires NoResume(k, v), exhaustive branches,
-                                     TailResume(k, every branch)
-```
-
-Check all equation groups, guards/pins, block items, records, constructor
-arguments, lambda bodies, nested handler return rows, and staging results.
-Counting textual occurrences is wrong: two mutually exclusive branches can
-each contain a resume, while one resume in a closure can escape and run later.
-Unknown new AST forms must not default to "safe" without traversing children.
-
-Keep ordinary helpers usable before resume, but reject passing resume to a
-helper, aliasing it, storing it, wrapping it in a closure, or using its answer
-in a larger expression. No interprocedural linear-function inference is needed
-for this first discipline.
-
-### Core and backend contract
-
-Replace reliance on `Handle.TailResumptive = true` with a verified control
-structure. A candidate terminator is:
-
-```text
-ResumeTail { owner: ResumeId, value: Expr<A>, clauseResult: H }
-```
-
-`A` is the operation result; `H` is the handled result after any return
-transformation. They need not be equal. The operation evidence callback returns
-`A`; the handled computation later produces `H`. Do not "fix" erasure by
-equating these types.
-
-Core lint must re-establish tail position, ownership, and one terminal action
-on every normal path. It must forbid a resume beneath a lambda or in an
-ordinary operand even when its types happen to agree. Remove the permissive
-generic `Resume -> value` fallback in both backends; only a verified clause
-emitter may implement that lowering. Compiler-internal malformed Core is a
-compile-time rejection, not a generated runtime panic.
-
-Run this verifier after transformations that can move or copy expressions,
-including equation lowering, ANF, lifting, and specialization. Do not confuse
-legal branch duplication in a decision tree with duplicated execution.
-
-### Retirement and acceptance
-
-- Remove the dormant `RunGeneral` integration direction and, in a focused
-  implementation change, its unused engine/API and materialized sources after
-  checking callers. Keep shared Unit/native-host facilities intact.
-- Update design's implemented-runtime description when that removal happens.
-  This roadmap does not claim the removal has already occurred.
-- Replace "GENERAL CONTINUATIONS NOT READY" with durable, precise diagnostics
-  such as `NON-TAIL RESUME`, `MISSING RESUME`, and `RESUME ESCAPES`, with the
-  offending span and the owning clause's location.
-- Test bare resume, double resume, nested resume arguments, closure capture,
-  partial application, every equation row, splices, and illegal Core built
-  directly in linter tests. Include legal branch-dependent resumes.
-- Extend the generated-Go restriction test to inspect forbidden runtime calls,
-  not just `go`/channel syntax. A call to a hidden scheduler helper can otherwise
-  evade a structural test.
-- Existing direct handler, evidence restoration, per-arrow timing, return
-  transformation, functional, and differential tests remain passing.
 
 ## E1. Scoped evidence and capture checking
 
@@ -711,7 +587,7 @@ if valid then resume answer else fail error
 ```
 
 is legal once its failure is known to be abort-only. A branch returning an
-ordinary value instead of resuming is still illegal. Extend E0's judgment with
+ordinary value instead of resuming is still illegal. Extend the tail-resume judgment with
 explicit exit terminals, not a permissive "may call an effect" exception.
 
 ### Exit routing and ordering
@@ -1072,7 +948,7 @@ worker process infrastructure is not a suspended Fango continuation engine.
 
 Build the internal suspension backend with private Core fixtures first. Do not
 enable source-level general resume merely because the machine can run it.
-E8 supplies its static ownership contract. E0–E6 remain useful without E7.
+E8 supplies its static ownership contract. E1–E6 remain useful without E7.
 
 Use an ANF-to-control-flow lowering, optionally expressed through selective CPS
 internally, followed by defunctionalization. Emitting chains of Go closures
@@ -1319,7 +1195,7 @@ compiler may abandon work on a statically identified exceptional exit.
   does not retain a mutable cell.
 - Implement a continuation-result annotation example using scoped non-tail
   resume and compare with the reference semantics. Tail-only declarations
-  retain E0 errors for the same non-tail source.
+  retain the current errors for the same non-tail source.
 - Keep state-machine-owned cleanup alive during suspension and discharge it
   deterministically at early termination. No source correctness depends on a
   GC finalizer or a check inside the private Go `next` method.
@@ -1496,7 +1372,7 @@ numbers from another language's native backend as a Fango performance promise.
 
 | Use case | Earliest support / limitation |
 | --- | --- |
-| Reader/configuration, direct effect translation | Existing path strengthened by E0 |
+| Reader/configuration, direct effect translation | Existing proved direct path |
 | State, Writer, per-run deterministic Random | E2, with E1 scope/capture checking |
 | Local memoization | E2; cache pure computations or explicitly define skipped-effect semantics |
 | Failure, early return, parser alternatives | E4; fresh attempts, no continuation cloning |
@@ -1520,7 +1396,7 @@ attempts. Do not describe all nondeterministic algorithms as impossible.
 
 ## 7. Decisions to settle at the relevant milestone
 
-These are bounded open decisions, not prerequisites for completing E0.
+These are bounded open decisions for their named milestones.
 
 - **E1 capture polymorphism:** choose the minimal summary language that permits
   synchronous higher-order wrappers and prevents hidden capability escape.
@@ -1572,7 +1448,7 @@ to reproduce another language's runtime or surface syntax.
 
 - [Generalized Evidence Passing for Effect Handlers — Xie and Leijen](https://xnning.github.io/papers/multip-tr.pdf).
   Read the tail-resumptive optimization and evidence restoration sections when
-  checking E0–E3. Its general continuation machinery is broader than this plan.
+  checking the direct-handler foundation through E3. Its general continuation machinery is broader than this plan.
 - [Algebraic Effect Handlers with Resources and Deep Finalization — Leijen](https://www.microsoft.com/en-us/research/publication/algebraic-effect-handlers-resources-deep-finalization/).
   Use for E5/E7 scope lifetime and abandonment questions; multi-shot initializer
   machinery is not required by the chosen one-shot model.

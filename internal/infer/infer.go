@@ -145,9 +145,11 @@ type Checker struct {
 	// the session declares operators.
 	Fixity fixity.Table
 
-	OpCalls     map[*ast.App]*types.EffectOp
-	HandleInfos map[*ast.Handle]*HandlerInfo
-	ResumeCalls map[*ast.App]bool
+	OpCalls      map[*ast.App]*types.EffectOp
+	HandleInfos  map[*ast.Handle]*HandlerInfo
+	ResumeCalls  map[*ast.App]bool
+	ResumeOwners map[*ast.Resume]types.ResumeID
+	ResumeGen    types.ResumeID
 
 	// Workers maps top-level function names to their syntactic parameter
 	// count — the arity that drives doc/design.md, "Go backend and runtime" saturation analysis. Session
@@ -262,6 +264,7 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		OpCalls:         map[*ast.App]*types.EffectOp{},
 		HandleInfos:     map[*ast.Handle]*HandlerInfo{},
 		ResumeCalls:     map[*ast.App]bool{},
+		ResumeOwners:    map[*ast.Resume]types.ResumeID{},
 		Workers:         map[string]int{},
 		BindTypes:       map[*ast.LocalBind]types.Type{},
 		PatTypes:        map[ast.Pattern]types.Type{},
@@ -308,6 +311,7 @@ type HandlerClauseInfo struct {
 	Op         *types.EffectOp
 	ParamTypes []types.Type
 	OpResult   types.Type
+	ResumeID   types.ResumeID
 }
 
 type HandlerInfo struct {
@@ -1097,6 +1101,7 @@ type generator struct {
 	errs          []diag.Error
 	ambient       types.Row
 	resumeType    types.Type
+	resumeID      types.ResumeID
 	preds         []predObligation
 	records       []*recordObligation
 	patternPins   *blockScope
@@ -1338,6 +1343,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			ty = g.ck.Sup.FreshVar(types.General)
 		} else {
 			ty = g.resumeType
+			g.ck.ResumeOwners[e] = g.resumeID
 		}
 	case *ast.Quote:
 		// The quoted body is not checked here — its holes have no type yet.
@@ -1435,6 +1441,8 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	seen := map[string]bool{}
 	for i := range e.Clauses {
 		cl := &e.Clauses[i]
+		g.ck.ResumeGen++
+		resumeID := g.ck.ResumeGen
 		op := g.ck.Operations[cl.Op]
 		if op == nil {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "UNKNOWN OPERATION", "I don't know an operation named `%s`.", cl.Op))
@@ -1489,16 +1497,21 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			}
 			g.patternPins = oldPins
 			oldResume := g.resumeType
+			oldResumeID := g.resumeID
 			g.resumeType = &types.TFun{Arg: opResult, Eff: residual, Ret: result}
+			g.resumeID = resumeID
 			clTy := g.expr(eq.Body)
 			g.resumeType = oldResume
+			g.resumeID = oldResumeID
 			g.locals = scope.parent
 			g.cs = append(g.cs, Constraint{Left: clTy, Right: result, Span: eq.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
-			if err := tailResume(eq.Body, true); err != "" {
-				g.errs = append(g.errs, diag.Errorf(eq.Body.Span(), "GENERAL CONTINUATIONS NOT READY", "%s", err))
+			if failure := g.tailResume(resumeID, eq.Body, true); failure != nil {
+				pos := cl.OpSpan.StartPos()
+				g.errs = append(g.errs, diag.Errorf(failure.span, failure.kind,
+					"%s The owning operation clause starts at %d:%d.", failure.message, pos.Line, pos.Col))
 			}
 		}
-		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, ParamTypes: paramTys, OpResult: opResult})
+		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, ParamTypes: paramTys, OpResult: opResult, ResumeID: resumeID})
 	}
 	for _, op := range first.Owner.Ops {
 		if !seen[op.Name] {
@@ -1546,62 +1559,51 @@ func peelOperation(t types.Type, n int) ([]types.Type, types.Type) {
 	return args, t
 }
 
-func tailResume(e ast.Expr, tail bool) string {
-	resumes, err := resumePaths(e, tail)
-	if err != "" {
-		return err
-	}
-	if tail && !resumes {
-		return "Every operation-clause path must end with exactly one call to `resume`."
-	}
-	return ""
+type resumeFailure struct {
+	kind, message string
+	span          source.Span
 }
 
-// resumePaths proves the current tail-resumptive discipline structurally. The bool is
-// true only when every normal path through e terminates in one tail resume;
-// any resume encountered in an evaluated subexpression is rejected. Nested
-// lambdas are traversed too, so staging a resume in a closure cannot evade
-// the check.
-func resumePaths(e ast.Expr, tail bool) (bool, string) {
+// tailResume proves the discipline for one clause identity. Resumes owned by
+// nested operation clauses are independent; bodies and return rows retain the
+// surrounding identity and therefore cannot hide or duplicate its resume.
+func (g *generator) tailResume(owner types.ResumeID, e ast.Expr, tail bool) *resumeFailure {
 	if a, ok := e.(*ast.App); ok {
-		if _, yes := a.Fn.(*ast.Resume); yes {
-			if _, err := resumePaths(a.Arg, false); err != "" {
-				return false, err
+		if r, yes := a.Fn.(*ast.Resume); yes && g.ck.ResumeOwners[r] == owner {
+			if failure := g.tailResume(owner, a.Arg, false); failure != nil {
+				return failure
 			}
 			if !tail {
-				return false, "`resume` must be the final action on every reachable clause path."
+				return &resumeFailure{"NON-TAIL RESUME", "`resume` must be the final action on every reachable clause path.", a.Span()}
 			}
-			return true, ""
+			return nil
 		}
 	}
-	nontail := func(q ast.Expr) string {
-		_, err := resumePaths(q, false)
-		return err
+	nontail := func(q ast.Expr) *resumeFailure {
+		return g.tailResume(owner, q, false)
 	}
 	switch x := e.(type) {
 	case *ast.If:
-		if err := nontail(x.Cond); err != "" {
-			return false, err
+		if failure := nontail(x.Cond); failure != nil {
+			return failure
 		}
-		a, err := resumePaths(x.Then, tail)
-		if err != "" {
-			return false, err
+		if failure := g.tailResume(owner, x.Then, tail); failure != nil {
+			return failure
 		}
-		b, err := resumePaths(x.Else, tail)
-		return a && b, err
+		if failure := g.tailResume(owner, x.Else, tail); failure != nil {
+			return failure
+		}
+		return nil
 	case *ast.Case:
-		if err := nontail(x.Scrutinee); err != "" {
-			return false, err
+		if failure := nontail(x.Scrutinee); failure != nil {
+			return failure
 		}
-		all := len(x.Branches) > 0
 		for _, b := range x.Branches {
-			ok, err := resumePaths(b.Body, tail)
-			if err != "" {
-				return false, err
+			if failure := g.tailResume(owner, b.Body, tail); failure != nil {
+				return failure
 			}
-			all = all && ok
 		}
-		return all, ""
+		return nil
 	case *ast.Block:
 		items := x.Items
 		if len(items) == 0 {
@@ -1614,69 +1616,117 @@ func resumePaths(e ast.Expr, tail bool) (bool, string) {
 			if q == nil {
 				q = x.Binds[item.BindIndex].Body
 			}
-			if err := nontail(q); err != "" {
-				return false, err
+			if failure := nontail(q); failure != nil {
+				return failure
 			}
 		}
-		return resumePaths(x.Result, tail)
+		return g.tailResume(owner, x.Result, tail)
 	case *ast.App:
-		if err := nontail(x.Fn); err != "" {
-			return false, err
+		if failure := nontail(x.Fn); failure != nil {
+			return failure
 		}
-		if err := nontail(x.Arg); err != "" {
-			return false, err
+		if failure := nontail(x.Arg); failure != nil {
+			return failure
 		}
 	case *ast.BinOp:
-		if err := nontail(x.L); err != "" {
-			return false, err
+		if failure := nontail(x.L); failure != nil {
+			return failure
 		}
-		if err := nontail(x.R); err != "" {
-			return false, err
+		if failure := nontail(x.R); failure != nil {
+			return failure
 		}
 	case *ast.Neg:
-		if err := nontail(x.Operand); err != "" {
-			return false, err
+		if failure := nontail(x.Operand); failure != nil {
+			return failure
 		}
 	case *ast.RecordLit:
 		for _, f := range x.Fields {
-			if err := nontail(f.Value); err != "" {
-				return false, err
+			if failure := nontail(f.Value); failure != nil {
+				return failure
 			}
 		}
 	case *ast.RecordGet:
-		if err := nontail(x.Record); err != "" {
-			return false, err
+		if failure := nontail(x.Record); failure != nil {
+			return failure
 		}
 	case *ast.RecordUpdate:
-		if err := nontail(x.Record); err != "" {
-			return false, err
+		if failure := nontail(x.Record); failure != nil {
+			return failure
 		}
 		for _, f := range x.Fields {
-			if err := nontail(f.Value); err != "" {
-				return false, err
+			if failure := nontail(f.Value); failure != nil {
+				return failure
 			}
 		}
 	case *ast.Lambda:
-		// A resume in a closure is never the current clause's tail action.
-		if err := nontail(x.Body); err != "" {
-			return false, err
+		if g.containsResume(owner, x.Body) {
+			return &resumeFailure{"RESUME ESCAPES", "`resume` cannot be captured by a lambda.", x.Body.Span()}
 		}
 	case *ast.Handle:
-		// Its handled expression and return clause are evaluated as parts of
-		// this expression. Inner operation clauses bind their own resume and
-		// are checked independently by handle().
-		if err := nontail(x.Body); err != "" {
-			return false, err
+		if failure := nontail(x.Body); failure != nil {
+			return failure
+		}
+		for i := range x.Clauses {
+			cl := &x.Clauses[i]
+			if len(cl.Equations) == 0 {
+				if failure := nontail(cl.Body); failure != nil {
+					return failure
+				}
+			} else {
+				for _, eq := range cl.Equations {
+					if failure := nontail(eq.Body); failure != nil {
+						return failure
+					}
+				}
+			}
 		}
 		if x.Return != nil {
-			if err := nontail(x.Return.Body); err != "" {
-				return false, err
+			if len(x.Return.Equations) == 0 {
+				if failure := nontail(x.Return.Body); failure != nil {
+					return failure
+				}
+			} else {
+				for _, eq := range x.Return.Equations {
+					if failure := nontail(eq.Body); failure != nil {
+						return failure
+					}
+				}
 			}
 		}
 	case *ast.Resume:
-		return false, "`resume` must be applied to exactly one value."
+		if g.ck.ResumeOwners[x] == owner {
+			return &resumeFailure{"RESUME ESCAPES", "`resume` must be applied directly to exactly one value.", x.Sp}
+		}
+	case *ast.Quote:
+		for _, h := range g.ck.QuoteHoles[x] {
+			if failure := nontail(h.Operand); failure != nil {
+				return failure
+			}
+		}
+	case *ast.Splice:
+		if failure := nontail(x.Operand); failure != nil {
+			return failure
+		}
+	case *ast.OpChain:
+		for _, operand := range x.Operands {
+			if failure := nontail(operand); failure != nil {
+				return failure
+			}
+		}
+	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.CharLit, *ast.UnitLit,
+		*ast.Var, *ast.Ctor, *ast.TypeOf, *ast.MetaValue:
+		// Leaves cannot contain a resume occurrence.
+	default:
+		return &resumeFailure{"RESUME CHECK ERROR", fmt.Sprintf("The resume checker does not know expression %T.", e), e.Span()}
 	}
-	return false, ""
+	if tail {
+		return &resumeFailure{"MISSING RESUME", "Every operation-clause path must end with exactly one call to `resume`.", e.Span()}
+	}
+	return nil
+}
+
+func (g *generator) containsResume(owner types.ResumeID, e ast.Expr) bool {
+	return g.tailResume(owner, e, false) != nil
 }
 
 func (g *generator) operationSpine(e *ast.App) (*types.EffectOp, int) {

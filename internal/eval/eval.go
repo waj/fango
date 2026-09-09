@@ -422,7 +422,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			saved := in.evidence
 			in.evidence = cloneEvidence(ev.outer)
-			v, err := in.eval(clause.Body, &Frame{parent: ev.frame, vars: vars})
+			v, err := in.evalResumeTail(clause.Body, &Frame{parent: ev.frame, vars: vars}, clause.ResumeID)
 			in.evidence = saved
 			return v, err
 		}
@@ -446,8 +446,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			return spec.Eval(in.nativeRuntime(), args)
 		}
 		return nil, fmt.Errorf("eval: unhandled effect operation `%s.%s`", e.Effect.Name, e.Op.Name)
-	case *core.Resume:
-		return in.eval(e.Value, fr)
+	case *core.ResumeTail:
+		return nil, fmt.Errorf("eval: ResumeTail outside verified handler-clause evaluation")
 	case *core.Seq:
 		if _, err := in.eval(e.First, fr); err != nil {
 			return nil, err
@@ -568,6 +568,59 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		return in.tree(e.Tree, frame, in.eval)
 	default:
 		return nil, fmt.Errorf("eval: unhandled Core node %T", e)
+	}
+}
+
+// evalResumeTail is the interpreter counterpart of codegen's clause emitter.
+// It accepts only the control skeleton proved by Core lint and returns the
+// operation result carried by the terminal ResumeTail.
+func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID) (Value, error) {
+	switch e := e.(type) {
+	case *core.ResumeTail:
+		if e.Owner != owner {
+			return nil, fmt.Errorf("eval: ResumeTail owner %d does not match handler clause %d", e.Owner, owner)
+		}
+		return in.eval(e.Value, fr)
+	case *core.Let:
+		if e.Rec {
+			lam, ok := e.Rhs.(*core.Lambda)
+			if !ok {
+				return nil, fmt.Errorf("eval: recursive Let `%s` without a Lambda RHS", e.Name)
+			}
+			frame := &Frame{parent: fr, vars: map[string]Value{}}
+			frame.vars[e.Name] = &Closure{Param: lam.Param, Body: lam.Body, Env: frame, Evidence: cloneEvidence(in.evidence)}
+			return in.evalResumeTail(e.Body, frame, owner)
+		}
+		v, err := in.eval(e.Rhs, fr)
+		if err != nil {
+			return nil, err
+		}
+		return in.evalResumeTail(e.Body, &Frame{parent: fr, vars: map[string]Value{e.Name: v}}, owner)
+	case *core.Seq:
+		if _, err := in.eval(e.First, fr); err != nil {
+			return nil, err
+		}
+		return in.evalResumeTail(e.Then, fr, owner)
+	case *core.If:
+		cond, err := in.eval(e.Cond, fr)
+		if err != nil {
+			return nil, err
+		}
+		if cond.(bool) {
+			return in.evalResumeTail(e.Then, fr, owner)
+		}
+		return in.evalResumeTail(e.Else, fr, owner)
+	case *core.Case:
+		v, err := in.eval(e.Scrut, fr)
+		if err != nil {
+			return nil, err
+		}
+		frame := &Frame{parent: fr, vars: map[string]Value{e.Bind: v}}
+		return in.tree(e.Tree, frame, func(body core.Expr, leafFrame *Frame) (Value, error) {
+			return in.evalResumeTail(body, leafFrame, owner)
+		})
+	default:
+		return nil, fmt.Errorf("eval: non-tail-resumptive handler clause node %T", e)
 	}
 }
 

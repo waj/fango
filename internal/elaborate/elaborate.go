@@ -108,7 +108,15 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 // The first returned Def is the declaration itself; any further Defs are
 // lambda-lifted polymorphic block bindings (doc/design.md, "Go backend and runtime", lift.go).
 func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
-	return decl(info, ck, false)
+	defs, errs := decl(info, ck, false)
+	if len(errs) == 0 {
+		for i := range defs {
+			for _, err := range core.VerifyResumeStructure(defs[i].Body) {
+				errs = append(errs, diag.Errorf(info.NameSpan, "INTERNAL RESUME INVARIANT", "%v", err))
+			}
+		}
+	}
+	return defs, errs
 }
 
 func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def, []diag.Error) {
@@ -214,6 +222,16 @@ func Expr(e ast.Expr, ck *infer.Checker) (core.Expr, []core.Def, []diag.Error) {
 	}
 	el := newElab(ck, "", types.Scheme{})
 	ce := el.anf(el.expr(e))
+	if len(el.errs) == 0 {
+		for _, err := range core.VerifyResumeStructure(ce) {
+			el.errs = append(el.errs, diag.Errorf(e.Span(), "INTERNAL RESUME INVARIANT", "%v", err))
+		}
+		for i := range el.aux {
+			for _, err := range core.VerifyResumeStructure(el.aux[i].Body) {
+				el.errs = append(el.errs, diag.Errorf(e.Span(), "INTERNAL RESUME INVARIANT", "%v", err))
+			}
+		}
+	}
 	return ce, el.aux, el.errs
 }
 
@@ -784,7 +802,7 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 			}
 			clauseBody = el.matchPatternRows(patterns, bodies, spans, occs, cl.OpSpan, "handler clause")
 		}
-		clauses[i] = core.HandlerClause{Op: ci.Op, Params: params, ParamTypes: pts,
+		clauses[i] = core.HandlerClause{Op: ci.Op, ResumeID: ci.ResumeID, Params: params, ParamTypes: pts,
 			ResultType: el.zonkDefault(ci.OpResult), Body: clauseBody}
 	}
 	var ret *core.ReturnClause
@@ -819,7 +837,7 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 	for _, a := range info.Effect.Args {
 		inst.Args = append(inst.Args, el.zonkDefault(a))
 	}
-	return &core.Handle{Body: el.expr(e.Body), Effect: inst, Clauses: clauses, Return: ret, TailResumptive: true, Ty: ty}
+	return &core.Handle{Body: el.expr(e.Body), Effect: inst, Clauses: clauses, Return: ret, Ty: ty}
 }
 
 func hasRuntimeVars(s types.Scheme) bool {

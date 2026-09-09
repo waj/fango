@@ -104,9 +104,9 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Ty = r.typ(e.Ty)
 		n.First, n.Then = r.expr(e.First), r.expr(e.Then)
 		out = &n
-	case *Resume:
+	case *ResumeTail:
 		n := *e
-		n.Ty = r.typ(e.Ty)
+		n.ClauseResult = r.typ(e.ClauseResult)
 		n.Value = r.expr(e.Value)
 		out = &n
 	case *Perform:

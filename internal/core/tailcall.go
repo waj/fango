@@ -176,7 +176,7 @@ func capturesMutated(e Expr, mutated map[string]bool) bool {
 					return true
 				}
 			}
-		case *Resume:
+		case *ResumeTail:
 			return walk(e.Value)
 		case *Seq:
 			return walk(e.First) || walk(e.Then)

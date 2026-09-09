@@ -1,0 +1,7 @@
+effect Ask
+    ask : () -> Int
+
+main =
+    print
+        (handle ask () of
+            ask () -> resume (resume 1))

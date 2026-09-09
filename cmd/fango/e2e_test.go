@@ -443,7 +443,7 @@ func TestProjectMaterializesBundledNativeSidecars(t *testing.T) {
 	}
 }
 
-func TestCheckpoint2GeneratedGoHasNoContinuationRuntime(t *testing.T) {
+func TestGeneratedGoHasNoContinuationRuntime(t *testing.T) {
 	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "run"))
 	for _, path := range files {
 		if _, err := os.Stat(strings.TrimSuffix(path, ".fango") + ".error"); err == nil {
@@ -469,6 +469,13 @@ func TestCheckpoint2GeneratedGoHasNoContinuationRuntime(t *testing.T) {
 					case *goast.CallExpr:
 						if id, ok := n.Fun.(*goast.Ident); ok && id.Name == "panic" {
 							t.Errorf("%s: generated a panic sentinel", generated.Path)
+						}
+						if sel, ok := n.Fun.(*goast.SelectorExpr); ok {
+							pkg, isIdent := sel.X.(*goast.Ident)
+							forbidden := map[string]bool{"RunGeneral": true, "Perform": true, "Resume": true, "Discard": true}
+							if isIdent && pkg.Name == "fangort" && forbidden[sel.Sel.Name] {
+								t.Errorf("%s: generated forbidden continuation runtime call fangort.%s", generated.Path, sel.Sel.Name)
+							}
 						}
 					case *goast.TypeSpec:
 						if strings.Contains(strings.ToLower(n.Name.Name), "continuation") {

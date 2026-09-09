@@ -1,0 +1,11 @@
+bad = quote (resume 1)
+
+effect Ask
+    ask : () -> Int
+
+main =
+    print
+        (handle ask () of
+            ask () ->
+                ignored = $(bad)
+                resume 2)

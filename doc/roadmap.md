@@ -114,8 +114,7 @@ Haskell's ambient reification, which is what breaks modularity there.
 ## Product polish
 
 - Improve diagnostic specificity and source presentation, especially for row
-  inclusion. Resume-discipline diagnostics are owned by
-  [effects E0](roadmap-effects.md#e0-prove-the-existing-resume-discipline).
+  inclusion.
 - Add interactive editing and persistent history to the REPL.
 - Expand introductory and task-oriented documentation without duplicating the
   normative reference.
@@ -159,14 +158,13 @@ requirements govern that work: effects compile to ordinary calls or explicit
 state machines without goroutine-based continuations or stack-copy capture;
 resume discipline is enforced at compile time.
 
-Start by proving the existing tail-resumptive discipline, then add scoped
-evidence and parameterized State handlers. Introduce control-aware calling
+The existing tail-resumptive discipline is now proved in source checking and
+Core. Next add scoped evidence and parameterized State handlers. Introduce control-aware calling
 conventions before abort-only effects and generic cleanup scopes. Resource
 management is exposed through ordinary `Scope.bracket`/`withFile` calls rather
 than requiring new cleanup syntax. These increments can ship without suspension.
 
-The same roadmap owns retirement of the dormant general-handler engine,
-per-handler Random state, `Result`, structured IO failures, resource/native ABI
+The same roadmap owns per-handler Random state, `Result`, structured IO failures, resource/native ABI
 work, and the open decisions for operation polymorphism and builtin IO handling.
 Owned iterators, scoped non-tail resumption, structured async, and cancellation
 are later milestones, gated by a concrete consumer and static ownership checks.

@@ -97,6 +97,7 @@ type Perform struct {
 }
 type HandlerClause struct {
 	Op         *types.EffectOp
+	ResumeID   types.ResumeID
 	Params     []string
 	ParamTypes []types.Type
 	ResultType types.Type
@@ -107,16 +108,16 @@ type ReturnClause struct {
 	Body  Expr
 }
 type Handle struct {
-	Body           Expr
-	Effect         EffectInstance
-	Clauses        []HandlerClause
-	Return         *ReturnClause
-	TailResumptive bool
-	Ty             types.Type
+	Body    Expr
+	Effect  EffectInstance
+	Clauses []HandlerClause
+	Return  *ReturnClause
+	Ty      types.Type
 }
-type Resume struct {
-	Value Expr
-	Ty    types.Type
+type ResumeTail struct {
+	Owner        types.ResumeID
+	Value        Expr
+	ClauseResult types.Type
 }
 type Seq struct {
 	First, Then Expr
@@ -277,7 +278,7 @@ func (*TypeOf) isExpr()     {}
 func (*If) isExpr()         {}
 func (*Perform) isExpr()    {}
 func (*Handle) isExpr()     {}
-func (*Resume) isExpr()     {}
+func (*ResumeTail) isExpr() {}
 func (*Seq) isExpr()        {}
 func (*Let) isExpr()        {}
 func (*Lambda) isExpr()     {}
@@ -298,7 +299,7 @@ func (e *TypeOf) Type() types.Type     { return e.Ty }
 func (e *If) Type() types.Type         { return e.Ty }
 func (e *Perform) Type() types.Type    { return e.Ty }
 func (e *Handle) Type() types.Type     { return e.Ty }
-func (e *Resume) Type() types.Type     { return e.Ty }
+func (e *ResumeTail) Type() types.Type { return e.ClauseResult }
 func (e *Seq) Type() types.Type        { return e.Ty }
 func (e *Let) Type() types.Type        { return e.Ty }
 func (e *Lambda) Type() types.Type     { return e.Ty }
@@ -347,7 +348,7 @@ func Mentions(e Expr, name string) bool {
 			}
 		}
 		return e.Return != nil && Mentions(e.Return.Body, name)
-	case *Resume:
+	case *ResumeTail:
 		return Mentions(e.Value, name)
 	case *Seq:
 		return Mentions(e.First, name) || Mentions(e.Then, name)

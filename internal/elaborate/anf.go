@@ -40,13 +40,13 @@ func (el *elab) anf(e core.Expr) core.Expr {
 	case *core.Handle:
 		clauses := make([]core.HandlerClause, len(e.Clauses))
 		for i, c := range e.Clauses {
-			clauses[i] = core.HandlerClause{Op: c.Op, Params: c.Params, ParamTypes: c.ParamTypes, ResultType: c.ResultType, Body: el.anf(c.Body)}
+			clauses[i] = core.HandlerClause{Op: c.Op, ResumeID: c.ResumeID, Params: c.Params, ParamTypes: c.ParamTypes, ResultType: c.ResultType, Body: el.anf(c.Body)}
 		}
 		var ret *core.ReturnClause
 		if e.Return != nil {
 			ret = &core.ReturnClause{Param: e.Return.Param, Body: el.anf(e.Return.Body)}
 		}
-		return &core.Handle{Body: el.anf(e.Body), Effect: e.Effect, Clauses: clauses, Return: ret, TailResumptive: e.TailResumptive, Ty: e.Ty}
+		return &core.Handle{Body: el.anf(e.Body), Effect: e.Effect, Clauses: clauses, Return: ret, Ty: e.Ty}
 	case *core.Seq:
 		return &core.Seq{First: el.anf(e.First), Then: el.anf(e.Then), Ty: e.Ty}
 	default:
@@ -138,8 +138,8 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 			args[i] = slot(a)
 		}
 		return &core.Perform{Op: e.Op, Effect: e.Effect, Args: args, Ty: e.Ty}, hoists
-	case *core.Resume:
-		return &core.Resume{Value: slot(e.Value), Ty: e.Ty}, hoists
+	case *core.ResumeTail:
+		return &core.ResumeTail{Owner: e.Owner, Value: slot(e.Value), ClauseResult: e.ClauseResult}, hoists
 	case *core.App:
 		callee := e.Callee
 		if e.CalleeKind == core.Value {

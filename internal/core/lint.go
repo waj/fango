@@ -17,7 +17,7 @@ import (
 func Lint(p *Prog, b *types.Builtins) []error {
 	l := &linter{b: b, scope: map[string]bool{}, workers: map[string]*Def{},
 		adts: map[int]*types.ADTInfo{}, effects: map[int]*types.EffectInfo{},
-		tyParams: map[int]bool{}, evidence: map[int]int{}, natives: p.Natives}
+		tyParams: map[int]bool{}, evidence: map[int]int{}, resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives}
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
 	}
@@ -127,18 +127,53 @@ func Lint(p *Prog, b *types.Builtins) []error {
 	return l.errs
 }
 
+// VerifyResumeStructure checks the handler control invariant without needing a
+// complete program environment. Incremental elaboration uses it before Core is
+// installed in the REPL; batch compilation runs the stronger full Lint after
+// specialization.
+func VerifyResumeStructure(e Expr) []error {
+	l := &linter{resumeIDs: map[types.ResumeID]bool{}}
+	var resumes []*ResumeTail
+	Rewrite(e, func(t types.Type) types.Type { return t }, func(x Expr) Expr {
+		switch x := x.(type) {
+		case *Handle:
+			for _, c := range x.Clauses {
+				if c.ResumeID == 0 {
+					l.errorf("handler clause has no ResumeID")
+				} else if l.resumeIDs[c.ResumeID] {
+					l.errorf("handler clause reuses ResumeID %d", c.ResumeID)
+				} else {
+					l.resumeIDs[c.ResumeID] = true
+				}
+				l.tailResume(c.Body, c.ResumeID, c.ResultType, x.Ty, "handler clause")
+			}
+		case *ResumeTail:
+			resumes = append(resumes, x)
+		}
+		return x
+	})
+	for _, r := range resumes {
+		if !l.resumeIDs[r.Owner] {
+			l.errorf("ResumeTail owner %d has no handler clause", r.Owner)
+		}
+	}
+	return l.errs
+}
+
 type linter struct {
-	b         *types.Builtins
-	scope     map[string]bool // def names + enclosing Let/param names: no shadowing
-	workers   map[string]*Def
-	adts      map[int]*types.ADTInfo // declared ADTs: equatable via derived eq
-	effects   map[int]*types.EffectInfo
-	tyParams  map[int]bool // the enclosing def's declared rigid vars
-	evidence  map[int]int
-	natives   map[string]*types.NativeInfo
-	resumeArg types.Type
-	resumeRet types.Type
-	errs      []error
+	b           *types.Builtins
+	scope       map[string]bool // def names + enclosing Let/param names: no shadowing
+	workers     map[string]*Def
+	adts        map[int]*types.ADTInfo // declared ADTs: equatable via derived eq
+	effects     map[int]*types.EffectInfo
+	tyParams    map[int]bool // the enclosing def's declared rigid vars
+	evidence    map[int]int
+	natives     map[string]*types.NativeInfo
+	resumeOwner types.ResumeID
+	resumeIDs   map[types.ResumeID]bool
+	resumeArg   types.Type
+	resumeRet   types.Type
+	errs        []error
 }
 
 func (l *linter) errorf(format string, args ...any) {
@@ -347,15 +382,15 @@ func (l *linter) expr(e Expr, where string) {
 		for _, a := range e.Args {
 			l.expr(a, where)
 		}
-	case *Resume:
-		if l.resumeArg == nil || l.resumeRet == nil {
-			l.errorf("%s: Resume outside a handler clause", where)
+	case *ResumeTail:
+		if l.resumeOwner == 0 || e.Owner != l.resumeOwner || l.resumeArg == nil || l.resumeRet == nil {
+			l.errorf("%s: ResumeTail owner %d is outside its handler clause", where, e.Owner)
 		} else {
 			if !types.Equal(e.Value.Type(), l.resumeArg) {
 				l.errorf("%s: Resume argument typed %s, want %s", where, types.Show(e.Value.Type()), types.Show(l.resumeArg))
 			}
-			if !types.Equal(e.Ty, l.resumeRet) {
-				l.errorf("%s: Resume typed %s, want handler result %s", where, types.Show(e.Ty), types.Show(l.resumeRet))
+			if !types.Equal(e.ClauseResult, l.resumeRet) {
+				l.errorf("%s: ResumeTail clause result typed %s, want handler result %s", where, types.Show(e.ClauseResult), types.Show(l.resumeRet))
 			}
 		}
 		l.expr(e.Value, where)
@@ -369,9 +404,6 @@ func (l *linter) expr(e Expr, where string) {
 		l.expr(e.First, where)
 		l.expr(e.Then, where)
 	case *Handle:
-		if !e.TailResumptive {
-			l.errorf("%s: checkpoint-2 Handle is not tail resumptive", where)
-		}
 		l.effectInstance(e.Effect, where)
 		l.evidence[e.Effect.Unique]++
 		l.expr(e.Body, where)
@@ -418,10 +450,18 @@ func (l *linter) expr(e Expr, where string) {
 					l.scope[p] = true
 				}
 			}
-			oldArg, oldRet := l.resumeArg, l.resumeRet
-			l.resumeArg, l.resumeRet = opResult, e.Ty
+			if c.ResumeID == 0 {
+				l.errorf("%s: handler clause `%s` has no ResumeID", where, c.Op.Name)
+			} else if l.resumeIDs[c.ResumeID] {
+				l.errorf("%s: handler clause `%s` reuses ResumeID %d", where, c.Op.Name, c.ResumeID)
+			} else {
+				l.resumeIDs[c.ResumeID] = true
+			}
+			l.tailResume(c.Body, c.ResumeID, opResult, e.Ty, where)
+			oldOwner, oldArg, oldRet := l.resumeOwner, l.resumeArg, l.resumeRet
+			l.resumeOwner, l.resumeArg, l.resumeRet = c.ResumeID, opResult, e.Ty
 			l.expr(c.Body, where)
-			l.resumeArg, l.resumeRet = oldArg, oldRet
+			l.resumeOwner, l.resumeArg, l.resumeRet = oldOwner, oldArg, oldRet
 			for _, p := range c.Params {
 				delete(l.scope, p)
 			}
@@ -609,6 +649,96 @@ func (l *linter) expr(e Expr, where string) {
 	default:
 		l.errorf("%s: unhandled Core node %T", where, e)
 	}
+}
+
+// tailResume independently proves the lowering contract consumed by both
+// backends. Only control-flow tails may contain the clause's ResumeTail; all
+// evaluated operands must be free of that owner.
+func (l *linter) tailResume(e Expr, owner types.ResumeID, arg, result types.Type, where string) {
+	noResume := func(x Expr, slot string) bool {
+		if hasResumeOwner(x, owner) {
+			l.errorf("%s: NON-TAIL RESUME: clause owner %d occurs in %s", where, owner, slot)
+			return false
+		}
+		return true
+	}
+	var tail func(Expr)
+	var tree func(Tree)
+	tail = func(x Expr) {
+		switch x := x.(type) {
+		case *ResumeTail:
+			if x.Owner != owner {
+				l.errorf("%s: MISSING RESUME: clause owner %d ends in owner %d", where, owner, x.Owner)
+				return
+			}
+			noResume(x.Value, "a resume argument")
+			if !types.Equal(x.Value.Type(), arg) {
+				l.errorf("%s: ResumeTail argument typed %s, want %s", where, types.Show(x.Value.Type()), types.Show(arg))
+			}
+			if !types.Equal(x.ClauseResult, result) {
+				l.errorf("%s: ResumeTail clause result typed %s, want %s", where, types.Show(x.ClauseResult), types.Show(result))
+			}
+		case *Let:
+			noResume(x.Rhs, "a Let right-hand side")
+			tail(x.Body)
+		case *Seq:
+			noResume(x.First, "a Seq prefix")
+			tail(x.Then)
+		case *If:
+			noResume(x.Cond, "an If condition")
+			tail(x.Then)
+			tail(x.Else)
+		case *Case:
+			noResume(x.Scrut, "a Case scrutinee")
+			tree(x.Tree)
+		default:
+			if hasResumeOwner(x, owner) {
+				l.errorf("%s: NON-TAIL RESUME: clause owner %d occurs beneath %T", where, owner, x)
+			} else {
+				l.errorf("%s: MISSING RESUME: clause owner %d has a normal path ending in %T", where, owner, x)
+			}
+		}
+	}
+	tree = func(t Tree) {
+		switch t := t.(type) {
+		case *Unreachable:
+			return
+		case *Leaf:
+			tail(t.Body)
+		case *Guard:
+			noResume(t.Cond, "a decision-tree guard")
+			tree(t.Then)
+			tree(t.Else)
+		case *SwitchCtor:
+			for _, c := range t.Cases {
+				tree(c.Tree)
+			}
+			if t.Default != nil {
+				tree(t.Default)
+			}
+		case *SwitchLit:
+			for _, c := range t.Cases {
+				tree(c.Tree)
+			}
+			if t.Default != nil {
+				tree(t.Default)
+			}
+		default:
+			l.errorf("%s: unknown decision tree %T while checking resume owner %d", where, t, owner)
+		}
+	}
+	tail(e)
+}
+
+func hasResumeOwner(e Expr, owner types.ResumeID) bool {
+	found := false
+	Rewrite(e, func(t types.Type) types.Type { return t }, func(x Expr) Expr {
+		if r, ok := x.(*ResumeTail); ok && r.Owner == owner {
+			found = true
+		}
+		return x
+	})
+	return found
 }
 
 func matchNativeType(pattern, actual types.Type, sub map[int]types.Type) bool {

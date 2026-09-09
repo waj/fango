@@ -7,6 +7,11 @@ package types
 
 import "sort"
 
+// ResumeID identifies one source handler operation clause. It is compiler-only
+// proof data: resumes with different owners may be nested without being
+// confused by the source checker or Core linter.
+type ResumeID int
+
 type VarKind int
 
 const (

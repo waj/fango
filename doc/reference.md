@@ -1044,7 +1044,13 @@ Current handlers are deliberately restricted: every reachable operation-clause
 path must end in exactly one tail call to `resume`. Aborting clauses, non-tail
 or escaping continuations, operation-local/result polymorphism, and handlers
 for builtin `IO` are rejected. Effects other than the handled label remain in
-the surrounding row.
+the surrounding row. A resume in an operand or before another expression is a
+`NON-TAIL RESUME`; a normal clause path without a resume is a `MISSING RESUME`;
+and a bare, partially applied, stored, or lambda-captured resume is a
+`RESUME ESCAPES` error. Diagnostics point to the offending expression and name
+the owning operation clause's location. Nested operation clauses bind their own
+resume, while nested handled bodies and return groups retain the surrounding
+resume binding.
 
 A reusable handler wrapper may annotate that residual flow with an open row
 tail. The handled label disappears from the callback's row while every other

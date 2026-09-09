@@ -1,0 +1,16 @@
+effect Ask
+    ask : () -> Int
+
+effect Pick
+    pick : () -> Bool
+
+main =
+    print
+        (handle ask () of
+            ask () ->
+                ignored =
+                    handle pick () of
+                        pick () -> resume False
+                        return True -> 0
+                        return False -> resume 1
+                resume 2)
