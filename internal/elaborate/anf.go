@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/types"
 )
 
 // ANF hoisting (doc/design.md, "Core and evidence invariants"): Case and If are statement-shaped in Go, so
@@ -51,7 +52,7 @@ func (el *elab) anf(e core.Expr) core.Expr {
 		if e.State != nil {
 			state = &core.HandlerState{Name: e.State.Name, Initial: el.anf(e.State.Initial), Ty: e.State.Ty}
 		}
-		return &core.Handle{Body: el.anf(e.Body), State: state, Effect: e.Effect, Scope: e.Scope, Scoped: e.Scoped, Clauses: clauses, Return: ret, Ty: e.Ty}
+		return &core.Handle{Body: el.anf(e.Body), State: state, Effect: e.Effect, Scope: e.Scope, Scoped: e.Scoped, Clauses: clauses, Return: ret, Ty: e.Ty, Control: e.Control}
 	case *core.Seq:
 		return &core.Seq{First: el.anf(e.First), Then: el.anf(e.Then), Ty: e.Ty}
 	default:
@@ -106,9 +107,21 @@ func (el *elab) anfSlot(e core.Expr) (core.Expr, []hoist) {
 		return &core.Lambda{Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty,
 			ParamCapture: e.ParamCapture, EffectParams: e.EffectParams}, nil
 	case *core.Handle, *core.Seq:
-		return el.anf(e), nil
+		out := el.anf(e)
+		if control := core.ExprControl(out); control.Transport != types.Direct || control.Polymorphic {
+			name := fmt.Sprintf("_control%d", el.tmp)
+			el.tmp++
+			return &core.VarRef{Name: name, Ty: out.Type()}, []hoist{{name: name, rhs: out}}
+		}
+		return out, nil
 	default:
-		return el.anfExprChildren(e)
+		out, hoists := el.anfExprChildren(e)
+		if control := core.ExprControl(out); control.Transport != types.Direct || control.Polymorphic {
+			name := fmt.Sprintf("_control%d", el.tmp)
+			el.tmp++
+			return &core.VarRef{Name: name, Ty: out.Type()}, append(hoists, hoist{name: name, rhs: out})
+		}
+		return out, hoists
 	}
 }
 
@@ -124,6 +137,12 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 	switch e := e.(type) {
 	case *core.IntLit, *core.FloatLit, *core.StringLit, *core.CharLit, *core.BoolLit, *core.UnitLit, *core.VarRef, *core.TypeOf:
 		return e, nil
+	case *core.ControlExit:
+		payload := make([]core.Expr, len(e.Payload))
+		for i, p := range e.Payload {
+			payload[i] = slot(p)
+		}
+		return &core.ControlExit{Target: e.Target, Op: e.Op, Payload: payload, Ty: e.Ty}, hoists
 	case *core.Neg:
 		return &core.Neg{Operand: slot(e.Operand), Ty: e.Ty}, hoists
 	case *core.NativeCall:
@@ -143,7 +162,7 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		for i, a := range e.Args {
 			args[i] = slot(a)
 		}
-		return &core.Perform{Op: e.Op, Effect: e.Effect, Args: args, Ty: e.Ty}, hoists
+		return &core.Perform{Op: e.Op, Effect: e.Effect, Args: args, Ty: e.Ty, Control: e.Control}, hoists
 	case *core.ResumeTail:
 		var next core.Expr
 		if e.NextState != nil {
@@ -163,7 +182,7 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 			args[i] = slot(a)
 		}
 		return &core.App{CalleeKind: e.CalleeKind, Callee: callee, Args: args,
-			TyArgs: e.TyArgs, Ty: e.Ty, Ctor: e.Ctor, EvidenceArgs: e.EvidenceArgs}, hoists
+			TyArgs: e.TyArgs, Ty: e.Ty, Ctor: e.Ctor, EvidenceArgs: e.EvidenceArgs, Control: e.Control}, hoists
 	default:
 		panic(fmt.Sprintf("elaborate: anf unhandled node %T", e))
 	}

@@ -24,6 +24,7 @@ type EffectInstance struct {
 	Name     string
 	Args     []types.Type
 	Captures types.CaptureSet
+	Control  types.Control
 }
 
 type Def struct {
@@ -41,6 +42,7 @@ type Def struct {
 	ParamCaptures  []types.CaptureVar
 	EffectParams   []EffectInstance
 	ResultCaptures types.CaptureSet
+	Control        types.Control
 	Body           Expr
 }
 
@@ -93,10 +95,22 @@ type If struct {
 }
 
 type Perform struct {
-	Op     *types.EffectOp
-	Effect EffectInstance
-	Args   []Expr
-	Ty     types.Type
+	Op      *types.EffectOp
+	Effect  EffectInstance
+	Args    []Expr
+	Ty      types.Type
+	Control types.Control
+}
+
+// ControlExit is the private semantic-Core producer used by control lowering
+// and its synthetic tests. Source abort-only operations will lower to this in
+// E4. Ty is the normal result type of the abandoned computation; the payload
+// is descriptor-checked Core data, never an unchecked host assertion.
+type ControlExit struct {
+	Target  types.ScopeID
+	Op      *types.EffectOp
+	Payload []Expr
+	Ty      types.Type
 }
 type HandlerClause struct {
 	Op         *types.EffectOp
@@ -124,6 +138,7 @@ type Handle struct {
 	Clauses []HandlerClause
 	Return  *ReturnClause
 	Ty      types.Type
+	Control types.Control
 }
 type ResumeTail struct {
 	Owner        types.ResumeID
@@ -212,6 +227,7 @@ type App struct {
 	TyArgs       []types.Type
 	Ty           types.Type
 	EvidenceArgs []EffectInstance
+	Control      types.Control
 
 	// Ctor identifies the constructor when CalleeKind == Ctor (always
 	// saturated: len(Args) == len(Ctor.Fields); partial applications were
@@ -280,47 +296,49 @@ func (*Leaf) isTree()       {}
 func (*SwitchCtor) isTree() {}
 func (*SwitchLit) isTree()  {}
 
-func (*IntLit) isExpr()     {}
-func (*FloatLit) isExpr()   {}
-func (*StringLit) isExpr()  {}
-func (*CharLit) isExpr()    {}
-func (*UnitLit) isExpr()    {}
-func (*BoolLit) isExpr()    {}
-func (*VarRef) isExpr()     {}
-func (*Neg) isExpr()        {}
-func (*NativeCall) isExpr() {}
-func (*Quote) isExpr()      {}
-func (*TypeOf) isExpr()     {}
-func (*If) isExpr()         {}
-func (*Perform) isExpr()    {}
-func (*Handle) isExpr()     {}
-func (*ResumeTail) isExpr() {}
-func (*Seq) isExpr()        {}
-func (*Let) isExpr()        {}
-func (*Lambda) isExpr()     {}
-func (*App) isExpr()        {}
-func (*Case) isExpr()       {}
+func (*IntLit) isExpr()      {}
+func (*FloatLit) isExpr()    {}
+func (*StringLit) isExpr()   {}
+func (*CharLit) isExpr()     {}
+func (*UnitLit) isExpr()     {}
+func (*BoolLit) isExpr()     {}
+func (*VarRef) isExpr()      {}
+func (*Neg) isExpr()         {}
+func (*NativeCall) isExpr()  {}
+func (*Quote) isExpr()       {}
+func (*TypeOf) isExpr()      {}
+func (*If) isExpr()          {}
+func (*Perform) isExpr()     {}
+func (*ControlExit) isExpr() {}
+func (*Handle) isExpr()      {}
+func (*ResumeTail) isExpr()  {}
+func (*Seq) isExpr()         {}
+func (*Let) isExpr()         {}
+func (*Lambda) isExpr()      {}
+func (*App) isExpr()         {}
+func (*Case) isExpr()        {}
 
-func (e *IntLit) Type() types.Type     { return e.Ty }
-func (e *FloatLit) Type() types.Type   { return e.Ty }
-func (e *StringLit) Type() types.Type  { return e.Ty }
-func (e *CharLit) Type() types.Type    { return e.Ty }
-func (e *UnitLit) Type() types.Type    { return e.Ty }
-func (e *BoolLit) Type() types.Type    { return e.Ty }
-func (e *VarRef) Type() types.Type     { return e.Ty }
-func (e *Neg) Type() types.Type        { return e.Ty }
-func (e *NativeCall) Type() types.Type { return e.Ty }
-func (e *Quote) Type() types.Type      { return e.Ty }
-func (e *TypeOf) Type() types.Type     { return e.Ty }
-func (e *If) Type() types.Type         { return e.Ty }
-func (e *Perform) Type() types.Type    { return e.Ty }
-func (e *Handle) Type() types.Type     { return e.Ty }
-func (e *ResumeTail) Type() types.Type { return e.ClauseResult }
-func (e *Seq) Type() types.Type        { return e.Ty }
-func (e *Let) Type() types.Type        { return e.Ty }
-func (e *Lambda) Type() types.Type     { return e.Ty }
-func (e *App) Type() types.Type        { return e.Ty }
-func (e *Case) Type() types.Type       { return e.Ty }
+func (e *IntLit) Type() types.Type      { return e.Ty }
+func (e *FloatLit) Type() types.Type    { return e.Ty }
+func (e *StringLit) Type() types.Type   { return e.Ty }
+func (e *CharLit) Type() types.Type     { return e.Ty }
+func (e *UnitLit) Type() types.Type     { return e.Ty }
+func (e *BoolLit) Type() types.Type     { return e.Ty }
+func (e *VarRef) Type() types.Type      { return e.Ty }
+func (e *Neg) Type() types.Type         { return e.Ty }
+func (e *NativeCall) Type() types.Type  { return e.Ty }
+func (e *Quote) Type() types.Type       { return e.Ty }
+func (e *TypeOf) Type() types.Type      { return e.Ty }
+func (e *If) Type() types.Type          { return e.Ty }
+func (e *Perform) Type() types.Type     { return e.Ty }
+func (e *ControlExit) Type() types.Type { return e.Ty }
+func (e *Handle) Type() types.Type      { return e.Ty }
+func (e *ResumeTail) Type() types.Type  { return e.ClauseResult }
+func (e *Seq) Type() types.Type         { return e.Ty }
+func (e *Let) Type() types.Type         { return e.Ty }
+func (e *Lambda) Type() types.Type      { return e.Ty }
+func (e *App) Type() types.Type         { return e.Ty }
+func (e *Case) Type() types.Type        { return e.Ty }
 
 // Mentions reports whether name occurs in e. No-shadowing makes a plain
 // occurrence check exact: nothing inside e can rebind name. Used by the
@@ -331,6 +349,13 @@ func Mentions(e Expr, name string) bool {
 		return e.Name == name
 	case *Neg:
 		return Mentions(e.Operand, name)
+	case *ControlExit:
+		for _, p := range e.Payload {
+			if Mentions(p, name) {
+				return true
+			}
+		}
+		return false
 	case *NativeCall:
 		for _, a := range e.Args {
 			if Mentions(a, name) {

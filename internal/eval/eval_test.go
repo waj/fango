@@ -239,6 +239,7 @@ func TestSwitchTotality(t *testing.T) {
 		binOp("+", it, one, one),
 		&core.If{Cond: &core.BoolLit{Val: true, Ty: bt}, Then: one, Else: one, Ty: it},
 		writeExpr("1\n"),
+		&core.ControlExit{Target: 1, Op: &types.EffectOp{Owner: &types.EffectInfo{Unique: 9, Name: "Fail"}, Index: 0, Name: "fail"}, Ty: it},
 		&core.Let{Name: "v", Rhs: one, Body: one, Ty: it},
 		&core.Lambda{Param: "x", Body: one, Ty: &types.TFun{Arg: it, Ret: it}},
 		&core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: "nope", Ty: it}, Ty: it},
@@ -248,6 +249,24 @@ func TestSwitchTotality(t *testing.T) {
 		if err != nil && strings.Contains(err.Error(), "unhandled Core node") {
 			t.Errorf("%T hit the unhandled fallback — add it to the interpreter switch", n)
 		}
+	}
+}
+
+func TestEvalOutcomePropagatesBeforeFollowingExpression(t *testing.T) {
+	it := intTy()
+	eff := &types.EffectInfo{Unique: 9, Name: "Fail"}
+	op := &types.EffectOp{Owner: eff, Index: 0, Name: "fail", Arity: 1, ParamTypes: []types.Type{it}, ResultType: it}
+	eff.Ops = []*types.EffectOp{op}
+	exit := &core.ControlExit{Target: 7, Op: op, Payload: []core.Expr{&core.IntLit{Val: 41, Ty: it}}, Ty: it}
+	expr := &core.Let{Name: "never", Rhs: exit, Ty: it,
+		Body: &core.NativeCall{Name: "Basics.+", Module: "Basics", Args: []core.Expr{&core.IntLit{Val: 1, Ty: it}, &core.IntLit{Val: 1, Ty: it}}, Ty: it}}
+
+	outcome, err := EvalOutcome(context.Background(), expr, NewEnv(), NewIOContext(strings.NewReader(""), io.Discard))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Exit == nil || outcome.Exit.Target != 7 || outcome.Exit.Op != op || len(outcome.Exit.Payload) != 1 || outcome.Exit.Payload[0] != int64(41) {
+		t.Fatalf("outcome = %#v, want checked exit request", outcome)
 	}
 }
 

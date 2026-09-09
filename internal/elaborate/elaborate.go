@@ -157,6 +157,7 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 		Params:        allParams,
 		ParamCaptures: paramCaptures,
 		EffectParams:  effectParams,
+		Control:       core.ArrowControl(prependTypes(dictTypes, defType), len(allParams)),
 		Body:          el.anf(body),
 	}
 	return append([]core.Def{def}, el.aux...), el.errs
@@ -218,7 +219,7 @@ func executingEffects(t types.Type, arity int) []core.EffectInstance {
 	seen := map[int]bool{}
 	for _, l := range row.Labels {
 		if types.SurfaceName(l.Name) != "IO" && !seen[l.Unique] {
-			out = append(out, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...)})
+			out = append(out, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Control: types.Control{Polymorphic: true}})
 			seen[l.Unique] = true
 		}
 	}
@@ -237,7 +238,7 @@ func Expr(e ast.Expr, ck *infer.Checker) (core.Expr, []core.Def, []diag.Error) {
 	ce := el.anf(el.expr(e))
 	if len(el.errs) == 0 {
 		defs := append([]core.Def(nil), el.aux...)
-		defs = append(defs, core.Def{Name: "_expression", Type: ce.Type(), Body: ce})
+		defs = append(defs, core.Def{Name: "_expression", Type: ce.Type(), Control: core.ExprControl(ce), Body: ce})
 		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
 		el.errs = append(el.errs, captureDiagnostics(core.InferCaptures(p, ck.B), ck, e.Span())...)
 		for _, err := range core.VerifyResumeStructure(ce) {
@@ -324,29 +325,30 @@ type elab struct {
 	// evidence is a lexical stack per nominal effect. Concrete handler
 	// activations carry a scope identity; function/lambda parameters carry a
 	// capture variable. This metadata is erased by both runtime backends.
-	evidence map[int][]types.CaptureSet
+	evidence map[int][]core.EffectInstance
 }
 
 func newElab(ck *infer.Checker, declName string, declScheme types.Scheme) *elab {
 	return &elab{ck: ck, declName: declName, declScheme: declScheme,
 		instanceLimit: len(ck.Instances),
 		owner:         symbolOwner(declName),
-		scopeIdx:      map[string]int{}, lifted: map[string]*liftedLocal{}, evidence: map[int][]types.CaptureSet{}}
+		scopeIdx:      map[string]int{}, lifted: map[string]*liftedLocal{}, evidence: map[int][]core.EffectInstance{}}
 }
 
 func (el *elab) bindEffectParams(effects []core.EffectInstance) []core.EffectInstance {
 	out := make([]core.EffectInstance, len(effects))
 	for i, ev := range effects {
 		ev.Captures = types.VarCapture(el.ck.Sup.FreshCapture())
+		ev.Control = types.Control{Polymorphic: true}
 		out[i] = ev
-		el.evidence[ev.Unique] = append(el.evidence[ev.Unique], ev.Captures)
+		el.evidence[ev.Unique] = append(el.evidence[ev.Unique], ev)
 	}
 	return out
 }
 
 func (el *elab) pushEvidence(effects []core.EffectInstance) {
 	for _, ev := range effects {
-		el.evidence[ev.Unique] = append(el.evidence[ev.Unique], ev.Captures)
+		el.evidence[ev.Unique] = append(el.evidence[ev.Unique], ev)
 	}
 }
 
@@ -362,7 +364,15 @@ func (el *elab) evidenceCaptures(unique int) types.CaptureSet {
 	if len(stack) == 0 {
 		return types.CaptureSet{}
 	}
-	return stack[len(stack)-1]
+	return stack[len(stack)-1].Captures
+}
+
+func (el *elab) evidenceControl(unique int) types.Control {
+	stack := el.evidence[unique]
+	if len(stack) == 0 {
+		return types.Control{}
+	}
+	return stack[len(stack)-1].Control
 }
 
 type scopeVar struct {
@@ -946,7 +956,7 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 		el.popScope(pushed)
 		ret = &core.ReturnClause{Param: name, Body: retBody}
 	}
-	inst := core.EffectInstance{Unique: info.Effect.Unique, Name: info.Effect.Name, Captures: types.ScopeCapture(info.Scope)}
+	inst := core.EffectInstance{Unique: info.Effect.Unique, Name: info.Effect.Name, Captures: types.ScopeCapture(info.Scope), Control: types.Control{Polymorphic: true}}
 	for _, a := range info.Effect.Args {
 		inst.Args = append(inst.Args, el.zonkDefault(a))
 	}
@@ -1092,7 +1102,16 @@ func eraseRowsFrom(origin, t types.Type) types.Type {
 			}
 			eff.Labels = append(eff.Labels, types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args})
 		}
-		return &types.TFun{Arg: arg, Eff: eff, Ret: ret}
+		control := t.Control
+		if t.Eff.Tail != nil {
+			control.Polymorphic = true
+		}
+		for _, l := range t.Eff.Labels {
+			if types.SurfaceName(l.Name) != "IO" {
+				control.Polymorphic = true
+			}
+		}
+		return &types.TFun{Arg: arg, Eff: eff, Ret: ret, Control: control}
 	case types.Row:
 		return types.Row{}
 	default:

@@ -93,6 +93,7 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 		Params:        params,
 		ParamCaptures: paramCaptures,
 		EffectParams:  lf.effects,
+		Control:       core.ArrowControl(genTy, len(params)),
 		Body:          el.anf(body),
 	})
 }

@@ -33,6 +33,25 @@ import (
 // must agree; the differential suite is the referee.
 type Value = any
 
+// ExitRequest is a language-level control value, deliberately separate from
+// Go errors used for interpreter failures. Payload values have already been
+// checked against Op by Core lint.
+type ExitRequest struct {
+	Target  types.ScopeID
+	Op      *types.EffectOp
+	Payload []Value
+}
+
+type Outcome struct {
+	Value Value
+	Exit  *ExitRequest
+}
+
+func asExit(v Value) (*ExitRequest, bool) {
+	exit, ok := v.(*ExitRequest)
+	return exit, ok
+}
+
 // Cell is a lazily-memoized top-level binding (doc/design.md, "Interpreter and REPL") — the final
 // session model, not a shortcut: the REPL's generational redefinition
 // replaces cells wholesale.
@@ -260,6 +279,20 @@ func EvalIO(ctx context.Context, e core.Expr, env *Env, ioctx *IOContext) (Value
 	return (&interp{ctx: ctx, env: env, out: ioctx.Writer, ioctx: ioctx, evidence: map[int]*evidence{}}).eval(e, nil)
 }
 
+// EvalOutcome exposes the interpreter's control protocol to compiler tests and
+// later control handlers without conflating a language exit with an internal
+// evaluator error.
+func EvalOutcome(ctx context.Context, e core.Expr, env *Env, ioctx *IOContext) (Outcome, error) {
+	v, err := EvalIO(ctx, e, env, ioctx)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if exit, ok := asExit(v); ok {
+		return Outcome{Exit: exit}, nil
+	}
+	return Outcome{Value: v}, nil
+}
+
 // Force evaluates (and memoizes) the named top-level binding.
 func Force(ctx context.Context, name string, env *Env, out io.Writer) (Value, error) {
 	return ForceIO(ctx, name, env, NewIOContext(strings.NewReader(""), out))
@@ -317,6 +350,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		if err != nil {
 			return nil, err
 		}
+		if _, ok := asExit(v); ok {
+			return v, nil
+		}
 		return in.eval(e.Body, &Frame{parent: fr, vars: map[string]Value{e.Name: v}})
 	case *core.Lambda:
 		return &Closure{Param: e.Param, Body: e.Body, Env: fr, Evidence: cloneEvidence(in.evidence)}, nil
@@ -324,6 +360,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		v, err := in.eval(e.Operand, fr)
 		if err != nil {
 			return nil, err
+		}
+		if _, ok := asExit(v); ok {
+			return v, nil
 		}
 		switch v := v.(type) {
 		case int64:
@@ -342,6 +381,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
+			if _, ok := asExit(v); ok {
+				return v, nil
+			}
 			code, ok := v.(*meta.Code)
 			if !ok {
 				return nil, fmt.Errorf("eval: quote hole evaluated to a %T, want code", v)
@@ -357,6 +399,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			v, err := in.eval(a, fr)
 			if err != nil {
 				return nil, err
+			}
+			if _, ok := asExit(v); ok {
+				return v, nil
 			}
 			args[i] = v
 		}
@@ -391,6 +436,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		if err != nil {
 			return nil, err
 		}
+		if _, ok := asExit(cond); ok {
+			return cond, nil
+		}
 		if cond.(bool) {
 			return in.eval(e.Then, fr)
 		}
@@ -401,6 +449,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			v, err := in.eval(a, fr)
 			if err != nil {
 				return nil, err
+			}
+			if _, ok := asExit(v); ok {
+				return v, nil
 			}
 			args[i] = v
 		}
@@ -450,11 +501,28 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			return spec.Eval(in.nativeRuntime(), args)
 		}
 		return nil, fmt.Errorf("eval: unhandled effect operation `%s.%s`", e.Effect.Name, e.Op.Name)
+	case *core.ControlExit:
+		payload := make([]Value, len(e.Payload))
+		for i, p := range e.Payload {
+			v, err := in.eval(p, fr)
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := asExit(v); ok {
+				return v, nil
+			}
+			payload[i] = v
+		}
+		return &ExitRequest{Target: e.Target, Op: e.Op, Payload: payload}, nil
 	case *core.ResumeTail:
 		return nil, fmt.Errorf("eval: ResumeTail outside verified handler-clause evaluation")
 	case *core.Seq:
-		if _, err := in.eval(e.First, fr); err != nil {
+		first, err := in.eval(e.First, fr)
+		if err != nil {
 			return nil, err
+		}
+		if _, ok := asExit(first); ok {
+			return first, nil
 		}
 		return in.eval(e.Then, fr)
 	case *core.Handle:
@@ -465,6 +533,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
+			if _, ok := asExit(state); ok {
+				return state, nil
+			}
 		}
 		outer := cloneEvidence(in.evidence)
 		in.evidence[e.Effect.Unique] = &evidence{handler: e, frame: fr, outer: outer, state: state}
@@ -473,6 +544,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		in.evidence = outer
 		if err != nil {
 			return nil, err
+		}
+		if _, ok := asExit(v); ok {
+			return v, nil
 		}
 		if e.Return == nil {
 			return v, nil
@@ -503,6 +577,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				v, err := in.eval(a, fr)
 				if err != nil {
 					return nil, err
+				}
+				if _, ok := asExit(v); ok {
+					return v, nil
 				}
 				vars[def.Params[i]] = v
 			}
@@ -538,6 +615,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
+			if _, ok := asExit(calleeV); ok {
+				return calleeV, nil
+			}
 			c, ok := calleeV.(*Closure)
 			if !ok {
 				return nil, fmt.Errorf("eval: applying a %T — the linter should have caught this", calleeV)
@@ -548,6 +628,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			v, err := in.eval(e.Args[0], fr)
 			if err != nil {
 				return nil, err
+			}
+			if _, ok := asExit(v); ok {
+				return v, nil
 			}
 			saved := in.evidence
 			callEvidence := cloneEvidence(c.Evidence)
@@ -569,6 +652,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				if err != nil {
 					return nil, err
 				}
+				if _, ok := asExit(v); ok {
+					return v, nil
+				}
 				fields[i] = v
 			}
 			return &CtorVal{Ctor: e.Ctor, Fields: fields}, nil
@@ -579,6 +665,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		v, err := in.eval(e.Scrut, fr)
 		if err != nil {
 			return nil, err
+		}
+		if _, ok := asExit(v); ok {
+			return v, nil
 		}
 		frame := &Frame{parent: fr, vars: map[string]Value{e.Bind: v}}
 		return in.tree(e.Tree, frame, in.eval)
@@ -600,10 +689,16 @@ func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID, e
 		if err != nil {
 			return nil, err
 		}
+		if _, ok := asExit(value); ok {
+			return value, nil
+		}
 		if e.NextState != nil {
 			next, err := in.eval(e.NextState, fr)
 			if err != nil {
 				return nil, err
+			}
+			if _, ok := asExit(next); ok {
+				return next, nil
 			}
 			ev.state = next
 		}
@@ -622,16 +717,26 @@ func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID, e
 		if err != nil {
 			return nil, err
 		}
+		if _, ok := asExit(v); ok {
+			return v, nil
+		}
 		return in.evalResumeTail(e.Body, &Frame{parent: fr, vars: map[string]Value{e.Name: v}}, owner, ev)
 	case *core.Seq:
-		if _, err := in.eval(e.First, fr); err != nil {
+		first, err := in.eval(e.First, fr)
+		if err != nil {
 			return nil, err
+		}
+		if _, ok := asExit(first); ok {
+			return first, nil
 		}
 		return in.evalResumeTail(e.Then, fr, owner, ev)
 	case *core.If:
 		cond, err := in.eval(e.Cond, fr)
 		if err != nil {
 			return nil, err
+		}
+		if _, ok := asExit(cond); ok {
+			return cond, nil
 		}
 		if cond.(bool) {
 			return in.evalResumeTail(e.Then, fr, owner, ev)
@@ -641,6 +746,9 @@ func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID, e
 		v, err := in.eval(e.Scrut, fr)
 		if err != nil {
 			return nil, err
+		}
+		if _, ok := asExit(v); ok {
+			return v, nil
 		}
 		frame := &Frame{parent: fr, vars: map[string]Value{e.Bind: v}}
 		return in.tree(e.Tree, frame, func(body core.Expr, leafFrame *Frame) (Value, error) {
@@ -696,6 +804,9 @@ func (in *interp) tree(t core.Tree, fr *Frame, leaf func(core.Expr, *Frame) (Val
 		v, err := in.eval(t.Cond, fr)
 		if err != nil {
 			return nil, err
+		}
+		if _, ok := asExit(v); ok {
+			return v, nil
 		}
 		if v.(bool) {
 			return in.tree(t.Then, fr, leaf)
@@ -793,6 +904,9 @@ func (in *interp) force(name string) (Value, error) {
 	cell.forcing = false
 	if err != nil {
 		return nil, err
+	}
+	if _, ok := asExit(v); ok {
+		return v, nil
 	}
 	cell.memo, cell.forced = v, true
 	return v, nil

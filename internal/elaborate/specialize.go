@@ -295,7 +295,7 @@ func (s *scalarSpecializer) methodValue(method scalarMethod, ty types.Type) core
 	} else if name := method.instance.NativeMethods[method.index]; name != "" {
 		body = &core.NativeCall{Name: name, Module: s.ck.Natives[name].Module, Args: args, Ty: ret}
 	} else {
-		body = &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: method.instance.Methods[method.index], Ty: ty}, Args: args, Ty: ret}
+		body = &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: method.instance.Methods[method.index], Ty: ty}, Args: args, Ty: ret, Control: core.ArrowControl(ty, len(args))}
 	}
 	for i := len(args) - 1; i >= 0; i-- {
 		body = &core.Lambda{Param: args[i].(*core.VarRef).Name, Body: body, Ty: arrows[i], ParamCapture: s.ck.Sup.FreshCapture()}

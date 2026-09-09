@@ -158,142 +158,19 @@ prefix elaboration or an interpreter-only convenience path.
 
 | Milestone | Depends on | Shippable result |
 | --- | --- | --- |
-| E3: control-aware calls and callback ABIs | Proven tail-resume and scoped capture Core | Stable direct/exit transport and higher-order calls |
-| E4: abort-only effects and Result | E3 | Failure handlers; integrate implemented State for State/failure examples |
+| E4: abort-only effects and Result | Implemented Direct/Exit ABI | Failure handlers; integrate implemented State for State/failure examples |
 | E5: synchronous cleanup scopes | Scoped capture Core, E4 | `Scope.bracket` / `finally`, generic cleanup across exits |
 | E6: resource APIs and native error boundaries | E5 | Useful file/resource examples and structured IO failures |
-| E7: selective execution machines | E3, E5 | Internal one-shot suspension and cleanup frames |
+| E7: selective execution machines | Implemented control ABI, E5 | Internal one-shot suspension and cleanup frames |
 | E8: owned iterators and scoped non-tail handlers | Scoped capture Core, E7 | Pull traversal and checked non-tail resumption |
 | E9: structured async and cancellation | E6, E8 | Cooperative tasks, cancellation, nursery cleanup |
 
-E3 builds on the shipped tail-resume and scoped-state Core without changing
-their direct fast path. E3–E6 form a useful release with state, exceptions, and
-resources but no general continuation objects.
+The shipped control-aware ABI preserves the tail-resume and scoped-state direct
+fast path. E4–E6 form a useful release with state, exceptions, and resources but
+no general continuation objects.
 E7–E9 are explicitly deferred until a concrete suspension consumer warrants
 their compiler and type-system cost. No milestone requires implementing the
 whole table at once.
-
-## E3. Control-aware calls and stable callback ABIs
-
-### Deliverable and rationale
-
-Introduce control transport as compiler metadata before allowing new source
-exits. Keep direct code direct (P), and prevent row erasure from concealing
-non-local control (S). This can ship as a compiler refactoring with unchanged
-source semantics and private synthetic Core tests for the new transport.
-
-Keep two concepts separate:
-
-```text
-Operation discipline: TailResume | AbortOnly | ScopedOneShot (future)
-Execution transport:  Direct | Exit | Machine (future)
-```
-
-Discipline determines how a clause may use its own resume. Transport describes
-what executing a function or evidence callback can do, including through other
-effects. A tail-resumptive State clause can execute `fail "bad"` before its
-resume; then a function whose source row mentions only State still needs the
-Exit ABI when passed that interpretation. A syntactic scan for `fail` in the
-function itself cannot establish Direct transport.
-
-### Analysis and representations
-
-Compute transport from body operations, calls, residual rows, supplied evidence,
-and closure captures. Internal handlers can discharge control effects: a
-function catching all its exits may expose Direct transport despite using Exit
-code internally. Unknown row tails require control variables or a conservative
-transport; they must not default to Direct.
-
-One candidate inference model is:
-
-```text
-Arrow = { argument, effects, result, control }
-control ∈ { Direct, Exit, Machine, control variable }
-join(Direct, Exit) = Exit
-join(Exit, Machine) = Machine
-```
-
-Effect-instance evidence needs transport information too. Thread it through
-substitution, instantiation, dictionary methods, annotations, higher-order
-schemes, and module-owned worker interfaces. An explicit source annotation
-cannot erase an inferred control obligation.
-
-Go cannot use a type parameter to select between a plain result, an Outcome,
-and a step protocol. Emit concrete ABI families instead of pretending a
-`Control` generic parameter can change a Go function's signature:
-
-```text
-worker$direct(evD, args...) -> A
-worker$exit(evX, args...)   -> Outcome<A>
-worker$machine(...)        -> Step                 -- introduced in E7
-
-StateEvidenceDirect<S>.Get() -> S
-StateEvidenceExit<S>.Get()   -> Outcome<S>
-```
-
-For transport-polymorphic definitions, generate a bounded family from the
-defining module's own source contract. Prefer one joined transport for a worker
-and widening adapters over a combinatorial variant for every combination of
-callback modes. Monomorphic direct workers need no unused Exit version unless
-their declared polymorphism requires it.
-
-Here transport polymorphism includes abstract effect evidence even when the
-source has no type variables or open row. For example,
-`() ->{State Int} Int` can be called with an aborting interpretation of State;
-a closed row is not proof of Direct transport. Infer that evidence-dependent
-mode in the defining module's contract and emit the required family there.
-
-A Direct callback can be adapted to Exit by calling it and wrapping its result.
-An Exit callback cannot be made Direct by dropping its exit field, swallowing
-failure, or panicking. It requires a real enclosing handler that discharges the
-exit, or a diagnostic. Machine adapters obey the same rule later.
-
-### Implementation sequence
-
-1. Preserve control constraints until after effect solving and evidence
-   requirements are known. Derive an explicit call convention for every Core
-   definition, lambda, operation slot, and application.
-2. Extend `adaptFunctionValue` and eta expansion to adapt transport as well as
-   evidence. Preserve scoped captures, partial application, and per-arrow timing.
-3. Represent Exit results as a tagged sum conceptually:
-
-   ```text
-   Outcome<A> = Normal(A) | ExitRequest(target, operation, payload)
-   ```
-
-   In Go, choose typed structs/tags and typed operation payload variants where
-   feasible. A shared erased dispatch boundary may box payloads, but every
-   producer/consumer must be tied to the same checked operation descriptor.
-   Do not turn failed runtime type assertions into the type system.
-4. Lower ANF call results so exit propagation occurs before the next source
-   expression. Include calls in arguments, guards, record construction, native
-   adapters, return transformations, and handler clause prefixes.
-5. Teach Core lint to check call convention, evidence-slot agreement, complete
-   Outcome handling, and absence of discarded exit paths. Extend dumps so
-   goldens make ABI choices inspectable.
-6. Implement equivalent interpreter outcomes. Keep interpreter-internal errors
-   distinct from language-level ExitRequest values.
-
-Native calls that cannot invoke Fango callbacks need only declared native
-error conversion. Do not allow a future foreign callback to suspend or abort
-across an ordinary foreign frame without an explicit adapter and checked ABI.
-
-### Acceptance and examples
-
-- Pure List map, effectful map, a callback stored in an ADT, a dictionary method,
-  and an annotated open-row handler wrapper choose compatible transports.
-- A pure callback can be used in an Exit worker without losing its lexical
-  evidence or changing evaluation timing.
-- An interpreted State `get` that calls an outer failure handler propagates
-  through a worker with no textual failure operation.
-- Early-effect curried functions preserve their early transport; partially
-  applied final-effect workers remain pure at construction.
-- Adding a downstream Exit consumer does not alter already-generated dependency
-  bytes or select different class instances.
-- Existing direct-only emitted functions do not acquire per-call outcome tags
-  unnecessarily. Measure any unavoidable adapters and emitted code-size growth.
-- Cross-module and recursive control constraints terminate; no mode is guessed
-  from a call site's available Go type after erasure.
 
 ## E4. Abort-only effects, Result, and state/failure composition
 
@@ -713,7 +590,7 @@ worker process infrastructure is not a suspended Fango continuation engine.
 
 Build the internal suspension backend with private Core fixtures first. Do not
 enable source-level general resume merely because the machine can run it.
-E8 supplies its static ownership contract. State and E3–E6 remain useful without E7.
+E8 supplies its static ownership contract. State and E4–E6 remain useful without E7.
 
 Use an ANF-to-control-flow lowering, optionally expressed through selective CPS
 internally, followed by defunctionalization. Emitting chains of Go closures
@@ -769,7 +646,7 @@ source resume linearity.
 
 Direct workers still use their existing ABI. Machine workers call Direct code
 normally when its evidence is proven non-suspending. Exit adapters preserve
-tagged failures. A call with unknown transport uses its E3-compatible family;
+tagged failures. A call with unknown transport uses its implemented compatible family;
 never suspend through an unconverted direct caller and attempt to reconstruct
 that caller's Go frame afterward.
 
@@ -1163,9 +1040,6 @@ attempts. Do not describe all nondeterministic algorithms as impossible.
 
 These are bounded open decisions for their named milestones.
 
-- **E3 ABI families:** validate the joined-mode strategy against recursive
-  higher-order functions and per-module determinism. Document exactly when a
-  Direct/Exit adapter is generated and what metadata survives erasure.
 - **E4 abort spelling and result polymorphism:** freeze operation discipline in
   declaration metadata. The special abort-result variable is not a general
   generic-operation implementation. Keep mixed abort/resume handlers outside
@@ -1207,7 +1081,8 @@ to reproduce another language's runtime or surface syntax.
 
 - [Generalized Evidence Passing for Effect Handlers — Xie and Leijen](https://xnning.github.io/papers/multip-tr.pdf).
   Read the tail-resumptive optimization and evidence restoration sections when
-  checking the direct-handler foundation through E3. Its general continuation machinery is broader than this plan.
+  checking the implemented direct-handler and control-ABI foundation. Its
+  general continuation machinery is broader than this plan.
 - [Algebraic Effect Handlers with Resources and Deep Finalization — Leijen](https://www.microsoft.com/en-us/research/publication/algebraic-effect-handlers-resources-deep-finalization/).
   Use for E5/E7 scope lifetime and abandonment questions; multi-shot initializer
   machinery is not required by the chosen one-shot model.

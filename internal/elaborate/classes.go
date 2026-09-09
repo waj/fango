@@ -179,7 +179,8 @@ func instanceDefinition(in *infer.InstanceInfo, ck *infer.Checker) (core.Def, []
 	var fields []core.Expr
 	for i, name := range in.Methods {
 		mt := types.SubstRigid(in.Class.Methods[i].Type, map[int]types.Type{in.Class.Param.ID: in.Head})
-		fields = append(fields, el.valueReference(name, mt))
+		want := el.zonkDefault(mt)
+		fields = append(fields, el.adaptFunctionValue(el.valueReference(name, mt), want))
 	}
 	ct := types.Type(ty)
 	for i := len(fields) - 1; i >= 0; i-- {
@@ -190,8 +191,9 @@ func instanceDefinition(in *infer.InstanceInfo, ck *infer.Checker) (core.Def, []
 	for i := range paramCaptures {
 		paramCaptures[i] = ck.Sup.FreshCapture()
 	}
-	return core.Def{Name: in.Name, Owner: in.Owner, Type: prependTypes(dictTypes, ty), TyParams: in.Vars,
-		Params: params, ParamCaptures: paramCaptures, Body: el.anf(body)}, el.errs
+	fullType := prependTypes(dictTypes, ty)
+	return core.Def{Name: in.Name, Owner: in.Owner, Type: fullType, TyParams: in.Vars,
+		Params: params, ParamCaptures: paramCaptures, Control: core.ArrowControl(fullType, len(params)), Body: el.anf(body)}, el.errs
 }
 
 // Display evaluates its argument once and renders through the ordinary Show

@@ -1103,6 +1103,17 @@ the owning operation clause's location. Nested operation clauses bind their own
 resume, while nested handled bodies and return groups retain the surrounding
 resume binding.
 
+The compiler preserves a control-aware calling convention through
+higher-order functions and abstract effect evidence. Direct calls keep their
+plain generated-Go result, while definitions whose callback/evidence contract
+can later carry a non-local exit have stable Direct and Exit ABI families in
+their defining module. The Exit family uses an internal tagged `Outcome` and
+propagates it before evaluating the next source expression. Function values
+stored in ADTs or class dictionaries use matching representation families.
+This is currently an implementation guarantee visible in `--emit-go`, not new
+source syntax: user-declared operations remain tail-resumptive, and aborting
+operations are not yet accepted.
+
 Ordinary stateless user-declared effects have durable evidence: returning a pure closure
 that captures an immutable Reader-style handler remains legal. There is no
 scope annotation in source syntax. Parameterized handlers are scoped: a result

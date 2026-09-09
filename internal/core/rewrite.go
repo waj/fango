@@ -116,6 +116,11 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Args = r.exprs(e.Args)
 		n.Effect = r.effect(e.Effect)
 		out = &n
+	case *ControlExit:
+		n := *e
+		n.Ty = r.typ(e.Ty)
+		n.Payload = r.exprs(e.Payload)
+		out = &n
 	case *Handle:
 		n := *e
 		n.Ty = r.typ(e.Ty)

@@ -27,46 +27,60 @@ func fieldName(i int) string { return fmt.Sprintf("F%d", i) }
 func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 	var decls []goast.Decl
 	for _, adt := range adts {
-		g.tyParamNames = tyParamNames(adt.Params)
-		paramIdents := make([]goast.Expr, len(adt.Params))
-		for i, v := range adt.Params {
-			paramIdents[i] = ident(g.tyParamNames[v.ID])
+		modes := []types.Transport{types.Direct}
+		if g.controlledType(adt.Con, nil) {
+			modes = append(modes, types.Exit)
 		}
-		iface := mangleType(adt.Con.Name)
-		marker := markerMethod(adt.Con.Name)
-		decls = append(decls, &goast.GenDecl{
-			Tok: gotoken.TYPE,
-			Specs: []goast.Spec{&goast.TypeSpec{
-				Name:       ident(iface),
-				TypeParams: g.typeParamFields(adt.Params),
-				Type: &goast.InterfaceType{Methods: &goast.FieldList{List: []*goast.Field{{
-					Names: []*goast.Ident{ident(marker)},
-					Type:  &goast.FuncType{Params: &goast.FieldList{}},
-				}}}},
-			}},
-		})
-		for _, c := range adt.Ctors {
-			fields := make([]*goast.Field, len(c.Fields))
-			for i, ft := range c.Fields {
-				fields[i] = &goast.Field{Names: []*goast.Ident{ident(fieldName(i))}, Type: g.goType(ft)}
+		for _, mode := range modes {
+			oldControl := g.control
+			g.control = mode
+			g.tyParamNames = tyParamNames(adt.Params)
+			paramIdents := make([]goast.Expr, len(adt.Params))
+			for i, v := range adt.Params {
+				paramIdents[i] = ident(g.tyParamNames[v.ID])
 			}
-			decls = append(decls,
-				&goast.GenDecl{
-					Tok: gotoken.TYPE,
-					Specs: []goast.Spec{&goast.TypeSpec{
-						Name:       ident(mangleCtor(c.Name)),
-						TypeParams: g.typeParamFields(adt.Params),
-						Type:       &goast.StructType{Fields: &goast.FieldList{List: fields}},
-					}},
-				},
-				&goast.FuncDecl{
-					Recv: &goast.FieldList{List: []*goast.Field{{
-						Type: indexExpr(ident(mangleCtor(c.Name)), paramIdents),
-					}}},
-					Name: ident(marker),
-					Type: &goast.FuncType{Params: &goast.FieldList{}},
-					Body: &goast.BlockStmt{},
-				})
+			suffix := ""
+			if mode == types.Exit {
+				suffix = "_exit"
+			}
+			iface := mangleType(adt.Con.Name) + suffix
+			marker := markerMethod(adt.Con.Name) + suffix
+			decls = append(decls, &goast.GenDecl{
+				Tok: gotoken.TYPE,
+				Specs: []goast.Spec{&goast.TypeSpec{
+					Name:       ident(iface),
+					TypeParams: g.typeParamFields(adt.Params),
+					Type: &goast.InterfaceType{Methods: &goast.FieldList{List: []*goast.Field{{
+						Names: []*goast.Ident{ident(marker)},
+						Type:  &goast.FuncType{Params: &goast.FieldList{}},
+					}}}},
+				}},
+			})
+			for _, c := range adt.Ctors {
+				fields := make([]*goast.Field, len(c.Fields))
+				for i, ft := range c.Fields {
+					fields[i] = &goast.Field{Names: []*goast.Ident{ident(fieldName(i))}, Type: g.goType(ft)}
+				}
+				ctorName := mangleCtor(c.Name) + suffix
+				decls = append(decls,
+					&goast.GenDecl{
+						Tok: gotoken.TYPE,
+						Specs: []goast.Spec{&goast.TypeSpec{
+							Name:       ident(ctorName),
+							TypeParams: g.typeParamFields(adt.Params),
+							Type:       &goast.StructType{Fields: &goast.FieldList{List: fields}},
+						}},
+					},
+					&goast.FuncDecl{
+						Recv: &goast.FieldList{List: []*goast.Field{{
+							Type: indexExpr(ident(ctorName), paramIdents),
+						}}},
+						Name: ident(marker),
+						Type: &goast.FuncType{Params: &goast.FieldList{}},
+						Body: &goast.BlockStmt{},
+					})
+			}
+			g.control = oldControl
 		}
 	}
 	g.tyParamNames = nil

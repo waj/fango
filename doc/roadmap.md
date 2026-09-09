@@ -159,9 +159,10 @@ state machines without goroutine-based continuations or stack-copy capture;
 resume discipline is enforced at compile time.
 
 The tail-resumptive discipline and parameterized State handlers are proved in
-source checking and Core, and scoped capture metadata is checked during
-elaboration and again in Core. Next introduce control-aware calling
-conventions before abort-only effects and generic cleanup scopes. Resource
+source checking and Core, scoped capture metadata is checked during elaboration
+and again in Core, and control-aware Direct/Exit calling conventions are
+implemented for workers, callbacks, evidence, ADTs, dictionaries, and both
+backends. Next add abort-only effects, then generic cleanup scopes. Resource
 management is exposed through ordinary `Scope.bracket`/`withFile` calls rather
 than requiring new cleanup syntax. These increments can ship without suspension.
 

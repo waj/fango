@@ -122,13 +122,13 @@ func (el *elab) effectInstance(op *types.EffectOp, ty types.Type) core.EffectIns
 		if i == op.Arity-1 {
 			for _, l := range f.Eff.Labels {
 				if l.Unique == op.Owner.Unique {
-					return core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Captures: el.evidenceCaptures(l.Unique)}
+					return core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Captures: el.evidenceCaptures(l.Unique), Control: el.evidenceControl(l.Unique)}
 				}
 			}
 		}
 		t = f.Ret
 	}
-	return core.EffectInstance{Unique: op.Owner.Unique, Name: op.Owner.Name, Captures: el.evidenceCaptures(op.Owner.Unique)}
+	return core.EffectInstance{Unique: op.Owner.Unique, Name: op.Owner.Name, Captures: el.evidenceCaptures(op.Owner.Unique), Control: el.evidenceControl(op.Owner.Unique)}
 }
 
 func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args []ast.Expr) core.Expr {
@@ -154,7 +154,8 @@ func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args [
 	if len(args) < op.Arity {
 		effectParams = el.bindEffectParams(executingEffects(arrowAt(opTy, len(args)), op.Arity-len(args)))
 	}
-	var body core.Expr = &core.Perform{Op: op, Effect: el.effectInstance(op, rawTy), Args: coreArgs, Ty: ret}
+	inst := el.effectInstance(op, rawTy)
+	var body core.Expr = &core.Perform{Op: op, Effect: inst, Args: coreArgs, Ty: ret, Control: inst.Control}
 	if len(effectParams) > 0 {
 		el.popEvidence(effectParams)
 	}
@@ -218,10 +219,11 @@ func (el *elab) valueApp(callee, arg core.Expr) core.Expr {
 		Callee:     callee,
 		Args:       []core.Expr{arg},
 		Ty:         fn.Ret,
+		Control:    types.FunctionControl(fn),
 	}
 	for _, l := range types.SortedRow(fn.Eff).Labels {
 		if types.SurfaceName(l.Name) != "IO" {
-			app.EvidenceArgs = append(app.EvidenceArgs, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Captures: el.evidenceCaptures(l.Unique)})
+			app.EvidenceArgs = append(app.EvidenceArgs, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Captures: el.evidenceCaptures(l.Unique), Control: el.evidenceControl(l.Unique)})
 		}
 	}
 	return app
@@ -366,6 +368,10 @@ func (el *elab) nullaryValueUse(name string, sch types.Scheme, occTy types.Type)
 // saturatedApp builds the direct App for a fully applied callee.
 func (c callee) saturatedApp(args []core.Expr) *core.App {
 	_, ret := core.PeelFun(c.ty, c.arity)
+	control := core.ArrowControl(c.ty, c.arity)
+	if c.kind == core.Ctor {
+		control = types.Control{}
+	}
 	return &core.App{
 		CalleeKind:   c.kind,
 		Callee:       &core.VarRef{Name: c.name, Ty: c.ty},
@@ -374,6 +380,7 @@ func (c callee) saturatedApp(args []core.Expr) *core.App {
 		Ty:           ret,
 		EvidenceArgs: c.evidence,
 		Ctor:         c.ctor,
+		Control:      control,
 	}
 }
 
@@ -411,6 +418,7 @@ func (el *elab) workerEvidence(name string, arity int, tyArgs []types.Type) []co
 	}
 	for i := range effects {
 		effects[i].Captures = el.evidenceCaptures(effects[i].Unique)
+		effects[i].Control = el.evidenceControl(effects[i].Unique)
 	}
 	return effects
 }
@@ -442,7 +450,9 @@ func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
 // erased row ABI. Its concrete handler evidence remains captured by the
 // wrapper at the creation site.
 func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
-	if types.Equal(e.Type(), want) {
+	actualFn, actualIsFn := e.Type().(*types.TFun)
+	wantFn0, wantIsFn := want.(*types.TFun)
+	if types.Equal(e.Type(), want) && (!actualIsFn || !wantIsFn || types.FunctionControl(actualFn) == types.FunctionControl(wantFn0)) {
 		return e
 	}
 	wantFn, wantOK := want.(*types.TFun)
@@ -500,7 +510,7 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 	body := el.valueApp(e, arg)
 	el.popEvidence(effectParams)
 	body = el.adaptFunctionValue(body, wantFn.Ret)
-	return &core.Lambda{Param: name, Body: body, Ty: &types.TFun{Arg: wantFn.Arg, Eff: wantFn.Eff, Ret: wantFn.Ret},
+	return &core.Lambda{Param: name, Body: body, Ty: &types.TFun{Arg: wantFn.Arg, Eff: wantFn.Eff, Ret: wantFn.Ret, Control: wantFn.Control},
 		ParamCapture: el.ck.Sup.FreshCapture(), EffectParams: effectParams}
 }
 

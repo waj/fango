@@ -295,6 +295,10 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			r.value = types.CaptureSet{}
 		}
 		return r
+	case *ControlExit:
+		r := children(e.Payload...)
+		r.value = types.CaptureSet{}
+		return r
 	case *ResumeTail:
 		r := a.expr(e.Value, env, evidence)
 		if e.NextState != nil {

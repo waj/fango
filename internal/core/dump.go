@@ -84,6 +84,9 @@ func Dump(p *Prog) string {
 			}
 			b.WriteString(")")
 		}
+		if d.Control != (types.Control{}) {
+			fmt.Fprintf(&b, " (control %s)", ControlName(d.Control))
+		}
 		fmt.Fprintf(&b, " %s %s)", pr.Type(d.Type), dumpExpr(d.Body, pr))
 	}
 	b.WriteString(")\n")
@@ -116,9 +119,19 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 	case *If:
 		return fmt.Sprintf("(if %s %s %s %s)", pr.Type(e.Ty), dumpExpr(e.Cond, pr), dumpExpr(e.Then, pr), dumpExpr(e.Else, pr))
 	case *Perform:
-		parts := []string{fmt.Sprintf("(perform %s/%s", dumpEffect(e.Effect, pr), e.Op.Name)}
+		form := "perform"
+		if e.Control != (types.Control{}) {
+			form += "/" + ControlName(e.Control)
+		}
+		parts := []string{fmt.Sprintf("(%s %s/%s", form, dumpEffect(e.Effect, pr), e.Op.Name)}
 		for _, a := range e.Args {
 			parts = append(parts, dumpExpr(a, pr))
+		}
+		return strings.Join(parts, " ") + " " + pr.Type(e.Ty) + ")"
+	case *ControlExit:
+		parts := []string{fmt.Sprintf("(control-exit scope[%d] %s/%s", e.Target, e.Op.Owner.Name, e.Op.Name)}
+		for _, p := range e.Payload {
+			parts = append(parts, dumpExpr(p, pr))
 		}
 		return strings.Join(parts, " ") + " " + pr.Type(e.Ty) + ")"
 	case *ResumeTail:
@@ -149,7 +162,12 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		}
 		return fmt.Sprintf("(%s %s %s %s %s)", form, e.Name, pr.Type(e.Ty), dumpExpr(e.Rhs, pr), dumpExpr(e.Body, pr))
 	case *Lambda:
-		return fmt.Sprintf("(lam %s %s %s)", e.Param, pr.Type(e.Ty), dumpExpr(e.Body, pr))
+		control := types.FunctionControl(e.Ty.(*types.TFun))
+		form := "lam"
+		if control != (types.Control{}) {
+			form += "/" + ControlName(control)
+		}
+		return fmt.Sprintf("(%s %s %s %s)", form, e.Param, pr.Type(e.Ty), dumpExpr(e.Body, pr))
 	case *VarRef:
 		if len(e.TyArgs) > 0 {
 			return fmt.Sprintf("(var %s @[%s] %s)", e.Name, dumpTypes(e.TyArgs, pr), pr.Type(e.Ty))
@@ -170,6 +188,9 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 	case *App:
 		kinds := map[CalleeKind]string{Worker: "worker", Ctor: "ctor", Value: "value"}
 		head := "(app/" + kinds[e.CalleeKind]
+		if e.Control != (types.Control{}) {
+			head += "/" + ControlName(e.Control)
+		}
 		if len(e.TyArgs) > 0 {
 			head += fmt.Sprintf(" @[%s]", dumpTypes(e.TyArgs, pr))
 		}
@@ -197,10 +218,14 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 }
 
 func dumpEffect(e EffectInstance, pr *types.Printer) string {
-	if len(e.Args) == 0 {
-		return e.Name
+	name := e.Name
+	if e.Control != (types.Control{}) {
+		name += "@" + ControlName(e.Control)
 	}
-	return e.Name + "[" + dumpTypes(e.Args, pr) + "]"
+	if len(e.Args) == 0 {
+		return name
+	}
+	return name + "[" + dumpTypes(e.Args, pr) + "]"
 }
 
 func dumpTypes(ts []types.Type, pr *types.Printer) string {

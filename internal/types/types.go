@@ -12,6 +12,64 @@ import "sort"
 // confused by the source checker or Core linter.
 type ResumeID int
 
+// Transport is the concrete execution protocol of one function arrow.  Direct
+// arrows return their result normally; Exit arrows return an Outcome carrying
+// either that result or a non-local exit. Machine is reserved for the selective
+// execution-machine lowering described by the effects roadmap.
+type Transport uint8
+
+const (
+	Direct Transport = iota
+	Exit
+	Machine
+)
+
+// Control is compiler-only function-arrow metadata. Polymorphic means that the
+// defining module emits the bounded Direct/Exit ABI family and a use selects a
+// member from its enclosing control context. Transport is the fixed lower
+// bound, so a future Machine-polymorphic arrow can be represented without
+// changing this shape.
+type Control struct {
+	Transport   Transport
+	Polymorphic bool
+}
+
+func (c Control) Valid() bool { return c.Transport <= Machine }
+
+func (c Control) Resolve(context Transport) Transport {
+	if c.Polymorphic && context > c.Transport {
+		return context
+	}
+	return c.Transport
+}
+
+func JoinControl(cs ...Control) Control {
+	var out Control
+	for _, c := range cs {
+		if c.Transport > out.Transport {
+			out.Transport = c.Transport
+		}
+		out.Polymorphic = out.Polymorphic || c.Polymorphic
+	}
+	return out
+}
+
+// FunctionControl returns the materialized arrow protocol. Source-owned type
+// metadata predating Core may still carry only its effect row; an open row or
+// custom evidence makes that arrow transport-polymorphic by contract.
+func FunctionControl(fn *TFun) Control {
+	out := fn.Control
+	if fn.Eff.Tail != nil {
+		out.Polymorphic = true
+	}
+	for _, label := range fn.Eff.Labels {
+		if SurfaceName(label.Name) != "IO" {
+			out.Polymorphic = true
+		}
+	}
+	return out
+}
+
 type VarKind int
 
 const (
@@ -45,9 +103,10 @@ type TCon struct {
 // TFun is the shared internal representation for function arrows. Effects
 // belong to the individual arrow whose application performs them.
 type TFun struct {
-	Arg Type
-	Eff Row
-	Ret Type
+	Arg     Type
+	Eff     Row
+	Ret     Type
+	Control Control // omitted by source type printing; materialized for Core
 }
 
 // Row is a distinct-label effect row, optionally ending in an open tail.
@@ -152,7 +211,7 @@ func SubstRigid(t Type, m map[int]Type) Type {
 		}
 		return &TCon{Unique: t.Unique, Name: t.Name, Args: args}
 	case *TFun:
-		return &TFun{Arg: SubstRigid(t.Arg, m), Eff: substRigidRow(t.Eff, m), Ret: SubstRigid(t.Ret, m)}
+		return &TFun{Arg: SubstRigid(t.Arg, m), Eff: substRigidRow(t.Eff, m), Ret: SubstRigid(t.Ret, m), Control: t.Control}
 	case Row:
 		return substRigidRow(t, m)
 	default:

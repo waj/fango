@@ -145,6 +145,29 @@ capture boundary: calls whose instantiated result can carry their local
 capability are conservatively rejected; immutable scalar and transitively
 capture-free ADT results are admitted.
 
+Execution transport is compiler metadata distinct from both effect rows and
+operation discipline. Each Core arrow, definition, lambda, application, and
+effect-evidence slot records a `Direct`, `Exit`, or future `Machine` lower
+bound, plus whether the mode is selected from its enclosing control context.
+An open row or abstract custom-effect evidence is transport-polymorphic even
+when the source type has no ordinary type variables: a handler interpretation
+may perform a non-local exit before returning the operation's apparent result.
+The metadata is inferred from solved rows and supplied evidence, not by
+scanning a function body for a particular operation name. It belongs to each
+curried arrow independently, preserving early-effect and partial-application
+timing. `Machine` is represented in the contract but rejected until selective
+machine lowering is implemented.
+
+Transport-polymorphic definitions have one joined contract rather than a
+variant for every combination of callback and evidence modes. Their defining
+module always emits Direct and Exit ABI members, so a downstream consumer
+cannot change dependency output. A Direct callback widens to Exit through an
+eta wrapper that calls it and returns `Normal`; the inverse conversion is
+illegal. ADTs, including class dictionaries, that transitively store a
+transport-polymorphic function receive corresponding module-owned Direct and
+Exit representation families. This keeps stored callbacks typed without
+boxing every ordinary value or guessing an ABI after row erasure.
+
 ## Compiler pipeline
 
 The batch pipeline is:
@@ -585,10 +608,21 @@ linter rejects unsolved metavariables, malformed generic applications,
 callee/evidence disagreements, invalid handler coverage or types, and residual
 open rows before either backend runs.
 
+Core also retains the control convention on every executable boundary.
+Transport-polymorphic operations and calls are ANF-hoisted whenever they occur
+in an operand, argument, guard, record/constructor field, handler prefix, or
+return transformation. The Exit emitter therefore tests an `Outcome` before
+the next source expression. Core lint independently checks the convention on
+callee and evidence slots, validates private `ControlExit` producers against
+their operation descriptor and lexical target scope, rejects Machine Core, and
+checks that no control-producing expression remains in an unhandled expression
+slot. Core dumps print non-Direct conventions so ABI choices are reviewable.
+
 An effect-polymorphic higher-order worker has its open callback row erased from
 the runtime ABI. Passing a concrete callback therefore adapts it to that ABI;
 local function references are eta-expanded so their binding keeps its concrete
-type while the wrapper retains the callback's execution and evidence behavior.
+type while the wrapper retains the callback's execution, evidence, captures,
+and per-arrow control behavior.
 
 ## Go backend and runtime
 
@@ -615,6 +649,18 @@ explicit instantiation. Class dictionaries, instance factories, and generated
 deriving methods use the same typed, exported internal ABI as ordinary ADTs
 and workers. Definitions belong to their source module, so adding a downstream
 consumer does not change the dependency's generated package.
+
+Direct workers and operation evidence retain the plain-result ABI, including
+implicit Unit results. Exit workers and evidence return
+`fangort.Outcome[A]`, whose nil request denotes `Normal(A)` and whose request
+contains a lexical target, checked effect/operation descriptor identities, and
+an erased payload checked before boxing. Propagation constructs an Outcome at
+the caller's result type; it never drops an exit, converts it to a panic, or
+uses a failed host type assertion as a language type check. The interpreter
+implements the same outcome propagation with a dedicated language-level
+`ExitRequest` value kept separate from evaluator errors. No current source
+construct produces an aborting exit; the private Core producer and ABI are the
+foundation for abort-only effects.
 
 The backend emits one Go package per Fango module beneath a single generated Go
 module. The entry module is the root `package main`; local and bundled
@@ -670,7 +716,7 @@ generated Go is unchanged. Go's package cache then reuses unchanged compilation
 units. `build` copies the resulting executable; `run` reuses it while inputs
 are unchanged.
 `fangort` owns genuinely shared runtime facilities: represented Unit,
-formatting and the generic native-host contract.
+Direct/Exit outcomes, formatting and the generic native-host contract.
 Module-specific native logic lives in the owning stdlib sidecar instead. In
 particular, `IO.native.go` owns IO operations and line semantics, while
 `Random.native.go` supplies pure PRNG transition/range functions and entropy

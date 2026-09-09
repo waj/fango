@@ -53,6 +53,13 @@ func Lint(p *Prog, b *types.Builtins) []error {
 			l.tyParams[v.ID] = true
 		}
 		l.typ(d.Type, where)
+		l.control(d.Control, where)
+		if d.IsWorker() {
+			wantControl := ArrowControl(d.Type, len(d.Params))
+			if d.Control != wantControl {
+				l.errorf("%s: declared control %s disagrees with final arrow %s", where, ControlName(d.Control), ControlName(wantControl))
+			}
+		}
 		if len(d.ParamCaptures) != len(d.Params) {
 			l.errorf("%s: has %d parameter capture binders, want %d", where, len(d.ParamCaptures), len(d.Params))
 		}
@@ -125,6 +132,11 @@ func Lint(p *Prog, b *types.Builtins) []error {
 			}
 			l.expr(d.Body, where)
 		}
+		bodyControl := ExprControl(d.Body)
+		if !controlBodyFits(bodyControl, d.Control) {
+			l.errorf("%s: body control %s is not representable by contract %s", where, ControlName(bodyControl), ControlName(d.Control))
+		}
+		l.verifyControlANF(d.Body, true, where)
 		for _, v := range d.ResultCaptures.Vars {
 			if !l.captureVars[v] {
 				l.errorf("%s: result capture summary references unbound variable %d", where, v)
@@ -361,6 +373,7 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: Lambda body type %s differs from arrow result %s",
 				where, types.Show(e.Body.Type()), types.Show(fn.Ret))
 		}
+		l.control(types.FunctionControl(fn), where)
 		if e.Param != "_" && l.scope[e.Param] {
 			l.errorf("%s: Lambda param `%s` shadows — the checker should have rejected this", where, e.Param)
 		}
@@ -384,6 +397,9 @@ func (l *linter) expr(e Expr, where string) {
 			l.bindEvidenceCaptures(ev, where)
 		}
 		l.expr(e.Body, where)
+		if bodyControl := ExprControl(e.Body); !controlBodyFits(bodyControl, types.FunctionControl(fn)) {
+			l.errorf("%s: Lambda body control %s is not representable by arrow %s", where, ControlName(bodyControl), ControlName(types.FunctionControl(fn)))
+		}
 		for _, ev := range e.EffectParams {
 			l.evidence[ev.Unique]--
 			l.unbindEvidenceCaptures(ev)
@@ -393,6 +409,10 @@ func (l *linter) expr(e Expr, where string) {
 			delete(l.scope, e.Param)
 		}
 	case *Perform:
+		l.control(e.Control, where)
+		if e.Control != e.Effect.Control {
+			l.errorf("%s: Perform control %s disagrees with its evidence %s", where, ControlName(e.Control), ControlName(e.Effect.Control))
+		}
 		if e.Op == nil || e.Op.Owner.Unique != e.Effect.Unique {
 			l.errorf("%s: malformed Perform evidence", where)
 		} else if !l.operationBelongs(e.Op) {
@@ -429,6 +449,23 @@ func (l *linter) expr(e Expr, where string) {
 		for _, a := range e.Args {
 			l.expr(a, where)
 		}
+	case *ControlExit:
+		if e.Target == 0 || !l.activeScopes[e.Target] {
+			l.errorf("%s: ControlExit targets inactive scope %d", where, e.Target)
+		}
+		if e.Op == nil || !l.operationBelongs(e.Op) {
+			l.errorf("%s: ControlExit has an undeclared operation descriptor", where)
+		} else {
+			if len(e.Payload) != len(e.Op.ParamTypes) {
+				l.errorf("%s: ControlExit `%s` payload arity mismatch", where, e.Op.Name)
+			}
+			for i, p := range e.Payload {
+				if i < len(e.Op.ParamTypes) && !types.Equal(p.Type(), e.Op.ParamTypes[i]) {
+					l.errorf("%s: ControlExit `%s` payload %d typed %s, want %s", where, e.Op.Name, i+1, types.Show(p.Type()), types.Show(e.Op.ParamTypes[i]))
+				}
+				l.expr(p, where)
+			}
+		}
 	case *ResumeTail:
 		if l.resumeOwner == 0 || e.Owner != l.resumeOwner || l.resumeArg == nil || l.resumeRet == nil {
 			l.errorf("%s: ResumeTail owner %d is outside its handler clause", where, e.Owner)
@@ -461,6 +498,7 @@ func (l *linter) expr(e Expr, where string) {
 		l.expr(e.First, where)
 		l.expr(e.Then, where)
 	case *Handle:
+		l.control(e.Control, where)
 		l.effectInstance(e.Effect, where)
 		if e.State != nil {
 			if e.State.Name == "" || e.State.Ty == nil || e.State.Initial == nil {
@@ -587,6 +625,7 @@ func (l *linter) expr(e Expr, where string) {
 			}
 		}
 	case *App:
+		l.control(e.Control, where)
 		switch e.CalleeKind {
 		case Worker:
 			ref, ok := e.Callee.(*VarRef)
@@ -645,6 +684,10 @@ func (l *linter) expr(e Expr, where string) {
 				}
 			}
 			argTys, ret := PeelFun(calleeTy, len(def.Params))
+			wantControl := ArrowControl(calleeTy, len(def.Params))
+			if !controlInstance(e.Control, wantControl) {
+				l.errorf("%s: App{Worker} `%s` control %s disagrees with callee %s", where, ref.Name, ControlName(e.Control), ControlName(wantControl))
+			}
 			for i, a := range e.Args {
 				if !types.Equal(a.Type(), argTys[i]) {
 					l.errorf("%s: App{Worker} `%s` arg %d typed %s, want %s",
@@ -675,6 +718,10 @@ func (l *linter) expr(e Expr, where string) {
 				l.errorf("%s: App{Value} typed %s, want %s",
 					where, types.Show(e.Ty), types.Show(fn.Ret))
 			}
+			wantControl := types.FunctionControl(fn)
+			if !controlInstance(e.Control, wantControl) {
+				l.errorf("%s: App{Value} control %s disagrees with arrow %s", where, ControlName(e.Control), ControlName(wantControl))
+			}
 			wantEvidence := rowEvidence(fn.Eff)
 			if len(e.EvidenceArgs) != len(wantEvidence) {
 				l.errorf("%s: App{Value} has %d evidence args, function requires %d", where, len(e.EvidenceArgs), len(wantEvidence))
@@ -693,6 +740,9 @@ func (l *linter) expr(e Expr, where string) {
 			l.expr(e.Callee, where)
 			l.expr(e.Args[0], where)
 		case Ctor:
+			if e.Control != (types.Control{}) {
+				l.errorf("%s: App{Ctor} must use direct control", where)
+			}
 			if e.Ctor == nil {
 				l.errorf("%s: App{Ctor} without constructor info", where)
 				return
@@ -992,6 +1042,7 @@ func (l *linter) tree(t Tree, want types.Type, where string) {
 }
 
 func (l *linter) effectInstance(e EffectInstance, where string) {
+	l.control(e.Control, where)
 	eff := l.effects[e.Unique]
 	if eff == nil {
 		l.errorf("%s: evidence names unknown effect `%s` (%d)", where, e.Name, e.Unique)
@@ -1068,7 +1119,7 @@ func (l *linter) operationBelongs(op *types.EffectOp) bool {
 }
 
 func substEffectInstance(e EffectInstance, m map[int]types.Type) EffectInstance {
-	out := EffectInstance{Unique: e.Unique, Name: e.Name, Args: make([]types.Type, len(e.Args)), Captures: e.Captures}
+	out := EffectInstance{Unique: e.Unique, Name: e.Name, Args: make([]types.Type, len(e.Args)), Captures: e.Captures, Control: e.Control}
 	for i, a := range e.Args {
 		out.Args[i] = types.SubstRigid(a, m)
 	}
@@ -1084,7 +1135,132 @@ func equalEffectInstance(a, b EffectInstance) bool {
 			return false
 		}
 	}
+	return a.Control == b.Control || b.Control.Polymorphic
+}
+
+func (l *linter) control(c types.Control, where string) {
+	if !c.Valid() {
+		l.errorf("%s: invalid control transport %d", where, c.Transport)
+	}
+	if c.Transport == types.Machine {
+		l.errorf("%s: Machine control survived before machine lowering is implemented", where)
+	}
+}
+
+func controlInstance(actual, contract types.Control) bool {
+	if actual == contract {
+		return true
+	}
+	return contract.Polymorphic && actual.Transport >= contract.Transport && !actual.Polymorphic
+}
+
+func controlBodyFits(body, contract types.Control) bool {
+	if body.Transport > contract.Transport && !contract.Polymorphic {
+		return false
+	}
 	return true
+}
+
+// verifyControlANF checks the proof boundary consumed by Exit emission: a
+// control-producing expression may occur only where generated statements can
+// test its Outcome before evaluating the next source expression.
+func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
+	if e == nil {
+		return
+	}
+	directSlot := func(x Expr, slot string) {
+		if c := ExprControl(x); c.Transport != types.Direct || c.Polymorphic {
+			l.errorf("%s: control-producing %s was not ANF-hoisted", where, slot)
+		}
+		l.verifyControlANF(x, false, where)
+	}
+	switch e := e.(type) {
+	case *Let:
+		l.verifyControlANF(e.Rhs, true, where)
+		l.verifyControlANF(e.Body, tail, where)
+	case *Seq:
+		l.verifyControlANF(e.First, true, where)
+		l.verifyControlANF(e.Then, tail, where)
+	case *If:
+		directSlot(e.Cond, "If condition")
+		l.verifyControlANF(e.Then, tail, where)
+		l.verifyControlANF(e.Else, tail, where)
+	case *Case:
+		directSlot(e.Scrut, "Case scrutinee")
+		l.verifyControlTree(e.Tree, tail, where)
+	case *Neg:
+		directSlot(e.Operand, "negation operand")
+	case *NativeCall:
+		for _, a := range e.Args {
+			directSlot(a, "native argument")
+		}
+	case *Quote:
+		for _, h := range e.Holes {
+			directSlot(h, "quote hole")
+		}
+	case *Perform:
+		for _, a := range e.Args {
+			directSlot(a, "operation argument")
+		}
+	case *ControlExit:
+		for _, p := range e.Payload {
+			directSlot(p, "exit payload")
+		}
+	case *App:
+		if e.CalleeKind == Value {
+			directSlot(e.Callee, "indirect callee")
+		}
+		for _, a := range e.Args {
+			directSlot(a, "call argument")
+		}
+	case *ResumeTail:
+		directSlot(e.Value, "resume value")
+		if e.NextState != nil {
+			directSlot(e.NextState, "next state")
+		}
+	case *Handle:
+		if e.State != nil {
+			directSlot(e.State.Initial, "handler initial state")
+		}
+		l.verifyControlANF(e.Body, true, where)
+		for _, c := range e.Clauses {
+			l.verifyControlANF(c.Body, true, where)
+		}
+		if e.Return != nil {
+			l.verifyControlANF(e.Return.Body, true, where)
+		}
+	case *Lambda:
+		l.verifyControlANF(e.Body, true, where)
+	default:
+		if !tail {
+			_ = tail
+		}
+	}
+}
+
+func (l *linter) verifyControlTree(t Tree, tail bool, where string) {
+	switch t := t.(type) {
+	case nil, *Unreachable:
+	case *Leaf:
+		l.verifyControlANF(t.Body, tail, where)
+	case *Guard:
+		if c := ExprControl(t.Cond); c.Transport != types.Direct || c.Polymorphic {
+			l.errorf("%s: control-producing decision-tree guard was not ANF-hoisted", where)
+		}
+		l.verifyControlANF(t.Cond, false, where)
+		l.verifyControlTree(t.Then, tail, where)
+		l.verifyControlTree(t.Else, tail, where)
+	case *SwitchCtor:
+		for _, c := range t.Cases {
+			l.verifyControlTree(c.Tree, tail, where)
+		}
+		l.verifyControlTree(t.Default, tail, where)
+	case *SwitchLit:
+		for _, c := range t.Cases {
+			l.verifyControlTree(c.Tree, tail, where)
+		}
+		l.verifyControlTree(t.Default, tail, where)
+	}
 }
 
 func (l *linter) typ(t types.Type, where string) {
@@ -1103,6 +1279,7 @@ func (l *linter) typ(t types.Type, where string) {
 		if t.Eff.Tail != nil {
 			l.errorf("%s: source effect row survived elaboration", where)
 		}
+		l.control(types.FunctionControl(t), where)
 		for _, ev := range rowEvidence(t.Eff) {
 			l.effectInstance(ev, where)
 		}
@@ -1117,7 +1294,7 @@ func rowEvidence(r types.Row) []EffectInstance {
 	var out []EffectInstance
 	for _, l := range types.SortedRow(r).Labels {
 		if types.SurfaceName(l.Name) != "IO" {
-			out = append(out, EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...)})
+			out = append(out, EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Control: types.Control{Polymorphic: true}})
 		}
 	}
 	return out

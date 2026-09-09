@@ -42,6 +42,9 @@ func (in *interp) evalTailLoop(def *core.Def, vars map[string]Value) (Value, err
 		if err != nil {
 			return nil, err
 		}
+		if _, ok := asExit(v); ok {
+			return v, nil
+		}
 		if j, ok := v.(*tailJump); ok {
 			vars = j.vars
 			continue
@@ -70,25 +73,38 @@ func (in *interp) tailStep(def *core.Def, e core.Expr, fr *Frame) (Value, error)
 		if err != nil {
 			return nil, err
 		}
+		if _, ok := asExit(v); ok {
+			return v, nil
+		}
 		return in.tailStep(def, e.Body, &Frame{parent: fr, vars: map[string]Value{e.Name: v}})
 	case *core.If:
 		cond, err := in.eval(e.Cond, fr)
 		if err != nil {
 			return nil, err
 		}
+		if _, ok := asExit(cond); ok {
+			return cond, nil
+		}
 		if cond.(bool) {
 			return in.tailStep(def, e.Then, fr)
 		}
 		return in.tailStep(def, e.Else, fr)
 	case *core.Seq:
-		if _, err := in.eval(e.First, fr); err != nil {
+		first, err := in.eval(e.First, fr)
+		if err != nil {
 			return nil, err
+		}
+		if _, ok := asExit(first); ok {
+			return first, nil
 		}
 		return in.tailStep(def, e.Then, fr)
 	case *core.Case:
 		v, err := in.eval(e.Scrut, fr)
 		if err != nil {
 			return nil, err
+		}
+		if _, ok := asExit(v); ok {
+			return v, nil
 		}
 		frame := &Frame{parent: fr, vars: map[string]Value{e.Bind: v}}
 		return in.tree(e.Tree, frame, func(body core.Expr, leafFr *Frame) (Value, error) {
@@ -101,6 +117,9 @@ func (in *interp) tailStep(def *core.Def, e core.Expr, fr *Frame) (Value, error)
 				v, err := in.eval(a, fr)
 				if err != nil {
 					return nil, err
+				}
+				if _, ok := asExit(v); ok {
+					return v, nil
 				}
 				vars[def.Params[i]] = v
 			}

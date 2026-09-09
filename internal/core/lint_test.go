@@ -45,6 +45,32 @@ func TestLintAcceptsBranchDependentTailResumes(t *testing.T) {
 	}
 }
 
+func TestLintChecksExitControlContractAndDescriptor(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	eff := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Fail"}
+	op := &types.EffectOp{Owner: eff, Index: 0, Name: "fail", Arity: 1, ParamTypes: []types.Type{b.Int}, ResultType: b.Int}
+	eff.Ops = []*types.EffectOp{op}
+	exit := &ControlExit{Target: 1, Op: op, Payload: []Expr{&IntLit{Val: 7, Ty: b.Int}}, Ty: b.Int}
+	h := &Handle{
+		Body: exit, Effect: EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(1)}, Scope: 1, Ty: b.Int,
+		Clauses: []HandlerClause{{Op: op, ResumeID: 1, Params: []string{"x"}, ParamTypes: []types.Type{b.Int}, ResultType: b.Int,
+			Body: &ResumeTail{Owner: 1, Value: &IntLit{Val: 0, Ty: b.Int}, ClauseResult: b.Int}}},
+		Control: types.Control{Transport: types.Exit},
+	}
+	fn := &types.TFun{Arg: b.Unit, Ret: b.Int, Control: types.Control{Transport: types.Exit}}
+	p := &Prog{Effects: []*types.EffectInfo{eff}, Defs: []Def{{Name: "run", Type: fn, Params: []string{"_"}, ParamCaptures: []types.CaptureVar{1}, Control: types.Control{Transport: types.Exit}, Body: h}}}
+	InferCaptures(p, b)
+	if got := lintText(p, b); got != "" {
+		t.Fatalf("Lint rejected checked Exit Core:\n%s", got)
+	}
+
+	p.Defs[0].Control = types.Control{}
+	if got := lintText(p, b); !strings.Contains(got, "declared control direct disagrees") || !strings.Contains(got, "body control exit") {
+		t.Fatalf("Lint errors = %q, want erased Exit contract diagnostics", got)
+	}
+}
+
 func TestLintRejectsMalformedResumeCore(t *testing.T) {
 	tests := []struct {
 		name, want string
