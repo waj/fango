@@ -157,7 +157,13 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 			decls = append(decls, g.workerDef(d, baseMode, baseMode))
 			if baseMode != types.Exit && (d.Control.Polymorphic || g.workerNeedsABIFamily(d)) {
 				execution := baseMode
-				if d.Control.Polymorphic {
+				// A worker that consumes a controlled callback must run in
+				// Exit control as well as use the Exit representation family:
+				// invoking that callback can return an Outcome which has to
+				// propagate through this worker. Workers whose controlled
+				// values are only in their result may keep Direct execution;
+				// their Exit member is only a representation-family variant.
+				if d.Control.Polymorphic || g.workerCallsControlledArg(d) {
 					execution = types.Exit
 				}
 				decls = append(decls, g.workerDef(d, execution, types.Exit))
@@ -674,12 +680,48 @@ func (g *gen) workerCallABI(d *core.Def, execution types.Transport) types.Transp
 
 func (g *gen) workerNeedsABIFamily(d *core.Def) bool {
 	args, ret := core.PeelFun(d.Type, len(d.Params))
+	if g.workerNeedsControlledArgTypes(args) {
+		return true
+	}
+	return g.controlledType(ret, nil)
+}
+
+// workerCallsControlledArg reports whether the worker actually invokes one of
+// its controlled function parameters. Merely storing such a callback (for
+// example in an ADT) needs the Exit representation family, but does not make
+// the worker itself return an Outcome.
+func (g *gen) workerCallsControlledArg(d *core.Def) bool {
+	args, _ := core.PeelFun(d.Type, len(d.Params))
+	controlled := map[string]bool{}
+	for i, arg := range args {
+		if i < len(d.Params) && g.controlledType(arg, nil) {
+			controlled[d.Params[i]] = true
+		}
+	}
+	if len(controlled) == 0 {
+		return false
+	}
+	called := false
+	core.Rewrite(d.Body, func(t types.Type) types.Type { return t }, func(e core.Expr) core.Expr {
+		if app, ok := e.(*core.App); ok {
+			for name := range controlled {
+				if core.Mentions(app.Callee, name) {
+					called = true
+				}
+			}
+		}
+		return e
+	})
+	return called
+}
+
+func (g *gen) workerNeedsControlledArgTypes(args []types.Type) bool {
 	for _, arg := range args {
 		if g.controlledType(arg, nil) {
 			return true
 		}
 	}
-	return g.controlledType(ret, nil)
+	return false
 }
 
 func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
