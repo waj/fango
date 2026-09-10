@@ -1213,7 +1213,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 				}
 				args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), mode))
 			}
-			args = append(args, g.expr(e.Args[0], 0))
+			args = append(args, g.callArgExpr(e.Args[0], e.Callee.Type().(*types.TFun).Arg, mode))
 			return callExpr(g.expr(e.Callee, 0), args...)
 		case core.Ctor:
 			return g.ctorLit(e)
@@ -1350,7 +1350,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 			}
 			continue
 		}
-		args = append(args, g.expr(a, 0))
+		args = append(args, g.callArgExpr(a, formal[i], mode))
 	}
 	if needPrelude {
 		var body []goast.Stmt
@@ -1387,6 +1387,39 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 		return callExpr(funcLit(g.goType(e.Ty), []goast.Stmt{exprStmt(call), returnStmt(g.unitValue())}))
 	}
 	return call
+}
+
+// callArgExpr widens a direct callback to the Exit representation family when
+// an enclosing call is being emitted in Exit control.  The source type of a
+// callback can be direct (for example, an IO-only cleanup), while the
+// higher-order function receiving it must use an Outcome-returning callback so
+// that exits from callbacks can propagate through its body.
+func (g *gen) callArgExpr(arg core.Expr, formal types.Type, mode types.Transport) goast.Expr {
+	fn, ok := formal.(*types.TFun)
+	if !ok || mode != types.Exit || types.FunctionControl(fn).Resolve(mode) != types.Exit {
+		return g.expr(arg, 0)
+	}
+	actual, ok := arg.Type().(*types.TFun)
+	if !ok || types.FunctionControl(actual).Resolve(mode) == types.Exit {
+		return g.expr(arg, 0)
+	}
+
+	direct := g.expr(arg, 0)
+	params := make([]paramSpec, 0, len(actual.Eff.Labels)+1)
+	var callArgs []goast.Expr
+	for _, label := range types.SortedRow(actual.Eff).Labels {
+		if types.SurfaceName(label.Name) == "IO" {
+			continue
+		}
+		name := g.evidenceName(label.Name)
+		params = append(params, paramSpec{name: name, typ: g.effectTypeMode(core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Control: types.FunctionControl(actual)}, types.Direct)})
+		callArgs = append(callArgs, ident(name))
+	}
+	paramName := "v_arg"
+	params = append(params, paramSpec{name: paramName, typ: g.goType(actual.Arg)})
+	callArgs = append(callArgs, ident(paramName))
+	body := []goast.Stmt{returnStmt(g.normalOutcome(actual.Ret, callExpr(direct, callArgs...)))}
+	return funcLitParams(params, g.outcomeType(actual.Ret), body)
 }
 
 func unitAtom(e core.Expr) bool {

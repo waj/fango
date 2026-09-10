@@ -1,0 +1,23 @@
+effect Exception ex
+    abort throw : ex -> a
+
+finally : (() ->{Exception ex | e} a) -> (() ->{e} ()) ->{Exception ex | e} a
+finally action cleanup =
+    handle action() of
+        throw msg ->
+            cleanup()
+            throw msg
+        return result ->
+            cleanup()
+            result
+
+catch : (() ->{Exception ex | e} a) -> (ex ->{e} a) ->{e} a
+catch action handler =
+    handle action() of
+        throw msg -> handler msg
+        return result -> result
+
+main() =
+    catch
+        (\_ -> finally (\_ -> throw "boom") (\_ -> print "cleanup"))
+        (\msg -> print msg)
