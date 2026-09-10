@@ -349,7 +349,10 @@ func (c *CtorInfo) ValueType() Type {
 type ADTInfo struct {
 	Con    *TCon
 	Params []*TVar
-	Ctors  []*CtorInfo
+	// ParamKindsKnown distinguishes a header's initially unresolved parameter
+	// kinds from kinds established while resolving its constructor fields.
+	ParamKindsKnown []bool
+	Ctors           []*CtorInfo
 	// RecordFields is non-nil for a standalone nominal record. The sole
 	// synthetic constructor remains an internal representation detail.
 	RecordFields []RecordFieldInfo

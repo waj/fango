@@ -71,6 +71,10 @@ func TestPolyPositive(t *testing.T) {
 		// Patterns instantiate constructors too.
 		{"type Maybe a = Nothing | Just a\nf m = case m of\n    Nothing -> 0\n    Just n -> n + 1", "f : Num a => Maybe a -> a"},
 		{"type Box a = MkBox a\nunbox b = case b of\n    MkBox x -> x", "unbox : Box a -> a"},
+		{"type Foo eff = Foo (() ->{IO | eff} ())\nwrap action = Foo action", "wrap : (() ->{IO} ()) -> Foo e"},
+		{"type Test eff = TestCase (() ->{eff} ())\nsuite : Test IO\nsuite = TestCase (\\_ -> print ())", "suite : Test {IO}"},
+		{"type Test eff = Wrap (Test eff) | Bar (() ->{eff} ())\nmake action = Bar action", "make : (() -> ()) -> Test e"},
+		{"effect Expectation\n    abort fail : String -> e\ntype Test eff = TestCase (() ->{Expectation | eff} ())\nrunHelper : Test eff ->{IO | eff} ()\nrunHelper (TestCase action) =\n    handle action() of\n        fail msg -> print msg", "runHelper : Test e ->{IO} ()"},
 		// Applied types in annotations.
 		{"type Maybe a = Nothing | Just a\nx : Maybe Int\nx = Just 1", "x : Maybe Int"},
 		{"type Maybe a = Nothing | Just a\nf : Maybe a -> Maybe a\nf m = m", "f : Maybe a -> Maybe a"},
@@ -129,6 +133,7 @@ func TestPolyNegative(t *testing.T) {
 		// Constructor fields resolve in the closed parameter scope.
 		{"type T a = MkT b", "NAMING ERROR", 1},
 		{"type T a a = MkT a", "SHADOWING", 1},
+		{"type Inner eff = Inner (() ->{IO | eff} ())\ntype Bad a = Bad (Inner a) a", "KIND MISMATCH", 2},
 		// A generalized block binding's annotation must not claim a variable
 		// the enclosing definition pins down. (Value bindings don't
 		// generalize — the monomorphism restriction — so the check applies

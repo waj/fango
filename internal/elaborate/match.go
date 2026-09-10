@@ -470,7 +470,7 @@ func (m *matcher) switchCtor(occs []occurrence, rows []row, col int, adt *types.
 		fields := instFields(adt, ctor, occs[col].ty)
 		fieldOccs := make([]occurrence, len(fields))
 		for j, ft := range fields {
-			fieldOccs[j] = occurrence{name: fmt.Sprintf("_c%d", m.el.tmp), ty: ft}
+			fieldOccs[j] = occurrence{name: fmt.Sprintf("_c%d", m.el.tmp), ty: m.el.zonkDefault(ft)}
 			m.el.tmp++
 		}
 		newOccs := spliceOccs(occs, col, fieldOccs)

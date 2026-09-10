@@ -330,6 +330,16 @@ func unifyRows(a, b types.Row, sub Subst, bi *types.Builtins, sup *types.Supply)
 func includeRows(subrow, superrow types.Row, sub Subst, bi *types.Builtins, sup *types.Supply) *mismatch {
 	subrow, superrow = sub.applyRow(subrow), sub.applyRow(superrow)
 	if subrow.Tail != nil {
+		if len(subrow.Labels) == 0 {
+			if sv, ok := subrow.Tail.(*types.TVar); ok && sv.Rigid && sv.Kind == types.RowVar {
+				if tv, ok := superrow.Tail.(*types.TVar); ok && tv.Rigid && tv.ID == sv.ID {
+					return nil
+				}
+				if tv, ok := superrow.Tail.(*types.TVar); ok && !tv.Rigid && tv.Kind == types.RowVar {
+					return bindVar(tv, sv, sub, bi)
+				}
+			}
+		}
 		return unifyRows(subrow, superrow, sub, bi, sup)
 	}
 	seen := map[int]bool{}

@@ -35,7 +35,7 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 	rawLocalGenTy := el.ck.Sub.Apply(sch.Body)
 	el.defaultFree(rawLocalGenTy)
 	rawLocalGenTy = el.ck.Sub.Apply(rawLocalGenTy)
-	localGenTy := eraseRows(rawLocalGenTy)
+	localGenTy := el.eraseRuntimeKinds(eraseRows(rawLocalGenTy))
 	frees := el.freeLocals(bind)
 	savedDicts := len(el.dicts)
 	dictNames, dictTypes := el.bindDictionaries(sch.Preds)

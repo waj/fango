@@ -655,6 +655,21 @@ polymorphism uses ordinary class constraints, for example
 recursive ADTs are rejected. Local value bindings are monomorphic; local
 functions and lambda bindings may generalize.
 
+An ADT parameter is inferred as row-kinded when it is used as an open effect-row
+tail. This supports effect-indexed declarations without explicit kind syntax:
+
+```fango
+type Foo eff = Foo (() ->{IO | eff} ())
+```
+
+The row parameter may be used in effect rows, but not as an ordinary value type
+or as an ordinary value type. When an ADT parameter is known to be row-kinded,
+an effect name is accepted as a singleton row argument, so `Foo IO` means
+`Foo {IO}`; parameterized effects use the corresponding application, such as
+`Foo (State Int)`. Row-kinded parameters are source-level metadata and are
+erased from Core and generated Go representations; the declaration remains
+available to inference and reflection.
+
 ### Tail-call guarantee
 
 Recursion is the language's loop, and self tail calls are guaranteed to run

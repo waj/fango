@@ -691,6 +691,7 @@ func (l *linter) expr(e Expr, where string) {
 				}
 				calleeTy = types.SubstRigid(calleeTy, m)
 			}
+			calleeTy = l.runtimeType(calleeTy)
 			for i, ev := range e.EvidenceArgs {
 				l.effectInstance(ev, where)
 				if i >= len(def.EffectParams) {
@@ -809,7 +810,7 @@ func (l *linter) expr(e Expr, where string) {
 					l.errorf("%s: App{Ctor} `%s` type arg %d disagrees with its result type", where, e.Ctor.Name, i+1)
 				}
 			}
-			fields := adt.InstFields(e.Ctor, result.Args)
+			fields := l.runtimeInstFields(adt, e.Ctor, result.Args)
 			for i, a := range e.Args {
 				if !types.Equal(a.Type(), fields[i]) {
 					l.errorf("%s: App{Ctor} `%s` arg %d typed %s, want %s",
@@ -1347,6 +1348,49 @@ func (l *linter) typ(t types.Type, where string) {
 	default:
 		l.errorf("%s: unhandled type %T", where, t)
 	}
+}
+
+func (l *linter) runtimeType(t types.Type) types.Type {
+	switch t := t.(type) {
+	case *types.TVar:
+		if t.Kind == types.RowVar {
+			return l.b.Unit
+		}
+		return t
+	case *types.TCon:
+		args := make([]types.Type, len(t.Args))
+		adt := l.adts[t.Unique]
+		for i, a := range t.Args {
+			if adt != nil && i < len(adt.Params) && adt.Params[i].Kind == types.RowVar {
+				args[i] = l.b.Unit
+			} else {
+				args[i] = l.runtimeType(a)
+			}
+		}
+		return &types.TCon{Unique: t.Unique, Name: t.Name, Args: args}
+	case *types.TFun:
+		return &types.TFun{Arg: l.runtimeType(t.Arg), Eff: l.runtimeType(t.Eff).(types.Row), Ret: l.runtimeType(t.Ret), Control: t.Control}
+	case types.Row:
+		labels := make([]types.EffLabel, len(t.Labels))
+		for i, label := range t.Labels {
+			args := make([]types.Type, len(label.Args))
+			for j, a := range label.Args {
+				args[j] = l.runtimeType(a)
+			}
+			labels[i] = types.EffLabel{Unique: label.Unique, Name: label.Name, Args: args, Abort: label.Abort}
+		}
+		return types.Row{Labels: labels}
+	default:
+		return t
+	}
+}
+
+func (l *linter) runtimeInstFields(adt *types.ADTInfo, c *types.CtorInfo, args []types.Type) []types.Type {
+	fields := adt.InstFields(c, args)
+	for i := range fields {
+		fields[i] = l.runtimeType(fields[i])
+	}
+	return fields
 }
 
 func rowEvidence(r types.Row) []EffectInstance {

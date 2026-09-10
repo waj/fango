@@ -27,6 +27,7 @@ func fieldName(i int) string { return fmt.Sprintf("F%d", i) }
 func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 	var decls []goast.Decl
 	for _, adt := range adts {
+		runtimeParams := runtimeADTParams(adt)
 		modes := []types.Transport{types.Direct}
 		if g.controlledType(adt.Con, nil) {
 			modes = append(modes, types.Exit)
@@ -34,9 +35,9 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 		for _, mode := range modes {
 			oldControl, oldABI := g.control, g.abi
 			g.control, g.abi = mode, mode
-			g.tyParamNames = tyParamNames(adt.Params)
-			paramIdents := make([]goast.Expr, len(adt.Params))
-			for i, v := range adt.Params {
+			g.tyParamNames = tyParamNames(runtimeParams)
+			paramIdents := make([]goast.Expr, len(runtimeParams))
+			for i, v := range runtimeParams {
 				paramIdents[i] = ident(g.tyParamNames[v.ID])
 			}
 			suffix := ""
@@ -49,7 +50,7 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 				Tok: gotoken.TYPE,
 				Specs: []goast.Spec{&goast.TypeSpec{
 					Name:       ident(iface),
-					TypeParams: g.typeParamFields(adt.Params),
+					TypeParams: g.typeParamFields(runtimeParams),
 					Type: &goast.InterfaceType{Methods: &goast.FieldList{List: []*goast.Field{{
 						Names: []*goast.Ident{ident(marker)},
 						Type:  &goast.FuncType{Params: &goast.FieldList{}},
@@ -67,7 +68,7 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 						Tok: gotoken.TYPE,
 						Specs: []goast.Spec{&goast.TypeSpec{
 							Name:       ident(ctorName),
-							TypeParams: g.typeParamFields(adt.Params),
+							TypeParams: g.typeParamFields(runtimeParams),
 							Type:       &goast.StructType{Fields: &goast.FieldList{List: fields}},
 						}},
 					},
@@ -96,7 +97,12 @@ func (g *gen) ctorLit(e *core.App) goast.Expr {
 	for i, a := range e.Args {
 		args[i] = g.expr(a, 0)
 	}
-	litType := indexExpr(g.ctorRef(e.Ctor), g.goTypes(e.TyArgs))
+	adt := g.adts[e.Ctor.Result.Unique]
+	typeArgs := e.TyArgs
+	if adt != nil {
+		typeArgs = runtimeADTArgs(adt, typeArgs)
+	}
+	litType := indexExpr(g.ctorRef(e.Ctor), g.goTypes(typeArgs))
 	return &goast.UnaryExpr{
 		Op: gotoken.AND,
 		X:  &goast.CompositeLit{Type: litType, Elts: args},
@@ -176,7 +182,7 @@ func (g *gen) ctorSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) 
 	if !ok {
 		panic("codegen: SwitchCtor scrutinee type unknown")
 	}
-	tagArgs := g.goTypes(scrutTy.Args)
+	tagArgs := g.goTypes(runtimeADTArgs(t.ADT, scrutTy.Args))
 	ctorTag := func(name string) goast.Expr {
 		ctor := t.ADT.CtorNamed(name)
 		return &goast.StarExpr{X: indexExpr(g.ctorRef(ctor), tagArgs)}
@@ -334,10 +340,11 @@ func (g *gen) derivedDecls(adts []*types.ADTInfo) []goast.Decl {
 // parameter fields compare via the element-op parameters; monomorphic types
 // take no element operations and keep the monomorphic shape exactly.
 func (g *gen) eqDecl(adt *types.ADTInfo) goast.Decl {
-	g.tyParamNames = tyParamNames(adt.Params)
+	runtimeParams := runtimeADTParams(adt)
+	g.tyParamNames = tyParamNames(runtimeParams)
 	g.eqParamNames = map[int]string{}
-	paramIdents := make([]goast.Expr, len(adt.Params))
-	for i, v := range adt.Params {
+	paramIdents := make([]goast.Expr, len(runtimeParams))
+	for i, v := range runtimeParams {
 		g.eqParamNames[v.ID] = eqParamName(i)
 		paramIdents[i] = ident(g.tyParamNames[v.ID])
 	}
@@ -395,8 +402,8 @@ func (g *gen) eqDecl(adt *types.ADTInfo) goast.Decl {
 		&goast.TypeSwitchStmt{Assign: tag, Body: &goast.BlockStmt{List: clauses}},
 		returnStmt(ident("false")), // unreachable: the switch is total
 	}
-	params := make([]*goast.Field, 0, len(adt.Params)+1)
-	for i, v := range adt.Params {
+	params := make([]*goast.Field, 0, len(runtimeParams)+1)
+	for i, v := range runtimeParams {
 		pv := ident(g.tyParamNames[v.ID])
 		params = append(params, &goast.Field{
 			Names: []*goast.Ident{ident(eqParamName(i))},
@@ -409,7 +416,7 @@ func (g *gen) eqDecl(adt *types.ADTInfo) goast.Decl {
 	return &goast.FuncDecl{
 		Name: ident(g.eqName(adt)),
 		Type: &goast.FuncType{
-			TypeParams: g.typeParamFields(adt.Params),
+			TypeParams: g.typeParamFields(runtimeParams),
 			Params:     &goast.FieldList{List: params},
 			Results:    &goast.FieldList{List: []*goast.Field{{Type: ident("bool")}}},
 		},
@@ -435,10 +442,11 @@ func (g *gen) eqField(f types.Type, af, bf goast.Expr) goast.Expr {
 // fields as source literals. Both backends must format identically; the
 // interpreter mirrors this in eval's show.
 func (g *gen) showDecl(adt *types.ADTInfo) goast.Decl {
-	g.tyParamNames = tyParamNames(adt.Params)
+	runtimeParams := runtimeADTParams(adt)
+	g.tyParamNames = tyParamNames(runtimeParams)
 	g.showParamNames = map[int]string{}
-	paramIdents := make([]goast.Expr, len(adt.Params))
-	for i, v := range adt.Params {
+	paramIdents := make([]goast.Expr, len(runtimeParams))
+	for i, v := range runtimeParams {
 		g.showParamNames[v.ID] = showParamName(i)
 		paramIdents[i] = ident(g.tyParamNames[v.ID])
 	}
@@ -493,8 +501,8 @@ func (g *gen) showDecl(adt *types.ADTInfo) goast.Decl {
 		&goast.TypeSwitchStmt{Assign: tag, Body: &goast.BlockStmt{List: clauses}},
 		returnStmt(stringLit("")), // unreachable: the switch is total
 	}
-	params := make([]*goast.Field, 0, len(adt.Params)+2)
-	for i, v := range adt.Params {
+	params := make([]*goast.Field, 0, len(runtimeParams)+2)
+	for i, v := range runtimeParams {
 		params = append(params, &goast.Field{
 			Names: []*goast.Ident{ident(showParamName(i))},
 			Type: &goast.FuncType{
@@ -511,7 +519,7 @@ func (g *gen) showDecl(adt *types.ADTInfo) goast.Decl {
 	return &goast.FuncDecl{
 		Name: ident(g.showName(adt)),
 		Type: &goast.FuncType{
-			TypeParams: g.typeParamFields(adt.Params),
+			TypeParams: g.typeParamFields(runtimeParams),
 			Params:     &goast.FieldList{List: params},
 			Results:    &goast.FieldList{List: []*goast.Field{{Type: ident("string")}}},
 		},

@@ -133,7 +133,7 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 	rawType := ck.Sub.Apply(info.Type)
 	el.defaultFree(rawType)
 	rawType = ck.Sub.Apply(rawType)
-	defType := eraseRows(rawType)
+	defType := el.eraseRuntimeKinds(eraseRows(rawType))
 	effectParams := el.bindEffectParams(executingEffects(rawType, len(info.Params)))
 	dictNames, dictTypes := el.bindDictionaries(info.Scheme.Preds)
 	var params []string
@@ -713,7 +713,7 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 		return &core.If{Cond: cond, Then: &core.BoolLit{Val: true, Ty: ty}, Else: el.expr(e.R), Ty: ty}
 	case *ast.Lambda:
 		el.defaultFree(el.ck.Sub.Apply(el.ck.ExprTypes[e]))
-		return el.lambda(e.Params, e.Body, eraseRows(el.ck.Sub.Apply(el.ck.ExprTypes[e])))
+		return el.lambda(e.Params, e.Body, el.eraseRuntimeKinds(eraseRows(el.ck.Sub.Apply(el.ck.ExprTypes[e]))))
 	case *ast.Case:
 		return el.caseExpr(e, ty)
 	case *ast.Handle:
@@ -1092,7 +1092,47 @@ func (el *elab) zonkDefault(t types.Type) types.Type {
 	origin := t
 	t = el.ck.Sub.Apply(t)
 	el.defaultFree(t)
-	return eraseRowsFrom(origin, el.ck.Sub.Apply(t))
+	return el.eraseRuntimeKinds(eraseRowsFrom(origin, el.ck.Sub.Apply(t)))
+}
+
+// eraseRuntimeKinds replaces row-kinded ADT arguments with Unit. Row
+// parameters remain present in source inference and nominal identity, but
+// they carry no runtime value; using a stable phantom argument keeps Core's
+// existing source-arity checks while preventing RowVar values from reaching
+// Core or Go.
+func (el *elab) eraseRuntimeKinds(t types.Type) types.Type {
+	switch t := t.(type) {
+	case *types.TVar:
+		if t.Kind == types.RowVar {
+			return el.ck.B.Unit
+		}
+		return t
+	case *types.TCon:
+		args := make([]types.Type, len(t.Args))
+		adt := el.ck.ADTs[t.Unique]
+		for i, a := range t.Args {
+			if adt != nil && i < len(adt.Params) && adt.Params[i].Kind == types.RowVar {
+				args[i] = el.ck.B.Unit
+			} else {
+				args[i] = el.eraseRuntimeKinds(a)
+			}
+		}
+		return &types.TCon{Unique: t.Unique, Name: t.Name, Args: args}
+	case *types.TFun:
+		return &types.TFun{Arg: el.eraseRuntimeKinds(t.Arg), Eff: el.eraseRuntimeKinds(t.Eff).(types.Row), Ret: el.eraseRuntimeKinds(t.Ret), Control: t.Control}
+	case types.Row:
+		labels := make([]types.EffLabel, len(t.Labels))
+		for i, l := range t.Labels {
+			args := make([]types.Type, len(l.Args))
+			for j, a := range l.Args {
+				args[j] = el.eraseRuntimeKinds(a)
+			}
+			labels[i] = types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort}
+		}
+		return types.Row{Labels: labels}
+	default:
+		return t
+	}
 }
 
 func eraseRows(t types.Type) types.Type {

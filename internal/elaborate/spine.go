@@ -219,6 +219,7 @@ func (el *elab) valueApp(callee, arg core.Expr) core.Expr {
 	if !ok {
 		panic(fmt.Sprintf("elaborate: applying a non-function type %s", types.Show(callee.Type())))
 	}
+	arg = el.adaptFunctionValue(arg, fn.Arg)
 	app := &core.App{
 		CalleeKind: core.Value,
 		Callee:     callee,

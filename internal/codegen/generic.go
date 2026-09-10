@@ -25,9 +25,9 @@ func (g *gen) eqCall(t types.Type, a, b goast.Expr) goast.Expr {
 	g.needEqType(t)
 	con := t.(*types.TCon)
 	adt := g.adts[con.Unique]
-	fn := indexExpr(g.eqRef(adt), g.goTypes(con.Args))
+	fn := indexExpr(g.eqRef(adt), g.goTypes(runtimeADTArgs(adt, con.Args)))
 	args := make([]goast.Expr, 0, len(con.Args)+2)
-	for _, ta := range con.Args {
+	for _, ta := range runtimeADTArgs(adt, con.Args) {
 		args = append(args, g.eqArg(ta))
 	}
 	return callExpr(fn, append(args, a, b)...)
@@ -38,9 +38,9 @@ func (g *gen) showCall(t types.Type, v, nested goast.Expr) goast.Expr {
 	g.needShowType(t)
 	con := t.(*types.TCon)
 	adt := g.adts[con.Unique]
-	fn := indexExpr(g.showRef(adt), g.goTypes(con.Args))
+	fn := indexExpr(g.showRef(adt), g.goTypes(runtimeADTArgs(adt, con.Args)))
 	args := make([]goast.Expr, 0, len(con.Args)+2)
-	for _, ta := range con.Args {
+	for _, ta := range runtimeADTArgs(adt, con.Args) {
 		args = append(args, g.showArg(ta))
 	}
 	return callExpr(fn, append(args, v, nested)...)

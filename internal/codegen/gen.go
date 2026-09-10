@@ -767,6 +767,27 @@ func tyParamNames(vars []*types.TVar) map[int]string {
 	return m
 }
 
+func runtimeADTParams(adt *types.ADTInfo) []*types.TVar {
+	var out []*types.TVar
+	for _, v := range adt.Params {
+		if v.Kind != types.RowVar {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func runtimeADTArgs(adt *types.ADTInfo, args []types.Type) []types.Type {
+	var out []types.Type
+	for i, a := range args {
+		if i < len(adt.Params) && adt.Params[i].Kind == types.RowVar {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 // typeParamFields builds the [A0 any, A1 fangort.Number] type-parameter list.
 func (g *gen) typeParamFields(vars []*types.TVar) *goast.FieldList {
 	if len(vars) == 0 {
@@ -890,7 +911,7 @@ func (g *gen) goType(t types.Type) goast.Expr {
 			return g.unitType()
 		default:
 			if adt, ok := g.adts[t.Unique]; ok {
-				return indexExpr(g.typeRef(adt), g.goTypes(t.Args))
+				return indexExpr(g.typeRef(adt), g.goTypes(runtimeADTArgs(adt, t.Args)))
 			}
 			panic(fmt.Sprintf("codegen: unknown type constructor %s", t.Name))
 		}

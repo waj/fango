@@ -848,7 +848,7 @@ func (ck *Checker) declareTypeHeader(td *ast.TypeDecl) (*types.ADTInfo, []diag.E
 		params[i] = ck.Sup.FreshRigid(types.General)
 	}
 	con := &types.TCon{Unique: ck.Sup.NextUnique(), Name: td.Name}
-	adt := &types.ADTInfo{Con: con, Params: params}
+	adt := &types.ADTInfo{Con: con, Params: params, ParamKindsKnown: make([]bool, len(params))}
 	ck.TypeNames[td.Name] = con
 	ck.ADTs[con.Unique] = adt
 	ck.ADTOrder = append(ck.ADTOrder, adt)
@@ -895,6 +895,9 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 		ctor := &types.CtorInfo{Name: td.Name + ".__record", Index: 0, Fields: fields, Result: result}
 		adt.Ctors = append(adt.Ctors, ctor)
 		ck.Ctors[ctor.Name] = ctor
+		for i := range adt.Params {
+			adt.ParamKindsKnown[i] = true
+		}
 		return errs
 	}
 	for _, c := range td.Ctors {
@@ -921,6 +924,9 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 		info := &types.CtorInfo{Name: c.Name, Index: len(adt.Ctors), Fields: fields, Result: result}
 		adt.Ctors = append(adt.Ctors, info)
 		ck.Ctors[c.Name] = info
+	}
+	for i := range adt.Params {
+		adt.ParamKindsKnown[i] = true
 	}
 	return errs
 }
@@ -1202,19 +1208,20 @@ type recordUpdateObligation struct {
 }
 
 type generator struct {
-	ck            *Checker
-	locals        *blockScope
-	cs            []Constraint
-	errs          []diag.Error
-	ambient       types.Row
-	resumeType    types.Type
-	resumeState   types.Type
-	resumeID      types.ResumeID
-	abortClause   bool
-	preds         []predObligation
-	records       []*recordObligation
-	patternPins   *blockScope
-	patternBinder string
+	ck                *Checker
+	locals            *blockScope
+	cs                []Constraint
+	errs              []diag.Error
+	ambient           types.Row
+	resumeType        types.Type
+	resumeState       types.Type
+	resumeID          types.ResumeID
+	abortClause       bool
+	preds             []predObligation
+	records           []*recordObligation
+	patternPins       *blockScope
+	patternBinder     string
+	annotationAmbient *types.Row
 }
 
 func (g *generator) isDefaultPrint(op *types.EffectOp) bool {
@@ -1566,7 +1573,12 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	}
 	g.ambient = types.Row{Labels: []types.EffLabel{label}, Tail: residualVar}
 	bodyTy := g.expr(e.Body)
-	g.ambient = residual
+	clauseAmbient := residual
+	if g.annotationAmbient != nil {
+		clauseAmbient = *g.annotationAmbient
+		g.cs = append(g.cs, Constraint{Left: clauseAmbient, Right: savedAmbient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
+	}
+	g.ambient = clauseAmbient
 	info := &HandlerInfo{Effect: label, Residual: residual, Scope: g.ck.Sup.FreshScope(), Scoped: first.Owner.Scoped || e.State != nil, Result: result, BodyResult: bodyTy, StateType: stateTy}
 	g.ck.ScopeSpans[info.Scope] = e.Sp
 	seen := map[string]bool{}
@@ -1991,6 +2003,17 @@ func (g *generator) functionEquations(name string, nameSpan source.Span, eqs []a
 		}
 	}
 	bodyAmbient := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
+	var annotationAmbient *types.Row
+	if ann != nil {
+		cur := ann
+		for range paramTys {
+			if fn, ok := cur.(*types.TFun); ok {
+				r := fn.Eff
+				annotationAmbient = &r
+				cur = fn.Ret
+			}
+		}
+	}
 	resultTy := g.ck.Sup.FreshVar(types.General)
 	funTy := g.wrapFunction(paramTys, resultTy, bodyAmbient)
 	for _, eq := range eqs {
@@ -2011,9 +2034,12 @@ func (g *generator) functionEquations(name string, nameSpan source.Span, eqs []a
 		g.patternBinder = oldBinder
 		g.patternPins = oldPins
 		savedAmbient := g.ambient
+		savedAnnotationAmbient := g.annotationAmbient
+		g.annotationAmbient = annotationAmbient
 		g.ambient = bodyAmbient
 		bodyTy := g.expr(eq.Body)
 		g.ambient = savedAmbient
+		g.annotationAmbient = savedAnnotationAmbient
 		g.cs = append(g.cs, Constraint{Left: resultTy, Right: bodyTy, Span: eq.NameSpan, Why: Why{Kind: WhyRecursion, Name: name}})
 	}
 	g.locals = outer

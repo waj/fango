@@ -66,17 +66,26 @@ type TypeVars struct {
 	minted []*types.TVar // open scopes: skolems in first-use order
 	preds  []types.Pred
 	native bool
+	// kinds records the first required kind for each binder in this scope.
+	// ADT parameters start as ordinary variables and are promoted to RowVar
+	// when used as an effect-row tail; a second, incompatible use is a
+	// source-level kind error.
+	kinds map[int]types.VarKind
 }
 
+// kindAny is used while resolving a recursive reference to an ADT whose
+// parameter kinds have not yet been established by its constructor fields.
+const kindAny types.VarKind = -1
+
 func (ck *Checker) newNativeAnnScope() *TypeVars {
-	return &TypeVars{open: true, sup: ck.Sup, vars: map[string]*types.TVar{}, native: true}
+	return &TypeVars{open: true, sup: ck.Sup, vars: map[string]*types.TVar{}, kinds: map[int]types.VarKind{}, native: true}
 }
 func (tv *TypeVars) Preds() []types.Pred { return append([]types.Pred(nil), tv.preds...) }
 
 // NewAnnScope is the open scope for one annotation; variables of the same
 // name within the annotation share one skolem.
 func (ck *Checker) NewAnnScope() *TypeVars {
-	return &TypeVars{open: true, sup: ck.Sup, vars: map[string]*types.TVar{}}
+	return &TypeVars{open: true, sup: ck.Sup, vars: map[string]*types.TVar{}, kinds: map[int]types.VarKind{}}
 }
 
 // newCtorScope is the closed scope of a type declaration's parameters.
@@ -85,13 +94,17 @@ func newCtorScope(names []string, vars []*types.TVar) *TypeVars {
 	for i, n := range names {
 		m[n] = vars[i]
 	}
-	return &TypeVars{vars: m}
+	kinds := map[int]types.VarKind{}
+	return &TypeVars{vars: m, kinds: kinds}
 }
 
 func newEffectScope(names []string, vars []*types.TVar, sup *types.Supply) *TypeVars {
 	tv := newCtorScope(names, vars)
 	tv.open = true
 	tv.sup = sup
+	for _, v := range vars {
+		tv.kinds[v.ID] = types.General
+	}
 	return tv
 }
 
@@ -102,8 +115,18 @@ func (tv *TypeVars) Minted() []*types.TVar { return tv.minted }
 // the session's type-name table, resolving type variables in tv. Returns nil
 // (with diagnostics) if any part fails to resolve.
 func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, []diag.Error) {
+	return ck.resolveTypeExpr(te, tv, types.General)
+}
+
+func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.VarKind) (types.Type, []diag.Error) {
 	switch te := te.(type) {
 	case *ast.TName:
+		if want == types.RowVar {
+			if effect := ck.Effects[te.Name]; effect != nil && len(effect.Params) == 0 {
+				return types.Row{Labels: []types.EffLabel{{Unique: effect.Unique, Name: effect.Name}}}, nil
+			}
+			return nil, []diag.Error{diag.Errorf(te.Sp, "KIND MISMATCH", "A row-kinded parameter must be an effect-row variable or effect label, not the type `%s`.", te.Name)}
+		}
 		t, ok := ck.TypeNames[te.Name]
 		if !ok {
 			return nil, []diag.Error{diag.Errorf(te.Sp, "NAMING ERROR",
@@ -116,6 +139,14 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, [
 		return t, nil
 	case *ast.TVarName:
 		if v, ok := tv.vars[te.Name]; ok {
+			if want == kindAny {
+				return v, nil
+			}
+			if prior, used := tv.kinds[v.ID]; used && prior != want {
+				return nil, []diag.Error{diag.Errorf(te.Sp, "KIND MISMATCH", "The parameter `%s` is used both as an ordinary type and as an effect row.", te.Name)}
+			}
+			tv.kinds[v.ID] = want
+			v.Kind = want
 			return v, nil
 		}
 		if !tv.open {
@@ -125,10 +156,21 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, [
 		v := tv.sup.FreshRigid(types.General)
 		tv.vars[te.Name] = v
 		tv.minted = append(tv.minted, v)
+		if want == kindAny {
+			return v, nil
+		}
+		if prior, ok := tv.kinds[v.ID]; ok && prior != want {
+			return nil, []diag.Error{diag.Errorf(te.Sp, "KIND MISMATCH", "The parameter `%s` is used both as an ordinary type and as an effect row.", te.Name)}
+		}
+		tv.kinds[v.ID] = want
+		v.Kind = want
 		return v, nil
 	case *ast.TFunExpr:
-		arg, argErrs := ck.ResolveTypeExpr(te.Arg, tv)
-		ret, retErrs := ck.ResolveTypeExpr(te.Ret, tv)
+		if want == types.RowVar {
+			return nil, []diag.Error{diag.Errorf(te.Span(), "KIND MISMATCH", "A function type has ordinary type kind, not effect-row kind.")}
+		}
+		arg, argErrs := ck.resolveTypeExpr(te.Arg, tv, types.General)
+		ret, retErrs := ck.resolveTypeExpr(te.Ret, tv, types.General)
 		errs := append(argErrs, retErrs...)
 		if arg == nil || ret == nil {
 			return nil, errs
@@ -137,6 +179,22 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, [
 		errs = append(errs, rowErrs...)
 		return &types.TFun{Arg: arg, Eff: row, Ret: ret}, errs
 	case *ast.TApp:
+		if want == types.RowVar {
+			if effect := ck.Effects[te.Name]; effect != nil {
+				if len(effect.Params) != len(te.Args) {
+					return nil, []diag.Error{diag.Errorf(te.Span(), "EFFECT ARITY", "`%s` takes %d effect parameter(s), but %d are given.", te.Name, len(effect.Params), len(te.Args))}
+				}
+				args := make([]types.Type, len(te.Args))
+				var errs []diag.Error
+				for i, a := range te.Args {
+					at, aErrs := ck.resolveTypeExpr(a, tv, types.General)
+					errs = append(errs, aErrs...)
+					args[i] = at
+				}
+				return types.Row{Labels: []types.EffLabel{{Unique: effect.Unique, Name: effect.Name, Args: args}}}, errs
+			}
+			return nil, []diag.Error{diag.Errorf(te.Span(), "KIND MISMATCH", "A row-kinded parameter must be an effect label, not a type application.")}
+		}
 		t, ok := ck.TypeNames[te.Name]
 		if !ok {
 			return nil, []diag.Error{diag.Errorf(te.NameSp, "NAMING ERROR",
@@ -151,7 +209,13 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, [
 		args := make([]types.Type, len(te.Args))
 		var errs []diag.Error
 		for i, a := range te.Args {
-			at, aErrs := ck.ResolveTypeExpr(a, tv)
+			paramKind := types.General
+			if adt := ck.ADTs[con.Unique]; adt != nil && i < len(adt.Params) && (len(adt.ParamKindsKnown) == 0 || adt.ParamKindsKnown[i]) {
+				paramKind = adt.Params[i].Kind
+			} else if adt := ck.ADTs[con.Unique]; adt != nil && i < len(adt.Params) {
+				paramKind = kindAny
+			}
+			at, aErrs := ck.resolveTypeExpr(a, tv, paramKind)
 			errs = append(errs, aErrs...)
 			if at == nil {
 				return nil, errs
@@ -188,7 +252,7 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 		}
 		args := make([]types.Type, len(l.Args))
 		for i, a := range l.Args {
-			at, aErrs := ck.ResolveTypeExpr(a, tv)
+			at, aErrs := ck.resolveTypeExpr(a, tv, types.General)
 			errs = append(errs, aErrs...)
 			args[i] = at
 		}
@@ -197,9 +261,11 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 	}
 	if row.Tail != "" {
 		if old, ok := tv.vars[row.Tail]; ok {
-			if old.Kind != types.RowVar {
+			if prior, used := tv.kinds[old.ID]; used && prior != types.RowVar {
 				errs = append(errs, diag.Errorf(row.TailSp, "KIND MISMATCH", "`%s` is already used as an ordinary type variable, not an effect row.", row.Tail))
 			} else {
+				tv.kinds[old.ID] = types.RowVar
+				old.Kind = types.RowVar
 				result.Tail = old
 			}
 		} else if !tv.open {
@@ -207,6 +273,7 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 		} else {
 			v := tv.sup.FreshRigid(types.RowVar)
 			tv.vars[row.Tail] = v
+			tv.kinds[v.ID] = types.RowVar
 			tv.minted = append(tv.minted, v)
 			result.Tail = v
 		}

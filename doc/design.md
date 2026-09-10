@@ -302,7 +302,12 @@ statements.
 ## Type inference
 
 Inference is Hindley-Milner with parameterized ADTs, qualified schemes, explicit
-annotations, effect rows, and two variable kinds: general and row. It generates
+annotations, effect rows, and two variable kinds: general and row. ADT
+parameters whose uses require a row variable are inferred as row-kinded
+parameters; this permits declarations such as `type Foo eff = Foo (() ->{IO |
+eff} ())` without explicit kind syntax. The row kind is source-level metadata:
+runtime/Core types erase those arguments to Unit, and generated Go types omit
+their generic parameters. It generates
 reason-tagged equality/inclusion constraints, solves them by unification with
 an occurs check, and generalizes at binding boundaries. A label-free open row
 normalizes to its tail during unification, so an annotation's rigid row
@@ -311,6 +316,17 @@ handler wrapper carry an explicit open-tail annotation. Annotation variables
 are rigid skolems, preventing an annotation from claiming more polymorphism
 than its body supplies. Variable spelling never grants numeric or other
 capabilities.
+
+In a row-kinded ADT argument, an effect name is contextual row syntax: `Foo IO`
+is resolved as the singleton row `Foo {IO}`. Parameterized effect applications
+use the same rule, while ordinary type-kinded arguments retain ordinary type
+resolution.
+
+Row inclusion preserves a rigid residual tail when composing effects around a
+handler: an outer row such as `IO | eff` retains the annotated `eff` tail while
+adding effects performed by handler clauses. This allows an annotated handler
+to carry both residual effects from a row-kinded ADT payload and its own `IO`
+work.
 
 Top-level values and functions generalize. Local syntactic functions and
 lambdas generalize, while local values remain monomorphic so their strict,
@@ -673,7 +689,9 @@ Erasing a Unit argument never erases its evaluation: expression lowering keeps
 strict left-to-right order, materializing the singleton only when a value is
 required. Functions are typed Go functions, and ADTs use typed interfaces and
 constructor structs. Parameterized definitions map to Go generics with
-explicit instantiation. Class dictionaries, instance factories, and generated
+explicit instantiation; row-kinded ADT parameters are omitted from those
+runtime generics and their arguments are represented by Unit. Class
+dictionaries, instance factories, and generated
 deriving methods use the same typed, exported internal ABI as ordinary ADTs
 and workers. Definitions belong to their source module, so adding a downstream
 consumer does not change the dependency's generated package.
