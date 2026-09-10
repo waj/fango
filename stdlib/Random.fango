@@ -1,5 +1,7 @@
 module Random exposing (Random(..), int, runSeeded, runSystem)
 
+import IO exposing (IO)
+
 effect Random
     int : Int -> Int -> Int
 
@@ -9,7 +11,7 @@ nextState = native
 valueAt : Int -> Int -> Int -> Int
 valueAt = native
 
-entropySeed : () -> Int
+entropySeed : () ->{IO} Int
 entropySeed = native
 
 -- runSeeded answers every `int lo hi` draw from a deterministic generator
@@ -23,5 +25,5 @@ runSeeded seed action =
 
 -- runSystem answers draws from a system-entropy seed: a fresh sequence on
 -- every run.
-runSystem : (() ->{Random | e} a) ->{e} a
+runSystem : (() ->{Random | e} a) ->{IO | e} a
 runSystem action = runSeeded (entropySeed()) action

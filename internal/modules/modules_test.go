@@ -221,6 +221,15 @@ func TestBundledModuleNamesAreReserved(t *testing.T) {
 }
 
 func TestNativeSidecarValidation(t *testing.T) {
+	t.Run("effectful value", func(t *testing.T) {
+		d := t.TempDir()
+		entry := write(t, d, "Main.fango", "module Main exposing (main)\neffect Clock\n    tick : () -> Int\nvalue : () ->{Clock} Int\nvalue = native\nmain = 0\n")
+		write(t, d, "Main.native.go", "package native\nfunc Value() int64 { return 42 }\n")
+		if _, errs := Load(entry); len(errs) > 0 {
+			t.Fatalf("effectful native: %v", errs)
+		}
+	})
+
 	t.Run("valid scalar ABI", func(t *testing.T) {
 		d := t.TempDir()
 		entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Hash\nmain = Hash.twice 21\n")

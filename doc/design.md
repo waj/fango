@@ -72,6 +72,11 @@ execute only through explicit application. `f()` is surface sugar for applying
 `f` to Unit, and a definition `f() = body` uses the existing one-parameter
 worker representation with a discarded Unit parameter.
 
+Native value declarations may carry the same effect rows as ordinary
+functions, including `IO` and user-declared effects. The row participates in
+inference and checking; a sidecar call uses the scalar ABI of its annotation
+and receives no hidden evidence argument.
+
 A syntactic multi-parameter worker executes its body only after its final
 parameter, so inferred effects belong to the final arrow and earlier partial
 applications are pure. A one-parameter function whose body returns a lambda is

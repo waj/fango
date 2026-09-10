@@ -448,11 +448,13 @@ The supported boundary types are `Int`/`int64`, `Float`/`float64`,
 results are validated, and an invalid UTF-8 string or non-scalar rune panics at
 the native boundary. Unit parameters are omitted from
 the Go function and a Unit result is represented by no Go result. Functions,
-ADTs, polymorphic variables, class constraints, explicit effect rows on native
-value types, Go type parameters, multiple
-results, and `error` results are rejected. Sidecars may import only Go
-standard-library packages. Every call-form declaration needs its matching
-exported function, and every exported sidecar function needs a declaration.
+ADTs, polymorphic variables, class constraints, Go type parameters, multiple
+results, and `error` results are rejected. Effect rows on native value types
+are preserved for checking and may contain `IO` or user-declared effects; the
+sidecar call itself uses the same scalar ABI and does not receive a hidden
+evidence argument. Sidecars may import only Go standard-library packages.
+Every call-form declaration needs its matching exported function, and every
+exported sidecar function needs a declaration.
 
 An operation in an `effect` declaration may also use call form:
 

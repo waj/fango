@@ -718,9 +718,6 @@ func validateNativeShape(d *ast.ValueDecl, fn *goast.FuncDecl) []diag.Error {
 		if !ok {
 			break
 		}
-		if f.Eff != nil && (len(f.Eff.Labels) > 0 || f.Eff.Tail != "") {
-			return []diag.Error{diag.Errorf(d.Native.Sp, "NATIVE ABI", "Native `%s` cannot include an explicit effect row in its boundary type.", d.Name)}
-		}
 		if !isUnitType(f.Arg) {
 			params = append(params, f.Arg)
 		}
