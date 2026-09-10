@@ -1,0 +1,13 @@
+effect Stop
+    abort stop : String -> value
+
+type Box = Box (() ->{Stop} ())
+
+use : Int -> Box -> ()
+use _ (Box action) =
+    handle action() of
+        stop _ -> ()
+
+run = use 0
+
+main() = ()

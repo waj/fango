@@ -673,7 +673,12 @@ func (g *gen) workerCallABI(d *core.Def, execution types.Transport) types.Transp
 }
 
 func (g *gen) workerNeedsABIFamily(d *core.Def) bool {
-	_, ret := core.PeelFun(d.Type, len(d.Params))
+	args, ret := core.PeelFun(d.Type, len(d.Params))
+	for _, arg := range args {
+		if g.controlledType(arg, nil) {
+			return true
+		}
+	}
 	return g.controlledType(ret, nil)
 }
 
