@@ -90,12 +90,14 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		scalarShow:    map[int]bool{},
 		caseVarTys:    map[string]types.Type{},
 		evidence:      map[int][]goast.Expr{},
+		evidenceModes: map[int][]types.Transport{},
 		defs:          map[string]*core.Def{},
 		unit:          unit.Name,
 		imports:       map[string]bool{},
 		nativeImports: map[string]bool{},
 		direct:        map[string]bool{},
 		natives:       p.Natives,
+		effects:       map[int]*types.EffectInfo{},
 		control:       types.Direct,
 	}
 	for _, name := range unit.Imports {
@@ -106,6 +108,9 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 	}
 	for _, adt := range p.ADTs {
 		g.adts[adt.Con.Unique] = adt
+	}
+	for _, effect := range p.Effects {
+		g.effects[effect.Unique] = effect
 	}
 	if unit.Entry {
 		for _, native := range p.Natives {
@@ -148,7 +153,7 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 			// Includes nullary generic workers — polymorphic values emit as
 			// zero-parameter generic functions (doc/design.md, "Go backend and runtime").
 			decls = append(decls, g.workerDef(d, d.Control.Transport))
-			if d.Control.Polymorphic {
+			if d.Control.Polymorphic && d.Control.Transport != types.Exit {
 				decls = append(decls, g.workerDef(d, types.Exit))
 			}
 			continue
@@ -239,12 +244,14 @@ type gen struct {
 	// any parameter directly, so constructor switches need all of them here.
 	caseVarTys    map[string]types.Type
 	evidence      map[int][]goast.Expr
+	evidenceModes map[int][]types.Transport
 	defs          map[string]*core.Def
 	unit          string
 	imports       map[string]bool
 	nativeImports map[string]bool
 	direct        map[string]bool
 	natives       map[string]*types.NativeInfo
+	effects       map[int]*types.EffectInfo
 	control       types.Transport
 	resultType    types.Type
 }
@@ -567,6 +574,7 @@ func (g *gen) workerDef(d *core.Def, mode types.Transport) goast.Decl {
 		name := g.evidenceName(ev.Name)
 		params = append(params, paramSpec{name: name, typ: g.effectType(ev)})
 		g.evidence[ev.Unique] = append(g.evidence[ev.Unique], ident(name))
+		g.evidenceModes[ev.Unique] = append(g.evidenceModes[ev.Unique], mode)
 	}
 	for i, name := range d.Params {
 		if g.isUnit(argTys[i]) {
@@ -601,6 +609,7 @@ func (g *gen) workerDef(d *core.Def, mode types.Transport) goast.Decl {
 	decl := workerDecl(name, params, result, body).(*goast.FuncDecl)
 	for _, ev := range d.EffectParams {
 		g.evidence[ev.Unique] = g.evidence[ev.Unique][:len(g.evidence[ev.Unique])-1]
+		g.evidenceModes[ev.Unique] = g.evidenceModes[ev.Unique][:len(g.evidenceModes[ev.Unique])-1]
 	}
 	decl.Type.TypeParams = g.typeParamFields(d.TyParams)
 	return decl
@@ -639,13 +648,14 @@ func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
 			return exprStmt(g.workerCallExpr(e))
 		}
 	}
+	mode := e.Control.Resolve(g.control)
 	args := make([]goast.Expr, 0, len(e.EvidenceArgs)+len(e.Args))
 	for _, ev := range e.EvidenceArgs {
 		stack := g.evidence[ev.Unique]
 		if len(stack) == 0 {
 			panic("codegen: missing lexical evidence")
 		}
-		args = append(args, stack[len(stack)-1])
+		args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), mode))
 	}
 	for i, a := range e.Args {
 		if i < len(formal) && g.isUnit(formal[i]) {
@@ -653,7 +663,6 @@ func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
 		}
 		args = append(args, g.expr(a, 0))
 	}
-	mode := e.Control.Resolve(g.control)
 	return exprStmt(callExpr(indexExpr(g.topValueRefMode(ref.Name, mode), g.goTypes(e.TyArgs)), args...))
 }
 
@@ -1028,6 +1037,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			inst := core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args, Control: types.FunctionControl(fn)}
 			params = append(params, paramSpec{name: name, typ: g.effectType(inst)})
 			g.evidence[l.Unique] = append(g.evidence[l.Unique], ident(name))
+			g.evidenceModes[l.Unique] = append(g.evidenceModes[l.Unique], mode)
 			pushed = append(pushed, l.Unique)
 		}
 		params = append(params, paramSpec{name: func() string {
@@ -1046,6 +1056,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		}
 		for _, unique := range pushed {
 			g.evidence[unique] = g.evidence[unique][:len(g.evidence[unique])-1]
+			g.evidenceModes[unique] = g.evidenceModes[unique][:len(g.evidenceModes[unique])-1]
 		}
 		result := g.goType(fn.Ret)
 		if mode == types.Exit {
@@ -1061,13 +1072,14 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			// One typed indirect call per application; chains render
 			// e(a)(b). Call is a Go primary expression — no parens needed,
 			// and a func-literal callee called in place is legal Go.
+			mode := e.Control.Resolve(g.control)
 			args := make([]goast.Expr, 0, len(e.EvidenceArgs)+1)
 			for _, ev := range e.EvidenceArgs {
 				stack := g.evidence[ev.Unique]
 				if len(stack) == 0 {
 					panic("codegen: missing lexical evidence")
 				}
-				args = append(args, stack[len(stack)-1])
+				args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), mode))
 			}
 			args = append(args, g.expr(e.Args[0], 0))
 			return callExpr(g.expr(e.Callee, 0), args...)
@@ -1159,12 +1171,16 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return call
 	case *core.ControlExit:
 		g.usesFangort = true
+		stack := g.evidence[e.Effect.Unique]
+		if len(stack) == 0 {
+			panic("codegen: ControlExit without lexical evidence")
+		}
 		payload := make([]goast.Expr, len(e.Payload))
 		for i, p := range e.Payload {
 			payload[i] = g.expr(p, 0)
 		}
 		exit := &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: selector("fangort", "ExitRequest"), Elts: []goast.Expr{
-			&goast.KeyValueExpr{Key: ident("Target"), Value: intLit(int64(e.Target))},
+			&goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Target")}},
 			&goast.KeyValueExpr{Key: ident("Effect"), Value: intLit(int64(e.Op.Owner.Unique))},
 			&goast.KeyValueExpr{Key: ident("Operation"), Value: intLit(int64(e.Op.Index))},
 			&goast.KeyValueExpr{Key: ident("Payload"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: ident("any")}, Elts: payload}},
@@ -1184,13 +1200,14 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 	ref := e.Callee.(*core.VarRef)
 	formal, voidResult := g.workerABI(ref.Name)
+	mode := e.Control.Resolve(g.control)
 	args := make([]goast.Expr, 0, len(e.EvidenceArgs)+len(e.Args))
 	for _, ev := range e.EvidenceArgs {
 		stack := g.evidence[ev.Unique]
 		if len(stack) == 0 {
 			panic("codegen: missing lexical evidence")
 		}
-		args = append(args, stack[len(stack)-1])
+		args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), mode))
 	}
 	needPrelude := false
 	for i, a := range e.Args {
@@ -1215,7 +1232,6 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 			body = append(body, varDeclStmt(name, g.goType(a.Type()), g.expr(a, 0)))
 			args = append(args, ident(name))
 		}
-		mode := e.Control.Resolve(g.control)
 		call := callExpr(indexExpr(g.topValueRefMode(ref.Name, mode), g.goTypes(e.TyArgs)), args...)
 		if mode == types.Exit {
 			body = append(body, returnStmt(call))
@@ -1230,7 +1246,6 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 		}
 		return callExpr(funcLit(result, body))
 	}
-	mode := e.Control.Resolve(g.control)
 	call := callExpr(indexExpr(g.topValueRefMode(ref.Name, mode), g.goTypes(e.TyArgs)), args...)
 	if mode == types.Exit {
 		return call
@@ -1251,6 +1266,9 @@ func unitAtom(e core.Expr) bool {
 }
 
 func (g *gen) handleExpr(e *core.Handle) goast.Expr {
+	if len(e.Clauses) > 0 && e.Clauses[0].Op.Abort {
+		return g.abortHandleExpr(e)
+	}
 	evidenceMode := e.Effect.Control.Resolve(g.control)
 	stateCell := ""
 	if e.State != nil {
@@ -1304,8 +1322,10 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	g.tmp++
 	decl := varDeclStmt(name, st, &goast.CompositeLit{Type: st, Elts: elts})
 	g.evidence[e.Effect.Unique] = append(g.evidence[e.Effect.Unique], ident(name))
+	g.evidenceModes[e.Effect.Unique] = append(g.evidenceModes[e.Effect.Unique], evidenceMode)
 	body := g.expr(e.Body, 0)
 	g.evidence[e.Effect.Unique] = g.evidence[e.Effect.Unique][:len(g.evidence[e.Effect.Unique])-1]
+	g.evidenceModes[e.Effect.Unique] = g.evidenceModes[e.Effect.Unique][:len(g.evidenceModes[e.Effect.Unique])-1]
 	// A handler whose subject does not perform the handled effect still
 	// constructs valid lexical evidence; keep the local legal in Go even
 	// when no generated operation call refers to it.
@@ -1348,12 +1368,133 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	return callExpr(funcLit(result, stmts))
 }
 
+// abortHandleExpr installs only a unique target token. Performing an abort
+// constructs an ExitRequest; the clause is invoked here, after the handled
+// body has unwound and the handler's evidence has been removed.
+func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
+	g.usesFangort = true
+	overall := e.Control.Resolve(g.control)
+	targetName := fmt.Sprintf("t_target%d", g.tmp)
+	g.tmp++
+	evidenceName := fmt.Sprintf("ev%d", g.tmp)
+	g.tmp++
+	outcomeName := fmt.Sprintf("t_handle%d", g.tmp)
+	g.tmp++
+	stateCell := ""
+	if e.State != nil {
+		stateCell = fmt.Sprintf("t_state%d", g.tmp)
+		g.tmp++
+	}
+
+	var stmts []goast.Stmt
+	if e.State != nil {
+		stmts = append(stmts, varDeclStmt(stateCell, g.goType(e.State.Ty), g.expr(e.State.Initial, 0)))
+	}
+	target := &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: selector("fangort", "ExitTarget"), Elts: []goast.Expr{
+		&goast.KeyValueExpr{Key: ident("Marker"), Value: intLit(1)},
+	}}}
+	stmts = append(stmts, varDeclStmt(targetName, &goast.StarExpr{X: selector("fangort", "ExitTarget")}, target))
+	st := g.effectType(e.Effect)
+	evidenceValue := &goast.CompositeLit{Type: st, Elts: []goast.Expr{
+		&goast.KeyValueExpr{Key: ident("Target"), Value: ident(targetName)},
+	}}
+	stmts = append(stmts, varDeclStmt(evidenceName, st, evidenceValue), assignBlank(ident(evidenceName)))
+
+	g.evidence[e.Effect.Unique] = append(g.evidence[e.Effect.Unique], ident(evidenceName))
+	g.evidenceModes[e.Effect.Unique] = append(g.evidenceModes[e.Effect.Unique], types.Exit)
+	oldControl, oldResult := g.control, g.resultType
+	g.control, g.resultType = types.Exit, e.Body.Type()
+	body := callExpr(funcLit(g.outcomeType(e.Body.Type()), g.retStmtsFor(e.Body, g.isUnit(e.Body.Type()))))
+	g.control, g.resultType = oldControl, oldResult
+	g.evidence[e.Effect.Unique] = g.evidence[e.Effect.Unique][:len(g.evidence[e.Effect.Unique])-1]
+	g.evidenceModes[e.Effect.Unique] = g.evidenceModes[e.Effect.Unique][:len(g.evidenceModes[e.Effect.Unique])-1]
+	stmts = append(stmts, varDeclStmt(outcomeName, g.outcomeType(e.Body.Type()), body))
+
+	exit := &goast.SelectorExpr{X: ident(outcomeName), Sel: ident("Exit")}
+	foreignBody := []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, exit))}
+	if overall == types.Direct {
+		foreignBody = g.zeroReturn(e.Ty)
+	}
+	targetMismatch := &goast.BinaryExpr{X: &goast.SelectorExpr{X: exit, Sel: ident("Target")}, Op: gotoken.NEQ, Y: ident(targetName)}
+	hasExitBody := []goast.Stmt{&goast.IfStmt{Cond: targetMismatch, Body: &goast.BlockStmt{List: foreignBody}}}
+	for _, clause := range e.Clauses {
+		cond := &goast.BinaryExpr{X: &goast.SelectorExpr{X: exit, Sel: ident("Operation")}, Op: gotoken.EQL, Y: intLit(int64(clause.Op.Index))}
+		var clauseStmts []goast.Stmt
+		if e.State != nil {
+			clauseStmts = append(clauseStmts, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), ident(stateCell)), assignBlank(ident(mangleValue(e.State.Name))))
+		}
+		for i, p := range clause.Params {
+			if p == "_" || p == "()" {
+				continue
+			}
+			payload := &goast.IndexExpr{X: &goast.SelectorExpr{X: exit, Sel: ident("Payload")}, Index: intLit(int64(i))}
+			value := &goast.TypeAssertExpr{X: payload, Type: g.goType(clause.ParamTypes[i])}
+			clauseStmts = append(clauseStmts, varDeclStmt(mangleValue(p), g.goType(clause.ParamTypes[i]), value))
+			if g.isUnit(clause.ParamTypes[i]) || !core.Mentions(clause.Body, p) {
+				clauseStmts = append(clauseStmts, assignBlank(ident(mangleValue(p))))
+			}
+		}
+		g.control, g.resultType = overall, e.Ty
+		clauseStmts = append(clauseStmts, g.retStmtsFor(clause.Body, g.isUnit(e.Ty))...)
+		g.control, g.resultType = oldControl, oldResult
+		hasExitBody = append(hasExitBody, &goast.IfStmt{Cond: cond, Body: &goast.BlockStmt{List: clauseStmts}})
+	}
+	if overall == types.Exit {
+		hasExitBody = append(hasExitBody, returnStmt(g.propagateOutcome(e.Ty, exit)))
+	} else {
+		hasExitBody = append(hasExitBody, g.zeroReturn(e.Ty)...)
+	}
+	stmts = append(stmts, &goast.IfStmt{Cond: &goast.BinaryExpr{X: exit, Op: gotoken.NEQ, Y: ident("nil")}, Body: &goast.BlockStmt{List: hasExitBody}})
+
+	if e.Return == nil {
+		value := &goast.SelectorExpr{X: ident(outcomeName), Sel: ident("Value")}
+		if overall == types.Exit {
+			stmts = append(stmts, returnStmt(g.normalOutcome(e.Ty, value)))
+		} else {
+			stmts = append(stmts, returnStmt(value))
+		}
+	} else {
+		if p := e.Return.Param; p != "_" && p != "()" {
+			stmts = append(stmts, varDeclStmt(mangleValue(p), g.goType(e.Body.Type()), &goast.SelectorExpr{X: ident(outcomeName), Sel: ident("Value")}))
+			if g.isUnit(e.Body.Type()) || !core.Mentions(e.Return.Body, p) {
+				stmts = append(stmts, assignBlank(ident(mangleValue(p))))
+			}
+		}
+		if e.State != nil {
+			stmts = append(stmts, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), ident(stateCell)))
+		}
+		g.control, g.resultType = overall, e.Ty
+		stmts = append(stmts, g.retStmtsFor(e.Return.Body, g.isUnit(e.Ty))...)
+		g.control, g.resultType = oldControl, oldResult
+	}
+	result := g.goType(e.Ty)
+	if overall == types.Exit {
+		result = g.outcomeType(e.Ty)
+	}
+	return callExpr(funcLit(result, stmts))
+}
+
+// zeroReturn closes generated branches that Core proves unreachable: a
+// foreign target in a Direct handler or an unknown operation for a matching
+// private target. Keeping this path data-only preserves the no-panic control
+// runtime invariant.
+func (g *gen) zeroReturn(t types.Type) []goast.Stmt {
+	name := fmt.Sprintf("t_unreachable%d", g.tmp)
+	g.tmp++
+	return []goast.Stmt{varDeclNoValue(name, g.goType(t)), returnStmt(ident(name))}
+}
+
 // resumeStmts lowers a proven tail-resumptive clause. A tail `resume v`
 // becomes a direct return of v from the evidence operation field; the
 // caller's ordinary Go continuation then proceeds with that operation
 // result. No continuation object or non-local control transfer is needed.
 func (g *gen) resumeStmtsFor(e core.Expr, owner types.ResumeID, unitResult bool, stateCell string, stateType types.Type) []goast.Stmt {
 	switch e := e.(type) {
+	case *core.ControlExit:
+		if g.control != types.Exit {
+			panic("codegen: abort terminal in a Direct resumptive clause")
+		}
+		return []goast.Stmt{returnStmt(g.expr(e, 0))}
 	case *core.ResumeTail:
 		if e.Owner != owner {
 			panic("codegen: ResumeTail owner does not match handler clause")
@@ -1395,6 +1536,14 @@ func (g *gen) resumeStmtsFor(e core.Expr, owner types.ResumeID, unitResult bool,
 		}
 		return []goast.Stmt{returnStmt(g.expr(e.Value, 0))}
 	case *core.Let:
+		if _, exits := e.Rhs.(*core.ControlExit); exits {
+			outcome := fmt.Sprintf("t_terminal%d", g.tmp)
+			g.tmp++
+			return []goast.Stmt{
+				varDeclStmt(outcome, g.outcomeType(e.Rhs.Type()), g.expr(e.Rhs, 0)),
+				returnStmt(g.propagateOutcome(g.resultType, selector(outcome, "Exit"))),
+			}
+		}
 		return append(g.letBindingStmts(e), g.resumeStmtsFor(e.Body, owner, unitResult, stateCell, stateType)...)
 	case *core.Seq:
 		return append(g.stmts(e.First), g.resumeStmtsFor(e.Then, owner, unitResult, stateCell, stateType)...)
@@ -1415,6 +1564,60 @@ func (g *gen) effectType(e core.EffectInstance) goast.Expr {
 	return indexExpr(g.qualified(symbolOwner(e.Name), name), g.goTypes(e.Args))
 }
 
+// evidenceArg widens a Direct evidence record to its Exit ABI family when an
+// enclosing aborting call needs Outcome-returning operation callbacks. The
+// reverse conversion is intentionally absent.
+func (g *gen) currentEvidenceMode(unique int) types.Transport {
+	stack := g.evidenceModes[unique]
+	if len(stack) == 0 {
+		return types.Direct
+	}
+	return stack[len(stack)-1]
+}
+
+func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want types.Transport) goast.Expr {
+	if want != types.Exit || actual == types.Exit {
+		return value
+	}
+	eff := g.effects[ev.Unique]
+	if eff == nil || (len(eff.Ops) > 0 && eff.Ops[0].Abort) {
+		return value
+	}
+	desired := ev
+	desired.Control = types.Control{Transport: types.Exit}
+	elts := make([]goast.Expr, 0, len(eff.Ops))
+	sub := make(map[int]types.Type, len(eff.Params))
+	for i, p := range eff.Params {
+		if i < len(ev.Args) {
+			sub[p.ID] = ev.Args[i]
+		}
+	}
+	for _, op := range eff.Ops {
+		var params []paramSpec
+		var args []goast.Expr
+		for i, raw := range op.ParamTypes {
+			ty := types.SubstRigid(raw, sub)
+			if g.isUnit(ty) {
+				continue
+			}
+			name := fmt.Sprintf("t_evarg%d", i)
+			params = append(params, paramSpec{name: name, typ: g.goType(ty)})
+			args = append(args, ident(name))
+		}
+		resultTy := types.SubstRigid(op.ResultType, sub)
+		call := callExpr(&goast.SelectorExpr{X: value, Sel: ident("Op_" + linkName(op.Name))}, args...)
+		var body []goast.Stmt
+		if g.isUnit(resultTy) {
+			body = []goast.Stmt{exprStmt(call), returnStmt(g.normalOutcome(resultTy, g.unitValue()))}
+		} else {
+			body = []goast.Stmt{returnStmt(g.normalOutcome(resultTy, call))}
+		}
+		fn := funcLitParams(params, g.outcomeType(resultTy), body)
+		elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + linkName(op.Name)), Value: fn})
+	}
+	return &goast.CompositeLit{Type: g.effectType(desired), Elts: elts}
+}
+
 func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 	var out []goast.Decl
 	for _, eff := range effects {
@@ -1424,7 +1627,7 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 		for _, mode := range []types.Transport{types.Direct, types.Exit} {
 			oldNames, oldControl := g.tyParamNames, g.control
 			g.tyParamNames, g.control = map[int]string{}, mode
-			fields := make([]*goast.Field, len(eff.Ops))
+			var fields []*goast.Field
 			for i, p := range eff.Params {
 				g.tyParamNames[p.ID] = fmt.Sprintf("E%d", i)
 			}
@@ -1436,7 +1639,14 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 					g.tyParamNames[v.ID] = "any"
 				}
 			}
-			for i, op := range eff.Ops {
+			if len(eff.Ops) > 0 && eff.Ops[0].Abort {
+				g.usesFangort = true
+				fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Target")}, Type: &goast.StarExpr{X: selector("fangort", "ExitTarget")}})
+			}
+			for _, op := range eff.Ops {
+				if op.Abort {
+					continue
+				}
 				ps := make([]paramSpec, 0, len(op.ParamTypes))
 				for _, t := range op.ParamTypes {
 					if g.isUnit(t) {
@@ -1450,7 +1660,7 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 				} else if !g.isUnit(op.ResultType) {
 					results = &goast.FieldList{List: []*goast.Field{{Type: g.goType(op.ResultType)}}}
 				}
-				fields[i] = &goast.Field{Names: []*goast.Ident{ident("Op_" + linkName(op.Name))}, Type: &goast.FuncType{Params: paramFields(ps), Results: results}}
+				fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Op_" + linkName(op.Name))}, Type: &goast.FuncType{Params: paramFields(ps), Results: results}})
 			}
 			name := "Eff_" + linkName(eff.Name)
 			if mode == types.Exit {
@@ -1503,6 +1713,9 @@ func (g *gen) floatLit(v float64) goast.Expr {
 // context fallback; statement contexts (main's body, and function bodies
 // emit the bindings as plain Go statements instead.
 func (g *gen) letIIFE(e *core.Let) goast.Expr {
+	if core.ExprControl(e).Resolve(g.control) == types.Exit {
+		return callExpr(funcLit(g.outcomeType(e.Ty), g.retStmtsFor(e, false)))
+	}
 	var body []goast.Stmt
 	var cur core.Expr = e
 	for {

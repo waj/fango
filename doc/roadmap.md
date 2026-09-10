@@ -12,8 +12,8 @@ Continue selecting APIs from concrete programs rather than attempting broad
 coverage.
 
 - Expand `List`, text, numeric, and IO operations as subsequent examples require
-  them. `Result` and structured IO failures are coordinated in the
-  [effects roadmap](roadmap-effects.md#e4-abort-only-effects-result-and-statefailure-composition).
+  them. Structured IO failures are coordinated in the
+  [effects roadmap](roadmap-effects.md).
 - Strings use valid UTF-8 storage and Unicode-scalar `Char`, indexing, and
   length. Normalization, grapheme segmentation, and Unicode-aware word or case
   operations remain deferred until an example requires them.
@@ -162,12 +162,13 @@ The tail-resumptive discipline and parameterized State handlers are proved in
 source checking and Core, scoped capture metadata is checked during elaboration
 and again in Core, and control-aware Direct/Exit calling conventions are
 implemented for workers, callbacks, evidence, ADTs, dictionaries, and both
-backends. Next add abort-only effects, then generic cleanup scopes. Resource
+backends. Abort-only effects and `Result` are implemented; next add generic
+cleanup scopes. Resource
 management is exposed through ordinary `Scope.bracket`/`withFile` calls rather
 than requiring new cleanup syntax. These increments can ship without suspension.
 
-The same roadmap owns `Result`, structured IO failures, resource/native ABI
-work, and the open decisions for operation polymorphism and builtin IO handling.
+The same roadmap owns structured IO failures, resource/native ABI work, and the
+open decisions for operation polymorphism and builtin IO handling.
 Owned iterators, scoped non-tail resumption, structured async, and cancellation
 are later milestones, gated by a concrete consumer and static ownership checks.
 

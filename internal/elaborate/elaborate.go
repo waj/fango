@@ -219,8 +219,31 @@ func executingEffects(t types.Type, arity int) []core.EffectInstance {
 	seen := map[int]bool{}
 	for _, l := range row.Labels {
 		if types.SurfaceName(l.Name) != "IO" && !seen[l.Unique] {
-			out = append(out, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Control: types.Control{Polymorphic: true}})
+			control := types.Control{Polymorphic: true}
+			if l.Abort {
+				control = types.Control{Transport: types.Exit}
+			}
+			out = append(out, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Control: control})
 			seen[l.Unique] = true
+		}
+	}
+	return out
+}
+
+func rowControl(row types.Row, ck *infer.Checker) types.Control {
+	var out types.Control
+	if row.Tail != nil {
+		out.Polymorphic = true
+	}
+	for _, label := range row.Labels {
+		abort := label.Abort
+		if eff := ck.EffectsByUnique[label.Unique]; eff != nil && len(eff.Ops) > 0 {
+			abort = eff.Ops[0].Abort
+		}
+		if abort {
+			out.Transport = types.Exit
+		} else if types.SurfaceName(label.Name) != "IO" {
+			out.Polymorphic = true
 		}
 	}
 	return out
@@ -339,7 +362,11 @@ func (el *elab) bindEffectParams(effects []core.EffectInstance) []core.EffectIns
 	out := make([]core.EffectInstance, len(effects))
 	for i, ev := range effects {
 		ev.Captures = types.VarCapture(el.ck.Sup.FreshCapture())
-		ev.Control = types.Control{Polymorphic: true}
+		if eff := el.ck.EffectsByUnique[ev.Unique]; eff != nil && len(eff.Ops) > 0 && eff.Ops[0].Abort {
+			ev.Control = types.Control{Transport: types.Exit}
+		} else if ev.Control.Transport != types.Exit {
+			ev.Control.Polymorphic = true
+		}
 		out[i] = ev
 		el.evidence[ev.Unique] = append(el.evidence[ev.Unique], ev)
 	}
@@ -956,7 +983,11 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 		el.popScope(pushed)
 		ret = &core.ReturnClause{Param: name, Body: retBody}
 	}
-	inst := core.EffectInstance{Unique: info.Effect.Unique, Name: info.Effect.Name, Captures: types.ScopeCapture(info.Scope), Control: types.Control{Polymorphic: true}}
+	control := types.Control{Polymorphic: true}
+	if info.Effect.Abort {
+		control = types.Control{Transport: types.Exit}
+	}
+	inst := core.EffectInstance{Unique: info.Effect.Unique, Name: info.Effect.Name, Captures: types.ScopeCapture(info.Scope), Control: control}
 	for _, a := range info.Effect.Args {
 		inst.Args = append(inst.Args, el.zonkDefault(a))
 	}
@@ -967,7 +998,17 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 	if e.State != nil {
 		state = &core.HandlerState{Name: e.State.Name, Initial: el.expr(e.State.Initial), Ty: el.zonkDefault(info.StateType)}
 	}
-	return &core.Handle{Body: body, State: state, Effect: inst, Scope: info.Scope, Scoped: info.Scoped, Clauses: clauses, Return: ret, Ty: ty}
+	residualType := el.ck.Sub.Apply(info.Residual)
+	el.defaultFree(residualType)
+	residual := el.ck.Sub.Apply(residualType).(types.Row)
+	resultControl := rowControl(residual, el.ck)
+	for _, clause := range clauses {
+		resultControl = types.JoinControl(resultControl, core.ExprControl(clause.Body))
+	}
+	if ret != nil {
+		resultControl = types.JoinControl(resultControl, core.ExprControl(ret.Body))
+	}
+	return &core.Handle{Body: body, State: state, Effect: inst, Scope: info.Scope, Scoped: info.Scoped, Clauses: clauses, Return: ret, Ty: ty, Control: resultControl}
 }
 
 func hasRuntimeVars(s types.Scheme) bool {
@@ -1100,14 +1141,18 @@ func eraseRowsFrom(origin, t types.Type) types.Type {
 			for i, a := range l.Args {
 				args[i] = eraseRowsFrom(a, a)
 			}
-			eff.Labels = append(eff.Labels, types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args})
+			eff.Labels = append(eff.Labels, types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort})
 		}
 		control := t.Control
 		if t.Eff.Tail != nil {
 			control.Polymorphic = true
 		}
 		for _, l := range t.Eff.Labels {
-			if types.SurfaceName(l.Name) != "IO" {
+			if l.Abort {
+				if control.Transport < types.Exit {
+					control.Transport = types.Exit
+				}
+			} else if types.SurfaceName(l.Name) != "IO" {
 				control.Polymorphic = true
 			}
 		}

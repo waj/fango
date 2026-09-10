@@ -1,0 +1,6 @@
+effect Fail error
+    abort fail : error -> value
+
+main =
+    handle fail "no" of
+        fail error -> resume error

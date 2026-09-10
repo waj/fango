@@ -155,7 +155,12 @@ func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args [
 		effectParams = el.bindEffectParams(executingEffects(arrowAt(opTy, len(args)), op.Arity-len(args)))
 	}
 	inst := el.effectInstance(op, rawTy)
-	var body core.Expr = &core.Perform{Op: op, Effect: inst, Args: coreArgs, Ty: ret, Control: inst.Control}
+	var body core.Expr
+	if op.Abort {
+		body = &core.ControlExit{Effect: inst, Op: op, Payload: coreArgs, Ty: ret}
+	} else {
+		body = &core.Perform{Op: op, Effect: inst, Args: coreArgs, Ty: ret, Control: inst.Control}
+	}
 	if len(effectParams) > 0 {
 		el.popEvidence(effectParams)
 	}
@@ -566,6 +571,7 @@ func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 			for _, ev := range effectParams {
 				if c.evidence[i].Unique == ev.Unique {
 					c.evidence[i].Captures = ev.Captures
+					c.evidence[i].Control = ev.Control
 				}
 			}
 		}

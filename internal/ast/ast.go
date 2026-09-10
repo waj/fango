@@ -606,6 +606,7 @@ type OpSig struct {
 	NameSpan source.Span
 	Type     TypeExpr
 	Native   *NativeBody
+	Abort    bool // `abort name : ...`; the operation never resumes normally
 }
 
 // NativeBody marks a declaration implemented outside ordinary fango source.

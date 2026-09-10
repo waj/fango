@@ -617,6 +617,11 @@ func (p *parser) parseEffectDecl() ast.Decl {
 	var ops []ast.OpSig
 	for {
 		p.stmtStart = p.pos
+		abort := false
+		if p.peekInExpr().Kind == token.KwAbort {
+			abort = true
+			p.next()
+		}
 		// Class declarations share this loop, and a class method may be an
 		// operator: `class Num a` declares `(+) : a -> a -> a`.
 		opName, opSpan, ok := p.parseMethodName("SYNTAX PROBLEM",
@@ -640,7 +645,7 @@ func (p *parser) parseEffectDecl() ast.Decl {
 			}
 			native = p.parseNativeBody()
 		}
-		ops = append(ops, ast.OpSig{Name: opName, NameSpan: opSpan, Type: ty, Native: native})
+		ops = append(ops, ast.OpSig{Name: opName, NameSpan: opSpan, Type: ty, Native: native, Abort: abort})
 		nt := p.peek()
 		if nt.Kind == token.EOF || nt.Pos().Col < col {
 			break

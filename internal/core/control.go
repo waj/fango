@@ -59,15 +59,20 @@ func ExprControl(e Expr) types.Control {
 		}
 		return types.JoinControl(parts...)
 	case *Handle:
-		parts := []types.Control{e.Control, ExprControl(e.Body)}
+		parts := []types.Control{e.Control}
 		if e.State != nil {
 			parts = append(parts, ExprControl(e.State.Initial))
 		}
-		for _, c := range e.Clauses {
-			parts = append(parts, ExprControl(c.Body))
-		}
-		if e.Return != nil {
-			parts = append(parts, ExprControl(e.Return.Body))
+		if len(e.Clauses) == 0 || e.Clauses[0].Op == nil || !e.Clauses[0].Op.Abort {
+			// Resumptive evidence may select an Exit ABI member. Abort-only body
+			// exits are instead consumed by this boundary.
+			parts = append(parts, ExprControl(e.Body))
+			for _, c := range e.Clauses {
+				parts = append(parts, ExprControl(c.Body))
+			}
+			if e.Return != nil {
+				parts = append(parts, ExprControl(e.Return.Body))
+			}
 		}
 		return types.JoinControl(parts...)
 	case *Case:

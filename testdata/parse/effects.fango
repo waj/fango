@@ -1,5 +1,5 @@
 effect Fail e
-    throw : e -> a
+    abort throw : e -> a
 
 effect Console
     print : String -> ()

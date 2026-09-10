@@ -1,0 +1,134 @@
+import Result exposing (Result(..))
+import State
+import Meta exposing (Code)
+
+effect Fail error
+    abort fail : error -> value
+
+asInt : Int -> Int
+asInt value = value
+
+attempt action =
+    handle action() of
+        fail error -> Err error
+        return value -> Ok value
+
+attemptLoud action =
+    handle action() of
+        fail error ->
+            print error
+            Err error
+        return value -> Ok value
+
+failInt : String ->{Fail String} Int
+failInt = fail
+
+effect Ask
+    ask : Bool -> Int
+
+effect FixedFail
+    abort stop : String -> Int
+
+askWithAbort() =
+    attempt (\_ ->
+        handle ask True + ask False of
+            ask valid ->
+                if valid then resume 5 else
+                    stopped = fail "ask-failed"
+                    stopped
+            return total -> total)
+
+fixedFailure() =
+    handle stop "fixed" of
+        stop message -> message
+        return _ -> "normal"
+
+consumeThenFail() =
+    current = State.get()
+    State.put (asInt current + 1)
+    if True then fail "consumed" else asInt 0
+
+consumeThenSucceed() =
+    current = State.get()
+    State.put (asInt current + 1)
+    asInt 42
+
+backtrack original =
+    first = attempt (\_ -> State.run (asInt original) consumeThenFail)
+    case first of
+        Err _ -> State.run (asInt original) consumeThenSucceed
+        Ok stateResult -> stateResult
+
+reraised() =
+    handle
+        (handle fail "inner" of
+            fail message -> fail (message ++ "-outer")
+            return value -> value) of
+        fail message -> message
+        return _ -> "normal"
+
+failedReturn() =
+    handle
+        (handle 7 of
+            fail message -> message
+            return _ -> fail "return-failed") of
+        fail message -> message
+        return _ -> "normal"
+
+recursiveFailure n =
+    handle (if n == 0 then fail "deep" else recursiveFailure (n - 1)) of
+        fail message -> if n == 0 then fail (message ++ "!") else message ++ "?"
+        return message -> message
+
+compileChoice : () -> Code
+compileChoice() =
+    handle fail "compile-time" of
+        fail _ -> quote 17
+        return code -> code
+
+markedError() =
+    print "argument"
+    "marked"
+
+main() =
+    generic = attempt (\_ -> if False then asInt 9 else fail "number")
+    visible = State.run 0 (\_ -> attempt consumeThenFail)
+    discarded = attempt (\_ -> State.run 0 consumeThenFail)
+    retried = backtrack 0
+    case generic of
+        Err message -> print message
+        Ok number -> print (asInt number)
+    case visible.value of
+        Err message -> print message
+        Ok number -> print (asInt number)
+    print (asInt visible.state)
+    case discarded of
+        Err message -> print message
+        Ok stateResult -> print (asInt stateResult.state)
+    print (asInt retried.value)
+    print (asInt retried.state)
+    print (reraised())
+    print (failedReturn())
+    recursive =
+        handle recursiveFailure 2 of
+            fail message -> message
+            return message -> message
+    print recursive
+    print $(compileChoice())
+    marked = attempt (\_ -> fail (markedError()))
+    case marked of
+        Err message -> print message
+        Ok _ -> ()
+    partial = attempt (\_ -> failInt "partial")
+    case partial of
+        Err message -> print message
+        Ok number -> print number
+    askResult = askWithAbort()
+    case askResult of
+        Err message -> print message
+        Ok number -> print number
+    print (fixedFailure())
+    loudResult = attemptLoud (\_ -> if True then fail "loud" else 0)
+    case loudResult of
+        Err _ -> ()
+        Ok _ -> ()

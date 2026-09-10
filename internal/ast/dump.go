@@ -138,7 +138,11 @@ func dumpDecl(d Decl) string {
 			fmt.Fprintf(&b, " %s", p)
 		}
 		for _, op := range d.Ops {
-			fmt.Fprintf(&b, " (op %s %s", op.Name, DumpTypeExpr(op.Type))
+			kind := "op"
+			if op.Abort {
+				kind = "abort-op"
+			}
+			fmt.Fprintf(&b, " (%s %s %s", kind, op.Name, DumpTypeExpr(op.Type))
 			if op.Native != nil {
 				b.WriteString(" (native")
 				if op.Native.Template != nil {

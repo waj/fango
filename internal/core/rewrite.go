@@ -120,6 +120,7 @@ func (r rewriter) expr(e Expr) Expr {
 		n := *e
 		n.Ty = r.typ(e.Ty)
 		n.Payload = r.exprs(e.Payload)
+		n.Effect = r.effect(e.Effect)
 		out = &n
 	case *Handle:
 		n := *e

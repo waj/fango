@@ -37,7 +37,7 @@ type Value = any
 // Go errors used for interpreter failures. Payload values have already been
 // checked against Op by Core lint.
 type ExitRequest struct {
-	Target  types.ScopeID
+	Target  *evidence
 	Op      *types.EffectOp
 	Payload []Value
 }
@@ -456,6 +456,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			args[i] = v
 		}
 		if ev := in.evidence[e.Effect.Unique]; ev != nil && ev.handler != nil {
+			if e.Op.Abort {
+				return nil, fmt.Errorf("eval: abort-only operation `%s` reached Perform", e.Op.Name)
+			}
 			var clause *core.HandlerClause
 			for i := range ev.handler.Clauses {
 				if ev.handler.Clauses[i].Op.Name == e.Op.Name {
@@ -513,7 +516,11 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			payload[i] = v
 		}
-		return &ExitRequest{Target: e.Target, Op: e.Op, Payload: payload}, nil
+		target := in.evidence[e.Effect.Unique]
+		if target == nil {
+			return nil, fmt.Errorf("eval: missing abort evidence for `%s.%s`", e.Effect.Name, e.Op.Name)
+		}
+		return &ExitRequest{Target: target, Op: e.Op, Payload: payload}, nil
 	case *core.ResumeTail:
 		return nil, fmt.Errorf("eval: ResumeTail outside verified handler-clause evaluation")
 	case *core.Seq:
@@ -545,8 +552,30 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := asExit(v); ok {
-			return v, nil
+		if exit, ok := asExit(v); ok {
+			if exit.Target != installed {
+				return v, nil
+			}
+			var clause *core.HandlerClause
+			for i := range e.Clauses {
+				if e.Clauses[i].Op == exit.Op {
+					clause = &e.Clauses[i]
+					break
+				}
+			}
+			if clause == nil || !clause.Op.Abort {
+				return nil, fmt.Errorf("eval: abort target missing clause `%s`", exit.Op.Name)
+			}
+			vars := map[string]Value{}
+			if e.State != nil {
+				vars[e.State.Name] = installed.state
+			}
+			for i, p := range clause.Params {
+				if p != "_" && p != "()" {
+					vars[p] = exit.Payload[i]
+				}
+			}
+			return in.eval(clause.Body, &Frame{parent: installed.frame, vars: vars})
 		}
 		if e.Return == nil {
 			return v, nil
@@ -681,6 +710,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 // operation result carried by the terminal ResumeTail.
 func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID, ev *evidence) (Value, error) {
 	switch e := e.(type) {
+	case *core.ControlExit:
+		return in.eval(e, fr)
 	case *core.ResumeTail:
 		if e.Owner != owner {
 			return nil, fmt.Errorf("eval: ResumeTail owner %d does not match handler clause %d", e.Owner, owner)

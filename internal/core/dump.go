@@ -59,7 +59,11 @@ func Dump(p *Prog) string {
 			fmt.Fprintf(&b, " (params %s)", strings.Join(params, " "))
 		}
 		for _, op := range eff.Ops {
-			fmt.Fprintf(&b, " (op %s %s)", op.Name, pr.Type(op.Scheme.Body))
+			kind := "op"
+			if op.Abort {
+				kind = "abort-op"
+			}
+			fmt.Fprintf(&b, " (%s %s %s)", kind, op.Name, pr.Type(op.Scheme.Body))
 		}
 		b.WriteString(")")
 	}
@@ -129,7 +133,7 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		}
 		return strings.Join(parts, " ") + " " + pr.Type(e.Ty) + ")"
 	case *ControlExit:
-		parts := []string{fmt.Sprintf("(control-exit scope[%d] %s/%s", e.Target, e.Op.Owner.Name, e.Op.Name)}
+		parts := []string{fmt.Sprintf("(control-exit %s/%s", dumpEffect(e.Effect, pr), e.Op.Name)}
 		for _, p := range e.Payload {
 			parts = append(parts, dumpExpr(p, pr))
 		}

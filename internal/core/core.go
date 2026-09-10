@@ -102,12 +102,12 @@ type Perform struct {
 	Control types.Control
 }
 
-// ControlExit is the private semantic-Core producer used by control lowering
-// and its synthetic tests. Source abort-only operations will lower to this in
-// E4. Ty is the normal result type of the abandoned computation; the payload
-// is descriptor-checked Core data, never an unchecked host assertion.
+// ControlExit is an abort-only operation. Effect selects the lexical evidence
+// whose dynamically unique activation token becomes the request target. Ty is
+// the normal result type of the abandoned computation; the payload is checked
+// Core data, never an unchecked source value.
 type ControlExit struct {
-	Target  types.ScopeID
+	Effect  EffectInstance
 	Op      *types.EffectOp
 	Payload []Expr
 	Ty      types.Type

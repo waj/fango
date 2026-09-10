@@ -4,7 +4,9 @@ Syntax highlighting for the [Fango](../../README.md) programming language (`.fan
 
 ## What's covered
 
-- Keywords: `module`, `import`, `as`, `exposing`, `type`, `effect`, `native`, `infixl`/`infixr`/`infix`, `if`/`then`/`else`, `case`/`of`, `handle`/`resume` (plus the contextual `return` clause in handlers)
+- Keywords: `module`, `import`, `as`, `exposing`, `type`, `effect`, `abort`,
+  `native`, `infixl`/`infixr`/`infix`, `if`/`then`/`else`, `case`/`of`, and
+  `handle`/`resume` (plus the contextual `return` clause in handlers)
 - Type classes: `class`, `instance`, `deriving (…)`, and `Ctx =>` constraints in signatures
 - Comments: `--` line comments and nesting `{- … -}` block comments
 - Strings with the exact Fango escape set (`\\ \" \n \t \r`; anything else is flagged as invalid)

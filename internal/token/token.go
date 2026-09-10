@@ -61,6 +61,7 @@ const (
 	KwOf
 	KwType
 	KwEffect
+	KwAbort
 	KwHandle
 	KwResume
 	KwNative
@@ -85,7 +86,7 @@ var kindNames = map[Kind]string{
 	EQ: "EQ", ARROW: "ARROW", DARROW: "DARROW", COLON: "COLON", PIPE: "PIPE", CARET: "CARET",
 	KwModule: "module", KwImport: "import", KwAs: "as", KwExposing: "exposing", KwLet: "let", KwIn: "in",
 	KwIf: "if", KwThen: "then", KwElse: "else", KwCase: "case", KwOf: "of",
-	KwType: "type", KwEffect: "effect", KwHandle: "handle", KwResume: "resume",
+	KwType: "type", KwEffect: "effect", KwAbort: "abort", KwHandle: "handle", KwResume: "resume",
 	KwNative: "native", KwInfix: "infix", KwInfixL: "infixl", KwInfixR: "infixr",
 	KwClass: "class", KwInstance: "instance", KwDeriver: "deriver", KwDeriving: "deriving",
 	KwQuote: "quote", KwTypeOf: "typeOf",
@@ -99,7 +100,7 @@ var Keywords = map[string]Kind{
 	"let": KwLet, "in": KwIn,
 	"if": KwIf, "then": KwThen, "else": KwElse,
 	"case": KwCase, "of": KwOf,
-	"type": KwType, "effect": KwEffect, "handle": KwHandle, "resume": KwResume,
+	"type": KwType, "effect": KwEffect, "abort": KwAbort, "handle": KwHandle, "resume": KwResume,
 	"native": KwNative, "infix": KwInfix, "infixl": KwInfixL, "infixr": KwInfixR,
 	"class": KwClass, "instance": KwInstance, "deriver": KwDeriver, "deriving": KwDeriving,
 	"quote": KwQuote, "typeOf": KwTypeOf,

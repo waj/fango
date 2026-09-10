@@ -1,0 +1,4 @@
+effect Fail error
+    abort fail : error -> value
+
+main = fail "unhandled"

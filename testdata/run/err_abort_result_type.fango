@@ -1,0 +1,4 @@
+effect Bad
+    abort fail : value -> value
+
+main = 0

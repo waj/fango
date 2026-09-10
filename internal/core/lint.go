@@ -172,6 +172,15 @@ func VerifyResumeStructure(e Expr) []error {
 		switch x := x.(type) {
 		case *Handle:
 			for _, c := range x.Clauses {
+				if c.Op != nil && c.Op.Abort {
+					if c.ResumeID != 0 {
+						l.errorf("abort handler clause has ResumeID %d", c.ResumeID)
+					}
+					if hasAnyResume(c.Body) {
+						l.errorf("RESUME IN ABORT CLAUSE: `%s` contains ResumeTail", c.Op.Name)
+					}
+					continue
+				}
 				if c.ResumeID == 0 {
 					l.errorf("handler clause has no ResumeID")
 				} else if l.resumeIDs[c.ResumeID] {
@@ -415,6 +424,8 @@ func (l *linter) expr(e Expr, where string) {
 		}
 		if e.Op == nil || e.Op.Owner.Unique != e.Effect.Unique {
 			l.errorf("%s: malformed Perform evidence", where)
+		} else if e.Op.Abort {
+			l.errorf("%s: abort-only operation `%s` was not lowered to ControlExit", where, e.Op.Name)
 		} else if !l.operationBelongs(e.Op) {
 			l.errorf("%s: Perform operation `%s` is not declared by its effect", where, e.Op.Name)
 		}
@@ -450,18 +461,28 @@ func (l *linter) expr(e Expr, where string) {
 			l.expr(a, where)
 		}
 	case *ControlExit:
-		if e.Target == 0 || !l.activeScopes[e.Target] {
-			l.errorf("%s: ControlExit targets inactive scope %d", where, e.Target)
+		l.control(e.Effect.Control, where)
+		l.effectInstance(e.Effect, where)
+		if e.Effect.Control.Transport != types.Exit {
+			l.errorf("%s: ControlExit evidence is not Exit transport", where)
 		}
-		if e.Op == nil || !l.operationBelongs(e.Op) {
+		if e.Op == nil || e.Op.Owner.Unique != e.Effect.Unique || !l.operationBelongs(e.Op) {
 			l.errorf("%s: ControlExit has an undeclared operation descriptor", where)
+		} else if !e.Op.Abort {
+			l.errorf("%s: ControlExit operation `%s` is resumptive", where, e.Op.Name)
 		} else {
-			if len(e.Payload) != len(e.Op.ParamTypes) {
+			if l.evidence[e.Effect.Unique] == 0 {
+				l.errorf("%s: ControlExit `%s` has no lexical evidence", where, e.Op.Name)
+			} else {
+				l.evidenceAvailable(e.Effect, where)
+			}
+			want, _ := l.operationTypes(e.Op, e.Effect)
+			if len(e.Payload) != len(want) {
 				l.errorf("%s: ControlExit `%s` payload arity mismatch", where, e.Op.Name)
 			}
 			for i, p := range e.Payload {
-				if i < len(e.Op.ParamTypes) && !types.Equal(p.Type(), e.Op.ParamTypes[i]) {
-					l.errorf("%s: ControlExit `%s` payload %d typed %s, want %s", where, e.Op.Name, i+1, types.Show(p.Type()), types.Show(e.Op.ParamTypes[i]))
+				if i < len(want) && !types.Equal(p.Type(), want[i]) {
+					l.errorf("%s: ControlExit `%s` payload %d typed %s, want %s", where, e.Op.Name, i+1, types.Show(p.Type()), types.Show(want[i]))
 				}
 				l.expr(p, where)
 			}
@@ -555,7 +576,7 @@ func (l *linter) expr(e Expr, where string) {
 					l.errorf("%s: handler clause `%s` uses () for a non-Unit parameter", where, c.Op.Name)
 				}
 			}
-			if !types.Equal(c.ResultType, opResult) {
+			if !c.Op.Abort && !types.Equal(c.ResultType, opResult) {
 				l.errorf("%s: handler clause `%s` evidence result typed %s, want operation result %s", where, c.Op.Name, types.Show(c.ResultType), types.Show(opResult))
 			}
 			if !types.Equal(c.Body.Type(), e.Ty) {
@@ -575,20 +596,29 @@ func (l *linter) expr(e Expr, where string) {
 					l.scope[p] = true
 				}
 			}
-			if c.ResumeID == 0 {
-				l.errorf("%s: handler clause `%s` has no ResumeID", where, c.Op.Name)
-			} else if l.resumeIDs[c.ResumeID] {
-				l.errorf("%s: handler clause `%s` reuses ResumeID %d", where, c.Op.Name, c.ResumeID)
-			} else {
-				l.resumeIDs[c.ResumeID] = true
-			}
 			var state types.Type
 			if e.State != nil {
 				state = e.State.Ty
 			}
-			l.tailResume(c.Body, c.ResumeID, opResult, e.Ty, state, where)
 			oldOwner, oldArg, oldRet, oldState := l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState
-			l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = c.ResumeID, opResult, e.Ty, state
+			if c.Op.Abort {
+				if c.ResumeID != 0 {
+					l.errorf("%s: abort clause `%s` has a ResumeID", where, c.Op.Name)
+				}
+				if hasAnyResume(c.Body) {
+					l.errorf("%s: RESUME IN ABORT CLAUSE: `%s` contains ResumeTail", where, c.Op.Name)
+				}
+			} else {
+				if c.ResumeID == 0 {
+					l.errorf("%s: handler clause `%s` has no ResumeID", where, c.Op.Name)
+				} else if l.resumeIDs[c.ResumeID] {
+					l.errorf("%s: handler clause `%s` reuses ResumeID %d", where, c.Op.Name, c.ResumeID)
+				} else {
+					l.resumeIDs[c.ResumeID] = true
+				}
+				l.tailResume(c.Body, c.ResumeID, opResult, e.Ty, state, where)
+				l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = c.ResumeID, opResult, e.Ty, state
+			}
 			l.expr(c.Body, where)
 			l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = oldOwner, oldArg, oldRet, oldState
 			for _, p := range c.Params {
@@ -675,7 +705,8 @@ func (l *linter) expr(e Expr, where string) {
 					want = substEffectInstance(want, m)
 				}
 				if !equalEffectInstance(ev, want) {
-					l.errorf("%s: App{Worker} `%s` evidence arg %d disagrees with the callee", where, ref.Name, i+1)
+					l.errorf("%s: App{Worker} `%s` evidence arg %d disagrees with the callee (got %s/%s, want %s/%s)", where, ref.Name, i+1,
+						effectArgsText(ev), ControlName(ev.Control), effectArgsText(want), ControlName(want.Control))
 				}
 				if l.evidence[ev.Unique] == 0 {
 					l.errorf("%s: App{Worker} `%s` passes unavailable lexical evidence `%s`", where, ref.Name, ev.Name)
@@ -820,6 +851,11 @@ func (l *linter) tailResume(e Expr, owner types.ResumeID, arg, result, state typ
 	var tree func(Tree)
 	tail = func(x Expr) {
 		switch x := x.(type) {
+		case *ControlExit:
+			for _, p := range x.Payload {
+				noResume(p, "an exit payload")
+			}
+			return
 		case *ResumeTail:
 			if x.Owner != owner {
 				l.errorf("%s: MISSING RESUME: clause owner %d ends in owner %d", where, owner, x.Owner)
@@ -844,6 +880,9 @@ func (l *linter) tailResume(e Expr, owner types.ResumeID, arg, result, state typ
 			}
 		case *Let:
 			noResume(x.Rhs, "a Let right-hand side")
+			if _, exits := x.Rhs.(*ControlExit); exits {
+				return
+			}
 			tail(x.Body)
 		case *Seq:
 			noResume(x.First, "a Seq prefix")
@@ -898,6 +937,17 @@ func hasResumeOwner(e Expr, owner types.ResumeID) bool {
 	found := false
 	Rewrite(e, func(t types.Type) types.Type { return t }, func(x Expr) Expr {
 		if r, ok := x.(*ResumeTail); ok && r.Owner == owner {
+			found = true
+		}
+		return x
+	})
+	return found
+}
+
+func hasAnyResume(e Expr) bool {
+	found := false
+	Rewrite(e, func(t types.Type) types.Type { return t }, func(x Expr) Expr {
+		if _, ok := x.(*ResumeTail); ok {
 			found = true
 		}
 		return x
@@ -1135,7 +1185,16 @@ func equalEffectInstance(a, b EffectInstance) bool {
 			return false
 		}
 	}
-	return a.Control == b.Control || b.Control.Polymorphic
+	return a.Control == b.Control || b.Control.Polymorphic ||
+		(a.Control.Resolve(types.Direct) == types.Direct && b.Control.Resolve(types.Exit) == types.Exit)
+}
+
+func effectArgsText(e EffectInstance) string {
+	out := e.Name
+	for _, arg := range e.Args {
+		out += " " + types.Show(arg)
+	}
+	return out
 }
 
 func (l *linter) control(c types.Control, where string) {

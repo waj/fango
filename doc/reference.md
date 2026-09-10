@@ -339,6 +339,18 @@ sequence, any other character, and values outside the signed 64-bit range all
 produce `Nothing`; `String.toInt "007"` is `Just 7` and
 `String.toInt "-9223372036854775808"` parses the most negative Int.
 
+`Result` exposes a conventional success-or-error value and basic transforms:
+
+```fango
+module Result exposing (Result(..), map, mapError, andThen, withDefault)
+
+type Result error value = Err error | Ok value deriving (Eq, Ord, Show)
+```
+
+`map` transforms an `Ok`, `mapError` transforms an `Err`, `andThen` chains a
+successful computation, and `withDefault` extracts a success or returns its
+fallback.
+
 `State` provides a parameterized state effect and its standard runner:
 
 ```fango
@@ -1065,13 +1077,44 @@ The compiler adds the declaring effect to each operation's type. Functions may
 annotate closed or open effect rows. An operation with a Unit argument is
 called explicitly with `()`.
 
+An abort-only effect marks every operation with `abort`:
+
+```fango
+effect Fail error
+    abort fail : error -> value
+```
+
+All operations in one effect must use the same discipline; mixing marked and
+unmarked operations is rejected. An abort operation may introduce exactly one
+operation-local type variable as its whole result, as above. That variable may
+not occur in a payload parameter. This is the only supported form of
+operation-local polymorphism. Abort operations cannot be `native`. A saturated
+abort never returns normally, while partial application remains a pure function
+value.
+
 A handler handles one effect and must contain a clause group for every
 operation of that effect. Adjacent repetitions of an operation form one
 source-ordered, exhaustive, non-redundant pattern group; a noncontiguous repeat
 is a duplicate-clause error. An optional adjacent `return` group matches the
 handled computation's normal result under the same rules. All clauses align
 like `case` branches and accept full argument patterns. `resume value`
-continues from the handled operation.
+continues from a resumptive operation. An abort clause instead returns the
+handler answer directly and has no resume binding:
+
+```fango
+attempt action =
+    handle action() of
+        fail error -> Err error
+        return value -> Ok value
+```
+
+Using `resume` there is a `RESUME IN ABORT CLAUSE` error. An abort evaluates
+all payload arguments left to right, unwinds to the exact handler activation,
+and only then runs its clause with the surrounding outer evidence. Recursive
+and nested handlers of the same effect remain distinct. The abort answer
+bypasses the handler's `return` clause; normal completion runs `return` once.
+An abort raised by an abort clause or return clause propagates outward rather
+than re-entering that activation.
 
 A parameterized handler inserts `with snapshot = initial` between its subject
 and `of`:
@@ -1091,17 +1134,19 @@ ordinary handlers continue to use `resume value`. The value and next-state
 expressions evaluate left to right exactly once, and the state is committed
 only after both finish successfully. The `return` clause sees the final state.
 
-Current handlers are deliberately restricted: every reachable operation-clause
-path must end in exactly one tail call to `resume`. Aborting clauses, non-tail
-or escaping continuations, operation-local/result polymorphism, and handlers
-for builtin `IO` are rejected. Effects other than the handled label remain in
-the surrounding row. A resume in an operand or before another expression is a
-`NON-TAIL RESUME`; a normal clause path without a resume is a `MISSING RESUME`;
-and a bare, partially applied, stored, or lambda-captured resume is a
-`RESUME ESCAPES` error. Diagnostics point to the offending expression and name
-the owning operation clause's location. Nested operation clauses bind their own
-resume, while nested handled bodies and return groups retain the surrounding
-resume binding.
+Resumptive handlers are deliberately restricted: every normally completing
+operation-clause path must end in exactly one tail call to `resume`. A
+saturated abort-only call is an exceptional terminal, so a path such as
+`if valid then resume answer else fail error` is legal. Non-tail or escaping
+continuations, general operation-local polymorphism, mixed-discipline effects,
+and handlers for builtin `IO` are rejected. Effects other than the handled
+label remain in the surrounding row. A resume in an operand or before another
+expression is a `NON-TAIL RESUME`; a normal clause path without a resume is a
+`MISSING RESUME`; and a bare, partially applied, stored, or lambda-captured
+resume is a `RESUME ESCAPES` error. Diagnostics point to the offending
+expression and name the owning operation clause's location. Nested operation
+clauses bind their own resume, while nested handled bodies and return groups
+retain the surrounding resume binding.
 
 The compiler preserves a control-aware calling convention through
 higher-order functions and abstract effect evidence. Direct calls keep their
@@ -1110,9 +1155,10 @@ can later carry a non-local exit have stable Direct and Exit ABI families in
 their defining module. The Exit family uses an internal tagged `Outcome` and
 propagates it before evaluating the next source expression. Function values
 stored in ADTs or class dictionaries use matching representation families.
-This is currently an implementation guarantee visible in `--emit-go`, not new
-source syntax: user-declared operations remain tail-resumptive, and aborting
-operations are not yet accepted.
+This calling convention is an implementation guarantee visible in
+`--emit-go`. Abort-only operations select the Exit family; ordinary
+tail-resumptive handlers retain the Direct fast path where their context allows
+it.
 
 Ordinary stateless user-declared effects have durable evidence: returning a pure closure
 that captures an immutable Reader-style handler remains legal. There is no

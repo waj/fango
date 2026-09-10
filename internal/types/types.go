@@ -63,7 +63,11 @@ func FunctionControl(fn *TFun) Control {
 		out.Polymorphic = true
 	}
 	for _, label := range fn.Eff.Labels {
-		if SurfaceName(label.Name) != "IO" {
+		if label.Abort {
+			if out.Transport < Exit {
+				out.Transport = Exit
+			}
+		} else if SurfaceName(label.Name) != "IO" {
 			out.Polymorphic = true
 		}
 	}
@@ -121,6 +125,7 @@ type EffLabel struct {
 	Unique int
 	Name   string
 	Args   []Type
+	Abort  bool // every operation in this (uniform-discipline) effect aborts
 }
 
 func (r Row) Empty() bool { return len(r.Labels) == 0 && r.Tail == nil }
@@ -226,7 +231,7 @@ func substRigidRow(r Row, m map[int]Type) Row {
 		for j, a := range l.Args {
 			args[j] = SubstRigid(a, m)
 		}
-		labels[i] = EffLabel{Unique: l.Unique, Name: l.Name, Args: args}
+		labels[i] = EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort}
 	}
 	var tail Type
 	if r.Tail != nil {
@@ -393,6 +398,7 @@ type EffectOp struct {
 	ResultType Type
 	LocalVars  []*TVar
 	Builtin    bool
+	Abort      bool
 	Native     *NativeInfo
 	// BorrowsEvidence says the operation result retains the current scoped
 	// evidence activation. It is reserved for compiler-owned resource APIs.

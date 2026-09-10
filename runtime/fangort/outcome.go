@@ -6,11 +6,15 @@ package fangort
 // descriptor. No generated consumer uses a failed type assertion as a type
 // check.
 type ExitRequest struct {
-	Target    int
+	Target    *ExitTarget
 	Effect    int
 	Operation int
 	Payload   []any
 }
+
+// ExitTarget is deliberately non-zero-sized. A fresh pointer is one handler
+// activation identity, including recursive activations of the same handler.
+type ExitTarget struct{ Marker byte }
 
 // Outcome is the Exit calling convention. Exit == nil denotes normal
 // completion and Value contains the result. A non-nil Exit abandons Value.

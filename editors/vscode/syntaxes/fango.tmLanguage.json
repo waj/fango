@@ -409,7 +409,7 @@
         },
         {
           "name": "keyword.other.fango",
-          "match": "\\b(module|import|as|exposing|type|effect|native|infixl|infixr|infix|class|instance|deriver|deriving)\\b"
+          "match": "\\b(module|import|as|exposing|type|effect|abort|native|infixl|infixr|infix|class|instance|deriver|deriving)\\b"
         },
         {
           "name": "invalid.deprecated.reserved.fango",

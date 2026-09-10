@@ -1,5 +1,5 @@
 effect Console
-    print : String ->{Console} ()
+    abort print : String ->{Console} ()
 
 handle program of
     print text -> resume ()

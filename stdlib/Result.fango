@@ -1,0 +1,15 @@
+module Result exposing (Result(..), map, mapError, andThen, withDefault)
+
+type Result error value = Err error | Ok value deriving (Eq, Ord, Show)
+
+map transform (Err error) = Err error
+map transform (Ok value) = Ok (transform value)
+
+mapError transform (Err error) = Err (transform error)
+mapError transform (Ok value) = Ok value
+
+andThen transform (Err error) = Err error
+andThen transform (Ok value) = transform value
+
+withDefault fallback (Err _) = fallback
+withDefault _ (Ok value) = value

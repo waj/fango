@@ -142,7 +142,7 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		for i, p := range e.Payload {
 			payload[i] = slot(p)
 		}
-		return &core.ControlExit{Target: e.Target, Op: e.Op, Payload: payload, Ty: e.Ty}, hoists
+		return &core.ControlExit{Effect: e.Effect, Op: e.Op, Payload: payload, Ty: e.Ty}, hoists
 	case *core.Neg:
 		return &core.Neg{Operand: slot(e.Operand), Ty: e.Ty}, hoists
 	case *core.NativeCall:

@@ -80,23 +80,32 @@ while effects in the lambda body belong to the returned arrow.
 
 Effect rows contain distinct, nominal effect labels and an optional open tail.
 Row solving supports inclusion and union for nested and higher-order calls.
-Effect declarations may be parameterized, but runtime operation-local/result
-polymorphism is not yet supported. A saturated operation application performs;
-a partial application is a pure closure.
+Effect declarations may be parameterized. General runtime operation-local
+polymorphism is not supported; the one exception is an abort-only operation's
+single caller-selected result variable, which cannot occur in its payload. A
+saturated operation application performs; a partial application is a pure
+closure.
 
-Implemented custom handlers are complete, one-shot, and tail-resumptive. Every
-operation clause must end in exactly one tail `resume` on every reachable path;
-aborting clauses and escaping or general continuations are rejected. Each
-operation clause and its resume occurrences carry a compiler-only owner
+Custom effects have one uniform operation discipline per declaration. A
+resumptive effect remains complete, one-shot, and tail-resumptive: every
+operation clause ends in exactly one tail `resume` on every normally completing
+path. An abort-only effect declares every operation with `abort`; its clauses
+have no resume binding and return the handler answer directly. A saturated
+abort is an explicit exceptional terminal, so it can discharge a pending tail
+resume obligation on that path. Escaping and general continuations remain
+rejected.
+
+Each resumptive clause and its resume occurrences carry a compiler-only owner
 identity. Source checking proves that the owner's resume occurs only as the
 terminal action of every normal path, including equation groups, nested
 handler returns, lambdas, operands, and staged results. Typed Core preserves
 the owner in `ResumeTail`, and Core lint independently re-establishes the same
-control-flow and type invariant after elaboration transforms. The
-optional `return` clause transforms normal completion. Handling builtin `IO`
-is currently rejected. These restrictions let both backends implement handlers
-with stack-local evidence and direct returns, without goroutines, channels,
-panic sentinels, or continuation objects.
+control-flow and type invariant after elaboration transforms. Abort operations
+instead elaborate to typed `ControlExit` terminals. The optional `return`
+clause transforms normal completion only; an abort answer bypasses it. Handling
+builtin `IO` is currently rejected. These restrictions let both backends use
+stack-local evidence and direct returns or tagged exits, without goroutines,
+channels, panic sentinels, or continuation objects.
 
 A handler may own one parameterized state cell. The initial expression runs
 once before evidence installation. Operation and return clauses receive an
@@ -116,6 +125,16 @@ caller). This distinction is load-bearing for nested handlers of the same
 effect: operation selection remains nominal, while capture and availability
 checks distinguish the two lexical capabilities. Scope and capture identities
 are erased by both runtime backends; they are not liveness flags.
+
+Abort evidence additionally carries a fresh runtime target token. Performing
+an abort evaluates its payload left to right and returns an `ExitRequest`
+without running the clause at the perform site. Intervening computations
+propagate the request until the matching target boundary; that boundary
+restores definition-site outer evidence and evaluates the clause. Foreign exits
+continue outward, and exits from a clause or return transformation are never
+routed back into the same activation. Target tokens are pointers to a
+non-zero-sized runtime value, so recursive activations of the same nominal
+effect remain distinct.
 
 Capture summaries are separate from effect rows. Each worker parameter and
 caller-supplied evidence parameter binds a capture variable, and a fixed-point
@@ -494,9 +513,11 @@ expanded before Core exists, so prefix elaboration cannot re-enter the
 evaluator and needs no reentrancy guard.
 
 Reproducibility is enforced rather than assumed. Compile-time code must type
-with an empty effect row, so "no IO during compilation" follows from the
-effect system. Beyond purity, the interpreter runs splices in a restricted
-mode: natives carry a compile-time-safe flag. Seeded `Random` transitions are
+with an empty residual effect row; a locally handled abort-only effect is
+therefore allowed, while unhandled effects remain prohibited. Thus "no IO
+during compilation" follows from the effect system. Beyond purity, the
+interpreter runs splices in a restricted mode: natives carry a compile-time-safe
+flag. Seeded `Random` transitions are
 pure over handler-local state and are safe at compile time; system entropy is
 not. User Go sidecars are unavailable for the reason they always were: the
 interpreter cannot load Go. A step budget bounds evaluation. Together these
@@ -653,14 +674,16 @@ consumer does not change the dependency's generated package.
 Direct workers and operation evidence retain the plain-result ABI, including
 implicit Unit results. Exit workers and evidence return
 `fangort.Outcome[A]`, whose nil request denotes `Normal(A)` and whose request
-contains a lexical target, checked effect/operation descriptor identities, and
-an erased payload checked before boxing. Propagation constructs an Outcome at
+contains a dynamically unique lexical target, checked effect/operation
+descriptor identities, and an erased payload checked before boxing.
+Propagation constructs an Outcome at
 the caller's result type; it never drops an exit, converts it to a panic, or
 uses a failed host type assertion as a language type check. The interpreter
 implements the same outcome propagation with a dedicated language-level
-`ExitRequest` value kept separate from evaluator errors. No current source
-construct produces an aborting exit; the private Core producer and ABI are the
-foundation for abort-only effects.
+`ExitRequest` value kept separate from evaluator errors. Abort-only source
+operations are the checked producer of this protocol. When Exit code calls
+Direct evidence, code generation builds a typed eta record whose operation
+fields wrap normal results; conversion in the other direction is forbidden.
 
 The backend emits one Go package per Fango module beneath a single generated Go
 module. The entry module is the root `package main`; local and bundled

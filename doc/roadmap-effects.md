@@ -158,176 +158,18 @@ prefix elaboration or an interpreter-only convenience path.
 
 | Milestone | Depends on | Shippable result |
 | --- | --- | --- |
-| E4: abort-only effects and Result | Implemented Direct/Exit ABI | Failure handlers; integrate implemented State for State/failure examples |
-| E5: synchronous cleanup scopes | Scoped capture Core, E4 | `Scope.bracket` / `finally`, generic cleanup across exits |
+| E5: synchronous cleanup scopes | Scoped capture Core, implemented abort exits | `Scope.bracket` / `finally`, generic cleanup across exits |
 | E6: resource APIs and native error boundaries | E5 | Useful file/resource examples and structured IO failures |
 | E7: selective execution machines | Implemented control ABI, E5 | Internal one-shot suspension and cleanup frames |
 | E8: owned iterators and scoped non-tail handlers | Scoped capture Core, E7 | Pull traversal and checked non-tail resumption |
 | E9: structured async and cancellation | E6, E8 | Cooperative tasks, cancellation, nursery cleanup |
 
 The shipped control-aware ABI preserves the tail-resume and scoped-state direct
-fast path. E4–E6 form a useful release with state, exceptions, and resources but
-no general continuation objects.
+fast path. E5–E6 extend the implemented state and exception foundation with
+resources but no general continuation objects.
 E7–E9 are explicitly deferred until a concrete suspension consumer warrants
 their compiler and type-system cost. No milestone requires implementing the
 whole table at once.
-
-## E4. Abort-only effects, Result, and state/failure composition
-
-### Deliverable and source discipline
-
-Add exception-like failure without saving continuations (P). Statically declare
-that these operations do not resume (S), rather than interpreting any missing
-resume in an existing resumptive clause as an implicit abort.
-
-The operation-level `abort` marker below is a proposed spelling, not current
-syntax. A declaration marker is preferred to guessing discipline from whichever
-handler happens to be installed; it stabilizes checking and exception ordering.
-Finalize its spelling before changing the parser/editor grammar.
-
-```fango
-effect Fail error
-    abort fail : error -> a
-
-type Result error value = Err error | Ok value
-
-attempt action =
-    handle action() of
-        fail error -> Err error
-        return value -> Ok value
-
-readPositive text =
-    case parseInt text of
-        Nothing -> fail "expected an integer"
-        Just n -> if n > 0 then n else fail "expected a positive integer"
-
-main() =
-    result = attempt (\_ -> readPositive "-3")
-    case result of
-        Ok n -> print n
-        Err message -> print message
-```
-
-`parseInt` is a proposed library consumer. The example's result-polymorphic
-`a` requires a narrow extension: an abort-only operation may have a universally
-quantified result variable because it never produces a normal operation
-result. Do not use this to claim arbitrary operation-local polymorphism works.
-No generic method returning a caller-selected `a` is needed in the evidence
-slot: the operation emits an exit payload and its normal path is unreachable.
-Check that such result variables do not occur in payload arguments or hidden
-constraints that this implementation cannot represent. General polymorphic
-operations have a separate decision in section 7.
-
-An abort clause has no resume binding. Reject any `resume` occurrence as
-`RESUME IN ABORT CLAUSE`. Existing resumptive clauses still require a tail
-resume on every normal path; a call to an abort-only effect can terminate an
-exceptional path and discharge its pending obligation. In particular:
-
-```text
-if valid then resume answer else fail error
-```
-
-is legal once its failure is known to be abort-only. A branch returning an
-ordinary value instead of resuming is still illegal. Extend the tail-resume judgment with
-explicit exit terminals, not a permissive "may call an effect" exception.
-
-### Exit routing and ordering
-
-An abort operation must evaluate arguments, identify its target activation from
-evidence, and return an ExitRequest. Do not execute the target clause at the
-perform site. Propagate the request until that target's boundary, finalizing
-intervening scopes once E5 is available. Then invoke the abort clause with its
-outer evidence and payload.
-
-```text
-handleBoundary(h, body):
-    outcome = run body with h installed
-    Normal(value)          -> run h.return(value) in outer evidence
-    Exit(target=h, op, arg) -> run h.clause[op](arg) in outer evidence
-    Exit(target=other, ...) -> propagate unchanged
-```
-
-If the clause itself exits, propagate its new request; do not route it back to
-the same clause. If the return transformation exits, do not rerun it. Handler
-activation identity is essential when recursive invocations install identical
-effect labels. Use an addressable non-zero-sized token or another explicit
-unique-activation representation; distinct zero-sized Go pointers are not a
-sound identity scheme.
-
-Typed Go sketch for one statically resolved failure target:
-
-```go
-func checked(x int64, fail FailEvidence) Outcome[int64] {
-    if x < 0 {
-        return exitInt(fail.Target, FailOperation, "negative input")
-    }
-    return normalInt(x)
-}
-
-func calculate(x int64, fail FailEvidence) Outcome[int64] {
-    r := checked(x, fail)
-    if r.IsExit { return r }
-    return normalInt(r.Value + 1)
-}
-```
-
-The `exitInt` helper constructs a checked payload; it does not call the failure
-clause. Normal paths need no continuation allocation. Consider struct layouts
-that keep normal results unboxed and measure whether failure payloads allocate.
-
-### State and transaction examples
-
-Using the implemented State runner, implement a parser carrying its cursor in
-State and failing with a structured parse error. Use nested handlers to make
-state visibility explicit:
-
-```text
-runState initial (attempt action)
-    -> StateResult<S, Result<E, A>>
-    -- final state remains observable after a caught failure
-
-attempt (runState initial action)
-    -> Result<E, StateResult<S, A>>
-    -- failure discards the local state handler's normal result
-```
-
-These lines describe compositions, not literal Fango application syntax.
-The second composition does not undo outer state changes or IO. A transaction
-over an immutable state value can run against a private trial value and commit
-only on success:
-
-```text
-trial := parent.current
-outcome := runAttemptWithPrivateState(trial, parser)
-on success: parent.current := outcome.finalState
-on failure: leave parent unchanged
-```
-
-An alternative parser runs as a fresh computation from the original cursor.
-This permits ordinary backtracking without resuming one continuation twice.
-Mutable native maps require copying/undo logs; sharing a map pointer is not a
-transaction. External writes require domain-specific compensation.
-
-### Implementation and acceptance
-
-- Add operation discipline to declarations, resolution, imported metadata,
-  inference, Core, dump formats, and generated evidence types.
-- Add `Result` to the stdlib here or as a preceding independent library change;
-  do not make a runtime Outcome implementation leak into its public definition.
-- Preserve nominal effect identity, handler coverage, exhaustive equation
-  groups, and operation argument evaluation before the exit is raised.
-- Test non-Unit results, generic handled answers, narrow polymorphic abort
-  results, nested same-label recursion, failure in clauses/return groups,
-  and unrelated residual effects.
-- Test State/failure handler ordering with observable final states. Add a
-  cursor parser with an alternative that intentionally fails after consuming
-  input, then succeeds from the original position.
-- Top-level unhandled custom effects remain compile-time errors. Choose an
-  explicit IO/CLI runner policy for designated application failures; do not
-  silently install default handlers for all Fail instances.
-- Extend staging deliberately: a handled pure Fail may be evaluated at compile
-  time, while unhandled effects and native access remain prohibited. Keep
-  `Meta.fail` diagnostic attribution and rollback behavior intact.
 
 ## E5. Synchronous cleanup scopes without new cleanup syntax
 
@@ -590,7 +432,8 @@ worker process infrastructure is not a suspended Fango continuation engine.
 
 Build the internal suspension backend with private Core fixtures first. Do not
 enable source-level general resume merely because the machine can run it.
-E8 supplies its static ownership contract. State and E4–E6 remain useful without E7.
+E8 supplies its static ownership contract. State, abort-only effects, and E5–E6
+remain useful without E7.
 
 Use an ANF-to-control-flow lowering, optionally expressed through selective CPS
 internally, followed by defunctionalization. Emitting chains of Go closures
@@ -1017,9 +860,9 @@ numbers from another language's native backend as a Fango performance promise.
 | Reader/configuration, direct effect translation | Existing proved direct path |
 | State, Writer, per-run deterministic Random | Implemented, with scoped capture checking |
 | Local memoization | State is implemented; cache pure computations or explicitly define skipped-effect semantics |
-| Failure, early return, parser alternatives | E4; fresh attempts, no continuation cloning |
+| Failure, early return, parser alternatives | Implemented; fresh attempts, no continuation cloning |
 | Scoped files, locks, temporary resources | E5 mechanism, E6 concrete APIs |
-| State rollback | E4 with private immutable state; not automatic external rollback |
+| State rollback | Implemented with private immutable state; not automatic external rollback |
 | Push generators | Direct tail handlers; no inverted control required |
 | Pull generators and early consumer exit | E7/E8; owned frames and deterministic disposal |
 | Non-tail one-shot continuation results | E8b; explicit scoped discipline, no raw escape |
@@ -1040,10 +883,6 @@ attempts. Do not describe all nondeterministic algorithms as impossible.
 
 These are bounded open decisions for their named milestones.
 
-- **E4 abort spelling and result polymorphism:** freeze operation discipline in
-  declaration metadata. The special abort-result variable is not a general
-  generic-operation implementation. Keep mixed abort/resume handlers outside
-  the first exception release.
 - **E5 completion envelope:** settle how cleanup errors are reported alongside
   arbitrary failure payloads and how cleanup failure supersedes a non-error
   exit. Choose public observation APIs before promising a library contract.

@@ -357,6 +357,7 @@ type HandlerClauseInfo struct {
 
 type HandlerInfo struct {
 	Effect     types.EffLabel
+	Residual   types.Row
 	Scope      types.ScopeID
 	Scoped     bool
 	Result     types.Type
@@ -701,6 +702,15 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 	}
 	seen := map[string]bool{}
 	var errs []diag.Error
+	if len(ed.Ops) > 1 {
+		discipline := ed.Ops[0].Abort
+		for _, op := range ed.Ops[1:] {
+			if op.Abort != discipline {
+				errs = append(errs, diag.Errorf(op.NameSpan, "MIXED EFFECT DISCIPLINE",
+					"Effect `%s` mixes abort-only and resumptive operations; the first abort release requires one discipline per effect.", ed.Name))
+			}
+		}
+	}
 	for _, op := range ed.Ops {
 		if seen[op.Name] || (batch && ck.Env.Has(op.Name)) {
 			errs = append(errs, diag.Errorf(op.NameSpan, "MULTIPLE DEFINITIONS",
@@ -742,7 +752,7 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 			arrow.Eff = types.Row{Tail: rowVars[i]}
 		}
 		inner := arrows[len(arrows)-1]
-		inner.Eff.Labels = []types.EffLabel{{Unique: info.Unique, Name: info.Name, Args: labelArgs}}
+		inner.Eff.Labels = []types.EffLabel{{Unique: info.Unique, Name: info.Name, Args: labelArgs, Abort: op.Abort}}
 		vars := append([]*types.TVar(nil), info.Params...)
 		vars = append(vars, scope.Minted()...)
 		vars = append(vars, rowVars...)
@@ -752,8 +762,23 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 			params[i] = a.Arg
 		}
 		local := append([]*types.TVar(nil), scope.Minted()...)
+		if op.Abort {
+			if op.Native != nil {
+				errs = append(errs, diag.Errorf(op.NameSpan, "ABORT NATIVE", "Abort-only operation `%s` must be handled in fango and cannot be native.", op.Name))
+			}
+			payloadUsesResult := false
+			if len(local) == 1 {
+				for _, p := range params {
+					payloadUsesResult = payloadUsesResult || containsTypeVar(p, local[0].ID)
+				}
+			}
+			if len(local) > 1 || len(local) == 1 && (!types.Equal(inner.Ret, local[0]) || payloadUsesResult) {
+				errs = append(errs, diag.Errorf(op.NameSpan, "ABORT RESULT TYPE",
+					"Abort-only operation `%s` may introduce exactly one operation-local type variable, used as its whole result type.", op.Name))
+			}
+		}
 		meta := &types.EffectOp{Owner: info, Index: len(info.Ops), Name: op.Name, Scheme: sch,
-			Arity: len(arrows), ParamTypes: params, ResultType: arrows[len(arrows)-1].Ret, LocalVars: local}
+			Arity: len(arrows), ParamTypes: params, ResultType: arrows[len(arrows)-1].Ret, LocalVars: local, Abort: op.Abort}
 		if op.Native != nil {
 			n := &types.NativeInfo{Name: op.Name, Module: symbolModule(op.Name), Scheme: sch, Arity: len(arrows), Template: op.Native.Template, Effect: info}
 			meta.Native = n
@@ -764,6 +789,31 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 		ck.Env.Bind(op.Name, sch)
 	}
 	return errs
+}
+
+func containsTypeVar(t types.Type, id int) bool {
+	switch t := t.(type) {
+	case *types.TVar:
+		return t.ID == id
+	case *types.TCon:
+		for _, arg := range t.Args {
+			if containsTypeVar(arg, id) {
+				return true
+			}
+		}
+	case *types.TFun:
+		if containsTypeVar(t.Arg, id) || containsTypeVar(t.Ret, id) {
+			return true
+		}
+		for _, label := range t.Eff.Labels {
+			for _, arg := range label.Args {
+				if containsTypeVar(arg, id) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // TypeDecl checks and installs one type declaration — the REPL's entry
@@ -1160,6 +1210,7 @@ type generator struct {
 	resumeType    types.Type
 	resumeState   types.Type
 	resumeID      types.ResumeID
+	abortClause   bool
 	preds         []predObligation
 	records       []*recordObligation
 	patternPins   *blockScope
@@ -1234,7 +1285,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			} else {
 				ty = g.instantiateAt(scheme, e.Sp, e.Name)
 			}
-			if op := g.ck.Operations[e.Name]; op != nil && len(op.LocalVars) > 0 && op.Native == nil && !g.isDefaultPrint(op) {
+			if op := g.ck.Operations[e.Name]; op != nil && len(op.LocalVars) > 0 && !op.Abort && op.Native == nil && !g.isDefaultPrint(op) {
 				g.errs = append(g.errs, diag.Errorf(e.Sp, "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has operation-local polymorphism that cannot be used at runtime until checkpoint 3.", op.Name))
 			}
 		}
@@ -1329,7 +1380,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			g.cs = append(g.cs, Constraint{Left: last.Eff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
 			ty = result
 			g.ck.OpCalls[e] = op
-			if len(op.LocalVars) > 0 && op.Native == nil && !g.isDefaultPrint(op) {
+			if len(op.LocalVars) > 0 && !op.Abort && op.Native == nil && !g.isDefaultPrint(op) {
 				g.errs = append(g.errs, diag.Errorf(e.Span(), "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has result polymorphism that is staged until checkpoint 3.", op.Name))
 			}
 			break
@@ -1399,7 +1450,11 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		ty = g.handle(e)
 	case *ast.Resume:
 		if g.resumeType == nil {
-			g.errs = append(g.errs, diag.Errorf(e.Sp, "RESUME OUTSIDE A HANDLER", "`resume` is only available inside an operation clause."))
+			if g.abortClause {
+				g.errs = append(g.errs, diag.Errorf(e.Sp, "RESUME IN ABORT CLAUSE", "An abort-only operation clause cannot resume."))
+			} else {
+				g.errs = append(g.errs, diag.Errorf(e.Sp, "RESUME OUTSIDE A HANDLER", "`resume` is only available inside an operation clause."))
+			}
 			ty = g.ck.Sup.FreshVar(types.General)
 		} else {
 			if e.NextState != nil {
@@ -1503,7 +1558,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	for i := range labelArgs {
 		labelArgs[i] = g.ck.Sup.FreshVar(types.General)
 	}
-	label := types.EffLabel{Unique: first.Owner.Unique, Name: first.Owner.Name, Args: labelArgs}
+	label := types.EffLabel{Unique: first.Owner.Unique, Name: first.Owner.Name, Args: labelArgs, Abort: first.Abort}
 	savedAmbient := g.ambient
 	var stateTy types.Type
 	if e.State != nil {
@@ -1512,13 +1567,11 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	g.ambient = types.Row{Labels: []types.EffLabel{label}, Tail: residualVar}
 	bodyTy := g.expr(e.Body)
 	g.ambient = residual
-	info := &HandlerInfo{Effect: label, Scope: g.ck.Sup.FreshScope(), Scoped: first.Owner.Scoped || e.State != nil, Result: result, BodyResult: bodyTy, StateType: stateTy}
+	info := &HandlerInfo{Effect: label, Residual: residual, Scope: g.ck.Sup.FreshScope(), Scoped: first.Owner.Scoped || e.State != nil, Result: result, BodyResult: bodyTy, StateType: stateTy}
 	g.ck.ScopeSpans[info.Scope] = e.Sp
 	seen := map[string]bool{}
 	for i := range e.Clauses {
 		cl := &e.Clauses[i]
-		g.ck.ResumeGen++
-		resumeID := g.ck.ResumeGen
 		op := g.ck.Operations[cl.Op]
 		if op == nil {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "UNKNOWN OPERATION", "I don't know an operation named `%s`.", cl.Op))
@@ -1528,12 +1581,17 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "MIXED HANDLER EFFECTS", "All clauses in a handler must belong to `%s`.", first.Owner.Name))
 			continue
 		}
-		if len(op.LocalVars) > 0 && op.Native == nil && !g.isDefaultPrint(op) {
+		if len(op.LocalVars) > 0 && !op.Abort && op.Native == nil && !g.isDefaultPrint(op) {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has operation-local polymorphism that cannot be used at runtime until checkpoint 3.", op.Name))
 		}
 		if seen[op.Name] {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "DUPLICATE HANDLER CLAUSE", "The operation `%s` is handled more than once.", op.Name))
 			continue
+		}
+		var resumeID types.ResumeID
+		if !op.Abort {
+			g.ck.ResumeGen++
+			resumeID = g.ck.ResumeGen
 		}
 		seen[op.Name] = true
 		inst := g.instantiate(op.Scheme)
@@ -1582,19 +1640,29 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			oldResume := g.resumeType
 			oldResumeID := g.resumeID
 			oldResumeState := g.resumeState
-			g.resumeType = &types.TFun{Arg: opResult, Eff: residual, Ret: result}
+			oldAbortClause := g.abortClause
+			if op.Abort {
+				g.resumeType = nil
+				g.abortClause = true
+			} else {
+				g.resumeType = &types.TFun{Arg: opResult, Eff: residual, Ret: result}
+				g.abortClause = false
+			}
 			g.resumeID = resumeID
 			g.resumeState = stateTy
 			clTy := g.expr(eq.Body)
 			g.resumeType = oldResume
 			g.resumeID = oldResumeID
 			g.resumeState = oldResumeState
+			g.abortClause = oldAbortClause
 			g.locals = scope.parent
 			g.cs = append(g.cs, Constraint{Left: clTy, Right: result, Span: eq.Body.Span(), Why: Why{Kind: WhyCaseBranches}})
-			if failure := g.tailResume(resumeID, eq.Body, true); failure != nil {
-				pos := cl.OpSpan.StartPos()
-				g.errs = append(g.errs, diag.Errorf(failure.span, failure.kind,
-					"%s The owning operation clause starts at %d:%d.", failure.message, pos.Line, pos.Col))
+			if !op.Abort {
+				if failure := g.tailResume(resumeID, eq.Body, true); failure != nil {
+					pos := cl.OpSpan.StartPos()
+					g.errs = append(g.errs, diag.Errorf(failure.span, failure.kind,
+						"%s The owning operation clause starts at %d:%d.", failure.message, pos.Line, pos.Col))
+				}
 			}
 		}
 		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, ParamTypes: paramTys, OpResult: opResult, ResumeID: resumeID})
@@ -1662,6 +1730,16 @@ type resumeFailure struct {
 // surrounding identity and therefore cannot hide or duplicate its resume.
 func (g *generator) tailResume(owner types.ResumeID, e ast.Expr, tail bool) *resumeFailure {
 	if a, ok := e.(*ast.App); ok {
+		if op := g.ck.OpCalls[a]; op != nil && op.Abort {
+			// A saturated abort operation is an explicit exceptional terminal.
+			// Its evaluated payload must still not contain this clause's resume.
+			for _, arg := range appArgs(a) {
+				if failure := g.tailResume(owner, arg, false); failure != nil {
+					return failure
+				}
+			}
+			return nil
+		}
 		if r, yes := a.Fn.(*ast.Resume); yes && g.ck.ResumeOwners[r] == owner {
 			if failure := g.tailResume(owner, a.Arg, false); failure != nil {
 				return failure
@@ -1716,6 +1794,9 @@ func (g *generator) tailResume(owner types.ResumeID, e ast.Expr, tail bool) *res
 			}
 			if failure := nontail(q); failure != nil {
 				return failure
+			}
+			if g.abortTerminal(q) {
+				return nil
 			}
 		}
 		return g.tailResume(owner, x.Result, tail)
@@ -1831,6 +1912,11 @@ func (g *generator) tailResume(owner types.ResumeID, e ast.Expr, tail bool) *res
 		return &resumeFailure{"MISSING RESUME", "Every operation-clause path must end with exactly one call to `resume`.", e.Span()}
 	}
 	return nil
+}
+
+func (g *generator) abortTerminal(e ast.Expr) bool {
+	a, ok := e.(*ast.App)
+	return ok && g.ck.OpCalls[a] != nil && g.ck.OpCalls[a].Abort
 }
 
 func (g *generator) containsResume(owner types.ResumeID, e ast.Expr) bool {
