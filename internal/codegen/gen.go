@@ -843,6 +843,19 @@ func (g *gen) retStmtsFor(e core.Expr, unitResult bool) []goast.Stmt {
 	}
 }
 
+// keepUnused blanks a binding the body never reads. Go rejects an unused
+// local, and a handler's return transformation is free to ignore the handled
+// value or the final state.
+func (g *gen) keepUnused(body core.Expr, name string, ty types.Type) []goast.Stmt {
+	if name == "_" || name == "()" {
+		return nil
+	}
+	if !g.isUnit(ty) && core.Mentions(body, name) {
+		return nil
+	}
+	return []goast.Stmt{assignBlank(ident(mangleValue(name)))}
+}
+
 // unitValueRetStmts emits a Unit expression for a Go closure that represents
 // Unit as fangort.Unit. Ordinary Direct workers erase Unit results and use a
 // bare return, but expression closures must return the singleton value.
@@ -1517,16 +1530,26 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 			&goast.IfStmt{Cond: &goast.BinaryExpr{X: selector(outcome, "Exit"), Op: gotoken.NEQ, Y: ident("nil")}, Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, selector(outcome, "Exit")))}}})
 		if p != "_" && p != "()" {
 			stmts = append(stmts, varDeclStmt(mangleValue(p), g.goType(e.Body.Type()), selector(outcome, "Value")))
+			stmts = append(stmts, g.keepUnused(e.Return.Body, p, e.Body.Type())...)
 		}
 	} else if p == "_" || p == "()" {
 		stmts = append(stmts, assignBlank(body))
 	} else {
 		stmts = append(stmts, varDeclStmt(mangleValue(p), g.goType(e.Body.Type()), body))
+		stmts = append(stmts, g.keepUnused(e.Return.Body, p, e.Body.Type())...)
 	}
 	if e.State != nil {
 		stmts = append(stmts, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), ident(stateCell)))
+		stmts = append(stmts, g.keepUnused(e.Return.Body, e.State.Name, e.State.Ty)...)
 	}
-	stmts = append(stmts, g.retStmtsFor(e.Return.Body, g.isUnit(e.Ty))...)
+	// The closure declares fangort.Unit, so a Unit body returns the
+	// singleton; only a worker whose Go signature erases the result may
+	// return bare.
+	if g.control != types.Exit && g.isUnit(e.Ty) {
+		stmts = append(stmts, g.unitValueRetStmts(e.Return.Body)...)
+	} else {
+		stmts = append(stmts, g.retStmtsFor(e.Return.Body, g.isUnit(e.Ty))...)
+	}
 	result := g.goType(e.Ty)
 	if g.control == types.Exit {
 		result = g.outcomeType(e.Ty)
@@ -1626,15 +1649,18 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 	} else {
 		if p := e.Return.Param; p != "_" && p != "()" {
 			stmts = append(stmts, varDeclStmt(mangleValue(p), g.goType(e.Body.Type()), &goast.SelectorExpr{X: ident(outcomeName), Sel: ident("Value")}))
-			if g.isUnit(e.Body.Type()) || !core.Mentions(e.Return.Body, p) {
-				stmts = append(stmts, assignBlank(ident(mangleValue(p))))
-			}
+			stmts = append(stmts, g.keepUnused(e.Return.Body, p, e.Body.Type())...)
 		}
 		if e.State != nil {
 			stmts = append(stmts, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), ident(stateCell)))
+			stmts = append(stmts, g.keepUnused(e.Return.Body, e.State.Name, e.State.Ty)...)
 		}
 		g.control, g.resultType = overall, e.Ty
-		stmts = append(stmts, g.retStmtsFor(e.Return.Body, g.isUnit(e.Ty))...)
+		if overall == types.Direct && g.isUnit(e.Ty) {
+			stmts = append(stmts, g.unitValueRetStmts(e.Return.Body)...)
+		} else {
+			stmts = append(stmts, g.retStmtsFor(e.Return.Body, g.isUnit(e.Ty))...)
+		}
 		g.control, g.resultType = oldControl, oldResult
 	}
 	result := g.goType(e.Ty)

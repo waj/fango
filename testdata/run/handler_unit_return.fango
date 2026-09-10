@@ -1,0 +1,40 @@
+-- Return transformations that produce Unit, and that ignore the handled
+-- value or the final state. The handler's Go closure declares fangort.Unit,
+-- so its body must return the singleton rather than the bare return an
+-- ordinary Direct worker uses, and bindings the transformation never reads
+-- have to stay legal Go.
+effect Ask
+    ask : () -> String
+
+effect Fail err
+    abort fail : err -> a
+
+effect Counter
+    step : () -> Int
+
+answering action =
+    handle action() of
+        ask () -> resume "yes"
+        return _ -> print "answered"
+
+ignoring action =
+    handle action() of
+        ask () -> resume "no"
+        return unused -> 5
+
+rescuing action handler =
+    handle action() of
+        fail err -> handler err
+        return _ -> ()
+
+counting action =
+    handle action() with count = 0 of
+        step () -> resume count with count + 1
+        return _ -> print "counted"
+
+main() =
+    answering (\_ -> print ("asked " ++ ask()))
+    print (ignoring (\_ -> ask()))
+    rescuing (\_ -> fail "stopped") (\err -> print ("rescued " ++ err))
+    rescuing (\_ -> print "quiet") (\err -> print ("rescued " ++ err))
+    counting (\_ -> print (step() + step()))

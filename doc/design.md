@@ -702,8 +702,10 @@ Unicode-scalar Go `rune`, and `Bool` is `bool`.
 Concrete Unit parameters and results at direct worker and operation boundaries
 are implicit in generated Go: the parameter is omitted and the result is a
 void result. Unit remains a represented, runtime zero-sized value at
-first-class-function, polymorphic, and ADT boundaries, where Go's type system
-requires a value; `fangort.Unit` and `fangort.UnitValue` give every generated
+first-class-function, polymorphic, ADT, and handler-closure boundaries, where
+Go's type system requires a value — a handler's return transformation yields
+the singleton rather than the void return its enclosing worker would use;
+`fangort.Unit` and `fangort.UnitValue` give every generated
 package the same nominal representation instead of repeating anonymous
 composite literals.
 Erasing a Unit argument never erases its evaluation: expression lowering keeps
