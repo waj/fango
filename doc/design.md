@@ -772,9 +772,10 @@ are unchanged.
 Direct/Exit outcomes, formatting and the generic native-host contract.
 Module-specific native logic lives in the owning stdlib sidecar instead. In
 particular, `IO.native.go` owns IO operations and line semantics, while
-`Random.native.go` supplies pure PRNG transition/range functions and entropy
-acquisition. The changing deterministic seed belongs to each Fango handler
-activation rather than to a native process global.
+`Random.native.go` supplies entropy acquisition. The pure PRNG transition and
+range functions are ordinary Fango code, and the changing deterministic seed
+belongs to each Fango handler activation rather than to a native process
+global.
 
 During ordinary interpretation, every call-form sidecar runs in one persistent
 native worker per sidecar set. Its protocol and execution loop are ordinary Go

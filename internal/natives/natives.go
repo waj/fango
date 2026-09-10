@@ -95,12 +95,6 @@ var Table = func() map[string]Spec {
 	t["IO.lineEnding"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return lineEnding(args[0].(string)), nil
 	}}
-	t["Random.nextState"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
-		return stdlib.NextState(args[0].(int64)), nil
-	}}
-	t["Random.valueAt"] = Spec{Arity: 3, Eval: func(_ *Runtime, args []any) (any, error) {
-		return stdlib.ValueAt(args[0].(int64), args[1].(int64), args[2].(int64)), nil
-	}}
 	t["Random.entropySeed"] = Spec{Arity: 1, Eval: func(_ *Runtime, _ []any) (any, error) {
 		return stdlib.EntropySeed(), nil
 	}}

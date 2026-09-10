@@ -104,27 +104,7 @@ func TestStringNatives(t *testing.T) {
 	}
 }
 
-func TestRandomNatives(t *testing.T) {
-	state := int64(7)
-	for range 1000 {
-		state = NextState(state)
-		if v := ValueAt(state, 1, 6); v < 1 || v > 6 {
-			t.Fatalf("ValueAt(state, 1, 6) = %d out of range", v)
-		}
-		if v := ValueAt(state, 6, 1); v < 1 || v > 6 {
-			t.Fatalf("ValueAt(state, 6, 1) = %d out of range", v)
-		}
-		if v := ValueAt(state, -3, 3); v < -3 || v > 3 {
-			t.Fatalf("ValueAt(state, -3, 3) = %d out of range", v)
-		}
-	}
-	if v := ValueAt(NextState(42), 5, 5); v != 5 {
-		t.Errorf("ValueAt(state, 5, 5) = %d", v)
-	}
-	if NextState(42) != NextState(42) {
-		t.Error("explicit transition is not deterministic")
-	}
-
+func TestEntropySeed(t *testing.T) {
 	// Two entropy seeds colliding is astronomically unlikely.
 	if EntropySeed() == EntropySeed() {
 		t.Error("EntropySeed returned the same seed twice")

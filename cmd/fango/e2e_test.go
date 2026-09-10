@@ -436,8 +436,8 @@ func TestProjectMaterializesBundledNativeSidecars(t *testing.T) {
 	}
 
 	files = emittedProject(t, filepath.Join("..", "..", "testdata", "run", "stdlib_random.fango"))
-	if src := generatedFile(t, files, "native/Random/native.go"); !bytes.Contains(src, []byte("func NextState")) || !bytes.Contains(src, []byte("func ValueAt")) || bytes.Contains(src, []byte("randomState")) {
-		t.Errorf("Random sidecar did not contain the pure state-transition implementation:\n%s", src)
+	if src := generatedFile(t, files, "native/Random/native.go"); !bytes.Contains(src, []byte("func EntropySeed")) {
+		t.Errorf("Random sidecar did not contain the entropy implementation:\n%s", src)
 	}
 }
 

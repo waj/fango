@@ -1,15 +1,23 @@
 module Random exposing (Random(..), int, runSeeded, runSystem)
 
 import IO exposing (IO)
+import Basics exposing (modBy)
 
 effect Random
     int : Int -> Int -> Int
 
 nextState : Int -> Int
-nextState = native
+nextState state = modBy 2147483648 (1103515245 * state + 12345)
 
 valueAt : Int -> Int -> Int -> Int
-valueAt = native
+valueAt state lo hi =
+    lower = if hi < lo then hi else lo
+    upper = if hi < lo then lo else hi
+    span = upper - lower + 1
+    if span == 0 then
+        lower + state
+    else
+        lower + modBy span state
 
 entropySeed : () ->{IO} Int
 entropySeed = native
