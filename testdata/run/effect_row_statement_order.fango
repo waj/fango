@@ -1,0 +1,50 @@
+-- An annotated body may call a `{e}` function before one that also performs
+-- `Exception ex`. The inclusion `{e} ⊆ ambient` waits for the label-bearing
+-- call instead of closing the surrounding row on statement order, so
+-- `bracket` acquires through a pure-row callback and still throws.
+effect Exception ex
+    abort throw : ex -> a
+
+finally : (() ->{Exception ex | e} a) -> (() ->{e} ()) ->{Exception ex | e} a
+finally action cleanup =
+    handle action() of
+        throw msg ->
+            cleanup()
+            throw msg
+        return result ->
+            cleanup()
+            result
+
+bracket : (() ->{e} a) -> (a ->{Exception ex | e} b) -> (a ->{e} ()) ->{Exception ex | e} b
+bracket acquire use release =
+    resource = acquire()
+    finally (\_ -> use resource) (\_ -> release resource)
+
+catch : (() ->{Exception ex | e} a) -> (ex ->{e} a) ->{e} a
+catch action handler =
+    handle action() of
+        throw msg -> handler msg
+        return result -> result
+
+open name =
+    print ("open " ++ name)
+    name
+
+close name = print ("close " ++ name)
+
+-- The surrounding row may also hold more than a callee's: `report` performs
+-- `IO` of its own while calling back into a `{Exception ex | e}` function.
+report : (() ->{Exception ex | e} ()) -> (() ->{e} ()) ->{IO, Exception ex | e} ()
+report risky plain =
+    plain()
+    risky()
+    print "reported"
+
+main() =
+    catch
+        (\_ ->
+            bracket (\_ -> open "one") (\name -> print ("use " ++ name)) close
+            report (\_ -> print "risky") (\_ -> print "plain")
+            bracket (\_ -> open "two") (\_ -> throw "boom") close
+            print "unreachable")
+        (\msg -> print ("caught " ++ msg))

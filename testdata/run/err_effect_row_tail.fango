@@ -1,0 +1,14 @@
+-- A rigid open row tail from an annotation cannot absorb an effect the
+-- annotation does not list: the handler clause runs in `{e}`, and `print`
+-- performs `IO`.
+effect Ask
+    ask : () -> String
+
+run : (() ->{Ask | e} a) ->{e} a
+run action =
+    handle action() of
+        ask () ->
+            print "asking"
+            resume "yes"
+
+main() = print (run (\_ -> ask()))

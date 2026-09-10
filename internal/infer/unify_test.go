@@ -59,3 +59,73 @@ func TestUnifyTConIdentityIsUnique(t *testing.T) {
 		t.Error("TCons with equal names but different uniques must not unify")
 	}
 }
+
+// Effect inclusion must not depend on the order the constraints arrive in. A
+// body that calls a `{e}` function before an `{A | e}` one produces `{e} ⊆ ρ`
+// first; solving that eagerly would bind ρ := e and leave nowhere to put `A`.
+func TestInclusionIntoOpenRowIsOrderIndependent(t *testing.T) {
+	label := types.EffLabel{Unique: 10, Name: "A"}
+	for _, name := range []string{"plain first", "labelled first"} {
+		t.Run(name, func(t *testing.T) {
+			sup := &types.Supply{}
+			b := types.NewBuiltins(sup)
+			e := sup.FreshRigid(types.RowVar)
+			ambient := types.Row{Tail: sup.FreshVar(types.RowVar)}
+			plain := Constraint{Left: types.Row{Tail: e}, Right: ambient, Why: Why{Kind: WhyCall}, Include: true}
+			labelled := Constraint{Left: types.Row{Labels: []types.EffLabel{label}, Tail: e}, Right: ambient, Why: Why{Kind: WhyCall}, Include: true}
+			cs := []Constraint{plain, labelled}
+			if name == "labelled first" {
+				cs = []Constraint{labelled, plain}
+			}
+			sub, _, errs := Solve(cs, nil, Subst{}, b, sup)
+			if len(errs) > 0 {
+				t.Fatalf("solve: %v", errs)
+			}
+			got := sub.Apply(ambient)
+			want := types.Row{Labels: []types.EffLabel{label}, Tail: e}
+			if !types.Equal(got, want) {
+				t.Fatalf("ambient row = %s, want %s", types.Show(got), types.Show(want))
+			}
+		})
+	}
+}
+
+// The surrounding row still closes onto the annotation's tail when nothing
+// else contributes a label, so a body that only performs `{e}` keeps it.
+func TestInclusionClosesOnAnnotationTailWhenUnconstrained(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	e := sup.FreshRigid(types.RowVar)
+	ambient := types.Row{Tail: sup.FreshVar(types.RowVar)}
+	c := Constraint{Left: types.Row{Tail: e}, Right: ambient, Why: Why{Kind: WhyCall}, Include: true}
+	sub, _, errs := Solve([]Constraint{c}, nil, Subst{}, b, sup)
+	if len(errs) > 0 {
+		t.Fatalf("solve: %v", errs)
+	}
+	if got := sub.Apply(ambient); !types.Equal(got, types.Row{Tail: e}) {
+		t.Fatalf("ambient row = %s, want the annotation tail", types.Show(got))
+	}
+}
+
+// An inclusion whose row has both labels and a rigid tail contributes its
+// labels immediately and its tail last, so a later `{IO}`-style call can
+// still widen the surrounding row.
+func TestInclusionWithLabelsLeavesRoomForMore(t *testing.T) {
+	note := types.EffLabel{Unique: 10, Name: "Note"}
+	io := types.EffLabel{Unique: 11, Name: "IO"}
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	e := sup.FreshRigid(types.RowVar)
+	ambient := types.Row{Tail: sup.FreshVar(types.RowVar)}
+	callee := Constraint{Left: types.Row{Labels: []types.EffLabel{note}, Tail: e}, Right: ambient, Why: Why{Kind: WhyCall}, Include: true}
+	printing := Constraint{Left: types.Row{Labels: []types.EffLabel{io}}, Right: ambient, Why: Why{Kind: WhyCall}, Include: true}
+	sub, _, errs := Solve([]Constraint{callee, printing}, nil, Subst{}, b, sup)
+	if len(errs) > 0 {
+		t.Fatalf("solve: %v", errs)
+	}
+	got := sub.Apply(ambient)
+	want := types.Row{Labels: []types.EffLabel{note, io}, Tail: e}
+	if !types.Equal(got, want) {
+		t.Fatalf("ambient row = %s, want %s", types.Show(got), types.Show(want))
+	}
+}

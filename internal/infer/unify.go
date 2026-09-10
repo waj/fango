@@ -134,10 +134,10 @@ func unify(a, b types.Type, sub Subst, bi *types.Builtins, sup *types.Supply) *m
 		if bv, ok := b.(*types.TVar); ok && bv.ID == av.ID {
 			return nil
 		}
-		return &mismatch{a: a, b: b, note: "a type variable from an annotation must stay fully general"}
+		return rigidMismatch(a, b, av)
 	}
-	if _, ok := b.(*types.TVar); ok {
-		return &mismatch{a: a, b: b, note: "a type variable from an annotation must stay fully general"}
+	if bv, ok := b.(*types.TVar); ok {
+		return rigidMismatch(a, b, bv)
 	}
 
 	switch a := a.(type) {
@@ -173,6 +173,17 @@ func unify(a, b types.Type, sub Subst, bi *types.Builtins, sup *types.Supply) *m
 	default:
 		panic(fmt.Sprintf("infer.unify: unhandled %T", a))
 	}
+}
+
+// rigidMismatch explains a failure to make the rigid annotation variable v
+// equal to something else. A rigid row tail gets its own story: whatever the
+// caller instantiates it with, the body may not add an effect to it.
+func rigidMismatch(a, b types.Type, v *types.TVar) *mismatch {
+	if v.Kind == types.RowVar {
+		return &mismatch{a: a, b: b, effect: true,
+			note: "an annotation's open row tail cannot absorb an effect the annotation does not list"}
+	}
+	return &mismatch{a: a, b: b, note: "a type variable from an annotation must stay fully general"}
 }
 
 // bindVar binds metavariable v to t, respecting kinds and the occurs check.

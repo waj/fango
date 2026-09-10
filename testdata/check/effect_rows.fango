@@ -10,3 +10,19 @@ map fn values =
         Cons x xs -> Cons (fn x) (map fn xs)
 
 type List a = Nil | Cons a (List a)
+
+effect Note
+    abort stop : String -> a
+
+-- Statement order must not decide whether the surrounding row can still take
+-- a label: both bodies call a `{e}` function and a `{Note | e}` one, and both
+-- infer the same row.
+plainFirst : (() ->{e} ()) -> (() ->{Note | e} ()) ->{Note | e} ()
+plainFirst plain risky =
+    plain()
+    risky()
+
+riskyFirst : (() ->{e} ()) -> (() ->{Note | e} ()) ->{Note | e} ()
+riskyFirst plain risky =
+    risky()
+    plain()

@@ -1,6 +1,8 @@
 package infer
 
 import (
+	"sort"
+
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/types"
 )
@@ -12,8 +14,18 @@ import (
 // substitution for REPL use); bi identifies the number types for
 // Number-kinded metavariable checks.
 func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup *types.Supply) (Subst, []types.Pred, []diag.Error) {
-	var errs []diag.Error
-	for _, c := range cs {
+	// A failure and a deferred constraint both remember the index they came
+	// from, because postponing work must not reorder diagnostics.
+	type failure struct {
+		at  int
+		err diag.Error
+	}
+	type pending struct {
+		at int
+		c  Constraint
+	}
+	var failures []failure
+	solve := func(at int, c Constraint) bool {
 		var m *mismatch
 		if c.Include {
 			left, lok := sub.Apply(c.Left).(types.Row)
@@ -27,15 +39,106 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			m = unify(c.Left, c.Right, sub, bi, sup)
 		}
 		if m != nil {
-			errs = append(errs, mismatchError(c, m, sub))
+			failures = append(failures, failure{at: at, err: mismatchError(c, m, sub)})
+			return false
 		}
+		return true
+	}
+	var deferred []pending
+	for i := range cs {
+		labels, tail, split := splitRigidTail(cs[i], sub)
+		if !split {
+			solve(i, cs[i])
+			continue
+		}
+		// The labels go in now — that keeps the surrounding row open — and the
+		// rigid tail waits, so a body's statement order cannot decide whether
+		// the row can still take a label. A failed label leaves the tail
+		// alone rather than reporting the same call twice.
+		if len(labels) > 0 {
+			c := cs[i]
+			c.Left = types.Row{Labels: labels}
+			if !solve(i, c) {
+				continue
+			}
+		}
+		c := cs[i]
+		c.Left = types.Row{Tail: tail}
+		deferred = append(deferred, pending{at: i, c: c})
+	}
+	// A deferred tail is solved as soon as something else has closed the
+	// surrounding row's own tail — an annotation, most often. Each pass may
+	// release another, so iterate while there is progress.
+	for len(deferred) > 0 {
+		var rest []pending
+		for _, p := range deferred {
+			if _, _, wait := splitRigidTail(p.c, sub); wait {
+				rest = append(rest, p)
+				continue
+			}
+			solve(p.at, p.c)
+		}
+		if len(rest) == len(deferred) {
+			break
+		}
+		deferred = rest
+	}
+	// What is left performs nothing beyond the annotated tail, so binding the
+	// surrounding row to that tail is the answer rather than a guess.
+	for _, p := range deferred {
+		solve(p.at, p.c)
+	}
+	sort.SliceStable(failures, func(i, j int) bool { return failures[i].at < failures[j].at })
+	errs := make([]diag.Error, 0, len(failures))
+	for _, f := range failures {
+		errs = append(errs, f.err)
 	}
 	return sub, ps, errs
+}
+
+// splitRigidTail decides whether c is an inclusion of the shape
+// `{L | e} ⊆ ρ` — `e` an annotation's rigid tail, ρ a surrounding row that is
+// still open — and if so returns the labels to include now and the tail to
+// include later. includeRows answers such a constraint by binding ρ's tail to
+// `e`, and a row that ends in a rigid tail cannot absorb an effect
+// afterwards, so solving it in place would let the order of a body's calls
+// decide whether it checks: an `{e}` call before an `{Exception ex | e}` one
+// would close the row against `Exception`. The two halves mean the same thing
+// as the whole — every effect the callee performs is available here — but the
+// label half leaves the surrounding tail open for later constraints.
+func splitRigidTail(c Constraint, sub Subst) (labels []types.EffLabel, tail *types.TVar, ok bool) {
+	if !c.Include {
+		return nil, nil, false
+	}
+	subrow, isRow := sub.Apply(c.Left).(types.Row)
+	if !isRow || subrow.Tail == nil {
+		return nil, nil, false
+	}
+	rigid, isVar := subrow.Tail.(*types.TVar)
+	if !isVar || !rigid.Rigid || rigid.Kind != types.RowVar {
+		return nil, nil, false
+	}
+	// Labels already in the surrounding row are no help: binding closes its
+	// tail either way, so a label a later constraint adds would still clash.
+	ambient, isRow := sub.Apply(c.Right).(types.Row)
+	if !isRow || ambient.Tail == nil {
+		return nil, nil, false
+	}
+	open, isVar := ambient.Tail.(*types.TVar)
+	if !isVar || open.Rigid || open.Kind != types.RowVar {
+		return nil, nil, false
+	}
+	return subrow.Labels, rigid, true
 }
 
 func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 	if c.Why.Kind == WhyAnnotation && m.effect {
 		c.Why.Kind = WhyEffectMismatch
+	}
+	// An inclusion constraint compares two rows, so the value-shaped stories
+	// (WhyCall above all) would print an effect row where a type belongs.
+	if c.Include && c.Why.Kind == WhyCall {
+		c.Why.Kind = WhyEffectNotAllowed
 	}
 	p := types.NewPrinter()
 	// The constraint's own sides give the top-level story; the mismatch
@@ -101,6 +204,9 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 	case WhyEffectEscapes:
 		e = diag.Errorf(c.Span, "UNHANDLED EFFECT",
 			"This top-level value performs an effect that is not handled.\nTop-level bindings must be pure; move the call into a function or add a handler.")
+	case WhyEffectNotAllowed:
+		e = diag.Errorf(c.Span, "EFFECT MISMATCH",
+			"This expression performs effects the surrounding function does not allow.\nIt performs:\n\n    %s\n\nbut only these effects are available here:\n\n    %s", left, right)
 	case WhyEffectMismatch:
 		e = diag.Errorf(c.Span, "EFFECT MISMATCH",
 			"The effect row in this annotation does not match the effects performed by its body.\nThe annotation says:\n\n    %s\n\nbut the body requires:\n\n    %s", left, right)

@@ -24,22 +24,23 @@ import (
 type WhyKind int
 
 const (
-	WhyOperand        WhyKind = iota // operands of a numeric operator must agree
-	WhyDeclBody                      // a declaration body must match its (future) annotation
-	WhyCall                          // a callee must be a function accepting the argument
-	WhyIfCondition                   // an if condition must be Bool
-	WhyIfBranches                    // then/else branches must agree
-	WhyCompare                       // both sides of a comparison must agree
-	WhyBoolOperand                   // both sides of && / || must be Bool
-	WhyNegate                        // a negated operand must be a number
-	WhyOpRequires                    // an operator fixes its operand type (/, ++)
-	WhyAnnotation                    // a definition must match its type annotation
-	WhyRecursion                     // recursive uses must match the definition
-	WhyPattern                       // a pattern must match the scrutinee's type
-	WhyCaseBranches                  // all case branches must produce the same type
-	WhyEffectEscapes                 // a top-level value performs an unhandled effect
-	WhyEffectMismatch                // an annotation's effect row disagrees with its body
-	WhySpliceOperand                 // `$(…)` needs an operand that evaluates to code
+	WhyOperand          WhyKind = iota // operands of a numeric operator must agree
+	WhyDeclBody                        // a declaration body must match its (future) annotation
+	WhyCall                            // a callee must be a function accepting the argument
+	WhyIfCondition                     // an if condition must be Bool
+	WhyIfBranches                      // then/else branches must agree
+	WhyCompare                         // both sides of a comparison must agree
+	WhyBoolOperand                     // both sides of && / || must be Bool
+	WhyNegate                          // a negated operand must be a number
+	WhyOpRequires                      // an operator fixes its operand type (/, ++)
+	WhyAnnotation                      // a definition must match its type annotation
+	WhyRecursion                       // recursive uses must match the definition
+	WhyPattern                         // a pattern must match the scrutinee's type
+	WhyCaseBranches                    // all case branches must produce the same type
+	WhyEffectEscapes                   // a top-level value performs an unhandled effect
+	WhyEffectMismatch                  // an annotation's effect row disagrees with its body
+	WhyEffectNotAllowed                // an effect row does not fit the surrounding row
+	WhySpliceOperand                   // `$(…)` needs an operand that evaluates to code
 )
 
 type Why struct {

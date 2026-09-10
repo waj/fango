@@ -1073,6 +1073,27 @@ map : (a ->{e} b) -> List a ->{e} List b
 A pure callback instantiates `e` to empty; an effectful callback propagates its
 row to the traversal call.
 
+A body may call arrows that carry the bare tail alongside arrows that add
+labels to it, in either order:
+
+```fango
+using : (() ->{e} a) -> (a ->{Fail String | e} ()) ->{Fail String | e} ()
+using acquire use =
+    resource = acquire()
+    use resource
+```
+
+Calling `acquire`, whose row is the bare tail `{e}`, does not stop the
+surrounding row from gaining `Fail String` from the later call, and swapping
+two such statements never changes whether a definition is accepted. The
+annotated row may also carry effects a callee does not perform, so a
+`{IO, Fail String | e}` body may call a `{Fail String | e}` argument and
+`print` besides.
+
+An annotation's tail stays rigid, so a body may not perform an effect the
+annotation does not list. That reports `EFFECT MISMATCH`, naming the effects
+the expression performs and the effects available where it appears.
+
 ## Effects and handlers
 
 Effects declare operations using an indented signature block:

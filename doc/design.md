@@ -333,6 +333,22 @@ adding effects performed by handler clauses. This allows an annotated handler
 to carry both residual effects from a row-kinded ADT payload and its own `IO`
 work.
 
+Inclusion is order-independent. `{L | e} ⊆ ρ`, where `e` is an annotation's
+rigid tail and ρ a surrounding row that is still open, is answered by putting
+`L` in ρ and binding ρ's tail to `e` — correct as a final answer, but a row
+ending in a rigid tail cannot absorb a label afterwards, so answering it in
+place would make a body's call order decide whether it checks: an `{e}` call
+before an `{Exception ex | e}` one would close the row against `Exception`.
+The solver therefore splits that shape into the labels, included immediately
+and leaving ρ open, and the bare tail, deferred. A deferred tail is solved
+once something else closes ρ's own tail — usually the annotation — and
+otherwise last, when the binding is the answer rather than a guess. Because
+the labels land first, a surrounding row may hold effects the callee does not
+perform, which is what lets an `{IO, Exception ex | e}` body call an
+`{Exception ex | e}` argument. Splitting never suppresses a diagnostic:
+failures are reported in constraint order regardless of the order they were
+solved in.
+
 Top-level values and functions generalize. Local syntactic functions and
 lambdas generalize, while local values remain monomorphic so their strict,
 evaluate-once semantics are not changed by lambda lifting. `main` is ground and
