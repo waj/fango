@@ -186,6 +186,13 @@ illegal. ADTs, including class dictionaries, that transitively store a
 transport-polymorphic function receive corresponding module-owned Direct and
 Exit representation families. This keeps stored callbacks typed without
 boxing every ordinary value or guessing an ABI after row erasure.
+Pure wrappers inside one of those members retain its representation family:
+entering a pure lambda changes that lambda's execution protocol, but does not
+switch its controlled parameters, constructor results, or nested values back
+to the Direct family. A named pure worker that produces a controlled value
+likewise has Direct- and Exit-family members even though both members use the
+Direct execution protocol; the family selects the result representation
+independently of whether the worker itself returns an outcome.
 
 ## Compiler pipeline
 

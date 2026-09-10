@@ -32,8 +32,8 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 			modes = append(modes, types.Exit)
 		}
 		for _, mode := range modes {
-			oldControl := g.control
-			g.control = mode
+			oldControl, oldABI := g.control, g.abi
+			g.control, g.abi = mode, mode
 			g.tyParamNames = tyParamNames(adt.Params)
 			paramIdents := make([]goast.Expr, len(adt.Params))
 			for i, v := range adt.Params {
@@ -80,7 +80,7 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 						Body: &goast.BlockStmt{},
 					})
 			}
-			g.control = oldControl
+			g.control, g.abi = oldControl, oldABI
 		}
 	}
 	g.tyParamNames = nil

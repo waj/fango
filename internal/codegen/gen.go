@@ -99,6 +99,7 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		natives:       p.Natives,
 		effects:       map[int]*types.EffectInfo{},
 		control:       types.Direct,
+		abi:           types.Direct,
 	}
 	for _, name := range unit.Imports {
 		g.direct[name] = true
@@ -152,9 +153,14 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		if d.IsWorker() {
 			// Includes nullary generic workers — polymorphic values emit as
 			// zero-parameter generic functions (doc/design.md, "Go backend and runtime").
-			decls = append(decls, g.workerDef(d, d.Control.Transport))
-			if d.Control.Polymorphic && d.Control.Transport != types.Exit {
-				decls = append(decls, g.workerDef(d, types.Exit))
+			baseMode := d.Control.Transport
+			decls = append(decls, g.workerDef(d, baseMode, baseMode))
+			if baseMode != types.Exit && (d.Control.Polymorphic || g.workerNeedsABIFamily(d)) {
+				execution := baseMode
+				if d.Control.Polymorphic {
+					execution = types.Exit
+				}
+				decls = append(decls, g.workerDef(d, execution, types.Exit))
 			}
 			continue
 		}
@@ -204,9 +210,9 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 }
 
 func (g *gen) topValueDecl(d *core.Def, mode types.Transport) goast.Decl {
-	oldControl := g.control
-	g.control = mode
-	defer func() { g.control = oldControl }()
+	oldControl, oldABI := g.control, g.abi
+	g.control, g.abi = mode, mode
+	defer func() { g.control, g.abi = oldControl, oldABI }()
 	name := g.topValueName(d.Name)
 	if mode == types.Exit {
 		name += "_exit"
@@ -253,7 +259,13 @@ type gen struct {
 	natives       map[string]*types.NativeInfo
 	effects       map[int]*types.EffectInfo
 	control       types.Transport
-	resultType    types.Type
+	// abi selects the Direct/Exit representation family for controlled
+	// function and ADT values in the declaration currently being emitted.
+	// Unlike control, it does not change when emission enters a pure nested
+	// lambda: that lambda still consumes and produces the enclosing family's
+	// representations even though its own call returns directly.
+	abi        types.Transport
+	resultType types.Type
 }
 
 func symbolOwner(name string) string {
@@ -322,9 +334,16 @@ func (g *gen) topValueRefMode(name string, mode types.Transport) goast.Expr {
 	return g.qualified(owner, link)
 }
 
+func (g *gen) representationMode() types.Transport {
+	if g.control > g.abi {
+		return g.control
+	}
+	return g.abi
+}
+
 func (g *gen) typeRef(adt *types.ADTInfo) goast.Expr {
 	name := mangleType(adt.Con.Name)
-	if g.control == types.Exit && g.controlledType(adt.Con, nil) {
+	if g.representationMode() == types.Exit && g.controlledType(adt.Con, nil) {
 		name += "_exit"
 	}
 	return g.qualified(symbolOwner(adt.Con.Name), name)
@@ -332,7 +351,7 @@ func (g *gen) typeRef(adt *types.ADTInfo) goast.Expr {
 
 func (g *gen) ctorRef(ctor *types.CtorInfo) goast.Expr {
 	name := mangleCtor(ctor.Name)
-	if g.control == types.Exit && g.controlledType(ctor.Result, nil) {
+	if g.representationMode() == types.Exit && g.controlledType(ctor.Result, nil) {
 		name += "_exit"
 	}
 	return g.qualified(symbolOwner(ctor.Result.Name), name)
@@ -552,13 +571,13 @@ func (g *gen) printFn(t types.Type) string {
 // body emits in return-position statement context. A generic definition's
 // TyParams become Go type parameters — `any` for General vars,
 // fangort.Number for Number-kinded ones (doc/design.md, "Type inference", doc/design.md, "Go backend and runtime").
-func (g *gen) workerDef(d *core.Def, mode types.Transport) goast.Decl {
-	oldControl, oldResult := g.control, g.resultType
-	g.control, g.resultType = mode, func() types.Type {
+func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
+	oldControl, oldABI, oldResult := g.control, g.abi, g.resultType
+	g.control, g.abi, g.resultType = mode, abi, func() types.Type {
 		_, ret := core.PeelFun(d.Type, len(d.Params))
 		return ret
 	}()
-	defer func() { g.control, g.resultType = oldControl, oldResult }()
+	defer func() { g.control, g.abi, g.resultType = oldControl, oldABI, oldResult }()
 	g.tyParamNames = tyParamNames(d.TyParams)
 	argTys, ret := core.PeelFun(d.Type, len(d.Params))
 	for i, name := range d.Params {
@@ -603,7 +622,7 @@ func (g *gen) workerDef(d *core.Def, mode types.Transport) goast.Decl {
 		body = g.retStmtsFor(d.Body, g.isUnit(ret))
 	}
 	name := g.topValueName(d.Name)
-	if mode == types.Exit {
+	if abi == types.Exit {
 		name += "_exit"
 	}
 	decl := workerDecl(name, params, result, body).(*goast.FuncDecl)
@@ -627,14 +646,35 @@ func (g *gen) workerABI(name string) ([]types.Type, bool) {
 func (g *gen) workerCallStmts(name string, args []goast.Expr) []goast.Stmt {
 	d := g.defs[name]
 	mode := types.Direct
+	abi := types.Direct
 	if d != nil {
 		mode = d.Control.Resolve(g.control)
+		abi = g.workerCallABI(d, mode)
 	}
-	call := callExpr(g.topValueRefMode(name, mode), args...)
+	call := callExpr(g.topValueRefMode(name, abi), args...)
 	if args == nil {
-		call = callExpr(g.topValueRefMode(name, mode))
+		call = callExpr(g.topValueRefMode(name, abi))
 	}
 	return []goast.Stmt{exprStmt(call)}
+}
+
+func (g *gen) workerCallABI(d *core.Def, execution types.Transport) types.Transport {
+	if execution == types.Exit {
+		return types.Exit
+	}
+	// A transport-polymorphic worker's existing Direct/Exit pair is joined:
+	// its execution choice also selects the family. Only a control-fixed
+	// worker that produces a controlled value needs an independent
+	// Exit-family member.
+	if d != nil && !d.Control.Polymorphic && g.representationMode() == types.Exit && g.workerNeedsABIFamily(d) {
+		return types.Exit
+	}
+	return types.Direct
+}
+
+func (g *gen) workerNeedsABIFamily(d *core.Def) bool {
+	_, ret := core.PeelFun(d.Type, len(d.Params))
+	return g.controlledType(ret, nil)
 }
 
 func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
@@ -649,6 +689,7 @@ func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
 		}
 	}
 	mode := e.Control.Resolve(g.control)
+	abi := g.workerCallABI(g.defs[ref.Name], mode)
 	args := make([]goast.Expr, 0, len(e.EvidenceArgs)+len(e.Args))
 	for _, ev := range e.EvidenceArgs {
 		stack := g.evidence[ev.Unique]
@@ -663,7 +704,7 @@ func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
 		}
 		args = append(args, g.expr(a, 0))
 	}
-	return exprStmt(callExpr(indexExpr(g.topValueRefMode(ref.Name, mode), g.goTypes(e.TyArgs)), args...))
+	return exprStmt(callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...))
 }
 
 // tyParamNames assigns positional Go names (A0, A1, …) to a definition's
@@ -751,15 +792,16 @@ func (g *gen) goType(t types.Type) goast.Expr {
 	case *types.TFun:
 		params := make([]paramSpec, 0, len(t.Eff.Labels)+1)
 		arrowControl := types.FunctionControl(t)
+		mode := arrowControl.Resolve(g.representationMode())
 		for _, l := range types.SortedRow(t.Eff).Labels {
 			if types.SurfaceName(l.Name) == "IO" {
 				continue
 			}
-			params = append(params, paramSpec{typ: g.effectType(core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args, Control: arrowControl})})
+			params = append(params, paramSpec{typ: g.effectTypeMode(core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args, Control: arrowControl}, mode)})
 		}
 		params = append(params, paramSpec{typ: g.goType(t.Arg)})
 		result := g.goType(t.Ret)
-		if arrowControl.Resolve(g.control) == types.Exit {
+		if mode == types.Exit {
 			result = g.outcomeType(t.Ret)
 		}
 		return &goast.FuncType{Params: paramFields(params), Results: &goast.FieldList{List: []*goast.Field{{Type: result}}}}
@@ -1010,7 +1052,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		}
 		if !e.Local && g.defs[e.Name] != nil {
 			mode := types.Direct
-			if g.control == types.Exit && g.controlledType(e.Ty, nil) {
+			if g.representationMode() == types.Exit && g.controlledType(e.Ty, nil) {
 				mode = types.Exit
 			}
 			return g.topValueRefMode(e.Name, mode)
@@ -1024,7 +1066,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		// happens-before any call), so by-reference and by-value are
 		// indistinguishable.
 		fn := e.Ty.(*types.TFun)
-		mode := types.FunctionControl(fn).Resolve(g.control)
+		mode := types.FunctionControl(fn).Resolve(g.representationMode())
 		oldControl, oldResult := g.control, g.resultType
 		g.control, g.resultType = mode, fn.Ret
 		params := make([]paramSpec, 0, len(fn.Eff.Labels)+1)
@@ -1201,6 +1243,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 	ref := e.Callee.(*core.VarRef)
 	formal, voidResult := g.workerABI(ref.Name)
 	mode := e.Control.Resolve(g.control)
+	abi := g.workerCallABI(g.defs[ref.Name], mode)
 	args := make([]goast.Expr, 0, len(e.EvidenceArgs)+len(e.Args))
 	for _, ev := range e.EvidenceArgs {
 		stack := g.evidence[ev.Unique]
@@ -1232,7 +1275,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 			body = append(body, varDeclStmt(name, g.goType(a.Type()), g.expr(a, 0)))
 			args = append(args, ident(name))
 		}
-		call := callExpr(indexExpr(g.topValueRefMode(ref.Name, mode), g.goTypes(e.TyArgs)), args...)
+		call := callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...)
 		if mode == types.Exit {
 			body = append(body, returnStmt(call))
 		} else if voidResult {
@@ -1246,7 +1289,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 		}
 		return callExpr(funcLit(result, body))
 	}
-	call := callExpr(indexExpr(g.topValueRefMode(ref.Name, mode), g.goTypes(e.TyArgs)), args...)
+	call := callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...)
 	if mode == types.Exit {
 		return call
 	}
@@ -1557,8 +1600,12 @@ func (g *gen) resumeStmtsFor(e core.Expr, owner types.ResumeID, unitResult bool,
 }
 
 func (g *gen) effectType(e core.EffectInstance) goast.Expr {
+	return g.effectTypeMode(e, g.control)
+}
+
+func (g *gen) effectTypeMode(e core.EffectInstance, mode types.Transport) goast.Expr {
 	name := "Eff_" + linkName(e.Name)
-	if e.Control.Resolve(g.control) == types.Exit {
+	if e.Control.Resolve(mode) == types.Exit {
 		name += "_exit"
 	}
 	return indexExpr(g.qualified(symbolOwner(e.Name), name), g.goTypes(e.Args))
@@ -1625,8 +1672,8 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 			continue
 		}
 		for _, mode := range []types.Transport{types.Direct, types.Exit} {
-			oldNames, oldControl := g.tyParamNames, g.control
-			g.tyParamNames, g.control = map[int]string{}, mode
+			oldNames, oldControl, oldABI := g.tyParamNames, g.control, g.abi
+			g.tyParamNames, g.control, g.abi = map[int]string{}, mode, mode
 			var fields []*goast.Field
 			for i, p := range eff.Params {
 				g.tyParamNames[p.ID] = fmt.Sprintf("E%d", i)
@@ -1675,7 +1722,7 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 				spec.TypeParams = &goast.FieldList{List: fs}
 			}
 			out = append(out, &goast.GenDecl{Tok: gotoken.TYPE, Specs: []goast.Spec{spec}})
-			g.tyParamNames, g.control = oldNames, oldControl
+			g.tyParamNames, g.control, g.abi = oldNames, oldControl, oldABI
 		}
 	}
 	return out

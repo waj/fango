@@ -1,0 +1,17 @@
+(<|) f value = f value
+
+effect Expectation
+    log : String -> String
+
+type Test = TestCase (() ->{Expectation} ())
+
+test : (() ->{Expectation} ()) -> Test
+test action = TestCase action
+
+viaOperator : Test
+viaOperator = TestCase <| \_ -> ()
+
+viaWorker : Test
+viaWorker = test (\_ -> ())
+
+main() = ()
