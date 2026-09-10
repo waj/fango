@@ -1,0 +1,8 @@
+effect Stop
+    abort stop : String -> value
+
+run action =
+    handle action() of
+        stop message -> print message
+
+main() = run (\_ -> stop "stopped")

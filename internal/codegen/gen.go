@@ -775,6 +775,28 @@ func (g *gen) retStmtsFor(e core.Expr, unitResult bool) []goast.Stmt {
 	}
 }
 
+// unitValueRetStmts emits a Unit expression for a Go closure that represents
+// Unit as fangort.Unit. Ordinary Direct workers erase Unit results and use a
+// bare return, but expression closures must return the singleton value.
+func (g *gen) unitValueRetStmts(e core.Expr) []goast.Stmt {
+	switch e := e.(type) {
+	case *core.Let:
+		return append(g.letBindingStmts(e), g.unitValueRetStmts(e.Body)...)
+	case *core.If:
+		stmts := []goast.Stmt{&goast.IfStmt{
+			Cond: g.expr(e.Cond, 0),
+			Body: &goast.BlockStmt{List: g.unitValueRetStmts(e.Then)},
+		}}
+		return append(stmts, g.unitValueRetStmts(e.Else)...)
+	case *core.Case:
+		return g.caseStmts(e, g.unitValueRetStmts)
+	case *core.Seq:
+		return append(g.stmts(e.First), g.unitValueRetStmts(e.Then)...)
+	default:
+		return append(g.stmts(e), returnStmt(g.unitValue()))
+	}
+}
+
 // goType maps a fango type to its unboxed Go representation (see
 // doc/design.md, "Go backend and runtime"). Int is int64, not int: identical
 // overflow behavior on every GOARCH.
@@ -1478,7 +1500,11 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 			}
 		}
 		g.control, g.resultType = overall, e.Ty
-		clauseStmts = append(clauseStmts, g.retStmtsFor(clause.Body, g.isUnit(e.Ty))...)
+		if overall == types.Direct && g.isUnit(e.Ty) {
+			clauseStmts = append(clauseStmts, g.unitValueRetStmts(clause.Body)...)
+		} else {
+			clauseStmts = append(clauseStmts, g.retStmtsFor(clause.Body, g.isUnit(e.Ty))...)
+		}
 		g.control, g.resultType = oldControl, oldResult
 		hasExitBody = append(hasExitBody, &goast.IfStmt{Cond: cond, Body: &goast.BlockStmt{List: clauseStmts}})
 	}
