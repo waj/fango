@@ -8,15 +8,27 @@ the library surface and the complexity callers may rely on are in
 
 ## What it bought
 
-Measured on identical programs, the same benchmark sources compiled by the
-cons-cell representation and by this one:
+Identical benchmark sources, compiled before and after, timed as whole
+processes and reported as the minimum of repeated runs. "Before" is the
+cons-cell representation with the combinators written the direct recursive way;
+"after" is the array-backed representation with them written to accumulate and
+reverse.
 
-| case | cons cells | chunked | change |
+| case | before | after | change |
 |---|---|---|---|
-| `sum` | 7.80x | 4.49x | 1.84x faster |
-| `mapfilter` | 5.82x | 4.52x | 1.65x faster |
-| `branchcons` | 2.19x | 1.55x | fango time unchanged |
-| `tree` (control) | 1.07x | 1.09x | unchanged |
+| `sum` | 58ms | 33ms | 1.8x faster |
+| `mapfilter` | 51ms | 28ms | 1.8x faster |
+| `branchcons` | 17.8ms | 17.8ms | unchanged |
+
+`sum` calls no library function — its `build` and `sum` are both user code — so
+its entire gain is the representation. `mapfilter` splits about 1.45x from the
+representation and 1.27x from writing the combinators as loops. `branchcons` is
+the guarantee holding: the workload where an array-backed list could have lost
+is exactly level.
+
+Whole-process timing understates all of this, because several milliseconds of
+spawn and collection are common to both legs; see the note at the end of
+[roadmap-calls.md](roadmap-calls.md).
 
 Linear building is where it wins; branching is a wash, which is what a
 worst-case-O(1) cons was chosen for. `branchcons` races handwritten cons cells
