@@ -353,7 +353,10 @@ func generatedFile(t *testing.T, files []codegen.File, path string) []byte {
 func TestEmitDeterministicAndFormatted(t *testing.T) {
 	// poly_map_filter_foldr covers generic emission — instantiation
 	// plumbing is where nondeterminism would first appear (risk #1).
-	for _, name := range []string{"arith0.fango", "print_float.fango", "if_expr.fango", "block_area.fango", "block_print_order.fango", "fib.fango", "partial.fango", "poly_map_filter_foldr.fango", "poly_eq_nested.fango", "effect_translate_return.fango", "effect_nested_restore.fango", "effect_partial_capture.fango", "effect_row_union.fango", "scope_cleanup_failure.fango"} {
+	// list_literals and stdlib_list cover the bundled List's runtime
+	// representation, whose emission is driven by a nominal identity rather
+	// than by a name (doc/roadmap-list.md).
+	for _, name := range []string{"arith0.fango", "print_float.fango", "if_expr.fango", "block_area.fango", "block_print_order.fango", "fib.fango", "partial.fango", "poly_map_filter_foldr.fango", "poly_eq_nested.fango", "list_literals.fango", "stdlib_list.fango", "effect_translate_return.fango", "effect_nested_restore.fango", "effect_partial_capture.fango", "effect_row_union.fango", "scope_cleanup_failure.fango"} {
 		path := filepath.Join("..", "..", "testdata", "run", name)
 		a := emittedProject(t, path)
 		b := emittedProject(t, path)
@@ -579,5 +582,41 @@ func TestGeneratedGoMaterializesNativeUnitOnlyInValueContext(t *testing.T) {
 	}
 	if !strings.Contains(src, "n_IO.Write(\" \")") {
 		t.Fatalf("statement-position IO.write was not emitted directly:\n%s", src)
+	}
+}
+
+// The bundled List has a runtime representation: its module declares no marker
+// interface and no constructor structs, and its consumers name fangort.List.
+// A locally declared cons type is a different nominal type and is unaffected —
+// recognition is by identity, so the negative case is the one that proves the
+// mechanism is not matching on a spelling (doc/roadmap-list.md).
+func TestBundledListUsesRuntimeRepresentationAndLocalListDoesNot(t *testing.T) {
+	listModule := filepath.Join("modules", "List", "module.go")
+
+	bundled := emittedProject(t, filepath.Join("..", "..", "testdata", "run", "list_literals.fango"))
+	list := string(generatedFile(t, bundled, listModule))
+	for _, unwanted := range []string{"type T_List_dot_List", "isT_List_dot_List", "C_List_dot_Cons", "C_List_dot_Nil"} {
+		if strings.Contains(list, unwanted) {
+			t.Errorf("bundled List still emits %q:\n%s", unwanted, list)
+		}
+	}
+	if !strings.Contains(list, "fangort.List[") {
+		t.Errorf("bundled List module never names fangort.List:\n%s", list)
+	}
+	// The same fixture declares its own `LocalList`, and its bracket syntax
+	// still means the bundled constructors.
+	main := string(generatedFile(t, bundled, "main.go"))
+	for _, want := range []string{"type T_LocalList interface", "C_Cons", "fangort.ListCons[int64]"} {
+		if !strings.Contains(main, want) {
+			t.Errorf("entry module is missing %q:\n%s", want, main)
+		}
+	}
+
+	// A user type of List's exact shape, in a program that never uses the
+	// bundled one, keeps the ordinary cons lowering.
+	local := emittedProject(t, filepath.Join("..", "..", "testdata", "run", "poly_eq_nested.fango"))
+	entry := string(generatedFile(t, local, "main.go"))
+	if !strings.Contains(entry, "interface") {
+		t.Errorf("user ADTs stopped emitting marker interfaces:\n%s", entry)
 	}
 }

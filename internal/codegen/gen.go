@@ -924,6 +924,14 @@ func (g *gen) goType(t types.Type) goast.Expr {
 			return g.unitType()
 		default:
 			if adt, ok := g.adts[t.Unique]; ok {
+				if adt.Repr == types.ReprList {
+					// The bundled List is one runtime type for both ABI
+					// families: its own fields cannot be controlled, so the
+					// Direct/Exit distinction rides entirely on the element
+					// argument, which the generic parameter absorbs.
+					g.usesFangort = true
+					return indexExpr(selector("fangort", "List"), g.goTypes(runtimeADTArgs(adt, t.Args)))
+				}
 				return indexExpr(g.typeRef(adt), g.goTypes(runtimeADTArgs(adt, t.Args)))
 			}
 			panic(fmt.Sprintf("codegen: unknown type constructor %s", t.Name))

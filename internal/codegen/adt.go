@@ -27,6 +27,11 @@ func fieldName(i int) string { return fmt.Sprintf("F%d", i) }
 func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 	var decls []goast.Decl
 	for _, adt := range adts {
+		if adt.Repr == types.ReprList {
+			// The bundled List has a runtime type instead of an emitted one
+			// (doc/roadmap-list.md); there is nothing to declare for it.
+			continue
+		}
 		runtimeParams := runtimeADTParams(adt)
 		modes := []types.Transport{types.Direct}
 		if g.controlledType(adt.Con, nil) {
@@ -102,6 +107,19 @@ func (g *gen) ctorLit(e *core.App) goast.Expr {
 	if adt != nil {
 		typeArgs = runtimeADTArgs(adt, typeArgs)
 	}
+	if e.Ctor.Repr == types.ReprList {
+		// Go evaluates call arguments left to right, exactly as it does
+		// composite-literal elements, so the source evaluation order a cons
+		// guarantees survives the change of form. The instantiation is
+		// explicit because an argument may be an untyped constant or an
+		// erased Unit, and because emission has to stay deterministic.
+		g.usesFangort = true
+		fn := "ListNil"
+		if e.Ctor.Index == listConsIndex {
+			fn = "ListCons"
+		}
+		return callExpr(indexExpr(selector("fangort", fn), g.goTypes(typeArgs)), args...)
+	}
 	litType := indexExpr(g.ctorRef(e.Ctor), g.goTypes(typeArgs))
 	return &goast.UnaryExpr{
 		Op: gotoken.AND,
@@ -144,6 +162,9 @@ func (g *gen) treeStmts(t core.Tree, leaf func(core.Expr) []goast.Stmt) []goast.
 		if t.ADT.Con.Unique == g.b.Bool.Unique {
 			return g.boolSwitch(t, leaf)
 		}
+		if t.ADT.Repr == types.ReprList {
+			return g.listSwitch(t, leaf)
+		}
 		return g.ctorSwitch(t, leaf)
 	case *core.SwitchLit:
 		return g.litSwitch(t, leaf)
@@ -165,6 +186,63 @@ func (g *gen) boolSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) 
 	return []goast.Stmt{ifStmt(ident(mangleValue(t.Scrut)),
 		g.treeStmts(pick("True"), leaf),
 		g.treeStmts(pick("False"), leaf))}
+}
+
+// Nil and Cons occupy these positions in the bundled declaration; infer's
+// markListRepr verifies that before any of this runs, because head/tail
+// projection is compiled against the layout rather than looked up.
+const (
+	listNilIndex  = 0
+	listConsIndex = 1
+)
+
+// listSwitch: `case` on the bundled List compiles to an emptiness test with
+// head/tail projections (doc/roadmap-list.md) — List has a runtime
+// representation, so there is no interface to switch on. Neither of
+// ctorSwitch's Go-imposed complications applies: no type switch means no
+// full-coverage `default:` re-assertion and no binding that Go could reject as
+// unused. The scrutinee is read up to three times, which is safe because
+// caseStmts guarantees it is a bound local and all three accessors are pure.
+func (g *gen) listSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) []goast.Stmt {
+	scrutTy, ok := g.caseVarTys[t.Scrut].(*types.TCon)
+	if !ok {
+		panic("codegen: SwitchCtor scrutinee type unknown")
+	}
+	// Cons's fields, in declaration order.
+	accessor := []string{"Head", "Tail"}
+
+	branch := func(index int) []goast.Stmt {
+		for _, c := range t.Cases {
+			if c.Ctor.Index != index {
+				continue
+			}
+			var body []goast.Stmt
+			fields := t.ADT.InstFields(c.Ctor, scrutTy.Args)
+			for i, b := range c.Binds {
+				if b == "" {
+					continue
+				}
+				// Nested list patterns read their column's type from here.
+				g.caseVarTys[b] = fields[i]
+				body = append(body, varDeclStmt(mangleValue(b), g.goType(fields[i]),
+					callExpr(selector(mangleValue(t.Scrut), accessor[i]))))
+				if g.isUnit(fields[i]) {
+					// As in ctorSwitch: a Unit binding the branch mentions in
+					// fango still emits no use, and Go rejects that.
+					body = append(body, assignBlank(ident(mangleValue(b))))
+				}
+			}
+			return append(body, g.treeStmts(c.Tree, leaf)...)
+		}
+		if t.Default == nil {
+			panic("codegen: list switch missing a constructor with no default — coverage is broken")
+		}
+		return g.treeStmts(t.Default, leaf)
+	}
+
+	return []goast.Stmt{ifStmt(callExpr(selector(mangleValue(t.Scrut), "IsEmpty")),
+		branch(listNilIndex),
+		branch(listConsIndex))}
 }
 
 // ctorSwitch emits a Go type switch. Full coverage turns the LAST case into
@@ -329,16 +407,82 @@ func (g *gen) adtOf(t types.Type) *types.ADTInfo {
 func (g *gen) derivedDecls(adts []*types.ADTInfo) []goast.Decl {
 	var decls []goast.Decl
 	for _, adt := range adts {
-		if g.neededEq[adt.Con.Unique] {
-			decls = append(decls, g.eqDecl(adt))
+		if !g.neededEq[adt.Con.Unique] {
+			continue
 		}
+		if adt.Repr == types.ReprList {
+			decls = append(decls, g.listEqDecl(adt))
+			continue
+		}
+		decls = append(decls, g.eqDecl(adt))
 	}
 	for _, adt := range adts {
-		if g.neededShow[adt.Con.Unique] {
-			decls = append(decls, g.showDecl(adt))
+		if !g.neededShow[adt.Con.Unique] {
+			continue
 		}
+		if adt.Repr == types.ReprList {
+			decls = append(decls, g.listShowDecl(adt))
+			continue
+		}
+		decls = append(decls, g.showDecl(adt))
 	}
 	return decls
+}
+
+// listEqDecl and listShowDecl keep the exported name, owner, and generic
+// signature the emitted versions have, and only change the body to the runtime
+// implementation. That is what lets the element-op synthesis in generic.go
+// stay untouched: a call site builds the same instantiated call and the same
+// element operations whatever the type's representation is.
+func (g *gen) listEqDecl(adt *types.ADTInfo) goast.Decl {
+	runtimeParams := runtimeADTParams(adt)
+	g.tyParamNames = tyParamNames(runtimeParams)
+	defer func() { g.tyParamNames = nil }()
+	g.usesFangort = true
+	elem := ident(g.tyParamNames[runtimeParams[0].ID])
+	eq := eqParamName(0)
+	return &goast.FuncDecl{
+		Name: ident(g.eqName(adt)),
+		Type: &goast.FuncType{
+			TypeParams: g.typeParamFields(runtimeParams),
+			Params: &goast.FieldList{List: []*goast.Field{
+				{Names: []*goast.Ident{ident(eq)}, Type: &goast.FuncType{
+					Params:  &goast.FieldList{List: []*goast.Field{{Type: elem}, {Type: elem}}},
+					Results: &goast.FieldList{List: []*goast.Field{{Type: ident("bool")}}},
+				}},
+				{Names: []*goast.Ident{ident("a"), ident("b")}, Type: indexExpr(selector("fangort", "List"), []goast.Expr{elem})},
+			}},
+			Results: &goast.FieldList{List: []*goast.Field{{Type: ident("bool")}}},
+		},
+		Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(
+			callExpr(selector("fangort", "ListEq"), ident(eq), ident("a"), ident("b")))}},
+	}
+}
+
+func (g *gen) listShowDecl(adt *types.ADTInfo) goast.Decl {
+	runtimeParams := runtimeADTParams(adt)
+	g.tyParamNames = tyParamNames(runtimeParams)
+	defer func() { g.tyParamNames = nil }()
+	g.usesFangort = true
+	elem := ident(g.tyParamNames[runtimeParams[0].ID])
+	show := showParamName(0)
+	return &goast.FuncDecl{
+		Name: ident(g.showName(adt)),
+		Type: &goast.FuncType{
+			TypeParams: g.typeParamFields(runtimeParams),
+			Params: &goast.FieldList{List: []*goast.Field{
+				{Names: []*goast.Ident{ident(show)}, Type: &goast.FuncType{
+					Params:  &goast.FieldList{List: []*goast.Field{{Type: elem}, {Type: ident("bool")}}},
+					Results: &goast.FieldList{List: []*goast.Field{{Type: ident("string")}}},
+				}},
+				{Names: []*goast.Ident{ident("v")}, Type: indexExpr(selector("fangort", "List"), []goast.Expr{elem})},
+				{Names: []*goast.Ident{ident("nested")}, Type: ident("bool")},
+			}},
+			Results: &goast.FieldList{List: []*goast.Field{{Type: ident("string")}}},
+		},
+		Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(
+			callExpr(selector("fangort", "ListShow"), ident(show), ident("v"), ident("nested")))}},
+	}
 }
 
 // eqDecl: func eqT_X[A0 any](eq0 func(A0, A0) bool, a, b T_X[A0]) bool —
