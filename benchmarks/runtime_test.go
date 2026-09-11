@@ -39,6 +39,10 @@ const (
 // builder-based derived display once display is user-callable. state compares
 // five million get/put pairs against the same closure-cell evidence shape in
 // handwritten Go, separating per-operation cost from one handler setup.
+// bracket gates cleanup-scope setup at fixed nesting depth against the same
+// acquire/use/release sequence written by hand: a scope lowers to ordinary
+// calls, so it has no continuation to pay for, and the gap is the generic
+// callback closures Go inlines away in the baseline (recorded 1.84x).
 //
 // Limits are measurement-informed ceilings (recorded ratios in parentheses):
 // where the baseline allocates like fango does, the 2–3× target holds with
@@ -61,6 +65,7 @@ var ratioCases = []struct {
 	{"tree", "perf/tree.fango", "perf/baseline/tree", "42949017600\n", 3.0},
 	{"strcat", "perf/strcat.fango", "perf/baseline/strcat", "True\n", 3.0},
 	{"state", "perf/stateops.fango", "perf/baseline/state", "5000000\n", 2.5},
+	{"bracket", "perf/bracket.fango", "perf/baseline/bracket", "40000000\n", 2.5},
 }
 
 func TestRuntimeRatio(t *testing.T) {

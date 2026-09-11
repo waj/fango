@@ -1,0 +1,14 @@
+open a
+close a
+ok used a
+opening b
+err cannot open b
+open c
+err inner
+close c
+ok used c
+open outer
+open inner
+close inner
+close outer
+ok outer/inner

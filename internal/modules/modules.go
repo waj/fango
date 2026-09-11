@@ -28,6 +28,7 @@ import (
 	"github.com/waj/fango/internal/parser"
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/token"
+	"github.com/waj/fango/internal/types"
 )
 
 // Provider is the package-resolution seam shared by local and compiler-bundled
@@ -473,6 +474,18 @@ func validateModuleDecls(n *node) []diag.Error {
 		case *ast.ValueDecl:
 			declared[d.Name] = true
 			if d.Native == nil {
+				continue
+			}
+			if types.Intrinsic(canonical(n.name, d.Name)) {
+				// A compiler intrinsic is neither a template nor a sidecar call:
+				// elaboration gives it a Core body, so it needs no Go function and
+				// no entry in the interpreter native registry.
+				if !n.bundled {
+					errs = append(errs, diag.Errorf(d.Native.Sp, "RESERVED NATIVE IDENTIFIER", "`%s.%s` names a compiler intrinsic and cannot be declared here.", n.name, d.Name))
+				}
+				if d.Native.Template != nil {
+					errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE TEMPLATE NOT ALLOWED", "The compiler intrinsic `%s.%s` has no Go template.", n.name, d.Name))
+				}
 				continue
 			}
 			if d.Native.Template != nil {

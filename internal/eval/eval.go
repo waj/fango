@@ -40,6 +40,25 @@ type ExitRequest struct {
 	Target  *evidence
 	Op      *types.EffectOp
 	Payload []Value
+	// Suppressed mirrors fangort.ExitRequest.Suppressed: exits a cleanup
+	// scope could not make primary, in inner-to-outer order.
+	Suppressed []*ExitRequest
+}
+
+// suppress returns primary carrying secondary, copying rather than editing
+// an exit the scope is only forwarding.
+func suppress(primary, secondary *ExitRequest) *ExitRequest {
+	if secondary == nil {
+		return primary
+	}
+	if primary == nil {
+		return secondary
+	}
+	joined := *primary
+	joined.Suppressed = make([]*ExitRequest, 0, len(primary.Suppressed)+1)
+	joined.Suppressed = append(joined.Suppressed, primary.Suppressed...)
+	joined.Suppressed = append(joined.Suppressed, secondary)
+	return &joined
 }
 
 type Outcome struct {
@@ -532,6 +551,37 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			return first, nil
 		}
 		return in.eval(e.Then, fr)
+	case *core.Bracket:
+		acquired, err := in.eval(e.Acquire, fr)
+		if err != nil {
+			return nil, err
+		}
+		if _, isExit := asExit(acquired); isExit {
+			// Nothing was acquired, so there is nothing to release.
+			return acquired, nil
+		}
+		inner := &Frame{parent: fr, vars: map[string]Value{e.Resource: acquired}}
+		body, bodyErr := in.eval(e.Body, inner)
+		release, releaseErr := in.eval(e.Release, inner)
+		if bodyErr != nil {
+			// An interpreter failure is not a language exit; release still ran,
+			// and the original failure is what the caller sees.
+			return nil, bodyErr
+		}
+		if releaseErr != nil {
+			return nil, releaseErr
+		}
+		bodyExit, bodyExits := asExit(body)
+		releaseExit, releaseExits := asExit(release)
+		switch {
+		case bodyExits && releaseExits:
+			return suppress(bodyExit, releaseExit), nil
+		case bodyExits:
+			return body, nil
+		case releaseExits:
+			return release, nil
+		}
+		return body, nil
 	case *core.Handle:
 		var state Value
 		var err error

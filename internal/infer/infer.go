@@ -142,6 +142,10 @@ type Checker struct {
 	Operations      map[string]*types.EffectOp
 	IO              *types.EffectInfo
 	Natives         map[string]*types.NativeInfo
+	// Intrinsics records bundled `native` declarations the compiler
+	// implements as a Core node. They are deliberately absent from Natives:
+	// nothing may lower one to a NativeCall or look for a sidecar.
+	Intrinsics map[string]types.Scheme
 	// Fixity is the graph-wide operator table. Module loading fills it and
 	// resolves every operator run before inference; the REPL extends it as
 	// the session declares operators.
@@ -300,6 +304,7 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		EffectsByUnique:  map[int]*types.EffectInfo{},
 		Operations:       map[string]*types.EffectOp{},
 		Natives:          map[string]*types.NativeInfo{},
+		Intrinsics:       map[string]types.Scheme{},
 		Fixity:           fixity.Builtin(),
 		OpCalls:          map[*ast.App]*types.EffectOp{},
 		HandleInfos:      map[*ast.Handle]*HandlerInfo{},
@@ -422,6 +427,10 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 		}
 		if ck.Env.Has(vd.Name) {
 			errs = append(errs, diag.Errorf(vd.NameSpan, "MULTIPLE DEFINITIONS", "`%s` is defined more than once.", vd.Name))
+			continue
+		}
+		if types.Intrinsic(vd.Name) {
+			errs = append(errs, ck.declareIntrinsic(vd)...)
 			continue
 		}
 		errs = append(errs, ck.declareNative(vd)...)
@@ -619,6 +628,60 @@ func projectionPattern(p ast.Pattern) (ast.Pattern, map[string]string) {
 		}
 	}
 	return copy(p), aliases
+}
+
+// declareIntrinsic types a compiler intrinsic. Its annotation is resolved in
+// the ordinary annotation scope rather than the native scope, because an
+// intrinsic is not a sidecar: its parameters are fango functions and its
+// effects are an open row, neither of which crosses a Go ABI.
+func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
+	if d.Ann == nil {
+		return []diag.Error{diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "A native declaration requires a type annotation.")}
+	}
+	if len(d.Ann.Preds) > 0 {
+		return []diag.Error{diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "Native declarations cannot require class constraints; use an ordinary constrained wrapper.")}
+	}
+	scope := ck.NewAnnScope()
+	ty, errs := ck.ResolveTypeExpr(d.Ann.Type, scope)
+	if ty == nil {
+		return errs
+	}
+	arity := types.IntrinsicArity(d.Name)
+	// Elaboration reads the parameter types structurally when it builds the
+	// body, so a bundled annotation that does not match the shape the compiler
+	// implements is a declaration error rather than a later panic.
+	params, rest := peelArrows(ty, arity)
+	if rest == nil {
+		errs = append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION",
+			"The intrinsic `%s` takes %d parameters, so its annotation must have that many arrows.", ast.Spelling(d.Name), arity))
+		return errs
+	}
+	for i, param := range params {
+		if _, isFn := param.(*types.TFun); !isFn {
+			errs = append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION",
+				"Parameter %d of the intrinsic `%s` must be a function.", i+1, ast.Spelling(d.Name)))
+			return errs
+		}
+	}
+	sch := types.Scheme{Vars: scope.Minted(), Preds: scope.Preds(), Body: ty}
+	ck.Intrinsics[d.Name] = sch
+	ck.Env.Bind(d.Name, sch)
+	ck.Workers[d.Name] = arity
+	return errs
+}
+
+// peelArrows splits n arrows off t, reporting nil when t has fewer.
+func peelArrows(t types.Type, n int) ([]types.Type, types.Type) {
+	args := make([]types.Type, 0, n)
+	for range n {
+		fn, ok := t.(*types.TFun)
+		if !ok {
+			return nil, nil
+		}
+		args = append(args, fn.Arg)
+		t = fn.Ret
+	}
+	return args, t
 }
 
 func (ck *Checker) declareNative(d *ast.ValueDecl) []diag.Error {
@@ -1370,6 +1433,10 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		g.records = append(g.records, ob)
 		ty = receiver
 	case *ast.App:
+		if name, n := g.intrinsicSpine(e); name != "" && n == types.IntrinsicArity(name) {
+			ty = g.intrinsicCall(e, name)
+			break
+		}
 		if op, n := g.operationSpine(e); op != nil && n == op.Arity {
 			inst := g.instantiateAt(op.Scheme, e.Span(), op.Name)
 			g.ck.ExprTypes[appHead(e)] = inst
@@ -1934,6 +2001,74 @@ func (g *generator) abortTerminal(e ast.Expr) bool {
 
 func (g *generator) containsResume(owner types.ResumeID, e ast.Expr) bool {
 	return g.tailResume(owner, e, false) != nil
+}
+
+// intrinsicSpine reports the compiler intrinsic at the head of an
+// application spine, and how many arguments the spine applies.
+func (g *generator) intrinsicSpine(e *ast.App) (string, int) {
+	n := 0
+	var cur ast.Expr = e
+	for {
+		a, ok := cur.(*ast.App)
+		if !ok {
+			break
+		}
+		n++
+		cur = a.Fn
+	}
+	v, ok := cur.(*ast.Var)
+	if !ok {
+		return "", n
+	}
+	if _, local := g.locals.lookup(v.Name); local {
+		return "", n
+	}
+	if _, declared := g.ck.Intrinsics[v.Name]; !declared {
+		return "", n
+	}
+	return v.Name, n
+}
+
+// intrinsicCall types a saturated cleanup scope. Its three callbacks share
+// one row variable in the declaration, but a scope only requires each
+// callback's effects to be *available* where the scope runs, not that all
+// three perform the same effects: acquiring and releasing a resource is
+// ordinarily IO while the body also fails. Source row syntax cannot spell that
+// union, so the compiler supplies it here, as inclusion rather than equality
+// on each callback's own row. A partial application falls back to the ordinary
+// rule, which is the stricter one and therefore still sound.
+func (g *generator) intrinsicCall(e *ast.App, name string) types.Type {
+	sch := g.ck.Intrinsics[name]
+	arity := types.IntrinsicArity(name)
+	inst := g.instantiateAt(sch, e.Span(), name)
+	g.ck.ExprTypes[appHead(e)] = inst
+	params, result := peelOperation(inst, arity)
+	if len(params) != arity {
+		return result
+	}
+	cur := inst
+	var last *types.TFun
+	for range arity {
+		last = cur.(*types.TFun)
+		cur = last.Ret
+	}
+	for i, arg := range appArgs(e) {
+		if i >= arity {
+			break
+		}
+		callback, isFn := params[i].(*types.TFun)
+		at := g.exprWant(arg, params[i])
+		if !isFn {
+			g.cs = append(g.cs, Constraint{Left: at, Right: params[i], Span: arg.Span(), Why: Why{Kind: WhyCall}})
+			continue
+		}
+		own := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
+		g.cs = append(g.cs,
+			Constraint{Left: at, Right: &types.TFun{Arg: callback.Arg, Eff: own, Ret: callback.Ret}, Span: arg.Span(), Why: Why{Kind: WhyCall}},
+			Constraint{Left: own, Right: callback.Eff, Span: arg.Span(), Why: Why{Kind: WhyCall}, Include: true})
+	}
+	g.cs = append(g.cs, Constraint{Left: last.Eff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
+	return result
 }
 
 func (g *generator) operationSpine(e *ast.App) (*types.EffectOp, int) {

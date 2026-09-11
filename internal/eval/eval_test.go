@@ -333,3 +333,53 @@ func TestCancellation(t *testing.T) {
 		t.Error("expected interruption")
 	}
 }
+
+// Nested cleanup scopes whose releases both fail keep the innermost failure
+// primary and record the rest in the order they were abandoned.
+func TestCleanupScopeRecordsSuppressedReleaseFailures(t *testing.T) {
+	it, ut := intTy(), unitTy()
+	eff := &types.EffectInfo{Unique: 9, Name: "Fail"}
+	op := &types.EffectOp{Owner: eff, Index: 0, Name: "fail", Arity: 1, ParamTypes: []types.Type{it}, ResultType: it, Abort: true}
+	eff.Ops = []*types.EffectOp{op}
+	ev := core.EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(1), Control: types.Control{Transport: types.Exit}}
+	raise := func(code int64, ty types.Type) core.Expr {
+		return &core.ControlExit{Effect: ev, Op: op, Payload: []core.Expr{&core.IntLit{Val: code, Ty: it}}, Ty: ty}
+	}
+	// The inner scope's body succeeds and its release fails, so that failure
+	// is primary; the outer release then fails while the exit is in flight.
+	inner := &core.Bracket{Scope: 2, Resource: "_inner", ResourceTy: it,
+		Acquire: &core.IntLit{Val: 0, Ty: it}, Release: raise(2, ut),
+		Body: &core.IntLit{Val: 1, Ty: it}, Ty: it, Control: types.Control{Transport: types.Exit}}
+	outer := &core.Bracket{Scope: 3, Resource: "_outer", ResourceTy: it,
+		Acquire: &core.IntLit{Val: 0, Ty: it}, Release: raise(3, ut),
+		Body: inner, Ty: it, Control: types.Control{Transport: types.Exit}}
+	handled := &core.Handle{
+		Body: outer, Effect: ev, Scope: 1, Ty: it,
+		Clauses: []core.HandlerClause{{Op: op, Params: []string{"code"}, ParamTypes: []types.Type{it},
+			ResultType: it, Body: &core.VarRef{Name: "code", Local: true, Ty: it}}},
+	}
+
+	value, err := EvalIO(context.Background(), handled, NewEnv(), NewIOContext(strings.NewReader(""), io.Discard))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != int64(2) {
+		t.Fatalf("handler answer = %v, want the inner release failure (2)", value)
+	}
+
+	// The handler consumes the request, so check the envelope it carried
+	// directly: the outer release joins the inner one, innermost first.
+	body := &ExitRequest{Op: op, Payload: []Value{int64(1)}}
+	innerRelease := &ExitRequest{Op: op, Payload: []Value{int64(2)}}
+	outerRelease := &ExitRequest{Op: op, Payload: []Value{int64(3)}}
+	joined := suppress(suppress(body, innerRelease), outerRelease)
+	if len(body.Suppressed) != 0 {
+		t.Fatalf("the forwarded request was edited in place: %v", body.Suppressed)
+	}
+	if len(joined.Suppressed) != 2 || joined.Suppressed[0] != innerRelease || joined.Suppressed[1] != outerRelease {
+		t.Fatalf("suppressed = %v, want inner-to-outer order", joined.Suppressed)
+	}
+	if joined.Payload[0] != int64(1) {
+		t.Fatalf("primary payload = %v, want the body failure", joined.Payload[0])
+	}
+}

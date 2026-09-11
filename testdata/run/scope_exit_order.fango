@@ -1,0 +1,61 @@
+import Scope
+import Result exposing (Result(..))
+
+-- The two nestings of a cleanup scope and a handler have different traces.
+-- A scope inside a handler releases before the handler's abort clause runs;
+-- a scope around a handler releases after that clause produced the answer.
+
+effect Fail error
+    abort fail : error -> value
+
+effect Note
+    say : String -> ()
+
+open label =
+    print ("open " ++ label)
+    label
+
+close label = print ("close " ++ label)
+
+report : Result String String ->{IO} ()
+report outcome =
+    case outcome of
+        Ok value -> print ("ok " ++ value)
+        Err error -> print ("answer " ++ error)
+
+failingBody token =
+    print ("body " ++ token)
+    fail "requested"
+
+scopeInsideHandler() =
+    handle Scope.bracket (\_ -> open "inner-first") close failingBody of
+        fail error ->
+            print ("clause sees " ++ error)
+            Err error
+        return value -> Ok value
+
+handlerInsideScope() =
+    Scope.bracket (\_ -> open "outer-first") close (\token ->
+        handle failingBody token of
+            fail error ->
+                print ("clause sees " ++ error)
+                Err error
+            return value -> Ok value)
+
+noted token =
+    say token
+    say token
+
+-- A resumptive handler's operation clauses also run inside the scope.
+counted() =
+    Scope.bracket (\_ -> open "counted") close (\token ->
+        handle noted token of
+            say message ->
+                print ("note " ++ message)
+                resume ()
+            return _ -> Ok "noted")
+
+main() =
+    report (scopeInsideHandler())
+    report (handlerInsideScope())
+    report (counted())

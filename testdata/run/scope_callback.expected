@@ -1,0 +1,10 @@
+open a
+close a
+open b
+close b
+<a><b>
+open c
+close c
+open stop
+close stop
+err stopped

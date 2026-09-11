@@ -1,0 +1,14 @@
+import Scope
+import Meta exposing (Code)
+
+-- A cleanup scope whose constituents are pure is stage-safe: the compiler can
+-- run it while expanding a splice. Resources and entropy stay forbidden there
+-- because they are effects, not because a scope is special.
+
+counted : Int -> Int
+counted start = Scope.bracket (\_ -> start) (\_ -> ()) (\seed -> seed * 3 + 1)
+
+folded : Code
+folded = quote $(Meta.lift (counted 7))
+
+main() = print $(folded)

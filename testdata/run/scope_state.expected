@@ -1,0 +1,9 @@
+open inner
+close inner
+inner 01 state 2
+open outer
+close outer
+outer 78 state 9
+open failing
+close failing
+err stopped at failing3

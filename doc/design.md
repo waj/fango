@@ -123,6 +123,31 @@ interpreter stores the cell on its evidence activation; Go emission uses one
 closure-captured local per handler setup. Neither backend allocates or captures
 a continuation, and nested same-effect handlers own distinct cells.
 
+A cleanup scope is a second kind of region, introduced only by the bundled
+`Scope.bracket` intrinsic. Acquisition runs once; on success the release runs
+exactly once when the scope exits, including when the body is carrying a
+tagged exit aimed at an outer handler, and including when a handler's return
+transformation fails inside it. Nested scopes release in reverse acquisition
+order. A release is an ordinary closure created at the call site, so it runs
+with its own definition-site evidence rather than whatever handler stack was
+installed where the body exited; no obligation record is needed to arrange
+that. A release that fails while the body was already exiting does not become
+the answer: the body's exit stays primary and the release's exit is recorded
+in it, inner to outer. A release that fails after a successful body is the
+only failure and propagates on its own.
+
+Scopes carry their own `ScopeID`, and the acquired resource binds it, so the
+existing non-escape analysis applies to a borrowed resource exactly as to a
+scoped handler activation. Inside the intrinsic the body applies an abstract
+callback to the resource, which the conservative indirect-call rule always
+treats as retaining it, so the intrinsic itself is exempt and its callers are
+restricted instead: a call whose instantiated result can carry a capture is
+rejected when the instantiated resource type can carry one too. A scope over a
+scalar — `Scope.finally`, whose resource is Unit, among them — leaves its
+result unrestricted. Because a scope's ScopeID is also a scoped capability,
+storing the resource in another scoped handler's evidence is rejected by the
+same cross-scope rule that governs state cells.
+
 Every handler activation also has a compiler-only `ScopeID`. Evidence in Core
 therefore names both its nominal effect and the activation (or an abstract
 capture variable when a worker or lambda receives the evidence from its
@@ -664,7 +689,7 @@ effect ownership; the linter checks arity and declaration instantiation rather
 than switching on operator spelling. Effect primitives remain `Perform`, so a
 lexical handler can intercept them before their native boundary default.
 
-Effectful Core uses `Perform`, `Handle`, `Resume`, and `Seq`. Open source row
+Effectful Core uses `Perform`, `Handle`, `Resume`, `Seq`, and `Bracket`. Open source row
 tails are erased after evidence requirements have been derived; concrete labels
 remain on first-class arrows as their indirect-call evidence ABI.
 Hidden evidence parameters precede ordinary worker parameters in deterministic
@@ -672,6 +697,26 @@ effect-identity order, and calls supply matching lexical evidence. The Core
 linter rejects unsolved metavariables, malformed generic applications,
 callee/evidence disagreements, invalid handler coverage or types, and residual
 open rows before either backend runs.
+
+`Bracket` is the cleanup-scope node: a scope identity, a resource binder, and
+acquire, release, and body expressions, each of which may produce control.
+Elaboration is its only producer, and it appears only as the body of the
+`Scope.bracket` intrinsic, whose checker-declared signature it replaces; Core
+lint re-establishes that, along with the node's scope uniqueness, its release
+being Unit-typed, and its control being the join of its three children, since
+a scope forwards every exit it intercepts rather than consuming any. Both
+backends erase the scope identity.
+
+A compiler intrinsic is a bundled `native` declaration the compiler implements
+as a Core node. It is recognized by resolved canonical name, is absent from the
+native table so nothing can lower it to a `NativeCall` or look for a Go
+sidecar, and its annotation is resolved in the ordinary annotation scope
+because its parameters are fango functions over an open row rather than scalars
+crossing a Go ABI. The checker also gives a saturated intrinsic application a
+bespoke rule where source row syntax falls short: each callback's effects are
+required to be *available* where the scope runs rather than equal to the
+scope's own row, which is what lets one scope acquire with `IO` and fail in its
+body. An unsaturated application keeps the ordinary, stricter rule.
 
 Core also retains the control convention on every executable boundary.
 Transport-polymorphic operations and calls are ANF-hoisted whenever they occur
@@ -732,6 +777,18 @@ implements the same outcome propagation with a dedicated language-level
 operations are the checked producer of this protocol. When Exit code calls
 Direct evidence, code generation builds a typed eta record whose operation
 fields wrap normal results; conversion in the other direction is forbidden.
+
+A cleanup scope emits as straight-line Go. Its Direct family member acquires,
+runs the body, discards the release result, and returns the body value with no
+`Outcome` plumbing at all — the roadmap's "plain result variant" falls out of
+the existing ABI families rather than needing a flag. Its Exit family member
+tests each slot's `Outcome`: a failed acquisition propagates without releasing,
+and once the body has run, a release that also failed is joined onto the body's
+request through `fangort.Suppress`, which copies rather than editing an exit
+the scope is only forwarding. Go `defer` is deliberately unused: a release must
+be ordered against the body's result, not against a function literal returning.
+No scope allocates a continuation, starts a goroutine, or tests a
+consumed-state flag.
 
 The backend emits one Go package per Fango module beneath a single generated Go
 module. The entry module is the root `package main`; local and bundled

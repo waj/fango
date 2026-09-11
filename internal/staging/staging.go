@@ -33,6 +33,7 @@ func Install(ck *infer.Checker) {
 		ev.env = eval.NewEnv()
 		ev.env.Templates = ck.Templates
 		ev.installedDecls, ev.installedInstances = 0, 0
+		ev.installedIntrinsics = false
 	}
 }
 
@@ -45,6 +46,10 @@ type evaluator struct {
 	// one. A program with no splices elaborates nothing twice.
 	installedDecls     int
 	installedInstances int
+
+	// installedIntrinsics records whether this environment already holds the
+	// compiler intrinsics. They have no declaration prefix to follow.
+	installedIntrinsics bool
 }
 
 func (ev *evaluator) run(operand ast.Expr) (any, []diag.Error) {
@@ -74,6 +79,10 @@ func (ev *evaluator) sync() []diag.Error {
 	add := func(ds []core.Def, es []diag.Error) {
 		defs = append(defs, ds...)
 		errs = append(errs, es...)
+	}
+	if !ev.installedIntrinsics {
+		defs = append(defs, elaborate.IntrinsicDefs(ev.ck)...)
+		ev.installedIntrinsics = true
 	}
 	if n := len(ev.ck.Instances); n > ev.installedInstances {
 		add(elaborate.Instances(ev.ck.Instances[ev.installedInstances:], ev.ck))

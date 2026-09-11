@@ -14,6 +14,8 @@ func SubstituteCaptureVars(e Expr, m map[types.CaptureVar]types.CaptureSet) Expr
 		switch x := x.(type) {
 		case *Perform:
 			sub(&x.Effect)
+		case *ControlExit:
+			sub(&x.Effect)
 		case *Handle:
 			sub(&x.Effect)
 		case *App:

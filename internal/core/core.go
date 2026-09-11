@@ -146,6 +146,25 @@ type ResumeTail struct {
 	NextState    Expr
 	ClauseResult types.Type
 }
+
+// Bracket is a synchronous cleanup scope. Acquire runs once; on a successful
+// acquisition Release runs exactly once on every exit from the scope,
+// including a tagged exit raised by Body and aimed at an outer handler. Scope
+// is the compiler-owned capability identity the acquired resource carries, so
+// the existing non-escape analysis applies to it exactly as to a scoped
+// handler activation. Elaboration is its only producer: the node is the body
+// of the bundled `Scope.bracket` intrinsic and occurs nowhere else.
+type Bracket struct {
+	Scope      types.ScopeID
+	Resource   string
+	ResourceTy types.Type
+	Acquire    Expr
+	Release    Expr // Unit-typed; may mention Resource
+	Body       Expr
+	Ty         types.Type
+	Control    types.Control
+}
+
 type Seq struct {
 	First, Then Expr
 	Ty          types.Type
@@ -311,6 +330,7 @@ func (*If) isExpr()          {}
 func (*Perform) isExpr()     {}
 func (*ControlExit) isExpr() {}
 func (*Handle) isExpr()      {}
+func (*Bracket) isExpr()     {}
 func (*ResumeTail) isExpr()  {}
 func (*Seq) isExpr()         {}
 func (*Let) isExpr()         {}
@@ -333,6 +353,7 @@ func (e *If) Type() types.Type          { return e.Ty }
 func (e *Perform) Type() types.Type     { return e.Ty }
 func (e *ControlExit) Type() types.Type { return e.Ty }
 func (e *Handle) Type() types.Type      { return e.Ty }
+func (e *Bracket) Type() types.Type     { return e.Ty }
 func (e *ResumeTail) Type() types.Type  { return e.ClauseResult }
 func (e *Seq) Type() types.Type         { return e.Ty }
 func (e *Let) Type() types.Type         { return e.Ty }
@@ -392,6 +413,8 @@ func Mentions(e Expr, name string) bool {
 			}
 		}
 		return e.Return != nil && Mentions(e.Return.Body, name)
+	case *Bracket:
+		return Mentions(e.Acquire, name) || Mentions(e.Release, name) || Mentions(e.Body, name)
 	case *ResumeTail:
 		return Mentions(e.Value, name) || Mentions(e.NextState, name)
 	case *Seq:

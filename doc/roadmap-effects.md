@@ -158,211 +158,25 @@ prefix elaboration or an interpreter-only convenience path.
 
 | Milestone | Depends on | Shippable result |
 | --- | --- | --- |
-| E5: synchronous cleanup scopes | Scoped capture Core, implemented abort exits | `Scope.bracket` / `finally`, generic cleanup across exits |
-| E6: resource APIs and native error boundaries | E5 | Useful file/resource examples and structured IO failures |
-| E7: selective execution machines | Implemented control ABI, E5 | Internal one-shot suspension and cleanup frames |
+| E6: resource APIs and native error boundaries | Implemented cleanup scopes | Useful file/resource examples and structured IO failures |
+| E7: selective execution machines | Implemented control ABI and cleanup scopes | Internal one-shot suspension and cleanup frames |
 | E8: owned iterators and scoped non-tail handlers | Scoped capture Core, E7 | Pull traversal and checked non-tail resumption |
 | E9: structured async and cancellation | E6, E8 | Cooperative tasks, cancellation, nursery cleanup |
 
 The shipped control-aware ABI preserves the tail-resume and scoped-state direct
-fast path. E5–E6 extend the implemented state and exception foundation with
-resources but no general continuation objects.
+fast path, and synchronous cleanup scopes are implemented on top of it. E6
+extends the implemented state, exception, and cleanup foundation with resources
+but no general continuation objects.
 E7–E9 are explicitly deferred until a concrete suspension consumer warrants
 their compiler and type-system cost. No milestone requires implementing the
 whole table at once.
-
-## E5. Synchronous cleanup scopes without new cleanup syntax
-
-### Deliverable and rationale
-
-Expose `Scope.bracket` and optionally `Scope.finally` using ordinary function
-application. Give them compiler-supported scope semantics. A `finally` keyword
-or handler clause is not required; any later syntax is optional sugar.
-
-Do not repurpose `return`: it remains a normal-result transformation. Generic
-cleanup must run when an arbitrary residual effect exits, and when a handler's
-return transformation or abort clause fails. A handler for one named Fail
-cannot guarantee this for an open effect row. The distinction is motivated by
-[deep finalization](https://www.microsoft.com/en-us/research/publication/algebraic-effect-handlers-resources-deep-finalization/).
-
-Proposed APIs, using existing Fango expression syntax:
-
-```fango
-withFile path action =
-    Scope.bracket
-        (\_ -> File.open path)
-        File.close
-        action
-
-main() =
-    text = withFile "input.txt" (\file -> File.readAll file)
-    print text
-```
-
-`File` is a future E6 API. E5 first tests the mechanism with a fake resource
-whose acquire/use/release operations record events. `Scope` is identified by
-resolved declaration identity, not by the spelling of arbitrary user functions.
-Do not extend user native templates with unrestricted compiler intrinsics.
-
-### Type and lifetime contract
-
-Conceptual signature before adding scoped capture constraints:
-
-```text
-bracket : (() ->{ea} r)
-       -> (r ->{er} ())
-       -> (r ->{eb} a)
-       ->{ea union er union eb} a
-
-finally : (() ->{eb} a) -> (() ->{er} ()) ->{eb union er} a
-```
-
-The union notation is explanatory, not source row syntax. Scope introduction
-also constrains `a` and its captures not to retain a borrowed resource identity.
-For a resource-owning bracket, acquisition transfers ownership to the scope,
-the body borrows it, and release is its sole terminal disposal authority.
-The body must not manually close the borrowed handle. Abstract APIs and the capture checker's
-scope checking must enforce that distinction; non-escape alone does not prevent
-double-close inside the scope.
-
-A generic bracket over an ordinary integer does not make that integer linear.
-Special resource contracts apply when the resource type/capability carries an
-ownership obligation. E6 must define that native resource type, and the compiler
-must distinguish the body's borrowed view from the release authority without
-exposing unchecked casts. Compiler-owned scope-polymorphic signatures are
-acceptable initially; typed wrappers still have to preserve their constraints.
-
-The intrinsic calls the body once on successful acquisition. It registers
-release before the body executes and invokes release once when the scope exits.
-Reject attempts to move or duplicate a pending cleanup obligation in Core.
-This does not prove that arbitrary release code terminates or that an OS close
-succeeds. Initially reject cleanup with a suspending control effect and require
-its own scope-local obligations to be discharged before it returns.
-
-### Lifecycle and observable order
-
-| Event | Required behavior |
-| --- | --- |
-| Acquisition fails | Propagate failure; no release of an unacquired resource |
-| Body returns normally | Release, then expose its result |
-| Failure caught within the body | Continue body; release at actual scope exit |
-| Exit targets an outer handler | Release before invoking the outer abort clause |
-| Return transformation fails inside scope | Release before propagating that failure |
-| Nested scopes exit | Release in reverse successful-acquisition order |
-| Release fails | Continue outer cleanup; apply the failure policy below |
-| Future machine suspends | Keep resource and obligation alive; do not release |
-| Future cancellation/abandonment | Release as part of terminating owned work |
-
-For an outer Fail handler enclosing a file scope, require this trace:
-
-```text
-open -> body -> fail requested -> close -> outer fail clause
-```
-
-The reverse placement of scopes has a different trace. If a cleanup scope
-encloses a handler, it covers both the body and whichever handler result path
-runs; that scope releases after the handler clause completes. Write tests for
-both arrangements. Do not apply one implicit finalizer ordering to every
-possible syntactic nesting.
-
-Finalizers execute with their lexical outer evidence, not whatever inner
-handler stack happened to be installed at the exit point. Store that evidence
-in the obligation. Finalizer code may itself use nested, well-scoped handlers.
-
-### Core and direct Go lowering
-
-Use an explicit Core node or equivalent verified region structure:
-
-```text
-Bracket {
-    scope: ScopeId,
-    acquire: Thunk<Resource>,
-    release: Owned<Resource> -> Outcome<Unit>,
-    body: Borrowed<Resource, scope> -> Outcome<A>,
-    captures, residualEffects, control
-}
-```
-
-It must intercept all language exits, not just exceptions with one payload
-type. Lower function-shaped source intrinsics during elaboration; add rules to
-the Core rewriter/linter, interpreter, codegen, and staging whitelist.
-Staging may execute a scope only if all constituent code is stage-safe; an
-empty surface row does not permit native resources at compile time.
-
-```go
-func bracket[R, A any](acquire func() Outcome[R],
-    release func(R) Outcome[Unit], use func(R) Outcome[A]) Outcome[A] {
-    acquired := acquire()
-    if acquired.IsExit {
-        return propagate[A](acquired.Exit)
-    }
-    resource := acquired.Value
-    bodyResult := use(resource)
-    cleanupResult := release(resource)
-    return combineOutcomes(bodyResult, cleanupResult)
-}
-```
-
-These ordinary Go functions implement P without saved continuations. A plain
-result variant can elide Outcome plumbing if the scope cannot exit. Go `defer`
-is an optional lowering for suitable synchronous cleanup, not the definition
-of language lifetime. Never put `defer close(resource)` in an operation
-callback implementing `resume resource`: it runs when that callback returns,
-before the resumed computation uses the resource.
-
-### Cleanup failure and cancellation policy
-
-Adopt this default for synchronous cleanup:
-
-- Body succeeds and cleanup succeeds: return the body value.
-- Body succeeds and cleanup fails: propagate cleanup failure.
-- Body fails and cleanup succeeds: preserve the original failure.
-- Both fail: preserve the original failure as primary and attach cleanup
-  failure as secondary information in deterministic inner-to-outer order.
-
-An ExitRequest may denote a non-error control exit as well as a diagnostic
-failure. Secondary failures cannot just be attached to an arbitrary user's
-payload without a representation contract. Before shipping, define an internal
-completion envelope and public reporting mechanism: an ordinary non-error exit
-with failed cleanup should become a designated cleanup failure retaining the
-original exit as context. Keep this conversion in the scope/runner protocol,
-not in every user's Fail payload. Tests must pin all combinations.
-
-This policy ensures outer resources still get their release attempt even if an
-inner release fails. Initial release code can report ordinary failures but may
-not suspend or deliberately jump to an unrelated non-error control target;
-reject that unsupported cleanup mode statically. It may catch such control
-internally and return normally. Do not silently discard an unsupported exit.
-
-For later cooperative cancellation, install the obligation without a cancellation
-delivery point after successful acquisition. If acquisition itself creates an
-external resource and then can fail before returning it, acquisition owns its
-partial-work cleanup. Registration cannot repair an incorrectly implemented
-acquire function. While releasing, defer repeated cancellation delivery until
-that release attempt completes; then continue unwinding. E9 formalizes the
-scheduler protocol. Fatal process exit and nonterminating cleanup are not
-covered by an exactly-once invocation guarantee.
-
-### Acceptance and a smaller library-only alternative
-
-A library-only bracket can catch one known Fail into `Result`, release, and
-re-raise. Keep that as a test/example explaining the difference, but do not use
-it as the implementation of a guarantee over arbitrary open rows. Its type
-would need to exclude all other abandoning effects.
-
-Test fake resources with event logs for every row of the lifecycle table,
-nested cleanup failure, failure in acquisition, target handler identity,
-failure in return transformations, legal use in a callback, and direct/Exit
-ABI adaptation. Reject escape, early manual disposal of borrowed handles,
-duplicated release authority, and suspending cleanup. Verify there is neither
-a continuation object nor a dynamic consumed-state check in generated code.
 
 ## E6. Resource APIs, native boundaries, and useful IO errors
 
 ### Deliverable and rationale
 
-Build a concrete file API using E5, and replace selected panic-based IO failures
-with structured results/exits. Keep the foreign interface narrow. A file
+Build a concrete file API on the implemented cleanup scopes, and replace
+selected panic-based IO failures with structured results/exits. Keep the foreign interface narrow. A file
 resource is not a scalar integer users can retain after closing (S), and a
 resource callback must not force the general continuation runtime (P).
 
@@ -432,8 +246,8 @@ worker process infrastructure is not a suspended Fango continuation engine.
 
 Build the internal suspension backend with private Core fixtures first. Do not
 enable source-level general resume merely because the machine can run it.
-E8 supplies its static ownership contract. State, abort-only effects, and E5–E6
-remain useful without E7.
+E8 supplies its static ownership contract. State, abort-only effects, cleanup
+scopes, and E6 remain useful without E7.
 
 Use an ANF-to-control-flow lowering, optionally expressed through selective CPS
 internally, followed by defunctionalization. Emitting chains of Go closures
@@ -507,7 +321,7 @@ operation clause, not just the operation result's destination in the body.
 
 ### Cleanup and exits in a machine
 
-Move E5 obligations into scope-owned machine storage. Suspension keeps them
+Move cleanup-scope obligations into scope-owned machine storage. Suspension keeps them
 pending. Completion or abandonment runs them in lexical nesting order. A
 cleanup may call ordinary Direct/Exit functions initially; suspending cleanup
 remains statically rejected.
@@ -516,7 +330,8 @@ An exit targets a live owning boundary and destroys only the intervening
 continuation segment after its cleanups. Mark ownership consumed in compiler
 control flow; do not add public `Resume`/`Discard` objects with dynamic checks.
 Keep the original completion envelope while cleanup runs. A cleanup failure
-changes that envelope according to E5 without skipping remaining cleanups.
+changes that envelope the way a synchronous scope does, without skipping
+remaining cleanups.
 
 ### Acceptance and costs
 
@@ -761,7 +576,7 @@ Go netpoll or scheduler internals.
   registration. Partial acquisition remains the acquisition routine's duty.
 - Mask repeated cancellation delivery during each synchronous release attempt,
   then continue the pending unwind. A release may report an error, which joins
-  the E5 completion envelope without skipping other releases.
+  the cleanup completion envelope without skipping other releases.
 - Reject suspension inside cleanup in the first release. Async finalization is
   a separate extension requiring ownership of a cancelling task while cleanup
   itself waits; do not smuggle it through an ordinary effect-polymorphic callback.
@@ -861,7 +676,7 @@ numbers from another language's native backend as a Fango performance promise.
 | State, Writer, per-run deterministic Random | Implemented, with scoped capture checking |
 | Local memoization | State is implemented; cache pure computations or explicitly define skipped-effect semantics |
 | Failure, early return, parser alternatives | Implemented; fresh attempts, no continuation cloning |
-| Scoped files, locks, temporary resources | E5 mechanism, E6 concrete APIs |
+| Scoped files, locks, temporary resources | Mechanism implemented as `Scope.bracket`; E6 concrete APIs |
 | State rollback | Implemented with private immutable state; not automatic external rollback |
 | Push generators | Direct tail handlers; no inverted control required |
 | Pull generators and early consumer exit | E7/E8; owned frames and deterministic disposal |
@@ -883,9 +698,18 @@ attempts. Do not describe all nondeterministic algorithms as impossible.
 
 These are bounded open decisions for their named milestones.
 
-- **E5 completion envelope:** settle how cleanup errors are reported alongside
-  arbitrary failure payloads and how cleanup failure supersedes a non-error
-  exit. Choose public observation APIs before promising a library contract.
+- **Observing a suppressed cleanup failure:** a release that fails while the
+  body is already exiting is recorded in the exit, inner to outer, and no
+  source API reads it. Two questions remain open together, and E6 is where a
+  concrete consumer appears: what a program may observe, and whether an exit
+  can be classified as an ordinary non-error control transfer, which is the
+  only way a failed cleanup could be made to supersede one. Choose the public
+  observation API before promising a library contract.
+- **Cleanup checks a synchronous scope cannot express:** early manual disposal
+  of a borrowed handle and duplicated release authority need the E6 resource
+  capability type before they can even be stated, and rejecting suspending
+  cleanup needs E7 `Machine` transport to exist. None of them is checkable
+  today, and none is reachable today either.
 - **E6 resource/native ABI:** choose an abstract capability and owned-release
   representation compatible with both generated Go and the interpreter worker.
   Do not expose worker IDs as freely usable source handles.
@@ -923,7 +747,7 @@ to reproduce another language's runtime or surface syntax.
   checking the implemented direct-handler and control-ABI foundation. Its
   general continuation machinery is broader than this plan.
 - [Algebraic Effect Handlers with Resources and Deep Finalization — Leijen](https://www.microsoft.com/en-us/research/publication/algebraic-effect-handlers-resources-deep-finalization/).
-  Use for E5/E7 scope lifetime and abandonment questions; multi-shot initializer
+  Use for scope lifetime and E7 abandonment questions; multi-shot initializer
   machinery is not required by the chosen one-shot model.
 - [Effekt: Captures](https://effekt-lang.org/tour/captures).
   Informs the implemented distinction between execution effects and values

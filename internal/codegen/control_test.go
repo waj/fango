@@ -57,3 +57,63 @@ func TestExitWorkerEmitsOutcomePropagationWhileDirectWorkerStaysPlain(t *testing
 		t.Fatalf("direct worker acquired Outcome ABI:\n%s", got)
 	}
 }
+
+// A cleanup scope has no ABI of its own: the Direct family member sequences
+// ordinary calls, and the Exit family member tests each Outcome and records a
+// release failure it cannot make primary. Neither captures a continuation nor
+// consults a consumed-state flag.
+func TestCleanupScopeEmitsBothFamiliesWithoutAContinuation(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	result := &types.TVar{ID: sup.NextUnique(), Rigid: true}
+	poly := types.Control{Polymorphic: true}
+	acquireTy := &types.TFun{Arg: b.Unit, Ret: b.String, Control: poly}
+	releaseTy := &types.TFun{Arg: b.String, Ret: b.Unit, Control: poly}
+	useTy := &types.TFun{Arg: b.String, Ret: result, Control: poly}
+	defTy := &types.TFun{Arg: acquireTy, Ret: &types.TFun{Arg: releaseTy,
+		Ret: &types.TFun{Arg: useTy, Ret: result, Control: poly}}}
+	call := func(fn string, fnTy *types.TFun, arg core.Expr) core.Expr {
+		return &core.App{CalleeKind: core.Value, Callee: &core.VarRef{Name: fn, Local: true, Ty: fnTy},
+			Args: []core.Expr{arg}, Ty: fnTy.Ret, Control: types.FunctionControl(fnTy)}
+	}
+	resource := func() core.Expr { return &core.VarRef{Name: "_resource", Local: true, Ty: b.String} }
+	scope := &core.Bracket{
+		Scope: 1, Resource: "_resource", ResourceTy: b.String,
+		Acquire: call("_acquire", acquireTy, &core.UnitLit{Ty: b.Unit}),
+		Release: call("_release", releaseTy, resource()),
+		Body:    call("_use", useTy, resource()),
+		Ty:      result, Control: poly,
+	}
+	p := &core.Prog{Entry: "Main.bracket", Defs: []core.Def{{
+		Name: "Main.bracket", Owner: "Main", Type: defTy, TyParams: []*types.TVar{result},
+		Params:        []string{"_acquire", "_release", "_use"},
+		ParamCaptures: []types.CaptureVar{1, 2, 3},
+		Control:       poly, Body: scope,
+	}}}
+	core.InferCaptures(p, b)
+
+	data, err := emitUnit(p, b, Unit{Name: "Main", Entry: true}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		"func V_Main_dot_bracket[A0 any](t_acquire func(fangort.Unit) string, t_release func(string) fangort.Unit, t_use func(string) A0) A0",
+		"func V_Main_dot_bracket_exit[A0 any](t_acquire func(fangort.Unit) fangort.Outcome[string]",
+		"_ = t_release(t_resource)",
+		"fangort.Suppress(",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("generated Go missing %q:\n%s", want, got)
+		}
+	}
+	direct := got[strings.Index(got, "func V_Main_dot_bracket["):strings.Index(got, "func V_Main_dot_bracket_exit[")]
+	if strings.Contains(direct, "fangort.Outcome") || strings.Contains(direct, "fangort.Propagate") {
+		t.Fatalf("the direct family member acquired Outcome plumbing:\n%s", direct)
+	}
+	for _, unwanted := range []string{"go func", "chan ", "panic(", "Resume", "Discard"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("generated cleanup scope contains %q:\n%s", unwanted, got)
+		}
+	}
+}

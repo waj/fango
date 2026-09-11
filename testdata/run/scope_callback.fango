@@ -1,0 +1,38 @@
+import Scope
+import List exposing (List(..))
+import Result exposing (Result(..))
+
+-- A scope inside a higher-order callback, with a direct callback and an
+-- aborting one in the same program, so both calling conventions are adapted
+-- around the same generic traversal.
+
+effect Fail error
+    abort fail : error -> value
+
+attempt action =
+    handle action() of
+        fail error -> Err error
+        return value -> Ok value
+
+open label =
+    print ("open " ++ label)
+    label
+
+close label = print ("close " ++ label)
+
+scoped : String ->{IO} String
+scoped label = Scope.bracket (\_ -> open label) close (\token -> "<" ++ token ++ ">")
+
+guarded label =
+    Scope.bracket (\_ -> open label) close (\token ->
+        if token == "stop" then fail "stopped" else "<" ++ token ++ ">")
+
+collect : (String ->{e} String) -> List String ->{e} String
+collect step labels = List.foldl (\label sofar -> sofar ++ step label) "" labels
+
+main() =
+    print (collect (\label -> scoped label) [ "a", "b" ])
+    outcome = attempt (\_ -> collect (\label -> guarded label) [ "c", "stop", "d" ])
+    case outcome of
+        Ok values -> print values
+        Err error -> print ("err " ++ error)

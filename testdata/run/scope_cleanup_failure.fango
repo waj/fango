@@ -1,0 +1,40 @@
+import Scope
+import Result exposing (Result(..))
+
+-- Every combination of a failing body and a failing release. The body failure
+-- stays primary; a release that fails while the body succeeded is the only
+-- failure and propagates on its own.
+
+effect Fail error
+    abort fail : error -> value
+
+attempt action =
+    handle action() of
+        fail error -> Err error
+        return value -> Ok value
+
+report : String -> Result String String ->{IO} ()
+report label outcome =
+    case outcome of
+        Ok value -> print (label ++ ": ok " ++ value)
+        Err error -> print (label ++ ": err " ++ error)
+
+quietRelease label = print ("close " ++ label)
+
+failingRelease label =
+    print ("closing " ++ label)
+    fail ("close failed " ++ label)
+
+main() =
+    report "both succeed" (attempt (\_ ->
+        Scope.bracket (\_ -> "a") quietRelease (\token -> "used " ++ token)))
+    report "cleanup fails" (attempt (\_ ->
+        Scope.bracket (\_ -> "b") failingRelease (\token -> "used " ++ token)))
+    report "body fails" (attempt (\_ ->
+        Scope.bracket (\_ -> "c") quietRelease (\_ -> fail "body failed c")))
+    report "both fail" (attempt (\_ ->
+        Scope.bracket (\_ -> "d") failingRelease (\_ -> fail "body failed d")))
+    report "nested cleanup fails" (attempt (\_ ->
+        Scope.bracket (\_ -> "outer") failingRelease (\outer ->
+            Scope.bracket (\_ -> "inner") failingRelease (\inner ->
+                outer ++ "/" ++ inner))))

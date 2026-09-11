@@ -163,6 +163,11 @@ func capturesMutated(e Expr, mutated map[string]bool) bool {
 				return true
 			}
 			return walk(e.Body)
+		case *Bracket:
+			// A cleanup scope runs to completion within one iteration, like a
+			// handled body, so its children are walked rather than treated as
+			// stored closures.
+			return walk(e.Acquire) || walk(e.Release) || walk(e.Body)
 		case *Neg:
 			return walk(e.Operand)
 		case *NativeCall:

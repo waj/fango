@@ -1,0 +1,42 @@
+import Scope
+import Result exposing (Result(..))
+
+effect Fail error
+    abort fail : error -> value
+
+attempt action =
+    handle action() of
+        fail error -> Err error
+        return value -> Ok value
+
+open label =
+    print ("open " ++ label)
+    label
+
+close label = print ("close " ++ label)
+
+describe : Result String String ->{IO} ()
+describe outcome =
+    case outcome of
+        Ok value -> print ("ok " ++ value)
+        Err error -> print ("err " ++ error)
+
+main() =
+    describe (attempt (\_ ->
+        Scope.bracket (\_ -> open "a") close (\token -> "used " ++ token)))
+    describe (attempt (\_ ->
+        Scope.bracket
+            (\_ ->
+                print "opening b"
+                fail "cannot open b")
+            close
+            (\token -> "used " ++ token)))
+    describe (attempt (\_ ->
+        Scope.bracket (\_ -> open "c") close (\token ->
+            inner = attempt (\_ -> fail "inner")
+            describe inner
+            "used " ++ token)))
+    describe (attempt (\_ ->
+        Scope.bracket (\_ -> open "outer") close (\outer ->
+            Scope.bracket (\_ -> open "inner") close (\inner ->
+                outer ++ "/" ++ inner))))

@@ -41,6 +41,7 @@ func Lint(p *Prog, b *types.Builtins) []error {
 	for i := range p.Defs {
 		d := &p.Defs[i]
 		where := "def " + d.Name
+		l.defName = d.Name
 		l.scope[d.Name] = true
 		l.tyParams = map[int]bool{}
 		for _, v := range d.TyParams {
@@ -225,6 +226,7 @@ type linter struct {
 	resumeArg        types.Type
 	resumeRet        types.Type
 	resumeState      types.Type
+	defName          string
 	errs             []error
 }
 
@@ -518,6 +520,44 @@ func (l *linter) expr(e Expr, where string) {
 		}
 		l.expr(e.First, where)
 		l.expr(e.Then, where)
+	case *Bracket:
+		l.control(e.Control, where)
+		if e.Scope == 0 || l.scopeIDs[e.Scope] {
+			l.errorf("%s: cleanup scope has invalid or reused scope identity %d", where, e.Scope)
+		}
+		l.scopeIDs[e.Scope] = true
+		// Elaboration is the only producer, and it emits exactly one scope, as
+		// the body of the bundled intrinsic. A Bracket anywhere else would mean
+		// a transform copied or moved a pending cleanup obligation.
+		if l.defName != types.ScopeBracketName {
+			l.errorf("%s: cleanup scope outside the `%s` intrinsic", where, types.ScopeBracketName)
+		}
+		if e.Resource == "" || e.ResourceTy == nil || e.Acquire == nil || e.Release == nil || e.Body == nil {
+			l.errorf("%s: cleanup scope has incomplete metadata", where)
+			return
+		}
+		if !types.Equal(e.Acquire.Type(), e.ResourceTy) {
+			l.errorf("%s: cleanup scope acquires %s, want resource %s", where, types.Show(e.Acquire.Type()), types.Show(e.ResourceTy))
+		}
+		if l.unique(e.Release.Type()) != l.b.Unit.Unique {
+			l.errorf("%s: cleanup scope release typed %s, want ()", where, types.Show(e.Release.Type()))
+		}
+		if !types.Equal(e.Body.Type(), e.Ty) {
+			l.errorf("%s: cleanup scope type differs from its body", where)
+		}
+		if want := types.JoinControl(ExprControl(e.Acquire), ExprControl(e.Release), ExprControl(e.Body)); e.Control != want {
+			l.errorf("%s: cleanup scope control %s disagrees with its children %s", where, ControlName(e.Control), ControlName(want))
+		}
+		l.expr(e.Acquire, where)
+		if l.scope[e.Resource] {
+			l.errorf("%s: cleanup scope resource `%s` shadows", where, e.Resource)
+		}
+		l.scope[e.Resource] = true
+		l.activeScopes[e.Scope] = true
+		l.expr(e.Body, where)
+		l.expr(e.Release, where)
+		delete(l.activeScopes, e.Scope)
+		delete(l.scope, e.Resource)
 	case *Handle:
 		l.control(e.Control, where)
 		l.effectInstance(e.Effect, where)
@@ -1278,6 +1318,12 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		if e.NextState != nil {
 			directSlot(e.NextState, "next state")
 		}
+	case *Bracket:
+		// Every slot is emitted as a statement whose Outcome the scope tests,
+		// so all three may produce control.
+		l.verifyControlANF(e.Acquire, true, where)
+		l.verifyControlANF(e.Body, true, where)
+		l.verifyControlANF(e.Release, true, where)
 	case *Handle:
 		if e.State != nil {
 			directSlot(e.State.Initial, "handler initial state")

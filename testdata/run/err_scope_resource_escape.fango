@@ -1,0 +1,13 @@
+import Scope
+
+-- The resource holds a function, so the compiler cannot prove that a
+-- capture-capable result does not retain it past its release.
+
+type Port = { emit : String ->{IO} (), label : String }
+
+openPort : String -> Port
+openPort label = Port { emit = \message -> print (label ++ ": " ++ message), label = label }
+
+main() =
+    leaked = Scope.bracket (\_ -> openPort "a") (\port -> print ("close " ++ port.label)) (\port -> port.emit)
+    leaked "after close"

@@ -1,0 +1,29 @@
+import Scope
+import Result exposing (Result(..))
+
+-- `finally` has no resource, so it places no restriction on the result it
+-- returns: a scope over Unit can hand back a function.
+
+effect Fail error
+    abort fail : error -> value
+
+attempt action =
+    handle action() of
+        fail error -> Err error
+        return value -> Ok value
+
+adder : Int -> Int -> Int
+adder base offset = base + offset
+
+buildAdder : () ->{IO} (Int -> Int)
+buildAdder() =
+    Scope.finally (\_ -> adder 10) (\_ -> print "cleanup built")
+
+main() =
+    add = buildAdder()
+    print (add 5)
+    outcome = attempt (\_ -> Scope.finally (\_ -> fail "inside") (\_ -> print "cleanup failed path"))
+    case outcome of
+        Ok value -> print ("ok " ++ value)
+        Err error -> print ("err " ++ error)
+    print (Scope.finally (\_ -> "plain") (\_ -> print "cleanup plain"))

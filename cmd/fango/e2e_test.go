@@ -353,7 +353,7 @@ func generatedFile(t *testing.T, files []codegen.File, path string) []byte {
 func TestEmitDeterministicAndFormatted(t *testing.T) {
 	// poly_map_filter_foldr covers generic emission — instantiation
 	// plumbing is where nondeterminism would first appear (risk #1).
-	for _, name := range []string{"arith0.fango", "print_float.fango", "if_expr.fango", "block_area.fango", "block_print_order.fango", "fib.fango", "partial.fango", "poly_map_filter_foldr.fango", "poly_eq_nested.fango", "effect_translate_return.fango", "effect_nested_restore.fango", "effect_partial_capture.fango", "effect_row_union.fango"} {
+	for _, name := range []string{"arith0.fango", "print_float.fango", "if_expr.fango", "block_area.fango", "block_print_order.fango", "fib.fango", "partial.fango", "poly_map_filter_foldr.fango", "poly_eq_nested.fango", "effect_translate_return.fango", "effect_nested_restore.fango", "effect_partial_capture.fango", "effect_row_union.fango", "scope_cleanup_failure.fango"} {
 		path := filepath.Join("..", "..", "testdata", "run", name)
 		a := emittedProject(t, path)
 		b := emittedProject(t, path)

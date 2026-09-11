@@ -1337,6 +1337,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return callExpr(funcLit(g.goType(e.Ty), append(g.stmts(e.First), returnStmt(g.expr(e.Then, 0)))))
 	case *core.Handle:
 		return g.handleExpr(e)
+	case *core.Bracket:
+		return g.bracketExpr(e)
 	default:
 		panic(fmt.Sprintf("codegen: node %T arrives in a later slice", e))
 	}
@@ -1553,6 +1555,106 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	result := g.goType(e.Ty)
 	if g.control == types.Exit {
 		result = g.outcomeType(e.Ty)
+	}
+	return callExpr(funcLit(result, stmts))
+}
+
+// bracketExpr lowers a cleanup scope to straight-line Go. Acquire runs once;
+// release runs after the body on every path that acquired, including one
+// where the body is carrying an exit aimed at an outer handler. Nothing here
+// captures a continuation or tests a consumed-state flag: a scope is a
+// sequence of ordinary calls plus the Outcome tests the Exit ABI already
+// uses. Go `defer` is deliberately not used — the release must be ordered
+// against the body result, not against this function literal returning.
+func (g *gen) bracketExpr(e *core.Bracket) goast.Expr {
+	overall := e.Control.Resolve(g.control)
+	oldControl, oldResult := g.control, g.resultType
+	// Each slot is emitted as a value of its own type, so a slot that is
+	// itself a statement shape propagates at its own result type.
+	child := func(x core.Expr) (goast.Expr, bool) {
+		g.control, g.resultType = overall, x.Type()
+		out := g.expr(x, 0)
+		g.control, g.resultType = oldControl, oldResult
+		return out, overall == types.Exit && core.ExprControl(x).Resolve(overall) == types.Exit
+	}
+	name := func(kind string) string {
+		n := fmt.Sprintf("t_scope%s%d", kind, g.tmp)
+		g.tmp++
+		return n
+	}
+
+	resource := mangleValue(e.Resource)
+	var stmts []goast.Stmt
+
+	acquire, acquireExits := child(e.Acquire)
+	if acquireExits {
+		acquired := name("Acquired")
+		stmts = append(stmts,
+			varDeclStmt(acquired, g.outcomeType(e.ResourceTy), acquire),
+			&goast.IfStmt{
+				Cond: &goast.BinaryExpr{X: selector(acquired, "Exit"), Op: gotoken.NEQ, Y: ident("nil")},
+				// Acquisition failed, so there is no resource to release.
+				Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, selector(acquired, "Exit")))}},
+			})
+		acquire = selector(acquired, "Value")
+	}
+	stmts = append(stmts, varDeclStmt(resource, g.goType(e.ResourceTy), acquire))
+	if !core.Mentions(e.Body, e.Resource) && !core.Mentions(e.Release, e.Resource) {
+		stmts = append(stmts, assignBlank(ident(resource)))
+	}
+
+	bodyName := name("Body")
+	body, bodyExits := child(e.Body)
+	bodyType := g.goType(e.Ty)
+	if bodyExits {
+		bodyType = g.outcomeType(e.Ty)
+	}
+	stmts = append(stmts, varDeclStmt(bodyName, bodyType, body))
+
+	release, releaseExits := child(e.Release)
+	releaseName := ""
+	if releaseExits {
+		releaseName = name("Release")
+		stmts = append(stmts, varDeclStmt(releaseName, g.outcomeType(e.Release.Type()), release))
+	} else {
+		stmts = append(stmts, assignBlank(release))
+	}
+
+	result := g.goType(e.Ty)
+	if overall == types.Exit {
+		result = g.outcomeType(e.Ty)
+		bodyExit := selector(bodyName, "Exit")
+		if bodyExits {
+			primary := []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, bodyExit))}
+			if releaseExits {
+				// The body failure stays primary; the release failure is recorded
+				// rather than dropped.
+				g.usesFangort = true
+				joined := callExpr(selector("fangort", "Suppress"), bodyExit, selector(releaseName, "Exit"))
+				primary = append([]goast.Stmt{&goast.IfStmt{
+					Cond: &goast.BinaryExpr{X: selector(releaseName, "Exit"), Op: gotoken.NEQ, Y: ident("nil")},
+					Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, joined))}},
+				}}, primary...)
+			}
+			stmts = append(stmts, &goast.IfStmt{
+				Cond: &goast.BinaryExpr{X: bodyExit, Op: gotoken.NEQ, Y: ident("nil")},
+				Body: &goast.BlockStmt{List: primary},
+			})
+		}
+		if releaseExits {
+			// The body completed, so a failed release is the only failure.
+			stmts = append(stmts, &goast.IfStmt{
+				Cond: &goast.BinaryExpr{X: selector(releaseName, "Exit"), Op: gotoken.NEQ, Y: ident("nil")},
+				Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, selector(releaseName, "Exit")))}},
+			})
+		}
+		if bodyExits {
+			stmts = append(stmts, returnStmt(ident(bodyName)))
+		} else {
+			stmts = append(stmts, returnStmt(g.normalOutcome(e.Ty, ident(bodyName))))
+		}
+	} else {
+		stmts = append(stmts, returnStmt(ident(bodyName)))
 	}
 	return callExpr(funcLit(result, stmts))
 }

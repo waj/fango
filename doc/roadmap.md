@@ -162,15 +162,41 @@ The tail-resumptive discipline and parameterized State handlers are proved in
 source checking and Core, scoped capture metadata is checked during elaboration
 and again in Core, and control-aware Direct/Exit calling conventions are
 implemented for workers, callbacks, evidence, ADTs, dictionaries, and both
-backends. Abort-only effects and `Result` are implemented; next add generic
-cleanup scopes. Resource
-management is exposed through ordinary `Scope.bracket`/`withFile` calls rather
-than requiring new cleanup syntax. These increments can ship without suspension.
+backends. Abort-only effects, `Result`, and generic cleanup scopes are
+implemented: `Scope.bracket` and `Scope.finally` are ordinary function calls
+with compiler-supported lifetimes, so resource management needs no new cleanup
+syntax. Next come concrete resource APIs and structured IO failures on top of
+them. These increments ship without suspension.
 
 The same roadmap owns structured IO failures, resource/native ABI work, and the
 open decisions for operation polymorphism and builtin IO handling.
 Owned iterators, scoped non-tail resumption, structured async, and cancellation
 are later milestones, gated by a concrete consumer and static ownership checks.
+
+## Effect-row subsumption for higher-order arguments
+
+A function taking several callbacks over one shared row variable can only be
+applied to arguments whose rows agree, because an argument's type is unified
+with the parameter's rather than required to be included in it. Passing a named
+worker pins the row; passing an eta-expanded lambda does not, because a
+lambda's row is inferred and accumulates inclusion constraints. So today
+`bracket open close body` is written with each callback wrapped, or it is
+rejected as soon as the body performs something `open` does not.
+
+`Scope.bracket` does not have that problem, because it is a compiler intrinsic
+whose saturated application gets a bespoke rule: each callback's effects are
+required to be available where the scope runs rather than equal to the scope's
+row. Every ordinary higher-order function still has it, and `File.withFile`
+and its neighbours will meet it as soon as they exist.
+
+The general fix is effect-row subsumption on function arguments: a callback
+performing fewer effects should be usable where more are allowed, which is
+already true at run time — elaboration eta-expands and re-tags such callbacks
+for the erased-row ABI. Making it true in the checker means using inclusion
+rather than unification for an argument's own row, and the open questions are
+where that widening is sound to apply, what it does to inference order and
+generalization, and how the resulting diagnostics read when a callback really
+is wrong.
 
 ## Longer-term candidates
 

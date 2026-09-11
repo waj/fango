@@ -220,3 +220,96 @@ func TestLintRejectsScopedCaptureStoredThroughOuterEvidence(t *testing.T) {
 		t.Fatalf("Lint error = %q, want RESOURCE ESCAPES", got)
 	}
 }
+
+// scopeFixture builds the cleanup-scope intrinsic the way elaboration does:
+// three callback parameters, and a body that acquires, uses, and releases.
+func scopeFixture() (*Prog, *types.Builtins, *Bracket, *Def) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	acquireTy := &types.TFun{Arg: b.Unit, Ret: b.String}
+	releaseTy := &types.TFun{Arg: b.String, Ret: b.Unit}
+	result := &types.TVar{ID: sup.NextUnique(), Rigid: true}
+	useTy := &types.TFun{Arg: b.String, Ret: result}
+	defTy := &types.TFun{Arg: acquireTy, Ret: &types.TFun{Arg: releaseTy, Ret: &types.TFun{Arg: useTy, Ret: result}}}
+	call := func(fn string, fnTy *types.TFun, arg Expr) Expr {
+		return &App{CalleeKind: Value, Callee: &VarRef{Name: fn, Local: true, Ty: fnTy},
+			Args: []Expr{arg}, Ty: fnTy.Ret, Control: types.FunctionControl(fnTy)}
+	}
+	resource := func() Expr { return &VarRef{Name: "_resource", Local: true, Ty: b.String} }
+	scope := &Bracket{
+		Scope: 1, Resource: "_resource", ResourceTy: b.String,
+		Acquire: call("_acquire", acquireTy, &UnitLit{Ty: b.Unit}),
+		Release: call("_release", releaseTy, resource()),
+		Body:    call("_use", useTy, resource()),
+		Ty:      result,
+	}
+	def := Def{Name: types.ScopeBracketName, Type: defTy, TyParams: []*types.TVar{result},
+		Params:        []string{"_acquire", "_release", "_use"},
+		ParamCaptures: []types.CaptureVar{1, 2, 3},
+		Body:          scope,
+	}
+	p := &Prog{Defs: []Def{def}}
+	return p, b, scope, &p.Defs[0]
+}
+
+func TestLintAcceptsCleanupScopeCore(t *testing.T) {
+	p, b, _, _ := scopeFixture()
+	InferCaptures(p, b)
+	if got := lintText(p, b); got != "" {
+		t.Fatalf("Lint rejected a checked cleanup scope:\n%s", got)
+	}
+}
+
+func TestDumpCleanupScope(t *testing.T) {
+	p, b, _, _ := scopeFixture()
+	InferCaptures(p, b)
+	got := Dump(p)
+	want := "(bracket 1 _resource String"
+	if !strings.Contains(got, want) {
+		t.Fatalf("Dump = %q, want it to contain %q", got, want)
+	}
+}
+
+func TestLintRejectsMalformedCleanupScopeCore(t *testing.T) {
+	tests := []struct {
+		name, want string
+		damage     func(*Bracket, *Def, *types.Builtins)
+	}{
+		{"no scope identity", "invalid or reused scope identity",
+			func(s *Bracket, _ *Def, _ *types.Builtins) { s.Scope = 0 }},
+		{"outside the intrinsic", "cleanup scope outside",
+			func(_ *Bracket, d *Def, _ *types.Builtins) { d.Name = "Elsewhere.bracket" }},
+		{"release is not Unit", "want ()",
+			func(s *Bracket, _ *Def, b *types.Builtins) { s.Release = &IntLit{Val: 1, Ty: b.Int} }},
+		{"acquire disagrees with the resource", "want resource",
+			func(s *Bracket, _ *Def, b *types.Builtins) { s.Acquire = &IntLit{Val: 1, Ty: b.Int} }},
+		{"body disagrees with the scope", "type differs from its body",
+			func(s *Bracket, _ *Def, b *types.Builtins) { s.Body = &StringLit{Val: "x", Ty: b.String} }},
+		{"control disagrees with its children", "disagrees with its children",
+			func(s *Bracket, _ *Def, _ *types.Builtins) { s.Control = types.Control{Transport: types.Exit} }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, b, scope, def := scopeFixture()
+			InferCaptures(p, b)
+			tt.damage(scope, def, b)
+			if got := lintText(p, b); !strings.Contains(got, tt.want) {
+				t.Fatalf("Lint errors = %q, want one containing %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCleanupScopeResultRetainsItsResource(t *testing.T) {
+	p, b, _, def := scopeFixture()
+	InferCaptures(p, b)
+	// The intrinsic's own result conservatively retains whatever its acquire
+	// and use callbacks retain; the borrowed resource scope is discharged at
+	// the boundary rather than escaping into the summary.
+	if def.ResultCaptures.HasScope(1) {
+		t.Fatalf("result captures = %v, want the scope discharged", def.ResultCaptures)
+	}
+	if len(def.ResultCaptures.Vars) == 0 {
+		t.Fatalf("result captures = %v, want the callback captures retained", def.ResultCaptures)
+	}
+}

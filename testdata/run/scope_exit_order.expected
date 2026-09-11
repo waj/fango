@@ -1,0 +1,15 @@
+open inner-first
+body inner-first
+close inner-first
+clause sees requested
+answer requested
+open outer-first
+body outer-first
+clause sees requested
+close outer-first
+answer requested
+open counted
+note counted
+note counted
+close counted
+ok noted

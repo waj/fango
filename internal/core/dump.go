@@ -159,6 +159,13 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		}
 		fmt.Fprintf(&b, " %s)", pr.Type(e.Ty))
 		return b.String()
+	case *Bracket:
+		form := "bracket"
+		if e.Control != (types.Control{}) {
+			form += "/" + ControlName(e.Control)
+		}
+		return fmt.Sprintf("(%s %d %s %s %s %s %s %s)", form, e.Scope, e.Resource, pr.Type(e.ResourceTy),
+			dumpExpr(e.Acquire, pr), dumpExpr(e.Release, pr), dumpExpr(e.Body, pr), pr.Type(e.Ty))
 	case *Let:
 		form := "let"
 		if e.Rec {

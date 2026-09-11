@@ -220,6 +220,12 @@ func (g *gen) ctorSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) 
 			g.caseVarTys[b] = fields[i]
 			body = append(body, varDeclStmt(mangleValue(b), g.goType(fields[i]),
 				&goast.SelectorExpr{X: ident(src), Sel: ident(fieldName(i))}))
+			if g.isUnit(fields[i]) {
+				// A Unit-typed binding emits as statements rather than a Go local,
+				// so the branch can mention the field in fango and still leave this
+				// declaration unused, which Go rejects.
+				body = append(body, assignBlank(ident(mangleValue(b))))
+			}
 		}
 		body = append(body, g.treeStmts(c.Tree, leaf)...)
 		var list []goast.Expr

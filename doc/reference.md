@@ -386,6 +386,22 @@ run : (w -> w -> w) -> w
 `Writer.run combine empty action` updates the accumulator with
 `combine output item` for each `tell item`, preserving source order.
 
+`Scope` provides cleanup that survives every exit from a region, which a
+handler for one named failure cannot:
+
+```fango
+module Scope exposing (bracket, finally)
+
+bracket : (() ->{e} resource) -> (resource ->{e} ())
+       -> (resource ->{e} result) ->{e} result
+
+finally : (() ->{e} result) -> (() ->{e} ()) ->{e} result
+```
+
+`bracket acquire release use` acquires once, runs `use` on the resource, and
+releases. `finally action cleanup` is the same shape without a resource. Both
+are described under [cleanup scopes](#cleanup-scopes).
+
 `Random` declares a randomness effect and two ready-made handlers:
 
 ```fango
@@ -1090,6 +1106,23 @@ annotated row may also carry effects a callee does not perform, so a
 `{IO, Fail String | e}` body may call a `{Fail String | e}` argument and
 `print` besides.
 
+A shared row variable means the same row at every occurrence, so two arguments
+whose own rows differ do not both fit one `{e}`. Passing a named function
+pins `e` to that function's row, and a later argument performing anything else
+is then rejected:
+
+```fango
+pair : (() ->{e} Int) -> (() ->{e} Int) ->{e} Int
+
+pair emit boom      -- rejected: emit fixes e to {IO}, boom needs Fail
+pair (\_ -> emit()) (\_ -> boom())   -- accepted: e becomes {IO, Fail String}
+```
+
+A lambda's row is inferred, so wrapping each argument lets the row grow to the
+union of what the callbacks perform. There is no source syntax for that union,
+so the eta-expanded form is the way to write it.
+
+
 An annotation's tail stays rigid, so a body may not perform an effect the
 annotation does not list. That reports `EFFECT MISMATCH`, naming the effects
 the expression performs and the effects available where it appears.
@@ -1223,6 +1256,85 @@ Ambient `print : Show a => a ->{IO} ()` displays values through their instance.
 `readLine : () ->{IO} Maybe IO.Line` distinguishes clean EOF from a line and
 preserves the exact line ending as described under the bundled standard
 library. Call it as `readLine()` (or equivalently `readLine ()`).
+
+## Cleanup scopes
+
+A handler releases a resource only for the failure it handles. Cleanup that
+must also run when an arbitrary residual effect leaves the region needs a
+scope, which the bundled `Scope` module provides through ordinary function
+application — there is no `try`, `catch`, `finally`, `using`, or `defer`
+syntax:
+
+```fango
+withResource label action =
+    Scope.bracket (\_ -> open label) close action
+
+main() =
+    text = withResource "input" (\resource -> readAll resource)
+    print text
+```
+
+`bracket acquire release use` evaluates `acquire()` once. If that fails,
+nothing is released. Otherwise `use` runs on the acquired resource and
+`release` runs exactly once when the scope exits:
+
+| Event | Behavior |
+| --- | --- |
+| Acquisition fails | Propagate the failure; nothing is released |
+| Body returns normally | Release, then produce the body value |
+| Failure caught within the body | Continue the body; release at the real scope exit |
+| Exit targets an outer handler | Release before the outer clause runs |
+| Failure in a handler's `return` clause | Release before that failure propagates |
+| Nested scopes exit | Release in reverse acquisition order |
+
+So a scope inside a handler releases before the handler's abort clause sees
+the failure:
+
+```text
+open -> body -> fail requested -> close -> outer fail clause
+```
+
+while a scope around a handler releases after that clause has produced the
+handler's answer. The two nestings are different programs; neither ordering is
+applied to the other.
+
+A release runs with the evidence where it was written, not with whatever
+handlers happened to be installed where the body exited, and may itself use
+nested handlers.
+
+When a release fails, the failure the body was already carrying stays primary:
+
+| Body | Release | Result |
+| --- | --- | --- |
+| Succeeds | Succeeds | The body value |
+| Succeeds | Fails | The release failure |
+| Fails | Succeeds | The original failure |
+| Fails | Fails | The original failure, with the release failure recorded alongside it |
+
+A recorded release failure is kept in the exit rather than discarded, in
+deterministic inner-to-outer order. No API observes it yet, so a program sees
+the primary failure plus whatever the release did before failing.
+
+`finally action cleanup` is `bracket` without a resource. Because its resource
+is `()`, it places no restriction on the result it returns.
+
+A scope over a resource that could itself hold a capability does restrict its
+result: a call whose result type can carry a capture is rejected with
+`RESOURCE ESCAPES`, because the compiler cannot prove the returned value does
+not retain the resource past its release. A scope over a scalar, or over any
+resource made of scalars and transitively capture-free algebraic data, leaves
+its result unrestricted.
+
+`Scope.bracket` is a compiler intrinsic rather than an ordinary library
+function, so the compiler knows each callback's effects need only be available
+where the scope runs. Acquiring and releasing with `IO` while the body also
+fails is therefore accepted, which the shared row variable in its signature
+cannot express on its own. Applying it to fewer than three arguments falls back
+to the ordinary, stricter rule.
+
+A scope does whatever its callbacks do, so a program whose parts are all
+stage-safe may run one at compile time. Resources and system entropy remain
+forbidden there because they are effects, not because a scope is special.
 
 ## Compile-time metaprogramming
 

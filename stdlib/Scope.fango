@@ -1,0 +1,25 @@
+module Scope exposing (bracket, finally)
+
+{- Cleanup scopes.
+
+`bracket` is a compiler intrinsic, and deliberately so: no fango expression can
+release a resource when the scope body exits to an outer handler, because a
+handler for one named effect cannot cover an open effect row. Elaboration gives
+this declaration a Core cleanup scope instead of a Go template or a sidecar
+call.
+
+Acquisition runs once. If it fails there is nothing to release. Otherwise the
+release runs exactly once when the scope exits, whether the body returned a
+value, raised an abort aimed at any outer handler, or failed inside a handler's
+`return` transformation. Nested scopes release in reverse acquisition order.
+
+If the body succeeds and the release fails, the release failure propagates. If
+both fail the body failure stays primary. -}
+
+bracket : (() ->{e} resource) -> (resource ->{e} ()) -> (resource ->{e} result) ->{e} result
+bracket = native
+
+-- `finally` is an ordinary wrapper: its resource is Unit, so it carries no
+-- lifetime obligation and puts no restriction on the result it returns.
+finally : (() ->{e} result) -> (() ->{e} ()) ->{e} result
+finally action cleanup = bracket (\_ -> ()) (\_ -> cleanup()) (\_ -> action())

@@ -1,0 +1,11 @@
+close a
+both succeed: ok used a
+closing b
+cleanup fails: err close failed b
+close c
+body fails: err body failed c
+closing d
+both fail: err body failed d
+closing inner
+closing outer
+nested cleanup fails: err close failed inner

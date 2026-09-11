@@ -131,7 +131,7 @@ func effectFreeBody(body core.Expr) bool {
 		return t
 	}, func(e core.Expr) core.Expr {
 		switch e := e.(type) {
-		case *core.Handle, *core.Perform, *core.ResumeTail:
+		case *core.Handle, *core.Perform, *core.ResumeTail, *core.Bracket:
 			pure = false
 		case *core.App:
 			pure = pure && len(e.EvidenceArgs) == 0

@@ -1,0 +1,57 @@
+import Scope
+import State exposing (State)
+import Result exposing (Result(..))
+
+-- A cleanup scope composes with a parameterized handler in both nestings, and
+-- the state cell survives the scope it encloses.
+
+effect Fail error
+    abort fail : error -> value
+
+attempt action =
+    handle action() of
+        fail error -> Err error
+        return value -> Ok value
+
+open label =
+    print ("open " ++ label)
+    label
+
+close label = print ("close " ++ label)
+
+bump : () ->{State Int} Int
+bump() =
+    current = State.get()
+    State.put (current + 1)
+    current
+
+countingBody token =
+    first = bump()
+    second = bump()
+    token ++ " " ++ show first ++ show second
+
+-- The scope runs inside the state handler.
+scopeInsideState() =
+    State.run 0 (\_ -> Scope.bracket (\_ -> open "inner") close countingBody)
+
+-- The state handler runs inside the scope.
+stateInsideScope() =
+    Scope.bracket (\_ -> open "outer") close (\token ->
+        State.run 7 (\_ -> countingBody token))
+
+failingCount token =
+    ignored = bump()
+    fail ("stopped at " ++ token ++ show ignored)
+
+main() =
+    result = scopeInsideState()
+    print (result.value ++ " state " ++ show result.state)
+    other = stateInsideScope()
+    print (other.value ++ " state " ++ show other.state)
+    outcome = attempt (\_ ->
+        Scope.bracket (\_ -> open "failing") close (\token ->
+            inner = State.run 3 (\_ -> failingCount token)
+            inner.value))
+    case outcome of
+        Ok value -> print ("ok " ++ value)
+        Err error -> print ("err " ++ error)

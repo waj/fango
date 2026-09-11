@@ -39,20 +39,22 @@ type captureResult struct {
 }
 
 type captureAnalyzer struct {
-	p              *Prog
-	b              *types.Builtins
-	defs           map[string]*Def
-	adts           map[int]*types.ADTInfo
-	nextVar        types.CaptureVar
-	escapes        map[types.ScopeID]bool
-	scoped         map[types.ScopeID]bool
-	checking       bool
-	current        *Def
-	badStateResult bool
+	p                 *Prog
+	b                 *types.Builtins
+	defs              map[string]*Def
+	adts              map[int]*types.ADTInfo
+	nextVar           types.CaptureVar
+	escapes           map[types.ScopeID]bool
+	scoped            map[types.ScopeID]bool
+	checking          bool
+	current           *Def
+	clauseVars        map[*Handle][][]types.CaptureVar
+	badStateResult    string
+	badResourceResult string
 }
 
 func newCaptureAnalyzer(p *Prog, b *types.Builtins) *captureAnalyzer {
-	a := &captureAnalyzer{p: p, b: b, defs: map[string]*Def{}, adts: map[int]*types.ADTInfo{}, escapes: map[types.ScopeID]bool{}, scoped: map[types.ScopeID]bool{}}
+	a := &captureAnalyzer{p: p, b: b, defs: map[string]*Def{}, adts: map[int]*types.ADTInfo{}, escapes: map[types.ScopeID]bool{}, scoped: map[types.ScopeID]bool{}, clauseVars: map[*Handle][][]types.CaptureVar{}}
 	for i := range p.Defs {
 		d := &p.Defs[i]
 		a.defs[d.Name] = d
@@ -74,8 +76,13 @@ func newCaptureAnalyzer(p *Prog, b *types.Builtins) *captureAnalyzer {
 	}
 	for i := range p.Defs {
 		Rewrite(p.Defs[i].Body, func(t types.Type) types.Type { return t }, func(e Expr) Expr {
-			if h, ok := e.(*Handle); ok && h.Scoped {
-				a.scoped[h.Scope] = true
+			switch e := e.(type) {
+			case *Handle:
+				if e.Scoped {
+					a.scoped[e.Scope] = true
+				}
+			case *Bracket:
+				a.scoped[e.Scope] = true
 			}
 			return e
 		})
@@ -83,7 +90,37 @@ func newCaptureAnalyzer(p *Prog, b *types.Builtins) *captureAnalyzer {
 	return a
 }
 
+func (a *captureAnalyzer) currentName() string {
+	if a.current == nil {
+		return "?"
+	}
+	return a.current.Name
+}
+
 func (a *captureAnalyzer) fresh() types.CaptureVar { a.nextVar++; return a.nextVar }
+
+// clauseBinders allocates one placeholder per handler clause parameter, once
+// per handler, and reports them as a set to discharge at the boundary.
+func (a *captureAnalyzer) clauseBinders(e *Handle) map[types.CaptureVar]bool {
+	vars, ok := a.clauseVars[e]
+	if !ok {
+		vars = make([][]types.CaptureVar, len(e.Clauses))
+		for i, clause := range e.Clauses {
+			vars[i] = make([]types.CaptureVar, len(clause.Params))
+			for j := range clause.Params {
+				vars[i][j] = a.fresh()
+			}
+		}
+		a.clauseVars[e] = vars
+	}
+	binders := map[types.CaptureVar]bool{}
+	for _, row := range vars {
+		for _, v := range row {
+			binders[v] = true
+		}
+	}
+	return binders
+}
 
 func (a *captureAnalyzer) solve() {
 	// Capture equations contain union only, so the least fixed point is
@@ -122,15 +159,19 @@ func (a *captureAnalyzer) checkScopes() []error {
 	for _, scope := range scopes {
 		errs = append(errs, ScopeEscapeError{Scope: scope})
 	}
-	if a.badStateResult {
-		errs = append(errs, StateResultEscapeError{})
+	if a.badStateResult != "" {
+		errs = append(errs, StateResultEscapeError{In: a.badStateResult})
+	}
+	if a.badResourceResult != "" {
+		errs = append(errs, ResourceResultEscapeError{In: a.badResourceResult})
 	}
 	return errs
 }
 
 type ScopeEscapeError struct{ Scope types.ScopeID }
 
-type StateResultEscapeError struct{}
+// In names the definition whose body holds the offending call.
+type StateResultEscapeError struct{ In string }
 
 func (StateResultEscapeError) Error() string {
 	return "a parameterized handler result may retain its local state capability"
@@ -138,6 +179,22 @@ func (StateResultEscapeError) Error() string {
 
 func (StateResultEscapeError) Detail() string {
 	return "This call returns a capture-capable value, so the compiler cannot prove that handler-local state stays inside its activation. Return immutable data instead."
+}
+
+// ResourceResultEscapeError is the call-site rule for a cleanup scope: the
+// scope cannot prove that a capture-capable result does not retain the
+// resource it just released. It applies only when the resource type could
+// carry a capability at all, so scopes over scalars and `finally` — whose
+// resource is Unit — leave their result unrestricted. In names the
+// definition whose body holds the offending call.
+type ResourceResultEscapeError struct{ In string }
+
+func (ResourceResultEscapeError) Error() string {
+	return "a cleanup scope result may retain the resource it released"
+}
+
+func (ResourceResultEscapeError) Detail() string {
+	return "This scope returns a capture-capable value built from a capture-capable resource, so the compiler cannot prove the resource does not outlive its release. Return immutable data instead."
 }
 
 func (e ScopeEscapeError) Error() string {
@@ -330,8 +387,18 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			matched := false
 			if ref, ok := e.Callee.(*VarRef); ok {
 				if d := a.defs[ref.Name]; d != nil {
-					if a.checking && trustedStateRunner(d.Name) && a.canCarry(e.Ty, nil) && !trustedStateForwarder(a.current, d) {
-						a.badStateResult = true
+					if a.checking && trustedScopedRunner(d.Name) && a.canCarry(e.Ty, nil) && !trustedStateForwarder(a.current, d) {
+						if resource, scope := a.scopeResourceType(d, e); scope {
+							// A cleanup scope over a resource that cannot hold a
+							// capability leaves its result unrestricted.
+							if a.canCarry(resource, nil) && a.badResourceResult == "" {
+								a.badResourceResult = a.currentName()
+							}
+						} else {
+							if a.badStateResult == "" {
+								a.badStateResult = a.currentName()
+							}
+						}
 					}
 					matched = true
 					m := map[types.CaptureVar]types.CaptureSet{}
@@ -390,21 +457,50 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			result.value = ret.value
 			result.uses = types.UnionCaptures(body.uses, ret.uses)
 		}
-		for _, clause := range e.Clauses {
+		// An operation payload arrives from the perform site, which this
+		// analysis does not see, so each clause parameter binds an opaque
+		// placeholder. The placeholders are allocated once per handler, not once
+		// per fixed-point pass, and are discharged at the handler boundary along
+		// with its scope: they belong to the handler, and letting one escape
+		// into a caller's result summary would name a variable nothing binds —
+		// and would never converge.
+		binders := a.clauseBinders(e)
+		for i, clause := range e.Clauses {
 			inner := cloneCaptureEnv(env)
 			if e.State != nil {
 				inner[e.State.Name] = initial.value
 			}
-			for _, p := range clause.Params {
+			for j, p := range clause.Params {
 				if p != "_" && p != "()" {
-					inner[p] = types.VarCapture(a.fresh())
+					inner[p] = types.VarCapture(a.clauseVars[e][i][j])
 				}
 			}
 			cl := a.expr(clause.Body, inner, evidence)
 			result.uses = types.UnionCaptures(result.uses, cl.uses)
 		}
+		result.value = result.value.Without(nil, binders)
+		result.uses = result.uses.Without(nil, binders)
 		if e.Scoped && result.value.HasScope(e.Scope) {
-			if e.State != nil && trustedStateRunnerName(a.current) {
+			if e.State != nil && trustedScopedRunnerName(a.current) {
+				result.value = result.value.Without(map[types.ScopeID]bool{e.Scope: true}, nil)
+			} else if a.checking {
+				a.escapes[e.Scope] = true
+			}
+		}
+		result.uses = result.uses.Without(map[types.ScopeID]bool{e.Scope: true}, nil)
+		return result
+	case *Bracket:
+		acquired := a.expr(e.Acquire, env, evidence)
+		inner := cloneCaptureEnv(env)
+		inner[e.Resource] = types.UnionCaptures(acquired.value, types.ScopeCapture(e.Scope))
+		body := a.expr(e.Body, inner, evidence)
+		release := a.expr(e.Release, inner, evidence)
+		result := captureResult{value: body.value, uses: types.UnionCaptures(acquired.uses, body.uses, release.uses)}
+		if result.value.HasScope(e.Scope) {
+			if trustedScopedRunnerName(a.current) {
+				// The intrinsic's own definition applies an abstract callback to
+				// the resource, so the conservative indirect-call rule always
+				// retains the scope here. Its callers are restricted instead.
 				result.value = result.value.Without(map[types.ScopeID]bool{e.Scope: true}, nil)
 			} else if a.checking {
 				a.escapes[e.Scope] = true
@@ -423,13 +519,33 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 	}
 }
 
-func trustedStateRunnerName(d *Def) bool {
-	return d != nil && trustedStateRunner(d.Name)
+// scopeResourceType returns the instantiated resource type of a cleanup-scope
+// call, and whether the callee is that intrinsic at all.
+func (a *captureAnalyzer) scopeResourceType(d *Def, e *App) (types.Type, bool) {
+	if d.Name != types.ScopeBracketName || len(d.Params) != 3 {
+		return nil, false
+	}
+	args, _ := PeelFun(d.Type, 3)
+	acquire, ok := args[0].(*types.TFun)
+	if !ok {
+		return nil, false
+	}
+	m := make(map[int]types.Type, len(d.TyParams))
+	for i, tv := range d.TyParams {
+		if i < len(e.TyArgs) {
+			m[tv.ID] = e.TyArgs[i]
+		}
+	}
+	return types.SubstRigid(acquire.Ret, m), true
 }
 
-func trustedStateRunner(name string) bool {
+func trustedScopedRunnerName(d *Def) bool {
+	return d != nil && trustedScopedRunner(d.Name)
+}
+
+func trustedScopedRunner(name string) bool {
 	switch name {
-	case "State.run", "Writer.run", "Random.runSeeded", "Random.runSystem":
+	case "State.run", "Writer.run", "Random.runSeeded", "Random.runSystem", types.ScopeBracketName:
 		return true
 	default:
 		return false

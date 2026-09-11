@@ -50,6 +50,10 @@ func ExprControl(e Expr) types.Control {
 		return types.JoinControl(ExprControl(e.Value), ExprControl(e.NextState))
 	case *Seq:
 		return types.JoinControl(ExprControl(e.First), ExprControl(e.Then))
+	case *Bracket:
+		// A cleanup scope re-propagates every exit it intercepts, so unlike an
+		// abort handler it consumes nothing: all three children join.
+		return types.JoinControl(e.Control, ExprControl(e.Acquire), ExprControl(e.Release), ExprControl(e.Body))
 	case *Let:
 		return types.JoinControl(ExprControl(e.Rhs), ExprControl(e.Body))
 	case *App:

@@ -63,6 +63,7 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 		p.Defs = append(p.Defs, d)
 		errs = append(errs, es...)
 	}
+	p.Defs = append(p.Defs, IntrinsicDefs(ck)...)
 	kept := infos[:0:0]
 	for _, info := range infos {
 		// A compile-time-only definition is not emitted: it exists only for
@@ -161,6 +162,77 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 		Body:          el.anf(body),
 	}
 	return append([]core.Def{def}, el.aux...), el.errs
+}
+
+// IntrinsicDefs supplies bodies for the compiler intrinsics the checker
+// declared. An intrinsic has no equations to elaborate: its meaning is a
+// Core node, so the definition is built here rather than read from source.
+// The compile-time evaluator installs the same definitions, so a splice sees
+// the intrinsic the batch pipeline emits.
+func IntrinsicDefs(ck *infer.Checker) []core.Def {
+	names := make([]string, 0, len(ck.Intrinsics))
+	for name := range ck.Intrinsics {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	defs := make([]core.Def, 0, len(names))
+	for _, name := range names {
+		if name == types.ScopeBracketName {
+			// The declaration keeps its open row tail; Core does not.
+			defs = append(defs, scopeBracketDef(name, eraseRows(ck.Intrinsics[name].Body), ck))
+		}
+	}
+	return defs
+}
+
+// scopeBracketDef builds the cleanup-scope intrinsic: three callback
+// parameters, and a body that acquires, runs the use callback on the
+// borrowed resource, and releases. The three applications are indirect calls
+// through function values whose row is an abstract tail, so they carry no
+// evidence arguments — each callback closed over its own evidence where it
+// was written, which is why a finalizer runs with its lexical outer evidence
+// rather than whatever handler stack was installed at the exit point.
+func scopeBracketDef(name string, ty types.Type, ck *infer.Checker) core.Def {
+	args, result := core.PeelFun(ty, 3)
+	acquireTy := args[0].(*types.TFun)
+	releaseTy := args[1].(*types.TFun)
+	useTy := args[2].(*types.TFun)
+
+	params := []string{"_acquire", "_release", "_use"}
+	resource := "_resource"
+	call := func(fn string, fnTy *types.TFun, arg core.Expr) core.Expr {
+		return &core.App{CalleeKind: core.Value, Callee: &core.VarRef{Name: fn, Local: true, Ty: fnTy},
+			Args: []core.Expr{arg}, Ty: fnTy.Ret, Control: types.FunctionControl(fnTy)}
+	}
+	borrowed := func() core.Expr { return &core.VarRef{Name: resource, Local: true, Ty: acquireTy.Ret} }
+
+	acquire := call(params[0], acquireTy, &core.UnitLit{Ty: acquireTy.Arg})
+	release := call(params[1], releaseTy, borrowed())
+	body := call(params[2], useTy, borrowed())
+
+	paramCaptures := make([]types.CaptureVar, len(params))
+	for i := range paramCaptures {
+		paramCaptures[i] = ck.Sup.FreshCapture()
+	}
+	return core.Def{
+		Name:          name,
+		Owner:         symbolOwner(name),
+		Type:          ty,
+		TyParams:      runtimeRigidVars(ty),
+		Params:        params,
+		ParamCaptures: paramCaptures,
+		Control:       core.ArrowControl(ty, len(params)),
+		Body: &core.Bracket{
+			Scope:      ck.Sup.FreshScope(),
+			Resource:   resource,
+			ResourceTy: acquireTy.Ret,
+			Acquire:    acquire,
+			Release:    release,
+			Body:       body,
+			Ty:         result,
+			Control:    types.JoinControl(core.ExprControl(acquire), core.ExprControl(release), core.ExprControl(body)),
+		},
+	}
 }
 
 func symbolOwner(name string) string {
@@ -296,18 +368,33 @@ func installCaptureSummaries(defs []core.Def, ck *infer.Checker) {
 }
 
 func captureDiagnostics(errs []error, ck *infer.Checker, fallback source.Span) []diag.Error {
+	// A capture summary has no source position of its own, so an escape is
+	// reported at the definition whose body holds the offending call.
+	at := func(name string) source.Span {
+		for _, info := range ck.Checked {
+			if info.Name == name {
+				return info.NameSpan
+			}
+		}
+		return fallback
+	}
 	out := make([]diag.Error, 0, len(errs))
 	for _, err := range errs {
 		var escape core.ScopeEscapeError
-		if errors.As(err, &escape) {
+		var resource core.ResourceResultEscapeError
+		var state core.StateResultEscapeError
+		switch {
+		case errors.As(err, &escape):
 			sp := ck.ScopeSpans[escape.Scope]
 			if sp == (source.Span{}) {
 				sp = fallback
 			}
 			out = append(out, diag.Errorf(sp, "RESOURCE ESCAPES", "%s", escape.Detail()))
-		} else if _, ok := err.(core.StateResultEscapeError); ok {
-			out = append(out, diag.Errorf(fallback, "STATE RESULT ESCAPES", "%s", core.StateResultEscapeError{}.Detail()))
-		} else {
+		case errors.As(err, &resource):
+			out = append(out, diag.Errorf(at(resource.In), "RESOURCE ESCAPES", "%s", resource.Detail()))
+		case errors.As(err, &state):
+			out = append(out, diag.Errorf(at(state.In), "STATE RESULT ESCAPES", "%s", state.Detail()))
+		default:
 			out = append(out, diag.Errorf(fallback, "CAPTURE CHECK ERROR", "%v", err))
 		}
 	}
