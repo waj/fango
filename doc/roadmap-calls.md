@@ -35,13 +35,41 @@ else branch. `List.map` and `List.foldr` do not. Yet a `foldl`-based sum runs
 curried callback on every element while the recursive version pays nothing at a
 higher-order boundary at all.
 
-That is the argument against answering this with native implementations of the
-list combinators. A native `each` or `foldl` removes nothing, since they are
-already loops, and it would still receive a curried fango closure and pay for
-it. A native `map` or `foldr` would remove frames, but only inside the standard
-library — and the benchmark that is furthest from Go calls no library function
-at all, only user-written `build` and `sum`. The two items below fix the
-standard library and user code together.
+Native, chunk-aware implementations of the combinators are worth having, but
+not for the reason they first appear to be, and not for all of them.
+`runtime/fangort/list_cost_test.go` measures which costs chunk-awareness can
+actually remove:
+
+| operation | accessors or recursion | chunk-aware |
+|---|---|---|
+| traversal, no callback | 38us | 26us |
+| fold, plain opaque callback | 90us | 99us |
+| fold, curried callback | 766us | 755us |
+| `map` | 811us | 199us |
+
+Walking a chunk's array directly recovers most of the traversal gap. But once a
+per-element callback the compiler cannot see through sits in the loop, the
+traversal method stops mattering — the nested loop is in fact slightly worse,
+because more state stays live across the call. So a native `each` or `foldl`
+buys nothing: they are already loops, and their cost is the callback.
+
+`map` is the opposite case. It gains four-fold, and none of that is traversal:
+it is the recursion. A chunk-aware `map` mirrors each source chunk into a fresh
+one, filling it head-to-tail so the callback still runs in element order, and
+links forward — one pass, no recursion, no intermediate buffer, and the same
+chunk count as the source. `filter` and `foldr` have the same shape.
+
+That is the same win C2 below delivers, by a narrower and much cheaper route.
+The difference is reach: a native fixes the library, while C2 fixes every
+user-written function of the same shape — and the benchmark furthest from Go
+calls no library function at all, only user-written `build` and `sum`. Landing
+natives first is defensible on cost; it does not remove the reason for C2.
+
+Callback-free operations are the third case, and the clearest one. `length`,
+`reverse`, `==`, and future `append`, `take`, and indexing have no callback for
+the traversal cost to hide behind, so they get the full traversal win —
+`length` considerably more than that, since it can total each chunk's occupancy
+instead of visiting elements at all.
 
 ## C1 — Uncurried callbacks at worker boundaries
 
@@ -104,8 +132,10 @@ itself across module boundaries.
 signature and the wrapper form; a `foldl`-heavy runtime-ratio case, since the
 existing list cases exercise the callback boundary only incidentally.
 
-Expected payoff: the curried row above collapsing toward the plain one, and one
-fewer allocation per element at every higher-order call in any program.
+Expected payoff: the curried fold row collapsing toward the plain one — the
+allocations are most of that difference — and one fewer allocation per element
+at every higher-order call in any program. This is the only one of the three
+directions that reaches the cost `each` and `foldl` actually pay.
 
 ## C2 — Loops for list-building recursion
 
@@ -126,15 +156,14 @@ whole soundness argument.
 **Transform.** A loop that appends each head in turn and finishes with the
 base case's value.
 
-**Runtime support, and the honest cost.** Chunks fill downward, because that is
-what makes a cons worst-case constant time; a forward loop therefore cannot
-write chunks as it goes. A builder has to collect in order and materialize the
-spine afterwards, which buys one Go frame per element at the price of one extra
-buffer. That is a trade rather than a pure win, and it should be measured
-before it is committed — a `map` over a short list may well prefer the
-recursion. An alternative worth pricing at the same time is materializing in
-exact-sized chunks, which the current allocator cannot do because it never
-knows the length in advance.
+**Runtime support.** A forward builder needs no intermediate buffer, which the
+`map` prototype demonstrates: allocation is identical to the recursive version.
+Chunks fill downward, because that is what makes a cons worst-case constant
+time, so a builder that does not know the length fills each chunk from index
+zero and, at the end, shifts the final partial chunk to the high end and sets
+its watermark — one move of at most a chunk's worth of elements per list.
+Chunks under construction are unpublished, so backpatching each one's
+successor as the next is allocated is sound.
 
 **Scope.** Restricted to `List.Cons`. A general version needs a mutable hole in
 the value under construction, which an immutable chunk spine does not offer;

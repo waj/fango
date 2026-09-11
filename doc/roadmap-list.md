@@ -23,10 +23,13 @@ worst-case-O(1) cons was chosen for. `branchcons` races handwritten cons cells
 rather than a slice, because that is the workload where an array-backed list is
 the one that has to pay.
 
-What remains between fango and the slice baseline is not list work.
-[roadmap-calls.md](roadmap-calls.md) records where it actually goes: an
-allocation per element at curried higher-order boundaries, and a Go frame per
-element in recursion that builds a list.
+What remains between fango and the slice baseline is mostly not list work.
+[roadmap-calls.md](roadmap-calls.md) records where it goes: an allocation per
+element at curried higher-order boundaries, and a Go frame per element in
+recursion that builds a list. The part that *is* list work — walking a chunk's
+array rather than stepping a list value per element — is worth having for the
+operations that have no callback to hide it behind; see the native combinators
+below.
 
 ## Open questions
 
@@ -45,18 +48,19 @@ element in recursion that builds a list.
 - **Whether to expose cheap length and indexing.** Both are available from the
   representation and neither is expressible on the current surface; `length` is
   a traversal today. This is a surface question, not a representation one.
-- **Native acceleration for the combinators — measured, and not the lever.**
-  The obvious next step is native `map` and `each`, and the numbers say no.
-  `each` and `foldl` already compile to loops, so a native version removes
-  nothing, and it would still receive a curried fango closure and pay an
-  allocation per element for it; a `foldl`-based sum is accordingly *slower*
-  than a hand-written non-tail-recursive one. A native `map` or `foldr` would
-  remove real Go frames, but only inside the library, while the benchmark
-  furthest from Go calls no library function at all. The two costs that
-  actually dominate are general, and they are owned by
-  [roadmap-calls.md](roadmap-calls.md). Revisit natives only if that work lands
-  and a gap remains — the standard-library rule in [the roadmap](roadmap.md)
-  asks for benchmark evidence, and the evidence currently points elsewhere.
+- **Chunk-aware native combinators**, which the representation makes possible
+  and which `runtime/fangort/list_cost_test.go` measures. They split three
+  ways rather than being one decision. `map`, `filter`, and `foldr` gain
+  four-fold, entirely from replacing recursion with one forward pass rather
+  than from faster traversal. `each` and `foldl` gain nothing: they are already
+  loops, and once a per-element callback sits in the loop the traversal method
+  stops mattering — their cost is the callback, which
+  [roadmap-calls.md](roadmap-calls.md) owns. Callback-free operations —
+  `length`, `reverse`, `==`, and future `append`, `take`, and indexing — get
+  the full traversal win, `length` much more if it totals each chunk's
+  occupancy instead of visiting elements. The standard-library rule in
+  [the roadmap](roadmap.md) asks for benchmark evidence before a native; this
+  is that evidence, and it says which ones.
 - **Whether any other bundled type deserves a compiler-known representation**,
   and what the criterion is. `List` earned it on a measurement; that is the bar.
 
