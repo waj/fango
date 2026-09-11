@@ -323,6 +323,16 @@ func Equal(a, b Type) bool {
 	}
 }
 
+// Repr selects how a nominal type is represented at run time. It is a backend
+// concern only: inference, elaboration, Core, the linter, reflection, and the
+// deriver treat every ADT identically whatever its Repr.
+type Repr uint8
+
+const (
+	ReprADT  Repr = iota // marker interface plus one struct per constructor
+	ReprList             // fangort.List, the bundled List type
+)
+
 // CtorInfo is one constructor's row in the constructor table (doc/design.md, "Type inference"), shared
 // by pattern checking, exhaustiveness checking, and codegen.
 type CtorInfo struct {
@@ -330,6 +340,9 @@ type CtorInfo struct {
 	Index  int    // declaration position; drives layout and tree ordering
 	Fields []Type // solved constructor field types
 	Result *TCon  // the ADT this constructor belongs to
+	// Repr mirrors the owning ADT's representation, because the interpreter
+	// discriminates a construction from the CtorInfo alone.
+	Repr Repr
 }
 
 // ValueType is the constructor used as a value: fields curried onto the
@@ -353,6 +366,9 @@ type ADTInfo struct {
 	// kinds from kinds established while resolving its constructor fields.
 	ParamKindsKnown []bool
 	Ctors           []*CtorInfo
+	// Repr selects the backends' runtime representation. Every source type is
+	// ReprADT; the bundled List is recognized at declaration (doc/roadmap-list.md).
+	Repr Repr
 	// RecordFields is non-nil for a standalone nominal record. The sole
 	// synthetic constructor remains an internal representation detail.
 	RecordFields []RecordFieldInfo
