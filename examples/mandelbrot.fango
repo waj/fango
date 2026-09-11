@@ -1,6 +1,7 @@
 import IO
 import Range
 
+printDensity : Int ->{IO} ()
 printDensity density =
     if density > 8 then
         IO.write " "
@@ -11,6 +12,7 @@ printDensity density =
     else
         IO.write "+"
 
+mandelConverger : Float -> Float -> Int -> Float -> Float -> Int
 mandelConverger real imaginary iterations constantReal constantImaginary =
     if iterations > 255 || real * real + imaginary * imaginary >= 4 then
         iterations
@@ -22,9 +24,11 @@ mandelConverger real imaginary iterations constantReal constantImaginary =
             constantReal
             constantImaginary
 
+mandelConverge : Float -> Float -> Int
 mandelConverge real imaginary =
     mandelConverger real imaginary 0 real imaginary
 
+mandel : Float -> Float -> Float -> Float -> {IO} ()
 mandel realStart imaginaryStart realMagnitude imaginaryMagnitude =
     drawRow row =
         drawPoint column =
