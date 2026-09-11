@@ -28,7 +28,7 @@ type Summary = { count : Int, cents : Int }
 type Report = { totals : Dict.Dict String Summary, count : Int, cents : Int }
 
 emptyReport : Report
-emptyReport = Report { totals = Dict.empty, count = 0, cents = 0 }
+emptyReport = { totals = Dict.empty, count = 0, cents = 0 }
 
 -- parseCents reads a decimal amount into cents. The sign is stripped first so
 -- the magnitude parses as an ordinary non-negative number, and a one-digit
@@ -78,7 +78,7 @@ addExpense : String -> Int -> Report -> Report
 addExpense category cents report =
     totals = Dict.update category (\existing ->
         case existing of
-            Nothing -> Just (Summary { count = 1, cents = cents })
+            Nothing -> Just ({ count = 1, cents = cents })
             Just summary -> Just ({ summary | count = summary.count + 1, cents = summary.cents + cents })) report.totals
     { report | totals = totals, count = report.count + 1, cents = report.cents + cents }
 

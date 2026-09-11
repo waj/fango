@@ -11,4 +11,4 @@ run initial action =
     handle action() with current = initial of
         get () -> resume current with current
         put next -> resume () with next
-        return value -> StateResult { value = value, state = current }
+        return value -> { value = value, state = current }

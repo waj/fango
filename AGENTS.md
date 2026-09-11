@@ -32,3 +32,11 @@ is wrong or the document is stale. Preserve the existing verification gates,
 including the Core linter, interpreter/compiler differential suite, functional
 tests, benchmarks, and `go vet`; update relevant goldens with intentional
 language changes.
+
+Do not run the benchmarks during ordinary development. `make test` and `make ci`
+already exclude them, and `make test-perf` measures elapsed time against
+thresholds recorded on one machine, so under a normal working load it reports
+regressions that are contention or a cold cache rather than the change. Check
+only that they still build, with `go vet ./benchmarks`. Run `make test-perf` on
+an otherwise idle machine, and only when the change is meant to move
+performance or could plausibly affect it.

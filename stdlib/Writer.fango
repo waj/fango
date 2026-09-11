@@ -9,4 +9,4 @@ run : (w -> w -> w) -> w -> (() ->{Writer w | e} a) ->{e} WriterResult w a
 run combine empty action =
     handle action() with output = empty of
         tell item -> resume () with combine output item
-        return value -> WriterResult { value = value, output = output }
+        return value -> { value = value, output = output }

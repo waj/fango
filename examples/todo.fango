@@ -128,7 +128,7 @@ addTodo text =
     case load() of
         Nothing -> storageFailure()
         Just todos ->
-            updated = append todos (Todo { text = text, done = False })
+            updated = append todos { text = text, done = False }
             save updated
             print ("Added " ++ show (count updated) ++ ": " ++ text)
 

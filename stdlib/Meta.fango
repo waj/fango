@@ -175,13 +175,12 @@ fieldsFrom repr ctorIndex index =
 
 ctorFor : TypeRepr -> Int -> Ctor
 ctorFor repr index =
-    Ctor
-        { name = ctorName repr index
-        , symbol = ctorSymbol repr index
-        , index = index
-        , owner = repr
-        , fields = fieldsFrom repr index 0
-        }
+    { name = ctorName repr index
+    , symbol = ctorSymbol repr index
+    , index = index
+    , owner = repr
+    , fields = fieldsFrom repr index 0
+    }
 
 ctorsFrom : TypeRepr -> Int -> Items Ctor
 ctorsFrom repr index =
@@ -201,13 +200,12 @@ shapeOf repr =
 -- calls it when it invokes a deriver for a type it is declaring.
 infoOf : TypeRepr -> TypeInfo
 infoOf repr =
-    TypeInfo
-        { name = typeSurfaceName repr
-        , moduleName = typeModuleName repr
-        , ty = repr
-        , params = args repr
-        , shape = shapeOf repr
-        }
+    { name = typeSurfaceName repr
+    , moduleName = typeModuleName repr
+    , ty = repr
+    , params = args repr
+    , shape = shapeOf repr
+    }
 
 info : TypeRepr -> Reflected
 info repr = if schemaVisible repr then Visible (infoOf repr) else Opaque
@@ -254,16 +252,15 @@ constructPush = native "$1 == $2"
 
 bindField : Code -> Ctor -> Field -> BoundField
 bindField scrutinee ctor field =
-    BoundField
-        { name = field.name
-        , index = field.index
-        , ty = field.ty
-        , value = varCode (binderName scrutinee ctor.index field.index)
-        }
+    { name = field.name
+    , index = field.index
+    , ty = field.ty
+    , value = varCode (binderName scrutinee ctor.index field.index)
+    }
 
 boundOf : Code -> Ctor -> Bound
 boundOf scrutinee ctor =
-    Bound { ctor = ctor, fields = mapItems (bindField scrutinee ctor) ctor.fields }
+    { ctor = ctor, fields = mapItems (bindField scrutinee ctor) ctor.fields }
 
 patternOf : Code -> Ctor -> Code
 patternOf scrutinee ctor =

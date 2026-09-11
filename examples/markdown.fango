@@ -43,9 +43,9 @@ contains target input =
 takeEmphasis : String -> Builder -> Emphasis
 takeEmphasis input content =
     case String.uncons input of
-        Nothing -> Emphasis { content = content, remaining = "" }
+        Nothing -> { content = content, remaining = "" }
         Just (String.Uncons { first = ^emphasisMarker, rest = remaining }) ->
-            Emphasis { content = content, remaining = remaining }
+            { content = content, remaining = remaining }
         Just (String.Uncons { first = character, rest = remaining }) ->
             takeEmphasis remaining (appendBuilder content (escapeChar character))
 
@@ -81,13 +81,13 @@ classify input =
 flush : State -> State
 flush state =
     case state of
-        State { block = NoBlock } -> state
-        State { block = Paragraph content } ->
+        { block = NoBlock } -> state
+        { block = Paragraph content } ->
             State {
                 block = NoBlock,
                 document = appendBuilder state.document (around "<p>" content "</p>\n")
             }
-        State { block = Bullets items } ->
+        { block = Bullets items } ->
             State {
                 block = NoBlock,
                 document = appendBuilder state.document (around "<ul>\n" items "</ul>\n")
@@ -107,14 +107,14 @@ step input state =
             { cleared | document = appendBuilder cleared.document html }
         Bullet body ->
             case state of
-                State { block = Bullets items } ->
+                { block = Bullets items } ->
                     { state | block = Bullets (appendBuilder items (listItem body)) }
                 _ ->
                     cleared = flush state
                     { cleared | block = Bullets (listItem body) }
         Ordinary body ->
             case state of
-                State { block = Paragraph content } ->
+                { block = Paragraph content } ->
                     joined = appendBuilder content (appendBuilder (Chunk " ") (inline body))
                     { state | block = Paragraph joined }
                 _ ->
@@ -141,4 +141,4 @@ convert state =
             writePending (Cons finished.document Nil)
         Just (IO.Line { text = input }) -> convert (step input state)
 
-main() = convert (State { block = NoBlock, document = EmptyBuilder })
+main() = convert { block = NoBlock, document = EmptyBuilder }
