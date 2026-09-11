@@ -119,3 +119,33 @@ func ListShow[T any](show func(T, bool) string, v List[T], nested bool) string {
 	b.WriteString(strings.Repeat(")", opened))
 	return b.String()
 }
+
+// ListMap applies fn to every element in order, in one forward pass. The
+// source's shape is known, so each chunk is mirrored into a fresh one — filled
+// head to tail, so an effectful callback still runs in element order — and
+// linked as it goes. No recursion, no intermediate list, and the same number
+// of chunks as the source.
+//
+// Writing this in fango costs either a Go frame per element (recursing under
+// the constructor) or a second pass and a second list (accumulating and
+// reversing). This is the one-pass form neither can express.
+func ListMap[A, B any](fn func(A) B, l List[A]) List[B] {
+	if l.node == nil {
+		return List[B]{}
+	}
+	mirror := func(src *chunk[A], off int) *chunk[B] {
+		dst := &chunk[B]{lo: off}
+		for i := off; i < listChunk; i++ {
+			dst.elems[i] = fn(src.elems[i])
+		}
+		return dst
+	}
+	head := mirror(l.node, l.off)
+	cur := head
+	for src := l.node.next; src.node != nil; src = src.node.next {
+		dst := mirror(src.node, src.off)
+		cur.next = List[B]{node: dst, off: src.off}
+		cur = dst
+	}
+	return List[B]{node: head, off: l.off}
+}

@@ -73,3 +73,28 @@ problem; it belongs with
 [effect-row subsumption](roadmap.md#effect-row-subsumption-for-higher-order-arguments).
 `testdata/run/list_of_functions.fango` is written around it, annotating every
 element into one closed row.
+
+## What a native `map` would need
+
+`fangort.ListMap` exists and is measured: one forward pass over the source
+chunks, 2.4 times faster than the accumulate-and-reverse implementation and
+half its allocation. It is not yet reachable from fango. Wiring it up runs into
+three separate gaps, none of them about lists:
+
+- **Core lint rejects the declaration.** `matchNativeType` requires a
+  declaration's effect row and the call site's to have tails alike, and a
+  higher-order native's callback row is a variable that elaboration erases. The
+  rule was written when every native was a closed scalar signature. It needs to
+  bind a row variable the way it already binds a type variable.
+- **A native cannot call a fango function.** No native takes one today, and the
+  interpreter's native runtime has no way to apply a closure, nor to propagate
+  an exit raised inside one back out through the native boundary.
+- **A single template cannot serve both ABI families.** An effect-polymorphic
+  worker has Direct and Exit members; the Exit member's callback returns an
+  `Outcome` and the result is an `Outcome`. One Go expression string cannot
+  spell both, so native lowering would have to become transport-aware, or a
+  native would need one template per family.
+
+Together these are the concrete content of extending the native ABI beyond
+scalars, which the [roadmap](roadmap.md) holds open. The payoff is known and
+the list side of it is already written; what is missing is the mechanism.

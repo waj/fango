@@ -9,7 +9,7 @@ import "testing"
 //
 // The headline: chunk-awareness is worth little on its own once a per-element
 // callback is in the loop, and worth a great deal when it replaces recursion.
-// mapChunk is the prototype of the planned native, kept honest by
+// ListMap is the prototype of the planned native, kept honest by
 // TestMapChunkMatchesMapRec.
 
 const benchN = 100000
@@ -141,30 +141,6 @@ func mapRec(f func(int64) int64, l List[int64]) List[int64] {
 	return ListCons(f(l.Head()), mapRec(f, l.Tail()))
 }
 
-// A chunk-aware native: mirror each source chunk into a fresh one, filling it
-// head-to-tail so the callback still runs in element order, and link forward.
-// No recursion, no intermediate buffer, same chunk count as the source.
-func mapChunk(f func(int64) int64, l List[int64]) List[int64] {
-	if l.node == nil {
-		return List[int64]{}
-	}
-	fill := func(src *chunk[int64], off int) *chunk[int64] {
-		dst := &chunk[int64]{lo: off}
-		for i := off; i < listChunk; i++ {
-			dst.elems[i] = f(src.elems[i])
-		}
-		return dst
-	}
-	head := fill(l.node, l.off)
-	cur := head
-	for src := l.node.next; src.node != nil; src = src.node.next {
-		dst := fill(src.node, src.off)
-		cur.next = List[int64]{node: dst, off: src.off}
-		cur = dst
-	}
-	return List[int64]{node: head, off: l.off}
-}
-
 var sinkL List[int64]
 
 func BenchmarkMapRecursive(b *testing.B) {
@@ -181,7 +157,7 @@ func BenchmarkMapChunkForward(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		sinkL = mapChunk(plainCB, l)
+		sinkL = ListMap(plainCB, l)
 	}
 }
 
@@ -195,10 +171,46 @@ func TestMapChunkMatchesMapRec(t *testing.T) {
 			if src.IsEmpty() && n > 1 {
 				t.Fatal("tail of a non-trivial list is empty")
 			}
-			want, got := mapRec(plainCB, src), mapChunk(plainCB, src)
+			want, got := mapRec(plainCB, src), ListMap(plainCB, src)
 			if !ListEq(func(a, b int64) bool { return a == b }, want, got) {
 				t.Fatalf("n=%d: chunk-wise map disagrees with the recursive one", n)
 			}
+		}
+	}
+}
+
+// What stdlib List.map compiles to today: a tail-recursive accumulator loop,
+// then a reverse loop. Two passes, two lists.
+func mapAccumReverse(f func(int64) int64, l List[int64]) List[int64] {
+	acc := ListNil[int64]()
+	for c := l; !c.IsEmpty(); c = c.Tail() {
+		acc = ListCons(f(c.Head()), acc)
+	}
+	out := ListNil[int64]()
+	for c := acc; !c.IsEmpty(); c = c.Tail() {
+		out = ListCons(c.Head(), out)
+	}
+	return out
+}
+
+func BenchmarkMapAccumReverse(b *testing.B) {
+	l := mkList()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		sinkL = mapAccumReverse(plainCB, l)
+	}
+}
+
+func TestMapAccumReverseMatchesListMap(t *testing.T) {
+	for _, n := range []int{0, 1, listChunk - 1, listChunk, listChunk + 1, 500} {
+		l := ListNil[int64]()
+		for i := int64(1); i <= int64(n); i++ {
+			l = ListCons(i, l)
+		}
+		eq := func(a, b int64) bool { return a == b }
+		if !ListEq(eq, mapAccumReverse(plainCB, l), ListMap(plainCB, l)) {
+			t.Fatalf("n=%d: one-pass map disagrees with accumulate-and-reverse", n)
 		}
 	}
 }
