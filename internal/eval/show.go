@@ -18,6 +18,9 @@ func Show(v Value, ty types.Type, b *types.Builtins) string {
 	if cv, ok := v.(*CtorVal); ok {
 		return showCtorVal(cv, false)
 	}
+	if l, ok := v.(fangort.List[Value]); ok {
+		return fangort.ListShow(showFieldValueNested, l, false)
+	}
 	if con, ok := ty.(*types.TCon); ok && len(con.Args) == 0 {
 		switch con.Unique {
 		case b.Int.Unique:
@@ -71,10 +74,17 @@ func showFieldValue(f Value) string {
 		return fangort.ShowUnit()
 	case *CtorVal:
 		return showCtorVal(f, true)
+	case fangort.List[Value]:
+		return fangort.ListShow(showFieldValueNested, f, true)
 	default:
 		return fmt.Sprintf("<unshowable %T>", f)
 	}
 }
+
+// showFieldValueNested adapts showFieldValue to fangort's element-operation
+// shape. Every list element is a nested position, so the flag is ignored, and
+// the compiled backend's showT_X passes `true` at exactly these positions.
+func showFieldValueNested(f Value, nested bool) string { return showFieldValue(f) }
 
 // ShowForPrint renders a value with `print` semantics — identical to Show
 // except Strings are raw, mirroring fangort.PrintString. The differential

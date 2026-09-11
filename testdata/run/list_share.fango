@@ -1,0 +1,27 @@
+-- Consing twice onto one list must produce independent lists and leave the
+-- shared tail untouched. This is the behavior a slice-backed prepend that
+-- wrote into its tail's storage would get wrong; the bundled List is
+-- array-backed, so nothing else in the suite covers it.
+import List
+
+drop values =
+    case values of
+        [] -> []
+        [_ | rest] -> rest
+
+main() =
+    xs = [1, 2, 3]
+    a = [10 | xs]
+    b = [20 | xs]
+    c = [30 | a]
+    d = [40 | drop xs]
+    -- Read them out of construction order: a later cons must not have
+    -- clobbered an earlier one's slot.
+    print d
+    print b
+    print c
+    print a
+    print xs
+    print (List.foldl (\v acc -> v + acc) 0 xs)
+    print (a == [10, 1, 2, 3])
+    print (a == b)

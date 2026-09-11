@@ -1,0 +1,43 @@
+-- A list whose elements are functions that may abort. The bundled List has one
+-- runtime type for both ABI families, because its own constructor fields
+-- cannot be controlled and the Direct/Exit distinction rides entirely on the
+-- element type argument; this is what pins that.
+--
+-- Every element performs the effect, because a list literal's elements share
+-- one type and an annotation's row must match its body exactly — see the
+-- roadmap's effect-row subsumption item.
+import List
+import Result exposing (Result(..))
+
+effect Fail error
+    abort fail : error -> value
+
+attempt : (() ->{Fail String | e} Int) ->{e} Result String Int
+attempt action =
+    handle action() of
+        fail error -> Err error
+        return value -> Ok value
+
+double : Int ->{Fail String} Int
+double n = if n > 1000 then fail "overflow" else n * 2
+
+guard : Int ->{Fail String} Int
+guard n = if n > 10 then fail "too big" else n + 1
+
+applyAll : List.List (Int ->{Fail String} Int) -> Int ->{Fail String} Int
+applyAll fns n =
+    case fns of
+        [] -> n
+        [fn | rest] -> applyAll rest (fn n)
+
+mixed : List.List (Int ->{Fail String} Int)
+mixed = [guard, guard]
+
+main() =
+    print (attempt (\_ -> applyAll [double, double] 3))
+    print (attempt (\_ -> applyAll [guard, double] 2))
+    print (attempt (\_ -> applyAll [double, guard, double] 9))
+    -- The same list value reused across two handler activations.
+    print (attempt (\_ -> applyAll mixed 1))
+    print (attempt (\_ -> applyAll mixed 20))
+    print (attempt (\_ -> applyAll [] 7))

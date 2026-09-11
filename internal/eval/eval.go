@@ -736,6 +736,15 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				}
 				fields[i] = v
 			}
+			if e.Ctor.Repr == types.ReprList {
+				// The bundled List shares the compiled backend's runtime
+				// representation (doc/roadmap-list.md). The discriminator is on
+				// the constructor because there is no ADT table here.
+				if len(fields) == 0 {
+					return fangort.ListNil[Value](), nil
+				}
+				return fangort.ListCons(fields[0], fields[1].(fangort.List[Value])), nil
+			}
 			return &CtorVal{Ctor: e.Ctor, Fields: fields}, nil
 		default:
 			return nil, fmt.Errorf("eval: App with unknown CalleeKind")
@@ -863,6 +872,8 @@ func (in *interp) showValue(v Value) (string, error) {
 		s = fangort.ShowBool(v)
 	case *CtorVal:
 		s = showCtorVal(v, false)
+	case fangort.List[Value]:
+		s = fangort.ListShow(showFieldValueNested, v, false)
 	default:
 		return "", fmt.Errorf("eval: printing a %T", v)
 	}
@@ -911,6 +922,27 @@ func (in *interp) tree(t core.Tree, fr *Frame, leaf func(core.Expr, *Frame) (Val
 				if c.Ctor.Name == want {
 					return in.tree(c.Tree, fr, leaf)
 				}
+			}
+			return in.tree(t.Default, fr, leaf)
+		}
+		if l, isList := v.(fangort.List[Value]); isList {
+			// As with Bool above: an ordinary ADT to the checker, a runtime
+			// representation here and in generated Go.
+			want, binds := listNilIndex, []Value(nil)
+			if !l.IsEmpty() {
+				want, binds = listConsIndex, []Value{l.Head(), l.Tail()}
+			}
+			for _, c := range t.Cases {
+				if c.Ctor.Index != want {
+					continue
+				}
+				vars := map[string]Value{}
+				for i, bind := range c.Binds {
+					if bind != "" {
+						vars[bind] = binds[i]
+					}
+				}
+				return in.tree(c.Tree, &Frame{parent: fr, vars: vars}, leaf)
 			}
 			return in.tree(t.Default, fr, leaf)
 		}
@@ -996,7 +1028,20 @@ func (in *interp) force(name string) (Value, error) {
 // eqValue is structural equality — the interpreter's mirror of the derived
 // eqT_X functions (doc/design.md, "Go backend and runtime"). Function-containing types were rejected by the
 // checker, so every reachable field compares.
+// listNilIndex and listConsIndex mirror the bundled declaration's layout,
+// which infer's markListRepr verifies before any of this runs.
+const (
+	listNilIndex  = 0
+	listConsIndex = 1
+)
+
 func eqValue(l, r Value) bool {
+	if ll, ok := l.(fangort.List[Value]); ok {
+		// Must precede the scalar fallback: List is deliberately not
+		// comparable with Go ==, so reaching the fallback would panic rather
+		// than answer.
+		return fangort.ListEq(eqValue, ll, r.(fangort.List[Value]))
+	}
 	if lc, ok := l.(*CtorVal); ok {
 		rc := r.(*CtorVal)
 		if lc.Ctor.Index != rc.Ctor.Index {

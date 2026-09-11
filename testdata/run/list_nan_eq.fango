@@ -1,0 +1,18 @@
+-- Derived list equality is structural, element by element. A representation
+-- that answered from identity would call this list equal to itself, because
+-- it is the same list; Float equality says otherwise.
+import List
+
+nan = 0.0 / 0.0
+
+empty : List.List Float
+empty = []
+
+main() =
+    withNan = [1.0, nan, 3.0]
+    plain = [1.0, 2.0, 3.0]
+    print (withNan == withNan)
+    print (plain == plain)
+    print (withNan == plain)
+    print (empty == empty)
+    print ([nan] == [nan])
