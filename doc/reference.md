@@ -227,6 +227,11 @@ contiguous. That representation is not observable — values are immutable, so
 sharing has no effect a program can detect — but it is what the complexity
 above rests on. `length` is a traversal, not a stored count.
 
+`map`, `filter`, and `foldr` build an intermediate list and reverse it, so they
+run in constant stack rather than one frame per element, at the cost of
+allocating each result twice. Callback order is unaffected: `map` and `filter`
+call theirs from left to right, `foldr` from right to left.
+
 `Range.each : (Num a, Ord a) => (a ->{e} ()) -> a -> a ->{e} ()` traverses an
 inclusive ascending numeric range without constructing a `List`. For example,
 `Range.each drawPoint 0 78` calls `drawPoint` with every value from `0` through

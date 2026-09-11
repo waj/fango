@@ -29,27 +29,56 @@ foldl combine result values =
         [] -> result
         [value | rest] -> foldl combine (combine value result) rest
 
-foldr : (a -> b ->{e} b) -> b -> List a ->{e} b
-foldr combine initial values =
+-- reverse and length are written out rather than expressed through foldl.
+-- foldl takes its callback curried, so routing through it would allocate a
+-- closure per element; these have no callback at all.
+reverseHelp : List a -> List a -> List a
+reverseHelp values acc =
     case values of
-        [] -> initial
-        [value | rest] -> combine value (foldr combine initial rest)
-
-map : (a ->{e} b) -> List a ->{e} List b
-map fn values =
-    case values of
-        [] -> []
-        [value | rest] -> [fn value | map fn rest]
-
-filter : (a ->{e} Bool) -> List a ->{e} List a
-filter keep values =
-    case values of
-        [] -> []
-        [value | rest] ->
-            if keep value then [value | filter keep rest] else filter keep rest
-
-length : List a -> Int
-length values = foldl (\_ total -> total + 1) 0 values
+        [] -> acc
+        [value | rest] -> reverseHelp rest [value | acc]
 
 reverse : List a -> List a
-reverse values = foldl (\value acc -> [value | acc]) [] values
+reverse values = reverseHelp values []
+
+lengthHelp : List a -> Int -> Int
+lengthHelp values total =
+    case values of
+        [] -> total
+        [_ | rest] -> lengthHelp rest (total + 1)
+
+length : List a -> Int
+length values = lengthHelp values 0
+
+-- map, filter, and foldr accumulate and reverse rather than recurse under the
+-- constructor. Written the direct way they cost one Go frame per element and
+-- grow the stack without bound; written this way every recursive call is a
+-- tail call, so both backends run them as loops in constant stack. The
+-- accumulator reverses the result, which is what the final reverse undoes.
+mapHelp : (a ->{e} b) -> List a -> List b ->{e} List b
+mapHelp fn values acc =
+    case values of
+        [] -> acc
+        [value | rest] -> mapHelp fn rest [fn value | acc]
+
+map : (a ->{e} b) -> List a ->{e} List b
+map fn values = reverse (mapHelp fn values [])
+
+filterHelp : (a ->{e} Bool) -> List a -> List a ->{e} List a
+filterHelp keep values acc =
+    case values of
+        [] -> acc
+        [value | rest] ->
+            if keep value then
+                filterHelp keep rest [value | acc]
+            else
+                filterHelp keep rest acc
+
+filter : (a ->{e} Bool) -> List a ->{e} List a
+filter keep values = reverse (filterHelp keep values [])
+
+-- foldr visits from the right, which is exactly foldl over the reversed list;
+-- the callback still sees elements last-to-first, so its effects keep their
+-- order.
+foldr : (a -> b ->{e} b) -> b -> List a ->{e} b
+foldr combine initial values = foldl combine initial (reverse values)

@@ -28,12 +28,19 @@ allocation per element at a higher-order boundary. Non-tail recursion adds one
 Go frame per element. Allocation volume is identical between the loop and
 recursion rows, so the recursion cost is frames rather than memory.
 
-A third result decides how to read these. `List.each` and `List.foldl` already
-compile to loops, because they are self-tail-recursive; `List.filter` gets its
-else branch. `List.map` and `List.foldr` do not. Yet a `foldl`-based sum runs
-*slower* than a hand-written non-tail-recursive one, because `foldl` pays the
-curried callback on every element while the recursive version pays nothing at a
+A third result decides how to read these. A `foldl`-based sum runs *slower*
+than a hand-written non-tail-recursive one, because `foldl` pays the curried
+callback on every element while the recursive version pays nothing at a
 higher-order boundary at all.
+
+That cost reaches inside the library. `map`, `filter`, and `foldr` were
+rewritten to accumulate and reverse so every recursive call is a tail call and
+both backends run them as loops; the first attempt expressed `reverse` through
+`foldl` and made the list benchmark *worse*, because a closure per element cost
+more than the recursion it removed. Written without a callback, the same
+rewrite is worth about 1.4x on that benchmark. `reverse` and `length` are
+therefore written out rather than expressed through `foldl`, which is a
+standing hazard for any library function that looks like a fold until C1 lands.
 
 Native, chunk-aware implementations of the combinators are worth having, but
 not for the reason they first appear to be, and not for all of them.
@@ -53,14 +60,19 @@ traversal method stops mattering — the nested loop is in fact slightly worse,
 because more state stays live across the call. So a native `each` or `foldl`
 buys nothing: they are already loops, and their cost is the callback.
 
-`map` is the opposite case. It gains four-fold, and none of that is traversal:
-it is the recursion. A chunk-aware `map` mirrors each source chunk into a fresh
-one, filling it head-to-tail so the callback still runs in element order, and
-links forward — one pass, no recursion, no intermediate buffer, and the same
-chunk count as the source. `filter` and `foldr` have the same shape.
+`map` is the opposite case. Measured against the recursive implementation it
+gains four-fold, and none of that is traversal: it is the recursion. A
+chunk-aware `map` mirrors each source chunk into a fresh one, filling it
+head-to-tail so the callback still runs in element order, and links forward —
+one pass, no recursion, no intermediate buffer, and the same chunk count as the
+source. `filter` and `foldr` have the same shape.
 
-That is the same win C2 below delivers, by a narrower and much cheaper route.
-The difference is reach: a native fixes the library, while C2 fixes every
+Accumulate-and-reverse has since taken part of that win in ordinary fango, so
+the remaining gap for a native is one pass against two and no intermediate list
+rather than the full four-fold. It is still the widest of the three.
+
+C2 below delivers the one-pass form as a compiler transform instead. The
+difference is reach: a native fixes the library, while C2 fixes every
 user-written function of the same shape — and the benchmark furthest from Go
 calls no library function at all, only user-written `build` and `sum`. Landing
 natives first is defensible on cost; it does not remove the reason for C2.

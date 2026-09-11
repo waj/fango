@@ -1,0 +1,41 @@
+-- map, filter, and foldr accumulate and reverse rather than recurse under the
+-- constructor, so the order their callbacks run in is exactly what that
+-- rewrite could have changed. map and filter visit left to right; foldr visits
+-- right to left, because it folds the rest of the list before combining.
+import IO exposing (write)
+import List
+
+noisyDouble : Int ->{IO} Int
+noisyDouble n =
+    write (show n)
+    n * 2
+
+noisyKeep : Int ->{IO} Bool
+noisyKeep n =
+    write (show n)
+    n > 2
+
+noisySub : Int -> Int ->{IO} Int
+noisySub v acc =
+    write (show v)
+    v - acc
+
+main() =
+    xs = [1, 2, 3, 4]
+    write "map:"
+    mapped = List.map noisyDouble xs
+    write "="
+    print mapped
+    write "filter:"
+    kept = List.filter noisyKeep xs
+    write "="
+    print kept
+    write "foldr:"
+    folded = List.foldr noisySub 0 xs
+    write "="
+    print folded
+    write "foldl:"
+    print (List.foldl noisySub 0 xs)
+    write "each:"
+    List.each (\n -> write (show n)) xs
+    print ""
