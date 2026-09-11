@@ -51,7 +51,10 @@ func Prelude() (*ast.Module, fixity.Table, map[string]bool, []diag.Error) {
 		}
 	}
 
-	for _, root := range []string{"Basics", "Meta", "Derive", "IO"} {
+	// Tuple joins the roots because `(a, b)` is surface syntax like bracket
+	// lists, and syntax that always parses must always resolve — in the REPL
+	// and the checker harness, not only where module resolution runs.
+	for _, root := range []string{"Basics", "Meta", "Derive", "IO", "Tuple"} {
 		load(root)
 	}
 	if len(errs) > 0 {

@@ -1,0 +1,5 @@
+pair : Num a => (a, String)
+triple : Num a => (Bool, a, String)
+swapped : (a, b) -> (b, a)
+annotated : (Int, String) -> Int
+nested : (Num a, Num b, Num c) => ((a, b), c)

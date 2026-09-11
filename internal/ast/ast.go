@@ -43,9 +43,9 @@ type Var struct {
 
 // Ctor is a constructor reference, including builtin True and False.
 type Ctor struct {
-	Name       string
-	Sp         source.Span
-	ListSyntax bool // parser-generated List.Nil/List.Cons; bypasses import lookup
+	Name    string
+	Sp      source.Span
+	Sugared bool // parser-generated bundled ctor (list or tuple); bypasses import lookup
 }
 
 // RecordLit is keyed construction of a nominal record, `Counts { lines = 1 }`.
@@ -223,9 +223,10 @@ func (r *EffRow) Span() source.Span { return r.Sp }
 // TApp is type application, `Maybe Int`. The head is always an uppercase
 // name — type variables cannot head applications (no higher kinds, doc/design.md, "Go backend and runtime").
 type TApp struct {
-	Name   string
-	NameSp source.Span
-	Args   []TypeExpr // non-empty
+	Name    string
+	NameSp  source.Span
+	Args    []TypeExpr // non-empty
+	Sugared bool       // parser-generated bundled type (tuple); bypasses import lookup
 }
 
 func (*TName) isTypeExpr()    {}
@@ -432,10 +433,10 @@ type RecordPatternField struct {
 }
 
 type PCtor struct {
-	Name       string
-	NameSpan   source.Span
-	Args       []Pattern
-	ListSyntax bool // parser-generated List.Nil/List.Cons; bypasses import lookup
+	Name     string
+	NameSpan source.Span
+	Args     []Pattern
+	Sugared  bool // parser-generated bundled ctor (list or tuple); bypasses import lookup
 }
 
 func (*PVar) isPattern()      {}
@@ -692,6 +693,10 @@ type Module struct {
 	// UsesLists records bracket list syntax. The module loader adds List as a
 	// syntax dependency without exposing its ordinary names.
 	UsesLists bool
+
+	// UsesTuples records `(a, b)` syntax, in type, expression, or pattern
+	// position. The module loader adds Tuple the same way it adds List.
+	UsesTuples bool
 }
 
 // Spelling renders a declaration name the way it is written in source: an

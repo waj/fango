@@ -1,0 +1,52 @@
+import IO
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Tuple exposing (first, second, swap)
+
+pair : (Int, String)
+pair = (1, "one")
+
+triple : (Int, String, Bool)
+triple = (2, "two", True)
+
+nested : ((Int, Int), Int)
+nested = ((1, 2), 3)
+
+-- A tuple parameter and a class context in one annotation: the parser has to
+-- tell `(Show a, Show b) =>` from the tuple that follows it.
+render : (Show a, Show b) => (a, b) -> String
+render p =
+    case p of
+        (a, b) -> show a ++ "/" ++ show b
+
+sumBoth : (Int, Int) -> Int
+sumBoth p =
+    case p of
+        (a, b) -> a + b
+
+pick : (Int, Int, Int) -> Int
+pick t =
+    case t of
+        (1, b, _) -> b
+        (_, _, c) -> c
+
+main() =
+    print pair
+    print triple
+    print nested
+    print (render pair)
+    print (sumBoth (3, 4))
+    print (pick (1, 20, 30))
+    print (pick (9, 20, 30))
+    print (first pair)
+    print (second pair)
+    print (swap pair)
+    print [(1, 2), (3, 4)]
+    print (Just (1, 2))
+    (x, y) = pair
+    print x
+    print y
+    print (pair == (1, "one"))
+    print (pair == (1, "two"))
+    print (pair < (1, "two"))
+    print ((1, 2, 3) < (1, 2, 4))

@@ -302,6 +302,29 @@ type Maybe a = Nothing | Just a deriving (Eq, Ord, Show)
 `withDefault : a -> Maybe a -> a` returns the contained value or the
 fallback.
 
+`Tuple` exposes the types behind tuple syntax:
+
+```fango
+module Tuple exposing (Pair(..), Triple(..), first, second, swap)
+
+type Pair a b = Pair a b deriving (Eq, Ord)
+
+type Triple a b c = Triple a b c deriving (Eq, Ord)
+```
+
+`(a, b)` and `(a, b, c)` are surface syntax for these, so a file that uses
+tuples needs no import; naming `Tuple`, `Pair`, or `Triple` still does. Both
+types have handwritten `Show` instances that display a tuple the way it is
+written, `(1, one)`, rather than the derived structural form `Pair 1 one`,
+and the type printer spells them `(Int, String)` for the same reason.
+Derived `Eq` and `Ord` compare elements left to right, so `Ord` on a tuple
+needs `Ord` on every element.
+
+Its public function types are `first : Pair a b -> a`,
+`second : Pair a b -> b`, and `swap : Pair a b -> Pair b a`. There is no
+`Triple` accessor set and no `mapFirst`/`mapSecond`; pattern matching covers
+both, and the roadmap adds library functions when an example needs them.
+
 `Json` exposes a derivable encoding class:
 
 ```fango
@@ -996,6 +1019,29 @@ the tail must be a list of that type. A trailing comma is not accepted, and
 `|` requires at least one element on its left and one tail expression on its
 right. Bracket syntax selects the bundled constructors directly and needs no
 import; naming `List`, `Nil`, or `Cons` still does.
+
+Tuples use parentheses and commas in type, expression, and pattern position
+alike:
+
+```fango
+labelled : (Int, String)
+labelled = (1, "one")
+
+keyOf : (k, v) -> k
+keyOf pair =
+    case pair of
+        (key, _) -> key
+```
+
+`(a, b)` is `Tuple.Pair a b` and `(a, b, c)` is `Tuple.Triple a b c`, in
+every position. Elements are evaluated left to right. A tuple holds two or
+three elements; four or more is a `TUPLE TOO BIG` error pointing at nominal
+records, whose fields have names. `(e)` with no comma stays an ordinary
+grouped expression, type, or pattern, and `()` remains Unit. Like bracket
+syntax, tuple syntax selects the bundled types directly and needs no import.
+
+A class context is told apart from a tuple type by its `=>`, so
+`(Eq a, Show a) => (a, a) -> String` reads the way it looks.
 
 Equality, ordering, and display are opt-in, either handwritten instances or an
 explicit deriving clause:

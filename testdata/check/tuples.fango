@@ -1,0 +1,14 @@
+pair = (1, "one")
+
+triple = (True, 2, "three")
+
+swapped p =
+    case p of
+        (a, b) -> (b, a)
+
+annotated : (Int, String) -> Int
+annotated p =
+    case p of
+        (n, _) -> n
+
+nested = ((1, 2), 3)

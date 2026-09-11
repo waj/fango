@@ -1,0 +1,42 @@
+module Tuple exposing (Pair(..), Triple(..), first, second, swap)
+
+import Basics
+
+-- `(a, b)` and `(a, b, c)` are surface syntax for these types, in type,
+-- expression, and pattern position alike. The parser writes the constructor
+-- directly, so a file using tuple syntax needs no import.
+--
+-- Arity stops at three. Each one is a separate nominal type here rather than a
+-- compiler limit, so raising the cap is four more lines; past three, a record
+-- with named fields reads better than positional ones.
+type Pair a b = Pair a b deriving (Eq, Ord)
+
+type Triple a b c = Triple a b c deriving (Eq, Ord)
+
+-- Show is handwritten so a tuple displays the way it is written, `(1, 2)`,
+-- rather than the derived structural form `Pair 1 2`. List does the same for
+-- its bracket display.
+instance (Show a, Show b) => Show (Pair a b)
+    show pair =
+        case pair of
+            Pair a b -> "(" ++ show a ++ ", " ++ show b ++ ")"
+
+instance (Show a, Show b, Show c) => Show (Triple a b c)
+    show triple =
+        case triple of
+            Triple a b c -> "(" ++ show a ++ ", " ++ show b ++ ", " ++ show c ++ ")"
+
+first : Pair a b -> a
+first pair =
+    case pair of
+        Pair a _ -> a
+
+second : Pair a b -> b
+second pair =
+    case pair of
+        Pair _ b -> b
+
+swap : Pair a b -> Pair b a
+swap pair =
+    case pair of
+        Pair a b -> Pair b a

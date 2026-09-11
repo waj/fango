@@ -407,6 +407,9 @@ const DeriveModule = "Derive"
 // ListModule owns the List.Nil/List.Cons constructors used by bracket syntax.
 const ListModule = "List"
 
+// TupleModule owns the Pair/Triple types and constructors used by `(a, b)`.
+const TupleModule = "Tuple"
+
 // implicitDeps adds the bundled modules a file needs because of the syntax it
 // used rather than because it imported them.
 func implicitDeps(m *ast.Module, deps []string, self string) []string {
@@ -418,6 +421,9 @@ func implicitDeps(m *ast.Module, deps []string, self string) []string {
 	}
 	if m.UsesLists && self != ListModule {
 		deps = addDep(deps, ListModule)
+	}
+	if m.UsesTuples && self != TupleModule {
+		deps = addDep(deps, TupleModule)
 	}
 	return deps
 }
@@ -1424,7 +1430,9 @@ func (r *resolver) typ(t ast.TypeExpr) {
 	case *ast.TName:
 		t.Name = r.qualified(t.Name, r.tys, "type", t.Sp)
 	case *ast.TApp:
-		t.Name = r.qualified(t.Name, r.tys, "type", t.NameSp)
+		if !t.Sugared {
+			t.Name = r.qualified(t.Name, r.tys, "type", t.NameSp)
+		}
 		for _, a := range t.Args {
 			r.typ(a)
 		}
@@ -1463,7 +1471,7 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 			e.Name = r.qualified(e.Name, vals, "value", e.Sp)
 		}
 	case *ast.Ctor:
-		if !e.ListSyntax {
+		if !e.Sugared {
 			e.Name = r.qualified(e.Name, r.ctors, "ctor", e.Sp)
 		}
 	case *ast.RecordLit:
@@ -1680,7 +1688,7 @@ func (r *resolver) patternInner(p ast.Pattern, locals, outer map[string]bool, va
 			p.Name = r.qualified(p.Name, vals, "value", p.NameSpan)
 		}
 	case *ast.PCtor:
-		if !p.ListSyntax {
+		if !p.Sugared {
 			p.Name = r.qualified(p.Name, r.ctors, "ctor", p.NameSpan)
 		}
 		for _, a := range p.Args {

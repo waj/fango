@@ -41,6 +41,13 @@ func (p *Printer) render(t Type) string {
 		if len(t.Args) == 0 {
 			return SurfaceName(t.Name)
 		}
+		if n := tupleArity(t.Name); n == len(t.Args) {
+			parts := make([]string, n)
+			for i, a := range t.Args {
+				parts[i] = p.render(a)
+			}
+			return "(" + strings.Join(parts, ", ") + ")"
+		}
 		parts := []string{SurfaceName(t.Name)}
 		for _, a := range t.Args {
 			parts = append(parts, p.atom(a))
@@ -128,7 +135,8 @@ func (p *Printer) atom(t Type) string {
 	case *TFun:
 		return "(" + p.render(t) + ")"
 	case *TCon:
-		if len(t.Args) > 0 {
+		// A tuple is already bracketed, so it never needs another pair.
+		if len(t.Args) > 0 && tupleArity(t.Name) != len(t.Args) {
 			return "(" + p.render(t) + ")"
 		}
 	}
@@ -185,3 +193,16 @@ func (p *Printer) Scheme(s Scheme) string {
 }
 
 func ShowScheme(s Scheme) string { return NewPrinter().Scheme(s) }
+
+// tupleArity reports the element count of a bundled tuple type, whose surface
+// spelling is `(a, b)` rather than its constructor name. The parser writes
+// these same names when it lowers tuple syntax.
+func tupleArity(name string) int {
+	switch name {
+	case "Tuple.Pair":
+		return 2
+	case "Tuple.Triple":
+		return 3
+	}
+	return 0
+}

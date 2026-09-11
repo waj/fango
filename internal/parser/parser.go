@@ -39,6 +39,7 @@ type parser struct {
 	// module loader knows to pull in the bundled `Meta` module.
 	usesStaging bool
 	usesLists   bool
+	usesTuples  bool
 
 	// stopWith makes the contextual word `with` terminate only the subject
 	// of a handle expression. It remains an ordinary identifier elsewhere.
@@ -69,6 +70,7 @@ func Parse(toks []token.Token, f *source.File) (*ast.Module, []diag.Error) {
 	}
 	m.UsesStaging = p.usesStaging
 	m.UsesLists = p.usesLists
+	m.UsesTuples = p.usesTuples
 	return m, p.errs
 }
 
@@ -1238,6 +1240,9 @@ func (p *parser) parseTypeAtom() ast.TypeExpr {
 		if inner == nil {
 			return nil
 		}
+		if p.peekInExpr().Kind == token.COMMA {
+			return p.parseTupleTypeRest(t, inner)
+		}
 		if !p.expect(token.RPAREN, "I was expecting a closing `)` in this type.") {
 			return nil
 		}
@@ -1700,6 +1705,9 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 		if pat == nil {
 			return nil
 		}
+		if p.peekInExpr().Kind == token.COMMA {
+			return p.parseTuplePatternRest(lp, pat)
+		}
 		if !p.expect(token.RPAREN, "I was expecting a closing `)` in this pattern.") {
 			return nil
 		}
@@ -1731,7 +1739,7 @@ func (p *parser) parseListPattern() ast.Pattern {
 	if p.peek().Kind == token.RBRACKET {
 		rb := p.next()
 		sp := lb.Span.Merge(rb.Span)
-		return &ast.PCtor{Name: "List.Nil", NameSpan: sp, ListSyntax: true}
+		return &ast.PCtor{Name: "List.Nil", NameSpan: sp, Sugared: true}
 	}
 
 	var elems []ast.Pattern
@@ -1790,10 +1798,10 @@ done:
 	rb := p.next()
 	sp := lb.Span.Merge(rb.Span)
 	if tail == nil {
-		tail = &ast.PCtor{Name: "List.Nil", NameSpan: sp, ListSyntax: true}
+		tail = &ast.PCtor{Name: "List.Nil", NameSpan: sp, Sugared: true}
 	}
 	for i := len(elems) - 1; i >= 0; i-- {
-		tail = &ast.PCtor{Name: "List.Cons", NameSpan: sp, Args: []ast.Pattern{elems[i], tail}, ListSyntax: true}
+		tail = &ast.PCtor{Name: "List.Cons", NameSpan: sp, Args: []ast.Pattern{elems[i], tail}, Sugared: true}
 	}
 	return tail
 }
@@ -1999,6 +2007,9 @@ func (p *parser) parseAtom() ast.Expr {
 		if e == nil {
 			return nil
 		}
+		if p.peekInExpr().Kind == token.COMMA {
+			return p.parseTupleExprRest(lp, e)
+		}
 		if inner := p.peekInExpr(); inner.Kind == token.RPAREN {
 			p.next()
 		} else if inner.Kind == token.EOF && p.peek().Kind == token.EOF {
@@ -2038,7 +2049,7 @@ func (p *parser) parseListExpr() ast.Expr {
 	p.usesLists = true
 	if p.peek().Kind == token.RBRACKET {
 		rb := p.next()
-		return &ast.Ctor{Name: "List.Nil", Sp: lb.Span.Merge(rb.Span), ListSyntax: true}
+		return &ast.Ctor{Name: "List.Nil", Sp: lb.Span.Merge(rb.Span), Sugared: true}
 	}
 
 	var elems []ast.Expr
@@ -2097,10 +2108,10 @@ done:
 	rb := p.next()
 	sp := lb.Span.Merge(rb.Span)
 	if tail == nil {
-		tail = &ast.Ctor{Name: "List.Nil", Sp: sp, ListSyntax: true}
+		tail = &ast.Ctor{Name: "List.Nil", Sp: sp, Sugared: true}
 	}
 	for i := len(elems) - 1; i >= 0; i-- {
-		cons := &ast.Ctor{Name: "List.Cons", Sp: sp, ListSyntax: true}
+		cons := &ast.Ctor{Name: "List.Cons", Sp: sp, Sugared: true}
 		tail = &ast.App{Fn: &ast.App{Fn: cons, Arg: elems[i]}, Arg: tail}
 	}
 	return tail
@@ -2209,4 +2220,105 @@ func (p *parser) recoverToTopLevel(consumeFirst bool) {
 
 func (p *parser) errorAt(sp source.Span, title, body string) {
 	p.errs = append(p.errs, diag.Error{Title: title, Span: sp, Body: body})
+}
+
+// Tuple syntax lowers to the bundled Tuple types the same way bracket syntax
+// lowers to List: the parser writes the qualified constructor directly and
+// marks it Sugared, so it resolves without an import.
+//
+// Arity is capped deliberately rather than by any compiler limit. Each arity
+// is one more bundled nominal type, and past three a nominal record with named
+// fields reads better than positional ones.
+func tupleCtorName(n int) string {
+	switch n {
+	case 2:
+		return "Tuple.Pair"
+	case 3:
+		return "Tuple.Triple"
+	default:
+		return ""
+	}
+}
+
+func (p *parser) tupleArityError(sp source.Span, n int) {
+	p.errorAt(sp, "TUPLE TOO BIG",
+		"A tuple holds two or three elements; this one holds "+strconv.Itoa(n)+". Declare a record type instead, so the fields have names.")
+}
+
+// parseTupleTypeRest continues a tuple type after its first element and the
+// comma that proves it is one.
+func (p *parser) parseTupleTypeRest(open token.Token, first ast.TypeExpr) ast.TypeExpr {
+	args := []ast.TypeExpr{first}
+	for p.peekInExpr().Kind == token.COMMA {
+		p.next()
+		next := p.parseTypeExpr()
+		if next == nil {
+			return nil
+		}
+		args = append(args, next)
+	}
+	if !p.expect(token.RPAREN, "I was expecting a closing `)` in this tuple type.") {
+		return nil
+	}
+	sp := open.Span.Merge(p.prevSpan())
+	name := tupleCtorName(len(args))
+	if name == "" {
+		p.tupleArityError(sp, len(args))
+		return nil
+	}
+	p.usesTuples = true
+	return &ast.TApp{Name: name, NameSp: sp, Args: args, Sugared: true}
+}
+
+// parseTupleExprRest continues a tuple expression after its first element.
+// Elements evaluate left to right, which is ordinary constructor application.
+func (p *parser) parseTupleExprRest(open token.Token, first ast.Expr) ast.Expr {
+	args := []ast.Expr{first}
+	for p.peekInExpr().Kind == token.COMMA {
+		p.next()
+		next := p.parseExpr()
+		if next == nil {
+			return nil
+		}
+		args = append(args, next)
+	}
+	if !p.expect(token.RPAREN, "I was expecting a closing `)` in this tuple.") {
+		return nil
+	}
+	sp := open.Span.Merge(p.prevSpan())
+	name := tupleCtorName(len(args))
+	if name == "" {
+		p.tupleArityError(sp, len(args))
+		return nil
+	}
+	p.usesTuples = true
+	var out ast.Expr = &ast.Ctor{Name: name, Sp: sp, Sugared: true}
+	for _, a := range args {
+		out = &ast.App{Fn: out, Arg: a}
+	}
+	return out
+}
+
+// parseTuplePatternRest continues a tuple pattern after its first element.
+func (p *parser) parseTuplePatternRest(open token.Token, first ast.Pattern) ast.Pattern {
+	args := []ast.Pattern{first}
+	for p.peekInExpr().Kind == token.COMMA {
+		p.next()
+		next := p.parsePattern()
+		if next == nil {
+			return nil
+		}
+		args = append(args, next)
+	}
+	if !p.expect(token.RPAREN, "I was expecting a closing `)` in this tuple pattern.") {
+		return nil
+	}
+	sp := open.Span.Merge(p.prevSpan())
+	name := tupleCtorName(len(args))
+	if name == "" {
+		p.tupleArityError(sp, len(args))
+		return nil
+	}
+	p.usesTuples = true
+	return &ast.PCtor{Name: name, NameSpan: sp, Args: args, Sugared: true}
 }

@@ -1,0 +1,10 @@
+(module
+  (def pair (app (app (ctor Tuple.Pair) (int 1)) (string "one")))
+  (def triple (app (app (app (ctor Tuple.Triple) (int 1)) (int 2)) (int 3)))
+  (def nested (app (app (ctor Tuple.Pair) (app (app (ctor Tuple.Pair) (int 1)) (int 2))) (app (app (app (ctor Tuple.Triple) (int 3)) (int 4)) (int 5))))
+  (def grouped (binop + (int 1) (int 2)))
+  (def annotated (params p) (ann (-> (Tuple.Pair Int String) (Tuple.Triple Bool Int Int))) (app (app (app (ctor Tuple.Triple) (ctor True)) (int 1)) (int 2)))
+  (def constrained (params p) (ann (Eq a, Show a) => (-> (Tuple.Pair a a) String)) (string ""))
+  (def matched (params p) (case (var p) (branch (pctor Tuple.Pair (pint 1) (pvar b)) (var b)) (branch (pctor Tuple.Pair (pvar a) (pctor Tuple.Pair (pvar b) (pvar c))) (var a)) (branch _ (int 0))))
+  (def inList (app (app (ctor List.Cons) (app (app (ctor Tuple.Pair) (int 1)) (int 2))) (app (app (ctor List.Cons) (app (app (ctor Tuple.Pair) (int 3)) (int 4))) (ctor List.Nil))))
+  (def destructured (block (pattern-bind (pctor Tuple.Pair (pvar x) (pvar y)) (app (app (ctor Tuple.Pair) (int 1)) (int 2))) (var x))))

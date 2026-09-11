@@ -61,6 +61,16 @@ coverage, and evaluation rules as explicit constructor code. `List` is an
 ordinary parameterized ADT to the checker, the deriver, reflection, Core, and
 the linter; only the backends know it is stored as an array spine.
 
+Tuple syntax is the same arrangement without the representation half:
+`(a, b)` and `(a, b, c)` are parser sugar for the bundled `Tuple.Pair` and
+`Tuple.Triple` types, in type, expression, and pattern position alike. They
+are ordinary nominal ADTs everywhere below the parser — no new type former,
+no structural typing, and `Eq`/`Ord` derived in fango rather than synthesized
+by the compiler. Arity stops at three because each one is a separate bundled
+declaration, not because anything in the compiler counts. `Tuple` is a
+prelude root, since syntax that always parses must always resolve, including
+in the REPL.
+
 ## Functions and effects
 
 The internal function type is `TFun{Arg, Eff, Ret}`. Effects belong exclusively
@@ -245,7 +255,9 @@ exempts single tokens that open a construct, and an `if` additionally exempts
 its own `then` and `else` at the column of its `if`, so a chain of arms can
 align under one `if` rather than staircasing rightward. Bracket lists lower
 immediately to right-nested constructor applications or patterns; an omitted
-tail lowers to `List.Nil`. AST and diagnostic dump formats are stable
+tail lowers to `List.Nil`. Tuple syntax lowers the same way, to a
+saturated `Tuple.Pair` or `Tuple.Triple` application or pattern; a
+parenthesized item with no comma stays a grouping. AST and diagnostic dump formats are stable
 golden-test interfaces.
 
 Batch compilation first discovers the complete module graph. The entry
@@ -1000,7 +1012,8 @@ parameter, no superclasses, higher kinds, default methods, ambiguous overlapping
 or method-local polymorphism. There are no source-path
 flags, external library version selection, or package resolution. The implicit
 prelude is fixed to hidden `Basics` plus ambient `IO`, with `Meta` added only
-for files that use the staging syntax; the bundled standard
+for files that use the staging syntax and `Tuple` always, since tuple syntax
+must resolve wherever it parses; the bundled standard
 library is intentionally small and experimental.
 Compile-time metaprogramming has quotes, splices, type reflection, and
 derivers, but no declaration splices, so generation that must introduce a

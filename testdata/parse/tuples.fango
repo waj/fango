@@ -1,0 +1,27 @@
+pair = (1, "one")
+
+triple = (1, 2, 3)
+
+nested = ((1, 2), (3, 4, 5))
+
+grouped = (1 + 2)
+
+annotated : (Int, String) -> (Bool, Int, Int)
+annotated p = (True, 1, 2)
+
+-- A class context must not be mistaken for a tuple type: parseContext finds
+-- the `=>` before any type syntax is consumed.
+constrained : (Eq a, Show a) => (a, a) -> String
+constrained p = ""
+
+matched p =
+    case p of
+        (1, b) -> b
+        (a, (b, c)) -> a
+        _ -> 0
+
+inList = [(1, 2), (3, 4)]
+
+destructured =
+    (x, y) = (1, 2)
+    x
