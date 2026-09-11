@@ -26,6 +26,15 @@ Independent library versioning, package distribution, and dependency fetching
 remain deferred; configurable source roots are entangled with the question
 below.
 
+## List representation
+
+[roadmap-list.md](roadmap-list.md) owns giving the bundled `List` an
+array-backed runtime representation while keeping its linked-list surface. It
+is the concrete answer to the design's standing note that cons-list allocation
+remains the main known structural performance cost, and it is the first case of
+a stdlib-declared type whose representation the backends know, so it also
+settles what that mechanism looks like.
+
 ## Unembedding the bundled sources
 
 `stdlib/*.fango`, `stdlib/*.native.go`, the native support sources, and
