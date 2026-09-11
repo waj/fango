@@ -1,0 +1,339 @@
+module Dict exposing
+    (Dict, empty, foldl, foldr, fromList, get, insert, isEmpty, keys, map, member, remove, singleton, size, toList, update, values)
+
+import Basics
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Tuple exposing (Pair(..), Triple(..))
+
+-- A weight-balanced search tree, the shape Haskell's Data.Map uses. Every Bin
+-- caches the size of the subtree rooted at it, so size is O(1) and balance can
+-- decide rotations arithmetically.
+--
+-- Dict is exported without its constructors: the balance invariant is this
+-- module's to hold, and an exposed Bin would let a caller hand balance a lie.
+--
+-- For every Bin n key value left right:
+--   1. n == 1 + size left + size right;
+--   2. every key in left is < key and every key in right is > key, where
+--      "equivalent" means neither < holds in either direction; and
+--   3. either size left + size right <= 1, or neither subtree exceeds delta
+--      times the other.
+type Dict k v = Tip | Bin Int k v (Dict k v) (Dict k v)
+
+-- delta bounds the size ratio between siblings; ratio picks a single rotation
+-- over a double one. (3, 2) on element counts is Data.Map's pair, verified for
+-- insertion and deletion together. Retuning them invalidates that.
+delta : Int
+delta = 3
+
+ratio : Int
+ratio = 2
+
+size : Dict k v -> Int
+size dict =
+    case dict of
+        Tip -> 0
+        Bin count _ _ _ _ -> count
+
+isEmpty : Dict k v -> Bool
+isEmpty dict =
+    case dict of
+        Tip -> True
+        Bin _ _ _ _ _ -> False
+
+empty : Dict k v
+empty = Tip
+
+singleton : k -> v -> Dict k v
+singleton key value = Bin 1 key value Tip Tip
+
+-- bin is the smart constructor: the only place a cached size is computed.
+bin : k -> v -> Dict k v -> Dict k v -> Dict k v
+bin key value left right = Bin (size left + size right + 1) key value left right
+
+-- balance repairs one node after a single insertion or deletion below it. It
+-- assumes both subtrees are internally balanced and that one of them changed
+-- by at most one element; every call site below honours that.
+--
+-- The Tip branches inside the rotations are unreachable — a subtree more than
+-- delta times its sibling holds at least two nodes — but a match must be
+-- exhaustive and there is no crash primitive, so each rebuilds the node
+-- unrotated. That is harmless while the invariant holds and silent if it ever
+-- breaks, which is why the rotations are checked against tree height rather
+-- than only against lookup results.
+balance : k -> v -> Dict k v -> Dict k v -> Dict k v
+balance key value left right =
+    sizeLeft = size left
+    sizeRight = size right
+    if sizeLeft + sizeRight <= 1 then
+        Bin (sizeLeft + sizeRight + 1) key value left right
+    else if sizeRight > delta * sizeLeft then
+        case right of
+            Tip -> Bin (sizeLeft + sizeRight + 1) key value left right
+            Bin _ rightKey rightValue rightLeft rightRight ->
+                if size rightLeft < ratio * size rightRight then
+                    bin rightKey rightValue (bin key value left rightLeft) rightRight
+                else
+                    case rightLeft of
+                        Tip -> bin rightKey rightValue (bin key value left rightLeft) rightRight
+                        Bin _ innerKey innerValue innerLeft innerRight ->
+                            bin innerKey innerValue
+                                (bin key value left innerLeft)
+                                (bin rightKey rightValue innerRight rightRight)
+    else if sizeLeft > delta * sizeRight then
+        case left of
+            Tip -> Bin (sizeLeft + sizeRight + 1) key value left right
+            Bin _ leftKey leftValue leftLeft leftRight ->
+                if size leftRight < ratio * size leftLeft then
+                    bin leftKey leftValue leftLeft (bin key value leftRight right)
+                else
+                    case leftRight of
+                        Tip -> bin leftKey leftValue leftLeft (bin key value leftRight right)
+                        Bin _ innerKey innerValue innerLeft innerRight ->
+                            bin innerKey innerValue
+                                (bin leftKey leftValue leftLeft innerLeft)
+                                (bin key value innerRight right)
+    else
+        Bin (sizeLeft + sizeRight + 1) key value left right
+
+-- Ord has no compare, so navigation costs two comparisons per node.
+get : Ord k => k -> Dict k v -> Maybe v
+get key dict =
+    case dict of
+        Tip -> Nothing
+        Bin _ nodeKey nodeValue left right ->
+            if key < nodeKey then
+                get key left
+            else if nodeKey < key then
+                get key right
+            else
+                Just nodeValue
+
+-- member is written out rather than as a get comparison, so a lookup that
+-- only asks whether a key is present allocates no Maybe.
+member : Ord k => k -> Dict k v -> Bool
+member key dict =
+    case dict of
+        Tip -> False
+        Bin _ nodeKey _ left right ->
+            if key < nodeKey then
+                member key left
+            else if nodeKey < key then
+                member key right
+            else
+                True
+
+-- On a key already present the stored key is kept and only the value changes.
+-- That is one rule for insert, update, and fromList alike; update has no new
+-- key to substitute, so replacing here would need a second rule. It is
+-- observable only through an Ord that calls distinguishable keys equivalent.
+insert : Ord k => k -> v -> Dict k v -> Dict k v
+insert key value dict =
+    case dict of
+        Tip -> Bin 1 key value Tip Tip
+        Bin count nodeKey nodeValue left right ->
+            if key < nodeKey then
+                balance nodeKey nodeValue (insert key value left) right
+            else if nodeKey < key then
+                balance nodeKey nodeValue left (insert key value right)
+            else
+                Bin count nodeKey value left right
+
+-- minViewSure and maxViewSure take the node already destructured, so neither
+-- needs an unreachable branch for the empty tree it could not answer for.
+-- Each returns the extracted key, its value, and what is left.
+minViewSure : k -> v -> Dict k v -> Dict k v -> (k, v, Dict k v)
+minViewSure nodeKey nodeValue left right =
+    case left of
+        Tip -> (nodeKey, nodeValue, right)
+        Bin _ leftKey leftValue leftLeft leftRight ->
+            case minViewSure leftKey leftValue leftLeft leftRight of
+                (foundKey, foundValue, rest) ->
+                    (foundKey, foundValue, balance nodeKey nodeValue rest right)
+
+maxViewSure : k -> v -> Dict k v -> Dict k v -> (k, v, Dict k v)
+maxViewSure nodeKey nodeValue left right =
+    case right of
+        Tip -> (nodeKey, nodeValue, left)
+        Bin _ rightKey rightValue rightLeft rightRight ->
+            case maxViewSure rightKey rightValue rightLeft rightRight of
+                (foundKey, foundValue, rest) ->
+                    (foundKey, foundValue, balance nodeKey nodeValue left rest)
+
+-- glue rejoins the two subtrees of a removed node. It draws the replacement
+-- from the heavier side, which is what keeps balance's one-element
+-- precondition true.
+glue : Dict k v -> Dict k v -> Dict k v
+glue left right =
+    case left of
+        Tip -> right
+        Bin sizeLeft leftKey leftValue leftLeft leftRight ->
+            case right of
+                Tip -> left
+                Bin sizeRight rightKey rightValue rightLeft rightRight ->
+                    if sizeLeft > sizeRight then
+                        case maxViewSure leftKey leftValue leftLeft leftRight of
+                            (foundKey, foundValue, rest) -> balance foundKey foundValue rest right
+                    else
+                        case minViewSure rightKey rightValue rightLeft rightRight of
+                            (foundKey, foundValue, rest) -> balance foundKey foundValue left rest
+
+remove : Ord k => k -> Dict k v -> Dict k v
+remove key dict =
+    case dict of
+        Tip -> Tip
+        Bin _ nodeKey nodeValue left right ->
+            if key < nodeKey then
+                balance nodeKey nodeValue (remove key left) right
+            else if nodeKey < key then
+                balance nodeKey nodeValue left (remove key right)
+            else
+                glue left right
+
+-- update runs its callback exactly once, at the end of the search path, so a
+-- curried callback costs one allocation per call rather than one per level.
+-- Returning Nothing for a present key removes it; for an absent key it leaves
+-- the dictionary alone.
+update : Ord k => k -> (Maybe v ->{e} Maybe v) -> Dict k v ->{e} Dict k v
+update key alter dict =
+    case dict of
+        Tip ->
+            case alter Nothing of
+                Nothing -> Tip
+                Just value -> Bin 1 key value Tip Tip
+        Bin count nodeKey nodeValue left right ->
+            if key < nodeKey then
+                balance nodeKey nodeValue (update key alter left) right
+            else if nodeKey < key then
+                balance nodeKey nodeValue left (update key alter right)
+            else
+                case alter (Just nodeValue) of
+                    Nothing -> glue left right
+                    Just value -> Bin count nodeKey value left right
+
+-- The traversals take an accumulator and no callback, for the reason
+-- List.reverse and List.length do: routing them through a fold would allocate
+-- a closure per element. Each produces ascending key order.
+keysHelp : Dict k v -> List k -> List k
+keysHelp dict acc =
+    case dict of
+        Tip -> acc
+        Bin _ key _ left right -> keysHelp left (Cons key (keysHelp right acc))
+
+keys : Dict k v -> List k
+keys dict = keysHelp dict Nil
+
+valuesHelp : Dict k v -> List v -> List v
+valuesHelp dict acc =
+    case dict of
+        Tip -> acc
+        Bin _ _ value left right -> valuesHelp left (Cons value (valuesHelp right acc))
+
+values : Dict k v -> List v
+values dict = valuesHelp dict Nil
+
+toListHelp : Dict k v -> List (k, v) -> List (k, v)
+toListHelp dict acc =
+    case dict of
+        Tip -> acc
+        Bin _ key value left right -> toListHelp left (Cons (key, value) (toListHelp right acc))
+
+toList : Dict k v -> List (k, v)
+toList dict = toListHelp dict Nil
+
+fromListHelp : Ord k => List (k, v) -> Dict k v -> Dict k v
+fromListHelp entries dict =
+    case entries of
+        Nil -> dict
+        Cons entry rest ->
+            case entry of
+                (key, value) -> fromListHelp rest (insert key value dict)
+
+-- Later entries win the value; the first-inserted key is the one kept.
+fromList : Ord k => List (k, v) -> Dict k v
+fromList entries = fromListHelp entries Tip
+
+-- Callbacks take one pair rather than a curried key and value: a curried
+-- boundary allocates once per argument, so the pair costs one allocation
+-- where k -> v -> b would cost two.
+--
+-- Effects are propagated, so visit order is part of the contract: foldl and
+-- map ascend, foldr descends.
+foldl : ((k, v) -> b ->{e} b) -> b -> Dict k v ->{e} b
+foldl combine initial dict =
+    case dict of
+        Tip -> initial
+        Bin _ key value left right ->
+            afterLeft = foldl combine initial left
+            afterNode = combine (key, value) afterLeft
+            foldl combine afterNode right
+
+foldr : ((k, v) -> b ->{e} b) -> b -> Dict k v ->{e} b
+foldr combine initial dict =
+    case dict of
+        Tip -> initial
+        Bin _ key value left right ->
+            afterRight = foldr combine initial right
+            afterNode = combine (key, value) afterRight
+            foldr combine afterNode left
+
+-- map preserves every key, so it preserves search order and balance too: it
+-- reuses each cached size and never calls balance, and takes no Ord. The
+-- three bindings force ascending callback order rather than relying on
+-- constructor argument evaluation order.
+map : ((k, a) ->{e} b) -> Dict k a ->{e} Dict k b
+map transform dict =
+    case dict of
+        Tip -> Tip
+        Bin count key value left right ->
+            newLeft = map transform left
+            newValue = transform (key, value)
+            newRight = map transform right
+            Bin count key newValue newLeft newRight
+
+showEntries : (Show k, Show v) => List (k, v) -> String
+showEntries entries =
+    case entries of
+        Nil -> "]"
+        Cons entry Nil ->
+            case entry of
+                (key, value) -> show key ++ " = " ++ show value ++ "]"
+        Cons entry rest ->
+            case entry of
+                (key, value) -> show key ++ " = " ++ show value ++ ", " ++ showEntries rest
+
+instance (Show k, Show v) => Show (Dict k v)
+    show dict = "Dict [" ++ showEntries (toList dict)
+
+-- sameEntries compares the pairs componentwise rather than through
+-- Eq (List (k, v)). That is not a style choice: a constraint on a
+-- parameterized type is not simplified to constraints on its arguments, so
+-- `a == b` on two entry lists would demand `Eq (List (k, v))` in the instance
+-- context and leak into every caller of `==` on a Dict. See the roadmap.
+sameEntries : (Eq k, Eq v) => List (k, v) -> List (k, v) -> Bool
+sameEntries left right =
+    case left of
+        Nil ->
+            case right of
+                Nil -> True
+                Cons _ _ -> False
+        Cons leftEntry leftRest ->
+            case right of
+                Nil -> False
+                Cons rightEntry rightRest ->
+                    case leftEntry of
+                        (leftKey, leftValue) ->
+                            case rightEntry of
+                                (rightKey, rightValue) ->
+                                    if leftKey == rightKey && leftValue == rightValue then
+                                        sameEntries leftRest rightRest
+                                    else
+                                        False
+
+-- Equality compares entries in key order, never tree shape: the same entries
+-- inserted in different orders build differently shaped trees. Deriving Eq
+-- here would be wrong, not merely slower. The size test short-circuits the
+-- common unequal case before either list is built.
+instance (Eq k, Eq v) => Eq (Dict k v)
+    (==) left right = size left == size right && sameEntries (toList left) (toList right)

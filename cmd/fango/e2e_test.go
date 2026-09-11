@@ -620,3 +620,121 @@ func TestBundledListUsesRuntimeRepresentationAndLocalListDoesNot(t *testing.T) {
 		t.Errorf("user ADTs stopped emitting marker interfaces:\n%s", entry)
 	}
 }
+
+func TestCsvExample(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "csv.fango")
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join("..", "..", "examples", "csv.expected"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := os.ReadFile(filepath.Join("..", "..", "examples", "expenses.csv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The report is read from the working directory, so each leg gets its own
+	// copy of the committed fixture.
+	seed := func(t *testing.T) string {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "expenses.csv"), input, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+
+	prog, _, ok := compileFile(path, io.Discard)
+	if !ok {
+		t.Fatal("compile failed")
+	}
+	env := eval.NewEnv()
+	env.DefineProg(prog)
+	var interpreted bytes.Buffer
+	ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
+	ioctx.Args, ioctx.Dir = []string{"expenses.csv"}, seed(t)
+	if _, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx); err != nil {
+		t.Fatalf("interpreter: %v", err)
+	}
+	if interpreted.String() != string(want) {
+		t.Fatalf("interpreter output:\n%q\nwant:\n%q", interpreted.String(), want)
+	}
+
+	if testing.Short() {
+		return
+	}
+	cmd := exec.Command(cliBinary(t), "run", absPath, "--", "expenses.csv")
+	var compiled, stderr bytes.Buffer
+	cmd.Env = append(os.Environ(), "FANGO_BUILD_DIR="+t.TempDir())
+	cmd.Dir, cmd.Stdout, cmd.Stderr = seed(t), &compiled, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("compiled: %v\n%s", err, stderr.String())
+	}
+	if compiled.String() != string(want) {
+		t.Fatalf("compiled output:\n%q\nwant:\n%q", compiled.String(), want)
+	}
+	if compiled.String() != interpreted.String() {
+		t.Fatalf("backends disagree: compiled %q vs interpreted %q", compiled.String(), interpreted.String())
+	}
+}
+
+func TestCsvExampleFailures(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "csv.fango")
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog, _, ok := compileFile(path, io.Discard)
+	if !ok {
+		t.Fatal("compile failed")
+	}
+
+	cases := []struct {
+		name       string
+		args       []string
+		wantStatus int
+		wantOutput string
+	}{
+		{"usage", nil, 1, "usage: csv FILE\n"},
+		{"too many arguments", []string{"a", "b"}, 1, "usage: csv FILE\n"},
+		{"missing file", []string{"nope.csv"}, 1, "cannot read nope.csv\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name+"/interpreter", func(t *testing.T) {
+			env := eval.NewEnv()
+			env.DefineProg(prog)
+			var output bytes.Buffer
+			ioctx := eval.NewIOContext(strings.NewReader(""), &output)
+			ioctx.Args, ioctx.Dir = tc.args, t.TempDir()
+			_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
+			var exitErr *natives.ExitError
+			if !errors.As(err, &exitErr) || exitErr.Code != tc.wantStatus {
+				t.Fatalf("exit = %v, want status %d", err, tc.wantStatus)
+			}
+			if output.String() != tc.wantOutput {
+				t.Fatalf("output = %q, want %q", output.String(), tc.wantOutput)
+			}
+		})
+
+		if testing.Short() {
+			continue
+		}
+		t.Run(tc.name+"/compiled", func(t *testing.T) {
+			args := append([]string{"run", absPath, "--"}, tc.args...)
+			cmd := exec.Command(cliBinary(t), args...)
+			var stdout, stderr bytes.Buffer
+			cmd.Env = append(os.Environ(), "FANGO_BUILD_DIR="+t.TempDir())
+			cmd.Dir, cmd.Stdout, cmd.Stderr = t.TempDir(), &stdout, &stderr
+			err := cmd.Run()
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != tc.wantStatus {
+				t.Fatalf("exit = %v, want status %d; stderr: %s", err, tc.wantStatus, stderr.String())
+			}
+			if stdout.String() != tc.wantOutput {
+				t.Fatalf("output = %q, want %q", stdout.String(), tc.wantOutput)
+			}
+		})
+	}
+}

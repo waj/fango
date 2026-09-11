@@ -278,18 +278,22 @@ returns `Nothing` at clean end of input and otherwise preserves the line
 terminator separately as `"\n"`, `"\r\n"`, or `""` for an unterminated final
 line. Malformed UTF-8 input sequences are replaced with U+FFFD.
 
-`Basics` also declares two explicitly importable integer functions (the
+`Basics` also declares three explicitly importable integer functions (the
 implicit prelude exposes only the operators, `print`, `readLine`, and `show`):
 
 ```fango
-import Basics exposing (modBy, remainderBy)
+import Basics exposing (modBy, quotientBy, remainderBy)
 ```
 
 `modBy : Int -> Int -> Int` is the floored modulus: `modBy modulus x` has the
 modulus's sign, so `modBy 3 (-4)` is `2` and `modBy (-3) 4` is `-2`.
 `remainderBy : Int -> Int -> Int` is the truncated remainder:
 `remainderBy divisor x` has the dividend's sign, so `remainderBy 3 (-4)` is
-`-1`. A zero modulus or divisor crashes the program in both backends.
+`-1`. `quotientBy : Int -> Int -> Int` is the matching truncated division:
+the quotient rounds toward zero, so `quotientBy 3 (-7)` is `-2`, and
+`quotientBy d x * d + remainderBy d x` recovers `x` for every `d` and `x`.
+There is no floored division to pair with `modBy` yet. A zero modulus or
+divisor crashes the program in both backends.
 
 `Maybe` exposes the optional-value type:
 
@@ -324,6 +328,57 @@ Its public function types are `first : Pair a b -> a`,
 `second : Pair a b -> b`, and `swap : Pair a b -> Pair b a`. There is no
 `Triple` accessor set and no `mapFirst`/`mapSecond`; pattern matching covers
 both, and the roadmap adds library functions when an example needs them.
+
+`Dict` exposes an ordered dictionary keyed by any `Ord` type:
+
+```fango
+module Dict exposing
+    (Dict, empty, foldl, foldr, fromList, get, insert, isEmpty, keys, map,
+     member, remove, singleton, size, toList, update, values)
+```
+
+`Dict` is exposed without its constructors, so the type is abstract: the
+balance invariant belongs to the module. Its public types are
+`empty : Dict k v`, `singleton : k -> v -> Dict k v`,
+`size : Dict k v -> Int`, `isEmpty : Dict k v -> Bool`,
+`get : Ord k => k -> Dict k v -> Maybe v`,
+`member : Ord k => k -> Dict k v -> Bool`,
+`insert : Ord k => k -> v -> Dict k v -> Dict k v`,
+`remove : Ord k => k -> Dict k v -> Dict k v`,
+`update : Ord k => k -> (Maybe v ->{e} Maybe v) -> Dict k v ->{e} Dict k v`,
+`keys : Dict k v -> List k`, `values : Dict k v -> List v`,
+`toList : Dict k v -> List (k, v)`,
+`fromList : Ord k => List (k, v) -> Dict k v`,
+`map : ((k, a) ->{e} b) -> Dict k a ->{e} Dict k b`, and
+`foldl` and `foldr : ((k, v) -> b ->{e} b) -> b -> Dict k v ->{e} b`.
+
+Only the operations that navigate by key carry `Ord k`. `empty`, `singleton`,
+`size`, `isEmpty`, `map`, and the traversals do not, because none of them
+compares a key.
+
+`keys`, `values`, `toList`, `foldl`, and `map` visit in ascending key order
+and `foldr` in descending order. Callback effects are performed in that order,
+so the order is part of the contract rather than an accident. Callbacks take
+one `(k, v)` pair rather than a curried key and value, which also matches
+`List.foldl`'s arity. `update`'s callback runs exactly once per call, at the
+end of the search path; returning `Nothing` removes a present key and leaves
+an absent one absent.
+
+When a key is already present the stored key is kept and only the value
+changes. That one rule covers `insert`, `update`, and `fromList` alike, and
+it is observable only through an `Ord` instance that calls distinguishable
+keys equivalent. `fromList`'s later entries win the value.
+
+`show` displays `Dict [a = 1, b = 2]`, and the empty dictionary as `Dict []`.
+Equality compares entries in key order rather than tree shape, so two
+dictionaries built by inserting the same entries in different orders are
+equal even though their trees differ.
+
+The representation is a weight-balanced search tree caching each subtree's
+size. `size` and `isEmpty` are constant time; `get`, `member`, `insert`,
+`remove`, and `update` are logarithmic; `keys`, `values`, `toList`, the folds,
+and `map` are linear; `fromList` is `n log n`. Nodes are shared rather than
+copied, so an update rewrites only its search path.
 
 `Json` exposes a derivable encoding class:
 
@@ -372,6 +427,10 @@ slice : Int -> Int -> String -> String
 startsWith : String -> String -> Bool
 uncons : String -> Maybe String.Uncons
 fromChar : Char -> String
+split : String -> String -> List String
+trim : String -> String
+padLeft : Int -> Char -> String -> String
+padRight : Int -> Char -> String -> String
 ```
 
 `length` counts Unicode scalars and `byteLength` counts UTF-8 bytes. `slice`
@@ -386,6 +445,15 @@ parses an optional `+`/`-` sign followed by base-10 digits. An empty digit
 sequence, any other character, and values outside the signed 64-bit range all
 produce `Nothing`; `String.toInt "007"` is `Just 7` and
 `String.toInt "-9223372036854775808"` parses the most negative Int.
+
+`split separator text` cuts at every occurrence, so n occurrences give n + 1
+pieces and adjacent separators give empty ones: `String.split "," "a,,b"` is
+`["a", "", "b"]` and `String.split "," ""` is `[""]`. An empty separator
+yields the text unchanged as a single piece. `trim` removes leading and
+trailing bytes from the same ASCII whitespace set `words` splits on, so an
+all-whitespace string trims to `""`. `padLeft` and `padRight` measure width
+in Unicode scalars, like `length`, and return a string that is already that
+wide unchanged; a zero or negative width never truncates.
 
 `Result` exposes a conventional success-or-error value and basic transforms:
 

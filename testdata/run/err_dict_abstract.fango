@@ -1,0 +1,8 @@
+import Dict
+
+-- Dict is exported without its constructors: the balance invariant belongs to
+-- the module, so no caller can build or match a node directly.
+main() =
+    case Dict.empty of
+        Dict.Tip -> print "empty"
+        Dict.Bin _ _ _ _ _ -> print "node"

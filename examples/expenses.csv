@@ -1,0 +1,12 @@
+date,category,description,amount
+2024-01-03,Groceries,Corner market,42.50
+2024-01-04,Transport,Bus pass,75.00
+2024-01-07, Groceries ,Weekly shop,118.25
+2024-01-09,Books,Paperback,12.99
+2024-01-11,Utilities,Electricity,88.40
+2024-01-14,Groceries,Bakery refund,-9.75
+2024-01-15,Transport,Taxi,23.10
+2024-01-18,Books,Notebook,4.5
+2024-01-21,Utilities,Water,31.60
+2024-01-22,Groceries,Bakery,7.25
+2024-01-25,Snacks,Vending machine,not-a-number

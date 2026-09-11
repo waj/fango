@@ -1,4 +1,4 @@
-module Basics exposing (Num(..), Eq(..), Ord(..), Show(..), (/), (++), (/=), modBy, remainderBy)
+module Basics exposing (Num(..), Eq(..), Ord(..), Show(..), (/), (++), (/=), modBy, quotientBy, remainderBy)
 
 class Num a
     fromInt : Int -> a
@@ -232,3 +232,9 @@ modBy : Int -> Int -> Int
 modBy modulus x =
     r = remainderBy modulus x
     if r == 0 then r else if (r < 0) == (modulus < 0) then r else r + modulus
+
+-- Truncated division (Go's /): the quotient rounds toward zero, pairing with
+-- remainderBy, so quotientBy d x * d + remainderBy d x recovers x.
+-- A zero divisor crashes the program.
+quotientBy : Int -> Int -> Int
+quotientBy = native "$2 / $1"

@@ -1,0 +1,15 @@
+Dict [a = 1, b = 2]
+2
+Dict [a = 1, b = 2, z = 9]
+Dict [a = 9, b = 2]
+Dict [b = 2]
+Dict [a = 101, b = 2]
+Dict [a = 1, b = 2, z = 0]
+True
+called
+Dict [a = 1, b = 2, c = 3, d = 40, e = 5]
+called
+5
+Dict [a = 2]
+Dict [a = 3]
+Dict [a = 2]

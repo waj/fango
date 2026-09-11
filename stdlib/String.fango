@@ -1,4 +1,4 @@
-module String exposing (Uncons(..), byteLength, fromChar, length, slice, startsWith, toInt, uncons, words)
+module String exposing (Uncons(..), byteLength, fromChar, length, padLeft, padRight, slice, split, startsWith, toInt, trim, uncons, words)
 
 import Basics
 import List exposing (List(..))
@@ -128,3 +128,70 @@ toInt text =
         Nothing
     else
         toIntHelp text start size (first == 45) 0
+
+-- matchesAt is private: whether separator occurs at index. The bounds test
+-- comes first because byteSlice does not clamp, unlike slice.
+matchesAt : String -> Int -> String -> Int -> Int -> Bool
+matchesAt separator sepSize text index size =
+    if index + sepSize > size then
+        False
+    else
+        byteSlice index (index + sepSize) text == separator
+
+splitHelp : String -> Int -> String -> Int -> Int -> Int -> List String -> List String
+splitHelp separator sepSize text start index size result =
+    if index > size - sepSize then
+        reverseWords (Cons (byteSlice start size text) result) Nil
+    else if matchesAt separator sepSize text index size then
+        piece = byteSlice start index text
+        splitHelp separator sepSize text (index + sepSize) (index + sepSize) size (Cons piece result)
+    else
+        splitHelp separator sepSize text start (index + 1) size result
+
+-- split cuts text at every occurrence of separator, so n occurrences give
+-- n + 1 pieces and adjacent separators give empty ones. Splitting on the
+-- empty separator yields the whole text unchanged.
+split : String -> String -> List String
+split separator text =
+    sepSize = byteLength separator
+    if sepSize == 0 then
+        Cons text Nil
+    else
+        splitHelp separator sepSize text 0 0 (byteLength text) Nil
+
+-- scanSpaceBack is private: the index just past the last non-space byte,
+-- never below limit.
+scanSpaceBack : String -> Int -> Int -> Int
+scanSpaceBack text index limit =
+    if index <= limit then
+        limit
+    else if isSpace (byteAt (index - 1) text) then
+        scanSpaceBack text (index - 1) limit
+    else
+        index
+
+-- trim removes leading and trailing bytes from the same ASCII whitespace set
+-- words splits on. An all-whitespace string trims to "".
+trim : String -> String
+trim text =
+    size = byteLength text
+    start = skipSpace text 0 size
+    byteSlice start (scanSpaceBack text size start) text
+
+-- repeatHelp is private: filler repeated count times, prepended to tail.
+repeatHelp : String -> Int -> String -> String
+repeatHelp filler count tail =
+    if count <= 0 then
+        tail
+    else
+        repeatHelp filler (count - 1) (filler ++ tail)
+
+-- padLeft and padRight measure width in Unicode scalars, like length, and
+-- return a string that is already wide enough unchanged.
+padLeft : Int -> Char -> String -> String
+padLeft width filler text = repeatHelp (fromChar filler) (width - length text) text
+
+padRight : Int -> Char -> String -> String
+padRight width filler text =
+    padding = repeatHelp (fromChar filler) (width - length text) ""
+    text ++ padding

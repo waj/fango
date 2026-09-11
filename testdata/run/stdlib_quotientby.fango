@@ -1,0 +1,25 @@
+import Basics exposing (modBy, quotientBy, remainderBy)
+import IO
+
+-- quotientBy pairs with remainderBy (both truncate); divBy would pair with
+-- modBy (both floor) but does not exist yet.
+identity : Int -> Int -> Bool
+identity divisor x = quotientBy divisor x * divisor + remainderBy divisor x == x
+
+main() =
+    print (quotientBy 3 7)
+    print (quotientBy 3 (-7))
+    print (quotientBy (-3) 7)
+    print (quotientBy (-3) (-7))
+    print (quotientBy 1 42)
+    print (quotientBy (-1) 42)
+    print (quotientBy 7 3)
+    print (quotientBy 7 (-3))
+    print (identity 3 7)
+    print (identity 3 (-7))
+    print (identity (-3) 7)
+    print (identity (-3) (-7))
+    print (identity 5 0)
+    -- Truncation rounds toward zero; modBy still floors.
+    print (remainderBy 3 (-7))
+    print (modBy 3 (-7))

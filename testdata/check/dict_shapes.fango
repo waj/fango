@@ -1,0 +1,46 @@
+-- The checker harness has no module resolution, so this inlines a Dict-shaped
+-- miniature the way effect_rows.fango inlines its own List. What it pins is
+-- inference, not the library: that a nullary polymorphic value generalizes,
+-- that `Ord k =>` is inferred through recursion, and that an open effect row
+-- survives recursion with a class constraint in scope.
+type D k v = Tip | Bin Int k v (D k v) (D k v)
+
+-- Maybe is not in scope in this harness either, so get answers with its own.
+type Opt a = None | Some a
+
+empty = Tip
+
+sizeOf d =
+    case d of
+        Tip -> 0
+        Bin n _ _ _ _ -> n
+
+get key d =
+    case d of
+        Tip -> None
+        Bin _ nodeKey nodeValue left right ->
+            if key < nodeKey then
+                get key left
+            else if nodeKey < key then
+                get key right
+            else
+                Some nodeValue
+
+insert key value d =
+    case d of
+        Tip -> Bin 1 key value Tip Tip
+        Bin n nodeKey nodeValue left right ->
+            if key < nodeKey then
+                Bin n nodeKey nodeValue (insert key value left) right
+            else if nodeKey < key then
+                Bin n nodeKey nodeValue left (insert key value right)
+            else
+                Bin n nodeKey value left right
+
+foldl combine initial d =
+    case d of
+        Tip -> initial
+        Bin _ key value left right ->
+            afterLeft = foldl combine initial left
+            afterNode = combine (key, value) afterLeft
+            foldl combine afterNode right

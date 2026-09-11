@@ -1,0 +1,5 @@
+empty : D a b
+sizeOf : D a b -> Int
+get : Ord a => a -> D a b -> Opt b
+insert : Ord a => a -> b -> D a b -> D a b
+foldl : ((a, b) ->{e} c ->{e} c) -> c -> D a b ->{e} c

@@ -37,9 +37,15 @@ Forces the core stdlib: strings, `Maybe`, list combinators.
   `todo done 2`. Forced command-line arguments, current-directory file
   read/write, exit codes, records for todo items, and a bundled `Json.Encode`
   deriver. Encoding is derived; the exact-schema decoder is hand-written.
-- [ ] **CSV expense report** — read a CSV, aggregate by category, print an
-  aligned table with totals. Forces file IO, `Dict` insert/update/fold, and
-  number formatting (`String.padLeft`, float precision).
+- [x] **CSV expense report** — read a CSV named on the command line, aggregate
+  by category, print an aligned table with totals. Forced a pure-fango ordered
+  `Dict` (weight-balanced, `Ord`-keyed, pair-taking callbacks), which in turn
+  forced tuples; truncated integer division as `Basics.quotientBy`, since
+  `Basics` had `remainderBy` and `modBy` but no division at all; and
+  `String.split`, `trim`, `padLeft`, and `padRight`. Money is exact integer
+  cents, so float parsing and float precision formatting were **not** forced
+  and remain unbuilt. Category order in the report comes free from the
+  dictionary, which is why it is ordered rather than hashed.
 - [ ] **Conway's Game of Life** — animated in the terminal. Forces the grid
   representation decision (`Array` vs `Dict` vs list-of-lists), integer
   division and modulo, `sleep`/time, and ANSI control via `IO.write`.
@@ -77,6 +83,10 @@ Forces performance work and concurrency.
 ## Cross-cutting expectations
 
 Nearly every example immediately wants tuples or records to return two
-things, so expect the records decision to be forced within Tier 1. Math
-basics (`abs`, `min`/`max`, conversions such as `toFloat`/`floor`) and
+things. Records were forced first, in Tier 1; tuples followed when designing
+`Dict`, whose `toList` and fold callbacks would otherwise each need a named
+record. Both are now available, and the choice is ordinary style: names when
+the fields deserve them, positions when they do not.
+
+Math basics (`abs`, `min`/`max`, conversions such as `toFloat`/`floor`) and
 integer division will surface early as well.

@@ -22,6 +22,24 @@ coverage.
 - Keep adding differential, diagnostic, documentation, and performance
   coverage with each library increment.
 
+`Dict` ships with no `filter`, `union`, `intersect`, `partition`, `Ord`
+instance, or `Json.Encode` instance; the Markov generator and the Lisp
+interpreter are the next consumers likely to force them. `modBy` still has no
+floored division to pair with it — `quotientBy` pairs with `remainderBy` —
+and Game of Life's grid wrap is the likely forcer. `Tuple` has no
+`mapFirst`/`mapSecond`, and no accessors for `Triple`.
+
+`Dict`'s balance invariant has no automated gate. The type is exported
+abstractly, so no fango test can observe tree height, and a degenerate tree
+would pass every fixture in `testdata/run/stdlib_dict_balance.fango` — those
+prove correctness under every insertion order, not balance. The invariant was
+checked by hand at the time of writing, by temporarily exposing a `height`
+function and asserting the standard bound up to two thousand keys in three
+insertion orders and after deletion. A benchmark case is the durable fix: an
+unbalanced tree turns an `n log n` case quadratic and blows the ratio ceiling.
+That gate would live in `benchmarks/`, which is manual rather than part of
+`make ci`.
+
 Independent library versioning, package distribution, and dependency fetching
 remain deferred; configurable source roots are entangled with the question
 below.
@@ -223,6 +241,77 @@ rather than unification for an argument's own row, and the open questions are
 where that widening is sound to apply, what it does to inference order and
 generalization, and how the resulting diagnostics read when a callback really
 is wrong.
+
+## Constraint simplification for parameterized types
+
+A class constraint on a parameterized type is never reduced to constraints on
+its arguments, so `Eq a => List a -> List a -> Bool` is rejected: it asks for
+`Eq (List a)` instead, even though `List` derives `Eq` and the instance
+`Eq a => Eq (List a)` is exactly the one that would discharge it. Concrete
+element types are fine, because the constraint is solved outright; only a
+rigid variable under a type constructor hits this. Writing the unreduced
+constraint works — `Eq (List a) => …` is accepted — so this is missing
+simplification, not a missing instance.
+
+It is not academic. `Dict`'s `Eq` instance would naturally compare
+`toList left == toList right`, and doing so would force `Eq (List (k, v))`
+into the instance context and from there into every caller of `==` on a
+dictionary, exposing that equality happens to go through a list. The module
+compares the pairs componentwise instead, needing only `Eq k` and `Eq v`; the
+workaround is fine but the constraint it works around is not.
+
+The fix is to apply an instance to a constraint whose head is known even when
+its arguments are rigid, during generalization, and to report the residual
+constraints in terms of what is left. The open questions are the usual ones
+for context reduction: termination when an instance context is no smaller than
+its head, how the resulting diagnostics read, and whether the simplified or
+the written form should appear in an inferred signature.
+
+## Opaque native types
+
+A `GoAny` value — opaque on the fango side, a real Go value on the native
+side — is nearly free in the compiled backend and blocked only by the REPL.
+
+The compiled half is small. `goType` in `internal/codegen/gen.go` maps a
+fango type to a Go type, and `GoAny` maps to Go `any`. Core lint's
+`matchNativeType` never restricted natives to scalars: it checks only that a
+Core node instantiates the declared scheme. The one gate is the scalar type
+map in `internal/modules/modules.go`. Providing no `Eq` or `Show` instance is
+what keeps the type opaque. `Meta` already passes real Go objects this way,
+though only at compile time, where they never reach the backend or the worker.
+
+The REPL is the whole difficulty. Call-form sidecars run in a separate
+persistent worker process, and `nativewire.Value` carries five scalars over a
+gob wire. A Go pointer cannot cross that, which is the same wall
+[E6](roadmap-effects.md#e6-resource-apis-native-boundaries-and-useful-io-errors)
+hits for file handles.
+
+`plugin.Open` does not solve it. Go has no unload at all, a plugin must be
+built against byte-identical package archives as its host — which a
+distributed binary cannot promise — and darwin support is second-class.
+
+The direction to take instead is to **invert the wire**: move the Core
+interpreter into the child process alongside the sidecars, leave the compiler
+front end in the REPL process, and ship serialized Core across. `GoAny` values
+then share one heap and one garbage collector with interpreter values, and the
+wire never sees them. The dependency closure makes this tractable —
+`internal/eval` pulls in `core`, `types`, `meta`, `ast`, `source`, `natives`,
+`stdlib`, and `fangort`, with the type checker staying in the front end.
+Loading and unloading a native module becomes respawn-and-replay of the pure
+declarations the front end still holds, which the generation model under
+[REPL hardening](#repl-hardening) already has to accommodate; unloading is free
+because it is a process exit, the one thing Go can do that `plugin` cannot.
+
+Serializing Core is the same artifact
+[unembedding](#unembedding-the-bundled-sources) already wants, so the two
+converge on one mechanism rather than competing.
+
+A smaller adjacent idea is worth recording separately: erasing a
+single-constructor, single-scalar-field type across the *existing* boundary
+would give users type-safe opaque handles with no new representation and no
+architecture change. That is right for a file or a connection, which are
+opened a few at a time and explicitly closed, and wrong for a persistent
+`Dict`, where every insert would leak a table slot that nothing ever releases.
 
 ## Longer-term candidates
 

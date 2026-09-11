@@ -1,0 +1,43 @@
+import IO
+import List
+import String
+
+-- show does not quote strings, so an empty piece is invisible in a list
+-- display. Count the pieces as well, or [""] and [] would look alike.
+sizes : List.List String -> Int
+sizes pieces = List.length pieces
+
+main() =
+    -- split: n occurrences give n + 1 pieces
+    print (String.split "," "a,b,c")
+    print (String.split "," "a")
+    print (String.split "," "")
+    print (sizes (String.split "," ""))
+    print (String.split "," ",a")
+    print (String.split "," "a,")
+    print (String.split "," "a,,b")
+    print (sizes (String.split "," "a,,b"))
+    print (String.split "," ",")
+    print (sizes (String.split "," ","))
+    print (String.split "::" "a::b::c")
+    -- a separator longer than what remains must not slice out of range
+    print (String.split "abcd" "abc")
+    print (String.split "abcd" "xabcdy")
+    -- an empty separator yields the text unchanged
+    print (String.split "" "abc")
+    -- trim
+    print (String.trim "  hi  ")
+    print (String.trim "hi")
+    print (String.trim "")
+    print (String.trim "   ")
+    print (String.trim "\t\n\r hi \r\n\t")
+    print (String.trim "a b")
+    -- padding measures Unicode scalars, not bytes
+    print (String.padLeft 5 '.' "ab")
+    print (String.padRight 5 '.' "ab")
+    print (String.padLeft 2 '.' "ab")
+    print (String.padLeft 1 '.' "ab")
+    print (String.padLeft 0 '.' "ab")
+    print (String.padLeft (-3) '.' "ab")
+    print (String.padLeft 4 '.' "éé")
+    print (String.byteLength (String.padLeft 4 '.' "éé"))

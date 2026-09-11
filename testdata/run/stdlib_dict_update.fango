@@ -1,0 +1,64 @@
+import Dict
+import IO
+import Maybe exposing (Maybe(..))
+
+base : Dict.Dict String Int
+base = Dict.fromList [("a", 1), ("b", 2)]
+
+-- A key type whose Ord calls two spellings equivalent while Show keeps them
+-- apart, so "the stored key is kept" is observable.
+type Fold = Fold String
+
+lower : Fold -> String
+lower key =
+    case key of
+        Fold text -> if text == "A" then "a" else if text == "B" then "b" else text
+
+instance Eq Fold
+    (==) x y = lower x == lower y
+
+instance Ord Fold
+    (<) x y = lower x < lower y
+    (>) x y = lower x > lower y
+    (<=) x y = lower x <= lower y
+    (>=) x y = lower x >= lower y
+
+instance Show Fold
+    show key =
+        case key of
+            Fold text -> text
+
+main() =
+    -- the four arms of update
+    print (Dict.update "z" (\existing -> Nothing) base)
+    print (Dict.size (Dict.update "z" (\existing -> Nothing) base))
+    print (Dict.update "z" (\existing -> Just 9) base)
+    print (Dict.update "a" (\existing -> Just 9) base)
+    print (Dict.update "a" (\existing -> Nothing) base)
+    -- the callback sees what was there
+    print (Dict.update "a" (\existing -> case existing of
+        Nothing -> Just 0
+        Just n -> Just (n + 100)) base)
+    print (Dict.update "z" (\existing -> case existing of
+        Nothing -> Just 0
+        Just n -> Just (n + 100)) base)
+    -- inserting into an absent key matches insert
+    print (Dict.update "z" (\existing -> Just 9) base == Dict.insert "z" 9 base)
+    -- the callback runs exactly once per call, at the end of the search path.
+    -- The effect row is open, so an IO callback is allowed and each line here
+    -- is one invocation.
+    bigger = Dict.fromList [("a", 1), ("b", 2), ("c", 3), ("d", 4), ("e", 5)]
+    counted = Dict.update "d" (\existing ->
+        print "called"
+        Just 40) bigger
+    print counted
+    -- and once even when the key is absent
+    missing = Dict.update "zz" (\existing ->
+        print "called"
+        Nothing) bigger
+    print (Dict.size missing)
+    -- the stored key survives; only the value changes
+    folded = Dict.fromList [(Fold "a", 1)]
+    print (Dict.insert (Fold "A") 2 folded)
+    print (Dict.update (Fold "A") (\existing -> Just 3) folded)
+    print (Dict.fromList [(Fold "a", 1), (Fold "A", 2)])

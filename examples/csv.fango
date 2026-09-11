@@ -1,0 +1,166 @@
+-- A CSV expense report.
+--
+--     csv expenses.csv
+--
+-- Reads date,category,description,amount records after a header line,
+-- aggregates them by category, and prints an aligned table with totals.
+--
+-- Money is integer cents throughout. Amounts are parsed and formatted with
+-- integer arithmetic rather than floats, because a report that sums floats and
+-- prints two decimals accumulates rounding error it never shows.
+--
+-- Rows are split on commas with no support for quoted fields, so a field may
+-- not contain one. Category names are trimmed, so " Groceries " and
+-- "Groceries" are one category.
+--
+-- The report comes out in category order for free: Dict.toList ascends, and
+-- List has no sort function. That is the reason the dictionary is ordered.
+
+import Basics exposing (quotientBy, remainderBy)
+import Dict
+import IO
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import String
+
+type Summary = { count : Int, cents : Int }
+
+type Report = { totals : Dict.Dict String Summary, count : Int, cents : Int }
+
+emptyReport : Report
+emptyReport = Report { totals = Dict.empty, count = 0, cents = 0 }
+
+-- parseCents reads a decimal amount into cents. The sign is stripped first so
+-- the magnitude parses as an ordinary non-negative number, and a one-digit
+-- fraction is padded, so "4.5" is 450 rather than 45.
+parseFraction : String -> Maybe Int
+parseFraction text =
+    if String.length text > 2 then
+        Nothing
+    else
+        String.toInt (String.padRight 2 '0' text)
+
+parseMagnitude : String -> Maybe Int
+parseMagnitude text =
+    case String.split "." text of
+        [whole] ->
+            case String.toInt whole of
+                Nothing -> Nothing
+                Just dollars -> Just (dollars * 100)
+        [whole, fraction] ->
+            case String.toInt whole of
+                Nothing -> Nothing
+                Just dollars ->
+                    case parseFraction fraction of
+                        Nothing -> Nothing
+                        Just cents -> Just (dollars * 100 + cents)
+        _ -> Nothing
+
+parseCents : String -> Maybe Int
+parseCents raw =
+    text = String.trim raw
+    if String.startsWith "-" text then
+        case parseMagnitude (String.slice 1 (String.length text) text) of
+            Nothing -> Nothing
+            Just magnitude -> Just (0 - magnitude)
+    else
+        parseMagnitude text
+
+formatCents : Int -> String
+formatCents cents =
+    sign = if cents < 0 then "-" else ""
+    units = if cents < 0 then 0 - cents else cents
+    sign ++ "$" ++ show (quotientBy 100 units) ++ "." ++ String.padLeft 2 '0' (show (remainderBy 100 units))
+
+-- Aggregation is the whole point of the example: one update per row, whether
+-- the category has been seen before or not.
+addExpense : String -> Int -> Report -> Report
+addExpense category cents report =
+    totals = Dict.update category (\existing ->
+        case existing of
+            Nothing -> Just (Summary { count = 1, cents = cents })
+            Just summary -> Just ({ summary | count = summary.count + 1, cents = summary.cents + cents })) report.totals
+    { report | totals = totals, count = report.count + 1, cents = report.cents + cents }
+
+addRow : Int -> String -> Report ->{IO} Report
+addRow lineNumber line report =
+    case String.split "," line of
+        [_, category, _, amount] ->
+            case parseCents amount of
+                Nothing ->
+                    print ("warning: line " ++ show lineNumber ++ ": cannot read amount " ++ String.trim amount)
+                    report
+                Just cents -> addExpense (String.trim category) cents report
+        _ ->
+            print ("warning: line " ++ show lineNumber ++ ": expected four fields")
+            report
+
+addRows : Int -> List String -> Report ->{IO} Report
+addRows lineNumber lines report =
+    case lines of
+        [] -> report
+        [line | rest] ->
+            if String.trim line == "" then
+                addRows (lineNumber + 1) rest report
+            else
+                addRows (lineNumber + 1) rest (addRow lineNumber line report)
+
+categoryWidth : Int
+categoryWidth = 16
+
+countWidth : Int
+countWidth = 6
+
+amountWidth : Int
+amountWidth = 12
+
+row : String -> String -> String -> String
+row category count amount =
+    String.padRight categoryWidth ' ' category
+        ++ String.padLeft countWidth ' ' count
+        ++ String.padLeft amountWidth ' ' amount
+
+rule : String
+rule = String.padLeft (categoryWidth + countWidth + amountWidth) '-' ""
+
+printCategory : (String, Summary) ->{IO} ()
+printCategory entry =
+    case entry of
+        (category, summary) -> print (row category (show summary.count) (formatCents summary.cents))
+
+printReport : Report ->{IO} ()
+printReport report =
+    print (row "Category" "Count" "Amount")
+    print rule
+    List.each printCategory (Dict.toList report.totals)
+    print rule
+    print (row "Total" (show report.count) (formatCents report.cents))
+    print ""
+    print (show (Dict.size report.totals) ++ " categories")
+
+-- The header line is always dropped, so a malformed first record is reported
+-- as a missing header rather than as a mysterious warning.
+dropHeader : List String -> List String
+dropHeader lines =
+    case lines of
+        [] -> []
+        [_ | rest] -> rest
+
+run : String ->{IO} ()
+run path =
+    case IO.readFile path of
+        Nothing ->
+            print ("cannot read " ++ path)
+            IO.exit 1
+        Just contents ->
+            printReport (addRows 2 (dropHeader (String.split "\n" contents)) emptyReport)
+
+usage : () ->{IO} ()
+usage() =
+    print "usage: csv FILE"
+    IO.exit 1
+
+main() =
+    case IO.args() of
+        [path] -> run path
+        _ -> usage()

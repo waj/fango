@@ -1,0 +1,11 @@
+warning: line 12: cannot read amount not-a-number
+Category         Count      Amount
+----------------------------------
+Books                2      $17.49
+Groceries            4     $158.25
+Transport            2      $98.10
+Utilities            2     $120.00
+----------------------------------
+Total               10     $393.84
+
+4 categories

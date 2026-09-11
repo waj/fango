@@ -1009,7 +1009,9 @@ dependence: the ratio moves with whatever else is competing for the CPU.
 The implementation has a deliberately narrow scalar Go sidecar FFI but no
 package manager, transparent aliases, formatter, or LSP. Type classes have one
 parameter, no superclasses, higher kinds, default methods, ambiguous overlapping heads,
-or method-local polymorphism. There are no source-path
+or method-local polymorphism. A constraint on a parameterized type is not
+simplified to constraints on its arguments, so `Eq a => List a -> Bool` is
+rejected in favor of `Eq (List a) => …`. There are no source-path
 flags, external library version selection, or package resolution. The implicit
 prelude is fixed to hidden `Basics` plus ambient `IO`, with `Meta` added only
 for files that use the staging syntax and `Tuple` always, since tuple syntax

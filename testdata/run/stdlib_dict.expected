@@ -1,0 +1,23 @@
+Dict [a = 1, b = 2, c = 3]
+Dict []
+Dict [k = 1]
+3
+0
+True
+False
+Just 1
+Nothing
+Nothing
+True
+False
+[a, b, c]
+[1, 2, 3]
+[(a, 1), (b, 2), (c, 3)]
+[]
+Dict [a = 99, b = 2, c = 3]
+3
+Dict [a = 2]
+True
+False
+True
+Dict [1 = [10], 2 = [20, 21]]

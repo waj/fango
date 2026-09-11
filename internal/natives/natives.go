@@ -69,6 +69,11 @@ var Table = func() map[string]Spec {
 	t["Basics.remainderBy"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
 		return args[1].(int64) % args[0].(int64), nil
 	}}
+	// Not Foldable, as remainderBy is not: folding a zero divisor would turn a
+	// runtime crash into a compiler crash.
+	t["Basics.quotientBy"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
+		return args[1].(int64) / args[0].(int64), nil
+	}}
 	t["String.length"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return stdlib.Length(args[0].(string)), nil
 	}}

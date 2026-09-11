@@ -1,0 +1,43 @@
+import Dict
+import IO
+import List
+import Maybe exposing (Maybe(..))
+
+-- empty is polymorphic, so printing it needs a chosen instantiation.
+noEntries : Dict.Dict String Int
+noEntries = Dict.empty
+
+main() =
+    d = Dict.fromList [("b", 2), ("a", 1), ("c", 3)]
+    print d
+    print noEntries
+    print (Dict.singleton "k" 1)
+    print (Dict.size d)
+    print (Dict.size noEntries)
+    print (Dict.isEmpty noEntries)
+    print (Dict.isEmpty d)
+    print (Dict.get "a" d)
+    print (Dict.get "z" d)
+    print (Dict.get "a" noEntries)
+    print (Dict.member "b" d)
+    print (Dict.member "z" d)
+    -- traversals are ascending whatever the insertion order was
+    print (Dict.keys d)
+    print (Dict.values d)
+    print (Dict.toList d)
+    print (Dict.keys noEntries)
+    -- insert replaces the value of a key already present
+    replaced = Dict.insert "a" 99 d
+    print replaced
+    print (Dict.size replaced)
+    -- later entries win in fromList
+    print (Dict.fromList [("a", 1), ("a", 2)])
+    -- Eq compares entries, not tree shape: these two trees have different
+    -- shapes and must still be equal. A derived structural Eq would say False.
+    ascending = Dict.fromList [("a", 1), ("b", 2), ("c", 3), ("d", 4), ("e", 5)]
+    descending = Dict.fromList [("e", 5), ("d", 4), ("c", 3), ("b", 2), ("a", 1)]
+    print (ascending == descending)
+    print (ascending == Dict.remove "a" ascending)
+    print (noEntries == Dict.remove "a" (Dict.singleton "a" 1))
+    -- Show at a second instantiation
+    print (Dict.fromList [(2, [20, 21]), (1, [10])])

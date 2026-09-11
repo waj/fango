@@ -1,0 +1,59 @@
+import Basics exposing (modBy)
+import Dict
+import IO
+import List exposing (List(..))
+
+-- Ascending and descending insertion are the two worst cases for an
+-- unbalanced search tree and drive the single rotations; a stride coprime to
+-- n scatters the keys and drives the double rotations. All three must build
+-- equal dictionaries. Tree height is not observable from here — Dict is
+-- abstract — so this fixture proves correctness under every insertion order,
+-- not balance itself.
+ascending : Int -> Int -> Dict.Dict Int Int -> Dict.Dict Int Int
+ascending i n d = if i > n then d else ascending (i + 1) n (Dict.insert i (i * 2) d)
+
+descending : Int -> Dict.Dict Int Int -> Dict.Dict Int Int
+descending i d = if i < 1 then d else descending (i - 1) (Dict.insert i (i * 2) d)
+
+strided : Int -> Int -> Dict.Dict Int Int -> Dict.Dict Int Int
+strided i n d =
+    if i > n then
+        d
+    else
+        key = modBy n (i * 7) + 1
+        strided (i + 1) n (Dict.insert key (key * 2) d)
+
+removeFrom : Int -> Int -> Int -> Dict.Dict Int Int -> Dict.Dict Int Int
+removeFrom i n step d =
+    if i > n then d else removeFrom (i + step) n step (Dict.remove i d)
+
+allPresent : Int -> Int -> Dict.Dict Int Int -> Bool
+allPresent i n d = if i > n then True else Dict.member i d && allPresent (i + 1) n d
+
+n : Int
+n = 200
+
+main() =
+    a = ascending 1 n Dict.empty
+    b = descending n Dict.empty
+    c = strided 1 n Dict.empty
+    print (Dict.size a)
+    print (Dict.size b)
+    print (Dict.size c)
+    print (a == b)
+    print (a == c)
+    print (a == Dict.fromList (Dict.toList a))
+    print (Dict.keys a == List.range 1 n)
+    print (allPresent 1 n a)
+    print (allPresent 1 n c)
+    -- removing every even key exercises glue on both the min and max sides
+    odds = removeFrom 2 n 2 a
+    print (Dict.size odds)
+    print (Dict.get 1 odds)
+    print (Dict.get 2 odds)
+    print (odds == removeFrom 2 n 2 c)
+    -- removing an absent key changes nothing
+    print (odds == Dict.remove 2 odds)
+    -- and removing the rest empties it
+    print (Dict.isEmpty (removeFrom 1 n 2 odds))
+    print (Dict.size (removeFrom 1 n 1 a))
