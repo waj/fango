@@ -130,18 +130,35 @@ Haskell's ambient reification, which is what breaks modularity there.
 - Make benchmark baselines easier to reproduce and less sensitive to machine
   load while retaining meaningful regression gates. Neither performance gate
   runs unattended today, because neither survives a loaded host: the
-  runtime-ratio gate's `mapfilter` case swings between roughly 5x and 8x
-  against its 4.5 ceiling on one machine depending on whether the rest of the
-  suite is running alongside it, so calibrating against a same-host Go
-  baseline is not on its own enough. Until that is fixed the gates stay
-  manual, and compile latency additionally needs per-host baselines or a
-  host-independent formulation.
+  runtime-ratio gate's `mapfilter` case has swung by several multiples on one
+  machine depending on whether the rest of the suite is running alongside it,
+  so calibrating against a same-host Go baseline is not on its own enough.
+  Until that is fixed the gates stay manual, and compile latency additionally
+  needs per-host baselines or a host-independent formulation.
+- Decide whether the runtime-ratio gate should time work rather than
+  processes. It times whole runs, and for the short cases most of the
+  baseline's wall clock is process spawn and collection, which both sides pay
+  equally — so the published ratios understate how far apart the compute is,
+  by a wide margin on the list cases. That makes the gate sound as a
+  regression alarm and misleading as a target.
+
+## Calling conventions and recursion shapes
+
+[roadmap-calls.md](roadmap-calls.md) owns two measured, unstarted items: passing
+callbacks to worker parameters uncurried, which today costs an allocation per
+element at every higher-order call, and compiling list-building recursion to a
+loop, which today costs a Go frame per element in `map`, `foldr`, and every
+user-written function of the same shape. Both fix the standard library and user
+code together, which is why neither is answered by native list combinators —
+that document records the measurements ruling that out.
 
 ## Tail calls beyond the self-call loop
 
 Self tail calls of top-level workers compile to loops in both backends (see
-the design and reference). Deliberately deferred, each awaiting a concrete
-program that needs it:
+the design and reference). Recursion that builds a list is not tail recursion
+but is tail recursion modulo a constructor; it is owned by
+[roadmap-calls.md](roadmap-calls.md). Deliberately deferred, each awaiting a
+concrete program that needs it:
 
 - **Mutual recursion** (`f` → `g` → `f`): needs fused dispatch loops or a
   trampoline, changes the emitted shape of several defs at once, and

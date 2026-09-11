@@ -23,6 +23,11 @@ worst-case-O(1) cons was chosen for. `branchcons` races handwritten cons cells
 rather than a slice, because that is the workload where an array-backed list is
 the one that has to pay.
 
+What remains between fango and the slice baseline is not list work.
+[roadmap-calls.md](roadmap-calls.md) records where it actually goes: an
+allocation per element at curried higher-order boundaries, and a Go frame per
+element in recursion that builds a list.
+
 ## Open questions
 
 - **Retuning `listChunk`.** It is 32 because bytes per element saturates there
@@ -40,13 +45,18 @@ the one that has to pay.
 - **Whether to expose cheap length and indexing.** Both are available from the
   representation and neither is expressible on the current surface; `length` is
   a traversal today. This is a surface question, not a representation one.
-- **Native acceleration for the combinators.** `map`, `filter`, and `foldl` are
-  ordinary fango. An inline `native` template over a runtime helper is available
-  now and would need a matching interpreter registry entry; carrying a list
-  across the sidecar ABI is a larger question that belongs with the FFI work.
-  Both presuppose the shared representation, which is why neither was worth
-  doing before it existed. Neither should happen without benchmark evidence,
-  per the standard-library rule in [the roadmap](roadmap.md).
+- **Native acceleration for the combinators — measured, and not the lever.**
+  The obvious next step is native `map` and `each`, and the numbers say no.
+  `each` and `foldl` already compile to loops, so a native version removes
+  nothing, and it would still receive a curried fango closure and pay an
+  allocation per element for it; a `foldl`-based sum is accordingly *slower*
+  than a hand-written non-tail-recursive one. A native `map` or `foldr` would
+  remove real Go frames, but only inside the library, while the benchmark
+  furthest from Go calls no library function at all. The two costs that
+  actually dominate are general, and they are owned by
+  [roadmap-calls.md](roadmap-calls.md). Revisit natives only if that work lands
+  and a gap remains — the standard-library rule in [the roadmap](roadmap.md)
+  asks for benchmark evidence, and the evidence currently points elsewhere.
 - **Whether any other bundled type deserves a compiler-known representation**,
   and what the criterion is. `List` earned it on a measurement; that is the bar.
 
