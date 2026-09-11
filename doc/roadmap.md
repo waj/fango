@@ -326,6 +326,15 @@ These are directions, not commitments or an ordering after the work above.
 - Extend nominal records to inline record payloads on variant constructors
   when an example needs named fields on one alternative; the surface syntax,
   construction, matching, and field visibility remain open together.
+- Let a constructor take an inferred record literal without parentheses.
+  `Wrap { x = 1 }` currently reads as a literal of a record named `Wrap`,
+  because a capitalized name before `{` always names the record, and the
+  parser cannot know whether the name is a record type or a constructor. The
+  diagnostic says so and suggests `Wrap ({ x = 1 })`. Resolution knows both
+  namespaces and could rewrite the node, but rewriting an application into a
+  literal there is a surprising transform for a pass that otherwise only
+  renames; whether the convenience is worth it is the open question, and it
+  only becomes pressing alongside inline record payloads above.
 - Numeric semantics beyond the current `Int`/`Float` model: overflow, integer
   division, conversions, and possible arbitrary precision.
 - Extend type classes only from concrete needs: superclasses, method-local

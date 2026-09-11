@@ -1084,7 +1084,27 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	errs = append(errs, g.errs...)
 	errs = append(errs, solveErrs...)
 	g.errs = nil
-	g.resolveRecords(true)
+	// An inferred record literal takes its nominal type from context, and a
+	// declaration's annotation is that context. The annotation is normally
+	// reconciled below, after the record fixed point, which would be too late;
+	// when something is actually waiting on it, unify it first so the fixed
+	// point can see through it. Doing this through the substitution rather than
+	// by threading an expected type down the syntax covers every shape the
+	// literal can sit in — a list element, a branch, a nested field — uniformly.
+	// The gate keeps declarations that use no inferred record on exactly the
+	// path they were on before.
+	annPreSolved, effectsAgree := false, true
+	if d.Ann != nil && annTy != nil && g.hasPendingInferredRecord() {
+		// Capture the effect comparison against the pre-unification zonk: after
+		// the solve the two sides are equal by construction, so an annotation
+		// could otherwise claim effects the body never performs.
+		effectsAgree = sameKnownEffects(ck.Sub.Apply(annTy), ck.Sub.Apply(ty))
+		sub, _, solveErrs := Solve([]Constraint{{Left: annTy, Right: ty, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: d.Name}}}, nil, ck.Sub, ck.B, ck.Sup)
+		ck.Sub = sub
+		errs = append(errs, solveErrs...)
+		annPreSolved = true
+	}
+	g.resolveRecords(true, 0)
 	errs = append(errs, g.errs...)
 	if d.Ann == nil && !isMain {
 		ck.closeSingleRows(ty)
@@ -1109,14 +1129,19 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 		// Skolemize-and-unify (doc/design.md, "Type inference"): the annotation's variables resolve to
 		// fresh rigid skolems, atomic in unification, so an annotation
 		// claiming more polymorphism than the body delivers errors here.
-		if !sameKnownEffects(ck.Sub.Apply(annTy), ck.Sub.Apply(ty)) {
+		if !annPreSolved {
+			if !sameKnownEffects(ck.Sub.Apply(annTy), ck.Sub.Apply(ty)) {
+				errs = append(errs, diag.Errorf(d.Ann.Sp, "EFFECT MISMATCH",
+					"The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", d.Name))
+			}
+			c := Constraint{Left: annTy, Right: ty, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: d.Name}}
+			sub, _, solveErrs := Solve([]Constraint{c}, nil, ck.Sub, ck.B, ck.Sup)
+			ck.Sub = sub
+			errs = append(errs, solveErrs...)
+		} else if !effectsAgree {
 			errs = append(errs, diag.Errorf(d.Ann.Sp, "EFFECT MISMATCH",
 				"The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", d.Name))
 		}
-		c := Constraint{Left: annTy, Right: ty, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: d.Name}}
-		sub, _, solveErrs := Solve([]Constraint{c}, nil, ck.Sub, ck.B, ck.Sup)
-		ck.Sub = sub
-		errs = append(errs, solveErrs...)
 		ty = annTy
 	}
 	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Equations: d.Equations, Type: ty, Body: d.Body, InstanceLimit: len(ck.Instances)}
@@ -1216,7 +1241,7 @@ func (ck *Checker) ExprWhere(e ast.Expr, allowEffects bool) (types.Type, []diag.
 	_ = residual
 	errs := append(g.errs, solveErrs...)
 	g.errs = nil
-	g.resolveRecords(true)
+	g.resolveRecords(true, 0)
 	errs = append(errs, g.errs...)
 	left, es := ck.reduceObligations(g.preds, nil)
 	ids := map[int]bool{}
@@ -1254,8 +1279,23 @@ type predObligation struct {
 	op   string
 }
 
+// recordKind says what a deferred obligation becomes once its receiver names a
+// nominal record. An access reads or replaces fields of a value that already
+// has a type; a build or a match is an inferred `{ ... }` whose own type comes
+// from context, so it additionally checks the schema the named forms check
+// eagerly and fills the side table elaboration reads.
+type recordKind int
+
+const (
+	recordAccess recordKind = iota
+	recordBuild
+	recordMatch
+)
+
 type recordObligation struct {
+	kind       recordKind
 	node       ast.Expr
+	pat        *ast.PRecord
 	receiver   types.Type
 	result     types.Type
 	field      string
@@ -1375,13 +1415,17 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			ty = &types.TFun{Arg: fields[i], Eff: types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}, Ret: ty}
 		}
 	case *ast.RecordLit:
+		if e.Name == "" {
+			ty = g.inferredRecord(e, want)
+			break
+		}
 		named, ok := g.ck.TypeNames[e.Name].(*types.TCon)
 		adt := (*types.ADTInfo)(nil)
 		if ok {
 			adt = g.ck.ADTs[named.Unique]
 		}
 		if adt == nil || !adt.IsRecord() {
-			g.errs = append(g.errs, diag.Errorf(e.NameSpan, "UNKNOWN RECORD", "I don't know an exposed record type named `%s`.", types.SurfaceName(e.Name)))
+			g.errs = append(g.errs, g.unknownRecord(e.Name, e.NameSpan))
 			ty = g.ck.Sup.FreshVar(types.General)
 			for _, f := range e.Fields {
 				g.expr(f.Value)
@@ -2252,6 +2296,7 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 		var annVars []*types.TVar
 		var given []types.Pred
 		predStart := len(g.preds)
+		recordStart := len(g.records)
 		var annTy types.Type
 		if bind.Ann != nil {
 			annScope := g.ck.NewAnnScope()
@@ -2298,7 +2343,7 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 			// Solve-at-binding (doc/design.md, "Type inference"): discharge this binding's constraints
 			// into the substitution now, so generalization sees solved types
 			// and later bindings can use this one polymorphically.
-			g.solveHere()
+			g.solveHere(recordStart)
 			if bind.Ann == nil {
 				g.ck.closeSingleRows(ty)
 			}
@@ -2346,16 +2391,91 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 
 // solveHere discharges the accumulated constraints into the checker's
 // substitution — the solve-at-binding point.
-func (g *generator) solveHere() {
+//
+// from is the index of the first obligation belonging to this binding.
+// Obligations raised by the enclosing declaration are still given a chance to
+// make progress here, but they are not declared ambiguous: the code that would
+// decide them may not have been reached yet.
+func (g *generator) solveHere(from int) {
 	if len(g.cs) == 0 {
-		g.resolveRecords(true)
+		g.resolveRecords(true, from)
 		return
 	}
 	sub, _, errs := Solve(g.cs, nil, g.ck.Sub, g.ck.B, g.ck.Sup)
 	g.ck.Sub = sub
 	g.errs = append(g.errs, errs...)
 	g.cs = nil
-	g.resolveRecords(true)
+	g.resolveRecords(true, from)
+}
+
+// inferredRecord types `{ field = value, ... }`, whose nominal type is the one
+// the context expects rather than one the source names. The literal's type is
+// a fresh variable; anything that pins it — an annotation, a parameter type,
+// an enclosing field, a unified branch — decides which record this is. A want
+// already solved to a nominal type is constrained here so the mismatch is
+// reported at the literal, and everything else waits for the fixed point.
+// Field labels are never consulted: they check the schema once the type is
+// known, they do not choose it.
+func (g *generator) inferredRecord(e *ast.RecordLit, want types.Type) types.Type {
+	recv := g.ck.Sup.FreshVar(types.General)
+	if want != nil {
+		if con, ok := g.ck.Sub.Apply(want).(*types.TCon); ok {
+			g.cs = append(g.cs, Constraint{Left: recv, Right: con, Span: e.Sp, Why: Why{Kind: WhyCall}})
+		}
+	}
+	ob := &recordObligation{kind: recordBuild, node: e, receiver: recv, result: recv, fieldSpan: e.Sp}
+	seen := map[string]bool{}
+	for _, f := range e.Fields {
+		if seen[f.Name] {
+			g.errs = append(g.errs, diag.Errorf(f.NameSpan, "RECORD FIELDS", "The field `%s` is provided more than once.", f.Name))
+		}
+		seen[f.Name] = true
+		ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, ty: g.expr(f.Value), candidates: f.Records})
+	}
+	g.records = append(g.records, ob)
+	return recv
+}
+
+// inferredRecordPattern types `{ field = pattern, ... }`. Binders enter scope
+// immediately, so a branch body sees them; only their types wait for the
+// scrutinee to name a record.
+func (g *generator) inferredRecordPattern(p *ast.PRecord, scope *blockScope) types.Type {
+	recv := g.ck.Sup.FreshVar(types.General)
+	ob := &recordObligation{kind: recordMatch, pat: p, receiver: recv, result: recv, fieldSpan: p.Sp}
+	seen := map[string]bool{}
+	for _, f := range p.Fields {
+		if seen[f.Name] {
+			g.errs = append(g.errs, diag.Errorf(f.NameSpan, "RECORD FIELDS", "The field `%s` appears more than once in this record pattern.", f.Name))
+		}
+		seen[f.Name] = true
+		ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, ty: g.pattern(f.Pattern, scope), candidates: f.Records})
+	}
+	g.records = append(g.records, ob)
+	return recv
+}
+
+// unknownRecord explains a capitalized name before `{` that is not a record
+// type. A name in that position always names the record, so a constructor
+// there is a user who meant to hand it an inferred literal; say so, because
+// "I don't know a record type named `Wrap`" is true but unhelpful when `Wrap`
+// is right there in scope.
+func (g *generator) unknownRecord(name string, sp source.Span) diag.Error {
+	if _, ok := g.ck.Ctors[name]; ok {
+		return diag.Errorf(sp, "UNKNOWN RECORD", "`%s` is a constructor, not a record type, and a capitalized name\nbefore `{` always names the record being built. To hand `%s` an\ninferred record literal, parenthesize the literal: `%s ({ ... })`.",
+			types.SurfaceName(name), types.SurfaceName(name), types.SurfaceName(name))
+	}
+	return diag.Errorf(sp, "UNKNOWN RECORD", "I don't know an exposed record type named `%s`.", types.SurfaceName(name))
+}
+
+// hasPendingInferredRecord reports whether some inferred `{ ... }` is still
+// waiting to learn which record it is.
+func (g *generator) hasPendingInferredRecord() bool {
+	for _, ob := range g.records {
+		if !ob.resolved && ob.kind != recordAccess {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveRecords discharges field obligations to a fixed point. One
@@ -2364,26 +2484,34 @@ func (g *generator) solveHere() {
 // resolution depend on the order the obligations were collected in. Each pass
 // solves what it learned, which is what lets the next one make progress;
 // only when a pass learns nothing are the survivors genuinely ambiguous.
-func (g *generator) resolveRecords(final bool) {
-	for g.recordPass(false) > 0 {
+func (g *generator) resolveRecords(final bool, from int) {
+	for g.recordPass(false, from) > 0 {
 	}
 	if final {
-		g.recordPass(true)
+		g.recordPass(true, from)
 	}
 }
 
-func (g *generator) recordPass(final bool) int {
+// from bounds which obligations may be reported as ambiguous on a final pass.
+// Every obligation still participates: an outer one that resolves here is what
+// lets an inner one make progress.
+func (g *generator) recordPass(final bool, from int) int {
 	resolved := 0
 	var constraints []Constraint
-	for _, ob := range g.records {
+	for i, ob := range g.records {
 		if ob.resolved {
 			continue
 		}
+		report := final && i >= from
 		t := g.ck.Sub.Apply(ob.receiver)
 		con, ok := t.(*types.TCon)
 		if !ok {
-			if final {
-				g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "AMBIGUOUS FIELD", "The record type is not known here; add a type annotation or provide a contextual record type."))
+			if report {
+				if ob.kind == recordAccess {
+					g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "AMBIGUOUS FIELD", "The record type is not known here; add a type annotation or provide a contextual record type."))
+				} else {
+					g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "AMBIGUOUS RECORD", "I cannot tell which record this is. Name its type, as in\n`Counts { ... }`, or add an annotation that gives it one. Field\nnames alone never choose a record type."))
+				}
 				ob.resolved = true
 				resolved++
 			}
@@ -2414,10 +2542,13 @@ func (g *generator) recordPass(final bool) int {
 		if ob.field != "" {
 			idx, _ := adt.RecordField(ob.field)
 			switch {
-			case !visible(ob.candidates):
-				g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "PRIVATE RECORD FIELD", "The fields of record `%s` are not exposed to this module.", types.SurfaceName(adt.Con.Name)))
+			// Existence first: a label this record does not have is unknown
+			// whatever the module boundary says, and reporting it as private
+			// would describe a field that does not exist.
 			case idx < 0:
 				g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "UNKNOWN FIELD", "Record `%s` has no field named `%s`.", types.SurfaceName(adt.Con.Name), ob.field))
+			case !visible(ob.candidates):
+				g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "PRIVATE RECORD FIELD", "The fields of record `%s` are not exposed to this module.", types.SurfaceName(adt.Con.Name)))
 			default:
 				constraints = append(constraints, Constraint{Left: ob.result, Right: fieldTypes[idx], Span: ob.fieldSpan, Why: Why{Kind: WhyCall}})
 			}
@@ -2425,15 +2556,33 @@ func (g *generator) recordPass(final bool) int {
 		for _, u := range ob.updates {
 			idx, _ := adt.RecordField(u.name)
 			switch {
-			case !visible(u.candidates):
-				g.errs = append(g.errs, diag.Errorf(u.span, "PRIVATE RECORD FIELD", "The fields of record `%s` are not exposed to this module.", types.SurfaceName(adt.Con.Name)))
 			case idx < 0:
 				g.errs = append(g.errs, diag.Errorf(u.span, "UNKNOWN FIELD", "Record `%s` has no field named `%s`.", types.SurfaceName(adt.Con.Name), u.name))
+			case !visible(u.candidates):
+				g.errs = append(g.errs, diag.Errorf(u.span, "PRIVATE RECORD FIELD", "The fields of record `%s` are not exposed to this module.", types.SurfaceName(adt.Con.Name)))
 			default:
 				constraints = append(constraints, Constraint{Left: u.ty, Right: fieldTypes[idx], Span: u.span, Why: Why{Kind: WhyCall}})
 			}
 		}
-		g.ck.RecordUses[ob.node] = adt
+		if ob.kind == recordBuild {
+			// A literal builds the whole value, so every declared field must be
+			// there. A pattern is a partial view and omitted fields stay
+			// implicit wildcards.
+			provided := map[string]bool{}
+			for _, u := range ob.updates {
+				provided[u.name] = true
+			}
+			for _, f := range adt.RecordFields {
+				if !provided[f.Name] {
+					g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "RECORD FIELDS", "Record `%s` is missing field `%s`.", types.SurfaceName(adt.Con.Name), f.Name))
+				}
+			}
+		}
+		if ob.kind == recordMatch {
+			g.ck.RecordPatternUses[ob.pat] = adt
+		} else {
+			g.ck.RecordUses[ob.node] = adt
+		}
 		ob.resolved = true
 		resolved++
 	}
@@ -2540,13 +2689,16 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 		g.preds = append(g.preds, predObligation{pred: g.ck.StandardPred("Eq", ty), span: p.Sp})
 		return ty
 	case *ast.PRecord:
+		if p.Name == "" {
+			return g.inferredRecordPattern(p, scope)
+		}
 		named, ok := g.ck.TypeNames[p.Name].(*types.TCon)
 		var adt *types.ADTInfo
 		if ok {
 			adt = g.ck.ADTs[named.Unique]
 		}
 		if adt == nil || !adt.IsRecord() {
-			g.errs = append(g.errs, diag.Errorf(p.NameSpan, "UNKNOWN RECORD", "I don't know an exposed record type named `%s`.", types.SurfaceName(p.Name)))
+			g.errs = append(g.errs, g.unknownRecord(p.Name, p.NameSpan))
 			for _, f := range p.Fields {
 				g.pattern(f.Pattern, scope)
 			}

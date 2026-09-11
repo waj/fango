@@ -1,0 +1,10 @@
+Circle { center = Point { x = 10, y = 20 }, radius = 8 }
+Circle { center = Point { x = 1, y = 2 }, radius = 3 }
+11
+9
+11
+Box { value = 7 }
+[Point { x = 1, y = 2 }, Point { x = 3, y = 4 }]
+Point { x = 1, y = 0 }
+0
+True

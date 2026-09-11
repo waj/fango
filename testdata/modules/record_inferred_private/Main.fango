@@ -1,0 +1,8 @@
+-- An inferred literal has no type name to resolve, so the field labels are the
+-- only thing carrying visibility. Exposing `Secret` without `(..)` must still
+-- keep the schema closed.
+module Main exposing (main)
+
+import Data
+
+main = Data.take { value = 1 }

@@ -1,0 +1,7 @@
+-- No expected type reaches this literal. Point is the only record with exactly
+-- these labels, and that still does not choose it: labels never drive inference.
+type Point = { x : Int, y : Int }
+
+c = { x = 1, y = 2 }
+
+main() = print 0

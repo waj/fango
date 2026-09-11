@@ -1,0 +1,8 @@
+fromAnnotation : Point
+fromResult : Int -> Point
+fromField : Pair Point
+sumP : Point -> Int
+fromParameter : Int
+fromListElement : L Point
+fromSkolem : a -> Pair a
+firstOf : Pair Int -> Int

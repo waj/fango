@@ -1,0 +1,58 @@
+-- A record literal may omit its type name wherever the expected type already
+-- says which record it is. The type comes from context only — an annotation, a
+-- parameter type, an enclosing field, a unified branch — never from the labels.
+import List exposing (List)
+
+type Point = { x : Int, y : Int } deriving (Eq, Show)
+type Circle = { center : Point, radius : Int } deriving (Show)
+type Box a = { value : a } deriving (Show)
+
+-- the enclosing field's declared type decides the nested literal
+nested = Circle { center = { x = 10, y = 20 }, radius = 8 }
+
+-- the annotation decides both the literal and the one nested inside it
+annotated : Circle
+annotated = { center = { x = 1, y = 2 }, radius = 3 }
+
+-- a parameter type decides an argument
+sumP : Point -> Int
+sumP p = p.x + p.y
+
+-- an inferred pattern in an annotated equation head
+firstOf : Point -> Int
+firstOf { x = x } = x
+
+-- an inferred pattern in a case branch
+secondOf : Point -> Int
+secondOf p =
+    case p of
+        { y = y } -> y
+
+-- a parameterized record takes its arguments from the annotation
+boxed : Box Int
+boxed = { value = 7 }
+
+-- a list element: the type arrives through the annotation, not through syntax
+points : List Point
+points = [{ x = 1, y = 2 }, { x = 3, y = 4 }]
+
+-- an if branch unified with a known type
+pick : Bool -> Point
+pick flag =
+    if flag then { x = 1, y = 0 } else { x = 0, y = 1 }
+
+origin : Point
+origin = { x = 0, y = 0 }
+
+main() =
+    print nested
+    print annotated
+    print (sumP { x = 5, y = 6 })
+    print (firstOf { x = 9, y = 0 })
+    print (secondOf { x = 0, y = 11 })
+    print boxed
+    print points
+    print (pick True)
+    { x = ox, y = oy } = origin
+    print (ox + oy)
+    print ({ x = 1, y = 2 } == Point { x = 1, y = 2 })

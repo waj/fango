@@ -1027,25 +1027,56 @@ bump : Counts -> Counts
 bump counts = { counts | lines = counts.lines + 1 }
 ```
 
-A record literal must name its type and provide every declared field exactly
-once; source field order does not affect its type. `value.field` projects a
-field, and `{ value | field = expression, ... }` produces a new value of the
-same nominal type. Update expressions are evaluated left to right and the
-original value is evaluated once. A projection or update receiver must already
-have a known nominal record type; field labels do not drive structural type
-inference.
+A record literal provides every declared field exactly once; source field order
+does not affect its type. `value.field` projects a field, and
+`{ value | field = expression, ... }` produces a new value of the same nominal
+type. Update expressions are evaluated left to right and the original value is
+evaluated once. A projection or update receiver must already have a known
+nominal record type.
 
-A nominal record pattern names its type and any fields to inspect:
+A literal may omit its type name when the expected type already says which
+record it is:
+
+```fango
+type Point = { x : Int, y : Int }
+type Circle = { center : Point, radius : Int }
+
+near = Circle { center = { x = 10, y = 20 }, radius = 8 }
+
+far : Circle
+far = { center = { x = 90, y = 90 }, radius = 1 }
+```
+
+The type comes from context and from nothing else: an annotation, a parameter
+type at the call site, the declared type of an enclosing field, or a branch
+unified with a known type. Field labels never choose a record, so adding a
+second record type with the same labels anywhere in scope cannot change how an
+existing program infers. A literal no context reaches reports `AMBIGUOUS
+RECORD`, even when exactly one record in scope has those labels. Once the type
+is known the schema is checked as usual, and a label whose schema this module
+cannot see still reports `PRIVATE RECORD FIELD`.
+
+A capitalized name immediately before `{` always names the record being built,
+so a constructor that takes a record parenthesizes an inferred literal
+(`Wrap ({ x = 1 })`); writing `Wrap { x = 1 }` reports `UNKNOWN RECORD` and
+says so.
+
+A nominal record pattern names its type and any fields to inspect, and may omit
+the type name on the same terms:
 
 ```fango
 case line of
     IO.Line { text = "", ending = ending } -> ending
     IO.Line { text = text } -> text
+
+startsAt : Point -> Int
+startsAt { x = x } = x
 ```
 
 Fields are keyed and may be reordered. Omitted fields are implicit wildcards,
 so `IO.Line {}` is irrefutable. Duplicate and unknown fields are rejected, and
-matching requires the field schema exposed by `Type(..)`.
+matching requires the field schema exposed by `Type(..)`. A record pattern
+delimits itself, so it needs no parentheses in an argument position.
 
 Records participate in module abstraction. An exposing item `Counts` makes
 only the type name available, while `Counts(..)` additionally exposes its field

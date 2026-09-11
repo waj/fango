@@ -281,7 +281,7 @@ func (ck *Checker) instanceMethod(d *ast.ValueDecl, ty types.Type, inst *Instanc
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
 	g.errs = nil
-	g.resolveRecords(true)
+	g.resolveRecords(true, 0)
 	errs = append(errs, g.errs...)
 	sch := ck.generalize(ty, nil)
 	sch.Preds = ck.NormalizePreds(given)
@@ -308,7 +308,7 @@ func (ck *Checker) annotatedDecl(d *ast.ValueDecl, ty types.Type) (DeclInfo, []d
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
 	g.errs = nil
-	g.resolveRecords(true)
+	g.resolveRecords(true, 0)
 	errs = append(errs, g.errs...)
 	sch, es := ck.qualify(ck.generalize(ty, nil), g.preds, nil, true, d.NameSpan)
 	errs = append(errs, es...)

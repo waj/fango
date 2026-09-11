@@ -87,6 +87,59 @@ main = unbox (Box { value = 42 })
 	}
 }
 
+// TestInferredRecords pins where the nominal type of an inferred `{ ... }` may
+// come from, including the shapes no expected type reaches syntactically.
+func TestInferredRecords(t *testing.T) {
+	_, _, errs := check(t, `type Point = { x : Int, y : Int }
+type Pair a = { first : a, second : a }
+type L a = Nil | Cons a (L a)
+
+fromAnnotation : Point
+fromAnnotation = { x = 1, y = 2 }
+
+fromResult : Int -> Point
+fromResult n = { x = n, y = n }
+
+fromField = Pair { first = Point { x = 1, y = 2 }, second = { x = 3, y = 4 } }
+
+sumP : Point -> Int
+sumP p = p.x + p.y
+
+fromParameter = sumP { x = 5, y = 6 }
+
+fromConstructorSpine : L Point
+fromConstructorSpine = Cons ({ x = 1, y = 2 }) Nil
+
+fromSkolem : a -> Pair a
+fromSkolem v = { first = v, second = v }
+
+fromPattern : Pair Int -> Int
+fromPattern { first = f } = f
+`)
+	if len(errs) > 0 {
+		t.Fatalf("inferred record errors: %v", errs)
+	}
+}
+
+// A block-local binding solves its own constraints early. That must not
+// finalize an obligation raised by the enclosing declaration, whose deciding
+// code the checker has not reached yet.
+func TestInferredRecordSurvivesLocalBinding(t *testing.T) {
+	_, _, errs := check(t, `type Point = { x : Int, y : Int }
+
+describe : Point -> Int
+describe p = p.x
+
+main =
+    p = { x = 1, y = 2 }
+    label v = v
+    describe p + label 0
+`)
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+}
+
 func TestPositive(t *testing.T) {
 	cases := []struct {
 		src  string
@@ -194,6 +247,17 @@ func TestNegative(t *testing.T) {
 		{"type R = { value : Int }\nget r = r.value", "AMBIGUOUS FIELD", 2},
 		{"x = \"text\".value", "NOT A RECORD", 1},
 		{"type R = { value : Int, value : Int }\nx = 1", "RECORD FIELDS", 1},
+		// An inferred literal no context reaches stays ambiguous even when one
+		// record in scope has exactly its labels: labels never choose a type.
+		{"type R = { value : Int }\nx = { value = 1 }", "AMBIGUOUS RECORD", 2},
+		{"type R = { a : Int, b : Int }\nx : R\nx = { a = 1 }", "RECORD FIELDS", 3},
+		{"type R = { a : Int }\nx : R\nx = { a = 1, b = 2 }", "UNKNOWN FIELD", 3},
+		{"type R = { a : Int }\nx : R\nx = { a = 1, a = 2 }", "RECORD FIELDS", 3},
+		{"type R = { a : Int }\nx : Int\nx = { a = 1 }", "NOT A RECORD", 3},
+		// A capitalized name before `{` always names the record, so this is a
+		// literal of a record called `Wrap`, not `Wrap` applied to one.
+		{"type R = { a : Int }\ntype W = Wrap R\nw = Wrap { a = 1 }", "UNKNOWN RECORD", 3},
+		{"type R = { a : Int }\nf r = r.a\ng x = x\nmain : R -> Int\nmain r = f r", "AMBIGUOUS FIELD", 2},
 	}
 	for _, c := range cases {
 		_, _, errs := check(t, c.src)

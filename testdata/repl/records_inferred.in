@@ -1,0 +1,10 @@
+type Point = { x : Int, y : Int } deriving (Show)
+{ x = 1, y = 2 }
+p : Point
+p = { x = 1, y = 2 }
+p
+p.x
+sumP : Point -> Int
+sumP { x = a, y = b } = a + b
+sumP { x = 3, y = 4 }
+:quit

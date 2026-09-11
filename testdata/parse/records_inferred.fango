@@ -1,0 +1,37 @@
+type Pair a = { first : a, second : a }
+
+-- an update and an inferred literal in one declaration, pinning the
+-- `{ lident |` and `{ lident =` split
+swap : Pair Int -> Pair Int
+swap pair = { pair | first = pair.second, second = pair.first }
+
+annotated : Pair Int
+annotated = { first = 1, second = 2 }
+
+-- inferred inside named, and inferred inside inferred
+nested : Pair (Pair Int)
+nested = { first = { first = 1, second = 2 }, second = Pair { first = 3, second = 4 } }
+
+-- a bare application argument needs no parens
+applied = swap { first = 5, second = 6 }
+
+-- a multi-line literal may close its brace at column 1
+wide : Pair Int
+wide = {
+    first = 7,
+    second = 8
+}
+
+-- an inferred pattern in an equation head and in a case
+headOf : Pair Int -> Int
+headOf { first = f } = f
+
+tailOf : Pair Int -> Int
+tailOf p =
+    case p of
+        { second = s } -> s
+
+-- a field may be named `with` without disturbing the resume lookahead
+type Held = { with : Int }
+held : Held
+held = { with = 1 }

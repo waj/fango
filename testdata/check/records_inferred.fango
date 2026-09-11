@@ -1,0 +1,38 @@
+-- What this pins is where the nominal type of an inferred `{ ... }` may come
+-- from. Every case here resolves through the substitution, not through the
+-- syntax the literal happens to sit in: the checker never reads field labels to
+-- choose a record.
+type Point = { x : Int, y : Int }
+type Pair a = { first : a, second : a }
+type L a = Nil | Cons a (L a)
+
+-- from a nullary declaration's annotation
+fromAnnotation : Point
+fromAnnotation = { x = 1, y = 2 }
+
+-- from an annotated function's result type
+fromResult : Int -> Point
+fromResult n = { x = n, y = n }
+
+-- from an enclosing field's declared type, through a named literal
+fromField = Pair { first = Point { x = 1, y = 2 }, second = { x = 3, y = 4 } }
+
+-- from a parameter type at the call site
+sumP : Point -> Int
+sumP p = p.x + p.y
+
+fromParameter = sumP { x = 5, y = 6 }
+
+-- through a constructor spine, where no expected type reaches the literal
+-- syntactically and only the annotation decides it. A capitalized name before
+-- `{` always names a record, so a constructor argument takes parentheses.
+fromListElement : L Point
+fromListElement = Cons ({ x = 1, y = 2 }) Nil
+
+-- a polymorphic record instantiated by the annotation's skolems
+fromSkolem : a -> Pair a
+fromSkolem v = { first = v, second = v }
+
+-- an inferred pattern takes its type from what it is matched against
+firstOf : Pair Int -> Int
+firstOf { first = f } = f

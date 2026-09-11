@@ -49,6 +49,8 @@ type Ctor struct {
 }
 
 // RecordLit is keyed construction of a nominal record, `Counts { lines = 1 }`.
+// An empty Name is the inferred form, `{ lines = 1 }`: the nominal type comes
+// from the expected type at the use site, never from the field labels.
 type RecordLit struct {
 	Name     string
 	NameSpan source.Span
@@ -419,6 +421,9 @@ type PPin struct {
 	NameSpan, Sp source.Span
 }
 
+// PRecord is a keyed, partial view of a nominal record schema. An empty Name
+// is the inferred form, `{ lines = n }`: the nominal type comes from the type
+// the pattern is matched against, never from the field labels.
 type PRecord struct {
 	Name     string
 	NameSpan source.Span
@@ -430,6 +435,7 @@ type RecordPatternField struct {
 	Name     string
 	NameSpan source.Span
 	Pattern  Pattern
+	Records  []string // resolver-visible nominal record candidates for this label
 }
 
 type PCtor struct {

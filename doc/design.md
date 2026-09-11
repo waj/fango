@@ -334,7 +334,10 @@ module owner so the Go backend can recover compilation boundaries. `Prog.Entry`
 identifies the selected entry definition independently of its printed name.
 Nominal record schemas follow type visibility, while field visibility follows
 `Type(..)`. Resolution records the visible nominal candidates for each field
-use; inference never treats a label as a structural type constraint.
+use; inference never treats a label as a structural type constraint. A named
+literal or pattern is gated by resolving the type name itself; an inferred one
+has no name, so those per-label candidates are the whole gate and are recorded
+for patterns as well as expressions.
 
 Inference and elaboration are separate because code generation is
 type-directed. Elaboration resolves defaulting,
@@ -487,14 +490,34 @@ instance-visibility rule.
 Nominal records use the same type identity, schemes, and deriving machinery as
 single-constructor ADTs. Field projection and update are deferred until the
 receiver has unified to a known record type, then checked against the resolved
-visible schema. Deferred accesses resolve to a fixed point rather than in one
+visible schema. A literal or pattern that omits its type name defers on the
+same mechanism, with its own type as the receiver: the expected type decides
+which record it is, and the schema check that a named form performs eagerly
+happens once that type is known. A label is still never a structural
+constraint — candidates only filter what this module may see, they never select
+a type — so an inferred form no context reaches is ambiguous rather than
+guessed. Deferred accesses resolve to a fixed point rather than in one
 pass, because one access's receiver is often another's result: `ctor.fields`
-decides the element type a later `field.index` reads. Only obligations that
-survive a pass learning nothing are genuinely ambiguous. Every checker that
+decides the element type a later `field.index` reads, and an inferred literal
+nested in another's field is decided by the pass that resolves its parent. Only
+obligations that survive a pass learning nothing are genuinely ambiguous, and
+only those raised by the binding being closed: a block-local binding solves
+early, and an enclosing declaration's obligation may still be waiting on code
+the checker has not reached. Every checker that
 generalizes a body — top-level values, prompt expressions, local function
 bindings, instance methods, and deriver methods — resolves them before
 reducing predicate obligations, so a constraint on a field's type names a type
 rather than an unsolved variable.
+
+A declaration's annotation is normally reconciled with its body after that
+fixed point, which is too late to decide an inferred form the annotation is the
+only context for. When one is actually waiting, the annotation is unified
+first, and the effect-row comparison is taken against the pre-unification zonk
+so an annotation still cannot claim effects its body never performs. Doing this
+through the substitution rather than by threading an expected type down the
+syntax is what makes every position work alike — a list element, a branch, a
+nested field, an argument in a curried spine — and the gate keeps declarations
+that use no inferred form on exactly the path they were on before.
 Elaboration lowers literals, projections, and functional
 updates to the existing constructor, `Let`, and exhaustive one-constructor
 `Case` Core forms. This keeps Core and both backends free of a second record

@@ -1475,7 +1475,11 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 			e.Name = r.qualified(e.Name, r.ctors, "ctor", e.Sp)
 		}
 	case *ast.RecordLit:
-		e.Name = r.qualified(e.Name, r.records, "record", e.NameSpan)
+		// An inferred literal has no name to resolve; its field labels carry the
+		// visibility instead, the way a projection's do.
+		if e.Name != "" {
+			e.Name = r.qualified(e.Name, r.records, "record", e.NameSpan)
+		}
 		for i := range e.Fields {
 			f := &e.Fields[i]
 			f.Records = append([]string{}, r.recordLabels[f.Name]...)
@@ -1695,8 +1699,12 @@ func (r *resolver) patternInner(p ast.Pattern, locals, outer map[string]bool, va
 			r.patternInner(a, locals, outer, vals)
 		}
 	case *ast.PRecord:
-		p.Name = r.qualified(p.Name, r.records, "record", p.NameSpan)
-		for _, f := range p.Fields {
+		if p.Name != "" {
+			p.Name = r.qualified(p.Name, r.records, "record", p.NameSpan)
+		}
+		for i := range p.Fields {
+			f := &p.Fields[i]
+			f.Records = append([]string{}, r.recordLabels[f.Name]...)
 			r.patternInner(f.Pattern, locals, outer, vals)
 		}
 	}

@@ -1,0 +1,6 @@
+type Point = { x : Int, y : Int }
+
+p : Point
+p = { x = 1 }
+
+main() = print p.x

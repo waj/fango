@@ -1,0 +1,12 @@
+-- The same program with the schema exposed: an inferred literal may build it,
+-- and an inferred pattern may take it apart.
+module Main exposing (main)
+
+import Data
+
+unwrap : Data.Secret -> Int
+unwrap { value = v } = v
+
+main() =
+    print (Data.take { value = 1 })
+    print (unwrap { value = 2 })

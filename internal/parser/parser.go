@@ -1615,7 +1615,8 @@ func (p *parser) parsePattern() ast.Pattern {
 func isPatternAtomStart(k token.Kind) bool {
 	switch k {
 	case token.UNDERSCORE, token.CARET, token.LIDENT, token.UIDENT,
-		token.INT, token.FLOAT, token.STRING, token.CHAR, token.LPAREN, token.LBRACKET:
+		token.INT, token.FLOAT, token.STRING, token.CHAR, token.LPAREN, token.LBRACKET,
+		token.LBRACE:
 		return true
 	}
 	return false
@@ -1644,6 +1645,14 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 			return &ast.PRecord{Name: name, NameSpan: sp, Fields: fields, Sp: sp.Merge(end)}
 		}
 		return &ast.PCtor{Name: name, NameSpan: sp}
+	case token.LBRACE:
+		// A pattern has no update form, so `{` here is always the inferred
+		// record view; the nominal type comes from what it is matched against.
+		fields, end, ok := p.parseRecordPatternFields()
+		if !ok {
+			return nil
+		}
+		return &ast.PRecord{NameSpan: t.Span, Fields: fields, Sp: t.Span.Merge(end)}
 	case token.INT:
 		p.next()
 		v, _ := strconv.ParseInt(t.Text, 10, 64) // overflow reported by the lexer
@@ -1934,6 +1943,19 @@ func (p *parser) parseAtom() ast.Expr {
 		return &ast.Ctor{Name: name, Sp: sp}
 	case token.LBRACE:
 		lb := p.next()
+		if p.atInferredRecord() {
+			fields, end, ok := p.parseRecordExprFieldsAfterOpen()
+			if !ok {
+				return nil
+			}
+			return &ast.RecordLit{NameSpan: lb.Span, Fields: fields, Sp: lb.Span.Merge(end)}
+		}
+		if p.peekInExpr().Kind == token.RBRACE {
+			// A record type needs at least one field, so `{}` is neither a
+			// literal nor an update and the update error would misdescribe it.
+			p.errorAt(lb.Span.Merge(p.peek().Span), "SYNTAX PROBLEM", "A record literal needs at least one field.")
+			return nil
+		}
 		record := p.parseExpr()
 		if record == nil || !p.expect(token.PIPE, "I expect `|` after the record being updated.") {
 			return nil
@@ -2034,6 +2056,18 @@ func (p *parser) parseAtom() ast.Expr {
 		p.errorAt(t.Span, "SYNTAX PROBLEM", "I was expecting an expression here.")
 		return nil
 	}
+}
+
+// atInferredRecord reports whether the just-consumed `{` opens an inferred
+// record literal rather than a record update. `{ field = ...` can only be a
+// literal: an update names its subject first and that subject is always
+// followed by `|`, `.`, or another atom, never by `=`. EQ is exactly `=`, so
+// `==` and `=>` carry their own token kinds and cannot be mistaken for one.
+func (p *parser) atInferredRecord() bool {
+	// peekInExpr, not the raw token: a label sitting at or left of the layout
+	// column belongs to the next declaration, and reading it here would let the
+	// lookahead cross a boundary the offside rule has already closed.
+	return p.peekInExpr().Kind == token.LIDENT && p.at(p.pos+1).Kind == token.EQ
 }
 
 func (p *parser) parseRecordExprFields() ([]ast.RecordExprField, source.Span, bool) {

@@ -1,0 +1,8 @@
+-- A capitalized name before `{` always names the record being built, so a
+-- constructor there needs its inferred literal parenthesized.
+type Point = { x : Int, y : Int }
+type Wrapped = Wrap Point
+
+w = Wrap { x = 1, y = 2 }
+
+main() = print 0

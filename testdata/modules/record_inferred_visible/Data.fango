@@ -1,0 +1,6 @@
+module Data exposing (Secret(..), take)
+
+type Secret = { value : Int }
+
+take : Secret -> Int
+take s = s.value

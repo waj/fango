@@ -126,3 +126,52 @@ func TestParseReflectionAndDeriver(t *testing.T) {
 		t.Fatalf("unexpected dump:\n%s", got)
 	}
 }
+
+// A `{` in expression position opens either an inferred record literal or a
+// record update, and one token of lookahead past the label settles which: an
+// update names its subject first, and that subject is never followed by `=`.
+func TestInferredRecordVersusUpdate(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{"{ x = 1 }", "(record-inferred (x (int 1)))"},
+		{"{ x | y = 1 }", "(update (var x) (y (int 1)))"},
+		{"{ x.y | z = 1 }", "(update (field y (var x)) (z (int 1)))"},
+		{"{ f a | z = 1 }", "(update (app (var f) (var a)) (z (int 1)))"},
+		// `==` and `=>` are their own lexemes, so neither can be mistaken for
+		// the `=` that marks a field.
+		{"{ x == y | z = 1 }", "(update (binop == (var x) (var y)) (z (int 1)))"},
+		// A literal delimits itself, so it needs no parens as an argument.
+		{"f { x = 1 }", "(app (var f) (record-inferred (x (int 1))))"},
+		// A capitalized name immediately before `{` always names the record.
+		{"Wrap { x = 1 }", "(record Wrap (x (int 1)))"},
+	}
+	for _, c := range cases {
+		f := source.NewFile("<test>", []byte(c.src))
+		toks, lexErrs := lexer.Lex(f)
+		if len(lexErrs) > 0 {
+			t.Fatalf("%q: %v", c.src, lexErrs)
+		}
+		e, errs := ParseExprInput(toks, f)
+		if len(errs) > 0 {
+			t.Errorf("%q: unexpected errors: %v", c.src, errs)
+			continue
+		}
+		e, errs = fixity.Builtin().ResolveExpr(e)
+		if len(errs) > 0 {
+			t.Errorf("%q: grouping errors: %v", c.src, errs)
+			continue
+		}
+		if got := ast.DumpExpr(e); got != c.want {
+			t.Errorf("%q: got %s, want %s", c.src, got, c.want)
+		}
+	}
+}
+
+// `{}` can never be a literal, because a record type needs at least one field.
+func TestEmptyBracesRejected(t *testing.T) {
+	f := source.NewFile("<test>", []byte("{}"))
+	toks, _ := lexer.Lex(f)
+	_, errs := ParseExprInput(toks, f)
+	if len(errs) == 0 || !strings.Contains(errs[0].Body, "at least one field") {
+		t.Errorf("expected an empty-record error, got %v", errs)
+	}
+}

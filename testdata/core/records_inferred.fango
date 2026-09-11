@@ -1,0 +1,16 @@
+-- An inferred literal and a named one must elaborate to the same Core: the
+-- name is resolved during inference and elaboration reads only the side table,
+-- so Core and both backends stay free of a second record representation.
+type Point = { x : Int, y : Int }
+
+named : Point
+named = Point { x = 1, y = 2 }
+
+inferred : Point
+inferred = { x = 1, y = 2 }
+
+namedPattern : Point -> Int
+namedPattern (Point { x = x }) = x
+
+inferredPattern : Point -> Int
+inferredPattern { x = x } = x

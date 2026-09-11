@@ -1,0 +1,13 @@
+-- A block-local function binding solves its own constraints early. That must
+-- not declare an enclosing obligation ambiguous: the code that decides `p` is
+-- the call below, which the checker has not reached when `label` is generalized.
+type Point = { x : Int, y : Int } deriving (Show)
+
+describe : Point -> Int
+describe p = p.x + p.y
+
+main() =
+    p = { x = 1, y = 2 }
+    label v = v
+    print (describe p)
+    print (label 7)

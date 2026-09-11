@@ -366,6 +366,28 @@
             "0": { "name": "punctuation.section.braces.end.fango" }
           },
           "patterns": [ { "include": "#record_body" } ]
+        },
+        {
+          "begin": "(\\{)(?=\\s*[a-z][A-Za-z0-9_]*\\s*=(?!=|>))",
+          "end": "\\}",
+          "beginCaptures": {
+            "1": { "name": "punctuation.section.braces.begin.fango" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.section.braces.end.fango" }
+          },
+          "patterns": [ { "include": "#record_body" } ]
+        },
+        {
+          "begin": "(\\{)(?=\\s*$)",
+          "end": "\\}",
+          "beginCaptures": {
+            "1": { "name": "punctuation.section.braces.begin.fango" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.section.braces.end.fango" }
+          },
+          "patterns": [ { "include": "#record_body" } ]
         }
       ]
     },

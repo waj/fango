@@ -1,0 +1,11 @@
+(module
+  (type Pair (params a) (record (field first a) (field second a)))
+  (def swap (params pair) (ann (-> (Pair Int) (Pair Int))) (update (var pair) (first (field second (var pair))) (second (field first (var pair)))))
+  (def annotated (ann (Pair Int)) (record-inferred (first (int 1)) (second (int 2))))
+  (def nested (ann (Pair (Pair Int))) (record-inferred (first (record-inferred (first (int 1)) (second (int 2)))) (second (record Pair (first (int 3)) (second (int 4))))))
+  (def applied (app (var swap) (record-inferred (first (int 5)) (second (int 6)))))
+  (def wide (ann (Pair Int)) (record-inferred (first (int 7)) (second (int 8))))
+  (def headOf (patterns (precord-inferred (first (pvar f)))) (ann (-> (Pair Int) Int)) (var f))
+  (def tailOf (params p) (ann (-> (Pair Int) Int)) (case (var p) (branch (precord-inferred (second (pvar s))) (var s))))
+  (type Held (record (field with Int)))
+  (def held (ann Held) (record-inferred (with (int 1)))))

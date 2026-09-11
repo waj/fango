@@ -300,7 +300,11 @@ func DumpPattern(p Pattern) string {
 		return fmt.Sprintf("(ppin %s)", p.Name)
 	case *PRecord:
 		var b strings.Builder
-		fmt.Fprintf(&b, "(precord %s", p.Name)
+		if p.Name == "" {
+			b.WriteString("(precord-inferred")
+		} else {
+			fmt.Fprintf(&b, "(precord %s", p.Name)
+		}
 		for _, f := range p.Fields {
 			fmt.Fprintf(&b, " (%s %s)", f.Name, DumpPattern(f.Pattern))
 		}
@@ -337,7 +341,11 @@ func DumpExpr(e Expr) string {
 		return fmt.Sprintf("(ctor %s)", e.Name)
 	case *RecordLit:
 		var b strings.Builder
-		fmt.Fprintf(&b, "(record %s", e.Name)
+		if e.Name == "" {
+			b.WriteString("(record-inferred")
+		} else {
+			fmt.Fprintf(&b, "(record %s", e.Name)
+		}
 		for _, f := range e.Fields {
 			fmt.Fprintf(&b, " (%s %s)", f.Name, DumpExpr(f.Value))
 		}
