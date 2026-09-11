@@ -185,15 +185,20 @@ and APIs must be imported explicitly.
 `List` exposes the following algebraic type:
 
 ```fango
-module List exposing (List(..), range, each, foldl)
+module List exposing (List(..), range, each, foldl, foldr, map, filter, length, reverse)
 
 type List a = Nil | Cons a (List a) deriving (Eq, Ord)
 ```
 
-Its inferred public function types are
+Its public function types are
 `range : (Num a, Ord a) => a -> a -> List a`,
-`each : (a ->{e} ()) -> List a ->{e} ()`, and
-`foldl : (a -> b ->{e} b) -> b -> List a ->{e} b`.
+`each : (a ->{e} ()) -> List a ->{e} ()`,
+`foldl : (a -> b ->{e} b) -> b -> List a ->{e} b`,
+`foldr : (a -> b ->{e} b) -> b -> List a ->{e} b`,
+`map : (a ->{e} b) -> List a ->{e} List b`,
+`filter : (a ->{e} Bool) -> List a ->{e} List a`,
+`length : List a -> Int`, and
+`reverse : List a -> List a`.
 
 Its handwritten `Show a => Show (List a)` instance displays lists with bracket
 syntax, using each element's `Show` instance: `[]`, `[1]`, and `[1, 2, 3]`.
@@ -205,7 +210,22 @@ ordinary recursive implementation is not guaranteed to terminate for `NaN`
 or positive infinity. `each action values` applies `action` from left to right
 and propagates its effects. `foldl combine initial values` visits values from
 left to right, passing the current element first and the accumulator second to
-`combine`; callback effects are propagated.
+`combine`; callback effects are propagated. `foldr` passes the same arguments
+in the same order but visits values from right to left, so its combining
+function receives the result of folding the rest of the list. `map fn values`
+applies `fn` to every element, preserving order and length. `filter keep
+values` retains the elements for which `keep` answers `True`, preserving their
+order. Both call their callback once per element, from left to right.
+`length` counts elements and `reverse` returns the same elements in the
+opposite order.
+
+A `List` is a linked list: `Cons`, the head, and the tail are each constant
+time, and a tail is shared rather than copied. It is stored as a spine of
+fixed-size arrays rather than one cell per element, so building a list
+allocates far less than its length would suggest and traversing one is
+contiguous. That representation is not observable — values are immutable, so
+sharing has no effect a program can detect — but it is what the complexity
+above rests on. `length` is a traversal, not a stored count.
 
 `Range.each : (Num a, Ord a) => (a ->{e} ()) -> a -> a ->{e} ()` traverses an
 inclusive ascending numeric range without constructing a `List`. For example,
@@ -965,7 +985,8 @@ extended = [0, 1 | numbers]
 
 `[a, b]` is `Cons a (Cons b Nil)`, and `[a, b | tail]` is
 `Cons a (Cons b tail)`. Elements are evaluated from left to right, followed
-by the tail, and the existing tail is shared. All elements have one type and
+by the tail, and the existing tail is shared rather than copied, in constant
+time however many lists already share it. All elements have one type and
 the tail must be a list of that type. A trailing comma is not accepted, and
 `|` requires at least one element on its left and one tail expression on its
 right. Bracket syntax selects the bundled constructors directly and needs no

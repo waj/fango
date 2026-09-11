@@ -1,13 +1,13 @@
-type List a = Nil | Cons a (List a)
+import List
 
-build : Int -> List Int
-build n = if n < 1 then Nil else Cons n (build (n - 1))
+build : Int -> List.List Int
+build n = if n < 1 then [] else [n | build (n - 1)]
 
-sum : List Int -> Int
+sum : List.List Int -> Int
 sum xs =
     case xs of
-        Nil -> 0
-        Cons x rest -> x + sum rest
+        [] -> 0
+        [x | rest] -> x + sum rest
 
 loop : Int -> Int -> Int
 loop i acc = if i < 1 then acc else loop (i - 1) (acc + sum (build 100000))

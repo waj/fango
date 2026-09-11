@@ -1,0 +1,26 @@
+-- The List combinators the standard library exposes beyond range/each/foldl.
+import List
+
+empty : List.List Int
+empty = []
+
+evens values = List.filter (\n -> n * 2 / 2 == n) values
+
+main() =
+    xs = List.range 1 5
+    print (List.map (\n -> n * 2) xs)
+    print (List.filter (\n -> n > 2) xs)
+    print (List.foldr (\v acc -> [v | acc]) [] xs)
+    print (List.foldr (\v acc -> v - acc) 0 xs)
+    print (List.foldl (\v acc -> v - acc) 0 xs)
+    print (List.length xs)
+    print (List.reverse xs)
+    -- Empty inputs take the other branch of every one of them.
+    print (List.map (\n -> n * 2) empty)
+    print (List.filter (\n -> n > 2) empty)
+    print (List.foldr (\v acc -> v - acc) 0 empty)
+    print (List.length empty)
+    print (List.reverse empty)
+    -- Effects in a callback run in element order.
+    print (List.map (\n -> n + 1) (List.reverse xs))
+    print (evens xs)

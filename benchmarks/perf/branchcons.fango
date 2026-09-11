@@ -1,0 +1,30 @@
+-- Backtracking shape: extend one shared partial solution many different ways,
+-- keep several branches live, and fold over each. This is the workload where
+-- an array-backed list is worse than a cons cell rather than better, because
+-- every branch off a shared tail starts a fresh chunk for one element. It is
+-- the counterweight to sum and mapfilter, which only build linearly.
+import List
+
+path : Int -> List.List Int
+path n = if n < 1 then [] else [n | path (n - 1)]
+
+total : List.List Int -> Int
+total xs =
+    case xs of
+        [] -> 0
+        [x | rest] -> x + total rest
+
+-- Extend `shared` with each of width heads, summing every branch. Every
+-- iteration conses onto the same tail, so only the first can be cheap.
+branches : List.List Int -> Int -> Int -> Int
+branches shared width acc =
+    if width < 1 then
+        acc
+    else
+        branches shared (width - 1) (acc + total [width | shared])
+
+loop : Int -> Int -> Int
+loop i acc =
+    if i < 1 then acc else loop (i - 1) (acc + branches (path 200) 200 0)
+
+main = print (loop 60 0)

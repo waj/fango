@@ -1,4 +1,4 @@
-module List exposing (List(..), range, each, foldl)
+module List exposing (List(..), range, each, foldl, foldr, map, filter, length, reverse)
 
 type List a = Nil | Cons a (List a) deriving (Eq, Ord)
 
@@ -28,3 +28,28 @@ foldl combine result values =
     case values of
         [] -> result
         [value | rest] -> foldl combine (combine value result) rest
+
+foldr : (a -> b ->{e} b) -> b -> List a ->{e} b
+foldr combine initial values =
+    case values of
+        [] -> initial
+        [value | rest] -> combine value (foldr combine initial rest)
+
+map : (a ->{e} b) -> List a ->{e} List b
+map fn values =
+    case values of
+        [] -> []
+        [value | rest] -> [fn value | map fn rest]
+
+filter : (a ->{e} Bool) -> List a ->{e} List a
+filter keep values =
+    case values of
+        [] -> []
+        [value | rest] ->
+            if keep value then [value | filter keep rest] else filter keep rest
+
+length : List a -> Int
+length values = foldl (\_ total -> total + 1) 0 values
+
+reverse : List a -> List a
+reverse values = foldl (\value acc -> [value | acc]) [] values

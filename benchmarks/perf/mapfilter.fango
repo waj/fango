@@ -1,28 +1,12 @@
-type List a = Nil | Cons a (List a)
+import List
 
-map : (a -> b) -> List a -> List b
-map f xs =
-    case xs of
-        Nil -> Nil
-        Cons x rest -> Cons (f x) (map f rest)
-
-filter : (a -> Bool) -> List a -> List a
-filter p xs =
-    case xs of
-        Nil -> Nil
-        Cons x rest -> if p x then Cons x (filter p rest) else filter p rest
-
-foldr : (a -> b -> b) -> b -> List a -> b
-foldr f z xs =
-    case xs of
-        Nil -> z
-        Cons x rest -> f x (foldr f z rest)
-
-upto : Int -> List Int
-upto n = if n < 1 then Nil else Cons n (upto (n - 1))
+upto : Int -> List.List Int
+upto n = if n < 1 then [] else [n | upto (n - 1)]
 
 chain : Int -> Int
-chain n = foldr (\x acc -> x + acc) 0 (map (\x -> x * 3) (filter (\x -> x < n) (upto n)))
+chain n =
+    List.foldr (\x acc -> x + acc) 0
+        (List.map (\x -> x * 3) (List.filter (\x -> x < n) (upto n)))
 
 loop : Int -> Int -> Int
 loop i acc = if i < 1 then acc else loop (i - 1) (acc + chain 30000)

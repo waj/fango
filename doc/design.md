@@ -57,7 +57,9 @@ partial views of a visible schema. `Bool` behaves as the predefined
 `True | False` ADT to the checker while using native Go booleans in generated
 code. Bracket list expressions and patterns are parser sugar for the bundled
 `List.Nil` and `List.Cons` constructors, so they use the same inference,
-coverage, representation, and evaluation rules as explicit constructor code.
+coverage, and evaluation rules as explicit constructor code. `List` is an
+ordinary parameterized ADT to the checker, the deriver, reflection, Core, and
+the linter; only the backends know it is stored as an array spine.
 
 ## Functions and effects
 
@@ -744,6 +746,26 @@ implementation details.
 Representations are type-directed rather than uniformly boxed: `Int` is
 `int64`, `Float` is `float64`, `String` is a valid UTF-8 `string`, `Char` is a
 Unicode-scalar Go `rune`, and `Bool` is `bool`.
+The bundled `List` is the one declared type with a representation the backends
+know: `fangort.List`, a spine of fixed-size inline arrays filled downward
+behind a two-word value. It is recognized once, by canonical symbol and
+validated shape, when its constructors are resolved, and everything below that
+compares nominal identity; a user-declared cons type is a different type and
+keeps the ordinary lowering. Its module emits no marker interface and no
+constructor structs, construction is a runtime call, and its decision-tree node
+is an emptiness test with head and tail projections rather than a type switch.
+It needs no `Exit` family member, because its own constructor fields cannot be
+controlled and the Direct/Exit distinction rides entirely on the element type
+argument. Its compiler-derived eq and show keep the exported names and generic
+signatures an emitted pair would have and delegate to the runtime, so
+element-operation synthesis at call sites is representation-blind.
+A chunk's watermark records how far it has been filled and only ever decreases,
+and a cons claims the slot below it only when the list it extends still owns
+that frontier; every value's offset is at or above its chunk's watermark when
+created, so a cons is invisible to every value that already existed. Persistence
+therefore costs two comparisons rather than a copy, and no cons is ever worse
+than a cons cell. The interpreter uses the same runtime type, so the two
+backends agree by construction rather than by two implementations matching.
 Concrete Unit parameters and results at direct worker and operation boundaries
 are implicit in generated Go: the parameter is omitted and the result is a
 void result. Unit remains a represented, runtime zero-sized value at
@@ -881,7 +903,13 @@ process-state-observing natives.
 representation in the interpreter, while environments distinguish typed
 workers from lazy memoized top-level cells and eager block frames. `EvalIO` and
 `ForceIO` are the explicit IO entry points. The interpreter and generated Go
-share observable formatting rules.
+share observable formatting rules. They also share the runtime types `fangort`
+owns — represented Unit and the bundled `List` — so a representation the
+backends know is implemented once rather than mirrored; the interpreter's value
+switch and generated Go's representations must agree, and the differential
+suite is the referee. Structural equality tests for a list before its scalar
+fallback, because that fallback is Go `==` and a list value is deliberately not
+comparable.
 
 The interpreter shares the compiled backend's tail-call predicate: applying a
 worker the predicate accepts runs a frame-reuse loop instead of recursing
@@ -948,8 +976,11 @@ match, string, list, tree, and repeated handler-state operations with
 handwritten Go and use per-case ratio ceilings. The State baseline uses the
 same one-cell/two-closure setup so its timed loop isolates per-operation
 overhead from handler setup. These measurements arbitrate representation or
-optimization work. Cons-list allocation remains the main known structural
-performance cost.
+optimization work. The three list cases use the bundled `List` rather than a
+private cons type, so they measure its array-backed representation; one of them
+is a branching workload, because that is the shape where an array-backed list
+pays rather than wins, and `tree` keeps a pointer-ADT case so the suite still
+witnesses that not every data structure became a slice.
 
 Both gates assert on elapsed time, so neither is a correctness gate: a busy
 host fails them without anything having regressed. They live in their own

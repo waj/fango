@@ -31,10 +31,15 @@ const (
 // runs 20 iterations and its ratio is cons-allocation tax); match gates
 // decision-tree/enum dispatch, using an int-enum Go baseline, so that ratio
 // is the arbiter for any representation change.
-// sum/mapfilter/tree cover polymorphic data representations: generic cons
-// lists vs slices, generic map/filter/foldr chains vs
-// staged slice loops, generic tree build+fold (GC pressure) vs pointer
-// structs. strcat gates per-operation string overhead at the same
+// sum/mapfilter/branchcons/tree cover polymorphic data representations. The
+// three list cases all use the bundled List, so they measure its array-backed
+// representation rather than a private cons type; a benchmark that declared
+// its own would measure nothing this work can move. sum races a slice,
+// mapfilter races staged slice loops through the stdlib map/filter/foldr
+// chain, and branchcons races handwritten cons cells on the backtracking shape
+// where an array-backed list is the one that has to pay. tree keeps a
+// pointer-ADT case, so it stays the witness that we did not simply turn every
+// data structure into a slice. strcat gates per-operation string overhead at the same
 // asymptotics; a strings.Builder-shaped baseline is the future arbiter for
 // builder-based derived display once display is user-callable. state compares
 // five million get/put pairs against the same closure-cell evidence shape in
@@ -46,10 +51,14 @@ const (
 //
 // Limits are measurement-informed ceilings (recorded ratios in parentheses):
 // where the baseline allocates like fango does, the 2–3× target holds with
-// room (tree 1.13×, strcat 1.04×); where a slice replaces a cons list
-// wholesale, the per-cell allocation tax is structural — sum (6.8×) and
-// mapfilter (3.8×) gate at that reality plus headroom, and are the arbiters
-// for any future unboxed/fused list representation.
+// room (tree 1.09×, strcat 1.04×, branchcons 1.55×). The two cases that race a
+// slice keep the widest gap, because a slice is still the shape a Go
+// programmer writes and a fango list is still a list: sum (4.49×) and
+// mapfilter (4.52×) gate at that reality plus headroom. On identical programs
+// the array-backed representation moved them from 7.80× and 5.82×, while
+// leaving branchcons' fango time unchanged — chunking is a win on linear
+// building and a wash on branching, which is what it was chosen for
+// (doc/roadmap-list.md).
 var ratioCases = []struct {
 	name     string
 	program  string
@@ -60,8 +69,9 @@ var ratioCases = []struct {
 	{"fib", "perf/fib.fango", "perf/baseline/fib", "9227465\n", 1.2},
 	{"loop", "perf/loop.fango", "perf/baseline/loop", "125000000250000000\n", 1.2},
 	{"match", "perf/match.fango", "perf/baseline/match", "-2834052877137561537\n", 1.2},
-	{"sum", "perf/sum.fango", "perf/baseline/sum", "100001000000\n", 8.0},
-	{"mapfilter", "perf/mapfilter.fango", "perf/baseline/mapfilter", "26999100000\n", 4.5},
+	{"sum", "perf/sum.fango", "perf/baseline/sum", "100001000000\n", 5.5},
+	{"mapfilter", "perf/mapfilter.fango", "perf/baseline/mapfilter", "26999100000\n", 5.5},
+	{"branchcons", "perf/branchcons.fango", "perf/baseline/branchcons", "242406000\n", 2.5},
 	{"tree", "perf/tree.fango", "perf/baseline/tree", "42949017600\n", 3.0},
 	{"strcat", "perf/strcat.fango", "perf/baseline/strcat", "True\n", 3.0},
 	{"state", "perf/stateops.fango", "perf/baseline/state", "5000000\n", 2.5},
