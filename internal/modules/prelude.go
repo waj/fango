@@ -15,7 +15,7 @@ import (
 // focused checker tests have no name resolver, so they bind these names
 // directly and read the list from here rather than repeating it.
 type Scope struct {
-	Values, Types, Ops map[string]string
+	Values, Types, Ctors, Ops map[string]string
 }
 
 // PreludeResult is the resolved bundled prelude. Owners identifies the
@@ -144,7 +144,7 @@ func Prelude() (*PreludeResult, []diag.Error) {
 // public interfaces, which is exactly what the batch resolver merges into
 // each module.
 func preludeScope(nodes map[string]*node) (Scope, []diag.Error) {
-	s := Scope{Values: map[string]string{}, Types: map[string]string{}, Ops: map[string]string{}}
+	s := Scope{Values: map[string]string{}, Types: map[string]string{}, Ctors: map[string]string{}, Ops: map[string]string{}}
 	prelude := nodes[PreludeModule]
 	if prelude == nil {
 		return s, []diag.Error{{Title: "INVALID EMBEDDED PRELUDE", Body: "The bundled " + PreludeModule + " module is missing."}}
@@ -162,6 +162,9 @@ func preludeScope(nodes map[string]*node) (Scope, []diag.Error) {
 		}
 		for k, v := range sel.types {
 			s.Types[k] = v
+		}
+		for k, v := range sel.ctors {
+			s.Ctors[k] = v
 		}
 		for k, v := range sel.ops {
 			s.Ops[k] = v

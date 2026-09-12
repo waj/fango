@@ -24,12 +24,23 @@ func (ck *Checker) InstallPrelude() []diag.Error {
 		return errs
 	}
 	ck.PreludeInfos = infos
+	// A type name reaches one of three tables depending on what it names, and
+	// the prelude may expose any of them: `Maybe` is an ADT, `Show` a class,
+	// `IO` an effect.
 	for surface, canonical := range p.Scope.Types {
+		if t, ok := ck.TypeNames[canonical]; ok {
+			ck.TypeNames[surface] = t
+		}
 		if class, ok := ck.Classes[canonical]; ok {
 			ck.Classes[surface] = class
 		}
 		if eff, ok := ck.Effects[canonical]; ok {
 			ck.Effects[surface] = eff
+		}
+	}
+	for surface, canonical := range p.Scope.Ctors {
+		if info, ok := ck.Ctors[canonical]; ok {
+			ck.Ctors[surface] = info
 		}
 	}
 	for surface, canonical := range p.Scope.Values {
