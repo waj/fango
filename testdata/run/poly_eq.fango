@@ -1,2 +1,2 @@
-type List a = Nil | Cons a (List a) deriving (Eq, Show)
-main = print (Cons 1 (Cons 2 Nil) == Cons 1 (Cons 2 Nil))
+type Chain a = Empty | Link a (Chain a) deriving (Eq, Show)
+main = print (Link 1 (Link 2 Empty) == Link 1 (Link 2 Empty))

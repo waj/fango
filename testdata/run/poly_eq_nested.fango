@@ -1,3 +1,3 @@
-type Maybe a = Nothing | Just a deriving (Eq, Show)
-type List a = Nil | Cons a (List a) deriving (Eq, Show)
-main = print (Cons (Just 1) Nil /= Cons Nothing Nil)
+type Opt a = None | Some a deriving (Eq, Show)
+type Chain a = Empty | Link a (Chain a) deriving (Eq, Show)
+main = print (Link (Some 1) Empty /= Link None Empty)

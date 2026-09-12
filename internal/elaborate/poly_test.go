@@ -86,24 +86,24 @@ func elabPolyErr(t *testing.T, src string) string {
 // TyArgs on every call — including the self-recursive one — and instantiated
 // constructor applications.
 func TestPolyGenericWorker(t *testing.T) {
-	prog := elabPoly(t, `type List a = Nil | Cons a (List a)
+	prog := elabPoly(t, `type Chain a = Empty | Link a (Chain a)
 
 len xs =
     case xs of
-        Nil -> 0
-        Cons _ rest -> 1 + len rest
+        Empty -> 0
+        Link _ rest -> 1 + len rest
 
-main = print (len (Cons 1 Nil))
+main = print (len (Link 1 Empty))
 `)
 	dump := core.Dump(prog)
 	for _, want := range []string{
-		"(type List (params a) (ctor Nil) (ctor Cons a (List a)))",
+		"(type Chain (params a) (ctor Empty) (ctor Link a (Chain a)))",
 		// The result generalizes as `number` too — Elm semantics (doc/design.md, "Type inference").
-		"(def len (typarams a b) (params _dict0 xs) _dictionary_Num b -> List a -> b",
+		"(def len (typarams a b) (params _dict0 xs) _dictionary_Num b -> Chain a -> b",
 		// The recursive call instantiates at the def's own type params.
-		"(app/worker @[a b] (var len _dictionary_Num b -> List a -> b)",
+		"(app/worker @[a b] (var len _dictionary_Num b -> Chain a -> b)",
 		// main's call instantiates at the defaulted ground types.
-		"(app/worker @[Int Int] (var len _dictionary_Num Int -> List Int -> Int)",
+		"(app/worker @[Int Int] (var len _dictionary_Num Int -> Chain Int -> Int)",
 		"(app/ctor @[Int]",
 	} {
 		if !strings.Contains(dump, want) {
@@ -115,21 +115,21 @@ main = print (len (Cons 1 Nil))
 // TestPolyNullaryValue: a polymorphic top-level value becomes a nullary
 // generic worker; each use is an instantiated zero-arg call.
 func TestPolyNullaryValue(t *testing.T) {
-	prog := elabPoly(t, `type Maybe a = Nothing | Just a
+	prog := elabPoly(t, `type Opt a = None | Some a
 
-none = Nothing
+none = None
 
 check m =
     case m of
-        Nothing -> 0
-        Just n -> n
+        None -> 0
+        Some n -> n
 
 main = print (check none)
 `)
 	dump := core.Dump(prog)
 	for _, want := range []string{
-		"(def none (typarams a) Maybe a (app/ctor @[a]",
-		"(app/worker @[Int] (var none Maybe Int) Maybe Int)",
+		"(def none (typarams a) Opt a (app/ctor @[a]",
+		"(app/worker @[Int] (var none Opt Int) Opt Int)",
 	} {
 		if !strings.Contains(dump, want) {
 			t.Errorf("dump missing %q:\n%s", want, dump)
@@ -201,20 +201,20 @@ main =
 
 // TestPolyInteriorDefaulting pins the internal-unconstrained-variable rule
 // from doc/design.md, "Go backend and runtime":
-// `len Nil` at an undetermined element type defaults it to Unit in the
+// `len Empty` at an undetermined element type defaults it to Unit in the
 // instantiation.
 func TestPolyInteriorDefaulting(t *testing.T) {
-	prog := elabPoly(t, `type List a = Nil | Cons a (List a)
+	prog := elabPoly(t, `type Chain a = Empty | Link a (Chain a)
 
 len xs =
     case xs of
-        Nil -> 0
-        Cons _ rest -> 1 + len rest
+        Empty -> 0
+        Link _ rest -> 1 + len rest
 
-main = print (len Nil)
+main = print (len Empty)
 `)
 	dump := core.Dump(prog)
-	if !strings.Contains(dump, "(app/worker @[() Int] (var len _dictionary_Num Int -> List () -> Int)") {
+	if !strings.Contains(dump, "(app/worker @[() Int] (var len _dictionary_Num Int -> Chain () -> Int)") {
 		t.Errorf("dump missing Unit-defaulted instantiation:\n%s", dump)
 	}
 }
@@ -243,14 +243,14 @@ main = id
 }
 
 // TestPolyMainDefaults: main's unconstrained type variables default like
-// interior ones (`main = Nothing` is a Maybe () program), keeping
+// interior ones (`main = None` is an Opt () program), keeping
 // `main = 1 + 2` an Int program.
 func TestPolyMainDefaults(t *testing.T) {
-	prog := elabPoly(t, `type Maybe a = Nothing | Just a
-main = Nothing
+	prog := elabPoly(t, `type Opt a = None | Some a
+main = None
 `)
 	dump := core.Dump(prog)
-	if !strings.Contains(dump, "(def main Maybe ()") {
-		t.Errorf("main should default to Maybe ():\n%s", dump)
+	if !strings.Contains(dump, "(def main Opt ()") {
+		t.Errorf("main should default to Opt ():\n%s", dump)
 	}
 }

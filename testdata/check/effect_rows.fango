@@ -3,13 +3,13 @@ delay action _ = action()
 
 pure() = 1
 
-map : (a ->{e} b) -> List a ->{e} List b
+map : (a ->{e} b) -> Chain a ->{e} Chain b
 map fn values =
     case values of
-        Nil -> Nil
-        Cons x xs -> Cons (fn x) (map fn xs)
+        Empty -> Empty
+        Link x xs -> Link (fn x) (map fn xs)
 
-type List a = Nil | Cons a (List a)
+type Chain a = Empty | Link a (Chain a)
 
 effect Note
     abort stop : String -> a

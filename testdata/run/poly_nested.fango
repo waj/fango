@@ -1,16 +1,16 @@
-type Maybe a = Nothing | Just a deriving (Eq, Show)
-type List a = Nil | Cons a (List a) deriving (Eq, Show)
+type Opt a = None | Some a deriving (Eq, Show)
+type Chain a = Empty | Link a (Chain a) deriving (Eq, Show)
 
-heads : List (Maybe Int) -> Int
+heads : Chain (Opt Int) -> Int
 heads xs =
     case xs of
-        Nil -> 0
-        Cons (Just n) rest -> n + heads rest
-        Cons Nothing rest -> heads rest
+        Empty -> 0
+        Link (Some n) rest -> n + heads rest
+        Link None rest -> heads rest
 
 main =
-    xs = Cons (Just 40) (Cons Nothing (Cons (Just 2) Nil))
-    same = xs == Cons (Just 40) (Cons Nothing (Cons (Just 2) Nil))
+    xs = Link (Some 40) (Link None (Link (Some 2) Empty))
+    same = xs == Link (Some 40) (Link None (Link (Some 2) Empty))
     if same then
             print (heads xs)
         else

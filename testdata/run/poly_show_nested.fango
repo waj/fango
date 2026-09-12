@@ -1,3 +1,3 @@
-type Maybe a = Nothing | Just a deriving (Eq, Show)
+type Opt a = None | Some a deriving (Eq, Show)
 type Pair a b = MkPair a b deriving (Eq, Show)
-main = print (MkPair (Just (0 - 1)) "hi")
+main = print (MkPair (Some (0 - 1)) "hi")

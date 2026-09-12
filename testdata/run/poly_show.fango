@@ -1,2 +1,2 @@
-type Maybe a = Nothing | Just a deriving (Eq, Show)
-main = print (Just (Just 1))
+type Opt a = None | Some a deriving (Eq, Show)
+main = print (Some (Some 1))

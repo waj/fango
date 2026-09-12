@@ -111,6 +111,8 @@ import Basics exposing
     , (+), (-), (*), (/), (==), (/=), (<), (>), (<=), (>=), (++)
     )
 import IO exposing (IO, print, readLine)
+import List exposing (List)
+import Maybe exposing (Maybe(..))
 ```
 
 These are ordinary imports, so besides the unqualified names they also grant
@@ -121,6 +123,11 @@ Importing a module the prelude already names is not a duplicate import; it
 simply adds the names its own exposing list selects. Aliasing another module
 to a qualifier the prelude holds is a `DUPLICATE IMPORT ALIAS`, so `import
 Helper as IO` is rejected.
+
+Because `Maybe`, `Nothing`, `Just` and `List` are in scope everywhere, a
+module cannot declare its own: doing so is an `UNQUALIFIED COLLISION`, since
+fango rejects shadowing rather than resolving it. Pick another name, or opt
+out with the pragma below.
 
 A module opts out with the `{-# no-prelude #-}` pragma above its header,
 after which the only names in scope are its own declarations and whatever its
@@ -144,8 +151,9 @@ and carries the pragma, which is why its modules import `Basics` explicitly.
 Bracket list syntax, tuple syntax, `deriving`, and the staging forms are
 implicit in a different way. A module that uses one automatically depends on
 the bundled module the syntax desugars into — `List`, `Tuple`, `Derive`, or
-`Meta` — but this exposes none of their names. `List`, `Nil`, `Cons`, `Pair`,
-`Triple`, `Code` and the rest still follow the ordinary import rules.
+`Meta` — but the dependency exposes nothing. `Nil`, `Cons`, `Pair`, `Triple`
+and `Code` still follow the ordinary import rules; `List` and `Maybe` are in
+scope because the prelude imports them, not because the syntax does.
 
 `build` and `run` use only the entry module's `main`; a dependency's `main` is
 an ordinary declaration. `check` does not require `main`. Imports expose only
@@ -217,8 +225,9 @@ following `then` or `else` even when the block sits at that keyword's column.
 
 The standard library ships with the compiler, has no separately selected
 version, and is experimental: its API may evolve before a future stability
-milestone. `Prelude` declares what is in scope without an import, and the
-"Modules, imports, and source layout" section above lists it; every other
+milestone. `Prelude` declares what is in scope without an import — the
+"Modules, imports, and source layout" section above lists it, and it covers
+the `Maybe` type with its constructors and the `List` type name; every other
 module and API must be imported explicitly.
 
 `Prelude` is the one bundled module with no API. It exposes nothing, may
@@ -246,6 +255,9 @@ Its public function types are
 
 Its handwritten `Show a => Show (List a)` instance displays lists with bracket
 syntax, using each element's `Show` instance: `[]`, `[1]`, and `[1, 2, 3]`.
+
+The prelude imports the `List` type name, so an annotation may say `List a`
+with no import. `Nil`, `Cons`, and the functions above still need one.
 
 `range start end` produces ascending values by adding one, including `end`
 when that value is reached, and returns `Nil` immediately when `start > end`.
@@ -349,7 +361,8 @@ type Maybe a = Nothing | Just a deriving (Eq, Ord, Show)
 ```
 
 `withDefault : a -> Maybe a -> a` returns the contained value or the
-fallback.
+fallback. The prelude imports `Maybe(..)`, so the type and both constructors
+need no import; `withDefault` does.
 
 `Tuple` exposes the types behind tuple syntax:
 

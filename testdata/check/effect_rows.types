@@ -1,5 +1,5 @@
 delay : (() ->{e} a) -> () ->{e} a
 pure : Num a => () -> a
-map : (a ->{e} b) -> List a ->{e} List b
+map : (a ->{e} b) -> Chain a ->{e} Chain b
 plainFirst : (() ->{e} ()) -> (() ->{Note | e} ()) ->{Note | e} ()
 riskyFirst : (() ->{e} ()) -> (() ->{Note | e} ()) ->{Note | e} ()

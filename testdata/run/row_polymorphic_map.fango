@@ -1,10 +1,10 @@
-type List a = Nil | Cons a (List a) deriving (Eq, Show)
+type Chain a = Empty | Link a (Chain a) deriving (Eq, Show)
 
-map : (a ->{e} b) -> List a ->{e} List b
+map : (a ->{e} b) -> Chain a ->{e} Chain b
 map fn values =
     case values of
-        Nil -> Nil
-        Cons x xs -> Cons (fn x) (map fn xs)
+        Empty -> Empty
+        Link x xs -> Link (fn x) (map fn xs)
 
 increment x = x + 1
 
@@ -13,7 +13,7 @@ announce x =
     print x
     x + 10
 
-numbers = Cons 1 (Cons 2 Nil)
+numbers = Link 1 (Link 2 Empty)
 
 main() =
     print (map increment numbers)

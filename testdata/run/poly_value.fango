@@ -1,10 +1,10 @@
-type Maybe a = Nothing | Just a deriving (Eq, Show)
+type Opt a = None | Some a deriving (Eq, Show)
 
-none = Nothing
+none = None
 
 pick m d =
     case m of
-        Nothing -> d
-        Just x -> x
+        None -> d
+        Some x -> x
 
 main = print (pick none 7)

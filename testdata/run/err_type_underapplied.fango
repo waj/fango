@@ -1,6 +1,6 @@
-type Maybe a = Nothing | Just a
+type Opt a = None | Some a
 
-x : Maybe
-x = Nothing
+x : Opt
+x = None
 
 main = 1

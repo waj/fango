@@ -47,20 +47,22 @@ func TestBundledListIsMarkedForRuntimeRepresentation(t *testing.T) {
 	}
 }
 
-// A user type of the same shape, and even the same source name, keeps the
-// ordinary cons lowering — it has its own canonical symbol and its own
-// identity.
+// A user type of the same shape keeps the ordinary cons lowering: the
+// runtime representation is chosen by canonical symbol, not by shape. The
+// name `List` can no longer be the one used here — the prelude exposes the
+// bundled type, so a module declaring its own is an UNQUALIFIED COLLISION —
+// but the canonical-symbol match is what this guards either way.
 func TestUserDeclaredListKeepsConsRepresentation(t *testing.T) {
-	ck, _, errs := checkPoly(t, "type List a = Nil | Cons a (List a)\nmain = 1\n")
+	ck, _, errs := checkPoly(t, "type Chain a = Empty | Link a (Chain a)\nmain = 1\n")
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
-	local := adtNamed(t, ck, "List")
+	local := adtNamed(t, ck, "Chain")
 	if local.Con.Unique == adtNamed(t, ck, infer.ListTypeName).Con.Unique {
 		t.Fatal("the local type shadowed the bundled one; this test proves nothing")
 	}
 	if local.Repr != types.ReprADT {
-		t.Fatalf("locally declared List has Repr %v, want ReprADT", local.Repr)
+		t.Fatalf("locally declared Chain has Repr %v, want ReprADT", local.Repr)
 	}
 	for _, c := range local.Ctors {
 		if c.Repr != types.ReprADT {

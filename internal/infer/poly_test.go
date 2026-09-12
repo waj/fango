@@ -66,20 +66,20 @@ func TestPolyPositive(t *testing.T) {
 		// An annotation may be less general than the body.
 		{"idInt : Int -> Int\nidInt x = x", "idInt : Int -> Int"},
 		// Parameterized ADTs: constructor instantiation per occurrence.
-		{"type Maybe a = Nothing | Just a\nx = Just 1\ny = Just \"s\"", "x : Num a => Maybe a, y : Maybe String"},
-		{"type Maybe a = Nothing | Just a\nn = Nothing", "n : Maybe a"},
+		{"type Opt a = None | Some a\nx = Some 1\ny = Some \"s\"", "x : Num a => Opt a, y : Opt String"},
+		{"type Opt a = None | Some a\nn = None", "n : Opt a"},
 		// Patterns instantiate constructors too.
-		{"type Maybe a = Nothing | Just a\nf m = case m of\n    Nothing -> 0\n    Just n -> n + 1", "f : Num a => Maybe a -> a"},
+		{"type Opt a = None | Some a\nf m = case m of\n    None -> 0\n    Some n -> n + 1", "f : Num a => Opt a -> a"},
 		{"type Box a = MkBox a\nunbox b = case b of\n    MkBox x -> x", "unbox : Box a -> a"},
 		{"type Foo eff = Foo (() ->{IO | eff} ())\nwrap action = Foo action", "wrap : (() ->{IO} ()) -> Foo e"},
 		{"type Test eff = TestCase (() ->{eff} ())\nsuite : Test IO\nsuite = TestCase (\\_ -> print ())", "suite : Test {IO}"},
 		{"type Test eff = Wrap (Test eff) | Bar (() ->{eff} ())\nmake action = Bar action", "make : (() -> ()) -> Test e"},
 		{"effect Expectation\n    abort fail : String -> e\ntype Test eff = TestCase (() ->{Expectation | eff} ())\nrunHelper : Test eff ->{IO | eff} ()\nrunHelper (TestCase action) =\n    handle action() of\n        fail msg -> print msg", "runHelper : Test e ->{IO} ()"},
 		// Applied types in annotations.
-		{"type Maybe a = Nothing | Just a\nx : Maybe Int\nx = Just 1", "x : Maybe Int"},
-		{"type Maybe a = Nothing | Just a\nf : Maybe a -> Maybe a\nf m = m", "f : Maybe a -> Maybe a"},
+		{"type Opt a = None | Some a\nx : Opt Int\nx = Some 1", "x : Opt Int"},
+		{"type Opt a = None | Some a\nf : Opt a -> Opt a\nf m = m", "f : Opt a -> Opt a"},
 		// A recursive parameterized type, regular occurrences only.
-		{"type List a = Nil | Cons a (List a)\nlen xs = case xs of\n    Nil -> 0\n    Cons _ rest -> 1 + len rest", "len : Num b => List a -> b"},
+		{"type Chain a = Empty | Link a (Chain a)\nlen xs = case xs of\n    Empty -> 0\n    Link _ rest -> 1 + len rest", "len : Num b => Chain a -> b"},
 		// Local (block) polymorphism: one local used at two types.
 		{"v =\n  id2 y = y\n  a = id2 1\n  b = id2 \"s\"\n  a", "v : Num a => a"},
 		// Mutually recursive parameterized types, regular.
@@ -127,8 +127,8 @@ func TestPolyNegative(t *testing.T) {
 		{"type Pair a b = MkPair a b\ntype T a = Leaf | Node (T (Pair a a))", "NON-REGULAR TYPE", 2},
 		{"type A a = MkA (B (A a)) | EndA\ntype B a = MkB (A a)", "NON-REGULAR TYPE", 1},
 		// Type-application arity.
-		{"type Maybe a = Nothing | Just a\nx : Maybe\nx = Nothing", "TYPE ARITY", 2},
-		{"type Maybe a = Nothing | Just a\nx : Maybe Int Int\nx = Nothing", "TYPE ARITY", 2},
+		{"type Opt a = None | Some a\nx : Opt\nx = None", "TYPE ARITY", 2},
+		{"type Opt a = None | Some a\nx : Opt Int Int\nx = None", "TYPE ARITY", 2},
 		{"x : Int Int\nx = 1", "TYPE ARITY", 1},
 		// Constructor fields resolve in the closed parameter scope.
 		{"type T a = MkT b", "NAMING ERROR", 1},

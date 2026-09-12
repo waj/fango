@@ -1,6 +1,6 @@
-type Maybe a = Nothing | Just a deriving (Eq, Show)
-Just 3
-:type Just
+type Opt a = None | Some a deriving (Eq, Show)
+Some 3
+:type Some
 id x = x
 id "hi"
 id 1.5
@@ -9,12 +9,12 @@ double 4
 double 0.5
 withDefault d m =
     case m of
-        Nothing -> d
-        Just x -> x
+        None -> d
+        Some x -> x
 
-withDefault 9 Nothing
-withDefault 9 (Just 5)
-none = Nothing
+withDefault 9 None
+withDefault 9 (Some 5)
+none = None
 :type none
 v =
     id2 y = y
@@ -23,7 +23,7 @@ v =
     a + 10
 
 v
-Just 1 == Just 1
-type Maybe a = Nothing | Just a deriving (Eq, Show)
-Just 2
+Some 1 == Some 1
+type Opt a = None | Some a deriving (Eq, Show)
+Some 2
 :quit

@@ -1,7 +1,7 @@
-type Maybe a = Nothing | Just a deriving (Eq, Show)
+type Opt a = None | Some a deriving (Eq, Show)
 
-wrap : a -> Maybe a
-wrap x = Just x
+wrap : a -> Opt a
+wrap x = Some x
 
 apply f x = f x
 

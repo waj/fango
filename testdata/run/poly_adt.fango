@@ -1,9 +1,9 @@
-type Maybe a = Nothing | Just a deriving (Eq, Show)
+type Opt a = None | Some a deriving (Eq, Show)
 
-withDefault : a -> Maybe a -> a
+withDefault : a -> Opt a -> a
 withDefault d m =
     case m of
-        Nothing -> d
-        Just x -> x
+        None -> d
+        Some x -> x
 
-main = print (withDefault 0 (Just 42))
+main = print (withDefault 0 (Some 42))

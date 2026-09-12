@@ -226,7 +226,7 @@ func TestNegative(t *testing.T) {
 		{"x = 1 ++ \"a\"", "MISSING INSTANCE", 1},                // WhyOpRequires ++
 		{"x = [1, True]", "MISSING INSTANCE", 1},                 // every list element has one type
 		{"x = [1 | True]", "TYPE MISMATCH", 1},                   // tail must be a List
-		{"x = Just", "NAMING ERROR", 1},                          // unknown constructor
+		{"x = Absent", "NAMING ERROR", 1},                        // unknown constructor
 		{"x = print 1\nmain = x", "UNHANDLED EFFECT", 1},
 		{"x = 1\ny =\n  x = 2\n  x + 1", "SHADOWING", 3},
 		{"y =\n  a = 1\n  a = 2\n  a", "SHADOWING", 3},
