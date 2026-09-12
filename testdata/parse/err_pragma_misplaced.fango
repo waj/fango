@@ -1,0 +1,5 @@
+module Bare exposing (answer)
+
+answer = 42
+
+{-# no-prelude #-}

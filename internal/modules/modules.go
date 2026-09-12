@@ -27,7 +27,6 @@ import (
 	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/parser"
 	"github.com/waj/fango/internal/source"
-	"github.com/waj/fango/internal/token"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -182,7 +181,7 @@ func Load(entry string) (*Result, []diag.Error) {
 	if !private && m.Header.Name != wantEntry {
 		return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "MODULE/PATH MISMATCH", "The entry file `%s` must declare module `%s`, but declares `%s`.", filepath.Base(abs), wantEntry, m.Header.Name)}
 	}
-	rootNode := &node{name: entryName, path: filepath.Base(abs), content: content, mod: m, private: private, deps: implicitDeps(m, []string{"Basics", "IO"}, entryName), nativeModule: wantEntry}
+	rootNode := &node{name: entryName, path: filepath.Base(abs), content: content, mod: m, private: private, deps: implicitDeps(m, preludeDeps(m, entryName), entryName), nativeModule: wantEntry}
 	rootNativePath := wantEntry + ".native.go"
 	if nb, ne := os.ReadFile(filepath.Join(root, rootNativePath)); ne == nil {
 		rootNode.nativePath, rootNode.native = rootNativePath, nb
@@ -235,10 +234,7 @@ func Load(entry string) (*Result, []diag.Error) {
 			return
 		}
 		n := &node{name: name, path: path, content: b, mod: mm, bundled: bundled, nativeModule: name}
-		if !bundled {
-			n.deps = []string{"Basics", "IO"}
-		}
-		n.deps = implicitDeps(mm, n.deps, name)
+		n.deps = implicitDeps(mm, preludeDeps(mm, name), name)
 		var np string
 		var nb []byte
 		var ne error
@@ -379,6 +375,12 @@ func Load(entry string) (*Result, []diag.Error) {
 			manifest = append(manifest, ManifestEntry{Module: name, Path: n.nativePath, SHA256: hex.EncodeToString(nh[:])})
 			natives = append(natives, NativeSource{Module: n.nativeModule, Path: n.nativePath, Content: n.native})
 		}
+		if name == PreludeModule {
+			// The prelude declares nothing, so it has no code to emit. It
+			// stays in the manifest, where its hash invalidates a build when
+			// the default scope changes.
+			continue
+		}
 		unitName := name
 		if n.private {
 			unitName = ""
@@ -391,6 +393,14 @@ func Load(entry string) (*Result, []diag.Error) {
 	}
 	return &Result{Module: merged, Entry: entrySymbol, Manifest: manifest, Units: units, Fixity: fixities, Natives: natives}, nil
 }
+
+// PreludeModule declares the default scope. It holds nothing but imports,
+// and a module that does not carry `{-# no-prelude #-}` resolves as though
+// those imports stood at the top of its own file — qualified access
+// included, since they are ordinary imports. Keeping the list in fango
+// rather than in this package is what stops the batch resolver and the
+// REPL's scope from drifting apart.
+const PreludeModule = "Prelude"
 
 // MetaModule is the bundled module that owns the abstract compile-time code
 // type. A file using `quote` or `$(…)` needs it in the graph to have a type
@@ -409,6 +419,16 @@ const ListModule = "List"
 
 // TupleModule owns the Pair/Triple types and constructors used by `(a, b)`.
 const TupleModule = "Tuple"
+
+// preludeDeps seeds a module's dependency list with the prelude, unless the
+// module opted out. Depending on Prelude rather than on the modules it
+// imports is enough for instance visibility, which is already transitive.
+func preludeDeps(m *ast.Module, self string) []string {
+	if m.NoPrelude || self == PreludeModule {
+		return nil
+	}
+	return []string{PreludeModule}
+}
 
 // implicitDeps adds the bundled modules a file needs because of the syntax it
 // used rather than because it imported them.
@@ -466,6 +486,12 @@ var nativePlaceholder = regexp.MustCompile(`\$([0-9]+)`)
 // operator its own module declares.
 func validateModuleDecls(n *node) []diag.Error {
 	var errs []diag.Error
+	if n.name == PreludeModule && len(n.mod.Decls) > 0 {
+		// Prelude is a scope directive, not a library: it declares the
+		// default imports and nothing else. Holding it to that is what lets
+		// every build skip emitting a unit for it.
+		errs = append(errs, diag.Error{Title: "INVALID EMBEDDED PRELUDE", Body: n.path + " may contain only imports."})
+	}
 	callDecls := map[string]*ast.ValueDecl{}
 	// declared is every value name this module introduces — the names its
 	// own fixity declarations may refer to.
@@ -1066,6 +1092,11 @@ type resolver struct {
 	recordLabels                   map[string][]string
 	quals                          map[string]*iface
 
+	// seenModules, aliases, and fullQualifiers guard the duplicate-import
+	// diagnostics. Only a module's own imports populate them: the prelude's
+	// are implicit, so importing a prelude module explicitly is ordinary.
+	seenModules, aliases, fullQualifiers map[string]bool
+
 	// schemas holds the canonical types whose constructors or record fields
 	// this module may read. `typeOf` copies it, which is the whole modularity
 	// story for reflection: `exposing (T)` reflects opaque and
@@ -1081,59 +1112,33 @@ func (r *resolver) canon(name string) string {
 	return canonical(r.node.name, name)
 }
 
-func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
-	r.vals = map[string]string{}
-	r.tys = map[string]string{"Int": "Int", "Float": "Float", "String": "String", "Char": "Char", "Bool": "Bool", "()": "()"}
-	r.ctors = map[string]string{"True": "True", "False": "False"}
-	r.ops = map[string]string{}
-	r.records = map[string]string{}
-	r.recordLabels = map[string][]string{}
-	r.schemas = map[string]bool{"Bool": true}
-	if r.node.name != "Basics" {
-		if basics := r.nodes["Basics"]; basics != nil {
-			for _, name := range []string{"Num", "Eq", "Ord", "Show"} {
-				if v := basics.iface.types[name]; v != "" {
-					r.tys[name] = v
-				}
-			}
-			if v := basics.iface.values["show"]; v != "" {
-				r.vals["show"] = v
-			}
-			// Every operator Basics exposes is ambient. Operators are
-			// ordinary names now, so without this `1 + 2` would need an
-			// explicit `import Basics exposing ((+))` in every module.
-			// Named methods still require the import, as before.
-			for name, v := range basics.iface.values {
-				if isOperatorName(name) {
-					r.vals[name] = v
-				}
-			}
-		}
+// preludeImports returns the import list every module resolves as though it
+// had written itself. A module that opted out, and the prelude itself, get
+// none — which is also what keeps the bundled library below the prelude from
+// importing its way into a cycle.
+func (r *resolver) preludeImports() []ast.Import {
+	if r.node.mod.NoPrelude || r.node.name == PreludeModule {
+		return nil
 	}
-	if !r.node.bundled {
-		if ioNode := r.nodes["IO"]; ioNode != nil && ioNode.iface != nil {
-			for _, name := range []string{"print", "readLine"} {
-				if v := ioNode.iface.values[name]; v != "" {
-					r.vals[name] = v
-					r.ops[name] = ioNode.iface.ops[name]
-				}
-			}
-			if v := ioNode.iface.types["IO"]; v != "" {
-				r.tys["IO"] = v
-			}
-		}
+	prelude := r.nodes[PreludeModule]
+	if prelude == nil {
+		return nil
 	}
-	r.quals = map[string]*iface{}
-	seenModules, aliases, fullQualifiers := map[string]bool{}, map[string]bool{}, map[string]bool{}
-	for _, im := range r.node.mod.Imports {
-		fullQualifiers[im.Module] = true
-	}
-	for _, im := range r.node.mod.Imports {
-		if seenModules[im.Module] {
-			r.errs = append(r.errs, diag.Errorf(im.ModuleSpan, "DUPLICATE IMPORT", "Module `%s` is imported more than once.", im.Module))
-			continue
+	return prelude.mod.Imports
+}
+
+// applyImports seeds the scope from a list of imports. recordSeen reports
+// whether these are the module's own, and so subject to the duplicate-import
+// and duplicate-alias diagnostics.
+func (r *resolver) applyImports(imports []ast.Import, recordSeen bool) {
+	for _, im := range imports {
+		if recordSeen {
+			if r.seenModules[im.Module] {
+				r.errs = append(r.errs, diag.Errorf(im.ModuleSpan, "DUPLICATE IMPORT", "Module `%s` is imported more than once.", im.Module))
+				continue
+			}
+			r.seenModules[im.Module] = true
 		}
-		seenModules[im.Module] = true
 		dep := r.nodes[im.Module]
 		if dep == nil {
 			continue
@@ -1148,10 +1153,10 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 			}
 		}
 		if im.Alias != "" {
-			if aliases[im.Alias] || fullQualifiers[im.Alias] || r.quals[im.Alias] != nil {
+			if r.aliases[im.Alias] || r.fullQualifiers[im.Alias] || r.quals[im.Alias] != nil {
 				r.errs = append(r.errs, diag.Errorf(im.AliasSpan, "DUPLICATE IMPORT ALIAS", "The qualifier `%s` is already in use.", im.Alias))
 			} else {
-				aliases[im.Alias] = true
+				r.aliases[im.Alias] = true
 				r.quals[im.Alias] = dep.iface
 			}
 		}
@@ -1159,6 +1164,29 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 		r.errs = append(r.errs, es...)
 		r.merge(sel, im.ModuleSpan)
 	}
+}
+
+func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
+	r.vals = map[string]string{}
+	r.tys = map[string]string{"Int": "Int", "Float": "Float", "String": "String", "Char": "Char", "Bool": "Bool", "()": "()"}
+	r.ctors = map[string]string{"True": "True", "False": "False"}
+	r.ops = map[string]string{}
+	r.records = map[string]string{}
+	r.recordLabels = map[string][]string{}
+	r.schemas = map[string]bool{"Bool": true}
+	r.quals = map[string]*iface{}
+	r.aliases, r.seenModules = map[string]bool{}, map[string]bool{}
+	r.fullQualifiers = map[string]bool{}
+	for _, im := range r.node.mod.Imports {
+		r.fullQualifiers[im.Module] = true
+	}
+	// The prelude's imports are applied first and are ordinary imports, so a
+	// module reaches `print` and `IO.write` alike without writing one. They
+	// are not recorded as seen, which leaves the module free to import the
+	// same module again for more names; `add` accepts a repeated binding at
+	// an identical canonical name.
+	r.applyImports(r.preludeImports(), false)
+	r.applyImports(r.node.mod.Imports, true)
 	// Types, effects, constructors, and operations are module-wide, matching
 	// the checker's existing mutually-recursive declaration pass.
 	for _, d := range r.node.mod.Decls {
@@ -1713,11 +1741,4 @@ func (r *resolver) patternInner(p ast.Pattern, locals, outer map[string]bool, va
 func ManifestJSON(entries []ManifestEntry) []byte {
 	b, _ := json.MarshalIndent(entries, "", "  ")
 	return append(b, '\n')
-}
-
-// isOperatorName reports whether a surface name is an operator spelling
-// rather than an identifier. The two character sets are disjoint, so the
-// first byte settles it.
-func isOperatorName(name string) bool {
-	return name != "" && token.IsOpChar(name[0])
 }

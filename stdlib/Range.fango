@@ -1,4 +1,7 @@
+{-# no-prelude #-}
 module Range exposing (each)
+
+import Basics exposing (..)
 
 each : (Num a, Ord a) => (a ->{e} ()) -> a -> a ->{e} ()
 each action start end =

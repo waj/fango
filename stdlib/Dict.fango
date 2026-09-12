@@ -1,7 +1,8 @@
+{-# no-prelude #-}
 module Dict exposing
     (Dict, empty, foldl, foldr, fromList, get, insert, isEmpty, keys, map, member, remove, singleton, size, toList, update, values)
 
-import Basics
+import Basics exposing (..)
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 import Tuple exposing (Pair(..), Triple(..))

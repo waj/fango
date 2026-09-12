@@ -1,6 +1,7 @@
+{-# no-prelude #-}
 module IO exposing (IO, Line(..), args, exit, print, readFile, readLine, write, writeFile)
 
-import Basics
+import Basics exposing (..)
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 

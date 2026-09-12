@@ -68,7 +68,7 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 	for _, m := range r.Manifest {
 		got = append(got, m.Module)
 	}
-	if strings.Join(got, ",") != "Basics,Meta,Derive,List,Maybe,IO,IO,B,A,Z,Main" {
+	if strings.Join(got, ",") != "Basics,Meta,Derive,List,Maybe,IO,IO,Prelude,B,A,Z,Main" {
 		t.Fatalf("order %v", got)
 	}
 	if r.Entry != "Main.main" {
@@ -81,7 +81,7 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 	for _, unit := range r.Units {
 		units = append(units, unit.Name+":"+strings.Join(unit.Imports, "+"))
 	}
-	if strings.Join(units, ",") != "Basics:,Meta:Basics,Derive:Basics+Meta,List:,Maybe:,IO:Basics+List+Maybe,B:,A:B,Z:,Main:Z+A" {
+	if strings.Join(units, ",") != "Basics:,Meta:Basics,Derive:Basics+Meta,List:Basics,Maybe:Basics,IO:Basics+List+Maybe,B:,A:B,Z:,Main:Z+A" {
 		t.Fatalf("units %v", units)
 	}
 	if !r.Units[len(r.Units)-1].Entry {
@@ -90,13 +90,13 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 }
 
 func TestPreludeFollowsBundledImports(t *testing.T) {
-	m, _, owners, errs := Prelude()
+	p, errs := Prelude()
 	if len(errs) > 0 {
 		t.Fatalf("Prelude: %v", errs)
 	}
-	wantOwners := []string{"Basics", "Derive", "IO", "List", "Maybe", "Meta", "Tuple"}
+	wantOwners := []string{"Basics", "Derive", "IO", "List", "Maybe", "Meta", "Prelude", "Tuple"}
 	var gotOwners []string
-	for owner := range owners {
+	for owner := range p.Owners {
 		gotOwners = append(gotOwners, owner)
 	}
 	slices.Sort(gotOwners)
@@ -104,7 +104,7 @@ func TestPreludeFollowsBundledImports(t *testing.T) {
 		t.Fatalf("owners %v, want %v", gotOwners, wantOwners)
 	}
 	listDecls := 0
-	for _, decl := range m.Decls {
+	for _, decl := range p.Module.Decls {
 		if d, ok := decl.(*ast.TypeDecl); ok && d.Name == "List.List" {
 			listDecls++
 		}
@@ -169,7 +169,7 @@ func TestBundledModules(t *testing.T) {
 	for _, m := range r.Manifest {
 		got = append(got, m.Module+":"+m.Path)
 	}
-	want := "Basics:<stdlib>/Basics.fango,Meta:<stdlib>/Meta.fango,Derive:<stdlib>/Derive.fango,List:<stdlib>/List.fango,Maybe:<stdlib>/Maybe.fango,IO:<stdlib>/IO.fango,IO:<stdlib>/IO.native.go,Range:<stdlib>/Range.fango,Main:Main.fango"
+	want := "Basics:<stdlib>/Basics.fango,Meta:<stdlib>/Meta.fango,Derive:<stdlib>/Derive.fango,List:<stdlib>/List.fango,Maybe:<stdlib>/Maybe.fango,IO:<stdlib>/IO.fango,IO:<stdlib>/IO.native.go,Prelude:<stdlib>/Prelude.fango,Range:<stdlib>/Range.fango,Main:Main.fango"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("manifest = %v, want %s", got, want)
 	}

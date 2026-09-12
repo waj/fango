@@ -1,1 +1,1 @@
-main() = IO.write "hidden"
+main() = print (show (Dict.size Dict.empty))

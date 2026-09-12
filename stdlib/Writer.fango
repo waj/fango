@@ -1,4 +1,7 @@
+{-# no-prelude #-}
 module Writer exposing (Writer(..), WriterResult(..), run)
+
+import Basics exposing (..)
 
 effect Writer w
     tell : w -> ()

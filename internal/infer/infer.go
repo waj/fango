@@ -14,7 +14,6 @@ import (
 	"github.com/waj/fango/internal/fixity"
 	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/internal/source"
-	"github.com/waj/fango/internal/token"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -87,13 +86,6 @@ func (e *Env) Names() []string {
 	return out
 }
 
-// isOperatorName reports whether a surface name is an operator spelling
-// rather than an identifier. The character sets are disjoint, so the first
-// byte settles it.
-func isOperatorName(name string) bool {
-	return name != "" && token.IsOpChar(name[0])
-}
-
 // Checker carries the session-scoped inference state: the fresh-variable
 // supply, the accumulated substitution, and per-node solved types. The REPL
 // keeps one Checker across many inputs; batch compilation uses one per run.
@@ -140,8 +132,12 @@ type Checker struct {
 	Effects         map[string]*types.EffectInfo
 	EffectsByUnique map[int]*types.EffectInfo
 	Operations      map[string]*types.EffectOp
-	IO              *types.EffectInfo
-	Natives         map[string]*types.NativeInfo
+	// IO is the ambient IO effect, and is nil when the bundled IO module is
+	// not in the graph at all — which a module carrying `{-# no-prelude #-}`
+	// and importing nothing can arrange. A `main` obligation naming IO is
+	// then simply not imposed: there is no IO for the program to perform.
+	IO      *types.EffectInfo
+	Natives map[string]*types.NativeInfo
 	// Intrinsics records bundled `native` declarations the compiler
 	// implements as a Core node. They are deliberately absent from Natives:
 	// nothing may lower one to a NativeCall or look for a sidecar.
@@ -1068,13 +1064,13 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 		}
 	} else if annTy != nil {
 		ty = g.functionEquations(d.Name, d.NameSpan, declEquations(d), annTy)
-		if isMain && len(d.Params) == 1 {
+		if isMain && len(d.Params) == 1 && ck.IO != nil {
 			want := &types.TFun{Arg: ck.B.Unit, Eff: types.Row{Labels: []types.EffLabel{{Unique: ck.IO.Unique, Name: ck.IO.Name}}}, Ret: ck.B.Unit}
 			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
 		}
 	} else {
 		ty = g.functionEquations(d.Name, d.NameSpan, declEquations(d), nil)
-		if isMain && len(d.Params) == 1 {
+		if isMain && len(d.Params) == 1 && ck.IO != nil {
 			want := &types.TFun{Arg: ck.B.Unit, Eff: types.Row{Labels: []types.EffLabel{{Unique: ck.IO.Unique, Name: ck.IO.Name}}}, Ret: ck.B.Unit}
 			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
 		}
@@ -1116,7 +1112,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	if !allowEffects && promptEffects {
 		errs = append(errs, diag.Errorf(d.Body.Span(), "EFFECTFUL PROMPT DECLARATION", "Effectful declarations are not installed at the prompt; run the expression directly."))
 	}
-	if isMain && len(d.Params) == 0 {
+	if isMain && len(d.Params) == 0 && ck.IO != nil {
 		row := ck.Sub.Apply(g.ambient).(types.Row)
 		for _, l := range row.Labels {
 			if l.Unique != ck.IO.Unique {

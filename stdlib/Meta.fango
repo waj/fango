@@ -1,3 +1,4 @@
+{-# no-prelude #-}
 module Meta exposing
     ( Code, TypeRepr, Items(..), Field(..), Ctor(..), Shape(..), TypeInfo(..)
     , Reflected(..), Bound(..), BoundField(..), Lift(..)
@@ -7,7 +8,7 @@ module Meta exposing
     , fail
     )
 
-import Basics
+import Basics exposing (..)
 
 {- The compile-time stage's representations.
 

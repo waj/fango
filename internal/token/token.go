@@ -15,6 +15,13 @@ const (
 	LIDENT // lower-case identifier
 	UIDENT // upper-case identifier (constructors, types, module names)
 
+	// PRAGMA is a `{-# ... #-}` compiler directive. Its Text is the body
+	// with surrounding whitespace trimmed, scanned as raw text rather than
+	// tokenized, so a directive's spelling need not obey the ordinary
+	// lexical rules. Pragmas precede the module header; the parser
+	// interprets them.
+	PRAGMA
+
 	// OP is a run of operator characters that is not one of the reserved
 	// lexemes below. Its Text is the spelling, which is also the operator's
 	// name: `(+)` declares the value the lexer reports as OP "+". Operator
@@ -78,7 +85,7 @@ const (
 
 var kindNames = map[Kind]string{
 	EOF: "EOF", INT: "INT", FLOAT: "FLOAT", STRING: "STRING", CHAR: "CHAR",
-	LIDENT: "LIDENT", UIDENT: "UIDENT",
+	LIDENT: "LIDENT", UIDENT: "UIDENT", PRAGMA: "PRAGMA",
 	OP:     "OP",
 	LPAREN: "LPAREN", RPAREN: "RPAREN", COMMA: "COMMA", DOT: "DOT", DOTDOT: "DOTDOT",
 	LBRACE: "LBRACE", RBRACE: "RBRACE", LBRACKET: "LBRACKET", RBRACKET: "RBRACKET", BACKSLASH: "BACKSLASH",

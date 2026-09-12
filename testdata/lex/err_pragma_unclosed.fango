@@ -1,0 +1,2 @@
+{-# no-prelude
+answer = 42

@@ -1,0 +1,6 @@
+1:1 PRAGMA no-prelude
+2:1 PRAGMA spaced
+4:1 LIDENT answer
+4:8 EQ =
+4:10 INT 42
+5:1 EOF

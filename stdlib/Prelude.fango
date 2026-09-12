@@ -1,0 +1,13 @@
+{-# no-prelude #-}
+module Prelude exposing ()
+
+-- The default scope. Every module that does not carry `{-# no-prelude #-}`
+-- resolves as though these imports stood at the top of its own file, so they
+-- grant qualified access exactly as a written import does. The bundled
+-- standard library sits below this file and carries the pragma.
+
+import Basics exposing
+    ( Num, Eq, Ord, Show, show
+    , (+), (-), (*), (/), (==), (/=), (<), (>), (<=), (>=), (++)
+    )
+import IO exposing (IO, print, readLine)

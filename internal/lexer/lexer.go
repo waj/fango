@@ -133,12 +133,40 @@ func (l *lexer) skipSpaceAndComments() {
 			for l.pos < len(l.f.Content) && l.f.Content[l.pos] != '\n' {
 				l.pos++
 			}
+		case c == '{' && l.peekAt(1) == '-' && l.peekAt(2) == '#':
+			l.lexPragma()
 		case c == '{' && l.peekAt(1) == '-':
 			l.skipBlockComment()
 		default:
 			return
 		}
 	}
+}
+
+// lexPragma scans `{-# ... #-}`, a compiler directive rather than a comment.
+// The body is taken as raw text, so a directive's spelling is independent of
+// the ordinary lexical rules, and pragmas do not nest — the first `#-}` ends
+// one. That makes `{-#` unavailable as the opening of a block comment whose
+// first character is `#`; write `{- #` instead.
+func (l *lexer) lexPragma() {
+	start := l.pos
+	body := l.pos + 3
+	for l.pos < len(l.f.Content) {
+		if l.f.Content[l.pos] == '#' && l.peekAt(1) == '-' && l.peekAt(2) == '}' {
+			end := l.pos
+			l.pos += 3
+			l.toks = append(l.toks, token.Token{
+				Kind: token.PRAGMA,
+				Text: strings.TrimSpace(string(l.f.Content[body:end])),
+				Span: source.Span{File: l.f, Start: start, End: l.pos},
+			})
+			return
+		}
+		l.pos++
+	}
+	sp := source.Span{File: l.f, Start: start, End: start + 3}
+	l.errs = append(l.errs, diag.Errorf(sp, "UNCLOSED PRAGMA",
+		"I got to the end of the file while looking for the `#-}` that closes\nthis pragma."))
 }
 
 func (l *lexer) skipBlockComment() {

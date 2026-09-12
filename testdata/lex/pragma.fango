@@ -1,0 +1,4 @@
+{-# no-prelude #-}
+{-#   spaced   #-}
+{- an ordinary {- nested -} comment -}
+answer = 42

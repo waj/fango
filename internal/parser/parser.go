@@ -51,6 +51,7 @@ func Parse(toks []token.Token, f *source.File) (*ast.Module, []diag.Error) {
 	p := &parser{f: f, toks: toks, stmtStart: -1}
 	p.lay.push(ctxDecl, 1)
 	m := &ast.Module{}
+	p.parsePragmas(m)
 	m.Header = p.parseHeader()
 	for p.peek().Kind == token.KwImport {
 		if im, ok := p.parseImport(); ok {
@@ -58,6 +59,11 @@ func Parse(toks []token.Token, f *source.File) (*ast.Module, []diag.Error) {
 		}
 	}
 	for p.peek().Kind != token.EOF {
+		if t := p.peek(); t.Kind == token.PRAGMA {
+			p.next()
+			p.errorAt(t.Span, "MISPLACED PRAGMA", "A pragma describes the whole file, so it belongs above the `module`\nheader rather than here.")
+			continue
+		}
 		if d := p.parseDecl(); d != nil {
 			if vd, ok := d.(*ast.ValueDecl); ok && len(m.Decls) > 0 {
 				prev, _ := m.Decls[len(m.Decls)-1].(*ast.ValueDecl)
@@ -84,6 +90,26 @@ func ParseExprInput(toks []token.Token, f *source.File) (ast.Expr, []diag.Error)
 		p.errorAt(t.Span, "SYNTAX PROBLEM", "I parsed a complete expression but then ran into this.")
 	}
 	return e, p.errs
+}
+
+// parsePragmas consumes the `{-# ... #-}` directives that may precede the
+// module header. A pragma is a property of the whole file, so it has exactly
+// one place to sit; one appearing later is reported where it stands.
+func (p *parser) parsePragmas(m *ast.Module) {
+	for p.peek().Kind == token.PRAGMA {
+		t := p.next()
+		if !p.applyPragma(m, t) {
+			p.errorAt(t.Span, "UNKNOWN PRAGMA", "I don't know the pragma `"+t.Text+"`. The only one I understand is\n`no-prelude`.")
+		}
+	}
+}
+
+func (p *parser) applyPragma(m *ast.Module, t token.Token) bool {
+	if t.Text != "no-prelude" {
+		return false
+	}
+	m.NoPrelude = true
+	return true
 }
 
 func (p *parser) parseHeader() *ast.ModuleHeader {

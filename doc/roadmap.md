@@ -67,14 +67,22 @@ a rare one. Embedding source should go.
 
 Two properties currently rest on it and need somewhere else to live. The
 compiler hard-codes canonical stdlib symbols — `Meta.Code`, `Meta.TypeInfo`,
-`Meta.infoOf`, `Basics.Eq`/`Ord`/`Show`/`Num`, `IO.print`/`readLine` — and
+`Meta.infoOf`, and the classes the derivers name — and
 native validation cross-checks every bundled `native` declaration against the
 interpreter registry, so a stdlib one version away from its binary is an
 internal error rather than a behavioral difference. Embedding makes that skew
 unrepresentable; anything else has to make it *detectable*, which means a
 version stamp and a real diagnostic. The `RESERVED MODULE` rule, which today
-rejects a local file named after a bundled module, needs rethinking at the
-same time: it exists to enforce the same invariant from the other side.
+rejects a local file named after a bundled module — `Prelude` included — needs
+rethinking at the same time: it exists to enforce the same invariant from the
+other side.
+
+`Prelude` sharpens the question rather than answering it. The default scope is
+now editable in fango, which is most of what a project would want from it, but
+only by editing the compiler's own copy: there is no per-project prelude, and
+the reserved-name rule is precisely what forbids one. Whether a source root
+should let a project supply its own is the same decision as the source-root
+bullet below, and should be settled with it rather than separately.
 
 There is a second cost worth collecting while the mechanism is open. Embedded
 source is still *source*: every invocation re-lexes, re-parses, re-resolves,
@@ -356,7 +364,9 @@ These are directions, not commitments or an ordering after the work above.
   libraries could give the same spelling different precedences; sections
   (`(+ 1)`, `(1 +)`); operators bound inside a function body, which today have
   nowhere to put a fixity; qualified infix use (`a Mod.<+> b`); and a way for
-  a module to hide a prelude operator so it can declare its own.
+  a module to hide one prelude name so it can declare its own —
+  `{-# no-prelude #-}` is all-or-nothing, which is a blunt instrument for
+  wanting a different `(+)`.
 - Widen the operator character class if a concrete need appears. `.` is
   excluded because a dot in a name means "module separator" everywhere in
   name resolution, `$` because `$(` opens a splice, and an operator may not

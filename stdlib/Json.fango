@@ -1,6 +1,7 @@
+{-# no-prelude #-}
 module Json exposing (Encode(..), StringToken(..), parseString)
 
-import Basics
+import Basics exposing (..)
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 import Meta exposing (Bound(..), BoundField(..), Code, Items(..), Lift(..), Shape(..), TypeInfo(..))

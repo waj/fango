@@ -1,6 +1,7 @@
+{-# no-prelude #-}
 module Derive exposing ()
 
-import Basics
+import Basics exposing (..)
 import Meta exposing (Bound(..), BoundField(..), Code, Ctor(..), Field(..), Items(..), Lift(..), Shape(..), TypeInfo(..))
 
 {- The derivers for the standard classes.

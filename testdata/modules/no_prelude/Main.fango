@@ -1,0 +1,7 @@
+module Main exposing (main)
+
+import Bare
+
+-- Main keeps the prelude, so `++` and `show` need no import of its own.
+main : String
+main = Bare.label (Bare.double 21) ++ "/" ++ show (Bare.double 1)

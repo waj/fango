@@ -21,10 +21,28 @@
   "repository": {
     "comments": {
       "patterns": [
+        { "include": "#pragma" },
         { "include": "#block_comment" },
         {
           "name": "comment.line.double-dash.fango",
           "match": "--.*$"
+        }
+      ]
+    },
+    "pragma": {
+      "name": "meta.preprocessor.fango",
+      "begin": "\\{-#",
+      "end": "#-\\}",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.preprocessor.fango" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.preprocessor.fango" }
+      },
+      "patterns": [
+        {
+          "name": "keyword.control.directive.fango",
+          "match": "[A-Za-z][A-Za-z0-9-]*"
         }
       ]
     },

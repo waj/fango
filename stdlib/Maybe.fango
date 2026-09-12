@@ -1,4 +1,7 @@
+{-# no-prelude #-}
 module Maybe exposing (Maybe(..), withDefault)
+
+import Basics exposing (..)
 
 type Maybe a = Nothing | Just a deriving (Eq, Ord, Show)
 

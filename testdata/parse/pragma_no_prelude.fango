@@ -1,0 +1,6 @@
+{-# no-prelude #-}
+module Bare exposing (double)
+
+import Basics exposing ((+))
+
+double x = x + x

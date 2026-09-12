@@ -1,4 +1,7 @@
+{-# no-prelude #-}
 module Scope exposing (bracket, finally)
+
+import Basics exposing (..)
 
 {- Cleanup scopes.
 

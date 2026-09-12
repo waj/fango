@@ -1,6 +1,7 @@
+{-# no-prelude #-}
 module String exposing (Uncons(..), byteLength, fromChar, length, padLeft, padRight, slice, split, startsWith, toInt, trim, uncons, words)
 
-import Basics
+import Basics exposing (..)
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 

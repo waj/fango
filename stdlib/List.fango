@@ -1,4 +1,7 @@
+{-# no-prelude #-}
 module List exposing (List(..), range, each, foldl, foldr, map, filter, length, reverse)
+
+import Basics exposing (..)
 
 type List a = Nil | Cons a (List a) deriving (Eq, Ord)
 

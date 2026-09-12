@@ -1,0 +1,9 @@
+3:1 EOF
+-- errors --
+-- UNCLOSED PRAGMA ------------------- err_pragma_unclosed.fango
+
+I got to the end of the file while looking for the `#-}` that closes
+this pragma.
+
+1| {-# no-prelude
+   ^^^

@@ -1,7 +1,8 @@
+{-# no-prelude #-}
 module Random exposing (Random(..), int, runSeeded, runSystem)
 
 import IO exposing (IO)
-import Basics exposing (modBy)
+import Basics exposing (..)
 
 effect Random
     int : Int -> Int -> Int

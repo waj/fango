@@ -67,9 +67,9 @@ Tuple syntax is the same arrangement without the representation half:
 are ordinary nominal ADTs everywhere below the parser — no new type former,
 no structural typing, and `Eq`/`Ord` derived in fango rather than synthesized
 by the compiler. Arity stops at three because each one is a separate bundled
-declaration, not because anything in the compiler counts. `Tuple` is a
-prelude root, since syntax that always parses must always resolve, including
-in the REPL.
+declaration, not because anything in the compiler counts. `Tuple` is a syntax
+root — always resolved, never in scope — since syntax that always parses must
+always resolve, including in the REPL.
 
 ## Functions and effects
 
@@ -268,19 +268,36 @@ providers are parsed and their declared public interfaces validated before a
 deterministic dependency-first topological order is chosen, with lexical
 tie-breaking.
 
-The embedded prelude used by the REPL and focused checker tests follows the
-same bundled dependency closure instead of maintaining a parallel module
-list. Its roots are `Basics`, `Meta`, `Derive`, and ambient `IO`; ordinary
-imports and syntax-driven `Meta`, `Derive`, and `List` edges recursively add
-their dependencies. The checker retains that resolved owner set so fixture
-projections can omit the whole prelude while still elaborating and linting it.
-Bundled modules therefore use the public standard-library types rather than
-private substitutes.
+The default scope is itself a bundled module. `Prelude` holds nothing but
+imports — the loader rejects a declaration in it — and a module that does not
+carry `{-# no-prelude #-}` resolves as though that import list stood at the
+top of its own file. They are ordinary imports, qualifiers included, so the
+file says exactly what it means. Keeping the list in fango is what stops the
+batch resolver and the REPL's scope from drifting: both read it, neither
+restates it. The prelude declares nothing, so it emits no Go package; it stays
+in the manifest, where its hash invalidates a build when the default scope
+changes.
 
-Primitives are declarations rather than a compiler catalog. Every ordinary
-module implicitly loads the hidden `Basics` module, whose native values define
-the scalar implementations of class methods, and the bundled `IO` module declares the ambient IO
-effect and its operations. Basics also declares the standard operators and
+The bundled standard library sits below the prelude and carries the pragma,
+which is also what keeps it out of a cycle: `Prelude` imports `IO`, which
+imports `Basics`, so an implicit edge back into those would close one. Those
+modules therefore write the imports they need.
+
+The embedded prelude used by the REPL and focused checker tests follows the
+same bundled dependency closure instead of maintaining a parallel module list.
+Its roots are `Prelude` and the modules surface syntax desugars into — `Meta`,
+`Derive`, `List`, and `Tuple` — since a later prompt can quote, derive, or
+write `[1]` or `(a, b)`, and syntax that always parses must always resolve.
+Rooting those puts none of their names in view. Ordinary imports and the same
+syntax-driven edges recursively add their dependencies. The checker retains
+that resolved owner set so fixture projections can omit the whole prelude
+while still elaborating and linting it. Bundled modules therefore use the
+public standard-library types rather than private substitutes.
+
+Primitives are declarations rather than a compiler catalog. The prelude names
+the bundled `Basics` module, whose native values define the scalar
+implementations of class methods, and the bundled `IO` module declares the
+ambient IO effect and its operations. Basics also declares the standard operators and
 their fixities, which any module may do — there is no privileged operator
 set. `native "..."` templates remain bundled-only. They are retained for
 inlined Basics scalar primitives and Meta's compiler-only representations. The
@@ -324,8 +341,13 @@ fixity, where an import could change how a run parses, is deferred.
 Name resolution rewrites module-level declarations and imported references to
 opaque, collision-free canonical symbols before inference. Local binders keep
 their source names. An operator is an ordinary name here too: it resolves
-through the same scope, and the implicit prelude injects the ones `Basics`
-exposes so arithmetic needs no import. The resolved modules are merged in graph order and checked
+through the same scope, and `Prelude` exposes the ones `Basics` declares so
+arithmetic needs no import. A module's scope is built by applying the
+prelude's imports and then its own, through one code path, so an implicit
+import differs from a written one in nothing but where it is written; a
+repeated binding at an identical canonical name is accepted, which leaves a
+module free to import a prelude module again for more names. The resolved
+modules are merged in graph order and checked
 with one graph-wide fresh-name supply and one set of builtin identities. This
 shares nominal ADT and effect identities safely across module boundaries while
 an import can seed only its direct dependency's declared public interface.
@@ -1042,11 +1064,11 @@ parameter, no superclasses, higher kinds, default methods, ambiguous overlapping
 or method-local polymorphism. A constraint on a parameterized type is not
 simplified to constraints on its arguments, so `Eq a => List a -> Bool` is
 rejected in favor of `Eq (List a) => …`. There are no source-path
-flags, external library version selection, or package resolution. The implicit
-prelude is fixed to hidden `Basics` plus ambient `IO`, with `Meta` added only
-for files that use the staging syntax and `Tuple` always, since tuple syntax
-must resolve wherever it parses; the bundled standard
-library is intentionally small and experimental.
+flags, external library version selection, or package resolution. The default
+scope is whatever the bundled `Prelude` imports, editable in fango but not
+replaceable per project: a module chooses between that scope and none, through
+`{-# no-prelude #-}`, and nothing in between. The bundled standard library is
+intentionally small and experimental.
 Compile-time metaprogramming has quotes, splices, type reflection, and
 derivers, but no declaration splices, so generation that must introduce a
 top-level name is not expressible. Reflection reads a schema and compares type

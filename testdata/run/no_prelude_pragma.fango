@@ -1,0 +1,7 @@
+{-# no-prelude #-}
+-- With the pragma there is no implicit scope at all: every name below comes
+-- from one of these imports.
+import Basics exposing ((+), show)
+import IO exposing (print)
+
+main() = print (show (20 + 2))

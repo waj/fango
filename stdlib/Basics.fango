@@ -1,3 +1,4 @@
+{-# no-prelude #-}
 module Basics exposing (Num(..), Eq(..), Ord(..), Show(..), (/), (++), (/=), modBy, quotientBy, remainderBy)
 
 class Num a

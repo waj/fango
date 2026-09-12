@@ -1,0 +1,3 @@
+(module (pragma no-prelude) Bare (exposing double)
+  (import Basics (exposing +))
+  (def double (params x) (binop + (var x) (var x))))

@@ -12,6 +12,9 @@ import (
 func Dump(m *Module) string {
 	var b strings.Builder
 	b.WriteString("(module")
+	if m.NoPrelude {
+		b.WriteString(" (pragma no-prelude)")
+	}
 	if m.Header != nil {
 		fmt.Fprintf(&b, " %s", m.Header.Name)
 		b.WriteString(" (exposing")

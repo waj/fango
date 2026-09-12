@@ -1,4 +1,7 @@
+{-# no-prelude #-}
 module Result exposing (Result(..), map, mapError, andThen, withDefault)
+
+import Basics exposing (..)
 
 type Result error value = Err error | Ok value deriving (Eq, Ord, Show)
 

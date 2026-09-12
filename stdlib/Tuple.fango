@@ -1,6 +1,7 @@
+{-# no-prelude #-}
 module Tuple exposing (Pair(..), Triple(..), first, second, swap)
 
-import Basics
+import Basics exposing (..)
 
 -- `(a, b)` and `(a, b, c)` are surface syntax for these types, in type,
 -- expression, and pattern position alike. The parser writes the constructor

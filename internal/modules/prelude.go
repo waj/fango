@@ -9,11 +9,31 @@ import (
 	"github.com/waj/fango/internal/source"
 )
 
+// Scope is the unqualified view Prelude.fango's exposing lists produce,
+// mapping each surface name to its canonical one. The batch resolver reaches
+// the same view by merging those imports into every module; the REPL and the
+// focused checker tests have no name resolver, so they bind these names
+// directly and read the list from here rather than repeating it.
+type Scope struct {
+	Values, Types, Ops map[string]string
+}
+
+// PreludeResult is the resolved bundled prelude. Owners identifies the
+// complete resolved module set for test projections.
+type PreludeResult struct {
+	Module   *ast.Module
+	Fixities fixity.Table
+	Owners   map[string]bool
+	Scope    Scope
+}
+
 // Prelude resolves the actual bundled sources and their transitive bundled
-// dependencies. The REPL always roots Meta and Derive because a later prompt
-// can use staging or deriving; ordinary ambient definitions come from Basics
-// and IO. Owners identifies the complete resolved prelude for test projections.
-func Prelude() (*ast.Module, fixity.Table, map[string]bool, []diag.Error) {
+// dependencies. Its roots are Prelude itself, which declares the default
+// scope, and the modules that surface syntax desugars into: a later prompt
+// can quote, derive, or write `[1]` or `(a, b)`, and syntax that always
+// parses must always resolve. Rooting those puts none of their names in
+// view — only Prelude.fango does that.
+func Prelude() (*PreludeResult, []diag.Error) {
 	provider := BundledProvider{}
 	nodes := map[string]*node{}
 	var errs []diag.Error
@@ -41,7 +61,7 @@ func Prelude() (*ast.Module, fixity.Table, map[string]bool, []diag.Error) {
 		if nativePath, native, nativeErr := provider.Native(name); nativeErr == nil {
 			n.nativePath, n.native = nativePath, native
 		}
-		n.deps = implicitDeps(m, nil, name)
+		n.deps = implicitDeps(m, preludeDeps(m, name), name)
 		nodes[name] = n
 		for _, im := range m.Imports {
 			load(im.Module)
@@ -51,14 +71,11 @@ func Prelude() (*ast.Module, fixity.Table, map[string]bool, []diag.Error) {
 		}
 	}
 
-	// Tuple joins the roots because `(a, b)` is surface syntax like bracket
-	// lists, and syntax that always parses must always resolve — in the REPL
-	// and the checker harness, not only where module resolution runs.
-	for _, root := range []string{"Basics", "Meta", "Derive", "IO", "Tuple"} {
+	for _, root := range []string{PreludeModule, MetaModule, DeriveModule, ListModule, TupleModule} {
 		load(root)
 	}
 	if len(errs) > 0 {
-		return nil, nil, nil, errs
+		return nil, errs
 	}
 
 	names := make([]string, 0, len(nodes))
@@ -70,7 +87,7 @@ func Prelude() (*ast.Module, fixity.Table, map[string]bool, []diag.Error) {
 		errs = append(errs, validateModuleDecls(nodes[name])...)
 	}
 	if len(errs) > 0 {
-		return nil, nil, nil, errs
+		return nil, errs
 	}
 
 	fixities := fixity.Builtin()
@@ -81,18 +98,18 @@ func Prelude() (*ast.Module, fixity.Table, map[string]bool, []diag.Error) {
 		errs = append(errs, fixities.Resolve(nodes[name].mod)...)
 	}
 	if len(errs) > 0 {
-		return nil, nil, nil, errs
+		return nil, errs
 	}
 	for _, name := range names {
 		nodes[name].iface, errs = buildInterface(nodes[name], errs)
 	}
 	if len(errs) > 0 {
-		return nil, nil, nil, errs
+		return nil, errs
 	}
 
 	order := topo(nodes)
 	if len(order) != len(nodes) {
-		return nil, nil, nil, []diag.Error{{Title: "INVALID EMBEDDED PRELUDE", Body: "Bundled prelude imports form a cycle."}}
+		return nil, []diag.Error{{Title: "INVALID EMBEDDED PRELUDE", Body: "Bundled prelude imports form a cycle."}}
 	}
 	merged := &ast.Module{InstanceImports: map[string]map[string]bool{}}
 	owners := make(map[string]bool, len(order))
@@ -118,5 +135,37 @@ func Prelude() (*ast.Module, fixity.Table, map[string]bool, []diag.Error) {
 		promptVisible[owner] = true
 	}
 	merged.InstanceImports[""] = promptVisible
-	return merged, fixities, owners, errs
+	scope, scopeErrs := preludeScope(nodes)
+	errs = append(errs, scopeErrs...)
+	return &PreludeResult{Module: merged, Fixities: fixities, Owners: owners, Scope: scope}, errs
+}
+
+// preludeScope projects Prelude.fango's imports through the imported modules'
+// public interfaces, which is exactly what the batch resolver merges into
+// each module.
+func preludeScope(nodes map[string]*node) (Scope, []diag.Error) {
+	s := Scope{Values: map[string]string{}, Types: map[string]string{}, Ops: map[string]string{}}
+	prelude := nodes[PreludeModule]
+	if prelude == nil {
+		return s, []diag.Error{{Title: "INVALID EMBEDDED PRELUDE", Body: "The bundled " + PreludeModule + " module is missing."}}
+	}
+	var errs []diag.Error
+	for _, im := range prelude.mod.Imports {
+		dep := nodes[im.Module]
+		if dep == nil || dep.iface == nil {
+			continue
+		}
+		sel, es := dep.iface.selection(im.Exposing, im.ModuleSpan)
+		errs = append(errs, es...)
+		for k, v := range sel.values {
+			s.Values[k] = v
+		}
+		for k, v := range sel.types {
+			s.Types[k] = v
+		}
+		for k, v := range sel.ops {
+			s.Ops[k] = v
+		}
+	}
+	return s, errs
 }

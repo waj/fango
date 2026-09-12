@@ -1,0 +1,12 @@
+{-# no-prelude #-}
+module Bare exposing (double, label)
+
+-- Nothing is implicit here, so `+`, `show` and `(++)` all arrive through
+-- this one import rather than through the prelude.
+import Basics exposing (..)
+
+double : Int -> Int
+double x = x + x
+
+label : Int -> String
+label n = "n = " ++ show n

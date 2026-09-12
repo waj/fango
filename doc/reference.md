@@ -101,15 +101,51 @@ imported.
 The compiler also contains standard-library modules.
 Their names are reserved: a named entry or local module that has the same name
 is rejected with `RESERVED MODULE`, rather than replacing the bundled module.
-Every ordinary module implicitly loads `Basics`, receiving the classes
-`Num`, `Eq`, `Ord`, and `Show`, every operator `Basics` exposes, the `IO`
-effect, and unqualified `show`, `print`, and `readLine`. Other
-standard-library APIs still require explicit imports.
+One of them, `Prelude`, declares the default scope. It holds nothing but
+imports, and every other module resolves as though they stood at the top of
+its own file:
 
-Bracket list syntax is also implicit. A module that uses it automatically
-depends on the bundled `List` module, but this does not expose the names
-`List`, `Nil`, `Cons`, or the module's functions. Those names still follow the
-ordinary import rules.
+```fango
+import Basics exposing
+    ( Num, Eq, Ord, Show, show
+    , (+), (-), (*), (/), (==), (/=), (<), (>), (<=), (>=), (++)
+    )
+import IO exposing (IO, print, readLine)
+```
+
+These are ordinary imports, so besides the unqualified names they also grant
+qualified access: `IO.write` and `Basics.modBy` need no import line of their
+own. Everything the exposing lists leave out does — the named methods
+`fromInt` and `negate` among them, and every other standard-library module.
+Importing a module the prelude already names is not a duplicate import; it
+simply adds the names its own exposing list selects. Aliasing another module
+to a qualifier the prelude holds is a `DUPLICATE IMPORT ALIAS`, so `import
+Helper as IO` is rejected.
+
+A module opts out with the `{-# no-prelude #-}` pragma above its header,
+after which the only names in scope are its own declarations and whatever its
+own imports bring in:
+
+```fango
+{-# no-prelude #-}
+module Bare exposing (double)
+
+import Basics exposing ((+))
+
+double x = x + x
+```
+
+A pragma is `{-#`, a directive name, and `#-}`. It describes the whole file,
+so it belongs above the `module` header; one appearing later is a `MISPLACED
+PRAGMA`, and an unrecognized directive is an `UNKNOWN PRAGMA`. `no-prelude` is
+currently the only one. The bundled standard library sits below the prelude
+and carries the pragma, which is why its modules import `Basics` explicitly.
+
+Bracket list syntax, tuple syntax, `deriving`, and the staging forms are
+implicit in a different way. A module that uses one automatically depends on
+the bundled module the syntax desugars into — `List`, `Tuple`, `Derive`, or
+`Meta` — but this exposes none of their names. `List`, `Nil`, `Cons`, `Pair`,
+`Triple`, `Code` and the rest still follow the ordinary import rules.
 
 `build` and `run` use only the entry module's `main`; a dependency's `main` is
 an ordinary declaration. `check` does not require `main`. Imports expose only
@@ -123,7 +159,9 @@ paths are relative to the source root; bundled paths begin with `<stdlib>/`.
 
 Top-level declarations begin in column 1 and are visible only to declarations
 below them within their module. Tabs are rejected; indent with spaces. `--`
-starts a line comment, and `{- ... -}` comments may nest.
+starts a line comment, and `{- ... -}` comments may nest. `{-#` opens a
+pragma rather than a comment, so a block comment whose first character is `#`
+must be written `{- #`.
 
 Lowercase names identify values, parameters, type variables, operations, and
 effect-row tails. Uppercase names identify types, effects, and constructors.
@@ -179,8 +217,14 @@ following `then` or `else` even when the block sits at that keyword's column.
 
 The standard library ships with the compiler, has no separately selected
 version, and is experimental: its API may evolve before a future stability
-milestone. `Basics` and the ambient portion of `IO` are implicit; other modules
-and APIs must be imported explicitly.
+milestone. `Prelude` declares what is in scope without an import, and the
+"Modules, imports, and source layout" section above lists it; every other
+module and API must be imported explicitly.
+
+`Prelude` is the one bundled module with no API. It exposes nothing, may
+contain only imports, and exists so that the default scope is written in fango
+rather than fixed in the compiler. Importing it does nothing; editing it
+changes what every module sees.
 
 `List` exposes the following algebraic type:
 
@@ -250,9 +294,10 @@ main() =
 ```
 
 `IO.write : String ->{IO} ()` writes the string exactly as provided without a
-trailing newline. It is a native operation available only through an `IO`
-import. The names `print : Show a => a ->{IO} ()` and `readLine` come from
-ambient IO. `IO` also exposes:
+trailing newline. It is a native operation; the prelude imports `IO`, so
+`IO.write` is reachable without an import of your own, while reaching it
+unqualified takes one. `print : Show a => a ->{IO} ()` and `readLine` are
+unqualified already, from the prelude. `IO` also exposes:
 
 ```fango
 args : () ->{IO} List String
@@ -278,8 +323,8 @@ returns `Nothing` at clean end of input and otherwise preserves the line
 terminator separately as `"\n"`, `"\r\n"`, or `""` for an unterminated final
 line. Malformed UTF-8 input sequences are replaced with U+FFFD.
 
-`Basics` also declares three explicitly importable integer functions (the
-implicit prelude exposes only the operators, `print`, `readLine`, and `show`):
+`Basics` also declares three integer functions the prelude leaves out, so
+reaching them unqualified takes an import of your own:
 
 ```fango
 import Basics exposing (modBy, quotientBy, remainderBy)
@@ -999,8 +1044,9 @@ The standard classes are independent (in particular, `Ord` does not imply
 | `Ord a` | `(<)`, `(>)`, `(<=)`, `(>=) : a -> a -> Bool` | `Int`, `Float`, `String`, `Char` |
 | `Show a` | `show : a -> String` | `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
 
-Their operator-named methods are ambient, as is `show`. The named ones —
-`fromInt` and `negate` — require an explicit `Basics` import. `print` is an ordinary
+Their operator-named methods are in the prelude, as is `show`. The named ones —
+`fromInt` and `negate` — are not, so using them unqualified takes a `Basics`
+import. `print` is an ordinary
 Show-constrained function that writes `show value` followed by a newline.
 Strings display raw, not quoted.
 
@@ -1698,7 +1744,12 @@ ordinary built executable exits without printing them.
 
 `fango repl` evaluates expressions, installs
 value/function/type/effect/class/instance/deriver declarations, and accepts
-multiline layout-sensitive input. Definitions echo
+multiline layout-sensitive input. The prompt starts in the same scope
+`Prelude` gives a module, and, since a later prompt may use them, it also
+resolves the modules surface syntax desugars into — so `[1, 2]`, `(1, 2)`, and
+`deriving` work without putting `List`, `Tuple`, or `Derive` in scope.
+There is no `import` at the prompt; qualified names reach any module already
+resolved. Definitions echo
 their inferred types; expressions print a value and type. Errors do not end the
 session. Redefinition is allowed at the prompt, while existing memoized values
 and closures retain earlier bindings.

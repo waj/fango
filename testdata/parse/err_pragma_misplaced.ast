@@ -1,0 +1,10 @@
+(module Bare (exposing answer)
+  (def answer (int 42)))
+-- errors --
+-- MISPLACED PRAGMA ----------------- err_pragma_misplaced.fango
+
+A pragma describes the whole file, so it belongs above the `module`
+header rather than here.
+
+5| {-# no-prelude #-}
+   ^^^^^^^^^^^^^^^^^^

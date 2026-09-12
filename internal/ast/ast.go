@@ -703,6 +703,13 @@ type Module struct {
 	// UsesTuples records `(a, b)` syntax, in type, expression, or pattern
 	// position. The module loader adds Tuple the same way it adds List.
 	UsesTuples bool
+
+	// NoPrelude records the `{-# no-prelude #-}` pragma: this module is
+	// resolved with no implicit imports at all, so every name it uses comes
+	// from its own declarations or its own import list. The bundled standard
+	// library sits below the prelude and carries it; a local module may use
+	// it to start from nothing.
+	NoPrelude bool
 }
 
 // Spelling renders a declaration name the way it is written in source: an

@@ -1,4 +1,7 @@
+{-# no-prelude #-}
 module State exposing (State(..), StateResult(..), run)
+
+import Basics exposing (..)
 
 effect State s
     get : () -> s
