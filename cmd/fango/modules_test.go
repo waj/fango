@@ -16,17 +16,23 @@ import (
 )
 
 func TestMultiModuleDifferential(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range []string{"basic", "effects", "classes", "records", "blanket", "reflection", "deriver", "operators", "patterns"} {
-		t.Run(fixture, func(t *testing.T) { testMultiModule(t, fixture) })
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+			testMultiModule(t, fixture)
+		})
 	}
 }
 
 func TestCrossModuleBlanketCycle(t *testing.T) {
+	t.Parallel()
 	entry := filepath.Join("..", "..", "testdata", "modules", "blanket_cycle", "Main.fango")
 	runErrorCase(t, entry, "Circular blanket instance requirements")
 }
 
 func TestPrivateRecordFields(t *testing.T) {
+	t.Parallel()
 	entry := filepath.Join("..", "..", "testdata", "modules", "record_private", "Main.fango")
 	want, err := os.ReadFile(strings.TrimSuffix(entry, ".fango") + ".error")
 	if err != nil {
@@ -53,12 +59,16 @@ func testMultiModuleEntry(t *testing.T, entry, want string) {
 	}
 	env := eval.NewEnv()
 	env.DefineProg(prog)
-	_, err := eval.ForceIO(context.Background(), prog.Entry, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{}))
-	if err != nil {
-		t.Fatal(err)
-	}
 	_ = ck
-	shown, err := eval.EvalIO(context.Background(), prog.EntryDisplay, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{}))
+	var shown any
+	err := withInterpreter(func() error {
+		if _, err := eval.ForceIO(context.Background(), prog.Entry, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{})); err != nil {
+			return err
+		}
+		var err error
+		shown, err = eval.EvalIO(context.Background(), prog.EntryDisplay, env, eval.NewIOContext(strings.NewReader(""), &bytes.Buffer{}))
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,23 +79,24 @@ func testMultiModuleEntry(t *testing.T, entry, want string) {
 	if testing.Short() {
 		return
 	}
-	stderr.Reset()
-	t.Setenv("FANGO_BUILD_DIR", t.TempDir())
-	t.Setenv("FANGO_INTERNAL_PRINT_MAIN", "1")
-	dir, ok := ensureBuilt(entry, &stderr)
-	if !ok {
-		t.Fatalf("build: %s", stderr.String())
+	// The compiled leg goes through the real CLI, so multi-module fixtures
+	// cover `fango run` end to end while each case owns its build directory.
+	cmd := exec.Command(cliBinary(t), "run", entry)
+	cmd.Env = append(os.Environ(),
+		"FANGO_INTERNAL_PRINT_MAIN=1",
+		"FANGO_BUILD_DIR="+t.TempDir())
+	var stdout, runErr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &runErr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("fango run: %v\n%s", err, runErr.String())
 	}
-	stdout, err := exec.Command(build.BinaryPath(dir)).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.TrimSpace(string(stdout)) != strings.TrimSpace(string(want)) {
-		t.Fatalf("compiled got %q, want %q", stdout, want)
+	if strings.TrimSpace(stdout.String()) != strings.TrimSpace(string(want)) {
+		t.Fatalf("compiled got %q, want %q", stdout.String(), want)
 	}
 }
 
 func TestCrossModuleContextPrecedence(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, extra, value, want, diagnostic string
 	}{
@@ -97,6 +108,7 @@ func TestCrossModuleContextPrecedence(t *testing.T) {
 		{name: "duplicate", extra: "instance Show b => Base.Inspect b\n    inspect _ = \"duplicate\"\n", value: "True", diagnostic: "OVERLAPPING INSTANCE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			root := t.TempDir()
 			writeModuleFile(t, root, "Base.fango", `module Base exposing (Inspect(..), forward)
 class Inspect a
@@ -138,6 +150,7 @@ instance Num a => Base.Inspect a
 }
 
 func TestDependencyManifestInvalidatesBuild(t *testing.T) {
+	t.Parallel()
 	src := t.TempDir()
 	entry := filepath.Join(src, "Main.fango")
 	dep := filepath.Join(src, "Dep.fango")
@@ -208,6 +221,7 @@ func TestDependencyManifestInvalidatesBuild(t *testing.T) {
 }
 
 func TestEmitGoProjectDirectory(t *testing.T) {
+	t.Parallel()
 	entry := filepath.Join("..", "..", "testdata", "modules", "basic", "Main.fango")
 	out := filepath.Join(t.TempDir(), "custom.out")
 	var stdout, stderr bytes.Buffer
@@ -222,15 +236,17 @@ func TestEmitGoProjectDirectory(t *testing.T) {
 			t.Errorf("missing %s: %v", rel, err)
 		}
 	}
+	// GOPROXY=off is what proves the emitted project is self-contained; the
+	// ambient build cache is shared with every other compiled leg.
 	cmd := exec.Command("go", "build", ".")
 	cmd.Dir = out
-	cmd.Env = append(os.Environ(), "GOCACHE="+filepath.Join(t.TempDir(), "go-cache"), "GOPROXY=off", "GOTOOLCHAIN=local")
+	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOTOOLCHAIN=local")
 	if data, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build emitted project: %v\n%s", err, data)
 	}
 	cmd = exec.Command("go", "list", "./...")
 	cmd.Dir = out
-	cmd.Env = append(os.Environ(), "GOCACHE="+filepath.Join(t.TempDir(), "go-cache"), "GOPROXY=off", "GOTOOLCHAIN=local")
+	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOTOOLCHAIN=local")
 	listed, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go list emitted project: %v\n%s", err, listed)
@@ -449,6 +465,7 @@ func writeModuleFile(t *testing.T, root, rel, contents string) string {
 }
 
 func TestScalarSpecializationModuleStability(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeModuleFile(t, root, "Dep.fango", `module Dep exposing (double)
 double value = value + value

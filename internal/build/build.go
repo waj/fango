@@ -189,7 +189,16 @@ func GoBuild(dir string) error {
 	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
 		return err
 	}
-	cmd := exec.Command("go", "build", "-o", BinaryPath(dir), ".")
+	return GoBuildPackages(dir, BinaryPath(dir), ".")
+}
+
+// GoBuildPackages runs one `go build` in dir for the given package patterns,
+// writing to dest — a file for a single package, or an existing directory
+// (named with a trailing separator) that receives one executable per package.
+// The differential test harness uses it to build every fixture in a single
+// invocation.
+func GoBuildPackages(dir, dest string, patterns ...string) error {
+	cmd := exec.Command("go", append([]string{"build", "-o", dest}, patterns...)...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOTOOLCHAIN=local")
 	out, err := cmd.CombinedOutput()

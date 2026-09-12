@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"go/format"
 	"io"
-	"os"
 
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/core"
@@ -77,8 +76,9 @@ func hasMain(p *core.Prog) bool {
 }
 
 // emitProjectManifest emits the complete multi-package Go project used by
-// build, run, --emit-go, and backend structural tests.
-func emitProjectManifest(entry string, stderr io.Writer) ([]codegen.File, []modules.ManifestEntry, bool) {
+// build, run, --emit-go, and backend structural tests. printMain makes a
+// value-typed entry print its value through the shared formatter.
+func emitProjectManifest(entry string, printMain bool, stderr io.Writer) ([]codegen.File, []modules.ManifestEntry, bool) {
 	prog, ck, manifest, loadedUnits, nativeSources, ok := compileFileGraph(entry, stderr)
 	if !ok {
 		return nil, nil, false
@@ -91,7 +91,6 @@ func emitProjectManifest(entry string, stderr io.Writer) ([]codegen.File, []modu
 	for i, unit := range loadedUnits {
 		units[i] = codegen.Unit{Name: unit.Name, Imports: unit.Imports, Entry: unit.Entry}
 	}
-	printMain := os.Getenv("FANGO_INTERNAL_PRINT_MAIN") == "1"
 	files, err := codegen.EmitProject(prog, ck.B, units, printMain)
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", err)

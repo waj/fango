@@ -13,10 +13,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/waj/fango/internal/build"
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/natives"
@@ -26,19 +28,26 @@ import (
 
 // The differential end-to-end suite (doc/design.md, "Testing and performance"): every
 // testdata/run/*.fango runs through BOTH backends — the Core interpreter
-// in-process and the compiled binary via the real CLI — and stdout is
-// diffed byte-exact against the .expected file AND between the backends.
-// Programs with a .error file instead assert a compile-error substring.
+// in-process and generated Go compiled and executed — and stdout is diffed
+// byte-exact against the .expected file AND between the backends. Programs
+// with a .error file instead assert a compile-error substring.
 //
-// Pure value programs produce no output, so the compiled leg runs under
-// FANGO_INTERNAL_PRINT_MAIN=1 and the eval leg shows main's value through
-// the same shared fangort formatter.
+// Pure value programs produce no output, so the compiled leg is emitted with
+// printMain and the eval leg shows main's value through the same shared
+// fangort formatter.
+//
+// The run fixtures' compiled legs share one Go project (fixtureBatch): each
+// entry module becomes its own package under progs/, the bundled packages
+// they all emit are written once, and a single `go build` produces every
+// binary. The examples and the multi-module fixtures instead go through the
+// real CLI, so `fango run` itself stays covered end to end.
 
 // The CLI is built once, lazily, so short mode never pays for it. The Once
 // records the failure rather than calling t.Fatal, because the goroutine that
 // wins the race belongs to an arbitrary parallel case.
 var (
 	buildOnce sync.Once
+	cliDir    string
 	fangoBin  string
 	buildErr  error
 )
@@ -51,6 +60,7 @@ func cliBinary(t *testing.T) string {
 			buildErr = err
 			return
 		}
+		cliDir = dir
 		bin := filepath.Join(dir, "fango")
 		if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 			buildErr = fmt.Errorf("building CLI: %v\n%s", err, out)
@@ -64,41 +74,260 @@ func cliBinary(t *testing.T) string {
 	return fangoBin
 }
 
-// The compiled leg is subprocess work — a `go build` of generated Go and a
-// run of the result — and each case compiles into its own FANGO_BUILD_DIR, so
-// the suite runs in parallel. The interpreter leg is the exception; see
-// interpret below.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	for _, dir := range []string{cliDir, batch.dir} {
+		if dir != "" {
+			os.RemoveAll(dir)
+		}
+	}
+	os.Exit(code)
+}
+
+// fixtureEmissions holds every runnable testdata/run fixture's emitted Go
+// project (with printMain), keyed by fixture path. Emission is pure and
+// CPU-bound, so it runs across a worker pool; the structural tests inspect
+// these files and fixtureBatch compiles them.
+type fixtureEmissions struct {
+	paths []string
+	files map[string][]codegen.File
+	err   error
+}
+
+var (
+	emissionsOnce sync.Once
+	emissions     fixtureEmissions
+)
+
+func runFixtureEmissions(t *testing.T) *fixtureEmissions {
+	t.Helper()
+	emissionsOnce.Do(func() { emissions = emitRunFixtures() })
+	if emissions.err != nil {
+		t.Fatal(emissions.err)
+	}
+	return &emissions
+}
+
+func emitRunFixtures() fixtureEmissions {
+	matches, err := filepath.Glob(filepath.Join("..", "..", "testdata", "run", "*.fango"))
+	if err != nil {
+		return fixtureEmissions{err: err}
+	}
+	var paths []string
+	for _, path := range matches {
+		if strings.HasPrefix(filepath.Base(path), ".") {
+			continue
+		}
+		if _, err := os.Stat(strings.TrimSuffix(path, ".fango") + ".error"); err == nil {
+			continue
+		}
+		paths = append(paths, path)
+	}
+
+	type result struct {
+		path  string
+		files []codegen.File
+		err   error
+	}
+	work := make(chan string)
+	results := make(chan result)
+	var wg sync.WaitGroup
+	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
+		wg.Go(func() {
+			for path := range work {
+				var stderr bytes.Buffer
+				files, _, ok := emitProjectManifest(path, true, &stderr)
+				if !ok {
+					results <- result{path: path, err: fmt.Errorf("%s: emit failed:\n%s", path, stderr.String())}
+					continue
+				}
+				results <- result{path: path, files: files}
+			}
+		})
+	}
+	go func() {
+		for _, path := range paths {
+			work <- path
+		}
+		close(work)
+		wg.Wait()
+		close(results)
+	}()
+	out := fixtureEmissions{paths: paths, files: make(map[string][]codegen.File, len(paths))}
+	for r := range results {
+		if r.err != nil && out.err == nil {
+			out.err = r.err
+		}
+		out.files[r.path] = r.files
+	}
+	return out
+}
+
+// fixtureBatch is the shared Go project built from fixtureEmissions: one
+// `go build` writes bin/<fixture> for every runnable fixture. Shared paths
+// emitted by more than one fixture must be byte-identical — bundled and
+// dependency packages do not depend on their consumer — and any difference
+// fails the batch.
+type fixtureBatch struct {
+	dir string
+	err error
+}
+
+var (
+	batchOnce sync.Once
+	batch     fixtureBatch
+)
+
+// prepareFixtureBatch emits and builds the batch once; concurrent callers
+// block until the first completes. TestDifferential starts it in the
+// background so the Go build overlaps the serialized interpreter legs.
+func prepareFixtureBatch() {
+	emissionsOnce.Do(func() { emissions = emitRunFixtures() })
+	if emissions.err != nil {
+		return
+	}
+	batchOnce.Do(func() { batch = buildFixtureBatch(&emissions) })
+}
+
+func runFixtureBatch(t *testing.T) *fixtureBatch {
+	t.Helper()
+	prepareFixtureBatch()
+	if emissions.err != nil {
+		t.Fatal(emissions.err)
+	}
+	if batch.err != nil {
+		t.Fatal(batch.err)
+	}
+	return &batch
+}
+
+func (b *fixtureBatch) binary(path string) string {
+	return filepath.Join(b.dir, "bin", strings.TrimSuffix(filepath.Base(path), ".fango"))
+}
+
+func buildFixtureBatch(emitted *fixtureEmissions) fixtureBatch {
+	dir, err := os.MkdirTemp("", "fango-e2e-batch")
+	if err != nil {
+		return fixtureBatch{err: err}
+	}
+	b := fixtureBatch{dir: dir}
+	owner := make(map[string]string)
+	for _, path := range emitted.paths {
+		name := strings.TrimSuffix(filepath.Base(path), ".fango")
+		for _, file := range emitted.files[path] {
+			rel := filepath.FromSlash(file.Path)
+			if file.Path == "main.go" {
+				rel = filepath.Join("progs", name, "main.go")
+			} else if first, seen := owner[file.Path]; seen {
+				existing, err := os.ReadFile(filepath.Join(dir, rel))
+				if err != nil {
+					b.err = err
+					return b
+				}
+				if !bytes.Equal(existing, file.Data) {
+					b.err = fmt.Errorf("%s emitted by %s differs from the one emitted by %s: bundled and dependency packages must not depend on their consumer", file.Path, name, first)
+					return b
+				}
+				continue
+			} else {
+				owner[file.Path] = name
+			}
+			if _, err := build.WriteIfChanged(filepath.Join(dir, rel), file.Data); err != nil {
+				b.err = err
+				return b
+			}
+		}
+	}
+	if _, err := build.Materialize(dir); err != nil {
+		b.err = err
+		return b
+	}
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		b.err = err
+		return b
+	}
+	if err := build.GoBuildPackages(dir, binDir+string(filepath.Separator), "./progs/..."); err != nil {
+		b.err = err
+	}
+	return b
+}
+
+// compiledRunner produces the compiled backend's stdout for one case.
+type compiledRunner func(t *testing.T, stdin string) string
+
+// batchRunner executes the fixture's binary from the shared batch build.
+func batchRunner(path string) compiledRunner {
+	return func(t *testing.T, stdin string) string {
+		return runCompiled(t, exec.Command(runFixtureBatch(t).binary(path)), stdin)
+	}
+}
+
+// cliRunner compiles and runs through the real CLI, in a private build dir.
+func cliRunner(path string) compiledRunner {
+	return func(t *testing.T, stdin string) string {
+		cmd := exec.Command(cliBinary(t), "run", path)
+		cmd.Env = append(os.Environ(),
+			"FANGO_INTERNAL_PRINT_MAIN=1",
+			"FANGO_BUILD_DIR="+t.TempDir())
+		return runCompiled(t, cmd, stdin)
+	}
+}
+
+func runCompiled(t *testing.T, cmd *exec.Cmd, stdin string) string {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdin = strings.NewReader(stdin)
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("%s: %v\n%s", strings.Join(cmd.Args, " "), err, stderr.String())
+	}
+	return stdout.String()
+}
+
+// The compiled legs come from the single batch build, so the cases run in
+// parallel with no per-case build work. The interpreter leg is the exception;
+// see interpret below.
 func TestDifferential(t *testing.T) {
+	t.Parallel()
 	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "run"))
+	if !testing.Short() {
+		go prepareFixtureBatch()
+	}
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			t.Parallel()
-			runDifferentialCase(t, path)
+			runDifferentialCase(t, path, batchRunner(path))
 		})
 	}
 }
 
 func TestMandelbrotExample(t *testing.T) {
 	t.Parallel()
-	runDifferentialCase(t, filepath.Join("..", "..", "examples", "mandelbrot.fango"))
+	path := filepath.Join("..", "..", "examples", "mandelbrot.fango")
+	runDifferentialCase(t, path, cliRunner(path))
 }
 
 func TestGuessingGameExample(t *testing.T) {
 	t.Parallel()
-	runDifferentialCase(t, filepath.Join("..", "..", "examples", "guess.fango"))
+	path := filepath.Join("..", "..", "examples", "guess.fango")
+	runDifferentialCase(t, path, cliRunner(path))
 }
 
 func TestWcExample(t *testing.T) {
 	t.Parallel()
-	runDifferentialCase(t, filepath.Join("..", "..", "examples", "wc.fango"))
+	path := filepath.Join("..", "..", "examples", "wc.fango")
+	runDifferentialCase(t, path, cliRunner(path))
 }
 
 func TestMarkdownExample(t *testing.T) {
 	t.Parallel()
-	runDifferentialCase(t, filepath.Join("..", "..", "examples", "markdown.fango"))
+	path := filepath.Join("..", "..", "examples", "markdown.fango")
+	runDifferentialCase(t, path, cliRunner(path))
 }
 
 func TestTodoExample(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "todo.fango")
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -123,15 +352,19 @@ func TestTodoExample(t *testing.T) {
 	}
 	interpDir := t.TempDir()
 	var interpreted bytes.Buffer
-	for _, args := range commands {
-		env := eval.NewEnv()
-		env.DefineProg(prog)
-		ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
-		ioctx.Args, ioctx.Dir = args, interpDir
-		if _, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx); err != nil {
-			t.Fatalf("interpreter %v: %v", args, err)
+	func() {
+		interpret.Lock()
+		defer interpret.Unlock()
+		for _, args := range commands {
+			env := eval.NewEnv()
+			env.DefineProg(prog)
+			ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
+			ioctx.Args, ioctx.Dir = args, interpDir
+			if _, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx); err != nil {
+				t.Fatalf("interpreter %v: %v", args, err)
+			}
 		}
-	}
+	}()
 	if interpreted.String() != string(want) {
 		t.Fatalf("interpreter output:\n%q\nwant:\n%q", interpreted.String(), want)
 	}
@@ -161,6 +394,7 @@ func TestTodoExample(t *testing.T) {
 }
 
 func TestTodoExampleFailures(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "todo.fango")
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -184,6 +418,9 @@ func TestTodoExampleFailures(t *testing.T) {
 		{"missing index", []string{"done", "1"}, "[]", 2, "No todo at index 1.\n"},
 	}
 
+	// The compiled cases run the same program, so they share one build
+	// directory and the CLI compiles it once.
+	buildDir := t.TempDir()
 	for _, tc := range cases {
 		t.Run(tc.name+"/interpreter", func(t *testing.T) {
 			dir := t.TempDir()
@@ -197,7 +434,10 @@ func TestTodoExampleFailures(t *testing.T) {
 			var output bytes.Buffer
 			ioctx := eval.NewIOContext(strings.NewReader(""), &output)
 			ioctx.Args, ioctx.Dir = tc.args, dir
-			_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
+			err := withInterpreter(func() error {
+				_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
+				return err
+			})
 			var exitErr *natives.ExitError
 			if !errors.As(err, &exitErr) || exitErr.Code != tc.wantStatus {
 				t.Fatalf("exit = %v, want status %d", err, tc.wantStatus)
@@ -220,7 +460,7 @@ func TestTodoExampleFailures(t *testing.T) {
 			args := append([]string{"run", absPath, "--"}, tc.args...)
 			cmd := exec.Command(cliBinary(t), args...)
 			var stdout, stderr bytes.Buffer
-			cmd.Env = append(os.Environ(), "FANGO_BUILD_DIR="+t.TempDir())
+			cmd.Env = append(os.Environ(), "FANGO_BUILD_DIR="+buildDir)
 			cmd.Dir, cmd.Stdout, cmd.Stderr = dir, &stdout, &stderr
 			err := cmd.Run()
 			var exitErr *exec.ExitError
@@ -235,12 +475,19 @@ func TestTodoExampleFailures(t *testing.T) {
 }
 
 // The Core interpreter runs fango programs inside this process and shares its
-// persistent native-worker host infrastructure across cases. Interpreter legs
-// therefore take turns; the compiled leg, where the time actually goes, stays
-// parallel. Handler-local Random state itself needs no serialization.
+// persistent native-worker host infrastructure across cases. Every in-process
+// evaluation in this package's parallel tests therefore holds interpret; the
+// compiled legs stay parallel. Handler-local Random state itself needs no
+// serialization.
 var interpret sync.Mutex
 
-func runDifferentialCase(t *testing.T, path string) {
+func withInterpreter(run func() error) error {
+	interpret.Lock()
+	defer interpret.Unlock()
+	return run()
+}
+
+func runDifferentialCase(t *testing.T, path string, compiled compiledRunner) {
 	t.Helper()
 	base := strings.TrimSuffix(path, ".fango")
 	if errData, err := os.ReadFile(base + ".error"); err == nil {
@@ -294,25 +541,16 @@ func runDifferentialCase(t *testing.T, path string) {
 		t.Errorf("interpreter output:\n%q\nwant:\n%q", evalOut, expected)
 	}
 
-	// Backend 2: the compiled binary, via the real CLI.
+	// Backend 2: generated Go, compiled and executed.
 	if testing.Short() {
 		t.Skip("compiled leg skipped in -short mode")
 	}
-	cmd := exec.Command(cliBinary(t), "run", path)
-	cmd.Env = append(os.Environ(),
-		"FANGO_INTERNAL_PRINT_MAIN=1",
-		"FANGO_BUILD_DIR="+t.TempDir())
-	var stdout, runErr bytes.Buffer
-	cmd.Stdin = strings.NewReader(stdin)
-	cmd.Stdout, cmd.Stderr = &stdout, &runErr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("fango run: %v\n%s", err, runErr.String())
+	compiledOut := compiled(t, stdin)
+	if compiledOut != expected {
+		t.Errorf("compiled output:\n%q\nwant:\n%q", compiledOut, expected)
 	}
-	if stdout.String() != expected {
-		t.Errorf("compiled output:\n%q\nwant:\n%q", stdout.String(), expected)
-	}
-	if stdout.String() != evalOut {
-		t.Errorf("backends disagree: compiled %q vs interpreted %q", stdout.String(), evalOut)
+	if compiledOut != evalOut {
+		t.Errorf("backends disagree: compiled %q vs interpreted %q", compiledOut, evalOut)
 	}
 }
 
@@ -329,7 +567,7 @@ func runErrorCase(t *testing.T, path, wantSubstr string) {
 func emittedProject(t *testing.T, path string) []codegen.File {
 	t.Helper()
 	var stderr bytes.Buffer
-	files, _, ok := emitProjectManifest(path, &stderr)
+	files, _, ok := emitProjectManifest(path, false, &stderr)
 	if !ok {
 		t.Fatalf("emit failed:\n%s", stderr.String())
 	}
@@ -351,6 +589,7 @@ func generatedFile(t *testing.T, files []codegen.File, path string) []byte {
 // the output is gofmt-idempotent (emitted via go/format.Node). Covers a
 // value program, a printing (Unit main) program, and an IIFE-if program.
 func TestEmitDeterministicAndFormatted(t *testing.T) {
+	t.Parallel()
 	// poly_map_filter_foldr covers generic emission — instantiation
 	// plumbing is where nondeterminism would first appear (risk #1).
 	// list_literals and stdlib_list cover the bundled List's runtime
@@ -379,6 +618,7 @@ func TestEmitDeterministicAndFormatted(t *testing.T) {
 }
 
 func TestProjectEmitDeterministicAndFormatted(t *testing.T) {
+	t.Parallel()
 	paths := []string{
 		filepath.Join("..", "..", "testdata", "run", "poly_eq_nested.fango"),
 		// Compile-time evaluation is pure, bounded, and native-restricted, so
@@ -390,11 +630,11 @@ func TestProjectEmitDeterministicAndFormatted(t *testing.T) {
 	for _, path := range paths {
 		t.Run(filepath.Base(filepath.Dir(path))+"/"+filepath.Base(path), func(t *testing.T) {
 			var stderr bytes.Buffer
-			a, _, ok := emitProjectManifest(path, &stderr)
+			a, _, ok := emitProjectManifest(path, false, &stderr)
 			if !ok {
 				t.Fatalf("first emit failed:\n%s", stderr.String())
 			}
-			b, _, ok := emitProjectManifest(path, &stderr)
+			b, _, ok := emitProjectManifest(path, false, &stderr)
 			if !ok || len(a) != len(b) {
 				t.Fatalf("second emit failed or changed file count: %s", stderr.String())
 			}
@@ -415,6 +655,7 @@ func TestProjectEmitDeterministicAndFormatted(t *testing.T) {
 }
 
 func TestProjectMaterializesBundledNativeSidecars(t *testing.T) {
+	t.Parallel()
 	jsonPath := filepath.Join("..", "..", "testdata", "run", "json_encode.fango")
 	files := emittedProject(t, jsonPath)
 	again := emittedProject(t, jsonPath)
@@ -445,13 +686,12 @@ func TestProjectMaterializesBundledNativeSidecars(t *testing.T) {
 }
 
 func TestGeneratedGoHasNoContinuationRuntime(t *testing.T) {
-	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "run"))
-	for _, path := range files {
-		if _, err := os.Stat(strings.TrimSuffix(path, ".fango") + ".error"); err == nil {
-			continue
-		}
+	t.Parallel()
+	emitted := runFixtureEmissions(t)
+	for _, path := range emitted.paths {
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			for _, generated := range emittedProject(t, path) {
+			t.Parallel()
+			for _, generated := range emitted.files[path] {
 				// Native sidecars are library-authored Go, not compiler-emitted
 				// control flow; panics are explicitly allowed to cross their ABI.
 				if strings.HasPrefix(generated.Path, "native/") {
@@ -499,6 +739,7 @@ func TestGeneratedGoHasNoContinuationRuntime(t *testing.T) {
 // capture-excluded worker keeps the self call and gains no ForStmt. Codegen
 // emits ForStmts nowhere else, so the signal is unambiguous.
 func TestTailLoopGeneratedShape(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		fixture, fn string
 		loop        bool
@@ -548,6 +789,7 @@ func TestTailLoopGeneratedShape(t *testing.T) {
 }
 
 func TestGeneratedGoUsesImplicitConcreteUnitABI(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"explicit_unit_calls.fango", "effect_handler.fango"} {
 		path := filepath.Join("..", "..", "testdata", "run", name)
 		src := generatedFile(t, emittedProject(t, path), "main.go")
@@ -575,6 +817,7 @@ func TestGeneratedGoUsesImplicitConcreteUnitABI(t *testing.T) {
 }
 
 func TestGeneratedGoMaterializesNativeUnitOnlyInValueContext(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "mandelbrot.fango")
 	src := string(generatedFile(t, emittedProject(t, path), "main.go"))
 	if strings.Contains(src, "n_IO.Write(\" \")\n\t\t\treturn fangort.UnitValue") {
@@ -591,6 +834,7 @@ func TestGeneratedGoMaterializesNativeUnitOnlyInValueContext(t *testing.T) {
 // recognition is by identity, so the negative case is the one that proves the
 // mechanism is not matching on a spelling (doc/roadmap-list.md).
 func TestBundledListUsesRuntimeRepresentationAndLocalListDoesNot(t *testing.T) {
+	t.Parallel()
 	listModule := filepath.Join("modules", "List", "module.go")
 
 	bundled := emittedProject(t, filepath.Join("..", "..", "testdata", "run", "list_literals.fango"))
@@ -622,6 +866,7 @@ func TestBundledListUsesRuntimeRepresentationAndLocalListDoesNot(t *testing.T) {
 }
 
 func TestCsvExample(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "csv.fango")
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -654,7 +899,11 @@ func TestCsvExample(t *testing.T) {
 	var interpreted bytes.Buffer
 	ioctx := eval.NewIOContext(strings.NewReader(""), &interpreted)
 	ioctx.Args, ioctx.Dir = []string{"expenses.csv"}, seed(t)
-	if _, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx); err != nil {
+	err = withInterpreter(func() error {
+		_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("interpreter: %v", err)
 	}
 	if interpreted.String() != string(want) {
@@ -680,6 +929,7 @@ func TestCsvExample(t *testing.T) {
 }
 
 func TestCsvExampleFailures(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "csv.fango")
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -701,6 +951,7 @@ func TestCsvExampleFailures(t *testing.T) {
 		{"missing file", []string{"nope.csv"}, 1, "cannot read nope.csv\n"},
 	}
 
+	buildDir := t.TempDir()
 	for _, tc := range cases {
 		t.Run(tc.name+"/interpreter", func(t *testing.T) {
 			env := eval.NewEnv()
@@ -708,7 +959,10 @@ func TestCsvExampleFailures(t *testing.T) {
 			var output bytes.Buffer
 			ioctx := eval.NewIOContext(strings.NewReader(""), &output)
 			ioctx.Args, ioctx.Dir = tc.args, t.TempDir()
-			_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
+			err := withInterpreter(func() error {
+				_, err := eval.ForceIO(context.Background(), prog.Entry, env, ioctx)
+				return err
+			})
 			var exitErr *natives.ExitError
 			if !errors.As(err, &exitErr) || exitErr.Code != tc.wantStatus {
 				t.Fatalf("exit = %v, want status %d", err, tc.wantStatus)
@@ -725,7 +979,7 @@ func TestCsvExampleFailures(t *testing.T) {
 			args := append([]string{"run", absPath, "--"}, tc.args...)
 			cmd := exec.Command(cliBinary(t), args...)
 			var stdout, stderr bytes.Buffer
-			cmd.Env = append(os.Environ(), "FANGO_BUILD_DIR="+t.TempDir())
+			cmd.Env = append(os.Environ(), "FANGO_BUILD_DIR="+buildDir)
 			cmd.Dir, cmd.Stdout, cmd.Stderr = t.TempDir(), &stdout, &stderr
 			err := cmd.Run()
 			var exitErr *exec.ExitError

@@ -53,7 +53,8 @@ func usage(w io.Writer) {
 // compileToDir runs the pipeline for entry and leaves a ready-to-build main.go
 // in the build directory, reporting whether any input changed.
 func compileToDir(entry, dir string, stderr io.Writer) (changed bool, ok bool) {
-	files, manifest, ok := emitProjectManifest(entry, stderr)
+	printMain := os.Getenv("FANGO_INTERNAL_PRINT_MAIN") == "1"
+	files, manifest, ok := emitProjectManifest(entry, printMain, stderr)
 	if !ok {
 		return false, false
 	}

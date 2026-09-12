@@ -999,9 +999,16 @@ test-only environment.
 Generated Go is checked for deterministic, gofmt-idempotent output. The Core
 linter runs in every batch compilation.
 
-The differential cases run in parallel, since each compiles into its own
-build directory and the compiled leg is subprocess work. Their interpreter
-legs are serialized because native workers and host contexts are process-level
+The runnable fixtures' compiled legs share one generated Go project: each
+fixture's entry module is emitted as its own package, the bundled and
+dependency packages they emit are written once and asserted byte-identical
+across fixtures (a package's generated code must not depend on its consumer),
+and a single Go build produces every fixture binary. The build starts in the
+background so it overlaps the interpreter legs, and the cases then run in
+parallel with no per-case build work. The examples and the multi-module
+fixtures instead compile through the real CLI, each in a private build
+directory, so `fango run` itself stays covered end to end. Interpreter legs
+are serialized because native workers and host contexts are process-level
 test infrastructure. Handler-local State, Writer, and seeded Random
 activations themselves do not share mutable process state.
 
