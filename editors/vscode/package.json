@@ -1,15 +1,20 @@
 {
   "name": "fango-lang",
   "displayName": "Fango",
-  "description": "Syntax highlighting for the Fango programming language",
-  "version": "0.1.0",
+  "description": "Syntax highlighting and formatting for the Fango programming language",
+  "version": "0.2.0",
   "publisher": "fango",
   "license": "MIT",
   "engines": {
     "vscode": "^1.75.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Formatters"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:fango"
   ],
   "contributes": {
     "languages": [
@@ -31,6 +36,22 @@
         "scopeName": "source.fango",
         "path": "./syntaxes/fango.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Fango",
+      "properties": {
+        "fango.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the fango executable. When empty, a fango built at the workspace root is used if present, otherwise fango from PATH."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[fango]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "fango.fango-lang"
+      }
+    }
   }
 }

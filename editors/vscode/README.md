@@ -1,6 +1,7 @@
 # Fango for VS Code
 
-Syntax highlighting for the [Fango](../../README.md) programming language (`.fango` files).
+Syntax highlighting and formatting for the [Fango](../../README.md) programming
+language (`.fango` files).
 
 ## What's covered
 
@@ -13,6 +14,33 @@ Syntax highlighting for the [Fango](../../README.md) programming language (`.fan
 - `native "…"` bodies with `$1`-style placeholders highlighted
 - Type annotations, effect rows (`->{IO}`, `{Fail String | e}`), ADT declarations, list expressions and patterns (`[one, two | rest]`), qualified names (`List.range`), numeric literals, operator and fixity declarations (`(<+>) a b = …`, `infixl 6 (<+>)`), and user-declared operators
 - Editing affordances: comment toggling, bracket matching/auto-closing, indent heuristics
+- Formatting, by running `fango fmt` over the buffer
+
+## Formatting
+
+The extension registers a formatter for `.fango` files and turns on
+`editor.formatOnSave` for them, so saving formats. Both are ordinary settings:
+format manually with `Format Document` instead, or turn the default off with
+
+```json
+"[fango]": { "editor.formatOnSave": false }
+```
+
+It runs the `fango` executable, resolved in this order:
+
+1. the `fango.path` setting, when set;
+2. a `fango` built at the workspace root, so working on the compiler formats
+   with the compiler you just built (`make build` produces it);
+3. `fango` on `PATH`.
+
+A buffer that does not parse is left exactly as it is — `fango fmt` declines
+rather than guessing, which is what you want while a file is mid-edit — and the
+reason goes to the `Fango` output channel rather than interrupting the save. A
+missing executable is reported the same way.
+
+The extension has no dependencies and no build step: `vscode` is supplied by the
+host and everything else is a Node builtin, so the directory is loadable as it
+stands.
 
 ## Install (local)
 

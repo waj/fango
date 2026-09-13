@@ -135,11 +135,12 @@ contradicted.
 No VS Code language client at first. Helix, Neovim, and Zed attach to an
 arbitrary server binary with a few lines of declarative configuration and no
 build step, so documenting those is enough to get the server real use while
-its surface is still changing. The VS Code extension is grammar-only today,
-with no build step at all; adding a client means a TypeScript toolchain, a
-lockfile, and a bundler, and should wait until the server has earned it. The
-TextMate grammar stays either way — it is the pre-server-start fallback and
-coexists with semantic tokens.
+its surface is still changing. The VS Code extension carries a formatting client
+already, but that is a few dozen lines of plain JavaScript against Node
+builtins and the `vscode` module the host supplies. A language client is a
+different proposition — a TypeScript toolchain, a lockfile, and a bundler — and
+should wait until the server has earned it. The TextMate grammar stays either
+way: it is the pre-server-start fallback and coexists with semantic tokens.
 
 Capturing comments changes lexer internals but not comment syntax, so the
 grammar needs no change for the formatter. The lockstep rule is satisfied by

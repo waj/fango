@@ -93,6 +93,11 @@ A file that does not lex or parse is left untouched and its diagnostics are
 reported, because a failed declaration is dropped during recovery and formatting
 would lose it.
 
+The VS Code extension in `editors/vscode/` registers `fmt` as the formatter for
+`.fango` files and enables format-on-save for them, both as ordinary settings
+the user can override. It runs the executable named by `fango.path`, or one
+built at the workspace root, or `fango` from `PATH`.
+
 `build --emit-go` writes a complete Go project instead of an executable. For
 `Main.fango`, its default destination is the `Main.out` directory in the
 current working directory; `-o DIR` selects another directory. The project has
