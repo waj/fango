@@ -11,16 +11,16 @@ listValue =
 
 tupleValue =
     ( first
-        , second, third
-        )
+    , second, third
+    )
 
 nested =
     [ [ first
-    , second
-    ]
+      , second
+      ]
     , ( third
-        , fourth
-        )
+      , fourth
+      )
     ]
 
 casePattern value =
@@ -33,12 +33,12 @@ casePattern value =
 
 destructure subject =
     ( first
-        , second
-        ) = subject
+    , second
+    ) = subject
     first
 
 pair ( first
-    , second
-    ) = first
+     , second
+     ) = first
 
 run = 1

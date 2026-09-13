@@ -1272,7 +1272,7 @@ func (p *parser) parseTypeAtom() ast.TypeExpr {
 		if inner == nil {
 			return nil
 		}
-		if p.peekInExpr().Kind == token.COMMA {
+		if p.peek().Kind == token.COMMA {
 			return p.parseTupleTypeRest(t, inner)
 		}
 		if !p.expect(token.RPAREN, "I was expecting a closing `)` in this type.") {
@@ -1746,7 +1746,7 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 		if pat == nil {
 			return nil
 		}
-		if p.peekInExpr().Kind == token.COMMA {
+		if p.peek().Kind == token.COMMA {
 			return p.parseTuplePatternRest(lp, pat)
 		}
 		if !p.expect(token.RPAREN, "I was expecting a closing `)` in this pattern.") {
@@ -2061,7 +2061,7 @@ func (p *parser) parseAtom() ast.Expr {
 		if e == nil {
 			return nil
 		}
-		if p.peekInExpr().Kind == token.COMMA {
+		if p.peek().Kind == token.COMMA {
 			return p.parseTupleExprRest(lp, e)
 		}
 		if inner := p.peekInExpr(); inner.Kind == token.RPAREN {
@@ -2267,6 +2267,24 @@ func (p *parser) expect(k token.Kind, msg string) bool {
 	return false
 }
 
+// expectRaw accepts punctuation belonging to an already-open delimited form
+// even at the surrounding layout column. A comma or a closing parenthesis
+// cannot start a declaration, statement, or branch, so this does not weaken
+// ordinary offside boundaries.
+func (p *parser) expectRaw(k token.Kind, msg string) bool {
+	if t := p.peek(); t.Kind == k {
+		p.next()
+		return true
+	}
+	if p.peek().Kind == token.EOF {
+		p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
+			"I got to the end of the input too soon. "+msg)
+	} else {
+		p.errorAt(p.peek().Span, "SYNTAX PROBLEM", msg)
+	}
+	return false
+}
+
 // recoverToTopLevel skips to the next token at column 1 (or EOF) so one
 // syntax error does not cascade through the rest of the file. consumeFirst
 // forces one token of progress — required when the offending token itself
@@ -2330,7 +2348,7 @@ func (p *parser) tupleArityError(sp source.Span, n int) {
 // comma that proves it is one.
 func (p *parser) parseTupleTypeRest(open token.Token, first ast.TypeExpr) ast.TypeExpr {
 	args := []ast.TypeExpr{first}
-	for p.peekInExpr().Kind == token.COMMA {
+	for p.peek().Kind == token.COMMA {
 		p.next()
 		next := p.parseTypeExpr()
 		if next == nil {
@@ -2338,7 +2356,7 @@ func (p *parser) parseTupleTypeRest(open token.Token, first ast.TypeExpr) ast.Ty
 		}
 		args = append(args, next)
 	}
-	if !p.expect(token.RPAREN, "I was expecting a closing `)` in this tuple type.") {
+	if !p.expectRaw(token.RPAREN, "I was expecting a closing `)` in this tuple type.") {
 		return nil
 	}
 	sp := open.Span.Merge(p.prevSpan())
@@ -2355,7 +2373,7 @@ func (p *parser) parseTupleTypeRest(open token.Token, first ast.TypeExpr) ast.Ty
 // Elements evaluate left to right, which is ordinary constructor application.
 func (p *parser) parseTupleExprRest(open token.Token, first ast.Expr) ast.Expr {
 	args := []ast.Expr{first}
-	for p.peekInExpr().Kind == token.COMMA {
+	for p.peek().Kind == token.COMMA {
 		p.next()
 		next := p.parseExpr()
 		if next == nil {
@@ -2363,7 +2381,7 @@ func (p *parser) parseTupleExprRest(open token.Token, first ast.Expr) ast.Expr {
 		}
 		args = append(args, next)
 	}
-	if !p.expect(token.RPAREN, "I was expecting a closing `)` in this tuple.") {
+	if !p.expectRaw(token.RPAREN, "I was expecting a closing `)` in this tuple.") {
 		return nil
 	}
 	sp := open.Span.Merge(p.prevSpan())
@@ -2383,7 +2401,7 @@ func (p *parser) parseTupleExprRest(open token.Token, first ast.Expr) ast.Expr {
 // parseTuplePatternRest continues a tuple pattern after its first element.
 func (p *parser) parseTuplePatternRest(open token.Token, first ast.Pattern) ast.Pattern {
 	args := []ast.Pattern{first}
-	for p.peekInExpr().Kind == token.COMMA {
+	for p.peek().Kind == token.COMMA {
 		p.next()
 		next := p.parsePattern()
 		if next == nil {
@@ -2391,7 +2409,7 @@ func (p *parser) parseTuplePatternRest(open token.Token, first ast.Pattern) ast.
 		}
 		args = append(args, next)
 	}
-	if !p.expect(token.RPAREN, "I was expecting a closing `)` in this tuple pattern.") {
+	if !p.expectRaw(token.RPAREN, "I was expecting a closing `)` in this tuple pattern.") {
 		return nil
 	}
 	sp := open.Span.Merge(p.prevSpan())

@@ -63,6 +63,24 @@ func TestParseExprInput(t *testing.T) {
 	}
 }
 
+// Delimiters inside an open tuple are punctuation, not sibling layout items.
+// In particular they may align with the tuple opener when that opener begins
+// a block expression or a case-branch pattern.
+func TestDelimiterAlignedTuplesAtLayoutAnchor(t *testing.T) {
+	src := "value =\n    ( first\n    , second\n    )\n\n" +
+		"match value =\n    case value of\n        ( first\n        , second\n        ) -> first\n\n" +
+		"typed :\n    ( Int\n    , String\n    ) -> ()\ntyped value = ()\n"
+	f := source.NewFile("<test>", []byte(src))
+	toks, lexErrs := lexer.Lex(f)
+	if len(lexErrs) > 0 {
+		t.Fatal(lexErrs)
+	}
+	_, errs := Parse(toks, f)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+}
+
 func TestWithRemainsAnOrdinaryIdentifier(t *testing.T) {
 	f := source.NewFile("<repl>", []byte("with 1"))
 	toks, lexErrs := lexer.Lex(f)

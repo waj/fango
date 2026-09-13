@@ -120,14 +120,13 @@ func (p *printer) renderPatternList(elems []ast.Pattern, tail ast.Pattern, ind i
 }
 
 func (p *printer) renderPatternTuple(elems []ast.Pattern, ind int) bool {
-	base := p.lineIndent(ind)
-	rowInd := base + Indent
+	base := p.column()
 	p.emit("( ")
 	prevEnd := elems[0].Span().Start
 	for i, elem := range elems {
 		if i > 0 {
 			if brokeBetween(elem.Span().File, prevEnd, elem.Span().Start) {
-				p.start(rowInd)
+				p.start(base)
 			}
 			p.emit(", ")
 		}
@@ -136,7 +135,7 @@ func (p *printer) renderPatternTuple(elems []ast.Pattern, ind int) bool {
 		}
 		prevEnd = elem.Span().End
 	}
-	p.start(rowInd)
+	p.start(base)
 	p.emit(")")
 	return true
 }

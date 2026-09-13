@@ -1075,9 +1075,12 @@ The layout constructs are the ones whose meaning is carried by columns, and a
 renderer that hands each child an indent deeper than its own is what keeps the
 output parsing as the input did: a block's statements align, a `case` or
 `handle` aligns its branches, and an `if` anchors its `then` and `else` at its
-own column. A declaration printer that discovers halfway through that it cannot
-reproduce what the author wrote rolls its output back, so the verbatim copy
-that follows starts from a clean buffer.
+own column. Delimited composites are the exception: their comma, pipe, and
+closing-delimiter tokens align with the opening delimiter, and the parser admits
+that punctuation at an enclosing layout anchor because it cannot begin a
+sibling construct. A declaration printer that discovers halfway through that it
+cannot reproduce what the author wrote rolls its output back, so the verbatim
+copy that follows starts from a clean buffer.
 
 Sorting import lines and exposed names is the one exception, and it forces two
 consequences. A comment directly above an import has to travel with it, so the

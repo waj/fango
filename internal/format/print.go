@@ -457,3 +457,13 @@ func (p *printer) lineIndent(fallback int) int {
 	}
 	return fallback
 }
+
+// column is the zero-based byte column at the current write cursor. Source
+// positions use byte columns too, so a delimiter block can align its later
+// punctuation exactly with the opening delimiter.
+func (p *printer) column() int {
+	if !p.open {
+		return 0
+	}
+	return p.ind + len(p.cur)
+}

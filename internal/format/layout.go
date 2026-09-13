@@ -465,7 +465,7 @@ func (p *printer) renderList(elems []ast.Expr, tail ast.Expr, ind int) bool {
 		p.emit("[]")
 		return true
 	}
-	base := p.lineIndent(ind)
+	base := p.column()
 	p.emit("[ ")
 	prevEnd := elems[0].Span().Start
 	for i, elem := range elems {
@@ -498,14 +498,13 @@ func (p *printer) renderList(elems []ast.Expr, tail ast.Expr, ind int) bool {
 
 // renderTuple is renderList without its optional tail and square brackets.
 func (p *printer) renderTuple(elems []ast.Expr, ind int) bool {
-	base := p.lineIndent(ind)
-	rowInd := base + Indent
+	base := p.column()
 	p.emit("( ")
 	prevEnd := elems[0].Span().Start
 	for i, elem := range elems {
 		if i > 0 {
 			if brokeBetween(elem.Span().File, prevEnd, elem.Span().Start) {
-				p.start(rowInd)
+				p.start(base)
 			}
 			p.emit(", ")
 		}
@@ -514,7 +513,7 @@ func (p *printer) renderTuple(elems []ast.Expr, ind int) bool {
 		}
 		prevEnd = elem.Span().End
 	}
-	p.start(rowInd)
+	p.start(base)
 	p.emit(")")
 	return true
 }

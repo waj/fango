@@ -79,9 +79,9 @@ instead of staircasing rightward. An `exposing` list the author moved below
 its keyword is printed in the leading-comma block form.
 
 A bracket list or tuple written across lines uses that same leading-separator
-style. Its elements remain grouped on the source lines the author chose, while
-spacing and indentation are normalized; nested lists and tuples behave the
-same way, in expressions and patterns:
+style. Its separators and closing delimiter align with its opening delimiter;
+elements remain grouped on the source lines the author chose. Nested lists and
+tuples align independently, in expressions and patterns:
 
 ```fango
 values =
@@ -91,8 +91,8 @@ values =
 
 pair =
     ( first
-        , second
-        )
+    , second
+    )
 ```
 
 Import lines are sorted by module name and exposed names are sorted by kind —
