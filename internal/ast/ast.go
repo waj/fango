@@ -521,7 +521,17 @@ func (e *Block) Span() source.Span {
 	if len(e.Items) > 0 && e.Items[0].Expr != nil {
 		return e.Items[0].Expr.Span().Merge(e.Result.Span())
 	}
-	return e.Binds[0].NameSpan.Merge(e.Result.Span())
+	return e.Binds[0].start().Merge(e.Result.Span())
+}
+
+// start is where a local binding begins. A destructuring binding has no name,
+// so its NameSpan is the zero span — merging from that would put the enclosing
+// block's span at offset zero with no file attached.
+func (b LocalBind) start() source.Span {
+	if b.Pattern != nil {
+		return b.Pattern.Span()
+	}
+	return b.NameSpan
 }
 func (e *Lambda) Span() source.Span { return e.Sp.Merge(e.Body.Span()) }
 func (e *Case) Span() source.Span {

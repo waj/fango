@@ -97,12 +97,17 @@ func exprInline(e ast.Expr) (string, bool) {
 func atomic(e ast.Expr) bool {
 	switch e := e.(type) {
 	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.CharLit, *ast.UnitLit,
-		*ast.Var, *ast.RecordGet, *ast.RecordUpdate, *ast.Splice:
+		*ast.Var, *ast.RecordGet, *ast.Splice:
 		return true
 	case *ast.RecordLit:
-		// `{ x = 1 }` brackets itself, but `Named { x = 1 }` is two tokens and
-		// keeps the parentheses its author wrote around it.
+		// `{ x = 1 }` brackets itself; `Named { x = 1 }` is two tokens and is
+		// parenthesized in argument position, the way a named record pattern
+		// is, so the two sides of the language agree.
 		return e.Name == ""
+	case *ast.RecordUpdate:
+		// Brackets itself, but see recordAfter: a brace directly after an
+		// uppercase name binds to that name instead.
+		return true
 	case *ast.Ctor:
 		return true
 	case *ast.Resume:
@@ -199,7 +204,7 @@ func appInline(e *ast.App) (string, bool) {
 		if !argOK {
 			return "", false
 		}
-		parts = append(parts, s)
+		parts = append(parts, recordAfter(parts[len(parts)-1], s))
 	}
 	return strings.Join(parts, " "), true
 }
@@ -329,4 +334,42 @@ func tupleInline(elems []ast.Expr) (string, bool) {
 		parts[i] = s
 	}
 	return "(" + strings.Join(parts, ", ") + ")", true
+}
+
+// recordAfter wraps a record literal or update in parentheses when it would
+// follow an uppercase name, because a brace there opens a *named* record:
+// `Just { x = 1 }` is a literal of nominal type Just rather than Just applied
+// to a record, and the update form does not parse in that position at all.
+// After anything else — a lowercase name, a closing bracket, an operator — the
+// braces delimit the record on their own and the parentheses are noise.
+func recordAfter(prev, s string) string {
+	if !strings.HasPrefix(s, "{") {
+		return s
+	}
+	if !endsWithUpperName(prev) {
+		return s
+	}
+	return "(" + s + ")"
+}
+
+// endsWithUpperName reports whether text ends in an identifier whose last
+// segment starts with an uppercase letter, which is what a brace binds to.
+func endsWithUpperName(text string) bool {
+	i := len(text)
+	for i > 0 && isNameByte(text[i-1]) {
+		i--
+	}
+	if i == len(text) {
+		return false
+	}
+	name := text[i:]
+	if dot := strings.LastIndexByte(name, '.'); dot >= 0 {
+		name = name[dot+1:]
+	}
+	return name != "" && name[0] >= 'A' && name[0] <= 'Z'
+}
+
+func isNameByte(b byte) bool {
+	return b == '_' || b == '.' ||
+		(b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }

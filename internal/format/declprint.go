@@ -10,14 +10,9 @@ import (
 )
 
 // printDecl renders one declaration, reporting whether it did. A declaration
-// it does not yet know how to print is copied verbatim by the caller, and so
-// is one holding a comment: a comment inside a declaration has no anchor until
-// the printer learns to place it, and copying is what keeps it from being
-// moved or lost in the meantime.
-func (p *printer) printDecl(d ast.Decl, sp source.Span, hasComment bool) bool {
-	if hasComment {
-		return false
-	}
+// it does not know how to print is copied verbatim by the caller, and so is one
+// whose comments it could not all place.
+func (p *printer) printDecl(d ast.Decl, sp source.Span) bool {
 	switch d := d.(type) {
 	case *ast.FixityDecl:
 		p.line(0, fixityText(d))

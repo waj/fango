@@ -160,16 +160,30 @@ func TestLayoutIsRenderedNotCopied(t *testing.T) {
 	}
 }
 
-// A declaration holding a comment is copied verbatim, which is what keeps the
-// comment from moving before the printer can anchor it.
-func TestDeclarationWithCommentIsCopiedVerbatim(t *testing.T) {
+// A comment with an anchor is placed, and the declaration around it is
+// normalized like any other.
+func TestAnchoredCommentIsPlaced(t *testing.T) {
 	src := "module M exposing (f)\n\nimport Basics exposing (..)\n\n" +
-		"f   x =\n    -- why\n    x\n"
+		"f   x =\n        -- why\n    x\n"
 	out, errs := Source(source.NewFile("m.fango", []byte(src)))
 	if len(errs) > 0 {
 		t.Fatalf("%s: %s", errs[0].Title, errs[0].Body)
 	}
-	if !strings.HasSuffix(string(out), "f   x =\n    -- why\n    x\n") {
-		t.Errorf("declaration with a comment was not copied verbatim:\n%s", out)
+	if !strings.HasSuffix(string(out), "f x =\n    -- why\n    x\n") {
+		t.Errorf("anchored comment was not placed:\n%s", out)
+	}
+}
+
+// A comment with no anchor — here between an operator and its operand — sends
+// the declaration to a verbatim copy, so the comment cannot be moved or lost.
+func TestUnanchorableCommentCopiesDeclaration(t *testing.T) {
+	body := "f   x =\n    x + -- why\n        1\n"
+	src := "module M exposing (f)\n\nimport Basics exposing (..)\n\n" + body
+	out, errs := Source(source.NewFile("m.fango", []byte(src)))
+	if len(errs) > 0 {
+		t.Fatalf("%s: %s", errs[0].Title, errs[0].Body)
+	}
+	if !strings.HasSuffix(string(out), body) {
+		t.Errorf("declaration with an unanchorable comment was not copied:\n%s", out)
 	}
 }

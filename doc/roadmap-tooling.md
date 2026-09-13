@@ -17,31 +17,30 @@ below.
 
 ## Formatter
 
-The declaration, expression, pattern, type and layout grammars are all
-formatted. A declaration is copied verbatim from its source extent when it is
-an instance or deriver, when it holds a comment, or when it contains a break
-the printer cannot reproduce. Each stage below shrinks that copied region, and
-the verbatim fallback keeps the output correct in the meantime.
+Every declaration in the bundled standard library and the examples now prints
+structurally, comments included, and the corpus round-trips through the
+formatter unchanged. A declaration is still copied verbatim when it holds a
+comment with no anchor, or when some part of it has a line structure the
+printer does not reproduce.
 
-### Remaining stages
+### Remaining work
 
-1. **Breaks inside applications, operator runs and record literals.** These are
-   the remaining reasons a declaration is copied rather than printed. An
-   operator run keeps the glyph where the author put it, leading or trailing,
-   since the formatter cannot see fixity and the placement is not a question
-   fixity answers. A record literal broken across lines needs a spelling
-   decision of the kind the `exposing` block form already settled.
-2. **Instance and deriver declarations**, whose method bodies are ordinary
-   value declarations and so need only the head printed.
-3. **Comment reassociation** inside declarations, making the verbatim fallback
-   rare rather than routine.
-4. **A renderer-level layout assertion** mirroring the parser's layout stack,
+1. **Bracket lists and tuples broken across lines.** A list written over
+   several lines is the one composite left without a block form; it needs the
+   same spelling decision the `exposing` and record block forms already
+   settled.
+2. **More comment anchors.** A comment reaching no anchor through whitespace
+   alone sends its declaration to a verbatim copy, which is correct but coarse.
+   Anchors inside an application's argument list and an operator run would
+   narrow it further. There will always be positions with no sensible anchor,
+   so the fallback stays.
+3. **A renderer-level layout assertion** mirroring the parser's layout stack,
    refusing to emit a line at or left of the innermost layout column. The
    self-check already catches the damage after the fact; this would catch it at
-   its source, and name the construct responsible.
+   its source and name the construct responsible.
 
-Each stage ends with a reformat of the bundled standard library and the
-examples, which the `ci` gate then holds.
+Each piece ends with a reformat of the standard library and the examples, which
+the `ci` gate then holds.
 
 ### Traps worth remembering
 
@@ -56,11 +55,13 @@ examples, which the `ci` gate then holds.
   than from spans.
 - Blocks carry two AST shapes, a legacy binding list and an ordered item list,
   and both must print the same way.
+- A destructuring binding has no name, so its `NameSpan` is the zero span. A
+  block deriving its own span from that reported offset zero with no file
+  attached, which read as "written on one line" and sent every such declaration
+  to a verbatim copy.
 
 ### Open decisions
 
-- Comment attachment rules: which anchor a comment binds to when it sits
-  between two constructs, and whether a blank line before it changes that.
 - The remaining style rules: spacing inside brackets and records, and whether
   equation groups align anything.
 - Whether the author's blank lines below the imports need any rule beyond

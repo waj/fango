@@ -998,11 +998,14 @@ it still rejects every structural change except the reordering the formatter is
 meant to perform, and comments are compared as a multiset for the same reason;
 that the ordering itself is right is held by fixtures.
 
-Two properties keep it safe. Anything the printer does not yet render
-structurally is copied verbatim from its source extent, so no comment can be
-moved or lost before the printer learns to place it — which is also how a
-declaration holding a comment in a position with no anchor will keep being
-handled. And the formatter re-lexes and re-parses its own output and compares
+Two properties keep it safe. Anything the printer cannot render structurally is
+copied verbatim from its source extent. Comments are placed at anchors — above
+a statement, a branch, a handler clause or a body, or trailing the line they
+were written on — and a comment that reaches no anchor through whitespace alone
+sits inside a construct that has none, so the whole declaration is copied
+instead. A declaration is therefore counted as printed only when every comment
+inside it was placed as well, which is what makes "no comment moves" a property
+rather than a hope. And the formatter re-lexes and re-parses its own output and compares
 span-free trees and comment text before returning, falling back to the original
 bytes on any mismatch: indentation carries meaning here, so a printing bug
 would otherwise change a program rather than merely misformat it. A file that

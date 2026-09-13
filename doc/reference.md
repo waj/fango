@@ -56,10 +56,11 @@ writes to standard output; with paths it writes each formatted file to standard
 output, `-w` rewrites the files in place, and `-l` lists the files that would
 change and exits 1, which is how the repository gates its own sources. It
 normalizes spacing, indentation, the `(op)` spelling of an operator name, and
-runs of blank lines. Instance and deriver declarations are preserved as
-written, as is any declaration holding a comment and any construct whose line
-structure the printer cannot reproduce — a break inside an application, an
-operator run, or a record literal.
+runs of blank lines. A declaration is preserved exactly as written when it
+holds a comment the formatter cannot anchor — one between an operator and its
+operand, say, rather than above a statement or a branch — or when some part of
+it has a line structure the printer cannot reproduce, such as a bracket list
+broken across lines.
 
 Redundant parentheses are dropped, because the syntax tree does not record
 them. Grouping is not: an operator run is printed flat in the order it was
@@ -84,6 +85,10 @@ broken `exposing` list starts a line per kind and wraps to stay readable, which
 is the one place the formatter consults a width: sorting has already discarded
 the author's line structure there, so there is no break left to preserve. A
 list written inline is left inline however long it is.
+A comment above a statement, a branch, a handler clause or a declaration body
+keeps its place, and one written at the end of a line stays at the end of that
+line.
+
 A file that does not lex or parse is left untouched and its diagnostics are
 reported, because a failed declaration is dropped during recovery and formatting
 would lose it.

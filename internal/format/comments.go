@@ -113,3 +113,82 @@ func (c *commentCursor) holdsComment(sp source.Span) bool {
 	}
 	return false
 }
+
+// placeBefore emits the comments that precede offset, reporting whether every
+// one of them could be placed.
+//
+// A comment is placeable when nothing but whitespace separates it from the
+// construct it precedes, so it is genuinely that construct's comment, or when
+// it trails code already written on the current line. Anything else sits
+// inside a construct with no anchor — between an operator and its operand, say
+// — and the answer is no, which sends the whole declaration to a verbatim
+// copy rather than moving the comment somewhere it was not written.
+func (p *printer) placeBefore(at, ind int) bool {
+	if p.cs == nil {
+		return true
+	}
+	for p.cs.next < len(p.cs.cs) {
+		cm := p.cs.cs[p.cs.next]
+		if cm.Span.Start >= at {
+			return true
+		}
+		if !p.cs.ownLine(cm) {
+			p.cs.next++
+			p.appendTrailing(cm.Text)
+			continue
+		}
+		// The run reaches the anchor only through whitespace and any comments
+		// following it, so a block of comments above a construct is checked
+		// comment by comment rather than as one span.
+		boundary := at
+		if next := p.cs.next + 1; next < len(p.cs.cs) && p.cs.cs[next].Span.Start < at {
+			boundary = p.cs.cs[next].Span.Start
+		}
+		if !onlyWhitespace(p.f, cm.Span.End, boundary) {
+			return false
+		}
+		p.cs.next++
+		if precededByBlankLine(p.f, cm.Span.Start) {
+			p.blank()
+		}
+		p.start(ind)
+		p.emit(strings.TrimRight(cm.Text, " \t"))
+	}
+	return true
+}
+
+// consumedThrough reports whether every comment before offset has been placed.
+func (c *commentCursor) consumedThrough(offset int) bool {
+	return c.next >= len(c.cs) || c.cs[c.next].Span.Start >= offset
+}
+
+func onlyWhitespace(f *source.File, from, to int) bool {
+	if f == nil || from < 0 || to > len(f.Content) || from > to {
+		return false
+	}
+	for _, b := range f.Content[from:to] {
+		switch b {
+		case ' ', '\t', '\n', '\r':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func precededByBlankLine(f *source.File, at int) bool {
+	newlines := 0
+	for i := at - 1; i >= 0; i-- {
+		switch f.Content[i] {
+		case ' ', '\t', '\r':
+		case '\n':
+			newlines++
+			if newlines > 1 {
+				return true
+			}
+		default:
+			return false
+		}
+	}
+	return false
+}

@@ -24,6 +24,7 @@ type printer struct {
 	ind    int          // that line's indent
 	open   bool
 	srcEnd int
+	cs     *commentCursor // comments still to place, for in-declaration anchors
 }
 
 // start begins a line at indent, completing whatever line was open. An open
@@ -184,8 +185,8 @@ func lastTokenEnd(toks []token.Token, from, to int) int {
 // declarations verbatim. Expressions, types and the rest of the declaration
 // grammar still reach the output through their own source text.
 func printModule(f *source.File, m *ast.Module, toks []token.Token, comments []token.Comment) []byte {
-	p := &printer{f: f}
 	cs := newCommentCursor(f, comments)
+	p := &printer{f: f, cs: cs}
 
 	bodyStart := len(f.Content)
 	if len(m.Decls) > 0 {
@@ -228,11 +229,13 @@ func printModule(f *source.File, m *ast.Module, toks []token.Token, comments []t
 		cs.emitBefore(p, sp.Start, 0)
 		p.gapBefore(sp.Start)
 		snap := p.snapshot()
-		if !p.printDecl(d, sp, cs.holdsComment(sp)) {
+		// A declaration counts as printed only if every comment inside it was
+		// placed as well; one left over sits somewhere with no anchor, and
+		// copying keeps it where its author put it.
+		if !p.printDecl(d, sp) || !cs.consumedThrough(sp.End) {
 			p.restore(snap)
 			p.verbatim(sp)
 		}
-		// Whatever is inside the declaration was printed or copied with it.
 		cs.skipTo(sp.End)
 		p.srcEnd = sp.End
 	}
@@ -406,20 +409,22 @@ func normalizeSpace(s string) string {
 // what the author wrote, and the caller then copies the declaration verbatim —
 // which only works if the abandoned output goes away first.
 type snapshot struct {
-	buflen int
-	cur    []byte
-	ind    int
-	open   bool
-	srcEnd int
+	buflen  int
+	cur     []byte
+	ind     int
+	open    bool
+	srcEnd  int
+	comment int
 }
 
 func (p *printer) snapshot() snapshot {
 	return snapshot{
-		buflen: p.buf.Len(),
-		cur:    append([]byte(nil), p.cur...),
-		ind:    p.ind,
-		open:   p.open,
-		srcEnd: p.srcEnd,
+		buflen:  p.buf.Len(),
+		cur:     append([]byte(nil), p.cur...),
+		ind:     p.ind,
+		open:    p.open,
+		srcEnd:  p.srcEnd,
+		comment: p.commentPos(),
 	}
 }
 
@@ -429,4 +434,26 @@ func (p *printer) restore(s snapshot) {
 	p.ind = s.ind
 	p.open = s.open
 	p.srcEnd = s.srcEnd
+	if p.cs != nil {
+		p.cs.next = s.comment
+	}
+}
+
+func (p *printer) commentPos() int {
+	if p.cs == nil {
+		return 0
+	}
+	return p.cs.next
+}
+
+// lineIndent is the indent of the line being built, which is what a construct
+// starting mid-line must continue from. A construct handed a continuation
+// indent by its caller can sit on a shallower line than that indent suggests —
+// a lambda opened inside an argument list, say — and indenting its body from
+// the caller's figure would push it a level too deep.
+func (p *printer) lineIndent(fallback int) int {
+	if p.open {
+		return p.ind
+	}
+	return fallback
 }

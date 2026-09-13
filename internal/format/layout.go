@@ -56,6 +56,9 @@ func (p *printer) renderExpr(e ast.Expr, ind int) bool {
 func (p *printer) renderBlock(b *ast.Block, ind int) bool {
 	for _, item := range blockItems(b) {
 		if item.BindIndex < 0 {
+			if !p.placeBefore(item.Expr.Span().Start, ind) {
+				return false
+			}
 			p.start(ind)
 			if !p.renderExpr(item.Expr, ind) {
 				return false
@@ -65,6 +68,9 @@ func (p *printer) renderBlock(b *ast.Block, ind int) bool {
 		if !p.renderBind(b.Binds[item.BindIndex], ind) {
 			return false
 		}
+	}
+	if !p.placeBefore(b.Result.Span().Start, ind) {
+		return false
 	}
 	p.start(ind)
 	return p.renderExpr(b.Result, ind)
@@ -86,6 +92,9 @@ func blockItems(b *ast.Block) []ast.BlockItem {
 // renderBind writes a local binding: an annotation line when there is one,
 // then one line per equation.
 func (p *printer) renderBind(lb ast.LocalBind, ind int) bool {
+	if !p.placeBefore(bindStart(lb), ind) {
+		return false
+	}
 	if lb.Ann != nil {
 		p.line(ind, declName(lb.Name)+" : "+annotationText(lb.Ann))
 	}
@@ -127,8 +136,12 @@ func (p *printer) renderAssigned(body ast.Expr, ind int) bool {
 	if body == nil {
 		return false
 	}
+	ind = p.lineIndent(ind)
 	if bodyOnOwnLine(body.Span().File, body.Span().Start) {
 		p.emit(" =")
+		if !p.placeBefore(body.Span().Start, ind+Indent) {
+			return false
+		}
 		p.start(ind + Indent)
 		return p.renderExpr(body, ind+Indent)
 	}
@@ -147,6 +160,9 @@ func (p *printer) renderCase(c *ast.Case, ind int) bool {
 	p.emit("case " + scrutinee + " of")
 	branchInd := ind + Indent
 	for _, br := range c.Branches {
+		if !p.placeBefore(br.Pattern.Span().Start, branchInd) {
+			return false
+		}
 		pat, patOK := patternInline(br.Pattern)
 		if !patOK {
 			return false
@@ -165,8 +181,12 @@ func (p *printer) renderArrow(body ast.Expr, ind int) bool {
 	if body == nil {
 		return false
 	}
+	ind = p.lineIndent(ind)
 	if bodyOnOwnLine(body.Span().File, body.Span().Start) {
 		p.emit(" ->")
+		if !p.placeBefore(body.Span().Start, ind+Indent) {
+			return false
+		}
 		p.start(ind + Indent)
 		return p.renderExpr(body, ind+Indent)
 	}
@@ -193,6 +213,9 @@ func (p *printer) renderHandle(h *ast.Handle, ind int) bool {
 
 	clauseInd := ind + Indent
 	for _, cl := range h.Clauses {
+		if !p.placeBefore(cl.OpSpan.Start, clauseInd) {
+			return false
+		}
 		params, paramsOK := patternsInline(cl.Params, patternArgInline)
 		if !paramsOK {
 			return false
@@ -274,6 +297,9 @@ func (p *printer) renderIf(e *ast.If, ind int) bool {
 // below its keyword and on the same line when not.
 func (p *printer) renderArm(arm ast.Expr, ind int) bool {
 	if bodyOnOwnLine(arm.Span().File, arm.Span().Start) {
+		if !p.placeBefore(arm.Span().Start, ind+Indent) {
+			return false
+		}
 		p.start(ind + Indent)
 		return p.renderExpr(arm, ind+Indent)
 	}
@@ -496,4 +522,16 @@ func (p *printer) recordFieldBlock(fields []ast.RecordExprField, lead string, in
 	p.start(ind)
 	p.emit("}")
 	return true
+}
+
+// bindStart is where a local binding begins in source, which is its annotation
+// line when it has one.
+func bindStart(lb ast.LocalBind) int {
+	if lb.Ann != nil && lb.Ann.Sp.File != nil {
+		return lb.NameSpan.Start
+	}
+	if lb.Pattern != nil {
+		return lb.Pattern.Span().Start
+	}
+	return lb.NameSpan.Start
 }

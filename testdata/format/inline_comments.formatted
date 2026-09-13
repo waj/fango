@@ -1,0 +1,32 @@
+module Commented exposing (run)
+
+import Basics exposing (..)
+import Maybe exposing (Maybe(..))
+
+-- A comment above a declaration.
+blockComments =
+    -- above the first statement
+    x = 1
+
+    -- after a blank line, above the second
+    y = 2
+    -- two lines
+    -- of comment above the result
+    x + y
+
+trailing =
+    x = 1 -- at the end of a statement
+    x
+
+branchComments value =
+    case value of
+        -- above a branch
+        Nothing -> 0
+        Just v -> v -- after a branch
+
+-- a comment with no anchor stays put by copying the declaration
+unanchored a =
+    a + -- between an operator and its operand
+        1
+
+run = 1
