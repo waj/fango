@@ -160,6 +160,26 @@ result unrestricted. Because a scope's ScopeID is also a scoped capability,
 storing the resource in another scoped handler's evidence is rejected by the
 same cross-scope rule that governs state cells.
 
+Whether a type can carry a capture is decided by its shape — functions and
+type variables can, scalars cannot, algebraic data can when a field can —
+with one deliberate exception: a *compiler-known resource type*, identified
+by canonical name in `internal/types/intrinsic.go`, always can. The bundled
+`File.Handle` is an `Int` behind a private constructor, so its shape says
+nothing; the name says it is a capability, and that single switch makes every
+existing rule apply to it. The bundled resource runners `File.withFile`,
+`withOutput`, and `withAppend` are ordinary fango over `Scope.bracket`, and
+the capture analysis treats them as it treats `State.run`: their call sites
+are checked against the instantiated result type with the resource fixed to
+`File.Handle`, and a runner's own call to the intrinsic (or to another
+runner) is exempt in the same way `Random.runSystem`'s call to `runSeeded`
+is, so the wrapper's polymorphic result is what its callers answer for. The
+bracket `ScopeID` never reaches a caller — the callback's resource is an
+abstract capture variable — so these type-based rules are the whole
+mechanism for a handle escaping through a result or a scoped runner's state.
+They do not cover a value that leaves through an operation of a handler
+installed *outside* the scope, which the roadmap records as an open gap for
+every capture-capable resource.
+
 Every handler activation also has a compiler-only `ScopeID`. Evidence in Core
 therefore names both its nominal effect and the activation (or an abstract
 capture variable when a worker or lambda receives the evidence from its
@@ -870,6 +890,16 @@ operations are the checked producer of this protocol. When Exit code calls
 Direct evidence, code generation builds a typed eta record whose operation
 fields wrap normal results; conversion in the other direction is forbidden.
 
+A perform on a resumptive handler's evidence can resolve to Exit in an
+enclosing Exit context — an open-row callback inside `attempt`, say — while
+the activation it reaches is a Direct one. The generated call then wraps the
+plain result as a normal Outcome, exactly as passing Direct evidence to an
+Exit worker builds an eta record; a Unit operation's void call is sequenced
+before the Unit outcome. Symmetrically, Core lint admits a call whose control
+is polymorphic with an Exit lower bound against a polymorphic Direct
+contract: a definition whose own lower bound is Exit emits only its Exit
+member, so such a call always resolves to the callee's Exit member.
+
 A cleanup scope emits as straight-line Go. Its Direct family member acquires,
 runs the body, discards the release result, and returns the body value with no
 `Outcome` plumbing at all — the roadmap's "plain result variant" falls out of
@@ -938,7 +968,9 @@ are unchanged.
 `fangort` owns genuinely shared runtime facilities: represented Unit,
 Direct/Exit outcomes, formatting and the generic native-host contract.
 Module-specific native logic lives in the owning stdlib sidecar instead. In
-particular, `IO.native.go` owns IO operations and line semantics, while
+particular, `IO.native.go` owns console IO operations and line semantics,
+`File.native.go` owns the open-file table and every fallible file operation,
+while
 `Random.native.go` supplies entropy acquisition. The pure PRNG transition and
 range functions are ordinary Fango code, and the changing deterministic seed
 belongs to each Fango handler activation rather than to a native process
@@ -965,7 +997,42 @@ the interpreter; a host exit becomes the interpreter's exit error.
 The in-process native registry is limited to inline templates, compiler-only
 representations, and explicitly safe bundled behavior needed during splice
 evaluation. Compile-time evaluation still rejects user sidecars, effects, and
-process-state-observing natives.
+process-state-observing natives. The bundled `File` natives have registry
+entries only so bundled-native validation can check their arity; the entries
+refuse to run, because those natives exist only in the sidecar worker.
+
+The sidecar boundary admits two shapes beyond plain scalars, both resolved
+once by the checker after the module's constructors are declared and recorded
+on the native's metadata, so neither backend re-derives them from names. A
+*boundary wrapper* is a type the sidecar's own module declares with one
+constructor over one boundary scalar: generated Go projects the field
+(`v.(*C_T).F0`, a projection on a single-constructor type rather than a type
+check) before the call and rebuilds the constructor after it, and the
+interpreter unwraps and rewraps the same `CtorVal`. Module validation
+recognizes the shape by spelling, which is safe because the type must be
+declared in the same file; the checker confirms it on resolved types. A
+*fallible result*, `Result IO.Error a` backed by a Go `(T, error)`, is
+admitted only to the bundled `File` module's value natives. The Go error is
+classified in exactly one place, `fangort.ClassifyIOError`, into a kind code
+indexing `IO.Kind`'s constructors, the path, and the underlying message;
+generated code emits the branch at the call site as straight-line Go that
+builds `Err (IO.Error {...})` or `Ok payload` with the ordinary constructor
+emission, and the worker classifies in its dispatch loop and sends the
+failure in its own protocol field, separate from infrastructure faults and
+native panics, so the interpreter builds the same constructor values. The
+`IO.Kind` constructor order is the compiler's contract with the classifier
+and is checked when the native is declared. `File.Handle` and `File.Directory`
+are boundary wrappers over the sidecar's table of open files and directory
+listings; the table lives in the sidecar package's globals, which a compiled
+program owns per process and the interpreter's worker keeps per session, so
+both backends run the same code with the same lifetime. Ids are never
+reused, so a stale id is an ordinary "closed handle" failure rather than an
+alias of a newer file — a defensive check accepted fango cannot reach, since
+a handle is abstract and its scope closes it exactly once. Every failure is
+relabeled with the path the program supplied, because the sidecar joins
+relative paths onto the working directory and the absolute form would differ
+from run to run. Natives are inlined at their call sites, so the raw handle
+operations stay unexposed and only `File`'s own wrappers call them.
 
 ## Formatting
 
@@ -1106,7 +1173,15 @@ goldens. Every runnable fixture is evaluated through Core and, outside short
 mode, compiled through the real CLI; output is compared byte-for-byte with its
 expected file and between backends. A fixture or example may carry a `.stdin`
 transcript beside its source; both backends receive it as scripted standard
-input. Stateful command examples run a sequence against isolated working
+input. A fixture may also carry `.args` (one program argument per line),
+`.status` (the exit status it must end with), and a `.files/` seed directory,
+which each leg receives as a fresh copy in its own working directory, so a
+fixture can read, write, and fail on real files without touching the
+repository or the other backend's run; failures are scripted portably by
+opening a directory as a file or naming a missing path, never with `chmod`.
+A fixture with a sibling `.native.go` gets its sidecar installed in a private
+worker for the interpreter leg, as a user module would. Stateful command
+examples run a sequence against isolated working
 directories, with the interpreter's explicit argument/directory context
 matching the compiled process's argv and working directory. Invalid fixtures
 pin diagnostic substrings.

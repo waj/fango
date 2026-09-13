@@ -335,6 +335,10 @@ func validateModuleDecls(n *node) []diag.Error {
 		errs = append(errs, diag.Error{Title: "INVALID EMBEDDED PRELUDE", Body: n.path + " may contain only imports."})
 	}
 	callDecls := map[string]*ast.ValueDecl{}
+	// opDecls marks the call-form natives that are effect operations; only
+	// those may use the fallible result shape (doc/design.md, "Go backend and
+	// runtime").
+	opDecls := map[string]bool{}
 	// declared is every value name this module introduces — the names its
 	// own fixity declarations may refer to.
 	declared := map[string]bool{}
@@ -388,6 +392,7 @@ func validateModuleDecls(n *node) []diag.Error {
 				if op.Native.Template == nil {
 					callDecls[op.Name] = &ast.ValueDecl{Name: op.Name, NameSpan: op.NameSpan,
 						Ann: &ast.TypeAnn{Type: op.Type}, Native: op.Native}
+					opDecls[op.Name] = true
 				} else {
 					if !n.bundled {
 						errs = append(errs, diag.Errorf(op.Native.Sp, "NATIVE TEMPLATE NOT ALLOWED", "Inline native templates are reserved for compiler-bundled modules; use `native` with a sidecar function."))
@@ -430,7 +435,7 @@ func validateModuleDecls(n *node) []diag.Error {
 		}
 		return errs
 	}
-	return append(errs, validateSidecar(n, callDecls)...)
+	return append(errs, validateSidecar(n, callDecls, opDecls)...)
 }
 
 func nativeArity(ann *ast.TypeAnn) int {
@@ -526,7 +531,7 @@ func validateTemplate(template string, arity int, sp source.Span) []diag.Error {
 	return errs
 }
 
-func validateSidecar(n *node, decls map[string]*ast.ValueDecl) []diag.Error {
+func validateSidecar(n *node, decls map[string]*ast.ValueDecl, opDecls map[string]bool) []diag.Error {
 	f, err := goparser.ParseFile(gotoken.NewFileSet(), n.nativePath, n.native, 0)
 	if err != nil {
 		return []diag.Error{diag.Errorf(source.Span{}, "INVALID NATIVE SIDECAR", "%s does not parse as Go: %v.", n.nativePath, err)}
@@ -569,6 +574,7 @@ func validateSidecar(n *node, decls map[string]*ast.ValueDecl) []diag.Error {
 		}
 	}
 	used := map[string]bool{}
+	boundary := nativeBoundary{wrappers: localWrapperTypes(n.mod.Decls), fallibleAllowed: n.bundled && n.name == fallibleNativeModule}
 	for name, d := range decls {
 		goName := exportNativeName(name)
 		fn := funcs[goName]
@@ -577,7 +583,7 @@ func validateSidecar(n *node, decls map[string]*ast.ValueDecl) []diag.Error {
 			continue
 		}
 		used[goName] = true
-		errs = append(errs, validateNativeShape(d, fn)...)
+		errs = append(errs, boundary.validateNativeShape(d, fn, opDecls[name])...)
 	}
 	for name := range funcs {
 		if !used[name] {
@@ -594,7 +600,51 @@ func exportNativeName(name string) string {
 	return strings.ToUpper(name[:1]) + name[1:]
 }
 
-func validateNativeShape(d *ast.ValueDecl, fn *goast.FuncDecl) []diag.Error {
+// nativeBoundary is what module validation knows about a sidecar's boundary
+// before name resolution: the module's own single-scalar wrapper types, and
+// whether it may declare fallible results. Recognition is by spelling, which
+// is safe here because a wrapper must be declared in this very file and the
+// fallible shape is admitted only in the module the compiler controls; type
+// checking re-establishes both shapes on resolved types.
+type nativeBoundary struct {
+	wrappers        map[string]string // local wrapper type name -> Go scalar type
+	fallibleAllowed bool
+}
+
+// localWrapperTypes finds the module's `type T = T Scalar` declarations: one
+// constructor, one boundary-scalar field, no parameters, not a record.
+func localWrapperTypes(decls []ast.Decl) map[string]string {
+	out := map[string]string{}
+	for _, d := range decls {
+		td, ok := d.(*ast.TypeDecl)
+		if !ok || len(td.Params) != 0 || td.RecordFields != nil || len(td.Ctors) != 1 || len(td.Ctors[0].Args) != 1 {
+			continue
+		}
+		if goType := scalarGoType(td.Ctors[0].Args[0]); goType != "" {
+			out[td.Name] = goType
+		}
+	}
+	return out
+}
+
+// fallibleNativeModule is the one bundled module whose sidecar may return Go
+// errors: its natives are the file operations behind the scoped File API.
+const fallibleNativeModule = "File"
+
+// fallibleResult recognizes the spelling `Result IO.Error T` (or `Result
+// Error T` once IO's Error is imported unqualified), answering T.
+func fallibleResult(t ast.TypeExpr) (ast.TypeExpr, bool) {
+	app, ok := t.(*ast.TApp)
+	if !ok || app.Name != "Result" || len(app.Args) != 2 {
+		return nil, false
+	}
+	if errTy, ok := app.Args[0].(*ast.TName); !ok || errTy.Name != "Error" && errTy.Name != "IO.Error" {
+		return nil, false
+	}
+	return app.Args[1], true
+}
+
+func (b nativeBoundary) validateNativeShape(d *ast.ValueDecl, fn *goast.FuncDecl, fromOp bool) []diag.Error {
 	if d.Ann == nil {
 		return nil // parser already diagnoses the missing annotation
 	}
@@ -622,18 +672,31 @@ func validateNativeShape(d *ast.ValueDecl, fn *goast.FuncDecl) []diag.Error {
 			count = 1
 		}
 		for range count {
-			if want := nativeGoType(params[i]); want == "" || goTypeName(field.Type) != want {
-				errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Parameter %d of `%s` must use the scalar Go type for its Fango annotation.", i+1, fn.Name.Name))
+			if want := b.nativeGoType(params[i]); want == "" || goTypeName(field.Type) != want {
+				errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Parameter %d of `%s` must use the scalar Go type for its Fango annotation, or a type this module declares as a single-constructor wrapper around one.", i+1, fn.Name.Name))
 			}
 			i++
 		}
 	}
-	if isUnitType(t) {
+	if payload, fallible := fallibleResult(t); fallible {
+		if !b.fallibleAllowed || fromOp {
+			errs = append(errs, diag.Errorf(d.Native.Sp, "FALLIBLE NATIVE NOT ALLOWED", "Only value natives of the bundled `File` module may declare a `Result IO.Error` result; return a scalar and build the `Result` in fango."))
+			return errs
+		}
+		results := resultTypeNames(fn.Type.Results)
+		if isUnitType(payload) {
+			if len(results) != 1 || results[0] != "error" {
+				errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Function `%s` must return exactly `error` for native `%s`'s `Result Error ()` annotation.", fn.Name.Name, d.Name))
+			}
+		} else if want := b.nativeGoType(payload); want == "" || len(results) != 2 || results[0] != want || results[1] != "error" {
+			errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Function `%s` must return `(%s, error)` for native `%s`'s fallible annotation.", fn.Name.Name, orGoType(want), d.Name))
+		}
+	} else if isUnitType(t) {
 		if fieldCount(fn.Type.Results) != 0 {
 			errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Function `%s` must return no value for Fango Unit.", fn.Name.Name))
 		}
-	} else if fieldCount(fn.Type.Results) != 1 || len(fn.Type.Results.List) != 1 || goTypeName(fn.Type.Results.List[0].Type) != nativeGoType(t) {
-		errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Function `%s` must return exactly the scalar Go type in native `%s`'s annotation.", fn.Name.Name, d.Name))
+	} else if fieldCount(fn.Type.Results) != 1 || len(fn.Type.Results.List) != 1 || goTypeName(fn.Type.Results.List[0].Type) != b.nativeGoType(t) {
+		errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Function `%s` must return exactly the scalar Go type in native `%s`'s annotation, or a type this module declares as a single-constructor wrapper around one.", fn.Name.Name, d.Name))
 	}
 	if fn.Type.TypeParams != nil {
 		errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Function `%s` cannot declare Go type parameters.", fn.Name.Name))
@@ -661,12 +724,50 @@ func isUnitType(t ast.TypeExpr) bool {
 	return ok && n.Name == "()"
 }
 
-func nativeGoType(t ast.TypeExpr) string {
+// nativeGoType is the Go type a fango boundary type crosses as: a scalar's
+// own Go type, or the field type of one of this module's wrapper types.
+func (b nativeBoundary) nativeGoType(t ast.TypeExpr) string {
+	if goType := scalarGoType(t); goType != "" {
+		return goType
+	}
+	n, ok := t.(*ast.TName)
+	if !ok {
+		return ""
+	}
+	return b.wrappers[n.Name]
+}
+
+func scalarGoType(t ast.TypeExpr) string {
 	n, ok := t.(*ast.TName)
 	if !ok {
 		return ""
 	}
 	return map[string]string{"Int": "int64", "Float": "float64", "String": "string", "Char": "rune", "Bool": "bool"}[n.Name]
+}
+
+func orGoType(goType string) string {
+	if goType == "" {
+		return "scalar"
+	}
+	return goType
+}
+
+// resultTypeNames lists a Go result list's type spellings, one per result.
+func resultTypeNames(fs *goast.FieldList) []string {
+	if fs == nil {
+		return nil
+	}
+	var out []string
+	for _, f := range fs.List {
+		count := len(f.Names)
+		if count == 0 {
+			count = 1
+		}
+		for range count {
+			out = append(out, goTypeName(f.Type))
+		}
+	}
+	return out
 }
 
 func goTypeName(e goast.Expr) string {

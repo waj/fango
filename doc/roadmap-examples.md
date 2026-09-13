@@ -73,9 +73,14 @@ Forces the error-handling story.
 
 Forces performance work and concurrency.
 
-- [ ] **`grep`-lite** — pattern search across files named on the command
-  line, correct exit codes. Forces multi-file IO, directory listing, and
-  efficient string search; a performance gate against Go.
+- [x] **`grep`-lite** — pattern search across files named on the command
+  line, correct exit codes. Forced the scoped `File` API over
+  `Scope.bracket` (`withFile`, streaming `readLine`, `listDirectory`,
+  `isDirectory`), typed `IO.Error` values with a platform-stable
+  `describeError`, a bundled `Fail` effect, `String.contains`, and the
+  native-boundary work behind them: opaque wrapper types erased only at the
+  Go boundary and fallible natives returning Go errors. Search is a plain
+  substring scan; the performance gate against Go remains unbuilt.
 - [ ] **Parallel downloader or multi-file word count** — the concrete
   consumer for structured concurrency (nursery, channels, cancellation) and
   for network/process effects. Deliberately last.

@@ -12,8 +12,11 @@ Continue selecting APIs from concrete programs rather than attempting broad
 coverage.
 
 - Expand `List`, text, numeric, and IO operations as subsequent examples require
-  them. Structured IO failures are coordinated in the
-  [effects roadmap](roadmap-effects.md).
+  them. `IO.readFile`, `IO.writeFile`, and `IO.exit` are legacy shapes kept for
+  the todo and csv examples; the `File` module reports failures as values and
+  is where new file operations go. Deprecating the legacy trio, and moving the
+  examples over, is deferred until there is a deprecation mechanism to do it
+  with.
 - Strings use valid UTF-8 storage and Unicode-scalar `Char`, indexing, and
   length. Normalization, grapheme segmentation, and Unicode-aware word or case
   operations remain deferred until an example requires them.
@@ -248,13 +251,15 @@ implemented for workers, callbacks, evidence, ADTs, dictionaries, and both
 backends. Abort-only effects, `Result`, and generic cleanup scopes are
 implemented: `Scope.bracket` and `Scope.finally` are ordinary function calls
 with compiler-supported lifetimes, so resource management needs no new cleanup
-syntax. Next come concrete resource APIs and structured IO failures on top of
-them. These increments ship without suspension.
+syntax. The bundled `Fail` effect, typed `IO.Error` values, and the scoped
+`File` resource API are built on them, with `File.Handle` a compiler-known
+capability. All of this shipped without suspension.
 
-The same roadmap owns structured IO failures, resource/native ABI work, and the
-open decisions for operation polymorphism and builtin IO handling.
-Owned iterators, scoped non-tail resumption, structured async, and cancellation
-are later milestones, gated by a concrete consumer and static ownership checks.
+The same roadmap owns the open decisions for operation polymorphism, builtin
+IO handling, fallible natives beyond `File`, and a resource escaping through an
+outer handler's operation. Owned iterators, scoped non-tail resumption,
+structured async, and cancellation are later milestones, gated by a concrete
+consumer and static ownership checks.
 
 ## Effect-row subsumption for higher-order arguments
 
@@ -345,12 +350,13 @@ Serializing Core is the same artifact
 [unembedding](#unembedding-the-bundled-sources) already wants, so the two
 converge on one mechanism rather than competing.
 
-A smaller adjacent idea is worth recording separately: erasing a
-single-constructor, single-scalar-field type across the *existing* boundary
-would give users type-safe opaque handles with no new representation and no
-architecture change. That is right for a file or a connection, which are
-opened a few at a time and explicitly closed, and wrong for a persistent
-`Dict`, where every insert would leak a table slot that nothing ever releases.
+The smaller adjacent idea is now implemented: a single-constructor,
+single-scalar-field type declared in the sidecar's module is erased to its
+scalar across the *existing* boundary, which is how `File.Handle` works and is
+available to user sidecars (see the design and reference). It is right for a
+file or a connection, which are opened a few at a time and explicitly closed,
+and wrong for a persistent `Dict`, where every insert would leak a table slot
+that nothing ever releases; `GoAny` remains the answer for that.
 
 ## Longer-term candidates
 

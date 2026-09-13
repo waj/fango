@@ -23,4 +23,15 @@ type Message struct {
 	Data   []byte
 	Values []string
 	Bool   bool
+	// Failure is a fallible native's classified error. It is deliberately
+	// separate from Error (an infrastructure fault) and Panic (a native
+	// panic): it is an ordinary language value, not a failure of the worker.
+	Failure *Failure
+}
+
+// Failure mirrors fangort.IOFailure on the wire.
+type Failure struct {
+	Kind    int64
+	Path    string
+	Message string
 }

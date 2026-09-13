@@ -971,41 +971,130 @@ func (g *gen) goTypes(ts []types.Type) []goast.Expr {
 // result is needed as a value. Unit arguments are erased from the Go ABI, but
 // a non-atomic Unit argument must still run in source order; prelude contains
 // the statements (and any temporaries) needed to preserve that order.
+//
+// Boundary wrappers (doc/design.md, "Go backend and runtime") are erased
+// here: a wrapped argument is projected to its scalar field and a wrapped
+// result is rebuilt with the wrapper's constructor. A wrapped argument always
+// goes through a typed temporary, because the projection is a type assertion
+// on the ADT's interface type and a constructor literal would not have it.
 func (g *gen) nativeSidecarCall(call *core.NativeCall, n *types.NativeInfo) ([]goast.Stmt, goast.Expr) {
 	g.nativeImports[n.Module] = true
 	args := make([]goast.Expr, 0, len(call.Args))
 	needsSequence := false
-	for _, arg := range call.Args {
-		needsSequence = needsSequence || g.isUnit(arg.Type()) && !unitAtom(arg)
+	for i, arg := range call.Args {
+		needsSequence = needsSequence || g.isUnit(arg.Type()) && !unitAtom(arg) || g.paramWrapper(n, i) != nil
 	}
 	var prelude []goast.Stmt
-	for _, arg := range call.Args {
+	for i, arg := range call.Args {
 		if g.isUnit(arg.Type()) {
 			if needsSequence {
 				prelude = append(prelude, g.stmts(arg)...)
 			}
 			continue
 		}
+		var value goast.Expr
 		if needsSequence {
 			name := fmt.Sprintf("t_native%d", g.tmp)
 			g.tmp++
 			prelude = append(prelude, varDeclStmt(name, g.goType(arg.Type()), g.expr(arg, 0)))
-			args = append(args, ident(name))
+			value = ident(name)
 		} else {
-			args = append(args, g.expr(arg, 0))
+			value = g.expr(arg, 0)
 		}
+		if wrapper := g.paramWrapper(n, i); wrapper != nil {
+			value = g.unwrapBoundary(wrapper, value)
+		}
+		args = append(args, value)
 	}
 	fn := selector(nativeAlias(n.Module), exportNativeName(types.SurfaceName(n.Name)))
 	var result goast.Expr = callExpr(fn, args...)
-	switch g.unique(call.Ty) {
+	if n.Fallible != nil {
+		return prelude, g.fallibleNativeResult(call, n, result)
+	}
+	return prelude, g.wrapBoundaryResult(n, call.Ty, result)
+}
+
+func (g *gen) paramWrapper(n *types.NativeInfo, i int) *types.CtorInfo {
+	if i < len(n.ParamWrappers) {
+		return n.ParamWrappers[i]
+	}
+	return nil
+}
+
+// unwrapBoundary projects a wrapper value to its scalar: `v.(*C_Wrap).F0`.
+// A wrapper has exactly one constructor, so the assertion is a projection
+// that cannot fail, not a type check.
+func (g *gen) unwrapBoundary(wrapper *types.CtorInfo, value goast.Expr) goast.Expr {
+	asserted := &goast.TypeAssertExpr{X: value, Type: &goast.StarExpr{X: g.ctorRef(wrapper)}}
+	return &goast.SelectorExpr{X: asserted, Sel: ident(fieldName(0))}
+}
+
+// wrapBoundaryResult validates a scalar native result and rebuilds a wrapper
+// around it when the declaration names one.
+func (g *gen) wrapBoundaryResult(n *types.NativeInfo, ty types.Type, result goast.Expr) goast.Expr {
+	scalar := ty
+	if n.ResultWrapper != nil {
+		scalar = n.ResultWrapper.Fields[0]
+	}
+	result = g.validatedScalar(n.Name, scalar, result)
+	if n.ResultWrapper != nil {
+		result = g.ctorValue(n.ResultWrapper, nil, result)
+	}
+	return result
+}
+
+func (g *gen) validatedScalar(name string, ty types.Type, result goast.Expr) goast.Expr {
+	switch g.unique(ty) {
 	case g.b.String.Unique:
 		g.usesFangort = true
-		result = callExpr(selector("fangort", "RequireValidString"), stringLit(n.Name), result)
+		result = callExpr(selector("fangort", "RequireValidString"), stringLit(name), result)
 	case g.b.Char.Unique:
 		g.usesFangort = true
-		result = callExpr(selector("fangort", "RequireValidChar"), stringLit(n.Name), result)
+		result = callExpr(selector("fangort", "RequireValidChar"), stringLit(name), result)
 	}
-	return prelude, result
+	return result
+}
+
+// fallibleNativeResult turns a Go `(T, error)` call into `Result IO.Error T`
+// as straight-line Go: classify a non-nil error through fangort and build
+// `Err (Error {...})`, otherwise build `Ok payload`. No panic, no defer.
+func (g *gen) fallibleNativeResult(call *core.NativeCall, n *types.NativeInfo, invoke goast.Expr) goast.Expr {
+	g.usesFangort = true
+	shape := n.Fallible
+	resultArgs := call.Ty.(*types.TCon).Args
+	unitPayload := g.isUnit(shape.Payload)
+	var body []goast.Stmt
+	lhs := []goast.Expr{ident("t_err")}
+	if !unitPayload {
+		lhs = []goast.Expr{ident("t_payload"), ident("t_err")}
+	}
+	body = append(body, &goast.AssignStmt{Lhs: lhs, Tok: gotoken.DEFINE, Rhs: []goast.Expr{invoke}})
+	kindType := g.goType(shape.Error.Fields[shape.KindIdx])
+	kinds := make([]goast.Expr, len(shape.Kinds))
+	for i, k := range shape.Kinds {
+		kinds[i] = g.ctorValue(k, nil)
+	}
+	kind := &goast.IndexExpr{
+		X:     &goast.CompositeLit{Type: &goast.ArrayType{Elt: kindType}, Elts: kinds},
+		Index: selector("t_failure", "Kind"),
+	}
+	fields := make([]goast.Expr, 3)
+	fields[shape.KindIdx] = kind
+	fields[shape.PathIdx] = selector("t_failure", "Path")
+	fields[shape.MessageIdx] = selector("t_failure", "Message")
+	failure := g.ctorValue(shape.Err, resultArgs, g.ctorValue(shape.Error, nil, fields...))
+	body = append(body, ifStmt(binExpr(gotoken.NEQ, ident("t_err"), ident("nil")), []goast.Stmt{
+		varDeclStmt("t_failure", selector("fangort", "IOFailure"), callExpr(selector("fangort", "ClassifyIOError"), ident("t_err"))),
+		returnStmt(failure),
+	}, nil))
+	var payload goast.Expr
+	if unitPayload {
+		payload = g.unitValue()
+	} else {
+		payload = g.wrapBoundaryResult(n, shape.Payload, ident("t_payload"))
+	}
+	body = append(body, returnStmt(g.ctorValue(shape.Ok, resultArgs, payload)))
+	return callExpr(funcLit(g.goType(call.Ty), body))
 }
 
 func (g *gen) nativeTemplateExpr(call *core.NativeCall, template string, parentPrec int) goast.Expr {
@@ -1292,6 +1381,14 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		callOp := func(as []goast.Expr) goast.Expr {
 			return callExpr(&goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Op_" + linkName(e.Op.Name))}, as...)
 		}
+		// A perform that resolves to Exit in this context but reaches a
+		// Direct handler activation gets a plain result back — a void call
+		// for a Unit operation — and must wrap it as a normal Outcome, the
+		// same adaptation evidenceArg applies when Direct evidence is passed
+		// to an Exit worker.
+		exit := e.Control.Resolve(g.control) == types.Exit
+		directEvidence := g.currentEvidenceMode(e.Effect.Unique) != types.Exit
+		unitResult := g.isUnit(e.Op.ResultType)
 		call := callOp(args)
 		if needPrelude {
 			body := []goast.Stmt{}
@@ -1307,18 +1404,26 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 				args = append(args, ident(name))
 			}
 			call = callOp(args)
-			if e.Control.Resolve(g.control) == types.Exit {
+			switch {
+			case exit && directEvidence && unitResult:
+				return callExpr(funcLit(g.outcomeType(e.Ty), append(body, exprStmt(call), returnStmt(g.normalOutcome(e.Ty, g.unitValue())))))
+			case exit && directEvidence:
+				return callExpr(funcLit(g.outcomeType(e.Ty), append(body, returnStmt(g.normalOutcome(e.Ty, call)))))
+			case exit:
 				return callExpr(funcLit(g.outcomeType(e.Ty), append(body, returnStmt(call))))
-			}
-			if g.isUnit(e.Op.ResultType) {
+			case unitResult:
 				return callExpr(funcLit(g.goType(e.Ty), append(body, exprStmt(call), returnStmt(g.unitValue()))))
 			}
 			return callExpr(funcLit(g.goType(e.Ty), append(body, returnStmt(call))))
 		}
-		if e.Control.Resolve(g.control) == types.Exit {
+		switch {
+		case exit && directEvidence && unitResult:
+			return callExpr(funcLit(g.outcomeType(e.Ty), []goast.Stmt{exprStmt(call), returnStmt(g.normalOutcome(e.Ty, g.unitValue()))}))
+		case exit && directEvidence:
+			return g.normalOutcome(e.Ty, call)
+		case exit:
 			return call
-		}
-		if g.isUnit(e.Op.ResultType) {
+		case unitResult:
 			return callExpr(funcLit(g.goType(e.Ty), []goast.Stmt{exprStmt(call), returnStmt(g.unitValue())}))
 		}
 		return call

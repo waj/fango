@@ -103,14 +103,34 @@ var Table = func() map[string]Spec {
 	t["Random.entropySeed"] = Spec{Arity: 1, Eval: func(_ *Runtime, _ []any) (any, error) {
 		return stdlib.EntropySeed(), nil
 	}}
+	// The File module's natives exist only in the sidecar worker: they touch
+	// the file system and return Go errors the compiler turns into IO.Error,
+	// which this in-process table cannot represent. Their entries record the
+	// arity bundled-native validation checks and refuse to run here.
+	for name, arity := range fileNatives {
+		t[name] = Spec{Arity: arity, Eval: func(_ *Runtime, _ []any) (any, error) {
+			return nil, fmt.Errorf("native %s requires the sidecar worker", name)
+		}}
+	}
 	// Bundled natives are compile-time-safe by default: they are pure
-	// functions of their arguments. System entropy is Random's one exclusion;
-	// seeded draws now use explicit handler-local state.
+	// functions of their arguments. System entropy is Random's one exclusion,
+	// and the File natives observe the file system; seeded draws now use
+	// explicit handler-local state.
 	for name, spec := range t {
-		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed"
+		_, file := fileNatives[name]
+		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed" && !file
 		t[name] = spec
 	}
 	return t
 }()
+
+// fileNatives lists the bundled File sidecar's natives with their arities.
+var fileNatives = map[string]int{
+	"File.openRead": 1, "File.openWrite": 1, "File.openAppend": 1, "File.closeHandle": 1,
+	"File.handleHasInput": 1, "File.readHandleLine": 1, "File.writeHandle": 2,
+	"File.readFileResult": 1, "File.writeFileResult": 2,
+	"File.openDirectory": 1, "File.readDirectoryEntry": 1, "File.closeDirectory": 1,
+	"File.isDirectoryPath": 1,
+}
 
 func Lookup(name string) (Spec, bool) { spec, ok := Table[name]; return spec, ok }

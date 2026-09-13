@@ -1,0 +1,8 @@
+err missing.txt: no such file or directory
+err .: is a directory
+err missing/out.txt: no such file or directory
+ok True
+err missing: no such file or directory
+err missing: no such file or directory
+err .: is a directory
+NotFound

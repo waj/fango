@@ -1,0 +1,35 @@
+import Fail exposing (attempt)
+import File
+import IO exposing (Error, describeError)
+import Result exposing (Result(..))
+
+-- Structured IO failures without any seeded files: every path here is either
+-- missing or the working directory itself, which exists under both backends.
+
+report : Result Error String ->{IO} ()
+report outcome =
+    case outcome of
+        Ok value -> print ("ok " ++ value)
+        Err error -> print ("err " ++ describeError error)
+
+showBool : Result Error Bool -> Result Error String
+showBool outcome = Result.map show outcome
+
+main() =
+    report (File.read "missing.txt")
+    report (File.read ".")
+    report (Result.map (\_ -> "written") (File.writeAll "missing/out.txt" "x"))
+    report (showBool (File.isDirectory "."))
+    report (showBool (File.isDirectory "missing"))
+    report (Result.map (\_ -> "listed") (File.listDirectory "missing"))
+    -- Open succeeds on a directory; the first read fails after acquisition,
+    -- so the scope releases and the failure reaches attempt.
+    report (attempt (\_ ->
+        File.withFile "." (\file ->
+            case File.readLine file of
+                Nothing -> "empty"
+                Just line -> line.text)))
+    -- The kind is data, not just text.
+    case File.read "missing.txt" of
+        Err error -> print (show error.kind)
+        Ok _ -> print "unexpected"

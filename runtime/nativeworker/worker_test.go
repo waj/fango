@@ -4,10 +4,13 @@ import (
 	"encoding/gob"
 	"errors"
 	"io"
+	"io/fs"
 	"net"
 	"strings"
+	"syscall"
 	"testing"
 
+	"github.com/waj/fango/runtime/fangort"
 	"github.com/waj/fango/runtime/nativewire"
 )
 
@@ -17,6 +20,33 @@ func TestInvoke(t *testing.T) {
 		"unit": func() {},
 		"boom": func() { panic("broken") },
 		"exit": func() { panic(exitSignal{code: 0}) },
+		"open": func(path string) (int64, error) {
+			if path == "missing" {
+				return 0, &fs.PathError{Op: "open", Path: path, Err: syscall.ENOENT}
+			}
+			return 7, nil
+		},
+		"close": func(id int64) error {
+			if id == 0 {
+				return errors.New("closed handle")
+			}
+			return nil
+		},
+	}
+	// A fallible native's nil error is dropped and its payload travels as the
+	// value; a non-nil error travels as a classified Failure, never as a
+	// panic or an infrastructure error.
+	if got := invoke(functions, "open", []nativewire.Value{{Kind: "string", S: "ok"}}); got.Failure != nil || got.Value.Kind != "int" || got.Value.I != 7 {
+		t.Fatalf("open ok = %#v", got)
+	}
+	if got := invoke(functions, "open", []nativewire.Value{{Kind: "string", S: "missing"}}); got.Failure == nil || got.Failure.Kind != fangort.IOErrorNotFound || got.Failure.Path != "missing" || got.Panic != "" || got.Error != "" {
+		t.Fatalf("open missing = %#v", got)
+	}
+	if got := invoke(functions, "close", []nativewire.Value{{Kind: "int", I: 1}}); got.Failure != nil || got.Value.Kind != "" {
+		t.Fatalf("close ok = %#v", got)
+	}
+	if got := invoke(functions, "close", []nativewire.Value{{Kind: "int", I: 0}}); got.Failure == nil || got.Failure.Kind != fangort.IOErrorOther || got.Failure.Message != "closed handle" {
+		t.Fatalf("close stale = %#v", got)
 	}
 	got := invoke(functions, "add", []nativewire.Value{{Kind: "int", I: 2}, {Kind: "int", I: 3}})
 	if got.Panic != "" || got.Value.Kind != "int" || got.Value.I != 5 {

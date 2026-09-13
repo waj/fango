@@ -1,0 +1,14 @@
+import Fail exposing (Fail)
+import File
+import IO exposing (Error)
+
+-- A user-written generic wrapper over a resource runner has a result type
+-- that could carry the handle, so it is rejected the way a generic wrapper
+-- over State.run is: only a concrete, capture-free result is admitted.
+
+withLogged : String -> (File.Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+withLogged path use =
+    print ("opening " ++ path)
+    File.withFile path use
+
+main() = print "unreachable"

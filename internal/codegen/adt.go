@@ -120,10 +120,18 @@ func (g *gen) ctorLit(e *core.App) goast.Expr {
 		}
 		return callExpr(indexExpr(selector("fangort", fn), g.goTypes(typeArgs)), args...)
 	}
-	litType := indexExpr(g.ctorRef(e.Ctor), g.goTypes(typeArgs))
+	return g.ctorValue(e.Ctor, typeArgs, args...)
+}
+
+// ctorValue builds `&C_Name[typeArgs]{elts…}` for an ordinary ADT
+// constructor. typeArgs are already reduced to the runtime parameters.
+// Native-boundary emission shares this with ctorLit so a Result or a wrapper
+// built at a sidecar call has exactly the representation a literal has.
+func (g *gen) ctorValue(ctor *types.CtorInfo, typeArgs []types.Type, elts ...goast.Expr) goast.Expr {
+	litType := indexExpr(g.ctorRef(ctor), g.goTypes(typeArgs))
 	return &goast.UnaryExpr{
 		Op: gotoken.AND,
-		X:  &goast.CompositeLit{Type: litType, Elts: args},
+		X:  &goast.CompositeLit{Type: litType, Elts: elts},
 	}
 }
 

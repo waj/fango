@@ -1247,11 +1247,18 @@ func (l *linter) control(c types.Control, where string) {
 	}
 }
 
+// controlInstance reports whether a call's control is an instance of its
+// callee's contract. A polymorphic contract admits any actual whose lower
+// bound is at least its own: a fixed Direct or Exit call, or a call that is
+// itself polymorphic with a higher lower bound, as when an open-row caller
+// also carries an abort label. The caller's own emission already resolves
+// such a call in Exit context — a definition whose lower bound is Exit emits
+// only its Exit member — so the callee's Exit member is always what runs.
 func controlInstance(actual, contract types.Control) bool {
 	if actual == contract {
 		return true
 	}
-	return contract.Polymorphic && actual.Transport >= contract.Transport && !actual.Polymorphic
+	return contract.Polymorphic && actual.Transport >= contract.Transport
 }
 
 func controlBodyFits(body, contract types.Control) bool {

@@ -1,0 +1,95 @@
+-- grep-lite: search files for a fixed string.
+--
+--     grep [-r] PATTERN PATH...
+--
+-- Prints every line containing PATTERN. With more than one path, or with -r,
+-- each line is prefixed by its file, as `path:line:text`. With -r a directory
+-- path is searched recursively, in sorted order; without it a directory is
+-- reported and skipped. A path that cannot be read is reported and skipped as
+-- well, and the search continues.
+--
+-- The exit status follows grep: 0 when something matched, 1 when nothing did,
+-- and 2 when any path failed or the arguments were wrong.
+--
+-- Each file is streamed through a scope: File.withFile opens it, readLine
+-- yields one line at a time with its terminator kept separate, and the handle
+-- is closed when the search of that file ends, however it ends. Failures are
+-- values of IO.Error, so a missing file and a directory in the wrong place
+-- are ordinary cases rather than crashes.
+
+import Fail exposing (Fail, attempt)
+import File
+import IO exposing (Error, describeError)
+import List exposing (List(..), foldl)
+import Result exposing (Result(..))
+import String
+
+type Options = { recursive : Bool, pattern : String, paths : List String, prefix : Bool }
+
+type Outcome = { matched : Bool, failed : Bool }
+
+-- searchLines scans one open file, printing matches as it goes and answering
+-- whether any line matched.
+searchLines : String -> String -> File.Handle -> Int -> Bool ->{IO, Fail Error} Bool
+searchLines pattern label file lineNumber found =
+    case File.readLine file of
+        Nothing -> found
+        Just line ->
+            if String.contains pattern line.text then
+                print (label ++ show lineNumber ++ ":" ++ line.text)
+                searchLines pattern label file (lineNumber + 1) True
+            else
+                searchLines pattern label file (lineNumber + 1) found
+
+report : Error -> Outcome ->{IO} Outcome
+report error outcome =
+    print (describeError error)
+    { outcome | failed = True }
+
+searchFile : Options -> String -> Outcome ->{IO} Outcome
+searchFile options path outcome =
+    label = if options.prefix then path ++ ":" else ""
+    case attempt (\_ -> File.withFile path (\file -> searchLines options.pattern label file 1 False)) of
+        Ok found -> { outcome | matched = outcome.matched || found }
+        Err error -> report error outcome
+
+searchPath : Options -> String -> Outcome ->{IO} Outcome
+searchPath options path outcome =
+    case File.isDirectory path of
+        Ok True ->
+            if options.recursive then
+                case File.listDirectory path of
+                    Ok names -> foldl (\name found -> searchPath options (path ++ "/" ++ name) found) outcome names
+                    Err error -> report error outcome
+            else
+                print (path ++ ": is a directory")
+                { outcome | failed = True }
+        Ok False -> searchFile options path outcome
+        Err error -> report error outcome
+
+withPaths : Bool -> String -> List String -> Maybe Options
+withPaths recursive pattern paths =
+    case paths of
+        Nil -> Nothing
+        Cons _ rest -> Just ({ recursive = recursive, pattern = pattern, paths = paths, prefix = recursive || rest /= Nil })
+
+parseOptions : List String -> Maybe Options
+parseOptions args =
+    case args of
+        Cons "-r" (Cons pattern paths) -> withPaths True pattern paths
+        Cons pattern paths -> withPaths False pattern paths
+        Nil -> Nothing
+
+main() =
+    case parseOptions (IO.args()) of
+        Nothing ->
+            print "Usage: grep [-r] PATTERN PATH..."
+            IO.exit 2
+        Just options ->
+            outcome = foldl (searchPath options) { matched = False, failed = False } options.paths
+            if outcome.failed then
+                IO.exit 2
+            else if outcome.matched then
+                ()
+            else
+                IO.exit 1

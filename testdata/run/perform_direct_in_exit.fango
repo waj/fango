@@ -1,0 +1,38 @@
+import Fail exposing (Fail, attempt, fail)
+import Result exposing (Result(..))
+
+-- A perform on a Direct handler activation from inside an Exit context: the
+-- resumptive Count handler is installed outside `attempt`, and the aborting
+-- callback performs its operations as a statement, as a Unit value, and as a
+-- value the callback returns. Each plain result must be wrapped as a normal
+-- outcome rather than handed to Exit code as is.
+
+effect Count
+    bump : Int -> ()
+    readTotal : () -> Int
+
+withValue : Int -> (Int ->{Fail String | e} a) ->{Fail String | e} a
+withValue x use = use x
+
+counted : Int ->{Count, Fail String} Int
+counted v =
+    bump v
+    if v > 10 then fail "too big" else bump 1
+    readTotal()
+
+run : Int ->{IO} ()
+run start =
+    outcome =
+        handle (attempt (\_ -> withValue start (\v -> counted v))) with sum = 0 of
+            bump n -> resume () with sum + n
+            readTotal () -> resume sum with sum
+            return result -> (result, sum)
+    print outcome
+
+main() =
+    run 5
+    run 50
+    print (handle (attempt (\_ -> withValue 7 (\v -> bump v))) with sum = 0 of
+        bump n -> resume () with sum + n
+        readTotal () -> resume sum with sum
+        return result -> (result, sum))

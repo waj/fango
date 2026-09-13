@@ -443,6 +443,7 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 		}
 		errs = append(errs, ck.declareNative(vd)...)
 	}
+	errs = append(errs, ck.resolveNativeBoundaries(m)...)
 	// Fixity declarations carry no type and bind no name; the graph-wide
 	// table is built during module loading. They reach here only so the
 	// REPL can rebuild its table from the merged prelude.
@@ -901,7 +902,8 @@ func (ck *Checker) TypeDecl(td *ast.TypeDecl) []diag.Error {
 
 func (ck *Checker) EffectDecl(ed *ast.EffectDecl) []diag.Error {
 	errs := ck.declareEffectHeader(ed, false)
-	return append(errs, ck.declareEffectOps(ed, false)...)
+	errs = append(errs, ck.declareEffectOps(ed, false)...)
+	return append(errs, ck.resolveNativeBoundaries(&ast.Module{Decls: []ast.Decl{ed}})...)
 }
 
 // declareTypeHeader registers the type's name, unique, and parameters —

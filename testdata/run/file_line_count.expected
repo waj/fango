@@ -1,0 +1,3 @@
+input.txt: 3
+blanks.txt: 3
+missing.txt: no such file or directory

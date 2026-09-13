@@ -1,0 +1,9 @@
+import IO exposing (Error)
+import Result exposing (Result(..))
+
+-- Only the bundled File module may return Go errors across the boundary.
+
+probe : String ->{IO} Result Error Int
+probe = native
+
+main() = print "unreachable"

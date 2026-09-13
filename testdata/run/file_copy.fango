@@ -1,0 +1,38 @@
+import Fail exposing (Fail, attempt)
+import File
+import IO exposing (Error, describeError)
+import Result exposing (Result(..))
+
+-- Copying through two nested scopes. Each failure happens at a different
+-- point: before anything is open, after the input is open but before the
+-- output is, and after both are open. Every case releases what it acquired
+-- and reports a structured failure; the listing at the end shows which
+-- outputs the failing copies left behind.
+
+copyLines : File.Handle -> File.Handle -> Int ->{IO, Fail Error} Int
+copyLines input output count =
+    case File.readLine input of
+        Nothing -> count
+        Just line ->
+            File.write output (line.text ++ line.ending)
+            copyLines input output (count + 1)
+
+copy : String -> String ->{IO} Result Error Int
+copy from to =
+    attempt (\_ ->
+        File.withFile from (\input ->
+            File.withOutput to (\output -> copyLines input output 0)))
+
+report : String -> Result Error Int ->{IO} ()
+report label outcome =
+    case outcome of
+        Ok count -> print (label ++ ": copied " ++ show count ++ " lines")
+        Err error -> print (label ++ ": " ++ describeError error)
+
+main() =
+    report "copy" (copy "input.txt" "output.txt")
+    print (File.read "output.txt")
+    report "missing input" (copy "missing.txt" "never.txt")
+    report "output is a directory" (copy "input.txt" "adir")
+    report "input is a directory" (copy "adir" "truncated.txt")
+    print (File.listDirectory ".")

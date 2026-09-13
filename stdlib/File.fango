@@ -1,0 +1,133 @@
+{-# no-prelude #-}
+module File exposing (Handle, isDirectory, listDirectory, read, readLine, withAppend, withFile, withOutput, write, writeAll)
+
+import Basics exposing (..)
+import Fail exposing (Fail, attempt, fail, fromResult)
+import IO exposing (Error, IO, Line(..))
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import Scope
+
+{- Files as scoped resources.
+
+A `Handle` is an open file. Its constructor is private and it derives neither
+Show nor Eq, so a program can neither build, inspect, nor compare one; the
+only way to obtain a handle is inside a `with*` scope, and the compiler treats
+the type as a capability so the handle cannot outlive that scope.
+
+Both `Handle` and `Directory` wrap the sidecar's table id. The compiler erases
+the wrapper to its Int at the Go boundary and nowhere else (doc/design.md,
+"Go backend and runtime"). -}
+
+type Handle = Handle Int
+
+type Directory = Directory Int
+
+-- The fallible natives. Each Go function returns an error that the compiler
+-- classifies into `IO.Error` at the boundary. None is exposed; the scoped API
+-- below is the only way to reach them.
+
+openRead : String ->{IO} Result Error Handle
+openRead = native
+
+openWrite : String ->{IO} Result Error Handle
+openWrite = native
+
+openAppend : String ->{IO} Result Error Handle
+openAppend = native
+
+closeHandle : Handle ->{IO} Result Error ()
+closeHandle = native
+
+handleHasInput : Handle ->{IO} Result Error Bool
+handleHasInput = native
+
+readHandleLine : Handle ->{IO} Result Error String
+readHandleLine = native
+
+writeHandle : Handle -> String ->{IO} Result Error ()
+writeHandle = native
+
+readFileResult : String ->{IO} Result Error String
+readFileResult = native
+
+writeFileResult : String -> String ->{IO} Result Error ()
+writeFileResult = native
+
+openDirectory : String ->{IO} Result Error Directory
+openDirectory = native
+
+readDirectoryEntry : Directory ->{IO} Result Error String
+readDirectoryEntry = native
+
+closeDirectory : Directory ->{IO} Result Error ()
+closeDirectory = native
+
+isDirectoryPath : String ->{IO} Result Error Bool
+isDirectoryPath = native
+
+-- Scopes. Opening raises the failure before anything is acquired, so a failed
+-- open releases nothing; closing raises after the body, so a failed close
+-- after a successful body is the scope's failure and after a failed body it
+-- is recorded alongside the body's (see Scope).
+
+close : Handle ->{IO, Fail Error} ()
+close file = fromResult (closeHandle file)
+
+withOpened : (String ->{IO} Result Error Handle) -> String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+withOpened open path use = Scope.bracket (\_ -> fromResult (open path)) close use
+
+-- withFile opens path for reading and runs use on the handle.
+withFile : String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+withFile path use = withOpened openRead path use
+
+-- withOutput creates or truncates path and runs use on the handle.
+withOutput : String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+withOutput path use = withOpened openWrite path use
+
+-- withAppend opens path for appending, creating it if needed.
+withAppend : String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+withAppend path use = withOpened openAppend path use
+
+-- readLine has the console readLine's contract: Nothing at end of file,
+-- otherwise the line and its exact terminator.
+readLine : Handle ->{IO, Fail Error} Maybe Line
+readLine file =
+    if fromResult (handleHasInput file) then
+        raw = fromResult (readHandleLine file)
+        Just ({ text = IO.lineText raw, ending = IO.lineEnding raw })
+    else
+        Nothing
+
+write : Handle -> String ->{IO, Fail Error} ()
+write file text = fromResult (writeHandle file text)
+
+-- Whole-file operations need no handle and report failure as a Result.
+
+read : String ->{IO} Result Error String
+read path = readFileResult path
+
+writeAll : String -> String ->{IO} Result Error ()
+writeAll path text = writeFileResult path text
+
+isDirectory : String ->{IO} Result Error Bool
+isDirectory path = isDirectoryPath path
+
+collectEntries : Directory -> List String ->{IO, Fail Error} List String
+collectEntries directory found =
+    name = fromResult (readDirectoryEntry directory)
+    if name == "" then
+        List.reverse found
+    else
+        collectEntries directory (Cons name found)
+
+closeListing : Directory ->{IO, Fail Error} ()
+closeListing directory = fromResult (closeDirectory directory)
+
+-- listDirectory names the entries of a directory in sorted order.
+listDirectory : String ->{IO} Result Error (List String)
+listDirectory path =
+    attempt (\_ ->
+        Scope.bracket (\_ -> fromResult (openDirectory path)) closeListing (\directory ->
+            collectEntries directory Nil))

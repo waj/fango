@@ -1,0 +1,8 @@
+copy: copied 3 lines
+Ok alpha
+beta
+gamma
+missing input: missing.txt: no such file or directory
+output is a directory: adir: is a directory
+input is a directory: adir: is a directory
+Ok [adir, input.txt, output.txt, truncated.txt]

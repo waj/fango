@@ -181,12 +181,40 @@ func (c *ClassInfo) DictType(t Type) *TCon {
 
 // NativeInfo is declaration metadata shared by inference, Core, and both
 // backends. Template is nil for a Go-sidecar call.
+//
+// ParamWrappers, ResultWrapper, and Fallible describe the boundary shapes a
+// sidecar call may use beyond plain scalars (doc/design.md, "Go backend and
+// runtime"). They are resolved once, after the module's types are declared,
+// so both backends read the same constructors instead of re-deriving them.
 type NativeInfo struct {
 	Name, Module string
 	Scheme       Scheme
 	Arity        int
 	Template     *string
 	Effect       *EffectInfo
+	// ParamWrappers[i] is the single-scalar-field constructor parameter i
+	// is wrapped in, or nil for a plain scalar or Unit. Its length is Arity.
+	ParamWrappers []*CtorInfo
+	// ResultWrapper wraps the plain result, or the Ok payload when Fallible
+	// is set; nil for a plain scalar or Unit.
+	ResultWrapper *CtorInfo
+	// Fallible is set when the result is `Result IO.Error T` and the Go
+	// function returns an error alongside its payload.
+	Fallible *FallibleShape
+}
+
+// FallibleShape is everything a backend needs to turn a Go error into
+// `Err (IO.Error {...})` and a payload into `Ok payload`. Kinds indexes
+// IO.Kind's constructors in declaration order, matching fangort's kind codes.
+type FallibleShape struct {
+	Err, Ok *CtorInfo
+	Error   *CtorInfo
+	Kinds   []*CtorInfo
+	// Field positions inside Error's constructor.
+	KindIdx, PathIdx, MessageIdx int
+	// Payload is T, the Ok field's type; Unit when the Go function returns
+	// only an error.
+	Payload Type
 }
 
 func (*TVar) isType() {}

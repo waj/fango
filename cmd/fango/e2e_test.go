@@ -21,6 +21,7 @@ import (
 	"github.com/waj/fango/internal/build"
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/eval"
+	"github.com/waj/fango/internal/nativehost"
 	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/testutil"
 	"github.com/waj/fango/internal/types"
@@ -253,38 +254,6 @@ func buildFixtureBatch(emitted *fixtureEmissions) fixtureBatch {
 	return b
 }
 
-// compiledRunner produces the compiled backend's stdout for one case.
-type compiledRunner func(t *testing.T, stdin string) string
-
-// batchRunner executes the fixture's binary from the shared batch build.
-func batchRunner(path string) compiledRunner {
-	return func(t *testing.T, stdin string) string {
-		return runCompiled(t, exec.Command(runFixtureBatch(t).binary(path)), stdin)
-	}
-}
-
-// cliRunner compiles and runs through the real CLI, in a private build dir.
-func cliRunner(path string) compiledRunner {
-	return func(t *testing.T, stdin string) string {
-		cmd := exec.Command(cliBinary(t), "run", path)
-		cmd.Env = append(os.Environ(),
-			"FANGO_INTERNAL_PRINT_MAIN=1",
-			"FANGO_BUILD_DIR="+t.TempDir())
-		return runCompiled(t, cmd, stdin)
-	}
-}
-
-func runCompiled(t *testing.T, cmd *exec.Cmd, stdin string) string {
-	t.Helper()
-	var stdout, stderr bytes.Buffer
-	cmd.Stdin = strings.NewReader(stdin)
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("%s: %v\n%s", strings.Join(cmd.Args, " "), err, stderr.String())
-	}
-	return stdout.String()
-}
-
 // The compiled legs come from the single batch build, so the cases run in
 // parallel with no per-case build work. The interpreter leg is the exception;
 // see interpret below.
@@ -498,16 +467,21 @@ func runDifferentialCase(t *testing.T, path string, compiled compiledRunner) {
 	if err != nil {
 		t.Fatalf("missing %s.expected (or .error): %v", base, err)
 	}
-	expected := string(expData)
-	stdin := ""
-	if stdinData, err := os.ReadFile(base + ".stdin"); err == nil {
-		stdin = string(stdinData)
-	}
+	runDifferentialCaseWith(t, path, compiled, readFixtureInputs(t, base), string(expData))
+}
+
+// runDifferentialCaseWith runs one program under both backends with explicit
+// inputs and expected output, so a test can drive the same source through
+// several argument sets.
+func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner, in fixtureInputs, expected string) {
+	t.Helper()
 
 	// Backend 1: the Core interpreter. A Unit-typed main is observed through
 	// its print output; any other main through its value and shared formatter.
+	// A fixture with a sibling sidecar gets its own worker, exactly as a user
+	// module would in an interpreter session.
 	var stderr bytes.Buffer
-	prog, ck, ok := compileFile(path, &stderr)
+	prog, ck, _, _, sources, ok := compileFileGraph(path, &stderr)
 	if !ok {
 		t.Fatalf("compile failed:\n%s", stderr.String())
 	}
@@ -518,8 +492,35 @@ func runDifferentialCase(t *testing.T, path string, compiled compiledRunner) {
 		env := eval.NewEnv()
 		env.DefineProg(prog)
 		var printed bytes.Buffer
-		if _, err := eval.ForceIO(context.Background(), "main", env, eval.NewIOContext(strings.NewReader(stdin), &printed)); err != nil {
+		ioctx := eval.NewIOContext(strings.NewReader(in.stdin), &printed)
+		ioctx.Args = in.args
+		if dir := seedDir(t, in); dir != "" {
+			ioctx.Dir = dir
+		}
+		if len(sources) > 0 {
+			workerSources := make([]nativehost.Source, len(sources))
+			for i, source := range sources {
+				workerSources[i] = nativehost.Source{Module: source.Module, Content: source.Content}
+			}
+			executor, err := nativehost.New(workerSources)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer executor.Close()
+			ioctx.Natives = executor
+		}
+		_, err := eval.ForceIO(context.Background(), "main", env, ioctx)
+		var exitErr *natives.ExitError
+		switch {
+		case errors.As(err, &exitErr):
+			if exitErr.Code != in.status {
+				t.Fatalf("eval: exited with status %d, want %d", exitErr.Code, in.status)
+			}
+			return printed.String()
+		case err != nil:
 			t.Fatalf("eval: %v", err)
+		case in.status != 0:
+			t.Fatalf("eval: completed normally, want exit status %d", in.status)
 		}
 		mainTy := prog.Defs[len(prog.Defs)-1].Type
 		for _, d := range prog.Defs {
@@ -531,7 +532,7 @@ func runDifferentialCase(t *testing.T, path string, compiled compiledRunner) {
 		if con, isCon := mainTy.(*types.TCon); (isCon && con.Unique == ck.B.Unit.Unique) || functionMain {
 			return printed.String()
 		}
-		shown, err := eval.EvalIO(context.Background(), prog.EntryDisplay, env, eval.NewIOContext(strings.NewReader(stdin), &printed))
+		shown, err := eval.EvalIO(context.Background(), prog.EntryDisplay, env, ioctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -545,7 +546,10 @@ func runDifferentialCase(t *testing.T, path string, compiled compiledRunner) {
 	if testing.Short() {
 		t.Skip("compiled leg skipped in -short mode")
 	}
-	compiledOut := compiled(t, stdin)
+	compiledOut, status := compiled(t, in, seedDir(t, in))
+	if status != in.status {
+		t.Errorf("compiled exit status %d, want %d", status, in.status)
+	}
 	if compiledOut != expected {
 		t.Errorf("compiled output:\n%q\nwant:\n%q", compiledOut, expected)
 	}
@@ -595,7 +599,7 @@ func TestEmitDeterministicAndFormatted(t *testing.T) {
 	// list_literals and stdlib_list cover the bundled List's runtime
 	// representation, whose emission is driven by a nominal identity rather
 	// than by a name (doc/roadmap-list.md).
-	for _, name := range []string{"arith0.fango", "print_float.fango", "if_expr.fango", "block_area.fango", "block_print_order.fango", "fib.fango", "partial.fango", "poly_map_filter_foldr.fango", "poly_eq_nested.fango", "list_literals.fango", "stdlib_list.fango", "effect_translate_return.fango", "effect_nested_restore.fango", "effect_partial_capture.fango", "effect_row_union.fango", "scope_cleanup_failure.fango"} {
+	for _, name := range []string{"arith0.fango", "print_float.fango", "if_expr.fango", "block_area.fango", "block_print_order.fango", "fib.fango", "partial.fango", "poly_map_filter_foldr.fango", "poly_eq_nested.fango", "list_literals.fango", "stdlib_list.fango", "effect_translate_return.fango", "effect_nested_restore.fango", "effect_partial_capture.fango", "effect_row_union.fango", "scope_cleanup_failure.fango", "file_copy.fango", "native_wrapper.fango"} {
 		path := filepath.Join("..", "..", "testdata", "run", name)
 		a := emittedProject(t, path)
 		b := emittedProject(t, path)

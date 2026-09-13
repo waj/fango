@@ -1,0 +1,7 @@
+import Fail exposing (Fail, attempt, fail)
+import List exposing (List(..), each)
+
+checkAll : List Int ->{Fail String, IO | e} ()
+checkAll xs = each (\x -> if x > 2 then fail "big" else print x) xs
+
+main() = print (attempt (\_ -> checkAll (Cons 1 (Cons 3 Nil))))

@@ -27,6 +27,7 @@ import (
 	fango "github.com/waj/fango"
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/runtimefiles"
+	"github.com/waj/fango/runtime/fangort"
 	"github.com/waj/fango/runtime/nativewire"
 )
 
@@ -269,6 +270,9 @@ func (e *Executor) Call(ctx context.Context, host Host, name string, args []any)
 			}
 			if m.Code != 0 || m.Value.Kind == "exit" {
 				return nil, &ExitError{Code: m.Code}
+			}
+			if m.Failure != nil {
+				return fangort.IOFailure{Kind: m.Failure.Kind, Path: m.Failure.Path, Message: m.Failure.Message}, nil
 			}
 			return decodeValue(m.Value)
 		default:

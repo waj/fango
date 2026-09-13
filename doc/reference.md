@@ -359,7 +359,9 @@ main() =
 trailing newline. It is a native operation; the prelude imports `IO`, so
 `IO.write` is reachable without an import of your own, while reaching it
 unqualified takes one. `print : Show a => a ->{IO} ()` and `readLine` are
-unqualified already, from the prelude. `IO` also exposes:
+unqualified already, from the prelude. `IO` also exposes these legacy
+operations, kept for existing programs; new code reads and writes files
+through the `File` module below, which reports failures as values:
 
 ```fango
 args : () ->{IO} List String
@@ -383,7 +385,88 @@ terminates with that status.
 `readLine : () ->{IO} Maybe IO.Line`
 returns `Nothing` at clean end of input and otherwise preserves the line
 terminator separately as `"\n"`, `"\r\n"`, or `""` for an unterminated final
-line. Malformed UTF-8 input sequences are replaced with U+FFFD.
+line. Malformed UTF-8 input sequences are replaced with U+FFFD. The pure
+helpers `lineText : String -> String` and `lineEnding : String -> String`
+split a raw line the same way, so other line sources can produce a `Line`.
+
+Structured failures are values of `IO.Error`:
+
+```fango
+type Kind = NotFound | PermissionDenied | AlreadyExists | IsDirectory | NotDirectory | Other
+    deriving (Eq, Show)
+
+type Error = { kind : Kind, path : String, message : String } deriving (Eq, Show)
+
+describeError : Error -> String
+```
+
+`kind` classifies what went wrong, `path` is the path the program supplied,
+and `message` is the operating system's own text. `describeError` renders
+`path: reason` with a fixed reason per kind — `no such file or directory`,
+`permission denied`, `file exists`, `is a directory`, `not a directory` — so
+its output is the same on every platform; only an `Other` failure shows the
+system message. The legacy `readFile` and `writeFile` above do not produce
+these values; the `File` module does.
+
+`File` reads, writes, and lists files with structured failures, and treats an
+open file as a scoped resource:
+
+```fango
+import Fail exposing (Fail, attempt)
+import File
+import IO exposing (Error)
+
+countLines : File.Handle -> Int ->{IO, Fail Error} Int
+countLines file count =
+    case File.readLine file of
+        Nothing -> count
+        Just _ -> countLines file (count + 1)
+
+main() =
+    case attempt (\_ -> File.withFile "input.txt" (\file -> countLines file 0)) of
+        Ok count -> print count
+        Err error -> print (IO.describeError error)
+```
+
+Its public types are
+
+```fango
+withFile : String -> (File.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
+withOutput : String -> (File.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
+withAppend : String -> (File.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
+readLine : File.Handle ->{IO, Fail IO.Error} Maybe IO.Line
+write : File.Handle -> String ->{IO, Fail IO.Error} ()
+read : String ->{IO} Result IO.Error String
+writeAll : String -> String ->{IO} Result IO.Error ()
+listDirectory : String ->{IO} Result IO.Error (List String)
+isDirectory : String ->{IO} Result IO.Error Bool
+```
+
+`withFile path use` opens `path` for reading and runs `use` on the handle;
+`withOutput` creates or truncates the file first, and `withAppend` opens it
+for appending, creating it if needed. Each is a cleanup scope (see below): the
+file is closed exactly once when `use` finishes, whether it returned, failed,
+or exited to an outer handler. A failed open raises `Fail IO.Error` before
+anything is acquired; a failed close after a successful body is the scope's
+failure, and after a failed body it is recorded alongside the body's failure.
+`readLine` has the console `readLine`'s contract — `Nothing` at end of file,
+otherwise the text and its exact terminator — and `write` writes a string as
+given. Both raise `Fail IO.Error` on a system failure, so a body that only
+reads and writes needs no `case` of its own; `attempt` around the scope
+collects the failure. `read` and `writeAll` handle a whole file without a
+handle and answer a `Result` instead. `listDirectory` names a directory's
+entries in sorted order, and `isDirectory` answers whether a path names one;
+a missing path is an `Err` with kind `NotFound` for both.
+
+`File.Handle` is abstract: it has no constructor, no `Show`, and no `Eq`, and
+it can be obtained only inside a `with*` scope. The compiler treats it as a
+capability, so a body may not return the handle, a closure over it, or data
+containing it (`RESOURCE ESCAPES`), and a scoped handler outside the scope may
+not keep it in its state (`STATE RESULT ESCAPES`). As with `State.run`, the
+result of a `with*` call must be a scalar or transitively capture-free data,
+so a user-written generic wrapper over `withFile` is rejected; write the body
+at the call site instead. Passing a named worker whose closed row lacks
+`Fail IO.Error` where `use` is expected is a row mismatch; wrap it in a lambda.
 
 `Basics` also declares three integer functions the prelude leaves out, so
 reaching them unqualified takes an import of your own:
@@ -711,9 +794,21 @@ The supported boundary types are `Int`/`int64`, `Float`/`float64`,
 `String`/`string`, `Char`/`rune`, `Bool`/`bool`, and Unit. String and Char
 results are validated, and an invalid UTF-8 string or non-scalar rune panics at
 the native boundary. Unit parameters are omitted from
-the Go function and a Unit result is represented by no Go result. Functions,
-ADTs, polymorphic variables, class constraints, Go type parameters, multiple
-results, and `error` results are rejected. Effect rows on native value types
+the Go function and a Unit result is represented by no Go result.
+
+One kind of declared type also crosses: a type the same module declares with
+exactly one constructor holding exactly one boundary scalar, such as
+`type Token = Token Int`, may appear as a parameter or result. The Go function
+sees the scalar (`int64` here); the compiler projects the field on the way in
+and rebuilds the constructor on the way out, in both backends. Keep the
+constructor out of the module's exposing list and derive no `Show` or `Eq`,
+and callers hold an opaque handle they can neither forge nor inspect — the
+bundled `File.Handle` is exactly this. Anything else — functions, other ADTs,
+records, polymorphic variables, class constraints, Go type parameters, and
+multiple results — is a `NATIVE ABI` error. A Go `error` result is likewise
+rejected in user sidecars (`FALLIBLE NATIVE NOT ALLOWED`); only the bundled
+`File` module's natives return one, which the compiler turns into
+`Result IO.Error a`. Effect rows on native value types
 are preserved for checking and may contain `IO` or user-declared effects; the
 sidecar call itself uses the same scalar ABI and does not receive a hidden
 evidence argument. Sidecars may import only Go standard-library packages.
@@ -1628,7 +1723,10 @@ result: a call whose result type can carry a capture is rejected with
 `RESOURCE ESCAPES`, because the compiler cannot prove the returned value does
 not retain the resource past its release. A scope over a scalar, or over any
 resource made of scalars and transitively capture-free algebraic data, leaves
-its result unrestricted.
+its result unrestricted. The bundled `File.Handle` is the exception to the
+shape rule: it is an `Int` behind a private constructor, but the compiler
+knows it as a resource, so `File.withFile` and its siblings restrict their
+results exactly as a scope over a closure-bearing record would.
 
 `Scope.bracket` is a compiler intrinsic rather than an ordinary library
 function, so the compiler knows each callback's effects need only be available

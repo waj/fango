@@ -43,6 +43,7 @@ type captureAnalyzer struct {
 	b                 *types.Builtins
 	defs              map[string]*Def
 	adts              map[int]*types.ADTInfo
+	adtsByName        map[string]*types.ADTInfo // canonical name -> ADT, for compiler-known resources
 	nextVar           types.CaptureVar
 	escapes           map[types.ScopeID]bool
 	scoped            map[types.ScopeID]bool
@@ -54,7 +55,7 @@ type captureAnalyzer struct {
 }
 
 func newCaptureAnalyzer(p *Prog, b *types.Builtins) *captureAnalyzer {
-	a := &captureAnalyzer{p: p, b: b, defs: map[string]*Def{}, adts: map[int]*types.ADTInfo{}, escapes: map[types.ScopeID]bool{}, scoped: map[types.ScopeID]bool{}, clauseVars: map[*Handle][][]types.CaptureVar{}}
+	a := &captureAnalyzer{p: p, b: b, defs: map[string]*Def{}, adts: map[int]*types.ADTInfo{}, adtsByName: map[string]*types.ADTInfo{}, escapes: map[types.ScopeID]bool{}, scoped: map[types.ScopeID]bool{}, clauseVars: map[*Handle][][]types.CaptureVar{}}
 	for i := range p.Defs {
 		d := &p.Defs[i]
 		a.defs[d.Name] = d
@@ -73,6 +74,7 @@ func newCaptureAnalyzer(p *Prog, b *types.Builtins) *captureAnalyzer {
 	}
 	for _, adt := range p.ADTs {
 		a.adts[adt.Con.Unique] = adt
+		a.adtsByName[adt.Con.Name] = adt
 	}
 	for i := range p.Defs {
 		Rewrite(p.Defs[i].Body, func(t types.Type) types.Type { return t }, func(e Expr) Expr {
@@ -387,7 +389,7 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			matched := false
 			if ref, ok := e.Callee.(*VarRef); ok {
 				if d := a.defs[ref.Name]; d != nil {
-					if a.checking && trustedScopedRunner(d.Name) && a.canCarry(e.Ty, nil) && !trustedStateForwarder(a.current, d) {
+					if a.checking && trustedScopedRunner(d.Name) && a.canCarry(e.Ty, nil) && !trustedForwarder(a.current, d) {
 						if resource, scope := a.scopeResourceType(d, e); scope {
 							// A cleanup scope over a resource that cannot hold a
 							// capability leaves its result unrestricted.
@@ -520,8 +522,16 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 }
 
 // scopeResourceType returns the instantiated resource type of a cleanup-scope
-// call, and whether the callee is that intrinsic at all.
+// call, and whether the callee is that intrinsic or a bundled resource runner
+// at all. A resource runner's resource is fixed by name, so no instantiation
+// is needed for it.
 func (a *captureAnalyzer) scopeResourceType(d *Def, e *App) (types.Type, bool) {
+	if resource, ok := types.ResourceRunner(d.Name); ok {
+		if adt := a.adtsByName[resource]; adt != nil {
+			return adt.Con, true
+		}
+		return nil, false
+	}
 	if d.Name != types.ScopeBracketName || len(d.Params) != 3 {
 		return nil, false
 	}
@@ -547,13 +557,28 @@ func trustedScopedRunner(name string) bool {
 	switch name {
 	case "State.run", "Writer.run", "Random.runSeeded", "Random.runSystem", types.ScopeBracketName:
 		return true
-	default:
-		return false
 	}
+	_, resource := types.ResourceRunner(name)
+	return resource
 }
 
-func trustedStateForwarder(current, callee *Def) bool {
-	return current != nil && current.Name == "Random.runSystem" && callee != nil && callee.Name == "Random.runSeeded"
+// trustedForwarder exempts a bundled runner's own call to the runner it
+// wraps: Random.runSystem forwards to runSeeded, and a File resource runner
+// forwards to the cleanup-scope intrinsic or to another File runner. The
+// wrapper's polymorphic result is what its callers are checked against, so
+// checking the forwarding call itself would reject the wrapper's definition.
+func trustedForwarder(current, callee *Def) bool {
+	if current == nil || callee == nil {
+		return false
+	}
+	if current.Name == "Random.runSystem" && callee.Name == "Random.runSeeded" {
+		return true
+	}
+	if _, resource := types.ResourceRunner(current.Name); resource {
+		_, calleeResource := types.ResourceRunner(callee.Name)
+		return callee.Name == types.ScopeBracketName || calleeResource
+	}
+	return false
 }
 
 func (a *captureAnalyzer) tree(t Tree, env map[string]types.CaptureSet, evidence map[int][]types.CaptureSet, scrut types.CaptureSet) captureResult {
@@ -616,7 +641,10 @@ func (a *captureAnalyzer) canCarry(t types.Type, seen map[int]bool) bool {
 			}
 		}
 		adt := a.adts[t.Unique]
-		if adt == nil {
+		if adt == nil || types.ResourceType(adt.Con.Name) {
+			// A compiler-known resource is a capability regardless of its
+			// shape: the bundled handle is an Int behind a private
+			// constructor, and that Int must not outlive its scope.
 			return true
 		}
 		if seen == nil {

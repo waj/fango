@@ -126,11 +126,23 @@ func invoke(functions map[string]any, name string, args []nativewire.Value) (res
 		in[i] = decode(arg)
 	}
 	out := call.Call(in)
+	// A fallible native returns an error last. A non-nil error is classified
+	// here, in the process that saw it, and travels as an ordinary value.
+	if n := len(out); n > 0 && out[n-1].Type() == errorType {
+		if !out[n-1].IsNil() {
+			failure := fangort.ClassifyIOError(out[n-1].Interface().(error))
+			result.Failure = &nativewire.Failure{Kind: failure.Kind, Path: failure.Path, Message: failure.Message}
+			return result
+		}
+		out = out[:n-1]
+	}
 	if len(out) == 1 {
 		result.Value = encode(out[0])
 	}
 	return result
 }
+
+var errorType = reflect.TypeFor[error]()
 
 // Run connects to the interpreter, installs its host in every linked sidecar,
 // and serves native calls until the interpreter closes the connection.

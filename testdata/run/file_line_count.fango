@@ -1,0 +1,30 @@
+import Fail exposing (Fail, attempt)
+import File
+import IO exposing (Error, describeError)
+import List exposing (List(..), foldl)
+import Result exposing (Result(..))
+
+-- Line counting over the files named on the command line, streaming each one
+-- through a scope. An unreadable file is reported and skipped, and the exit
+-- status says whether every file was counted, the way a command-line tool
+-- would report it.
+
+countLines : File.Handle -> Int ->{IO, Fail Error} Int
+countLines file count =
+    case File.readLine file of
+        Nothing -> count
+        Just _ -> countLines file (count + 1)
+
+countFile : String -> Bool ->{IO} Bool
+countFile path ok =
+    case attempt (\_ -> File.withFile path (\file -> countLines file 0)) of
+        Ok count ->
+            print (path ++ ": " ++ show count)
+            ok
+        Err error ->
+            print (describeError error)
+            False
+
+main() =
+    ok = foldl countFile True (IO.args())
+    if ok then () else IO.exit 2

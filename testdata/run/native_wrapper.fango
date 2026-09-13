@@ -1,0 +1,22 @@
+import List exposing (List(..), each)
+
+-- A user sidecar with an opaque wrapper type: Token is a single-constructor
+-- type around an Int, so it crosses the Go boundary as int64 and comes back
+-- wrapped. Its constructor is never used here and it derives no Show, so the
+-- id behind a token is unobservable; only the sidecar can interpret it.
+
+type Token = Token Int
+
+mint : String -> Token
+mint = native
+
+describe : Token -> String
+describe = native
+
+next : Token -> Token
+next = native
+
+main() =
+    first = mint "alpha"
+    second = next first
+    each print (Cons (describe first) (Cons (describe second) (Cons (describe (mint "beta")) Nil)))

@@ -160,6 +160,10 @@ type Env struct {
 	// Pointer identity means REPL redefinition invalidates naturally: a new
 	// generation is a new *core.Def.
 	tails map[*core.Def]*core.TailLoop
+	// natives is the program's sidecar declaration metadata, keyed by
+	// canonical name. A sidecar call reads its boundary shapes from here
+	// (doc/design.md, "Go backend and runtime").
+	natives map[string]*types.NativeInfo
 
 	// Templates is the compiler's quote table, installed only for the
 	// compile-time environment. The Meta natives that assemble generated
@@ -193,7 +197,7 @@ func (f *Frame) lookup(name string) (Value, bool) {
 }
 
 func NewEnv() *Env {
-	return &Env{cells: map[string]*Cell{}, workers: map[string]*core.Def{}, tails: map[*core.Def]*core.TailLoop{}}
+	return &Env{cells: map[string]*Cell{}, workers: map[string]*core.Def{}, tails: map[*core.Def]*core.TailLoop{}, natives: map[string]*types.NativeInfo{}}
 }
 
 // tailLoop reports (and caches) whether def executes as a frame-reuse loop.
@@ -229,6 +233,9 @@ func (e *Env) DefineProg(p *core.Prog) {
 	e.entry = p.Entry
 	if e.entry == "" {
 		e.entry = "main"
+	}
+	for name, n := range p.Natives {
+		e.natives[name] = n
 	}
 	for i := range p.Defs {
 		d := &p.Defs[i]
@@ -429,8 +436,14 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
-			if executor.Has(e.Name) {
-				return executor.Call(in.ctx, in.ioctx, e.Name, args)
+			// The worker registers sidecar functions under their link module,
+			// which a headerless entry's bare canonical symbol does not carry.
+			key := e.Name
+			if e.Module != "" {
+				key = e.Module + "." + types.SurfaceName(e.Name)
+			}
+			if executor.Has(key) {
+				return in.sidecarCall(executor, key, in.env.natives[e.Name], args)
 			}
 		}
 		if spec, ok := natives.Lookup(e.Name); ok && !spec.Effect {
@@ -513,7 +526,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				return nil, err
 			}
 			if executor.Has(key) {
-				return executor.Call(in.ctx, in.ioctx, key, args)
+				return in.sidecarCall(executor, key, e.Op.Native, args)
 			}
 		}
 		if spec, ok := natives.Lookup(key); ok && spec.Effect {

@@ -1,0 +1,9 @@
+-- A boundary wrapper has exactly one constructor with exactly one scalar
+-- field; a two-field type has no scalar to cross as.
+
+type Pair = Pair Int Int
+
+mint : String -> Pair
+mint = native
+
+main() = print "unreachable"
