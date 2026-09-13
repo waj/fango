@@ -64,10 +64,16 @@ func Parse(toks []token.Token, f *source.File) (*ast.Module, []diag.Error) {
 			p.errorAt(t.Span, "MISPLACED PRAGMA", "A pragma describes the whole file, so it belongs above the `module`\nheader rather than here.")
 			continue
 		}
+		declStart := p.pos
 		if d := p.parseDecl(); d != nil {
+			sp := p.spanOfTokens(declStart, p.pos)
+			ast.SetDeclSpan(d, sp)
 			if vd, ok := d.(*ast.ValueDecl); ok && len(m.Decls) > 0 {
 				prev, _ := m.Decls[len(m.Decls)-1].(*ast.ValueDecl)
 				if p.appendEquation(prev, vd) {
+					// The group is one declaration, so its extent grows to
+					// cover the row just folded into it.
+					prev.Sp = prev.Sp.Merge(sp)
 					continue
 				}
 			}
@@ -2265,6 +2271,21 @@ func (p *parser) expect(k token.Kind, msg string) bool {
 // syntax error does not cascade through the rest of the file. consumeFirst
 // forces one token of progress — required when the offending token itself
 // sits at column 1, or the parse loop would spin on it forever.
+// spanOfTokens covers tokens [from, to) — the extent a declaration consumed.
+// It is clamped so a declaration that consumed nothing still reports a
+// well-formed zero-width span at its first token.
+func (p *parser) spanOfTokens(from, to int) source.Span {
+	if from >= len(p.toks) {
+		from = len(p.toks) - 1
+	}
+	start := p.toks[from].Span.Start
+	end := start
+	if to > from {
+		end = p.toks[to-1].Span.End
+	}
+	return source.Span{File: p.f, Start: start, End: end}
+}
+
 func (p *parser) recoverToTopLevel(consumeFirst bool) {
 	if consumeFirst {
 		p.next()

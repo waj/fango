@@ -156,6 +156,7 @@ type ClassDecl struct {
 	NameSpan source.Span
 	Param    Param
 	Methods  []OpSig
+	Sp       source.Span
 }
 
 type InstanceDecl struct {
@@ -163,6 +164,7 @@ type InstanceDecl struct {
 	Preds   []PredExpr
 	Methods []*ValueDecl
 	Owner   string
+	Sp      source.Span
 }
 
 // DeriverDecl supplies compile-time generators for every method of one class.
@@ -172,6 +174,7 @@ type DeriverDecl struct {
 	ClassSpan source.Span
 	Methods   []*ValueDecl
 	Owner     string
+	Sp        source.Span
 }
 
 func (*ClassDecl) isDecl()    {}
@@ -546,6 +549,7 @@ type ValueDecl struct {
 	Ann       *TypeAnn   // nil when unannotated
 	Body      Expr
 	Native    *NativeBody
+	Sp        source.Span
 }
 
 func (*ValueDecl) isDecl() {}
@@ -556,6 +560,7 @@ func (*ValueDecl) isDecl() {}
 type PatternDecl struct {
 	Pattern Pattern
 	Body    Expr
+	Sp      source.Span
 }
 
 func (*PatternDecl) isDecl() {}
@@ -573,6 +578,7 @@ type TypeDecl struct {
 	// ReflectionVisible is a resolver snapshot of nominal schemas accessible
 	// where this declaration was written. Derived metadata inherits it.
 	ReflectionVisible map[string]bool
+	Sp                source.Span
 }
 
 type RecordFieldDef struct {
@@ -605,6 +611,7 @@ type EffectDecl struct {
 	NameSpan source.Span
 	Params   []Param
 	Ops      []OpSig
+	Sp       source.Span
 }
 
 // OpSig is one operation signature line inside an `effect` declaration.
@@ -723,4 +730,59 @@ func Spelling(name string) string {
 
 func isIdentStart(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_'
+}
+
+// DeclSpan reports a declaration's source extent, or the zero span for a
+// declaration the compiler synthesized rather than parsed — deriving, class
+// elaboration, and module loading all build declarations that answer to no
+// source text. It is a function rather than a method on Decl so those sites
+// are not obliged to invent a span they do not have.
+//
+// For a ValueDecl the span covers the whole equation group, annotation line
+// included, which is what "blank lines and comments do not split a group"
+// (doc/reference.md, "Declarations and equations") requires of anything
+// reassociating comments to declarations.
+func DeclSpan(d Decl) source.Span {
+	switch d := d.(type) {
+	case *ValueDecl:
+		return d.Sp
+	case *PatternDecl:
+		return d.Sp
+	case *TypeDecl:
+		return d.Sp
+	case *EffectDecl:
+		return d.Sp
+	case *ClassDecl:
+		return d.Sp
+	case *InstanceDecl:
+		return d.Sp
+	case *DeriverDecl:
+		return d.Sp
+	case *FixityDecl:
+		return d.Sp
+	}
+	return source.Span{}
+}
+
+// SetDeclSpan records a parsed declaration's extent. Only the parser calls it;
+// every other producer of a Decl leaves the span zero.
+func SetDeclSpan(d Decl, sp source.Span) {
+	switch d := d.(type) {
+	case *ValueDecl:
+		d.Sp = sp
+	case *PatternDecl:
+		d.Sp = sp
+	case *TypeDecl:
+		d.Sp = sp
+	case *EffectDecl:
+		d.Sp = sp
+	case *ClassDecl:
+		d.Sp = sp
+	case *InstanceDecl:
+		d.Sp = sp
+	case *DeriverDecl:
+		d.Sp = sp
+	case *FixityDecl:
+		d.Sp = sp
+	}
 }
