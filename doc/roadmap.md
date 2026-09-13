@@ -168,6 +168,19 @@ Haskell's ambient reification, which is what breaks modularity there.
   by a wide margin on the list cases. That makes the gate sound as a
   regression alarm and misleading as a target.
 
+## Developer tooling: formatter and editor support
+
+[roadmap-tooling.md](roadmap-tooling.md) owns two unstarted items that share
+prerequisites: a formatter for the layout syntax and a language server. The
+formatter is a library with `fango fmt` as a thin front end, so the language
+server later calls the same code rather than reimplementing it, and formatting
+stays a single-file, pre-fixity operation that works on a project which does
+not compile. Capturing comments in the lexer, giving declarations source
+extents, and extracting a check entry point that accumulates diagnostics
+across stages are shared groundwork; that document records why comments arrive
+as a side channel rather than as tokens, and why the formatter re-parses its
+own output before returning it.
+
 ## Calling conventions and recursion shapes
 
 [roadmap-calls.md](roadmap-calls.md) owns two measured, unstarted items: passing
@@ -359,7 +372,6 @@ These are directions, not commitments or an ordering after the work above.
 - Broaden the bounded scalar worker specialization only when benchmarks justify
   it; multiple numeric parameters, effectful workers, and custom dictionaries
   currently retain the generic evidence-passing path.
-- A canonical formatter for the layout syntax and an LSP for editor support.
 - Operator surface beyond declaration and fixity: module-scoped fixity, so two
   libraries could give the same spelling different precedences; sections
   (`(+ 1)`, `(1 +)`); operators bound inside a function body, which today have
