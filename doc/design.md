@@ -1024,7 +1024,8 @@ declared in the same file; the checker confirms it on resolved types. A
 *fallible result*, `Result IO.Error a` backed by a Go `(T, error)`, is
 admitted only to the bundled `File` module's value natives. The Go error is
 classified in exactly one place, `fangort.ClassifyIOError`, into a kind code
-indexing `IO.Kind`'s constructors, the path, and the underlying message;
+indexing `IO.Kind`'s constructors, the path, and a stable message for a
+recognized kind or the underlying text for `Other`;
 generated code emits the branch at the call site as straight-line Go that
 builds `Err (IO.Error {...})` or `Ok payload` with the ordinary constructor
 emission, and the worker classifies in its dispatch loop and sends the

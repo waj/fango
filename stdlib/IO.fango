@@ -12,12 +12,13 @@ type Line = { text : String, ending : String } deriving (Eq, Show)
 type Kind = NotFound | PermissionDenied | AlreadyExists | IsDirectory | NotDirectory | Other deriving (Eq, Show)
 
 -- A structured IO failure: what went wrong, the path the program supplied,
--- and the system's message. Fallible natives produce these; see the design.
+-- and a stable reason for a known kind or the system's message for Other.
+-- Fallible natives produce these; see the design.
 type Error = { kind : Kind, path : String, message : String } deriving (Eq, Show)
 
 -- describeError renders a failure in the conventional `path: reason` form.
--- The text comes from the kind, not the host, so it is the same on every
--- platform; only an Other failure shows the system message.
+-- Known kinds use text from the kind rather than the host, so they are the
+-- same on every platform; Other shows the system message.
 describeError : Error -> String
 describeError error =
     case error.kind of

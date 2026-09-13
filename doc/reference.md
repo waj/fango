@@ -400,13 +400,15 @@ type Error = { kind : Kind, path : String, message : String } deriving (Eq, Show
 describeError : Error -> String
 ```
 
-`kind` classifies what went wrong, `path` is the path the program supplied,
-and `message` is the operating system's own text. `describeError` renders
-`path: reason` with a fixed reason per kind — `no such file or directory`,
-`permission denied`, `file exists`, `is a directory`, `not a directory` — so
-its output is the same on every platform; only an `Other` failure shows the
-system message. The legacy `readFile` and `writeFile` above do not produce
-these values; the `File` module does.
+`kind` classifies what went wrong and `path` is the path the program supplied.
+For `NotFound`, `PermissionDenied`, `AlreadyExists`, `IsDirectory`, and
+`NotDirectory`, `message` is respectively `no such file or directory`,
+`permission denied`, `file exists`, `is a directory`, or `not a directory`.
+Those messages, and `describeError`'s output for them, are the same on every
+platform. An `Other` failure instead preserves the underlying system message
+for diagnostics; programs should use `kind`, rather than matching that text,
+for portable behavior. The legacy `readFile` and `writeFile` above do not
+produce these values; the `File` module does.
 
 `File` reads, writes, and lists files with structured failures, and treats an
 open file as a scoped resource:
