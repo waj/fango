@@ -1,0 +1,10 @@
+ok 42
+err not a number: x
+err not positive: -3
+ok 9
+err zero
+err outer saw inner failure
+True
+True
+False
+True

@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module String exposing (Uncons(..), byteLength, fromChar, length, padLeft, padRight, slice, split, startsWith, toInt, trim, uncons, words)
+module String exposing (Uncons(..), byteLength, contains, fromChar, length, padLeft, padRight, slice, split, startsWith, toInt, trim, uncons, words)
 
 import Basics exposing (..)
 import List exposing (List(..))
@@ -159,6 +159,21 @@ split separator text =
         Cons text Nil
     else
         splitHelp separator sepSize text 0 0 (byteLength text) Nil
+
+-- containsFrom is private: whether needle occurs at or after index.
+containsFrom : String -> Int -> String -> Int -> Int -> Bool
+containsFrom needle needleSize text index size =
+    if index + needleSize > size then
+        False
+    else if matchesAt needle needleSize text index size then
+        True
+    else
+        containsFrom needle needleSize text (index + 1) size
+
+-- contains tests whether needle occurs anywhere in text. The empty needle is
+-- found in every string, at index zero.
+contains : String -> String -> Bool
+contains needle text = containsFrom needle (byteLength needle) text 0 (byteLength text)
 
 -- scanSpaceBack is private: the index just past the last non-space byte,
 -- never below limit.

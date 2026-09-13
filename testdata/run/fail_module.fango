@@ -1,0 +1,37 @@
+import Fail exposing (Fail, attempt, fail, fromResult)
+import Result exposing (Result(..))
+import String
+
+-- The bundled Fail module: attempt captures a failure as a Result, fromResult
+-- raises an Err, and a nested attempt handles the innermost failure only.
+
+parsePositive : String ->{Fail String} Int
+parsePositive text =
+    case String.toInt text of
+        Nothing -> fail ("not a number: " ++ text)
+        Just n -> if n > 0 then n else fail ("not positive: " ++ text)
+
+decrement : Int -> Result String Int
+decrement n = if n == 0 then Err "zero" else Ok (n - 1)
+
+report : Result String Int ->{IO} ()
+report outcome =
+    case outcome of
+        Ok value -> print ("ok " ++ show value)
+        Err error -> print ("err " ++ error)
+
+main() =
+    report (attempt (\_ -> parsePositive "42"))
+    report (attempt (\_ -> parsePositive "x"))
+    report (attempt (\_ -> parsePositive "-3"))
+    report (attempt (\_ -> fromResult (decrement 10)))
+    report (attempt (\_ -> fromResult (decrement 0)))
+    report (attempt (\_ ->
+        inner = attempt (\_ -> parsePositive "oops")
+        case inner of
+            Err _ -> fail "outer saw inner failure"
+            Ok n -> n))
+    print (String.contains "ell" "hello")
+    print (String.contains "" "hello")
+    print (String.contains "hello!" "hello")
+    print (String.contains "lo" "hello")

@@ -533,6 +533,7 @@ length : String -> Int
 byteLength : String -> Int
 slice : Int -> Int -> String -> String
 startsWith : String -> String -> Bool
+contains : String -> String -> Bool
 uncons : String -> Maybe String.Uncons
 fromChar : Char -> String
 split : String -> String -> List String
@@ -543,8 +544,9 @@ padRight : Int -> Char -> String -> String
 
 `length` counts Unicode scalars and `byteLength` counts UTF-8 bytes. `slice`
 uses clamped half-open scalar indices and returns `""` when its end is not
-greater than its start. `startsWith prefix text` tests an exact prefix;
-`uncons` returns the first scalar and remaining string, or `Nothing` for the
+greater than its start. `startsWith prefix text` tests an exact prefix and
+`contains needle text` tests for an occurrence anywhere, with the empty needle
+found in every string; `uncons` returns the first scalar and remaining string, or `Nothing` for the
 empty string. `fromChar` makes the corresponding one-scalar string.
 `String.words : String -> List String` splits on ASCII space, tab, LF, CR,
 vertical tab, and form feed, and
@@ -574,6 +576,28 @@ type Result error value = Err error | Ok value deriving (Eq, Ord, Show)
 `map` transforms an `Ok`, `mapError` transforms an `Err`, `andThen` chains a
 successful computation, and `withDefault` extracts a success or returns its
 fallback.
+
+`Fail` is the conventional abort-only failure effect, so programs no longer
+declare their own:
+
+```fango
+module Fail exposing (Fail, attempt, fail, fromResult)
+
+effect Fail error
+    abort fail : error -> value
+
+attempt : (() ->{Fail error | e} value) ->{e} Result error value
+fromResult : Result error value ->{Fail error} value
+```
+
+`fail error` never returns: it unwinds to the nearest enclosing `attempt`,
+which answers `Err error`; a normal completion answers `Ok value`. `fromResult`
+unwraps an `Ok` and raises an `Err`, so a `Result`-returning call can join a
+failing computation with `fromResult (File.read path)`. Nested attempts handle
+only the failures raised inside them, and an abort raised by an outer `attempt`'s
+clause propagates outward as usual. The effect is not in the prelude: import
+`Fail exposing (Fail, attempt, fail)` to use it, and a module that declares its
+own `Fail` effect is unaffected.
 
 `State` provides a parameterized state effect and its standard runner:
 

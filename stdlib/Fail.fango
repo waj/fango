@@ -1,0 +1,28 @@
+{-# no-prelude #-}
+module Fail exposing (Fail, attempt, fail, fromResult)
+
+import Basics exposing (..)
+import Result exposing (Result(..))
+
+{- The conventional failure effect.
+
+`fail` never resumes: it unwinds to the nearest `attempt`, which turns the
+handled computation into a `Result`. The module is deliberately not part of the
+prelude, so a module that declares its own `Fail` keeps compiling. -}
+
+effect Fail error
+    abort fail : error -> value
+
+-- attempt runs an action that may fail, capturing the failure as `Err`.
+attempt : (() ->{Fail error | e} value) ->{e} Result error value
+attempt action =
+    handle action() of
+        fail error -> Err error
+        return value -> Ok value
+
+-- fromResult raises an `Err` as a failure and unwraps an `Ok`.
+fromResult : Result error value ->{Fail error} value
+fromResult result =
+    case result of
+        Err error -> fail error
+        Ok value -> value
