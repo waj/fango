@@ -1,0 +1,18 @@
+fango 0.1 — :help for commands
+> loaded Result
+loaded Fail
+loaded Scope
+loaded File
+> > > > Err Error { kind = NotFound, path = missing.txt, message = no such file or directory } : Result Error String
+> Ok False : Result Error Bool
+> Err Error { kind = IsDirectory, path = ., message = is a directory } : Result Error (Maybe Line)
+> -- RESOURCE ESCAPES ------------------------------------- <repl>
+
+This scope returns a capture-capable value built from a capture-capable resource, so the compiler cannot prove the resource does not outlive its release. Return immutable data instead.
+
+1| attempt (\_ -> File.withFile "." (\file -> file))
+   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> | | | | describe : Result Error a -> String
+> missing.txt: no such file or directory : String
+> .: is a directory : String
+> 

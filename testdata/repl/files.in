@@ -1,0 +1,16 @@
+import File
+import Fail exposing (attempt)
+import IO exposing (describeError)
+import Result exposing (Result(..))
+File.read "missing.txt"
+File.isDirectory "repl_test.go"
+attempt (\_ -> File.withFile "." (\file -> File.readLine file))
+attempt (\_ -> File.withFile "." (\file -> file))
+describe outcome =
+    case outcome of
+        Ok _ -> "read something"
+        Err error -> describeError error
+
+describe (attempt (\_ -> File.withFile "missing.txt" (\file -> File.readLine file)))
+describe (attempt (\_ -> File.withFile "." (\file -> File.readLine file)))
+:quit

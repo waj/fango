@@ -415,7 +415,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		}
 		var allDefs []core.Def
 		for _, info := range infos {
-			defs, es := elaborate.Decl(info, s.ck)
+			defs, es := elaborate.DeclIn(info, s.installed, s.ck)
 			if len(es) > 0 {
 				restore()
 				diag.Render(s.out, es)
@@ -476,7 +476,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	} else {
 		delete(s.ck.Workers, vd.Name)
 	}
-	defs, elabErrs := elaborate.Decl(info, s.ck)
+	defs, elabErrs := elaborate.DeclIn(info, s.installed, s.ck)
 	if len(elabErrs) > 0 {
 		restore()
 		diag.Render(s.out, elabErrs)
@@ -556,6 +556,10 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 // monomorphism rule is for its own memo cells only.
 func (s *Session) install(inc *modules.Increment) []diag.Error {
 	start := len(s.ck.Instances)
+	known := make(map[string]bool, len(s.ck.Intrinsics))
+	for name := range s.ck.Intrinsics {
+		known[name] = true
+	}
 	mono := s.ck.MonoValues
 	s.ck.MonoValues = false
 	infos, errs := s.ck.Module(&ast.Module{Decls: inc.Decls, InstanceImports: inc.InstanceImports})
@@ -563,7 +567,15 @@ func (s *Session) install(inc *modules.Increment) []diag.Error {
 	if len(errs) > 0 {
 		return errs
 	}
-	defs, errs := elaborate.Increment(infos, s.ck.Instances[start:], s.ck)
+	// An intrinsic declared by this increment needs its synthesized
+	// definition installed alongside the module that declares it.
+	var intrinsics []string
+	for name := range s.ck.Intrinsics {
+		if !known[name] {
+			intrinsics = append(intrinsics, name)
+		}
+	}
+	defs, errs := elaborate.Increment(infos, s.ck.Instances[start:], intrinsics, s.installed, s.ck)
 	if len(errs) > 0 {
 		return errs
 	}
@@ -576,7 +588,7 @@ func (s *Session) install(inc *modules.Increment) []diag.Error {
 		return errs
 	}
 	s.installed = program
-	s.env.DefineProg(&core.Prog{Defs: defs})
+	s.env.DefineProg(&core.Prog{Defs: defs, Natives: s.ck.Natives})
 	// Like a batch entry, the prompt sees instances and derivers from every
 	// module in its graph.
 	for _, name := range inc.Modules {
@@ -676,7 +688,7 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 	// Elaboration then defaults for evaluation; the value renders at the
 	// defaulted (ground) type.
 	shownTy := types.ShowScheme(types.Scheme{Body: s.ck.Sub.Apply(ty), Preds: s.ck.PendingPreds})
-	coreExpr, aux, elabErrs := elaborate.Expr(e, s.ck)
+	coreExpr, aux, elabErrs := elaborate.ExprIn(e, s.installed, s.ck)
 	if len(elabErrs) > 0 {
 		diag.Render(s.out, elabErrs)
 		return inputDone
@@ -733,7 +745,7 @@ func (s *Session) installInstances(infos []infer.DeclInfo, start int) []diag.Err
 	if len(errs) > 0 {
 		return errs
 	}
-	s.env.DefineProg(&core.Prog{Defs: defs})
+	s.env.DefineProg(&core.Prog{Defs: defs, Natives: s.ck.Natives})
 	return nil
 }
 

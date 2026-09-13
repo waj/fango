@@ -11,7 +11,22 @@ import (
 // scoped Handle results. It runs after elaboration transforms; Lint recomputes
 // the same contract from a clean fixed point rather than trusting the summary.
 func InferCaptures(p *Prog, b *types.Builtins) []error {
+	return InferCapturesIn(p, nil, b)
+}
+
+// InferCapturesIn analyzes p with context supplying the definitions p may
+// call but does not contain — the modules a REPL session has already
+// installed. Context definitions contribute their names, parameters, and
+// solved summaries to the call-site rules and are never re-solved, so a
+// prompt calling `State.run` or `File.withFile` is checked exactly as the
+// same call inside a program would be.
+func InferCapturesIn(p *Prog, context []Def, b *types.Builtins) []error {
 	a := newCaptureAnalyzer(p, b)
+	for i := range context {
+		if _, own := a.defs[context[i].Name]; !own {
+			a.defs[context[i].Name] = &context[i]
+		}
+	}
 	a.solve()
 	return a.checkScopes()
 }

@@ -327,6 +327,16 @@ checker tables; the REPL does not, because its resolver canonicalizes every
 prompt and a surface spelling in the tables would let an unresolved name slip
 past the scope the resolver enforces.
 
+An import increment is elaborated under the rules a program gets: a compiler
+intrinsic the increment declares — `Scope.bracket` when `Scope` or a module
+over it is imported — has its synthesized definition installed with the
+increment, the increment's native metadata reaches the evaluator so a sidecar
+call applies its boundary shapes, and the capture analysis of every prompt
+input, declaration or expression, runs with the session's installed
+definitions as context. That last point is what makes the call-site rules for
+`State.run` and `File.withFile` fire at the prompt exactly as they do in a
+file; without it a prompt could hand a handle out of its scope.
+
 Primitives are declarations rather than a compiler catalog. The prelude names
 the bundled `Basics` module, whose native values define the scalar
 implementations of class methods, and the bundled `IO` module declares the

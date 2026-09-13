@@ -116,9 +116,16 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 // capture summaries are solved over the whole increment. Unlike Module it
 // re-emits neither the prelude nor earlier instances, so a session installs
 // each definition exactly once.
-func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
+//
+// intrinsics names the compiler intrinsics the increment declared; their
+// synthesized definitions are installed with it, exactly as Module installs
+// them for a program, so a module that calls `Scope.bracket` lints and runs.
+// context holds the session's already-installed definitions, which the
+// capture analysis reads for the call-site rules (core.InferCapturesIn).
+func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsics []string, context []core.Def, ck *infer.Checker) ([]core.Def, []diag.Error) {
 	var defs []core.Def
 	var errs []diag.Error
+	defs = append(defs, intrinsicDefsNamed(intrinsics, ck)...)
 	for _, inst := range instances {
 		if ck.IsCompileTimeOnly(inst.Class.DictType(inst.Head)) {
 			continue
@@ -147,7 +154,7 @@ func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, ck *infe
 	}
 	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
 	specializeScalars(p, kept, ck)
-	errs = append(errs, captureDiagnostics(core.InferCaptures(p, ck.B), ck, source.Span{})...)
+	errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, source.Span{})...)
 	installCaptureSummaries(p.Defs, ck)
 	return p.Defs, errs
 }
@@ -163,10 +170,16 @@ func LintProg(defs []core.Def, ck *infer.Checker) []error {
 // The first returned Def is the declaration itself; any further Defs are
 // lambda-lifted polymorphic block bindings (doc/design.md, "Go backend and runtime", lift.go).
 func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
+	return DeclIn(info, nil, ck)
+}
+
+// DeclIn is Decl with the session's installed definitions as capture-analysis
+// context, so a prompt definition's calls into installed runners are checked.
+func DeclIn(info infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]core.Def, []diag.Error) {
 	defs, errs := decl(info, ck, false)
 	if len(errs) == 0 {
 		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
-		errs = append(errs, captureDiagnostics(core.InferCaptures(p, ck.B), ck, info.NameSpan)...)
+		errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, info.NameSpan)...)
 		installCaptureSummaries(defs, ck)
 		for i := range defs {
 			for _, err := range core.VerifyResumeStructure(defs[i].Body) {
@@ -225,9 +238,17 @@ func IntrinsicDefs(ck *infer.Checker) []core.Def {
 	for name := range ck.Intrinsics {
 		names = append(names, name)
 	}
+	return intrinsicDefsNamed(names, ck)
+}
+
+func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
+	names = append([]string(nil), names...)
 	sort.Strings(names)
 	defs := make([]core.Def, 0, len(names))
 	for _, name := range names {
+		if _, declared := ck.Intrinsics[name]; !declared {
+			continue
+		}
 		if name == types.ScopeBracketName {
 			// The declaration keeps its open row tail; Core does not.
 			defs = append(defs, scopeBracketDef(name, eraseRows(ck.Intrinsics[name].Body), ck))
@@ -377,6 +398,12 @@ func rowControl(row types.Row, ck *infer.Checker) types.Control {
 // inputs can contain blocks); the caller must install them before
 // evaluating the expression.
 func Expr(e ast.Expr, ck *infer.Checker) (core.Expr, []core.Def, []diag.Error) {
+	return ExprIn(e, nil, ck)
+}
+
+// ExprIn is Expr with the session's installed definitions as capture-analysis
+// context, so a prompt expression's calls into installed runners are checked.
+func ExprIn(e ast.Expr, context []core.Def, ck *infer.Checker) (core.Expr, []core.Def, []diag.Error) {
 	if errs := ck.DefaultPreds(ck.PendingPreds, e.Span()); len(errs) > 0 {
 		return nil, nil, errs
 	}
@@ -386,7 +413,7 @@ func Expr(e ast.Expr, ck *infer.Checker) (core.Expr, []core.Def, []diag.Error) {
 		defs := append([]core.Def(nil), el.aux...)
 		defs = append(defs, core.Def{Name: "_expression", Type: ce.Type(), Control: core.ExprControl(ce), Body: ce})
 		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
-		el.errs = append(el.errs, captureDiagnostics(core.InferCaptures(p, ck.B), ck, e.Span())...)
+		el.errs = append(el.errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, e.Span())...)
 		for _, err := range core.VerifyResumeStructure(ce) {
 			el.errs = append(el.errs, diag.Errorf(e.Span(), "INTERNAL RESUME INVARIANT", "%v", err))
 		}

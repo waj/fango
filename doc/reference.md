@@ -1959,6 +1959,10 @@ session echoes `loaded M` for each module the import brought in for the first
 time, dependencies included, in dependency order; a module already loaded
 echoes nothing. The imported module's instances and derivers become usable at
 the prompt, and its sidecar, if any, runs in the session's native worker.
+Importing `File` and `Fail` gives the prompt scoped file access under the same
+checks as a program: a body that fails releases its handle before the failure
+reaches `attempt`, and a body that tries to return the handle is a
+`RESOURCE ESCAPES` error at the prompt.
 
 Prompt imports are cumulative. Importing a module again adds the names its
 new exposing list selects, and repeating an alias for the same module is
