@@ -112,6 +112,19 @@ type ControlExit struct {
 	Payload []Expr
 	Ty      types.Type
 }
+
+// Suspend is a compiler-only suspension point used by selective machine
+// lowering. Request is evaluated before the machine yields; resuming supplies
+// the value of this expression. No parser or source elaboration path produces
+// this node: source-level ownership and non-tail resume remain E8 work.
+//
+// A Suspend is legal only at the semantic-Core proof boundary accepted by
+// LintMachineInput. Ordinary Lint continues to reject Machine control, which
+// prevents an unlowered suspension from reaching either existing backend.
+type Suspend struct {
+	Request Expr
+	Ty      types.Type
+}
 type HandlerClause struct {
 	Op         *types.EffectOp
 	ResumeID   types.ResumeID
@@ -329,6 +342,7 @@ func (*TypeOf) isExpr()      {}
 func (*If) isExpr()          {}
 func (*Perform) isExpr()     {}
 func (*ControlExit) isExpr() {}
+func (*Suspend) isExpr()     {}
 func (*Handle) isExpr()      {}
 func (*Bracket) isExpr()     {}
 func (*ResumeTail) isExpr()  {}
@@ -352,6 +366,7 @@ func (e *TypeOf) Type() types.Type      { return e.Ty }
 func (e *If) Type() types.Type          { return e.Ty }
 func (e *Perform) Type() types.Type     { return e.Ty }
 func (e *ControlExit) Type() types.Type { return e.Ty }
+func (e *Suspend) Type() types.Type     { return e.Ty }
 func (e *Handle) Type() types.Type      { return e.Ty }
 func (e *Bracket) Type() types.Type     { return e.Ty }
 func (e *ResumeTail) Type() types.Type  { return e.ClauseResult }
@@ -377,6 +392,8 @@ func Mentions(e Expr, name string) bool {
 			}
 		}
 		return false
+	case *Suspend:
+		return Mentions(e.Request, name)
 	case *NativeCall:
 		for _, a := range e.Args {
 			if Mentions(a, name) {

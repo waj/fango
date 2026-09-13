@@ -373,6 +373,12 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		r := children(e.Payload...)
 		r.value = types.CaptureSet{}
 		return r
+	case *Suspend:
+		// E7's compiler-only fixtures resume with scalar values. E8 attaches
+		// ownership before capture-capable suspension results reach source.
+		r := a.expr(e.Request, env, evidence)
+		r.value = types.CaptureSet{}
+		return r
 	case *ResumeTail:
 		r := a.expr(e.Value, env, evidence)
 		if e.NextState != nil {

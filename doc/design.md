@@ -228,7 +228,7 @@ capture-free ADT results are admitted.
 
 Execution transport is compiler metadata distinct from both effect rows and
 operation discipline. Each Core arrow, definition, lambda, application, and
-effect-evidence slot records a `Direct`, `Exit`, or future `Machine` lower
+effect-evidence slot records a `Direct`, `Exit`, or reserved `Machine` lower
 bound, plus whether the mode is selected from its enclosing control context.
 An open row or abstract custom-effect evidence is transport-polymorphic even
 when the source type has no ordinary type variables: a handler interpretation
@@ -236,8 +236,9 @@ may perform a non-local exit before returning the operation's apparent result.
 The metadata is inferred from solved rows and supplied evidence, not by
 scanning a function body for a particular operation name. It belongs to each
 curried arrow independently, preserving early-effect and partial-application
-timing. `Machine` is represented in the contract but rejected until selective
-machine lowering is implemented.
+timing. `Machine` is represented in the contract. Ordinary Core lint and the
+ordinary backends reject it; the private selective-machine entry point admits
+it only after the dedicated pre-machine checks described below.
 
 Transport-polymorphic definitions have one joined contract rather than a
 variant for every combination of callback and evidence modes. Their defining
@@ -826,9 +827,66 @@ in an operand, argument, guard, record/constructor field, handler prefix, or
 return transformation. The Exit emitter therefore tests an `Outcome` before
 the next source expression. Core lint independently checks the convention on
 callee and evidence slots, validates private `ControlExit` producers against
-their operation descriptor and lexical target scope, rejects Machine Core, and
-checks that no control-producing expression remains in an unhandled expression
-slot. Core dumps print non-Direct conventions so ABI choices are reviewable.
+their operation descriptor and lexical target scope, and checks that no
+control-producing expression remains in an unhandled expression slot. The
+ordinary lint entry rejects Machine Core. A separate pre-machine lint entry
+admits the compiler-only `Suspend` node and Machine transport while retaining
+the other semantic Core invariants; no parser or source elaboration path can
+produce that node. Core dumps print non-Direct conventions so ABI choices are
+reviewable.
+
+Selective machine lowering has its own typed execution IR in
+`internal/machine`, below semantic Core rather than mixed into it. It selects
+only concrete Machine roots and the transport-polymorphic workers they reach in
+Machine context. Direct and Exit definitions are absent from the result. The
+lowerer splits ANF `Let`, `Seq`, and `If` computations at compiler-only
+suspensions and known Machine worker calls, represents shared branch
+continuations once, and marks calls whose continuation is only the caller's
+return as tail transfers. Every block has one explicit terminator and typed
+result binding.
+
+Backwards fixed-point liveness materializes `LiveIn` and `LiveOut` sets on each
+machine block. A worker frame contains the union of locals live across a
+suspension or non-tail Machine call; the result supplied by that transition is
+defined on the outgoing edge and is therefore not spuriously saved. The
+machine linter independently recomputes those sets and the frame layout, checks
+block reachability and successor validity, proves a single cleanup depth at
+every normal CFG join and zero pending worker-owned cleanups at return, and
+validates local, call, result, and control types.
+
+Two private backends consume that IR. The in-process evaluator owns an explicit
+slice of machine frames and uses the recursive Core evaluator only for a
+non-Machine expression that finishes before the next transition. The Go
+backend emits a module-owned typed frame with a PC, parameters, and precisely
+the computed cross-transition locals. Its `Step` method runs local blocks in an
+inner loop and returns only to request suspension, push/replace a frame, return,
+or exit; the shared `fangort.Machine` dispatcher alone invokes steps. A tail
+Machine call replaces the active frame. A non-tail call pushes one, and a
+return passes its value through one erased runtime register before the typed
+caller stores it. Generated module boundaries use exported frame constructors,
+so the runtime imports no generated package and the source-module DAG remains
+intact.
+
+Both consumers clear completed frames. At suspension and non-tail call
+boundaries the evaluator deletes locals outside `LiveOut`, while generated code
+zeros the typed frame before copying back only live fields. The runtime also
+owns a LIFO stack of synchronous cleanup closures: suspension leaves it intact,
+normal completion drains it, and an exit drains it while retaining that exit as
+primary and appending cleanup failures in inner-to-outer order through the same
+`Suppress` operation used by synchronous `Bracket`.
+
+The implemented private lowering covers strict bindings and sequencing,
+conditionals, constructor/literal decision trees with edge-specific field
+bindings, monomorphic evidence-free known-worker calls, direct Core
+expressions, the compiler-only suspension point, and `Bracket` scopes whose
+acquire and release are non-suspending Direct expressions. Such a bracket
+registers a synchronous release closure before entering its body, preserves it
+across suspension, and pops it exactly once on normal completion; exit and
+abandonment use the runtime unwind path. Machine handlers, evidence-bearing
+and indirect calls, generic Machine representation families, and Exit-capable
+release emission remain unimplemented. Source-level handlers therefore retain
+their existing tail-resumptive semantics, and ordinary source compilation
+cannot select the private Machine backend.
 
 An effect-polymorphic higher-order worker has its open callback row erased from
 the runtime ABI. Passing a concrete callback therefore adapts it to that ABI;

@@ -167,15 +167,31 @@ The shipped control-aware ABI preserves the tail-resume and scoped-state direct
 fast path; synchronous cleanup scopes, the bundled `Fail` effect, typed IO
 errors, and the scoped `File` resource API are implemented on top of it (see
 the design and reference). No general continuation object exists.
-E7–E9 are explicitly deferred until a concrete suspension consumer warrants
-their compiler and type-system cost. No milestone requires implementing the
-whole table at once.
+The private E7 machine foundation is now under implementation; exposing it to
+source programs remains deferred until a concrete suspension consumer warrants
+the ownership and type-system cost. E8–E9 remain deferred. No milestone
+requires implementing the whole table at once.
 
 ## E7. Selective one-shot execution machines
 
 ### Deliverable and rationale
 
-Build the internal suspension backend with private Core fixtures first. Do not
+The compiler-side proof boundary is implemented: a separate pre-machine Core
+lint admits a compiler-only suspension node that source cannot produce, and
+selective lowering builds an independently linted machine IR. It closes a
+Machine island through known transport-polymorphic worker calls, splits ANF
+`Let`, `Seq`, `If`, and decision trees, shares branch continuations, identifies
+tail transfers, and computes minimal frame layouts by backwards liveness. A
+private iterative interpreter and generated-Go dispatcher consume the
+monomorphic, evidence-free subset; generated frame constructors cross existing
+module DAG edges without a global frame union. The shared runtime also owns the
+synchronous cleanup stack and its primary/suppressed exit ordering. Private
+`Bracket` fixtures with non-suspending Direct acquisition and release populate
+that stack and retain it across suspension. Exit-capable release emission and
+handler-targeted partial unwind remain unfinished. The implemented contract is
+described in the design.
+
+Finish the internal suspension backend with private Core fixtures first. Do not
 enable source-level general resume merely because the machine can run it.
 E8 supplies its static ownership contract. State, abort-only effects, cleanup
 scopes, and E6 remain useful without E7.
@@ -190,21 +206,22 @@ and [defunctionalization](https://www.brics.dk/RS/01/23/).
 
 ### Frame construction
 
-1. Identify actual suspension points after evidence/control solving, including
-   indirect callbacks and operation clauses whose residual effects suspend.
-2. Split execution into basic blocks at those points, calls into Machine
-   workers, normal returns, and exits.
-3. Compute liveness. Save only values required by later blocks, plus relevant
-   evidence, scope ownership, result destinations, and cleanup obligations.
-4. Generate typed frame variants and a dispatcher. A single PC plus locals
-   suffices only for a single activation; non-tail recursion and indirect
-   calls need explicit caller frames.
-5. Express tail transitions as frame reuse/parameter assignment and iteration.
-   Preserve captured source snapshots before mutating reused frame fields.
-6. Use indices or stable storage where frame buffers can grow. Do not retain
-   pointers into a slice across an append that may relocate its backing array.
-7. Clear dead references when popping/reusing frames so GC does not retain
-   completed trees, resources, evidence, or large intermediate results.
+1. Extend selection and block construction through handlers, indirect
+   callbacks, and operation clauses whose residual effects suspend.
+   Preserve the already-implemented shared continuations, decision-tree edge
+   bindings, Direct cleanup scopes, and liveness proof across those regions.
+2. Add relevant evidence, scope ownership, result destinations, and cleanup
+   obligations to the liveness inputs; ordinary value locals are already
+   computed and independently checked.
+3. Extend the implemented typed frames and dispatcher to generic workers,
+   evidence-bearing calls, indirect callbacks, handler activations, and
+   Exit-capable cleanup boundaries. A single PC plus locals suffices only for
+   one activation; non-tail calls already use explicit caller frames.
+4. Generalize implemented tail frame replacement to captured parameters and
+   evidence. Preserve source snapshots before mutating a reused frame.
+5. Replace the current append-grown frame slice, or prove its index-only use at
+   every backend boundary. Do not retain pointers into a slice across an append
+   that may relocate its backing array.
 
 Conceptual internal representation:
 
@@ -267,8 +284,9 @@ remaining cleanups.
 ### Acceptance and costs
 
 Use private machine fixtures for repeated operations, nested handlers, a
-non-tail recursive tree traversal, mutual recursion across module boundaries,
-deep caller chains, return transformations, early exit, and cleanup failure.
+non-tail recursive tree traversal, dynamic cross-module re-entry through a
+callback, deep caller chains, return transformations, early exit, and cleanup
+failure.
 Compare with a simple reference execution model and the direct backend where
 the program belongs to both subsets.
 

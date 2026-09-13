@@ -138,6 +138,8 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 			parts = append(parts, dumpExpr(p, pr))
 		}
 		return strings.Join(parts, " ") + " " + pr.Type(e.Ty) + ")"
+	case *Suspend:
+		return fmt.Sprintf("(suspend %s %s)", pr.Type(e.Ty), dumpExpr(e.Request, pr))
 	case *ResumeTail:
 		if e.NextState != nil {
 			return fmt.Sprintf("(resume-tail %d %s %s (next-state %s))", e.Owner, pr.Type(e.ClauseResult), dumpExpr(e.Value, pr), dumpExpr(e.NextState, pr))

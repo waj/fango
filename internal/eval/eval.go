@@ -553,6 +553,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			return nil, fmt.Errorf("eval: missing abort evidence for `%s.%s`", e.Effect.Name, e.Op.Name)
 		}
 		return &ExitRequest{Target: target, Op: e.Op, Payload: payload}, nil
+	case *core.Suspend:
+		return nil, fmt.Errorf("eval: compiler-only suspension reached recursive evaluator")
 	case *core.ResumeTail:
 		return nil, fmt.Errorf("eval: ResumeTail outside verified handler-clause evaluation")
 	case *core.Seq:

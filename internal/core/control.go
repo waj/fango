@@ -36,6 +36,8 @@ func ExprControl(e Expr) types.Control {
 		return types.Control{}
 	case *ControlExit:
 		return types.Control{Transport: types.Exit}
+	case *Suspend:
+		return types.JoinControl(types.Control{Transport: types.Machine}, ExprControl(e.Request))
 	case *Neg:
 		return ExprControl(e.Operand)
 	case *NativeCall:

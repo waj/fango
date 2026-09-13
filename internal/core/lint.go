@@ -15,11 +15,24 @@ import (
 // (and under a debug flag later) — instantiation plumbing bugs are the
 // design's top risk, and this is the tripwire.
 func Lint(p *Prog, b *types.Builtins) []error {
+	return lint(p, b, false)
+}
+
+// LintMachineInput checks semantic Core immediately before selective machine
+// lowering. It admits compiler-only Suspend nodes and Machine transport while
+// retaining every ordinary Core invariant. The batch pipeline intentionally
+// uses Lint, so source programs cannot send unlowered machine control to an
+// existing backend.
+func LintMachineInput(p *Prog, b *types.Builtins) []error {
+	return lint(p, b, true)
+}
+
+func lint(p *Prog, b *types.Builtins, allowMachine bool) []error {
 	l := &linter{b: b, scope: map[string]bool{}, workers: map[string]*Def{},
 		adts: map[int]*types.ADTInfo{}, effects: map[int]*types.EffectInfo{},
 		tyParams: map[int]bool{}, evidence: map[int]int{}, evidenceCaptures: map[int][]types.CaptureSet{},
 		captureVars: map[types.CaptureVar]bool{}, scopeIDs: map[types.ScopeID]bool{}, activeScopes: map[types.ScopeID]bool{},
-		resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives}
+		resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives, allowMachine: allowMachine}
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
 	}
@@ -227,6 +240,7 @@ type linter struct {
 	resumeRet        types.Type
 	resumeState      types.Type
 	defName          string
+	allowMachine     bool
 	errs             []error
 }
 
@@ -462,6 +476,18 @@ func (l *linter) expr(e Expr, where string) {
 		for _, a := range e.Args {
 			l.expr(a, where)
 		}
+	case *Suspend:
+		if !l.allowMachine {
+			l.errorf("%s: compiler-only suspension reached ordinary Core", where)
+		}
+		if e.Request == nil {
+			l.errorf("%s: suspension has no request", where)
+			return
+		}
+		if c := ExprControl(e.Request); c.Transport != types.Direct || c.Polymorphic {
+			l.errorf("%s: suspension request control %s is not direct", where, ControlName(c))
+		}
+		l.expr(e.Request, where)
 	case *ControlExit:
 		l.control(e.Effect.Control, where)
 		l.effectInstance(e.Effect, where)
@@ -1242,7 +1268,7 @@ func (l *linter) control(c types.Control, where string) {
 	if !c.Valid() {
 		l.errorf("%s: invalid control transport %d", where, c.Transport)
 	}
-	if c.Transport == types.Machine {
+	if c.Transport == types.Machine && !l.allowMachine {
 		l.errorf("%s: Machine control survived before machine lowering is implemented", where)
 	}
 }
@@ -1313,6 +1339,8 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		for _, p := range e.Payload {
 			directSlot(p, "exit payload")
 		}
+	case *Suspend:
+		directSlot(e.Request, "suspension request")
 	case *App:
 		if e.CalleeKind == Value {
 			directSlot(e.Callee, "indirect callee")

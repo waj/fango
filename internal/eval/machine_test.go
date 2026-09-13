@@ -1,0 +1,248 @@
+package eval
+
+import (
+	"context"
+	"io"
+	"strings"
+	"testing"
+
+	"github.com/waj/fango/internal/core"
+	machineir "github.com/waj/fango/internal/machine"
+	"github.com/waj/fango/internal/types"
+)
+
+func TestMachineSessionSuspendsAndResumesWithoutRecursiveFrames(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	x := &core.VarRef{Name: "x", Local: true, Ty: b.Int}
+	body := &core.Let{Name: "x", Rhs: machineSuspend(b, machineInt(b, 1)), Ty: b.Int,
+		Body: &core.Let{Name: "ignored", Rhs: machineSuspend(b, x), Ty: b.Int, Body: x}}
+	p := &core.Prog{Defs: []core.Def{{Name: "main", Type: b.Int,
+		Control: types.Control{Transport: types.Machine}, Body: body}}}
+	mp := lowerMachineTest(t, p, b)
+	session := startMachineTest(t, p, mp, "main", nil)
+
+	event, err := session.Run()
+	if err != nil || event.Done || event.Request != int64(1) {
+		t.Fatalf("first event = %#v, %v; want request 1", event, err)
+	}
+	event, err = session.Resume(int64(41))
+	if err != nil || event.Done || event.Request != int64(41) {
+		t.Fatalf("second event = %#v, %v; want request 41", event, err)
+	}
+	event, err = session.Resume(int64(99))
+	if err != nil || !event.Done || event.Exit != nil || event.Value != int64(41) {
+		t.Fatalf("completion = %#v, %v; want value 41", event, err)
+	}
+	if stats := session.Stats(); stats.MaxDepth != 1 {
+		t.Fatalf("maximum frame depth = %d, want 1", stats.MaxDepth)
+	}
+}
+
+func TestMachineSessionUsesExplicitCallerFrame(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	machineControl := types.Control{Transport: types.Machine}
+	helperTy := &types.TFun{Arg: b.Int, Eff: types.Row{}, Ret: b.Int, Control: machineControl}
+	helper := core.Def{Name: "helper", Type: helperTy, Params: []string{"n"},
+		ParamCaptures: []types.CaptureVar{sup.FreshCapture()}, Control: machineControl,
+		Body: machineSuspend(b, &core.VarRef{Name: "n", Local: true, Ty: b.Int})}
+	call := &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: "helper", Ty: helperTy},
+		Args: []core.Expr{machineInt(b, 7)}, Ty: b.Int, Control: machineControl}
+	x := &core.VarRef{Name: "x", Local: true, Ty: b.Int}
+	mainBody := &core.Let{Name: "x", Rhs: call, Ty: b.Int,
+		Body: &core.Let{Name: "ignored", Rhs: machineSuspend(b, x), Ty: b.Int, Body: x}}
+	main := core.Def{Name: "main", Type: b.Int, Control: machineControl, Body: mainBody}
+	p := &core.Prog{Defs: []core.Def{helper, main}}
+	mp := lowerMachineTest(t, p, b)
+	session := startMachineTest(t, p, mp, "main", nil)
+
+	event, err := session.Run()
+	if err != nil || event.Request != int64(7) {
+		t.Fatalf("callee suspension = %#v, %v", event, err)
+	}
+	event, err = session.Resume(int64(11))
+	if err != nil || event.Request != int64(11) {
+		t.Fatalf("caller suspension = %#v, %v", event, err)
+	}
+	event, err = session.Resume(int64(0))
+	if err != nil || !event.Done || event.Value != int64(11) {
+		t.Fatalf("completion = %#v, %v", event, err)
+	}
+	if stats := session.Stats(); stats.MaxDepth != 2 {
+		t.Fatalf("maximum frame depth = %d, want 2", stats.MaxDepth)
+	}
+}
+
+func TestMachineSessionEnforcesPrivateDriverProtocol(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	p := &core.Prog{Defs: []core.Def{{Name: "main", Type: b.Int,
+		Control: types.Control{Transport: types.Machine}, Body: machineSuspend(b, machineInt(b, 1))}}}
+	mp := lowerMachineTest(t, p, b)
+	session := startMachineTest(t, p, mp, "main", nil)
+	if _, err := session.Resume(int64(1)); err == nil || !strings.Contains(err.Error(), "not suspended") {
+		t.Fatalf("Resume before Run error = %v", err)
+	}
+	if _, err := session.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Run(); err == nil || !strings.Contains(err.Error(), "must be resumed") {
+		t.Fatalf("second Run error = %v", err)
+	}
+	if _, err := session.Resume(int64(2)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Run(); err == nil || !strings.Contains(err.Error(), "already completed") {
+		t.Fatalf("Run after completion error = %v", err)
+	}
+}
+
+func TestMachineSessionSuspendsInsideDecisionTree(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	option := &types.TCon{Unique: sup.NextUnique(), Name: "Main.Option"}
+	none := &types.CtorInfo{Name: "Main.None", Index: 0, Result: option}
+	some := &types.CtorInfo{Name: "Main.Some", Index: 1, Fields: []types.Type{b.Int}, Result: option}
+	adt := &types.ADTInfo{Con: option, Ctors: []*types.CtorInfo{none, some}}
+	someValue := &core.App{CalleeKind: core.Ctor, Callee: &core.VarRef{Name: some.Name, Ty: some.ValueType()},
+		Args: []core.Expr{machineInt(b, 7)}, Ctor: some, Ty: option}
+	value := &core.VarRef{Name: "value", Local: true, Ty: b.Int}
+	body := &core.Case{Scrut: someValue, Bind: "_scrut", Ty: b.Int, Tree: &core.SwitchCtor{
+		Scrut: "_scrut", ADT: adt, Cases: []core.CtorCase{
+			{Ctor: none, Tree: &core.Leaf{Body: machineSuspend(b, machineInt(b, 0))}},
+			{Ctor: some, Binds: []string{"value"}, Tree: &core.Leaf{Body: &core.Let{
+				Name: "ignored", Rhs: machineSuspend(b, value), Ty: b.Int, Body: value,
+			}}},
+		},
+	}}
+	p := &core.Prog{ADTs: []*types.ADTInfo{adt}, Defs: []core.Def{{Name: "main", Type: b.Int,
+		Control: types.Control{Transport: types.Machine}, Body: body}}}
+	mp := lowerMachineTest(t, p, b)
+	session := startMachineTest(t, p, mp, "main", nil)
+	event, err := session.Run()
+	if err != nil || event.Done || event.Request != int64(7) {
+		t.Fatalf("decision-tree suspension = %#v, %v", event, err)
+	}
+	event, err = session.Resume(int64(99))
+	if err != nil || !event.Done || event.Value != int64(7) {
+		t.Fatalf("decision-tree completion = %#v, %v", event, err)
+	}
+	if got := localNamesForEval(mp.Workers[0].Frame); len(got) != 1 || got[0] != "value" {
+		t.Fatalf("decision-tree frame = %v, want [value]", got)
+	}
+}
+
+func TestMachineSessionTraversesDeepTreeWithExplicitFrames(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	control := types.Control{Transport: types.Machine}
+	treeTy := &types.TCon{Unique: sup.NextUnique(), Name: "Main.Tree"}
+	empty := &types.CtorInfo{Name: "Main.Empty", Index: 0, Result: treeTy}
+	node := &types.CtorInfo{Name: "Main.Node", Index: 1, Fields: []types.Type{treeTy, b.Int, treeTy}, Result: treeTy}
+	adt := &types.ADTInfo{Con: treeTy, Ctors: []*types.CtorInfo{empty, node}}
+	walkTy := &types.TFun{Arg: treeTy, Ret: b.Unit, Control: control}
+	callWalk := func(name string) core.Expr {
+		return &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: "Main.walk", Ty: walkTy},
+			Args: []core.Expr{&core.VarRef{Name: name, Local: true, Ty: treeTy}}, Ty: b.Unit, Control: control}
+	}
+	walkBody := &core.Case{Scrut: &core.VarRef{Name: "tree", Local: true, Ty: treeTy}, Bind: "_tree", Ty: b.Unit,
+		Tree: &core.SwitchCtor{Scrut: "_tree", ADT: adt, Cases: []core.CtorCase{
+			{Ctor: empty, Tree: &core.Leaf{Body: &core.UnitLit{Ty: b.Unit}}},
+			{Ctor: node, Binds: []string{"left", "value", "right"}, Tree: &core.Leaf{Body: &core.Seq{
+				First: callWalk("left"), Ty: b.Unit, Then: &core.Seq{
+					First: &core.Suspend{Request: &core.VarRef{Name: "value", Local: true, Ty: b.Int}, Ty: b.Unit},
+					Then:  callWalk("right"), Ty: b.Unit,
+				},
+			}}},
+		}}}
+	walk := core.Def{Name: "Main.walk", Owner: "Main", Type: walkTy, Params: []string{"tree"},
+		ParamCaptures: []types.CaptureVar{sup.FreshCapture()}, Control: control, Body: walkBody}
+	p := &core.Prog{ADTs: []*types.ADTInfo{adt}, Defs: []core.Def{walk}}
+	mp := lowerMachineTest(t, p, b)
+
+	const depth = 2000
+	emptyValue := &CtorVal{Ctor: empty}
+	var tree Value = emptyValue
+	for i := depth - 1; i >= 0; i-- {
+		tree = &CtorVal{Ctor: node, Fields: []Value{tree, int64(i), emptyValue}}
+	}
+	session := startMachineTest(t, p, mp, "Main.walk", []Value{tree})
+	event, err := session.Run()
+	for want := 0; want < depth; want++ {
+		if err != nil || event.Done || event.Request != int64(depth-1-want) {
+			t.Fatalf("yield %d = %#v, %v", want, event, err)
+		}
+		event, err = session.Resume(struct{}{})
+	}
+	if err != nil || !event.Done || event.Exit != nil {
+		t.Fatalf("tree completion = %#v, %v", event, err)
+	}
+	if got := session.Stats().MaxDepth; got != depth+1 {
+		t.Fatalf("maximum tree frame depth = %d, want %d", got, depth+1)
+	}
+}
+
+func TestMachineSessionKeepsCleanupPendingAcrossSuspension(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	resource := &core.VarRef{Name: "resource", Local: true, Ty: b.Int}
+	body := &core.Let{Name: "ignored", Rhs: &core.Suspend{Request: resource, Ty: b.Unit}, Ty: b.Int, Body: resource}
+	bracket := &core.Bracket{Scope: sup.FreshScope(), Resource: "resource", ResourceTy: b.Int,
+		Acquire: machineInt(b, 1), Release: &core.UnitLit{Ty: b.Unit}, Body: body, Ty: b.Int,
+		Control: types.Control{Transport: types.Machine}}
+	p := &core.Prog{Defs: []core.Def{{Name: types.ScopeBracketName, Owner: "Scope", Type: b.Int,
+		Control: types.Control{Transport: types.Machine}, Body: bracket}}}
+	mp := lowerMachineTest(t, p, b)
+	session := startMachineTest(t, p, mp, types.ScopeBracketName, nil)
+	event, err := session.Run()
+	if err != nil || event.Done || event.Request != int64(1) {
+		t.Fatalf("cleanup-body suspension = %#v, %v", event, err)
+	}
+	if len(session.cleanups) != 1 {
+		t.Fatalf("pending cleanups = %d, want 1", len(session.cleanups))
+	}
+	event, err = session.Resume(struct{}{})
+	if err != nil || !event.Done || event.Value != int64(1) {
+		t.Fatalf("cleanup completion = %#v, %v", event, err)
+	}
+	if len(session.cleanups) != 0 || session.Stats().MaxCleanups != 1 {
+		t.Fatalf("cleanup stack/stats = %d/%#v", len(session.cleanups), session.Stats())
+	}
+}
+
+func lowerMachineTest(t *testing.T, p *core.Prog, b *types.Builtins) *machineir.Prog {
+	t.Helper()
+	mp, errs := machineir.Lower(p, b)
+	if len(errs) != 0 {
+		t.Fatalf("machine lowering: %v", errs)
+	}
+	return mp
+}
+
+func startMachineTest(t *testing.T, p *core.Prog, mp *machineir.Prog, entry string, args []Value) *MachineSession {
+	t.Helper()
+	env := NewEnv()
+	env.DefineProg(p)
+	session, err := StartMachine(context.Background(), mp, entry, args, env, NewIOContext(strings.NewReader(""), io.Discard))
+	if err != nil {
+		t.Fatalf("StartMachine: %v", err)
+	}
+	return session
+}
+
+func machineInt(b *types.Builtins, value int64) core.Expr {
+	return &core.IntLit{Val: value, Ty: b.Int}
+}
+
+func machineSuspend(b *types.Builtins, request core.Expr) core.Expr {
+	return &core.Suspend{Request: request, Ty: b.Int}
+}
+
+func localNamesForEval(locals []machineir.Local) []string {
+	out := make([]string, len(locals))
+	for i, local := range locals {
+		out[i] = local.Name
+	}
+	return out
+}

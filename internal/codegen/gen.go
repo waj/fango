@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/waj/fango/internal/core"
+	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -35,6 +36,20 @@ type File struct {
 // module. The entry module is package main at the project root; dependencies
 // live below modules/ in their logical source layout.
 func EmitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
+	return emitProject(p, nil, b, units, printMain)
+}
+
+// EmitMachineProject is the private E7 project emitter. Machine definitions
+// are emitted as iterative fangort frames; all other definitions retain the
+// ordinary Direct/Exit path. No source pipeline calls this entry point yet.
+func EmitMachineProject(p *core.Prog, mp *machineir.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
+	if errs := machineir.Lint(mp); len(errs) != 0 {
+		return nil, fmt.Errorf("codegen: malformed machine IR: %v", errs[0])
+	}
+	return emitProject(p, mp, b, units, printMain)
+}
+
+func emitProject(p *core.Prog, mp *machineir.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
 	var files []File
 	entryCount := 0
 	owners := make(map[string]bool, len(units))
@@ -46,7 +61,7 @@ func EmitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) 
 		if unit.Entry {
 			entryCount++
 		}
-		data, err := emitUnit(p, b, unit, printMain)
+		data, err := emitUnitWithMachine(p, mp, b, unit, printMain)
 		if err != nil {
 			return nil, err
 		}
@@ -81,6 +96,10 @@ func EmitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) 
 }
 
 func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byte, error) {
+	return emitUnitWithMachine(p, nil, b, unit, printMain)
+}
+
+func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byte, error) {
 	g := &gen{
 		b:             b,
 		adts:          map[int]*types.ADTInfo{},
@@ -122,6 +141,12 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 	}
 
 	var mainDef *core.Def
+	machineWorkers := map[string]*machineir.Worker{}
+	if mp != nil {
+		for i := range mp.Workers {
+			machineWorkers[mp.Workers[i].Name] = &mp.Workers[i]
+		}
+	}
 	entry := p.Entry
 	if entry == "" {
 		entry = "main"
@@ -150,6 +175,9 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		if d == mainDef && mainIsUnit {
 			continue // no package var: the effect runs inside func main()
 		}
+		if machineWorkers[d.Name] != nil {
+			continue
+		}
 		if d.IsWorker() {
 			// Includes nullary generic workers — polymorphic values emit as
 			// zero-parameter generic functions (doc/design.md, "Go backend and runtime").
@@ -176,8 +204,19 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 			decls = append(decls, g.topValueDecl(d, types.Exit))
 		}
 	}
+	if mp != nil {
+		machineDecls, err := g.machineDecls(mp)
+		if err != nil {
+			return nil, err
+		}
+		decls = append(decls, machineDecls...)
+	}
 
 	switch {
+	case mainDef != nil && machineWorkers[mainDef.Name] != nil:
+		// The private fixture driver owns Run/Resume. Keep a valid entry
+		// package without choosing a source-level suspension policy.
+		decls = append(decls, funcDecl("main", assignBlank(callExpr(g.machineConstructorRef(mainDef.Name)))))
 	case mainIsUnit:
 		decls = append(decls, funcDecl("main", g.stmts(mainDef.Body)...))
 	case mainIsFn:

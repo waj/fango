@@ -122,6 +122,11 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Payload = r.exprs(e.Payload)
 		n.Effect = r.effect(e.Effect)
 		out = &n
+	case *Suspend:
+		n := *e
+		n.Ty = r.typ(e.Ty)
+		n.Request = r.expr(e.Request)
+		out = &n
 	case *Bracket:
 		n := *e
 		n.Ty = r.typ(e.Ty)
