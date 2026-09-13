@@ -33,7 +33,9 @@ These were settled when the design was drawn up and are not open:
   its own effect around the whole run.
 - **Pipes join the prelude.** `Basics` gains `(|>)` (`infixl 0`) and `(<|)`
   (`infixr 0`), both exposed by `Prelude`, so `test "name" <| \_ ->` followed
-  by an indented block is the canonical test shape.
+  by an indented block is the canonical test shape. Whether that shape keeps
+  the `<| \_ ->` is [open](#the-call-shape-for-test-bodies); `(|>)` is wanted
+  either way, for `actual |> Expect.equal expected`.
 - **First-version scope** is `describe`, `test`, `skip`, `todo`, `only`, the
   expectations below, a console report, and failure source positions. Fuzz
   testing is deferred, and the tree is shaped so it can be added without a
@@ -205,6 +207,58 @@ Semantics:
   reporter effect — the runner performing `suiteStart`, `caseEnd`, and so on,
   with the console reporter as one handler — is the way to add one later
   without changing the tree.
+
+## The call shape for test bodies
+
+**Open.** Every case is written `test "name" <| \_ ->` with the body indented
+under it, and a suite is mostly that line repeated. The ceremony is not
+test-specific: zero-parameter lambdas are already most of the lambdas in the
+tree, and the call sites that produce them are `attempt`, `Scope.bracket`,
+`Scope.finally`, and `Random.runSystem` rather than anything here. Whatever
+lands is therefore a language decision, judged on those call sites as much as
+on this framework, and the first library version does not wait on it: bodies
+are written `<| \_ ->` until something replaces it, and converting fixtures
+afterwards is mechanical.
+
+Three candidates, the first two independent of each other and the third an
+alternative to both:
+
+- **A trailing lambda in argument position** — `test "name" \_ ->` opening a
+  block, with no `<|`. In an argument position a `\` starts a lambda that
+  extends maximally to the right, so it can only be the last argument; the
+  layout question is already answered, because `<| \_ ->` ends its body at a
+  dedent or a leading `,` today. It is the only candidate that also covers
+  lambdas that *take* something, so a later `fuzz int "name" \n ->` reads like
+  `test "name" \_ ->` instead of reverting to `<|` beside it, and it removes
+  the parentheses around `attempt (\_ -> ...)` and `Scope.bracket (\_ -> ...)`
+  as well.
+- **A zero-pattern lambda**, `\-> body`: a lambda with an empty pattern row.
+  It saves little on its own and composes with the above as
+  `test "name" \->`.
+- **A `do` keyword**, sugar for a zero-parameter lambda that may open a block
+  bare in the last argument position, so a case reads `test "name" do`. It is
+  the shortest, it is the shape an hspec reader already knows, and it drops
+  `<|` from the canonical test without needing either change above.
+
+The case against `do` is why it is not the recommendation. The word means "run
+this now" in the languages that have it, and here it would mean the opposite —
+suspend this block — which is the one thing a reader has to know about it;
+`f = do` followed by a block would define a function rather than a value. It
+adds a second way to open a statement block that differs from the existing one
+only by suspension. It helps only at arity zero, so the fuzz shape above
+diverges from the plain one in the same file. And desugaring it to `\_ ->`
+would make it silently apply to argument-*ignoring* call sites such as
+`Result.map (\_ -> ...)`, where "suspend" is not what is meant; desugaring to
+`\() ->` avoids that but narrows it. The name itself is free — no identifier
+in the stdlib or the fixtures is called `do`.
+
+Constraints on whichever lands. It desugars in the parser to the same lambda
+node, so inference — a lambda's row is inferred, which the suite annotation
+above depends on — the Core linter, and both backends see identical Core. A
+keyword costs a reserved word and the TextMate grammar; a new block opener
+also touches the editor's language configuration. The formatter's expression
+printers do not exist yet, so surface syntax is cheaper to add before that
+work than after it.
 
 ## Failure source positions
 

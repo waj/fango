@@ -210,7 +210,11 @@ effect, a bundled `Test` module with a row-indexed tree of `describe`, `test`,
 `skip`, `todo`, and `only`, and a `Test.run` entry a program calls from
 `main`. Its first milestone adds `(|>)` and `(<|)` to `Basics` and the
 prelude. Failure source positions need a compiler-solved call-site constraint,
-recorded there as proposed syntax; a `fango test` command and fuzz testing
+recorded there as proposed syntax, and how a test body is passed — a
+trailing lambda in argument position, a zero-pattern lambda, or a `do`
+keyword, against the `<| \_ ->` written today — is an open language
+decision recorded there too, weighed on the `attempt` and `Scope.bracket`
+call sites as much as on tests. A `fango test` command and fuzz testing
 are sketched but deferred.
 
 ## Calling conventions and recursion shapes
