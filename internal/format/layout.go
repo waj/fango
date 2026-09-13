@@ -1,6 +1,8 @@
 package format
 
 import (
+	"bytes"
+
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/source"
 )
@@ -35,6 +37,10 @@ func (p *printer) renderExpr(e ast.Expr, ind int) bool {
 		return p.renderIf(e, ind)
 	case *ast.Lambda:
 		return p.renderLambda(e, ind)
+	case *ast.OpChain:
+		return p.renderOpChain(e, ind)
+	case *ast.App:
+		return p.renderApp(e, ind)
 	}
 	// A break inside an application, an operator run, or a record literal is
 	// not reproduced yet.
@@ -327,4 +333,90 @@ func keywordOnOwnLine(f *source.File, from int) bool {
 		}
 	}
 	return false
+}
+
+// renderOpChain writes a run of infix operators across the lines the author
+// used. Where the glyph sits is the author's too: a run broken before its
+// operator keeps the operator leading, one broken after keeps it trailing.
+// Fixity is not consulted — it is not available here, and it does not answer
+// where a glyph goes.
+func (p *printer) renderOpChain(e *ast.OpChain, ind int) bool {
+	f := e.Span().File
+	contInd := ind + Indent
+	for i, operand := range e.Operands {
+		if i > 0 {
+			op := e.Ops[i-1]
+			if brokeBetween(f, e.Operands[i-1].Span().End, op.Sp.Start) {
+				p.start(contInd)
+			} else {
+				p.emit(" ")
+			}
+			p.emit(op.Op)
+			if brokeBetween(f, op.Sp.End, operand.Span().Start) {
+				p.start(contInd)
+			} else {
+				p.emit(" ")
+			}
+		}
+		if brokeWithin(operand.Span()) {
+			return false
+		}
+		s, ok := exprOperandInline(operand)
+		if !ok {
+			return false
+		}
+		p.emit(s)
+	}
+	return true
+}
+
+// renderApp writes an application whose arguments the author spread over
+// several lines, each argument staying on the line it was written on.
+func (p *printer) renderApp(e *ast.App, ind int) bool {
+	if _, _, ok := asList(e); ok {
+		return false
+	}
+	if _, ok := asTuple(e); ok {
+		return false
+	}
+	fn, args := spine(e)
+	if r, isResume := fn.(*ast.Resume); isResume && r.NextState != nil {
+		return false
+	}
+	head, ok := exprAtomInline(fn)
+	if !ok {
+		return false
+	}
+	p.emit(head)
+
+	f := e.Span().File
+	contInd := ind + Indent
+	prevEnd := fn.Span().End
+	for _, a := range args {
+		if brokeBetween(f, prevEnd, a.Span().Start) {
+			p.start(contInd)
+		} else {
+			p.emit(" ")
+		}
+		// An argument with its own line structure would be collapsed onto one
+		// line here, so the declaration is copied instead.
+		if brokeWithin(a.Span()) {
+			return false
+		}
+		s, argOK := exprAtomInline(a)
+		if !argOK {
+			return false
+		}
+		p.emit(s)
+		prevEnd = a.Span().End
+	}
+	return true
+}
+
+// brokeBetween reports whether the author put a newline between two offsets.
+func brokeBetween(f *source.File, from, to int) bool {
+	if f == nil || from < 0 || to > len(f.Content) || from > to {
+		return false
+	}
+	return bytes.ContainsRune(f.Content[from:to], '\n')
 }

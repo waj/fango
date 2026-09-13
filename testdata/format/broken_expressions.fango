@@ -1,0 +1,23 @@
+module Broken exposing (run)
+
+import Basics exposing (..)
+
+leadingOperators byte =
+    byte == 32 || byte == 9 || byte == 10
+        || byte == 13 || byte == 11
+
+trailingOperators byte =
+    byte == 32 || byte == 9 ||
+        byte == 13 || byte == 11
+
+brokenApplication a b c =
+    combine
+        (a + 1)
+        (b + 2)
+        (c + 3)
+
+partlyBroken a b =
+    combine a
+        (b + 2)
+
+run = 1
