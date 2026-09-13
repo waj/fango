@@ -15,15 +15,24 @@ import (
 )
 
 type lexer struct {
-	f    *source.File
-	pos  int
-	toks []token.Token
-	errs []diag.Error
+	f        *source.File
+	pos      int
+	toks     []token.Token
+	comments []token.Comment
+	errs     []diag.Error
 }
 
-// Lex scans the entire file. The returned slice always ends with an EOF
-// token, even when there are errors.
+// Lex scans the entire file, discarding comments. The returned slice always
+// ends with an EOF token, even when there are errors.
 func Lex(f *source.File) ([]token.Token, []diag.Error) {
+	toks, _, errs := LexWithComments(f)
+	return toks, errs
+}
+
+// LexWithComments is Lex, also returning the comments the token stream omits,
+// in source order. Tokens, comments, and whitespace together tile the file, so
+// a caller that must not lose source text — the formatter — can reconstruct it.
+func LexWithComments(f *source.File) ([]token.Token, []token.Comment, []diag.Error) {
 	if !utf8.Valid(f.Content) {
 		at := 0
 		for at < len(f.Content) {
@@ -35,11 +44,21 @@ func Lex(f *source.File) ([]token.Token, []diag.Error) {
 		}
 		sp := source.Span{File: f, Start: at, End: at + 1}
 		return []token.Token{{Kind: token.EOF, Span: source.Span{File: f, Start: len(f.Content), End: len(f.Content)}}},
+			nil,
 			[]diag.Error{diag.Errorf(sp, "INVALID UTF-8", "Fango source files must be valid UTF-8.")}
 	}
 	l := &lexer{f: f}
 	l.run()
-	return l.toks, l.errs
+	return l.toks, l.comments, l.errs
+}
+
+// addComment records a comment span on the side channel.
+func (l *lexer) addComment(start, end int, block bool) {
+	l.comments = append(l.comments, token.Comment{
+		Span:  source.Span{File: l.f, Start: start, End: end},
+		Text:  string(l.f.Content[start:end]),
+		Block: block,
+	})
 }
 
 func (l *lexer) run() {
@@ -130,9 +149,11 @@ func (l *lexer) skipSpaceAndComments() {
 				"I found a tab character. fango indentation is column-sensitive, so\ntabs are not allowed — use spaces."))
 			l.pos++
 		case c == '-' && l.peekAt(1) == '-':
+			start := l.pos
 			for l.pos < len(l.f.Content) && l.f.Content[l.pos] != '\n' {
 				l.pos++
 			}
+			l.addComment(start, l.pos, false)
 		case c == '{' && l.peekAt(1) == '-' && l.peekAt(2) == '#':
 			l.lexPragma()
 		case c == '{' && l.peekAt(1) == '-':
@@ -180,12 +201,16 @@ func (l *lexer) skipBlockComment() {
 			depth--
 			l.pos += 2
 			if depth == 0 {
+				l.addComment(start, l.pos, true)
 				return
 			}
 		} else {
 			l.pos++
 		}
 	}
+	// Unclosed: the comment still covers the rest of the file, and recording it
+	// keeps the tiling invariant true even on this error path.
+	l.addComment(start, l.pos, true)
 	sp := source.Span{File: l.f, Start: start, End: start + 2}
 	l.errs = append(l.errs, diag.Errorf(sp, "UNCLOSED COMMENT",
 		"I got to the end of the file while looking for the `-}` that closes\nthis comment."))

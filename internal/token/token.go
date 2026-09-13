@@ -172,3 +172,17 @@ func (t Token) IsOp() bool { return t.Kind == OP }
 // Pos returns the token's 1-based start position (the layout rules are
 // stated in terms of token columns).
 func (t Token) Pos() source.Pos { return t.Span.StartPos() }
+
+// Comment is one `--` line comment or `{- -}` block comment. Comments are not
+// tokens: the parser distinguishes `f()` from `f ()` by comparing neighbouring
+// token spans for byte adjacency, so a comment token in the stream would make
+// `f{- c -}()` look adjacent and silently invert that rule. The lexer returns
+// them on the side instead, for the formatter and for doc comments.
+type Comment struct {
+	Span  source.Span
+	Text  string // verbatim, delimiters included
+	Block bool   // `{- -}` rather than `--`
+}
+
+// Pos returns the comment's 1-based start position.
+func (c Comment) Pos() source.Pos { return c.Span.StartPos() }
