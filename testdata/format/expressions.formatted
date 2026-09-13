@@ -22,7 +22,7 @@ applyNested = f (g a) (h b c)
 applyList = f [1, 2] (g x)
 unitCall = value()
 unitSpaced = value ()
-postfixArg = print value()
+postfixArg = print (value())
 
 negation = -1
 negApplied = f (-1)
@@ -50,6 +50,6 @@ wildcards _ (Box _) = False
 listPattern [] = 0
 listPattern [only] = only
 listPattern [head | _] = head
-recordPattern Point { x = a } = a
+recordPattern (Point { x = a }) = a
 tuplePattern (a, b) = a
 run = 1

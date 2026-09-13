@@ -976,7 +976,17 @@ not print itself.
 Author line breaks are preserved. The formatter normalizes indentation and
 spacing and chooses nothing about where a construct is split, so no width
 search is needed and a long line stays long. Whether a construct was written
-across lines is read off its span.
+across lines is read off its span; where a keyword landed is read off the
+source directly, because the AST records no span for `then`, for `=`, or for a
+declaration name on its definition line as opposed to its annotation line.
+
+The layout constructs are the ones whose meaning is carried by columns, and a
+renderer that hands each child an indent deeper than its own is what keeps the
+output parsing as the input did: a block's statements align, a `case` or
+`handle` aligns its branches, and an `if` anchors its `then` and `else` at its
+own column. A declaration printer that discovers halfway through that it cannot
+reproduce what the author wrote rolls its output back, so the verbatim copy
+that follows starts from a clean buffer.
 
 Sorting import lines and exposed names is the one exception, and it forces two
 consequences. A comment directly above an import has to travel with it, so the

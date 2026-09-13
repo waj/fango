@@ -116,21 +116,13 @@ func atomic(e ast.Expr) bool {
 		if _, ok := asTuple(e); ok {
 			return true
 		}
-		// A postfix unit call already binds tighter than application, so
-		// `print value()` needs no parentheses around `value()`.
-		return postfixUnitCall(e)
-	}
-	return false
-}
-
-// postfixUnitCall reports whether the application is the `f()` form: a Unit
-// argument written hard against an atomic callee.
-func postfixUnitCall(e *ast.App) bool {
-	if _, isUnit := e.Arg.(*ast.UnitLit); !isUnit {
+		// A postfix unit call binds tighter than application, so `f value()`
+		// would parse the same without parentheses — but `g (h()) x` reads as
+		// three arguments without them, so an application in argument position
+		// is parenthesized whatever its shape.
 		return false
 	}
-	fn, arg := e.Fn.Span(), e.Arg.Span()
-	return fn.File != nil && arg.File != nil && fn.End == arg.Start && atomic(e.Fn)
+	return false
 }
 
 // exprAtomInline renders an expression in a position that binds tightly,
@@ -172,7 +164,27 @@ func appInline(e *ast.App) (string, bool) {
 	}
 
 	fn, args := spine(e)
-	head, ok := exprHeadInline(fn)
+
+	// `resume` heads an application, so `resume value with next` is the head,
+	// its argument, and then the state clause — which therefore has to be
+	// rendered after the arguments rather than on the head.
+	if r, isResume := fn.(*ast.Resume); isResume && r.NextState != nil {
+		parts := []string{"resume"}
+		for _, a := range args {
+			s, argOK := exprAtomInline(a)
+			if !argOK {
+				return "", false
+			}
+			parts = append(parts, s)
+		}
+		next, nextOK := exprInline(r.NextState)
+		if !nextOK {
+			return "", false
+		}
+		return strings.Join(parts, " ") + " with " + next, true
+	}
+
+	head, ok := exprAtomInline(fn)
 	if !ok {
 		return "", false
 	}
@@ -180,7 +192,7 @@ func appInline(e *ast.App) (string, bool) {
 	for i, a := range args {
 		// `f()` and `f ()` differ in tree depth, so the spacing the author
 		// used is what distinguishes them and is reproduced here.
-		if _, isUnit := a.(*ast.UnitLit); isUnit && i == len(args)-1 && adjacent(fn, a, args) {
+		if _, isUnit := a.(*ast.UnitLit); isUnit && i == len(args)-1 && adjacent(a) {
 			return strings.Join(parts, " ") + "()", true
 		}
 		s, argOK := exprAtomInline(a)
@@ -194,18 +206,9 @@ func appInline(e *ast.App) (string, bool) {
 
 // adjacent reports whether the argument was written with no space before it,
 // which is what makes `f()` bind tighter than `f ()`.
-func adjacent(fn ast.Expr, arg ast.Expr, args []ast.Expr) bool {
-	prev := fn.Span()
-	if len(args) > 1 {
-		prev = args[len(args)-2].Span()
-	}
-	return prev.File != nil && arg.Span().File != nil && prev.End == arg.Span().Start
-}
-
-// exprHeadInline renders the head of an application spine, which needs
-// parentheses only when it is not an atom.
-func exprHeadInline(e ast.Expr) (string, bool) {
-	return exprAtomInline(e)
+func adjacent(arg ast.Expr) bool {
+	sp := arg.Span()
+	return writtenAgainst(sp.File, sp.Start)
 }
 
 // spine flattens curried application into a head and its arguments.

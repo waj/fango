@@ -1,6 +1,7 @@
 package format
 
 import (
+	"bytes"
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
@@ -18,15 +19,22 @@ import (
 // author decides where the air goes.
 type printer struct {
 	f      *source.File
-	buf    strings.Builder // completed lines, each ending in a newline
-	cur    []byte          // the line being built, without its indent
-	ind    int             // that line's indent
+	buf    bytes.Buffer // completed lines, each ending in a newline
+	cur    []byte       // the line being built, without its indent
+	ind    int          // that line's indent
 	open   bool
 	srcEnd int
 }
 
-// start begins a line at indent, completing whatever line was open.
+// start begins a line at indent, completing whatever line was open. An open
+// line with nothing on it is reused rather than completed, so a construct that
+// opens a line and then hands off to one that starts its own does not leave a
+// blank line between them.
 func (p *printer) start(indent int) {
+	if p.open && len(p.cur) == 0 {
+		p.ind = indent
+		return
+	}
 	p.flush()
 	p.ind = indent
 	p.open = true
@@ -219,7 +227,9 @@ func printModule(f *source.File, m *ast.Module, toks []token.Token, comments []t
 		sp := ast.DeclSpan(d)
 		cs.emitBefore(p, sp.Start, 0)
 		p.gapBefore(sp.Start)
+		snap := p.snapshot()
 		if !p.printDecl(d, sp, cs.holdsComment(sp)) {
+			p.restore(snap)
 			p.verbatim(sp)
 		}
 		// Whatever is inside the declaration was printed or copied with it.
@@ -389,4 +399,34 @@ func tidy(s string) string {
 
 func normalizeSpace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
+}
+
+// snapshot records enough of the printer's state to undo a partial render.
+// A declaration printer can discover halfway through that it cannot reproduce
+// what the author wrote, and the caller then copies the declaration verbatim —
+// which only works if the abandoned output goes away first.
+type snapshot struct {
+	buflen int
+	cur    []byte
+	ind    int
+	open   bool
+	srcEnd int
+}
+
+func (p *printer) snapshot() snapshot {
+	return snapshot{
+		buflen: p.buf.Len(),
+		cur:    append([]byte(nil), p.cur...),
+		ind:    p.ind,
+		open:   p.open,
+		srcEnd: p.srcEnd,
+	}
+}
+
+func (p *printer) restore(s snapshot) {
+	p.buf.Truncate(s.buflen)
+	p.cur = append(p.cur[:0], s.cur...)
+	p.ind = s.ind
+	p.open = s.open
+	p.srcEnd = s.srcEnd
 }

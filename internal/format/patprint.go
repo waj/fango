@@ -57,6 +57,12 @@ func patternArgInline(p ast.Pattern) (string, bool) {
 		}
 		return "(" + s + ")", true
 	}
+	// `{ x = a }` brackets itself, but `Point { x = a }` is two tokens. Either
+	// spelling parses, and the parenthesized one is chosen so that patterns and
+	// expressions treat a named record the same way.
+	if r, isRecord := p.(*ast.PRecord); isRecord && r.Name != "" {
+		return "(" + s + ")", true
+	}
 	return s, true
 }
 

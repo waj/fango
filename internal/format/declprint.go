@@ -44,55 +44,42 @@ func (p *printer) printDecl(d ast.Decl, sp source.Span, hasComment bool) bool {
 // constructs are not printed yet, and declining leaves the declaration to be
 // copied with its own line structure intact.
 func (p *printer) valueDeclLines(d *ast.ValueDecl) bool {
-	type row struct{ head, body string }
-	var rows []row
-
-	for _, eq := range equations(d) {
-		if eq.Body == nil || equationBroke(eq) {
-			return false
-		}
-		body, ok := exprInline(eq.Body)
-		if !ok {
-			return false
-		}
-		head, ok := equationHead(d.Name, eq)
-		if !ok {
-			return false
-		}
-		rows = append(rows, row{head, body})
-	}
 	if d.Native != nil {
-		if len(rows) != 0 {
-			return false
-		}
 		p.annotationLine(d)
 		p.line(0, declName(d.Name)+" = "+nativeText(d.Native))
 		return true
 	}
+	rows := equations(d)
 	if len(rows) == 0 {
 		return false
 	}
-
 	p.annotationLine(d)
-	for _, r := range rows {
-		p.line(0, r.head+" = "+r.body)
+	for _, eq := range rows {
+		head, ok := equationHead(d.Name, eq)
+		if !ok {
+			return false
+		}
+		p.start(0)
+		p.emit(head)
+		if !p.renderAssigned(eq.Body, 0) {
+			return false
+		}
 	}
+	p.flush()
 	return true
 }
 
 func (p *printer) patternDeclLine(d *ast.PatternDecl) bool {
-	if d.Body == nil || brokeWithin(d.Body.Span()) {
-		return false
-	}
 	pat, ok := patternInline(d.Pattern)
 	if !ok {
 		return false
 	}
-	body, ok := exprInline(d.Body)
-	if !ok {
+	p.start(0)
+	p.emit(pat)
+	if !p.renderAssigned(d.Body, 0) {
 		return false
 	}
-	p.line(0, pat+" = "+body)
+	p.flush()
 	return true
 }
 
@@ -295,10 +282,6 @@ func equationHead(name string, eq ast.Equation) (string, bool) {
 // paramAdjacent reports whether a parameter was written with no space before
 // it, which for `()` is what `args()` means.
 func paramAdjacent(eq ast.Equation, i int) bool {
-	prev := eq.NameSpan
-	if i > 0 {
-		prev = eq.Params[i-1].Span()
-	}
-	cur := eq.Params[i].Span()
-	return prev.File != nil && cur.File != nil && prev.End == cur.Start
+	sp := eq.Params[i].Span()
+	return writtenAgainst(sp.File, sp.Start)
 }

@@ -55,11 +55,11 @@ Go. `clean` removes the source file's persistent `.fango/build` artifacts.
 writes to standard output; with paths it writes each formatted file to standard
 output, `-w` rewrites the files in place, and `-l` lists the files that would
 change and exits 1, which is how the repository gates its own sources. It
-normalizes the module header, the import block, and every declaration whose
-lines it can reproduce: spacing, indentation, the `(op)` spelling of an
-operator name, and runs of blank lines. A declaration whose body the author
-wrote across lines is preserved as written, as are instance and deriver
-declarations and any declaration holding a comment.
+normalizes spacing, indentation, the `(op)` spelling of an operator name, and
+runs of blank lines. Instance and deriver declarations are preserved as
+written, as is any declaration holding a comment and any construct whose line
+structure the printer cannot reproduce — a break inside an application, an
+operator run, or a record literal.
 
 Redundant parentheses are dropped, because the syntax tree does not record
 them. Grouping is not: an operator run is printed flat in the order it was
@@ -69,8 +69,12 @@ rewritten — as is the difference between `f()` and `f ()`.
 
 The formatter keeps the author's line breaks rather than reflowing to a width,
 so a construct written across several lines stays that way and one written
-inline stays inline. An `exposing` list the author moved below its keyword is
-printed in the leading-comma block form.
+inline stays inline. That extends to where a keyword sits: a body moved below
+its `=` or `->` stays below it, a `case` written on its declaration's own line
+keeps its branches one level in from there, and a `then` or `else` given a line
+of its own is anchored at the column of its `if`, so a chain of arms lines up
+instead of staircasing rightward. An `exposing` list the author moved below
+its keyword is printed in the leading-comma block form.
 
 Import lines are sorted by module name and exposed names are sorted by kind —
 types, effects and constructors first, then values, then operators — and

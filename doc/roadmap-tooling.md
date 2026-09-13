@@ -17,27 +17,28 @@ below.
 
 ## Formatter
 
-Everything except the layout constructs is formatted. A declaration is copied
-verbatim from its source extent when its body was written across lines, when it
-is an instance or deriver, or when it holds a comment. Each stage below shrinks
-that copied region, and the verbatim fallback keeps the output correct in the
-meantime.
+The declaration, expression, pattern, type and layout grammars are all
+formatted. A declaration is copied verbatim from its source extent when it is
+an instance or deriver, when it holds a comment, or when it contains a break
+the printer cannot reproduce. Each stage below shrinks that copied region, and
+the verbatim fallback keeps the output correct in the meantime.
 
 ### Remaining stages
 
-1. **Layout constructs** — blocks, `case`, `handle`, `if`, and lambdas. The
-   offside rule is alignment-based rather than indentation-based, so these need
-   a printer that can set an indent to the current column. A renderer-level
-   assertion mirroring the parser's layout stack, refusing to emit a line at or
-   left of the innermost layout column, belongs here: it catches a continuation
-   line landing back at a case-branch column, which silently becomes a new
-   branch.
-2. **Author-break fidelity** across application chains, operator runs, lists,
-   records, and signatures. Most of the taste lives here. An operator run keeps
-   the glyph where the author put it, leading or trailing, since the formatter
-   cannot see fixity and the placement is not a question fixity answers.
+1. **Breaks inside applications, operator runs and record literals.** These are
+   the remaining reasons a declaration is copied rather than printed. An
+   operator run keeps the glyph where the author put it, leading or trailing,
+   since the formatter cannot see fixity and the placement is not a question
+   fixity answers. A record literal broken across lines needs a spelling
+   decision of the kind the `exposing` block form already settled.
+2. **Instance and deriver declarations**, whose method bodies are ordinary
+   value declarations and so need only the head printed.
 3. **Comment reassociation** inside declarations, making the verbatim fallback
    rare rather than routine.
+4. **A renderer-level layout assertion** mirroring the parser's layout stack,
+   refusing to emit a line at or left of the innermost layout column. The
+   self-check already catches the damage after the fact; this would catch it at
+   its source, and name the construct responsible.
 
 Each stage ends with a reformat of the bundled standard library and the
 examples, which the `ci` gate then holds.
@@ -45,7 +46,14 @@ examples, which the `ci` gate then holds.
 ### Traps worth remembering
 
 - `a--b` is a comment, not an operator. The emitter must never put `-`
-  immediately after `-`.
+  immediately after `-`. Operator runs and negation are always spaced today, so
+  nothing produces it, but a tighter spelling would.
+- `resume` heads an application, so `resume value with next` is the head, its
+  argument, and then the state clause — the `with` clause renders after the
+  arguments, not on the head.
+- A declaration's `NameSpan` points at the name on its annotation line, not on
+  its definition line, so breaks and adjacency are read from the source rather
+  than from spans.
 - Blocks carry two AST shapes, a legacy binding list and an ordered item list,
   and both must print the same way.
 

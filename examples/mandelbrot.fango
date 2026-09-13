@@ -28,7 +28,7 @@ mandelConverge : Float -> Float -> Int
 mandelConverge real imaginary =
     mandelConverger real imaginary 0 real imaginary
 
-mandel : Float -> Float -> Float -> Float -> {IO} ()
+mandel : Float -> Float -> Float -> Float ->{IO} ()
 mandel realStart imaginaryStart realMagnitude imaginaryMagnitude =
     drawRow row =
         drawPoint column =

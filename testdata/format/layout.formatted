@@ -1,0 +1,79 @@
+module Layout exposing (run)
+
+import Basics exposing (..)
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+
+blockBody =
+    x = 1
+    y = 2
+    x + y
+
+blockWithStatement =
+    print "hi"
+    ()
+
+annotatedLocal =
+    total : Int
+    total = 1
+    total
+
+localFunction outer =
+    helper a = a + outer
+    helper 1
+
+groupedLocal outer =
+    step 0 = outer
+    step n = step (n - 1)
+    step 3
+
+destructured pair =
+    (a, b) = pair
+    a + b
+
+caseInline x =
+    case x of
+        Nothing -> 0
+        Just v -> v
+
+caseOnHeadLine x = case x of
+    Nothing -> 0
+    Just v -> v
+
+caseBrokenBranch x =
+    case x of
+        Nothing -> 0
+        Just v ->
+            doubled = v + v
+            doubled
+
+nestedCase x y =
+    case x of
+        Nothing ->
+            case y of
+                Nothing -> 0
+                Just w -> w
+        Just v -> v
+
+ifBroken a =
+    if a then
+        1
+    else
+        2
+
+ifChainInline a b =
+    if a then 1
+    else if b then 2
+    else 3
+
+ifInline a = if a then 1 else 2
+
+lambdaBroken xs =
+    map
+        (\x ->
+            y = x + 1
+            y
+        )
+        xs
+
+run = 1

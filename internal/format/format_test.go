@@ -145,17 +145,31 @@ func TestRefusesFileThatDoesNotLex(t *testing.T) {
 	}
 }
 
-// The declarations are copied verbatim for now, so whatever the author wrote
-// below the imports must survive byte for byte.
-func TestDeclarationsAreCopiedVerbatim(t *testing.T) {
+// A layout construct keeps the author's line structure while its spacing is
+// normalized, and the branch column stays a level in from the `case`.
+func TestLayoutIsRenderedNotCopied(t *testing.T) {
 	src := "module M exposing (f)\n\nimport Basics exposing (..)\n\n" +
 		"f   x =\n    case x of\n        0 ->   1\n        n -> n\n"
 	out, errs := Source(source.NewFile("m.fango", []byte(src)))
 	if len(errs) > 0 {
 		t.Fatalf("%s: %s", errs[0].Title, errs[0].Body)
 	}
-	body := "f   x =\n    case x of\n        0 ->   1\n        n -> n\n"
+	body := "f x =\n    case x of\n        0 -> 1\n        n -> n\n"
 	if !strings.HasSuffix(string(out), body) {
-		t.Errorf("declaration body was not copied verbatim:\n%s", out)
+		t.Errorf("layout was not rendered as expected:\n%s", out)
+	}
+}
+
+// A declaration holding a comment is copied verbatim, which is what keeps the
+// comment from moving before the printer can anchor it.
+func TestDeclarationWithCommentIsCopiedVerbatim(t *testing.T) {
+	src := "module M exposing (f)\n\nimport Basics exposing (..)\n\n" +
+		"f   x =\n    -- why\n    x\n"
+	out, errs := Source(source.NewFile("m.fango", []byte(src)))
+	if len(errs) > 0 {
+		t.Fatalf("%s: %s", errs[0].Title, errs[0].Body)
+	}
+	if !strings.HasSuffix(string(out), "f   x =\n    -- why\n    x\n") {
+		t.Errorf("declaration with a comment was not copied verbatim:\n%s", out)
 	}
 }
