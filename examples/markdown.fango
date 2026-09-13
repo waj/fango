@@ -83,15 +83,15 @@ flush state =
     case state of
         { block = NoBlock } -> state
         { block = Paragraph content } ->
-            State {
-                block = NoBlock,
-                document = appendBuilder state.document (around "<p>" content "</p>\n")
-            }
+            State
+                { block = NoBlock
+                , document = appendBuilder state.document (around "<p>" content "</p>\n")
+                }
         { block = Bullets items } ->
-            State {
-                block = NoBlock,
-                document = appendBuilder state.document (around "<ul>\n" items "</ul>\n")
-            }
+            State
+                { block = NoBlock
+                , document = appendBuilder state.document (around "<ul>\n" items "</ul>\n")
+                }
 
 listItem : String -> Builder
 listItem input = around "<li>" (inline input) "</li>\n"

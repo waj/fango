@@ -41,6 +41,10 @@ func (p *printer) renderExpr(e ast.Expr, ind int) bool {
 		return p.renderOpChain(e, ind)
 	case *ast.App:
 		return p.renderApp(e, ind)
+	case *ast.RecordLit:
+		return p.renderRecordLit(e, ind)
+	case *ast.RecordUpdate:
+		return p.renderRecordUpdate(e, ind)
 	}
 	// A break inside an application, an operator run, or a record literal is
 	// not reproduced yet.
@@ -398,10 +402,23 @@ func (p *printer) renderApp(e *ast.App, ind int) bool {
 		} else {
 			p.emit(" ")
 		}
-		// An argument with its own line structure would be collapsed onto one
-		// line here, so the declaration is copied instead.
+		// An argument with its own line structure is rendered rather than
+		// inlined, so a nest stays a nest. Its closing parenthesis lands at the
+		// end of its last line, which is where the author wrote it.
 		if brokeWithin(a.Span()) {
-			return false
+			if atomic(a) {
+				if !p.renderExpr(a, contInd) {
+					return false
+				}
+			} else {
+				p.emit("(")
+				if !p.renderExpr(a, contInd) {
+					return false
+				}
+				p.emit(")")
+			}
+			prevEnd = a.Span().End
+			continue
 		}
 		s, argOK := exprAtomInline(a)
 		if !argOK {
@@ -419,4 +436,64 @@ func brokeBetween(f *source.File, from, to int) bool {
 		return false
 	}
 	return bytes.ContainsRune(f.Content[from:to], '\n')
+}
+
+// renderRecordLit writes a record literal the author spread over several
+// lines, in the leading-comma block form the standard library already uses.
+func (p *printer) renderRecordLit(e *ast.RecordLit, ind int) bool {
+	if e.Name != "" {
+		// The fields go one level in from the line the constructor name sits
+		// on, which is not the same as the caller's continuation indent when
+		// the name was written mid-line.
+		lineInd := p.ind
+		p.emit(e.Name + " ")
+		return p.recordFieldBlock(e.Fields, "{ ", lineInd+Indent)
+	}
+	return p.recordFieldBlock(e.Fields, "{ ", ind)
+}
+
+// renderRecordUpdate writes `{ receiver | field = value, … }` across lines.
+// The `|` sits one level in rather than at the brace, because at the brace
+// column the offside rule reads it as ending the construct.
+func (p *printer) renderRecordUpdate(e *ast.RecordUpdate, ind int) bool {
+	recv, ok := exprAtomInline(e.Record)
+	if !ok || brokeWithin(e.Record.Span()) {
+		return false
+	}
+	p.emit("{ " + recv)
+	for i, f := range e.Fields {
+		value, valueOK := exprInline(f.Value)
+		if !valueOK || brokeWithin(f.Value.Span()) {
+			return false
+		}
+		lead := ", "
+		if i == 0 {
+			lead = "| "
+		}
+		p.start(ind + Indent)
+		p.emit(lead + f.Name + " = " + value)
+	}
+	p.start(ind)
+	p.emit("}")
+	return true
+}
+
+// recordFieldBlock writes one field per line, opened by lead and closed by a
+// brace back at the block's own column.
+func (p *printer) recordFieldBlock(fields []ast.RecordExprField, lead string, ind int) bool {
+	for i, f := range fields {
+		value, ok := exprInline(f.Value)
+		if !ok || brokeWithin(f.Value.Span()) {
+			return false
+		}
+		open := ", "
+		if i == 0 {
+			open = lead
+		}
+		p.start(ind)
+		p.emit(open + f.Name + " = " + value)
+	}
+	p.start(ind)
+	p.emit("}")
+	return true
 }

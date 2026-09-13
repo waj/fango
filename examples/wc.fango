@@ -20,10 +20,10 @@ count counts =
     case readLine() of
         Nothing -> counts
         Just line ->
-            next = { counts |
-                lines = counts.lines + lineCount line,
-                words = counts.words + wordsIn line,
-                bytes = counts.bytes + String.byteLength line.text + String.byteLength line.ending
+            next = { counts
+                | lines = counts.lines + lineCount line
+                , words = counts.words + wordsIn line
+                , bytes = counts.bytes + String.byteLength line.text + String.byteLength line.ending
             }
             count next
 

@@ -21,3 +21,20 @@ partlyBroken a b =
         (b + 2)
 
 run = 1
+
+brokenRecord =
+    { lines = 1
+    , words = 2
+    }
+
+brokenNamedRecord =
+    Counts
+        { lines = 1
+        , words = 2
+        }
+
+brokenUpdate counts =
+    { counts
+        | lines = 1
+        , words = 2
+    }
