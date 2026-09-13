@@ -158,7 +158,7 @@ prefix elaboration or an interpreter-only convenience path.
 
 | Milestone | Depends on | Shippable result |
 | --- | --- | --- |
-| E6: resource APIs and native error boundaries | Implemented cleanup scopes | Useful file/resource examples and structured IO failures |
+| E6: file resources, structured IO failures, grep-lite | Implemented cleanup scopes | Scoped file handles, typed IO errors, a bundled `Fail`, multi-file `grep` |
 | E7: selective execution machines | Implemented control ABI and cleanup scopes | Internal one-shot suspension and cleanup frames |
 | E8: owned iterators and scoped non-tail handlers | Scoped capture Core, E7 | Pull traversal and checked non-tail resumption |
 | E9: structured async and cancellation | E6, E8 | Cooperative tasks, cancellation, nursery cleanup |
@@ -171,74 +171,200 @@ E7–E9 are explicitly deferred until a concrete suspension consumer warrants
 their compiler and type-system cost. No milestone requires implementing the
 whole table at once.
 
-## E6. Resource APIs, native boundaries, and useful IO errors
+## E6. File resources, structured IO failures, and grep-lite
 
 ### Deliverable and rationale
 
-Build a concrete file API on the implemented cleanup scopes, and replace
-selected panic-based IO failures with structured results/exits. Keep the foreign interface narrow. A file
-resource is not a scalar integer users can retain after closing (S), and a
-resource callback must not force the general continuation runtime (P).
+Build the first concrete resource on the implemented cleanup scopes and
+replace panic-based IO failures with typed values. The consumer is the
+`grep`-lite example from the examples pipeline: pattern search across files
+named on the command line, recursive directory walks, unreadable paths
+reported and skipped, and grep's exit statuses (0 matches, 1 none, 2 error).
+It forces every piece below and nothing beyond them: no suspension, no
+continuation object, no goroutine per resource.
 
-Suggested consumer APIs, all provisional:
+The existing `IO.readFile`, `writeFile`, `args`, and `exit` keep their types
+and behavior. They are the legacy shapes; the new APIs sit beside them, and
+the main roadmap owns their eventual deprecation.
+
+### Surface
+
+A bundled `Fail` module ends the per-file re-declaration of the failure
+effect. It is deliberately not in the prelude, so modules that declare their
+own `Fail` keep compiling:
 
 ```fango
-copy input output =
-    File.withFile input (\reader ->
-        File.withOutput output (\writer ->
-            File.copy reader writer))
+module Fail exposing (Fail, fail, attempt, fromResult)
 
-main() =
-    result = attempt (\_ -> copy "input.txt" "output.txt")
-    case result of
-        Ok () -> print "copied"
-        Err error -> print (File.describeError error)
+effect Fail error
+    abort fail : error -> value
+
+attempt : (() ->{Fail error | e} value) ->{e} Result error value
+fromResult : Result error value ->{Fail error} value
 ```
 
-Build a line-counting example and a copy example with scripted failure after
-opening the second resource. Do not call the copy operation transactional:
-closing resources does not undo bytes already written. Add an atomic-replace
-example only with explicit temporary-file/rename semantics and cleanup.
+`IO` gains a structured error vocabulary and two opaque handle types:
 
-### Representation and boundary tasks
+```fango
+type Kind = NotFound | PermissionDenied | AlreadyExists | IsDirectory | NotDirectory | Other
+type Error = { kind : Kind, path : String, message : String }
+describeError : Error -> String
 
-- Introduce an abstract scoped file capability and an owned close authority.
-  A borrowed handle permits reading/writing but does not expose public close.
-  Decide whether low-level owned open/close are compiler-private initially;
-  that is preferable to exposing unconstrained manual ownership prematurely.
-- Extend bundled native handling deliberately for this type. The existing
-  sidecar ABI accepts closed scalars/Unit, and the interpreter uses a separate
-  persistent native worker. A generated-program `*os.File` cannot simply be
-  serialized to that worker. Use worker-owned opaque IDs behind checked
-  capabilities and explicit release messages, or a focused bundled resource
-  boundary with equivalent semantics. IDs are not source-level resource types.
-- Define worker shutdown, broken transport, partial acquisition, and cleanup
-  acknowledgment. The interpreter waits for release completion when the source
-  scope exits; it must not report success while cleanup remains queued.
-- Keep infrastructure/protocol faults separate from ordinary file errors and
-  invalid source lifetime transitions. Runtime checks protecting a native handle
-  table may remain defensive, but cannot substitute for Fango scope checking.
-- Preserve existing IO line endings, EOF representation, host binding,
-  arguments, directory, formatting, and interpreter/compiler parity.
-- Convert expected OS failures to typed `Result` values at the native boundary;
-  a Fango wrapper can raise the designated Fail effect. Native panics remain
-  foreign failures with an explicit boundary policy, not the implementation of
-  language exceptions. Do not promise recoverable cleanup after `os.Exit`.
-- Start with fixed-signature custom Console/File effects for testing and
-  redirection. Full builtin IO interception remains gated by its declaration
-  and polymorphism representation; do not bypass the current rejection without
-  checking native defaults, classes, and evidence timing.
-- Keep resource access and system entropy forbidden during staging. Retain the
-  existing interpreter worker isolation and native-source cache invalidation.
+type Handle = Handle Int        -- exposed as `Handle`, never `Handle(..)`
+type Directory = Directory Int  -- private to IO and File
+```
+
+`describeError` renders platform-stable text from the kind and path, so
+fixture output does not depend on the host's error strings; `message` carries
+the OS text and matters only for `Other`. Neither handle type derives `Show`
+or `Eq`: the wrapped id must not leak through `show`, and a handle has no
+meaningful equality. The constructors are private, so a program can obtain a
+`Handle` only inside a scope and can never build, inspect, or compare one.
+
+The file operations are declared inside the existing `effect IO` block in
+call form, exactly like `readFileText`. The compiler adds `IO` to every
+operation's type, so `openRead` is `String ->{IO} Result Error Handle` at each
+use, gated by the row and rejected during staging by the existing rules. They
+are not exposed; only fango wrappers in `IO` and `File` call them.
+
+```fango
+effect IO
+    openRead   : String -> Result Error Handle = native
+    openWrite  : String -> Result Error Handle = native     -- create or truncate
+    openAppend : String -> Result Error Handle = native
+    closeHandle    : Handle -> Result Error () = native
+    handleHasInput : Handle -> Result Error Bool = native   -- EOF versus read error
+    readHandleLine : Handle -> Result Error String = native -- readRawLine's contract
+    writeHandle    : Handle -> String -> Result Error () = native
+    readFileResult  : String -> Result Error String = native
+    writeFileResult : String -> String -> Result Error () = native
+    openDirectory      : String -> Result Error Directory = native
+    readDirectoryEntry : Directory -> Result Error String = native -- "" at the end
+    closeDirectory     : Directory -> Result Error () = native
+    isDirectoryPath    : String -> Result Error Bool = native
+```
+
+`File` owns the scoped API over `IO.Handle`; the type lives in `IO` because
+it must be declared beside the natives that name it and `IO` cannot import
+`File`:
+
+```fango
+withFile   : String -> (IO.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
+withOutput : String -> (IO.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
+withAppend : String -> (IO.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
+readLine   : IO.Handle ->{IO, Fail IO.Error} Maybe IO.Line
+write      : IO.Handle -> String ->{IO, Fail IO.Error} ()
+read       : String ->{IO} Result IO.Error String
+writeAll   : String -> String ->{IO} Result IO.Error ()
+listDirectory : String ->{IO} Result IO.Error (List String)
+isDirectory   : String ->{IO} Result IO.Error Bool
+```
+
+`withFile path use` is `Scope.bracket` over an acquisition that raises `fail`
+on an `Err`, so a failed open releases nothing; a failed close after a
+successful body is the scope's failure, and after a failed body it is
+recorded as suppressed, exactly as the implemented scope semantics say.
+`readLine` reuses the console line helpers, so a file line has the same
+EOF, terminator, and U+FFFD contract as `readLine()`.
+
+Passing a named worker whose closed row lacks `Fail IO.Error` to `withFile` is
+a row mismatch; wrap it in a lambda. That is the general higher-order row
+subsumption question the main roadmap owns, not an E6 task.
+
+### Mechanism A: fallible natives
+
+The scalar sidecar ABI grows one shape, available only to `effect IO`
+operations in the bundled `IO` module: a result `Result Error T`, with `T` a
+boundary scalar, Unit, or a wrapper type from Mechanism A′, is implemented by a
+Go function returning `(T, error)` (or `error` alone for Unit). A non-nil
+error is classified by one shared `fangort` helper into a kind code, the
+path, and the underlying message, and both backends construct
+`Err (Error {...})` from those scalars; a nil error constructs `Ok`.
+
+- Module validation runs before name resolution and sees spellings, so
+  recognition of `Result Error T` is spelling-based and therefore restricted
+  to the module the compiler controls; anywhere else it is
+  `FALLIBLE NATIVE NOT ALLOWED`. Type checking then verifies the resolved
+  shape: `Result.Result`, `IO.Error` with fields `kind`, `path`, `message`,
+  and `IO.Kind` with exactly the six constructors in order, which is the
+  compiler's contract with the classifier.
+- The natives are effect operations, not value natives, because bundled value
+  natives require an in-process registry entry and that registry cannot build
+  ADT values. Staging is unaffected: the operations are not registered, so
+  compile-time evaluation still rejects them.
+- Sidecars may import only the Go standard library, so the classifier is
+  invoked by generated code and by the worker's dispatch loop, never by
+  `IO.native.go`. The worker protocol carries the failure in its own field,
+  separate from infrastructure faults and native panics.
+- Generated code emits the branch as straight-line Go at the call site — no
+  `panic`, no `defer` — using the same constructor emission as ordinary ADT
+  literals. The interpreter builds the same constructor values; both backends
+  therefore agree by construction.
+- The sidecar joins relative paths onto the working directory, so a raw
+  `PathError` would carry a per-run absolute path. Every error is relabeled
+  with the path the program supplied before it leaves the sidecar.
+
+### Mechanism A′: opaque scalar wrappers at the boundary
+
+A general boundary rule, not specific to IO: a native parameter or result may
+name a type declared in the sidecar's own module with exactly one constructor
+holding exactly one boundary scalar. It crosses to Go as that scalar and is
+wrapped back into its constructor on return, in both backends. With a private
+constructor this yields a type-safe opaque handle with no new runtime
+representation; a two-field type, a record, a polymorphic type, or a type
+from another module stays a `NATIVE ABI` error.
+
+### Mechanism B: handles as capabilities
+
+The bracket `ScopeID` never leaves the intrinsic — a callback's resource is an
+abstract capture variable — so a handle escaping its scope is caught by the
+type-based rules, and the whole mechanism is one switch: `IO.Handle` and
+`IO.Directory` are compiler-known resource types, identified by canonical ADT
+name, that `canCarry` treats as capability-carrying. Consequently:
+
+- A `withFile` body may not return the handle, a closure over it, or a
+  `Maybe`/record/list holding it: `RESOURCE ESCAPES`.
+- A scoped handler's result that could retain a handle is rejected:
+  `STATE RESULT ESCAPES`.
+- `File.withFile`, `withOutput`, and `withAppend` are trusted scoped runners
+  like `State.run`: their call sites are checked against the instantiated
+  result type, and a user-written generic wrapper over them is rejected the way
+  one over `State.run` is today. A resource runner's own body is allowed to
+  call `Scope.bracket` with a polymorphic result, which is the same
+  forwarding exemption `State.run` has.
+
+Core lint recomputes the summaries with the same analyzer, so the proof is
+repeated after elaboration. Runtime checks on the handle table (an unknown or
+closed id) remain defensive and unreachable from accepted fango.
+
+### Mechanism C: fixtures with files
+
+The differential harness accepts, beside `X.fango`, an `X.files/` seed
+directory copied into a fresh temporary working directory per leg, an
+`X.args` list, and an `X.status` expected exit code; today every non-zero
+exit is a harness failure. Failures are scripted portably, without `chmod`: a
+seeded directory opened as a file succeeds at open and fails at the first
+read with `IsDirectory`, which is the "failure after opening" case; a missing
+path or parent is `NotFound`; a path through a regular file is
+`NotDirectory`. `PermissionDenied` is covered by the classifier's unit test.
 
 ### Acceptance
 
-Run compiled/interpreted copies and line-counting with scripted acquisition,
-read, write, and close failures; compare result diagnostics and cleanup traces.
-Test nested files, callback captures, REPL recovery, worker shutdown, and
-concurrent test isolation. No goroutine-per-resource/effect or continuation
-channel is introduced to implement a synchronous language operation. Existing
-worker process infrastructure is not a suspended Fango continuation engine.
+- Copy, line-count, nested-scope, and error-kind fixtures run through both
+  backends with byte-identical output; negative fixtures pin every escape
+  diagnostic above plus the wrapper-shape and fallible-shape errors.
+- A user sidecar fixture proves a private wrapper type round-trips through
+  the boundary with its id unobservable.
+- A REPL transcript shows a failing `withFile` body leaves the session
+  usable and the handle closed.
+- `grep`-lite runs with arguments and exit codes under both backends.
+- Exploratory: a user-declared stateful handler *outside* the scope that
+  stores the handle in its cell and returns it through `return`. If that is
+  accepted, it is a pre-existing gap for every capture-capable resource, to
+  be recorded in section 7 rather than fixed here.
+
+No goroutine, channel, or continuation is introduced. The worker process is
+lifecycle isolation for natives, not a suspended computation.
 
 ## E7. Selective one-shot execution machines
 
@@ -710,9 +836,10 @@ These are bounded open decisions for their named milestones.
   capability type before they can even be stated, and rejecting suspending
   cleanup needs E7 `Machine` transport to exist. None of them is checkable
   today, and none is reachable today either.
-- **E6 resource/native ABI:** choose an abstract capability and owned-release
-  representation compatible with both generated Go and the interpreter worker.
-  Do not expose worker IDs as freely usable source handles.
+- **E6 resource/native ABI:** settled in the E6 section above — an opaque
+  scalar-wrapper type erased only at the Go boundary, a handle table owned by
+  the sidecar in both backends, and fallible natives restricted to the bundled
+  `IO` effect. Promote to the design when E6 ships.
 - **General operation-local polymorphism and builtin IO handling:** preserve
   this unfinished work from the old roadmap. Parameterized effects are not the
   same feature: an operation such as `fetch : Key a -> a` is universally
