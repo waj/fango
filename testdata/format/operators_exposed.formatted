@@ -1,4 +1,4 @@
-module Ops exposing ((+++), (<%>), Thing(..))
+module Ops exposing (Thing(..), (+++), (<%>))
 
 import Basics exposing (..)
 

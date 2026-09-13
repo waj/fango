@@ -978,6 +978,16 @@ spacing and chooses nothing about where a construct is split, so no width
 search is needed and a long line stays long. Whether a construct was written
 across lines is read off its span.
 
+Sorting import lines and exposed names is the one exception, and it forces two
+consequences. A comment directly above an import has to travel with it, so the
+import block is collected and emitted as a unit rather than in source order.
+And a sorted list has no author line structure left to preserve, so a broken
+one is laid out by kind and wrapped to a width — the only width the formatter
+consults. The self-check canonicalizes both orders before comparing trees, so
+it still rejects every structural change except the reordering the formatter is
+meant to perform, and comments are compared as a multiset for the same reason;
+that the ordering itself is right is held by fixtures.
+
 Two properties keep it safe. Anything the printer does not yet render
 structurally is copied verbatim from its source extent, so no comment can be
 moved or lost before the printer learns to place it — which is also how a

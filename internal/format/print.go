@@ -146,7 +146,23 @@ func printModule(f *source.File, m *ast.Module, toks []token.Token, comments []t
 		bodyStart = ast.DeclSpan(m.Decls[0]).Start
 	}
 
-	for _, it := range scanPrelude(f, toks, bodyStart) {
+	items := scanPrelude(f, toks, bodyStart)
+	entries, floating := collectImports(f, items, m, comments)
+	importLo, importHi := importRegion(items)
+
+	for _, it := range items {
+		if it.kind == kindImport {
+			// The whole import block is written once, at the first import,
+			// because sorting reorders the lines and their comments with them.
+			if it.span.Start != importLo {
+				continue
+			}
+			cs.skipTo(importHi)
+			p.gapBefore(it.span.Start)
+			p.printImportBlock(entries, floating)
+			p.srcEnd = importHi
+			continue
+		}
 		cs.emitBefore(p, it.span.Start, 0)
 		p.gapBefore(it.span.Start)
 		switch it.kind {
@@ -154,8 +170,6 @@ func printModule(f *source.File, m *ast.Module, toks []token.Token, comments []t
 			p.line(0, "{-# "+strings.TrimSpace(it.text)+" #-}")
 		case kindHeader:
 			p.headerLines(m.Header, it.span.StartPos().Line)
-		case kindImport:
-			p.importLines(m.Imports[it.index], it.span.StartPos().Line)
 		}
 		p.srcEnd = it.span.End
 	}
@@ -205,31 +219,75 @@ func (p *printer) exposingLines(head string, e *ast.Exposing, headLine int) {
 		p.line(0, head+suffix)
 		return
 	}
-	groups := groupByLine(e.Items)
-	if len(groups) == 1 && groups[0][0].Sp.StartPos().Line == headLine {
-		p.line(0, head+" ("+strings.Join(itemTexts(e.Items), ", ")+")")
+	items := sortExposed(e.Items)
+	if !p.broke(e.Items, headLine) {
+		p.line(0, head+" ("+strings.Join(itemTexts(items), ", ")+")")
 		return
 	}
 	p.line(0, head)
-	for i, g := range groups {
-		lead := ", "
-		if i == 0 {
-			lead = "( "
+	first := true
+	for _, g := range groupByKind(items) {
+		for _, row := range wrapItems(itemTexts(g)) {
+			lead := ", "
+			if first {
+				lead = "( "
+				first = false
+			}
+			p.line(Indent, lead+row)
 		}
-		p.line(Indent, lead+strings.Join(itemTexts(g), ", "))
 	}
 	p.line(Indent, ")")
 }
 
-// groupByLine splits items into the lines the author wrote them on.
-func groupByLine(items []ast.ExposeItem) [][]ast.ExposeItem {
-	var groups [][]ast.ExposeItem
-	line := -1
+// wrapWidth is the column a wrapped exposing list aims to stay inside. It is
+// the one place the formatter consults a width, and only because sorting has
+// already discarded the author's own line structure: there is no break left to
+// preserve, so the formatter has to choose one.
+const wrapWidth = 80
+
+// wrapItems packs names into lines that fit, keeping their order.
+func wrapItems(names []string) []string {
+	var rows []string
+	cur := ""
+	for _, n := range names {
+		switch {
+		case cur == "":
+			cur = n
+		case Indent+2+len(cur)+2+len(n) <= wrapWidth:
+			cur += ", " + n
+		default:
+			rows = append(rows, cur)
+			cur = n
+		}
+	}
+	if cur != "" {
+		rows = append(rows, cur)
+	}
+	return rows
+}
+
+// broke reports whether the author put the list on lines of its own, either by
+// moving it below the keyword or by spreading it across several lines.
+func (p *printer) broke(items []ast.ExposeItem, headLine int) bool {
 	for _, it := range items {
-		at := it.Sp.StartPos().Line
-		if at != line {
+		if it.Sp.StartPos().Line != headLine {
+			return true
+		}
+	}
+	return false
+}
+
+// groupByKind splits sorted items into one group per kind, which is how a
+// broken list is laid out: types, then values, then operators. The author's
+// own grouping cannot be preserved once the list is sorted, so the kinds
+// supply the line structure instead.
+func groupByKind(items []ast.ExposeItem) [][]ast.ExposeItem {
+	var groups [][]ast.ExposeItem
+	kind := itemKind(-1)
+	for _, it := range items {
+		if k := exposeKind(it.Name); k != kind {
 			groups = append(groups, nil)
-			line = at
+			kind = k
 		}
 		groups[len(groups)-1] = append(groups[len(groups)-1], it)
 	}

@@ -7,8 +7,9 @@ module Prelude exposing ()
 -- standard library sits below this file and carries the pragma.
 
 import Basics exposing
-    ( Num, Eq, Ord, Show, show
-    , (+), (-), (*), (/), (==), (/=), (<), (>), (<=), (>=), (++)
+    ( Eq, Num, Ord, Show
+    , show
+    , (*), (+), (++), (-), (/), (/=), (<), (<=), (==), (>), (>=)
     )
 import IO exposing (IO, print, readLine)
 import List exposing (List)

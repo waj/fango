@@ -1,0 +1,11 @@
+module Sorted exposing (run)
+
+-- About the block as a whole.
+
+import Json as J
+-- About IO specifically.
+import IO exposing (print, IO, readLine)
+import Basics exposing (..) -- trailing stays with Basics
+import Dict
+
+run = 1

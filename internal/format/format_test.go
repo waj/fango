@@ -1,6 +1,7 @@
 package format
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,11 +102,10 @@ func TestNoCommentLost(t *testing.T) {
 			t.Errorf("%s: %d comments in, %d out", path, len(before), len(after))
 			continue
 		}
-		for i := range before {
-			if normalizeSpace(before[i].Text) != normalizeSpace(after[i].Text) {
-				t.Errorf("%s: comment %d changed: %q -> %q",
-					path, i, before[i].Text, after[i].Text)
-			}
+		// A multiset: sorting the import block moves a comment with its
+		// import, so order is the fixtures' business, not this check's.
+		if !bytes.Equal(commentTexts(before), commentTexts(after)) {
+			t.Errorf("%s: the comments changed", path)
 		}
 	}
 }

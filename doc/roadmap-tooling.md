@@ -43,7 +43,9 @@ correct in the meantime.
    line landing back at a case-branch column, which silently becomes a new
    branch.
 3. **Author-break fidelity** across application chains, operator runs, lists,
-   records, and signatures. Most of the taste lives here.
+   records, and signatures. Most of the taste lives here. An operator run keeps
+   the glyph where the author put it, leading or trailing, since the formatter
+   cannot see fixity and the placement is not a question fixity answers.
 4. **Comment reassociation** inside declarations, making the verbatim fallback
    rare rather than routine.
 
@@ -63,12 +65,10 @@ examples, which the `ci` gate then holds.
 
 - Comment attachment rules: which anchor a comment binds to when it sits
   between two constructs, and whether a blank line before it changes that.
-- The style rules themselves: operator-run wrapping, whether imports are sorted
-  at all, spacing inside brackets and records, and alignment of equation groups.
-- Blank-line policy below the imports. Above them the author's blank lines are
-  reproduced; a stricter rule — exactly one between top-level declarations,
-  none inside an equation group — is worth considering once declarations print
-  structurally.
+- The remaining style rules: spacing inside brackets and records, and whether
+  equation groups align anything.
+- Whether the author's blank lines below the imports need any rule beyond
+  reproducing them, which is what happens above the imports today.
 - Whether an `ast.Bad` declaration node should let the formatter work on files
   that do not parse. It would also improve batch `fango check`, which reports
   one syntax error per run today. The formatter should not be coupled to it.

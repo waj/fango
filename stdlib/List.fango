@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module List exposing (List(..), range, each, foldl, foldr, map, filter, length, reverse)
+module List exposing (List(..), each, filter, foldl, foldr, length, map, range, reverse)
 
 import Basics exposing (..)
 

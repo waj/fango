@@ -62,7 +62,16 @@ below the imports is preserved as written.
 The formatter keeps the author's line breaks rather than reflowing to a width,
 so a construct written across several lines stays that way and one written
 inline stays inline. An `exposing` list the author moved below its keyword is
-printed in the leading-comma block form; the order of the list is never changed.
+printed in the leading-comma block form.
+
+Import lines are sorted by module name and exposed names are sorted by kind —
+types, effects and constructors first, then values, then operators — and
+alphabetically within each kind. A comment written directly above an import
+moves with it; one set off by a blank line stays at the top of the block. A
+broken `exposing` list starts a line per kind and wraps to stay readable, which
+is the one place the formatter consults a width: sorting has already discarded
+the author's line structure there, so there is no break left to preserve. A
+list written inline is left inline however long it is.
 A file that does not lex or parse is left untouched and its diagnostics are
 reported, because a failed declaration is dropped during recovery and formatting
 would lose it.

@@ -17,8 +17,8 @@ package format
 import (
 	"bytes"
 	"fmt"
+	"sort"
 
-	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/lexer"
 	"github.com/waj/fango/internal/parser"
@@ -81,7 +81,7 @@ func verify(orig *source.File, out []byte, want []token.Comment) error {
 
 	origToks, _, _ := lexer.LexWithComments(orig)
 	origModule, _ := parser.Parse(origToks, orig)
-	if a, b := ast.Dump(origModule), ast.Dump(m); a != b {
+	if !equivalent(origModule, m) {
 		return fmt.Errorf("the syntax tree changed")
 	}
 	if a, b := commentTexts(want), commentTexts(gotComments); !bytes.Equal(a, b) {
@@ -90,10 +90,19 @@ func verify(orig *source.File, out []byte, want []token.Comment) error {
 	return nil
 }
 
+// commentTexts is the multiset of comments, as sorted normalized text. It is a
+// multiset rather than a sequence because sorting the import block moves a
+// comment with the import it describes; that the move is the right one is held
+// by the fixtures, while this check holds that nothing was lost or altered.
 func commentTexts(cs []token.Comment) []byte {
+	texts := make([]string, len(cs))
+	for i, c := range cs {
+		texts[i] = normalizeSpace(c.Text)
+	}
+	sort.Strings(texts)
 	var b bytes.Buffer
-	for _, c := range cs {
-		b.WriteString(normalizeSpace(c.Text))
+	for _, t := range texts {
+		b.WriteString(t)
 		b.WriteByte('\n')
 	}
 	return b.Bytes()

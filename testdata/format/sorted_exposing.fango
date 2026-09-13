@@ -1,0 +1,7 @@
+module Kinds exposing
+    ( show, (+), Num(..), modBy, (++), Eq(..)
+    )
+
+import Basics exposing (modBy, (+), Num(..), show)
+
+modBy = 1

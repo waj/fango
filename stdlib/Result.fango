@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Result exposing (Result(..), map, mapError, andThen, withDefault)
+module Result exposing (Result(..), andThen, map, mapError, withDefault)
 
 import Basics exposing (..)
 

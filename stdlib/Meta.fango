@@ -1,11 +1,9 @@
 {-# no-prelude #-}
 module Meta exposing
-    ( Code, TypeRepr, Items(..), Field(..), Ctor(..), Shape(..), TypeInfo(..)
-    , Reflected(..), Bound(..), BoundField(..), Lift(..)
-    , sameType, head, args, isVar, typeName, info
-    , match, construct, ctorsIn
-    , foldItems, mapItems, lengthItems
-    , fail
+    ( Bound(..), BoundField(..), Code, Ctor(..), Field(..), Items(..), Lift(..)
+    , Reflected(..), Shape(..), TypeInfo(..), TypeRepr
+    , args, construct, ctorsIn, fail, foldItems, head, info, isVar, lengthItems
+    , mapItems, match, sameType, typeName
     )
 
 import Basics exposing (..)

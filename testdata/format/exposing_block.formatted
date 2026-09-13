@@ -1,10 +1,10 @@
 module Wide exposing
     ( Alpha, Beta
-    , gamma, delta
+    , delta, gamma
     )
 
 import Basics exposing
-    ( Num, Eq
+    ( Eq, Num
     , (+), (-)
     )
 

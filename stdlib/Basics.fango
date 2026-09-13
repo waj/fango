@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Basics exposing (Num(..), Eq(..), Ord(..), Show(..), (/), (++), (/=), modBy, quotientBy, remainderBy)
+module Basics exposing (Eq(..), Num(..), Ord(..), Show(..), modBy, quotientBy, remainderBy, (++), (/), (/=))
 
 class Num a
     fromInt : Int -> a
