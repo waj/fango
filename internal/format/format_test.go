@@ -187,3 +187,18 @@ func TestUnanchorableCommentCopiesDeclaration(t *testing.T) {
 		t.Errorf("declaration with an unanchorable comment was not copied:\n%s", out)
 	}
 }
+
+// A multiline composite has no comment anchors yet. Its declaration therefore
+// takes the same conservative verbatim fallback as every other unsupported
+// comment position.
+func TestCommentInBrokenCompositeCopiesDeclaration(t *testing.T) {
+	body := "values =\n    [first\n    -- why\n    , second]\n"
+	src := "module M exposing (values)\n\nimport Basics exposing (..)\n\n" + body
+	out, errs := Source(source.NewFile("m.fango", []byte(src)))
+	if len(errs) > 0 {
+		t.Fatalf("%s: %s", errs[0].Title, errs[0].Body)
+	}
+	if !strings.HasSuffix(string(out), body) {
+		t.Errorf("declaration with a composite comment was not copied:\n%s", out)
+	}
+}

@@ -27,6 +27,15 @@ func (p *printer) renderExpr(e ast.Expr, ind int) bool {
 		return true
 	}
 	switch e := e.(type) {
+	case *ast.Ctor:
+		// An empty bracket list lowers to a constructor rather than an
+		// application. It has no members to lay out, so its compact spelling is
+		// the only block form.
+		if e.Sugared && e.Name == "List.Nil" {
+			p.emit("[]")
+			return true
+		}
+		return false
 	case *ast.Block:
 		return p.renderBlock(e, ind)
 	case *ast.Case:
@@ -40,6 +49,12 @@ func (p *printer) renderExpr(e ast.Expr, ind int) bool {
 	case *ast.OpChain:
 		return p.renderOpChain(e, ind)
 	case *ast.App:
+		if elems, tail, ok := asList(e); ok {
+			return p.renderList(elems, tail, ind)
+		}
+		if elems, ok := asTuple(e); ok {
+			return p.renderTuple(elems, ind)
+		}
 		return p.renderApp(e, ind)
 	case *ast.RecordLit:
 		return p.renderRecordLit(e, ind)
@@ -99,21 +114,17 @@ func (p *printer) renderBind(lb ast.LocalBind, ind int) bool {
 		p.line(ind, declName(lb.Name)+" : "+annotationText(lb.Ann))
 	}
 	if lb.Pattern != nil {
-		pat, ok := patternInline(lb.Pattern)
-		if !ok {
+		p.start(ind)
+		if !p.renderPattern(lb.Pattern, ind) {
 			return false
 		}
-		p.start(ind)
-		p.emit(pat)
 		return p.renderAssigned(lb.Body, ind)
 	}
 	for _, eq := range localEquations(lb) {
-		head, ok := equationHead(lb.Name, eq)
-		if !ok {
+		p.start(ind)
+		if !p.renderEquationHead(lb.Name, eq, ind) {
 			return false
 		}
-		p.start(ind)
-		p.emit(head)
 		if !p.renderAssigned(eq.Body, ind) {
 			return false
 		}
@@ -163,12 +174,10 @@ func (p *printer) renderCase(c *ast.Case, ind int) bool {
 		if !p.placeBefore(br.Pattern.Span().Start, branchInd) {
 			return false
 		}
-		pat, patOK := patternInline(br.Pattern)
-		if !patOK {
+		p.start(branchInd)
+		if !p.renderPattern(br.Pattern, branchInd) {
 			return false
 		}
-		p.start(branchInd)
-		p.emit(pat)
 		if !p.renderArrow(br.Body, branchInd) {
 			return false
 		}
@@ -216,27 +225,21 @@ func (p *printer) renderHandle(h *ast.Handle, ind int) bool {
 		if !p.placeBefore(cl.OpSpan.Start, clauseInd) {
 			return false
 		}
-		params, paramsOK := patternsInline(cl.Params, patternArgInline)
-		if !paramsOK {
+		p.start(clauseInd)
+		p.emit(cl.Op)
+		if !p.renderPatternArgs(cl.Params, clauseInd) {
 			return false
 		}
-		name := cl.Op
-		if params != "" {
-			name += " " + params
-		}
-		p.start(clauseInd)
-		p.emit(name)
 		if !p.renderArrow(cl.Body, clauseInd) {
 			return false
 		}
 	}
 	if h.Return != nil {
-		pat, patOK := patternInline(h.Return.Param)
-		if !patOK {
+		p.start(clauseInd)
+		p.emit("return ")
+		if !p.renderPattern(h.Return.Param, clauseInd) {
 			return false
 		}
-		p.start(clauseInd)
-		p.emit("return " + pat)
 		if !p.renderArrow(h.Return.Body, clauseInd) {
 			return false
 		}
@@ -308,11 +311,15 @@ func (p *printer) renderArm(arm ast.Expr, ind int) bool {
 }
 
 func (p *printer) renderLambda(e *ast.Lambda, ind int) bool {
-	params, ok := patternsInline(e.Params, patternArgInline)
-	if !ok {
-		return false
+	p.emit("\\")
+	for i, param := range e.Params {
+		if i > 0 {
+			p.emit(" ")
+		}
+		if !p.renderPatternArg(param, ind) {
+			return false
+		}
 	}
-	p.emit("\\" + params)
 	return p.renderArrow(e.Body, ind)
 }
 
@@ -403,12 +410,6 @@ func (p *printer) renderOpChain(e *ast.OpChain, ind int) bool {
 // renderApp writes an application whose arguments the author spread over
 // several lines, each argument staying on the line it was written on.
 func (p *printer) renderApp(e *ast.App, ind int) bool {
-	if _, _, ok := asList(e); ok {
-		return false
-	}
-	if _, ok := asTuple(e); ok {
-		return false
-	}
 	fn, args := spine(e)
 	if r, isResume := fn.(*ast.Resume); isResume && r.NextState != nil {
 		return false
@@ -453,6 +454,68 @@ func (p *printer) renderApp(e *ast.App, ind int) bool {
 		p.emit(s)
 		prevEnd = a.Span().End
 	}
+	return true
+}
+
+// renderList writes a broken bracket list in the same leading-comma block
+// form as records. Source line breaks choose which adjacent elements share a
+// row; the formatter only normalizes their spacing and indentation.
+func (p *printer) renderList(elems []ast.Expr, tail ast.Expr, ind int) bool {
+	if len(elems) == 0 {
+		p.emit("[]")
+		return true
+	}
+	base := p.lineIndent(ind)
+	p.emit("[ ")
+	prevEnd := elems[0].Span().Start
+	for i, elem := range elems {
+		if i > 0 {
+			if brokeBetween(elem.Span().File, prevEnd, elem.Span().Start) {
+				p.start(base)
+			}
+			p.emit(", ")
+		}
+		if !p.renderExpr(elem, base) {
+			return false
+		}
+		prevEnd = elem.Span().End
+	}
+	if tail != nil {
+		if brokeBetween(tail.Span().File, prevEnd, tail.Span().Start) {
+			p.start(base)
+			p.emit("| ")
+		} else {
+			p.emit(" | ")
+		}
+		if !p.renderExpr(tail, base) {
+			return false
+		}
+	}
+	p.start(base)
+	p.emit("]")
+	return true
+}
+
+// renderTuple is renderList without its optional tail and square brackets.
+func (p *printer) renderTuple(elems []ast.Expr, ind int) bool {
+	base := p.lineIndent(ind)
+	rowInd := base + Indent
+	p.emit("( ")
+	prevEnd := elems[0].Span().Start
+	for i, elem := range elems {
+		if i > 0 {
+			if brokeBetween(elem.Span().File, prevEnd, elem.Span().Start) {
+				p.start(rowInd)
+			}
+			p.emit(", ")
+		}
+		if !p.renderExpr(elem, base) {
+			return false
+		}
+		prevEnd = elem.Span().End
+	}
+	p.start(rowInd)
+	p.emit(")")
 	return true
 }
 

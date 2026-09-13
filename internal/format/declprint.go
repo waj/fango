@@ -54,12 +54,10 @@ func (p *printer) valueDeclLines(d *ast.ValueDecl, ind int) bool {
 	}
 	p.annotationLine(d, ind)
 	for _, eq := range rows {
-		head, ok := equationHead(d.Name, eq)
-		if !ok {
+		p.start(ind)
+		if !p.renderEquationHead(d.Name, eq, ind) {
 			return false
 		}
-		p.start(ind)
-		p.emit(head)
 		if !p.renderAssigned(eq.Body, ind) {
 			return false
 		}
@@ -69,12 +67,10 @@ func (p *printer) valueDeclLines(d *ast.ValueDecl, ind int) bool {
 }
 
 func (p *printer) patternDeclLine(d *ast.PatternDecl) bool {
-	pat, ok := patternInline(d.Pattern)
-	if !ok {
+	p.start(0)
+	if !p.renderPattern(d.Pattern, 0) {
 		return false
 	}
-	p.start(0)
-	p.emit(pat)
 	if !p.renderAssigned(d.Body, 0) {
 		return false
 	}
@@ -260,22 +256,22 @@ func equationBroke(eq ast.Equation) bool {
 	return bytes.ContainsRune(body.File.Content[eq.NameSpan.Start:body.End], '\n')
 }
 
-// equationHead renders the left of the `=`. A Unit parameter written against
-// the name keeps that spelling, the same adjacency rule application obeys.
-func equationHead(name string, eq ast.Equation) (string, bool) {
-	head := declName(name)
+// renderEquationHead writes the left of an `=`. A Unit parameter written
+// against the name keeps that spelling, the same adjacency rule application
+// obeys. Patterns may themselves have a block form.
+func (p *printer) renderEquationHead(name string, eq ast.Equation, ind int) bool {
+	p.emit(declName(name))
 	for i, param := range eq.Params {
 		if _, isUnit := param.(*ast.PUnit); isUnit && paramAdjacent(eq, i) {
-			head += "()"
+			p.emit("()")
 			continue
 		}
-		s, ok := patternArgInline(param)
-		if !ok {
-			return "", false
+		p.emit(" ")
+		if !p.renderPatternArg(param, ind) {
+			return false
 		}
-		head += " " + s
 	}
-	return head, true
+	return true
 }
 
 // paramAdjacent reports whether a parameter was written with no space before

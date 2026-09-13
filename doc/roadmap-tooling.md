@@ -25,16 +25,12 @@ printer does not reproduce.
 
 ### Remaining work
 
-1. **Bracket lists and tuples broken across lines.** A list written over
-   several lines is the one composite left without a block form; it needs the
-   same spelling decision the `exposing` and record block forms already
-   settled.
-2. **More comment anchors.** A comment reaching no anchor through whitespace
+1. **More comment anchors.** A comment reaching no anchor through whitespace
    alone sends its declaration to a verbatim copy, which is correct but coarse.
    Anchors inside an application's argument list and an operator run would
    narrow it further. There will always be positions with no sensible anchor,
    so the fallback stays.
-3. **A renderer-level layout assertion** mirroring the parser's layout stack,
+2. **A renderer-level layout assertion** mirroring the parser's layout stack,
    refusing to emit a line at or left of the innermost layout column. The
    self-check already catches the damage after the fact; this would catch it at
    its source and name the construct responsible.

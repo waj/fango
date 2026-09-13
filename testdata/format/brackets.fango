@@ -1,0 +1,36 @@
+module Brackets exposing (run)
+
+import Basics exposing (..)
+
+listValue =
+    [first,  second
+     ,third, four
+     ,fifth
+     |rest]
+
+tupleValue =
+    (first,
+     second, third)
+
+nested =
+    [[first,
+      second]
+     , (third,
+        fourth)]
+
+casePattern value =
+    case value of
+        [first, second
+         , third
+         | rest] -> first
+        _ -> 0
+
+destructure subject =
+    (first,
+     second) = subject
+    first
+
+pair (first,
+      second) = first
+
+run = 1

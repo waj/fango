@@ -61,8 +61,7 @@ normalizes spacing, indentation, the `(op)` spelling of an operator name, and
 runs of blank lines. A declaration is preserved exactly as written when it
 holds a comment the formatter cannot anchor — one between an operator and its
 operand, say, rather than above a statement or a branch — or when some part of
-it has a line structure the printer cannot reproduce, such as a bracket list
-broken across lines.
+it has a line structure the printer cannot reproduce.
 
 Redundant parentheses are dropped, because the syntax tree does not record
 them. Grouping is not: an operator run is printed flat in the order it was
@@ -78,6 +77,23 @@ keeps its branches one level in from there, and a `then` or `else` given a line
 of its own is anchored at the column of its `if`, so a chain of arms lines up
 instead of staircasing rightward. An `exposing` list the author moved below
 its keyword is printed in the leading-comma block form.
+
+A bracket list or tuple written across lines uses that same leading-separator
+style. Its elements remain grouped on the source lines the author chose, while
+spacing and indentation are normalized; nested lists and tuples behave the
+same way, in expressions and patterns:
+
+```fango
+values =
+    [ first, second
+    , third
+    ]
+
+pair =
+    ( first
+        , second
+        )
+```
 
 Import lines are sorted by module name and exposed names are sorted by kind —
 types, effects and constructors first, then values, then operators — and

@@ -6,6 +6,141 @@ import (
 	"github.com/waj/fango/internal/ast"
 )
 
+// renderPattern writes p continuing the current line. List and tuple patterns
+// are the only patterns with a block form; a constructor containing one is
+// rendered structurally as well so nested bracket syntax does not force its
+// declaration back to verbatim text.
+func (p *printer) renderPattern(pat ast.Pattern, ind int) bool {
+	if !brokeWithin(pat.Span()) {
+		s, ok := patternInline(pat)
+		if ok {
+			p.emit(s)
+		}
+		return ok
+	}
+	c, isCtor := pat.(*ast.PCtor)
+	if !isCtor {
+		return false
+	}
+	if elems, tail, ok := asListPattern(c); ok {
+		return p.renderPatternList(elems, tail, ind)
+	}
+	if elems, ok := asTuplePattern(c); ok {
+		return p.renderPatternTuple(elems, ind)
+	}
+	return p.renderCtorPattern(c, ind)
+}
+
+func (p *printer) renderPatternArgs(ps []ast.Pattern, ind int) bool {
+	for _, pat := range ps {
+		p.emit(" ")
+		if !p.renderPatternArg(pat, ind) {
+			return false
+		}
+	}
+	return true
+}
+
+func (p *printer) renderPatternArg(pat ast.Pattern, ind int) bool {
+	if !brokeWithin(pat.Span()) {
+		s, ok := patternArgInline(pat)
+		if ok {
+			p.emit(s)
+		}
+		return ok
+	}
+	if c, ok := pat.(*ast.PCtor); ok {
+		if _, _, list := asListPattern(c); list {
+			return p.renderPattern(pat, ind)
+		}
+		if _, tuple := asTuplePattern(c); tuple {
+			return p.renderPattern(pat, ind)
+		}
+	}
+	p.emit("(")
+	if !p.renderPattern(pat, ind) {
+		return false
+	}
+	p.emit(")")
+	return true
+}
+
+func (p *printer) renderCtorPattern(c *ast.PCtor, ind int) bool {
+	p.emit(c.Name)
+	prevEnd := c.NameSpan.End
+	base := p.lineIndent(ind)
+	for _, arg := range c.Args {
+		if brokeBetween(arg.Span().File, prevEnd, arg.Span().Start) {
+			p.start(base + Indent)
+		} else {
+			p.emit(" ")
+		}
+		if !p.renderPatternArg(arg, base) {
+			return false
+		}
+		prevEnd = arg.Span().End
+	}
+	return true
+}
+
+func (p *printer) renderPatternList(elems []ast.Pattern, tail ast.Pattern, ind int) bool {
+	if len(elems) == 0 {
+		p.emit("[]")
+		return true
+	}
+	base := p.lineIndent(ind)
+	p.emit("[ ")
+	prevEnd := elems[0].Span().Start
+	for i, elem := range elems {
+		if i > 0 {
+			if brokeBetween(elem.Span().File, prevEnd, elem.Span().Start) {
+				p.start(base)
+			}
+			p.emit(", ")
+		}
+		if !p.renderPattern(elem, base) {
+			return false
+		}
+		prevEnd = elem.Span().End
+	}
+	if tail != nil {
+		if brokeBetween(tail.Span().File, prevEnd, tail.Span().Start) {
+			p.start(base)
+			p.emit("| ")
+		} else {
+			p.emit(" | ")
+		}
+		if !p.renderPattern(tail, base) {
+			return false
+		}
+	}
+	p.start(base)
+	p.emit("]")
+	return true
+}
+
+func (p *printer) renderPatternTuple(elems []ast.Pattern, ind int) bool {
+	base := p.lineIndent(ind)
+	rowInd := base + Indent
+	p.emit("( ")
+	prevEnd := elems[0].Span().Start
+	for i, elem := range elems {
+		if i > 0 {
+			if brokeBetween(elem.Span().File, prevEnd, elem.Span().Start) {
+				p.start(rowInd)
+			}
+			p.emit(", ")
+		}
+		if !p.renderPattern(elem, base) {
+			return false
+		}
+		prevEnd = elem.Span().End
+	}
+	p.start(rowInd)
+	p.emit(")")
+	return true
+}
+
 // patternInline renders a pattern on one line, reporting whether it could.
 // Patterns have no layout of their own, so the only failure is a shape the
 // printer does not handle.
