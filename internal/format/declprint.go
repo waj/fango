@@ -32,9 +32,13 @@ func (p *printer) printDecl(d ast.Decl, sp source.Span, hasComment bool) bool {
 		p.sigBlock("class "+d.Name, []string{d.Param.Name}, d.Methods)
 		return true
 	case *ast.ValueDecl:
-		return p.valueDeclLines(d)
+		return p.valueDeclLines(d, 0)
 	case *ast.PatternDecl:
 		return p.patternDeclLine(d)
+	case *ast.InstanceDecl:
+		return p.instanceLines(d)
+	case *ast.DeriverDecl:
+		return p.deriverLines(d)
 	}
 	return false
 }
@@ -43,25 +47,25 @@ func (p *printer) printDecl(d ast.Decl, sp source.Span, hasComment bool) bool {
 // declines any equation whose body the author wrote across lines: the layout
 // constructs are not printed yet, and declining leaves the declaration to be
 // copied with its own line structure intact.
-func (p *printer) valueDeclLines(d *ast.ValueDecl) bool {
+func (p *printer) valueDeclLines(d *ast.ValueDecl, ind int) bool {
 	if d.Native != nil {
-		p.annotationLine(d)
-		p.line(0, declName(d.Name)+" = "+nativeText(d.Native))
+		p.annotationLine(d, ind)
+		p.line(ind, declName(d.Name)+" = "+nativeText(d.Native))
 		return true
 	}
 	rows := equations(d)
 	if len(rows) == 0 {
 		return false
 	}
-	p.annotationLine(d)
+	p.annotationLine(d, ind)
 	for _, eq := range rows {
 		head, ok := equationHead(d.Name, eq)
 		if !ok {
 			return false
 		}
-		p.start(0)
+		p.start(ind)
 		p.emit(head)
-		if !p.renderAssigned(eq.Body, 0) {
+		if !p.renderAssigned(eq.Body, ind) {
 			return false
 		}
 	}
@@ -83,9 +87,9 @@ func (p *printer) patternDeclLine(d *ast.PatternDecl) bool {
 	return true
 }
 
-func (p *printer) annotationLine(d *ast.ValueDecl) {
+func (p *printer) annotationLine(d *ast.ValueDecl, ind int) {
 	if d.Ann != nil {
-		p.line(0, declName(d.Name)+" : "+annotationText(d.Ann))
+		p.line(ind, declName(d.Name)+" : "+annotationText(d.Ann))
 	}
 }
 
@@ -284,4 +288,49 @@ func equationHead(name string, eq ast.Equation) (string, bool) {
 func paramAdjacent(eq ast.Equation, i int) bool {
 	sp := eq.Params[i].Span()
 	return writtenAgainst(sp.File, sp.Start)
+}
+
+// instanceLines renders `instance Preds => Head` and its method definitions,
+// which are ordinary value declarations one level in.
+func (p *printer) instanceLines(d *ast.InstanceDecl) bool {
+	head := "instance "
+	if len(d.Preds) > 0 {
+		head += predsText(d.Preds) + " => "
+	}
+	head += predText(d.Head)
+	p.line(0, head)
+	return p.methodLines(d.Methods)
+}
+
+// deriverLines renders `deriver Class` and its method generators.
+func (p *printer) deriverLines(d *ast.DeriverDecl) bool {
+	p.line(0, "deriver "+d.Class)
+	return p.methodLines(d.Methods)
+}
+
+func (p *printer) methodLines(methods []*ast.ValueDecl) bool {
+	for _, m := range methods {
+		if !p.valueDeclLines(m, Indent) {
+			return false
+		}
+	}
+	p.flush()
+	return true
+}
+
+func predText(p ast.PredExpr) string {
+	return p.Class + " " + typeArgText(p.Ty)
+}
+
+// predsText renders a constraint context, parenthesized only when there is
+// more than one constraint.
+func predsText(preds []ast.PredExpr) string {
+	parts := make([]string, len(preds))
+	for i, pr := range preds {
+		parts[i] = predText(pr)
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
 }

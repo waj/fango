@@ -110,13 +110,5 @@ func annotationText(a *ast.TypeAnn) string {
 	if len(a.Preds) == 0 {
 		return typeText(a.Type)
 	}
-	preds := make([]string, len(a.Preds))
-	for i, p := range a.Preds {
-		preds[i] = p.Class + " " + typeArgText(p.Ty)
-	}
-	head := preds[0]
-	if len(preds) > 1 {
-		head = "(" + strings.Join(preds, ", ") + ")"
-	}
-	return head + " => " + typeText(a.Type)
+	return predsText(a.Preds) + " => " + typeText(a.Type)
 }

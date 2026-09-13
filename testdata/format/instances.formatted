@@ -1,0 +1,15 @@
+module Instances exposing (Pair(..))
+
+import Basics exposing (..)
+
+type Pair a = Pair a a
+
+instance Show a => Show (Pair a)
+    show (Pair x y) = "(" ++ show x ++ ", " ++ show y ++ ")"
+
+instance (Eq a, Ord a) => Ord (Pair a)
+    (<) (Pair a _) (Pair b _) = a < b
+    (>) (Pair a _) (Pair b _) = a > b
+
+instance Eq Int
+    (==) a b = intEq a b
