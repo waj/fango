@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	goast "go/ast"
 	goparser "go/parser"
@@ -136,6 +135,9 @@ type node struct {
 	nativePath   string
 	native       []byte
 	nativeModule string
+	// resolved is the module's declaration list after name resolution, in
+	// source order, as the checker consumes it.
+	resolved []ast.Decl
 }
 
 type iface struct {
@@ -171,9 +173,9 @@ func Load(entry string) (*Result, []diag.Error) {
 	if !private {
 		entryName = m.Header.Name
 	}
-	bundledProvider := BundledProvider{}
+	g := newGraph(FSProvider{Root: root})
 	if !private {
-		if path, _, bundleErr := bundledProvider.Source(entryName); bundleErr == nil {
+		if path, _, bundleErr := g.bundled.Source(entryName); bundleErr == nil {
 			return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "RESERVED MODULE", "Module `%s` is bundled with fango as `%s`; local modules cannot use bundled names.", entryName, path)}
 		}
 	}
@@ -186,188 +188,28 @@ func Load(entry string) (*Result, []diag.Error) {
 	if nb, ne := os.ReadFile(filepath.Join(root, rootNativePath)); ne == nil {
 		rootNode.nativePath, rootNode.native = rootNativePath, nb
 	}
-	nodes := map[string]*node{entryName: rootNode}
-	provider := FSProvider{Root: root}
-	var load func(string, source.Span)
-	load = func(name string, at source.Span) {
-		if nodes[name] != nil {
-			return
-		}
-		localPath, localContent, localErr := provider.Source(name)
-		bundlePath, bundleContent, bundleErr := bundledProvider.Source(name)
-		path, b, readErr, bundled := localPath, localContent, localErr, false
-		if bundleErr == nil {
-			if localErr == nil {
-				errs = append(errs, diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with fango as `%s`; remove or rename the local `%s`.", name, bundlePath, localPath))
-				return
-			}
-			if _, caseCollision := localErr.(pathCaseError); caseCollision {
-				errs = append(errs, diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with fango as `%s`; a case-insensitive local path also conflicts with that reserved name.", name, bundlePath))
-				return
-			}
-			if !errors.Is(localErr, fs.ErrNotExist) {
-				errs = append(errs, diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with fango as `%s`; the local `%s` also occupies that reserved path.", name, bundlePath, localPath))
-				return
-			}
-			path, b, readErr, bundled = bundlePath, bundleContent, nil, true
-		}
-		if readErr != nil {
-			if ce, ok := readErr.(pathCaseError); ok {
-				errs = append(errs, diag.Errorf(at, "MODULE PATH CASING", "Module `%s` requires exact path casing; expected `%s` but found `%s`.", name, ce.want, ce.found))
-				return
-			}
-			errs = append(errs, diag.Errorf(at, "MISSING MODULE", "I cannot find module `%s`; expected `%s` beneath the entry directory.", name, path))
-			return
-		}
-		mf := source.NewFile(path, b)
-		mm, es := parse(mf)
-		errs = append(errs, es...)
-		if len(es) > 0 {
-			return
-		}
-		if mm.Header == nil {
-			errs = append(errs, diag.Errorf(at, "MISSING MODULE HEADER", "Imported file `%s` must declare `module %s exposing (...)`.", path, name))
-			return
-		}
-		if mm.Header.Name != name {
-			errs = append(errs, diag.Errorf(mm.Header.NameSpan, "MODULE/PATH MISMATCH", "File `%s` must declare module `%s`, but declares `%s`.", path, name, mm.Header.Name))
-			return
-		}
-		n := &node{name: name, path: path, content: b, mod: mm, bundled: bundled, nativeModule: name}
-		n.deps = implicitDeps(mm, preludeDeps(mm, name), name)
-		var np string
-		var nb []byte
-		var ne error
-		if bundled {
-			np, nb, ne = bundledProvider.Native(name)
-		} else {
-			np, nb, ne = provider.Native(name)
-		}
-		if ne == nil {
-			n.nativePath, n.native = np, nb
-		}
-		nodes[name] = n
-		for _, im := range mm.Imports {
-			load(im.Module, im.ModuleSpan)
-		}
-		for _, dep := range n.deps {
-			load(dep, at)
-		}
+	pending := map[string]*node{entryName: rootNode}
+	if errs := g.loadDeps(pending, rootNode, source.Span{}); len(errs) > 0 {
+		return nil, errs
 	}
-	for _, im := range m.Imports {
-		load(im.Module, im.ModuleSpan)
-	}
-	for _, dep := range nodes[entryName].deps {
-		load(dep, source.Span{})
-	}
+	order, errs := g.complete(pending)
 	if len(errs) > 0 {
 		return nil, errs
 	}
-	for _, n := range nodes {
-		errs = append(errs, validateModuleDecls(n)...)
-	}
-	if len(errs) > 0 {
-		return nil, errs
-	}
-
-	// Detect cycles with a stable lexical traversal and retain the complete
-	// repeated-start chain in the diagnostic.
-	state, stack := map[string]int{}, []string{}
-	var visit func(string) bool
-	visit = func(name string) bool {
-		state[name] = 1
-		stack = append(stack, name)
-		deps := dependencyNames(nodes[name])
-		sort.Strings(deps)
-		for _, dep := range deps {
-			if state[dep] == 0 && visit(dep) {
-				return true
-			}
-			if state[dep] == 1 {
-				i := 0
-				for stack[i] != dep {
-					i++
-				}
-				chain := append(append([]string{}, stack[i:]...), dep)
-				var sp source.Span
-				for _, im := range nodes[name].mod.Imports {
-					if im.Module == dep {
-						sp = im.ModuleSpan
-						break
-					}
-				}
-				errs = append(errs, diag.Errorf(sp, "IMPORT CYCLE", "Imports form a cycle: %s.", strings.Join(chain, " -> ")))
-				return true
-			}
-		}
-		stack = stack[:len(stack)-1]
-		state[name] = 2
-		return false
-	}
-	names := make([]string, 0, len(nodes))
-	for n := range nodes {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
-		if state[n] == 0 && visit(n) {
-			return nil, errs
-		}
-	}
-
-	// Fixity is graph-wide, so the table needs every parsed file; the
-	// rewrite has to finish before name resolution, whose expression walk
-	// would otherwise skip the unresolved chains and leave their operands
-	// uncanonicalized. `names` is already sorted, so the table and its
-	// diagnostics are deterministic.
-	fixities := fixity.Builtin()
-	for _, name := range names {
-		errs = append(errs, fixities.Collect(nodes[name].mod.Decls)...)
-	}
-	if len(errs) > 0 {
-		return nil, errs
-	}
-	for _, name := range names {
-		errs = append(errs, fixities.Resolve(nodes[name].mod)...)
-	}
-	if len(errs) > 0 {
-		return nil, errs
-	}
-
-	for _, n := range nodes {
-		n.iface, errs = buildInterface(n, errs)
-	}
-	if len(errs) > 0 {
-		return nil, errs
-	}
-	order := topo(nodes)
 	merged := &ast.Module{InstanceImports: map[string]map[string]bool{}}
 	for _, name := range order {
 		owner := name
-		if nodes[name].private {
+		if g.nodes[name].private {
 			owner = ""
 		}
-		visible := map[string]bool{}
-		for _, dep := range dependencyNames(nodes[name]) {
-			visible[dep] = true
-			for trans := range merged.InstanceImports[dep] {
-				visible[trans] = true
-			}
-		}
-		merged.InstanceImports[owner] = visible
-		r := resolver{node: nodes[name], nodes: nodes}
-		decls, es := r.resolve()
-		errs = append(errs, es...)
-		merged.Decls = append(merged.Decls, decls...)
-	}
-	if len(errs) > 0 {
-		return nil, errs
+		merged.InstanceImports[owner] = g.visible[name]
+		merged.Decls = append(merged.Decls, g.nodes[name].resolved...)
 	}
 	manifest := make([]ManifestEntry, 0, len(order))
 	units := make([]Unit, 0, len(order))
 	var natives []NativeSource
 	for _, name := range order {
-		n := nodes[name]
+		n := g.nodes[name]
 		h := sha256.Sum256(n.content)
 		manifest = append(manifest, ManifestEntry{Module: name, Path: n.path, SHA256: hex.EncodeToString(h[:])})
 		if n.native != nil {
@@ -391,7 +233,7 @@ func Load(entry string) (*Result, []diag.Error) {
 	if !private {
 		entrySymbol = canonical(entryName, "main")
 	}
-	return &Result{Module: merged, Entry: entrySymbol, Manifest: manifest, Units: units, Fixity: fixities, Natives: natives}, nil
+	return &Result{Module: merged, Entry: entrySymbol, Manifest: manifest, Units: units, Fixity: g.fixities, Natives: natives}, nil
 }
 
 // PreludeModule declares the default scope. It holds nothing but imports,
@@ -867,9 +709,15 @@ func explicitDependencyNames(n *node) []string {
 func topo(nodes map[string]*node) []string {
 	indegree, users := map[string]int{}, map[string][]string{}
 	for name, n := range nodes {
-		deps := dependencyNames(n)
-		indegree[name] = len(deps)
-		for _, dep := range deps {
+		indegree[name] = 0
+		for _, dep := range dependencyNames(n) {
+			// A dependency outside this map is already ordered elsewhere
+			// (the REPL orders each import's new modules against a graph it
+			// has already committed), so it never blocks a node here.
+			if nodes[dep] == nil {
+				continue
+			}
+			indegree[name]++
 			users[dep] = append(users[dep], name)
 		}
 	}
@@ -1103,6 +951,12 @@ type resolver struct {
 	// `exposing (T(..))` reflects in full, exactly as those two forms
 	// already govern patterns and field access.
 	schemas map[string]bool
+
+	// prompt marks the REPL's resolver, whose module is never complete: a
+	// prompt may redefine its own names (a rebinding to the same canonical
+	// name is not a collision) and may import the same module again for
+	// more names, alias included.
+	prompt bool
 }
 
 func (r *resolver) canon(name string) string {
@@ -1153,7 +1007,10 @@ func (r *resolver) applyImports(imports []ast.Import, recordSeen bool) {
 			}
 		}
 		if im.Alias != "" {
-			if r.aliases[im.Alias] || r.fullQualifiers[im.Alias] || r.quals[im.Alias] != nil {
+			if r.prompt && r.quals[im.Alias] == dep.iface {
+				// The prompt imported this module under this alias before;
+				// repeating it adds names, and the qualifier already agrees.
+			} else if r.aliases[im.Alias] || r.fullQualifiers[im.Alias] || r.quals[im.Alias] != nil {
 				r.errs = append(r.errs, diag.Errorf(im.AliasSpan, "DUPLICATE IMPORT ALIAS", "The qualifier `%s` is already in use.", im.Alias))
 			} else {
 				r.aliases[im.Alias] = true
@@ -1166,7 +1023,24 @@ func (r *resolver) applyImports(imports []ast.Import, recordSeen bool) {
 	}
 }
 
+// resolve canonicalizes a whole module: its scope is seeded from the prelude
+// and its own imports, its type-level names are registered module-wide, and
+// then every declaration is rewritten in place.
 func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
+	r.init()
+	// The prelude's imports are applied first and are ordinary imports, so a
+	// module reaches `print` and `IO.write` alike without writing one. They
+	// are not recorded as seen, which leaves the module free to import the
+	// same module again for more names; `add` accepts a repeated binding at
+	// an identical canonical name.
+	r.applyImports(r.preludeImports(), false)
+	r.applyImports(r.node.mod.Imports, true)
+	r.declareHeaders(r.node.mod.Decls)
+	return r.resolveDecls(r.node.mod.Decls), r.errs
+}
+
+// init seeds the scope with the builtin names every module sees.
+func (r *resolver) init() {
 	r.vals = map[string]string{}
 	r.tys = map[string]string{"Int": "Int", "Float": "Float", "String": "String", "Char": "Char", "Bool": "Bool", "()": "()"}
 	r.ctors = map[string]string{"True": "True", "False": "False"}
@@ -1180,16 +1054,13 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 	for _, im := range r.node.mod.Imports {
 		r.fullQualifiers[im.Module] = true
 	}
-	// The prelude's imports are applied first and are ordinary imports, so a
-	// module reaches `print` and `IO.write` alike without writing one. They
-	// are not recorded as seen, which leaves the module free to import the
-	// same module again for more names; `add` accepts a repeated binding at
-	// an identical canonical name.
-	r.applyImports(r.preludeImports(), false)
-	r.applyImports(r.node.mod.Imports, true)
-	// Types, effects, constructors, and operations are module-wide, matching
-	// the checker's existing mutually-recursive declaration pass.
-	for _, d := range r.node.mod.Decls {
+}
+
+// declareHeaders registers types, effects, constructors, and operations
+// module-wide, matching the checker's existing mutually-recursive
+// declaration pass.
+func (r *resolver) declareHeaders(decls []ast.Decl) {
+	for _, d := range decls {
 		switch d := d.(type) {
 		case *ast.TypeDecl:
 			r.add(r.tys, d.Name, r.canon(d.Name), d.NameSpan)
@@ -1211,8 +1082,13 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 			}
 		}
 	}
+}
+
+// resolveDecls rewrites each declaration's names to their canonical form and
+// binds the values it declares, in source order.
+func (r *resolver) resolveDecls(decls []ast.Decl) []ast.Decl {
 	var out []ast.Decl
-	for _, d := range r.node.mod.Decls {
+	for _, d := range decls {
 		switch d := d.(type) {
 		case *ast.ClassDecl:
 			r.add(r.tys, d.Name, r.canon(d.Name), d.NameSpan)
@@ -1255,7 +1131,7 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 		case *ast.ValueDecl:
 			surface := d.Name
 			canon := r.canon(surface)
-			if _, exists := r.vals[surface]; exists {
+			if existing, exists := r.vals[surface]; exists && (!r.prompt || existing != canon) {
 				r.errs = append(r.errs, diag.Errorf(d.NameSpan, "UNQUALIFIED COLLISION", "The value `%s` collides with an exposed import or operation.", d.Name))
 			}
 			visible := clone(r.vals)
@@ -1277,11 +1153,11 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 			locals := map[string]bool{}
 			r.pattern(d.Pattern, locals, r.vals)
 			for _, b := range patternBinders(d.Pattern) {
-				if _, exists := r.vals[b.Name]; exists {
-					r.errs = append(r.errs, diag.Errorf(b.Sp, "UNQUALIFIED COLLISION", "The value `%s` collides with an exposed import or existing declaration.", b.Name))
-				}
 				surface := b.Name
 				canon := r.canon(surface)
+				if existing, exists := r.vals[surface]; exists && (!r.prompt || existing != canon) {
+					r.errs = append(r.errs, diag.Errorf(b.Sp, "UNQUALIFIED COLLISION", "The value `%s` collides with an exposed import or existing declaration.", b.Name))
+				}
 				b.Name = canon
 				r.vals[surface] = canon
 			}
@@ -1318,7 +1194,7 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 			out = append(out, d)
 		}
 	}
-	return out, r.errs
+	return out
 }
 
 // An abstract exported class can constrain clients, but an instance needs

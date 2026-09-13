@@ -1,0 +1,4 @@
+module Broken exposing (bad)
+
+bad : Int
+bad = "no"

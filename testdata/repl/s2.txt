@@ -6,15 +6,13 @@ Int
 > r : Int
 > | | | -- SHADOWING -------------------------------------------- <repl>
 
-The name `r` is already defined at the top level — fango does not allow
-shadowing. Choose a different name.
+The local name `r` shadows an imported, builtin, or top-level value.
 
 2|     r = 5.0
        ^
 | | | -- SHADOWING -------------------------------------------- <repl>
 
-The name `x` is already defined at the top level — fango does not allow
-shadowing. Choose a different name.
+The local name `x` shadows an imported, builtin, or top-level value.
 
 2|     x = 9
        ^

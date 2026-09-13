@@ -1,8 +1,8 @@
 // Package repl is the interactive session: one Checker, one substitution,
-// one supply, and one cell environment shared across inputs. Expressions
-// evaluate through the same Core the compiler consumes; definitions install
-// lazy memo cells. Every input's errors are recovered — no input kills the
-// session.
+// one supply, one module graph with its prompt scope, and one cell
+// environment shared across inputs. Expressions evaluate through the same
+// Core the compiler consumes; definitions install lazy memo cells. Every
+// input's errors are recovered — no input kills the session.
 package repl
 
 import (
@@ -19,6 +19,8 @@ import (
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/lexer"
+	"github.com/waj/fango/internal/modules"
+	"github.com/waj/fango/internal/nativehost"
 	"github.com/waj/fango/internal/parser"
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/staging"
@@ -26,43 +28,99 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
+// Options configures a session.
+type Options struct {
+	// Root is the source root a prompt `import Foo.Bar` resolves beneath as
+	// `Foo/Bar.fango`, the way an entry file's directory is in a build.
+	// Empty means the working directory.
+	Root string
+}
+
 type Session struct {
 	ck    *infer.Checker
 	env   *eval.Env
 	gen   int // generation counter incremented on redefinition
 	out   io.Writer
 	ioctx *eval.IOContext
+
+	// graph holds every module the session has resolved, the bundled prelude
+	// closure included; prompt is the resolver scope prompts and imports
+	// extend (doc/design.md, "Interpreter and REPL").
+	graph  *modules.Graph
+	prompt *modules.Prompt
+
+	// natives are the user sidecars imported so far, and exec the worker
+	// built over them and the bundled ones. Nil exec means only bundled
+	// sidecars have been needed, which the shared bundled worker serves.
+	natives []nativehost.Source
+	exec    *nativehost.Executor
+
+	// installed is every module definition the session holds, prelude
+	// first: the Core lint checks a program, and an imported module's calls
+	// into modules imported earlier are only well-formed against it.
+	installed []core.Def
 }
 
 func NewSession(out io.Writer) *Session {
+	return NewSessionWith(out, Options{})
+}
+
+func NewSessionWith(out io.Writer, opts Options) *Session {
+	root := opts.Root
+	if root == "" {
+		root = "."
+	}
+	graph, prelude, errs := modules.NewGraph(root)
+	if len(errs) > 0 {
+		panic("invalid embedded prelude: " + errs[0].Body)
+	}
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
 	staging.Install(ck)
-	if errs := ck.InstallPrelude(); len(errs) > 0 {
+	// The prompt resolver canonicalizes every input, so the checker holds
+	// the prelude under canonical names only.
+	if errs := ck.InstallPreludeModule(prelude); len(errs) > 0 {
 		panic("invalid embedded prelude: " + errs[0].Body)
 	}
 	// Prompt values are lazy memo cells (doc/design.md, "Interpreter and REPL") — evaluated once, so their
 	// types stay monotypes (the block-binding monomorphism restriction).
 	// Functions and lambdas still generalize.
 	ck.MonoValues = true
-	prelude, errs := elaborate.Module(nil, ck)
+	preludeProg, errs := elaborate.Module(nil, ck)
 	if len(errs) > 0 {
 		panic("invalid elaborated prelude: " + errs[0].Body)
 	}
 	env := eval.NewEnv()
-	env.DefineProg(prelude)
+	env.DefineProg(preludeProg)
 	return &Session{
-		ck:    ck,
-		env:   env,
-		out:   out,
-		ioctx: eval.NewIOContext(strings.NewReader(""), out),
+		ck:        ck,
+		env:       env,
+		out:       out,
+		ioctx:     eval.NewIOContext(strings.NewReader(""), out),
+		graph:     graph,
+		prompt:    graph.NewPrompt(),
+		installed: preludeProg.Defs,
+	}
+}
+
+// Close stops the session's own native worker, if it built one.
+func (s *Session) Close() {
+	if s.exec != nil {
+		_ = s.exec.Close()
+		s.exec = nil
 	}
 }
 
 const banner = "fango 0.1 — :help for commands"
 
-// Run drives the read-eval-print loop until :quit or EOF.
+// Run drives the read-eval-print loop until :quit or EOF, rooted at the
+// working directory.
+func Run(in io.Reader, out io.Writer) {
+	RunWith(in, out, Options{})
+}
+
+// RunWith is Run with options.
 //
 // Multi-line policy (doc/design.md, "Interpreter and REPL": input continues while the layout stack
 // is open): a first line that parses incomplete opens continuation mode;
@@ -70,11 +128,12 @@ const banner = "fango 0.1 — :help for commands"
 // parse — a `case` may grow another branch, a `type` another `|` line. A
 // blank line, a column-1 line (necessarily a new declaration or expression),
 // or EOF submits the buffer.
-func Run(in io.Reader, out io.Writer) {
-	s := NewSession(out)
+func RunWith(in io.Reader, out io.Writer, opts Options) {
+	s := NewSessionWith(out, opts)
+	defer s.Close()
 	fmt.Fprintln(out, banner)
 	reader := bufio.NewReader(in)
-	s.ioctx = &eval.IOContext{Reader: reader, Writer: out}
+	s.ioctx = &eval.IOContext{Reader: reader, Writer: out, Natives: s.ioctx.Natives}
 	var buf strings.Builder
 	flush := func() {
 		if buf.Len() > 0 {
@@ -179,9 +238,9 @@ func (s *Session) parsesComplete(text string) bool {
 	return !wantsMore(errs)
 }
 
-// input handles one declaration or expression. Unless force is set, a parse
-// that failed only by running out of input reports needMoreInput instead of
-// rendering errors — the continuation signal.
+// input handles one import, declaration, or expression. Unless force is set,
+// a parse that failed only by running out of input reports needMoreInput
+// instead of rendering errors — the continuation signal.
 func (s *Session) input(text string, force bool) inputResult {
 	f := source.NewFile("<repl>", []byte(text))
 	toks, lexErrs := lexer.Lex(f)
@@ -195,8 +254,8 @@ func (s *Session) input(text string, force bool) inputResult {
 	return s.exprInput(toks, f, force)
 }
 
-// isDecl: `type …`, `name = …`, `name params… = …`, `name : …` (an
-// annotation opening a definition), or a fixity declaration is a
+// isDecl: `import …`, `type …`, `name = …`, `name params… = …`, `name : …`
+// (an annotation opening a definition), or a fixity declaration is a
 // declaration; anything else is an expression. `==` lexes as one token, so
 // comparisons still classify as expressions, and `f x y` without `=` stays
 // an application.
@@ -204,7 +263,7 @@ func (s *Session) input(text string, force bool) inputResult {
 // An operator declaration opens with `(op)`, which also opens the
 // expression `(+) 1 2`; the `=` scan below is what separates them.
 func isDecl(toks []token.Token) bool {
-	if len(toks) >= 1 && (toks[0].Kind == token.KwType || toks[0].Kind == token.KwEffect || toks[0].Kind == token.KwClass || toks[0].Kind == token.KwInstance || toks[0].Kind == token.KwDeriver) {
+	if len(toks) >= 1 && (toks[0].Kind == token.KwImport || toks[0].Kind == token.KwType || toks[0].Kind == token.KwEffect || toks[0].Kind == token.KwClass || toks[0].Kind == token.KwInstance || toks[0].Kind == token.KwDeriver) {
 		return true
 	}
 	if len(toks) >= 1 && (toks[0].Kind == token.KwInfix || toks[0].Kind == token.KwInfixL || toks[0].Kind == token.KwInfixR) {
@@ -241,6 +300,17 @@ func isDecl(toks []token.Token) bool {
 	return false
 }
 
+// checkpoint protects the whole persistent session state an input may touch:
+// the checker's declaration environment and the prompt's resolver scope. The
+// evaluation environment is only extended once both have accepted the input.
+func (s *Session) checkpoint() func() {
+	ck, prompt := s.ck.Checkpoint(), s.prompt.Checkpoint()
+	return func() {
+		ck()
+		prompt()
+	}
+}
+
 func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inputResult {
 	m, errs := parser.Parse(toks, f)
 	if !force && wantsMore(errs) {
@@ -250,17 +320,33 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		diag.Render(s.out, errs)
 		return inputDone
 	}
+	if len(m.Imports) > 0 {
+		return s.importInput(m)
+	}
+	if len(m.Decls) == 0 {
+		return inputDone
+	}
+	restore := s.checkpoint()
 	// The prompt is parsed one entry at a time, so grouping happens here
 	// against the session table rather than during module loading. A fixity
 	// declaration extends the table for later entries.
 	errs = append(errs, s.ck.Fixity.Collect(m.Decls)...)
 	errs = append(errs, s.ck.Fixity.Resolve(m)...)
 	if len(errs) > 0 {
+		restore()
+		diag.Render(s.out, errs)
+		return inputDone
+	}
+	// Names reach the checker canonical, exactly as a module's do: the
+	// resolver binds what this input declares and rewrites what it uses.
+	if errs := s.prompt.Decl(m.Decls[0]); len(errs) > 0 {
+		restore()
 		diag.Render(s.out, errs)
 		return inputDone
 	}
 	if cl, ok := m.Decls[0].(*ast.ClassDecl); ok {
 		if errs := s.ck.ClassDecl(cl); len(errs) > 0 {
+			restore()
 			diag.Render(s.out, errs)
 		} else {
 			fmt.Fprintf(s.out, "%s : class\n", cl.Name)
@@ -271,9 +357,8 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		// A deriver is compile-time-only, so nothing installs into the
 		// evaluation environment: the compile-time evaluator elaborates it
 		// from the checked prefix when a `deriving` clause first runs it.
-		rollback := s.ck.Checkpoint()
 		if errs := s.ck.DeriverDecl(dr); len(errs) > 0 {
-			rollback()
+			restore()
 			diag.Render(s.out, errs)
 		} else {
 			fmt.Fprintf(s.out, "deriver %s\n", types.SurfaceName(dr.Class))
@@ -281,14 +366,13 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	if in, ok := m.Decls[0].(*ast.InstanceDecl); ok {
-		rollback := s.ck.Checkpoint()
 		start := len(s.ck.Instances)
 		var errs []diag.Error
 		for _, method := range in.Methods {
 			errs = append(errs, s.ck.StageDecl(method)...)
 		}
 		if len(errs) > 0 {
-			rollback()
+			restore()
 			diag.Render(s.out, errs)
 			return inputDone
 		}
@@ -297,7 +381,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 			errs = s.installInstances(infos, start)
 		}
 		if len(errs) > 0 {
-			rollback()
+			restore()
 			diag.Render(s.out, errs)
 		} else {
 			fmt.Fprintf(s.out, "instance %s %s\n", types.SurfaceName(in.Head.Class), ast.DumpTypeExpr(in.Head.Ty))
@@ -305,10 +389,11 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	if td, ok := m.Decls[0].(*ast.TypeDecl); ok {
-		return s.typeDeclInput(td)
+		return s.typeDeclInput(td, restore)
 	}
 	if ed, ok := m.Decls[0].(*ast.EffectDecl); ok {
 		if errs := s.ck.EffectDecl(ed); len(errs) > 0 {
+			restore()
 			diag.Render(s.out, errs)
 		} else {
 			fmt.Fprintf(s.out, "%s : effect\n", ed.Name)
@@ -322,10 +407,9 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	if pd, ok := m.Decls[0].(*ast.PatternDecl); ok {
-		rollback := s.ck.Checkpoint()
 		infos, inferErrs := s.ck.PatternDecl(pd, false)
 		if len(inferErrs) > 0 {
-			rollback()
+			restore()
 			diag.Render(s.out, inferErrs)
 			return inputDone
 		}
@@ -333,7 +417,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		for _, info := range infos {
 			defs, es := elaborate.Decl(info, s.ck)
 			if len(es) > 0 {
-				rollback()
+				restore()
 				diag.Render(s.out, es)
 				return inputDone
 			}
@@ -357,19 +441,20 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	}
 	vd := m.Decls[0].(*ast.ValueDecl)
 	if len(vd.Equations) > 0 {
+		restore()
 		diag.Render(s.out, []diag.Error{diag.Errorf(vd.NameSpan, "GROUPED INPUT", "Multiple function equations are supported in source files; enter one exhaustive equation at the REPL.")})
 		return inputDone
 	}
 	if vd.Native != nil {
+		restore()
 		diag.Render(s.out, []diag.Error{diag.Errorf(vd.Native.Sp, "NATIVE MODULE REQUIRED", "Native declarations belong in source modules with a sidecar and cannot be entered directly at the REPL.")})
 		return inputDone
 	}
 	redefining := s.ck.Env.Has(vd.Name)
 	// A failed input leaves nothing behind, expansion included: a splice that
 	// fails half way through has already checked whatever preceded it.
-	rollback := s.ck.Checkpoint()
 	if stageErrs := s.ck.StageDecl(vd); len(stageErrs) > 0 {
-		rollback()
+		restore()
 		diag.Render(s.out, stageErrs)
 		return inputDone
 	}
@@ -378,7 +463,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	// pure; effectful expressions can be evaluated directly at the prompt.
 	info, inferErrs := s.ck.DeclWhere(vd, false)
 	if len(inferErrs) > 0 {
-		rollback()
+		restore()
 		diag.Render(s.out, inferErrs)
 		return inputDone
 	}
@@ -393,7 +478,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	}
 	defs, elabErrs := elaborate.Decl(info, s.ck)
 	if len(elabErrs) > 0 {
-		rollback()
+		restore()
 		diag.Render(s.out, elabErrs)
 		return inputDone
 	}
@@ -420,14 +505,116 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	return inputDone
 }
 
+// importInput brings modules into the session. Each import loads what the
+// graph lacks, checks and installs the new modules, and extends the prompt
+// scope; the input is all-or-nothing, so a failing import leaves the graph,
+// the checker, and the scope exactly as they were.
+func (s *Session) importInput(m *ast.Module) inputResult {
+	if len(m.Decls) > 0 {
+		diag.Render(s.out, []diag.Error{diag.Errorf(m.Imports[0].ModuleSpan, "IMPORT INPUT", "Enter imports on their own; a declaration is its own input.")})
+		return inputDone
+	}
+	restore := s.checkpoint()
+	restoreGraph := s.graph.Checkpoint()
+	fail := func(errs []diag.Error) inputResult {
+		restore()
+		restoreGraph()
+		diag.Render(s.out, errs)
+		return inputDone
+	}
+	var loaded []string
+	var natives []nativehost.Source
+	for _, im := range m.Imports {
+		inc, errs := s.prompt.Import(im)
+		if len(errs) > 0 {
+			return fail(errs)
+		}
+		if len(inc.Modules) == 0 {
+			continue
+		}
+		if errs := s.install(inc); len(errs) > 0 {
+			return fail(errs)
+		}
+		loaded = append(loaded, inc.Modules...)
+		for _, n := range inc.Natives {
+			natives = append(natives, nativehost.Source{Module: n.Module, Content: n.Content})
+		}
+	}
+	if len(natives) > 0 {
+		if err := s.addNatives(natives); err != nil {
+			return fail([]diag.Error{{Title: "NATIVE WORKER ERROR", Body: err.Error()}})
+		}
+	}
+	for _, name := range loaded {
+		fmt.Fprintf(s.out, "loaded %s\n", name)
+	}
+	return inputDone
+}
+
+// install checks one graph increment and installs its definitions. Module
+// values are immutable, so they generalize as in a build; the prompt's
+// monomorphism rule is for its own memo cells only.
+func (s *Session) install(inc *modules.Increment) []diag.Error {
+	start := len(s.ck.Instances)
+	mono := s.ck.MonoValues
+	s.ck.MonoValues = false
+	infos, errs := s.ck.Module(&ast.Module{Decls: inc.Decls, InstanceImports: inc.InstanceImports})
+	s.ck.MonoValues = mono
+	if len(errs) > 0 {
+		return errs
+	}
+	defs, errs := elaborate.Increment(infos, s.ck.Instances[start:], s.ck)
+	if len(errs) > 0 {
+		return errs
+	}
+	program := append(append([]core.Def(nil), s.installed...), defs...)
+	if lintErrs := elaborate.LintProg(program, s.ck); len(lintErrs) > 0 {
+		var errs []diag.Error
+		for _, err := range lintErrs {
+			errs = append(errs, diag.Error{Title: "INTERNAL COMPILER ERROR", Body: "Core invariants violated: " + err.Error()})
+		}
+		return errs
+	}
+	s.installed = program
+	s.env.DefineProg(&core.Prog{Defs: defs})
+	// Like a batch entry, the prompt sees instances and derivers from every
+	// module in its graph.
+	for _, name := range inc.Modules {
+		s.ck.InstanceImports[""][name] = true
+	}
+	return nil
+}
+
+// addNatives rebuilds the session's native worker over the bundled sidecars
+// and every user sidecar imported so far. The worker only builds and starts
+// when a sidecar function is first called, and builds are cached by content.
+func (s *Session) addNatives(sources []nativehost.Source) error {
+	bundled, err := nativehost.BundledSources()
+	if err != nil {
+		return err
+	}
+	all := append(append(bundled, s.natives...), sources...)
+	exec, err := nativehost.New(all)
+	if err != nil {
+		return err
+	}
+	s.natives = append(s.natives, sources...)
+	old := s.exec
+	s.exec = exec
+	s.ioctx.Natives = exec
+	if old != nil {
+		_ = old.Close()
+	}
+	return nil
+}
+
 // typeDeclInput installs a `type` declaration. Redefinition mints a fresh
 // generation (a new Unique), exactly like value redefinition (doc/design.md, "Interpreter and REPL").
-func (s *Session) typeDeclInput(td *ast.TypeDecl) inputResult {
-	rollback := s.ck.Checkpoint()
+func (s *Session) typeDeclInput(td *ast.TypeDecl, restore func()) inputResult {
 	start := len(s.ck.Instances)
 	_, redefining := s.ck.TypeNames[td.Name]
 	if errs := s.ck.TypeDecl(td); len(errs) > 0 {
-		rollback()
+		restore()
 		diag.Render(s.out, errs)
 		return inputDone
 	}
@@ -436,7 +623,7 @@ func (s *Session) typeDeclInput(td *ast.TypeDecl) inputResult {
 		errs = s.installInstances(infos, start)
 	}
 	if len(errs) > 0 {
-		rollback()
+		restore()
 		diag.Render(s.out, errs)
 		return inputDone
 	}
@@ -467,6 +654,10 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 	}
 	e, errs = s.ck.Fixity.ResolveExpr(e)
 	if len(errs) > 0 {
+		diag.Render(s.out, errs)
+		return inputDone
+	}
+	if errs := s.prompt.Expr(e); len(errs) > 0 {
 		diag.Render(s.out, errs)
 		return inputDone
 	}
@@ -515,6 +706,10 @@ func (s *Session) typeOf(src string) {
 		return
 	}
 	if e, errs = s.ck.Fixity.ResolveExpr(e); len(errs) > 0 {
+		diag.Render(s.out, errs)
+		return
+	}
+	if errs := s.prompt.Expr(e); len(errs) > 0 {
 		diag.Render(s.out, errs)
 		return
 	}

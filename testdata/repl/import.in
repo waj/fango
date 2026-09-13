@@ -1,0 +1,29 @@
+import Geometry.Point as P exposing (origin)
+origin
+P.manhattan origin (P.Point 3 4)
+origin == P.Point 0 0
+P.diff 1 2
+Geometry.Point.manhattan origin origin
+manhattan origin origin
+Dict.empty
+import Geometry.Shape exposing (Shape(..), area)
+area (Box origin (P.Point 2 3))
+Dict.size Geometry.Shape.named
+import Dict
+Dict.size Geometry.Shape.named
+Dict.get "unit" Geometry.Shape.named
+import Geometry.Point exposing (manhattan, nope)
+import Geometry.Point exposing (manhattan)
+manhattan origin (P.Point 1 1)
+import Missing.Module
+import String
+import Geometry.Shape as P
+import Geometry.Point as P
+origin = P.Point 9 9
+x = 1
+x = 2
+x
+import Broken
+import Broken
+origin
+:quit

@@ -1,5 +1,5 @@
 fango 0.1 — :help for commands
-> answer : Code
+> > answer : Code
 > 42 : Num a => a
 > twice : Code -> Code
 > big : Code

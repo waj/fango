@@ -108,6 +108,57 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 	return p, errs
 }
 
+// Increment elaborates the modules one REPL import added to the checker: the
+// given instances (a suffix of ck.Instances) and then the checked
+// declarations, under exactly the rules Module applies to a program —
+// compile-time-only definitions are not emitted, each Def records its owner,
+// lifted names are stable per module, scalar specialization runs, and
+// capture summaries are solved over the whole increment. Unlike Module it
+// re-emits neither the prelude nor earlier instances, so a session installs
+// each definition exactly once.
+func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
+	var defs []core.Def
+	var errs []diag.Error
+	for _, inst := range instances {
+		if ck.IsCompileTimeOnly(inst.Class.DictType(inst.Head)) {
+			continue
+		}
+		d, es := instanceDefinition(inst, ck)
+		defs = append(defs, d)
+		errs = append(errs, es...)
+	}
+	kept := infos[:0:0]
+	for _, info := range infos {
+		if !ck.IsCompileTimeOnly(ck.Sub.Apply(info.Type)) {
+			kept = append(kept, info)
+		}
+	}
+	for _, info := range kept {
+		owner := symbolOwner(info.Name)
+		ds, es := decl(info, ck, owner != "")
+		for i := range ds {
+			ds[i].Owner = owner
+		}
+		defs = append(defs, ds...)
+		errs = append(errs, es...)
+	}
+	if len(errs) > 0 {
+		return defs, errs
+	}
+	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
+	specializeScalars(p, kept, ck)
+	errs = append(errs, captureDiagnostics(core.InferCaptures(p, ck.B), ck, source.Span{})...)
+	installCaptureSummaries(p.Defs, ck)
+	return p.Defs, errs
+}
+
+// LintProg checks a set of definitions against the Core invariants in the
+// context of the checker's current types, effects, and natives — the REPL's
+// counterpart to the lint the batch pipeline runs on a whole program.
+func LintProg(defs []core.Def, ck *infer.Checker) []error {
+	return core.Lint(&core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}, ck.B)
+}
+
 // Decl elaborates one declaration — also the REPL's per-input entry point.
 // The first returned Def is the declaration itself; any further Defs are
 // lambda-lifted polymorphic block bindings (doc/design.md, "Go backend and runtime", lift.go).

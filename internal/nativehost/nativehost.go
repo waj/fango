@@ -154,26 +154,37 @@ var (
 	bundledErr  error
 )
 
+// Bundled is the shared executor over the standard library's sidecars alone.
+// It is process-wide and never closed by its users.
 func Bundled() (*Executor, error) {
 	bundledOnce.Do(func() {
-		paths, err := fs.Glob(fango.StdlibFS, "stdlib/*.native.go")
+		sources, err := BundledSources()
 		if err != nil {
 			bundledErr = err
 			return
 		}
-		var sources []Source
-		for _, path := range paths {
-			data, err := fs.ReadFile(fango.StdlibFS, path)
-			if err != nil {
-				bundledErr = err
-				return
-			}
-			module := strings.TrimSuffix(filepath.Base(path), ".native.go")
-			sources = append(sources, Source{Module: module, Content: data})
-		}
 		bundledExec, bundledErr = New(sources)
 	})
 	return bundledExec, bundledErr
+}
+
+// BundledSources reads the standard library's sidecars, so a session that
+// also holds user sidecars can build one executor over both.
+func BundledSources() ([]Source, error) {
+	paths, err := fs.Glob(fango.StdlibFS, "stdlib/*.native.go")
+	if err != nil {
+		return nil, err
+	}
+	var sources []Source
+	for _, path := range paths {
+		data, err := fs.ReadFile(fango.StdlibFS, path)
+		if err != nil {
+			return nil, err
+		}
+		module := strings.TrimSuffix(filepath.Base(path), ".native.go")
+		sources = append(sources, Source{Module: module, Content: data})
+	}
+	return sources, nil
 }
 
 func (e *Executor) Call(ctx context.Context, host Host, name string, args []any) (any, error) {

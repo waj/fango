@@ -10,7 +10,9 @@ import (
 )
 
 // Transcript goldens: each testdata/repl/*.in is a scripted session; the
-// golden *.txt is the complete output stream, prompts included.
+// golden *.txt is the complete output stream, prompts included. A directory
+// beside the script with the same base name is the session's source root,
+// holding the modules its imports name.
 func TestTranscripts(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join("..", "..", "testdata", "repl", "*.in"))
 	if err != nil {
@@ -25,9 +27,14 @@ func TestTranscripts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			base := strings.TrimSuffix(path, ".in")
+			var opts Options
+			if info, err := os.Stat(base); err == nil && info.IsDir() {
+				opts.Root = base
+			}
 			var out strings.Builder
-			Run(strings.NewReader(string(script)), &out)
-			testutil.Golden(t, strings.TrimSuffix(path, ".in")+".txt", out.String())
+			RunWith(strings.NewReader(string(script)), &out, opts)
+			testutil.Golden(t, base+".txt", out.String())
 		})
 	}
 }
@@ -239,5 +246,26 @@ func TestPromptNullaryFunctionRunsOnlyWhenCalled(t *testing.T) {
 	Run(strings.NewReader("say : () ->{IO} ()\nsay() = print \"ok\"\n:type say\nsay()\nsay()\n:quit\n"), &out)
 	if strings.Count(out.String(), "ok\n") != 2 {
 		t.Fatalf("nullary function should run only on its two explicit calls:\n%s", out.String())
+	}
+}
+
+// A user sidecar imported at the prompt runs in a worker built over the
+// bundled sidecars and it, so `print` keeps working after the swap.
+func TestImportNativeSidecar(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, contents string) {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("Hash.fango", "module Hash exposing (twice)\n\ntwice : Int -> Int\ntwice = native\n")
+	write("Hash.native.go", "package native\n\nfunc Twice(x int64) int64 { return x * 2 }\n")
+	var out strings.Builder
+	RunWith(strings.NewReader("import Hash\nHash.twice 21\nprint \"still\"\n:quit\n"), &out, Options{Root: root})
+	got := out.String()
+	for _, want := range []string{"loaded Hash\n", "42 : Int\n", "still\n"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q:\n%s", want, got)
+		}
 	}
 }

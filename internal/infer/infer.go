@@ -373,9 +373,21 @@ type HandlerInfo struct {
 // declarations in source order — solve-at-definition, the same call
 // structure used by binding-boundary generalization.
 func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
+	// Visibility merges rather than replaces: a REPL session checks the
+	// prelude first and each imported module graph afterwards, and every
+	// owner keeps its own entry. A batch run starts empty, so it sees no
+	// difference.
 	if m.InstanceImports != nil {
-		ck.InstanceImports = m.InstanceImports
+		if ck.InstanceImports == nil {
+			ck.InstanceImports = map[string]map[string]bool{}
+		}
+		for owner, visible := range m.InstanceImports {
+			ck.InstanceImports[owner] = visible
+		}
 	}
+	// Declarations run under their own module's owner; the caller's owner
+	// (the prompt's, in the REPL) is restored afterwards.
+	defer func(owner string) { ck.CurrentOwner = owner }(ck.CurrentOwner)
 	var infos []DeclInfo
 	var errs []diag.Error
 	adts := map[*ast.TypeDecl]*types.ADTInfo{}

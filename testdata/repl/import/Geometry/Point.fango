@@ -1,0 +1,10 @@
+module Geometry.Point exposing (Point(..), origin, manhattan)
+
+type Point = Point Int Int deriving (Eq, Show)
+
+origin = Point 0 0
+
+diff a b = if a > b then a - b else b - a
+
+manhattan : Point -> Point -> Int
+manhattan (Point x1 y1) (Point x2 y2) = diff x1 x2 + diff y1 y2

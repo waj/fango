@@ -1,3 +1,4 @@
+import Meta
 answer = quote (6 * 7)
 $(answer)
 twice c = quote ($(c) + $(c))

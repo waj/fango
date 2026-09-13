@@ -132,7 +132,27 @@ Haskell's ambient reification, which is what breaks modularity there.
 
 - Add a grouped-input mechanism for multiple top-level function equations;
   today the prompt accepts only one exhaustive equation per input.
-- Implement `:load` and `:reload` for complete source files.
+- Implement `:reload`, re-reading the modules a session imported after they
+  change on disk. `import` already gives the prompt a persistent module graph
+  and resolver scope, so `:load` is not needed: a named module is imported,
+  and the working directory (or the directory given to `fango repl`) is the
+  source root. The intended shape: the graph re-reads every non-bundled node,
+  compares content hashes, and re-resolves the changed modules plus their
+  reverse dependents in a staging map committed only on success; the checker
+  gains a `Retract(owners)` that deletes the canonical-keyed entries of those
+  modules (types, classes, effects, constructors, values, workers, methods,
+  operations, natives, capture summaries, derivers by owner) and marks their
+  instances retracted rather than removing them, because instance limits and
+  the compile-time evaluator treat the instance and checked-declaration lists
+  as positional prefixes, so retraction must append-and-shadow; the operator
+  table is rebuilt from the current nodes plus the prompt's own fixity
+  declarations; the prompt's import list is re-applied against the new
+  interfaces and names that vanished are reported; old memo cells and
+  closures keep their old bindings, as they do under prompt redefinition.
+- Decide whether the prompt should be able to see a module's private
+  top-level scope, the way GHCi's `:load` puts the prompt inside a module.
+  `import` shows only the public interface, which is consistent with every
+  other module; debugging a private helper currently means exposing it.
 - Reconcile values, custom types, constructors, and effects by generation so
   unchanged declarations retain identity while changed generative declarations
   cannot be confused with old values or closures.
@@ -143,7 +163,7 @@ Haskell's ambient reification, which is what breaks modularity there.
   without corrupting the session or consuming input intended for `readLine`.
   Basic prompt cancellation may ship earlier once its active execution path
   has the corresponding cleanup guarantees.
-- Add transcript coverage for load/reload, cross-generation errors,
+- Add transcript coverage for reload, cross-generation errors,
   cancellation, handler interaction, and recovery after failures.
 
 ## Product polish
@@ -338,9 +358,6 @@ These are directions, not commitments or an ordering after the work above.
 
 - Extend the deliberately narrow Go sidecar FFI only from concrete needs:
   richer safe boundary types and richer panic/error translation remain open.
-- Add a CLI path for loading and reloading module graphs in `fango repl`; the
-  interpreter's native worker already accepts user sidecars, but the current
-  REPL still starts from bundled modules only.
 - Transparent aliases, including whether aliases can abbreviate effect rows.
 - Extend nominal records to inline record payloads on variant constructors
   when an example needs named fields on one alternative; the surface syntax,

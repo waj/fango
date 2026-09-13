@@ -48,7 +48,7 @@ func usage(w io.Writer) {
   fango run main.fango [--] [args...]
   fango check main.fango
   fango fmt [-w] [-l] [file...]
-  fango repl
+  fango repl [dir]
   fango clean main.fango
 `)
 }

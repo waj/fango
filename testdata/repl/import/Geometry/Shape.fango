@@ -1,0 +1,16 @@
+module Geometry.Shape exposing (Shape(..), area, named)
+
+import Dict exposing (Dict)
+import Geometry.Point exposing (Point(..), manhattan, origin)
+
+type Shape = Dot Point | Box Point Point deriving (Show)
+
+area : Shape -> Int
+area shape =
+    case shape of
+        Dot _ -> 0
+        Box (Point x1 y1) (Point x2 y2) ->
+            manhattan (Point x1 0) (Point x2 0) * manhattan (Point 0 y1) (Point 0 y2)
+
+named : Dict String Shape
+named = Dict.insert "unit" (Box origin (Point 1 1)) Dict.empty

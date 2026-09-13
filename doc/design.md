@@ -294,6 +294,19 @@ that resolved owner set so fixture projections can omit the whole prelude
 while still elaborating and linting it. Bundled modules therefore use the
 public standard-library types rather than private substitutes.
 
+Module discovery, validation, interface building, ordering, and resolution
+live in one persistent graph (`modules.Graph`). A batch build fills a fresh
+graph from the entry file in one step; the REPL keeps its graph for the whole
+session, seeds it with the prelude closure, and grows it import by import.
+Every node the graph holds is already resolved, so a new module — or a new
+prompt — resolves against the committed nodes without touching them, and an
+import that fails anywhere commits nothing: the operator table is extended on
+a copy and the pending nodes are dropped. The checker tests that have no
+resolver still bind the prelude's exposed surface names directly into the
+checker tables; the REPL does not, because its resolver canonicalizes every
+prompt and a surface spelling in the tables would let an unresolved name slip
+past the scope the resolver enforces.
+
 Primitives are declarations rather than a compiler catalog. The prelude names
 the bundled `Basics` module, whose native values define the scalar
 implementations of class methods, and the bundled `IO` module declares the
@@ -1047,19 +1060,43 @@ Show instance have an opaque typed placeholder; functions show `<function>`.
 Strings and Chars are displayed raw through `Show`, including inside explicitly
 derived ADT displays; tooling uses quoted source-literal forms.
 
-The REPL retains one checker, type/name supply, evaluator environment, and IO
-reader/writer across inputs. Prompt definitions become lazy memo cells;
-functions become workers. Redefinition installs a new generation, and existing
-memoized values and closures keep their old bindings. Multiline input is driven
-by parser incompleteness and layout. Effectful ordinary prompt declarations
-are rejected, while effectful expressions run directly. Function definitions
-are installed without executing their bodies and run only when applied.
-Class and instance declarations are supported. Failed instance or deriving
-declarations roll back the persistent environment, without reusing allocated
-identities. Class redefinition is rejected; type redefinition creates a new
-generation with independently installed instances.
+The REPL retains one checker, type/name supply, evaluator environment, module
+graph, resolver scope, and IO reader/writer across inputs. Prompt definitions
+become lazy memo cells; functions become workers. Redefinition installs a new
+generation, and existing memoized values and closures keep their old bindings.
+Multiline input is driven by parser incompleteness and layout. Effectful
+ordinary prompt declarations are rejected, while effectful expressions run
+directly. Function definitions are installed without executing their bodies
+and run only when applied. Class and instance declarations are supported.
+Failed instance or deriving declarations roll back the persistent environment,
+without reusing allocated identities. Class redefinition is rejected; type
+redefinition creates a new generation with independently installed instances.
 
-Loading, reloading, cancellation, and interactive line history are not yet
+Every prompt input passes through the batch name resolver before inference.
+The prompt is a synthetic private module whose scope persists: it starts from
+the prelude's imports, and each accepted import or declaration extends it, so
+names reach the checker canonical exactly as a module's do and the checker
+holds the prelude under canonical names only. The resolver's prompt mode
+differs from a file in two ways only: rebinding a prompt-declared name is not
+a collision, and importing a module again is cumulative rather than a
+duplicate. A prompt `import` loads the module graph increment, checks it with
+the same module entry point a build uses (with the prompt's monomorphism rule
+switched off, since module values are immutable), elaborates it under the
+program rules — stable lifted names, scalar specialization, capture summaries
+solved over the increment — lints it against everything the session has
+installed, and only then defines it in the evaluator. Visibility of instances
+and derivers merges per owner, and the prompt's own visible set grows with
+every module loaded. User sidecars rebuild the session's native worker over
+the bundled sidecars and all user sidecars imported so far.
+
+Each input is a transaction over three stores — checker tables, resolver
+scope, and module graph — that all roll back together on failure; the
+checker's checkpoint therefore also covers effects, natives, the operator
+table (restored in place, since the graph shares it by identity), and
+instance visibility. The evaluator environment is only extended once an input
+has been accepted everywhere else.
+
+Reloading, cancellation, and interactive line history are not yet
 implemented; see [REPL hardening](roadmap.md#repl-hardening).
 
 ## Testing and performance

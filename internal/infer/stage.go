@@ -38,8 +38,9 @@ const (
 
 // Reflect builds the compile-time value of a reflected type. visible names
 // the schemas the reflection site may read, as module resolution recorded
-// them; nil means every schema is readable, which is the REPL and a
-// headerless file, neither of which has an export boundary to respect.
+// them — the REPL prompt included, which resolves as a private module. nil
+// means every schema is readable, which only the checker's own tests, having
+// no resolver, arrange.
 func (ck *Checker) Reflect(t types.Type, visible map[string]bool) *meta.TypeRepr {
 	repr := &meta.TypeRepr{Type: t, Schema: ck}
 	if visible == nil {
