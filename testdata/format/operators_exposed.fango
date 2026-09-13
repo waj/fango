@@ -1,0 +1,7 @@
+module Ops exposing ((+++), (<%>), Thing(..))
+
+import Basics exposing (..)
+
+infixl 6 (+++)
+
+(+++) a b = a

@@ -29,6 +29,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdRun(args[1:], stderr)
 	case "check":
 		return cmdCheck(args[1:], stderr)
+	case "fmt":
+		return cmdFmt(args[1:], stdout, stderr)
 	case "repl":
 		return cmdRepl(args[1:], stdout, stderr)
 	case "clean":
@@ -45,6 +47,7 @@ func usage(w io.Writer) {
   fango build [-o out] [--emit-go] main.fango
   fango run main.fango [--] [args...]
   fango check main.fango
+  fango fmt [-w] [-l] [file...]
   fango repl
   fango clean main.fango
 `)

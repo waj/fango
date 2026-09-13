@@ -39,6 +39,7 @@ The CLI accepts one `.fango` source file:
 fango build [-o out] [--emit-go] main.fango
 fango run main.fango [--] [args...]
 fango check main.fango
+fango fmt [-w] [-l] [file...]
 fango repl
 fango clean main.fango
 ```
@@ -49,6 +50,22 @@ every argument after the source path to the program; an optional `--` is
 removed first. `check` runs
 through parsing, inference, elaboration, and Core validation without generating
 Go. `clean` removes the source file's persistent `.fango/build` artifacts.
+
+`fmt` formats source. With no paths, or with `-`, it reads standard input and
+writes to standard output; with paths it writes each formatted file to standard
+output, `-w` rewrites the files in place, and `-l` lists the files that would
+change and exits 1, which is how the repository gates its own sources. It
+normalizes the module header and the import block: spacing, indentation, the
+`(op)` spelling of an exposed operator, and runs of blank lines. Everything
+below the imports is preserved as written.
+
+The formatter keeps the author's line breaks rather than reflowing to a width,
+so a construct written across several lines stays that way and one written
+inline stays inline. An `exposing` list the author moved below its keyword is
+printed in the leading-comma block form; the order of the list is never changed.
+A file that does not lex or parse is left untouched and its diagnostics are
+reported, because a failed declaration is dropped during recovery and formatting
+would lose it.
 
 `build --emit-go` writes a complete Go project instead of an executable. For
 `Main.fango`, its default destination is the `Main.out` directory in the

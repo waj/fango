@@ -1,184 +1,77 @@
 # fango developer tooling: formatter and editor support
 
-This document owns two unstarted pieces of work that together make fango
-usable in an editor: a source formatter and a language server. They are in one
-document because they share prerequisites — capturing comments in the lexer, a
-check entry point that accumulates diagnostics across stages, and byte-offset
-to editor-position conversion — and splitting them would leave those shared
-decisions owned by neither file.
+This document owns the unfinished half of two pieces of work that together
+make fango usable in an editor: a source formatter and a language server. They
+are in one document because they share prerequisites — comments on a side
+channel from the lexer, a check entry point that accumulates diagnostics across
+stages, and byte-offset to editor-position conversion — and splitting them
+would leave those shared decisions owned by neither file.
 
-Implemented architecture belongs in [the design](design.md) and implemented
-behavior in [the reference](reference.md). Neither tool exists yet; both are
-listed under Known limitations in the design.
-
-## The shape: a library, not a tool inside a tool
-
-The formatter is a library, `internal/format`, exposing a pure function from
-one file's bytes to bytes. `fango fmt` is a thin front end over it, and
-`fango lsp` later calls the same library for `textDocument/formatting`. One
-binary, no duplication, no subprocess discovery.
-
-The alternatives were considered and rejected. Putting the formatter inside
-the language server would mean driving JSON-RPC to test formatting, in a
-repository whose verification culture is golden files over `testdata/`; it
-would also rule out a CI formatting gate and headless use. Shipping a separate
-binary would add a second build target and the version- and
-discovery-mismatch problems that `rustfmt`/rust-analyzer and
-`elm-format`/elm-language-server both pay for, in exchange for nothing —
-`cmd/fango` dispatches subcommands with a plain switch.
-
-The decisive constraint is that **formatting must not need the module graph**.
-`fango fmt` has to work on a file with type errors, missing imports, or no
-project around it. So it runs on `lexer.Lex` and `parser.Parse` only,
-deliberately before `internal/fixity`, which needs `modules.Load` to supply
-imported fixities. Operator runs stay flat as `ast.OpChain` until fixity
-resolution, so the pre-fixity AST is exactly the right input: the formatter
-prints a run as written and never re-derives precedence or associativity.
-
-The formatter is independently shippable and independently useful; the
-language server is not. That settles the order — the formatter first.
+The shape is settled and partly built: `internal/format` is a library, `fango
+fmt` is a front end over it, and the language server will be another. [The
+design](design.md) records the architecture that is implemented — the comment
+side channel, formatting as a single-file pre-fixity operation, preserved
+author breaks, the verbatim fallback, and the self-check — and [the
+reference](reference.md) records what `fango fmt` does today. What remains is
+below.
 
 ## Formatter
 
-### Style: author breaks are preserved
+The header and the import block are formatted; everything below the imports is
+copied verbatim from its source extent. Each stage below replaces part of that
+copied region with a real printer, and the verbatim fallback keeps the output
+correct in the meantime.
 
-The formatter normalizes indentation and inter-token spacing and preserves the
-author's decision to split or join a construct. It does not reflow to a target
-width: a long line the author wrote stays long. This is the `gofmt` model
-rather than the `elm-format` one.
+### Remaining stages
 
-The consequence for the implementation is that break decisions are not
-searched for, they are read off the input. A construct was written multi-line
-exactly when its source span contains a newline, which every node's `Span`
-answers directly against `File.Content`.
+1. **Expressions, flat only.** Parenthesization, list and tuple un-desugaring,
+   and literal raw text. The parser drops parentheses, so they are re-derived:
+   a nested operator run as an operand can only have come from explicit
+   parentheses, since runs parse flat, and the remaining cases are non-atomic
+   application arguments and negation operands. List and tuple literals are
+   lowered to constructor applications, and the `Sugared` flag is the only
+   signal that distinguishes them from a hand-written constructor application —
+   spans cannot help, because every synthetic constructor in a lowered list
+   shares the whole bracket span. Literal spelling is decoded at parse time and
+   is recovered by slicing the source, through the one helper allowed to print
+   a literal.
+2. **Layout constructs** — blocks, `case`, `handle`, `if`, and lambdas. The
+   offside rule is alignment-based rather than indentation-based, so these need
+   a printer that can set an indent to the current column. A renderer-level
+   assertion mirroring the parser's layout stack, refusing to emit a line at or
+   left of the innermost layout column, belongs here: it catches a continuation
+   line landing back at a case-branch column, which silently becomes a new
+   branch.
+3. **Author-break fidelity** across application chains, operator runs, lists,
+   records, and signatures. Most of the taste lives here.
+4. **Comment reassociation** inside declarations, making the verbatim fallback
+   rare rather than routine.
 
-### Comments: a lexer side channel
+Each stage ends with a reformat of the bundled standard library and the
+examples, which the `ci` gate then holds.
 
-`skipSpaceAndComments` currently discards line and block comments by advancing
-the scan position, so comments reach neither the token stream nor the AST.
-They will be collected into a side list returned alongside the tokens, leaving
-`Lex` and its callers unchanged.
+### Traps worth remembering
 
-Comment tokens in the main stream were rejected for a specific reason.
-`parsePostfixAtom` implements the documented rule that whitespace or a comment
-before `()` makes it an ordinary application as a byte-adjacency test on
-neighbouring token spans. Interleaving a comment token would make a commented
-call byte-adjacent to its predecessor and silently invert that rule. Several
-other sites index the token slice directly for lookahead and forward scans and
-would each need trivia-skipping wrappers.
-
-A separate re-scan was also rejected: it would duplicate the nesting-depth
-logic and the string- and character-literal skipping that stops `--` inside a
-string literal from opening a comment, and that duplicate would drift from the
-lexer silently.
-
-The lexer gains one invariant test: tokens, comments, and whitespace must
-exactly tile the file's content. That is what makes "no comment can be lost"
-checkable rather than hoped for.
-
-### Declaration extents
-
-Comment attachment and blank-line preservation both need to know where a
-declaration starts and ends, and `Decl` carries no span today.
-
-The span will be added as a field on the declaration nodes the parser builds,
-read through a free `ast.DeclSpan` function, rather than as a method on the
-`Decl` interface. Several packages synthesize declarations — deriving, class
-elaboration, module loading — and those have no meaningful source extent; a
-required method would be a lie at each of those sites permanently. A free
-function reports the zero span for them instead. The AST dump is untouched, so
-no parse goldens churn.
-
-For a value declaration the span covers the whole equation group including its
-annotation line, which is what the reference's rule that blank lines and
-comments do not split a group requires.
-
-### Output must re-parse to the same tree
-
-Indentation is semantics in a layout-sensitive language, so the formatter
-carries two independent defenses.
-
-The renderer tracks a minimum-column stack mirroring the parser's layout
-contexts, and refuses to emit a line at or left of the innermost layout
-column. That catches the dangerous class at its source: a continuation line
-landing back at the case-branch column silently becomes a new branch.
-
-Beyond that, the formatter re-lexes and re-parses its own output and compares
-span-free trees before returning anything. On a mismatch it returns the
-original bytes and an internal error. `gofmt` does not do this because Go is
-not layout-sensitive; for fango it is the single most valuable decision in the
-design, because no bug in parenthesization, un-desugaring, or rendering can
-then corrupt a file.
-
-### What the parser drops, and how it comes back
-
-Literal spelling is decoded at parse time, but every literal node carries a
-span, so raw text is recovered by slicing the source. One helper does this and
-is the only code permitted to print a literal.
-
-Parentheses have no AST node. A nested `OpChain` appearing as an operand can
-only have arisen from explicit parentheses, since the parser keeps runs flat,
-so re-wrapping exactly those reproduces the original grouping; the remaining
-cases are the ordinary ones of non-atomic application arguments and negation
-operands.
-
-List and tuple literals are lowered to constructor applications at parse time.
-The `Sugared` flag distinguishes them from a hand-written constructor
-application, and gating the un-lowering on that flag is both necessary and
-sufficient — spans cannot help, because every synthetic constructor in a
-lowered list shares the whole bracket span.
-
-Two nodes carry dual representations, a single-row form and a grouped form for
-value declarations, and a legacy binding list beside an ordered item list for
-blocks. The printer normalizes each through one accessor.
-
-Calls written against `()` are recoverable structurally rather than lost: the
-adjacent form binds tighter, so the two spellings differ in tree depth.
-
-### Refusing, and the verbatim fallback
-
-The formatter refuses, leaving the file byte-identical, on a lex error, on a
-parse error, and on a failed self-check. Refusing on parse errors is not
-conservatism: recovery drops a failed declaration entirely and there is no
-error node, so formatting a broken file would silently delete code.
-
-Within a successful format, any declaration holding a comment in a position
-with no anchor — between an operator and its operand, say — is copied
-verbatim from its source region. Comments then cannot be moved or lost by
-construction, and the formatter is useful on real code from the first stage
-rather than the last.
-
-### Staging
-
-The first increment formats only the module header, imports, pragmas, fixity
-declarations, and type and effect declarations, copying every other
-declaration verbatim. That ships a useful `fango fmt` — canonical import
-blocks being the most-wanted part — while exercising the whole skeleton:
-document IR, renderer, region table, self-check, CLI, goldens, and the corpus
-gate. Expressions, then layout constructs, then author-break fidelity, then
-full comment reassociation follow, with the verbatim fallback holding
-correctness throughout.
-
-The gate lands last: a one-time reformat of the bundled standard library and
-the examples, then a listing mode wired into `make ci` over those two trees
-only. Test data is excluded, since it holds deliberately malformed inputs.
-`make fmt` already means gofmt over the Go sources, so the new target needs a
-distinct name.
+- `f()` and `f ()` differ in tree depth, not just in spacing: the adjacent form
+  binds tighter. Printing them apart needs its own fixture.
+- `a--b` is a comment, not an operator. The emitter must never put `-`
+  immediately after `-`.
+- Equation groups and blocks each carry two AST shapes, a single-row form and a
+  grouped one, and both must print the same way.
 
 ### Open decisions
 
 - Comment attachment rules: which anchor a comment binds to when it sits
   between two constructs, and whether a blank line before it changes that.
-- The style rules themselves: operator-chain wrapping, import ordering and
-  whether imports are sorted at all, spacing inside brackets and records,
-  and alignment of equation groups.
-- Blank-line policy. A proposal to start from: collapse runs to one, exactly
-  one blank line between top-level declarations, none inside an equation
-  group.
-- Whether a later `ast.Bad` declaration node should let the formatter work on
-  files that do not parse. It would also improve batch `fango check`, which
-  today reports one syntax error per run. The formatter should not be coupled
-  to it.
+- The style rules themselves: operator-run wrapping, whether imports are sorted
+  at all, spacing inside brackets and records, and alignment of equation groups.
+- Blank-line policy below the imports. Above them the author's blank lines are
+  reproduced; a stricter rule — exactly one between top-level declarations,
+  none inside an equation group — is worth considering once declarations print
+  structurally.
+- Whether an `ast.Bad` declaration node should let the formatter work on files
+  that do not parse. It would also improve batch `fango check`, which reports
+  one syntax error per run today. The formatter should not be coupled to it.
 
 ## Language server
 

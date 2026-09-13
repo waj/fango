@@ -1,0 +1,8 @@
+module Shapes exposing (Shape(..), area, perimeter)
+
+import Geometry.Point
+import Geometry.Point as P
+import Geometry.Point exposing (Point, origin)
+import Geometry.Point as Q exposing (Point, origin)
+
+area = 1

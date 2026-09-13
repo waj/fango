@@ -1,0 +1,11 @@
+module Wide exposing
+    ( Alpha, Beta
+    , gamma, delta
+    )
+
+import Basics exposing
+    ( Num, Eq
+    , (+), (-)
+    )
+
+gamma = 1

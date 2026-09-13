@@ -1,0 +1,4 @@
+-- An entry file needs no module header.
+import IO
+
+main = IO.print "hi"

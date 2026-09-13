@@ -170,16 +170,14 @@ Haskell's ambient reification, which is what breaks modularity there.
 
 ## Developer tooling: formatter and editor support
 
-[roadmap-tooling.md](roadmap-tooling.md) owns two unstarted items that share
-prerequisites: a formatter for the layout syntax and a language server. The
-formatter is a library with `fango fmt` as a thin front end, so the language
-server later calls the same code rather than reimplementing it, and formatting
-stays a single-file, pre-fixity operation that works on a project which does
-not compile. Capturing comments in the lexer, giving declarations source
-extents, and extracting a check entry point that accumulates diagnostics
-across stages are shared groundwork; that document records why comments arrive
-as a side channel rather than as tokens, and why the formatter re-parses its
-own output before returning it.
+[roadmap-tooling.md](roadmap-tooling.md) owns what is left of two items that
+share prerequisites: a formatter for the layout syntax and a language server.
+`fango fmt` formats the module header and the import block today and copies
+everything below them verbatim, so the remaining formatter work is the printers
+for declarations, expressions, and the layout constructs. The language server is
+unstarted; its largest prerequisite, a check entry point that accumulates
+diagnostics across stages instead of stopping at the first, is worth doing on
+its own merits.
 
 ## Calling conventions and recursion shapes
 

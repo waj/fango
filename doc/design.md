@@ -954,6 +954,41 @@ representations, and explicitly safe bundled behavior needed during splice
 evaluation. Compile-time evaluation still rejects user sidecars, effects, and
 process-state-observing natives.
 
+## Formatting
+
+`internal/format` is a library; `fango fmt` is a front end over it, and an
+editor server would be another. Formatting is a pure function of one file's
+bytes, so it holds no project state and needs no module graph: it runs the
+lexer and the parser and stops. That is deliberate rather than incidental. It
+runs before `internal/fixity`, which could only group operator runs with the
+whole graph loaded, so the printer sees a flat run and prints it in the order
+it was written rather than reassociating it — and formatting therefore works on
+a file that does not resolve, does not typecheck, or has no project around it.
+
+The lexer returns comments on a side channel rather than as tokens. The parser
+distinguishes `f()` from `f ()` by testing whether neighbouring token spans are
+byte-adjacent, so a comment token would make `f{- c -}()` look adjacent and
+invert a documented rule; several other sites index the token slice directly
+for lookahead. Tokens, comments, and whitespace together tile a file that lexes
+cleanly, which is the invariant a formatter needs to reconstruct text it did
+not print itself.
+
+Author line breaks are preserved. The formatter normalizes indentation and
+spacing and chooses nothing about where a construct is split, so no width
+search is needed and a long line stays long. Whether a construct was written
+across lines is read off its span.
+
+Two properties keep it safe. Anything the printer does not yet render
+structurally is copied verbatim from its source extent, so no comment can be
+moved or lost before the printer learns to place it — which is also how a
+declaration holding a comment in a position with no anchor will keep being
+handled. And the formatter re-lexes and re-parses its own output and compares
+span-free trees and comment text before returning, falling back to the original
+bytes on any mismatch: indentation carries meaning here, so a printing bug
+would otherwise change a program rather than merely misformat it. A file that
+does not lex or parse is refused outright, because recovery drops a failed
+declaration and no error node stands in for it.
+
 ## Interpreter and REPL
 
 `internal/eval` executes Core, not the surface AST. Values have a uniform Go
@@ -1059,7 +1094,9 @@ dependence: the ratio moves with whatever else is competing for the CPU.
 ## Known limitations
 
 The implementation has a deliberately narrow scalar Go sidecar FFI but no
-package manager, transparent aliases, formatter, or LSP. Type classes have one
+package manager, transparent aliases, or LSP, and `fango fmt` normalizes only
+the module header and the import block so far — everything below the imports is
+copied as written. Type classes have one
 parameter, no superclasses, higher kinds, default methods, ambiguous overlapping heads,
 or method-local polymorphism. A constraint on a parameterized type is not
 simplified to constraints on its arguments, so `Eq a => List a -> Bool` is

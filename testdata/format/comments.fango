@@ -1,0 +1,13 @@
+-- A leading file comment.
+-- It has two lines.
+
+{-# no-prelude #-}
+module Commented exposing (value)
+
+-- About the imports.
+
+import Basics exposing (..) -- trailing on an import
+import IO
+
+-- About the declaration, which is copied verbatim.
+value = 1

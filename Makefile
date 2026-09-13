@@ -1,7 +1,7 @@
 # Convenience wrappers for the repository verification gates; see
 # doc/design.md, "Testing and performance".
 
-.PHONY: build test test-short test-perf update-goldens update-baselines fmt vet ci clean
+.PHONY: build test test-short test-perf update-goldens update-baselines fmt fmt-fango vet ci clean
 
 build:
 	go build -o fango ./cmd/fango
@@ -24,7 +24,7 @@ test-short:
 # Regenerate golden files after an intentional output change. Review the
 # diff before committing.
 update-goldens:
-	go test ./internal/lexer ./internal/parser ./internal/infer ./internal/elaborate ./internal/repl -update
+	go test ./internal/lexer ./internal/parser ./internal/infer ./internal/elaborate ./internal/repl ./internal/format -update
 
 # Re-record compile-latency baselines (machine-specific).
 update-baselines:
@@ -33,11 +33,18 @@ update-baselines:
 fmt:
 	gofmt -w .
 
+# The fango formatter over the sources the project owns, mirroring what `fmt`
+# does for the Go sources. testdata is excluded: it deliberately holds malformed
+# and oddly laid out inputs. The `ci` gate checks the same set without writing.
+fmt-fango:
+	go run ./cmd/fango fmt -w stdlib/*.fango examples/*.fango
+
 vet:
 	go vet ./...
 
 ci:
 	test -z "$$(gofmt -l .)"
+	go run ./cmd/fango fmt -l stdlib/*.fango examples/*.fango
 	go vet ./...
 	go test $$(go list ./... | grep -v benchmarks)
 
