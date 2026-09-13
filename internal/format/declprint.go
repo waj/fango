@@ -31,8 +31,103 @@ func (p *printer) printDecl(d ast.Decl, sp source.Span, hasComment bool) bool {
 	case *ast.ClassDecl:
 		p.sigBlock("class "+d.Name, []string{d.Param.Name}, d.Methods)
 		return true
+	case *ast.ValueDecl:
+		return p.valueDeclLines(d)
+	case *ast.PatternDecl:
+		return p.patternDeclLine(d)
 	}
 	return false
+}
+
+// valueDeclLines renders an annotation line and one line per equation. It
+// declines any equation whose body the author wrote across lines: the layout
+// constructs are not printed yet, and declining leaves the declaration to be
+// copied with its own line structure intact.
+func (p *printer) valueDeclLines(d *ast.ValueDecl) bool {
+	type row struct{ head, body string }
+	var rows []row
+
+	for _, eq := range equations(d) {
+		if eq.Body == nil || equationBroke(eq) {
+			return false
+		}
+		body, ok := exprInline(eq.Body)
+		if !ok {
+			return false
+		}
+		head, ok := equationHead(d.Name, eq)
+		if !ok {
+			return false
+		}
+		rows = append(rows, row{head, body})
+	}
+	if d.Native != nil {
+		if len(rows) != 0 {
+			return false
+		}
+		p.annotationLine(d)
+		p.line(0, declName(d.Name)+" = "+nativeText(d.Native))
+		return true
+	}
+	if len(rows) == 0 {
+		return false
+	}
+
+	p.annotationLine(d)
+	for _, r := range rows {
+		p.line(0, r.head+" = "+r.body)
+	}
+	return true
+}
+
+func (p *printer) patternDeclLine(d *ast.PatternDecl) bool {
+	if d.Body == nil || brokeWithin(d.Body.Span()) {
+		return false
+	}
+	pat, ok := patternInline(d.Pattern)
+	if !ok {
+		return false
+	}
+	body, ok := exprInline(d.Body)
+	if !ok {
+		return false
+	}
+	p.line(0, pat+" = "+body)
+	return true
+}
+
+func (p *printer) annotationLine(d *ast.ValueDecl) {
+	if d.Ann != nil {
+		p.line(0, declName(d.Name)+" : "+annotationText(d.Ann))
+	}
+}
+
+// declName gives an operator back the `(op)` spelling that names it.
+func declName(name string) string {
+	if startsWithLetter(name) {
+		return name
+	}
+	return "(" + name + ")"
+}
+
+// equations presents the two shapes a definition can take — a single row on
+// the declaration itself, or a grouped list — as one list.
+func equations(d *ast.ValueDecl) []ast.Equation {
+	if len(d.Equations) > 0 {
+		return d.Equations
+	}
+	if d.Body == nil {
+		return nil
+	}
+	return []ast.Equation{{Params: d.Params, Body: d.Body, NameSpan: d.NameSpan}}
+}
+
+// brokeWithin reports whether the author put a newline inside a node.
+func brokeWithin(sp source.Span) bool {
+	if sp.File == nil {
+		return false
+	}
+	return bytes.ContainsRune(sp.File.Content[sp.Start:sp.End], '\n')
 }
 
 func fixityText(d *ast.FixityDecl) string {
@@ -165,4 +260,45 @@ func brokeAfter(sp source.Span, offset int) bool {
 		return false
 	}
 	return bytes.ContainsRune(sp.File.Content[offset:sp.End], '\n')
+}
+
+// equationBroke reports whether the author put a newline anywhere between the
+// name that starts an equation and the end of its body — either a body moved
+// below the `=`, or a break inside the body itself. Both mean the equation has
+// a line structure the printer cannot yet reproduce.
+func equationBroke(eq ast.Equation) bool {
+	body := eq.Body.Span()
+	if body.File == nil || eq.NameSpan.File == nil || eq.NameSpan.Start > body.End {
+		return false
+	}
+	return bytes.ContainsRune(body.File.Content[eq.NameSpan.Start:body.End], '\n')
+}
+
+// equationHead renders the left of the `=`. A Unit parameter written against
+// the name keeps that spelling, the same adjacency rule application obeys.
+func equationHead(name string, eq ast.Equation) (string, bool) {
+	head := declName(name)
+	for i, param := range eq.Params {
+		if _, isUnit := param.(*ast.PUnit); isUnit && paramAdjacent(eq, i) {
+			head += "()"
+			continue
+		}
+		s, ok := patternArgInline(param)
+		if !ok {
+			return "", false
+		}
+		head += " " + s
+	}
+	return head, true
+}
+
+// paramAdjacent reports whether a parameter was written with no space before
+// it, which for `()` is what `args()` means.
+func paramAdjacent(eq ast.Equation, i int) bool {
+	prev := eq.NameSpan
+	if i > 0 {
+		prev = eq.Params[i-1].Span()
+	}
+	cur := eq.Params[i].Span()
+	return prev.File != nil && cur.File != nil && prev.End == cur.Start
 }

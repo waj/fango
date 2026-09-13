@@ -58,19 +58,23 @@ func cmdFmt(args []string, stdout, stderr io.Writer) int {
 			failed = true
 			continue
 		}
-		if bytes.Equal(out, src) {
-			continue
-		}
-		changed = true
+		differs := !bytes.Equal(out, src)
+		changed = changed || differs
 		switch {
 		case *list:
-			fmt.Fprintln(stdout, path)
+			if differs {
+				fmt.Fprintln(stdout, path)
+			}
 		case *write:
-			if err := os.WriteFile(path, out, 0o644); err != nil {
-				fmt.Fprintf(stderr, "fango fmt: %v\n", err)
-				failed = true
+			if differs {
+				if err := os.WriteFile(path, out, 0o644); err != nil {
+					fmt.Fprintf(stderr, "fango fmt: %v\n", err)
+					failed = true
+				}
 			}
 		default:
+			// Like gofmt, printing is unconditional: the formatted source is
+			// what was asked for, whether or not it differs.
 			stdout.Write(out)
 		}
 	}

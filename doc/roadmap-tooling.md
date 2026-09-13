@@ -17,38 +17,26 @@ below.
 
 ## Formatter
 
-The header, the import block, and the type, effect, class and fixity
-declarations are formatted. Value and instance declarations are copied verbatim
-from their source extents, as is any declaration holding a comment. Each stage
-below replaces part of that copied region with a real printer, and the verbatim
-fallback keeps the output correct in the meantime.
+Everything except the layout constructs is formatted. A declaration is copied
+verbatim from its source extent when its body was written across lines, when it
+is an instance or deriver, or when it holds a comment. Each stage below shrinks
+that copied region, and the verbatim fallback keeps the output correct in the
+meantime.
 
 ### Remaining stages
 
-1. **Value declarations and flat expressions.** Parenthesization, list and
-   tuple un-desugaring, and literal raw text. The parser drops parentheses, so
-   they are re-derived:
-   a nested operator run as an operand can only have come from explicit
-   parentheses, since runs parse flat, and the remaining cases are non-atomic
-   application arguments and negation operands. List and tuple literals are
-   lowered to constructor applications, and the `Sugared` flag is the only
-   signal that distinguishes them from a hand-written constructor application —
-   spans cannot help, because every synthetic constructor in a lowered list
-   shares the whole bracket span. Literal spelling is decoded at parse time and
-   is recovered by slicing the source, through the one helper allowed to print
-   a literal.
-2. **Layout constructs** — blocks, `case`, `handle`, `if`, and lambdas. The
+1. **Layout constructs** — blocks, `case`, `handle`, `if`, and lambdas. The
    offside rule is alignment-based rather than indentation-based, so these need
    a printer that can set an indent to the current column. A renderer-level
    assertion mirroring the parser's layout stack, refusing to emit a line at or
    left of the innermost layout column, belongs here: it catches a continuation
    line landing back at a case-branch column, which silently becomes a new
    branch.
-3. **Author-break fidelity** across application chains, operator runs, lists,
+2. **Author-break fidelity** across application chains, operator runs, lists,
    records, and signatures. Most of the taste lives here. An operator run keeps
    the glyph where the author put it, leading or trailing, since the formatter
    cannot see fixity and the placement is not a question fixity answers.
-4. **Comment reassociation** inside declarations, making the verbatim fallback
+3. **Comment reassociation** inside declarations, making the verbatim fallback
    rare rather than routine.
 
 Each stage ends with a reformat of the bundled standard library and the
@@ -56,12 +44,10 @@ examples, which the `ci` gate then holds.
 
 ### Traps worth remembering
 
-- `f()` and `f ()` differ in tree depth, not just in spacing: the adjacent form
-  binds tighter. Printing them apart needs its own fixture.
 - `a--b` is a comment, not an operator. The emitter must never put `-`
   immediately after `-`.
-- Equation groups and blocks each carry two AST shapes, a single-row form and a
-  grouped one, and both must print the same way.
+- Blocks carry two AST shapes, a legacy binding list and an ordered item list,
+  and both must print the same way.
 
 ### Open decisions
 

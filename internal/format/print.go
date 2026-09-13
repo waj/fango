@@ -18,21 +18,58 @@ import (
 // author decides where the air goes.
 type printer struct {
 	f      *source.File
-	buf    strings.Builder
+	buf    strings.Builder // completed lines, each ending in a newline
+	cur    []byte          // the line being built, without its indent
+	ind    int             // that line's indent
+	open   bool
 	srcEnd int
 }
 
-func (p *printer) line(indent int, text string) {
-	if text != "" {
-		p.buf.WriteString(strings.Repeat(" ", indent))
+// start begins a line at indent, completing whatever line was open.
+func (p *printer) start(indent int) {
+	p.flush()
+	p.ind = indent
+	p.open = true
+}
+
+// emit appends to the line being built.
+func (p *printer) emit(s string) {
+	if !p.open {
+		p.start(0)
+	}
+	p.cur = append(p.cur, s...)
+}
+
+// flush completes the line being built, if any.
+func (p *printer) flush() {
+	if !p.open {
+		return
+	}
+	if text := strings.TrimRight(string(p.cur), " \t"); text != "" {
+		p.buf.WriteString(strings.Repeat(" ", p.ind))
 		p.buf.WriteString(text)
 	}
 	p.buf.WriteByte('\n')
+	p.cur = p.cur[:0]
+	p.open = false
+}
+
+func (p *printer) line(indent int, text string) {
+	p.start(indent)
+	p.emit(text)
+	p.flush()
+}
+
+// done completes the output.
+func (p *printer) done() string {
+	p.flush()
+	return p.buf.String()
 }
 
 // gapBefore reproduces a blank line the author left between the construct just
 // written and the one about to be.
 func (p *printer) gapBefore(start int) {
+	p.flush()
 	if p.buf.Len() == 0 || start < p.srcEnd {
 		return
 	}
@@ -42,6 +79,7 @@ func (p *printer) gapBefore(start int) {
 }
 
 func (p *printer) blank() {
+	p.flush()
 	if s := p.buf.String(); s != "" && !strings.HasSuffix(s, "\n\n") {
 		p.buf.WriteByte('\n')
 	}
@@ -158,7 +196,10 @@ func printModule(f *source.File, m *ast.Module, toks []token.Token, comments []t
 				continue
 			}
 			cs.skipTo(importHi)
-			p.gapBefore(it.span.Start)
+			// The gap is measured to whatever the block prints first, which
+			// is a block-level comment when there is one rather than the
+			// import line itself.
+			p.gapBefore(blockStart(entries, floating, it.span.Start))
 			p.printImportBlock(entries, floating)
 			p.srcEnd = importHi
 			continue
@@ -187,7 +228,7 @@ func printModule(f *source.File, m *ast.Module, toks []token.Token, comments []t
 	}
 	cs.emitRest(p, 0)
 
-	return []byte(tidy(p.buf.String()))
+	return []byte(tidy(p.done()))
 }
 
 func (p *printer) headerLines(h *ast.ModuleHeader, line int) {

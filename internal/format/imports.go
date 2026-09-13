@@ -130,3 +130,20 @@ func (p *printer) printImportBlock(entries []importEntry, floating []token.Comme
 		}
 	}
 }
+
+// blockStart is the source position of whatever the import block prints first
+// — a block-level comment, or the comments carried by the first import, or the
+// first import line. The blank line above the block is measured to that, so a
+// comment sitting directly under a pragma does not gain one.
+func blockStart(entries []importEntry, floating []token.Comment, fallback int) int {
+	at := fallback
+	if len(floating) > 0 && floating[0].Span.Start < at {
+		at = floating[0].Span.Start
+	}
+	if len(entries) > 0 && len(entries[0].leading) > 0 {
+		if s := entries[0].leading[0].Span.Start; s < at {
+			at = s
+		}
+	}
+	return at
+}

@@ -71,6 +71,10 @@ func (c *commentCursor) ownLine(cm token.Comment) bool {
 // appendTrailing puts a comment back at the end of the line already written,
 // where its author put it.
 func (p *printer) appendTrailing(text string) {
+	if p.open {
+		p.emit(" " + strings.TrimRight(text, " \t"))
+		return
+	}
 	s := p.buf.String()
 	if !strings.HasSuffix(s, "\n") {
 		p.buf.WriteByte(' ')

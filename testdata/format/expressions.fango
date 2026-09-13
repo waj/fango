@@ -1,0 +1,55 @@
+module Exprs exposing (Box(..), run)
+
+import Basics exposing (..)
+import List exposing (List(..))
+
+type Box a = Box a
+type Point = { x : Int, y : Int }
+
+lists = [1, 2, 3]
+emptyList = []
+consTail = [1, 2 | rest]
+nestedList = [[1], [2, 3]]
+
+tuples = (1, "two")
+triple = (1, 2, 3)
+
+floats = (1.50, 1e3)
+strings = ("a\tb", 'x')
+
+apply = f a b
+applyNested = f (g a) (h b c)
+applyList = f [1, 2] (g x)
+unitCall = value()
+unitSpaced = value ()
+postfixArg = print value()
+
+negation = -1
+negApplied = f (-1)
+negExpr = -(a + b)
+
+ops = 1 + 2 * 3
+opsGrouped = (1 + 2) * 3
+opsChain = a ++ b ++ c
+dashes = a - -1
+
+records = { x = 1, y = 2 }
+namedRecord = Point { x = 1, y = 2 }
+recordArg = f (Point { x = 1, y = 2 })
+projection = point.x
+update = { point | x = 3 }
+
+lambdas = \x -> x
+lambdaMulti = \x y -> x + y
+lambdaArg = map (\x -> x + 1) xs
+
+conditional = if a then b else c
+
+pinned (Box ^expected) = True
+wildcards _ (Box _) = False
+listPattern [] = 0
+listPattern [only] = only
+listPattern [head | _] = head
+recordPattern Point { x = a } = a
+tuplePattern (a, b) = a
+run = 1
