@@ -1,0 +1,38 @@
+module Decls exposing (Color(..), Console, Pair, Show(..))
+
+import Basics exposing (..)
+
+infixl 6 (+++)
+infixr 5 (<|>)
+infix 4 (===)
+
+type Color = Red | Green | Blue deriving (Eq, Show)
+
+type Tree a
+    = Leaf
+    | Node (Tree a) a (Tree a)
+
+type Pair a = { first : a, second : a } deriving (Eq)
+
+type Wide =
+    { alpha : Int
+    , beta : String
+    }
+
+type Fn e = Wrap (Int ->{e} String) | Pure (Maybe (List Int))
+
+type Pairs = Holder (Int, String) (Maybe (Int, Int, Int))
+
+effect Console
+    print : String -> ()
+    readLine : () -> String
+
+effect Fail e
+    abort fail : e -> ()
+
+class Show a
+    show : a -> String
+
+class Num a
+    (+) : a -> a -> a
+    fromInt : Int -> a

@@ -55,9 +55,10 @@ Go. `clean` removes the source file's persistent `.fango/build` artifacts.
 writes to standard output; with paths it writes each formatted file to standard
 output, `-w` rewrites the files in place, and `-l` lists the files that would
 change and exits 1, which is how the repository gates its own sources. It
-normalizes the module header and the import block: spacing, indentation, the
-`(op)` spelling of an exposed operator, and runs of blank lines. Everything
-below the imports is preserved as written.
+normalizes the module header, the import block, and `type`, `effect`, `class`
+and fixity declarations: spacing, indentation, the `(op)` spelling of an
+operator name, and runs of blank lines. Value and instance declarations are
+still preserved as written, as is any declaration holding a comment.
 
 The formatter keeps the author's line breaks rather than reflowing to a width,
 so a construct written across several lines stays that way and one written

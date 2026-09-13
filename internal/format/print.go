@@ -174,15 +174,18 @@ func printModule(f *source.File, m *ast.Module, toks []token.Token, comments []t
 		p.srcEnd = it.span.End
 	}
 
-	if len(m.Decls) > 0 {
-		cs.emitBefore(p, bodyStart, 0)
-		p.gapBefore(bodyStart)
-		p.verbatim(source.Span{File: f, Start: bodyStart, End: len(f.Content)})
-		// The copied region already contains its own comments.
-		cs.skipTo(len(f.Content) + 1)
-	} else {
-		cs.emitRest(p, 0)
+	for _, d := range m.Decls {
+		sp := ast.DeclSpan(d)
+		cs.emitBefore(p, sp.Start, 0)
+		p.gapBefore(sp.Start)
+		if !p.printDecl(d, sp, cs.holdsComment(sp)) {
+			p.verbatim(sp)
+		}
+		// Whatever is inside the declaration was printed or copied with it.
+		cs.skipTo(sp.End)
+		p.srcEnd = sp.End
 	}
+	cs.emitRest(p, 0)
 
 	return []byte(tidy(p.buf.String()))
 }

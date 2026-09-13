@@ -97,3 +97,15 @@ func (c *commentCursor) skipTo(offset int) {
 		c.next++
 	}
 }
+
+// holdsComment reports whether any comment falls inside the span. A
+// declaration that holds one is copied verbatim rather than printed, so the
+// comment keeps its place until the printer can anchor it.
+func (c *commentCursor) holdsComment(sp source.Span) bool {
+	for _, cm := range c.cs {
+		if cm.Span.Start >= sp.Start && cm.Span.End <= sp.End {
+			return true
+		}
+	}
+	return false
+}

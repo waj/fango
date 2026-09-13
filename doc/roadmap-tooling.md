@@ -17,15 +17,17 @@ below.
 
 ## Formatter
 
-The header and the import block are formatted; everything below the imports is
-copied verbatim from its source extent. Each stage below replaces part of that
-copied region with a real printer, and the verbatim fallback keeps the output
-correct in the meantime.
+The header, the import block, and the type, effect, class and fixity
+declarations are formatted. Value and instance declarations are copied verbatim
+from their source extents, as is any declaration holding a comment. Each stage
+below replaces part of that copied region with a real printer, and the verbatim
+fallback keeps the output correct in the meantime.
 
 ### Remaining stages
 
-1. **Expressions, flat only.** Parenthesization, list and tuple un-desugaring,
-   and literal raw text. The parser drops parentheses, so they are re-derived:
+1. **Value declarations and flat expressions.** Parenthesization, list and
+   tuple un-desugaring, and literal raw text. The parser drops parentheses, so
+   they are re-derived:
    a nested operator run as an operand can only have come from explicit
    parentheses, since runs parse flat, and the remaining cases are non-atomic
    application arguments and negation operands. List and tuple literals are
