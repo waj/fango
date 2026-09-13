@@ -202,6 +202,17 @@ unstarted; its largest prerequisite, a check entry point that accumulates
 diagnostics across stages instead of stopping at the first, is worth doing on
 its own merits.
 
+## Test framework
+
+[roadmap-testing.md](roadmap-testing.md) owns the design of a test framework
+written in fango: a bundled `Expect` module whose failures abort through an
+effect, a bundled `Test` module with a row-indexed tree of `describe`, `test`,
+`skip`, `todo`, and `only`, and a `Test.run` entry a program calls from
+`main`. Its first milestone adds `(|>)` and `(<|)` to `Basics` and the
+prelude. Failure source positions need a compiler-solved call-site constraint,
+recorded there as proposed syntax; a `fango test` command and fuzz testing
+are sketched but deferred.
+
 ## Calling conventions and recursion shapes
 
 [roadmap-calls.md](roadmap-calls.md) owns two measured, unstarted items: passing
