@@ -42,6 +42,8 @@ func ExprControl(e Expr) types.Control {
 		// Producer's latent Machine protocol is consumed by this owner rather
 		// than joined into the enclosing computation.
 		return types.JoinControl(e.Control, ExprControl(e.Producer), ExprControl(e.Consumer))
+	case *IteratorForEach:
+		return types.JoinControl(e.Control, ExprControl(e.Action), ExprControl(e.Cursor))
 	case *Neg:
 		return ExprControl(e.Operand)
 	case *NativeCall:

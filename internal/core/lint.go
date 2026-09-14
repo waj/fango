@@ -524,6 +524,31 @@ func (l *linter) expr(e Expr, where string) {
 		}
 		l.expr(e.Producer, where)
 		l.expr(e.Consumer, where)
+	case *IteratorForEach:
+		l.control(e.Control, where)
+		if !l.intrinsics[types.IteratorForEachName] || l.defName != types.IteratorForEachName {
+			l.errorf("%s: iterator forEach outside the declared `%s` intrinsic", where, types.IteratorForEachName)
+		}
+		if l.unique(e.Ty) != l.b.Unit.Unique {
+			l.errorf("%s: iterator forEach result typed %s, want Unit", where, types.Show(e.Ty))
+		}
+		action, ok := e.Action.Type().(*types.TFun)
+		if !ok {
+			l.errorf("%s: iterator forEach action is not a function", where)
+		} else {
+			if !types.Equal(action.Arg, e.Element) || l.unique(action.Ret) != l.b.Unit.Unique {
+				l.errorf("%s: iterator forEach action does not have shape `a -> ()`", where)
+			}
+			if want := types.FunctionControl(action); e.Control != want {
+				l.errorf("%s: iterator forEach control %s disagrees with action %s", where, ControlName(e.Control), ControlName(want))
+			}
+		}
+		cursor, ok := e.Cursor.Type().(*types.TCon)
+		if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 1 || !types.Equal(cursor.Args[0], e.Element) {
+			l.errorf("%s: iterator forEach cursor does not have type `%s a`", where, types.IteratorTypeName)
+		}
+		l.expr(e.Action, where)
+		l.expr(e.Cursor, where)
 	case *ControlExit:
 		l.control(e.Effect.Control, where)
 		l.effectInstance(e.Effect, where)
@@ -1401,6 +1426,9 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		// function types and by IteratorScope.Control.
 		directSlot(e.Producer, "iterator producer")
 		directSlot(e.Consumer, "iterator consumer")
+	case *IteratorForEach:
+		directSlot(e.Action, "iterator action")
+		directSlot(e.Cursor, "iterator cursor")
 	case *Handle:
 		if e.State != nil {
 			directSlot(e.State.Initial, "handler initial state")

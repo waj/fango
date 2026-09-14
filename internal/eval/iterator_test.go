@@ -51,6 +51,8 @@ func TestIteratorScopeRunsThroughInstalledMachineLowering(t *testing.T) {
 	label := types.EffLabel{Unique: sup.NextUnique(), Name: types.GeneratorEffectName, Args: []types.Type{b.Int}, Suspension: true}
 	producerTy := &types.TFun{Arg: b.Unit, Eff: types.Row{Labels: []types.EffLabel{label}}, Ret: b.Unit}
 	consumerTy := &types.TFun{Arg: iterator, Ret: b.Unit}
+	actionTy := &types.TFun{Arg: b.Int, Ret: b.Unit}
+	forEachTy := &types.TFun{Arg: actionTy, Ret: &types.TFun{Arg: iterator, Ret: b.Unit}}
 	ownerTy := &types.TFun{Arg: producerTy, Ret: &types.TFun{Arg: consumerTy, Ret: b.Unit}}
 	owner := core.Def{Name: types.GeneratorWithIteratorName, Owner: "Main", Type: ownerTy,
 		Params: []string{"producer", "consumer"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()},
@@ -59,15 +61,24 @@ func TestIteratorScopeRunsThroughInstalledMachineLowering(t *testing.T) {
 			Consumer: &core.VarRef{Name: "consumer", Local: true, Ty: consumerTy},
 			CursorTy: iterator, Ty: b.Unit,
 		}}
+	forEach := core.Def{Name: types.IteratorForEachName, Owner: "Main", Type: forEachTy,
+		Params: []string{"action", "cursor"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()},
+		Body: &core.IteratorForEach{
+			Action: &core.VarRef{Name: "action", Local: true, Ty: actionTy}, Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: iterator},
+			Element: b.Int, Ty: b.Unit,
+		}}
 	producer := &core.Lambda{Param: "_", ParamCapture: sup.FreshCapture(), Ty: producerTy,
-		Body: &core.Suspend{Request: &core.VarRef{Name: "captured", Local: true, Ty: b.Int}, Ty: b.Unit}}
+		Body: &core.Seq{First: &core.Suspend{Request: &core.VarRef{Name: "captured", Local: true, Ty: b.Int}, Ty: b.Unit},
+			Then: &core.Suspend{Request: &core.IntLit{Val: 8, Ty: b.Int}, Ty: b.Unit}, Ty: b.Unit}}
+	action := &core.Lambda{Param: "value", ParamCapture: sup.FreshCapture(), Ty: actionTy, Body: &core.UnitLit{Ty: b.Unit}}
 	consumer := &core.Lambda{Param: "cursor", ParamCapture: sup.FreshCapture(), Ty: consumerTy,
-		Body: &core.UnitLit{Ty: b.Unit}}
+		Body: &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: types.IteratorForEachName, Ty: forEachTy},
+			Args: []core.Expr{action, &core.VarRef{Name: "cursor", Local: true, Ty: iterator}}, Ty: b.Unit}}
 	call := &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: owner.Name, Ty: ownerTy},
 		Args: []core.Expr{producer, consumer}, Ty: b.Unit}
 	main := core.Def{Name: "Main.main", Owner: "Main", Type: b.Unit,
 		Body: &core.Let{Name: "captured", Rhs: &core.IntLit{Val: 7, Ty: b.Int}, Body: call, Ty: b.Unit}}
-	p := &core.Prog{Entry: main.Name, Intrinsics: map[string]bool{types.GeneratorWithIteratorName: true}, Defs: []core.Def{owner, main}}
+	p := &core.Prog{Entry: main.Name, Intrinsics: map[string]bool{types.GeneratorWithIteratorName: true, types.IteratorForEachName: true}, Defs: []core.Def{owner, forEach, main}}
 	if errs := core.InferCaptures(p, b); len(errs) != 0 {
 		t.Fatalf("capture inference: %v", errs)
 	}

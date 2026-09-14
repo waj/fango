@@ -49,6 +49,9 @@ func Inspect(e Expr, visit func(Expr)) {
 	case *IteratorScope:
 		walk(e.Producer)
 		walk(e.Consumer)
+	case *IteratorForEach:
+		walk(e.Action)
+		walk(e.Cursor)
 	case *Bracket:
 		walk(e.Acquire)
 		walk(e.Release)

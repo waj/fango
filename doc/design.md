@@ -941,6 +941,16 @@ Raw `next` is deliberately absent from this initial discipline because it
 would require representing ownership transfer to a successor cursor rather
 than terminal consumption.
 
+`Iterator.forEach` has the first terminal Core implementation. Its intrinsic
+body is an `IteratorForEach` node carrying an element callback and the opaque
+cursor. Both backends repeatedly pull one value, invoke the callback once, and
+stop on producer completion or a tagged exit. The terminal does not close the
+cursor itself: returning normally or exceptionally transfers control back to
+the enclosing `IteratorScope`, which closes or abandons the producer exactly
+once and combines cleanup failure with the consumer exit. The other recognized
+terminal identities remain ownership-checker reservations until their typed
+Core nodes are implemented.
+
 An effect-polymorphic higher-order worker has its open callback row erased from
 the runtime ABI. Passing a concrete callback therefore adapts it to that ABI;
 local function references are eta-expanded so their binding keeps its concrete

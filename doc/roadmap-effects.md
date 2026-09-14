@@ -193,9 +193,12 @@ transport and elaborates to the existing semantic-Core suspension point without
 runtime effect evidence. The typed `IteratorScope` boundary now lowers the
 owning runner in both backends: Machine producer lambdas nested in Direct or
 Exit callers become rooted frame factories, the consumer receives the private
-owner, and scope exit closes unfinished production. Remaining E8a work is
-source exposure: introduce the `Generator`/`Iterator` declarations and lower
-the checked terminal consumers that drive the owner.
+owner, and scope exit closes unfinished production. `Iterator.forEach` also has
+a typed terminal node in both backends and drives the producer to exhaustion,
+leaving early-exit cleanup with the owner. Remaining E8a work is to implement
+the `fold`, `find`, and `take` terminals, introduce the bundled
+`Generator`/`Iterator` declarations, and activate selective lowering in the
+batch and REPL pipelines.
 
 Provisional library use, with `Generator.yield` a new suspension-capable
 operation, not an ordinary tail-only Yield declaration:

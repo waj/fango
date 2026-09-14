@@ -1531,6 +1531,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return g.bracketExpr(e)
 	case *core.IteratorScope:
 		return g.iteratorScopeExpr(e)
+	case *core.IteratorForEach:
+		return g.iteratorForEachExpr(e)
 	default:
 		panic(fmt.Sprintf("codegen: node %T arrives in a later slice", e))
 	}
@@ -1907,6 +1909,74 @@ func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
 
 	g.control, g.resultType = oldControl, oldResult
 	return callExpr(funcLit(iifeResult, stmts))
+}
+
+func (g *gen) iteratorForEachExpr(e *core.IteratorForEach) goast.Expr {
+	overall := e.Control.Resolve(g.control)
+	oldControl, oldResult := g.control, g.resultType
+	g.control, g.resultType = overall, e.Ty
+	g.usesFangort = true
+
+	name := func(kind string) string {
+		n := fmt.Sprintf("t_iterator%s%d", kind, g.tmp)
+		g.tmp++
+		return n
+	}
+	action := name("Action")
+	cursor := name("Cursor")
+	value := name("Value")
+	yielded := name("Yielded")
+	exit := name("Exit")
+	errName := name("Err")
+	item := name("Item")
+
+	stmts := []goast.Stmt{
+		varDeclStmt(action, g.goType(e.Action.Type()), g.expr(e.Action, 0)),
+		varDeclStmt(cursor, g.goType(e.Cursor.Type()), g.expr(e.Cursor, 0)),
+	}
+	next := &goast.AssignStmt{
+		Lhs: []goast.Expr{ident(value), ident(yielded), ident(exit), ident(errName)}, Tok: gotoken.DEFINE,
+		Rhs: []goast.Expr{callExpr(selector(cursor, "Next"))},
+	}
+	loop := []goast.Stmt{
+		next,
+		&goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(errName), Op: gotoken.NEQ, Y: ident("nil")},
+			Body: &goast.BlockStmt{List: []goast.Stmt{exprStmt(callExpr(ident("panic"), ident(errName)))}}},
+	}
+	if overall == types.Exit {
+		loop = append(loop, &goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(exit), Op: gotoken.NEQ, Y: ident("nil")},
+			Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, ident(exit)))}}})
+	} else {
+		loop = append(loop, &goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(exit), Op: gotoken.NEQ, Y: ident("nil")},
+			Body: &goast.BlockStmt{List: []goast.Stmt{exprStmt(callExpr(ident("panic"), ident(exit)))}}})
+	}
+	doneValue := g.unitValue()
+	if overall == types.Exit {
+		doneValue = g.normalOutcome(e.Ty, doneValue)
+	}
+	loop = append(loop,
+		&goast.IfStmt{Cond: &goast.UnaryExpr{Op: gotoken.NOT, X: ident(yielded)},
+			Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(doneValue)}}},
+		varDeclStmt(item, g.goType(e.Element), &goast.TypeAssertExpr{X: ident(value), Type: g.goType(e.Element)}),
+	)
+	call := callExpr(ident(action), ident(item))
+	if overall == types.Exit {
+		outcome := name("ActionResult")
+		loop = append(loop,
+			varDeclStmt(outcome, g.outcomeType(e.Ty), call),
+			&goast.IfStmt{Cond: &goast.BinaryExpr{X: selector(outcome, "Exit"), Op: gotoken.NEQ, Y: ident("nil")},
+				Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, selector(outcome, "Exit")))}}})
+	} else {
+		loop = append(loop, exprStmt(call))
+	}
+	stmts = append(stmts, &goast.ForStmt{Body: &goast.BlockStmt{List: loop}})
+
+	result := g.goType(e.Ty)
+	if overall == types.Exit {
+		result = g.outcomeType(e.Ty)
+	}
+	g.control, g.resultType = oldControl, oldResult
+	return callExpr(funcLit(result, stmts))
 }
 
 // abortHandleExpr installs only a unique target token. Performing an abort

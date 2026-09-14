@@ -387,6 +387,10 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			value = types.CaptureSet{}
 		}
 		return captureResult{value: value, uses: types.UnionCaptures(producer.uses, consumer.uses)}
+	case *IteratorForEach:
+		action := a.expr(e.Action, env, evidence)
+		cursor := a.expr(e.Cursor, env, evidence)
+		return captureResult{uses: types.UnionCaptures(action.uses, cursor.uses)}
 	case *ResumeTail:
 		r := a.expr(e.Value, env, evidence)
 		if e.NextState != nil {

@@ -262,9 +262,28 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 			defs = append(defs, scopeBracketDef(name, eraseRows(ck.Intrinsics[name].Body), ck))
 		} else if name == types.GeneratorWithIteratorName {
 			defs = append(defs, withIteratorDef(name, eraseRows(ck.Intrinsics[name].Body), ck))
+		} else if name == types.IteratorForEachName {
+			defs = append(defs, iteratorForEachDef(name, eraseRows(ck.Intrinsics[name].Body), ck))
 		}
 	}
 	return defs
+}
+
+func iteratorForEachDef(name string, ty types.Type, ck *infer.Checker) core.Def {
+	args, result := core.PeelFun(ty, 2)
+	action := args[0].(*types.TFun)
+	cursor := args[1].(*types.TCon)
+	params := []string{"_action", "_cursor"}
+	return core.Def{
+		Name: name, Owner: symbolOwner(name), Type: ty, TyParams: runtimeRigidVars(ty), Params: params,
+		ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture()},
+		Control:       core.ArrowControl(ty, len(params)),
+		Body: &core.IteratorForEach{
+			Action:  &core.VarRef{Name: params[0], Local: true, Ty: action},
+			Cursor:  &core.VarRef{Name: params[1], Local: true, Ty: cursor},
+			Element: cursor.Args[0], Ty: result, Control: types.FunctionControl(action),
+		},
+	}
 }
 
 func withIteratorDef(name string, ty types.Type, ck *infer.Checker) core.Def {

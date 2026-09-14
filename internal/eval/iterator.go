@@ -114,3 +114,50 @@ func (in *interp) evalIteratorScope(scope *core.IteratorScope, fr *Frame) (Value
 	}
 	return result, nil
 }
+
+func (in *interp) evalIteratorForEach(each *core.IteratorForEach, fr *Frame) (Value, error) {
+	actionValue, err := in.eval(each.Action, fr)
+	if err != nil {
+		return nil, err
+	}
+	if _, exits := asExit(actionValue); exits {
+		return actionValue, nil
+	}
+	action, ok := actionValue.(*Closure)
+	if !ok {
+		return nil, fmt.Errorf("eval: iterator forEach action is %T, want callback", actionValue)
+	}
+	cursorValue, err := in.eval(each.Cursor, fr)
+	if err != nil {
+		return nil, err
+	}
+	if _, exits := asExit(cursorValue); exits {
+		return cursorValue, nil
+	}
+	cursor, ok := cursorValue.(*MachineIteratorSession)
+	if !ok {
+		return nil, fmt.Errorf("eval: iterator forEach cursor is %T, want owned iterator", cursorValue)
+	}
+	for {
+		value, yielded, exit, err := cursor.Next()
+		if err != nil {
+			return nil, err
+		}
+		if exit != nil {
+			return exit, nil
+		}
+		if !yielded {
+			return struct{}{}, nil
+		}
+		saved := in.evidence
+		in.evidence = cloneEvidence(action.Evidence)
+		result, err := in.eval(action.Body, &Frame{parent: action.Env, vars: map[string]Value{action.Param: value}})
+		in.evidence = saved
+		if err != nil {
+			return nil, err
+		}
+		if _, exits := asExit(result); exits {
+			return result, nil
+		}
+	}
+}

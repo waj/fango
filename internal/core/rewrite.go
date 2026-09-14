@@ -134,6 +134,13 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Producer = r.expr(e.Producer)
 		n.Consumer = r.expr(e.Consumer)
 		out = &n
+	case *IteratorForEach:
+		n := *e
+		n.Ty = r.typ(e.Ty)
+		n.Element = r.typ(e.Element)
+		n.Action = r.expr(e.Action)
+		n.Cursor = r.expr(e.Cursor)
+		out = &n
 	case *Bracket:
 		n := *e
 		n.Ty = r.typ(e.Ty)

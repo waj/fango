@@ -22,6 +22,7 @@ const (
 	GeneratorEffectName = "Generator.Generator"
 	GeneratorYieldName  = "Generator.yield"
 	IteratorTypeName    = "Iterator.Iterator"
+	IteratorForEachName = "Iterator.forEach"
 )
 
 // RuntimeEvidenceEffect reports whether an effect row label needs an explicit
@@ -54,6 +55,8 @@ func IntrinsicArity(name string) int {
 	case ScopeBracketName:
 		return 3
 	case GeneratorWithIteratorName:
+		return 2
+	case IteratorForEachName:
 		return 2
 	}
 	return 0

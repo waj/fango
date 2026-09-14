@@ -146,6 +146,12 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 			form += "/" + ControlName(e.Control)
 		}
 		return fmt.Sprintf("(%s %s %s %s %s)", form, pr.Type(e.CursorTy), pr.Type(e.Ty), dumpExpr(e.Producer, pr), dumpExpr(e.Consumer, pr))
+	case *IteratorForEach:
+		form := "iterator-for-each"
+		if e.Control != (types.Control{}) {
+			form += "/" + ControlName(e.Control)
+		}
+		return fmt.Sprintf("(%s %s %s %s)", form, pr.Type(e.Element), dumpExpr(e.Action, pr), dumpExpr(e.Cursor, pr))
 	case *ResumeTail:
 		if e.NextState != nil {
 			return fmt.Sprintf("(resume-tail %d %s %s (next-state %s))", e.Owner, pr.Type(e.ClauseResult), dumpExpr(e.Value, pr), dumpExpr(e.NextState, pr))
