@@ -167,10 +167,10 @@ The shipped control-aware ABI preserves the tail-resume and scoped-state direct
 fast path; synchronous cleanup scopes, the bundled `Fail` effect, typed IO
 errors, and the scoped `File` resource API are implemented on top of it (see
 the design and reference). No general continuation object exists.
-The private E7 machine backend is implemented; exposing it to
-source programs remains deferred until a concrete suspension consumer warrants
-the ownership and type-system cost. E8–E9 remain deferred. No milestone
-requires implementing the whole table at once.
+The private E7 machine backend is implemented. E8a is underway behind a private
+runtime boundary; source exposure remains disabled until its declarations and
+lowering are complete. E8b and E9 remain deferred. No milestone requires
+implementing the whole table at once.
 
 ## E8. Owned iterators and scoped non-tail resumption
 
@@ -184,12 +184,13 @@ use case for E7 without raw escaping continuations.
 The private pull-owner layer is implemented in both runtime and interpreter:
 it advances an E7 machine one yield at a time and deterministically abandons
 unfinished production on close. Generated-machine fixtures exercise early
-close across a pending cleanup scope. Typed Core recognizes the future runner
-and terminal-consumer identities and rejects a non-lexical consumer, cursor
-alias/escape, or more than one terminal consumption. Remaining E8a work is
-source exposure: introduce the `Generator`/`Iterator` declarations, lower
-`yield` and the runner into the private machine owner, and produce
-source-positioned ownership diagnostics during inference.
+close across a pending cleanup scope. Inference and typed Core recognize the
+future runner and terminal-consumer identities and reject a non-lexical
+consumer, cursor alias/escape, or more than one terminal consumption; inference
+reports the exact source occurrence and Core repeats the proof after
+elaboration. Remaining E8a work is source exposure: introduce the
+`Generator`/`Iterator` declarations and lower `yield` and the runner into the
+private machine owner.
 
 Provisional library use, with `Generator.yield` a new suspension-capable
 operation, not an ordinary tail-only Yield declaration:

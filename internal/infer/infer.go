@@ -1488,6 +1488,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		g.records = append(g.records, ob)
 		ty = receiver
 	case *ast.App:
+		g.errs = append(g.errs, g.iteratorOwnership(e)...)
 		if name, n := g.intrinsicSpine(e); name != "" && n == types.IntrinsicArity(name) {
 			ty = g.intrinsicCall(e, name)
 			break

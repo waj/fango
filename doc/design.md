@@ -910,14 +910,15 @@ owners are not source cursors: source construction remains disabled until
 capture analysis can give the consumer a non-escaping, non-aliasable
 capability.
 
-Typed Core already enforces the first source-ownership boundary by resolved
-identity. A `Generator.withIterator` consumer must be a lexical lambda, and its
-cursor parameter may occur only as the final argument of a recognized terminal
-consumer (`Iterator.forEach`, `fold`, `find`, or `take`), at most once. Aliasing,
-capturing, returning, or passing the cursor elsewhere is rejected. Raw `next`
-is deliberately absent from this initial discipline because it would require
-representing ownership transfer to a successor cursor rather than terminal
-consumption.
+Inference and typed Core enforce the first source-ownership boundary by
+resolved identity. A `Generator.withIterator` consumer must be a lexical
+lambda, and its cursor parameter may occur only as the final argument of a
+recognized terminal consumer (`Iterator.forEach`, `fold`, `find`, or `take`),
+at most once. Inference points an alias, capture, escape, or second consumption
+at its source occurrence; the Core linter repeats the proof after elaboration.
+Raw `next` is deliberately absent from this initial discipline because it
+would require representing ownership transfer to a successor cursor rather
+than terminal consumption.
 
 An effect-polymorphic higher-order worker has its open callback row erased from
 the runtime ABI. Passing a concrete callback therefore adapts it to that ABI;

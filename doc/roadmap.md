@@ -272,9 +272,10 @@ capability. All of this shipped without suspension.
 
 The same roadmap owns the open decisions for operation polymorphism, builtin
 IO handling, fallible natives beyond `File`, and a resource escaping through an
-outer handler's operation. Owned iterators, scoped non-tail resumption,
-structured async, and cancellation are later milestones, gated by a concrete
-consumer and static ownership checks.
+outer handler's operation. Owned iterators are underway with a private pull
+owner and static ownership checks; source declarations and lowering remain
+open. Scoped non-tail resumption, structured async, and cancellation follow in
+later milestones.
 
 ## Effect-row subsumption for higher-order arguments
 
