@@ -549,6 +549,31 @@ func (l *linter) expr(e Expr, where string) {
 		}
 		l.expr(e.Action, where)
 		l.expr(e.Cursor, where)
+	case *IteratorFold:
+		l.control(e.Control, where)
+		if !l.intrinsics[types.IteratorFoldName] || l.defName != types.IteratorFoldName {
+			l.errorf("%s: iterator fold outside the declared `%s` intrinsic", where, types.IteratorFoldName)
+		}
+		if !types.Equal(e.Ty, e.Accumulator) || !types.Equal(e.Initial.Type(), e.Accumulator) {
+			l.errorf("%s: iterator fold initial/result type disagrees with its accumulator", where)
+		}
+		combine, ok := e.Combine.Type().(*types.TFun)
+		var step *types.TFun
+		if ok {
+			step, ok = combine.Ret.(*types.TFun)
+		}
+		if !ok || !types.Equal(combine.Arg, e.Element) || !types.Equal(step.Arg, e.Accumulator) || !types.Equal(step.Ret, e.Accumulator) {
+			l.errorf("%s: iterator fold callback does not have shape `a -> b -> b`", where)
+		} else if want := types.FunctionControl(step); e.Control != want {
+			l.errorf("%s: iterator fold control %s disagrees with callback %s", where, ControlName(e.Control), ControlName(want))
+		}
+		cursor, ok := e.Cursor.Type().(*types.TCon)
+		if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 1 || !types.Equal(cursor.Args[0], e.Element) {
+			l.errorf("%s: iterator fold cursor does not have type `%s a`", where, types.IteratorTypeName)
+		}
+		l.expr(e.Combine, where)
+		l.expr(e.Initial, where)
+		l.expr(e.Cursor, where)
 	case *ControlExit:
 		l.control(e.Effect.Control, where)
 		l.effectInstance(e.Effect, where)
@@ -1428,6 +1453,10 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		directSlot(e.Consumer, "iterator consumer")
 	case *IteratorForEach:
 		directSlot(e.Action, "iterator action")
+		directSlot(e.Cursor, "iterator cursor")
+	case *IteratorFold:
+		directSlot(e.Combine, "iterator combine")
+		directSlot(e.Initial, "iterator initial")
 		directSlot(e.Cursor, "iterator cursor")
 	case *Handle:
 		if e.State != nil {

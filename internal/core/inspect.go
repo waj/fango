@@ -52,6 +52,10 @@ func Inspect(e Expr, visit func(Expr)) {
 	case *IteratorForEach:
 		walk(e.Action)
 		walk(e.Cursor)
+	case *IteratorFold:
+		walk(e.Combine)
+		walk(e.Initial)
+		walk(e.Cursor)
 	case *Bracket:
 		walk(e.Acquire)
 		walk(e.Release)

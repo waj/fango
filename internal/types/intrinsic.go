@@ -23,6 +23,7 @@ const (
 	GeneratorYieldName  = "Generator.yield"
 	IteratorTypeName    = "Iterator.Iterator"
 	IteratorForEachName = "Iterator.forEach"
+	IteratorFoldName    = "Iterator.fold"
 )
 
 // RuntimeEvidenceEffect reports whether an effect row label needs an explicit
@@ -58,6 +59,8 @@ func IntrinsicArity(name string) int {
 		return 2
 	case IteratorForEachName:
 		return 2
+	case IteratorFoldName:
+		return 3
 	}
 	return 0
 }

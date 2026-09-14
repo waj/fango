@@ -120,8 +120,8 @@ type ControlExit struct {
 // this node: source-level ownership and non-tail resume remain E8 work.
 //
 // A Suspend is legal only at the semantic-Core proof boundary accepted by
-// LintMachineInput. Ordinary Lint continues to reject Machine control, which
-// prevents an unlowered suspension from reaching either existing backend.
+// LintMachineInput or below the resolved Generator.withIterator activation
+// boundary accepted by ordinary Lint.
 type Suspend struct {
 	Request Expr
 	Ty      types.Type
@@ -149,6 +149,18 @@ type IteratorForEach struct {
 	Element types.Type
 	Ty      types.Type
 	Control types.Control
+}
+
+// IteratorFold consumes an owned iterator while threading Accumulator through
+// the curried Combine callback in yield order.
+type IteratorFold struct {
+	Combine     Expr
+	Initial     Expr
+	Cursor      Expr
+	Element     types.Type
+	Accumulator types.Type
+	Ty          types.Type
+	Control     types.Control
 }
 type HandlerClause struct {
 	Op         *types.EffectOp
@@ -370,6 +382,7 @@ func (*ControlExit) isExpr()     {}
 func (*Suspend) isExpr()         {}
 func (*IteratorScope) isExpr()   {}
 func (*IteratorForEach) isExpr() {}
+func (*IteratorFold) isExpr()    {}
 func (*Handle) isExpr()          {}
 func (*Bracket) isExpr()         {}
 func (*ResumeTail) isExpr()      {}
@@ -396,6 +409,7 @@ func (e *ControlExit) Type() types.Type     { return e.Ty }
 func (e *Suspend) Type() types.Type         { return e.Ty }
 func (e *IteratorScope) Type() types.Type   { return e.Ty }
 func (e *IteratorForEach) Type() types.Type { return e.Ty }
+func (e *IteratorFold) Type() types.Type    { return e.Ty }
 func (e *Handle) Type() types.Type          { return e.Ty }
 func (e *Bracket) Type() types.Type         { return e.Ty }
 func (e *ResumeTail) Type() types.Type      { return e.ClauseResult }
@@ -427,6 +441,8 @@ func Mentions(e Expr, name string) bool {
 		return Mentions(e.Producer, name) || Mentions(e.Consumer, name)
 	case *IteratorForEach:
 		return Mentions(e.Action, name) || Mentions(e.Cursor, name)
+	case *IteratorFold:
+		return Mentions(e.Combine, name) || Mentions(e.Initial, name) || Mentions(e.Cursor, name)
 	case *NativeCall:
 		for _, a := range e.Args {
 			if Mentions(a, name) {

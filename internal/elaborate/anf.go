@@ -176,6 +176,8 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		return &core.IteratorScope{Producer: slot(e.Producer), Consumer: slot(e.Consumer), CursorTy: e.CursorTy, Ty: e.Ty, Control: e.Control}, hoists
 	case *core.IteratorForEach:
 		return &core.IteratorForEach{Action: slot(e.Action), Cursor: slot(e.Cursor), Element: e.Element, Ty: e.Ty, Control: e.Control}, hoists
+	case *core.IteratorFold:
+		return &core.IteratorFold{Combine: slot(e.Combine), Initial: slot(e.Initial), Cursor: slot(e.Cursor), Element: e.Element, Accumulator: e.Accumulator, Ty: e.Ty, Control: e.Control}, hoists
 	case *core.ResumeTail:
 		var next core.Expr
 		if e.NextState != nil {

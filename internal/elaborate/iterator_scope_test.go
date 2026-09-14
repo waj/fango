@@ -71,3 +71,36 @@ func TestIteratorForEachIntrinsicBuildsTerminalCore(t *testing.T) {
 		t.Fatalf("Core lint: %v", errs)
 	}
 }
+
+func TestIteratorFoldIntrinsicBuildsTerminalCore(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	ck := infer.NewChecker(sup, b, infer.NewEnv())
+	elem := sup.FreshRigid(types.General)
+	acc := sup.FreshRigid(types.General)
+	row := sup.FreshRigid(types.RowVar)
+	iterator := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{elem}}
+	step := &types.TFun{Arg: acc, Eff: types.Row{Tail: row}, Ret: acc}
+	combine := &types.TFun{Arg: elem, Ret: step}
+	ty := &types.TFun{Arg: combine, Ret: &types.TFun{Arg: acc, Ret: &types.TFun{Arg: iterator, Eff: types.Row{Tail: row}, Ret: acc}}}
+	ck.Intrinsics[types.IteratorFoldName] = types.Scheme{Vars: []*types.TVar{elem, acc, row}, Body: ty}
+
+	defs := IntrinsicDefs(ck)
+	if len(defs) != 1 {
+		t.Fatalf("intrinsic defs = %d, want 1", len(defs))
+	}
+	terminal, ok := defs[0].Body.(*core.IteratorFold)
+	if !ok {
+		t.Fatalf("intrinsic body = %T, want *core.IteratorFold", defs[0].Body)
+	}
+	if !types.Equal(terminal.Element, elem) || !types.Equal(terminal.Accumulator, acc) {
+		t.Fatalf("terminal element/accumulator = %s / %s", types.Show(terminal.Element), types.Show(terminal.Accumulator))
+	}
+	p := &core.Prog{Defs: defs, Intrinsics: map[string]bool{types.IteratorFoldName: true}}
+	if errs := core.InferCaptures(p, b); len(errs) != 0 {
+		t.Fatalf("capture inference: %v", errs)
+	}
+	if errs := core.Lint(p, b); len(errs) != 0 {
+		t.Fatalf("Core lint: %v", errs)
+	}
+}

@@ -1533,6 +1533,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return g.iteratorScopeExpr(e)
 	case *core.IteratorForEach:
 		return g.iteratorForEachExpr(e)
+	case *core.IteratorFold:
+		return g.iteratorFoldExpr(e)
 	default:
 		panic(fmt.Sprintf("codegen: node %T arrives in a later slice", e))
 	}
@@ -1968,6 +1970,76 @@ func (g *gen) iteratorForEachExpr(e *core.IteratorForEach) goast.Expr {
 				Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, selector(outcome, "Exit")))}}})
 	} else {
 		loop = append(loop, exprStmt(call))
+	}
+	stmts = append(stmts, &goast.ForStmt{Body: &goast.BlockStmt{List: loop}})
+
+	result := g.goType(e.Ty)
+	if overall == types.Exit {
+		result = g.outcomeType(e.Ty)
+	}
+	g.control, g.resultType = oldControl, oldResult
+	return callExpr(funcLit(result, stmts))
+}
+
+func (g *gen) iteratorFoldExpr(e *core.IteratorFold) goast.Expr {
+	overall := e.Control.Resolve(g.control)
+	oldControl, oldResult := g.control, g.resultType
+	g.control, g.resultType = overall, e.Ty
+	g.usesFangort = true
+
+	name := func(kind string) string {
+		n := fmt.Sprintf("t_iterator%s%d", kind, g.tmp)
+		g.tmp++
+		return n
+	}
+	combine := name("Combine")
+	accumulator := name("Accumulator")
+	cursor := name("Cursor")
+	value := name("Value")
+	yielded := name("Yielded")
+	exit := name("Exit")
+	errName := name("Err")
+	item := name("Item")
+
+	stmts := []goast.Stmt{
+		varDeclStmt(combine, g.goType(e.Combine.Type()), g.expr(e.Combine, 0)),
+		varDeclStmt(accumulator, g.goType(e.Accumulator), g.expr(e.Initial, 0)),
+		varDeclStmt(cursor, g.goType(e.Cursor.Type()), g.expr(e.Cursor, 0)),
+	}
+	loop := []goast.Stmt{
+		&goast.AssignStmt{
+			Lhs: []goast.Expr{ident(value), ident(yielded), ident(exit), ident(errName)}, Tok: gotoken.DEFINE,
+			Rhs: []goast.Expr{callExpr(selector(cursor, "Next"))},
+		},
+		&goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(errName), Op: gotoken.NEQ, Y: ident("nil")},
+			Body: &goast.BlockStmt{List: []goast.Stmt{exprStmt(callExpr(ident("panic"), ident(errName)))}}},
+	}
+	if overall == types.Exit {
+		loop = append(loop, &goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(exit), Op: gotoken.NEQ, Y: ident("nil")},
+			Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, ident(exit)))}}})
+	} else {
+		loop = append(loop, &goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(exit), Op: gotoken.NEQ, Y: ident("nil")},
+			Body: &goast.BlockStmt{List: []goast.Stmt{exprStmt(callExpr(ident("panic"), ident(exit)))}}})
+	}
+	doneValue := goast.Expr(ident(accumulator))
+	if overall == types.Exit {
+		doneValue = g.normalOutcome(e.Ty, doneValue)
+	}
+	loop = append(loop,
+		&goast.IfStmt{Cond: &goast.UnaryExpr{Op: gotoken.NOT, X: ident(yielded)},
+			Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(doneValue)}}},
+		varDeclStmt(item, g.goType(e.Element), &goast.TypeAssertExpr{X: ident(value), Type: g.goType(e.Element)}),
+	)
+	call := callExpr(callExpr(ident(combine), ident(item)), ident(accumulator))
+	if overall == types.Exit {
+		outcome := name("CombineResult")
+		loop = append(loop,
+			varDeclStmt(outcome, g.outcomeType(e.Accumulator), call),
+			&goast.IfStmt{Cond: &goast.BinaryExpr{X: selector(outcome, "Exit"), Op: gotoken.NEQ, Y: ident("nil")},
+				Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, selector(outcome, "Exit")))}}},
+			assignStmt(accumulator, selector(outcome, "Value")))
+	} else {
+		loop = append(loop, assignStmt(accumulator, call))
 	}
 	stmts = append(stmts, &goast.ForStmt{Body: &goast.BlockStmt{List: loop}})
 

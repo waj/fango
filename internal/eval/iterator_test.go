@@ -99,3 +99,50 @@ func TestIteratorScopeRunsThroughInstalledMachineLowering(t *testing.T) {
 		t.Fatalf("iterator scope result = %#v, want Unit", value)
 	}
 }
+
+func TestIteratorFoldThreadsAccumulatorAcrossYields(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	body := &core.Seq{
+		First: &core.Suspend{Request: &core.IntLit{Val: 2, Ty: b.Int}, Ty: b.Unit},
+		Then:  &core.Suspend{Request: &core.IntLit{Val: 3, Ty: b.Int}, Ty: b.Unit},
+		Ty:    b.Unit,
+	}
+	p := &core.Prog{Defs: []core.Def{{Name: "Main.producer", Owner: "Main", Type: b.Unit,
+		Control: types.Control{Transport: types.Machine}, Body: body}}}
+	mp, errs := machineir.Lower(p, b)
+	if len(errs) != 0 {
+		t.Fatalf("machine lowering: %v", errs)
+	}
+	env := NewEnv()
+	env.DefineProg(p)
+	cursor, err := StartMachineIterator(context.Background(), mp, "Main.producer", nil, env, NewIOContext(strings.NewReader(""), io.Discard))
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := &core.Lambda{Param: "acc", Ty: &types.TFun{Arg: b.Int, Ret: b.Int}, Body: &core.NativeCall{
+		Name: "Basics.+", Module: "Basics", Args: []core.Expr{
+			&core.VarRef{Name: "value", Local: true, Ty: b.Int},
+			&core.VarRef{Name: "acc", Local: true, Ty: b.Int},
+		}, Ty: b.Int}}
+	combine := &Closure{Param: "value", Body: step, Env: &Frame{vars: map[string]Value{}}, Evidence: map[int]*evidence{}}
+	frame := &Frame{vars: map[string]Value{"combine": combine, "cursor": cursor}}
+	fold := &core.IteratorFold{
+		Combine: &core.VarRef{Name: "combine", Local: true, Ty: &types.TFun{Arg: b.Int, Ret: step.Ty}},
+		Initial: &core.IntLit{Val: 0, Ty: b.Int}, Cursor: &core.VarRef{Name: "cursor", Local: true,
+			Ty: &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int}}},
+		Element: b.Int, Accumulator: b.Int, Ty: b.Int,
+	}
+	in := &interp{ctx: context.Background(), env: env, out: io.Discard,
+		ioctx: NewIOContext(strings.NewReader(""), io.Discard), evidence: map[int]*evidence{}}
+	got, err := in.evalIteratorFold(fold, frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != int64(5) {
+		t.Fatalf("fold result = %#v, want 5", got)
+	}
+	if !cursor.done {
+		t.Fatal("fold did not exhaust its iterator")
+	}
+}

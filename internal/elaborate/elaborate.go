@@ -264,9 +264,30 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 			defs = append(defs, withIteratorDef(name, eraseRows(ck.Intrinsics[name].Body), ck))
 		} else if name == types.IteratorForEachName {
 			defs = append(defs, iteratorForEachDef(name, eraseRows(ck.Intrinsics[name].Body), ck))
+		} else if name == types.IteratorFoldName {
+			defs = append(defs, iteratorFoldDef(name, eraseRows(ck.Intrinsics[name].Body), ck))
 		}
 	}
 	return defs
+}
+
+func iteratorFoldDef(name string, ty types.Type, ck *infer.Checker) core.Def {
+	args, result := core.PeelFun(ty, 3)
+	combine := args[0].(*types.TFun)
+	cursor := args[2].(*types.TCon)
+	step := combine.Ret.(*types.TFun)
+	params := []string{"_combine", "_initial", "_cursor"}
+	return core.Def{
+		Name: name, Owner: symbolOwner(name), Type: ty, TyParams: runtimeRigidVars(ty), Params: params,
+		ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture(), ck.Sup.FreshCapture()},
+		Control:       core.ArrowControl(ty, len(params)),
+		Body: &core.IteratorFold{
+			Combine: &core.VarRef{Name: params[0], Local: true, Ty: combine},
+			Initial: &core.VarRef{Name: params[1], Local: true, Ty: args[1]},
+			Cursor:  &core.VarRef{Name: params[2], Local: true, Ty: cursor},
+			Element: cursor.Args[0], Accumulator: result, Ty: result, Control: types.FunctionControl(step),
+		},
+	}
 }
 
 func iteratorForEachDef(name string, ty types.Type, ck *infer.Checker) core.Def {

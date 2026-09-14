@@ -44,6 +44,8 @@ func ExprControl(e Expr) types.Control {
 		return types.JoinControl(e.Control, ExprControl(e.Producer), ExprControl(e.Consumer))
 	case *IteratorForEach:
 		return types.JoinControl(e.Control, ExprControl(e.Action), ExprControl(e.Cursor))
+	case *IteratorFold:
+		return types.JoinControl(e.Control, ExprControl(e.Combine), ExprControl(e.Initial), ExprControl(e.Cursor))
 	case *Neg:
 		return ExprControl(e.Operand)
 	case *NativeCall:

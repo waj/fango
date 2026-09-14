@@ -92,10 +92,7 @@ func (in *interp) evalIteratorScope(scope *core.IteratorScope, fr *Frame) (Value
 			if !ok {
 				consumerErr = fmt.Errorf("eval: iterator consumer is %T, want Direct/Exit callback", consumerValue)
 			} else {
-				saved := in.evidence
-				in.evidence = cloneEvidence(consumer.Evidence)
-				result, consumerErr = in.eval(consumer.Body, &Frame{parent: consumer.Env, vars: map[string]Value{consumer.Param: iteratorSession}})
-				in.evidence = saved
+				result, consumerErr = in.callClosure(consumer, iteratorSession)
 			}
 		}
 	}
@@ -149,10 +146,7 @@ func (in *interp) evalIteratorForEach(each *core.IteratorForEach, fr *Frame) (Va
 		if !yielded {
 			return struct{}{}, nil
 		}
-		saved := in.evidence
-		in.evidence = cloneEvidence(action.Evidence)
-		result, err := in.eval(action.Body, &Frame{parent: action.Env, vars: map[string]Value{action.Param: value}})
-		in.evidence = saved
+		result, err := in.callClosure(action, value)
 		if err != nil {
 			return nil, err
 		}
@@ -160,4 +154,74 @@ func (in *interp) evalIteratorForEach(each *core.IteratorForEach, fr *Frame) (Va
 			return result, nil
 		}
 	}
+}
+
+func (in *interp) evalIteratorFold(fold *core.IteratorFold, fr *Frame) (Value, error) {
+	combineValue, err := in.eval(fold.Combine, fr)
+	if err != nil {
+		return nil, err
+	}
+	if _, exits := asExit(combineValue); exits {
+		return combineValue, nil
+	}
+	combine, ok := combineValue.(*Closure)
+	if !ok {
+		return nil, fmt.Errorf("eval: iterator fold combine is %T, want callback", combineValue)
+	}
+	accumulator, err := in.eval(fold.Initial, fr)
+	if err != nil {
+		return nil, err
+	}
+	if _, exits := asExit(accumulator); exits {
+		return accumulator, nil
+	}
+	cursorValue, err := in.eval(fold.Cursor, fr)
+	if err != nil {
+		return nil, err
+	}
+	if _, exits := asExit(cursorValue); exits {
+		return cursorValue, nil
+	}
+	cursor, ok := cursorValue.(*MachineIteratorSession)
+	if !ok {
+		return nil, fmt.Errorf("eval: iterator fold cursor is %T, want owned iterator", cursorValue)
+	}
+	for {
+		value, yielded, exit, err := cursor.Next()
+		if err != nil {
+			return nil, err
+		}
+		if exit != nil {
+			return exit, nil
+		}
+		if !yielded {
+			return accumulator, nil
+		}
+		stepValue, err := in.callClosure(combine, value)
+		if err != nil {
+			return nil, err
+		}
+		if _, exits := asExit(stepValue); exits {
+			return stepValue, nil
+		}
+		step, ok := stepValue.(*Closure)
+		if !ok {
+			return nil, fmt.Errorf("eval: iterator fold first callback application returned %T, want callback", stepValue)
+		}
+		accumulator, err = in.callClosure(step, accumulator)
+		if err != nil {
+			return nil, err
+		}
+		if _, exits := asExit(accumulator); exits {
+			return accumulator, nil
+		}
+	}
+}
+
+func (in *interp) callClosure(closure *Closure, arg Value) (Value, error) {
+	saved := in.evidence
+	in.evidence = cloneEvidence(closure.Evidence)
+	result, err := in.eval(closure.Body, &Frame{parent: closure.Env, vars: map[string]Value{closure.Param: arg}})
+	in.evidence = saved
+	return result, err
 }

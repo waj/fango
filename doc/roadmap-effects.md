@@ -193,10 +193,10 @@ transport and elaborates to the existing semantic-Core suspension point without
 runtime effect evidence. The typed `IteratorScope` boundary now lowers the
 owning runner in both backends: Machine producer lambdas nested in Direct or
 Exit callers become rooted frame factories, the consumer receives the private
-owner, and scope exit closes unfinished production. `Iterator.forEach` also has
-a typed terminal node in both backends and drives the producer to exhaustion,
-leaving early-exit cleanup with the owner. Remaining E8a work is to implement
-the `fold`, `find`, and `take` terminals, introduce the bundled
+owner, and scope exit closes unfinished production. `Iterator.forEach` and
+`Iterator.fold` have typed terminal nodes in both backends and drive the
+producer in yield order, leaving early-exit cleanup with the owner. Remaining
+E8a work is to implement the `find` and `take` terminals, introduce the bundled
 `Generator`/`Iterator` declarations, and activate selective lowering in the
 batch and REPL pipelines.
 
