@@ -39,9 +39,10 @@ func EmitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) 
 	return emitProject(p, nil, b, units, printMain)
 }
 
-// EmitMachineProject is the private E7 project emitter. Machine definitions
-// are emitted as iterative fangort frames; all other definitions retain the
-// ordinary Direct/Exit path. No source pipeline calls this entry point yet.
+// EmitMachineProject emits selective Machine definitions as iterative
+// fangort frames while every other definition retains the ordinary
+// Direct/Exit path. The source pipeline selects it only for the resolved
+// Generator.withIterator owner boundary.
 func EmitMachineProject(p *core.Prog, mp *machineir.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
 	if errs := machineir.Lint(mp); len(errs) != 0 {
 		return nil, fmt.Errorf("codegen: malformed machine IR: %v", errs[0])
@@ -1871,7 +1872,6 @@ func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
 	iterator := name("Owner")
 	consumerResult := name("Result")
 	closeExit := name("CloseExit")
-	closeErr := name("CloseErr")
 
 	producerFrame := callExpr(g.machineExpr(e.Producer), g.unitValue())
 	start := callExpr(selector("fangort", "StartMachineIterator"), producerFrame)
@@ -1884,10 +1884,8 @@ func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
 	stmts := []goast.Stmt{
 		varDeclStmt(iterator, &goast.StarExpr{X: selector("fangort", "MachineIterator")}, start),
 		varDeclStmt(consumerResult, resultType, consume),
-		&goast.AssignStmt{Lhs: []goast.Expr{ident(closeExit), ident(closeErr)}, Tok: gotoken.DEFINE,
-			Rhs: []goast.Expr{callExpr(&goast.SelectorExpr{X: ident(iterator), Sel: ident("Close")})}},
-		&goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(closeErr), Op: gotoken.NEQ, Y: ident("nil")},
-			Body: &goast.BlockStmt{List: []goast.Stmt{exprStmt(callExpr(ident("panic"), ident(closeErr)))}}},
+		varDeclStmt(closeExit, &goast.StarExpr{X: selector("fangort", "ExitRequest")},
+			callExpr(selector("fangort", "CloseMachineIterator"), ident(iterator))),
 	}
 
 	var iifeResult goast.Expr = g.goType(e.Ty)
@@ -1904,8 +1902,7 @@ func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
 		iifeResult = g.outcomeType(e.Ty)
 	} else {
 		stmts = append(stmts,
-			&goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(closeExit), Op: gotoken.NEQ, Y: ident("nil")},
-				Body: &goast.BlockStmt{List: []goast.Stmt{exprStmt(callExpr(ident("panic"), ident(closeExit)))}}},
+			exprStmt(callExpr(selector("fangort", "AssertNoMachineExit"), ident(closeExit))),
 			returnStmt(ident(consumerResult)))
 	}
 
@@ -1929,7 +1926,6 @@ func (g *gen) iteratorForEachExpr(e *core.IteratorForEach) goast.Expr {
 	value := name("Value")
 	yielded := name("Yielded")
 	exit := name("Exit")
-	errName := name("Err")
 	item := name("Item")
 
 	stmts := []goast.Stmt{
@@ -1937,20 +1933,15 @@ func (g *gen) iteratorForEachExpr(e *core.IteratorForEach) goast.Expr {
 		varDeclStmt(cursor, g.goType(e.Cursor.Type()), g.expr(e.Cursor, 0)),
 	}
 	next := &goast.AssignStmt{
-		Lhs: []goast.Expr{ident(value), ident(yielded), ident(exit), ident(errName)}, Tok: gotoken.DEFINE,
-		Rhs: []goast.Expr{callExpr(selector(cursor, "Next"))},
+		Lhs: []goast.Expr{ident(value), ident(yielded), ident(exit)}, Tok: gotoken.DEFINE,
+		Rhs: []goast.Expr{callExpr(selector("fangort", "PullMachineIterator"), ident(cursor))},
 	}
-	loop := []goast.Stmt{
-		next,
-		&goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(errName), Op: gotoken.NEQ, Y: ident("nil")},
-			Body: &goast.BlockStmt{List: []goast.Stmt{exprStmt(callExpr(ident("panic"), ident(errName)))}}},
-	}
+	loop := []goast.Stmt{next}
 	if overall == types.Exit {
 		loop = append(loop, &goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(exit), Op: gotoken.NEQ, Y: ident("nil")},
 			Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, ident(exit)))}}})
 	} else {
-		loop = append(loop, &goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(exit), Op: gotoken.NEQ, Y: ident("nil")},
-			Body: &goast.BlockStmt{List: []goast.Stmt{exprStmt(callExpr(ident("panic"), ident(exit)))}}})
+		loop = append(loop, exprStmt(callExpr(selector("fangort", "AssertNoMachineExit"), ident(exit))))
 	}
 	doneValue := g.unitValue()
 	if overall == types.Exit {
@@ -1998,7 +1989,6 @@ func (g *gen) iteratorFoldExpr(e *core.IteratorFold) goast.Expr {
 	value := name("Value")
 	yielded := name("Yielded")
 	exit := name("Exit")
-	errName := name("Err")
 	item := name("Item")
 
 	stmts := []goast.Stmt{
@@ -2008,18 +1998,15 @@ func (g *gen) iteratorFoldExpr(e *core.IteratorFold) goast.Expr {
 	}
 	loop := []goast.Stmt{
 		&goast.AssignStmt{
-			Lhs: []goast.Expr{ident(value), ident(yielded), ident(exit), ident(errName)}, Tok: gotoken.DEFINE,
-			Rhs: []goast.Expr{callExpr(selector(cursor, "Next"))},
+			Lhs: []goast.Expr{ident(value), ident(yielded), ident(exit)}, Tok: gotoken.DEFINE,
+			Rhs: []goast.Expr{callExpr(selector("fangort", "PullMachineIterator"), ident(cursor))},
 		},
-		&goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(errName), Op: gotoken.NEQ, Y: ident("nil")},
-			Body: &goast.BlockStmt{List: []goast.Stmt{exprStmt(callExpr(ident("panic"), ident(errName)))}}},
 	}
 	if overall == types.Exit {
 		loop = append(loop, &goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(exit), Op: gotoken.NEQ, Y: ident("nil")},
 			Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, ident(exit)))}}})
 	} else {
-		loop = append(loop, &goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(exit), Op: gotoken.NEQ, Y: ident("nil")},
-			Body: &goast.BlockStmt{List: []goast.Stmt{exprStmt(callExpr(ident("panic"), ident(exit)))}}})
+		loop = append(loop, exprStmt(callExpr(selector("fangort", "AssertNoMachineExit"), ident(exit))))
 	}
 	doneValue := goast.Expr(ident(accumulator))
 	if overall == types.Exit {

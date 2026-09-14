@@ -52,6 +52,11 @@ type MachineStep struct {
 	Exit    *ExitRequest
 }
 
+// InvalidMachineStep is emitted only for supposedly unreachable generated
+// control-flow states. Keeping the trap in the runtime prevents generated Go
+// from using panic as a continuation or control-transfer representation.
+func InvalidMachineStep(message string) MachineStep { panic(message) }
+
 type MachineEvent struct {
 	Request any
 	Done    bool

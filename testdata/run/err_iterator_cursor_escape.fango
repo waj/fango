@@ -1,0 +1,4 @@
+import Generator
+
+main() =
+    Generator.withIterator (\_ -> Generator.yield 1) (\iterator -> iterator)

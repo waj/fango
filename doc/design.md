@@ -263,8 +263,15 @@ The batch pipeline is:
 
 ```text
 source -> lexer -> parser -> AST -> inference -> typed AST
-       -> elaboration -> Core -> Core lint -> Go AST -> go build
+       -> elaboration -> Core -> Core lint
+       -> optional selective machine lowering -> Go AST -> go build
 ```
+
+Selective machine lowering is activated only when the resolved bundled
+`Generator.withIterator` intrinsic is in the program. The ordinary path skips
+it entirely. The REPL performs the same lowering over the exact displayed Core
+expression before evaluation, so its Machine-lambda identity table matches the
+expression the interpreter receives.
 
 The hand-written lexer records byte spans and line/column positions but does
 not synthesize layout tokens. The recursive-descent parser applies the offside
@@ -900,16 +907,17 @@ Explicit abandonment consumes an unfinished private machine, runs all pending
 cleanups, and clears its frames, handler activations, state cells, pending
 result, and suspension marker. Cleanup failure becomes the abandonment
 completion rather than being discarded. Source-level handlers retain their
-existing tail-resumptive semantics, and ordinary source compilation
-cannot select the private Machine backend.
+existing tail-resumptive semantics. Ordinary source compilation selects the
+private Machine backend only when the resolved bundled iterator owner is
+present; no command or general source annotation selects it directly.
 
 The first E8 runtime layer wraps that private machine in a pull owner. Each
 `Next` drives the producer to one suspension and resumes a prior yield with
 Unit; normal return ends iteration, while a tagged exit remains distinct.
 `Close` abandons unfinished production and is safe to defer after normal
 exhaustion. Generated code and the interpreter use equivalent owners. These Go
-owners are not source cursors: source construction remains disabled until the
-bundled declarations and checked terminal-consumer lowering are complete.
+owners are not source cursors: the bundled `Iterator.Iterator` type is opaque,
+and only checked terminal intrinsics receive its private representation.
 
 `IteratorScope` is the typed Core owner boundary and is produced only as the
 body of the resolved `Generator.withIterator` intrinsic. It stores the

@@ -1,0 +1,14 @@
+{-# no-prelude #-}
+module Iterator exposing (Iterator, fold, forEach)
+
+import Basics exposing (..)
+
+-- The constructor is private. Values of this type are borrowed cursors that
+-- only the compiler-owned Generator scope can create.
+type Iterator a = Iterator
+
+forEach : (a ->{e} ()) -> Iterator a ->{e} ()
+forEach = native
+
+fold : (a -> b ->{e} b) -> b -> Iterator a ->{e} b
+fold = native

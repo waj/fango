@@ -167,9 +167,9 @@ The shipped control-aware ABI preserves the tail-resume and scoped-state direct
 fast path; synchronous cleanup scopes, the bundled `Fail` effect, typed IO
 errors, and the scoped `File` resource API are implemented on top of it (see
 the design and reference). No general continuation object exists.
-The private E7 machine backend is implemented. E8a is underway behind a private
-runtime boundary; source exposure remains disabled until its declarations and
-lowering are complete. E8b and E9 remain deferred. No milestone requires
+The private E7 machine backend is implemented. E8a is partially exposed through
+the scoped `Generator`/`Iterator` API; `find` and `take` remain before that
+increment is complete. E8b and E9 remain deferred. No milestone requires
 implementing the whole table at once.
 
 ## E8. Owned iterators and scoped non-tail resumption
@@ -196,12 +196,12 @@ Exit callers become rooted frame factories, the consumer receives the private
 owner, and scope exit closes unfinished production. `Iterator.forEach` and
 `Iterator.fold` have typed terminal nodes in both backends and drive the
 producer in yield order, leaving early-exit cleanup with the owner. Remaining
-E8a work is to implement the `find` and `take` terminals, introduce the bundled
-`Generator`/`Iterator` declarations, and activate selective lowering in the
-batch and REPL pipelines.
+E8a work is to implement the `find` and `take` terminals. The bundled
+`Generator`/`Iterator` declarations and selective batch/REPL lowering are
+active for `withIterator`, `yield`, `forEach`, and `fold`.
 
-Provisional library use, with `Generator.yield` a new suspension-capable
-operation, not an ordinary tail-only Yield declaration:
+Library use, with `Generator.yield` a suspension-capable operation rather than
+an ordinary tail-only effect declaration:
 
 ```fango
 walk tree =

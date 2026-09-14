@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
@@ -19,6 +20,7 @@ import (
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/lexer"
+	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/nativehost"
 	"github.com/waj/fango/internal/parser"
@@ -59,6 +61,11 @@ type Session struct {
 	// first: the Core lint checks a program, and an imported module's calls
 	// into modules imported earlier are only well-formed against it.
 	installed []core.Def
+	// promptDefs is the active Core generation of each prompt-defined worker
+	// or value. The ordinary evaluator installs these incrementally; selective
+	// machine lowering needs the same active set when a later expression passes
+	// a named producer to Generator.withIterator.
+	promptDefs map[string]core.Def
 }
 
 func NewSession(out io.Writer) *Session {
@@ -94,13 +101,14 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 	env := eval.NewEnv()
 	env.DefineProg(preludeProg)
 	return &Session{
-		ck:        ck,
-		env:       env,
-		out:       out,
-		ioctx:     eval.NewIOContext(strings.NewReader(""), out),
-		graph:     graph,
-		prompt:    graph.NewPrompt(),
-		installed: preludeProg.Defs,
+		ck:         ck,
+		env:        env,
+		out:        out,
+		ioctx:      eval.NewIOContext(strings.NewReader(""), out),
+		graph:      graph,
+		prompt:     graph.NewPrompt(),
+		installed:  preludeProg.Defs,
+		promptDefs: map[string]core.Def{},
 	}
 }
 
@@ -476,7 +484,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	} else {
 		delete(s.ck.Workers, vd.Name)
 	}
-	defs, elabErrs := elaborate.DeclIn(info, s.installed, s.ck)
+	defs, elabErrs := elaborate.DeclIn(info, s.activeExecutionDefs(), s.ck)
 	if len(elabErrs) > 0 {
 		restore()
 		diag.Render(s.out, elabErrs)
@@ -487,6 +495,9 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	// evaluator's prefix has to grow with the session.
 	s.ck.Checked = append(s.ck.Checked, info)
 	def := &defs[0]
+	for i := range defs {
+		s.promptDefs[defs[i].Name] = defs[i]
+	}
 	for i := range defs[1:] {
 		s.env.DefineWorker(&defs[1+i]) // lambda-lifted locals (doc/design.md, "Go backend and runtime")
 	}
@@ -688,21 +699,60 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 	// Elaboration then defaults for evaluation; the value renders at the
 	// defaulted (ground) type.
 	shownTy := types.ShowScheme(types.Scheme{Body: s.ck.Sub.Apply(ty), Preds: s.ck.PendingPreds})
-	coreExpr, aux, elabErrs := elaborate.ExprIn(e, s.installed, s.ck)
+	coreExpr, aux, elabErrs := elaborate.ExprIn(e, s.activeExecutionDefs(), s.ck)
 	if len(elabErrs) > 0 {
 		diag.Render(s.out, elabErrs)
 		return inputDone
 	}
+	display := elaborate.Display(coreExpr, s.ck, "")
+	if s.ck.Intrinsics[types.GeneratorWithIteratorName].Body != nil {
+		defs := append(s.activeExecutionDefs(), aux...)
+		defs = append(defs, core.Def{Name: "_repl_expression", Type: display.Type(), Control: core.ExprControl(display), Body: display})
+		machineProg, lowerErrs := machineir.Lower(s.program(defs), s.ck.B)
+		if len(lowerErrs) > 0 {
+			fmt.Fprintf(s.out, "runtime error: internal machine lowering failed: %v\n", lowerErrs[0])
+			return inputDone
+		}
+		if err := s.env.DefineMachineProg(machineProg); err != nil {
+			fmt.Fprintf(s.out, "runtime error: %v\n", err)
+			return inputDone
+		}
+	}
 	for i := range aux {
 		s.env.DefineWorker(&aux[i])
 	}
-	v, err := eval.EvalIO(context.Background(), elaborate.Display(coreExpr, s.ck, ""), s.env, s.ioctx)
+	v, err := eval.EvalIO(context.Background(), display, s.env, s.ioctx)
 	if err != nil {
 		fmt.Fprintf(s.out, "runtime error: %v\n", err)
 		return inputDone
 	}
 	fmt.Fprintf(s.out, "%s : %s\n", v.(string), shownTy)
 	return inputDone
+}
+
+func (s *Session) activeExecutionDefs() []core.Def {
+	defs := append([]core.Def(nil), s.installed...)
+	names := make([]string, 0, len(s.promptDefs))
+	for name := range s.promptDefs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		defs = append(defs, s.promptDefs[name])
+	}
+	return defs
+}
+
+func (s *Session) program(defs []core.Def) *core.Prog {
+	effects := make([]*types.EffectInfo, 0, len(s.ck.EffectsByUnique))
+	for _, effect := range s.ck.EffectsByUnique {
+		effects = append(effects, effect)
+	}
+	intrinsics := make(map[string]bool, len(s.ck.Intrinsics))
+	for name := range s.ck.Intrinsics {
+		intrinsics[name] = true
+	}
+	return &core.Prog{ADTs: s.ck.ADTOrder, Effects: effects, Defs: defs, Natives: s.ck.Natives, Intrinsics: intrinsics}
 }
 
 func (s *Session) typeOf(src string) {

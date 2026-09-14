@@ -89,6 +89,25 @@ func TestListSyntax(t *testing.T) {
 	}
 }
 
+func TestOwnedGeneratorRunsInREPL(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader(`import Generator
+import Iterator
+produce : () ->{Generator.Generator Int} ()
+produce _ =
+    Generator.yield 10
+    Generator.yield 20
+    Generator.yield 30
+Generator.withIterator produce (\iterator ->
+    Iterator.forEach print iterator)
+:quit
+`), &out)
+	got := out.String()
+	if !strings.Contains(got, "10\n20\n30\n") || !strings.Contains(got, "() : ()") {
+		t.Fatalf("owned generator did not run in the REPL:\n%s", got)
+	}
+}
+
 func TestClassInstanceTransactions(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader(`class Twice a

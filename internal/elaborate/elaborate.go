@@ -171,7 +171,7 @@ func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsi
 // context of the checker's current types, effects, and natives — the REPL's
 // counterpart to the lint the batch pipeline runs on a whole program.
 func LintProg(defs []core.Def, ck *infer.Checker) []error {
-	return core.Lint(&core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}, ck.B)
+	return core.Lint(&core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck)}, ck.B)
 }
 
 // Decl elaborates one declaration — also the REPL's per-input entry point.

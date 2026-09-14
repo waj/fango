@@ -46,7 +46,11 @@ func IteratorConsumer(name string) bool {
 
 // Intrinsic reports whether a canonical symbol names a compiler intrinsic.
 func Intrinsic(name string) bool {
-	return name == ScopeBracketName
+	switch name {
+	case ScopeBracketName, GeneratorWithIteratorName, IteratorForEachName, IteratorFoldName:
+		return true
+	}
+	return false
 }
 
 // IntrinsicArity is the number of parameters an intrinsic's synthesized

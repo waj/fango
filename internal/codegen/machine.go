@@ -213,7 +213,7 @@ func (g *gen) machineStepDecl(worker *machineir.Worker, frameName string, stored
 			resumePC++
 		}
 	}
-	clauses = append(clauses, &goast.CaseClause{Body: []goast.Stmt{&goast.ExprStmt{X: callExpr(ident("panic"), stringLit("invalid generated machine PC"))}}})
+	clauses = append(clauses, &goast.CaseClause{Body: []goast.Stmt{returnStmt(callExpr(selector("fangort", "InvalidMachineStep"), stringLit("invalid generated machine PC")))}})
 	body = append(body, &goast.ForStmt{Body: &goast.BlockStmt{List: []goast.Stmt{&goast.SwitchStmt{
 		Tag: machinePC(), Body: &goast.BlockStmt{List: clauses},
 	}}}})
@@ -498,7 +498,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 				body := append(save(), assignMachinePC(resumePC+1), step("MachineCall", "Frame", callExpr(ctor, args...)))
 				cases = append(cases, &goast.CaseClause{List: []goast.Expr{intLit(int64(clause.Op.Index))}, Body: body})
 			}
-			cases = append(cases, &goast.CaseClause{Body: []goast.Stmt{&goast.ExprStmt{X: callExpr(ident("panic"), stringLit("unknown caught machine exit"))}}})
+			cases = append(cases, &goast.CaseClause{Body: []goast.Stmt{returnStmt(callExpr(selector("fangort", "InvalidMachineStep"), stringLit("unknown caught machine exit")))}})
 			first = append(first, &goast.IfStmt{Cond: binExpr(gotoken.NEQ, ident(caught), ident("nil")), Body: &goast.BlockStmt{List: []goast.Stmt{&goast.SwitchStmt{Tag: selector(caught, "Operation"), Body: &goast.BlockStmt{List: cases}}}}})
 			first = append(first, exprStmt(callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PopHandler")})))
 			first = append(first, resumed...)
@@ -577,7 +577,7 @@ func (g *gen) machineCtorSwitch(term *machineir.SwitchCtor, jump func(machineir.
 		if term.Default != nil {
 			return jump(*term.Default)
 		}
-		return []goast.Stmt{&goast.ExprStmt{X: callExpr(ident("panic"), stringLit("exhaustive generated machine match failed"))}}
+		return []goast.Stmt{returnStmt(callExpr(selector("fangort", "InvalidMachineStep"), stringLit("exhaustive generated machine match failed")))}
 	}
 	caseBody := func(c machineir.CtorCase, fields []goast.Expr) []goast.Stmt {
 		var out []goast.Stmt

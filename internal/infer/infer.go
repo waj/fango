@@ -666,10 +666,37 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 		return errs
 	}
 	for i, param := range params {
-		if _, isFn := param.(*types.TFun); !isFn {
+		functionParam := false
+		switch d.Name {
+		case types.ScopeBracketName, types.GeneratorWithIteratorName:
+			functionParam = true
+		case types.IteratorForEachName, types.IteratorFoldName:
+			functionParam = i == 0
+		}
+		if _, isFn := param.(*types.TFun); functionParam && !isFn {
 			errs = append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION",
 				"Parameter %d of the intrinsic `%s` must be a function.", i+1, ast.Spelling(d.Name)))
 			return errs
+		}
+	}
+	if d.Name == types.IteratorForEachName || d.Name == types.IteratorFoldName {
+		cursor, ok := params[len(params)-1].(*types.TCon)
+		if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 1 {
+			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION",
+				"The intrinsic `%s` must take `%s a` as its final parameter.", ast.Spelling(d.Name), types.IteratorTypeName))
+		}
+		action := params[0].(*types.TFun)
+		if d.Name == types.IteratorForEachName {
+			if !types.Equal(action.Arg, cursor.Args[0]) || !types.Equal(action.Ret, ck.B.Unit) || !types.Equal(rest, ck.B.Unit) {
+				return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION",
+					"The intrinsic `%s` must have shape `(a -> ()) -> %s a -> ()`.", ast.Spelling(d.Name), types.IteratorTypeName))
+			}
+		} else {
+			step, ok := action.Ret.(*types.TFun)
+			if !ok || !types.Equal(action.Arg, cursor.Args[0]) || !types.Equal(params[1], step.Arg) || !types.Equal(step.Arg, step.Ret) || !types.Equal(rest, step.Ret) {
+				return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION",
+					"The intrinsic `%s` must have shape `(a -> b -> b) -> b -> %s a -> b`.", ast.Spelling(d.Name), types.IteratorTypeName))
+			}
 		}
 	}
 	sch := types.Scheme{Vars: scope.Minted(), Preds: scope.Preds(), Body: ty}

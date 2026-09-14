@@ -274,9 +274,10 @@ The same roadmap owns the open decisions for operation polymorphism, builtin
 IO handling, fallible natives beyond `File`, and a resource escaping through an
 outer handler's operation. Owned iterators are underway with a private pull
 owner, static ownership checks, and a typed owner boundary in both backends;
-the `forEach` and `fold` terminals are implemented internally. `find`, `take`,
-source declarations, and pipeline activation remain open. Scoped non-tail
-resumption, structured async, and cancellation follow in later milestones.
+the `forEach` and `fold` terminals are implemented. `find`, `take`,
+and their result-constructor lowering remain open; the scoped generator API is
+otherwise exposed in batch builds and the REPL. Scoped non-tail resumption,
+structured async, and cancellation follow in later milestones.
 
 ## Effect-row subsumption for higher-order arguments
 

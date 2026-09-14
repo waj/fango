@@ -151,7 +151,7 @@ func TestIteratorOwnerRootsMachineProducerInDirectCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	generated := string(files[0].Data)
-	for _, want := range []string{"fangort.StartMachineIterator", ".Next()", "V_Iterator_dot_fold", "t_iteratorAccumulator", "MachineFrame_Main_dot_main_machine_lambda", "v_captured int64 = 7"} {
+	for _, want := range []string{"fangort.StartMachineIterator", "fangort.PullMachineIterator", "V_Iterator_dot_fold", "t_iteratorAccumulator", "MachineFrame_Main_dot_main_machine_lambda", "v_captured int64 = 7"} {
 		if !strings.Contains(generated, want) {
 			t.Fatalf("generated iterator owner missing %q:\n%s", want, generated)
 		}

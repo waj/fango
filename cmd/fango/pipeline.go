@@ -10,6 +10,7 @@ import (
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/elaborate"
 	"github.com/waj/fango/internal/infer"
+	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/runtimefiles"
 	"github.com/waj/fango/internal/staging"
@@ -91,7 +92,18 @@ func emitProjectManifest(entry string, printMain bool, stderr io.Writer) ([]code
 	for i, unit := range loadedUnits {
 		units[i] = codegen.Unit{Name: unit.Name, Imports: unit.Imports, Entry: unit.Entry}
 	}
-	files, err := codegen.EmitProject(prog, ck.B, units, printMain)
+	var files []codegen.File
+	var err error
+	if prog.Intrinsics[types.GeneratorWithIteratorName] {
+		machineProg, lowerErrs := machineir.Lower(prog, ck.B)
+		if len(lowerErrs) > 0 {
+			fmt.Fprintf(stderr, "fango: internal compiler error: machine lowering failed: %v\n", lowerErrs[0])
+			return nil, nil, false
+		}
+		files, err = codegen.EmitMachineProject(prog, machineProg, ck.B, units, printMain)
+	} else {
+		files, err = codegen.EmitProject(prog, ck.B, units, printMain)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", err)
 		return nil, nil, false

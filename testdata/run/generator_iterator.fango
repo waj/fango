@@ -1,0 +1,15 @@
+import Generator
+import Iterator
+
+main() =
+    Generator.withIterator (\_ ->
+        Generator.yield 10
+        Generator.yield 20
+        Generator.yield 30) (\iterator ->
+            Iterator.forEach print iterator)
+    total = Generator.withIterator (\_ ->
+        Generator.yield 10
+        Generator.yield 20
+        Generator.yield 30) (\iterator ->
+            Iterator.fold (\value -> \sum -> value + sum) 0 iterator)
+    print total

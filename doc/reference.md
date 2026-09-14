@@ -354,6 +354,46 @@ run in constant stack rather than one frame per element, at the cost of
 allocating each result twice. Callback order is unaffected: `map` and `filter`
 call theirs from left to right, `foldr` from right to left.
 
+`Generator` and `Iterator` provide scoped, pull-driven traversal:
+
+```fango
+import Generator
+import Iterator
+
+main() =
+    Generator.withIterator (\_ ->
+        Generator.yield 10
+        Generator.yield 20
+        Generator.yield 30) (\iterator ->
+        Iterator.forEach print iterator)
+```
+
+`Generator.yield : a ->{Generator a} ()` suspends the producer and offers one
+value to its owning iterator scope. `Generator.withIterator` takes the
+producer and a lexical consumer:
+
+```fango
+withIterator
+    : (() ->{Generator a | e} ())
+    -> (Iterator a ->{e} result)
+    ->{e} result
+```
+
+The `Iterator a` constructor is private. The consumer must be a lambda, and
+its cursor parameter may occur exactly once or not at all, only as the final
+argument of a terminal iterator call. It cannot be aliased, captured, stored,
+returned, passed to another helper, or consumed twice. There is no public
+`next`: source code never owns a copyable handle to suspended computation.
+
+`Iterator.forEach : (a ->{e} ()) -> Iterator a ->{e} ()` invokes its callback
+once per yield in production order. `Iterator.fold` has type
+`(a -> b ->{e} b) -> b -> Iterator a ->{e} b`; it threads an accumulator in
+the same order, passing the element first and accumulator second like
+`List.foldl`. Normal producer return ends traversal. If the consumer returns
+early or an effect exits the scope, unfinished production is abandoned and its
+pending cleanup scopes run before control continues. The iterator and generator
+modules must be imported explicitly.
+
 `Range.each : (Num a, Ord a) => (a ->{e} ()) -> a -> a ->{e} ()` traverses an
 inclusive ascending numeric range without constructing a `List`. For example,
 `Range.each drawPoint 0 78` calls `drawPoint` with every value from `0` through

@@ -21,6 +21,7 @@ import (
 	"github.com/waj/fango/internal/build"
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/eval"
+	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/nativehost"
 	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/testutil"
@@ -491,6 +492,15 @@ func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner,
 
 		env := eval.NewEnv()
 		env.DefineProg(prog)
+		if prog.Intrinsics[types.GeneratorWithIteratorName] {
+			machineProg, errs := machineir.Lower(prog, ck.B)
+			if len(errs) > 0 {
+				t.Fatalf("machine lowering: %v", errs)
+			}
+			if err := env.DefineMachineProg(machineProg); err != nil {
+				t.Fatal(err)
+			}
+		}
 		var printed bytes.Buffer
 		ioctx := eval.NewIOContext(strings.NewReader(in.stdin), &printed)
 		ioctx.Args = in.args

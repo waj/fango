@@ -14,9 +14,8 @@ func (g *generator) iteratorOwnership(e *ast.App) []diag.Error {
 	if !ok || g.canonicalValueName(head.Name) != types.GeneratorWithIteratorName {
 		return nil
 	}
-	// The canonical spelling is not sufficient identity by itself while the
-	// future bundled Generator module is absent: a local module may still own
-	// that spelling. Activate the rule only for a declared compiler intrinsic.
+	// Canonical spelling is not sufficient identity by itself: activate the
+	// rule only when the bundled declaration installed the compiler intrinsic.
 	if _, declared := g.ck.Intrinsics[types.GeneratorWithIteratorName]; !declared {
 		return nil
 	}

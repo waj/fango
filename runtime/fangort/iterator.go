@@ -61,3 +61,31 @@ func (it *MachineIterator) Stats() MachineStats {
 	}
 	return it.machine.Stats()
 }
+
+// PullMachineIterator is the compiler-owned generated-code bridge. Driver
+// protocol errors indicate malformed compiler output, so they remain inside
+// the runtime rather than becoming generated panic-based control flow.
+func PullMachineIterator(it *MachineIterator) (value any, yielded bool, exit *ExitRequest) {
+	value, yielded, exit, err := it.Next()
+	if err != nil {
+		panic(err)
+	}
+	return value, yielded, exit
+}
+
+// CloseMachineIterator is the matching generated-code bridge for scope exit.
+func CloseMachineIterator(it *MachineIterator) *ExitRequest {
+	exit, err := it.Close()
+	if err != nil {
+		panic(err)
+	}
+	return exit
+}
+
+// AssertNoMachineExit guards a statically Direct owner path. Reaching it
+// indicates a compiler/runtime protocol mismatch, never source-level control.
+func AssertNoMachineExit(exit *ExitRequest) {
+	if exit != nil {
+		panic(exit)
+	}
+}
