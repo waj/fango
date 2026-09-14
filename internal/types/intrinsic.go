@@ -10,7 +10,23 @@ const (
 	// `Scope.bracket`. No fango expression can release a resource when the
 	// scope body exits to an outer handler, so elaboration supplies its body.
 	ScopeBracketName = "Scope.bracket"
+
+	// GeneratorWithIteratorName owns a private MachineIterator for the dynamic
+	// extent of its consumer callback. Its source declaration is staged in E8;
+	// Core ownership checks recognize the resolved identity, never spelling.
+	GeneratorWithIteratorName = "Generator.withIterator"
 )
+
+// IteratorConsumer reports the initial E8 combinators that consume a borrowed
+// iterator cursor. Raw step exposure is intentionally deferred until Core can
+// represent transfer to a successor cursor.
+func IteratorConsumer(name string) bool {
+	switch name {
+	case "Iterator.forEach", "Iterator.fold", "Iterator.find", "Iterator.take":
+		return true
+	}
+	return false
+}
 
 // Intrinsic reports whether a canonical symbol names a compiler intrinsic.
 func Intrinsic(name string) bool {

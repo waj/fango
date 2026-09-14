@@ -184,10 +184,12 @@ use case for E7 without raw escaping continuations.
 The private pull-owner layer is implemented in both runtime and interpreter:
 it advances an E7 machine one yield at a time and deterministically abandons
 unfinished production on close. Generated-machine fixtures exercise early
-close across a pending cleanup scope. Remaining E8a work is source exposure:
-introduce the `Generator`/`Iterator` declarations and teach capture analysis
-that the consumer receives a borrowed, non-aliasable cursor which cannot
-escape its lexical owner.
+close across a pending cleanup scope. Typed Core recognizes the future runner
+and terminal-consumer identities and rejects a non-lexical consumer, cursor
+alias/escape, or more than one terminal consumption. Remaining E8a work is
+source exposure: introduce the `Generator`/`Iterator` declarations, lower
+`yield` and the runner into the private machine owner, and produce
+source-positioned ownership diagnostics during inference.
 
 Provisional library use, with `Generator.yield` a new suspension-capable
 operation, not an ordinary tail-only Yield declaration:

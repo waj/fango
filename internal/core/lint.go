@@ -172,6 +172,7 @@ func lint(p *Prog, b *types.Builtins, allowMachine bool) []error {
 		}
 	}
 	l.errs = append(l.errs, verifyCaptures(p, b)...)
+	l.errs = append(l.errs, verifyIteratorOwnership(p)...)
 	return l.errs
 }
 
