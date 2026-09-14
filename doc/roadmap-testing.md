@@ -13,9 +13,11 @@ Elm's: a test body is a statement-style block, an expectation that fails
 the places elm-test uses callbacks or combinators — `onFail`, `all`,
 reporters — are handlers or plain sequencing here.
 
-Fango snippets illustrate intended APIs. Those marked *proposed syntax*
-require language work; every other snippet was checked against the current
-compiler, either as an existing fixture or at the REPL.
+All APIs in this document are proposed. Snippets use existing Fango syntax
+except for the canonical suite's trailing lambdas and the explicitly marked
+call-site constraint. Shared call syntax is owned by
+[effects milestone 1](roadmap-effects.md#1-compositional-effects-and-call-syntax),
+not a separate testing-language proposal.
 
 ## Decisions
 
@@ -31,11 +33,9 @@ These were settled when the design was drawn up and are not open:
   whose bodies are `() ->{Expect, IO} ()` — has simpler signatures but fixes
   the effects a test may perform; the row-indexed form lets a caller handle
   its own effect around the whole run.
-- **Pipes join the prelude.** `Basics` gains `(|>)` (`infixl 0`) and `(<|)`
-  (`infixr 0`), both exposed by `Prelude`, so `test "name" <| \_ ->` followed
-  by an indented block is the canonical test shape. Whether that shape keeps
-  the `<| \_ ->` is [open](#the-call-shape-for-test-bodies); `(|>)` is wanted
-  either way, for `actual |> Expect.equal expected`.
+- **Shared call syntax.** Adopt the trailing final lambda `test "name" \_ ->`
+  and ordinary `(|>)` / `(<|)` from effects milestone 1. Unit callbacks retain
+  `\_ ->`; no zero-pattern lambda or `do` keyword is planned here.
 - **First-version scope** is `describe`, `test`, `skip`, `todo`, `only`, the
   expectations below, a console report, and failure source positions. Fuzz
   testing is deferred, and the tree is shaped so it can be added without a
@@ -53,7 +53,8 @@ These were settled when the design was drawn up and are not open:
   infers a closed row (`Test {}`) rather than generalizing, so a pure suite and
   an IO suite cannot share one `describe`. This is the row-subsumption gap
   recorded in [the roadmap](roadmap.md#effect-row-subsumption-for-higher-order-arguments);
-  the framework documents the workaround rather than waiting on the fix.
+  the framework can use parenthesized lambda wrappers before that milestone.
+  Afterwards named callbacks and covariant suite rows should compose directly.
 - A lambda may open an indented block, and an abort raised inside an abort
   clause propagates outward — which is what `Expect.onFail` needs.
 - Blanket-instance specialization (`instance Show a => Inspect a` over a bare
@@ -98,27 +99,28 @@ fuzz cases, richer `only` semantics — without touching user code. A fuzz test
 later is a `Case` whose body loops under `Random.runSeeded`, so the shape
 already accommodates it.
 
-The canonical shape, with several expectations sequenced as statements:
+The proposed canonical shape after effects milestone 1, with several
+expectations sequenced as statements:
 
 ```fango
 suite : Test IO
 suite =
     describe "String.split"
-        [ test "splits on the separator" <| \_ ->
+        [ test "splits on the separator" \_ ->
             Expect.equal [ "a", "b" ] (String.split "," "a,b")
             Expect.equal [ "" ] (String.split "," "")
-        , test "reads the fixture" <| \_ ->
+        , test "reads the fixture" \_ ->
             text = IO.readFile "fixture.txt"
             Expect.equal 3 (List.length (String.lines text))
-        , skip <| test "unicode separators" <| \_ -> Expect.failWith "later"
+        , skip (test "unicode separators" \_ -> Expect.failWith "later")
         , todo "empty separator"
         ]
 
 main() = Test.run suite
 ```
 
-Guidance the reference will carry: annotate each suite with the row its
-module needs, `Test IO` being the usual choice; pass bodies as lambdas, and
+Interim guidance before effects milestone 1 (using parenthesized callbacks):
+annotate each suite with the row its module needs, `Test IO` being the usual choice; pass bodies as lambdas, and
 wrap a named function as `\_ -> check()` rather than passing it directly; any
 effect other than `Expect` and the suite's row is handled inside the body with
 an ordinary handler, as in `result = Random.runSeeded 7 (\_ -> roll())`.
@@ -210,55 +212,18 @@ Semantics:
 
 ## The call shape for test bodies
 
-**Open.** Every case is written `test "name" <| \_ ->` with the body indented
-under it, and a suite is mostly that line repeated. The ceremony is not
-test-specific: zero-parameter lambdas are already most of the lambdas in the
-tree, and the call sites that produce them are `attempt`, `Scope.bracket`,
-`Scope.finally`, and `Random.runSystem` rather than anything here. Whatever
-lands is therefore a language decision, judged on those call sites as much as
-on this framework, and the first library version does not wait on it: bodies
-are written `<| \_ ->` until something replaces it, and converting fixtures
-afterwards is mechanical.
+The selected proposal is a trailing final lambda, `test "name" \_ ->`,
+with the body indented beneath it. It also handles parameter-taking callbacks
+such as `fuzz int "name" \n ->`; Unit callbacks keep the existing `\_ ->`
+spelling. This is a general application rule for tests, resource scopes, and
+async runners. A zero-pattern lambda and a `do` keyword are not part of it.
 
-Three candidates, the first two independent of each other and the third an
-alternative to both:
-
-- **A trailing lambda in argument position** — `test "name" \_ ->` opening a
-  block, with no `<|`. In an argument position a `\` starts a lambda that
-  extends maximally to the right, so it can only be the last argument; the
-  layout question is already answered, because `<| \_ ->` ends its body at a
-  dedent or a leading `,` today. It is the only candidate that also covers
-  lambdas that *take* something, so a later `fuzz int "name" \n ->` reads like
-  `test "name" \_ ->` instead of reverting to `<|` beside it, and it removes
-  the parentheses around `attempt (\_ -> ...)` and `Scope.bracket (\_ -> ...)`
-  as well.
-- **A zero-pattern lambda**, `\-> body`: a lambda with an empty pattern row.
-  It saves little on its own and composes with the above as
-  `test "name" \->`.
-- **A `do` keyword**, sugar for a zero-parameter lambda that may open a block
-  bare in the last argument position, so a case reads `test "name" do`. It is
-  the shortest, it is the shape an hspec reader already knows, and it drops
-  `<|` from the canonical test without needing either change above.
-
-The case against `do` is why it is not the recommendation. The word means "run
-this now" in the languages that have it, and here it would mean the opposite —
-suspend this block — which is the one thing a reader has to know about it;
-`f = do` followed by a block would define a function rather than a value. It
-adds a second way to open a statement block that differs from the existing one
-only by suspension. It helps only at arity zero, so the fuzz shape above
-diverges from the plain one in the same file. And desugaring it to `\_ ->`
-would make it silently apply to argument-*ignoring* call sites such as
-`Result.map (\_ -> ...)`, where "suspend" is not what is meant; desugaring to
-`\() ->` avoids that but narrows it. The name itself is free — no identifier
-in the stdlib or the fixtures is called `do`.
-
-Constraints on whichever lands. It desugars in the parser to the same lambda
-node, so inference — a lambda's row is inferred, which the suite annotation
-above depends on — the Core linter, and both backends see identical Core. A
-keyword costs a reserved word and the TextMate grammar; a new block opener
-also touches the editor's language configuration. The formatter's expression
-printers do not exist yet, so surface syntax is cheaper to add before that
-work than after it.
+[Effects milestone 1](roadmap-effects.md#1-compositional-effects-and-call-syntax)
+owns parsing/layout, pipeline operators, callback parity, and editor verification.
+It lowers to ordinary lambda/application Core. The first library version can
+ship earlier using `test "name" (\_ -> ...)`; adopt trailing syntax when that
+shared milestone lands. `actual |> Expect.equal expected` likewise waits for
+the shared ordinary operator declarations rather than a test-specific pipe.
 
 ## Failure source positions
 
@@ -297,19 +262,20 @@ signature.
 
 ## Milestones
 
-1. **M0 — pipes.** `(|>)` and `(<|)` in `Basics`, exposed by `Prelude`, with
-   fixtures and the reference's operator table updated. The grammar is
-   untouched: operators are lexed generically.
-2. **M1 — library.** `stdlib/Expect.fango`, `stdlib/Test.fango`, the runner,
+The shared syntax dependency is effects milestone 1; this document owns only
+the framework work. M1 can precede it using parenthesized callbacks and ordinary
+application, then adopt the shared syntax and row-subsumption behavior.
+
+1. **M1 — library.** `stdlib/Expect.fango`, `stdlib/Test.fango`, the runner,
    and the report format. Fixtures under `testdata/run/`: a passing run, a
    failing run and its exit code, an incomplete run for each of `only`,
    `skip`, and `todo`, `onFail`, `ok`/`just` unwrapping, the `Inspect`
    fallback, and an effectful body with its own handler. A reference section
    describing the surface, and a formatter-clean stdlib.
-3. **M2 — dogfooding.** Rewrite one or two existing stdlib fixtures, `Dict` or
+2. **M2 — dogfooding.** Rewrite one or two existing stdlib fixtures, `Dict` or
    `String` say, as `Test` suites to find API gaps; each stays an ordinary
    differential fixture.
-4. **M3 — positions.** The `Located` constraint, `Meta.location`, the
+3. **M3 — positions.** The `Located` constraint, `Meta.location`, the
    `Failure` location, and the report line.
 
 ## Later

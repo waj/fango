@@ -162,7 +162,7 @@ Haskell's ambient reification, which is what breaks modularity there.
 - Decide dependency invalidation and whether removed declarations remain
   addressable by existing closures only.
 - Connect Ctrl-C to the cleanup and cancellation protocol in
-  [effects E9](roadmap-effects.md#e9-structured-async-cancellation-and-repl-integration)
+  [cooperative structured async](roadmap-effects.md#4-cooperative-structured-async)
   without corrupting the session or consuming input intended for `readLine`.
   Basic prompt cancellation may ship earlier once its active execution path
   has the corresponding cleanup guarantees.
@@ -208,14 +208,12 @@ its own merits.
 written in fango: a bundled `Expect` module whose failures abort through an
 effect, a bundled `Test` module with a row-indexed tree of `describe`, `test`,
 `skip`, `todo`, and `only`, and a `Test.run` entry a program calls from
-`main`. Its first milestone adds `(|>)` and `(<|)` to `Basics` and the
-prelude. Failure source positions need a compiler-solved call-site constraint,
-recorded there as proposed syntax, and how a test body is passed — a
-trailing lambda in argument position, a zero-pattern lambda, or a `do`
-keyword, against the `<| \_ ->` written today — is an open language
-decision recorded there too, weighed on the `attempt` and `Scope.bracket`
-call sites as much as on tests. A `fango test` command and fuzz testing
-are sketched but deferred.
+`main`. Shared pipeline operators, trailing final lambdas, and named-callback
+row subsumption belong to [effects milestone 1](roadmap-effects.md#1-compositional-effects-and-call-syntax).
+The proposed canonical test shape is `test "name" \_ ->`; the library can
+start with parenthesized callbacks before that milestone. Failure source
+positions need the proposed compiler-solved call-site constraint described in
+the testing roadmap. A `fango test` command and fuzz testing are deferred.
 
 ## Calling conventions and recursion shapes
 
@@ -270,17 +268,28 @@ syntax. The bundled `Fail` effect, typed `IO.Error` values, and the scoped
 `File` resource API are built on them, with `File.Handle` a compiler-known
 capability. All of this shipped without suspension.
 
-The same roadmap owns the open decisions for operation polymorphism, builtin
-IO handling, fallible natives beyond `File`, and a resource escaping through an
-outer handler's operation. Scoped iterators are underway with a private pull
-owner, static ownership checks, and a typed owner boundary in both backends;
-the `forEach` and `fold` terminals are implemented, and a producer that yields
-from its own body runs in batch builds and the REPL. Completing E8a needs a
-diagnostic for handling a suspension effect, a Machine ABI family for callback
-parameters, and machine lowering for nested iterator scopes and result
-constructors; the `find` and `take` terminals follow from the last of those.
-Structured async and cancellation follow. Scoped non-tail resumption is
-specified but unscheduled, because no remaining consumer needs it.
+The proposed sequence is API-first:
+
+1. Compositional effect subsumption, trailing final lambdas, and ordinary pipes.
+2. General scoped resources and capture/borrowing contracts, including escape
+   through outer handlers.
+3. One Stream API with scoped cursors, ordinary library consumers, complete
+   Machine composition, file pipelines, custom parsing, and sequential zip.
+4. Cooperative structured async with nursery-owned tasks, reusable await,
+   cancellation/drain, bounded native adapters, and REPL interruption.
+5. Suspending acquisition and cleanup through the same Scope API.
+6. Bounded ordered/unordered concurrent streams, race, timeout, and subscriptions.
+7. An explicitly selected bounded parallel executor with checked capture transfer.
+8. Measured frame, callback, and pipeline optimization.
+
+The experimental `Generator`/`Iterator` path currently supports producers yielding
+from their own bodies and the `forEach`/`fold` terminal intrinsics. It is not the
+proposed Stream API: general helper borrowing and compositional Machine lowering
+remain work. Experimental APIs may be replaced without compatibility scaffolding.
+The detailed roadmap owns cleanup-failure observation as a prerequisite for stable
+reporting, and separates deferred operation polymorphism, builtin IO interception,
+named instances, non-tail resumption, escaping owners, and shared mutable state
+from the committed sequence.
 
 ## Effect-row subsumption for higher-order arguments
 
@@ -292,20 +301,14 @@ lambda's row is inferred and accumulates inclusion constraints. So today
 `bracket open close body` is written with each callback wrapped, or it is
 rejected as soon as the body performs something `open` does not.
 
-`Scope.bracket` does not have that problem, because it is a compiler intrinsic
-whose saturated application gets a bespoke rule: each callback's effects are
-required to be available where the scope runs rather than equal to the scope's
-row. Every ordinary higher-order function still has it, and `File.withFile`
-and its neighbours will meet it as soon as they exist.
+`Scope.bracket` has a bespoke saturated-call rule: each callback's effects
+need only be available where the scope runs. Ordinary helpers do not receive
+that general subsumption rule, so named callbacks can still require eta wrappers.
 
-The general fix is effect-row subsumption on function arguments: a callback
-performing fewer effects should be usable where more are allowed, which is
-already true at run time — elaboration eta-expands and re-tags such callbacks
-for the erased-row ABI. Making it true in the checker means using inclusion
-rather than unification for an argument's own row, and the open questions are
-where that widening is sound to apply, what it does to inference order and
-generalization, and how the resulting diagnostics read when a callback really
-is wrong.
+[Effects milestone 1](roadmap-effects.md#1-compositional-effects-and-call-syntax)
+owns the general fix: callback row inclusion and covariant row-indexed values,
+with sound variance, annotation checking, generalization, and inference order.
+The testing roadmap consumes this work rather than defining a separate fix.
 
 ## Constraint simplification for parameterized types
 
@@ -347,9 +350,8 @@ though only at compile time, where they never reach the backend or the worker.
 
 The REPL is the whole difficulty. Call-form sidecars run in a separate
 persistent worker process, and `nativewire.Value` carries five scalars over a
-gob wire. A Go pointer cannot cross that, which is the same wall
-[E6](roadmap-effects.md#e6-resource-apis-native-boundaries-and-useful-io-errors)
-hits for file handles.
+gob wire. A Go pointer cannot cross that, which is why the implemented
+[File boundary](reference.md#native-go-sidecars) uses scalar handle IDs.
 
 `plugin.Open` does not solve it. Go has no unload at all, a plugin must be
 built against byte-identical package archives as its host — which a

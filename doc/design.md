@@ -911,7 +911,7 @@ existing tail-resumptive semantics. Ordinary source compilation selects the
 private Machine backend only when the resolved bundled iterator owner is
 present; no command or general source annotation selects it directly.
 
-The first E8 runtime layer wraps that private machine in a pull owner. Each
+The pull-iterator runtime layer wraps that private machine in a pull owner. Each
 `Next` drives the producer to one suspension and resumes a prior yield with
 Unit; normal return ends iteration, while a tagged exit remains distinct.
 `Close` abandons unfinished production and is safe to defer after normal
