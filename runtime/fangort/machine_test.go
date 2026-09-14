@@ -136,6 +136,43 @@ func TestMachineExitRunsNestedCleanupAndSuppressesFailures(t *testing.T) {
 	}
 }
 
+type catchingFrame struct {
+	pc     uint8
+	target *ExitTarget
+	child  MachineFrame
+	caught *ExitRequest
+}
+
+func (f *catchingFrame) Step(m *Machine) MachineStep {
+	if f.pc == 0 {
+		f.pc = 1
+		m.PushHandler(f.target)
+		return MachineStep{Kind: MachineCall, Frame: f.child}
+	}
+	f.caught = m.TakeCaughtExit()
+	if f.caught == nil {
+		return MachineStep{Kind: MachineReturn, Value: "normal"}
+	}
+	return MachineStep{Kind: MachineReturn, Value: f.caught.Operation}
+}
+func (*catchingFrame) Clear() {}
+
+func TestMachineRoutesExitToNearestHandlerBoundary(t *testing.T) {
+	target := &ExitTarget{Marker: 1}
+	frame := &catchingFrame{target: target}
+	frame.child = &exitFrame{exit: &ExitRequest{Target: target, Operation: 7}}
+	m := StartMachine(frame)
+	var order []string
+	m.PushCleanup(func() *ExitRequest { order = append(order, "outer"); return nil })
+	event, err := m.Run()
+	if err != nil || !event.Done || event.Exit != nil || event.Value != 7 {
+		t.Fatalf("event = %#v, %v", event, err)
+	}
+	if frame.caught == nil || len(order) != 1 || order[0] != "outer" {
+		t.Fatalf("caught/cleanup = %#v/%v", frame.caught, order)
+	}
+}
+
 func BenchmarkMachineFixedDepthSuspension(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {

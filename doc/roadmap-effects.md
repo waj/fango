@@ -167,7 +167,7 @@ The shipped control-aware ABI preserves the tail-resume and scoped-state direct
 fast path; synchronous cleanup scopes, the bundled `Fail` effect, typed IO
 errors, and the scoped `File` resource API are implemented on top of it (see
 the design and reference). No general continuation object exists.
-The private E7 machine foundation is now under implementation; exposing it to
+The private E7 machine backend is implemented; exposing it to
 source programs remains deferred until a concrete suspension consumer warrants
 the ownership and type-system cost. E8–E9 remain deferred. No milestone
 requires implementing the whole table at once.
@@ -176,20 +176,20 @@ requires implementing the whole table at once.
 
 ### Deliverable and rationale
 
-The compiler-side proof boundary is implemented: a separate pre-machine Core
+The compiler-side proof boundary and backend are implemented: a separate pre-machine Core
 lint admits a compiler-only suspension node that source cannot produce, and
 selective lowering builds an independently linted machine IR. It closes a
 Machine island through known transport-polymorphic worker calls, splits ANF
 `Let`, `Seq`, `If`, and decision trees, shares branch continuations, identifies
 tail transfers, and computes minimal frame layouts by backwards liveness. A
-private iterative interpreter and generated-Go dispatcher consume the
-monomorphic, evidence-free subset; generated frame constructors cross existing
-module DAG edges without a global frame union. The shared runtime also owns the
-synchronous cleanup stack and its primary/suppressed exit ordering. Private
-`Bracket` fixtures with non-suspending Direct acquisition and release populate
-that stack and retain it across suspension. Exit-capable release emission and
-handler-targeted partial unwind remain unfinished. The implemented contract is
-described in the design.
+private iterative interpreter and generated-Go dispatcher consume generic,
+evidence-bearing workers, indirect callbacks, resumptive/stateful handlers,
+and abort handlers. Generated frame constructors cross existing module DAG
+edges without a global frame union. The shared runtime owns synchronous cleanup
+and handler/state stacks, preserves primary/suppressed exit ordering, and
+partially unwinds to an exact abort target. Private `Bracket` fixtures permit
+non-suspending Direct or Exit acquisition/release and retain scopes across
+suspension. The implemented contract is described in the design.
 
 Finish the internal suspension backend with private Core fixtures first. Do not
 enable source-level general resume merely because the machine can run it.
@@ -205,6 +205,9 @@ over explicit frames (P). Background reading:
 and [defunctionalization](https://www.brics.dk/RS/01/23/).
 
 ### Frame construction
+
+Completed in E7. Future E8 work may extend the same checked representation for
+source-owned iteration, but must not expose a copyable continuation.
 
 1. Extend selection and block construction through handlers, indirect
    callbacks, and operation clauses whose residual effects suspend.

@@ -52,6 +52,11 @@ func analyze(w *Worker) {
 				delete(across, term.Bind.Name)
 				unionInto(frame, across)
 			}
+		case *Handle:
+			across := cloneSet(liveOut[i])
+			delete(across, term.Bind.Name)
+			delete(across, term.StateResult.Name)
+			unionInto(frame, across)
 		}
 	}
 	for _, name := range sortedSet(frame) {
@@ -87,9 +92,28 @@ func termUses(term Term, known map[string]bool) map[string]bool {
 	case *Suspend:
 		add(term.Request)
 	case *Call:
+		add(term.CalleeExpr)
 		for _, arg := range term.Args {
 			add(arg)
 		}
+	case *Handle:
+		if term.State != nil {
+			add(term.State.Initial)
+		}
+		for _, capture := range term.BodyCaptures {
+			out[capture.Name] = true
+		}
+		for _, clause := range term.Clauses {
+			for _, capture := range clause.Captures {
+				out[capture.Name] = true
+			}
+		}
+		for _, capture := range term.ReturnCaptures {
+			out[capture.Name] = true
+		}
+	case *StateResume:
+		add(term.Value)
+		add(term.NextState)
 	case *PushCleanup:
 		add(term.Acquire)
 		// Release is captured when the cleanup is pushed. Its free locals are
@@ -115,6 +139,11 @@ func transfer(term Term, liveIn []map[string]bool, ordinaryOut map[string]bool) 
 		if term.Default != nil {
 			unionInto(in, liveIn[*term.Default])
 		}
+		return in
+	case *Handle:
+		in := cloneSet(ordinaryOut)
+		delete(in, term.Bind.Name)
+		delete(in, term.StateResult.Name)
 		return in
 	default:
 		in := cloneSet(ordinaryOut)
@@ -206,6 +235,10 @@ func defined(term Term) string {
 		return term.Bind.Name
 	case *Call:
 		return term.Bind.Name
+	case *Handle:
+		return term.Bind.Name
+	case *StateResume:
+		return term.Bind.Name
 	case *PushCleanup:
 		return term.Resource.Name
 	default:
@@ -237,6 +270,13 @@ func successors(term Term) []BlockID {
 	case *Suspend:
 		return []BlockID{term.Next}
 	case *Call:
+		return []BlockID{term.Next}
+	case *Handle:
+		if term.Abort {
+			return []BlockID{term.Next, term.AbortNext}
+		}
+		return []BlockID{term.Next}
+	case *StateResume:
 		return []BlockID{term.Next}
 	case *PushCleanup:
 		return []BlockID{term.Next}

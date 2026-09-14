@@ -23,13 +23,10 @@ func (g *gen) machineDecls(p *machineir.Prog) ([]goast.Decl, error) {
 	for _, worker := range workers {
 		d := g.defs[worker.Name]
 		if d == nil {
+			d = worker.Def
+		}
+		if d == nil {
 			return nil, fmt.Errorf("codegen: machine worker %q has no semantic Core definition", worker.Name)
-		}
-		if len(d.TyParams) != 0 {
-			return nil, fmt.Errorf("codegen: generic Machine worker %q is not implemented", worker.Name)
-		}
-		if len(d.EffectParams) != 0 {
-			return nil, fmt.Errorf("codegen: Machine evidence parameters for %q are not implemented", worker.Name)
 		}
 		if err := directMachineTerms(worker); err != nil {
 			return nil, err
@@ -40,8 +37,9 @@ func (g *gen) machineDecls(p *machineir.Prog) ([]goast.Decl, error) {
 }
 
 func directMachineTerms(worker *machineir.Worker) error {
-	check := func(e core.Expr) error {
-		if control := core.ExprControl(e); control != (types.Control{}) {
+	check := func(e core.Expr, allowExit bool) error {
+		control := core.ExprControl(e)
+		if control.Polymorphic || control.Transport == types.Machine || (!allowExit && control.Transport != types.Direct) {
 			return fmt.Errorf("codegen: Machine worker %q still has %s expression control", worker.Name, core.ControlName(control))
 		}
 		return nil
@@ -49,43 +47,48 @@ func directMachineTerms(worker *machineir.Worker) error {
 	for _, block := range worker.Blocks {
 		switch term := block.Term.(type) {
 		case *machineir.Eval:
-			if err := check(term.Value); err != nil {
+			if err := check(term.Value, true); err != nil {
 				return err
 			}
 		case *machineir.Branch:
-			if err := check(term.Cond); err != nil {
+			if err := check(term.Cond, false); err != nil {
 				return err
 			}
 		case *machineir.SwitchCtor:
 		case *machineir.SwitchLit:
 			for _, c := range term.Cases {
-				if err := check(c.Lit); err != nil {
+				if err := check(c.Lit, false); err != nil {
 					return err
 				}
 			}
 		case *machineir.Suspend:
-			if err := check(term.Request); err != nil {
+			if err := check(term.Request, false); err != nil {
 				return err
 			}
 		case *machineir.Call:
-			if len(term.EvidenceArgs) != 0 {
-				return fmt.Errorf("codegen: Machine call from %q carries evidence", worker.Name)
-			}
 			for _, arg := range term.Args {
-				if err := check(arg); err != nil {
+				if err := check(arg, false); err != nil {
 					return err
 				}
 			}
-		case *machineir.PushCleanup:
-			if err := check(term.Acquire); err != nil {
+		case *machineir.Handle:
+		case *machineir.StateResume:
+			if err := check(term.Value, false); err != nil {
 				return err
 			}
-			if err := check(term.Release); err != nil {
+			if err := check(term.NextState, false); err != nil {
+				return err
+			}
+		case *machineir.PushCleanup:
+			if err := check(term.Acquire, true); err != nil {
+				return err
+			}
+			if err := check(term.Release, true); err != nil {
 				return err
 			}
 		case *machineir.PopCleanup:
 		case *machineir.Return:
-			if err := check(term.Value); err != nil {
+			if err := check(term.Value, true); err != nil {
 				return err
 			}
 		}
@@ -95,33 +98,56 @@ func directMachineTerms(worker *machineir.Worker) error {
 
 func (g *gen) machineWorkerDecls(worker *machineir.Worker) []goast.Decl {
 	g.usesFangort = true
+	oldNames := g.tyParamNames
+	g.tyParamNames = tyParamNames(worker.TyParams)
+	defer func() { g.tyParamNames = oldNames }()
 	frameName := machineFrameName(worker.Name)
 	stored := machineStoredLocals(worker)
 	fields := []*goast.Field{{Names: []*goast.Ident{ident("PC")}, Type: ident("int")}}
+	if worker.StateToken {
+		fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("StateToken")}, Type: ident("int")})
+	}
+	for _, ev := range worker.EffectParams {
+		fields = append(fields, &goast.Field{
+			Names: []*goast.Ident{ident(machineEvidenceFieldName(ev.Unique))},
+			Type:  g.effectTypeMode(ev, types.Machine),
+		})
+	}
 	for _, local := range stored {
 		fields = append(fields, &goast.Field{Names: []*goast.Ident{ident(machineFieldName(local.Name))}, Type: g.goType(local.Ty)})
 	}
-	frameDecl := &goast.GenDecl{Tok: gotoken.TYPE, Specs: []goast.Spec{&goast.TypeSpec{
-		Name: ident(frameName), Type: &goast.StructType{Fields: &goast.FieldList{List: fields}},
-	}}}
+	frameSpec := &goast.TypeSpec{Name: ident(frameName), Type: &goast.StructType{Fields: &goast.FieldList{List: fields}}}
+	frameSpec.TypeParams = g.typeParamFields(worker.TyParams)
+	frameDecl := &goast.GenDecl{Tok: gotoken.TYPE, Specs: []goast.Spec{frameSpec}}
 
-	params := make([]paramSpec, len(worker.Params))
+	params := make([]paramSpec, 0, len(worker.EffectParams)+len(worker.Params))
 	ctorFields := []goast.Expr{&goast.KeyValueExpr{Key: ident("PC"), Value: intLit(int64(worker.Entry))}}
-	for i, param := range worker.Params {
+	for _, ev := range worker.EffectParams {
+		name := machineEvidenceName(ev.Unique)
+		params = append(params, paramSpec{name: name, typ: g.effectTypeMode(ev, types.Machine)})
+		ctorFields = append(ctorFields, &goast.KeyValueExpr{Key: ident(machineEvidenceFieldName(ev.Unique)), Value: ident(name)})
+	}
+	if worker.StateToken {
+		params = append(params, paramSpec{name: "machineStateToken", typ: ident("int")})
+		ctorFields = append(ctorFields, &goast.KeyValueExpr{Key: ident("StateToken"), Value: ident("machineStateToken")})
+	}
+	for _, param := range worker.Params {
 		name := machineLocalName(param.Name)
-		params[i] = paramSpec{name: name, typ: g.goType(param.Ty)}
+		params = append(params, paramSpec{name: name, typ: g.goType(param.Ty)})
 		ctorFields = append(ctorFields, &goast.KeyValueExpr{Key: ident(machineFieldName(param.Name)), Value: ident(name)})
 	}
 	ctor := workerDecl(machineConstructorName(worker.Name), params, selector("fangort", "MachineFrame"), []goast.Stmt{
-		returnStmt(&goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: ident(frameName), Elts: ctorFields}}),
+		returnStmt(&goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: indexExpr(ident(frameName), machineTypeParamIdents(worker.TyParams)), Elts: ctorFields}}),
 	})
+	ctor.(*goast.FuncDecl).Type.TypeParams = g.typeParamFields(worker.TyParams)
 
+	receiverType := indexExpr(ident(frameName), machineTypeParamIdents(worker.TyParams))
 	clear := &goast.FuncDecl{
-		Recv: &goast.FieldList{List: []*goast.Field{{Names: []*goast.Ident{ident("f")}, Type: &goast.StarExpr{X: ident(frameName)}}}},
+		Recv: &goast.FieldList{List: []*goast.Field{{Names: []*goast.Ident{ident("f")}, Type: &goast.StarExpr{X: receiverType}}}},
 		Name: ident("Clear"), Type: &goast.FuncType{Params: &goast.FieldList{}},
 		Body: &goast.BlockStmt{List: []goast.Stmt{&goast.AssignStmt{
 			Lhs: []goast.Expr{&goast.StarExpr{X: ident("f")}}, Tok: gotoken.ASSIGN,
-			Rhs: []goast.Expr{&goast.CompositeLit{Type: ident(frameName)}},
+			Rhs: []goast.Expr{&goast.CompositeLit{Type: receiverType}},
 		}}},
 	}
 	step := g.machineStepDecl(worker, frameName, stored)
@@ -130,8 +156,19 @@ func (g *gen) machineWorkerDecls(worker *machineir.Worker) []goast.Decl {
 
 func (g *gen) machineStepDecl(worker *machineir.Worker, frameName string, stored []machineir.Local) goast.Decl {
 	oldControl, oldABI, oldResult := g.control, g.abi, g.resultType
-	g.control, g.abi, g.resultType = types.Direct, types.Direct, worker.Result
+	g.control, g.abi, g.resultType = types.Direct, types.Machine, worker.Result
 	defer func() { g.control, g.abi, g.resultType = oldControl, oldABI, oldResult }()
+	for _, ev := range worker.EffectParams {
+		name := machineEvidenceName(ev.Unique)
+		g.evidence[ev.Unique] = append(g.evidence[ev.Unique], ident(name))
+		g.evidenceModes[ev.Unique] = append(g.evidenceModes[ev.Unique], types.Machine)
+	}
+	defer func() {
+		for _, ev := range worker.EffectParams {
+			g.evidence[ev.Unique] = g.evidence[ev.Unique][:len(g.evidence[ev.Unique])-1]
+			g.evidenceModes[ev.Unique] = g.evidenceModes[ev.Unique][:len(g.evidenceModes[ev.Unique])-1]
+		}
+	}()
 	for _, local := range worker.Locals {
 		g.caseVarTys[local.Name] = local.Ty
 	}
@@ -146,6 +183,16 @@ func (g *gen) machineStepDecl(worker *machineir.Worker, frameName string, stored
 		storedSet[local.Name] = true
 	}
 	var body []goast.Stmt
+	if worker.StateToken {
+		body = append(body, varDeclStmt("machineStateToken", ident("int"), &goast.SelectorExpr{X: ident("f"), Sel: ident("StateToken")}))
+	}
+	for _, ev := range worker.EffectParams {
+		name := machineEvidenceName(ev.Unique)
+		body = append(body,
+			varDeclStmt(name, g.effectTypeMode(ev, types.Machine), machineFrameEvidenceField(ev.Unique)),
+			assignBlank(ident(name)),
+		)
+	}
 	for _, local := range worker.Locals {
 		name := machineLocalName(local.Name)
 		if storedSet[local.Name] {
@@ -159,9 +206,9 @@ func (g *gen) machineStepDecl(worker *machineir.Worker, frameName string, stored
 	var clauses []goast.Stmt
 	resumePC := len(worker.Blocks)
 	for _, block := range worker.Blocks {
-		stmts, resume := g.machineBlockStmts(worker, frameName, &block, resumePC, stored)
+		stmts, resumes := g.machineBlockStmts(worker, frameName, &block, resumePC, stored)
 		clauses = append(clauses, &goast.CaseClause{List: []goast.Expr{intLit(int64(block.ID))}, Body: stmts})
-		if resume != nil {
+		for _, resume := range resumes {
 			clauses = append(clauses, &goast.CaseClause{List: []goast.Expr{intLit(int64(resumePC))}, Body: resume})
 			resumePC++
 		}
@@ -171,7 +218,7 @@ func (g *gen) machineStepDecl(worker *machineir.Worker, frameName string, stored
 		Tag: machinePC(), Body: &goast.BlockStmt{List: clauses},
 	}}}})
 	return &goast.FuncDecl{
-		Recv: &goast.FieldList{List: []*goast.Field{{Names: []*goast.Ident{ident("f")}, Type: &goast.StarExpr{X: ident(frameName)}}}},
+		Recv: &goast.FieldList{List: []*goast.Field{{Names: []*goast.Ident{ident("f")}, Type: &goast.StarExpr{X: indexExpr(ident(frameName), machineTypeParamIdents(worker.TyParams))}}}},
 		Name: ident("Step"),
 		Type: &goast.FuncType{Params: paramFields([]paramSpec{{name: "m", typ: &goast.StarExpr{X: selector("fangort", "Machine")}}}),
 			Results: &goast.FieldList{List: []*goast.Field{{Type: selector("fangort", "MachineStep")}}}},
@@ -179,7 +226,7 @@ func (g *gen) machineStepDecl(worker *machineir.Worker, frameName string, stored
 	}
 }
 
-func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, block *machineir.Block, resumePC int, stored []machineir.Local) ([]goast.Stmt, []goast.Stmt) {
+func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, block *machineir.Block, resumePC int, stored []machineir.Local) ([]goast.Stmt, [][]goast.Stmt) {
 	continueStmt := func(next machineir.BlockID) []goast.Stmt {
 		return []goast.Stmt{assignMachinePC(int(next)), &goast.BranchStmt{Tok: gotoken.CONTINUE}}
 	}
@@ -194,11 +241,46 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		}
 		return returnStmt(&goast.CompositeLit{Type: selector("fangort", "MachineStep"), Elts: fields})
 	}
+	// A machine block may run a non-suspending Exit expression. Emit it with
+	// the existing Outcome ABI, then turn a failed outcome into an explicit
+	// dispatcher transition before exposing its normal value to the block.
+	value := func(e core.Expr) ([]goast.Stmt, goast.Expr) {
+		control := core.ExprControl(e)
+		oldControl, oldResult := g.control, g.resultType
+		if control.Transport == types.Exit {
+			g.control, g.resultType = types.Exit, e.Type()
+		}
+		expr := g.machineExpr(e)
+		g.control, g.resultType = oldControl, oldResult
+		if control.Transport != types.Exit {
+			return nil, expr
+		}
+		name := fmt.Sprintf("machineOutcome%d", g.tmp)
+		g.tmp++
+		stmts := []goast.Stmt{
+			varDeclStmt(name, g.outcomeType(e.Type()), expr),
+			&goast.IfStmt{
+				Cond: &goast.BinaryExpr{X: selector(name, "Exit"), Op: gotoken.NEQ, Y: ident("nil")},
+				Body: &goast.BlockStmt{List: []goast.Stmt{step("MachineExit", "Exit", selector(name, "Exit"))}},
+			},
+		}
+		return stmts, selector(name, "Value")
+	}
 	save := func() []goast.Stmt {
 		out := []goast.Stmt{&goast.AssignStmt{
 			Lhs: []goast.Expr{&goast.StarExpr{X: ident("f")}}, Tok: gotoken.ASSIGN,
-			Rhs: []goast.Expr{&goast.CompositeLit{Type: ident(frameName)}},
+			Rhs: []goast.Expr{&goast.CompositeLit{Type: indexExpr(ident(frameName), machineTypeParamIdents(worker.TyParams))}},
 		}}
+		for _, ev := range worker.EffectParams {
+			out = append(out, &goast.AssignStmt{
+				Lhs: []goast.Expr{machineFrameEvidenceField(ev.Unique)}, Tok: gotoken.ASSIGN,
+				Rhs: []goast.Expr{ident(machineEvidenceName(ev.Unique))},
+			})
+		}
+		if worker.StateToken {
+			out = append(out, &goast.AssignStmt{Lhs: []goast.Expr{&goast.SelectorExpr{X: ident("f"), Sel: ident("StateToken")}},
+				Tok: gotoken.ASSIGN, Rhs: []goast.Expr{ident("machineStateToken")}})
+		}
 		live := map[string]bool{}
 		for _, name := range block.LiveOut {
 			live[name] = true
@@ -213,7 +295,9 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 	}
 	switch term := block.Term.(type) {
 	case *machineir.Eval:
-		return append([]goast.Stmt{assignStmt(machineLocalName(term.Bind.Name), g.expr(term.Value, 0))}, continueStmt(term.Next)...), nil
+		prefix, normal := value(term.Value)
+		prefix = append(prefix, assignStmt(machineLocalName(term.Bind.Name), normal))
+		return append(prefix, continueStmt(term.Next)...), nil
 	case *machineir.Branch:
 		return []goast.Stmt{ifStmt(g.expr(term.Cond, 0), continueStmt(term.Then), continueStmt(term.Else))}, nil
 	case *machineir.SwitchCtor:
@@ -228,28 +312,232 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 	case *machineir.Suspend:
 		stmts := append(save(), assignMachinePC(resumePC))
 		stmts = append(stmts, step("MachineSuspend", "Request", g.machineBoxedValue(term.Request)))
-		return stmts, resume(term.Bind, term.Next)
+		return stmts, [][]goast.Stmt{resume(term.Bind, term.Next)}
 	case *machineir.Call:
-		args := make([]goast.Expr, len(term.Args))
-		for i, arg := range term.Args {
-			args[i] = g.expr(arg, 0)
+		args := make([]goast.Expr, 0, len(term.EvidenceArgs)+len(term.Args))
+		for _, ev := range term.EvidenceArgs {
+			stack := g.evidence[ev.Unique]
+			if len(stack) == 0 {
+				panic("codegen: missing lexical machine evidence")
+			}
+			args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
 		}
-		child := callExpr(g.machineConstructorRef(term.Callee), args...)
+		for _, arg := range term.Args {
+			args = append(args, g.machineExpr(arg))
+		}
+		var child goast.Expr
+		if term.Operation != nil {
+			stack := g.evidence[term.Effect.Unique]
+			if len(stack) == 0 {
+				panic("codegen: machine operation has no lexical evidence")
+			}
+			opArgs := make([]goast.Expr, 0, len(term.Args))
+			for i, arg := range term.Args {
+				if i < len(term.Operation.ParamTypes) && g.isUnit(term.Operation.ParamTypes[i]) {
+					continue
+				}
+				opArgs = append(opArgs, g.machineExpr(arg))
+			}
+			child = callExpr(&goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Op_" + linkName(term.Operation.Name))}, opArgs...)
+		} else if term.Callee == "" {
+			child = callExpr(g.machineExpr(term.CalleeExpr), args...)
+		} else {
+			child = callExpr(indexExpr(g.machineConstructorRef(term.Callee), g.goTypes(term.TyArgs)), args...)
+		}
 		if term.Tail {
 			return []goast.Stmt{step("MachineTailCall", "Frame", child)}, nil
 		}
 		stmts := append(save(), assignMachinePC(resumePC))
 		stmts = append(stmts, step("MachineCall", "Frame", child))
-		return stmts, resume(term.Bind, term.Next)
-	case *machineir.PushCleanup:
-		cleanup := funcLit(&goast.StarExpr{X: selector("fangort", "ExitRequest")}, []goast.Stmt{
-			assignBlank(g.expr(term.Release, 0)),
-			returnStmt(ident("nil")),
-		})
-		stmts := []goast.Stmt{
-			assignStmt(machineLocalName(term.Resource.Name), g.expr(term.Acquire, 0)),
-			exprStmt(callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PushCleanup")}, cleanup)),
+		return stmts, [][]goast.Stmt{resume(term.Bind, term.Next)}
+	case *machineir.Handle:
+		h := term.Node
+		var statePrefix []goast.Stmt
+		stateToken := ""
+		if term.State != nil {
+			initialPrefix, initial := value(term.State.Initial)
+			stateToken = fmt.Sprintf("machineHandlerState%d", g.tmp)
+			g.tmp++
+			statePrefix = append(initialPrefix, varDeclStmt(stateToken, ident("int"),
+				callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PushState")}, initial)))
 		}
+		evidenceName := fmt.Sprintf("machineHandlerEvidence%d", g.tmp)
+		g.tmp++
+		evidenceType := g.effectTypeMode(core.EffectInstance{Unique: h.Effect.Unique, Name: h.Effect.Name, Args: h.Effect.Args,
+			Control: types.Control{Transport: types.Machine}}, types.Machine)
+		elts := make([]goast.Expr, 0, len(term.Clauses))
+		targetName := ""
+		if term.Abort {
+			targetName = fmt.Sprintf("machineHandlerTarget%d", g.tmp)
+			g.tmp++
+			elts = append(elts, &goast.KeyValueExpr{Key: ident("Target"), Value: ident(targetName)})
+		}
+		for _, clause := range term.Clauses {
+			if term.Abort {
+				continue
+			}
+			var source *core.HandlerClause
+			for i := range h.Clauses {
+				if h.Clauses[i].Op == clause.Op {
+					source = &h.Clauses[i]
+					break
+				}
+			}
+			if source == nil {
+				panic("codegen: machine handler clause has no source metadata")
+			}
+			var params []paramSpec
+			var ctorArgs []goast.Expr
+			clauseWorker := g.machineWorkers[clause.Worker]
+			for _, ev := range clauseWorker.EffectParams {
+				stack := g.evidence[ev.Unique]
+				if len(stack) == 0 {
+					panic("codegen: machine handler clause captures unavailable evidence")
+				}
+				ctorArgs = append(ctorArgs, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
+			}
+			if clauseWorker.StateToken {
+				ctorArgs = append(ctorArgs, ident(stateToken))
+			}
+			for _, capture := range clause.Captures {
+				ctorArgs = append(ctorArgs, ident(machineLocalName(capture.Name)))
+			}
+			if clause.StateName != "" {
+				state := &goast.TypeAssertExpr{X: callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("State")}, ident(stateToken)), Type: g.goType(clause.StateTy)}
+				ctorArgs = append(ctorArgs, state)
+			}
+			for i, param := range source.Params {
+				if g.isUnit(source.ParamTypes[i]) {
+					ctorArgs = append(ctorArgs, g.unitValue())
+					continue
+				}
+				name := machineLocalName(param)
+				params = append(params, paramSpec{name: name, typ: g.goType(source.ParamTypes[i])})
+				ctorArgs = append(ctorArgs, ident(name))
+			}
+			ctor := indexExpr(g.machineConstructorRef(clause.Worker), machineTypeParamIdents(clauseWorker.TyParams))
+			fn := funcLitParams(params, selector("fangort", "MachineFrame"), []goast.Stmt{returnStmt(callExpr(ctor, ctorArgs...))})
+			elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + linkName(clause.Op.Name)), Value: fn})
+		}
+		decl := varDeclStmt(evidenceName, evidenceType, &goast.CompositeLit{Type: evidenceType, Elts: elts})
+		bodyWorker := g.machineWorkers[term.BodyWorker]
+		bodyArgs := make([]goast.Expr, 0, len(bodyWorker.EffectParams)+len(term.BodyCaptures))
+		for _, ev := range bodyWorker.EffectParams {
+			if ev.Unique == h.Effect.Unique {
+				bodyArgs = append(bodyArgs, ident(evidenceName))
+				continue
+			}
+			stack := g.evidence[ev.Unique]
+			if len(stack) == 0 {
+				panic("codegen: machine handler body captures unavailable evidence")
+			}
+			bodyArgs = append(bodyArgs, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
+		}
+		for _, capture := range term.BodyCaptures {
+			bodyArgs = append(bodyArgs, ident(machineLocalName(capture.Name)))
+		}
+		child := callExpr(indexExpr(g.machineConstructorRef(term.BodyWorker), machineTypeParamIdents(bodyWorker.TyParams)), bodyArgs...)
+		stmts := append([]goast.Stmt{}, statePrefix...)
+		if term.Abort {
+			target := &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: selector("fangort", "ExitTarget"), Elts: []goast.Expr{
+				&goast.KeyValueExpr{Key: ident("Marker"), Value: intLit(1)},
+			}}}
+			stmts = append(stmts, varDeclStmt(targetName, &goast.StarExpr{X: selector("fangort", "ExitTarget")}, target))
+		}
+		stmts = append(stmts, decl, assignBlank(ident(evidenceName)))
+		if term.Abort {
+			stmts = append(stmts, exprStmt(callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PushHandler")}, ident(targetName))))
+		}
+		stmts = append(stmts, save()...)
+		stmts = append(stmts, assignMachinePC(resumePC), step("MachineCall", "Frame", child))
+		resumed := resume(term.Bind, term.Next)
+		if term.Abort {
+			// An exit caught by this handler has already unwound the body and
+			// restored this frame. Start the matching abort clause; otherwise
+			// consume the normal body return and leave the handler scope.
+			caught := fmt.Sprintf("machineCaughtExit%d", g.tmp)
+			g.tmp++
+			first := []goast.Stmt{varDeclStmt(caught, &goast.StarExpr{X: selector("fangort", "ExitRequest")}, callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("TakeCaughtExit")}))}
+			var cases []goast.Stmt
+			for _, clause := range term.Clauses {
+				var source *core.HandlerClause
+				for i := range h.Clauses {
+					if h.Clauses[i].Op == clause.Op {
+						source = &h.Clauses[i]
+						break
+					}
+				}
+				if source == nil {
+					panic("codegen: abort clause has no source metadata")
+				}
+				clauseWorker := g.machineWorkers[clause.Worker]
+				args := make([]goast.Expr, 0, len(clauseWorker.EffectParams)+len(clause.Captures)+len(source.Params)+1)
+				for _, ev := range clauseWorker.EffectParams {
+					stack := g.evidence[ev.Unique]
+					if len(stack) == 0 {
+						panic("codegen: abort clause captures unavailable evidence")
+					}
+					args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
+				}
+				if clauseWorker.StateToken {
+					args = append(args, callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("TopStateToken")}))
+				}
+				for _, capture := range clause.Captures {
+					args = append(args, ident(machineLocalName(capture.Name)))
+				}
+				if clause.StateName != "" {
+					token := callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("TopStateToken")})
+					args = append(args, &goast.TypeAssertExpr{X: callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("State")}, token), Type: g.goType(clause.StateTy)})
+				}
+				for i := range source.Params {
+					payload := &goast.IndexExpr{X: selector(caught, "Payload"), Index: intLit(int64(i))}
+					args = append(args, &goast.TypeAssertExpr{X: payload, Type: g.goType(source.ParamTypes[i])})
+				}
+				ctor := indexExpr(g.machineConstructorRef(clause.Worker), machineTypeParamIdents(clauseWorker.TyParams))
+				body := append(save(), assignMachinePC(resumePC+1), step("MachineCall", "Frame", callExpr(ctor, args...)))
+				cases = append(cases, &goast.CaseClause{List: []goast.Expr{intLit(int64(clause.Op.Index))}, Body: body})
+			}
+			cases = append(cases, &goast.CaseClause{Body: []goast.Stmt{&goast.ExprStmt{X: callExpr(ident("panic"), stringLit("unknown caught machine exit"))}}})
+			first = append(first, &goast.IfStmt{Cond: binExpr(gotoken.NEQ, ident(caught), ident("nil")), Body: &goast.BlockStmt{List: []goast.Stmt{&goast.SwitchStmt{Tag: selector(caught, "Operation"), Body: &goast.BlockStmt{List: cases}}}}})
+			first = append(first, exprStmt(callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PopHandler")})))
+			first = append(first, resumed...)
+			aborted := resume(term.Bind, term.AbortNext)
+			if term.State != nil {
+				state := &goast.TypeAssertExpr{X: callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PopState")}), Type: g.goType(term.State.Ty)}
+				aborted = append(aborted[:1], append([]goast.Stmt{assignStmt(machineLocalName(term.StateResult.Name), state)}, aborted[1:]...)...)
+			}
+			return stmts, [][]goast.Stmt{first, aborted}
+		}
+		if term.State != nil {
+			state := &goast.TypeAssertExpr{X: callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PopState")}), Type: g.goType(term.State.Ty)}
+			resumed = append(resumed[:1], append([]goast.Stmt{assignStmt(machineLocalName(term.StateResult.Name), state)}, resumed[1:]...)...)
+		}
+		return stmts, [][]goast.Stmt{resumed}
+	case *machineir.PushCleanup:
+		acquirePrefix, acquired := value(term.Acquire)
+		oldControl, oldResult := g.control, g.resultType
+		releaseControl := core.ExprControl(term.Release)
+		if releaseControl.Transport == types.Exit {
+			g.control, g.resultType = types.Exit, term.Release.Type()
+		}
+		release := g.expr(term.Release, 0)
+		g.control, g.resultType = oldControl, oldResult
+		var releaseBody []goast.Stmt
+		if releaseControl.Transport == types.Exit {
+			name := fmt.Sprintf("machineRelease%d", g.tmp)
+			g.tmp++
+			releaseBody = []goast.Stmt{
+				varDeclStmt(name, g.outcomeType(term.Release.Type()), release),
+				returnStmt(selector(name, "Exit")),
+			}
+		} else {
+			releaseBody = []goast.Stmt{assignBlank(release), returnStmt(ident("nil"))}
+		}
+		cleanup := funcLit(&goast.StarExpr{X: selector("fangort", "ExitRequest")}, releaseBody)
+		stmts := append(acquirePrefix,
+			assignStmt(machineLocalName(term.Resource.Name), acquired),
+			exprStmt(callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PushCleanup")}, cleanup)),
+		)
 		return append(stmts, continueStmt(term.Next)...), nil
 	case *machineir.PopCleanup:
 		exitName := fmt.Sprintf("machineCleanupExit%d", block.ID)
@@ -260,8 +548,18 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			&goast.IfStmt{Cond: binExpr(gotoken.NEQ, ident(exitName), ident("nil")), Body: &goast.BlockStmt{List: failure}},
 		}
 		return append(stmts, continueStmt(term.Next)...), nil
+	case *machineir.StateResume:
+		resultName := fmt.Sprintf("machineResumeResult%d", g.tmp)
+		g.tmp++
+		stmts := []goast.Stmt{
+			varDeclStmt(resultName, g.goType(term.Value.Type()), g.machineExpr(term.Value)),
+			exprStmt(callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("SetState")}, ident("machineStateToken"), g.machineExpr(term.NextState))),
+			assignStmt(machineLocalName(term.Bind.Name), ident(resultName)),
+		}
+		return append(stmts, continueStmt(term.Next)...), nil
 	case *machineir.Return:
-		return []goast.Stmt{step("MachineReturn", "Value", g.machineBoxedValue(term.Value))}, nil
+		prefix, normal := value(term.Value)
+		return append(prefix, step("MachineReturn", "Value", callExpr(g.goType(term.Value.Type()), normal))), nil
 	default:
 		panic(fmt.Sprintf("codegen: unknown machine term %T", block.Term))
 	}
@@ -339,7 +637,45 @@ func (g *gen) machineCtorSwitch(term *machineir.SwitchCtor, jump func(machineir.
 }
 
 func (g *gen) machineBoxedValue(e core.Expr) goast.Expr {
-	return callExpr(g.goType(e.Type()), g.expr(e, 0))
+	return callExpr(g.goType(e.Type()), g.machineExpr(e))
+}
+
+func (g *gen) machineExpr(e core.Expr) goast.Expr {
+	lam, ok := e.(*core.Lambda)
+	if !ok {
+		return g.expr(e, 0)
+	}
+	closure := g.machineClosures[lam]
+	if closure == nil {
+		return g.expr(e, 0)
+	}
+	worker := g.machineWorkers[closure.Worker]
+	if worker == nil {
+		panic("codegen: machine closure has no worker")
+	}
+	params := make([]paramSpec, 0, len(closure.CallEvidence)+1)
+	args := make([]goast.Expr, 0, len(closure.CapturedEvidence)+len(closure.CallEvidence)+len(closure.Captures)+1)
+	for _, ev := range closure.CapturedEvidence {
+		stack := g.evidence[ev.Unique]
+		if len(stack) == 0 {
+			panic("codegen: machine closure captures unavailable evidence")
+		}
+		args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
+	}
+	for _, ev := range closure.CallEvidence {
+		name := machineClosureEvidenceName(ev.Unique)
+		params = append(params, paramSpec{name: name, typ: g.effectTypeMode(ev, types.Machine)})
+		args = append(args, ident(name))
+	}
+	for _, capture := range closure.Captures {
+		args = append(args, ident(machineLocalName(capture.Name)))
+	}
+	fn := lam.Ty.(*types.TFun)
+	paramName := machineLocalName(lam.Param)
+	params = append(params, paramSpec{name: paramName, typ: g.goType(fn.Arg)})
+	args = append(args, ident(paramName))
+	ctor := indexExpr(g.machineConstructorRef(closure.Worker), machineTypeParamIdents(worker.TyParams))
+	return funcLitParams(params, selector("fangort", "MachineFrame"), []goast.Stmt{returnStmt(callExpr(ctor, args...))})
 }
 
 func machineStoredLocals(worker *machineir.Worker) []machineir.Local {
@@ -356,10 +692,23 @@ func machineStoredLocals(worker *machineir.Worker) []machineir.Local {
 	return out
 }
 
-func machineFrameName(name string) string       { return "machineFrame_" + linkName(name) }
-func machineConstructorName(name string) string { return "MachineFrame_" + linkName(name) }
-func machineFieldName(name string) string       { return "L_" + linkName(name) }
-func machineLocalName(name string) string       { return mangleValue(name) }
+func machineFrameName(name string) string        { return "machineFrame_" + linkName(name) }
+func machineConstructorName(name string) string  { return "MachineFrame_" + linkName(name) }
+func machineFieldName(name string) string        { return "L_" + linkName(name) }
+func machineLocalName(name string) string        { return mangleValue(name) }
+func machineEvidenceName(unique int) string      { return fmt.Sprintf("machineEvidence%d", unique) }
+func machineEvidenceFieldName(unique int) string { return fmt.Sprintf("E_%d", unique) }
+func machineClosureEvidenceName(unique int) string {
+	return fmt.Sprintf("machineClosureEvidence%d", unique)
+}
+
+func machineTypeParamIdents(params []*types.TVar) []goast.Expr {
+	out := make([]goast.Expr, len(params))
+	for i := range params {
+		out[i] = ident(fmt.Sprintf("A%d", i))
+	}
+	return out
+}
 
 func (g *gen) machineConstructorRef(name string) goast.Expr {
 	owner := symbolOwner(name)
@@ -372,6 +721,9 @@ func (g *gen) machineConstructorRef(name string) goast.Expr {
 func machinePC() goast.Expr { return &goast.SelectorExpr{X: ident("f"), Sel: ident("PC")} }
 func machineFrameField(name string) goast.Expr {
 	return &goast.SelectorExpr{X: ident("f"), Sel: ident(machineFieldName(name))}
+}
+func machineFrameEvidenceField(unique int) goast.Expr {
+	return &goast.SelectorExpr{X: ident("f"), Sel: ident(machineEvidenceFieldName(unique))}
 }
 func assignMachinePC(pc int) goast.Stmt {
 	return &goast.AssignStmt{Lhs: []goast.Expr{machinePC()}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{intLit(int64(pc))}}

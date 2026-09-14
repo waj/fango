@@ -877,14 +877,17 @@ primary and appending cleanup failures in inner-to-outer order through the same
 
 The implemented private lowering covers strict bindings and sequencing,
 conditionals, constructor/literal decision trees with edge-specific field
-bindings, monomorphic evidence-free known-worker calls, direct Core
-expressions, the compiler-only suspension point, and `Bracket` scopes whose
-acquire and release are non-suspending Direct expressions. Such a bracket
-registers a synchronous release closure before entering its body, preserves it
-across suspension, and pops it exactly once on normal completion; exit and
-abandonment use the runtime unwind path. Machine handlers, evidence-bearing
-and indirect calls, generic Machine representation families, and Exit-capable
-release emission remain unimplemented. Source-level handlers therefore retain
+bindings, generic evidence-bearing known-worker calls, indirect callbacks,
+direct/Exit Core expressions, and the compiler-only suspension point. Machine
+handler bodies and resumptive or abort clauses are separate typed workers;
+their lexical Machine evidence is carried in frame fields. Stateful clauses
+receive an opaque runtime state-cell token, and abort routing unwinds only to
+the exact handler target before invoking its clause. `Bracket` scopes whose
+acquire and release are non-suspending Direct or Exit expressions register a
+synchronous release closure before entering their body, preserve it across
+suspension, and pop it exactly once on normal completion. Exits retain the
+primary/suppressed ordering while partially unwinding to an inner handler.
+Source-level handlers retain
 their existing tail-resumptive semantics, and ordinary source compilation
 cannot select the private Machine backend.
 

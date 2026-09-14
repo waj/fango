@@ -56,13 +56,23 @@ func Lower(p *core.Prog, b *types.Builtins) (*Prog, []error) {
 	sort.Strings(names)
 	out := &Prog{}
 	var errs []error
-	for _, name := range names {
-		w, es := lowerWorker(defs[name], selected)
+	queue := append([]string(nil), names...)
+	for len(queue) != 0 {
+		name := queue[0]
+		queue = queue[1:]
+		w, aux, closures, es := lowerWorker(defs[name], selected)
 		if len(es) != 0 {
 			errs = append(errs, es...)
 			continue
 		}
 		out.Workers = append(out.Workers, w)
+		out.Closures = append(out.Closures, closures...)
+		for i := range aux {
+			d := aux[i]
+			defs[d.Name] = &d
+			selected[d.Name] = true
+			queue = append(queue, d.Name)
+		}
 	}
 	if len(errs) == 0 {
 		errs = append(errs, Lint(out)...)
@@ -79,10 +89,14 @@ type builder struct {
 	locals   map[string]types.Type
 	tmp      int
 	errs     []error
+	aux      []core.Def
+	closures []Closure
+	lambdas  map[*core.Lambda]bool
+	lambdaN  int
 }
 
-func lowerWorker(d *core.Def, selected map[string]bool) (Worker, []error) {
-	b := &builder{def: d, selected: selected, locals: map[string]types.Type{}}
+func lowerWorker(d *core.Def, selected map[string]bool) (Worker, []core.Def, []Closure, []error) {
+	b := &builder{def: d, selected: selected, locals: map[string]types.Type{}, lambdas: map[*core.Lambda]bool{}}
 	argTys, result := core.PeelFun(d.Type, len(d.Params))
 	params := make([]Local, len(d.Params))
 	for i, name := range d.Params {
@@ -95,7 +109,7 @@ func lowerWorker(d *core.Def, selected map[string]bool) (Worker, []error) {
 	ret := b.add(&Return{Value: localRef(resultLocal)})
 	entry := b.lowerInto(d.Body, resultLocal, ret)
 	if len(b.errs) != 0 {
-		return Worker{}, b.errs
+		return Worker{}, nil, nil, b.errs
 	}
 
 	locals := make([]Local, 0, len(b.locals))
@@ -103,18 +117,25 @@ func lowerWorker(d *core.Def, selected map[string]bool) (Worker, []error) {
 		locals = append(locals, Local{Name: name, Ty: ty})
 	}
 	sort.Slice(locals, func(i, j int) bool { return locals[i].Name < locals[j].Name })
-	w := Worker{Name: d.Name, Owner: d.Owner, Params: params, Result: result, Entry: entry, Blocks: b.blocks, Locals: locals}
+	w := Worker{Name: d.Name, Owner: d.Owner, TyParams: d.TyParams, Params: params, EffectParams: d.EffectParams,
+		Result: result, Entry: entry, Blocks: b.blocks, Locals: locals, Def: d}
+	core.Rewrite(d.Body, identityType, func(e core.Expr) core.Expr {
+		if resume, ok := e.(*core.ResumeTail); ok && resume.NextState != nil {
+			w.StateToken = true
+		}
+		return e
+	})
 	analyze(&w)
-	return w, nil
+	return w, b.aux, b.closures, nil
 }
 
 func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 	switch e := e.(type) {
 	case *core.Let:
-		body := b.lowerInto(e.Body, bind, next)
 		name := b.localName(e.Name)
 		local := Local{Name: name, Ty: e.Rhs.Type()}
 		b.declare(local)
+		body := b.lowerInto(e.Body, bind, next)
 		return b.lowerInto(e.Rhs, local, body)
 	case *core.Seq:
 		body := b.lowerInto(e.Then, bind, next)
@@ -144,11 +165,35 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 			return next
 		}
 		return b.add(&Suspend{Request: e.Request, Bind: bind, Next: next})
+	case *core.ResumeTail:
+		if e.NextState != nil {
+			return b.add(&StateResume{Value: e.Value, NextState: e.NextState, Bind: bind, Next: next})
+		}
+		return b.lowerInto(e.Value, bind, next)
+	case *core.Perform:
+		if e.Control.Resolve(types.Machine) == types.Machine {
+			for _, arg := range e.Args {
+				if machineControl(arg) {
+					b.errorf("%s: Machine operation argument was not ANF-hoisted", b.def.Name)
+					return next
+				}
+			}
+			return b.add(&Call{Operation: e.Op, Effect: e.Effect, Args: e.Args, Bind: bind, Next: next,
+				Tail: b.isReturnOf(next, bind)})
+		}
 	case *core.App:
 		if e.Control.Resolve(types.Machine) == types.Machine {
-			ref, ok := e.Callee.(*core.VarRef)
-			if e.CalleeKind != core.Worker || !ok || !b.selected[ref.Name] {
-				b.errorf("%s: unsupported indirect or unresolved Machine call", b.def.Name)
+			ref, known := e.Callee.(*core.VarRef)
+			if e.CalleeKind == core.Worker && (!known || !b.selected[ref.Name]) {
+				b.errorf("%s: unresolved Machine worker call", b.def.Name)
+				return next
+			}
+			if e.CalleeKind != core.Worker && e.CalleeKind != core.Value {
+				b.errorf("%s: unsupported Machine call target", b.def.Name)
+				return next
+			}
+			if e.CalleeKind == core.Value && machineControl(e.Callee) {
+				b.errorf("%s: Machine indirect callee was not ANF-hoisted", b.def.Name)
 				return next
 			}
 			for _, arg := range e.Args {
@@ -157,7 +202,13 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 					return next
 				}
 			}
-			call := &Call{Callee: ref.Name, Args: e.Args, EvidenceArgs: e.EvidenceArgs, Bind: bind, Next: next}
+			call := &Call{TyArgs: e.TyArgs, Args: e.Args, EvidenceArgs: e.EvidenceArgs, Bind: bind, Next: next}
+			if e.CalleeKind == core.Worker {
+				call.Callee = ref.Name
+			} else {
+				call.CalleeExpr = e.Callee
+				b.registerMachineLambdas(e.Callee)
+			}
 			call.Tail = b.isReturnOf(next, bind)
 			return b.add(call)
 		}
@@ -175,12 +226,167 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 		pop := b.add(&PopCleanup{Next: next})
 		body := b.lowerInto(e.Body, bind, pop)
 		return b.add(&PushCleanup{Acquire: e.Acquire, Resource: resource, Release: e.Release, Next: body})
+	case *core.Handle:
+		return b.lowerHandle(e, bind, next)
 	}
+	b.registerMachineLambdas(e)
 	if machineControl(e) {
 		b.errorf("%s: machine lowering does not yet support %T", b.def.Name, e)
 		return next
 	}
 	return b.add(&Eval{Bind: bind, Value: e, Next: next})
+}
+
+func (b *builder) lowerHandle(h *core.Handle, bind Local, next BlockID) BlockID {
+	if len(h.Clauses) == 0 {
+		b.errorf("%s: machine handler has no clauses", b.def.Name)
+		return next
+	}
+	abort := h.Clauses[0].Op.Abort
+	outer := append([]core.EffectInstance(nil), b.def.EffectParams...)
+	inner := make([]core.EffectInstance, 0, len(outer)+1)
+	for _, ev := range outer {
+		if ev.Unique != h.Effect.Unique {
+			inner = append(inner, ev)
+		}
+	}
+	handled := h.Effect
+	handled.Control = types.Control{Transport: types.Machine}
+	inner = append(inner, handled)
+
+	bodyCaptures := b.regionCaptures(h.Body)
+	bodyWorker := b.addRegion("handle_body", bodyCaptures, nil, nil, h.Body.Type(), inner, h.Body)
+	handlerBind, handlerNext := bind, next
+	var stateResult Local
+	if h.State != nil {
+		stateResult = Local{Name: h.State.Name, Ty: h.State.Ty}
+		b.declare(stateResult)
+	}
+	if h.Return != nil {
+		handlerBind = Local{Name: b.fresh("handled"), Ty: h.Body.Type()}
+		b.declare(handlerBind)
+		transformed := h.Return.Body
+		if h.Return.Param != "_" && h.Return.Param != "()" {
+			transformed = &core.Let{Name: h.Return.Param, Rhs: localRef(handlerBind), Body: transformed, Ty: h.Ty}
+		}
+		handlerNext = b.lowerInto(transformed, bind, next)
+	}
+	term := &Handle{Node: h, BodyWorker: bodyWorker, BodyCaptures: bodyCaptures, Bind: handlerBind, Next: handlerNext,
+		Abort: abort, AbortNext: next,
+		State: h.State, StateResult: stateResult}
+	for _, clause := range h.Clauses {
+		captures := b.regionCaptures(clause.Body)
+		body := core.Rewrite(clause.Body, identityType, func(e core.Expr) core.Expr {
+			if resume, ok := e.(*core.ResumeTail); ok && resume.Owner == clause.ResumeID && h.State == nil && !abort {
+				return resume.Value
+			}
+			return e
+		})
+		paramNames := append([]string(nil), clause.Params...)
+		paramTypes := append([]types.Type(nil), clause.ParamTypes...)
+		stateName := ""
+		var stateTy types.Type
+		if h.State != nil {
+			stateName, stateTy = h.State.Name, h.State.Ty
+			paramNames = append([]string{stateName}, paramNames...)
+			paramTypes = append([]types.Type{stateTy}, paramTypes...)
+		}
+		result := clause.ResultType
+		if abort {
+			result = h.Ty
+		}
+		worker := b.addRegion("handle_clause", captures, paramNames, paramTypes, result, outer, body)
+		term.Clauses = append(term.Clauses, HandlerClause{Op: clause.Op, Worker: worker, Captures: captures,
+			StateName: stateName, StateTy: stateTy})
+	}
+	return b.add(term)
+}
+
+func (b *builder) regionCaptures(body core.Expr) []Local {
+	free := freeLocalRefs(body)
+	var captures []Local
+	for name, ty := range b.locals {
+		if free[name] {
+			captures = append(captures, Local{Name: name, Ty: ty})
+		}
+	}
+	sort.Slice(captures, func(i, j int) bool { return captures[i].Name < captures[j].Name })
+	return captures
+}
+
+func (b *builder) addRegion(kind string, captures []Local, names []string, tys []types.Type, result types.Type, effects []core.EffectInstance, body core.Expr) string {
+	b.lambdaN++
+	name := fmt.Sprintf("%s_machine_%s%d", b.def.Name, kind, b.lambdaN)
+	params := make([]string, 0, len(captures)+len(names))
+	paramTypes := make([]types.Type, 0, len(captures)+len(tys))
+	for _, capture := range captures {
+		params = append(params, capture.Name)
+		paramTypes = append(paramTypes, capture.Ty)
+	}
+	for i, param := range names {
+		if param == "()" || param == "_" {
+			param = fmt.Sprintf("_machine_arg%d", i)
+		}
+		params = append(params, param)
+		paramTypes = append(paramTypes, tys[i])
+	}
+	ty := result
+	for i := len(paramTypes) - 1; i >= 0; i-- {
+		ty = &types.TFun{Arg: paramTypes[i], Ret: ty}
+	}
+	b.aux = append(b.aux, core.Def{Name: name, Owner: b.def.Owner, Type: ty, TyParams: b.def.TyParams,
+		Params: params, EffectParams: append([]core.EffectInstance(nil), effects...),
+		Control: types.Control{Transport: types.Machine}, Body: body})
+	return name
+}
+
+func (b *builder) registerMachineLambdas(e core.Expr) {
+	lam, ok := e.(*core.Lambda)
+	if !ok || b.lambdas[lam] {
+		return
+	}
+	fn, ok := lam.Ty.(*types.TFun)
+	if !ok || types.FunctionControl(fn).Resolve(types.Machine) != types.Machine {
+		return
+	}
+	b.lambdas[lam] = true
+	b.lambdaN++
+	name := fmt.Sprintf("%s_machine_lambda%d", b.def.Name, b.lambdaN)
+	free := freeLocalRefs(lam.Body)
+	delete(free, lam.Param)
+	var captures []Local
+	for local, ty := range b.locals {
+		if free[local] {
+			captures = append(captures, Local{Name: local, Ty: ty})
+		}
+	}
+	sort.Slice(captures, func(i, j int) bool { return captures[i].Name < captures[j].Name })
+	callEvidence := append([]core.EffectInstance(nil), lam.EffectParams...)
+	callEffects := map[int]bool{}
+	for _, ev := range callEvidence {
+		callEffects[ev.Unique] = true
+	}
+	var capturedEvidence []core.EffectInstance
+	for _, ev := range b.def.EffectParams {
+		if !callEffects[ev.Unique] {
+			capturedEvidence = append(capturedEvidence, ev)
+		}
+	}
+	params := make([]string, 0, len(captures)+1)
+	ty := lam.Ty
+	for i := len(captures) - 1; i >= 0; i-- {
+		ty = &types.TFun{Arg: captures[i].Ty, Ret: ty}
+	}
+	for _, capture := range captures {
+		params = append(params, capture.Name)
+	}
+	params = append(params, lam.Param)
+	effects := append(append([]core.EffectInstance(nil), capturedEvidence...), callEvidence...)
+	aux := core.Def{Name: name, Owner: b.def.Owner, Type: ty, TyParams: b.def.TyParams,
+		Params: params, EffectParams: effects, Control: types.Control{Transport: types.Machine}, Body: lam.Body}
+	b.aux = append(b.aux, aux)
+	b.closures = append(b.closures, Closure{Expr: lam, Worker: name, Captures: captures,
+		CapturedEvidence: capturedEvidence, CallEvidence: callEvidence})
 }
 
 func (b *builder) lowerTree(tree core.Tree, bind Local, next BlockID) BlockID {

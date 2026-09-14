@@ -23,6 +23,27 @@ type MachineFrame interface {
 	Clear()
 }
 
+// ImmediateMachine adapts a non-suspending Direct or Exit callback to the
+// machine frame protocol. The callback is invoked once by the dispatcher; it
+// is not a continuation and cannot be resumed or copied from Fango source.
+func ImmediateMachine(run func() (any, *ExitRequest)) MachineFrame {
+	return &immediateMachineFrame{run: run}
+}
+
+type immediateMachineFrame struct {
+	run func() (any, *ExitRequest)
+}
+
+func (f *immediateMachineFrame) Step(*Machine) MachineStep {
+	value, exit := f.run()
+	if exit != nil {
+		return MachineStep{Kind: MachineExit, Exit: exit}
+	}
+	return MachineStep{Kind: MachineReturn, Value: value}
+}
+
+func (f *immediateMachineFrame) Clear() { f.run = nil }
+
 type MachineStep struct {
 	Kind    MachineStepKind
 	Frame   MachineFrame
@@ -42,6 +63,7 @@ type MachineStats struct {
 	Steps       uint64
 	MaxDepth    int
 	MaxCleanups int
+	MaxStates   int
 }
 
 // MachineCleanup is a definition-site Direct/Exit release closure. E7 does
@@ -54,10 +76,20 @@ type MachineCleanup func() *ExitRequest
 type Machine struct {
 	frames   []MachineFrame
 	cleanups []MachineCleanup
+	states   []any
+	handlers []machineHandler
+	caught   *ExitRequest
 	result   any
 	waiting  bool
 	finished bool
 	stats    MachineStats
+}
+
+type machineHandler struct {
+	target       *ExitTarget
+	frameDepth   int
+	cleanupDepth int
+	stateDepth   int
 }
 
 func StartMachine(entry MachineFrame) *Machine {
@@ -119,6 +151,9 @@ func (m *Machine) Run() (MachineEvent, error) {
 			m.waiting = true
 			return MachineEvent{Request: step.Request}, nil
 		case MachineExit:
+			if m.routeExit(step.Exit) {
+				continue
+			}
 			step.Exit = m.unwind(step.Exit, 0)
 			m.clearFrames()
 			m.finished = true
@@ -148,7 +183,97 @@ func (m *Machine) TakeResult() any {
 	return value
 }
 
+func (m *Machine) TakeCaughtExit() *ExitRequest {
+	exit := m.caught
+	m.caught = nil
+	return exit
+}
+
 func (m *Machine) Stats() MachineStats { return m.stats }
+
+func (m *Machine) PushState(value any) int {
+	token := len(m.states)
+	m.states = append(m.states, value)
+	if len(m.states) > m.stats.MaxStates {
+		m.stats.MaxStates = len(m.states)
+	}
+	return token
+}
+
+func (m *Machine) State(token int) any {
+	if token < 0 || token >= len(m.states) {
+		panic("fangort: invalid machine state token")
+	}
+	return m.states[token]
+}
+
+// TopStateToken identifies the innermost live handler state cell. It is used
+// only while routing an abort into that handler's clause frame.
+func (m *Machine) TopStateToken() int {
+	if len(m.states) == 0 {
+		panic("fangort: machine state stack underflow")
+	}
+	return len(m.states) - 1
+}
+
+func (m *Machine) SetState(token int, value any) {
+	if token < 0 || token >= len(m.states) {
+		panic("fangort: invalid machine state token")
+	}
+	m.states[token] = value
+}
+
+func (m *Machine) PopState() any {
+	if len(m.states) == 0 {
+		panic("fangort: machine state stack underflow")
+	}
+	i := len(m.states) - 1
+	value := m.states[i]
+	m.states[i] = nil
+	m.states = m.states[:i]
+	return value
+}
+
+func (m *Machine) PushHandler(target *ExitTarget) {
+	if target == nil {
+		panic("fangort: machine handler has no target")
+	}
+	m.handlers = append(m.handlers, machineHandler{target: target, frameDepth: len(m.frames),
+		cleanupDepth: len(m.cleanups), stateDepth: len(m.states)})
+}
+
+func (m *Machine) PopHandler() {
+	if len(m.handlers) == 0 {
+		panic("fangort: machine handler stack underflow")
+	}
+	m.handlers = m.handlers[:len(m.handlers)-1]
+}
+
+func (m *Machine) routeExit(exit *ExitRequest) bool {
+	for i := len(m.handlers) - 1; i >= 0; i-- {
+		h := m.handlers[i]
+		if exit.Target != h.target {
+			continue
+		}
+		exit = m.unwind(exit, h.cleanupDepth)
+		for len(m.frames) > h.frameDepth {
+			last := len(m.frames) - 1
+			m.frames[last].Clear()
+			m.frames[last] = nil
+			m.frames = m.frames[:last]
+		}
+		for len(m.states) > h.stateDepth {
+			last := len(m.states) - 1
+			m.states[last] = nil
+			m.states = m.states[:last]
+		}
+		m.handlers = m.handlers[:i]
+		m.result = nil
+		m.caught = exit
+		return true
+	}
+	return false
+}
 
 // PushCleanup registers an acquired scope before its body may suspend.
 func (m *Machine) PushCleanup(cleanup MachineCleanup) {
@@ -204,4 +329,10 @@ func (m *Machine) clearFrames() {
 		m.cleanups[i] = nil
 	}
 	m.cleanups = nil
+	for i := range m.states {
+		m.states[i] = nil
+	}
+	m.states = nil
+	m.handlers = nil
+	m.caught = nil
 }

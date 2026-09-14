@@ -36,6 +36,9 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 		modes := []types.Transport{types.Direct}
 		if g.controlledType(adt.Con, nil) {
 			modes = append(modes, types.Exit)
+			if g.machine {
+				modes = append(modes, types.Machine)
+			}
 		}
 		for _, mode := range modes {
 			oldControl, oldABI := g.control, g.abi
@@ -48,6 +51,8 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 			suffix := ""
 			if mode == types.Exit {
 				suffix = "_exit"
+			} else if mode == types.Machine {
+				suffix = "_machine"
 			}
 			iface := mangleType(adt.Con.Name) + suffix
 			marker := markerMethod(adt.Con.Name) + suffix

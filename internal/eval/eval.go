@@ -145,10 +145,11 @@ func (c *IOContext) nativeExecutor() (*nativehost.Executor, error) {
 }
 
 type evidence struct {
-	handler *core.Handle
-	frame   *Frame
-	outer   map[int]*evidence
-	state   Value
+	handler    *core.Handle
+	frame      *Frame
+	outer      map[int]*evidence
+	state      Value
+	machineOps map[int]*machineOperation
 }
 
 // Env holds top-level cells and workers.

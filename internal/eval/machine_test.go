@@ -211,6 +211,88 @@ func TestMachineSessionKeepsCleanupPendingAcrossSuspension(t *testing.T) {
 	}
 }
 
+func TestMachineSessionRunsResumptiveHandlerClause(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	eff := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Main.Ask"}
+	op := &types.EffectOp{Owner: eff, Index: 0, Name: "Main.ask", Arity: 1,
+		ParamTypes: []types.Type{b.Unit}, ResultType: b.Int}
+	eff.Ops = []*types.EffectOp{op}
+	scope := sup.FreshScope()
+	ev := core.EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(scope),
+		Control: types.Control{Transport: types.Machine}}
+	clause := &core.Let{Name: "pause", Rhs: &core.Suspend{Request: &core.IntLit{Val: 5, Ty: b.Int}, Ty: b.Unit}, Ty: b.Int,
+		Body: &core.ResumeTail{Owner: 1, Value: &core.IntLit{Val: 40, Ty: b.Int}, ClauseResult: b.Int}}
+	h := &core.Handle{Body: &core.Perform{Op: op, Effect: ev, Args: []core.Expr{&core.UnitLit{Ty: b.Unit}}, Ty: b.Int,
+		Control: types.Control{Transport: types.Machine}}, Effect: ev, Scope: scope, Ty: b.Int,
+		Control: types.Control{Transport: types.Machine}, Clauses: []core.HandlerClause{{Op: op, ResumeID: 1,
+			Params: []string{"()"}, ParamTypes: []types.Type{b.Unit}, ResultType: b.Int, Body: clause}}}
+	p := &core.Prog{Effects: []*types.EffectInfo{eff}, Defs: []core.Def{{Name: "Main.main", Owner: "Main", Type: b.Int,
+		Control: types.Control{Transport: types.Machine}, Body: h}}}
+	mp := lowerMachineTest(t, p, b)
+	session := startMachineTest(t, p, mp, "Main.main", nil)
+	event, err := session.Run()
+	if err != nil || event.Done || event.Request != int64(5) {
+		t.Fatalf("handler suspension = %#v, %v", event, err)
+	}
+	event, err = session.Resume(struct{}{})
+	if err != nil || !event.Done || event.Value != int64(40) {
+		t.Fatalf("handler completion = %#v, %v", event, err)
+	}
+}
+
+func TestMachineSessionRunsStatefulHandler(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	eff := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Main.Cell"}
+	op := &types.EffectOp{Owner: eff, Index: 0, Name: "Main.get", Arity: 1,
+		ParamTypes: []types.Type{b.Unit}, ResultType: b.Int}
+	eff.Ops = []*types.EffectOp{op}
+	scope := sup.FreshScope()
+	ev := core.EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(scope),
+		Control: types.Control{Transport: types.Machine}}
+	h := &core.Handle{Body: &core.Perform{Op: op, Effect: ev, Args: []core.Expr{&core.UnitLit{Ty: b.Unit}}, Ty: b.Int,
+		Control: types.Control{Transport: types.Machine}}, Effect: ev, Scope: scope, Scoped: true, Ty: b.Int,
+		Control: types.Control{Transport: types.Machine}, State: &core.HandlerState{Name: "current", Initial: &core.IntLit{Val: 1, Ty: b.Int}, Ty: b.Int},
+		Clauses: []core.HandlerClause{{Op: op, ResumeID: 1, Params: []string{"()"}, ParamTypes: []types.Type{b.Unit}, ResultType: b.Int,
+			Body: &core.ResumeTail{Owner: 1, Value: &core.IntLit{Val: 40, Ty: b.Int}, NextState: &core.IntLit{Val: 41, Ty: b.Int}, ClauseResult: b.Int}}},
+		Return: &core.ReturnClause{Param: "_", Body: &core.VarRef{Name: "current", Local: true, Ty: b.Int}}}
+	p := &core.Prog{Effects: []*types.EffectInfo{eff}, Defs: []core.Def{{Name: "Main.main", Owner: "Main", Type: b.Int,
+		Control: types.Control{Transport: types.Machine}, Body: h}}}
+	mp := lowerMachineTest(t, p, b)
+	session := startMachineTest(t, p, mp, "Main.main", nil)
+	event, err := session.Run()
+	if err != nil || !event.Done || event.Value != int64(41) || session.Stats().MaxStates != 1 {
+		t.Fatalf("stateful handler = %#v, %v, stats %#v", event, err, session.Stats())
+	}
+}
+
+func TestMachineSessionRoutesAbortToClause(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	eff := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Main.Fail"}
+	op := &types.EffectOp{Owner: eff, Index: 0, Name: "Main.fail", Arity: 1, ParamTypes: []types.Type{b.Int}, ResultType: b.Int, Abort: true}
+	eff.Ops = []*types.EffectOp{op}
+	scope := sup.FreshScope()
+	ev := core.EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(scope), Control: types.Control{Transport: types.Exit}}
+	body := &core.ControlExit{Effect: ev, Op: op, Payload: []core.Expr{&core.IntLit{Val: 9, Ty: b.Int}}, Ty: b.Int}
+	clauseBody := &core.Let{Name: "pause", Rhs: &core.Suspend{Request: &core.IntLit{Val: 5, Ty: b.Int}, Ty: b.Unit}, Ty: b.Int,
+		Body: &core.VarRef{Name: "value", Local: true, Ty: b.Int}}
+	h := &core.Handle{Body: body, Effect: ev, Scope: scope, Ty: b.Int, Control: types.Control{Transport: types.Machine},
+		Clauses: []core.HandlerClause{{Op: op, Params: []string{"value"}, ParamTypes: []types.Type{b.Int}, ResultType: b.Int, Body: clauseBody}}}
+	p := &core.Prog{Effects: []*types.EffectInfo{eff}, Defs: []core.Def{{Name: "Main.main", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: h}}}
+	mp := lowerMachineTest(t, p, b)
+	session := startMachineTest(t, p, mp, "Main.main", nil)
+	event, err := session.Run()
+	if err != nil || event.Done || event.Request != int64(5) {
+		t.Fatalf("abort clause suspension = %#v, %v", event, err)
+	}
+	event, err = session.Resume(struct{}{})
+	if err != nil || !event.Done || event.Exit != nil || event.Value != int64(9) {
+		t.Fatalf("abort clause completion = %#v, %v", event, err)
+	}
+}
+
 func lowerMachineTest(t *testing.T, p *core.Prog, b *types.Builtins) *machineir.Prog {
 	t.Helper()
 	mp, errs := machineir.Lower(p, b)

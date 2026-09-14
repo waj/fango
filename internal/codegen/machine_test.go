@@ -113,9 +113,47 @@ func TestGeneratedMachineFrameExecutes(t *testing.T) {
 	bracket := &core.Bracket{Scope: sup.FreshScope(), Resource: "resource", ResourceTy: b.Int,
 		Acquire: &core.IntLit{Val: 3, Ty: b.Int}, Release: &core.UnitLit{Ty: b.Unit}, Body: bracketBody, Ty: b.Int,
 		Control: types.Control{Transport: types.Machine}}
-	p := &core.Prog{Entry: "Main.main", ADTs: []*types.ADTInfo{adt}, Defs: []core.Def{
+	callbackTy := &types.TFun{Arg: b.Int, Ret: b.Int, Control: types.Control{Transport: types.Machine}}
+	callbackLambda := &core.Lambda{Param: "ignoredArg", ParamCapture: sup.FreshCapture(), Ty: callbackTy,
+		Body: &core.Suspend{Request: &core.VarRef{Name: "captured", Local: true, Ty: b.Int}, Ty: b.Int}}
+	callbackBody := &core.Let{Name: "captured", Rhs: &core.IntLit{Val: 8, Ty: b.Int}, Ty: b.Int,
+		Body: &core.Let{Name: "callback", Rhs: callbackLambda, Ty: b.Int,
+			Body: &core.App{CalleeKind: core.Value, Callee: &core.VarRef{Name: "callback", Local: true, Ty: callbackTy},
+				Args: []core.Expr{&core.IntLit{Val: 0, Ty: b.Int}}, Ty: b.Int, Control: types.Control{Transport: types.Machine}}}}
+	genericVar := sup.FreshVar(types.General)
+	genericVar.Rigid = true
+	genericTy := &types.TFun{Arg: genericVar, Ret: genericVar, Control: types.Control{Transport: types.Machine}}
+	generic := core.Def{Name: "Main.generic", Owner: "Main", Type: genericTy, TyParams: []*types.TVar{genericVar},
+		Params: []string{"value"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture()}, Control: types.Control{Transport: types.Machine},
+		Body: &core.Suspend{Request: &core.VarRef{Name: "value", Local: true, Ty: genericVar}, Ty: genericVar}}
+	genericCall := &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: generic.Name, Ty: genericTy, TyArgs: []types.Type{b.Int}},
+		TyArgs: []types.Type{b.Int}, Args: []core.Expr{&core.IntLit{Val: 9, Ty: b.Int}}, Ty: b.Int, Control: types.Control{Transport: types.Machine}}
+	eff := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Main.Ask"}
+	op := &types.EffectOp{Owner: eff, Index: 0, Name: "Main.ask", Arity: 1, ParamTypes: []types.Type{b.Unit}, ResultType: b.Int}
+	eff.Ops = []*types.EffectOp{op}
+	handlerScope := sup.FreshScope()
+	handlerEvidence := core.EffectInstance{Unique: eff.Unique, Name: eff.Name, Captures: types.ScopeCapture(handlerScope),
+		Control: types.Control{Transport: types.Machine}}
+	handlerClause := &core.Let{Name: "handlerPause", Rhs: &core.Suspend{Request: &core.IntLit{Val: 10, Ty: b.Int}, Ty: b.Unit}, Ty: b.Int,
+		Body: &core.ResumeTail{Owner: 1, Value: &core.IntLit{Val: 44, Ty: b.Int}, ClauseResult: b.Int}}
+	handler := &core.Handle{Body: &core.Perform{Op: op, Effect: handlerEvidence, Args: []core.Expr{&core.UnitLit{Ty: b.Unit}}, Ty: b.Int,
+		Control: types.Control{Transport: types.Machine}}, Effect: handlerEvidence, Scope: handlerScope, Ty: b.Int,
+		Control: types.Control{Transport: types.Machine}, Clauses: []core.HandlerClause{{Op: op, ResumeID: 1,
+			Params: []string{"()"}, ParamTypes: []types.Type{b.Unit}, ResultType: b.Int, Body: handlerClause}}}
+	fail := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Main.Fail"}
+	failOp := &types.EffectOp{Owner: fail, Index: 0, Name: "Main.fail", Arity: 1, ParamTypes: []types.Type{b.Int}, ResultType: b.Int, Abort: true}
+	fail.Ops = []*types.EffectOp{failOp}
+	failScope := sup.FreshScope()
+	failEvidence := core.EffectInstance{Unique: fail.Unique, Name: fail.Name, Captures: types.ScopeCapture(failScope), Control: types.Control{Transport: types.Exit}}
+	abort := &core.Handle{Body: &core.ControlExit{Effect: failEvidence, Op: failOp, Payload: []core.Expr{&core.IntLit{Val: 12, Ty: b.Int}}, Ty: b.Int}, Effect: failEvidence, Scope: failScope, Ty: b.Int, Control: types.Control{Transport: types.Machine}, Clauses: []core.HandlerClause{{Op: failOp, Params: []string{"n"}, ParamTypes: []types.Type{b.Int}, ResultType: b.Int, Body: &core.Let{Name: "pause", Rhs: &core.Suspend{Request: &core.IntLit{Val: 11, Ty: b.Int}, Ty: b.Unit}, Ty: b.Int, Body: &core.VarRef{Name: "n", Local: true, Ty: b.Int}}}}}
+	p := &core.Prog{Entry: "Main.main", ADTs: []*types.ADTInfo{adt}, Effects: []*types.EffectInfo{eff, fail}, Defs: []core.Def{
 		{Name: "Main.main", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: body},
 		{Name: "Main.match", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: matchBody},
+		{Name: "Main.callback", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: callbackBody},
+		generic,
+		{Name: "Main.genericCall", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: genericCall},
+		{Name: "Main.handler", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: handler},
+		{Name: "Main.abort", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: abort},
 		{Name: types.ScopeBracketName, Owner: "Scope", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: bracket},
 	}}
 	mp, errs := machineir.Lower(p, b)
@@ -176,6 +214,30 @@ func TestFixture(t *testing.T) {
     if err != nil || event.Done || event.Request != int64(3) || scoped.Stats().MaxCleanups != 1 { t.Fatalf("scope: %#v %v", event, err) }
     event, err = scoped.Resume(fangort.UnitValue)
     if err != nil || !event.Done || event.Value != int64(3) { t.Fatalf("scope done: %#v %v", event, err) }
+
+    callback := fangort.StartMachine(MachineFrame_Main_dot_callback())
+    event, err = callback.Run()
+    if err != nil || event.Done || event.Request != int64(8) { t.Fatalf("callback: %#v %v", event, err) }
+    event, err = callback.Resume(int64(42))
+    if err != nil || !event.Done || event.Value != int64(42) { t.Fatalf("callback done: %#v %v", event, err) }
+
+    generic := fangort.StartMachine(MachineFrame_Main_dot_genericCall())
+    event, err = generic.Run()
+    if err != nil || event.Done || event.Request != int64(9) { t.Fatalf("generic: %#v %v", event, err) }
+    event, err = generic.Resume(int64(43))
+    if err != nil || !event.Done || event.Value != int64(43) { t.Fatalf("generic done: %#v %v", event, err) }
+
+    handler := fangort.StartMachine(MachineFrame_Main_dot_handler())
+    event, err = handler.Run()
+    if err != nil || event.Done || event.Request != int64(10) { t.Fatalf("handler: %#v %v", event, err) }
+    event, err = handler.Resume(fangort.UnitValue)
+    if err != nil || !event.Done || event.Value != int64(44) { t.Fatalf("handler done: %#v %v", event, err) }
+
+    abort := fangort.StartMachine(MachineFrame_Main_dot_abort())
+    event, err = abort.Run()
+    if err != nil || event.Done || event.Request != int64(11) { t.Fatalf("abort: %#v %v", event, err) }
+    event, err = abort.Resume(fangort.UnitValue)
+    if err != nil || !event.Done || event.Exit != nil || event.Value != int64(12) { t.Fatalf("abort done: %#v %v", event, err) }
 }
 `))
 	cmd := exec.Command("go", "test", ".")

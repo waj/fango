@@ -33,6 +33,14 @@ func Lint(p *Prog) []error {
 func lintWorker(w *Worker, workers map[string]*Worker) []error {
 	where := "machine worker " + w.Name
 	var errs []error
+	tyParams := map[int]bool{}
+	for _, param := range w.TyParams {
+		if param == nil || !param.Rigid || param.Kind == types.RowVar || tyParams[param.ID] {
+			errs = append(errs, fmt.Errorf("%s: malformed or duplicate type parameter", where))
+			continue
+		}
+		tyParams[param.ID] = true
+	}
 	locals := map[string]types.Type{}
 	for _, local := range w.Locals {
 		if local.Name == "" || local.Ty == nil {
@@ -48,6 +56,13 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 		if ty := locals[param.Name]; ty == nil || !types.Equal(ty, param.Ty) {
 			errs = append(errs, fmt.Errorf("%s: parameter %q is absent or mistyped in locals", where, param.Name))
 		}
+	}
+	seenEvidence := map[int]bool{}
+	for _, ev := range w.EffectParams {
+		if ev.Unique == 0 || ev.Name == "" || seenEvidence[ev.Unique] {
+			errs = append(errs, fmt.Errorf("%s: malformed or duplicate evidence parameter", where))
+		}
+		seenEvidence[ev.Unique] = true
 	}
 	if int(w.Entry) < 0 || int(w.Entry) >= len(w.Blocks) {
 		errs = append(errs, fmt.Errorf("%s: invalid entry block %d", where, w.Entry))
@@ -136,22 +151,122 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			for i, arg := range term.Args {
 				checkExpr(arg, fmt.Sprintf("call argument %d", i+1), false)
 			}
+			if term.Operation != nil {
+				if term.Effect.Unique == 0 || !seenEvidence[term.Effect.Unique] {
+					errs = append(errs, fmt.Errorf("%s: machine operation %q has unavailable evidence", blockWhere, term.Operation.Name))
+				}
+				if len(term.Args) != len(term.Operation.ParamTypes) {
+					errs = append(errs, fmt.Errorf("%s: machine operation %q argument arity mismatch", blockWhere, term.Operation.Name))
+				}
+				break
+			}
+			if term.Callee == "" {
+				checkExpr(term.CalleeExpr, "indirect callee", false)
+				fn, ok := term.CalleeExpr.Type().(*types.TFun)
+				if !ok {
+					errs = append(errs, fmt.Errorf("%s: indirect machine callee is not a function", blockWhere))
+				} else {
+					if len(term.Args) != 1 || !types.Equal(term.Args[0].Type(), fn.Arg) {
+						errs = append(errs, fmt.Errorf("%s: indirect machine call argument disagrees with function", blockWhere))
+					}
+					if !types.Equal(term.Bind.Ty, fn.Ret) {
+						errs = append(errs, fmt.Errorf("%s: indirect machine call result disagrees with function", blockWhere))
+					}
+					wantEvidence := 0
+					for _, label := range types.SortedRow(fn.Eff).Labels {
+						if types.SurfaceName(label.Name) != "IO" {
+							wantEvidence++
+						}
+					}
+					if len(term.EvidenceArgs) != wantEvidence {
+						errs = append(errs, fmt.Errorf("%s: indirect machine call has %d evidence arguments, want %d", blockWhere, len(term.EvidenceArgs), wantEvidence))
+					}
+				}
+				for _, ev := range term.EvidenceArgs {
+					if !seenEvidence[ev.Unique] {
+						errs = append(errs, fmt.Errorf("%s: indirect machine call passes unavailable evidence %q", blockWhere, ev.Name))
+					}
+				}
+				break
+			}
 			callee := workers[term.Callee]
 			if callee == nil {
 				errs = append(errs, fmt.Errorf("%s: unknown machine callee %q", blockWhere, term.Callee))
 			} else {
+				if len(term.TyArgs) != len(callee.TyParams) {
+					errs = append(errs, fmt.Errorf("%s: call to %q has %d type arguments, want %d", blockWhere, term.Callee, len(term.TyArgs), len(callee.TyParams)))
+				}
+				sub := make(map[int]types.Type, len(callee.TyParams))
+				for i, param := range callee.TyParams {
+					if i < len(term.TyArgs) {
+						sub[param.ID] = term.TyArgs[i]
+					}
+				}
 				if len(term.Args) != len(callee.Params) {
 					errs = append(errs, fmt.Errorf("%s: call to %q has %d arguments, want %d", blockWhere, term.Callee, len(term.Args), len(callee.Params)))
 				}
+				if len(term.EvidenceArgs) != len(callee.EffectParams) {
+					errs = append(errs, fmt.Errorf("%s: call to %q has %d evidence arguments, want %d", blockWhere, term.Callee, len(term.EvidenceArgs), len(callee.EffectParams)))
+				}
+				for i, ev := range term.EvidenceArgs {
+					if !seenEvidence[ev.Unique] {
+						errs = append(errs, fmt.Errorf("%s: call to %q passes unavailable evidence %q", blockWhere, term.Callee, ev.Name))
+					}
+					if i < len(callee.EffectParams) {
+						want := callee.EffectParams[i]
+						if ev.Unique != want.Unique || len(ev.Args) != len(want.Args) {
+							errs = append(errs, fmt.Errorf("%s: call evidence %d to %q disagrees with callee", blockWhere, i+1, term.Callee))
+						} else {
+							for j := range ev.Args {
+								if !types.Equal(ev.Args[j], types.SubstRigid(want.Args[j], sub)) {
+									errs = append(errs, fmt.Errorf("%s: call evidence %d type argument to %q disagrees with callee", blockWhere, i+1, term.Callee))
+								}
+							}
+						}
+					}
+				}
 				for i, arg := range term.Args {
-					if i < len(callee.Params) && !types.Equal(arg.Type(), callee.Params[i].Ty) {
+					if i < len(callee.Params) && !types.Equal(arg.Type(), types.SubstRigid(callee.Params[i].Ty, sub)) {
 						errs = append(errs, fmt.Errorf("%s: call argument %d to %q is mistyped", blockWhere, i+1, term.Callee))
 					}
 				}
-				if term.Bind.Ty != nil && !types.Equal(term.Bind.Ty, callee.Result) {
+				if term.Bind.Ty != nil && !types.Equal(term.Bind.Ty, types.SubstRigid(callee.Result, sub)) {
 					errs = append(errs, fmt.Errorf("%s: call result from %q is mistyped", blockWhere, term.Callee))
 				}
 			}
+		case *Handle:
+			checkBind(term.Bind)
+			if term.Node == nil || len(term.Clauses) == 0 {
+				errs = append(errs, fmt.Errorf("%s: malformed or unsupported machine handler", blockWhere))
+				break
+			}
+			if term.State != nil {
+				checkBind(term.StateResult)
+				checkExpr(term.State.Initial, "handler initial state", true)
+			}
+			body := workers[term.BodyWorker]
+			if body == nil || !types.Equal(body.Result, term.Node.Body.Type()) {
+				errs = append(errs, fmt.Errorf("%s: machine handler body worker is missing or mistyped", blockWhere))
+			}
+			for _, clause := range term.Clauses {
+				worker := workers[clause.Worker]
+				if clause.Op == nil || worker == nil {
+					errs = append(errs, fmt.Errorf("%s: machine handler clause worker is missing", blockWhere))
+				}
+			}
+			if term.ReturnWorker != "" {
+				worker := workers[term.ReturnWorker]
+				if worker == nil || !types.Equal(worker.Result, term.Node.Ty) {
+					errs = append(errs, fmt.Errorf("%s: machine handler return worker is missing or mistyped", blockWhere))
+				}
+			}
+		case *StateResume:
+			if !w.StateToken {
+				errs = append(errs, fmt.Errorf("%s: state resume occurs in a worker without a state token", blockWhere))
+			}
+			checkExpr(term.Value, "state resume value", false)
+			checkExpr(term.NextState, "state resume update", false)
+			checkBind(term.Bind)
 		case *PushCleanup:
 			checkBind(term.Resource)
 			checkExpr(term.Acquire, "cleanup acquisition", true)

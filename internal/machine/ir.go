@@ -13,7 +13,19 @@ import (
 type BlockID int
 
 type Prog struct {
-	Workers []Worker
+	Workers  []Worker
+	Closures []Closure
+}
+
+// Closure connects one semantic Core lambda to its defunctionalized machine
+// worker. Captures are supplied when the value is created; CallEvidence and
+// the lambda argument are supplied when it is invoked.
+type Closure struct {
+	Expr             *core.Lambda
+	Worker           string
+	Captures         []Local
+	CapturedEvidence []core.EffectInstance
+	CallEvidence     []core.EffectInstance
 }
 
 type Local struct {
@@ -22,12 +34,18 @@ type Local struct {
 }
 
 type Worker struct {
-	Name   string
-	Owner  string
-	Params []Local
-	Result types.Type
-	Entry  BlockID
-	Blocks []Block
+	Name     string
+	Owner    string
+	TyParams []*types.TVar
+	Params   []Local
+	// EffectParams are explicit lexical evidence inputs. Unlike term locals,
+	// they keep nominal effect identity and capture metadata through lowering.
+	EffectParams []core.EffectInstance
+	Result       types.Type
+	Entry        BlockID
+	Blocks       []Block
+	Def          *core.Def
+	StateToken   bool
 
 	// Locals is the complete typed local namespace. Frame is the subset live
 	// across at least one suspension or non-tail machine call.
@@ -98,12 +116,52 @@ type Suspend struct {
 // Call transfers to another machine worker. The caller frame remains below
 // the callee unless Tail is true. Resumption/return defines Bind at Next.
 type Call struct {
-	Callee       string
+	Callee       string // non-empty for a statically known worker
+	CalleeExpr   core.Expr
+	Operation    *types.EffectOp
+	Effect       core.EffectInstance
+	TyArgs       []types.Type
 	Args         []core.Expr
 	EvidenceArgs []core.EffectInstance
 	Bind         Local
 	Next         BlockID
 	Tail         bool
+}
+
+type HandlerClause struct {
+	Op        *types.EffectOp
+	Worker    string
+	Captures  []Local
+	StateName string
+	StateTy   types.Type
+}
+
+// Handle installs Machine evidence, calls the defunctionalized handled body,
+// then optionally calls a return-transform worker under outer evidence.
+// Abort handlers and state cells extend this term below without changing the
+// ordinary Call protocol.
+type Handle struct {
+	Node           *core.Handle
+	BodyWorker     string
+	BodyCaptures   []Local
+	Clauses        []HandlerClause
+	ReturnWorker   string
+	ReturnCaptures []Local
+	Bind           Local
+	Next           BlockID
+	// Abort selects the non-resumptive exit-routing protocol. AbortNext is
+	// reached after an abort clause returns; ordinary completion uses Next.
+	Abort       bool
+	AbortNext   BlockID
+	State       *core.HandlerState
+	StateResult Local
+}
+
+type StateResume struct {
+	Value     core.Expr
+	NextState core.Expr
+	Bind      Local
+	Next      BlockID
 }
 
 type PushCleanup struct {
@@ -127,6 +185,8 @@ func (*SwitchCtor) isTerm()  {}
 func (*SwitchLit) isTerm()   {}
 func (*Suspend) isTerm()     {}
 func (*Call) isTerm()        {}
+func (*Handle) isTerm()      {}
+func (*StateResume) isTerm() {}
 func (*PushCleanup) isTerm() {}
 func (*PopCleanup) isTerm()  {}
 func (*Return) isTerm()      {}
