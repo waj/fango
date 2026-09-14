@@ -356,6 +356,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		stateToken := ""
 		if term.State != nil {
 			initialPrefix, initial := value(term.State.Initial)
+			initial = callExpr(g.goType(term.State.Ty), initial)
 			stateToken = fmt.Sprintf("machineHandlerState%d", g.tmp)
 			g.tmp++
 			statePrefix = append(initialPrefix, varDeclStmt(stateToken, ident("int"),
@@ -501,7 +502,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			first = append(first, &goast.IfStmt{Cond: binExpr(gotoken.NEQ, ident(caught), ident("nil")), Body: &goast.BlockStmt{List: []goast.Stmt{&goast.SwitchStmt{Tag: selector(caught, "Operation"), Body: &goast.BlockStmt{List: cases}}}}})
 			first = append(first, exprStmt(callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PopHandler")})))
 			first = append(first, resumed...)
-			aborted := resume(term.Bind, term.AbortNext)
+			aborted := resume(term.AbortBind, term.AbortNext)
 			if term.State != nil {
 				state := &goast.TypeAssertExpr{X: callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PopState")}), Type: g.goType(term.State.Ty)}
 				aborted = append(aborted[:1], append([]goast.Stmt{assignStmt(machineLocalName(term.StateResult.Name), state)}, aborted[1:]...)...)
@@ -553,7 +554,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		g.tmp++
 		stmts := []goast.Stmt{
 			varDeclStmt(resultName, g.goType(term.Value.Type()), g.machineExpr(term.Value)),
-			exprStmt(callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("SetState")}, ident("machineStateToken"), g.machineExpr(term.NextState))),
+			exprStmt(callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("SetState")}, ident("machineStateToken"), callExpr(g.goType(term.NextState.Type()), g.machineExpr(term.NextState)))),
 			assignStmt(machineLocalName(term.Bind.Name), ident(resultName)),
 		}
 		return append(stmts, continueStmt(term.Next)...), nil

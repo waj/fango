@@ -54,6 +54,11 @@ func TestMachineEmitterBuildsIterativeTypedFrame(t *testing.T) {
 	if len(files) != 2 {
 		t.Fatalf("got %d files, want 2", len(files))
 	}
+	totalBytes := 0
+	for _, file := range files {
+		totalBytes += len(file.Data)
+	}
+	t.Logf("generated Machine source size: %d bytes", totalBytes)
 	got := string(files[0].Data)
 	for _, want := range []string{
 		"type machineFrame_Main_dot_main struct",
@@ -136,24 +141,40 @@ func TestGeneratedMachineFrameExecutes(t *testing.T) {
 		Control: types.Control{Transport: types.Machine}}
 	handlerClause := &core.Let{Name: "handlerPause", Rhs: &core.Suspend{Request: &core.IntLit{Val: 10, Ty: b.Int}, Ty: b.Unit}, Ty: b.Int,
 		Body: &core.ResumeTail{Owner: 1, Value: &core.IntLit{Val: 44, Ty: b.Int}, ClauseResult: b.Int}}
-	handler := &core.Handle{Body: &core.Perform{Op: op, Effect: handlerEvidence, Args: []core.Expr{&core.UnitLit{Ty: b.Unit}}, Ty: b.Int,
-		Control: types.Control{Transport: types.Machine}}, Effect: handlerEvidence, Scope: handlerScope, Ty: b.Int,
+	perform := func() core.Expr {
+		return &core.Perform{Op: op, Effect: handlerEvidence, Args: []core.Expr{&core.UnitLit{Ty: b.Unit}}, Ty: b.Int,
+			Control: types.Control{Transport: types.Machine}}
+	}
+	handler := &core.Handle{Body: &core.Let{Name: "first", Rhs: perform(), Body: perform(), Ty: b.Int}, Effect: handlerEvidence, Scope: handlerScope, Ty: b.Int,
 		Control: types.Control{Transport: types.Machine}, Clauses: []core.HandlerClause{{Op: op, ResumeID: 1,
-			Params: []string{"()"}, ParamTypes: []types.Type{b.Unit}, ResultType: b.Int, Body: handlerClause}}}
+			Params: []string{"()"}, ParamTypes: []types.Type{b.Unit}, ResultType: b.Int, Body: handlerClause}},
+		Return: &core.ReturnClause{Param: "handled", Body: &core.Let{Name: "returnPause", Rhs: &core.Suspend{Request: &core.IntLit{Val: 12, Ty: b.Int}, Ty: b.Unit}, Ty: b.Int, Body: &core.VarRef{Name: "handled", Local: true, Ty: b.Int}}}}
 	fail := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Main.Fail"}
 	failOp := &types.EffectOp{Owner: fail, Index: 0, Name: "Main.fail", Arity: 1, ParamTypes: []types.Type{b.Int}, ResultType: b.Int, Abort: true}
 	fail.Ops = []*types.EffectOp{failOp}
 	failScope := sup.FreshScope()
 	failEvidence := core.EffectInstance{Unique: fail.Unique, Name: fail.Name, Captures: types.ScopeCapture(failScope), Control: types.Control{Transport: types.Exit}}
-	abort := &core.Handle{Body: &core.ControlExit{Effect: failEvidence, Op: failOp, Payload: []core.Expr{&core.IntLit{Val: 12, Ty: b.Int}}, Ty: b.Int}, Effect: failEvidence, Scope: failScope, Ty: b.Int, Control: types.Control{Transport: types.Machine}, Clauses: []core.HandlerClause{{Op: failOp, Params: []string{"n"}, ParamTypes: []types.Type{b.Int}, ResultType: b.Int, Body: &core.Let{Name: "pause", Rhs: &core.Suspend{Request: &core.IntLit{Val: 11, Ty: b.Int}, Ty: b.Unit}, Ty: b.Int, Body: &core.VarRef{Name: "n", Local: true, Ty: b.Int}}}}}
-	p := &core.Prog{Entry: "Main.main", ADTs: []*types.ADTInfo{adt}, Effects: []*types.EffectInfo{eff, fail}, Defs: []core.Def{
+	abort := &core.Handle{Body: &core.ControlExit{Effect: failEvidence, Op: failOp, Payload: []core.Expr{&core.IntLit{Val: 12, Ty: b.Int}}, Ty: b.Int}, Effect: failEvidence, Scope: failScope, Ty: b.Bool, Control: types.Control{Transport: types.Machine}, Clauses: []core.HandlerClause{{Op: failOp, Params: []string{"n"}, ParamTypes: []types.Type{b.Int}, ResultType: b.Int, Body: &core.Let{Name: "pause", Rhs: &core.Suspend{Request: &core.IntLit{Val: 11, Ty: b.Int}, Ty: b.Unit}, Ty: b.Bool, Body: &core.BoolLit{Val: true, Ty: b.Bool}}}}, Return: &core.ReturnClause{Param: "normal", Body: &core.BoolLit{Val: false, Ty: b.Bool}}}
+	cell := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Main.Cell", Scoped: true}
+	get := &types.EffectOp{Owner: cell, Index: 0, Name: "Main.get", Arity: 1, ParamTypes: []types.Type{b.Unit}, ResultType: b.Int}
+	cell.Ops = []*types.EffectOp{get}
+	cellScope := sup.FreshScope()
+	cellEvidence := core.EffectInstance{Unique: cell.Unique, Name: cell.Name, Captures: types.ScopeCapture(cellScope), Control: types.Control{Transport: types.Machine}}
+	stateful := &core.Handle{Body: &core.Perform{Op: get, Effect: cellEvidence, Args: []core.Expr{&core.UnitLit{Ty: b.Unit}}, Ty: b.Int, Control: types.Control{Transport: types.Machine}},
+		Effect: cellEvidence, Scope: cellScope, Scoped: true, Ty: b.Int, Control: types.Control{Transport: types.Machine},
+		State: &core.HandlerState{Name: "current", Initial: &core.IntLit{Val: 1, Ty: b.Int}, Ty: b.Int},
+		Clauses: []core.HandlerClause{{Op: get, ResumeID: 2, Params: []string{"()"}, ParamTypes: []types.Type{b.Unit}, ResultType: b.Int,
+			Body: &core.ResumeTail{Owner: 2, Value: &core.IntLit{Val: 40, Ty: b.Int}, NextState: &core.IntLit{Val: 41, Ty: b.Int}, ClauseResult: b.Int}}},
+		Return: &core.ReturnClause{Param: "_", Body: &core.VarRef{Name: "current", Local: true, Ty: b.Int}}}
+	p := &core.Prog{Entry: "Main.main", ADTs: []*types.ADTInfo{adt}, Effects: []*types.EffectInfo{eff, fail, cell}, Defs: []core.Def{
 		{Name: "Main.main", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: body},
 		{Name: "Main.match", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: matchBody},
 		{Name: "Main.callback", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: callbackBody},
 		generic,
 		{Name: "Main.genericCall", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: genericCall},
 		{Name: "Main.handler", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: handler},
-		{Name: "Main.abort", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: abort},
+		{Name: "Main.abort", Owner: "Main", Type: b.Bool, Control: types.Control{Transport: types.Machine}, Body: abort},
+		{Name: "Main.stateful", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: stateful},
 		{Name: types.ScopeBracketName, Owner: "Scope", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: bracket},
 	}}
 	mp, errs := machineir.Lower(p, b)
@@ -231,13 +252,21 @@ func TestFixture(t *testing.T) {
     event, err = handler.Run()
     if err != nil || event.Done || event.Request != int64(10) { t.Fatalf("handler: %#v %v", event, err) }
     event, err = handler.Resume(fangort.UnitValue)
+    if err != nil || event.Done || event.Request != int64(10) { t.Fatalf("handler second: %#v %v", event, err) }
+    event, err = handler.Resume(fangort.UnitValue)
+    if err != nil || event.Done || event.Request != int64(12) { t.Fatalf("handler return: %#v %v", event, err) }
+    event, err = handler.Resume(fangort.UnitValue)
     if err != nil || !event.Done || event.Value != int64(44) { t.Fatalf("handler done: %#v %v", event, err) }
 
     abort := fangort.StartMachine(MachineFrame_Main_dot_abort())
     event, err = abort.Run()
     if err != nil || event.Done || event.Request != int64(11) { t.Fatalf("abort: %#v %v", event, err) }
     event, err = abort.Resume(fangort.UnitValue)
-    if err != nil || !event.Done || event.Exit != nil || event.Value != int64(12) { t.Fatalf("abort done: %#v %v", event, err) }
+    if err != nil || !event.Done || event.Exit != nil || event.Value != true { t.Fatalf("abort done: %#v %v", event, err) }
+
+    stateful := fangort.StartMachine(MachineFrame_Main_dot_stateful())
+    event, err = stateful.Run()
+    if err != nil || !event.Done || event.Value != int64(41) || stateful.Stats().MaxStates != 1 { t.Fatalf("stateful: %#v %v %#v", event, err, stateful.Stats()) }
 }
 `))
 	cmd := exec.Command("go", "test", ".")
@@ -252,14 +281,19 @@ func TestMachineFramesCrossModuleThroughExportedConstructors(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	control := types.Control{Transport: types.Machine}
-	helperTy := &types.TFun{Arg: b.Int, Ret: b.Int, Control: control}
-	helper := core.Def{Name: "Dep.helper", Owner: "Dep", Type: helperTy, Params: []string{"n"},
+	callbackTy := &types.TFun{Arg: b.Int, Ret: b.Int, Control: control}
+	invokeTy := &types.TFun{Arg: callbackTy, Ret: b.Int, Control: control}
+	invoke := core.Def{Name: "Dep.invoke", Owner: "Dep", Type: invokeTy, Params: []string{"callback"},
 		ParamCaptures: []types.CaptureVar{sup.FreshCapture()}, Control: control,
+		Body: &core.App{CalleeKind: core.Value, Callee: &core.VarRef{Name: "callback", Local: true, Ty: callbackTy},
+			Args: []core.Expr{&core.IntLit{Val: 7, Ty: b.Int}}, Ty: b.Int, Control: control}}
+	callback := &core.Lambda{Param: "n", ParamCapture: sup.FreshCapture(), Ty: callbackTy,
 		Body: &core.Suspend{Request: &core.VarRef{Name: "n", Local: true, Ty: b.Int}, Ty: b.Int}}
-	call := &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: "Dep.helper", Ty: helperTy},
-		Args: []core.Expr{&core.IntLit{Val: 7, Ty: b.Int}}, Ty: b.Int, Control: control}
-	main := core.Def{Name: "Main.main", Owner: "Main", Type: b.Int, Control: control, Body: call}
-	p := &core.Prog{Entry: "Main.main", Defs: []core.Def{helper, main}}
+	call := &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: "Dep.invoke", Ty: invokeTy},
+		Args: []core.Expr{&core.VarRef{Name: "callback", Local: true, Ty: callbackTy}}, Ty: b.Int, Control: control}
+	main := core.Def{Name: "Main.main", Owner: "Main", Type: b.Int, Control: control,
+		Body: &core.Let{Name: "callback", Rhs: callback, Body: call, Ty: b.Int}}
+	p := &core.Prog{Entry: "Main.main", Defs: []core.Def{invoke, main}}
 	mp, errs := machineir.Lower(p, b)
 	if len(errs) != 0 {
 		t.Fatalf("machine lowering: %v", errs)
@@ -281,11 +315,51 @@ func TestMachineFramesCrossModuleThroughExportedConstructors(t *testing.T) {
 			mainGo = string(file.Data)
 		}
 	}
-	if !strings.Contains(dep, "func MachineFrame_Dep_dot_helper(v_n int64) fangort.MachineFrame") {
+	if !strings.Contains(dep, "func MachineFrame_Dep_dot_invoke(") {
 		t.Fatalf("dependency does not export its frame constructor:\n%s", dep)
 	}
 	if !strings.Contains(mainGo, `m_Dep "fangobuild/modules/Dep"`) ||
-		!strings.Contains(mainGo, "m_Dep.MachineFrame_Dep_dot_helper(7)") {
+		!strings.Contains(mainGo, "m_Dep.MachineFrame_Dep_dot_invoke(") {
 		t.Fatalf("entry does not call the dependency-owned constructor:\n%s", mainGo)
+	}
+	runtimeSources, err := runtimefiles.Packages("fangort")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	write := func(path string, data []byte) {
+		path = filepath.Join(dir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", []byte("module fangobuild\n\ngo 1.26\n"))
+	for _, file := range files {
+		write(file.Path, file.Data)
+	}
+	for _, file := range runtimeSources {
+		write(file.Path, file.Data)
+	}
+	write("machine_cross_module_test.go", []byte(`package main
+import (
+    "testing"
+    "fangobuild/fangort"
+)
+func TestCrossModuleCallback(t *testing.T) {
+    m := fangort.StartMachine(MachineFrame_Main_dot_main())
+    event, err := m.Run()
+    if err != nil || event.Done || event.Request != int64(7) { t.Fatalf("request = %#v, %v", event, err) }
+    event, err = m.Resume(int64(31))
+    if err != nil || !event.Done || event.Value != int64(31) { t.Fatalf("completion = %#v, %v", event, err) }
+}
+`))
+	cmd := exec.Command("go", "test", ".")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOCACHE="+filepath.Join(dir, "gocache"))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generated cross-module callback failed: %v\n%s", err, output)
 	}
 }

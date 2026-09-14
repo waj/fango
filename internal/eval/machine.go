@@ -24,6 +24,7 @@ type MachineEvent struct {
 type MachineStats struct {
 	Steps        int
 	MaxDepth     int
+	MaxFrameCap  int
 	MaxLiveSlots int
 	MaxCleanups  int
 	MaxStates    int
@@ -61,9 +62,11 @@ type machineHandler struct {
 	term         *machineir.Handle
 }
 
-// MachineSession owns one suspended computation. The session, its frames, and
-// Resume are compiler-internal Go APIs; no copyable continuation value exists
-// in Fango or Core.
+// MachineSession owns one suspended computation. Frame objects live separately
+// from the append-grown pointer slice, and handler boundaries retain depths,
+// so slice relocation cannot invalidate a live frame. The session, its frames,
+// and Resume are compiler-internal Go APIs; no copyable continuation value
+// exists in Fango or Core.
 type MachineSession struct {
 	interp   *interp
 	workers  map[string]*machineir.Worker
@@ -112,6 +115,7 @@ func StartMachine(ctx context.Context, p *machineir.Prog, entry string, args []V
 		frames:   []*machineFrame{{worker: worker, block: worker.Entry, vars: vars, evidence: map[int]*evidence{}, stateToken: -1}},
 	}
 	s.stats.MaxDepth = 1
+	s.stats.MaxFrameCap = cap(s.frames)
 	s.stats.MaxLiveSlots = len(vars)
 	return s, nil
 }
@@ -347,12 +351,16 @@ func (s *MachineSession) Run() (MachineEvent, error) {
 			if term.Tail {
 				child.returnBind = frame.returnBind
 				child.returnState = frame.returnState
+				child.returnHandler = frame.returnHandler
 				clearMachineFrame(frame)
 				s.frames[len(s.frames)-1] = child
 			} else {
 				frame.block = term.Next
 				s.prune(frame, block.LiveOut, term.Bind.Name)
 				s.frames = append(s.frames, child)
+				if cap(s.frames) > s.stats.MaxFrameCap {
+					s.stats.MaxFrameCap = cap(s.frames)
+				}
 				if len(s.frames) > s.stats.MaxDepth {
 					s.stats.MaxDepth = len(s.frames)
 				}
@@ -408,6 +416,9 @@ func (s *MachineSession) Run() (MachineEvent, error) {
 			frame.block = term.Next
 			s.prune(frame, block.LiveOut, term.Bind.Name)
 			s.frames = append(s.frames, child)
+			if cap(s.frames) > s.stats.MaxFrameCap {
+				s.stats.MaxFrameCap = cap(s.frames)
+			}
 			if len(s.frames) > s.stats.MaxDepth {
 				s.stats.MaxDepth = len(s.frames)
 			}
@@ -545,6 +556,38 @@ func (s *MachineSession) Resume(value Value) (MachineEvent, error) {
 	return s.Run()
 }
 
+// Abandon consumes an unfinished private interpreter machine and discharges
+// its cleanup stack. It is the interpreter counterpart of fangort.Abandon.
+func (s *MachineSession) Abandon() (*ExitRequest, error) {
+	if s.finished {
+		return nil, fmt.Errorf("eval: machine session already completed")
+	}
+	var exit *ExitRequest
+	var firstErr error
+	for len(s.cleanups) != 0 {
+		next, err := s.popCleanup(exit)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		exit = next
+	}
+	for _, frame := range s.frames {
+		clearMachineFrame(frame)
+	}
+	s.frames = nil
+	for i := range s.states {
+		s.states[i] = nil
+	}
+	s.states = nil
+	s.handlers = nil
+	s.waiting = nil
+	s.finished = true
+	return exit, firstErr
+}
+
 func (s *MachineSession) Stats() MachineStats { return s.stats }
 
 func (s *MachineSession) finishExit(exit *ExitRequest) (MachineEvent, error) {
@@ -631,9 +674,12 @@ func (s *MachineSession) catchExit(exit *ExitRequest) (bool, error) {
 			evidence[ev.Unique] = owner.evidence[ev.Unique]
 		}
 		child := &machineFrame{worker: worker, block: worker.Entry, vars: vars, evidence: evidence,
-			returnBind: h.term.Bind.Name, returnState: h.term.StateResult.Name, stateToken: stateToken}
+			returnBind: h.term.AbortBind.Name, returnState: h.term.StateResult.Name, stateToken: stateToken}
 		owner.block = h.term.AbortNext
 		s.frames = append(s.frames, child)
+		if cap(s.frames) > s.stats.MaxFrameCap {
+			s.stats.MaxFrameCap = cap(s.frames)
+		}
 		if len(s.frames) > s.stats.MaxDepth {
 			s.stats.MaxDepth = len(s.frames)
 		}

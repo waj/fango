@@ -153,6 +153,7 @@ type Handle struct {
 	// reached after an abort clause returns; ordinary completion uses Next.
 	Abort       bool
 	AbortNext   BlockID
+	AbortBind   Local
 	State       *core.HandlerState
 	StateResult Local
 }

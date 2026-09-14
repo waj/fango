@@ -236,9 +236,18 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			}
 		case *Handle:
 			checkBind(term.Bind)
+			if term.Abort {
+				checkBind(term.AbortBind)
+				if term.Node != nil && !types.Equal(term.AbortBind.Ty, term.Node.Ty) {
+					errs = append(errs, fmt.Errorf("%s: abort result binding has the wrong type", blockWhere))
+				}
+			}
 			if term.Node == nil || len(term.Clauses) == 0 {
 				errs = append(errs, fmt.Errorf("%s: malformed or unsupported machine handler", blockWhere))
 				break
+			}
+			if !types.Equal(term.Bind.Ty, term.Node.Body.Type()) {
+				errs = append(errs, fmt.Errorf("%s: normal handler result binding has the wrong type", blockWhere))
 			}
 			if term.State != nil {
 				checkBind(term.StateResult)
@@ -247,11 +256,48 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			body := workers[term.BodyWorker]
 			if body == nil || !types.Equal(body.Result, term.Node.Body.Type()) {
 				errs = append(errs, fmt.Errorf("%s: machine handler body worker is missing or mistyped", blockWhere))
+			} else if len(body.Params) != len(term.BodyCaptures) {
+				errs = append(errs, fmt.Errorf("%s: machine handler body capture arity mismatch", blockWhere))
+			} else {
+				for i, capture := range term.BodyCaptures {
+					if !types.Equal(body.Params[i].Ty, capture.Ty) {
+						errs = append(errs, fmt.Errorf("%s: machine handler body capture %d is mistyped", blockWhere, i+1))
+					}
+				}
 			}
 			for _, clause := range term.Clauses {
 				worker := workers[clause.Worker]
 				if clause.Op == nil || worker == nil {
 					errs = append(errs, fmt.Errorf("%s: machine handler clause worker is missing", blockWhere))
+					continue
+				}
+				if clause.Op.Abort != term.Abort {
+					errs = append(errs, fmt.Errorf("%s: machine handler mixes abort and resumptive clauses", blockWhere))
+				}
+				var source *core.HandlerClause
+				for i := range term.Node.Clauses {
+					if term.Node.Clauses[i].Op == clause.Op {
+						source = &term.Node.Clauses[i]
+						break
+					}
+				}
+				if source == nil {
+					errs = append(errs, fmt.Errorf("%s: machine handler clause has no source metadata", blockWhere))
+					continue
+				}
+				wantResult := source.ResultType
+				if term.Abort {
+					wantResult = term.Node.Ty
+				}
+				if !types.Equal(worker.Result, wantResult) {
+					errs = append(errs, fmt.Errorf("%s: machine handler clause worker is mistyped", blockWhere))
+				}
+				wantParams := len(clause.Captures) + len(source.ParamTypes)
+				if clause.StateName != "" {
+					wantParams++
+				}
+				if len(worker.Params) != wantParams {
+					errs = append(errs, fmt.Errorf("%s: machine handler clause parameter arity mismatch", blockWhere))
 				}
 			}
 			if term.ReturnWorker != "" {

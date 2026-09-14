@@ -78,6 +78,25 @@ func TestMachineRepeatedSuspensionKeepsOneFrame(t *testing.T) {
 	}
 }
 
+func TestMachineAbandonRunsPendingCleanupAndClearsFrames(t *testing.T) {
+	frame := &repeatFrame{remaining: 2, value: 1}
+	m := StartMachine(frame)
+	want := &ExitRequest{Operation: 4}
+	called := false
+	m.PushCleanup(func() *ExitRequest { called = true; return want })
+	event, err := m.Run()
+	if err != nil || event.Done {
+		t.Fatalf("suspension = %#v, %v", event, err)
+	}
+	exit, err := m.Abandon()
+	if err != nil || exit != want || !called || !frame.cleared {
+		t.Fatalf("abandon = %#v, %v, called=%v cleared=%v", exit, err, called, frame.cleared)
+	}
+	if _, err := m.Run(); err == nil {
+		t.Fatal("abandoned machine remained runnable")
+	}
+}
+
 func TestMachineCallAndTailCallManageExplicitStack(t *testing.T) {
 	leaf := &repeatFrame{value: 9}
 	caller := &callFrame{child: leaf}
@@ -99,6 +118,20 @@ func TestMachineCallAndTailCallManageExplicitStack(t *testing.T) {
 	}
 	if m.Stats().MaxDepth != 1 || !tailCaller.cleared || !tailLeaf.cleared {
 		t.Fatalf("tail call stats/clears = %#v, %v/%v", m.Stats(), tailCaller.cleared, tailLeaf.cleared)
+	}
+}
+
+func TestImmediateMachineMatchesDirectAndExitCompletion(t *testing.T) {
+	direct := StartMachine(ImmediateMachine(func() (any, *ExitRequest) { return int64(42), nil }))
+	event, err := direct.Run()
+	if err != nil || !event.Done || event.Value != int64(42) || event.Exit != nil {
+		t.Fatalf("direct completion = %#v, %v", event, err)
+	}
+	want := &ExitRequest{Operation: 9}
+	exiting := StartMachine(ImmediateMachine(func() (any, *ExitRequest) { return nil, want }))
+	event, err = exiting.Run()
+	if err != nil || !event.Done || event.Exit != want {
+		t.Fatalf("exit completion = %#v, %v", event, err)
 	}
 }
 
@@ -137,16 +170,20 @@ func TestMachineExitRunsNestedCleanupAndSuppressesFailures(t *testing.T) {
 }
 
 type catchingFrame struct {
-	pc     uint8
-	target *ExitTarget
-	child  MachineFrame
-	caught *ExitRequest
+	pc      uint8
+	target  *ExitTarget
+	child   MachineFrame
+	caught  *ExitRequest
+	cleanup MachineCleanup
 }
 
 func (f *catchingFrame) Step(m *Machine) MachineStep {
 	if f.pc == 0 {
 		f.pc = 1
 		m.PushHandler(f.target)
+		if f.cleanup != nil {
+			m.PushCleanup(f.cleanup)
+		}
 		return MachineStep{Kind: MachineCall, Frame: f.child}
 	}
 	f.caught = m.TakeCaughtExit()
@@ -159,27 +196,65 @@ func (*catchingFrame) Clear() {}
 
 func TestMachineRoutesExitToNearestHandlerBoundary(t *testing.T) {
 	target := &ExitTarget{Marker: 1}
+	secondary := &ExitRequest{Operation: 8}
 	frame := &catchingFrame{target: target}
 	frame.child = &exitFrame{exit: &ExitRequest{Target: target, Operation: 7}}
 	m := StartMachine(frame)
 	var order []string
 	m.PushCleanup(func() *ExitRequest { order = append(order, "outer"); return nil })
+	frame.cleanup = func() *ExitRequest { order = append(order, "inner"); return secondary }
 	event, err := m.Run()
 	if err != nil || !event.Done || event.Exit != nil || event.Value != 7 {
 		t.Fatalf("event = %#v, %v", event, err)
 	}
-	if frame.caught == nil || len(order) != 1 || order[0] != "outer" {
+	if frame.caught == nil || len(frame.caught.Suppressed) != 1 || frame.caught.Suppressed[0] != secondary || len(order) != 2 || order[0] != "inner" || order[1] != "outer" {
 		t.Fatalf("caught/cleanup = %#v/%v", frame.caught, order)
+	}
+}
+
+func TestMachineFrameBufferGrowthKeepsFrameObjectsStable(t *testing.T) {
+	leaf := &repeatFrame{value: 21}
+	var root MachineFrame = leaf
+	frames := []MachineFrame{leaf}
+	for range 256 {
+		caller := &callFrame{child: root}
+		frames = append(frames, caller)
+		root = caller
+	}
+	m := StartMachine(root)
+	event, err := m.Run()
+	if err != nil || !event.Done || event.Value != 21 {
+		t.Fatalf("completion = %#v, %v", event, err)
+	}
+	if m.Stats().MaxDepth != 257 || m.Stats().MaxFrameCap < 257 {
+		t.Fatalf("stats = %#v", m.Stats())
+	}
+	for i, frame := range frames {
+		switch frame := frame.(type) {
+		case *repeatFrame:
+			if !frame.cleared {
+				t.Fatalf("leaf %d was not cleared", i)
+			}
+		case *callFrame:
+			if !frame.cleared {
+				t.Fatalf("caller %d was not cleared", i)
+			}
+		}
 	}
 }
 
 func BenchmarkMachineFixedDepthSuspension(b *testing.B) {
 	b.ReportAllocs()
+	b.ReportMetric(8, "suspensions/op")
+	var stats MachineStats
 	for i := 0; i < b.N; i++ {
 		m := StartMachine(&repeatFrame{remaining: 8})
 		event, _ := m.Run()
 		for !event.Done {
 			event, _ = m.Resume(event.Request.(int) + 1)
 		}
+		stats = m.Stats()
 	}
+	b.ReportMetric(float64(stats.MaxDepth), "max-frames")
+	b.ReportMetric(float64(stats.MaxFrameCap), "frame-cap")
 }

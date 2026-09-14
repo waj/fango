@@ -865,7 +865,14 @@ Machine call replaces the active frame. A non-tail call pushes one, and a
 return passes its value through one erased runtime register before the typed
 caller stores it. Generated module boundaries use exported frame constructors,
 so the runtime imports no generated package and the source-module DAG remains
-intact.
+intact. Tail-call constructor arguments, captures, and evidence are evaluated
+before the dispatcher clears and replaces the active frame, preserving source
+snapshots. The runtime frame slice contains interfaces pointing to separately
+allocated typed frames, and the interpreter slice contains pointers to
+separately allocated frames; handler boundaries retain integer depths. Neither
+backend retains pointers to slice slots, so append growth may relocate the
+buffer safely. Machine statistics expose maximum live depth and frame-buffer
+capacity in addition to cleanup and state high-water marks.
 
 Both consumers clear completed frames. At suspension and non-tail call
 boundaries the evaluator deletes locals outside `LiveOut`, while generated code
@@ -887,8 +894,11 @@ acquire and release are non-suspending Direct or Exit expressions register a
 synchronous release closure before entering their body, preserve it across
 suspension, and pop it exactly once on normal completion. Exits retain the
 primary/suppressed ordering while partially unwinding to an inner handler.
-Source-level handlers retain
-their existing tail-resumptive semantics, and ordinary source compilation
+Explicit abandonment consumes an unfinished private machine, runs all pending
+cleanups, and clears its frames, handler activations, state cells, pending
+result, and suspension marker. Cleanup failure becomes the abandonment
+completion rather than being discarded. Source-level handlers retain their
+existing tail-resumptive semantics, and ordinary source compilation
 cannot select the private Machine backend.
 
 An effect-polymorphic higher-order worker has its open callback row erased from

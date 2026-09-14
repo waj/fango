@@ -62,6 +62,7 @@ type MachineEvent struct {
 type MachineStats struct {
 	Steps       uint64
 	MaxDepth    int
+	MaxFrameCap int
 	MaxCleanups int
 	MaxStates   int
 }
@@ -70,9 +71,13 @@ type MachineStats struct {
 // not permit it to suspend. A nil result is successful cleanup.
 type MachineCleanup func() *ExitRequest
 
-// Machine owns the explicit caller-frame stack. The pending result register is
-// consumed by the parent frame after a call return or by the suspended frame
-// after Resume. Generated code uses TakeResult exactly once on that edge.
+// Machine owns the explicit caller-frame stack. Frames are interface values
+// pointing at separately allocated typed frame objects; handler boundaries
+// retain integer depths, never pointers to slice slots. Growing frames may
+// therefore relocate its backing array without invalidating live state. The
+// pending result register is consumed by the parent frame after a call return
+// or by the suspended frame after Resume. Generated code uses TakeResult
+// exactly once on that edge.
 type Machine struct {
 	frames   []MachineFrame
 	cleanups []MachineCleanup
@@ -94,6 +99,7 @@ type machineHandler struct {
 
 func StartMachine(entry MachineFrame) *Machine {
 	m := &Machine{frames: []MachineFrame{entry}}
+	m.stats.MaxFrameCap = cap(m.frames)
 	if entry != nil {
 		m.stats.MaxDepth = 1
 	}
@@ -123,6 +129,9 @@ func (m *Machine) Run() (MachineEvent, error) {
 				return MachineEvent{}, fmt.Errorf("fangort: machine call has no frame")
 			}
 			m.frames = append(m.frames, step.Frame)
+			if cap(m.frames) > m.stats.MaxFrameCap {
+				m.stats.MaxFrameCap = cap(m.frames)
+			}
 			if len(m.frames) > m.stats.MaxDepth {
 				m.stats.MaxDepth = len(m.frames)
 			}
@@ -175,6 +184,20 @@ func (m *Machine) Resume(value any) (MachineEvent, error) {
 	m.result = value
 	m.waiting = false
 	return m.Run()
+}
+
+// Abandon consumes an unfinished private machine, runs every pending cleanup,
+// and clears all frame, handler, and state storage. E8's owned consumers use
+// this operation when they stop pulling before normal completion.
+func (m *Machine) Abandon() (*ExitRequest, error) {
+	if m.finished {
+		return nil, fmt.Errorf("fangort: machine already completed")
+	}
+	exit := m.unwind(nil, 0)
+	m.clearFrames()
+	m.waiting = false
+	m.finished = true
+	return exit, nil
 }
 
 func (m *Machine) TakeResult() any {

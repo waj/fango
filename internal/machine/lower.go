@@ -56,11 +56,12 @@ func Lower(p *core.Prog, b *types.Builtins) (*Prog, []error) {
 	sort.Strings(names)
 	out := &Prog{}
 	var errs []error
+	stateWorkers := map[string]bool{}
 	queue := append([]string(nil), names...)
 	for len(queue) != 0 {
 		name := queue[0]
 		queue = queue[1:]
-		w, aux, closures, es := lowerWorker(defs[name], selected)
+		w, aux, closures, stateAux, es := lowerWorker(defs[name], selected, stateWorkers[name])
 		if len(es) != 0 {
 			errs = append(errs, es...)
 			continue
@@ -71,6 +72,7 @@ func Lower(p *core.Prog, b *types.Builtins) (*Prog, []error) {
 			d := aux[i]
 			defs[d.Name] = &d
 			selected[d.Name] = true
+			stateWorkers[d.Name] = stateAux[d.Name]
 			queue = append(queue, d.Name)
 		}
 	}
@@ -91,12 +93,13 @@ type builder struct {
 	errs     []error
 	aux      []core.Def
 	closures []Closure
+	stateAux map[string]bool
 	lambdas  map[*core.Lambda]bool
 	lambdaN  int
 }
 
-func lowerWorker(d *core.Def, selected map[string]bool) (Worker, []core.Def, []Closure, []error) {
-	b := &builder{def: d, selected: selected, locals: map[string]types.Type{}, lambdas: map[*core.Lambda]bool{}}
+func lowerWorker(d *core.Def, selected map[string]bool, stateToken bool) (Worker, []core.Def, []Closure, map[string]bool, []error) {
+	b := &builder{def: d, selected: selected, locals: map[string]types.Type{}, lambdas: map[*core.Lambda]bool{}, stateAux: map[string]bool{}}
 	argTys, result := core.PeelFun(d.Type, len(d.Params))
 	params := make([]Local, len(d.Params))
 	for i, name := range d.Params {
@@ -109,7 +112,7 @@ func lowerWorker(d *core.Def, selected map[string]bool) (Worker, []core.Def, []C
 	ret := b.add(&Return{Value: localRef(resultLocal)})
 	entry := b.lowerInto(d.Body, resultLocal, ret)
 	if len(b.errs) != 0 {
-		return Worker{}, nil, nil, b.errs
+		return Worker{}, nil, nil, nil, b.errs
 	}
 
 	locals := make([]Local, 0, len(b.locals))
@@ -118,15 +121,9 @@ func lowerWorker(d *core.Def, selected map[string]bool) (Worker, []core.Def, []C
 	}
 	sort.Slice(locals, func(i, j int) bool { return locals[i].Name < locals[j].Name })
 	w := Worker{Name: d.Name, Owner: d.Owner, TyParams: d.TyParams, Params: params, EffectParams: d.EffectParams,
-		Result: result, Entry: entry, Blocks: b.blocks, Locals: locals, Def: d}
-	core.Rewrite(d.Body, identityType, func(e core.Expr) core.Expr {
-		if resume, ok := e.(*core.ResumeTail); ok && resume.NextState != nil {
-			w.StateToken = true
-		}
-		return e
-	})
+		Result: result, Entry: entry, Blocks: b.blocks, Locals: locals, Def: d, StateToken: stateToken}
 	analyze(&w)
-	return w, b.aux, b.closures, nil
+	return w, b.aux, b.closures, b.stateAux, nil
 }
 
 func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
@@ -255,7 +252,7 @@ func (b *builder) lowerHandle(h *core.Handle, bind Local, next BlockID) BlockID 
 	inner = append(inner, handled)
 
 	bodyCaptures := b.regionCaptures(h.Body)
-	bodyWorker := b.addRegion("handle_body", bodyCaptures, nil, nil, h.Body.Type(), inner, h.Body)
+	bodyWorker := b.addRegion("handle_body", bodyCaptures, nil, nil, h.Body.Type(), inner, h.Body, false)
 	handlerBind, handlerNext := bind, next
 	var stateResult Local
 	if h.State != nil {
@@ -272,7 +269,7 @@ func (b *builder) lowerHandle(h *core.Handle, bind Local, next BlockID) BlockID 
 		handlerNext = b.lowerInto(transformed, bind, next)
 	}
 	term := &Handle{Node: h, BodyWorker: bodyWorker, BodyCaptures: bodyCaptures, Bind: handlerBind, Next: handlerNext,
-		Abort: abort, AbortNext: next,
+		Abort: abort, AbortNext: next, AbortBind: bind,
 		State: h.State, StateResult: stateResult}
 	for _, clause := range h.Clauses {
 		captures := b.regionCaptures(clause.Body)
@@ -295,7 +292,7 @@ func (b *builder) lowerHandle(h *core.Handle, bind Local, next BlockID) BlockID 
 		if abort {
 			result = h.Ty
 		}
-		worker := b.addRegion("handle_clause", captures, paramNames, paramTypes, result, outer, body)
+		worker := b.addRegion("handle_clause", captures, paramNames, paramTypes, result, outer, body, h.State != nil && !abort)
 		term.Clauses = append(term.Clauses, HandlerClause{Op: clause.Op, Worker: worker, Captures: captures,
 			StateName: stateName, StateTy: stateTy})
 	}
@@ -314,7 +311,7 @@ func (b *builder) regionCaptures(body core.Expr) []Local {
 	return captures
 }
 
-func (b *builder) addRegion(kind string, captures []Local, names []string, tys []types.Type, result types.Type, effects []core.EffectInstance, body core.Expr) string {
+func (b *builder) addRegion(kind string, captures []Local, names []string, tys []types.Type, result types.Type, effects []core.EffectInstance, body core.Expr, stateToken bool) string {
 	b.lambdaN++
 	name := fmt.Sprintf("%s_machine_%s%d", b.def.Name, kind, b.lambdaN)
 	params := make([]string, 0, len(captures)+len(names))
@@ -337,6 +334,7 @@ func (b *builder) addRegion(kind string, captures []Local, names []string, tys [
 	b.aux = append(b.aux, core.Def{Name: name, Owner: b.def.Owner, Type: ty, TyParams: b.def.TyParams,
 		Params: params, EffectParams: append([]core.EffectInstance(nil), effects...),
 		Control: types.Control{Transport: types.Machine}, Body: body})
+	b.stateAux[name] = stateToken
 	return name
 }
 

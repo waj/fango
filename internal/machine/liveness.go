@@ -55,6 +55,7 @@ func analyze(w *Worker) {
 		case *Handle:
 			across := cloneSet(liveOut[i])
 			delete(across, term.Bind.Name)
+			delete(across, term.AbortBind.Name)
 			delete(across, term.StateResult.Name)
 			unionInto(frame, across)
 		}
@@ -143,6 +144,7 @@ func transfer(term Term, liveIn []map[string]bool, ordinaryOut map[string]bool) 
 	case *Handle:
 		in := cloneSet(ordinaryOut)
 		delete(in, term.Bind.Name)
+		delete(in, term.AbortBind.Name)
 		delete(in, term.StateResult.Name)
 		return in
 	default:
