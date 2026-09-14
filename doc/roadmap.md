@@ -272,12 +272,15 @@ capability. All of this shipped without suspension.
 
 The same roadmap owns the open decisions for operation polymorphism, builtin
 IO handling, fallible natives beyond `File`, and a resource escaping through an
-outer handler's operation. Owned iterators are underway with a private pull
+outer handler's operation. Scoped iterators are underway with a private pull
 owner, static ownership checks, and a typed owner boundary in both backends;
-the `forEach` and `fold` terminals are implemented. `find`, `take`,
-and their result-constructor lowering remain open; the scoped generator API is
-otherwise exposed in batch builds and the REPL. Scoped non-tail resumption,
-structured async, and cancellation follow in later milestones.
+the `forEach` and `fold` terminals are implemented, and a producer that yields
+from its own body runs in batch builds and the REPL. Completing E8a needs a
+diagnostic for handling a suspension effect, a Machine ABI family for callback
+parameters, and machine lowering for nested iterator scopes and result
+constructors; the `find` and `take` terminals follow from the last of those.
+Structured async and cancellation follow. Scoped non-tail resumption is
+specified but unscheduled, because no remaining consumer needs it.
 
 ## Effect-row subsumption for higher-order arguments
 

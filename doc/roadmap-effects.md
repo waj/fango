@@ -160,17 +160,22 @@ prefix elaboration or an interpreter-only convenience path.
 | Milestone | Depends on | Shippable result |
 | --- | --- | --- |
 | E7: selective execution machines | Implemented control ABI and cleanup scopes | Internal one-shot suspension and cleanup frames |
-| E8: owned iterators and scoped non-tail handlers | Scoped capture Core, E7 | Pull traversal and checked non-tail resumption |
-| E9: structured async and cancellation | Implemented file resources, E8 | Cooperative tasks, cancellation, nursery cleanup |
+| E8a: scoped iterators and pipeline stages | Scoped capture Core, E7 | Pull traversal and producer composition |
+| E8b: scoped non-tail resumption | E8a | Checked non-tail resume; unscheduled, see section 7 |
+| E9: structured async and cancellation | Implemented file resources, E8a | Cooperative tasks, cancellation, nursery cleanup |
 
 The shipped control-aware ABI preserves the tail-resume and scoped-state direct
 fast path; synchronous cleanup scopes, the bundled `Fail` effect, typed IO
 errors, and the scoped `File` resource API are implemented on top of it (see
 the design and reference). No general continuation object exists.
 The private E7 machine backend is implemented. E8a is partially exposed through
-the scoped `Generator`/`Iterator` API; `find` and `take` remain before that
-increment is complete. E8b and E9 remain deferred. No milestone requires
-implementing the whole table at once.
+the scoped `Generator`/`Iterator` API: a producer that performs
+`Generator.yield` in its own body, including across named workers and
+recursion, runs in both backends. Machine lowering does not yet cover the other
+producer shapes, so that exposure is narrower than the bundled declarations
+suggest; the E8a remaining work below states the gaps. E9 is deferred, and E8b
+is no longer scheduled ahead of it. No milestone requires implementing the
+whole table at once.
 
 ## E8. Owned iterators and scoped non-tail resumption
 
@@ -195,8 +200,7 @@ owning runner in both backends: Machine producer lambdas nested in Direct or
 Exit callers become rooted frame factories, the consumer receives the private
 owner, and scope exit closes unfinished production. `Iterator.forEach` and
 `Iterator.fold` have typed terminal nodes in both backends and drive the
-producer in yield order, leaving early-exit cleanup with the owner. Remaining
-E8a work is to implement the `find` and `take` terminals. The bundled
+producer in yield order, leaving early-exit cleanup with the owner. The bundled
 `Generator`/`Iterator` declarations and selective batch/REPL lowering are
 active for `withIterator`, `yield`, `forEach`, and `fold`.
 
@@ -274,7 +278,69 @@ references, incorporate evidence/cleanup, and handle exits as specified in E7.
 Ordinary completion checks are allowed; duplicate advancement must be rejected
 by source ownership analysis, not detected by a runtime consumed flag.
 
+### E8a remaining work
+
+Four gaps separate the exposed API from a usable one. The first is a source
+diagnostic; the rest are machine-lowering and Machine-ABI coverage, and they
+share one area of the backend. Do them in this order: the diagnostic is
+independent and small, the ABI family and nested scope gate every pipeline
+shape, and the terminals fall out once result constructors lower.
+
+1. **Handling a suspension effect must be a diagnostic.** `Generator` is
+   exported as `Generator(..)`, so source can write a handler for `yield`.
+   Only `withIterator` establishes an owner boundary, so any other handler for
+   a suspension effect is illegal — but it currently passes inference and
+   fails Core lint as an unrepresentable contract, which reaches the user as
+   an internal compiler error. Requirement S asks for a source diagnostic that
+   names the operation and the missing owner.
+2. **The Machine ABI family must lift callback parameter types.** A producer
+   that passes `Generator.yield`, or any Machine-transport callback, as an
+   argument to a higher-order worker type-checks and then emits Go that does
+   not compile: the worker's Machine member keeps the Direct callback
+   parameter type. A user-defined traversal fails the same way as a bundled
+   one, so this is the general higher-order rule rather than a stdlib quirk.
+   This is the Machine analogue of the shipped Direct/Exit representation
+   families, and E9 needs it too, since an async combinator's callback can
+   suspend. Until it lands, no producer can be built from an existing
+   traversal:
+
+   ```fango
+   fromList : List a -> () ->{Generator a | e} ()
+   fromList values = \_ -> List.each Generator.yield values
+   ```
+
+3. **Machine lowering must cover nested `IteratorScope`.** A pipeline stage —
+   a producer whose body consumes an inner iterator and re-yields — is
+   accepted by the type checker and rejected by the lowerer. The lowerer
+   covers `ResumeTail`, `Perform`, `App`, `Bracket`, and `Handle`; other
+   Machine-control nodes reach the unsupported fallthrough.
+4. **Machine lowering must cover result constructors**, which is what the
+   `find` and `take` terminals need in order to build a `Maybe` or a `List`
+   from inside a terminal. Same fallthrough as the previous item.
+
+### Producer composition may remove the need for an escaping iterator
+
+A producer is an ordinary function value of type `() ->{Generator a | e} ()`,
+and a stage that maps or filters one producer into another has that same type
+with an inner `withIterator` scope. The type checker already accepts such a
+stage; only lowering rejects it. If stages compose this way, `map`, `filter`,
+and `take` are ordinary library functions over the existing borrowed cursor,
+no value owning suspended frames ever leaves its construction scope, and the
+cursor rule stays exactly as it is.
+
+`zip` is the exception: it must advance two producers in step, so two cursors
+must be live in one scope, which the one-occurrence cursor rule forbids.
+Decide the owned-iterator question against `zip` and merge specifically,
+rather than against pipelines in general, and do not freeze an escaping
+iterator API before a consumer needs one.
+
 ### E8b: checked non-tail resume within an operation clause
+
+This milestone is specified but not scheduled: generators, the use case that
+would have justified it, are served by the `Generator` machinery instead, and
+pipeline stages compose without it. Section 7 records the decision to confirm
+before building it. The specification below stands for whenever a consumer
+appears.
 
 Only expose this after the internal machine and ownership checker exist. Use
 an explicit declaration discipline rather than changing every existing
@@ -518,8 +584,10 @@ numbers from another language's native backend as a Fango performance promise.
 | Locks, temporary resources, atomic replace | Same mechanism; each needs its own bundled runner and resource type when an example asks |
 | State rollback | Implemented with private immutable state; not automatic external rollback |
 | Push generators | Direct tail handlers; no inverted control required |
-| Pull generators and early consumer exit | E7/E8; owned frames and deterministic disposal |
-| Non-tail one-shot continuation results | E8b; explicit scoped discipline, no raw escape |
+| Pull generators and early consumer exit | E7/E8a; owned frames and deterministic disposal |
+| Pipeline stages over a producer | E8a; nested scopes, no escaping iterator value |
+| `zip` and merge over two producers | Needs two live cursors; open, see section 7 |
+| Non-tail one-shot continuation results | E8b; unscheduled, explicit scoped discipline, no raw escape |
 | Cooperative async and structured tasks | E9; scheduler/IO adapters required |
 | Multi-shot nondeterministic handler | Excluded by the selected one-shot model |
 | Escaping raw resume closures | Excluded; owning iterators/tasks are separate checked abstractions |
@@ -589,6 +657,13 @@ These are bounded open decisions for their named milestones.
 - **E8 ownership surface:** start with scoped combinators; freeze any consuming
   iterator/task API before permitting escape of owning computation objects.
   Scoped non-tail resume and moving an owned machine are different features.
+  Producer composition may settle this without an escaping iterator at all, so
+  decide it against `zip` and merge once those have a consumer.
+- **Whether E8b is worth building:** scoped non-tail resumption has no consumer
+  left. Generators do not need it and neither do pipeline stages, while E9 has
+  concrete ones. Confirm a use case before scheduling it; until then the
+  tail-only discipline and the `Generator` suspension path cover the shipped
+  surface, and E9 depends only on E8a.
 - **E9 advanced scheduling:** detached tasks, channels/select, parallel shared
   state, and async cleanup remain beyond the first structured scheduler. Each
   needs a concrete consumer and a checked lifetime/cancellation protocol.
