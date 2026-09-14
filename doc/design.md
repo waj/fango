@@ -901,6 +901,15 @@ completion rather than being discarded. Source-level handlers retain their
 existing tail-resumptive semantics, and ordinary source compilation
 cannot select the private Machine backend.
 
+The first E8 runtime layer wraps that private machine in a pull owner. Each
+`Next` drives the producer to one suspension and resumes a prior yield with
+Unit; normal return ends iteration, while a tagged exit remains distinct.
+`Close` abandons unfinished production and is safe to defer after normal
+exhaustion. Generated code and the interpreter use equivalent owners. These Go
+owners are not source cursors: source construction remains disabled until
+capture analysis can give the consumer a non-escaping, non-aliasable
+capability.
+
 An effect-polymorphic higher-order worker has its open callback row erased from
 the runtime ABI. Passing a concrete callback therefore adapts it to that ABI;
 local function references are eta-expanded so their binding keeps its concrete

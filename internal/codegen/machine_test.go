@@ -236,6 +236,12 @@ func TestFixture(t *testing.T) {
     event, err = scoped.Resume(fangort.UnitValue)
     if err != nil || !event.Done || event.Value != int64(3) { t.Fatalf("scope done: %#v %v", event, err) }
 
+    iterator := fangort.StartMachineIterator(m_Scope.MachineFrame_Scope_dot_bracket())
+    yieldedValue, yielded, iteratorExit, err := iterator.Next()
+    if err != nil || !yielded || iteratorExit != nil || yieldedValue != int64(3) { t.Fatalf("iterator: %#v %v/%v/%v", yieldedValue, yielded, iteratorExit, err) }
+    if iterator.Stats().MaxCleanups != 1 { t.Fatalf("iterator cleanup stats: %#v", iterator.Stats()) }
+    if iteratorExit, err = iterator.Close(); err != nil || iteratorExit != nil { t.Fatalf("iterator close: %#v %v", iteratorExit, err) }
+
     callback := fangort.StartMachine(MachineFrame_Main_dot_callback())
     event, err = callback.Run()
     if err != nil || event.Done || event.Request != int64(8) { t.Fatalf("callback: %#v %v", event, err) }

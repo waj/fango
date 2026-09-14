@@ -181,6 +181,14 @@ consumer runs within that scope; exiting it cancels unfinished production and
 runs its cleanup. This limits the first lifetime problem and provides a real
 use case for E7 without raw escaping continuations.
 
+The private pull-owner layer is implemented in both runtime and interpreter:
+it advances an E7 machine one yield at a time and deterministically abandons
+unfinished production on close. Generated-machine fixtures exercise early
+close across a pending cleanup scope. Remaining E8a work is source exposure:
+introduce the `Generator`/`Iterator` declarations and teach capture analysis
+that the consumer receives a borrowed, non-aliasable cursor which cannot
+escape its lexical owner.
+
 Provisional library use, with `Generator.yield` a new suspension-capable
 operation, not an ordinary tail-only Yield declaration:
 
