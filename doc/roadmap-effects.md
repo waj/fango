@@ -190,9 +190,12 @@ consumer, cursor alias/escape, or more than one terminal consumption; inference
 reports the exact source occurrence and Core repeats the proof after
 elaboration. The internal `Generator.yield` identity now selects Machine
 transport and elaborates to the existing semantic-Core suspension point without
-runtime effect evidence. Remaining E8a work is source exposure: introduce the
-`Generator`/`Iterator` declarations and lower the owning runner and terminal
-consumers into the private machine owner.
+runtime effect evidence. The typed `IteratorScope` boundary now lowers the
+owning runner in both backends: Machine producer lambdas nested in Direct or
+Exit callers become rooted frame factories, the consumer receives the private
+owner, and scope exit closes unfinished production. Remaining E8a work is
+source exposure: introduce the `Generator`/`Iterator` declarations and lower
+the checked terminal consumers that drive the owner.
 
 Provisional library use, with `Generator.yield` a new suspension-capable
 operation, not an ordinary tail-only Yield declaration:

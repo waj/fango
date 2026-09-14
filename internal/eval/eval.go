@@ -13,6 +13,7 @@ import (
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
+	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/internal/nativehost"
 	"github.com/waj/fango/internal/natives"
@@ -156,7 +157,12 @@ type evidence struct {
 type Env struct {
 	cells   map[string]*Cell
 	workers map[string]*core.Def
-	entry   string
+	machine *machineir.Prog
+	// machineClosures preserves the semantic Lambda identity used by the
+	// selective lowerer. Direct evaluation can therefore materialize a frame
+	// factory when such a callback crosses a structured owner boundary.
+	machineClosures map[*core.Lambda]*machineir.Closure
+	entry           string
 	// tails caches core.DetectTailLoop per *core.Def (nil = ineligible).
 	// Pointer identity means REPL redefinition invalidates naturally: a new
 	// generation is a new *core.Def.
@@ -198,7 +204,7 @@ func (f *Frame) lookup(name string) (Value, bool) {
 }
 
 func NewEnv() *Env {
-	return &Env{cells: map[string]*Cell{}, workers: map[string]*core.Def{}, tails: map[*core.Def]*core.TailLoop{}, natives: map[string]*types.NativeInfo{}}
+	return &Env{cells: map[string]*Cell{}, workers: map[string]*core.Def{}, machineClosures: map[*core.Lambda]*machineir.Closure{}, tails: map[*core.Def]*core.TailLoop{}, natives: map[string]*types.NativeInfo{}}
 }
 
 // tailLoop reports (and caches) whether def executes as a frame-reuse loop.
@@ -246,6 +252,22 @@ func (e *Env) DefineProg(p *core.Prog) {
 			e.Define(d.Name, d.Body)
 		}
 	}
+}
+
+// DefineMachineProg installs the selective lowering that corresponds to the
+// semantic Core definitions already in this environment. It does not replace
+// Direct/Exit workers; it supplies frame factories for Machine callbacks held
+// by structured owner nodes.
+func (e *Env) DefineMachineProg(p *machineir.Prog) error {
+	if errs := machineir.Lint(p); len(errs) != 0 {
+		return fmt.Errorf("eval: malformed machine IR: %v", errs[0])
+	}
+	e.machine = p
+	e.machineClosures = make(map[*core.Lambda]*machineir.Closure, len(p.Closures))
+	for i := range p.Closures {
+		e.machineClosures[p.Closures[i].Expr] = &p.Closures[i]
+	}
+	return nil
 }
 
 // interp carries the cancellation context and the print destination; ctx is
@@ -382,6 +404,24 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		}
 		return in.eval(e.Body, &Frame{parent: fr, vars: map[string]Value{e.Name: v}})
 	case *core.Lambda:
+		if desc := in.env.machineClosures[e]; desc != nil {
+			values := make([]Value, len(desc.Captures))
+			for i, capture := range desc.Captures {
+				value, ok := fr.lookup(capture.Name)
+				if !ok {
+					return nil, fmt.Errorf("eval: Machine callback capture `%s` is unavailable", capture.Name)
+				}
+				values[i] = value
+			}
+			captured := make(map[int]*evidence, len(desc.CapturedEvidence))
+			for _, ev := range desc.CapturedEvidence {
+				if in.evidence[ev.Unique] == nil {
+					return nil, fmt.Errorf("eval: Machine callback evidence `%s` is unavailable", ev.Name)
+				}
+				captured[ev.Unique] = in.evidence[ev.Unique]
+			}
+			return &machineClosure{desc: desc, values: values, evidence: captured}, nil
+		}
 		return &Closure{Param: e.Param, Body: e.Body, Env: fr, Evidence: cloneEvidence(in.evidence)}, nil
 	case *core.Neg:
 		v, err := in.eval(e.Operand, fr)
@@ -556,6 +596,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		return &ExitRequest{Target: target, Op: e.Op, Payload: payload}, nil
 	case *core.Suspend:
 		return nil, fmt.Errorf("eval: compiler-only suspension reached recursive evaluator")
+	case *core.IteratorScope:
+		return in.evalIteratorScope(e, fr)
 	case *core.ResumeTail:
 		return nil, fmt.Errorf("eval: ResumeTail outside verified handler-clause evaluation")
 	case *core.Seq:

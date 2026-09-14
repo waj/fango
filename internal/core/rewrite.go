@@ -127,6 +127,13 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Ty = r.typ(e.Ty)
 		n.Request = r.expr(e.Request)
 		out = &n
+	case *IteratorScope:
+		n := *e
+		n.Ty = r.typ(e.Ty)
+		n.CursorTy = r.typ(e.CursorTy)
+		n.Producer = r.expr(e.Producer)
+		n.Consumer = r.expr(e.Consumer)
+		out = &n
 	case *Bracket:
 		n := *e
 		n.Ty = r.typ(e.Ty)

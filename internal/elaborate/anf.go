@@ -172,6 +172,8 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		return &core.Perform{Op: e.Op, Effect: e.Effect, Args: args, Ty: e.Ty, Control: e.Control}, hoists
 	case *core.Suspend:
 		return &core.Suspend{Request: slot(e.Request), Ty: e.Ty}, hoists
+	case *core.IteratorScope:
+		return &core.IteratorScope{Producer: slot(e.Producer), Consumer: slot(e.Consumer), CursorTy: e.CursorTy, Ty: e.Ty, Control: e.Control}, hoists
 	case *core.ResumeTail:
 		var next core.Expr
 		if e.NextState != nil {

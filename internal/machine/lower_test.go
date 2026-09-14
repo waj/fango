@@ -106,6 +106,49 @@ func TestLowerLeavesDirectProgramOutsideMachineIR(t *testing.T) {
 	}
 }
 
+func TestLowerRootsMachineLambdaInsideDirectIteratorOwnerCall(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	iterator := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int}}
+	label := types.EffLabel{Unique: sup.NextUnique(), Name: types.GeneratorEffectName, Args: []types.Type{b.Int}, Suspension: true}
+	producerTy := &types.TFun{Arg: b.Unit, Eff: types.Row{Labels: []types.EffLabel{label}}, Ret: b.Unit}
+	consumerTy := &types.TFun{Arg: iterator, Ret: b.Unit}
+	ownerTy := &types.TFun{Arg: producerTy, Ret: &types.TFun{Arg: consumerTy, Ret: b.Unit}}
+	owner := core.Def{Name: types.GeneratorWithIteratorName, Type: ownerTy,
+		Params: []string{"producer", "consumer"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()},
+		Body: &core.IteratorScope{
+			Producer: &core.VarRef{Name: "producer", Local: true, Ty: producerTy},
+			Consumer: &core.VarRef{Name: "consumer", Local: true, Ty: consumerTy},
+			CursorTy: iterator, Ty: b.Unit,
+		}}
+	captured := &core.VarRef{Name: "captured", Local: true, Ty: b.Int}
+	producer := &core.Lambda{Param: "_", ParamCapture: sup.FreshCapture(), Ty: producerTy,
+		Body: &core.Suspend{Request: captured, Ty: b.Unit}}
+	consumer := &core.Lambda{Param: "cursor", ParamCapture: sup.FreshCapture(), Ty: consumerTy, Body: &core.UnitLit{Ty: b.Unit}}
+	call := &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: owner.Name, Ty: ownerTy},
+		Args: []core.Expr{producer, consumer}, Ty: b.Unit}
+	main := core.Def{Name: "Main.main", Owner: "Main", Type: b.Unit,
+		Body: &core.Let{Name: "captured", Rhs: &core.IntLit{Val: 7, Ty: b.Int}, Body: call, Ty: b.Unit}}
+	p := &core.Prog{Intrinsics: map[string]bool{types.GeneratorWithIteratorName: true}, Defs: []core.Def{owner, main}}
+	if errs := core.InferCaptures(p, b); len(errs) != 0 {
+		t.Fatalf("capture inference: %v", errs)
+	}
+	mp, errs := Lower(p, b)
+	if len(errs) != 0 {
+		t.Fatalf("machine lowering: %v", errs)
+	}
+	if len(mp.Closures) != 1 || len(mp.Workers) != 1 {
+		t.Fatalf("machine roots = %d closures / %d workers, want 1 / 1", len(mp.Closures), len(mp.Workers))
+	}
+	closure := mp.Closures[0]
+	if closure.Expr != producer || len(closure.Captures) != 1 || closure.Captures[0].Name != "captured" {
+		t.Fatalf("rooted closure = %+v", closure)
+	}
+	if mp.Workers[0].Name != closure.Worker || len(mp.Workers[0].Params) != 2 {
+		t.Fatalf("rooted worker = %+v", mp.Workers[0])
+	}
+}
+
 func TestMachineLintRecomputesLivenessAndRejectsBadEdges(t *testing.T) {
 	_, b := testBuiltins()
 	x := &core.VarRef{Name: "x", Local: true, Ty: b.Int}

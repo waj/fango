@@ -21,6 +21,7 @@ const (
 	// semantic-Core Suspend and selects Machine transport instead.
 	GeneratorEffectName = "Generator.Generator"
 	GeneratorYieldName  = "Generator.yield"
+	IteratorTypeName    = "Iterator.Iterator"
 )
 
 // RuntimeEvidenceEffect reports whether an effect row label needs an explicit
@@ -49,8 +50,11 @@ func Intrinsic(name string) bool {
 // IntrinsicArity is the number of parameters an intrinsic's synthesized
 // worker takes. It is fixed by the compiler, not read from the declaration.
 func IntrinsicArity(name string) int {
-	if name == ScopeBracketName {
+	switch name {
+	case ScopeBracketName:
 		return 3
+	case GeneratorWithIteratorName:
+		return 2
 	}
 	return 0
 }

@@ -20,9 +20,9 @@ func Lint(p *Prog, b *types.Builtins) []error {
 
 // LintMachineInput checks semantic Core immediately before selective machine
 // lowering. It admits compiler-only Suspend nodes and Machine transport while
-// retaining every ordinary Core invariant. The batch pipeline intentionally
-// uses Lint, so source programs cannot send unlowered machine control to an
-// existing backend.
+// retaining every ordinary Core invariant. Ordinary Lint admits the same
+// private nodes only when the resolved Generator.withIterator intrinsic is
+// present; that declaration is the source activation boundary.
 func LintMachineInput(p *Prog, b *types.Builtins) []error {
 	return lint(p, b, true)
 }
@@ -32,7 +32,8 @@ func lint(p *Prog, b *types.Builtins, allowMachine bool) []error {
 		adts: map[int]*types.ADTInfo{}, effects: map[int]*types.EffectInfo{},
 		tyParams: map[int]bool{}, evidence: map[int]int{}, evidenceCaptures: map[int][]types.CaptureSet{},
 		captureVars: map[types.CaptureVar]bool{}, scopeIDs: map[types.ScopeID]bool{}, activeScopes: map[types.ScopeID]bool{},
-		resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives, allowMachine: allowMachine}
+		resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives, intrinsics: p.Intrinsics,
+		allowMachine: allowMachine || p.Intrinsics[types.GeneratorWithIteratorName]}
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
 	}
@@ -235,6 +236,7 @@ type linter struct {
 	scopeIDs         map[types.ScopeID]bool
 	activeScopes     map[types.ScopeID]bool
 	natives          map[string]*types.NativeInfo
+	intrinsics       map[string]bool
 	resumeOwner      types.ResumeID
 	resumeIDs        map[types.ResumeID]bool
 	resumeArg        types.Type
@@ -489,6 +491,39 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: suspension request control %s is not direct", where, ControlName(c))
 		}
 		l.expr(e.Request, where)
+	case *IteratorScope:
+		l.control(e.Control, where)
+		if !l.intrinsics[types.GeneratorWithIteratorName] || l.defName != types.GeneratorWithIteratorName {
+			l.errorf("%s: iterator scope outside the declared `%s` intrinsic", where, types.GeneratorWithIteratorName)
+		}
+		cursor, ok := e.CursorTy.(*types.TCon)
+		if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 1 {
+			l.errorf("%s: iterator scope cursor typed %s, want `%s a`", where, types.Show(e.CursorTy), types.IteratorTypeName)
+		}
+		producer, ok := e.Producer.Type().(*types.TFun)
+		if !ok {
+			l.errorf("%s: iterator producer is not a function", where)
+		} else {
+			if l.unique(producer.Arg) != l.b.Unit.Unique || l.unique(producer.Ret) != l.b.Unit.Unique {
+				l.errorf("%s: iterator producer must have shape `() -> ()`", where)
+			}
+			if types.FunctionControl(producer).Transport != types.Machine {
+				l.errorf("%s: iterator producer does not use Machine transport", where)
+			}
+		}
+		consumer, ok := e.Consumer.Type().(*types.TFun)
+		if !ok {
+			l.errorf("%s: iterator consumer is not a function", where)
+		} else {
+			if !types.Equal(consumer.Arg, e.CursorTy) || !types.Equal(consumer.Ret, e.Ty) {
+				l.errorf("%s: iterator consumer type disagrees with cursor or result", where)
+			}
+			if want := types.FunctionControl(consumer); e.Control != want {
+				l.errorf("%s: iterator scope control %s disagrees with consumer %s", where, ControlName(e.Control), ControlName(want))
+			}
+		}
+		l.expr(e.Producer, where)
+		l.expr(e.Consumer, where)
 	case *ControlExit:
 		l.control(e.Effect.Control, where)
 		l.effectInstance(e.Effect, where)
@@ -1360,6 +1395,12 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		l.verifyControlANF(e.Acquire, true, where)
 		l.verifyControlANF(e.Body, true, where)
 		l.verifyControlANF(e.Release, true, where)
+	case *IteratorScope:
+		// The node owns invocation. Its two stored expressions only construct
+		// callback values; their latent transports are represented by their
+		// function types and by IteratorScope.Control.
+		directSlot(e.Producer, "iterator producer")
+		directSlot(e.Consumer, "iterator consumer")
 	case *Handle:
 		if e.State != nil {
 			directSlot(e.State.Initial, "handler initial state")

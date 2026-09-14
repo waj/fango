@@ -260,9 +260,34 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 		if name == types.ScopeBracketName {
 			// The declaration keeps its open row tail; Core does not.
 			defs = append(defs, scopeBracketDef(name, eraseRows(ck.Intrinsics[name].Body), ck))
+		} else if name == types.GeneratorWithIteratorName {
+			defs = append(defs, withIteratorDef(name, eraseRows(ck.Intrinsics[name].Body), ck))
 		}
 	}
 	return defs
+}
+
+func withIteratorDef(name string, ty types.Type, ck *infer.Checker) core.Def {
+	args, result := core.PeelFun(ty, 2)
+	producer := args[0].(*types.TFun)
+	consumer := args[1].(*types.TFun)
+	params := []string{"_producer", "_consumer"}
+	paramCaptures := []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture()}
+	return core.Def{
+		Name:          name,
+		Type:          ty,
+		TyParams:      runtimeRigidVars(ty),
+		Params:        params,
+		ParamCaptures: paramCaptures,
+		Control:       core.ArrowControl(ty, len(params)),
+		Body: &core.IteratorScope{
+			Producer: &core.VarRef{Name: params[0], Local: true, Ty: producer},
+			Consumer: &core.VarRef{Name: params[1], Local: true, Ty: consumer},
+			CursorTy: consumer.Arg,
+			Ty:       result,
+			Control:  types.FunctionControl(consumer),
+		},
+	}
 }
 
 // scopeBracketDef builds the cleanup-scope intrinsic: three callback

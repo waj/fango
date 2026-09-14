@@ -26,6 +26,31 @@ func Lower(p *core.Prog, b *types.Builtins) (*Prog, []error) {
 		}
 	}
 
+	// A structured owner may hold a Machine callback inside an otherwise
+	// Direct/Exit definition. Materialize those lambdas as frame factories
+	// before closing the ordinary Machine-worker island.
+	var rootedClosures []Closure
+	var rootedAux []core.Def
+	for i := range p.Defs {
+		d := &p.Defs[i]
+		if d.Control.Transport == types.Machine {
+			continue
+		}
+		builder := &builder{def: d, locals: localRefTypes(d.Body), lambdas: map[*core.Lambda]bool{}, stateAux: map[string]bool{}}
+		core.Inspect(d.Body, func(e core.Expr) {
+			if lambda, ok := e.(*core.Lambda); ok {
+				builder.registerMachineLambdas(lambda)
+			}
+		})
+		rootedClosures = append(rootedClosures, builder.closures...)
+		rootedAux = append(rootedAux, builder.aux...)
+	}
+	for i := range rootedAux {
+		d := rootedAux[i]
+		defs[d.Name] = &rootedAux[i]
+		selected[d.Name] = true
+	}
+
 	// A polymorphic call resolves in its enclosing Machine context. Close the
 	// selected set before lowering so every Call has a materialized callee.
 	for changed := true; changed; {
@@ -54,7 +79,7 @@ func Lower(p *core.Prog, b *types.Builtins) (*Prog, []error) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	out := &Prog{}
+	out := &Prog{Closures: rootedClosures}
 	var errs []error
 	stateWorkers := map[string]bool{}
 	queue := append([]string(nil), names...)
@@ -80,6 +105,16 @@ func Lower(p *core.Prog, b *types.Builtins) (*Prog, []error) {
 		errs = append(errs, Lint(out)...)
 	}
 	return out, errs
+}
+
+func localRefTypes(e core.Expr) map[string]types.Type {
+	out := map[string]types.Type{}
+	core.Inspect(e, func(e core.Expr) {
+		if ref, ok := e.(*core.VarRef); ok && ref.Local {
+			out[ref.Name] = ref.Ty
+		}
+	})
+	return out
 }
 
 func identityType(t types.Type) types.Type { return t }

@@ -2,7 +2,9 @@ package eval
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/waj/fango/internal/core"
 	machineir "github.com/waj/fango/internal/machine"
 )
 
@@ -57,4 +59,58 @@ func (it *MachineIteratorSession) Stats() MachineStats {
 		return MachineStats{}
 	}
 	return it.session.Stats()
+}
+
+func (in *interp) evalIteratorScope(scope *core.IteratorScope, fr *Frame) (Value, error) {
+	producerValue, err := in.eval(scope.Producer, fr)
+	if err != nil {
+		return nil, err
+	}
+	if _, exits := asExit(producerValue); exits {
+		return producerValue, nil
+	}
+	producer, ok := producerValue.(*machineClosure)
+	if !ok {
+		return nil, fmt.Errorf("eval: iterator producer is %T, want lowered Machine callback", producerValue)
+	}
+	if in.env.machine == nil {
+		return nil, fmt.Errorf("eval: iterator owner has no installed Machine lowering")
+	}
+	machineSession, err := startMachineClosure(in.ctx, in.env.machine, producer, struct{}{}, in.evidence, in.env, in.ioctx)
+	if err != nil {
+		return nil, err
+	}
+	iteratorSession := &MachineIteratorSession{session: machineSession}
+
+	consumerValue, consumerErr := in.eval(scope.Consumer, fr)
+	var result Value
+	if consumerErr == nil {
+		if exit, exits := asExit(consumerValue); exits {
+			result = exit
+		} else {
+			consumer, ok := consumerValue.(*Closure)
+			if !ok {
+				consumerErr = fmt.Errorf("eval: iterator consumer is %T, want Direct/Exit callback", consumerValue)
+			} else {
+				saved := in.evidence
+				in.evidence = cloneEvidence(consumer.Evidence)
+				result, consumerErr = in.eval(consumer.Body, &Frame{parent: consumer.Env, vars: map[string]Value{consumer.Param: iteratorSession}})
+				in.evidence = saved
+			}
+		}
+	}
+	closeExit, closeErr := iteratorSession.Close()
+	if consumerErr != nil {
+		return nil, consumerErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if consumerExit, exits := asExit(result); exits {
+		return suppress(consumerExit, closeExit), nil
+	}
+	if closeExit != nil {
+		return closeExit, nil
+	}
+	return result, nil
 }

@@ -973,6 +973,10 @@ func (g *gen) goType(t types.Type) goast.Expr {
 		}
 		return &goast.FuncType{Params: paramFields(params), Results: &goast.FieldList{List: []*goast.Field{{Type: result}}}}
 	case *types.TCon:
+		if t.Name == types.IteratorTypeName {
+			g.usesFangort = true
+			return &goast.StarExpr{X: selector("fangort", "MachineIterator")}
+		}
 		switch t.Unique {
 		case g.b.Int.Unique:
 			return ident("int64")
@@ -1330,6 +1334,12 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		// happens-before any call), so by-reference and by-value are
 		// indistinguishable.
 		fn := e.Ty.(*types.TFun)
+		if types.FunctionControl(fn).Resolve(g.representationMode()) == types.Machine {
+			if g.machineClosures[e] == nil {
+				panic("codegen: Machine lambda has no lowered closure")
+			}
+			return g.machineExpr(e)
+		}
 		mode := types.FunctionControl(fn).Resolve(g.representationMode())
 		oldControl, oldResult := g.control, g.resultType
 		g.control, g.resultType = mode, fn.Ret
@@ -1519,6 +1529,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return g.handleExpr(e)
 	case *core.Bracket:
 		return g.bracketExpr(e)
+	case *core.IteratorScope:
+		return g.iteratorScopeExpr(e)
 	default:
 		panic(fmt.Sprintf("codegen: node %T arrives in a later slice", e))
 	}
@@ -1837,6 +1849,64 @@ func (g *gen) bracketExpr(e *core.Bracket) goast.Expr {
 		stmts = append(stmts, returnStmt(ident(bodyName)))
 	}
 	return callExpr(funcLit(result, stmts))
+}
+
+// iteratorScopeExpr owns one nested producer machine for the dynamic extent of
+// its consumer callback. The consumer-facing cursor is the runtime owner
+// itself; source code can only pass it to checked terminal combinators.
+func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
+	overall := e.Control.Resolve(g.control)
+	oldControl, oldResult := g.control, g.resultType
+	g.control, g.resultType = overall, e.Ty
+
+	name := func(kind string) string {
+		n := fmt.Sprintf("t_iterator%s%d", kind, g.tmp)
+		g.tmp++
+		return n
+	}
+	iterator := name("Owner")
+	consumerResult := name("Result")
+	closeExit := name("CloseExit")
+	closeErr := name("CloseErr")
+
+	producerFrame := callExpr(g.machineExpr(e.Producer), g.unitValue())
+	start := callExpr(selector("fangort", "StartMachineIterator"), producerFrame)
+	consume := callExpr(g.expr(e.Consumer, 0), ident(iterator))
+	resultType := g.goType(e.Ty)
+	consumerExits := overall == types.Exit
+	if consumerExits {
+		resultType = g.outcomeType(e.Ty)
+	}
+	stmts := []goast.Stmt{
+		varDeclStmt(iterator, &goast.StarExpr{X: selector("fangort", "MachineIterator")}, start),
+		varDeclStmt(consumerResult, resultType, consume),
+		&goast.AssignStmt{Lhs: []goast.Expr{ident(closeExit), ident(closeErr)}, Tok: gotoken.DEFINE,
+			Rhs: []goast.Expr{callExpr(&goast.SelectorExpr{X: ident(iterator), Sel: ident("Close")})}},
+		&goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(closeErr), Op: gotoken.NEQ, Y: ident("nil")},
+			Body: &goast.BlockStmt{List: []goast.Stmt{exprStmt(callExpr(ident("panic"), ident(closeErr)))}}},
+	}
+
+	var iifeResult goast.Expr = g.goType(e.Ty)
+	if consumerExits {
+		g.usesFangort = true
+		consumerExit := selector(consumerResult, "Exit")
+		joined := callExpr(selector("fangort", "Suppress"), consumerExit, ident(closeExit))
+		stmts = append(stmts,
+			&goast.IfStmt{Cond: &goast.BinaryExpr{X: consumerExit, Op: gotoken.NEQ, Y: ident("nil")},
+				Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, joined))}}},
+			&goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(closeExit), Op: gotoken.NEQ, Y: ident("nil")},
+				Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, ident(closeExit)))}}},
+			returnStmt(g.normalOutcome(e.Ty, selector(consumerResult, "Value"))))
+		iifeResult = g.outcomeType(e.Ty)
+	} else {
+		stmts = append(stmts,
+			&goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(closeExit), Op: gotoken.NEQ, Y: ident("nil")},
+				Body: &goast.BlockStmt{List: []goast.Stmt{exprStmt(callExpr(ident("panic"), ident(closeExit)))}}},
+			returnStmt(ident(consumerResult)))
+	}
+
+	g.control, g.resultType = oldControl, oldResult
+	return callExpr(funcLit(iifeResult, stmts))
 }
 
 // abortHandleExpr installs only a unique target token. Performing an abort

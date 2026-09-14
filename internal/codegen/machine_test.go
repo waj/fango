@@ -93,6 +93,78 @@ func TestOrdinaryEmitterDoesNotAcquireMachineRuntime(t *testing.T) {
 	}
 }
 
+func TestIteratorOwnerRootsMachineProducerInDirectCaller(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	iterator := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int}}
+	label := types.EffLabel{Unique: sup.NextUnique(), Name: types.GeneratorEffectName, Args: []types.Type{b.Int}, Suspension: true}
+	producerTy := &types.TFun{Arg: b.Unit, Eff: types.Row{Labels: []types.EffLabel{label}}, Ret: b.Unit}
+	consumerTy := &types.TFun{Arg: iterator, Ret: b.Unit}
+	ownerTy := &types.TFun{Arg: producerTy, Ret: &types.TFun{Arg: consumerTy, Ret: b.Unit}}
+	owner := core.Def{Name: types.GeneratorWithIteratorName, Owner: "Main", Type: ownerTy,
+		Params: []string{"producer", "consumer"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()},
+		Body: &core.IteratorScope{
+			Producer: &core.VarRef{Name: "producer", Local: true, Ty: producerTy},
+			Consumer: &core.VarRef{Name: "consumer", Local: true, Ty: consumerTy},
+			CursorTy: iterator, Ty: b.Unit,
+		}}
+	producer := &core.Lambda{Param: "_", ParamCapture: sup.FreshCapture(), Ty: producerTy,
+		Body: &core.Suspend{Request: &core.VarRef{Name: "captured", Local: true, Ty: b.Int}, Ty: b.Unit}}
+	consumer := &core.Lambda{Param: "cursor", ParamCapture: sup.FreshCapture(), Ty: consumerTy,
+		Body: &core.UnitLit{Ty: b.Unit}}
+	call := &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: owner.Name, Ty: ownerTy},
+		Args: []core.Expr{producer, consumer}, Ty: b.Unit}
+	main := core.Def{Name: "Main.main", Owner: "Main", Type: b.Unit,
+		Body: &core.Let{Name: "captured", Rhs: &core.IntLit{Val: 7, Ty: b.Int}, Body: call, Ty: b.Unit}}
+	p := &core.Prog{Entry: main.Name, Intrinsics: map[string]bool{types.GeneratorWithIteratorName: true}, Defs: []core.Def{owner, main}}
+	if errs := core.InferCaptures(p, b); len(errs) != 0 {
+		t.Fatalf("capture inference: %v", errs)
+	}
+	mp, errs := machineir.Lower(p, b)
+	if len(errs) != 0 {
+		t.Fatalf("machine lowering: %v", errs)
+	}
+	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Main", Entry: true}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := string(files[0].Data)
+	for _, want := range []string{"fangort.StartMachineIterator", "MachineFrame_Main_dot_main_machine_lambda", "v_captured int64 = 7"} {
+		if !strings.Contains(generated, want) {
+			t.Fatalf("generated iterator owner missing %q:\n%s", want, generated)
+		}
+	}
+
+	runtimeSources, err := runtimefiles.Packages("fangort")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	write := func(path string, data []byte) {
+		t.Helper()
+		path = filepath.Join(dir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", []byte("module fangobuild\n\ngo 1.26\n"))
+	for _, file := range files {
+		write(file.Path, file.Data)
+	}
+	for _, file := range runtimeSources {
+		write(file.Path, file.Data)
+	}
+	cmd := exec.Command("go", "test", "./...")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOCACHE="+filepath.Join(dir, "gocache"))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generated iterator-owner project failed: %v\n%s\n%s", err, output, generated)
+	}
+}
+
 func TestGeneratedMachineFrameExecutes(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)

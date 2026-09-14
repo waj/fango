@@ -140,6 +140,12 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		return strings.Join(parts, " ") + " " + pr.Type(e.Ty) + ")"
 	case *Suspend:
 		return fmt.Sprintf("(suspend %s %s)", pr.Type(e.Ty), dumpExpr(e.Request, pr))
+	case *IteratorScope:
+		form := "iterator-scope"
+		if e.Control != (types.Control{}) {
+			form += "/" + ControlName(e.Control)
+		}
+		return fmt.Sprintf("(%s %s %s %s %s)", form, pr.Type(e.CursorTy), pr.Type(e.Ty), dumpExpr(e.Producer, pr), dumpExpr(e.Consumer, pr))
 	case *ResumeTail:
 		if e.NextState != nil {
 			return fmt.Sprintf("(resume-tail %d %s %s (next-state %s))", e.Owner, pr.Type(e.ClauseResult), dumpExpr(e.Value, pr), dumpExpr(e.NextState, pr))

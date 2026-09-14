@@ -829,10 +829,12 @@ the next source expression. Core lint independently checks the convention on
 callee and evidence slots, validates private `ControlExit` producers against
 their operation descriptor and lexical target scope, and checks that no
 control-producing expression remains in an unhandled expression slot. The
-ordinary lint entry rejects Machine Core. A separate pre-machine lint entry
-admits the compiler-only `Suspend` node and Machine transport while retaining
-the other semantic Core invariants; no parser or source elaboration path can
-produce that node. Core dumps print non-Direct conventions so ABI choices are
+ordinary lint entry rejects Machine Core unless the resolved
+`Generator.withIterator` intrinsic activates the private owner boundary. A
+separate pre-machine lint entry admits compiler-only `Suspend` nodes and
+Machine transport while retaining the other semantic Core invariants. Only
+the resolved bundled `Generator.yield` operation can produce `Suspend` during
+source elaboration. Core dumps print non-Direct conventions so ABI choices are
 reviewable.
 
 Selective machine lowering has its own typed execution IR in
@@ -906,9 +908,21 @@ The first E8 runtime layer wraps that private machine in a pull owner. Each
 Unit; normal return ends iteration, while a tagged exit remains distinct.
 `Close` abandons unfinished production and is safe to defer after normal
 exhaustion. Generated code and the interpreter use equivalent owners. These Go
-owners are not source cursors: source construction remains disabled until
-capture analysis can give the consumer a non-escaping, non-aliasable
-capability.
+owners are not source cursors: source construction remains disabled until the
+bundled declarations and checked terminal-consumer lowering are complete.
+
+`IteratorScope` is the typed Core owner boundary and is produced only as the
+body of the resolved `Generator.withIterator` intrinsic. It stores the
+Machine-transport producer callback, the lexical consumer callback, and the
+opaque `Iterator.Iterator` cursor type. Its visible control is the consumer's
+residual control: the producer's latent Machine transport terminates at the
+owner instead of infecting the caller. Selective lowering roots Machine
+lambdas found inside Direct or Exit definitions as typed frame factories while
+leaving those enclosing definitions out of the machine-worker island. The Go
+backend and interpreter both start the resulting frame under a private pull
+owner, pass that owner only to the consumer, and close it on scope exit. The
+interpreter installs the lowering beside semantic Core and keys frame factories
+by the original lambda identity, matching generated code's closure table.
 
 The reserved `Generator.Generator` effect is the typed marker for this private
 suspension path. It selects Machine transport but has no runtime evidence

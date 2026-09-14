@@ -83,6 +83,10 @@ type MachineSession struct {
 // StartMachine validates and initializes an iterative machine evaluation.
 // Call Run to reach the first suspension or completion.
 func StartMachine(ctx context.Context, p *machineir.Prog, entry string, args []Value, env *Env, ioctx *IOContext) (*MachineSession, error) {
+	return startMachine(ctx, p, entry, args, nil, env, ioctx, true)
+}
+
+func startMachine(ctx context.Context, p *machineir.Prog, entry string, args []Value, initialEvidence map[int]*evidence, env *Env, ioctx *IOContext, requireClosed bool) (*MachineSession, error) {
 	if errs := machineir.Lint(p); len(errs) != 0 {
 		return nil, fmt.Errorf("eval: malformed machine IR: %v", errs[0])
 	}
@@ -101,8 +105,15 @@ func StartMachine(ctx context.Context, p *machineir.Prog, entry string, args []V
 	if len(args) != len(worker.Params) {
 		return nil, fmt.Errorf("eval: machine entry %q got %d arguments, want %d", entry, len(args), len(worker.Params))
 	}
-	if len(worker.EffectParams) != 0 {
+	if requireClosed && len(worker.EffectParams) != 0 {
 		return nil, fmt.Errorf("eval: machine entry %q requires lexical evidence", entry)
+	}
+	if !requireClosed {
+		for _, ev := range worker.EffectParams {
+			if initialEvidence[ev.Unique] == nil {
+				return nil, fmt.Errorf("eval: machine entry %q lacks evidence `%s`", entry, ev.Name)
+			}
+		}
 	}
 	vars := make(map[string]Value, len(args)+len(worker.Frame)+1)
 	for i, arg := range args {
@@ -112,12 +123,28 @@ func StartMachine(ctx context.Context, p *machineir.Prog, entry string, args []V
 		interp:   &interp{ctx: ctx, env: env, out: ioctx.Writer, ioctx: ioctx, evidence: map[int]*evidence{}},
 		workers:  workers,
 		closures: closures,
-		frames:   []*machineFrame{{worker: worker, block: worker.Entry, vars: vars, evidence: map[int]*evidence{}, stateToken: -1}},
+		frames:   []*machineFrame{{worker: worker, block: worker.Entry, vars: vars, evidence: cloneEvidence(initialEvidence), stateToken: -1}},
 	}
 	s.stats.MaxDepth = 1
 	s.stats.MaxFrameCap = cap(s.frames)
 	s.stats.MaxLiveSlots = len(vars)
 	return s, nil
+}
+
+func startMachineClosure(ctx context.Context, p *machineir.Prog, closure *machineClosure, arg Value, callEvidence map[int]*evidence, env *Env, ioctx *IOContext) (*MachineSession, error) {
+	if closure == nil || closure.desc == nil {
+		return nil, fmt.Errorf("eval: invalid Machine callback")
+	}
+	evidence := cloneEvidence(closure.evidence)
+	for _, ev := range closure.desc.CallEvidence {
+		value := callEvidence[ev.Unique]
+		if value == nil {
+			return nil, fmt.Errorf("eval: Machine callback lacks call evidence `%s`", ev.Name)
+		}
+		evidence[ev.Unique] = value
+	}
+	args := append(append([]Value(nil), closure.values...), arg)
+	return startMachine(ctx, p, closure.desc.Worker, args, evidence, env, ioctx, false)
 }
 
 // Run advances until the next suspension, normal completion, or exit.
