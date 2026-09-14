@@ -188,9 +188,11 @@ close across a pending cleanup scope. Inference and typed Core recognize the
 future runner and terminal-consumer identities and reject a non-lexical
 consumer, cursor alias/escape, or more than one terminal consumption; inference
 reports the exact source occurrence and Core repeats the proof after
-elaboration. Remaining E8a work is source exposure: introduce the
-`Generator`/`Iterator` declarations and lower `yield` and the runner into the
-private machine owner.
+elaboration. The internal `Generator.yield` identity now selects Machine
+transport and elaborates to the existing semantic-Core suspension point without
+runtime effect evidence. Remaining E8a work is source exposure: introduce the
+`Generator`/`Iterator` declarations and lower the owning runner and terminal
+consumers into the private machine owner.
 
 Provisional library use, with `Generator.yield` a new suspension-capable
 operation, not an ordinary tail-only Yield declaration:

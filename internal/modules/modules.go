@@ -384,6 +384,9 @@ func validateModuleDecls(n *node) []diag.Error {
 				}
 			}
 		case *ast.EffectDecl:
+			if n.bundled && canonical(n.name, d.Name) == types.GeneratorEffectName {
+				d.CompilerSuspension = true
+			}
 			for _, op := range d.Ops {
 				declared[op.Name] = true
 				if op.Native == nil {

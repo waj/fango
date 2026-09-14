@@ -63,7 +63,9 @@ func FunctionControl(fn *TFun) Control {
 		out.Polymorphic = true
 	}
 	for _, label := range fn.Eff.Labels {
-		if label.Abort {
+		if label.Suspension {
+			out.Transport = Machine
+		} else if label.Abort {
 			if out.Transport < Exit {
 				out.Transport = Exit
 			}
@@ -122,10 +124,11 @@ type Row struct {
 // EffLabel identifies an effect by its generation-stable Unique. Name is
 // diagnostic syntax; Args instantiate parameterized effects such as Fail e.
 type EffLabel struct {
-	Unique int
-	Name   string
-	Args   []Type
-	Abort  bool // every operation in this (uniform-discipline) effect aborts
+	Unique     int
+	Name       string
+	Args       []Type
+	Abort      bool // every operation in this (uniform-discipline) effect aborts
+	Suspension bool // compiler-owned Machine suspension; no runtime evidence
 }
 
 func (r Row) Empty() bool { return len(r.Labels) == 0 && r.Tail == nil }
@@ -259,7 +262,7 @@ func substRigidRow(r Row, m map[int]Type) Row {
 		for j, a := range l.Args {
 			args[j] = SubstRigid(a, m)
 		}
-		labels[i] = EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort}
+		labels[i] = EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Suspension: l.Suspension}
 	}
 	var tail Type
 	if r.Tail != nil {
@@ -430,6 +433,9 @@ type EffectInfo struct {
 	// by default; State/resource milestones mark the capabilities whose
 	// handler activation must not escape.
 	Scoped bool
+	// Suspension is set only by the bundled-module loader. Its operations
+	// elaborate to compiler-owned suspension rather than evidence dispatch.
+	Suspension bool
 }
 
 // EffectOp is the runtime-relevant, declaration-ordered description of an

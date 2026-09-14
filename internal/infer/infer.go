@@ -756,7 +756,7 @@ func (ck *Checker) declareEffectHeader(ed *ast.EffectDecl, batch bool) []diag.Er
 		seen[p.Name] = true
 		params[i] = ck.Sup.FreshRigid(types.General)
 	}
-	info := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: ed.Name, Params: params}
+	info := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: ed.Name, Params: params, Suspension: ed.CompilerSuspension}
 	ck.Effects[ed.Name], ck.EffectsByUnique[info.Unique] = info, info
 	if ed.Name == "IO.IO" || ed.Name == "IO" {
 		ck.IO = info
@@ -825,7 +825,7 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 			arrow.Eff = types.Row{Tail: rowVars[i]}
 		}
 		inner := arrows[len(arrows)-1]
-		inner.Eff.Labels = []types.EffLabel{{Unique: info.Unique, Name: info.Name, Args: labelArgs, Abort: op.Abort}}
+		inner.Eff.Labels = []types.EffLabel{{Unique: info.Unique, Name: info.Name, Args: labelArgs, Abort: op.Abort, Suspension: info.Suspension}}
 		vars := append([]*types.TVar(nil), info.Params...)
 		vars = append(vars, scope.Minted()...)
 		vars = append(vars, rowVars...)
@@ -1689,7 +1689,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	for i := range labelArgs {
 		labelArgs[i] = g.ck.Sup.FreshVar(types.General)
 	}
-	label := types.EffLabel{Unique: first.Owner.Unique, Name: first.Owner.Name, Args: labelArgs, Abort: first.Abort}
+	label := types.EffLabel{Unique: first.Owner.Unique, Name: first.Owner.Name, Args: labelArgs, Abort: first.Abort, Suspension: first.Owner.Suspension}
 	savedAmbient := g.ambient
 	var stateTy types.Type
 	if e.State != nil {

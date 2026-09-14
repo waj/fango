@@ -23,6 +23,26 @@ func write(t *testing.T, root, rel, body string) string {
 	return p
 }
 
+func TestOnlyBundledGeneratorEffectGetsSuspensionIdentity(t *testing.T) {
+	decl := func() *ast.EffectDecl { return &ast.EffectDecl{Name: "Generator"} }
+	bundledDecl := decl()
+	bundled := &node{name: "Generator", bundled: true, mod: &ast.Module{Decls: []ast.Decl{bundledDecl}}}
+	if errs := validateModuleDecls(bundled); len(errs) != 0 {
+		t.Fatalf("bundled validation: %+v", errs)
+	}
+	if !bundledDecl.CompilerSuspension {
+		t.Fatal("bundled Generator effect did not receive compiler suspension identity")
+	}
+	localDecl := decl()
+	local := &node{name: "Generator", mod: &ast.Module{Decls: []ast.Decl{localDecl}}}
+	if errs := validateModuleDecls(local); len(errs) != 0 {
+		t.Fatalf("local validation: %+v", errs)
+	}
+	if localDecl.CompilerSuspension {
+		t.Fatal("local Generator spelling received compiler suspension identity")
+	}
+}
+
 func TestNativeTemplateValidation(t *testing.T) {
 	for _, tt := range []struct {
 		name, template, title string

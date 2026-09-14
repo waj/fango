@@ -370,7 +370,7 @@ func executingEffects(t types.Type, arity int) []core.EffectInstance {
 	out := make([]core.EffectInstance, 0, len(row.Labels))
 	seen := map[int]bool{}
 	for _, l := range row.Labels {
-		if types.SurfaceName(l.Name) != "IO" && !seen[l.Unique] {
+		if types.RuntimeEvidenceEffect(l) && !seen[l.Unique] {
 			control := types.Control{Polymorphic: true}
 			if l.Abort {
 				control = types.Control{Transport: types.Exit}
@@ -392,7 +392,9 @@ func rowControl(row types.Row, ck *infer.Checker) types.Control {
 		if eff := ck.EffectsByUnique[label.Unique]; eff != nil && len(eff.Ops) > 0 {
 			abort = eff.Ops[0].Abort
 		}
-		if abort {
+		if label.Suspension {
+			out.Transport = types.Machine
+		} else if abort {
 			out.Transport = types.Exit
 		} else if types.SurfaceName(label.Name) != "IO" {
 			out.Polymorphic = true
@@ -1300,7 +1302,7 @@ func (el *elab) eraseRuntimeKinds(t types.Type) types.Type {
 			for j, a := range l.Args {
 				args[j] = el.eraseRuntimeKinds(a)
 			}
-			labels[i] = types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort}
+			labels[i] = types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Suspension: l.Suspension}
 		}
 		return types.Row{Labels: labels}
 	default:
@@ -1354,21 +1356,9 @@ func eraseRowsFrom(origin, t types.Type) types.Type {
 			for i, a := range l.Args {
 				args[i] = eraseRowsFrom(a, a)
 			}
-			eff.Labels = append(eff.Labels, types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort})
+			eff.Labels = append(eff.Labels, types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Suspension: l.Suspension})
 		}
-		control := t.Control
-		if t.Eff.Tail != nil {
-			control.Polymorphic = true
-		}
-		for _, l := range t.Eff.Labels {
-			if l.Abort {
-				if control.Transport < types.Exit {
-					control.Transport = types.Exit
-				}
-			} else if types.SurfaceName(l.Name) != "IO" {
-				control.Polymorphic = true
-			}
-		}
+		control := types.FunctionControl(t)
 		return &types.TFun{Arg: arg, Eff: eff, Ret: ret, Control: control}
 	case types.Row:
 		return types.Row{}

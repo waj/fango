@@ -170,6 +170,8 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 			args[i] = slot(a)
 		}
 		return &core.Perform{Op: e.Op, Effect: e.Effect, Args: args, Ty: e.Ty, Control: e.Control}, hoists
+	case *core.Suspend:
+		return &core.Suspend{Request: slot(e.Request), Ty: e.Ty}, hoists
 	case *core.ResumeTail:
 		var next core.Expr
 		if e.NextState != nil {

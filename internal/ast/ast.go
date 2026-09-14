@@ -617,11 +617,12 @@ func (*TypeDecl) isDecl() {}
 // TypeDecl.Params. Operation signatures are ordinary type expressions; the
 // checker attaches the effect's own label to the operation's arrow.
 type EffectDecl struct {
-	Name     string
-	NameSpan source.Span
-	Params   []Param
-	Ops      []OpSig
-	Sp       source.Span
+	Name               string
+	NameSpan           source.Span
+	Params             []Param
+	Ops                []OpSig
+	Sp                 source.Span
+	CompilerSuspension bool // set only on the bundled Generator effect
 }
 
 // OpSig is one operation signature line inside an `effect` declaration.

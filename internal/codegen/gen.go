@@ -958,7 +958,7 @@ func (g *gen) goType(t types.Type) goast.Expr {
 		arrowControl := types.FunctionControl(t)
 		mode := arrowControl.Resolve(g.representationMode())
 		for _, l := range types.SortedRow(t.Eff).Labels {
-			if types.SurfaceName(l.Name) == "IO" {
+			if !types.RuntimeEvidenceEffect(l) {
 				continue
 			}
 			params = append(params, paramSpec{typ: g.effectTypeMode(core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args, Control: arrowControl}, mode)})
@@ -1336,7 +1336,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		params := make([]paramSpec, 0, len(fn.Eff.Labels)+1)
 		var pushed []int
 		for _, l := range types.SortedRow(fn.Eff).Labels {
-			if types.SurfaceName(l.Name) == "IO" {
+			if !types.RuntimeEvidenceEffect(l) {
 				continue
 			}
 			name := g.evidenceName(l.Name)
@@ -1603,7 +1603,7 @@ func (g *gen) callArgExpr(arg core.Expr, formal types.Type, mode types.Transport
 	params := make([]paramSpec, 0, len(actual.Eff.Labels)+1)
 	var callArgs []goast.Expr
 	for _, label := range types.SortedRow(actual.Eff).Labels {
-		if types.SurfaceName(label.Name) == "IO" {
+		if !types.RuntimeEvidenceEffect(label) {
 			continue
 		}
 		name := g.evidenceName(label.Name)

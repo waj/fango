@@ -154,11 +154,14 @@ func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args [
 	if len(args) < op.Arity {
 		effectParams = el.bindEffectParams(executingEffects(arrowAt(opTy, len(args)), op.Arity-len(args)))
 	}
-	inst := el.effectInstance(op, rawTy)
 	var body core.Expr
-	if op.Abort {
+	if op.Owner.Suspension && op.Name == types.GeneratorYieldName {
+		body = &core.Suspend{Request: coreArgs[0], Ty: ret}
+	} else if op.Abort {
+		inst := el.effectInstance(op, rawTy)
 		body = &core.ControlExit{Effect: inst, Op: op, Payload: coreArgs, Ty: ret}
 	} else {
+		inst := el.effectInstance(op, rawTy)
 		body = &core.Perform{Op: op, Effect: inst, Args: coreArgs, Ty: ret, Control: inst.Control}
 	}
 	if len(effectParams) > 0 {
@@ -228,7 +231,7 @@ func (el *elab) valueApp(callee, arg core.Expr) core.Expr {
 		Control:    types.FunctionControl(fn),
 	}
 	for _, l := range types.SortedRow(fn.Eff).Labels {
-		if types.SurfaceName(l.Name) != "IO" {
+		if types.RuntimeEvidenceEffect(l) {
 			app.EvidenceArgs = append(app.EvidenceArgs, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Captures: el.evidenceCaptures(l.Unique), Control: el.evidenceControl(l.Unique)})
 		}
 	}

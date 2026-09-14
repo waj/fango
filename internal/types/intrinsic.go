@@ -15,7 +15,20 @@ const (
 	// extent of its consumer callback. Its source declaration is staged in E8;
 	// Core ownership checks recognize the resolved identity, never spelling.
 	GeneratorWithIteratorName = "Generator.withIterator"
+
+	// GeneratorEffectName is the handled-at-an-owner-boundary suspension
+	// effect. It has no runtime evidence record: Generator.yield lowers to a
+	// semantic-Core Suspend and selects Machine transport instead.
+	GeneratorEffectName = "Generator.Generator"
+	GeneratorYieldName  = "Generator.yield"
 )
+
+// RuntimeEvidenceEffect reports whether an effect row label needs an explicit
+// runtime evidence parameter. IO is ambient and Generator is represented by
+// Machine transport itself.
+func RuntimeEvidenceEffect(label EffLabel) bool {
+	return SurfaceName(label.Name) != "IO" && !label.Suspension
+}
 
 // IteratorConsumer reports the initial E8 combinators that consume a borrowed
 // iterator cursor. Raw step exposure is intentionally deferred until Core can

@@ -910,6 +910,13 @@ owners are not source cursors: source construction remains disabled until
 capture analysis can give the consumer a non-escaping, non-aliasable
 capability.
 
+The reserved `Generator.Generator` effect is the typed marker for this private
+suspension path. It selects Machine transport but has no runtime evidence
+parameter: a canonical `Generator.yield` operation elaborates directly to
+`Suspend`, whose request is the yielded element and whose resumed result is
+Unit. The bundled declaration and owning runner remain the activation boundary;
+an unrelated effect or operation spelling does not acquire this lowering.
+
 Inference and typed Core enforce the first source-ownership boundary by
 resolved identity. A `Generator.withIterator` consumer must be a lexical
 lambda, and its cursor parameter may occur only as the final argument of a

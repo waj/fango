@@ -174,7 +174,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 					}
 					wantEvidence := 0
 					for _, label := range types.SortedRow(fn.Eff).Labels {
-						if types.SurfaceName(label.Name) != "IO" {
+						if types.RuntimeEvidenceEffect(label) {
 							wantEvidence++
 						}
 					}

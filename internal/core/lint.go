@@ -1459,7 +1459,7 @@ func (l *linter) runtimeType(t types.Type) types.Type {
 			for j, a := range label.Args {
 				args[j] = l.runtimeType(a)
 			}
-			labels[i] = types.EffLabel{Unique: label.Unique, Name: label.Name, Args: args, Abort: label.Abort}
+			labels[i] = types.EffLabel{Unique: label.Unique, Name: label.Name, Args: args, Abort: label.Abort, Suspension: label.Suspension}
 		}
 		return types.Row{Labels: labels}
 	default:
@@ -1478,7 +1478,7 @@ func (l *linter) runtimeInstFields(adt *types.ADTInfo, c *types.CtorInfo, args [
 func rowEvidence(r types.Row) []EffectInstance {
 	var out []EffectInstance
 	for _, l := range types.SortedRow(r).Labels {
-		if types.SurfaceName(l.Name) != "IO" {
+		if types.RuntimeEvidenceEffect(l) {
 			out = append(out, EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Control: types.Control{Polymorphic: true}})
 		}
 	}
