@@ -53,7 +53,7 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 			adts = append(adts, adt)
 		}
 	}
-	p := &core.Prog{ADTs: adts, Effects: effects, Entry: ck.EntryName, Natives: ck.Natives}
+	p := &core.Prog{ADTs: adts, Effects: effects, Entry: ck.EntryName, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck)}
 	var errs []diag.Error
 	for _, inst := range ck.Instances {
 		if ck.IsCompileTimeOnly(inst.Class.DictType(inst.Head)) {
@@ -106,6 +106,14 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 		installCaptureSummaries(p.Defs, ck)
 	}
 	return p, errs
+}
+
+func intrinsicIdentities(ck *infer.Checker) map[string]bool {
+	identities := make(map[string]bool, len(ck.Intrinsics))
+	for name := range ck.Intrinsics {
+		identities[name] = true
+	}
+	return identities
 }
 
 // Increment elaborates the modules one REPL import added to the checker: the

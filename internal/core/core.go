@@ -10,10 +10,11 @@ type Prog struct {
 	// ADTs lists declared types in declaration order — codegen emits marker
 	// interfaces, constructor structs, and derived eq/show from it. Bool is
 	// absent (native Go bool forever, doc/design.md, "Go backend and runtime").
-	ADTs    []*types.ADTInfo
-	Effects []*types.EffectInfo
-	Defs    []Def
-	Natives map[string]*types.NativeInfo
+	ADTs       []*types.ADTInfo
+	Effects    []*types.EffectInfo
+	Defs       []Def
+	Natives    map[string]*types.NativeInfo
+	Intrinsics map[string]bool // compiler-declared bundled identities present in this program
 	// Entry selects the entry module's main definition by canonical symbol.
 	Entry        string
 	EntryDisplay Expr // optional, pure String observation used by tests and tooling

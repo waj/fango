@@ -37,7 +37,7 @@ func TestIteratorOwnershipRejectsDuplicateAndEscapingCursorUses(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := &Prog{Defs: []Def{{Name: "Main.main", Body: call(tt.body)}}}
+			p := &Prog{Intrinsics: map[string]bool{types.GeneratorWithIteratorName: true}, Defs: []Def{{Name: "Main.main", Body: call(tt.body)}}}
 			errs := verifyIteratorOwnership(p)
 			got := ""
 			for _, err := range errs {
@@ -50,5 +50,21 @@ func TestIteratorOwnershipRejectsDuplicateAndEscapingCursorUses(t *testing.T) {
 				t.Fatalf("errors = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIteratorOwnershipRequiresDeclaredIntrinsicIdentity(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	cursorTy := &types.TCon{Unique: sup.NextUnique(), Name: "Iterator.Iterator", Args: []types.Type{b.Int}}
+	consumerTy := &types.TFun{Arg: cursorTy, Ret: b.Unit}
+	withIteratorTy := &types.TFun{Arg: b.Unit, Ret: &types.TFun{Arg: consumerTy, Ret: b.Unit}}
+	call := &App{CalleeKind: Worker, Callee: &VarRef{Name: types.GeneratorWithIteratorName, Ty: withIteratorTy}, Args: []Expr{
+		&UnitLit{Ty: b.Unit},
+		&Lambda{Param: "cursor", ParamCapture: sup.FreshCapture(), Ty: consumerTy, Body: &VarRef{Name: "cursor", Local: true, Ty: cursorTy}},
+	}, Ty: b.Unit}
+	p := &Prog{Defs: []Def{{Name: "Main.main", Body: call}}}
+	if errs := verifyIteratorOwnership(p); len(errs) != 0 {
+		t.Fatalf("ordinary worker with future intrinsic spelling was checked: %v", errs)
 	}
 }

@@ -11,6 +11,9 @@ import (
 // makes it independent of parser sugar and shared by batch, REPL, interpreter,
 // and generated-code entry paths once the declarations are enabled.
 func verifyIteratorOwnership(p *Prog) []error {
+	if !p.Intrinsics[types.GeneratorWithIteratorName] {
+		return nil
+	}
 	var errs []error
 	identity := func(t types.Type) types.Type { return t }
 	for i := range p.Defs {
