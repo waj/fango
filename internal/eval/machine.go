@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 
 	"github.com/waj/fango/internal/core"
 	machineir "github.com/waj/fango/internal/machine"
@@ -35,6 +36,7 @@ type MachineStats struct {
 }
 
 type machineFrame struct {
+	rows          rowEnv
 	types         descriptorEnv
 	worker        *machineir.Worker
 	block         machineir.BlockID
@@ -47,6 +49,7 @@ type machineFrame struct {
 }
 
 type machineClosure struct {
+	rows     rowEnv
 	types    descriptorEnv
 	desc     *machineir.Closure
 	values   []Value
@@ -54,6 +57,7 @@ type machineClosure struct {
 }
 
 type machineOperation struct {
+	rows       rowEnv
 	types      descriptorEnv
 	worker     *machineir.Worker
 	values     []Value
@@ -115,7 +119,7 @@ func startMachine(ctx context.Context, p *machineir.Prog, entry string, args []V
 	if len(args) != len(worker.Params) {
 		return nil, fmt.Errorf("eval: machine entry %q got %d arguments, want %d", entry, len(args), len(worker.Params))
 	}
-	if requireClosed && len(worker.EffectParams) != 0 {
+	if requireClosed && (len(worker.EffectParams) != 0 || len(worker.Rows) != 0) {
 		return nil, fmt.Errorf("eval: machine entry %q requires lexical evidence", entry)
 	}
 	if !requireClosed {
@@ -142,7 +146,7 @@ func startMachine(ctx context.Context, p *machineir.Prog, entry string, args []V
 	return s, nil
 }
 
-func (in *interp) startMachineClosure(p *machineir.Prog, closure *machineClosure, arg Value, callEvidence map[int]*evidence) (*MachineSession, error) {
+func (in *interp) startMachineClosure(p *machineir.Prog, closure *machineClosure, arg Value, callEvidence map[int]*evidence, row *fangort.EvidenceRow) (*MachineSession, error) {
 	if closure == nil || closure.desc == nil {
 		return nil, fmt.Errorf("eval: invalid Machine callback")
 	}
@@ -163,6 +167,14 @@ func (in *interp) startMachineClosure(p *machineir.Prog, closure *machineClosure
 	// stage-safe traversal cannot acquire a runtime interpreter.
 	session.interp = in
 	session.frames[0].types = closure.types
+	frame := session.frames[0]
+	frame.rows = maps.Clone(closure.rows)
+	if frame.rows == nil {
+		frame.rows = rowEnv{}
+	}
+	for id, value := range bindInvocationRow(frame.worker.RowParam, frame.worker.RowEffects, row, frame.evidence) {
+		frame.rows[id] = value
+	}
 	return session, nil
 }
 
@@ -202,7 +214,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 		frame := s.frames[len(s.frames)-1]
 		s.interp.evidence = frame.evidence
 		block := &frame.worker.Blocks[frame.block]
-		locals := &Frame{vars: frame.vars, types: frame.types, mutable: true}
+		locals := &Frame{vars: frame.vars, types: frame.types, rows: frame.rows, mutable: true}
 		eval := func(expr core.Expr) (Value, error) {
 			if lam, ok := expr.(*core.Lambda); ok {
 				return s.interp.makeClosure(lam, locals, s.closures[lam])
@@ -307,7 +319,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 		case *machineir.Suspend:
 			var owner *fangort.YieldOwner
 			if term.Owner.Unique != 0 {
-				ev := frame.evidence[term.Owner.Unique]
+				ev := resolveEvidence(frame.evidence[term.Owner.Unique])
 				if ev == nil || ev.yieldOwner == nil {
 					return MachineEvent{}, fmt.Errorf("eval: suspension has no lexical owner")
 				}
@@ -339,16 +351,39 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			if !ok {
 				return MachineEvent{}, fmt.Errorf("eval: advancement operand is %T", value)
 			}
+			row, rowErr := s.interp.argumentRow(term.Row, locals)
+			if rowErr != nil {
+				return MachineEvent{}, rowErr
+			}
 			frame.block = term.Next
 			s.prune(frame, block.LiveOut, term.Bind.Name)
-			return MachineEvent{advance: &cursorAdvanceRequest{cursor: cursor, term: term}}, nil
+			return MachineEvent{advance: &cursorAdvanceRequest{cursor: cursor, term: term, row: row}}, nil
 		case *machineir.Call:
 			callee := s.workers[term.Callee]
 			var closure *machineClosure
 			var synchronous *Closure
 			var operation *machineOperation
 			if term.Operation != nil {
-				ev := frame.evidence[term.Effect.Unique]
+				ev := resolveEvidence(frame.evidence[term.Effect.Unique])
+				if ev != nil && ev.handler != nil && ev.machineOps == nil {
+					// A Direct/Exit interpretation may be passed to a Machine
+					// producer. Invoke it synchronously with its lexical evidence.
+					value, err := eval(&core.Perform{Op: term.Operation, Effect: term.Effect, Args: term.Args, Ty: term.Bind.Ty})
+					if err != nil {
+						return MachineEvent{}, err
+					}
+					if exit, ok := asExit(value); ok {
+						if caught, err := s.catchExit(exit); err != nil {
+							return MachineEvent{Exit: exit}, err
+						} else if caught {
+							continue
+						}
+						return s.finishExit(exit)
+					}
+					s.prune(frame, block.LiveOut, term.Bind.Name)
+					frame.vars[term.Bind.Name], frame.block = value, term.Next
+					continue
+				}
 				if ev == nil || ev.machineOps == nil {
 					return MachineEvent{}, fmt.Errorf("eval: machine operation %q has no evidence", term.Operation.Name)
 				}
@@ -389,6 +424,10 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				}
 				values[i] = value
 			}
+			row, rowErr := s.interp.argumentRow(term.Row, locals)
+			if rowErr != nil {
+				return MachineEvent{}, rowErr
+			}
 			if synchronous != nil {
 				if len(values) != 1 {
 					return MachineEvent{}, fmt.Errorf("eval: synchronous Machine adapter requires one argument")
@@ -397,8 +436,9 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				for _, ev := range term.EvidenceArgs {
 					callEvidence[ev.Unique] = frame.evidence[ev.Unique]
 				}
+				rows := bindInvocationRow(synchronous.rowParam, synchronous.rowEffects, row, callEvidence)
 				s.interp.evidence = callEvidence
-				value, err := s.interp.eval(synchronous.Body, &Frame{parent: synchronous.Env, vars: map[string]Value{synchronous.Param: values[0]}})
+				value, err := s.interp.eval(synchronous.Body, &Frame{parent: synchronous.Env, vars: map[string]Value{synchronous.Param: values[0]}, rows: rows})
 				s.interp.evidence = frame.evidence
 				if err != nil {
 					return MachineEvent{}, err
@@ -450,8 +490,10 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			child := &machineFrame{worker: callee, block: callee.Entry, vars: childVars, evidence: childEvidence,
 				returnBind: term.Bind.Name, stateToken: -1}
 			if closure != nil {
+				child.rows = maps.Clone(closure.rows)
 				child.types = closure.types
 			} else if operation != nil {
+				child.rows = maps.Clone(operation.rows)
 				child.types = operation.types
 			} else {
 				var err error
@@ -459,6 +501,12 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				if err != nil {
 					return MachineEvent{}, err
 				}
+			}
+			if child.rows == nil {
+				child.rows = rowEnv{}
+			}
+			for id, value := range bindInvocationRow(callee.RowParam, callee.RowEffects, row, childEvidence) {
+				child.rows[id] = value
 			}
 			if operation != nil {
 				child.stateToken = operation.stateToken
@@ -505,7 +553,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				for _, param := range worker.EffectParams {
 					outer[param.Unique] = frame.evidence[param.Unique]
 				}
-				installed.machineOps[clause.Op.Index] = &machineOperation{worker: worker, values: values, evidence: outer, types: frame.types,
+				installed.machineOps[clause.Op.Index] = &machineOperation{worker: worker, values: values, evidence: outer, types: frame.types, rows: frame.rows,
 					stateToken: stateToken}
 			}
 			bodyWorker := s.workers[term.BodyWorker]
@@ -521,7 +569,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 					childEvidence[param.Unique] = frame.evidence[param.Unique]
 				}
 			}
-			child := &machineFrame{worker: bodyWorker, block: bodyWorker.Entry, vars: childVars, types: frame.types,
+			child := &machineFrame{worker: bodyWorker, block: bodyWorker.Entry, vars: childVars, types: frame.types, rows: frame.rows,
 				evidence: childEvidence, returnBind: term.Bind.Name, returnState: term.StateResult.Name, stateToken: -1}
 			if term.Abort {
 				s.handlers = append(s.handlers, machineHandler{target: installed, frameDepth: len(s.frames),
@@ -557,10 +605,11 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			}
 			releaseEvidence := cloneEvidence(s.interp.evidence)
 			releaseTypes := frame.types
+			releaseRows := frame.rows
 			s.cleanups = append(s.cleanups, func() (*ExitRequest, error) {
 				saved := s.interp.evidence
 				s.interp.evidence = cloneEvidence(releaseEvidence)
-				value, err := s.interp.eval(term.Release, &Frame{vars: releaseVars, types: releaseTypes})
+				value, err := s.interp.eval(term.Release, &Frame{vars: releaseVars, types: releaseTypes, rows: releaseRows})
 				s.interp.evidence = saved
 				if err != nil {
 					return nil, err
@@ -587,11 +636,16 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				owner = fangort.NewYieldOwner()
 				callEvidence[term.Yield.Unique] = &evidence{yieldOwner: owner}
 			}
-			producerSession, err := s.interp.startMachineClosure(s.program, producer.machine, struct{}{}, callEvidence)
+			row, rowErr := s.interp.argumentRow(term.Row, locals)
+			if rowErr != nil {
+				return MachineEvent{}, rowErr
+			}
+			cursorEvidence := fangort.NewCursorEvidence(row)
+			producerSession, err := s.interp.startMachineClosure(s.program, producer.machine, struct{}{}, callEvidence, cursorEvidence.Row())
 			if err != nil {
 				return MachineEvent{}, err
 			}
-			cursor := &MachineIteratorSession{owner: owner, session: producerSession}
+			cursor := &MachineIteratorSession{owner: owner, session: producerSession, evidence: cursorEvidence}
 			frame.vars[term.Cursor.Name] = cursor
 			s.cleanups = append(s.cleanups, cursor.Close)
 			if len(s.cleanups) > s.stats.MaxCleanups {
@@ -814,7 +868,7 @@ func (s *MachineSession) catchExit(exit *ExitRequest) (bool, error) {
 		for _, ev := range worker.EffectParams {
 			evidence[ev.Unique] = owner.evidence[ev.Unique]
 		}
-		child := &machineFrame{worker: worker, block: worker.Entry, vars: vars, evidence: evidence, types: owner.types,
+		child := &machineFrame{worker: worker, block: worker.Entry, vars: vars, evidence: evidence, types: owner.types, rows: owner.rows,
 			returnBind: h.term.AbortBind.Name, returnState: h.term.StateResult.Name, stateToken: stateToken}
 		owner.block = h.term.AbortNext
 		s.frames = append(s.frames, child)
@@ -864,4 +918,6 @@ func clearMachineFrame(frame *machineFrame) {
 	frame.worker = nil
 	frame.vars = nil
 	frame.evidence = nil
+	frame.rows = nil
+	frame.types = nil
 }

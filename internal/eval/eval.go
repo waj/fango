@@ -252,7 +252,7 @@ func (in *interp) makeClosure(lam *core.Lambda, fr *Frame, desc *machineir.Closu
 		}
 		captured[ev.Unique] = in.evidence[ev.Unique]
 	}
-	closure.machine = &machineClosure{desc: desc, values: values, evidence: captured, types: fr.descriptors()}
+	closure.machine = &machineClosure{desc: desc, values: values, evidence: captured, types: fr.descriptors(), rows: fr.closureRows(lam)}
 	return closure, nil
 }
 

@@ -121,7 +121,8 @@ func (b *builder) registerOwnedRoots(body core.Expr) {
 		if h, ok := e.(*core.Handle); ok {
 			outer := b.def
 			inside := *outer
-			inside.EffectParams = shadowEvidence(outer.EffectParams, []core.EffectInstance{h.Effect})
+			inside.EffectParams = shadowEvidence(shadowEvidence(outer.EffectParams, outer.RowEffects), []core.EffectInstance{h.Effect})
+			inside.RowEffects = nil
 			b.def = &inside
 			b.registerOwnedRoots(h.Body)
 			b.def = outer
@@ -144,7 +145,8 @@ func (b *builder) registerOwnedRoots(body core.Expr) {
 			}
 			outer := b.def
 			inside := *outer
-			inside.EffectParams = shadowEvidence(outer.EffectParams, lambda.EffectParams)
+			inside.EffectParams = shadowEvidence(shadowEvidence(outer.EffectParams, outer.RowEffects), shadowEvidence(lambda.EffectParams, lambda.RowEffects))
+			inside.RowEffects = nil
 			b.def = &inside
 			b.registerOwnedRoots(lambda.Body)
 			b.def = outer
@@ -213,7 +215,8 @@ func lowerWorker(d *core.Def, selected map[string]bool, stateToken bool) (Worker
 	}
 	sort.Slice(locals, func(i, j int) bool { return locals[i].Name < locals[j].Name })
 	w := Worker{Name: d.Name, Owner: d.Owner, TyParams: d.TyParams, Params: params, EffectParams: d.EffectParams,
-		Result: result, Entry: entry, Blocks: b.blocks, Locals: locals, Def: source, StateToken: stateToken, SynchronousParams: synchronousParams}
+		Result: result, Entry: entry, Blocks: b.blocks, Locals: locals, Def: source, StateToken: stateToken, SynchronousParams: synchronousParams,
+		RowParam: d.RowParam, Rows: workerRows(d), RowEffects: machineEvidence(d.RowEffects)}
 	w.EffectParams = machineEvidence(w.EffectParams)
 	analyze(&w)
 	return w, b.aux, b.closures, b.stateAux, nil
@@ -260,16 +263,16 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 		}
 		return b.add(&Suspend{Owner: owner, Request: e.Request, Bind: bind, Next: next})
 	case *core.IteratorNext:
-		return b.add(&CursorAdvance{Cursor: e.Cursor, Result: e.Result, Access: e.Access, Bind: bind, Next: next})
+		return b.add(&CursorAdvance{Cursor: e.Cursor, Result: e.Result, Access: e.Access, Bind: bind, Next: next, Row: e.Row})
 	case *core.IteratorScope:
 		if e.Control.Resolve(types.Machine) == types.Machine {
 			cursor := Local{Name: b.fresh("cursor"), Ty: e.CursorTy}
 			b.declare(cursor)
 			b.registerMachineLambdas(e.Producer)
 			close := b.add(&CursorClose{Scope: e.Scope, Next: next})
-			call := &core.App{CalleeKind: core.Value, Callee: e.Consumer, Args: []core.Expr{localRef(cursor)}, Ty: e.Ty, Control: e.Control}
+			call := &core.App{CalleeKind: core.Value, Callee: e.Consumer, Args: []core.Expr{localRef(cursor)}, Ty: e.Ty, Control: e.Control, Row: e.Row}
 			body := b.lowerInto(call, bind, close)
-			return b.add(&CursorOpen{Scope: e.Scope, Yield: e.Yield, Producer: e.Producer, Cursor: cursor, Next: body})
+			return b.add(&CursorOpen{Scope: e.Scope, Yield: e.Yield, Producer: e.Producer, Cursor: cursor, Next: body, Row: e.Row})
 		}
 	case *core.ResumeTail:
 		if e.NextState != nil {
@@ -309,7 +312,7 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 				}
 				b.registerMachineLambdas(arg)
 			}
-			call := &Call{TyArgs: e.TyArgs, Args: e.Args, EvidenceArgs: e.EvidenceArgs, Bind: bind, Next: next}
+			call := &Call{TyArgs: e.TyArgs, Args: e.Args, EvidenceArgs: e.EvidenceArgs, Bind: bind, Next: next, Row: e.Row}
 			if e.CalleeKind == core.Worker {
 				call.Callee = ref.Name
 				if ref.Name == types.ScopeBracketName {
@@ -353,7 +356,7 @@ func (b *builder) lowerHandle(h *core.Handle, bind Local, next BlockID) BlockID 
 		return next
 	}
 	abort := h.Clauses[0].Op.Abort
-	outer := append([]core.EffectInstance(nil), b.def.EffectParams...)
+	outer := shadowEvidence(b.def.EffectParams, b.def.RowEffects)
 	inner := make([]core.EffectInstance, 0, len(outer)+1)
 	for _, ev := range outer {
 		if ev.Unique != h.Effect.Unique {
@@ -509,7 +512,7 @@ func (b *builder) registerMachineLambda(e core.Expr) {
 	}
 	var capturedEvidence []core.EffectInstance
 	needed := core.FreeEvidence(lam)
-	for _, ev := range b.def.EffectParams {
+	for _, ev := range shadowEvidence(b.def.EffectParams, b.def.RowEffects) {
 		if _, used := needed[ev.Unique]; !callEffects[ev.Unique] && used {
 			capturedEvidence = append(capturedEvidence, ev)
 		}
@@ -526,10 +529,10 @@ func (b *builder) registerMachineLambda(e core.Expr) {
 	params = append(params, lam.Param)
 	effects := append(append([]core.EffectInstance(nil), capturedEvidence...), callEvidence...)
 	aux := core.Def{Name: name, Owner: b.def.Owner, Type: ty, TyParams: b.def.TyParams,
-		Params: params, EffectParams: effects, Control: types.Control{Transport: types.Machine}, Body: lam.Body}
+		Params: params, EffectParams: effects, Control: types.Control{Transport: types.Machine}, Body: lam.Body, RowParam: lam.RowParam, RowEffects: lam.RowEffects}
 	b.aux = append(b.aux, aux)
 	b.closures = append(b.closures, Closure{Expr: lam, Worker: name, Captures: captures,
-		CapturedEvidence: capturedEvidence, CallEvidence: callEvidence})
+		CapturedEvidence: capturedEvidence, CallEvidence: callEvidence, CapturedRows: sortedRows(core.FreeRows(lam)), CallRow: lam.RowParam})
 }
 
 func (b *builder) lowerTree(tree core.Tree, bind Local, next BlockID) BlockID {

@@ -5,10 +5,12 @@ import (
 	"fmt"
 
 	machineir "github.com/waj/fango/internal/machine"
+	"github.com/waj/fango/runtime/fangort"
 )
 
 // cursorAdvanceRequest retains the checked result packaging at the transfer.
 type cursorAdvanceRequest struct {
+	row    *fangort.EvidenceRow
 	cursor *MachineIteratorSession
 	term   *machineir.CursorAdvance
 }
@@ -83,6 +85,7 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 				return MachineEvent{}, fmt.Errorf("eval: cursor has no producer")
 			}
 			cursor.busy = true
+			cursor.evidence.Bind(request.row)
 			d.pulls = append(d.pulls, machinePull{caller: d.active, cursor: cursor, term: request.term})
 			if parked := cursor.session.traversal; parked != nil {
 				cursor.session.traversal = nil
@@ -112,6 +115,7 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 			d.pulls[i] = machinePull{}
 			d.pulls = d.pulls[:i]
 			pull.cursor.done, pull.cursor.busy = true, false
+			pull.cursor.evidence.Clear()
 			d.active = pull.caller
 			d.active.completeAdvance(pull.term, nil, false, event.Exit)
 			continue
@@ -135,6 +139,7 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 		}
 		d.pulls = d.pulls[:matched]
 		pull.cursor.busy = false
+		pull.cursor.evidence.Restore()
 		d.active = pull.caller
 		d.active.completeAdvance(pull.term, event.Request, true, nil)
 	}
@@ -150,6 +155,9 @@ func (m *MachineSession) Abandon() (*ExitRequest, error) {
 		return m.abandonLocal()
 	}
 	var primary *ExitRequest
+	for _, pull := range d.pulls {
+		pull.cursor.evidence.Restore()
+	}
 	var failure error
 	active := d.active
 	for i := len(d.pulls) - 1; i >= -1; i-- {
@@ -162,6 +170,7 @@ func (m *MachineSession) Abandon() (*ExitRequest, error) {
 			pull := d.pulls[i]
 			d.pulls[i] = machinePull{}
 			pull.cursor.done, pull.cursor.busy = true, false
+			pull.cursor.evidence.Clear()
 			active = pull.caller
 		}
 	}

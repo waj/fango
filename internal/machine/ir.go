@@ -26,6 +26,8 @@ type Closure struct {
 	Captures         []Local
 	CapturedEvidence []core.EffectInstance
 	CallEvidence     []core.EffectInstance
+	CapturedRows     []types.CaptureVar
+	CallRow          types.CaptureVar
 }
 
 type Local struct {
@@ -41,6 +43,9 @@ type Worker struct {
 	// EffectParams are explicit lexical evidence inputs. Unlike term locals,
 	// they keep nominal effect identity and capture metadata through lowering.
 	EffectParams []core.EffectInstance
+	RowEffects   []core.EffectInstance
+	RowParam     types.CaptureVar
+	Rows         []types.CaptureVar
 	Result       types.Type
 	Entry        BlockID
 	Blocks       []Block
@@ -120,6 +125,7 @@ type Suspend struct {
 }
 
 type CursorAdvance struct {
+	Row    *core.RowArgument
 	Cursor core.Expr
 	Result *types.ADTInfo
 	Access types.CursorAccess
@@ -130,6 +136,7 @@ type CursorAdvance struct {
 // Call transfers to another machine worker. The caller frame remains below
 // the callee unless Tail is true. Resumption/return defines Bind at Next.
 type Call struct {
+	Row             *core.RowArgument
 	Callee          string // non-empty for a statically known worker
 	CalleeExpr      core.Expr
 	Operation       *types.EffectOp
@@ -190,6 +197,7 @@ type PushCleanup struct {
 // CursorOpen allocates a lazy producer and registers its synchronous closure.
 // Yield is fresh evidence supplied only when constructing the producer frame.
 type CursorOpen struct {
+	Row      *core.RowArgument
 	Scope    types.ScopeID
 	Yield    core.EffectInstance
 	Producer core.Expr

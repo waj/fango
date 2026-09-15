@@ -333,9 +333,10 @@ Core retains residual-arrow metadata separately from transport; explicit row
 arguments and ownership checks still need to connect that information to the
 runtime's cursor-owned evidence forwarding and per-advance rebinding.
 Wire row construction, deferred interpretation checking, and the dedicated
-row verifier into all semantic Core entry points. Complete row transport through
-Machine lowering, both Machine interpreters/emitters, and generated Direct/Exit
-members; recursive interpreter calls already accept the explicit Core model.
+row verifier into all semantic Core entry points. Complete generated row
+transport in Direct/Exit members and Machine frames; both interpreter paths
+accept the explicit Core/Machine models. Make row arguments mandatory for all
+source open-row calls when the source elaborator starts emitting them.
 Call-site overlays must use the instantiated residual row; forwarding every
 lexical handler would make otherwise independent callbacks retain resources.
 The task APIs above remain unimplemented.

@@ -13,11 +13,12 @@ import (
 // MachineIteratorSession owns one interpreter-side producer traversal. Source
 // cursor lifetimes and access are checked by capture contracts before execution.
 type MachineIteratorSession struct {
-	busy    bool
-	owner   *fangort.YieldOwner
-	session *MachineSession
-	started bool
-	done    bool
+	evidence *fangort.CursorEvidence
+	busy     bool
+	owner    *fangort.YieldOwner
+	session  *MachineSession
+	started  bool
+	done     bool
 }
 
 func StartMachineIterator(ctx context.Context, p *machineir.Prog, entry string, args []Value, env *Env, ioctx *IOContext) (*MachineIteratorSession, error) {
@@ -29,6 +30,10 @@ func StartMachineIterator(ctx context.Context, p *machineir.Prog, entry string, 
 }
 
 func (it *MachineIteratorSession) Next() (value Value, yielded bool, exit *ExitRequest, err error) {
+	return it.NextWithEvidence(nil)
+}
+
+func (it *MachineIteratorSession) NextWithEvidence(row *fangort.EvidenceRow) (value Value, yielded bool, exit *ExitRequest, err error) {
 	if it != nil && it.busy {
 		return nil, false, nil, fmt.Errorf("eval: overlapping cursor advancement")
 	}
@@ -38,6 +43,14 @@ func (it *MachineIteratorSession) Next() (value Value, yielded bool, exit *ExitR
 	if it.done {
 		return nil, false, nil, nil
 	}
+	it.evidence.Bind(row)
+	defer func() {
+		if it.done {
+			it.evidence.Clear()
+		} else {
+			it.evidence.Restore()
+		}
+	}()
 	var event MachineEvent
 	if it.started {
 		event, err = it.session.Resume(struct{}{})
@@ -65,7 +78,10 @@ func (it *MachineIteratorSession) Close() (*ExitRequest, error) {
 		return nil, nil
 	}
 	it.done = true
-	return it.session.Abandon()
+	it.evidence.Restore()
+	exit, err := it.session.Abandon()
+	it.evidence.Clear()
+	return exit, err
 }
 
 func (it *MachineIteratorSession) Stats() MachineStats {
@@ -96,11 +112,16 @@ func (in *interp) evalIteratorScope(scope *core.IteratorScope, fr *Frame) (Value
 		owner = fangort.NewYieldOwner()
 		callEvidence[scope.Yield.Unique] = &evidence{yieldOwner: owner}
 	}
-	machineSession, err := in.startMachineClosure(in.env.machine, producer.machine, struct{}{}, callEvidence)
+	row, rowErr := in.argumentRow(scope.Row, fr)
+	if rowErr != nil {
+		return nil, rowErr
+	}
+	cursorEvidence := fangort.NewCursorEvidence(row)
+	machineSession, err := in.startMachineClosure(in.env.machine, producer.machine, struct{}{}, callEvidence, cursorEvidence.Row())
 	if err != nil {
 		return nil, err
 	}
-	iteratorSession := &MachineIteratorSession{owner: owner, session: machineSession}
+	iteratorSession := &MachineIteratorSession{owner: owner, session: machineSession, evidence: cursorEvidence}
 
 	consumerValue, consumerErr := in.eval(scope.Consumer, fr)
 	var result Value
@@ -113,7 +134,7 @@ func (in *interp) evalIteratorScope(scope *core.IteratorScope, fr *Frame) (Value
 				consumerErr = fmt.Errorf("eval: iterator consumer is %T, want Direct/Exit callback", consumerValue)
 			} else if scope.Traversal.Unique != 0 {
 				var consumerSession *MachineSession
-				consumerSession, consumerErr = in.startMachineClosure(in.env.machine, consumer.machine, iteratorSession, in.evidence)
+				consumerSession, consumerErr = in.startMachineClosure(in.env.machine, consumer.machine, iteratorSession, in.evidence, row)
 				if consumerErr == nil {
 					consumerSession.cleanups = append(consumerSession.cleanups, iteratorSession.Close)
 					var event MachineEvent

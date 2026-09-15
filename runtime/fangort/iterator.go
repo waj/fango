@@ -53,12 +53,12 @@ func (it *MachineIterator) NextWithEvidence(row *EvidenceRow) (value any, yielde
 	if it.busy {
 		return nil, false, nil, fmt.Errorf("fangort: overlapping cursor advancement")
 	}
-	it.evidence.bind(row)
+	it.evidence.Bind(row)
 	defer func() {
 		if it.done {
-			it.evidence.clear()
+			it.evidence.Clear()
 		} else {
-			it.evidence.restore()
+			it.evidence.Restore()
 		}
 	}()
 	var event MachineEvent
@@ -92,9 +92,9 @@ func (it *MachineIterator) Close() (*ExitRequest, error) {
 		return nil, nil
 	}
 	it.done = true
-	it.evidence.restore()
+	it.evidence.Restore()
 	exit, err := it.machine.Abandon()
-	it.evidence.clear()
+	it.evidence.Clear()
 	return exit, err
 }
 

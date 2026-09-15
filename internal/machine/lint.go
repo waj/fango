@@ -2,6 +2,7 @@ package machine
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 
 	"github.com/waj/fango/internal/core"
@@ -40,6 +41,9 @@ func lintClosure(closure Closure, workers map[string]*Worker) []error {
 		return []error{fmt.Errorf("%s: missing lambda or worker", where)}
 	}
 	var errs []error
+	if !slices.Equal(closure.CapturedRows, sortedRows(core.FreeRows(closure.Expr))) || closure.CallRow != closure.Expr.RowParam {
+		errs = append(errs, fmt.Errorf("%s: missing or stale closure row bindings", where))
+	}
 	same := func(a, b core.EffectInstance) bool {
 		if a.Unique != b.Unique || a.Name != b.Name || len(a.Args) != len(b.Args) || !types.EqualCaptures(a.Captures, b.Captures) {
 			return false
@@ -87,6 +91,20 @@ func lintClosure(closure Closure, workers map[string]*Worker) []error {
 func lintWorker(w *Worker, workers map[string]*Worker) []error {
 	where := "machine worker " + w.Name
 	var errs []error
+	rowsEnabled := false
+	for _, worker := range workers {
+		rowsEnabled = rowsEnabled || len(worker.Rows) != 0 || worker.RowParam != 0
+	}
+	if w.Def != nil {
+		if w.RowParam != w.Def.RowParam || !slices.Equal(w.Rows, workerRows(w.Def)) {
+			errs = append(errs, fmt.Errorf("%s: missing or stale worker row bindings", where))
+		}
+		if !reflect.DeepEqual(w.RowEffects, machineEvidence(w.Def.RowEffects)) {
+			errs = append(errs, fmt.Errorf("%s: missing or stale deferred row evidence", where))
+		}
+	} else if w.RowParam != 0 || len(w.Rows) != 0 || len(w.RowEffects) != 0 {
+		errs = append(errs, fmt.Errorf("%s: row bindings lack a source definition", where))
+	}
 	wantSynchronous := []int(nil)
 	if w.Name == types.FailAttemptReportName && !core.CaptureContractCurrent(w.Def) {
 		errs = append(errs, fmt.Errorf("%s: missing or stale failure report source contract", where))
@@ -138,7 +156,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 	}
 	seenEvidence := map[int]bool{}
 	seenCursorScopes := map[types.ScopeID]bool{}
-	for _, ev := range w.EffectParams {
+	for _, ev := range append(slices.Clone(w.EffectParams), w.RowEffects...) {
 		if ev.Unique == 0 || ev.Name == "" || seenEvidence[ev.Unique] {
 			errs = append(errs, fmt.Errorf("%s: malformed or duplicate evidence parameter", where))
 		}
@@ -180,6 +198,34 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 		checkBind := func(bind Local) {
 			if ty := locals[bind.Name]; ty == nil || bind.Ty == nil || !types.Equal(ty, bind.Ty) {
 				errs = append(errs, fmt.Errorf("%s: result local %q is absent or mistyped", blockWhere, bind.Name))
+			}
+		}
+		checkRow := func(row *core.RowArgument, required bool) {
+			if (row != nil) != required {
+				errs = append(errs, fmt.Errorf("%s: missing or unexpected row argument", blockWhere))
+			}
+			if row == nil {
+				return
+			}
+			if row.From != 0 && !slices.Contains(w.Rows, row.From) {
+				errs = append(errs, fmt.Errorf("%s: unavailable residual row", blockWhere))
+			}
+			last := 0
+			for _, ev := range row.Effects {
+				if ev.Unique <= last || !seenEvidence[ev.Unique] {
+					errs = append(errs, fmt.Errorf("%s: invalid residual evidence argument", blockWhere))
+				}
+				last = ev.Unique
+				for _, expected := range append(slices.Clone(w.EffectParams), w.RowEffects...) {
+					if expected.Unique != ev.Unique {
+						continue
+					}
+					actual := ev
+					actual.Control = types.Control{Transport: types.Machine}
+					if !reflect.DeepEqual(actual, expected) {
+						errs = append(errs, fmt.Errorf("%s: stale residual evidence activation", blockWhere))
+					}
+				}
 			}
 		}
 		switch term := block.Term.(type) {
@@ -244,6 +290,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				errs = append(errs, fmt.Errorf("%s: suspension owner/request type mismatch", blockWhere))
 			}
 		case *CursorAdvance:
+			checkRow(term.Row, w.RowParam != 0)
 			checkBind(term.Bind)
 			checkExpr(term.Cursor, "cursor operand", false)
 			if term.Access != types.ExclusiveAdvance {
@@ -255,6 +302,14 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				}
 			}
 		case *Call:
+			requiresRow := false
+			if rowsEnabled && term.CalleeExpr != nil {
+				requiresRow = core.ArrowOpenRow(term.CalleeExpr.Type(), 1)
+			}
+			if callee := workers[term.Callee]; callee != nil {
+				requiresRow = callee.RowParam != 0
+			}
+			checkRow(term.Row, requiresRow)
 			wantSynchronous := []int(nil)
 			if term.Callee == types.ScopeBracketName {
 				wantSynchronous = []int{0, 1}
@@ -451,6 +506,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				}
 			}
 		case *CursorOpen:
+			checkRow(term.Row, rowsEnabled && term.Producer != nil && core.ArrowOpenRow(term.Producer.Type(), 1))
 			checkBind(term.Cursor)
 			checkExpr(term.Producer, "cursor producer", false)
 			if term.Scope == 0 || seenCursorScopes[term.Scope] {

@@ -78,7 +78,7 @@ func NewCursorEvidence(boundary *EvidenceRow) *CursorEvidence {
 
 func (e *CursorEvidence) Row() *EvidenceRow { return &e.row }
 
-func (e *CursorEvidence) bind(row *EvidenceRow) {
+func (e *CursorEvidence) Bind(row *EvidenceRow) {
 	if e == nil {
 		return
 	}
@@ -90,13 +90,13 @@ func (e *CursorEvidence) bind(row *EvidenceRow) {
 	e.row.tail = row
 }
 
-func (e *CursorEvidence) restore() {
+func (e *CursorEvidence) Restore() {
 	if e != nil {
 		e.row.tail = e.boundary
 	}
 }
 
-func (e *CursorEvidence) clear() {
+func (e *CursorEvidence) Clear() {
 	if e != nil {
 		e.row.tail, e.boundary = nil, nil
 	}
