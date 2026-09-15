@@ -1,0 +1,12 @@
+import Generator
+import Iterator
+import Scope
+
+effect Flush
+    flush : () -> ()
+
+main() = Generator.withIterator (\_ ->
+    handle Scope.finally (\_ -> ()) (\_ -> flush()) of
+        flush () ->
+            Generator.yield 1
+            resume ()) (Iterator.forEach print)

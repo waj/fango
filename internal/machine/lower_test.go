@@ -106,6 +106,27 @@ func TestLowerLeavesDirectProgramOutsideMachineIR(t *testing.T) {
 	}
 }
 
+func TestLowerDoesNotRootUnselectedPolymorphicClosures(t *testing.T) {
+	sup, b := testBuiltins()
+	callback := &types.TFun{Arg: b.Int, Ret: b.Int, Control: types.Control{Polymorphic: true}}
+	factory := core.Def{Name: "Library.factory", Owner: "Library", Type: &types.TFun{Arg: b.Int, Ret: callback},
+		Params: []string{"value"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture()},
+		Body: &core.Lambda{Param: "ignored", ParamCapture: sup.FreshCapture(), Ty: callback,
+			Body: &core.VarRef{Name: "value", Local: true, Ty: b.Int}}}
+	entry := core.Def{Name: "main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: suspend(b, intLit(b, 1))}
+	p := &core.Prog{Defs: []core.Def{factory, entry}}
+	if errs := core.InferCaptures(p, b); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	mp, errs := Lower(p, b)
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	if len(mp.Workers) != 1 || mp.Workers[0].Name != "main" || len(mp.Closures) != 0 {
+		t.Fatalf("unrelated factory gained Machine definitions: %v, %v", workerNames(mp), mp.Closures)
+	}
+}
+
 func TestLowerRootsMachineLambdaInsideDirectIteratorOwnerCall(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)

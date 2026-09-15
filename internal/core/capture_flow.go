@@ -70,6 +70,7 @@ type flowContext struct {
 	scopes    []int
 	def       string
 	accesses  []int
+	suspends  bool
 }
 type flowOwner struct {
 	origin  source.Span
@@ -109,20 +110,40 @@ func (e CursorAccessError) Detail() string {
 	return fmt.Sprintf("The cursor owned by %s may be advanced while an earlier advancement is still executing its producer.", e.Owner)
 }
 
+// SuspensionError reports a producer suspension reached through an actual
+// acquisition or release callback, after substituting its exported contract.
+type SuspensionError struct {
+	Span      source.Span
+	In, Phase string
+}
+
+func (e SuspensionError) Error() string { return "SUSPENDING RESOURCE CALLBACK: " + e.Detail() }
+func (e SuspensionError) Detail() string {
+	return fmt.Sprintf("Resource %s must complete synchronously, but this callback may suspend.", e.Phase)
+}
+
+type synchronousFlow struct {
+	phase     string
+	span      source.Span
+	enclosing []int
+}
+
 type flowChecker struct {
-	shape     *captureAnalyzer
-	defs      map[string]*Def
-	objects   []*flowObject
-	objectIDs map[string]int
-	owners    []*flowOwner
-	ownerIDs  map[string]int
-	contexts  map[string]*flowContext
-	changed   bool
-	errors    map[string]error
-	root      string
-	location  source.Span
-	active    map[int]int
-	calls     []*flowContext
+	shape           *captureAnalyzer
+	defs            map[string]*Def
+	objects         []*flowObject
+	objectIDs       map[string]int
+	owners          []*flowOwner
+	ownerIDs        map[string]int
+	contexts        map[string]*flowContext
+	changed         bool
+	errors          map[string]error
+	root            string
+	location        source.Span
+	active          map[int]int
+	calls           []*flowContext
+	synchronous     []synchronousFlow
+	suspensionCalls []*flowContext
 }
 
 func checkCaptureFlows(a *captureAnalyzer) []error {
@@ -536,17 +557,22 @@ func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env fl
 	for _, owner := range c.accesses {
 		f.requireAdvance(owner)
 	}
+	if c.suspends {
+		f.suspend()
+	}
 	if c.busy {
 		return c.result
 	}
 	c.busy = true
 	f.calls = append(f.calls, c)
+	f.suspensionCalls = append(f.suspensionCalls, c)
 	var got flowValue
 	for _, owner := range c.resumes {
 		got = joinFlow(got, f.eval(body, c.env, key, c.scopes, owner))
 	}
 	c.busy = false
 	f.calls = f.calls[:len(f.calls)-1]
+	f.suspensionCalls = f.suspensionCalls[:len(f.suspensionCalls)-1]
 	f.merge(&c.result, got)
 	return c.result
 }
@@ -692,7 +718,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		}
 		result = joinFlow(result, child(0))
 	case "scope":
-		acquired := child(0)
+		acquired := f.syncEval("acquisition", n.Children[0], env, ctx, scopes, resume)
 		id := f.owner(n, env, ctx, scopes)
 		resource := acquired
 		if len(n.TypeArgs) > 0 && f.carry(n.TypeArgs[0], env) {
@@ -702,7 +728,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		inner.values[n.Name] = resource
 		inside := append(slices.Clone(scopes), id)
 		result = f.eval(n.Children[1], inner, ctx, inside, resume)
-		f.eval(n.Children[2], inner, ctx, inside, resume)
+		f.syncEval("release", n.Children[2], inner, ctx, inside, resume)
 		f.escape(result, id, "scope result", "The returned value")
 	case "handle":
 		initial := child(0)
@@ -764,7 +790,27 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 				}
 				// Clause code runs with definition-site evidence. Its synchronous
 				// execution still lies inside the caller's live resource scopes.
+				savedSync, savedCalls := f.synchronous, f.suspensionCalls
+				if n.Kind == "exit" {
+					// An abort clause runs after unwinding to its handler. It is
+					// outside callbacks entered beneath that handler, even though
+					// the contract interpreter visits it at the operation site.
+					f.synchronous = nil
+					for _, obligation := range savedSync {
+						if !slices.Contains(obligation.enclosing, id) {
+							f.synchronous = append(f.synchronous, obligation)
+						}
+					}
+					f.suspensionCalls = nil
+					for i, call := range savedCalls {
+						if call == f.contexts[o.context] {
+							f.suspensionCalls = slices.Clone(savedCalls[:i+1])
+							break
+						}
+					}
+				}
 				got := f.invoke(fmt.Sprintf("clause:%s:%d", f.contextDef(o.context), cl.Body.ID), f.contextDef(o.context), cl.Body, inner, key, scopes, id)
+				f.synchronous, f.suspensionCalls = savedSync, savedCalls
 				if n.Kind == "exit" {
 					f.merge(&o.answer, got)
 				} else {
@@ -787,6 +833,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		return result
 	case "suspend":
 		result = child(0)
+		f.suspend()
 		// Existing iterator ownership remains independently checked. A yielded
 		// value must not smuggle an inner resource outside its producer lifetime.
 		for _, id := range f.captures(result) {
@@ -856,7 +903,38 @@ func (f *flowChecker) advance(cursor flowValue, env flowEnv, site string, scopes
 			continue
 		}
 		f.active[owner]++
+		// A synchronous pull handles its producer's suspension. Do not export
+		// that suspension as an obligation on the caller driving the cursor.
+		saved, calls := f.synchronous, f.suspensionCalls
+		f.synchronous, f.suspensionCalls = nil, nil
 		f.apply(o.fields[0], []flowValue{{}}, env, site+"/advance", scopes)
+		f.synchronous, f.suspensionCalls = saved, calls
 		f.active[owner]--
 	}
+}
+
+func (f *flowChecker) syncEval(phase string, n *types.CaptureFlow, env flowEnv, ctx string, scopes []int, resume int) flowValue {
+	f.synchronous = append(f.synchronous, synchronousFlow{phase: phase, span: f.location, enclosing: slices.Clone(scopes)})
+	result := f.eval(n, env, ctx, scopes, resume)
+	f.synchronous = f.synchronous[:len(f.synchronous)-1]
+	return result
+}
+
+func (f *flowChecker) suspend() {
+	for _, call := range f.suspensionCalls {
+		if !call.suspends {
+			call.suspends = true
+			f.changed = true
+		}
+	}
+	if len(f.synchronous) == 0 {
+		return
+	}
+	obligation := f.synchronous[len(f.synchronous)-1]
+	span := f.location
+	if span.File == nil {
+		span = obligation.span
+	}
+	err := SuspensionError{Span: span, In: f.root, Phase: obligation.phase}
+	f.errors[err.Error()] = err
 }

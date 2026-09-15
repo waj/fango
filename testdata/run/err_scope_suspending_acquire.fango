@@ -1,0 +1,9 @@
+import Generator
+import Iterator
+import Scope
+
+withResource acquire use = Scope.bracket acquire (\_ -> ()) use
+
+main() =
+    Generator.withIterator (\_ ->
+        withResource (\_ -> Generator.yield 1) (\_ -> ())) (Iterator.forEach print)

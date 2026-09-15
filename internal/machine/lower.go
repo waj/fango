@@ -52,7 +52,13 @@ func lower(p *core.Prog) (*Prog, []error) {
 		builder := &builder{def: d, locals: localRefTypes(d.Body), lambdas: map[*core.Lambda]bool{}, stateAux: map[string]bool{}}
 		core.Inspect(d.Body, func(e core.Expr) {
 			if lambda, ok := e.(*core.Lambda); ok {
-				builder.registerMachineLambdas(lambda)
+				// An open row alone is not a Machine root. Its Machine member
+				// is selected when called from a Machine worker; rooting every
+				// polymorphic lambda here changes unrelated dependency output
+				// merely because an importer opens a producer elsewhere.
+				if fn, ok := lambda.Ty.(*types.TFun); ok && types.FunctionControl(fn).Transport == types.Machine {
+					builder.registerMachineLambdas(lambda)
+				}
 			}
 		})
 		rootedClosures = append(rootedClosures, builder.closures...)

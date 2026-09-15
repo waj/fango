@@ -1,0 +1,12 @@
+import Generator
+import Iterator
+import Scope
+
+type Cleanup = Cleanup (() ->{Generator.Generator Int} ())
+
+runCleanup (Cleanup cleanup) = cleanup()
+
+main() =
+    cleanup = Cleanup (\_ -> Generator.yield 1)
+    Generator.withIterator (\_ ->
+        Scope.finally (\_ -> ()) (\_ -> runCleanup cleanup)) (Iterator.forEach print)

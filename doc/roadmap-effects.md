@@ -337,6 +337,9 @@ ordinary library composition:
 - **Compositional suspension:** Machine calls work through higher-order and
   stored callbacks, nested scopes, result constructors, and module boundaries.
   Unsupported suspension handlers receive source diagnostics, not Core errors.
+  Complete the Machine scope member with Direct/Exit acquisition and release
+  callbacks and a Machine body, preserving the implemented non-suspension
+  contracts before callback row widening.
 - **Task boundaries:** validate captures and separate child completion from an
   exit targeted at a parent handler. A child executor never unwinds a parent's
   stack directly; it reports completion for parent-side routing after drain.

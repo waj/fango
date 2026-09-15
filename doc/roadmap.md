@@ -289,6 +289,9 @@ routing, and compositional Machine lowering remain work. Terminal traversal now
 exports cursor lifetime and exclusive-advancement contracts through named helpers,
 aliases, stored callbacks, and modules. Experimental APIs may be replaced without
 compatibility scaffolding.
+Acquisition and release export non-suspension obligations through those same
+contracts. Completing the Machine scope representation must preserve this check
+while accepting Direct/Exit acquisition and release alongside a Machine body.
 Stage-safe traversal uses selective Machine lowering and shares the caller's
 native restrictions and evaluation budget; the Stream replacement must preserve
 that boundary and its rollback checks.

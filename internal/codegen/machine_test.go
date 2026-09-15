@@ -191,6 +191,13 @@ func TestIteratorOwnerRootsMachineProducerInDirectCaller(t *testing.T) {
 func TestGeneratedMachineFrameExecutes(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
+	poly := types.Control{Polymorphic: true}
+	polyCallback := &types.TFun{Arg: b.Int, Ret: b.Int, Control: poly}
+	applyCallback := core.Def{Name: "Main.applyCallback", Owner: "Main",
+		Type:   &types.TFun{Arg: polyCallback, Ret: b.Int, Control: types.Control{Transport: types.Machine}},
+		Params: []string{"action"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture()}, Control: types.Control{Transport: types.Machine},
+		Body: &core.App{CalleeKind: core.Value, Callee: &core.VarRef{Name: "action", Local: true, Ty: polyCallback},
+			Args: []core.Expr{&core.IntLit{Val: 17, Ty: b.Int}}, Ty: b.Int, Control: poly}}
 	x := &core.VarRef{Name: "x", Local: true, Ty: b.Int}
 	body := &core.Let{Name: "x", Rhs: &core.Suspend{Request: &core.IntLit{Val: 1, Ty: b.Int}, Ty: b.Int}, Ty: b.Int,
 		Body: &core.Let{Name: "ignored", Rhs: &core.Suspend{Request: x, Ty: b.Int}, Ty: b.Int, Body: x}}
@@ -265,6 +272,7 @@ func TestGeneratedMachineFrameExecutes(t *testing.T) {
 		{Name: "Main.main", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: body},
 		{Name: "Main.match", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: matchBody},
 		{Name: "Main.callback", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: callbackBody},
+		applyCallback,
 		generic,
 		{Name: "Main.genericCall", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: genericCall},
 		{Name: "Main.handler", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: handler},
@@ -342,6 +350,14 @@ func TestFixture(t *testing.T) {
     if err != nil || event.Done || event.Request != int64(8) { t.Fatalf("callback: %#v %v", event, err) }
     event, err = callback.Resume(int64(42))
     if err != nil || !event.Done || event.Value != int64(42) { t.Fatalf("callback done: %#v %v", event, err) }
+
+    polymorphic := fangort.StartMachine(MachineFrame_Main_dot_applyCallback(func(value int64) fangort.MachineFrame {
+        return MachineFrame_Main_dot_generic[int64](value)
+    }))
+    event, err = polymorphic.Run()
+    if err != nil || event.Done || event.Request != int64(17) { t.Fatalf("polymorphic callback: %#v %v", event, err) }
+    event, err = polymorphic.Resume(int64(71))
+    if err != nil || !event.Done || event.Value != int64(71) { t.Fatalf("polymorphic callback done: %#v %v", event, err) }
 
     generic := fangort.StartMachine(MachineFrame_Main_dot_genericCall())
     event, err = generic.Run()

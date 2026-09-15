@@ -98,6 +98,9 @@ func directMachineTerms(worker *machineir.Worker) error {
 
 func (g *gen) machineWorkerDecls(worker *machineir.Worker) []goast.Decl {
 	g.usesFangort = true
+	oldControl, oldABI := g.control, g.abi
+	g.control, g.abi = types.Machine, types.Machine
+	defer func() { g.control, g.abi = oldControl, oldABI }()
 	oldNames := g.tyParamNames
 	g.tyParamNames = tyParamNames(worker.TyParams)
 	defer func() { g.tyParamNames = oldNames }()

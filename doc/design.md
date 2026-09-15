@@ -905,6 +905,13 @@ block reachability and successor validity, proves a single cleanup depth at
 every normal CFG join and zero pending worker-owned cleanups at return, and
 validates local, call, result, and control types.
 
+Machine frame fields and factory parameters use the same Machine value
+representation as their step bodies, including polymorphic callbacks. An open
+callback row in an otherwise unselected definition does not itself create a
+Machine root; concrete Machine closures and calls from selected workers do.
+Importing a producer elsewhere therefore does not add speculative closure
+frames to unrelated Direct/Exit dependencies.
+
 Two private backends consume that IR. The in-process evaluator owns an explicit
 slice of machine frames and uses the recursive Core evaluator only for a
 non-Machine expression that finishes before the next transition. The Go
@@ -957,6 +964,17 @@ acquire and release are non-suspending Direct or Exit expressions register a
 synchronous release closure before entering their body, preserve it across
 suspension, and pop it exactly once on normal completion. Exits retain the
 primary/suppressed ordering while partially unwinding to an inner handler.
+
+Capture-flow contracts also export acquisition and release non-suspension
+obligations. They inspect actual callback bodies through helpers, stored values,
+and definition-site evidence, independently of a widened callback row. Recursive
+call summaries retain outward suspension obligations. A completed pull handles
+its own producer's suspension, so synchronous traversal within acquisition or
+release is allowed. Resumptive clauses remain part of the calling callback;
+an abort clause outside it runs after unwinding and is checked outside that
+callback's obligation. Core lint reconstructs these checks from executable Core
+and rejects stale contracts.
+
 Explicit abandonment consumes an unfinished private machine, runs all pending
 cleanups, and clears its frames, handler activations, state cells, pending
 result, and suspension marker. Cleanup failure becomes the abandonment

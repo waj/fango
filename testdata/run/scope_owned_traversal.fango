@@ -1,0 +1,12 @@
+import Generator
+import Iterator
+import Scope
+
+total : () -> Int
+total() = Generator.withIterator (\_ ->
+    Generator.yield 10
+    Generator.yield 20) (Iterator.fold (\value acc -> value + acc) 0)
+
+main() = Scope.bracket total (\value ->
+    print value
+    print (total())) print

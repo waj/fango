@@ -545,7 +545,14 @@ func captureDiagnostics(errs []error, ck *infer.Checker, fallback source.Span) [
 	for _, err := range errs {
 		var flow core.CaptureFlowError
 		var access core.CursorAccessError
+		var suspension core.SuspensionError
 		switch {
+		case errors.As(err, &suspension):
+			sp := suspension.Span
+			if sp.File == nil {
+				sp = at(suspension.In)
+			}
+			out = append(out, diag.Errorf(sp, "SUSPENDING RESOURCE CALLBACK", "%s", suspension.Detail()))
 		case errors.As(err, &access):
 			sp := access.Span
 			if sp.File == nil {
