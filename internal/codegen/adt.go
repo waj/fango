@@ -35,10 +35,7 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 		runtimeParams := runtimeADTParams(adt)
 		modes := []types.Transport{types.Direct}
 		if g.controlledType(adt.Con, nil) {
-			modes = append(modes, types.Exit)
-			if g.machine {
-				modes = append(modes, types.Machine)
-			}
+			modes = append(modes, types.Exit, types.Machine)
 		}
 		for _, mode := range modes {
 			oldControl, oldABI := g.control, g.abi

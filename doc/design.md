@@ -250,8 +250,9 @@ module always emits Direct and Exit ABI members, so a downstream consumer
 cannot change dependency output. A Direct callback widens to Exit through an
 eta wrapper that calls it and returns `Normal`; the inverse conversion is
 illegal. ADTs, including class dictionaries, that transitively store a
-transport-polymorphic function receive corresponding module-owned Direct and
-Exit representation families. This keeps stored callbacks typed without
+transport-polymorphic function receive module-owned Direct, Exit, and Machine
+representation families. Effect evidence records likewise emit all three
+families independently of downstream consumers. This keeps stored callbacks typed without
 boxing every ordinary value or guessing an ABI after row erasure.
 Pure wrappers inside one of those members retain its representation family:
 entering a pure lambda changes that lambda's execution protocol, but does not
@@ -260,6 +261,11 @@ to the Direct family. A named pure worker that produces a controlled value
 likewise has Direct- and Exit-family members even though both members use the
 Direct execution protocol; the family selects the result representation
 independently of whether the worker itself returns an outcome.
+Pure factories that only transfer stored callbacks also emit a Machine-family
+member using Direct execution. A Machine consumer calls that factory directly
+and receives the corresponding constructor family. Completing Machine families
+for closure-producing factories and transport-polymorphic workers remains in
+the effects roadmap.
 
 A statically Direct call that constructs an Exit-family value selects a
 transport-polymorphic worker's Exit member, widening any Direct evidence.

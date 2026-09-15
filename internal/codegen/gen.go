@@ -120,7 +120,6 @@ func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, un
 		effects:         map[int]*types.EffectInfo{},
 		control:         types.Direct,
 		abi:             types.Direct,
-		machine:         mp != nil,
 		machineClosures: map[*core.Lambda]*machineir.Closure{},
 		machineWorkers:  map[string]*machineir.Worker{},
 	}
@@ -203,6 +202,9 @@ func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, un
 					execution = types.Exit
 				}
 				decls = append(decls, g.workerDef(d, execution, types.Exit))
+			}
+			if g.passiveMachineFactory(d) {
+				decls = append(decls, g.workerDef(d, types.Direct, types.Machine))
 			}
 			continue
 		}
@@ -319,7 +321,6 @@ type gen struct {
 	// representations even though its own call returns directly.
 	abi             types.Transport
 	resultType      types.Type
-	machine         bool
 	machineClosures map[*core.Lambda]*machineir.Closure
 	machineWorkers  map[string]*machineir.Worker
 }
@@ -692,6 +693,8 @@ func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
 	name := g.topValueName(d.Name)
 	if abi == types.Exit {
 		name += "_exit"
+	} else if abi == types.Machine {
+		name += "_machine"
 	}
 	decl := workerDecl(name, params, result, body).(*goast.FuncDecl)
 	for _, ev := range d.EffectParams {
@@ -727,6 +730,9 @@ func (g *gen) workerCallStmts(name string, args []goast.Expr) []goast.Stmt {
 }
 
 func (g *gen) workerCallABI(d *core.Def, execution types.Transport) types.Transport {
+	if g.representationMode() == types.Machine && g.passiveMachineFactory(d) {
+		return types.Machine
+	}
 	if execution == types.Exit {
 		return types.Exit
 	}
@@ -746,6 +752,43 @@ func (g *gen) workerNeedsABIFamily(d *core.Def) bool {
 		return true
 	}
 	return g.controlledType(ret, nil)
+}
+
+// Passive factories transfer stored callbacks without executing or constructing
+// them. Their representation family follows their values, while their execution
+// remains Direct. Closure-producing factories also need module-owned lowering.
+func (g *gen) passiveMachineFactory(d *core.Def) bool {
+	return g.passiveMachineFactorySeen(d, map[string]bool{})
+}
+
+func (g *gen) passiveMachineFactorySeen(d *core.Def, seen map[string]bool) bool {
+	if d == nil || d.Control != (types.Control{}) || !g.workerNeedsABIFamily(d) {
+		return false
+	}
+	if seen[d.Name] {
+		return true
+	}
+	seen[d.Name] = true
+	passive := true
+	core.Inspect(d.Body, func(e core.Expr) {
+		switch e := e.(type) {
+		case *core.Lambda:
+			passive = false
+		case *core.App:
+			if e.CalleeKind == core.Value || e.Control != (types.Control{}) {
+				passive = false
+			}
+			if e.CalleeKind == core.Worker {
+				if ref, ok := e.Callee.(*core.VarRef); ok {
+					callee := g.defs[ref.Name]
+					if callee != nil && g.workerNeedsABIFamily(callee) && !g.passiveMachineFactorySeen(callee, seen) {
+						passive = false
+					}
+				}
+			}
+		}
+	})
+	return passive
 }
 
 // workerCallsControlledArg reports whether the worker actually invokes one of
@@ -2404,10 +2447,7 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 		if types.SurfaceName(eff.Name) == "IO" || eff.Suspension {
 			continue
 		}
-		modes := []types.Transport{types.Direct, types.Exit}
-		if g.machine {
-			modes = append(modes, types.Machine)
-		}
+		modes := []types.Transport{types.Direct, types.Exit, types.Machine}
 		for _, mode := range modes {
 			oldNames, oldControl, oldABI := g.tyParamNames, g.control, g.abi
 			g.tyParamNames, g.control, g.abi = map[int]string{}, mode, mode
