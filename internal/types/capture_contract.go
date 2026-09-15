@@ -28,6 +28,7 @@ type CaptureFlow struct {
 	Scoped   bool
 	Borrow   bool
 	Retain   bool
+	Access   CursorAccess
 	Index    int
 	Rec      bool
 	Children []*CaptureFlow

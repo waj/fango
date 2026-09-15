@@ -204,7 +204,8 @@ retain the contracts; source annotations do not erase them.
 Contract checking substitutes actual callbacks and evidence and joins branches.
 An allocation-site abstract heap tracks closures and constructor fields; closures
 retain free values and definition-site evidence, excluding their own binders.
-Recursive calls join enclosing contexts and iterate to a fixed point, without
+Recursive calls join enclosing contexts at a repeated target and lexical call
+site and iterate to a fixed point, without
 an iteration-limit success fallback. Separate acyclic call paths distinguish
 nested owners. Folded recursive activations cannot establish that two dynamic
 owners are identical, so retention requiring that equality is rejected
@@ -969,13 +970,14 @@ The pull-iterator runtime layer wraps that private machine in a pull owner. Each
 Unit; normal return ends iteration, while a tagged exit remains distinct.
 `Close` abandons unfinished production and is safe to defer after normal
 exhaustion. Generated code and the interpreter use equivalent owners. These Go
-owners are not source cursors: the bundled `Iterator.Iterator` type is opaque,
-and only checked terminal intrinsics receive its private representation.
+owners represent the abstract `Iterator.Iterator` resource. Ordinary Fango
+helpers may pass them within their lifetime; only compiler-owned advancement
+inspects their runtime state.
 
 `IteratorScope` is the typed Core owner boundary and is produced only as the
 body of the resolved `Generator.withIterator` intrinsic. It stores the
-Machine-transport producer callback, the lexical consumer callback, and the
-opaque `Iterator.Iterator` cursor type. Its visible control is the consumer's
+Machine-transport producer callback, the consumer callback, a fresh `ScopeID`,
+and the opaque `Iterator.Iterator` cursor type. Its visible control is the consumer's
 residual control: the producer's latent Machine transport terminates at the
 owner instead of infecting the caller. Selective lowering roots Machine
 lambdas found inside Direct or Exit definitions as typed frame factories while
@@ -985,22 +987,38 @@ owner, pass that owner only to the consumer, and close it on scope exit. The
 interpreter installs the lowering beside semantic Core and keys frame factories
 by the original lambda identity, matching generated code's closure table.
 
+An interpreter closure can retain both an ordinary body and a checked Machine
+factory. The call chooses its execution protocol; storing or passing that
+closure does not erase either representation. A closure created over mutable
+Machine locals snapshots only the locals its body references, so pruning or
+clearing the frame cannot invalidate the closure or retain unrelated locals.
+
 The reserved `Generator.Generator` effect is the typed marker for this private
 suspension path. It selects Machine transport but has no runtime evidence
 parameter: a canonical `Generator.yield` operation elaborates directly to
 `Suspend`, whose request is the yielded element and whose resumed result is
 Unit. The bundled declaration and owning runner remain the activation boundary;
 an unrelated effect or operation spelling does not acquire this lowering.
+Source checking rejects ordinary handlers for this compiler-owned effect, and
+Core lint independently rejects such handler nodes.
 
-Inference and typed Core enforce the first source-ownership boundary by
-resolved identity. A `Generator.withIterator` consumer must be a lexical
-lambda, and its cursor parameter may occur only as the final argument of a
-recognized terminal consumer (`Iterator.forEach`, `fold`, `find`, or `take`),
-at most once. Inference points an alias, capture, escape, or second consumption
-at its source occurrence; the Core linter repeats the proof after elaboration.
-Raw `next` is deliberately absent from this initial discipline because it
-would require representing ownership transfer to a successor cursor rather
-than terminal consumption.
+Cursor ownership is part of the inferred capture-flow contract. `Iterator` is
+an opaque declared resource; the owner supplies its fresh capability to the
+consumer. Named consumers, aliases, constructor fields, stored callbacks,
+dictionaries, and helper calls retain the same obligations. Returning the
+cursor or a value that captures it, or retaining it in an outer handler, fails
+the ordinary resource escape proof. Independent nested owner call sites stay
+distinct even when they invoke the same bundled wrapper.
+
+Terminal Core nodes carry explicit exclusive-advancement metadata. Contract
+checking substitutes actual cursor identities and executes each producer's
+contract under that cursor's exclusive borrow. Consumer callbacks execute after
+the advancement finishes. Access summaries remain active at recursive joins;
+a possible overlap reports `ITERATOR ADVANCEMENT CONFLICT`. Core lint checks
+the scope and access metadata, reconstructs the contracts, and repeats the
+proof, rejecting missing or stale contracts. These contracts support sequential
+uses of a cursor, including reads after exhaustion. Raw `next` and compositional
+suspension routing remain unimplemented.
 
 `Iterator.forEach` and `Iterator.fold` have terminal Core implementations.
 Their intrinsic bodies carry the callback and opaque cursor; `fold` additionally
@@ -1010,8 +1028,8 @@ the callback once in yield order. `fold` applies its curried callback as
 accumulator. A terminal does not close the cursor itself: returning normally or
 exceptionally transfers control back to the enclosing `IteratorScope`, which
 closes or abandons the producer exactly once and combines cleanup failure with
-the consumer exit. `find` and `take` remain ownership-checker reservations
-until their typed Core nodes are implemented.
+the consumer exit. The fold contract joins accumulator values to a fixed point,
+including callback effects reached through an accumulator from a prior iteration.
 
 An effect-polymorphic higher-order worker has its open callback row erased from
 the runtime ABI. Passing a concrete callback therefore adapts it to that ABI;

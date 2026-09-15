@@ -32,9 +32,9 @@ func stageIterator(t *testing.T, sup *types.Supply, b *types.Builtins, body core
 	action := &core.Lambda{Param: "element", ParamCapture: sup.FreshCapture(),
 		Ty: &types.TFun{Arg: b.Int, Ret: b.Unit}, Body: &core.UnitLit{Ty: b.Unit}}
 	consumer := &core.Lambda{Param: "cursor", ParamCapture: sup.FreshCapture(),
-		Ty: &types.TFun{Arg: cursorTy, Ret: b.Unit}, Body: &core.IteratorForEach{
+		Ty: &types.TFun{Arg: cursorTy, Ret: b.Unit}, Body: &core.IteratorForEach{Access: types.ExclusiveAdvance,
 			Action: action, Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: cursorTy}, Element: b.Int, Ty: b.Unit}}
-	return &core.IteratorScope{Producer: producer, Consumer: consumer, CursorTy: cursorTy, Ty: b.Unit}, env
+	return &core.IteratorScope{Scope: sup.FreshScope(), Producer: producer, Consumer: consumer, CursorTy: cursorTy, Ty: b.Unit}, env
 }
 
 func TestIteratorPreservesCompileTimeNativeRestrictions(t *testing.T) {

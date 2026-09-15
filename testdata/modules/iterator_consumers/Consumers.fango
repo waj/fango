@@ -1,0 +1,26 @@
+module Consumers exposing (Consumer, escape, make, prefix, run)
+
+import Iterator exposing (Iterator)
+
+type Consumer = Consumer (Iterator Int -> Int)
+
+sum : Iterator Int -> Int
+sum cursor = Iterator.fold (\element acc -> element + acc) 0 cursor
+
+twice cursor =
+    alias = cursor
+    first = sum alias
+    second = sum cursor
+    first + second
+
+make() = Consumer twice
+
+run (Consumer action) cursor = action cursor
+
+prefix : Int ->{IO} (Iterator Int -> Int)
+prefix extra =
+    print "prefix"
+    \cursor -> sum cursor + extra
+
+escape : Iterator Int -> (() -> Iterator Int)
+escape cursor = \_ -> cursor

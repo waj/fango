@@ -8,9 +8,8 @@ import (
 	machineir "github.com/waj/fango/internal/machine"
 )
 
-// MachineIteratorSession is the interpreter-side owner for E8's private pull
-// protocol. Source construction remains disabled until cursor ownership is
-// represented by capture analysis.
+// MachineIteratorSession owns one interpreter-side producer traversal. Source
+// cursor lifetimes and access are checked by capture contracts before execution.
 type MachineIteratorSession struct {
 	session *MachineSession
 	started bool
@@ -73,14 +72,14 @@ func (in *interp) evalIteratorScope(scope *core.IteratorScope, fr *Frame) (Value
 	if _, exits := asExit(producerValue); exits {
 		return producerValue, nil
 	}
-	producer, ok := producerValue.(*machineClosure)
-	if !ok {
+	producer, ok := producerValue.(*Closure)
+	if !ok || producer.machine == nil {
 		return nil, fmt.Errorf("eval: iterator producer is %T, want lowered Machine callback", producerValue)
 	}
 	if in.env.machine == nil {
 		return nil, fmt.Errorf("eval: iterator owner has no installed Machine lowering")
 	}
-	machineSession, err := in.startMachineClosure(in.env.machine, producer, struct{}{}, in.evidence)
+	machineSession, err := in.startMachineClosure(in.env.machine, producer.machine, struct{}{}, in.evidence)
 	if err != nil {
 		return nil, err
 	}

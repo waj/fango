@@ -282,6 +282,7 @@ func iteratorFoldDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 		ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture(), ck.Sup.FreshCapture()},
 		Control:       core.ArrowControl(ty, len(params)),
 		Body: &core.IteratorFold{
+			Access:  types.ExclusiveAdvance,
 			Combine: &core.VarRef{Name: params[0], Local: true, Ty: combine},
 			Initial: &core.VarRef{Name: params[1], Local: true, Ty: args[1]},
 			Cursor:  &core.VarRef{Name: params[2], Local: true, Ty: cursor},
@@ -300,6 +301,7 @@ func iteratorForEachDef(name string, ty types.Type, ck *infer.Checker) core.Def 
 		ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture()},
 		Control:       core.ArrowControl(ty, len(params)),
 		Body: &core.IteratorForEach{
+			Access:  types.ExclusiveAdvance,
 			Action:  &core.VarRef{Name: params[0], Local: true, Ty: action},
 			Cursor:  &core.VarRef{Name: params[1], Local: true, Ty: cursor},
 			Element: cursor.Args[0], Ty: result, Control: types.FunctionControl(action),
@@ -321,6 +323,7 @@ func withIteratorDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 		ParamCaptures: paramCaptures,
 		Control:       core.ArrowControl(ty, len(params)),
 		Body: &core.IteratorScope{
+			Scope:    ck.Sup.FreshScope(),
 			Producer: &core.VarRef{Name: params[0], Local: true, Ty: producer},
 			Consumer: &core.VarRef{Name: params[1], Local: true, Ty: consumer},
 			CursorTy: consumer.Arg,
@@ -541,7 +544,14 @@ func captureDiagnostics(errs []error, ck *infer.Checker, fallback source.Span) [
 	out := make([]diag.Error, 0, len(errs))
 	for _, err := range errs {
 		var flow core.CaptureFlowError
+		var access core.CursorAccessError
 		switch {
+		case errors.As(err, &access):
+			sp := access.Span
+			if sp.File == nil {
+				sp = at(access.In)
+			}
+			out = append(out, diag.Errorf(sp, "ITERATOR ADVANCEMENT CONFLICT", "%s", access.Detail()))
 		case errors.As(err, &flow):
 			title := "RESOURCE ESCAPES"
 			if flow.State {

@@ -39,6 +39,37 @@ func TestMachineSessionSuspendsAndResumesWithoutRecursiveFrames(t *testing.T) {
 	}
 }
 
+func TestMachineRetainsOnlyCapturedLocalsInReturnedDirectCallback(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	fn := &types.TFun{Arg: b.Unit, Ret: b.Int}
+	callback := &core.Lambda{Param: "_", ParamCapture: sup.FreshCapture(), Ty: fn,
+		Body: &core.VarRef{Name: "kept", Local: true, Ty: b.Int}}
+	body := &core.Let{Name: "kept", Rhs: &core.IntLit{Val: 42, Ty: b.Int}, Ty: fn,
+		Body: &core.Let{Name: "discarded", Rhs: &core.StringLit{Val: strings.Repeat("x", 1024), Ty: b.String}, Ty: fn,
+			Body: &core.Let{Name: "callback", Rhs: callback, Ty: fn,
+				Body: &core.Seq{First: &core.Suspend{Request: &core.IntLit{Val: 1, Ty: b.Int}, Ty: b.Unit},
+					Then: &core.VarRef{Name: "callback", Local: true, Ty: fn}, Ty: fn}}}}
+	p := &core.Prog{Defs: []core.Def{{Name: "producer", Type: fn, Control: types.Control{Transport: types.Machine}, Body: body}}}
+	mp := lowerMachineTest(t, p, b)
+	session := startMachineTest(t, p, mp, "producer", nil)
+	if _, err := session.Run(); err != nil {
+		t.Fatal(err)
+	}
+	event, err := session.Resume(struct{}{})
+	if err != nil || !event.Done {
+		t.Fatalf("completion = %#v, %v", event, err)
+	}
+	closure, ok := event.Value.(*Closure)
+	if !ok || closure.Env == nil || len(closure.Env.vars) != 1 || closure.Env.parent != nil {
+		t.Fatalf("returned callback retained more than its captured local: %#v", event.Value)
+	}
+	value, err := session.interp.callClosure(closure, struct{}{})
+	if err != nil || value != int64(42) {
+		t.Fatalf("callback after producer completion = %#v, %v", value, err)
+	}
+}
+
 func TestMachineSessionUsesExplicitCallerFrame(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)

@@ -55,10 +55,12 @@ type flowObject struct {
 	env    flowEnv
 	fields []flowValue
 	ctor   int
+	owner  int
 }
 type flowContext struct {
 	origin    source.Span
 	target    string
+	site      string
 	parent    string
 	env       flowEnv
 	result    flowValue
@@ -67,6 +69,7 @@ type flowContext struct {
 	resumes   []int
 	scopes    []int
 	def       string
+	accesses  []int
 }
 type flowOwner struct {
 	origin  source.Span
@@ -94,6 +97,18 @@ func (e CaptureFlowError) Detail() string {
 	return fmt.Sprintf("`%s` retains the resource owned by %s. %s outlives that resource's scope.", e.Value, e.Owner, e.Destination)
 }
 
+// CursorAccessError reports a conflict after substituting actual cursor,
+// callback, and evidence identities into a definition's access contract.
+type CursorAccessError struct {
+	Span      source.Span
+	In, Owner string
+}
+
+func (e CursorAccessError) Error() string { return "ITERATOR ADVANCEMENT CONFLICT: " + e.Detail() }
+func (e CursorAccessError) Detail() string {
+	return fmt.Sprintf("The cursor owned by %s may be advanced while an earlier advancement is still executing its producer.", e.Owner)
+}
+
 type flowChecker struct {
 	shape     *captureAnalyzer
 	defs      map[string]*Def
@@ -106,6 +121,8 @@ type flowChecker struct {
 	errors    map[string]error
 	root      string
 	location  source.Span
+	active    map[int]int
+	calls     []*flowContext
 }
 
 func checkCaptureFlows(a *captureAnalyzer) []error {
@@ -118,7 +135,7 @@ func checkCaptureFlows(a *captureAnalyzer) []error {
 	// parameters. Checking all definitions also rejects unconditional escapes in
 	// an unused exported function, independently of whole-program reachability.
 	for _, name := range names {
-		f := &flowChecker{shape: a, defs: a.defs, objects: []*flowObject{nil}, objectIDs: map[string]int{}, owners: []*flowOwner{nil}, ownerIDs: map[string]int{}, contexts: map[string]*flowContext{}, errors: map[string]error{}, root: name}
+		f := &flowChecker{shape: a, defs: a.defs, objects: []*flowObject{nil}, objectIDs: map[string]int{}, owners: []*flowOwner{nil}, ownerIDs: map[string]int{}, contexts: map[string]*flowContext{}, errors: map[string]error{}, root: name, active: map[int]int{}}
 		d := a.defs[name]
 		args := make([]flowValue, len(d.Params))
 		for i := range args {
@@ -229,6 +246,8 @@ func (f *flowChecker) owner(n *types.CaptureFlow, env flowEnv, ctx string, scope
 		if len(n.TypeArgs) > 0 {
 			name += " for `" + types.Show(types.SubstRigid(n.TypeArgs[0], env.types)) + "`"
 		}
+	} else if n.Kind == "iterator" {
+		name = "cursor scope"
 	}
 	id := len(f.owners)
 	f.ownerIDs[key] = id
@@ -482,13 +501,16 @@ func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env fl
 		parent = parent[:i]
 	}
 	key := site + ">" + target
-	// Fold recursive call strings at the first repeated code identity.
+	// Fold at a repeated code identity AND lexical call site. Distinct nested
+	// uses of the same scope wrapper introduce independent owners; invoking an
+	// intrinsic twice is not, by itself, recursive source computation.
+	callSite := f.contextDef(parent) + strings.TrimPrefix(site, parent)
 	for p := parent; p != ""; {
 		c := f.contexts[p]
 		if c == nil {
 			break
 		}
-		if c.target == target {
+		if c.target == target && c.site == callSite {
 			key = p
 			if !c.recursive {
 				c.recursive = true
@@ -500,7 +522,7 @@ func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env fl
 	}
 	c := f.contexts[key]
 	if c == nil {
-		c = &flowContext{origin: f.location, target: target, parent: parent, def: def, scopes: slices.Clone(scopes)}
+		c = &flowContext{origin: f.location, target: target, site: callSite, parent: parent, def: def, scopes: slices.Clone(scopes)}
 		f.contexts[key] = c
 		f.changed = true
 	}
@@ -509,15 +531,22 @@ func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env fl
 		c.resumes = append(c.resumes, resume)
 		f.changed = true
 	}
+	// A recursive edge may reuse a busy summary. Its already-discovered access
+	// obligations still apply; skipping them would accept reentrant helpers.
+	for _, owner := range c.accesses {
+		f.requireAdvance(owner)
+	}
 	if c.busy {
 		return c.result
 	}
 	c.busy = true
+	f.calls = append(f.calls, c)
 	var got flowValue
 	for _, owner := range c.resumes {
 		got = joinFlow(got, f.eval(body, c.env, key, c.scopes, owner))
 	}
 	c.busy = false
+	f.calls = f.calls[:len(f.calls)-1]
 	f.merge(&c.result, got)
 	return c.result
 }
@@ -766,18 +795,68 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		result = flowValue{}
 	case "iterator":
 		producer, consumer := child(0), child(1)
-		f.apply(producer, []flowValue{{}}, env, key+"/producer", scopes)
-		result = f.apply(consumer, []flowValue{{unknown: true}}, env, key+"/consumer", scopes)
+		owner := f.owner(n, env, ctx, scopes)
+		cursor := f.alloc(key+"/cursor", flowObject{kind: "cursor", owner: owner, fields: []flowValue{producer}})
+		inside := append(slices.Clone(scopes), owner)
+		result = f.apply(consumer, []flowValue{{refs: []int{cursor}, caps: []int{owner}}}, env, key+"/consumer", inside)
+		f.escape(result, owner, "cursor scope result", "The returned value")
 	case "foreach":
 		action := child(0)
-		child(1)
+		f.advance(child(1), env, key, scopes)
 		f.apply(action, []flowValue{{unknown: true}}, env, key, scopes)
 	case "fold":
 		combine, initial := child(0), child(1)
-		child(2)
-		result = joinFlow(initial, f.apply(combine, []flowValue{{unknown: true}, initial}, env, key, scopes))
+		f.advance(child(2), env, key, scopes)
+		// A later iteration can invoke or retain a callback stored by an earlier
+		// one. Feed the growing accumulator back through the callback contract,
+		// just as ordinary recursive Fango folds do through call summaries.
+		state := f.alloc(key+"/accumulator", flowObject{kind: "fold-state", fields: []flowValue{initial}})
+		accumulator := f.objects[state].fields[0]
+		next := f.apply(combine, []flowValue{{unknown: true}, accumulator}, env, key, scopes)
+		f.merge(&f.objects[state].fields[0], next)
+		result = f.objects[state].fields[0]
 	default:
 		panic("unknown capture flow: " + n.Kind)
 	}
 	return f.trim(result, n.Type, env)
+}
+
+func (f *flowChecker) requireAdvance(owner int) {
+	for _, call := range f.calls {
+		if !slices.Contains(call.accesses, owner) {
+			call.accesses = append(call.accesses, owner)
+			f.changed = true
+		}
+	}
+	if f.active[owner] == 0 {
+		return
+	}
+	o := f.owners[owner]
+	span := f.location
+	if span.File == nil {
+		span = o.origin
+	}
+	err := CursorAccessError{Span: span, In: f.root, Owner: o.name}
+	f.errors[err.Error()] = err
+}
+
+// advance models the entire producer execution under an exclusive borrow.
+// Yield does not release that borrow within the contract: any call reached
+// before the producer returns to its caller is checked against the same owner.
+// Consumer callbacks run after this method returns, with the borrow discharged.
+func (f *flowChecker) advance(cursor flowValue, env flowEnv, site string, scopes []int) {
+	for _, ref := range cursor.refs {
+		o := f.objects[ref]
+		if o.kind != "cursor" {
+			continue
+		}
+		owner := o.owner
+		f.requireAdvance(owner)
+		if f.active[owner] != 0 {
+			continue
+		}
+		f.active[owner]++
+		f.apply(o.fields[0], []flowValue{{}}, env, site+"/advance", scopes)
+		f.active[owner]--
+	}
 }

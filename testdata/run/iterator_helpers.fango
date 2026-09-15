@@ -1,0 +1,51 @@
+import Generator
+import Iterator
+
+type Held a = Held (Iterator.Iterator a)
+type Consumer = Consumer (Iterator.Iterator Int -> Int)
+
+produce : () ->{Generator.Generator Int} ()
+produce() =
+    Generator.yield 1
+    Generator.yield 2
+    Generator.yield 3
+
+sumCursor : Iterator.Iterator Int -> Int
+sumCursor cursor = Iterator.fold (\element acc -> element + acc) 0 cursor
+
+sumHeld (Held cursor) = sumCursor cursor
+
+twice cursor =
+    alias = cursor
+    read() = sumHeld (Held alias)
+    first = read()
+    second = sumCursor cursor
+    first + second
+
+makeConsumer() = Consumer twice
+
+runStored source =
+    case makeConsumer() of
+        Consumer consume -> Generator.withIterator source consume
+
+class Consume a
+    consume : Iterator.Iterator a -> Int
+
+instance Consume Int
+    consume cursor = sumCursor cursor
+
+independent : Iterator.Iterator Int -> (() -> Int)
+independent cursor = \_ -> 42
+
+main() =
+    print (Generator.withIterator produce twice)
+    print (runStored produce)
+    print (Generator.withIterator produce consume)
+    print (Generator.withIterator produce (\left ->
+        Generator.withIterator produce (\right ->
+            a = sumCursor left
+            b = sumCursor right
+            c = sumCursor left
+            a + b + c)))
+    saved = Generator.withIterator produce independent
+    print (saved())

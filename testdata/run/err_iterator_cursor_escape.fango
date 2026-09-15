@@ -1,4 +1,8 @@
 import Generator
+import Iterator
 
-main() =
+escape : () -> Iterator.Iterator Int
+escape() =
     Generator.withIterator (\_ -> Generator.yield 1) (\iterator -> iterator)
+
+main() = print "unreachable"

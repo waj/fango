@@ -5,6 +5,7 @@ import Basics exposing (..)
 
 -- The constructor is private. Values of this type are borrowed cursors that
 -- only the compiler-owned Generator scope can create.
+{-# resource #-}
 type Iterator a = Iterator
 
 forEach : (a ->{e} ()) -> Iterator a ->{e} ()

@@ -284,8 +284,11 @@ outer handlers is checked. The remaining proposed sequence is API-first:
 
 The experimental `Generator`/`Iterator` path currently supports producers yielding
 from their own bodies and the `forEach`/`fold` terminal intrinsics. It is not the
-proposed Stream API: exclusive cursor borrowing and compositional Machine lowering
-remain work. Experimental APIs may be replaced without compatibility scaffolding.
+proposed Stream API: row-indexed cursors, raw advancement, lexical suspension
+routing, and compositional Machine lowering remain work. Terminal traversal now
+exports cursor lifetime and exclusive-advancement contracts through named helpers,
+aliases, stored callbacks, and modules. Experimental APIs may be replaced without
+compatibility scaffolding.
 Stage-safe traversal uses selective Machine lowering and shares the caller's
 native restrictions and evaluation budget; the Stream replacement must preserve
 that boundary and its rollback checks.

@@ -183,20 +183,10 @@ func (s *MachineSession) Run() (event MachineEvent, err error) {
 		frame := s.frames[len(s.frames)-1]
 		s.interp.evidence = frame.evidence
 		block := &frame.worker.Blocks[frame.block]
-		locals := &Frame{vars: frame.vars}
+		locals := &Frame{vars: frame.vars, mutable: true}
 		eval := func(expr core.Expr) (Value, error) {
 			if lam, ok := expr.(*core.Lambda); ok {
-				if desc := s.closures[lam]; desc != nil {
-					values := make([]Value, len(desc.Captures))
-					for i, capture := range desc.Captures {
-						values[i] = frame.vars[capture.Name]
-					}
-					captured := make(map[int]*evidence, len(desc.CapturedEvidence))
-					for _, ev := range desc.CapturedEvidence {
-						captured[ev.Unique] = frame.evidence[ev.Unique]
-					}
-					return &machineClosure{desc: desc, values: values, evidence: captured}, nil
-				}
+				return s.interp.makeClosure(lam, locals, s.closures[lam])
 			}
 			return s.interp.eval(expr, locals)
 		}
@@ -332,11 +322,11 @@ func (s *MachineSession) Run() (event MachineEvent, err error) {
 				if err != nil {
 					return MachineEvent{}, err
 				}
-				var ok bool
-				closure, ok = value.(*machineClosure)
-				if !ok {
+				fn, ok := value.(*Closure)
+				if !ok || fn.machine == nil {
 					return MachineEvent{}, fmt.Errorf("eval: indirect machine call of %T", value)
 				}
+				closure = fn.machine
 				callee = s.workers[closure.desc.Worker]
 			}
 			values := make([]Value, len(term.Args))

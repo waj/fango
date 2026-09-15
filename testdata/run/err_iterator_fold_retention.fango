@@ -1,0 +1,25 @@
+import Generator
+import Iterator
+import State
+import Maybe exposing (Maybe(..))
+
+type Pending = Empty | Saved (() -> Iterator.Iterator Int)
+
+produce : () ->{Generator.Generator Int} ()
+produce() =
+    Generator.yield 1
+    Generator.yield 2
+
+consume cursor =
+    step element previous =
+        case previous of
+            Empty -> Saved (\_ -> cursor)
+            Saved read ->
+                State.put (Just (read()))
+                Empty
+    ignored = Iterator.fold step Empty cursor
+    ()
+
+escape() = State.run Nothing (\_ -> Generator.withIterator produce consume)
+
+main() = print "unreachable"

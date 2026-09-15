@@ -1520,7 +1520,6 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		g.records = append(g.records, ob)
 		ty = receiver
 	case *ast.App:
-		g.errs = append(g.errs, g.iteratorOwnership(e)...)
 		if name, n := g.intrinsicSpine(e); name != "" && n == types.IntrinsicArity(name) {
 			ty = g.intrinsicCall(e, name)
 			break
@@ -1716,6 +1715,10 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	}
 	if first.Owner == g.ck.IO {
 		g.errs = append(g.errs, diag.Errorf(e.Sp, "BUILTIN IO HANDLING NOT READY", "Handlers for builtin IO are staged until polymorphic print evidence is available."))
+	}
+	if first.Owner.Suspension {
+		g.errs = append(g.errs, diag.Errorf(e.Sp, "COMPILER-OWNED EFFECT",
+			"Effect `%s` belongs to its compiler-owned traversal scope and cannot be handled by an ordinary handler.", ast.Spelling(first.Owner.Name)))
 	}
 	residualVar := g.ck.Sup.FreshVar(types.RowVar)
 	residual := types.Row{Tail: residualVar}

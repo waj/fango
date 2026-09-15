@@ -56,14 +56,14 @@ func TestIteratorScopeRunsThroughInstalledMachineLowering(t *testing.T) {
 	ownerTy := &types.TFun{Arg: producerTy, Ret: &types.TFun{Arg: consumerTy, Ret: b.Unit}}
 	owner := core.Def{Name: types.GeneratorWithIteratorName, Owner: "Main", Type: ownerTy,
 		Params: []string{"producer", "consumer"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()},
-		Body: &core.IteratorScope{
+		Body: &core.IteratorScope{Scope: sup.FreshScope(),
 			Producer: &core.VarRef{Name: "producer", Local: true, Ty: producerTy},
 			Consumer: &core.VarRef{Name: "consumer", Local: true, Ty: consumerTy},
 			CursorTy: iterator, Ty: b.Unit,
 		}}
 	forEach := core.Def{Name: types.IteratorForEachName, Owner: "Main", Type: forEachTy,
 		Params: []string{"action", "cursor"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()},
-		Body: &core.IteratorForEach{
+		Body: &core.IteratorForEach{Access: types.ExclusiveAdvance,
 			Action: &core.VarRef{Name: "action", Local: true, Ty: actionTy}, Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: iterator},
 			Element: b.Int, Ty: b.Unit,
 		}}
@@ -127,7 +127,7 @@ func TestIteratorFoldThreadsAccumulatorAcrossYields(t *testing.T) {
 		}, Ty: b.Int}}
 	combine := &Closure{Param: "value", Body: step, Env: &Frame{vars: map[string]Value{}}, Evidence: map[int]*evidence{}}
 	frame := &Frame{vars: map[string]Value{"combine": combine, "cursor": cursor}}
-	fold := &core.IteratorFold{
+	fold := &core.IteratorFold{Access: types.ExclusiveAdvance,
 		Combine: &core.VarRef{Name: "combine", Local: true, Ty: &types.TFun{Arg: b.Int, Ret: step.Ty}},
 		Initial: &core.IntLit{Val: 0, Ty: b.Int}, Cursor: &core.VarRef{Name: "cursor", Local: true,
 			Ty: &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int}}},

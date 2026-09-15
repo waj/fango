@@ -1,0 +1,13 @@
+import Consumers
+import Generator
+
+produce : () ->{Generator.Generator Int, IO} ()
+produce() =
+    print "produce"
+    Generator.yield 1
+    Generator.yield 2
+    Generator.yield 3
+
+main() =
+    print (Generator.withIterator produce (Consumers.run (Consumers.make())))
+    print (Generator.withIterator produce (Consumers.prefix 4))

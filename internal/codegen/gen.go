@@ -1883,7 +1883,7 @@ func (g *gen) bracketExpr(e *core.Bracket) goast.Expr {
 
 // iteratorScopeExpr owns one nested producer machine for the dynamic extent of
 // its consumer callback. The consumer-facing cursor is the runtime owner
-// itself; source code can only pass it to checked terminal combinators.
+// itself; inferred contracts govern aliases, helper calls, and advancement.
 func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
 	overall := e.Control.Resolve(g.control)
 	oldControl, oldResult := g.control, g.resultType

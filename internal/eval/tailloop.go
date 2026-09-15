@@ -57,7 +57,7 @@ func (in *interp) tailStep(def *core.Def, e core.Expr, fr *Frame) (Value, error)
 			if !ok {
 				return nil, fmt.Errorf("eval: recursive Let `%s` without a Lambda RHS", e.Name)
 			}
-			frame := &Frame{parent: fr, vars: map[string]Value{}}
+			frame := &Frame{parent: closureFrame(lam, fr), vars: map[string]Value{}}
 			frame.vars[e.Name] = &Closure{Param: lam.Param, Body: lam.Body, Env: frame, Evidence: cloneEvidence(in.evidence)}
 			return in.tailStep(def, e.Body, frame)
 		}

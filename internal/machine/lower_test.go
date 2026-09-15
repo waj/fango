@@ -116,7 +116,7 @@ func TestLowerRootsMachineLambdaInsideDirectIteratorOwnerCall(t *testing.T) {
 	ownerTy := &types.TFun{Arg: producerTy, Ret: &types.TFun{Arg: consumerTy, Ret: b.Unit}}
 	owner := core.Def{Name: types.GeneratorWithIteratorName, Type: ownerTy,
 		Params: []string{"producer", "consumer"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()},
-		Body: &core.IteratorScope{
+		Body: &core.IteratorScope{Scope: sup.FreshScope(),
 			Producer: &core.VarRef{Name: "producer", Local: true, Ty: producerTy},
 			Consumer: &core.VarRef{Name: "consumer", Local: true, Ty: consumerTy},
 			CursorTy: iterator, Ty: b.Unit,

@@ -137,6 +137,7 @@ type Suspend struct {
 // boundary drives Producer's machine, so its own Control describes only the
 // residual execution protocol visible to the enclosing computation.
 type IteratorScope struct {
+	Scope    types.ScopeID
 	Producer Expr
 	Consumer Expr
 	CursorTy types.Type
@@ -149,6 +150,7 @@ type IteratorScope struct {
 // per yielded element; IteratorScope retains responsibility for closing the
 // producer on every way out.
 type IteratorForEach struct {
+	Access  types.CursorAccess
 	Action  Expr
 	Cursor  Expr
 	Element types.Type
@@ -159,6 +161,7 @@ type IteratorForEach struct {
 // IteratorFold consumes an owned iterator while threading Accumulator through
 // the curried Combine callback in yield order.
 type IteratorFold struct {
+	Access      types.CursorAccess
 	Combine     Expr
 	Initial     Expr
 	Cursor      Expr

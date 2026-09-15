@@ -183,7 +183,6 @@ func lint(p *Prog, b *types.Builtins, allowMachine, allowStage bool) []error {
 		}
 	}
 	l.errs = append(l.errs, verifyCaptures(p, b)...)
-	l.errs = append(l.errs, verifyIteratorOwnership(p)...)
 	return l.errs
 }
 
@@ -555,6 +554,10 @@ func (l *linter) expr(e Expr, where string) {
 		l.expr(e.Request, where)
 	case *IteratorScope:
 		l.control(e.Control, where)
+		if e.Scope == 0 || l.scopeIDs[e.Scope] {
+			l.errorf("%s: iterator scope has invalid or reused scope identity %d", where, e.Scope)
+		}
+		l.scopeIDs[e.Scope] = true
 		if !l.intrinsics[types.GeneratorWithIteratorName] || l.defName != types.GeneratorWithIteratorName {
 			l.errorf("%s: iterator scope outside the declared `%s` intrinsic", where, types.GeneratorWithIteratorName)
 		}
@@ -588,6 +591,9 @@ func (l *linter) expr(e Expr, where string) {
 		l.expr(e.Consumer, where)
 	case *IteratorForEach:
 		l.control(e.Control, where)
+		if e.Access != types.ExclusiveAdvance {
+			l.errorf("%s: iterator forEach lacks exclusive advancement proof", where)
+		}
 		if !l.intrinsics[types.IteratorForEachName] || l.defName != types.IteratorForEachName {
 			l.errorf("%s: iterator forEach outside the declared `%s` intrinsic", where, types.IteratorForEachName)
 		}
@@ -613,6 +619,9 @@ func (l *linter) expr(e Expr, where string) {
 		l.expr(e.Cursor, where)
 	case *IteratorFold:
 		l.control(e.Control, where)
+		if e.Access != types.ExclusiveAdvance {
+			l.errorf("%s: iterator fold lacks exclusive advancement proof", where)
+		}
 		if !l.intrinsics[types.IteratorFoldName] || l.defName != types.IteratorFoldName {
 			l.errorf("%s: iterator fold outside the declared `%s` intrinsic", where, types.IteratorFoldName)
 		}
@@ -735,6 +744,9 @@ func (l *linter) expr(e Expr, where string) {
 	case *Handle:
 		l.control(e.Control, where)
 		l.effectInstance(e.Effect, where)
+		if effect := l.effects[e.Effect.Unique]; effect != nil && effect.Suspension {
+			l.errorf("%s: ordinary handler intercepts compiler-owned suspension effect", where)
+		}
 		if e.State != nil {
 			if e.State.Name == "" || e.State.Ty == nil || e.State.Initial == nil {
 				l.errorf("%s: parameterized handler has incomplete state metadata", where)

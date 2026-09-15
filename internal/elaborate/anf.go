@@ -173,11 +173,11 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 	case *core.Suspend:
 		return &core.Suspend{Request: slot(e.Request), Ty: e.Ty}, hoists
 	case *core.IteratorScope:
-		return &core.IteratorScope{Producer: slot(e.Producer), Consumer: slot(e.Consumer), CursorTy: e.CursorTy, Ty: e.Ty, Control: e.Control}, hoists
+		return &core.IteratorScope{Scope: e.Scope, Producer: slot(e.Producer), Consumer: slot(e.Consumer), CursorTy: e.CursorTy, Ty: e.Ty, Control: e.Control}, hoists
 	case *core.IteratorForEach:
-		return &core.IteratorForEach{Action: slot(e.Action), Cursor: slot(e.Cursor), Element: e.Element, Ty: e.Ty, Control: e.Control}, hoists
+		return &core.IteratorForEach{Access: e.Access, Action: slot(e.Action), Cursor: slot(e.Cursor), Element: e.Element, Ty: e.Ty, Control: e.Control}, hoists
 	case *core.IteratorFold:
-		return &core.IteratorFold{Combine: slot(e.Combine), Initial: slot(e.Initial), Cursor: slot(e.Cursor), Element: e.Element, Accumulator: e.Accumulator, Ty: e.Ty, Control: e.Control}, hoists
+		return &core.IteratorFold{Access: e.Access, Combine: slot(e.Combine), Initial: slot(e.Initial), Cursor: slot(e.Cursor), Element: e.Element, Accumulator: e.Accumulator, Ty: e.Ty, Control: e.Control}, hoists
 	case *core.ResumeTail:
 		var next core.Expr
 		if e.NextState != nil {

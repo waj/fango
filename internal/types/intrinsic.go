@@ -33,16 +33,11 @@ func RuntimeEvidenceEffect(label EffLabel) bool {
 	return SurfaceName(label.Name) != "IO" && !label.Suspension
 }
 
-// IteratorConsumer reports the initial E8 combinators that consume a borrowed
-// iterator cursor. Raw step exposure is intentionally deferred until Core can
-// represent transfer to a successor cursor.
-func IteratorConsumer(name string) bool {
-	switch name {
-	case "Iterator.forEach", "Iterator.fold", "Iterator.find", "Iterator.take":
-		return true
-	}
-	return false
-}
+// CursorAccess is proof metadata for a cursor advancement. Zero is deliberately
+// invalid: an ownership-aware Core operation must carry its access obligation.
+type CursorAccess uint8
+
+const ExclusiveAdvance CursorAccess = 1
 
 // Intrinsic reports whether a canonical symbol names a compiler intrinsic.
 func Intrinsic(name string) bool {

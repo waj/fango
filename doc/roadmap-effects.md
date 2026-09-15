@@ -323,16 +323,17 @@ are outside the committed scope.
 
 The implemented baseline includes Direct/Exit effects, synchronous `Scope`,
 `Fail`, declared scoped resources, inferred capture contracts, and a limited
-experimental `Generator`/`Iterator` path. It does not yet provide exclusive cursor
-borrowing, Stream, or the task APIs above.
+experimental `Generator`/`Iterator` path with inferred cursor lifetime and
+exclusive-advancement contracts for terminal traversal. It does not yet provide
+row-indexed cursors, raw `next`, Stream, or the task APIs above.
 Preserve its useful mechanisms while replacing terminal intrinsics with
 ordinary library composition:
 
 - **Effect subsumption:** use the implemented callback inclusion and nominal
   variance rules for the proposed Stream types; never erase a real effect.
-- **Exclusive borrowing:** extend the implemented capture contracts with access
-  requirements that persist across suspension, including stored callbacks and
-  captured evidence.
+- **Exclusive borrowing:** preserve the terminal traversal access contracts when
+  adding raw advancement and lexical suspension routing, including stored
+  callbacks and captured evidence across producer/caller transitions.
 - **Compositional suspension:** Machine calls work through higher-order and
   stored callbacks, nested scopes, result constructors, and module boundaries.
   Unsupported suspension handlers receive source diagnostics, not Core errors.

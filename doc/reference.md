@@ -370,7 +370,7 @@ main() =
 
 `Generator.yield : a ->{Generator a} ()` suspends the producer and offers one
 value to its owning iterator scope. `Generator.withIterator` takes the
-producer and a lexical consumer:
+producer and a consumer:
 
 ```fango
 withIterator
@@ -379,11 +379,20 @@ withIterator
     ->{e} result
 ```
 
-The `Iterator a` constructor is private. The consumer must be a lambda, and
-its cursor parameter may occur exactly once or not at all, only as the final
-argument of a terminal iterator call. It cannot be aliased, captured, stored,
-returned, passed to another helper, or consumed twice. There is no public
-`next`: source code never owns a copyable handle to suspended computation.
+`Iterator a` is an opaque resource. Consumers may be named functions; aliases,
+helper calls, and temporary ADTs or closures may use the cursor within its
+owner. Returning the cursor, returning a closure or ADT that retains it, or
+storing it in an outer handler reports `RESOURCE ESCAPES`. Unrelated closures
+may be returned. A producer cannot reenter an advancement of the same cursor;
+overlapping or possibly overlapping access reports `ITERATOR ADVANCEMENT CONFLICT`.
+There is no public `next` yet.
+
+Sequential terminal calls are supported. Once a cursor is exhausted, `forEach`
+does nothing and `fold` returns its initial accumulator. Distinct cursors in
+nested scopes remain independent. These rules follow inferred contracts across
+module boundaries, including callbacks stored in records or dictionaries.
+An ordinary handler cannot intercept `Generator.yield`: attempting to handle
+its compiler-owned effect reports `COMPILER-OWNED EFFECT`.
 
 `Iterator.forEach : (a ->{e} ()) -> Iterator a ->{e} ()` invokes its callback
 once per yield in production order. `Iterator.fold` has type
@@ -1865,8 +1874,8 @@ the same retention checks. Diagnostics identify the owning scope and the value
 or destination that would outlive it.
 
 Contracts are conservative at recursive joins where distinct dynamic owners
-cannot be proved identical. Exclusive cursor access and explicit written
-capture contracts are not part of this synchronous resource API.
+cannot be proved identical. Cursor advancement additionally carries exclusive
+access obligations. Written capture contracts are not implemented.
 
 `Scope.bracket` remains a compiler intrinsic for cleanup and lifetime handling.
 Its callbacks use the ordinary argument-inclusion rule: acquisition and release

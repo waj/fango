@@ -108,20 +108,20 @@ func TestIteratorOwnerRootsMachineProducerInDirectCaller(t *testing.T) {
 	ownerTy := &types.TFun{Arg: producerTy, Ret: &types.TFun{Arg: consumerTy, Ret: b.Unit}}
 	owner := core.Def{Name: types.GeneratorWithIteratorName, Owner: "Main", Type: ownerTy,
 		Params: []string{"producer", "consumer"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()},
-		Body: &core.IteratorScope{
+		Body: &core.IteratorScope{Scope: sup.FreshScope(),
 			Producer: &core.VarRef{Name: "producer", Local: true, Ty: producerTy},
 			Consumer: &core.VarRef{Name: "consumer", Local: true, Ty: consumerTy},
 			CursorTy: iterator, Ty: b.Unit,
 		}}
 	forEach := core.Def{Name: types.IteratorForEachName, Owner: "Main", Type: forEachTy,
 		Params: []string{"action", "cursor"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()},
-		Body: &core.IteratorForEach{
+		Body: &core.IteratorForEach{Access: types.ExclusiveAdvance,
 			Action: &core.VarRef{Name: "action", Local: true, Ty: actionTy}, Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: iterator},
 			Element: b.Int, Ty: b.Unit,
 		}}
 	fold := core.Def{Name: types.IteratorFoldName, Owner: "Main", Type: foldTy,
 		Params: []string{"combine", "initial", "cursor"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture(), sup.FreshCapture()},
-		Body: &core.IteratorFold{
+		Body: &core.IteratorFold{Access: types.ExclusiveAdvance,
 			Combine: &core.VarRef{Name: "combine", Local: true, Ty: combineTy}, Initial: &core.VarRef{Name: "initial", Local: true, Ty: b.Int},
 			Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: iterator}, Element: b.Int, Accumulator: b.Int, Ty: b.Int,
 		}}

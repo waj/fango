@@ -128,13 +128,14 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 		n.Kind = "suspend"
 		children(e.Request)
 	case *IteratorScope:
-		n.Kind = "iterator"
+		n.Kind, n.Scope, n.Scoped = "iterator", e.Scope, true
+		n.TypeArgs = []types.Type{e.CursorTy}
 		children(e.Producer, e.Consumer)
 	case *IteratorForEach:
-		n.Kind = "foreach"
+		n.Kind, n.Access = "foreach", e.Access
 		children(e.Action, e.Cursor)
 	case *IteratorFold:
-		n.Kind = "fold"
+		n.Kind, n.Access = "fold", e.Access
 		children(e.Combine, e.Initial, e.Cursor)
 	default:
 		panic(fmt.Sprintf("capture contract: unhandled Core expression %T", e))

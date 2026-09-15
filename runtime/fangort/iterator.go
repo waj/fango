@@ -3,9 +3,9 @@ package fangort
 import "fmt"
 
 // MachineIterator is the private pull owner used by E8's scoped iterator
-// lowering. It owns exactly one E7 machine. Source programs cannot construct or
-// copy this Go value; the source ownership checker controls the cursor passed
-// to a consumer scope.
+// lowering. It owns exactly one machine. Source programs can alias the opaque
+// cursor within its scope; checked capture and access contracts govern those
+// aliases before the private runtime representation is selected.
 type MachineIterator struct {
 	machine *Machine
 	started bool
@@ -46,8 +46,8 @@ func (it *MachineIterator) Next() (value any, yielded bool, exit *ExitRequest, e
 
 // Close consumes unfinished production and returns a cleanup failure, if any.
 // It is idempotent so a lexical owner may defer it while also exhausting the
-// iterator normally. Source-level duplicate advancement is still a static
-// ownership error rather than a dynamic consumed-token check.
+// iterator normally. Overlapping advancement is checked statically; repeated
+// sequential reads observe stable exhaustion.
 func (it *MachineIterator) Close() (*ExitRequest, error) {
 	if it == nil || it.machine == nil || it.done {
 		return nil, nil

@@ -1,0 +1,5 @@
+import Generator
+
+main() =
+    handle Generator.yield 1 of
+        Generator.yield value -> resume ()

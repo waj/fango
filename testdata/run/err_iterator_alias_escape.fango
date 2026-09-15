@@ -1,0 +1,12 @@
+import Generator
+import Iterator
+
+type Held = Held (Iterator.Iterator Int)
+
+retain cursor =
+    alias = cursor
+    Held alias
+
+escape() = Generator.withIterator (\_ -> Generator.yield 1) retain
+
+main() = print "unreachable"

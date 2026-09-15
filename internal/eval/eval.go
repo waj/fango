@@ -99,6 +99,10 @@ type Closure struct {
 	Body     core.Expr
 	Env      *Frame
 	Evidence map[int]*evidence
+	// A transport-polymorphic value retains both its ordinary interpretation
+	// and its checked Machine factory. Choosing a call protocol does not change
+	// the representation of a stored callback.
+	machine *machineClosure
 }
 
 type IOContext struct {
@@ -190,8 +194,56 @@ func (e *Env) Expand(c *meta.Code) ast.Expr {
 // Frame holds block-local bindings (doc/design.md, "Language semantics") — eager values, unlike the lazy
 // top-level cells. Function parameters extend the same chain.
 type Frame struct {
-	parent *Frame
-	vars   map[string]Value
+	parent  *Frame
+	vars    map[string]Value
+	mutable bool // Machine locals are pruned and overwritten between transitions.
+}
+
+// closureFrame snapshots only referenced locals when a closure crosses a
+// mutable Machine frame. Ordinary Core environments remain immutable chains.
+// Core forbids shadowing, so a body-local reference cannot select an outer
+// binding of the same name here.
+func closureFrame(lam *core.Lambda, fr *Frame) *Frame {
+	mutable := false
+	for f := fr; f != nil; f = f.parent {
+		mutable = mutable || f.mutable
+	}
+	if !mutable {
+		return fr
+	}
+	vars := map[string]Value{}
+	core.Inspect(lam.Body, func(e core.Expr) {
+		if ref, ok := e.(*core.VarRef); ok && ref.Local && ref.Name != lam.Param {
+			if value, found := fr.lookup(ref.Name); found {
+				vars[ref.Name] = value
+			}
+		}
+	})
+	return &Frame{vars: vars}
+}
+
+func (in *interp) makeClosure(lam *core.Lambda, fr *Frame, desc *machineir.Closure) (*Closure, error) {
+	closure := &Closure{Param: lam.Param, Body: lam.Body, Env: closureFrame(lam, fr), Evidence: cloneEvidence(in.evidence)}
+	if desc == nil {
+		return closure, nil
+	}
+	values := make([]Value, len(desc.Captures))
+	for i, capture := range desc.Captures {
+		value, ok := fr.lookup(capture.Name)
+		if !ok {
+			return nil, fmt.Errorf("eval: Machine callback capture `%s` is unavailable", capture.Name)
+		}
+		values[i] = value
+	}
+	captured := make(map[int]*evidence, len(desc.CapturedEvidence))
+	for _, ev := range desc.CapturedEvidence {
+		if in.evidence[ev.Unique] == nil {
+			return nil, fmt.Errorf("eval: Machine callback evidence `%s` is unavailable", ev.Name)
+		}
+		captured[ev.Unique] = in.evidence[ev.Unique]
+	}
+	closure.machine = &machineClosure{desc: desc, values: values, evidence: captured}
+	return closure, nil
 }
 
 func (f *Frame) lookup(name string) (Value, bool) {
@@ -399,7 +451,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			if !ok {
 				return nil, fmt.Errorf("eval: recursive Let `%s` without a Lambda RHS", e.Name)
 			}
-			frame := &Frame{parent: fr, vars: map[string]Value{}}
+			frame := &Frame{parent: closureFrame(lam, fr), vars: map[string]Value{}}
 			frame.vars[e.Name] = &Closure{Param: lam.Param, Body: lam.Body, Env: frame, Evidence: cloneEvidence(in.evidence)}
 			return in.eval(e.Body, frame)
 		}
@@ -413,25 +465,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		}
 		return in.eval(e.Body, &Frame{parent: fr, vars: map[string]Value{e.Name: v}})
 	case *core.Lambda:
-		if desc := in.env.machineClosures[e]; desc != nil {
-			values := make([]Value, len(desc.Captures))
-			for i, capture := range desc.Captures {
-				value, ok := fr.lookup(capture.Name)
-				if !ok {
-					return nil, fmt.Errorf("eval: Machine callback capture `%s` is unavailable", capture.Name)
-				}
-				values[i] = value
-			}
-			captured := make(map[int]*evidence, len(desc.CapturedEvidence))
-			for _, ev := range desc.CapturedEvidence {
-				if in.evidence[ev.Unique] == nil {
-					return nil, fmt.Errorf("eval: Machine callback evidence `%s` is unavailable", ev.Name)
-				}
-				captured[ev.Unique] = in.evidence[ev.Unique]
-			}
-			return &machineClosure{desc: desc, values: values, evidence: captured}, nil
-		}
-		return &Closure{Param: e.Param, Body: e.Body, Env: fr, Evidence: cloneEvidence(in.evidence)}, nil
+		return in.makeClosure(e, fr, in.env.machineClosures[e])
 	case *core.Neg:
 		v, err := in.eval(e.Operand, fr)
 		if err != nil {
@@ -870,7 +904,7 @@ func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID, e
 			if !ok {
 				return nil, fmt.Errorf("eval: recursive Let `%s` without a Lambda RHS", e.Name)
 			}
-			frame := &Frame{parent: fr, vars: map[string]Value{}}
+			frame := &Frame{parent: closureFrame(lam, fr), vars: map[string]Value{}}
 			frame.vars[e.Name] = &Closure{Param: lam.Param, Body: lam.Body, Env: frame, Evidence: cloneEvidence(in.evidence)}
 			return in.evalResumeTail(e.Body, frame, owner, ev)
 		}
