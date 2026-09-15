@@ -21,6 +21,7 @@ func TestGrepExampleFailures(t *testing.T) {
 	path := filepath.Join("..", "..", "examples", "grep.fango")
 	base := filepath.Join("..", "..", "examples", "grep")
 	seed := readFixtureInputs(t, base)
+	compiled := cliRunner(path)
 	cases := []struct {
 		name   string
 		args   []string
@@ -39,7 +40,7 @@ func TestGrepExampleFailures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			in := fixtureInputs{args: tc.args, status: tc.status, files: seed.files}
-			runDifferentialCaseWith(t, path, cliRunner(path), in, tc.output)
+			runDifferentialCaseWith(t, path, compiled, in, tc.output)
 		})
 	}
 }

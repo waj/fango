@@ -9,7 +9,7 @@ func TestStreamIntegration(t *testing.T) {
 	for _, name := range []string{"stream_operations", "stream_demand", "stream_cleanup", "stream_file", "stream_parser", "stream_stored_callbacks", "stream_evidence_shadow", "stream_recovery", "failure_reports"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", "testdata", "run", name+".fango")
-			runDifferentialCase(t, path, cliRunner(path))
+			runDifferentialCase(t, path, batchRunner(path))
 		})
 	}
 }
@@ -18,21 +18,21 @@ func TestFailureReportCapture(t *testing.T) {
 	for _, name := range []string{"err_failure_report_resource_escape", "err_failure_report_stored_escape", "failure_report_borrow"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", "testdata", "run", name+".fango")
-			runDifferentialCase(t, path, cliRunner(path))
+			runDifferentialCase(t, path, batchRunner(path))
 		})
 	}
 }
 
 func TestStreamResidualOwnership(t *testing.T) {
 	path := filepath.Join("..", "..", "testdata", "run", "err_iterator_handler_reentrant.fango")
-	runDifferentialCase(t, path, cliRunner(path))
+	runDifferentialCase(t, path, batchRunner(path))
 }
 
 func TestResidualCallbackRepresentations(t *testing.T) {
 	for _, name := range []string{"classes_locals", "iterator_helpers", "list_deep", "row_kind_adt", "scope_owned_traversal", "state_independent_result", "stdlib_words_foldl", "stream_staging", "user_operators"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", "testdata", "run", name+".fango")
-			runDifferentialCase(t, path, cliRunner(path))
+			runDifferentialCase(t, path, batchRunner(path))
 		})
 	}
 }
@@ -46,7 +46,7 @@ func TestMachineStoredEffectfulResult(t *testing.T) {
 	for _, name := range []string{"state_independent_result", "scope_state", "state_handlers"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", "testdata", "run", name+".fango")
-			runDifferentialCase(t, path, cliRunner(path))
+			runDifferentialCase(t, path, batchRunner(path))
 		})
 	}
 }

@@ -1610,12 +1610,18 @@ dependency packages they emit are written once and asserted byte-identical
 across fixtures (a package's generated code must not depend on its consumer),
 and a single Go build produces every fixture binary. The build starts in the
 background so it overlaps the interpreter legs, and the cases then run in
-parallel with no per-case build work. The examples and the multi-module
-fixtures instead compile through the real CLI, each in a private build
-directory, so `fango run` itself stays covered end to end. Interpreter legs
-are serialized because native workers and host contexts are process-level
-test infrastructure. Handler-local State, Writer, and seeded Random
-activations themselves do not share mutable process state.
+parallel with no per-case build work. The examples and multi-module fixtures
+instead compile through the real CLI once per differential runner, then run
+that binary with fresh inputs. The runner owns the build so tests that rewrite
+a temporary source path cannot reuse an earlier version's binary; dedicated
+command tests exercise the `fango run` wrapper itself.
+Interpreter legs are serialized because native workers and host contexts are
+process-level test infrastructure. Handler-local State, Writer, and seeded
+Random activations themselves do not share mutable process state. The
+correctness commands set Go's package test parallelism to sixteen: enough
+independent structural and compiled checks can advance while the interpreter
+mutex is held, without making the test host's processor count determine whether
+the suite can drain.
 
 Compile-latency benchmarks track cold and warm paths against recorded,
 machine-specific baselines. Runtime benchmarks compare representative scalar,

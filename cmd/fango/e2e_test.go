@@ -42,7 +42,8 @@ import (
 // entry module becomes its own package under progs/, the bundled packages
 // they all emit are written once, and a single `go build` produces every
 // binary. The examples and the multi-module fixtures instead go through the
-// real CLI, so `fango run` itself stays covered end to end.
+// real CLI once per differential runner; dedicated command cases cover
+// `fango run` itself end to end.
 
 // The CLI is built once, lazily, so short mode never pays for it. The Once
 // records the failure rather than calling t.Fatal, because the goroutine that
@@ -52,7 +53,19 @@ var (
 	cliDir    string
 	fangoBin  string
 	buildErr  error
+
+	cliBuildsMu sync.Mutex
+	cliBuilds   = make(map[string]*cliBuild)
 )
+
+// cliBuild is the reusable output of compiling one source through the public
+// CLI. The source can be exercised repeatedly with different argv, stdin, and
+// working directories without re-running the compiler and Go toolchain.
+type cliBuild struct {
+	once   sync.Once
+	binary string
+	err    error
+}
 
 func cliBinary(t *testing.T) string {
 	t.Helper()
@@ -74,6 +87,46 @@ func cliBinary(t *testing.T) string {
 		t.Fatal(buildErr)
 	}
 	return fangoBin
+}
+
+func cliCompiledBinary(t *testing.T, source string) string {
+	t.Helper()
+	absSource, err := filepath.Abs(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cliBuildsMu.Lock()
+	b := cliBuilds[absSource]
+	if b == nil {
+		b = new(cliBuild)
+		cliBuilds[absSource] = b
+	}
+	cliBuildsMu.Unlock()
+	return buildCLIBinary(t, source, absSource, b)
+}
+
+func buildCLIBinary(t *testing.T, source, absSource string, b *cliBuild) string {
+	t.Helper()
+	b.once.Do(func() {
+		dir, err := os.MkdirTemp(filepath.Dir(cliBinary(t)), "program-")
+		if err != nil {
+			b.err = err
+			return
+		}
+		b.binary = filepath.Join(dir, "program")
+		cmd := exec.Command(cliBinary(t), "build", "-o", b.binary, absSource)
+		cmd.Env = append(os.Environ(),
+			"FANGO_INTERNAL_PRINT_MAIN=1",
+			"FANGO_BUILD_DIR="+filepath.Join(dir, "build"))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			b.err = fmt.Errorf("building %s through fango: %w\n%s", source, err, out)
+		}
+	})
+	if b.err != nil {
+		t.Fatal(b.err)
+	}
+	return b.binary
 }
 
 func TestMain(m *testing.M) {
@@ -299,10 +352,6 @@ func TestMarkdownExample(t *testing.T) {
 func TestTodoExample(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "todo.fango")
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		t.Fatal(err)
-	}
 	want, err := os.ReadFile(strings.TrimSuffix(path, ".fango") + ".expected")
 	if err != nil {
 		t.Fatal(err)
@@ -343,13 +392,10 @@ func TestTodoExample(t *testing.T) {
 		return
 	}
 	compiledDir := t.TempDir()
-	buildDir := t.TempDir()
 	var compiled bytes.Buffer
 	for _, args := range commands {
-		cliArgs := append([]string{"run", absPath, "--"}, args...)
-		cmd := exec.Command(cliBinary(t), cliArgs...)
+		cmd := exec.Command(cliCompiledBinary(t, path), args...)
 		var stderr bytes.Buffer
-		cmd.Env = append(os.Environ(), "FANGO_BUILD_DIR="+buildDir)
 		cmd.Dir, cmd.Stdout, cmd.Stderr = compiledDir, &compiled, &stderr
 		if err := cmd.Run(); err != nil {
 			t.Fatalf("compiled %v: %v\n%s", args, err, stderr.String())
@@ -366,10 +412,6 @@ func TestTodoExample(t *testing.T) {
 func TestTodoExampleFailures(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "todo.fango")
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		t.Fatal(err)
-	}
 	prog, _, ok := compileFile(path, io.Discard)
 	if !ok {
 		t.Fatal("compile failed")
@@ -388,9 +430,6 @@ func TestTodoExampleFailures(t *testing.T) {
 		{"missing index", []string{"done", "1"}, "[]", 2, "No todo at index 1.\n"},
 	}
 
-	// The compiled cases run the same program, so they share one build
-	// directory and the CLI compiles it once.
-	buildDir := t.TempDir()
 	for _, tc := range cases {
 		t.Run(tc.name+"/interpreter", func(t *testing.T) {
 			dir := t.TempDir()
@@ -427,10 +466,8 @@ func TestTodoExampleFailures(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			args := append([]string{"run", absPath, "--"}, tc.args...)
-			cmd := exec.Command(cliBinary(t), args...)
+			cmd := exec.Command(cliCompiledBinary(t, path), tc.args...)
 			var stdout, stderr bytes.Buffer
-			cmd.Env = append(os.Environ(), "FANGO_BUILD_DIR="+buildDir)
 			cmd.Dir, cmd.Stdout, cmd.Stderr = dir, &stdout, &stderr
 			err := cmd.Run()
 			var exitErr *exec.ExitError
@@ -945,10 +982,6 @@ func TestCsvExample(t *testing.T) {
 func TestCsvExampleFailures(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "csv.fango")
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		t.Fatal(err)
-	}
 	prog, _, ok := compileFile(path, io.Discard)
 	if !ok {
 		t.Fatal("compile failed")
@@ -965,7 +998,6 @@ func TestCsvExampleFailures(t *testing.T) {
 		{"missing file", []string{"nope.csv"}, 1, "cannot read nope.csv\n"},
 	}
 
-	buildDir := t.TempDir()
 	for _, tc := range cases {
 		t.Run(tc.name+"/interpreter", func(t *testing.T) {
 			env := eval.NewEnv()
@@ -990,10 +1022,8 @@ func TestCsvExampleFailures(t *testing.T) {
 			continue
 		}
 		t.Run(tc.name+"/compiled", func(t *testing.T) {
-			args := append([]string{"run", absPath, "--"}, tc.args...)
-			cmd := exec.Command(cliBinary(t), args...)
+			cmd := exec.Command(cliCompiledBinary(t, path), tc.args...)
 			var stdout, stderr bytes.Buffer
-			cmd.Env = append(os.Environ(), "FANGO_BUILD_DIR="+buildDir)
 			cmd.Dir, cmd.Stdout, cmd.Stderr = t.TempDir(), &stdout, &stderr
 			err := cmd.Run()
 			var exitErr *exec.ExitError

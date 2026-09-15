@@ -9,7 +9,7 @@ build:
 # The correctness suite: deterministic, asserting nothing about elapsed time.
 # This includes the full compiler/interpreter differential suite.
 test:
-	go test $$(go list ./... | grep -v benchmarks)
+	go test -parallel 16 $$(go list ./... | grep -v benchmarks)
 
 # The compile-latency and runtime-ratio gates measure elapsed time, so they
 # answer to host load and, for latency, to the machine that recorded the
@@ -46,7 +46,7 @@ ci:
 	test -z "$$(gofmt -l .)"
 	go run ./cmd/fango fmt -l stdlib/*.fango examples/*.fango
 	go vet ./...
-	go test $$(go list ./... | grep -v benchmarks)
+	go test -parallel 16 $$(go list ./... | grep -v benchmarks)
 
 clean:
 	rm -f fango

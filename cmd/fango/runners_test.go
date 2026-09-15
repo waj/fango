@@ -70,22 +70,19 @@ func batchRunner(path string) compiledRunner {
 	}
 }
 
-// cliRunner compiles and runs through the real CLI, in a private build dir.
+// cliRunner compiles this runner's source version once through the real CLI,
+// then runs that binary with each case's isolated inputs. Keeping the build on
+// the runner, rather than in a path-global cache, isolates tests that rewrite a
+// temporary source at the same path. Dedicated command tests cover the fango
+// run wrapper itself.
 func cliRunner(path string) compiledRunner {
+	b := new(cliBuild)
 	return func(t *testing.T, in fixtureInputs, dir string) (string, int) {
-		source, err := filepath.Abs(path)
+		absPath, err := filepath.Abs(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		args := []string{"run", source}
-		if len(in.args) > 0 {
-			args = append(append(args, "--"), in.args...)
-		}
-		cmd := exec.Command(cliBinary(t), args...)
-		cmd.Env = append(os.Environ(),
-			"FANGO_INTERNAL_PRINT_MAIN=1",
-			"FANGO_BUILD_DIR="+t.TempDir())
-		return runCompiled(t, cmd, in.stdin, dir)
+		return runCompiled(t, exec.Command(buildCLIBinary(t, path, absPath, b), in.args...), in.stdin, dir)
 	}
 }
 
