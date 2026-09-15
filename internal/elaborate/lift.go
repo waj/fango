@@ -73,10 +73,11 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 	params = append(params, dictNames...)
 	var body core.Expr
 	if len(bind.Params) > 0 {
-		argTys, _ := core.PeelFun(localGenTy, len(bind.Params))
+		argTys, retTy := core.PeelFun(localGenTy, len(bind.Params))
 		eqs := equationRows(bind.Equations, bind.Params, bind.Body, bind.NameSpan)
 		var worker []string
 		worker, body = el.workerBody(eqs, argTys, bind.NameSpan, "local function")
+		body = el.adaptFunctionValue(body, retTy)
 		params = append(params, worker...)
 	} else {
 		body = el.expr(bind.Body)
@@ -140,8 +141,17 @@ func (el *elab) liftedCallee(lf *liftedLocal, occTy, rawOccTy types.Type) callee
 			}
 		}
 	}
-	return callee{kind: core.Worker, name: lf.defName, ty: ty,
+	ty = el.eraseRuntimeKinds(eraseRowsFrom(lf.rawGenTy, rawTy))
+	c := callee{kind: core.Worker, name: lf.defName, ty: ty, raw: rawTy,
 		arity: lf.arity, tyArgs: tyArgs, pre: pre, evidence: evidence}
+	if core.ArrowOpenRow(ty, lf.arity) {
+		actual, explicit := rawTy, ty
+		for i := 1; i < lf.arity; i++ {
+			actual, explicit = actual.(*types.TFun).Ret, explicit.(*types.TFun).Ret
+		}
+		c.row = el.residualArgument(actual.(*types.TFun).Eff, explicit.(*types.TFun).Eff)
+	}
+	return c
 }
 
 // freeLocals computes the enclosing locals a binding's body mentions, in

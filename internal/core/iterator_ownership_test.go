@@ -22,7 +22,7 @@ func iteratorProofFixture() (*Prog, *types.Builtins, *IteratorScope, *IteratorNe
 	maybe := &types.TCon{Unique: con.Unique, Name: con.Name, Args: []types.Type{b.Int}}
 	scope := &IteratorScope{Scope: sup.FreshScope(), Producer: &VarRef{Name: "producer", Local: true, Ty: producer},
 		Consumer: &VarRef{Name: "consumer", Local: true, Ty: consumer}, CursorTy: cursor, Ty: b.Unit}
-	each := &IteratorNext{Access: types.ExclusiveAdvance,
+	each := &IteratorNext{Row: &RowArgument{}, Access: types.ExclusiveAdvance,
 		Cursor: &VarRef{Name: "cursor", Local: true, Ty: cursor}, Result: result, Ty: maybe}
 	p := &Prog{ADTs: []*types.ADTInfo{result}, Intrinsics: map[string]bool{types.StreamWithProducerName: true, types.IteratorNextName: true}, Defs: []Def{
 		{Name: types.StreamWithProducerName, Type: &types.TFun{Arg: producer, Ret: &types.TFun{Arg: consumer, Ret: b.Unit}},

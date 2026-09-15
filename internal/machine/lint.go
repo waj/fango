@@ -91,10 +91,6 @@ func lintClosure(closure Closure, workers map[string]*Worker) []error {
 func lintWorker(w *Worker, workers map[string]*Worker) []error {
 	where := "machine worker " + w.Name
 	var errs []error
-	rowsEnabled := false
-	for _, worker := range workers {
-		rowsEnabled = rowsEnabled || len(worker.Rows) != 0 || worker.RowParam != 0
-	}
 	if w.Def != nil {
 		if w.RowParam != w.Def.RowParam || !slices.Equal(w.Rows, workerRows(w.Def)) {
 			errs = append(errs, fmt.Errorf("%s: missing or stale worker row bindings", where))
@@ -222,7 +218,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 					}
 					actual := ev
 					actual.Control = types.Control{Transport: types.Machine}
-					if !reflect.DeepEqual(actual, expected) {
+					if !core.EqualEvidenceActivation(actual, expected) {
 						errs = append(errs, fmt.Errorf("%s: stale residual evidence activation", blockWhere))
 					}
 				}
@@ -290,7 +286,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				errs = append(errs, fmt.Errorf("%s: suspension owner/request type mismatch", blockWhere))
 			}
 		case *CursorAdvance:
-			checkRow(term.Row, w.RowParam != 0)
+			checkRow(term.Row, true)
 			checkBind(term.Bind)
 			checkExpr(term.Cursor, "cursor operand", false)
 			if term.Access != types.ExclusiveAdvance {
@@ -303,7 +299,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			}
 		case *Call:
 			requiresRow := false
-			if rowsEnabled && term.CalleeExpr != nil {
+			if term.CalleeExpr != nil {
 				requiresRow = core.ArrowOpenRow(term.CalleeExpr.Type(), 1)
 			}
 			if callee := workers[term.Callee]; callee != nil {
@@ -506,7 +502,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				}
 			}
 		case *CursorOpen:
-			checkRow(term.Row, rowsEnabled && term.Producer != nil && core.ArrowOpenRow(term.Producer.Type(), 1))
+			checkRow(term.Row, term.Producer != nil && core.ArrowOpenRow(term.Producer.Type(), 1))
 			checkBind(term.Cursor)
 			checkExpr(term.Producer, "cursor producer", false)
 			if term.Scope == 0 || seenCursorScopes[term.Scope] {

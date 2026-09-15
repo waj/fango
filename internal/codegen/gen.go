@@ -313,6 +313,7 @@ type gen struct {
 	caseVarTys    map[string]types.Type
 	evidence      map[int][]goast.Expr
 	evidenceModes map[int][]types.Transport
+	rows          map[types.CaptureVar][]goast.Expr
 	defs          map[string]*core.Def
 	unit          string
 	imports       map[string]bool
@@ -642,6 +643,13 @@ func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
 		g.evidence[ev.Unique] = append(g.evidence[ev.Unique], ident(name))
 		g.evidenceModes[ev.Unique] = append(g.evidenceModes[ev.Unique], mode)
 	}
+	if d.RowParam != 0 {
+		name := fmt.Sprintf("rowParam%d", g.tmp)
+		g.tmp++
+		params = append(params, paramSpec{name: name, typ: g.rowType()})
+		defer g.pushRow(d.RowParam, ident(name))()
+		defer g.bindDeferredEffects(d.RowEffects, ident(name), mode)()
+	}
 	for i, name := range d.Params {
 		if g.isUnit(argTys[i]) {
 			continue
@@ -834,6 +842,9 @@ func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
 			panic("codegen: missing lexical evidence")
 		}
 		args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), mode))
+	}
+	if e.Row != nil {
+		args = append(args, g.rowArgument(e.Row))
 	}
 	for i, a := range e.Args {
 		if i < len(formal) && g.isUnit(formal[i]) {
@@ -1363,6 +1374,9 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 				}
 				args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), mode))
 			}
+			if e.Row != nil {
+				args = append(args, g.rowArgument(e.Row))
+			}
 			args = append(args, g.expr(e.Args[0], 0))
 			return callExpr(callbackMember(g.expr(e.Callee, 0), mode), args...)
 		case core.Ctor:
@@ -1485,7 +1499,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			descriptors[i] = g.typeDescriptor(p.Type())
 		}
 		exit := &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: selector("fangort", "ExitRequest"), Elts: []goast.Expr{
-			&goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Target")}},
+			&goast.KeyValueExpr{Key: ident("Target"), Value: callExpr(selector("fangort", "ResolveExitTarget"), &goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Target")})},
 			&goast.KeyValueExpr{Key: ident("Effect"), Value: stringLit(e.Op.Owner.Name)},
 			&goast.KeyValueExpr{Key: ident("Operation"), Value: intLit(int64(e.Op.Index))},
 			&goast.KeyValueExpr{Key: ident("OperationName"), Value: stringLit(e.Op.Name)},
@@ -1530,6 +1544,9 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 			panic("codegen: missing lexical evidence")
 		}
 		args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), mode))
+	}
+	if e.Row != nil {
+		args = append(args, g.rowArgument(e.Row))
 	}
 	leadingArgs := len(args)
 	needPrelude := false
@@ -1838,14 +1855,32 @@ func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
 		ownerDecl = append(ownerDecl, varDeclStmt(owner, &goast.StarExpr{X: selector("fangort", "YieldOwner")}, callExpr(selector("fangort", "NewYieldOwner"))))
 		producerArgs = append(producerArgs, ident(owner))
 	}
+	boundary, cursorRow := name("Row"), name("RowOwner")
+	if e.Row != nil {
+		ownerDecl = append(ownerDecl, varDeclStmt(boundary, g.rowType(), g.rowArgument(e.Row)),
+			varDeclStmt(cursorRow, &goast.StarExpr{X: selector("fangort", "CursorEvidence")}, callExpr(selector("fangort", "NewCursorEvidence"), ident(boundary))))
+		producerArgs = append(producerArgs, callExpr(selector(cursorRow, "Row")))
+	}
 	producerArgs = append(producerArgs, g.unitValue())
 	producerFrame := callExpr(callbackMember(g.machineExpr(e.Producer), types.Machine), producerArgs...)
 	start := callExpr(selector("fangort", "StartMachineIterator"), producerFrame)
 	if e.Yield.Unique != 0 {
 		start = callExpr(selector("fangort", "StartOwnedMachineIterator"), ident(owner), producerFrame)
 	}
+	if e.Row != nil {
+		var ownerValue goast.Expr = ident("nil")
+		if e.Yield.Unique != 0 {
+			ownerValue = ident(owner)
+		}
+		start = callExpr(selector("fangort", "StartCursorWithEvidence"), ownerValue, ident(cursorRow), producerFrame)
+	}
+	consumerArgs := []goast.Expr{}
+	if e.Row != nil {
+		consumerArgs = append(consumerArgs, ident(boundary))
+	}
+	consumerArgs = append(consumerArgs, ident(iterator))
 	if e.Traversal.Unique != 0 {
-		consumerFrame := callExpr(callbackMember(g.machineExpr(e.Consumer), types.Machine), ident(iterator))
+		consumerFrame := callExpr(callbackMember(g.machineExpr(e.Consumer), types.Machine), consumerArgs...)
 		consume := callExpr(indexExpr(selector("fangort", "RunCursorConsumer"), []goast.Expr{g.goType(e.Ty)}), ident(iterator), consumerFrame)
 		result := g.outcomeType(e.Ty)
 		if overall == types.Direct {
@@ -1856,7 +1891,7 @@ func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
 		g.control, g.resultType = oldControl, oldResult
 		return callExpr(funcLit(result, stmts))
 	}
-	consume := callExpr(callbackMember(g.expr(e.Consumer, 0), overall), ident(iterator))
+	consume := callExpr(callbackMember(g.expr(e.Consumer, 0), overall), consumerArgs...)
 	resultType := g.goType(e.Ty)
 	consumerExits := overall == types.Exit
 	if consumerExits {
@@ -2325,6 +2360,9 @@ func (g *gen) floatLit(v float64) goast.Expr {
 // emit the bindings as plain Go statements instead.
 func (g *gen) letIIFE(e *core.Let) goast.Expr {
 	if core.ExprControl(e).Resolve(g.control) == types.Exit {
+		oldResult := g.resultType
+		g.resultType = e.Ty
+		defer func() { g.resultType = oldResult }()
 		return callExpr(funcLit(g.outcomeType(e.Ty), g.retStmtsFor(e, false)))
 	}
 	var body []goast.Stmt
@@ -2542,6 +2580,13 @@ func (g *gen) directLambdaMember(e *core.Lambda, mode types.Transport) goast.Exp
 		g.evidence[l.Unique] = append(g.evidence[l.Unique], ident(name))
 		g.evidenceModes[l.Unique] = append(g.evidenceModes[l.Unique], mode)
 		pushed = append(pushed, l.Unique)
+	}
+	if e.RowParam != 0 {
+		name := fmt.Sprintf("rowParam%d", g.tmp)
+		g.tmp++
+		params = append(params, paramSpec{name: name, typ: g.rowType()})
+		defer g.pushRow(e.RowParam, ident(name))()
+		defer g.bindDeferredEffects(e.RowEffects, ident(name), mode)()
 	}
 	params = append(params, paramSpec{name: func() string {
 		if e.Param == "_" {

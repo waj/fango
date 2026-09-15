@@ -11,6 +11,27 @@ type valueAdapter struct {
 	ref      *core.VarRef
 }
 
+// Equal surface types can still have different residual callback ABIs, even
+// underneath a curried result or nominal type argument.
+func sameValueABI(a, b types.Type) bool {
+	if !types.Equal(a, b) {
+		return false
+	}
+	switch a := a.(type) {
+	case *types.TFun:
+		b := b.(*types.TFun)
+		return types.FunctionOpenRow(a) == types.FunctionOpenRow(b) && types.FunctionControl(a) == types.FunctionControl(b) && sameValueABI(a.Arg, b.Arg) && sameValueABI(a.Ret, b.Ret)
+	case *types.TCon:
+		b := b.(*types.TCon)
+		for i, arg := range a.Args {
+			if !sameValueABI(arg, b.Args[i]) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // adaptNominalValue maps an immutable nominal value only when its stored
 // runtime types differ. Row-indexed values whose rows erase identically need
 // no traversal. Recursive conversions are ordinary, typed local functions.
@@ -25,7 +46,7 @@ func (el *elab) adaptNominalValue(e core.Expr, want types.Type) core.Expr {
 		return e
 	}
 	for _, a := range el.valueAdapters {
-		if types.Equal(a.from, from) && types.Equal(a.to, to) {
+		if sameValueABI(a.from, from) && sameValueABI(a.to, to) {
 			return el.valueApp(a.ref, e)
 		}
 	}

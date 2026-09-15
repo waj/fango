@@ -41,8 +41,10 @@ func (el *elab) app(e *ast.App) core.Expr {
 	if v, ok := head.(*ast.Var); ok {
 		if _, local := el.scopeIdx[v.Name]; local {
 			res := el.expr(head)
+			raw := el.ck.Sub.Apply(el.ck.ExprTypes[head])
 			for _, a := range args {
-				res = el.valueApp(res, el.expr(a))
+				res = el.valueAppWithRow(res, el.expr(a), raw)
+				raw = raw.(*types.TFun).Ret
 			}
 			return res
 		}
@@ -109,8 +111,10 @@ func (el *elab) app(e *ast.App) core.Expr {
 
 	// Unknown callee: one typed indirect call per application.
 	res := el.expr(head)
+	raw := el.ck.Sub.Apply(el.ck.ExprTypes[head])
 	for _, a := range args {
-		res = el.valueApp(res, el.expr(a))
+		res = el.valueAppWithRow(res, el.expr(a), raw)
+		raw = raw.(*types.TFun).Ret
 	}
 	return res
 }
@@ -134,8 +138,8 @@ func (el *elab) effectInstance(op *types.EffectOp, ty types.Type) core.EffectIns
 func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args []ast.Expr) core.Expr {
 	if len(args) > op.Arity {
 		res := el.operationCall(op, opTy, rawTy, args[:op.Arity])
-		for _, a := range args[op.Arity:] {
-			res = el.valueApp(res, el.expr(a))
+		for i, a := range args[op.Arity:] {
+			res = el.valueAppWithRow(res, el.expr(a), arrowAt(rawTy, op.Arity+i))
 		}
 		return res
 	}
@@ -230,6 +234,9 @@ func (el *elab) valueApp(callee, arg core.Expr) core.Expr {
 		Ty:         fn.Ret,
 		Control:    types.FunctionControl(fn),
 	}
+	if types.FunctionOpenRow(fn) {
+		app.Row = &core.RowArgument{From: pendingRow}
+	}
 	for _, l := range types.SortedRow(fn.Eff).Labels {
 		if types.RuntimeEvidenceEffect(l) {
 			app.EvidenceArgs = append(app.EvidenceArgs, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Captures: el.evidenceCaptures(l.Unique), Control: el.evidenceControl(l.Unique)})
@@ -250,6 +257,8 @@ type callee struct {
 	tyArgs   []types.Type    // explicit instantiation (doc/design.md, "Go backend and runtime"); nil when monomorphic
 	pre      []core.Expr     // lifted locals: the captured frees, already-atomic leading args
 	evidence []core.EffectInstance
+	row      *core.RowArgument
+	raw      types.Type
 }
 
 func (el *elab) workerCallee(name string, workerTy, rawTy types.Type, arity int) callee {
@@ -257,6 +266,11 @@ func (el *elab) workerCallee(name string, workerTy, rawTy types.Type, arity int)
 	sch, _ := el.ck.Env.Lookup(name)
 	if name == el.declName {
 		sch = el.declScheme
+	}
+	c.ty = el.eraseRuntimeKinds(eraseRowsFrom(el.ck.Sub.Apply(sch.Body), rawTy))
+	c.raw = rawTy
+	if core.ArrowOpenRow(c.ty, arity) {
+		c.row = el.residualArgument(arrowAt(rawTy, arity-1).(*types.TFun).Eff, arrowAt(c.ty, arity-1).(*types.TFun).Eff)
 	}
 	return el.addEvidence(c, sch, rawTy)
 }
@@ -370,11 +384,11 @@ func matchType(gen, occ types.Type, m map[int]types.Type) {
 
 // nullaryValueUse is a use of a polymorphic top-level value — a nullary
 // generic worker (doc/design.md, "Go backend and runtime"), instantiated and called per use.
-func (el *elab) nullaryValueUse(name string, sch types.Scheme, occTy types.Type) core.Expr {
+func (el *elab) nullaryValueUse(name string, sch types.Scheme, occTy, rawTy types.Type) core.Expr {
 	genTy := el.zonkDefault(sch.Body)
 	vars := types.RigidVarsIn(genTy)
 	c := callee{kind: core.Worker, name: name, ty: occTy, tyArgs: matchTyArgs(genTy, vars, occTy)}
-	c = el.addEvidence(c, sch, occTy)
+	c = el.addEvidence(c, sch, rawTy)
 	return c.saturatedApp(nil)
 }
 
@@ -394,6 +408,7 @@ func (c callee) saturatedApp(args []core.Expr) *core.App {
 		EvidenceArgs: c.evidence,
 		Ctor:         c.ctor,
 		Control:      control,
+		Row:          c.row,
 	}
 }
 
@@ -449,8 +464,12 @@ func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
 
 	case len(args) > missing: // oversaturated: direct call, then indirect
 		res := el.calleeCall(c, args[:missing])
-		for _, a := range args[missing:] {
-			res = el.valueApp(res, el.expr(a))
+		for i, a := range args[missing:] {
+			if c.raw != nil {
+				res = el.valueAppWithRow(res, el.expr(a), arrowAt(c.raw, c.arity+i))
+			} else {
+				res = el.valueApp(res, el.expr(a))
+			}
 		}
 		return res
 
@@ -463,9 +482,8 @@ func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
 // erased row ABI. Its concrete handler evidence remains captured by the
 // wrapper at the creation site.
 func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
-	actualFn, actualIsFn := e.Type().(*types.TFun)
-	wantFn0, wantIsFn := want.(*types.TFun)
-	if types.Equal(e.Type(), want) && (!actualIsFn || !wantIsFn || types.FunctionControl(actualFn) == types.FunctionControl(wantFn0) && types.FunctionOpenRow(actualFn) == types.FunctionOpenRow(wantFn0)) {
+	actualFn, _ := e.Type().(*types.TFun)
+	if sameValueABI(e.Type(), want) {
 		return e
 	}
 	wantFn, wantOK := want.(*types.TFun)
@@ -475,7 +493,7 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 	}
 	switch e := e.(type) {
 	case *core.Lambda:
-		if !types.Equal(actualFn.Arg, wantFn.Arg) {
+		if !sameValueABI(actualFn.Arg, wantFn.Arg) {
 			break
 		}
 		// A wider explicit row needs fresh (possibly unused) evidence binders.
@@ -506,6 +524,10 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 			}
 			if retained {
 				kept = append(kept, ev)
+				continue
+			}
+			if len(el.evidence[ev.Unique]) == 0 && types.FunctionOpenRow(wantFn) {
+				e.RowEffects = append(e.RowEffects, ev)
 				continue
 			}
 			for _, v := range ev.Captures.Vars {
@@ -539,11 +561,25 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 	el.tmp++
 	arg := &core.VarRef{Name: name, Local: true, Ty: wantFn.Arg}
 	effectParams := el.bindEffectParams(executingEffects(want, 1))
+	var rowEffects []core.EffectInstance
+	for _, label := range actualFn.Eff.Labels {
+		if types.RuntimeEvidenceEffect(label) && len(el.evidence[label.Unique]) == 0 && types.FunctionOpenRow(wantFn) {
+			rowEffects = append(rowEffects, core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Control: el.evidenceControl(label.Unique)})
+		}
+	}
+	rowEffects = el.bindEffectParams(rowEffects)
 	body := el.valueApp(e, arg)
+	if app, ok := body.(*core.App); ok && app.Row != nil {
+		app.Row = el.residualArgument(wantFn.Eff, actualFn.Eff)
+		if types.FunctionOpenRow(wantFn) {
+			app.Row.From = pendingRow
+		}
+	}
+	el.popEvidence(rowEffects)
 	el.popEvidence(effectParams)
 	body = el.adaptFunctionValue(body, wantFn.Ret)
 	return &core.Lambda{Param: name, Body: body, Ty: &types.TFun{Arg: wantFn.Arg, Eff: wantFn.Eff, Ret: wantFn.Ret, Control: wantFn.Control, OpenRow: wantFn.OpenRow},
-		ParamCapture: el.ck.Sup.FreshCapture(), EffectParams: effectParams}
+		ParamCapture: el.ck.Sup.FreshCapture(), EffectParams: effectParams, RowEffects: rowEffects}
 }
 
 // partial eta-expands an unsaturated worker or constructor application into

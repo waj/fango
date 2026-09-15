@@ -187,7 +187,11 @@ func CheckRowEvidence(p *Prog) []error {
 	return errors
 }
 
-func sameRowEffect(a, b EffectInstance) bool {
+func sameRowEffect(a, b EffectInstance) bool { return EqualEvidenceActivation(a, b) }
+
+// EqualEvidenceActivation compares semantic types and capture sets, including
+// the lexical identity; nil and empty set representations are equivalent.
+func EqualEvidenceActivation(a, b EffectInstance) bool {
 	if a.Unique != b.Unique || a.Name != b.Name || a.Control != b.Control || len(a.Args) != len(b.Args) || !types.EqualCaptures(a.Captures, b.Captures) {
 		return false
 	}

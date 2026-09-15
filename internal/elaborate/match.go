@@ -38,7 +38,7 @@ func (el *elab) caseExpr(e *ast.Case, ty types.Type) core.Expr {
 	for i := range e.Branches {
 		br := &e.Branches[i]
 		br.Pattern = el.lowerRecordPattern(br.Pattern)
-		n := el.pushPatternVars(br.Pattern)
+		n := el.pushPatternVars(br.Pattern, scrut.Type())
 		m.bodies[i] = el.adaptFunctionValue(el.expr(br.Body), ty)
 		el.popScope(n)
 		m.spans[i] = br.Pattern.Span()
@@ -96,8 +96,8 @@ func (el *elab) matchPatternRows(patterns [][]ast.Pattern, bodies []ast.Expr, sp
 			matrix[i][j] = el.lowerRecordPattern(p)
 		}
 		n := 0
-		for _, p := range matrix[i] {
-			n += el.pushPatternVars(p)
+		for j, p := range matrix[i] {
+			n += el.pushPatternVars(p, occs[j].ty)
 		}
 		m.bodies[i] = el.expr(bodies[i])
 		el.popScope(n)
@@ -269,25 +269,28 @@ func instFields(adt *types.ADTInfo, c *types.CtorInfo, colTy types.Type) []types
 // pushPatternVars enters a branch pattern's variables (with zonked types)
 // into the elaborator's scope — the free-variable universe for lifting —
 // returning how many were pushed.
-func (el *elab) pushPatternVars(p ast.Pattern) int {
+func (el *elab) pushPatternVars(p ast.Pattern, ty types.Type) int {
 	n := 0
-	var walk func(ast.Pattern)
-	walk = func(p ast.Pattern) {
+	var walk func(ast.Pattern, types.Type)
+	walk = func(p ast.Pattern, ty types.Type) {
 		switch p := p.(type) {
 		case *ast.PVar:
-			el.pushScope(p.Name, el.zonkDefault(el.ck.PatTypes[p]))
+			el.pushScope(p.Name, el.zonkDefault(ty))
 			n++
 		case *ast.PCtor:
-			for _, a := range p.Args {
-				walk(a)
+			ctor := el.ck.Ctors[p.Name]
+			if ctor == nil {
+				return
+			}
+			fields := instFields(el.ck.ADTs[ctor.Result.Unique], ctor, ty)
+			for i, a := range p.Args {
+				walk(a, fields[i])
 			}
 		case *ast.PRecord:
-			for _, f := range p.Fields {
-				walk(f.Pattern)
-			}
+			walk(el.lowerRecordPattern(p), ty)
 		}
 	}
-	walk(p)
+	walk(p, ty)
 	return n
 }
 

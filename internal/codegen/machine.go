@@ -120,6 +120,9 @@ func (g *gen) machineWorkerDecls(worker *machineir.Worker) []goast.Decl {
 	for _, param := range worker.TyParams {
 		fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("T_" + g.tyParamNames[param.ID])}, Type: g.descriptorType()})
 	}
+	for i := range worker.Rows {
+		fields = append(fields, &goast.Field{Names: []*goast.Ident{ident(fmt.Sprintf("R%d", i))}, Type: g.rowType()})
+	}
 	if worker.StateToken {
 		fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("StateToken")}, Type: ident("int")})
 	}
@@ -145,6 +148,11 @@ func (g *gen) machineWorkerDecls(worker *machineir.Worker) []goast.Decl {
 		name := machineEvidenceName(ev)
 		params = append(params, paramSpec{name: name, typ: g.effectTypeMode(ev, types.Machine)})
 		ctorFields = append(ctorFields, &goast.KeyValueExpr{Key: ident(machineEvidenceFieldName(ev)), Value: ident(name)})
+	}
+	for i := range worker.Rows {
+		name := fmt.Sprintf("machineRow%d", i)
+		params = append(params, paramSpec{name: name, typ: g.rowType()})
+		ctorFields = append(ctorFields, &goast.KeyValueExpr{Key: ident(fmt.Sprintf("R%d", i)), Value: ident(name)})
 	}
 	if worker.StateToken {
 		params = append(params, paramSpec{name: "machineStateToken", typ: ident("int")})
@@ -177,6 +185,12 @@ func (g *gen) machineStepDecl(worker *machineir.Worker, frameName string, stored
 	oldControl, oldABI, oldResult := g.control, g.abi, g.resultType
 	g.control, g.abi, g.resultType = types.Direct, types.Machine, worker.Result
 	defer func() { g.control, g.abi, g.resultType = oldControl, oldABI, oldResult }()
+	for i, row := range worker.Rows {
+		defer g.pushRow(row, ident(fmt.Sprintf("machineRow%d", i)))()
+	}
+	if worker.RowParam != 0 {
+		defer g.bindDeferredEffects(worker.RowEffects, g.rowValue(worker.RowParam), types.Machine)()
+	}
 	for _, ev := range worker.EffectParams {
 		name := machineEvidenceName(ev)
 		g.evidence[ev.Unique] = append(g.evidence[ev.Unique], ident(name))
@@ -202,6 +216,10 @@ func (g *gen) machineStepDecl(worker *machineir.Worker, frameName string, stored
 		storedSet[local.Name] = true
 	}
 	var body []goast.Stmt
+	for i := range worker.Rows {
+		name := fmt.Sprintf("machineRow%d", i)
+		body = append(body, varDeclStmt(name, g.rowType(), selector("f", fmt.Sprintf("R%d", i))), assignBlank(ident(name)))
+	}
 	for _, param := range worker.TyParams {
 		name := descriptorParamName(g.tyParamNames[param.ID])
 		body = append(body, varDeclStmt(name, g.descriptorType(), &goast.SelectorExpr{X: ident("f"), Sel: ident("T_" + g.tyParamNames[param.ID])}), assignBlank(ident(name)))
@@ -300,6 +318,9 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 				Rhs: []goast.Expr{g.typeDescriptor(param)},
 			})
 		}
+		for i, row := range worker.Rows {
+			out = append(out, &goast.AssignStmt{Lhs: []goast.Expr{selector("f", fmt.Sprintf("R%d", i))}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{g.rowValue(row)}})
+		}
 		for _, ev := range worker.EffectParams {
 			out = append(out, &goast.AssignStmt{
 				Lhs: []goast.Expr{machineFrameEvidenceField(ev)}, Tok: gotoken.ASSIGN,
@@ -348,7 +369,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		return stmts, [][]goast.Stmt{resume(term.Bind, term.Next)}
 	case *machineir.CursorAdvance:
 		stmts := append(save(), assignMachinePC(resumePC))
-		stmts = append(stmts, step("MachineAdvance", "Cursor", g.machineExpr(term.Cursor)))
+		stmts = append(stmts, step("MachineAdvance", "Cursor", g.machineExpr(term.Cursor), &goast.KeyValueExpr{Key: ident("Evidence"), Value: g.rowArgument(term.Row)}))
 		name := fmt.Sprintf("machinePull%d", g.tmp)
 		g.tmp++
 		resultTy := term.Bind.Ty.(*types.TCon)
@@ -369,6 +390,11 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 				panic("codegen: missing lexical machine evidence")
 			}
 			args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
+		}
+		if term.Callee != "" {
+			args = append(args, g.machineRowArgs(g.machineWorkers[term.Callee], g.rowArgument(term.Row))...)
+		} else if term.Row != nil {
+			args = append(args, g.rowArgument(term.Row))
 		}
 		for i, arg := range term.Args {
 			if slices.Contains(term.SynchronousArgs, i) {
@@ -449,6 +475,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 				}
 				ctorArgs = append(ctorArgs, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
 			}
+			ctorArgs = append(ctorArgs, g.machineRowArgs(clauseWorker, ident("nil"))...)
 			if clauseWorker.StateToken {
 				ctorArgs = append(ctorArgs, ident(stateToken))
 			}
@@ -486,6 +513,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			}
 			bodyArgs = append(bodyArgs, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
 		}
+		bodyArgs = append(bodyArgs, g.machineRowArgs(bodyWorker, ident("nil"))...)
 		for _, capture := range term.BodyCaptures {
 			bodyArgs = append(bodyArgs, ident(machineLocalName(capture.Name)))
 		}
@@ -532,6 +560,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 					}
 					args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
 				}
+				args = append(args, g.machineRowArgs(clauseWorker, ident("nil"))...)
 				if clauseWorker.StateToken {
 					args = append(args, callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("TopStateToken")}))
 				}
@@ -603,11 +632,23 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			stmts = append(stmts, varDeclStmt(owner, &goast.StarExpr{X: selector("fangort", "YieldOwner")}, callExpr(selector("fangort", "NewYieldOwner"))))
 			args = append(args, ident(owner))
 		}
+		rowName := fmt.Sprintf("machineCursorRow%d", block.ID)
+		if term.Row != nil {
+			stmts = append(stmts, varDeclStmt(rowName, &goast.StarExpr{X: selector("fangort", "CursorEvidence")}, callExpr(selector("fangort", "NewCursorEvidence"), g.rowArgument(term.Row))))
+			args = append(args, callExpr(selector(rowName, "Row")))
+		}
 		args = append(args, g.unitValue())
 		producer := callExpr(callbackMember(g.machineExpr(term.Producer), types.Machine), args...)
 		start := callExpr(selector("fangort", "StartMachineIterator"), producer)
 		if term.Yield.Unique != 0 {
 			start = callExpr(selector("fangort", "StartOwnedMachineIterator"), ident(owner), producer)
+		}
+		if term.Row != nil {
+			var ownerValue goast.Expr = ident("nil")
+			if term.Yield.Unique != 0 {
+				ownerValue = ident(owner)
+			}
+			start = callExpr(selector("fangort", "StartCursorWithEvidence"), ownerValue, ident(rowName), producer)
 		}
 		cursor := machineLocalName(term.Cursor.Name)
 		// Capture the cursor in a separate binding: generated frame locals are
@@ -752,6 +793,14 @@ func (g *gen) machineLambdaExpr(lam *core.Lambda) goast.Expr {
 		params = append(params, paramSpec{name: name, typ: g.effectTypeMode(ev, types.Machine)})
 		args = append(args, ident(name))
 	}
+	var callRow goast.Expr = ident("nil")
+	if closure.CallRow != 0 {
+		name := fmt.Sprintf("closureRow%d", g.tmp)
+		g.tmp++
+		params = append(params, paramSpec{name: name, typ: g.rowType()})
+		callRow = ident(name)
+	}
+	args = append(args, g.machineRowArgs(worker, callRow)...)
 	for _, capture := range closure.Captures {
 		args = append(args, ident(machineLocalName(capture.Name)))
 	}

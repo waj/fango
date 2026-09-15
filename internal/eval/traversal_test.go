@@ -26,7 +26,7 @@ func TestTypedCursorAdvancementStartsOnDemandAndStaysExhausted(t *testing.T) {
 		{Name: "producer", Type: b.Unit, Control: control, Body: &core.Seq{
 			First: &core.Suspend{Request: machineInt(b, 42), Ty: b.Unit}, Then: &core.UnitLit{Ty: b.Unit}, Ty: b.Unit}},
 		{Name: types.IteratorNextName, Type: fn, Params: []string{"cursor"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture()}, Control: control,
-			Body: &core.IteratorNext{Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: cursor}, Result: adt, Access: types.ExclusiveAdvance, Ty: result}},
+			Body: &core.IteratorNext{Row: &core.RowArgument{}, Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: cursor}, Result: adt, Access: types.ExclusiveAdvance, Ty: result}},
 	}}
 	if errs := core.InferCaptures(p, b); len(errs) != 0 {
 		t.Fatal(errs)

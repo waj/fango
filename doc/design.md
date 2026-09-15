@@ -905,6 +905,14 @@ evidence. The interpreter saves row references through frames, handler regions,
 and cleanup, and clears them when frames complete. Its dispatcher can call a
 synchronous resumptive interpretation from a Machine producer without changing
 the interpretation's lexical evidence.
+Generated Direct, Exit, and Machine callable members carry the same explicit
+residual-row ABI. Elaboration records instantiated residual labels before row
+erasure, and deferred callback projections resolve their interpretation at
+operation execution. Abort projections resolve to a fixed activation before
+unwinding. Core lint checks row metadata on every source program; capture-flow
+contracts substitute the actual row's handler owners while a cursor advancement
+holds its exclusive borrow. Retained outer rows contribute their handlers'
+resource captures, while invocation rows are local binders.
 Hidden evidence parameters precede ordinary worker parameters in deterministic
 effect-identity order, and calls supply matching lexical evidence. The Core
 linter rejects unsolved metavariables, malformed generic applications,

@@ -102,6 +102,7 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 	}
 	if len(errs) == 0 {
 		specializeScalars(p, infos, ck)
+		bindRows(p.Defs, ck)
 		errs = append(errs, captureDiagnostics(core.InferCaptures(p, ck.B), ck, source.Span{})...)
 		installCaptureSummaries(p.Defs, ck)
 	}
@@ -162,6 +163,7 @@ func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsi
 	}
 	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
 	specializeScalars(p, kept, ck)
+	bindRows(p.Defs, ck)
 	errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, source.Span{})...)
 	installCaptureSummaries(p.Defs, ck)
 	return p.Defs, errs
@@ -187,6 +189,7 @@ func DeclIn(info infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]core.
 	defs, errs := decl(info, ck, false)
 	if len(errs) == 0 {
 		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
+		bindRows(p.Defs, ck)
 		errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, info.NameSpan)...)
 		installCaptureSummaries(defs, ck)
 		for i := range defs {
@@ -212,9 +215,10 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 	var params []string
 	var body core.Expr
 	if len(info.Params) > 0 {
-		argTys, _ := core.PeelFun(defType, len(info.Params))
+		argTys, retTy := core.PeelFun(defType, len(info.Params))
 		eqs := equationRows(info.Equations, info.Params, info.Body, info.NameSpan)
 		params, body = el.workerBody(eqs, argTys, info.NameSpan, "function")
+		body = el.adaptFunctionValue(body, retTy)
 	} else {
 		body = el.expr(info.Body)
 		body = el.adaptFunctionValue(body, defType)
@@ -272,6 +276,7 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 			defs = append(defs, attemptReportDef(name, ty, ck))
 		}
 	}
+	bindRows(defs, ck)
 	return defs
 }
 
@@ -486,6 +491,7 @@ func ExprIn(e ast.Expr, context []core.Def, ck *infer.Checker) (core.Expr, []cor
 	if len(el.errs) == 0 {
 		defs := append([]core.Def(nil), el.aux...)
 		defs = append(defs, core.Def{Name: "_expression", Type: ce.Type(), Control: core.ExprControl(ce), Body: ce})
+		bindRows(defs, ck)
 		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
 		el.errs = append(el.errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, e.Span())...)
 		for _, err := range core.VerifyResumeStructure(ce) {
@@ -691,7 +697,7 @@ func (el *elab) popScope(n int) {
 // lambda nests a multi-parameter surface lambda into single-param Core
 // Lambdas, peeling one arrow per parameter off the (ground) function type.
 func (el *elab) lambda(params []ast.Pattern, body ast.Expr, funTy types.Type) core.Expr {
-	argTys, _ := core.PeelFun(funTy, len(params))
+	argTys, retTy := core.PeelFun(funTy, len(params))
 	effectParams := el.bindEffectParams(executingEffects(funTy, len(params)))
 	names := make([]string, len(params))
 	var inner core.Expr
@@ -715,6 +721,7 @@ func (el *elab) lambda(params []ast.Pattern, body ast.Expr, funTy types.Type) co
 		}
 		inner = el.matchPatternRows([][]ast.Pattern{params}, []ast.Expr{body}, []source.Span{params[0].Span()}, occs, params[0].Span(), "lambda")
 	}
+	inner = el.adaptFunctionValue(inner, retTy)
 	el.popEvidence(effectParams)
 	cur := funTy
 	funs := make([]*types.TFun, len(params))
@@ -924,7 +931,7 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 		// A polymorphic top-level value compiled to a nullary generic worker
 		// (doc/design.md, "Go backend and runtime"): every use is an instantiated zero-argument call.
 		if sch, ok := el.ck.Env.Lookup(e.Name); ok && hasRuntimeVars(sch) {
-			return el.nullaryValueUse(e.Name, sch, ty)
+			return el.nullaryValueUse(e.Name, sch, ty, el.ck.Sub.Apply(el.ck.ExprTypes[e]))
 		}
 		return &core.VarRef{Name: e.Name, Ty: ty}
 	case *ast.Ctor:
@@ -1023,10 +1030,7 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 				rhs := el.expr(bind.Body)
 				subject := fmt.Sprintf("_bind%d", el.tmp)
 				el.tmp++
-				for _, name := range inferPatternNames(bind.Pattern) {
-					el.pushScope(name.name, el.zonkDefault(el.ck.PatTypes[name.pattern]))
-					pushed++
-				}
+				pushed += el.pushPatternVars(bind.Pattern, rhs.Type())
 				order = append(order, localPatternLet{pattern: bind.Pattern, rhs: rhs, subject: subject, ty: rhs.Type()})
 				continue
 			}

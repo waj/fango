@@ -1,0 +1,14 @@
+import Stream
+import Iterator
+
+effect Pull
+    pull : () -> Int
+
+source() = Stream.generate (\_ -> Stream.yield (pull()))
+
+main() = print (handle Stream.withCursor (source()) (\cursor ->
+    handle Iterator.next cursor of
+        pull() ->
+            print (Iterator.next cursor)
+            resume 1) of
+    pull() -> resume 0)

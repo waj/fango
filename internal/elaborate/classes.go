@@ -63,6 +63,9 @@ func (el *elab) addEvidence(c callee, s types.Scheme, raw types.Type) callee {
 		ts = append(ts, e.Type())
 	}
 	c.ty = prependTypes(ts, c.ty)
+	if c.raw != nil {
+		c.raw = prependTypes(ts, c.raw)
+	}
 	c.arity += len(args)
 	c.pre = append(args, c.pre...)
 	return c
@@ -101,7 +104,7 @@ func (el *elab) dictionary(p types.Pred) core.Expr {
 	if len(sch.Vars) == 0 && len(sch.Preds) == 0 {
 		return &core.VarRef{Name: in.Name, Ty: ty}
 	}
-	return el.nullaryValueUse(in.Name, sch, ty)
+	return el.nullaryValueUse(in.Name, sch, ty, in.Class.DictType(p.Ty))
 }
 
 func (el *elab) methodValue(method *types.MethodInfo, raw types.Type) core.Expr {
@@ -163,7 +166,7 @@ func (el *elab) valueReference(name string, raw types.Type) core.Expr {
 	}
 	sch, _ := el.ck.Env.Lookup(name)
 	if hasRuntimeVars(sch) || len(sch.Preds) > 0 {
-		return el.nullaryValueUse(name, sch, ty)
+		return el.nullaryValueUse(name, sch, ty, raw)
 	}
 	return &core.VarRef{Name: name, Ty: ty}
 }
@@ -225,5 +228,6 @@ func Instances(instances []*infer.InstanceInfo, ck *infer.Checker) ([]core.Def, 
 		defs = append(defs, d)
 		errs = append(errs, es...)
 	}
+	bindRows(defs, ck)
 	return defs, errs
 }

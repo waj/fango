@@ -42,10 +42,11 @@ type flowEnv struct {
 	values   map[string]flowValue
 	evidence map[int][]int
 	types    map[int]types.Type
+	rows     map[types.CaptureVar]flowRow
 }
 
 func (e flowEnv) clone() flowEnv {
-	return flowEnv{maps.Clone(e.values), maps.Clone(e.evidence), maps.Clone(e.types)}
+	return flowEnv{maps.Clone(e.values), maps.Clone(e.evidence), maps.Clone(e.types), maps.Clone(e.rows)}
 }
 
 type flowObject struct {
@@ -173,7 +174,8 @@ func checkCaptureFlows(a *captureAnalyzer) []error {
 		for i := range args {
 			args[i].unknown = true
 		}
-		env := flowEnv{map[string]flowValue{}, map[int][]int{}, map[int]types.Type{}}
+		env := emptyFlowEnv()
+		env.rows[0] = flowRow{unknown: true}
 		// All stores and results grow monotonically over a finite set of allocation
 		// sites, contexts, and owners. There is no iteration cap or success fallback.
 		for {
@@ -215,7 +217,8 @@ func (f *flowChecker) merge(dst *flowValue, v flowValue) {
 }
 func (f *flowChecker) mergeEnv(dst *flowEnv, src flowEnv) {
 	if dst.values == nil {
-		*dst = flowEnv{map[string]flowValue{}, map[int][]int{}, maps.Clone(src.types)}
+		*dst = emptyFlowEnv()
+		dst.types = maps.Clone(src.types)
 	}
 	// Reentrant higher-order code can instantiate the same worker at different
 	// types, even without source polymorphic recursion. A folded context must
@@ -238,6 +241,13 @@ func (f *flowChecker) mergeEnv(dst *flowEnv, src flowEnv) {
 		joined = slices.Compact(joined)
 		if !slices.Equal(joined, dst.evidence[k]) {
 			dst.evidence[k] = joined
+			f.changed = true
+		}
+	}
+	for k, row := range src.rows {
+		joined := joinFlowRow(dst.rows[k], row)
+		if !equalFlowRow(joined, dst.rows[k]) {
+			dst.rows[k] = joined
 			f.changed = true
 		}
 	}
@@ -307,6 +317,18 @@ func (f *flowChecker) captures(v flowValue) []int {
 	owners := map[int]bool{}
 	var visit func(flowValue)
 	var evidence func(int)
+	visitRows := func(n *types.CaptureFlow, env flowEnv, own types.CaptureVar) {
+		for row := range flowRows(n) {
+			if row == own {
+				continue
+			}
+			for _, owners := range env.rows[row].evidence {
+				for _, owner := range owners {
+					evidence(owner)
+				}
+			}
+		}
+	}
 	evidence = func(id int) {
 		if id == 0 || owners[id] {
 			return
@@ -319,6 +341,7 @@ func (f *flowChecker) captures(v flowValue) []int {
 		visit(o.state)
 		// Durable evidence can itself capture a borrowed value in its clauses.
 		for _, cl := range o.code.Clauses {
+			visitRows(cl.Body, o.env, 0)
 			free := flowFree(cl.Body, cl.Names)
 			for name := range free {
 				visit(o.env.values[name])
@@ -342,12 +365,16 @@ func (f *flowChecker) captures(v flowValue) []int {
 				visit(v)
 			}
 			if o.kind == "lambda" {
+				visitRows(o.code.Children[0], o.env, o.code.RowParam)
 				free := flowFree(o.code.Children[0], []string{o.code.Name})
 				for name := range free {
 					visit(o.env.values[name])
 				}
 				evs := flowEffects(o.code.Children[0])
 				for _, id := range o.code.Effects {
+					delete(evs, id)
+				}
+				for _, id := range o.code.Deferred {
 					delete(evs, id)
 				}
 				for ev := range evs {
@@ -424,6 +451,13 @@ func flowEffects(n *types.CaptureFlow) map[int]bool {
 		if n == nil {
 			return
 		}
+		if n.Row != nil {
+			for _, ev := range n.Row.Effects {
+				if !bound[ev] {
+					out[ev] = true
+				}
+			}
+		}
 		if n.Kind == "iterator" {
 			// The scope supplies Yield evidence when it starts production;
 			// constructing its callback arguments still uses outer evidence.
@@ -435,6 +469,9 @@ func flowEffects(n *types.CaptureFlow) map[int]bool {
 		if n.Kind == "lambda" || n.Kind == "handle" {
 			inner := maps.Clone(bound)
 			for _, ev := range n.Effects {
+				inner[ev] = true
+			}
+			for _, ev := range n.Deferred {
 				inner[ev] = true
 			}
 			if n.Kind == "lambda" {
@@ -515,7 +552,8 @@ func (f *flowChecker) callDef(name string, args []flowValue, typeArgs []types.Ty
 	if contract == nil {
 		contract = inferCaptureContract(d)
 	}
-	env := flowEnv{map[string]flowValue{}, map[int][]int{}, map[int]types.Type{}}
+	env := emptyFlowEnv()
+	f.bindFlowRow(&env, contract.RowParam, contract.RowEffects, caller.rows[0])
 	for i, p := range contract.Params {
 		if i < len(args) {
 			env.values[p] = args[i]
@@ -626,6 +664,7 @@ func (f *flowChecker) apply(fn flowValue, args []flowValue, env flowEnv, site st
 				continue
 			}
 			inner := o.env.clone()
+			f.bindFlowRow(&inner, o.code.RowParam, o.code.Deferred, env.rows[0])
 			inner.values[o.code.Name] = args[0]
 			for _, ev := range o.code.Effects {
 				inner.evidence[ev] = env.evidence[ev]
@@ -710,6 +749,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 	case "call":
 		fn := child(0)
 		args := all(1)
+		env = invocationFlowRow(env, n.Row)
 		_, local := env.values[n.Children[0].Name]
 		if n.Children[0].Kind == "global" && !local {
 			result = f.callDef(n.Children[0].Name, args, n.TypeArgs, env, key, scopes)
@@ -926,6 +966,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		result = flowValue{}
 	case "iterator":
 		producer, consumer := child(0), child(1)
+		env = invocationFlowRow(env, n.Row)
 		owner := f.owner(n, env, ctx, scopes)
 		var yieldEffect int
 		if len(n.Effects) != 0 {
@@ -937,7 +978,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		f.escape(result, owner, "cursor scope result", "The returned value")
 
 	case "next":
-		value := f.advance(child(0), env, key, scopes)
+		value := f.advance(child(0), invocationFlowRow(env, n.Row), key, scopes)
 		some := f.alloc(key+"/some", flowObject{kind: "ctor", ctor: 1, fields: []flowValue{value}})
 		none := f.alloc(key+"/none", flowObject{kind: "ctor", ctor: 0})
 		result.refs = []int{some, none}

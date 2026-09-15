@@ -40,7 +40,7 @@ func cursorScopeWith(sup *types.Supply, b *types.Builtins, synchronous bool) *co
 	producerTy := &types.TFun{Arg: b.Unit, Ret: b.Unit, Control: control}
 	consumerTy := &types.TFun{Arg: cursor, Ret: maybe, Control: control}
 	next := core.Def{Name: types.IteratorNextName, Owner: "Iterator", Type: consumerTy, Params: []string{"cursor"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture()}, Control: control,
-		Body: &core.IteratorNext{Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: cursor}, Result: adt, Access: types.ExclusiveAdvance, Ty: maybe}}
+		Body: &core.IteratorNext{Row: &core.RowArgument{}, Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: cursor}, Result: adt, Access: types.ExclusiveAdvance, Ty: maybe}}
 	scopeTy := &types.TFun{Arg: producerTy, Ret: &types.TFun{Arg: consumerTy, Ret: maybe, Control: control}}
 	scope := core.Def{Name: types.StreamWithProducerName, Owner: "Stream", Type: scopeTy, Params: []string{"producer", "consumer"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()}, Control: control,
 		Body: &core.IteratorScope{Scope: sup.FreshScope(), Producer: &core.VarRef{Name: "producer", Local: true, Ty: producerTy}, Consumer: &core.VarRef{Name: "consumer", Local: true, Ty: consumerTy}, CursorTy: cursor, Ty: maybe, Control: control}}

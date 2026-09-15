@@ -22,7 +22,23 @@ type ExitRequest struct {
 
 // ExitTarget is deliberately non-zero-sized. A fresh pointer is one handler
 // activation identity, including recursive activations of the same handler.
-type ExitTarget struct{ Marker byte }
+type ExitTarget struct {
+	Marker  byte
+	resolve func() *ExitTarget
+}
+
+// DeferredExitTarget is used only by checked residual-evidence projections.
+// Exit requests resolve it before unwinding, so dispatch targets stay fixed.
+func DeferredExitTarget(resolve func() *ExitTarget) *ExitTarget {
+	return &ExitTarget{resolve: resolve}
+}
+
+func ResolveExitTarget(target *ExitTarget) *ExitTarget {
+	for target != nil && target.resolve != nil {
+		target = target.resolve()
+	}
+	return target
+}
 
 // Outcome is the Exit calling convention. Exit == nil denotes normal
 // completion and Value contains the result. A non-nil Exit abandons Value.

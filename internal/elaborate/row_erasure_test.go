@@ -57,3 +57,19 @@ func TestCallbackAdaptationRetainsErasedResidualArrow(t *testing.T) {
 		t.Fatal("equal surface types skipped residual-row adaptation")
 	}
 }
+
+func TestCallbackAdaptationChecksCurriedResultABI(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	el := &elab{ck: infer.NewChecker(sup, b, infer.NewEnv())}
+	closed := &types.TFun{Arg: b.Int, Ret: b.Int}
+	open := &types.TFun{Arg: b.Int, Ret: b.Int, OpenRow: true}
+	actual := &types.TFun{Arg: b.Unit, Ret: closed}
+	want := &types.TFun{Arg: b.Unit, Ret: open}
+	inner := &core.Lambda{Param: "value", Ty: closed, Body: &core.IntLit{Val: 1, Ty: b.Int}}
+	outer := &core.Lambda{Param: "unit", Ty: actual, Body: inner}
+	adapted := el.adaptFunctionValue(outer, want).(*core.Lambda)
+	if !types.FunctionOpenRow(adapted.Body.Type().(*types.TFun)) {
+		t.Fatal("curried result lost its residual callback ABI")
+	}
+}

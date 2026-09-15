@@ -17,9 +17,19 @@ func (g *gen) synchronousMachineCallback(arg core.Expr) goast.Expr {
 	g.tmp++
 	param := fmt.Sprintf("t_syncarg%d", g.tmp)
 	g.tmp++
-	frame := callExpr(callbackMember(ident(name), types.Machine), ident(param))
+	params := []paramSpec{}
+	args := []goast.Expr{}
+	if types.FunctionOpenRow(fn) {
+		row := fmt.Sprintf("t_syncrow%d", g.tmp)
+		g.tmp++
+		params = append(params, paramSpec{name: row, typ: g.rowType()})
+		args = append(args, ident(row))
+	}
+	params = append(params, paramSpec{name: param, typ: g.goType(fn.Arg)})
+	args = append(args, ident(param))
+	frame := callExpr(callbackMember(ident(name), types.Machine), args...)
 	outcome := callExpr(indexExpr(selector("fangort", "RunSynchronousMachine"), []goast.Expr{g.goType(fn.Ret)}), frame)
-	exit := funcLitParams([]paramSpec{{name: param, typ: g.goType(fn.Arg)}}, g.outcomeType(fn.Ret), []goast.Stmt{returnStmt(outcome)})
+	exit := funcLitParams(params, g.outcomeType(fn.Ret), []goast.Stmt{returnStmt(outcome)})
 	value := &goast.CompositeLit{Type: g.goType(fn), Elts: []goast.Expr{&goast.KeyValueExpr{Key: ident("Exit"), Value: exit}}}
 	return callExpr(funcLitParams([]paramSpec{{name: name, typ: g.goType(fn)}}, g.goType(fn), []goast.Stmt{returnStmt(value)}), g.machineExpr(arg))
 }

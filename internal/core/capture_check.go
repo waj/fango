@@ -78,12 +78,22 @@ func newCaptureAnalyzer(p *Prog, b *types.Builtins) *captureAnalyzer {
 	for i := range p.Defs {
 		d := &p.Defs[i]
 		a.defs[d.Name] = d
+		Inspect(d.Body, func(e Expr) {
+			if lam, ok := e.(*Lambda); ok {
+				if lam.RowParam > a.nextVar {
+					a.nextVar = lam.RowParam
+				}
+			}
+		})
+		if d.RowParam > a.nextVar {
+			a.nextVar = d.RowParam
+		}
 		for _, v := range d.ParamCaptures {
 			if v > a.nextVar {
 				a.nextVar = v
 			}
 		}
-		for _, ev := range d.EffectParams {
+		for _, ev := range append(append([]EffectInstance(nil), d.EffectParams...), d.RowEffects...) {
 			for _, v := range ev.Captures.Vars {
 				if v > a.nextVar {
 					a.nextVar = v
@@ -154,7 +164,7 @@ func (a *captureAnalyzer) definition(d *Def) captureResult {
 		}
 	}
 	evidence := map[int][]types.CaptureSet{}
-	for _, ev := range d.EffectParams {
+	for _, ev := range append(append([]EffectInstance(nil), d.EffectParams...), d.RowEffects...) {
 		evidence[ev.Unique] = append(evidence[ev.Unique], ev.Captures)
 	}
 	return a.expr(d.Body, env, evidence)
@@ -247,8 +257,8 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			inner[e.Param] = types.VarCapture(e.ParamCapture)
 		}
 		innerEvidence := cloneCaptureEvidence(evidence)
-		bound := map[types.CaptureVar]bool{e.ParamCapture: true}
-		for _, ev := range e.EffectParams {
+		bound := map[types.CaptureVar]bool{e.ParamCapture: true, e.RowParam: true}
+		for _, ev := range append(append([]EffectInstance(nil), e.EffectParams...), e.RowEffects...) {
 			innerEvidence[ev.Unique] = append(innerEvidence[ev.Unique], ev.Captures)
 			for _, v := range ev.Captures.Vars {
 				bound[v] = true
@@ -301,9 +311,10 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		if !a.canCarry(e.Ty, nil) {
 			value = types.CaptureSet{}
 		}
-		return captureResult{value: value, uses: types.UnionCaptures(producer.uses, consumer.uses)}
+		return captureResult{value: value, uses: types.UnionCaptures(producer.uses, consumer.uses, RowCaptures(e.Row))}
 	case *IteratorNext:
 		r := a.expr(e.Cursor, env, evidence)
+		r.uses = types.UnionCaptures(r.uses, RowCaptures(e.Row))
 		if !a.canCarry(e.Ty, nil) {
 			r.value = types.CaptureSet{}
 		}
@@ -328,6 +339,8 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			parts = append(parts, a.expr(arg, env, evidence))
 		}
 		var uses, fallback types.CaptureSet
+		uses = RowCaptures(e.Row)
+		fallback = uses
 		for _, p := range parts {
 			uses = types.UnionCaptures(uses, p.uses)
 			fallback = types.UnionCaptures(fallback, p.value)
@@ -342,6 +355,14 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 				if d := a.defs[ref.Name]; d != nil {
 					matched = true
 					m := map[types.CaptureVar]types.CaptureSet{}
+					if d.RowParam != 0 {
+						m[d.RowParam] = RowCaptures(e.Row)
+					}
+					for _, ev := range d.RowEffects {
+						for _, v := range ev.Captures.Vars {
+							m[v] = RowCaptures(e.Row)
+						}
+					}
 					for i, v := range d.ParamCaptures {
 						if i < len(parts) {
 							m[v] = parts[i].value

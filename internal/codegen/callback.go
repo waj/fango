@@ -28,6 +28,9 @@ func (g *gen) callbackMemberType(fn *types.TFun, mode types.Transport) *goast.Fu
 		}
 		params = append(params, paramSpec{typ: g.effectTypeMode(core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Control: types.Control{Transport: mode}}, mode)})
 	}
+	if types.FunctionOpenRow(fn) {
+		params = append(params, paramSpec{typ: g.rowType()})
+	}
 	params = append(params, paramSpec{typ: g.goType(fn.Arg)})
 	result := g.goType(fn.Ret)
 	if mode == types.Exit {
@@ -72,6 +75,10 @@ func (g *gen) callbackValue(lam *core.Lambda) goast.Expr {
 			params = append(params, paramSpec{name: name, typ: g.callbackMemberType(fn, types.Machine).Params.List[len(params)].Type})
 			args = append(args, g.evidenceArg(ev, ident(name), types.Machine, mode))
 		}
+		if types.FunctionOpenRow(fn) {
+			params = append(params, paramSpec{name: "rowEvidence", typ: g.rowType()})
+			args = append(args, ident("rowEvidence"))
+		}
 		params = append(params, paramSpec{name: "value", typ: g.goType(fn.Arg)})
 		args = append(args, ident("value"))
 		invoke := callExpr(member, args...)
@@ -96,6 +103,9 @@ func (g *gen) callbackMinimum(lam *core.Lambda) types.Transport {
 	minimum := core.ExprControl(lam.Body).Transport
 	bound := map[int]int{}
 	for _, ev := range lam.EffectParams {
+		bound[ev.Unique]++
+	}
+	for _, ev := range lam.RowEffects {
 		bound[ev.Unique]++
 	}
 	check := func(ev core.EffectInstance) {

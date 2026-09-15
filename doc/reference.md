@@ -411,6 +411,10 @@ Overlapping or possibly overlapping advancement reports
 reports `COMPILER-OWNED EFFECT`.
 
 Exhaustion keeps returning `Nothing`. A producer failure closes its cursor.
+When a producer's residual effect has no handler at description construction,
+each pull supplies its interpretation. A consumer can catch a failure around
+one `Iterator.next`; subsequent reads then return `Nothing`. An interpretation
+captured lexically when a callback is constructed keeps its original identity.
 Scope exit closes unfinished production before returning or propagating
 failure. Distinct nested cursors have separate identities. Each yield routes
 to its lexical owner, including across nested producer suspensions.

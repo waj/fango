@@ -1,0 +1,15 @@
+import Stream
+import Iterator
+import Fail
+import Scope
+
+source = Stream.generate (\_ ->
+    Scope.finally (\_ ->
+        Stream.yield 9
+        Fail.fail "producer failed") (\_ -> print "closed"))
+
+main() =
+    print (Fail.attempt (\_ -> Stream.withCursor source (\cursor ->
+        print (Fail.attempt (\_ -> Iterator.next cursor))
+        print (Fail.attempt (\_ -> Iterator.next cursor))
+        print (Fail.attempt (\_ -> Iterator.next cursor)))))

@@ -102,6 +102,17 @@ func lint(p *Prog, b *types.Builtins, allowMachine, allowStage bool) []error {
 			l.evidence[ev.Unique]++
 			l.bindEvidenceCaptures(ev, where)
 		}
+		if d.RowParam != 0 {
+			if l.captureVars[d.RowParam] {
+				l.errorf("%s: duplicate residual capture variable %d", where, d.RowParam)
+			}
+			l.captureVars[d.RowParam] = true
+		}
+		for _, ev := range d.RowEffects {
+			l.effectInstance(ev, where)
+			l.evidence[ev.Unique]++
+			l.bindEvidenceCaptures(ev, where)
+		}
 		// Every declared type parameter must be used by the value type or by
 		// typed evidence (phantom effect parameters need not occur in Type).
 		usedTyParams := map[int]bool{}
@@ -171,6 +182,11 @@ func lint(p *Prog, b *types.Builtins, allowMachine, allowStage bool) []error {
 			l.evidence[ev.Unique]--
 			l.unbindEvidenceCaptures(ev)
 		}
+		for _, ev := range d.RowEffects {
+			l.evidence[ev.Unique]--
+			l.unbindEvidenceCaptures(ev)
+		}
+		delete(l.captureVars, d.RowParam)
 		for _, v := range d.ParamCaptures {
 			delete(l.captureVars, v)
 		}
@@ -183,6 +199,7 @@ func lint(p *Prog, b *types.Builtins, allowMachine, allowStage bool) []error {
 		}
 	}
 	l.errs = append(l.errs, verifyCaptures(p, b)...)
+	l.errs = append(l.errs, CheckRowEvidence(p)...)
 	return l.errs
 }
 
@@ -484,6 +501,17 @@ func (l *linter) expr(e Expr, where string) {
 			l.evidence[ev.Unique]++
 			l.bindEvidenceCaptures(ev, where)
 		}
+		if e.RowParam != 0 {
+			if l.captureVars[e.RowParam] {
+				l.errorf("%s: duplicate residual capture variable %d", where, e.RowParam)
+			}
+			l.captureVars[e.RowParam] = true
+		}
+		for _, ev := range e.RowEffects {
+			l.effectInstance(ev, where)
+			l.evidence[ev.Unique]++
+			l.bindEvidenceCaptures(ev, where)
+		}
 		l.expr(e.Body, where)
 		if bodyControl := ExprControl(e.Body); !controlBodyFits(bodyControl, types.FunctionControl(fn)) {
 			l.errorf("%s: Lambda body control %s is not representable by arrow %s", where, ControlName(bodyControl), ControlName(types.FunctionControl(fn)))
@@ -492,6 +520,11 @@ func (l *linter) expr(e Expr, where string) {
 			l.evidence[ev.Unique]--
 			l.unbindEvidenceCaptures(ev)
 		}
+		for _, ev := range e.RowEffects {
+			l.evidence[ev.Unique]--
+			l.unbindEvidenceCaptures(ev)
+		}
+		delete(l.captureVars, e.RowParam)
 		delete(l.captureVars, e.ParamCapture)
 		if e.Param != "_" {
 			delete(l.scope, e.Param)
