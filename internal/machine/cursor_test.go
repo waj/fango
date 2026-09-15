@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/core/coretest"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -79,4 +80,50 @@ func TestCursorAdvanceProofAndLiveness(t *testing.T) {
 	if got := errorsText(core.LintMachineInput(p, b)); !strings.Contains(got, "exclusive access proof") || !strings.Contains(got, "capture contract is stale") {
 		t.Fatalf("Core accepted stale access: %s", got)
 	}
+}
+
+func TestCursorScopeChecksCleanupOwnerAndSetupProof(t *testing.T) {
+	p, b := coretest.CursorScope()
+	if errs := core.InferCaptures(p, b); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	mp, errs := Lower(p, b)
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	var openBlock, closeBlock *Block
+	for wi := range mp.Workers {
+		for bi := range mp.Workers[wi].Blocks {
+			block := &mp.Workers[wi].Blocks[bi]
+			switch block.Term.(type) {
+			case *CursorOpen:
+				openBlock = block
+			case *CursorClose:
+				closeBlock = block
+			}
+		}
+	}
+	if openBlock == nil || closeBlock == nil {
+		t.Fatal("missing setup or closure transition")
+	}
+	originalOpen := *openBlock.Term.(*CursorOpen)
+	originalClose := *closeBlock.Term.(*CursorClose)
+	badClose := originalClose
+	badClose.Scope++
+	closeBlock.Term = &badClose
+	if got := errorsText(Lint(mp)); !strings.Contains(got, "cleanup owner mismatch") {
+		t.Fatalf("wrong owner accepted: %s", got)
+	}
+	closeBlock.Term = &PopCleanup{Next: originalClose.Next}
+	if got := errorsText(Lint(mp)); !strings.Contains(got, "cleanup owner mismatch") {
+		t.Fatalf("ordinary cleanup closed cursor: %s", got)
+	}
+	closeBlock.Term = &originalClose
+	badOpen := originalOpen
+	badOpen.Scope = 0
+	openBlock.Term = &badOpen
+	if got := errorsText(Lint(mp)); !strings.Contains(got, "invalid or reused cursor scope") {
+		t.Fatalf("missing scope accepted: %s", got)
+	}
+	openBlock.Term = &originalOpen
 }

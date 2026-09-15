@@ -286,8 +286,9 @@ The experimental `Generator`/`Iterator` path currently supports producers yieldi
 from their own bodies and the `forEach`/`fold` terminal intrinsics. It is not the
 proposed Stream API: row-indexed cursors, raw advancement, suspension transfers
 between cursors, and compositional Machine lowering remain work. Yield now carries
-explicit lexical owner evidence through Core, Machine IR, and both backends;
-the dispatcher still needs cursor setup, advancement, and closure transitions.
+explicit lexical owner evidence through Core, Machine IR, and both backends.
+Typed Machine cursor setup, advancement, and closure transitions are implemented;
+the Stream surface and complete module-owned representation families remain.
 Terminal traversal now
 exports cursor lifetime and exclusive-advancement contracts through named helpers,
 aliases, stored callbacks, and modules. Experimental APIs may be replaced without

@@ -98,6 +98,8 @@ func termUses(term Term, known map[string]bool) map[string]bool {
 		add(term.Request)
 	case *CursorAdvance:
 		add(term.Cursor)
+	case *CursorOpen:
+		add(term.Producer)
 	case *Call:
 		add(term.CalleeExpr)
 		for _, arg := range term.Args {
@@ -243,6 +245,8 @@ func defined(term Term) string {
 		return term.Bind.Name
 	case *CursorAdvance:
 		return term.Bind.Name
+	case *CursorOpen:
+		return term.Cursor.Name
 	case *Call:
 		return term.Bind.Name
 	case *Handle:
@@ -259,6 +263,10 @@ func defined(term Term) string {
 func successors(term Term) []BlockID {
 	switch term := term.(type) {
 	case *Eval:
+		return []BlockID{term.Next}
+	case *CursorOpen:
+		return []BlockID{term.Next}
+	case *CursorClose:
 		return []BlockID{term.Next}
 	case *Branch:
 		return []BlockID{term.Then, term.Else}

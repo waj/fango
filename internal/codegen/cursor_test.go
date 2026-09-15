@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/core/coretest"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -92,5 +93,73 @@ func TestPulls(t *testing.T) {
 			t.Logf("%s:\n%s", file.Path, file.Data)
 		}
 		t.Fatalf("generated advancement: %v\n%s", err, output)
+	}
+}
+
+func TestGeneratedCursorScopeClosesBeforeReturning(t *testing.T) {
+	p, b := coretest.CursorScope()
+	if errs := core.InferCaptures(p, b); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	mp, errs := machineir.Lower(p, b)
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Generator", Imports: []string{"Maybe", "Iterator"}}, {Name: "Main", Imports: []string{"Maybe", "Iterator", "Generator"}, Entry: true}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources, err := runtimefiles.Packages("fangort")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	write := func(path string, data []byte) {
+		t.Helper()
+		path = filepath.Join(dir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", []byte("module fangobuild\n\ngo 1.26\n"))
+	for _, file := range files {
+		write(file.Path, file.Data)
+	}
+	for _, file := range sources {
+		write(file.Path, file.Data)
+	}
+	write("cursor_test.go", []byte(`package main
+import (
+ "testing"
+ "fangobuild/fangort"
+ m_Maybe "fangobuild/modules/Maybe"
+)
+func TestScope(t *testing.T) {
+ for _,abandon:=range []bool{false,true} {
+  m:=fangort.StartMachine(MachineFrame_Main_dot_main())
+  event,err:=m.Run()
+  if err!=nil || event.Done || event.Request!=int64(99) {t.Fatalf("consumer pause: %#v %v",event,err)}
+  if m.Stats().MaxCleanups!=1 {t.Fatalf("owners: %#v",m.Stats())}
+  if abandon {
+   if exit,err:=m.Abandon();exit!=nil || err!=nil {t.Fatalf("abandon: %#v %v",exit,err)}
+  } else {
+   event,err=m.Resume(fangort.UnitValue)
+   if err!=nil || !event.Done || event.Exit!=nil {t.Fatalf("completion: %#v %v",event,err)}
+   value,ok:=event.Value.(*m_Maybe.C_Maybe_dot_Just[int64])
+   if !ok || value.F0!=42 {t.Fatalf("result: %#v",event.Value)}
+  }
+ }
+}
+`))
+	cmd := exec.Command("go", "test", ".")
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		for _, f := range files {
+			t.Logf("%s:\n%s", f.Path, f.Data)
+		}
+		t.Fatalf("generated cursor scope: %v\n%s", err, output)
 	}
 }

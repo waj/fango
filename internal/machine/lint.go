@@ -58,6 +58,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 		}
 	}
 	seenEvidence := map[int]bool{}
+	seenCursorScopes := map[types.ScopeID]bool{}
 	for _, ev := range w.EffectParams {
 		if ev.Unique == 0 || ev.Name == "" || seenEvidence[ev.Unique] {
 			errs = append(errs, fmt.Errorf("%s: malformed or duplicate evidence parameter", where))
@@ -355,6 +356,38 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 					errs = append(errs, fmt.Errorf("%s: cleanup release may suspend", blockWhere))
 				}
 			}
+		case *CursorOpen:
+			checkBind(term.Cursor)
+			checkExpr(term.Producer, "cursor producer", false)
+			if term.Scope == 0 || seenCursorScopes[term.Scope] {
+				errs = append(errs, fmt.Errorf("%s: invalid or reused cursor scope", blockWhere))
+			}
+			seenCursorScopes[term.Scope] = true
+			cursor, ok := term.Cursor.Ty.(*types.TCon)
+			if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 1 {
+				errs = append(errs, fmt.Errorf("%s: cursor setup has invalid Iterator type", blockWhere))
+			}
+			if term.Yield.Unique != 0 && (term.Yield.Control.Transport != types.Machine || !types.EqualCaptures(term.Yield.Captures, types.ScopeCapture(term.Scope)) || cursor == nil || len(cursor.Args) != 1 || len(term.Yield.Args) != 1 || !types.Equal(cursor.Args[0], term.Yield.Args[0])) {
+				errs = append(errs, fmt.Errorf("%s: cursor setup has stale Yield ownership", blockWhere))
+			}
+			if term.Producer != nil {
+				fn, ok := term.Producer.Type().(*types.TFun)
+				if !ok || types.FunctionControl(fn).Transport != types.Machine {
+					errs = append(errs, fmt.Errorf("%s: cursor producer must use Machine transport", blockWhere))
+				} else {
+					arg, argOK := fn.Arg.(*types.TCon)
+					ret, retOK := fn.Ret.(*types.TCon)
+					if !argOK || !retOK || arg.Name != "()" || ret.Name != "()" || len(arg.Args) != 0 || len(ret.Args) != 0 {
+						errs = append(errs, fmt.Errorf("%s: cursor producer must have shape () -> ()", blockWhere))
+					}
+					for _, label := range fn.Eff.Labels {
+						if label.Suspension && label.Unique != term.Yield.Unique {
+							errs = append(errs, fmt.Errorf("%s: cursor producer lacks lexical Yield owner", blockWhere))
+						}
+					}
+				}
+			}
+		case *CursorClose:
 		case *PopCleanup:
 		case *Return:
 			checkExpr(term.Value, "return value", true)
@@ -412,11 +445,9 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 // cleanup belonging to them. Dynamic exits may occur in expression slots and
 // are handled by the runtime unwind path instead of a normal successor edge.
 func lintCleanupDepths(w *Worker, reachable map[BlockID]bool) []error {
-	depths := make([]int, len(w.Blocks))
-	for i := range depths {
-		depths[i] = -1
-	}
-	depths[w.Entry] = 0
+	stacks := make([][]types.ScopeID, len(w.Blocks))
+	seen := make([]bool, len(w.Blocks))
+	seen[w.Entry] = true
 	work := []BlockID{w.Entry}
 	var errs []error
 	for len(work) != 0 {
@@ -425,31 +456,41 @@ func lintCleanupDepths(w *Worker, reachable map[BlockID]bool) []error {
 		if !reachable[id] {
 			continue
 		}
-		depth := depths[id]
+		stack := slices.Clone(stacks[id])
 		block := &w.Blocks[id]
-		nextDepth := depth
-		switch block.Term.(type) {
-		case *PushCleanup:
-			nextDepth++
-		case *PopCleanup:
-			if depth == 0 {
+		pop := func(want types.ScopeID) {
+			if len(stack) == 0 {
 				errs = append(errs, fmt.Errorf("machine worker %s block %d: cleanup stack underflow", w.Name, id))
-				continue
+			} else if stack[len(stack)-1] != want {
+				errs = append(errs, fmt.Errorf("machine worker %s block %d: cleanup owner mismatch", w.Name, id))
+			} else {
+				stack = stack[:len(stack)-1]
 			}
-			nextDepth--
+		}
+		switch term := block.Term.(type) {
+		case *PushCleanup:
+			stack = append(stack, 0)
+		case *CursorOpen:
+			stack = append(stack, term.Scope)
+		case *PopCleanup:
+			pop(0)
+		case *CursorClose:
+			if term.Scope == 0 {
+				errs = append(errs, fmt.Errorf("machine worker %s block %d: cursor closure lacks owner", w.Name, id))
+			}
+			pop(term.Scope)
 		case *Return:
-			if depth != 0 {
-				errs = append(errs, fmt.Errorf("machine worker %s block %d: returns with %d pending cleanup(s)", w.Name, id, depth))
+			if len(stack) != 0 {
+				errs = append(errs, fmt.Errorf("machine worker %s block %d: returns with %d pending cleanup(s)", w.Name, id, len(stack)))
 			}
 		}
 		for _, succ := range successors(block.Term) {
-			if depths[succ] == -1 {
-				depths[succ] = nextDepth
+			if !seen[succ] {
+				seen[succ] = true
+				stacks[succ] = slices.Clone(stack)
 				work = append(work, succ)
-				continue
-			}
-			if depths[succ] != nextDepth {
-				errs = append(errs, fmt.Errorf("machine worker %s block %d: cleanup depth is %d on one edge and %d on another", w.Name, succ, depths[succ], nextDepth))
+			} else if !slices.Equal(stacks[succ], stack) {
+				errs = append(errs, fmt.Errorf("machine worker %s block %d: cleanup depth or ownership differs between incoming edges", w.Name, succ))
 			}
 		}
 	}

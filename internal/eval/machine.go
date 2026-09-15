@@ -72,6 +72,7 @@ type machineHandler struct {
 // and Resume are compiler-internal Go APIs; no copyable continuation value
 // exists in Fango or Core.
 type MachineSession struct {
+	program     *machineir.Prog
 	traversal   *machineTraversal
 	pendingExit *ExitRequest
 	interp      *interp
@@ -126,6 +127,7 @@ func startMachine(ctx context.Context, p *machineir.Prog, entry string, args []V
 		vars[worker.Params[i].Name] = arg
 	}
 	s := &MachineSession{
+		program:  p,
 		interp:   &interp{ctx: ctx, env: env, out: ioctx.Writer, ioctx: ioctx, evidence: map[int]*evidence{}},
 		workers:  workers,
 		closures: closures,
@@ -522,7 +524,33 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				s.stats.MaxCleanups = len(s.cleanups)
 			}
 			frame.block = term.Next
-		case *machineir.PopCleanup:
+		case *machineir.CursorOpen:
+			value, err := eval(term.Producer)
+			if err != nil {
+				return MachineEvent{}, err
+			}
+			producer, ok := value.(*Closure)
+			if !ok || producer.machine == nil {
+				return MachineEvent{}, fmt.Errorf("eval: cursor producer is not a Machine callback")
+			}
+			callEvidence := cloneEvidence(s.interp.evidence)
+			var owner *fangort.YieldOwner
+			if term.Yield.Unique != 0 {
+				owner = fangort.NewYieldOwner()
+				callEvidence[term.Yield.Unique] = &evidence{yieldOwner: owner}
+			}
+			producerSession, err := s.interp.startMachineClosure(s.program, producer.machine, struct{}{}, callEvidence)
+			if err != nil {
+				return MachineEvent{}, err
+			}
+			cursor := &MachineIteratorSession{owner: owner, session: producerSession}
+			frame.vars[term.Cursor.Name] = cursor
+			s.cleanups = append(s.cleanups, cursor.Close)
+			if len(s.cleanups) > s.stats.MaxCleanups {
+				s.stats.MaxCleanups = len(s.cleanups)
+			}
+			frame.block = term.Next
+		case *machineir.CursorClose, *machineir.PopCleanup:
 			exit, err := s.popCleanup(nil)
 			if err != nil {
 				return MachineEvent{}, err
@@ -535,7 +563,12 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				}
 				return s.finishExit(exit)
 			}
-			frame.block = term.Next
+			switch close := term.(type) {
+			case *machineir.CursorClose:
+				frame.block = close.Next
+			case *machineir.PopCleanup:
+				frame.block = close.Next
+			}
 		case *machineir.StateResume:
 			value, err := eval(term.Value)
 			if err != nil {

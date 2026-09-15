@@ -218,6 +218,16 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 		return b.add(&Suspend{Owner: e.Owner, Request: e.Request, Bind: bind, Next: next})
 	case *core.IteratorNext:
 		return b.add(&CursorAdvance{Cursor: e.Cursor, Result: e.Result, Access: e.Access, Bind: bind, Next: next})
+	case *core.IteratorScope:
+		if e.Control.Resolve(types.Machine) == types.Machine {
+			cursor := Local{Name: b.fresh("cursor"), Ty: e.CursorTy}
+			b.declare(cursor)
+			b.registerMachineLambdas(e.Producer)
+			close := b.add(&CursorClose{Scope: e.Scope, Next: next})
+			call := &core.App{CalleeKind: core.Value, Callee: e.Consumer, Args: []core.Expr{localRef(cursor)}, Ty: e.Ty, Control: e.Control}
+			body := b.lowerInto(call, bind, close)
+			return b.add(&CursorOpen{Scope: e.Scope, Yield: e.Yield, Producer: e.Producer, Cursor: cursor, Next: body})
+		}
 	case *core.ResumeTail:
 		if e.NextState != nil {
 			return b.add(&StateResume{Value: e.Value, NextState: e.NextState, Bind: bind, Next: next})
@@ -254,6 +264,7 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 					b.errorf("%s: Machine call argument was not ANF-hoisted", b.def.Name)
 					return next
 				}
+				b.registerMachineLambdas(arg)
 			}
 			call := &Call{TyArgs: e.TyArgs, Args: e.Args, EvidenceArgs: e.EvidenceArgs, Bind: bind, Next: next}
 			if e.CalleeKind == core.Worker {

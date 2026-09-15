@@ -69,6 +69,11 @@ func directMachineTerms(worker *machineir.Worker) error {
 			if err := check(term.Cursor, false); err != nil {
 				return err
 			}
+		case *machineir.CursorOpen:
+			if err := check(term.Producer, false); err != nil {
+				return err
+			}
+		case *machineir.CursorClose:
 		case *machineir.Call:
 			for _, arg := range term.Args {
 				if err := check(arg, false); err != nil {
@@ -566,7 +571,29 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			exprStmt(callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PushCleanup")}, cleanup)),
 		)
 		return append(stmts, continueStmt(term.Next)...), nil
-	case *machineir.PopCleanup:
+	case *machineir.CursorOpen:
+		owner := fmt.Sprintf("machineYield%d", block.ID)
+		var stmts []goast.Stmt
+		var args []goast.Expr
+		if term.Yield.Unique != 0 {
+			stmts = append(stmts, varDeclStmt(owner, &goast.StarExpr{X: selector("fangort", "YieldOwner")}, callExpr(selector("fangort", "NewYieldOwner"))))
+			args = append(args, ident(owner))
+		}
+		args = append(args, g.unitValue())
+		producer := callExpr(g.machineExpr(term.Producer), args...)
+		start := callExpr(selector("fangort", "StartMachineIterator"), producer)
+		if term.Yield.Unique != 0 {
+			start = callExpr(selector("fangort", "StartOwnedMachineIterator"), ident(owner), producer)
+		}
+		cursor := machineLocalName(term.Cursor.Name)
+		// Capture the cursor in a separate binding: generated frame locals are
+		// reassigned when execution loops back through this scope.
+		captured := fmt.Sprintf("machineCursor%d", block.ID)
+		stmts = append(stmts, assignStmt(cursor, start), varDeclStmt(captured, &goast.StarExpr{X: selector("fangort", "MachineIterator")}, ident(cursor)))
+		cleanup := funcLit(&goast.StarExpr{X: selector("fangort", "ExitRequest")}, []goast.Stmt{returnStmt(callExpr(selector("fangort", "CloseMachineIterator"), ident(captured)))})
+		stmts = append(stmts, exprStmt(callExpr(selector("m", "PushCleanup"), cleanup)))
+		return append(stmts, continueStmt(term.Next)...), nil
+	case *machineir.CursorClose, *machineir.PopCleanup:
 		exitName := fmt.Sprintf("machineCleanupExit%d", block.ID)
 		exitValue := callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PopCleanup")})
 		failure := []goast.Stmt{step("MachineExit", "Exit", ident(exitName))}
@@ -574,7 +601,14 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			varDeclStmt(exitName, &goast.StarExpr{X: selector("fangort", "ExitRequest")}, exitValue),
 			&goast.IfStmt{Cond: binExpr(gotoken.NEQ, ident(exitName), ident("nil")), Body: &goast.BlockStmt{List: failure}},
 		}
-		return append(stmts, continueStmt(term.Next)...), nil
+		var next machineir.BlockID
+		switch close := term.(type) {
+		case *machineir.CursorClose:
+			next = close.Next
+		case *machineir.PopCleanup:
+			next = close.Next
+		}
+		return append(stmts, continueStmt(next)...), nil
 	case *machineir.StateResume:
 		resultName := fmt.Sprintf("machineResumeResult%d", g.tmp)
 		g.tmp++

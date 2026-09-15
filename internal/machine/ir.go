@@ -183,6 +183,22 @@ type PushCleanup struct {
 	Next     BlockID
 }
 
+// CursorOpen allocates a lazy producer and registers its synchronous closure.
+// Yield is fresh evidence supplied only when constructing the producer frame.
+type CursorOpen struct {
+	Scope    types.ScopeID
+	Yield    core.EffectInstance
+	Producer core.Expr
+	Cursor   Local
+	Next     BlockID
+}
+
+// CursorClose discharges the matching registered owner before continuing.
+type CursorClose struct {
+	Scope types.ScopeID
+	Next  BlockID
+}
+
 type PopCleanup struct {
 	Next BlockID
 }
@@ -201,5 +217,7 @@ func (*Call) isTerm()          {}
 func (*Handle) isTerm()        {}
 func (*StateResume) isTerm()   {}
 func (*PushCleanup) isTerm()   {}
+func (*CursorOpen) isTerm()    {}
+func (*CursorClose) isTerm()   {}
 func (*PopCleanup) isTerm()    {}
 func (*Return) isTerm()        {}

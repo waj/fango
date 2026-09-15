@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/core/coretest"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -57,5 +58,40 @@ func TestTypedCursorAdvancementStartsOnDemandAndStaysExhausted(t *testing.T) {
 	}
 	if len(producer.frames) != 0 || producer.traversal != nil {
 		t.Fatal("exhausted producer retained execution storage")
+	}
+}
+
+func TestMachineCursorScopeClosesOnReturnAndAbandon(t *testing.T) {
+	p, b := coretest.CursorScope()
+	if errs := core.InferCaptures(p, b); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	mp := lowerMachineTest(t, p, b)
+	for _, abandon := range []bool{false, true} {
+		session := startMachineTest(t, p, mp, p.Entry, nil)
+		event, err := session.Run()
+		if err != nil || event.Done || event.Request != int64(99) {
+			t.Fatalf("consumer pause: %#v %v", event, err)
+		}
+		if len(session.cleanups) != 1 {
+			t.Fatalf("pending owners: %d", len(session.cleanups))
+		}
+		if abandon {
+			if exit, err := session.Abandon(); err != nil || exit != nil {
+				t.Fatalf("abandon: %#v %v", exit, err)
+			}
+		} else {
+			event, err = session.Resume(struct{}{})
+			if err != nil || !event.Done || event.Exit != nil {
+				t.Fatalf("return: %#v %v", event, err)
+			}
+			value := event.Value.(*CtorVal)
+			if value.Ctor.Name != "Maybe.Just" || value.Fields[0] != int64(42) {
+				t.Fatalf("result: %#v", value)
+			}
+		}
+		if len(session.cleanups) != 0 || len(session.frames) != 0 || session.traversal != nil {
+			t.Fatal("scope retained execution state")
+		}
 	}
 }

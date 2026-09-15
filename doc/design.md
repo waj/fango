@@ -1040,6 +1040,13 @@ exclusive access metadata and the checked nominal `Maybe` descriptor. Both
 backends package yielded elements as `Just` and exhaustion as `Nothing`, and
 propagate producer exits before inspecting the result register. Independent
 Machine lint checks the descriptor, element type, access, and live locals.
+Machine cursor scopes use `CursorOpen` and `CursorClose`. Opening creates the
+producer frame with fresh owner evidence and registers synchronous closure;
+it executes no producer instructions. The consumer runs through ordinary
+Machine calls. Normal closure and unwind share the cleanup protocol, including
+abandonment of parked producer transfers. The verifier tracks lexical cursor
+identities as well as cleanup depth, rejecting a close for a different owner or
+an ordinary cleanup pop substituted for a cursor close.
 The public source API does not yet expose this instruction. Its terminal pull
 driver still accepts only its own owner's
 requests. Host-driven Machine fixtures without a declared suspension
