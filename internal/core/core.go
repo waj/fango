@@ -149,6 +149,15 @@ type IteratorScope struct {
 	Control  types.Control
 }
 
+// IteratorNext advances exactly once. Result supplies the checked Maybe
+// constructors used to package the result after the producer transfers back.
+type IteratorNext struct {
+	Cursor Expr
+	Result *types.ADTInfo
+	Access types.CursorAccess
+	Ty     types.Type
+}
+
 // IteratorForEach is the first checked terminal operation over an owned
 // iterator cursor. It advances Cursor to exhaustion and invokes Action once
 // per yielded element; IteratorScope retains responsibility for closing the
@@ -397,6 +406,7 @@ func (*Suspend) isExpr()         {}
 func (*IteratorScope) isExpr()   {}
 func (*IteratorForEach) isExpr() {}
 func (*IteratorFold) isExpr()    {}
+func (*IteratorNext) isExpr()    {}
 func (*Handle) isExpr()          {}
 func (*Bracket) isExpr()         {}
 func (*ResumeTail) isExpr()      {}
@@ -424,6 +434,7 @@ func (e *Suspend) Type() types.Type         { return e.Ty }
 func (e *IteratorScope) Type() types.Type   { return e.Ty }
 func (e *IteratorForEach) Type() types.Type { return e.Ty }
 func (e *IteratorFold) Type() types.Type    { return e.Ty }
+func (e *IteratorNext) Type() types.Type    { return e.Ty }
 func (e *Handle) Type() types.Type          { return e.Ty }
 func (e *Bracket) Type() types.Type         { return e.Ty }
 func (e *ResumeTail) Type() types.Type      { return e.ClauseResult }
@@ -457,6 +468,8 @@ func Mentions(e Expr, name string) bool {
 		return Mentions(e.Action, name) || Mentions(e.Cursor, name)
 	case *IteratorFold:
 		return Mentions(e.Combine, name) || Mentions(e.Initial, name) || Mentions(e.Cursor, name)
+	case *IteratorNext:
+		return Mentions(e.Cursor, name)
 	case *NativeCall:
 		for _, a := range e.Args {
 			if Mentions(a, name) {

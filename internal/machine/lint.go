@@ -163,7 +163,19 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			if term.Owner.Unique != 0 && (term.Owner.Control.Transport != types.Machine || len(term.Owner.Args) != 1 || term.Request == nil || !types.Equal(term.Owner.Args[0], term.Request.Type())) {
 				errs = append(errs, fmt.Errorf("%s: suspension owner/request type mismatch", blockWhere))
 			}
+		case *CursorAdvance:
+			checkBind(term.Bind)
+			checkExpr(term.Cursor, "cursor operand", false)
+			if term.Access != types.ExclusiveAdvance {
+				errs = append(errs, fmt.Errorf("%s: cursor advancement lacks exclusive access proof", blockWhere))
+			}
+			if term.Cursor != nil {
+				if err := core.CheckCursorResult(term.Cursor.Type(), term.Bind.Ty, term.Result); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %v", blockWhere, err))
+				}
+			}
 		case *Call:
+
 			checkBind(term.Bind)
 			for i, arg := range term.Args {
 				checkExpr(arg, fmt.Sprintf("call argument %d", i+1), false)
@@ -252,6 +264,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				}
 			}
 		case *Handle:
+
 			checkBind(term.Bind)
 			if term.Abort {
 				checkBind(term.AbortBind)

@@ -622,6 +622,7 @@ func (l *linter) expr(e Expr, where string) {
 		l.expr(e.Producer, where)
 		l.expr(e.Consumer, where)
 	case *IteratorForEach:
+
 		l.control(e.Control, where)
 		if e.Access != types.ExclusiveAdvance {
 			l.errorf("%s: iterator forEach lacks exclusive advancement proof", where)
@@ -649,6 +650,21 @@ func (l *linter) expr(e Expr, where string) {
 		}
 		l.expr(e.Action, where)
 		l.expr(e.Cursor, where)
+	case *IteratorNext:
+		if !l.intrinsics[types.IteratorNextName] || l.defName != types.IteratorNextName {
+			l.errorf("%s: advancement outside the declared Iterator.next intrinsic", where)
+		}
+		if e.Access != types.ExclusiveAdvance {
+			l.errorf("%s: cursor advancement lacks exclusive access proof", where)
+		}
+		if e.Cursor == nil {
+			l.errorf("%s: cursor advancement has no cursor", where)
+		} else {
+			if err := CheckCursorResult(e.Cursor.Type(), e.Ty, e.Result); err != nil {
+				l.errorf("%s: %v", where, err)
+			}
+			l.expr(e.Cursor, where)
+		}
 	case *IteratorFold:
 		l.control(e.Control, where)
 		if e.Access != types.ExclusiveAdvance {
@@ -1533,6 +1549,8 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		}
 	case *Suspend:
 		directSlot(e.Request, "suspension request")
+	case *IteratorNext:
+		directSlot(e.Cursor, "cursor advancement operand")
 	case *App:
 		if e.CalleeKind == Value {
 			directSlot(e.Callee, "indirect callee")

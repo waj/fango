@@ -46,6 +46,8 @@ func Inspect(e Expr, visit func(Expr)) {
 		}
 	case *Suspend:
 		walk(e.Request)
+	case *IteratorNext:
+		walk(e.Cursor)
 	case *IteratorScope:
 		walk(e.Producer)
 		walk(e.Consumer)

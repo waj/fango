@@ -140,6 +140,9 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 	case *IteratorForEach:
 		n.Kind, n.Access = "foreach", e.Access
 		children(e.Action, e.Cursor)
+	case *IteratorNext:
+		n.Kind, n.Access = "next", e.Access
+		children(e.Cursor)
 	case *IteratorFold:
 		n.Kind, n.Access = "fold", e.Access
 		children(e.Combine, e.Initial, e.Cursor)

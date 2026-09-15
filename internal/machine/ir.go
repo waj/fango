@@ -116,6 +116,14 @@ type Suspend struct {
 	Next    BlockID
 }
 
+type CursorAdvance struct {
+	Cursor core.Expr
+	Result *types.ADTInfo
+	Access types.CursorAccess
+	Bind   Local
+	Next   BlockID
+}
+
 // Call transfers to another machine worker. The caller frame remains below
 // the callee unless Tail is true. Resumption/return defines Bind at Next.
 type Call struct {
@@ -183,14 +191,15 @@ type Return struct {
 	Value core.Expr
 }
 
-func (*Eval) isTerm()        {}
-func (*Branch) isTerm()      {}
-func (*SwitchCtor) isTerm()  {}
-func (*SwitchLit) isTerm()   {}
-func (*Suspend) isTerm()     {}
-func (*Call) isTerm()        {}
-func (*Handle) isTerm()      {}
-func (*StateResume) isTerm() {}
-func (*PushCleanup) isTerm() {}
-func (*PopCleanup) isTerm()  {}
-func (*Return) isTerm()      {}
+func (*Eval) isTerm()          {}
+func (*Branch) isTerm()        {}
+func (*SwitchCtor) isTerm()    {}
+func (*SwitchLit) isTerm()     {}
+func (*Suspend) isTerm()       {}
+func (*CursorAdvance) isTerm() {}
+func (*Call) isTerm()          {}
+func (*Handle) isTerm()        {}
+func (*StateResume) isTerm()   {}
+func (*PushCleanup) isTerm()   {}
+func (*PopCleanup) isTerm()    {}
+func (*Return) isTerm()        {}

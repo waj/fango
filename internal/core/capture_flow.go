@@ -59,19 +59,19 @@ type flowObject struct {
 	yieldEffect int
 }
 type flowContext struct {
-	origin    source.Span
-	target    string
-	site      string
-	parent    string
-	env       flowEnv
-	result    flowValue
-	busy      bool
-	recursive bool
-	resumes   []int
-	scopes    []int
-	def       string
-	accesses  []int
-	suspends  bool
+	origin      source.Span
+	target      string
+	site        string
+	parent      string
+	env         flowEnv
+	result      flowValue
+	busy        bool
+	recursive   bool
+	resumes     []int
+	scopes      []int
+	def         string
+	accesses    []int
+	suspensions []int
 }
 type flowOwner struct {
 	origin  source.Span
@@ -85,6 +85,7 @@ type flowOwner struct {
 	env     flowEnv
 	state   flowValue
 	answer  flowValue
+	yielded flowValue
 }
 
 type CaptureFlowError struct {
@@ -129,6 +130,12 @@ type synchronousFlow struct {
 	enclosing []int
 }
 
+type flowPull struct {
+	owner       int
+	synchronous []synchronousFlow
+	calls       []*flowContext
+}
+
 type flowChecker struct {
 	shape           *captureAnalyzer
 	defs            map[string]*Def
@@ -145,6 +152,7 @@ type flowChecker struct {
 	calls           []*flowContext
 	synchronous     []synchronousFlow
 	suspensionCalls []*flowContext
+	pulls           []flowPull
 }
 
 func checkCaptureFlows(a *captureAnalyzer) []error {
@@ -566,8 +574,8 @@ func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env fl
 	for _, owner := range c.accesses {
 		f.requireAdvance(owner)
 	}
-	if c.suspends {
-		f.suspend()
+	for _, target := range c.suspensions {
+		f.suspend(target)
 	}
 	if c.busy {
 		return c.result
@@ -842,11 +850,28 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		return result
 	case "suspend":
 		result = child(0)
-		f.suspend()
-		// Existing iterator ownership remains independently checked. A yielded
-		// value must not smuggle an inner resource outside its producer lifetime.
+		var targets []int
+		if len(n.Effects) != 0 {
+			targets = env.evidence[n.Effects[0]]
+		}
+		if len(targets) == 0 {
+			f.suspend(0)
+		}
+		for _, target := range targets {
+			f.suspend(target)
+			f.merge(&f.owners[target].yielded, result)
+		}
+		// Elements may borrow resources enclosing their lexical Yield owner,
+		// but never resources acquired inside production that a later pull can
+		// release. Keep the actual element flow for Maybe and callback results.
 		for _, id := range f.captures(result) {
-			f.escape(result, id, "yielded value", "the iterator consumer")
+			safe := len(targets) != 0
+			for _, target := range targets {
+				safe = safe && slices.Contains(f.owners[target].parent, id) && !f.recursiveOwner(id)
+			}
+			if !safe {
+				f.escape(result, id, "yielded value", "the iterator consumer")
+			}
 		}
 		result = flowValue{}
 	case "iterator":
@@ -862,17 +887,22 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		f.escape(result, owner, "cursor scope result", "The returned value")
 	case "foreach":
 		action := child(0)
-		f.advance(child(1), env, key, scopes)
-		f.apply(action, []flowValue{{unknown: true}}, env, key, scopes)
+		value := f.advance(child(1), env, key, scopes)
+		f.apply(action, []flowValue{value}, env, key, scopes)
+	case "next":
+		value := f.advance(child(0), env, key, scopes)
+		some := f.alloc(key+"/some", flowObject{kind: "ctor", ctor: 1, fields: []flowValue{value}})
+		none := f.alloc(key+"/none", flowObject{kind: "ctor", ctor: 0})
+		result.refs = []int{some, none}
 	case "fold":
 		combine, initial := child(0), child(1)
-		f.advance(child(2), env, key, scopes)
+		value := f.advance(child(2), env, key, scopes)
 		// A later iteration can invoke or retain a callback stored by an earlier
 		// one. Feed the growing accumulator back through the callback contract,
 		// just as ordinary recursive Fango folds do through call summaries.
 		state := f.alloc(key+"/accumulator", flowObject{kind: "fold-state", fields: []flowValue{initial}})
 		accumulator := f.objects[state].fields[0]
-		next := f.apply(combine, []flowValue{{unknown: true}, accumulator}, env, key, scopes)
+		next := f.apply(combine, []flowValue{value, accumulator}, env, key, scopes)
 		f.merge(&f.objects[state].fields[0], next)
 		result = f.objects[state].fields[0]
 	default:
@@ -904,7 +934,8 @@ func (f *flowChecker) requireAdvance(owner int) {
 // Yield does not release that borrow within the contract: any call reached
 // before the producer returns to its caller is checked against the same owner.
 // Consumer callbacks run after this method returns, with the borrow discharged.
-func (f *flowChecker) advance(cursor flowValue, env flowEnv, site string, scopes []int) {
+func (f *flowChecker) advance(cursor flowValue, env flowEnv, site string, scopes []int) flowValue {
+	result := flowValue{unknown: cursor.unknown}
 	for _, ref := range cursor.refs {
 		o := f.objects[ref]
 		if o.kind != "cursor" {
@@ -919,6 +950,7 @@ func (f *flowChecker) advance(cursor flowValue, env flowEnv, site string, scopes
 		// A synchronous pull handles its producer's suspension. Do not export
 		// that suspension as an obligation on the caller driving the cursor.
 		saved, calls := f.synchronous, f.suspensionCalls
+		f.pulls = append(f.pulls, flowPull{owner: owner, synchronous: saved, calls: calls})
 		f.synchronous, f.suspensionCalls = nil, nil
 		producerEnv := env.clone()
 		if o.yieldEffect != 0 {
@@ -926,8 +958,11 @@ func (f *flowChecker) advance(cursor flowValue, env flowEnv, site string, scopes
 		}
 		f.apply(o.fields[0], []flowValue{{}}, producerEnv, site+"/advance", scopes)
 		f.synchronous, f.suspensionCalls = saved, calls
+		f.pulls = f.pulls[:len(f.pulls)-1]
 		f.active[owner]--
+		result = joinFlow(result, f.owners[owner].yielded)
 	}
+	return result
 }
 
 func (f *flowChecker) syncEval(phase string, n *types.CaptureFlow, env flowEnv, ctx string, scopes []int, resume int) flowValue {
@@ -937,17 +972,26 @@ func (f *flowChecker) syncEval(phase string, n *types.CaptureFlow, env flowEnv, 
 	return result
 }
 
-func (f *flowChecker) suspend() {
-	for _, call := range f.suspensionCalls {
-		if !call.suspends {
-			call.suspends = true
+func (f *flowChecker) suspend(target int) {
+	calls, synchronous := f.suspensionCalls, f.synchronous
+	for i := len(f.pulls) - 1; i >= 0; i-- {
+		pull := f.pulls[i]
+		if target == 0 || pull.owner == target {
+			break
+		}
+		calls = append(slices.Clone(pull.calls), calls...)
+		synchronous = append(slices.Clone(pull.synchronous), synchronous...)
+	}
+	for _, call := range calls {
+		if !slices.Contains(call.suspensions, target) {
+			call.suspensions = append(call.suspensions, target)
 			f.changed = true
 		}
 	}
-	if len(f.synchronous) == 0 {
+	if len(synchronous) == 0 {
 		return
 	}
-	obligation := f.synchronous[len(f.synchronous)-1]
+	obligation := synchronous[len(synchronous)-1]
 	span := f.location
 	if span.File == nil {
 		span = obligation.span

@@ -65,6 +65,10 @@ func directMachineTerms(worker *machineir.Worker) error {
 			if err := check(term.Request, false); err != nil {
 				return err
 			}
+		case *machineir.CursorAdvance:
+			if err := check(term.Cursor, false); err != nil {
+				return err
+			}
 		case *machineir.Call:
 			for _, arg := range term.Args {
 				if err := check(arg, false); err != nil {
@@ -320,6 +324,21 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		}
 		stmts = append(stmts, step("MachineSuspend", "Request", g.machineBoxedValue(term.Request), &goast.KeyValueExpr{Key: ident("Owner"), Value: owner}))
 		return stmts, [][]goast.Stmt{resume(term.Bind, term.Next)}
+	case *machineir.CursorAdvance:
+		stmts := append(save(), assignMachinePC(resumePC))
+		stmts = append(stmts, step("MachineAdvance", "Cursor", g.machineExpr(term.Cursor)))
+		name := fmt.Sprintf("machinePull%d", g.tmp)
+		g.tmp++
+		resultTy := term.Bind.Ty.(*types.TCon)
+		resumed := []goast.Stmt{varDeclStmt(name, selector("fangort", "CursorResult"), &goast.TypeAssertExpr{X: callExpr(selector("m", "TakeResult")), Type: selector("fangort", "CursorResult")}),
+			&goast.IfStmt{Cond: &goast.BinaryExpr{X: selector(name, "Exit"), Op: gotoken.NEQ, Y: ident("nil")}, Body: &goast.BlockStmt{List: []goast.Stmt{step("MachineExit", "Exit", selector(name, "Exit"))}}},
+		}
+		value := &goast.TypeAssertExpr{X: selector(name, "Value"), Type: g.goType(resultTy.Args[0])}
+		assign := func(value goast.Expr) goast.Stmt {
+			return &goast.AssignStmt{Lhs: []goast.Expr{ident(machineLocalName(term.Bind.Name))}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{value}}
+		}
+		resumed = append(resumed, &goast.IfStmt{Cond: selector(name, "Present"), Body: &goast.BlockStmt{List: []goast.Stmt{assign(g.ctorValue(term.Result.Ctors[1], resultTy.Args, value))}}, Else: &goast.BlockStmt{List: []goast.Stmt{assign(g.ctorValue(term.Result.Ctors[0], resultTy.Args))}}}, assignMachinePC(int(term.Next)), &goast.BranchStmt{Tok: gotoken.CONTINUE})
+		return stmts, [][]goast.Stmt{resumed}
 	case *machineir.Call:
 		args := make([]goast.Expr, 0, len(term.EvidenceArgs)+len(term.Args))
 		for _, ev := range term.EvidenceArgs {

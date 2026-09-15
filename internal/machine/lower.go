@@ -216,6 +216,8 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 			return next
 		}
 		return b.add(&Suspend{Owner: e.Owner, Request: e.Request, Bind: bind, Next: next})
+	case *core.IteratorNext:
+		return b.add(&CursorAdvance{Cursor: e.Cursor, Result: e.Result, Access: e.Access, Bind: bind, Next: next})
 	case *core.ResumeTail:
 		if e.NextState != nil {
 			return b.add(&StateResume{Value: e.Value, NextState: e.NextState, Bind: bind, Next: next})

@@ -16,6 +16,7 @@ import (
 // completed nil/Unit-like value from suspension. This protocol is not exposed
 // to Fango source; E8 supplies the ownership contract for source consumers.
 type MachineEvent struct {
+	advance *cursorAdvanceRequest
 	Owner   *fangort.YieldOwner
 	Request Value
 	Done    bool
@@ -24,6 +25,7 @@ type MachineEvent struct {
 }
 
 type MachineStats struct {
+	MaxPullDepth int
 	Steps        int
 	MaxDepth     int
 	MaxFrameCap  int
@@ -70,16 +72,18 @@ type machineHandler struct {
 // and Resume are compiler-internal Go APIs; no copyable continuation value
 // exists in Fango or Core.
 type MachineSession struct {
-	interp   *interp
-	workers  map[string]*machineir.Worker
-	closures map[*core.Lambda]*machineir.Closure
-	frames   []*machineFrame
-	waiting  *machineir.Local
-	finished bool
-	stats    MachineStats
-	cleanups []func() (*ExitRequest, error)
-	states   []Value
-	handlers []machineHandler
+	traversal   *machineTraversal
+	pendingExit *ExitRequest
+	interp      *interp
+	workers     map[string]*machineir.Worker
+	closures    map[*core.Lambda]*machineir.Closure
+	frames      []*machineFrame
+	waiting     *machineir.Local
+	finished    bool
+	stats       MachineStats
+	cleanups    []func() (*ExitRequest, error)
+	states      []Value
+	handlers    []machineHandler
 }
 
 // StartMachine validates and initializes an iterative machine evaluation.
@@ -157,7 +161,7 @@ func (in *interp) startMachineClosure(p *machineir.Prog, closure *machineClosure
 }
 
 // Run advances until the next suspension, normal completion, or exit.
-func (s *MachineSession) Run() (event MachineEvent, err error) {
+func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 	if s.finished {
 		return MachineEvent{}, fmt.Errorf("eval: machine session already completed")
 	}
@@ -169,13 +173,21 @@ func (s *MachineSession) Run() (event MachineEvent, err error) {
 	savedEvidence := s.interp.evidence
 	defer func() {
 		if err != nil && !s.finished {
-			closeExit, closeErr := s.Abandon()
+			closeExit, closeErr := s.abandonLocal()
 			event.Exit = suppress(event.Exit, closeExit)
 			event.Done = true
 			err = errors.Join(err, closeErr)
 		}
 		s.interp.evidence = savedEvidence
 	}()
+	if exit := s.pendingExit; exit != nil {
+		s.pendingExit = nil
+		if caught, err := s.catchExit(exit); err != nil {
+			return MachineEvent{Exit: exit}, err
+		} else if !caught {
+			return s.finishExit(exit)
+		}
+	}
 	for len(s.frames) != 0 {
 		s.stats.Steps++
 		if err := s.interp.tick(); err != nil {
@@ -312,6 +324,18 @@ func (s *MachineSession) Run() (event MachineEvent, err error) {
 			bind := term.Bind
 			s.waiting = &bind
 			return MachineEvent{Owner: owner, Request: request}, nil
+		case *machineir.CursorAdvance:
+			value, err := eval(term.Cursor)
+			if err != nil {
+				return MachineEvent{}, err
+			}
+			cursor, ok := value.(*MachineIteratorSession)
+			if !ok {
+				return MachineEvent{}, fmt.Errorf("eval: advancement operand is %T", value)
+			}
+			frame.block = term.Next
+			s.prune(frame, block.LiveOut, term.Bind.Name)
+			return MachineEvent{advance: &cursorAdvanceRequest{cursor: cursor, term: term}}, nil
 		case *machineir.Call:
 			callee := s.workers[term.Callee]
 			var closure *machineClosure
@@ -590,22 +614,22 @@ func (s *MachineSession) prune(frame *machineFrame, live []string, definedOnResu
 }
 
 // Resume supplies the result of the last suspension and advances again.
-func (s *MachineSession) Resume(value Value) (MachineEvent, error) {
+func (s *MachineSession) resumeLocal(value Value) error {
 	if s.finished {
-		return MachineEvent{}, fmt.Errorf("eval: machine session already completed")
+		return fmt.Errorf("eval: machine session already completed")
 	}
 	if s.waiting == nil || len(s.frames) == 0 {
-		return MachineEvent{}, fmt.Errorf("eval: machine is not suspended")
+		return fmt.Errorf("eval: machine is not suspended")
 	}
 	frame := s.frames[len(s.frames)-1]
 	frame.vars[s.waiting.Name] = value
 	s.waiting = nil
-	return s.Run()
+	return nil
 }
 
 // Abandon consumes an unfinished private interpreter machine and discharges
 // its cleanup stack. It is the interpreter counterpart of fangort.Abandon.
-func (s *MachineSession) Abandon() (*ExitRequest, error) {
+func (s *MachineSession) abandonLocal() (*ExitRequest, error) {
 	if s.finished {
 		return nil, fmt.Errorf("eval: machine session already completed")
 	}
@@ -629,6 +653,7 @@ func (s *MachineSession) clear() {
 	s.cleanups = nil
 	s.handlers = nil
 	s.waiting = nil
+	s.pendingExit = nil
 	s.finished = true
 }
 

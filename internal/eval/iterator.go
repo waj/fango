@@ -13,6 +13,7 @@ import (
 // MachineIteratorSession owns one interpreter-side producer traversal. Source
 // cursor lifetimes and access are checked by capture contracts before execution.
 type MachineIteratorSession struct {
+	busy    bool
 	owner   *fangort.YieldOwner
 	session *MachineSession
 	started bool
@@ -28,6 +29,9 @@ func StartMachineIterator(ctx context.Context, p *machineir.Prog, entry string, 
 }
 
 func (it *MachineIteratorSession) Next() (value Value, yielded bool, exit *ExitRequest, err error) {
+	if it != nil && it.busy {
+		return nil, false, nil, fmt.Errorf("eval: overlapping cursor advancement")
+	}
 	if it == nil || it.session == nil {
 		return nil, false, nil, fmt.Errorf("eval: iterator has no machine")
 	}

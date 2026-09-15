@@ -46,6 +46,10 @@ func analyze(w *Worker) {
 			across := cloneSet(liveOut[i])
 			delete(across, term.Bind.Name)
 			unionInto(frame, across)
+		case *CursorAdvance:
+			across := cloneSet(liveOut[i])
+			delete(across, term.Bind.Name)
+			unionInto(frame, across)
 		case *Call:
 			if !term.Tail {
 				across := cloneSet(liveOut[i])
@@ -92,6 +96,8 @@ func termUses(term Term, known map[string]bool) map[string]bool {
 		}
 	case *Suspend:
 		add(term.Request)
+	case *CursorAdvance:
+		add(term.Cursor)
 	case *Call:
 		add(term.CalleeExpr)
 		for _, arg := range term.Args {
@@ -235,6 +241,8 @@ func defined(term Term) string {
 		return term.Bind.Name
 	case *Suspend:
 		return term.Bind.Name
+	case *CursorAdvance:
+		return term.Bind.Name
 	case *Call:
 		return term.Bind.Name
 	case *Handle:
@@ -270,6 +278,8 @@ func successors(term Term) []BlockID {
 		}
 		return append(out, term.Default)
 	case *Suspend:
+		return []BlockID{term.Next}
+	case *CursorAdvance:
 		return []BlockID{term.Next}
 	case *Call:
 		return []BlockID{term.Next}

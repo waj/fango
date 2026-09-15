@@ -149,6 +149,8 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 			form += "/" + ControlName(e.Control)
 		}
 		return fmt.Sprintf("(%s %d %s %s %s %s)", form, e.Scope, pr.Type(e.CursorTy), pr.Type(e.Ty), dumpExpr(e.Producer, pr), dumpExpr(e.Consumer, pr))
+	case *IteratorNext:
+		return fmt.Sprintf("(iterator-next access=%d %s %s)", e.Access, pr.Type(e.Ty), dumpExpr(e.Cursor, pr))
 	case *IteratorForEach:
 		form := "iterator-for-each"
 		if e.Control != (types.Control{}) {

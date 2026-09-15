@@ -1029,14 +1029,19 @@ Core verifies source-yield evidence availability, scope ownership, and element
 types. Capture contracts retain Yield identities through callbacks and evidence
 substitution. Machine IR preserves the owner explicitly on each suspension and
 independently checks its evidence binding, capture metadata, and request type.
-Both dispatchers return the owner with the suspended request. The generated-Go
-runtime also has an explicit cursor-advancement transition. Its dispatcher owns
+Both dispatchers return the owner with the suspended request and implement an
+explicit cursor-advancement transition. Each dispatcher owns
 an iterative stack of producer/caller transfers. A yield to an enclosing owner
 parks unfinished inner advancements with that owner; their exclusive borrows
 remain active until those advancements complete. Closing the parked traversal
 drains inner producers before their callers and clears all transfer storage.
-This runtime transition is not yet emitted by source lowering or implemented by
-the interpreter. The source pull driver still accepts only its own owner's
+Core's `IteratorNext` lowers to a typed `CursorAdvance` instruction carrying
+exclusive access metadata and the checked nominal `Maybe` descriptor. Both
+backends package yielded elements as `Just` and exhaustion as `Nothing`, and
+propagate producer exits before inspecting the result register. Independent
+Machine lint checks the descriptor, element type, access, and live locals.
+The public source API does not yet expose this instruction. Its terminal pull
+driver still accepts only its own owner's
 requests. Host-driven Machine fixtures without a declared suspension
 effect may still use ownerless requests with arbitrary resumed types.
 
@@ -1055,8 +1060,11 @@ the advancement finishes. Access summaries remain active at recursive joins;
 a possible overlap reports `ITERATOR ADVANCEMENT CONFLICT`. Core lint checks
 the scope and access metadata, reconstructs the contracts, and repeats the
 proof, rejecting missing or stale contracts. These contracts support sequential
-uses of a cursor, including reads after exhaustion. Raw `next` and compositional
-suspension routing remain unimplemented.
+uses of a cursor, including reads after exhaustion. Yield contracts retain the
+actual element flow through advancement results and terminal callbacks. Elements
+may borrow enclosing resources, while producer-local resources cannot cross a
+yield. A foreign yield also carries suspension obligations across unfinished
+inner advancements. Public `next` and compositional source lowering remain work.
 
 `Iterator.forEach` and `Iterator.fold` have terminal Core implementations.
 Their intrinsic bodies carry the callback and opaque cursor; `fold` additionally

@@ -168,6 +168,16 @@ func capturesMutated(e Expr, mutated map[string]bool) bool {
 			// handled body, so its children are walked rather than treated as
 			// stored closures.
 			return walk(e.Acquire) || walk(e.Release) || walk(e.Body)
+		case *IteratorNext:
+			return walk(e.Cursor)
+		case *IteratorScope:
+			return walk(e.Producer) || walk(e.Consumer)
+		case *IteratorForEach:
+			return walk(e.Action) || walk(e.Cursor)
+		case *IteratorFold:
+			return walk(e.Combine) || walk(e.Initial) || walk(e.Cursor)
+		case *Suspend:
+			return walk(e.Request)
 		case *Neg:
 			return walk(e.Operand)
 		case *NativeCall:
