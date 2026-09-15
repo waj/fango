@@ -1053,6 +1053,15 @@ Machine calls. Normal closure and unwind share the cleanup protocol, including
 abandonment of parked producer transfers. The verifier tracks lexical cursor
 identities as well as cleanup depth, rejecting a close for a different owner or
 an ordinary cleanup pop substituted for a cursor close.
+Core scopes can additionally own `Iterator.Traversal`. That marker requires no
+runtime evidence record: the cursor supplies the checked advancement identity.
+The owning scope removes only Traversal from its outward control contract;
+Core lint verifies the marker's scope and the remaining effects independently.
+A Direct/Exit scope drives its Machine consumer synchronously, with producer
+closure registered before the first step. Its private runtime boundary returns
+the ordinary value or exit after closure and rejects any unexpected foreign
+suspension. Both backends use this boundary; source declarations are still
+pending the Stream API replacement.
 The public source API does not yet expose this instruction. Its terminal pull
 driver still accepts only its own owner's
 requests. Host-driven Machine fixtures without a declared suspension

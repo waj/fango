@@ -136,6 +136,9 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 		if e.Yield.Unique != 0 {
 			effects([]EffectInstance{e.Yield})
 		}
+		if e.Traversal.Unique != 0 {
+			effects([]EffectInstance{e.Traversal})
+		}
 		children(e.Producer, e.Consumer)
 	case *IteratorForEach:
 		n.Kind, n.Access = "foreach", e.Access

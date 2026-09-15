@@ -127,3 +127,32 @@ func TestCursorScopeChecksCleanupOwnerAndSetupProof(t *testing.T) {
 	}
 	openBlock.Term = &originalOpen
 }
+
+func TestCoreSynchronousTraversalBoundaryRequiresProof(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		damage func(*core.Prog, *core.IteratorScope)
+		want   string
+	}{
+		{"missing ownership", func(_ *core.Prog, s *core.IteratorScope) { s.Traversal = core.EffectInstance{} }, "disagrees with consumer"},
+		{"stale scope", func(_ *core.Prog, s *core.IteratorScope) { s.Traversal.Captures = types.ScopeCapture(s.Scope + 1) }, "invalid Traversal ownership"},
+		{"unhandled residual", func(p *core.Prog, s *core.IteratorScope) {
+			failure := &types.EffectInfo{Unique: 1000, Name: "Test.Fail"}
+			p.Effects = append(p.Effects, failure)
+			fn := s.Consumer.Type().(*types.TFun)
+			fn.Eff.Labels = append(fn.Eff.Labels, types.EffLabel{Unique: failure.Unique, Name: failure.Name, Abort: true})
+		}, "stale residual Traversal control"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			p, b := coretest.SynchronousCursorScope()
+			if errs := core.InferCaptures(p, b); len(errs) != 0 {
+				t.Fatal(errs)
+			}
+			scope := p.Defs[1].Body.(*core.IteratorScope)
+			test.damage(p, scope)
+			if got := errorsText(core.LintMachineInput(p, b)); !strings.Contains(got, test.want) {
+				t.Fatalf("got %s, want %s", got, test.want)
+			}
+		})
+	}
+}

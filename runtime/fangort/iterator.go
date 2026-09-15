@@ -105,6 +105,27 @@ func CloseMachineIterator(it *MachineIterator) *ExitRequest {
 	return exit
 }
 
+// RunCursorConsumer is the checked Direct/Exit boundary for an owned Traversal.
+// Advancement is handled by the dispatcher; residual suspension is forbidden
+// by the scope's Core control contract. Register closure before the first step
+// so internal failures also unwind the producer.
+func RunCursorConsumer[A any](it *MachineIterator, entry MachineFrame) Outcome[A] {
+	m := StartMachine(entry)
+	m.PushCleanup(func() *ExitRequest { return CloseMachineIterator(it) })
+	event, err := m.Run()
+	if err != nil {
+		panic(err)
+	}
+	if !event.Done {
+		_, _ = m.Abandon()
+		panic("fangort: foreign suspension escaped a synchronous cursor scope")
+	}
+	if event.Exit != nil {
+		return Propagate[A](event.Exit)
+	}
+	return Normal(event.Value.(A))
+}
+
 // AssertNoMachineExit guards a statically Direct owner path. Reaching it
 // indicates a compiler/runtime protocol mismatch, never source-level control.
 func AssertNoMachineExit(exit *ExitRequest) {

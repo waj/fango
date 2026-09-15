@@ -145,6 +145,9 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		return fmt.Sprintf("(suspend %s %s)", pr.Type(e.Ty), dumpExpr(e.Request, pr))
 	case *IteratorScope:
 		form := "iterator-scope"
+		if e.Traversal.Unique != 0 {
+			form += " traversal=" + dumpEffect(e.Traversal, pr)
+		}
 		if e.Control != (types.Control{}) {
 			form += "/" + ControlName(e.Control)
 		}

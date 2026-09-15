@@ -615,8 +615,29 @@ func (l *linter) expr(e Expr, where string) {
 			if !types.Equal(consumer.Arg, e.CursorTy) || !types.Equal(consumer.Ret, e.Ty) {
 				l.errorf("%s: iterator consumer type disagrees with cursor or result", where)
 			}
-			if want := types.FunctionControl(consumer); e.Control != want {
-				l.errorf("%s: iterator scope control %s disagrees with consumer %s", where, ControlName(e.Control), ControlName(want))
+			if e.Traversal.Unique == 0 {
+				if want := types.FunctionControl(consumer); e.Control != want {
+					l.errorf("%s: iterator scope control %s disagrees with consumer %s", where, ControlName(e.Control), ControlName(want))
+				}
+			} else {
+				l.effectInstance(e.Traversal, where)
+				effect := l.effects[e.Traversal.Unique]
+				if effect == nil || effect.Name != types.IteratorTraversalEffectName || !effect.Suspension || e.Yield.Unique == 0 || e.Traversal.Control.Transport != types.Machine || len(e.Traversal.Args) != 0 || !types.EqualCaptures(e.Traversal.Captures, types.ScopeCapture(e.Scope)) {
+					l.errorf("%s: iterator scope has invalid Traversal ownership", where)
+				}
+				found := false
+				residual := &types.TFun{Eff: types.Row{Tail: consumer.Eff.Tail}}
+				for _, label := range consumer.Eff.Labels {
+					if label.Unique == e.Traversal.Unique {
+						found = true
+					} else {
+						residual.Eff.Labels = append(residual.Eff.Labels, label)
+					}
+				}
+				minimum := types.FunctionControl(residual)
+				if !found || minimum.Transport > e.Control.Transport || minimum.Polymorphic && !e.Control.Polymorphic || l.workers[l.defName] == nil || ArrowControl(l.workers[l.defName].Type, len(l.workers[l.defName].Params)) != e.Control {
+					l.errorf("%s: iterator scope has stale residual Traversal control", where)
+				}
 			}
 		}
 		l.expr(e.Producer, where)

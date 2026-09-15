@@ -111,6 +111,22 @@ func (in *interp) evalIteratorScope(scope *core.IteratorScope, fr *Frame) (Value
 			consumer, ok := consumerValue.(*Closure)
 			if !ok {
 				consumerErr = fmt.Errorf("eval: iterator consumer is %T, want Direct/Exit callback", consumerValue)
+			} else if scope.Traversal.Unique != 0 {
+				var consumerSession *MachineSession
+				consumerSession, consumerErr = in.startMachineClosure(in.env.machine, consumer.machine, iteratorSession, in.evidence)
+				if consumerErr == nil {
+					consumerSession.cleanups = append(consumerSession.cleanups, iteratorSession.Close)
+					var event MachineEvent
+					event, consumerErr = consumerSession.Run()
+					if consumerErr == nil && !event.Done {
+						_, closeErr := consumerSession.Abandon()
+						consumerErr = errors.Join(fmt.Errorf("eval: foreign suspension escaped a synchronous cursor scope"), closeErr)
+					}
+					result = event.Value
+					if event.Exit != nil {
+						result = event.Exit
+					}
+				}
 			} else {
 				result, consumerErr = in.callClosure(consumer, iteratorSession)
 			}

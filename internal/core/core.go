@@ -140,13 +140,14 @@ type Suspend struct {
 // boundary drives Producer's machine, so its own Control describes only the
 // residual execution protocol visible to the enclosing computation.
 type IteratorScope struct {
-	Yield    EffectInstance
-	Scope    types.ScopeID
-	Producer Expr
-	Consumer Expr
-	CursorTy types.Type
-	Ty       types.Type
-	Control  types.Control
+	Yield     EffectInstance
+	Traversal EffectInstance
+	Scope     types.ScopeID
+	Producer  Expr
+	Consumer  Expr
+	CursorTy  types.Type
+	Ty        types.Type
+	Control   types.Control
 }
 
 // IteratorNext advances exactly once. Result supplies the checked Maybe

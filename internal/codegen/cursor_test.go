@@ -163,3 +163,56 @@ func TestScope(t *testing.T) {
 		t.Fatalf("generated cursor scope: %v\n%s", err, output)
 	}
 }
+
+func TestGeneratedSynchronousCursorScope(t *testing.T) {
+	p, b := coretest.SynchronousCursorScope()
+	if errs := core.InferCaptures(p, b); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	mp, errs := machineir.Lower(p, b)
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	units := []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Generator", Imports: []string{"Maybe", "Iterator"}}, {Name: "Main", Imports: []string{"Maybe", "Iterator", "Generator"}, Entry: true}}
+	files, err := EmitMachineProject(p, mp, b, units, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	write := func(path string, data []byte) {
+		t.Helper()
+		path = filepath.Join(dir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", []byte("module fangobuild\n\ngo 1.26\n"))
+	for _, f := range files {
+		write(f.Path, f.Data)
+	}
+	sources, err := runtimefiles.Packages("fangort")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range sources {
+		write(f.Path, f.Data)
+	}
+	write("cursor_test.go", []byte(`package main
+import("testing";m_Maybe "fangobuild/modules/Maybe")
+func TestSynchronous(t *testing.T){
+ value,ok:=V_Main_dot_main.(*m_Maybe.C_Maybe_dot_Just[int64])
+ if !ok || value.F0!=42 {t.Fatalf("result: %#v",V_Main_dot_main)}
+}
+`))
+	cmd := exec.Command("go", "test", ".")
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		for _, f := range files {
+			t.Logf("%s:\n%s", f.Path, f.Data)
+		}
+		t.Fatalf("synchronous scope: %v\n%s", err, output)
+	}
+}

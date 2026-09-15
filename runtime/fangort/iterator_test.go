@@ -203,3 +203,37 @@ func TestMachineIteratorLongTraversalKeepsBoundedFrames(t *testing.T) {
 		t.Fatalf("live storage grew with traversal: %+v", stats)
 	}
 }
+
+func TestSynchronousCursorConsumerClosesBeforeReturn(t *testing.T) {
+	for _, limit := range []int{1, 10} {
+		closed := 0
+		owner := NewYieldOwner()
+		cursor := StartOwnedMachineIterator(owner, &iteratorFixtureFrame{owner: owner, limit: 3, cleanup: &closed})
+		var values []int
+		outcome := RunCursorConsumer[int](cursor, &collectingFrame{input: cursor, values: &values, limit: limit})
+		if outcome.Exit != nil || outcome.Value != len(values) || closed != 1 {
+			t.Fatalf("result=%#v values=%v closed=%d", outcome, values, closed)
+		}
+		if !cursor.done || len(cursor.machine.frames) != 0 || cursor.machine.traversal != nil {
+			t.Fatal("producer retained live state")
+		}
+		if _, err := cursor.Close(); err != nil || closed != 1 {
+			t.Fatalf("second close: %v, count=%d", err, closed)
+		}
+	}
+}
+
+func TestSynchronousCursorConsumerDrainsInvalidForeignSuspension(t *testing.T) {
+	var log []string
+	owner := NewYieldOwner()
+	cursor := StartOwnedMachineIterator(owner, &foreignYieldFrame{own: owner, outer: NewYieldOwner(), log: &log})
+	var values []int
+	panicked := false
+	func() {
+		defer func() { panicked = recover() != nil }()
+		RunCursorConsumer[int](cursor, &collectingFrame{input: cursor, values: &values})
+	}()
+	if !panicked || !cursor.done || !reflect.DeepEqual(log, []string{"inner"}) {
+		t.Fatalf("panic=%v done=%v cleanup=%v", panicked, cursor.done, log)
+	}
+}

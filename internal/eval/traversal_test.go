@@ -1,6 +1,8 @@
 package eval
 
 import (
+	"context"
+	"io"
 	"testing"
 
 	"github.com/waj/fango/internal/core"
@@ -93,5 +95,26 @@ func TestMachineCursorScopeClosesOnReturnAndAbandon(t *testing.T) {
 		if len(session.cleanups) != 0 || len(session.frames) != 0 || session.traversal != nil {
 			t.Fatal("scope retained execution state")
 		}
+	}
+}
+
+func TestSynchronousScopeDrivesMachineConsumer(t *testing.T) {
+	p, b := coretest.SynchronousCursorScope()
+	if errs := core.InferCaptures(p, b); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	mp := lowerMachineTest(t, p, b)
+	env := NewEnv()
+	env.DefineProg(p)
+	if err := env.DefineMachineProg(mp); err != nil {
+		t.Fatal(err)
+	}
+	value, err := Force(context.Background(), p.Entry, env, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok := value.(*CtorVal)
+	if !ok || item.Ctor.Name != "Maybe.Just" || item.Fields[0] != int64(42) {
+		t.Fatalf("value: %#v", value)
 	}
 }

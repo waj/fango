@@ -1954,6 +1954,18 @@ func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
 	if e.Yield.Unique != 0 {
 		start = callExpr(selector("fangort", "StartOwnedMachineIterator"), ident(owner), producerFrame)
 	}
+	if e.Traversal.Unique != 0 {
+		consumerFrame := callExpr(g.machineExpr(e.Consumer), ident(iterator))
+		consume := callExpr(indexExpr(selector("fangort", "RunCursorConsumer"), []goast.Expr{g.goType(e.Ty)}), ident(iterator), consumerFrame)
+		result := g.outcomeType(e.Ty)
+		if overall == types.Direct {
+			consume = callExpr(selector("fangort", "RequireNormal"), consume)
+			result = g.goType(e.Ty)
+		}
+		stmts := append(ownerDecl, varDeclStmt(iterator, &goast.StarExpr{X: selector("fangort", "MachineIterator")}, start), returnStmt(consume))
+		g.control, g.resultType = oldControl, oldResult
+		return callExpr(funcLit(result, stmts))
+	}
 	consume := callExpr(g.expr(e.Consumer, 0), ident(iterator))
 	resultType := g.goType(e.Ty)
 	consumerExits := overall == types.Exit

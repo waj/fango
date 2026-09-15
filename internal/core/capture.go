@@ -20,6 +20,7 @@ func SubstituteCaptureVars(e Expr, m map[types.CaptureVar]types.CaptureSet) Expr
 			sub(&x.Owner)
 		case *IteratorScope:
 			sub(&x.Yield)
+			sub(&x.Traversal)
 		case *Handle:
 			sub(&x.Effect)
 		case *App:

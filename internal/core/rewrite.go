@@ -131,6 +131,7 @@ func (r rewriter) expr(e Expr) Expr {
 	case *IteratorScope:
 		n := *e
 		n.Yield = r.effect(e.Yield)
+		n.Traversal = r.effect(e.Traversal)
 		n.Ty = r.typ(e.Ty)
 		n.CursorTy = r.typ(e.CursorTy)
 		n.Producer = r.expr(e.Producer)
