@@ -332,6 +332,10 @@ and the remaining acceptance coverage.
 Core retains residual-arrow metadata separately from transport; explicit row
 arguments and ownership checks still need to connect that information to the
 runtime's cursor-owned evidence forwarding and per-advance rebinding.
+Wire row construction, deferred interpretation checking, and the dedicated
+row verifier into all semantic Core entry points and both execution backends.
+Call-site overlays must use the instantiated residual row; forwarding every
+lexical handler would make otherwise independent callbacks retain resources.
 The task APIs above remain unimplemented.
 
 - **Effect subsumption:** use the implemented callback inclusion and nominal

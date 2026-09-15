@@ -16,7 +16,10 @@ func CaptureContractCurrent(d *Def) bool {
 // and access paths. Lint rebuilds this graph independently from semantic Core.
 func inferCaptureContract(d *Def) *types.CaptureContract {
 	b := captureBuilder{}
-	c := &types.CaptureContract{Params: append([]string(nil), d.Params...), Body: b.expr(d.Body)}
+	c := &types.CaptureContract{Params: append([]string(nil), d.Params...), Body: b.expr(d.Body), RowParam: d.RowParam}
+	for _, ev := range d.RowEffects {
+		c.RowEffects = append(c.RowEffects, ev.Unique)
+	}
 	for _, ev := range d.EffectParams {
 		c.Effects = append(c.Effects, ev.Unique)
 	}
@@ -37,6 +40,12 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 		return nil
 	}
 	n := b.node("scalar", e.Type())
+	if row := ExpressionRow(e); row != nil {
+		n.Row = &types.CaptureRow{From: row.From}
+		for _, ev := range row.Effects {
+			n.Row.Effects = append(n.Row.Effects, ev.Unique)
+		}
+	}
 	children := func(es ...Expr) {
 		for _, x := range es {
 			n.Children = append(n.Children, b.expr(x))
@@ -78,6 +87,10 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 		children(e.Rhs, e.Body)
 	case *Lambda:
 		n.Kind, n.Name = "lambda", e.Param
+		n.RowParam = e.RowParam
+		for _, ev := range e.RowEffects {
+			n.Deferred = append(n.Deferred, ev.Unique)
+		}
 		effects(e.EffectParams)
 		children(e.Body)
 	case *App:

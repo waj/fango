@@ -9,6 +9,8 @@ import "github.com/waj/fango/internal/source"
 type CaptureContract struct {
 	Params     []string
 	Effects    []int
+	RowParam   CaptureVar
+	RowEffects []int
 	TypeParams []int
 	Body       *CaptureFlow
 }
@@ -24,6 +26,9 @@ type CaptureFlow struct {
 	TypeArgs []Type
 	Names    []string
 	Effects  []int
+	RowParam CaptureVar
+	Deferred []int
+	Row      *CaptureRow
 	Scope    ScopeID
 	Scoped   bool
 	Borrow   bool
@@ -33,6 +38,11 @@ type CaptureFlow struct {
 	Rec      bool
 	Children []*CaptureFlow
 	Clauses  []CaptureClause
+}
+
+type CaptureRow struct {
+	From    CaptureVar
+	Effects []int
 }
 
 type CaptureClause struct {

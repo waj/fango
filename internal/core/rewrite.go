@@ -30,6 +30,16 @@ func (r rewriter) exprs(es []Expr) []Expr {
 	return out
 }
 func (r rewriter) effect(e EffectInstance) EffectInstance { e.Args = r.types(e.Args); return e }
+func (r rewriter) row(row *RowArgument) *RowArgument {
+	if row == nil {
+		return nil
+	}
+	out := &RowArgument{From: row.From, Effects: make([]EffectInstance, len(row.Effects))}
+	for i, ev := range row.Effects {
+		out.Effects[i] = r.effect(ev)
+	}
+	return out
+}
 func (r rewriter) expr(e Expr) Expr {
 	if e == nil {
 		return nil
@@ -101,6 +111,14 @@ func (r rewriter) expr(e Expr) Expr {
 		out = &n
 	case *Lambda:
 		n := *e
+		n.EffectParams = append([]EffectInstance(nil), e.EffectParams...)
+		for i, ev := range n.EffectParams {
+			n.EffectParams[i] = r.effect(ev)
+		}
+		n.RowEffects = append([]EffectInstance(nil), e.RowEffects...)
+		for i, ev := range n.RowEffects {
+			n.RowEffects[i] = r.effect(ev)
+		}
 		n.Ty = r.typ(e.Ty)
 		n.Body = r.expr(e.Body)
 		out = &n
@@ -135,6 +153,7 @@ func (r rewriter) expr(e Expr) Expr {
 		out = &n
 	case *IteratorScope:
 		n := *e
+		n.Row = r.row(e.Row)
 		n.Yield = r.effect(e.Yield)
 		n.Traversal = r.effect(e.Traversal)
 		n.Ty = r.typ(e.Ty)
@@ -144,6 +163,7 @@ func (r rewriter) expr(e Expr) Expr {
 		out = &n
 	case *IteratorNext:
 		n := *e
+		n.Row = r.row(e.Row)
 		n.Ty, n.Cursor = r.typ(e.Ty), r.expr(e.Cursor)
 		out = &n
 
@@ -180,6 +200,7 @@ func (r rewriter) expr(e Expr) Expr {
 		out = &n
 	case *App:
 		n := *e
+		n.Row = r.row(e.Row)
 		n.Ty = r.typ(e.Ty)
 		n.Callee = r.expr(e.Callee)
 		n.Args = r.exprs(e.Args)

@@ -16,11 +16,11 @@ func FreeEvidence(expr Expr) map[int]EffectInstance {
 		InspectPruned(expr, func(e Expr) bool {
 			switch e := e.(type) {
 			case *Lambda:
-				for _, ev := range e.EffectParams {
+				for _, ev := range append(append([]EffectInstance(nil), e.EffectParams...), e.RowEffects...) {
 					bound[ev.Unique]++
 				}
 				visit(e.Body)
-				for _, ev := range e.EffectParams {
+				for _, ev := range append(append([]EffectInstance(nil), e.EffectParams...), e.RowEffects...) {
 					bound[ev.Unique]--
 				}
 				return false
@@ -39,6 +39,11 @@ func FreeEvidence(expr Expr) map[int]EffectInstance {
 				}
 				return false
 			case *App:
+				if e.Row != nil {
+					for _, ev := range e.Row.Effects {
+						use(ev)
+					}
+				}
 				for _, ev := range e.EvidenceArgs {
 					use(ev)
 				}
@@ -48,6 +53,18 @@ func FreeEvidence(expr Expr) map[int]EffectInstance {
 				use(e.Effect)
 			case *Suspend:
 				use(e.Owner)
+			case *IteratorScope:
+				if e.Row != nil {
+					for _, ev := range e.Row.Effects {
+						use(ev)
+					}
+				}
+			case *IteratorNext:
+				if e.Row != nil {
+					for _, ev := range e.Row.Effects {
+						use(ev)
+					}
+				}
 			}
 			return true
 		})

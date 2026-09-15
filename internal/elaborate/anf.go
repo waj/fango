@@ -38,7 +38,7 @@ func (el *elab) anf(e core.Expr) core.Expr {
 		return wrapHoists(hoists, out)
 	case *core.Lambda:
 		return &core.Lambda{Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty,
-			ParamCapture: e.ParamCapture, EffectParams: e.EffectParams}
+			ParamCapture: e.ParamCapture, EffectParams: e.EffectParams, RowParam: e.RowParam, RowEffects: e.RowEffects}
 	case *core.Handle:
 		clauses := make([]core.HandlerClause, len(e.Clauses))
 		for i, c := range e.Clauses {
@@ -113,7 +113,7 @@ func (el *elab) anfSlot(e core.Expr) (core.Expr, []hoist) {
 		return el.anf(e), nil
 	case *core.Lambda:
 		return &core.Lambda{Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty,
-			ParamCapture: e.ParamCapture, EffectParams: e.EffectParams}, nil
+			ParamCapture: e.ParamCapture, EffectParams: e.EffectParams, RowParam: e.RowParam, RowEffects: e.RowEffects}, nil
 	case *core.Handle, *core.Seq:
 		out := el.anf(e)
 		if control := core.ExprControl(out); control.Transport != types.Direct || control.Polymorphic {
@@ -180,9 +180,9 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 	case *core.Suspend:
 		return &core.Suspend{Owner: e.Owner, Request: slot(e.Request), Ty: e.Ty}, hoists
 	case *core.IteratorNext:
-		return &core.IteratorNext{Cursor: slot(e.Cursor), Result: e.Result, Access: e.Access, Ty: e.Ty}, hoists
+		return &core.IteratorNext{Cursor: slot(e.Cursor), Result: e.Result, Access: e.Access, Ty: e.Ty, Row: e.Row}, hoists
 	case *core.IteratorScope:
-		return &core.IteratorScope{Yield: e.Yield, Traversal: e.Traversal, Scope: e.Scope, Producer: slot(e.Producer), Consumer: slot(e.Consumer), CursorTy: e.CursorTy, Ty: e.Ty, Control: e.Control}, hoists
+		return &core.IteratorScope{Yield: e.Yield, Traversal: e.Traversal, Scope: e.Scope, Producer: slot(e.Producer), Consumer: slot(e.Consumer), CursorTy: e.CursorTy, Ty: e.Ty, Control: e.Control, Row: e.Row}, hoists
 
 	case *core.ResumeTail:
 		var next core.Expr
@@ -203,7 +203,7 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 			args[i] = slot(a)
 		}
 		return &core.App{Origin: e.Origin, CalleeKind: e.CalleeKind, Callee: callee, Args: args,
-			TyArgs: e.TyArgs, Ty: e.Ty, Ctor: e.Ctor, EvidenceArgs: e.EvidenceArgs, Control: e.Control}, hoists
+			TyArgs: e.TyArgs, Ty: e.Ty, Ctor: e.Ctor, EvidenceArgs: e.EvidenceArgs, Control: e.Control, Row: e.Row}, hoists
 	default:
 		panic(fmt.Sprintf("elaborate: anf unhandled node %T", e))
 	}

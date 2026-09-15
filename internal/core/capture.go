@@ -11,6 +11,11 @@ func SubstituteCaptureVars(e Expr, m map[types.CaptureVar]types.CaptureSet) Expr
 	}
 	return Rewrite(e, func(t types.Type) types.Type { return t }, func(x Expr) Expr {
 		sub := func(ev *EffectInstance) { ev.Captures = ev.Captures.Substitute(m) }
+		if row := ExpressionRow(x); row != nil {
+			for i := range row.Effects {
+				sub(&row.Effects[i])
+			}
+		}
 		switch x := x.(type) {
 		case *Perform:
 			sub(&x.Effect)
@@ -28,6 +33,9 @@ func SubstituteCaptureVars(e Expr, m map[types.CaptureVar]types.CaptureSet) Expr
 				sub(&x.EvidenceArgs[i])
 			}
 		case *Lambda:
+			for i := range x.RowEffects {
+				sub(&x.RowEffects[i])
+			}
 			for i := range x.EffectParams {
 				sub(&x.EffectParams[i])
 			}

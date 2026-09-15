@@ -30,6 +30,13 @@ type EffectInstance struct {
 	Control  types.Control
 }
 
+// RowArgument forwards a lexically bound residual row and overlays checked
+// effect instances. A zero From denotes the empty row, never ambient lookup.
+type RowArgument struct {
+	From    types.CaptureVar
+	Effects []EffectInstance
+}
+
 type Def struct {
 	Name  string
 	Owner string     // defining source module; empty for headerless files and REPL inputs
@@ -44,6 +51,8 @@ type Def struct {
 	Params          []string // non-empty ⇒ worker (doc/design.md, "Go backend and runtime"); uncurried Go signature = peeling len(Params) arrows off Type
 	ParamCaptures   []types.CaptureVar
 	EffectParams    []EffectInstance
+	RowParam        types.CaptureVar
+	RowEffects      []EffectInstance
 	ResultCaptures  types.CaptureSet
 	CaptureContract *types.CaptureContract
 	Control         types.Control
@@ -139,6 +148,7 @@ type Suspend struct {
 // boundary drives Producer's machine, so its own Control describes only the
 // residual execution protocol visible to the enclosing computation.
 type IteratorScope struct {
+	Row       *RowArgument
 	Yield     EffectInstance
 	Traversal EffectInstance
 	Scope     types.ScopeID
@@ -152,6 +162,7 @@ type IteratorScope struct {
 // IteratorNext advances exactly once. Result supplies the checked Maybe
 // constructors used to package the result after the producer transfers back.
 type IteratorNext struct {
+	Row    *RowArgument
 	Cursor Expr
 	Result *types.ADTInfo
 	Access types.CursorAccess
@@ -254,6 +265,8 @@ type Lambda struct {
 	// non-escape analysis. They have no runtime representation.
 	ParamCapture types.CaptureVar
 	EffectParams []EffectInstance
+	RowParam     types.CaptureVar
+	RowEffects   []EffectInstance
 }
 
 type VarRef struct {
@@ -308,6 +321,7 @@ type App struct {
 	TyArgs       []types.Type
 	Ty           types.Type
 	EvidenceArgs []EffectInstance
+	Row          *RowArgument
 	Control      types.Control
 
 	// Ctor identifies the constructor when CalleeKind == Ctor (always
