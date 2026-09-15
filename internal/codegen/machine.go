@@ -347,15 +347,6 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		return stmts, [][]goast.Stmt{resumed}
 	case *machineir.Call:
 		args := make([]goast.Expr, 0, len(term.EvidenceArgs)+len(term.Args))
-		callee := g.machineWorkers[term.Callee]
-		sub := map[int]types.Type{}
-		if callee != nil {
-			for i, param := range callee.TyParams {
-				if i < len(term.TyArgs) {
-					sub[param.ID] = term.TyArgs[i]
-				}
-			}
-		}
 		for _, ev := range term.EvidenceArgs {
 			stack := g.evidence[ev.Unique]
 			if len(stack) == 0 {
@@ -367,11 +358,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			if slices.Contains(term.SynchronousArgs, i) {
 				args = append(args, g.synchronousMachineCallback(arg))
 			} else {
-				value := g.machineExpr(arg)
-				if callee != nil && i < len(callee.Params) {
-					value = g.adaptMachineValue(value, arg.Type(), types.SubstRigid(callee.Params[i].Ty, sub), types.Machine)
-				}
-				args = append(args, value)
+				args = append(args, g.machineExpr(arg))
 			}
 		}
 		var child goast.Expr
@@ -389,7 +376,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			}
 			child = callExpr(&goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Op_" + linkName(term.Operation.Name))}, opArgs...)
 		} else if term.Callee == "" {
-			child = callExpr(g.machineExpr(term.CalleeExpr), args...)
+			child = callExpr(callbackMember(g.machineExpr(term.CalleeExpr), types.Machine), args...)
 		} else {
 			child = callExpr(indexExpr(g.machineConstructorRef(term.Callee), g.goTypes(term.TyArgs)), args...)
 		}
@@ -598,7 +585,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			args = append(args, ident(owner))
 		}
 		args = append(args, g.unitValue())
-		producer := callExpr(g.machineExpr(term.Producer), args...)
+		producer := callExpr(callbackMember(g.machineExpr(term.Producer), types.Machine), args...)
 		start := callExpr(selector("fangort", "StartMachineIterator"), producer)
 		if term.Yield.Unique != 0 {
 			start = callExpr(selector("fangort", "StartOwnedMachineIterator"), ident(owner), producer)
@@ -720,13 +707,13 @@ func (g *gen) machineBoxedValue(e core.Expr) goast.Expr {
 }
 
 func (g *gen) machineExpr(e core.Expr) goast.Expr {
-	lam, ok := e.(*core.Lambda)
-	if !ok {
-		return g.expr(e, 0)
-	}
+	return g.expr(e, 0)
+}
+
+func (g *gen) machineLambdaExpr(lam *core.Lambda) goast.Expr {
 	closure := g.machineClosures[lam]
 	if closure == nil {
-		return g.expr(e, 0)
+		panic("codegen: missing Machine callback member")
 	}
 	worker := g.machineWorkers[closure.Worker]
 	if worker == nil {
@@ -747,7 +734,7 @@ func (g *gen) machineExpr(e core.Expr) goast.Expr {
 		args = append(args, ident(name))
 	}
 	for _, capture := range closure.Captures {
-		args = append(args, g.liftMachineValue(ident(machineLocalName(capture.Name)), capture.Ty, g.representationMode()))
+		args = append(args, ident(machineLocalName(capture.Name)))
 	}
 	fn := lam.Ty.(*types.TFun)
 	paramName := machineLocalName(lam.Param)

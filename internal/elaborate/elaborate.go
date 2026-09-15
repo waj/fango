@@ -217,6 +217,7 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 		params, body = el.workerBody(eqs, argTys, info.NameSpan, "function")
 	} else {
 		body = el.expr(info.Body)
+		body = el.adaptFunctionValue(body, defType)
 	}
 	allParams := append(dictNames, params...)
 	paramCaptures := make([]types.CaptureVar, len(allParams))

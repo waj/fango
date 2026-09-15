@@ -94,7 +94,7 @@ func(p *pause) Step(m *fangort.Machine) fangort.MachineStep {
  return fangort.MachineStep{Kind:fangort.MachineReturn,Value:m.TakeResult()}
 }
 func TestFactory(t *testing.T){
- m:=fangort.StartMachine(MachineFrame_Main_dot_run(func(n int64) fangort.MachineFrame{return &pause{value:n}}))
+ m:=fangort.StartMachine(MachineFrame_Main_dot_run(struct{Direct func(int64)int64;Exit func(int64)fangort.Outcome[int64];Machine func(int64)fangort.MachineFrame}{Machine:func(n int64)fangort.MachineFrame{return &pause{value:n}}}))
  e,err:=m.Run();if err!=nil || e.Done || e.Request!=int64(42){t.Fatalf("pause: %#v %v",e,err)}
  e,err=m.Resume(int64(73));if err!=nil || !e.Done || e.Value!=int64(73){t.Fatalf("return: %#v %v",e,err)}
 }

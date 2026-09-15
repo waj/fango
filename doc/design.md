@@ -250,47 +250,40 @@ it only after the dedicated pre-machine checks described below.
 
 Transport-polymorphic definitions have one joined contract rather than a
 variant for every combination of callback and evidence modes. Their defining
-module always emits Direct, Exit, and Machine ABI members, so a downstream consumer
-cannot change dependency output. A Direct callback widens to Exit through an
-eta wrapper that calls it and returns `Normal`; the inverse conversion is
-illegal. ADTs, including class dictionaries, that transitively store a
-transport-polymorphic function receive module-owned Direct, Exit, and Machine
-representation families. Effect evidence records likewise emit all three
-families independently of downstream consumers. This keeps stored callbacks typed without
-boxing every ordinary value or guessing an ABI after row erasure.
-Pure wrappers inside one of those members retain its representation family:
-entering a pure lambda changes that lambda's execution protocol, but does not
-switch its controlled parameters, constructor results, or nested values back
-to the Direct family. A named pure worker that produces a controlled value
-likewise has Direct- and Exit-family members even though both members use the
-Direct execution protocol; the family selects the result representation
-independently of whether the worker itself returns an outcome.
-Pure factories that transfer or construct stored callbacks also emit a
-Machine-family member using Direct execution. A Machine consumer calls that
-factory directly and receives the corresponding constructor family. Callback
-frames and effect evidence members are emitted from the defining module's own
-contracts. Generated evidence names use nominal declaration names, avoiding
-dependence on a compilation graph's numeric identity allocation.
+module emits Direct, Exit, and Machine workers independently of downstream
+consumers. Direct workers return ordinary values, Exit workers propagate a
+checked `Outcome`, and Machine workers return typed frames.
 
-A fixed Machine callback has one function representation, as does an opaque
-cursor. Their containing ADTs need additional families only if another field
-actually varies by transport. Creating a producer closure in Direct or Exit
-code lifts its synchronous callback captures into lazy Machine frames. Pure
-curried arrows still execute directly; the final effectful call runs when its
-frame is stepped. Synthetic local references in elaborated adapters carry the
-same local-binding identity as source locals, including temporaries retained
-by nested Machine closures.
+A function value carries its typed Direct, Exit, and Machine callable members
+together in a Go record. An indirect call selects the member required by its
+checked control. A member below the body's or captured evidence's minimum transport is absent; the
+source effect and capture contracts prevent its selection. Pure curried arrows
+still execute directly. Constructing the record executes no callback body, and
+synchronous callbacks' Machine members defer execution until their frame steps.
+Polymorphic callback frames are emitted by their defining module even when no
+consumer currently needs Machine execution.
 
-A statically Direct call that constructs an Exit-family value selects a
-transport-polymorphic worker's Exit member, widening any Direct evidence.
-`RequireNormal` projects the result under the Core Direct contract and rejects
-an unexpected exit as a compiler invariant violation. This preserves the
-joined module-owned ABI without discarding a real exit or adding a variant
-for each combination of callback and result representations.
-A synchronous call constructing a Machine-family result instead drives the
-module's Machine member to completion. Its checked outward control forbids
-suspension; Direct calls additionally require a normal result. This permits a
-handler-backed factory to return a callback with fresh evidence parameters.
+This gives immutable values one representation across transport boundaries.
+ADTs, recursive ADTs, and class dictionaries can store callbacks without copying
+or converting their contents when a producer captures them. Their exported
+Direct, Exit, and Machine type names are aliases of that representation. Pure
+factories continue to use Direct calls and return complete function values;
+constructing a callback does not run any of its members. Strict factory effects
+occur once before storing the result.
+
+Effect evidence records retain separate Direct, Exit, and Machine members.
+Explicit evidence binders and captured definition-site evidence are preserved
+in each callable member. Generated evidence names use nominal declaration names,
+avoiding dependence on a compilation graph's numeric identity allocation.
+Opaque cursors keep their single runtime owner representation. Synthetic local
+references in elaborated adapters carry the same binding identity as source
+locals, including temporaries retained by nested Machine closures.
+
+A statically Direct call may use a transport-polymorphic worker's Exit member
+under an enclosing Exit convention. `RequireNormal` projects the result under
+the checked Core Direct contract and rejects an unexpected exit as a compiler
+invariant violation. Value representation does not require driving a Machine
+frame for a pure factory call.
 
 ## Compiler pipeline
 
@@ -952,12 +945,11 @@ runtime invariant. Actual callbacks are checked for non-suspension before row
 widening by the ordinary capture-flow boundary. The interpreter applies the
 same checked callbacks with their definition-site evidence.
 
-Machine frame fields and factory parameters use the same Machine value
-representation as their step bodies, including polymorphic callbacks. An open
-callback row in an otherwise unselected definition does not itself create a
-Machine root; concrete Machine closures and calls from selected workers do.
-Importing a producer elsewhere therefore does not add speculative closure
-frames to unrelated Direct/Exit dependencies.
+Machine frame fields and factory parameters use the same value representation
+as ordinary code, including stored callbacks. An open callback row owns a
+Machine member even in an otherwise Direct definition. These members are
+determined by the defining module, so importing a producer elsewhere cannot
+change a dependency's output.
 
 Two private backends consume that IR. The in-process evaluator owns an explicit
 slice of machine frames and uses the recursive Core evaluator only for a
@@ -1198,7 +1190,7 @@ package the same nominal representation instead of repeating anonymous
 composite literals.
 Erasing a Unit argument never erases its evaluation: expression lowering keeps
 strict left-to-right order, materializing the singleton only when a value is
-required. Functions are typed Go functions, and ADTs use typed interfaces and
+required. Function members are typed Go functions, and ADTs use typed interfaces and
 constructor structs. Parameterized definitions map to Go generics with
 explicit instantiation; row-kinded ADT parameters are omitted from those
 runtime generics and their arguments are represented by Unit. Class

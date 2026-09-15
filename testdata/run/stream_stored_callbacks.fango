@@ -1,0 +1,38 @@
+import Stream
+
+type Box e = Box (Int ->{e} Int)
+
+runBox : Box e -> Int ->{e} Int
+runBox (Box action) value = action value
+
+makeBox : () ->{IO} Box IO
+makeBox() =
+    print "factory"
+    Box (\value ->
+        print value
+        value + 1)
+
+type Chain e = End | Link (Box e) (Chain e)
+
+runChain : Chain e -> Int ->{e} Int
+runChain chain value = case chain of
+    End -> value
+    Link box rest -> runChain rest (runBox box value)
+
+class Invoke a
+    invoke : a -> Int ->{IO} Int
+
+instance Invoke (Box IO)
+    invoke = runBox
+
+emit : Invoke a => a -> Stream.Stream Int IO
+emit stored = Stream.generate (\_ -> Stream.yield (invoke stored 4))
+
+main() =
+    box = makeBox()
+    source = Stream.generate (\_ -> Stream.yield (runBox box 4))
+    Stream.forEach print source
+    Stream.forEach print source
+    chain = Link box (Link box End)
+    Stream.forEach print (Stream.generate (\_ -> Stream.yield (runChain chain 6)))
+    Stream.forEach print (emit box)

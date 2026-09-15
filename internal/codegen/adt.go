@@ -53,6 +53,19 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 			}
 			iface := mangleType(adt.Con.Name) + suffix
 			marker := markerMethod(adt.Con.Name) + suffix
+			if mode != types.Direct {
+				// Function fields carry their callable members together. Alias
+				// the nominal families so capture never converts an ADT graph.
+				names := []string{mangleType(adt.Con.Name)}
+				for _, ctor := range adt.Ctors {
+					names = append(names, mangleCtor(ctor.Name))
+				}
+				for _, name := range names {
+					decls = append(decls, &goast.GenDecl{Tok: gotoken.TYPE, Specs: []goast.Spec{&goast.TypeSpec{Name: ident(name + suffix), TypeParams: g.typeParamFields(runtimeParams), Assign: 1, Type: indexExpr(ident(name), paramIdents)}}})
+				}
+				g.control, g.abi = oldControl, oldABI
+				continue
+			}
 			decls = append(decls, &goast.GenDecl{
 				Tok: gotoken.TYPE,
 				Specs: []goast.Spec{&goast.TypeSpec{

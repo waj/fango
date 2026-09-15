@@ -1747,10 +1747,12 @@ retain the surrounding resume binding.
 The compiler preserves a control-aware calling convention through
 higher-order functions and abstract effect evidence. Direct calls keep their
 plain generated-Go result, while definitions whose callback/evidence contract
-can later carry a non-local exit have stable Direct and Exit ABI families in
+can later carry a non-local exit have stable Direct, Exit, and Machine ABI families in
 their defining module. The Exit family uses an internal tagged `Outcome` and
 propagates it before evaluating the next source expression. Function values
-stored in ADTs or class dictionaries use matching representation families.
+carry their callable members together, so ADTs and class dictionaries keep a
+stable value representation across execution modes. Creating a function value
+does not execute its body or repeat the effects of a factory that returned it.
 This calling convention is an implementation guarantee visible in
 `--emit-go`. Abort-only operations select the Exit family; ordinary
 tail-resumptive handlers retain the Direct fast path where their context allows

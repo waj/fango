@@ -983,24 +983,7 @@ func (g *gen) goType(t types.Type) goast.Expr {
 		}
 		panic("codegen: type variable outside its definition's type parameters")
 	case *types.TFun:
-		params := make([]paramSpec, 0, len(t.Eff.Labels)+1)
-		arrowControl := types.FunctionControl(t)
-		mode := arrowControl.Resolve(g.representationMode())
-		for _, l := range types.SortedRow(t.Eff).Labels {
-			if !types.RuntimeEvidenceEffect(l) {
-				continue
-			}
-			params = append(params, paramSpec{typ: g.effectTypeMode(core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args, Control: arrowControl}, mode)})
-		}
-		params = append(params, paramSpec{typ: g.goType(t.Arg)})
-		result := g.goType(t.Ret)
-		if mode == types.Machine {
-			g.usesFangort = true
-			result = selector("fangort", "MachineFrame")
-		} else if mode == types.Exit {
-			result = g.outcomeType(t.Ret)
-		}
-		return &goast.FuncType{Params: paramFields(params), Results: &goast.FieldList{List: []*goast.Field{{Type: result}}}}
+		return g.callbackType(t)
 	case *types.TCon:
 		if t.Name == types.IteratorTypeName {
 			g.usesFangort = true
@@ -1358,57 +1341,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 	case *core.Let:
 		return g.letIIFE(e)
 	case *core.Lambda:
-		// A typed func literal. Go captures variables by reference, but
-		// fango bindings are immutable (the single letrec assignment
-		// happens-before any call), so by-reference and by-value are
-		// indistinguishable.
-		fn := e.Ty.(*types.TFun)
-		if types.FunctionControl(fn).Resolve(g.representationMode()) == types.Machine {
-			if g.machineClosures[e] == nil {
-				panic("codegen: Machine lambda has no lowered closure")
-			}
-			return g.machineExpr(e)
-		}
-		mode := types.FunctionControl(fn).Resolve(g.representationMode())
-		oldControl, oldResult := g.control, g.resultType
-		g.control, g.resultType = mode, fn.Ret
-		params := make([]paramSpec, 0, len(fn.Eff.Labels)+1)
-		var pushed []int
-		for _, l := range types.SortedRow(fn.Eff).Labels {
-			if !types.RuntimeEvidenceEffect(l) {
-				continue
-			}
-			name := g.evidenceName(l.Name)
-			inst := core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args, Control: types.FunctionControl(fn)}
-			params = append(params, paramSpec{name: name, typ: g.effectType(inst)})
-			g.evidence[l.Unique] = append(g.evidence[l.Unique], ident(name))
-			g.evidenceModes[l.Unique] = append(g.evidenceModes[l.Unique], mode)
-			pushed = append(pushed, l.Unique)
-		}
-		params = append(params, paramSpec{name: func() string {
-			if e.Param == "_" {
-				return "_"
-			}
-			return mangleValue(e.Param)
-		}(), typ: g.goType(fn.Arg)})
-		oldParamTy, hadParamTy := g.caseVarTys[e.Param]
-		g.caseVarTys[e.Param] = fn.Arg
-		body := g.retStmts(e.Body)
-		if hadParamTy {
-			g.caseVarTys[e.Param] = oldParamTy
-		} else {
-			delete(g.caseVarTys, e.Param)
-		}
-		for _, unique := range pushed {
-			g.evidence[unique] = g.evidence[unique][:len(g.evidence[unique])-1]
-			g.evidenceModes[unique] = g.evidenceModes[unique][:len(g.evidenceModes[unique])-1]
-		}
-		result := g.goType(fn.Ret)
-		if mode == types.Exit {
-			result = g.outcomeType(fn.Ret)
-		}
-		g.control, g.resultType = oldControl, oldResult
-		return funcLitParams(params, result, body)
+		return g.callbackValue(e)
 	case *core.App:
 		switch e.CalleeKind {
 		case core.Worker:
@@ -1426,8 +1359,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 				}
 				args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), mode))
 			}
-			args = append(args, g.callArgExpr(e.Args[0], e.Callee.Type().(*types.TFun).Arg, mode))
-			return callExpr(g.expr(e.Callee, 0), args...)
+			args = append(args, g.expr(e.Args[0], 0))
+			return callExpr(callbackMember(g.expr(e.Callee, 0), mode), args...)
 		case core.Ctor:
 			return g.ctorLit(e)
 		default:
@@ -1569,22 +1502,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 	ref := e.Callee.(*core.VarRef)
 	formal, voidResult := g.workerABI(ref.Name)
-	sub := map[int]types.Type{}
-	if d := g.defs[ref.Name]; d != nil {
-		for i, param := range d.TyParams {
-			if i < len(e.TyArgs) {
-				sub[param.ID] = e.TyArgs[i]
-			}
-		}
-	}
 	mode := e.Control.Resolve(g.control)
-	// A handled computation can return a Machine-family callback while its
-	// outward call is still synchronous. Execute its owned Machine member to
-	// preserve that result representation; the checked call control forbids
-	// an outward suspension.
-	if g.representationMode() == types.Machine && mode != types.Machine && g.machineWorkers[ref.Name] != nil {
-		return g.synchronousMachineWorkerCall(e, formal, sub, mode)
-	}
 	// A source-Direct call can still construct an Exit-family function value.
 	// A polymorphic worker has a joined execution/representation ABI, so use
 	// its Exit member and project its statically normal result. Supplied Direct
@@ -1611,7 +1529,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 			}
 			continue
 		}
-		args = append(args, g.callArgExpr(a, types.SubstRigid(formal[i], sub), abi))
+		args = append(args, g.expr(a, 0))
 	}
 	if needPrelude {
 		var body []goast.Stmt
@@ -1661,42 +1579,6 @@ func (g *gen) workerNeedsNormalProjection(e *core.App) bool {
 	d := g.defs[e.Callee.(*core.VarRef).Name]
 	return d != nil && d.Control.Polymorphic &&
 		e.Control.Resolve(g.control) == types.Direct && g.representationMode() == types.Exit
-}
-
-// callArgExpr widens a direct callback to the Exit representation family when
-// an enclosing call is being emitted in Exit control.  The source type of a
-// callback can be direct (for example, an IO-only cleanup), while the
-// higher-order function receiving it must use an Outcome-returning callback so
-// that exits from callbacks can propagate through its body.
-func (g *gen) callArgExpr(arg core.Expr, formal types.Type, mode types.Transport) goast.Expr {
-	if mode == types.Machine {
-		return g.adaptMachineValue(g.expr(arg, 0), arg.Type(), formal, g.representationMode())
-	}
-	fn, ok := formal.(*types.TFun)
-	if !ok || mode != types.Exit || types.FunctionControl(fn).Resolve(mode) != types.Exit {
-		return g.expr(arg, 0)
-	}
-	actual, ok := arg.Type().(*types.TFun)
-	if !ok || types.FunctionControl(actual).Resolve(mode) == types.Exit {
-		return g.expr(arg, 0)
-	}
-
-	direct := g.expr(arg, 0)
-	params := make([]paramSpec, 0, len(actual.Eff.Labels)+1)
-	var callArgs []goast.Expr
-	for _, label := range types.SortedRow(actual.Eff).Labels {
-		if !types.RuntimeEvidenceEffect(label) {
-			continue
-		}
-		name := g.evidenceName(label.Name)
-		params = append(params, paramSpec{name: name, typ: g.effectTypeMode(core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Control: types.FunctionControl(actual)}, types.Direct)})
-		callArgs = append(callArgs, ident(name))
-	}
-	paramName := "v_arg"
-	params = append(params, paramSpec{name: paramName, typ: g.goType(actual.Arg)})
-	callArgs = append(callArgs, ident(paramName))
-	body := []goast.Stmt{returnStmt(g.normalOutcome(actual.Ret, callExpr(direct, callArgs...)))}
-	return funcLitParams(params, g.outcomeType(actual.Ret), body)
 }
 
 func unitAtom(e core.Expr) bool {
@@ -1946,13 +1828,13 @@ func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
 		producerArgs = append(producerArgs, ident(owner))
 	}
 	producerArgs = append(producerArgs, g.unitValue())
-	producerFrame := callExpr(g.machineExpr(e.Producer), producerArgs...)
+	producerFrame := callExpr(callbackMember(g.machineExpr(e.Producer), types.Machine), producerArgs...)
 	start := callExpr(selector("fangort", "StartMachineIterator"), producerFrame)
 	if e.Yield.Unique != 0 {
 		start = callExpr(selector("fangort", "StartOwnedMachineIterator"), ident(owner), producerFrame)
 	}
 	if e.Traversal.Unique != 0 {
-		consumerFrame := callExpr(g.machineExpr(e.Consumer), ident(iterator))
+		consumerFrame := callExpr(callbackMember(g.machineExpr(e.Consumer), types.Machine), ident(iterator))
 		consume := callExpr(indexExpr(selector("fangort", "RunCursorConsumer"), []goast.Expr{g.goType(e.Ty)}), ident(iterator), consumerFrame)
 		result := g.outcomeType(e.Ty)
 		if overall == types.Direct {
@@ -1963,7 +1845,7 @@ func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
 		g.control, g.resultType = oldControl, oldResult
 		return callExpr(funcLit(result, stmts))
 	}
-	consume := callExpr(g.expr(e.Consumer, 0), ident(iterator))
+	consume := callExpr(callbackMember(g.expr(e.Consumer, 0), overall), ident(iterator))
 	resultType := g.goType(e.Ty)
 	consumerExits := overall == types.Exit
 	if consumerExits {
@@ -2628,4 +2510,47 @@ func linkName(name string) string {
 		}
 	}
 	return b.String()
+}
+
+func (g *gen) directLambdaMember(e *core.Lambda, mode types.Transport) goast.Expr {
+	fn := e.Ty.(*types.TFun)
+	oldControl, oldResult := g.control, g.resultType
+	g.control, g.resultType = mode, fn.Ret
+	params := make([]paramSpec, 0, len(fn.Eff.Labels)+1)
+	var pushed []int
+	for _, l := range types.SortedRow(fn.Eff).Labels {
+		if !types.RuntimeEvidenceEffect(l) {
+			continue
+		}
+		name := g.evidenceName(l.Name)
+		inst := core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args, Control: types.Control{Transport: mode}}
+		params = append(params, paramSpec{name: name, typ: g.effectType(inst)})
+		g.evidence[l.Unique] = append(g.evidence[l.Unique], ident(name))
+		g.evidenceModes[l.Unique] = append(g.evidenceModes[l.Unique], mode)
+		pushed = append(pushed, l.Unique)
+	}
+	params = append(params, paramSpec{name: func() string {
+		if e.Param == "_" {
+			return "_"
+		}
+		return mangleValue(e.Param)
+	}(), typ: g.goType(fn.Arg)})
+	oldParamTy, hadParamTy := g.caseVarTys[e.Param]
+	g.caseVarTys[e.Param] = fn.Arg
+	body := g.retStmts(e.Body)
+	if hadParamTy {
+		g.caseVarTys[e.Param] = oldParamTy
+	} else {
+		delete(g.caseVarTys, e.Param)
+	}
+	for _, unique := range pushed {
+		g.evidence[unique] = g.evidence[unique][:len(g.evidence[unique])-1]
+		g.evidenceModes[unique] = g.evidenceModes[unique][:len(g.evidenceModes[unique])-1]
+	}
+	result := g.goType(fn.Ret)
+	if mode == types.Exit {
+		result = g.outcomeType(fn.Ret)
+	}
+	g.control, g.resultType = oldControl, oldResult
+	return funcLitParams(params, result, body)
 }

@@ -99,9 +99,9 @@ func TestCleanupScopeEmitsBothFamiliesWithoutAContinuation(t *testing.T) {
 	}
 	got := string(data)
 	for _, want := range []string{
-		"func V_Main_dot_bracket[A0 any](t_acquire func(fangort.Unit) string, t_release func(string) fangort.Unit, t_use func(string) A0) A0",
-		"func V_Main_dot_bracket_exit[A0 any](t_acquire func(fangort.Unit) fangort.Outcome[string]",
-		"_ = t_release(t_resource)",
+		"func V_Main_dot_bracket[A0 any](t_acquire struct",
+		"func V_Main_dot_bracket_exit[A0 any](t_acquire struct",
+		"_ = t_release.Direct(t_resource)",
 		"fangort.Suppress(",
 	} {
 		if !strings.Contains(got, want) {
@@ -109,7 +109,7 @@ func TestCleanupScopeEmitsBothFamiliesWithoutAContinuation(t *testing.T) {
 		}
 	}
 	direct := got[strings.Index(got, "func V_Main_dot_bracket["):strings.Index(got, "func V_Main_dot_bracket_exit[")]
-	if strings.Contains(direct, "fangort.Outcome") || strings.Contains(direct, "fangort.Propagate") {
+	if strings.Contains(direct, "fangort.Propagate") || strings.Contains(direct, "fangort.Suppress") {
 		t.Fatalf("the direct family member acquired Outcome plumbing:\n%s", direct)
 	}
 	for _, unwanted := range []string{"go func", "chan ", "panic(", "Resume", "Discard"} {

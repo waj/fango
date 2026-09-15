@@ -316,9 +316,7 @@ func TestFixture(t *testing.T) {
     event, err = callback.Resume(int64(42))
     if err != nil || !event.Done || event.Value != int64(42) { t.Fatalf("callback done: %#v %v", event, err) }
 
-    polymorphic := fangort.StartMachine(MachineFrame_Main_dot_applyCallback(func(value int64) fangort.MachineFrame {
-        return MachineFrame_Main_dot_generic[int64](value)
-    }))
+    polymorphic := fangort.StartMachine(MachineFrame_Main_dot_applyCallback(struct{Direct func(int64)int64;Exit func(int64)fangort.Outcome[int64];Machine func(int64)fangort.MachineFrame}{Machine:func(value int64)fangort.MachineFrame{return MachineFrame_Main_dot_generic[int64](value)}}))
     event, err = polymorphic.Run()
     if err != nil || event.Done || event.Request != int64(17) { t.Fatalf("polymorphic callback: %#v %v", event, err) }
     event, err = polymorphic.Resume(int64(71))

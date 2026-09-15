@@ -29,10 +29,6 @@ func LowerStage(p *core.Prog, b *types.Builtins) (*Prog, []error) {
 }
 
 func lower(p *core.Prog) (*Prog, []error) {
-	adts := map[int]*types.ADTInfo{}
-	for _, adt := range p.ADTs {
-		adts[adt.Con.Unique] = adt
-	}
 	defs := make(map[string]*core.Def, len(p.Defs))
 	selected := map[string]bool{}
 	for i := range p.Defs {
@@ -54,8 +50,7 @@ func lower(p *core.Prog) (*Prog, []error) {
 			continue
 		}
 		builder := &builder{def: d, locals: localRefTypes(d.Body), lambdas: map[*core.Lambda]bool{}, stateAux: map[string]bool{}}
-		family := types.ControlledRepresentation(d.Type, adts)
-		builder.registerOwnedRoots(d.Body, family)
+		builder.registerOwnedRoots(d.Body)
 		rootedClosures = append(rootedClosures, builder.closures...)
 		rootedAux = append(rootedAux, builder.aux...)
 	}
@@ -121,29 +116,29 @@ func lower(p *core.Prog) (*Prog, []error) {
 	return out, errs
 }
 
-func (b *builder) registerOwnedRoots(body core.Expr, family bool) {
+func (b *builder) registerOwnedRoots(body core.Expr) {
 	core.InspectPruned(body, func(e core.Expr) bool {
 		if h, ok := e.(*core.Handle); ok {
 			outer := b.def
 			inside := *outer
 			inside.EffectParams = append(append([]core.EffectInstance(nil), outer.EffectParams...), h.Effect)
 			b.def = &inside
-			b.registerOwnedRoots(h.Body, family)
+			b.registerOwnedRoots(h.Body)
 			b.def = outer
 			for _, clause := range h.Clauses {
-				b.registerOwnedRoots(clause.Body, family)
+				b.registerOwnedRoots(clause.Body)
 			}
 			if h.Return != nil {
-				b.registerOwnedRoots(h.Return.Body, family)
+				b.registerOwnedRoots(h.Return.Body)
 			}
 			if h.State != nil {
-				b.registerOwnedRoots(h.State.Initial, family)
+				b.registerOwnedRoots(h.State.Initial)
 			}
 			return false
 		}
 		if lambda, ok := e.(*core.Lambda); ok {
 			control := types.FunctionControl(lambda.Ty.(*types.TFun))
-			if control.Transport == types.Machine || family && control.Resolve(types.Machine) == types.Machine {
+			if control.Resolve(types.Machine) == types.Machine {
 				b.registerMachineLambdas(lambda)
 				return false
 			}
@@ -151,7 +146,7 @@ func (b *builder) registerOwnedRoots(body core.Expr, family bool) {
 			inside := *outer
 			inside.EffectParams = append(append([]core.EffectInstance(nil), outer.EffectParams...), lambda.EffectParams...)
 			b.def = &inside
-			b.registerOwnedRoots(lambda.Body, family)
+			b.registerOwnedRoots(lambda.Body)
 			b.def = outer
 			return false
 		}

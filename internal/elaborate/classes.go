@@ -29,7 +29,7 @@ func (el *elab) bindDictionaries(ps []types.Pred) ([]string, []types.Type) {
 		}
 		n := fmt.Sprintf("_dict%d", el.tmp)
 		el.tmp++
-		ty := cl.DictType(p.Ty)
+		ty := el.eraseRuntimeKinds(eraseRows(cl.DictType(p.Ty)))
 		names = append(names, n)
 		tys = append(tys, ty)
 		el.dicts = append(el.dicts, dictionary{p, &core.VarRef{Name: n, Local: true, Ty: ty}})
@@ -97,7 +97,7 @@ func (el *elab) dictionary(p types.Pred) core.Expr {
 		return &core.VarRef{Name: "_missingDictionary", Ty: cl.DictType(p.Ty)}
 	}
 	sch, _ := el.ck.Env.Lookup(in.Name)
-	ty := in.Class.DictType(p.Ty)
+	ty := el.eraseRuntimeKinds(eraseRows(in.Class.DictType(p.Ty)))
 	if len(sch.Vars) == 0 && len(sch.Preds) == 0 {
 		return &core.VarRef{Name: in.Name, Ty: ty}
 	}
@@ -174,7 +174,7 @@ func instanceDefinition(in *infer.InstanceInfo, ck *infer.Checker) (core.Def, []
 	el.owner = in.Owner
 	el.instanceLimit = in.Limit
 	params, dictTypes := el.bindDictionaries(in.Preds)
-	ty := in.Class.DictType(in.Head)
+	ty := el.eraseRuntimeKinds(eraseRows(in.Class.DictType(in.Head)))
 	ctor := in.Class.Dict.Ctors[0]
 	var fields []core.Expr
 	for i, name := range in.Methods {
@@ -186,7 +186,7 @@ func instanceDefinition(in *infer.InstanceInfo, ck *infer.Checker) (core.Def, []
 	for i := len(fields) - 1; i >= 0; i-- {
 		ct = &types.TFun{Arg: fields[i].Type(), Ret: ct}
 	}
-	body := &core.App{CalleeKind: core.Ctor, Callee: &core.VarRef{Name: ctor.Name, Ty: ct}, Args: fields, Ty: ty, TyArgs: []types.Type{in.Head}, Ctor: ctor}
+	body := &core.App{CalleeKind: core.Ctor, Callee: &core.VarRef{Name: ctor.Name, Ty: ct}, Args: fields, Ty: ty, TyArgs: []types.Type{el.eraseRuntimeKinds(eraseRows(in.Head))}, Ctor: ctor}
 	paramCaptures := make([]types.CaptureVar, len(params))
 	for i := range paramCaptures {
 		paramCaptures[i] = ck.Sup.FreshCapture()
