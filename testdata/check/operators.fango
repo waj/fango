@@ -4,9 +4,6 @@
 (<+>) a b = a * 10 + b
 infixl 5 (<+>)
 
-(|>) : a -> (a -> b) -> b
-(|>) x f = f x
-infixl 1 (|>)
 
 infix_use = 1 <+> 2
 

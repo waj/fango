@@ -38,9 +38,13 @@ rather than guessing, which is what you want while a file is mid-edit — and th
 reason goes to the `Fango` output channel rather than interrupting the save. A
 missing executable is reported the same way.
 
-The extension has no dependencies and no build step: `vscode` is supplied by the
+The extension has no runtime dependencies and no build step: `vscode` is supplied by the
 host and everything else is a Node builtin, so the directory is loadable as it
 stands.
+
+For grammar changes, run `npm install` and `npm run test:grammar` in this
+directory. The development dependencies tokenize stdlib, testdata, and examples
+with `vscode-textmate` and check trailing-lambda and ordinary pipe scopes.
 
 ## Install (local)
 

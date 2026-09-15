@@ -1,0 +1,23 @@
+import Meta
+one : () -> Int
+one() = 1
+
+pair : (() ->{e} Int) -> (() ->{e} Int) ->{e} Int
+pair left right = left() + right()
+
+emit() =
+    print 2
+    2
+
+:type pair one emit
+:type pair emit one
+pair one \_ -> 2
+3 |> (\n -> n + 1)
+$(quote (pair one \_ -> 2))
+bad : () -> Int
+bad() = pair one emit
+
+:type bad
+bad() = 2
+bad()
+:q

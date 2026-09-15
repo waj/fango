@@ -988,7 +988,7 @@ func hasStatementEqual(toks []token.Token, start, col int) bool {
 // with its own `then`/`else` puts that keyword at the body block's column,
 // and neither keyword can begin a statement.
 func closesBlock(k token.Kind) bool {
-	return k == token.KwThen || k == token.KwElse
+	return k == token.KwThen || k == token.KwElse || k == token.COMMA || k == token.RPAREN || k == token.RBRACKET || k == token.RBRACE
 }
 
 // parseBlock parses a statement block at the given column: `name = expr`
@@ -1342,7 +1342,7 @@ func (p *parser) parseUnary() ast.Expr {
 }
 
 // parseApply parses juxtaposition application, left-associative: one head,
-// then any number of argument atoms. An immediately attached empty `()` is
+// then argument atoms and an optional final lambda. An attached empty `()` is
 // folded into its atom first, so `f x()` is `f (x ())`, while `f x ()`
 // remains `(f x) ()`. `if` may head an expression but is not an atom, so
 // `print if …` needs parens (as in Elm).
@@ -1363,6 +1363,12 @@ func (p *parser) parseApply() ast.Expr {
 	}
 	for {
 		switch p.peekInExpr().Kind {
+		case token.BACKSLASH:
+			arg := p.parseLambda()
+			if arg == nil {
+				return nil
+			}
+			return &ast.App{Fn: fn, Arg: arg}
 		case token.INT, token.FLOAT, token.STRING, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.LBRACKET, token.KwResume, token.KwQuote, token.DOLLARPAREN:
 			arg := p.parsePostfixAtom()
 			if arg == nil {
@@ -1541,8 +1547,8 @@ func (p *parser) parseClauseParams() []ast.Pattern {
 }
 
 // parseLambda parses `\x -> body` / `\x y -> body`. Like `if`, a lambda
-// heads an expression but is not an atom: `f (\x -> x)` needs parens, and
-// the body extends maximally right (or opens an indented block).
+// may head an expression or be the final argument of an application. Its body
+// extends maximally right (or opens an indented block), up to a delimiter.
 func (p *parser) parseLambda() ast.Expr {
 	bs := p.next() // the backslash
 	var params []ast.Pattern

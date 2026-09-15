@@ -1,0 +1,108 @@
+import Scope
+
+effect Boom
+    abort boom : () -> Int
+
+effect Ask
+    ask : () -> Int
+
+useAsk : (() ->{Ask} Int) ->{Ask} Int
+useAsk action = action()
+
+asking() = ask()
+
+runAsk action =
+    handle useAsk action of
+        ask () -> resume 7
+
+pure() = 1
+emit() =
+    print "emit"
+    2
+fail() = boom()
+
+pair : (() ->{e} Int) -> (() ->{e} Int) ->{e} Int
+pair left right = left() + right()
+
+type Tree e = Leaf (() ->{e} Int) | Branch (List (Tree e))
+leaf : (() ->{e} Int) -> Tree e
+leaf action = Leaf action
+branch : List (Tree e) -> Tree e
+branch children = Branch children
+
+run : Tree e ->{e} Int
+run tree =
+    case tree of
+        Leaf action -> action()
+        Branch children -> List.foldl (\child total -> total + run child) 0 children
+
+quiet = leaf pure
+loud = leaf emit
+
+type Box a = Box a
+
+boxed = Box pure
+
+useBox : Box (() ->{IO} Int) ->{IO} Int
+useBox box =
+    case box of
+        Box action -> action()
+
+useFunctions : List (() ->{IO} Int) ->{IO} Int
+useFunctions actions = List.foldl (\action total -> total + action()) 0 actions
+
+functions = [pure, pure]
+
+consumeIO : (() ->{IO} Int) ->{IO} Int
+consumeIO action = action()
+
+usePure : ((() -> Int) ->{IO} Int) ->{IO} Int
+usePure consumer = consumer pure
+
+type Record e = { action : () ->{e} Int }
+
+runRecord : Record e ->{e} Int
+runRecord record = record.action()
+
+runRecords : List (Record e) ->{e} Int
+runRecords records = List.foldl (\record total -> total + runRecord record) 0 records
+
+quietRecord = Record { action = pure }
+
+staged : Int ->{IO} (Int -> Int)
+staged first =
+    print first
+    \second -> first + second
+
+scoped() = Scope.bracket pure (\_ -> print "release") \_ ->
+    pair emit fail
+
+main() =
+    print (pair pure emit)
+    print (pair emit pure)
+    print (run (branch [quiet, loud]))
+    print (run (branch [loud, quiet]))
+    print (useBox boxed)
+    print (useFunctions functions)
+    print (useFunctions [pure, emit])
+    print (useFunctions [emit, pure])
+    print ((if True then pure else emit)())
+    print (runAsk pure)
+    print (runAsk asking)
+    print (usePure consumeIO)
+    print (runRecords [quietRecord, Record { action = emit }])
+    print (runRecords [Record { action = emit }, quietRecord])
+    print (runRecord { quietRecord | action = pure })
+    later = staged 10
+    print (later 2)
+    tests =
+        [ leaf \_ -> 4
+        , leaf \_ -> 5
+        ]
+    print (run (branch tests))
+    answer =
+        handle scoped() of
+            boom () -> 9
+    print answer
+    3 |> (\n -> n + 1) |> print
+    print <| 5 + 1

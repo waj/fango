@@ -34,6 +34,26 @@ func lintText(p *Prog, b *types.Builtins) string {
 	return out.String()
 }
 
+func TestLintRejectsRetaggedCallbackBinding(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	actual := &types.TFun{Arg: b.Unit, Ret: b.Int}
+	wrong := &types.TFun{Arg: b.Unit, Ret: b.String}
+	callback := &Lambda{Param: "_", Body: &IntLit{Val: 1, Ty: b.Int}, Ty: actual, ParamCapture: sup.FreshCapture()}
+	ref := &VarRef{Name: "callback", Local: true, Ty: actual}
+	app := &App{CalleeKind: Value, Callee: ref, Args: []Expr{&UnitLit{Ty: b.Unit}}, Ty: b.Int}
+	body := &Let{Name: "callback", Rhs: callback, Body: app, Ty: b.Int}
+	p := &Prog{Defs: []Def{{Name: "main", Type: b.Int, Body: body}}}
+	InferCaptures(p, b)
+	if got := lintText(p, b); got != "" {
+		t.Fatalf("valid callback: %s", got)
+	}
+	ref.Ty = wrong
+	if got := lintText(p, b); !strings.Contains(got, "changes its binding type") {
+		t.Fatalf("retagged callback: %s", got)
+	}
+}
+
 func TestLintAcceptsBranchDependentTailResumes(t *testing.T) {
 	p, b := resumeFixture(func(b *types.Builtins) Expr {
 		return &If{Cond: &BoolLit{Val: true, Ty: b.Bool},

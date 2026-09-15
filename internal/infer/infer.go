@@ -57,6 +57,10 @@ type Constraint struct {
 	// It expresses composition without claiming the surrounding function call
 	// performs exactly the callee's effects.
 	Include bool
+	// Subsume checks value compatibility, including variance-directed rows.
+	Subsume   bool
+	ADTs      map[int]*types.ADTInfo
+	Invariant []types.Type
 }
 
 // Env maps top-level names to schemes; block scopes and function parameters
@@ -1116,7 +1120,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
 		}
 	}
-	sub, _, solveErrs := Solve(g.cs, nil, ck.Sub, ck.B, ck.Sup)
+	sub, _, solveErrs := g.solveConstraints(nil)
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
 	errs = append(errs, solveErrs...)
@@ -1181,6 +1185,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 		}
 		ty = annTy
 	}
+	ty = ck.runnerControl(ty, len(d.Params), declEquations(d))
 	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Equations: d.Equations, Type: ty, Body: d.Body, InstanceLimit: len(ck.Instances)}
 	_, isLambda := d.Body.(*ast.Lambda)
 	switch {
@@ -1273,7 +1278,7 @@ func (ck *Checker) ExprWhere(e ast.Expr, allowEffects bool) (types.Type, []diag.
 	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	ty := g.expr(e)
 	var preds []types.Pred // the typeclass seam: always empty in the MVP
-	sub, residual, solveErrs := Solve(g.cs, preds, ck.Sub, ck.B, ck.Sup)
+	sub, residual, solveErrs := g.solveConstraints(preds)
 	ck.Sub = sub
 	_ = residual
 	errs := append(g.errs, solveErrs...)
@@ -1483,7 +1488,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			if idx < 0 {
 				g.errs = append(g.errs, diag.Errorf(f.NameSpan, "UNKNOWN FIELD", "Record `%s` has no field named `%s`.", types.SurfaceName(adt.Con.Name), f.Name))
 			} else {
-				g.cs = append(g.cs, Constraint{Left: ft, Right: fieldTys[idx], Span: f.Value.Span(), Why: Why{Kind: WhyCall}})
+				g.cs = append(g.cs, Constraint{Left: ft, Right: fieldTys[idx], Span: f.Value.Span(), Why: Why{Kind: WhyCall}, Subsume: true, ADTs: g.ck.ADTs})
 			}
 		}
 		for _, f := range adt.RecordFields {
@@ -1527,7 +1532,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			args := appArgs(e)
 			for i, a := range args {
 				at := g.exprWant(a, params[i])
-				g.cs = append(g.cs, Constraint{Left: at, Right: params[i], Span: a.Span(), Why: Why{Kind: WhyCall}})
+				g.cs = append(g.cs, Constraint{Left: at, Right: params[i], Span: a.Span(), Why: Why{Kind: WhyCall}, Subsume: true, ADTs: g.ck.ADTs})
 			}
 			cur := inst
 			var last *types.TFun
@@ -1549,14 +1554,16 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			argWant = fn.Arg
 		}
 		argTy := g.exprWant(e.Arg, argWant)
+		paramTy := g.ck.Sup.FreshVar(types.General)
 		r := g.ck.Sup.FreshVar(types.General)
 		callEff := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
 		g.cs = append(g.cs, Constraint{
 			Left:  fnTy,
-			Right: &types.TFun{Arg: argTy, Eff: callEff, Ret: r},
+			Right: &types.TFun{Arg: paramTy, Eff: callEff, Ret: r},
 			Span:  e.Fn.Span(),
 			Why:   Why{Kind: WhyCall},
 		})
+		g.cs = append(g.cs, Constraint{Left: argTy, Right: paramTy, Span: e.Arg.Span(), Why: Why{Kind: WhyCall}, Subsume: true, ADTs: g.ck.ADTs})
 		g.cs = append(g.cs, Constraint{Left: callEff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
 		ty = r
 		if op, n := g.operationSpine(e); op != nil && n < op.Arity {
@@ -1576,10 +1583,10 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		})
 		thenTy := g.expr(e.Then)
 		elseTy := g.expr(e.Else)
-		g.cs = append(g.cs, Constraint{
-			Left: elseTy, Right: thenTy, Span: e.Else.Span(), Why: Why{Kind: WhyIfBranches},
-		})
-		ty = thenTy
+		ty = g.ck.Sup.FreshVar(types.General)
+		g.cs = append(g.cs,
+			Constraint{Left: thenTy, Right: ty, Span: e.Then.Span(), Why: Why{Kind: WhyIfBranches}, Subsume: true, ADTs: g.ck.ADTs},
+			Constraint{Left: elseTy, Right: ty, Span: e.Else.Span(), Why: Why{Kind: WhyIfBranches}, Subsume: true, ADTs: g.ck.ADTs})
 	case *ast.BinOp:
 		ty = g.binOp(e)
 	case *ast.Block:
@@ -2112,14 +2119,9 @@ func (g *generator) intrinsicSpine(e *ast.App) (string, int) {
 	return v.Name, n
 }
 
-// intrinsicCall types a saturated cleanup scope. Its three callbacks share
-// one row variable in the declaration, but a scope only requires each
-// callback's effects to be *available* where the scope runs, not that all
-// three perform the same effects: acquiring and releasing a resource is
-// ordinarily IO while the body also fails. Source row syntax cannot spell that
-// union, so the compiler supplies it here, as inclusion rather than equality
-// on each callback's own row. A partial application falls back to the ordinary
-// rule, which is the stricter one and therefore still sound.
+// intrinsicCall checks the saturated intrinsic spine while retaining its
+// resolved identity for ownership and lowering. Callback arguments use the
+// same directional compatibility as ordinary and partial applications.
 func (g *generator) intrinsicCall(e *ast.App, name string) types.Type {
 	sch := g.ck.Intrinsics[name]
 	arity := types.IntrinsicArity(name)
@@ -2139,16 +2141,8 @@ func (g *generator) intrinsicCall(e *ast.App, name string) types.Type {
 		if i >= arity {
 			break
 		}
-		callback, isFn := params[i].(*types.TFun)
 		at := g.exprWant(arg, params[i])
-		if !isFn {
-			g.cs = append(g.cs, Constraint{Left: at, Right: params[i], Span: arg.Span(), Why: Why{Kind: WhyCall}})
-			continue
-		}
-		own := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
-		g.cs = append(g.cs,
-			Constraint{Left: at, Right: &types.TFun{Arg: callback.Arg, Eff: own, Ret: callback.Ret}, Span: arg.Span(), Why: Why{Kind: WhyCall}},
-			Constraint{Left: own, Right: callback.Eff, Span: arg.Span(), Why: Why{Kind: WhyCall}, Include: true})
+		g.cs = append(g.cs, Constraint{Left: at, Right: params[i], Span: arg.Span(), Why: Why{Kind: WhyCall}, Subsume: true, ADTs: g.ck.ADTs})
 	}
 	g.cs = append(g.cs, Constraint{Left: last.Eff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
 	return result
@@ -2361,6 +2355,15 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 			ty = g.expr(bind.Body)
 		}
 		if bind.Ann != nil && annTy != nil {
+			// Observe the inferred row before equality can populate it from the
+			// annotation. Record obligations still resolve after annotation context.
+			sub, _, errs := g.solveConstraints(nil)
+			g.ck.Sub = sub
+			g.errs = append(g.errs, errs...)
+			g.cs = nil
+			if !sameKnownEffects(g.ck.Sub.Apply(annTy), g.ck.Sub.Apply(ty)) {
+				g.errs = append(g.errs, diag.Errorf(bind.Ann.Sp, "EFFECT MISMATCH", "The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", bind.Name))
+			}
 			// Skolemize-and-unify, as at the top level.
 			g.cs = append(g.cs, Constraint{Left: annTy, Right: ty,
 				Span: bind.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: bind.Name}})
@@ -2394,6 +2397,11 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 						"The annotation for `%s` claims a type variable that the enclosing\ndefinition pins down — the annotation is more general than the body\nallows.", bind.Name))
 				}
 			}
+			eqs := bind.Equations
+			if len(eqs) == 0 {
+				eqs = []ast.Equation{{Params: bind.Params, Body: bind.Body}}
+			}
+			ty = g.ck.runnerControl(ty, len(bind.Params), eqs)
 			scheme = g.ck.generalize(ty, g.scopeFreeIDs())
 			// Only obligations involving this binding's quantified variables
 			// move into its scheme; captured obligations stay with the parent.
@@ -2439,7 +2447,7 @@ func (g *generator) solveHere(from int) {
 		g.resolveRecords(true, from)
 		return
 	}
-	sub, _, errs := Solve(g.cs, nil, g.ck.Sub, g.ck.B, g.ck.Sup)
+	sub, _, errs := g.solveConstraints(nil)
 	g.ck.Sub = sub
 	g.errs = append(g.errs, errs...)
 	g.cs = nil
@@ -2599,7 +2607,7 @@ func (g *generator) recordPass(final bool, from int) int {
 			case !visible(u.candidates):
 				g.errs = append(g.errs, diag.Errorf(u.span, "PRIVATE RECORD FIELD", "The fields of record `%s` are not exposed to this module.", types.SurfaceName(adt.Con.Name)))
 			default:
-				constraints = append(constraints, Constraint{Left: u.ty, Right: fieldTypes[idx], Span: u.span, Why: Why{Kind: WhyCall}})
+				constraints = append(constraints, Constraint{Left: u.ty, Right: fieldTypes[idx], Span: u.span, Why: Why{Kind: WhyCall}, Subsume: ob.kind != recordMatch, ADTs: g.ck.ADTs})
 			}
 		}
 		if ob.kind == recordBuild {
@@ -2665,7 +2673,7 @@ func (g *generator) caseExpr(e *ast.Case) types.Type {
 		bodyTy := g.expr(br.Body)
 		g.locals = scope.parent
 		g.cs = append(g.cs, Constraint{
-			Left: bodyTy, Right: resultTy, Span: br.Body.Span(), Why: Why{Kind: WhyCaseBranches},
+			Left: bodyTy, Right: resultTy, Span: br.Body.Span(), Why: Why{Kind: WhyCaseBranches}, Subsume: true, ADTs: g.ck.ADTs,
 		})
 	}
 	return resultTy

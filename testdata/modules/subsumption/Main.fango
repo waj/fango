@@ -1,0 +1,32 @@
+module Main exposing (main)
+
+import Helpers
+import Tree
+
+effect Tick
+    tick : () -> Int
+
+effect Stop
+    abort stop : () -> Int
+
+pure() = 1
+count() = tick()
+release _ = ()
+fail _ = stop()
+
+quiet = Tree.leaf pure
+
+calculation() =
+    counted = Tree.leaf count
+    first = Tree.total (Tree.group [quiet, counted])
+    second = Tree.total (Tree.group [counted, quiet])
+    partial = Helpers.pair pure
+    paired = partial count
+    scoped =
+        handle Helpers.withValue pure release fail of
+            stop () -> 9
+    first + second + paired + scoped
+
+main =
+    handle calculation() of
+        tick () -> resume 2

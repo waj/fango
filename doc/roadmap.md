@@ -209,9 +209,8 @@ written in fango: a bundled `Expect` module whose failures abort through an
 effect, a bundled `Test` module with a row-indexed tree of `describe`, `test`,
 `skip`, `todo`, and `only`, and a `Test.run` entry a program calls from
 `main`. Shared pipeline operators, trailing final lambdas, and named-callback
-row subsumption belong to [effects milestone 1](roadmap-effects.md#1-compositional-effects-and-call-syntax).
-The proposed canonical test shape is `test "name" \_ ->`; the library can
-start with parenthesized callbacks before that milestone. Failure source
+row subsumption are implemented; see the [reference](reference.md#effectful-function-types).
+The proposed canonical test shape is `test "name" \_ ->`. Failure source
 positions need the proposed compiler-solved call-site constraint described in
 the testing roadmap. A `fango test` command and fuzz testing are deferred.
 
@@ -268,9 +267,9 @@ syntax. The bundled `Fail` effect, typed `IO.Error` values, and the scoped
 `File` resource API are built on them, with `File.Handle` a compiler-known
 capability. All of this shipped without suspension.
 
-The proposed sequence is API-first:
+Callback inclusion, covariant row widening, trailing final lambdas, and ordinary
+pipes are implemented. The remaining proposed sequence is API-first:
 
-1. Compositional effect subsumption, trailing final lambdas, and ordinary pipes.
 2. General scoped resources and capture/borrowing contracts, including escape
    through outer handlers.
 3. One Stream API with scoped cursors, ordinary library consumers, complete
@@ -290,25 +289,6 @@ The detailed roadmap owns cleanup-failure observation as a prerequisite for stab
 reporting, and separates deferred operation polymorphism, builtin IO interception,
 named instances, non-tail resumption, escaping owners, and shared mutable state
 from the committed sequence.
-
-## Effect-row subsumption for higher-order arguments
-
-A function taking several callbacks over one shared row variable can only be
-applied to arguments whose rows agree, because an argument's type is unified
-with the parameter's rather than required to be included in it. Passing a named
-worker pins the row; passing an eta-expanded lambda does not, because a
-lambda's row is inferred and accumulates inclusion constraints. So today
-`bracket open close body` is written with each callback wrapped, or it is
-rejected as soon as the body performs something `open` does not.
-
-`Scope.bracket` has a bespoke saturated-call rule: each callback's effects
-need only be available where the scope runs. Ordinary helpers do not receive
-that general subsumption rule, so named callbacks can still require eta wrappers.
-
-[Effects milestone 1](roadmap-effects.md#1-compositional-effects-and-call-syntax)
-owns the general fix: callback row inclusion and covariant row-indexed values,
-with sound variance, annotation checking, generalization, and inference order.
-The testing roadmap consumes this work rather than defining a separate fix.
 
 ## Constraint simplification for parameterized types
 

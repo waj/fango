@@ -4,7 +4,9 @@ This document owns proposed APIs and the work needed to make them usable.
 The implemented contract remains in [design](design.md#functions-and-effects)
 and [reference](reference.md#effects-and-handlers); the main
 [roadmap](roadmap.md#effects-state-and-resource-scopes) summarizes priorities.
-All examples below are **proposed**, with their delivery milestones identified.
+The APIs below are **proposed**, with their delivery milestones identified.
+Callback subsumption, trailing lambdas, and pipes are implemented foundations;
+see the [reference](reference.md#effectful-function-types).
 Fango blocks use intended Fango syntax and omit routine imports; application
 functions such as `fetch` and `consume` stand for domain code. Lifetime
 contracts are explicitly schematic, not new source syntax.
@@ -21,8 +23,7 @@ remove completed roadmap work; Git history is the archive.
 
 ### Effects and real IO
 
-**Proposed example — milestone 1 for callback parity and call syntax; milestone
-4 for the suspending interpretation.** Ordinary declarations, direct calls,
+**Proposed example — milestone 4 for the suspending interpretation.** Ordinary declarations, direct calls,
 tail-resumptive handlers, and `Fail` retain their existing meaning:
 
 ```fango
@@ -52,7 +53,7 @@ The operation's apparent result type does not determine its execution mode:
 the supplied interpretation does. `Async` describes execution, `IO` external
 interaction, and `Fail Error` typed failure; none erases the others.
 
-**Proposed example — milestone 2, with milestone 1 trailing syntax:**
+**Proposed example — milestone 2:**
 
 ```fango
 File.withFile path \file ->
@@ -70,7 +71,7 @@ example are synchronous; their suspending forms arrive in milestone 5.
 
 ### Stream descriptions and pipelines
 
-**Proposed example — milestone 3, using milestone 1 syntax:**
+**Proposed example — milestone 3:**
 
 ```fango
 numbers = Stream.generate \_ ->
@@ -342,9 +343,8 @@ It does not yet provide the general borrowing, Stream, or task APIs above.
 Preserve its useful mechanisms while replacing terminal intrinsics and
 canonical resource-name lists with general rules:
 
-- **Effect subsumption:** widen fewer-effect callbacks and covariant stream
-  values to a permitted combined row. Prove variance, annotation checking,
-  generalization, and inference-order behavior; never erase a real effect.
+- **Effect subsumption:** use the implemented callback inclusion and nominal
+  variance rules for the proposed Stream types; never erase a real effect.
 - **Capture and borrowing contracts:** infer and export argument retention,
   result captures, exclusive access, and captured evidence through helpers,
   closures, ADTs, dictionaries, and module boundaries. General resource
@@ -396,24 +396,9 @@ Go stack allocation.
 Each stopping point is usable without the remaining sequence. All inherit the
 API tour's semantics and the verification gates below.
 
-### 1. Compositional effects and call syntax
-
-- **API and dependencies:** named pure/effectful callbacks work alike in
-  ordinary helpers; deliver the tour's trailing lambdas and pipes on the
-  existing Direct/Exit foundation. Suspended interpretations wait for 4.
-- **Implementation and soundness:** inclusion-based callback checking and
-  covariant row widening, sound variance and annotation checks, order-independent
-  inference; parser sugar lowers to ordinary application/lambda Core. A final
-  lambda extends rightward and ends at its layout boundary or list comma.
-- **Generated code:** preserve effect timing, evidence and Direct/Exit adapters;
-  no scheduler is introduced by call syntax or row widening.
-- **Acceptance/stopping point:** mixed named and inline callbacks compose in
-  `Scope` and test helpers, across modules and argument orderings. The test
-  framework can adopt `test "name" \_ ->` without waiting for streams.
-
 ### 2. General scoped capabilities
 
-- **API and dependencies:** after 1, declare library resources and implement
+- **API and dependencies:** declare library resources and implement
   `withConnection` over `Scope.bracket`; checked helpers can borrow resources.
 - **Implementation and soundness:** replace canonical-name treatment with
   general resource declarations and inferred/exported capture/access contracts.
@@ -427,7 +412,7 @@ API tour's semantics and the verification gates below.
 
 ### 3. Streams and custom traversal
 
-- **API and dependencies:** after 1–2, deliver `Stream.generate`, transformations,
+- **API and dependencies:** after 2, deliver `Stream.generate`, transformations,
   library consumers, `withCursor`, and `Iterator.next`. The tour's file/filter/
   take, annotated consumer, lookahead parsing, and sequential zip must work.
 - **Implementation and soundness:** complete Machine representation families for
@@ -601,7 +586,7 @@ The API tour is the implementation acceptance-suite specification:
 - Parallel execution rejects unsafe captures. Generated synchronous pipelines
   contain no required scheduler, goroutine, or channel machinery.
 
-For this documentation replacement, check internal links, API spelling,
+For roadmap changes, check internal links, API spelling,
 milestone dependencies, proposed/implemented labels, and single ownership of
 syntax proposals. Proposed snippets are acceptance specifications, not fixtures
 claimed to compile with today's compiler.

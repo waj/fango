@@ -25,6 +25,7 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 		c  Constraint
 	}
 	var failures []failure
+	var vs map[int][]polarity
 	solve := func(at int, c Constraint) bool {
 		var m *mismatch
 		if c.Include {
@@ -45,10 +46,31 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 		return true
 	}
 	var deferred []pending
-	for i := range cs {
-		labels, tail, split := splitRigidTail(cs[i], sub)
+	var bounds []pending
+	for i, c := range cs {
+		if c.Subsume {
+			if vs == nil {
+				vs = variances(c.ADTs)
+			}
+			rows, m := subsumption(c, sub, bi, sup, vs)
+			if m != nil {
+				failures = append(failures, failure{at: i, err: mismatchError(c, m, sub)})
+			} else {
+				for _, r := range rows {
+					bounds = append(bounds, pending{at: i, c: r})
+				}
+			}
+		} else if c.Include || c.Why.Kind == WhyEffectEscapes {
+			bounds = append(bounds, pending{at: i, c: c})
+		} else {
+			solve(i, c)
+		}
+	}
+	for _, p := range bounds {
+		i, constraint := p.at, p.c
+		labels, tail, split := splitRigidTail(constraint, sub)
 		if !split {
-			solve(i, cs[i])
+			solve(i, constraint)
 			continue
 		}
 		// The labels go in now — that keeps the surrounding row open — and the
@@ -56,13 +78,13 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 		// the row can still take a label. A failed label leaves the tail
 		// alone rather than reporting the same call twice.
 		if len(labels) > 0 {
-			c := cs[i]
+			c := constraint
 			c.Left = types.Row{Labels: labels}
 			if !solve(i, c) {
 				continue
 			}
 		}
-		c := cs[i]
+		c := constraint
 		c.Left = types.Row{Tail: tail}
 		deferred = append(deferred, pending{at: i, c: c})
 	}
@@ -132,6 +154,9 @@ func splitRigidTail(c Constraint, sub Subst) (labels []types.EffLabel, tail *typ
 }
 
 func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
+	if c.Subsume && m.effect {
+		c.Why.Kind = WhyEffectNotAllowed
+	}
 	if c.Why.Kind == WhyAnnotation && m.effect {
 		c.Why.Kind = WhyEffectMismatch
 	}
@@ -152,7 +177,9 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 			"I cannot use (%s) with this operand:\n\n    %s\n\nIt does not match the other side:\n\n    %s",
 			c.Why.Op, left, right)
 	case WhyCall:
-		if _, ok := sub.Apply(c.Left).(*types.TFun); ok {
+		if c.Subsume {
+			e = diag.Errorf(c.Span, "TYPE MISMATCH", "This argument has type:\n\n    %s\n\nbut the function expects:\n\n    %s", left, right)
+		} else if _, ok := sub.Apply(c.Left).(*types.TFun); ok {
 			e = diag.Errorf(c.Span, "TYPE MISMATCH", "This function's argument type does not match this application.\nThe function has type:\n\n    %s\n\nbut this application requires:\n\n    %s", left, right)
 		} else {
 			e = diag.Errorf(c.Span, "TYPE MISMATCH", "This is not a function, so I cannot give it an argument.\nIt has type:\n\n    %s", left)

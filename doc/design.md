@@ -464,6 +464,30 @@ perform, which is what lets an `{IO, Exception ex | e}` body call an
 failures are reported in constraint order regardless of the order they were
 solved in.
 
+Applications separate callee-shape equality from directional argument
+compatibility. Callback effects are included in the permitted parameter row;
+results are covariant and function inputs contravariant. A fresh expected type
+gets its own row view rather than borrowing a named value's closed row. Shared
+arguments, collection elements, and branch results can therefore accumulate
+their combined effects without retagging the original binding. Shape constraints
+are solved before the resulting row bounds; unresolved flexible relationships
+use the existing shared-row schemes rather than introducing row inequalities
+into the source language. Class-constrained types remain invariant.
+
+Nominal variance is the least fixed point of positive and negative parameter
+occurrences through constructor and record fields. Mixed occurrences and effect
+label arguments are invariant. The checker has module schemas even when their
+constructors are private, so abstract imports obey the same variance proof.
+Row kind alone never implies covariance. Definition annotations still compare
+known arrow effects exactly before annotation equality can populate inferred
+rows; local definitions use the same check.
+
+A pure handler runner that consumes controlled callbacks retains a polymorphic
+transport contract independently of its source effect row. The checker derives
+that requirement from controlled parameter types and executed call contracts,
+including calls inside handlers, while excluding latent lambda bodies. Handling
+an effect does not convert a caller's Exit-family callback to a Direct value.
+
 Top-level values and functions generalize. Local syntactic functions and
 lambdas generalize, while local values remain monomorphic so their strict,
 evaluate-once semantics are not changed by lambda lifting. `main` is ground and
@@ -822,11 +846,9 @@ as a Core node. It is recognized by resolved canonical name, is absent from the
 native table so nothing can lower it to a `NativeCall` or look for a Go
 sidecar, and its annotation is resolved in the ordinary annotation scope
 because its parameters are fango functions over an open row rather than scalars
-crossing a Go ABI. The checker also gives a saturated intrinsic application a
-bespoke rule where source row syntax falls short: each callback's effects are
-required to be *available* where the scope runs rather than equal to the
-scope's own row, which is what lets one scope acquire with `IO` and fail in its
-body. An unsaturated application keeps the ordinary, stricter rule.
+crossing a Go ABI. Intrinsic callbacks use the same directional argument
+checking as ordinary calls, including partial applications. Their special rules
+concern ownership and Core lowering, rather than callback row equality.
 
 Core also retains the control convention on every executable boundary.
 Transport-polymorphic operations and calls are ANF-hoisted whenever they occur
@@ -965,6 +987,20 @@ the runtime ABI. Passing a concrete callback therefore adapts it to that ABI;
 local function references are eta-expanded so their binding keeps its concrete
 type while the wrapper retains the callback's execution, evidence, captures,
 and per-arrow control behavior.
+
+Function adapters also convert inputs contravariantly and returned values
+covariantly. Nominal values with different stored runtime types are converted
+through typed constructor/case reconstruction and recursive local helpers;
+row-indexed values with identical erased types need no traversal. Local
+references use their binding's actual Core ABI, including partial applications,
+and Core lint independently rejects retagged worker parameters, lambda
+parameters, and Let-bound values. Pure factories select callback adapters by
+their representation family even when their execution protocol remains Direct.
+
+A trailing final lambda is parser sugar for the existing application and lambda
+nodes. Its body extends rightward to a layout boundary or enclosing delimiter;
+list commas remain element boundaries. `Basics` defines `|>` and `<|` as
+ordinary effect-polymorphic functions with precedence zero, exposed by `Prelude`.
 
 ## Go backend and runtime
 

@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Basics exposing (Eq(..), Num(..), Ord(..), Show(..), modBy, quotientBy, remainderBy, (++), (/), (/=))
+module Basics exposing (Eq(..), Num(..), Ord(..), Show(..), modBy, quotientBy, remainderBy, (++), (/), (/=), (<|), (|>))
 
 class Num a
     fromInt : Int -> a
@@ -239,3 +239,13 @@ modBy modulus x =
 -- A zero divisor crashes the program.
 quotientBy : Int -> Int -> Int
 quotientBy = native "$2 / $1"
+
+-- Strict application, with the callback effects on the final arrow.
+(|>) : a -> (a ->{e} b) ->{e} b
+(|>) value fn = fn value
+
+(<|) : (a ->{e} b) -> a ->{e} b
+(<|) fn value = fn value
+
+infixl 0 (|>)
+infixr 0 (<|)

@@ -1,5 +1,4 @@
 <+> : Int -> Int -> Int
-|> : a -> (a -> b) -> b
 infix_use : Int
 as_value : Int -> Int -> Int
 partial : Int -> Int

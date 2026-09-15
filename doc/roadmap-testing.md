@@ -14,10 +14,9 @@ the places elm-test uses callbacks or combinators — `onFail`, `all`,
 reporters — are handlers or plain sequencing here.
 
 All APIs in this document are proposed. Snippets use existing Fango syntax
-except for the canonical suite's trailing lambdas and the explicitly marked
-call-site constraint. Shared call syntax is owned by
-[effects milestone 1](roadmap-effects.md#1-compositional-effects-and-call-syntax),
-not a separate testing-language proposal.
+except for the explicitly marked call-site constraint. Shared call syntax and
+callback inclusion are implemented in the language; see the
+[reference](reference.md#effectful-function-types).
 
 ## Decisions
 
@@ -33,8 +32,8 @@ These were settled when the design was drawn up and are not open:
   whose bodies are `() ->{Expect, IO} ()` — has simpler signatures but fixes
   the effects a test may perform; the row-indexed form lets a caller handle
   its own effect around the whole run.
-- **Shared call syntax.** Adopt the trailing final lambda `test "name" \_ ->`
-  and ordinary `(|>)` / `(<|)` from effects milestone 1. Unit callbacks retain
+- **Shared call syntax.** Use the trailing final lambda `test "name" \_ ->`
+  and ordinary `(|>)` / `(<|)` already supplied by the language. Unit callbacks retain
   `\_ ->`; no zero-pattern lambda or `do` keyword is planned here.
 - **First-version scope** is `describe`, `test`, `skip`, `todo`, `only`, the
   expectations below, a console report, and failure source positions. Fuzz
@@ -47,14 +46,10 @@ These were settled when the design was drawn up and are not open:
   (`type Foo eff = Foo (() ->{IO | eff} ())` in `testdata/run/row_kind_adt.fango`),
   and an effect name is accepted as a singleton row argument, so `Test IO`
   means `Test {IO}`.
-- A lambda's row is inferred, so a pure lambda body fits a suite annotated
-  `Test IO`. A *named* pure function does not: `() -> ()` is a closed-row
-  mismatch against `() ->{Expect | e} ()`. An unannotated top-level suite
-  infers a closed row (`Test {}`) rather than generalizing, so a pure suite and
-  an IO suite cannot share one `describe`. This is the row-subsumption gap
-  recorded in [the roadmap](roadmap.md#effect-row-subsumption-for-higher-order-arguments);
-  the framework can use parenthesized lambda wrappers before that milestone.
-  Afterwards named callbacks and covariant suite rows should compose directly.
+- Named and inline callbacks both fit a permitted wider effect row. Nominal
+  variance is inferred through recursive fields, so the proposed covariant
+  `Test e` tree can combine pure and IO suites in one `describe`. Definition
+  annotations still check known arrow effects exactly.
 - A lambda may open an indented block, and an abort raised inside an abort
   clause propagates outward — which is what `Expect.onFail` needs.
 - Blanket-instance specialization (`instance Show a => Inspect a` over a bare
@@ -99,7 +94,7 @@ fuzz cases, richer `only` semantics — without touching user code. A fuzz test
 later is a `Case` whose body loops under `Random.runSeeded`, so the shape
 already accommodates it.
 
-The proposed canonical shape after effects milestone 1, with several
+The proposed canonical shape, with several
 expectations sequenced as statements:
 
 ```fango
@@ -118,12 +113,6 @@ suite =
 
 main() = Test.run suite
 ```
-
-Interim guidance before effects milestone 1 (using parenthesized callbacks):
-annotate each suite with the row its module needs, `Test IO` being the usual choice; pass bodies as lambdas, and
-wrap a named function as `\_ -> check()` rather than passing it directly; any
-effect other than `Expect` and the suite's row is handled inside the body with
-an ordinary handler, as in `result = Random.runSeeded 7 (\_ -> roll())`.
 
 ## Expectations
 
@@ -212,18 +201,17 @@ Semantics:
 
 ## The call shape for test bodies
 
-The selected proposal is a trailing final lambda, `test "name" \_ ->`,
+The selected call shape is a trailing final lambda, `test "name" \_ ->`,
 with the body indented beneath it. It also handles parameter-taking callbacks
 such as `fuzz int "name" \n ->`; Unit callbacks keep the existing `\_ ->`
 spelling. This is a general application rule for tests, resource scopes, and
 async runners. A zero-pattern lambda and a `do` keyword are not part of it.
 
-[Effects milestone 1](roadmap-effects.md#1-compositional-effects-and-call-syntax)
-owns parsing/layout, pipeline operators, callback parity, and editor verification.
-It lowers to ordinary lambda/application Core. The first library version can
-ship earlier using `test "name" (\_ -> ...)`; adopt trailing syntax when that
-shared milestone lands. `actual |> Expect.equal expected` likewise waits for
-the shared ordinary operator declarations rather than a test-specific pipe.
+Parsing/layout, ordinary pipeline operators, and callback inclusion are
+implemented language features, documented in the
+[reference](reference.md#declarations-annotations-and-functions). They lower to
+ordinary lambda/application Core. The first library version can use
+`test "name" \_ ->` and `actual |> Expect.equal expected` directly.
 
 ## Failure source positions
 
@@ -262,9 +250,8 @@ signature.
 
 ## Milestones
 
-The shared syntax dependency is effects milestone 1; this document owns only
-the framework work. M1 can precede it using parenthesized callbacks and ordinary
-application, then adopt the shared syntax and row-subsumption behavior.
+Shared syntax and row subsumption are implemented; this document owns the
+remaining framework work.
 
 1. **M1 — library.** `stdlib/Expect.fango`, `stdlib/Test.fango`, the runner,
    and the report format. Fixtures under `testdata/run/`: a passing run, a

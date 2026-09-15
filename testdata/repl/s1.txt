@@ -10,17 +10,16 @@ fango 0.1 — :help for commands
 > x : Int
 > -- TYPE MISMATCH ---------------------------------------- <repl>
 
-This function's argument type does not match this application.
-The function has type:
+This argument has type:
 
-    Float -> Float -> Float
+    Int
 
-but this application requires:
+but the function expects:
 
-    Int -> a
+    Float
 
 1| x / 2
-     ^
+   ^
 > -- EFFECTFUL PROMPT DECLARATION ------------------------- <repl>
 
 Effectful declarations are not installed at the prompt; run the expression directly.

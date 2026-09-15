@@ -935,6 +935,8 @@ fixities it declares, from tighter to looser:
 | `==`, `/=`, `<`, `>`, `<=`, `>=` | comparison | `infix 4` |
 | `&&` | logical and, short-circuiting | `infixr 3` |
 | `\|\|` | logical or, short-circuiting | `infixr 2` |
+| `\|>` | pass the left value to the right function | `infixl 0` |
+| `<\|` | apply the left function to the right value | `infixr 0` |
 
 `+`, `-`, `*`, and unary negation require `Num`; equality requires `Eq`, and
 ordering requires `Ord`. These classes have standard scalar instances and can
@@ -1038,7 +1040,27 @@ the ordinary whitespace-application grouping `(print foo) 1`. Whitespace or a
 comment before `()` makes it an ordinary application.
 
 Partial application and functions as values are supported. Lambdas use
-`\x y -> expression`; parenthesize a lambda when passing it as an argument.
+`\x y -> expression`. A final lambda argument may omit parentheses:
+
+```fango
+Scope.bracket acquire release \resource ->
+    use resource
+```
+
+The lambda body extends rightward, including operators, until its enclosing
+layout boundary or delimiter. A list comma ends the current element, so
+`[test "one" \_ -> checkOne(), test "two" \_ -> checkTwo()]` contains two
+calls. An indented lambda body may contain bindings and Unit statements.
+Parenthesized lambdas remain valid; a lambda always needs at least one pattern.
+
+`value |> function` and `function <| value` are ordinary strict calls to
+operators declared in `Basics` and exposed by `Prelude`. They perform the
+callback's effects on the final application. For example,
+`values |> List.map double |> List.foldl (+) 0` chains leftward;
+`print <| 1 + 2` applies `print` to the sum. Mixing `|>` and `<|` without
+parentheses is an associativity conflict. In `apply \x -> x |> finish`, the
+pipe belongs to the lambda body.
+
 Function and lambda arguments are patterns. Constructor applications must be
 parenthesized in an argument position (`map f (Cons x xs)`), while record and
 list patterns delimit themselves. `_` discards an argument. A lambda has one
@@ -1564,21 +1586,37 @@ annotated row may also carry effects a callee does not perform, so a
 `{IO, Fail String | e}` body may call a `{Fail String | e}` argument and
 `print` besides.
 
-A shared row variable means the same row at every occurrence, so two arguments
-whose own rows differ do not both fit one `{e}`. Passing a named function
-pins `e` to that function's row, and a later argument performing anything else
-is then rejected:
+A shared row variable describes the permitted combined effects. Each callback
+may perform fewer effects, whether it is named or written inline:
 
 ```fango
 pair : (() ->{e} Int) -> (() ->{e} Int) ->{e} Int
 
-pair emit boom      -- rejected: emit fixes e to {IO}, boom needs Fail
-pair (\_ -> emit()) (\_ -> boom())   -- accepted: e becomes {IO, Fail String}
+pair emit boom      -- e includes IO and Fail String
+pair boom emit      -- the same combined row
+pair (\_ -> emit()) boom
 ```
 
-A lambda's row is inferred, so wrapping each argument lets the row grow to the
-union of what the callbacks perform. There is no source syntax for that union,
-so the eta-expanded form is the way to write it.
+Argument order does not determine the permitted row. Partial applications and
+ordinary wrappers use the same rule as saturated calls, including `Scope`.
+Passing a callback never executes it, and widening one use does not change its
+binding or other uses.
+
+The rule also applies to stored callbacks and covariant effect-indexed values.
+For example, `type Test e = Test (() ->{e} ())` permits pure and IO tests in
+one list, in either order. The compiler derives variance from fields, including
+recursive types and imported abstract types. Function inputs reverse the
+direction: a function accepting only pure callbacks cannot stand in for one
+that must accept IO callbacks. Parameters used in both directions, effect-label
+arguments, and class constraints remain invariant. Widening never removes an
+effect or relaxes capture and resource restrictions.
+
+Definition annotations remain exact about the known effects on their arrows.
+A pure body annotated `() ->{IO} Int` is rejected, at top level or in a local
+definition. This differs deliberately from argument compatibility: a named pure
+function can be passed to a parameter permitting IO without claiming that its
+own definition performs IO. Annotation type variables and residual row tails
+remain rigid.
 
 
 An annotation's tail stays rigid, so a body may not perform an effect the
@@ -1786,12 +1824,10 @@ shape rule: it is an `Int` behind a private constructor, but the compiler
 knows it as a resource, so `File.withFile` and its siblings restrict their
 results exactly as a scope over a closure-bearing record would.
 
-`Scope.bracket` is a compiler intrinsic rather than an ordinary library
-function, so the compiler knows each callback's effects need only be available
-where the scope runs. Acquiring and releasing with `IO` while the body also
-fails is therefore accepted, which the shared row variable in its signature
-cannot express on its own. Applying it to fewer than three arguments falls back
-to the ordinary, stricter rule.
+`Scope.bracket` remains a compiler intrinsic for cleanup and lifetime handling.
+Its callbacks use the ordinary argument-inclusion rule: acquisition and release
+may use IO while the body also fails. Partial applications and ordinary wrappers
+have the same effect compatibility, subject to the existing resource restrictions.
 
 A scope does whatever its callbacks do, so a program whose parts are all
 stage-safe may run one at compile time. Resources and system entropy remain

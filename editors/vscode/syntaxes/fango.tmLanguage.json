@@ -313,6 +313,7 @@
         { "include": "#pin_pattern" },
         { "include": "#handler_state" },
         { "include": "#resume_expression" },
+        { "include": "#lambda" },
         { "include": "#keywords" },
         { "include": "#return_clause" },
         { "include": "#booleans" },
@@ -335,6 +336,21 @@
           "name": "constant.language.unit.fango",
           "match": "\\(\\)"
         }
+      ]
+    },
+    "lambda": {
+      "comment": "A lambda may head an expression or follow application arguments. Its parameter header ends at the exact arrow token; the body uses the enclosing expression rules.",
+      "begin": "\\\\",
+      "end": "(?<![!#%&*+\\-/:<=>?@^|~])->(?![!#%&*+\\-/:<=>?@^|~])",
+      "beginCaptures": {
+        "0": { "name": "keyword.operator.lambda.fango" }
+      },
+      "endCaptures": {
+        "0": { "name": "keyword.operator.arrow.fango" }
+      },
+      "patterns": [
+        { "include": "#expressions" },
+        { "name": "variable.parameter.fango", "match": "\\b[a-z][A-Za-z0-9_]*\\b" }
       ]
     },
     "list_expression": {

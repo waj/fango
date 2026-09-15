@@ -1,0 +1,14 @@
+module Tree exposing (Tree, leaf, group, total)
+
+type Tree e = Leaf (() ->{e} Int) | Group (List (Tree e))
+
+leaf : (() ->{e} Int) -> Tree e
+leaf action = Leaf action
+
+group : List (Tree e) -> Tree e
+group children = Group children
+
+total : Tree e ->{e} Int
+total tree = case tree of
+    Leaf action -> action()
+    Group children -> List.foldl (\child sum -> sum + total child) 0 children

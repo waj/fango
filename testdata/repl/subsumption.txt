@@ -1,0 +1,40 @@
+fango 0.1 — :help for commands
+> > | | one : () -> Int
+> | | pair : (() ->{e} Int) -> (() ->{e} Int) ->{e} Int
+> | | | emit : Num a => () ->{IO} a
+> Int
+> Int
+> 3 : Int
+> 4 : Num a => a
+> 3 : Int
+> | | -- EFFECT MISMATCH -------------------------------------- <repl>
+
+The effect row in the annotation for `bad` does not exactly match the effects performed by its body.
+
+1| bad : () -> Int
+       ^^^^^^^^^^^
+
+-- EFFECT MISMATCH -------------------------------------- <repl>
+
+The effect row in this annotation does not match the effects performed by its body.
+The annotation says:
+
+    () -> Int
+
+but the body requires:
+
+    () ->{IO} Int
+
+2| bad() = pair one emit
+           ^^^^^^^^^^^^^
+
+Note: a closed effect row cannot absorb additional effects
+> -- NAMING ERROR ----------------------------------------- <repl>
+
+I don't know a value named `bad`.
+
+1| bad
+   ^^^
+> bad : Num a => () -> a
+> 2 : Num a => a
+> 

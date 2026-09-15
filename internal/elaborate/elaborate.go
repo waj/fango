@@ -588,7 +588,8 @@ type elab struct {
 	// evidence is a lexical stack per nominal effect. Concrete handler
 	// activations carry a scope identity; function/lambda parameters carry a
 	// capture variable. This metadata is erased by both runtime backends.
-	evidence map[int][]core.EffectInstance
+	evidence      map[int][]core.EffectInstance
+	valueAdapters []valueAdapter
 }
 
 func newElab(ck *infer.Checker, declName string, declScheme types.Scheme) *elab {
@@ -861,8 +862,8 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 	case *ast.UnitLit:
 		return &core.UnitLit{Ty: ty}
 	case *ast.Var:
-		if _, local := el.scopeIdx[e.Name]; local {
-			return &core.VarRef{Name: e.Name, Ty: ty, Local: true}
+		if index, local := el.scopeIdx[e.Name]; local {
+			return &core.VarRef{Name: e.Name, Ty: el.scope[index].ty, Local: true}
 		}
 		if method := el.ck.Methods[e.Name]; method != nil {
 			return el.methodValue(method, el.ck.ExprTypes[e])
@@ -933,8 +934,8 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 	case *ast.If:
 		return &core.If{
 			Cond: el.expr(e.Cond),
-			Then: el.expr(e.Then),
-			Else: el.expr(e.Else),
+			Then: el.adaptFunctionValue(el.expr(e.Then), ty),
+			Else: el.adaptFunctionValue(el.expr(e.Else), ty),
 			Ty:   ty,
 		}
 	case *ast.BinOp:
@@ -1018,7 +1019,7 @@ func (el *elab) expr(e ast.Expr) core.Expr {
 				rhs = el.expr(bind.Body)
 			}
 			if !isFn {
-				el.pushScope(bind.Name, zonked)
+				el.pushScope(bind.Name, rhs.Type())
 				pushed++
 			}
 			let := &core.Let{
@@ -1080,8 +1081,9 @@ func (el *elab) recordLiteral(e *ast.RecordLit, ty types.Type) core.Expr {
 		}{name, value})
 	}
 	args := make([]core.Expr, len(adt.RecordFields))
+	fieldTypes := adt.InstFields(adt.Ctors[0], ty.(*types.TCon).Args)
 	for i, f := range adt.RecordFields {
-		args[i] = values[f.Name]
+		args[i] = el.adaptFunctionValue(values[f.Name], el.eraseRuntimeKinds(eraseRows(fieldTypes[i])))
 	}
 	body := el.recordCtorApp(adt, args, ty)
 	for i := len(binds) - 1; i >= 0; i-- {
@@ -1124,6 +1126,7 @@ func (el *elab) recordUpdate(e *ast.RecordUpdate, ty types.Type) core.Expr {
 		el.tmp++
 		value := el.expr(f.Value)
 		idx, _ := adt.RecordField(f.Name)
+		value = el.adaptFunctionValue(value, el.eraseRuntimeKinds(eraseRows(fieldTypes[idx])))
 		old[idx] = ""
 		args[idx] = &core.VarRef{Name: name, Ty: value.Type(), Local: true}
 		lets = append(lets, struct {

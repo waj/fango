@@ -1,0 +1,7 @@
+(module
+  (def simple (app (app (var apply) (int 1)) (lambda (x) (binop + (var x) (int 2)))))
+  (def nested (app (var outer) (lambda (x) (app (var inner) (lambda (y) (binop + (var x) (var y)))))))
+  (def suite (app (app (var describe) (string "suite")) (app (app (ctor List.Cons) (app (app (var test) (string "first")) (lambda (_) (block (expr (app (var print) (int 1))) (unit))))) (app (app (ctor List.Cons) (app (app (var test) (string "second")) (lambda (_) (unit)))) (ctor List.Nil)))))
+  (def tuple (app (app (ctor Tuple.Pair) (app (var apply) (lambda (x) (var x)))) (app (var apply) (lambda (x) (var x)))))
+  (def pipes (binop |> (var value) (app (var transform) (lambda (x) (binop |> (var x) (var finish))))))
+  (def unitCalls (app (app (var apply) (app (var maker) (unit))) (lambda (()) (app (var answer) (unit))))))

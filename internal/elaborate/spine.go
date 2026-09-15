@@ -467,10 +467,29 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 	wantFn, wantOK := want.(*types.TFun)
 	_, actualOK := e.Type().(*types.TFun)
 	if !wantOK || !actualOK {
-		return e
+		return el.adaptNominalValue(e, want)
 	}
 	switch e := e.(type) {
 	case *core.Lambda:
+		if !types.Equal(actualFn.Arg, wantFn.Arg) {
+			break
+		}
+		// A wider explicit row needs fresh (possibly unused) evidence binders.
+		// Build the wrapper below instead of changing this lambda's binding ABI.
+		needsEvidence := false
+		for _, label := range wantFn.Eff.Labels {
+			if !types.RuntimeEvidenceEffect(label) {
+				continue
+			}
+			found := false
+			for _, ev := range e.EffectParams {
+				found = found || ev.Unique == label.Unique
+			}
+			needsEvidence = needsEvidence || !found
+		}
+		if needsEvidence {
+			break
+		}
 		var kept []core.EffectInstance
 		sub := map[types.CaptureVar]types.CaptureSet{}
 		for _, ev := range e.EffectParams {

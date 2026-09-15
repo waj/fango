@@ -277,7 +277,7 @@ func (ck *Checker) instanceMethod(d *ast.ValueDecl, ty types.Type, inst *Instanc
 		g.cs = append(g.cs, Constraint{Left: g.ambient, Right: types.Row{}, Span: d.Body.Span(), Why: Why{Kind: WhyEffectEscapes}})
 	}
 	g.cs = append(g.cs, Constraint{Left: inferred, Right: ty, Span: d.NameSpan, Why: Why{Kind: WhyAnnotation, Name: d.Name}})
-	sub, _, errs := Solve(g.cs, nil, ck.Sub, ck.B, ck.Sup)
+	sub, _, errs := g.solveConstraints(nil)
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
 	g.errs = nil
@@ -304,7 +304,7 @@ func (ck *Checker) annotatedDecl(d *ast.ValueDecl, ty types.Type) (DeclInfo, []d
 		g.cs = append(g.cs, Constraint{Left: g.ambient, Right: types.Row{}, Span: d.Body.Span(), Why: Why{Kind: WhyEffectEscapes}})
 	}
 	g.cs = append(g.cs, Constraint{Left: inferred, Right: ty, Span: d.NameSpan, Why: Why{Kind: WhyAnnotation, Name: types.SurfaceName(d.Name)}})
-	sub, _, errs := Solve(g.cs, nil, ck.Sub, ck.B, ck.Sup)
+	sub, _, errs := g.solveConstraints(nil)
 	ck.Sub = sub
 	errs = append(errs, g.errs...)
 	g.errs = nil

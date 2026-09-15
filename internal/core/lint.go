@@ -28,7 +28,7 @@ func LintMachineInput(p *Prog, b *types.Builtins) []error {
 }
 
 func lint(p *Prog, b *types.Builtins, allowMachine bool) []error {
-	l := &linter{b: b, scope: map[string]bool{}, workers: map[string]*Def{},
+	l := &linter{b: b, scope: map[string]bool{}, localTypes: map[string]types.Type{}, workers: map[string]*Def{},
 		adts: map[int]*types.ADTInfo{}, effects: map[int]*types.EffectInfo{},
 		tyParams: map[int]bool{}, evidence: map[int]int{}, evidenceCaptures: map[int][]types.CaptureSet{},
 		captureVars: map[types.CaptureVar]bool{}, scopeIDs: map[types.ScopeID]bool{}, activeScopes: map[types.ScopeID]bool{},
@@ -127,6 +127,7 @@ func lint(p *Prog, b *types.Builtins, allowMachine bool) []error {
 				}
 				if param != "_" {
 					l.scope[param] = true
+					l.localTypes[param] = fn.Arg
 				}
 				t = fn.Ret
 			}
@@ -138,6 +139,7 @@ func lint(p *Prog, b *types.Builtins, allowMachine bool) []error {
 			for _, param := range d.Params {
 				if param != "_" {
 					delete(l.scope, param)
+					delete(l.localTypes, param)
 				}
 			}
 		} else {
@@ -225,7 +227,8 @@ func VerifyResumeStructure(e Expr) []error {
 
 type linter struct {
 	b                *types.Builtins
-	scope            map[string]bool // def names + enclosing Let/param names: no shadowing
+	scope            map[string]bool       // def names + enclosing Let/param names: no shadowing
+	localTypes       map[string]types.Type // binding ABIs; occurrences cannot retag a stored callback
 	workers          map[string]*Def
 	adts             map[int]*types.ADTInfo // declared ADTs: equatable via derived eq
 	effects          map[int]*types.EffectInfo
@@ -314,6 +317,9 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: BoolLit typed %s", where, types.Show(e.Ty))
 		}
 	case *VarRef:
+		if bound := l.localTypes[e.Name]; bound != nil && !types.Equal(bound, e.Ty) {
+			l.errorf("%s: reference `%s` changes its binding type from %s to %s", where, e.Name, types.Show(bound), types.Show(e.Ty))
+		}
 		// A worker name may appear ONLY as an App{Worker} callee (that
 		// case does not recurse here): a bare reference means elaboration
 		// failed to eta-expand a first-class use.
@@ -384,13 +390,16 @@ func (l *linter) expr(e Expr, where string) {
 				l.errorf("%s: recursive Let `%s` whose Rhs is not a Lambda", where, e.Name)
 			}
 			l.scope[e.Name] = true // in scope inside its own Rhs
+			l.localTypes[e.Name] = e.Rhs.Type()
 			l.expr(e.Rhs, where)
 		} else {
 			l.expr(e.Rhs, where)
 			l.scope[e.Name] = true
+			l.localTypes[e.Name] = e.Rhs.Type()
 		}
 		l.expr(e.Body, where)
 		delete(l.scope, e.Name)
+		delete(l.localTypes, e.Name)
 	case *Lambda:
 		fn, ok := e.Ty.(*types.TFun)
 		if !ok {
@@ -407,6 +416,7 @@ func (l *linter) expr(e Expr, where string) {
 		}
 		if e.Param != "_" {
 			l.scope[e.Param] = true
+			l.localTypes[e.Param] = fn.Arg
 		}
 		if e.ParamCapture == 0 || l.captureVars[e.ParamCapture] {
 			l.errorf("%s: Lambda has invalid capture parameter %d", where, e.ParamCapture)
@@ -435,6 +445,7 @@ func (l *linter) expr(e Expr, where string) {
 		delete(l.captureVars, e.ParamCapture)
 		if e.Param != "_" {
 			delete(l.scope, e.Param)
+			delete(l.localTypes, e.Param)
 		}
 	case *Perform:
 		l.control(e.Control, where)

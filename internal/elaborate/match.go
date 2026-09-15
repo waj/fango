@@ -39,7 +39,7 @@ func (el *elab) caseExpr(e *ast.Case, ty types.Type) core.Expr {
 		br := &e.Branches[i]
 		br.Pattern = el.lowerRecordPattern(br.Pattern)
 		n := el.pushPatternVars(br.Pattern)
-		m.bodies[i] = el.expr(br.Body)
+		m.bodies[i] = el.adaptFunctionValue(el.expr(br.Body), ty)
 		el.popScope(n)
 		m.spans[i] = br.Pattern.Span()
 		rows[i] = row{pats: []ast.Pattern{br.Pattern}, idx: i}

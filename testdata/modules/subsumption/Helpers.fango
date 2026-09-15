@@ -1,0 +1,9 @@
+module Helpers exposing (pair, withValue)
+
+import Scope
+
+pair : (() ->{e} Int) -> (() ->{e} Int) ->{e} Int
+pair left right = left() + right()
+
+withValue : (() ->{e} Int) -> (Int ->{e} ()) -> (Int ->{e} a) ->{e} a
+withValue acquire release use = Scope.bracket acquire release use

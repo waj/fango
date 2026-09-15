@@ -63,6 +63,17 @@ func TestParseExprInput(t *testing.T) {
 	}
 }
 
+func TestTrailingLambdaNeedsParameterAndBody(t *testing.T) {
+	for _, src := range []string{"apply \\ -> 1", "apply \\x ->", "[apply \\x ->, 2]"} {
+		f := source.NewFile("<test>", []byte(src))
+		toks, _ := lexer.Lex(f)
+		_, errs := ParseExprInput(toks, f)
+		if len(errs) == 0 {
+			t.Fatalf("accepted %q", src)
+		}
+	}
+}
+
 // Delimiters inside an open tuple are punctuation, not sibling layout items.
 // In particular they may align with the tuple opener when that opener begins
 // a block expression or a case-branch pattern.

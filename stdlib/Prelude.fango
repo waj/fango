@@ -9,7 +9,7 @@ module Prelude exposing ()
 import Basics exposing
     ( Eq, Num, Ord, Show
     , show
-    , (*), (+), (++), (-), (/), (/=), (<), (<=), (==), (>), (>=)
+    , (*), (+), (++), (-), (/), (/=), (<), (<=), (<|), (==), (>), (>=), (|>)
     )
 import IO exposing (IO, print, readLine)
 import List exposing (List)

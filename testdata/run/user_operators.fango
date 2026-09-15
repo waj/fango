@@ -2,9 +2,6 @@
 -- one, give it a fixity, and pass it as a value.
 import List exposing (List(..), foldl, range)
 
-(|>) : a -> (a -> b) -> b
-(|>) x f = f x
-infixl 1 (|>)
 
 (<+>) : Int -> Int -> Int
 (<+>) a b = a * 10 + b

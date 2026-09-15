@@ -13,6 +13,13 @@
     "Formatters"
   ],
   "main": "./extension.js",
+  "scripts": {
+    "test:grammar": "node tests/tokenize.cjs"
+  },
+  "devDependencies": {
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2"
+  },
   "activationEvents": [
     "onLanguage:fango"
   ],

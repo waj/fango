@@ -1,5 +1,3 @@
-(<|) f value = f value
-
 effect Expectation
     log : String -> String
 

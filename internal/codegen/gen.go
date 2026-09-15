@@ -1562,7 +1562,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 			}
 			continue
 		}
-		args = append(args, g.callArgExpr(a, formal[i], mode))
+		args = append(args, g.callArgExpr(a, formal[i], abi))
 	}
 	if needPrelude {
 		var body []goast.Stmt
