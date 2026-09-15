@@ -148,7 +148,7 @@ func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args [
 	for i := len(args); i < op.Arity; i++ {
 		n := fmt.Sprintf("_op%d", el.tmp)
 		el.tmp++
-		coreArgs = append(coreArgs, &core.VarRef{Name: n, Ty: argTys[i]})
+		coreArgs = append(coreArgs, &core.VarRef{Name: n, Local: true, Ty: argTys[i]})
 	}
 	var effectParams []core.EffectInstance
 	if len(args) < op.Arity {
@@ -203,7 +203,7 @@ func (el *elab) nativeApply(n *types.NativeInfo, nativeTy types.Type, args []ast
 	for i := len(args); i < n.Arity; i++ {
 		name := fmt.Sprintf("_native%d", el.tmp)
 		el.tmp++
-		coreArgs = append(coreArgs, &core.VarRef{Name: name, Ty: argTys[i]})
+		coreArgs = append(coreArgs, &core.VarRef{Name: name, Local: true, Ty: argTys[i]})
 	}
 	var body core.Expr = el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Args: coreArgs, Ty: ret})
 	for i := n.Arity - 1; i >= len(args); i-- {
@@ -522,7 +522,7 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 	if !isAtom(e) {
 		name := fmt.Sprintf("_adaptValue%d", el.tmp)
 		el.tmp++
-		body := el.adaptFunctionValue(&core.VarRef{Name: name, Ty: e.Type()}, want)
+		body := el.adaptFunctionValue(&core.VarRef{Name: name, Local: true, Ty: e.Type()}, want)
 		return &core.Let{Name: name, Rhs: e, Body: body, Ty: want}
 	}
 
@@ -533,7 +533,7 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 	// supplied there), while the generic callee receives its row-erased ABI.
 	name := fmt.Sprintf("_adapt%d", el.tmp)
 	el.tmp++
-	arg := &core.VarRef{Name: name, Ty: wantFn.Arg}
+	arg := &core.VarRef{Name: name, Local: true, Ty: wantFn.Arg}
 	effectParams := el.bindEffectParams(executingEffects(want, 1))
 	body := el.valueApp(e, arg)
 	el.popEvidence(effectParams)
@@ -570,7 +570,7 @@ func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 		tmp := fmt.Sprintf("_a%d", el.tmp)
 		el.tmp++
 		hoists = append(hoists, hoist{tmp, ca})
-		coreArgs = append(coreArgs, &core.VarRef{Name: tmp, Ty: ca.Type()})
+		coreArgs = append(coreArgs, &core.VarRef{Name: tmp, Local: true, Ty: ca.Type()})
 	}
 
 	// Missing parameters become nested lambda params.
@@ -579,7 +579,7 @@ func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 	for i := range missing {
 		lamParams[i] = fmt.Sprintf("_w%d", el.tmp)
 		el.tmp++
-		coreArgs = append(coreArgs, &core.VarRef{Name: lamParams[i], Ty: argTys[taken+i]})
+		coreArgs = append(coreArgs, &core.VarRef{Name: lamParams[i], Local: true, Ty: argTys[taken+i]})
 	}
 
 	// Wrap lambdas innermost-out; each level's type is the remaining chain.

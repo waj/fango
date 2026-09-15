@@ -32,7 +32,7 @@ func (el *elab) bindDictionaries(ps []types.Pred) ([]string, []types.Type) {
 		ty := cl.DictType(p.Ty)
 		names = append(names, n)
 		tys = append(tys, ty)
-		el.dicts = append(el.dicts, dictionary{p, &core.VarRef{Name: n, Ty: ty}})
+		el.dicts = append(el.dicts, dictionary{p, &core.VarRef{Name: n, Local: true, Ty: ty}})
 		el.pushScope(n, ty)
 	}
 	return names, tys
@@ -124,7 +124,7 @@ func (el *elab) methodValue(method *types.MethodInfo, raw types.Type) core.Expr 
 	binds := make([]string, len(method.Class.Methods))
 	binds[method.Index] = field
 	ty := el.zonkDefault(raw)
-	return &core.Case{Scrut: d, Bind: bind, Ty: ty, Tree: &core.SwitchCtor{Scrut: bind, ADT: method.Class.Dict, Cases: []core.CtorCase{{Ctor: method.Class.Dict.Ctors[0], Binds: binds, Tree: &core.Leaf{Body: &core.VarRef{Name: field, Ty: ty}}}}}}
+	return &core.Case{Scrut: d, Bind: bind, Ty: ty, Tree: &core.SwitchCtor{Scrut: bind, ADT: method.Class.Dict, Cases: []core.CtorCase{{Ctor: method.Class.Dict.Ctors[0], Binds: binds, Tree: &core.Leaf{Body: &core.VarRef{Name: field, Local: true, Ty: ty}}}}}}
 }
 
 // An instance method knows its own dictionary independently of lookup.

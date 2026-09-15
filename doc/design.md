@@ -205,7 +205,11 @@ Contract checking substitutes actual callbacks and evidence and joins branches.
 An allocation-site abstract heap tracks closures and constructor fields; closures
 retain free values and definition-site evidence, excluding their own binders.
 Recursive calls join enclosing contexts at a repeated target and lexical call
-site and iterate to a fixed point, without
+site when their inputs identify the same existing values or values allocated
+inside that activation. Distinct pre-existing callbacks and descriptions keep
+nested helper invocations independent. Compiler-created adapter temporaries and
+dictionary references carry local-binding identities, so closure capture
+analysis retains them just like source locals. Summaries reach a fixed point without
 an iteration-limit success fallback. Separate acyclic call paths distinguish
 nested owners. Folded recursive activations cannot establish that two dynamic
 owners are identical, so retention requiring that equality is rejected

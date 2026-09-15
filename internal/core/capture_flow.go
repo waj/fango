@@ -49,6 +49,7 @@ func (e flowEnv) clone() flowEnv {
 }
 
 type flowObject struct {
+	allocation  string
 	kind        string
 	code        *types.CaptureFlow
 	def         string
@@ -253,6 +254,7 @@ func (f *flowChecker) alloc(key string, o flowObject) int {
 		return id
 	}
 	id := len(f.objects)
+	o.allocation = key
 	f.objectIDs[key] = id
 	f.objects = append(f.objects, &o)
 	f.changed = true
@@ -528,6 +530,21 @@ func (f *flowChecker) callDef(name string, args []flowValue, typeArgs []types.Ty
 	}
 	return f.invoke("def:"+name, name, contract.Body, env, site, scopes, 0)
 }
+
+// Distinct pre-existing callbacks and descriptions distinguish nested uses of
+// the same helper. Values allocated within the repeated activation may grow
+// recursively, so those are widened into its finite summary instead.
+func (f *flowChecker) recursiveInputs(context string, previous, next flowEnv) bool {
+	for name, value := range next.values {
+		for _, ref := range value.refs {
+			if !slices.Contains(previous.values[name].refs, ref) && !strings.HasPrefix(f.objects[ref].allocation, context+"/") {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env flowEnv, site string, scopes []int, resume int) flowValue {
 	parent := site
 	for f.contexts[parent] == nil {
@@ -548,7 +565,7 @@ func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env fl
 		if c == nil {
 			break
 		}
-		if c.target == target && c.site == callSite {
+		if c.target == target && c.site == callSite && f.recursiveInputs(p, c.env, env) {
 			key = p
 			if !c.recursive {
 				c.recursive = true
