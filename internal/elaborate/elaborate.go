@@ -266,6 +266,10 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 			defs = append(defs, withProducerDef(name, ty, ck))
 		} else if name == types.IteratorNextName {
 			defs = append(defs, iteratorNextDef(name, ty, ck))
+		} else if types.FailureInspection(name) {
+			defs = append(defs, failureInspectDef(name, ty, ck))
+		} else if name == types.FailAttemptReportName {
+			defs = append(defs, attemptReportDef(name, ty, ck))
 		}
 	}
 	return defs

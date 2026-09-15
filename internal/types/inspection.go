@@ -14,6 +14,10 @@ func inspectionShapeSafe(t Type, adts map[int]*ADTInfo, visiting map[int]bool) b
 	case *TFun:
 		return false
 	case *TCon:
+		// A snapshot may itself retain opaque function/resource payloads.
+		if t.Name == FailureTypeName {
+			return false
+		}
 		for _, arg := range t.Args {
 			if !inspectionShapeSafe(arg, adts, visiting) {
 				return false

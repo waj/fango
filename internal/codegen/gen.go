@@ -989,6 +989,10 @@ func (g *gen) goType(t types.Type) goast.Expr {
 			g.usesFangort = true
 			return &goast.StarExpr{X: selector("fangort", "MachineIterator")}
 		}
+		if t.Name == types.FailureTypeName {
+			g.usesFangort = true
+			return &goast.StarExpr{X: selector("fangort", "Failure")}
+		}
 		switch t.Unique {
 		case g.b.Int.Unique:
 			return ident("int64")
@@ -1375,6 +1379,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			operand = &goast.ParenExpr{X: operand}
 		}
 		return parenIf(parentPrec > 0, &goast.UnaryExpr{Op: gotoken.SUB, X: operand})
+	case *core.FailureInspect:
+		return g.failureInspectExpr(e)
 	case *core.NativeCall:
 		return g.nativeExpr(e, parentPrec)
 	case *core.If:
@@ -1938,6 +1944,9 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 	for _, clause := range e.Clauses {
 		cond := &goast.BinaryExpr{X: &goast.SelectorExpr{X: exit, Sel: ident("Operation")}, Op: gotoken.EQL, Y: intLit(int64(clause.Op.Index))}
 		var clauseStmts []goast.Stmt
+		if clause.SuppressedParam != "" {
+			clauseStmts = append(clauseStmts, varDeclStmt(mangleValue(clause.SuppressedParam), g.goType(clause.SuppressedType), callExpr(selector("fangort", "SnapshotSuppressed"), exit)), assignBlank(ident(mangleValue(clause.SuppressedParam))))
+		}
 		if e.State != nil {
 			clauseStmts = append(clauseStmts, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), ident(stateCell)), assignBlank(ident(mangleValue(e.State.Name))))
 		}

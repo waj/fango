@@ -59,6 +59,9 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 	case *NativeCall:
 		n.Kind = "native"
 		children(e.Args...)
+	case *FailureInspect:
+		n.Kind = "native"
+		children(e.Args...)
 	case *Quote:
 		n.Kind = "native"
 		children(e.Holes...)
@@ -121,7 +124,7 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 			children(nil)
 		}
 		for _, cl := range e.Clauses {
-			n.Clauses = append(n.Clauses, types.CaptureClause{Index: cl.Op.Index, Names: cl.Params, Types: cl.ParamTypes, Body: b.expr(cl.Body)})
+			n.Clauses = append(n.Clauses, types.CaptureClause{Index: cl.Op.Index, Names: cl.Params, Types: cl.ParamTypes, Suppressed: cl.SuppressedParam, Body: b.expr(cl.Body)})
 		}
 	case *Bracket:
 		n.Kind, n.Scope, n.Name = "scope", e.Scope, e.Resource

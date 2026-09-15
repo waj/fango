@@ -60,6 +60,16 @@ func SnapshotFailure(exit *ExitRequest) *Failure {
 	return failure
 }
 
+func SnapshotSuppressed(exit *ExitRequest) List[*Failure] {
+	result := ListNil[*Failure]()
+	if exit != nil {
+		for i := len(exit.Suppressed) - 1; i >= 0; i-- {
+			result = ListCons(SnapshotFailure(exit.Suppressed[i]), result)
+		}
+	}
+	return result
+}
+
 func (failure *Failure) Effect() string {
 	if failure == nil {
 		return ""

@@ -1,5 +1,6 @@
 fango 0.1 — :help for commands
-> loaded Result
+> loaded Failure
+loaded Result
 loaded Fail
 loaded Scope
 loaded File

@@ -1,0 +1,44 @@
+body
+Fail.Fail
+Fail.fail
+1
+Just close
+Nothing
+Nothing
+Nothing
+close after success
+close after take
+heterogeneous body
+Just 42
+1
+[before failure, machine body, machine close]
+nested body
+Fail.Fail
+Fail.fail
+1
+Just inner close
+Nothing
+Nothing
+Nothing
+Fail.Fail
+Fail.fail
+1
+Just outer close
+Nothing
+Nothing
+Nothing
+Fail.Fail
+Fail.fail
+1
+Just outer nested close
+Nothing
+Nothing
+Nothing
+first cleanup
+Fail.Fail
+Fail.fail
+1
+Just second cleanup
+Nothing
+Nothing
+Nothing

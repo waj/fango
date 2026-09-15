@@ -154,6 +154,12 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		return fmt.Sprintf("(%s %d %s %s %s %s)", form, e.Scope, pr.Type(e.CursorTy), pr.Type(e.Ty), dumpExpr(e.Producer, pr), dumpExpr(e.Consumer, pr))
 	case *IteratorNext:
 		return fmt.Sprintf("(iterator-next access=%d %s %s)", e.Access, pr.Type(e.Ty), dumpExpr(e.Cursor, pr))
+	case *FailureInspect:
+		parts := []string{"(failure-inspect", e.Name, pr.Type(e.Ty)}
+		for _, arg := range e.Args {
+			parts = append(parts, dumpExpr(arg, pr))
+		}
+		return strings.Join(parts, " ") + ")"
 
 	case *ResumeTail:
 		if e.NextState != nil {
@@ -169,6 +175,9 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 			fmt.Fprintf(&b, " (state %s %s %s)", e.State.Name, pr.Type(e.State.Ty), dumpExpr(e.State.Initial, pr))
 		}
 		for _, c := range e.Clauses {
+			if c.SuppressedParam != "" {
+				fmt.Fprintf(&b, " (suppressed %s %s)", c.SuppressedParam, pr.Type(c.SuppressedType))
+			}
 			fmt.Fprintf(&b, " (%s (%s) %s)", c.Op.Name, strings.Join(c.Params, " "), dumpExpr(c.Body, pr))
 		}
 		if e.Return != nil {

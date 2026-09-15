@@ -25,6 +25,10 @@ func InspectPruned(e Expr, visit func(Expr) bool) {
 		for _, arg := range e.Args {
 			walk(arg)
 		}
+	case *FailureInspect:
+		for _, arg := range e.Args {
+			walk(arg)
+		}
 	case *Quote:
 		for _, hole := range e.Holes {
 			walk(hole)

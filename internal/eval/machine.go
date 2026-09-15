@@ -805,6 +805,11 @@ func (s *MachineSession) catchExit(exit *ExitRequest) (bool, error) {
 		for j, value := range exit.Payload {
 			vars[worker.Params[param+j].Name] = value
 		}
+		for _, source := range h.term.Node.Clauses {
+			if source.Op == clause.Op && source.SuppressedParam != "" {
+				vars[source.SuppressedParam] = failureList(snapshotFailure(exit).Suppressed())
+			}
+		}
 		evidence := make(map[int]*evidence, len(worker.EffectParams))
 		for _, ev := range worker.EffectParams {
 			evidence[ev.Unique] = owner.evidence[ev.Unique]

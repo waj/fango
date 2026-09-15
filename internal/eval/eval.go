@@ -511,6 +511,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		return &meta.Code{Template: e.Template, Holes: holes}, nil
 	case *core.TypeOf:
 		return e.Repr, nil
+	case *core.FailureInspect:
+		return in.inspectFailure(e, fr)
 	case *core.NativeCall:
 		args := make([]Value, len(e.Args))
 		for i, a := range e.Args {
@@ -733,6 +735,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				return nil, fmt.Errorf("eval: abort target missing clause `%s`", exit.Op.Name)
 			}
 			vars := map[string]Value{}
+			if clause.SuppressedParam != "" {
+				vars[clause.SuppressedParam] = failureList(snapshotFailure(exit).Suppressed())
+			}
 			if e.State != nil {
 				vars[e.State.Name] = installed.state
 			}

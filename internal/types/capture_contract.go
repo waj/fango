@@ -36,8 +36,9 @@ type CaptureFlow struct {
 }
 
 type CaptureClause struct {
-	Index int
-	Names []string
-	Types []Type
-	Body  *CaptureFlow
+	Suppressed string
+	Index      int
+	Names      []string
+	Types      []Type
+	Body       *CaptureFlow
 }

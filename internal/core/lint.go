@@ -659,6 +659,35 @@ func (l *linter) expr(e Expr, where string) {
 			l.expr(e.Cursor, where)
 		}
 
+	case *FailureInspect:
+		if !l.intrinsics[e.Name] || l.defName != e.Name || !types.FailureInspection(e.Name) {
+			l.errorf("%s: failure inspection outside its declared intrinsic", where)
+		}
+		args := make([]types.Type, len(e.Args))
+		for i, arg := range e.Args {
+			if arg != nil {
+				args[i] = arg.Type()
+				l.expr(arg, where)
+			}
+		}
+		if !types.FailureInspectionShape(e.Name, args, e.Ty) {
+			l.errorf("%s: invalid failure inspection signature", where)
+			return
+		}
+		failure := args[len(args)-1].(*types.TCon)
+		if adt := l.adts[failure.Unique]; adt == nil || adt.Con.Name != types.FailureTypeName {
+			l.errorf("%s: failure inspection has no declared snapshot identity", where)
+		}
+		if e.Name == types.FailureArgumentName {
+			result := e.Ty.(*types.TCon)
+			adt := e.Result
+			if adt == nil || l.adts[result.Unique] != adt || adt.Con.Name != "Maybe.Maybe" || len(adt.Params) != 1 || len(adt.Ctors) != 2 ||
+				adt.Ctors[0].Name != "Maybe.Nothing" || len(adt.Ctors[0].Fields) != 0 || adt.Ctors[1].Name != "Maybe.Just" || len(adt.Ctors[1].Fields) != 1 || !types.Equal(adt.InstFields(adt.Ctors[1], result.Args)[0], result.Args[0]) {
+				l.errorf("%s: failure inspection has missing or stale Maybe packaging proof", where)
+			}
+		} else if e.Result != nil {
+			l.errorf("%s: non-argument failure inspection carries a packaging proof", where)
+		}
 	case *ControlExit:
 		l.control(e.Effect.Control, where)
 		l.effectInstance(e.Effect, where)
@@ -790,6 +819,27 @@ func (l *linter) expr(e Expr, where string) {
 		delete(l.activeScopes, e.Scope)
 		seen := map[string]bool{}
 		for _, c := range e.Clauses {
+			report := l.defName == types.FailAttemptReportName && l.intrinsics[types.FailAttemptReportName]
+			if report != (c.SuppressedParam != "") || (c.SuppressedParam == "") != (c.SuppressedType == nil) {
+				l.errorf("%s: missing or misplaced suppressed failure binding", where)
+			}
+			if c.SuppressedParam != "" {
+				valid := report && c.Op != nil && c.Op.Abort && e.Effect.Name == "Fail.Fail"
+				list, ok := c.SuppressedType.(*types.TCon)
+				valid = valid && ok && list.Name == "List.List" && len(list.Args) == 1
+				if valid {
+					failure, ok := list.Args[0].(*types.TCon)
+					valid = ok && failure.Name == types.FailureTypeName && len(failure.Args) == 0 && l.adts[failure.Unique] != nil && l.adts[failure.Unique].Con.Name == types.FailureTypeName && l.adts[list.Unique] != nil && l.adts[list.Unique].Repr == types.ReprList
+				}
+				if !valid {
+					l.errorf("%s: invalid suppressed failure packaging proof", where)
+				}
+				if l.scope[c.SuppressedParam] {
+					l.errorf("%s: suppressed failure binding shadows", where)
+				}
+				l.scope[c.SuppressedParam] = true
+				l.localTypes[c.SuppressedParam] = c.SuppressedType
+			}
 			if c.Op == nil || c.Op.Owner.Unique != e.Effect.Unique {
 				l.errorf("%s: handler clause has wrong effect", where)
 				continue
@@ -860,6 +910,8 @@ func (l *linter) expr(e Expr, where string) {
 				l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = c.ResumeID, opResult, e.Ty, state
 			}
 			l.expr(c.Body, where)
+			delete(l.scope, c.SuppressedParam)
+			delete(l.localTypes, c.SuppressedParam)
 			l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = oldOwner, oldArg, oldRet, oldState
 			for _, p := range c.Params {
 				delete(l.scope, p)
@@ -895,6 +947,9 @@ func (l *linter) expr(e Expr, where string) {
 			}
 		}
 	case *App:
+		if con, ok := e.Ty.(*types.TCon); ok && con.Name == types.FailureTypeName && e.CalleeKind == Ctor {
+			l.errorf("%s: opaque failure snapshot constructed as an ordinary ADT", where)
+		}
 		l.control(e.Control, where)
 		switch e.CalleeKind {
 		case Worker:
@@ -1062,6 +1117,9 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: App with unknown CalleeKind %d", where, e.CalleeKind)
 		}
 	case *Case:
+		if con, ok := e.Scrut.Type().(*types.TCon); ok && con.Name == types.FailureTypeName {
+			l.errorf("%s: opaque failure snapshot matched as an ordinary ADT", where)
+		}
 		if e.Bind == "" {
 			l.errorf("%s: Case without a scrutinee binder", where)
 		}
@@ -1501,6 +1559,10 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		for _, a := range e.Args {
 			directSlot(a, "native argument")
 		}
+	case *FailureInspect:
+		for _, a := range e.Args {
+			directSlot(a, "failure inspection argument")
+		}
 	case *Quote:
 		for _, h := range e.Holes {
 			directSlot(h, "quote hole")
@@ -1596,6 +1658,17 @@ func (l *linter) typ(t types.Type, where string) {
 			l.errorf("%s: rigid variable not declared by the definition's TyParams", where)
 		}
 	case *types.TCon:
+		// Runtime inspection uses canonical nominal names, so they are proof
+		// data as well as diagnostic text. A type occurrence cannot rename a
+		// declaration while keeping its Unique (or claim a builtin's name).
+		for _, builtin := range []*types.TCon{l.b.Int, l.b.Float, l.b.String, l.b.Char, l.b.Bool, l.b.Unit} {
+			if (t.Unique == builtin.Unique || t.Name == builtin.Name) && (t.Unique != builtin.Unique || t.Name != builtin.Name || len(t.Args) != 0) {
+				l.errorf("%s: stale nominal type identity for `%s`", where, t.Name)
+			}
+		}
+		if adt := l.adts[t.Unique]; adt != nil && t.Name != adt.Con.Name {
+			l.errorf("%s: nominal type name `%s` disagrees with declaration `%s`", where, t.Name, adt.Con.Name)
+		}
 		for _, a := range t.Args {
 			l.typ(a, where)
 		}

@@ -546,6 +546,9 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 					payload := &goast.IndexExpr{X: selector(caught, "Payload"), Index: intLit(int64(i))}
 					args = append(args, &goast.TypeAssertExpr{X: payload, Type: g.goType(source.ParamTypes[i])})
 				}
+				if source.SuppressedParam != "" {
+					args = append(args, callExpr(selector("fangort", "SnapshotSuppressed"), ident(caught)))
+				}
 				ctor := indexExpr(g.machineConstructorRef(clause.Worker), machineTypeParamIdents(clauseWorker.TyParams))
 				body := append(save(), assignMachinePC(resumePC+1), step("MachineCall", "Frame", callExpr(ctor, args...)))
 				cases = append(cases, &goast.CaseClause{List: []goast.Expr{intLit(int64(clause.Op.Index))}, Body: body})

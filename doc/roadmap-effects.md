@@ -328,7 +328,7 @@ ordinary Fango definitions; the public Generator and terminal Iterator APIs
 and their terminal Core nodes have been removed. The remaining milestone-3 work includes
 latent effect-evidence propagation for descriptions
 constructed outside their handlers and consumer recovery after producer failure,
-typed cleanup reports, and the remaining acceptance coverage.
+and the remaining acceptance coverage.
 The task APIs above remain unimplemented.
 
 - **Effect subsumption:** use the implemented callback inclusion and nominal
@@ -507,15 +507,10 @@ introduced. These domain functions retain their IO and failure effects.
 
 ## Failure reporting prerequisite
 
-The exit representation carries checked nominal payload descriptors and internal
-detached snapshots, but exposes no source observation API yet. Complete the
-selected milestone #3 contract: `Fail.Report error` retains a typed `primary`
-and a list of opaque `Failure.Failure` snapshots; opt-in `Fail.attemptReport`
-returns that report while `Fail.attempt` keeps its existing result type.
-Expose effect/operation names, argument counts, nested suppression, and typed
-`Failure.argument` inspection. Preserve payload capture restrictions through
-report construction, including opaque payloads. A file close failure after a
-failed write is the concrete acceptance case, with deterministic injection.
+Typed primary errors and detached heterogeneous cleanup snapshots are
+implemented through `Fail.attemptReport`; see the reference for inspection and
+ordering. Concurrent failure selection remains a prerequisite for later
+milestones.
 
 Distinguish ordinary errors, early stop, and cancellation. Failed cleanup after
 successful completion or early stream stop propagates the first cleanup failure;

@@ -42,7 +42,8 @@ func (el *elab) anf(e core.Expr) core.Expr {
 	case *core.Handle:
 		clauses := make([]core.HandlerClause, len(e.Clauses))
 		for i, c := range e.Clauses {
-			clauses[i] = core.HandlerClause{Op: c.Op, ResumeID: c.ResumeID, Params: c.Params, ParamTypes: c.ParamTypes, ResultType: c.ResultType, Body: el.anf(c.Body)}
+			clauses[i] = c
+			clauses[i].Body = el.anf(c.Body)
 		}
 		var ret *core.ReturnClause
 		if e.Return != nil {
@@ -158,6 +159,12 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 			args[i] = slot(a)
 		}
 		return &core.NativeCall{Name: e.Name, Module: e.Module, Args: args, Ty: e.Ty}, hoists
+	case *core.FailureInspect:
+		args := make([]core.Expr, len(e.Args))
+		for i, a := range e.Args {
+			args[i] = slot(a)
+		}
+		return &core.FailureInspect{Name: e.Name, Args: args, Result: e.Result, Ty: e.Ty}, hoists
 	case *core.Quote:
 		holes := make([]core.Expr, len(e.Holes))
 		for i, h := range e.Holes {

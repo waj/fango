@@ -170,6 +170,13 @@ func capturesMutated(e Expr, mutated map[string]bool) bool {
 			return walk(e.Acquire) || walk(e.Release) || walk(e.Body)
 		case *IteratorNext:
 			return walk(e.Cursor)
+		case *FailureInspect:
+			for _, arg := range e.Args {
+				if walk(arg) {
+					return true
+				}
+			}
+			return false
 		case *IteratorScope:
 			return walk(e.Producer) || walk(e.Consumer)
 

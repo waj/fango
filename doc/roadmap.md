@@ -285,8 +285,9 @@ outer handlers is checked. The remaining proposed sequence is API-first:
 `Stream` descriptions, ordinary combinators, row-indexed scoped cursors, and raw
 advancement are implemented in both backends and staging. Remaining milestone
 #3 work includes completing latent
-effect-evidence propagation through reusable descriptions, cleanup-failure
-reports, and the remaining ownership and representation acceptance cases.
+effect-evidence propagation through reusable descriptions and the remaining
+ownership and representation acceptance cases. Typed cleanup-failure reports
+and nominal payload inspection are implemented in both backends and staging.
 Module-owned Machine families and synchronous acquisition/release adapters are
 implemented; their remaining representation combinations need verification.
 Stage-safe traversal shares the caller's native restrictions, evaluation budget,

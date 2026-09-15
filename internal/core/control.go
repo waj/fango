@@ -49,6 +49,8 @@ func ExprControl(e Expr) types.Control {
 		return ExprControl(e.Operand)
 	case *NativeCall:
 		return join(e.Args...)
+	case *FailureInspect:
+		return join(e.Args...)
 	case *Quote:
 		return join(e.Holes...)
 	case *If:

@@ -75,6 +75,11 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Ty = r.typ(e.Ty)
 		n.Args = r.exprs(e.Args)
 		out = &n
+	case *FailureInspect:
+		n := *e
+		n.Ty = r.typ(e.Ty)
+		n.Args = r.exprs(e.Args)
+		out = &n
 	case *Quote:
 		n := *e
 		n.Ty = r.typ(e.Ty)
@@ -160,6 +165,9 @@ func (r rewriter) expr(e Expr) Expr {
 		}
 		n.Clauses = make([]HandlerClause, len(e.Clauses))
 		for i, c := range e.Clauses {
+			if c.SuppressedType != nil {
+				c.SuppressedType = r.typ(c.SuppressedType)
+			}
 			c.Params = append([]string(nil), c.Params...)
 			c.ParamTypes = r.types(c.ParamTypes)
 			c.ResultType = r.typ(c.ResultType)

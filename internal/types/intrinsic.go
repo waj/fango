@@ -13,6 +13,13 @@ const (
 	IteratorTypeName            = "Iterator.Iterator"
 	IteratorNextName            = "Iterator.next"
 	IteratorTraversalEffectName = "Iterator.Traversal"
+	FailureTypeName             = "Failure.Failure"
+	FailureArgumentName         = "Failure.argument"
+	FailureEffectName           = "Failure.effectName"
+	FailureOperationName        = "Failure.operationName"
+	FailureArgumentCountName    = "Failure.argumentCount"
+	FailureSuppressedName       = "Failure.suppressed"
+	FailAttemptReportName       = "Fail.attemptReport"
 )
 
 // RuntimeEvidenceEffect reports whether a row label needs runtime evidence.
@@ -33,10 +40,18 @@ func IntrinsicArity(name string) int {
 	switch name {
 	case ScopeBracketName:
 		return 3
-	case StreamWithProducerName:
+	case StreamWithProducerName, FailureArgumentName:
 		return 2
-	case IteratorNextName:
+	case IteratorNextName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailAttemptReportName:
 		return 1
 	}
 	return 0
+}
+
+func FailureInspection(name string) bool {
+	switch name {
+	case FailureArgumentName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName:
+		return true
+	}
+	return false
 }

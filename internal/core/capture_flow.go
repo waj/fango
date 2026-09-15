@@ -75,18 +75,19 @@ type flowContext struct {
 	suspensions []int
 }
 type flowOwner struct {
-	origin  source.Span
-	scope   types.ScopeID
-	parent  []int
-	name    string
-	in      string
-	scoped  bool
-	context string
-	code    *types.CaptureFlow
-	env     flowEnv
-	state   flowValue
-	answer  flowValue
-	yielded flowValue
+	failures flowValue
+	origin   source.Span
+	scope    types.ScopeID
+	parent   []int
+	name     string
+	in       string
+	scoped   bool
+	context  string
+	code     *types.CaptureFlow
+	env      flowEnv
+	state    flowValue
+	answer   flowValue
+	yielded  flowValue
 }
 
 type CaptureFlowError struct {
@@ -788,6 +789,35 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 	case "perform", "exit":
 		args := all(0)
 		targets := env.evidence[n.Effects[0]]
+		cleanupExit := false
+		if n.Kind == "exit" {
+			for _, obligation := range f.synchronous {
+				if obligation.phase != "release" {
+					continue
+				}
+				for _, target := range targets {
+					cleanupExit = cleanupExit || slices.Contains(obligation.enclosing, target)
+				}
+			}
+		}
+		if cleanupExit {
+			for _, id := range scopes {
+				o := f.owners[id]
+				for _, cl := range o.code.Clauses {
+					if cl.Suppressed != "" {
+						for _, arg := range args {
+							f.merge(&o.failures, arg)
+							for _, owner := range f.captures(arg) {
+								if !slices.Contains(o.parent, owner) || f.recursiveOwner(owner) {
+									f.escape(arg, owner, "suppressed failure payload", "the report destination")
+								}
+							}
+						}
+						break
+					}
+				}
+			}
+		}
 		if len(targets) == 0 {
 			result.unknown = true
 		}
@@ -816,6 +846,9 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 					continue
 				}
 				inner := o.env.clone()
+				if cl.Suppressed != "" {
+					inner.values[cl.Suppressed] = o.failures
+				}
 				inner.values[o.code.Name] = o.state
 				for i, name := range cl.Names {
 					if i < len(args) {

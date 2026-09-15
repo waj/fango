@@ -695,6 +695,21 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 				"The intrinsic `%s` must have shape `Iterator a e ->{Traversal | e} Maybe a`.", ast.Spelling(d.Name)))
 		}
 	}
+	if types.FailureInspection(d.Name) {
+		pure := true
+		arrow := ty
+		for range arity {
+			fn := arrow.(*types.TFun)
+			pure = pure && len(fn.Eff.Labels) == 0 && fn.Eff.Tail == nil
+			arrow = fn.Ret
+		}
+		if !pure || !types.FailureInspectionShape(d.Name, params, rest) {
+			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic `%s` has an invalid failure inspection signature.", ast.Spelling(d.Name)))
+		}
+	}
+	if d.Name == types.FailAttemptReportName && !types.AttemptReportShape(ty) {
+		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic `%s` must preserve the action's residual row and return `Result (Report error) value`.", ast.Spelling(d.Name)))
+	}
 	sch := types.Scheme{Vars: scope.Minted(), Preds: scope.Preds(), Body: ty}
 	ck.Intrinsics[d.Name] = sch
 	ck.Env.Bind(d.Name, sch)

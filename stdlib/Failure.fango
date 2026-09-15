@@ -1,0 +1,24 @@
+{-# no-prelude #-}
+module Failure exposing (Failure, argument, argumentCount, effectName, operationName, suppressed)
+
+import Basics exposing (..)
+import List exposing (List)
+import Maybe exposing (Maybe)
+
+-- Detached failure data. The compiler supplies the opaque representation.
+type Failure = Failure
+
+effectName : Failure -> String
+effectName = native
+
+operationName : Failure -> String
+operationName = native
+
+argumentCount : Failure -> Int
+argumentCount = native
+
+suppressed : Failure -> List Failure
+suppressed = native
+
+argument : Int -> Failure -> Maybe a
+argument = native

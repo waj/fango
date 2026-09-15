@@ -106,8 +106,12 @@ func (a *captureAnalyzer) clauseBinders(e *Handle) map[types.CaptureVar]bool {
 	if !ok {
 		vars = make([][]types.CaptureVar, len(e.Clauses))
 		for i, clause := range e.Clauses {
-			vars[i] = make([]types.CaptureVar, len(clause.Params))
-			for j := range clause.Params {
+			count := len(clause.Params)
+			if clause.SuppressedParam != "" {
+				count++
+			}
+			vars[i] = make([]types.CaptureVar, count)
+			for j := range vars[i] {
 				vars[i][j] = a.fresh()
 			}
 		}
@@ -277,6 +281,12 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		r := children(e.Payload...)
 		r.value = types.CaptureSet{}
 		return r
+	case *FailureInspect:
+		r := children(e.Args...)
+		if !a.canCarry(e.Ty, nil) {
+			r.value = types.CaptureSet{}
+		}
+		return r
 	case *Suspend:
 		// E7's compiler-only fixtures resume with scalar values. E8 attaches
 		// ownership before capture-capable suspension results reach source.
@@ -397,6 +407,9 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		binders := a.clauseBinders(e)
 		for i, clause := range e.Clauses {
 			inner := cloneCaptureEnv(env)
+			if clause.SuppressedParam != "" {
+				inner[clause.SuppressedParam] = types.VarCapture(a.clauseVars[e][i][len(clause.Params)])
+			}
 			if e.State != nil {
 				inner[e.State.Name] = initial.value
 			}
@@ -489,6 +502,9 @@ func (a *captureAnalyzer) canCarry(t types.Type, seen map[int]bool) bool {
 	case *types.TVar, *types.TFun:
 		return true
 	case *types.TCon:
+		if t.Name == types.FailureTypeName {
+			return true
+		}
 		if a.b != nil {
 			switch t.Unique {
 			case a.b.Int.Unique, a.b.Float.Unique, a.b.String.Unique, a.b.Char.Unique, a.b.Bool.Unique, a.b.Unit.Unique:

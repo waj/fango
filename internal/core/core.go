@@ -158,13 +158,27 @@ type IteratorNext struct {
 	Ty     types.Type
 }
 
+// FailureInspect is a pure projection from detached failure data. Argument
+// inspection derives a complete nominal descriptor from Ty and packages the
+// result with the independently checked Maybe declaration.
+type FailureInspect struct {
+	Name   string
+	Args   []Expr
+	Result *types.ADTInfo
+	Ty     types.Type
+}
+
 type HandlerClause struct {
-	Op         *types.EffectOp
-	ResumeID   types.ResumeID
-	Params     []string
-	ParamTypes []types.Type
-	ResultType types.Type
-	Body       Expr
+	// SuppressedParam is an intrinsic-only binding populated after unwinding.
+	// It retains opaque payload captures even when inspection is disallowed.
+	SuppressedParam string
+	SuppressedType  types.Type
+	Op              *types.EffectOp
+	ResumeID        types.ResumeID
+	Params          []string
+	ParamTypes      []types.Type
+	ResultType      types.Type
+	Body            Expr
 }
 type ReturnClause struct {
 	Param string
@@ -363,57 +377,59 @@ func (*Leaf) isTree()       {}
 func (*SwitchCtor) isTree() {}
 func (*SwitchLit) isTree()  {}
 
-func (*IntLit) isExpr()        {}
-func (*FloatLit) isExpr()      {}
-func (*StringLit) isExpr()     {}
-func (*CharLit) isExpr()       {}
-func (*UnitLit) isExpr()       {}
-func (*BoolLit) isExpr()       {}
-func (*VarRef) isExpr()        {}
-func (*Neg) isExpr()           {}
-func (*NativeCall) isExpr()    {}
-func (*Quote) isExpr()         {}
-func (*TypeOf) isExpr()        {}
-func (*If) isExpr()            {}
-func (*Perform) isExpr()       {}
-func (*ControlExit) isExpr()   {}
-func (*Suspend) isExpr()       {}
-func (*IteratorScope) isExpr() {}
-func (*IteratorNext) isExpr()  {}
-func (*Handle) isExpr()        {}
-func (*Bracket) isExpr()       {}
-func (*ResumeTail) isExpr()    {}
-func (*Seq) isExpr()           {}
-func (*Let) isExpr()           {}
-func (*Lambda) isExpr()        {}
-func (*App) isExpr()           {}
-func (*Case) isExpr()          {}
+func (*IntLit) isExpr()         {}
+func (*FloatLit) isExpr()       {}
+func (*StringLit) isExpr()      {}
+func (*CharLit) isExpr()        {}
+func (*UnitLit) isExpr()        {}
+func (*BoolLit) isExpr()        {}
+func (*VarRef) isExpr()         {}
+func (*Neg) isExpr()            {}
+func (*NativeCall) isExpr()     {}
+func (*Quote) isExpr()          {}
+func (*TypeOf) isExpr()         {}
+func (*If) isExpr()             {}
+func (*Perform) isExpr()        {}
+func (*ControlExit) isExpr()    {}
+func (*Suspend) isExpr()        {}
+func (*IteratorScope) isExpr()  {}
+func (*IteratorNext) isExpr()   {}
+func (*FailureInspect) isExpr() {}
+func (*Handle) isExpr()         {}
+func (*Bracket) isExpr()        {}
+func (*ResumeTail) isExpr()     {}
+func (*Seq) isExpr()            {}
+func (*Let) isExpr()            {}
+func (*Lambda) isExpr()         {}
+func (*App) isExpr()            {}
+func (*Case) isExpr()           {}
 
-func (e *IntLit) Type() types.Type        { return e.Ty }
-func (e *FloatLit) Type() types.Type      { return e.Ty }
-func (e *StringLit) Type() types.Type     { return e.Ty }
-func (e *CharLit) Type() types.Type       { return e.Ty }
-func (e *UnitLit) Type() types.Type       { return e.Ty }
-func (e *BoolLit) Type() types.Type       { return e.Ty }
-func (e *VarRef) Type() types.Type        { return e.Ty }
-func (e *Neg) Type() types.Type           { return e.Ty }
-func (e *NativeCall) Type() types.Type    { return e.Ty }
-func (e *Quote) Type() types.Type         { return e.Ty }
-func (e *TypeOf) Type() types.Type        { return e.Ty }
-func (e *If) Type() types.Type            { return e.Ty }
-func (e *Perform) Type() types.Type       { return e.Ty }
-func (e *ControlExit) Type() types.Type   { return e.Ty }
-func (e *Suspend) Type() types.Type       { return e.Ty }
-func (e *IteratorScope) Type() types.Type { return e.Ty }
-func (e *IteratorNext) Type() types.Type  { return e.Ty }
-func (e *Handle) Type() types.Type        { return e.Ty }
-func (e *Bracket) Type() types.Type       { return e.Ty }
-func (e *ResumeTail) Type() types.Type    { return e.ClauseResult }
-func (e *Seq) Type() types.Type           { return e.Ty }
-func (e *Let) Type() types.Type           { return e.Ty }
-func (e *Lambda) Type() types.Type        { return e.Ty }
-func (e *App) Type() types.Type           { return e.Ty }
-func (e *Case) Type() types.Type          { return e.Ty }
+func (e *IntLit) Type() types.Type         { return e.Ty }
+func (e *FloatLit) Type() types.Type       { return e.Ty }
+func (e *StringLit) Type() types.Type      { return e.Ty }
+func (e *CharLit) Type() types.Type        { return e.Ty }
+func (e *UnitLit) Type() types.Type        { return e.Ty }
+func (e *BoolLit) Type() types.Type        { return e.Ty }
+func (e *VarRef) Type() types.Type         { return e.Ty }
+func (e *Neg) Type() types.Type            { return e.Ty }
+func (e *NativeCall) Type() types.Type     { return e.Ty }
+func (e *Quote) Type() types.Type          { return e.Ty }
+func (e *TypeOf) Type() types.Type         { return e.Ty }
+func (e *If) Type() types.Type             { return e.Ty }
+func (e *Perform) Type() types.Type        { return e.Ty }
+func (e *ControlExit) Type() types.Type    { return e.Ty }
+func (e *Suspend) Type() types.Type        { return e.Ty }
+func (e *IteratorScope) Type() types.Type  { return e.Ty }
+func (e *IteratorNext) Type() types.Type   { return e.Ty }
+func (e *FailureInspect) Type() types.Type { return e.Ty }
+func (e *Handle) Type() types.Type         { return e.Ty }
+func (e *Bracket) Type() types.Type        { return e.Ty }
+func (e *ResumeTail) Type() types.Type     { return e.ClauseResult }
+func (e *Seq) Type() types.Type            { return e.Ty }
+func (e *Let) Type() types.Type            { return e.Ty }
+func (e *Lambda) Type() types.Type         { return e.Ty }
+func (e *App) Type() types.Type            { return e.Ty }
+func (e *Case) Type() types.Type           { return e.Ty }
 
 // Mentions reports whether name occurs in e. No-shadowing makes a plain
 // occurrence check exact: nothing inside e can rebind name. Used by the
@@ -438,6 +454,13 @@ func Mentions(e Expr, name string) bool {
 
 	case *IteratorNext:
 		return Mentions(e.Cursor, name)
+	case *FailureInspect:
+		for _, arg := range e.Args {
+			if Mentions(arg, name) {
+				return true
+			}
+		}
+		return false
 	case *NativeCall:
 		for _, a := range e.Args {
 			if Mentions(a, name) {

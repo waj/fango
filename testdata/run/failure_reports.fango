@@ -1,0 +1,79 @@
+import Fail
+import Failure
+import Scope
+import Stream
+import Result exposing (Result(..))
+
+effect Close
+    abort close : Int -> ()
+
+showHeterogeneous : Result (Fail.Report String) value ->{IO} ()
+showHeterogeneous result =
+    case result of
+        Err report ->
+            print report.primary
+            List.each (\failure ->
+                number : Maybe Int
+                number = Failure.argument 0 failure
+                print number
+                print (Failure.argumentCount failure)) report.suppressed
+        Ok _ -> print "unexpected success"
+
+showFailure failure =
+    print (Failure.effectName failure)
+    print (Failure.operationName failure)
+    print (Failure.argumentCount failure)
+    text : Maybe String
+    text = Failure.argument 0 failure
+    number : Maybe Int
+    number = Failure.argument 0 failure
+    missing : Maybe String
+    missing = Failure.argument 1 failure
+    print text
+    print number
+    print missing
+    negative : Maybe String
+    negative = Failure.argument (-1) failure
+    print negative
+    List.each showFailure (Failure.suppressed failure)
+
+showReport : Show value => Result (Fail.Report String) value ->{IO} ()
+showReport result =
+    case result of
+        Err report ->
+            print report.primary
+            List.each showFailure report.suppressed
+        Ok value -> print value
+
+main() =
+    showReport (Fail.attemptReport (\_ -> Scope.finally (\_ ->
+        Fail.fail "body"
+        0) (\_ -> Fail.fail "close")))
+    showReport (Fail.attemptReport (\_ -> Scope.finally (\_ -> 7) (\_ -> Fail.fail "close after success")))
+    showReport (Fail.attemptReport (\_ -> Stream.toList (Stream.take 1 (Stream.generate (\_ ->
+        Scope.finally (\_ ->
+            Stream.yield 1
+            Stream.yield 2) (\_ -> Fail.fail "close after take"))))))
+    handle showHeterogeneous (Fail.attemptReport (\_ -> Scope.finally (\_ ->
+        Fail.fail "heterogeneous body") (\_ -> close 42))) of
+        close _ -> print "unexpected close handler"
+    print (Stream.toList (Stream.generate (\_ ->
+        result : Result (Fail.Report String) ()
+        result = Fail.attemptReport (\_ -> Scope.finally (\_ ->
+            Stream.yield "before failure"
+            Fail.fail "machine body") (\_ -> Fail.fail "machine close"))
+        case result of
+            Err report ->
+                Stream.yield report.primary
+                List.each (\failure ->
+                    message : Maybe String
+                    message = Failure.argument 0 failure
+                    Stream.yield (Maybe.withDefault "missing" message)) report.suppressed
+            Ok _ -> Stream.yield "unexpected success")))
+    showReport (Fail.attemptReport (\_ -> Scope.finally (\_ ->
+        Scope.finally (\_ ->
+            Fail.fail "nested body"
+            0) (\_ -> Fail.fail "inner close")) (\_ ->
+        Scope.finally (\_ -> Fail.fail "outer close") (\_ -> Fail.fail "outer nested close"))))
+    showReport (Fail.attemptReport (\_ -> Scope.finally (\_ ->
+        Scope.finally (\_ -> 99) (\_ -> Fail.fail "first cleanup")) (\_ -> Fail.fail "second cleanup")))

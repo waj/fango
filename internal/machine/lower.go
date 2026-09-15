@@ -394,6 +394,10 @@ func (b *builder) lowerHandle(h *core.Handle, bind Local, next BlockID) BlockID 
 		})
 		paramNames := append([]string(nil), clause.Params...)
 		paramTypes := append([]types.Type(nil), clause.ParamTypes...)
+		if clause.SuppressedParam != "" {
+			paramNames = append(paramNames, clause.SuppressedParam)
+			paramTypes = append(paramTypes, clause.SuppressedType)
+		}
 		stateName := ""
 		var stateTy types.Type
 		if h.State != nil {

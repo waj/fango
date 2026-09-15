@@ -991,6 +991,23 @@ retain suppressed failures, without copying handler targets or resumptions.
 Inspection compares complete descriptors before projecting a value; unknown
 declarations and function- or resource-bearing types are opaque.
 
+The bundled `Fail.attemptReport` intrinsic elaborates to an ordinary abort
+handler with one compiler-owned suppressed-payload binding. Both synchronous
+and Machine handlers populate that binding only after unwinding cleanup. The
+rest of the result uses ordinary `Fail.Report` and `Result` constructors.
+Core lint verifies the binding's declared snapshot/list identities and its
+intrinsic owner; Machine lint checks its typed clause parameter and retained
+source contract. `FailureInspect` nodes carry checked result packaging for
+`Maybe`; projections neither invoke payloads nor expose exit targets.
+
+Capture contracts retain the suppressed-payload binding and track failures
+leaving release callbacks. A report may retain their opaque captures only when
+their owners enclose its destination. This check includes failures aimed at a
+different handler that become secondary during unwinding. Handlers installed
+inside a release callback can consume their own failures before release exits.
+Report and snapshot values continue to carry those captures through ordinary
+ADTs, closures, and field projections.
+
 Producer machines in the interpreter share their caller's execution policy and
 step counter. Core evaluation, tail loops, and Machine dispatch all charge that
 counter, including computations that loop without yielding. Starting or reopening

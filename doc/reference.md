@@ -747,12 +747,14 @@ fallback.
 declare their own:
 
 ```fango
-module Fail exposing (Fail, attempt, fail, fromResult)
+module Fail exposing (Fail, Report(..), attempt, attemptReport, fail, fromResult)
 
 effect Fail error
     abort fail : error -> value
 
 attempt : (() ->{Fail error | e} value) ->{e} Result error value
+type Report error = { primary : error, suppressed : List Failure.Failure }
+attemptReport : (() ->{Fail error | e} value) ->{e} Result (Report error) value
 fromResult : Result error value ->{Fail error} value
 ```
 
@@ -764,6 +766,32 @@ only the failures raised inside them, and an abort raised by an outer `attempt`'
 clause propagates outward as usual. The effect is not in the prelude: import
 `Fail exposing (Fail, attempt, fail)` to use it, and a module that declares its
 own `Fail` effect is unaffected.
+
+`attemptReport` also captures secondary cleanup failures. Its `Err` contains
+the original typed error in `primary` and detached snapshots in `suppressed`.
+`attempt` keeps its existing result type. Snapshots support these pure operations
+from the separately imported `Failure` module:
+
+```fango
+effectName : Failure -> String
+operationName : Failure -> String
+argumentCount : Failure -> Int
+suppressed : Failure -> List Failure
+argument : Int -> Failure -> Maybe a
+```
+
+Names identify the effect and operation declarations. `argument` uses a
+zero-based index and the requested nominal type, including all type arguments.
+For example, `payload : Maybe IO.Error` followed by
+`payload = Failure.argument 0 failure` inspects an IO error. Wrong types,
+negative or out-of-range indices, and types containing functions or resources
+produce `Nothing`. Ordinary immutable private ADTs are inspectable without
+exposing their constructors. Redefining a REPL type gives it a new identity;
+values of the old type do not match it.
+
+Snapshots expose no handlers or resumptions. They retain opaque payloads, so
+capture checks also reject a report whose secondary payload could outlive its
+resource. Nested secondary failures retain their own `suppressed` lists.
 
 `State` provides a parameterized state effect and its standard runner:
 
@@ -1846,9 +1874,10 @@ When a release fails, the failure the body was already carrying stays primary:
 | Fails | Succeeds | The original failure |
 | Fails | Fails | The original failure, with the release failure recorded alongside it |
 
-A recorded release failure is kept in the exit rather than discarded, in
-deterministic inner-to-outer order. No API observes it yet, so a program sees
-the primary failure plus whatever the release did before failing.
+A recorded release failure is kept in the exit in deterministic inner-to-outer
+order. `Fail.attemptReport` exposes these failures as typed-inspectable snapshots.
+If successful completion or an early stream stop is followed by failed cleanup,
+the first cleanup failure becomes primary and later failures remain secondary.
 
 `finally action cleanup` is `bracket` without a resource. Because its resource
 is `()`, it places no restriction on the result it returns.

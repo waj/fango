@@ -34,6 +34,9 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 	where := "machine worker " + w.Name
 	var errs []error
 	wantSynchronous := []int(nil)
+	if w.Name == types.FailAttemptReportName && !core.CaptureContractCurrent(w.Def) {
+		errs = append(errs, fmt.Errorf("%s: missing or stale failure report source contract", where))
+	}
 	if w.Name == types.ScopeBracketName && (len(w.Params) == 3 || len(w.SynchronousParams) > 0 || w.Def != nil && len(w.Def.Params) == 3) {
 		wantSynchronous = []int{0, 1}
 		if w.Def == nil {
@@ -294,7 +297,9 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				}
 			}
 		case *Handle:
-
+			if w.Name == types.FailAttemptReportName && (w.Def == nil || w.Def.Body != term.Node) {
+				errs = append(errs, fmt.Errorf("%s: failure report handler differs from its source proof", blockWhere))
+			}
 			checkBind(term.Bind)
 			if term.Abort {
 				checkBind(term.AbortBind)
@@ -353,6 +358,12 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 					errs = append(errs, fmt.Errorf("%s: machine handler clause worker is mistyped", blockWhere))
 				}
 				wantParams := len(clause.Captures) + len(source.ParamTypes)
+				if source.SuppressedParam != "" {
+					wantParams++
+					if !term.Abort || len(worker.Params) == 0 || worker.Params[len(worker.Params)-1].Name != source.SuppressedParam || !types.Equal(worker.Params[len(worker.Params)-1].Ty, source.SuppressedType) {
+						errs = append(errs, fmt.Errorf("%s: machine report has missing or stale suppressed payload binding", blockWhere))
+					}
+				}
 				if clause.StateName != "" {
 					wantParams++
 				}

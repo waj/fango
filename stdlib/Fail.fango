@@ -1,7 +1,9 @@
 {-# no-prelude #-}
-module Fail exposing (Fail, attempt, fail, fromResult)
+module Fail exposing (Fail, Report(..), attempt, attemptReport, fail, fromResult)
 
 import Basics exposing (..)
+import Failure
+import List exposing (List)
 import Result exposing (Result(..))
 
 {- The conventional failure effect.
@@ -12,6 +14,12 @@ prelude, so a module that declares its own `Fail` keeps compiling. -}
 
 effect Fail error
     abort fail : error -> value
+
+type Report error = { primary : error, suppressed : List Failure.Failure }
+
+-- Capture typed primary failure and detached secondary cleanup failures.
+attemptReport : (() ->{Fail error | e} value) ->{e} Result (Report error) value
+attemptReport = native
 
 -- attempt runs an action that may fail, capturing the failure as `Err`.
 attempt : (() ->{Fail error | e} value) ->{e} Result error value
