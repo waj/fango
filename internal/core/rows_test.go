@@ -81,3 +81,30 @@ func TestFreeRowsExcludeInvocationBinders(t *testing.T) {
 		t.Fatal("outer row reference lost")
 	}
 }
+
+func TestStoredCallbackCannotRetagResidualABI(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	callback := &types.TFun{Arg: b.Unit, Ret: b.Int, OpenRow: true}
+	ref := &VarRef{Name: "callback", Local: true, Ty: callback}
+	p := &Prog{Defs: []Def{{Name: "identity", Type: &types.TFun{Arg: callback, Ret: callback}, Params: []string{"callback"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture()}, Body: ref}}}
+	if errs := InferCaptures(p, b); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	if errs := Lint(p, b); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	closed := *callback
+	closed.OpenRow = false
+	if EqualEvidenceActivation(EffectInstance{Unique: 1, Args: []types.Type{callback}}, EffectInstance{Unique: 1, Args: []types.Type{&closed}}) {
+		t.Fatal("residual evidence accepted a retagged callback argument")
+	}
+	ref.Ty = &closed
+	found := false
+	for _, err := range Lint(p, b) {
+		found = found || strings.Contains(err.Error(), "changes its binding type")
+	}
+	if !found {
+		t.Fatal("a stored open-row callback was retagged to a closed ABI")
+	}
+}

@@ -917,6 +917,9 @@ Pattern bindings use instantiated constructor-field representations, and
 callback adaptation checks residual arrows recursively through curried results
 and nominal arguments. This keeps module-owned callable families identical
 across Direct, Exit, and Machine consumers, including stored callbacks.
+Core and Machine lint compare that residual representation recursively at value
+bindings and call boundaries; equal source types cannot retag a stored callback
+to a different row ABI.
 Hidden evidence parameters precede ordinary worker parameters in deterministic
 effect-identity order, and calls supply matching lexical evidence. The Core
 linter rejects unsolved metavariables, malformed generic applications,

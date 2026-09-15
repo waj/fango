@@ -49,7 +49,7 @@ func lintClosure(closure Closure, workers map[string]*Worker) []error {
 			return false
 		}
 		for i := range a.Args {
-			if !types.Equal(a.Args[i], b.Args[i]) {
+			if !core.EqualValueRepresentation(a.Args[i], b.Args[i]) {
 				return false
 			}
 		}
@@ -146,7 +146,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 		locals[local.Name] = local.Ty
 	}
 	for _, param := range w.Params {
-		if ty := locals[param.Name]; ty == nil || !types.Equal(ty, param.Ty) {
+		if ty := locals[param.Name]; ty == nil || !core.EqualValueRepresentation(ty, param.Ty) {
 			errs = append(errs, fmt.Errorf("%s: parameter %q is absent or mistyped in locals", where, param.Name))
 		}
 	}
@@ -192,7 +192,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			}
 		}
 		checkBind := func(bind Local) {
-			if ty := locals[bind.Name]; ty == nil || bind.Ty == nil || !types.Equal(ty, bind.Ty) {
+			if ty := locals[bind.Name]; ty == nil || bind.Ty == nil || !core.EqualValueRepresentation(ty, bind.Ty) {
 				errs = append(errs, fmt.Errorf("%s: result local %q is absent or mistyped", blockWhere, bind.Name))
 			}
 		}
@@ -228,7 +228,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 		case *Eval:
 			checkBind(term.Bind)
 			checkExpr(term.Value, "evaluated expression", true)
-			if term.Value != nil && term.Bind.Ty != nil && !types.Equal(term.Value.Type(), term.Bind.Ty) {
+			if term.Value != nil && term.Bind.Ty != nil && !core.EqualValueRepresentation(term.Value.Type(), term.Bind.Ty) {
 				errs = append(errs, fmt.Errorf("%s: evaluated result type disagrees with binding", blockWhere))
 			}
 		case *Branch:
@@ -261,7 +261,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			}
 			for i, c := range term.Cases {
 				checkExpr(c.Lit, fmt.Sprintf("literal case %d", i+1), false)
-				if c.Lit != nil && locals[term.Scrut] != nil && !types.Equal(c.Lit.Type(), locals[term.Scrut]) {
+				if c.Lit != nil && locals[term.Scrut] != nil && !core.EqualValueRepresentation(c.Lit.Type(), locals[term.Scrut]) {
 					errs = append(errs, fmt.Errorf("%s: literal case %d is mistyped", blockWhere, i+1))
 				}
 			}
@@ -278,11 +278,11 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				if ev.Unique == term.Owner.Unique && (!types.EqualCaptures(ev.Captures, term.Owner.Captures) || ev.Name != term.Owner.Name || ev.Control != term.Owner.Control) {
 					errs = append(errs, fmt.Errorf("%s: suspension owner evidence is stale", blockWhere))
 				}
-				if ev.Unique == term.Owner.Unique && (len(ev.Args) != 1 || len(term.Owner.Args) != 1 || !types.Equal(ev.Args[0], term.Owner.Args[0])) {
+				if ev.Unique == term.Owner.Unique && (len(ev.Args) != 1 || len(term.Owner.Args) != 1 || !core.EqualValueRepresentation(ev.Args[0], term.Owner.Args[0])) {
 					errs = append(errs, fmt.Errorf("%s: suspension owner type arguments are stale", blockWhere))
 				}
 			}
-			if term.Owner.Unique != 0 && (term.Owner.Control.Transport != types.Machine || len(term.Owner.Args) != 1 || term.Request == nil || !types.Equal(term.Owner.Args[0], term.Request.Type())) {
+			if term.Owner.Unique != 0 && (term.Owner.Control.Transport != types.Machine || len(term.Owner.Args) != 1 || term.Request == nil || !core.EqualValueRepresentation(term.Owner.Args[0], term.Request.Type())) {
 				errs = append(errs, fmt.Errorf("%s: suspension owner/request type mismatch", blockWhere))
 			}
 		case *CursorAdvance:
@@ -333,10 +333,10 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				if !ok {
 					errs = append(errs, fmt.Errorf("%s: indirect machine callee is not a function", blockWhere))
 				} else {
-					if len(term.Args) != 1 || !types.Equal(term.Args[0].Type(), fn.Arg) {
+					if len(term.Args) != 1 || !core.EqualValueRepresentation(term.Args[0].Type(), fn.Arg) {
 						errs = append(errs, fmt.Errorf("%s: indirect machine call argument disagrees with function", blockWhere))
 					}
-					if !types.Equal(term.Bind.Ty, fn.Ret) {
+					if !core.EqualValueRepresentation(term.Bind.Ty, fn.Ret) {
 						errs = append(errs, fmt.Errorf("%s: indirect machine call result disagrees with function", blockWhere))
 					}
 					wantEvidence := 0
@@ -385,7 +385,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 							errs = append(errs, fmt.Errorf("%s: call evidence %d to %q disagrees with callee", blockWhere, i+1, term.Callee))
 						} else {
 							for j := range ev.Args {
-								if !types.Equal(ev.Args[j], types.SubstRigid(want.Args[j], sub)) {
+								if !core.EqualValueRepresentation(ev.Args[j], types.SubstRigid(want.Args[j], sub)) {
 									errs = append(errs, fmt.Errorf("%s: call evidence %d type argument to %q disagrees with callee", blockWhere, i+1, term.Callee))
 								}
 							}
@@ -393,11 +393,11 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 					}
 				}
 				for i, arg := range term.Args {
-					if i < len(callee.Params) && !types.Equal(arg.Type(), types.SubstRigid(callee.Params[i].Ty, sub)) {
+					if i < len(callee.Params) && !core.EqualValueRepresentation(arg.Type(), types.SubstRigid(callee.Params[i].Ty, sub)) {
 						errs = append(errs, fmt.Errorf("%s: call argument %d to %q is mistyped: got %s, want %s", blockWhere, i+1, term.Callee, types.Show(arg.Type()), types.Show(types.SubstRigid(callee.Params[i].Ty, sub))))
 					}
 				}
-				if term.Bind.Ty != nil && !types.Equal(term.Bind.Ty, types.SubstRigid(callee.Result, sub)) {
+				if term.Bind.Ty != nil && !core.EqualValueRepresentation(term.Bind.Ty, types.SubstRigid(callee.Result, sub)) {
 					errs = append(errs, fmt.Errorf("%s: call result from %q is mistyped", blockWhere, term.Callee))
 				}
 			}
@@ -408,7 +408,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			checkBind(term.Bind)
 			if term.Abort {
 				checkBind(term.AbortBind)
-				if term.Node != nil && !types.Equal(term.AbortBind.Ty, term.Node.Ty) {
+				if term.Node != nil && !core.EqualValueRepresentation(term.AbortBind.Ty, term.Node.Ty) {
 					errs = append(errs, fmt.Errorf("%s: abort result binding has the wrong type", blockWhere))
 				}
 			}
@@ -416,7 +416,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				errs = append(errs, fmt.Errorf("%s: malformed or unsupported machine handler", blockWhere))
 				break
 			}
-			if !types.Equal(term.Bind.Ty, term.Node.Body.Type()) {
+			if !core.EqualValueRepresentation(term.Bind.Ty, term.Node.Body.Type()) {
 				errs = append(errs, fmt.Errorf("%s: normal handler result binding has the wrong type", blockWhere))
 			}
 			if term.State != nil {
@@ -424,13 +424,13 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				checkExpr(term.State.Initial, "handler initial state", true)
 			}
 			body := workers[term.BodyWorker]
-			if body == nil || !types.Equal(body.Result, term.Node.Body.Type()) {
+			if body == nil || !core.EqualValueRepresentation(body.Result, term.Node.Body.Type()) {
 				errs = append(errs, fmt.Errorf("%s: machine handler body worker is missing or mistyped", blockWhere))
 			} else if len(body.Params) != len(term.BodyCaptures) {
 				errs = append(errs, fmt.Errorf("%s: machine handler body capture arity mismatch", blockWhere))
 			} else {
 				for i, capture := range term.BodyCaptures {
-					if !types.Equal(body.Params[i].Ty, capture.Ty) {
+					if !core.EqualValueRepresentation(body.Params[i].Ty, capture.Ty) {
 						errs = append(errs, fmt.Errorf("%s: machine handler body capture %d is mistyped", blockWhere, i+1))
 					}
 				}
@@ -459,13 +459,13 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				if term.Abort {
 					wantResult = term.Node.Ty
 				}
-				if !types.Equal(worker.Result, wantResult) {
+				if !core.EqualValueRepresentation(worker.Result, wantResult) {
 					errs = append(errs, fmt.Errorf("%s: machine handler clause worker is mistyped", blockWhere))
 				}
 				wantParams := len(clause.Captures) + len(source.ParamTypes)
 				if source.SuppressedParam != "" {
 					wantParams++
-					if !term.Abort || len(worker.Params) == 0 || worker.Params[len(worker.Params)-1].Name != source.SuppressedParam || !types.Equal(worker.Params[len(worker.Params)-1].Ty, source.SuppressedType) {
+					if !term.Abort || len(worker.Params) == 0 || worker.Params[len(worker.Params)-1].Name != source.SuppressedParam || !core.EqualValueRepresentation(worker.Params[len(worker.Params)-1].Ty, source.SuppressedType) {
 						errs = append(errs, fmt.Errorf("%s: machine report has missing or stale suppressed payload binding", blockWhere))
 					}
 				}
@@ -478,7 +478,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			}
 			if term.ReturnWorker != "" {
 				worker := workers[term.ReturnWorker]
-				if worker == nil || !types.Equal(worker.Result, term.Node.Ty) {
+				if worker == nil || !core.EqualValueRepresentation(worker.Result, term.Node.Ty) {
 					errs = append(errs, fmt.Errorf("%s: machine handler return worker is missing or mistyped", blockWhere))
 				}
 			}
@@ -493,7 +493,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			checkBind(term.Resource)
 			checkExpr(term.Acquire, "cleanup acquisition", true)
 			checkExpr(term.Release, "cleanup release", true)
-			if term.Acquire != nil && term.Resource.Ty != nil && !types.Equal(term.Acquire.Type(), term.Resource.Ty) {
+			if term.Acquire != nil && term.Resource.Ty != nil && !core.EqualValueRepresentation(term.Acquire.Type(), term.Resource.Ty) {
 				errs = append(errs, fmt.Errorf("%s: cleanup acquisition and resource types differ", blockWhere))
 			}
 			if term.Release != nil {
@@ -513,7 +513,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 2 {
 				errs = append(errs, fmt.Errorf("%s: cursor setup has invalid Iterator type", blockWhere))
 			}
-			if term.Yield.Unique != 0 && (term.Yield.Control.Transport != types.Machine || !types.EqualCaptures(term.Yield.Captures, types.ScopeCapture(term.Scope)) || cursor == nil || len(cursor.Args) != 2 || len(term.Yield.Args) != 1 || !types.Equal(cursor.Args[0], term.Yield.Args[0])) {
+			if term.Yield.Unique != 0 && (term.Yield.Control.Transport != types.Machine || !types.EqualCaptures(term.Yield.Captures, types.ScopeCapture(term.Scope)) || cursor == nil || len(cursor.Args) != 2 || len(term.Yield.Args) != 1 || !core.EqualValueRepresentation(cursor.Args[0], term.Yield.Args[0])) {
 				errs = append(errs, fmt.Errorf("%s: cursor setup has stale Yield ownership", blockWhere))
 			}
 			if term.Producer != nil {
@@ -537,7 +537,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 		case *PopCleanup:
 		case *Return:
 			checkExpr(term.Value, "return value", true)
-			if term.Value != nil && !types.Equal(term.Value.Type(), w.Result) {
+			if term.Value != nil && !core.EqualValueRepresentation(term.Value.Type(), w.Result) {
 				errs = append(errs, fmt.Errorf("%s: return type %s, want %s", blockWhere, types.Show(term.Value.Type()), types.Show(w.Result)))
 			}
 		default:
@@ -648,7 +648,7 @@ func equalLocals(a, b []Local) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].Name != b[i].Name || !types.Equal(a[i].Ty, b[i].Ty) {
+		if a[i].Name != b[i].Name || !core.EqualValueRepresentation(a[i].Ty, b[i].Ty) {
 			return false
 		}
 	}

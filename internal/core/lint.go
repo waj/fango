@@ -150,7 +150,7 @@ func lint(p *Prog, b *types.Builtins, allowMachine, allowStage bool) []error {
 				}
 				t = fn.Ret
 			}
-			if !types.Equal(t, d.Body.Type()) {
+			if !EqualValueRepresentation(t, d.Body.Type()) {
 				l.errorf("%s: body type %s differs from peeled result %s",
 					where, types.Show(d.Body.Type()), types.Show(t))
 			}
@@ -162,7 +162,7 @@ func lint(p *Prog, b *types.Builtins, allowMachine, allowStage bool) []error {
 				}
 			}
 		} else {
-			if !types.Equal(d.Type, d.Body.Type()) {
+			if !EqualValueRepresentation(d.Type, d.Body.Type()) {
 				l.errorf("%s: body type %s differs from def type %s",
 					where, types.Show(d.Body.Type()), types.Show(d.Type))
 			}
@@ -194,7 +194,7 @@ func lint(p *Prog, b *types.Builtins, allowMachine, allowStage bool) []error {
 	if p.EntryDisplay != nil {
 		l.tyParams = map[int]bool{}
 		l.expr(p.EntryDisplay, "entry display")
-		if !types.Equal(p.EntryDisplay.Type(), b.String) {
+		if !EqualValueRepresentation(p.EntryDisplay.Type(), b.String) {
 			l.errorf("entry display must return String")
 		}
 	}
@@ -354,7 +354,7 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: BoolLit typed %s", where, types.Show(e.Ty))
 		}
 	case *VarRef:
-		if bound := l.localTypes[e.Name]; bound != nil && !types.Equal(bound, e.Ty) {
+		if bound := l.localTypes[e.Name]; bound != nil && !EqualValueRepresentation(bound, e.Ty) {
 			l.errorf("%s: reference `%s` changes its binding type from %s to %s", where, e.Name, types.Show(bound), types.Show(e.Ty))
 		}
 		// A worker name may appear ONLY as an App{Worker} callee (that
@@ -370,7 +370,7 @@ func (l *linter) expr(e Expr, where string) {
 		if !l.numeric(e.Ty) {
 			l.errorf("%s: Neg typed %s, want Int, Float, or a number variable", where, types.Show(e.Ty))
 		}
-		if !types.Equal(e.Operand.Type(), e.Ty) {
+		if !EqualValueRepresentation(e.Operand.Type(), e.Ty) {
 			l.errorf("%s: Neg operand type differs from result", where)
 		}
 		l.expr(e.Operand, where)
@@ -439,14 +439,14 @@ func (l *linter) expr(e Expr, where string) {
 		if l.unique(e.Cond.Type()) != l.b.Bool.Unique {
 			l.errorf("%s: If condition typed %s, want Bool", where, types.Show(e.Cond.Type()))
 		}
-		if !types.Equal(e.Then.Type(), e.Ty) || !types.Equal(e.Else.Type(), e.Ty) {
+		if !EqualValueRepresentation(e.Then.Type(), e.Ty) || !EqualValueRepresentation(e.Else.Type(), e.Ty) {
 			l.errorf("%s: If branches disagree with result type", where)
 		}
 		l.expr(e.Cond, where)
 		l.expr(e.Then, where)
 		l.expr(e.Else, where)
 	case *Let:
-		if !types.Equal(e.Ty, e.Body.Type()) {
+		if !EqualValueRepresentation(e.Ty, e.Body.Type()) {
 			l.errorf("%s: Let type differs from its body", where)
 		}
 		if l.scope[e.Name] {
@@ -473,7 +473,7 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: Lambda typed %s, want a function type", where, types.Show(e.Ty))
 			return
 		}
-		if !types.Equal(fn.Ret, e.Body.Type()) {
+		if !EqualValueRepresentation(fn.Ret, e.Body.Type()) {
 			l.errorf("%s: Lambda body type %s differs from arrow result %s",
 				where, types.Show(e.Body.Type()), types.Show(fn.Ret))
 		}
@@ -555,7 +555,7 @@ func (l *linter) expr(e Expr, where string) {
 			wantArgs, wantResult := l.operationTypes(e.Op, e.Effect)
 			isPrint := types.SurfaceName(e.Op.Owner.Name) == "IO" && types.SurfaceName(e.Op.Name) == "print"
 			for i, a := range e.Args {
-				if !isPrint && i < len(wantArgs) && !types.Equal(a.Type(), wantArgs[i]) {
+				if !isPrint && i < len(wantArgs) && !EqualValueRepresentation(a.Type(), wantArgs[i]) {
 					l.errorf("%s: Perform `%s` arg %d typed %s, want %s", where, e.Op.Name, i+1, types.Show(a.Type()), types.Show(wantArgs[i]))
 				}
 			}
@@ -566,7 +566,7 @@ func (l *linter) expr(e Expr, where string) {
 			} else if len(e.Op.LocalVars) > 0 {
 				l.errorf("%s: operation-local polymorphism survived into Core for `%s`", where, e.Op.Name)
 			}
-			if wantResult != nil && !types.Equal(e.Ty, wantResult) {
+			if wantResult != nil && !EqualValueRepresentation(e.Ty, wantResult) {
 				l.errorf("%s: Perform `%s` typed %s, want %s", where, e.Op.Name, types.Show(e.Ty), types.Show(wantResult))
 			}
 		}
@@ -588,7 +588,7 @@ func (l *linter) expr(e Expr, where string) {
 				l.errorf("%s: suspension has invalid owner effect", where)
 			}
 			l.evidenceAvailable(e.Owner, where)
-			if len(e.Owner.Args) != 1 || !types.Equal(e.Owner.Args[0], e.Request.Type()) || l.unique(e.Ty) != l.b.Unit.Unique {
+			if len(e.Owner.Args) != 1 || !EqualValueRepresentation(e.Owner.Args[0], e.Request.Type()) || l.unique(e.Ty) != l.b.Unit.Unique {
 				l.errorf("%s: owned yield request/result disagrees with owner type", where)
 			}
 		} else {
@@ -622,7 +622,7 @@ func (l *linter) expr(e Expr, where string) {
 			if effect := l.effects[e.Yield.Unique]; effect == nil || !effect.Suspension || e.Yield.Control.Transport != types.Machine {
 				l.errorf("%s: iterator scope has invalid Yield evidence", where)
 			}
-			if cursor == nil || len(cursor.Args) != 2 || len(e.Yield.Args) != 1 || !types.Equal(cursor.Args[0], e.Yield.Args[0]) {
+			if cursor == nil || len(cursor.Args) != 2 || len(e.Yield.Args) != 1 || !EqualValueRepresentation(cursor.Args[0], e.Yield.Args[0]) {
 				l.errorf("%s: iterator cursor element disagrees with Yield owner", where)
 			}
 		}
@@ -636,7 +636,7 @@ func (l *linter) expr(e Expr, where string) {
 				l.errorf("%s: iterator producer does not use Machine transport", where)
 			}
 			for _, label := range producer.Eff.Labels {
-				if label.Suspension && (e.Yield.Unique != label.Unique || e.Yield.Name != label.Name || len(e.Yield.Args) != 1 || len(label.Args) != 1 || !types.Equal(e.Yield.Args[0], label.Args[0]) || !types.EqualCaptures(e.Yield.Captures, types.ScopeCapture(e.Scope))) {
+				if label.Suspension && (e.Yield.Unique != label.Unique || e.Yield.Name != label.Name || len(e.Yield.Args) != 1 || len(label.Args) != 1 || !EqualValueRepresentation(e.Yield.Args[0], label.Args[0]) || !types.EqualCaptures(e.Yield.Captures, types.ScopeCapture(e.Scope))) {
 					l.errorf("%s: iterator scope lacks matching lexical Yield ownership", where)
 				}
 			}
@@ -645,7 +645,7 @@ func (l *linter) expr(e Expr, where string) {
 		if !ok {
 			l.errorf("%s: iterator consumer is not a function", where)
 		} else {
-			if !types.Equal(consumer.Arg, e.CursorTy) || !types.Equal(consumer.Ret, e.Ty) {
+			if !EqualValueRepresentation(consumer.Arg, e.CursorTy) || !EqualValueRepresentation(consumer.Ret, e.Ty) {
 				l.errorf("%s: iterator consumer type disagrees with cursor or result", where)
 			}
 			if e.Traversal.Unique == 0 {
@@ -715,7 +715,7 @@ func (l *linter) expr(e Expr, where string) {
 			result := e.Ty.(*types.TCon)
 			adt := e.Result
 			if adt == nil || l.adts[result.Unique] != adt || adt.Con.Name != "Maybe.Maybe" || len(adt.Params) != 1 || len(adt.Ctors) != 2 ||
-				adt.Ctors[0].Name != "Maybe.Nothing" || len(adt.Ctors[0].Fields) != 0 || adt.Ctors[1].Name != "Maybe.Just" || len(adt.Ctors[1].Fields) != 1 || !types.Equal(adt.InstFields(adt.Ctors[1], result.Args)[0], result.Args[0]) {
+				adt.Ctors[0].Name != "Maybe.Nothing" || len(adt.Ctors[0].Fields) != 0 || adt.Ctors[1].Name != "Maybe.Just" || len(adt.Ctors[1].Fields) != 1 || !EqualValueRepresentation(adt.InstFields(adt.Ctors[1], result.Args)[0], result.Args[0]) {
 				l.errorf("%s: failure inspection has missing or stale Maybe packaging proof", where)
 			}
 		} else if e.Result != nil {
@@ -742,7 +742,7 @@ func (l *linter) expr(e Expr, where string) {
 				l.errorf("%s: ControlExit `%s` payload arity mismatch", where, e.Op.Name)
 			}
 			for i, p := range e.Payload {
-				if i < len(want) && !types.Equal(p.Type(), want[i]) {
+				if i < len(want) && !EqualValueRepresentation(p.Type(), want[i]) {
 					l.errorf("%s: ControlExit `%s` payload %d typed %s, want %s", where, e.Op.Name, i+1, types.Show(p.Type()), types.Show(want[i]))
 				}
 				l.expr(p, where)
@@ -752,10 +752,10 @@ func (l *linter) expr(e Expr, where string) {
 		if l.resumeOwner == 0 || e.Owner != l.resumeOwner || l.resumeArg == nil || l.resumeRet == nil {
 			l.errorf("%s: ResumeTail owner %d is outside its handler clause", where, e.Owner)
 		} else {
-			if !types.Equal(e.Value.Type(), l.resumeArg) {
+			if !EqualValueRepresentation(e.Value.Type(), l.resumeArg) {
 				l.errorf("%s: Resume argument typed %s, want %s", where, types.Show(e.Value.Type()), types.Show(l.resumeArg))
 			}
-			if !types.Equal(e.ClauseResult, l.resumeRet) {
+			if !EqualValueRepresentation(e.ClauseResult, l.resumeRet) {
 				l.errorf("%s: ResumeTail clause result typed %s, want handler result %s", where, types.Show(e.ClauseResult), types.Show(l.resumeRet))
 			}
 		}
@@ -765,7 +765,7 @@ func (l *linter) expr(e Expr, where string) {
 		} else if l.resumeState != nil && e.NextState == nil {
 			l.errorf("%s: stateful ResumeTail has no next state", where)
 		} else if e.NextState != nil {
-			if !types.Equal(e.NextState.Type(), l.resumeState) {
+			if !EqualValueRepresentation(e.NextState.Type(), l.resumeState) {
 				l.errorf("%s: next handler state typed %s, want %s", where, types.Show(e.NextState.Type()), types.Show(l.resumeState))
 			}
 			l.expr(e.NextState, where)
@@ -774,7 +774,7 @@ func (l *linter) expr(e Expr, where string) {
 		if l.unique(e.First.Type()) != l.b.Unit.Unique {
 			l.errorf("%s: Seq first expression is not Unit", where)
 		}
-		if !types.Equal(e.Ty, e.Then.Type()) {
+		if !EqualValueRepresentation(e.Ty, e.Then.Type()) {
 			l.errorf("%s: Seq type differs from its final expression", where)
 		}
 		l.expr(e.First, where)
@@ -795,13 +795,13 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: cleanup scope has incomplete metadata", where)
 			return
 		}
-		if !types.Equal(e.Acquire.Type(), e.ResourceTy) {
+		if !EqualValueRepresentation(e.Acquire.Type(), e.ResourceTy) {
 			l.errorf("%s: cleanup scope acquires %s, want resource %s", where, types.Show(e.Acquire.Type()), types.Show(e.ResourceTy))
 		}
 		if l.unique(e.Release.Type()) != l.b.Unit.Unique {
 			l.errorf("%s: cleanup scope release typed %s, want ()", where, types.Show(e.Release.Type()))
 		}
-		if !types.Equal(e.Body.Type(), e.Ty) {
+		if !EqualValueRepresentation(e.Body.Type(), e.Ty) {
 			l.errorf("%s: cleanup scope type differs from its body", where)
 		}
 		if want := types.JoinControl(ExprControl(e.Acquire), ExprControl(e.Release), ExprControl(e.Body)); e.Control != want {
@@ -827,7 +827,7 @@ func (l *linter) expr(e Expr, where string) {
 			if e.State.Name == "" || e.State.Ty == nil || e.State.Initial == nil {
 				l.errorf("%s: parameterized handler has incomplete state metadata", where)
 			} else {
-				if !types.Equal(e.State.Initial.Type(), e.State.Ty) {
+				if !EqualValueRepresentation(e.State.Initial.Type(), e.State.Ty) {
 					l.errorf("%s: initial handler state typed %s, want %s", where, types.Show(e.State.Initial.Type()), types.Show(e.State.Ty))
 				}
 				l.expr(e.State.Initial, where)
@@ -890,7 +890,7 @@ func (l *linter) expr(e Expr, where string) {
 				l.errorf("%s: handler clause `%s` arity mismatch", where, c.Op.Name)
 			}
 			for i, pt := range c.ParamTypes {
-				if i < len(wantParams) && !types.Equal(pt, wantParams[i]) {
+				if i < len(wantParams) && !EqualValueRepresentation(pt, wantParams[i]) {
 					l.errorf("%s: handler clause `%s` param %d typed %s, want %s", where, c.Op.Name, i+1, types.Show(pt), types.Show(wantParams[i]))
 				}
 			}
@@ -899,10 +899,10 @@ func (l *linter) expr(e Expr, where string) {
 					l.errorf("%s: handler clause `%s` uses () for a non-Unit parameter", where, c.Op.Name)
 				}
 			}
-			if !c.Op.Abort && !types.Equal(c.ResultType, opResult) {
+			if !c.Op.Abort && !EqualValueRepresentation(c.ResultType, opResult) {
 				l.errorf("%s: handler clause `%s` evidence result typed %s, want operation result %s", where, c.Op.Name, types.Show(c.ResultType), types.Show(opResult))
 			}
-			if !types.Equal(c.Body.Type(), e.Ty) {
+			if !EqualValueRepresentation(c.Body.Type(), e.Ty) {
 				l.errorf("%s: handler clause `%s` body does not exactly match the handler type", where, c.Op.Name)
 			}
 			if e.State != nil {
@@ -971,7 +971,7 @@ func (l *linter) expr(e Expr, where string) {
 				l.scope[e.Return.Param] = true
 			}
 			l.expr(e.Return.Body, where)
-			if !types.Equal(e.Return.Body.Type(), e.Ty) {
+			if !EqualValueRepresentation(e.Return.Body.Type(), e.Ty) {
 				l.errorf("%s: handler return clause does not exactly match the handler type", where)
 			}
 			delete(l.scope, e.Return.Param)
@@ -1049,13 +1049,13 @@ func (l *linter) expr(e Expr, where string) {
 				l.errorf("%s: App{Worker} `%s` control %s disagrees with callee %s", where, ref.Name, ControlName(e.Control), ControlName(wantControl))
 			}
 			for i, a := range e.Args {
-				if !types.Equal(a.Type(), argTys[i]) {
+				if !EqualValueRepresentation(a.Type(), argTys[i]) {
 					l.errorf("%s: App{Worker} `%s` arg %d typed %s, want %s",
 						where, ref.Name, i+1, types.Show(a.Type()), types.Show(argTys[i]))
 				}
 				l.expr(a, where)
 			}
-			if !types.Equal(e.Ty, ret) {
+			if !EqualValueRepresentation(e.Ty, ret) {
 				l.errorf("%s: App{Worker} `%s` typed %s, want %s",
 					where, ref.Name, types.Show(e.Ty), types.Show(ret))
 			}
@@ -1070,11 +1070,11 @@ func (l *linter) expr(e Expr, where string) {
 					where, types.Show(e.Callee.Type()))
 				return
 			}
-			if !types.Equal(e.Args[0].Type(), fn.Arg) {
+			if !EqualValueRepresentation(e.Args[0].Type(), fn.Arg) {
 				l.errorf("%s: App{Value} arg typed %s, want %s",
 					where, types.Show(e.Args[0].Type()), types.Show(fn.Arg))
 			}
-			if !types.Equal(e.Ty, fn.Ret) {
+			if !EqualValueRepresentation(e.Ty, fn.Ret) {
 				l.errorf("%s: App{Value} typed %s, want %s",
 					where, types.Show(e.Ty), types.Show(fn.Ret))
 			}
@@ -1134,13 +1134,13 @@ func (l *linter) expr(e Expr, where string) {
 				return
 			}
 			for i, ta := range e.TyArgs {
-				if !types.Equal(ta, result.Args[i]) {
+				if !EqualValueRepresentation(ta, result.Args[i]) {
 					l.errorf("%s: App{Ctor} `%s` type arg %d disagrees with its result type", where, e.Ctor.Name, i+1)
 				}
 			}
 			fields := l.runtimeInstFields(adt, e.Ctor, result.Args)
 			for i, a := range e.Args {
-				if !types.Equal(a.Type(), fields[i]) {
+				if !EqualValueRepresentation(a.Type(), fields[i]) {
 					l.errorf("%s: App{Ctor} `%s` arg %d typed %s, want %s",
 						where, e.Ctor.Name, i+1, types.Show(a.Type()), types.Show(fields[i]))
 				}
@@ -1197,17 +1197,17 @@ func (l *linter) tailResume(e Expr, owner types.ResumeID, arg, result, state typ
 			if x.NextState != nil {
 				noResume(x.NextState, "a next-state expression")
 			}
-			if !types.Equal(x.Value.Type(), arg) {
+			if !EqualValueRepresentation(x.Value.Type(), arg) {
 				l.errorf("%s: ResumeTail argument typed %s, want %s", where, types.Show(x.Value.Type()), types.Show(arg))
 			}
-			if !types.Equal(x.ClauseResult, result) {
+			if !EqualValueRepresentation(x.ClauseResult, result) {
 				l.errorf("%s: ResumeTail clause result typed %s, want %s", where, types.Show(x.ClauseResult), types.Show(result))
 			}
 			if state == nil && x.NextState != nil {
 				l.errorf("%s: stateless clause owner %d supplies next state", where, owner)
 			} else if state != nil && x.NextState == nil {
 				l.errorf("%s: stateful clause owner %d omits next state", where, owner)
-			} else if x.NextState != nil && !types.Equal(x.NextState.Type(), state) {
+			} else if x.NextState != nil && !EqualValueRepresentation(x.NextState.Type(), state) {
 				l.errorf("%s: next state typed %s, want %s", where, types.Show(x.NextState.Type()), types.Show(state))
 			}
 		case *Let:
@@ -1291,7 +1291,7 @@ func matchNativeType(pattern, actual types.Type, sub map[int]types.Type) bool {
 	switch p := pattern.(type) {
 	case *types.TVar:
 		if old := sub[p.ID]; old != nil {
-			return types.Equal(old, actual)
+			return EqualValueRepresentation(old, actual)
 		}
 		sub[p.ID] = actual
 		return true
@@ -1341,13 +1341,13 @@ func (l *linter) tree(t Tree, want types.Type, where string) {
 	case *Unreachable:
 	case *Guard:
 		l.expr(t.Cond, where)
-		if !types.Equal(t.Cond.Type(), l.b.Bool) {
+		if !EqualValueRepresentation(t.Cond.Type(), l.b.Bool) {
 			l.errorf("%s: pattern guard must be Bool", where)
 		}
 		l.tree(t.Then, want, where)
 		l.tree(t.Else, want, where)
 	case *Leaf:
-		if !types.Equal(t.Body.Type(), want) {
+		if !EqualValueRepresentation(t.Body.Type(), want) {
 			l.errorf("%s: case leaf typed %s, want %s",
 				where, types.Show(t.Body.Type()), types.Show(want))
 		}
@@ -1513,7 +1513,7 @@ func equalEffectInstance(a, b EffectInstance) bool {
 		return false
 	}
 	for i := range a.Args {
-		if !types.Equal(a.Args[i], b.Args[i]) {
+		if !EqualValueRepresentation(a.Args[i], b.Args[i]) {
 			return false
 		}
 	}

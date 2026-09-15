@@ -35,6 +35,37 @@ func RowCaptures(row *RowArgument) types.CaptureSet {
 	return captures
 }
 
+// EqualValueRepresentation includes residual-row ABI metadata that ordinary
+// source type equality intentionally ignores. Execution transport is separate:
+// every stored function uses the same Direct/Exit/Machine family record.
+func EqualValueRepresentation(a, b types.Type) bool {
+	if !types.Equal(a, b) {
+		return false
+	}
+	switch a := a.(type) {
+	case *types.TFun:
+		b := b.(*types.TFun)
+		return types.FunctionOpenRow(a) == types.FunctionOpenRow(b) && EqualValueRepresentation(a.Arg, b.Arg) && EqualValueRepresentation(a.Ret, b.Ret) && EqualValueRepresentation(a.Eff, b.Eff)
+	case *types.TCon:
+		b := b.(*types.TCon)
+		for i, arg := range a.Args {
+			if !EqualValueRepresentation(arg, b.Args[i]) {
+				return false
+			}
+		}
+	case types.Row:
+		a, b := types.SortedRow(a), types.SortedRow(b.(types.Row))
+		for i, label := range a.Labels {
+			for j, arg := range label.Args {
+				if !EqualValueRepresentation(arg, b.Labels[i].Args[j]) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
 // FreeRows reconstructs residual arguments retained by a closure. A nested
 // function's invocation binder is local to that function, not a capture.
 func FreeRows(expr Expr) map[types.CaptureVar]bool {
@@ -196,7 +227,7 @@ func EqualEvidenceActivation(a, b EffectInstance) bool {
 		return false
 	}
 	for i := range a.Args {
-		if !types.Equal(a.Args[i], b.Args[i]) {
+		if !EqualValueRepresentation(a.Args[i], b.Args[i]) {
 			return false
 		}
 	}
