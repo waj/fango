@@ -1797,6 +1797,9 @@ that receives fresh evidence on its next application does not by itself retain
 the preceding handler. This does not shorten the lifetime of existing stateless
 handler values.
 
+Nested handlers of the same effect remain distinct. Stored callbacks use their
+nearest lexical binding and do not retain unrelated handler evidence.
+
 A reusable handler wrapper may annotate that residual flow with an open row
 tail. The handled label disappears from the callback's row while every other
 effect the callback performs passes through the wrapper's own row:

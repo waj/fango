@@ -121,7 +121,7 @@ func (b *builder) registerOwnedRoots(body core.Expr) {
 		if h, ok := e.(*core.Handle); ok {
 			outer := b.def
 			inside := *outer
-			inside.EffectParams = append(append([]core.EffectInstance(nil), outer.EffectParams...), h.Effect)
+			inside.EffectParams = shadowEvidence(outer.EffectParams, []core.EffectInstance{h.Effect})
 			b.def = &inside
 			b.registerOwnedRoots(h.Body)
 			b.def = outer
@@ -139,12 +139,12 @@ func (b *builder) registerOwnedRoots(body core.Expr) {
 		if lambda, ok := e.(*core.Lambda); ok {
 			control := types.FunctionControl(lambda.Ty.(*types.TFun))
 			if control.Resolve(types.Machine) == types.Machine {
-				b.registerMachineLambdas(lambda)
+				b.registerMachineLambda(lambda)
 				return false
 			}
 			outer := b.def
 			inside := *outer
-			inside.EffectParams = append(append([]core.EffectInstance(nil), outer.EffectParams...), lambda.EffectParams...)
+			inside.EffectParams = shadowEvidence(outer.EffectParams, lambda.EffectParams)
 			b.def = &inside
 			b.registerOwnedRoots(lambda.Body)
 			b.def = outer
@@ -464,18 +464,21 @@ func (b *builder) registerMachineLambdas(e core.Expr) {
 	}
 	b.locals = available
 	defer func() { b.locals = outer }()
-	core.InspectPruned(e, func(e core.Expr) bool {
-		lam, ok := e.(*core.Lambda)
-		if !ok {
-			return true
+	b.registerOwnedRoots(e)
+}
+
+func shadowEvidence(outer, inner []core.EffectInstance) []core.EffectInstance {
+	bound := map[int]bool{}
+	for _, ev := range inner {
+		bound[ev.Unique] = true
+	}
+	result := make([]core.EffectInstance, 0, len(outer)+len(inner))
+	for _, ev := range outer {
+		if !bound[ev.Unique] {
+			result = append(result, ev)
 		}
-		fn, ok := lam.Ty.(*types.TFun)
-		if !ok || types.FunctionControl(fn).Resolve(types.Machine) != types.Machine {
-			return true
-		}
-		b.registerMachineLambda(lam)
-		return false
-	})
+	}
+	return append(result, inner...)
 }
 
 func (b *builder) registerMachineLambda(e core.Expr) {
@@ -505,8 +508,9 @@ func (b *builder) registerMachineLambda(e core.Expr) {
 		callEffects[ev.Unique] = true
 	}
 	var capturedEvidence []core.EffectInstance
+	needed := core.FreeEvidence(lam)
 	for _, ev := range b.def.EffectParams {
-		if !callEffects[ev.Unique] {
+		if _, used := needed[ev.Unique]; !callEffects[ev.Unique] && used {
 			capturedEvidence = append(capturedEvidence, ev)
 		}
 	}

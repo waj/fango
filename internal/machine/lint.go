@@ -27,6 +27,60 @@ func Lint(p *Prog) []error {
 	for i := range p.Workers {
 		errs = append(errs, lintWorker(&p.Workers[i], workers)...)
 	}
+	for _, closure := range p.Closures {
+		errs = append(errs, lintClosure(closure, workers)...)
+	}
+	return errs
+}
+
+func lintClosure(closure Closure, workers map[string]*Worker) []error {
+	where := "machine closure " + closure.Worker
+	w := workers[closure.Worker]
+	if closure.Expr == nil || w == nil {
+		return []error{fmt.Errorf("%s: missing lambda or worker", where)}
+	}
+	var errs []error
+	same := func(a, b core.EffectInstance) bool {
+		if a.Unique != b.Unique || a.Name != b.Name || len(a.Args) != len(b.Args) || !types.EqualCaptures(a.Captures, b.Captures) {
+			return false
+		}
+		for i := range a.Args {
+			if !types.Equal(a.Args[i], b.Args[i]) {
+				return false
+			}
+		}
+		return a.Control == (types.Control{Transport: types.Machine})
+	}
+	needed := core.FreeEvidence(closure.Expr)
+	for _, ev := range closure.CapturedEvidence {
+		want, found := needed[ev.Unique]
+		if !found || !same(ev, want) {
+			errs = append(errs, fmt.Errorf("%s: extra or stale captured evidence", where))
+		}
+		delete(needed, ev.Unique)
+	}
+	if len(needed) != 0 {
+		errs = append(errs, fmt.Errorf("%s: missing captured evidence", where))
+	}
+	if len(closure.CallEvidence) != len(closure.Expr.EffectParams) {
+		errs = append(errs, fmt.Errorf("%s: missing invocation evidence", where))
+	} else {
+		for i, ev := range closure.CallEvidence {
+			if !same(ev, closure.Expr.EffectParams[i]) {
+				errs = append(errs, fmt.Errorf("%s: stale invocation evidence", where))
+			}
+		}
+	}
+	all := append(slices.Clone(closure.CapturedEvidence), closure.CallEvidence...)
+	if len(all) != len(w.EffectParams) {
+		errs = append(errs, fmt.Errorf("%s: worker evidence arity disagrees with closure", where))
+	} else {
+		for i, ev := range all {
+			if !same(ev, w.EffectParams[i]) {
+				errs = append(errs, fmt.Errorf("%s: worker evidence differs from closure", where))
+			}
+		}
+	}
 	return errs
 }
 

@@ -228,7 +228,7 @@ func closureFrame(lam *core.Lambda, fr *Frame) *Frame {
 }
 
 func (in *interp) makeClosure(lam *core.Lambda, fr *Frame, desc *machineir.Closure) (*Closure, error) {
-	closure := &Closure{Param: lam.Param, Body: lam.Body, Env: closureFrame(lam, fr), Evidence: cloneEvidence(in.evidence), control: types.FunctionControl(lam.Ty.(*types.TFun))}
+	closure := &Closure{Param: lam.Param, Body: lam.Body, Env: closureFrame(lam, fr), Evidence: in.closureEvidence(lam), control: types.FunctionControl(lam.Ty.(*types.TFun))}
 	if desc == nil {
 		return closure, nil
 	}
@@ -460,7 +460,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				return nil, fmt.Errorf("eval: recursive Let `%s` without a Lambda RHS", e.Name)
 			}
 			frame := &Frame{parent: closureFrame(lam, fr), vars: map[string]Value{}}
-			frame.vars[e.Name] = &Closure{Param: lam.Param, Body: lam.Body, Env: frame, Evidence: cloneEvidence(in.evidence)}
+			frame.vars[e.Name] = &Closure{Param: lam.Param, Body: lam.Body, Env: frame, Evidence: in.closureEvidence(lam)}
 			return in.eval(e.Body, frame)
 		}
 		// Eager, in order — identical to the compiled backend's locals.

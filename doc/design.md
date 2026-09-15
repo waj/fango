@@ -234,6 +234,13 @@ non-escape proof after ANF, lifting, callback adaptation, and specialization.
 The bundled State, Writer, seeded-Random, and resource runners use these same
 contracts; there are no trusted runner or forwarding-name exemptions.
 
+Closure lowering reconstructs free evidence through lexical handlers and nested
+functions. An inner activation of the same effect shadows its outer binding;
+unused evidence and evidence supplied on invocation are not captured. Machine
+lint independently checks the closure's captured and invocation evidence
+against its semantic lambda and typed worker. The interpreter applies the same
+free-evidence selection to ordinary closures.
+
 Execution transport is compiler metadata distinct from both effect rows and
 operation discipline. Each Core arrow, definition, lambda, application, and
 effect-evidence slot records a `Direct`, `Exit`, or reserved `Machine` lower

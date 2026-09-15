@@ -6,7 +6,7 @@ import (
 )
 
 func TestStreamIntegration(t *testing.T) {
-	for _, name := range []string{"stream_operations", "stream_demand", "stream_cleanup", "stream_file", "stream_parser", "stream_stored_callbacks", "failure_reports"} {
+	for _, name := range []string{"stream_operations", "stream_demand", "stream_cleanup", "stream_file", "stream_parser", "stream_stored_callbacks", "stream_evidence_shadow", "failure_reports"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", "testdata", "run", name+".fango")
 			runDifferentialCase(t, path, cliRunner(path))

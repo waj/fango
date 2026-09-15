@@ -333,9 +333,9 @@ The task APIs above remain unimplemented.
 
 - **Effect subsumption:** use the implemented callback inclusion and nominal
   variance rules for the proposed Stream types; never erase a real effect.
-- **Exclusive borrowing:** preserve the terminal traversal access contracts when
-  adding raw advancement and transfers to lexical suspension owners, including stored
-  callbacks and captured evidence across producer/caller transitions.
+- **Exclusive borrowing:** complete acceptance coverage for raw advancement
+  and transfers to lexical suspension owners, including stored callbacks and
+  captured evidence across producer/caller transitions.
 - **Compositional suspension:** Machine calls work through higher-order and
   stored callbacks, nested scopes, result constructors, and module boundaries.
   Unsupported suspension handlers receive source diagnostics, not Core errors.

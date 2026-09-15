@@ -1,0 +1,12 @@
+import Stream
+
+effect Reader
+    ask : () -> Int
+
+-- Neither Reader is used by production; nested same-effect activations must
+-- not become duplicate captures on a module-owned Machine callback.
+description() = handle (handle Stream.generate (\_ -> Stream.yield 7) of
+    ask() -> resume 2) of
+    ask() -> resume 1
+
+main() = print (Stream.toList (description()))
