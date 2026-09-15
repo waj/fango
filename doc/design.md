@@ -898,6 +898,9 @@ because its parameters are fango functions over an open row rather than scalars
 crossing a Go ABI. Intrinsic callbacks use the same directional argument
 checking as ordinary calls, including partial applications. Their special rules
 concern ownership and Core lowering, rather than callback row equality.
+Before erasure, the `Iterator.next` declaration must expose exactly its cursor's
+residual row plus the nullary owned `Traversal` label. A missing, substituted,
+or widened row is rejected as an invalid intrinsic declaration.
 
 Core also retains the control convention on every executable boundary.
 Transport-polymorphic operations and calls are ANF-hoisted whenever they occur

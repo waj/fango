@@ -682,15 +682,7 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 		}
 	}
 	if d.Name == types.IteratorNextName {
-		cursor, cursorOK := params[0].(*types.TCon)
-		result, resultOK := rest.(*types.TCon)
-		traversal := false
-		for _, label := range ty.(*types.TFun).Eff.Labels {
-			traversal = traversal || label.Name == types.IteratorTraversalEffectName && label.Suspension
-		}
-		if !cursorOK || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 2 ||
-			!resultOK || result.Name != "Maybe.Maybe" || len(result.Args) != 1 ||
-			!types.Equal(cursor.Args[0], result.Args[0]) || !traversal {
+		if !types.IteratorNextShape(ty) {
 			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION",
 				"The intrinsic `%s` must have shape `Iterator a e ->{Traversal | e} Maybe a`.", ast.Spelling(d.Name)))
 		}
