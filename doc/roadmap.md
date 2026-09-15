@@ -272,8 +272,6 @@ pipes, resource declaration pragmas, and inferred capture/retention contracts
 are implemented. Ordinary wrappers export lifetime obligations; escape through
 outer handlers is checked. The remaining proposed sequence is API-first:
 
-3. One Stream API with scoped cursors, ordinary library consumers, complete
-   Machine composition, file pipelines, custom parsing, and sequential zip.
 4. Cooperative structured async with nursery-owned tasks, reusable await,
    cancellation/drain, bounded native adapters, and REPL interruption.
 5. Suspending acquisition and cleanup through the same Scope API.
@@ -282,18 +280,9 @@ outer handlers is checked. The remaining proposed sequence is API-first:
 8. Measured frame, callback, and pipeline optimization.
 9. Explicit source annotations for capture, retention, and borrowing contracts.
 
-`Stream` descriptions, ordinary combinators, row-indexed scoped cursors, and raw
-advancement are implemented in both backends and staging. Remaining milestone
-#3 work includes completing latent
-effect-evidence propagation through reusable descriptions and the remaining
-ownership and representation acceptance cases. Typed cleanup-failure reports
-and nominal payload inspection are implemented in both backends and staging.
-Module-owned Machine families and synchronous acquisition/release adapters are
-implemented; their remaining representation combinations need verification.
-Stage-safe traversal shares the caller's native restrictions, evaluation budget,
-and rollback checks.
-The detailed roadmap owns cleanup-failure observation as a prerequisite for stable
-reporting, and separates deferred operation polymorphism, builtin IO interception,
+The implemented Stream and typed cleanup-failure APIs are described in the
+[reference](reference.md#streams-and-cursors). The detailed roadmap owns
+concurrent failure selection and separates deferred operation polymorphism, builtin IO interception,
 named instances, non-tail resumption, escaping owners, and shared mutable state
 from the committed sequence.
 

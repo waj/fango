@@ -423,6 +423,32 @@ A pure traversal can run in a splice. Compile-time native restrictions and
 the evaluation-step budget apply throughout production and consumption,
 including loops that never yield. Failed expansions retain REPL rollback.
 
+For example, a reusable file description opens its file during traversal:
+
+```fango
+emitLines file = case File.readLine file of
+    Nothing -> ()
+    Just line ->
+        Stream.yield line.text
+        emitLines file
+
+lines path = Stream.generate (\_ -> File.withFile path emitLines)
+
+prefix path =
+    lines path
+        |> Stream.filter (\line -> line /= "")
+        |> Stream.take 20
+        |> Stream.toList
+```
+
+Import `File` and handle the pipeline's `Fail IO.Error` effect at traversal.
+File acquisition and release are synchronous. A custom stage can use
+`withCursor` inside `generate`, reading several input elements and yielding
+zero or more outputs. A parser can retain bounded lookahead in ordinary values.
+Yielded values may retain resources owned by an enclosing scope, but cannot
+retain producer-local resources that a later pull could release. This rule also
+applies through aliases, ADTs, and closures.
+
 `Range.each : (Num a, Ord a) => (a ->{e} ()) -> a -> a ->{e} ()` traverses an
 inclusive ascending numeric range without constructing a `List`. For example,
 `Range.each drawPoint 0 78` calls `drawPoint` with every value from `0` through

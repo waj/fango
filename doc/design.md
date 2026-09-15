@@ -913,6 +913,10 @@ unwinding. Core lint checks row metadata on every source program; capture-flow
 contracts substitute the actual row's handler owners while a cursor advancement
 holds its exclusive borrow. Retained outer rows contribute their handlers'
 resource captures, while invocation rows are local binders.
+Pattern bindings use instantiated constructor-field representations, and
+callback adaptation checks residual arrows recursively through curried results
+and nominal arguments. This keeps module-owned callable families identical
+across Direct, Exit, and Machine consumers, including stored callbacks.
 Hidden evidence parameters precede ordinary worker parameters in deterministic
 effect-identity order, and calls supply matching lexical evidence. The Core
 linter rejects unsolved metavariables, malformed generic applications,

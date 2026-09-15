@@ -107,6 +107,34 @@ Stream.forEach print (Stream.generate produce)
 	}
 }
 
+func TestStreamResidualRowsInREPLAndStaging(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader(`import Stream
+import Iterator
+import Fail
+import Meta
+source : Stream.Stream Int (Fail.Fail String)
+source = Stream.generate (\_ ->
+    Stream.yield 7
+    Fail.fail "finished")
+readAll() = Fail.attempt (\_ -> Stream.withCursor source (\cursor ->
+    first = Fail.attempt (\_ -> Iterator.next cursor)
+    second = Fail.attempt (\_ -> Iterator.next cursor)
+    third = Fail.attempt (\_ -> Iterator.next cursor)
+    (first, second, third)))
+readAll()
+answer : String
+answer = $(Meta.lift (show (readAll())))
+answer
+readAll()
+:quit
+`), &out)
+	got := out.String()
+	if strings.Contains(got, "INTERNAL") || strings.Contains(got, "runtime error") || strings.Count(got, "Ok Just 7, Err finished, Ok Nothing") < 3 {
+		t.Fatalf("latent row traversal did not survive REPL/staging boundaries:\n%s", got)
+	}
+}
+
 func TestOwnedStreamStagesAndRollsBackInREPL(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader(`import Meta

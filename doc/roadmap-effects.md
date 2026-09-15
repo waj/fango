@@ -53,81 +53,11 @@ The operation's apparent result type does not determine its execution mode:
 the supplied interpretation does. `Async` describes execution, `IO` external
 interaction, and `Fail Error` typed failure; none erases the others.
 
-### Stream descriptions and pipelines
+### Async stream pipelines
 
-**Proposed example — milestone 3:**
-
-```fango
-numbers = Stream.generate \_ ->
-    Stream.yield 10
-    Stream.yield 20
-
-total =
-    numbers
-        |> Stream.map double
-        |> Stream.fold (\value sum -> sum + value) 0
-```
-
-`Stream` is the public producer abstraction, absorbing the experimental
-`Generator` construction API. `Yield` is its owned suspension effect, exposed
-with the `Stream.yield` operation. Ordinary handlers cannot intercept it;
-traversal supplies its owner.
-
-**Proposed Fango signatures — milestone 3; suspending callbacks usable at
-milestone 4.** These are source type signatures, not lifetime notation:
-
-```fango
-generate : (() ->{Yield a | e} ()) -> Stream a e
-yield : a ->{Yield a} ()
-
-map : (a ->{e} b) -> Stream a e -> Stream b e
-filter : (a ->{e} Bool) -> Stream a e -> Stream a e
-take : Int -> Stream a e -> Stream a e
-fold : (a -> b ->{e} b) -> b -> Stream a e ->{e} b
-forEach : (a ->{e} ()) -> Stream a e ->{e} ()
-```
-
-The shared `e` is the permitted combined row. Subsumption admits a callback
-or covariant stream value with fewer effects; arguments need not have identical
-rows. Construction and transformation are pure. Traversal performs the latent
-producer and callback effects. Strict argument expressions still evaluate
-normally before calling a constructor or combinator.
-
-A stream describes production; a cursor is one active traversal. Reopening a
-reusable description repeats its effects and need not reproduce identical
-values. Captured resources and effect evidence restrict where that description
-can be used. Reusability does not extend a captured capability's lifetime.
-
-Ordinary stages are sequential and demand-driven. `take 0` never starts its
-upstream producer, and ending traversal releases everything it acquired.
-`take` produces another stream; materialization is a separate library operation,
-such as `Stream.toList`, with storage proportional to the collected output.
-Pure and suspending callbacks use the same `map`, `filter`, and `fold`.
-
-**Proposed file pipeline — milestone 3:**
-
-```fango
-emitLines file =
-    case File.readLine file of
-        Nothing -> ()
-        Just line ->
-            Stream.yield line.text
-            emitLines file
-
-lines path = Stream.generate \_ ->
-    File.withFile path \file ->
-        emitLines file
-
-printPrefix path =
-    lines path
-        |> Stream.filter nonempty
-        |> Stream.take 20
-        |> Stream.forEach print
-```
-
-Opening the description starts no file IO; traversal opens the file and closes
-it once on exhaustion, failure, or early stop. File IO here is synchronous.
-Machine lowering does not make a blocking native call nonblocking.
+The synchronous Stream API, scoped cursors, custom stages, and file pipelines
+are implemented; see [Streams and cursors](reference.md#streams-and-cursors).
+The next extension admits suspending callbacks through those same combinators.
 
 **Proposed async network pipeline — milestone 4:**
 
@@ -142,104 +72,6 @@ Async.run \_ ->
 This still fetches sequentially. The network adapter supplies readiness or a
 bounded blocking-native bridge; neither `map` nor the call to `fetch` needs an
 async-specific spelling. Residual IO and failure remain visible to the caller.
-
-### Custom consumers and stages
-
-**Proposed example — milestone 3:**
-
-```fango
-Stream.withCursor source \cursor ->
-    first = Iterator.next cursor
-    second = Iterator.next cursor
-    combine first second
-```
-
-`Iterator.next` returns `Maybe a`, exclusively borrows its cursor for the whole
-advancement, and carries both traversal-state and producer effects. Exhaustion
-is stable: every later read returns `Nothing`. Cursors can pass through checked
-helpers and be used sequentially. Escape, retention beyond the owner, reentrant
-advancement, and concurrent advancement are statically rejected. An outstanding
-advancement retains its exclusive borrow across suspension. Distinct cursors
-can advance independently inside nested scopes.
-
-**Proposed annotated consumer — milestone 3.** `Iterator a e` and `Traversal`
-are proposed source types/effects; the hidden borrow identity is inferred.
-`Traversal` represents cursor-state access, discharged by `withCursor`, and is
-separate from the producer's residual row. Helper contracts also record which
-cursor is borrowed; an effect label alone cannot establish exclusivity.
-
-```fango
-sumCursor : Iterator Int e ->{Traversal | e} Int
-sumCursor cursor =
-    case Iterator.next cursor of
-        Nothing -> 0
-        Just value -> value + sumCursor cursor
-
-sumStream : Stream Int e ->{e} Int
-sumStream source = Stream.withCursor source sumCursor
-```
-
-The helper retains no cursor and returns an immutable result. Implementations
-may use a tail-recursive accumulator to avoid pending additions. There is no
-terminal-name recognition: an independently authored consumer has the same
-rights as `Stream.fold`.
-
-**Proposed filtering producer and sequential zip — milestone 3:**
-
-```fango
-keepMatching predicate cursor =
-    case Iterator.next cursor of
-        Nothing -> ()
-        Just value ->
-            if predicate value then Stream.yield value else ()
-            keepMatching predicate cursor
-
-filterWith predicate source = Stream.generate \_ ->
-    Stream.withCursor source \cursor ->
-        keepMatching predicate cursor
-
-emitPairs left right =
-    case Iterator.next left of
-        Nothing -> ()
-        Just a ->
-            case Iterator.next right of
-                Nothing -> ()
-                Just b ->
-                    Stream.yield (a, b)
-                    emitPairs left right
-
-zip left right = Stream.generate \_ ->
-    Stream.withCursor left \leftCursor ->
-        Stream.withCursor right \rightCursor ->
-            emitPairs leftCursor rightCursor
-```
-
-Sequential `zip` reads left first. If right ends, one unmatched left value may
-already have been produced; it cannot be undone. Storage is bounded apart from
-the producers' own state. Scope exit closes unfinished production before
-returning or propagating failure, including when downstream stops between
-yields. Lookahead consumers keep a bounded value buffer, and many-input or
-many-output stages use these same facilities.
-
-**Schematic lifetime contracts — milestone 3 cursors;
-not Fango syntax:**
-
-```text
-withCursor(source, use): introduce fresh s
-  cursor: Iterator<s, a, e>, owned by this traversal
-  use: borrow cursor within s; result and outer stores must not retain s
-next(&exclusive cursor<s>): {Traversal(s), e} Maybe a
-  exclusive borrow lasts until completion, including suspension
-helper(cursor<s>): export retention, result-capture, and access requirements
-```
-
-Every scope entry has a fresh identity, including recursive entries. Inferred
-contracts propagate through helper calls, closures, ADTs, and effect evidence,
-and module interfaces export them. An output element with captures retains its
-own lifetime restrictions; wrapping it in `Maybe` does not erase them. Ordinary
-examples infer identities and borrow boundaries. Resource declarations and inferred synchronous borrowing contracts are implemented
-(see the reference). Written capture and access annotations remain milestone 9;
-the schematic notation above is not accepted source syntax.
 
 ### Structured async
 
@@ -321,36 +153,14 @@ are outside the committed scope.
 
 ## Language foundations and compiler boundary
 
-The implemented baseline includes Direct/Exit effects, synchronous `Scope`,
-`Fail`, declared scoped resources, Stream descriptions, and row-indexed cursors with inferred lifetime and
-exclusive-advancement contracts. Stream transformations and consumers are
-ordinary Fango definitions; the public Generator and terminal Iterator APIs
-and their terminal Core nodes have been removed. The remaining milestone-3 work includes
-latent effect-evidence propagation for descriptions
-constructed outside their handlers and consumer recovery after producer failure,
-and the remaining acceptance coverage.
-Core retains residual-arrow metadata separately from transport; explicit row
-arguments and ownership checks still need to connect that information to the
-runtime's cursor-owned evidence forwarding and per-advance rebinding.
-Wire row construction, deferred interpretation checking, and the dedicated
-row verifier into all semantic Core entry points. Complete generated row
-transport in Direct/Exit members and Machine frames; both interpreter paths
-accept the explicit Core/Machine models. Make row arguments mandatory for all
-source open-row calls when the source elaborator starts emitting them.
-Call-site overlays must use the instantiated residual row; forwarding every
-lexical handler would make otherwise independent callbacks retain resources.
-The task APIs above remain unimplemented.
+The implemented effect, Stream, cursor, and representation contracts are in
+the [design](design.md#core-and-evidence-invariants). The task APIs above remain
+unimplemented and must preserve those boundaries.
 
-- **Effect subsumption:** use the implemented callback inclusion and nominal
-  variance rules for the proposed Stream types; never erase a real effect.
-- **Exclusive borrowing:** complete acceptance coverage for raw advancement
-  and transfers to lexical suspension owners, including stored callbacks and
-  captured evidence across producer/caller transitions.
-- **Compositional suspension:** Machine calls work through higher-order and
-  stored callbacks, nested scopes, result constructors, and module boundaries.
-  Unsupported suspension handlers receive source diagnostics, not Core errors.
-  Preserve the implemented Machine scope member's synchronous acquisition and
-  release obligations before callback row widening.
+- **Effect subsumption:** extend the implemented callback inclusion and nominal
+  variance rules to task APIs; never erase a real effect.
+- **Exclusive borrowing:** preserve sole advancement authority across task
+  suspension, cancellation, and transfers between executors.
 - **Task boundaries:** validate captures and separate child completion from an
   exit targeted at a parent handler. A child executor never unwinds a parent's
   stack directly; it reports completion for parent-side routing after drain.
@@ -391,23 +201,6 @@ Go stack allocation.
 
 Each stopping point is usable without the remaining sequence. All inherit the
 API tour's semantics and the verification gates below.
-
-### 3. Streams and custom traversal
-
-- **API and dependencies:** build on implemented scoped capabilities to deliver `Stream.generate`, transformations,
-  library consumers, `withCursor`, and `Iterator.next`. The tour's file/filter/
-  take, annotated consumer, lookahead parsing, and sequential zip must work.
-- **Implementation and soundness:** complete Machine representation families for
-  higher-order/stored callbacks, nested cursor scopes, result constructors, and
-  module calls. Replace recognized terminal consumers with ordinary Fango.
-  Prove exclusive borrows across suspension and stable exhaustion; reject
-  handling `Yield` without an owner with a source diagnostic.
-- **Generated code:** selective typed producer frames and owned advancement;
-  synchronous pipelines require no scheduler, goroutine, or channel machinery.
-- **Acceptance/stopping point:** custom many-input/many-output stages use bounded
-  storage; `take 0` starts nothing and early termination closes nested files
-  once, including failures. Settle cleanup-failure observation below before
-  promising stable early-stop failure reporting. Streams work without tasks.
 
 ### 4. Cooperative structured async
 

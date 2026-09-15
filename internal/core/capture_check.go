@@ -298,8 +298,8 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		}
 		return r
 	case *Suspend:
-		// E7's compiler-only fixtures resume with scalar values. E8 attaches
-		// ownership before capture-capable suspension results reach source.
+		// Yield retains its request's captures in the ownership flow graph;
+		// its ordinary expression result is Unit.
 		r := a.expr(e.Request, env, evidence)
 		r.uses = types.UnionCaptures(r.uses, e.Owner.Captures, captureEvidence(evidence, e.Owner.Unique))
 		r.value = types.CaptureSet{}
