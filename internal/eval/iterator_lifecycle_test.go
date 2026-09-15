@@ -10,31 +10,35 @@ import (
 	"time"
 
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/core/coretest"
 	"github.com/waj/fango/internal/types"
 )
 
-// stageIterator installs a checked producer factory and returns an owner
-// expression whose consumer drains it. Tests exercise EvalCompileTime's actual
-// owner boundary, including the transition back from Machine to ordinary Core.
-func stageIterator(t *testing.T, sup *types.Supply, b *types.Builtins, body core.Expr, defs []core.Def, natives map[string]*types.NativeInfo) (*core.IteratorScope, *Env) {
+// stageIterator installs the same checked advancement and owner boundary as
+// source traversal. Its consumer pulls once, then scope exit closes production.
+func stageIterator(t *testing.T, sup *types.Supply, b *types.Builtins, body core.Expr, defs []core.Def, natives map[string]*types.NativeInfo) (core.Expr, *Env) {
 	t.Helper()
-	producerTy := &types.TFun{Arg: b.Unit, Ret: b.Unit, Control: types.Control{Transport: types.Machine}}
-	producer := &core.Lambda{Param: "_", ParamCapture: sup.FreshCapture(), Body: body, Ty: producerTy}
-	defs = append(defs, core.Def{Name: "factory", Type: producerTy, Body: producer})
-	p := &core.Prog{Defs: defs, Natives: natives}
+	p := coretest.SynchronousCursorScopeWith(sup, b)
+	call := p.Defs[2].Body.(*core.App)
+	producer := call.Args[0].(*core.Lambda)
+	owner := producer.EffectParams[0]
+	producer.Body = core.Rewrite(body, func(t types.Type) types.Type { return t }, func(e core.Expr) core.Expr {
+		if suspension, ok := e.(*core.Suspend); ok && suspension.Owner.Unique == 0 {
+			copied := *suspension
+			copied.Owner = owner
+			return &copied
+		}
+		return e
+	})
+	p.Defs = append(p.Defs, defs...)
+	p.Natives = natives
 	mp := lowerMachineTest(t, p, b)
 	env := NewEnv()
 	env.DefineProg(p)
 	if err := env.DefineMachineProg(mp); err != nil {
 		t.Fatal(err)
 	}
-	cursorTy := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int}}
-	action := &core.Lambda{Param: "element", ParamCapture: sup.FreshCapture(),
-		Ty: &types.TFun{Arg: b.Int, Ret: b.Unit}, Body: &core.UnitLit{Ty: b.Unit}}
-	consumer := &core.Lambda{Param: "cursor", ParamCapture: sup.FreshCapture(),
-		Ty: &types.TFun{Arg: cursorTy, Ret: b.Unit}, Body: &core.IteratorForEach{Access: types.ExclusiveAdvance,
-			Action: action, Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: cursorTy}, Element: b.Int, Ty: b.Unit}}
-	return &core.IteratorScope{Scope: sup.FreshScope(), Producer: producer, Consumer: consumer, CursorTy: cursorTy, Ty: b.Unit}, env
+	return call, env
 }
 
 func TestIteratorPreservesCompileTimeNativeRestrictions(t *testing.T) {

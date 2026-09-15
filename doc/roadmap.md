@@ -284,7 +284,7 @@ outer handlers is checked. The remaining proposed sequence is API-first:
 
 `Stream` descriptions, ordinary combinators, row-indexed scoped cursors, and raw
 advancement are implemented in both backends and staging. Remaining milestone
-#3 work includes removing the legacy internal terminal nodes, completing latent
+#3 work includes completing latent
 effect-evidence propagation through reusable descriptions, cleanup-failure
 reports, and the remaining ownership and representation acceptance cases.
 Module-owned Machine families and synchronous acquisition/release adapters are

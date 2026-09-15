@@ -147,15 +147,11 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 			effects([]EffectInstance{e.Traversal})
 		}
 		children(e.Producer, e.Consumer)
-	case *IteratorForEach:
-		n.Kind, n.Access = "foreach", e.Access
-		children(e.Action, e.Cursor)
+
 	case *IteratorNext:
 		n.Kind, n.Access = "next", e.Access
 		children(e.Cursor)
-	case *IteratorFold:
-		n.Kind, n.Access = "fold", e.Access
-		children(e.Combine, e.Initial, e.Cursor)
+
 	default:
 		panic(fmt.Sprintf("capture contract: unhandled Core expression %T", e))
 	}

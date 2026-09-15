@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/core/coretest"
 	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/runtimefiles"
 	"github.com/waj/fango/internal/types"
@@ -94,57 +95,12 @@ func TestOrdinaryEmitterDoesNotAcquireMachineRuntime(t *testing.T) {
 }
 
 func TestIteratorOwnerRootsMachineProducerInDirectCaller(t *testing.T) {
-	sup := &types.Supply{}
-	b := types.NewBuiltins(sup)
-	iterator := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int}}
-	label := types.EffLabel{Unique: sup.NextUnique(), Name: types.GeneratorEffectName, Args: []types.Type{b.Int}, Suspension: true}
-	ownerScope := sup.FreshScope()
-	yieldOwner := core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Captures: types.ScopeCapture(ownerScope), Control: types.Control{Transport: types.Machine}}
-	yieldParam := yieldOwner
-	yieldParam.Captures = types.VarCapture(sup.FreshCapture())
-	yieldEffect := &types.EffectInfo{Unique: label.Unique, Name: label.Name, Params: []*types.TVar{sup.FreshRigid(types.General)}, Suspension: true}
-	producerTy := &types.TFun{Arg: b.Unit, Eff: types.Row{Labels: []types.EffLabel{label}}, Ret: b.Unit}
-	consumerTy := &types.TFun{Arg: iterator, Ret: b.Unit}
-	actionTy := &types.TFun{Arg: b.Int, Ret: b.Unit}
-	forEachTy := &types.TFun{Arg: actionTy, Ret: &types.TFun{Arg: iterator, Ret: b.Unit}}
-	stepTy := &types.TFun{Arg: b.Int, Ret: b.Int}
-	combineTy := &types.TFun{Arg: b.Int, Ret: stepTy}
-	foldTy := &types.TFun{Arg: combineTy, Ret: &types.TFun{Arg: b.Int, Ret: &types.TFun{Arg: iterator, Ret: b.Int}}}
-	ownerTy := &types.TFun{Arg: producerTy, Ret: &types.TFun{Arg: consumerTy, Ret: b.Unit}}
-	owner := core.Def{Name: types.GeneratorWithIteratorName, Owner: "Main", Type: ownerTy,
-		Params: []string{"producer", "consumer"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()},
-		Body: &core.IteratorScope{Scope: ownerScope, Yield: yieldOwner,
-			Producer: &core.VarRef{Name: "producer", Local: true, Ty: producerTy},
-			Consumer: &core.VarRef{Name: "consumer", Local: true, Ty: consumerTy},
-			CursorTy: iterator, Ty: b.Unit,
-		}}
-	forEach := core.Def{Name: types.IteratorForEachName, Owner: "Main", Type: forEachTy,
-		Params: []string{"action", "cursor"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()},
-		Body: &core.IteratorForEach{Access: types.ExclusiveAdvance,
-			Action: &core.VarRef{Name: "action", Local: true, Ty: actionTy}, Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: iterator},
-			Element: b.Int, Ty: b.Unit,
-		}}
-	fold := core.Def{Name: types.IteratorFoldName, Owner: "Main", Type: foldTy,
-		Params: []string{"combine", "initial", "cursor"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture(), sup.FreshCapture()},
-		Body: &core.IteratorFold{Access: types.ExclusiveAdvance,
-			Combine: &core.VarRef{Name: "combine", Local: true, Ty: combineTy}, Initial: &core.VarRef{Name: "initial", Local: true, Ty: b.Int},
-			Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: iterator}, Element: b.Int, Accumulator: b.Int, Ty: b.Int,
-		}}
-	producer := &core.Lambda{Param: "_", ParamCapture: sup.FreshCapture(), Ty: producerTy, EffectParams: []core.EffectInstance{yieldParam},
-		Body: &core.Seq{First: &core.Suspend{Owner: yieldParam, Request: &core.VarRef{Name: "captured", Local: true, Ty: b.Int}, Ty: b.Unit},
-			Then: &core.Suspend{Owner: yieldParam, Request: &core.IntLit{Val: 8, Ty: b.Int}, Ty: b.Unit}, Ty: b.Unit}}
-	action := &core.Lambda{Param: "value", ParamCapture: sup.FreshCapture(), Ty: actionTy, Body: &core.UnitLit{Ty: b.Unit}}
-	consumer := &core.Lambda{Param: "cursor", ParamCapture: sup.FreshCapture(), Ty: consumerTy,
-		Body: &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: types.IteratorForEachName, Ty: forEachTy},
-			Args: []core.Expr{action, &core.VarRef{Name: "cursor", Local: true, Ty: iterator}}, Ty: b.Unit}}
-	call := &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: owner.Name, Ty: ownerTy},
-		Args: []core.Expr{producer, consumer}, Ty: b.Unit}
-	main := core.Def{Name: "Main.main", Owner: "Main", Type: b.Unit,
-		Body: &core.Let{Name: "captured", Rhs: &core.IntLit{Val: 7, Ty: b.Int}, Body: call, Ty: b.Unit}}
-	p := &core.Prog{Entry: main.Name, Intrinsics: map[string]bool{
-		types.GeneratorWithIteratorName: true, types.IteratorForEachName: true, types.IteratorFoldName: true,
-	}, Defs: []core.Def{owner, forEach, fold, main}}
-	p.Effects = append(p.Effects, yieldEffect)
+	p, b := coretest.SynchronousCursorScope()
+	main := &p.Defs[2]
+	call := main.Body.(*core.App)
+	producer := call.Args[0].(*core.Lambda)
+	producer.Body.(*core.Seq).First.(*core.Suspend).Request = &core.VarRef{Name: "captured", Local: true, Ty: b.Int}
+	main.Body = &core.Let{Name: "captured", Rhs: &core.IntLit{Val: 7, Ty: b.Int}, Body: call, Ty: main.Type}
 	if errs := core.InferCaptures(p, b); len(errs) != 0 {
 		t.Fatalf("capture inference: %v", errs)
 	}
@@ -152,12 +108,15 @@ func TestIteratorOwnerRootsMachineProducerInDirectCaller(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("machine lowering: %v", errs)
 	}
-	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Main", Entry: true}, {Name: "Generator"}}, false)
+	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Stream", Imports: []string{"Maybe", "Iterator"}}, {Name: "Main", Imports: []string{"Maybe", "Iterator", "Stream"}, Entry: true}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	generated := string(files[0].Data)
-	for _, want := range []string{"fangort.StartOwnedMachineIterator", "fangort.NewYieldOwner", "fangort.PullMachineIterator", "V_Iterator_dot_fold", "t_iteratorAccumulator", "MachineFrame_Main_dot_main_machine_lambda", "v_captured int64 = 7"} {
+	generated := ""
+	for _, file := range files {
+		generated += string(file.Data)
+	}
+	for _, want := range []string{"fangort.StartOwnedMachineIterator", "fangort.NewYieldOwner", "fangort.RunCursorConsumer", "MachineFrame_Main_dot_main_machine_lambda", "v_captured int64 = 7"} {
 		if !strings.Contains(generated, want) {
 			t.Fatalf("generated iterator owner missing %q:\n%s", want, generated)
 		}

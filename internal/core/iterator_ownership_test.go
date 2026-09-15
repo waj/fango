@@ -7,22 +7,28 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-func iteratorProofFixture() (*Prog, *types.Builtins, *IteratorScope, *IteratorForEach) {
+func iteratorProofFixture() (*Prog, *types.Builtins, *IteratorScope, *IteratorNext) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
-	cursor := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int}}
+	cursor := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int, b.Unit}}
 	producer := &types.TFun{Arg: b.Unit, Ret: b.Unit, Control: types.Control{Transport: types.Machine}}
 	consumer := &types.TFun{Arg: cursor, Ret: b.Unit}
-	action := &types.TFun{Arg: b.Int, Ret: b.Unit}
+	elem := sup.FreshRigid(types.General)
+	con := &types.TCon{Unique: sup.NextUnique(), Name: "Maybe.Maybe", Args: []types.Type{elem}}
+	result := &types.ADTInfo{Con: con, Params: []*types.TVar{elem}, Ctors: []*types.CtorInfo{
+		{Name: "Maybe.Nothing", Index: 0, Result: con},
+		{Name: "Maybe.Just", Index: 1, Fields: []types.Type{elem}, Result: con},
+	}}
+	maybe := &types.TCon{Unique: con.Unique, Name: con.Name, Args: []types.Type{b.Int}}
 	scope := &IteratorScope{Scope: sup.FreshScope(), Producer: &VarRef{Name: "producer", Local: true, Ty: producer},
 		Consumer: &VarRef{Name: "consumer", Local: true, Ty: consumer}, CursorTy: cursor, Ty: b.Unit}
-	each := &IteratorForEach{Access: types.ExclusiveAdvance, Action: &VarRef{Name: "action", Local: true, Ty: action},
-		Cursor: &VarRef{Name: "cursor", Local: true, Ty: cursor}, Element: b.Int, Ty: b.Unit}
-	p := &Prog{Intrinsics: map[string]bool{types.GeneratorWithIteratorName: true, types.IteratorForEachName: true}, Defs: []Def{
-		{Name: types.GeneratorWithIteratorName, Type: &types.TFun{Arg: producer, Ret: &types.TFun{Arg: consumer, Ret: b.Unit}},
+	each := &IteratorNext{Access: types.ExclusiveAdvance,
+		Cursor: &VarRef{Name: "cursor", Local: true, Ty: cursor}, Result: result, Ty: maybe}
+	p := &Prog{ADTs: []*types.ADTInfo{result}, Intrinsics: map[string]bool{types.StreamWithProducerName: true, types.IteratorNextName: true}, Defs: []Def{
+		{Name: types.StreamWithProducerName, Type: &types.TFun{Arg: producer, Ret: &types.TFun{Arg: consumer, Ret: b.Unit}},
 			Params: []string{"producer", "consumer"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()}, Body: scope},
-		{Name: types.IteratorForEachName, Type: &types.TFun{Arg: action, Ret: &types.TFun{Arg: cursor, Ret: b.Unit}},
-			Params: []string{"action", "cursor"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()}, Body: each},
+		{Name: types.IteratorNextName, Type: &types.TFun{Arg: cursor, Ret: maybe, Control: types.Control{Transport: types.Machine}}, Control: types.Control{Transport: types.Machine},
+			Params: []string{"cursor"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture()}, Body: each},
 	}}
 	return p, b, scope, each
 }
@@ -30,17 +36,17 @@ func iteratorProofFixture() (*Prog, *types.Builtins, *IteratorScope, *IteratorFo
 func TestIteratorCoreRequiresOwnershipAndAccessProofs(t *testing.T) {
 	for _, test := range []struct {
 		name   string
-		damage func(*Prog, *IteratorScope, *IteratorForEach)
+		damage func(*Prog, *IteratorScope, *IteratorNext)
 		want   string
 	}{
-		{"valid", func(*Prog, *IteratorScope, *IteratorForEach) {}, ""},
-		{"missing owner", func(_ *Prog, s *IteratorScope, _ *IteratorForEach) { s.Scope = 0 }, "invalid or reused scope identity"},
-		{"missing access", func(_ *Prog, _ *IteratorScope, e *IteratorForEach) { e.Access = 0 }, "lacks exclusive advancement proof"},
-		{"unknown access", func(_ *Prog, _ *IteratorScope, e *IteratorForEach) { e.Access = 99 }, "lacks exclusive advancement proof"},
-		{"stale scope contract", func(p *Prog, _ *IteratorScope, _ *IteratorForEach) { p.Defs[0].CaptureContract.Body.Scope++ }, "capture contract is stale"},
-		{"stale access contract", func(p *Prog, _ *IteratorScope, _ *IteratorForEach) { p.Defs[1].CaptureContract.Body.Access = 0 }, "capture contract is stale"},
-		{"missing contract", func(p *Prog, _ *IteratorScope, _ *IteratorForEach) { p.Defs[1].CaptureContract = nil }, "capture contract is stale"},
-		{"undeclared intrinsic", func(p *Prog, _ *IteratorScope, _ *IteratorForEach) { delete(p.Intrinsics, types.IteratorForEachName) }, "outside the declared"},
+		{"valid", func(*Prog, *IteratorScope, *IteratorNext) {}, ""},
+		{"missing owner", func(_ *Prog, s *IteratorScope, _ *IteratorNext) { s.Scope = 0 }, "invalid or reused scope identity"},
+		{"missing access", func(_ *Prog, _ *IteratorScope, e *IteratorNext) { e.Access = 0 }, "lacks exclusive access proof"},
+		{"unknown access", func(_ *Prog, _ *IteratorScope, e *IteratorNext) { e.Access = 99 }, "lacks exclusive access proof"},
+		{"stale scope contract", func(p *Prog, _ *IteratorScope, _ *IteratorNext) { p.Defs[0].CaptureContract.Body.Scope++ }, "capture contract is stale"},
+		{"stale access contract", func(p *Prog, _ *IteratorScope, _ *IteratorNext) { p.Defs[1].CaptureContract.Body.Access = 0 }, "capture contract is stale"},
+		{"missing contract", func(p *Prog, _ *IteratorScope, _ *IteratorNext) { p.Defs[1].CaptureContract = nil }, "capture contract is stale"},
+		{"undeclared intrinsic", func(p *Prog, _ *IteratorScope, _ *IteratorNext) { delete(p.Intrinsics, types.IteratorNextName) }, "outside the declared"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			p, b, scope, each := iteratorProofFixture()
@@ -73,7 +79,7 @@ func TestCursorAccessContractsSubstituteAliasesAndRecursiveHelpers(t *testing.T)
 			scalar := &types.CaptureFlow{ID: 1, Kind: "scalar", Type: b.Unit}
 			action := &types.CaptureFlow{ID: 2, Kind: "lambda", Name: "ignored", Type: fnTy, Children: []*types.CaptureFlow{scalar}}
 			cursor := &types.CaptureFlow{ID: 3, Kind: "var", Name: "cursor", Type: cursorTy}
-			read := &types.CaptureFlow{ID: 4, Kind: "foreach", Access: types.ExclusiveAdvance, Type: b.Unit, Children: []*types.CaptureFlow{action, cursor}}
+			read := &types.CaptureFlow{ID: 4, Kind: "next", Access: types.ExclusiveAdvance, Type: b.Unit, Children: []*types.CaptureFlow{cursor}}
 			global := &types.CaptureFlow{ID: 5, Kind: "global", Name: "helper", Type: fnTy}
 			call := &types.CaptureFlow{ID: 6, Kind: "call", Type: b.Unit, Children: []*types.CaptureFlow{global, cursor}}
 			body := &types.CaptureFlow{ID: 7, Kind: "branch", Type: b.Unit, Children: []*types.CaptureFlow{scalar, read, call}}

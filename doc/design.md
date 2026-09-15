@@ -1134,8 +1134,8 @@ normally or exceptionally transfers control back to the enclosing
 `IteratorScope`, which closes or abandons the producer exactly once and combines
 cleanup failure with the consumer exit. Recursive capture contracts join
 accumulator values to a fixed point, including callback effects reached through
-an accumulator from a prior iteration. Legacy terminal Core nodes remain internal
-until their low-level fixtures are migrated; no source declaration exposes them.
+an accumulator from a prior iteration. Only cursor ownership, advancement, and
+yield require compiler support; there are no terminal traversal Core nodes.
 
 An effect-polymorphic higher-order worker has its open callback row erased from
 the runtime ABI. Passing a concrete callback therefore adapts it to that ABI;

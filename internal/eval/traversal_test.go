@@ -19,7 +19,7 @@ func TestTypedCursorAdvancementStartsOnDemandAndStaysExhausted(t *testing.T) {
 	just := &types.CtorInfo{Name: "Maybe.Just", Index: 1, Fields: []types.Type{a}, Result: con}
 	adt := &types.ADTInfo{Con: con, Params: []*types.TVar{a}, Ctors: []*types.CtorInfo{nothing, just}}
 	result := &types.TCon{Unique: con.Unique, Name: con.Name, Args: []types.Type{b.Int}}
-	cursor := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int}}
+	cursor := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int, b.Unit}}
 	control := types.Control{Transport: types.Machine}
 	fn := &types.TFun{Arg: cursor, Ret: result, Control: control}
 	p := &core.Prog{Intrinsics: map[string]bool{types.IteratorNextName: true}, ADTs: []*types.ADTInfo{adt}, Defs: []core.Def{

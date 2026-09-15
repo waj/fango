@@ -89,7 +89,7 @@ func TestListSyntax(t *testing.T) {
 	}
 }
 
-func TestOwnedGeneratorRunsInREPL(t *testing.T) {
+func TestOwnedStreamRunsInREPL(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader(`import Stream
 import Iterator
@@ -107,7 +107,7 @@ Stream.forEach print (Stream.generate produce)
 	}
 }
 
-func TestOwnedGeneratorStagesAndRollsBackInREPL(t *testing.T) {
+func TestOwnedStreamStagesAndRollsBackInREPL(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader(`import Meta
 early : Bool

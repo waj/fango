@@ -10,16 +10,16 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-func TestGeneratorYieldElaboratesToSuspend(t *testing.T) {
+func TestStreamYieldElaboratesToSuspend(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
 	elem := sup.FreshRigid(types.General)
 	row := sup.FreshRigid(types.RowVar)
-	effect := &types.EffectInfo{Unique: sup.NextUnique(), Name: types.GeneratorEffectName, Params: []*types.TVar{elem}, Suspension: true}
+	effect := &types.EffectInfo{Unique: sup.NextUnique(), Name: types.StreamYieldEffectName, Params: []*types.TVar{elem}, Suspension: true}
 	label := types.EffLabel{Unique: effect.Unique, Name: effect.Name, Args: []types.Type{elem}, Suspension: true}
 	ty := &types.TFun{Arg: elem, Eff: types.Row{Labels: []types.EffLabel{label}, Tail: row}, Ret: b.Unit}
-	op := &types.EffectOp{Owner: effect, Name: types.GeneratorYieldName, Scheme: types.Scheme{Vars: []*types.TVar{elem, row}, Body: ty}, Arity: 1, ParamTypes: []types.Type{elem}, ResultType: b.Unit}
+	op := &types.EffectOp{Owner: effect, Name: types.StreamYieldName, Scheme: types.Scheme{Vars: []*types.TVar{elem, row}, Body: ty}, Arity: 1, ParamTypes: []types.Type{elem}, ResultType: b.Unit}
 	effect.Ops = []*types.EffectOp{op}
 	ck.Effects[effect.Name] = effect
 	ck.EffectsByUnique[effect.Unique] = effect

@@ -22,7 +22,7 @@ func Lint(p *Prog, b *types.Builtins) []error {
 // LintMachineInput checks semantic Core immediately before selective machine
 // lowering. It admits compiler-only Suspend nodes and Machine transport while
 // retaining every ordinary Core invariant. Ordinary Lint admits the same
-// private nodes only when the resolved Generator.withIterator intrinsic is
+// private nodes only when the resolved Stream.withProducer intrinsic is
 // present; that declaration is the source activation boundary.
 func LintMachineInput(p *Prog, b *types.Builtins) []error {
 	return lint(p, b, true, false)
@@ -41,7 +41,7 @@ func lint(p *Prog, b *types.Builtins, allowMachine, allowStage bool) []error {
 		tyParams: map[int]bool{}, evidence: map[int]int{}, evidenceCaptures: map[int][]types.CaptureSet{},
 		captureVars: map[types.CaptureVar]bool{}, scopeIDs: map[types.ScopeID]bool{}, activeScopes: map[types.ScopeID]bool{},
 		resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives, intrinsics: p.Intrinsics,
-		allowMachine: allowMachine || (p.Intrinsics[types.GeneratorWithIteratorName] || p.Intrinsics[types.StreamWithProducerName] || p.Intrinsics[types.IteratorNextName]), allowStage: allowStage}
+		allowMachine: allowMachine || (p.Intrinsics[types.StreamWithProducerName] || p.Intrinsics[types.IteratorNextName]), allowStage: allowStage}
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
 	}
@@ -576,12 +576,12 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: iterator scope has invalid or reused scope identity %d", where, e.Scope)
 		}
 		l.scopeIDs[e.Scope] = true
-		if !l.intrinsics[l.defName] || (l.defName != types.GeneratorWithIteratorName && l.defName != types.StreamWithProducerName) {
-			l.errorf("%s: iterator scope outside the declared `%s` intrinsic", where, types.GeneratorWithIteratorName)
+		if !l.intrinsics[l.defName] || (l.defName != types.StreamWithProducerName) {
+			l.errorf("%s: iterator scope outside the declared `%s` intrinsic", where, types.StreamWithProducerName)
 		}
 		cursor, ok := e.CursorTy.(*types.TCon)
-		if !ok || cursor.Name != types.IteratorTypeName || (len(cursor.Args) < 1 || len(cursor.Args) > 2) {
-			l.errorf("%s: iterator scope cursor typed %s, want `%s a`", where, types.Show(e.CursorTy), types.IteratorTypeName)
+		if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 2 {
+			l.errorf("%s: iterator scope cursor typed %s, want `%s a e`", where, types.Show(e.CursorTy), types.IteratorTypeName)
 		}
 		producer, ok := e.Producer.Type().(*types.TFun)
 		if e.Yield.Unique != 0 {
@@ -589,7 +589,7 @@ func (l *linter) expr(e Expr, where string) {
 			if effect := l.effects[e.Yield.Unique]; effect == nil || !effect.Suspension || e.Yield.Control.Transport != types.Machine {
 				l.errorf("%s: iterator scope has invalid Yield evidence", where)
 			}
-			if cursor == nil || (len(cursor.Args) < 1 || len(cursor.Args) > 2) || len(e.Yield.Args) != 1 || !types.Equal(cursor.Args[0], e.Yield.Args[0]) {
+			if cursor == nil || len(cursor.Args) != 2 || len(e.Yield.Args) != 1 || !types.Equal(cursor.Args[0], e.Yield.Args[0]) {
 				l.errorf("%s: iterator cursor element disagrees with Yield owner", where)
 			}
 		}
@@ -642,35 +642,7 @@ func (l *linter) expr(e Expr, where string) {
 		}
 		l.expr(e.Producer, where)
 		l.expr(e.Consumer, where)
-	case *IteratorForEach:
 
-		l.control(e.Control, where)
-		if e.Access != types.ExclusiveAdvance {
-			l.errorf("%s: iterator forEach lacks exclusive advancement proof", where)
-		}
-		if !l.intrinsics[types.IteratorForEachName] || l.defName != types.IteratorForEachName {
-			l.errorf("%s: iterator forEach outside the declared `%s` intrinsic", where, types.IteratorForEachName)
-		}
-		if l.unique(e.Ty) != l.b.Unit.Unique {
-			l.errorf("%s: iterator forEach result typed %s, want Unit", where, types.Show(e.Ty))
-		}
-		action, ok := e.Action.Type().(*types.TFun)
-		if !ok {
-			l.errorf("%s: iterator forEach action is not a function", where)
-		} else {
-			if !types.Equal(action.Arg, e.Element) || l.unique(action.Ret) != l.b.Unit.Unique {
-				l.errorf("%s: iterator forEach action does not have shape `a -> ()`", where)
-			}
-			if want := types.FunctionControl(action); e.Control != want {
-				l.errorf("%s: iterator forEach control %s disagrees with action %s", where, ControlName(e.Control), ControlName(want))
-			}
-		}
-		cursor, ok := e.Cursor.Type().(*types.TCon)
-		if !ok || cursor.Name != types.IteratorTypeName || (len(cursor.Args) < 1 || len(cursor.Args) > 2) || !types.Equal(cursor.Args[0], e.Element) {
-			l.errorf("%s: iterator forEach cursor does not have type `%s a`", where, types.IteratorTypeName)
-		}
-		l.expr(e.Action, where)
-		l.expr(e.Cursor, where)
 	case *IteratorNext:
 		if !l.intrinsics[types.IteratorNextName] || l.defName != types.IteratorNextName {
 			l.errorf("%s: advancement outside the declared Iterator.next intrinsic", where)
@@ -686,34 +658,7 @@ func (l *linter) expr(e Expr, where string) {
 			}
 			l.expr(e.Cursor, where)
 		}
-	case *IteratorFold:
-		l.control(e.Control, where)
-		if e.Access != types.ExclusiveAdvance {
-			l.errorf("%s: iterator fold lacks exclusive advancement proof", where)
-		}
-		if !l.intrinsics[types.IteratorFoldName] || l.defName != types.IteratorFoldName {
-			l.errorf("%s: iterator fold outside the declared `%s` intrinsic", where, types.IteratorFoldName)
-		}
-		if !types.Equal(e.Ty, e.Accumulator) || !types.Equal(e.Initial.Type(), e.Accumulator) {
-			l.errorf("%s: iterator fold initial/result type disagrees with its accumulator", where)
-		}
-		combine, ok := e.Combine.Type().(*types.TFun)
-		var step *types.TFun
-		if ok {
-			step, ok = combine.Ret.(*types.TFun)
-		}
-		if !ok || !types.Equal(combine.Arg, e.Element) || !types.Equal(step.Arg, e.Accumulator) || !types.Equal(step.Ret, e.Accumulator) {
-			l.errorf("%s: iterator fold callback does not have shape `a -> b -> b`", where)
-		} else if want := types.FunctionControl(step); e.Control != want {
-			l.errorf("%s: iterator fold control %s disagrees with callback %s", where, ControlName(e.Control), ControlName(want))
-		}
-		cursor, ok := e.Cursor.Type().(*types.TCon)
-		if !ok || cursor.Name != types.IteratorTypeName || (len(cursor.Args) < 1 || len(cursor.Args) > 2) || !types.Equal(cursor.Args[0], e.Element) {
-			l.errorf("%s: iterator fold cursor does not have type `%s a`", where, types.IteratorTypeName)
-		}
-		l.expr(e.Combine, where)
-		l.expr(e.Initial, where)
-		l.expr(e.Cursor, where)
+
 	case *ControlExit:
 		l.control(e.Effect.Control, where)
 		l.effectInstance(e.Effect, where)
@@ -1596,13 +1541,7 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		// function types and by IteratorScope.Control.
 		directSlot(e.Producer, "iterator producer")
 		directSlot(e.Consumer, "iterator consumer")
-	case *IteratorForEach:
-		directSlot(e.Action, "iterator action")
-		directSlot(e.Cursor, "iterator cursor")
-	case *IteratorFold:
-		directSlot(e.Combine, "iterator combine")
-		directSlot(e.Initial, "iterator initial")
-		directSlot(e.Cursor, "iterator cursor")
+
 	case *Handle:
 		if e.State != nil {
 			directSlot(e.State.Initial, "handler initial state")

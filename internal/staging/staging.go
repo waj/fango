@@ -64,7 +64,7 @@ func (ev *evaluator) run(operand ast.Expr) (any, []diag.Error) {
 	if len(errs) > 0 {
 		return nil, errs
 	}
-	if ev.ck.Intrinsics[types.GeneratorWithIteratorName].Body != nil || ev.ck.Intrinsics[types.StreamWithProducerName].Body != nil || ev.ck.Intrinsics[types.IteratorNextName].Body != nil {
+	if ev.ck.Intrinsics[types.StreamWithProducerName].Body != nil || ev.ck.Intrinsics[types.IteratorNextName].Body != nil {
 		defs := ev.executionDefs(body, aux)
 		p := ev.program(defs)
 		if captureErrs := core.InferCaptures(p, ev.ck.B); len(captureErrs) > 0 {

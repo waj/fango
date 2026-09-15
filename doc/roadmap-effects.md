@@ -322,12 +322,11 @@ are outside the committed scope.
 ## Language foundations and compiler boundary
 
 The implemented baseline includes Direct/Exit effects, synchronous `Scope`,
-`Fail`, declared scoped resources, inferred capture contracts, and a limited
-Stream descriptions and row-indexed cursors with inferred lifetime and
+`Fail`, declared scoped resources, Stream descriptions, and row-indexed cursors with inferred lifetime and
 exclusive-advancement contracts. Stream transformations and consumers are
 ordinary Fango definitions; the public Generator and terminal Iterator APIs
-have been removed. The remaining milestone-3 work includes removal of legacy
-internal terminal nodes, latent effect-evidence propagation for descriptions
+and their terminal Core nodes have been removed. The remaining milestone-3 work includes
+latent effect-evidence propagation for descriptions
 constructed outside their handlers and consumer recovery after producer failure,
 typed cleanup reports, and the remaining acceptance coverage.
 The task APIs above remain unimplemented.

@@ -22,7 +22,7 @@ func TestGeneratedTypedCursorAdvancement(t *testing.T) {
 	just := &types.CtorInfo{Name: "Maybe.Just", Index: 1, Fields: []types.Type{a}, Result: con}
 	adt := &types.ADTInfo{Con: con, Params: []*types.TVar{a}, Ctors: []*types.CtorInfo{nothing, just}}
 	result := &types.TCon{Unique: con.Unique, Name: con.Name, Args: []types.Type{b.Int}}
-	cursor := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int}}
+	cursor := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int, b.Unit}}
 	control := types.Control{Transport: types.Machine}
 	fn := &types.TFun{Arg: cursor, Ret: result, Control: control}
 	p := &core.Prog{Entry: "Main.producer", Intrinsics: map[string]bool{types.IteratorNextName: true}, ADTs: []*types.ADTInfo{adt}, Defs: []core.Def{
@@ -105,7 +105,7 @@ func TestGeneratedCursorScopeClosesBeforeReturning(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatal(errs)
 	}
-	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Generator", Imports: []string{"Maybe", "Iterator"}}, {Name: "Main", Imports: []string{"Maybe", "Iterator", "Generator"}, Entry: true}}, false)
+	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Stream", Imports: []string{"Maybe", "Iterator"}}, {Name: "Main", Imports: []string{"Maybe", "Iterator", "Stream"}, Entry: true}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestGeneratedSynchronousCursorScope(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatal(errs)
 	}
-	units := []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Generator", Imports: []string{"Maybe", "Iterator"}}, {Name: "Main", Imports: []string{"Maybe", "Iterator", "Generator"}, Entry: true}}
+	units := []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Stream", Imports: []string{"Maybe", "Iterator"}}, {Name: "Main", Imports: []string{"Maybe", "Iterator", "Stream"}, Entry: true}}
 	files, err := EmitMachineProject(p, mp, b, units, false)
 	if err != nil {
 		t.Fatal(err)

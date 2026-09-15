@@ -384,7 +384,7 @@ func validateModuleDecls(n *node) []diag.Error {
 				}
 			}
 		case *ast.EffectDecl:
-			if name := canonical(n.name, d.Name); n.bundled && (name == types.GeneratorEffectName || name == types.StreamYieldEffectName || name == types.IteratorTraversalEffectName) {
+			if name := canonical(n.name, d.Name); n.bundled && (name == types.StreamYieldEffectName || name == types.IteratorTraversalEffectName) {
 				d.CompilerSuspension = true
 			}
 			for _, op := range d.Ops {

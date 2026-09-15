@@ -18,7 +18,7 @@ func TestCursorAdvanceProofAndLiveness(t *testing.T) {
 	just := &types.CtorInfo{Name: "Maybe.Just", Index: 1, Fields: []types.Type{a}, Result: con}
 	adt := &types.ADTInfo{Con: con, Params: []*types.TVar{a}, Ctors: []*types.CtorInfo{nothing, just}}
 	result := &types.TCon{Unique: con.Unique, Name: con.Name, Args: []types.Type{b.Int}}
-	cursor := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int}}
+	cursor := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int, b.Unit}}
 	control := types.Control{Transport: types.Machine}
 	fn := &types.TFun{Arg: cursor, Ret: result, Control: control}
 	p := &core.Prog{Intrinsics: map[string]bool{types.IteratorNextName: true}, ADTs: []*types.ADTInfo{adt}, Defs: []core.Def{
@@ -54,7 +54,7 @@ func TestCursorAdvanceProofAndLiveness(t *testing.T) {
 	}{
 		{"missing access", func(c *CursorAdvance) { c.Access = 0 }, "exclusive"},
 		{"wrong element", func(c *CursorAdvance) {
-			c.Cursor = &core.VarRef{Name: "cursor", Local: true, Ty: &types.TCon{Name: types.IteratorTypeName, Args: []types.Type{b.String}}}
+			c.Cursor = &core.VarRef{Name: "cursor", Local: true, Ty: &types.TCon{Name: types.IteratorTypeName, Args: []types.Type{b.String, b.Unit}}}
 		}, "invalid Maybe"},
 		{"missing descriptor", func(c *CursorAdvance) { c.Result = nil }, "invalid Maybe"},
 		{"missing constructor", func(c *CursorAdvance) { copy := *adt; copy.Ctors = []*types.CtorInfo{nil, just}; c.Result = &copy }, "invalid Maybe constructors"},

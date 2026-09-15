@@ -298,19 +298,7 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			r.value = types.CaptureSet{}
 		}
 		return r
-	case *IteratorForEach:
-		action := a.expr(e.Action, env, evidence)
-		cursor := a.expr(e.Cursor, env, evidence)
-		return captureResult{uses: types.UnionCaptures(action.uses, cursor.uses)}
-	case *IteratorFold:
-		combine := a.expr(e.Combine, env, evidence)
-		initial := a.expr(e.Initial, env, evidence)
-		cursor := a.expr(e.Cursor, env, evidence)
-		value := types.UnionCaptures(combine.value, initial.value, cursor.value)
-		if !a.canCarry(e.Ty, nil) {
-			value = types.CaptureSet{}
-		}
-		return captureResult{value: value, uses: types.UnionCaptures(combine.uses, initial.uses, cursor.uses)}
+
 	case *ResumeTail:
 		r := a.expr(e.Value, env, evidence)
 		if e.NextState != nil {

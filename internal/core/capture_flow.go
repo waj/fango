@@ -902,26 +902,13 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		inside := append(slices.Clone(scopes), owner)
 		result = f.apply(consumer, []flowValue{{refs: []int{cursor}, caps: []int{owner}}}, env, key+"/consumer", inside)
 		f.escape(result, owner, "cursor scope result", "The returned value")
-	case "foreach":
-		action := child(0)
-		value := f.advance(child(1), env, key, scopes)
-		f.apply(action, []flowValue{value}, env, key, scopes)
+
 	case "next":
 		value := f.advance(child(0), env, key, scopes)
 		some := f.alloc(key+"/some", flowObject{kind: "ctor", ctor: 1, fields: []flowValue{value}})
 		none := f.alloc(key+"/none", flowObject{kind: "ctor", ctor: 0})
 		result.refs = []int{some, none}
-	case "fold":
-		combine, initial := child(0), child(1)
-		value := f.advance(child(2), env, key, scopes)
-		// A later iteration can invoke or retain a callback stored by an earlier
-		// one. Feed the growing accumulator back through the callback contract,
-		// just as ordinary recursive Fango folds do through call summaries.
-		state := f.alloc(key+"/accumulator", flowObject{kind: "fold-state", fields: []flowValue{initial}})
-		accumulator := f.objects[state].fields[0]
-		next := f.apply(combine, []flowValue{value, accumulator}, env, key, scopes)
-		f.merge(&f.objects[state].fields[0], next)
-		result = f.objects[state].fields[0]
+
 	default:
 		panic("unknown capture flow: " + n.Kind)
 	}

@@ -10,7 +10,7 @@ import (
 // semantic Core and the independently checked advancement instruction.
 func CheckCursorResult(cursor, result types.Type, adt *types.ADTInfo) error {
 	c, ok := cursor.(*types.TCon)
-	if !ok || c.Name != types.IteratorTypeName || len(c.Args) < 1 || len(c.Args) > 2 {
+	if !ok || c.Name != types.IteratorTypeName || len(c.Args) != 2 {
 		return fmt.Errorf("advancement requires an Iterator cursor")
 	}
 	r, ok := result.(*types.TCon)

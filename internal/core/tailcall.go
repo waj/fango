@@ -172,10 +172,7 @@ func capturesMutated(e Expr, mutated map[string]bool) bool {
 			return walk(e.Cursor)
 		case *IteratorScope:
 			return walk(e.Producer) || walk(e.Consumer)
-		case *IteratorForEach:
-			return walk(e.Action) || walk(e.Cursor)
-		case *IteratorFold:
-			return walk(e.Combine) || walk(e.Initial) || walk(e.Cursor)
+
 		case *Suspend:
 			return walk(e.Request)
 		case *Neg:

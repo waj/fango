@@ -261,14 +261,10 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 		if name == types.ScopeBracketName {
 			// The declaration keeps its open row tail; Core does not.
 			defs = append(defs, scopeBracketDef(name, ty, ck))
-		} else if name == types.GeneratorWithIteratorName || name == types.StreamWithProducerName {
-			defs = append(defs, withIteratorDef(name, ty, ck))
+		} else if name == types.StreamWithProducerName {
+			defs = append(defs, withProducerDef(name, ty, ck))
 		} else if name == types.IteratorNextName {
 			defs = append(defs, iteratorNextDef(name, ty, ck))
-		} else if name == types.IteratorForEachName {
-			defs = append(defs, iteratorForEachDef(name, ty, ck))
-		} else if name == types.IteratorFoldName {
-			defs = append(defs, iteratorFoldDef(name, ty, ck))
 		}
 	}
 	return defs
@@ -281,45 +277,7 @@ func iteratorNextDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 		Body: &core.IteratorNext{Cursor: &core.VarRef{Name: "_cursor", Local: true, Ty: args[0]}, Result: ck.ADTs[maybe.Unique], Access: types.ExclusiveAdvance, Ty: result}}
 }
 
-func iteratorFoldDef(name string, ty types.Type, ck *infer.Checker) core.Def {
-	args, result := core.PeelFun(ty, 3)
-	combine := args[0].(*types.TFun)
-	cursor := args[2].(*types.TCon)
-	step := combine.Ret.(*types.TFun)
-	params := []string{"_combine", "_initial", "_cursor"}
-	return core.Def{
-		Name: name, Owner: symbolOwner(name), Type: ty, TyParams: runtimeRigidVars(ty), Params: params,
-		ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture(), ck.Sup.FreshCapture()},
-		Control:       core.ArrowControl(ty, len(params)),
-		Body: &core.IteratorFold{
-			Access:  types.ExclusiveAdvance,
-			Combine: &core.VarRef{Name: params[0], Local: true, Ty: combine},
-			Initial: &core.VarRef{Name: params[1], Local: true, Ty: args[1]},
-			Cursor:  &core.VarRef{Name: params[2], Local: true, Ty: cursor},
-			Element: cursor.Args[0], Accumulator: result, Ty: result, Control: types.FunctionControl(step),
-		},
-	}
-}
-
-func iteratorForEachDef(name string, ty types.Type, ck *infer.Checker) core.Def {
-	args, result := core.PeelFun(ty, 2)
-	action := args[0].(*types.TFun)
-	cursor := args[1].(*types.TCon)
-	params := []string{"_action", "_cursor"}
-	return core.Def{
-		Name: name, Owner: symbolOwner(name), Type: ty, TyParams: runtimeRigidVars(ty), Params: params,
-		ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture()},
-		Control:       core.ArrowControl(ty, len(params)),
-		Body: &core.IteratorForEach{
-			Access:  types.ExclusiveAdvance,
-			Action:  &core.VarRef{Name: params[0], Local: true, Ty: action},
-			Cursor:  &core.VarRef{Name: params[1], Local: true, Ty: cursor},
-			Element: cursor.Args[0], Ty: result, Control: types.FunctionControl(action),
-		},
-	}
-}
-
-func withIteratorDef(name string, ty types.Type, ck *infer.Checker) core.Def {
+func withProducerDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 	args, result := core.PeelFun(ty, 2)
 	producer := args[0].(*types.TFun)
 	consumer := args[1].(*types.TFun)

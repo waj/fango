@@ -624,7 +624,7 @@ type EffectDecl struct {
 	Params             []Param
 	Ops                []OpSig
 	Sp                 source.Span
-	CompilerSuspension bool // set only on the bundled Generator effect
+	CompilerSuspension bool // set only on bundled compiler-owned effects
 }
 
 // OpSig is one operation signature line inside an `effect` declaration.

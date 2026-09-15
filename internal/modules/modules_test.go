@@ -23,23 +23,23 @@ func write(t *testing.T, root, rel, body string) string {
 	return p
 }
 
-func TestOnlyBundledGeneratorEffectGetsSuspensionIdentity(t *testing.T) {
-	decl := func() *ast.EffectDecl { return &ast.EffectDecl{Name: "Generator"} }
+func TestOnlyBundledYieldEffectGetsSuspensionIdentity(t *testing.T) {
+	decl := func() *ast.EffectDecl { return &ast.EffectDecl{Name: "Yield"} }
 	bundledDecl := decl()
-	bundled := &node{name: "Generator", bundled: true, mod: &ast.Module{Decls: []ast.Decl{bundledDecl}}}
+	bundled := &node{name: "Stream", bundled: true, mod: &ast.Module{Decls: []ast.Decl{bundledDecl}}}
 	if errs := validateModuleDecls(bundled); len(errs) != 0 {
 		t.Fatalf("bundled validation: %+v", errs)
 	}
 	if !bundledDecl.CompilerSuspension {
-		t.Fatal("bundled Generator effect did not receive compiler suspension identity")
+		t.Fatal("bundled Yield effect did not receive compiler suspension identity")
 	}
 	localDecl := decl()
-	local := &node{name: "Generator", mod: &ast.Module{Decls: []ast.Decl{localDecl}}}
+	local := &node{name: "Stream", mod: &ast.Module{Decls: []ast.Decl{localDecl}}}
 	if errs := validateModuleDecls(local); len(errs) != 0 {
 		t.Fatalf("local validation: %+v", errs)
 	}
 	if localDecl.CompilerSuspension {
-		t.Fatal("local Generator spelling received compiler suspension identity")
+		t.Fatal("local Yield spelling received compiler suspension identity")
 	}
 }
 

@@ -135,8 +135,8 @@ func TestLowerEmitsFactoryClosuresIndependentlyOfMachineConsumers(t *testing.T) 
 func TestLowerRootsMachineLambdaInsideDirectIteratorOwnerCall(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
-	iterator := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int}}
-	label := types.EffLabel{Unique: sup.NextUnique(), Name: types.GeneratorEffectName, Args: []types.Type{b.Int}, Suspension: true}
+	iterator := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int, b.Unit}}
+	label := types.EffLabel{Unique: sup.NextUnique(), Name: types.StreamYieldEffectName, Args: []types.Type{b.Int}, Suspension: true}
 	ownerScope := sup.FreshScope()
 	yieldOwner := core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Captures: types.ScopeCapture(ownerScope), Control: types.Control{Transport: types.Machine}}
 	yieldParam := yieldOwner
@@ -145,7 +145,7 @@ func TestLowerRootsMachineLambdaInsideDirectIteratorOwnerCall(t *testing.T) {
 	producerTy := &types.TFun{Arg: b.Unit, Eff: types.Row{Labels: []types.EffLabel{label}}, Ret: b.Unit}
 	consumerTy := &types.TFun{Arg: iterator, Ret: b.Unit}
 	ownerTy := &types.TFun{Arg: producerTy, Ret: &types.TFun{Arg: consumerTy, Ret: b.Unit}}
-	owner := core.Def{Name: types.GeneratorWithIteratorName, Type: ownerTy,
+	owner := core.Def{Name: types.StreamWithProducerName, Type: ownerTy,
 		Params: []string{"producer", "consumer"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()},
 		Body: &core.IteratorScope{Scope: ownerScope, Yield: yieldOwner,
 			Producer: &core.VarRef{Name: "producer", Local: true, Ty: producerTy},
@@ -160,7 +160,7 @@ func TestLowerRootsMachineLambdaInsideDirectIteratorOwnerCall(t *testing.T) {
 		Args: []core.Expr{producer, consumer}, Ty: b.Unit}
 	main := core.Def{Name: "Main.main", Owner: "Main", Type: b.Unit,
 		Body: &core.Let{Name: "captured", Rhs: &core.IntLit{Val: 7, Ty: b.Int}, Body: call, Ty: b.Unit}}
-	p := &core.Prog{Intrinsics: map[string]bool{types.GeneratorWithIteratorName: true}, Defs: []core.Def{owner, main}}
+	p := &core.Prog{Intrinsics: map[string]bool{types.StreamWithProducerName: true}, Defs: []core.Def{owner, main}}
 	p.Effects = append(p.Effects, yieldEffect)
 	if errs := core.InferCaptures(p, b); len(errs) != 0 {
 		t.Fatalf("capture inference: %v", errs)

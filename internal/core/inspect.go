@@ -59,13 +59,7 @@ func InspectPruned(e Expr, visit func(Expr) bool) {
 	case *IteratorScope:
 		walk(e.Producer)
 		walk(e.Consumer)
-	case *IteratorForEach:
-		walk(e.Action)
-		walk(e.Cursor)
-	case *IteratorFold:
-		walk(e.Combine)
-		walk(e.Initial)
-		walk(e.Cursor)
+
 	case *Bracket:
 		walk(e.Acquire)
 		walk(e.Release)

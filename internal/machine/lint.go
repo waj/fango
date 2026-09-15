@@ -173,7 +173,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				errs = append(errs, fmt.Errorf("%s: suspension has unavailable owner evidence", blockWhere))
 			}
 			for _, ev := range w.EffectParams {
-				if ev.Name == types.GeneratorEffectName && term.Owner.Unique == 0 {
+				if ev.Name == types.StreamYieldEffectName && term.Owner.Unique == 0 {
 					errs = append(errs, fmt.Errorf("%s: suspension lacks lexical owner evidence", blockWhere))
 				}
 				if ev.Unique == term.Owner.Unique && (!types.EqualCaptures(ev.Captures, term.Owner.Captures) || ev.Name != term.Owner.Name || ev.Control != term.Owner.Control) {
@@ -393,10 +393,10 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			}
 			seenCursorScopes[term.Scope] = true
 			cursor, ok := term.Cursor.Ty.(*types.TCon)
-			if !ok || cursor.Name != types.IteratorTypeName || (len(cursor.Args) < 1 || len(cursor.Args) > 2) {
+			if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 2 {
 				errs = append(errs, fmt.Errorf("%s: cursor setup has invalid Iterator type", blockWhere))
 			}
-			if term.Yield.Unique != 0 && (term.Yield.Control.Transport != types.Machine || !types.EqualCaptures(term.Yield.Captures, types.ScopeCapture(term.Scope)) || cursor == nil || (len(cursor.Args) < 1 || len(cursor.Args) > 2) || len(term.Yield.Args) != 1 || !types.Equal(cursor.Args[0], term.Yield.Args[0])) {
+			if term.Yield.Unique != 0 && (term.Yield.Control.Transport != types.Machine || !types.EqualCaptures(term.Yield.Captures, types.ScopeCapture(term.Scope)) || cursor == nil || len(cursor.Args) != 2 || len(term.Yield.Args) != 1 || !types.Equal(cursor.Args[0], term.Yield.Args[0])) {
 				errs = append(errs, fmt.Errorf("%s: cursor setup has stale Yield ownership", blockWhere))
 			}
 			if term.Producer != nil {

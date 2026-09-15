@@ -154,18 +154,7 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		return fmt.Sprintf("(%s %d %s %s %s %s)", form, e.Scope, pr.Type(e.CursorTy), pr.Type(e.Ty), dumpExpr(e.Producer, pr), dumpExpr(e.Consumer, pr))
 	case *IteratorNext:
 		return fmt.Sprintf("(iterator-next access=%d %s %s)", e.Access, pr.Type(e.Ty), dumpExpr(e.Cursor, pr))
-	case *IteratorForEach:
-		form := "iterator-for-each"
-		if e.Control != (types.Control{}) {
-			form += "/" + ControlName(e.Control)
-		}
-		return fmt.Sprintf("(%s access=%d %s %s %s)", form, e.Access, pr.Type(e.Element), dumpExpr(e.Action, pr), dumpExpr(e.Cursor, pr))
-	case *IteratorFold:
-		form := "iterator-fold"
-		if e.Control != (types.Control{}) {
-			form += "/" + ControlName(e.Control)
-		}
-		return fmt.Sprintf("(%s access=%d %s %s %s %s %s)", form, e.Access, pr.Type(e.Element), pr.Type(e.Accumulator), dumpExpr(e.Combine, pr), dumpExpr(e.Initial, pr), dumpExpr(e.Cursor, pr))
+
 	case *ResumeTail:
 		if e.NextState != nil {
 			return fmt.Sprintf("(resume-tail %d %s %s (next-state %s))", e.Owner, pr.Type(e.ClauseResult), dumpExpr(e.Value, pr), dumpExpr(e.NextState, pr))

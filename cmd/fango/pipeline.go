@@ -94,7 +94,7 @@ func emitProjectManifest(entry string, printMain bool, stderr io.Writer) ([]code
 	}
 	var files []codegen.File
 	var err error
-	if prog.Intrinsics[types.GeneratorWithIteratorName] || prog.Intrinsics[types.StreamWithProducerName] || prog.Intrinsics[types.IteratorNextName] {
+	if prog.Intrinsics[types.StreamWithProducerName] || prog.Intrinsics[types.IteratorNextName] {
 		machineProg, lowerErrs := machineir.Lower(prog, ck.B)
 		if len(lowerErrs) > 0 {
 			fmt.Fprintf(stderr, "fango: internal compiler error: machine lowering failed: %v\n", lowerErrs[0])
