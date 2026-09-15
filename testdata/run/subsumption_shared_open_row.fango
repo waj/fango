@@ -1,0 +1,18 @@
+type Source a e = Source (() ->{e} a)
+
+read : Source a e ->{e} a
+read source = case source of
+    Source action -> action()
+
+withSource : Source a e -> (Source a e ->{e} b) ->{e} b
+withSource source consumer = consumer source
+
+readAndPrint : Source a e ->{IO | e} a
+readAndPrint source =
+    print "read"
+    read source
+
+printed : Source a e ->{IO | e} a
+printed source = withSource source (\cursor -> readAndPrint cursor)
+
+main() = print (printed (Source (\_ -> 42)))

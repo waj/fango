@@ -1124,8 +1124,8 @@ tail. This supports effect-indexed declarations without explicit kind syntax:
 type Foo eff = Foo (() ->{IO | eff} ())
 ```
 
-The row parameter may be used in effect rows, but not as an ordinary value type
-or as an ordinary value type. When an ADT parameter is known to be row-kinded,
+The row parameter may be used in effect rows, but not as an ordinary value type.
+When an ADT parameter is known to be row-kinded,
 an effect name is accepted as a singleton row argument, so `Foo IO` means
 `Foo {IO}`; parameterized effects use the corresponding application, such as
 `Foo (State Int)`. Row-kinded parameters are source-level metadata and are
@@ -1624,7 +1624,10 @@ binding or other uses.
 
 The rule also applies to stored callbacks and covariant effect-indexed values.
 For example, `type Test e = Test (() ->{e} ())` permits pure and IO tests in
-one list, in either order. The compiler derives variance from fields, including
+one list, in either order. Open row parameters can also widen: a consumer of
+an effect-indexed source may add its own
+effects to the shared row. The enclosing annotation must permit those effects.
+The compiler derives variance from fields, including
 recursive types and imported abstract types. Function inputs reverse the
 direction: a function accepting only pure callbacks cannot stand in for one
 that must accept IO callbacks. Parameters used in both directions, effect-label

@@ -493,7 +493,12 @@ solved in.
 Applications separate callee-shape equality from directional argument
 compatibility. Callback effects are included in the permitted parameter row;
 results are covariant and function inputs contravariant. A fresh expected type
-gets its own row view rather than borrowing a named value's closed row. Shared
+gets its own row view rather than borrowing a named value's closed row. Bare
+row variables inside covariant ADT arguments receive the same fresh view.
+For bounds with the same tail, `{L | e} ⊆ {R | e}`, extra permitted labels in
+`R` require no equality. Missing labels in `L` extend a flexible `e`; a rigid
+annotation tail cannot acquire them. Conflicting arguments of the same nominal
+effect still fail the distinct-label check. Shared
 arguments, collection elements, and branch results can therefore accumulate
 their combined effects without retagging the original binding. Shape constraints
 are solved before the resulting row bounds; unresolved flexible relationships

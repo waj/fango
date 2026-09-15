@@ -92,3 +92,34 @@ loud = leaf emit
 		})
 	}
 }
+
+func TestGenericCursorCallbackCanExtendSharedRow(t *testing.T) {
+	const prefix = `type Source a e = Source (() ->{e} a)
+read : Source a e ->{e} a
+read source = case source of
+    Source action -> action()
+withSource : Source a e -> (Source a e ->{e} b) ->{e} b
+withSource source consumer = consumer source
+readAndPrint : Source a e ->{IO | e} a
+readAndPrint source =
+    print "read"
+    read source
+`
+	for _, named := range []bool{false, true} {
+		for _, allowIO := range []bool{false, true} {
+			row := "e"
+			if allowIO {
+				row = "IO | e"
+			}
+			callback := "readAndPrint"
+			if !named {
+				callback = "(\\cursor -> readAndPrint cursor)"
+			}
+			src := prefix + "\nprinted : Source a e ->{" + row + "} a\nprinted source = withSource source " + callback
+			_, _, errs := check(t, src)
+			if allowIO && len(errs) != 0 || !allowIO && len(errs) == 0 {
+				t.Fatalf("named=%v allowIO=%v errors=%v", named, allowIO, errs)
+			}
+		}
+	}
+}

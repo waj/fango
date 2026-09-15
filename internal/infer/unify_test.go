@@ -129,3 +129,49 @@ func TestInclusionWithLabelsLeavesRoomForMore(t *testing.T) {
 		t.Fatalf("ambient row = %s, want %s", types.Show(got), types.Show(want))
 	}
 }
+
+func TestInclusionWithSharedTail(t *testing.T) {
+	for _, rigid := range []bool{false, true} {
+		for _, extraOnLeft := range []bool{false, true} {
+			sup := &types.Supply{}
+			b := types.NewBuiltins(sup)
+			tail := sup.FreshVar(types.RowVar)
+			tail.Rigid = rigid
+			label := types.EffLabel{Unique: sup.NextUnique(), Name: "Note", Args: []types.Type{b.Int}}
+			left, right := types.Row{Tail: tail}, types.Row{Tail: tail}
+			if extraOnLeft {
+				left.Labels = []types.EffLabel{label}
+			} else {
+				right.Labels = []types.EffLabel{label}
+			}
+			sub := Subst{}
+			m := includeRows(left, right, sub, b, sup)
+			if rigid && extraOnLeft {
+				if m == nil {
+					t.Fatal("added an unproved effect to a rigid tail")
+				}
+				continue
+			}
+			if m != nil {
+				t.Fatalf("rigid=%v left=%v: %v", rigid, extraOnLeft, m)
+			}
+			if extraOnLeft {
+				if !types.Equal(sub.Apply(left), sub.Apply(right)) {
+					t.Fatal("shared open tail did not absorb the required label")
+				}
+			}
+		}
+	}
+}
+
+func TestSharedTailStillRejectsConflictingEffectArguments(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	tail := sup.FreshVar(types.RowVar)
+	label := types.EffLabel{Unique: sup.NextUnique(), Name: "Read", Args: []types.Type{b.Int}}
+	other := label
+	other.Args = []types.Type{b.String}
+	if m := includeRows(types.Row{Labels: []types.EffLabel{label}, Tail: tail}, types.Row{Labels: []types.EffLabel{other}, Tail: tail}, Subst{}, b, sup); m == nil {
+		t.Fatal("conflicting nominal effect arguments accepted")
+	}
+}

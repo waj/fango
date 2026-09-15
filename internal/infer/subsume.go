@@ -115,6 +115,11 @@ func subsumption(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply,
 			return t
 		}
 		switch t := t.(type) {
+		case *types.TVar:
+			if t.Kind == types.RowVar {
+				return view(types.Row{Tail: t}, p)
+			}
+			return t
 		case types.Row:
 			r := types.Row{Tail: sup.FreshVar(types.RowVar)}
 			if p == positive {

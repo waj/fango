@@ -340,6 +340,44 @@ func unifyRows(a, b types.Row, sub Subst, bi *types.Builtins, sup *types.Supply)
 // only its explicit labels.
 func includeRows(subrow, superrow types.Row, sub Subst, bi *types.Builtins, sup *types.Supply) *mismatch {
 	subrow, superrow = sub.applyRow(subrow), sub.applyRow(superrow)
+	if left, ok := subrow.Tail.(*types.TVar); ok {
+		if right, ok := superrow.Tail.(*types.TVar); ok && left.ID == right.ID {
+			for _, row := range []types.Row{subrow, superrow} {
+				seen := map[int]bool{}
+				for _, label := range row.Labels {
+					if seen[label.Unique] {
+						return &mismatch{a: subrow, b: superrow, effect: true, note: "an effect may appear at most once in a row (distinct-label rule)"}
+					}
+					seen[label.Unique] = true
+				}
+			}
+			// A shared tail is an inclusion bound, not an equality. A callback
+			// can add a label to an open shared view even when that label also
+			// appears explicitly in its own row.
+			missing := []types.EffLabel{}
+			for _, label := range subrow.Labels {
+				found := false
+				for _, allowed := range superrow.Labels {
+					if label.Unique != allowed.Unique {
+						continue
+					}
+					found = true
+					if m := unifyRows(types.Row{Labels: []types.EffLabel{label}}, types.Row{Labels: []types.EffLabel{allowed}}, sub, bi, sup); m != nil {
+						return m
+					}
+				}
+				if !found {
+					missing = append(missing, label)
+				}
+			}
+			if len(missing) == 0 {
+				return nil
+			}
+			if !left.Rigid {
+				return bindVar(left, types.Row{Labels: missing, Tail: sup.FreshVar(types.RowVar)}, sub, bi)
+			}
+		}
+	}
 	if subrow.Tail != nil {
 		if len(subrow.Labels) == 0 {
 			if sv, ok := subrow.Tail.(*types.TVar); ok && sv.Rigid && sv.Kind == types.RowVar {
