@@ -812,11 +812,13 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: cleanup scope resource `%s` shadows", where, e.Resource)
 		}
 		l.scope[e.Resource] = true
+		l.localTypes[e.Resource] = e.ResourceTy
 		l.activeScopes[e.Scope] = true
 		l.expr(e.Body, where)
 		l.expr(e.Release, where)
 		delete(l.activeScopes, e.Scope)
 		delete(l.scope, e.Resource)
+		delete(l.localTypes, e.Resource)
 	case *Handle:
 		l.control(e.Control, where)
 		l.effectInstance(e.Effect, where)
@@ -910,13 +912,17 @@ func (l *linter) expr(e Expr, where string) {
 					l.errorf("%s: handler state `%s` shadows", where, e.State.Name)
 				}
 				l.scope[e.State.Name] = true
+				l.localTypes[e.State.Name] = e.State.Ty
 			}
-			for _, p := range c.Params {
+			for i, p := range c.Params {
 				if p != "_" && p != "()" {
 					if l.scope[p] {
 						l.errorf("%s: handler parameter `%s` shadows", where, p)
 					}
 					l.scope[p] = true
+					if i < len(c.ParamTypes) {
+						l.localTypes[p] = c.ParamTypes[i]
+					}
 				}
 			}
 			var state types.Type
@@ -948,9 +954,11 @@ func (l *linter) expr(e Expr, where string) {
 			l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = oldOwner, oldArg, oldRet, oldState
 			for _, p := range c.Params {
 				delete(l.scope, p)
+				delete(l.localTypes, p)
 			}
 			if e.State != nil {
 				delete(l.scope, e.State.Name)
+				delete(l.localTypes, e.State.Name)
 			}
 		}
 		if eff := l.effects[e.Effect.Unique]; eff != nil {
@@ -963,20 +971,24 @@ func (l *linter) expr(e Expr, where string) {
 		if e.Return != nil {
 			if e.State != nil {
 				l.scope[e.State.Name] = true
+				l.localTypes[e.State.Name] = e.State.Ty
 			}
 			if e.Return.Param == "()" && l.unique(e.Body.Type()) != l.b.Unit.Unique {
 				l.errorf("%s: handler return clause uses () for a non-Unit result", where)
 			}
 			if e.Return.Param != "_" && e.Return.Param != "()" {
 				l.scope[e.Return.Param] = true
+				l.localTypes[e.Return.Param] = e.Body.Type()
 			}
 			l.expr(e.Return.Body, where)
 			if !EqualValueRepresentation(e.Return.Body.Type(), e.Ty) {
 				l.errorf("%s: handler return clause does not exactly match the handler type", where)
 			}
 			delete(l.scope, e.Return.Param)
+			delete(l.localTypes, e.Return.Param)
 			if e.State != nil {
 				delete(l.scope, e.State.Name)
+				delete(l.localTypes, e.State.Name)
 			}
 		}
 	case *App:
@@ -1161,8 +1173,10 @@ func (l *linter) expr(e Expr, where string) {
 		}
 		l.expr(e.Scrut, where)
 		l.scope[e.Bind] = true
+		l.localTypes[e.Bind] = e.Scrut.Type()
 		l.tree(e.Tree, e.Ty, where)
 		delete(l.scope, e.Bind)
+		delete(l.localTypes, e.Bind)
 	default:
 		l.errorf("%s: unhandled Core node %T", where, e)
 	}
@@ -1375,7 +1389,11 @@ func (l *linter) tree(t Tree, want types.Type, where string) {
 				continue
 			}
 			var bound []string
-			for _, bind := range c.Binds {
+			var fields []types.Type
+			if scrut, ok := l.localTypes[t.Scrut].(*types.TCon); ok && scrut.Unique == t.ADT.Con.Unique && len(scrut.Args) == len(t.ADT.Params) {
+				fields = l.runtimeInstFields(t.ADT, c.Ctor, scrut.Args)
+			}
+			for i, bind := range c.Binds {
 				if bind == "" {
 					continue
 				}
@@ -1383,11 +1401,15 @@ func (l *linter) tree(t Tree, want types.Type, where string) {
 					l.errorf("%s: field binder `%s` shadows", where, bind)
 				}
 				l.scope[bind] = true
+				if i < len(fields) {
+					l.localTypes[bind] = fields[i]
+				}
 				bound = append(bound, bind)
 			}
 			l.tree(c.Tree, want, where)
 			for _, bind := range bound {
 				delete(l.scope, bind)
+				delete(l.localTypes, bind)
 			}
 		}
 		covered := len(t.Cases) == len(t.ADT.Ctors)

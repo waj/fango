@@ -920,6 +920,8 @@ across Direct, Exit, and Machine consumers, including stored callbacks.
 Core and Machine lint compare that residual representation recursively at value
 bindings and call boundaries; equal source types cannot retag a stored callback
 to a different row ABI.
+Core reconstructs binding types for constructor fields, handler parameters and
+state, handler return values, and acquired resources before checking their uses.
 Hidden evidence parameters precede ordinary worker parameters in deterministic
 effect-identity order, and calls supply matching lexical evidence. The Core
 linter rejects unsolved metavariables, malformed generic applications,
