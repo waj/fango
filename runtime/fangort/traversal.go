@@ -77,6 +77,7 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 				return MachineEvent{}, fmt.Errorf("fangort: cursor has no producer")
 			}
 			cursor.busy = true
+			cursor.evidence.bind(event.evidence)
 			d.pulls = append(d.pulls, machinePull{caller: d.active, cursor: cursor})
 			if parked := cursor.machine.traversal; parked != nil {
 				cursor.machine.traversal = nil
@@ -106,6 +107,7 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 			d.pulls[i] = machinePull{}
 			d.pulls = d.pulls[:i]
 			pull.cursor.done, pull.cursor.busy = true, false
+			pull.cursor.evidence.clear()
 			d.active = pull.caller
 			d.active.result = CursorResult{Exit: event.Exit}
 			continue
@@ -129,6 +131,7 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 		}
 		d.pulls = d.pulls[:matched]
 		pull.cursor.busy = false
+		pull.cursor.evidence.restore()
 		d.active = pull.caller
 		d.active.result = CursorResult{Value: event.Request, Present: true}
 	}
@@ -144,6 +147,11 @@ func (m *Machine) Abandon() (*ExitRequest, error) {
 		return m.abandonLocal()
 	}
 	var primary *ExitRequest
+	// Restore every unfinished cursor before any cleanup runs. Inner cleanup
+	// can itself refer through an enclosing cursor's residual row.
+	for _, pull := range d.pulls {
+		pull.cursor.evidence.restore()
+	}
 	active := d.active
 	for i := len(d.pulls) - 1; i >= -1; i-- {
 		if !active.finished {
@@ -154,6 +162,7 @@ func (m *Machine) Abandon() (*ExitRequest, error) {
 			pull := d.pulls[i]
 			d.pulls[i] = machinePull{}
 			pull.cursor.done, pull.cursor.busy = true, false
+			pull.cursor.evidence.clear()
 			active = pull.caller
 		}
 	}

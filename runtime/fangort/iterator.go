@@ -16,11 +16,12 @@ func NewYieldOwner() *YieldOwner { return &YieldOwner{marker: 1} }
 // cursor within its scope; checked capture and access contracts govern those
 // aliases before the private runtime representation is selected.
 type MachineIterator struct {
-	busy    bool
-	owner   *YieldOwner
-	machine *Machine
-	started bool
-	done    bool
+	evidence *CursorEvidence
+	busy     bool
+	owner    *YieldOwner
+	machine  *Machine
+	started  bool
+	done     bool
 }
 
 func StartMachineIterator(entry MachineFrame) *MachineIterator {
@@ -31,10 +32,18 @@ func StartOwnedMachineIterator(owner *YieldOwner, entry MachineFrame) *MachineIt
 	return &MachineIterator{owner: owner, machine: StartMachine(entry)}
 }
 
+func StartCursorWithEvidence(owner *YieldOwner, evidence *CursorEvidence, entry MachineFrame) *MachineIterator {
+	return &MachineIterator{owner: owner, evidence: evidence, machine: StartMachine(entry)}
+}
+
 // Next advances to one suspension. A normal machine return ends iteration;
 // a machine exit is reported separately. The yielded request is the iterator
 // element and Unit is supplied when production continues.
 func (it *MachineIterator) Next() (value any, yielded bool, exit *ExitRequest, err error) {
+	return it.NextWithEvidence(nil)
+}
+
+func (it *MachineIterator) NextWithEvidence(row *EvidenceRow) (value any, yielded bool, exit *ExitRequest, err error) {
 	if it == nil || it.machine == nil {
 		return nil, false, nil, fmt.Errorf("fangort: iterator has no machine")
 	}
@@ -44,6 +53,14 @@ func (it *MachineIterator) Next() (value any, yielded bool, exit *ExitRequest, e
 	if it.busy {
 		return nil, false, nil, fmt.Errorf("fangort: overlapping cursor advancement")
 	}
+	it.evidence.bind(row)
+	defer func() {
+		if it.done {
+			it.evidence.clear()
+		} else {
+			it.evidence.restore()
+		}
+	}()
 	var event MachineEvent
 	if it.started {
 		event, err = it.machine.Resume(UnitValue)
@@ -75,7 +92,10 @@ func (it *MachineIterator) Close() (*ExitRequest, error) {
 		return nil, nil
 	}
 	it.done = true
-	return it.machine.Abandon()
+	it.evidence.restore()
+	exit, err := it.machine.Abandon()
+	it.evidence.clear()
+	return exit, err
 }
 
 func (it *MachineIterator) Stats() MachineStats {

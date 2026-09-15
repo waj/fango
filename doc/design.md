@@ -286,6 +286,15 @@ Opaque cursors keep their single runtime owner representation. Synthetic local
 references in elaborated adapters carry the same binding identity as source
 locals, including temporaries retained by nested Machine closures.
 
+The private runtime can carry an explicit residual evidence row with a cursor
+advance. Immutable row extensions preserve lexical bindings; a cursor owns a
+stable forwarding reference that selects the current pull's row. Completed
+pulls restore the scope-boundary row, while unfinished advances retain their
+reference across foreign suspension. Early abandonment restores all nested
+boundaries before cleanup, and completed cursors clear their row references.
+Empty row forwarding adds no link; repeated pulls replace the cursor link
+rather than accumulating a chain.
+
 A statically Direct call may use a transport-polymorphic worker's Exit member
 under an enclosing Exit convention. `RequireNormal` projects the result under
 the checked Core Direct contract and rejects an unexpected exit as a compiler

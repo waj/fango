@@ -46,13 +46,14 @@ func (f *immediateMachineFrame) Step(*Machine) MachineStep {
 func (f *immediateMachineFrame) Clear() { f.run = nil }
 
 type MachineStep struct {
-	Cursor  *MachineIterator
-	Owner   *YieldOwner
-	Kind    MachineStepKind
-	Frame   MachineFrame
-	Value   any
-	Request any
-	Exit    *ExitRequest
+	Evidence *EvidenceRow
+	Cursor   *MachineIterator
+	Owner    *YieldOwner
+	Kind     MachineStepKind
+	Frame    MachineFrame
+	Value    any
+	Request  any
+	Exit     *ExitRequest
 }
 
 // InvalidMachineStep is emitted only for supposedly unreachable generated
@@ -61,12 +62,13 @@ type MachineStep struct {
 func InvalidMachineStep(message string) MachineStep { panic(message) }
 
 type MachineEvent struct {
-	advance *MachineIterator
-	Owner   *YieldOwner
-	Request any
-	Done    bool
-	Value   any
-	Exit    *ExitRequest
+	evidence *EvidenceRow
+	advance  *MachineIterator
+	Owner    *YieldOwner
+	Request  any
+	Done     bool
+	Value    any
+	Exit     *ExitRequest
 }
 
 type MachineStats struct {
@@ -182,7 +184,7 @@ func (m *Machine) runLocal() (event MachineEvent, err error) {
 			if step.Cursor == nil {
 				return MachineEvent{}, fmt.Errorf("fangort: advancement has no cursor")
 			}
-			return MachineEvent{advance: step.Cursor}, nil
+			return MachineEvent{advance: step.Cursor, evidence: step.Evidence}, nil
 		case MachineExit:
 			if m.routeExit(step.Exit) {
 				continue

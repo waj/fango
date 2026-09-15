@@ -33,6 +33,7 @@ type forwardingFrame struct {
 	owner *YieldOwner
 	input *MachineIterator
 	log   *[]string
+	row   *EvidenceRow
 }
 
 func (f *forwardingFrame) Step(m *Machine) MachineStep {
@@ -45,7 +46,7 @@ func (f *forwardingFrame) Step(m *Machine) MachineStep {
 		input := f.input
 		m.PushCleanup(func() *ExitRequest { return CloseMachineIterator(input) })
 		f.pc = 1
-		return MachineStep{Kind: MachineAdvance, Cursor: f.input}
+		return MachineStep{Kind: MachineAdvance, Cursor: f.input, Evidence: f.row}
 	case 1:
 		result := m.TakeResult().(CursorResult)
 		if result.Exit != nil {
@@ -59,7 +60,7 @@ func (f *forwardingFrame) Step(m *Machine) MachineStep {
 	default:
 		m.TakeResult()
 		f.pc = 1
-		return MachineStep{Kind: MachineAdvance, Cursor: f.input}
+		return MachineStep{Kind: MachineAdvance, Cursor: f.input, Evidence: f.row}
 	}
 }
 func (f *forwardingFrame) Clear() { *f = forwardingFrame{} }
