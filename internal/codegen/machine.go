@@ -4,6 +4,7 @@ import (
 	"fmt"
 	goast "go/ast"
 	gotoken "go/token"
+	"slices"
 	"sort"
 
 	"github.com/waj/fango/internal/core"
@@ -121,7 +122,7 @@ func (g *gen) machineWorkerDecls(worker *machineir.Worker) []goast.Decl {
 	}
 	for _, ev := range worker.EffectParams {
 		fields = append(fields, &goast.Field{
-			Names: []*goast.Ident{ident(machineEvidenceFieldName(ev.Unique))},
+			Names: []*goast.Ident{ident(machineEvidenceFieldName(ev))},
 			Type:  g.effectTypeMode(ev, types.Machine),
 		})
 	}
@@ -135,9 +136,9 @@ func (g *gen) machineWorkerDecls(worker *machineir.Worker) []goast.Decl {
 	params := make([]paramSpec, 0, len(worker.EffectParams)+len(worker.Params))
 	ctorFields := []goast.Expr{&goast.KeyValueExpr{Key: ident("PC"), Value: intLit(int64(worker.Entry))}}
 	for _, ev := range worker.EffectParams {
-		name := machineEvidenceName(ev.Unique)
+		name := machineEvidenceName(ev)
 		params = append(params, paramSpec{name: name, typ: g.effectTypeMode(ev, types.Machine)})
-		ctorFields = append(ctorFields, &goast.KeyValueExpr{Key: ident(machineEvidenceFieldName(ev.Unique)), Value: ident(name)})
+		ctorFields = append(ctorFields, &goast.KeyValueExpr{Key: ident(machineEvidenceFieldName(ev)), Value: ident(name)})
 	}
 	if worker.StateToken {
 		params = append(params, paramSpec{name: "machineStateToken", typ: ident("int")})
@@ -171,7 +172,7 @@ func (g *gen) machineStepDecl(worker *machineir.Worker, frameName string, stored
 	g.control, g.abi, g.resultType = types.Direct, types.Machine, worker.Result
 	defer func() { g.control, g.abi, g.resultType = oldControl, oldABI, oldResult }()
 	for _, ev := range worker.EffectParams {
-		name := machineEvidenceName(ev.Unique)
+		name := machineEvidenceName(ev)
 		g.evidence[ev.Unique] = append(g.evidence[ev.Unique], ident(name))
 		g.evidenceModes[ev.Unique] = append(g.evidenceModes[ev.Unique], types.Machine)
 	}
@@ -199,9 +200,9 @@ func (g *gen) machineStepDecl(worker *machineir.Worker, frameName string, stored
 		body = append(body, varDeclStmt("machineStateToken", ident("int"), &goast.SelectorExpr{X: ident("f"), Sel: ident("StateToken")}))
 	}
 	for _, ev := range worker.EffectParams {
-		name := machineEvidenceName(ev.Unique)
+		name := machineEvidenceName(ev)
 		body = append(body,
-			varDeclStmt(name, g.effectTypeMode(ev, types.Machine), machineFrameEvidenceField(ev.Unique)),
+			varDeclStmt(name, g.effectTypeMode(ev, types.Machine), machineFrameEvidenceField(ev)),
 			assignBlank(ident(name)),
 		)
 	}
@@ -285,8 +286,8 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		}}
 		for _, ev := range worker.EffectParams {
 			out = append(out, &goast.AssignStmt{
-				Lhs: []goast.Expr{machineFrameEvidenceField(ev.Unique)}, Tok: gotoken.ASSIGN,
-				Rhs: []goast.Expr{ident(machineEvidenceName(ev.Unique))},
+				Lhs: []goast.Expr{machineFrameEvidenceField(ev)}, Tok: gotoken.ASSIGN,
+				Rhs: []goast.Expr{ident(machineEvidenceName(ev))},
 			})
 		}
 		if worker.StateToken {
@@ -325,7 +326,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		stmts := append(save(), assignMachinePC(resumePC))
 		var owner goast.Expr = ident("nil")
 		if term.Owner.Unique != 0 {
-			owner = ident(machineEvidenceName(term.Owner.Unique))
+			owner = ident(machineEvidenceName(term.Owner))
 		}
 		stmts = append(stmts, step("MachineSuspend", "Request", g.machineBoxedValue(term.Request), &goast.KeyValueExpr{Key: ident("Owner"), Value: owner}))
 		return stmts, [][]goast.Stmt{resume(term.Bind, term.Next)}
@@ -346,6 +347,15 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		return stmts, [][]goast.Stmt{resumed}
 	case *machineir.Call:
 		args := make([]goast.Expr, 0, len(term.EvidenceArgs)+len(term.Args))
+		callee := g.machineWorkers[term.Callee]
+		sub := map[int]types.Type{}
+		if callee != nil {
+			for i, param := range callee.TyParams {
+				if i < len(term.TyArgs) {
+					sub[param.ID] = term.TyArgs[i]
+				}
+			}
+		}
 		for _, ev := range term.EvidenceArgs {
 			stack := g.evidence[ev.Unique]
 			if len(stack) == 0 {
@@ -353,8 +363,16 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			}
 			args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
 		}
-		for _, arg := range term.Args {
-			args = append(args, g.machineExpr(arg))
+		for i, arg := range term.Args {
+			if slices.Contains(term.SynchronousArgs, i) {
+				args = append(args, g.synchronousMachineCallback(arg))
+			} else {
+				value := g.machineExpr(arg)
+				if callee != nil && i < len(callee.Params) {
+					value = g.adaptMachineValue(value, arg.Type(), types.SubstRigid(callee.Params[i].Ty, sub), types.Machine)
+				}
+				args = append(args, value)
+			}
 		}
 		var child goast.Expr
 		if term.Operation != nil {
@@ -724,12 +742,12 @@ func (g *gen) machineExpr(e core.Expr) goast.Expr {
 		args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
 	}
 	for _, ev := range closure.CallEvidence {
-		name := machineClosureEvidenceName(ev.Unique)
+		name := machineClosureEvidenceName(ev)
 		params = append(params, paramSpec{name: name, typ: g.effectTypeMode(ev, types.Machine)})
 		args = append(args, ident(name))
 	}
 	for _, capture := range closure.Captures {
-		args = append(args, ident(machineLocalName(capture.Name)))
+		args = append(args, g.liftMachineValue(ident(machineLocalName(capture.Name)), capture.Ty, g.representationMode()))
 	}
 	fn := lam.Ty.(*types.TFun)
 	paramName := machineLocalName(lam.Param)
@@ -753,14 +771,16 @@ func machineStoredLocals(worker *machineir.Worker) []machineir.Local {
 	return out
 }
 
-func machineFrameName(name string) string        { return "machineFrame_" + linkName(name) }
-func machineConstructorName(name string) string  { return "MachineFrame_" + linkName(name) }
-func machineFieldName(name string) string        { return "L_" + linkName(name) }
-func machineLocalName(name string) string        { return mangleValue(name) }
-func machineEvidenceName(unique int) string      { return fmt.Sprintf("machineEvidence%d", unique) }
-func machineEvidenceFieldName(unique int) string { return fmt.Sprintf("E_%d", unique) }
-func machineClosureEvidenceName(unique int) string {
-	return fmt.Sprintf("machineClosureEvidence%d", unique)
+func machineFrameName(name string) string       { return "machineFrame_" + linkName(name) }
+func machineConstructorName(name string) string { return "MachineFrame_" + linkName(name) }
+func machineFieldName(name string) string       { return "L_" + linkName(name) }
+func machineLocalName(name string) string       { return mangleValue(name) }
+func machineEvidenceName(ev core.EffectInstance) string {
+	return "machineEvidence_" + linkName(ev.Name)
+}
+func machineEvidenceFieldName(ev core.EffectInstance) string { return "E_" + linkName(ev.Name) }
+func machineClosureEvidenceName(ev core.EffectInstance) string {
+	return "machineClosureEvidence_" + linkName(ev.Name)
 }
 
 func machineTypeParamIdents(params []*types.TVar) []goast.Expr {
@@ -783,8 +803,8 @@ func machinePC() goast.Expr { return &goast.SelectorExpr{X: ident("f"), Sel: ide
 func machineFrameField(name string) goast.Expr {
 	return &goast.SelectorExpr{X: ident("f"), Sel: ident(machineFieldName(name))}
 }
-func machineFrameEvidenceField(unique int) goast.Expr {
-	return &goast.SelectorExpr{X: ident("f"), Sel: ident(machineEvidenceFieldName(unique))}
+func machineFrameEvidenceField(ev core.EffectInstance) goast.Expr {
+	return &goast.SelectorExpr{X: ident("f"), Sel: ident(machineEvidenceFieldName(ev))}
 }
 func assignMachinePC(pc int) goast.Stmt {
 	return &goast.AssignStmt{Lhs: []goast.Expr{machinePC()}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{intLit(int64(pc))}}

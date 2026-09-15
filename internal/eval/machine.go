@@ -341,6 +341,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 		case *machineir.Call:
 			callee := s.workers[term.Callee]
 			var closure *machineClosure
+			var synchronous *Closure
 			var operation *machineOperation
 			if term.Operation != nil {
 				ev := frame.evidence[term.Effect.Unique]
@@ -358,11 +359,15 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 					return MachineEvent{}, err
 				}
 				fn, ok := value.(*Closure)
-				if !ok || fn.machine == nil {
+				if !ok || fn.machine == nil && fn.control.Transport == types.Machine {
 					return MachineEvent{}, fmt.Errorf("eval: indirect machine call of %T", value)
 				}
 				closure = fn.machine
-				callee = s.workers[closure.desc.Worker]
+				if closure != nil {
+					callee = s.workers[closure.desc.Worker]
+				} else {
+					synchronous = fn
+				}
 			}
 			values := make([]Value, len(term.Args))
 			for i, arg := range term.Args {
@@ -379,6 +384,33 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 					return s.finishExit(exit)
 				}
 				values[i] = value
+			}
+			if synchronous != nil {
+				if len(values) != 1 {
+					return MachineEvent{}, fmt.Errorf("eval: synchronous Machine adapter requires one argument")
+				}
+				callEvidence := cloneEvidence(synchronous.Evidence)
+				for _, ev := range term.EvidenceArgs {
+					callEvidence[ev.Unique] = frame.evidence[ev.Unique]
+				}
+				s.interp.evidence = callEvidence
+				value, err := s.interp.eval(synchronous.Body, &Frame{parent: synchronous.Env, vars: map[string]Value{synchronous.Param: values[0]}})
+				s.interp.evidence = frame.evidence
+				if err != nil {
+					return MachineEvent{}, err
+				}
+				if exit, ok := asExit(value); ok {
+					if caught, err := s.catchExit(exit); err != nil {
+						return MachineEvent{Exit: exit}, err
+					} else if caught {
+						continue
+					}
+					return s.finishExit(exit)
+				}
+				s.prune(frame, block.LiveOut, term.Bind.Name)
+				frame.vars[term.Bind.Name] = value
+				frame.block = term.Next
+				continue
 			}
 			if closure != nil {
 				values = append(append([]Value(nil), closure.values...), values...)

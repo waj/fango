@@ -1,11 +1,11 @@
-import Generator
+import Stream
 import Iterator
 
-retain : Iterator.Iterator Int -> (() -> Iterator.Iterator Int)
+retain : Iterator.Iterator Int e -> (() -> Iterator.Iterator Int e)
 retain cursor =
     alias = cursor
     \_ -> alias
 
-escape() = Generator.withIterator (\_ -> Generator.yield 1) retain
+escape() = Stream.withCursor (Stream.generate (\_ -> Stream.yield 1)) retain
 
 main() = print "unreachable"

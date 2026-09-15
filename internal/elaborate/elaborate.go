@@ -257,18 +257,28 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 		if _, declared := ck.Intrinsics[name]; !declared {
 			continue
 		}
+		ty := (&elab{ck: ck}).eraseRuntimeKinds(eraseRows(ck.Intrinsics[name].Body))
 		if name == types.ScopeBracketName {
 			// The declaration keeps its open row tail; Core does not.
-			defs = append(defs, scopeBracketDef(name, eraseRows(ck.Intrinsics[name].Body), ck))
-		} else if name == types.GeneratorWithIteratorName {
-			defs = append(defs, withIteratorDef(name, eraseRows(ck.Intrinsics[name].Body), ck))
+			defs = append(defs, scopeBracketDef(name, ty, ck))
+		} else if name == types.GeneratorWithIteratorName || name == types.StreamWithProducerName {
+			defs = append(defs, withIteratorDef(name, ty, ck))
+		} else if name == types.IteratorNextName {
+			defs = append(defs, iteratorNextDef(name, ty, ck))
 		} else if name == types.IteratorForEachName {
-			defs = append(defs, iteratorForEachDef(name, eraseRows(ck.Intrinsics[name].Body), ck))
+			defs = append(defs, iteratorForEachDef(name, ty, ck))
 		} else if name == types.IteratorFoldName {
-			defs = append(defs, iteratorFoldDef(name, eraseRows(ck.Intrinsics[name].Body), ck))
+			defs = append(defs, iteratorFoldDef(name, ty, ck))
 		}
 	}
 	return defs
+}
+
+func iteratorNextDef(name string, ty types.Type, ck *infer.Checker) core.Def {
+	args, result := core.PeelFun(ty, 1)
+	maybe := result.(*types.TCon)
+	return core.Def{Name: name, Owner: symbolOwner(name), Type: ty, TyParams: runtimeRigidVars(ty), Params: []string{"_cursor"}, ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture()}, Control: core.ArrowControl(ty, 1),
+		Body: &core.IteratorNext{Cursor: &core.VarRef{Name: "_cursor", Local: true, Ty: args[0]}, Result: ck.ADTs[maybe.Unique], Access: types.ExclusiveAdvance, Ty: result}}
 }
 
 func iteratorFoldDef(name string, ty types.Type, ck *infer.Checker) core.Def {
@@ -317,26 +327,38 @@ func withIteratorDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 	paramCaptures := []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture()}
 	scope := ck.Sup.FreshScope()
 	var yield core.EffectInstance
+	var traversal core.EffectInstance
 	for _, label := range producer.Eff.Labels {
 		if label.Suspension {
 			yield = core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Captures: types.ScopeCapture(scope), Control: types.Control{Transport: types.Machine}}
 		}
 	}
+	control := types.FunctionControl(consumer)
+	if name == types.StreamWithProducerName {
+		control = core.ArrowControl(ty, len(params))
+		for _, label := range consumer.Eff.Labels {
+			if label.Name == types.IteratorTraversalEffectName {
+				traversal = core.EffectInstance{Unique: label.Unique, Name: label.Name, Captures: types.ScopeCapture(scope), Control: types.Control{Transport: types.Machine}}
+			}
+		}
+	}
 	return core.Def{
 		Name:          name,
+		Owner:         symbolOwner(name),
 		Type:          ty,
 		TyParams:      runtimeRigidVars(ty),
 		Params:        params,
 		ParamCaptures: paramCaptures,
 		Control:       core.ArrowControl(ty, len(params)),
 		Body: &core.IteratorScope{
-			Yield:    yield,
-			Scope:    scope,
-			Producer: &core.VarRef{Name: params[0], Local: true, Ty: producer},
-			Consumer: &core.VarRef{Name: params[1], Local: true, Ty: consumer},
-			CursorTy: consumer.Arg,
-			Ty:       result,
-			Control:  types.FunctionControl(consumer),
+			Yield:     yield,
+			Traversal: traversal,
+			Scope:     scope,
+			Producer:  &core.VarRef{Name: params[0], Local: true, Ty: producer},
+			Consumer:  &core.VarRef{Name: params[1], Local: true, Ty: consumer},
+			CursorTy:  consumer.Arg,
+			Ty:        result,
+			Control:   control,
 		},
 	}
 }

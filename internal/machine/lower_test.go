@@ -106,7 +106,7 @@ func TestLowerLeavesDirectProgramOutsideMachineIR(t *testing.T) {
 	}
 }
 
-func TestLowerDoesNotRootUnselectedPolymorphicClosures(t *testing.T) {
+func TestLowerEmitsFactoryClosuresIndependentlyOfMachineConsumers(t *testing.T) {
 	sup, b := testBuiltins()
 	callback := &types.TFun{Arg: b.Int, Ret: b.Int, Control: types.Control{Polymorphic: true}}
 	factory := core.Def{Name: "Library.factory", Owner: "Library", Type: &types.TFun{Arg: b.Int, Ret: callback},
@@ -122,8 +122,13 @@ func TestLowerDoesNotRootUnselectedPolymorphicClosures(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatal(errs)
 	}
-	if len(mp.Workers) != 1 || mp.Workers[0].Name != "main" || len(mp.Closures) != 0 {
-		t.Fatalf("unrelated factory gained Machine definitions: %v, %v", workerNames(mp), mp.Closures)
+	if len(mp.Workers) != 2 || mp.Workers[0].Name != "Library.factory_machine_lambda1" || len(mp.Closures) != 1 {
+		t.Fatalf("factory lacks its module-owned Machine closure: %v, %v", workerNames(mp), mp.Closures)
+	}
+	p.Defs = p.Defs[:1]
+	onlyFactory, errs := Lower(p, b)
+	if len(errs) != 0 || len(onlyFactory.Workers) != 1 || onlyFactory.Workers[0].Name != mp.Workers[0].Name || len(onlyFactory.Closures) != 1 {
+		t.Fatalf("factory depends on downstream Machine consumer: %v, %v", workerNames(onlyFactory), errs)
 	}
 }
 

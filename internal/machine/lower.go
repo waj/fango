@@ -2,16 +2,16 @@ package machine
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/types"
 )
 
-// Lower selects the concrete Machine roots and every transport-polymorphic
-// worker they call in Machine context, then lowers only that closed island.
-// Direct and Exit definitions are absent from the result and remain on their
-// existing backend path.
+// Lower emits concrete Machine roots and module-owned polymorphic workers and
+// closures. Direct and Exit members remain on their existing backend paths;
+// downstream consumers do not determine which Machine families a module owns.
 func Lower(p *core.Prog, b *types.Builtins) (*Prog, []error) {
 	if errs := core.LintMachineInput(p, b); len(errs) != 0 {
 		return nil, errs
@@ -29,12 +29,16 @@ func LowerStage(p *core.Prog, b *types.Builtins) (*Prog, []error) {
 }
 
 func lower(p *core.Prog) (*Prog, []error) {
+	adts := map[int]*types.ADTInfo{}
+	for _, adt := range p.ADTs {
+		adts[adt.Con.Unique] = adt
+	}
 	defs := make(map[string]*core.Def, len(p.Defs))
 	selected := map[string]bool{}
 	for i := range p.Defs {
 		d := &p.Defs[i]
 		defs[d.Name] = d
-		if d.Control.Transport == types.Machine {
+		if d.Control.Resolve(types.Machine) == types.Machine {
 			selected[d.Name] = true
 		}
 	}
@@ -46,21 +50,12 @@ func lower(p *core.Prog) (*Prog, []error) {
 	var rootedAux []core.Def
 	for i := range p.Defs {
 		d := &p.Defs[i]
-		if d.Control.Transport == types.Machine {
+		if selected[d.Name] {
 			continue
 		}
 		builder := &builder{def: d, locals: localRefTypes(d.Body), lambdas: map[*core.Lambda]bool{}, stateAux: map[string]bool{}}
-		core.Inspect(d.Body, func(e core.Expr) {
-			if lambda, ok := e.(*core.Lambda); ok {
-				// An open row alone is not a Machine root. Its Machine member
-				// is selected when called from a Machine worker; rooting every
-				// polymorphic lambda here changes unrelated dependency output
-				// merely because an importer opens a producer elsewhere.
-				if fn, ok := lambda.Ty.(*types.TFun); ok && types.FunctionControl(fn).Transport == types.Machine {
-					builder.registerMachineLambdas(lambda)
-				}
-			}
-		})
+		family := types.ControlledRepresentation(d.Type, adts)
+		builder.registerOwnedRoots(d.Body, family)
 		rootedClosures = append(rootedClosures, builder.closures...)
 		rootedAux = append(rootedAux, builder.aux...)
 	}
@@ -126,6 +121,44 @@ func lower(p *core.Prog) (*Prog, []error) {
 	return out, errs
 }
 
+func (b *builder) registerOwnedRoots(body core.Expr, family bool) {
+	core.InspectPruned(body, func(e core.Expr) bool {
+		if h, ok := e.(*core.Handle); ok {
+			outer := b.def
+			inside := *outer
+			inside.EffectParams = append(append([]core.EffectInstance(nil), outer.EffectParams...), h.Effect)
+			b.def = &inside
+			b.registerOwnedRoots(h.Body, family)
+			b.def = outer
+			for _, clause := range h.Clauses {
+				b.registerOwnedRoots(clause.Body, family)
+			}
+			if h.Return != nil {
+				b.registerOwnedRoots(h.Return.Body, family)
+			}
+			if h.State != nil {
+				b.registerOwnedRoots(h.State.Initial, family)
+			}
+			return false
+		}
+		if lambda, ok := e.(*core.Lambda); ok {
+			control := types.FunctionControl(lambda.Ty.(*types.TFun))
+			if control.Transport == types.Machine || family && control.Resolve(types.Machine) == types.Machine {
+				b.registerMachineLambdas(lambda)
+				return false
+			}
+			outer := b.def
+			inside := *outer
+			inside.EffectParams = append(append([]core.EffectInstance(nil), outer.EffectParams...), lambda.EffectParams...)
+			b.def = &inside
+			b.registerOwnedRoots(lambda.Body, family)
+			b.def = outer
+			return false
+		}
+		return true
+	})
+}
+
 func localRefTypes(e core.Expr) map[string]types.Type {
 	out := map[string]types.Type{}
 	core.Inspect(e, func(e core.Expr) {
@@ -137,6 +170,14 @@ func localRefTypes(e core.Expr) map[string]types.Type {
 }
 
 func identityType(t types.Type) types.Type { return t }
+
+func machineEvidence(evidence []core.EffectInstance) []core.EffectInstance {
+	out := append([]core.EffectInstance(nil), evidence...)
+	for i := range out {
+		out[i].Control = types.Control{Transport: types.Machine}
+	}
+	return out
+}
 
 type builder struct {
 	def      *core.Def
@@ -153,6 +194,8 @@ type builder struct {
 }
 
 func lowerWorker(d *core.Def, selected map[string]bool, stateToken bool) (Worker, []core.Def, []Closure, map[string]bool, []error) {
+	source := d
+	d, synchronousParams := synchronousScopeMember(d)
 	b := &builder{def: d, selected: selected, locals: map[string]types.Type{}, lambdas: map[*core.Lambda]bool{}, stateAux: map[string]bool{}}
 	argTys, result := core.PeelFun(d.Type, len(d.Params))
 	params := make([]Local, len(d.Params))
@@ -175,7 +218,8 @@ func lowerWorker(d *core.Def, selected map[string]bool, stateToken bool) (Worker
 	}
 	sort.Slice(locals, func(i, j int) bool { return locals[i].Name < locals[j].Name })
 	w := Worker{Name: d.Name, Owner: d.Owner, TyParams: d.TyParams, Params: params, EffectParams: d.EffectParams,
-		Result: result, Entry: entry, Blocks: b.blocks, Locals: locals, Def: d, StateToken: stateToken}
+		Result: result, Entry: entry, Blocks: b.blocks, Locals: locals, Def: source, StateToken: stateToken, SynchronousParams: synchronousParams}
+	w.EffectParams = machineEvidence(w.EffectParams)
 	analyze(&w)
 	return w, b.aux, b.closures, b.stateAux, nil
 }
@@ -211,11 +255,15 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 		tree := b.lowerTree(e.Tree, bind, next)
 		return b.add(&Eval{Bind: scrut, Value: e.Scrut, Next: tree})
 	case *core.Suspend:
+		owner := e.Owner
+		if owner.Unique != 0 {
+			owner.Control = types.Control{Transport: types.Machine}
+		}
 		if machineControl(e.Request) {
 			b.errorf("%s: suspension request itself requires Machine control", b.def.Name)
 			return next
 		}
-		return b.add(&Suspend{Owner: e.Owner, Request: e.Request, Bind: bind, Next: next})
+		return b.add(&Suspend{Owner: owner, Request: e.Request, Bind: bind, Next: next})
 	case *core.IteratorNext:
 		return b.add(&CursorAdvance{Cursor: e.Cursor, Result: e.Result, Access: e.Access, Bind: bind, Next: next})
 	case *core.IteratorScope:
@@ -269,6 +317,9 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 			call := &Call{TyArgs: e.TyArgs, Args: e.Args, EvidenceArgs: e.EvidenceArgs, Bind: bind, Next: next}
 			if e.CalleeKind == core.Worker {
 				call.Callee = ref.Name
+				if ref.Name == types.ScopeBracketName {
+					call.SynchronousArgs = []int{0, 1}
+				}
 			} else {
 				call.CalleeExpr = e.Callee
 				b.registerMachineLambdas(e.Callee)
@@ -355,6 +406,7 @@ func (b *builder) lowerHandle(h *core.Handle, bind Local, next BlockID) BlockID 
 			paramNames = append([]string{stateName}, paramNames...)
 			paramTypes = append([]types.Type{stateTy}, paramTypes...)
 		}
+		captures = slices.DeleteFunc(captures, func(local Local) bool { return slices.Contains(paramNames, local.Name) })
 		result := clause.ResultType
 		if abort {
 			result = h.Ty
@@ -406,6 +458,28 @@ func (b *builder) addRegion(kind string, captures []Local, names []string, tys [
 }
 
 func (b *builder) registerMachineLambdas(e core.Expr) {
+	outer := b.locals
+	available := localRefTypes(e)
+	for name, ty := range outer {
+		available[name] = ty
+	}
+	b.locals = available
+	defer func() { b.locals = outer }()
+	core.InspectPruned(e, func(e core.Expr) bool {
+		lam, ok := e.(*core.Lambda)
+		if !ok {
+			return true
+		}
+		fn, ok := lam.Ty.(*types.TFun)
+		if !ok || types.FunctionControl(fn).Resolve(types.Machine) != types.Machine {
+			return true
+		}
+		b.registerMachineLambda(lam)
+		return false
+	})
+}
+
+func (b *builder) registerMachineLambda(e core.Expr) {
 	lam, ok := e.(*core.Lambda)
 	if !ok || b.lambdas[lam] {
 		return
@@ -426,7 +500,7 @@ func (b *builder) registerMachineLambdas(e core.Expr) {
 		}
 	}
 	sort.Slice(captures, func(i, j int) bool { return captures[i].Name < captures[j].Name })
-	callEvidence := append([]core.EffectInstance(nil), lam.EffectParams...)
+	callEvidence := machineEvidence(lam.EffectParams)
 	callEffects := map[int]bool{}
 	for _, ev := range callEvidence {
 		callEffects[ev.Unique] = true
@@ -437,6 +511,7 @@ func (b *builder) registerMachineLambdas(e core.Expr) {
 			capturedEvidence = append(capturedEvidence, ev)
 		}
 	}
+	capturedEvidence = machineEvidence(capturedEvidence)
 	params := make([]string, 0, len(captures)+1)
 	ty := lam.Ty
 	for i := len(captures) - 1; i >= 0; i-- {

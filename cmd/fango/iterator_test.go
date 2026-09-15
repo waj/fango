@@ -22,9 +22,9 @@ func TestImportedCursorContractRejectsEscape(t *testing.T) {
 	}
 	entry := filepath.Join(dir, "Main.fango")
 	if err := os.WriteFile(entry, []byte(`import Consumers
-import Generator
+import Stream
 
-escape() = Generator.withIterator (\_ -> Generator.yield 1) Consumers.escape
+escape() = Stream.withCursor (Stream.generate (\_ -> Stream.yield 1)) Consumers.escape
 
 main() = print "unreachable"
 `), 0600); err != nil {
@@ -53,13 +53,13 @@ withResource acquire release use = Scope.bracket acquire release use
 			}
 			entry := filepath.Join(dir, "Main.fango")
 			program := `import Resource
-import Generator
+import Stream
 import Iterator
 
 quiet() = ()
-pause() = Generator.yield 1
+pause() = Stream.yield 1
 
-main() = Generator.withIterator (\_ -> Resource.withResource ` + acquire + ` ` + release + ` quiet) (Iterator.forEach print)
+main() = Stream.forEach print (Stream.generate (\_ -> Resource.withResource ` + acquire + ` ` + release + ` quiet))
 `
 			if err := os.WriteFile(entry, []byte(program), 0600); err != nil {
 				t.Fatal(err)

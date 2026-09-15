@@ -282,23 +282,15 @@ outer handlers is checked. The remaining proposed sequence is API-first:
 8. Measured frame, callback, and pipeline optimization.
 9. Explicit source annotations for capture, retention, and borrowing contracts.
 
-The experimental `Generator`/`Iterator` path currently supports producers yielding
-from their own bodies and the `forEach`/`fold` terminal intrinsics. It is not the
-proposed Stream API: row-indexed cursors, raw advancement, suspension transfers
-between cursors, and compositional Machine lowering remain work. Yield now carries
-explicit lexical owner evidence through Core, Machine IR, and both backends.
-Typed Machine cursor setup, advancement, and closure transitions are implemented;
-the Stream surface and complete module-owned representation families remain.
-Terminal traversal now
-exports cursor lifetime and exclusive-advancement contracts through named helpers,
-aliases, stored callbacks, and modules. Experimental APIs may be replaced without
-compatibility scaffolding.
-Acquisition and release export non-suspension obligations through those same
-contracts. Completing the Machine scope representation must preserve this check
-while accepting Direct/Exit acquisition and release alongside a Machine body.
-Stage-safe traversal uses selective Machine lowering and shares the caller's
-native restrictions and evaluation budget; the Stream replacement must preserve
-that boundary and its rollback checks.
+`Stream` descriptions, ordinary combinators, row-indexed scoped cursors, and raw
+advancement are implemented in both backends and staging. Remaining milestone
+#3 work includes removing the legacy internal terminal nodes, completing latent
+effect-evidence propagation through reusable descriptions, cleanup-failure
+reports, and the remaining ownership and representation acceptance cases.
+Module-owned Machine families and synchronous acquisition/release adapters are
+implemented; their remaining representation combinations need verification.
+Stage-safe traversal shares the caller's native restrictions, evaluation budget,
+and rollback checks.
 The detailed roadmap owns cleanup-failure observation as a prerequisite for stable
 reporting, and separates deferred operation polymorphism, builtin IO interception,
 named instances, non-tail resumption, escaping owners, and shared mutable state

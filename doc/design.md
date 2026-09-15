@@ -250,7 +250,7 @@ it only after the dedicated pre-machine checks described below.
 
 Transport-polymorphic definitions have one joined contract rather than a
 variant for every combination of callback and evidence modes. Their defining
-module always emits Direct and Exit ABI members, so a downstream consumer
+module always emits Direct, Exit, and Machine ABI members, so a downstream consumer
 cannot change dependency output. A Direct callback widens to Exit through an
 eta wrapper that calls it and returns `Normal`; the inverse conversion is
 illegal. ADTs, including class dictionaries, that transitively store a
@@ -265,11 +265,21 @@ to the Direct family. A named pure worker that produces a controlled value
 likewise has Direct- and Exit-family members even though both members use the
 Direct execution protocol; the family selects the result representation
 independently of whether the worker itself returns an outcome.
-Pure factories that only transfer stored callbacks also emit a Machine-family
-member using Direct execution. A Machine consumer calls that factory directly
-and receives the corresponding constructor family. Completing Machine families
-for closure-producing factories and transport-polymorphic workers remains in
-the effects roadmap.
+Pure factories that transfer or construct stored callbacks also emit a
+Machine-family member using Direct execution. A Machine consumer calls that
+factory directly and receives the corresponding constructor family. Callback
+frames and effect evidence members are emitted from the defining module's own
+contracts. Generated evidence names use nominal declaration names, avoiding
+dependence on a compilation graph's numeric identity allocation.
+
+A fixed Machine callback has one function representation, as does an opaque
+cursor. Their containing ADTs need additional families only if another field
+actually varies by transport. Creating a producer closure in Direct or Exit
+code lifts its synchronous callback captures into lazy Machine frames. Pure
+curried arrows still execute directly; the final effectful call runs when its
+frame is stepped. Synthetic local references in elaborated adapters carry the
+same local-binding identity as source locals, including temporaries retained
+by nested Machine closures.
 
 A statically Direct call that constructs an Exit-family value selects a
 transport-polymorphic worker's Exit member, widening any Direct evidence.
@@ -277,6 +287,10 @@ transport-polymorphic worker's Exit member, widening any Direct evidence.
 an unexpected exit as a compiler invariant violation. This preserves the
 joined module-owned ABI without discarding a real exit or adding a variant
 for each combination of callback and result representations.
+A synchronous call constructing a Machine-family result instead drives the
+module's Machine member to completion. Its checked outward control forbids
+suspension; Direct calls additionally require a normal result. This permits a
+handler-backed factory to return a callback with fresh evidence parameters.
 
 ## Compiler pipeline
 
@@ -285,12 +299,12 @@ The batch pipeline is:
 ```text
 source -> lexer -> parser -> AST -> inference -> typed AST
        -> elaboration -> Core -> Core lint
-       -> optional selective machine lowering -> Go AST -> go build
+       -> module-owned machine lowering -> Go AST -> go build
 ```
 
-Selective machine lowering is activated only when the resolved bundled
-`Generator.withIterator` intrinsic is in the program. The ordinary path skips
-it entirely. The REPL performs the same lowering over the exact displayed Core
+Go emission materializes the module-owned Machine families even when the
+entry point uses Direct execution. Interpreter and REPL execution install
+Machine lowering when a cursor intrinsic is present. The REPL lowers the exact displayed Core
 expression before evaluation, so its Machine-lambda identity table matches the
 expression the interpreter receives.
 
@@ -894,17 +908,26 @@ callee and evidence slots, validates private `ControlExit` producers against
 their operation descriptor and lexical target scope, and checks that no
 control-producing expression remains in an unhandled expression slot. The
 ordinary lint entry rejects Machine Core unless the resolved
-`Generator.withIterator` intrinsic activates the private owner boundary. A
+`Stream.withProducer` intrinsic activates the private owner boundary. A
 separate pre-machine lint entry admits compiler-only `Suspend` nodes and
 Machine transport while retaining the other semantic Core invariants. Only
-the resolved bundled `Generator.yield` operation can produce `Suspend` during
+the resolved bundled `Stream.yield` operation can produce `Suspend` during
 source elaboration. Core dumps print non-Direct conventions so ABI choices are
 reviewable.
 
+The ordinary `Stream` module stores a producer closure in an abstract,
+effect-indexed ADT. Construction, transformations, and terminal consumers are
+Fango definitions. Its private `withProducer` intrinsic owns the cursor scope;
+`Iterator.next` supplies exclusive advancement. `Iterator.Traversal` is an owned
+marker with no runtime evidence parameter: the cursor itself carries its
+checked identity. Stream construction and callback argument evaluation remain
+strict, while production starts on the first pull.
+
 Selective machine lowering has its own typed execution IR in
 `internal/machine`, below semantic Core rather than mixed into it. It selects
-only concrete Machine roots and the transport-polymorphic workers they reach in
-Machine context. Direct and Exit definitions are absent from the result. The
+concrete Machine roots and every transport-polymorphic worker's Machine member.
+Fixed Direct/Exit definitions retain their ordinary execution path; their
+stored Machine callbacks have separately lowered closure factories. The
 lowerer splits ANF `Let`, `Seq`, and `If` computations at compiler-only
 suspensions and known Machine worker calls, represents shared branch
 continuations once, and marks calls whose continuation is only the caller's
@@ -919,6 +942,15 @@ machine linter independently recomputes those sets and the frame layout, checks
 block reachability and successor validity, proves a single cleanup depth at
 every normal CFG join and zero pending worker-owned cleanups at return, and
 validates local, call, result, and control types.
+
+The Machine member of `Scope.bracket` has Exit acquisition and release slots
+and a Machine body slot. Calls carry explicit synchronous-argument obligations;
+the linter checks them against the intrinsic's retained source scope contract.
+Adapters can execute a supplied Machine callback synchronously only at those
+checked slots. An unexpected suspension drains its cleanup and fails the
+runtime invariant. Actual callbacks are checked for non-suspension before row
+widening by the ordinary capture-flow boundary. The interpreter applies the
+same checked callbacks with their definition-site evidence.
 
 Machine frame fields and factory parameters use the same Machine value
 representation as their step bodies, including polymorphic callbacks. An open
@@ -1008,7 +1040,7 @@ helpers may pass them within their lifetime; only compiler-owned advancement
 inspects their runtime state.
 
 `IteratorScope` is the typed Core owner boundary and is produced only as the
-body of the resolved `Generator.withIterator` intrinsic. It stores the
+body of the resolved `Stream.withProducer` intrinsic. It stores the
 Machine-transport producer callback, the consumer callback, a fresh `ScopeID`,
 the Yield evidence it supplies to production, and the opaque `Iterator.Iterator`
 cursor type. Its visible control is the consumer's
@@ -1027,12 +1059,12 @@ closure does not erase either representation. A closure created over mutable
 Machine locals snapshots only the locals its body references, so pruning or
 clearing the frame cannot invalidate the closure or retain unrelated locals.
 
-The reserved `Generator.Generator` effect is the typed marker for this private
+The reserved `Stream.Yield` effect is the typed marker for this private
 suspension path. It selects Machine transport and carries a lexical owner token
 in an ordinary hidden evidence slot. Each cursor scope allocates a fresh token
 and supplies it when invoking its producer. Workers, callback factories, and
 captured evidence preserve that identity across suspension; no ambient current
-cursor determines where a yield belongs. A canonical `Generator.yield` operation
+cursor determines where a yield belongs. A canonical `Stream.yield` operation
 elaborates directly to `Suspend`, whose owner evidence determines its destination,
 whose request is the yielded element, and whose resumed result is Unit.
 The bundled declaration and owning runner remain the activation boundary;
@@ -1069,11 +1101,9 @@ Core lint verifies the marker's scope and the remaining effects independently.
 A Direct/Exit scope drives its Machine consumer synchronously, with producer
 closure registered before the first step. Its private runtime boundary returns
 the ordinary value or exit after closure and rejects any unexpected foreign
-suspension. Both backends use this boundary; source declarations are still
-pending the Stream API replacement.
-The public source API does not yet expose this instruction. Its terminal pull
-driver still accepts only its own owner's
-requests. Host-driven Machine fixtures without a declared suspension
+suspension. Both backends use this boundary for `Stream.withCursor`, whose
+ordinary body unpacks a description and calls the private owner intrinsic.
+Host-driven Machine fixtures without a declared suspension
 effect may still use ownerless requests with arbitrary resumed types.
 
 Cursor ownership is part of the inferred capture-flow contract. `Iterator` is
@@ -1084,7 +1114,7 @@ cursor or a value that captures it, or retaining it in an outer handler, fails
 the ordinary resource escape proof. Independent nested owner call sites stay
 distinct even when they invoke the same bundled wrapper.
 
-Terminal Core nodes carry explicit exclusive-advancement metadata. Contract
+Advancement Core nodes carry explicit exclusive-advancement metadata. Contract
 checking substitutes actual cursor identities and executes each producer's
 contract under that cursor's exclusive borrow. Consumer callbacks execute after
 the advancement finishes. Access summaries remain active at recursive joins;
@@ -1095,18 +1125,17 @@ uses of a cursor, including reads after exhaustion. Yield contracts retain the
 actual element flow through advancement results and terminal callbacks. Elements
 may borrow enclosing resources, while producer-local resources cannot cross a
 yield. A foreign yield also carries suspension obligations across unfinished
-inner advancements. Public `next` and compositional source lowering remain work.
+inner advancements.
 
-`Iterator.forEach` and `Iterator.fold` have terminal Core implementations.
-Their intrinsic bodies carry the callback and opaque cursor; `fold` additionally
-carries a typed accumulator. Both backends repeatedly pull one value and invoke
-the callback once in yield order. `fold` applies its curried callback as
-`combine element accumulator`, matching `List.foldl`, and returns the final
-accumulator. A terminal does not close the cursor itself: returning normally or
-exceptionally transfers control back to the enclosing `IteratorScope`, which
-closes or abandons the producer exactly once and combines cleanup failure with
-the consumer exit. The fold contract joins accumulator values to a fixed point,
-including callback effects reached through an accumulator from a prior iteration.
+`Stream` transformations and consumers are ordinary Fango functions. Recursive
+cursor helpers repeatedly call `Iterator.next`; `fold` applies its curried
+callback as `combine element accumulator`, matching `List.foldl`. Returning
+normally or exceptionally transfers control back to the enclosing
+`IteratorScope`, which closes or abandons the producer exactly once and combines
+cleanup failure with the consumer exit. Recursive capture contracts join
+accumulator values to a fixed point, including callback effects reached through
+an accumulator from a prior iteration. Legacy terminal Core nodes remain internal
+until their low-level fixtures are migrated; no source declaration exposes them.
 
 An effect-polymorphic higher-order worker has its open callback row erased from
 the runtime ABI. Passing a concrete callback therefore adapts it to that ABI;

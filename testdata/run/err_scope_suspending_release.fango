@@ -1,12 +1,20 @@
-import Generator
+import Stream
 import Iterator
+import Maybe exposing (Maybe(..))
 import Scope
 
-type Cleanup = Cleanup (() ->{Generator.Generator Int} ())
+eachCursor : (a ->{e} ()) -> Iterator.Iterator a e ->{Iterator.Traversal | e} ()
+eachCursor action cursor = case Iterator.next cursor of
+    Nothing -> ()
+    Just value ->
+        action value
+        eachCursor action cursor
+
+type Cleanup = Cleanup (() ->{Stream.Yield Int} ())
 
 runCleanup (Cleanup cleanup) = cleanup()
 
 main() =
-    cleanup = Cleanup (\_ -> Generator.yield 1)
-    Generator.withIterator (\_ ->
-        Scope.finally (\_ -> ()) (\_ -> runCleanup cleanup)) (Iterator.forEach print)
+    cleanup = Cleanup (\_ -> Stream.yield 1)
+    Stream.withCursor (Stream.generate (\_ ->
+        Scope.finally (\_ -> ()) (\_ -> runCleanup cleanup))) (eachCursor print)

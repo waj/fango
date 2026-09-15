@@ -5,11 +5,19 @@ package core
 // whose result is keyed by expression pointer identity, such as Machine
 // closure registration.
 func Inspect(e Expr, visit func(Expr)) {
+	InspectPruned(e, func(e Expr) bool { visit(e); return true })
+}
+
+// InspectPruned visits an expression before its children, stopping at a node
+// whose visitor returns false. Lexical lowering uses this at new worker roots.
+func InspectPruned(e Expr, visit func(Expr) bool) {
 	if e == nil {
 		return
 	}
-	visit(e)
-	walk := func(child Expr) { Inspect(child, visit) }
+	if !visit(e) {
+		return
+	}
+	walk := func(child Expr) { InspectPruned(child, visit) }
 	switch e := e.(type) {
 	case *Neg:
 		walk(e.Operand)
@@ -87,13 +95,13 @@ func Inspect(e Expr, visit func(Expr)) {
 	}
 }
 
-func inspectTree(tree Tree, visit func(Expr)) {
+func inspectTree(tree Tree, visit func(Expr) bool) {
 	switch tree := tree.(type) {
 	case nil, *Unreachable:
 	case *Leaf:
-		Inspect(tree.Body, visit)
+		InspectPruned(tree.Body, visit)
 	case *Guard:
-		Inspect(tree.Cond, visit)
+		InspectPruned(tree.Cond, visit)
 		inspectTree(tree.Then, visit)
 		inspectTree(tree.Else, visit)
 	case *SwitchCtor:
@@ -103,7 +111,7 @@ func inspectTree(tree Tree, visit func(Expr)) {
 		inspectTree(tree.Default, visit)
 	case *SwitchLit:
 		for _, c := range tree.Cases {
-			Inspect(c.Lit, visit)
+			InspectPruned(c.Lit, visit)
 			inspectTree(c.Tree, visit)
 		}
 		inspectTree(tree.Default, visit)

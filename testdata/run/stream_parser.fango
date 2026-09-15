@@ -1,0 +1,50 @@
+import Stream
+import Iterator
+import String
+
+isDigit char = char >= '0' && char <= '9'
+digit char = case String.toInt (String.fromChar char) of
+    Just value -> value
+    Nothing -> 0
+
+numberTail : Int -> Iterator.Iterator Char e ->{Iterator.Traversal | e} (Int, Maybe Char)
+numberTail value cursor = case Iterator.next cursor of
+    Nothing -> (value, Nothing)
+    Just char ->
+        if isDigit char then
+            numberTail (value * 10 + digit char) cursor
+        else
+            (value, Just char)
+
+-- The parser retains one lookahead character and one numeric accumulator.
+parseNumbers : Maybe Char -> Iterator.Iterator Char e ->{Iterator.Traversal, Stream.Yield Int | e} ()
+parseNumbers pending cursor =
+    token = case pending of
+        Just char -> Just char
+        Nothing -> Iterator.next cursor
+    case token of
+        Nothing -> ()
+        Just char ->
+            if isDigit char then
+                (value, lookahead) = numberTail (digit char) cursor
+                Stream.yield value
+                parseNumbers lookahead cursor
+            else
+                parseNumbers Nothing cursor
+
+numbers source = Stream.generate (\_ -> Stream.withCursor source (parseNumbers Nothing))
+
+expandCursor : Iterator.Iterator Int e ->{Iterator.Traversal, Stream.Yield Int | e} ()
+expandCursor cursor = case Iterator.next cursor of
+    Nothing -> ()
+    Just value ->
+        Stream.yield value
+        Stream.yield (value * 10)
+        expandCursor cursor
+
+expand source = Stream.generate (\_ -> Stream.withCursor source expandCursor)
+
+main() =
+    input = Stream.fromList ['1', '2', '+', '3', ' ', '4', '5']
+    print (Stream.toList (numbers input))
+    print (Stream.toList (Stream.take 5 (expand (numbers input))))

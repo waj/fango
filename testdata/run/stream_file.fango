@@ -1,0 +1,18 @@
+import Stream
+import File
+import Fail
+import IO
+
+emitLines file = case File.readLine file of
+    Nothing -> ()
+    Just line ->
+        print ("read " ++ line.text)
+        Stream.yield line.text
+        emitLines file
+
+pipeline : () ->{IO, Fail.Fail IO.Error} List String
+pipeline() =
+    lines = Stream.generate (\_ -> File.withFile "input.txt" emitLines)
+    Stream.toList (Stream.take 2 (Stream.filter (\line -> line /= "skip") lines))
+
+main() = print (Fail.attempt pipeline)

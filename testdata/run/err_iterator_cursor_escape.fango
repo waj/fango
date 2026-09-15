@@ -1,8 +1,7 @@
-import Generator
+import Stream
 import Iterator
 
-escape : () -> Iterator.Iterator Int
 escape() =
-    Generator.withIterator (\_ -> Generator.yield 1) (\iterator -> iterator)
+    Stream.withCursor (Stream.generate (\_ -> Stream.yield 1)) (\iterator -> iterator)
 
 main() = print "unreachable"

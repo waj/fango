@@ -1,5 +1,5 @@
-import Generator
+import Stream
 
 main() =
-    handle Generator.yield 1 of
-        Generator.yield value -> resume ()
+    handle Stream.yield 1 of
+        Stream.yield value -> resume ()

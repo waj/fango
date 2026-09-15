@@ -1,17 +1,23 @@
-import Generator
+import Stream
 import Iterator
+import Maybe exposing (Maybe(..))
 
-type Held a = Held (Iterator.Iterator a)
-type Consumer = Consumer (Iterator.Iterator Int -> Int)
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Iterator.Traversal | e} b
+foldCursor combine initial cursor = case Iterator.next cursor of
+    Nothing -> initial
+    Just value -> foldCursor combine (combine value initial) cursor
 
-produce : () ->{Generator.Generator Int} ()
+type Held a e = Held (Iterator.Iterator a e)
+type Consumer e = Consumer (Iterator.Iterator Int e ->{Iterator.Traversal | e} Int)
+
+produce : () ->{Stream.Yield Int | e} ()
 produce() =
-    Generator.yield 1
-    Generator.yield 2
-    Generator.yield 3
+    Stream.yield 1
+    Stream.yield 2
+    Stream.yield 3
 
-sumCursor : Iterator.Iterator Int -> Int
-sumCursor cursor = Iterator.fold (\element acc -> element + acc) 0 cursor
+sumCursor : Iterator.Iterator Int e ->{Iterator.Traversal | e} Int
+sumCursor cursor = foldCursor (\element acc -> element + acc) 0 cursor
 
 sumHeld (Held cursor) = sumCursor cursor
 
@@ -26,26 +32,26 @@ makeConsumer() = Consumer twice
 
 runStored source =
     case makeConsumer() of
-        Consumer consume -> Generator.withIterator source consume
+        Consumer consume -> Stream.withCursor (Stream.generate source) consume
 
 class Consume a
-    consume : Iterator.Iterator a -> Int
+    consume : Iterator.Iterator a IO ->{Iterator.Traversal, IO} Int
 
 instance Consume Int
     consume cursor = sumCursor cursor
 
-independent : Iterator.Iterator Int -> (() -> Int)
+independent : Iterator.Iterator Int e -> (() -> Int)
 independent cursor = \_ -> 42
 
 main() =
-    print (Generator.withIterator produce twice)
+    print (Stream.withCursor (Stream.generate produce) twice)
     print (runStored produce)
-    print (Generator.withIterator produce consume)
-    print (Generator.withIterator produce (\left ->
-        Generator.withIterator produce (\right ->
+    print (Stream.withCursor (Stream.generate produce) consume)
+    print (Stream.withCursor (Stream.generate produce) (\left ->
+        Stream.withCursor (Stream.generate produce) (\right ->
             a = sumCursor left
             b = sumCursor right
             c = sumCursor left
             a + b + c)))
-    saved = Generator.withIterator produce independent
+    saved = Stream.withCursor (Stream.generate produce) independent
     print (saved())

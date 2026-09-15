@@ -383,3 +383,21 @@ func (m *Machine) clearFrames() {
 	m.handlers = nil
 	m.caught = nil
 }
+
+// RunSynchronousMachine executes a callback whose non-suspension obligation
+// was checked before effect-row widening. Its outcome can still be an exit.
+func RunSynchronousMachine[A any](entry MachineFrame) Outcome[A] {
+	m := StartMachine(entry)
+	event, err := m.Run()
+	if err != nil {
+		panic(err)
+	}
+	if !event.Done {
+		_, _ = m.Abandon()
+		panic("fangort: suspension escaped a checked synchronous callback")
+	}
+	if event.Exit != nil {
+		return Propagate[A](event.Exit)
+	}
+	return Normal(event.Value.(A))
+}

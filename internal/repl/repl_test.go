@@ -91,15 +91,14 @@ func TestListSyntax(t *testing.T) {
 
 func TestOwnedGeneratorRunsInREPL(t *testing.T) {
 	var out strings.Builder
-	Run(strings.NewReader(`import Generator
+	Run(strings.NewReader(`import Stream
 import Iterator
-produce : () ->{Generator.Generator Int} ()
+produce : () ->{Stream.Yield Int} ()
 produce _ =
-    Generator.yield 10
-    Generator.yield 20
-    Generator.yield 30
-Generator.withIterator produce (\iterator ->
-    Iterator.forEach print iterator)
+    Stream.yield 10
+    Stream.yield 20
+    Stream.yield 30
+Stream.forEach print (Stream.generate produce)
 :quit
 `), &out)
 	got := out.String()
@@ -113,14 +112,14 @@ func TestOwnedGeneratorStagesAndRollsBackInREPL(t *testing.T) {
 	Run(strings.NewReader(`import Meta
 early : Bool
 early = $(Meta.lift True)
-import Generator
+import Stream
 import Iterator
-produce : () ->{Generator.Generator Int} ()
+produce : () ->{Stream.Yield Int} ()
 produce() =
-    Generator.yield 10
-    Generator.yield 20
+    Stream.yield 10
+    Stream.yield 20
 total : () -> Int
-total() = Generator.withIterator produce (\cursor -> Iterator.fold (\element acc -> element + acc) 0 cursor)
+total() = Stream.fold (\element acc -> element + acc) 0 (Stream.generate produce)
 bad : String
 bad = $(Meta.lift (total()))
 :type bad
@@ -141,15 +140,15 @@ $(Meta.lift (total()))
 
 func TestSuspendingCleanupRejectedAndRolledBackInREPL(t *testing.T) {
 	var out strings.Builder
-	Run(strings.NewReader(`import Generator
+	Run(strings.NewReader(`import Stream
 import Iterator
 import Scope
-pause : () ->{Generator.Generator Int} ()
-pause() = Generator.yield 1
+pause : () ->{Stream.Yield Int} ()
+pause() = Stream.yield 1
 withCleanup action cleanup = Scope.finally action cleanup
-bad() = Generator.withIterator (\_ -> withCleanup (\_ -> ()) pause) (Iterator.forEach print)
+bad() = Stream.forEach print (Stream.generate (\_ -> withCleanup (\_ -> ()) pause))
 :type bad
-Generator.withIterator pause (Iterator.forEach print)
+Stream.forEach print (Stream.generate pause)
 :quit
 `), &out)
 	got := out.String()

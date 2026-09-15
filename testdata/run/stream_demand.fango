@@ -1,0 +1,23 @@
+import Stream
+
+produce label values = Stream.generate (\_ ->
+    print label
+    List.each (\value ->
+        print value
+        Stream.yield value) values)
+
+makeMap() =
+    print "construct callback"
+    \value ->
+        print "map"
+        value * 10
+
+main() =
+    source = produce "start" [1, 2, 3]
+    mapped = Stream.map (makeMap()) source
+    print "constructed"
+    print (Stream.toList (Stream.take 0 mapped))
+    print (Stream.toList (Stream.take (-1) mapped))
+    print (Stream.toList (Stream.take 1 mapped))
+    print (Stream.toList (Stream.take 1 mapped))
+    print (Stream.toList (Stream.zip (produce "left" [4, 5, 6]) (produce "right" [7])))

@@ -99,6 +99,7 @@ type Closure struct {
 	Body     core.Expr
 	Env      *Frame
 	Evidence map[int]*evidence
+	control  types.Control
 	// A transport-polymorphic value retains both its ordinary interpretation
 	// and its checked Machine factory. Choosing a call protocol does not change
 	// the representation of a stored callback.
@@ -224,7 +225,7 @@ func closureFrame(lam *core.Lambda, fr *Frame) *Frame {
 }
 
 func (in *interp) makeClosure(lam *core.Lambda, fr *Frame, desc *machineir.Closure) (*Closure, error) {
-	closure := &Closure{Param: lam.Param, Body: lam.Body, Env: closureFrame(lam, fr), Evidence: cloneEvidence(in.evidence)}
+	closure := &Closure{Param: lam.Param, Body: lam.Body, Env: closureFrame(lam, fr), Evidence: cloneEvidence(in.evidence), control: types.FunctionControl(lam.Ty.(*types.TFun))}
 	if desc == nil {
 		return closure, nil
 	}

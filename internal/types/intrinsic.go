@@ -26,6 +26,9 @@ const (
 	IteratorFoldName            = "Iterator.fold"
 	IteratorNextName            = "Iterator.next"
 	IteratorTraversalEffectName = "Iterator.Traversal"
+	StreamWithProducerName      = "Stream.withProducer"
+	StreamYieldEffectName       = "Stream.Yield"
+	StreamYieldName             = "Stream.yield"
 )
 
 // RuntimeEvidenceEffect reports whether an effect row label needs an explicit
@@ -44,7 +47,7 @@ const ExclusiveAdvance CursorAccess = 1
 // Intrinsic reports whether a canonical symbol names a compiler intrinsic.
 func Intrinsic(name string) bool {
 	switch name {
-	case ScopeBracketName, GeneratorWithIteratorName, IteratorForEachName, IteratorFoldName, IteratorNextName:
+	case ScopeBracketName, GeneratorWithIteratorName, StreamWithProducerName, IteratorForEachName, IteratorFoldName, IteratorNextName:
 		return true
 	}
 	return false
@@ -56,7 +59,7 @@ func IntrinsicArity(name string) int {
 	switch name {
 	case ScopeBracketName:
 		return 3
-	case GeneratorWithIteratorName:
+	case GeneratorWithIteratorName, StreamWithProducerName:
 		return 2
 	case IteratorForEachName:
 		return 2

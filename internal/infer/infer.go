@@ -672,7 +672,7 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 	for i, param := range params {
 		functionParam := false
 		switch d.Name {
-		case types.ScopeBracketName, types.GeneratorWithIteratorName:
+		case types.ScopeBracketName, types.GeneratorWithIteratorName, types.StreamWithProducerName:
 			functionParam = true
 		case types.IteratorForEachName, types.IteratorFoldName:
 			functionParam = i == 0
@@ -683,9 +683,23 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 			return errs
 		}
 	}
+	if d.Name == types.IteratorNextName {
+		cursor, cursorOK := params[0].(*types.TCon)
+		result, resultOK := rest.(*types.TCon)
+		traversal := false
+		for _, label := range ty.(*types.TFun).Eff.Labels {
+			traversal = traversal || label.Name == types.IteratorTraversalEffectName && label.Suspension
+		}
+		if !cursorOK || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 2 ||
+			!resultOK || result.Name != "Maybe.Maybe" || len(result.Args) != 1 ||
+			!types.Equal(cursor.Args[0], result.Args[0]) || !traversal {
+			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION",
+				"The intrinsic `%s` must have shape `Iterator a e ->{Traversal | e} Maybe a`.", ast.Spelling(d.Name)))
+		}
+	}
 	if d.Name == types.IteratorForEachName || d.Name == types.IteratorFoldName {
 		cursor, ok := params[len(params)-1].(*types.TCon)
-		if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 1 {
+		if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) < 1 || len(cursor.Args) > 2 {
 			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION",
 				"The intrinsic `%s` must take `%s a` as its final parameter.", ast.Spelling(d.Name), types.IteratorTypeName))
 		}

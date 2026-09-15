@@ -46,6 +46,9 @@ type Worker struct {
 	Blocks       []Block
 	Def          *core.Def
 	StateToken   bool
+	// SynchronousParams select the Exit representation for the checked
+	// acquisition and release callbacks of the Scope intrinsic.
+	SynchronousParams []int
 
 	// Locals is the complete typed local namespace. Frame is the subset live
 	// across at least one suspension or non-tail machine call.
@@ -127,16 +130,17 @@ type CursorAdvance struct {
 // Call transfers to another machine worker. The caller frame remains below
 // the callee unless Tail is true. Resumption/return defines Bind at Next.
 type Call struct {
-	Callee       string // non-empty for a statically known worker
-	CalleeExpr   core.Expr
-	Operation    *types.EffectOp
-	Effect       core.EffectInstance
-	TyArgs       []types.Type
-	Args         []core.Expr
-	EvidenceArgs []core.EffectInstance
-	Bind         Local
-	Next         BlockID
-	Tail         bool
+	Callee          string // non-empty for a statically known worker
+	CalleeExpr      core.Expr
+	Operation       *types.EffectOp
+	Effect          core.EffectInstance
+	TyArgs          []types.Type
+	Args            []core.Expr
+	EvidenceArgs    []core.EffectInstance
+	Bind            Local
+	Next            BlockID
+	Tail            bool
+	SynchronousArgs []int
 }
 
 type HandlerClause struct {

@@ -1,15 +1,21 @@
-import Generator
+import Stream
 import Iterator
+import Maybe exposing (Maybe(..))
 import Meta exposing (Code)
 
-produce : () ->{Generator.Generator Int} ()
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Iterator.Traversal | e} b
+foldCursor combine initial cursor = case Iterator.next cursor of
+    Nothing -> initial
+    Just value -> foldCursor combine (combine value initial) cursor
+
+produce : () ->{Stream.Yield Int} ()
 produce() =
-    Generator.yield 10
-    Generator.yield 20
-    Generator.yield 30
+    Stream.yield 10
+    Stream.yield 20
+    Stream.yield 30
 
 total : () -> Int
-total() = Generator.withIterator produce (\cursor -> Iterator.fold (\element acc -> element + acc) 0 cursor)
+total() = Stream.withCursor (Stream.generate produce) (\cursor -> foldCursor (\element acc -> element + acc) 0 cursor)
 
 -- A producer factory may already be memoized by an earlier expansion. Its
 -- next traversal must use the lowering installed for the current operand.
@@ -24,4 +30,4 @@ seven = 7
 
 main() =
     print $(answer)
-    print $(Meta.lift (Generator.withIterator (\_ -> Generator.yield seven) (\cursor -> Iterator.fold (\element acc -> element + acc) 0 cursor)))
+    print $(Meta.lift (Stream.withCursor (Stream.generate (\_ -> Stream.yield seven)) (\cursor -> foldCursor (\element acc -> element + acc) 0 cursor)))

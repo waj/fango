@@ -1,13 +1,13 @@
-import Generator
+import Stream
 import Iterator
 import State
 import Maybe exposing (Maybe(..))
 
-save : Iterator.Iterator Int ->{State.State (Maybe (Iterator.Iterator Int))} ()
-save cursor = State.put (Just cursor)
+ignore cursor = 42
+save cursor = State.put (Just (\_ -> ignore cursor))
 
 escape() =
     State.run Nothing (\_ ->
-        Generator.withIterator (\_ -> Generator.yield 1) save)
+        Stream.withCursor (Stream.fromList [1]) save)
 
 main() = print "unreachable"

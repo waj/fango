@@ -1,9 +1,17 @@
-import Generator
+import Stream
 import Iterator
+import Maybe exposing (Maybe(..))
 import Scope
+
+eachCursor : (a ->{e} ()) -> Iterator.Iterator a e ->{Iterator.Traversal | e} ()
+eachCursor action cursor = case Iterator.next cursor of
+    Nothing -> ()
+    Just value ->
+        action value
+        eachCursor action cursor
 
 acquire n callback =
     if n <= 0 then callback() else acquire (n - 1) callback
 
-main() = Generator.withIterator (\_ ->
-    Scope.bracket (\_ -> acquire 2 (\_ -> Generator.yield 1)) (\_ -> ()) (\_ -> ())) (Iterator.forEach print)
+main() = Stream.withCursor (Stream.generate (\_ ->
+    Scope.bracket (\_ -> acquire 2 (\_ -> Stream.yield 1)) (\_ -> ()) (\_ -> ()))) (eachCursor print)

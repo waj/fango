@@ -1,0 +1,9 @@
+early
+close
+[1]
+exhaust
+close
+[1, 2]
+failed producer closed
+Err body
+Err cleanup

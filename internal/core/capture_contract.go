@@ -3,7 +3,14 @@ package core
 import (
 	"fmt"
 	"github.com/waj/fango/internal/types"
+	"reflect"
 )
+
+// CaptureContractCurrent independently reconstructs the ownership/access
+// graph retained by later execution IR. Missing metadata is never a proof.
+func CaptureContractCurrent(d *Def) bool {
+	return d != nil && d.CaptureContract != nil && reflect.DeepEqual(d.CaptureContract, inferCaptureContract(d))
+}
 
 // inferCaptureContract erases scalar computation while preserving all capture
 // and access paths. Lint rebuilds this graph independently from semantic Core.

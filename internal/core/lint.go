@@ -41,7 +41,7 @@ func lint(p *Prog, b *types.Builtins, allowMachine, allowStage bool) []error {
 		tyParams: map[int]bool{}, evidence: map[int]int{}, evidenceCaptures: map[int][]types.CaptureSet{},
 		captureVars: map[types.CaptureVar]bool{}, scopeIDs: map[types.ScopeID]bool{}, activeScopes: map[types.ScopeID]bool{},
 		resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives, intrinsics: p.Intrinsics,
-		allowMachine: allowMachine || p.Intrinsics[types.GeneratorWithIteratorName], allowStage: allowStage}
+		allowMachine: allowMachine || (p.Intrinsics[types.GeneratorWithIteratorName] || p.Intrinsics[types.StreamWithProducerName] || p.Intrinsics[types.IteratorNextName]), allowStage: allowStage}
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
 	}
@@ -576,11 +576,11 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: iterator scope has invalid or reused scope identity %d", where, e.Scope)
 		}
 		l.scopeIDs[e.Scope] = true
-		if !l.intrinsics[types.GeneratorWithIteratorName] || l.defName != types.GeneratorWithIteratorName {
+		if !l.intrinsics[l.defName] || (l.defName != types.GeneratorWithIteratorName && l.defName != types.StreamWithProducerName) {
 			l.errorf("%s: iterator scope outside the declared `%s` intrinsic", where, types.GeneratorWithIteratorName)
 		}
 		cursor, ok := e.CursorTy.(*types.TCon)
-		if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 1 {
+		if !ok || cursor.Name != types.IteratorTypeName || (len(cursor.Args) < 1 || len(cursor.Args) > 2) {
 			l.errorf("%s: iterator scope cursor typed %s, want `%s a`", where, types.Show(e.CursorTy), types.IteratorTypeName)
 		}
 		producer, ok := e.Producer.Type().(*types.TFun)
@@ -589,7 +589,7 @@ func (l *linter) expr(e Expr, where string) {
 			if effect := l.effects[e.Yield.Unique]; effect == nil || !effect.Suspension || e.Yield.Control.Transport != types.Machine {
 				l.errorf("%s: iterator scope has invalid Yield evidence", where)
 			}
-			if cursor == nil || len(cursor.Args) != 1 || len(e.Yield.Args) != 1 || !types.Equal(cursor.Args[0], e.Yield.Args[0]) {
+			if cursor == nil || (len(cursor.Args) < 1 || len(cursor.Args) > 2) || len(e.Yield.Args) != 1 || !types.Equal(cursor.Args[0], e.Yield.Args[0]) {
 				l.errorf("%s: iterator cursor element disagrees with Yield owner", where)
 			}
 		}
@@ -666,7 +666,7 @@ func (l *linter) expr(e Expr, where string) {
 			}
 		}
 		cursor, ok := e.Cursor.Type().(*types.TCon)
-		if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 1 || !types.Equal(cursor.Args[0], e.Element) {
+		if !ok || cursor.Name != types.IteratorTypeName || (len(cursor.Args) < 1 || len(cursor.Args) > 2) || !types.Equal(cursor.Args[0], e.Element) {
 			l.errorf("%s: iterator forEach cursor does not have type `%s a`", where, types.IteratorTypeName)
 		}
 		l.expr(e.Action, where)
@@ -708,7 +708,7 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: iterator fold control %s disagrees with callback %s", where, ControlName(e.Control), ControlName(want))
 		}
 		cursor, ok := e.Cursor.Type().(*types.TCon)
-		if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 1 || !types.Equal(cursor.Args[0], e.Element) {
+		if !ok || cursor.Name != types.IteratorTypeName || (len(cursor.Args) < 1 || len(cursor.Args) > 2) || !types.Equal(cursor.Args[0], e.Element) {
 			l.errorf("%s: iterator fold cursor does not have type `%s a`", where, types.IteratorTypeName)
 		}
 		l.expr(e.Combine, where)

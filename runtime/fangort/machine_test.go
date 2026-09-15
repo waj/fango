@@ -258,3 +258,45 @@ func BenchmarkMachineFixedDepthSuspension(b *testing.B) {
 	b.ReportMetric(float64(stats.MaxDepth), "max-frames")
 	b.ReportMetric(float64(stats.MaxFrameCap), "frame-cap")
 }
+
+func TestCheckedSynchronousMachineAdapter(t *testing.T) {
+	t.Run("normal", func(t *testing.T) {
+		frame := &repeatFrame{value: 42}
+		out := RunSynchronousMachine[int](frame)
+		if out.Exit != nil || out.Value != 42 || !frame.cleared {
+			t.Fatalf("outcome %#v, cleared %v", out, frame.cleared)
+		}
+	})
+	t.Run("exit", func(t *testing.T) {
+		failure := &ExitRequest{Effect: "Failure"}
+		out := RunSynchronousMachine[int](ImmediateMachine(func() (any, *ExitRequest) { return nil, failure }))
+		if out.Exit != failure {
+			t.Fatalf("exit %#v, want original failure", out.Exit)
+		}
+	})
+	t.Run("invalid suspension drains", func(t *testing.T) {
+		closed := 0
+		frame := &invalidSynchronousFrame{closed: &closed}
+		defer func() {
+			if recover() == nil {
+				t.Error("unchecked suspension was accepted")
+			}
+			if closed != 1 || !frame.cleared {
+				t.Errorf("cleanup count %d, cleared %v", closed, frame.cleared)
+			}
+		}()
+		RunSynchronousMachine[int](frame)
+	})
+}
+
+type invalidSynchronousFrame struct {
+	closed  *int
+	cleared bool
+}
+
+func (f *invalidSynchronousFrame) Step(m *Machine) MachineStep {
+	closed := f.closed
+	m.PushCleanup(func() *ExitRequest { *closed++; return nil })
+	return MachineStep{Kind: MachineSuspend, Request: 42}
+}
+func (f *invalidSynchronousFrame) Clear() { f.closed = nil; f.cleared = true }

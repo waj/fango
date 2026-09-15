@@ -354,64 +354,70 @@ run in constant stack rather than one frame per element, at the cost of
 allocating each result twice. Callback order is unaffected: `map` and `filter`
 call theirs from left to right, `foldr` from right to left.
 
-`Generator` and `Iterator` provide scoped, pull-driven traversal:
+### Streams and cursors
+
+`Stream a e` is an abstract, reusable description of elements `a` whose
+production may perform effects `e`. Import `Stream` explicitly:
 
 ```fango
-import Generator
-import Iterator
+import Stream
 
 main() =
-    Generator.withIterator (\_ ->
-        Generator.yield 10
-        Generator.yield 20
-        Generator.yield 30) (\iterator ->
-        Iterator.forEach print iterator)
+    source = Stream.fromList [1, 2, 3, 4]
+    Stream.forEach print (Stream.take 2 (Stream.map (\x -> x * 2) source))
 ```
 
-`Generator.yield : a ->{Generator a} ()` suspends the producer and offers one
-value to its owning iterator scope. `Generator.withIterator` takes the
-producer and a consumer:
+Construction is pure. Arguments still evaluate strictly, in source order;
+producer and transformation callbacks run during traversal. Each traversal
+starts production on its first pull, and reopening repeats producer effects.
 
 ```fango
-withIterator
-    : (() ->{Generator a | e} ())
-    -> (Iterator a ->{e} result)
-    ->{e} result
+generate : (() ->{Yield a | e} ()) -> Stream a e
+yield : a ->{Yield a} ()
+fromList : List a -> Stream a e
+map : (a ->{e} b) -> Stream a e -> Stream b e
+filter : (a ->{e} Bool) -> Stream a e -> Stream a e
+take : Int -> Stream a e -> Stream a e
+fold : (a -> b ->{e} b) -> b -> Stream a e ->{e} b
+forEach : (a ->{e} ()) -> Stream a e ->{e} ()
+toList : Stream a e ->{e} List a
+zip : Stream a e -> Stream b e -> Stream (a, b) e
 ```
 
-`Iterator a` is an opaque resource. Consumers may be named functions; aliases,
-helper calls, and temporary ADTs or closures may use the cursor within its
-owner. Returning the cursor, returning a closure or ADT that retains it, or
-storing it in an outer handler reports `RESOURCE ESCAPES`. Unrelated closures
-may be returned. A producer cannot reenter an advancement of the same cursor;
-overlapping or possibly overlapping access reports `ITERATOR ADVANCEMENT CONFLICT`.
-There is no public `next` yet.
+These names belong to `Stream`, including its compiler-owned `Yield` effect.
+`fold` passes the element before the accumulator. `take n` starts no upstream
+production when `n <= 0`. `zip` pulls left first and can consume one unmatched
+left element when right ends. Stages retain bounded buffering; `toList`
+intentionally retains every output element.
 
-Sequential terminal calls are supported. Once a cursor is exhausted, `forEach`
-does nothing and `fold` returns its initial accumulator. Distinct cursors in
-nested scopes remain independent. These rules follow inferred contracts across
-module boundaries, including callbacks stored in records or dictionaries.
-An ordinary handler cannot intercept `Generator.yield`: attempting to handle
-its compiler-owned effect reports `COMPILER-OWNED EFFECT`.
-Each traversal supplies fresh Yield evidence to its producer. Producer closures
-preserve that lexical evidence across suspension and resumption. This does not
-yet provide suspension transfers between nested cursors.
+Custom consumers use `Stream.withCursor` and `Iterator.next`:
 
-`Iterator.forEach : (a ->{e} ()) -> Iterator a ->{e} ()` invokes its callback
-once per yield in production order. `Iterator.fold` has type
-`(a -> b ->{e} b) -> b -> Iterator a ->{e} b`; it threads an accumulator in
-the same order, passing the element first and accumulator second like
-`List.foldl`. Normal producer return ends traversal. If the consumer returns
-early or an effect exits the scope, unfinished production is abandoned and its
-pending cleanup scopes run before control continues. The iterator and generator
-modules must be imported explicitly.
+```fango
+withCursor
+    : Stream a e
+    -> (Iterator a e ->{Traversal | e} result)
+    ->{e} result
 
-A producer starts only on the first pull; a consumer that ignores its cursor
-starts no production. A pure traversal can run in a splice, including repeated
-traversals of the same producer. Compile-time native restrictions and the
-evaluation-step budget apply throughout production and consumption, including
-producer loops that never yield. Failed expansions retain the usual REPL
-rollback behavior.
+next : Iterator a e ->{Traversal | e} Maybe a
+```
+
+`Iterator a e` is an opaque resource, and `Iterator.Traversal` is a
+compiler-owned effect. Named consumers, aliases, sequential reads, helper
+calls, and temporary ADTs or closures can use a cursor within its owner.
+Returning it, returning a closure or ADT that retains it, or storing it in an
+outer handler reports `RESOURCE ESCAPES`. Unrelated closures may be returned.
+Overlapping or possibly overlapping advancement reports
+`ITERATOR ADVANCEMENT CONFLICT`. Ordinary handling of `Yield` or `Traversal`
+reports `COMPILER-OWNED EFFECT`.
+
+Exhaustion keeps returning `Nothing`. A producer failure closes its cursor.
+Scope exit closes unfinished production before returning or propagating
+failure. Distinct nested cursors have separate identities. Each yield routes
+to its lexical owner, including across nested producer suspensions.
+
+A pure traversal can run in a splice. Compile-time native restrictions and
+the evaluation-step budget apply throughout production and consumption,
+including loops that never yield. Failed expansions retain REPL rollback.
 
 `Range.each : (Num a, Ord a) => (a ->{e} ()) -> a -> a ->{e} ()` traverses an
 inclusive ascending numeric range without constructing a `List`. For example,

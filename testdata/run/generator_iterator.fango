@@ -1,15 +1,28 @@
-import Generator
+import Stream
 import Iterator
+import Maybe exposing (Maybe(..))
+
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Iterator.Traversal | e} b
+foldCursor combine initial cursor = case Iterator.next cursor of
+    Nothing -> initial
+    Just value -> foldCursor combine (combine value initial) cursor
+
+eachCursor : (a ->{e} ()) -> Iterator.Iterator a e ->{Iterator.Traversal | e} ()
+eachCursor action cursor = case Iterator.next cursor of
+    Nothing -> ()
+    Just value ->
+        action value
+        eachCursor action cursor
 
 main() =
-    Generator.withIterator (\_ ->
-        Generator.yield 10
-        Generator.yield 20
-        Generator.yield 30) (\iterator ->
-            Iterator.forEach print iterator)
-    total = Generator.withIterator (\_ ->
-        Generator.yield 10
-        Generator.yield 20
-        Generator.yield 30) (\iterator ->
-            Iterator.fold (\value -> \sum -> value + sum) 0 iterator)
+    Stream.withCursor (Stream.generate (\_ ->
+        Stream.yield 10
+        Stream.yield 20
+        Stream.yield 30)) (\iterator ->
+            eachCursor print iterator)
+    total = Stream.withCursor (Stream.generate (\_ ->
+        Stream.yield 10
+        Stream.yield 20
+        Stream.yield 30)) (\iterator ->
+            foldCursor (\value -> \sum -> value + sum) 0 iterator)
     print total

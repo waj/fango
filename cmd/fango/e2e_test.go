@@ -157,8 +157,8 @@ func emitRunFixtures() fixtureEmissions {
 	}()
 	out := fixtureEmissions{paths: paths, files: make(map[string][]codegen.File, len(paths))}
 	for r := range results {
-		if r.err != nil && out.err == nil {
-			out.err = r.err
+		if r.err != nil {
+			out.err = errors.Join(out.err, r.err)
 		}
 		out.files[r.path] = r.files
 	}
@@ -492,7 +492,7 @@ func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner,
 
 		env := eval.NewEnv()
 		env.DefineProg(prog)
-		if prog.Intrinsics[types.GeneratorWithIteratorName] {
+		if prog.Intrinsics[types.GeneratorWithIteratorName] || prog.Intrinsics[types.StreamWithProducerName] || prog.Intrinsics[types.IteratorNextName] {
 			machineProg, errs := machineir.Lower(prog, ck.B)
 			if len(errs) > 0 {
 				t.Fatalf("machine lowering: %v", errs)

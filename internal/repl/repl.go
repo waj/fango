@@ -705,7 +705,7 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	display := elaborate.Display(coreExpr, s.ck, "")
-	if s.ck.Intrinsics[types.GeneratorWithIteratorName].Body != nil {
+	if s.ck.Intrinsics[types.GeneratorWithIteratorName].Body != nil || s.ck.Intrinsics[types.StreamWithProducerName].Body != nil || s.ck.Intrinsics[types.IteratorNextName].Body != nil {
 		defs := append(s.activeExecutionDefs(), aux...)
 		defs = append(defs, core.Def{Name: "_repl_expression", Type: display.Type(), Control: core.ExprControl(display), Body: display})
 		machineProg, lowerErrs := machineir.Lower(s.program(defs), s.ck.B)

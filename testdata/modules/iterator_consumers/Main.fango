@@ -1,13 +1,13 @@
 import Consumers
-import Generator
+import Stream
 
-produce : () ->{Generator.Generator Int, IO} ()
+produce : () ->{Stream.Yield Int, IO} ()
 produce() =
     print "produce"
-    Generator.yield 1
-    Generator.yield 2
-    Generator.yield 3
+    Stream.yield 1
+    Stream.yield 2
+    Stream.yield 3
 
 main() =
-    print (Generator.withIterator produce (Consumers.run (Consumers.make())))
-    print (Generator.withIterator produce (Consumers.prefix 4))
+    print (Stream.withCursor (Stream.generate produce) (Consumers.run (Consumers.make())))
+    print (Stream.withCursor (Stream.generate produce) (Consumers.prefix 4))

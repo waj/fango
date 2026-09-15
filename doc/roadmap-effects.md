@@ -323,11 +323,14 @@ are outside the committed scope.
 
 The implemented baseline includes Direct/Exit effects, synchronous `Scope`,
 `Fail`, declared scoped resources, inferred capture contracts, and a limited
-experimental `Generator`/`Iterator` path with inferred cursor lifetime and
-exclusive-advancement contracts for terminal traversal. It does not yet provide
-row-indexed cursors, raw `next`, Stream, or the task APIs above.
-Preserve its useful mechanisms while replacing terminal intrinsics with
-ordinary library composition:
+Stream descriptions and row-indexed cursors with inferred lifetime and
+exclusive-advancement contracts. Stream transformations and consumers are
+ordinary Fango definitions; the public Generator and terminal Iterator APIs
+have been removed. The remaining milestone-3 work includes removal of legacy
+internal terminal nodes, latent effect-evidence propagation for descriptions
+constructed outside their handlers and consumer recovery after producer failure,
+typed cleanup reports, and the remaining acceptance coverage.
+The task APIs above remain unimplemented.
 
 - **Effect subsumption:** use the implemented callback inclusion and nominal
   variance rules for the proposed Stream types; never erase a real effect.
@@ -337,9 +340,8 @@ ordinary library composition:
 - **Compositional suspension:** Machine calls work through higher-order and
   stored callbacks, nested scopes, result constructors, and module boundaries.
   Unsupported suspension handlers receive source diagnostics, not Core errors.
-  Complete the Machine scope member with Direct/Exit acquisition and release
-  callbacks and a Machine body, preserving the implemented non-suspension
-  contracts before callback row widening.
+  Preserve the implemented Machine scope member's synchronous acquisition and
+  release obligations before callback row widening.
 - **Task boundaries:** validate captures and separate child completion from an
   exit targeted at a parent handler. A child executor never unwinds a parent's
   stack directly; it reports completion for parent-side routing after drain.

@@ -1,12 +1,12 @@
-import Generator
+import Stream
 import Iterator
 
-type Held = Held (Iterator.Iterator Int)
+type Held e = Held (Iterator.Iterator Int e)
 
 retain cursor =
     alias = cursor
     Held alias
 
-escape() = Generator.withIterator (\_ -> Generator.yield 1) retain
+escape() = Stream.withCursor (Stream.generate (\_ -> Stream.yield 1)) retain
 
 main() = print "unreachable"

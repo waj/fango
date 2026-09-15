@@ -36,7 +36,11 @@ type File struct {
 // module. The entry module is package main at the project root; dependencies
 // live below modules/ in their logical source layout.
 func EmitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
-	return emitProject(p, nil, b, units, printMain)
+	mp, errs := machineir.Lower(p, b)
+	if len(errs) != 0 {
+		return nil, fmt.Errorf("codegen: Machine representation families: %v", errs[0])
+	}
+	return emitProject(p, mp, b, units, printMain)
 }
 
 // EmitMachineProject emits selective Machine definitions as iterative
@@ -182,7 +186,7 @@ func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, un
 		if d == mainDef && mainIsUnit {
 			continue // no package var: the effect runs inside func main()
 		}
-		if machineWorkers[d.Name] != nil {
+		if machineWorkers[d.Name] != nil && d.Control.Transport == types.Machine {
 			continue
 		}
 		if d.IsWorker() {
@@ -212,6 +216,7 @@ func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, un
 		decls = append(decls, g.topValueDecl(d, types.Direct))
 		if g.controlledType(d.Type, nil) {
 			decls = append(decls, g.topValueDecl(d, types.Exit))
+			decls = append(decls, g.topValueDecl(d, types.Machine))
 		}
 	}
 	if mp != nil {
@@ -266,11 +271,13 @@ func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, un
 
 func (g *gen) topValueDecl(d *core.Def, mode types.Transport) goast.Decl {
 	oldControl, oldABI := g.control, g.abi
-	g.control, g.abi = mode, mode
+	g.control, g.abi = types.Direct, mode
 	defer func() { g.control, g.abi = oldControl, oldABI }()
 	name := g.topValueName(d.Name)
 	if mode == types.Exit {
 		name += "_exit"
+	} else if mode == types.Machine {
+		name += "_machine"
 	}
 	return varDecl(name, g.goType(d.Type), g.expr(d.Body, 0))
 }
@@ -427,36 +434,7 @@ func (g *gen) ctorRef(ctor *types.CtorInfo) goast.Expr {
 }
 
 func (g *gen) controlledType(t types.Type, visiting map[int]bool) bool {
-	switch t := t.(type) {
-	case *types.TFun:
-		return types.FunctionControl(t) != (types.Control{}) || g.controlledType(t.Arg, visiting) || g.controlledType(t.Ret, visiting)
-	case *types.TCon:
-		for _, a := range t.Args {
-			if g.controlledType(a, visiting) {
-				return true
-			}
-		}
-		adt := g.adts[t.Unique]
-		if adt == nil {
-			return false
-		}
-		if visiting == nil {
-			visiting = map[int]bool{}
-		}
-		if visiting[t.Unique] {
-			return false
-		}
-		visiting[t.Unique] = true
-		defer delete(visiting, t.Unique)
-		for _, c := range adt.Ctors {
-			for _, f := range c.Fields {
-				if g.controlledType(f, visiting) {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	return types.ControlledRepresentation(t, g.adts)
 }
 
 func (g *gen) eqName(adt *types.ADTInfo) string {
@@ -770,10 +748,10 @@ func (g *gen) passiveMachineFactorySeen(d *core.Def, seen map[string]bool) bool 
 	}
 	seen[d.Name] = true
 	passive := true
-	core.Inspect(d.Body, func(e core.Expr) {
+	core.InspectPruned(d.Body, func(e core.Expr) bool {
 		switch e := e.(type) {
 		case *core.Lambda:
-			passive = false
+			return false
 		case *core.App:
 			if e.CalleeKind == core.Value || e.Control != (types.Control{}) {
 				passive = false
@@ -787,6 +765,7 @@ func (g *gen) passiveMachineFactorySeen(d *core.Def, seen map[string]bool) bool 
 				}
 			}
 		}
+		return true
 	})
 	return passive
 }
@@ -807,7 +786,10 @@ func (g *gen) workerCallsControlledArg(d *core.Def) bool {
 		return false
 	}
 	called := false
-	core.Rewrite(d.Body, func(t types.Type) types.Type { return t }, func(e core.Expr) core.Expr {
+	core.InspectPruned(d.Body, func(e core.Expr) bool {
+		if _, ok := e.(*core.Lambda); ok {
+			return false
+		}
 		if app, ok := e.(*core.App); ok {
 			for name := range controlled {
 				if core.Mentions(app.Callee, name) {
@@ -815,7 +797,7 @@ func (g *gen) workerCallsControlledArg(d *core.Def) bool {
 				}
 			}
 		}
-		return e
+		return true
 	})
 	return called
 }
@@ -1367,8 +1349,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		}
 		if !e.Local && g.defs[e.Name] != nil {
 			mode := types.Direct
-			if g.representationMode() == types.Exit && g.controlledType(e.Ty, nil) {
-				mode = types.Exit
+			if g.controlledType(e.Ty, nil) {
+				mode = g.representationMode()
 			}
 			return g.topValueRefMode(e.Name, mode)
 		}
@@ -1590,7 +1572,22 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 	ref := e.Callee.(*core.VarRef)
 	formal, voidResult := g.workerABI(ref.Name)
+	sub := map[int]types.Type{}
+	if d := g.defs[ref.Name]; d != nil {
+		for i, param := range d.TyParams {
+			if i < len(e.TyArgs) {
+				sub[param.ID] = e.TyArgs[i]
+			}
+		}
+	}
 	mode := e.Control.Resolve(g.control)
+	// A handled computation can return a Machine-family callback while its
+	// outward call is still synchronous. Execute its owned Machine member to
+	// preserve that result representation; the checked call control forbids
+	// an outward suspension.
+	if g.representationMode() == types.Machine && mode != types.Machine && g.machineWorkers[ref.Name] != nil {
+		return g.synchronousMachineWorkerCall(e, formal, sub, mode)
+	}
 	// A source-Direct call can still construct an Exit-family function value.
 	// A polymorphic worker has a joined execution/representation ABI, so use
 	// its Exit member and project its statically normal result. Supplied Direct
@@ -1617,7 +1614,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 			}
 			continue
 		}
-		args = append(args, g.callArgExpr(a, formal[i], abi))
+		args = append(args, g.callArgExpr(a, types.SubstRigid(formal[i], sub), abi))
 	}
 	if needPrelude {
 		var body []goast.Stmt
@@ -1675,6 +1672,9 @@ func (g *gen) workerNeedsNormalProjection(e *core.App) bool {
 // higher-order function receiving it must use an Outcome-returning callback so
 // that exits from callbacks can propagate through its body.
 func (g *gen) callArgExpr(arg core.Expr, formal types.Type, mode types.Transport) goast.Expr {
+	if mode == types.Machine {
+		return g.adaptMachineValue(g.expr(arg, 0), arg.Type(), formal, g.representationMode())
+	}
 	fn, ok := formal.(*types.TFun)
 	if !ok || mode != types.Exit || types.FunctionControl(fn).Resolve(mode) != types.Exit {
 		return g.expr(arg, 0)
@@ -2356,6 +2356,11 @@ func (g *gen) currentEvidenceMode(unique int) types.Transport {
 }
 
 func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want types.Transport) goast.Expr {
+	if eff := g.effects[ev.Unique]; actual != want && eff != nil && len(eff.Ops) > 0 && eff.Ops[0].Abort {
+		desired := ev
+		desired.Control = types.Control{Transport: want}
+		return &goast.CompositeLit{Type: g.effectTypeMode(desired, want), Elts: []goast.Expr{&goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: value, Sel: ident("Target")}}}}
+	}
 	if actual == want || want == types.Direct {
 		return value
 	}

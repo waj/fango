@@ -1,15 +1,16 @@
 {-# no-prelude #-}
-module Iterator exposing (Iterator, fold, forEach)
+module Iterator exposing (Iterator, Traversal, next)
 
 import Basics exposing (..)
+import Maybe exposing (Maybe(..))
 
--- The constructor is private. Values of this type are borrowed cursors that
--- only the compiler-owned Generator scope can create.
+effect Traversal
+    advance : () -> ()
+
+-- The private field establishes the element and latent effect-row kinds.
+-- Cursor values and their producer state are supplied by the compiler.
 {-# resource #-}
-type Iterator a = Iterator
+type Iterator a e = Iterator (() ->{e} a)
 
-forEach : (a ->{e} ()) -> Iterator a ->{e} ()
-forEach = native
-
-fold : (a -> b ->{e} b) -> b -> Iterator a ->{e} b
-fold = native
+next : Iterator a e ->{Traversal | e} Maybe a
+next = native

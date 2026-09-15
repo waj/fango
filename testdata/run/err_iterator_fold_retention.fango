@@ -1,25 +1,34 @@
-import Generator
+import Stream
 import Iterator
-import State
 import Maybe exposing (Maybe(..))
+import State
 
-type Pending = Empty | Saved (() -> Iterator.Iterator Int)
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Iterator.Traversal | e} b
+foldCursor combine initial cursor = case Iterator.next cursor of
+    Nothing -> initial
+    Just value -> foldCursor combine (combine value initial) cursor
 
-produce : () ->{Generator.Generator Int} ()
+type Pending = Empty | Saved (() -> Int)
+
+produce : () ->{Stream.Yield Int | e} ()
 produce() =
-    Generator.yield 1
-    Generator.yield 2
+    Stream.yield 1
+    Stream.yield 2
 
+ignore : a -> Int
+ignore cursor = 42
+
+consume : Iterator.Iterator Int (State.State (Maybe (() -> Int))) ->{Iterator.Traversal, State.State (Maybe (() -> Int))} ()
 consume cursor =
     step element previous =
         case previous of
-            Empty -> Saved (\_ -> cursor)
+            Empty -> Saved (\_ -> ignore cursor)
             Saved read ->
-                State.put (Just (read()))
+                State.put (Just read)
                 Empty
-    ignored = Iterator.fold step Empty cursor
+    ignored = foldCursor step Empty cursor
     ()
 
-escape() = State.run Nothing (\_ -> Generator.withIterator produce consume)
+escape() = State.run Nothing (\_ -> Stream.withCursor (Stream.generate produce) consume)
 
 main() = print "unreachable"

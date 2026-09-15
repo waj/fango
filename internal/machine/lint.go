@@ -33,6 +33,28 @@ func Lint(p *Prog) []error {
 func lintWorker(w *Worker, workers map[string]*Worker) []error {
 	where := "machine worker " + w.Name
 	var errs []error
+	wantSynchronous := []int(nil)
+	if w.Name == types.ScopeBracketName && (len(w.Params) == 3 || len(w.SynchronousParams) > 0 || w.Def != nil && len(w.Def.Params) == 3) {
+		wantSynchronous = []int{0, 1}
+		if w.Def == nil {
+			errs = append(errs, fmt.Errorf("%s: missing synchronous source contract", where))
+		} else if scope, ok := w.Def.Body.(*core.Bracket); !ok || scope.Scope == 0 || !core.CaptureContractCurrent(w.Def) {
+			errs = append(errs, fmt.Errorf("%s: stale synchronous source contract", where))
+		}
+	}
+	if !slices.Equal(w.SynchronousParams, wantSynchronous) {
+		errs = append(errs, fmt.Errorf("%s: invalid synchronous callback parameters", where))
+	}
+	for _, i := range w.SynchronousParams {
+		if i < 0 || i >= len(w.Params) {
+			errs = append(errs, fmt.Errorf("%s: invalid synchronous parameter index", where))
+			continue
+		}
+		fn, ok := w.Params[i].Ty.(*types.TFun)
+		if !ok || types.FunctionControl(fn) != (types.Control{Transport: types.Exit}) {
+			errs = append(errs, fmt.Errorf("%s: synchronous parameter must use Exit transport", where))
+		}
+	}
 	tyParams := map[int]bool{}
 	for _, param := range w.TyParams {
 		if param == nil || !param.Rigid || param.Kind == types.RowVar || tyParams[param.ID] {
@@ -176,6 +198,13 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				}
 			}
 		case *Call:
+			wantSynchronous := []int(nil)
+			if term.Callee == types.ScopeBracketName {
+				wantSynchronous = []int{0, 1}
+			}
+			if !slices.Equal(term.SynchronousArgs, wantSynchronous) {
+				errs = append(errs, fmt.Errorf("%s: missing or stale synchronous argument obligations", blockWhere))
+			}
 
 			checkBind(term.Bind)
 			for i, arg := range term.Args {
@@ -257,7 +286,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				}
 				for i, arg := range term.Args {
 					if i < len(callee.Params) && !types.Equal(arg.Type(), types.SubstRigid(callee.Params[i].Ty, sub)) {
-						errs = append(errs, fmt.Errorf("%s: call argument %d to %q is mistyped", blockWhere, i+1, term.Callee))
+						errs = append(errs, fmt.Errorf("%s: call argument %d to %q is mistyped: got %s, want %s", blockWhere, i+1, term.Callee, types.Show(arg.Type()), types.Show(types.SubstRigid(callee.Params[i].Ty, sub))))
 					}
 				}
 				if term.Bind.Ty != nil && !types.Equal(term.Bind.Ty, types.SubstRigid(callee.Result, sub)) {
@@ -364,10 +393,10 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			}
 			seenCursorScopes[term.Scope] = true
 			cursor, ok := term.Cursor.Ty.(*types.TCon)
-			if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 1 {
+			if !ok || cursor.Name != types.IteratorTypeName || (len(cursor.Args) < 1 || len(cursor.Args) > 2) {
 				errs = append(errs, fmt.Errorf("%s: cursor setup has invalid Iterator type", blockWhere))
 			}
-			if term.Yield.Unique != 0 && (term.Yield.Control.Transport != types.Machine || !types.EqualCaptures(term.Yield.Captures, types.ScopeCapture(term.Scope)) || cursor == nil || len(cursor.Args) != 1 || len(term.Yield.Args) != 1 || !types.Equal(cursor.Args[0], term.Yield.Args[0])) {
+			if term.Yield.Unique != 0 && (term.Yield.Control.Transport != types.Machine || !types.EqualCaptures(term.Yield.Captures, types.ScopeCapture(term.Scope)) || cursor == nil || (len(cursor.Args) < 1 || len(cursor.Args) > 2) || len(term.Yield.Args) != 1 || !types.Equal(cursor.Args[0], term.Yield.Args[0])) {
 				errs = append(errs, fmt.Errorf("%s: cursor setup has stale Yield ownership", blockWhere))
 			}
 			if term.Producer != nil {

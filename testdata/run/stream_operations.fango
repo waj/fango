@@ -1,0 +1,14 @@
+import Stream
+import Iterator
+main() =
+    source = Stream.fromList [1, 2, 3, 4]
+    print (Stream.toList source)
+    print (Stream.toList source)
+    print (Stream.toList (Stream.take 2 (Stream.filter (\x -> x > 1) (Stream.map (\x -> x * 2) source))))
+    print (Stream.fold (\x acc -> x - acc) 0 source)
+    Stream.forEach print (Stream.take 2 source)
+    print (Stream.toList (Stream.zip source (Stream.fromList [10, 20])))
+    Stream.withCursor (Stream.fromList [42]) (\cursor ->
+        print (Iterator.next cursor)
+        print (Iterator.next cursor)
+        print (Iterator.next cursor))

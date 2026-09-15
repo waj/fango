@@ -1,11 +1,17 @@
-import Generator
+import Stream
 import Iterator
+import Maybe exposing (Maybe(..))
 import Meta exposing (Code)
 
-spin : () ->{Generator.Generator Int} ()
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Iterator.Traversal | e} b
+foldCursor combine initial cursor = case Iterator.next cursor of
+    Nothing -> initial
+    Just value -> foldCursor combine (combine value initial) cursor
+
+spin : () ->{Stream.Yield Int} ()
 spin() = spin()
 
 count : () -> Int
-count() = Generator.withIterator spin (\cursor -> Iterator.fold (\element acc -> element + acc) 0 cursor)
+count() = Stream.withCursor (Stream.generate spin) (\cursor -> foldCursor (\element acc -> element + acc) 0 cursor)
 
 main() = print $(Meta.lift (count()))
