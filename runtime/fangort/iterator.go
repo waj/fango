@@ -16,6 +16,7 @@ func NewYieldOwner() *YieldOwner { return &YieldOwner{marker: 1} }
 // cursor within its scope; checked capture and access contracts govern those
 // aliases before the private runtime representation is selected.
 type MachineIterator struct {
+	busy    bool
 	owner   *YieldOwner
 	machine *Machine
 	started bool
@@ -39,6 +40,9 @@ func (it *MachineIterator) Next() (value any, yielded bool, exit *ExitRequest, e
 	}
 	if it.done {
 		return nil, false, nil, nil
+	}
+	if it.busy {
+		return nil, false, nil, fmt.Errorf("fangort: overlapping cursor advancement")
 	}
 	var event MachineEvent
 	if it.started {

@@ -13,6 +13,7 @@ const (
 	MachineReturn
 	MachineSuspend
 	MachineExit
+	MachineAdvance
 )
 
 // MachineFrame is implemented by module-owned generated frame types. Step
@@ -45,6 +46,7 @@ func (f *immediateMachineFrame) Step(*Machine) MachineStep {
 func (f *immediateMachineFrame) Clear() { f.run = nil }
 
 type MachineStep struct {
+	Cursor  *MachineIterator
 	Owner   *YieldOwner
 	Kind    MachineStepKind
 	Frame   MachineFrame
@@ -59,6 +61,7 @@ type MachineStep struct {
 func InvalidMachineStep(message string) MachineStep { panic(message) }
 
 type MachineEvent struct {
+	advance *MachineIterator
 	Owner   *YieldOwner
 	Request any
 	Done    bool
@@ -67,11 +70,12 @@ type MachineEvent struct {
 }
 
 type MachineStats struct {
-	Steps       uint64
-	MaxDepth    int
-	MaxFrameCap int
-	MaxCleanups int
-	MaxStates   int
+	MaxPullDepth int
+	Steps        uint64
+	MaxDepth     int
+	MaxFrameCap  int
+	MaxCleanups  int
+	MaxStates    int
 }
 
 // MachineCleanup is a definition-site Direct/Exit release closure. E7 does
@@ -86,15 +90,16 @@ type MachineCleanup func() *ExitRequest
 // or by the suspended frame after Resume. Generated code uses TakeResult
 // exactly once on that edge.
 type Machine struct {
-	frames   []MachineFrame
-	cleanups []MachineCleanup
-	states   []any
-	handlers []machineHandler
-	caught   *ExitRequest
-	result   any
-	waiting  bool
-	finished bool
-	stats    MachineStats
+	traversal *machineTraversal
+	frames    []MachineFrame
+	cleanups  []MachineCleanup
+	states    []any
+	handlers  []machineHandler
+	caught    *ExitRequest
+	result    any
+	waiting   bool
+	finished  bool
+	stats     MachineStats
 }
 
 type machineHandler struct {
@@ -114,7 +119,7 @@ func StartMachine(entry MachineFrame) *Machine {
 }
 
 // Run dispatches iteratively until suspension or completion.
-func (m *Machine) Run() (event MachineEvent, err error) {
+func (m *Machine) runLocal() (event MachineEvent, err error) {
 	if m.finished {
 		return MachineEvent{}, fmt.Errorf("fangort: machine already completed")
 	}
@@ -123,7 +128,7 @@ func (m *Machine) Run() (event MachineEvent, err error) {
 	}
 	defer func() {
 		if err != nil && !m.finished {
-			exit, _ := m.Abandon()
+			exit, _ := m.abandonLocal()
 			event.Exit = Suppress(event.Exit, exit)
 			event.Done = true
 		}
@@ -173,6 +178,11 @@ func (m *Machine) Run() (event MachineEvent, err error) {
 		case MachineSuspend:
 			m.waiting = true
 			return MachineEvent{Owner: step.Owner, Request: step.Request}, nil
+		case MachineAdvance:
+			if step.Cursor == nil {
+				return MachineEvent{}, fmt.Errorf("fangort: advancement has no cursor")
+			}
+			return MachineEvent{advance: step.Cursor}, nil
 		case MachineExit:
 			if m.routeExit(step.Exit) {
 				continue
@@ -188,22 +198,22 @@ func (m *Machine) Run() (event MachineEvent, err error) {
 	return MachineEvent{}, fmt.Errorf("fangort: machine exhausted without completion")
 }
 
-func (m *Machine) Resume(value any) (MachineEvent, error) {
+func (m *Machine) resumeLocal(value any) error {
 	if m.finished {
-		return MachineEvent{}, fmt.Errorf("fangort: machine already completed")
+		return fmt.Errorf("fangort: machine already completed")
 	}
 	if !m.waiting {
-		return MachineEvent{}, fmt.Errorf("fangort: machine is not suspended")
+		return fmt.Errorf("fangort: machine is not suspended")
 	}
 	m.result = value
 	m.waiting = false
-	return m.Run()
+	return nil
 }
 
 // Abandon consumes an unfinished private machine, runs every pending cleanup,
 // and clears all frame, handler, and state storage. E8's owned consumers use
 // this operation when they stop pulling before normal completion.
-func (m *Machine) Abandon() (*ExitRequest, error) {
+func (m *Machine) abandonLocal() (*ExitRequest, error) {
 	if m.finished {
 		return nil, fmt.Errorf("fangort: machine already completed")
 	}

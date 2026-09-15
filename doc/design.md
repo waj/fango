@@ -1029,9 +1029,15 @@ Core verifies source-yield evidence availability, scope ownership, and element
 types. Capture contracts retain Yield identities through callbacks and evidence
 substitution. Machine IR preserves the owner explicitly on each suspension and
 independently checks its evidence binding, capture metadata, and request type.
-Both dispatchers return the owner with the suspended request. The current private
-pull driver accepts only its own owner's requests; foreign cursor transfers
-are not implemented. Host-driven Machine fixtures without a declared suspension
+Both dispatchers return the owner with the suspended request. The generated-Go
+runtime also has an explicit cursor-advancement transition. Its dispatcher owns
+an iterative stack of producer/caller transfers. A yield to an enclosing owner
+parks unfinished inner advancements with that owner; their exclusive borrows
+remain active until those advancements complete. Closing the parked traversal
+drains inner producers before their callers and clears all transfer storage.
+This runtime transition is not yet emitted by source lowering or implemented by
+the interpreter. The source pull driver still accepts only its own owner's
+requests. Host-driven Machine fixtures without a declared suspension
 effect may still use ownerless requests with arbitrary resumed types.
 
 Cursor ownership is part of the inferred capture-flow contract. `Iterator` is
