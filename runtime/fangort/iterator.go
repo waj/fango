@@ -34,7 +34,8 @@ func (it *MachineIterator) Next() (value any, yielded bool, exit *ExitRequest, e
 		event, err = it.machine.Run()
 	}
 	if err != nil {
-		return nil, false, nil, err
+		it.done = true
+		return nil, false, event.Exit, err
 	}
 	if !event.Done {
 		return event.Request, true, nil, nil

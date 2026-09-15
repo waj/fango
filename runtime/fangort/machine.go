@@ -112,13 +112,20 @@ func StartMachine(entry MachineFrame) *Machine {
 }
 
 // Run dispatches iteratively until suspension or completion.
-func (m *Machine) Run() (MachineEvent, error) {
+func (m *Machine) Run() (event MachineEvent, err error) {
 	if m.finished {
 		return MachineEvent{}, fmt.Errorf("fangort: machine already completed")
 	}
 	if m.waiting {
 		return MachineEvent{}, fmt.Errorf("fangort: suspended machine must be resumed")
 	}
+	defer func() {
+		if err != nil && !m.finished {
+			exit, _ := m.Abandon()
+			event.Exit = Suppress(event.Exit, exit)
+			event.Done = true
+		}
+	}()
 	if len(m.frames) == 0 || m.frames[len(m.frames)-1] == nil {
 		return MachineEvent{}, fmt.Errorf("fangort: machine has no entry frame")
 	}
@@ -152,11 +159,11 @@ func (m *Machine) Run() (MachineEvent, error) {
 			m.frames = m.frames[:len(m.frames)-1]
 			if len(m.frames) == 0 {
 				if exit := m.unwind(nil, 0); exit != nil {
-					m.result = nil
+					m.clearFrames()
 					m.finished = true
 					return MachineEvent{Done: true, Exit: exit}, nil
 				}
-				m.result = nil
+				m.clearFrames()
 				m.finished = true
 				return MachineEvent{Done: true, Value: step.Value}, nil
 			}

@@ -394,6 +394,13 @@ early or an effect exits the scope, unfinished production is abandoned and its
 pending cleanup scopes run before control continues. The iterator and generator
 modules must be imported explicitly.
 
+A producer starts only on the first pull; a consumer that ignores its cursor
+starts no production. A pure traversal can run in a splice, including repeated
+traversals of the same producer. Compile-time native restrictions and the
+evaluation-step budget apply throughout production and consumption, including
+producer loops that never yield. Failed expansions retain the usual REPL
+rollback behavior.
+
 `Range.each : (Num a, Ord a) => (a ->{e} ()) -> a -> a ->{e} ()` traverses an
 inclusive ascending numeric range without constructing a `List`. For example,
 `Range.each drawPoint 0 78` calls `drawPoint` with every value from `0` through

@@ -351,17 +351,26 @@ func ForceIO(ctx context.Context, name string, env *Env, ioctx *IOContext) (Valu
 	return (&interp{ctx: ctx, env: env, out: ioctx.Writer, ioctx: ioctx, evidence: map[int]*evidence{}}).force(name)
 }
 
-func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
+// tick is shared by Core evaluation, tail loops, and producer machines. A
+// traversal must not reset its caller's stage budget or cancellation counter.
+func (in *interp) tick() error {
 	in.steps++
 	if in.steps%pollEvery == 0 {
 		select {
 		case <-in.ctx.Done():
-			return nil, fmt.Errorf("interrupted")
+			return fmt.Errorf("interrupted")
 		default:
 		}
 		if in.budget > 0 && in.steps > in.budget {
-			return nil, ErrStepBudget
+			return ErrStepBudget
 		}
+	}
+	return nil
+}
+
+func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
+	if err := in.tick(); err != nil {
+		return nil, err
 	}
 	switch e := e.(type) {
 	case *core.IntLit:

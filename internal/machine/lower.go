@@ -16,6 +16,19 @@ func Lower(p *core.Prog, b *types.Builtins) (*Prog, []error) {
 	if errs := core.LintMachineInput(p, b); len(errs) != 0 {
 		return nil, errs
 	}
+	return lower(p)
+}
+
+// LowerStage uses the same execution IR and ownership proofs for compile-time
+// traversal. Only its semantic-Core entry permits quoted and reflected values.
+func LowerStage(p *core.Prog, b *types.Builtins) (*Prog, []error) {
+	if errs := core.LintStageMachineInput(p, b); len(errs) != 0 {
+		return nil, errs
+	}
+	return lower(p)
+}
+
+func lower(p *core.Prog) (*Prog, []error) {
 	defs := make(map[string]*core.Def, len(p.Defs))
 	selected := map[string]bool{}
 	for i := range p.Defs {

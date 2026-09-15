@@ -283,6 +283,15 @@ it entirely. The REPL performs the same lowering over the exact displayed Core
 expression before evaluation, so its Machine-lambda identity table matches the
 expression the interpreter receives.
 
+Splice evaluation lowers the exact operand and its reachable definition closure
+through a stage-specific semantic-Core lint entry and the same Machine IR.
+That entry admits checked `Quote` and reflected constants; the emission lint
+entry still rejects them. Reachability matters while deriving: a dictionary
+whose methods are still being expanded is not a finished executable definition.
+The stage environment retains elaborated definitions for capture substitution
+and lowering, installs newly imported intrinsics incrementally, and rebuilds
+that state after rollback discards an installed declaration prefix.
+
 The hand-written lexer records byte spans and line/column positions but does
 not synthesize layout tokens. The recursive-descent parser applies the offside
 rule from token columns. Operator runs parse flat rather than into a tree,
@@ -922,6 +931,18 @@ owns a LIFO stack of synchronous cleanup closures: suspension leaves it intact,
 normal completion drains it, and an exit drains it while retaining that exit as
 primary and appending cleanup failures in inner-to-outer order through the same
 `Suppress` operation used by synchronous `Bracket`.
+
+Producer machines in the interpreter share their caller's execution policy and
+step counter. Core evaluation, tail loops, and Machine dispatch all charge that
+counter, including computations that loop without yielding. Starting or reopening
+a producer cannot reset a compile-time budget or enable a stage-forbidden native.
+Each dispatch restores the caller's evidence after suspension or completion.
+Evaluator errors terminate production and drain all registered synchronous
+cleanups, retaining cleanup errors while continuing outer release attempts.
+Terminal paths clear frames, states, handlers, and suspension storage; a cursor
+whose production failed remains exhausted. Protocol errors in the generated
+runtime likewise abandon and clear the producer before returning an error to
+its internal driver.
 
 The implemented private lowering covers strict bindings and sequencing,
 conditionals, constructor/literal decision trees with edge-specific field

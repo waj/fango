@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 
+	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -15,7 +16,7 @@ import (
 // (and under a debug flag later) — instantiation plumbing bugs are the
 // design's top risk, and this is the tripwire.
 func Lint(p *Prog, b *types.Builtins) []error {
-	return lint(p, b, false)
+	return lint(p, b, false, false)
 }
 
 // LintMachineInput checks semantic Core immediately before selective machine
@@ -24,16 +25,23 @@ func Lint(p *Prog, b *types.Builtins) []error {
 // private nodes only when the resolved Generator.withIterator intrinsic is
 // present; that declaration is the source activation boundary.
 func LintMachineInput(p *Prog, b *types.Builtins) []error {
-	return lint(p, b, true)
+	return lint(p, b, true, false)
 }
 
-func lint(p *Prog, b *types.Builtins, allowMachine bool) []error {
+// LintStageMachineInput applies the same ownership, capture, and transport
+// proofs to a splice's execution program. Quote and TypeOf are values at this
+// boundary only; the ordinary emission boundary continues to reject them.
+func LintStageMachineInput(p *Prog, b *types.Builtins) []error {
+	return lint(p, b, true, true)
+}
+
+func lint(p *Prog, b *types.Builtins, allowMachine, allowStage bool) []error {
 	l := &linter{b: b, scope: map[string]bool{}, localTypes: map[string]types.Type{}, workers: map[string]*Def{},
 		adts: map[int]*types.ADTInfo{}, effects: map[int]*types.EffectInfo{},
 		tyParams: map[int]bool{}, evidence: map[int]int{}, evidenceCaptures: map[int][]types.CaptureSet{},
 		captureVars: map[types.CaptureVar]bool{}, scopeIDs: map[types.ScopeID]bool{}, activeScopes: map[types.ScopeID]bool{},
 		resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives, intrinsics: p.Intrinsics,
-		allowMachine: allowMachine || p.Intrinsics[types.GeneratorWithIteratorName]}
+		allowMachine: allowMachine || p.Intrinsics[types.GeneratorWithIteratorName], allowStage: allowStage}
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
 	}
@@ -225,6 +233,18 @@ func VerifyResumeStructure(e Expr) []error {
 	return l.errs
 }
 
+func (l *linter) stageType(ty types.Type, name, where string) {
+	con, ok := ty.(*types.TCon)
+	if !ok || len(con.Args) != 0 {
+		l.errorf("%s: stage value must have type %s", where, name)
+		return
+	}
+	adt := l.adts[con.Unique]
+	if adt == nil || adt.Con.Name != name || con.Name != name {
+		l.errorf("%s: stage value must have declared type %s", where, name)
+	}
+}
+
 type linter struct {
 	b                *types.Builtins
 	scope            map[string]bool       // def names + enclosing Let/param names: no shadowing
@@ -247,6 +267,7 @@ type linter struct {
 	resumeState      types.Type
 	defName          string
 	allowMachine     bool
+	allowStage       bool
 	errs             []error
 }
 
@@ -341,9 +362,39 @@ func (l *linter) expr(e Expr, where string) {
 		// Compile-time-only definitions are dropped before the program is
 		// linted, so a surviving Quote means the emission rule let one
 		// through (doc/design.md, "Compile-time metaprogramming").
-		l.errorf("%s: quote in emitted code — a compile-time-only value escaped", where)
+		if !l.allowStage {
+			l.errorf("%s: quote in emitted code — a compile-time-only value escaped", where)
+		} else {
+			l.stageType(e.Ty, "Meta.Code", where)
+			if e.Template < 0 {
+				l.errorf("%s: quote has invalid template identity", where)
+			}
+			for _, hole := range e.Holes {
+				l.expr(hole, where)
+				l.stageType(hole.Type(), "Meta.Code", where)
+			}
+		}
 	case *TypeOf:
-		l.errorf("%s: typeOf in emitted code — a compile-time-only value escaped", where)
+		if !l.allowStage {
+			l.errorf("%s: typeOf in emitted code — a compile-time-only value escaped", where)
+		} else {
+			switch repr := e.Repr.(type) {
+			case *meta.TypeRepr:
+				l.stageType(e.Ty, "Meta.TypeRepr", where)
+				if repr == nil || repr.Type == nil {
+					l.errorf("%s: typeOf has no checked type representation", where)
+				}
+			case *meta.Code:
+				// Derivers also inject already-checked Code arguments using
+				// this constant node, rather than executing another quote.
+				l.stageType(e.Ty, "Meta.Code", where)
+				if repr == nil {
+					l.errorf("%s: stage code constant is nil", where)
+				}
+			default:
+				l.errorf("%s: invalid stage constant %T", where, e.Repr)
+			}
+		}
 	case *NativeCall:
 		n := l.natives[e.Name]
 		if n == nil {

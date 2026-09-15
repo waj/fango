@@ -2,6 +2,7 @@ package eval
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/waj/fango/internal/core"
@@ -131,7 +132,7 @@ func startMachine(ctx context.Context, p *machineir.Prog, entry string, args []V
 	return s, nil
 }
 
-func startMachineClosure(ctx context.Context, p *machineir.Prog, closure *machineClosure, arg Value, callEvidence map[int]*evidence, env *Env, ioctx *IOContext) (*MachineSession, error) {
+func (in *interp) startMachineClosure(p *machineir.Prog, closure *machineClosure, arg Value, callEvidence map[int]*evidence) (*MachineSession, error) {
 	if closure == nil || closure.desc == nil {
 		return nil, fmt.Errorf("eval: invalid Machine callback")
 	}
@@ -144,25 +145,40 @@ func startMachineClosure(ctx context.Context, p *machineir.Prog, closure *machin
 		evidence[ev.Unique] = value
 	}
 	args := append(append([]Value(nil), closure.values...), arg)
-	return startMachine(ctx, p, closure.desc.Worker, args, evidence, env, ioctx, false)
+	session, err := startMachine(in.ctx, p, closure.desc.Worker, args, evidence, in.env, in.ioctx, false)
+	if err != nil {
+		return nil, err
+	}
+	// Share execution policy and accounting with the caller. In particular,
+	// stage-safe traversal cannot acquire a runtime interpreter.
+	session.interp = in
+	return session, nil
 }
 
 // Run advances until the next suspension, normal completion, or exit.
-func (s *MachineSession) Run() (MachineEvent, error) {
+func (s *MachineSession) Run() (event MachineEvent, err error) {
 	if s.finished {
 		return MachineEvent{}, fmt.Errorf("eval: machine session already completed")
 	}
 	if s.waiting != nil {
 		return MachineEvent{}, fmt.Errorf("eval: suspended machine must be resumed")
 	}
+	// Production runs with its lexical evidence. Restore the caller's evidence
+	// after each yield or failure, including when both share an interpreter.
+	savedEvidence := s.interp.evidence
+	defer func() {
+		if err != nil && !s.finished {
+			closeExit, closeErr := s.Abandon()
+			event.Exit = suppress(event.Exit, closeExit)
+			event.Done = true
+			err = errors.Join(err, closeErr)
+		}
+		s.interp.evidence = savedEvidence
+	}()
 	for len(s.frames) != 0 {
 		s.stats.Steps++
-		if s.stats.Steps%pollEvery == 0 {
-			select {
-			case <-s.interp.ctx.Done():
-				return MachineEvent{}, fmt.Errorf("interrupted")
-			default:
-			}
+		if err := s.interp.tick(); err != nil {
+			return MachineEvent{}, err
 		}
 		frame := s.frames[len(s.frames)-1]
 		s.interp.evidence = frame.evidence
@@ -527,6 +543,7 @@ func (s *MachineSession) Run() (MachineEvent, error) {
 			}
 			bind, stateName, returnHandler := frame.returnBind, frame.returnState, frame.returnHandler
 			clearMachineFrame(frame)
+			s.frames[len(s.frames)-1] = nil
 			s.frames = s.frames[:len(s.frames)-1]
 			if returnHandler {
 				if len(s.handlers) == 0 {
@@ -535,7 +552,11 @@ func (s *MachineSession) Run() (MachineEvent, error) {
 				s.handlers = s.handlers[:len(s.handlers)-1]
 			}
 			if len(s.frames) == 0 {
-				s.finished = true
+				exit, err := s.unwind(nil)
+				s.clear()
+				if exit != nil || err != nil {
+					return MachineEvent{Done: true, Exit: exit}, err
+				}
 				return MachineEvent{Done: true, Value: value}, nil
 			}
 			s.frames[len(s.frames)-1].vars[bind] = value
@@ -589,52 +610,35 @@ func (s *MachineSession) Abandon() (*ExitRequest, error) {
 	if s.finished {
 		return nil, fmt.Errorf("eval: machine session already completed")
 	}
-	var exit *ExitRequest
-	var firstErr error
-	for len(s.cleanups) != 0 {
-		next, err := s.popCleanup(exit)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		exit = next
-	}
-	for _, frame := range s.frames {
+	exit, err := s.unwind(nil)
+	s.clear()
+	return exit, err
+}
+
+// clear drops live execution state on every terminal path. Program
+// descriptors and high-water statistics remain available for diagnostics.
+func (s *MachineSession) clear() {
+	for i, frame := range s.frames {
 		clearMachineFrame(frame)
+		s.frames[i] = nil
 	}
 	s.frames = nil
 	for i := range s.states {
 		s.states[i] = nil
 	}
 	s.states = nil
+	s.cleanups = nil
 	s.handlers = nil
 	s.waiting = nil
 	s.finished = true
-	return exit, firstErr
 }
 
 func (s *MachineSession) Stats() MachineStats { return s.stats }
 
 func (s *MachineSession) finishExit(exit *ExitRequest) (MachineEvent, error) {
-	var err error
-	exit, err = s.unwind(exit)
-	if err != nil {
-		return MachineEvent{}, err
-	}
-	for _, frame := range s.frames {
-		clearMachineFrame(frame)
-	}
-	s.frames = nil
-	for i := range s.states {
-		s.states[i] = nil
-	}
-	s.states = nil
-	s.handlers = nil
-	s.waiting = nil
-	s.finished = true
-	return MachineEvent{Done: true, Exit: exit}, nil
+	exit, err := s.unwind(exit)
+	s.clear()
+	return MachineEvent{Done: true, Exit: exit}, err
 }
 
 // catchExit transfers an abort to its dynamically nearest Machine handler.
@@ -724,10 +728,7 @@ func (s *MachineSession) popCleanup(primary *ExitRequest) (*ExitRequest, error) 
 	s.cleanups[i] = nil
 	s.cleanups = s.cleanups[:i]
 	secondary, err := cleanup()
-	if err != nil {
-		return nil, err
-	}
-	return suppress(primary, secondary), nil
+	return suppress(primary, secondary), err
 }
 
 func (s *MachineSession) unwind(primary *ExitRequest) (*ExitRequest, error) {
@@ -735,14 +736,15 @@ func (s *MachineSession) unwind(primary *ExitRequest) (*ExitRequest, error) {
 }
 
 func (s *MachineSession) unwindTo(primary *ExitRequest, depth int) (*ExitRequest, error) {
-	var err error
+	var errs []error
 	for len(s.cleanups) > depth {
+		var err error
 		primary, err = s.popCleanup(primary)
 		if err != nil {
-			return nil, err
+			errs = append(errs, err)
 		}
 	}
-	return primary, nil
+	return primary, errors.Join(errs...)
 }
 
 func clearMachineFrame(frame *machineFrame) {

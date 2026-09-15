@@ -27,16 +27,8 @@ func (in *interp) evalTailLoop(def *core.Def, vars map[string]Value) (Value, err
 		// A fully-trivial jump (`f x = f x`) evaluates almost nothing, so
 		// count an explicit step per iteration to keep the every-N
 		// cancellation poll firing.
-		in.steps++
-		if in.steps%pollEvery == 0 {
-			select {
-			case <-in.ctx.Done():
-				return nil, fmt.Errorf("interrupted")
-			default:
-			}
-			if in.budget > 0 && in.steps > in.budget {
-				return nil, ErrStepBudget
-			}
+		if err := in.tick(); err != nil {
+			return nil, err
 		}
 		v, err := in.tailStep(def, def.Body, &Frame{vars: vars})
 		if err != nil {

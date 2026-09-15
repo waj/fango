@@ -108,6 +108,37 @@ Generator.withIterator produce (\iterator ->
 	}
 }
 
+func TestOwnedGeneratorStagesAndRollsBackInREPL(t *testing.T) {
+	var out strings.Builder
+	Run(strings.NewReader(`import Meta
+early : Bool
+early = $(Meta.lift True)
+import Generator
+import Iterator
+produce : () ->{Generator.Generator Int} ()
+produce() =
+    Generator.yield 10
+    Generator.yield 20
+total : () -> Int
+total() = Generator.withIterator produce (\cursor -> Iterator.fold (\element acc -> element + acc) 0 cursor)
+bad : String
+bad = $(Meta.lift (total()))
+:type bad
+answer : Int
+answer = $(Meta.lift (total()))
+answer
+$(Meta.lift (total()))
+:quit
+`), &out)
+	got := out.String()
+	if strings.Contains(got, "INTERNAL") || strings.Contains(got, "runtime error") {
+		t.Fatalf("staged traversal failed:\n%s", got)
+	}
+	if !strings.Contains(got, "I don't know a value named `bad`.") || strings.Count(got, "30 : Int") < 2 {
+		t.Fatalf("failed expansion leaked a declaration or prevented the next traversal:\n%s", got)
+	}
+}
+
 func TestClassInstanceTransactions(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader(`class Twice a

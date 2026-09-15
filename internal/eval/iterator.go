@@ -26,6 +26,9 @@ func StartMachineIterator(ctx context.Context, p *machineir.Prog, entry string, 
 }
 
 func (it *MachineIteratorSession) Next() (value Value, yielded bool, exit *ExitRequest, err error) {
+	if it == nil || it.session == nil {
+		return nil, false, nil, fmt.Errorf("eval: iterator has no machine")
+	}
 	if it.done {
 		return nil, false, nil, nil
 	}
@@ -37,7 +40,8 @@ func (it *MachineIteratorSession) Next() (value Value, yielded bool, exit *ExitR
 		event, err = it.session.Run()
 	}
 	if err != nil {
-		return nil, false, nil, err
+		it.done = true
+		return nil, false, event.Exit, err
 	}
 	if !event.Done {
 		return event.Request, true, nil, nil
@@ -76,7 +80,7 @@ func (in *interp) evalIteratorScope(scope *core.IteratorScope, fr *Frame) (Value
 	if in.env.machine == nil {
 		return nil, fmt.Errorf("eval: iterator owner has no installed Machine lowering")
 	}
-	machineSession, err := startMachineClosure(in.ctx, in.env.machine, producer, struct{}{}, in.evidence, in.env, in.ioctx)
+	machineSession, err := in.startMachineClosure(in.env.machine, producer, struct{}{}, in.evidence)
 	if err != nil {
 		return nil, err
 	}

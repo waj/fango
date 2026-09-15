@@ -286,6 +286,9 @@ The experimental `Generator`/`Iterator` path currently supports producers yieldi
 from their own bodies and the `forEach`/`fold` terminal intrinsics. It is not the
 proposed Stream API: exclusive cursor borrowing and compositional Machine lowering
 remain work. Experimental APIs may be replaced without compatibility scaffolding.
+Stage-safe traversal uses selective Machine lowering and shares the caller's
+native restrictions and evaluation budget; the Stream replacement must preserve
+that boundary and its rollback checks.
 The detailed roadmap owns cleanup-failure observation as a prerequisite for stable
 reporting, and separates deferred operation polymorphism, builtin IO interception,
 named instances, non-tail resumption, escaping owners, and shared mutable state

@@ -1,0 +1,11 @@
+import Generator
+import Iterator
+import Meta exposing (Code)
+
+spin : () ->{Generator.Generator Int} ()
+spin() = spin()
+
+count : () -> Int
+count() = Generator.withIterator spin (\cursor -> Iterator.fold (\element acc -> element + acc) 0 cursor)
+
+main() = print $(Meta.lift (count()))

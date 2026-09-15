@@ -1,0 +1,27 @@
+import Generator
+import Iterator
+import Meta exposing (Code)
+
+produce : () ->{Generator.Generator Int} ()
+produce() =
+    Generator.yield 10
+    Generator.yield 20
+    Generator.yield 30
+
+total : () -> Int
+total() = Generator.withIterator produce (\cursor -> Iterator.fold (\element acc -> element + acc) 0 cursor)
+
+-- A producer factory may already be memoized by an earlier expansion. Its
+-- next traversal must use the lowering installed for the current operand.
+first : Code
+first = quote $(Meta.lift (total()))
+
+answer : Code
+answer = quote ($(first) + $(Meta.lift (total())))
+
+seven : Int
+seven = 7
+
+main() =
+    print $(answer)
+    print $(Meta.lift (Generator.withIterator (\_ -> Generator.yield seven) (\cursor -> Iterator.fold (\element acc -> element + acc) 0 cursor)))
