@@ -1,12 +1,22 @@
 package fangort
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+// YieldOwner is a lexical suspension destination. Its nonzero size ensures
+// separately allocated live owners have distinct pointer identities.
+type YieldOwner struct{ marker byte }
+
+func NewYieldOwner() *YieldOwner { return &YieldOwner{marker: 1} }
 
 // MachineIterator is the private pull owner used by E8's scoped iterator
 // lowering. It owns exactly one machine. Source programs can alias the opaque
 // cursor within its scope; checked capture and access contracts govern those
 // aliases before the private runtime representation is selected.
 type MachineIterator struct {
+	owner   *YieldOwner
 	machine *Machine
 	started bool
 	done    bool
@@ -14,6 +24,10 @@ type MachineIterator struct {
 
 func StartMachineIterator(entry MachineFrame) *MachineIterator {
 	return &MachineIterator{machine: StartMachine(entry)}
+}
+
+func StartOwnedMachineIterator(owner *YieldOwner, entry MachineFrame) *MachineIterator {
+	return &MachineIterator{owner: owner, machine: StartMachine(entry)}
 }
 
 // Next advances to one suspension. A normal machine return ends iteration;
@@ -38,6 +52,10 @@ func (it *MachineIterator) Next() (value any, yielded bool, exit *ExitRequest, e
 		return nil, false, event.Exit, err
 	}
 	if !event.Done {
+		if event.Owner != it.owner {
+			exit, closeErr := it.Close()
+			return nil, false, exit, errors.Join(fmt.Errorf("fangort: suspension reached a different cursor owner"), closeErr)
+		}
 		return event.Request, true, nil, nil
 	}
 	it.done = true

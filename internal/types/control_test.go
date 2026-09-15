@@ -2,14 +2,14 @@ package types
 
 import "testing"
 
-func TestGeneratorEffectSelectsMachineWithoutRuntimeEvidence(t *testing.T) {
+func TestGeneratorEffectSelectsMachineWithOwnerEvidence(t *testing.T) {
 	label := EffLabel{Unique: 2, Name: GeneratorEffectName, Suspension: true}
 	fn := &TFun{Arg: &TCon{Unique: 1, Name: "String"}, Eff: Row{Labels: []EffLabel{label}}, Ret: &TCon{Unique: 3, Name: "()"}}
 	if got := FunctionControl(fn); got.Transport != Machine {
 		t.Fatalf("Generator function control = %+v, want Machine", got)
 	}
-	if RuntimeEvidenceEffect(label) {
-		t.Fatal("Generator suspension effect must not acquire runtime evidence")
+	if !RuntimeEvidenceEffect(label) {
+		t.Fatal("Generator suspension effect must carry lexical owner evidence")
 	}
 	ordinary := label
 	ordinary.Suspension = false

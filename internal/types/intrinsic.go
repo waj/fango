@@ -17,8 +17,8 @@ const (
 	GeneratorWithIteratorName = "Generator.withIterator"
 
 	// GeneratorEffectName is the handled-at-an-owner-boundary suspension
-	// effect. It has no runtime evidence record: Generator.yield lowers to a
-	// semantic-Core Suspend and selects Machine transport instead.
+	// effect. Its evidence is a lexical owner token; Generator.yield lowers
+	// to a semantic-Core Suspend carrying that evidence.
 	GeneratorEffectName = "Generator.Generator"
 	GeneratorYieldName  = "Generator.yield"
 	IteratorTypeName    = "Iterator.Iterator"
@@ -27,10 +27,10 @@ const (
 )
 
 // RuntimeEvidenceEffect reports whether an effect row label needs an explicit
-// runtime evidence parameter. IO is ambient and Generator is represented by
-// Machine transport itself.
+// runtime evidence parameter. IO is ambient; suspension effects carry lexical
+// owner tokens in the same evidence slots as ordinary handler interpretations.
 func RuntimeEvidenceEffect(label EffLabel) bool {
-	return SurfaceName(label.Name) != "IO" && !label.Suspension
+	return SurfaceName(label.Name) != "IO"
 }
 
 // CursorAccess is proof metadata for a cursor advancement. Zero is deliberately

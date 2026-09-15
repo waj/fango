@@ -995,7 +995,8 @@ inspects their runtime state.
 `IteratorScope` is the typed Core owner boundary and is produced only as the
 body of the resolved `Generator.withIterator` intrinsic. It stores the
 Machine-transport producer callback, the consumer callback, a fresh `ScopeID`,
-and the opaque `Iterator.Iterator` cursor type. Its visible control is the consumer's
+the Yield evidence it supplies to production, and the opaque `Iterator.Iterator`
+cursor type. Its visible control is the consumer's
 residual control: the producer's latent Machine transport terminates at the
 owner instead of infecting the caller. Selective lowering roots Machine
 lambdas found inside Direct or Exit definitions as typed frame factories while
@@ -1012,13 +1013,26 @@ Machine locals snapshots only the locals its body references, so pruning or
 clearing the frame cannot invalidate the closure or retain unrelated locals.
 
 The reserved `Generator.Generator` effect is the typed marker for this private
-suspension path. It selects Machine transport but has no runtime evidence
-parameter: a canonical `Generator.yield` operation elaborates directly to
-`Suspend`, whose request is the yielded element and whose resumed result is
-Unit. The bundled declaration and owning runner remain the activation boundary;
+suspension path. It selects Machine transport and carries a lexical owner token
+in an ordinary hidden evidence slot. Each cursor scope allocates a fresh token
+and supplies it when invoking its producer. Workers, callback factories, and
+captured evidence preserve that identity across suspension; no ambient current
+cursor determines where a yield belongs. A canonical `Generator.yield` operation
+elaborates directly to `Suspend`, whose owner evidence determines its destination,
+whose request is the yielded element, and whose resumed result is Unit.
+The bundled declaration and owning runner remain the activation boundary;
 an unrelated effect or operation spelling does not acquire this lowering.
 Source checking rejects ordinary handlers for this compiler-owned effect, and
 Core lint independently rejects such handler nodes.
+
+Core verifies source-yield evidence availability, scope ownership, and element
+types. Capture contracts retain Yield identities through callbacks and evidence
+substitution. Machine IR preserves the owner explicitly on each suspension and
+independently checks its evidence binding, capture metadata, and request type.
+Both dispatchers return the owner with the suspended request. The current private
+pull driver accepts only its own owner's requests; foreign cursor transfers
+are not implemented. Host-driven Machine fixtures without a declared suspension
+effect may still use ownerless requests with arbitrary resumed types.
 
 Cursor ownership is part of the inferred capture-flow contract. `Iterator` is
 an opaque declared resource; the owner supplies its fresh capability to the

@@ -2,15 +2,18 @@ package eval
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/waj/fango/internal/core"
 	machineir "github.com/waj/fango/internal/machine"
+	"github.com/waj/fango/runtime/fangort"
 )
 
 // MachineIteratorSession owns one interpreter-side producer traversal. Source
 // cursor lifetimes and access are checked by capture contracts before execution.
 type MachineIteratorSession struct {
+	owner   *fangort.YieldOwner
 	session *MachineSession
 	started bool
 	done    bool
@@ -43,6 +46,10 @@ func (it *MachineIteratorSession) Next() (value Value, yielded bool, exit *ExitR
 		return nil, false, event.Exit, err
 	}
 	if !event.Done {
+		if event.Owner != it.owner {
+			exit, closeErr := it.Close()
+			return nil, false, exit, errors.Join(fmt.Errorf("eval: suspension reached a different cursor owner"), closeErr)
+		}
 		return event.Request, true, nil, nil
 	}
 	it.done = true
@@ -79,11 +86,17 @@ func (in *interp) evalIteratorScope(scope *core.IteratorScope, fr *Frame) (Value
 	if in.env.machine == nil {
 		return nil, fmt.Errorf("eval: iterator owner has no installed Machine lowering")
 	}
-	machineSession, err := in.startMachineClosure(in.env.machine, producer.machine, struct{}{}, in.evidence)
+	callEvidence := cloneEvidence(in.evidence)
+	var owner *fangort.YieldOwner
+	if scope.Yield.Unique != 0 {
+		owner = fangort.NewYieldOwner()
+		callEvidence[scope.Yield.Unique] = &evidence{yieldOwner: owner}
+	}
+	machineSession, err := in.startMachineClosure(in.env.machine, producer.machine, struct{}{}, callEvidence)
 	if err != nil {
 		return nil, err
 	}
-	iteratorSession := &MachineIteratorSession{session: machineSession}
+	iteratorSession := &MachineIteratorSession{owner: owner, session: machineSession}
 
 	consumerValue, consumerErr := in.eval(scope.Consumer, fr)
 	var result Value

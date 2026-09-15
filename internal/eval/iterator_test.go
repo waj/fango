@@ -9,6 +9,7 @@ import (
 	"github.com/waj/fango/internal/core"
 	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/types"
+	"github.com/waj/fango/runtime/fangort"
 )
 
 func TestMachineIteratorSessionClosesSuspendedCleanupScope(t *testing.T) {
@@ -49,6 +50,11 @@ func TestIteratorScopeRunsThroughInstalledMachineLowering(t *testing.T) {
 	b := types.NewBuiltins(sup)
 	iterator := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int}}
 	label := types.EffLabel{Unique: sup.NextUnique(), Name: types.GeneratorEffectName, Args: []types.Type{b.Int}, Suspension: true}
+	ownerScope := sup.FreshScope()
+	yieldOwner := core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Captures: types.ScopeCapture(ownerScope), Control: types.Control{Transport: types.Machine}}
+	yieldParam := yieldOwner
+	yieldParam.Captures = types.VarCapture(sup.FreshCapture())
+	yieldEffect := &types.EffectInfo{Unique: label.Unique, Name: label.Name, Params: []*types.TVar{sup.FreshRigid(types.General)}, Suspension: true}
 	producerTy := &types.TFun{Arg: b.Unit, Eff: types.Row{Labels: []types.EffLabel{label}}, Ret: b.Unit}
 	consumerTy := &types.TFun{Arg: iterator, Ret: b.Unit}
 	actionTy := &types.TFun{Arg: b.Int, Ret: b.Unit}
@@ -56,7 +62,7 @@ func TestIteratorScopeRunsThroughInstalledMachineLowering(t *testing.T) {
 	ownerTy := &types.TFun{Arg: producerTy, Ret: &types.TFun{Arg: consumerTy, Ret: b.Unit}}
 	owner := core.Def{Name: types.GeneratorWithIteratorName, Owner: "Main", Type: ownerTy,
 		Params: []string{"producer", "consumer"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()},
-		Body: &core.IteratorScope{Scope: sup.FreshScope(),
+		Body: &core.IteratorScope{Scope: ownerScope, Yield: yieldOwner,
 			Producer: &core.VarRef{Name: "producer", Local: true, Ty: producerTy},
 			Consumer: &core.VarRef{Name: "consumer", Local: true, Ty: consumerTy},
 			CursorTy: iterator, Ty: b.Unit,
@@ -67,9 +73,9 @@ func TestIteratorScopeRunsThroughInstalledMachineLowering(t *testing.T) {
 			Action: &core.VarRef{Name: "action", Local: true, Ty: actionTy}, Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: iterator},
 			Element: b.Int, Ty: b.Unit,
 		}}
-	producer := &core.Lambda{Param: "_", ParamCapture: sup.FreshCapture(), Ty: producerTy,
-		Body: &core.Seq{First: &core.Suspend{Request: &core.VarRef{Name: "captured", Local: true, Ty: b.Int}, Ty: b.Unit},
-			Then: &core.Suspend{Request: &core.IntLit{Val: 8, Ty: b.Int}, Ty: b.Unit}, Ty: b.Unit}}
+	producer := &core.Lambda{Param: "_", ParamCapture: sup.FreshCapture(), Ty: producerTy, EffectParams: []core.EffectInstance{yieldParam},
+		Body: &core.Seq{First: &core.Suspend{Owner: yieldParam, Request: &core.VarRef{Name: "captured", Local: true, Ty: b.Int}, Ty: b.Unit},
+			Then: &core.Suspend{Owner: yieldParam, Request: &core.IntLit{Val: 8, Ty: b.Int}, Ty: b.Unit}, Ty: b.Unit}}
 	action := &core.Lambda{Param: "value", ParamCapture: sup.FreshCapture(), Ty: actionTy, Body: &core.UnitLit{Ty: b.Unit}}
 	consumer := &core.Lambda{Param: "cursor", ParamCapture: sup.FreshCapture(), Ty: consumerTy,
 		Body: &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: types.IteratorForEachName, Ty: forEachTy},
@@ -79,6 +85,7 @@ func TestIteratorScopeRunsThroughInstalledMachineLowering(t *testing.T) {
 	main := core.Def{Name: "Main.main", Owner: "Main", Type: b.Unit,
 		Body: &core.Let{Name: "captured", Rhs: &core.IntLit{Val: 7, Ty: b.Int}, Body: call, Ty: b.Unit}}
 	p := &core.Prog{Entry: main.Name, Intrinsics: map[string]bool{types.GeneratorWithIteratorName: true, types.IteratorForEachName: true}, Defs: []core.Def{owner, forEach, main}}
+	p.Effects = append(p.Effects, yieldEffect)
 	if errs := core.InferCaptures(p, b); len(errs) != 0 {
 		t.Fatalf("capture inference: %v", errs)
 	}
@@ -97,6 +104,27 @@ func TestIteratorScopeRunsThroughInstalledMachineLowering(t *testing.T) {
 	}
 	if _, ok := value.(struct{}); !ok {
 		t.Fatalf("iterator scope result = %#v, want Unit", value)
+	}
+	left, right := fangort.NewYieldOwner(), fangort.NewYieldOwner()
+	for _, token := range []*fangort.YieldOwner{left, right} {
+		session, err := startMachine(context.Background(), mp, mp.Closures[0].Worker, []Value{int64(7), struct{}{}},
+			map[int]*evidence{label.Unique: {yieldOwner: token}}, env, NewIOContext(strings.NewReader(""), io.Discard), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ambient := &evidence{yieldOwner: fangort.NewYieldOwner()}
+		session.interp.evidence = map[int]*evidence{label.Unique: ambient}
+		event, err := session.Run()
+		if err != nil || event.Owner != token || event.Request != int64(7) || session.interp.evidence[label.Unique] != ambient {
+			t.Fatalf("yield lost lexical evidence or changed caller evidence: %+v %v", event, err)
+		}
+		event, err = session.Resume(struct{}{})
+		if err != nil || event.Owner != token || event.Request != int64(8) {
+			t.Fatalf("resumption lost lexical owner: %+v %v", event, err)
+		}
+		if _, err := session.Abandon(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

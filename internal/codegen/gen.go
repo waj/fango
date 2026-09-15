@@ -1898,8 +1898,19 @@ func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
 	consumerResult := name("Result")
 	closeExit := name("CloseExit")
 
-	producerFrame := callExpr(g.machineExpr(e.Producer), g.unitValue())
+	var ownerDecl []goast.Stmt
+	var producerArgs []goast.Expr
+	owner := name("Yield")
+	if e.Yield.Unique != 0 {
+		ownerDecl = append(ownerDecl, varDeclStmt(owner, &goast.StarExpr{X: selector("fangort", "YieldOwner")}, callExpr(selector("fangort", "NewYieldOwner"))))
+		producerArgs = append(producerArgs, ident(owner))
+	}
+	producerArgs = append(producerArgs, g.unitValue())
+	producerFrame := callExpr(g.machineExpr(e.Producer), producerArgs...)
 	start := callExpr(selector("fangort", "StartMachineIterator"), producerFrame)
+	if e.Yield.Unique != 0 {
+		start = callExpr(selector("fangort", "StartOwnedMachineIterator"), ident(owner), producerFrame)
+	}
 	consume := callExpr(g.expr(e.Consumer, 0), ident(iterator))
 	resultType := g.goType(e.Ty)
 	consumerExits := overall == types.Exit
@@ -1912,6 +1923,7 @@ func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
 		varDeclStmt(closeExit, &goast.StarExpr{X: selector("fangort", "ExitRequest")},
 			callExpr(selector("fangort", "CloseMachineIterator"), ident(iterator))),
 	}
+	stmts = append(ownerDecl, stmts...)
 
 	var iifeResult goast.Expr = g.goType(e.Ty)
 	if consumerExits {
@@ -2263,6 +2275,10 @@ func (g *gen) effectType(e core.EffectInstance) goast.Expr {
 }
 
 func (g *gen) effectTypeMode(e core.EffectInstance, mode types.Transport) goast.Expr {
+	if effect := g.effects[e.Unique]; effect != nil && effect.Suspension {
+		g.usesFangort = true
+		return &goast.StarExpr{X: selector("fangort", "YieldOwner")}
+	}
 	name := "Eff_" + linkName(e.Name)
 	switch e.Control.Resolve(mode) {
 	case types.Exit:
@@ -2289,7 +2305,7 @@ func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want
 		return value
 	}
 	eff := g.effects[ev.Unique]
-	if eff == nil {
+	if eff == nil || eff.Suspension {
 		return value
 	}
 	if want == types.Machine {
@@ -2385,7 +2401,7 @@ func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want
 func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 	var out []goast.Decl
 	for _, eff := range effects {
-		if types.SurfaceName(eff.Name) == "IO" {
+		if types.SurfaceName(eff.Name) == "IO" || eff.Suspension {
 			continue
 		}
 		modes := []types.Transport{types.Direct, types.Exit}

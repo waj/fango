@@ -146,6 +146,23 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 		case *Suspend:
 			checkBind(term.Bind)
 			checkExpr(term.Request, "suspension request", false)
+			if term.Owner.Unique != 0 && !seenEvidence[term.Owner.Unique] {
+				errs = append(errs, fmt.Errorf("%s: suspension has unavailable owner evidence", blockWhere))
+			}
+			for _, ev := range w.EffectParams {
+				if ev.Name == types.GeneratorEffectName && term.Owner.Unique == 0 {
+					errs = append(errs, fmt.Errorf("%s: suspension lacks lexical owner evidence", blockWhere))
+				}
+				if ev.Unique == term.Owner.Unique && (!types.EqualCaptures(ev.Captures, term.Owner.Captures) || ev.Name != term.Owner.Name || ev.Control != term.Owner.Control) {
+					errs = append(errs, fmt.Errorf("%s: suspension owner evidence is stale", blockWhere))
+				}
+				if ev.Unique == term.Owner.Unique && (len(ev.Args) != 1 || len(term.Owner.Args) != 1 || !types.Equal(ev.Args[0], term.Owner.Args[0])) {
+					errs = append(errs, fmt.Errorf("%s: suspension owner type arguments are stale", blockWhere))
+				}
+			}
+			if term.Owner.Unique != 0 && (term.Owner.Control.Transport != types.Machine || len(term.Owner.Args) != 1 || term.Request == nil || !types.Equal(term.Owner.Args[0], term.Request.Type())) {
+				errs = append(errs, fmt.Errorf("%s: suspension owner/request type mismatch", blockWhere))
+			}
 		case *Call:
 			checkBind(term.Bind)
 			for i, arg := range term.Args {

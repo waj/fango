@@ -315,6 +315,13 @@ func withIteratorDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 	consumer := args[1].(*types.TFun)
 	params := []string{"_producer", "_consumer"}
 	paramCaptures := []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture()}
+	scope := ck.Sup.FreshScope()
+	var yield core.EffectInstance
+	for _, label := range producer.Eff.Labels {
+		if label.Suspension {
+			yield = core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Captures: types.ScopeCapture(scope), Control: types.Control{Transport: types.Machine}}
+		}
+	}
 	return core.Def{
 		Name:          name,
 		Type:          ty,
@@ -323,7 +330,8 @@ func withIteratorDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 		ParamCaptures: paramCaptures,
 		Control:       core.ArrowControl(ty, len(params)),
 		Body: &core.IteratorScope{
-			Scope:    ck.Sup.FreshScope(),
+			Yield:    yield,
+			Scope:    scope,
 			Producer: &core.VarRef{Name: params[0], Local: true, Ty: producer},
 			Consumer: &core.VarRef{Name: params[1], Local: true, Ty: consumer},
 			CursorTy: consumer.Arg,
@@ -442,6 +450,9 @@ func executingEffects(t types.Type, arity int) []core.EffectInstance {
 			control := types.Control{Polymorphic: true}
 			if l.Abort {
 				control = types.Control{Transport: types.Exit}
+			}
+			if l.Suspension {
+				control = types.Control{Transport: types.Machine}
 			}
 			out = append(out, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Control: control})
 			seen[l.Unique] = true

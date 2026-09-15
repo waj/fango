@@ -281,6 +281,7 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		// E7's compiler-only fixtures resume with scalar values. E8 attaches
 		// ownership before capture-capable suspension results reach source.
 		r := a.expr(e.Request, env, evidence)
+		r.uses = types.UnionCaptures(r.uses, e.Owner.Captures, captureEvidence(evidence, e.Owner.Unique))
 		r.value = types.CaptureSet{}
 		return r
 	case *IteratorScope:

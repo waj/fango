@@ -6,6 +6,7 @@ import (
 )
 
 type iteratorFixtureFrame struct {
+	owner     *YieldOwner
 	pc        uint8
 	next      int
 	limit     int
@@ -29,10 +30,41 @@ func (f *iteratorFixtureFrame) Step(m *Machine) MachineStep {
 	value := f.next
 	f.next++
 	f.pc = 1
-	return MachineStep{Kind: MachineSuspend, Request: value}
+	return MachineStep{Kind: MachineSuspend, Owner: f.owner, Request: value}
 }
 
-func (f *iteratorFixtureFrame) Clear() { f.cleanup = nil }
+func (f *iteratorFixtureFrame) Clear() { f.cleanup = nil; f.owner = nil }
+
+func TestOwnedIteratorKeepsLexicalSuspensionIdentity(t *testing.T) {
+	left, right := NewYieldOwner(), NewYieldOwner()
+	if left == right {
+		t.Fatal("fresh owners share an identity")
+	}
+	closed := 0
+	frame := &iteratorFixtureFrame{owner: left, limit: 3, cleanup: &closed}
+	machine := StartMachine(frame)
+	event, err := machine.Run()
+	if err != nil || event.Owner != left || event.Request != 0 {
+		t.Fatalf("suspension lost lexical owner: %+v %v", event, err)
+	}
+	event, err = machine.Resume(UnitValue)
+	if err != nil || event.Owner != left || event.Request != 1 {
+		t.Fatalf("resumed suspension changed owner: %+v %v", event, err)
+	}
+	machine.Abandon()
+	if frame.owner != nil || closed != 1 {
+		t.Fatal("completion retained owner or skipped cleanup")
+	}
+	// Until cursor transfer transitions are present, a foreign suspension
+	// cannot be mistaken for an element of this cursor.
+	it := StartOwnedMachineIterator(right, &iteratorFixtureFrame{owner: left, limit: 3, cleanup: &closed})
+	if _, yielded, _, err := it.Next(); err == nil || yielded || closed != 2 {
+		t.Fatalf("foreign owner accepted or not closed: yielded=%v, closed=%d, err=%v", yielded, closed, err)
+	}
+	if _, yielded, exit, err := it.Next(); err != nil || yielded || exit != nil {
+		t.Fatal("failed cursor did not remain exhausted")
+	}
+}
 
 func TestMachineIteratorPullsAndClosesEarly(t *testing.T) {
 	closed := 0

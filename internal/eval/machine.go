@@ -16,6 +16,7 @@ import (
 // completed nil/Unit-like value from suspension. This protocol is not exposed
 // to Fango source; E8 supplies the ownership contract for source consumers.
 type MachineEvent struct {
+	Owner   *fangort.YieldOwner
 	Request Value
 	Done    bool
 	Value   Value
@@ -286,6 +287,14 @@ func (s *MachineSession) Run() (event MachineEvent, err error) {
 				}
 			}
 		case *machineir.Suspend:
+			var owner *fangort.YieldOwner
+			if term.Owner.Unique != 0 {
+				ev := frame.evidence[term.Owner.Unique]
+				if ev == nil || ev.yieldOwner == nil {
+					return MachineEvent{}, fmt.Errorf("eval: suspension has no lexical owner")
+				}
+				owner = ev.yieldOwner
+			}
 			request, err := eval(term.Request)
 			if err != nil {
 				return MachineEvent{}, err
@@ -302,7 +311,7 @@ func (s *MachineSession) Run() (event MachineEvent, err error) {
 			s.prune(frame, block.LiveOut, term.Bind.Name)
 			bind := term.Bind
 			s.waiting = &bind
-			return MachineEvent{Request: request}, nil
+			return MachineEvent{Owner: owner, Request: request}, nil
 		case *machineir.Call:
 			callee := s.workers[term.Callee]
 			var closure *machineClosure

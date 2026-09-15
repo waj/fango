@@ -215,7 +215,7 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 			b.errorf("%s: suspension request itself requires Machine control", b.def.Name)
 			return next
 		}
-		return b.add(&Suspend{Request: e.Request, Bind: bind, Next: next})
+		return b.add(&Suspend{Owner: e.Owner, Request: e.Request, Bind: bind, Next: next})
 	case *core.ResumeTail:
 		if e.NextState != nil {
 			return b.add(&StateResume{Value: e.Value, NextState: e.NextState, Bind: bind, Next: next})

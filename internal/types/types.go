@@ -128,7 +128,7 @@ type EffLabel struct {
 	Name       string
 	Args       []Type
 	Abort      bool // every operation in this (uniform-discipline) effect aborts
-	Suspension bool // compiler-owned Machine suspension; no runtime evidence
+	Suspension bool // compiler-owned Machine suspension with lexical owner evidence
 }
 
 func (r Row) Empty() bool { return len(r.Labels) == 0 && r.Tail == nil }

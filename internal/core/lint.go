@@ -548,6 +548,24 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: suspension has no request", where)
 			return
 		}
+		if e.Owner.Unique != 0 {
+			l.effectInstance(e.Owner, where)
+			effect := l.effects[e.Owner.Unique]
+			if effect == nil || !effect.Suspension || effect.Name != e.Owner.Name || e.Owner.Control.Transport != types.Machine {
+				l.errorf("%s: suspension has invalid owner effect", where)
+			}
+			l.evidenceAvailable(e.Owner, where)
+			if len(e.Owner.Args) != 1 || !types.Equal(e.Owner.Args[0], e.Request.Type()) || l.unique(e.Ty) != l.b.Unit.Unique {
+				l.errorf("%s: owned yield request/result disagrees with owner type", where)
+			}
+		} else {
+			for _, effect := range l.effects {
+				if effect.Suspension {
+					l.errorf("%s: source suspension lacks lexical owner evidence", where)
+					break
+				}
+			}
+		}
 		if c := ExprControl(e.Request); c.Transport != types.Direct || c.Polymorphic {
 			l.errorf("%s: suspension request control %s is not direct", where, ControlName(c))
 		}
@@ -566,6 +584,15 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: iterator scope cursor typed %s, want `%s a`", where, types.Show(e.CursorTy), types.IteratorTypeName)
 		}
 		producer, ok := e.Producer.Type().(*types.TFun)
+		if e.Yield.Unique != 0 {
+			l.effectInstance(e.Yield, where)
+			if effect := l.effects[e.Yield.Unique]; effect == nil || !effect.Suspension || e.Yield.Control.Transport != types.Machine {
+				l.errorf("%s: iterator scope has invalid Yield evidence", where)
+			}
+			if cursor == nil || len(cursor.Args) != 1 || len(e.Yield.Args) != 1 || !types.Equal(cursor.Args[0], e.Yield.Args[0]) {
+				l.errorf("%s: iterator cursor element disagrees with Yield owner", where)
+			}
+		}
 		if !ok {
 			l.errorf("%s: iterator producer is not a function", where)
 		} else {
@@ -574,6 +601,11 @@ func (l *linter) expr(e Expr, where string) {
 			}
 			if types.FunctionControl(producer).Transport != types.Machine {
 				l.errorf("%s: iterator producer does not use Machine transport", where)
+			}
+			for _, label := range producer.Eff.Labels {
+				if label.Suspension && (e.Yield.Unique != label.Unique || e.Yield.Name != label.Name || len(e.Yield.Args) != 1 || len(label.Args) != 1 || !types.Equal(e.Yield.Args[0], label.Args[0]) || !types.EqualCaptures(e.Yield.Captures, types.ScopeCapture(e.Scope))) {
+					l.errorf("%s: iterator scope lacks matching lexical Yield ownership", where)
+				}
 			}
 		}
 		consumer, ok := e.Consumer.Type().(*types.TFun)

@@ -139,6 +139,9 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		}
 		return strings.Join(parts, " ") + " " + pr.Type(e.Ty) + ")"
 	case *Suspend:
+		if e.Owner.Unique != 0 {
+			return fmt.Sprintf("(suspend owner=%s %s %s)", dumpEffect(e.Owner, pr), pr.Type(e.Ty), dumpExpr(e.Request, pr))
+		}
 		return fmt.Sprintf("(suspend %s %s)", pr.Type(e.Ty), dumpExpr(e.Request, pr))
 	case *IteratorScope:
 		form := "iterator-scope"

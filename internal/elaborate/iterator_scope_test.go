@@ -33,6 +33,7 @@ func TestWithIteratorIntrinsicBuildsOwnedCoreBoundary(t *testing.T) {
 		t.Fatalf("boundary cursor/result = %s / %s", types.Show(boundary.CursorTy), types.Show(boundary.Type()))
 	}
 	p := &core.Prog{Defs: defs, Intrinsics: map[string]bool{types.GeneratorWithIteratorName: true}}
+	p.Effects = []*types.EffectInfo{{Unique: boundary.Yield.Unique, Name: boundary.Yield.Name, Params: []*types.TVar{elem}, Suspension: true}}
 	if errs := core.InferCaptures(p, b); len(errs) != 0 {
 		t.Fatalf("capture inference: %v", errs)
 	}

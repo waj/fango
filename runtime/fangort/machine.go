@@ -45,6 +45,7 @@ func (f *immediateMachineFrame) Step(*Machine) MachineStep {
 func (f *immediateMachineFrame) Clear() { f.run = nil }
 
 type MachineStep struct {
+	Owner   *YieldOwner
 	Kind    MachineStepKind
 	Frame   MachineFrame
 	Value   any
@@ -58,6 +59,7 @@ type MachineStep struct {
 func InvalidMachineStep(message string) MachineStep { panic(message) }
 
 type MachineEvent struct {
+	Owner   *YieldOwner
 	Request any
 	Done    bool
 	Value   any
@@ -170,7 +172,7 @@ func (m *Machine) Run() (event MachineEvent, err error) {
 			m.result = step.Value
 		case MachineSuspend:
 			m.waiting = true
-			return MachineEvent{Request: step.Request}, nil
+			return MachineEvent{Owner: step.Owner, Request: step.Request}, nil
 		case MachineExit:
 			if m.routeExit(step.Exit) {
 				continue

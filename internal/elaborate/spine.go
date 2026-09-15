@@ -156,7 +156,7 @@ func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args [
 	}
 	var body core.Expr
 	if op.Owner.Suspension && op.Name == types.GeneratorYieldName {
-		body = &core.Suspend{Request: coreArgs[0], Ty: ret}
+		body = &core.Suspend{Owner: el.effectInstance(op, rawTy), Request: coreArgs[0], Ty: ret}
 	} else if op.Abort {
 		inst := el.effectInstance(op, rawTy)
 		body = &core.ControlExit{Effect: inst, Op: op, Payload: coreArgs, Ty: ret}

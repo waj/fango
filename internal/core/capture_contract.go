@@ -126,10 +126,16 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 		n.Children = append(n.Children, b.tree(e.Tree))
 	case *Suspend:
 		n.Kind = "suspend"
+		if e.Owner.Unique != 0 {
+			effects([]EffectInstance{e.Owner})
+		}
 		children(e.Request)
 	case *IteratorScope:
 		n.Kind, n.Scope, n.Scoped = "iterator", e.Scope, true
 		n.TypeArgs = []types.Type{e.CursorTy}
+		if e.Yield.Unique != 0 {
+			effects([]EffectInstance{e.Yield})
+		}
 		children(e.Producer, e.Consumer)
 	case *IteratorForEach:
 		n.Kind, n.Access = "foreach", e.Access

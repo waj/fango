@@ -237,12 +237,12 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		value := &goast.TypeAssertExpr{X: callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("TakeResult")}), Type: g.goType(bind.Ty)}
 		return append([]goast.Stmt{assignStmt(machineLocalName(bind.Name), value)}, continueStmt(next)...)
 	}
-	step := func(kind string, key string, value goast.Expr) goast.Stmt {
+	step := func(kind string, key string, value goast.Expr, extra ...goast.Expr) goast.Stmt {
 		fields := []goast.Expr{&goast.KeyValueExpr{Key: ident("Kind"), Value: selector("fangort", kind)}}
 		if key != "" {
 			fields = append(fields, &goast.KeyValueExpr{Key: ident(key), Value: value})
 		}
-		return returnStmt(&goast.CompositeLit{Type: selector("fangort", "MachineStep"), Elts: fields})
+		return returnStmt(&goast.CompositeLit{Type: selector("fangort", "MachineStep"), Elts: append(fields, extra...)})
 	}
 	// A machine block may run a non-suspending Exit expression. Emit it with
 	// the existing Outcome ABI, then turn a failed outcome into an explicit
@@ -314,7 +314,11 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		return []goast.Stmt{&goast.SwitchStmt{Tag: ident(machineLocalName(term.Scrut)), Body: &goast.BlockStmt{List: clauses}}}, nil
 	case *machineir.Suspend:
 		stmts := append(save(), assignMachinePC(resumePC))
-		stmts = append(stmts, step("MachineSuspend", "Request", g.machineBoxedValue(term.Request)))
+		var owner goast.Expr = ident("nil")
+		if term.Owner.Unique != 0 {
+			owner = ident(machineEvidenceName(term.Owner.Unique))
+		}
+		stmts = append(stmts, step("MachineSuspend", "Request", g.machineBoxedValue(term.Request), &goast.KeyValueExpr{Key: ident("Owner"), Value: owner}))
 		return stmts, [][]goast.Stmt{resume(term.Bind, term.Next)}
 	case *machineir.Call:
 		args := make([]goast.Expr, 0, len(term.EvidenceArgs)+len(term.Args))

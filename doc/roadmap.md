@@ -284,8 +284,11 @@ outer handlers is checked. The remaining proposed sequence is API-first:
 
 The experimental `Generator`/`Iterator` path currently supports producers yielding
 from their own bodies and the `forEach`/`fold` terminal intrinsics. It is not the
-proposed Stream API: row-indexed cursors, raw advancement, lexical suspension
-routing, and compositional Machine lowering remain work. Terminal traversal now
+proposed Stream API: row-indexed cursors, raw advancement, suspension transfers
+between cursors, and compositional Machine lowering remain work. Yield now carries
+explicit lexical owner evidence through Core, Machine IR, and both backends;
+the dispatcher still needs cursor setup, advancement, and closure transitions.
+Terminal traversal now
 exports cursor lifetime and exclusive-advancement contracts through named helpers,
 aliases, stored callbacks, and modules. Experimental APIs may be replaced without
 compatibility scaffolding.

@@ -49,13 +49,14 @@ func (e flowEnv) clone() flowEnv {
 }
 
 type flowObject struct {
-	kind   string
-	code   *types.CaptureFlow
-	def    string
-	env    flowEnv
-	fields []flowValue
-	ctor   int
-	owner  int
+	kind        string
+	code        *types.CaptureFlow
+	def         string
+	env         flowEnv
+	fields      []flowValue
+	ctor        int
+	owner       int
+	yieldEffect int
 }
 type flowContext struct {
 	origin    source.Span
@@ -410,6 +411,14 @@ func flowEffects(n *types.CaptureFlow) map[int]bool {
 	var walk func(*types.CaptureFlow, map[int]bool)
 	walk = func(n *types.CaptureFlow, bound map[int]bool) {
 		if n == nil {
+			return
+		}
+		if n.Kind == "iterator" {
+			// The scope supplies Yield evidence when it starts production;
+			// constructing its callback arguments still uses outer evidence.
+			for _, child := range n.Children {
+				walk(child, bound)
+			}
 			return
 		}
 		if n.Kind == "lambda" || n.Kind == "handle" {
@@ -843,7 +852,11 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 	case "iterator":
 		producer, consumer := child(0), child(1)
 		owner := f.owner(n, env, ctx, scopes)
-		cursor := f.alloc(key+"/cursor", flowObject{kind: "cursor", owner: owner, fields: []flowValue{producer}})
+		var yieldEffect int
+		if len(n.Effects) != 0 {
+			yieldEffect = n.Effects[0]
+		}
+		cursor := f.alloc(key+"/cursor", flowObject{kind: "cursor", owner: owner, yieldEffect: yieldEffect, fields: []flowValue{producer}})
 		inside := append(slices.Clone(scopes), owner)
 		result = f.apply(consumer, []flowValue{{refs: []int{cursor}, caps: []int{owner}}}, env, key+"/consumer", inside)
 		f.escape(result, owner, "cursor scope result", "The returned value")
@@ -907,7 +920,11 @@ func (f *flowChecker) advance(cursor flowValue, env flowEnv, site string, scopes
 		// that suspension as an obligation on the caller driving the cursor.
 		saved, calls := f.synchronous, f.suspensionCalls
 		f.synchronous, f.suspensionCalls = nil, nil
-		f.apply(o.fields[0], []flowValue{{}}, env, site+"/advance", scopes)
+		producerEnv := env.clone()
+		if o.yieldEffect != 0 {
+			producerEnv.evidence[o.yieldEffect] = []int{owner}
+		}
+		f.apply(o.fields[0], []flowValue{{}}, producerEnv, site+"/advance", scopes)
 		f.synchronous, f.suspensionCalls = saved, calls
 		f.active[owner]--
 	}

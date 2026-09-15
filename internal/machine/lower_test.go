@@ -132,25 +132,31 @@ func TestLowerRootsMachineLambdaInsideDirectIteratorOwnerCall(t *testing.T) {
 	b := types.NewBuiltins(sup)
 	iterator := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int}}
 	label := types.EffLabel{Unique: sup.NextUnique(), Name: types.GeneratorEffectName, Args: []types.Type{b.Int}, Suspension: true}
+	ownerScope := sup.FreshScope()
+	yieldOwner := core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Captures: types.ScopeCapture(ownerScope), Control: types.Control{Transport: types.Machine}}
+	yieldParam := yieldOwner
+	yieldParam.Captures = types.VarCapture(sup.FreshCapture())
+	yieldEffect := &types.EffectInfo{Unique: label.Unique, Name: label.Name, Params: []*types.TVar{sup.FreshRigid(types.General)}, Suspension: true}
 	producerTy := &types.TFun{Arg: b.Unit, Eff: types.Row{Labels: []types.EffLabel{label}}, Ret: b.Unit}
 	consumerTy := &types.TFun{Arg: iterator, Ret: b.Unit}
 	ownerTy := &types.TFun{Arg: producerTy, Ret: &types.TFun{Arg: consumerTy, Ret: b.Unit}}
 	owner := core.Def{Name: types.GeneratorWithIteratorName, Type: ownerTy,
 		Params: []string{"producer", "consumer"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()},
-		Body: &core.IteratorScope{Scope: sup.FreshScope(),
+		Body: &core.IteratorScope{Scope: ownerScope, Yield: yieldOwner,
 			Producer: &core.VarRef{Name: "producer", Local: true, Ty: producerTy},
 			Consumer: &core.VarRef{Name: "consumer", Local: true, Ty: consumerTy},
 			CursorTy: iterator, Ty: b.Unit,
 		}}
 	captured := &core.VarRef{Name: "captured", Local: true, Ty: b.Int}
-	producer := &core.Lambda{Param: "_", ParamCapture: sup.FreshCapture(), Ty: producerTy,
-		Body: &core.Suspend{Request: captured, Ty: b.Unit}}
+	producer := &core.Lambda{Param: "_", ParamCapture: sup.FreshCapture(), Ty: producerTy, EffectParams: []core.EffectInstance{yieldParam},
+		Body: &core.Suspend{Owner: yieldParam, Request: captured, Ty: b.Unit}}
 	consumer := &core.Lambda{Param: "cursor", ParamCapture: sup.FreshCapture(), Ty: consumerTy, Body: &core.UnitLit{Ty: b.Unit}}
 	call := &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: owner.Name, Ty: ownerTy},
 		Args: []core.Expr{producer, consumer}, Ty: b.Unit}
 	main := core.Def{Name: "Main.main", Owner: "Main", Type: b.Unit,
 		Body: &core.Let{Name: "captured", Rhs: &core.IntLit{Val: 7, Ty: b.Int}, Body: call, Ty: b.Unit}}
 	p := &core.Prog{Intrinsics: map[string]bool{types.GeneratorWithIteratorName: true}, Defs: []core.Def{owner, main}}
+	p.Effects = append(p.Effects, yieldEffect)
 	if errs := core.InferCaptures(p, b); len(errs) != 0 {
 		t.Fatalf("capture inference: %v", errs)
 	}
@@ -167,6 +173,37 @@ func TestLowerRootsMachineLambdaInsideDirectIteratorOwnerCall(t *testing.T) {
 	}
 	if mp.Workers[0].Name != closure.Worker || len(mp.Workers[0].Params) != 2 {
 		t.Fatalf("rooted worker = %+v", mp.Workers[0])
+	}
+	for _, damage := range []string{"missing", "identity", "capture", "type"} {
+		t.Run(damage+" owner", func(t *testing.T) {
+			broken := *mp
+			broken.Workers = append([]Worker(nil), mp.Workers...)
+			worker := &broken.Workers[0]
+			worker.Blocks = append([]Block(nil), worker.Blocks...)
+			term := *worker.Blocks[worker.Entry].Term.(*Suspend)
+			switch damage {
+			case "missing":
+				term.Owner = core.EffectInstance{}
+			case "identity":
+				term.Owner.Unique++
+			case "capture":
+				term.Owner.Captures = types.ScopeCapture(sup.FreshScope())
+			case "type":
+				term.Owner.Args = []types.Type{b.String}
+			}
+			worker.Blocks[worker.Entry].Term = &term
+			if got := errorsText(Lint(&broken)); !strings.Contains(got, "owner") {
+				t.Fatalf("malformed Machine owner accepted: %s", got)
+			}
+			// Reconstruct the same obligation from semantic Core, without
+			// trusting the graph already inferred before the mutation.
+			original := producer.Body.(*core.Suspend).Owner
+			producer.Body.(*core.Suspend).Owner = term.Owner
+			if errs := core.LintMachineInput(p, b); len(errs) == 0 {
+				t.Fatal("malformed Core owner accepted")
+			}
+			producer.Body.(*core.Suspend).Owner = original
+		})
 	}
 }
 

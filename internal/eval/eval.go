@@ -150,6 +150,7 @@ func (c *IOContext) nativeExecutor() (*nativehost.Executor, error) {
 }
 
 type evidence struct {
+	yieldOwner *fangort.YieldOwner
 	handler    *core.Handle
 	frame      *Frame
 	outer      map[int]*evidence

@@ -128,6 +128,9 @@ type ControlExit struct {
 // LintMachineInput or below the resolved Generator.withIterator activation
 // boundary accepted by ordinary Lint.
 type Suspend struct {
+	// Owner identifies lexical Yield evidence for source suspension. The zero
+	// value is reserved for host-driven, ownerless Machine fixtures.
+	Owner   EffectInstance
 	Request Expr
 	Ty      types.Type
 }
@@ -137,6 +140,7 @@ type Suspend struct {
 // boundary drives Producer's machine, so its own Control describes only the
 // residual execution protocol visible to the enclosing computation.
 type IteratorScope struct {
+	Yield    EffectInstance
 	Scope    types.ScopeID
 	Producer Expr
 	Consumer Expr

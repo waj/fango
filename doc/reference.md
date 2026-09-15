@@ -393,6 +393,9 @@ nested scopes remain independent. These rules follow inferred contracts across
 module boundaries, including callbacks stored in records or dictionaries.
 An ordinary handler cannot intercept `Generator.yield`: attempting to handle
 its compiler-owned effect reports `COMPILER-OWNED EFFECT`.
+Each traversal supplies fresh Yield evidence to its producer. Producer closures
+preserve that lexical evidence across suspension and resumption. This does not
+yet provide suspension transfers between nested cursors.
 
 `Iterator.forEach : (a ->{e} ()) -> Iterator a ->{e} ()` invokes its callback
 once per yield in production order. `Iterator.fold` has type

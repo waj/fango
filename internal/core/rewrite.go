@@ -124,11 +124,13 @@ func (r rewriter) expr(e Expr) Expr {
 		out = &n
 	case *Suspend:
 		n := *e
+		n.Owner = r.effect(e.Owner)
 		n.Ty = r.typ(e.Ty)
 		n.Request = r.expr(e.Request)
 		out = &n
 	case *IteratorScope:
 		n := *e
+		n.Yield = r.effect(e.Yield)
 		n.Ty = r.typ(e.Ty)
 		n.CursorTy = r.typ(e.CursorTy)
 		n.Producer = r.expr(e.Producer)
