@@ -159,7 +159,7 @@ func (ev *evaluator) sync() []diag.Error {
 	if len(errs) > 0 {
 		return errs
 	}
-	ev.env.DefineProg(&core.Prog{Defs: defs, Natives: ev.ck.Natives})
+	ev.env.DefineProg(&core.Prog{ADTs: ev.ck.ADTOrder, Defs: defs, Natives: ev.ck.Natives})
 	if ev.installedIntrinsics == nil {
 		ev.installedIntrinsics = map[string]bool{}
 	}

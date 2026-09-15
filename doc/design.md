@@ -979,6 +979,18 @@ normal completion drains it, and an exit drains it while retaining that exit as
 primary and appending cleanup failures in inner-to-outer order through the same
 `Suppress` operation used by synchronous `Bracket`.
 
+Exit payloads carry checked nominal type descriptors alongside their values.
+Descriptors include type arguments and whether every constructor is free of
+functions and resources. Generic workers receive descriptors as hidden
+parameters; returned closures and suspended Machine frames retain them.
+Compiled descriptors use canonical declaration names, preserving independent
+module output. Interpreter descriptors also identify declaration generations,
+so redefining a REPL type cannot make an old payload match the new type.
+Internal failure snapshots copy payload and descriptor lists and recursively
+retain suppressed failures, without copying handler targets or resumptions.
+Inspection compares complete descriptors before projecting a value; unknown
+declarations and function- or resource-bearing types are opaque.
+
 Producer machines in the interpreter share their caller's execution policy and
 step counter. Core evaluation, tail loops, and Machine dispatch all charge that
 counter, including computations that loop without yielding. Starting or reopening

@@ -35,6 +35,7 @@ type MachineStats struct {
 }
 
 type machineFrame struct {
+	types         descriptorEnv
 	worker        *machineir.Worker
 	block         machineir.BlockID
 	vars          map[string]Value
@@ -46,12 +47,14 @@ type machineFrame struct {
 }
 
 type machineClosure struct {
+	types    descriptorEnv
 	desc     *machineir.Closure
 	values   []Value
 	evidence map[int]*evidence
 }
 
 type machineOperation struct {
+	types      descriptorEnv
 	worker     *machineir.Worker
 	values     []Value
 	evidence   map[int]*evidence
@@ -159,6 +162,7 @@ func (in *interp) startMachineClosure(p *machineir.Prog, closure *machineClosure
 	// Share execution policy and accounting with the caller. In particular,
 	// stage-safe traversal cannot acquire a runtime interpreter.
 	session.interp = in
+	session.frames[0].types = closure.types
 	return session, nil
 }
 
@@ -198,7 +202,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 		frame := s.frames[len(s.frames)-1]
 		s.interp.evidence = frame.evidence
 		block := &frame.worker.Blocks[frame.block]
-		locals := &Frame{vars: frame.vars, mutable: true}
+		locals := &Frame{vars: frame.vars, types: frame.types, mutable: true}
 		eval := func(expr core.Expr) (Value, error) {
 			if lam, ok := expr.(*core.Lambda); ok {
 				return s.interp.makeClosure(lam, locals, s.closures[lam])
@@ -445,6 +449,17 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			}
 			child := &machineFrame{worker: callee, block: callee.Entry, vars: childVars, evidence: childEvidence,
 				returnBind: term.Bind.Name, stateToken: -1}
+			if closure != nil {
+				child.types = closure.types
+			} else if operation != nil {
+				child.types = operation.types
+			} else {
+				var err error
+				child.types, err = s.interp.instantiateDescriptors(callee.TyParams, term.TyArgs, locals)
+				if err != nil {
+					return MachineEvent{}, err
+				}
+			}
 			if operation != nil {
 				child.stateToken = operation.stateToken
 			}
@@ -490,7 +505,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				for _, param := range worker.EffectParams {
 					outer[param.Unique] = frame.evidence[param.Unique]
 				}
-				installed.machineOps[clause.Op.Index] = &machineOperation{worker: worker, values: values, evidence: outer,
+				installed.machineOps[clause.Op.Index] = &machineOperation{worker: worker, values: values, evidence: outer, types: frame.types,
 					stateToken: stateToken}
 			}
 			bodyWorker := s.workers[term.BodyWorker]
@@ -506,7 +521,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 					childEvidence[param.Unique] = frame.evidence[param.Unique]
 				}
 			}
-			child := &machineFrame{worker: bodyWorker, block: bodyWorker.Entry, vars: childVars,
+			child := &machineFrame{worker: bodyWorker, block: bodyWorker.Entry, vars: childVars, types: frame.types,
 				evidence: childEvidence, returnBind: term.Bind.Name, returnState: term.StateResult.Name, stateToken: -1}
 			if term.Abort {
 				s.handlers = append(s.handlers, machineHandler{target: installed, frameDepth: len(s.frames),
@@ -541,10 +556,11 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				releaseVars[name] = value
 			}
 			releaseEvidence := cloneEvidence(s.interp.evidence)
+			releaseTypes := frame.types
 			s.cleanups = append(s.cleanups, func() (*ExitRequest, error) {
 				saved := s.interp.evidence
 				s.interp.evidence = cloneEvidence(releaseEvidence)
-				value, err := s.interp.eval(term.Release, &Frame{vars: releaseVars})
+				value, err := s.interp.eval(term.Release, &Frame{vars: releaseVars, types: releaseTypes})
 				s.interp.evidence = saved
 				if err != nil {
 					return nil, err
@@ -793,7 +809,7 @@ func (s *MachineSession) catchExit(exit *ExitRequest) (bool, error) {
 		for _, ev := range worker.EffectParams {
 			evidence[ev.Unique] = owner.evidence[ev.Unique]
 		}
-		child := &machineFrame{worker: worker, block: worker.Entry, vars: vars, evidence: evidence,
+		child := &machineFrame{worker: worker, block: worker.Entry, vars: vars, evidence: evidence, types: owner.types,
 			returnBind: h.term.AbortBind.Name, returnState: h.term.StateResult.Name, stateToken: stateToken}
 		owner.block = h.term.AbortNext
 		s.frames = append(s.frames, child)

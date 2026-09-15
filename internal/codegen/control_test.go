@@ -99,8 +99,8 @@ func TestCleanupScopeEmitsBothFamiliesWithoutAContinuation(t *testing.T) {
 	}
 	got := string(data)
 	for _, want := range []string{
-		"func V_Main_dot_bracket[A0 any](t_acquire struct",
-		"func V_Main_dot_bracket_exit[A0 any](t_acquire struct",
+		"func V_Main_dot_bracket[A0 any](type_A0 *fangort.TypeDescriptor, t_acquire struct",
+		"func V_Main_dot_bracket_exit[A0 any](type_A0 *fangort.TypeDescriptor, t_acquire struct",
 		"_ = t_release.Direct(t_resource)",
 		"fangort.Suppress(",
 	} {

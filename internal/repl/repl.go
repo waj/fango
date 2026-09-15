@@ -599,7 +599,7 @@ func (s *Session) install(inc *modules.Increment) []diag.Error {
 		return errs
 	}
 	s.installed = program
-	s.env.DefineProg(&core.Prog{Defs: defs, Natives: s.ck.Natives})
+	s.env.DefineProg(&core.Prog{ADTs: s.ck.ADTOrder, Defs: defs, Natives: s.ck.Natives})
 	// Like a batch entry, the prompt sees instances and derivers from every
 	// module in its graph.
 	for _, name := range inc.Modules {
@@ -795,7 +795,7 @@ func (s *Session) installInstances(infos []infer.DeclInfo, start int) []diag.Err
 	if len(errs) > 0 {
 		return errs
 	}
-	s.env.DefineProg(&core.Prog{Defs: defs, Natives: s.ck.Natives})
+	s.env.DefineProg(&core.Prog{ADTs: s.ck.ADTOrder, Defs: defs, Natives: s.ck.Natives})
 	return nil
 }
 

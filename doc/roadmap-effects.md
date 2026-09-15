@@ -507,20 +507,24 @@ introduced. These domain functions retain their IO and failure effects.
 
 ## Failure reporting prerequisite
 
-The current exit representation records suppressed cleanup failures but exposes
-no source observation API. Preserve this obligation: before stable reporting in
-3–6, select a public observation contract in which primary failures remain typed
-and secondary cleanup failures are inspectable, including heterogeneous errors.
-A file close failure after a failed write is the concrete acceptance case.
+The exit representation carries checked nominal payload descriptors and internal
+detached snapshots, but exposes no source observation API yet. Complete the
+selected milestone #3 contract: `Fail.Report error` retains a typed `primary`
+and a list of opaque `Failure.Failure` snapshots; opt-in `Fail.attemptReport`
+returns that report while `Fail.attempt` keeps its existing result type.
+Expose effect/operation names, argument counts, nested suppression, and typed
+`Failure.argument` inspection. Preserve payload capture restrictions through
+report construction, including opaque payloads. A file close failure after a
+failed write is the concrete acceptance case, with deterministic injection.
 
-Distinguish ordinary errors, early stop, and cancellation. Decide when failed
-cleanup supersedes a non-error stop and how that is reported; do not silently
-turn `take` completion into an ordinary error or discard the close failure.
+Distinguish ordinary errors, early stop, and cancellation. Failed cleanup after
+successful completion or early stream stop propagates the first cleanup failure;
+later failures remain secondary.
 A successful body followed by failed release reports release failure; a failed
 body remains primary while nested release failures accumulate inner to outer.
 For concurrent children, define primary-failure selection and deterministic
 secondary ordering without assuming scheduler order is deterministic. These
-observation/selection details remain open prerequisites, not grounds to defer
+concurrent selection details remain open prerequisites, not grounds to defer
 cleanup or silently flatten typed errors into strings.
 
 ## Deferred topics

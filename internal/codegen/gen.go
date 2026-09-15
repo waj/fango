@@ -635,7 +635,7 @@ func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
 			delete(g.caseVarTys, name)
 		}
 	}()
-	params := make([]paramSpec, 0, len(d.EffectParams)+len(d.Params))
+	params := g.descriptorParams(d.TyParams)
 	for _, ev := range d.EffectParams {
 		name := g.evidenceName(ev.Name)
 		params = append(params, paramSpec{name: name, typ: g.effectType(ev)})
@@ -827,7 +827,7 @@ func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
 	}
 	mode := e.Control.Resolve(g.control)
 	abi := g.workerCallABI(g.defs[ref.Name], mode)
-	args := make([]goast.Expr, 0, len(e.EvidenceArgs)+len(e.Args))
+	args := g.typeDescriptorArgs(e.TyArgs)
 	for _, ev := range e.EvidenceArgs {
 		stack := g.evidence[ev.Unique]
 		if len(stack) == 0 {
@@ -1470,17 +1470,21 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			panic("codegen: ControlExit without lexical evidence")
 		}
 		payload := make([]goast.Expr, len(e.Payload))
+		descriptors := make([]goast.Expr, len(e.Payload))
 		for i, p := range e.Payload {
 			// Interface payloads otherwise default untyped literals (notably Int)
 			// to Go's `int`, while handler frames consistently expect the Fango
 			// representation selected by goType.
 			payload[i] = callExpr(g.goType(p.Type()), g.expr(p, 0))
+			descriptors[i] = g.typeDescriptor(p.Type())
 		}
 		exit := &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: selector("fangort", "ExitRequest"), Elts: []goast.Expr{
 			&goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Target")}},
 			&goast.KeyValueExpr{Key: ident("Effect"), Value: stringLit(e.Op.Owner.Name)},
 			&goast.KeyValueExpr{Key: ident("Operation"), Value: intLit(int64(e.Op.Index))},
+			&goast.KeyValueExpr{Key: ident("OperationName"), Value: stringLit(e.Op.Name)},
 			&goast.KeyValueExpr{Key: ident("Payload"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: ident("any")}, Elts: payload}},
+			&goast.KeyValueExpr{Key: ident("PayloadTypes"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: g.descriptorType()}, Elts: descriptors}},
 		}}}
 		return g.propagateOutcome(e.Ty, exit)
 	case *core.ResumeTail:
@@ -1513,7 +1517,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 		g.usesFangort = true
 	}
 	abi := g.workerCallABI(g.defs[ref.Name], mode)
-	args := make([]goast.Expr, 0, len(e.EvidenceArgs)+len(e.Args))
+	args := g.typeDescriptorArgs(e.TyArgs)
 	for _, ev := range e.EvidenceArgs {
 		stack := g.evidence[ev.Unique]
 		if len(stack) == 0 {
@@ -1521,6 +1525,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 		}
 		args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), mode))
 	}
+	leadingArgs := len(args)
 	needPrelude := false
 	for i, a := range e.Args {
 		if i < len(formal) && g.isUnit(formal[i]) {
@@ -1533,7 +1538,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 	}
 	if needPrelude {
 		var body []goast.Stmt
-		args = args[:len(e.EvidenceArgs)]
+		args = args[:leadingArgs]
 		for i, a := range e.Args {
 			if i < len(formal) && g.isUnit(formal[i]) {
 				body = append(body, g.stmts(a)...)

@@ -1754,7 +1754,8 @@ carry their callable members together, so ADTs and class dictionaries keep a
 stable value representation across execution modes. Creating a function value
 does not execute its body or repeat the effects of a factory that returned it.
 This calling convention is an implementation guarantee visible in
-`--emit-go`. Abort-only operations select the Exit family; ordinary
+`--emit-go`. Generic workers also receive hidden nominal type descriptors,
+which survive returned closures and suspended frames. Abort-only operations select the Exit family; ordinary
 tail-resumptive handlers retain the Direct fast path where their context allows
 it.
 

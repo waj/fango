@@ -22,7 +22,7 @@ type tailJump struct {
 // per-iteration work: the tail skeleton never enters a Handle, and identity
 // evidence (the eligibility predicate) guarantees the worker's own evidence
 // map — installed by the caller — is already correct for every iteration.
-func (in *interp) evalTailLoop(def *core.Def, vars map[string]Value) (Value, error) {
+func (in *interp) evalTailLoop(def *core.Def, vars map[string]Value, descriptors descriptorEnv) (Value, error) {
 	for {
 		// A fully-trivial jump (`f x = f x`) evaluates almost nothing, so
 		// count an explicit step per iteration to keep the every-N
@@ -30,7 +30,7 @@ func (in *interp) evalTailLoop(def *core.Def, vars map[string]Value) (Value, err
 		if err := in.tick(); err != nil {
 			return nil, err
 		}
-		v, err := in.tailStep(def, def.Body, &Frame{vars: vars})
+		v, err := in.tailStep(def, def.Body, &Frame{vars: vars, types: descriptors})
 		if err != nil {
 			return nil, err
 		}

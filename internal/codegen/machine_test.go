@@ -219,6 +219,14 @@ func TestGeneratedMachineFrameExecutes(t *testing.T) {
 	fail := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Main.Fail"}
 	failOp := &types.EffectOp{Owner: fail, Index: 0, Name: "Main.fail", Arity: 1, ParamTypes: []types.Type{b.Int}, ResultType: b.Int, Abort: true}
 	fail.Ops = []*types.EffectOp{failOp}
+	genericFail := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Main.GenericFail", Params: []*types.TVar{genericVar}}
+	genericFailOp := &types.EffectOp{Owner: genericFail, Index: 0, Name: "Main.genericFail", Arity: 1, ParamTypes: []types.Type{genericVar}, ResultType: b.Int, Abort: true}
+	genericFail.Ops = []*types.EffectOp{genericFailOp}
+	genericFailEvidence := core.EffectInstance{Unique: genericFail.Unique, Name: genericFail.Name, Args: []types.Type{genericVar}, Captures: types.VarCapture(sup.FreshCapture()), Control: types.Control{Transport: types.Exit}}
+	genericFailure := core.Def{Name: "Main.genericFailure", Owner: "Main", TyParams: []*types.TVar{genericVar}, Params: []string{"payload"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture()}, EffectParams: []core.EffectInstance{genericFailEvidence}, Control: types.Control{Transport: types.Machine},
+		Type: &types.TFun{Arg: genericVar, Ret: b.Int, Eff: types.Row{Labels: []types.EffLabel{{Unique: genericFail.Unique, Name: genericFail.Name, Args: []types.Type{genericVar}, Abort: true}}}, Control: types.Control{Transport: types.Machine}},
+		Body: &core.Let{Name: "pauseBeforeFailure", Rhs: &core.Suspend{Request: &core.IntLit{Val: 1, Ty: b.Int}, Ty: b.Unit}, Ty: b.Int,
+			Body: &core.ControlExit{Effect: genericFailEvidence, Op: genericFailOp, Payload: []core.Expr{&core.VarRef{Name: "payload", Local: true, Ty: genericVar}}, Ty: b.Int}}}
 	failScope := sup.FreshScope()
 	failEvidence := core.EffectInstance{Unique: fail.Unique, Name: fail.Name, Captures: types.ScopeCapture(failScope), Control: types.Control{Transport: types.Exit}}
 	abort := &core.Handle{Body: &core.ControlExit{Effect: failEvidence, Op: failOp, Payload: []core.Expr{&core.IntLit{Val: 12, Ty: b.Int}}, Ty: b.Int}, Effect: failEvidence, Scope: failScope, Ty: b.Bool, Control: types.Control{Transport: types.Machine}, Clauses: []core.HandlerClause{{Op: failOp, Params: []string{"n"}, ParamTypes: []types.Type{b.Int}, ResultType: b.Int, Body: &core.Let{Name: "pause", Rhs: &core.Suspend{Request: &core.IntLit{Val: 11, Ty: b.Int}, Ty: b.Unit}, Ty: b.Bool, Body: &core.BoolLit{Val: true, Ty: b.Bool}}}}, Return: &core.ReturnClause{Param: "normal", Body: &core.BoolLit{Val: false, Ty: b.Bool}}}
@@ -233,12 +241,13 @@ func TestGeneratedMachineFrameExecutes(t *testing.T) {
 		Clauses: []core.HandlerClause{{Op: get, ResumeID: 2, Params: []string{"()"}, ParamTypes: []types.Type{b.Unit}, ResultType: b.Int,
 			Body: &core.ResumeTail{Owner: 2, Value: &core.IntLit{Val: 40, Ty: b.Int}, NextState: &core.IntLit{Val: 41, Ty: b.Int}, ClauseResult: b.Int}}},
 		Return: &core.ReturnClause{Param: "_", Body: &core.VarRef{Name: "current", Local: true, Ty: b.Int}}}
-	p := &core.Prog{Entry: "Main.main", ADTs: []*types.ADTInfo{adt}, Effects: []*types.EffectInfo{eff, fail, cell}, Defs: []core.Def{
+	p := &core.Prog{Entry: "Main.main", ADTs: []*types.ADTInfo{adt}, Effects: []*types.EffectInfo{eff, fail, cell, genericFail}, Defs: []core.Def{
 		{Name: "Main.main", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: body},
 		{Name: "Main.match", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: matchBody},
 		{Name: "Main.callback", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: callbackBody},
 		applyCallback,
 		generic,
+		genericFailure,
 		{Name: "Main.genericCall", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: genericCall},
 		{Name: "Main.handler", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: handler},
 		{Name: "Main.abort", Owner: "Main", Type: b.Bool, Control: types.Control{Transport: types.Machine}, Body: abort},
@@ -316,7 +325,7 @@ func TestFixture(t *testing.T) {
     event, err = callback.Resume(int64(42))
     if err != nil || !event.Done || event.Value != int64(42) { t.Fatalf("callback done: %#v %v", event, err) }
 
-    polymorphic := fangort.StartMachine(MachineFrame_Main_dot_applyCallback(struct{Direct func(int64)int64;Exit func(int64)fangort.Outcome[int64];Machine func(int64)fangort.MachineFrame}{Machine:func(value int64)fangort.MachineFrame{return MachineFrame_Main_dot_generic[int64](value)}}))
+    polymorphic := fangort.StartMachine(MachineFrame_Main_dot_applyCallback(struct{Direct func(int64)int64;Exit func(int64)fangort.Outcome[int64];Machine func(int64)fangort.MachineFrame}{Machine:func(value int64)fangort.MachineFrame{return MachineFrame_Main_dot_generic[int64](fangort.NominalType("Int",true),value)}}))
     event, err = polymorphic.Run()
     if err != nil || event.Done || event.Request != int64(17) { t.Fatalf("polymorphic callback: %#v %v", event, err) }
     event, err = polymorphic.Resume(int64(71))
@@ -347,6 +356,14 @@ func TestFixture(t *testing.T) {
     stateful := fangort.StartMachine(MachineFrame_Main_dot_stateful())
     event, err = stateful.Run()
     if err != nil || !event.Done || event.Value != int64(41) || stateful.Stats().MaxStates != 1 { t.Fatalf("stateful: %#v %v %#v", event, err, stateful.Stats()) }
+
+    failed := fangort.StartMachine(MachineFrame_Main_dot_genericFailure[int64](fangort.NominalType("Int", true), Eff_Main_dot_GenericFail_machine[int64]{Target: &fangort.ExitTarget{}}, int64(73)))
+    event, err = failed.Run()
+    if err != nil || event.Done { t.Fatalf("before generic failure: %#v %v", event, err) }
+    event, err = failed.Resume(fangort.UnitValue)
+    if err != nil || !event.Done || event.Exit == nil { t.Fatalf("generic failure: %#v %v", event, err) }
+    payload, ok := fangort.FailureArgument[int64](0, fangort.SnapshotFailure(event.Exit), fangort.NominalType("Int", true))
+    if !ok || payload != 73 { t.Fatalf("descriptor lost across suspension: %v %v", payload, ok) }
 }
 `))
 	cmd := exec.Command("go", "test", ".")

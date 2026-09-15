@@ -9,9 +9,11 @@ type ExitRequest struct {
 	Target *ExitTarget
 	// Effect is the canonical declaration name, stable across import graphs.
 	// Dispatch uses Target; compiler-local numeric identities never cross the ABI.
-	Effect    string
-	Operation int
-	Payload   []any
+	Effect        string
+	Operation     int
+	OperationName string
+	Payload       []any
+	PayloadTypes  []*TypeDescriptor
 	// Suppressed records exits a cleanup scope could not make primary: a
 	// release that failed while the body was already exiting. Deterministic
 	// inner-to-outer order; nothing reads it from fango yet.

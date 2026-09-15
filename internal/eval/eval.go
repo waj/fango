@@ -38,9 +38,10 @@ type Value = any
 // Go errors used for interpreter failures. Payload values have already been
 // checked against Op by Core lint.
 type ExitRequest struct {
-	Target  *evidence
-	Op      *types.EffectOp
-	Payload []Value
+	Target       *evidence
+	Op           *types.EffectOp
+	Payload      []Value
+	PayloadTypes []*fangort.TypeDescriptor
 	// Suppressed mirrors fangort.ExitRequest.Suppressed: exits a cleanup
 	// scope could not make primary, in inner-to-outer order.
 	Suppressed []*ExitRequest
@@ -161,6 +162,7 @@ type evidence struct {
 
 // Env holds top-level cells and workers.
 type Env struct {
+	adts    map[int]*types.ADTInfo
 	cells   map[string]*Cell
 	workers map[string]*core.Def
 	machine *machineir.Prog
@@ -196,6 +198,7 @@ func (e *Env) Expand(c *meta.Code) ast.Expr {
 // Frame holds block-local bindings (doc/design.md, "Language semantics") — eager values, unlike the lazy
 // top-level cells. Function parameters extend the same chain.
 type Frame struct {
+	types   descriptorEnv
 	parent  *Frame
 	vars    map[string]Value
 	mutable bool // Machine locals are pruned and overwritten between transitions.
@@ -221,7 +224,7 @@ func closureFrame(lam *core.Lambda, fr *Frame) *Frame {
 			}
 		}
 	})
-	return &Frame{vars: vars}
+	return &Frame{vars: vars, types: fr.descriptors()}
 }
 
 func (in *interp) makeClosure(lam *core.Lambda, fr *Frame, desc *machineir.Closure) (*Closure, error) {
@@ -244,7 +247,7 @@ func (in *interp) makeClosure(lam *core.Lambda, fr *Frame, desc *machineir.Closu
 		}
 		captured[ev.Unique] = in.evidence[ev.Unique]
 	}
-	closure.machine = &machineClosure{desc: desc, values: values, evidence: captured}
+	closure.machine = &machineClosure{desc: desc, values: values, evidence: captured, types: fr.descriptors()}
 	return closure, nil
 }
 
@@ -258,7 +261,7 @@ func (f *Frame) lookup(name string) (Value, bool) {
 }
 
 func NewEnv() *Env {
-	return &Env{cells: map[string]*Cell{}, workers: map[string]*core.Def{}, machineClosures: map[*core.Lambda]*machineir.Closure{}, tails: map[*core.Def]*core.TailLoop{}, natives: map[string]*types.NativeInfo{}}
+	return &Env{adts: map[int]*types.ADTInfo{}, cells: map[string]*Cell{}, workers: map[string]*core.Def{}, machineClosures: map[*core.Lambda]*machineir.Closure{}, tails: map[*core.Def]*core.TailLoop{}, natives: map[string]*types.NativeInfo{}}
 }
 
 // tailLoop reports (and caches) whether def executes as a frame-reuse loop.
@@ -291,6 +294,9 @@ func (e *Env) DefineWorker(d *core.Def) {
 // workers (polymorphic values, doc/design.md, "Go backend and runtime") register as workers: their zero-arg
 // calls re-evaluate the body per use, matching the compiled cost rule.
 func (e *Env) DefineProg(p *core.Prog) {
+	for _, adt := range p.ADTs {
+		e.adts[adt.Con.Unique] = adt
+	}
 	e.entry = p.Entry
 	if e.entry == "" {
 		e.entry = "main"
@@ -624,6 +630,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		return nil, fmt.Errorf("eval: unhandled effect operation `%s.%s`", e.Effect.Name, e.Op.Name)
 	case *core.ControlExit:
 		payload := make([]Value, len(e.Payload))
+		descriptors := make([]*fangort.TypeDescriptor, len(e.Payload))
 		for i, p := range e.Payload {
 			v, err := in.eval(p, fr)
 			if err != nil {
@@ -633,12 +640,17 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				return v, nil
 			}
 			payload[i] = v
+			descriptor, err := in.typeDescriptor(p.Type(), fr)
+			if err != nil {
+				return nil, err
+			}
+			descriptors[i] = descriptor
 		}
 		target := in.evidence[e.Effect.Unique]
 		if target == nil {
 			return nil, fmt.Errorf("eval: missing abort evidence for `%s.%s`", e.Effect.Name, e.Op.Name)
 		}
-		return &ExitRequest{Target: target, Op: e.Op, Payload: payload}, nil
+		return &ExitRequest{Target: target, Op: e.Op, Payload: payload, PayloadTypes: descriptors}, nil
 	case *core.Suspend:
 		return nil, fmt.Errorf("eval: compiler-only suspension reached recursive evaluator")
 	case *core.IteratorScope:
@@ -780,6 +792,11 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			saved := in.evidence
 			in.evidence = callEvidence
+			descriptors, typeErr := in.instantiateDescriptors(def.TyParams, e.TyArgs, fr)
+			if typeErr != nil {
+				in.evidence = saved
+				return nil, typeErr
+			}
 			// Workers see no caller locals — matching compiled scoping.
 			var out Value
 			var err error
@@ -787,9 +804,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				// Self tail calls run as a frame-reuse loop (doc/design.md,
 				// "Interpreter and REPL") — constant Go stack, like the
 				// compiled backend's for-loop rewrite.
-				out, err = in.evalTailLoop(def, vars)
+				out, err = in.evalTailLoop(def, vars, descriptors)
 			} else {
-				out, err = in.eval(def.Body, &Frame{vars: vars})
+				out, err = in.eval(def.Body, &Frame{vars: vars, types: descriptors})
 			}
 			in.evidence = saved
 			return out, err
