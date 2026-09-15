@@ -6,8 +6,10 @@ package fangort
 // descriptor. No generated consumer uses a failed type assertion as a type
 // check.
 type ExitRequest struct {
-	Target    *ExitTarget
-	Effect    int
+	Target *ExitTarget
+	// Effect is the canonical declaration name, stable across import graphs.
+	// Dispatch uses Target; compiler-local numeric identities never cross the ABI.
+	Effect    string
 	Operation int
 	Payload   []any
 	// Suppressed records exits a cleanup scope could not make primary: a
@@ -28,6 +30,17 @@ type Outcome[A any] struct {
 }
 
 func Normal[A any](value A) Outcome[A] { return Outcome[A]{Value: value} }
+
+// RequireNormal projects an Exit-family call whose Core contract proves Direct
+// execution. This bridge is needed when a pure computation constructs a value
+// with the Exit representation. An unexpected exit is a compiler invariant
+// violation, never a failure that may be silently dropped.
+func RequireNormal[A any](outcome Outcome[A]) A {
+	if outcome.Exit != nil {
+		panic("fango: Exit from a statically Direct call")
+	}
+	return outcome.Value
+}
 
 func Propagate[A any](exit *ExitRequest) Outcome[A] { return Outcome[A]{Exit: exit} }
 

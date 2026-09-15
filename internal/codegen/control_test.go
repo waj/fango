@@ -46,6 +46,7 @@ func TestExitWorkerEmitsOutcomePropagationWhileDirectWorkerStaysPlain(t *testing
 		"func V_Main_dot_id(v_x int64) int64",
 		"func V_Main_dot_main_exit(ev_Main_dot_Fail Eff_Main_dot_Fail_exit) fangort.Outcome[int64]",
 		"fangort.Propagate[int64]",
+		`Effect: "Main.Fail"`,
 		"if t_outcome0.Exit != nil",
 		"V_Main_dot_tick()\n\treturn fangort.Normal[fangort.Unit](fangort.UnitValue)",
 	} {

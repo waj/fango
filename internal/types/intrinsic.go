@@ -68,28 +68,3 @@ func IntrinsicArity(name string) int {
 	}
 	return 0
 }
-
-// FileHandleName is the bundled open-file resource. Its constructor is
-// private and its field is a plain Int, so nothing about the type's shape
-// says it holds a capability; the compiler knows it does by this name.
-const FileHandleName = "File.Handle"
-
-// ResourceType reports whether a canonical ADT name is a compiler-known
-// resource: a value of that type is treated as capability-carrying by the
-// capture analysis, so it can neither leave the scope that produced it nor be
-// stored in a scoped handler's state (doc/design.md, "Functions and effects").
-func ResourceType(name string) bool {
-	return name == FileHandleName
-}
-
-// ResourceRunner answers the resource a bundled scoped runner acquires. The
-// runners wrap `Scope.bracket` in ordinary fango; naming them here makes their
-// call sites subject to the same instantiated-result check as `State.run`,
-// and lets their own bodies call the intrinsic with a polymorphic result.
-func ResourceRunner(name string) (resource string, ok bool) {
-	switch name {
-	case "File.withFile", "File.withOutput", "File.withAppend", "File.withOpened":
-		return FileHandleName, true
-	}
-	return "", false
-}

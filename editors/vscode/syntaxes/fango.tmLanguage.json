@@ -42,7 +42,7 @@
       "patterns": [
         {
           "name": "keyword.control.directive.fango",
-          "match": "[A-Za-z][A-Za-z0-9-]*"
+          "match": "\\b(?:no-prelude|resource)\\b"
         }
       ]
     },

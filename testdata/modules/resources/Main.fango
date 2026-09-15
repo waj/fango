@@ -1,0 +1,16 @@
+import Connection
+import Consumer
+import Fail exposing (attempt, fail)
+import Result exposing (Result)
+
+main() =
+    print (Connection.withConnection 3 Consumer.readTwice)
+    saved = Connection.withConnection 7 (\connection -> \_ -> 42)
+    print (saved())
+    failure : Result String ()
+    failure = attempt (\_ -> Connection.withConnection 9 (\_ -> fail "stop"))
+    print failure
+    total = Connection.withConnection 10 (\left ->
+        Connection.withConnection 20 (\right -> Consumer.readPair left right))
+    print total
+    print (Connection.active())

@@ -1,0 +1,17 @@
+import Scope
+
+type Box a = Box a
+
+{-# resource #-}
+type Handle = Handle Int
+
+withHandle action = Scope.bracket (\_ -> Handle 1) (\_ -> ()) action
+
+identity value = value
+invoke callback value = callback value
+
+main =
+    callback = withHandle (\resource -> identity (\_ -> 42))
+    wrapped = withHandle (\resource -> Box (\_ -> 17))
+    case wrapped of
+        Box other -> invoke callback () + other()

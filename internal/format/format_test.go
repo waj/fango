@@ -202,3 +202,22 @@ func TestCommentInBrokenCompositeCopiesDeclaration(t *testing.T) {
 		t.Errorf("declaration with a composite comment was not copied:\n%s", out)
 	}
 }
+
+func TestResourceMarkerStaysWithDeclaration(t *testing.T) {
+	for _, src := range []string{
+		"{-# resource #-}\ntype Handle= Handle Int\n",
+		"{-# no-prelude #-}\nmodule M exposing (Handle)\n\n{-# resource #-}\n-- resource comment\ntype Handle = { id:Int }\n",
+	} {
+		out, errs := Source(source.NewFile("resource.fango", []byte(src)))
+		if len(errs) > 0 {
+			t.Fatal(errs)
+		}
+		again, errs := Source(source.NewFile("resource.fango", out))
+		if len(errs) > 0 || !bytes.Equal(out, again) {
+			t.Fatalf("not idempotent: %s; %v", out, errs)
+		}
+		if strings.Count(string(out), "{-# resource #-}") != 1 {
+			t.Fatalf("marker lost or duplicated: %s", out)
+		}
+	}
+}

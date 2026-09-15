@@ -108,6 +108,9 @@ func dumpDecl(d Decl) string {
 	case *TypeDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(type %s", d.Name)
+		if d.Resource {
+			b.WriteString(" (pragma resource)")
+		}
 		if p := dumpParams(d.Params); p != "" {
 			fmt.Fprintf(&b, " %s", p)
 		}

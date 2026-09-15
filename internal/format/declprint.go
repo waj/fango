@@ -126,6 +126,9 @@ func fixityText(d *ast.FixityDecl) string {
 // typeDeclLines renders a nominal type. The alternatives go one per line, with
 // a leading `=` and `|`, exactly when the author wrote them that way.
 func (p *printer) typeDeclLines(d *ast.TypeDecl, sp source.Span) {
+	if d.Resource {
+		p.line(0, "{-# resource #-}")
+	}
 	head := "type " + d.Name
 	for _, param := range d.Params {
 		head += " " + param.Name

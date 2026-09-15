@@ -1,0 +1,20 @@
+module Consumer exposing (readPair, readTwice)
+
+import Connection exposing (Handle)
+
+readAgain : Handle -> Int ->{IO} Int
+readAgain connection remaining =
+    if remaining == 0 then
+        Connection.readValue connection
+    else
+        readAgain connection (remaining - 1)
+
+readTwice connection =
+    first = readAgain connection 2
+    second = Connection.readValue connection
+    first + second
+
+readPair left right =
+    a = Connection.readValue left
+    b = Connection.readValue right
+    a + b

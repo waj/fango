@@ -3,8 +3,7 @@
 -- errors --
 -- UNKNOWN PRAGMA --------------------- err_pragma_unknown.fango
 
-I don't know the pragma `turbo`. The only one I understand is
-`no-prelude`.
+I don't know the pragma `turbo`. Use `no-prelude` above the module header, or `resource` before a type declaration.
 
 2| {-# turbo #-}
    ^^^^^^^^^^^^^

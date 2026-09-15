@@ -18,8 +18,8 @@ const (
 	// PRAGMA is a `{-# ... #-}` compiler directive. Its Text is the body
 	// with surrounding whitespace trimmed, scanned as raw text rather than
 	// tokenized, so a directive's spelling need not obey the ordinary
-	// lexical rules. Pragmas precede the module header; the parser
-	// interprets them.
+	// lexical rules. The parser places directives before the module header
+	// or an adjacent declaration according to their meaning.
 	PRAGMA
 
 	// OP is a run of operator characters that is not one of the reserved

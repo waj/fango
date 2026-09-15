@@ -2,14 +2,14 @@ package core
 
 import (
 	"fmt"
-	"sort"
+	"reflect"
 
 	"github.com/waj/fango/internal/types"
 )
 
-// InferCaptures computes each definition's symbolic result summary and checks
-// scoped Handle results. It runs after elaboration transforms; Lint recomputes
-// the same contract from a clean fixed point rather than trusting the summary.
+// InferCaptures computes symbolic result summaries and higher-order capture
+// contracts, then discharges their lifetime obligations. Lint independently
+// reconstructs both forms after elaboration transforms.
 func InferCaptures(p *Prog, b *types.Builtins) []error {
 	return InferCapturesIn(p, nil, b)
 }
@@ -28,7 +28,11 @@ func InferCapturesIn(p *Prog, context []Def, b *types.Builtins) []error {
 		}
 	}
 	a.solve()
-	return a.checkScopes()
+	p.CaptureContractsChecked = true
+	for i := range p.Defs {
+		p.Defs[i].CaptureContract = inferCaptureContract(&p.Defs[i])
+	}
+	return checkCaptureFlows(a)
 }
 
 func verifyCaptures(p *Prog, b *types.Builtins) []error {
@@ -45,7 +49,14 @@ func verifyCaptures(p *Prog, b *types.Builtins) []error {
 			errs = append(errs, fmt.Errorf("def %s: result capture summary is stale", p.Defs[i].Name))
 		}
 	}
-	return append(errs, a.checkScopes()...)
+	for i := range p.Defs {
+		want := inferCaptureContract(&p.Defs[i])
+		if (p.CaptureContractsChecked || p.Defs[i].CaptureContract != nil) && !reflect.DeepEqual(p.Defs[i].CaptureContract, want) {
+			errs = append(errs, fmt.Errorf("def %s: capture contract is stale", p.Defs[i].Name))
+		}
+		copyProg.Defs[i].CaptureContract = want
+	}
+	return append(errs, checkCaptureFlows(a)...)
 }
 
 type captureResult struct {
@@ -54,23 +65,16 @@ type captureResult struct {
 }
 
 type captureAnalyzer struct {
-	p                 *Prog
-	b                 *types.Builtins
-	defs              map[string]*Def
-	adts              map[int]*types.ADTInfo
-	adtsByName        map[string]*types.ADTInfo // canonical name -> ADT, for compiler-known resources
-	nextVar           types.CaptureVar
-	escapes           map[types.ScopeID]bool
-	scoped            map[types.ScopeID]bool
-	checking          bool
-	current           *Def
-	clauseVars        map[*Handle][][]types.CaptureVar
-	badStateResult    string
-	badResourceResult string
+	p          *Prog
+	b          *types.Builtins
+	defs       map[string]*Def
+	adts       map[int]*types.ADTInfo
+	nextVar    types.CaptureVar
+	clauseVars map[*Handle][][]types.CaptureVar
 }
 
 func newCaptureAnalyzer(p *Prog, b *types.Builtins) *captureAnalyzer {
-	a := &captureAnalyzer{p: p, b: b, defs: map[string]*Def{}, adts: map[int]*types.ADTInfo{}, adtsByName: map[string]*types.ADTInfo{}, escapes: map[types.ScopeID]bool{}, scoped: map[types.ScopeID]bool{}, clauseVars: map[*Handle][][]types.CaptureVar{}}
+	a := &captureAnalyzer{p: p, b: b, defs: map[string]*Def{}, adts: map[int]*types.ADTInfo{}, clauseVars: map[*Handle][][]types.CaptureVar{}}
 	for i := range p.Defs {
 		d := &p.Defs[i]
 		a.defs[d.Name] = d
@@ -89,29 +93,8 @@ func newCaptureAnalyzer(p *Prog, b *types.Builtins) *captureAnalyzer {
 	}
 	for _, adt := range p.ADTs {
 		a.adts[adt.Con.Unique] = adt
-		a.adtsByName[adt.Con.Name] = adt
-	}
-	for i := range p.Defs {
-		Rewrite(p.Defs[i].Body, func(t types.Type) types.Type { return t }, func(e Expr) Expr {
-			switch e := e.(type) {
-			case *Handle:
-				if e.Scoped {
-					a.scoped[e.Scope] = true
-				}
-			case *Bracket:
-				a.scoped[e.Scope] = true
-			}
-			return e
-		})
 	}
 	return a
-}
-
-func (a *captureAnalyzer) currentName() string {
-	if a.current == nil {
-		return "?"
-	}
-	return a.current.Name
 }
 
 func (a *captureAnalyzer) fresh() types.CaptureVar { a.nextVar++; return a.nextVar }
@@ -142,8 +125,7 @@ func (a *captureAnalyzer) clauseBinders(e *Handle) map[types.CaptureVar]bool {
 func (a *captureAnalyzer) solve() {
 	// Capture equations contain union only, so the least fixed point is
 	// finite: scopes and parameter/evidence variables are the whole universe.
-	limit := len(a.p.Defs)*8 + 8
-	for range limit {
+	for {
 		changed := false
 		for i := range a.p.Defs {
 			d := &a.p.Defs[i]
@@ -160,72 +142,7 @@ func (a *captureAnalyzer) solve() {
 	}
 }
 
-func (a *captureAnalyzer) checkScopes() []error {
-	a.escapes = map[types.ScopeID]bool{}
-	a.checking = true
-	for i := range a.p.Defs {
-		a.definition(&a.p.Defs[i])
-	}
-	a.checking = false
-	var errs []error
-	scopes := make([]types.ScopeID, 0, len(a.escapes))
-	for scope := range a.escapes {
-		scopes = append(scopes, scope)
-	}
-	sort.Slice(scopes, func(i, j int) bool { return scopes[i] < scopes[j] })
-	for _, scope := range scopes {
-		errs = append(errs, ScopeEscapeError{Scope: scope})
-	}
-	if a.badStateResult != "" {
-		errs = append(errs, StateResultEscapeError{In: a.badStateResult})
-	}
-	if a.badResourceResult != "" {
-		errs = append(errs, ResourceResultEscapeError{In: a.badResourceResult})
-	}
-	return errs
-}
-
-type ScopeEscapeError struct{ Scope types.ScopeID }
-
-// In names the definition whose body holds the offending call.
-type StateResultEscapeError struct{ In string }
-
-func (StateResultEscapeError) Error() string {
-	return "a parameterized handler result may retain its local state capability"
-}
-
-func (StateResultEscapeError) Detail() string {
-	return "This call returns a capture-capable value, so the compiler cannot prove that handler-local state stays inside its activation. Return immutable data instead."
-}
-
-// ResourceResultEscapeError is the call-site rule for a cleanup scope: the
-// scope cannot prove that a capture-capable result does not retain the
-// resource it just released. It applies only when the resource type could
-// carry a capability at all, so scopes over scalars and `finally` — whose
-// resource is Unit — leave their result unrestricted. In names the
-// definition whose body holds the offending call.
-type ResourceResultEscapeError struct{ In string }
-
-func (ResourceResultEscapeError) Error() string {
-	return "a cleanup scope result may retain the resource it released"
-}
-
-func (ResourceResultEscapeError) Detail() string {
-	return "This scope returns a capture-capable value built from a capture-capable resource, so the compiler cannot prove the resource does not outlive its release. Return immutable data instead."
-}
-
-func (e ScopeEscapeError) Error() string {
-	return fmt.Sprintf("RESOURCE ESCAPES: the result retains scoped capability %d after its lifetime ends", e.Scope)
-}
-
-func (e ScopeEscapeError) Detail() string {
-	return fmt.Sprintf("The returned or externally retained value captures local capability %d, whose lifetime ends at this scope.", e.Scope)
-}
-
 func (a *captureAnalyzer) definition(d *Def) captureResult {
-	oldCurrent := a.current
-	a.current = d
-	defer func() { a.current = oldCurrent }()
 	env := map[string]types.CaptureSet{}
 	for i, name := range d.Params {
 		if name != "_" && i < len(d.ParamCaptures) {
@@ -352,19 +269,6 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		if e.Op != nil && e.Op.BorrowsEvidence {
 			r.value = types.UnionCaptures(r.value, ev)
 		}
-		retains := e.Op != nil && e.Op.RetainsArguments
-		for _, scope := range ev.Scopes {
-			retains = retains || a.scoped[scope]
-		}
-		if a.checking && retains {
-			for _, arg := range argResults {
-				for _, scope := range arg.value.Scopes {
-					if a.scoped[scope] && !ev.HasScope(scope) {
-						a.escapes[scope] = true
-					}
-				}
-			}
-		}
 		if !a.canCarry(e.Ty, nil) {
 			r.value = types.CaptureSet{}
 		}
@@ -431,19 +335,6 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			matched := false
 			if ref, ok := e.Callee.(*VarRef); ok {
 				if d := a.defs[ref.Name]; d != nil {
-					if a.checking && trustedScopedRunner(d.Name) && a.canCarry(e.Ty, nil) && !trustedForwarder(a.current, d) {
-						if resource, scope := a.scopeResourceType(d, e); scope {
-							// A cleanup scope over a resource that cannot hold a
-							// capability leaves its result unrestricted.
-							if a.canCarry(resource, nil) && a.badResourceResult == "" {
-								a.badResourceResult = a.currentName()
-							}
-						} else {
-							if a.badStateResult == "" {
-								a.badStateResult = a.currentName()
-							}
-						}
-					}
 					matched = true
 					m := map[types.CaptureVar]types.CaptureSet{}
 					for i, v := range d.ParamCaptures {
@@ -524,12 +415,8 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		}
 		result.value = result.value.Without(nil, binders)
 		result.uses = result.uses.Without(nil, binders)
-		if e.Scoped && result.value.HasScope(e.Scope) {
-			if e.State != nil && trustedScopedRunnerName(a.current) {
-				result.value = result.value.Without(map[types.ScopeID]bool{e.Scope: true}, nil)
-			} else if a.checking {
-				a.escapes[e.Scope] = true
-			}
+		if e.Scoped {
+			result.value = result.value.Without(map[types.ScopeID]bool{e.Scope: true}, nil)
 		}
 		result.uses = result.uses.Without(map[types.ScopeID]bool{e.Scope: true}, nil)
 		return result
@@ -540,16 +427,7 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		body := a.expr(e.Body, inner, evidence)
 		release := a.expr(e.Release, inner, evidence)
 		result := captureResult{value: body.value, uses: types.UnionCaptures(acquired.uses, body.uses, release.uses)}
-		if result.value.HasScope(e.Scope) {
-			if trustedScopedRunnerName(a.current) {
-				// The intrinsic's own definition applies an abstract callback to
-				// the resource, so the conservative indirect-call rule always
-				// retains the scope here. Its callers are restricted instead.
-				result.value = result.value.Without(map[types.ScopeID]bool{e.Scope: true}, nil)
-			} else if a.checking {
-				a.escapes[e.Scope] = true
-			}
-		}
+		result.value = result.value.Without(map[types.ScopeID]bool{e.Scope: true}, nil)
 		result.uses = result.uses.Without(map[types.ScopeID]bool{e.Scope: true}, nil)
 		return result
 	case *Case:
@@ -561,66 +439,6 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 	default:
 		return captureResult{}
 	}
-}
-
-// scopeResourceType returns the instantiated resource type of a cleanup-scope
-// call, and whether the callee is that intrinsic or a bundled resource runner
-// at all. A resource runner's resource is fixed by name, so no instantiation
-// is needed for it.
-func (a *captureAnalyzer) scopeResourceType(d *Def, e *App) (types.Type, bool) {
-	if resource, ok := types.ResourceRunner(d.Name); ok {
-		if adt := a.adtsByName[resource]; adt != nil {
-			return adt.Con, true
-		}
-		return nil, false
-	}
-	if d.Name != types.ScopeBracketName || len(d.Params) != 3 {
-		return nil, false
-	}
-	args, _ := PeelFun(d.Type, 3)
-	acquire, ok := args[0].(*types.TFun)
-	if !ok {
-		return nil, false
-	}
-	m := make(map[int]types.Type, len(d.TyParams))
-	for i, tv := range d.TyParams {
-		if i < len(e.TyArgs) {
-			m[tv.ID] = e.TyArgs[i]
-		}
-	}
-	return types.SubstRigid(acquire.Ret, m), true
-}
-
-func trustedScopedRunnerName(d *Def) bool {
-	return d != nil && trustedScopedRunner(d.Name)
-}
-
-func trustedScopedRunner(name string) bool {
-	switch name {
-	case "State.run", "Writer.run", "Random.runSeeded", "Random.runSystem", types.ScopeBracketName:
-		return true
-	}
-	_, resource := types.ResourceRunner(name)
-	return resource
-}
-
-// trustedForwarder exempts a bundled runner's own call to the runner it
-// wraps: Random.runSystem forwards to runSeeded, and a File resource runner
-// forwards to the cleanup-scope intrinsic or to another File runner. The
-// wrapper's polymorphic result is what its callers are checked against, so
-// checking the forwarding call itself would reject the wrapper's definition.
-func trustedForwarder(current, callee *Def) bool {
-	if current == nil || callee == nil {
-		return false
-	}
-	if current.Name == "Random.runSystem" && callee.Name == "Random.runSeeded" {
-		return true
-	}
-	if _, resource := types.ResourceRunner(current.Name); resource {
-		_, calleeResource := types.ResourceRunner(callee.Name)
-		return callee.Name == types.ScopeBracketName || calleeResource
-	}
-	return false
 }
 
 func (a *captureAnalyzer) tree(t Tree, env map[string]types.CaptureSet, evidence map[int][]types.CaptureSet, scrut types.CaptureSet) captureResult {
@@ -683,10 +501,9 @@ func (a *captureAnalyzer) canCarry(t types.Type, seen map[int]bool) bool {
 			}
 		}
 		adt := a.adts[t.Unique]
-		if adt == nil || types.ResourceType(adt.Con.Name) {
-			// A compiler-known resource is a capability regardless of its
-			// shape: the bundled handle is an Int behind a private
-			// constructor, and that Int must not outlive its scope.
+		if adt == nil || adt.Resource {
+			// A marked resource is a capability regardless of its private
+			// representation. Unknown types are conservatively capable too.
 			return true
 		}
 		if seen == nil {

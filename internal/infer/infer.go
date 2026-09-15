@@ -953,7 +953,7 @@ func (ck *Checker) declareTypeHeader(td *ast.TypeDecl) (*types.ADTInfo, []diag.E
 		params[i] = ck.Sup.FreshRigid(types.General)
 	}
 	con := &types.TCon{Unique: ck.Sup.NextUnique(), Name: td.Name}
-	adt := &types.ADTInfo{Con: con, Params: params, ParamKindsKnown: make([]bool, len(params))}
+	adt := &types.ADTInfo{Resource: td.Resource, Con: con, Params: params, ParamKindsKnown: make([]bool, len(params))}
 	ck.TypeNames[td.Name] = con
 	ck.ADTs[con.Unique] = adt
 	ck.ADTOrder = append(ck.ADTOrder, adt)

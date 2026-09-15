@@ -333,3 +333,22 @@ func TestCleanupScopeResultRetainsItsResource(t *testing.T) {
 		t.Fatalf("result captures = %v, want the callback captures retained", def.ResultCaptures)
 	}
 }
+
+func TestLintReconstructsCaptureContracts(t *testing.T) {
+	for _, damage := range []string{"missing", "forged"} {
+		t.Run(damage, func(t *testing.T) {
+			p, b, _, _ := scopeFixture()
+			if errs := InferCaptures(p, b); len(errs) > 0 {
+				t.Fatal(errs)
+			}
+			if damage == "missing" {
+				p.Defs[0].CaptureContract = nil
+			} else {
+				p.Defs[0].CaptureContract.Body.Kind = "scalar"
+			}
+			if got := lintText(p, b); !strings.Contains(got, "capture contract is stale") {
+				t.Fatalf("accepted %s contract: %s", damage, got)
+			}
+		})
+	}
+}

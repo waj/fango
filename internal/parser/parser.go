@@ -59,11 +59,6 @@ func Parse(toks []token.Token, f *source.File) (*ast.Module, []diag.Error) {
 		}
 	}
 	for p.peek().Kind != token.EOF {
-		if t := p.peek(); t.Kind == token.PRAGMA {
-			p.next()
-			p.errorAt(t.Span, "MISPLACED PRAGMA", "A pragma describes the whole file, so it belongs above the `module`\nheader rather than here.")
-			continue
-		}
 		declStart := p.pos
 		if d := p.parseDecl(); d != nil {
 			sp := p.spanOfTokens(declStart, p.pos)
@@ -99,13 +94,12 @@ func ParseExprInput(toks []token.Token, f *source.File) (ast.Expr, []diag.Error)
 }
 
 // parsePragmas consumes the `{-# ... #-}` directives that may precede the
-// module header. A pragma is a property of the whole file, so it has exactly
-// one place to sit; one appearing later is reported where it stands.
+// module header. Declaration-local resource markers are left for parseDecl.
 func (p *parser) parsePragmas(m *ast.Module) {
-	for p.peek().Kind == token.PRAGMA {
+	for p.peek().Kind == token.PRAGMA && p.peek().Text != "resource" {
 		t := p.next()
 		if !p.applyPragma(m, t) {
-			p.errorAt(t.Span, "UNKNOWN PRAGMA", "I don't know the pragma `"+t.Text+"`. The only one I understand is\n`no-prelude`.")
+			p.errorAt(t.Span, "UNKNOWN PRAGMA", "I don't know the pragma `"+t.Text+"`. Use `no-prelude` above the module header, or `resource` before a type declaration.")
 		}
 	}
 }
@@ -281,6 +275,27 @@ func (p *parser) parseDecl() ast.Decl {
 			"I was expecting a new declaration, which must start at column 1,\nbut this is indented.")
 		p.recoverToTopLevel(false)
 		return nil
+	}
+	if t.Kind == token.PRAGMA {
+		p.next()
+		if t.Text != "resource" {
+			p.errorAt(t.Span, "MISPLACED PRAGMA", "Only `{-# resource #-}` may precede a declaration; file pragmas belong above the module header.")
+			return nil
+		}
+		if p.peek().Kind == token.EOF {
+			p.errorAt(t.Span, TitleUnexpectedEOF, "After `{-# resource #-}` I expect a type declaration.")
+			return nil
+		}
+		if p.peek().Kind != token.KwType {
+			p.errorAt(p.peek().Span, "MISPLACED RESOURCE PRAGMA", "`{-# resource #-}` must immediately precede one type declaration.")
+			return nil
+		}
+		d := p.parseDecl()
+		if td, ok := d.(*ast.TypeDecl); ok {
+			td.Resource = true
+			td.ResourceSpan = t.Span
+		}
+		return d
 	}
 	if t.Kind == token.KwType {
 		return p.parseTypeDecl()

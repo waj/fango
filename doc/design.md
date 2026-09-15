@@ -148,37 +148,30 @@ the answer: the body's exit stays primary and the release's exit is recorded
 in it, inner to outer. A release that fails after a successful body is the
 only failure and propagates on its own.
 
-Scopes carry their own `ScopeID`, and the acquired resource binds it, so the
-existing non-escape analysis applies to a borrowed resource exactly as to a
-scoped handler activation. Inside the intrinsic the body applies an abstract
-callback to the resource, which the conservative indirect-call rule always
-treats as retaining it, so the intrinsic itself is exempt and its callers are
-restricted instead: a call whose instantiated result can carry a capture is
-rejected when the instantiated resource type can carry one too. A scope over a
-scalar — `Scope.finally`, whose resource is Unit, among them — leaves its
-result unrestricted. Because a scope's ScopeID is also a scoped capability,
-storing the resource in another scoped handler's evidence is rejected by the
-same cross-scope rule that governs state cells.
+Scopes carry their own `ScopeID`, and a capture-capable acquired resource
+binds it. The same non-escape proof covers borrowed resources and scoped
+handler activations. A scalar resource, including the Unit resource of
+`Scope.finally`, adds no capture to its borrowed value.
 
-Whether a type can carry a capture is decided by its shape — functions and
-type variables can, scalars cannot, algebraic data can when a field can —
-with one deliberate exception: a *compiler-known resource type*, identified
-by canonical name in `internal/types/intrinsic.go`, always can. The bundled
-`File.Handle` is an `Int` behind a private constructor, so its shape says
-nothing; the name says it is a capability, and that single switch makes every
-existing rule apply to it. The bundled resource runners `File.withFile`,
-`withOutput`, and `withAppend` are ordinary fango over `Scope.bracket`, and
-the capture analysis treats them as it treats `State.run`: their call sites
-are checked against the instantiated result type with the resource fixed to
-`File.Handle`, and a runner's own call to the intrinsic (or to another
-runner) is exempt in the same way `Random.runSystem`'s call to `runSeeded`
-is, so the wrapper's polymorphic result is what its callers answer for. The
-bracket `ScopeID` never reaches a caller — the callback's resource is an
-abstract capture variable — so these type-based rules are the whole
-mechanism for a handle escaping through a result or a scoped runner's state.
-They do not cover a value that leaves through an operation of a handler
-installed *outside* the scope, which the roadmap records as an open gap for
-every capture-capable resource.
+Capture capability follows type shape: functions and type variables can carry
+captures, scalars cannot, and algebraic data can when a field can. A nominal
+type marked `{-# resource #-}` always can, independently of its fields.
+The marker belongs to the following type declaration and survives resolution
+as nominal ADT metadata. Modules must export such types opaquely; constructors,
+record fields, and reflected schemas remain private. The defining module and
+native implementation own representation correctness. The marker itself does
+not acquire or release anything. `File.Handle` and its private directory handle
+use this declaration mechanism, with no canonical resource-name registry.
+
+Resource wrappers infer contracts from their implementation over `Scope.bracket`.
+A wrapper exports the callback's lifetime obligations instead of requiring
+a capture-free result type or receiving a compiler exemption. A returned
+closure is accepted when it does not capture the acquired resource. Stores
+through outer handlers are checked even when the computation returns Unit;
+an inner owner may retain an outer resource only within that resource's lifetime.
+An outer resumptive handler may borrow synchronously without retaining its
+argument. An abort payload cannot carry a resource across its cleanup boundary,
+since the destination clause executes after cleanup.
 
 Every handler activation also has a compiler-only `ScopeID`. Evidence in Core
 therefore names both its nominal effect and the activation (or an abstract
@@ -196,19 +189,28 @@ restores definition-site outer evidence and evaluates the clause. Foreign exits
 continue outward, and exits from a clause or return transformation are never
 routed back into the same activation. Target tokens are pointers to a
 non-zero-sized runtime value, so recursive activations of the same nominal
-effect remain distinct.
+effect remain distinct. The generated envelope records the canonical effect
+name rather than a compiler-local numeric identity, keeping module output
+stable across import graphs; dispatch uses the activation target.
 
-Capture summaries are separate from effect rows. Each worker parameter and
-caller-supplied evidence parameter binds a capture variable, and a fixed-point
-analysis records which of those variables or concrete scopes may occur in the
-worker's result. Calls substitute actual argument/evidence captures into that
-summary. Lambdas retain the captures used by their body after removing their
-own term and evidence binders; constructors and records retain field captures;
-matches, partial applications, dictionary values, lifted locals, and callback
-row adapters propagate them. Unknown indirect calls conservatively retain
-capture-capable arguments. Concrete scalar and Unit results cannot carry a
-capture, and nominal ADT schemas are inspected transitively so ordinary
-synchronous traversals returning immutable data are admitted.
+Capture contracts are separate from effect rows. Alongside symbolic result
+capture sets, each definition exports a finite capture-flow graph that erases
+scalar computation and preserves calls, callback invocation, constructor fields,
+handler interpretations, state updates, and scope obligations. Abstract callback
+and evidence requirements remain in this graph until callers supply their
+interpretations. Definitions, schemes, module increments, and REPL checkpoints
+retain the contracts; source annotations do not erase them.
+
+Contract checking substitutes actual callbacks and evidence and joins branches.
+An allocation-site abstract heap tracks closures and constructor fields; closures
+retain free values and definition-site evidence, excluding their own binders.
+Recursive calls join enclosing contexts and iterate to a fixed point, without
+an iteration-limit success fallback. Separate acyclic call paths distinguish
+nested owners. Folded recursive activations cannot establish that two dynamic
+owners are identical, so retention requiring that equality is rejected
+conservatively. Concrete scalar results cannot carry captures. Pattern matching,
+partial applications, dictionaries, lifted locals, and row adapters preserve
+the same flow obligations.
 
 Source-declared stateless effects remain durable by default, preserving
 existing Reader closures. A parameterized handler is scoped regardless of its
@@ -218,13 +220,14 @@ operation result as borrowing its evidence, or mark an operation as retaining
 arguments. A scoped handler rejects a result that transitively retains its
 activation, including a closure hidden in an ADT or one passed through another
 worker. A retaining operation also rejects storing an inner scoped capture in
-different evidence. Core lint independently recomputes summaries, checks
+longer-lived evidence. Clause evaluation propagates actual operation payloads,
+resumed results, state snapshots, and abort answers. Core lint independently
+reconstructs capture-flow graphs, rejects missing or stale checked contracts,
+recomputes result summaries, checks
 scope introduction and exact evidence-stack availability, and repeats the
 non-escape proof after ANF, lifting, callback adaptation, and specialization.
-The bundled polymorphic State, Writer, and seeded-Random runners carry a hidden
-capture boundary: calls whose instantiated result can carry their local
-capability are conservatively rejected; immutable scalar and transitively
-capture-free ADT results are admitted.
+The bundled State, Writer, seeded-Random, and resource runners use these same
+contracts; there are no trusted runner or forwarding-name exemptions.
 
 Execution transport is compiler metadata distinct from both effect rows and
 operation discipline. Each Core arrow, definition, lambda, application, and
@@ -256,6 +259,13 @@ to the Direct family. A named pure worker that produces a controlled value
 likewise has Direct- and Exit-family members even though both members use the
 Direct execution protocol; the family selects the result representation
 independently of whether the worker itself returns an outcome.
+
+A statically Direct call that constructs an Exit-family value selects a
+transport-polymorphic worker's Exit member, widening any Direct evidence.
+`RequireNormal` projects the result under the Core Direct contract and rejects
+an unexpected exit as a compiler invariant violation. This preserves the
+joined module-owned ABI without discarding a real exit or adding a variant
+for each combination of callback and result representations.
 
 ## Compiler pipeline
 

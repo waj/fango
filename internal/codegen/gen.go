@@ -792,6 +792,9 @@ func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
 	if !voidResult {
 		return assignBlank(g.workerCallExpr(e))
 	}
+	if g.workerNeedsNormalProjection(e) {
+		return assignBlank(g.workerCallExpr(e))
+	}
 	for i, a := range e.Args {
 		if i < len(formal) && g.isUnit(formal[i]) && !unitAtom(a) {
 			return exprStmt(g.workerCallExpr(e))
@@ -1517,7 +1520,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		}
 		exit := &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: selector("fangort", "ExitRequest"), Elts: []goast.Expr{
 			&goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Target")}},
-			&goast.KeyValueExpr{Key: ident("Effect"), Value: intLit(int64(e.Op.Owner.Unique))},
+			&goast.KeyValueExpr{Key: ident("Effect"), Value: stringLit(e.Op.Owner.Name)},
 			&goast.KeyValueExpr{Key: ident("Operation"), Value: intLit(int64(e.Op.Index))},
 			&goast.KeyValueExpr{Key: ident("Payload"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: ident("any")}, Elts: payload}},
 		}}}
@@ -1545,6 +1548,15 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 	ref := e.Callee.(*core.VarRef)
 	formal, voidResult := g.workerABI(ref.Name)
 	mode := e.Control.Resolve(g.control)
+	// A source-Direct call can still construct an Exit-family function value.
+	// A polymorphic worker has a joined execution/representation ABI, so use
+	// its Exit member and project its statically normal result. Supplied Direct
+	// evidence is widened below; no Exit is discarded by this projection.
+	normalProjection := g.workerNeedsNormalProjection(e)
+	if normalProjection {
+		mode = types.Exit
+		g.usesFangort = true
+	}
 	abi := g.workerCallABI(g.defs[ref.Name], mode)
 	args := make([]goast.Expr, 0, len(e.EvidenceArgs)+len(e.Args))
 	for _, ev := range e.EvidenceArgs {
@@ -1589,9 +1601,16 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 		if mode == types.Exit {
 			result = g.outcomeType(e.Ty)
 		}
-		return callExpr(funcLit(result, body))
+		wrapped := callExpr(funcLit(result, body))
+		if normalProjection {
+			return callExpr(selector("fangort", "RequireNormal"), wrapped)
+		}
+		return wrapped
 	}
 	call := callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...)
+	if normalProjection {
+		return callExpr(selector("fangort", "RequireNormal"), call)
+	}
 	if mode == types.Exit {
 		return call
 	}
@@ -1599,6 +1618,12 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 		return callExpr(funcLit(g.goType(e.Ty), []goast.Stmt{exprStmt(call), returnStmt(g.unitValue())}))
 	}
 	return call
+}
+
+func (g *gen) workerNeedsNormalProjection(e *core.App) bool {
+	d := g.defs[e.Callee.(*core.VarRef).Name]
+	return d != nil && d.Control.Polymorphic &&
+		e.Control.Resolve(g.control) == types.Direct && g.representationMode() == types.Exit
 }
 
 // callArgExpr widens a direct callback to the Exit representation family when

@@ -891,6 +891,20 @@ func buildInterface(n *node, errs []diag.Error) (*iface, []diag.Error) {
 	}
 	pub := newIface()
 	ex := n.mod.Header.Exposing
+	for _, decl := range n.mod.Decls {
+		td, ok := decl.(*ast.TypeDecl)
+		if !ok || !td.Resource {
+			continue
+		}
+		if ex.All {
+			errs = append(errs, diag.Errorf(td.ResourceSpan, "RESOURCE REPRESENTATION EXPOSED", "Resource `%s` must be exported opaquely; replace `exposing (..)` with an explicit export list.", td.Name))
+		}
+		for _, item := range ex.Items {
+			if item.Name == td.Name && item.All {
+				errs = append(errs, diag.Errorf(item.Sp, "RESOURCE REPRESENTATION EXPOSED", "Expose resource `%s` without `(..)` so its representation stays private.", td.Name))
+			}
+		}
+	}
 	if ex.All {
 		for k, v := range all.values {
 			pub.values[k] = v

@@ -53,22 +53,6 @@ The operation's apparent result type does not determine its execution mode:
 the supplied interpretation does. `Async` describes execution, `IO` external
 interaction, and `Fail Error` typed failure; none erases the others.
 
-**Proposed example — milestone 2:**
-
-```fango
-File.withFile path \file ->
-    process file
-
-withConnection address use =
-    Scope.bracket (\_ -> openConnection address) closeConnection use
-```
-
-The familiar file scope already exists with a parenthesized callback.
-`withConnection` illustrates a user library wrapper: a generally declared
-opaque resource and its wrapper receive the same capture checking as `File`,
-without registering either name in the compiler. Acquisition/release in this
-example are synchronous; their suspending forms arrive in milestone 5.
-
 ### Stream descriptions and pipelines
 
 **Proposed example — milestone 3:**
@@ -237,7 +221,7 @@ returning or propagating failure, including when downstream stops between
 yields. Lookahead consumers keep a bounded value buffer, and many-input or
 many-output stages use these same facilities.
 
-**Schematic lifetime contracts — milestone 2 foundations, milestone 3 cursors;
+**Schematic lifetime contracts — milestone 3 cursors;
 not Fango syntax:**
 
 ```text
@@ -253,9 +237,9 @@ Every scope entry has a fresh identity, including recursive entries. Inferred
 contracts propagate through helper calls, closures, ADTs, and effect evidence,
 and module interfaces export them. An output element with captures retains its
 own lifetime restrictions; wrapping it in `Maybe` does not erase them. Ordinary
-examples infer identities and borrow boundaries. The source spelling for
-explicit resource declarations and advanced capture contracts is a milestone 2
-design task, not a claim that the schematic notation is accepted today.
+examples infer identities and borrow boundaries. Resource declarations and inferred synchronous borrowing contracts are implemented
+(see the reference). Written capture and access annotations remain milestone 9;
+the schematic notation above is not accepted source syntax.
 
 ### Structured async
 
@@ -338,20 +322,17 @@ are outside the committed scope.
 ## Language foundations and compiler boundary
 
 The implemented baseline includes Direct/Exit effects, synchronous `Scope`,
-`Fail`, scoped `File`, and a limited experimental `Generator`/`Iterator` path.
-It does not yet provide the general borrowing, Stream, or task APIs above.
-Preserve its useful mechanisms while replacing terminal intrinsics and
-canonical resource-name lists with general rules:
+`Fail`, declared scoped resources, inferred capture contracts, and a limited
+experimental `Generator`/`Iterator` path. It does not yet provide exclusive cursor
+borrowing, Stream, or the task APIs above.
+Preserve its useful mechanisms while replacing terminal intrinsics with
+ordinary library composition:
 
 - **Effect subsumption:** use the implemented callback inclusion and nominal
   variance rules for the proposed Stream types; never erase a real effect.
-- **Capture and borrowing contracts:** infer and export argument retention,
-  result captures, exclusive access, and captured evidence through helpers,
-  closures, ADTs, dictionaries, and module boundaries. General resource
-  declarations grant opaque library resources scoped-capability treatment.
-- **Escape prevention:** check values stored through outer handlers, not only
-  scope return values. The existing outer-handler storage gap must close before
-  promising sound general resource wrappers.
+- **Exclusive borrowing:** extend the implemented capture contracts with access
+  requirements that persist across suspension, including stored callbacks and
+  captured evidence.
 - **Compositional suspension:** Machine calls work through higher-order and
   stored callbacks, nested scopes, result constructors, and module boundaries.
   Unsupported suspension handlers receive source diagnostics, not Core errors.
@@ -396,23 +377,9 @@ Go stack allocation.
 Each stopping point is usable without the remaining sequence. All inherit the
 API tour's semantics and the verification gates below.
 
-### 2. General scoped capabilities
-
-- **API and dependencies:** declare library resources and implement
-  `withConnection` over `Scope.bracket`; checked helpers can borrow resources.
-- **Implementation and soundness:** replace canonical-name treatment with
-  general resource declarations and inferred/exported capture/access contracts.
-  Check outer-handler stores, closure/ADT escape, and indirect helper retention.
-  Define diagnostics naming the owner, escaping value, and conflicting access.
-- **Generated code:** erase static identities after independent Core checking;
-  preserve direct synchronous scopes and exactly-once release authority.
-- **Acceptance/stopping point:** an independent wrapper needs no compiler
-  registration, valid scalar/capture-free results pass, and indirect escape
-  fails before execution. Synchronous resources are useful on their own.
-
 ### 3. Streams and custom traversal
 
-- **API and dependencies:** after 2, deliver `Stream.generate`, transformations,
+- **API and dependencies:** build on implemented scoped capabilities to deliver `Stream.generate`, transformations,
   library consumers, `withCursor`, and `Iterator.next`. The tour's file/filter/
   take, annotated consumer, lookahead parsing, and sequential zip must work.
 - **Implementation and soundness:** complete Machine representation families for
@@ -519,6 +486,19 @@ introduced. These domain functions retain their IO and failure effects.
 - **Acceptance/stopping point:** explain generated-code changes and allocation/
   latency results on an idle host; keep an optimization only with demonstrated
   benefit and all semantic gates passing. No optimization gates earlier API use.
+
+### 9. Explicit capture and borrowing annotations
+
+- **API and dependencies:** after the inferred contracts and access checks in
+  the preceding milestones, add source syntax for written capture, retention,
+  and borrowing contracts. Ordinary helpers continue to infer them.
+- **Implementation and soundness:** check annotations against inferred bodies;
+  preserve contracts across exported interfaces, callback adaptation, and
+  staging. An annotation cannot weaken a proven lifetime or access obligation.
+- **Acceptance/stopping point:** library authors can document and constrain a
+  helper's contract, with diagnostics identifying mismatches and conflicting
+  accesses. Settle the spelling and annotation placement during this milestone;
+  the schematic notation in this roadmap is not a syntax commitment.
 
 ## Failure reporting prerequisite
 

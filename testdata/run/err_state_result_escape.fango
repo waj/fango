@@ -1,9 +1,12 @@
-import Random
+effect Counter
+    readCounter : () -> Int
 
-leakingAction() =
-    ignored = Random.int 1 2
-    Random.int 1
+keep : (() ->{e} Int) -> () ->{e} Int
+keep action = action
 
-leak = Random.runSeeded 0 leakingAction
+-- The callback adapter captures the local interpretation.
+leak =
+    handle keep (\_ -> readCounter()) with state = 0 of
+        readCounter () -> resume state with state
 
 main = 0

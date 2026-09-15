@@ -517,6 +517,13 @@ func installCaptureSummaries(defs []core.Def, ck *infer.Checker) {
 			vars = append(vars, ev.Captures.Vars...)
 		}
 		ck.SetCaptureSummary(d.Name, vars, d.ResultCaptures)
+		summary := ck.CaptureSummaries[d.Name]
+		summary.Contract = d.CaptureContract
+		ck.CaptureSummaries[d.Name] = summary
+		if sch, ok := ck.Env.Lookup(d.Name); ok {
+			sch.CaptureContract = d.CaptureContract
+			ck.Env.Bind(d.Name, sch)
+		}
 	}
 }
 
@@ -533,20 +540,21 @@ func captureDiagnostics(errs []error, ck *infer.Checker, fallback source.Span) [
 	}
 	out := make([]diag.Error, 0, len(errs))
 	for _, err := range errs {
-		var escape core.ScopeEscapeError
-		var resource core.ResourceResultEscapeError
-		var state core.StateResultEscapeError
+		var flow core.CaptureFlowError
 		switch {
-		case errors.As(err, &escape):
-			sp := ck.ScopeSpans[escape.Scope]
-			if sp == (source.Span{}) {
-				sp = fallback
+		case errors.As(err, &flow):
+			title := "RESOURCE ESCAPES"
+			if flow.State {
+				title = "STATE RESULT ESCAPES"
 			}
-			out = append(out, diag.Errorf(sp, "RESOURCE ESCAPES", "%s", escape.Detail()))
-		case errors.As(err, &resource):
-			out = append(out, diag.Errorf(at(resource.In), "RESOURCE ESCAPES", "%s", resource.Detail()))
-		case errors.As(err, &state):
-			out = append(out, diag.Errorf(at(state.In), "STATE RESULT ESCAPES", "%s", state.Detail()))
+			sp := flow.Span
+			if sp.File == nil {
+				sp = ck.ScopeSpans[flow.Scope]
+			}
+			if sp.File == nil {
+				sp = at(flow.In)
+			}
+			out = append(out, diag.Errorf(sp, title, "%s", flow.Detail()))
 		default:
 			out = append(out, diag.Errorf(fallback, "CAPTURE CHECK ERROR", "%v", err))
 		}
@@ -840,7 +848,22 @@ func inferPatternNames(p ast.Pattern) []patternName {
 	return out
 }
 
-func (el *elab) expr(e ast.Expr) core.Expr {
+func (el *elab) expr(e ast.Expr) (out core.Expr) {
+	defer func() {
+		if e == nil {
+			return
+		}
+		switch x := out.(type) {
+		case *core.App:
+			x.Origin = e.Span()
+		case *core.VarRef:
+			x.Origin = e.Span()
+		case *core.Perform:
+			x.Origin = e.Span()
+		case *core.ControlExit:
+			x.Origin = e.Span()
+		}
+	}()
 	if desugared := el.ck.Desugared[e]; desugared != nil {
 		return el.expr(desugared)
 	}

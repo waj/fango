@@ -148,11 +148,12 @@ func SortedRow(r Row) Row {
 // CaptureVars are independently freshened at a value occurrence; they never
 // appear in user-facing type printing.
 type Scheme struct {
-	Vars        []*TVar
-	Preds       []Pred
-	Body        Type
-	CaptureVars []CaptureVar
-	Captures    CaptureSet
+	Vars            []*TVar
+	Preds           []Pred
+	Body            Type
+	CaptureVars     []CaptureVar
+	Captures        CaptureSet
+	CaptureContract *CaptureContract
 }
 
 // Pred is a typeclass-shaped obligation. Eq, Ord, and Show are currently
@@ -391,8 +392,10 @@ func (c *CtorInfo) ValueType() Type {
 // vars (empty for monomorphic types); constructor Fields and Result are
 // expressed over them.
 type ADTInfo struct {
-	Con    *TCon
-	Params []*TVar
+	// Resource marks an opaque scoped capability regardless of representation.
+	Resource bool
+	Con      *TCon
+	Params   []*TVar
 	// ParamKindsKnown distinguishes a header's initially unresolved parameter
 	// kinds from kinds established while resolving its constructor fields.
 	ParamKindsKnown []bool

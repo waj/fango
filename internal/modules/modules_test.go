@@ -346,3 +346,30 @@ func TestCrossModuleOperators(t *testing.T) {
 		})
 	}
 }
+
+func TestResourceExportsAreOpaque(t *testing.T) {
+	for _, tc := range []struct {
+		exports, decl string
+		bad           bool
+	}{
+		{"Handle", "type Handle = Handle Int", false},
+		{"Handle(..)", "type Handle = Handle Int", true},
+		{"..", "type Handle = Handle Int", true},
+		{"Handle", "type Handle = { id : Int }", false},
+		{"Handle(..)", "type Handle = { id : Int }", true},
+	} {
+		t.Run(tc.exports+tc.decl, func(t *testing.T) {
+			dir := t.TempDir()
+			entry := write(t, dir, "Main.fango", "module Main exposing (main)\nimport Resource\nmain = 0\n")
+			write(t, dir, "Resource.fango", "module Resource exposing ("+tc.exports+")\n{-# resource #-}\n"+tc.decl+"\n")
+			_, errs := Load(entry)
+			found := false
+			for _, e := range errs {
+				found = found || e.Title == "RESOURCE REPRESENTATION EXPOSED"
+			}
+			if found != tc.bad || (!tc.bad && len(errs) > 0) {
+				t.Fatalf("errors: %v", errs)
+			}
+		})
+	}
+}

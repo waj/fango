@@ -26,6 +26,10 @@ async function main() {
   assert(!scopeAt(sample.indexOf("|>")).includes("keyword.operator.pipe.fango"));
   assert(!scopeAt(sample.lastIndexOf("value")).includes("variable.parameter.fango"));
 
+  const pragma = grammar.tokenizeLine('{-# resource #-}').tokens;
+  assert(pragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
+  assert(grammar.tokenizeLine('resource = 1').tokens.every(t => !t.scopes.includes('keyword.control.directive.fango')));
+
   const root = path.resolve(__dirname, "../../..");
   let files = 0;
   function visit(dir) {

@@ -5,8 +5,10 @@
 package core
 
 import "github.com/waj/fango/internal/types"
+import "github.com/waj/fango/internal/source"
 
 type Prog struct {
+	CaptureContractsChecked bool
 	// ADTs lists declared types in declaration order — codegen emits marker
 	// interfaces, constructor structs, and derived eq/show from it. Bool is
 	// absent (native Go bool forever, doc/design.md, "Go backend and runtime").
@@ -39,12 +41,13 @@ type Def struct {
 	// as a function, re-evaluated per use.
 	TyParams []*types.TVar
 
-	Params         []string // non-empty ⇒ worker (doc/design.md, "Go backend and runtime"); uncurried Go signature = peeling len(Params) arrows off Type
-	ParamCaptures  []types.CaptureVar
-	EffectParams   []EffectInstance
-	ResultCaptures types.CaptureSet
-	Control        types.Control
-	Body           Expr
+	Params          []string // non-empty ⇒ worker (doc/design.md, "Go backend and runtime"); uncurried Go signature = peeling len(Params) arrows off Type
+	ParamCaptures   []types.CaptureVar
+	EffectParams    []EffectInstance
+	ResultCaptures  types.CaptureSet
+	CaptureContract *types.CaptureContract
+	Control         types.Control
+	Body            Expr
 }
 
 // IsWorker reports whether the definition emits as a function: it has term
@@ -96,6 +99,7 @@ type If struct {
 }
 
 type Perform struct {
+	Origin  source.Span
 	Op      *types.EffectOp
 	Effect  EffectInstance
 	Args    []Expr
@@ -108,6 +112,7 @@ type Perform struct {
 // the normal result type of the abandoned computation; the payload is checked
 // Core data, never an unchecked source value.
 type ControlExit struct {
+	Origin  source.Span
 	Effect  EffectInstance
 	Op      *types.EffectOp
 	Payload []Expr
@@ -247,6 +252,7 @@ type Lambda struct {
 }
 
 type VarRef struct {
+	Origin source.Span
 	Name   string
 	Local  bool // resolves a lexical binding even if a later global shares its spelling
 	Ty     types.Type
@@ -290,6 +296,7 @@ const (
 )
 
 type App struct {
+	Origin       source.Span
 	CalleeKind   CalleeKind
 	Callee       Expr
 	Args         []Expr

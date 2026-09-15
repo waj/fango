@@ -20,8 +20,10 @@ Both `Handle` and `Directory` wrap the sidecar's table id. The compiler erases
 the wrapper to its Int at the Go boundary and nowhere else (doc/design.md,
 "Go backend and runtime"). -}
 
+{-# resource #-}
 type Handle = Handle Int
 
+{-# resource #-}
 type Directory = Directory Int
 
 -- The fallible natives. Each Go function returns an error that the compiler

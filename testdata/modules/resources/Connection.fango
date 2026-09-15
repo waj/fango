@@ -1,0 +1,30 @@
+module Connection exposing (Handle, active, readValue, withConnection)
+
+import Scope
+
+{-# resource #-}
+type Handle = Handle Int
+
+openNative : Int ->{IO} Handle
+openNative = native
+
+closeNative : Handle ->{IO} ()
+closeNative = native
+
+readValue : Handle ->{IO} Int
+readValue = native
+
+active : () ->{IO} Int
+active = native
+
+openConnection value =
+    print ("open:" ++ show value)
+    openNative value
+
+closeConnection connection =
+    value = readValue connection
+    print ("close:" ++ show value)
+    closeNative connection
+
+withConnection : Int -> (Handle ->{IO | e} a) ->{IO | e} a
+withConnection value use = Scope.bracket (\_ -> openConnection value) closeConnection use

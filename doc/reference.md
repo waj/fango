@@ -519,12 +519,12 @@ a missing path is an `Err` with kind `NotFound` for both.
 `File.Handle` is abstract: it has no constructor, no `Show`, and no `Eq`, and
 it can be obtained only inside a `with*` scope. The compiler treats it as a
 capability, so a body may not return the handle, a closure over it, or data
-containing it (`RESOURCE ESCAPES`), and a scoped handler outside the scope may
-not keep it in its state (`STATE RESULT ESCAPES`). As with `State.run`, the
-result of a `with*` call must be a scalar or transitively capture-free data,
-so a user-written generic wrapper over `withFile` is rejected; write the body
-at the call site instead. Passing a named worker whose closed row lacks
-`Fail IO.Error` where `use` is expected is a row mismatch; wrap it in a lambda.
+containing it (`RESOURCE ESCAPES`). An outer handler may not keep it in its
+state, even when the surrounding computation returns Unit. Generic wrappers
+over `withFile` infer and export the same lifetime obligations. Functions and
+function-bearing data may be returned when their contracts prove independence
+from the file. Named callbacks use ordinary effect inclusion, so they may
+perform fewer effects than the wrapper permits.
 
 `Basics` also declares three integer functions the prelude leaves out, so
 reaching them unqualified takes an import of your own:
@@ -861,7 +861,8 @@ sees the scalar (`int64` here); the compiler projects the field on the way in
 and rebuilds the constructor on the way out, in both backends. Keep the
 constructor out of the module's exposing list and derive no `Show` or `Eq`,
 and callers hold an opaque handle they can neither forge nor inspect — the
-bundled `File.Handle` is exactly this. Anything else — functions, other ADTs,
+bundled `File.Handle` is exactly this, with `{-# resource #-}` adding its scoped
+capability contract. Anything else — functions, other ADTs,
 records, polymorphic variables, class constraints, Go type parameters, and
 multiple results — is a `NATIVE ABI` error. A Go `error` result is likewise
 rejected in user sidecars (`FALLIBLE NATIVE NOT ALLOWED`); only the bundled
@@ -1731,11 +1732,11 @@ Ordinary stateless user-declared effects have durable evidence: returning a pure
 that captures an immutable Reader-style handler remains legal. There is no
 scope annotation in source syntax. Parameterized handlers are scoped: a result
 that can retain their local capability is rejected with `STATE RESULT ESCAPES`
-or `RESOURCE ESCAPES`. The bundled polymorphic runners conservatively require
-an instantiated result made only from scalars and transitively capture-free
-ADTs; returning a function or an ADT that can contain one is rejected even when
-a particular value would be pure. This does not shorten the lifetime of
-existing stateless handler values.
+or `RESOURCE ESCAPES`. Inferred contracts distinguish functions that capture
+local evidence from functions that are independent of it. A partial operation
+that receives fresh evidence on its next application does not by itself retain
+the preceding handler. This does not shorten the lifetime of existing stateless
+handler values.
 
 A reusable handler wrapper may annotate that residual flow with an open row
 tail. The handled label disappears from the callback's row while every other
@@ -1814,15 +1815,51 @@ the primary failure plus whatever the release did before failing.
 `finally action cleanup` is `bracket` without a resource. Because its resource
 is `()`, it places no restriction on the result it returns.
 
-A scope over a resource that could itself hold a capability does restrict its
-result: a call whose result type can carry a capture is rejected with
-`RESOURCE ESCAPES`, because the compiler cannot prove the returned value does
-not retain the resource past its release. A scope over a scalar, or over any
-resource made of scalars and transitively capture-free algebraic data, leaves
-its result unrestricted. The bundled `File.Handle` is the exception to the
-shape rule: it is an `Int` behind a private constructor, but the compiler
-knows it as a resource, so `File.withFile` and its siblings restrict their
-results exactly as a scope over a closure-bearing record would.
+A scope rejects a result that retains its resource with `RESOURCE ESCAPES`.
+This includes a resource hidden in an ADT or captured by a returned function.
+An unrelated function may be returned when its inferred contract proves that
+it does not capture the resource. Scalars and transitively capture-free data
+remain valid results.
+
+Libraries mark opaque resource types with a declaration pragma:
+
+```fango
+module Connection exposing (Handle, withConnection)
+
+{-# resource #-}
+type Handle = Handle Int
+
+withConnection address use =
+    Scope.bracket (\_ -> openConnection address) closeConnection use
+```
+
+Here `openConnection` and `closeConnection` are private library functions.
+`{-# resource #-}` must precede exactly one type declaration, allowing comments
+and whitespace between them. It supports unions, records, and parameterized
+types. It takes no arguments, cannot be repeated for one declaration, and is
+not a file-header directive. `resource` remains an ordinary identifier outside
+the pragma. The declaration works at the REPL as well.
+
+A resource type carries a capability even when represented by an `Int`.
+Export it as `Handle`; exporting its representation with `Handle(..)` or
+`exposing (..)` reports `RESOURCE REPRESENTATION EXPOSED`. Importers cannot
+inspect its constructors, record fields, or reflected schema. Native code and
+the defining module remain responsible for resource representation and native
+correctness. The marker alone does not acquire or release resources.
+
+Wrappers and helpers infer and export capture and retention contracts without
+compiler registration or written lifetime annotations. A helper may borrow a
+resource synchronously. Returning it, retaining it through an indirect callback,
+or storing it in an outer handler reports `RESOURCE ESCAPES`, even when the
+enclosing result is `()`. A proven non-retaining outer resumptive handler may
+use it synchronously. Passing it as an abort payload across its cleanup boundary
+is rejected because the abort clause runs after release. Release callbacks obey
+the same retention checks. Diagnostics identify the owning scope and the value
+or destination that would outlive it.
+
+Contracts are conservative at recursive joins where distinct dynamic owners
+cannot be proved identical. Exclusive cursor access and explicit written
+capture contracts are not part of this synchronous resource API.
 
 `Scope.bracket` remains a compiler intrinsic for cleanup and lifetime handling.
 Its callbacks use the ordinary argument-inclusion rule: acquisition and release

@@ -93,9 +93,9 @@ func TestUnicodeBoundaryValidation(t *testing.T) {
 // failure against it must not edit the request the raising frame still holds.
 func TestSuppressCopiesRatherThanEditingThePrimaryExit(t *testing.T) {
 	target := &ExitTarget{Marker: 1}
-	primary := &ExitRequest{Target: target, Effect: 1, Operation: 0, Payload: []any{"body"}}
-	inner := &ExitRequest{Target: target, Effect: 1, Operation: 0, Payload: []any{"inner release"}}
-	outer := &ExitRequest{Target: target, Effect: 1, Operation: 0, Payload: []any{"outer release"}}
+	primary := &ExitRequest{Target: target, Effect: "Fail.Fail", Operation: 0, Payload: []any{"body"}}
+	inner := &ExitRequest{Target: target, Effect: "Fail.Fail", Operation: 0, Payload: []any{"inner release"}}
+	outer := &ExitRequest{Target: target, Effect: "Fail.Fail", Operation: 0, Payload: []any{"outer release"}}
 
 	once := Suppress(primary, inner)
 	twice := Suppress(once, outer)

@@ -8,7 +8,7 @@ loaded File
 > Err Error { kind = IsDirectory, path = ., message = is a directory } : Result Error (Maybe Line)
 > -- RESOURCE ESCAPES ------------------------------------- <repl>
 
-This scope returns a capture-capable value built from a capture-capable resource, so the compiler cannot prove the resource does not outlive its release. Return immutable data instead.
+`scope result` retains the resource owned by cleanup scope for `Handle` in `Scope.bracket`. The returned value outlives that resource's scope.
 
 1| attempt (\_ -> File.withFile "." (\file -> file))
    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

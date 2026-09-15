@@ -149,7 +149,7 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		for i, p := range e.Payload {
 			payload[i] = slot(p)
 		}
-		return &core.ControlExit{Effect: e.Effect, Op: e.Op, Payload: payload, Ty: e.Ty}, hoists
+		return &core.ControlExit{Origin: e.Origin, Effect: e.Effect, Op: e.Op, Payload: payload, Ty: e.Ty}, hoists
 	case *core.Neg:
 		return &core.Neg{Operand: slot(e.Operand), Ty: e.Ty}, hoists
 	case *core.NativeCall:
@@ -169,7 +169,7 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		for i, a := range e.Args {
 			args[i] = slot(a)
 		}
-		return &core.Perform{Op: e.Op, Effect: e.Effect, Args: args, Ty: e.Ty, Control: e.Control}, hoists
+		return &core.Perform{Origin: e.Origin, Op: e.Op, Effect: e.Effect, Args: args, Ty: e.Ty, Control: e.Control}, hoists
 	case *core.Suspend:
 		return &core.Suspend{Request: slot(e.Request), Ty: e.Ty}, hoists
 	case *core.IteratorScope:
@@ -196,7 +196,7 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		for i, a := range e.Args {
 			args[i] = slot(a)
 		}
-		return &core.App{CalleeKind: e.CalleeKind, Callee: callee, Args: args,
+		return &core.App{Origin: e.Origin, CalleeKind: e.CalleeKind, Callee: callee, Args: args,
 			TyArgs: e.TyArgs, Ty: e.Ty, Ctor: e.Ctor, EvidenceArgs: e.EvidenceArgs, Control: e.Control}, hoists
 	default:
 		panic(fmt.Sprintf("elaborate: anf unhandled node %T", e))

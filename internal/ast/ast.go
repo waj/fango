@@ -579,6 +579,8 @@ func (*PatternDecl) isDecl() {}
 // types and matching"). Its RHS is either constructor alternatives or a
 // standalone record schema. Params declare polymorphic types.
 type TypeDecl struct {
+	Resource     bool
+	ResourceSpan source.Span
 	Name         string
 	NameSpan     source.Span
 	Params       []Param // type parameters (lowercase)

@@ -264,14 +264,14 @@ backends. Abort-only effects, `Result`, and generic cleanup scopes are
 implemented: `Scope.bracket` and `Scope.finally` are ordinary function calls
 with compiler-supported lifetimes, so resource management needs no new cleanup
 syntax. The bundled `Fail` effect, typed `IO.Error` values, and the scoped
-`File` resource API are built on them, with `File.Handle` a compiler-known
-capability. All of this shipped without suspension.
+`File` resource API are built on them, with `File.Handle` a declared scoped
+resource. All of this shipped without suspension.
 
-Callback inclusion, covariant row widening, trailing final lambdas, and ordinary
-pipes are implemented. The remaining proposed sequence is API-first:
+Callback inclusion, covariant row widening, trailing final lambdas, ordinary
+pipes, resource declaration pragmas, and inferred capture/retention contracts
+are implemented. Ordinary wrappers export lifetime obligations; escape through
+outer handlers is checked. The remaining proposed sequence is API-first:
 
-2. General scoped resources and capture/borrowing contracts, including escape
-   through outer handlers.
 3. One Stream API with scoped cursors, ordinary library consumers, complete
    Machine composition, file pipelines, custom parsing, and sequential zip.
 4. Cooperative structured async with nursery-owned tasks, reusable await,
@@ -280,10 +280,11 @@ pipes are implemented. The remaining proposed sequence is API-first:
 6. Bounded ordered/unordered concurrent streams, race, timeout, and subscriptions.
 7. An explicitly selected bounded parallel executor with checked capture transfer.
 8. Measured frame, callback, and pipeline optimization.
+9. Explicit source annotations for capture, retention, and borrowing contracts.
 
 The experimental `Generator`/`Iterator` path currently supports producers yielding
 from their own bodies and the `forEach`/`fold` terminal intrinsics. It is not the
-proposed Stream API: general helper borrowing and compositional Machine lowering
+proposed Stream API: exclusive cursor borrowing and compositional Machine lowering
 remain work. Experimental APIs may be replaced without compatibility scaffolding.
 The detailed roadmap owns cleanup-failure observation as a prerequisite for stable
 reporting, and separates deferred operation polymorphism, builtin IO interception,
