@@ -47,6 +47,17 @@ func TestModulePunctuationAndKeywords(t *testing.T) {
 	}
 }
 
+func TestSemicolonIsStatementPunctuation(t *testing.T) {
+	f := source.NewFile("sequence.fango", []byte("main = print 1; 2"))
+	toks, errs := Lex(f)
+	if len(errs) != 0 {
+		t.Fatalf("lex: %v", errs)
+	}
+	if got := DumpTokens(toks); !strings.Contains(got, "SEMICOLON ;") {
+		t.Fatalf("tokens missing semicolon:\n%s", got)
+	}
+}
+
 func TestGoldens(t *testing.T) {
 	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "lex"))
 	for _, path := range files {

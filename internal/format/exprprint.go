@@ -73,6 +73,8 @@ func exprInline(e ast.Expr) (string, bool) {
 		params, ok1 := patternsInline(e.Params, patternArgInline)
 		body, ok2 := exprInline(e.Body)
 		return "\\" + params + " -> " + body, ok1 && ok2
+	case *ast.Block:
+		return semicolonBlockInline(e)
 	case *ast.Resume:
 		if e.NextState == nil {
 			return "resume", true
@@ -90,6 +92,68 @@ func exprInline(e ast.Expr) (string, bool) {
 	}
 	// Block, Case, Handle and MetaValue have no inline spelling.
 	return "", false
+}
+
+// semicolonBlockInline renders the explicit one-line spelling of a block.
+// Layout blocks deliberately have no inline form; Semicolons is what
+// distinguishes source that may safely retain separators when compacted.
+func semicolonBlockInline(b *ast.Block) (string, bool) {
+	if len(b.Semicolons) == 0 {
+		return "", false
+	}
+	var parts []string
+	for _, item := range blockItems(b) {
+		if item.Expr != nil {
+			s, ok := exprInline(item.Expr)
+			if !ok {
+				return "", false
+			}
+			parts = append(parts, s)
+			continue
+		}
+		bindParts, ok := localBindInline(b.Binds[item.BindIndex])
+		if !ok {
+			return "", false
+		}
+		parts = append(parts, bindParts...)
+	}
+	result, ok := exprInline(b.Result)
+	if !ok {
+		return "", false
+	}
+	parts = append(parts, result)
+	if len(parts) != len(b.Semicolons)+1 {
+		return "", false
+	}
+	return strings.Join(parts, "; "), true
+}
+
+func localBindInline(b ast.LocalBind) ([]string, bool) {
+	var parts []string
+	if b.Ann != nil {
+		parts = append(parts, declName(b.Name)+" : "+annotationText(b.Ann))
+	}
+	if b.Pattern != nil {
+		pat, ok1 := patternInline(b.Pattern)
+		body, ok2 := exprInline(b.Body)
+		if !ok1 || !ok2 {
+			return nil, false
+		}
+		return append(parts, pat+" = "+body), true
+	}
+	for _, eq := range localEquations(b) {
+		params, ok1 := patternsInline(eq.Params, patternArgInline)
+		body, ok2 := exprInline(eq.Body)
+		if !ok1 || !ok2 {
+			return nil, false
+		}
+		head := declName(b.Name)
+		if params != "" {
+			head += " " + params
+		}
+		parts = append(parts, head+" = "+body)
+	}
+	return parts, true
 }
 
 // atomic reports whether an expression needs no parentheses in argument

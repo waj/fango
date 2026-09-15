@@ -1,0 +1,11 @@
+(module
+  (def inline (params a b) (block (expr (app (var print) (var a))) (binop + (var b) (int 1))))
+  (def locals (params x) (block (bind y (binop + (var x) (int 1))) (expr (app (var print) (var y))) (binop * (var y) (int 2))))
+  (def wrapped (params x) (block (expr (app (var print) (var x))) (binop + (var x) (int 1))))
+  (def nested (params condition) (if (var condition) (block (expr (app (var print) (string "then"))) (int 1)) (block (expr (app (var print) (string "else"))) (int 2))))
+  (def outer (params condition) (block (expr (if (var condition) (app (var print) (string "then")) (app (var print) (string "else")))) (int 3)))
+  (def destructure (params pair) (block (pattern-bind (pctor Tuple.Pair (pvar x) (pvar y)) (var pair)) (binop + (var x) (var y))))
+  (def localFunction (params n) (block (bind-group f (equation (patterns (pint 0)) (int 0)) (equation (patterns (pvar x)) (binop + (var x) (int 1)))) (app (var f) (var n))))
+  (def annotated (params x) (block (bind y (ann Int) (var x)) (var y)))
+  (def branch (params maybe) (case (var maybe) (branch (pctor Nothing) (block (expr (app (var print) (int 0))) (int 0))) (branch (pctor Just (pvar x)) (block (expr (app (var print) (var x))) (var x)))))
+  (def handled (params action) (handle (app (var action) (unit)) (clause emit (params value) (block (expr (app (var print) (var value))) (app (resume) (var value)))) (return value (block (expr (app (var print) (var value))) (var value))))))

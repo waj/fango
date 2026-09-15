@@ -37,6 +37,14 @@ func (p *printer) renderExpr(e ast.Expr, ind int) bool {
 		}
 		return false
 	case *ast.Block:
+		// A wrapped explicit block keeps its source line structure verbatim
+		// until the structural renderer can place semicolons and comments as
+		// anchors of their own. Returning false activates the formatter's
+		// declaration-level safe fallback; one-line explicit blocks are handled
+		// by exprInline above.
+		if len(e.Semicolons) > 0 {
+			return false
+		}
 		return p.renderBlock(e, ind)
 	case *ast.Case:
 		return p.renderCase(e, ind)

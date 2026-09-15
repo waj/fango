@@ -74,6 +74,37 @@ func TestTrailingLambdaNeedsParameterAndBody(t *testing.T) {
 	}
 }
 
+func TestMalformedSemicolonBlocks(t *testing.T) {
+	for _, src := range []string{
+		"main = ; 1",
+		"main = print 1;; 2",
+		"main = print 1;",
+		"main = x = 1",
+	} {
+		f := source.NewFile("<test>", []byte(src))
+		toks, _ := lexer.Lex(f)
+		_, errs := Parse(toks, f)
+		if len(errs) == 0 {
+			t.Errorf("accepted %q", src)
+		}
+	}
+}
+
+func TestInlineBodyClassificationStopsAtNestedDelimiters(t *testing.T) {
+	src := "main =\n" +
+		"    handle keep (\\_ -> readCounter()) with state = 0 of\n" +
+		"        keepValue value -> resume value with state\n"
+	f := source.NewFile("<test>", []byte(src))
+	toks, lexErrs := lexer.Lex(f)
+	if len(lexErrs) > 0 {
+		t.Fatal(lexErrs)
+	}
+	_, errs := Parse(toks, f)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+}
+
 // Delimiters inside an open tuple are punctuation, not sibling layout items.
 // In particular they may align with the tuple opener when that opener begins
 // a block expression or a case-branch pattern.

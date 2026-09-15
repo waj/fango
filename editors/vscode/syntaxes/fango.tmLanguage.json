@@ -307,6 +307,10 @@
     "expressions": {
       "patterns": [
         { "include": "#comments" },
+        {
+          "name": "punctuation.separator.statement.fango",
+          "match": ";"
+        },
         { "include": "#native_expr" },
         { "include": "#string" },
         { "include": "#char" },

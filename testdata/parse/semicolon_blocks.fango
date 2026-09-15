@@ -1,0 +1,24 @@
+inline a b = print a; b + 1
+
+locals x = y = x + 1; print y; y * 2
+
+wrapped x = print x;
+    x + 1
+
+nested condition = if condition then print "then"; 1 else print "else"; 2
+
+outer condition = (if condition then print "then" else print "else"); 3
+
+destructure pair = (x, y) = pair; x + y
+
+localFunction n = f 0 = 0; f x = x + 1; f n
+
+annotated x = y : Int; y = x; y
+
+branch maybe = case maybe of
+    Nothing -> print 0; 0
+    Just x -> print x; x
+
+handled action = handle action() of
+    emit value -> print value; resume value
+    return value -> print value; value

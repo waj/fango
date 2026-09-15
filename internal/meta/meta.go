@@ -232,6 +232,7 @@ func copyWith(e ast.Expr, f func(ast.Expr) ast.Expr) ast.Expr {
 		return &n
 	case *ast.Block:
 		n := *e
+		n.Semicolons = append([]source.Span(nil), e.Semicolons...)
 		n.Binds = make([]ast.LocalBind, len(e.Binds))
 		for i, b := range e.Binds {
 			nb := b
@@ -458,6 +459,9 @@ func FillSpans(e ast.Expr, sp source.Span) {
 		}
 		rec(e.Body)
 	case *ast.Block:
+		for i := range e.Semicolons {
+			fill(&e.Semicolons[i])
+		}
 		for i := range e.Binds {
 			b := &e.Binds[i]
 			fill(&b.NameSpan)

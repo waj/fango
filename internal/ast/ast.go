@@ -97,13 +97,17 @@ type If struct {
 	Sp               source.Span // the `if` keyword
 }
 
-// Block is a statement-style body (doc/design.md, "Language semantics"): binding lines followed by one
-// result expression. The parser collapses zero-binding blocks to the plain
-// result expression, so a Block always has at least one binding.
+// Block is a statement-style body (doc/design.md, "Language semantics"):
+// bindings and Unit expressions followed by one result expression. The parser
+// collapses a body with no preceding statement to the plain result expression,
+// so a Block always has at least one non-result item.
 type Block struct {
 	Binds  []LocalBind
 	Items  []BlockItem // ordered; nil for legacy binding-only blocks
 	Result Expr
+
+	// Semicolons is non-empty when explicit separators spell the block.
+	Semicolons []source.Span
 }
 
 type BlockItem struct {

@@ -909,7 +909,7 @@ func (p *parser) parseBodyAfter(introTok token.Token, missing string) ast.Expr {
 			"I got to the end of the input while still expecting an expression.")
 		return nil
 	case t.Pos().Line == introTok.Pos().Line:
-		return p.parseExpr()
+		return p.parseInlineBlock()
 	case p.lay.checkOffside(t.Pos()) == offContinue:
 		return p.parseBlock(t.Pos().Col)
 	default:
@@ -993,9 +993,265 @@ func hasStatementEqual(toks []token.Token, start, col int) bool {
 			if depth == 0 {
 				return true
 			}
+		case token.SEMICOLON:
+			if depth == 0 {
+				return false
+			}
 		}
 	}
 	return false
+}
+
+// classifyInlineStmt is classifyStmt with a source-position boundary instead
+// of a layout-column boundary. An inline item's continuation may be deeper on
+// a later line, but an aligned or outdented token starts the surrounding
+// layout's next item. This keeps an ordinary body such as `x = 2` from looking
+// ahead into a following indented `y = 3` and misclassifying `2` as a pattern.
+func (p *parser) classifyInlineStmt() stmtKind {
+	base := p.toks[p.pos].Pos()
+	inBounds := func(i int) bool {
+		t := p.toks[i]
+		if t.Kind == token.EOF || t.Kind == token.SEMICOLON {
+			return false
+		}
+		return t.Pos().Line == base.Line || t.Pos().Col > base.Col
+	}
+	hasEqual := func(start int) bool {
+		depth := 0
+		for i := start; i < len(p.toks); i++ {
+			t := p.toks[i]
+			if !inBounds(i) && i > start && depth == 0 {
+				return false
+			}
+			if depth == 0 {
+				switch t.Kind {
+				case token.RPAREN, token.RBRACKET, token.RBRACE, token.COMMA,
+					token.ARROW, token.BACKSLASH, token.KwThen, token.KwElse, token.KwOf,
+					token.KwIf, token.KwCase, token.KwHandle:
+					return false
+				}
+				if p.stopWith > 0 && t.Kind == token.LIDENT && t.Text == "with" &&
+					i+2 < len(p.toks) && p.toks[i+1].Kind == token.LIDENT && p.toks[i+2].Kind == token.EQ {
+					return false
+				}
+			}
+			switch t.Kind {
+			case token.LPAREN, token.LBRACKET, token.LBRACE:
+				depth++
+			case token.RPAREN, token.RBRACKET, token.RBRACE:
+				if depth > 0 {
+					depth--
+				}
+			case token.EQ:
+				if depth == 0 {
+					return true
+				}
+			case token.SEMICOLON:
+				if depth == 0 {
+					return false
+				}
+			}
+		}
+		return false
+	}
+
+	i := p.pos
+	if _, isOpName := p.opNameAt(i); isOpName {
+		j := i + 3
+		for inBounds(j) && (p.toks[j].Kind == token.LIDENT || p.toks[j].Kind == token.UNDERSCORE) {
+			j++
+		}
+		if inBounds(j) && p.toks[j].Kind == token.EQ {
+			return stmtLocalOp
+		}
+		return stmtResult
+	}
+	if p.toks[i].Kind != token.LIDENT {
+		if isPatternAtomStart(p.toks[i].Kind) && hasEqual(i) {
+			return stmtPatternBind
+		}
+		return stmtResult
+	}
+	if !inBounds(i + 1) {
+		return stmtResult
+	}
+	switch p.toks[i+1].Kind {
+	case token.EQ:
+		return stmtBind
+	case token.COLON:
+		return stmtAnn
+	}
+	if hasEqual(i + 1) {
+		return stmtLocalFn
+	}
+	return stmtResult
+}
+
+// parseInlineBindBody parses one binding RHS inside a semicolon block. A
+// top-level semicolon ends this binding item; nested bodies (a lambda body or
+// an if arm, for example) still consume their own separators normally.
+func (p *parser) parseInlineBindBody(eqTok token.Token) ast.Expr {
+	t := p.peek()
+	switch {
+	case t.Kind == token.EOF:
+		p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
+			"I got to the end of the input while still expecting an expression.")
+		return nil
+	case t.Pos().Line == eqTok.Pos().Line:
+		return p.parseExpr()
+	case p.lay.checkOffside(t.Pos()) == offContinue:
+		return p.parseBlock(t.Pos().Col)
+	default:
+		p.errorAt(p.prevSpan(), "SYNTAX PROBLEM",
+			"This binding has no expression — the next line does not belong\nto it.")
+		return nil
+	}
+}
+
+// parseInlineBlock parses the explicit-separator spelling of a statement
+// body. With no semicolon it collapses to the ordinary expression, just as a
+// zero-statement layout block does. Every semicolon commits the expression or
+// binding to being a non-final item, so a trailing separator cannot imply
+// Unit: the block invariant still requires one explicit result expression.
+func (p *parser) parseInlineBlock() ast.Expr {
+	var binds []ast.LocalBind
+	var items []ast.BlockItem
+	var semicolons []source.Span
+	hasExprStmt := false
+	var pendingAnn *ast.TypeAnn
+	var pendingAnnName token.Token
+
+	for {
+		t := p.peekInExpr()
+		if t.Kind == token.EOF {
+			title := "SYNTAX PROBLEM"
+			if p.peek().Kind == token.EOF {
+				title = TitleUnexpectedEOF
+			}
+			p.errorAt(p.prevSpan(), title,
+				"A semicolon must be followed by another statement, and the final\nstatement must be this block's result expression.")
+			return nil
+		}
+
+		isResult := false
+		var result ast.Expr
+		switch p.classifyInlineStmt() {
+		case stmtLocalOp:
+			op, _ := p.opNameAt(p.pos)
+			p.errorAt(p.at(p.pos).Span.Merge(p.at(p.pos+2).Span), "OPERATOR DEFINITION",
+				"An operator can only be defined at the top level, in a class, or in\nan instance, so its fixity has one home. `("+op+")` here needs a name\ninstead.")
+			return nil
+
+		case stmtBind, stmtLocalFn:
+			nameT := p.next()
+			params := p.parseValueParams(nameT.Span)
+			eqT := p.peekInExpr()
+			if !p.expect(token.EQ, "I expect `=` after the binding name.") {
+				return nil
+			}
+			if pendingAnn != nil && pendingAnnName.Text != nameT.Text {
+				p.errorAt(nameT.Span, "MISSING DEFINITION",
+					"The type annotation for `"+pendingAnnName.Text+"` must sit directly\nbefore its binding, but this binds `"+nameT.Text+"`.")
+				return nil
+			}
+			rhs := p.parseInlineBindBody(eqT)
+			if rhs == nil {
+				return nil
+			}
+			next := ast.LocalBind{Name: nameT.Text, NameSpan: nameT.Span, Params: params, Ann: pendingAnn, Body: rhs}
+			grouped := false
+			if len(params) > 0 && pendingAnn == nil && len(binds) > 0 && len(items) > 0 && items[len(items)-1].Expr == nil {
+				prev := &binds[len(binds)-1]
+				if prev.Name == next.Name && len(prev.Params) > 0 {
+					if len(prev.Params) != len(next.Params) {
+						p.errorAt(nameT.Span, "INCONSISTENT ARITY", "Adjacent equations for `"+nameT.Text+"` must have the same number of arguments.")
+					} else {
+						if len(prev.Equations) == 0 {
+							prev.Equations = []ast.Equation{{Params: prev.Params, Body: prev.Body, NameSpan: prev.NameSpan}}
+						}
+						prev.Equations = append(prev.Equations, ast.Equation{Params: next.Params, Body: next.Body, NameSpan: next.NameSpan})
+						grouped = true
+					}
+				}
+			}
+			if !grouped {
+				binds = append(binds, next)
+				items = append(items, ast.BlockItem{BindIndex: len(binds) - 1})
+			}
+			pendingAnn = nil
+
+		case stmtPatternBind:
+			if pendingAnn != nil {
+				p.errorAt(t.Span, "DESTRUCTURING ANNOTATION", "A destructuring binding cannot have a direct type annotation; annotate a named subject first.")
+				return nil
+			}
+			p.stmtStart = p.pos
+			pat := p.parsePattern()
+			eqT := p.peekInExpr()
+			if !p.expect(token.EQ, "I expect `=` after the binding pattern.") {
+				return nil
+			}
+			rhs := p.parseInlineBindBody(eqT)
+			if rhs == nil {
+				return nil
+			}
+			binds = append(binds, ast.LocalBind{Pattern: pat, Body: rhs})
+			items = append(items, ast.BlockItem{BindIndex: len(binds) - 1})
+
+		case stmtAnn:
+			nameT := p.next()
+			colon := p.next()
+			if pendingAnn != nil {
+				p.errorAt(nameT.Span, "MISSING DEFINITION",
+					"The type annotation for `"+pendingAnnName.Text+"` must sit directly before its binding.")
+				return nil
+			}
+			preds := p.parseContext()
+			te := p.parseTypeExpr()
+			if te == nil {
+				return nil
+			}
+			pendingAnn = &ast.TypeAnn{Type: te, Preds: preds, Sp: colon.Span.Merge(te.Span())}
+			pendingAnnName = nameT
+
+		case stmtResult:
+			if pendingAnn != nil {
+				p.errorAt(t.Span, "MISSING DEFINITION",
+					"The type annotation for `"+pendingAnnName.Text+"` must sit directly before its binding.")
+				return nil
+			}
+			p.stmtStart = p.pos
+			result = p.parseExpr()
+			if result == nil {
+				return nil
+			}
+			isResult = true
+		}
+
+		if p.peek().Kind != token.SEMICOLON {
+			if !isResult {
+				p.errorAt(p.prevSpan(), "SYNTAX PROBLEM",
+					"This block ended without a result expression. Add `;` and the expression\nwhose value this block should return.")
+				return nil
+			}
+			if len(binds) == 0 && !hasExprStmt {
+				return result
+			}
+			return &ast.Block{Binds: binds, Items: items, Result: result, Semicolons: semicolons}
+		}
+
+		semi := p.next()
+		semicolons = append(semicolons, semi.Span)
+		if isResult {
+			items = append(items, ast.BlockItem{BindIndex: -1, Expr: result})
+			hasExprStmt = true
+		}
+		// A semicolon may join aligned statements inside a layout block. It
+		// does not cross a declaration or case-branch boundary.
+		if p.lay.innermost().kind == ctxBlock {
+			p.stmtStart = p.pos
+		}
+	}
 }
 
 // closesBlock reports whether a token at a block's own column ends the block

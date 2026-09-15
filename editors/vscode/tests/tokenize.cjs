@@ -26,6 +26,11 @@ async function main() {
   assert(!scopeAt(sample.indexOf("|>")).includes("keyword.operator.pipe.fango"));
   assert(!scopeAt(sample.lastIndexOf("value")).includes("variable.parameter.fango"));
 
+  const sequence = 'apply \\a b -> print a; b + 1';
+  const sequenceTokens = grammar.tokenizeLine(sequence).tokens;
+  const separator = sequenceTokens.find(t => t.startIndex <= sequence.indexOf(";") && t.endIndex > sequence.indexOf(";"));
+  assert(separator.scopes.includes("punctuation.separator.statement.fango"));
+
   const pragma = grammar.tokenizeLine('{-# resource #-}').tokens;
   assert(pragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
   assert(grammar.tokenizeLine('resource = 1').tokens.every(t => !t.scopes.includes('keyword.control.directive.fango')));

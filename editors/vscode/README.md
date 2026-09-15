@@ -13,6 +13,7 @@ language (`.fango` files).
 - Strings with the exact Fango escape set (`\\ \" \n \t \r`; anything else is flagged as invalid)
 - `native "…"` bodies with `$1`-style placeholders highlighted
 - Type annotations, effect rows (`->{IO}`, `{Fail String | e}`), ADT declarations, list expressions and patterns (`[one, two | rest]`), qualified names (`List.range`), numeric literals, operator and fixity declarations (`(<+>) a b = …`, `infixl 6 (<+>)`), and user-declared operators
+- Semicolon-separated statement bodies, such as `\x -> print x; x + 1`
 - Editing affordances: comment toggling, bracket matching/auto-closing, indent heuristics
 - Formatting, by running `fango fmt` over the buffer
 

@@ -27,6 +27,10 @@ handler, at an effectful call site, or by the entry-point IO runner.
 Top-level declarations and block bindings are scoped in source order. Forward
 references and shadowing are rejected. A block evaluates its bindings and Unit
 statements eagerly in order, then evaluates exactly one result expression.
+Blocks have two surface spellings: aligned layout items and explicit
+semicolon-separated items. Both become the same ordered AST block; explicit
+blocks additionally retain their separator spans so the formatter can preserve
+their spelling without giving later compiler stages a second sequencing form.
 Top-level functions may recurse; local function bindings may recurse, but
 ordinary value self-reference is an undefined-name error.
 
@@ -1469,6 +1473,9 @@ search is needed and a long line stays long. Whether a construct was written
 across lines is read off its span; where a keyword landed is read off the
 source directly, because the AST records no span for `then`, for `=`, or for a
 declaration name on its definition line as opposed to its annotation line.
+An explicit statement separator is normalized as `left; right` when its block
+is on one line. A wrapped explicit block retains its line structure, with the
+semicolon belonging to the item on its left.
 
 The layout constructs are the ones whose meaning is carried by columns, and a
 renderer that hands each child an indent deeper than its own is what keeps the

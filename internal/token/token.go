@@ -31,15 +31,16 @@ const (
 
 	// Punctuation. None of these characters is an operator character, so
 	// none of them ever takes part in an operator run.
-	LPAREN   // (
-	RPAREN   // )
-	COMMA    // ,
-	DOT      // .
-	DOTDOT   // ..
-	LBRACE   // {
-	RBRACE   // }
-	LBRACKET // [
-	RBRACKET // ]
+	LPAREN    // (
+	RPAREN    // )
+	COMMA     // ,
+	SEMICOLON // ; (statement separator)
+	DOT       // .
+	DOTDOT    // ..
+	LBRACE    // {
+	RBRACE    // }
+	LBRACKET  // [
+	RBRACKET  // ]
 	BACKSLASH
 	UNDERSCORE  // _ (wildcard pattern)
 	DOLLARPAREN // $( — opens a splice; `$` is never a token on its own
@@ -87,7 +88,7 @@ var kindNames = map[Kind]string{
 	EOF: "EOF", INT: "INT", FLOAT: "FLOAT", STRING: "STRING", CHAR: "CHAR",
 	LIDENT: "LIDENT", UIDENT: "UIDENT", PRAGMA: "PRAGMA",
 	OP:     "OP",
-	LPAREN: "LPAREN", RPAREN: "RPAREN", COMMA: "COMMA", DOT: "DOT", DOTDOT: "DOTDOT",
+	LPAREN: "LPAREN", RPAREN: "RPAREN", COMMA: "COMMA", SEMICOLON: "SEMICOLON", DOT: "DOT", DOTDOT: "DOTDOT",
 	LBRACE: "LBRACE", RBRACE: "RBRACE", LBRACKET: "LBRACKET", RBRACKET: "RBRACKET", BACKSLASH: "BACKSLASH",
 	UNDERSCORE: "UNDERSCORE", DOLLARPAREN: "DOLLARPAREN",
 	EQ: "EQ", ARROW: "ARROW", DARROW: "DARROW", COLON: "COLON", PIPE: "PIPE", CARET: "CARET",
@@ -116,12 +117,12 @@ var Keywords = map[string]Kind{
 // opChars is the operator character class. An operator name is a non-empty
 // run of these, so the set is the language's whole operator vocabulary.
 //
-// Four plausible characters are deliberately absent. `.` is record access
+// Several plausible characters are deliberately absent. `.` is record access
 // (`r.field`), module qualification (`List.foldl`), and `..`; because a dot
 // in a name means "module separator" everywhere in name resolution, an
 // operator containing one could not be told from a qualified reference. `$`
 // would make `f $(x)` a splice but `f $ (x)` an application. `\` keeps
-// lambda unambiguous, and `,` `(` `)` `{` `}` are punctuation.
+// lambda unambiguous, and `,` `;` `(` `)` `{` `}` are punctuation.
 //
 // A run may not begin with `--`, which is a line comment and is consumed
 // before operator scanning.

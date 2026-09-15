@@ -256,6 +256,28 @@ Bindings are eager and sequential. Unit-valued expression statements may be
 placed before the final result, which is how effectful work is sequenced.
 There is no `let ... in` expression.
 
+The same block may be written inline with `;` between its items. This works in
+every statement-bearing body: after `=`, `->`, `then`, and `else`, including
+case branches and handler clauses:
+
+```fango
+incrementAfterPrinting = \a b -> print a; b + 1
+withLocal x = y = x + 1; print y; y * 2
+```
+
+Inline blocks admit the same bindings, local functions, annotations,
+destructuring, and Unit statements as indented blocks. The last item is always
+the result, so a leading, doubled, or trailing semicolon is an error; `body;`
+does not imply `()`. A sequence may wrap onto later lines while it remains
+inside the ordinary layout boundary.
+
+A nested body owns the separators it reaches. Thus
+`if condition then a else b; c` means
+`if condition then a else (b; c)`. Parenthesize the completed nested expression
+to continue the surrounding body instead: `(if condition then a else b); c`.
+A semicolon after a local binding RHS ends that binding item, as in the
+`withLocal` example.
+
 An `if` anchors its `then` and `else` at the column of its own `if`. Both may
 align with it, or lead their own line further right, and an `else if` on the
 `else`'s line continues the same chain, so every arm aligns with the first
@@ -1062,9 +1084,9 @@ An operator name is a run of one or more of these characters:
 ```
 
 The runs `=`, `->`, `=>`, `:`, `|`, and `^` are reserved by the grammar and
-cannot be declared. Four plausible characters are deliberately excluded: `.`
+cannot be declared. Other plausible characters are deliberately excluded: `.`
 is field access, module qualification, and `..`; `$` belongs to the splice
-opener `$(`; `\` is the lambda; and `,` `(` `)` `{` `}` are punctuation. So
+opener `$(`; `\` is the lambda; and `,` `;` `(` `)` `{` `}` are punctuation. So
 `(.)`, `($)`, and `(<$>)` are unavailable, while `(<+>)`, `(|>)`, `(>>=)`,
 and `(:::)` are all ordinary names.
 
@@ -1131,8 +1153,9 @@ Scope.bracket acquire release \resource ->
     use resource
 ```
 
-The lambda body extends rightward, including operators, until its enclosing
-layout boundary or delimiter. A list comma ends the current element, so
+The lambda body extends rightward, including operators and semicolon-separated
+statements, until its enclosing layout boundary or delimiter. A list comma
+ends the current element, so
 `[test "one" \_ -> checkOne(), test "two" \_ -> checkTwo()]` contains two
 calls. An indented lambda body may contain bindings and Unit statements.
 Parenthesized lambdas remain valid; a lambda always needs at least one pattern.

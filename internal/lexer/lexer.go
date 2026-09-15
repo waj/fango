@@ -371,7 +371,7 @@ func (l *lexer) lexUnderscore(start int) {
 // punctuation maps the single characters that are not operator characters
 // but still stand alone as tokens.
 var punctuation = map[byte]token.Kind{
-	'(': token.LPAREN, ')': token.RPAREN, ',': token.COMMA,
+	'(': token.LPAREN, ')': token.RPAREN, ',': token.COMMA, ';': token.SEMICOLON,
 	'{': token.LBRACE, '}': token.RBRACE, '\\': token.BACKSLASH,
 	'[': token.LBRACKET, ']': token.RBRACKET,
 }
