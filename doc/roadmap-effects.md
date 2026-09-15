@@ -79,41 +79,73 @@ async-specific spelling. Residual IO and failure remain visible to the caller.
 
 ```fango
 Async.run \_ ->
-    Async.nursery \scope ->
-        first = Async.spawn scope (\_ -> fetch firstUrl)
-        second = Async.spawn scope (\_ -> fetch secondUrl)
-        a = Async.await first
-        b = Async.await second
-        combine a b
+    first = Async.spawn (\_ -> fetch firstUrl)
+    second = Async.spawn (\_ -> fetch secondUrl)
+    a = Async.await first
+    b = Async.await second
+    combine a b
 ```
 
 Calling a suspending function is an ordinary call. `spawn` starts a child owned
-by the nursery. `await` observes stored completion; repeated awaits do not rerun
-work. Initial reusable results must be immutable and capture-free, and handles
-remain nursery-scoped. Result reuse does not permit sharing mutable capabilities.
+by an implicit task context and takes only its action. `Async.run` selects the
+cooperative executor and establishes a root context, so spawning needs no
+additional scope block. `await` observes stored completion; repeated awaits do
+not rerun work. Initial reusable results must be immutable and capture-free, and handles
+remain scoped to their owning context. Result reuse does not permit sharing
+mutable capabilities.
 
-Successful nursery exit waits for all children. Failure or cancellation cancels
+**Proposed nested context — milestone 4:**
+
+```fango
+Async.run \_ ->
+    first = Async.spawn (\_ -> fetch firstUrl)
+
+    b = Async.context \_ ->
+        second = Async.spawn (\_ -> fetch secondUrl)
+        Async.await second
+
+    a = Async.await first
+    combine a b
+```
+
+`Async.context` requires async execution and establishes a nested task lifetime
+and cancellation boundary on the same executor. Its callback receives Unit.
+Here `second` must finish before the inner context exits; `first` belongs to
+the root and must finish before `run` exits. Awaiting an outer task inside an
+inner context is allowed and does not change its owner.
+
+Context ownership flows through scoped effect evidence. An ordinary helper
+receives that evidence from its caller; a closure that captured a definition-site
+context keeps that owner even when invoked inside a different context. Ownership
+does not come from a mutable ambient current-context slot. Task handles and
+closures retaining a context cannot outlive it, including through returned ADTs
+or stores into outer handlers. Child actions inherit their owning context unless
+they establish a nested one; exit waits for tasks spawned by children as well.
+Spawning without an async runner remains an unhandled effect, and detached tasks
+remain outside the proposal.
+
+Successful context exit waits for all owned tasks. Failure or cancellation cancels
 remaining children and drains their cleanup before exit. Unobserved child
-failures still fail the nursery: catching a failure from `await` does not erase
+failures still fail the context: catching a failure from `await` does not erase
 a failed child's completion. Handle expected failures inside the child and
 return a `Result`. Timeout and race cancel and drain losing work explicitly.
 
-`Async.run` selects the cooperative executor. Parent-local mutable state and
-borrowed cursors cannot be captured by children in the initial API, even on that
-executor; children may create their own local state and resources.
+Parent-local mutable state and borrowed cursors cannot be captured by children
+in the initial API, even on the cooperative executor; children may create their
+own local state and resources.
 
 **Proposed executor selection — milestone 7:**
 
 ```fango
 Async.runOn (Executor.parallel 4) \_ ->
-    Async.nursery \scope ->
-        task = Async.spawn scope (\_ -> fetch url)
-        Async.await task
+    task = Async.spawn (\_ -> fetch url)
+    Async.await task
 ```
 
-Parallel execution requires checked transferable captures, including captured
-effect evidence. An effect row alone is not a transfer proof. The executor uses
-bounded workers and preserves the same nursery, resource, and cancellation
+`Async.runOn` also establishes a root context. Parallel execution requires
+checked transferable captures, including captured effect evidence. An effect
+row alone is not a transfer proof. The executor uses
+bounded workers and preserves the same context, resource, and cancellation
 semantics as cooperative execution.
 
 ### Concurrent streams and external events
@@ -204,13 +236,16 @@ API tour's semantics and the verification gates below.
 
 ### 4. Cooperative structured async
 
-- **API and dependencies:** after 2–3, deliver `Async.run`, `nursery`, `spawn`,
-  reusable `await`, and the network interpretation/pipeline in the tour.
+- **API and dependencies:** after 2–3, deliver `Async.run` with an implicit root
+  context, nested `Async.context`, action-only `spawn`, reusable `await`, and the
+  network interpretation/pipeline in the tour.
 - **Implementation and soundness:** sole advancement authority transfers from
   running frame to wait registration to ready queue and back, then to completion
   or cancellation/drain. Duplicate readiness and cancellation races cannot
   create a second owner. Store immutable capture-free task results, keep handles
-  in their nursery, reject unsafe captures, and route child exits via completion.
+  in their owning context, reject unsafe captures, and route child exits via
+  completion. Preserve context identity through effect evidence and captured
+  closures, and drain all owned tasks, including those spawned by children.
 - **Native and cancellation protocol:** use deterministic readiness simulation
   first. Blocking-native bridges have bounded workers, explicit capacity and
   admission backpressure. Cancellation drains outstanding native requests before
@@ -221,7 +256,8 @@ API tour's semantics and the verification gates below.
 - **Generated code:** scheduler dispatch only for suspending work; no mandatory
   goroutine per child/wait and no reliance on Go netpoll internals.
 - **Acceptance/stopping point:** two fetches overlap; repeated await executes once;
-  unobserved failure cancels siblings and drains cleanup. Ctrl-C cancels active
+  root and nested contexts enforce ownership and drain before exit; unobserved
+  failure cancels siblings and drains cleanup. Ctrl-C cancels active
   REPL work and native requests, restores input ownership, and preserves session
   state. Test queued-readiness and `readLine` interruption. This is a useful
   cooperative task system with synchronous cleanup.
@@ -271,7 +307,8 @@ introduced. These domain functions retain their IO and failure effects.
 ### 7. Parallel executor
 
 - **API and dependencies:** after 4–6, `Async.runOn (Executor.parallel 4)` selects
-  bounded parallel execution explicitly; `Async.run` remains cooperative.
+  bounded parallel execution explicitly and establishes a root context;
+  `Async.run` remains cooperative.
 - **Implementation and soundness:** check transfer of values and captured effect
   evidence across executor boundaries. Reject parent-local mutable state and
   borrowed cursors. Permit child-owned local state/resources. Enforce single-owner
@@ -279,7 +316,7 @@ introduced. These domain functions retain their IO and failure effects.
 - **Generated code:** bounded worker scheduling, no worker/thread per task;
   compatible module-owned Machine ABIs and the same cleanup protocol.
 - **Acceptance/stopping point:** safe CPU tasks run concurrently; unsafe captures
-  fail statically. Run equivalent nursery/resource/cancellation fixtures on both
+  fail statically. Run equivalent context/resource/cancellation fixtures on both
   executors, without promising an identical concurrent effect interleaving.
 
 ### 8. Measured optimization
@@ -367,7 +404,16 @@ The API tour is the implementation acceptance-suite specification:
   handlers, or child tasks; reentrant/concurrent cursor advancement is rejected.
 - Zip, bounded lookahead, and many-input/many-output stages work; repeated await
   observes one execution. Concurrent mapping meets ordering and storage bounds.
-- Nursery failure, timeout, duplicate readiness, and cancellation races preserve
+- Root contexts own direct spawns without an explicit context block. Nested
+  contexts drain their own tasks before exit, and outer tasks can be awaited
+  inside them without changing ownership. Context exit also waits for tasks
+  spawned by children after the context body's result is available.
+- Ordinary helper calls use caller-supplied context evidence; closures capturing
+  an outer context keep that owner when invoked inside an inner context. Reject
+  task handles and context-retaining closures escaping their owner directly,
+  through ADTs, or through outer handlers. Spawning without an async runner
+  reports an unhandled effect.
+- Context failure, timeout, duplicate readiness, and cancellation races preserve
   sole advancement authority and drain tasks/resources. Count live registrations,
   frames, handles, and native requests; goroutine counts alone are insufficient.
 - Parallel execution rejects unsafe captures. Generated synchronous pipelines

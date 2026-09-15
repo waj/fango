@@ -272,8 +272,9 @@ pipes, resource declaration pragmas, and inferred capture/retention contracts
 are implemented. Ordinary wrappers export lifetime obligations; escape through
 outer handlers is checked. The remaining proposed sequence is API-first:
 
-4. Cooperative structured async with nursery-owned tasks, reusable await,
-   cancellation/drain, bounded native adapters, and REPL interruption.
+4. Cooperative structured async with implicit root task contexts, nested
+   `Async.context`, reusable await, cancellation/drain, bounded native adapters,
+   and REPL interruption.
 5. Suspending acquisition and cleanup through the same Scope API.
 6. Bounded ordered/unordered concurrent streams, race, timeout, and subscriptions.
 7. An explicitly selected bounded parallel executor with checked capture transfer.

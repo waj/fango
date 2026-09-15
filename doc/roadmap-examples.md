@@ -82,7 +82,7 @@ Forces performance work and concurrency.
   Go boundary and fallible natives returning Go errors. Search is a plain
   substring scan; the performance gate against Go remains unbuilt.
 - [ ] **Parallel downloader or multi-file word count** — the concrete
-  consumer for structured concurrency (nursery, channels, cancellation) and
+  consumer for structured concurrency (task contexts and cancellation) and
   for network/process effects. Deliberately last.
 
 ## Cross-cutting expectations
