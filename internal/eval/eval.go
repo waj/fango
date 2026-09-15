@@ -96,11 +96,13 @@ type CtorVal struct {
 // never materialize as values — elaboration eta-expanded every first-class
 // use, so *Partial from the doc/design.md, "Interpreter and REPL" sketch is not needed.
 type Closure struct {
-	Param    string
-	Body     core.Expr
-	Env      *Frame
-	Evidence map[int]*evidence
-	control  types.Control
+	Param      string
+	Body       core.Expr
+	Env        *Frame
+	Evidence   map[int]*evidence
+	control    types.Control
+	rowParam   types.CaptureVar
+	rowEffects []core.EffectInstance
 	// A transport-polymorphic value retains both its ordinary interpretation
 	// and its checked Machine factory. Choosing a call protocol does not change
 	// the representation of a stored callback.
@@ -152,6 +154,8 @@ func (c *IOContext) nativeExecutor() (*nativehost.Executor, error) {
 }
 
 type evidence struct {
+	row        *fangort.EvidenceRow
+	rowEffect  int
 	yieldOwner *fangort.YieldOwner
 	handler    *core.Handle
 	frame      *Frame
@@ -198,6 +202,7 @@ func (e *Env) Expand(c *meta.Code) ast.Expr {
 // Frame holds block-local bindings (doc/design.md, "Language semantics") — eager values, unlike the lazy
 // top-level cells. Function parameters extend the same chain.
 type Frame struct {
+	rows    rowEnv
 	types   descriptorEnv
 	parent  *Frame
 	vars    map[string]Value
@@ -224,11 +229,11 @@ func closureFrame(lam *core.Lambda, fr *Frame) *Frame {
 			}
 		}
 	})
-	return &Frame{vars: vars, types: fr.descriptors()}
+	return &Frame{vars: vars, types: fr.descriptors(), rows: fr.closureRows(lam)}
 }
 
 func (in *interp) makeClosure(lam *core.Lambda, fr *Frame, desc *machineir.Closure) (*Closure, error) {
-	closure := &Closure{Param: lam.Param, Body: lam.Body, Env: closureFrame(lam, fr), Evidence: in.closureEvidence(lam), control: types.FunctionControl(lam.Ty.(*types.TFun))}
+	closure := in.plainClosure(lam, closureFrame(lam, fr))
 	if desc == nil {
 		return closure, nil
 	}
@@ -460,7 +465,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				return nil, fmt.Errorf("eval: recursive Let `%s` without a Lambda RHS", e.Name)
 			}
 			frame := &Frame{parent: closureFrame(lam, fr), vars: map[string]Value{}}
-			frame.vars[e.Name] = &Closure{Param: lam.Param, Body: lam.Body, Env: frame, Evidence: in.closureEvidence(lam)}
+			frame.vars[e.Name] = in.plainClosure(lam, frame)
 			return in.eval(e.Body, frame)
 		}
 		// Eager, in order — identical to the compiled backend's locals.
@@ -581,7 +586,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			args[i] = v
 		}
-		if ev := in.evidence[e.Effect.Unique]; ev != nil && ev.handler != nil {
+		if ev := resolveEvidence(in.evidence[e.Effect.Unique]); ev != nil && ev.handler != nil {
 			if e.Op.Abort {
 				return nil, fmt.Errorf("eval: abort-only operation `%s` reached Perform", e.Op.Name)
 			}
@@ -648,7 +653,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			descriptors[i] = descriptor
 		}
-		target := in.evidence[e.Effect.Unique]
+		target := resolveEvidence(in.evidence[e.Effect.Unique])
 		if target == nil {
 			return nil, fmt.Errorf("eval: missing abort evidence for `%s.%s`", e.Effect.Name, e.Op.Name)
 		}
@@ -795,6 +800,11 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				}
 				callEvidence[arg.Unique] = ev
 			}
+			row, rowErr := in.argumentRow(e.Row, fr)
+			if rowErr != nil {
+				return nil, rowErr
+			}
+			rows := bindInvocationRow(def.RowParam, def.RowEffects, row, callEvidence)
 			saved := in.evidence
 			in.evidence = callEvidence
 			descriptors, typeErr := in.instantiateDescriptors(def.TyParams, e.TyArgs, fr)
@@ -809,9 +819,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				// Self tail calls run as a frame-reuse loop (doc/design.md,
 				// "Interpreter and REPL") — constant Go stack, like the
 				// compiled backend's for-loop rewrite.
-				out, err = in.evalTailLoop(def, vars, descriptors)
+				out, err = in.evalTailLoop(def, vars, descriptors, rows)
 			} else {
-				out, err = in.eval(def.Body, &Frame{vars: vars, types: descriptors})
+				out, err = in.eval(def.Body, &Frame{vars: vars, types: descriptors, rows: rows})
 			}
 			in.evidence = saved
 			return out, err
@@ -846,8 +856,13 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				}
 				callEvidence[arg.Unique] = ev
 			}
+			row, rowErr := in.argumentRow(e.Row, fr)
+			if rowErr != nil {
+				return nil, rowErr
+			}
+			rows := bindInvocationRow(c.rowParam, c.rowEffects, row, callEvidence)
 			in.evidence = callEvidence
-			out, err := in.eval(c.Body, &Frame{parent: c.Env, vars: map[string]Value{c.Param: v}})
+			out, err := in.eval(c.Body, &Frame{parent: c.Env, vars: map[string]Value{c.Param: v}, rows: rows})
 			in.evidence = saved
 			return out, err
 		case core.Ctor:
@@ -926,7 +941,7 @@ func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID, e
 				return nil, fmt.Errorf("eval: recursive Let `%s` without a Lambda RHS", e.Name)
 			}
 			frame := &Frame{parent: closureFrame(lam, fr), vars: map[string]Value{}}
-			frame.vars[e.Name] = &Closure{Param: lam.Param, Body: lam.Body, Env: frame, Evidence: cloneEvidence(in.evidence)}
+			frame.vars[e.Name] = in.plainClosure(lam, frame)
 			return in.evalResumeTail(e.Body, frame, owner, ev)
 		}
 		v, err := in.eval(e.Rhs, fr)

@@ -22,7 +22,7 @@ type tailJump struct {
 // per-iteration work: the tail skeleton never enters a Handle, and identity
 // evidence (the eligibility predicate) guarantees the worker's own evidence
 // map — installed by the caller — is already correct for every iteration.
-func (in *interp) evalTailLoop(def *core.Def, vars map[string]Value, descriptors descriptorEnv) (Value, error) {
+func (in *interp) evalTailLoop(def *core.Def, vars map[string]Value, descriptors descriptorEnv, rows rowEnv) (Value, error) {
 	for {
 		// A fully-trivial jump (`f x = f x`) evaluates almost nothing, so
 		// count an explicit step per iteration to keep the every-N
@@ -30,7 +30,7 @@ func (in *interp) evalTailLoop(def *core.Def, vars map[string]Value, descriptors
 		if err := in.tick(); err != nil {
 			return nil, err
 		}
-		v, err := in.tailStep(def, def.Body, &Frame{vars: vars, types: descriptors})
+		v, err := in.tailStep(def, def.Body, &Frame{vars: vars, types: descriptors, rows: rows})
 		if err != nil {
 			return nil, err
 		}
@@ -58,7 +58,7 @@ func (in *interp) tailStep(def *core.Def, e core.Expr, fr *Frame) (Value, error)
 				return nil, fmt.Errorf("eval: recursive Let `%s` without a Lambda RHS", e.Name)
 			}
 			frame := &Frame{parent: closureFrame(lam, fr), vars: map[string]Value{}}
-			frame.vars[e.Name] = &Closure{Param: lam.Param, Body: lam.Body, Env: frame, Evidence: cloneEvidence(in.evidence)}
+			frame.vars[e.Name] = in.plainClosure(lam, frame)
 			return in.tailStep(def, e.Body, frame)
 		}
 		v, err := in.eval(e.Rhs, fr)

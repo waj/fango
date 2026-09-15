@@ -893,6 +893,11 @@ including concrete lexical overlays and deferred callback evidence. Its
 dedicated verifier checks binder scope, arrow agreement, and exact lexical
 activation identities. Rewriting and capture-contract reconstruction retain
 the row fields; free-row analysis separates invocation binders from captures.
+The recursive interpreter accepts explicit row arguments on worker and closure
+calls. Deferred effect bindings resolve through those rows when an operation
+executes; captured lexical evidence remains fixed. Mutable-frame closure
+snapshots retain only referenced outer rows. A self-call can reuse its frame
+only when it forwards the identical row without an overlay.
 Hidden evidence parameters precede ordinary worker parameters in deterministic
 effect-identity order, and calls supply matching lexical evidence. The Core
 linter rejects unsolved metavariables, malformed generic applications,

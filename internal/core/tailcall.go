@@ -111,6 +111,13 @@ func IsTailLoopCall(d *Def, e *App) bool {
 	if len(e.Args) != len(d.Params) || len(e.TyArgs) != len(d.TyParams) || len(e.EvidenceArgs) != len(d.EffectParams) {
 		return false
 	}
+	if d.RowParam == 0 {
+		if e.Row != nil {
+			return false
+		}
+	} else if e.Row == nil || e.Row.From != d.RowParam || len(e.Row.Effects) != 0 {
+		return false
+	}
 	for i, ta := range e.TyArgs {
 		tv, ok := ta.(*types.TVar)
 		if !ok || !tv.Rigid || tv.ID != d.TyParams[i].ID {
