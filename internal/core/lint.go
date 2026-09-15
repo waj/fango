@@ -1706,7 +1706,7 @@ func (l *linter) runtimeType(t types.Type) types.Type {
 		}
 		return &types.TCon{Unique: t.Unique, Name: t.Name, Args: args}
 	case *types.TFun:
-		return &types.TFun{Arg: l.runtimeType(t.Arg), Eff: l.runtimeType(t.Eff).(types.Row), Ret: l.runtimeType(t.Ret), Control: t.Control}
+		return &types.TFun{Arg: l.runtimeType(t.Arg), Eff: l.runtimeType(t.Eff).(types.Row), Ret: l.runtimeType(t.Ret), Control: t.Control, OpenRow: types.FunctionOpenRow(t)}
 	case types.Row:
 		labels := make([]types.EffLabel, len(t.Labels))
 		for i, label := range t.Labels {

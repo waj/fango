@@ -113,7 +113,13 @@ type TFun struct {
 	Eff     Row
 	Ret     Type
 	Control Control // omitted by source type printing; materialized for Core
+	// OpenRow remembers a residual source row after Core erases row variables.
+	// It is independent of transport polymorphism: a closed row containing a
+	// resumptive effect also has polymorphic transport.
+	OpenRow bool
 }
+
+func FunctionOpenRow(fn *TFun) bool { return fn.OpenRow || fn.Eff.Tail != nil }
 
 // Row is a distinct-label effect row, optionally ending in an open tail.
 type Row struct {
@@ -248,7 +254,7 @@ func SubstRigid(t Type, m map[int]Type) Type {
 		}
 		return &TCon{Unique: t.Unique, Name: t.Name, Args: args}
 	case *TFun:
-		return &TFun{Arg: SubstRigid(t.Arg, m), Eff: substRigidRow(t.Eff, m), Ret: SubstRigid(t.Ret, m), Control: t.Control}
+		return &TFun{Arg: SubstRigid(t.Arg, m), Eff: substRigidRow(t.Eff, m), Ret: SubstRigid(t.Ret, m), Control: t.Control, OpenRow: t.OpenRow}
 	case Row:
 		return substRigidRow(t, m)
 	default:

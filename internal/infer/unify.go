@@ -45,7 +45,7 @@ func (s Subst) Apply(t types.Type) types.Type {
 		}
 		return &types.TCon{Unique: t.Unique, Name: t.Name, Args: args}
 	case *types.TFun:
-		return &types.TFun{Arg: s.Apply(t.Arg), Eff: s.applyRow(t.Eff), Ret: s.Apply(t.Ret), Control: t.Control}
+		return &types.TFun{Arg: s.Apply(t.Arg), Eff: s.applyRow(t.Eff), Ret: s.Apply(t.Ret), Control: t.Control, OpenRow: t.OpenRow}
 	case types.Row:
 		return s.applyRow(t)
 	default:

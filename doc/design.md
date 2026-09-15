@@ -875,6 +875,10 @@ lexical handler can intercept them before their native boundary default.
 Effectful Core uses `Perform`, `Handle`, `Resume`, `Seq`, and `Bracket`. Open source row
 tails are erased after evidence requirements have been derived; concrete labels
 remain on first-class arrows as their indirect-call evidence ABI.
+An arrow also retains whether its source ABI had a residual row, independently
+of transport polymorphism. Substitution, callback adaptation, nominal field
+instantiation, and synchronous scope lowering preserve that metadata. A pure
+factory does not inherit the residual row of a callback it returns.
 Hidden evidence parameters precede ordinary worker parameters in deterministic
 effect-identity order, and calls supply matching lexical evidence. The Core
 linter rejects unsolved metavariables, malformed generic applications,

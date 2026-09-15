@@ -1398,7 +1398,7 @@ func (el *elab) eraseRuntimeKinds(t types.Type) types.Type {
 		}
 		return &types.TCon{Unique: t.Unique, Name: t.Name, Args: args}
 	case *types.TFun:
-		return &types.TFun{Arg: el.eraseRuntimeKinds(t.Arg), Eff: el.eraseRuntimeKinds(t.Eff).(types.Row), Ret: el.eraseRuntimeKinds(t.Ret), Control: t.Control}
+		return &types.TFun{Arg: el.eraseRuntimeKinds(t.Arg), Eff: el.eraseRuntimeKinds(t.Eff).(types.Row), Ret: el.eraseRuntimeKinds(t.Ret), Control: t.Control, OpenRow: types.FunctionOpenRow(t)}
 	case types.Row:
 		labels := make([]types.EffLabel, len(t.Labels))
 		for i, l := range t.Labels {
@@ -1463,7 +1463,7 @@ func eraseRowsFrom(origin, t types.Type) types.Type {
 			eff.Labels = append(eff.Labels, types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Suspension: l.Suspension})
 		}
 		control := types.FunctionControl(t)
-		return &types.TFun{Arg: arg, Eff: eff, Ret: ret, Control: control}
+		return &types.TFun{Arg: arg, Eff: eff, Ret: ret, Control: control, OpenRow: types.FunctionOpenRow(of)}
 	case types.Row:
 		return types.Row{}
 	default:

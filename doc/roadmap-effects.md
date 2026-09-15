@@ -329,6 +329,8 @@ and their terminal Core nodes have been removed. The remaining milestone-3 work 
 latent effect-evidence propagation for descriptions
 constructed outside their handlers and consumer recovery after producer failure,
 and the remaining acceptance coverage.
+Core retains residual-arrow metadata separately from transport; explicit row
+evidence transport and its ownership checks still need to use that information.
 The task APIs above remain unimplemented.
 
 - **Effect subsumption:** use the implemented callback inclusion and nominal

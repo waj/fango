@@ -24,8 +24,16 @@ func synchronousScopeMember(source *core.Def) (*core.Def, []int) {
 	}
 	copy := *source
 	copy.Type = result
+	var arrows []*types.TFun
+	for ty := source.Type; len(arrows) < 3; {
+		fn := ty.(*types.TFun)
+		arrows = append(arrows, fn)
+		ty = fn.Ret
+	}
 	for i := 2; i >= 0; i-- {
-		copy.Type = &types.TFun{Arg: args[i], Ret: copy.Type, Control: core.ArrowControl(source.Type, i+1)}
+		fn := *arrows[i]
+		fn.Arg, fn.Ret, fn.Control = args[i], copy.Type, core.ArrowControl(source.Type, i+1)
+		copy.Type = &fn
 	}
 	copy.Body = core.Rewrite(source.Body, identityType, func(e core.Expr) core.Expr {
 		if ref, ok := e.(*core.VarRef); ok && ref.Local && replacements[ref.Name] != nil {

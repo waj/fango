@@ -129,7 +129,7 @@ func subsumption(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply,
 			}
 			return r
 		case *types.TFun:
-			return &types.TFun{Arg: view(t.Arg, flip(p)), Eff: view(t.Eff, p).(types.Row), Ret: view(t.Ret, p), Control: t.Control}
+			return &types.TFun{Arg: view(t.Arg, flip(p)), Eff: view(t.Eff, p).(types.Row), Ret: view(t.Ret, p), Control: t.Control, OpenRow: t.OpenRow}
 		case *types.TCon:
 			args := append([]types.Type(nil), t.Args...)
 			for i, a := range args {

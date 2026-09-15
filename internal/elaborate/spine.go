@@ -465,7 +465,7 @@ func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
 func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 	actualFn, actualIsFn := e.Type().(*types.TFun)
 	wantFn0, wantIsFn := want.(*types.TFun)
-	if types.Equal(e.Type(), want) && (!actualIsFn || !wantIsFn || types.FunctionControl(actualFn) == types.FunctionControl(wantFn0)) {
+	if types.Equal(e.Type(), want) && (!actualIsFn || !wantIsFn || types.FunctionControl(actualFn) == types.FunctionControl(wantFn0) && types.FunctionOpenRow(actualFn) == types.FunctionOpenRow(wantFn0)) {
 		return e
 	}
 	wantFn, wantOK := want.(*types.TFun)
@@ -542,7 +542,7 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 	body := el.valueApp(e, arg)
 	el.popEvidence(effectParams)
 	body = el.adaptFunctionValue(body, wantFn.Ret)
-	return &core.Lambda{Param: name, Body: body, Ty: &types.TFun{Arg: wantFn.Arg, Eff: wantFn.Eff, Ret: wantFn.Ret, Control: wantFn.Control},
+	return &core.Lambda{Param: name, Body: body, Ty: &types.TFun{Arg: wantFn.Arg, Eff: wantFn.Eff, Ret: wantFn.Ret, Control: wantFn.Control, OpenRow: wantFn.OpenRow},
 		ParamCapture: el.ck.Sup.FreshCapture(), EffectParams: effectParams}
 }
 
