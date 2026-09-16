@@ -30,6 +30,10 @@ delimiters align with their opener; the parser admits that punctuation at an
 enclosing layout boundary. Failed printing rolls back the buffer before copying
 the declaration verbatim.
 
+A broken nominal type body is a layout exception: its deriving clause is emitted
+as a separate indented line. A line break solely before `deriving` does not make
+an inline right-hand side broken, so that split remains source-controlled.
+
 Import sorting is the exception to line-structure preservation. Directly preceding
 comments move with imports; detached comments stay with the block. Sorted broken
 exposing lists use kind grouping and width wrapping because sorting discards the

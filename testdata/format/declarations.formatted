@@ -11,6 +11,7 @@ type Color = Red | Green | Blue deriving (Eq, Show)
 type Tree a
     = Leaf
     | Node (Tree a) a (Tree a)
+    deriving (Eq, Show)
 
 type Pair a = { first : a, second : a } deriving (Eq)
 
@@ -18,6 +19,13 @@ type Wide =
     { alpha : Int
     , beta : String
     }
+    deriving (Eq, Show)
+
+type SplitUnion = First | Second
+    deriving (Eq)
+
+type SplitRecord = { value : Int }
+    deriving (Show)
 
 type Fn e = Wrap (Int ->{e} String) | Pure (Maybe (List Int))
 

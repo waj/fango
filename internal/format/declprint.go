@@ -124,7 +124,8 @@ func fixityText(d *ast.FixityDecl) string {
 }
 
 // typeDeclLines renders a nominal type. The alternatives go one per line, with
-// a leading `=` and `|`, exactly when the author wrote them that way.
+// a leading `=` and `|`, exactly when the author wrote them that way. A broken
+// right-hand side always gives its deriving clause a line of its own.
 func (p *printer) typeDeclLines(d *ast.TypeDecl, sp source.Span) {
 	if d.Resource {
 		p.line(0, "{-# resource #-}")
@@ -134,14 +135,20 @@ func (p *printer) typeDeclLines(d *ast.TypeDecl, sp source.Span) {
 		head += " " + param.Name
 	}
 	tail := derivingText(d.Deriving)
+	bodyEnd, derivingStart := typeRHSBounds(d, sp)
+	broken := brokeBetween(sp.File, d.NameSpan.End, bodyEnd)
+	separateDeriving := len(d.Deriving) > 0 && !broken && brokeBetween(sp.File, bodyEnd, derivingStart)
 
 	if d.RecordFields != nil {
 		fields := make([]string, len(d.RecordFields))
 		for i, f := range d.RecordFields {
 			fields[i] = f.Name + " : " + typeText(f.Type)
 		}
-		if !brokeAfter(sp, d.NameSpan.End) {
-			p.line(0, head+" = { "+strings.Join(fields, ", ")+" }"+tail)
+		if !broken {
+			p.line(0, head+" = { "+strings.Join(fields, ", ")+" }"+inlineDeriving(tail, separateDeriving))
+			if separateDeriving {
+				p.line(Indent, strings.TrimSpace(tail))
+			}
 			return
 		}
 		p.line(0, head+" =")
@@ -152,7 +159,10 @@ func (p *printer) typeDeclLines(d *ast.TypeDecl, sp source.Span) {
 			}
 			p.line(Indent, lead+f)
 		}
-		p.line(Indent, "}"+tail)
+		p.line(Indent, "}")
+		if tail != "" {
+			p.line(Indent, strings.TrimSpace(tail))
+		}
 		return
 	}
 
@@ -164,8 +174,11 @@ func (p *printer) typeDeclLines(d *ast.TypeDecl, sp source.Span) {
 		}
 		alts[i] = strings.Join(parts, " ")
 	}
-	if !brokeAfter(sp, d.NameSpan.End) {
-		p.line(0, head+" = "+strings.Join(alts, " | ")+tail)
+	if !broken {
+		p.line(0, head+" = "+strings.Join(alts, " | ")+inlineDeriving(tail, separateDeriving))
+		if separateDeriving {
+			p.line(Indent, strings.TrimSpace(tail))
+		}
 		return
 	}
 	p.line(0, head)
@@ -174,11 +187,50 @@ func (p *printer) typeDeclLines(d *ast.TypeDecl, sp source.Span) {
 		if i == 0 {
 			lead = "= "
 		}
-		if i == len(alts)-1 {
-			alt += tail
-		}
 		p.line(Indent, lead+alt)
 	}
+	if tail != "" {
+		p.line(Indent, strings.TrimSpace(tail))
+	}
+}
+
+func inlineDeriving(tail string, separate bool) string {
+	if separate {
+		return ""
+	}
+	return tail
+}
+
+// typeRHSBounds identifies the source portion that determines whether the
+// type body is broken. A separately written deriving clause does not make an
+// otherwise inline right-hand side multiline.
+func typeRHSBounds(d *ast.TypeDecl, sp source.Span) (end, derivingStart int) {
+	end = sp.End
+	derivingStart = sp.End
+	if len(d.Deriving) == 0 || sp.File == nil {
+		return end, derivingStart
+	}
+	derivingStart = d.Deriving[0].Sp.Start
+	from := d.NameSpan.End
+	if from < sp.Start || derivingStart < from || derivingStart > sp.End {
+		return end, derivingStart
+	}
+	if i := bytes.LastIndex(sp.File.Content[from:derivingStart], []byte("deriving")); i >= 0 {
+		end = trimSpaceBefore(sp.File.Content, from+i)
+	}
+	return end, derivingStart
+}
+
+func trimSpaceBefore(src []byte, end int) int {
+	for end > 0 {
+		switch src[end-1] {
+		case ' ', '\t', '\r', '\n':
+			end--
+		default:
+			return end
+		}
+	}
+	return end
 }
 
 func derivingText(names []ast.TName) string {
@@ -236,15 +288,6 @@ func paramNames(params []ast.Param) []string {
 		out[i] = param.Name
 	}
 	return out
-}
-
-// brokeAfter reports whether the author put a newline in the declaration after
-// offset — the test for "this construct was written across lines".
-func brokeAfter(sp source.Span, offset int) bool {
-	if sp.File == nil || offset < sp.Start || offset > sp.End {
-		return false
-	}
-	return bytes.ContainsRune(sp.File.Content[offset:sp.End], '\n')
 }
 
 // equationBroke reports whether the author put a newline anywhere between the

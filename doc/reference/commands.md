@@ -67,6 +67,11 @@ of its own is anchored at the column of its `if`, so a chain of arms lines up
 instead of staircasing rightward. An `exposing` list the author moved below
 its keyword is printed in the leading-comma block form.
 
+A multiline nominal type is the exception: its `deriving` clause is always an
+indented line after its constructor alternatives or record schema. An inline
+type may instead keep `deriving` on the declaration line or on a following
+indented line, matching the source.
+
 A bracket list or tuple written across lines uses that same leading-separator
 style. Its separators and closing delimiter align with its opening delimiter;
 elements remain grouped on the source lines the author chose. Nested lists and
