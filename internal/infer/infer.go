@@ -2368,7 +2368,11 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 			// into the substitution now, so generalization sees solved types
 			// and later bindings can use this one polymorphically.
 			g.solveHere(recordStart)
-			if bind.Ann == nil {
+			// A local function can call a member of the enclosing top-level
+			// recursive group. Its effect row may therefore be constrained only
+			// once that group reaches its fixed point; closing it here would
+			// incorrectly make the local function pure first.
+			if bind.Ann == nil && g.ck.recursive == nil {
 				g.ck.closeSingleRows(ty)
 			}
 			// Skolem escape: this annotation's variables must not leak into

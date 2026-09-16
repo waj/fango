@@ -25,7 +25,9 @@ right : a -> Bool -> a
 right value stop = if stop then value else left value True
 
 fallible : Int ->{Fail.Fail String} ()
-fallible n = if n == 0 then Fail.fail "zero" else alternate (n - 1)
+fallible n =
+    go remaining = alternate remaining
+    if n == 0 then Fail.fail "zero" else go (n - 1)
 alternate n = fallible n
 
 main() =

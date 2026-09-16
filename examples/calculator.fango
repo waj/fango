@@ -67,40 +67,40 @@ tokenize text =
 -- factor = number | name | -factor | (expr)
 parseExpr : List Token ->{Fail.Fail String} (Expr, List Token)
 parseExpr tokens =
-    (first, rest) = term tokens
-    exprRest first rest
+    go left [PlusToken | remaining] =
+        (right, tail) = parseTerm remaining
+        go (Add left right) tail
+    go left [MinusToken | remaining] =
+        (right, tail) = parseTerm remaining
+        go (Subtract left right) tail
+    go left remaining = (left, remaining)
+    (first, rest) = parseTerm tokens
+    go first rest
 
-exprRest left [PlusToken | rest] =
-    (right, tail) = term rest
-    exprRest (Add left right) tail
-exprRest left [MinusToken | rest] =
-    (right, tail) = term rest
-    exprRest (Subtract left right) tail
-exprRest left rest = (left, rest)
+parseTerm : List Token ->{Fail.Fail String} (Expr, List Token)
+parseTerm input =
+    go left [TimesToken | remaining] =
+        (right, tail) = parseFactor remaining
+        go (Multiply left right) tail
+    go left [DivideToken | remaining] =
+        (right, tail) = parseFactor remaining
+        go (Divide left right) tail
+    go left remaining = (left, remaining)
+    (first, rest) = parseFactor input
+    go first rest
 
-term input =
-    (first, rest) = factor input
-    termRest first rest
-
-termRest left [TimesToken | rest] =
-    (right, tail) = factor rest
-    termRest (Multiply left right) tail
-termRest left [DivideToken | rest] =
-    (right, tail) = factor rest
-    termRest (Divide left right) tail
-termRest left rest = (left, rest)
-
-factor [NumberToken value | rest] = (Number value, rest)
-factor [NameToken name | rest] = (Variable name, rest)
-factor [MinusToken | rest] =
-    (value, tail) = factor rest
+parseFactor : List Token ->{Fail.Fail String} (Expr, List Token)
+parseFactor [NumberToken value | rest] = (Number value, rest)
+parseFactor [NameToken name | rest] = (Variable name, rest)
+parseFactor [MinusToken | rest] =
+    (value, tail) = parseFactor rest
     (Negate value, tail)
-factor [LeftParenToken | rest] =
+parseFactor [LeftParenToken | rest] =
     (value, tail) = parseExpr rest
     case tail of
         [RightParenToken | remaining] -> (value, remaining)
         _ -> Fail.fail "expected `)`"
-factor _ = Fail.fail "expected an expression"
+parseFactor _ = Fail.fail "expected an expression"
 
 parse tokens =
     case parseExpr tokens of
