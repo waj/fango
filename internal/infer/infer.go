@@ -94,6 +94,10 @@ func (e *Env) Names() []string {
 // supply, the accumulated substitution, and per-node solved types. The REPL
 // keeps one Checker across many inputs; batch compilation uses one per run.
 type Checker struct {
+	moduleCheck *moduleCheck
+	sourceLimit *int
+	recursive   *recursiveInference
+
 	Classes           map[string]*types.ClassInfo
 	Methods           map[string]*types.MethodInfo
 	Instances         []*InstanceInfo
@@ -206,10 +210,9 @@ type Checker struct {
 	QuoteTemplates map[*ast.Quote]int
 	QuoteHoles     map[*ast.Quote][]*ast.Splice
 
-	// Checked accumulates every declaration this checker has finished, in
-	// source order. The compile-time evaluator elaborates the prefix on
-	// demand from it, which is the same "already-inferred prefix" the REPL
-	// works from.
+	// Checked is the append-only log of completed dependency groups. Source
+	// order is retained separately in Module results; the compile-time evaluator
+	// installs newly completed groups together on demand.
 	Checked []DeclInfo
 
 	// CompileTime runs a splice operand. The driver installs it
@@ -218,7 +221,7 @@ type Checker struct {
 	CompileTime CompileTimeEval
 
 	// CompileTimeRollback discards the compile-time environment after a
-	// Checkpoint restores an earlier prefix, so the next splice rebuilds it
+	// Checkpoint restores an earlier completion log, so the next splice rebuilds it
 	// from the declarations that actually survived.
 	CompileTimeRollback func(checked, instances int)
 
@@ -336,6 +339,9 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 }
 
 type DeclInfo struct {
+	// BodySubst instantiates component variables absent from this declaration's
+	// public scheme. It applies to occurrences, never to another callee's scheme.
+	BodySubst map[int]types.Type
 	Name      string
 	NameSpan  source.Span
 	Params    []ast.Pattern
@@ -374,7 +380,7 @@ type HandlerInfo struct {
 
 // Module checks declarations: type headers first (so types may be mutually
 // recursive regardless of order), then constructor fields, then value
-// declarations in source order — solve-at-definition, the same call
+// declaration dependency groups, retaining source-position contexts — the same call
 // structure used by binding-boundary generalization.
 func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 	// Visibility merges rather than replaces: a REPL session checks the
@@ -456,80 +462,13 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 			errs = append(errs, ck.Fixity.Add(fd)...)
 		}
 	}
-	for _, d := range m.Decls {
-		if cl, ok := d.(*ast.ClassDecl); ok {
-			errs = append(errs, ck.ClassDecl(cl)...)
-			continue
-		}
-		if dr, ok := d.(*ast.DeriverDecl); ok {
-			ck.CurrentOwner = dr.Owner
-			errs = append(errs, ck.DeriverDecl(dr)...)
-			continue
-		}
-		if td, ok := d.(*ast.TypeDecl); ok && len(td.Deriving) > 0 {
-			ck.CurrentOwner = symbolModule(td.Name)
-			ds, es := ck.DeriveDecl(td)
-			infos = append(infos, ds...)
-			ck.Checked = append(ck.Checked, ds...)
-			errs = append(errs, es...)
-			continue
-		}
-		if in, ok := d.(*ast.InstanceDecl); ok {
-			ck.CurrentOwner = in.Owner
-			// InstanceDecl renames methods to their instance symbols, so keep
-			// the surface spelling for diagnostics.
-			methodNames := make([]string, len(in.Methods))
-			for i, m := range in.Methods {
-				methodNames[i] = types.SurfaceName(m.Name)
-				errs = append(errs, ck.StageDecl(m)...)
-			}
-			ds, es := ck.InstanceDecl(in)
-			infos = append(infos, ds...)
-			ck.Checked = append(ck.Checked, ds...)
-			errs = append(errs, es...)
-			for i, m := range in.Methods {
-				compileTimeMethod := false
-				if cl := ck.Classes[in.Head.Class]; cl != nil {
-					for _, cm := range cl.Methods {
-						if types.SurfaceName(cm.Name) == methodNames[i] && ck.IsCompileTimeOnly(cm.Type) {
-							compileTimeMethod = true
-						}
-					}
-				}
-				if !compileTimeMethod {
-					errs = append(errs, ck.checkStageLeaks(m, nil, methodNames[i])...)
-				}
-			}
-			continue
-		}
-		if pd, ok := d.(*ast.PatternDecl); ok {
-			ds, es := ck.patternDecl(pd, true)
-			infos = append(infos, ds...)
-			ck.Checked = append(ck.Checked, ds...)
-			errs = append(errs, es...)
-			continue
-		}
-		vd, ok := d.(*ast.ValueDecl)
-		if !ok || vd.Native != nil {
-			continue
-		}
-		// Duplicate definitions are a batch-compilation error only: the
-		// REPL redefines names freely (generational cells).
-		if ck.Env.Has(vd.Name) {
-			errs = append(errs, diag.Errorf(vd.NameSpan, "MULTIPLE DEFINITIONS",
-				"`%s` is defined more than once.", vd.Name))
-		}
-		ck.CurrentOwner = symbolModule(vd.Name)
-		// Staging runs first and in source order, so a splice can only name
-		// declarations that are already checked — fango's existing
-		// forward-reference rule doing duty as the stage discipline.
-		errs = append(errs, ck.StageDecl(vd)...)
-		info, declErrs := ck.Decl(vd)
-		errs = append(errs, declErrs...)
-		errs = append(errs, ck.checkStageLeaks(vd, info.Type, types.SurfaceName(vd.Name))...)
-		infos = append(infos, info)
-		ck.Checked = append(ck.Checked, info)
-	}
+	batch := newModuleCheck(ck, m.Decls)
+	previous := ck.moduleCheck
+	ck.moduleCheck = batch
+	defer func() { ck.moduleCheck = previous }()
+	ds, es := batch.run()
+	infos = append(infos, ds...)
+	errs = append(errs, es...)
 	return infos, errs
 }
 
@@ -1068,12 +1007,33 @@ func (ck *Checker) SetCaptureSummary(name string, vars []types.CaptureVar, captu
 	}
 }
 
+type declInference struct {
+	originalAnn          types.Type
+	d                    *ast.ValueDecl
+	g                    *generator
+	ty, annTy            types.Type
+	given                []types.Pred
+	errs                 []diag.Error
+	allowEffects, isMain bool
+	info                 DeclInfo
+}
+
 // DeclWhere checks one declaration — annotation resolution, body inference
 // (with parameter scoping and self-recursion for function definitions),
 // and the annotation constraint — without binding it, so callers control
 // whether a failed definition enters the environment (the REPL does not
 // bind on error).
 func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []diag.Error) {
+	q := ck.prepareDecl(d, allowEffects)
+	sub, _, es := q.g.solveConstraints(nil)
+	ck.Sub = sub
+	q.errs = append(q.errs, q.g.errs...)
+	q.errs = append(q.errs, es...)
+	q.g.errs = nil
+	return ck.finishDecl(q)
+}
+
+func (ck *Checker) prepareDecl(d *ast.ValueDecl, allowEffects bool) *declInference {
 	var errs []diag.Error
 	var given []types.Pred
 	isMain := d.Name == ck.EntryName
@@ -1099,6 +1059,15 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 		given, annErrs = ck.ResolvePreds(d.Ann.Preds, annScope)
 		errs = append(errs, annErrs...)
 	}
+	originalAnn := annTy
+	if ck.recursive != nil && annTy != nil {
+		replacements := map[int]types.Type{}
+		for _, v := range annScope.Minted() {
+			replacements[v.ID] = ck.Sup.FreshVar(v.Kind)
+		}
+		annTy = types.SubstRigid(annTy, replacements)
+		given = types.SubstPreds(given, replacements)
+	}
 	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	var ty types.Type
 	if len(d.Params) == 0 {
@@ -1119,11 +1088,12 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
 		}
 	}
-	sub, _, solveErrs := g.solveConstraints(nil)
-	ck.Sub = sub
-	errs = append(errs, g.errs...)
-	errs = append(errs, solveErrs...)
-	g.errs = nil
+	return &declInference{originalAnn: originalAnn, d: d, g: g, ty: ty, annTy: annTy, given: given, errs: errs, allowEffects: allowEffects, isMain: isMain}
+}
+
+func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
+	d, g, ty, annTy, given, errs, allowEffects, isMain := q.d, q.g, q.ty, q.annTy, q.given, q.errs, q.allowEffects, q.isMain
+
 	// An inferred record literal takes its nominal type from context, and a
 	// declaration's annotation is that context. The annotation is normally
 	// reconciled below, after the record fixed point, which would be too late;
@@ -1146,7 +1116,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	}
 	g.resolveRecords(true, 0)
 	errs = append(errs, g.errs...)
-	if d.Ann == nil && !isMain {
+	if d.Ann == nil && !isMain && ck.recursive == nil {
 		ck.closeSingleRows(ty)
 	}
 	promptEffects := false
@@ -1185,7 +1155,13 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 		ty = annTy
 	}
 	ty = ck.runnerControl(ty, len(d.Params), declEquations(d))
-	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Equations: d.Equations, Type: ty, Body: d.Body, InstanceLimit: len(ck.Instances)}
+	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Equations: d.Equations, Type: ty, Body: d.Body, InstanceLimit: ck.instanceLimit()}
+	if ck.recursive != nil {
+		q.info = info
+		q.errs = errs
+		return info, errs
+	}
+
 	_, isLambda := d.Body.(*ast.Lambda)
 	switch {
 	case isMain:
@@ -1422,7 +1398,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			ty = g.instantiateAt(localScheme, e.Sp, e.Name)
 		} else {
 			scheme, ok := g.ck.Env.Lookup(e.Name)
-			if !ok {
+			if !ok || !g.ck.valueVisible(e.Name) {
 				g.errs = append(g.errs, diag.Errorf(e.Sp, "NAMING ERROR",
 					"I don't know a value named `%s`.", e.Name))
 				ty = g.ck.Sup.FreshVar(types.General) // recover with a hole
@@ -1792,7 +1768,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
 			g.locals = scope
 			if e.State != nil {
-				if _, dup := scope.parent.lookup(e.State.Name); dup || g.ck.Env.Has(e.State.Name) {
+				if _, dup := scope.parent.lookup(e.State.Name); dup || g.ck.boundName(e.State.Name) {
 					g.errs = append(g.errs, diag.Errorf(e.State.NameSpan, "SHADOWING",
 						"The handler state `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", e.State.Name))
 				}
@@ -1853,7 +1829,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			scope := &blockScope{parent: g.locals, names: map[string]types.Scheme{}}
 			g.locals = scope
 			if e.State != nil {
-				if _, dup := scope.parent.lookup(e.State.Name); dup || g.ck.Env.Has(e.State.Name) {
+				if _, dup := scope.parent.lookup(e.State.Name); dup || g.ck.boundName(e.State.Name) {
 					g.errs = append(g.errs, diag.Errorf(e.State.NameSpan, "SHADOWING",
 						"The handler state `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", e.State.Name))
 				}
@@ -2231,6 +2207,11 @@ func (g *generator) functionEquations(name string, nameSpan source.Span, eqs []a
 	}
 	resultTy := g.ck.Sup.FreshVar(types.General)
 	funTy := g.wrapFunction(paramTys, resultTy, bodyAmbient)
+	if g.ck.recursive != nil && outer == nil {
+		if provisional := g.ck.recursive.types[name]; provisional != nil {
+			g.cs = append(g.cs, Constraint{Left: provisional, Right: funTy, Span: nameSpan, Why: Why{Kind: WhyRecursion, Name: name}})
+		}
+	}
 	for _, eq := range eqs {
 		if len(eq.Params) != len(paramTys) {
 			g.errs = append(g.errs, diag.Errorf(eq.NameSpan, "INCONSISTENT ARITY", "All equations for `%s` must have %d argument(s).", types.SurfaceName(name), len(paramTys)))
@@ -2318,7 +2299,7 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 			g.ck.BindSchemes[bind] = types.Scheme{Body: rhsTy}
 			continue
 		}
-		if _, dup := g.locals.lookup(bind.Name); dup || g.ck.Env.Has(bind.Name) {
+		if _, dup := g.locals.lookup(bind.Name); dup || g.ck.boundName(bind.Name) {
 			where := "at the top level"
 			if dup {
 				where = "earlier in this block"
@@ -2446,14 +2427,14 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 // decide them may not have been reached yet.
 func (g *generator) solveHere(from int) {
 	if len(g.cs) == 0 {
-		g.resolveRecords(true, from)
+		g.resolveRecords(g.ck.recursive == nil, from)
 		return
 	}
 	sub, _, errs := g.solveConstraints(nil)
 	g.ck.Sub = sub
 	g.errs = append(g.errs, errs...)
 	g.cs = nil
-	g.resolveRecords(true, from)
+	g.resolveRecords(g.ck.recursive == nil, from)
 }
 
 // inferredRecord types `{ field = value, ... }`, whose nominal type is the one
@@ -2696,7 +2677,7 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 	case *ast.PUnit:
 		return g.ck.B.Unit
 	case *ast.PVar:
-		if _, dup := g.locals.lookup(p.Name); dup || g.ck.Env.Has(p.Name) {
+		if _, dup := g.locals.lookup(p.Name); dup || g.ck.boundName(p.Name) {
 			kind := g.patternBinder
 			if kind == "" {
 				kind = "pattern variable"

@@ -11,7 +11,7 @@ import (
 func (el *elab) overloadedPattern(p ast.Pattern) bool {
 	switch p := p.(type) {
 	case *ast.PInt:
-		t := el.ck.Sub.Apply(el.ck.PatTypes[p])
+		t := el.apply(el.ck.PatTypes[p])
 		return el.unique(t) != el.ck.B.Int.Unique && el.unique(t) != el.ck.B.Float.Unique
 	case *ast.PPin:
 		return true

@@ -9,7 +9,9 @@ foldCursor combine initial cursor = case Iterator.next cursor of
     Just value -> foldCursor combine (combine value initial) cursor
 
 spin : () ->{Stream.Yield Int} ()
-spin() = spin()
+spin() =
+    Stream.yield 0
+    spin()
 
 count : () -> Int
 count() = Stream.withCursor (Stream.generate spin) (\cursor -> foldCursor (\element acc -> element + acc) 0 cursor)

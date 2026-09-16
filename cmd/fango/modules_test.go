@@ -495,3 +495,127 @@ main = print (Dep.double 2.5)
 		t.Fatalf("downstream edit changed dependency package:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }
+
+func TestModuleWideFunctions(t *testing.T) {
+	for _, tc := range []struct{ name, src, want, diagnostic string }{
+		{name: "deriver later dependency", src: `import Meta
+class Tag a
+    tag : a -> String
+deriver Tag
+    tag _ _ = later()
+type T = T deriving (Tag)
+later() = quote "ok"
+main = tag T`, diagnostic: "STAGE ERROR"},
+		{name: "deriver completed dependency", src: `import Meta
+class Tag a
+    tag : a -> String
+deriver Tag
+    tag _ _ = later()
+later() = quote "ok"
+type T = T deriving (Tag)
+main = tag T`, want: "ok"},
+		{name: "class function collision", src: `class C a
+    same : a -> a
+same x = x
+main = 0`, diagnostic: "UNQUALIFIED COLLISION"},
+		{name: "noncontiguous equations", src: `same True = 1
+other() = 2
+same False = 0
+main = same True`, diagnostic: "UNQUALIFIED COLLISION"},
+		{name: "internal component variable", src: `first unused stop = if stop then () else second()
+second() = first (\x -> x) True
+main = if second() == () then "ok" else "bad"`, want: "ok"},
+		{name: "internal numeric default", src: `first() = second 1
+second n = if n == 0 then True else first()
+main = second 0`, want: "True"},
+		{name: "annotated unused context", src: `left : Show a => a -> Bool -> a
+left x stop = if stop then x else right x True
+right x stop = if stop then x else left x True
+main = right 42 False`, want: "42"},
+		{name: "local record context", src: `type Point = { x : Int }
+left p stop =
+    get() = p.x
+    if stop then get() else right p True
+right : Point -> Bool -> Int
+right p stop = left p stop
+main = left (Point { x = 42 }) True`, want: "42"},
+		{name: "destructuring cycle", src: `(a, b) = later()
+later() = (a, b)
+main = a`, diagnostic: "CYCLIC VALUE DEFINITION"},
+		{name: "stage through instance", src: `import Meta
+class CodeFor a
+    codeFor : a -> Meta.Code
+instance CodeFor ()
+    codeFor _ = later()
+main = $(codeFor ())
+later() = quote 42`, diagnostic: "STAGE ERROR"},
+		{name: "annotated recursion", src: `left : a -> Bool -> a
+left x stop = if stop then x else right x True
+right : a -> Bool -> a
+right x stop = if stop then x else left x True
+main = show (left 42 False) ++ right "yes" False`, want: "42yes"},
+		{name: "earlier stage group", src: `import Meta
+left n = if n == 0 then quote 42 else right (n - 1)
+right n = left n
+main = $(left 2)`, want: "42"},
+		{name: "generated forward reference", src: `import Meta
+code() = quote (later 21)
+first() = $(code())
+later x = x * 2
+main = first()`, want: "42"},
+		{name: "direct later stage", src: `import Meta
+main = $(later())
+later() = quote 42`, diagnostic: "STAGE ERROR"},
+		{name: "transitive later stage", src: `import Meta
+early() = later()
+main = $(early())
+later() = quote 42`, diagnostic: "STAGE ERROR"},
+		{name: "cycle through value", src: `value = function()
+function() = value
+main = value`, diagnostic: "CYCLIC VALUE DEFINITION"},
+		{name: "lambda remains sequential", src: `early x = later x
+later = \x -> x
+main = early 42`, diagnostic: "NAMING ERROR"},
+		{name: "future function shadow", src: `early later = later
+later x = x
+main = early 42`, diagnostic: "SHADOWING"},
+		{name: "ordinary value dependency", src: `first() = later()
+value = 42
+later() = value
+main = first()`, want: "42"},
+		{name: "source evidence", src: `class Label a
+    label : a -> String
+instance Label a
+    label _ = "early"
+first() = later (label True)
+instance Label Bool
+    label _ = "late"
+later text = text ++ label True
+main = first()`, want: "earlylate"},
+		{name: "recursive source evidence", src: `class Label a
+    label : a -> String
+instance Label a
+    label _ = "early"
+first stop = if stop then label True else later True
+instance Label Bool
+    label _ = "late"
+later stop = if stop then label True else first True
+main = first True ++ later True`, want: "earlylate"},
+		{name: "annotation rejects overclaim", src: `left : a -> Bool -> a
+left x stop = if stop then x + 1 else right x True
+right x stop = left x stop
+main = left 1 True`, diagnostic: "MISSING CONSTRAINT"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entry := writeModuleFile(t, t.TempDir(), "Main.fango", tc.src+"\n")
+			if tc.diagnostic != "" {
+				var stderr bytes.Buffer
+				if _, _, ok := compileFile(entry, &stderr); ok || !strings.Contains(stderr.String(), tc.diagnostic) {
+					t.Fatalf("want %s, got %s", tc.diagnostic, stderr.String())
+				}
+			} else {
+				testMultiModuleEntry(t, entry, tc.want)
+			}
+		})
+	}
+}

@@ -209,7 +209,9 @@ func (ck *Checker) StageDecl(d *ast.ValueDecl) []diag.Error {
 				errs = append(errs, es...)
 				continue
 			}
-			eq.Body, _ = ck.stageExpand(eq.Body)
+			var es []diag.Error
+			eq.Body, es = ck.stageExpand(eq.Body)
+			errs = append(errs, es...)
 		}
 		return errs
 	}
@@ -255,6 +257,7 @@ func usesStaging(e ast.Expr) bool {
 type binderStage struct{ stage, quoted int }
 
 type stageChecker struct {
+	reference     func(string)
 	errs          []diag.Error
 	binders       map[string]binderStage
 	stage, quoted int
@@ -336,12 +339,23 @@ func (s *stageChecker) expr(e ast.Expr) {
 		s.stage--
 		return
 	case *ast.Var:
+		if s.reference != nil {
+			if _, bound := s.binders[e.Name]; !bound && s.stage == 0 && s.quoted == 0 {
+				s.reference(e.Name)
+			}
+			return
+		}
 		if b, ok := s.binders[e.Name]; ok && (b.stage != s.stage || b.quoted != s.quoted) {
 			s.errorf(e.Sp, "`%s` is a local binding of another stage, so it does not exist here.\n"+
 				"Only top-level definitions are available at both stages; pass a runtime\nvalue by applying the generated code to it.", e.Name)
 		}
 		return
+	case *ast.BinOp:
+		if s.reference != nil && s.stage == 0 && s.quoted == 0 && e.Op != "&&" && e.Op != "||" {
+			s.reference(e.Op)
+		}
 	case *ast.Lambda:
+		s.patternReferences(e.Params...)
 		restore := s.bind(paramNames(e.Params))
 		s.expr(e.Body)
 		restore()
@@ -351,12 +365,14 @@ func (s *stageChecker) expr(e ast.Expr) {
 		for i := range e.Binds {
 			b := &e.Binds[i]
 			if b.Pattern != nil {
+				s.patternReferences(b.Pattern)
 				s.expr(b.Body)
 				undo = append(undo, s.bind(patternNames(b.Pattern, nil)))
 				continue
 			}
 			if len(b.Equations) > 0 {
 				for _, eq := range b.Equations {
+					s.patternReferences(eq.Params...)
 					restore := s.bind(append([]string{b.Name}, paramNames(eq.Params)...))
 					s.expr(eq.Body)
 					restore()
@@ -364,6 +380,7 @@ func (s *stageChecker) expr(e ast.Expr) {
 				undo = append(undo, s.bind([]string{b.Name}))
 				continue
 			}
+			s.patternReferences(b.Params...)
 			inner := s.bind(paramNames(b.Params))
 			if len(b.Params) > 0 {
 				inner2 := s.bind([]string{b.Name})
@@ -386,6 +403,7 @@ func (s *stageChecker) expr(e ast.Expr) {
 	case *ast.Case:
 		s.expr(e.Scrutinee)
 		for _, br := range e.Branches {
+			s.patternReferences(br.Pattern)
 			restore := s.bind(patternNames(br.Pattern, nil))
 			s.expr(br.Body)
 			restore()
@@ -399,6 +417,7 @@ func (s *stageChecker) expr(e ast.Expr) {
 		for _, c := range e.Clauses {
 			if len(c.Equations) > 0 {
 				for _, eq := range c.Equations {
+					s.patternReferences(eq.Params...)
 					names := paramNames(eq.Params)
 					if e.State != nil {
 						names = append(names, e.State.Name)
@@ -408,6 +427,7 @@ func (s *stageChecker) expr(e ast.Expr) {
 					restore()
 				}
 			} else {
+				s.patternReferences(c.Params...)
 				names := paramNames(c.Params)
 				if e.State != nil {
 					names = append(names, e.State.Name)
@@ -420,6 +440,7 @@ func (s *stageChecker) expr(e ast.Expr) {
 		if e.Return != nil {
 			if len(e.Return.Equations) > 0 {
 				for _, eq := range e.Return.Equations {
+					s.patternReferences(eq.Params...)
 					names := paramNames(eq.Params)
 					if e.State != nil {
 						names = append(names, e.State.Name)
@@ -429,6 +450,7 @@ func (s *stageChecker) expr(e ast.Expr) {
 					restore()
 				}
 			} else {
+				s.patternReferences(e.Return.Param)
 				names := patternNames(e.Return.Param, nil)
 				if e.State != nil {
 					names = append(names, e.State.Name)
@@ -543,6 +565,11 @@ func (x *stageExpander) splice(s *ast.Splice) ast.Expr {
 
 // runSplice checks the operand, insists it is pure code, and evaluates it.
 func (ck *Checker) runSplice(operand ast.Expr, sp source.Span) (*meta.Code, []diag.Error) {
+	if ck.moduleCheck != nil {
+		if es := ck.moduleCheck.prepareSplice(operand, sp); len(es) > 0 {
+			return nil, es
+		}
+	}
 	code, codeErrs := ck.codeType(sp)
 	if len(codeErrs) > 0 {
 		return nil, codeErrs
@@ -670,5 +697,27 @@ func visitChildren(e ast.Expr, f func(ast.Expr)) {
 		each(e.Operand)
 	case *ast.Resume:
 		each(e.NextState)
+	}
+}
+
+// Dependency collection shares the stage/scope walk so a local name never
+// becomes a spurious dependency on an unrelated module's unqualified binding.
+func (s *stageChecker) patternReferences(ps ...ast.Pattern) {
+	if s.reference == nil || s.stage != 0 || s.quoted != 0 {
+		return
+	}
+	for _, p := range ps {
+		switch p := p.(type) {
+		case *ast.PPin:
+			if _, bound := s.binders[p.Name]; !bound {
+				s.reference(p.Name)
+			}
+		case *ast.PCtor:
+			s.patternReferences(p.Args...)
+		case *ast.PRecord:
+			for _, f := range p.Fields {
+				s.patternReferences(f.Pattern)
+			}
+		}
 	}
 }

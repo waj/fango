@@ -22,7 +22,7 @@ func (el *elab) bindDictionaries(ps []types.Pred) ([]string, []types.Type) {
 	var names []string
 	var tys []types.Type
 	for _, p := range ps {
-		p.Ty = el.ck.Sub.Apply(p.Ty)
+		p.Ty = el.apply(p.Ty)
 		cl := el.ck.Classes[p.Class]
 		if cl == nil {
 			continue
@@ -50,7 +50,7 @@ func (el *elab) instantiatedPreds(s types.Scheme, raw types.Type) []types.Pred {
 		return nil
 	}
 	m := map[int]types.Type{}
-	matchType(el.ck.Sub.Apply(s.Body), el.ck.Sub.Apply(raw), m)
+	matchType(el.ck.Sub.Apply(s.Body), el.apply(raw), m)
 	return types.SubstPreds(s.Preds, m)
 }
 
@@ -72,10 +72,10 @@ func (el *elab) addEvidence(c callee, s types.Scheme, raw types.Type) callee {
 }
 
 func (el *elab) givenDictionary(p types.Pred) core.Expr {
-	p.Ty = el.ck.Sub.Apply(p.Ty)
+	p.Ty = el.apply(p.Ty)
 	for i := len(el.dicts) - 1; i >= 0; i-- {
 		d := el.dicts[i]
-		if d.pred.Class == p.Class && types.Equal(el.ck.Sub.Apply(d.pred.Ty), p.Ty) {
+		if d.pred.Class == p.Class && types.Equal(el.apply(d.pred.Ty), p.Ty) {
 			return d.value
 		}
 	}
@@ -83,7 +83,7 @@ func (el *elab) givenDictionary(p types.Pred) core.Expr {
 }
 
 func (el *elab) dictionary(p types.Pred) core.Expr {
-	p.Ty = el.ck.Sub.Apply(p.Ty)
+	p.Ty = el.apply(p.Ty)
 	if d := el.givenDictionary(p); d != nil {
 		return d
 	}
@@ -108,7 +108,7 @@ func (el *elab) dictionary(p types.Pred) core.Expr {
 }
 
 func (el *elab) methodValue(method *types.MethodInfo, raw types.Type) core.Expr {
-	args := matchTyArgs(method.Type, []*types.TVar{method.Class.Param}, el.ck.Sub.Apply(raw))
+	args := matchTyArgs(method.Type, []*types.TVar{method.Class.Param}, el.apply(raw))
 	p := types.Pred{Class: method.Class.Name, Ty: args[0]}
 	d := el.givenDictionary(p)
 	if in, m, _ := el.matchInstance(p); d == nil && in != nil {
@@ -134,7 +134,7 @@ func (el *elab) methodValue(method *types.MethodInfo, raw types.Type) core.Expr 
 // Referring to that factory with its existing context preserves recursive
 // methods without selecting an instance for an arbitrary polymorphic type.
 func (el *elab) matchInstance(p types.Pred) (*infer.InstanceInfo, map[int]types.Type, bool) {
-	p.Ty = el.ck.Sub.Apply(p.Ty)
+	p.Ty = el.apply(p.Ty)
 	if in := el.selfInstance; in != nil && p.Class == in.Class.Name && types.Equal(p.Ty, in.Head) {
 		m := map[int]types.Type{}
 		for _, v := range in.Vars {

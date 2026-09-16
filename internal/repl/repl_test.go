@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -367,4 +368,50 @@ func TestImportNativeSidecar(t *testing.T) {
 			t.Fatalf("missing %q:\n%s", want, got)
 		}
 	}
+}
+
+func TestModuleFunctionImportRollback(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "Helpers.fango")
+	bad := `module Helpers exposing (first)
+first() = second()
+second : () -> Int
+second() = "bad"
+`
+	if err := os.WriteFile(path, []byte(bad), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Edit the module between inputs while preserving one live session.
+	reader := &moduleRetryReader{path: path, inputs: []string{"import Helpers\n", "import Helpers\nHelpers.first()\n:quit\n"}}
+	var out strings.Builder
+	RunWith(reader, &out, Options{Root: root})
+	got := out.String()
+	if !strings.Contains(got, "TYPE MISMATCH") || strings.Count(got, "loaded Helpers") != 1 || !strings.Contains(got, "42 : Int") {
+		t.Fatalf("import rollback: %s", got)
+	}
+}
+
+type moduleRetryReader struct {
+	path   string
+	inputs []string
+	offset int
+}
+
+func (r *moduleRetryReader) Read(p []byte) (int, error) {
+	if len(r.inputs) == 0 {
+		return 0, io.EOF
+	}
+	if r.offset == len(r.inputs[0]) {
+		r.inputs = r.inputs[1:]
+		r.offset = 0
+		if len(r.inputs) == 0 {
+			return 0, io.EOF
+		}
+		if err := os.WriteFile(r.path, []byte("module Helpers exposing (first)\nfirst() = second()\nsecond : () -> Int\nsecond() = 42\n"), 0600); err != nil {
+			return 0, err
+		}
+	}
+	n := copy(p, r.inputs[0][r.offset:])
+	r.offset += n
+	return n, nil
 }

@@ -145,9 +145,9 @@ Haskell's ambient reification, which is what breaks modularity there.
   gains a `Retract(owners)` that deletes the canonical-keyed entries of those
   modules (types, classes, effects, constructors, values, workers, methods,
   operations, natives, capture summaries, derivers by owner) and marks their
-  instances retracted rather than removing them, because instance limits and
-  the compile-time evaluator treat the instance and checked-declaration lists
-  as positional prefixes, so retraction must append-and-shadow; the operator
+  instances retracted rather than removing them, because instance limits are
+  positional and the compile-time evaluator tracks an append-only declaration completion log,
+  so retraction must preserve those identities and cutoffs; the operator
   table is rebuilt from the current nodes plus the prompt's own fixity
   declarations; the prompt's import list is re-applied against the new
   interfaces and names that vanished are reported; old memo cells and
@@ -237,10 +237,11 @@ but is tail recursion modulo a constructor; it is owned by
 [roadmap-calls.md](roadmap-calls.md). Deliberately deferred, each awaiting a
 concrete program that needs it:
 
-- **Mutual recursion** (`f` → `g` → `f`): needs fused dispatch loops or a
-  trampoline, changes the emitted shape of several defs at once, and
+- **Mutual tail-call optimization** (`f` → `g` → `f`): needs fused dispatch
+  loops or a trampoline, changes the emitted shape of several defs at once, and
   cross-module workers live in different Go packages that cannot share a
-  loop.
+  loop. Module-wide mutual recursion uses ordinary calls today and may consume
+  stack.
 - **Monomorphic local recursive closures**: emitted as declare-then-assign Go
   closures with indirect curried calls — a different transform over captured
   mutable locals with no worker ABI to anchor it. Workaround exists: annotate

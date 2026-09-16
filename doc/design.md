@@ -24,14 +24,17 @@ Evaluation is strict and call-by-value. Ordinary definitions are pure. Effects
 are tracked in rows and executed only where evidence is available: inside a
 handler, at an effectful call site, or by the entry-point IO runner.
 
-Top-level declarations and block bindings are scoped in source order. Forward
-references and shadowing are rejected. A block evaluates its bindings and Unit
+Top-level function declarations with parameters are visible throughout their
+module, including nullary and operator functions. Ordinary values (including
+lambda-valued declarations) and block bindings retain source-order visibility.
+Shadowing is rejected, including parameters or locals named after a later
+module function. A block evaluates its bindings and Unit
 statements eagerly in order, then evaluates exactly one result expression.
 Blocks have two surface spellings: aligned layout items and explicit
 semicolon-separated items. Both become the same ordered AST block; explicit
 blocks additionally retain their separator spans so the formatter can preserve
 their spelling without giving later compiler stages a second sequencing form.
-Top-level functions may recurse; local function bindings may recurse, but
+Top-level function groups may mutually recurse; local function bindings may recurse, but
 ordinary value self-reference is an undefined-name error.
 
 Contiguous same-name, same-arity function rows are one equation group. Each row
@@ -357,7 +360,7 @@ entry still rejects them. Reachability matters while deriving: a dictionary
 whose methods are still being expanded is not a finished executable definition.
 The stage environment retains elaborated definitions for capture substitution
 and lowering, installs newly imported intrinsics incrementally, and rebuilds
-that state after rollback discards an installed declaration prefix.
+that state after rollback discards installed declarations.
 
 The hand-written lexer records byte spans and line/column positions but does
 not synthesize layout tokens. The recursive-descent parser applies the offside
@@ -579,6 +582,20 @@ that requirement from controlled parameter types and executed call contracts,
 including calls inside handlers, while excluding latent lambda bodies. Handling
 an effect does not convert a caller's Exit-family callback to a Direct value.
 
+Resolved value references, including callbacks and nested bodies, determine
+dependency components. Bodies are checked dependency-first with deterministic
+source-order traversal; declaration output retains source order. Function-only
+strongly connected components receive monomorphic provisional bindings. Their
+bodies, effects, annotations, and record obligations are solved together before
+generalization. Residual class obligations propagate throughout the component;
+concrete obligations use each body's own source context. Independent components
+remain independently polymorphic, and recursive edges never instantiate a
+polymorphic scheme. Component variables absent from a member's public scheme
+are instantiated and defaulted in that member's body without specializing a
+sibling's scheme. Cycles containing ordinary values report
+`CYCLIC VALUE DEFINITION`; scheduling does not widen value or local scope or
+change their evaluation semantics.
+
 Top-level values and functions generalize. Local syntactic functions and
 lambdas generalize, while local values remain monomorphic so their strict,
 evaluate-once semantics are not changed by lambda lifting. `main` is ground and
@@ -633,9 +650,10 @@ Inference, evidence availability probes, and elaboration all bound recursion;
 repeated sibling requirements are not cycles. Instance selection never falls
 back to a less specific head when the selected context fails.
 
-Classes and instances are checked in source order. Typed declarations and
-instance factories retain an instance-environment cutoff, replayed during
-elaboration and scalar specialization, so later declarations cannot alter
+Class and instance registration follows source order independently of body
+checking. Typed declarations and instance factories retain their owner and
+instance-environment cutoff, used during inference, defaulting, elaboration,
+and scalar specialization, so later declarations cannot alter
 earlier concrete evidence. Polymorphic calls still receive caller evidence.
 All instances in the loaded
 graph participate in overlap checking, including orphan instances, while
@@ -793,18 +811,19 @@ Running a splice needs elaboration and the interpreter, which both sit above
 inference in the package graph, while the splice must be expanded during
 inference. `internal/staging` fills that seam: the checker holds a hook, and
 both the batch pipeline and the REPL install the same evaluator. It
-elaborates the already-inferred prefix on demand — the same per-declaration
-path `internal/repl` uses at every prompt — so a program with no splices
-elaborates nothing twice.
+elaborates completed dependency groups on demand, with every member present
+before capture analysis and evaluator installation. `Checked` is an append-only
+completion log, not a source prefix. A program with no splices elaborates
+nothing twice; rollback restores the completion log and the evaluator together.
 
-fango needs no equivalent of Template Haskell's stage restriction. Top-level
-declarations are scoped in source order and forward references are rejected,
-so a splice can only name declarations that are already checked, and
-`(*Checker).InstanceDecl` appends in source order. Declaration cutoffs preserve
-the same concrete evidence in prefix and final elaboration, while splice
-operands use the instances visible at the splice site. A splice at depth 0 is
-expanded before Core exists, so prefix elaboration cannot re-enter the
-evaluator and needs no reentrancy guard.
+Splice operands may execute only completed dependency groups whose declarations
+and transitive dependencies precede the splice. Source dependency checking and
+the elaborated closure (including dictionary calls) enforce this restriction
+with `STAGE ERROR`. Quotes describe code rather than executing it; generated
+expressions can refer to later module functions. Expansion precedes the final
+dependency analysis of those expressions. Declaration cutoffs preserve the same
+concrete evidence during compile-time and final elaboration, while splice
+operands use the instances visible at the splice site.
 
 Reproducibility is enforced rather than assumed. Compile-time code must type
 with an empty residual effect row; a locally handled abort-only effect is
@@ -835,7 +854,7 @@ so emitted text is deterministic. Decoding remains schema-specific fango code
 in the Todo example rather than a compiler facility.
 
 A failed expansion rolls back. `(*Checker).Checkpoint` restores the checked
-prefix and installed capture summaries along with the rest of the declaration
+completion log and installed capture summaries along with the rest of the declaration
 environment, and tells the
 compile-time evaluator to discard an environment that no longer describes it —
 which is why a REPL `deriving` clause whose deriver fails leaves no type

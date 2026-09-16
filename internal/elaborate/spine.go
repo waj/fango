@@ -41,7 +41,7 @@ func (el *elab) app(e *ast.App) core.Expr {
 	if v, ok := head.(*ast.Var); ok {
 		if _, local := el.scopeIdx[v.Name]; local {
 			res := el.expr(head)
-			raw := el.ck.Sub.Apply(el.ck.ExprTypes[head])
+			raw := el.apply(el.ck.ExprTypes[head])
 			for _, a := range args {
 				res = el.valueAppWithRow(res, el.expr(a), raw)
 				raw = raw.(*types.TFun).Ret
@@ -58,11 +58,11 @@ func (el *elab) app(e *ast.App) core.Expr {
 		return &core.ResumeTail{Owner: el.ck.ResumeOwners[r], Value: el.expr(args[0]), NextState: next, ClauseResult: el.zonkDefault(el.ck.ExprTypes[e])}
 	}
 	if op := el.ck.OpCalls[e]; op != nil {
-		return el.operationCall(op, el.zonkDefault(el.ck.ExprTypes[head]), el.ck.Sub.Apply(el.ck.ExprTypes[head]), args)
+		return el.operationCall(op, el.zonkDefault(el.ck.ExprTypes[head]), el.apply(el.ck.ExprTypes[head]), args)
 	}
 	if v, ok := head.(*ast.Var); ok {
 		if method := el.ck.Methods[v.Name]; method != nil {
-			raw := el.ck.Sub.Apply(el.ck.ExprTypes[head])
+			raw := el.apply(el.ck.ExprTypes[head])
 			ta := matchTyArgs(method.Type, []*types.TVar{method.Class.Param}, raw)
 			pred := types.Pred{Class: method.Class.Name, Ty: ta[0]}
 			if in, _, _ := el.matchInstance(pred); el.givenDictionary(pred) == nil && in != nil {
@@ -87,7 +87,7 @@ func (el *elab) app(e *ast.App) core.Expr {
 	if v, ok := head.(*ast.Var); ok {
 		if lf := el.lifted[v.Name]; lf != nil {
 			occTy := el.zonkDefault(el.ck.ExprTypes[head])
-			return el.calleeCall(el.liftedCallee(lf, occTy, el.ck.Sub.Apply(el.ck.ExprTypes[head])), args)
+			return el.calleeCall(el.liftedCallee(lf, occTy, el.apply(el.ck.ExprTypes[head])), args)
 		}
 	}
 
@@ -95,7 +95,7 @@ func (el *elab) app(e *ast.App) core.Expr {
 	if v, ok := head.(*ast.Var); ok {
 		if arity, isWorker := el.ck.Workers[v.Name]; isWorker {
 			workerTy := el.zonkDefault(el.ck.ExprTypes[head])
-			return el.workerCall(v.Name, workerTy, el.ck.Sub.Apply(el.ck.ExprTypes[head]), arity, args)
+			return el.workerCall(v.Name, workerTy, el.apply(el.ck.ExprTypes[head]), arity, args)
 		}
 	}
 
@@ -111,7 +111,7 @@ func (el *elab) app(e *ast.App) core.Expr {
 
 	// Unknown callee: one typed indirect call per application.
 	res := el.expr(head)
-	raw := el.ck.Sub.Apply(el.ck.ExprTypes[head])
+	raw := el.apply(el.ck.ExprTypes[head])
 	for _, a := range args {
 		res = el.valueAppWithRow(res, el.expr(a), raw)
 		raw = raw.(*types.TFun).Ret

@@ -26,7 +26,7 @@ func Install(ck *infer.Checker) {
 	ck.CompileTime = ev.run
 	// A failed expansion rolls the checker back past declarations this
 	// environment already holds, so the environment is rebuilt from the
-	// restored prefix rather than left describing a program that no longer
+	// restored completion log rather than left describing a program that no longer
 	// exists.
 	ck.CompileTimeRollback = func(checked, instances int) {
 		if ev.installedDecls <= checked && ev.installedInstances <= instances {
@@ -45,7 +45,7 @@ type evaluator struct {
 	env *eval.Env
 
 	// installed counts what the compile-time environment already holds, so
-	// each splice elaborates only the prefix that appeared since the last
+	// each splice elaborates only the completed groups added since the last
 	// one. A program with no splices elaborates nothing twice.
 	installedDecls     int
 	installedInstances int
@@ -63,6 +63,13 @@ func (ev *evaluator) run(operand ast.Expr) (any, []diag.Error) {
 	body, aux, errs := elaborate.ExprIn(operand, ev.defs, ev.ck)
 	if len(errs) > 0 {
 		return nil, errs
+	}
+	// Check the actual elaborated dependency closure as well: instance methods
+	// and dictionary factories can hide a forward call from surface references.
+	for _, d := range ev.executionDefs(body, aux) {
+		if es := ev.ck.CheckStageReference(d.Name, operand.Span()); len(es) > 0 {
+			return nil, es
+		}
 	}
 	if ev.ck.Intrinsics[types.StreamWithProducerName].Body != nil || ev.ck.Intrinsics[types.IteratorNextName].Body != nil {
 		defs := ev.executionDefs(body, aux)
@@ -126,9 +133,9 @@ func (ev *evaluator) executionDefs(body core.Expr, aux []core.Def) []core.Def {
 	return defs
 }
 
-// sync elaborates the already-inferred prefix on demand. Source-order scoping
-// is the stage discipline, so everything a splice can name is already checked
-// by the time it runs — the same property the REPL relies on per prompt.
+// sync elaborates newly completed groups together, so capture analysis and
+// evaluator installation see every recursive member. Instance registration
+// stays source-ordered and is bounded by the current splice's cutoff.
 func (ev *evaluator) sync() []diag.Error {
 	var defs []core.Def
 	var errs []diag.Error
@@ -147,14 +154,14 @@ func (ev *evaluator) sync() []diag.Error {
 			}
 		}
 	}
-	nextInstances := len(ev.ck.Instances)
+	nextInstances := ev.ck.StageInstanceLimit()
 	if n := nextInstances; n > ev.installedInstances {
 		add(elaborate.Instances(ev.ck.Instances[ev.installedInstances:], ev.ck))
 	}
 	nextDecls := len(ev.ck.Checked)
-	for i := ev.installedDecls; i < nextDecls; i++ {
+	if ev.installedDecls < nextDecls {
 		context := append(append([]core.Def(nil), ev.defs...), defs...)
-		add(elaborate.DeclIn(ev.ck.Checked[i], context, ev.ck))
+		add(elaborate.DeclsIn(ev.ck.Checked[ev.installedDecls:nextDecls], context, ev.ck))
 	}
 	if len(errs) > 0 {
 		return errs
@@ -167,7 +174,7 @@ func (ev *evaluator) sync() []diag.Error {
 		ev.installedIntrinsics[name] = true
 	}
 	ev.defs = append(ev.defs, defs...)
-	ev.installedDecls, ev.installedInstances = nextDecls, nextInstances
+	ev.installedDecls, ev.installedInstances = nextDecls, max(ev.installedInstances, nextInstances)
 	return nil
 }
 

@@ -186,7 +186,22 @@ func Decl(info infer.DeclInfo, ck *infer.Checker) ([]core.Def, []diag.Error) {
 // DeclIn is Decl with the session's installed definitions as capture-analysis
 // context, so a prompt definition's calls into installed runners are checked.
 func DeclIn(info infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]core.Def, []diag.Error) {
-	defs, errs := decl(info, ck, false)
+	return DeclsIn([]infer.DeclInfo{info}, context, ck)
+}
+
+// DeclsIn elaborates complete dependency groups before analyzing captures.
+func DeclsIn(infos []infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]core.Def, []diag.Error) {
+	var defs []core.Def
+	var errs []diag.Error
+	for _, info := range infos {
+		ds, es := decl(info, ck, false)
+		defs = append(defs, ds...)
+		errs = append(errs, es...)
+	}
+	var info infer.DeclInfo
+	if len(infos) > 0 {
+		info = infos[0]
+	}
 	if len(errs) == 0 {
 		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
 		bindRows(p.Defs, ck)
@@ -203,6 +218,7 @@ func DeclIn(info infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]core.
 
 func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def, []diag.Error) {
 	el := newElab(ck, info.Name, info.Scheme)
+	el.bodySubst = info.BodySubst
 	el.selfInstance = info.Instance
 	el.instanceLimit = info.InstanceLimit
 	el.stableLifts = stableLifts
@@ -487,6 +503,7 @@ func ExprIn(e ast.Expr, context []core.Def, ck *infer.Checker) (core.Expr, []cor
 		return nil, nil, errs
 	}
 	el := newElab(ck, "", types.Scheme{})
+	el.owner = ck.CurrentOwner
 	ce := el.anf(el.expr(e))
 	if len(el.errs) == 0 {
 		defs := append([]core.Def(nil), el.aux...)
@@ -582,6 +599,7 @@ func captureDiagnostics(errs []error, ck *infer.Checker, fallback source.Span) [
 }
 
 type elab struct {
+	bodySubst     map[int]types.Type
 	selfInstance  *infer.InstanceInfo
 	instanceLimit int
 	evidencePath  []types.Pred
@@ -621,7 +639,7 @@ type elab struct {
 
 func newElab(ck *infer.Checker, declName string, declScheme types.Scheme) *elab {
 	return &elab{ck: ck, declName: declName, declScheme: declScheme,
-		instanceLimit: len(ck.Instances),
+		instanceLimit: ck.StageInstanceLimit(),
 		owner:         symbolOwner(declName),
 		scopeIdx:      map[string]int{}, lifted: map[string]*liftedLocal{}, evidence: map[int][]core.EffectInstance{}}
 }
@@ -913,7 +931,7 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 		}
 		if op := el.ck.Operations[e.Name]; op != nil {
 
-			return el.operationValue(op, ty, el.ck.Sub.Apply(el.ck.ExprTypes[e]))
+			return el.operationValue(op, ty, el.apply(el.ck.ExprTypes[e]))
 		}
 		if n := el.ck.Natives[e.Name]; n != nil {
 			return el.nativeValue(n, ty)
@@ -921,17 +939,17 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 		// A lifted local in first-class position gets the same curried-
 		// wrapper treatment as a worker (its frees are the leading args).
 		if lf := el.lifted[e.Name]; lf != nil {
-			return el.partial(el.liftedCallee(lf, ty, el.ck.Sub.Apply(el.ck.ExprTypes[e])), nil)
+			return el.partial(el.liftedCallee(lf, ty, el.apply(el.ck.ExprTypes[e])), nil)
 		}
 		// A worker name in first-class position (not an application head —
 		// spine.go intercepts those) eta-expands into its curried wrapper.
 		if arity, isWorker := el.ck.Workers[e.Name]; isWorker {
-			return el.curriedWorkerRef(e.Name, ty, el.ck.Sub.Apply(el.ck.ExprTypes[e]), arity)
+			return el.curriedWorkerRef(e.Name, ty, el.apply(el.ck.ExprTypes[e]), arity)
 		}
 		// A polymorphic top-level value compiled to a nullary generic worker
 		// (doc/design.md, "Go backend and runtime"): every use is an instantiated zero-argument call.
 		if sch, ok := el.ck.Env.Lookup(e.Name); ok && hasRuntimeVars(sch) {
-			return el.nullaryValueUse(e.Name, sch, ty, el.ck.Sub.Apply(el.ck.ExprTypes[e]))
+			return el.nullaryValueUse(e.Name, sch, ty, el.apply(el.ck.ExprTypes[e]))
 		}
 		return &core.VarRef{Name: e.Name, Ty: ty}
 	case *ast.Ctor:
@@ -996,8 +1014,8 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 		}
 		return &core.If{Cond: cond, Then: &core.BoolLit{Val: true, Ty: ty}, Else: el.expr(e.R), Ty: ty}
 	case *ast.Lambda:
-		el.defaultFree(el.ck.Sub.Apply(el.ck.ExprTypes[e]))
-		return el.lambda(e.Params, e.Body, el.eraseRuntimeKinds(eraseRows(el.ck.Sub.Apply(el.ck.ExprTypes[e]))))
+		el.defaultFree(el.apply(el.ck.ExprTypes[e]))
+		return el.lambda(e.Params, e.Body, el.eraseRuntimeKinds(eraseRows(el.apply(el.ck.ExprTypes[e]))))
 	case *ast.Case:
 		return el.caseExpr(e, ty)
 	case *ast.Handle:
@@ -1281,7 +1299,7 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 	if e.State != nil {
 		state = &core.HandlerState{Name: e.State.Name, Initial: el.expr(e.State.Initial), Ty: el.zonkDefault(info.StateType)}
 	}
-	residualType := el.ck.Sub.Apply(info.Residual)
+	residualType := el.apply(info.Residual)
 	el.defaultFree(residualType)
 	residual := el.ck.Sub.Apply(residualType).(types.Row)
 	resultControl := rowControl(residual, el.ck)
@@ -1373,9 +1391,9 @@ func (el *elab) fold(e core.Expr) core.Expr {
 // a live REPL session — resolves identically.
 func (el *elab) zonkDefault(t types.Type) types.Type {
 	origin := t
-	t = el.ck.Sub.Apply(t)
+	t = el.apply(t)
 	el.defaultFree(t)
-	return el.eraseRuntimeKinds(eraseRowsFrom(origin, el.ck.Sub.Apply(t)))
+	return el.eraseRuntimeKinds(eraseRowsFrom(origin, el.apply(t)))
 }
 
 // eraseRuntimeKinds replaces row-kinded ADT arguments with Unit. Row
@@ -1507,4 +1525,14 @@ func (el *elab) defaultFree(t types.Type) {
 			el.defaultFree(t.Tail)
 		}
 	}
+}
+
+// apply zonks a local occurrence and instantiates any recursive-component
+// variables that this worker does not bind. Global schemes remain untouched.
+func (el *elab) apply(t types.Type) types.Type {
+	t = el.ck.Sub.Apply(t)
+	if len(el.bodySubst) == 0 {
+		return t
+	}
+	return types.SubstRigid(t, el.bodySubst)
 }

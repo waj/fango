@@ -72,6 +72,25 @@ func (ck *Checker) generalize(ty types.Type, avoid map[int]bool) types.Scheme {
 // never appear in a new binding's type, so including them is harmless.
 func (g *generator) scopeFreeIDs() map[int]bool {
 	ids := map[int]bool{}
+	if rec := g.ck.recursive; rec != nil {
+		for _, ob := range g.records {
+			if ob.resolved {
+				continue
+			}
+			if ob.receiver != nil {
+				collectVarIDs(g.ck.Sub.Apply(ob.receiver), ids)
+			}
+			if ob.result != nil {
+				collectVarIDs(g.ck.Sub.Apply(ob.result), ids)
+			}
+			for _, u := range ob.updates {
+				collectVarIDs(g.ck.Sub.Apply(u.ty), ids)
+			}
+		}
+		for _, ty := range rec.types {
+			collectVarIDs(g.ck.Sub.Apply(ty), ids)
+		}
+	}
 	for s := g.locals; s != nil; s = s.parent {
 		for _, sch := range s.names {
 			collectVarIDs(g.ck.Sub.Apply(sch.Body), ids)

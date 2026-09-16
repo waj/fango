@@ -1,0 +1,23 @@
+import Fail
+import IO
+import String
+
+beforeSpace char = char /= ' '
+
+trace char =
+    IO.write (String.fromChar char)
+    char /= '!'
+
+main() =
+    print (String.span beforeSpace "" == ("", ""))
+    print (String.span beforeSpace " hello" == ("", " hello"))
+    print (String.span beforeSpace "hello" == ("hello", ""))
+    print (String.span beforeSpace "hello world" == ("hello", " world"))
+    print (String.span beforeSpace "é😀 rest" == ("é😀", " rest"))
+    print (String.span beforeSpace "é😀" == ("é😀", ""))
+    -- Visit the rejected scalar once, and never visit the following suffix.
+    result = String.span trace "é😀!unvisited"
+    print result
+    print (String.span trace "" == ("", ""))
+    -- Callback failures propagate out of span.
+    print (Fail.attempt (\_ -> String.span (\_ -> Fail.fail "stopped") "abc"))

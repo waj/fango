@@ -1,10 +1,4 @@
-import Meta exposing (Code)
+import Meta
 import Random
 
-roll : Int
-roll = Random.runSystem (\_ -> Random.int 1 6)
-
-pick : Int -> Code
-pick n = if n > 3 then quote "high" else quote "low"
-
-main = print $(pick roll)
+main = $(Meta.lift (Random.runSystem (\_ -> Random.int 1 6)))

@@ -32,9 +32,9 @@ type liftedLocal struct {
 // later — including self-calls, registered before the body elaborates)
 // rewrite to calls.
 func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
-	rawLocalGenTy := el.ck.Sub.Apply(sch.Body)
+	rawLocalGenTy := el.apply(sch.Body)
 	el.defaultFree(rawLocalGenTy)
-	rawLocalGenTy = el.ck.Sub.Apply(rawLocalGenTy)
+	rawLocalGenTy = el.apply(rawLocalGenTy)
 	localGenTy := el.eraseRuntimeKinds(eraseRows(rawLocalGenTy))
 	frees := el.freeLocals(bind)
 	savedDicts := len(el.dicts)

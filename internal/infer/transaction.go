@@ -9,7 +9,7 @@ func (ck *Checker) Checkpoint() func() {
 	adts, ctors, types := maps.Clone(ck.ADTs), maps.Clone(ck.Ctors), maps.Clone(ck.TypeNames)
 	vars, workers, sub := maps.Clone(ck.Env.vars), maps.Clone(ck.Workers), maps.Clone(ck.Sub)
 	instances, order, pending := ck.Instances, ck.ADTOrder, ck.PendingPreds
-	// Checked is the prefix the compile-time evaluator elaborates on demand.
+	// Checked is the completion log the compile-time evaluator uses on demand.
 	// Restoring it without telling that evaluator would leave it holding
 	// definitions the checker has forgotten, so the two move together.
 	derivers, checked := maps.Clone(ck.Derivers), ck.Checked

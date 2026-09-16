@@ -754,6 +754,7 @@ startsWith : String -> String -> Bool
 contains : String -> String -> Bool
 uncons : String -> Maybe String.Uncons
 fromChar : Char -> String
+span : (Char ->{e} Bool) -> String ->{e} (String, String)
 split : String -> String -> List String
 trim : String -> String
 padLeft : Int -> Char -> String -> String
@@ -769,6 +770,11 @@ greater than its start. `startsWith prefix text` tests an exact prefix and
 `contains needle text` tests for an occurrence anywhere, with the empty needle
 found in every string; `uncons` returns the first scalar and remaining string, or `Nothing` for the
 empty string. `fromChar` makes the corresponding one-scalar string.
+`String.span keep text` returns the longest prefix whose scalars satisfy `keep`
+and the remaining suffix. It calls `keep` once per scalar from left to right,
+including the first rejected scalar, then stops; callback effects propagate.
+For example, `String.span (\c -> c /= ' ') "hello world"` returns
+`("hello", " world")`. Empty input returns `("", "")` without calling `keep`.
 `String.words : String -> List String` splits on ASCII space, tab, LF, CR,
 vertical tab, and form feed, and
 `toInt : String -> Maybe Int`, which
@@ -782,6 +788,12 @@ It consumes the complete string: whitespace, `NaN`, infinities, hexadecimal
 floats, `.5`, and `1.` produce `Nothing`. Finite values representable as a
 64-bit Float, including signed zero and subnormal values, produce `Just`;
 overflow and nonzero values that underflow to zero produce `Nothing`.
+
+The interactive `examples/calculator.fango` uses `span` and `toFloat` for a
+small decimal tokenizer. It supports variables, assignments, unary minus,
+`+ - * /`, and parentheses, with `:help` and `:quit` commands. Its numbers
+omit exponent notation, and failures print a simple message before continuing
+with the previous variable environment.
 
 `split separator text` cuts at every occurrence, so n occurrences give n + 1
 pieces and adjacent separators give empty ones: `String.split "," "a,,b"` is
@@ -934,7 +946,7 @@ the interpretation with one line in `main`.
 The seed is handler-local state. Nested seeded or system runs do not disturb
 an outer sequence, and independent runs share no PRNG cell. Deterministic
 `runSeeded` computations are allowed during compile-time staging; `runSystem`
-is rejected with `COMPILE-TIME NATIVE` because entropy is observable.
+is rejected with `COMPILE-TIME EFFECT` because it requires IO.
 
 ## Native Go sidecars
 
@@ -1205,9 +1217,26 @@ An attached definition `f() = body` retains the sole-argument Unit-function
 spelling. Spaced Unit is an ordinary exhaustive pattern, so `f () x = body`
 has two arguments. The compatible `f _ = body` form remains available.
 
-Top-level functions can recurse and Hindley-Milner inference generalizes their
-types. Polymorphic values and parameterized ADTs are supported. Numeric
-polymorphism uses ordinary class constraints, for example
+Top-level functions with parameters are visible throughout their module,
+including `f()` and operator functions. They may call or pass later functions
+as values, and mutually recursive groups need no annotations:
+
+```fango
+even n = if n == 0 then True else odd (n - 1)
+odd n = if n == 0 then False else even (n - 1)
+```
+
+Same-name equation rows must still be contiguous. Ordinary values, including
+`f = \x -> x`, and local block bindings remain visible only after their
+declarations; native declaration rules are unchanged. Parameters and locals
+cannot shadow any module function name, including a later declaration.
+Dependencies are checked before callers without changing evaluation order.
+A dependency cycle containing an ordinary value reports
+`CYCLIC VALUE DEFINITION`; only function-only groups can recurse.
+
+Hindley-Milner inference generalizes each completed dependency group, keeping
+recursive calls monomorphic while unrelated helpers remain polymorphic.
+Polymorphic values and parameterized ADTs are supported. Numeric polymorphism uses ordinary class constraints, for example
 `double : Num a => a -> a`. Variable names such as `number`, `equatable`, or
 `printable` have no special meaning. Polymorphic recursion and non-regular
 recursive ADTs are rejected. Local value bindings are monomorphic; local
@@ -1404,7 +1433,8 @@ Inside an instance method, its own head is available as self evidence using
 the instance's declared context. This permits direct recursive implementations
 without requiring callers to supply a circular self constraint.
 
-Classes, instances, and ordinary definitions are checked in source order.
+Classes, instances, and derivers retain source-position visibility even when
+function dependencies are checked in a different order.
 Later instances do not change earlier concrete calls; a polymorphic function
 still uses the evidence supplied by its caller.
 Instances may live outside both the class's and the type's defining module
@@ -2121,10 +2151,13 @@ Quoted code is resolved in the module that wrote it and checked at the site
 that splices it. Because names are resolved before inference, generated code
 can neither capture nor be captured by names at the splice site.
 
-A splice operand may name any top-level definition earlier in graph and source
-order — the ordinary scoping rule, which is also the stage discipline: a
-splice can only name what is already checked. **Top-level definitions are
-available at both stages.** Local binders are not: a lambda parameter, block
+A splice operand may execute only completed dependency groups whose declarations
+precede the splice. A direct or transitive dependency on a later declaration
+reports `STAGE ERROR`, even if that declaration has already been checked for
+another caller. Quoted code can refer to later module functions: it is checked
+where it is spliced, and its generated references participate in dependency
+checking. **Top-level definitions are available at both stages.** Local
+binders are not: a lambda parameter, block
 binding, or case binder belongs to the stage it was introduced at, and using
 one at the other stage is a `STAGE ERROR`. Staged code that needs a runtime
 value takes it as a function argument instead.
@@ -2134,7 +2167,7 @@ Compile-time code runs inside the compiler and is restricted accordingly:
 - it must type with an empty effect row (`COMPILE-TIME EFFECT`);
 - it may not reach a Go sidecar or a bundled native that observes external
   state; deterministic `Random.runSeeded` is safe, while system entropy from
-  `Random.runSystem` reports `COMPILE-TIME NATIVE`;
+  `Random.runSystem` requires IO and reports `COMPILE-TIME EFFECT`;
 - it is bounded by an evaluation-step budget (`COMPILE-TIME LIMIT`).
 
 Together these make generated Go reproducible.
@@ -2240,7 +2273,8 @@ one an import or the prelude exposes: that is the `UNQUALIFIED COLLISION` it
 would be in a module. Qualified access to the exposed name stays available.
 Imports see only a module's public interface; a private name is a `PRIVATE
 OR UNKNOWN NAME` under any qualifier.
-The prompt accepts a single exhaustive patterned function equation and
+Prompt inputs remain sequential; module-wide function visibility applies to
+imported source modules. The prompt accepts a single exhaustive patterned function equation and
 top-level destructuring bindings. It does not collect multiple function
 equations into a grouped input; use a source file for those.
 Record type declarations echo `Name : record`; their synthetic internal

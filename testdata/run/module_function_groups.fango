@@ -1,0 +1,40 @@
+import Fail
+import List
+
+first value = later value
+later value = value
+
+isEven 0 = True
+isEven n = isOdd (n - 1)
+isOdd 0 = False
+isOdd n = isEven (n - 1)
+
+applyLater values = List.map increment values
+increment value = value + 1
+
+nullary() = answer()
+answer() = 42
+
+infixl 6 (<+>)
+operatorCaller x = x <+> 1
+(<+>) x y = x + y
+
+left : a -> Bool -> a
+left value stop = if stop then value else right value True
+right : a -> Bool -> a
+right value stop = if stop then value else left value True
+
+fallible : Int ->{Fail.Fail String} ()
+fallible n = if n == 0 then Fail.fail "zero" else alternate (n - 1)
+alternate n = fallible n
+
+main() =
+    print (first 42)
+    print (first "independent")
+    print (List.map isEven [0, 1, 2, 3, 4])
+    print (applyLater [1, 2, 3])
+    print (nullary())
+    print (operatorCaller 41)
+    print (left "mutual" False)
+    print (right 42 False)
+    print (Fail.attempt (\_ -> fallible 3))

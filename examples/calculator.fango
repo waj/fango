@@ -1,20 +1,12 @@
--- A floating-point calculator with variables. Each line is either an
--- expression or an assignment such as `x = 3 * (2 + y)`. Parsing and
--- evaluation fail through the abort-only Fail effect, so an error leaves the
--- environment unchanged and the next line can continue.
+-- A small recursive-descent calculator with variables and assignments.
+-- Numbers are integers or decimals; names use ASCII letters, digits, and _.
+-- Try: x = 3, then x * (2 + 4). Type :quit to finish.
 
 import Dict
 import Fail
 import IO
-import List exposing (List(..))
 import Result exposing (Result(..))
 import String
-
-type Cursor = { remaining : String, column : Int }
-
-type Scan = { text : String, next : Cursor }
-
-type CalcError = { column : Int, message : String }
 
 type Token
     = NumberToken Float
@@ -26,15 +18,10 @@ type Token
     | EqualsToken
     | LeftParenToken
     | RightParenToken
-    | EndToken
-
-type Located = { token : Token, column : Int }
-
-type Lexed = { located : Located, next : Cursor }
 
 type Expr
     = Number Float
-    | Variable Int String
+    | Variable String
     | Negate Expr
     | Add Expr Expr
     | Subtract Expr Expr
@@ -43,311 +30,129 @@ type Expr
 
 type Statement = Evaluate Expr | Assign String Expr
 
-type Parsed a = { value : a, rest : List Located }
-
-raise : Int -> String ->{Fail.Fail CalcError} a
-raise column message = Fail.fail (CalcError { column = column, message = message })
-
-isSpace char = char == ' ' || char == '\t'
-
 isDigit char = char >= '0' && char <= '9'
 
-isLetter char = (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z')
+isLetter char = (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || char == '_'
 
-isNameStart char = isLetter char || char == '_'
-
-isNameRest char = isNameStart char || isDigit char
-
-advance : Cursor -> Maybe (Char, Cursor)
-advance cursor =
-    case String.uncons cursor.remaining of
-        Nothing -> Nothing
-        Just part ->
-            Just
-                ( part.first
-                , Cursor { remaining = part.rest, column = cursor.column + 1 }
-                )
-
-skipSpaces : Cursor -> Cursor
-skipSpaces cursor =
-    case String.uncons cursor.remaining of
-        Just part ->
-            if isSpace part.first then
-                skipSpaces (Cursor { remaining = part.rest, column = cursor.column + 1 })
-            else
-                cursor
-        Nothing -> cursor
-
-scanWhile : (Char -> Bool) -> String -> Cursor -> Scan
-scanWhile keep text cursor =
-    case String.uncons cursor.remaining of
-        Just part ->
-            if keep part.first then
-                scanWhile keep (text ++ String.fromChar part.first)
-                    (Cursor { remaining = part.rest, column = cursor.column + 1 })
-            else
-                Scan { text = text, next = cursor }
-        Nothing -> Scan { text = text, next = cursor }
-
-scanDigits : String -> Cursor -> Scan
-scanDigits text cursor = scanWhile isDigit text cursor
-
-scanNumber : Cursor ->{Fail.Fail CalcError} Scan
-scanNumber start =
-    integer = scanDigits "" start
-    afterFraction =
-        case String.uncons integer.next.remaining of
-            Just point ->
-                if point.first == '.' then
-                    afterPoint = Cursor
-                        { remaining = point.rest
-                        , column = integer.next.column + 1
-                        }
-                    fraction = scanDigits (integer.text ++ ".") afterPoint
-                    if fraction.next.column == afterPoint.column then
-                        raise start.column "invalid number"
-                    else
-                        fraction
-                else
-                    integer
-            Nothing -> integer
-    case String.uncons afterFraction.next.remaining of
-        Just exponent ->
-            if exponent.first == 'e' || exponent.first == 'E' then
-                afterMarker = Cursor
-                    { remaining = exponent.rest
-                    , column = afterFraction.next.column + 1
-                    }
-                signed =
-                    case String.uncons afterMarker.remaining of
-                        Just sign ->
-                            if sign.first == '+' || sign.first == '-' then
-                                Scan
-                                    { text = afterFraction.text ++ String.fromChar exponent.first ++ String.fromChar sign.first
-                                    , next = Cursor
-                                        { remaining = sign.rest
-                                        , column = afterMarker.column + 1
-                                        }
-                                    }
-                            else
-                                Scan
-                                    { text = afterFraction.text ++ String.fromChar exponent.first
-                                    , next = afterMarker
-                                    }
-                        Nothing ->
-                            Scan
-                                { text = afterFraction.text ++ String.fromChar exponent.first
-                                , next = afterMarker
-                                }
-                finished = scanDigits signed.text signed.next
-                if finished.next.column == signed.next.column then
-                    raise start.column "invalid number"
-                else
-                    finished
-            else
-                afterFraction
-        Nothing -> afterFraction
-
-oneToken : Token -> Cursor -> Lexed
-oneToken token cursor =
-    case advance cursor of
-        Just (_, next) ->
-            Lexed
-                { located = Located { token = token, column = cursor.column }
-                , next = next
-                }
-        Nothing ->
-            Lexed
-                { located = Located { token = EndToken, column = cursor.column }
-                , next = cursor
-                }
-
-lexTokens : Cursor ->{Fail.Fail CalcError} List Located
-lexTokens input =
-    cursor = skipSpaces input
-    case String.uncons cursor.remaining of
-        Nothing -> Cons (Located { token = EndToken, column = cursor.column }) Nil
-        Just part ->
-            if isDigit part.first then
-                scanned = scanNumber cursor
-                case String.toFloat scanned.text of
-                    Nothing -> raise cursor.column "invalid number"
-                    Just value ->
-                        Cons (Located { token = NumberToken value, column = cursor.column })
-                            (lexTokens scanned.next)
-            else if isNameStart part.first then
-                scanned = scanWhile isNameRest "" cursor
-                Cons (Located { token = NameToken scanned.text, column = cursor.column })
-                    (lexTokens scanned.next)
+tokenize : String ->{Fail.Fail String} List Token
+tokenize text =
+    case String.uncons text of
+        Nothing -> []
+        Just (String.Uncons { first = char, rest = rest }) ->
+            if char == ' ' || char == '\t' then
+                tokenize rest
+            else if isDigit char then
+                (number, tail) = String.span (\c -> isDigit c || c == '.') text
+                case String.toFloat number of
+                    Just value -> [NumberToken value | tokenize tail]
+                    Nothing -> Fail.fail "invalid number"
+            else if isLetter char then
+                (name, tail) = String.span (\c -> isLetter c || isDigit c) text
+                [NameToken name | tokenize tail]
             else
                 token =
-                    case part.first of
-                        '+' -> oneToken PlusToken cursor
-                        '-' -> oneToken MinusToken cursor
-                        '*' -> oneToken TimesToken cursor
-                        '/' -> oneToken DivideToken cursor
-                        '=' -> oneToken EqualsToken cursor
-                        '(' -> oneToken LeftParenToken cursor
-                        ')' -> oneToken RightParenToken cursor
-                        _ -> raise cursor.column ("unexpected `" ++ String.fromChar part.first ++ "`")
-                Cons token.located (lexTokens token.next)
+                    case char of
+                        '+' -> PlusToken
+                        '-' -> MinusToken
+                        '*' -> TimesToken
+                        '/' -> DivideToken
+                        '=' -> EqualsToken
+                        '(' -> LeftParenToken
+                        ')' -> RightParenToken
+                        _ -> Fail.fail ("unexpected `" ++ String.fromChar char ++ "`")
+                [token | tokenize rest]
 
-tokenText : Token -> String
-tokenText token =
-    case token of
-        NumberToken _ -> "number"
-        NameToken name -> "`" ++ name ++ "`"
-        PlusToken -> "`+`"
-        MinusToken -> "`-`"
-        TimesToken -> "`*`"
-        DivideToken -> "`/`"
-        EqualsToken -> "`=`"
-        LeftParenToken -> "`(`"
-        RightParenToken -> "`)`"
-        EndToken -> "end of input"
+-- expr   = term ((+ | -) term)*
+-- term   = factor ((* | /) factor)*
+-- factor = number | name | -factor | (expr)
+parseExpr : List Token ->{Fail.Fail String} (Expr, List Token)
+parseExpr tokens =
+    (first, rest) = term tokens
+    exprRest first rest
 
-parseExpression : List Located ->{Fail.Fail CalcError} Parsed Expr
-parseExpression tokens =
-    primary : List Located ->{Fail.Fail CalcError} Parsed Expr
-    primary input =
-        case input of
-            Nil -> raise 1 "expected an expression"
-            Cons located tail ->
-                case located.token of
-                    NumberToken value -> Parsed { value = Number value, rest = tail }
-                    NameToken name -> Parsed { value = Variable located.column name, rest = tail }
-                    LeftParenToken ->
-                        inside : Parsed Expr
-                        inside = parseExpression tail
-                        case inside.rest of
-                            Cons close remaining ->
-                                case close.token of
-                                    RightParenToken -> Parsed { value = inside.value, rest = remaining }
-                                    _ -> raise close.column "expected `)`"
-                            Nil -> raise located.column "expected `)`"
-                    _ -> raise located.column "expected an expression"
-    unary : List Located ->{Fail.Fail CalcError} Parsed Expr
-    unary input =
-        case input of
-            Cons located tail ->
-                case located.token of
-                    MinusToken ->
-                        operand = unary tail
-                        Parsed { value = Negate operand.value, rest = operand.rest }
-                    _ -> primary input
-            Nil -> primary input
-    termRest : Expr -> List Located ->{Fail.Fail CalcError} Parsed Expr
-    termRest left input =
-        case input of
-            Cons located tail ->
-                case located.token of
-                    TimesToken ->
-                        right = unary tail
-                        termRest (Multiply left right.value) right.rest
-                    DivideToken ->
-                        right = unary tail
-                        termRest (Divide left right.value) right.rest
-                    _ -> Parsed { value = left, rest = input }
-            Nil -> Parsed { value = left, rest = input }
-    term : List Located ->{Fail.Fail CalcError} Parsed Expr
-    term input =
-        firstTerm = unary input
-        termRest firstTerm.value firstTerm.rest
-    expressionRest : Expr -> List Located ->{Fail.Fail CalcError} Parsed Expr
-    expressionRest left input =
-        case input of
-            Cons located tail ->
-                case located.token of
-                    PlusToken ->
-                        right = term tail
-                        expressionRest (Add left right.value) right.rest
-                    MinusToken ->
-                        right = term tail
-                        expressionRest (Subtract left right.value) right.rest
-                    _ -> Parsed { value = left, rest = input }
-            Nil -> Parsed { value = left, rest = input }
-    first = term tokens
-    expressionRest first.value first.rest
+exprRest left [PlusToken | rest] =
+    (right, tail) = term rest
+    exprRest (Add left right) tail
+exprRest left [MinusToken | rest] =
+    (right, tail) = term rest
+    exprRest (Subtract left right) tail
+exprRest left rest = (left, rest)
 
-finish : Parsed a ->{Fail.Fail CalcError} a
-finish parsed =
-    case parsed.rest of
-        Cons located Nil ->
-            case located.token of
-                EndToken -> parsed.value
-                _ -> raise located.column ("unexpected " ++ tokenText located.token)
-        Cons located _ -> raise located.column ("unexpected " ++ tokenText located.token)
-        Nil -> parsed.value
+term input =
+    (first, rest) = factor input
+    termRest first rest
 
-parseStatement : List Located ->{Fail.Fail CalcError} Statement
-parseStatement tokens =
-    case tokens of
-        Cons first (Cons second tail) ->
-            case first.token of
-                NameToken name ->
-                    case second.token of
-                        EqualsToken ->
-                            expression = parseExpression tail
-                            Assign name (finish expression)
-                        _ -> Evaluate (finish (parseExpression tokens))
-                _ -> Evaluate (finish (parseExpression tokens))
-        _ -> Evaluate (finish (parseExpression tokens))
+termRest left [TimesToken | rest] =
+    (right, tail) = factor rest
+    termRest (Multiply left right) tail
+termRest left [DivideToken | rest] =
+    (right, tail) = factor rest
+    termRest (Divide left right) tail
+termRest left rest = (left, rest)
 
-evaluate : Dict.Dict String Float -> Expr ->{Fail.Fail CalcError} Float
-evaluate environment expression =
-    case expression of
-        Number value -> value
-        Variable column name ->
-            case Dict.get name environment of
-                Nothing -> raise column ("unknown variable `" ++ name ++ "`")
-                Just value -> value
-        Negate operand -> 0.0 - evaluate environment operand
-        Add left right -> evaluate environment left + evaluate environment right
-        Subtract left right -> evaluate environment left - evaluate environment right
-        Multiply left right -> evaluate environment left * evaluate environment right
-        Divide left right -> evaluate environment left / evaluate environment right
+factor [NumberToken value | rest] = (Number value, rest)
+factor [NameToken name | rest] = (Variable name, rest)
+factor [MinusToken | rest] =
+    (value, tail) = factor rest
+    (Negate value, tail)
+factor [LeftParenToken | rest] =
+    (value, tail) = parseExpr rest
+    case tail of
+        [RightParenToken | remaining] -> (value, remaining)
+        _ -> Fail.fail "expected `)`"
+factor _ = Fail.fail "expected an expression"
 
-execute : Dict.Dict String Float -> String ->{IO, Fail.Fail CalcError} Dict.Dict String Float
-execute environment text =
-    statement = parseStatement (lexTokens (Cursor { remaining = text, column = 1 }))
-    case statement of
-        Evaluate expression ->
-            value = evaluate environment expression
-            print value
-            environment
-        Assign name expression ->
-            value = evaluate environment expression
-            print (name ++ " = " ++ show value)
-            Dict.insert name value environment
+parse tokens =
+    case parseExpr tokens of
+        (value, []) -> value
+        _ -> Fail.fail "unexpected trailing tokens"
 
-attemptLine : Dict.Dict String Float -> String ->{IO} Result CalcError (Dict.Dict String Float)
-attemptLine environment text = Fail.attempt (\_ -> execute environment text)
+parseStatement [NameToken name, EqualsToken | rest] = Assign name (parse rest)
+parseStatement tokens = Evaluate (parse tokens)
 
-help : () ->{IO} ()
+evaluate : Dict.Dict String Float -> Expr ->{Fail.Fail String} Float
+evaluate _ (Number value) = value
+evaluate env (Variable name) =
+    case Dict.get name env of
+        Just value -> value
+        Nothing -> Fail.fail ("unknown variable `" ++ name ++ "`")
+evaluate env (Negate value) = 0.0 - evaluate env value
+evaluate env (Add a b) = evaluate env a + evaluate env b
+evaluate env (Subtract a b) = evaluate env a - evaluate env b
+evaluate env (Multiply a b) = evaluate env a * evaluate env b
+evaluate env (Divide a b) = evaluate env a / evaluate env b
+
+execute env (Assign name expr) =
+    value = evaluate env expr
+    print (name ++ " = " ++ show value)
+    Dict.insert name value env
+execute env (Evaluate expr) =
+    print (evaluate env expr)
+    env
+
 help() =
     print "Enter an expression or NAME = expression."
     print "Operators: + - * / and parentheses."
     print "Commands: :help, :quit"
 
-loop : Dict.Dict String Float ->{IO} ()
-loop environment =
+loop env =
     IO.write "calc> "
     case readLine() of
         Nothing -> ()
         Just line ->
-            command = String.trim line.text
-            if command == "" then
-                loop environment
-            else if command == ":quit" then
+            text = String.trim line.text
+            if text == ":quit" then
                 print "Goodbye!"
-            else if command == ":help" then
+            else if text == ":help" then
                 help()
-                loop environment
+                loop env
+            else if text == "" then
+                loop env
             else
-                case attemptLine environment line.text of
-                    Err error ->
-                        print ("error at column " ++ show error.column ++ ": " ++ error.message)
-                        loop environment
+                case Fail.attempt (\_ -> execute env (parseStatement (tokenize text))) of
                     Ok next -> loop next
+                    Err message ->
+                        print ("error: " ++ message)
+                        loop env
 
 main() = loop Dict.empty

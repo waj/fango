@@ -4,10 +4,17 @@ Commands: :help, :quit
 calc> 14
 calc> x = 20
 calc> 4
-calc> error at column 5: unknown variable `missing`
+calc> error: unknown variable `missing`
 calc> 20
 calc> 150.25
 calc> -6
-calc> error at column 7: expected `)`
-calc> error at column 3: unexpected `@`
+calc> error: expected `)`
+calc> error: unexpected `@`
+calc> 5
+calc> 3
+calc> 2
+calc> x = 21
+calc> 21
+calc> error: invalid number
+calc> error: unexpected trailing tokens
 calc> Goodbye!

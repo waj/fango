@@ -42,6 +42,13 @@ leak =
     handle keep (\_ -> readCounter()) with state = 0 of
         readCounter () -> resume state with state
 main = 0`, "STATE RESULT ESCAPES"},
+		{"mutual resource escape", `first port stop = if stop then (\_ -> readPort port) else second port True
+second port stop = first port stop
+leak = withPort (\port -> first port False)
+main = 0`, "RESOURCE ESCAPES"},
+		{"mutual safe resource", `first port stop = if stop then readPort port else second port True
+second port stop = first port stop
+main = withPort (\port -> first port False)`, ""},
 		{"scalar helper", `loop port n = if n == 0 then readPort port else loop port (n - 1)
 main = withPort (\port -> loop port 3)`, ""},
 		{"recursive owner store", `empty : Maybe Port

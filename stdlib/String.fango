@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module String exposing (Uncons(..), byteLength, contains, fromChar, length, padLeft, padRight, slice, split, startsWith, toFloat, toInt, trim, uncons, words)
+module String exposing (Uncons(..), byteLength, contains, fromChar, length, padLeft, padRight, slice, span, split, startsWith, toFloat, toInt, trim, uncons, words)
 
 import Basics exposing (..)
 import List exposing (List(..))
@@ -41,6 +41,20 @@ uncons text =
         Nothing
     else
         Just (Uncons { first = firstChar text, rest = restString text })
+
+-- Stop at the first rejected scalar, keeping it in the remaining suffix.
+spanHelp : (Char ->{e} Bool) -> String -> String -> Int ->{e} (String, String)
+spanHelp keep original rest count =
+    case uncons rest of
+        Nothing -> (original, "")
+        Just part ->
+            if keep part.first then
+                spanHelp keep original part.rest (count + 1)
+            else
+                (slice 0 count original, rest)
+
+span : (Char ->{e} Bool) -> String ->{e} (String, String)
+span keep text = spanHelp keep text text 0
 
 startsWith : String -> String -> Bool
 startsWith prefix text = slice 0 (length prefix) text == prefix

@@ -109,6 +109,11 @@ func (ck *Checker) ResolvePreds(ps []ast.PredExpr, scope *TypeVars) ([]types.Pre
 	var errs []diag.Error
 	for _, p := range ps {
 		cl := ck.Classes[p.Class]
+		if b := ck.moduleCheck; b != nil {
+			if i, ok := b.classAt[p.Class]; ok && i >= b.current {
+				cl = nil
+			}
+		}
 		if cl == nil {
 			errs = append(errs, diag.Errorf(p.Sp, "UNKNOWN CLASS", "I don't know a class named `%s`.", p.Class))
 			continue
@@ -123,6 +128,14 @@ func (ck *Checker) ResolvePreds(ps []ast.PredExpr, scope *TypeVars) ([]types.Pre
 }
 
 func (ck *Checker) InstanceDecl(d *ast.InstanceDecl) ([]DeclInfo, []diag.Error) {
+	inst, errs := ck.registerInstance(d)
+	if len(errs) > 0 {
+		return nil, errs
+	}
+	return ck.checkInstance(d, inst)
+}
+
+func (ck *Checker) registerInstance(d *ast.InstanceDecl) (*InstanceInfo, []diag.Error) {
 	cl := ck.Classes[d.Head.Class]
 	if cl == nil {
 		return nil, []diag.Error{diag.Errorf(d.Head.Sp, "UNKNOWN CLASS", "I don't know class `%s`.", d.Head.Class)}
@@ -224,6 +237,16 @@ func (ck *Checker) InstanceDecl(d *ast.InstanceDecl) ([]DeclInfo, []diag.Error) 
 	inst.IdentityMethods = map[int]bool{}
 	ck.Instances = append(ck.Instances, inst)
 	ck.Env.Bind(name, types.Scheme{Vars: inst.Vars, Preds: inst.Preds, Body: cl.DictType(head)})
+	return inst, nil
+}
+
+func (ck *Checker) checkInstance(d *ast.InstanceDecl, inst *InstanceInfo) ([]DeclInfo, []diag.Error) {
+	cl, head, name := inst.Class, inst.Head, inst.Name
+	methods := map[string]*ast.ValueDecl{}
+	for _, m := range d.Methods {
+		methods[types.SurfaceName(m.Name)] = m
+	}
+	var errs []diag.Error
 	var infos []DeclInfo
 	for _, cm := range cl.Methods {
 		m := methods[types.SurfaceName(cm.Name)]
@@ -341,7 +364,7 @@ func (ck *Checker) reduceObligations(obs []predObligation, given []types.Pred) (
 		given = append(append([]types.Pred{}, given...), types.Pred{Class: in.Class.Name, Ty: in.Head})
 	}
 	for _, o := range obs {
-		r := ck.ResolveInstance(o.pred, ck.CurrentOwner, len(ck.Instances), given)
+		r := ck.ResolveInstance(o.pred, ck.CurrentOwner, ck.instanceLimit(), given)
 		if r.Blocked {
 			residual = append(residual, o.pred)
 		}
@@ -552,7 +575,7 @@ func (ck *Checker) defaultEligible(p types.Pred, id int, path []types.Pred) (boo
 		sub[vid] = &v
 	}
 	probe := types.Pred{Class: p.Class, Ty: sub.Apply(p.Ty)}
-	candidates := ck.matchingInstances(probe, ck.CurrentOwner, len(ck.Instances))
+	candidates := ck.matchingInstances(probe, ck.CurrentOwner, ck.instanceLimit())
 	if len(candidates) == 0 {
 		_, bare := p.Ty.(*types.TVar)
 		return !bare, false // Preserve deferred structural defaulting.

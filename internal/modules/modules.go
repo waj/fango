@@ -1074,7 +1074,8 @@ type resolver struct {
 	// prompt may redefine its own names (a rebinding to the same canonical
 	// name is not a collision) and may import the same module again for
 	// more names, alias included.
-	prompt bool
+	prompt      bool
+	predeclared map[string]*ast.ValueDecl
 }
 
 func (r *resolver) canon(name string) string {
@@ -1154,6 +1155,19 @@ func (r *resolver) resolve() ([]ast.Decl, []diag.Error) {
 	r.applyImports(r.preludeImports(), false)
 	r.applyImports(r.node.mod.Imports, true)
 	r.declareHeaders(r.node.mod.Decls)
+	r.predeclared = map[string]*ast.ValueDecl{}
+	if !r.prompt {
+		for _, decl := range r.node.mod.Decls {
+			if d, ok := decl.(*ast.ValueDecl); ok && len(d.Params) > 0 && d.Native == nil {
+				if _, exists := r.vals[d.Name]; exists {
+					r.errs = append(r.errs, diag.Errorf(d.NameSpan, "UNQUALIFIED COLLISION", "The value `%s` collides with an exposed import, operation, or existing declaration.", d.Name))
+				} else {
+					r.add(r.vals, d.Name, r.canon(d.Name), d.NameSpan)
+					r.predeclared[d.Name] = d
+				}
+			}
+		}
+	}
 	return r.resolveDecls(r.node.mod.Decls), r.errs
 }
 
@@ -1211,6 +1225,9 @@ func (r *resolver) resolveDecls(decls []ast.Decl) []ast.Decl {
 		case *ast.ClassDecl:
 			r.add(r.tys, d.Name, r.canon(d.Name), d.NameSpan)
 			for _, m := range d.Methods {
+				if r.predeclared[m.Name] != nil {
+					r.errs = append(r.errs, diag.Errorf(m.NameSpan, "UNQUALIFIED COLLISION", "Method `%s` collides with a module function.", m.Name))
+				}
 				r.add(r.vals, m.Name, r.canon(m.Name), m.NameSpan)
 			}
 			d.Name = r.canon(d.Name)
@@ -1249,7 +1266,7 @@ func (r *resolver) resolveDecls(decls []ast.Decl) []ast.Decl {
 		case *ast.ValueDecl:
 			surface := d.Name
 			canon := r.canon(surface)
-			if existing, exists := r.vals[surface]; exists && (!r.prompt || existing != canon) {
+			if existing, exists := r.vals[surface]; exists && (!r.prompt || existing != canon) && r.predeclared[surface] != d {
 				r.errs = append(r.errs, diag.Errorf(d.NameSpan, "UNQUALIFIED COLLISION", "The value `%s` collides with an exposed import or operation.", d.Name))
 			}
 			visible := clone(r.vals)
