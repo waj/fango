@@ -2,8 +2,8 @@
 -- Numbers are integers or decimals; names use ASCII letters, digits, and _.
 -- Try: x = 3, then x * (2 + 4). Type :quit to finish.
 
-import Dict
-import Fail
+import Dict exposing (Dict)
+import Fail exposing (Fail, fail)
 import IO
 import Result exposing (Result(..))
 import String
@@ -34,18 +34,18 @@ isDigit char = char >= '0' && char <= '9'
 
 isLetter char = (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || char == '_'
 
-tokenize : String ->{Fail.Fail String} List Token
+tokenize : String ->{Fail String} List Token
 tokenize text =
     case String.uncons text of
         Nothing -> []
-        Just (String.Uncons { first = char, rest = rest }) ->
+        Just ({ first = char, rest = rest }) ->
             if char == ' ' || char == '\t' then
                 tokenize rest
             else if isDigit char then
                 (number, tail) = String.span (\c -> isDigit c || c == '.') text
                 case String.toFloat number of
                     Just value -> [NumberToken value | tokenize tail]
-                    Nothing -> Fail.fail "invalid number"
+                    Nothing -> fail "invalid number"
             else if isLetter char then
                 (name, tail) = String.span (\c -> isLetter c || isDigit c) text
                 [NameToken name | tokenize tail]
@@ -59,13 +59,13 @@ tokenize text =
                         '=' -> EqualsToken
                         '(' -> LeftParenToken
                         ')' -> RightParenToken
-                        _ -> Fail.fail ("unexpected `" ++ String.fromChar char ++ "`")
+                        _ -> fail ("unexpected `" ++ String.fromChar char ++ "`")
                 [token | tokenize rest]
 
 -- expr   = term ((+ | -) term)*
 -- term   = factor ((* | /) factor)*
 -- factor = number | name | -factor | (expr)
-parseExpr : List Token ->{Fail.Fail String} (Expr, List Token)
+parseExpr : List Token ->{Fail String} (Expr, List Token)
 parseExpr tokens =
     go left [PlusToken | remaining] =
         (right, tail) = parseTerm remaining
@@ -77,7 +77,7 @@ parseExpr tokens =
     (first, rest) = parseTerm tokens
     go first rest
 
-parseTerm : List Token ->{Fail.Fail String} (Expr, List Token)
+parseTerm : List Token ->{Fail String} (Expr, List Token)
 parseTerm input =
     go left [TimesToken | remaining] =
         (right, tail) = parseFactor remaining
@@ -89,7 +89,7 @@ parseTerm input =
     (first, rest) = parseFactor input
     go first rest
 
-parseFactor : List Token ->{Fail.Fail String} (Expr, List Token)
+parseFactor : List Token ->{Fail String} (Expr, List Token)
 parseFactor [NumberToken value | rest] = (Number value, rest)
 parseFactor [NameToken name | rest] = (Variable name, rest)
 parseFactor [MinusToken | rest] =
@@ -99,29 +99,31 @@ parseFactor [LeftParenToken | rest] =
     (value, tail) = parseExpr rest
     case tail of
         [RightParenToken | remaining] -> (value, remaining)
-        _ -> Fail.fail "expected `)`"
-parseFactor _ = Fail.fail "expected an expression"
+        _ -> fail "expected `)`"
+parseFactor _ = fail "expected an expression"
 
+parse : List Token ->{Fail String} Expr
 parse tokens =
     case parseExpr tokens of
         (value, []) -> value
-        _ -> Fail.fail "unexpected trailing tokens"
+        _ -> fail "unexpected trailing tokens"
 
 parseStatement [NameToken name, EqualsToken | rest] = Assign name (parse rest)
 parseStatement tokens = Evaluate (parse tokens)
 
-evaluate : Dict.Dict String Float -> Expr ->{Fail.Fail String} Float
+evaluate : Dict String Float -> Expr ->{Fail String} Float
 evaluate _ (Number value) = value
 evaluate env (Variable name) =
     case Dict.get name env of
         Just value -> value
-        Nothing -> Fail.fail ("unknown variable `" ++ name ++ "`")
-evaluate env (Negate value) = 0.0 - evaluate env value
+        Nothing -> fail ("unknown variable `" ++ name ++ "`")
+evaluate env (Negate value) = -(evaluate env value)
 evaluate env (Add a b) = evaluate env a + evaluate env b
 evaluate env (Subtract a b) = evaluate env a - evaluate env b
 evaluate env (Multiply a b) = evaluate env a * evaluate env b
 evaluate env (Divide a b) = evaluate env a / evaluate env b
 
+execute : Dict String Float -> Statement ->{Fail String, IO} Dict String Float
 execute env (Assign name expr) =
     value = evaluate env expr
     print (name ++ " = " ++ show value)
@@ -141,18 +143,19 @@ loop env =
         Nothing -> ()
         Just line ->
             text = String.trim line.text
-            if text == ":quit" then
-                print "Goodbye!"
-            else if text == ":help" then
-                help()
-                loop env
-            else if text == "" then
-                loop env
-            else
-                case Fail.attempt (\_ -> execute env (parseStatement (tokenize text))) of
-                    Ok next -> loop next
-                    Err message ->
-                        print ("error: " ++ message)
-                        loop env
+            case text of
+                ":quit" ->
+                    print "Goodbye!"
+                ":help" ->
+                    help()
+                    loop env
+                "" ->
+                    loop env
+                _ ->
+                    case Fail.attempt (\_ -> execute env (parseStatement (tokenize text))) of
+                        Ok next -> loop next
+                        Err message ->
+                            print ("error: " ++ message)
+                            loop env
 
 main() = loop Dict.empty
