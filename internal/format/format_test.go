@@ -145,6 +145,22 @@ func TestRefusesFileThatDoesNotLex(t *testing.T) {
 	}
 }
 
+func TestInferredRecordPatternAfterConstructorKeepsGrouping(t *testing.T) {
+	for _, src := range []string{
+		"foo W ({ x = x }) = x\n",
+		"foo (S ({ x = x })) = x\n",
+		"foo = \\W ({ x = x }) -> x\n",
+	} {
+		out, errs := Source(source.NewFile("patterns.fango", []byte(src)))
+		if len(errs) > 0 {
+			t.Fatalf("%q: %s: %s", src, errs[0].Title, errs[0].Body)
+		}
+		if string(out) != src {
+			t.Errorf("formatted %q as %q", src, out)
+		}
+	}
+}
+
 // A layout construct keeps the author's line structure while its spacing is
 // normalized, and the branch column stays a level in from the `case`.
 func TestLayoutIsRenderedNotCopied(t *testing.T) {

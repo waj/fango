@@ -70,7 +70,7 @@ func exprInline(e ast.Expr) (string, bool) {
 		f, ok3 := exprInline(e.Else)
 		return "if " + c + " then " + t + " else " + f, ok1 && ok2 && ok3
 	case *ast.Lambda:
-		params, ok1 := patternsInline(e.Params, patternArgInline)
+		params, ok1 := patternsInline(e.Params)
 		body, ok2 := exprInline(e.Body)
 		return "\\" + params + " -> " + body, ok1 && ok2
 	case *ast.Block:
@@ -142,7 +142,7 @@ func localBindInline(b ast.LocalBind) ([]string, bool) {
 		return append(parts, pat+" = "+body), true
 	}
 	for _, eq := range localEquations(b) {
-		params, ok1 := patternsInline(eq.Params, patternArgInline)
+		params, ok1 := patternsInline(eq.Params)
 		body, ok2 := exprInline(eq.Body)
 		if !ok1 || !ok2 {
 			return nil, false

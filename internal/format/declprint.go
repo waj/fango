@@ -264,15 +264,17 @@ func equationBroke(eq ast.Equation) bool {
 // obeys. Patterns may themselves have a block form.
 func (p *printer) renderEquationHead(name string, eq ast.Equation, ind int) bool {
 	p.emit(declName(name))
+	var prev ast.Pattern
 	for i, param := range eq.Params {
 		if _, isUnit := param.(*ast.PUnit); isUnit && paramAdjacent(eq, i) {
 			p.emit("()")
 			continue
 		}
 		p.emit(" ")
-		if !p.renderPatternArg(param, ind) {
+		if !p.renderPatternParam(param, prev, ind) {
 			return false
 		}
+		prev = param
 	}
 	return true
 }

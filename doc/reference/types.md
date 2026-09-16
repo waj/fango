@@ -66,8 +66,11 @@ startsAt { x = x } = x
 
 Fields are keyed and may be reordered. Omitted fields are implicit wildcards,
 so `IO.Line {}` is irrefutable. Duplicate and unknown fields are rejected, and
-matching requires the field schema exposed by `Type(..)`. A record pattern
-delimits itself, so it needs no parentheses in an argument position.
+matching requires the field schema exposed by `Type(..)`. An inferred record
+pattern delimits itself when it begins a function parameter, as in `startsAt {
+x = x }`. After a constructor pattern it needs parentheses: `foo W ({ x = x
+})` has a `W` parameter followed by an inferred record parameter, while `foo
+W { x = x }` is a record pattern named `W`.
 
 Records participate in module abstraction. An exposing item `Counts` makes
 only the type name available, while `Counts(..)` additionally exposes its field

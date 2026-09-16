@@ -32,11 +32,13 @@ func (p *printer) renderPattern(pat ast.Pattern, ind int) bool {
 }
 
 func (p *printer) renderPatternArgs(ps []ast.Pattern, ind int) bool {
+	var prev ast.Pattern
 	for _, pat := range ps {
 		p.emit(" ")
-		if !p.renderPatternArg(pat, ind) {
+		if !p.renderPatternParam(pat, prev, ind) {
 			return false
 		}
+		prev = pat
 	}
 	return true
 }
@@ -65,6 +67,31 @@ func (p *printer) renderPatternArg(pat ast.Pattern, ind int) bool {
 	return true
 }
 
+// renderPatternParam accounts for a record pattern immediately following a
+// constructor in a parameter vector. Without parentheses, its braces belong
+// to that constructor: `W { x = x }` is a named W record pattern, not two
+// parameters. The AST does not retain grouping parentheses, so restore them
+// when that distinction matters.
+func (p *printer) renderPatternParam(pat, prev ast.Pattern, ind int) bool {
+	if !needsInferredRecordGrouping(pat, prev) {
+		return p.renderPatternArg(pat, ind)
+	}
+	if !brokeWithin(pat.Span()) {
+		s, ok := patternArgInline(pat)
+		if !ok {
+			return false
+		}
+		p.emit("(" + s + ")")
+		return true
+	}
+	p.emit("(")
+	if !p.renderPattern(pat, ind) {
+		return false
+	}
+	p.emit(")")
+	return true
+}
+
 func (p *printer) renderCtorPattern(c *ast.PCtor, ind int) bool {
 	p.emit(c.Name)
 	prevEnd := c.NameSpan.End
@@ -75,12 +102,32 @@ func (p *printer) renderCtorPattern(c *ast.PCtor, ind int) bool {
 		} else {
 			p.emit(" ")
 		}
-		if !p.renderPatternArg(arg, base) {
+		if !p.renderCtorPatternArg(arg, base) {
 			return false
 		}
 		prevEnd = arg.Span().End
 	}
 	return true
+}
+
+func (p *printer) renderCtorPatternArg(pat ast.Pattern, ind int) bool {
+	if r, ok := pat.(*ast.PRecord); ok && r.Name == "" {
+		if !brokeWithin(pat.Span()) {
+			s, ok := patternArgInline(pat)
+			if !ok {
+				return false
+			}
+			p.emit("(" + s + ")")
+			return true
+		}
+		p.emit("(")
+		if !p.renderPattern(pat, ind) {
+			return false
+		}
+		p.emit(")")
+		return true
+	}
+	return p.renderPatternArg(pat, ind)
 }
 
 func (p *printer) renderPatternList(elems []ast.Pattern, tail ast.Pattern, ind int) bool {
@@ -200,6 +247,23 @@ func patternArgInline(p ast.Pattern) (string, bool) {
 	return s, true
 }
 
+func needsInferredRecordGrouping(pat, prev ast.Pattern) bool {
+	r, isRecord := pat.(*ast.PRecord)
+	if !isRecord || r.Name != "" {
+		return false
+	}
+	_, followsCtor := prev.(*ast.PCtor)
+	return followsCtor
+}
+
+func patternParamInline(pat, prev ast.Pattern) (string, bool) {
+	s, ok := patternArgInline(pat)
+	if !ok || !needsInferredRecordGrouping(pat, prev) {
+		return s, ok
+	}
+	return "(" + s + ")", true
+}
+
 func ctorPatternInline(p *ast.PCtor) (string, bool) {
 	if p.Sugared && p.Name == "List.Nil" && len(p.Args) == 0 {
 		return "[]", true
@@ -236,13 +300,24 @@ func ctorPatternInline(p *ast.PCtor) (string, bool) {
 	}
 	parts := []string{p.Name}
 	for _, a := range p.Args {
-		s, ok := patternArgInline(a)
+		s, ok := ctorPatternArgInline(a)
 		if !ok {
 			return "", false
 		}
 		parts = append(parts, s)
 	}
 	return strings.Join(parts, " "), true
+}
+
+func ctorPatternArgInline(p ast.Pattern) (string, bool) {
+	s, ok := patternArgInline(p)
+	if !ok {
+		return "", false
+	}
+	if r, isRecord := p.(*ast.PRecord); isRecord && r.Name == "" {
+		return "(" + s + ")", true
+	}
+	return s, true
 }
 
 // asListPattern mirrors asList for patterns.
@@ -283,14 +358,16 @@ func asTuplePattern(p ast.Pattern) ([]ast.Pattern, bool) {
 }
 
 // patternsInline renders a parameter list, space separated.
-func patternsInline(ps []ast.Pattern, render func(ast.Pattern) (string, bool)) (string, bool) {
+func patternsInline(ps []ast.Pattern) (string, bool) {
 	parts := make([]string, len(ps))
+	var prev ast.Pattern
 	for i, p := range ps {
-		s, ok := render(p)
+		s, ok := patternParamInline(p, prev)
 		if !ok {
 			return "", false
 		}
 		parts[i] = s
+		prev = p
 	}
 	return strings.Join(parts, " "), true
 }
