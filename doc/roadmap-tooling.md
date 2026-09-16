@@ -1,27 +1,11 @@
 # fango developer tooling: formatter and editor support
 
-This document owns the unfinished half of two pieces of work that together
-make fango usable in an editor: a source formatter and a language server. They
-are in one document because they share prerequisites — comments on a side
-channel from the lexer, a check entry point that accumulates diagnostics across
-stages, and byte-offset to editor-position conversion — and splitting them
-would leave those shared decisions owned by neither file.
-
-The shape is settled and partly built: `internal/format` is a library, `fango
-fmt` is a front end over it, and the language server will be another. [The
-design](design.md) records the architecture that is implemented — the comment
-side channel, formatting as a single-file pre-fixity operation, preserved
-author breaks, the verbatim fallback, and the self-check — and [the
-reference](reference.md) records what `fango fmt` does today. What remains is
-below.
+Remaining formatter, language-server, and REPL work. Implemented formatter
+invariants live in [design](design/formatter.md), command behavior in
+[reference](reference/commands.md#formatting), and session invariants in
+[REPL design](design/repl.md).
 
 ## Formatter
-
-Every declaration in the bundled standard library and the examples now prints
-structurally, comments included, and the corpus round-trips through the
-formatter unchanged. A declaration is still copied verbatim when it holds a
-comment with no anchor, or when some part of it has a line structure the
-printer does not reproduce.
 
 ### Remaining work
 
@@ -38,30 +22,11 @@ printer does not reproduce.
 Each piece ends with a reformat of the standard library and the examples, which
 the `ci` gate then holds.
 
-### Traps worth remembering
-
-- `a--b` is a comment, not an operator. The emitter must never put `-`
-  immediately after `-`. Operator runs and negation are always spaced today, so
-  nothing produces it, but a tighter spelling would.
-- `resume` heads an application, so `resume value with next` is the head, its
-  argument, and then the state clause — the `with` clause renders after the
-  arguments, not on the head.
-- A declaration's `NameSpan` points at the name on its annotation line, not on
-  its definition line, so breaks and adjacency are read from the source rather
-  than from spans.
-- Blocks carry two AST shapes, a legacy binding list and an ordered item list,
-  and both must print the same way.
-- A destructuring binding has no name, so its `NameSpan` is the zero span. A
-  block deriving its own span from that reported offset zero with no file
-  attached, which read as "written on one line" and sent every such declaration
-  to a verbatim copy.
-
 ### Open decisions
 
 - The remaining style rules: spacing inside brackets and records, and whether
   equation groups align anything.
-- Whether the author's blank lines below the imports need any rule beyond
-  reproducing them, which is what happens above the imports today.
+- Whether blank-line normalization needs a more specific style policy.
 - Whether an `ast.Bad` declaration node should let the formatter work on files
   that do not parse. It would also improve batch `fango check`, which reports
   one syntax error per run today. The formatter should not be coupled to it.
@@ -138,11 +103,6 @@ different proposition — a TypeScript toolchain, a lockfile, and a bundler — 
 should wait until the server has earned it. The TextMate grammar stays either
 way: it is the pre-server-start fallback and coexists with semantic tokens.
 
-Capturing comments changes lexer internals but not comment syntax, so the
-grammar needs no change for the formatter. The lockstep rule is satisfied by
-re-tokenizing the standard library and examples and confirming the language
-configuration still matches what the formatter emits.
-
 ### Open decisions
 
 - Which protocol library, or transport-only plus hand-written structs.
@@ -150,3 +110,43 @@ configuration still matches what the formatter emits.
   UTF-16.
 - Feature order after the first version: go-to-definition, document symbols,
   completion, semantic tokens.
+
+## REPL hardening
+
+- Add a grouped-input mechanism for multiple top-level function equations;
+  today the prompt accepts only one exhaustive equation per input.
+- Implement `:reload`, re-reading the modules a session imported after they
+  change on disk. `import` already gives the prompt a persistent module graph
+  and resolver scope, so `:load` is not needed: a named module is imported,
+  and the working directory (or the directory given to `fango repl`) is the
+  source root. The intended shape: the graph re-reads every non-bundled node,
+  compares content hashes, and re-resolves the changed modules plus their
+  reverse dependents in a staging map committed only on success; the checker
+  gains a `Retract(owners)` that deletes the canonical-keyed entries of those
+  modules (types, classes, effects, constructors, values, workers, methods,
+  operations, natives, capture summaries, derivers by owner) and marks their
+  instances retracted rather than removing them, because instance limits are
+  positional and the compile-time evaluator tracks an append-only declaration completion log,
+  so retraction must preserve those identities and cutoffs; the operator
+  table is rebuilt from the current nodes plus the prompt's own fixity
+  declarations; the prompt's import list is re-applied against the new
+  interfaces and names that vanished are reported; old memo cells and
+  closures keep their old bindings, as they do under prompt redefinition.
+- Decide whether the prompt should be able to see a module's private
+  top-level scope, the way GHCi's `:load` puts the prompt inside a module.
+  `import` shows only the public interface, which is consistent with every
+  other module; debugging a private helper currently means exposing it.
+- Reconcile values, custom types, constructors, and effects by generation so
+  unchanged declarations retain identity while changed generative declarations
+  cannot be confused with old values or closures.
+- Decide dependency invalidation and whether removed declarations remain
+  addressable by existing closures only.
+- Connect Ctrl-C to the cleanup and cancellation protocol in
+  [cooperative structured async](roadmap-effects.md#4-cooperative-structured-async)
+  without corrupting the session or consuming input intended for `readLine`.
+  Basic prompt cancellation may ship earlier once its active execution path
+  has the corresponding cleanup guarantees.
+- Add transcript coverage for reload, cross-generation errors,
+  cancellation, handler interaction, and recovery after failures.
+
+- Add interactive line editing and persistent history.

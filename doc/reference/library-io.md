@@ -1,0 +1,129 @@
+# IO and files
+
+Console and process IO, structured IO.Error values, and scoped File APIs.
+
+[Reference index](../reference.md). Sources: [IO](../../stdlib/IO.fango), [File](../../stdlib/File.fango).
+
+## IO
+
+`IO` exposes console IO, process arguments, files, and explicit process exit:
+
+```fango
+import IO
+
+main() =
+    IO.write "same line"
+    print " then newline"
+```
+
+`IO.write : String ->{IO} ()` writes the string exactly as provided without a
+trailing newline. It is a native operation; the prelude imports `IO`, so
+`IO.write` is reachable without an import of your own, while reaching it
+unqualified takes one. `print : Show a => a ->{IO} ()` and `readLine` are
+unqualified already, from the prelude. `IO` also exposes these legacy
+operations, kept for existing programs; new code reads and writes files
+through the `File` module below, which reports failures as values:
+
+```fango
+args : () ->{IO} List String
+readFile : String ->{IO} Maybe String
+writeFile : String -> String ->{IO} ()
+exit : Int ->{IO} ()
+```
+
+`args()` returns the program arguments after the source path (and optional
+`--`) when launched with `fango run`, using the ordinary `List` type. Import
+`List exposing (List(..))` to pattern-match its constructors unqualified.
+Relative file paths are resolved from
+the running program's current working directory. `readFile` returns `Nothing`
+when the path does not exist and `Just contents` otherwise; malformed UTF-8
+bytes in a file are replaced with U+FFFD. Other read errors fail the program.
+`writeFile path contents` creates or replaces the file, and `exit status`
+terminates with that status.
+
+`IO` also exposes the nominal record
+`type Line = { text : String, ending : String }`;
+`readLine : () ->{IO} Maybe IO.Line`
+returns `Nothing` at clean end of input and otherwise preserves the line
+terminator separately as `"\n"`, `"\r\n"`, or `""` for an unterminated final
+line. Malformed UTF-8 input sequences are replaced with U+FFFD. The pure
+helpers `lineText : String -> String` and `lineEnding : String -> String`
+split a raw line the same way, so other line sources can produce a `Line`.
+
+Structured failures are values of `IO.Error`:
+
+```fango
+type Kind = NotFound | PermissionDenied | AlreadyExists | IsDirectory | NotDirectory | Other
+    deriving (Eq, Show)
+
+type Error = { kind : Kind, path : String, message : String } deriving (Eq, Show)
+
+describeError : Error -> String
+```
+
+`kind` classifies what went wrong and `path` is the path the program supplied.
+For `NotFound`, `PermissionDenied`, `AlreadyExists`, `IsDirectory`, and
+`NotDirectory`, `message` is respectively `no such file or directory`,
+`permission denied`, `file exists`, `is a directory`, or `not a directory`.
+Those messages, and `describeError`'s output for them, are the same on every
+platform. An `Other` failure instead preserves the underlying system message
+for diagnostics; programs should use `kind`, rather than matching that text,
+for portable behavior. The legacy `readFile` and `writeFile` above do not
+produce these values; the `File` module does.
+
+## File
+
+`File` reads, writes, and lists files with structured failures, and treats an
+open file as a scoped resource:
+
+```fango
+import Fail exposing (Fail, attempt)
+import File
+import IO exposing (Error)
+
+countLines : File.Handle -> Int ->{IO, Fail Error} Int
+countLines file count =
+    case File.readLine file of
+        Nothing -> count
+        Just _ -> countLines file (count + 1)
+
+main() =
+    case attempt (\_ -> File.withFile "input.txt" (\file -> countLines file 0)) of
+        Ok count -> print count
+        Err error -> print (IO.describeError error)
+```
+
+Its public types are
+
+```fango
+withFile : String -> (File.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
+withOutput : String -> (File.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
+withAppend : String -> (File.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
+readLine : File.Handle ->{IO, Fail IO.Error} Maybe IO.Line
+write : File.Handle -> String ->{IO, Fail IO.Error} ()
+read : String ->{IO} Result IO.Error String
+writeAll : String -> String ->{IO} Result IO.Error ()
+listDirectory : String ->{IO} Result IO.Error (List String)
+isDirectory : String ->{IO} Result IO.Error Bool
+```
+
+`withFile path use` opens `path` for reading and runs `use` on the handle;
+`withOutput` creates or truncates the file first, and `withAppend` opens it
+for appending, creating it if needed. Each is a [cleanup scope](resources.md): the
+file is closed exactly once when `use` finishes, whether it returned, failed,
+or exited to an outer handler. A failed open raises `Fail IO.Error` before
+anything is acquired; a failed close after a successful body is the scope's
+failure, and after a failed body it is recorded alongside the body's failure.
+`readLine` has the console `readLine`'s contract — `Nothing` at end of file,
+otherwise the text and its exact terminator — and `write` writes a string as
+given. Both raise `Fail IO.Error` on a system failure, so a body that only
+reads and writes needs no `case` of its own; `attempt` around the scope
+collects the failure. `read` and `writeAll` handle a whole file without a
+handle and answer a `Result` instead. `listDirectory` names a directory's
+entries in sorted order, and `isDirectory` answers whether a path names one;
+a missing path is an `Err` with kind `NotFound` for both.
+
+`File.Handle` is abstract, with no accessible constructor, `Show`, or `Eq`.
+It is available only inside a `with*` scope and obeys the ordinary
+[resource escape and wrapper rules](resources.md#resource-escape-checks).
+Named callbacks may perform fewer effects than the wrapper permits.

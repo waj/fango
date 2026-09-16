@@ -33,14 +33,9 @@ than a hand-written non-tail-recursive one, because `foldl` pays the curried
 callback on every element while the recursive version pays nothing at a
 higher-order boundary at all.
 
-That cost reaches inside the library. `map`, `filter`, and `foldr` were
-rewritten to accumulate and reverse so every recursive call is a tail call and
-both backends run them as loops; the first attempt expressed `reverse` through
-`foldl` and made the list benchmark *worse*, because a closure per element cost
-more than the recursion it removed. Written without a callback, the same
-rewrite is worth about 1.4x on that benchmark. `reverse` and `length` are
-therefore written out rather than expressed through `foldl`, which is a
-standing hazard for any library function that looks like a fold until C1 lands.
+The current library avoids non-tail recursion in map/filter/foldr using
+accumulation and reversal. Callback-free reverse/length avoid foldl's curried
+callback allocation. These workarounds do not remove the general C1/C2 costs.
 
 Native, chunk-aware implementations of the combinators are worth having, but
 not for the reason they first appear to be, and not for all of them.
@@ -60,34 +55,17 @@ traversal method stops mattering — the nested loop is in fact slightly worse,
 because more state stays live across the call. So a native `each` or `foldl`
 buys nothing: they are already loops, and their cost is the callback.
 
-`map` is the opposite case. Measured against the recursive implementation it
-gains four-fold, and none of that is traversal: it is the recursion. A
-chunk-aware `map` mirrors each source chunk into a fresh one, filling it
-head-to-tail so the callback still runs in element order, and links forward —
-one pass, no recursion, no intermediate buffer, and the same chunk count as the
-source. `filter` and `foldr` have the same shape.
-
-Accumulate-and-reverse has since taken part of that win in ordinary fango, so
-the remaining gap for a native is one pass against two and no intermediate list
-rather than the full four-fold. It is still the widest of the three.
-
-C2 below delivers the one-pass form as a compiler transform instead. The
-difference is reach: a native fixes the library, while C2 fixes every
-user-written function of the same shape — and the benchmark furthest from Go
-calls no library function at all, only user-written `build` and `sum`. Landing
-natives first is defensible on cost; it does not remove the reason for C2.
-
-Callback-free operations are the third case, and the clearest one. `length`,
-`reverse`, `==`, and future `append`, `take`, and indexing have no callback for
-the traversal cost to hide behind, so they get the full traversal win —
-`length` considerably more than that, since it can total each chunk's occupancy
-instead of visiting elements at all.
+The map measurement used the older directly recursive implementation. The
+current accumulate/reverse version has already removed stack growth; a native
+single-pass version could still remove its intermediate list. C2 reaches user
+code with the same constructor-recursion shape. Callback-free length/reverse/
+equality can instead benefit directly from chunk traversal.
 
 ## C1 — Uncurried callbacks at worker boundaries
 
-A function value of type `a -> b -> c` is emitted as `func(A) func(B) C`, so a
-worker that always applies such a parameter to both arguments still evaluates
-`combine(value)` into a closure before it can apply it. Inside a generated
+A function value carries curried callable members. A worker applying a callback
+of type `a -> b -> c` to both arguments still constructs an intermediate function
+value before final application. Inside a generated
 worker the callback is a parameter of unknown identity, so Go can neither
 inline it nor stack-allocate what it returns: the closure is a real allocation,
 once per element.
@@ -120,7 +98,8 @@ at all: it applies one argument at a time and never sees a Go type.
 
 **Emission.** The parameter's Go type becomes `func(A0, ..., Ak) R`, where `R`
 is the last arrow's result under the current transport, so the Exit family
-member returns an `Outcome` exactly as it does now. An application chain whose
+member returns an `Outcome`; the Machine member must retain its checked frame
+protocol and suspension behavior. An application chain whose
 base names an uncurried parameter emits as one call. At call sites each
 argument is adapted: a literal lambda nest of sufficient depth emits directly
 as a flat Go function literal, which is the case that pays and the common one;
@@ -131,8 +110,8 @@ wrappers adapt too.
 **What it deliberately does not change.** The representation of a function
 *value*. ADT fields, class-dictionary methods, and effect evidence keep the
 curried form; only worker parameters gain the flat one, with the adapter
-bridging. Widening it further would multiply the existing Direct/Exit
-representation families by an arity dimension.
+bridging. Widening it further would add an arity dimension to the existing callable
+transport contracts.
 
 **The property to be careful about.** This is the first place a Go
 representation depends on something other than the fango type, so the design's
@@ -151,8 +130,10 @@ directions that reaches the cost `each` and `foldl` actually pay.
 
 ## C2 — Loops for list-building recursion
 
-`map`, `filter`, `foldr`, and every user-written `build`-shaped function recur
-once per element, so a long list costs a long Go stack. The recursion is not
+Direct recursive implementations of `map`, `filter`, `foldr`, and user-written
+`build`-shaped functions consume one frame per element. The bundled combinators
+currently avoid this with accumulation/reversal; C2 would enable the direct forms.
+The recursion is not
 tail recursion and the existing loop rewrite does not apply, but it is tail
 recursion *modulo a constructor*: the recursive call is the last argument of a
 `Cons`.

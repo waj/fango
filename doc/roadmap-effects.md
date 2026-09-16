@@ -1,12 +1,12 @@
 # Roadmap: direct effects, streams, and structured tasks
 
 This document owns proposed APIs and the work needed to make them usable.
-The implemented contract remains in [design](design.md#functions-and-effects)
-and [reference](reference.md#effects-and-handlers); the main
+The implemented contract remains in [design](design/effects.md)
+and [reference](reference/effects.md#effects-and-handlers); the main
 [roadmap](roadmap.md#effects-state-and-resource-scopes) summarizes priorities.
 The APIs below are **proposed**, with their delivery milestones identified.
 Callback subsumption, trailing lambdas, and pipes are implemented foundations;
-see the [reference](reference.md#effectful-function-types).
+see the [reference](reference/effects.md).
 Fango blocks use intended Fango syntax and omit routine imports; application
 functions such as `fetch` and `consume` stand for domain code. Lifetime
 contracts are explicitly schematic, not new source syntax.
@@ -56,7 +56,7 @@ interaction, and `Fail Error` typed failure; none erases the others.
 ### Async stream pipelines
 
 The synchronous Stream API, scoped cursors, custom stages, and file pipelines
-are implemented; see [Streams and cursors](reference.md#streams-and-cursors).
+are implemented; see [Streams and cursors](reference/library-streams.md).
 The next extension admits suspending callbacks through those same combinators.
 
 **Proposed async network pipeline — milestone 4:**
@@ -186,7 +186,7 @@ are outside the committed scope.
 ## Language foundations and compiler boundary
 
 The implemented effect, Stream, cursor, and representation contracts are in
-the [design](design.md#core-and-evidence-invariants). The task APIs above remain
+the [design](design/core.md). The task APIs above remain
 unimplemented and must preserve those boundaries.
 
 - **Effect subsumption:** extend the implemented callback inclusion and nominal
@@ -199,7 +199,7 @@ unimplemented and must preserve those boundaries.
 - **Surface convenience:** trailing final lambdas retain `\_ ->` for Unit
   callbacks. `Basics` supplies `(|>)` (`infixl 0`) and `(<|)` (`infixr 0`),
   exported by `Prelude`, as ordinary functions. No `async` keyword or `do`
-  block is required. This document owns that syntax work for tests as well.
+  block is required. No additional call syntax is proposed here.
 
 | Compiler/runtime | Ordinary Fango library |
 | --- | --- |
@@ -236,7 +236,7 @@ API tour's semantics and the verification gates below.
 
 ### 4. Cooperative structured async
 
-- **API and dependencies:** after 2–3, deliver `Async.run` with an implicit root
+- **API and dependencies:** build on the implemented stream/cursor foundation to deliver `Async.run` with an implicit root
   context, nested `Async.context`, action-only `spawn`, reusable `await`, and the
   network interpretation/pipeline in the tour.
 - **Implementation and soundness:** sole advancement authority transfers from
@@ -321,7 +321,7 @@ introduced. These domain functions retain their IO and failure effects.
 
 ### 8. Measured optimization
 
-- **API and dependencies:** after 3–7, retain the same tour API and semantics.
+- **API and dependencies:** after the stream foundation and milestones 4–7, retain the same tour API and semantics.
 - **Implementation and soundness:** measure frame reuse, synchronous-completion
   paths, callback overhead, and selective stage fusion. Transformations must
   preserve demand, effect order, cleanup, captures, and sole advancement authority.
@@ -347,20 +347,12 @@ introduced. These domain functions retain their IO and failure effects.
 
 ## Failure reporting prerequisite
 
-Typed primary errors and detached heterogeneous cleanup snapshots are
-implemented through `Fail.attemptReport`; see the reference for inspection and
-ordering. Concurrent failure selection remains a prerequisite for later
-milestones.
-
-Distinguish ordinary errors, early stop, and cancellation. Failed cleanup after
-successful completion or early stream stop propagates the first cleanup failure;
-later failures remain secondary.
-A successful body followed by failed release reports release failure; a failed
-body remains primary while nested release failures accumulate inner to outer.
-For concurrent children, define primary-failure selection and deterministic
-secondary ordering without assuming scheduler order is deterministic. These
-concurrent selection details remain open prerequisites, not grounds to defer
-cleanup or silently flatten typed errors into strings.
+Concurrent failure selection remains open. Define primary selection and deterministic
+secondary ordering without assuming deterministic scheduler order. Distinguish
+ordinary failure, early stop, and cancellation. Preserve the implemented
+[cleanup precedence](reference/resources.md#cleanup-failures) and
+[typed snapshots](reference/library-effects.md#fail-and-failure); do not flatten
+failures into strings or defer cleanup while choosing concurrent policy.
 
 ## Deferred topics
 
@@ -424,26 +416,14 @@ milestone dependencies, proposed/implemented labels, and single ownership of
 syntax proposals. Proposed snippets are acceptance specifications, not fixtures
 claimed to compile with today's compiler.
 
-For subsequent implementation, preserve independent semantic and lowered Core
-lint, with malformed-Core negative tests and source provenance. Keep compiler/
-interpreter differential tests through the real CLI, functional examples, REPL
-and diagnostic tests, intentional lexer/parser/checker/Core goldens, deterministic
-and gofmt-idempotent generated modules, native invalidation, and `go vet`.
-Exercise early curried effects, handler equation groups, nested handlers,
-staging/splices/derivers, step limits, and checkpoint rollback.
+For implementation, retain the [repository gates](../AGENTS.md) and
+[verification contracts](design/verification.md), including independent semantic
+and Machine lint with malformed-IR tests. Exercise early curried effects, equation
+groups, nested handlers, staging, step limits, and rollback. Syntax changes require
+exact TextMate updates and representative tokenization; library API names alone
+do not become keywords.
 
-Syntax changes update `editors/vscode/syntaxes/fango.tmLanguage.json` in the same
-change; update language configuration when comments/brackets change. Verify
-stdlib, testdata, and representative new syntax with `vscode-textmate`, keeping
-regexes exact to lexer rules. No keyword is reserved solely for highlighting an
-ordinary library API.
-
-Build-check benchmarks with `go vet ./benchmarks` during ordinary development;
-do not run timing gates. Keep `make test`, `make ci`, Core lint, differential and
-functional suites, and existing benchmark thresholds intact. Run `make test-perf`
-only for relevant performance work on an otherwise idle machine. Separate setup,
-hot operation cost, callback/evidence adapters, application allocation, live
-frame depth/storage, cancellation/drain latency, native worker capacity, compile
-latency, and generated code size. Use allocation profiles and Go escape reports
-to explain changes rather than treating a source lifetime proof as an allocation
-promise.
+For performance work on an idle host, distinguish setup, hot operations, callback/
+evidence adapters, allocation, live frame storage, cancellation/drain latency,
+native capacity, compile latency, and output size. Explain results with allocation
+profiles and escape reports; source lifetime proofs do not promise stack allocation.

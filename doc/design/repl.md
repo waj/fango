@@ -1,0 +1,65 @@
+# Interpreter and REPL
+
+Core evaluation, persistent prompt state, imports, generations, and transaction boundaries.
+
+[Design index](../design.md). Source and checks: [Evaluator](../../internal/eval/eval.go), [Session](../../internal/repl/repl.go), [REPL tests](../../internal/repl/repl_test.go), [Failure tests](../../internal/repl/failure_test.go).
+
+## Evaluation
+
+internal/eval executes Core with a uniform Go value representation. Environments
+distinguish typed workers, lazy memoized top-level cells, and eager block frames.
+EvalIO/ForceIO are explicit IO entry points. List and represented Unit use shared
+fangort runtime types. Structural list equality must precede the scalar Go-equality
+fallback because a list is deliberately not comparable.
+
+Both backends share observable formatting and the
+[self tail-loop predicate](backend.md#self-tail-call-loops). The differential suite
+checks agreement. Native call forms use the [persistent worker](backend.md#interpreter-native-worker);
+selective [Machine execution](machines.md) supplements recursive evaluation.
+
+Print is ordinary Show-constrained Fango over show and IO.write. Tooling evaluates
+an observed expression once and uses available Show evidence, otherwise an opaque
+typed placeholder or `<function>`. Show renders String/Char raw even inside derived
+ADTs; tooling literal forms are quoted. Display never adds a Show constraint to the
+observed expression.
+
+## Persistent stores and generations
+
+A session retains one checker, fresh-name supply, evaluator environment, module
+graph, resolver scope, and buffered IO context. Prompt values become memo cells;
+functions become workers. Redefinition creates a new generation without rebinding
+old memoized values or closures. Class redefinition is rejected; type redefinition
+has fresh nominal identity and may install new instances. Identity allocations are
+not reused on rollback.
+
+Parser incompleteness/layout drives multiline input. Prompt inputs are sequential,
+even though imported module functions have module-wide visibility. Effectful ordinary
+declarations are rejected; effectful expressions run and installed functions wait
+for explicit calls. Surface limitations and commands live in [REPL](../reference/repl.md).
+
+## Imports and resolution
+
+Every input passes through the batch resolver as a synthetic private module.
+Its persistent scope begins with Prelude imports and grows only on accepted inputs.
+The checker holds canonical names. Prompt mode permits rebinding prompt-owned names
+and cumulative re-imports; other collision/visibility rules are ordinary module rules.
+
+An import checks a graph increment through the batch entry point, with prompt
+monomorphism disabled for immutable module values. Elaboration installs stable
+lifted names, specialization, intrinsics, native metadata, and solved capture
+summaries, then lints against everything already installed. Visibility merges per
+owner and expands the prompt's set. Sidecar imports rebuild the worker's module set.
+
+## Transactions and staging
+
+Every input is a transaction over checker tables, resolver scope, and module graph.
+Checkpoints include effects, natives, instance visibility, and the operator table,
+restored in place because the graph shares its identity. Extend the evaluator only
+after acceptance; staged failures also restore the completion log and evaluator
+state. [Metaprogramming](metaprogramming.md#reproducibility-and-rollback) owns that seam.
+
+Resource checking uses installed definitions as context, so imported wrappers obey
+the same non-escape rules at the prompt as in a source program. Machine lowering
+uses the exact displayed/evaluated Core expression to preserve lambda identities.
+Future reload, cancellation, and editing work belongs in the
+[tooling roadmap](../roadmap-tooling.md#repl-hardening).

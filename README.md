@@ -22,7 +22,10 @@ make
 ./fango run examples/guess.fango
 ```
 
-For the language and project details, see the
-[language reference](doc/reference.md), [design](doc/design.md), and
-[roadmap](doc/roadmap.md). More runnable programs live in
-[examples](examples/).
+Find more runnable programs and their expected outputs in [examples](examples/).
+
+## Documentation
+
+- [Language reference](doc/reference.md): syntax, commands, and library contracts.
+- [Compiler design](doc/design.md): architecture, invariants, and source/test links.
+- [Roadmap](doc/roadmap.md): priorities and unresolved work.

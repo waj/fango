@@ -2,9 +2,8 @@
 
 Expression quotes, expression splices, type reflection, and open `deriving`
 are implemented and documented in [the design](design.md) and
-[the reference](reference.md). Declaration generation is deferred until an
-example genuinely needs it; the Todo CLI did not, because deriving `Encode`
-only generates an instance.
+[the reference](reference.md). Declaration generation is deferred until a concrete consumer needs named
+declarations beyond ordinary deriving.
 
 The future increment should preserve a property the module system has today:
 a reader can determine a module's public names without executing compile-time
@@ -102,7 +101,5 @@ kinds, hygiene, rollback, and deterministic emission. The full Core linter,
 interpreter/compiler differential suite, functional tests, and `go vet` remain
 release gates.
 
-`Meta.fail` remains the generator's only structured failure escape until the
-language gains `Result` or aborting handlers. Prefix re-elaboration is still a
-compile-latency risk to measure when a forcing consumer makes this milestone
-worth implementing.
+Preserve the existing stage-safety, step-budget, and completion-group rules.
+Measure elaboration cost when a forcing consumer justifies declaration generation.

@@ -1,20 +1,19 @@
 # Repository instructions
 
-Before architectural or implementation work, read `doc/design.md` and
-`doc/roadmap.md`. Before changing syntax, commands, diagnostics, or other
-user-visible behavior, also read `doc/reference.md`.
+Before architectural or implementation work, read the `doc/design.md` and
+`doc/roadmap.md` entry pages, then follow only task-relevant topic links.
+For user-visible changes, consult the relevant `doc/reference.md` topics.
+Search headings with `rg` before reading whole topic files.
 
-Update the living documentation in the same change as the implementation:
-
-- architecture and invariants belong in `doc/design.md`;
-- implemented syntax, behavior, diagnostics, and commands belong in
-  `doc/reference.md`;
-- priorities, unfinished work, and open decisions belong in `doc/roadmap.md`.
-
-Keep design and reference limited to implemented behavior. Put speculation in
-the roadmap. When roadmap work is complete, promote durable results into design
-or reference and remove the completed item; do not create implementation
-diaries or completed plan files. Git history is the archive.
+Update documentation with the implementation: reference owns behavior and
+diagnostics, design owns architecture and invariants, roadmap owns unfinished
+work. Keep design/reference limited to implemented behavior. Edit the authoritative
+explanation rather than appending change summaries; link instead of duplicating,
+and keep examples only for distinct rules.
+Keep entry pages as navigation; split growing topics at coherent boundaries
+and update links. Remove completed roadmap work after promoting durable results
+into design/reference. Do not add implementation diaries or completed plan files;
+Git history is the archive.
 
 The VS Code extension in `editors/vscode/` is part of the language's
 user-visible surface. When changing the surface syntax — keywords, operators,

@@ -16,7 +16,7 @@ reporters — are handlers or plain sequencing here.
 All APIs in this document are proposed. Snippets use existing Fango syntax
 except for the explicitly marked call-site constraint. Shared call syntax and
 callback inclusion are implemented in the language; see the
-[reference](reference.md#effectful-function-types).
+[reference](reference/effects.md).
 
 ## Decisions
 
@@ -40,27 +40,14 @@ These were settled when the design was drawn up and are not open:
   testing is deferred, and the tree is shaped so it can be added without a
   breaking change.
 
-## Facts the design rests on
+## Existing prerequisites
 
-- An ADT parameter used as an open row tail is row-kinded
-  (`type Foo eff = Foo (() ->{IO | eff} ())` in `testdata/run/row_kind_adt.fango`),
-  and an effect name is accepted as a singleton row argument, so `Test IO`
-  means `Test {IO}`.
-- Named and inline callbacks both fit a permitted wider effect row. Nominal
-  variance is inferred through recursive fields, so the proposed covariant
-  `Test e` tree can combine pure and IO suites in one `describe`. Definition
-  annotations still check known arrow effects exactly.
-- A lambda may open an indented block, and an abort raised inside an abort
-  clause propagates outward — which is what `Expect.onFail` needs.
-- Blanket-instance specialization (`instance Show a => Inspect a` over a bare
-  `instance Inspect a`) is a documented idiom, and literal defaulting still
-  reaches `Int` through such a blanket.
-- `IO.exit` exists; there is no stderr, so the report goes to stdout. Bundled
-  module names are reserved, so adding `stdlib/Test.fango` and
-  `stdlib/Expect.fango` reserves both local names.
-- The e2e harness compares stdout byte-for-byte on both backends and
-  propagates the program's exit code, so the framework's own coverage is
-  ordinary `testdata/run` fixtures whose `main` runs a suite.
+Use [callback inclusion](reference/effects.md#row-inclusion-and-callback-compatibility),
+[row-kinded ADTs](reference/functions.md#row-kinded-parameters), and
+[blanket instances](reference/classes.md#instance-heads-and-blanket-instances).
+Adding bundled Expect/Test reserves those module names. Reports use stdout because
+there is no stderr API; IO.exit supplies status. Existing differential fixtures
+can pin output and failure status without a new harness.
 
 ## Modules
 
@@ -105,8 +92,8 @@ suite =
             Expect.equal [ "a", "b" ] (String.split "," "a,b")
             Expect.equal [ "" ] (String.split "," "")
         , test "reads the fixture" \_ ->
-            text = IO.readFile "fixture.txt"
-            Expect.equal 3 (List.length (String.lines text))
+            text = Expect.ok (File.read "fixture.txt")
+            Expect.equal 3 (List.length (String.split "\n" text))
         , skip (test "unicode separators" \_ -> Expect.failWith "later")
         , todo "empty separator"
         ]
@@ -198,20 +185,6 @@ Semantics:
   reporter effect — the runner performing `suiteStart`, `caseEnd`, and so on,
   with the console reporter as one handler — is the way to add one later
   without changing the tree.
-
-## The call shape for test bodies
-
-The selected call shape is a trailing final lambda, `test "name" \_ ->`,
-with the body indented beneath it. It also handles parameter-taking callbacks
-such as `fuzz int "name" \n ->`; Unit callbacks keep the existing `\_ ->`
-spelling. This is a general application rule for tests, resource scopes, and
-async runners. A zero-pattern lambda and a `do` keyword are not part of it.
-
-Parsing/layout, ordinary pipeline operators, and callback inclusion are
-implemented language features, documented in the
-[reference](reference.md#declarations-annotations-and-functions). They lower to
-ordinary lambda/application Core. The first library version can use
-`test "name" \_ ->` and `actual |> Expect.equal expected` directly.
 
 ## Failure source positions
 
