@@ -182,7 +182,7 @@ func Materialize(dir string) (changed bool, err error) {
 // BinaryPath is where GoBuild leaves the compiled program.
 func BinaryPath(dir string) string { return filepath.Join(dir, "bin", "main") }
 
-// GoBuild compiles the build directory. Any failure is by definition a fango
+// GoBuild compiles the build directory. Any failure is by definition a Fango
 // compiler bug: the generated code is our output, so a Go error means we
 // emitted something invalid. The build directory is preserved for inspection.
 func GoBuild(dir string) error {
@@ -220,8 +220,8 @@ go build said:
 		}
 		return fmt.Errorf(`-- INTERNAL COMPILER ERROR ------------------------------------
 
-fango generated Go code that Go refused to compile. This is a bug in
-the fango compiler, not in your program — please report it.
+Fango generated Go code that Go refused to compile. This is a bug in
+the Fango compiler, not in your program — please report it.
 
 The build directory is preserved for inspection:
 

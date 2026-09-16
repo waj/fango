@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="fango.jpg" alt="fango logo" width="260">
+  <img src="fango.jpg" alt="Fango logo" width="260">
 </p>
 
-# fango
+# Fango
 
-fango is an experimental, strict, statically typed, purely functional
+Fango is an experimental, strict, statically typed, purely functional
 programming language inspired by Elm and Haskell. It combines whole-program
 type inference, algebraic data types and pattern matching, type classes, and
 direct-style algebraic effects, then compiles programs to Go.
@@ -15,7 +15,7 @@ stay close to ordinary Go.
 
 ## Try it
 
-fango requires Go 1.26. Build the compiler, then run a program:
+Fango requires Go 1.26. Build the compiler, then run a program:
 
 ```sh
 make

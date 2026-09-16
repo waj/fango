@@ -1,4 +1,4 @@
-fango 0.1 — :help for commands
+Fango 0.1 — :help for commands
 > 7 : Num a => a
 > <+> : Num a => a -> a -> a
 > infixl 5 (<+>)

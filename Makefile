@@ -33,7 +33,7 @@ update-baselines:
 fmt:
 	gofmt -w .
 
-# The fango formatter over the sources the project owns, mirroring what `fmt`
+# The Fango formatter over the sources the project owns, mirroring what `fmt`
 # does for the Go sources. testdata is excluded: it deliberately holds malformed
 # and oddly laid out inputs. The `ci` gate checks the same set without writing.
 fmt-fango:

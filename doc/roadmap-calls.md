@@ -1,4 +1,4 @@
-# fango calling conventions and recursion shapes
+# Fango calling conventions and recursion shapes
 
 This document owns two unstarted pieces of work on how calls and recursion
 compile. Both came out of measuring where the bundled `List` still loses to
@@ -114,7 +114,7 @@ bridging. Widening it further would add an arity dimension to the existing calla
 transport contracts.
 
 **The property to be careful about.** This is the first place a Go
-representation depends on something other than the fango type, so the design's
+representation depends on something other than the Fango type, so the design's
 "representations are type-directed" claim needs amending rather than quietly
 breaking. Keeping the predicate shared is what stops codegen disagreeing with
 itself across module boundaries.

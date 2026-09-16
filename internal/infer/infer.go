@@ -584,7 +584,7 @@ func projectionPattern(p ast.Pattern) (ast.Pattern, map[string]string) {
 
 // declareIntrinsic types a compiler intrinsic. Its annotation is resolved in
 // the ordinary annotation scope rather than the native scope, because an
-// intrinsic is not a sidecar: its parameters are fango functions and its
+// intrinsic is not a sidecar: its parameters are Fango functions and its
 // effects are an open row, neither of which crosses a Go ABI.
 func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 	if d.Ann == nil {
@@ -806,7 +806,7 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 		local := append([]*types.TVar(nil), scope.Minted()...)
 		if op.Abort {
 			if op.Native != nil {
-				errs = append(errs, diag.Errorf(op.NameSpan, "ABORT NATIVE", "Abort-only operation `%s` must be handled in fango and cannot be native.", op.Name))
+				errs = append(errs, diag.Errorf(op.NameSpan, "ABORT NATIVE", "Abort-only operation `%s` must be handled in Fango and cannot be native.", op.Name))
 			}
 			payloadUsesResult := false
 			if len(local) == 1 {
@@ -1781,7 +1781,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			if e.State != nil {
 				if _, dup := scope.parent.lookup(e.State.Name); dup || g.ck.boundName(e.State.Name) {
 					g.errs = append(g.errs, diag.Errorf(e.State.NameSpan, "SHADOWING",
-						"The handler state `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", e.State.Name))
+						"The handler state `%s` shadows a name that is already defined —\nFango does not allow shadowing. Choose a different name.", e.State.Name))
 				}
 				scope.names[e.State.Name] = types.Scheme{Body: stateTy}
 			}
@@ -1842,7 +1842,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			if e.State != nil {
 				if _, dup := scope.parent.lookup(e.State.Name); dup || g.ck.boundName(e.State.Name) {
 					g.errs = append(g.errs, diag.Errorf(e.State.NameSpan, "SHADOWING",
-						"The handler state `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", e.State.Name))
+						"The handler state `%s` shadows a name that is already defined —\nFango does not allow shadowing. Choose a different name.", e.State.Name))
 				}
 				scope.names[e.State.Name] = types.Scheme{Body: stateTy}
 			}
@@ -2316,7 +2316,7 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 				where = "earlier in this block"
 			}
 			g.errs = append(g.errs, diag.Errorf(bind.NameSpan, "SHADOWING",
-				"The name `%s` is already defined %s — fango does not allow\nshadowing. Choose a different name.", bind.Name, where))
+				"The name `%s` is already defined %s — Fango does not allow\nshadowing. Choose a different name.", bind.Name, where))
 		}
 		var ty types.Type
 		var annVars []*types.TVar
@@ -2702,7 +2702,7 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 				kind = "pattern variable"
 			}
 			g.errs = append(g.errs, diag.Errorf(p.Sp, "SHADOWING",
-				"The %s `%s` shadows a name that is already defined —\nfango does not allow shadowing. Choose a different name.", kind, p.Name))
+				"The %s `%s` shadows a name that is already defined —\nFango does not allow shadowing. Choose a different name.", kind, p.Name))
 		}
 		pv := g.ck.Sup.FreshVar(types.General)
 		scope.names[p.Name] = types.Scheme{Body: pv}

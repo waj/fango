@@ -1,4 +1,4 @@
-// The runtime-ratio gate compares fango programs with handwritten Go
+// The runtime-ratio gate compares Fango programs with handwritten Go
 // baselines; see doc/design.md, "Testing and performance". The Go binary IS
 // the baseline — the ratio self-calibrates per
 // machine, unlike the latency gate's absolute budgets. Scalar/first-order
@@ -50,13 +50,13 @@ const (
 // callback closures Go inlines away in the baseline (recorded 1.84x).
 //
 // Limits are measurement-informed ceilings (recorded ratios in parentheses):
-// where the baseline allocates like fango does, the 2–3× target holds with
+// where the baseline allocates like Fango does, the 2–3× target holds with
 // room (tree 1.09×, strcat 1.04×, branchcons 1.55×). The two cases that race a
 // slice keep the widest gap, because a slice is still the shape a Go
-// programmer writes and a fango list is still a list: sum (4.49×) and
+// programmer writes and a Fango list is still a list: sum (4.49×) and
 // mapfilter (4.52×) gate at that reality plus headroom. On identical programs
 // the array-backed representation moved them from 7.80× and 5.82×, while
-// leaving branchcons' fango time unchanged — chunking is a win on linear
+// leaving branchcons' Fango time unchanged — chunking is a win on linear
 // building and a wash on branching, which is what it was chosen for
 // (doc/roadmap-list.md).
 var ratioCases = []struct {
@@ -88,7 +88,7 @@ func TestRuntimeRatio(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			work := t.TempDir()
 
-			// Build the fango binary once via the real CLI.
+			// Build the Fango binary once via the real CLI.
 			fangoBin := filepath.Join(work, tc.name+"_fango")
 			build := exec.Command(fangoCLI, "build", "-o", fangoBin, tc.program)
 			build.Env = append(os.Environ(), "FANGO_BUILD_DIR="+filepath.Join(work, "build"))
@@ -138,10 +138,10 @@ func TestRuntimeRatio(t *testing.T) {
 			}
 
 			ratio := float64(fangoMin) / float64(goMin)
-			t.Logf("%s: fango %v, go %v — ratio %.3f (target ≤ %.1f)", tc.name, fangoMin, goMin, ratio, tc.limit)
+			t.Logf("%s: Fango %v, go %v — ratio %.3f (target ≤ %.1f)", tc.name, fangoMin, goMin, ratio, tc.limit)
 			limit := time.Duration(float64(goMin)*tc.limit) + ratioSlack
 			if fangoMin > limit {
-				t.Errorf("fango %s %v exceeds %.1f× handwritten Go (%v) + %v slack",
+				t.Errorf("Fango %s %v exceeds %.1f× handwritten Go (%v) + %v slack",
 					tc.name, fangoMin, tc.limit, goMin, ratioSlack)
 			}
 		})

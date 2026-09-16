@@ -1,4 +1,4 @@
-// Package format implements fango's source formatter.
+// Package format implements Fango's source formatter.
 //
 // Formatting is a pure function of one file's bytes. It needs no module graph,
 // no fixity resolution and no types, so it works on a file that does not

@@ -1,4 +1,4 @@
-fango 0.1 — :help for commands
+Fango 0.1 — :help for commands
 > > | | one : () -> Int
 > | | pair : (() ->{e} Int) -> (() ->{e} Int) ->{e} Int
 > | | | emit : Num a => () ->{IO} a

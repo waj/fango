@@ -73,7 +73,7 @@ func batchRunner(path string) compiledRunner {
 // cliRunner compiles this runner's source version once through the real CLI,
 // then runs that binary with each case's isolated inputs. Keeping the build on
 // the runner, rather than in a path-global cache, isolates tests that rewrite a
-// temporary source at the same path. Dedicated command tests cover the fango
+// temporary source at the same path. Dedicated command tests cover the Fango
 // run wrapper itself.
 func cliRunner(path string) compiledRunner {
 	b := new(cliBuild)

@@ -1,4 +1,4 @@
-# fango language reference
+# Fango language reference
 
 Implemented language and library contracts. Read the topics relevant to the
 change; [design](design.md) owns architecture and [roadmap](roadmap.md) owns

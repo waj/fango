@@ -69,7 +69,7 @@ Declaration splices require Haskell-style declaration groups: expand a group,
 install all of its names and nominal identities together, then check later
 source against the expanded group. A group may refer to names generated within
 that same group through its `Meta.Name` handles. It may only use earlier
-ordinary declarations or earlier expanded groups, retaining fango's existing
+ordinary declarations or earlier expanded groups, retaining Fango's existing
 source-order stage discipline.
 
 Expansion must happen before resolving or inferring declarations that follow

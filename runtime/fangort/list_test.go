@@ -193,7 +193,7 @@ func TestListEq(t *testing.T) {
 }
 
 // A representation-identity short circuit would make this list equal to
-// itself, which fango's Float equality says it is not.
+// itself, which Fango's Float equality says it is not.
 func TestListEqHasNoIdentityShortCircuit(t *testing.T) {
 	eq := func(a, b float64) bool { return a == b }
 	nan := ListCons(math.NaN(), ListCons(1.0, ListNil[float64]()))

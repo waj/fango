@@ -219,7 +219,7 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 			left, right)
 	case WhyOpRequires:
 		e = diag.Errorf(c.Span, "TYPE MISMATCH",
-			"fango's (%s) only works on %s, but this operand is:\n\n    %s",
+			"Fango's (%s) only works on %s, but this operand is:\n\n    %s",
 			c.Why.Op, c.Why.Want, left)
 		if c.Why.Op == "/" && left == "Int" {
 			e.Notes = append(e.Notes,

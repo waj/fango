@@ -487,7 +487,7 @@ func TestTodoExampleFailures(t *testing.T) {
 	}
 }
 
-// The Core interpreter runs fango programs inside this process and shares its
+// The Core interpreter runs Fango programs inside this process and shares its
 // persistent native-worker host infrastructure across cases. Every in-process
 // evaluation in this package's parallel tests therefore holds interpret; the
 // compiled legs stay parallel. Handler-local Random state itself needs no

@@ -5,7 +5,7 @@ import Basics exposing (..)
 
 {- Cleanup scopes.
 
-`bracket` is a compiler intrinsic, and deliberately so: no fango expression can
+`bracket` is a compiler intrinsic, and deliberately so: no Fango expression can
 release a resource when the scope body exits to an outer handler, because a
 handler for one named effect cannot cover an open effect row. Elaboration gives
 this declaration a Core cleanup scope instead of a Go template or a sidecar

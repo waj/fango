@@ -1,4 +1,4 @@
-# fango developer tooling: formatter and editor support
+# Fango developer tooling: formatter and editor support
 
 Remaining formatter, language-server, and REPL work. Implemented formatter
 invariants live in [design](design/formatter.md), command behavior in

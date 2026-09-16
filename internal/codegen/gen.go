@@ -615,7 +615,7 @@ func (g *gen) printFn(t types.Type) string {
 }
 
 // workerDef emits a top-level function definition as an uncurried Go func
-// (doc/design.md, "Go backend and runtime" item 1): the parameter types peel off the curried fango type, the
+// (doc/design.md, "Go backend and runtime" item 1): the parameter types peel off the curried Fango type, the
 // body emits in return-position statement context. A generic definition's
 // TyParams become Go type parameters — `any` for General vars,
 // fangort.Number for Number-kinded ones (doc/design.md, "Type inference", doc/design.md, "Go backend and runtime").
@@ -979,7 +979,7 @@ func (g *gen) unitValueRetStmts(e core.Expr) []goast.Stmt {
 	}
 }
 
-// goType maps a fango type to its unboxed Go representation (see
+// goType maps a Fango type to its unboxed Go representation (see
 // doc/design.md, "Go backend and runtime"). Int is int64, not int: identical
 // overflow behavior on every GOARCH.
 // Rigid type variables map to the enclosing definition's Go type parameters;
@@ -2405,7 +2405,7 @@ func (g *gen) letIIFE(e *core.Let) goast.Expr {
 // letBindingStmts emits one binding: Unit-typed right-hand sides run as
 // statements (their value is the singleton; prints must still execute),
 // other bindings become `var` declarations, kept alive with `_ =` when the
-// rest of the chain never mentions them (Go rejects unused locals; fango
+// rest of the chain never mentions them (Go rejects unused locals; Fango
 // bindings still evaluate eagerly).
 func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
 	if let.Rec {
@@ -2532,9 +2532,9 @@ func (g *gen) exitPrefix(e core.Expr) []goast.Stmt {
 	}
 }
 
-// mangleValue maps a fango value name into the generated package's `v_`
+// mangleValue maps a Fango value name into the generated package's `v_`
 // namespace (constructors use C_, types T_). Elaboration temporaries start
-// with `_` — unlexable as fango identifiers — and land in a disjoint `t`
+// with `_` — unlexable as Fango identifiers — and land in a disjoint `t`
 // namespace (`_w0` → `t_w0`) so they can never collide with user names.
 func mangleValue(name string) string {
 	if strings.HasPrefix(name, "_") {
@@ -2554,12 +2554,12 @@ var linkOps = map[byte]string{
 	'|': "_bar_", '~': "_tilde_",
 }
 
-// linkName maps a canonical fango symbol to a Go identifier. Module
-// separators and operator characters are the only characters a fango symbol
+// linkName maps a canonical Fango symbol to a Go identifier. Module
+// separators and operator characters are the only characters a Fango symbol
 // can hold that Go cannot.
 //
 // The substitution is injective against ordinary names: identifier
-// characters and operator characters are disjoint sets, a fango name may
+// characters and operator characters are disjoint sets, a Fango name may
 // not begin with `_`, and the character after a `_dot_` is always a letter —
 // so no identifier can spell one of these words in the position where an
 // operator's would appear. It is a pure function of the name, which is what

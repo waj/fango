@@ -4,7 +4,7 @@ Meta reflection, quotes, splices, derivers, hygiene, and stage restrictions.
 
 [Reference index](../reference.md).
 
-fango has one compile-time stage. `quote` goes up a stage and `$(…)` comes
+Fango has one compile-time stage. `quote` goes up a stage and `$(…)` comes
 back down, and together they are the whole staging surface. `quote` is a
 reserved word; `$` is a token only as part of `$(`.
 
@@ -67,7 +67,7 @@ type Colour = Red | Green Int deriving (Tag)
 
 A deriver method's type is dictated by the class: for a class method with *n*
 arrows, its deriver method takes a `TypeInfo` plus *n* `Code` arguments and
-returns `Code`. A deriver is otherwise an ordinary fango function, checked by
+returns `Code`. A deriver is otherwise an ordinary Fango function, checked by
 ordinary inference. It must supply exactly the class's methods
 (`MISSING METHOD`, `UNKNOWN METHOD`), a class may have only one deriver
 (`DUPLICATE DERIVER`), and — like an instance — it is visible by dependency.
@@ -92,7 +92,7 @@ depends on `Meta`.
 
 `quote atom` builds a value of the abstract type `Meta.Code`. It does not
 evaluate the quoted expression — it describes it. The quoted text is ordinary
-fango and takes exactly one atom, so anything larger is parenthesized:
+Fango and takes exactly one atom, so anything larger is parenthesized:
 
 ```fango
 import Meta exposing (Code)

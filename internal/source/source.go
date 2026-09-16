@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// File is one fango source file with precomputed line offsets.
+// File is one Fango source file with precomputed line offsets.
 type File struct {
 	Name        string
 	Content     []byte

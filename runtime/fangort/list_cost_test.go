@@ -133,7 +133,7 @@ func BenchmarkFoldChunkWalkCurried(b *testing.B) {
 
 // --- map: recursion + accessors, versus one forward chunk-wise pass --------
 
-// What fango emits today: non-tail recursion through the accessors.
+// What Fango emits today: non-tail recursion through the accessors.
 func mapRec(f func(int64) int64, l List[int64]) List[int64] {
 	if l.IsEmpty() {
 		return ListNil[int64]()

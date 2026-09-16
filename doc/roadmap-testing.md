@@ -1,13 +1,13 @@
 # Roadmap: test framework
 
-This document owns the design of a test framework written in fango: a bundled
+This document owns the design of a test framework written in Fango: a bundled
 `Expect` module for expectations, a bundled `Test` module for organizing and
 running them, and the language work the two need. Nothing here is implemented
 yet; when a milestone lands, its durable semantics move to [the
 design](design.md) and [the reference](reference.md) and the section is
 removed here. The main [roadmap](roadmap.md#test-framework) links here.
 
-The framework is inspired by elm-test but follows fango's idioms rather than
+The framework is inspired by elm-test but follows Fango's idioms rather than
 Elm's: a test body is a statement-style block, an expectation that fails
 *aborts* through an effect instead of returning an `Expectation` value, and
 the places elm-test uses callbacks or combinators — `onFail`, `all`,
@@ -179,7 +179,7 @@ Semantics:
   1, as elm-test does, so a placeholder cannot make CI green.
 - Duplicate case names within one `describe`, an empty `describe`, and an
   empty name are reported as failures of that group.
-- A runtime crash inside a body ends the whole run; there is no fango-level
+- A runtime crash inside a body ends the whole run; there is no Fango-level
   catch. This is a limitation to record in the reference.
 - The reporter is not pluggable in the first version. The earlier sketch's
   reporter effect — the runner performing `suiteStart`, `caseEnd`, and so on,

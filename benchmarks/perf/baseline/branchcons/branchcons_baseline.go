@@ -1,7 +1,7 @@
 // Idiomatic Go for branchcons.fango's job. A Go programmer who needs a shared,
 // repeatedly extended prefix reaches for cons cells rather than a slice,
 // because a slice has to copy on every branch — so this baseline is the
-// pointer-per-element structure fango's array-backed list must not lose to.
+// pointer-per-element structure Fango's array-backed list must not lose to.
 // See doc/design.md, "Testing and performance", and doc/roadmap-list.md.
 package main
 

@@ -1,4 +1,4 @@
-# fango design
+# Fango design
 
 Implemented architecture and invariants. Start here, then read only the topics
 relevant to the task. [Reference](reference.md) owns observable behavior;

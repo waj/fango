@@ -19,7 +19,7 @@ import (
 // per process, and the interpreter's native worker keeps its globals for the
 // session, so both backends share the same code and the same lifetime. Ids
 // are never reused, so a stale handle is an ordinary "closed handle" failure
-// rather than a silent alias of a newer file. A fango program cannot reach
+// rather than a silent alias of a newer file. A Fango program cannot reach
 // that failure: File.Handle is abstract and its scope closes exactly once.
 
 type handle struct {

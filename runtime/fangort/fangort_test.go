@@ -9,7 +9,7 @@ import (
 // (Elm's String.fromFloat). The MVP acceptance value 12.56636 lives here.
 func TestShowFloat(t *testing.T) {
 	// Computed at runtime: Go constant arithmetic is exact and would fold
-	// 0.1 + 0.2 to 0.3 — the very trap fango's elaborator folds around.
+	// 0.1 + 0.2 to 0.3 — the very trap Fango's elaborator folds around.
 	tenth, fifth := 0.1, 0.2
 	cases := []struct {
 		in   float64

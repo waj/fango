@@ -1,5 +1,5 @@
 // The handwritten-Go baseline for benchmarks/perf/fib.fango — idiomatic
-// Go, int64 like fango's Int, printing the same way fangort does.
+// Go, int64 like Fango's Int, printing the same way fangort does.
 package main
 
 import "fmt"

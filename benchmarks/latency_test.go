@@ -206,7 +206,7 @@ func buildCLI(t *testing.T) string {
 	cmd := exec.Command("go", "build", "-o", bin, "github.com/waj/fango/cmd/fango")
 	cmd.Dir = ".."
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("building fango CLI: %v\n%s", err, out)
+		t.Fatalf("building Fango CLI: %v\n%s", err, out)
 	}
 	return bin
 }

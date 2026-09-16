@@ -176,7 +176,7 @@ func Load(entry string) (*Result, []diag.Error) {
 	g := newGraph(FSProvider{Root: root})
 	if !private {
 		if path, _, bundleErr := g.bundled.Source(entryName); bundleErr == nil {
-			return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "RESERVED MODULE", "Module `%s` is bundled with fango as `%s`; local modules cannot use bundled names.", entryName, path)}
+			return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; local modules cannot use bundled names.", entryName, path)}
 		}
 	}
 	wantEntry := strings.TrimSuffix(filepath.Base(abs), filepath.Ext(abs))
@@ -239,7 +239,7 @@ func Load(entry string) (*Result, []diag.Error) {
 // PreludeModule declares the default scope. It holds nothing but imports,
 // and a module that does not carry `{-# no-prelude #-}` resolves as though
 // those imports stood at the top of its own file — qualified access
-// included, since they are ordinary imports. Keeping the list in fango
+// included, since they are ordinary imports. Keeping the list in Fango
 // rather than in this package is what stops the batch resolver and the
 // REPL's scope from drifting apart.
 const PreludeModule = "Prelude"
@@ -683,7 +683,7 @@ func (b nativeBoundary) validateNativeShape(d *ast.ValueDecl, fn *goast.FuncDecl
 	}
 	if payload, fallible := fallibleResult(t); fallible {
 		if !b.fallibleAllowed || fromOp {
-			errs = append(errs, diag.Errorf(d.Native.Sp, "FALLIBLE NATIVE NOT ALLOWED", "Only value natives of the bundled `File` module may declare a `Result IO.Error` result; return a scalar and build the `Result` in fango."))
+			errs = append(errs, diag.Errorf(d.Native.Sp, "FALLIBLE NATIVE NOT ALLOWED", "Only value natives of the bundled `File` module may declare a `Result IO.Error` result; return a scalar and build the `Result` in Fango."))
 			return errs
 		}
 		results := resultTypeNames(fn.Type.Results)
@@ -727,7 +727,7 @@ func isUnitType(t ast.TypeExpr) bool {
 	return ok && n.Name == "()"
 }
 
-// nativeGoType is the Go type a fango boundary type crosses as: a scalar's
+// nativeGoType is the Go type a Fango boundary type crosses as: a scalar's
 // own Go type, or the field type of one of this module's wrapper types.
 func (b nativeBoundary) nativeGoType(t ast.TypeExpr) string {
 	if goType := scalarGoType(t); goType != "" {

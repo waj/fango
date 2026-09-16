@@ -7,7 +7,7 @@
 -- errors --
 -- TAB CHARACTER --------------------------------- err_tab.fango
 
-I found a tab character. fango indentation is column-sensitive, so
+I found a tab character. Fango indentation is column-sensitive, so
 tabs are not allowed — use spaces.
 
 2| 	1 + 2

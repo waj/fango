@@ -251,7 +251,7 @@ func (g *gen) listSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) 
 					callExpr(selector(mangleValue(t.Scrut), accessor[i]))))
 				if g.isUnit(fields[i]) {
 					// As in ctorSwitch: a Unit binding the branch mentions in
-					// fango still emits no use, and Go rejects that.
+					// Fango still emits no use, and Go rejects that.
 					body = append(body, assignBlank(ident(mangleValue(b))))
 				}
 			}
@@ -323,7 +323,7 @@ func (g *gen) ctorSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) 
 				&goast.SelectorExpr{X: ident(src), Sel: ident(fieldName(i))}))
 			if g.isUnit(fields[i]) {
 				// A Unit-typed binding emits as statements rather than a Go local,
-				// so the branch can mention the field in fango and still leave this
+				// so the branch can mention the field in Fango and still leave this
 				// declaration unused, which Go rejects.
 				body = append(body, assignBlank(ident(mangleValue(b))))
 			}

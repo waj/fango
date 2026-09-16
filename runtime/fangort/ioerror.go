@@ -30,7 +30,7 @@ const (
 	IOErrorOther
 )
 
-// ClassifyIOError maps a Go error to an IOFailure. The kinds a fango program
+// ClassifyIOError maps a Go error to an IOFailure. The kinds a Fango program
 // can act on are recognized through the portable sentinels and the two errno
 // values that portable sentinels do not cover; everything else is Other with
 // its underlying error text preserved.

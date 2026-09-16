@@ -40,7 +40,7 @@ type RowArgument struct {
 type Def struct {
 	Name  string
 	Owner string     // defining source module; empty for headerless files and REPL inputs
-	Type  types.Type // the full curried fango type
+	Type  types.Type // the full curried Fango type
 
 	// TyParams are the definition's quantified type variables (rigid, first
 	// occurrence order in Type) — Go type parameters at codegen. Non-empty

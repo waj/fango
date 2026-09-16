@@ -1,4 +1,4 @@
-// Package runtimefiles reads the Go support sources shipped inside the fango
+// Package runtimefiles reads the Go support sources shipped inside the Fango
 // binary and adapts their imports for a self-contained generated module.
 package runtimefiles
 

@@ -1,4 +1,4 @@
-fango 0.1 — :help for commands
+Fango 0.1 — :help for commands
 > loaded Geometry.Point
 > Point 0 0 : Point
 > 7 : Int
@@ -48,7 +48,7 @@ I cannot find module `Missing.Module`; expected `Missing/Module.fango` beneath t
           ^^^^^^^^^^^^^^
 > -- RESERVED MODULE -------------------------------------- <repl>
 
-Module `String` is bundled with fango as `<stdlib>/String.fango`; remove or rename the local `String.fango`.
+Module `String` is bundled with Fango as `<stdlib>/String.fango`; remove or rename the local `String.fango`.
 
 1| import String
           ^^^^^^

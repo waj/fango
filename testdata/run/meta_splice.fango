@@ -8,7 +8,7 @@ answer = quote (6 * 7)
 twice : Code -> Code
 twice c = quote ($(c) + $(c))
 
--- Compile-time code is ordinary fango, recursion included.
+-- Compile-time code is ordinary Fango, recursion included.
 repeat : Int -> Code -> Code
 repeat n c =
     if n <= 1 then c else twice (repeat (n - 1) c)

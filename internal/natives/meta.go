@@ -6,8 +6,8 @@ package natives
 // (doc/design.md, "Compile-time metaprogramming").
 //
 // Every one of them is a pure function of its arguments, and none of them
-// constructs a fango ADT value: lists and records are built by `Meta`'s own
-// fango code from the counts and indices these return. That is what keeps
+// constructs a Fango ADT value: lists and records are built by `Meta`'s own
+// Fango code from the counts and indices these return. That is what keeps
 // this package below the interpreter in the graph.
 
 import (

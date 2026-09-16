@@ -2,7 +2,7 @@ package fangort
 
 import "strings"
 
-// The runtime representation of the bundled fango `List` type (see
+// The runtime representation of the bundled Fango `List` type (see
 // doc/roadmap-list.md). `List` is an ordinary ADT to the checker, the deriver,
 // and reflection; only the backends know it is stored this way, exactly as
 // `Bool` is an ADT that compiles to a native Go bool.
@@ -36,10 +36,10 @@ type chunk[T any] struct {
 	next  List[T]
 }
 
-// List is a fango list value: two words, and the zero value is the empty list.
+// List is a Fango list value: two words, and the zero value is the empty list.
 // The unnamed zero-sized field makes List uncomparable, so an accidental Go
 // `==` is a compile error rather than a silently wrong identity comparison —
-// fango equality is structural and goes through ListEq.
+// Fango equality is structural and goes through ListEq.
 type List[T any] struct {
 	_    [0]func()
 	node *chunk[T]
@@ -126,7 +126,7 @@ func ListShow[T any](show func(T, bool) string, v List[T], nested bool) string {
 // linked as it goes. No recursion, no intermediate list, and the same number
 // of chunks as the source.
 //
-// Writing this in fango costs either a Go frame per element (recursing under
+// Writing this in Fango costs either a Go frame per element (recursing under
 // the constructor) or a second pass and a second list (accumulating and
 // reversing). This is the one-pass form neither can express.
 func ListMap[A, B any](fn func(A) B, l List[A]) List[B] {

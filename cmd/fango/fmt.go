@@ -12,7 +12,7 @@ import (
 	"github.com/waj/fango/internal/source"
 )
 
-// cmdFmt formats fango source. With no paths it reads standard input and
+// cmdFmt formats Fango source. With no paths it reads standard input and
 // writes the result to standard output, so it composes with an editor that
 // pipes a buffer through a formatter.
 func cmdFmt(args []string, stdout, stderr io.Writer) int {

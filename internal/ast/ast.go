@@ -640,7 +640,7 @@ type OpSig struct {
 	Abort    bool // `abort name : ...`; the operation never resumes normally
 }
 
-// NativeBody marks a declaration implemented outside ordinary fango source.
+// NativeBody marks a declaration implemented outside ordinary Fango source.
 // Template is nil for sidecar call form and non-nil for bundled inline form.
 type NativeBody struct {
 	Template *string

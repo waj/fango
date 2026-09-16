@@ -1,4 +1,4 @@
-fango 0.1 — :help for commands
+Fango 0.1 — :help for commands
 > add : Num a => a -> a -> a
 > Num a => a -> a -> a
 > 5 : Num a => a
@@ -14,7 +14,7 @@ fango 0.1 — :help for commands
 > -- SHADOWING -------------------------------------------- <repl>
 
 The parameter `y` shadows a name that is already defined —
-fango does not allow shadowing. Choose a different name.
+Fango does not allow shadowing. Choose a different name.
 
 1| f y y = y
        ^

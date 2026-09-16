@@ -141,13 +141,13 @@ func (g *Graph) load(pending map[string]*node, name string, at source.Span) []di
 		path, b, readErr = localPath, localContent, localErr
 		if bundleErr == nil {
 			if localErr == nil {
-				return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with fango as `%s`; remove or rename the local `%s`.", name, bundlePath, localPath)}
+				return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; remove or rename the local `%s`.", name, bundlePath, localPath)}
 			}
 			if _, caseCollision := localErr.(pathCaseError); caseCollision {
-				return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with fango as `%s`; a case-insensitive local path also conflicts with that reserved name.", name, bundlePath)}
+				return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; a case-insensitive local path also conflicts with that reserved name.", name, bundlePath)}
 			}
 			if !errors.Is(localErr, fs.ErrNotExist) {
-				return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with fango as `%s`; the local `%s` also occupies that reserved path.", name, bundlePath, localPath)}
+				return []diag.Error{diag.Errorf(at, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; the local `%s` also occupies that reserved path.", name, bundlePath, localPath)}
 			}
 			path, b, readErr, bundled = bundlePath, bundleContent, nil, true
 		}

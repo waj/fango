@@ -1,4 +1,4 @@
-fango 0.1 — :help for commands
+Fango 0.1 — :help for commands
 > loaded Scope
 > | | Handle : Int -> Handle
 withHandle : (Handle ->{e} a) ->{e} a

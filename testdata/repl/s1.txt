@@ -1,4 +1,4 @@
-fango 0.1 — :help for commands
+Fango 0.1 — :help for commands
 > 2.5 : Float
 > hi! : String
 > True : Bool

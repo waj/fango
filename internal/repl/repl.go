@@ -120,7 +120,7 @@ func (s *Session) Close() {
 	}
 }
 
-const banner = "fango 0.1 — :help for commands"
+const banner = "Fango 0.1 — :help for commands"
 
 // Run drives the read-eval-print loop until :quit or EOF, rooted at the
 // working directory.

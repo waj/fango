@@ -1,7 +1,7 @@
 package infer
 
 // Deriving. `deriving (C)` runs C's *deriver* — a compile-time generator
-// written in ordinary fango — and installs the instance it produces. The
+// written in ordinary Fango — and installs the instance it produces. The
 // generated methods are checked and elaborated through exactly the same path
 // as handwritten ones, so nothing downstream needs to know a method was
 // derived (doc/design.md, "Compile-time metaprogramming").
@@ -47,7 +47,7 @@ func deriverSymbol(owner, class, method string) string {
 // DeriverDecl checks one `deriver C` block. Each method's type is dictated by
 // the class: a method with n arrows generates from a TypeInfo and n Code
 // arguments, and produces Code. There is no new type-system machinery here —
-// a deriver is an ordinary fango function with a compiler-supplied signature.
+// a deriver is an ordinary Fango function with a compiler-supplied signature.
 func (ck *Checker) DeriverDecl(d *ast.DeriverDecl) []diag.Error {
 	cl := ck.Classes[d.Class]
 	if cl == nil {

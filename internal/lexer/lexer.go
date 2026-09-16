@@ -146,7 +146,7 @@ func (l *lexer) skipSpaceAndComments() {
 		case c == '\t':
 			sp := source.Span{File: l.f, Start: l.pos, End: l.pos + 1}
 			l.errs = append(l.errs, diag.Errorf(sp, "TAB CHARACTER",
-				"I found a tab character. fango indentation is column-sensitive, so\ntabs are not allowed — use spaces."))
+				"I found a tab character. Fango indentation is column-sensitive, so\ntabs are not allowed — use spaces."))
 			l.pos++
 		case c == '-' && l.peekAt(1) == '-':
 			start := l.pos

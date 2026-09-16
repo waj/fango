@@ -16,7 +16,7 @@ type ExitRequest struct {
 	PayloadTypes  []*TypeDescriptor
 	// Suppressed records exits a cleanup scope could not make primary: a
 	// release that failed while the body was already exiting. Deterministic
-	// inner-to-outer order; nothing reads it from fango yet.
+	// inner-to-outer order; nothing reads it from Fango yet.
 	Suppressed []*ExitRequest
 }
 

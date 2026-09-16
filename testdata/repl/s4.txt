@@ -1,4 +1,4 @@
-fango 0.1 — :help for commands
+Fango 0.1 — :help for commands
 > NothingI : MaybeInt
 JustI : Int -> MaybeInt
 > JustI 3 : MaybeInt

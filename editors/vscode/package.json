@@ -50,7 +50,7 @@
         "fango.path": {
           "type": "string",
           "default": "",
-          "description": "Path to the fango executable. When empty, a fango built at the workspace root is used if present, otherwise fango from PATH."
+          "description": "Path to the Fango executable. When empty, a Fango built at the workspace root is used if present, otherwise Fango from PATH."
         }
       }
     },

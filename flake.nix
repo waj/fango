@@ -1,5 +1,5 @@
 {
-  description = "fango — a statically compiled functional language on the Go runtime";
+  description = "Fango — a statically compiled functional language on the Go runtime";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";

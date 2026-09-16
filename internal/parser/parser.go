@@ -2282,7 +2282,7 @@ func (p *parser) parseAtom() ast.Expr {
 	case token.KwQuote:
 		// `quote` takes exactly one atom, so `quote (f x)` needs its parens
 		// the way every other argument position does. Nothing about the
-		// quoted text is parsed differently — it is ordinary fango syntax.
+		// quoted text is parsed differently — it is ordinary Fango syntax.
 		p.next()
 		p.usesStaging = true
 		body := p.parsePostfixAtom()

@@ -1,4 +1,4 @@
-// Package fangort is the fango runtime support package. It is embedded into
+// Package fangort is the Fango runtime support package. It is embedded into
 // the compiler binary and materialized into every build directory; generated
 // code imports it, and the interpreter and REPL import it directly — one
 // shared formatting implementation across both backends, by construction.
@@ -97,7 +97,7 @@ func ShowCharLiteral(r rune) string {
 	return "'" + inside + "'"
 }
 
-// ShowStringLiteral renders a String as a fango source literal — the REPL's
+// ShowStringLiteral renders a String as a Fango source literal — the REPL's
 // at-the-prompt form. Escapes: \\ \" \n \t \r; other control characters as
 // \u{XXXX}; everything else (including non-ASCII) passes through.
 func ShowStringLiteral(s string) string {

@@ -74,7 +74,7 @@ Helper as IO` is rejected.
 
 Because `Maybe`, `Nothing`, `Just` and `List` are in scope everywhere, a
 module cannot declare its own: doing so is an `UNQUALIFIED COLLISION`, since
-fango rejects shadowing rather than resolving it. Pick another name, or opt
+Fango rejects shadowing rather than resolving it. Pick another name, or opt
 out with the pragma below.
 
 A module opts out with the `{-# no-prelude #-}` pragma above its header,

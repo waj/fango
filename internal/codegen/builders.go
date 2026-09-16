@@ -126,7 +126,7 @@ func returnStmt(e goast.Expr) goast.Stmt {
 
 // varDeclStmt is `var name T = value` as a statement — always `var`, never
 // `:=`: short declarations infer Go types from untyped constants (`x := 2`
-// is an int, not int64) and would silently mistype fango locals.
+// is an int, not int64) and would silently mistype Fango locals.
 func varDeclStmt(name string, typ, value goast.Expr) goast.Stmt {
 	return &goast.DeclStmt{Decl: varDecl(name, typ, value)}
 }

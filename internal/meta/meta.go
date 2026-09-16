@@ -90,7 +90,7 @@ func (t *Table) Get(i int) *Template {
 }
 
 // Code is the compile-time value of a quote: a template index plus one Code
-// per hole, already evaluated. It is opaque to fango — no constructor, no
+// per hole, already evaluated. It is opaque to Fango — no constructor, no
 // projection — and never reaches generated Go.
 //
 // Direct carries a compiler-built fragment instead of a template: scalar

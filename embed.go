@@ -1,4 +1,4 @@
-// Package fango holds the embedded runtime sources. It lives at the module
+// Package Fango holds the embedded runtime sources. It lives at the module
 // root because go:embed cannot reference paths outside the embedding
 // package's directory; internal packages materialize these sources into
 // generated Go modules.

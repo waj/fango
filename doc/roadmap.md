@@ -1,4 +1,4 @@
-# fango roadmap
+# Fango roadmap
 
 Priorities, unfinished work, and open decisions. Follow topic links only as
 needed; [design](design.md) and [reference](reference.md) own implemented contracts.

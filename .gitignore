@@ -9,7 +9,7 @@ result-*
 /fango
 *.test
 
-# fango build directories
+# Fango build directories
 .fango/
 *.out/
 
