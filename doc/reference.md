@@ -1242,6 +1242,11 @@ Polymorphic values and parameterized ADTs are supported. Numeric polymorphism us
 recursive ADTs are rejected. Local value bindings are monomorphic; local
 functions and lambda bindings may generalize.
 
+Local helpers may call their enclosing function or a member of its mutually
+recursive group, including when the callee's effects are inferred later.
+Helpers may carry explicit effect annotations; these must match the effects
+their bodies perform, just as for top-level functions.
+
 An ADT parameter is inferred as row-kinded when it is used as an open effect-row
 tail. This supports effect-indexed declarations without explicit kind syntax:
 

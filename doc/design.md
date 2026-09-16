@@ -596,6 +596,16 @@ sibling's scheme. Cycles containing ordinary values report
 `CYCLIC VALUE DEFINITION`; scheduling does not widen value or local scope or
 change their evaluation semantics.
 
+At a local binding, inferred single-occurrence effect tails close only when
+they are not free in an enclosing scope or an unfinished dependency component.
+This keeps calls through local helpers monomorphic in the enclosing effects
+until self-recursive or mutually recursive bodies are solved, while independent
+helpers still close and generalize at their own binding. A local annotation
+whose inferred arrow effects share such an open tail checks its argument and
+result shape immediately, but defers its effect comparison and row equality
+until the enclosing bodies have been solved. Deferred comparisons run before
+annotation equality can add labels, so annotations cannot invent body effects.
+
 Top-level values and functions generalize. Local syntactic functions and
 lambdas generalize, while local values remain monomorphic so their strict,
 evaluate-once semantics are not changed by lambda lifting. `main` is ground and

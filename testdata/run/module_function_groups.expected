@@ -7,3 +7,6 @@ independent
 mutual
 42
 Err zero
+Err self
+Err annotated
+Err returned

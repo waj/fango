@@ -30,6 +30,23 @@ fallible n =
     if n == 0 then Fail.fail "zero" else go (n - 1)
 alternate n = fallible n
 
+selfFallible n =
+    go remaining = selfFallible remaining
+    if n == 0 then Fail.fail "self" else if n < 0 then () else go (n - 1)
+
+annotatedFallible n =
+    go : Int ->{Fail.Fail String} ()
+    go remaining = annotatedAlternate remaining
+    if n == 0 then Fail.fail "annotated" else go (n - 1)
+annotatedAlternate n = annotatedFallible n
+
+returnedCallback n =
+    go : Int ->{Fail.Fail String} (() -> Int)
+    go remaining =
+        value = returnedCallback remaining
+        \_ -> value
+    if n == 0 then Fail.fail "returned" else if n < 0 then 7 else (go (n - 1))()
+
 main() =
     print (first 42)
     print (first "independent")
@@ -40,3 +57,6 @@ main() =
     print (left "mutual" False)
     print (right 42 False)
     print (Fail.attempt (\_ -> fallible 3))
+    print (Fail.attempt (\_ -> selfFallible 3))
+    print (Fail.attempt (\_ -> annotatedFallible 3))
+    print (Fail.attempt (\_ -> returnedCallback 3))

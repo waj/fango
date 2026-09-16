@@ -1030,6 +1030,7 @@ func (ck *Checker) DeclWhere(d *ast.ValueDecl, allowEffects bool) (DeclInfo, []d
 	q.errs = append(q.errs, q.g.errs...)
 	q.errs = append(q.errs, es...)
 	q.g.errs = nil
+	q.errs = append(q.errs, q.g.finishLocalAnnotations()...)
 	return ck.finishDecl(q)
 }
 
@@ -1187,7 +1188,11 @@ func sameKnownEffects(a, b types.Type) bool {
 	if !aok || !bok {
 		return true
 	}
-	al, bl := types.SortedRow(af.Eff).Labels, types.SortedRow(bf.Eff).Labels
+	return sameKnownRowEffects(af.Eff, bf.Eff) && sameKnownEffects(af.Ret, bf.Ret)
+}
+
+func sameKnownRowEffects(a, b types.Row) bool {
+	al, bl := types.SortedRow(a).Labels, types.SortedRow(b).Labels
 	if len(al) != len(bl) {
 		return false
 	}
@@ -1196,13 +1201,17 @@ func sameKnownEffects(a, b types.Type) bool {
 			return false
 		}
 	}
-	return sameKnownEffects(af.Ret, bf.Ret)
+	return true
 }
 
 // closeSingleRows makes an inferred arrow pure when its open row occurs only
 // once in the type. A row shared between a callback and the surrounding call
 // remains quantified, preserving inferred higher-order effect polymorphism.
 func (ck *Checker) closeSingleRows(t types.Type) {
+	ck.closeSingleRowsExcept(t, nil)
+}
+
+func (ck *Checker) closeSingleRowsExcept(t types.Type, avoid map[int]bool) {
 	t = ck.Sub.Apply(t)
 	counts := map[int]int{}
 	var count func(types.Type)
@@ -1233,7 +1242,7 @@ func (ck *Checker) closeSingleRows(t types.Type) {
 	}
 	count(t)
 	for id, n := range counts {
-		if n == 1 {
+		if n == 1 && !avoid[id] {
 			ck.Sub[id] = types.Row{}
 		}
 	}
@@ -1257,6 +1266,7 @@ func (ck *Checker) ExprWhere(e ast.Expr, allowEffects bool) (types.Type, []diag.
 	ck.Sub = sub
 	_ = residual
 	errs := append(g.errs, solveErrs...)
+	errs = append(errs, g.finishLocalAnnotations()...)
 	g.errs = nil
 	g.resolveRecords(true, 0)
 	errs = append(errs, g.errs...)
@@ -1344,6 +1354,7 @@ type generator struct {
 	patternPins       *blockScope
 	patternBinder     string
 	annotationAmbient *types.Row
+	localAnnotations  []localAnnotation
 }
 
 func (g *generator) isDefaultPrint(op *types.EffectOp) bool {
@@ -2344,7 +2355,13 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 			g.ck.Sub = sub
 			g.errs = append(g.errs, errs...)
 			g.cs = nil
-			if !sameKnownEffects(g.ck.Sub.Apply(annTy), g.ck.Sub.Apply(ty)) {
+			if g.sharedOpenEffects(ty) {
+				// Check the type shape now, but do not let the annotation's
+				// labels populate a body whose recursive callees are unfinished.
+				shape := g.annotationShape(annTy, ty, g.scopeFreeIDs(), bind)
+				g.deferLocalAnnotation(annTy, shape, annVars, bind)
+				annTy = shape
+			} else if !sameKnownEffects(g.ck.Sub.Apply(annTy), g.ck.Sub.Apply(ty)) {
 				g.errs = append(g.errs, diag.Errorf(bind.Ann.Sp, "EFFECT MISMATCH", "The effect row in the annotation for `%s` does not exactly match the effects performed by its body.", bind.Name))
 			}
 			// Skolemize-and-unify, as at the top level.
@@ -2368,12 +2385,10 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 			// into the substitution now, so generalization sees solved types
 			// and later bindings can use this one polymorphically.
 			g.solveHere(recordStart)
-			// A local function can call a member of the enclosing top-level
-			// recursive group. Its effect row may therefore be constrained only
-			// once that group reaches its fixed point; closing it here would
-			// incorrectly make the local function pure first.
-			if bind.Ann == nil && g.ck.recursive == nil {
-				g.ck.closeSingleRows(ty)
+			// Rows shared with an enclosing scope are still being inferred,
+			// including self-recursive functions and mutual dependency groups.
+			if bind.Ann == nil {
+				g.ck.closeSingleRowsExcept(ty, g.scopeFreeIDs())
 			}
 			// Skolem escape: this annotation's variables must not leak into
 			// enclosing bindings (that would grant the enclosing definition

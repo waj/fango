@@ -41,6 +41,15 @@ func (b *moduleCheck) inferGroup(group []int) {
 		return
 	}
 
+	// Compare every local annotation before any annotation can add labels
+	// to the shared recursive rows.
+	for _, q := range qs {
+		b.errs = append(b.errs, q.g.checkLocalAnnotations()...)
+	}
+	for _, q := range qs {
+		b.errs = append(b.errs, q.g.solveLocalAnnotations()...)
+	}
+
 	// Reconcile every annotation before the shared record fixed point.
 	for _, q := range qs {
 		if q.annTy == nil {
