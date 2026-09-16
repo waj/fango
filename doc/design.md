@@ -1331,6 +1331,12 @@ implements the same outcome propagation with a dedicated language-level
 operations are the checked producer of this protocol. When Exit code calls
 Direct evidence, code generation builds a typed eta record whose operation
 fields wrap normal results; conversion in the other direction is forbidden.
+An `If`, `Case`, or `Seq` that remains in Go expression position is emitted as
+a typed immediately invoked closure. In Exit mode that closure returns
+`Outcome` at the control-flow expression's own type, and its normal leaves are
+wrapped at that same type rather than at the enclosing worker's result type.
+This keeps effectful right-hand sides valid when an intermediate ADT differs
+from the worker result.
 
 A perform on a resumptive handler's evidence can resolve to Exit in an
 enclosing Exit context — an open-row callback inside `attempt`, say — while

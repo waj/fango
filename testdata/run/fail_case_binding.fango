@@ -1,0 +1,23 @@
+import Fail
+import Result exposing (Result(..))
+
+type Problem = Problem
+
+type Box = Box Int
+
+choose flag =
+    boxed =
+        case flag of
+            True -> Box 7
+            False -> Fail.fail Problem
+    case boxed of
+        Box value -> show value
+
+report flag =
+    case Fail.attempt (\_ -> choose flag) of
+        Ok value -> value
+        Err _ -> "failed"
+
+main() =
+    print (report True)
+    print (report False)

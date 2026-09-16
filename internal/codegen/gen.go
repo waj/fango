@@ -1402,19 +1402,20 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		// preserves branch laziness and stays gofmt-clean. ANF hoisting, as
 		// documented in doc/design.md, "Core and evidence invariants", bypasses this inside function bodies; it
 		// remains the top-level-initializer fallback.
-		body := []goast.Stmt{
-			&goast.IfStmt{
+		return g.controlIIFE(e, func() []goast.Stmt {
+			body := []goast.Stmt{&goast.IfStmt{
 				Cond: g.expr(e.Cond, 0),
-				Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.expr(e.Then, 0))}},
-			},
-			returnStmt(g.expr(e.Else, 0)),
-		}
-		return callExpr(funcLit(g.goType(e.Ty), body))
+				Body: &goast.BlockStmt{List: g.retStmts(e.Then)},
+			}}
+			return append(body, g.retStmts(e.Else)...)
+		})
 	case *core.Case:
 		// Expression-context fallback (top-level initializers): an
 		// immediately-invoked typed closure, exactly like If above. Inside
 		// function bodies the elaborator's ANF hoisting bypasses this.
-		return callExpr(funcLit(g.goType(e.Ty), g.caseStmts(e, g.retStmts)))
+		return g.controlIIFE(e, func() []goast.Stmt {
+			return g.caseStmts(e, g.retStmts)
+		})
 	case *core.Perform:
 		if e.Op.Native != nil && len(g.evidence[e.Effect.Unique]) == 0 {
 			return g.nativeExpr(&core.NativeCall{Name: e.Op.Native.Name, Module: e.Op.Native.Module, Args: e.Args, Ty: e.Ty}, parentPrec)
@@ -1510,7 +1511,9 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 	case *core.ResumeTail:
 		panic("codegen: ResumeTail outside verified handler-clause emission")
 	case *core.Seq:
-		return callExpr(funcLit(g.goType(e.Ty), append(g.stmts(e.First), returnStmt(g.expr(e.Then, 0)))))
+		return g.controlIIFE(e, func() []goast.Stmt {
+			return append(g.stmts(e.First), g.retStmts(e.Then)...)
+		})
 	case *core.Handle:
 		return g.handleExpr(e)
 	case *core.Bracket:
@@ -2352,6 +2355,26 @@ func (g *gen) floatLit(v float64) goast.Expr {
 	default:
 		return &goast.BasicLit{Kind: gotoken.FLOAT, Value: strconv.FormatFloat(v, 'g', -1, 64)}
 	}
+}
+
+// controlIIFE emits a control-flow expression in a typed closure. Exit-mode
+// leaves return Outcome at the expression's own result type, not the enclosing
+// worker's type; this matters for an effectful If, Case, or Seq used as a let
+// right-hand side.
+func (g *gen) controlIIFE(e core.Expr, body func() []goast.Stmt) goast.Expr {
+	oldControl, oldResult := g.control, g.resultType
+	exits := g.control == types.Exit && core.ExprControl(e).Resolve(g.control) == types.Exit
+	if g.control == types.Exit && !exits {
+		g.control = types.Direct
+	}
+	g.resultType = e.Type()
+	stmts := body()
+	g.control, g.resultType = oldControl, oldResult
+	result := g.goType(e.Type())
+	if exits {
+		result = g.outcomeType(e.Type())
+	}
+	return callExpr(funcLit(result, stmts))
 }
 
 // letIIFE collapses a Let chain into one immediately-invoked closure:

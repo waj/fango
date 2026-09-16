@@ -758,6 +758,9 @@ split : String -> String -> List String
 trim : String -> String
 padLeft : Int -> Char -> String -> String
 padRight : Int -> Char -> String -> String
+words : String -> List String
+toInt : String -> Maybe Int
+toFloat : String -> Maybe Float
 ```
 
 `length` counts Unicode scalars and `byteLength` counts UTF-8 bytes. `slice`
@@ -773,6 +776,12 @@ parses an optional `+`/`-` sign followed by base-10 digits. An empty digit
 sequence, any other character, and values outside the signed 64-bit range all
 produce `Nothing`; `String.toInt "007"` is `Just 7` and
 `String.toInt "-9223372036854775808"` parses the most negative Int.
+`toFloat` accepts an optional sign, one or more decimal digits, an optional
+fraction with digits on both sides of `.`, and an optional decimal exponent.
+It consumes the complete string: whitespace, `NaN`, infinities, hexadecimal
+floats, `.5`, and `1.` produce `Nothing`. Finite values representable as a
+64-bit Float, including signed zero and subnormal values, produce `Just`;
+overflow and nonzero values that underflow to zero produce `Nothing`.
 
 `split separator text` cuts at every occurrence, so n occurrences give n + 1
 pieces and adjacent separators give empty ones: `String.split "," "a,,b"` is

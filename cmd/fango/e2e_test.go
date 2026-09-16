@@ -337,6 +337,12 @@ func TestGuessingGameExample(t *testing.T) {
 	runDifferentialCase(t, path, cliRunner(path))
 }
 
+func TestCalculatorExample(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join("..", "..", "examples", "calculator.fango")
+	runDifferentialCase(t, path, cliRunner(path))
+}
+
 func TestWcExample(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "wc.fango")

@@ -102,6 +102,28 @@ func TestStringNatives(t *testing.T) {
 	if got := Slice(-2, 99, "a二z"); got != "a二z" {
 		t.Errorf("clamped Slice = %q", got)
 	}
+	for _, c := range []struct {
+		text string
+		want float64
+	}{
+		{"0", 0},
+		{"-0", math.Copysign(0, -1)},
+		{"+17", 17},
+		{"1.25", 1.25},
+		{"1e3", 1000},
+		{"1.0E-2", 0.01},
+		{"5e-324", math.SmallestNonzeroFloat64},
+		{"1.7976931348623157e308", math.MaxFloat64},
+	} {
+		if got := ToFloatNative(c.text); got != c.want || (c.text == "-0" && !math.Signbit(got)) {
+			t.Errorf("ToFloatNative(%q) = %v, want %v", c.text, got, c.want)
+		}
+	}
+	for _, invalid := range []string{"", "+", ".5", "1.", "1e", " 1", "1 ", "NaN", "Infinity", "0x1p2", "1e309", "1e-4000"} {
+		if got := ToFloatNative(invalid); !math.IsNaN(got) {
+			t.Errorf("ToFloatNative(%q) = %v, want NaN sentinel", invalid, got)
+		}
+	}
 }
 
 func TestEntropySeed(t *testing.T) {

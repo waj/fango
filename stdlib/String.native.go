@@ -1,6 +1,10 @@
 package native
 
-import "unicode/utf8"
+import (
+	"math"
+	"strconv"
+	"unicode/utf8"
+)
 
 // Length returns the number of Unicode scalar values in a String.
 func Length(s string) int64 { return int64(utf8.RuneCountInString(s)) }
@@ -43,3 +47,63 @@ func FirstChar(s string) rune { r, _ := utf8.DecodeRuneInString(s); return r }
 func RestString(s string) string { _, n := utf8.DecodeRuneInString(s); return s[n:] }
 
 func FromChar(r rune) string { return string(r) }
+
+// ToFloatNative accepts the decimal grammar exposed by String.toFloat. NaN is
+// a private failure sentinel: the grammar deliberately has no spelling for it.
+func ToFloatNative(text string) float64 {
+	if !decimalFloat(text) {
+		return math.NaN()
+	}
+	value, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsInf(value, 0) || value == 0 && nonzeroMantissa(text) {
+		return math.NaN()
+	}
+	return value
+}
+
+func nonzeroMantissa(text string) bool {
+	for i := 0; i < len(text) && text[i] != 'e' && text[i] != 'E'; i++ {
+		if text[i] >= '1' && text[i] <= '9' {
+			return true
+		}
+	}
+	return false
+}
+
+func decimalFloat(text string) bool {
+	i := 0
+	if i < len(text) && (text[i] == '+' || text[i] == '-') {
+		i++
+	}
+	start := i
+	for i < len(text) && text[i] >= '0' && text[i] <= '9' {
+		i++
+	}
+	if i == start {
+		return false
+	}
+	if i < len(text) && text[i] == '.' {
+		i++
+		start = i
+		for i < len(text) && text[i] >= '0' && text[i] <= '9' {
+			i++
+		}
+		if i == start {
+			return false
+		}
+	}
+	if i < len(text) && (text[i] == 'e' || text[i] == 'E') {
+		i++
+		if i < len(text) && (text[i] == '+' || text[i] == '-') {
+			i++
+		}
+		start = i
+		for i < len(text) && text[i] >= '0' && text[i] <= '9' {
+			i++
+		}
+		if i == start {
+			return false
+		}
+	}
+	return i == len(text)
+}

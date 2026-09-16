@@ -1,0 +1,13 @@
+calc> Enter an expression or NAME = expression.
+Operators: + - * / and parentheses.
+Commands: :help, :quit
+calc> 14
+calc> x = 20
+calc> 4
+calc> error at column 5: unknown variable `missing`
+calc> 20
+calc> 150.25
+calc> -6
+calc> error at column 7: expected `)`
+calc> error at column 3: unexpected `@`
+calc> Goodbye!

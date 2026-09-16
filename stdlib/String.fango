@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module String exposing (Uncons(..), byteLength, contains, fromChar, length, padLeft, padRight, slice, split, startsWith, toInt, trim, uncons, words)
+module String exposing (Uncons(..), byteLength, contains, fromChar, length, padLeft, padRight, slice, split, startsWith, toFloat, toInt, trim, uncons, words)
 
 import Basics exposing (..)
 import List exposing (List(..))
@@ -129,6 +129,16 @@ toInt text =
         Nothing
     else
         toIntHelp text start size (first == 45) 0
+
+-- The native validates the complete decimal grammar and returns NaN as its
+-- private failure sentinel. Accepted input can never itself denote NaN.
+toFloatNative : String -> Float
+toFloatNative = native
+
+toFloat : String -> Maybe Float
+toFloat text =
+    value = toFloatNative text
+    if value == value then Just value else Nothing
 
 -- matchesAt is private: whether separator occurs at index. The bounds test
 -- comes first because byteSlice does not clamp, unlike slice.
