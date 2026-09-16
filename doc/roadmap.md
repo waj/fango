@@ -184,6 +184,11 @@ Haskell's ambient reification, which is what breaks modularity there.
   so calibrating against a same-host Go baseline is not on its own enough.
   Until that is fixed the gates stay manual, and compile latency additionally
   needs per-host baselines or a host-independent formulation.
+- Record the compact capture-flow diamond graph's pure and `Fail.attempt`
+  compile-latency baselines on an otherwise idle machine with
+  `go test ./benchmarks -update-baselines`. The manual gate measures cold,
+  warm-unchanged, and warm-changed runs; these new cases need their initial
+  measurements before the regression comparisons can run.
 - Decide whether the runtime-ratio gate should time work rather than
   processes. It times whole runs, and for the short cases most of the
   baseline's wall clock is process spawn and collection, which both sides pay

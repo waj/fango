@@ -105,8 +105,9 @@ func TestCursorAccessContractsSubstituteAliasesAndRecursiveHelpers(t *testing.T)
 			producer := f.alloc("producer A", flowObject{kind: "lambda", code: &types.CaptureFlow{ID: 12, Kind: "lambda", Name: "ignored", Type: fnTy, Children: []*types.CaptureFlow{call}}, env: producerEnv})
 			f.objects[a].fields[0] = flowValue{refs: []int{producer}}
 			for {
+				f.generation++
 				f.changed = false
-				f.advance(flowValue{refs: []int{a}}, env, "root", []int{ownerA, ownerB})
+				f.advance(flowValue{refs: []int{a}}, env, rootFlowSite, []int{ownerA, ownerB})
 				if !f.changed {
 					break
 				}

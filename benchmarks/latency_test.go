@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/waj/fango/internal/testutil"
 )
 
 var updateBaselines = flag.Bool("update-baselines", false, "rewrite baselines/latency.json")
@@ -35,9 +37,16 @@ type baselines struct {
 
 	// The generics-heavy program (~500 lines, many distinct instantiations)
 	// detects generic build-time and code-size regressions.
-	PolyColdMs          float64 `json:"poly_cold_ms"`
-	PolyWarmUnchangedMs float64 `json:"poly_warm_unchanged_ms"`
-	PolyWarmChangedMs   float64 `json:"poly_warm_changed_ms"`
+	PolyColdMs          float64                 `json:"poly_cold_ms"`
+	PolyWarmUnchangedMs float64                 `json:"poly_warm_unchanged_ms"`
+	PolyWarmChangedMs   float64                 `json:"poly_warm_changed_ms"`
+	CaptureGraphs       map[string]graphLatency `json:"capture_graphs"`
+}
+
+type graphLatency struct {
+	Cold      float64 `json:"cold_ms"`
+	Unchanged float64 `json:"warm_unchanged_ms"`
+	Changed   float64 `json:"warm_changed_ms"`
 }
 
 const (
@@ -114,6 +123,22 @@ func TestCompileLatency(t *testing.T) {
 	polyCold, polyWarmUnchanged, polyWarmChanged := measure(t, fangoBin, polyEntry, polyWork, func(lit int) {
 		writePolyProgram(t, polyEntry, lit)
 	})
+	graphs := map[string]graphLatency{}
+	for _, effectful := range []bool{false, true} {
+		name := "pure"
+		if effectful {
+			name = "fail"
+		}
+		work := t.TempDir()
+		entry := filepath.Join(work, "graph.fango")
+		cold, unchanged, changed := measure(t, fangoBin, entry, work, func(lit int) {
+			if err := os.WriteFile(entry, []byte(testutil.CaptureGraph(8, lit, effectful)), 0600); err != nil {
+				t.Fatal(err)
+			}
+		})
+		graphs[name] = graphLatency{cold, unchanged, changed}
+		t.Logf("capture-%s: cold=%.0fms warm-unchanged=%.0fms warm-changed=%.0fms", name, cold, unchanged, changed)
+	}
 
 	t.Logf("hello: cold=%.0fms warm-unchanged=%.0fms warm-changed=%.0fms  adt500: cold=%.0fms warm-unchanged=%.0fms warm-changed=%.0fms  poly500: cold=%.0fms warm-unchanged=%.0fms warm-changed=%.0fms",
 		cold, warmUnchanged, warmChanged, adtCold, adtWarmUnchanged, adtWarmChanged,
@@ -125,6 +150,7 @@ func TestCompileLatency(t *testing.T) {
 			cold, warmUnchanged, warmChanged,
 			adtCold, adtWarmUnchanged, adtWarmChanged,
 			polyCold, polyWarmUnchanged, polyWarmChanged,
+			graphs,
 		}, "", "  ")
 		if err := os.MkdirAll("baselines", 0o755); err != nil {
 			t.Fatal(err)
@@ -161,6 +187,17 @@ func TestCompileLatency(t *testing.T) {
 	check("poly-cold", polyCold, base.PolyColdMs, budgetColdMs)
 	check("poly-warm-unchanged", polyWarmUnchanged, base.PolyWarmUnchangedMs, budgetWarmUnchangedMs)
 	check("poly-warm-changed", polyWarmChanged, base.PolyWarmChangedMs, budgetADTWarmChangedMs)
+	for _, name := range []string{"pure", "fail"} {
+		baseline, ok := base.CaptureGraphs[name]
+		if !ok {
+			t.Errorf("missing capture-%s baseline: run with -update-baselines on an idle machine", name)
+			continue
+		}
+		got := graphs[name]
+		check("capture-"+name+"-cold", got.Cold, baseline.Cold, budgetColdMs)
+		check("capture-"+name+"-warm-unchanged", got.Unchanged, baseline.Unchanged, budgetWarmUnchangedMs)
+		check("capture-"+name+"-warm-changed", got.Changed, baseline.Changed, budgetADTWarmChangedMs)
+	}
 }
 
 func buildCLI(t *testing.T) string {

@@ -208,14 +208,43 @@ retain the contracts; source annotations do not erase them.
 Contract checking substitutes actual callbacks and evidence and joins branches.
 An allocation-site abstract heap tracks closures and constructor fields; closures
 retain free values and definition-site evidence, excluding their own binders.
+Contexts have stable internal IDs independent of invocation paths. New
+invocations share a context when their callable and structural capability state
+agree: relevant arguments and free bindings, type substitutions, captured and
+invocation evidence, residual rows, live scopes, resume owners, and active borrow
+and acquisition/release/pull boundaries. Closure fingerprints exclude their own
+value, evidence, and row binders. Scalars are erased by their instantiated type;
+constructor fields that can carry capabilities or callables remain structural.
+Global references use immutable callable identities. Graph traversal preserves
+aliases and terminates cycles, while concrete owner IDs and unknown versus
+known-empty capability states remain distinct.
+
+Fingerprints are lookup data over the current abstract heap, not permanent
+identities. A monotone revision invalidates cached fingerprints whenever inputs,
+heap objects, owners, results, or obligations grow; lookup refreshes candidates
+within the callable's bucket. Stable invocation edges merge later input growth
+into the context they already selected, including after recursive widening.
+The sharing entry state and the widened evaluation environment are separate;
+both retain references to the evolving heap. Disagreeing type substitutions are
+forgotten conservatively so an earlier scalar instantiation cannot erase a
+later resource.
+
 Recursive calls join enclosing contexts at a repeated target and lexical call
 site when their inputs identify the same existing values or values allocated
-inside that activation. Distinct pre-existing callbacks and descriptions keep
-nested helper invocations independent. Compiler-created adapter temporaries and
+inside that activation. Explicit allocation ancestry records stable context
+IDs rather than inferring ancestry from path strings; invocation ancestry is
+joined even on cached returns. Distinct pre-existing
+callbacks and descriptions keep nested helper invocations independent.
+Compiler-created adapter temporaries and
 dictionary references carry local-binding identities, so closure capture
-analysis retains them just like source locals. Summaries reach a fixed point without
-an iteration-limit success fallback. Separate acyclic call paths distinguish
-nested owners. Folded recursive activations cannot establish that two dynamic
+analysis retains them just like source locals. Each generation evaluates a
+context once, joining folded resume owners within that evaluation, after
+merging its incoming environment; busy and already-evaluated
+contexts return their current summary. Later growth requests another generation,
+and summaries reach a fixed point without an iteration-limit success fallback.
+Cached and busy returns replay access and suspension obligations at every
+invocation. Diagnostic origins are separate from sharing keys. Live scope and
+evidence identities distinguish nested owners. Folded recursive activations cannot establish that two dynamic
 owners are identical, so retention requiring that equality is rejected
 conservatively. Concrete scalar results cannot carry captures. Pattern matching,
 partial applications, dictionaries, lifted locals, and row adapters preserve
@@ -1631,7 +1660,11 @@ mutex is held, without making the test host's processor count determine whether
 the suite can drain.
 
 Compile-latency benchmarks track cold and warm paths against recorded,
-machine-specific baselines. Runtime benchmarks compare representative scalar,
+machine-specific baselines. Compact source-ordered local helper diamonds, pure
+and beneath one `Fail.attempt`, exercise capture-flow sharing without expensive
+runtime execution. Deterministic Core tests vary their depth and evidence state
+and assert context/object growth and one evaluation per context per generation;
+elapsed-time checks remain in the manual latency gate. Runtime benchmarks compare representative scalar,
 match, string, list, tree, and repeated handler-state operations with
 handwritten Go and use per-case ratio ceilings. The State baseline uses the
 same one-cell/two-closure setup so its timed loop isolates per-operation

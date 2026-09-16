@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
@@ -12,8 +11,8 @@ import (
 
 // The abstract machine executes capture contracts, never source computations.
 // Scalars are erased, branches are joined, and recursive calls use a finite
-// allocation-site heap and monotone call summaries. Each acyclic call path has
-// its own context; a recursive edge joins the enclosing context for that code.
+// allocation-site heap and monotone call summaries. Equivalent capability
+// states share contexts; recursive growth joins an enclosing activation.
 // Thus wrappers and callbacks remain relational without unrolling recursion.
 type flowValue struct {
 	refs    []int
@@ -51,6 +50,7 @@ func (e flowEnv) clone() flowEnv {
 
 type flowObject struct {
 	allocation  string
+	ancestry    []string
 	kind        string
 	code        *types.CaptureFlow
 	def         string
@@ -60,10 +60,54 @@ type flowObject struct {
 	owner       int
 	yieldEffect int
 }
+
+// A call site is lexical code plus an application phase, never a call path.
+// The context component is used only for allocation and stable dataflow edges.
+type flowSite struct {
+	context string
+	node    int
+	phase   string
+}
+
+func (s flowSite) within(phase string) flowSite {
+	s.phase += "/" + phase
+	return s
+}
+
+func (s flowSite) allocation() string {
+	return fmt.Sprintf("%s/%d%s", s.context, s.node, s.phase)
+}
+
+type flowLexicalSite struct {
+	def   string
+	node  int
+	phase string
+}
+
+type flowEdge struct {
+	parent                   string
+	site                     flowSite
+	target, boundary, scopes string
+	resume                   int
+}
+
+var rootFlowSite = flowSite{phase: "root"}
+
 type flowContext struct {
+	// entry is the invocation state used for sharing; env is its monotone
+	// recursive widening. Both refer to the live heap. Stable incoming edges
+	// keep supplying growth even after widening changes the sharing key.
+	entry       flowEnv
+	ancestry    []string
+	id          string
+	boundary    string
+	evaluated   int
+	evaluations map[int]int
+	fingerprint string
+	revision    int
 	origin      source.Span
 	target      string
-	site        string
+	site        flowLexicalSite
 	parent      string
 	env         flowEnv
 	result      flowValue
@@ -84,6 +128,7 @@ type flowOwner struct {
 	in       string
 	scoped   bool
 	context  string
+	ancestry []string
 	code     *types.CaptureFlow
 	env      flowEnv
 	state    flowValue
@@ -147,6 +192,10 @@ type flowChecker struct {
 	owners          []*flowOwner
 	ownerIDs        map[string]int
 	contexts        map[string]*flowContext
+	byTarget        map[string][]*flowContext
+	edges           map[flowEdge]string
+	revision        int
+	generation      int
 	changed         bool
 	errors          map[string]error
 	root            string
@@ -179,8 +228,9 @@ func checkCaptureFlows(a *captureAnalyzer) []error {
 		// All stores and results grow monotonically over a finite set of allocation
 		// sites, contexts, and owners. There is no iteration cap or success fallback.
 		for {
+			f.generation++
 			f.changed = false
-			f.callDef(name, args, nil, env, "root", nil)
+			f.callDef(name, args, nil, env, rootFlowSite, nil)
 			if !f.changed {
 				break
 			}
@@ -212,7 +262,7 @@ func (f *flowChecker) merge(dst *flowValue, v flowValue) {
 	n := joinFlow(*dst, v)
 	if !equalFlow(n, *dst) {
 		*dst = n
-		f.changed = true
+		f.grow()
 	}
 }
 func (f *flowChecker) mergeEnv(dst *flowEnv, src flowEnv) {
@@ -227,7 +277,7 @@ func (f *flowChecker) mergeEnv(dst *flowEnv, src flowEnv) {
 	for variable, old := range dst.types {
 		if next, ok := src.types[variable]; !ok || !types.Equal(old, next) {
 			delete(dst.types, variable)
-			f.changed = true
+			f.grow()
 		}
 	}
 	for k, v := range src.values {
@@ -241,23 +291,25 @@ func (f *flowChecker) mergeEnv(dst *flowEnv, src flowEnv) {
 		joined = slices.Compact(joined)
 		if !slices.Equal(joined, dst.evidence[k]) {
 			dst.evidence[k] = joined
-			f.changed = true
+			f.grow()
 		}
 	}
 	for k, row := range src.rows {
 		joined := joinFlowRow(dst.rows[k], row)
 		if !equalFlowRow(joined, dst.rows[k]) {
 			dst.rows[k] = joined
-			f.changed = true
+			f.grow()
 		}
 	}
 }
 func (f *flowChecker) alloc(key string, o flowObject) int {
 	if id := f.objectIDs[key]; id != 0 {
 		old := f.objects[id]
+		f.mergeAncestry(&old.ancestry)
 		f.mergeEnv(&old.env, o.env)
 		for len(old.fields) < len(o.fields) {
 			old.fields = append(old.fields, flowValue{})
+			f.grow()
 		}
 		for i, v := range o.fields {
 			f.merge(&old.fields[i], v)
@@ -266,9 +318,12 @@ func (f *flowChecker) alloc(key string, o flowObject) int {
 	}
 	id := len(f.objects)
 	o.allocation = key
+	for _, c := range f.calls {
+		o.ancestry = append(o.ancestry, c.id)
+	}
 	f.objectIDs[key] = id
 	f.objects = append(f.objects, &o)
-	f.changed = true
+	f.grow()
 	return id
 }
 func (f *flowChecker) contextDef(ctx string) string {
@@ -280,6 +335,7 @@ func (f *flowChecker) contextDef(ctx string) string {
 func (f *flowChecker) owner(n *types.CaptureFlow, env flowEnv, ctx string, scopes []int) int {
 	key := fmt.Sprintf("%s/s%d", ctx, n.ID)
 	if id := f.ownerIDs[key]; id != 0 {
+		f.mergeAncestry(&f.owners[id].ancestry)
 		f.mergeEnv(&f.owners[id].env, env)
 		return id
 	}
@@ -308,7 +364,8 @@ func (f *flowChecker) owner(n *types.CaptureFlow, env flowEnv, ctx string, scope
 		context = c.parent
 	}
 	f.owners = append(f.owners, &flowOwner{origin: origin, scope: n.Scope, parent: slices.Clone(scopes), name: name + " in `" + f.contextDef(ctx) + "`", in: f.root, scoped: n.Scoped || n.Kind == "scope", context: ctx, code: n, env: env.clone()})
-	f.changed = true
+	f.mergeAncestry(&f.owners[id].ancestry)
+	f.grow()
 	return id
 }
 func (f *flowChecker) captures(v flowValue) []int {
@@ -530,20 +587,15 @@ func (f *flowChecker) store(v flowValue, dest int, value string) {
 	}
 }
 func (f *flowChecker) recursiveOwner(id int) bool {
-	for ctx := f.owners[id].context; ctx != ""; {
-		c := f.contexts[ctx]
-		if c == nil {
-			break
-		}
-		if c.recursive {
+	for _, ctx := range f.owners[id].ancestry {
+		if f.contextAncestry(ctx, func(c *flowContext) bool { return c.recursive }) {
 			return true
 		}
-		ctx = c.parent
 	}
 	return false
 }
 
-func (f *flowChecker) callDef(name string, args []flowValue, typeArgs []types.Type, caller flowEnv, site string, scopes []int) flowValue {
+func (f *flowChecker) callDef(name string, args []flowValue, typeArgs []types.Type, caller flowEnv, site flowSite, scopes []int) flowValue {
 	d := f.defs[name]
 	if d == nil {
 		return flowValue{unknown: true}
@@ -576,7 +628,11 @@ func (f *flowChecker) callDef(name string, args []flowValue, typeArgs []types.Ty
 func (f *flowChecker) recursiveInputs(context string, previous, next flowEnv) bool {
 	for name, value := range next.values {
 		for _, ref := range value.refs {
-			if !slices.Contains(previous.values[name].refs, ref) && !strings.HasPrefix(f.objects[ref].allocation, context+"/") {
+			allocated := false
+			for _, ctx := range f.objects[ref].ancestry {
+				allocated = allocated || ctx == context || f.contextAncestry(ctx, func(c *flowContext) bool { return c.id == context })
+			}
+			if !slices.Contains(previous.values[name].refs, ref) && !allocated {
 				return false
 			}
 		}
@@ -584,46 +640,75 @@ func (f *flowChecker) recursiveInputs(context string, previous, next flowEnv) bo
 	return true
 }
 
-func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env flowEnv, site string, scopes []int, resume int) flowValue {
-	parent := site
-	for f.contexts[parent] == nil {
-		i := strings.LastIndex(parent, "/")
-		if i < 0 {
-			parent = ""
-			break
-		}
-		parent = parent[:i]
+func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env flowEnv, site flowSite, scopes []int, resume int) flowValue {
+	parent := ""
+	if len(f.calls) > 0 {
+		parent = f.calls[len(f.calls)-1].id
 	}
-	key := site + ">" + target
+	env = relevantFlowEnv(body, env, nil, nil, 0)
+	key := ""
+	boundary := f.boundaryKey()
+	edge := flowEdge{parent: parent, site: site, target: target, boundary: boundary, scopes: fmt.Sprint(scopes), resume: resume}
+	boundEdge := parent != "" || site == rootFlowSite
+	if boundEdge {
+		// An already-bound invocation is a dataflow edge, not a new lookup.
+		// Otherwise a growing recursive argument could allocate a new context
+		// every generation and lose the very widening that makes it finite.
+		key = f.edges[edge]
+	}
 	// Fold at a repeated code identity AND lexical call site. Distinct nested
 	// uses of the same scope wrapper introduce independent owners; invoking an
 	// intrinsic twice is not, by itself, recursive source computation.
-	callSite := f.contextDef(parent) + strings.TrimPrefix(site, parent)
-	for p := parent; p != ""; {
-		c := f.contexts[p]
-		if c == nil {
-			break
-		}
+	callSite := flowLexicalSite{def: f.contextDef(site.context), node: site.node, phase: site.phase}
+	for i := len(f.calls) - 1; i >= 0; i-- {
+		c := f.calls[i]
+		p := c.id
 		if c.target == target && c.site == callSite && f.recursiveInputs(p, c.env, env) {
 			key = p
 			if !c.recursive {
 				c.recursive = true
-				f.changed = true
+				f.grow()
 			}
 			break
 		}
-		p = c.parent
+	}
+	if key == "" {
+		fingerprint := f.flowFingerprint(env)
+		// Fingerprints describe the current heap, not permanent identities.
+		// Reindex candidates from their current inputs before every lookup.
+		for _, candidate := range f.byTarget[target] {
+			if candidate.boundary == boundary && slices.Equal(candidate.scopes, scopes) && slices.Equal(candidate.resumes, []int{resume}) && f.contextFingerprint(candidate) == fingerprint {
+				key = candidate.id
+				break
+			}
+		}
 	}
 	c := f.contexts[key]
 	if c == nil {
-		c = &flowContext{origin: f.location, target: target, site: callSite, parent: parent, def: def, scopes: slices.Clone(scopes)}
+		key = fmt.Sprintf("c%d", len(f.contexts)+1)
+		c = &flowContext{id: key, entry: env.clone(), boundary: boundary, evaluations: map[int]int{}, origin: f.location, target: target, site: callSite, parent: parent, def: def, scopes: slices.Clone(scopes)}
 		f.contexts[key] = c
-		f.changed = true
+		if f.byTarget == nil {
+			f.byTarget = map[string][]*flowContext{}
+		}
+		f.byTarget[target] = append(f.byTarget[target], c)
+		f.grow()
+	}
+	if boundEdge {
+		if f.edges == nil {
+			f.edges = map[flowEdge]string{}
+		}
+		f.edges[edge] = key
 	}
 	f.mergeEnv(&c.env, env)
+	f.mergeAncestry(&c.ancestry)
+	if c.busy && !c.recursive {
+		c.recursive = true
+		f.grow()
+	}
 	if !slices.Contains(c.resumes, resume) {
 		c.resumes = append(c.resumes, resume)
-		f.changed = true
+		f.grow()
 	}
 	// A recursive edge may reuse a busy summary. Its already-discovered access
 	// obligations still apply; skipping them would accept reentrant helpers.
@@ -633,23 +718,22 @@ func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env fl
 	for _, target := range c.suspensions {
 		f.suspend(target)
 	}
-	if c.busy {
+	if c.busy || c.evaluated == f.generation {
 		return c.result
 	}
+	c.evaluated = f.generation
+	c.evaluations[f.generation]++
 	c.busy = true
 	f.calls = append(f.calls, c)
 	f.suspensionCalls = append(f.suspensionCalls, c)
-	var got flowValue
-	for _, owner := range c.resumes {
-		got = joinFlow(got, f.eval(body, c.env, key, c.scopes, owner))
-	}
+	got := f.eval(body, c.env, key, c.scopes, c.resumes)
 	c.busy = false
 	f.calls = f.calls[:len(f.calls)-1]
 	f.suspensionCalls = f.suspensionCalls[:len(f.suspensionCalls)-1]
 	f.merge(&c.result, got)
 	return c.result
 }
-func (f *flowChecker) apply(fn flowValue, args []flowValue, env flowEnv, site string, scopes []int) flowValue {
+func (f *flowChecker) apply(fn flowValue, args []flowValue, env flowEnv, site flowSite, scopes []int) flowValue {
 	var result flowValue
 	if fn.unknown {
 		result.unknown = true
@@ -671,14 +755,14 @@ func (f *flowChecker) apply(fn flowValue, args []flowValue, env flowEnv, site st
 			}
 			got := f.invoke(fmt.Sprintf("lambda:%s:%d", o.def, o.code.ID), o.def, o.code.Children[0], inner, site, scopes, 0)
 			if len(args) > 1 {
-				got = f.apply(got, args[1:], env, site+"/apply", scopes)
+				got = f.apply(got, args[1:], env, site.within("apply"), scopes)
 			}
 			result = joinFlow(result, got)
 		}
 	}
 	return result
 }
-func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes []int, resume int) flowValue {
+func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes []int, resumes []int) flowValue {
 	if n == nil {
 		return flowValue{}
 	}
@@ -687,12 +771,12 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		f.location = n.Origin
 	}
 	defer func() { f.location = oldLocation }()
-	key := fmt.Sprintf("%s/%d", ctx, n.ID)
+	key := flowSite{context: ctx, node: n.ID}
 	child := func(i int) flowValue {
 		if i >= len(n.Children) {
 			return flowValue{}
 		}
-		return f.eval(n.Children[i], env, ctx, scopes, resume)
+		return f.eval(n.Children[i], env, ctx, scopes, resumes)
 	}
 	all := func(start int) []flowValue {
 		var vs []flowValue
@@ -712,7 +796,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		if d := f.defs[n.Name]; d != nil && !d.IsWorker() {
 			result = f.callDef(n.Name, nil, n.TypeArgs, env, key, scopes)
 		} else {
-			id := f.alloc(key, flowObject{kind: "global", def: n.Name, code: n, env: env.clone()})
+			id := f.alloc(key.allocation(), flowObject{kind: "global", def: n.Name, code: n, env: env.clone()})
 			result.refs = []int{id}
 		}
 	case "native":
@@ -739,12 +823,12 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 				}
 			}
 		}
-		result = f.eval(n.Children[1], inner, ctx, scopes, resume)
+		result = f.eval(n.Children[1], inner, ctx, scopes, resumes)
 	case "lambda":
-		id := f.alloc(key, flowObject{kind: "lambda", code: n, def: f.contextDef(ctx), env: env.clone()})
+		id := f.alloc(key.allocation(), flowObject{kind: "lambda", code: n, def: f.contextDef(ctx), env: env.clone()})
 		result.refs = []int{id}
 	case "ctor":
-		id := f.alloc(key, flowObject{kind: "ctor", ctor: n.Index, fields: all(0)})
+		id := f.alloc(key.allocation(), flowObject{kind: "ctor", ctor: n.Index, fields: all(0)})
 		result.refs = []int{id}
 	case "call":
 		fn := child(0)
@@ -760,7 +844,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		v := child(0)
 		inner := env.clone()
 		inner.values[n.Name] = v
-		result = f.eval(n.Children[1], inner, ctx, scopes, resume)
+		result = f.eval(n.Children[1], inner, ctx, scopes, resumes)
 	case "switch":
 		v := env.values[n.Name]
 		for _, cl := range n.Clauses {
@@ -789,11 +873,11 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 				}
 				inner.values[name] = value
 			}
-			result = joinFlow(result, f.eval(cl.Body, inner, ctx, scopes, resume))
+			result = joinFlow(result, f.eval(cl.Body, inner, ctx, scopes, resumes))
 		}
 		result = joinFlow(result, child(0))
 	case "scope":
-		acquired := f.syncEval("acquisition", n.Children[0], env, ctx, scopes, resume)
+		acquired := f.syncEval("acquisition", n.Children[0], env, ctx, scopes, resumes)
 		id := f.owner(n, env, ctx, scopes)
 		resource := acquired
 		if len(n.TypeArgs) > 0 && f.carry(n.TypeArgs[0], env) {
@@ -802,8 +886,8 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		inner := env.clone()
 		inner.values[n.Name] = resource
 		inside := append(slices.Clone(scopes), id)
-		result = f.eval(n.Children[1], inner, ctx, inside, resume)
-		f.syncEval("release", n.Children[2], inner, ctx, inside, resume)
+		result = f.eval(n.Children[1], inner, ctx, inside, resumes)
+		f.syncEval("release", n.Children[2], inner, ctx, inside, resumes)
 		f.escape(result, id, "scope result", "The returned value")
 	case "handle":
 		initial := child(0)
@@ -813,14 +897,14 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		f.merge(&o.state, initial)
 		inner := env.clone()
 		inner.evidence[n.Effects[0]] = []int{id}
-		result = f.eval(n.Children[1], inner, ctx, append(slices.Clone(scopes), id), resume)
+		result = f.eval(n.Children[1], inner, ctx, append(slices.Clone(scopes), id), resumes)
 		if n.Children[2] != nil {
 			ret := env.clone()
 			ret.values[n.Name] = o.state
 			if len(n.Names) > 0 {
 				ret.values[n.Names[0]] = result
 			}
-			result = f.eval(n.Children[2], ret, ctx, scopes, resume)
+			result = f.eval(n.Children[2], ret, ctx, scopes, resumes)
 		}
 		result = joinFlow(result, o.answer)
 		if n.Scoped {
@@ -930,10 +1014,14 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		}
 	case "resume":
 		result = child(0)
-		if len(n.Children) > 1 && n.Children[1] != nil && resume != 0 {
+		if len(n.Children) > 1 && n.Children[1] != nil && slices.ContainsFunc(resumes, func(id int) bool { return id != 0 }) {
 			next := child(1)
-			f.store(next, resume, "next state")
-			f.merge(&f.owners[resume].state, next)
+			for _, owner := range resumes {
+				if owner != 0 {
+					f.store(next, owner, "next state")
+					f.merge(&f.owners[owner].state, next)
+				}
+			}
 		}
 		// Resume's apparent Core result is the handler answer, while the value
 		// flowing back to the perform site is the operation result.
@@ -972,15 +1060,15 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		if len(n.Effects) != 0 {
 			yieldEffect = n.Effects[0]
 		}
-		cursor := f.alloc(key+"/cursor", flowObject{kind: "cursor", owner: owner, yieldEffect: yieldEffect, fields: []flowValue{producer}})
+		cursor := f.alloc(key.within("cursor").allocation(), flowObject{kind: "cursor", owner: owner, yieldEffect: yieldEffect, fields: []flowValue{producer}})
 		inside := append(slices.Clone(scopes), owner)
-		result = f.apply(consumer, []flowValue{{refs: []int{cursor}, caps: []int{owner}}}, env, key+"/consumer", inside)
+		result = f.apply(consumer, []flowValue{{refs: []int{cursor}, caps: []int{owner}}}, env, key.within("consumer"), inside)
 		f.escape(result, owner, "cursor scope result", "The returned value")
 
 	case "next":
 		value := f.advance(child(0), invocationFlowRow(env, n.Row), key, scopes)
-		some := f.alloc(key+"/some", flowObject{kind: "ctor", ctor: 1, fields: []flowValue{value}})
-		none := f.alloc(key+"/none", flowObject{kind: "ctor", ctor: 0})
+		some := f.alloc(key.within("some").allocation(), flowObject{kind: "ctor", ctor: 1, fields: []flowValue{value}})
+		none := f.alloc(key.within("none").allocation(), flowObject{kind: "ctor", ctor: 0})
 		result.refs = []int{some, none}
 
 	default:
@@ -993,7 +1081,7 @@ func (f *flowChecker) requireAdvance(owner int) {
 	for _, call := range f.calls {
 		if !slices.Contains(call.accesses, owner) {
 			call.accesses = append(call.accesses, owner)
-			f.changed = true
+			f.grow()
 		}
 	}
 	if f.active[owner] == 0 {
@@ -1012,7 +1100,7 @@ func (f *flowChecker) requireAdvance(owner int) {
 // Yield does not release that borrow within the contract: any call reached
 // before the producer returns to its caller is checked against the same owner.
 // Consumer callbacks run after this method returns, with the borrow discharged.
-func (f *flowChecker) advance(cursor flowValue, env flowEnv, site string, scopes []int) flowValue {
+func (f *flowChecker) advance(cursor flowValue, env flowEnv, site flowSite, scopes []int) flowValue {
 	result := flowValue{unknown: cursor.unknown}
 	for _, ref := range cursor.refs {
 		o := f.objects[ref]
@@ -1034,7 +1122,7 @@ func (f *flowChecker) advance(cursor flowValue, env flowEnv, site string, scopes
 		if o.yieldEffect != 0 {
 			producerEnv.evidence[o.yieldEffect] = []int{owner}
 		}
-		f.apply(o.fields[0], []flowValue{{}}, producerEnv, site+"/advance", scopes)
+		f.apply(o.fields[0], []flowValue{{}}, producerEnv, site.within("advance"), scopes)
 		f.synchronous, f.suspensionCalls = saved, calls
 		f.pulls = f.pulls[:len(f.pulls)-1]
 		f.active[owner]--
@@ -1043,9 +1131,9 @@ func (f *flowChecker) advance(cursor flowValue, env flowEnv, site string, scopes
 	return result
 }
 
-func (f *flowChecker) syncEval(phase string, n *types.CaptureFlow, env flowEnv, ctx string, scopes []int, resume int) flowValue {
+func (f *flowChecker) syncEval(phase string, n *types.CaptureFlow, env flowEnv, ctx string, scopes []int, resumes []int) flowValue {
 	f.synchronous = append(f.synchronous, synchronousFlow{phase: phase, span: f.location, enclosing: slices.Clone(scopes)})
-	result := f.eval(n, env, ctx, scopes, resume)
+	result := f.eval(n, env, ctx, scopes, resumes)
 	f.synchronous = f.synchronous[:len(f.synchronous)-1]
 	return result
 }
@@ -1063,7 +1151,7 @@ func (f *flowChecker) suspend(target int) {
 	for _, call := range calls {
 		if !slices.Contains(call.suspensions, target) {
 			call.suspensions = append(call.suspensions, target)
-			f.changed = true
+			f.grow()
 		}
 	}
 	if len(synchronous) == 0 {
