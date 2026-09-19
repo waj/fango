@@ -7,6 +7,8 @@ package staging
 
 import (
 	"context"
+	"sort"
+	"strings"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
@@ -47,6 +49,86 @@ func Install(ck *infer.Checker) *Session {
 		ev.resetToBase()
 	}
 	return &Session{ev: ev}
+}
+
+// BeginModule resets compile-time dependency collection for one owner. Every
+// splice and imported deriver contributes the complete executable Core closure
+// it reaches; names stay symbolic in the cached Core itself. An owner answers
+// to every name that denotes it, because a sidecar package need not share the
+// module name.
+func (s *Session) BeginModule(names ...string) {
+	s.ev.currentOwner = ownerSet(names)
+	s.ev.stageDependencies = map[string]bool{}
+}
+
+func ownerSet(names []string) map[string]bool {
+	out := map[string]bool{}
+	for _, name := range names {
+		if name != "" {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+func (s *Session) StageDependencies() []string {
+	out := make([]string, 0, len(s.ev.stageDependencies))
+	for owner := range s.ev.stageDependencies {
+		out = append(out, owner)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// StageReferences returns the module owners reachable from defs through the
+// currently installed symbolic stage Core. This closure contributes to the
+// module's stage fingerprint even when checking the module did not execute it.
+func (s *Session) StageReferences(defs []core.Def, names ...string) []string {
+	owner := ownerSet(names)
+	byName := make(map[string]*core.Def, len(s.ev.defs))
+	for i := range s.ev.defs {
+		byName[s.ev.defs[i].Name] = &s.ev.defs[i]
+	}
+	queue := make([]string, 0, len(defs))
+	for i := range defs {
+		queue = append(queue, defs[i].Name)
+	}
+	reached := map[string]bool{}
+	owners := map[string]bool{}
+	for len(queue) != 0 {
+		name := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		if reached[name] {
+			continue
+		}
+		reached[name] = true
+		def := byName[name]
+		if def == nil {
+			continue
+		}
+		defOwner := definitionOwner(*def)
+		if defOwner != "" && !owner[defOwner] {
+			owners[defOwner] = true
+		}
+		core.Inspect(def.Body, func(e core.Expr) {
+			switch e := e.(type) {
+			case *core.VarRef:
+				if !e.Local && byName[e.Name] != nil {
+					queue = append(queue, e.Name)
+				}
+			case *core.NativeCall:
+				if e.Module != "" && !owner[e.Module] {
+					owners[e.Module] = true
+				}
+			}
+		})
+	}
+	out := make([]string, 0, len(owners))
+	for dependency := range owners {
+		out = append(out, dependency)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Snapshot completes and returns the stage Core added since the prior
@@ -114,6 +196,8 @@ type evaluator struct {
 	baseIntrinsics      map[string]bool
 	groups              []Group
 	baseGroups          []Group
+	currentOwner        map[string]bool
+	stageDependencies   map[string]bool
 }
 
 func (ev *evaluator) resetToBase() {
@@ -141,7 +225,14 @@ func (ev *evaluator) run(operand ast.Expr) (any, []diag.Error) {
 	}
 	// Check the actual elaborated dependency closure as well: instance methods
 	// and dictionary factories can hide a forward call from surface references.
-	for _, d := range ev.executionDefs(body, aux) {
+	execution := ev.executionDefs(body, aux)
+	for _, d := range execution {
+		ev.recordStageOwner(definitionOwner(d))
+		core.Inspect(d.Body, func(e core.Expr) {
+			if call, ok := e.(*core.NativeCall); ok {
+				ev.recordStageOwner(call.Module)
+			}
+		})
 		if es := ev.ck.CheckStageReference(d.Name, operand.Span()); len(es) > 0 {
 			return nil, es
 		}
@@ -168,6 +259,25 @@ func (ev *evaluator) run(operand ast.Expr) (any, []diag.Error) {
 		return nil, []diag.Error{infer.CompileTimeError(err, operand.Span())}
 	}
 	return v, nil
+}
+
+func definitionOwner(d core.Def) string {
+	if d.Owner != "" {
+		return d.Owner
+	}
+	if i := strings.LastIndexByte(d.Name, '.'); i >= 0 {
+		return d.Name[:i]
+	}
+	return ""
+}
+
+func (ev *evaluator) recordStageOwner(owner string) {
+	if owner != "" && !ev.currentOwner[owner] {
+		if ev.stageDependencies == nil {
+			ev.stageDependencies = map[string]bool{}
+		}
+		ev.stageDependencies[owner] = true
+	}
 }
 
 // An in-progress deriving group can have a dictionary declaration whose

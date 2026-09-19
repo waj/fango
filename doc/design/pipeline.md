@@ -72,6 +72,13 @@ nominal, type-variable, capture, scope, and resume identities, remaps template
 indices, and reconstructs stable instance cutoffs without changing positional
 parameter or evidence order.
 
+Interning an imported declaration reaches every copy of it, including a
+generated dictionary constructor that no name table exposes, and binds the
+decoded declaration parameters to the installed ones. Otherwise a type reached
+only by value — a capture contract's recorded clause fields, for instance —
+would receive fresh variables and contradict the interned declaration it
+describes.
+
 Source spans carry their source identity, exact text, and bounded surrounding
 anchors. Decoding binds them to caller-supplied current source files, validates
 the range, and relocates a uniquely anchored span when comments moved it.
@@ -84,8 +91,42 @@ checker checkpoint for the remaining mutation. Types, effects, classes,
 instances, native/intrinsic metadata, IO identity, capture contracts,
 visibility, templates, and the staging evaluator commit together. Rollback
 retains fresh-supply advancement but restores every published table. Persistent
-lookup remains unfinished; normal compilation still creates these objects in
-memory and M5 decides when to encode/store or install them.
+lookup treats any decode or compatibility failure as a miss and checks the
+owner normally. An owner whose dependencies are not all summarized is checked
+and left unpublished, as is every later consumer of it; caching never decides
+whether a program compiles.
+
+After graph preparation, the shared session looks up each owner in dependency
+order. A base key contains the exact parsed source and native-sidecar identity,
+module role, effective fixity hash, and ordered dependency semantic
+fingerprints. Its candidate manifest records the compile-time dependencies
+discovered by the prior successful check and points to an immutable checked
+object whose final key also contains their current stage fingerprints. Both
+candidate and object have independently validated envelopes and payload
+digests. Only successfully checked, elaborated, and owner-linted objects are
+published, so completed dependency artifacts survive a later entry failure.
+
+Semantic and ABI summaries are canonical, source-position-independent views of
+the installed declaration state and Core headers. Stage summaries cover
+declarative stage Core and templates, with allocation identities normalized.
+The staging evaluator records the complete Core closure reached by every splice
+or deriver, including dictionary definitions, ordinary helpers, quote holes,
+callbacks, and native owners. An owner answers to its sidecar package name as
+well as its module name, so a headerless entry, whose sidecar is named after
+its file, does not record itself as its own dependency. Cached Core retains symbolic global names, so a
+later splice executes the currently installed dependency bodies. Candidate
+validation recomputes recorded dependency stage fingerprints from the current
+graph; this catches edits hidden behind an unchanged relay while allowing a
+runtime-only importer to remain a hit after a dependency body edit. Comment and
+source-position changes rebuild their own owner but do not change downstream
+semantic, ABI, or stage fingerprints.
+
+Every cached state is still installed through the graph compatibility checks.
+Consequently independently cached branches cannot bypass duplicate-deriver,
+instance-overlap, or blanket-cycle validation. Batch event instrumentation
+reports `checked-cache-hit` and `checked-cache-miss` separately from actual
+`check`, `elaborate`, and `semantic-lint` work. The older exact whole-project
+shortcut remains until the module backend milestones can replace it.
 
 ## Parsing and surface lowering
 

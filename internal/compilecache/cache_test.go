@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -217,6 +218,28 @@ func TestConcurrentAtomicWriters(t *testing.T) {
 	wg.Wait()
 	if _, _, ok := Load(entry, "writers"); !ok {
 		t.Fatal("concurrent writers did not leave a valid artifact")
+	}
+}
+
+func TestModuleStoreKeepsImmutableCandidates(t *testing.T) {
+	entry, _ := fixture(t)
+	root := filepath.Join(t.TempDir(), "module-cache")
+	oldRoots := cacheRoots
+	t.Cleanup(func() { cacheRoots = oldRoots })
+	cacheRoots = func(string) (string, string, error) { return root, "", nil }
+	store := NewModuleStore(entry)
+	base := strings.Repeat("ab", 32)
+	object := strings.Repeat("cd", 32)
+	store.StoreCandidate(base, []byte("first"))
+	store.StoreCandidate(base, []byte("second"))
+	store.StoreCandidate(base, []byte("first"))
+	candidates := store.LoadCandidates(base)
+	if len(candidates) != 2 {
+		t.Fatalf("candidates = %q", candidates)
+	}
+	store.StoreObject(object, []byte("payload"))
+	if got, ok := store.LoadObject(object); !ok || string(got) != "payload" {
+		t.Fatalf("object = %q, %v", got, ok)
 	}
 }
 

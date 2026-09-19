@@ -242,14 +242,19 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 	for _, class := range object.State.Classes {
 		r.ownedClasses[class] = true
 	}
-	vars, captures, scopes, resumes := map[int]*types.TVar{}, map[types.CaptureVar]bool{}, map[types.ScopeID]bool{}, map[types.ResumeID]bool{}
-	collectRemapIDs(reflect.ValueOf(object), map[uintptr]bool{}, vars, captures, scopes, resumes)
+	ids := &remapIDs{vars: map[int]*types.TVar{}, captures: map[types.CaptureVar]bool{}, scopes: map[types.ScopeID]bool{}, resumes: map[types.ResumeID]bool{}}
+	collectRemapIDs(reflect.ValueOf(object), map[uintptr]bool{}, ids)
+	r.alignForeignParams(ids)
+	vars, captures, scopes, resumes := ids.vars, ids.captures, ids.scopes, ids.resumes
 	var varIDs []int
 	for id := range vars {
 		varIDs = append(varIDs, id)
 	}
 	sort.Ints(varIDs)
 	for _, id := range varIDs {
+		if _, aligned := r.vars[id]; aligned {
+			continue
+		}
 		v := vars[id]
 		if v.Rigid {
 			r.vars[id] = ck.Sup.FreshRigid(v.Kind).ID
@@ -291,25 +296,81 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 	return r
 }
 
-func collectRemapIDs(v reflect.Value, seen map[uintptr]bool, vars map[int]*types.TVar, captures map[types.CaptureVar]bool, scopes map[types.ScopeID]bool, resumes map[types.ResumeID]bool) {
+// alignForeignParams keeps a decoded copy of a foreign declaration on the
+// installed declaration's parameter identities. Types reached only by value —
+// capture-contract clause fields, for instance — would otherwise receive fresh
+// variables and disagree with the interned declaration they describe.
+func (r *remapper) alignForeignParams(ids *remapIDs) {
+	align := func(old, installed []*types.TVar) {
+		if len(old) != len(installed) {
+			return
+		}
+		for i, v := range old {
+			if v != nil && installed[i] != nil {
+				r.vars[v.ID] = installed[i].ID
+			}
+		}
+	}
+	for _, adt := range ids.adts {
+		if r.ownedADTs[adt] {
+			continue
+		}
+		if n := r.uniqueForCon(adt.Con); n >= 0 {
+			if installed := r.ck.ADTs[n]; installed != nil {
+				align(adt.Params, installed.Params)
+			}
+		}
+	}
+	for _, effect := range ids.effects {
+		if r.ownedEffects[effect] {
+			continue
+		}
+		if installed := r.ck.Effects[effect.Name]; installed != nil {
+			align(effect.Params, installed.Params)
+		}
+	}
+	for _, class := range ids.classes {
+		if r.ownedClasses[class] {
+			continue
+		}
+		if installed := r.ck.Classes[class.Name]; installed != nil {
+			align([]*types.TVar{class.Param}, []*types.TVar{installed.Param})
+		}
+	}
+}
+
+// remapIDs collects the identities a decoded object allocates afresh, plus
+// the foreign nominals whose declared parameters must align with the
+// installed declaration instead.
+type remapIDs struct {
+	vars     map[int]*types.TVar
+	captures map[types.CaptureVar]bool
+	scopes   map[types.ScopeID]bool
+	resumes  map[types.ResumeID]bool
+	adts     []*types.ADTInfo
+	effects  []*types.EffectInfo
+	classes  []*types.ClassInfo
+}
+
+func collectRemapIDs(v reflect.Value, seen map[uintptr]bool, ids *remapIDs) {
 	if !v.IsValid() || v.Type() == reflect.TypeOf(source.Span{}) {
 		return
 	}
 	if v.Type() == captureVarType {
-		captures[types.CaptureVar(v.Int())] = true
+		ids.captures[types.CaptureVar(v.Int())] = true
 		return
 	}
 	if v.Type() == scopeType {
-		scopes[types.ScopeID(v.Int())] = true
+		ids.scopes[types.ScopeID(v.Int())] = true
 		return
 	}
 	if v.Type() == resumeType {
-		resumes[types.ResumeID(v.Int())] = true
+		ids.resumes[types.ResumeID(v.Int())] = true
 		return
 	}
 	if v.Kind() == reflect.Interface {
 		if !v.IsNil() {
-			collectRemapIDs(v.Elem(), seen, vars, captures, scopes, resumes)
+			collectRemapIDs(v.Elem(), seen, ids)
 		}
 		return
 	}
@@ -320,30 +381,38 @@ func collectRemapIDs(v reflect.Value, seen map[uintptr]bool, vars map[int]*types
 		seen[v.Pointer()] = true
 		if v.Type() == tVarPtr {
 			tv := v.Interface().(*types.TVar)
-			if old := vars[tv.ID]; old == nil {
-				vars[tv.ID] = tv
+			if old := ids.vars[tv.ID]; old == nil {
+				ids.vars[tv.ID] = tv
 			}
 			return
 		}
-		collectRemapIDs(v.Elem(), seen, vars, captures, scopes, resumes)
+		switch v.Type() {
+		case adtPtr:
+			ids.adts = append(ids.adts, v.Interface().(*types.ADTInfo))
+		case effectPtr:
+			ids.effects = append(ids.effects, v.Interface().(*types.EffectInfo))
+		case classPtr:
+			ids.classes = append(ids.classes, v.Interface().(*types.ClassInfo))
+		}
+		collectRemapIDs(v.Elem(), seen, ids)
 		return
 	}
 	switch v.Kind() {
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
 			if v.Type().Field(i).Tag.Get("object") != "omit" {
-				collectRemapIDs(v.Field(i), seen, vars, captures, scopes, resumes)
+				collectRemapIDs(v.Field(i), seen, ids)
 			}
 		}
 	case reflect.Slice:
 		for i := 0; i < v.Len(); i++ {
-			collectRemapIDs(v.Index(i), seen, vars, captures, scopes, resumes)
+			collectRemapIDs(v.Index(i), seen, ids)
 		}
 	case reflect.Map:
 		it := v.MapRange()
 		for it.Next() {
-			collectRemapIDs(it.Key(), seen, vars, captures, scopes, resumes)
-			collectRemapIDs(it.Value(), seen, vars, captures, scopes, resumes)
+			collectRemapIDs(it.Key(), seen, ids)
+			collectRemapIDs(it.Value(), seen, ids)
 		}
 	}
 }
@@ -525,6 +594,18 @@ func (r *remapper) intern(v reflect.Value) reflect.Value {
 		}
 		if installed := r.ck.Ctors[c.Name]; installed != nil {
 			return reflect.ValueOf(installed)
+		}
+		// Generated dictionary constructors are reachable only through their
+		// ADT, so name lookup alone would keep a copy whose field variables no
+		// longer match the installed type parameters.
+		if n := r.uniqueForCon(c.Result); n >= 0 {
+			if adt := r.ck.ADTs[n]; adt != nil {
+				for _, ctor := range adt.Ctors {
+					if ctor.Name == c.Name {
+						return reflect.ValueOf(ctor)
+					}
+				}
+			}
 		}
 	case effectPtr:
 		e := v.Interface().(*types.EffectInfo)

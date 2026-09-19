@@ -135,12 +135,18 @@ const (
 // order. Module contains only declarations owned by Name (or the headerless
 // entry), while InstanceImports retains that owner's graph visibility.
 type ResolvedModule struct {
-	Name      string
-	Role      ModuleRole
-	Entry     string
-	Source    *source.File
-	Interface Interface
-	Module    *ast.Module
+	Name       string
+	Role       ModuleRole
+	Entry      string
+	Source     *source.File
+	SourceHash string
+	// NativeModule names the owner's sidecar package. A headerless entry's
+	// sidecar is named after its file rather than its empty module name.
+	NativeModule string
+	NativeHash   string
+	Dependencies []string
+	Interface    Interface
+	Module       *ast.Module
 }
 
 // Interface is the resolver-visible public surface of one module. Private
@@ -358,7 +364,14 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 		if moduleSource == nil {
 			moduleSource = firstDeclFile(g.nodes[name].resolved)
 		}
-		resolved = append(resolved, ResolvedModule{Name: owner, Role: role, Entry: entry, Source: moduleSource, Interface: exportInterface(g.nodes[name].iface), Module: &ast.Module{
+		deps := dependencyNames(g.nodes[name])
+		sort.Strings(deps)
+		nativeHash := ""
+		if g.nodes[name].native != nil {
+			h := sha256.Sum256(g.nodes[name].native)
+			nativeHash = hex.EncodeToString(h[:])
+		}
+		resolved = append(resolved, ResolvedModule{Name: owner, Role: role, Entry: entry, Source: moduleSource, SourceHash: g.nodes[name].sourceHash, NativeModule: g.nodes[name].nativeModule, NativeHash: nativeHash, Dependencies: deps, Interface: exportInterface(g.nodes[name].iface), Module: &ast.Module{
 			Decls:           append([]ast.Decl(nil), g.nodes[name].resolved...),
 			InstanceImports: map[string]map[string]bool{owner: g.visible[name]},
 		}})

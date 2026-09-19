@@ -150,53 +150,14 @@ distinct from rerunning semantic Core lint on an already validated object.
 Implement the remaining milestones in dependency order. Each has an
 independently reviewable result and acceptance gate. The implemented in-memory
 module boundary is described in
-[pipeline design](design/pipeline.md#pipeline), including its typed installable
-object codec and staging boundary. M5 enables persistence. Do not substitute
+[pipeline design](design/pipeline.md#pipeline), including its typed persistent
+module-object cache and stage-dependency validation. Do not substitute
 whole-project cache hits for any milestone's module-level acceptance tests.
-
-### M5: activate checked-module caching with stage dependency tracking
-
-Builds on the implemented installable module-object boundary.
-
-Required work:
-
-- Compute deterministic semantic and ABI summaries after successful owner
-  validation.
-- Record a module's compile-time dependencies whenever a splice or deriver
-  runs. Track the executable closure, including dictionary calls, template
-  holes, ordinary helper functions, and indirect callbacks.
-- Use module-granularity stage fingerprints initially. The stage fingerprint
-  combines the module's stage-capable implementation with dependency stage
-  fingerprints. This may conservatively propagate changes through a stage
-  closure, but must not invalidate an unrelated runtime-only importer.
-- Keep stage references symbolic so an unchanged module object uses the
-  current dependency implementation when a later consumer executes it during
-  compilation.
-- Support lookup when stage dependencies are discovered during checking: use
-  a base key for known parse/native/role/fixity/semantic inputs, then validate
-  immutable candidate manifests containing the recorded stage dependencies.
-  Include those dependencies in the final checked-object key.
-- Recompute transitive stage fingerprints from current dependencies even when
-  the module's own checked object is reused. Otherwise changes hidden behind
-  an unchanged intermediary could be missed.
-- Install valid hits directly. On any decoding or compatibility failure,
-  discard temporary state and follow the ordinary miss path.
-- Publish only successfully checked, elaborated, and linted objects. Valid
-  dependency artifacts may survive a later entry failure.
-- Rerun graph-level declaration compatibility checks over installed interfaces
-  on every prepared graph. These checks do not replay module inference or
-  Core lint.
-
-Acceptance: runtime-only consumers remain hits after a scalar implementation
-edit. A splice that calls the same edited function rebuilds. Cover transitive
-helpers behind unchanged intermediate modules, imported derivers, reflection,
-dictionaries, and mixed cached/cold dependency graphs. Adding incompatible
-instances in a separate branch must fail even when both modules were previously
-cached successfully.
 
 ### M6: add owner-scoped lowering and emission caching
 
-Depends on M5. Starting points are `machine.Lower`, `codegen.EmitProject`, and
+Builds on the persistent checked-module boundary. Starting points are
+`machine.Lower`, `codegen.EmitProject`, and
 the per-unit generator's imported-definition lookups.
 
 Required work:
@@ -230,8 +191,9 @@ backend work.
 
 ### M7: integrate fresh REPL sessions and transactional imports
 
-Depends on M5; use M6's boundaries where runtime Machine installation needs
-them. Starting points are REPL bootstrap, `importInput`, `install`, evaluator
+Builds on the persistent checked-module boundary; use M6's boundaries where
+runtime Machine installation needs them. Starting points are REPL bootstrap,
+`importInput`, `install`, evaluator
 definition installation, and native-worker replacement.
 
 Required work:

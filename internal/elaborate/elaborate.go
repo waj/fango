@@ -235,7 +235,11 @@ func DeclsIn(infos []infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]c
 	var defs []core.Def
 	var errs []diag.Error
 	for _, info := range infos {
-		ds, es := decl(info, ck, false)
+		owner := symbolOwner(info.Name)
+		ds, es := decl(info, ck, owner != "")
+		for i := range ds {
+			ds[i].Owner = owner
+		}
 		defs = append(defs, ds...)
 		errs = append(errs, es...)
 	}

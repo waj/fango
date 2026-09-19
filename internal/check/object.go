@@ -29,18 +29,23 @@ type objectEnvelope struct {
 	Payload       json.RawMessage `json:"payload"`
 }
 
-// ModuleObject is the in-memory installable boundary. Persistence and lookup
-// policy belong to M5; M4 owns its typed codec and transactional installation.
+// ModuleObject is the typed installable and persistent checked-module boundary.
 type ModuleObject struct {
-	State        *infer.ModuleState
-	Resolver     modules.Interface
-	Nominals     map[int]string
-	EffectNames  map[int]string
-	Runtime      []core.Def
-	Stage        []core.Def
-	StageGroups  []staging.Group
-	TemplateBase int
-	Templates    []*meta.Template
+	State                  *infer.ModuleState
+	Resolver               modules.Interface
+	Semantic               string
+	ABI                    string
+	StageImplementation    string
+	StageFingerprint       string
+	StageDependencies      []string
+	CheckStageDependencies []string
+	Nominals               map[int]string
+	EffectNames            map[int]string
+	Runtime                []core.Def
+	Stage                  []core.Def
+	StageGroups            []staging.Group
+	TemplateBase           int
+	Templates              []*meta.Template
 }
 
 func EncodeObject(object *ModuleObject) ([]byte, error) {

@@ -13,6 +13,7 @@ import (
 	"github.com/waj/fango/internal/elaborate"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/modules"
+	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/staging"
 	"github.com/waj/fango/internal/types"
 )
@@ -20,7 +21,9 @@ import (
 type Observer func(stage, owner string)
 
 type Session struct {
-	Observe Observer
+	Observe            Observer
+	Cache              ObjectCache
+	DisableObjectCache bool
 }
 
 type Result struct {
@@ -49,6 +52,17 @@ func (s *Session) Compile(entry string) (*Result, []diag.Error, error) {
 	ck := infer.NewChecker(sup, types.NewBuiltins(sup), infer.NewEnv())
 	ck.Fixity, ck.EntryName = loaded.Fixity, loaded.Entry
 	stageSession := staging.Install(ck)
+	objectCache := s.Cache
+	if objectCache == nil && !s.DisableObjectCache {
+		objectCache = compilecache.NewModuleStore(entry)
+	}
+	sources := map[string]*source.File{}
+	for _, module := range loaded.Modules {
+		if module.Source != nil {
+			sources[module.Source.Name] = module.Source
+		}
+	}
+	summaries := map[string]moduleSummary{}
 	var defs, installed []core.Def
 	var infos []infer.DeclInfo
 	states := make([]*infer.ModuleState, 0, len(loaded.Modules))
@@ -63,6 +77,22 @@ func (s *Session) Compile(entry string) (*Result, []diag.Error, error) {
 		if module.Role == modules.EntryRole {
 			role = infer.EntryModule
 		}
+		baseKey, hasBase := moduleBaseKey(module, loaded.FixityHash, summaries)
+		if hasBase && objectCache != nil {
+			if object, hit := loadCachedObject(objectCache, baseKey, module, summaries, sources); hit {
+				if err := InstallObject(ck, stageSession, object); err == nil {
+					s.event("checked-cache-hit", owner)
+					states = append(states, object.State)
+					objects = append(objects, object)
+					defs = append(defs, object.Runtime...)
+					installed = append(installed, object.Runtime...)
+					summaries[module.Name] = moduleSummary{Semantic: object.Semantic, ABI: object.ABI, Stage: object.StageFingerprint}
+					continue
+				}
+			}
+			s.event("checked-cache-miss", owner)
+		}
+		stageSession.BeginModule(module.Name, module.NativeModule)
 		s.event("check", owner)
 		checked, checkErrs := ck.CheckModule(module.Module, infer.ModuleOptions{Name: module.Name, Role: role, Entry: module.Entry})
 		if len(checkErrs) != 0 {
@@ -95,8 +125,27 @@ func (s *Session) Compile(entry string) (*Result, []diag.Error, error) {
 			}
 			return nil, nil, fmt.Errorf("Core invariants violated in module %s:\n  %s", owner, strings.Join(parts, "\n  "))
 		}
+		checkStageDependencies := stageSession.StageDependencies()
+		stageDependencies := mergeNames(checkStageDependencies, stageSession.StageReferences(stageObject.Defs, module.Name, module.NativeModule))
+		object := &ModuleObject{State: state, Resolver: module.Interface, Nominals: nominalNames(ck), EffectNames: effectNames(ck), Runtime: append([]core.Def(nil), owned...), Stage: stageObject.Defs, StageGroups: stageObject.Groups, TemplateBase: templateStart, Templates: ck.Templates.Snapshot(templateStart), StageDependencies: stageDependencies, CheckStageDependencies: checkStageDependencies}
+		ownSemantic, ownABI, ownStage := ownFingerprints(object)
+		semanticDeps, semanticOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.Semantic })
+		abiDeps, abiOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.ABI })
+		stageDeps, stageOK := dependencyFingerprints(object.StageDependencies, summaries, func(s moduleSummary) string { return s.Stage })
+		// A dependency outside the summarized graph leaves this owner, and every
+		// later consumer of it, unsummarized rather than uncompilable.
+		if semanticOK && abiOK && stageOK {
+			object.Semantic = combinedFingerprint("semantic", ownSemantic, semanticDeps)
+			object.ABI = combinedFingerprint("abi", ownABI, abiDeps)
+			object.StageImplementation = ownStage
+			object.StageFingerprint = combinedFingerprint("stage", ownStage, stageDeps)
+			summaries[module.Name] = moduleSummary{Semantic: object.Semantic, ABI: object.ABI, Stage: object.StageFingerprint}
+			if hasBase && objectCache != nil {
+				publishCachedObject(objectCache, baseKey, object, summaries)
+			}
+		}
 		states = append(states, state)
-		objects = append(objects, &ModuleObject{State: state, Resolver: module.Interface, Nominals: nominalNames(ck), EffectNames: effectNames(ck), Runtime: append([]core.Def(nil), owned...), Stage: stageObject.Defs, StageGroups: stageObject.Groups, TemplateBase: templateStart, Templates: ck.Templates.Snapshot(templateStart)})
+		objects = append(objects, object)
 		defs = append(defs, owned...)
 		installed = append(installed, owned...)
 	}
@@ -105,6 +154,21 @@ func (s *Session) Compile(entry string) (*Result, []diag.Error, error) {
 		return nil, entryErrs, nil
 	}
 	return &Result{Program: prog, Checker: ck, Graph: loaded, States: states, Objects: objects}, nil, nil
+}
+
+func mergeNames(groups ...[]string) []string {
+	seen := map[string]bool{}
+	for _, group := range groups {
+		for _, name := range group {
+			seen[name] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func nominalNames(ck *infer.Checker) map[int]string {

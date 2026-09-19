@@ -16,6 +16,263 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
+type memoryObjectCache struct {
+	candidates map[string][][]byte
+	objects    map[string][]byte
+}
+
+func newMemoryObjectCache() *memoryObjectCache {
+	return &memoryObjectCache{candidates: map[string][][]byte{}, objects: map[string][]byte{}}
+}
+
+func (c *memoryObjectCache) LoadCandidates(key string) [][]byte {
+	out := make([][]byte, len(c.candidates[key]))
+	for i, b := range c.candidates[key] {
+		out[i] = append([]byte(nil), b...)
+	}
+	return out
+}
+func (c *memoryObjectCache) StoreCandidate(key string, data []byte) {
+	for _, old := range c.candidates[key] {
+		if string(old) == string(data) {
+			return
+		}
+	}
+	c.candidates[key] = append(c.candidates[key], append([]byte(nil), data...))
+}
+func (c *memoryObjectCache) LoadObject(key string) ([]byte, bool) {
+	b, ok := c.objects[key]
+	return append([]byte(nil), b...), ok
+}
+func (c *memoryObjectCache) StoreObject(key string, data []byte) {
+	c.objects[key] = append([]byte(nil), data...)
+}
+
+func compileEvents(t *testing.T, entry string, cache ObjectCache) (*Result, map[string]map[string]int) {
+	t.Helper()
+	events := map[string]map[string]int{}
+	s := &Session{Cache: cache, Observe: func(stage, owner string) {
+		if events[stage] == nil {
+			events[stage] = map[string]int{}
+		}
+		events[stage][owner]++
+	}}
+	result, diagnostics, internalErr := s.Compile(entry)
+	if internalErr != nil {
+		t.Fatal(internalErr)
+	}
+	if len(diagnostics) != 0 {
+		t.Fatal(diagnostics)
+	}
+	return result, events
+}
+
+func intDefinition(t *testing.T, result *Result, name string) int64 {
+	t.Helper()
+	for _, def := range result.Program.Defs {
+		if def.Name == name {
+			lit, ok := def.Body.(*core.IntLit)
+			if !ok {
+				t.Fatalf("%s body = %T", name, def.Body)
+			}
+			return lit.Val
+		}
+	}
+	t.Fatalf("definition %s missing", name)
+	return 0
+}
+
+func stringDefinition(t *testing.T, result *Result, name string) string {
+	t.Helper()
+	for _, def := range result.Program.Defs {
+		if def.Name == name {
+			lit, ok := def.Body.(*core.StringLit)
+			if !ok {
+				t.Fatalf("%s body = %T", name, def.Body)
+			}
+			return lit.Val
+		}
+	}
+	t.Fatalf("definition %s missing", name)
+	return ""
+}
+
+func TestCheckedCacheKeepsRuntimeOnlyImporterHit(t *testing.T) {
+	d := t.TempDir()
+	lib := filepath.Join(d, "Lib.fango")
+	main := filepath.Join(d, "Main.fango")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"one\"\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.value\n")
+	cache := newMemoryObjectCache()
+	compileEvents(t, main, cache)
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"two\"\n")
+	result, events := compileEvents(t, main, cache)
+	if events["check"]["Lib"] != 1 || events["checked-cache-hit"]["Main"] != 1 || events["check"]["Main"] != 0 {
+		t.Fatalf("events after runtime edit: %#v", events)
+	}
+	if got := stringDefinition(t, result, "Lib.value"); got != "two" {
+		t.Fatalf("current dependency implementation = %q", got)
+	}
+}
+
+func TestCheckedCacheInvalidatesTransitiveStageClosure(t *testing.T) {
+	d := t.TempDir()
+	lib := filepath.Join(d, "Lib.fango")
+	relay := filepath.Join(d, "Relay.fango")
+	main := filepath.Join(d, "Main.fango")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (make)\nmake = quote 1\n")
+	write(relay, "{-# no-prelude #-}\nmodule Relay exposing (make)\nimport Lib\nmake = Lib.make\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Relay\nmain = $(Relay.make)\n")
+	cache := newMemoryObjectCache()
+	first, _ := compileEvents(t, main, cache)
+	if got := intDefinition(t, first, "Main.main"); got != 1 {
+		t.Fatalf("first splice = %d", got)
+	}
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (make)\nmake = quote 2\n")
+	second, events := compileEvents(t, main, cache)
+	if events["checked-cache-hit"]["Relay"] != 1 || events["check"]["Main"] != 1 {
+		t.Fatalf("events after stage edit: %#v", events)
+	}
+	if got := intDefinition(t, second, "Main.main"); got != 2 {
+		t.Fatalf("rebuilt splice = %d", got)
+	}
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (make)\nmake = quote 1\n")
+	third, events := compileEvents(t, main, cache)
+	if events["checked-cache-hit"]["Lib"] != 1 || events["checked-cache-hit"]["Main"] != 1 || events["check"]["Main"] != 0 {
+		t.Fatalf("immutable candidate was not reusable: %#v", events)
+	}
+	if got := intDefinition(t, third, "Main.main"); got != 1 {
+		t.Fatalf("reused splice = %d", got)
+	}
+}
+
+func TestCheckedCacheReusesReflectionDictionariesAndImportedDeriver(t *testing.T) {
+	for _, fixture := range []string{"reflection", "deriver", "classes"} {
+		t.Run(fixture, func(t *testing.T) {
+			entry := filepath.Join("..", "..", "testdata", "modules", fixture, "Main.fango")
+			cache := newMemoryObjectCache()
+			first, _ := compileEvents(t, entry, cache)
+			second, events := compileEvents(t, entry, cache)
+			if len(first.Program.Defs) != len(second.Program.Defs) || len(events["check"]) != 0 {
+				t.Fatalf("cached graph did semantic work: events=%#v defs=%d/%d", events, len(first.Program.Defs), len(second.Program.Defs))
+			}
+			if errs := core.Lint(second.Program, second.Checker.B); len(errs) != 0 {
+				t.Fatalf("cached whole program: %v", errs[0])
+			}
+			for _, object := range second.Objects {
+				owner := object.State.Name
+				if owner == "" {
+					owner = "<entry>"
+				}
+				if events["checked-cache-hit"][owner] != 1 {
+					t.Fatalf("%s was not a hit: %#v", owner, events)
+				}
+			}
+		})
+	}
+}
+
+func TestCachedBranchesStillRejectIncompatibleInstances(t *testing.T) {
+	d := t.TempDir()
+	write := func(name, body string) string {
+		t.Helper()
+		path := filepath.Join(d, name+".fango")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	write("Capability", "module Capability exposing (Mark(..))\nclass Mark a\n    mark : a -> String\n")
+	write("Left", "module Left exposing (left)\nimport Capability\ninstance Capability.Mark Int\n    mark x = \"left\"\nleft = \"left\"\n")
+	write("Right", "module Right exposing (right)\nimport Capability\ninstance Capability.Mark Int\n    mark x = \"right\"\nright = \"right\"\n")
+	leftEntry := write("UseLeft", "module UseLeft exposing (main)\nimport Left\nmain = Left.left\n")
+	rightEntry := write("UseRight", "module UseRight exposing (main)\nimport Right\nmain = Right.right\n")
+	combined := write("Combined", "module Combined exposing (main)\nimport Left\nimport Right\nmain = Left.left ++ Right.right\n")
+	cache := newMemoryObjectCache()
+	compileEvents(t, leftEntry, cache)
+	compileEvents(t, rightEntry, cache)
+	result, diagnostics, internalErr := (&Session{Cache: cache}).Compile(combined)
+	if internalErr != nil {
+		t.Fatal(internalErr)
+	}
+	if result != nil || len(diagnostics) == 0 || diagnostics[0].Title != "OVERLAPPING INSTANCE" {
+		t.Fatalf("result=%v diagnostics=%v", result, diagnostics)
+	}
+}
+
+func TestCheckedCacheIgnoresDependencyCommentPositions(t *testing.T) {
+	d := t.TempDir()
+	lib := filepath.Join(d, "Lib.fango")
+	main := filepath.Join(d, "Main.fango")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (make)\nmake = quote \"same\"\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = $(Lib.make)\n")
+	cache := newMemoryObjectCache()
+	compileEvents(t, main, cache)
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (make)\n-- shifted source positions\nmake = quote \"same\"\n")
+	_, events := compileEvents(t, main, cache)
+	if events["check"]["Lib"] != 1 || events["checked-cache-hit"]["Main"] != 1 {
+		t.Fatalf("comment edit invalidated downstream stage consumer: %#v", events)
+	}
+}
+
+func TestCheckedCachePublishesDependenciesBeforeEntryFailure(t *testing.T) {
+	d := t.TempDir()
+	lib := filepath.Join(d, "Lib.fango")
+	main := filepath.Join(d, "Main.fango")
+	if err := os.WriteFile(lib, []byte("{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"ok\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(main, []byte("{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = missing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := newMemoryObjectCache()
+	if result, diagnostics, internalErr := (&Session{Cache: cache}).Compile(main); internalErr != nil || result != nil || len(diagnostics) == 0 {
+		t.Fatalf("result=%v diagnostics=%v internal=%v", result, diagnostics, internalErr)
+	}
+	if err := os.WriteFile(main, []byte("{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.value\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, events := compileEvents(t, main, cache)
+	if events["checked-cache-hit"]["Lib"] != 1 || events["check"]["Lib"] != 0 {
+		t.Fatalf("valid dependency was not retained: %#v", events)
+	}
+}
+
+func TestCorruptCheckedObjectFallsBackToChecking(t *testing.T) {
+	d := t.TempDir()
+	entry := filepath.Join(d, "Main.fango")
+	if err := os.WriteFile(entry, []byte("{-# no-prelude #-}\nmodule Main exposing (main)\nmain = \"ok\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := newMemoryObjectCache()
+	compileEvents(t, entry, cache)
+	for key := range cache.objects {
+		cache.objects[key] = []byte("corrupt")
+	}
+	_, events := compileEvents(t, entry, cache)
+	if events["check"]["Main"] != 1 || events["checked-cache-hit"]["Main"] != 0 {
+		t.Fatalf("corrupt object did not become a miss: %#v", events)
+	}
+}
+
 func TestDependencyStateIsConsumerIndependent(t *testing.T) {
 	d := t.TempDir()
 	write := func(name, body string) string {
@@ -30,7 +287,7 @@ func TestDependencyStateIsConsumerIndependent(t *testing.T) {
 	one := write("One.fango", "{-# no-prelude #-}\nmodule One exposing (main)\nimport Lib\nmain = Lib.main (Lib.id ()) ()\n")
 	two := write("Two.fango", "{-# no-prelude #-}\nmodule Two exposing (main)\nimport Lib\nmain = Lib.main () (Lib.id ())\n")
 	compile := func(entry string) *Result {
-		r, diagnostics, internalErr := (&Session{}).Compile(entry)
+		r, diagnostics, internalErr := (&Session{DisableObjectCache: true}).Compile(entry)
 		if internalErr != nil {
 			t.Fatal(internalErr)
 		}
@@ -304,5 +561,23 @@ func TestInstallObjectRollsBackAllPublishedState(t *testing.T) {
 	}
 	if len(ck.ADTOrder) != beforeADTs || ck.Templates.Len() != beforeTemplates || len(ck.Instances) != 0 || len(ck.Intrinsics) != 0 || ck.IO != nil {
 		t.Fatalf("partial install survived: adts=%d templates=%d instances=%d intrinsics=%d io=%v", len(ck.ADTOrder), ck.Templates.Len(), len(ck.Instances), len(ck.Intrinsics), ck.IO)
+	}
+}
+
+func TestCheckedCacheCoversNativeSidecarEntry(t *testing.T) {
+	d := t.TempDir()
+	entry := filepath.Join(d, "Sidecar.fango")
+	if err := os.WriteFile(entry, []byte("tag : String -> String\ntag = native\nmain() = print (tag \"x\")\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	native := "package native\n\nfunc Tag(s string) string { return s }\n"
+	if err := os.WriteFile(filepath.Join(d, "Sidecar.native.go"), []byte(native), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := newMemoryObjectCache()
+	compileEvents(t, entry, cache)
+	_, events := compileEvents(t, entry, cache)
+	if events["checked-cache-hit"]["<entry>"] != 1 || events["check"]["<entry>"] != 0 {
+		t.Fatalf("native sidecar owner was not cacheable: %#v", events)
 	}
 }
