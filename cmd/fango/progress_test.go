@@ -83,21 +83,23 @@ func TestStageTableReconciles(t *testing.T) {
 	_, out := buildVerbose(t, entry, "-vv")
 
 	rows, total, seenTotal := 0, 0.0, false
-	var sum float64
+	var sum, slack float64
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
 		}
 		if fields[0] == "total" {
-			total, seenTotal = parseMillis(t, fields[1]), true
+			d, half := parseMillis(t, fields[1])
+			total, slack, seenTotal = d, slack+half, true
 			continue
 		}
 		if seenTotal {
 			continue
 		}
-		if d, ok := millis(fields[len(fields)-2]); ok {
+		if d, half, ok := millis(fields[len(fields)-2]); ok {
 			sum += d
+			slack += half
 			rows++
 		}
 	}
@@ -107,10 +109,12 @@ func TestStageTableReconciles(t *testing.T) {
 	if rows == 0 {
 		t.Fatalf("-vv printed no stage rows:\n%s", out)
 	}
-	// Rows are rounded for display, so they reconcile to within rounding
-	// rather than exactly.
-	if diff := sum - total; diff > 1 || diff < -1 {
-		t.Errorf("stage rows sum to %.1fms but total is %.1fms:\n%s", sum, total, out)
+	// Every duration is rounded to the unit it is printed in, and a total of a
+	// second or more is printed in seconds, a coarser grid than the rows sit
+	// on. So the two reconcile to within what those roundings can hide rather
+	// than exactly.
+	if diff := sum - total; diff > slack || diff < -slack {
+		t.Errorf("stage rows sum to %.1fms but total is %.1fms, further apart than the %.2fms of display rounding:\n%s", sum, total, slack, out)
 	}
 }
 
@@ -174,25 +178,28 @@ func TestQuietByDefault(t *testing.T) {
 	}
 }
 
-func millis(field string) (float64, bool) {
+// millis reads a duration written the way the summary writes it, in
+// milliseconds, with the most the printed digits can differ from the value
+// behind them: half of the last place shown in that unit.
+func millis(field string) (d, half float64, ok bool) {
 	switch {
 	case strings.HasSuffix(field, "ms"):
-		return parseFloat(strings.TrimSuffix(field, "ms")), true
+		return parseFloat(strings.TrimSuffix(field, "ms")), 0.05, true
 	case strings.HasSuffix(field, "µs"):
-		return parseFloat(strings.TrimSuffix(field, "µs")) / 1000, true
+		return parseFloat(strings.TrimSuffix(field, "µs")) / 1000, 0.0005, true
 	case strings.HasSuffix(field, "s"):
-		return parseFloat(strings.TrimSuffix(field, "s")) * 1000, true
+		return parseFloat(strings.TrimSuffix(field, "s")) * 1000, 5, true
 	}
-	return 0, false
+	return 0, 0, false
 }
 
-func parseMillis(t *testing.T, field string) float64 {
+func parseMillis(t *testing.T, field string) (d, half float64) {
 	t.Helper()
-	d, ok := millis(field)
+	d, half, ok := millis(field)
 	if !ok {
 		t.Fatalf("not a duration: %q", field)
 	}
-	return d
+	return d, half
 }
 
 func parseFloat(s string) float64 {

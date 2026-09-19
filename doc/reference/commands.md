@@ -164,7 +164,10 @@ check, and the module line alone cannot say which part a pause belongs to. It
 then adds a table of where the time went and what the cache moved. Stages that
 belong to no module — writing the generated project, and the Go toolchain — are
 timed by the command itself, and time that belongs to no stage is reported as
-`other`, so the rows always reconcile with the total. Modules that arrive from
+`other`, so the rows always reconcile with the total — as measured, that is:
+each duration is rounded to the unit it is shown in, and a build of a second or
+more is shown in seconds, so adding up a printed column lands near the printed
+total rather than on it. Modules that arrive from
 cache defer their stage Core until some module is checked from source; the
 `stage Core` row and the count beneath the cache block are what reading it
 cost. Each reuse count is over every module that stage covered, so a module
