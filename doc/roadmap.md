@@ -109,6 +109,22 @@ executor; measured optimization; written capture/borrowing contracts. Preserve
 compiler-proved resume discipline and ordinary calls/explicit machines, without
 host-stack copying or goroutine-based continuations.
 
+## Capture-flow analysis cost
+
+The analysis interprets every definition as its own root, from a checker that
+shares nothing with the other roots, so a helper reached from many definitions
+is interpreted once per root that reaches it. A module of mutually recursive
+functions over a recursive polymorphic type — `Dict` is the standard library's
+one example — pays that multiplier in full, and remains by a wide margin the
+most expensive module to compile.
+
+Sharing work across roots is a redesign rather than an optimization: object
+identities, owners, and allocation ancestry are all relative to the root being
+checked, and a diagnostic names the root it was found from. What is wanted is a
+per-callable summary strong enough that a second root can reuse it without
+reinterpreting the callee, which is the same question the contract already
+answers for dependency modules and does not answer within a module.
+
 ## Constraint simplification for parameterized types
 
 Known-head constraints containing rigid arguments remain whole predicates:

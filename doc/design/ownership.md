@@ -54,9 +54,12 @@ that can carry capabilities or callables remain structural. Traversal preserves
 aliases, terminates cycles, and distinguishes concrete owners and unknown versus
 known-empty capability states. Globals use immutable callable identities.
 
-Fingerprints describe the current heap, not permanent identities. A monotone
-revision invalidates caches when inputs, objects, owners, results, or obligations
-grow; lookup refreshes candidates within the callable bucket. Stable invocation
+Fingerprints describe the current heap, not permanent identities. A fingerprint
+reads only an object's fields and a closure object's environment, so a monotone
+heap revision invalidates cached ones when either grows, and growth in owners,
+results, obligations, ancestry, or a context's widened environment leaves them
+intact; lookup refreshes candidates within the callable bucket. A fingerprint is
+compared only for equality, never ordered, stored, or shown. Stable invocation
 edges merge later input growth into their selected context even after widening.
 Sharing entry state and
 the widened environment are separate and both reference the evolving heap.
@@ -92,6 +95,13 @@ Core lint reconstructs flow graphs from executable Core, rejects missing/stale
 contracts, recomputes result summaries, checks scope introduction and exact
 lexical evidence availability, and repeats the proof after ANF, lifting, callback
 adaptation, and specialization. Source summaries alone are not trusted.
+
+Reconstruction is unconditional; discharging the reconstructed obligations again
+is not. A caller that has just discharged them for these same definitions, with
+no transform in between, says so, and lint then compares what it reconstructs
+without re-deriving the same answer from the same inputs. Any disagreement is
+stale, is reported, and discharges them anyway. The whole-program path states
+nothing and always discharges.
 
 ## Synchronous acquisition and release
 
