@@ -18,6 +18,8 @@ import (
 	"github.com/waj/fango/internal/runtimefiles"
 )
 
+var userCacheDir = os.UserCacheDir
+
 // Dir returns (creating if needed) the build directory for an entry file:
 // FANGO_BUILD_DIR if set, else .fango/build beside the entry file, else a
 // per-path cache directory if the source tree is unwritable.
@@ -33,7 +35,7 @@ func Dir(entry string) (string, error) {
 	if err := os.MkdirAll(d, 0o755); err == nil {
 		return d, nil
 	}
-	cache, err := os.UserCacheDir()
+	cache, err := userCacheDir()
 	if err != nil {
 		return "", err
 	}
@@ -41,23 +43,35 @@ func Dir(entry string) (string, error) {
 	return d, os.MkdirAll(d, 0o755)
 }
 
-// CacheDir returns (creating if needed) the compiler artifact cache beside the
-// source root. It follows Dir's per-entry unwritable-source fallback.
-func CacheDir(entry string) (string, error) {
+// CacheDirs returns the preferred source-local compiler cache and its
+// source-root-scoped fallback. It does not create either directory: reads must
+// not mutate the source tree, and writers need to be able to try the fallback
+// when an existing local cache is not writable.
+func CacheDirs(entry string) (local, fallback string, err error) {
+	abs, err := filepath.Abs(entry)
+	if err != nil {
+		return "", "", err
+	}
+	cache, err := userCacheDir()
+	if err != nil {
+		return filepath.Join(filepath.Dir(abs), ".fango", "cache"), "", nil
+	}
+	root := filepath.Dir(abs)
+	return filepath.Join(root, ".fango", "cache"), filepath.Join(cache, "fango", "roots", pathHash(root), "cache"), nil
+}
+
+// LegacyCacheDir identifies the pre-M1 per-entry fallback so clean can remove
+// it during the transition. New cache reads and writes do not use it.
+func LegacyCacheDir(entry string) (string, error) {
 	abs, err := filepath.Abs(entry)
 	if err != nil {
 		return "", err
 	}
-	d := filepath.Join(filepath.Dir(abs), ".fango", "cache")
-	if err := os.MkdirAll(d, 0o755); err == nil {
-		return d, nil
-	}
-	cache, err := os.UserCacheDir()
+	cache, err := userCacheDir()
 	if err != nil {
 		return "", err
 	}
-	d = filepath.Join(cache, "fango", pathHash(abs), "cache")
-	return d, os.MkdirAll(d, 0o755)
+	return filepath.Join(cache, "fango", pathHash(abs), "cache"), nil
 }
 
 func pathHash(p string) string {
@@ -175,6 +189,21 @@ func validGeneratedSourcePath(rel string) bool {
 		strings.HasPrefix(slash, "native/") && (strings.HasSuffix(slash, "/native.go") || strings.HasSuffix(slash, "/host.go"))
 }
 
+// ValidateGeneratedFiles checks the structural contract of a cached emission.
+func ValidateGeneratedFiles(files []codegen.File) bool {
+	seen := make(map[string]bool, len(files))
+	hasMain := false
+	for _, file := range files {
+		rel := filepath.Clean(filepath.FromSlash(file.Path))
+		if !validGeneratedSourcePath(rel) || seen[filepath.ToSlash(rel)] || len(file.Data) == 0 {
+			return false
+		}
+		seen[filepath.ToSlash(rel)] = true
+		hasMain = hasMain || filepath.ToSlash(rel) == "main.go"
+	}
+	return hasMain
+}
+
 // Materialize ensures go.mod and the embedded fangort sources exist in dir,
 // reporting whether anything changed.
 func Materialize(dir string) (changed bool, err error) {
@@ -268,11 +297,28 @@ func RunBinary(dir string, args ...string) (int, error) {
 	return -1, err
 }
 
-// Clean removes the .fango directory beside the entry file.
+// Clean removes the source-local artifacts and the precisely identified
+// source-root fallback. It also removes the legacy per-entry fallback.
 func Clean(entry string) error {
 	abs, err := filepath.Abs(entry)
 	if err != nil {
 		return err
 	}
-	return os.RemoveAll(filepath.Join(filepath.Dir(abs), ".fango"))
+	local, fallback, err := CacheDirs(abs)
+	if err != nil {
+		return err
+	}
+	paths := []string{filepath.Dir(local)}
+	if fallback != "" {
+		paths = append(paths, fallback)
+	}
+	if legacy, legacyErr := LegacyCacheDir(abs); legacyErr == nil {
+		paths = append(paths, filepath.Dir(legacy))
+	}
+	for _, path := range paths {
+		if err := os.RemoveAll(path); err != nil {
+			return err
+		}
+	}
+	return nil
 }

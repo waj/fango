@@ -20,11 +20,18 @@ definitions (see [metaprogramming](metaprogramming.md)).
 
 Successful batch commands also publish a compiler-fingerprinted project
 artifact after validation. Before loading the graph, a later `check`, `build`,
-or `run` hashes the local paths recorded by that artifact. An exact match lets
-`check` reuse the prior success and lets build/run reuse the emitted Go bytes,
-skipping parsing through emission. Bundled inputs are covered by the exact
-compiler-executable fingerprint. Invalid JSON, missing inputs, hash mismatches,
-and cache I/O errors are ordinary misses.
+or `run` revalidates the recorded graph through the filesystem provider,
+including exact path casing, bundled-name conflicts, sidecar presence, and
+content hashes. An exact match lets `check` reuse the prior success and lets
+build/run reuse the emitted Go bytes, skipping parsing through emission.
+Bundled inputs are covered by the exact compiler-executable fingerprint.
+Artifacts carry a digest of their complete payload; invalid envelopes,
+structurally invalid emissions, missing inputs, hash mismatches, and cache I/O
+errors are ordinary misses.
+
+Batch compilation sessions have a test-only event observer. It records cache
+hits and misses and the parse, resolve, check, elaborate, semantic-lint,
+lowering, and emission stages with their owner. It never writes CLI output.
 
 ## Parsing and surface lowering
 

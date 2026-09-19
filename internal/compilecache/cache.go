@@ -17,151 +17,203 @@ import (
 	"github.com/waj/fango/internal/modules"
 )
 
-const schema = 1
+const (
+	schema       = 2
+	artifactKind = "project"
+)
 
-type artifact struct {
-	Schema int                     `json:"schema"`
+type payload struct {
 	Entry  string                  `json:"entry"`
 	Mode   string                  `json:"mode"`
 	Inputs []modules.ManifestEntry `json:"inputs"`
-	Files  []codegen.File          `json:"files,omitempty"`
+	Files  []codegen.File          `json:"files"`
 }
 
-var fingerprint struct {
+type artifact struct {
+	Schema        int     `json:"schema"`
+	Kind          string  `json:"kind"`
+	PayloadSHA256 string  `json:"payload_sha256"`
+	Payload       payload `json:"payload"`
+}
+
+type fingerprintResult struct {
 	sync.Once
 	value string
+	err   error
 }
 
+var fingerprint = &fingerprintResult{}
+
+var executablePath = os.Executable
+var cacheRoots = build.CacheDirs
+
+type fileOperations struct {
+	readFile   func(string) ([]byte, error)
+	mkdirAll   func(string, os.FileMode) error
+	createTemp func(string, string) (*os.File, error)
+	rename     func(string, string) error
+	remove     func(string) error
+}
+
+var cacheFiles = fileOperations{os.ReadFile, os.MkdirAll, os.CreateTemp, os.Rename, os.Remove}
+
 func compilerFingerprint() (string, error) {
-	var err error
 	fingerprint.Do(func() {
-		path, e := os.Executable()
-		if e != nil {
-			err = e
+		path, err := executablePath()
+		if err != nil {
+			fingerprint.err = err
 			return
 		}
-		data, e := os.ReadFile(path)
-		if e != nil {
-			err = e
+		data, err := cacheFiles.readFile(path)
+		if err != nil {
+			fingerprint.err = err
 			return
 		}
 		h := sha256.Sum256(data)
 		fingerprint.value = hex.EncodeToString(h[:])
 	})
-	return fingerprint.value, err
+	return fingerprint.value, fingerprint.err
 }
 
-func path(entry, mode string) (string, error) {
+func paths(entry, mode string) ([]string, error) {
 	abs, err := filepath.Abs(entry)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	root, err := build.CacheDir(abs)
+	local, fallback, err := cacheRoots(abs)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	fp, err := compilerFingerprint()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	h := sha256.Sum256([]byte(abs + "\x00" + mode))
-	return filepath.Join(root, "v1", fp, hex.EncodeToString(h[:])+".json"), nil
+	name := hex.EncodeToString(h[:]) + ".json"
+	paths := []string{filepath.Join(local, "v1", fp, name)}
+	if fallback != "" {
+		paths = append(paths, filepath.Join(fallback, "v1", fp, name))
+	}
+	return paths, nil
+}
+
+func payloadHash(p payload) (string, error) {
+	b, err := json.Marshal(p)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:]), nil
 }
 
 // Load returns a validated successful artifact. Bundled inputs are covered by
-// the executable fingerprint; project inputs are re-hashed from the source
-// root without invoking the lexer or parser.
+// the executable fingerprint; project discovery is revalidated without
+// invoking the lexer or parser.
 func Load(entry, mode string) ([]codegen.File, []modules.ManifestEntry, bool) {
-	p, err := path(entry, mode)
+	ps, err := paths(entry, mode)
 	if err != nil {
-		return nil, nil, false
-	}
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return nil, nil, false
-	}
-	var a artifact
-	if json.Unmarshal(data, &a) != nil || a.Schema != schema || a.Mode != mode {
 		return nil, nil, false
 	}
 	abs, err := filepath.Abs(entry)
-	if err != nil || a.Entry != abs {
+	if err != nil {
 		return nil, nil, false
 	}
-	root := filepath.Dir(abs)
-	known := make(map[string]bool, len(a.Inputs))
-	for _, in := range a.Inputs {
-		if strings.HasPrefix(in.Path, "<stdlib>/") {
+	for _, path := range ps {
+		data, readErr := cacheFiles.readFile(path)
+		if readErr != nil {
 			continue
 		}
-		rel := filepath.Clean(filepath.FromSlash(in.Path))
-		if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return nil, nil, false
-		}
-		known[filepath.ToSlash(rel)] = true
-		b, err := os.ReadFile(filepath.Join(root, rel))
-		if err != nil {
-			return nil, nil, false
-		}
-		h := sha256.Sum256(b)
-		if hex.EncodeToString(h[:]) != in.SHA256 {
-			return nil, nil, false
-		}
-	}
-	// A newly added sidecar is an input change too. It cannot appear in the
-	// old manifest, so derive each possible sidecar path from its source.
-	for rel := range known {
-		if !strings.HasSuffix(rel, ".fango") {
+		var a artifact
+		if json.Unmarshal(data, &a) != nil || a.Schema != schema || a.Kind != artifactKind ||
+			a.Payload.Entry != abs || a.Payload.Mode != mode || a.PayloadSHA256 == "" ||
+			a.Payload.Inputs == nil || a.Payload.Files == nil {
 			continue
 		}
-		native := strings.TrimSuffix(rel, ".fango") + ".native.go"
-		_, err := os.Stat(filepath.Join(root, filepath.FromSlash(native)))
-		if (err == nil) != known[native] {
-			return nil, nil, false
+		digest, hashErr := payloadHash(a.Payload)
+		if hashErr != nil || !strings.EqualFold(digest, a.PayloadSHA256) {
+			continue
 		}
+		if !validFiles(mode, a.Payload.Files) || !modules.ValidateManifest(abs, a.Payload.Inputs) {
+			continue
+		}
+		return a.Payload.Files, a.Payload.Inputs, true
 	}
-	return a.Files, a.Inputs, true
+	return nil, nil, false
 }
 
-// Store atomically publishes a successful artifact. Errors are intentionally
-// ignored by callers; a read-only or concurrently modified cache is a miss.
+func validFiles(mode string, files []codegen.File) bool {
+	switch {
+	case mode == "check":
+		return len(files) == 0
+	case strings.HasPrefix(mode, "emit:"):
+		return build.ValidateGeneratedFiles(files)
+	case len(files) == 0:
+		return true
+	default:
+		return build.ValidateGeneratedFiles(files)
+	}
+}
+
+// Store atomically publishes a successful artifact, preferring source-local
+// storage and falling back to the source-root namespace. Errors are ignored by
+// callers; a read-only or concurrently modified cache remains an optimization.
 func Store(entry, mode string, inputs []modules.ManifestEntry, files []codegen.File) {
-	p, err := path(entry, mode)
+	ps, err := paths(entry, mode)
 	if err != nil {
 		return
 	}
 	abs, err := filepath.Abs(entry)
+	if files == nil {
+		files = []codegen.File{}
+	}
+	if err != nil || !validFiles(mode, files) || !modules.ValidateManifest(abs, inputs) {
+		return
+	}
+	p := payload{Entry: abs, Mode: mode, Inputs: inputs, Files: files}
+	digest, err := payloadHash(p)
 	if err != nil {
 		return
 	}
-	a := artifact{Schema: schema, Entry: abs, Mode: mode, Inputs: inputs, Files: files}
-	data, err := json.Marshal(a)
-	if err != nil || os.MkdirAll(filepath.Dir(p), 0o755) != nil {
-		return
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(p), ".artifact-*")
+	data, err := json.Marshal(artifact{Schema: schema, Kind: artifactKind, PayloadSHA256: digest, Payload: p})
 	if err != nil {
 		return
+	}
+	for _, path := range ps {
+		if writeAtomic(path, data) == nil {
+			return
+		}
+	}
+}
+
+func writeAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := cacheFiles.mkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := cacheFiles.createTemp(dir, ".artifact-*")
+	if err != nil {
+		return err
 	}
 	name := tmp.Name()
-	ok := false
+	closed := false
 	defer func() {
-		tmp.Close()
-		if !ok {
-			os.Remove(name)
+		if !closed {
+			_ = tmp.Close()
 		}
+		_ = cacheFiles.remove(name)
 	}()
-	if tmp.Chmod(0o644) != nil {
-		return
+	if err := tmp.Chmod(0o644); err != nil {
+		return err
 	}
-	if _, err = tmp.Write(data); err != nil {
-		return
+	if _, err := tmp.Write(data); err != nil {
+		return err
 	}
-	if tmp.Sync() != nil || tmp.Close() != nil {
-		return
+	if err := tmp.Sync(); err != nil {
+		return err
 	}
-	if os.Rename(name, p) != nil {
-		return
+	if err := tmp.Close(); err != nil {
+		return err
 	}
-	ok = true
+	closed = true
+	return cacheFiles.rename(name, path)
 }

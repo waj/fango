@@ -147,55 +147,15 @@ distinct from rerunning semantic Core lint on an already validated object.
 
 ## Required milestones
 
-Implement the milestones in dependency order. Each has an independently
-reviewable result and acceptance gate. M3 establishes the new semantic boundary
-without persistent checked-object reuse; M4 makes that boundary serializable;
-M5 enables persistence. Do not substitute whole-project cache hits for any
-milestone's module-level acceptance tests.
-
-### M1: harden the existing cache and establish observability
-
-This is independently deliverable and precedes further cache activation.
-Starting points are `internal/compilecache`, `internal/build`, and the batch
-driver's cache calls.
-
-Required work:
-
-- Persist both the executable fingerprint and its failure in the
-  once-per-process result. A failed first fingerprint must disable caching
-  consistently; later calls must not use an empty fingerprint.
-- Validate complete artifact envelopes, including the required entry input and
-  expected emitted-file structure. Add payload integrity checks so
-  syntactically valid corruption is also a miss.
-- Make the temporary project shortcut revalidate discovery-sensitive facts:
-  exact path casing, local conflicts with bundled module names, and
-  native-sidecar presence. Reuse provider validation rather than implementing
-  a second resolution policy.
-- Treat unexpected filesystem errors as misses. Do not interpret permission
-  errors as evidence that a sidecar is absent.
-- Separate cache-directory selection from creation. Read attempts should not
-  create directories unnecessarily; an existing but unwritable local cache
-  must permit the documented fallback.
-- Give the final cache a fallback namespace keyed by absolute source root so
-  entries and REPL sessions from that root share artifacts. Clean the
-  source-local cache and the precisely identified fallback namespace; account
-  for the legacy per-entry fallback during transition.
-- Keep `FANGO_BUILD_DIR` governing generated build output, not redirecting the
-  source project's compilation cache.
-- Introduce per-session stage events for parse, resolve, check, elaborate,
-  semantic lint, lowering, emission, and cache hit/miss. Events identify the
-  owner and are test-only, with no CLI output.
-
-Acceptance: regression tests cover empty-but-valid JSON, damaged payloads,
-fingerprint failure across repeated calls, new reserved-name conflicts, casing
-changes, sidecar addition/removal, read-only storage, concurrent atomic writers,
-and fallback cleaning. Exercise I/O failures through injected filesystem/store
-operations where permissions-based tests would depend on the test user's
-privileges.
+Implement the remaining milestones in dependency order. Each has an
+independently reviewable result and acceptance gate. M3 establishes the new
+semantic boundary without persistent checked-object reuse; M4 makes that
+boundary serializable; M5 enables persistence. Do not substitute whole-project
+cache hits for any milestone's module-level acceptance tests.
 
 ### M2: add the parsed-unit codec and separate graph discovery
 
-Depends on M1. Starting points are `modules.Graph`, `modules.Load`, the parser,
+Starting points are `modules.Graph`, `modules.Load`, the parser,
 and graph completion's fixity/interface/resolution work.
 
 Required work:

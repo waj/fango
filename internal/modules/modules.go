@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	goast "go/ast"
 	goparser "go/parser"
@@ -36,6 +37,10 @@ type Provider interface {
 	Native(module string) (path string, content []byte, err error)
 }
 
+// StageObserver is the test instrumentation seam for discovery work. A nil
+// observer has no cost or user-visible output.
+type StageObserver func(stage, owner string)
+
 type FSProvider struct{ Root string }
 
 type pathCaseError struct{ want, found string }
@@ -46,17 +51,22 @@ func (e pathCaseError) Error() string {
 
 func (p FSProvider) Source(module string) (string, []byte, error) {
 	rel := filepath.FromSlash(strings.ReplaceAll(module, ".", "/") + ".fango")
-	path := filepath.Join(p.Root, rel)
-	absRoot, _ := filepath.Abs(p.Root)
+	b, err := readExact(p.Root, rel)
+	return filepath.ToSlash(rel), b, err
+}
+
+func readExact(root, rel string) ([]byte, error) {
+	path := filepath.Join(root, rel)
+	absRoot, _ := filepath.Abs(root)
 	absPath, _ := filepath.Abs(path)
 	if absPath != absRoot && !strings.HasPrefix(absPath, absRoot+string(filepath.Separator)) {
-		return rel, nil, fmt.Errorf("module path escapes the source root")
+		return nil, fmt.Errorf("module path escapes the source root")
 	}
-	cur := p.Root
+	cur := root
 	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
 		entries, readErr := os.ReadDir(cur)
 		if readErr != nil {
-			break
+			return nil, readErr
 		}
 		found := ""
 		for _, e := range entries {
@@ -69,17 +79,16 @@ func (p FSProvider) Source(module string) (string, []byte, error) {
 			}
 		}
 		if found != "" && found != part {
-			return rel, nil, pathCaseError{want: part, found: found}
+			return nil, pathCaseError{want: part, found: found}
 		}
 		cur = filepath.Join(cur, part)
 	}
-	b, err := os.ReadFile(path)
-	return filepath.ToSlash(rel), b, err
+	return os.ReadFile(path)
 }
 
 func (p FSProvider) Native(module string) (string, []byte, error) {
 	rel := filepath.FromSlash(strings.ReplaceAll(module, ".", "/") + ".native.go")
-	b, err := os.ReadFile(filepath.Join(p.Root, rel))
+	b, err := readExact(p.Root, rel)
 	return filepath.ToSlash(rel), b, err
 }
 
@@ -114,6 +123,77 @@ type Result struct {
 type NativeSource struct {
 	Module, Path string
 	Content      []byte
+}
+
+// ValidateManifest rechecks the discovery-sensitive local filesystem facts in
+// a cached manifest without parsing source. It deliberately uses the same
+// exact-path provider rules as graph loading. Any malformed entry or I/O error
+// is a miss.
+func ValidateManifest(entry string, entries []ManifestEntry) bool {
+	abs, err := filepath.Abs(entry)
+	if err != nil {
+		return false
+	}
+	root, entryPath := filepath.Dir(abs), filepath.Base(abs)
+	local := FSProvider{Root: root}
+	known := make(map[string]ManifestEntry, len(entries))
+	entrySeen := false
+	for _, in := range entries {
+		if in.Path == "" || len(in.SHA256) != sha256.Size*2 {
+			return false
+		}
+		if _, err := hex.DecodeString(in.SHA256); err != nil {
+			return false
+		}
+		if _, exists := known[in.Path]; exists {
+			return false
+		}
+		known[in.Path] = in
+		if in.Path == filepath.ToSlash(entryPath) {
+			entrySeen = true
+		}
+		if strings.HasPrefix(in.Path, "<stdlib>/") {
+			if strings.HasSuffix(in.Path, ".fango") {
+				_, _, localErr := local.Source(in.Module)
+				if !errors.Is(localErr, fs.ErrNotExist) {
+					return false
+				}
+			}
+			continue
+		}
+		rel := filepath.Clean(filepath.FromSlash(in.Path))
+		if filepath.IsAbs(rel) || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return false
+		}
+		b, readErr := readExact(root, rel)
+		if readErr != nil {
+			return false
+		}
+		h := sha256.Sum256(b)
+		if hex.EncodeToString(h[:]) != in.SHA256 {
+			return false
+		}
+	}
+	if !entrySeen {
+		return false
+	}
+	for path := range known {
+		if strings.HasPrefix(path, "<stdlib>/") || !strings.HasSuffix(path, ".fango") {
+			continue
+		}
+		native := strings.TrimSuffix(path, ".fango") + ".native.go"
+		_, expected := known[native]
+		_, readErr := readExact(root, filepath.FromSlash(native))
+		switch {
+		case readErr == nil && !expected:
+			return false
+		case errors.Is(readErr, fs.ErrNotExist) && expected:
+			return false
+		case readErr != nil && !errors.Is(readErr, fs.ErrNotExist):
+			return false
+		}
+	}
+	return true
 }
 
 // Unit is one source module in dependency-first build order. Name is empty
@@ -155,6 +235,11 @@ func newIface() *iface {
 // Load uses the entry file's directory as the sole source root and returns a
 // dependency-first merged surface program with canonical top-level names.
 func Load(entry string) (*Result, []diag.Error) {
+	return LoadObserved(entry, nil)
+}
+
+// LoadObserved is Load with per-module parse and resolve notifications.
+func LoadObserved(entry string, observe StageObserver) (*Result, []diag.Error) {
 	abs, err := filepath.Abs(entry)
 	if err != nil {
 		return nil, []diag.Error{{Title: "SOURCE ERROR", Body: err.Error()}}
@@ -173,7 +258,11 @@ func Load(entry string) (*Result, []diag.Error) {
 	if !private {
 		entryName = m.Header.Name
 	}
+	if observe != nil {
+		observe("parse", entryName)
+	}
 	g := newGraph(FSProvider{Root: root})
+	g.observe = observe
 	if !private {
 		if path, _, bundleErr := g.bundled.Source(entryName); bundleErr == nil {
 			return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; local modules cannot use bundled names.", entryName, path)}

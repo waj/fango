@@ -37,16 +37,20 @@ every argument after the source path to the program; an optional `--` is
 removed first. `check` runs
 through parsing, inference, elaboration, and Core validation without generating
 Go. `clean` removes the source file's persistent `.fango/` build and compilation
-cache artifacts.
+cache artifacts, its source-root fallback compilation cache, and the legacy
+per-entry fallback namespace when present.
 `repl` starts an interactive session whose source root is `dir`, or the
 working directory; see [REPL](repl.md).
 
 Successful `check`, `build`, and `run` results are cached under
 `.fango/cache/v1/` beside the entry file. If every previously discovered local
-source and native sidecar still has the same content, an unchanged command can
-skip source loading and compilation. The cache is transparent: corrupt,
-incompatible, or unwritable entries are ignored and rebuilt, and there is no
-status or disable flag. Distinct compiler executables and build modes use
+source and native sidecar still has the same content and discovery still finds
+the same exact paths, an unchanged command can skip source loading and
+compilation. When that directory cannot be written, artifacts use a shared
+user-cache namespace for the absolute source root. The cache is transparent:
+corrupt, incompatible, or unwritable entries are ignored and rebuilt, and
+there is no status or disable flag. `FANGO_BUILD_DIR` redirects generated build
+output, not this cache. Distinct compiler executables and build modes use
 distinct entries. `fmt` always parses its requested input and is not cached.
 
 ## Formatting

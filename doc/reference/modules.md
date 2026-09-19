@@ -116,8 +116,10 @@ includes `sources.json`, containing each transitive Fango source and native
 sidecar's logical name, path, and SHA-256 hash for build invalidation. Local
 paths are relative to the source root; bundled paths begin with `<stdlib>/`.
 The same manifest validates the transparent compilation cache: edits,
-removals, or newly added native sidecars force a miss, while bundled content is
-tied to the compiler-executable fingerprint.
+removals, newly added native sidecars, path-casing changes, and new local
+conflicts with reachable bundled modules force a miss, while bundled content
+is tied to the compiler-executable fingerprint. Unexpected filesystem errors
+also force a miss rather than proving that an optional sidecar is absent.
 
 ## Current naming limitation
 

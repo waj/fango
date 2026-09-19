@@ -50,3 +50,62 @@ func TestValidateExportDirRejectsUnmanagedContent(t *testing.T) {
 		t.Fatal("non-empty unmanaged directory accepted")
 	}
 }
+
+func TestCacheFallbackIsSourceRootScopedAndCleaned(t *testing.T) {
+	old := userCacheDir
+	cacheBase := t.TempDir()
+	userCacheDir = func() (string, error) { return cacheBase, nil }
+	t.Cleanup(func() { userCacheDir = old })
+
+	root := t.TempDir()
+	first := filepath.Join(root, "Main.fango")
+	second := filepath.Join(root, "Tool.fango")
+	local, fallback, err := CacheDirs(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, secondFallback, err := CacheDirs(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fallback != secondFallback {
+		t.Fatalf("same source root got distinct fallbacks: %q and %q", fallback, secondFallback)
+	}
+	legacy, err := LegacyCacheDir(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{filepath.Dir(local), fallback, filepath.Dir(legacy)} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "artifact"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Clean(first); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{filepath.Dir(local), fallback, filepath.Dir(legacy)} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("clean left %q: %v", dir, err)
+		}
+	}
+}
+
+func TestBuildDirOverrideDoesNotRedirectCompilationCache(t *testing.T) {
+	old := userCacheDir
+	userCacheDir = func() (string, error) { return t.TempDir(), nil }
+	t.Cleanup(func() { userCacheDir = old })
+	root := t.TempDir()
+	entry := filepath.Join(root, "Main.fango")
+	t.Setenv("FANGO_BUILD_DIR", filepath.Join(t.TempDir(), "generated"))
+	local, _, err := CacheDirs(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(root, ".fango", "cache")
+	if local != want {
+		t.Fatalf("cache dir = %q, want %q", local, want)
+	}
+}

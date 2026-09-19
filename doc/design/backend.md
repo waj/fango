@@ -86,11 +86,15 @@ paths and managed-directory safeguards.
 
 The source project also keeps successful batch artifacts beneath
 `.fango/cache/v1/<compiler fingerprint>/`. Artifacts use a versioned JSON
-envelope and atomic rename, and contain the validated source manifest plus the
-generated files for one entry/print-main mode. The compiler fingerprint is the
-SHA-256 of the running executable, computed once per process, so compiler or
-schema changes select a cold namespace. Cache writes are optional and cache
-read failures never become diagnostics.
+envelope, payload digest, and atomic rename, and contain the validated source
+manifest plus the generated files for one entry/print-main mode. The compiler
+fingerprint is the SHA-256 of the running executable, computed once per process;
+both its value and any computation failure are stable for that process, so a
+failed fingerprint disables cache use. Compiler or schema changes select a cold
+namespace. Reads do not create directories. If source-local storage cannot be
+written, writes use a user-cache namespace keyed by the absolute source root;
+cache failures never become diagnostics. `FANGO_BUILD_DIR` affects generated
+build output only and never selects the compilation cache.
 
 ## Self tail-call loops
 

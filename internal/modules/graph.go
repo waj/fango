@@ -32,6 +32,7 @@ type Graph struct {
 	// the same map, so prompt-declared operators and imported ones meet in
 	// one place.
 	fixities fixity.Table
+	observe  StageObserver
 }
 
 // Increment is what one import adds to a graph: the newly loaded modules in
@@ -169,6 +170,9 @@ func (g *Graph) load(pending map[string]*node, name string, at source.Span) []di
 	if mm.Header.Name != name {
 		return []diag.Error{diag.Errorf(mm.Header.NameSpan, "MODULE/PATH MISMATCH", "File `%s` must declare module `%s`, but declares `%s`.", path, name, mm.Header.Name)}
 	}
+	if g.observe != nil {
+		g.observe("parse", name)
+	}
 	n := &node{name: name, path: path, content: b, mod: mm, bundled: bundled, nativeModule: name}
 	n.deps = implicitDeps(mm, preludeDeps(mm, name), name)
 	var np string
@@ -264,6 +268,9 @@ func (g *Graph) complete(pending map[string]*node) ([]string, []diag.Error) {
 		visible[name] = vis
 		r := resolver{node: n, nodes: all}
 		decls, resolveErrs := r.resolve()
+		if g.observe != nil {
+			g.observe("resolve", name)
+		}
 		n.resolved = decls
 		errs = append(errs, resolveErrs...)
 	}
