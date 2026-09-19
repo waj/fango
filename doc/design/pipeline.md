@@ -33,6 +33,34 @@ Batch compilation sessions have a test-only event observer. It records cache
 hits and misses and the parse, resolve, check, elaborate, semantic-lint,
 lowering, and emission stages with their owner. It never writes CLI output.
 
+`internal/check.Session` owns the uncached semantic path. The loader retains a
+merged AST only as a differential-test adapter; normal compilation consumes
+resolved modules in dependency-first order. Each module is checked against the
+declaration state already installed in the session, elaborated immediately,
+and semantically linted before the next module. The entry/dependency role and
+entry symbol are explicit inputs, so an imported declaration named `main` has
+no entry-only obligations.
+
+Inference publishes an immutable-by-contract `ModuleState` delta containing
+the module's solved schemes and declaration tables, nominal types and effects,
+classes and methods, instances, native/intrinsic/worker metadata, derivers,
+capture summaries, and instance visibility. The typed-AST `CheckedModule`
+handoff is separate: AST-keyed types, substitutions, staging callbacks, and
+other inference workspace are not declaration state. Instance cutoffs in a
+module state use module/source declaration references; live checker indexes are
+only transient checking machinery.
+
+Owner-scoped elaboration and lint use installed dependency worker signatures,
+result-capture summaries, and validated capture contracts as context. They do
+not traverse or revalidate dependency runtime bodies. Core definitions carry
+an ABI summary for body-derived facts used by emission, including controlled
+callback invocation and passive Machine-factory classification. Graph assembly
+concatenates already validated Core and applies only entry-specific checks.
+Instance overlap, blanket-context cycles, and duplicate derivers also have an
+explicit graph compatibility pass over module states; declaration collisions
+and effect-operation binder shadowing remain graph-resolution and per-module
+header-validation rules, respectively.
+
 ## Parsing and surface lowering
 
 The lexer records byte spans and line/column positions without layout tokens.

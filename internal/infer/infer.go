@@ -95,6 +95,7 @@ func (e *Env) Names() []string {
 // keeps one Checker across many inputs; batch compilation uses one per run.
 type Checker struct {
 	moduleCheck *moduleCheck
+	moduleName  string
 	sourceLimit *int
 	recursive   *recursiveInference
 

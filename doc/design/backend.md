@@ -76,6 +76,13 @@ identifier/operator alphabets and the ban on leading underscores prevent
 collisions. A dependency's generated package cannot depend on its consumers.
 Project emission is the single generation path used by CLI and tests.
 
+Emission does not inspect dependency bodies to rediscover calling conventions.
+Owner-scoped Core elaboration records an ABI summary on every definition:
+whether its type needs a Direct/Exit/Machine representation family, whether it
+actually invokes a controlled callback parameter, and whether it is a passive
+Machine factory. Recursive classification may inspect bodies owned by the
+current module and consults only these summaries for installed dependencies.
+
 The driver writes only changed files beneath persistent .fango/build and removes
 only stale generated paths recorded in its manifest. sources.json lists logical
 names, root-relative or `<stdlib>/` paths, and SHA-256 hashes in deterministic

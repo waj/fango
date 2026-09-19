@@ -6,16 +6,15 @@ import (
 	"io"
 	"path/filepath"
 
+	compilecheck "github.com/waj/fango/internal/check"
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/compilecache"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
-	"github.com/waj/fango/internal/elaborate"
 	"github.com/waj/fango/internal/infer"
 	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/runtimefiles"
-	"github.com/waj/fango/internal/staging"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -44,42 +43,19 @@ func compileFileGraph(entry string, stderr io.Writer) (*core.Prog, *infer.Checke
 }
 
 func compileFileGraphSession(entry string, stderr io.Writer, session *compilationSession) (*core.Prog, *infer.Checker, []modules.ManifestEntry, []modules.Unit, []modules.NativeSource, bool) {
-	var observe modules.StageObserver
+	var observe compilecheck.Observer
 	if session != nil && session.observe != nil {
 		observe = func(stage, owner string) { session.event(stage, owner) }
 	}
-	loaded, loadErrs := modules.LoadWithOptions(entry, modules.LoadOptions{Observe: observe, Parsed: compilecache.NewParsedStore(entry)})
-	if report(stderr, loadErrs) {
+	result, checkErrs, internalErr := (&compilecheck.Session{Observe: observe}).Compile(entry)
+	if report(stderr, checkErrs) {
 		return nil, nil, nil, nil, nil, false
 	}
-
-	sup := &types.Supply{}
-	b := types.NewBuiltins(sup)
-	ck := infer.NewChecker(sup, b, infer.NewEnv())
-	ck.Fixity = loaded.Fixity
-	ck.EntryName = loaded.Entry
-	staging.Install(ck)
-	owner := entryOwner(loaded.Units, entry)
-	session.event("check", owner)
-	infos, inferErrs := ck.Module(loaded.Module)
-	if report(stderr, inferErrs) {
+	if internalErr != nil {
+		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", internalErr)
 		return nil, nil, nil, nil, nil, false
 	}
-
-	session.event("elaborate", owner)
-	prog, elabErrs := elaborate.Module(infos, ck)
-	if report(stderr, elabErrs) {
-		return nil, nil, nil, nil, nil, false
-	}
-	session.event("semantic-lint", owner)
-	if lintErrs := core.Lint(prog, ck.B); len(lintErrs) > 0 {
-		fmt.Fprintf(stderr, "fango: internal compiler error: Core invariants violated:\n")
-		for _, e := range lintErrs {
-			fmt.Fprintf(stderr, "  %v\n", e)
-		}
-		return nil, nil, nil, nil, nil, false
-	}
-	return prog, ck, loaded.Manifest, loaded.Units, loaded.Natives, true
+	return result.Program, result.Checker, result.Graph.Manifest, result.Graph.Units, result.Graph.Natives, true
 }
 
 func entryOwner(units []modules.Unit, entry string) string {

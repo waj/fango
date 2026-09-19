@@ -105,6 +105,7 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 		bindRows(p.Defs, ck)
 		errs = append(errs, captureDiagnostics(core.InferCaptures(p, ck.B), ck, source.Span{})...)
 		installCaptureSummaries(p.Defs, ck)
+		core.SummarizeABI(p, nil)
 	}
 	return p, errs
 }
@@ -166,6 +167,7 @@ func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsi
 	bindRows(p.Defs, ck)
 	errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, source.Span{})...)
 	installCaptureSummaries(p.Defs, ck)
+	core.SummarizeABI(p, context)
 	return p.Defs, errs
 }
 
@@ -174,6 +176,45 @@ func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsi
 // counterpart to the lint the batch pipeline runs on a whole program.
 func LintProg(defs []core.Def, ck *infer.Checker) []error {
 	return core.Lint(&core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck)}, ck.B)
+}
+
+// LintProgIn validates an owned module increment against installed dependency
+// signatures and capture contracts without traversing dependency bodies.
+func LintProgIn(defs, context []core.Def, ck *infer.Checker) []error {
+	return core.LintIn(&core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck)}, context, ck.B)
+}
+
+// AssembleModuleProgram joins already checked and owner-linted module Core.
+// It performs only entry-specific validation and creates the whole-program
+// metadata consumed by lowering and emission.
+func AssembleModuleProgram(defs []core.Def, infos []infer.DeclInfo, entry string, ck *infer.Checker) (*core.Prog, []diag.Error) {
+	adts := make([]*types.ADTInfo, 0, len(ck.ADTOrder))
+	for _, adt := range ck.ADTOrder {
+		if !ck.IsCompileTimeOnly(adt.Con) {
+			adts = append(adts, adt)
+		}
+	}
+	p := &core.Prog{ADTs: adts, Effects: effectList(ck), Defs: defs, Entry: entry, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck), CaptureContractsChecked: true}
+	spans := map[string]source.Span{}
+	for _, info := range infos {
+		spans[info.Name] = info.NameSpan
+	}
+	var errs []diag.Error
+	for i := range p.Defs {
+		d := &p.Defs[i]
+		if d.Name != entry {
+			continue
+		}
+		if len(d.Params) == 0 {
+			if _, isFn := d.Type.(*types.TFun); isFn {
+				errs = append(errs, diag.Errorf(spans[d.Name], "BAD MAIN", "`main` must be a value, or use the supported function form `main _ : () ->{IO} ()`."))
+			} else if len(d.TyParams) > 0 {
+				errs = append(errs, diag.Errorf(spans[d.Name], "BAD MAIN", "`main` must be a concrete value, but its type `%s` still has\ntype variables in it.", types.Show(d.Type)))
+			}
+			p.EntryDisplay = Display(&core.VarRef{Name: d.Name, Ty: d.Type}, ck, d.Owner)
+		}
+	}
+	return p, errs
 }
 
 // Decl elaborates one declaration — also the REPL's per-input entry point.

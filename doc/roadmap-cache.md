@@ -148,56 +148,17 @@ distinct from rerunning semantic Core lint on an already validated object.
 ## Required milestones
 
 Implement the remaining milestones in dependency order. Each has an
-independently reviewable result and acceptance gate. M3 establishes the new
-semantic boundary without persistent checked-object reuse; M4 makes that
-boundary serializable; M5 enables persistence. Do not substitute whole-project
-cache hits for any milestone's module-level acceptance tests.
-
-### M3: introduce in-memory module boundaries and explicit summaries
-
-Establish correctness without persistent checked-object reuse.
-Starting points are `Checker.Module`, `elaborate.Module`,
-`elaborate.Increment`, Core lint/capture analysis, and backend ABI queries.
-
-Required work:
-
-- Extract the shared session and check modules dependency-first against
-  already installed dependencies.
-- Introduce `infer.ModuleState` as an explicit, immutable declaration-state
-  delta. Include schemes, constructors/types, effects/operations,
-  classes/methods, instances, worker/native/intrinsic metadata, derivers,
-  capture summaries, and visibility.
-- Separate persistent declaration state from transient AST-keyed inference
-  tables and substitutions. Snapshot solved state; importing a module must
-  not require restoring another module's inference workspace.
-- Add owner-scoped elaboration and semantic lint entry points. Use dependency
-  signatures and validated capture contracts as context without traversing or
-  revalidating dependency runtime bodies.
-- Compute explicit ABI summaries for facts currently discovered by backend
-  body inspection, particularly controlled callback invocation and passive
-  Machine factories.
-- Preserve source-order declaration cutoffs. Replace persisted session-global
-  instance indexes with stable module/declaration references and remap them on
-  installation.
-- Preserve entry-specific `main` behavior through an explicit role, including
-  ordinary imported `main` declarations and `check` without `main`.
-- Retain graph-wide compatibility checks independently of module inference:
-  overlapping instances, blanket-context cycles, duplicate derivers, and
-  existing declaration-collision rules must still detect conflicts between
-  individually valid cached modules.
-- Preserve the documented graph-wide effect-operation shadowing behavior
-  using declaration/binder validation metadata. Do not accidentally change it
-  as a consequence of checking dependencies earlier.
-
-Acceptance: compare the new uncached module path with the existing merged path
-across diagnostic, Core, specialization, capture, and generated-output fixtures.
-Dependencies checked alone must produce the same owned result when included by
-different consumers. No persistence is enabled until these boundaries agree.
+independently reviewable result and acceptance gate. The implemented in-memory
+module boundary is described in
+[pipeline design](design/pipeline.md#pipeline); M4 makes that boundary
+serializable and M5 enables persistence. Do not substitute whole-project cache
+hits for any milestone's module-level acceptance tests.
 
 ### M4: make module state, Core, and staging installable
 
-Depends on M3. Starting points are checker checkpoint/state tables, `meta.Table`,
-and staging's completion-log-driven evaluator.
+Builds on the implemented in-memory module boundary. Starting points are
+checker checkpoint/state tables, `meta.Table`, and staging's
+completion-log-driven evaluator.
 
 Required work:
 
@@ -280,7 +241,7 @@ Required work:
 - Introduce `machine.LowerUnit` and `codegen.EmitUnit`, or equivalent APIs,
   consuming owned Core plus imported link/ABI summaries.
 - Eliminate imported runtime-body inspection from code generation. Use the
-  summaries introduced in M3 for calling-convention decisions.
+  installed module ABI summaries for calling-convention decisions.
 - Lower only owned workers, closures, and synthesized helpers. Imported
   Machine families are declared by link summaries.
 - Add owner-scoped Machine validation without weakening the existing

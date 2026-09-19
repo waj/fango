@@ -113,12 +113,32 @@ type ManifestEntry struct {
 
 type Result struct {
 	Module     *ast.Module
+	Modules    []ResolvedModule
 	Entry      string
 	FixityHash string
 	Manifest   []ManifestEntry
 	Units      []Unit
 	Fixity     fixity.Table
 	Natives    []NativeSource
+}
+
+// ModuleRole makes entry-only language obligations explicit. In particular,
+// a dependency's declaration named main is an ordinary value.
+type ModuleRole uint8
+
+const (
+	DependencyRole ModuleRole = iota
+	EntryRole
+)
+
+// ResolvedModule is one independently checkable module in dependency-first
+// order. Module contains only declarations owned by Name (or the headerless
+// entry), while InstanceImports retains that owner's graph visibility.
+type ResolvedModule struct {
+	Name   string
+	Role   ModuleRole
+	Entry  string
+	Module *ast.Module
 }
 
 type NativeSource struct {
@@ -302,6 +322,7 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 		return nil, errs
 	}
 	merged := &ast.Module{InstanceImports: map[string]map[string]bool{}}
+	resolved := make([]ResolvedModule, 0, len(order))
 	for _, name := range order {
 		owner := name
 		if g.nodes[name].private {
@@ -309,6 +330,19 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 		}
 		merged.InstanceImports[owner] = g.visible[name]
 		merged.Decls = append(merged.Decls, g.nodes[name].resolved...)
+		role := DependencyRole
+		entry := ""
+		if name == entryName {
+			role = EntryRole
+			entry = "main"
+			if !private {
+				entry = canonical(entryName, "main")
+			}
+		}
+		resolved = append(resolved, ResolvedModule{Name: owner, Role: role, Entry: entry, Module: &ast.Module{
+			Decls:           append([]ast.Decl(nil), g.nodes[name].resolved...),
+			InstanceImports: map[string]map[string]bool{owner: g.visible[name]},
+		}})
 	}
 	manifest := make([]ManifestEntry, 0, len(order))
 	units := make([]Unit, 0, len(order))
@@ -337,7 +371,7 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 	if !private {
 		entrySymbol = canonical(entryName, "main")
 	}
-	return &Result{Module: merged, Entry: entrySymbol, FixityHash: fixity.Hash(g.fixities), Manifest: manifest, Units: units, Fixity: g.fixities, Natives: natives}, nil
+	return &Result{Module: merged, Modules: resolved, Entry: entrySymbol, FixityHash: fixity.Hash(g.fixities), Manifest: manifest, Units: units, Fixity: g.fixities, Natives: natives}, nil
 }
 
 func parseUnit(f *source.File, cache ParsedCache) (*ParsedUnit, bool, []diag.Error) {

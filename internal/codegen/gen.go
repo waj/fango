@@ -733,6 +733,9 @@ func (g *gen) workerCallABI(d *core.Def, execution types.Transport) types.Transp
 }
 
 func (g *gen) workerNeedsABIFamily(d *core.Def) bool {
+	if d != nil && d.ABI.Valid {
+		return d.ABI.NeedsFamily
+	}
 	args, ret := core.PeelFun(d.Type, len(d.Params))
 	if g.workerNeedsControlledArgTypes(args) {
 		return true
@@ -744,6 +747,9 @@ func (g *gen) workerNeedsABIFamily(d *core.Def) bool {
 // them. Their representation family follows their values, while their execution
 // remains Direct. Closure-producing factories also need module-owned lowering.
 func (g *gen) passiveMachineFactory(d *core.Def) bool {
+	if d != nil && d.ABI.Valid {
+		return d.ABI.PassiveMachineFactory
+	}
 	return g.passiveMachineFactorySeen(d, map[string]bool{})
 }
 
@@ -783,6 +789,9 @@ func (g *gen) passiveMachineFactorySeen(d *core.Def, seen map[string]bool) bool 
 // example in an ADT) needs the Exit representation family, but does not make
 // the worker itself return an Outcome.
 func (g *gen) workerCallsControlledArg(d *core.Def) bool {
+	if d != nil && d.ABI.Valid {
+		return d.ABI.CallsControlledArg
+	}
 	args, _ := core.PeelFun(d.Type, len(d.Params))
 	controlled := map[string]bool{}
 	for i, arg := range args {

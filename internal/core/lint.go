@@ -16,7 +16,14 @@ import (
 // (and under a debug flag later) — instantiation plumbing bugs are the
 // design's top risk, and this is the tripwire.
 func Lint(p *Prog, b *types.Builtins) []error {
-	return lint(p, b, false, false)
+	return lint(p, nil, b, false, false)
+}
+
+// LintIn validates only p's owned definitions while using context as an
+// already-validated signature and capture-contract environment. Dependency
+// bodies are neither traversed nor revalidated.
+func LintIn(p *Prog, context []Def, b *types.Builtins) []error {
+	return lint(p, context, b, false, false)
 }
 
 // LintMachineInput checks semantic Core immediately before selective machine
@@ -25,17 +32,17 @@ func Lint(p *Prog, b *types.Builtins) []error {
 // private nodes only when the resolved Stream.withProducer intrinsic is
 // present; that declaration is the source activation boundary.
 func LintMachineInput(p *Prog, b *types.Builtins) []error {
-	return lint(p, b, true, false)
+	return lint(p, nil, b, true, false)
 }
 
 // LintStageMachineInput applies the same ownership, capture, and transport
 // proofs to a splice's execution program. Quote and TypeOf are values at this
 // boundary only; the ordinary emission boundary continues to reject them.
 func LintStageMachineInput(p *Prog, b *types.Builtins) []error {
-	return lint(p, b, true, true)
+	return lint(p, nil, b, true, true)
 }
 
-func lint(p *Prog, b *types.Builtins, allowMachine, allowStage bool) []error {
+func lint(p *Prog, context []Def, b *types.Builtins, allowMachine, allowStage bool) []error {
 	l := &linter{b: b, scope: map[string]bool{}, localTypes: map[string]types.Type{}, workers: map[string]*Def{},
 		adts: map[int]*types.ADTInfo{}, effects: map[int]*types.EffectInfo{},
 		tyParams: map[int]bool{}, evidence: map[int]int{}, evidenceCaptures: map[int][]types.CaptureSet{},
@@ -58,6 +65,14 @@ func lint(p *Prog, b *types.Builtins, allowMachine, allowStage bool) []error {
 		d := &p.Defs[i]
 		if d.IsWorker() {
 			l.workers[d.Name] = d
+		}
+	}
+	for i := range context {
+		d := &context[i]
+		if d.IsWorker() {
+			if _, owned := l.workers[d.Name]; !owned {
+				l.workers[d.Name] = d
+			}
 		}
 	}
 	for i := range p.Defs {
@@ -198,7 +213,7 @@ func lint(p *Prog, b *types.Builtins, allowMachine, allowStage bool) []error {
 			l.errorf("entry display must return String")
 		}
 	}
-	l.errs = append(l.errs, verifyCaptures(p, b)...)
+	l.errs = append(l.errs, verifyCapturesIn(p, context, b)...)
 	l.errs = append(l.errs, CheckRowEvidence(p)...)
 	return l.errs
 }

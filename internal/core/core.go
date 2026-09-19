@@ -57,6 +57,16 @@ type Def struct {
 	CaptureContract *types.CaptureContract
 	Control         types.Control
 	Body            Expr
+	ABI             ABISummary
+}
+
+// ABISummary records backend representation facts that require inspecting an
+// owned body. Installed dependency objects expose this summary, not the body.
+type ABISummary struct {
+	Valid                 bool
+	NeedsFamily           bool
+	CallsControlledArg    bool
+	PassiveMachineFactory bool
 }
 
 // IsWorker reports whether the definition emits as a function: it has term

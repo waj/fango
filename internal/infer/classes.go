@@ -22,6 +22,10 @@ type InstanceInfo struct {
 	Methods     []string
 	// Limit freezes the instance environment at this declaration.
 	Limit int
+	// Ref is the stable module/source declaration identity used by module
+	// objects. Limit remains the live-session cutoff until M4 installation.
+	Ref    DeclRef
+	Cutoff []DeclRef
 	// Exact native forwarding and identity bodies can bypass dictionary
 	// projection when an instance is statically known.
 	NativeMethods   map[int]string

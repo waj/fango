@@ -113,6 +113,13 @@ func (b *moduleCheck) registerThrough(end int) {
 		case *ast.InstanceDecl:
 			b.context(i, d.Owner, func() {
 				in, es := b.ck.registerInstance(d)
+				if in != nil {
+					in.Ref = DeclRef{Module: b.ck.moduleName, Index: i}
+					in.Cutoff = make([]DeclRef, 0, in.Limit)
+					for _, visible := range b.ck.Instances[:in.Limit] {
+						in.Cutoff = append(in.Cutoff, visible.Ref)
+					}
+				}
 				b.instances[i] = in
 				b.errs = append(b.errs, es...)
 			})

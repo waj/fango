@@ -109,6 +109,17 @@ func TestDependencyOrderAndManifest(t *testing.T) {
 	if !r.Units[len(r.Units)-1].Entry {
 		t.Fatal("last dependency-first unit is not the entry")
 	}
+	if len(r.Modules) == 0 || r.Modules[len(r.Modules)-1].Role != EntryRole || r.Modules[len(r.Modules)-1].Entry != "Main.main" {
+		t.Fatalf("resolved module roles: %#v", r.Modules)
+	}
+	for i, module := range r.Modules[:len(r.Modules)-1] {
+		if module.Role != DependencyRole || module.Entry != "" {
+			t.Fatalf("dependency %d has entry role: %#v", i, module)
+		}
+		if len(module.Module.InstanceImports) != 1 {
+			t.Fatalf("module %q visibility owners = %v", module.Name, module.Module.InstanceImports)
+		}
+	}
 }
 
 func TestPreludeFollowsBundledImports(t *testing.T) {

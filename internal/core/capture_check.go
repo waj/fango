@@ -36,12 +36,21 @@ func InferCapturesIn(p *Prog, context []Def, b *types.Builtins) []error {
 }
 
 func verifyCaptures(p *Prog, b *types.Builtins) []error {
+	return verifyCapturesIn(p, nil, b)
+}
+
+func verifyCapturesIn(p *Prog, context []Def, b *types.Builtins) []error {
 	copyProg := *p
 	copyProg.Defs = append([]Def(nil), p.Defs...)
 	for i := range copyProg.Defs {
 		copyProg.Defs[i].ResultCaptures = types.CaptureSet{}
 	}
 	a := newCaptureAnalyzer(&copyProg, b)
+	for i := range context {
+		if _, own := a.defs[context[i].Name]; !own {
+			a.defs[context[i].Name] = &context[i]
+		}
+	}
 	a.solve()
 	var errs []error
 	for i := range p.Defs {
