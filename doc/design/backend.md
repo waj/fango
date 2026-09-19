@@ -84,6 +84,14 @@ Go's cache reuses unchanged packages. Build copies the executable; run reuses it
 while inputs are unchanged. [Commands](../reference/commands.md) owns output
 paths and managed-directory safeguards.
 
+The source project also keeps successful batch artifacts beneath
+`.fango/cache/v1/<compiler fingerprint>/`. Artifacts use a versioned JSON
+envelope and atomic rename, and contain the validated source manifest plus the
+generated files for one entry/print-main mode. The compiler fingerprint is the
+SHA-256 of the running executable, computed once per process, so compiler or
+schema changes select a cold namespace. Cache writes are optional and cache
+read failures never become diagnostics.
+
 ## Self tail-call loops
 
 Both backends use the pure Core eligibility predicate. It requires a saturated

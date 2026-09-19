@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/waj/fango/internal/codegen"
+	"github.com/waj/fango/internal/compilecache"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/elaborate"
@@ -80,6 +81,10 @@ func hasMain(p *core.Prog) bool {
 // build, run, --emit-go, and backend structural tests. printMain makes a
 // value-typed entry print its value through the shared formatter.
 func emitProjectManifest(entry string, printMain bool, stderr io.Writer) ([]codegen.File, []modules.ManifestEntry, bool) {
+	mode := fmt.Sprintf("emit:print-main=%t", printMain)
+	if files, manifest, ok := compilecache.Load(entry, mode); ok {
+		return files, manifest, true
+	}
 	prog, ck, manifest, loadedUnits, nativeSources, ok := compileFileGraph(entry, stderr)
 	if !ok {
 		return nil, nil, false
@@ -123,6 +128,7 @@ func emitProjectManifest(entry string, printMain bool, stderr io.Writer) ([]code
 			codegen.File{Path: dir + "native.go", Data: data},
 			codegen.File{Path: dir + "host.go", Data: hostSource})
 	}
+	compilecache.Store(entry, mode, manifest, files)
 	return files, manifest, true
 }
 
@@ -133,8 +139,13 @@ func cmdCheck(args []string, stderr io.Writer) int {
 		usage(stderr)
 		return 2
 	}
-	if _, _, ok := compileFile(args[0], stderr); !ok {
+	if _, _, ok := compilecache.Load(args[0], "check"); ok {
+		return 0
+	}
+	if _, _, manifest, _, _, ok := compileFileGraph(args[0], stderr); !ok {
 		return 1
+	} else {
+		compilecache.Store(args[0], "check", manifest, nil)
 	}
 	return 0
 }

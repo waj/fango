@@ -41,6 +41,25 @@ func Dir(entry string) (string, error) {
 	return d, os.MkdirAll(d, 0o755)
 }
 
+// CacheDir returns (creating if needed) the compiler artifact cache beside the
+// source root. It follows Dir's per-entry unwritable-source fallback.
+func CacheDir(entry string) (string, error) {
+	abs, err := filepath.Abs(entry)
+	if err != nil {
+		return "", err
+	}
+	d := filepath.Join(filepath.Dir(abs), ".fango", "cache")
+	if err := os.MkdirAll(d, 0o755); err == nil {
+		return d, nil
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	d = filepath.Join(cache, "fango", pathHash(abs), "cache")
+	return d, os.MkdirAll(d, 0o755)
+}
+
 func pathHash(p string) string {
 	var h uint64 = 14695981039346656037
 	for i := 0; i < len(p); i++ {

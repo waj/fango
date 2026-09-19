@@ -6,9 +6,11 @@ contracts are in [pipeline](design/pipeline.md) and [backend](design/backend.md)
 ## Unembedding the bundled sources
 
 Bundled Fango, sidecars, and Go runtime support are embedded in the compiler.
-Manual edits require rebuilding; every invocation also rechecks the bundled
-Prelude and runs its derivers. A replacement should improve iteration and/or
-cold compile latency without silently accepting compiler/library skew.
+Manual edits require rebuilding. Successful repeated project commands reuse a
+compiler-fingerprinted project artifact, so an unchanged invocation does not
+recheck the bundled Prelude or rerun its derivers. Shipping prechecked bundled
+modules independently of a prior project compilation remains open; it must not
+silently accept compiler/library skew.
 
 Embedding currently guarantees agreement with canonical Meta symbols/classes and
 the bundled-native registry. Removing it needs a version/skew diagnostic and a
@@ -18,7 +20,9 @@ copy; a project's ability to supply one is part of the same source-root decision
 Open choices:
 
 - Files beside the binary, serialized checked interfaces/Core, or source for
-  development plus a precompiled distribution artifact.
+  development plus a precompiled distribution artifact. A future per-module
+  codec can reuse the versioned, atomic cache namespace already used by batch
+  project artifacts.
 - Whether Go runtime support remains embedded: generated projects/workers still
   need its source materialized in arbitrary build directories.
 - Source-root spelling and whether it is a development escape hatch or the

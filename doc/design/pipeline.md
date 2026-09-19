@@ -18,6 +18,14 @@ installs Machine lowering when cursor intrinsics require it. Staging uses a
 separate lint entry and lowers the exact splice operand and reachable completed
 definitions (see [metaprogramming](metaprogramming.md)).
 
+Successful batch commands also publish a compiler-fingerprinted project
+artifact after validation. Before loading the graph, a later `check`, `build`,
+or `run` hashes the local paths recorded by that artifact. An exact match lets
+`check` reuse the prior success and lets build/run reuse the emitted Go bytes,
+skipping parsing through emission. Bundled inputs are covered by the exact
+compiler-executable fingerprint. Invalid JSON, missing inputs, hash mismatches,
+and cache I/O errors are ordinary misses.
+
 ## Parsing and surface lowering
 
 The lexer records byte spans and line/column positions without layout tokens.

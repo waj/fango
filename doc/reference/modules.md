@@ -115,6 +115,9 @@ private Go module, allowing unchanged packages to use Go's build cache. It
 includes `sources.json`, containing each transitive Fango source and native
 sidecar's logical name, path, and SHA-256 hash for build invalidation. Local
 paths are relative to the source root; bundled paths begin with `<stdlib>/`.
+The same manifest validates the transparent compilation cache: edits,
+removals, or newly added native sidecars force a miss, while bundled content is
+tied to the compiler-executable fingerprint.
 
 ## Current naming limitation
 
