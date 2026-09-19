@@ -23,13 +23,16 @@ projects or other ignored application data.
 `build`, `run`, `check`, and `clean` accept one `.fango` source file:
 
 ```text
-fango build [-o out] [--emit-go] main.fango
-fango run main.fango [--] [args...]
-fango check main.fango
+fango build [-o out] [--emit-go] [verbosity] main.fango
+fango run [verbosity] main.fango [--] [args...]
+fango check [verbosity] main.fango
 fango fmt [-w] [-l] [file...]
 fango repl [dir]
 fango clean main.fango
 ```
+
+Flags precede the source path, because everything after it belongs to the
+program `run` is about to start.
 
 `build` writes a native executable (defaulting to the source basename without
 `.fango`). `run` builds if needed and runs the cached executable, forwarding
@@ -59,12 +62,55 @@ reuses, so checking first costs a build only its back end.
 
 When the source-local cache cannot be written, artifacts use a shared
 user-cache namespace for the absolute source root. The cache is transparent:
-corrupt, incompatible, or unwritable entries are ignored and rebuilt, and there
-is no status or disable flag. Distinct compiler executables use distinct
+corrupt, incompatible, or unwritable entries are ignored and rebuilt, and no
+failure to read or write one is ever a diagnostic. `-no-cache` compiles every
+module from source, ignoring valid artifacts and publishing none, so a cold
+build can be compared with a warm one without discarding either; the
+[verbosity flags](#build-progress-and-statistics) report what was reused.
+Distinct compiler executables use distinct
 namespaces, so an upgraded compiler starts cold and never reads what an older
 one wrote. `FANGO_BUILD_DIR` redirects generated build output, not this cache.
 Parsing is never cached: every command reparses the whole source graph, and
 `fmt` parses its requested input like any other.
+
+## Build progress and statistics
+
+`build`, `run`, and `check` are silent on success by default. `-v` reports each
+module as it goes by, naming the stage as the verb and marking the ones served
+from cache:
+
+```text
+   Parsing  10 modules
+  Checking  List (from cache)
+  Checking  Markdown
+  Emitting  List (from cache)
+  Emitting  Markdown
+   Linking  go build
+  Finished  markdown — 10 modules (9 cached, 1 compiled), 1.4 MB reused, 275ms
+```
+
+Discovery is one line, because nothing in it is cacheable: every command
+reparses and revalidates the whole graph, so the count is all there is to
+report. `Checking` and `Emitting` name one module each, in dependency order; an
+entry file that declares no module header is named `<entry>`. A
+build whose generated sources are all unchanged relinks nothing and prints no
+`Linking` line. `check` stops after `Checking`.
+
+`-vv` adds a table of where the time went and what the cache moved. Stages that
+belong to no module — writing the generated project, and the Go toolchain — are
+timed by the command itself, and time that belongs to no stage is reported as
+`other`, so the rows always reconcile with the total. Modules that arrive from
+cache defer their stage Core until some module is checked from source; the
+`stage Core` row and the count beneath the cache block are what reading it
+cost.
+
+`-timings json` writes the same measurements as one JSON object instead of the
+prose, for recording build cost over time. `-no-cache` ignores and publishes no
+artifacts, so a cold build can be measured against a warm one in place.
+
+All of this goes to standard error. A program started by `run` still owns
+standard output entirely, so its output is byte-for-byte what it wrote whatever
+verbosity the build ran at.
 
 ## Formatting
 
@@ -144,7 +190,9 @@ current working directory; `-o DIR` selects another directory. The project has
 one `go.mod`, a root `main.go`, the shared `fangort` package, and one package per
 imported Fango module beneath `modules/`. It can be compiled by running
 `go build .` inside the directory without network access. Emission is quiet on
-success. A missing, empty, or previously Fango-generated destination is
+success unless a [verbosity flag](#build-progress-and-statistics) asks
+otherwise; it stops before the Go toolchain, so it reports no linking stage. A
+missing, empty, or previously Fango-generated destination is
 accepted; a non-empty unmanaged directory is rejected. Exported `.out`
 directories are output artifacts and are not removed by `fango clean`.
 

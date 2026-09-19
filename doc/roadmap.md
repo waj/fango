@@ -44,11 +44,14 @@ Artifact framing, the binary object encoding, and deferred stage sections are
   a cold namespace and nothing removes the previous one but `clean`, so a
   developer rebuilding the compiler accumulates them.
 - Decode artifacts in parallel. Decoding is pure and the objects are
-  independent, but coordination cost is real for small graphs; it needs a
-  measurement showing it pays before it is worth the concurrency.
+  independent, but coordination cost is real for small graphs. `fango build
+  -vv` now measures what decoding costs a build, so the question is whether a
+  given graph spends enough in artifact lookup to pay for the concurrency.
 - Shrink stage Core. A module's stage section is its declarations elaborated a
   second time for the compile-time evaluator, and it is the largest part of
-  every object. That is a staging question, not a cache one.
+  every object. Changing one module forces it for every module it depends on,
+  which `-vv` reports as its own stage. That is a staging question, not a cache
+  one.
 
 ## Compile-time metaprogramming
 

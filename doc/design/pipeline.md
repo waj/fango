@@ -27,11 +27,16 @@ compiler-executable fingerprint. Every artifact carries a digest of its
 complete payload; invalid frames, structurally invalid emissions, missing
 inputs, hash mismatches, and cache I/O errors are ordinary misses.
 
-Compilation sessions have a test-only event observer. It records the parse,
+Compilation sessions report through one event observer. It records the parse,
 resolve, check, elaborate, semantic-lint, lowering, and emission stages with
-their owner, and the checked and emitted artifact hits and misses, and the
-stage sections actually read, separately from them, so a test can tell reuse
-from work. It never writes CLI output.
+their owner, and the checked and emitted artifact hits, misses, and stores, and
+the stage sections actually read, separately from them, so a caller can tell
+reuse from work. Every site reports after the work it names, so an event
+carries the elapsed time of its own stage rather than the gap to the next one,
+and artifact events carry the bytes they moved. Tests count the events; the CLI
+presents them as progress and build statistics behind its verbosity flags. An
+absent observer costs the pipeline nothing, which is what the commands install
+by default.
 
 `internal/check` owns the semantic path, and its installer is shared: a batch
 command installs a whole entry graph, a REPL session installs its Prelude roots
@@ -154,7 +159,8 @@ Every cached state is still installed through the graph compatibility checks.
 Consequently independently cached branches cannot bypass duplicate-deriver,
 instance-overlap, or blanket-cycle validation. Batch event instrumentation
 reports `checked-cache-hit`, `checked-cache-miss`, and `stage-section`
-separately from actual `check`, `elaborate`, and `semantic-lint` work.
+separately from actual `check`, `elaborate`, and `semantic-lint` work, so
+reusing a module and checking one are never confused for each other.
 
 ## Parsing and surface lowering
 
