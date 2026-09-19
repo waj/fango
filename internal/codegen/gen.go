@@ -55,49 +55,95 @@ func EmitMachineProject(p *core.Prog, mp *machineir.Prog, b *types.Builtins, uni
 }
 
 func emitProject(p *core.Prog, mp *machineir.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
-	var files []File
+	if err := ValidateUnits(p, units); err != nil {
+		return nil, err
+	}
+	files := make([]File, 0, len(units))
+	for _, unit := range units {
+		file, err := EmitUnit(UnitProgram(p, unit), mp, b, unit, printMain)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, file)
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	return files, nil
+}
+
+// ValidateUnits proves the unit set covers the program: one entry, no repeated
+// owner, and a unit for every definition, type, and effect owner. It reads no
+// definition body, so the module backend runs it on installed headers.
+func ValidateUnits(p *core.Prog, units []Unit) error {
 	entryCount := 0
 	owners := make(map[string]bool, len(units))
 	for _, unit := range units {
 		if owners[unit.Name] {
-			return nil, fmt.Errorf("codegen: duplicate module unit %q", unit.Name)
+			return fmt.Errorf("codegen: duplicate module unit %q", unit.Name)
 		}
 		owners[unit.Name] = true
 		if unit.Entry {
 			entryCount++
 		}
-		data, err := emitUnitWithMachine(p, mp, b, unit, printMain)
-		if err != nil {
-			return nil, err
-		}
-		path := "main.go"
-		if !unit.Entry {
-			path = filepath.ToSlash(filepath.Join("modules", strings.ReplaceAll(unit.Name, ".", "/"), "module.go"))
-		}
-		files = append(files, File{Path: path, Data: data})
 	}
 	if entryCount != 1 {
-		return nil, fmt.Errorf("codegen: module graph has %d entry units, want 1", entryCount)
+		return fmt.Errorf("codegen: module graph has %d entry units, want 1", entryCount)
 	}
 	for _, def := range p.Defs {
 		if !owners[def.Owner] {
-			return nil, fmt.Errorf("codegen: definition %q has no module unit for owner %q", def.Name, def.Owner)
+			return fmt.Errorf("codegen: definition %q has no module unit for owner %q", def.Name, def.Owner)
 		}
 	}
 	for _, adt := range p.ADTs {
 		owner := symbolOwner(adt.Con.Name)
 		if !owners[owner] {
-			return nil, fmt.Errorf("codegen: type %q has no module unit for owner %q", adt.Con.Name, owner)
+			return fmt.Errorf("codegen: type %q has no module unit for owner %q", adt.Con.Name, owner)
 		}
 	}
 	for _, eff := range p.Effects {
 		owner := symbolOwner(eff.Name)
 		if types.SurfaceName(eff.Name) != "IO" && !owners[owner] {
-			return nil, fmt.Errorf("codegen: effect %q has no module unit for owner %q", eff.Name, owner)
+			return fmt.Errorf("codegen: effect %q has no module unit for owner %q", eff.Name, owner)
 		}
 	}
-	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	return files, nil
+	return nil
+}
+
+// EmitUnit emits one owner's Go package. p carries that owner's Core together
+// with the installed dependency headers its calls link against; mp carries the
+// Machine families the owner materialized. Nothing here reads a dependency
+// body, so an owner can be emitted from its checked object alone.
+func EmitUnit(p *core.Prog, mp *machineir.Prog, b *types.Builtins, unit Unit, printMain bool) (File, error) {
+	data, err := emitUnitWithMachine(p, mp, b, unit, printMain)
+	if err != nil {
+		return File{}, err
+	}
+	return File{Path: UnitPath(unit), Data: data}, nil
+}
+
+// UnitPath is the generated file one unit owns, relative to the Go module
+// root. The entry module is package main at the root; dependencies live below
+// modules/ in their logical source layout.
+func UnitPath(unit Unit) string {
+	if unit.Entry {
+		return "main.go"
+	}
+	return filepath.ToSlash(filepath.Join("modules", strings.ReplaceAll(unit.Name, ".", "/"), "module.go"))
+}
+
+// UnitProgram narrows p to one owner. Imported definitions keep their headers
+// — type, control, evidence order, and ABI summary — and lose their bodies, so
+// emission cannot rediscover a dependency's calling convention from its
+// implementation.
+func UnitProgram(p *core.Prog, unit Unit) *core.Prog {
+	out := *p
+	out.Defs = make([]core.Def, len(p.Defs))
+	for i := range p.Defs {
+		out.Defs[i] = p.Defs[i]
+		if out.Defs[i].Owner != unit.Name {
+			out.Defs[i].Body = nil
+		}
+	}
+	return &out
 }
 
 func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byte, error) {
@@ -156,6 +202,13 @@ func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, un
 		}
 		for i := range mp.Closures {
 			g.machineClosures[mp.Closures[i].Expr] = &mp.Closures[i]
+		}
+		// Imported families are link contracts only: they supply row and
+		// evidence shapes at call sites and are declared by their own owner.
+		for i := range mp.Declared {
+			if g.machineWorkers[mp.Declared[i].Name] == nil {
+				g.machineWorkers[mp.Declared[i].Name] = &mp.Declared[i]
+			}
 		}
 	}
 	entry := p.Entry

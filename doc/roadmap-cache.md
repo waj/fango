@@ -151,49 +151,16 @@ Implement the remaining milestones in dependency order. Each has an
 independently reviewable result and acceptance gate. The implemented in-memory
 module boundary is described in
 [pipeline design](design/pipeline.md#pipeline), including its typed persistent
-module-object cache and stage-dependency validation. Do not substitute
-whole-project cache hits for any milestone's module-level acceptance tests.
-
-### M6: add owner-scoped lowering and emission caching
-
-Builds on the persistent checked-module boundary. Starting points are
-`machine.Lower`, `codegen.EmitProject`, and
-the per-unit generator's imported-definition lookups.
-
-Required work:
-
-- Introduce `machine.LowerUnit` and `codegen.EmitUnit`, or equivalent APIs,
-  consuming owned Core plus imported link/ABI summaries.
-- Eliminate imported runtime-body inspection from code generation. Use the
-  installed module ABI summaries for calling-convention decisions.
-- Lower only owned workers, closures, and synthesized helpers. Imported
-  Machine families are declared by link summaries.
-- Add owner-scoped Machine validation without weakening the existing
-  whole-program validation used by equivalence tests.
-- Cache formatted Go bytes per owner. Missing emission artifacts must reuse
-  checked module objects.
-- Include every byte-affecting link input in emission keys, including
-  transitive type-owner imports and entry-package native-package links.
-- Preserve managed generated-project paths, runtime materialization,
-  stale-file pruning, and `sources.json`.
-- Read current native Go bytes for native-package materialization. A sidecar
-  body edit rebuilds its owner/native package while unchanged Fango-facing
-  summaries preserve importer hits.
-- Keep `--emit-go` using the source project cache and exporting only the
-  existing managed project files.
-
-Acceptance: the module backend emits byte-identical Go to the whole-program
-reference path. Tests must make imported runtime bodies unavailable to
-lowering/emission, proving the new boundary is sufficient. An unchanged build
-performs zero module parsing, resolution, checking, elaboration, linting,
-lowering, or emission. A check followed by a build performs only the missing
-backend work.
+module-object cache and stage-dependency validation; the owner-scoped backend
+and its emission cache are described in
+[backend design](design/backend.md#module-emission-and-build-cache). Do not
+substitute whole-project cache hits for any milestone's module-level acceptance
+tests.
 
 ### M7: integrate fresh REPL sessions and transactional imports
 
-Builds on the persistent checked-module boundary; use M6's boundaries where
-runtime Machine installation needs them. Starting points are REPL bootstrap,
-`importInput`, `install`, evaluator
+Builds on the persistent checked-module and module-backend boundaries.
+Starting points are REPL bootstrap, `importInput`, `install`, evaluator
 definition installation, and native-worker replacement.
 
 Required work:
@@ -224,7 +191,7 @@ the prompt's own input.
 
 ### M8: remove the project shortcut and complete the public contract
 
-Depends on M6 and M7.
+Depends on M7.
 
 Required work:
 

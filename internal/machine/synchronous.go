@@ -8,19 +8,44 @@ import (
 // Scope's source contract checks actual acquisition/release callbacks before
 // row widening. Its Machine member transports these two slots synchronously.
 func synchronousScopeMember(source *core.Def) (*core.Def, []int) {
-	if source.Name != types.ScopeBracketName {
+	if _, ok := source.Body.(*core.Bracket); !ok {
 		return source, nil
 	}
-	if _, ok := source.Body.(*core.Bracket); !ok || len(source.Params) != 3 {
+	copy, params := synchronousScopeSignature(source)
+	if params == nil {
+		return source, nil
+	}
+	replacements := map[string]types.Type{}
+	args, _ := core.PeelFun(copy.Type, 3)
+	for _, i := range params {
+		replacements[source.Params[i]] = args[i]
+	}
+	copy.Body = core.Rewrite(source.Body, identityType, func(e core.Expr) core.Expr {
+		if ref, ok := e.(*core.VarRef); ok && ref.Local && replacements[ref.Name] != nil {
+			ref.Ty = replacements[ref.Name]
+		}
+		if call, ok := e.(*core.App); ok && call.CalleeKind == core.Value {
+			if ref, ok := call.Callee.(*core.VarRef); ok && replacements[ref.Name] != nil {
+				call.Control = types.Control{Transport: types.Exit}
+			}
+		}
+		return e
+	})
+	return copy, params
+}
+
+// synchronousScopeSignature is the same transport decision taken from the
+// declaration alone, so a consumer can link against the member its dependency
+// lowered without reading that dependency's body.
+func synchronousScopeSignature(source *core.Def) (*core.Def, []int) {
+	if source.Name != types.ScopeBracketName || len(source.Params) != 3 {
 		return source, nil
 	}
 	args, result := core.PeelFun(source.Type, 3)
-	replacements := map[string]types.Type{}
 	for _, i := range []int{0, 1} {
 		fn := *args[i].(*types.TFun)
 		fn.Control = types.Control{Transport: types.Exit}
 		args[i] = &fn
-		replacements[source.Params[i]] = &fn
 	}
 	copy := *source
 	copy.Type = result
@@ -35,16 +60,5 @@ func synchronousScopeMember(source *core.Def) (*core.Def, []int) {
 		fn.Arg, fn.Ret, fn.Control = args[i], copy.Type, core.ArrowControl(source.Type, i+1)
 		copy.Type = &fn
 	}
-	copy.Body = core.Rewrite(source.Body, identityType, func(e core.Expr) core.Expr {
-		if ref, ok := e.(*core.VarRef); ok && ref.Local && replacements[ref.Name] != nil {
-			ref.Ty = replacements[ref.Name]
-		}
-		if call, ok := e.(*core.App); ok && call.CalleeKind == core.Value {
-			if ref, ok := call.Callee.(*core.VarRef); ok && replacements[ref.Name] != nil {
-				call.Control = types.Control{Transport: types.Exit}
-			}
-		}
-		return e
-	})
 	return &copy, []int{0, 1}
 }

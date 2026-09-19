@@ -12,7 +12,11 @@ import (
 // Lint independently checks the execution contract consumed by machine
 // interpreters and emitters. In particular it recomputes liveness and frame
 // layouts instead of trusting Lower's materialized proof data.
+// Lint checks a unit's Machine IR against every family it calls. Imported
+// families are declarations — parameters, evidence, rows, and result with no
+// blocks of their own: their owner proved those when it lowered them.
 func Lint(p *Prog) []error {
+	declared := p.Declared
 	workers := map[string]*Worker{}
 	var errs []error
 	for i := range p.Workers {
@@ -24,6 +28,11 @@ func Lint(p *Prog) []error {
 			errs = append(errs, fmt.Errorf("duplicate machine worker %q", w.Name))
 		}
 		workers[w.Name] = w
+	}
+	for i := range declared {
+		if workers[declared[i].Name] == nil {
+			workers[declared[i].Name] = &declared[i]
+		}
 	}
 	for i := range p.Workers {
 		errs = append(errs, lintWorker(&p.Workers[i], workers)...)

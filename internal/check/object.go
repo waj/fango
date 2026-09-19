@@ -35,6 +35,7 @@ type ModuleObject struct {
 	Resolver               modules.Interface
 	Semantic               string
 	ABI                    string
+	Implementation         string
 	StageImplementation    string
 	StageFingerprint       string
 	StageDependencies      []string

@@ -128,7 +128,7 @@ func (s *Session) Compile(entry string) (*Result, []diag.Error, error) {
 		checkStageDependencies := stageSession.StageDependencies()
 		stageDependencies := mergeNames(checkStageDependencies, stageSession.StageReferences(stageObject.Defs, module.Name, module.NativeModule))
 		object := &ModuleObject{State: state, Resolver: module.Interface, Nominals: nominalNames(ck), EffectNames: effectNames(ck), Runtime: append([]core.Def(nil), owned...), Stage: stageObject.Defs, StageGroups: stageObject.Groups, TemplateBase: templateStart, Templates: ck.Templates.Snapshot(templateStart), StageDependencies: stageDependencies, CheckStageDependencies: checkStageDependencies}
-		ownSemantic, ownABI, ownStage := ownFingerprints(object)
+		ownSemantic, ownABI, ownStage, ownImplementation := ownFingerprints(object)
 		semanticDeps, semanticOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.Semantic })
 		abiDeps, abiOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.ABI })
 		stageDeps, stageOK := dependencyFingerprints(object.StageDependencies, summaries, func(s moduleSummary) string { return s.Stage })
@@ -138,6 +138,7 @@ func (s *Session) Compile(entry string) (*Result, []diag.Error, error) {
 			object.Semantic = combinedFingerprint("semantic", ownSemantic, semanticDeps)
 			object.ABI = combinedFingerprint("abi", ownABI, abiDeps)
 			object.StageImplementation = ownStage
+			object.Implementation = ownImplementation
 			object.StageFingerprint = combinedFingerprint("stage", ownStage, stageDeps)
 			summaries[module.Name] = moduleSummary{Semantic: object.Semantic, ABI: object.ABI, Stage: object.StageFingerprint}
 			if hasBase && objectCache != nil {

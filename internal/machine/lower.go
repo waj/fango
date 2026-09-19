@@ -16,7 +16,7 @@ func Lower(p *core.Prog, b *types.Builtins) (*Prog, []error) {
 	if errs := core.LintMachineInput(p, b); len(errs) != 0 {
 		return nil, errs
 	}
-	return lower(p)
+	return lower(p, nil)
 }
 
 // LowerStage uses the same execution IR and ownership proofs for compile-time
@@ -25,10 +25,43 @@ func LowerStage(p *core.Prog, b *types.Builtins) (*Prog, []error) {
 	if errs := core.LintStageMachineInput(p, b); len(errs) != 0 {
 		return nil, errs
 	}
-	return lower(p)
+	return lower(p, nil)
 }
 
-func lower(p *core.Prog) (*Prog, []error) {
+// LowerUnit emits the Machine families one owner owns. p holds that owner's
+// Core together with installed dependency headers, whose Machine members are
+// declared by their control alone and never lowered here. Validation is
+// owner-scoped for the same reason: a dependency's body is not available and
+// its invariants were proven when it was checked.
+func LowerUnit(p *core.Prog, owner string, b *types.Builtins) (*Prog, []error) {
+	owned, imported := partitionOwner(p, owner)
+	if errs := core.LintMachineInputIn(owned, imported, b); len(errs) != 0 {
+		return nil, errs
+	}
+	return lower(p, &owner)
+}
+
+// partitionOwner splits p into the owner's own program and the installed
+// definitions it links against.
+func partitionOwner(p *core.Prog, owner string) (*core.Prog, []core.Def) {
+	out := *p
+	out.Defs = nil
+	var imported []core.Def
+	for _, d := range p.Defs {
+		if d.Owner == owner {
+			out.Defs = append(out.Defs, d)
+		} else {
+			imported = append(imported, d)
+		}
+	}
+	return &out, imported
+}
+
+// lower selects the Machine roots to materialize. A nil owner lowers the whole
+// program; otherwise only that owner's definitions are lowered, while every
+// definition's control still decides whether a call reaches a Machine member.
+func lower(p *core.Prog, owner *string) (*Prog, []error) {
+	owns := func(d *core.Def) bool { return d != nil && (owner == nil || d.Owner == *owner) }
 	defs := make(map[string]*core.Def, len(p.Defs))
 	selected := map[string]bool{}
 	for i := range p.Defs {
@@ -46,7 +79,7 @@ func lower(p *core.Prog) (*Prog, []error) {
 	var rootedAux []core.Def
 	for i := range p.Defs {
 		d := &p.Defs[i]
-		if selected[d.Name] {
+		if selected[d.Name] || !owns(d) {
 			continue
 		}
 		builder := &builder{def: d, locals: localRefTypes(d.Body), lambdas: map[*core.Lambda]bool{}, stateAux: map[string]bool{}}
@@ -66,7 +99,7 @@ func lower(p *core.Prog) (*Prog, []error) {
 		changed = false
 		for name := range selected {
 			d := defs[name]
-			if d == nil {
+			if d == nil || !owns(d) {
 				continue
 			}
 			core.Rewrite(d.Body, identityType, func(e core.Expr) core.Expr {
@@ -85,7 +118,9 @@ func lower(p *core.Prog) (*Prog, []error) {
 
 	names := make([]string, 0, len(selected))
 	for name := range selected {
-		names = append(names, name)
+		if owns(defs[name]) {
+			names = append(names, name)
+		}
 	}
 	sort.Strings(names)
 	out := &Prog{Closures: rootedClosures}
@@ -110,10 +145,53 @@ func lower(p *core.Prog) (*Prog, []error) {
 			queue = append(queue, d.Name)
 		}
 	}
+	out.Declared = declaredWorkers(defs, selected, owns)
 	if len(errs) == 0 {
 		errs = append(errs, Lint(out)...)
 	}
 	return out, errs
+}
+
+// declaredWorkers are the Machine families this unit calls but does not own.
+// Their contracts follow from the installed declaration, so a consumer links
+// against them without its dependency's blocks.
+func declaredWorkers(defs map[string]*core.Def, selected map[string]bool, owns func(*core.Def) bool) []Worker {
+	var names []string
+	for name := range selected {
+		if d := defs[name]; d != nil && !owns(d) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	out := make([]Worker, 0, len(names))
+	for _, name := range names {
+		out = append(out, declareWorker(defs[name]))
+	}
+	return out
+}
+
+// declareWorker reconstructs an imported Machine family's calling contract
+// from its declaration: parameter, evidence, row, and result types, with no
+// blocks. Only its owner lowers and validates its implementation.
+func declareWorker(d *core.Def) Worker {
+	synchronousParams := []int(nil)
+	if signature, params := synchronousScopeSignature(d); params != nil {
+		d, synchronousParams = signature, params
+	}
+	argTys, result := core.PeelFun(d.Type, len(d.Params))
+	params := make([]Local, len(d.Params))
+	for i, name := range d.Params {
+		params[i] = Local{Name: name, Ty: argTys[i]}
+	}
+	// A top-level worker's only row is its own parameter: rows are bound by
+	// enclosing scopes, and the families a consumer can name are top level.
+	var rows []types.CaptureVar
+	if d.RowParam != 0 {
+		rows = []types.CaptureVar{d.RowParam}
+	}
+	return Worker{Name: d.Name, Owner: d.Owner, TyParams: d.TyParams, Params: params,
+		EffectParams: machineEvidence(d.EffectParams), RowEffects: machineEvidence(d.RowEffects),
+		RowParam: d.RowParam, Rows: rows, Result: result, Def: d, SynchronousParams: synchronousParams}
 }
 
 func (b *builder) registerOwnedRoots(body core.Expr) {

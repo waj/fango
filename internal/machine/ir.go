@@ -15,6 +15,10 @@ type BlockID int
 type Prog struct {
 	Workers  []Worker
 	Closures []Closure
+	// Declared are the Machine families this unit calls but does not own: the
+	// imported calling contract without blocks. Whole-program lowering owns
+	// every family it calls and leaves this empty.
+	Declared []Worker
 }
 
 // Closure connects one semantic Core lambda to its defunctionalized machine

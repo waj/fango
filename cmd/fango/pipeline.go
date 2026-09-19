@@ -6,16 +6,15 @@ import (
 	"io"
 	"path/filepath"
 
+	"github.com/waj/fango/internal/backend"
 	compilecheck "github.com/waj/fango/internal/check"
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/compilecache"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/infer"
-	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/runtimefiles"
-	"github.com/waj/fango/internal/types"
 )
 
 type stageEvent struct {
@@ -43,19 +42,27 @@ func compileFileGraph(entry string, stderr io.Writer) (*core.Prog, *infer.Checke
 }
 
 func compileFileGraphSession(entry string, stderr io.Writer, session *compilationSession) (*core.Prog, *infer.Checker, []modules.ManifestEntry, []modules.Unit, []modules.NativeSource, bool) {
+	result, ok := checkGraph(entry, stderr, session)
+	if !ok {
+		return nil, nil, nil, nil, nil, false
+	}
+	return result.Program, result.Checker, result.Graph.Manifest, result.Graph.Units, result.Graph.Natives, true
+}
+
+func checkGraph(entry string, stderr io.Writer, session *compilationSession) (*compilecheck.Result, bool) {
 	var observe compilecheck.Observer
 	if session != nil && session.observe != nil {
 		observe = func(stage, owner string) { session.event(stage, owner) }
 	}
 	result, checkErrs, internalErr := (&compilecheck.Session{Observe: observe}).Compile(entry)
 	if report(stderr, checkErrs) {
-		return nil, nil, nil, nil, nil, false
+		return nil, false
 	}
 	if internalErr != nil {
 		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", internalErr)
-		return nil, nil, nil, nil, nil, false
+		return nil, false
 	}
-	return result.Program, result.Checker, result.Graph.Manifest, result.Graph.Units, result.Graph.Natives, true
+	return result, true
 }
 
 func entryOwner(units []modules.Unit, entry string) string {
@@ -105,11 +112,12 @@ func emitProjectManifestSession(entry string, printMain bool, stderr io.Writer, 
 		return files, manifest, true
 	}
 	session.event("cache-miss", filepath.Base(entry))
-	prog, ck, manifest, loadedUnits, nativeSources, ok := compileFileGraphSession(entry, stderr, session)
+	result, ok := checkGraph(entry, stderr, session)
 	if !ok {
 		return nil, nil, false
 	}
-	if !hasMain(prog) {
+	manifest, loadedUnits, nativeSources := result.Graph.Manifest, result.Graph.Units, result.Graph.Natives
+	if !hasMain(result.Program) {
 		fmt.Fprintf(stderr, "fango: %s has no `main` — a program needs `main = ...`\n", entry)
 		return nil, nil, false
 	}
@@ -117,21 +125,11 @@ func emitProjectManifestSession(entry string, printMain bool, stderr io.Writer, 
 	for i, unit := range loadedUnits {
 		units[i] = codegen.Unit{Name: unit.Name, Imports: unit.Imports, Entry: unit.Entry}
 	}
-	var files []codegen.File
-	var err error
-	session.event("lowering", entryOwner(loadedUnits, entry))
-	if prog.Intrinsics[types.StreamWithProducerName] || prog.Intrinsics[types.IteratorNextName] {
-		machineProg, lowerErrs := machineir.Lower(prog, ck.B)
-		if len(lowerErrs) > 0 {
-			fmt.Fprintf(stderr, "fango: internal compiler error: machine lowering failed: %v\n", lowerErrs[0])
-			return nil, nil, false
-		}
-		session.event("emission", entryOwner(loadedUnits, entry))
-		files, err = codegen.EmitMachineProject(prog, machineProg, ck.B, units, printMain)
-	} else {
-		session.event("emission", entryOwner(loadedUnits, entry))
-		files, err = codegen.EmitProject(prog, ck.B, units, printMain)
+	var observe backend.Observer
+	if session != nil && session.observe != nil {
+		observe = func(stage, owner string) { session.event(stage, owner) }
 	}
+	files, err := (&backend.Session{Observe: observe}).EmitProject(entry, result, units, printMain)
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", err)
 		return nil, nil, false

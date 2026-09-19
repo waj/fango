@@ -35,6 +35,13 @@ func LintMachineInput(p *Prog, b *types.Builtins) []error {
 	return lint(p, nil, b, true, false)
 }
 
+// LintMachineInputIn applies the same proofs to one owner's definitions.
+// Context supplies the installed declarations its calls resolve against; those
+// definitions were proven when their own module was checked.
+func LintMachineInputIn(p *Prog, context []Def, b *types.Builtins) []error {
+	return lint(p, context, b, true, false)
+}
+
 // LintStageMachineInput applies the same ownership, capture, and transport
 // proofs to a splice's execution program. Quote and TypeOf are values at this
 // boundary only; the ordinary emission boundary continues to reject them.
