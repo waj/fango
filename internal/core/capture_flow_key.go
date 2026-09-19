@@ -97,9 +97,9 @@ func (f *flowChecker) contextAncestry(id string, matches func(*flowContext) bool
 }
 
 func (f *flowChecker) contextFingerprint(c *flowContext) string {
-	if c.revision != f.revision {
+	if c.revision != f.heapRevision {
 		c.fingerprint = f.flowFingerprint(c.entry)
-		c.revision = f.revision
+		c.revision = f.heapRevision
 	}
 	return c.fingerprint
 }

@@ -104,7 +104,7 @@ func TestFlowFingerprintCyclesAliasesAndGrowth(t *testing.T) {
 		env.values["unrelated"] = flowValue{caps: []int{unrelated}}
 		ref := f.alloc(site, flowObject{kind: "lambda", def: "cycle", code: lambda, env: env})
 		env.values["self"] = flowValue{refs: []int{ref}}
-		f.mergeEnv(&f.objects[ref].env, env)
+		f.mergeObjectEnv(&f.objects[ref].env, env)
 		return ref
 	}
 	a, b := makeCycle("a", 10), makeCycle("b", 20)
@@ -126,7 +126,7 @@ func TestFlowFingerprintCyclesAliasesAndGrowth(t *testing.T) {
 	before := f.contextFingerprint(f.contexts["c1"])
 	grown := f.objects[a].env.clone()
 	grown.values["self"] = joinFlow(grown.values["self"], flowValue{caps: []int{9}})
-	f.mergeEnv(&f.objects[a].env, grown)
+	f.mergeObjectEnv(&f.objects[a].env, grown)
 	if before == f.contextFingerprint(f.contexts["c1"]) {
 		t.Fatal("heap growth left a stale fingerprint")
 	}

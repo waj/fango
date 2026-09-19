@@ -185,17 +185,21 @@ type flowPull struct {
 }
 
 type flowChecker struct {
-	shape           *captureAnalyzer
-	defs            map[string]*Def
-	objects         []*flowObject
-	objectIDs       map[string]int
-	owners          []*flowOwner
-	ownerIDs        map[string]int
-	contexts        map[string]*flowContext
-	key             flowKey
-	byTarget        map[string][]*flowContext
-	edges           map[flowEdge]string
-	revision        int
+	shape     *captureAnalyzer
+	defs      map[string]*Def
+	objects   []*flowObject
+	objectIDs map[string]int
+	owners    []*flowOwner
+	ownerIDs  map[string]int
+	contexts  map[string]*flowContext
+	key       flowKey
+	byTarget  map[string][]*flowContext
+	edges     map[flowEdge]string
+	revision  int
+	// heapRevision counts only the mutations a sharing key can observe: an
+	// object's fields and a closure object's environment. Every other kind of
+	// growth leaves every key intact.
+	heapRevision    int
 	generation      int
 	changed         bool
 	errors          map[string]error
@@ -266,6 +270,18 @@ func (f *flowChecker) merge(dst *flowValue, v flowValue) {
 		f.grow()
 	}
 }
+
+// mergeObjectEnv merges into a closure object's environment, which sharing
+// keys read, so a change here is a heap revision. Context and owner
+// environments go through mergeEnv and leave every key intact.
+func (f *flowChecker) mergeObjectEnv(dst *flowEnv, src flowEnv) {
+	before := f.revision
+	f.mergeEnv(dst, src)
+	if f.revision != before {
+		f.heapRevision++
+	}
+}
+
 func (f *flowChecker) mergeEnv(dst *flowEnv, src flowEnv) {
 	if dst.values == nil {
 		*dst = emptyFlowEnv()
@@ -307,13 +323,20 @@ func (f *flowChecker) alloc(key string, o flowObject) int {
 	if id := f.objectIDs[key]; id != 0 {
 		old := f.objects[id]
 		f.mergeAncestry(&old.ancestry)
-		f.mergeEnv(&old.env, o.env)
+		f.mergeObjectEnv(&old.env, o.env)
+		// A sharing key reads an object's fields, so their growth is a heap
+		// revision. The generic merge is not, because its other destinations
+		// are call results and owner state, which no key reads.
+		before := f.revision
 		for len(old.fields) < len(o.fields) {
 			old.fields = append(old.fields, flowValue{})
 			f.grow()
 		}
 		for i, v := range o.fields {
 			f.merge(&old.fields[i], v)
+		}
+		if f.revision != before {
+			f.heapRevision++
 		}
 		return id
 	}
@@ -685,7 +708,10 @@ func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env fl
 	c := f.contexts[key]
 	if c == nil {
 		key = fmt.Sprintf("c%d", len(f.contexts)+1)
-		c = &flowContext{id: key, entry: env.clone(), boundary: boundary, evaluations: map[int]int{}, origin: f.location, target: target, site: callSite, parent: parent, def: def, scopes: slices.Clone(scopes)}
+		// revision -1 marks the key as never computed: heap revision 0 is a
+		// real state, so a zero here would pass off the empty string as this
+		// context's key.
+		c = &flowContext{id: key, revision: -1, entry: env.clone(), boundary: boundary, evaluations: map[int]int{}, origin: f.location, target: target, site: callSite, parent: parent, def: def, scopes: slices.Clone(scopes)}
 		f.contexts[key] = c
 		if f.byTarget == nil {
 			f.byTarget = map[string][]*flowContext{}
@@ -818,7 +844,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 			for _, id := range v.refs {
 				o := f.objects[id]
 				if o.kind == "lambda" {
-					f.mergeEnv(&o.env, inner)
+					f.mergeObjectEnv(&o.env, inner)
 				}
 			}
 		}
