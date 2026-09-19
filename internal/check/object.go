@@ -1,14 +1,10 @@
 package check
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"reflect"
 
+	"github.com/waj/fango/internal/artifactframe"
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/infer"
@@ -20,14 +16,10 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-const moduleObjectSchema = 1
-
-type objectEnvelope struct {
-	Schema        int             `json:"schema"`
-	Kind          string          `json:"kind"`
-	PayloadSHA256 string          `json:"payload_sha256"`
-	Payload       json.RawMessage `json:"payload"`
-}
+const (
+	moduleObjectSchema = 1
+	moduleObjectKind   = "module-object"
+)
 
 // ModuleObject is the typed installable and persistent checked-module boundary.
 type ModuleObject struct {
@@ -54,29 +46,20 @@ func EncodeObject(object *ModuleObject) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := sha256.Sum256(payload)
-	return json.Marshal(objectEnvelope{Schema: moduleObjectSchema, Kind: "module-object", PayloadSHA256: hex.EncodeToString(h[:]), Payload: payload})
+	framed := artifactframe.Wrap(moduleObjectKind, moduleObjectSchema, payload)
+	if framed == nil {
+		return nil, fmt.Errorf("cannot frame module object")
+	}
+	return framed, nil
 }
 
 func DecodeObject(data []byte, sources map[string]*source.File) (*ModuleObject, error) {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	var envelope objectEnvelope
-	if err := dec.Decode(&envelope); err != nil {
-		return nil, err
-	}
-	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		return nil, fmt.Errorf("trailing module-object data")
-	}
-	if envelope.Schema != moduleObjectSchema || envelope.Kind != "module-object" || len(envelope.Payload) == 0 {
-		return nil, fmt.Errorf("unsupported module-object envelope")
-	}
-	h := sha256.Sum256(envelope.Payload)
-	if envelope.PayloadSHA256 != hex.EncodeToString(h[:]) {
-		return nil, fmt.Errorf("module-object payload digest mismatch")
+	payload, ok := artifactframe.Unwrap(moduleObjectKind, moduleObjectSchema, data)
+	if !ok {
+		return nil, fmt.Errorf("unsupported module-object frame")
 	}
 	var object *ModuleObject
-	err := objectcodec.Decode(envelope.Payload, &object, objectcodec.Context{Types: objectTypes(), Sources: sources})
+	err := objectcodec.Decode(payload, &object, objectcodec.Context{Types: objectTypes(), Sources: sources})
 	return object, err
 }
 

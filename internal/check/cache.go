@@ -2,18 +2,20 @@ package check
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
 
+	"github.com/waj/fango/internal/artifactframe"
 	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/source"
 )
 
-const checkedCandidateSchema = 1
+const (
+	checkedCandidateSchema = 1
+	checkedCandidateKind   = "checked-module-candidate"
+)
 
 type ObjectCache interface {
 	LoadCandidates(baseKey string) [][]byte
@@ -34,13 +36,6 @@ type candidatePayload struct {
 	Semantic          string       `json:"semantic"`
 	ABI               string       `json:"abi"`
 	StageDependencies []stageInput `json:"stage_dependencies"`
-}
-
-type candidateEnvelope struct {
-	Schema        int              `json:"schema"`
-	Kind          string           `json:"kind"`
-	PayloadSHA256 string           `json:"payload_sha256"`
-	Payload       candidatePayload `json:"payload"`
 }
 
 type moduleSummary struct {
@@ -96,43 +91,45 @@ func makeCandidate(base string, object *ModuleObject, summaries map[string]modul
 }
 
 func encodeCandidate(payload candidatePayload) ([]byte, error) {
-	b, err := json.Marshal(payload)
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	h := sha256.Sum256(b)
-	return json.Marshal(candidateEnvelope{Schema: checkedCandidateSchema, Kind: "checked-module-candidate", PayloadSHA256: hex.EncodeToString(h[:]), Payload: payload})
+	framed := artifactframe.Wrap(checkedCandidateKind, checkedCandidateSchema, body)
+	if framed == nil {
+		return nil, fmt.Errorf("cannot frame checked-module candidate")
+	}
+	return framed, nil
 }
 
 func decodeCandidate(data []byte, base, module string, summaries map[string]moduleSummary) (candidatePayload, error) {
-	dec := json.NewDecoder(bytes.NewReader(data))
+	body, ok := artifactframe.Unwrap(checkedCandidateKind, checkedCandidateSchema, data)
+	if !ok {
+		return candidatePayload{}, fmt.Errorf("unsupported checked-module candidate frame")
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
-	var envelope candidateEnvelope
-	if err := dec.Decode(&envelope); err != nil {
+	var payload candidatePayload
+	if err := dec.Decode(&payload); err != nil {
 		return candidatePayload{}, err
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		return candidatePayload{}, fmt.Errorf("trailing candidate data")
 	}
-	payload, err := json.Marshal(envelope.Payload)
-	if err != nil {
-		return candidatePayload{}, err
-	}
-	h := sha256.Sum256(payload)
-	if envelope.Schema != checkedCandidateSchema || envelope.Kind != "checked-module-candidate" || envelope.PayloadSHA256 != hex.EncodeToString(h[:]) || envelope.Payload.BaseKey != base || envelope.Payload.Module != module {
+	if payload.BaseKey != base || payload.Module != module {
 		return candidatePayload{}, fmt.Errorf("invalid checked-module candidate")
 	}
 	last := ""
-	for _, input := range envelope.Payload.StageDependencies {
+	for _, input := range payload.StageDependencies {
 		if input.Module <= last || summaries[input.Module].Stage == "" || summaries[input.Module].Stage != input.Fingerprint {
 			return candidatePayload{}, fmt.Errorf("stale stage dependency %q", input.Module)
 		}
 		last = input.Module
 	}
-	if envelope.Payload.ObjectKey != finalObjectKey(base, envelope.Payload.StageDependencies) {
+	if payload.ObjectKey != finalObjectKey(base, payload.StageDependencies) {
 		return candidatePayload{}, fmt.Errorf("invalid checked-module object key")
 	}
-	return envelope.Payload, nil
+	return payload, nil
 }
 
 func loadCachedObject(cache ObjectCache, base string, module modules.ResolvedModule, summaries map[string]moduleSummary, sources map[string]*source.File) (*ModuleObject, bool) {

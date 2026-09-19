@@ -4,27 +4,17 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
-	"io"
 	"strconv"
+	"strings"
 
+	"github.com/waj/fango/internal/artifactframe"
 	"github.com/waj/fango/internal/codegen"
 )
 
-const emissionSchema = 1
-
-type emissionPayload struct {
-	Key  string `json:"key"`
-	Path string `json:"path"`
-	Data []byte `json:"data"`
-}
-
-type emissionEnvelope struct {
-	Schema        int             `json:"schema"`
-	Kind          string          `json:"kind"`
-	PayloadSHA256 string          `json:"payload_sha256"`
-	Payload       emissionPayload `json:"payload"`
-}
+const (
+	emissionSchema = 1
+	emissionKind   = "emitted-unit"
+)
 
 func digest(parts ...string) string {
 	h := sha256.New()
@@ -36,43 +26,48 @@ func digest(parts ...string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// An emitted unit is its key and unit path on their own lines followed by the
+// generated Go source verbatim. The artifact frame carries the digest, so the
+// payload needs no container of its own and the source needs no re-encoding.
+func encodeUnit(key string, file codegen.File) []byte {
+	if strings.ContainsAny(key, "\n") || strings.ContainsAny(file.Path, "\n") {
+		return nil
+	}
+	payload := make([]byte, 0, len(key)+len(file.Path)+2+len(file.Data))
+	payload = append(payload, key...)
+	payload = append(payload, '\n')
+	payload = append(payload, file.Path...)
+	payload = append(payload, '\n')
+	payload = append(payload, file.Data...)
+	return artifactframe.Wrap(emissionKind, emissionSchema, payload)
+}
+
+func decodeUnit(data []byte, key, path string) ([]byte, bool) {
+	payload, ok := artifactframe.Unwrap(emissionKind, emissionSchema, data)
+	if !ok {
+		return nil, false
+	}
+	storedKey, rest, ok := bytes.Cut(payload, []byte{'\n'})
+	if !ok || string(storedKey) != key {
+		return nil, false
+	}
+	storedPath, source, ok := bytes.Cut(rest, []byte{'\n'})
+	if !ok || string(storedPath) != path || len(source) == 0 {
+		return nil, false
+	}
+	return source, true
+}
+
 func loadUnit(cache Cache, key, path string) ([]byte, bool) {
 	data, ok := cache.Load(key)
 	if !ok {
 		return nil, false
 	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	var envelope emissionEnvelope
-	if err := dec.Decode(&envelope); err != nil {
-		return nil, false
-	}
-	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		return nil, false
-	}
-	payload, err := json.Marshal(envelope.Payload)
-	if err != nil {
-		return nil, false
-	}
-	h := sha256.Sum256(payload)
-	if envelope.Schema != emissionSchema || envelope.Kind != "emitted-unit" ||
-		envelope.PayloadSHA256 != hex.EncodeToString(h[:]) ||
-		envelope.Payload.Key != key || envelope.Payload.Path != path || len(envelope.Payload.Data) == 0 {
-		return nil, false
-	}
-	return envelope.Payload.Data, true
+	return decodeUnit(data, key, path)
 }
 
 func storeUnit(cache Cache, key string, file codegen.File) {
-	payload := emissionPayload{Key: key, Path: file.Path, Data: file.Data}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return
+	if data := encodeUnit(key, file); data != nil {
+		cache.Store(key, data)
 	}
-	h := sha256.Sum256(encoded)
-	data, err := json.Marshal(emissionEnvelope{Schema: emissionSchema, Kind: "emitted-unit", PayloadSHA256: hex.EncodeToString(h[:]), Payload: payload})
-	if err != nil {
-		return
-	}
-	cache.Store(key, data)
 }

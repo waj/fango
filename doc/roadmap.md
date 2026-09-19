@@ -35,6 +35,13 @@ owns disk versus precompiled sources, source-root configuration, version/skew
 checks, per-project Prelude, and runtime-source materialization. Package
 fetching and independent library versioning remain deferred.
 
+## Compilation cache decoding cost
+
+[Compilation cache](roadmap-cache.md) owns the artifact framing, the binary
+object payload, and deferred stage sections. Warm compilation currently spends
+nearly all its time parsing cache artifacts rather than compiling; what is
+cached, and every validity rule, stays as it is.
+
 ## Compile-time metaprogramming
 
 [Declaration generation](roadmap-meta.md) waits for a concrete consumer and

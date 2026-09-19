@@ -118,8 +118,15 @@ paths and managed-directory safeguards.
 The source project keeps its artifacts beneath
 `.fango/cache/v1/<compiler fingerprint>/`, one namespace per artifact kind:
 checked module objects keyed as [pipeline](pipeline.md#pipeline) describes, and
-emitted Go keyed as above. Each uses a versioned JSON envelope, payload digest,
-and atomic rename, and each is validated independently before use. There is no
+emitted Go keyed as above. Each is framed with its artifact kind, payload
+schema, and payload digest on a single header line, followed by the payload
+bytes themselves, and each is written by atomic rename and validated
+independently before use. Framing the payload as opaque bytes is what lets a
+reader find and verify it without parsing it, and what makes the digest cover
+the bytes as stored rather than a re-encoded copy of them. An emitted unit's
+payload is its key and unit path followed by the generated Go source verbatim;
+a checked-module candidate's is its JSON; a checked module object's is its
+[object encoding](pipeline.md#pipeline). There is no
 whole-project artifact: every invocation discovers and validates the current
 graph, and one module-artifact pipeline decides what is still valid, so no
 command can be served a stale program by a shortcut that outranks its modules.

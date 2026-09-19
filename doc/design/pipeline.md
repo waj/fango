@@ -24,7 +24,7 @@ content hashes — and then reuses artifacts one module at a time. Nothing
 outranks that: there is no whole-project success record, so no command can skip
 the graph it is about to compile. Bundled inputs are covered by the exact
 compiler-executable fingerprint. Every artifact carries a digest of its
-complete payload; invalid envelopes, structurally invalid emissions, missing
+complete payload; invalid frames, structurally invalid emissions, missing
 inputs, hash mismatches, and cache I/O errors are ordinary misses.
 
 Compilation sessions have a test-only event observer. It records the parse,
