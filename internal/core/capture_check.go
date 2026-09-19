@@ -74,12 +74,14 @@ type captureResult struct {
 }
 
 type captureAnalyzer struct {
-	p          *Prog
-	b          *types.Builtins
-	defs       map[string]*Def
-	adts       map[int]*types.ADTInfo
-	nextVar    types.CaptureVar
-	clauseVars map[*Handle][][]types.CaptureVar
+	p           *Prog
+	b           *types.Builtins
+	defs        map[string]*Def
+	adts        map[int]*types.ADTInfo
+	nextVar     types.CaptureVar
+	clauseVars  map[*Handle][][]types.CaptureVar
+	typeKeys    map[types.Type][]byte
+	typeArgKeys map[*types.CaptureFlow][]byte
 }
 
 func newCaptureAnalyzer(p *Prog, b *types.Builtins) *captureAnalyzer {

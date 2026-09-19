@@ -192,6 +192,7 @@ type flowChecker struct {
 	owners          []*flowOwner
 	ownerIDs        map[string]int
 	contexts        map[string]*flowContext
+	key             flowKey
 	byTarget        map[string][]*flowContext
 	edges           map[flowEdge]string
 	revision        int

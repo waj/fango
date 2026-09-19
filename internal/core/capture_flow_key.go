@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/waj/fango/internal/types"
@@ -13,8 +14,22 @@ import (
 // Keep only definition-site bindings. Invocation binders must not accidentally
 // capture a previous activation's arguments, evidence, or residual row.
 func relevantFlowEnv(body *types.CaptureFlow, env flowEnv, bound []string, effects []int, row types.CaptureVar) flowEnv {
-	out := emptyFlowEnv()
+	out := filterFlowEnv(body, env, bound, effects, row)
 	out.types = maps.Clone(env.types)
+	return out
+}
+
+// readOnlyFlowEnv is relevantFlowEnv for a caller that only reads the result.
+// The sharing key is one such caller, and it rebuilds this for every closure
+// it reaches, so cloning the substitution there is pure waste.
+func readOnlyFlowEnv(body *types.CaptureFlow, env flowEnv, bound []string, effects []int, row types.CaptureVar) flowEnv {
+	out := filterFlowEnv(body, env, bound, effects, row)
+	out.types = env.types
+	return out
+}
+
+func filterFlowEnv(body *types.CaptureFlow, env flowEnv, bound []string, effects []int, row types.CaptureVar) flowEnv {
+	out := emptyFlowEnv()
 	for name := range flowFree(body, bound) {
 		if v, ok := env.values[name]; ok {
 			out.values[name] = v
@@ -39,77 +54,6 @@ func relevantFlowEnv(body *types.CaptureFlow, env flowEnv, bound []string, effec
 // constructor graphs. Concrete owner IDs are never structurally renumbered.
 // The key is recomputed against the mutable heap on lookup, so late field or
 // closure-environment growth cannot leave a stale key in the sharing index.
-func (f *flowChecker) flowFingerprint(env flowEnv) string {
-	var b strings.Builder
-	seen := map[int]int{}
-	var value func(flowValue)
-	var environment func(flowEnv)
-	environment = func(e flowEnv) {
-		b.WriteString("env{")
-		for _, name := range slices.Sorted(maps.Keys(e.values)) {
-			fmt.Fprintf(&b, "%q:", name)
-			value(e.values[name])
-		}
-		for _, ev := range slices.Sorted(maps.Keys(e.evidence)) {
-			if len(e.evidence[ev]) == 0 {
-				continue
-			}
-			fmt.Fprintf(&b, "e%d:%v;", ev, e.evidence[ev])
-		}
-		for _, r := range slices.Sorted(maps.Keys(e.rows)) {
-			row := e.rows[r]
-			if !row.unknown && len(row.evidence) == 0 {
-				continue
-			}
-			fmt.Fprintf(&b, "r%d:%t{", r, row.unknown)
-			for _, ev := range slices.Sorted(maps.Keys(row.evidence)) {
-				fmt.Fprintf(&b, "%d:%v;", ev, row.evidence[ev])
-			}
-			b.WriteString("}")
-		}
-		// JSON retains nominal uniques and rigid variable identities, unlike the
-		// diagnostic type printer (which deliberately hides both).
-		data, err := json.Marshal(e.types)
-		if err != nil {
-			panic(err)
-		}
-		b.Write(data)
-		b.WriteString("}")
-	}
-	value = func(v flowValue) {
-		fmt.Fprintf(&b, "v%t:%v[", v.unknown, v.caps)
-		for _, id := range v.refs {
-			o := f.objects[id]
-			if o.kind == "global" {
-				data, err := json.Marshal(o.code.TypeArgs)
-				if err != nil {
-					panic(err)
-				}
-				fmt.Fprintf(&b, "global:%q:%s;", o.def, data)
-				continue
-			}
-			if index := seen[id]; index != 0 {
-				fmt.Fprintf(&b, "@%d;", index)
-				continue
-			}
-			seen[id] = len(seen) + 1
-			fmt.Fprintf(&b, "o%d:%q:%q:%d:%d:%d{", seen[id], o.kind, o.def, o.ctor, o.owner, o.yieldEffect)
-			if o.kind == "lambda" {
-				fmt.Fprintf(&b, "code%d:", o.code.ID)
-				effects := append(slices.Clone(o.code.Effects), o.code.Deferred...)
-				environment(relevantFlowEnv(o.code.Children[0], o.env, []string{o.code.Name}, effects, o.code.RowParam))
-			}
-			for _, field := range o.fields {
-				value(field)
-			}
-			b.WriteString("}")
-		}
-		b.WriteString("]")
-	}
-	environment(env)
-	return b.String()
-}
-
 func (f *flowChecker) grow() {
 	f.changed = true
 	f.revision++
@@ -193,4 +137,220 @@ func (f *flowChecker) statistics() flowStatistics {
 		s.evaluations[id] = maps.Clone(c.evaluations)
 	}
 	return s
+}
+
+// flowKey builds a sharing key. The buffer and the alias table are reused
+// across calls: the key is rebuilt on nearly every context lookup, so the
+// allocation dominates what it encodes.
+type flowKey struct {
+	b    []byte
+	seen map[int]int
+}
+
+// appendInts renders a slice the way %v does, which is what the key used to
+// contain and what its stored form must keep matching.
+func appendInts(b []byte, xs []int) []byte {
+	b = append(b, '[')
+	for i, x := range xs {
+		if i > 0 {
+			b = append(b, ' ')
+		}
+		b = strconv.AppendInt(b, int64(x), 10)
+	}
+	return append(b, ']')
+}
+
+func appendBool(b []byte, v bool) []byte {
+	if v {
+		return append(b, "true"...)
+	}
+	return append(b, "false"...)
+}
+
+// typeJSON is json.Marshal for one type, memoized on the three pointer-shaped
+// representations. Types are immutable once elaborated, so the encoding of a
+// given node never changes. Row is a value type holding a slice, so it is not
+// a legal map key and is encoded directly.
+func (a *captureAnalyzer) typeJSON(t types.Type) []byte {
+	var key types.Type
+	switch t.(type) {
+	case *types.TVar, *types.TCon, *types.TFun:
+		key = t
+	}
+	if key != nil {
+		if data, ok := a.typeKeys[key]; ok {
+			return data
+		}
+	}
+	data, err := json.Marshal(t)
+	if err != nil {
+		panic(err)
+	}
+	if key != nil {
+		if a.typeKeys == nil {
+			a.typeKeys = map[types.Type][]byte{}
+		}
+		a.typeKeys[key] = data
+	}
+	return data
+}
+
+// appendTypes writes what json.Marshal writes for a map[int]types.Type: null
+// for a nil map, otherwise entries ordered by their quoted key, which is the
+// order encoding/json itself emits. Encoding each type separately is what
+// makes the memo above reachable.
+func (a *captureAnalyzer) appendTypes(b []byte, m map[int]types.Type) []byte {
+	if m == nil {
+		return append(b, "null"...)
+	}
+	keys := make([]string, 0, len(m))
+	index := make(map[string]int, len(m))
+	for k := range m {
+		s := strconv.Itoa(k)
+		keys = append(keys, s)
+		index[s] = k
+	}
+	slices.Sort(keys)
+	b = append(b, '{')
+	for i, s := range keys {
+		if i > 0 {
+			b = append(b, ',')
+		}
+		b = strconv.AppendQuote(b, s)
+		b = append(b, ':')
+		b = append(b, a.typeJSON(m[index[s]])...)
+	}
+	return append(b, '}')
+}
+
+// typeArgsJSON memoizes a code node's type arguments, which never change once
+// the contract that carries them is built.
+func (a *captureAnalyzer) typeArgsJSON(code *types.CaptureFlow) []byte {
+	if data, ok := a.typeArgKeys[code]; ok {
+		return data
+	}
+	data, err := json.Marshal(code.TypeArgs)
+	if err != nil {
+		panic(err)
+	}
+	if a.typeArgKeys == nil {
+		a.typeArgKeys = map[*types.CaptureFlow][]byte{}
+	}
+	a.typeArgKeys[code] = data
+	return data
+}
+
+// Canonical traversal numbers preserve aliases and terminate cyclic closure and
+// constructor graphs. Concrete owner IDs are never structurally renumbered.
+// The key is recomputed against the mutable heap on lookup, so late field or
+// closure-environment growth cannot leave a stale key in the sharing index.
+func (f *flowChecker) flowFingerprint(env flowEnv) string {
+	f.key.b = f.key.b[:0]
+	if f.key.seen == nil {
+		f.key.seen = map[int]int{}
+	} else {
+		clear(f.key.seen)
+	}
+	f.keyEnv(env)
+	return string(f.key.b)
+}
+
+func (f *flowChecker) keyEnv(e flowEnv) {
+	b := f.key.b
+	b = append(b, "env{"...)
+	for _, name := range slices.Sorted(maps.Keys(e.values)) {
+		b = strconv.AppendQuote(b, name)
+		b = append(b, ':')
+		f.key.b = b
+		f.keyValue(e.values[name])
+		b = f.key.b
+	}
+	for _, ev := range slices.Sorted(maps.Keys(e.evidence)) {
+		if len(e.evidence[ev]) == 0 {
+			continue
+		}
+		b = append(b, 'e')
+		b = strconv.AppendInt(b, int64(ev), 10)
+		b = append(b, ':')
+		b = appendInts(b, e.evidence[ev])
+		b = append(b, ';')
+	}
+	for _, r := range slices.Sorted(maps.Keys(e.rows)) {
+		row := e.rows[r]
+		if !row.unknown && len(row.evidence) == 0 {
+			continue
+		}
+		b = append(b, 'r')
+		b = strconv.AppendInt(b, int64(r), 10)
+		b = append(b, ':')
+		b = appendBool(b, row.unknown)
+		b = append(b, '{')
+		for _, ev := range slices.Sorted(maps.Keys(row.evidence)) {
+			b = strconv.AppendInt(b, int64(ev), 10)
+			b = append(b, ':')
+			b = appendInts(b, row.evidence[ev])
+			b = append(b, ';')
+		}
+		b = append(b, '}')
+	}
+	// JSON retains nominal uniques and rigid variable identities, unlike the
+	// diagnostic type printer (which deliberately hides both).
+	b = f.shape.appendTypes(b, e.types)
+	f.key.b = append(b, '}')
+}
+
+func (f *flowChecker) keyValue(v flowValue) {
+	b := f.key.b
+	b = append(b, 'v')
+	b = appendBool(b, v.unknown)
+	b = append(b, ':')
+	b = appendInts(b, v.caps)
+	b = append(b, '[')
+	for _, id := range v.refs {
+		o := f.objects[id]
+		if o.kind == "global" {
+			b = append(b, "global:"...)
+			b = strconv.AppendQuote(b, o.def)
+			b = append(b, ':')
+			b = append(b, f.shape.typeArgsJSON(o.code)...)
+			b = append(b, ';')
+			continue
+		}
+		if index := f.key.seen[id]; index != 0 {
+			b = append(b, '@')
+			b = strconv.AppendInt(b, int64(index), 10)
+			b = append(b, ';')
+			continue
+		}
+		f.key.seen[id] = len(f.key.seen) + 1
+		b = append(b, 'o')
+		b = strconv.AppendInt(b, int64(f.key.seen[id]), 10)
+		b = append(b, ':')
+		b = strconv.AppendQuote(b, o.kind)
+		b = append(b, ':')
+		b = strconv.AppendQuote(b, o.def)
+		b = append(b, ':')
+		b = strconv.AppendInt(b, int64(o.ctor), 10)
+		b = append(b, ':')
+		b = strconv.AppendInt(b, int64(o.owner), 10)
+		b = append(b, ':')
+		b = strconv.AppendInt(b, int64(o.yieldEffect), 10)
+		b = append(b, '{')
+		if o.kind == "lambda" {
+			b = append(b, "code"...)
+			b = strconv.AppendInt(b, int64(o.code.ID), 10)
+			b = append(b, ':')
+			f.key.b = b
+			effects := append(slices.Clone(o.code.Effects), o.code.Deferred...)
+			f.keyEnv(readOnlyFlowEnv(o.code.Children[0], o.env, []string{o.code.Name}, effects, o.code.RowParam))
+			b = f.key.b
+		}
+		for _, field := range o.fields {
+			f.key.b = b
+			f.keyValue(field)
+			b = f.key.b
+		}
+		b = append(b, '}')
+	}
+	f.key.b = append(b, ']')
 }
