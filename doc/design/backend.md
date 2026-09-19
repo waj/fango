@@ -116,16 +116,23 @@ while inputs are unchanged. [Commands](../reference/commands.md) owns output
 paths and managed-directory safeguards.
 
 The source project keeps its artifacts beneath
-`.fango/cache/v1/<compiler fingerprint>/`, one namespace per artifact kind:
-checked module objects keyed as [pipeline](pipeline.md#pipeline) describes, and
-emitted Go keyed as above. Each is framed with its artifact kind, payload
-schema, and payload digest on a single header line, followed by the payload
-bytes themselves, and each is written by atomic rename and validated
-independently before use. Framing the payload as opaque bytes is what lets a
-reader find and verify it without parsing it, and what makes the digest cover
-the bytes as stored rather than a re-encoded copy of them. An emitted unit's
-payload is its key and unit path followed by the generated Go source verbatim;
-a checked-module candidate's is its JSON; a checked module object's is its
+`.fango/cache/v1/<compiler fingerprint>/<kind>/<group>/<name>.json`, one
+namespace per artifact kind — checked module objects and emitted Go — holding
+one slot per module. A slot is the module's own identity, never a digest of
+its inputs, so a rebuild replaces an artifact rather than adding one beside it
+and storage is bounded by the modules a project has rather than by its edit
+history. The group separates entries from named modules, because a headerless
+entry answers to its file stem and would otherwise collide with the module of
+that name it imports. Each artifact is framed with its kind, payload schema,
+and payload digest on a single header line, followed by the payload bytes
+themselves, and each is written by atomic rename and validated before use — so
+a reader sees one complete artifact and the record that describes it, never a
+record paired with bytes it did not ship with. Framing the payload as opaque
+bytes is what lets a reader find and verify it without parsing it, and what
+makes the digest cover the bytes as stored rather than a re-encoded copy of
+them. Every payload leads with the record of what its artifact was built from,
+which is what a lookup compares against the graph it has; behind it, an emitted
+unit carries the generated Go source verbatim, and a checked module object its
 [object encoding](pipeline.md#pipeline), whose stage Core is a section of its
 own that a compile reads only when it needs it. There is no
 whole-project artifact: every invocation discovers and validates the current

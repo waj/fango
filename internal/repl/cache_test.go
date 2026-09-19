@@ -9,29 +9,19 @@ import (
 )
 
 type objectCache struct {
-	candidates map[string][][]byte
-	objects    map[string][]byte
+	objects map[string][]byte
 }
 
 func newObjectCache() *objectCache {
-	return &objectCache{candidates: map[string][][]byte{}, objects: map[string][]byte{}}
+	return &objectCache{objects: map[string][]byte{}}
 }
 
-func (c *objectCache) LoadCandidates(key string) [][]byte { return c.candidates[key] }
-func (c *objectCache) StoreCandidate(key string, data []byte) {
-	for _, old := range c.candidates[key] {
-		if string(old) == string(data) {
-			return
-		}
-	}
-	c.candidates[key] = append(c.candidates[key], append([]byte(nil), data...))
-}
-func (c *objectCache) LoadObject(key string) ([]byte, bool) {
-	data, ok := c.objects[key]
+func (c *objectCache) LoadObject(slot string) ([]byte, bool) {
+	data, ok := c.objects[slot]
 	return data, ok
 }
-func (c *objectCache) StoreObject(key string, data []byte) {
-	c.objects[key] = append([]byte(nil), data...)
+func (c *objectCache) StoreObject(slot string, data []byte) {
+	c.objects[slot] = append([]byte(nil), data...)
 }
 
 type events struct {

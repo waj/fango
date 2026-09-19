@@ -109,9 +109,11 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		role = infer.EntryModule
 	}
 	baseKey, hasBase := moduleBaseKey(module, fixityHash, i.summaries)
-	if hasBase && i.cache != nil {
+	slot, hasSlot := objectSlot(module)
+	cacheable := hasBase && hasSlot && i.cache != nil
+	if cacheable {
 		lookupStart := time.Now()
-		object, read, hit := loadCachedObject(i.cache, baseKey, module, i.summaries, i.sources)
+		object, read, hit := loadCachedObject(i.cache, slot, baseKey, module, i.summaries, i.sources)
 		if hit {
 			if err := InstallObject(i.ck, i.stage, object); err == nil {
 				i.artifact("checked-cache-hit", owner, lookupStart, read)
@@ -194,9 +196,9 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		object.Implementation = ownImplementation
 		object.StageFingerprint = combinedFingerprint("stage", ownStage, stageDeps)
 		i.summaries[module.Name] = moduleSummary{Semantic: object.Semantic, ABI: object.ABI, Stage: object.StageFingerprint}
-		if hasBase && i.cache != nil {
+		if cacheable {
 			publishStart := time.Now()
-			i.artifact("checked-cache-store", owner, publishStart, publishCachedObject(i.cache, baseKey, object, i.summaries))
+			i.artifact("checked-cache-store", owner, publishStart, publishCachedObject(i.cache, slot, baseKey, object, i.summaries))
 		}
 	}
 	i.states = append(i.states, state)

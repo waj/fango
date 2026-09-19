@@ -135,14 +135,20 @@ and left unpublished, as is every later consumer of it; caching never decides
 whether a program compiles.
 
 After graph preparation, the shared session looks up each owner in dependency
-order. A base key contains the exact parsed source and native-sidecar identity,
-module role, effective fixity hash, and ordered dependency semantic
-fingerprints. Its candidate manifest records the compile-time dependencies
-discovered by the prior successful check and points to an immutable checked
-object whose final key also contains their current stage fingerprints. Both
-candidate and object have independently validated envelopes and payload
-digests. Only successfully checked, elaborated, and owner-linted objects are
-published, so completed dependency artifacts survive a later entry failure.
+order. An owner keeps one checked object, at a slot named after the owner
+rather than after a hash of its inputs, and a later check replaces it. The
+artifact leads with the record of what it was built from: a base key over the
+exact parsed source and native-sidecar identity, module role, effective fixity
+hash, and ordered dependency semantic fingerprints, plus the compile-time
+dependencies the prior successful check discovered and the stage fingerprints
+they had. Only the artifact can report that second set, which is why it is
+recorded rather than keyed; a lookup that had to name it in advance could not
+be made without first doing the work. A record that disagrees with the current
+graph is an ordinary miss, and the recheck overwrites the slot, so the cache
+holds what a module is rather than what it has been. Restoring a module's
+earlier source therefore rechecks it. Only successfully checked, elaborated,
+and owner-linted objects are published, so completed dependency artifacts
+survive a later entry failure.
 
 Semantic and ABI summaries are canonical, source-position-independent views of
 the installed declaration state and Core headers. Stage summaries cover
@@ -152,7 +158,7 @@ or deriver, including dictionary definitions, ordinary helpers, quote holes,
 callbacks, and native owners. An owner answers to its sidecar package name as
 well as its module name, so a headerless entry, whose sidecar is named after
 its file, does not record itself as its own dependency. Cached Core retains symbolic global names, so a
-later splice executes the currently installed dependency bodies. Candidate
+later splice executes the currently installed dependency bodies. Record
 validation recomputes recorded dependency stage fingerprints from the current
 graph; this catches edits hidden behind an unchanged relay while allowing a
 runtime-only importer to remain a hit after a dependency body edit. Comment and

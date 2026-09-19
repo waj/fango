@@ -7,21 +7,17 @@ import (
 	"io"
 	"sort"
 
-	"github.com/waj/fango/internal/artifactframe"
+	"github.com/waj/fango/internal/compilecache"
 	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/source"
 )
 
-const (
-	checkedCandidateSchema = 1
-	checkedCandidateKind   = "checked-module-candidate"
-)
-
+// ObjectCache is the byte-storage seam for checked module objects. A slot
+// holds one module's current artifact and a store replaces it; deciding
+// whether that artifact is still the right one belongs here, not to the store.
 type ObjectCache interface {
-	LoadCandidates(baseKey string) [][]byte
-	StoreCandidate(baseKey string, data []byte)
-	LoadObject(objectKey string) ([]byte, bool)
-	StoreObject(objectKey string, data []byte)
+	LoadObject(slot string) ([]byte, bool)
+	StoreObject(slot string, data []byte)
 }
 
 type stageInput struct {
@@ -29,19 +25,24 @@ type stageInput struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
-type candidatePayload struct {
+// validityRecord is what a stored object says it was built from. Its base key
+// names the module's own source and its dependencies' contracts; its stage
+// dependencies name the modules the prior check reached at compile time, which
+// only the artifact itself can report.
+type validityRecord struct {
 	BaseKey           string       `json:"base_key"`
 	Module            string       `json:"module"`
-	ObjectKey         string       `json:"object_key"`
-	Semantic          string       `json:"semantic"`
-	ABI               string       `json:"abi"`
 	StageDependencies []stageInput `json:"stage_dependencies"`
 }
 
-type moduleSummary struct {
-	Semantic string
-	ABI      string
-	Stage    string
+// objectSlot names the one artifact this module keeps. The entry answers to
+// its sidecar name, which is its file stem, because a headerless entry has no
+// module name of its own and would otherwise collide with every other one.
+func objectSlot(module modules.ResolvedModule) (string, bool) {
+	if module.Role == modules.EntryRole {
+		return compilecache.Slot(true, module.NativeModule), module.NativeModule != ""
+	}
+	return compilecache.Slot(false, module.Name), module.Name != ""
 }
 
 func moduleBaseKey(module modules.ResolvedModule, fixityHash string, summaries map[string]moduleSummary) (string, bool) {
@@ -56,6 +57,12 @@ func moduleBaseKey(module modules.ResolvedModule, fixityHash string, summaries m
 	return digest(parts...), true
 }
 
+type moduleSummary struct {
+	Semantic string
+	ABI      string
+	Stage    string
+}
+
 func dependencyFingerprints(names []string, summaries map[string]moduleSummary, field func(moduleSummary) string) ([]string, bool) {
 	out := make([]string, 0, len(names)*2)
 	for _, name := range names {
@@ -68,133 +75,109 @@ func dependencyFingerprints(names []string, summaries map[string]moduleSummary, 
 	return out, true
 }
 
-func finalObjectKey(base string, inputs []stageInput) string {
-	parts := []string{"checked-module-object", base}
-	for _, input := range inputs {
-		parts = append(parts, input.Module, input.Fingerprint)
-	}
-	return digest(parts...)
-}
-
-func makeCandidate(base string, object *ModuleObject, summaries map[string]moduleSummary) (candidatePayload, bool) {
+func makeRecord(base string, object *ModuleObject, summaries map[string]moduleSummary) (validityRecord, bool) {
 	names := append([]string(nil), object.CheckStageDependencies...)
 	sort.Strings(names)
 	inputs := make([]stageInput, 0, len(names))
 	for _, name := range names {
 		summary, ok := summaries[name]
 		if !ok {
-			return candidatePayload{}, false
+			return validityRecord{}, false
 		}
 		inputs = append(inputs, stageInput{Module: name, Fingerprint: summary.Stage})
 	}
-	return candidatePayload{BaseKey: base, Module: object.State.Name, ObjectKey: finalObjectKey(base, inputs), Semantic: object.Semantic, ABI: object.ABI, StageDependencies: inputs}, true
+	return validityRecord{BaseKey: base, Module: object.State.Name, StageDependencies: inputs}, true
 }
 
-func encodeCandidate(payload candidatePayload) ([]byte, error) {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	framed := artifactframe.Wrap(checkedCandidateKind, checkedCandidateSchema, body)
-	if framed == nil {
-		return nil, fmt.Errorf("cannot frame checked-module candidate")
-	}
-	return framed, nil
-}
-
-func decodeCandidate(data []byte, base, module string, summaries map[string]moduleSummary) (candidatePayload, error) {
-	body, ok := artifactframe.Unwrap(checkedCandidateKind, checkedCandidateSchema, data)
-	if !ok {
-		return candidatePayload{}, fmt.Errorf("unsupported checked-module candidate frame")
-	}
-	dec := json.NewDecoder(bytes.NewReader(body))
+func decodeRecord(data []byte, base, module string, summaries map[string]moduleSummary) (validityRecord, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
-	var payload candidatePayload
-	if err := dec.Decode(&payload); err != nil {
-		return candidatePayload{}, err
+	var record validityRecord
+	if err := dec.Decode(&record); err != nil {
+		return validityRecord{}, err
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		return candidatePayload{}, fmt.Errorf("trailing candidate data")
+		return validityRecord{}, fmt.Errorf("trailing validity record data")
 	}
-	if payload.BaseKey != base || payload.Module != module {
-		return candidatePayload{}, fmt.Errorf("invalid checked-module candidate")
+	if record.BaseKey != base || record.Module != module {
+		return validityRecord{}, fmt.Errorf("superseded checked module")
 	}
 	last := ""
-	for _, input := range payload.StageDependencies {
+	for _, input := range record.StageDependencies {
 		if input.Module <= last || summaries[input.Module].Stage == "" || summaries[input.Module].Stage != input.Fingerprint {
-			return candidatePayload{}, fmt.Errorf("stale stage dependency %q", input.Module)
+			return validityRecord{}, fmt.Errorf("stale stage dependency %q", input.Module)
 		}
 		last = input.Module
 	}
-	if payload.ObjectKey != finalObjectKey(base, payload.StageDependencies) {
-		return candidatePayload{}, fmt.Errorf("invalid checked-module object key")
-	}
-	return payload, nil
+	return record, nil
 }
 
-// loadCachedObject also reports the artifact bytes it read, whether or not a
-// candidate proved usable, so a miss can be told apart from a cache that was
-// never consulted.
-func loadCachedObject(cache ObjectCache, base string, module modules.ResolvedModule, summaries map[string]moduleSummary, sources map[string]*source.File) (*ModuleObject, int, bool) {
-	read := 0
-	for _, data := range cache.LoadCandidates(base) {
-		read += len(data)
-		candidate, err := decodeCandidate(data, base, module.Name, summaries)
-		if err != nil {
-			continue
-		}
-		data, ok := cache.LoadObject(candidate.ObjectKey)
-		if !ok {
-			continue
-		}
-		read += len(data)
-		object, err := DecodeObject(data, sources)
-		if err != nil || object.State == nil || object.State.Name != module.Name {
-			continue
-		}
-		if len(object.CheckStageDependencies) != len(candidate.StageDependencies) {
-			continue
-		}
-		valid := true
-		for i, input := range candidate.StageDependencies {
-			valid = valid && object.CheckStageDependencies[i] == input.Module
-		}
-		ownSemantic, ownABI, ownImplementation := ownFingerprints(object)
-		// The object records its own stage fingerprint, and the artifact frame
-		// already proves the bytes are the ones that were written. Recomputing
-		// it here would mean decoding stage Core on every hit, which is what
-		// deferring the section exists to avoid; reading the section checks it.
-		ownStage := object.StageImplementation
-		semanticDeps, semanticOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.Semantic })
-		abiDeps, abiOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.ABI })
-		stageDeps, stageOK := dependencyFingerprints(object.StageDependencies, summaries, func(s moduleSummary) string { return s.Stage })
-		semantic := combinedFingerprint("semantic", ownSemantic, semanticDeps)
-		abi := combinedFingerprint("abi", ownABI, abiDeps)
-		if valid && semanticOK && abiOK && stageOK && object.Semantic == candidate.Semantic && object.Semantic == semantic && object.ABI == candidate.ABI && object.ABI == abi && ownStage != "" && object.Implementation == ownImplementation {
-			object.StageFingerprint = combinedFingerprint("stage", ownStage, stageDeps)
-			return object, read, true
+// loadCachedObject also reports the artifact bytes it read, whether or not the
+// slot proved usable, so a miss can be told apart from a cache that was never
+// consulted.
+func loadCachedObject(cache ObjectCache, slot, base string, module modules.ResolvedModule, summaries map[string]moduleSummary, sources map[string]*source.File) (*ModuleObject, int, bool) {
+	data, ok := cache.LoadObject(slot)
+	if !ok {
+		return nil, 0, false
+	}
+	read := len(data)
+	recordData, sections, err := SplitObject(data)
+	if err != nil {
+		return nil, read, false
+	}
+	record, err := decodeRecord(recordData, base, module.Name, summaries)
+	if err != nil {
+		return nil, read, false
+	}
+	object, err := DecodeObjectSections(sections, sources)
+	if err != nil || object.State == nil || object.State.Name != module.Name {
+		return nil, read, false
+	}
+	if len(object.CheckStageDependencies) != len(record.StageDependencies) {
+		return nil, read, false
+	}
+	for i, input := range record.StageDependencies {
+		if object.CheckStageDependencies[i] != input.Module {
+			return nil, read, false
 		}
 	}
-	return nil, read, false
+	ownSemantic, ownABI, ownImplementation := ownFingerprints(object)
+	// The object records its own stage fingerprint, and the artifact frame
+	// already proves the bytes are the ones that were written. Recomputing
+	// it here would mean decoding stage Core on every hit, which is what
+	// deferring the section exists to avoid; reading the section checks it.
+	ownStage := object.StageImplementation
+	semanticDeps, semanticOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.Semantic })
+	abiDeps, abiOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.ABI })
+	stageDeps, stageOK := dependencyFingerprints(object.StageDependencies, summaries, func(s moduleSummary) string { return s.Stage })
+	if !semanticOK || !abiOK || !stageOK || ownStage == "" {
+		return nil, read, false
+	}
+	if object.Semantic != combinedFingerprint("semantic", ownSemantic, semanticDeps) ||
+		object.ABI != combinedFingerprint("abi", ownABI, abiDeps) ||
+		object.Implementation != ownImplementation {
+		return nil, read, false
+	}
+	object.StageFingerprint = combinedFingerprint("stage", ownStage, stageDeps)
+	return object, read, true
 }
 
 // publishCachedObject reports the bytes it wrote, or zero when the object
 // could not be published. A failure to write stays silent: it is an
 // optimization declining, not a diagnostic.
-func publishCachedObject(cache ObjectCache, base string, object *ModuleObject, summaries map[string]moduleSummary) int {
-	candidate, ok := makeCandidate(base, object, summaries)
+func publishCachedObject(cache ObjectCache, slot, base string, object *ModuleObject, summaries map[string]moduleSummary) int {
+	record, ok := makeRecord(base, object, summaries)
 	if !ok {
 		return 0
 	}
-	objectData, err := EncodeObject(object)
+	recordData, err := json.Marshal(record)
 	if err != nil {
 		return 0
 	}
-	candidateData, err := encodeCandidate(candidate)
+	data, err := EncodeObject(object, recordData)
 	if err != nil {
 		return 0
 	}
-	cache.StoreObject(candidate.ObjectKey, objectData)
-	cache.StoreCandidate(base, candidateData)
-	return len(objectData) + len(candidateData)
+	cache.StoreObject(slot, data)
+	return len(data)
 }

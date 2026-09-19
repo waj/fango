@@ -1,13 +1,16 @@
 package check
 
 import (
-	"github.com/waj/fango/internal/compileevent"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/waj/fango/internal/compilecache"
+	"github.com/waj/fango/internal/compileevent"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/elaborate"
 	"github.com/waj/fango/internal/infer"
@@ -19,35 +22,19 @@ import (
 )
 
 type memoryObjectCache struct {
-	candidates map[string][][]byte
-	objects    map[string][]byte
+	objects map[string][]byte
 }
 
 func newMemoryObjectCache() *memoryObjectCache {
-	return &memoryObjectCache{candidates: map[string][][]byte{}, objects: map[string][]byte{}}
+	return &memoryObjectCache{objects: map[string][]byte{}}
 }
 
-func (c *memoryObjectCache) LoadCandidates(key string) [][]byte {
-	out := make([][]byte, len(c.candidates[key]))
-	for i, b := range c.candidates[key] {
-		out[i] = append([]byte(nil), b...)
-	}
-	return out
-}
-func (c *memoryObjectCache) StoreCandidate(key string, data []byte) {
-	for _, old := range c.candidates[key] {
-		if string(old) == string(data) {
-			return
-		}
-	}
-	c.candidates[key] = append(c.candidates[key], append([]byte(nil), data...))
-}
-func (c *memoryObjectCache) LoadObject(key string) ([]byte, bool) {
-	b, ok := c.objects[key]
+func (c *memoryObjectCache) LoadObject(slot string) ([]byte, bool) {
+	b, ok := c.objects[slot]
 	return append([]byte(nil), b...), ok
 }
-func (c *memoryObjectCache) StoreObject(key string, data []byte) {
-	c.objects[key] = append([]byte(nil), data...)
+func (c *memoryObjectCache) StoreObject(slot string, data []byte) {
+	c.objects[slot] = append([]byte(nil), data...)
 }
 
 func compileEvents(t *testing.T, entry string, cache ObjectCache) (*Result, map[string]map[string]int) {
@@ -155,13 +142,15 @@ func TestCheckedCacheInvalidatesTransitiveStageClosure(t *testing.T) {
 	if got := intDefinition(t, second, "Main.main"); got != 2 {
 		t.Fatalf("rebuilt splice = %d", got)
 	}
+	// A module keeps one artifact, so restoring its earlier source recompiles
+	// it rather than finding the artifact that source once had.
 	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (make)\nmake = quote 1\n")
 	third, events := compileEvents(t, main, cache)
-	if events["checked-cache-hit"]["Lib"] != 1 || events["checked-cache-hit"]["Main"] != 1 || events["check"]["Main"] != 0 {
-		t.Fatalf("immutable candidate was not reusable: %#v", events)
+	if events["checked-cache-miss"]["Lib"] != 1 || events["check"]["Lib"] != 1 || events["check"]["Main"] != 1 {
+		t.Fatalf("a restored source was served from a superseded artifact: %#v", events)
 	}
 	if got := intDefinition(t, third, "Main.main"); got != 1 {
-		t.Fatalf("reused splice = %d", got)
+		t.Fatalf("recompiled splice = %d", got)
 	}
 }
 
@@ -373,7 +362,7 @@ main = $(Base.make)
 	stageSession := staging.Install(ck)
 	var context []core.Def
 	for _, object := range compiled.Objects {
-		data, err := EncodeObject(object)
+		data, err := EncodeObject(object, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -419,7 +408,7 @@ func TestInstalledObjectSupportsSubsequentInference(t *testing.T) {
 	if len(diagnostics) != 0 {
 		t.Fatal(diagnostics)
 	}
-	data, err := EncodeObject(compiled.Objects[0])
+	data, err := EncodeObject(compiled.Objects[0], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +480,7 @@ func TestModuleObjectCodecRoundTrip(t *testing.T) {
 	if len(result.Objects) != 1 {
 		t.Fatalf("objects = %d", len(result.Objects))
 	}
-	data, err := EncodeObject(result.Objects[0])
+	data, err := EncodeObject(result.Objects[0], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +514,7 @@ func TestModuleObjectCodecRoundTrip(t *testing.T) {
 }
 
 func TestModuleObjectRejectsCorruptEnvelope(t *testing.T) {
-	data, err := EncodeObject(&ModuleObject{State: &infer.ModuleState{Name: "M"}})
+	data, err := EncodeObject(&ModuleObject{State: &infer.ModuleState{Name: "M"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,7 +546,7 @@ func TestInstallObjectRollsBackAllPublishedState(t *testing.T) {
 		}
 	}
 	for _, object := range compiled.Objects {
-		data, err := EncodeObject(object)
+		data, err := EncodeObject(object, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -773,7 +762,7 @@ func TestStageSectionDisagreeingWithItsObjectIsRejected(t *testing.T) {
 	}
 	object := result.Objects[0]
 	object.StageImplementation = "a fingerprint the section cannot have"
-	data, err := EncodeObject(object)
+	data, err := EncodeObject(object, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -784,4 +773,96 @@ func TestStageSectionDisagreeingWithItsObjectIsRejected(t *testing.T) {
 	if _, err := decoded.Pending.load(); err == nil {
 		t.Fatal("a stage section disagreeing with its object was accepted")
 	}
+}
+
+// A module keeps one slot, so editing it replaces that module's artifact
+// instead of adding one beside it and leaving the old one to be found again.
+func TestAnEditReplacesTheModuleArtifact(t *testing.T) {
+	d := t.TempDir()
+	lib := filepath.Join(d, "Lib.fango")
+	main := filepath.Join(d, "Main.fango")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"one\"\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.value\n")
+	cache := newMemoryObjectCache()
+	compileEvents(t, main, cache)
+	before := len(cache.objects)
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"two\"\n")
+	compileEvents(t, main, cache)
+	if len(cache.objects) != before {
+		t.Fatalf("an edit left %d artifacts where the graph has %d modules", len(cache.objects), before)
+	}
+	result, events := compileEvents(t, main, cache)
+	if events["check"]["Lib"] != 0 || events["checked-cache-hit"]["Lib"] != 1 {
+		t.Fatalf("the replaced artifact was not the one reused: %#v", events)
+	}
+	if got := stringDefinition(t, result, "Lib.value"); got != "two" {
+		t.Fatalf("reused implementation = %q", got)
+	}
+}
+
+// The same properties through the real store, which is where slots become
+// paths: one file per module, and an edit rewrites a file rather than adding
+// one.
+func TestOnDiskArtifactsAreOnePerModule(t *testing.T) {
+	d := t.TempDir()
+	lib := filepath.Join(d, "Lib.fango")
+	main := filepath.Join(d, "Main.fango")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"one\"\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.value\n")
+	compileEvents(t, main, compilecache.NewModuleStore(main))
+	first := artifactPaths(t, d)
+	if len(first) != 2 {
+		t.Fatalf("a two-module graph stored %d artifacts: %v", len(first), first)
+	}
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"two\"\n")
+	compileEvents(t, main, compilecache.NewModuleStore(main))
+	if second := artifactPaths(t, d); !reflect.DeepEqual(first, second) {
+		t.Fatalf("an edit changed the stored artifacts from %v to %v", first, second)
+	}
+	_, events := compileEvents(t, main, compilecache.NewModuleStore(main))
+	if events["check"]["Lib"] != 0 || events["check"]["Main"] != 0 {
+		t.Fatalf("a warm build off disk did module work: %#v", events)
+	}
+}
+
+// artifactPaths names every artifact beneath a project's cache, relative to
+// it, so a test can compare what a build left behind.
+func artifactPaths(t *testing.T, dir string) []string {
+	t.Helper()
+	root := filepath.Join(dir, ".fango", "cache")
+	var out []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		// The compiler namespace is a hash of the running binary; the layout
+		// beneath it is what this is about.
+		parts := strings.Split(filepath.ToSlash(relative), "/")
+		out = append(out, strings.Join(parts[2:], "/"))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(out)
+	return out
 }

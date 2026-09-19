@@ -6,24 +6,27 @@
 package backend
 
 import (
-	"time"
-
 	"fmt"
-	"github.com/waj/fango/internal/compileevent"
+	"path/filepath"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/waj/fango/internal/check"
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/compilecache"
+	"github.com/waj/fango/internal/compileevent"
 	"github.com/waj/fango/internal/core"
 	machineir "github.com/waj/fango/internal/machine"
 )
 
-// Cache is the byte-storage seam for emitted units. Missing, damaged, and
-// unwritable entries are misses; the backend never reports them.
+// Cache is the byte-storage seam for emitted units. A slot holds one owner's
+// current bytes and a store replaces them; whether those bytes are still the
+// right ones is decided here, from the record the artifact carries. Missing,
+// damaged, and unwritable entries are misses; the backend never reports them.
 type Cache interface {
-	Load(key string) ([]byte, bool)
-	Store(key string, data []byte)
+	Load(slot string) ([]byte, bool)
+	Store(slot string, data []byte)
 }
 
 type Observer = compileevent.Observer
@@ -78,9 +81,10 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 	for _, unit := range units {
 		owner := ownerLabel(unit.Name)
 		key, keyed := emissionKey(result, unit, summaries, links, printMain)
+		slot := unitSlot(entry, unit)
 		if keyed && cache != nil {
 			lookupStart := time.Now()
-			data, read, hit := loadUnit(cache, key, codegen.UnitPath(unit))
+			data, read, hit := loadUnit(cache, slot, key, codegen.UnitPath(unit))
 			if hit {
 				s.artifact("emitted-cache-hit", owner, lookupStart, read)
 				files = append(files, codegen.File{Path: codegen.UnitPath(unit), Data: data})
@@ -103,12 +107,23 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 		s.timed("emission", owner, emitStart)
 		if keyed && cache != nil {
 			storeStart := time.Now()
-			s.artifact("emitted-cache-store", owner, storeStart, storeUnit(cache, key, file))
+			s.artifact("emitted-cache-store", owner, storeStart, storeUnit(cache, slot, key, file))
 		}
 		files = append(files, file)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, nil
+}
+
+// unitSlot names the one artifact this owner keeps. The entry answers to its
+// file stem, which is also its sidecar name, because a headerless entry has no
+// module name of its own.
+func unitSlot(entry string, unit codegen.Unit) string {
+	if unit.Entry {
+		base := filepath.Base(entry)
+		return compilecache.Slot(true, strings.TrimSuffix(base, filepath.Ext(base)))
+	}
+	return compilecache.Slot(false, unit.Name)
 }
 
 func ownerLabel(name string) string {

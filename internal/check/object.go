@@ -1,6 +1,7 @@
 package check
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 
@@ -17,7 +18,7 @@ import (
 )
 
 const (
-	moduleObjectSchema = 1
+	moduleObjectSchema = 2
 	moduleObjectKind   = "module-object"
 	stageSection       = "stage"
 )
@@ -82,16 +83,27 @@ func (p *PendingStage) load() (*stagePayload, error) {
 	return payload, nil
 }
 
-func EncodeObject(object *ModuleObject) ([]byte, error) {
+// EncodeObject frames the object behind the record of what it was built from.
+// The record leads the payload instead of sitting among the object's own
+// sections, so a slot holding a superseded artifact is rejected without
+// interning its types or rebinding its sources.
+func EncodeObject(object *ModuleObject, record []byte) ([]byte, error) {
+	if bytes.ContainsRune(record, '\n') {
+		return nil, fmt.Errorf("a validity record cannot span lines")
+	}
 	head := *object
 	head.Stage, head.StageGroups, head.Pending = nil, nil, nil
-	payload, err := objectcodec.EncodeSections(
+	sections, err := objectcodec.EncodeSections(
 		objectcodec.Section{Value: &head},
 		objectcodec.Section{Name: stageSection, Value: &stagePayload{Stage: object.Stage, Groups: object.StageGroups}},
 	)
 	if err != nil {
 		return nil, err
 	}
+	payload := make([]byte, 0, len(record)+1+len(sections))
+	payload = append(payload, record...)
+	payload = append(payload, '\n')
+	payload = append(payload, sections...)
 	framed := artifactframe.Wrap(moduleObjectKind, moduleObjectSchema, payload)
 	if framed == nil {
 		return nil, fmt.Errorf("cannot frame module object")
@@ -99,12 +111,32 @@ func EncodeObject(object *ModuleObject) ([]byte, error) {
 	return framed, nil
 }
 
-func DecodeObject(data []byte, sources map[string]*source.File) (*ModuleObject, error) {
+// SplitObject separates an artifact's validity record from the object behind
+// it, so a reader can reject a superseded slot before paying to decode one.
+func SplitObject(data []byte) (record, sections []byte, err error) {
 	payload, ok := artifactframe.Unwrap(moduleObjectKind, moduleObjectSchema, data)
 	if !ok {
-		return nil, fmt.Errorf("unsupported module-object frame")
+		return nil, nil, fmt.Errorf("unsupported module-object frame")
 	}
-	decoder, err := objectcodec.NewDecoder(payload, objectcodec.Context{Types: objectTypes(), Sources: sources})
+	record, sections, ok = bytes.Cut(payload, []byte{'\n'})
+	if !ok {
+		return nil, nil, fmt.Errorf("module object carries no validity record")
+	}
+	return record, sections, nil
+}
+
+func DecodeObject(data []byte, sources map[string]*source.File) (*ModuleObject, error) {
+	_, sections, err := SplitObject(data)
+	if err != nil {
+		return nil, err
+	}
+	return DecodeObjectSections(sections, sources)
+}
+
+// DecodeObjectSections decodes the object itself, once its record has been
+// accepted.
+func DecodeObjectSections(sections []byte, sources map[string]*source.File) (*ModuleObject, error) {
+	decoder, err := objectcodec.NewDecoder(sections, objectcodec.Context{Types: objectTypes(), Sources: sources})
 	if err != nil {
 		return nil, err
 	}

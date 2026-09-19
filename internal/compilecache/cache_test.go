@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -38,13 +37,13 @@ func TestStoresRoundTripUnderTheCompilerNamespace(t *testing.T) {
 	entry := fixture(t)
 	local := filepath.Join(t.TempDir(), "local")
 	rootedAt(t, local, "")
-	hash := strings.Repeat("ab", 32)
-	NewModuleStore(entry).StoreObject(hash, []byte("object"))
-	NewEmissionStore(entry).Store(hash, []byte("emitted"))
-	if got, ok := NewModuleStore(entry).LoadObject(hash); !ok || string(got) != "object" {
+	slot := Slot(false, "String")
+	NewModuleStore(entry).StoreObject(slot, []byte("object"))
+	NewEmissionStore(entry).Store(slot, []byte("emitted"))
+	if got, ok := NewModuleStore(entry).LoadObject(slot); !ok || string(got) != "object" {
 		t.Fatalf("object = %q, %v", got, ok)
 	}
-	if got, ok := NewEmissionStore(entry).Load(hash); !ok || string(got) != "emitted" {
+	if got, ok := NewEmissionStore(entry).Load(slot); !ok || string(got) != "emitted" {
 		t.Fatalf("emitted = %q, %v", got, ok)
 	}
 	// Every artifact kind lives beneath the running compiler's namespace, so
@@ -57,22 +56,58 @@ func TestStoresRoundTripUnderTheCompilerNamespace(t *testing.T) {
 	}
 }
 
-func TestMalformedKeysAreRejected(t *testing.T) {
+// A slot is built from a module name, so the store is what stands between a
+// name it cannot spell and the filesystem.
+func TestMalformedSlotsAreRejected(t *testing.T) {
 	entry := fixture(t)
 	local := filepath.Join(t.TempDir(), "local")
 	rootedAt(t, local, "")
-	for _, key := range []string{"", "zz", strings.Repeat("ab", 31), "../escape"} {
-		NewModuleStore(entry).StoreObject(key, []byte("object"))
-		NewEmissionStore(entry).Store(key, []byte("emitted"))
-		if _, ok := NewModuleStore(entry).LoadObject(key); ok {
-			t.Fatalf("key %q was accepted", key)
+	for _, slot := range []string{"", "String", "module", "module/", "module/a/b", "other/String",
+		"module/../escape", "module/.", "module/..", "module/with space", "module/with/slash", "module/2Digits"} {
+		NewModuleStore(entry).StoreObject(slot, []byte("object"))
+		NewEmissionStore(entry).Store(slot, []byte("emitted"))
+		if _, ok := NewModuleStore(entry).LoadObject(slot); ok {
+			t.Fatalf("slot %q was accepted", slot)
 		}
-		if _, ok := NewEmissionStore(entry).Load(key); ok {
-			t.Fatalf("key %q was accepted", key)
+		if _, ok := NewEmissionStore(entry).Load(slot); ok {
+			t.Fatalf("slot %q was accepted", slot)
 		}
 	}
 	if _, err := os.Stat(local); !os.IsNotExist(err) {
-		t.Fatalf("a rejected key created storage: %v", err)
+		t.Fatalf("a rejected slot created storage: %v", err)
+	}
+}
+
+// An entry and a dependency can answer to the same name — a headerless
+// String.fango importing the stdlib String — and must not share a slot.
+func TestEntryAndModuleSlotsAreDistinct(t *testing.T) {
+	entry := fixture(t)
+	rootedAt(t, filepath.Join(t.TempDir(), "local"), "")
+	NewModuleStore(entry).StoreObject(Slot(true, "String"), []byte("the entry"))
+	NewModuleStore(entry).StoreObject(Slot(false, "String"), []byte("the module"))
+	if got, ok := NewModuleStore(entry).LoadObject(Slot(true, "String")); !ok || string(got) != "the entry" {
+		t.Fatalf("entry slot = %q, %v", got, ok)
+	}
+}
+
+// Storing a module twice replaces its artifact: the cache keeps what a module
+// is now, not what it has been.
+func TestStoringASlotTwiceLeavesOneArtifact(t *testing.T) {
+	entry := fixture(t)
+	local := filepath.Join(t.TempDir(), "local")
+	rootedAt(t, local, "")
+	slot := Slot(false, "List")
+	NewModuleStore(entry).StoreObject(slot, []byte("first"))
+	NewModuleStore(entry).StoreObject(slot, []byte("second"))
+	if got, ok := NewModuleStore(entry).LoadObject(slot); !ok || string(got) != "second" {
+		t.Fatalf("object = %q, %v", got, ok)
+	}
+	entries, err := os.ReadDir(filepath.Join(local, "v1", mustFingerprint(t), "checked", "module"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("a rewritten slot left %d artifacts", len(entries))
 	}
 }
 
@@ -99,7 +134,7 @@ func TestFingerprintFailureIsSticky(t *testing.T) {
 
 func TestReadDoesNotCreateCacheDirectories(t *testing.T) {
 	entry := fixture(t)
-	if _, ok := NewModuleStore(entry).LoadObject(strings.Repeat("cd", 32)); ok {
+	if _, ok := NewModuleStore(entry).LoadObject(Slot(false, "Maybe")); ok {
 		t.Fatal("unexpected hit")
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(entry), ".fango")); !os.IsNotExist(err) {
@@ -116,31 +151,12 @@ func TestStorageFallsBackWhenLocalIsUnwritable(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(local, 0o755) })
-	key := strings.Repeat("ef", 32)
-	NewModuleStore(entry).StoreObject(key, []byte("object"))
-	if got, ok := NewModuleStore(entry).LoadObject(key); !ok || string(got) != "object" {
+	slot := Slot(false, "Result")
+	NewModuleStore(entry).StoreObject(slot, []byte("object"))
+	if got, ok := NewModuleStore(entry).LoadObject(slot); !ok || string(got) != "object" {
 		t.Fatalf("fallback artifact was not readable: %q, %v", got, ok)
 	}
-	if _, err := os.Stat(filepath.Join(fallback, "v1", mustFingerprint(t), "checked", key+".json")); err != nil {
+	if _, err := os.Stat(filepath.Join(fallback, "v1", mustFingerprint(t), "checked", "module", "Result.json")); err != nil {
 		t.Fatalf("artifact did not land in the fallback namespace: %v", err)
-	}
-}
-
-func TestModuleStoreKeepsImmutableCandidates(t *testing.T) {
-	entry := fixture(t)
-	rootedAt(t, filepath.Join(t.TempDir(), "module-cache"), "")
-	store := NewModuleStore(entry)
-	base := strings.Repeat("ab", 32)
-	object := strings.Repeat("cd", 32)
-	store.StoreCandidate(base, []byte("first"))
-	store.StoreCandidate(base, []byte("second"))
-	store.StoreCandidate(base, []byte("first"))
-	candidates := store.LoadCandidates(base)
-	if len(candidates) != 2 {
-		t.Fatalf("candidates = %q", candidates)
-	}
-	store.StoreObject(object, []byte("payload"))
-	if got, ok := store.LoadObject(object); !ok || string(got) != "payload" {
-		t.Fatalf("object = %q, %v", got, ok)
 	}
 }
