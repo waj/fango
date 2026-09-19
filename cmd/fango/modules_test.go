@@ -162,18 +162,18 @@ func TestDependencyManifestInvalidatesBuild(t *testing.T) {
 	}
 	buildDir := t.TempDir()
 	var stderr bytes.Buffer
-	changed, ok := compileToDir(entry, buildDir, &stderr)
+	changed, ok := compileToDir(entry, buildDir, &stderr, nil, nil)
 	if !ok || !changed {
 		t.Fatalf("first compile changed=%v ok=%v: %s", changed, ok, stderr.String())
 	}
-	changed, ok = compileToDir(entry, buildDir, &stderr)
+	changed, ok = compileToDir(entry, buildDir, &stderr, nil, nil)
 	if !ok || changed {
 		t.Fatalf("unchanged compile changed=%v ok=%v: %s", changed, ok, stderr.String())
 	}
 	if err := os.WriteFile(dep, []byte("module Dep exposing (answer)\nanswer = 42\n-- comment-only edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	changed, ok = compileToDir(entry, buildDir, &stderr)
+	changed, ok = compileToDir(entry, buildDir, &stderr, nil, nil)
 	if !ok || !changed {
 		t.Fatalf("dependency edit changed=%v ok=%v: %s", changed, ok, stderr.String())
 	}
@@ -197,7 +197,7 @@ func TestDependencyManifestInvalidatesBuild(t *testing.T) {
 	if err := os.WriteFile(dep, []byte("module Dep exposing (answer)\nanswer = 43\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if changed, ok = compileToDir(entry, buildDir, &stderr); !ok || !changed {
+	if changed, ok = compileToDir(entry, buildDir, &stderr, nil, nil); !ok || !changed {
 		t.Fatalf("dependency implementation edit changed=%v ok=%v: %s", changed, ok, stderr.String())
 	}
 	depAfter, _ := os.ReadFile(depGo)
@@ -212,7 +212,7 @@ func TestDependencyManifestInvalidatesBuild(t *testing.T) {
 	if err := os.WriteFile(entry, []byte("module Main exposing (main)\nmain = 0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if changed, ok = compileToDir(entry, buildDir, &stderr); !ok || !changed {
+	if changed, ok = compileToDir(entry, buildDir, &stderr, nil, nil); !ok || !changed {
 		t.Fatalf("dependency removal changed=%v ok=%v: %s", changed, ok, stderr.String())
 	}
 	if _, err := os.Stat(depGo); !os.IsNotExist(err) {
@@ -329,7 +329,7 @@ main() =
 `)
 	t.Setenv("FANGO_BUILD_DIR", filepath.Join(root, "build"))
 	var stderr bytes.Buffer
-	dir, ok := ensureBuilt(entry, &stderr)
+	dir, ok := ensureBuilt(entry, &stderr, nil, nil)
 	if !ok {
 		t.Fatalf("build: %s", stderr.String())
 	}
@@ -408,7 +408,7 @@ main() = print (Hash.twice (Hash.constant (print "before")))
 	buildDir := filepath.Join(root, "build")
 	t.Setenv("FANGO_BUILD_DIR", buildDir)
 	t.Setenv("FANGO_INTERNAL_PRINT_MAIN", "1")
-	dir, ok := ensureBuilt(entry, &stderr)
+	dir, ok := ensureBuilt(entry, &stderr, nil, nil)
 	if !ok {
 		t.Fatalf("build: %s", stderr.String())
 	}
@@ -425,7 +425,7 @@ func Twice(x int64) int64 { return x * 3 }
 func Constant() int64 { return 42 }
 func Tick() int64 { return 42 }
 `)
-	if changed, ok := compileToDir(entry, buildDir, &stderr); !ok || !changed {
+	if changed, ok := compileToDir(entry, buildDir, &stderr, nil, nil); !ok || !changed {
 		t.Fatalf("sidecar edit changed=%v ok=%v: %s", changed, ok, stderr.String())
 	}
 	if err := build.GoBuild(buildDir); err != nil {
@@ -444,7 +444,7 @@ constant _ = 42
 	if err := os.Remove(filepath.Join(root, "Hash.native.go")); err != nil {
 		t.Fatal(err)
 	}
-	if changed, ok := compileToDir(entry, buildDir, &stderr); !ok || !changed {
+	if changed, ok := compileToDir(entry, buildDir, &stderr, nil, nil); !ok || !changed {
 		t.Fatalf("sidecar removal changed=%v ok=%v: %s", changed, ok, stderr.String())
 	}
 	if _, err := os.Stat(filepath.Join(buildDir, "native", "Hash", "native.go")); !os.IsNotExist(err) {

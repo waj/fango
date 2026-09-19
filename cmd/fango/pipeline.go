@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"go/format"
 	"io"
@@ -21,9 +22,15 @@ import (
 // own to it.
 type stageEvent = compileevent.Event
 
-// compilationSession carries the observer a command installs. A session with
-// no observer costs the pipeline nothing.
-type compilationSession struct{ observe compileevent.Observer }
+// compilationSession carries what a command installs into the pipeline: an
+// observer, and whether to bypass the persistent cache. A session with no
+// observer costs the pipeline nothing.
+type compilationSession struct {
+	observe compileevent.Observer
+	noCache bool
+}
+
+func (s *compilationSession) disableCache() bool { return s != nil && s.noCache }
 
 func (s *compilationSession) observer() compileevent.Observer {
 	if s == nil {
@@ -52,7 +59,7 @@ func compileFileGraphSession(entry string, stderr io.Writer, session *compilatio
 }
 
 func checkGraph(entry string, stderr io.Writer, session *compilationSession) (*compilecheck.Result, bool) {
-	result, checkErrs, internalErr := (&compilecheck.Session{Observe: session.observer()}).Compile(entry)
+	result, checkErrs, internalErr := (&compilecheck.Session{Observe: session.observer(), DisableObjectCache: session.disableCache()}).Compile(entry)
 	if report(stderr, checkErrs) {
 		return nil, false
 	}
@@ -117,7 +124,7 @@ func emitProjectManifestSession(entry string, printMain bool, stderr io.Writer, 
 	for i, unit := range loadedUnits {
 		units[i] = codegen.Unit{Name: unit.Name, Imports: unit.Imports, Entry: unit.Entry}
 	}
-	files, err := (&backend.Session{Observe: session.observer()}).EmitProject(entry, result, units, printMain)
+	files, err := (&backend.Session{Observe: session.observer(), DisableCache: session.disableCache()}).EmitProject(entry, result, units, printMain)
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", err)
 		return nil, nil, false
@@ -143,7 +150,21 @@ func emitProjectManifestSession(entry string, printMain bool, stderr io.Writer, 
 // cmdCheck parses and typechecks only: quiet on success (exit 0),
 // diagnostics on stderr (exit 1). The test harness's workhorse.
 func cmdCheck(args []string, stderr io.Writer) int {
-	return cmdCheckSession(args, stderr, nil)
+	fs := flag.NewFlagSet("check", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	observed := reporting(fs, stderr)
+	if fs.Parse(args) != nil || fs.NArg() != 1 {
+		usage(stderr)
+		return 2
+	}
+	session, report := observed()
+	code := cmdCheckSession(fs.Args(), stderr, session)
+	if code == 0 {
+		// check stops before emission, so it reports discovery and the
+		// semantic phase and nothing else.
+		report.finish("")
+	}
+	return code
 }
 
 func cmdCheckSession(args []string, stderr io.Writer, session *compilationSession) int {
