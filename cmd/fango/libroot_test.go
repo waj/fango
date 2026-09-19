@@ -80,3 +80,87 @@ func TestConfiguredLibraryIsNotSecondGuessed(t *testing.T) {
 		t.Fatalf("output does not name the configured root %s:\n%s", empty, out)
 	}
 }
+
+// copyTree copies a directory of the repository's library into a temporary
+// root, so a test can edit the standard library without touching the one this
+// checkout owns.
+func copyTree(t *testing.T, from, to string) {
+	t.Helper()
+	entries, err := os.ReadDir(from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(to, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		src, dst := filepath.Join(from, entry.Name()), filepath.Join(to, entry.Name())
+		if entry.IsDir() {
+			copyTree(t, src, dst)
+			continue
+		}
+		data, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func runWithLibrary(t *testing.T, root, entry, buildDir string) string {
+	t.Helper()
+	cmd := exec.Command(cliBinary(t), "run", entry)
+	cmd.Env = append(withoutLibrary(), libroot.EnvRoot+"="+root, "FANGO_BUILD_DIR="+buildDir)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("fango run: %v\n%s", err, stderr.String())
+	}
+	return strings.TrimSpace(stdout.String())
+}
+
+// The point of unembedding: a standard library edit takes effect on the next
+// build, with the same compiler executable. The manifest used to skip bundled
+// hashes because the compiler's own fingerprint stood in for them, and this is
+// the property that replaced it.
+func TestStdlibEditTakesEffectWithoutRebuildingTheCompiler(t *testing.T) {
+	if testing.Short() {
+		t.Skip("compiles twice through the real CLI")
+	}
+	root := t.TempDir()
+	repo, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyTree(t, filepath.Join(repo, "stdlib"), filepath.Join(root, "stdlib"))
+	copyTree(t, filepath.Join(repo, "runtime"), filepath.Join(root, "runtime"))
+
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "Main.fango")
+	if err := os.WriteFile(entry, []byte("main = print (List.length [1, 2, 3])\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	build := t.TempDir()
+	if got := runWithLibrary(t, root, entry, build); got != "3" {
+		t.Fatalf("before the edit: got %q, want %q", got, "3")
+	}
+
+	list := filepath.Join(root, "stdlib", "List.fango")
+	before, err := os.ReadFile(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := bytes.Replace(before, []byte("length values = lengthHelp values 0"), []byte("length values = lengthHelp values 100"), 1)
+	if bytes.Equal(before, after) {
+		t.Fatal("List.length is no longer written the way this test edits it")
+	}
+	if err := os.WriteFile(list, after, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The same executable, the same build directory: only the library moved.
+	if got := runWithLibrary(t, root, entry, build); got != "103" {
+		t.Fatalf("after the edit: got %q, want %q", got, "103")
+	}
+}

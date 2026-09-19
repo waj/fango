@@ -6,12 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	goast "go/ast"
 	goparser "go/parser"
 	gotoken "go/token"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -195,77 +193,6 @@ type Interface struct {
 type NativeSource struct {
 	Module, Path string
 	Content      []byte
-}
-
-// ValidateManifest rechecks the discovery-sensitive local filesystem facts in
-// a cached manifest without parsing source. It deliberately uses the same
-// exact-path provider rules as graph loading. Any malformed entry or I/O error
-// is a miss.
-func ValidateManifest(entry string, entries []ManifestEntry) bool {
-	abs, err := filepath.Abs(entry)
-	if err != nil {
-		return false
-	}
-	root, entryPath := filepath.Dir(abs), filepath.Base(abs)
-	local := FSProvider{Root: root}
-	known := make(map[string]ManifestEntry, len(entries))
-	entrySeen := false
-	for _, in := range entries {
-		if in.Path == "" || len(in.SHA256) != sha256.Size*2 {
-			return false
-		}
-		if _, err := hex.DecodeString(in.SHA256); err != nil {
-			return false
-		}
-		if _, exists := known[in.Path]; exists {
-			return false
-		}
-		known[in.Path] = in
-		if in.Path == filepath.ToSlash(entryPath) {
-			entrySeen = true
-		}
-		if strings.HasPrefix(in.Path, "<stdlib>/") {
-			if strings.HasSuffix(in.Path, ".fango") {
-				_, _, localErr := local.Source(in.Module)
-				if !errors.Is(localErr, fs.ErrNotExist) {
-					return false
-				}
-			}
-			continue
-		}
-		rel := filepath.Clean(filepath.FromSlash(in.Path))
-		if filepath.IsAbs(rel) || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return false
-		}
-		b, readErr := readExact(root, rel)
-		if readErr != nil {
-			return false
-		}
-		h := sha256.Sum256(b)
-		if hex.EncodeToString(h[:]) != in.SHA256 {
-			return false
-		}
-	}
-	if !entrySeen {
-		return false
-	}
-	for path := range known {
-		if strings.HasPrefix(path, "<stdlib>/") || !strings.HasSuffix(path, ".fango") {
-			continue
-		}
-		native := strings.TrimSuffix(path, ".fango") + ".native.go"
-		_, expected := known[native]
-		_, readErr := readExact(root, filepath.FromSlash(native))
-		switch {
-		case readErr == nil && !expected:
-			return false
-		case errors.Is(readErr, fs.ErrNotExist) && expected:
-			return false
-		case readErr != nil && !errors.Is(readErr, fs.ErrNotExist):
-			return false
-		}
-	}
-	return true
 }
 
 // Unit is one source module in dependency-first build order. Name is empty

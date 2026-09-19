@@ -1,8 +1,6 @@
 package modules
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"os"
 	"path/filepath"
 	"slices"
@@ -251,48 +249,6 @@ func TestBundledModuleNamesAreReserved(t *testing.T) {
 			t.Fatalf("errors: %#v", errs)
 		}
 	})
-}
-
-func TestValidateManifestRechecksDiscoveryFacts(t *testing.T) {
-	d := t.TempDir()
-	entryBody := "main = 1\n"
-	entry := write(t, d, "Main.fango", entryBody)
-	h := sha256.Sum256([]byte(entryBody))
-	manifest := []ManifestEntry{
-		{Module: "<entry>", Path: "Main.fango", SHA256: hex.EncodeToString(h[:])},
-		{Module: "Basics", Path: "<stdlib>/Basics.fango", SHA256: strings.Repeat("0", 64)},
-	}
-	if !ValidateManifest(entry, manifest) {
-		t.Fatal("valid manifest rejected")
-	}
-
-	write(t, d, "Basics.fango", "module Basics exposing (value)\nvalue = 1\n")
-	if ValidateManifest(entry, manifest) {
-		t.Fatal("new local conflict with bundled module was accepted")
-	}
-	if err := os.Remove(filepath.Join(d, "Basics.fango")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(entry, filepath.Join(d, "main.fango")); err != nil {
-		t.Fatal(err)
-	}
-	if ValidateManifest(entry, manifest) {
-		t.Fatal("entry path casing change was accepted")
-	}
-}
-
-func TestValidateManifestTreatsUnexpectedSidecarErrorAsMiss(t *testing.T) {
-	d := t.TempDir()
-	body := "main = 1\n"
-	entry := write(t, d, "Main.fango", body)
-	h := sha256.Sum256([]byte(body))
-	manifest := []ManifestEntry{{Module: "<entry>", Path: "Main.fango", SHA256: hex.EncodeToString(h[:])}}
-	if err := os.Mkdir(filepath.Join(d, "Main.native.go"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if ValidateManifest(entry, manifest) {
-		t.Fatal("sidecar read error was treated as absence")
-	}
 }
 
 func TestNativeSidecarValidation(t *testing.T) {
