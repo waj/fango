@@ -20,12 +20,12 @@ import (
 	"strings"
 	"time"
 
-	fango "github.com/waj/fango"
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/compileevent"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/fixity"
 	"github.com/waj/fango/internal/lexer"
+	"github.com/waj/fango/internal/libroot"
 	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/parser"
 	"github.com/waj/fango/internal/source"
@@ -94,16 +94,20 @@ func (p FSProvider) Native(module string) (string, []byte, error) {
 	return filepath.ToSlash(rel), b, err
 }
 
+// BundledProvider serves the standard library from the resolved library
+// root. It reports paths under the logical <stdlib>/ prefix rather than the
+// root they were read from, so a build manifest identifies a bundled module
+// the same way wherever the library is installed.
 type BundledProvider struct{}
 
 func (BundledProvider) Source(module string) (string, []byte, error) {
 	rel := strings.ReplaceAll(module, ".", "/") + ".fango"
-	b, err := fs.ReadFile(fango.StdlibFS, "stdlib/"+rel)
+	b, err := libroot.ReadStdlib(rel)
 	return "<stdlib>/" + rel, b, err
 }
 func (BundledProvider) Native(module string) (string, []byte, error) {
 	rel := strings.ReplaceAll(module, ".", "/") + ".native.go"
-	b, err := fs.ReadFile(fango.StdlibFS, "stdlib/"+rel)
+	b, err := libroot.ReadStdlib(rel)
 	return "<stdlib>/" + rel, b, err
 }
 
@@ -564,7 +568,7 @@ func validateModuleDecls(n *node) []diag.Error {
 		// Prelude is a scope directive, not a library: it declares the
 		// default imports and nothing else. Holding it to that is what lets
 		// every build skip emitting a unit for it.
-		errs = append(errs, diag.Error{Title: "INVALID EMBEDDED PRELUDE", Body: n.path + " may contain only imports."})
+		errs = append(errs, diag.Error{Title: "INVALID BUNDLED PRELUDE", Body: n.path + " may contain only imports."})
 	}
 	callDecls := map[string]*ast.ValueDecl{}
 	// opDecls marks the call-form natives that are effect operations; only

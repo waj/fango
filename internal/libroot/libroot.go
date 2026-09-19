@@ -46,17 +46,28 @@ var (
 	override   string
 )
 
-// ErrNotFound reports that no library tree was found. It carries the places
-// that were searched, because the useful diagnostic is where the compiler
-// looked rather than that it failed.
-type ErrNotFound struct{ Searched []string }
+// ErrNotFound reports that no library tree was found. It carries where the
+// compiler looked, because that is what tells a user whether their install or
+// their FANGO_ROOT is at fault.
+type ErrNotFound struct {
+	// Configured is the FANGO_ROOT that named a directory holding no
+	// library. Empty when the variable was unset and the search ran.
+	Configured string
+	// Searched holds the candidates the search rejected, in order.
+	Searched []string
+}
 
 func (e *ErrNotFound) Error() string {
-	if len(e.Searched) == 0 {
-		return fmt.Sprintf("no Fango library found; set %s to the directory holding stdlib/ and runtime/", EnvRoot)
+	if e.Configured != "" {
+		return fmt.Sprintf("%s is set to %s, which holds no Fango library: expected %s beneath it",
+			EnvRoot, e.Configured, probe)
 	}
-	return fmt.Sprintf("no Fango library found in %s; set %s to the directory holding stdlib/ and runtime/",
-		strings.Join(e.Searched, ", "), EnvRoot)
+	where := "nowhere to look"
+	if len(e.Searched) > 0 {
+		where = strings.Join(e.Searched, ", ")
+	}
+	return fmt.Sprintf("no Fango library found; looked beside the executable and in the enclosing %s checkout (%s); set %s to the directory holding stdlib/ and runtime/",
+		goModule, where, EnvRoot)
 }
 
 // Root is the library tree every bundled source is read from. The first
@@ -99,7 +110,7 @@ func search() (string, error) {
 		if dir, ok := consider(env); ok {
 			return dir, nil
 		}
-		return "", &ErrNotFound{Searched: searched}
+		return "", &ErrNotFound{Configured: env}
 	}
 	if exe, err := os.Executable(); err == nil {
 		if exe, err := filepath.EvalSymlinks(exe); err == nil {

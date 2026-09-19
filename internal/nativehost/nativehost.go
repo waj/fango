@@ -13,7 +13,6 @@ import (
 	goast "go/ast"
 	goparser "go/parser"
 	gotoken "go/token"
-	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -24,8 +23,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	fango "github.com/waj/fango"
 	"github.com/waj/fango/internal/codegen"
+	"github.com/waj/fango/internal/libroot"
 	"github.com/waj/fango/internal/runtimefiles"
 	"github.com/waj/fango/runtime/fangort"
 	"github.com/waj/fango/runtime/nativewire"
@@ -172,18 +171,17 @@ func Bundled() (*Executor, error) {
 // BundledSources reads the standard library's sidecars, so a session that
 // also holds user sidecars can build one executor over both.
 func BundledSources() ([]Source, error) {
-	paths, err := fs.Glob(fango.StdlibFS, "stdlib/*.native.go")
+	names, err := libroot.StdlibNatives()
 	if err != nil {
 		return nil, err
 	}
 	var sources []Source
-	for _, path := range paths {
-		data, err := fs.ReadFile(fango.StdlibFS, path)
+	for _, name := range names {
+		data, err := libroot.ReadStdlib(name)
 		if err != nil {
 			return nil, err
 		}
-		module := strings.TrimSuffix(filepath.Base(path), ".native.go")
-		sources = append(sources, Source{Module: module, Content: data})
+		sources = append(sources, Source{Module: strings.TrimSuffix(name, ".native.go"), Content: data})
 	}
 	return sources, nil
 }

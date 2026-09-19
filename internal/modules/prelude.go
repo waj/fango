@@ -48,7 +48,7 @@ func preludeScope(nodes map[string]*node) (Scope, []diag.Error) {
 	s := Scope{Values: map[string]string{}, Types: map[string]string{}, Ctors: map[string]string{}, Ops: map[string]string{}}
 	prelude := nodes[PreludeModule]
 	if prelude == nil {
-		return s, []diag.Error{{Title: "INVALID EMBEDDED PRELUDE", Body: "The bundled " + PreludeModule + " module is missing."}}
+		return s, []diag.Error{{Title: "INVALID BUNDLED PRELUDE", Body: "The bundled " + PreludeModule + " module is missing."}}
 	}
 	var errs []diag.Error
 	for _, im := range prelude.mod.Imports {

@@ -11,6 +11,7 @@ import (
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/fixity"
+	"github.com/waj/fango/internal/libroot"
 	"github.com/waj/fango/internal/source"
 )
 
@@ -131,20 +132,27 @@ func (g *Graph) increment(order []string) *Increment {
 // load reads module name into pending, unless the graph or pending already
 // holds it, and recurses into its imports and syntax-driven dependencies.
 // The diagnostics are the batch loader's; a bundled-only graph reports a
-// missing module as a broken embedded prelude, since nothing a user wrote
+// missing module as a broken bundled prelude, since nothing a user wrote
 // can be at fault.
 func (g *Graph) load(pending map[string]*node, name string, at source.Span) []diag.Error {
 	if g.nodes[name] != nil || pending[name] != nil {
 		return nil
 	}
 	bundlePath, bundleContent, bundleErr := g.bundled.Source(name)
+	// No library at all is its own situation. Left as an ordinary miss it
+	// would fall through to the source root and report that Prelude is
+	// missing from the user's own directory, which sends them looking in
+	// entirely the wrong place.
+	if libroot.Missing(bundleErr) {
+		return []diag.Error{{Title: "MISSING LIBRARY", Body: bundleErr.Error() + "."}}
+	}
 	var path string
 	var b []byte
 	var readErr error
 	bundled := false
 	if g.local == nil {
 		if bundleErr != nil {
-			return []diag.Error{{Title: "INVALID EMBEDDED PRELUDE", Body: bundleErr.Error()}}
+			return []diag.Error{{Title: "INVALID BUNDLED PRELUDE", Body: bundleErr.Error()}}
 		}
 		path, b, bundled = bundlePath, bundleContent, true
 	} else {

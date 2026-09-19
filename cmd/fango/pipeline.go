@@ -14,6 +14,7 @@ import (
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/infer"
+	"github.com/waj/fango/internal/libroot"
 	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/runtimefiles"
 )
@@ -64,7 +65,7 @@ func checkGraph(entry string, stderr io.Writer, session *compilationSession) (*c
 		return nil, false
 	}
 	if internalErr != nil {
-		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", internalErr)
+		reportInternal(stderr, internalErr)
 		return nil, false
 	}
 	return result, true
@@ -126,12 +127,12 @@ func emitProjectManifestSession(entry string, printMain bool, stderr io.Writer, 
 	}
 	files, err := (&backend.Session{Observe: session.observer(), DisableCache: session.disableCache()}).EmitProject(entry, result, units, printMain)
 	if err != nil {
-		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", err)
+		reportInternal(stderr, err)
 		return nil, nil, false
 	}
 	hostSource, err := runtimefiles.NativeHost()
 	if err != nil {
-		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", err)
+		reportInternal(stderr, err)
 		return nil, nil, false
 	}
 	for _, native := range nativeSources {
@@ -176,4 +177,15 @@ func cmdCheckSession(args []string, stderr io.Writer, session *compilationSessio
 		return 1
 	}
 	return 0
+}
+
+// reportInternal prints a compiler-side failure. A library that cannot be
+// found is the one such failure a user can fix, and telling them to report a
+// compiler bug instead would be actively misleading, so it reports as itself.
+func reportInternal(stderr io.Writer, err error) {
+	if libroot.Missing(err) {
+		diag.Render(stderr, []diag.Error{{Title: "MISSING LIBRARY", Body: err.Error() + "."}})
+		return
+	}
+	fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", err)
 }

@@ -103,7 +103,7 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 	}
 	graph, prelude, errs := modules.NewGraph(root)
 	if len(errs) > 0 {
-		panic("invalid embedded prelude: " + errs[0].Body)
+		panic("invalid bundled prelude: " + errs[0].Body)
 	}
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
