@@ -3,6 +3,8 @@ package infer
 import (
 	"fmt"
 
+	"github.com/waj/fango/internal/diag"
+	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -26,21 +28,24 @@ const (
 // cons lowering.
 //
 // The shape is verified rather than assumed. The backends emit head/tail
-// projections against a fixed constructor layout, so a stdlib that drifted from
-// the compiler would miscompile silently; failing here instead is the
-// detectable form of the lockstep invariant that unembedding the bundled
-// sources will have to preserve (doc/roadmap.md).
-func markListRepr(adt *types.ADTInfo) {
+// projections against a fixed constructor layout, so a standard library that
+// drifted from the compiler would miscompile silently. Now that the library is
+// a tree on disk rather than bytes in the executable, that drift is something a
+// user can produce by editing List.fango, so it reports as a diagnostic against
+// the declaration rather than as a compiler-internal assertion.
+func markListRepr(adt *types.ADTInfo, at source.Span) []diag.Error {
 	if adt.Con.Name != ListTypeName {
-		return
+		return nil
 	}
 	if err := checkListShape(adt); err != "" {
-		panic("infer: the bundled " + ListTypeName + " does not have the shape the backends compile: " + err)
+		return []diag.Error{diag.Errorf(at, "INVALID BUNDLED LIST",
+			"The bundled `%s` does not have the shape the compiler generates code against: %s. Restore it, or point FANGO_ROOT at a library matching this compiler.", ListTypeName, err)}
 	}
 	adt.Repr = types.ReprList
 	for _, c := range adt.Ctors {
 		c.Repr = types.ReprList
 	}
+	return nil
 }
 
 // checkListShape returns why adt is not `type List a = Nil | Cons a (List a)`,

@@ -28,12 +28,13 @@ for otherwise unavailable semantics or measured performance needs.
 exposure, and chunk-aware native combinators. Callback and recursion costs
 belong to [calling conventions](roadmap-calls.md).
 
-## Unembedding the bundled sources
+## Distributing the bundled sources
 
-[Modules and distribution](roadmap-modules.md#unembedding-the-bundled-sources)
-owns disk versus precompiled sources, source-root configuration, version/skew
-checks, per-project Prelude, and runtime-source materialization. Package
-fetching and independent library versioning remain deferred.
+The library is now a tree on disk beside the compiler. [Modules and
+distribution](roadmap-modules.md#distributing-the-bundled-sources) owns what is
+left: precompiled library artifacts, the one uncovered skew case, and a
+project-supplied Prelude. Package fetching and independent library versioning
+remain deferred.
 
 ## Compilation cache
 

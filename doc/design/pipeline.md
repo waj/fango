@@ -22,8 +22,9 @@ Every command discovers and validates the current graph through the filesystem
 provider — exact path casing, bundled-name conflicts, sidecar presence, and
 content hashes — and then reuses artifacts one module at a time. Nothing
 outranks that: there is no whole-project success record, so no command can skip
-the graph it is about to compile. Bundled inputs are covered by the exact
-compiler-executable fingerprint. Every artifact carries a digest of its
+the graph it is about to compile. Bundled inputs are covered the same way local
+ones are, by the source and sidecar bytes their module key already contains.
+Every artifact carries a digest of its
 complete payload; invalid frames, structurally invalid emissions, missing
 inputs, hash mismatches, and cache I/O errors are ordinary misses.
 
@@ -193,6 +194,43 @@ to a spelling and is graph-wide. No unresolved run reaches inference. Operators
 resolve as ordinary values; only short-circuit `&&` and `||` lower to `If`.
 Core has no operator node.
 
+## The library root
+
+The standard library and the Go runtime support are a tree on disk rather than
+bytes in the compiler executable, so editing either takes effect on the next
+build. `internal/libroot` resolves one root holding `stdlib/` and `runtime/`
+side by side: `FANGO_ROOT`, then the install layout beside the executable, then
+the enclosing checkout, which is what lets the repository's own tests and
+`go run ./cmd/fango` work with nothing configured. A root is accepted only if
+`stdlib/Prelude.fango` is readable beneath it, so a partial tree misses rather
+than half-loading. An explicit `FANGO_ROOT` that holds no library is an error
+rather than a reason to keep looking: a typo must not silently select whatever
+tree the working directory happens to sit in. [Commands](../reference/commands.md#the-library-root)
+owns the search order and the install layout as user-visible behavior.
+
+Resolution is process-wide and computed once, because the prelude is reached
+from focused checker tests and the evaluator's native executor, neither of
+which has any business carrying installation layout. For the same reason the
+root cannot change within a process.
+
+The trees are read through an exact-name index rather than joined paths, which
+preserves what embedding gave for free. Names stay case-exact, which a
+case-insensitive filesystem would otherwise lose and which the local provider
+beside it enforces deliberately. Directories stay flat, so a dotted module
+still does not name a nested file. Bytes are read once and retained, so every
+reader in a process sees one library and a mid-compile edit cannot tear a build
+across two versions of it.
+
+What the library cannot do is disagree with the compiler that reads it. Bundled
+native declarations are checked against the linked interpreter registry
+(`INVALID BUNDLED NATIVE`) and the bundled `List`'s constructor layout against
+what the backends project (`INVALID BUNDLED LIST`), both of which were compiler
+invariants when the sources were embedded and are user-reachable now. The
+residual gap is a sidecar: editing a bundled `.native.go` reaches compiled
+programs and the interpreter's worker, but not the copy of `stdlib` linked into
+the compiler, which is what the compile-time evaluator runs. That one needs a
+compiler rebuild, and nothing detects it.
+
 ## Module graph and Prelude
 
 `modules.Graph` runs source discovery, complete-graph validation, and per-module
@@ -202,8 +240,8 @@ and collects the complete effective fixity table, including builtins, before any
 fresh tree is rewritten; the sorted table also has a stable SHA-256 fingerprint.
 Resolution then processes modules in dependency-first order with lexical
 tie-breaking. Local modules come from the
-entry directory; bundled sources come from the embedded provider and reserve
-their module names. Imported scopes expose only direct public interfaces,
+entry directory; bundled sources come from the [library root](#the-library-root)
+and reserve their module names. Imported scopes expose only direct public interfaces,
 although instance visibility includes transitive dependencies.
 
 Prelude contains only imports and emits no Go package. Its imports enter each

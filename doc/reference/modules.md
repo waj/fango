@@ -46,7 +46,8 @@ imported.
 
 ## Prelude and implicit dependencies
 
-The compiler also contains standard-library modules.
+Fango also ships standard-library modules, in the
+[library root](commands.md#the-library-root) beside the compiler.
 Their names are reserved: a named entry or local module that has the same name
 is rejected with `RESERVED MODULE`, rather than replacing the bundled module.
 One of them, `Prelude`, declares the default scope. It holds nothing but
@@ -115,11 +116,9 @@ private Go module, allowing unchanged packages to use Go's build cache. It
 includes `sources.json`, containing each transitive Fango source and native
 sidecar's logical name, path, and SHA-256 hash for build invalidation. Local
 paths are relative to the source root; bundled paths begin with `<stdlib>/`.
-The same manifest validates the transparent compilation cache: edits,
-removals, newly added native sidecars, path-casing changes, and new local
-conflicts with reachable bundled modules force a miss, while bundled content
-is tied to the compiler-executable fingerprint. Unexpected filesystem errors
-also force a miss rather than proving that an optional sidecar is absent.
+It records what a build was made from and drives the Go build's change
+detection; the compilation cache reuses modules one at a time on their own
+keys, which cover bundled and local sources alike.
 
 ## Current naming limitation
 

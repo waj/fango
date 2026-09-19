@@ -210,8 +210,8 @@ are emitted only where wrappers reference them.
 
 Ordinary call-form evaluation uses one persistent process per sidecar set. Shared
 nativehost/nativewire packages own protocol and execution; generation supplies
-imports, registry, and FangoHost bindings. Embedded support files are materialized
-with AST-rewritten repository imports. Cache keys hash sorted destination paths
+imports, registry, and FangoHost bindings. Support files come from the library
+root and are materialized with AST-rewritten repository imports. Cache keys hash sorted destination paths
 and exact bytes of the entire module, including fixed support sources.
 
 A framed scalar protocol carries calls and reverse host requests over a dedicated

@@ -1,10 +1,30 @@
 # Convenience wrappers for the repository verification gates; see
 # doc/design.md, "Testing and performance".
 
-.PHONY: build test test-short test-perf update-goldens update-baselines fmt fmt-fango vet ci clean
+.PHONY: build install test test-short test-perf update-goldens update-baselines fmt fmt-fango vet ci clean
 
 build:
 	go build -o fango ./cmd/fango
+
+# The compiler reads its standard library and Go runtime support from a root
+# holding stdlib/ and runtime/, found beside the executable when FANGO_ROOT is
+# unset. A checkout is itself a valid root, so a locally built ./fango needs no
+# install; this is the layout a packaged one expects. See
+# doc/reference/commands.md, "The library root".
+PREFIX ?= /usr/local
+LIBDIR = $(PREFIX)/lib/fango
+
+install: build
+	install -d $(PREFIX)/bin $(LIBDIR)/stdlib
+	install -m 755 fango $(PREFIX)/bin/fango
+	install -m 644 stdlib/*.fango stdlib/*.native.go stdlib/native_support.go $(LIBDIR)/stdlib
+	for pkg in fangort nativewire nativeworker; do \
+		install -d $(LIBDIR)/runtime/$$pkg; \
+		for f in runtime/$$pkg/*.go; do \
+			case "$$f" in *_test.go) continue;; esac; \
+			install -m 644 "$$f" $(LIBDIR)/runtime/$$pkg; \
+		done; \
+	done
 
 # The correctness suite: deterministic, asserting nothing about elapsed time.
 # This includes the full compiler/interpreter differential suite.

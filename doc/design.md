@@ -9,8 +9,8 @@ relevant to the task. [Reference](reference.md) owns observable behavior;
 
 Fango is strict, statically typed, and purely functional, with nominal ADTs,
 inference, and direct-style algebraic effects. The compiler uses one Go toolchain,
-no compiler framework dependencies, local modules, and a bundled experimental
-library. Generated representations and calls aim to stay close to ordinary Go.
+no compiler framework dependencies, local modules, and an experimental library
+shipped beside it. Generated representations and calls aim to stay close to ordinary Go.
 Laziness, self-hosting, a package manager, and a general optimizer are not implemented.
 
 ## Language semantics

@@ -73,6 +73,47 @@ one wrote. `FANGO_BUILD_DIR` redirects generated build output, not this cache.
 Parsing is never cached: every command reparses the whole source graph, and
 `fmt` parses its requested input like any other.
 
+## The library root
+
+The standard library and the Go runtime support are files the compiler reads,
+not part of the executable, so editing one takes effect on the next build. They
+live in a single root holding `stdlib/` and `runtime/`, found in this order:
+
+1. `FANGO_ROOT`, when set.
+2. `lib/fango` beside the compiler, as `../lib/fango` then `lib/fango` relative
+   to the executable's own directory.
+3. The enclosing `github.com/waj/fango` checkout, walking up from the working
+   directory. This is what makes a freshly built compiler work in its own
+   source tree with nothing configured.
+
+A directory qualifies only if `stdlib/Prelude.fango` is readable beneath it. A
+`FANGO_ROOT` that does not qualify is reported rather than skipped, so a typo
+cannot quietly select a different library. When no root is found at all, every
+command that needs one fails with `MISSING LIBRARY` naming where it looked.
+`FANGO_ROOT` names the library; `FANGO_BUILD_DIR` redirects generated build
+output; neither selects the compilation cache.
+
+An installed layout therefore looks like:
+
+```text
+<prefix>/bin/fango
+<prefix>/lib/fango/stdlib/
+<prefix>/lib/fango/runtime/
+```
+
+A compiled program is self-contained and needs no root: the runtime support it
+uses is copied into its generated project at build time.
+
+The library is versioned with the compiler and expected to match it. Editing a
+bundled `.fango` module is supported and invalidates exactly what depends on
+it. Two mismatches are reported rather than miscompiled: a bundled native
+declaration that disagrees with the compiler's registry (`INVALID BUNDLED
+NATIVE`) and a `List` that no longer has the shape code generation projects
+against (`INVALID BUNDLED LIST`). One is not: editing a bundled `.native.go`
+sidecar changes compiled programs and the interpreter's native worker, but not
+the compile-time evaluator, which uses the copy linked into the compiler. That
+requires rebuilding the compiler.
+
 ## Build progress and statistics
 
 `build`, `run`, and `check` are silent on success by default. `-v` reports each

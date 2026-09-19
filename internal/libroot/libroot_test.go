@@ -14,7 +14,10 @@ import (
 func library(t *testing.T, extra map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
-	files := map[string]string{"stdlib/Prelude.fango": "module Prelude exposing ()\n"}
+	files := map[string]string{}
+	for _, name := range probe {
+		files[name] = "-- a library root must hold this\n"
+	}
 	for path, body := range extra {
 		files[path] = body
 	}
@@ -63,8 +66,10 @@ func TestCheckoutFallback(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(got, "go.mod")); err != nil {
 		t.Fatalf("resolved %s, which is not a checkout: %v", got, err)
 	}
-	if _, err := os.Stat(filepath.Join(got, filepath.FromSlash(probe))); err != nil {
-		t.Fatalf("resolved %s, which has no %s: %v", got, probe, err)
+	for _, want := range probe {
+		if _, err := os.Stat(filepath.Join(got, filepath.FromSlash(want))); err != nil {
+			t.Fatalf("resolved %s, which has no %s: %v", got, want, err)
+		}
 	}
 }
 
@@ -208,5 +213,19 @@ func TestContentsAreStableWithinAProcess(t *testing.T) {
 	}
 	if string(before) != string(after) {
 		t.Fatalf("contents changed mid-process: %q then %q", before, after)
+	}
+}
+
+// An install that dropped a file is a library problem, not a compiler one.
+// Accepting the directory on a partial signature would surface later as a
+// failure to generate code, which points the user at the wrong thing.
+func TestPartialLibraryIsNotARoot(t *testing.T) {
+	dir := library(t, nil)
+	if err := os.Remove(filepath.Join(dir, "stdlib", "native_support.go")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvRoot, dir)
+	if _, err := search(); !Missing(err) {
+		t.Fatalf("err = %v, want a not-found error", err)
 	}
 }

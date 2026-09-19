@@ -26,10 +26,12 @@ const EnvRoot = "FANGO_ROOT"
 // goModule is the checkout's module path, which identifies a development root.
 const goModule = "github.com/waj/fango"
 
-// probe is the file whose presence makes a directory a library root. A
+// probe names the files whose presence makes a directory a library root. A
 // directory that merely exists is not one: a partial tree must miss cleanly
-// rather than half-load a prelude.
-const probe = "stdlib/Prelude.fango"
+// rather than half-load a prelude, and an incomplete install must read as a
+// library that is not there rather than as a compiler that cannot generate
+// code. Every build needs both of these, whatever else it imports.
+var probe = []string{"stdlib/Prelude.fango", "stdlib/native_support.go"}
 
 type rootResult struct {
 	sync.Once
@@ -60,7 +62,7 @@ type ErrNotFound struct {
 func (e *ErrNotFound) Error() string {
 	if e.Configured != "" {
 		return fmt.Sprintf("%s is set to %s, which holds no Fango library: expected %s beneath it",
-			EnvRoot, e.Configured, probe)
+			EnvRoot, e.Configured, strings.Join(probe, " and "))
 	}
 	where := "nowhere to look"
 	if len(e.Searched) > 0 {
@@ -97,10 +99,12 @@ func search() (string, error) {
 			return "", false
 		}
 		searched = append(searched, abs)
-		if _, err := os.Stat(filepath.Join(abs, filepath.FromSlash(probe))); err == nil {
-			return abs, true
+		for _, want := range probe {
+			if _, err := os.Stat(filepath.Join(abs, filepath.FromSlash(want))); err != nil {
+				return "", false
+			}
 		}
-		return "", false
+		return abs, true
 	}
 
 	// An explicit root is a request, not a hint: if it does not hold the

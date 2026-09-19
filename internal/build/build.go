@@ -268,8 +268,10 @@ go build said:
 		}
 		return fmt.Errorf(`-- INTERNAL COMPILER ERROR ------------------------------------
 
-Fango generated Go code that Go refused to compile. This is a bug in
-the Fango compiler, not in your program — please report it.
+Fango generated Go code that Go refused to compile. This is a bug in the
+Fango compiler, not in your program — please report it, unless you have
+edited the library FANGO_ROOT points at, whose runtime support is compiled
+into this project.
 
 The build directory is preserved for inspection:
 

@@ -3,37 +3,31 @@
 Open source-distribution and foreign-value designs. Current loading and worker
 contracts are in [pipeline](design/pipeline.md) and [backend](design/backend.md).
 
-## Unembedding the bundled sources
+## Distributing the bundled sources
 
-Bundled Fango, sidecars, and Go runtime support are embedded in the compiler.
-Manual edits require rebuilding. Successful repeated project commands reuse a
-compiler-fingerprinted project artifact, so an unchanged invocation does not
-recheck the bundled Prelude or rerun its derivers. Shipping prechecked bundled
-modules independently of a prior project compilation remains open; it must not
-silently accept compiler/library skew.
+The library is [a tree on disk](design/pipeline.md#the-library-root) that the
+compiler resolves and reads as source. What remains is publishing it as
+something other than source.
 
-Embedding currently guarantees agreement with canonical Meta symbols/classes and
-the bundled-native registry. Removing it needs a version/skew diagnostic and a
-review of RESERVED MODULE protection. Prelude is editable only in the compiler's
-copy; a project's ability to supply one is part of the same source-root decision.
+- Precompiled library artifacts. Reuse the implemented checked-module codec and
+  its installation boundary ([pipeline](design/pipeline.md#pipeline)) rather
+  than designing a second artifact format: a precompiled library is the same
+  object, published by a producer instead of a local build. It needs a durable
+  identity in place of the compiler-executable fingerprint, a published source
+  manifest, and a compatibility rule for a consumer built from a different
+  compiler. Shipping those artifacts remains separate from project-local caching.
+- Compiler/library skew has two detectors — bundled native declarations against
+  the linked registry, and the bundled `List`'s shape — and one gap: a bundled
+  `.native.go` edit does not reach the compile-time evaluator, which runs the
+  copy linked into the compiler. A version stamp or a bundled-tree hash would
+  close it, at the cost of making an edited library refuse to compile at all.
+  Decide that with a concrete consumer rather than in advance.
+- A project supplying its own Prelude, or otherwise relaxing RESERVED MODULE.
+  Bundled names are reserved outright today, and the source-root spelling that
+  would let a project override one is the same decision as package distribution;
+  avoid incompatible parallel mechanisms.
 
-Open choices:
-
-- Files beside the binary, serialized checked interfaces/Core, or source for
-  development plus a precompiled distribution artifact. Reuse the implemented
-  checked-module codec and its installation boundary
-  ([pipeline](design/pipeline.md#pipeline)) rather than designing a second
-  artifact format: a precompiled library is the same object, published by a
-  producer instead of a local build, and it needs a durable identity in place
-  of the compiler-executable fingerprint, a published source manifest, and a
-  compatibility rule for a consumer built from a different compiler. Shipping
-  those artifacts remains separate from project-local caching.
-- Whether Go runtime support remains embedded: generated projects/workers still
-  need its source materialized in arbitrary build directories.
-- Source-root spelling and whether it is a development escape hatch or the
-  foundation for future package distribution. Avoid incompatible parallel mechanisms.
-- Lockstep validation via version stamp, bundled-tree hash in sources.json, or
-  stricter agreement. Per-file hashes already serve invalidation.
+Package fetching and independent library versioning remain deferred.
 
 ## Opaque native types
 
