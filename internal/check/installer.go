@@ -163,7 +163,9 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		return nil, compatibilityErrs, nil
 	}
 	lintStart := i.begin("semantic-lint", owner)
-	lintErrs := elaborate.LintProgIn(owned, i.installed, i.ck)
+	// Increment discharged these definitions' obligations moments ago, on this
+	// same slice, before any transform could touch it.
+	lintErrs := elaborate.LintProgIn(owned, i.installed, i.ck, true)
 	i.timed("semantic-lint", owner, lintStart)
 	if len(lintErrs) != 0 {
 		parts := make([]string, len(lintErrs))

@@ -398,7 +398,9 @@ main = $(Base.make)
 	if len(elabErrs) != 0 {
 		t.Fatal(elabErrs)
 	}
-	if lintErrs := elaborate.LintProgIn(defs, context, ck); len(lintErrs) != 0 {
+	// false keeps this exercising the full reconstruction, obligations and
+	// all, rather than the batch pipeline's shortcut.
+	if lintErrs := elaborate.LintProgIn(defs, context, ck, false); len(lintErrs) != 0 {
 		t.Fatal(lintErrs)
 	}
 }
@@ -467,7 +469,7 @@ func TestInstalledObjectSupportsSubsequentInference(t *testing.T) {
 	if len(elabErrs) != 0 {
 		t.Fatal(elabErrs)
 	}
-	if lintErrs := elaborate.LintProgIn(defs, decoded.Runtime, ck); len(lintErrs) != 0 {
+	if lintErrs := elaborate.LintProgIn(defs, decoded.Runtime, ck, false); len(lintErrs) != 0 {
 		t.Fatal(lintErrs)
 	}
 }

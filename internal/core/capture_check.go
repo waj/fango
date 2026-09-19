@@ -65,6 +65,13 @@ func verifyCapturesIn(p *Prog, context []Def, b *types.Builtins) []error {
 		}
 		copyProg.Defs[i].CaptureContract = want
 	}
+	// Reconstruction is what lint owes: summaries and contracts are re-derived
+	// above and compared. Discharging obligations again only repeats it when
+	// every comparison agreed, because the flow check reads nothing but the
+	// definitions and the contracts just proven identical.
+	if p.CaptureFlowsProven && len(errs) == 0 {
+		return errs
+	}
 	return append(errs, checkCaptureFlows(a)...)
 }
 

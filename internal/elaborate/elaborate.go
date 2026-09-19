@@ -180,8 +180,12 @@ func LintProg(defs []core.Def, ck *infer.Checker) []error {
 
 // LintProgIn validates an owned module increment against installed dependency
 // signatures and capture contracts without traversing dependency bodies.
-func LintProgIn(defs, context []core.Def, ck *infer.Checker) []error {
-	return core.LintIn(&core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck)}, context, ck.B)
+// flowsProven says these exact definitions have already had their lifetime
+// obligations discharged, which lets lint compare the contracts it
+// reconstructs without discharging them a second time.
+func LintProgIn(defs, context []core.Def, ck *infer.Checker, flowsProven bool) []error {
+	return core.LintIn(&core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives,
+		Intrinsics: intrinsicIdentities(ck), CaptureFlowsProven: flowsProven}, context, ck.B)
 }
 
 // AssembleModuleProgram joins already checked and owner-linted module Core.

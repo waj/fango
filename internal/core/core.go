@@ -9,6 +9,11 @@ import "github.com/waj/fango/internal/source"
 
 type Prog struct {
 	CaptureContractsChecked bool
+	// CaptureFlowsProven says the caller already discharged these exact
+	// definitions' lifetime obligations. Lint still reconstructs the summaries
+	// and contracts independently; it may skip re-discharging obligations it
+	// has just confirmed it would derive from identical inputs.
+	CaptureFlowsProven bool
 	// ADTs lists declared types in declaration order — codegen emits marker
 	// interfaces, constructor structs, and derived eq/show from it. Bool is
 	// absent (native Go bool forever, doc/design.md, "Go backend and runtime").
