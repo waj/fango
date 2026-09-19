@@ -58,16 +58,24 @@ func decodeUnit(data []byte, key, path string) ([]byte, bool) {
 	return source, true
 }
 
-func loadUnit(cache Cache, key, path string) ([]byte, bool) {
+// loadUnit also reports the artifact bytes it read, which a structurally
+// invalid artifact still costs even though it is a miss.
+func loadUnit(cache Cache, key, path string) ([]byte, int, bool) {
 	data, ok := cache.Load(key)
 	if !ok {
-		return nil, false
+		return nil, 0, false
 	}
-	return decodeUnit(data, key, path)
+	source, ok := decodeUnit(data, key, path)
+	return source, len(data), ok
 }
 
-func storeUnit(cache Cache, key string, file codegen.File) {
-	if data := encodeUnit(key, file); data != nil {
-		cache.Store(key, data)
+// storeUnit reports the bytes it wrote, or zero when the unit could not be
+// encoded.
+func storeUnit(cache Cache, key string, file codegen.File) int {
+	data := encodeUnit(key, file)
+	if data == nil {
+		return 0
 	}
+	cache.Store(key, data)
+	return len(data)
 }

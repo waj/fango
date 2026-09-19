@@ -315,6 +315,13 @@ func NewDecoder(data []byte, context Context) (*Decoder, error) {
 	return &Decoder{d: d}, nil
 }
 
+// SectionSize is the encoded byte size of one section, or zero if the object
+// has no such section. It reports what a deferred section costs to carry
+// without decoding it.
+func (dec *Decoder) SectionSize(name string) int {
+	return dec.d.roots[name].size
+}
+
 func (dec *Decoder) Section(name string, output any) error {
 	p := reflect.ValueOf(output)
 	if p.Kind() != reflect.Pointer || p.IsNil() {

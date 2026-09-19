@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"github.com/waj/fango/internal/compileevent"
 	"os"
 	"path/filepath"
 	"testing"
@@ -60,11 +61,11 @@ func (p *project) write(t *testing.T, name, body string) string {
 	return path
 }
 
-func (p *project) record(stage, owner string) {
-	if p.events[stage] == nil {
-		p.events[stage] = map[string]int{}
+func (p *project) record(event compileevent.Event) {
+	if p.events[event.Stage] == nil {
+		p.events[event.Stage] = map[string]int{}
 	}
-	p.events[stage][owner]++
+	p.events[event.Stage][event.Owner]++
 }
 
 func (p *project) check(t *testing.T) *check.Result {

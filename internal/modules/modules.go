@@ -18,9 +18,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	fango "github.com/waj/fango"
 	"github.com/waj/fango/internal/ast"
+	"github.com/waj/fango/internal/compileevent"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/fixity"
 	"github.com/waj/fango/internal/lexer"
@@ -37,9 +39,9 @@ type Provider interface {
 	Native(module string) (path string, content []byte, err error)
 }
 
-// StageObserver is the test instrumentation seam for discovery work. A nil
+// StageObserver is the instrumentation seam for discovery work. A nil
 // observer has no cost or user-visible output.
-type StageObserver func(stage, owner string)
+type StageObserver = compileevent.Observer
 
 type FSProvider struct{ Root string }
 
@@ -326,6 +328,7 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 	}
 	root := filepath.Dir(abs)
 	f := source.NewFile(filepath.Base(abs), content)
+	parseStart := time.Now()
 	m, errs := parse(f)
 	if len(errs) > 0 {
 		return nil, errs
@@ -334,9 +337,7 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 	if !private {
 		entryName = m.Header.Name
 	}
-	if options.Observe != nil {
-		options.Observe("parse", entryName)
-	}
+	options.Observe.Timed("parse", entryName, parseStart)
 	g := newGraph(FSProvider{Root: root})
 	g.observe = options.Observe
 	if !private {

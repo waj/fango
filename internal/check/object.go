@@ -59,6 +59,9 @@ type stagePayload struct {
 	Groups []staging.Group
 }
 
+// size is the encoded byte size of the undecoded stage section.
+func (p *PendingStage) size() int { return p.decoder.SectionSize(stageSection) }
+
 // load decodes the stage section through the decoder that produced the rest of
 // the object, so structure shared with it comes back as the same pointers.
 func (p *PendingStage) load() (*stagePayload, error) {

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
@@ -169,6 +170,7 @@ func (g *Graph) load(pending map[string]*node, name string, at source.Span) []di
 		return []diag.Error{diag.Errorf(at, "MISSING MODULE", "I cannot find module `%s`; expected `%s` beneath the entry directory.", name, path)}
 	}
 	mf := source.NewFile(path, b)
+	parseStart := time.Now()
 	mm, errs := parse(mf)
 	if len(errs) > 0 {
 		return errs
@@ -179,9 +181,7 @@ func (g *Graph) load(pending map[string]*node, name string, at source.Span) []di
 	if mm.Header.Name != name {
 		return []diag.Error{diag.Errorf(mm.Header.NameSpan, "MODULE/PATH MISMATCH", "File `%s` must declare module `%s`, but declares `%s`.", path, name, mm.Header.Name)}
 	}
-	if g.observe != nil {
-		g.observe("parse", name)
-	}
+	g.observe.Timed("parse", name, parseStart)
 	n := &node{name: name, path: path, content: b, mod: mm, sourceHash: hashBytes(b), bundled: bundled, nativeModule: name}
 	n.deps = syntaxDependencies(mm, name)
 	var np string
@@ -292,10 +292,9 @@ func (g *Graph) resolvePending(pending map[string]*node, names []string, fixitie
 		}
 		visible[name] = vis
 		r := resolver{node: n, nodes: all}
+		resolveStart := time.Now()
 		decls, resolveErrs := r.resolve()
-		if g.observe != nil {
-			g.observe("resolve", name)
-		}
+		g.observe.Timed("resolve", name, resolveStart)
 		n.resolved = decls
 		errs = append(errs, resolveErrs...)
 	}

@@ -6,7 +6,10 @@
 package backend
 
 import (
+	"time"
+
 	"fmt"
+	"github.com/waj/fango/internal/compileevent"
 	"sort"
 
 	"github.com/waj/fango/internal/check"
@@ -23,7 +26,7 @@ type Cache interface {
 	Store(key string, data []byte)
 }
 
-type Observer func(stage, owner string)
+type Observer = compileevent.Observer
 
 type Session struct {
 	Observe      Observer
@@ -32,8 +35,21 @@ type Session struct {
 }
 
 func (s *Session) event(stage, owner string) {
-	if s != nil && s.Observe != nil {
-		s.Observe(stage, owner)
+	if s != nil {
+		s.Observe.Stage(stage, owner)
+	}
+}
+
+func (s *Session) timed(stage, owner string, start time.Time) {
+	if s != nil {
+		s.Observe.Timed(stage, owner, start)
+	}
+}
+
+// artifact reports a cache decision together with the bytes it moved.
+func (s *Session) artifact(stage, owner string, start time.Time, bytes int) {
+	if s != nil {
+		s.Observe.Report(compileevent.Event{Stage: stage, Owner: owner, Duration: time.Since(start), Bytes: bytes})
 	}
 }
 
@@ -56,26 +72,31 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 		owner := ownerLabel(unit.Name)
 		key, keyed := emissionKey(result, unit, summaries, links, printMain)
 		if keyed && cache != nil {
-			if data, hit := loadUnit(cache, key, codegen.UnitPath(unit)); hit {
-				s.event("emitted-cache-hit", owner)
+			lookupStart := time.Now()
+			data, read, hit := loadUnit(cache, key, codegen.UnitPath(unit))
+			if hit {
+				s.artifact("emitted-cache-hit", owner, lookupStart, read)
 				files = append(files, codegen.File{Path: codegen.UnitPath(unit), Data: data})
 				continue
 			}
-			s.event("emitted-cache-miss", owner)
+			s.artifact("emitted-cache-miss", owner, lookupStart, read)
 		}
 		unitProg := codegen.UnitProgram(result.Program, unit)
-		s.event("lowering", owner)
+		lowerStart := time.Now()
 		mp, lowerErrs := machineir.LowerUnit(unitProg, unit.Name, result.Checker.B)
+		s.timed("lowering", owner, lowerStart)
 		if len(lowerErrs) != 0 {
 			return nil, fmt.Errorf("machine lowering failed in module %s: %v", owner, lowerErrs[0])
 		}
-		s.event("emission", owner)
+		emitStart := time.Now()
 		file, err := codegen.EmitUnit(unitProg, mp, result.Checker.B, unit, printMain)
 		if err != nil {
 			return nil, err
 		}
+		s.timed("emission", owner, emitStart)
 		if keyed && cache != nil {
-			storeUnit(cache, key, file)
+			storeStart := time.Now()
+			s.artifact("emitted-cache-store", owner, storeStart, storeUnit(cache, key, file))
 		}
 		files = append(files, file)
 	}

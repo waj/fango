@@ -128,7 +128,7 @@ func InstallObject(ck *infer.Checker, stage *staging.Session, object *ModuleObje
 	ck.InstanceImports[state.Name] = visible
 	ck.Templates.Append(object.Templates)
 	if pending != nil {
-		stage.Defer(state.Name, func() ([]core.Def, []staging.Group, error) { return r.stage(pending) })
+		stage.Defer(state.Name, func() ([]core.Def, []staging.Group, int, error) { return r.stage(pending) })
 	} else {
 		stage.InstallCore(object.Stage, object.StageGroups)
 	}
@@ -140,21 +140,22 @@ func InstallObject(ck *infer.Checker, stage *staging.Session, object *ModuleObje
 // object's own decoder returns the same pointers for structure the installed
 // half already holds, and this remapper's memo maps those to the copies it
 // installed, so the two halves cannot acquire disagreeing identities.
-func (r *remapper) stage(pending *PendingStage) ([]core.Def, []staging.Group, error) {
+func (r *remapper) stage(pending *PendingStage) ([]core.Def, []staging.Group, int, error) {
+	size := pending.size()
 	payload, err := pending.load()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	r.extend(reflect.ValueOf(payload))
 	v, err := r.rewrite(reflect.ValueOf(payload))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	if r.err != nil {
-		return nil, nil, r.err
+		return nil, nil, 0, r.err
 	}
 	out := v.Interface().(*stagePayload)
-	return out.Stage, out.Groups, nil
+	return out.Stage, out.Groups, size, nil
 }
 
 func validateInstall(ck *infer.Checker, state *infer.ModuleState) error {

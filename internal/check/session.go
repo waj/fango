@@ -4,6 +4,7 @@ package check
 
 import (
 	"github.com/waj/fango/internal/compilecache"
+	"github.com/waj/fango/internal/compileevent"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/elaborate"
@@ -13,7 +14,7 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-type Observer func(stage, owner string)
+type Observer = compileevent.Observer
 
 type Session struct {
 	Observe            Observer

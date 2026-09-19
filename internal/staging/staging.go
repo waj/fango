@@ -6,8 +6,11 @@
 package staging
 
 import (
+	"time"
+
 	"context"
 	"fmt"
+	"github.com/waj/fango/internal/compileevent"
 	"sort"
 	"strings"
 
@@ -25,16 +28,17 @@ import (
 // REPL call it, so a deriver behaves the same at the prompt as in a build.
 type Session struct{ ev *evaluator }
 
-type Observer func(stage, owner string)
+type Observer = compileevent.Observer
 
-// Observe reports deferred stage sections as they are read, for tests that
-// tell reuse from work. It never writes CLI output.
+// Observe reports deferred stage sections as they are read, so a caller can
+// tell reuse from work.
 func (s *Session) Observe(observe Observer) { s.ev.observe = observe }
 
-// deferred is one module's stage Core, recorded but not yet read.
+// deferred is one module's stage Core, recorded but not yet read. load also
+// reports the encoded size of the section it read, for cache accounting.
 type deferred struct {
 	owner string
-	load  func() ([]core.Def, []Group, error)
+	load  func() ([]core.Def, []Group, int, error)
 }
 
 type Group struct {
@@ -68,7 +72,7 @@ func Install(ck *infer.Checker) *Session {
 // snapshot elaborates a module's declarations against the installed stage
 // definitions of its dependencies, so a single module checked from source
 // needs all of them; a compile whose modules all come from cache needs none.
-func (s *Session) Defer(owner string, load func() ([]core.Def, []Group, error)) {
+func (s *Session) Defer(owner string, load func() ([]core.Def, []Group, int, error)) {
 	s.ev.pending = append(s.ev.pending, deferred{owner: owner, load: load})
 }
 
@@ -82,13 +86,12 @@ func (ev *evaluator) force() error {
 	pending := ev.pending
 	ev.pending = nil
 	for _, section := range pending {
-		defs, groups, err := section.load()
+		start := time.Now()
+		defs, groups, size, err := section.load()
 		if err != nil {
 			return fmt.Errorf("stage Core for module %s: %w", section.owner, err)
 		}
-		if ev.observe != nil {
-			ev.observe("stage-section", section.owner)
-		}
+		ev.observe.Report(compileevent.Event{Stage: "stage-section", Owner: section.owner, Duration: time.Since(start), Bytes: size})
 		(&Session{ev: ev}).InstallCore(defs, groups)
 	}
 	return nil

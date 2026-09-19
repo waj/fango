@@ -9,6 +9,7 @@ import (
 	"github.com/waj/fango/internal/backend"
 	compilecheck "github.com/waj/fango/internal/check"
 	"github.com/waj/fango/internal/codegen"
+	"github.com/waj/fango/internal/compileevent"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/infer"
@@ -16,17 +17,19 @@ import (
 	"github.com/waj/fango/internal/runtimefiles"
 )
 
-type stageEvent struct {
-	Stage string
-	Owner string
-}
+// stageEvent is the pipeline's own event type; the CLI adds no fields of its
+// own to it.
+type stageEvent = compileevent.Event
 
-type compilationSession struct{ observe func(stageEvent) }
+// compilationSession carries the observer a command installs. A session with
+// no observer costs the pipeline nothing.
+type compilationSession struct{ observe compileevent.Observer }
 
-func (s *compilationSession) event(stage, owner string) {
-	if s != nil && s.observe != nil {
-		s.observe(stageEvent{Stage: stage, Owner: owner})
+func (s *compilationSession) observer() compileevent.Observer {
+	if s == nil {
+		return nil
 	}
+	return s.observe
 }
 
 // compileFile runs source → tokens → AST → typed AST → Core. Diagnostics go
@@ -49,11 +52,7 @@ func compileFileGraphSession(entry string, stderr io.Writer, session *compilatio
 }
 
 func checkGraph(entry string, stderr io.Writer, session *compilationSession) (*compilecheck.Result, bool) {
-	var observe compilecheck.Observer
-	if session != nil && session.observe != nil {
-		observe = func(stage, owner string) { session.event(stage, owner) }
-	}
-	result, checkErrs, internalErr := (&compilecheck.Session{Observe: observe}).Compile(entry)
+	result, checkErrs, internalErr := (&compilecheck.Session{Observe: session.observer()}).Compile(entry)
 	if report(stderr, checkErrs) {
 		return nil, false
 	}
@@ -118,11 +117,7 @@ func emitProjectManifestSession(entry string, printMain bool, stderr io.Writer, 
 	for i, unit := range loadedUnits {
 		units[i] = codegen.Unit{Name: unit.Name, Imports: unit.Imports, Entry: unit.Entry}
 	}
-	var observe backend.Observer
-	if session != nil && session.observe != nil {
-		observe = func(stage, owner string) { session.event(stage, owner) }
-	}
-	files, err := (&backend.Session{Observe: observe}).EmitProject(entry, result, units, printMain)
+	files, err := (&backend.Session{Observe: session.observer()}).EmitProject(entry, result, units, printMain)
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: internal compiler error: %v\n", err)
 		return nil, nil, false

@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"github.com/waj/fango/internal/compileevent"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,11 +40,11 @@ type events struct {
 
 func newEvents() *events { return &events{counts: map[string]map[string]int{}} }
 
-func (e *events) record(stage, owner string) {
-	if e.counts[stage] == nil {
-		e.counts[stage] = map[string]int{}
+func (e *events) record(event compileevent.Event) {
+	if e.counts[event.Stage] == nil {
+		e.counts[event.Stage] = map[string]int{}
 	}
-	e.counts[stage][owner]++
+	e.counts[event.Stage][event.Owner]++
 }
 
 func (e *events) total(stages ...string) int {

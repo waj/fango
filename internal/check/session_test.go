@@ -1,6 +1,7 @@
 package check
 
 import (
+	"github.com/waj/fango/internal/compileevent"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -52,11 +53,11 @@ func (c *memoryObjectCache) StoreObject(key string, data []byte) {
 func compileEvents(t *testing.T, entry string, cache ObjectCache) (*Result, map[string]map[string]int) {
 	t.Helper()
 	events := map[string]map[string]int{}
-	s := &Session{Cache: cache, Observe: func(stage, owner string) {
-		if events[stage] == nil {
-			events[stage] = map[string]int{}
+	s := &Session{Cache: cache, Observe: func(event compileevent.Event) {
+		if events[event.Stage] == nil {
+			events[event.Stage] = map[string]int{}
 		}
-		events[stage][owner]++
+		events[event.Stage][event.Owner]++
 	}}
 	result, diagnostics, internalErr := s.Compile(entry)
 	if internalErr != nil {

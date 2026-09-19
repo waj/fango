@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/waj/fango/internal/compileevent"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/elaborate"
@@ -45,10 +47,13 @@ func (i *Installer) Adopt(defs []core.Def) {
 	i.installed = append(i.installed, defs...)
 }
 
-func (i *Installer) event(stage, owner string) {
-	if i.observe != nil {
-		i.observe(stage, owner)
-	}
+func (i *Installer) event(stage, owner string) { i.observe.Stage(stage, owner) }
+
+func (i *Installer) timed(stage, owner string, start time.Time) { i.observe.Timed(stage, owner, start) }
+
+// artifact reports a cache decision together with the bytes it moved.
+func (i *Installer) artifact(stage, owner string, start time.Time, bytes int) {
+	i.observe.Report(compileevent.Event{Stage: stage, Owner: owner, Duration: time.Since(start), Bytes: bytes})
 }
 
 // Installed is every definition this installer has taken in, in order.
@@ -103,9 +108,11 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 	}
 	baseKey, hasBase := moduleBaseKey(module, fixityHash, i.summaries)
 	if hasBase && i.cache != nil {
-		if object, hit := loadCachedObject(i.cache, baseKey, module, i.summaries, i.sources); hit {
+		lookupStart := time.Now()
+		object, read, hit := loadCachedObject(i.cache, baseKey, module, i.summaries, i.sources)
+		if hit {
 			if err := InstallObject(i.ck, i.stage, object); err == nil {
-				i.event("checked-cache-hit", owner)
+				i.artifact("checked-cache-hit", owner, lookupStart, read)
 				i.states = append(i.states, object.State)
 				i.objects = append(i.objects, object)
 				i.installed = append(i.installed, object.Runtime...)
@@ -113,7 +120,7 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 				return object.Runtime, nil, nil
 			}
 		}
-		i.event("checked-cache-miss", owner)
+		i.artifact("checked-cache-miss", owner, lookupStart, read)
 	}
 	// Checking a module from source elaborates it against the installed stage
 	// definitions of its dependencies, so every deferred section is needed
@@ -122,8 +129,9 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		return nil, nil, err
 	}
 	i.stage.BeginModule(module.Name, module.NativeModule)
-	i.event("check", owner)
+	checkStart := time.Now()
 	checked, checkErrs := i.ck.CheckModule(module.Module, infer.ModuleOptions{Name: module.Name, Role: role, Entry: module.Entry})
+	i.timed("check", owner, checkStart)
 	if len(checkErrs) != 0 {
 		return nil, checkErrs, nil
 	}
@@ -133,8 +141,9 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		intrinsics = append(intrinsics, name)
 	}
 	sort.Strings(intrinsics)
-	i.event("elaborate", owner)
+	elaborateStart := time.Now()
 	owned, elabErrs := elaborate.Increment(checked.Infos, checked.State.Instances, intrinsics, i.installed, i.ck)
+	i.timed("elaborate", owner, elaborateStart)
 	if len(elabErrs) != 0 {
 		return nil, elabErrs, nil
 	}
@@ -146,8 +155,10 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 	if compatibilityErrs := infer.ValidateModuleStates(append(i.states, state)); len(compatibilityErrs) != 0 {
 		return nil, compatibilityErrs, nil
 	}
-	i.event("semantic-lint", owner)
-	if lintErrs := elaborate.LintProgIn(owned, i.installed, i.ck); len(lintErrs) != 0 {
+	lintStart := time.Now()
+	lintErrs := elaborate.LintProgIn(owned, i.installed, i.ck)
+	i.timed("semantic-lint", owner, lintStart)
+	if len(lintErrs) != 0 {
 		parts := make([]string, len(lintErrs))
 		for n, err := range lintErrs {
 			parts[n] = err.Error()
@@ -175,7 +186,8 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		object.StageFingerprint = combinedFingerprint("stage", ownStage, stageDeps)
 		i.summaries[module.Name] = moduleSummary{Semantic: object.Semantic, ABI: object.ABI, Stage: object.StageFingerprint}
 		if hasBase && i.cache != nil {
-			publishCachedObject(i.cache, baseKey, object, i.summaries)
+			publishStart := time.Now()
+			i.artifact("checked-cache-store", owner, publishStart, publishCachedObject(i.cache, baseKey, object, i.summaries))
 		}
 	}
 	i.states = append(i.states, state)

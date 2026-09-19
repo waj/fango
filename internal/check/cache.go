@@ -132,8 +132,13 @@ func decodeCandidate(data []byte, base, module string, summaries map[string]modu
 	return payload, nil
 }
 
-func loadCachedObject(cache ObjectCache, base string, module modules.ResolvedModule, summaries map[string]moduleSummary, sources map[string]*source.File) (*ModuleObject, bool) {
+// loadCachedObject also reports the artifact bytes it read, whether or not a
+// candidate proved usable, so a miss can be told apart from a cache that was
+// never consulted.
+func loadCachedObject(cache ObjectCache, base string, module modules.ResolvedModule, summaries map[string]moduleSummary, sources map[string]*source.File) (*ModuleObject, int, bool) {
+	read := 0
 	for _, data := range cache.LoadCandidates(base) {
+		read += len(data)
 		candidate, err := decodeCandidate(data, base, module.Name, summaries)
 		if err != nil {
 			continue
@@ -142,6 +147,7 @@ func loadCachedObject(cache ObjectCache, base string, module modules.ResolvedMod
 		if !ok {
 			continue
 		}
+		read += len(data)
 		object, err := DecodeObject(data, sources)
 		if err != nil || object.State == nil || object.State.Name != module.Name {
 			continue
@@ -166,25 +172,29 @@ func loadCachedObject(cache ObjectCache, base string, module modules.ResolvedMod
 		abi := combinedFingerprint("abi", ownABI, abiDeps)
 		if valid && semanticOK && abiOK && stageOK && object.Semantic == candidate.Semantic && object.Semantic == semantic && object.ABI == candidate.ABI && object.ABI == abi && ownStage != "" && object.Implementation == ownImplementation {
 			object.StageFingerprint = combinedFingerprint("stage", ownStage, stageDeps)
-			return object, true
+			return object, read, true
 		}
 	}
-	return nil, false
+	return nil, read, false
 }
 
-func publishCachedObject(cache ObjectCache, base string, object *ModuleObject, summaries map[string]moduleSummary) {
+// publishCachedObject reports the bytes it wrote, or zero when the object
+// could not be published. A failure to write stays silent: it is an
+// optimization declining, not a diagnostic.
+func publishCachedObject(cache ObjectCache, base string, object *ModuleObject, summaries map[string]moduleSummary) int {
 	candidate, ok := makeCandidate(base, object, summaries)
 	if !ok {
-		return
+		return 0
 	}
 	objectData, err := EncodeObject(object)
 	if err != nil {
-		return
+		return 0
 	}
 	candidateData, err := encodeCandidate(candidate)
 	if err != nil {
-		return
+		return 0
 	}
 	cache.StoreObject(candidate.ObjectKey, objectData)
 	cache.StoreCandidate(base, candidateData)
+	return len(objectData) + len(candidateData)
 }
