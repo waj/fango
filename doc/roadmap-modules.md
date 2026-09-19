@@ -20,9 +20,11 @@ copy; a project's ability to supply one is part of the same source-root decision
 Open choices:
 
 - Files beside the binary, serialized checked interfaces/Core, or source for
-  development plus a precompiled distribution artifact. A future per-module
-  codec can reuse the versioned, atomic cache namespace already used by batch
-  project artifacts.
+  development plus a precompiled distribution artifact. Reuse the module-state
+  and Core codec planned in the
+  [compilation-cache roadmap](roadmap-cache.md#target-architecture-and-invariants)
+  rather than designing a second artifact format. Shipping precompiled bundled
+  artifacts remains separate from project-local caching.
 - Whether Go runtime support remains embedded: generated projects/workers still
   need its source materialized in arbitrary build directories.
 - Source-root spelling and whether it is a development escape hatch or the
@@ -46,5 +48,7 @@ package dependencies exclude inference, so that split has an existing boundary.
 Loading/unloading changes would respawn and replay pure declarations, coordinated
 with [REPL generations](roadmap-tooling.md#repl-hardening). Go plugins do not supply
 unloading and require matching build artifacts, so they do not solve this lifecycle.
-Core serialization is shared with the precompiled-source option above; design the
-artifact once. This remains a proposal, not an implemented native ABI.
+Core serialization is shared with the precompiled-source option above and the
+[installable-object milestone](roadmap-cache.md#m4-make-module-state-core-and-staging-installable).
+Reuse that codec; co-locating native values remains a separate proposal, not an
+implemented native ABI.

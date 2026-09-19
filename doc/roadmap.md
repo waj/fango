@@ -35,6 +35,13 @@ owns disk versus precompiled sources, source-root configuration, version/skew
 checks, per-project Prelude, and runtime-source materialization. Package
 fetching and independent library versioning remain deferred.
 
+## Persistent compilation cache
+
+[Compilation cache](roadmap-cache.md) owns parsed-unit and checked-module
+artifacts, semantic and compile-time invalidation, module-owned backend reuse,
+and transactional REPL installation. Its milestones replace the current
+whole-project shortcut with a shared module pipeline.
+
 ## Compile-time metaprogramming
 
 [Declaration generation](roadmap-meta.md) waits for a concrete consumer and

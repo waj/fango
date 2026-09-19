@@ -40,11 +40,12 @@ Scope for a first version: diagnostics, formatting, and coarse hover, as a
 
 `compileFileGraph` lives in `cmd/fango` and stops at the first stage that
 produces errors, so a single syntax error anywhere in the graph hides every
-type error everywhere. It moves to `internal/check`, accumulating diagnostics
-across stages, and takes a `modules.Provider` instead of constructing a
-filesystem provider internally. The existing `check`, `build`, and `run`
-subcommands become callers. This is worth doing on its own merits and is most
-of the server's backend.
+type error everywhere. The
+[compilation-cache roadmap](roadmap-cache.md#shared-compilation-session) owns
+extracting the shared, provider-based session into `internal/check`, with the
+batch commands and REPL as clients. The language server should reuse that
+session. Accumulating diagnostics across failed stages remains language-server
+work; module caching does not imply error recovery or diagnostic accumulation.
 
 ### What a useful first version needs
 
@@ -113,6 +114,11 @@ way: it is the pre-server-start fallback and coexists with semantic tokens.
 
 ## REPL hardening
 
+Fresh-session artifact reuse and atomic installation of prompt imports belong
+to the [cache integration milestone](roadmap-cache.md#m7-integrate-fresh-repl-sessions-and-transactional-imports).
+The work below extends the session beyond that milestone; caching does not
+introduce reload or change declarations already accepted by a live session.
+
 - Add a grouped-input mechanism for multiple top-level function equations;
   today the prompt accepts only one exhaustive equation per input.
 - Implement `:reload`, re-reading the modules a session imported after they
@@ -120,14 +126,13 @@ way: it is the pre-server-start fallback and coexists with semantic tokens.
   and resolver scope, so `:load` is not needed: a named module is imported,
   and the working directory (or the directory given to `fango repl`) is the
   source root. The intended shape: the graph re-reads every non-bundled node,
-  compares content hashes, and re-resolves the changed modules plus their
-  reverse dependents in a staging map committed only on success; the checker
-  gains a `Retract(owners)` that deletes the canonical-keyed entries of those
-  modules (types, classes, effects, constructors, values, workers, methods,
-  operations, natives, capture summaries, derivers by owner) and marks their
-  instances retracted rather than removing them, because instance limits are
-  positional and the compile-time evaluator tracks an append-only declaration completion log,
-  so retraction must preserve those identities and cutoffs; the operator
+  compares content hashes, and uses the shared cache pipeline to prepare the
+  changed modules plus their affected dependents, committing only on success.
+  The checker gains owner/generation retraction for declaration tables,
+  instances, and staging definitions while preserving the identities and
+  declaration cutoffs needed by existing closures. Build on the cache plan's
+  [module-state boundary](roadmap-cache.md#m3-introduce-in-memory-module-boundaries-and-explicit-summaries)
+  rather than depending on positional instance indexes; the operator
   table is rebuilt from the current nodes plus the prompt's own fixity
   declarations; the prompt's import list is re-applied against the new
   interfaces and names that vanished are reported; old memo cells and

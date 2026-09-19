@@ -1,0 +1,487 @@
+# Roadmap: persistent per-module compilation cache
+
+Required work for independently reusable parsed units, checked module objects,
+and emitted Go packages shared by batch commands and fresh REPL sessions.
+Implemented project-cache behavior belongs in
+[pipeline](design/pipeline.md#pipeline) and
+[backend](design/backend.md#module-emission-and-build-cache); this document
+owns the remaining architecture, milestone dependencies, and acceptance gates.
+
+[Roadmap index](roadmap.md). Related work:
+[module distribution](roadmap-modules.md#unembedding-the-bundled-sources),
+[language server](roadmap-tooling.md#language-server), and
+[REPL hardening](roadmap-tooling.md#repl-hardening).
+
+## Goal and decisions
+
+An unchanged module with unchanged semantic inputs must skip parsing,
+resolution, inference, elaboration, Core lint, machine lowering, and Go
+emission. Dependency implementation edits must preserve importer hits when
+the dependency's semantic and ABI contracts are unchanged and the importer
+does not execute the changed implementation during compilation.
+
+Two decisions govern the implementation:
+
+- Track compile-time dependencies separately. Ordinary exported functions can
+  run inside splices, so their bodies affect compile-time consumers without
+  automatically invalidating runtime-only consumers.
+- Replace the whole-project shortcut once module caching is complete. Every
+  invocation discovers and validates the current graph using cached parsed
+  metadata; one module-artifact pipeline owns compilation validity.
+
+No syntax changes, public cache flags, automatic eviction, source-distribution
+changes, or REPL reload feature are included. Cache behavior stays transparent
+and quiet. Failed, corrupt, incompatible, or unwritable entries are misses.
+
+## Target architecture and invariants
+
+### Shared compilation session
+
+Extract the batch pipeline into `internal/check`, following the language-server
+roadmap's proposed location. It owns graph preparation, checker/staging state,
+module-object installation, and diagnostic results. The CLI and REPL become
+clients; diagnostic rendering remains outside this package.
+
+The session accepts source providers, a cache store, and optional internal test
+instrumentation. It supports:
+
+- Preparing a complete entry graph or a pending REPL import increment.
+- Discovering sources, native sidecars, implicit dependencies, and Prelude
+  dependencies.
+- Establishing deterministic dependency order and the effective graph-wide
+  fixity table before checking.
+- Checking or installing one module at a time.
+- Returning module objects, manifests, runtime Core, and link information.
+- Preparing and committing imports transactionally.
+
+Existing tests that need a merged `core.Prog` retain an assembly adapter.
+Assembly concatenates validated objects in deterministic order; it does not
+recheck or elaborate them. Diagnostic accumulation across failed stages remains
+separate language-server work.
+
+### Artifact layers
+
+Use explicit JSON DTOs with independent artifact-kind/schema tags. Keep
+artifacts beneath `.fango/cache/v1/<compiler-fingerprint>/`, separated by
+artifact kind. Hash canonical encoded inputs with SHA-256.
+
+| Artifact | Contents | Lookup inputs |
+| --- | --- | --- |
+| `ParsedUnit` | Unresolved AST, declaration/header/import/export metadata, implicit dependencies, fixities | Compiler/schema identity and exact source hash |
+| `ModuleObject` | Installable checker state, resolver interface, owned runtime and stage Core, templates, native metadata, semantic and ABI summaries | Parsed-unit identity, module identity, entry/dependency role, sidecar presence/hash, effective fixity hash, ordered dependency semantic fingerprints, recorded stage dependencies |
+| `Emission` | Generated Go bytes for one owner | Module-object hash, imported ABI/link fingerprints, entry/dependency role, print-main mode |
+
+Named module identity and source-root-relative entry identity distinguish
+role-sensitive objects. Parsed artifacts remain reusable across filenames by
+binding their source-file slot during decoding.
+
+Keep old content-addressed variants until cleaning. Mutable lookup indexes may
+point to immutable objects, but must never be authoritative for validity.
+Missing or damaged indexes cause misses. Compiler/schema changes select a cold
+namespace; no migration of old artifacts is required.
+
+`check` creates parsed and checked artifacts without emitting Go. A later build
+reuses those objects. Build/run create the same checked artifacts, allowing
+subsequent checks to reuse them.
+
+### Three distinct fingerprints
+
+**Semantic interface:** exported schemes; nominal representations and schemas
+needed for inference, variance, reflection, or ABI; effects, operations, classes
+and methods; instance heads, constraints and selection metadata; capture
+contracts; native declarations and intrinsic identities; deriver availability;
+foreign-type representation dependencies; and transitively visible
+instances/derivers.
+
+Include compiler optimization facts that affect callers, such as native
+forwarding and identity-method recognition. An opaque source export does not
+justify omitting representation information the compiler actually uses.
+
+**ABI/link interface:** worker arity, type/evidence/row parameter order, Unit
+erasure, Direct/Exit/Machine families, callback invocation behavior,
+passive-factory classification, generated specialization symbols, nominal
+representation, and required package/native links.
+
+**Stage implementation:** executable Core and templates usable during
+compilation, including ordinary exported functions, private helpers,
+dictionaries, and transitive references. Exclude source positions and incidental
+allocation identities.
+
+Ordinary runtime body edits preserve importer hits only when semantic and ABI
+summaries remain unchanged and those bodies were not compile-time dependencies.
+A changed capture-flow contract is a semantic change even if the public type
+is unchanged. Source text, comments, positions, and native Go implementation
+bytes affect the owner's artifact inputs but do not themselves enter the
+downstream semantic fingerprint.
+
+### Serialization and identity
+
+- Encode every AST, type, Core, pattern, decision-tree, template, and
+  capture-contract variant explicitly. Unknown tags or missing required fields
+  are misses.
+- Use canonical nominal IDs `(kind, qualified name)`, with reserved identities
+  for builtins and stable identities for generated dictionary types.
+- On installation, intern nominal IDs into the current session and allocate
+  fresh type variables, capture variables, scopes, resumes, and template
+  indices.
+- Preserve graph sharing with reference tables and two-pass decoding, including
+  recursive types and template holes that refer to AST nodes.
+- Keep identity numbering separate from ABI parameter ordering. Remapping must
+  not reorder positional arguments; canonical set fields must remain valid
+  after remapping.
+- Encode floating-point values by IEEE bits so NaN, infinities, and negative
+  zero round-trip.
+- Sort maps and mathematical sets for hashing. Preserve declaration,
+  constructor, field, parameter, and evidence order where semantically
+  significant.
+- Store local spans as validated byte offsets attached to the current source
+  file. Reference foreign provenance through the defining module's current
+  source map rather than copying stale dependency offsets.
+- Do not serialize checker callbacks, evaluator cells, native processes, or
+  whole Go implementation structs.
+
+The cache is disposable. Validate envelope identity, payload hashes, reference
+bounds, and required structure before installation. Decode into temporary state
+and publish only after validation succeeds. Integrity validation on load is
+distinct from rerunning semantic Core lint on an already validated object.
+
+## Required milestones
+
+Implement the milestones in dependency order. Each has an independently
+reviewable result and acceptance gate. M3 establishes the new semantic boundary
+without persistent checked-object reuse; M4 makes that boundary serializable;
+M5 enables persistence. Do not substitute whole-project cache hits for any
+milestone's module-level acceptance tests.
+
+### M1: harden the existing cache and establish observability
+
+This is independently deliverable and precedes further cache activation.
+Starting points are `internal/compilecache`, `internal/build`, and the batch
+driver's cache calls.
+
+Required work:
+
+- Persist both the executable fingerprint and its failure in the
+  once-per-process result. A failed first fingerprint must disable caching
+  consistently; later calls must not use an empty fingerprint.
+- Validate complete artifact envelopes, including the required entry input and
+  expected emitted-file structure. Add payload integrity checks so
+  syntactically valid corruption is also a miss.
+- Make the temporary project shortcut revalidate discovery-sensitive facts:
+  exact path casing, local conflicts with bundled module names, and
+  native-sidecar presence. Reuse provider validation rather than implementing
+  a second resolution policy.
+- Treat unexpected filesystem errors as misses. Do not interpret permission
+  errors as evidence that a sidecar is absent.
+- Separate cache-directory selection from creation. Read attempts should not
+  create directories unnecessarily; an existing but unwritable local cache
+  must permit the documented fallback.
+- Give the final cache a fallback namespace keyed by absolute source root so
+  entries and REPL sessions from that root share artifacts. Clean the
+  source-local cache and the precisely identified fallback namespace; account
+  for the legacy per-entry fallback during transition.
+- Keep `FANGO_BUILD_DIR` governing generated build output, not redirecting the
+  source project's compilation cache.
+- Introduce per-session stage events for parse, resolve, check, elaborate,
+  semantic lint, lowering, emission, and cache hit/miss. Events identify the
+  owner and are test-only, with no CLI output.
+
+Acceptance: regression tests cover empty-but-valid JSON, damaged payloads,
+fingerprint failure across repeated calls, new reserved-name conflicts, casing
+changes, sidecar addition/removal, read-only storage, concurrent atomic writers,
+and fallback cleaning. Exercise I/O failures through injected filesystem/store
+operations where permissions-based tests would depend on the test user's
+privileges.
+
+### M2: add the parsed-unit codec and separate graph discovery
+
+Depends on M1. Starting points are `modules.Graph`, `modules.Load`, the parser,
+and graph completion's fixity/interface/resolution work.
+
+Required work:
+
+- Split graph loading into source discovery, graph validation, and per-module
+  resolution. The existing graph completion method combines these operations.
+- Serialize the full unresolved AST before fixity rewriting or name
+  canonicalization.
+- Derive discovery metadata from the parser result once and retain it in
+  `ParsedUnit`; do not add a separate approximate header parser.
+- Decode a fresh AST for each resolution/check attempt. Cached trees must
+  never accumulate mutations from resolution, splices, or inference.
+- Keep provider/path/header/reserved-name checks active on every discovery,
+  including parsed hits.
+- Collect fixities from the entire reachable graph before resolving any
+  misses. Hash the complete effective table, including builtin rules.
+- Preserve dependency-first ordering, cycle diagnostics, implicit syntax
+  roots, Prelude opt-out, and the existing `sources.json` contents/order.
+- Persist successful parses immediately, even if graph validation or later
+  compiler phases fail.
+- Inject the parser-cache seam without introducing a package cycle: the
+  low-level store must not depend on `modules`, `infer`, or `codegen`.
+
+Acceptance: a repeated discovery performs zero lexing/parsing. Dependency
+semantic edits reuse unchanged importers' parsed artifacts. Tests cover all AST
+variants, malformed source, named/headerless entries, identical source under
+different filenames, implicit dependencies, cycles, and fixity changes.
+`fmt` continues to parse its requested input directly.
+
+### M3: introduce in-memory module boundaries and explicit summaries
+
+Depends on M2. Establish correctness without persistent checked-object reuse.
+Starting points are `Checker.Module`, `elaborate.Module`,
+`elaborate.Increment`, Core lint/capture analysis, and backend ABI queries.
+
+Required work:
+
+- Extract the shared session and check modules dependency-first against
+  already installed dependencies.
+- Introduce `infer.ModuleState` as an explicit, immutable declaration-state
+  delta. Include schemes, constructors/types, effects/operations,
+  classes/methods, instances, worker/native/intrinsic metadata, derivers,
+  capture summaries, and visibility.
+- Separate persistent declaration state from transient AST-keyed inference
+  tables and substitutions. Snapshot solved state; importing a module must
+  not require restoring another module's inference workspace.
+- Add owner-scoped elaboration and semantic lint entry points. Use dependency
+  signatures and validated capture contracts as context without traversing or
+  revalidating dependency runtime bodies.
+- Compute explicit ABI summaries for facts currently discovered by backend
+  body inspection, particularly controlled callback invocation and passive
+  Machine factories.
+- Preserve source-order declaration cutoffs. Replace persisted session-global
+  instance indexes with stable module/declaration references and remap them on
+  installation.
+- Preserve entry-specific `main` behavior through an explicit role, including
+  ordinary imported `main` declarations and `check` without `main`.
+- Retain graph-wide compatibility checks independently of module inference:
+  overlapping instances, blanket-context cycles, duplicate derivers, and
+  existing declaration-collision rules must still detect conflicts between
+  individually valid cached modules.
+- Preserve the documented graph-wide effect-operation shadowing behavior
+  using declaration/binder validation metadata. Do not accidentally change it
+  as a consequence of checking dependencies earlier.
+
+Acceptance: compare the new uncached module path with the existing merged path
+across diagnostic, Core, specialization, capture, and generated-output fixtures.
+Dependencies checked alone must produce the same owned result when included by
+different consumers. No persistence is enabled until these boundaries agree.
+
+### M4: make module state, Core, and staging installable
+
+Depends on M3. Starting points are checker checkpoint/state tables, `meta.Table`,
+and staging's completion-log-driven evaluator.
+
+Required work:
+
+- Implement the typed object codec and the session-wide interning/remapping
+  context.
+- Add explicit snapshot/install operations for checker state and resolver
+  interfaces. Resolve private names only through their defining module;
+  installation must not widen source visibility.
+- Add a staging-session API that installs completed stage Core and templates
+  without replaying `DeclInfo` ASTs through elaboration.
+- Preserve stage completion groups, declaration cutoffs, dictionary
+  availability, reflection visibility, stage-safe native restrictions, and
+  evaluator budgets.
+- Store stage versions of compile-time-only definitions and ordinary
+  functions that later splices may call. Persist declarative Core/templates,
+  not evaluated closures or memo cells.
+- Restore `TypeRepr` schema access against the current checker and preserve
+  the distinction between unrestricted and empty reflection visibility.
+- Add source-provenance references for imported quote/template and
+  capture-contract locations. A comment inserted in a dependency must not
+  leave a cached importer pointing into the dependency's old source.
+- Make installation transactional, including intrinsics, IO identity,
+  templates, instance visibility, and staging state. Fresh identities may
+  advance across rollback but must never be reused.
+
+Acceptance: round-trip every relevant variant and shared graph structure.
+Decode into sessions with different prior allocations and verify nominal
+equality, distinct local identities, template-hole identity, evidence ordering,
+and unchanged behavior. An installed object must support subsequent inference,
+deriving, splices, Core interpretation, and diagnostics without rechecking its
+source.
+
+### M5: activate checked-module caching with stage dependency tracking
+
+Depends on M4.
+
+Required work:
+
+- Compute deterministic semantic and ABI summaries after successful owner
+  validation.
+- Record a module's compile-time dependencies whenever a splice or deriver
+  runs. Track the executable closure, including dictionary calls, template
+  holes, ordinary helper functions, and indirect callbacks.
+- Use module-granularity stage fingerprints initially. The stage fingerprint
+  combines the module's stage-capable implementation with dependency stage
+  fingerprints. This may conservatively propagate changes through a stage
+  closure, but must not invalidate an unrelated runtime-only importer.
+- Keep stage references symbolic so an unchanged module object uses the
+  current dependency implementation when a later consumer executes it during
+  compilation.
+- Support lookup when stage dependencies are discovered during checking: use
+  a base key for known parse/native/role/fixity/semantic inputs, then validate
+  immutable candidate manifests containing the recorded stage dependencies.
+  Include those dependencies in the final checked-object key.
+- Recompute transitive stage fingerprints from current dependencies even when
+  the module's own checked object is reused. Otherwise changes hidden behind
+  an unchanged intermediary could be missed.
+- Install valid hits directly. On any decoding or compatibility failure,
+  discard temporary state and follow the ordinary miss path.
+- Publish only successfully checked, elaborated, and linted objects. Valid
+  dependency artifacts may survive a later entry failure.
+- Rerun graph-level declaration compatibility checks over installed interfaces
+  on every prepared graph. These checks do not replay module inference or
+  Core lint.
+
+Acceptance: runtime-only consumers remain hits after a scalar implementation
+edit. A splice that calls the same edited function rebuilds. Cover transitive
+helpers behind unchanged intermediate modules, imported derivers, reflection,
+dictionaries, and mixed cached/cold dependency graphs. Adding incompatible
+instances in a separate branch must fail even when both modules were previously
+cached successfully.
+
+### M6: add owner-scoped lowering and emission caching
+
+Depends on M5. Starting points are `machine.Lower`, `codegen.EmitProject`, and
+the per-unit generator's imported-definition lookups.
+
+Required work:
+
+- Introduce `machine.LowerUnit` and `codegen.EmitUnit`, or equivalent APIs,
+  consuming owned Core plus imported link/ABI summaries.
+- Eliminate imported runtime-body inspection from code generation. Use the
+  summaries introduced in M3 for calling-convention decisions.
+- Lower only owned workers, closures, and synthesized helpers. Imported
+  Machine families are declared by link summaries.
+- Add owner-scoped Machine validation without weakening the existing
+  whole-program validation used by equivalence tests.
+- Cache formatted Go bytes per owner. Missing emission artifacts must reuse
+  checked module objects.
+- Include every byte-affecting link input in emission keys, including
+  transitive type-owner imports and entry-package native-package links.
+- Preserve managed generated-project paths, runtime materialization,
+  stale-file pruning, and `sources.json`.
+- Read current native Go bytes for native-package materialization. A sidecar
+  body edit rebuilds its owner/native package while unchanged Fango-facing
+  summaries preserve importer hits.
+- Keep `--emit-go` using the source project cache and exporting only the
+  existing managed project files.
+
+Acceptance: the module backend emits byte-identical Go to the whole-program
+reference path. Tests must make imported runtime bodies unavailable to
+lowering/emission, proving the new boundary is sufficient. An unchanged build
+performs zero module parsing, resolution, checking, elaboration, linting,
+lowering, or emission. A check followed by a build performs only the missing
+backend work.
+
+### M7: integrate fresh REPL sessions and transactional imports
+
+Depends on M5; use M6's boundaries where runtime Machine installation needs
+them. Starting points are REPL bootstrap, `importInput`, `install`, evaluator
+definition installation, and native-worker replacement.
+
+Required work:
+
+- Bootstrap Prelude and syntax roots through the shared session and
+  dependency-role artifacts.
+- Prepare all imports in one prompt input before committing graph, resolver,
+  checker, staging, runtime definitions, or native-module changes.
+- Keep already imported modules frozen for the session, matching existing
+  behavior. A fresh session rereads current sources.
+- Use the effective fixity table of each prepared import increment. Previously
+  accepted prompt declarations retain their existing interpretation.
+- Preserve module-value generalization independently of prompt-value
+  monomorphism.
+- Prepare evaluator definitions and native-worker configuration before commit.
+  Failed multi-import prompts must not leave earlier imports installed or
+  close the previous worker.
+- Keep successful immutable disk artifacts after a failed prompt transaction.
+- Preserve `loaded M` messages and dependency order on hits.
+
+Acceptance: fresh cached sessions match cold transcripts, including staging,
+deriving, resource/capture checks, imported `main`, native sidecars, and
+redefinition generations. Test failure after an earlier import succeeded within
+the same prompt, unknown exposed names, failed splices, and native-worker
+preparation failure. Retrying after correction must behave like a clean
+session. Count imported-module work separately from parsing/checking/evaluating
+the prompt's own input.
+
+### M8: remove the project shortcut and complete the public contract
+
+Depends on M6 and M7.
+
+Required work:
+
+- Remove whole-project success/emission bypasses from CLI entry points. All
+  commands use graph discovery and the shared module-artifact pipeline.
+- Leave legacy artifacts ignored until cleaning; no migration is required.
+- Keep any reference implementation needed for differential testing isolated
+  from production command paths.
+- Update design/reference explanations for pipeline boundaries, semantic
+  versus stage invalidation, backend summaries, staging installation, REPL
+  transactions, cache location, fallback, and cleaning.
+- Update the distribution roadmap to reuse the new codec for future
+  precompiled-library artifacts. Shipping those artifacts, external source
+  roots, and package distribution remain unfinished.
+- Keep the language-server roadmap using the shared check session. Diagnostic
+  accumulation remains a separate feature.
+- Remove completed cache milestones after their durable contracts are
+  documented.
+
+Acceptance: every required behavior is demonstrated through the module pipeline
+with the old shortcut unavailable. No test may pass only because it reused a
+whole-project success record.
+
+## Verification and release gates
+
+Use deterministic stage counts, fresh sessions, and temporary cache roots;
+elapsed-time thresholds are not acceptance criteria. Graph discovery, artifact
+decoding/integrity checks, and interface compatibility checks remain necessary
+on hits and must be measured separately from compiler stages.
+
+| Change or scenario | Required result |
+| --- | --- |
+| Identical second check/build | Zero module parse, resolve, check, elaborate, lint, lower, or emit work as applicable |
+| Dependency implementation edit with unchanged contracts | Rebuild owner; runtime-only importers remain checked/emission hits |
+| Dependency comment edit | Reparse/rebuild owner as required; importer semantics remain reusable and diagnostic locations stay current |
+| Exported scheme, schema, instance, capture, or ABI change | Invalidate affected dependency consumers |
+| Stage implementation or deriver change | Invalidate compile-time consumers, including transitive ones |
+| Graph fixity change | Reuse parsed artifacts; checked artifacts use the new complete table |
+| Native-sidecar body edit | Revalidate owner and materialize native package; preserve importers when interface/ABI is unchanged |
+| New import graph combining cached modules | Repeat graph/path/fixity/declaration compatibility checks |
+| Missing emission artifact | Reuse checked object; run only owner backend work |
+| Corrupt/incompatible/unwritable cache | Compile normally without cache diagnostics |
+| Failed REPL import | Restore session state; retain valid immutable disk artifacts |
+| Multiple entries and role changes | Share dependency artifacts; distinguish entry-role behavior |
+| Clean | Remove project-local and precisely identified fallback artifacts; preserve exported projects |
+
+Codec tests must additionally cover deterministic bytes under varied map
+insertion and allocation orders, pointer sharing, recursive references, all
+node tags, float bit patterns, invalid offsets/references, foreign-source
+relocation, and template-index remapping.
+
+Run cold-versus-cached comparisons for diagnostics, Core dumps, generated Go,
+executable output, and REPL transcripts. Include all-hit, all-miss, and mixed
+graphs, plus concurrent writers and separate compiler processes. Verify that a
+different compiler fingerprint selects a cold namespace and that reverting a
+source change can reuse retained content-addressed variants.
+
+Run focused tests at each milestone. Before final completion, run
+`make test-short`, `make test`, `make ci`, and `go vet ./benchmarks`. Preserve
+Core lint and interpreter/compiler differential coverage. Do not run timing
+benchmarks during ordinary development. The
+[verification design](design/verification.md) owns the repository-wide gates.
+
+## Documentation maintenance
+
+This roadmap owns only unfinished work and its acceptance criteria. Promote
+implemented boundaries and invariants into the relevant design topics as each
+milestone lands; promote behavior and diagnostics into reference topics.
+Remove completed milestones instead of retaining an implementation diary.
+
+Keep the roadmap index navigational. Link module distribution, tooling, and
+REPL roadmaps here instead of maintaining competing plans. Shipping
+precompiled library artifacts and implementing transactional REPL reload remain
+separate work even after all milestones here are complete.
