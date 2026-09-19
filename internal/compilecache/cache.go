@@ -1,6 +1,6 @@
-// Package compilecache locates the compiler's persistent artifacts — parsed
-// units, checked module objects, and emitted Go — beneath a source-local root
-// with a user-cache fallback. Cache failures are deliberately
+// Package compilecache locates the compiler's persistent artifacts — checked
+// module objects and emitted Go — beneath a source-local root with a
+// user-cache fallback. Cache failures are deliberately
 // indistinguishable from misses: compilation must never depend on this
 // optimization being writable or intact.
 package compilecache

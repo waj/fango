@@ -155,8 +155,8 @@ type ResolvedModule struct {
 func (g *Graph) resolvedModule(name, owner string, role ModuleRole, entry string) ResolvedModule {
 	n := g.nodes[name]
 	var moduleSource *source.File
-	if n.parsed != nil {
-		moduleSource = n.parsed.headerSp.File
+	if n.mod != nil && n.mod.Header != nil {
+		moduleSource = n.mod.Header.NameSpan.File
 	}
 	if moduleSource == nil {
 		moduleSource = firstDeclFile(n.resolved)
@@ -274,7 +274,6 @@ type node struct {
 	name, path   string
 	content      []byte
 	mod          *ast.Module
-	parsed       *ParsedUnit
 	sourceHash   string
 	iface        *iface
 	private      bool
@@ -313,11 +312,9 @@ func LoadObserved(entry string, observe StageObserver) (*Result, []diag.Error) {
 
 type LoadOptions struct {
 	Observe StageObserver
-	Parsed  ParsedCache
 }
 
-// LoadWithOptions loads a batch graph with optional parsed-unit persistence
-// and test instrumentation.
+// LoadWithOptions loads a batch graph with optional test instrumentation.
 func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) {
 	abs, err := filepath.Abs(entry)
 	if err != nil {
@@ -329,21 +326,19 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 	}
 	root := filepath.Dir(abs)
 	f := source.NewFile(filepath.Base(abs), content)
-	parsed, hit, errs := parseUnit(f, options.Parsed)
+	m, errs := parse(f)
 	if len(errs) > 0 {
 		return nil, errs
 	}
-	m := parsed.mod
-	entryName, private := "<entry>", !parsed.hasHeader
+	entryName, private := "<entry>", m.Header == nil
 	if !private {
-		entryName = parsed.header
+		entryName = m.Header.Name
 	}
-	if options.Observe != nil && !hit {
+	if options.Observe != nil {
 		options.Observe("parse", entryName)
 	}
 	g := newGraph(FSProvider{Root: root})
 	g.observe = options.Observe
-	g.parsed = options.Parsed
 	if !private {
 		if path, _, bundleErr := g.bundled.Source(entryName); bundleErr == nil {
 			return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; local modules cannot use bundled names.", entryName, path)}
@@ -353,7 +348,7 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 	if !private && m.Header.Name != wantEntry {
 		return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "MODULE/PATH MISMATCH", "The entry file `%s` must declare module `%s`, but declares `%s`.", filepath.Base(abs), wantEntry, m.Header.Name)}
 	}
-	rootNode := &node{name: entryName, path: filepath.Base(abs), content: content, mod: m, parsed: parsed, sourceHash: hashBytes(content), private: private, deps: parsedDependencies(parsed, entryName), nativeModule: wantEntry}
+	rootNode := &node{name: entryName, path: filepath.Base(abs), content: content, mod: m, sourceHash: hashBytes(content), private: private, deps: syntaxDependencies(m, entryName), nativeModule: wantEntry}
 	rootNativePath := wantEntry + ".native.go"
 	if nb, ne := os.ReadFile(filepath.Join(root, rootNativePath)); ne == nil {
 		rootNode.nativePath, rootNode.native = rootNativePath, nb
@@ -472,28 +467,6 @@ func firstDeclFile(decls []ast.Decl) *source.File {
 	return nil
 }
 
-func parseUnit(f *source.File, cache ParsedCache) (*ParsedUnit, bool, []diag.Error) {
-	hash := hashBytes(f.Content)
-	if cache != nil {
-		if data, ok := cache.LoadParsed(hash); ok {
-			if unit, err := decodeParsed(data, hash, f); err == nil {
-				return unit, true, nil
-			}
-		}
-	}
-	m, errs := parse(f)
-	if len(errs) > 0 {
-		return nil, false, errs
-	}
-	unit := newParsedUnit(m)
-	if cache != nil {
-		if data, err := encodeParsed(unit, hash); err == nil {
-			cache.StoreParsed(hash, data)
-		}
-	}
-	return unit, false, nil
-}
-
 func hashBytes(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
@@ -525,21 +498,24 @@ const ListModule = "List"
 // TupleModule owns the Pair/Triple types and constructors used by `(a, b)`.
 const TupleModule = "Tuple"
 
-func parsedDependencies(u *ParsedUnit, self string) []string {
+// syntaxDependencies is the set of modules a file depends on through syntax
+// rather than an import: the Prelude it did not opt out of, and the owners of
+// the bracket, tuple, quote, and deriving forms it uses.
+func syntaxDependencies(m *ast.Module, self string) []string {
 	var deps []string
-	if !u.noPrelude && self != PreludeModule {
+	if !m.NoPrelude && self != PreludeModule {
 		deps = append(deps, PreludeModule)
 	}
-	if u.staging && self != MetaModule {
+	if m.UsesStaging && self != MetaModule {
 		deps = addDep(deps, MetaModule)
 	}
-	if self != DeriveModule && u.deriving {
+	if self != DeriveModule && usesDeriving(m) {
 		deps = addDep(deps, DeriveModule)
 	}
-	if u.lists && self != ListModule {
+	if m.UsesLists && self != ListModule {
 		deps = addDep(deps, ListModule)
 	}
-	if u.tuples && self != TupleModule {
+	if m.UsesTuples && self != TupleModule {
 		deps = addDep(deps, TupleModule)
 	}
 	return deps

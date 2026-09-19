@@ -43,16 +43,15 @@ per-entry fallback namespace when present.
 working directory; see [REPL](repl.md).
 
 Compilation results are cached per module under `.fango/cache/v1/` beside the
-entry file. Every command discovers and validates the current source graph, and
-then reuses what is still valid: a parse for a file whose exact content is
-unchanged, a checked module whose sources, sidecar, operator table, and
-dependency contracts are unchanged, and generated Go for a module whose own
-implementation and every contract it links against are unchanged. So editing a
-function body recompiles its own module and relinks the program, while modules
-that only call it keep their generated code; changing an exported type,
-instance, or calling convention recompiles the modules that depend on it; and
-editing a comment recompiles only the file it is in, while diagnostics
-elsewhere still point at current source positions. A module whose
+entry file. Every command discovers, parses, and validates the current source
+graph, and then reuses what is still valid: a checked module whose sources,
+sidecar, operator table, and dependency contracts are unchanged, and generated
+Go for a module whose own implementation and every contract it links against
+are unchanged. So editing a function body recompiles its own module and relinks
+the program, while modules that only call it keep their generated code; changing
+an exported type, instance, or calling convention recompiles the modules that
+depend on it; and editing a comment recompiles only the module it is in, while
+diagnostics elsewhere still point at current source positions. A module whose
 implementation runs at compile time — through a splice or a deriver — also
 recompiles the modules that execute it, transitively, even when nothing about
 its type changed. `check` produces the same checked modules a later `build`
@@ -64,7 +63,8 @@ corrupt, incompatible, or unwritable entries are ignored and rebuilt, and there
 is no status or disable flag. Distinct compiler executables use distinct
 namespaces, so an upgraded compiler starts cold and never reads what an older
 one wrote. `FANGO_BUILD_DIR` redirects generated build output, not this cache.
-`fmt` always parses its requested input and is not cached.
+Parsing is never cached: every command reparses the whole source graph, and
+`fmt` parses its requested input like any other.
 
 ## Formatting
 

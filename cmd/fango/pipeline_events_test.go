@@ -42,8 +42,9 @@ func TestCompilationSessionStageEvents(t *testing.T) {
 		}
 	}
 
-	// A second invocation rediscovers and revalidates the graph, then serves
-	// every owner from its artifacts: no compiler stage runs again.
+	// A second invocation rediscovers and revalidates the graph — parsing and
+	// resolving it again — then serves every owner from its artifacts: no
+	// semantic or back-end stage runs again.
 	events = nil
 	if _, _, ok := emitProjectManifestSession(entry, false, &stderr, session); !ok {
 		t.Fatalf("cached compile failed: %s", stderr.String())
@@ -51,7 +52,7 @@ func TestCompilationSessionStageEvents(t *testing.T) {
 	hits := 0
 	for _, event := range events {
 		switch event.Stage {
-		case "parse", "check", "elaborate", "semantic-lint", "lowering", "emission":
+		case "check", "elaborate", "semantic-lint", "lowering", "emission":
 			t.Fatalf("a cached build repeated %s for %s: %#v", event.Stage, event.Owner, events)
 		case "checked-cache-hit", "emitted-cache-hit":
 			hits++
@@ -62,29 +63,5 @@ func TestCompilationSessionStageEvents(t *testing.T) {
 	}
 	if hits == 0 {
 		t.Fatalf("cached build reused nothing: %#v", events)
-	}
-}
-
-func TestRepeatedDiscoveryUsesPersistentParsedUnits(t *testing.T) {
-	d := t.TempDir()
-	entry := filepath.Join(d, "Main.fango")
-	if err := os.WriteFile(entry, []byte("main = 1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	countParses := func() int {
-		count := 0
-		session := &compilationSession{observe: func(event stageEvent) {
-			if event.Stage == "parse" {
-				count++
-			}
-		}}
-		var stderr bytes.Buffer
-		if _, _, _, _, _, ok := compileFileGraphSession(entry, &stderr, session); !ok {
-			t.Fatalf("compile failed: %s", stderr.String())
-		}
-		return count
-	}
-	if first, second := countParses(), countParses(); first == 0 || second != 0 {
-		t.Fatalf("parse counts = %d then %d", first, second)
 	}
 }

@@ -33,7 +33,7 @@ type Result struct {
 // owner at a time. Diagnostic errors are source-facing; internalErr denotes a
 // violated compiler invariant and is kept separate from rendering.
 func (s *Session) Compile(entry string) (*Result, []diag.Error, error) {
-	loaded, errs := modules.LoadWithOptions(entry, modules.LoadOptions{Observe: modules.StageObserver(s.Observe), Parsed: compilecache.NewParsedStore(entry)})
+	loaded, errs := modules.LoadWithOptions(entry, modules.LoadOptions{Observe: modules.StageObserver(s.Observe)})
 	if len(errs) != 0 {
 		return nil, errs, nil
 	}

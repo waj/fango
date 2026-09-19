@@ -153,11 +153,10 @@ func TestListSyntaxAddsDependency(t *testing.T) {
 	if len(errs) > 0 {
 		t.Fatalf("parse: %v", errs)
 	}
-	u := newParsedUnit(m)
-	if !slices.Contains(parsedDependencies(u, "Example"), ListModule) {
+	if !slices.Contains(syntaxDependencies(m, "Example"), ListModule) {
 		t.Fatal("list syntax did not add the bundled List dependency")
 	}
-	if slices.Contains(parsedDependencies(u, ListModule), ListModule) {
+	if slices.Contains(syntaxDependencies(m, ListModule), ListModule) {
 		t.Fatal("list syntax added a self-dependency to List")
 	}
 }

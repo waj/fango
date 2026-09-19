@@ -100,8 +100,11 @@ func (p *project) total(stages ...string) int {
 	return n
 }
 
+// compilerWork counts the per-module work artifacts can eliminate. Parsing and
+// resolution are not in it: every command rediscovers and revalidates the graph,
+// so they run on every build by design.
 func (p *project) compilerWork() int {
-	return p.total("check", "elaborate", "semantic-lint", "lowering", "emission", "parse")
+	return p.total("check", "elaborate", "semantic-lint", "lowering", "emission")
 }
 
 func libraryProject(t *testing.T) *project {

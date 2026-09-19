@@ -583,7 +583,7 @@ func TestCheckedCacheCoversNativeSidecarEntry(t *testing.T) {
 	}
 }
 
-func TestFixityChangeReusesParsedUnitsAndRechecks(t *testing.T) {
+func TestFixityChangeRechecksEveryOwner(t *testing.T) {
 	d := t.TempDir()
 	ops := filepath.Join(d, "Ops.fango")
 	main := filepath.Join(d, "Main.fango")
@@ -606,9 +606,6 @@ func TestFixityChangeReusesParsedUnitsAndRechecks(t *testing.T) {
 	}
 	if events["check"]["Main"] != 1 || events["checked-cache-hit"]["Main"] != 0 {
 		t.Fatalf("a checked artifact survived a graph fixity change: %#v", events)
-	}
-	if events["parse"]["Main"] != 0 {
-		t.Fatalf("an unchanged source was reparsed for a fixity change: %#v", events)
 	}
 }
 

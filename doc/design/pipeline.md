@@ -142,14 +142,13 @@ bundled constructors. A trailing lambda uses ordinary application/lambda nodes.
 These forms introduce no second type or evaluation system. Tuple is a syntax
 root, always resolvable but never implicitly in scope.
 
-Each successful batch parse is persisted immediately as a content-addressed
-`ParsedUnit`, before graph validation or checking. Its versioned JSON payload
-contains the complete unresolved AST and discovery metadata derived by that
-same parse: header, imports, Prelude choice, and syntax-driven dependencies.
-Every cache use decodes a new tree, validates tagged variants and span bounds,
-and binds spans to the current source file, so fixity, resolution, staging, and
-inference mutations cannot accumulate in the artifact. Failed parses are not
-cached. The formatter continues to lex and parse its requested text directly.
+Parses are not persisted. Every command parses each module in the graph from
+source, and discovery reads those bytes anyway to hash them, so the front end
+is deliberately the one stage with no artifact. Serializing an AST is not worth
+it: a tree large enough to round-trip safely costs an order of magnitude more
+to decode and validate than the recursive-descent parser costs to rerun, and
+parsing is a small fraction of a warm command. Reuse begins at the checked
+module, whose identity already contains the exact source hash.
 
 Operator runs remain flat until the complete graph is parsed. `internal/fixity`
 then groups them before name resolution, including inside quotes. Fixity belongs
@@ -161,11 +160,11 @@ Core has no operator node.
 
 `modules.Graph` runs source discovery, complete-graph validation, and per-module
 resolution as separate phases. Discovery always rechecks provider paths,
-headers, reserved bundled names, and native sidecars, even on parsed-unit hits.
-Validation detects cycles and collects the complete effective fixity table,
-including builtins, before any fresh tree is rewritten; the sorted table also
-has a stable SHA-256 fingerprint. Resolution then processes modules in
-dependency-first order with lexical tie-breaking. Local modules come from the
+headers, reserved bundled names, and native sidecars. Validation detects cycles
+and collects the complete effective fixity table, including builtins, before any
+fresh tree is rewritten; the sorted table also has a stable SHA-256 fingerprint.
+Resolution then processes modules in dependency-first order with lexical
+tie-breaking. Local modules come from the
 entry directory; bundled sources come from the embedded provider and reserve
 their module names. Imported scopes expose only direct public interfaces,
 although instance visibility includes transitive dependencies.

@@ -39,12 +39,8 @@ func TestStoresRoundTripUnderTheCompilerNamespace(t *testing.T) {
 	local := filepath.Join(t.TempDir(), "local")
 	rootedAt(t, local, "")
 	hash := strings.Repeat("ab", 32)
-	NewParsedStore(entry).StoreParsed(hash, []byte("unit"))
 	NewModuleStore(entry).StoreObject(hash, []byte("object"))
 	NewEmissionStore(entry).Store(hash, []byte("emitted"))
-	if got, ok := NewParsedStore(entry).LoadParsed(hash); !ok || string(got) != "unit" {
-		t.Fatalf("parsed = %q, %v", got, ok)
-	}
 	if got, ok := NewModuleStore(entry).LoadObject(hash); !ok || string(got) != "object" {
 		t.Fatalf("object = %q, %v", got, ok)
 	}
@@ -54,7 +50,7 @@ func TestStoresRoundTripUnderTheCompilerNamespace(t *testing.T) {
 	// Every artifact kind lives beneath the running compiler's namespace, so
 	// a different compiler starts cold rather than reading these.
 	namespace := filepath.Join(local, "v1", mustFingerprint(t))
-	for _, kind := range []string{"parsed", "checked", "emitted"} {
+	for _, kind := range []string{"checked", "emitted"} {
 		if _, err := os.Stat(filepath.Join(namespace, kind)); err != nil {
 			t.Fatalf("%s artifacts are not under the compiler namespace: %v", kind, err)
 		}
@@ -66,7 +62,6 @@ func TestMalformedKeysAreRejected(t *testing.T) {
 	local := filepath.Join(t.TempDir(), "local")
 	rootedAt(t, local, "")
 	for _, key := range []string{"", "zz", strings.Repeat("ab", 31), "../escape"} {
-		NewParsedStore(entry).StoreParsed(key, []byte("unit"))
 		NewModuleStore(entry).StoreObject(key, []byte("object"))
 		NewEmissionStore(entry).Store(key, []byte("emitted"))
 		if _, ok := NewModuleStore(entry).LoadObject(key); ok {

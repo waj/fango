@@ -10,8 +10,8 @@ import (
 func TestStoreRoundTripAndPathValidation(t *testing.T) {
 	root := t.TempDir()
 	s := New(root)
-	s.Store("parsed/abc.json", []byte("payload"))
-	if got, ok := s.Load("parsed/abc.json"); !ok || string(got) != "payload" {
+	s.Store("checked/abc.json", []byte("payload"))
+	if got, ok := s.Load("checked/abc.json"); !ok || string(got) != "payload" {
 		t.Fatalf("load = %q, %v", got, ok)
 	}
 	s.Store("../outside", []byte("bad"))
@@ -27,11 +27,11 @@ func TestConcurrentAtomicWriters(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.Store("parsed/unit.json", []byte("complete"))
+			s.Store("checked/object.json", []byte("complete"))
 		}()
 	}
 	wg.Wait()
-	if got, ok := s.Load("parsed/unit.json"); !ok || string(got) != "complete" {
+	if got, ok := s.Load("checked/object.json"); !ok || string(got) != "complete" {
 		t.Fatalf("load after concurrent stores = %q, %v", got, ok)
 	}
 }

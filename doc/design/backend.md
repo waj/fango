@@ -117,13 +117,12 @@ paths and managed-directory safeguards.
 
 The source project keeps its artifacts beneath
 `.fango/cache/v1/<compiler fingerprint>/`, one namespace per artifact kind:
-parsed units keyed by exact source hash, checked module objects keyed as
-[pipeline](pipeline.md#pipeline) describes, and emitted Go keyed as above. Each
-uses a versioned JSON envelope, payload digest, and atomic rename, and each is
-validated independently before use. There is no whole-project artifact: every
-invocation discovers and validates the current graph, and one module-artifact
-pipeline decides what is still valid, so no command can be served a stale
-program by a shortcut that outranks its modules.
+checked module objects keyed as [pipeline](pipeline.md#pipeline) describes, and
+emitted Go keyed as above. Each uses a versioned JSON envelope, payload digest,
+and atomic rename, and each is validated independently before use. There is no
+whole-project artifact: every invocation discovers and validates the current
+graph, and one module-artifact pipeline decides what is still valid, so no
+command can be served a stale program by a shortcut that outranks its modules.
 
 The compiler fingerprint is the SHA-256 of the running executable, computed
 once per process; both its value and any computation failure are stable for
