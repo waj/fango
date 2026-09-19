@@ -20,31 +20,19 @@ Measured on one machine with `examples/calculator.fango`, whose graph is the
 Prelude plus a handful of stdlib modules. A warm `fango check` and a warm
 `fango build` take the same time to within noise, so Go emission, the build
 directory, and the Go toolchain contribute almost nothing once the emission
-cache hits. The proportions below are the durable observation; the absolute
-times are not.
+cache hits. The proportions are the durable observation; absolute times are not.
 
-| Warm-compile phase | Share |
-| --- | --- |
-| Scanning the JSON envelope to find the payload | ~20% |
-| Parsing the payload into the codec's node graph | ~40% |
-| Reconstructing typed values from that node graph | ~10% |
-| Interning and identity remapping at install | ~5% |
-| Everything else, including allocator and GC pressure | remainder |
-
-Two conclusions follow. First, the reflective reference-graph codec is not the
-problem: rebuilding the typed graph is a small minority of the work, and the
-identity remapping on top of it is smaller still. The problem is that the graph
-is spelled as JSON, and a warm compile is therefore a JSON parser benchmark.
-Second, the artifacts are far larger than their information content — the
-checked objects for this small program run to tens of megabytes across a
-handful of modules, at hundreds of bytes per encoded value, because every value
-is a JSON object with a `kind` string, every struct field repeats its name, and
-fully qualified Go type paths are repeated thousands of times.
+Framing the artifacts and replacing the object payload's JSON with a binary
+encoding together took a warm compile to about a quarter of what it was and the
+checked objects to about a fourteenth of their size. Decoding is no longer the
+whole of a warm compile, but it is still most of the compiler-owned part of it.
 
 Attributing the bytes of a checked object to the `ModuleObject` fields that
 reach them puts stage Core at a little under half of every object, shared type
 and declaration structure at about a third, runtime Core at well under a fifth,
-and the declaration state itself at a few percent.
+and the declaration state itself at a few percent. Stage Core is therefore the
+largest remaining input, and a compile that never evaluates a splice never
+needs it.
 
 ## Goal and decisions
 
@@ -53,18 +41,12 @@ artifact decoding. No change to what is cached, to any key, to any validity
 rule, or to any user-visible behavior: this is entirely a change of
 representation and of when a representation is materialized.
 
-Three decisions govern the work.
+Two decisions govern the work.
 
-- **The object payload becomes a binary encoding of the same graph.** The
-  reference-numbered graph model, its sharing and cycle handling, its exact
-  float bits, its sorted maps, and its strictness are all kept as they are. Only
-  the spelling changes: tagged values, varints, a string pool, and a node offset
-  table, so that decoding walks bytes into typed values without materializing an
-  intermediate node representation at all.
-- **A node offset table makes partial decoding possible, and stage Core uses
-  it.** The encoder emits named sections over one shared node pool. Decoding a
-  section touches only the nodes it reaches, so a run that never needs stage
-  Core never pays for it.
+- **The object encoding's node table makes partial decoding possible, and stage
+  Core uses it.** The encoder emits named sections over one shared node pool.
+  Decoding a section touches only the nodes it reaches, so a run that never
+  needs stage Core never pays for it.
 - **Stage Core is needed exactly when some module is checked from source.**
   Completing a module's stage snapshot elaborates its declarations against the
   installed stage definitions of its dependencies, so a single cache miss
@@ -78,32 +60,6 @@ No new commands, flags, eviction policy, or on-disk layout beyond the artifact
 bytes themselves. Cache failures stay indistinguishable from misses.
 
 ## Milestones
-
-### M2 — Binary object payload
-
-`internal/objectcodec` keeps its exported shape and every validation rule it
-enforces today, and replaces its JSON spelling with:
-
-- a header magic and format version;
-- a string pool holding every type name, struct field name, string value, and
-  span text, so each distinct string is stored and allocated once;
-- a node table of offsets into the value area, so any node can be decoded
-  without reading the ones before it;
-- tagged values — nil, ref, struct, slice, map, string, bool, int, uint, float,
-  span, and a type wrapper — with varint lengths and indices, and exact IEEE
-  bits for floats.
-
-The decoder becomes a cursor over the payload that produces `reflect.Value`
-directly. It keeps the existing per-node value cache and the filling/filled
-marks that make cycles and sharing work, and it keeps rejecting unknown types,
-malformed references, missing or extra struct fields, wrong value kinds,
-duplicate map keys, invalid or unrelocatable spans, and oversized graphs. Two
-checks replace the JSON reader's trailing-data rule: every node's encoding must
-end exactly where the next node's begins, and the value area must be consumed
-exactly.
-
-Encoding stays deterministic: traversal order is unchanged, map keys keep their
-current sort, and the string pool is ordered by first encounter.
 
 ### M3 — Deferred stage sections
 
@@ -143,8 +99,6 @@ loaded no stage Core and that a compile with a miss loaded it.
   foreign-schema, or unwritable artifact is a miss and never a diagnostic, and
   every stale-input case still rebuilds. The framing and the binary payload each
   need their own corruption cases.
-- M2 should leave artifact decoding a minority of warm compile time and shrink
-  checked objects severalfold.
   M3 must load no stage section on an all-hit compile and must not change the
   work done by a compile with a miss.
 - Compile-latency measurement stays off the ordinary development path. The

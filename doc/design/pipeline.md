@@ -67,7 +67,18 @@ owned runtime and stage Core, staging completion groups, templates, and ABI
 summaries. Its typed reference-graph codec preserves shared and recursive
 compiler data, uses exact IEEE floating-point bits, sorts maps, and rejects
 unknown variants, malformed references, missing fields, and invalid source
-provenance. Pointer identity and session allocation numbers are not semantic:
+provenance.
+
+The codec writes a string pool, a table of node sizes, and tagged values. Each
+distinct string — every type name, field name, string value, and span text — is
+stored and allocated once, and a decoder walks bytes straight into typed values
+without materializing the graph first, reaching any node from its recorded
+offset without reading the ones before it. The size table is checked against
+the payload length before anything is decoded, and every value decoded must end
+exactly at its recorded boundary, so a damaged table cannot be read past its
+own description or ask for an allocation the payload cannot hold. Encoding is
+deterministic: traversal order is fixed, map keys are sorted, and the string
+pool follows first encounter. Pointer identity and session allocation numbers are not semantic:
 installation interns builtin/imported nominal names, allocates fresh local
 nominal, type-variable, capture, scope, and resume identities, remaps template
 indices, and reconstructs stable instance cutoffs without changing positional

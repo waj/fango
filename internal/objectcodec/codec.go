@@ -1,59 +1,52 @@
 // Package objectcodec encodes compiler-owned typed graphs without serializing
 // callbacks or implementation structs. Pointer nodes are reference-numbered,
 // preserving sharing and cycles across types, declaration metadata, and Core.
+//
+// The encoding is a string pool, a table of node sizes, and tagged values, so
+// a decoder walks bytes straight into typed values without materializing an
+// intermediate representation of the graph, and can reach any node without
+// reading the ones before it.
 package objectcodec
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/binary"
 	"fmt"
-	"io"
 	"math"
 	"reflect"
 	"sort"
-	"strconv"
 
 	"github.com/waj/fango/internal/source"
 )
 
-const maxNodes = 1_000_000
+const (
+	maxNodes = 1_000_000
+	magic    = "FGOB\x01"
+)
+
+// Value tags. A value carries a type only where the decoder consults one: a
+// struct always names its type, and an interface element or a node body that
+// is not a struct is wrapped so its concrete type survives.
+const (
+	tagNil byte = iota
+	tagRef
+	tagStruct
+	tagSlice
+	tagMap
+	tagString
+	tagFalse
+	tagTrue
+	tagInt
+	tagUint
+	tagFloat
+	tagSpanNil
+	tagSpan
+	tagTyped
+)
 
 type Context struct {
 	Types   map[string]reflect.Type
 	Sources map[string]*source.File
-}
-
-type graph struct {
-	Root  value   `json:"root"`
-	Nodes []value `json:"nodes,omitempty"`
-}
-
-type value struct {
-	Kind    string  `json:"kind"`
-	Type    string  `json:"type,omitempty"`
-	Ref     int     `json:"ref,omitempty"`
-	String  string  `json:"string,omitempty"`
-	Integer string  `json:"integer,omitempty"`
-	Bits    string  `json:"bits,omitempty"`
-	Boolean bool    `json:"boolean,omitempty"`
-	Fields  []field `json:"fields,omitempty"`
-	Items   []value `json:"items,omitempty"`
-	Entries []entry `json:"entries,omitempty"`
-	Source  string  `json:"source,omitempty"`
-	Start   int     `json:"start,omitempty"`
-	End     int     `json:"end,omitempty"`
-	Text    string  `json:"text,omitempty"`
-	Before  string  `json:"before,omitempty"`
-	After   string  `json:"after,omitempty"`
-}
-
-type field struct {
-	Name  string `json:"name"`
-	Value value  `json:"value"`
-}
-type entry struct {
-	Key   value `json:"key"`
-	Value value `json:"value"`
 }
 
 var spanType = reflect.TypeOf(source.Span{})
@@ -66,132 +59,218 @@ func typeName(t reflect.Type) string {
 }
 
 func Encode(input any) ([]byte, error) {
-	e := encoder{seen: map[any]int{}}
-	root, err := e.encode(reflect.ValueOf(input))
+	e := &encoder{index: map[string]int{}, seen: map[any]int{}}
+	body, _, err := e.value(nil, reflect.ValueOf(input))
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(graph{Root: root, Nodes: e.nodes})
+	return e.finish([]root{{name: e.str(""), body: body}}), nil
+}
+
+type root struct {
+	name int
+	body []byte
 }
 
 type encoder struct {
-	seen  map[any]int
-	nodes []value
+	strings []string
+	index   map[string]int
+	nodes   [][]byte
+	seen    map[any]int
 }
 
-func (e *encoder) encode(v reflect.Value) (value, error) {
+func (e *encoder) str(s string) int {
+	if i, ok := e.index[s]; ok {
+		return i
+	}
+	i := len(e.strings)
+	e.strings = append(e.strings, s)
+	e.index[s] = i
+	return i
+}
+
+// finish lays the value area out as the nodes in order followed by the roots in
+// order, and records every size, so a reader validates the table against the
+// payload length before decoding any of it.
+func (e *encoder) finish(roots []root) []byte {
+	out := make([]byte, 0, len(magic)+16)
+	out = append(out, magic...)
+	out = binary.AppendUvarint(out, uint64(len(e.strings)))
+	for _, s := range e.strings {
+		out = binary.AppendUvarint(out, uint64(len(s)))
+		out = append(out, s...)
+	}
+	out = binary.AppendUvarint(out, uint64(len(e.nodes)))
+	for _, node := range e.nodes {
+		out = binary.AppendUvarint(out, uint64(len(node)))
+	}
+	out = binary.AppendUvarint(out, uint64(len(roots)))
+	for _, r := range roots {
+		out = binary.AppendUvarint(out, uint64(r.name))
+		out = binary.AppendUvarint(out, uint64(len(r.body)))
+	}
+	for _, node := range e.nodes {
+		out = append(out, node...)
+	}
+	for _, r := range roots {
+		out = append(out, r.body...)
+	}
+	return out
+}
+
+// value appends v and reports whether the appended value names its own type.
+func (e *encoder) value(dst []byte, v reflect.Value) ([]byte, bool, error) {
 	if !v.IsValid() {
-		return value{Kind: "nil"}, nil
+		return append(dst, tagNil), false, nil
 	}
 	if v.Kind() == reflect.Interface {
 		if v.IsNil() {
-			return value{Kind: "nil"}, nil
+			return append(dst, tagNil), false, nil
 		}
-		out, err := e.encode(v.Elem())
-		if err == nil {
-			out.Type = typeName(v.Elem().Type())
+		elem := v.Elem()
+		if elem.Kind() == reflect.Struct && elem.Type() != spanType {
+			return e.value(dst, elem) // the struct names the same type itself
 		}
-		return out, err
+		dst = append(dst, tagTyped)
+		dst = binary.AppendUvarint(dst, uint64(e.str(typeName(elem.Type()))))
+		dst, _, err := e.value(dst, elem)
+		return dst, true, err
 	}
 	if v.Type() == spanType {
-		sp := v.Interface().(source.Span)
-		if sp.File == nil {
-			return value{Kind: "span"}, nil
-		}
-		if sp.Start < 0 || sp.End < sp.Start || sp.End > len(sp.File.Content) {
-			return value{}, fmt.Errorf("invalid span %s[%d:%d]", sp.File.Name, sp.Start, sp.End)
-		}
-		before := max(0, sp.Start-32)
-		after := min(len(sp.File.Content), sp.End+32)
-		return value{Kind: "span", Source: sp.File.Name, Start: sp.Start, End: sp.End,
-			Text: string(sp.File.Content[sp.Start:sp.End]), Before: string(sp.File.Content[before:sp.Start]), After: string(sp.File.Content[sp.End:after])}, nil
+		out, err := e.span(dst, v.Interface().(source.Span))
+		return out, false, err
 	}
 	switch v.Kind() {
 	case reflect.Pointer:
-		if v.IsNil() {
-			return value{Kind: "nil"}, nil
-		}
-		key := v.Interface()
-		if id, ok := e.seen[key]; ok {
-			return value{Kind: "ref", Ref: id}, nil
-		}
-		if len(e.nodes) >= maxNodes {
-			return value{}, fmt.Errorf("object graph exceeds %d nodes", maxNodes)
-		}
-		id := len(e.nodes) + 1
-		e.seen[key] = id
-		e.nodes = append(e.nodes, value{Kind: "pending"})
-		n, err := e.encode(v.Elem())
-		if err != nil {
-			return value{}, err
-		}
-		if n.Type == "" {
-			n.Type = typeName(v.Type())
-		}
-		e.nodes[id-1] = n
-		return value{Kind: "ref", Ref: id}, nil
+		return e.pointer(dst, v)
 	case reflect.Struct:
-		out := value{Kind: "struct", Type: typeName(v.Type())}
+		// The field count is a property of the type, so it is known before any
+		// field is encoded and needs no placeholder to patch afterwards.
+		fields := 0
+		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).Tag.Get("object") != "omit" {
+				fields++
+			}
+		}
+		dst = append(dst, tagStruct)
+		dst = binary.AppendUvarint(dst, uint64(e.str(typeName(v.Type()))))
+		dst = binary.AppendUvarint(dst, uint64(fields))
 		for i := 0; i < v.NumField(); i++ {
 			f := v.Type().Field(i)
 			if f.Tag.Get("object") == "omit" {
 				continue
 			}
 			if f.PkgPath != "" {
-				return value{}, fmt.Errorf("unsupported private field %s.%s", v.Type(), f.Name)
+				return nil, false, fmt.Errorf("unsupported private field %s.%s", v.Type(), f.Name)
 			}
-			fv, err := e.encode(v.Field(i))
+			dst = binary.AppendUvarint(dst, uint64(e.str(f.Name)))
+			next, _, err := e.value(dst, v.Field(i))
 			if err != nil {
-				return value{}, fmt.Errorf("%s.%s: %w", v.Type(), f.Name, err)
+				return nil, false, fmt.Errorf("%s.%s: %w", v.Type(), f.Name, err)
 			}
-			out.Fields = append(out.Fields, field{Name: f.Name, Value: fv})
+			dst = next
 		}
-		return out, nil
+		return dst, true, nil
 	case reflect.Slice:
 		if v.IsNil() {
-			return value{Kind: "nil"}, nil
+			return append(dst, tagNil), false, nil
 		}
-		out := value{Kind: "slice", Items: make([]value, v.Len())}
-		for i := range out.Items {
-			x, err := e.encode(v.Index(i))
+		dst = append(dst, tagSlice)
+		dst = binary.AppendUvarint(dst, uint64(v.Len()))
+		for i := 0; i < v.Len(); i++ {
+			next, _, err := e.value(dst, v.Index(i))
 			if err != nil {
-				return value{}, err
+				return nil, false, err
 			}
-			out.Items[i] = x
+			dst = next
 		}
-		return out, nil
+		return dst, false, nil
 	case reflect.Map:
 		if v.IsNil() {
-			return value{Kind: "nil"}, nil
+			return append(dst, tagNil), false, nil
 		}
 		keys := v.MapKeys()
 		sort.Slice(keys, func(i, j int) bool { return fmt.Sprint(keys[i].Interface()) < fmt.Sprint(keys[j].Interface()) })
-		out := value{Kind: "map", Entries: make([]entry, len(keys))}
-		for i, k := range keys {
-			key, err := e.encode(k)
+		dst = append(dst, tagMap)
+		dst = binary.AppendUvarint(dst, uint64(len(keys)))
+		for _, k := range keys {
+			next, _, err := e.value(dst, k)
 			if err != nil {
-				return value{}, err
+				return nil, false, err
 			}
-			val, err := e.encode(v.MapIndex(k))
-			if err != nil {
-				return value{}, err
+			if dst, _, err = e.value(next, v.MapIndex(k)); err != nil {
+				return nil, false, err
 			}
-			out.Entries[i] = entry{Key: key, Value: val}
 		}
-		return out, nil
+		return dst, false, nil
 	case reflect.String:
-		return value{Kind: "string", String: v.String()}, nil
+		dst = append(dst, tagString)
+		return binary.AppendUvarint(dst, uint64(e.str(v.String()))), false, nil
 	case reflect.Bool:
-		return value{Kind: "bool", Boolean: v.Bool()}, nil
+		if v.Bool() {
+			return append(dst, tagTrue), false, nil
+		}
+		return append(dst, tagFalse), false, nil
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return value{Kind: "int", Integer: strconv.FormatInt(v.Int(), 10)}, nil
+		dst = append(dst, tagInt)
+		n := v.Int()
+		return binary.AppendUvarint(dst, uint64(n<<1)^uint64(n>>63)), false, nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return value{Kind: "uint", Integer: strconv.FormatUint(v.Uint(), 10)}, nil
+		dst = append(dst, tagUint)
+		return binary.AppendUvarint(dst, v.Uint()), false, nil
 	case reflect.Float32, reflect.Float64:
-		return value{Kind: "float", Bits: fmt.Sprintf("%016x", math.Float64bits(v.Convert(reflect.TypeOf(float64(0))).Float()))}, nil
+		dst = append(dst, tagFloat)
+		bits := math.Float64bits(v.Convert(reflect.TypeOf(float64(0))).Float())
+		return binary.LittleEndian.AppendUint64(dst, bits), false, nil
 	default:
-		return value{}, fmt.Errorf("unsupported object value %s", v.Type())
+		return nil, false, fmt.Errorf("unsupported object value %s", v.Type())
 	}
+}
+
+func (e *encoder) pointer(dst []byte, v reflect.Value) ([]byte, bool, error) {
+	if v.IsNil() {
+		return append(dst, tagNil), false, nil
+	}
+	key := v.Interface()
+	if id, ok := e.seen[key]; ok {
+		dst = append(dst, tagRef)
+		return binary.AppendUvarint(dst, uint64(id)), false, nil
+	}
+	if len(e.nodes) >= maxNodes {
+		return nil, false, fmt.Errorf("object graph exceeds %d nodes", maxNodes)
+	}
+	id := len(e.nodes)
+	e.seen[key] = id
+	e.nodes = append(e.nodes, nil)
+	body, typed, err := e.value(nil, v.Elem())
+	if err != nil {
+		return nil, false, err
+	}
+	if !typed {
+		head := binary.AppendUvarint([]byte{tagTyped}, uint64(e.str(typeName(v.Type()))))
+		body = append(head, body...)
+	}
+	e.nodes[id] = body
+	dst = append(dst, tagRef)
+	return binary.AppendUvarint(dst, uint64(id)), false, nil
+}
+
+func (e *encoder) span(dst []byte, sp source.Span) ([]byte, error) {
+	if sp.File == nil {
+		return append(dst, tagSpanNil), nil
+	}
+	if sp.Start < 0 || sp.End < sp.Start || sp.End > len(sp.File.Content) {
+		return nil, fmt.Errorf("invalid span %s[%d:%d]", sp.File.Name, sp.Start, sp.End)
+	}
+	before := max(0, sp.Start-32)
+	after := min(len(sp.File.Content), sp.End+32)
+	dst = append(dst, tagSpan)
+	dst = binary.AppendUvarint(dst, uint64(e.str(sp.File.Name)))
+	dst = binary.AppendUvarint(dst, uint64(sp.Start))
+	dst = binary.AppendUvarint(dst, uint64(sp.End))
+	dst = binary.AppendUvarint(dst, uint64(e.str(string(sp.File.Content[sp.Start:sp.End]))))
+	dst = binary.AppendUvarint(dst, uint64(e.str(string(sp.File.Content[before:sp.Start]))))
+	return binary.AppendUvarint(dst, uint64(e.str(string(sp.File.Content[sp.End:after])))), nil
 }
 
 func Decode(data []byte, output any, context Context) error {
@@ -199,32 +278,163 @@ func Decode(data []byte, output any, context Context) error {
 	if p.Kind() != reflect.Pointer || p.IsNil() {
 		return fmt.Errorf("decode target must be a non-nil pointer")
 	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	var g graph
-	if err := dec.Decode(&g); err != nil {
-		return err
-	}
-	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		return fmt.Errorf("trailing object data")
-	}
-	if len(g.Nodes) > maxNodes {
-		return fmt.Errorf("object graph exceeds %d nodes", maxNodes)
-	}
-	d := decoder{nodes: g.Nodes, values: make([]reflect.Value, len(g.Nodes)), context: context, filling: make([]bool, len(g.Nodes)), filled: make([]bool, len(g.Nodes))}
-	v, err := d.decode(g.Root, p.Elem().Type())
+	d, err := newDecoder(data, context)
 	if err != nil {
 		return err
+	}
+	return d.section("", p)
+}
+
+type span struct{ at, size int }
+
+type decoder struct {
+	strings         []string
+	area            []byte
+	nodes           []span
+	roots           map[string]span
+	values          []reflect.Value
+	filling, filled []bool
+	context         Context
+}
+
+func newDecoder(data []byte, context Context) (*decoder, error) {
+	if !bytes.HasPrefix(data, []byte(magic)) {
+		return nil, fmt.Errorf("unsupported object encoding")
+	}
+	c := &cursor{data: data, at: len(magic)}
+	count, err := c.count()
+	if err != nil {
+		return nil, err
+	}
+	d := &decoder{context: context, strings: make([]string, count)}
+	for i := range d.strings {
+		n, err := c.count()
+		if err != nil {
+			return nil, err
+		}
+		raw, err := c.take(n)
+		if err != nil {
+			return nil, err
+		}
+		d.strings[i] = string(raw)
+	}
+	nodeCount, err := c.count()
+	if err != nil {
+		return nil, err
+	}
+	if nodeCount > maxNodes {
+		return nil, fmt.Errorf("object graph exceeds %d nodes", maxNodes)
+	}
+	d.nodes = make([]span, nodeCount)
+	total := 0
+	for i := range d.nodes {
+		size, err := c.count()
+		if err != nil {
+			return nil, err
+		}
+		d.nodes[i] = span{at: total, size: size}
+		total += size
+	}
+	rootCount, err := c.count()
+	if err != nil {
+		return nil, err
+	}
+	d.roots = make(map[string]span, rootCount)
+	for i := 0; i < rootCount; i++ {
+		name, err := c.count()
+		if err != nil {
+			return nil, err
+		}
+		size, err := c.count()
+		if err != nil {
+			return nil, err
+		}
+		if name >= len(d.strings) {
+			return nil, fmt.Errorf("invalid section name")
+		}
+		if _, repeated := d.roots[d.strings[name]]; repeated {
+			return nil, fmt.Errorf("duplicate section %q", d.strings[name])
+		}
+		d.roots[d.strings[name]] = span{at: total, size: size}
+		total += size
+	}
+	d.area = data[c.at:]
+	if total != len(d.area) {
+		return nil, fmt.Errorf("object value area is %d bytes, table describes %d", len(d.area), total)
+	}
+	d.values = make([]reflect.Value, nodeCount)
+	d.filling, d.filled = make([]bool, nodeCount), make([]bool, nodeCount)
+	return d, nil
+}
+
+// section decodes one named root into p, a non-nil pointer to the target.
+func (d *decoder) section(name string, p reflect.Value) error {
+	at, ok := d.roots[name]
+	if !ok {
+		return fmt.Errorf("object has no section %q", name)
+	}
+	c := &cursor{data: d.area, at: at.at}
+	v, err := d.decode(c, p.Elem().Type())
+	if err != nil {
+		return err
+	}
+	if c.at != at.at+at.size {
+		return fmt.Errorf("section %q ends at %d, want %d", name, c.at, at.at+at.size)
 	}
 	p.Elem().Set(v)
 	return nil
 }
 
-type decoder struct {
-	nodes           []value
-	values          []reflect.Value
-	filling, filled []bool
-	context         Context
+type cursor struct {
+	data []byte
+	at   int
+}
+
+func (c *cursor) tag() (byte, error) {
+	if c.at >= len(c.data) {
+		return 0, fmt.Errorf("object value ends early")
+	}
+	b := c.data[c.at]
+	c.at++
+	return b, nil
+}
+
+func (c *cursor) uvarint() (uint64, error) {
+	n, size := binary.Uvarint(c.data[c.at:])
+	if size <= 0 {
+		return 0, fmt.Errorf("malformed object varint")
+	}
+	c.at += size
+	return n, nil
+}
+
+// count reads a length that must be representable and cannot exceed the bytes
+// left to read, so a damaged table cannot ask for an enormous allocation.
+func (c *cursor) count() (int, error) {
+	n, err := c.uvarint()
+	if err != nil {
+		return 0, err
+	}
+	if n > uint64(len(c.data)-c.at) {
+		return 0, fmt.Errorf("object length %d exceeds remaining %d bytes", n, len(c.data)-c.at)
+	}
+	return int(n), nil
+}
+
+func (c *cursor) take(n int) ([]byte, error) {
+	if n < 0 || c.at+n > len(c.data) {
+		return nil, fmt.Errorf("object value ends early")
+	}
+	out := c.data[c.at : c.at+n]
+	c.at += n
+	return out, nil
+}
+
+func (d *decoder) str(i uint64) (string, error) {
+	if i >= uint64(len(d.strings)) {
+		return "", fmt.Errorf("invalid object string %d", i)
+	}
+	return d.strings[i], nil
 }
 
 func (d *decoder) concrete(tag string) (reflect.Type, error) {
@@ -235,16 +445,58 @@ func (d *decoder) concrete(tag string) (reflect.Type, error) {
 	return t, nil
 }
 
-func (d *decoder) decode(in value, target reflect.Type) (reflect.Value, error) {
-	if in.Kind == "nil" {
+func (d *decoder) decode(c *cursor, target reflect.Type) (reflect.Value, error) {
+	tag, err := c.tag()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	if tag == tagNil {
 		return reflect.Zero(target), nil
 	}
-	if target.Kind() == reflect.Interface {
-		t, err := d.concrete(in.Type)
+	if tag == tagTyped {
+		index, err := c.uvarint()
 		if err != nil {
 			return reflect.Value{}, err
 		}
-		v, err := d.decode(in, t)
+		name, err := d.str(index)
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		if target.Kind() == reflect.Interface {
+			concrete, err := d.concrete(name)
+			if err != nil {
+				return reflect.Value{}, err
+			}
+			v, err := d.decode(c, concrete)
+			if err != nil {
+				return reflect.Value{}, err
+			}
+			if !v.Type().AssignableTo(target) {
+				return reflect.Value{}, fmt.Errorf("%s does not implement %s", v.Type(), target)
+			}
+			return v, nil
+		}
+		return d.decode(c, target)
+	}
+	if target.Kind() == reflect.Interface {
+		if tag != tagStruct {
+			return reflect.Value{}, fmt.Errorf("untyped value cannot satisfy %s", target)
+		}
+		at := c.at - 1
+		index, err := c.uvarint()
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		name, err := d.str(index)
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		concrete, err := d.concrete(name)
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		c.at = at
+		v, err := d.decode(c, concrete)
 		if err != nil {
 			return reflect.Value{}, err
 		}
@@ -254,81 +506,25 @@ func (d *decoder) decode(in value, target reflect.Type) (reflect.Value, error) {
 		return v, nil
 	}
 	if target == spanType {
-		if in.Kind != "span" {
-			return reflect.Value{}, fmt.Errorf("want span, got %s", in.Kind)
-		}
-		if in.Source == "" {
-			return reflect.Zero(target), nil
-		}
-		f := d.context.Sources[in.Source]
-		if f == nil {
-			return reflect.Value{}, fmt.Errorf("unknown source provenance %q", in.Source)
-		}
-		start, end, ok := relocateSpan(in, f.Content)
-		if !ok {
-			return reflect.Value{}, fmt.Errorf("cannot relocate span %s[%d:%d] in current source", in.Source, in.Start, in.End)
-		}
-		return reflect.ValueOf(source.Span{File: f, Start: start, End: end}), nil
+		return d.span(c, tag)
 	}
-	if in.Kind == "ref" {
-		if target.Kind() != reflect.Pointer || in.Ref < 1 || in.Ref > len(d.nodes) {
-			return reflect.Value{}, fmt.Errorf("invalid reference %d for %s", in.Ref, target)
-		}
-		i := in.Ref - 1
-		if d.values[i].IsValid() && d.values[i].Type() != target {
-			return reflect.Value{}, fmt.Errorf("reference %d type mismatch: %s and %s", in.Ref, d.values[i].Type(), target)
-		}
-		if !d.values[i].IsValid() {
-			d.values[i] = reflect.New(target.Elem())
-		}
-		if !d.filled[i] && !d.filling[i] {
-			d.filling[i] = true
-			v, err := d.decode(d.nodes[i], target.Elem())
-			if err != nil {
-				return reflect.Value{}, fmt.Errorf("reference %d: %w", in.Ref, err)
-			}
-			d.values[i].Elem().Set(v)
-			d.filling[i], d.filled[i] = false, true
-		}
-		return d.values[i], nil
+	if tag == tagRef {
+		return d.ref(c, target)
 	}
 	switch target.Kind() {
 	case reflect.Struct:
-		if in.Kind != "struct" {
-			return reflect.Value{}, fmt.Errorf("want struct %s, got %s", target, in.Kind)
-		}
-		if in.Type != "" && in.Type != typeName(target) {
-			return reflect.Value{}, fmt.Errorf("struct type mismatch: %q, want %q", in.Type, typeName(target))
-		}
-		out := reflect.New(target).Elem()
-		fieldIndex := 0
-		for i := 0; i < target.NumField(); i++ {
-			want := target.Field(i)
-			if want.Tag.Get("object") == "omit" {
-				continue
-			}
-			if fieldIndex >= len(in.Fields) || in.Fields[fieldIndex].Name != want.Name || want.PkgPath != "" {
-				return reflect.Value{}, fmt.Errorf("missing or unexpected field %q in %s", want.Name, target)
-			}
-			f := in.Fields[fieldIndex]
-			v, err := d.decode(f.Value, want.Type)
-			if err != nil {
-				return reflect.Value{}, fmt.Errorf("%s.%s: %w", target, want.Name, err)
-			}
-			out.Field(i).Set(v)
-			fieldIndex++
-		}
-		if fieldIndex != len(in.Fields) {
-			return reflect.Value{}, fmt.Errorf("extra fields in %s", target)
-		}
-		return out, nil
+		return d.structure(c, tag, target)
 	case reflect.Slice:
-		if in.Kind != "slice" {
-			return reflect.Value{}, fmt.Errorf("want slice, got %s", in.Kind)
+		if tag != tagSlice {
+			return reflect.Value{}, fmt.Errorf("want slice, got tag %d", tag)
 		}
-		out := reflect.MakeSlice(target, len(in.Items), len(in.Items))
-		for i, item := range in.Items {
-			v, err := d.decode(item, target.Elem())
+		n, err := c.count()
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		out := reflect.MakeSlice(target, n, n)
+		for i := 0; i < n; i++ {
+			v, err := d.decode(c, target.Elem())
 			if err != nil {
 				return reflect.Value{}, err
 			}
@@ -336,16 +532,20 @@ func (d *decoder) decode(in value, target reflect.Type) (reflect.Value, error) {
 		}
 		return out, nil
 	case reflect.Map:
-		if in.Kind != "map" {
-			return reflect.Value{}, fmt.Errorf("want map, got %s", in.Kind)
+		if tag != tagMap {
+			return reflect.Value{}, fmt.Errorf("want map, got tag %d", tag)
 		}
-		out := reflect.MakeMapWithSize(target, len(in.Entries))
-		for _, item := range in.Entries {
-			k, err := d.decode(item.Key, target.Key())
+		n, err := c.count()
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		out := reflect.MakeMapWithSize(target, n)
+		for i := 0; i < n; i++ {
+			k, err := d.decode(c, target.Key())
 			if err != nil {
 				return reflect.Value{}, err
 			}
-			v, err := d.decode(item.Value, target.Elem())
+			v, err := d.decode(c, target.Elem())
 			if err != nil {
 				return reflect.Value{}, err
 			}
@@ -356,85 +556,233 @@ func (d *decoder) decode(in value, target reflect.Type) (reflect.Value, error) {
 		}
 		return out, nil
 	case reflect.String:
-		if in.Kind != "string" {
-			return reflect.Value{}, fmt.Errorf("want string, got %s", in.Kind)
+		if tag != tagString {
+			return reflect.Value{}, fmt.Errorf("want string, got tag %d", tag)
 		}
-		v := reflect.New(target).Elem()
-		v.SetString(in.String)
-		return v, nil
-	case reflect.Bool:
-		if in.Kind != "bool" {
-			return reflect.Value{}, fmt.Errorf("want bool, got %s", in.Kind)
+		index, err := c.uvarint()
+		if err != nil {
+			return reflect.Value{}, err
 		}
-		v := reflect.New(target).Elem()
-		v.SetBool(in.Boolean)
-		return v, nil
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if in.Kind != "int" {
-			return reflect.Value{}, fmt.Errorf("want int, got %s", in.Kind)
-		}
-		n, err := strconv.ParseInt(in.Integer, 10, target.Bits())
+		s, err := d.str(index)
 		if err != nil {
 			return reflect.Value{}, err
 		}
 		v := reflect.New(target).Elem()
+		v.SetString(s)
+		return v, nil
+	case reflect.Bool:
+		if tag != tagTrue && tag != tagFalse {
+			return reflect.Value{}, fmt.Errorf("want bool, got tag %d", tag)
+		}
+		v := reflect.New(target).Elem()
+		v.SetBool(tag == tagTrue)
+		return v, nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if tag != tagInt {
+			return reflect.Value{}, fmt.Errorf("want int, got tag %d", tag)
+		}
+		raw, err := c.uvarint()
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		n := int64(raw>>1) ^ -int64(raw&1)
+		v := reflect.New(target).Elem()
+		if v.OverflowInt(n) {
+			return reflect.Value{}, fmt.Errorf("%d overflows %s", n, target)
+		}
 		v.SetInt(n)
 		return v, nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		if in.Kind != "uint" {
-			return reflect.Value{}, fmt.Errorf("want uint, got %s", in.Kind)
+		if tag != tagUint {
+			return reflect.Value{}, fmt.Errorf("want uint, got tag %d", tag)
 		}
-		n, err := strconv.ParseUint(in.Integer, 10, target.Bits())
+		n, err := c.uvarint()
 		if err != nil {
 			return reflect.Value{}, err
 		}
 		v := reflect.New(target).Elem()
+		if v.OverflowUint(n) {
+			return reflect.Value{}, fmt.Errorf("%d overflows %s", n, target)
+		}
 		v.SetUint(n)
 		return v, nil
 	case reflect.Float32, reflect.Float64:
-		if in.Kind != "float" || len(in.Bits) != 16 {
-			return reflect.Value{}, fmt.Errorf("invalid float encoding")
+		if tag != tagFloat {
+			return reflect.Value{}, fmt.Errorf("want float, got tag %d", tag)
 		}
-		n, err := strconv.ParseUint(in.Bits, 16, 64)
+		raw, err := c.take(8)
 		if err != nil {
 			return reflect.Value{}, err
 		}
 		v := reflect.New(target).Elem()
-		v.SetFloat(math.Float64frombits(n))
+		v.SetFloat(math.Float64frombits(binary.LittleEndian.Uint64(raw)))
 		return v, nil
 	default:
 		return reflect.Value{}, fmt.Errorf("unsupported decode target %s", target)
 	}
 }
 
-func relocateSpan(in value, content []byte) (int, int, bool) {
-	if in.Start >= 0 && in.End >= in.Start && in.End <= len(content) && string(content[in.Start:in.End]) == in.Text {
-		return in.Start, in.End, true
+func (d *decoder) structure(c *cursor, tag byte, target reflect.Type) (reflect.Value, error) {
+	if tag != tagStruct {
+		return reflect.Value{}, fmt.Errorf("want struct %s, got tag %d", target, tag)
 	}
-	text := []byte(in.Text)
-	start, found := 0, -1
-	for start <= len(content) {
-		i := bytes.Index(content[start:], text)
+	index, err := c.uvarint()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	name, err := d.str(index)
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	if name != typeName(target) {
+		return reflect.Value{}, fmt.Errorf("struct type mismatch: %q, want %q", name, typeName(target))
+	}
+	count, err := c.count()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	out := reflect.New(target).Elem()
+	seen := 0
+	for i := 0; i < target.NumField(); i++ {
+		want := target.Field(i)
+		if want.Tag.Get("object") == "omit" {
+			continue
+		}
+		if seen >= count || want.PkgPath != "" {
+			return reflect.Value{}, fmt.Errorf("missing or unexpected field %q in %s", want.Name, target)
+		}
+		index, err := c.uvarint()
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		got, err := d.str(index)
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		if got != want.Name {
+			return reflect.Value{}, fmt.Errorf("missing or unexpected field %q in %s", want.Name, target)
+		}
+		v, err := d.decode(c, want.Type)
+		if err != nil {
+			return reflect.Value{}, fmt.Errorf("%s.%s: %w", target, want.Name, err)
+		}
+		out.Field(i).Set(v)
+		seen++
+	}
+	if seen != count {
+		return reflect.Value{}, fmt.Errorf("extra fields in %s", target)
+	}
+	return out, nil
+}
+
+func (d *decoder) ref(c *cursor, target reflect.Type) (reflect.Value, error) {
+	raw, err := c.uvarint()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	if target.Kind() != reflect.Pointer || raw >= uint64(len(d.nodes)) {
+		return reflect.Value{}, fmt.Errorf("invalid reference %d for %s", raw, target)
+	}
+	i := int(raw)
+	if d.values[i].IsValid() && d.values[i].Type() != target {
+		return reflect.Value{}, fmt.Errorf("reference %d type mismatch: %s and %s", i, d.values[i].Type(), target)
+	}
+	if !d.values[i].IsValid() {
+		d.values[i] = reflect.New(target.Elem())
+	}
+	if !d.filled[i] && !d.filling[i] {
+		d.filling[i] = true
+		node := &cursor{data: d.area, at: d.nodes[i].at}
+		v, err := d.decode(node, target.Elem())
+		if err != nil {
+			return reflect.Value{}, fmt.Errorf("reference %d: %w", i, err)
+		}
+		if node.at != d.nodes[i].at+d.nodes[i].size {
+			return reflect.Value{}, fmt.Errorf("reference %d ends at %d, want %d", i, node.at, d.nodes[i].at+d.nodes[i].size)
+		}
+		d.values[i].Elem().Set(v)
+		d.filling[i], d.filled[i] = false, true
+	}
+	return d.values[i], nil
+}
+
+func (d *decoder) span(c *cursor, tag byte) (reflect.Value, error) {
+	if tag == tagSpanNil {
+		return reflect.Zero(spanType), nil
+	}
+	if tag != tagSpan {
+		return reflect.Value{}, fmt.Errorf("want span, got tag %d", tag)
+	}
+	read := func() (string, error) {
+		index, err := c.uvarint()
+		if err != nil {
+			return "", err
+		}
+		return d.str(index)
+	}
+	name, err := read()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	start, err := c.uvarint()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	end, err := c.uvarint()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	text, err := read()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	before, err := read()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	after, err := read()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	f := d.context.Sources[name]
+	if f == nil {
+		return reflect.Value{}, fmt.Errorf("unknown source provenance %q", name)
+	}
+	at, to, ok := relocateSpan(int(start), int(end), text, before, after, f.Content)
+	if !ok {
+		return reflect.Value{}, fmt.Errorf("cannot relocate span %s[%d:%d] in current source", name, start, end)
+	}
+	return reflect.ValueOf(source.Span{File: f, Start: at, End: to}), nil
+}
+
+func relocateSpan(start, end int, text, before, after string, content []byte) (int, int, bool) {
+	if start >= 0 && end >= start && end <= len(content) && string(content[start:end]) == text {
+		return start, end, true
+	}
+	needle := []byte(text)
+	at, found := 0, -1
+	for at <= len(content) {
+		i := bytes.Index(content[at:], needle)
 		if i < 0 {
 			break
 		}
-		i += start
-		beforeStart := max(0, i-len(in.Before))
-		afterEnd := min(len(content), i+len(text)+len(in.After))
-		beforeOK := string(content[beforeStart:i]) == in.Before[len(in.Before)-(i-beforeStart):]
-		afterOK := string(content[i+len(text):afterEnd]) == in.After[:afterEnd-(i+len(text))]
+		i += at
+		beforeStart := max(0, i-len(before))
+		afterEnd := min(len(content), i+len(needle)+len(after))
+		beforeOK := string(content[beforeStart:i]) == before[len(before)-(i-beforeStart):]
+		afterOK := string(content[i+len(needle):afterEnd]) == after[:afterEnd-(i+len(needle))]
 		if beforeOK && afterOK {
 			if found >= 0 {
 				return 0, 0, false
 			}
 			found = i
 		}
-		start = i + 1
-		if len(text) == 0 && start > len(content) {
+		at = i + 1
+		if len(needle) == 0 && at > len(content) {
 			break
 		}
 	}
-	return found, found + len(text), found >= 0
+	return found, found + len(needle), found >= 0
 }
 
 func Registry(values ...any) map[string]reflect.Type {
