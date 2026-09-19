@@ -376,7 +376,7 @@ func (f *flowChecker) captures(v flowValue) []int {
 	var visit func(flowValue)
 	var evidence func(int)
 	visitRows := func(n *types.CaptureFlow, env flowEnv, own types.CaptureVar) {
-		for row := range flowRows(n) {
+		for row := range f.shape.rows(n) {
 			if row == own {
 				continue
 			}
@@ -400,11 +400,11 @@ func (f *flowChecker) captures(v flowValue) []int {
 		// Durable evidence can itself capture a borrowed value in its clauses.
 		for _, cl := range o.code.Clauses {
 			visitRows(cl.Body, o.env, 0)
-			free := flowFree(cl.Body, cl.Names)
+			free := f.shape.free(cl.Body, cl.Names)
 			for name := range free {
 				visit(o.env.values[name])
 			}
-			for ev := range flowEffects(cl.Body) {
+			for ev := range f.shape.effects(cl.Body) {
 				for _, outer := range o.env.evidence[ev] {
 					evidence(outer)
 				}
@@ -424,18 +424,16 @@ func (f *flowChecker) captures(v flowValue) []int {
 			}
 			if o.kind == "lambda" {
 				visitRows(o.code.Children[0], o.env, o.code.RowParam)
-				free := flowFree(o.code.Children[0], []string{o.code.Name})
+				free := f.shape.free(o.code.Children[0], []string{o.code.Name})
 				for name := range free {
 					visit(o.env.values[name])
 				}
-				evs := flowEffects(o.code.Children[0])
-				for _, id := range o.code.Effects {
-					delete(evs, id)
-				}
-				for _, id := range o.code.Deferred {
-					delete(evs, id)
-				}
-				for ev := range evs {
+				// The cached set is shared, so an owner's own effects are
+				// skipped rather than deleted from it.
+				for ev := range f.shape.effects(o.code.Children[0]) {
+					if slices.Contains(o.code.Effects, ev) || slices.Contains(o.code.Deferred, ev) {
+						continue
+					}
 					for _, id := range o.env.evidence[ev] {
 						evidence(id)
 					}
@@ -646,7 +644,7 @@ func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env fl
 	if len(f.calls) > 0 {
 		parent = f.calls[len(f.calls)-1].id
 	}
-	env = relevantFlowEnv(body, env, nil, nil, 0)
+	env = f.relevantFlowEnv(body, env, nil, nil, 0)
 	key := ""
 	boundary := f.boundaryKey()
 	edge := flowEdge{parent: parent, site: site, target: target, boundary: boundary, scopes: fmt.Sprint(scopes), resume: resume}

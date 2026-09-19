@@ -81,6 +81,9 @@ type captureAnalyzer struct {
 	nextVar     types.CaptureVar
 	clauseVars  map[*Handle][][]types.CaptureVar
 	typeKeys    map[types.Type][]byte
+	freeKeys    map[flowWalkKey]map[string]bool
+	effectKeys  map[*types.CaptureFlow]map[int]bool
+	rowKeys     map[*types.CaptureFlow]map[types.CaptureVar]bool
 	typeArgKeys map[*types.CaptureFlow][]byte
 }
 

@@ -13,8 +13,8 @@ import (
 
 // Keep only definition-site bindings. Invocation binders must not accidentally
 // capture a previous activation's arguments, evidence, or residual row.
-func relevantFlowEnv(body *types.CaptureFlow, env flowEnv, bound []string, effects []int, row types.CaptureVar) flowEnv {
-	out := filterFlowEnv(body, env, bound, effects, row)
+func (f *flowChecker) relevantFlowEnv(body *types.CaptureFlow, env flowEnv, bound []string, effects []int, row types.CaptureVar) flowEnv {
+	out := f.filterFlowEnv(body, env, bound, effects, row)
 	out.types = maps.Clone(env.types)
 	return out
 }
@@ -22,27 +22,28 @@ func relevantFlowEnv(body *types.CaptureFlow, env flowEnv, bound []string, effec
 // readOnlyFlowEnv is relevantFlowEnv for a caller that only reads the result.
 // The sharing key is one such caller, and it rebuilds this for every closure
 // it reaches, so cloning the substitution there is pure waste.
-func readOnlyFlowEnv(body *types.CaptureFlow, env flowEnv, bound []string, effects []int, row types.CaptureVar) flowEnv {
-	out := filterFlowEnv(body, env, bound, effects, row)
+func (f *flowChecker) readOnlyFlowEnv(body *types.CaptureFlow, env flowEnv, bound []string, effects []int, row types.CaptureVar) flowEnv {
+	out := f.filterFlowEnv(body, env, bound, effects, row)
 	out.types = env.types
 	return out
 }
 
-func filterFlowEnv(body *types.CaptureFlow, env flowEnv, bound []string, effects []int, row types.CaptureVar) flowEnv {
+func (f *flowChecker) filterFlowEnv(body *types.CaptureFlow, env flowEnv, bound []string, effects []int, row types.CaptureVar) flowEnv {
 	out := emptyFlowEnv()
-	for name := range flowFree(body, bound) {
+	for name := range f.shape.free(body, bound) {
 		if v, ok := env.values[name]; ok {
 			out.values[name] = v
 		}
 	}
-	used := flowEffects(body)
-	for _, ev := range effects {
-		delete(used, ev)
-	}
-	for ev := range used {
+	// The cached set is shared, so bound effects are skipped rather than
+	// deleted from it.
+	for ev := range f.shape.effects(body) {
+		if slices.Contains(effects, ev) {
+			continue
+		}
 		out.evidence[ev] = env.evidence[ev]
 	}
-	for r := range flowRows(body) {
+	for r := range f.shape.rows(body) {
 		if r != row {
 			out.rows[r] = env.rows[r]
 		}
@@ -342,7 +343,7 @@ func (f *flowChecker) keyValue(v flowValue) {
 			b = append(b, ':')
 			f.key.b = b
 			effects := append(slices.Clone(o.code.Effects), o.code.Deferred...)
-			f.keyEnv(readOnlyFlowEnv(o.code.Children[0], o.env, []string{o.code.Name}, effects, o.code.RowParam))
+			f.keyEnv(f.readOnlyFlowEnv(o.code.Children[0], o.env, []string{o.code.Name}, effects, o.code.RowParam))
 			b = f.key.b
 		}
 		for _, field := range o.fields {
@@ -353,4 +354,50 @@ func (f *flowChecker) keyValue(v flowValue) {
 		b = append(b, '}')
 	}
 	f.key.b = append(b, ']')
+}
+
+// The three syntactic summaries below are pure functions of a contract node,
+// and the sharing key recomputes them for every closure it reaches. Contract
+// nodes are immutable once built, so each answer is computed once per analysis.
+// The cached sets are shared, so no caller may modify one.
+type flowWalkKey struct {
+	node  *types.CaptureFlow
+	bound string
+}
+
+func (a *captureAnalyzer) free(n *types.CaptureFlow, bound []string) map[string]bool {
+	key := flowWalkKey{n, strings.Join(bound, "\x00")}
+	if out, ok := a.freeKeys[key]; ok {
+		return out
+	}
+	out := flowFree(n, bound)
+	if a.freeKeys == nil {
+		a.freeKeys = map[flowWalkKey]map[string]bool{}
+	}
+	a.freeKeys[key] = out
+	return out
+}
+
+func (a *captureAnalyzer) effects(n *types.CaptureFlow) map[int]bool {
+	if out, ok := a.effectKeys[n]; ok {
+		return out
+	}
+	out := flowEffects(n)
+	if a.effectKeys == nil {
+		a.effectKeys = map[*types.CaptureFlow]map[int]bool{}
+	}
+	a.effectKeys[n] = out
+	return out
+}
+
+func (a *captureAnalyzer) rows(n *types.CaptureFlow) map[types.CaptureVar]bool {
+	if out, ok := a.rowKeys[n]; ok {
+		return out
+	}
+	out := flowRows(n)
+	if a.rowKeys == nil {
+		a.rowKeys = map[*types.CaptureFlow]map[types.CaptureVar]bool{}
+	}
+	a.rowKeys[n] = out
+	return out
 }
