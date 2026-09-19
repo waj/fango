@@ -635,10 +635,14 @@ func runErrorCase(t *testing.T, path, wantSubstr string) {
 	}
 }
 
+// emittedProject compiles from source. Artifacts are bypassed on purpose: a
+// test that asks what the compiler generates must not be answered with bytes
+// an earlier run stored, which would make a determinism check compare a result
+// with a copy of itself.
 func emittedProject(t *testing.T, path string) []codegen.File {
 	t.Helper()
 	var stderr bytes.Buffer
-	files, _, ok := emitProjectManifest(path, false, &stderr)
+	files, _, ok := emitProjectManifestSession(path, false, &stderr, &compilationSession{noCache: true})
 	if !ok {
 		t.Fatalf("emit failed:\n%s", stderr.String())
 	}

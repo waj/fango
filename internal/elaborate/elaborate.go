@@ -572,11 +572,16 @@ func ExprIn(e ast.Expr, context []core.Def, ck *infer.Checker) (core.Expr, []cor
 	return ce, el.aux, el.errs
 }
 
+// effectList orders the checker's effects the way the whole-program path
+// does. The checker holds them in a map, so without this the order of a
+// program's effect declarations — and of the Go types emitted from them —
+// would vary from run to run.
 func effectList(ck *infer.Checker) []*types.EffectInfo {
 	out := make([]*types.EffectInfo, 0, len(ck.EffectsByUnique))
 	for _, eff := range ck.EffectsByUnique {
 		out = append(out, eff)
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Unique < out[j].Unique })
 	return out
 }
 

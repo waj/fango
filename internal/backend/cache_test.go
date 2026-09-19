@@ -242,3 +242,27 @@ func TestUnitProgramWithholdsImportedBodies(t *testing.T) {
 		t.Fatal("no imported definition was withheld; the test proves nothing")
 	}
 }
+
+// A module reused from its checked object must lower and emit to the same
+// bytes as one checked from source. Nothing downstream distinguishes the two,
+// so a difference here is a decoded object that no longer describes what it
+// described when it was written — and the emission cache, which serves the
+// first run's bytes, is exactly what would hide it.
+func TestEmittingFromAReusedObjectMatchesEmittingFromSource(t *testing.T) {
+	p := newProject(t)
+	// The fixture is the shape that matters: effect rows deferred into a
+	// lambda, whose identities the artifact records and installation remaps.
+	p.entry = filepath.Join("..", "..", "testdata", "run", "stream_file.fango")
+	fromSource := p.build(t)
+	// The objects stay; only the emitted artifacts go, so the second build
+	// installs every module from cache and does the backend work again.
+	p.emitted = newMemoryCache()
+	fromObjects := p.build(t)
+	if p.total("check") != 0 {
+		t.Fatalf("the second build checked from source: %#v", p.events)
+	}
+	if p.events["emission"]["<entry>"] != 1 {
+		t.Fatalf("the second build did not re-emit the entry: %#v", p.events)
+	}
+	assertSameFiles(t, "emission from a reused object", fromObjects, fromSource)
+}

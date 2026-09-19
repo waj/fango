@@ -813,6 +813,17 @@ func (r *remapper) remapStruct(v reflect.Value) {
 				r.err = fmt.Errorf("unknown effect identity %d in capture flow", id)
 			}
 		}
+		// A lambda's deferred row effects are the same identities its
+		// evidence parameters are, so they are remapped with them; left
+		// behind, they name effects from the run that wrote the artifact and
+		// the contract stops matching the body it describes.
+		for i, id := range x.Deferred {
+			if n, ok := r.effect[id]; ok {
+				x.Deferred[i] = n
+			} else if r.err == nil {
+				r.err = fmt.Errorf("unknown deferred effect identity %d in capture flow", id)
+			}
+		}
 	case *types.CaptureRow:
 		for i, id := range x.Effects {
 			if n, ok := r.effect[id]; ok {
