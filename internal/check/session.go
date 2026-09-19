@@ -41,6 +41,7 @@ func (s *Session) Compile(entry string) (*Result, []diag.Error, error) {
 	ck := infer.NewChecker(sup, types.NewBuiltins(sup), infer.NewEnv())
 	ck.Fixity, ck.EntryName = loaded.Fixity, loaded.Entry
 	stageSession := staging.Install(ck)
+	stageSession.Observe(staging.Observer(s.Observe))
 	objectCache := s.Cache
 	if objectCache == nil && !s.DisableObjectCache {
 		objectCache = compilecache.NewModuleStore(entry)

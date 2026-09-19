@@ -115,6 +115,12 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		}
 		i.event("checked-cache-miss", owner)
 	}
+	// Checking a module from source elaborates it against the installed stage
+	// definitions of its dependencies, so every deferred section is needed
+	// from here on. Nothing before this point can reach one.
+	if err := i.stage.Force(); err != nil {
+		return nil, nil, err
+	}
 	i.stage.BeginModule(module.Name, module.NativeModule)
 	i.event("check", owner)
 	checked, checkErrs := i.ck.CheckModule(module.Module, infer.ModuleOptions{Name: module.Name, Role: role, Entry: module.Entry})
@@ -154,7 +160,8 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		Runtime: append([]core.Def(nil), owned...), Stage: stageObject.Defs, StageGroups: stageObject.Groups,
 		TemplateBase: templateStart, Templates: i.ck.Templates.Snapshot(templateStart),
 		StageDependencies: stageDependencies, CheckStageDependencies: checkStageDependencies}
-	ownSemantic, ownABI, ownStage, ownImplementation := ownFingerprints(object)
+	ownSemantic, ownABI, ownImplementation := ownFingerprints(object)
+	ownStage := ownStageFingerprint(object, object.Stage)
 	semanticDeps, semanticOK := dependencyFingerprints(module.Dependencies, i.summaries, func(s moduleSummary) string { return s.Semantic })
 	abiDeps, abiOK := dependencyFingerprints(module.Dependencies, i.summaries, func(s moduleSummary) string { return s.ABI })
 	stageDeps, stageOK := dependencyFingerprints(object.StageDependencies, i.summaries, func(s moduleSummary) string { return s.Stage })

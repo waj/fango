@@ -7,6 +7,7 @@ package staging
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -23,6 +24,18 @@ import (
 // Install gives ck a compile-time evaluator. Both the batch pipeline and the
 // REPL call it, so a deriver behaves the same at the prompt as in a build.
 type Session struct{ ev *evaluator }
+
+type Observer func(stage, owner string)
+
+// Observe reports deferred stage sections as they are read, for tests that
+// tell reuse from work. It never writes CLI output.
+func (s *Session) Observe(observe Observer) { s.ev.observe = observe }
+
+// deferred is one module's stage Core, recorded but not yet read.
+type deferred struct {
+	owner string
+	load  func() ([]core.Def, []Group, error)
+}
 
 type Group struct {
 	End    int
@@ -49,6 +62,36 @@ func Install(ck *infer.Checker) *Session {
 		ev.resetToBase()
 	}
 	return &Session{ev: ev}
+}
+
+// Defer records stage Core that has not been decoded yet. Completing a stage
+// snapshot elaborates a module's declarations against the installed stage
+// definitions of its dependencies, so a single module checked from source
+// needs all of them; a compile whose modules all come from cache needs none.
+func (s *Session) Defer(owner string, load func() ([]core.Def, []Group, error)) {
+	s.ev.pending = append(s.ev.pending, deferred{owner: owner, load: load})
+}
+
+// Force installs every deferred section in the order it was recorded. Callers
+// place it where no index into the definition list is live across it. A
+// section that cannot be read is a violated compiler invariant, not a miss:
+// the object it belongs to was already installed.
+func (s *Session) Force() error { return s.ev.force() }
+
+func (ev *evaluator) force() error {
+	pending := ev.pending
+	ev.pending = nil
+	for _, section := range pending {
+		defs, groups, err := section.load()
+		if err != nil {
+			return fmt.Errorf("stage Core for module %s: %w", section.owner, err)
+		}
+		if ev.observe != nil {
+			ev.observe("stage-section", section.owner)
+		}
+		(&Session{ev: ev}).InstallCore(defs, groups)
+	}
+	return nil
 }
 
 // BeginModule resets compile-time dependency collection for one owner. Every
@@ -198,6 +241,8 @@ type evaluator struct {
 	baseGroups          []Group
 	currentOwner        map[string]bool
 	stageDependencies   map[string]bool
+	pending             []deferred
+	observe             Observer
 }
 
 func (ev *evaluator) resetToBase() {
@@ -216,6 +261,11 @@ func (ev *evaluator) resetToBase() {
 }
 
 func (ev *evaluator) run(operand ast.Expr) (any, []diag.Error) {
+	// A prompt reaches the evaluator without going through module
+	// installation, so the deferred sections are forced here as well.
+	if err := ev.force(); err != nil {
+		return nil, []diag.Error{infer.CompileTimeError(err, operand.Span())}
+	}
 	if errs := ev.sync(); len(errs) > 0 {
 		return nil, errs
 	}

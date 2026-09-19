@@ -109,6 +109,7 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
 	stage := staging.Install(ck)
+	stage.Observe(staging.Observer(opts.Observe))
 	// The prompt resolver canonicalizes every input, so the checker holds
 	// the prelude under canonical names only. Its roots install as ordinary
 	// dependency-role modules, so a fresh session reuses the very artifacts

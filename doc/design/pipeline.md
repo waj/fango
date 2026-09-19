@@ -29,8 +29,9 @@ inputs, hash mismatches, and cache I/O errors are ordinary misses.
 
 Compilation sessions have a test-only event observer. It records the parse,
 resolve, check, elaborate, semantic-lint, lowering, and emission stages with
-their owner, and the checked and emitted artifact hits and misses separately
-from them, so a test can tell reuse from work. It never writes CLI output.
+their owner, and the checked and emitted artifact hits and misses, and the
+stage sections actually read, separately from them, so a test can tell reuse
+from work. It never writes CLI output.
 
 `internal/check` owns the semantic path, and its installer is shared: a batch
 command installs a whole entry graph, a REPL session installs its Prelude roots
@@ -64,7 +65,8 @@ header-validation rules, respectively.
 
 The installable `ModuleObject` adds the module's public resolver interface,
 owned runtime and stage Core, staging completion groups, templates, and ABI
-summaries. Its typed reference-graph codec preserves shared and recursive
+summaries. Stage Core is a separate section of the artifact over the same node
+pool, so it can be left unread; the rest of this paragraph describes both. Its typed reference-graph codec preserves shared and recursive
 compiler data, uses exact IEEE floating-point bits, sorts maps, and rejects
 unknown variants, malformed references, missing fields, and invalid source
 provenance.
@@ -97,6 +99,21 @@ the range, and relocates a uniquely anchored span when comments moved it.
 Thus an importer never retains a foreign dependency's stale file pointer or
 blindly applies an old byte offset. Resolver objects contain only exported
 maps; installing one cannot expose private names.
+
+Installing a decoded object defers its stage Core rather than installing it.
+Completing a module's stage snapshot elaborates its declarations against the
+installed stage definitions of its dependencies, so a module checked from
+source needs all of them and a compile whose modules all come from cache needs
+none. Deferred sections are forced in installation order immediately before
+the first module is checked from source, and again before a prompt runs a
+splice, which is the only way the REPL reaches the evaluator without going
+through installation. A deferral holds the object's own decoder and remapper,
+so the stage half comes back as the same pointers for structure the installed
+half already holds and is interned against the same declarations; a section
+that cannot be read is a violated compiler invariant rather than a miss,
+because its object is already installed. Reading a section is also where the
+object's recorded stage fingerprint is checked against its contents, which
+installation therefore does not recompute.
 
 Module installation validates all decoded state before publication and uses a
 checker checkpoint for the remaining mutation. Types, effects, classes,
@@ -136,8 +153,8 @@ semantic, ABI, or stage fingerprints.
 Every cached state is still installed through the graph compatibility checks.
 Consequently independently cached branches cannot bypass duplicate-deriver,
 instance-overlap, or blanket-cycle validation. Batch event instrumentation
-reports `checked-cache-hit` and `checked-cache-miss` separately from actual
-`check`, `elaborate`, and `semantic-lint` work.
+reports `checked-cache-hit`, `checked-cache-miss`, and `stage-section`
+separately from actual `check`, `elaborate`, and `semantic-lint` work.
 
 ## Parsing and surface lowering
 

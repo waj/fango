@@ -58,13 +58,34 @@ func typeName(t reflect.Type) string {
 	return t.PkgPath() + "." + t.Name()
 }
 
+// Section is one named root of an object. Structure shared between sections is
+// stored once, and decoding a section touches only the nodes it reaches, so a
+// reader that never needs a section never pays for it.
+type Section struct {
+	Name  string
+	Value any
+}
+
 func Encode(input any) ([]byte, error) {
+	return EncodeSections(Section{Value: input})
+}
+
+func EncodeSections(sections ...Section) ([]byte, error) {
 	e := &encoder{index: map[string]int{}, seen: map[any]int{}}
-	body, _, err := e.value(nil, reflect.ValueOf(input))
-	if err != nil {
-		return nil, err
+	named := map[string]bool{}
+	roots := make([]root, len(sections))
+	for i, section := range sections {
+		if named[section.Name] {
+			return nil, fmt.Errorf("duplicate section %q", section.Name)
+		}
+		named[section.Name] = true
+		body, _, err := e.value(nil, reflect.ValueOf(section.Value))
+		if err != nil {
+			return nil, err
+		}
+		roots[i] = root{name: e.str(section.Name), body: body}
 	}
-	return e.finish([]root{{name: e.str(""), body: body}}), nil
+	return e.finish(roots), nil
 }
 
 type root struct {
@@ -274,15 +295,32 @@ func (e *encoder) span(dst []byte, sp source.Span) ([]byte, error) {
 }
 
 func Decode(data []byte, output any, context Context) error {
+	d, err := NewDecoder(data, context)
+	if err != nil {
+		return err
+	}
+	return d.Section("", output)
+}
+
+// Decoder reads an object's sections independently, sharing one node pool
+// across them. A node decoded for one section is not decoded again for
+// another, so the two see the same pointers for the structure they share.
+type Decoder struct{ d *decoder }
+
+func NewDecoder(data []byte, context Context) (*Decoder, error) {
+	d, err := newDecoder(data, context)
+	if err != nil {
+		return nil, err
+	}
+	return &Decoder{d: d}, nil
+}
+
+func (dec *Decoder) Section(name string, output any) error {
 	p := reflect.ValueOf(output)
 	if p.Kind() != reflect.Pointer || p.IsNil() {
 		return fmt.Errorf("decode target must be a non-nil pointer")
 	}
-	d, err := newDecoder(data, context)
-	if err != nil {
-		return err
-	}
-	return d.section("", p)
+	return dec.d.section(name, p)
 }
 
 type span struct{ at, size int }

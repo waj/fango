@@ -153,13 +153,18 @@ func loadCachedObject(cache ObjectCache, base string, module modules.ResolvedMod
 		for i, input := range candidate.StageDependencies {
 			valid = valid && object.CheckStageDependencies[i] == input.Module
 		}
-		ownSemantic, ownABI, ownStage, ownImplementation := ownFingerprints(object)
+		ownSemantic, ownABI, ownImplementation := ownFingerprints(object)
+		// The object records its own stage fingerprint, and the artifact frame
+		// already proves the bytes are the ones that were written. Recomputing
+		// it here would mean decoding stage Core on every hit, which is what
+		// deferring the section exists to avoid; reading the section checks it.
+		ownStage := object.StageImplementation
 		semanticDeps, semanticOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.Semantic })
 		abiDeps, abiOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.ABI })
 		stageDeps, stageOK := dependencyFingerprints(object.StageDependencies, summaries, func(s moduleSummary) string { return s.Stage })
 		semantic := combinedFingerprint("semantic", ownSemantic, semanticDeps)
 		abi := combinedFingerprint("abi", ownABI, abiDeps)
-		if valid && semanticOK && abiOK && stageOK && object.Semantic == candidate.Semantic && object.Semantic == semantic && object.ABI == candidate.ABI && object.ABI == abi && object.StageImplementation == ownStage && object.Implementation == ownImplementation {
+		if valid && semanticOK && abiOK && stageOK && object.Semantic == candidate.Semantic && object.Semantic == semantic && object.ABI == candidate.ABI && object.ABI == abi && ownStage != "" && object.Implementation == ownImplementation {
 			object.StageFingerprint = combinedFingerprint("stage", ownStage, stageDeps)
 			return object, true
 		}

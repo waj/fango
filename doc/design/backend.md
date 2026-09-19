@@ -126,7 +126,8 @@ reader find and verify it without parsing it, and what makes the digest cover
 the bytes as stored rather than a re-encoded copy of them. An emitted unit's
 payload is its key and unit path followed by the generated Go source verbatim;
 a checked-module candidate's is its JSON; a checked module object's is its
-[object encoding](pipeline.md#pipeline). There is no
+[object encoding](pipeline.md#pipeline), whose stage Core is a section of its
+own that a compile reads only when it needs it. There is no
 whole-project artifact: every invocation discovers and validates the current
 graph, and one module-artifact pipeline decides what is still valid, so no
 command can be served a stale program by a shortcut that outranks its modules.

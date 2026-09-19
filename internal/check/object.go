@@ -19,6 +19,7 @@ import (
 const (
 	moduleObjectSchema = 1
 	moduleObjectKind   = "module-object"
+	stageSection       = "stage"
 )
 
 // ModuleObject is the typed installable and persistent checked-module boundary.
@@ -39,10 +40,52 @@ type ModuleObject struct {
 	StageGroups            []staging.Group
 	TemplateBase           int
 	Templates              []*meta.Template
+	Pending                *PendingStage `object:"omit"`
+}
+
+// PendingStage is a decoded object whose stage Core has not been read yet.
+// Installation defers it, because nothing needs stage Core until some module
+// is checked from source, and it is the largest part of an object.
+// head is the object as decoded, kept because installation replaces the
+// object's fields with interned copies and the recorded fingerprint describes
+// the decoded form.
+type PendingStage struct {
+	decoder *objectcodec.Decoder
+	head    *ModuleObject
+}
+
+type stagePayload struct {
+	Stage  []core.Def
+	Groups []staging.Group
+}
+
+// load decodes the stage section through the decoder that produced the rest of
+// the object, so structure shared with it comes back as the same pointers.
+func (p *PendingStage) load() (*stagePayload, error) {
+	var payload *stagePayload
+	if err := p.decoder.Section(stageSection, &payload); err != nil {
+		return nil, err
+	}
+	if payload == nil {
+		payload = &stagePayload{}
+	}
+	// Reading the section is where the object's recorded stage fingerprint is
+	// checked against its contents. Installation does not recompute it, so
+	// this is what keeps a section from disagreeing with the object it
+	// belongs to.
+	if want := p.head.StageImplementation; want != "" && ownStageFingerprint(p.head, payload.Stage) != want {
+		return nil, fmt.Errorf("stage Core does not match the fingerprint recorded for it")
+	}
+	return payload, nil
 }
 
 func EncodeObject(object *ModuleObject) ([]byte, error) {
-	payload, err := objectcodec.Encode(object)
+	head := *object
+	head.Stage, head.StageGroups, head.Pending = nil, nil, nil
+	payload, err := objectcodec.EncodeSections(
+		objectcodec.Section{Value: &head},
+		objectcodec.Section{Name: stageSection, Value: &stagePayload{Stage: object.Stage, Groups: object.StageGroups}},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -58,9 +101,19 @@ func DecodeObject(data []byte, sources map[string]*source.File) (*ModuleObject, 
 	if !ok {
 		return nil, fmt.Errorf("unsupported module-object frame")
 	}
+	decoder, err := objectcodec.NewDecoder(payload, objectcodec.Context{Types: objectTypes(), Sources: sources})
+	if err != nil {
+		return nil, err
+	}
 	var object *ModuleObject
-	err := objectcodec.Decode(payload, &object, objectcodec.Context{Types: objectTypes(), Sources: sources})
-	return object, err
+	if err := decoder.Section("", &object); err != nil {
+		return nil, err
+	}
+	if object != nil {
+		head := *object
+		object.Pending = &PendingStage{decoder: decoder, head: &head}
+	}
+	return object, nil
 }
 
 func objectTypes() map[string]reflect.Type {

@@ -16,16 +16,23 @@ import (
 // InstallObject interns a decoded module object into ck and installs its stage
 // Core without replaying source inference or elaboration. The mutation is
 // transactional; the fresh supply intentionally remains advanced on failure.
+//
+// A decoded object's stage Core is deferred rather than installed, because
+// nothing needs it until some module is checked from source. The deferral
+// holds this remapper, so the stage half is interned against the same
+// installed declarations and the same shared structure as the rest.
 func InstallObject(ck *infer.Checker, stage *staging.Session, object *ModuleObject) error {
 	if object == nil || object.State == nil {
 		return fmt.Errorf("module object has no state")
 	}
 	newTemplateBase := ck.Templates.Len()
+	pending := object.Pending
 	r := newRemapper(ck, object, newTemplateBase)
 	if err := r.remap(); err != nil {
 		return err
 	}
 	*object = *r.object
+	object.Pending = pending
 	state := object.State
 	compatBase := &infer.ModuleState{Instances: append([]*infer.InstanceInfo(nil), ck.Instances...), Derivers: ck.Derivers}
 	if errs := infer.ValidateModuleStates([]*infer.ModuleState{compatBase, state}); len(errs) != 0 {
@@ -120,9 +127,34 @@ func InstallObject(ck *infer.Checker, stage *staging.Session, object *ModuleObje
 	}
 	ck.InstanceImports[state.Name] = visible
 	ck.Templates.Append(object.Templates)
-	stage.InstallCore(object.Stage, object.StageGroups)
+	if pending != nil {
+		stage.Defer(state.Name, func() ([]core.Def, []staging.Group, error) { return r.stage(pending) })
+	} else {
+		stage.InstallCore(object.Stage, object.StageGroups)
+	}
 	committed = true
 	return nil
+}
+
+// stage reads and interns a deferred stage section. Decoding it through the
+// object's own decoder returns the same pointers for structure the installed
+// half already holds, and this remapper's memo maps those to the copies it
+// installed, so the two halves cannot acquire disagreeing identities.
+func (r *remapper) stage(pending *PendingStage) ([]core.Def, []staging.Group, error) {
+	payload, err := pending.load()
+	if err != nil {
+		return nil, nil, err
+	}
+	r.extend(reflect.ValueOf(payload))
+	v, err := r.rewrite(reflect.ValueOf(payload))
+	if err != nil {
+		return nil, nil, err
+	}
+	if r.err != nil {
+		return nil, nil, r.err
+	}
+	out := v.Interface().(*stagePayload)
+	return out.Stage, out.Groups, nil
 }
 
 func validateInstall(ck *infer.Checker, state *infer.ModuleState) error {
@@ -242,8 +274,19 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 	for _, class := range object.State.Classes {
 		r.ownedClasses[class] = true
 	}
+	r.extend(reflect.ValueOf(object))
+	return r
+}
+
+// extend gives a decoded value the identities it needs: foreign declarations
+// keep the installed parameters they describe, and everything the value
+// allocates for itself is renamed in a deterministic order. A deferred stage
+// section goes through it too, so it cannot disagree with the half of the
+// object already installed.
+func (r *remapper) extend(v reflect.Value) {
+	ck := r.ck
 	ids := &remapIDs{vars: map[int]*types.TVar{}, captures: map[types.CaptureVar]bool{}, scopes: map[types.ScopeID]bool{}, resumes: map[types.ResumeID]bool{}}
-	collectRemapIDs(reflect.ValueOf(object), map[uintptr]bool{}, ids)
+	collectRemapIDs(v, map[uintptr]bool{}, ids)
 	r.alignForeignParams(ids)
 	vars, captures, scopes, resumes := ids.vars, ids.captures, ids.scopes, ids.resumes
 	var varIDs []int
@@ -293,7 +336,6 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 		ck.ResumeGen++
 		r.resumes[types.ResumeID(id)] = ck.ResumeGen
 	}
-	return r
 }
 
 // alignForeignParams keeps a decoded copy of a foreign declaration on the

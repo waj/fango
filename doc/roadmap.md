@@ -35,12 +35,20 @@ owns disk versus precompiled sources, source-root configuration, version/skew
 checks, per-project Prelude, and runtime-source materialization. Package
 fetching and independent library versioning remain deferred.
 
-## Compilation cache decoding cost
+## Compilation cache
 
-[Compilation cache](roadmap-cache.md) owns the artifact framing, the binary
-object payload, and deferred stage sections. Warm compilation currently spends
-nearly all its time parsing cache artifacts rather than compiling; what is
-cached, and every validity rule, stays as it is.
+Artifact framing, the binary object encoding, and deferred stage sections are
+[implemented](design/backend.md#module-emission-and-build-cache). What remains:
+
+- Prune superseded compiler-fingerprint namespaces. Each compiler build selects
+  a cold namespace and nothing removes the previous one but `clean`, so a
+  developer rebuilding the compiler accumulates them.
+- Decode artifacts in parallel. Decoding is pure and the objects are
+  independent, but coordination cost is real for small graphs; it needs a
+  measurement showing it pays before it is worth the concurrency.
+- Shrink stage Core. A module's stage section is its declarations elaborated a
+  second time for the compile-time evaluator, and it is the largest part of
+  every object. That is a staging question, not a cache one.
 
 ## Compile-time metaprogramming
 

@@ -496,8 +496,20 @@ func TestModuleObjectCodecRoundTrip(t *testing.T) {
 	if decoded.State.Ctors["Lib.Box"] != adt.Ctors[0] || adt.Ctors[0].Result.Unique != adt.Con.Unique {
 		t.Fatal("nominal graph sharing changed during round trip")
 	}
-	if len(decoded.Runtime) == 0 || len(decoded.Stage) == 0 {
-		t.Fatalf("runtime=%d stage=%d", len(decoded.Runtime), len(decoded.Stage))
+	// The stage section is not read until something needs it, so a decoded
+	// object carries the rest of itself and a way to reach the stage half.
+	if len(decoded.Runtime) == 0 || len(decoded.Stage) != 0 || decoded.Pending == nil {
+		t.Fatalf("runtime=%d stage=%d pending=%v", len(decoded.Runtime), len(decoded.Stage), decoded.Pending != nil)
+	}
+	payload, err := decoded.Pending.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Stage) == 0 {
+		t.Fatal("the deferred stage section is empty")
+	}
+	if decoded.State.ADTs[0] != adt {
+		t.Fatal("reading the stage section decoded shared structure a second time")
 	}
 	if _, visible := decoded.Resolver.Values["hidden"]; visible {
 		t.Fatal("private value leaked into resolver interface")
@@ -697,5 +709,71 @@ func TestReusedArtifactsReportCurrentSourcePositions(t *testing.T) {
 	}
 	if !strings.Contains(string(span.File.Content), "Lib.missing") {
 		t.Fatalf("diagnostic points at a stale source snapshot: %q", span.File.Name)
+	}
+}
+
+// Stage Core is the largest part of a module object and is needed only to
+// check a module from source. A compile whose modules all come from cache
+// checks none, so it must read no stage section at all.
+func TestAllHitCompileReadsNoStageSection(t *testing.T) {
+	d := t.TempDir()
+	lib := filepath.Join(d, "Lib.fango")
+	main := filepath.Join(d, "Main.fango")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"one\"\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.value\n")
+	cache := newMemoryObjectCache()
+	compileEvents(t, main, cache)
+
+	_, events := compileEvents(t, main, cache)
+	if events["checked-cache-hit"]["Lib"] != 1 || events["checked-cache-hit"]["Main"] != 1 {
+		t.Fatalf("the second compile was not all hits: %#v", events)
+	}
+	if n := len(events["stage-section"]); n != 0 {
+		t.Fatalf("an all-hit compile read %d stage sections: %#v", n, events)
+	}
+
+	// One module checked from source elaborates against its dependency's
+	// installed stage definitions, so the deferred section is read then.
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.value\n-- edited\n")
+	_, events = compileEvents(t, main, cache)
+	if events["check"]["Main"] != 1 || events["checked-cache-hit"]["Lib"] != 1 {
+		t.Fatalf("expected an edited entry over a cached dependency: %#v", events)
+	}
+	if events["stage-section"]["Lib"] != 1 {
+		t.Fatalf("the dependency's stage section was not read for a source check: %#v", events)
+	}
+}
+
+// A deferred section is read long after the object it belongs to was
+// installed, so it carries its own agreement check with that object.
+func TestStageSectionDisagreeingWithItsObjectIsRejected(t *testing.T) {
+	d := t.TempDir()
+	entry := filepath.Join(d, "Lib.fango")
+	content := []byte("{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue = \"one\"\n")
+	if err := os.WriteFile(entry, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, _, internalErr := (&Session{}).Compile(entry)
+	if internalErr != nil {
+		t.Fatal(internalErr)
+	}
+	object := result.Objects[0]
+	object.StageImplementation = "a fingerprint the section cannot have"
+	data, err := EncodeObject(object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeObject(data, map[string]*source.File{"Lib.fango": source.NewFile("Lib.fango", content)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decoded.Pending.load(); err == nil {
+		t.Fatal("a stage section disagreeing with its object was accepted")
 	}
 }
