@@ -2,6 +2,8 @@ package backend
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"reflect"
@@ -11,7 +13,7 @@ import (
 )
 
 const (
-	emissionSchema = 2
+	emissionSchema = 3
 	emissionKind   = "emitted-unit"
 )
 
@@ -40,55 +42,61 @@ type unitRecord struct {
 	Intrinsics     []string       `json:"intrinsics"`
 }
 
-// An emitted unit is the record of what it was built from on one line,
-// followed by the generated Go source verbatim. The artifact frame carries the
-// digest, so the payload needs no container of its own and the source needs no
-// re-encoding.
+// unitArtifact is an emitted unit's whole slot: what the unit was built from,
+// and the digest of what came out. The generated Go itself is not here. It is
+// already on disk at the record's path, in the tree the Go toolchain compiles,
+// and storing it again would mean keeping the same bytes twice and reading
+// them twice. The digest cannot live inside the record, which is assembled
+// before the bytes exist; it is what a lookup holds the file to.
+type unitArtifact struct {
+	Built  unitRecord `json:"built"`
+	Source string     `json:"source"`
+}
+
+func sourceDigest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
 func encodeUnit(record unitRecord, file codegen.File) []byte {
-	line, err := json.Marshal(record)
-	if err != nil || bytes.ContainsRune(line, '\n') {
+	payload, err := json.Marshal(unitArtifact{Built: record, Source: sourceDigest(file.Data)})
+	if err != nil {
 		return nil
 	}
-	payload := make([]byte, 0, len(line)+1+len(file.Data))
-	payload = append(payload, line...)
-	payload = append(payload, '\n')
-	payload = append(payload, file.Data...)
 	return artifactframe.Wrap(emissionKind, emissionSchema, payload)
 }
 
-func decodeUnit(data []byte, want unitRecord) ([]byte, bool) {
+// decodeUnit returns the digest the artifact expects its generated file to
+// have, if the unit it describes is the one being built now.
+func decodeUnit(data []byte, want unitRecord) (string, bool) {
 	payload, ok := artifactframe.Unwrap(emissionKind, emissionSchema, data)
 	if !ok {
-		return nil, false
+		return "", false
 	}
-	line, source, ok := bytes.Cut(payload, []byte{'\n'})
-	if !ok || len(source) == 0 {
-		return nil, false
-	}
-	dec := json.NewDecoder(bytes.NewReader(line))
+	dec := json.NewDecoder(bytes.NewReader(payload))
 	dec.DisallowUnknownFields()
-	var have unitRecord
+	var have unitArtifact
 	if err := dec.Decode(&have); err != nil {
-		return nil, false
+		return "", false
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		return nil, false
+		return "", false
 	}
-	if !reflect.DeepEqual(have, want) {
-		return nil, false
+	if have.Source == "" || !reflect.DeepEqual(have.Built, want) {
+		return "", false
 	}
-	return source, true
+	return have.Source, true
 }
 
 // loadUnit also reports the artifact bytes it read, which a superseded or
 // structurally invalid artifact still costs even though it is a miss.
-func loadUnit(cache Cache, slot string, want unitRecord) ([]byte, int, bool) {
+func loadUnit(cache Cache, slot string, want unitRecord) (string, int, bool) {
 	data, ok := cache.Load(slot)
 	if !ok {
-		return nil, 0, false
+		return "", 0, false
 	}
-	source, ok := decodeUnit(data, want)
-	return source, len(data), ok
+	digest, ok := decodeUnit(data, want)
+	return digest, len(data), ok
 }
 
 // storeUnit reports the bytes it wrote, or zero when the unit could not be

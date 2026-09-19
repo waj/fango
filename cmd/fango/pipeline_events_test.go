@@ -13,10 +13,11 @@ func TestCompilationSessionStageEvents(t *testing.T) {
 	if err := os.WriteFile(entry, []byte("main = 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	tree := t.TempDir()
 	var events []stageEvent
 	session := &compilationSession{observe: func(event stageEvent) { events = append(events, event) }}
 	var stderr bytes.Buffer
-	if _, _, _, ok := emitProjectManifestSession(entry, false, &stderr, session); !ok {
+	if _, _, _, ok := compileToDir(entry, tree, &stderr, session, nil); !ok {
 		t.Fatalf("cold compile failed: %s", stderr.String())
 	}
 	want := map[string]bool{
@@ -46,7 +47,7 @@ func TestCompilationSessionStageEvents(t *testing.T) {
 	// resolving it again — then serves every owner from its artifacts: no
 	// semantic or back-end stage runs again.
 	events = nil
-	if _, _, _, ok := emitProjectManifestSession(entry, false, &stderr, session); !ok {
+	if _, _, _, ok := compileToDir(entry, tree, &stderr, session, nil); !ok {
 		t.Fatalf("cached compile failed: %s", stderr.String())
 	}
 	hits := 0

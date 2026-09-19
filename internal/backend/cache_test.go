@@ -33,13 +33,24 @@ type project struct {
 	entry    string
 	objects  *objectCache
 	emitted  *memoryCache
+	tree     memoryTree
 	events   map[string]map[string]int
 	printOut bool
 }
 
+// memoryTree stands in for the build directory, which is where the generated
+// Go an emission artifact describes actually lives: a build reads what is
+// there and the driver writes back what came out.
+type memoryTree map[string][]byte
+
+func (t memoryTree) Source(path string) ([]byte, bool) {
+	data, ok := t[path]
+	return append([]byte(nil), data...), ok
+}
+
 func newProject(t *testing.T) *project {
 	t.Helper()
-	return &project{dir: t.TempDir(), objects: newObjectCache(), emitted: newMemoryCache()}
+	return &project{dir: t.TempDir(), objects: newObjectCache(), emitted: newMemoryCache(), tree: memoryTree{}}
 }
 
 func (p *project) write(t *testing.T, name, body string) string {
@@ -77,9 +88,12 @@ func (p *project) check(t *testing.T) *check.Result {
 func (p *project) build(t *testing.T) []codegen.File {
 	t.Helper()
 	result := p.check(t)
-	files, err := (&Session{Cache: p.emitted, Observe: p.record}).EmitProject(p.entry, result, unitsOf(result), false)
+	files, err := (&Session{Cache: p.emitted, Emitted: p.tree, Observe: p.record}).EmitProject(p.entry, result, unitsOf(result), false)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, file := range files {
+		p.tree[file.Path] = append([]byte(nil), file.Data...)
 	}
 	return files
 }

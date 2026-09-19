@@ -248,6 +248,22 @@ func SyncGenerated(dir, program string, files []codegen.File) (changed bool, err
 	return changed || wrote, err
 }
 
+// Generated reads the files a build tree already holds. It is how emission
+// reuses generated Go without a second copy of it: the artifact records what
+// a unit was built from and the digest of what came out, and the bytes stay
+// here, where the Go toolchain compiles them. An empty tree, an unreadable
+// file, and a path the driver would never write are all simply absent.
+type Generated string
+
+func (dir Generated) Source(path string) ([]byte, bool) {
+	rel := filepath.Clean(filepath.FromSlash(path))
+	if dir == "" || !validGeneratedSourcePath(rel) {
+		return nil, false
+	}
+	data, err := os.ReadFile(filepath.Join(string(dir), rel))
+	return data, err == nil
+}
+
 // sharedRuntimePath reports whether a generated path is part of the private
 // module itself rather than of one program: every build regenerates these in
 // full, so they are pruned against the current build alone.

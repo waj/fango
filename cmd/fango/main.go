@@ -69,7 +69,7 @@ Progress goes to stderr; a compiled program's own output is untouched.
 // and whether anything was written.
 func compileToDir(entry, dir string, stderr io.Writer, session *compilationSession, report *reporter) (program string, files []codegen.File, changed bool, ok bool) {
 	printMain := os.Getenv("FANGO_INTERNAL_PRINT_MAIN") == "1"
-	files, manifest, program, ok := emitProjectManifestSession(entry, printMain, stderr, session)
+	files, manifest, program, ok := emitProjectManifestSession(entry, dir, printMain, stderr, session)
 	if !ok {
 		return "", nil, false, false
 	}

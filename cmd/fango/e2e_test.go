@@ -649,7 +649,7 @@ func runErrorCase(t *testing.T, path, wantSubstr string) {
 func emittedProject(t *testing.T, path string) []codegen.File {
 	t.Helper()
 	var stderr bytes.Buffer
-	files, _, _, ok := emitProjectManifestSession(path, false, &stderr, &compilationSession{noCache: true})
+	files, _, _, ok := emitProjectManifestSession(path, "", false, &stderr, &compilationSession{noCache: true})
 	if !ok {
 		t.Fatalf("emit failed:\n%s", stderr.String())
 	}

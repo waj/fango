@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/waj/fango/internal/backend"
+	"github.com/waj/fango/internal/build"
 	compilecheck "github.com/waj/fango/internal/check"
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/compileevent"
@@ -108,12 +109,14 @@ func hasMain(p *core.Prog) bool {
 // build, run, --emit-go, and backend structural tests. printMain makes a
 // value-typed entry print its value through the shared formatter. The program
 // it returns is the entry's stem, which names both its generated package and
-// its cached artifacts.
+// its cached artifacts. The tree is where the generated Go a cached emission
+// describes already lives; emitting without one, as the structural tests do,
+// generates every unit.
 func emitProjectManifest(entry string, printMain bool, stderr io.Writer) ([]codegen.File, []modules.ManifestEntry, string, bool) {
-	return emitProjectManifestSession(entry, printMain, stderr, nil)
+	return emitProjectManifestSession(entry, "", printMain, stderr, nil)
 }
 
-func emitProjectManifestSession(entry string, printMain bool, stderr io.Writer, session *compilationSession) ([]codegen.File, []modules.ManifestEntry, string, bool) {
+func emitProjectManifestSession(entry, tree string, printMain bool, stderr io.Writer, session *compilationSession) ([]codegen.File, []modules.ManifestEntry, string, bool) {
 	result, ok := checkGraph(entry, stderr, session)
 	if !ok {
 		return nil, nil, "", false
@@ -131,7 +134,8 @@ func emitProjectManifestSession(entry string, printMain bool, stderr io.Writer, 
 			program = unit.Program
 		}
 	}
-	files, err := (&backend.Session{Observe: session.observer(), DisableCache: session.disableCache()}).EmitProject(entry, result, units, printMain)
+	emitting := &backend.Session{Observe: session.observer(), DisableCache: session.disableCache(), Emitted: build.Generated(tree)}
+	files, err := emitting.EmitProject(entry, result, units, printMain)
 	if err != nil {
 		reportInternal(stderr, err)
 		return nil, nil, "", false

@@ -47,15 +47,20 @@ legacy per-entry fallback namespace when present.
 working directory; see [REPL](repl.md).
 
 Compilation results are cached per module under `.fango/cache/v1/` beside the
-entry file. Each module keeps one checked result and one generated Go file
-there, and recompiling replaces them, so the cache grows with the modules a
+entry file. Each module keeps one checked result there, and one record of what
+its generated Go was made from and what it came out as; the generated Go
+itself is not copied there, because the build directory beside it already
+holds exactly one of each, which is what the Go toolchain compiles. Editing a
+file in the build directory therefore costs that module its reuse and it is
+generated again, rather than being silently overwritten with something else.
+Recompiling replaces a module's entries, so the cache grows with the modules a
 project has rather than with its edit history — and restoring a file to an
 earlier state recompiles it rather than finding what that state compiled to
 before. Entry programs in one directory share the modules they have in common
 and keep their own entry results, so alternating between them stays warm. The
-build directory beside it works the same way: each program is compiled and
-linked as a package of its own, so building one leaves the others' generated
-packages and executables alone.
+build directory works the same way: each program is compiled and linked as a
+package of its own, so building one leaves the others' generated packages and
+executables alone.
 
 Every command discovers, parses, and validates the current source
 graph, and then reuses what is still valid: a checked module whose sources,
