@@ -135,10 +135,22 @@ const (
 // order. Module contains only declarations owned by Name (or the headerless
 // entry), while InstanceImports retains that owner's graph visibility.
 type ResolvedModule struct {
-	Name   string
-	Role   ModuleRole
-	Entry  string
-	Module *ast.Module
+	Name      string
+	Role      ModuleRole
+	Entry     string
+	Source    *source.File
+	Interface Interface
+	Module    *ast.Module
+}
+
+// Interface is the resolver-visible public surface of one module. Private
+// declarations never enter these maps; caching and installation therefore
+// cannot widen source visibility.
+type Interface struct {
+	Values, Types, Ctors, Operations, Records map[string]string
+	TypeMembers, EffectMembers                map[string][]string
+	RecordFields                              map[string][]string
+	OpenTypes, OpenEffects                    map[string]bool
 }
 
 type NativeSource struct {
@@ -339,7 +351,14 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 				entry = canonical(entryName, "main")
 			}
 		}
-		resolved = append(resolved, ResolvedModule{Name: owner, Role: role, Entry: entry, Module: &ast.Module{
+		var moduleSource *source.File
+		if g.nodes[name].parsed != nil {
+			moduleSource = g.nodes[name].parsed.headerSp.File
+		}
+		if moduleSource == nil {
+			moduleSource = firstDeclFile(g.nodes[name].resolved)
+		}
+		resolved = append(resolved, ResolvedModule{Name: owner, Role: role, Entry: entry, Source: moduleSource, Interface: exportInterface(g.nodes[name].iface), Module: &ast.Module{
 			Decls:           append([]ast.Decl(nil), g.nodes[name].resolved...),
 			InstanceImports: map[string]map[string]bool{owner: g.visible[name]},
 		}})
@@ -372,6 +391,62 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 		entrySymbol = canonical(entryName, "main")
 	}
 	return &Result{Module: merged, Modules: resolved, Entry: entrySymbol, FixityHash: fixity.Hash(g.fixities), Manifest: manifest, Units: units, Fixity: g.fixities, Natives: natives}, nil
+}
+
+func exportInterface(in *iface) Interface {
+	if in == nil {
+		return Interface{}
+	}
+	cloneStrings := func(m map[string]string) map[string]string {
+		out := make(map[string]string, len(m))
+		for k, v := range m {
+			out[k] = v
+		}
+		return out
+	}
+	cloneSlices := func(m map[string][]string) map[string][]string {
+		out := make(map[string][]string, len(m))
+		for k, v := range m {
+			out[k] = append([]string(nil), v...)
+		}
+		return out
+	}
+	cloneBools := func(m map[string]bool) map[string]bool {
+		out := make(map[string]bool, len(m))
+		for k, v := range m {
+			out[k] = v
+		}
+		return out
+	}
+	return Interface{Values: cloneStrings(in.values), Types: cloneStrings(in.types), Ctors: cloneStrings(in.ctors), Operations: cloneStrings(in.ops), Records: cloneStrings(in.records), TypeMembers: cloneSlices(in.typeMembers), EffectMembers: cloneSlices(in.effectMembers), RecordFields: cloneSlices(in.recordFields), OpenTypes: cloneBools(in.openTypes), OpenEffects: cloneBools(in.openEffects)}
+}
+
+func firstDeclFile(decls []ast.Decl) *source.File {
+	for _, decl := range decls {
+		var sp source.Span
+		switch d := decl.(type) {
+		case *ast.ValueDecl:
+			sp = d.Sp
+		case *ast.PatternDecl:
+			sp = d.Sp
+		case *ast.TypeDecl:
+			sp = d.Sp
+		case *ast.EffectDecl:
+			sp = d.Sp
+		case *ast.FixityDecl:
+			sp = d.Sp
+		case *ast.ClassDecl:
+			sp = d.Sp
+		case *ast.InstanceDecl:
+			sp = d.Sp
+		case *ast.DeriverDecl:
+			sp = d.Sp
+		}
+		if sp.File != nil {
+			return sp.File
+		}
+	}
+	return nil
 }
 
 func parseUnit(f *source.File, cache ParsedCache) (*ParsedUnit, bool, []diag.Error) {

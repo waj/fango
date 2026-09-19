@@ -20,7 +20,19 @@ import (
 
 // Install gives ck a compile-time evaluator. Both the batch pipeline and the
 // REPL call it, so a deriver behaves the same at the prompt as in a build.
-func Install(ck *infer.Checker) {
+type Session struct{ ev *evaluator }
+
+type Group struct {
+	End    int
+	Cutoff []infer.DeclRef
+}
+
+type SnapshotObject struct {
+	Defs   []core.Def
+	Groups []Group
+}
+
+func Install(ck *infer.Checker) *Session {
 	ev := &evaluator{ck: ck, env: eval.NewEnv()}
 	ev.env.Templates = ck.Templates
 	ck.CompileTime = ev.run
@@ -32,11 +44,53 @@ func Install(ck *infer.Checker) {
 		if ev.installedDecls <= checked && ev.installedInstances <= instances {
 			return // nothing this environment holds was discarded
 		}
-		ev.env = eval.NewEnv()
-		ev.env.Templates = ck.Templates
-		ev.installedDecls, ev.installedInstances = 0, 0
-		ev.installedIntrinsics = nil
-		ev.defs = nil
+		ev.resetToBase()
+	}
+	return &Session{ev: ev}
+}
+
+// Snapshot completes and returns the stage Core added since the prior
+// snapshot. It is declarative Core; evaluator closures and memo cells are not
+// exposed to module objects.
+
+func (s *Session) Snapshot() (SnapshotObject, []diag.Error) {
+	beforeDefs, beforeGroups := len(s.ev.defs), len(s.ev.groups)
+	if errs := s.ev.sync(); len(errs) != 0 {
+		return SnapshotObject{}, errs
+	}
+	groups := append([]Group(nil), s.ev.groups[beforeGroups:]...)
+	for i := range groups {
+		groups[i].End -= beforeDefs
+	}
+	return SnapshotObject{Defs: append([]core.Def(nil), s.ev.defs[beforeDefs:]...), Groups: groups}, nil
+}
+
+// InstallCore installs validated cached stage Core without replaying DeclInfo
+// AST through elaboration. Installed definitions form the rollback base for
+// later speculative checking.
+func (s *Session) InstallCore(defs []core.Def, groups []Group) {
+	if len(defs) == 0 {
+		return
+	}
+	s.ev.env.DefineProg(&core.Prog{ADTs: s.ev.ck.ADTOrder, Defs: defs, Natives: s.ev.ck.Natives})
+	s.ev.defs = append(s.ev.defs, defs...)
+	s.ev.baseDefs = append(s.ev.baseDefs, defs...)
+	base := len(s.ev.groups)
+	for _, group := range groups {
+		group.End += len(s.ev.defs) - len(defs)
+		s.ev.groups = append(s.ev.groups, group)
+	}
+	s.ev.baseGroups = append([]Group(nil), s.ev.groups[:base+len(groups)]...)
+	s.ev.baseInstances = len(s.ev.ck.Instances)
+	s.ev.installedInstances = s.ev.baseInstances
+	if s.ev.baseIntrinsics == nil {
+		s.ev.baseIntrinsics = map[string]bool{}
+	}
+	if s.ev.installedIntrinsics == nil {
+		s.ev.installedIntrinsics = map[string]bool{}
+	}
+	for name := range s.ev.ck.Intrinsics {
+		s.ev.baseIntrinsics[name], s.ev.installedIntrinsics[name] = true, true
 	}
 }
 
@@ -48,12 +102,33 @@ type evaluator struct {
 	// each splice elaborates only the completed groups added since the last
 	// one. A program with no splices elaborates nothing twice.
 	installedDecls     int
+	installedGroups    int
 	installedInstances int
 
 	// installedIntrinsics records whether this environment already holds the
 	// compiler intrinsics. They have no declaration prefix to follow.
 	installedIntrinsics map[string]bool
 	defs                []core.Def
+	baseDefs            []core.Def
+	baseInstances       int
+	baseIntrinsics      map[string]bool
+	groups              []Group
+	baseGroups          []Group
+}
+
+func (ev *evaluator) resetToBase() {
+	ev.env = eval.NewEnv()
+	ev.env.Templates = ev.ck.Templates
+	ev.defs = append([]core.Def(nil), ev.baseDefs...)
+	ev.groups = append([]Group(nil), ev.baseGroups...)
+	if len(ev.baseDefs) != 0 {
+		ev.env.DefineProg(&core.Prog{ADTs: ev.ck.ADTOrder, Defs: ev.baseDefs, Natives: ev.ck.Natives})
+	}
+	ev.installedDecls, ev.installedGroups, ev.installedInstances = 0, 0, ev.baseInstances
+	ev.installedIntrinsics = map[string]bool{}
+	for name := range ev.baseIntrinsics {
+		ev.installedIntrinsics[name] = true
+	}
 }
 
 func (ev *evaluator) run(operand ast.Expr) (any, []diag.Error) {
@@ -159,9 +234,15 @@ func (ev *evaluator) sync() []diag.Error {
 		add(elaborate.Instances(ev.ck.Instances[ev.installedInstances:], ev.ck))
 	}
 	nextDecls := len(ev.ck.Checked)
-	if ev.installedDecls < nextDecls {
+	nextGroups := len(ev.ck.CompletionGroups)
+	var groupEnds []int
+	var groupCutoffs [][]infer.DeclRef
+	for i := ev.installedGroups; i < nextGroups; i++ {
+		group := ev.ck.CompletionGroups[i]
 		context := append(append([]core.Def(nil), ev.defs...), defs...)
-		add(elaborate.DeclsIn(ev.ck.Checked[ev.installedDecls:nextDecls], context, ev.ck))
+		add(elaborate.DeclsIn(group.Infos, context, ev.ck))
+		groupEnds = append(groupEnds, len(defs))
+		groupCutoffs = append(groupCutoffs, group.Cutoff)
 	}
 	if len(errs) > 0 {
 		return errs
@@ -173,8 +254,19 @@ func (ev *evaluator) sync() []diag.Error {
 	for name := range ev.ck.Intrinsics {
 		ev.installedIntrinsics[name] = true
 	}
+	base := len(ev.defs)
 	ev.defs = append(ev.defs, defs...)
-	ev.installedDecls, ev.installedInstances = nextDecls, max(ev.installedInstances, nextInstances)
+	for i, end := range groupEnds {
+		ev.groups = append(ev.groups, Group{End: base + end, Cutoff: append([]infer.DeclRef(nil), groupCutoffs[i]...)})
+	}
+	if len(defs) != 0 && len(groupEnds) == 0 {
+		cutoff := make([]infer.DeclRef, len(ev.ck.Instances))
+		for i, in := range ev.ck.Instances {
+			cutoff[i] = in.Ref
+		}
+		ev.groups = append(ev.groups, Group{End: len(ev.defs), Cutoff: cutoff})
+	}
+	ev.installedDecls, ev.installedGroups, ev.installedInstances = nextDecls, nextGroups, max(ev.installedInstances, nextInstances)
 	return nil
 }
 

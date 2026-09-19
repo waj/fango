@@ -439,7 +439,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 				s.env.Define(def.Name, def.Body)
 			}
 		}
-		s.ck.Checked = append(s.ck.Checked, infos...)
+		s.ck.RecordChecked(infos)
 		for _, info := range infos[1:] {
 			sch := info.Scheme
 			sch.Body = s.ck.Sub.Apply(sch.Body)
@@ -493,7 +493,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	s.ck.BindDecl(info)
 	// A later splice may name this definition, so the compile-time
 	// evaluator's prefix has to grow with the session.
-	s.ck.Checked = append(s.ck.Checked, info)
+	s.ck.RecordChecked([]infer.DeclInfo{info})
 	def := &defs[0]
 	for i := range defs {
 		s.promptDefs[defs[i].Name] = defs[i]

@@ -93,7 +93,7 @@ func (ck *Checker) DeriverDecl(d *ast.DeriverDecl) []diag.Error {
 		declInfo, es := ck.annotatedDecl(m, want)
 		errs = append(errs, es...)
 		ck.BindDecl(declInfo)
-		ck.Checked = append(ck.Checked, declInfo)
+		ck.RecordChecked([]DeclInfo{declInfo})
 	}
 	for _, m := range given {
 		errs = append(errs, diag.Errorf(m.NameSpan, "UNKNOWN METHOD", "Class `%s` has no method `%s`.", types.SurfaceName(cl.Name), m.Name))

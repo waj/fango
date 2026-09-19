@@ -98,7 +98,7 @@ func (b *moduleCheck) add(i int, infos []DeclInfo, errs []diag.Error) {
 	b.infos[i] = append(b.infos[i], infos...)
 	b.errs = append(b.errs, errs...)
 	if len(errs) == 0 {
-		b.ck.Checked = append(b.ck.Checked, infos...)
+		b.ck.RecordChecked(infos)
 	}
 }
 

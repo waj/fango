@@ -49,7 +49,9 @@ internal/staging connects the checker's hook to elaboration/evaluation without
 an inference-to-evaluator package cycle. Batch and REPL install the same hook.
 It elaborates completed dependency groups on demand, installing all members
 before capture analysis/evaluation. Checked is an append-only completion log,
-not a source prefix. Programs without splices do not elaborate twice.
+not a source prefix. The shared batch session also snapshots each completed
+module's declarative stage Core for its installable module object; this includes
+compile-time-only definitions and ordinary functions a later splice may call.
 
 Operands may execute only completed groups whose declarations and transitive
 dependencies precede the splice. Source checks and the elaborated closure,
@@ -63,6 +65,16 @@ the exact operand plus reachable completed definitions through the same Machine 
 A deriving dictionary still being expanded is not executable. The stage environment
 retains elaborated definitions for capture substitution and lowering, incrementally
 installs imported intrinsics, and rebuilds after rollback.
+
+Cached stage installation appends validated templates and completed Core groups
+directly, without replaying `DeclInfo` AST through elaboration. Group metadata
+retains stable instance cutoffs and dictionary availability. Installed Core is
+the evaluator's rollback base: a later failed splice discards speculative
+definitions but not dependency objects. `TypeRepr.Schema` is deliberately not
+serialized; installation reconnects it to the current checker while preserving
+the semantic difference between unrestricted nil visibility and a non-nil empty
+visibility set. Native stage-safety metadata and the evaluator's ordinary step
+budget follow the same paths after installation.
 
 ## Reproducibility and rollback
 

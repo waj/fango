@@ -30,7 +30,7 @@ type Schema interface {
 type TypeRepr struct {
 	Type    types.Type
 	Visible map[int]bool
-	Schema  Schema
+	Schema  Schema `object:"omit"`
 }
 
 // Con returns the reflected nominal type, or nil for a variable or an arrow.
@@ -87,6 +87,30 @@ func (t *Table) Get(i int) *Template {
 		return nil
 	}
 	return t.templates[i]
+}
+
+// Len and Snapshot expose declarative template state to the module-object
+// boundary. Snapshot copies the table slice; templates themselves are immutable
+// after checking.
+func (t *Table) Len() int { return len(t.templates) }
+
+func (t *Table) Snapshot(from int) []*Template {
+	if from < 0 || from > len(t.templates) {
+		return nil
+	}
+	return append([]*Template(nil), t.templates[from:]...)
+}
+
+func (t *Table) Append(templates []*Template) int {
+	base := len(t.templates)
+	t.templates = append(t.templates, templates...)
+	return base
+}
+
+func (t *Table) Truncate(n int) {
+	if n >= 0 && n <= len(t.templates) {
+		t.templates = t.templates[:n]
+	}
 }
 
 // Code is the compile-time value of a quote: a template index plus one Code

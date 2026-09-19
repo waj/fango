@@ -61,6 +61,32 @@ explicit graph compatibility pass over module states; declaration collisions
 and effect-operation binder shadowing remain graph-resolution and per-module
 header-validation rules, respectively.
 
+The installable `ModuleObject` adds the module's public resolver interface,
+owned runtime and stage Core, staging completion groups, templates, and ABI
+summaries. Its typed reference-graph codec preserves shared and recursive
+compiler data, uses exact IEEE floating-point bits, sorts maps, and rejects
+unknown variants, malformed references, missing fields, and invalid source
+provenance. Pointer identity and session allocation numbers are not semantic:
+installation interns builtin/imported nominal names, allocates fresh local
+nominal, type-variable, capture, scope, and resume identities, remaps template
+indices, and reconstructs stable instance cutoffs without changing positional
+parameter or evidence order.
+
+Source spans carry their source identity, exact text, and bounded surrounding
+anchors. Decoding binds them to caller-supplied current source files, validates
+the range, and relocates a uniquely anchored span when comments moved it.
+Thus an importer never retains a foreign dependency's stale file pointer or
+blindly applies an old byte offset. Resolver objects contain only exported
+maps; installing one cannot expose private names.
+
+Module installation validates all decoded state before publication and uses a
+checker checkpoint for the remaining mutation. Types, effects, classes,
+instances, native/intrinsic metadata, IO identity, capture contracts,
+visibility, templates, and the staging evaluator commit together. Rollback
+retains fresh-supply advancement but restores every published table. Persistent
+lookup remains unfinished; normal compilation still creates these objects in
+memory and M5 decides when to encode/store or install them.
+
 ## Parsing and surface lowering
 
 The lexer records byte spans and line/column positions without layout tokens.

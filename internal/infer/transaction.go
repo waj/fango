@@ -12,14 +12,16 @@ func (ck *Checker) Checkpoint() func() {
 	// Checked is the completion log the compile-time evaluator uses on demand.
 	// Restoring it without telling that evaluator would leave it holding
 	// definitions the checker has forgotten, so the two move together.
-	derivers, checked := maps.Clone(ck.Derivers), ck.Checked
+	derivers, checked, groups := maps.Clone(ck.Derivers), ck.Checked, ck.CompletionGroups
+	templateCount := ck.Templates.Len()
 	captures := maps.Clone(ck.CaptureSummaries)
 	scopeSpans := maps.Clone(ck.ScopeSpans)
 	// Effects, natives, operator fixities, and instance visibility change
 	// when a prompt declares an effect or imports a module graph; a failed
 	// input must leave none of it behind.
 	aliases, effects, effectsByUnique := maps.Clone(ck.Aliases), maps.Clone(ck.Effects), maps.Clone(ck.EffectsByUnique)
-	operations, natives, fixity := maps.Clone(ck.Operations), maps.Clone(ck.Natives), maps.Clone(ck.Fixity)
+	operations, natives, intrinsics, fixity := maps.Clone(ck.Operations), maps.Clone(ck.Natives), maps.Clone(ck.Intrinsics), maps.Clone(ck.Fixity)
+	io := ck.IO
 	instanceImports := make(map[string]map[string]bool, len(ck.InstanceImports))
 	for owner, visible := range ck.InstanceImports {
 		instanceImports[owner] = maps.Clone(visible)
@@ -29,11 +31,12 @@ func (ck *Checker) Checkpoint() func() {
 		ck.ADTs, ck.Ctors, ck.TypeNames = adts, ctors, types
 		ck.Env.vars, ck.Workers, ck.Sub = vars, workers, sub
 		ck.Instances, ck.ADTOrder, ck.PendingPreds = instances, order, pending
-		ck.Derivers, ck.Checked = derivers, checked
+		ck.Derivers, ck.Checked, ck.CompletionGroups = derivers, checked, groups
 		ck.CaptureSummaries = captures
 		ck.ScopeSpans = scopeSpans
 		ck.Aliases, ck.Effects, ck.EffectsByUnique = aliases, effects, effectsByUnique
-		ck.Operations, ck.Natives = operations, natives
+		ck.Operations, ck.Natives, ck.Intrinsics, ck.IO = operations, natives, intrinsics, io
+		ck.Templates.Truncate(templateCount)
 		// The fixity table is shared with the session's module graph by
 		// identity, so it is restored in place rather than replaced.
 		for op := range ck.Fixity {

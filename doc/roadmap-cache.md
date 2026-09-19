@@ -150,50 +150,13 @@ distinct from rerunning semantic Core lint on an already validated object.
 Implement the remaining milestones in dependency order. Each has an
 independently reviewable result and acceptance gate. The implemented in-memory
 module boundary is described in
-[pipeline design](design/pipeline.md#pipeline); M4 makes that boundary
-serializable and M5 enables persistence. Do not substitute whole-project cache
-hits for any milestone's module-level acceptance tests.
-
-### M4: make module state, Core, and staging installable
-
-Builds on the implemented in-memory module boundary. Starting points are
-checker checkpoint/state tables, `meta.Table`, and staging's
-completion-log-driven evaluator.
-
-Required work:
-
-- Implement the typed object codec and the session-wide interning/remapping
-  context.
-- Add explicit snapshot/install operations for checker state and resolver
-  interfaces. Resolve private names only through their defining module;
-  installation must not widen source visibility.
-- Add a staging-session API that installs completed stage Core and templates
-  without replaying `DeclInfo` ASTs through elaboration.
-- Preserve stage completion groups, declaration cutoffs, dictionary
-  availability, reflection visibility, stage-safe native restrictions, and
-  evaluator budgets.
-- Store stage versions of compile-time-only definitions and ordinary
-  functions that later splices may call. Persist declarative Core/templates,
-  not evaluated closures or memo cells.
-- Restore `TypeRepr` schema access against the current checker and preserve
-  the distinction between unrestricted and empty reflection visibility.
-- Add source-provenance references for imported quote/template and
-  capture-contract locations. A comment inserted in a dependency must not
-  leave a cached importer pointing into the dependency's old source.
-- Make installation transactional, including intrinsics, IO identity,
-  templates, instance visibility, and staging state. Fresh identities may
-  advance across rollback but must never be reused.
-
-Acceptance: round-trip every relevant variant and shared graph structure.
-Decode into sessions with different prior allocations and verify nominal
-equality, distinct local identities, template-hole identity, evidence ordering,
-and unchanged behavior. An installed object must support subsequent inference,
-deriving, splices, Core interpretation, and diagnostics without rechecking its
-source.
+[pipeline design](design/pipeline.md#pipeline), including its typed installable
+object codec and staging boundary. M5 enables persistence. Do not substitute
+whole-project cache hits for any milestone's module-level acceptance tests.
 
 ### M5: activate checked-module caching with stage dependency tracking
 
-Depends on M4.
+Builds on the implemented installable module-object boundary.
 
 Required work:
 

@@ -215,6 +215,9 @@ type Checker struct {
 	// order is retained separately in Module results; the compile-time evaluator
 	// installs newly completed groups together on demand.
 	Checked []DeclInfo
+	// CompletionGroups retains the dependency-group boundaries and stable
+	// instance cutoffs used by the staging object boundary.
+	CompletionGroups []CompletionGroup
 
 	// CompileTime runs a splice operand. The driver installs it
 	// (internal/staging): inference cannot, because running a splice needs
@@ -278,6 +281,24 @@ func (ck *Checker) MarkOperationRetainsArguments(name string) bool {
 // CompileTimeEval elaborates and evaluates one already-checked splice
 // operand, returning the *meta.Code it produced.
 type CompileTimeEval func(operand ast.Expr) (any, []diag.Error)
+
+type CompletionGroup struct {
+	Infos  []DeclInfo
+	Cutoff []DeclRef
+}
+
+func (ck *Checker) RecordChecked(infos []DeclInfo) {
+	if len(infos) == 0 {
+		return
+	}
+	ck.Checked = append(ck.Checked, infos...)
+	limit := ck.instanceLimit()
+	cutoff := make([]DeclRef, 0, limit)
+	for _, instance := range ck.Instances[:limit] {
+		cutoff = append(cutoff, instance.Ref)
+	}
+	ck.CompletionGroups = append(ck.CompletionGroups, CompletionGroup{Infos: append([]DeclInfo(nil), infos...), Cutoff: cutoff})
+}
 
 func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 	ck := &Checker{

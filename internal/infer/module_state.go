@@ -80,6 +80,7 @@ type ModuleState struct {
 	Entry      string
 	Schemes    map[string]types.Scheme
 	Types      map[string]types.Type
+	Aliases    map[string]string
 	Ctors      map[string]*types.CtorInfo
 	ADTs       []*types.ADTInfo
 	Effects    map[string]*types.EffectInfo
@@ -104,9 +105,9 @@ type CheckedModule struct {
 }
 
 type moduleSnapshot struct {
-	env, types, ctors, effects, operations, classes, methods map[string]bool
-	workers, natives, intrinsics, derivers, captures         map[string]bool
-	adts, instances                                          int
+	env, types, aliases, ctors, effects, operations, classes, methods map[string]bool
+	workers, natives, intrinsics, derivers, captures                  map[string]bool
+	adts, instances                                                   int
 }
 
 func keys[T any](m map[string]T) map[string]bool {
@@ -118,7 +119,7 @@ func keys[T any](m map[string]T) map[string]bool {
 }
 
 func (ck *Checker) moduleSnapshot() moduleSnapshot {
-	return moduleSnapshot{keys(ck.Env.vars), keys(ck.TypeNames), keys(ck.Ctors), keys(ck.Effects), keys(ck.Operations), keys(ck.Classes), keys(ck.Methods), keys(ck.Workers), keys(ck.Natives), keys(ck.Intrinsics), keys(ck.Derivers), keys(ck.CaptureSummaries), len(ck.ADTOrder), len(ck.Instances)}
+	return moduleSnapshot{keys(ck.Env.vars), keys(ck.TypeNames), keys(ck.Aliases), keys(ck.Ctors), keys(ck.Effects), keys(ck.Operations), keys(ck.Classes), keys(ck.Methods), keys(ck.Workers), keys(ck.Natives), keys(ck.Intrinsics), keys(ck.Derivers), keys(ck.CaptureSummaries), len(ck.ADTOrder), len(ck.Instances)}
 }
 
 func delta[T any](m map[string]T, before map[string]bool) map[string]T {
@@ -168,7 +169,7 @@ func (ck *Checker) CheckModule(m *ast.Module, options ModuleOptions) (*CheckedMo
 	}
 	state := &ModuleState{
 		Name: options.Name, Role: options.Role, Entry: options.Entry,
-		Schemes: schemes, Types: delta(ck.TypeNames, before.types),
+		Schemes: schemes, Types: delta(ck.TypeNames, before.types), Aliases: delta(ck.Aliases, before.aliases),
 		Ctors: delta(ck.Ctors, before.ctors), ADTs: append([]*types.ADTInfo(nil), ck.ADTOrder[before.adts:]...),
 		Effects: delta(ck.Effects, before.effects), Operations: delta(ck.Operations, before.operations),
 		Classes: delta(ck.Classes, before.classes), Methods: delta(ck.Methods, before.methods),
