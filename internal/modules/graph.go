@@ -45,6 +45,14 @@ type Increment struct {
 	Decls           []ast.Decl
 	InstanceImports map[string]map[string]bool
 	Natives         []NativeSource
+	// Units are the increment's modules as a checker takes them in, in the
+	// same shape a batch entry graph produces, so both reach the same
+	// per-module artifact identity.
+	Units []ResolvedModule
+	// FixityHash is the graph-wide operator table in effect for this
+	// increment. A later increment may widen it; artifacts record the table
+	// their module was resolved under.
+	FixityHash string
 }
 
 func newGraph(local Provider) *Graph {
@@ -107,11 +115,12 @@ func (g *Graph) Import(name string, at source.Span) (*Increment, []diag.Error) {
 }
 
 func (g *Graph) increment(order []string) *Increment {
-	inc := &Increment{Modules: order, InstanceImports: map[string]map[string]bool{}}
+	inc := &Increment{Modules: order, InstanceImports: map[string]map[string]bool{}, FixityHash: fixity.Hash(g.fixities)}
 	for _, name := range order {
 		n := g.nodes[name]
 		inc.Decls = append(inc.Decls, n.resolved...)
 		inc.InstanceImports[name] = g.visible[name]
+		inc.Units = append(inc.Units, g.resolvedModule(name, name, DependencyRole, ""))
 		if n.native != nil && !n.bundled {
 			inc.Natives = append(inc.Natives, NativeSource{Module: n.nativeModule, Path: n.nativePath, Content: n.native})
 		}
@@ -372,10 +381,12 @@ func (g *Graph) loadPrelude() (*PreludeResult, []diag.Error) {
 	}
 	merged := &ast.Module{InstanceImports: map[string]map[string]bool{}}
 	owners := make(map[string]bool, len(order))
+	units := make([]ResolvedModule, 0, len(order))
 	for _, name := range order {
 		owners[name] = true
 		merged.InstanceImports[name] = g.visible[name]
 		merged.Decls = append(merged.Decls, g.nodes[name].resolved...)
+		units = append(units, g.resolvedModule(name, name, DependencyRole, ""))
 	}
 	// Prompt declarations are the synthetic entry module. Like a batch entry,
 	// they can use instances and derivers from every transitive prelude module.
@@ -388,5 +399,6 @@ func (g *Graph) loadPrelude() (*PreludeResult, []diag.Error) {
 	if len(scopeErrs) > 0 {
 		return nil, scopeErrs
 	}
-	return &PreludeResult{Module: merged, Fixities: g.fixities, Owners: owners, Scope: scope}, nil
+	return &PreludeResult{Module: merged, Fixities: g.fixities, Owners: owners, Scope: scope,
+		Units: units, FixityHash: fixity.Hash(g.fixities), PromptVisible: promptVisible}, nil
 }

@@ -157,41 +157,7 @@ and its emission cache are described in
 substitute whole-project cache hits for any milestone's module-level acceptance
 tests.
 
-### M7: integrate fresh REPL sessions and transactional imports
-
-Builds on the persistent checked-module and module-backend boundaries.
-Starting points are REPL bootstrap, `importInput`, `install`, evaluator
-definition installation, and native-worker replacement.
-
-Required work:
-
-- Bootstrap Prelude and syntax roots through the shared session and
-  dependency-role artifacts.
-- Prepare all imports in one prompt input before committing graph, resolver,
-  checker, staging, runtime definitions, or native-module changes.
-- Keep already imported modules frozen for the session, matching existing
-  behavior. A fresh session rereads current sources.
-- Use the effective fixity table of each prepared import increment. Previously
-  accepted prompt declarations retain their existing interpretation.
-- Preserve module-value generalization independently of prompt-value
-  monomorphism.
-- Prepare evaluator definitions and native-worker configuration before commit.
-  Failed multi-import prompts must not leave earlier imports installed or
-  close the previous worker.
-- Keep successful immutable disk artifacts after a failed prompt transaction.
-- Preserve `loaded M` messages and dependency order on hits.
-
-Acceptance: fresh cached sessions match cold transcripts, including staging,
-deriving, resource/capture checks, imported `main`, native sidecars, and
-redefinition generations. Test failure after an earlier import succeeded within
-the same prompt, unknown exposed names, failed splices, and native-worker
-preparation failure. Retrying after correction must behave like a clean
-session. Count imported-module work separately from parsing/checking/evaluating
-the prompt's own input.
-
 ### M8: remove the project shortcut and complete the public contract
-
-Depends on M7.
 
 Required work:
 

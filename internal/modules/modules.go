@@ -149,6 +149,33 @@ type ResolvedModule struct {
 	Module       *ast.Module
 }
 
+// resolvedModule is one module as a checker takes it in. Batch entry graphs
+// and prompt import increments describe their modules the same way, so both
+// reach the same per-module artifact identity.
+func (g *Graph) resolvedModule(name, owner string, role ModuleRole, entry string) ResolvedModule {
+	n := g.nodes[name]
+	var moduleSource *source.File
+	if n.parsed != nil {
+		moduleSource = n.parsed.headerSp.File
+	}
+	if moduleSource == nil {
+		moduleSource = firstDeclFile(n.resolved)
+	}
+	deps := dependencyNames(n)
+	sort.Strings(deps)
+	nativeHash := ""
+	if n.native != nil {
+		h := sha256.Sum256(n.native)
+		nativeHash = hex.EncodeToString(h[:])
+	}
+	return ResolvedModule{Name: owner, Role: role, Entry: entry, Source: moduleSource, SourceHash: n.sourceHash,
+		NativeModule: n.nativeModule, NativeHash: nativeHash, Dependencies: deps, Interface: exportInterface(n.iface),
+		Module: &ast.Module{
+			Decls:           append([]ast.Decl(nil), n.resolved...),
+			InstanceImports: map[string]map[string]bool{owner: g.visible[name]},
+		}}
+}
+
 // Interface is the resolver-visible public surface of one module. Private
 // declarations never enter these maps; caching and installation therefore
 // cannot widen source visibility.
@@ -357,24 +384,7 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 				entry = canonical(entryName, "main")
 			}
 		}
-		var moduleSource *source.File
-		if g.nodes[name].parsed != nil {
-			moduleSource = g.nodes[name].parsed.headerSp.File
-		}
-		if moduleSource == nil {
-			moduleSource = firstDeclFile(g.nodes[name].resolved)
-		}
-		deps := dependencyNames(g.nodes[name])
-		sort.Strings(deps)
-		nativeHash := ""
-		if g.nodes[name].native != nil {
-			h := sha256.Sum256(g.nodes[name].native)
-			nativeHash = hex.EncodeToString(h[:])
-		}
-		resolved = append(resolved, ResolvedModule{Name: owner, Role: role, Entry: entry, Source: moduleSource, SourceHash: g.nodes[name].sourceHash, NativeModule: g.nodes[name].nativeModule, NativeHash: nativeHash, Dependencies: deps, Interface: exportInterface(g.nodes[name].iface), Module: &ast.Module{
-			Decls:           append([]ast.Decl(nil), g.nodes[name].resolved...),
-			InstanceImports: map[string]map[string]bool{owner: g.visible[name]},
-		}})
+		resolved = append(resolved, g.resolvedModule(name, owner, role, entry))
 	}
 	manifest := make([]ManifestEntry, 0, len(order))
 	units := make([]Unit, 0, len(order))

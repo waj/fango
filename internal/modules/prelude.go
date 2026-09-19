@@ -22,6 +22,15 @@ type PreludeResult struct {
 	Fixities fixity.Table
 	Owners   map[string]bool
 	Scope    Scope
+	// Units are the closure's modules in dependency order, in the shape a
+	// checker takes them in, so a session bootstraps through the same
+	// dependency-role artifacts a build reuses.
+	Units []ResolvedModule
+	// FixityHash is the operator table the closure was resolved under.
+	FixityHash string
+	// PromptVisible is the instance visibility a prompt starts with: every
+	// module of the closure, as a batch entry sees its own graph.
+	PromptVisible map[string]bool
 }
 
 // Prelude resolves the actual bundled sources and their transitive bundled

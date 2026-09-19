@@ -44,11 +44,17 @@ Its persistent scope begins with Prelude imports and grows only on accepted inpu
 The checker holds canonical names. Prompt mode permits rebinding prompt-owned names
 and cumulative re-imports; other collision/visibility rules are ordinary module rules.
 
-An import checks a graph increment through the batch entry point, with prompt
-monomorphism disabled for immutable module values. Elaboration installs stable
-lifted names, specialization, intrinsics, native metadata, and solved capture
-summaries, then lints against everything already installed. Visibility merges per
-owner and expands the prompt's set. Sidecar imports rebuild the worker's module set.
+A session bootstraps and imports through the shared compilation session, one
+module at a time in dependency order, so its Prelude and syntax roots and every
+imported module reuse the same checked objects a build of those sources
+produces and publishes. Module values generalize there whatever the prompt's
+own monomorphism rule is: that rule is for its memo cells alone. Elaboration
+installs stable lifted names, specialization, intrinsics, native metadata, and
+solved capture summaries, then lints against everything already installed.
+Visibility merges per owner and expands the prompt's set. Sidecar imports
+rebuild the worker's module set. An increment records the operator table in
+effect when it was resolved; a later increment may widen it without changing
+how an accepted input was read.
 
 ## Transactions and staging
 
@@ -57,6 +63,13 @@ Checkpoints include effects, natives, instance visibility, and the operator tabl
 restored in place because the graph shares its identity. Extend the evaluator only
 after acceptance; staged failures also restore the completion log and evaluator
 state. [Metaprogramming](metaprogramming.md#reproducibility-and-rollback) owns that seam.
+
+An input naming several imports prepares them all — resolution, checking,
+elaboration, lint, and the native worker its sidecars need — before any of them
+reaches the installed set, the evaluator, or the running worker. A failure
+part-way therefore installs nothing and retires no worker, and retrying after
+the correction behaves like a clean session. The checked objects the successful
+modules published are immutable and stay valid, so the retry reuses them.
 
 Resource checking uses installed definitions as context, so imported wrappers obey
 the same non-escape rules at the prompt as in a source program. Machine lowering

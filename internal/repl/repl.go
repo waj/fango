@@ -10,10 +10,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
+	"github.com/waj/fango/internal/check"
+	"github.com/waj/fango/internal/compilecache"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/elaborate"
@@ -36,6 +39,20 @@ type Options struct {
 	// `Foo/Bar.fango`, the way an entry file's directory is in a build.
 	// Empty means the working directory.
 	Root string
+	// Observe reports per-module compilation stages, for tests that count
+	// imported-module work apart from the prompt's own input.
+	Observe check.Observer
+	// Cache overrides the persistent module-object store. DisableCache
+	// compiles without reusing or publishing artifacts.
+	Cache        check.ObjectCache
+	DisableCache bool
+}
+
+func (o Options) objectCache(root string) check.ObjectCache {
+	if o.Cache != nil || o.DisableCache {
+		return o.Cache
+	}
+	return compilecache.NewModuleStore(filepath.Join(root, "<repl>"))
 }
 
 type Session struct {
@@ -56,6 +73,13 @@ type Session struct {
 	// sidecars have been needed, which the shared bundled worker serves.
 	natives []nativehost.Source
 	exec    *nativehost.Executor
+
+	// modules installs imported modules through the shared compilation
+	// session, so a fresh session reuses the same checked objects a build
+	// does. Its summaries persist across inputs, which is what lets a later
+	// import key against the modules already installed.
+	modules *check.Installer
+	stage   *staging.Session
 
 	// installed is every module definition the session holds, prelude
 	// first: the Core lint checks a program, and an imported module's calls
@@ -84,22 +108,34 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
-	staging.Install(ck)
+	stage := staging.Install(ck)
 	// The prompt resolver canonicalizes every input, so the checker holds
-	// the prelude under canonical names only.
-	if errs := ck.InstallPreludeModule(prelude); len(errs) > 0 {
-		panic("invalid embedded prelude: " + errs[0].Body)
+	// the prelude under canonical names only. Its roots install as ordinary
+	// dependency-role modules, so a fresh session reuses the very artifacts
+	// a build of the same sources produced.
+	ck.Fixity, ck.PreludeOwners = prelude.Fixities, prelude.Owners
+	installer := check.NewInstaller(ck, stage, opts.objectCache(root), opts.Observe)
+	preludeDefs, diagnostics, internalErr := installer.Install(prelude.Units, prelude.FixityHash)
+	if len(diagnostics) > 0 {
+		panic("invalid embedded prelude: " + diagnostics[0].Body)
 	}
+	if internalErr != nil {
+		panic("invalid embedded prelude: " + internalErr.Error())
+	}
+	ck.PreludeInfos = installer.Infos()
+	// Like a batch entry, a prompt sees instances and derivers from every
+	// module of the closure it starts with.
+	if ck.InstanceImports == nil {
+		ck.InstanceImports = map[string]map[string]bool{}
+	}
+	ck.InstanceImports[""] = prelude.PromptVisible
+	ck.CurrentOwner = ""
 	// Prompt values are lazy memo cells (doc/design.md, "Interpreter and REPL") — evaluated once, so their
 	// types stay monotypes (the block-binding monomorphism restriction).
 	// Functions and lambdas still generalize.
 	ck.MonoValues = true
-	preludeProg, errs := elaborate.Module(nil, ck)
-	if len(errs) > 0 {
-		panic("invalid elaborated prelude: " + errs[0].Body)
-	}
 	env := eval.NewEnv()
-	env.DefineProg(preludeProg)
+	env.DefineProg(&core.Prog{ADTs: ck.ADTOrder, Defs: preludeDefs, Natives: ck.Natives})
 	return &Session{
 		ck:         ck,
 		env:        env,
@@ -107,7 +143,9 @@ func NewSessionWith(out io.Writer, opts Options) *Session {
 		ioctx:      eval.NewIOContext(strings.NewReader(""), out),
 		graph:      graph,
 		prompt:     graph.NewPrompt(),
-		installed:  preludeProg.Defs,
+		modules:    installer,
+		stage:      stage,
+		installed:  preludeDefs,
 		promptDefs: map[string]core.Def{},
 	}
 }
@@ -533,8 +571,12 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 		diag.Render(s.out, errs)
 		return inputDone
 	}
+	// Prepare every import the input names before any of them reaches the
+	// evaluator, the installed set, or the native worker: a later failure
+	// must leave the session exactly as the prompt found it.
 	var loaded []string
 	var natives []nativehost.Source
+	var pending []core.Def
 	for _, im := range m.Imports {
 		inc, errs := s.prompt.Import(im)
 		if len(errs) > 0 {
@@ -543,18 +585,40 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 		if len(inc.Modules) == 0 {
 			continue
 		}
-		if errs := s.install(inc); len(errs) > 0 {
+		defs, errs, internalErr := s.modules.Install(inc.Units, inc.FixityHash)
+		if internalErr != nil {
+			return fail([]diag.Error{{Title: "INTERNAL COMPILER ERROR", Body: internalErr.Error()}})
+		}
+		if len(errs) > 0 {
 			return fail(errs)
 		}
+		pending = append(pending, defs...)
 		loaded = append(loaded, inc.Modules...)
 		for _, n := range inc.Natives {
 			natives = append(natives, nativehost.Source{Module: n.Module, Content: n.Content})
 		}
 	}
+	// The worker is built, but neither installed nor swapped in, before the
+	// transaction commits: a failure here must not close the running one.
+	var exec *nativehost.Executor
 	if len(natives) > 0 {
-		if err := s.addNatives(natives); err != nil {
+		prepared, err := s.prepareNatives(natives)
+		if err != nil {
 			return fail([]diag.Error{{Title: "NATIVE WORKER ERROR", Body: err.Error()}})
 		}
+		exec = prepared
+	}
+	s.installed = append(s.installed, pending...)
+	if len(pending) > 0 {
+		s.env.DefineProg(&core.Prog{ADTs: s.ck.ADTOrder, Defs: pending, Natives: s.ck.Natives})
+	}
+	// Like a batch entry, the prompt sees instances and derivers from every
+	// module in its graph.
+	for _, name := range loaded {
+		s.ck.InstanceImports[""][name] = true
+	}
+	if exec != nil {
+		s.commitNatives(natives, exec)
 	}
 	for _, name := range loaded {
 		fmt.Fprintf(s.out, "loaded %s\n", name)
@@ -562,73 +626,26 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 	return inputDone
 }
 
-// install checks one graph increment and installs its definitions. Module
-// values are immutable, so they generalize as in a build; the prompt's
-// monomorphism rule is for its own memo cells only.
-func (s *Session) install(inc *modules.Increment) []diag.Error {
-	start := len(s.ck.Instances)
-	known := make(map[string]bool, len(s.ck.Intrinsics))
-	for name := range s.ck.Intrinsics {
-		known[name] = true
-	}
-	mono := s.ck.MonoValues
-	s.ck.MonoValues = false
-	infos, errs := s.ck.Module(&ast.Module{Decls: inc.Decls, InstanceImports: inc.InstanceImports})
-	s.ck.MonoValues = mono
-	if len(errs) > 0 {
-		return errs
-	}
-	// An intrinsic declared by this increment needs its synthesized
-	// definition installed alongside the module that declares it.
-	var intrinsics []string
-	for name := range s.ck.Intrinsics {
-		if !known[name] {
-			intrinsics = append(intrinsics, name)
-		}
-	}
-	defs, errs := elaborate.Increment(infos, s.ck.Instances[start:], intrinsics, s.installed, s.ck)
-	if len(errs) > 0 {
-		return errs
-	}
-	program := append(append([]core.Def(nil), s.installed...), defs...)
-	if lintErrs := elaborate.LintProg(program, s.ck); len(lintErrs) > 0 {
-		var errs []diag.Error
-		for _, err := range lintErrs {
-			errs = append(errs, diag.Error{Title: "INTERNAL COMPILER ERROR", Body: "Core invariants violated: " + err.Error()})
-		}
-		return errs
-	}
-	s.installed = program
-	s.env.DefineProg(&core.Prog{ADTs: s.ck.ADTOrder, Defs: defs, Natives: s.ck.Natives})
-	// Like a batch entry, the prompt sees instances and derivers from every
-	// module in its graph.
-	for _, name := range inc.Modules {
-		s.ck.InstanceImports[""][name] = true
-	}
-	return nil
-}
-
-// addNatives rebuilds the session's native worker over the bundled sidecars
-// and every user sidecar imported so far. The worker only builds and starts
-// when a sidecar function is first called, and builds are cached by content.
-func (s *Session) addNatives(sources []nativehost.Source) error {
+// prepareNatives builds a worker over the bundled sidecars and every user
+// sidecar the session holds or this input adds, without disturbing the
+// running one. The worker only builds and starts when a sidecar function is
+// first called, and builds are cached by content.
+func (s *Session) prepareNatives(sources []nativehost.Source) (*nativehost.Executor, error) {
 	bundled, err := nativehost.BundledSources()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	all := append(append(bundled, s.natives...), sources...)
-	exec, err := nativehost.New(all)
-	if err != nil {
-		return err
-	}
+	return nativehost.New(append(append(bundled, s.natives...), sources...))
+}
+
+// commitNatives adopts a prepared worker and retires the previous one.
+func (s *Session) commitNatives(sources []nativehost.Source, exec *nativehost.Executor) {
 	s.natives = append(s.natives, sources...)
 	old := s.exec
-	s.exec = exec
-	s.ioctx.Natives = exec
+	s.exec, s.ioctx.Natives = exec, exec
 	if old != nil {
 		_ = old.Close()
 	}
-	return nil
 }
 
 // typeDeclInput installs a `type` declaration. Redefinition mints a fresh
