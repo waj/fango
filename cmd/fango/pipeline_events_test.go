@@ -20,7 +20,6 @@ func TestCompilationSessionStageEvents(t *testing.T) {
 		t.Fatalf("cold compile failed: %s", stderr.String())
 	}
 	want := map[string]bool{
-		"cache-miss":    false,
 		"parse":         false,
 		"resolve":       false,
 		"check":         false,
@@ -43,12 +42,26 @@ func TestCompilationSessionStageEvents(t *testing.T) {
 		}
 	}
 
+	// A second invocation rediscovers and revalidates the graph, then serves
+	// every owner from its artifacts: no compiler stage runs again.
 	events = nil
 	if _, _, ok := emitProjectManifestSession(entry, false, &stderr, session); !ok {
 		t.Fatalf("cached compile failed: %s", stderr.String())
 	}
-	if len(events) != 1 || events[0].Stage != "cache-hit" || events[0].Owner == "" {
-		t.Fatalf("cached events = %#v", events)
+	hits := 0
+	for _, event := range events {
+		switch event.Stage {
+		case "parse", "check", "elaborate", "semantic-lint", "lowering", "emission":
+			t.Fatalf("a cached build repeated %s for %s: %#v", event.Stage, event.Owner, events)
+		case "checked-cache-hit", "emitted-cache-hit":
+			hits++
+		}
+		if event.Owner == "" {
+			t.Fatalf("event has no owner: %#v", event)
+		}
+	}
+	if hits == 0 {
+		t.Fatalf("cached build reused nothing: %#v", events)
 	}
 }
 

@@ -20,11 +20,14 @@ copy; a project's ability to supply one is part of the same source-root decision
 Open choices:
 
 - Files beside the binary, serialized checked interfaces/Core, or source for
-  development plus a precompiled distribution artifact. Reuse the module-state
-  and Core codec planned in the
-  [compilation-cache roadmap](roadmap-cache.md#target-architecture-and-invariants)
-  rather than designing a second artifact format. Shipping precompiled bundled
-  artifacts remains separate from project-local caching.
+  development plus a precompiled distribution artifact. Reuse the implemented
+  checked-module codec and its installation boundary
+  ([pipeline](design/pipeline.md#pipeline)) rather than designing a second
+  artifact format: a precompiled library is the same object, published by a
+  producer instead of a local build, and it needs a durable identity in place
+  of the compiler-executable fingerprint, a published source manifest, and a
+  compatibility rule for a consumer built from a different compiler. Shipping
+  those artifacts remains separate from project-local caching.
 - Whether Go runtime support remains embedded: generated projects/workers still
   need its source materialized in arbitrary build directories.
 - Source-root spelling and whether it is a development escape hatch or the
@@ -48,7 +51,7 @@ package dependencies exclude inference, so that split has an existing boundary.
 Loading/unloading changes would respawn and replay pure declarations, coordinated
 with [REPL generations](roadmap-tooling.md#repl-hardening). Go plugins do not supply
 unloading and require matching build artifacts, so they do not solve this lifecycle.
-Core serialization is shared with the precompiled-source option above and the
-[installable-object milestone](roadmap-cache.md#m4-make-module-state-core-and-staging-installable).
-Reuse that codec; co-locating native values remains a separate proposal, not an
-implemented native ABI.
+Core serialization is shared with the precompiled-source option above; reuse
+the implemented [module-object codec](design/pipeline.md#pipeline).
+Co-locating native values remains a separate proposal, not an implemented
+native ABI.

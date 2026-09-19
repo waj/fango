@@ -32,9 +32,11 @@ type File struct {
 	Data []byte
 }
 
-// EmitProject lowers a whole Core program into one Go package per Fango
-// module. The entry module is package main at the project root; dependencies
-// live below modules/ in their logical source layout.
+// EmitProject lowers a whole Core program at once into one Go package per
+// Fango module, with every definition body available throughout. It is the
+// differential reference the module backend is compared against, and no
+// command uses it: internal/backend emits each owner from its own Core and the
+// declarations it links against, and must stay byte-identical to this.
 func EmitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
 	mp, errs := machineir.Lower(p, b)
 	if len(errs) != 0 {
@@ -43,10 +45,9 @@ func EmitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) 
 	return emitProject(p, mp, b, units, printMain)
 }
 
-// EmitMachineProject emits selective Machine definitions as iterative
-// fangort frames while every other definition retains the ordinary
-// Direct/Exit path. The source pipeline selects it only for the resolved
-// Stream.withProducer owner boundary.
+// EmitMachineProject is the whole-program reference for a pre-lowered Machine
+// program: selective Machine definitions become iterative fangort frames while
+// every other definition retains the ordinary Direct/Exit path.
 func EmitMachineProject(p *core.Prog, mp *machineir.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
 	if errs := machineir.Lint(mp); len(errs) != 0 {
 		return nil, fmt.Errorf("codegen: malformed machine IR: %v", errs[0])

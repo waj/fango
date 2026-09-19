@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 
 	"github.com/waj/fango/internal/artifactstore"
-	"github.com/waj/fango/internal/build"
 )
 
 // ParsedStore is an opaque content-addressed byte store. The modules package
@@ -16,7 +15,11 @@ type ParsedStore struct {
 }
 
 func NewParsedStore(entry string) *ParsedStore {
-	local, fallback, err := build.CacheDirs(entry)
+	abs, err := filepath.Abs(entry)
+	if err != nil {
+		return &ParsedStore{}
+	}
+	local, fallback, err := cacheRoots(abs)
 	if err != nil {
 		return &ParsedStore{}
 	}

@@ -18,23 +18,24 @@ installs Machine lowering when cursor intrinsics require it. Staging uses a
 separate lint entry and lowers the exact splice operand and reachable completed
 definitions (see [metaprogramming](metaprogramming.md)).
 
-Successful batch commands also publish a compiler-fingerprinted project
-artifact after validation. Before loading the graph, a later `check`, `build`,
-or `run` revalidates the recorded graph through the filesystem provider,
-including exact path casing, bundled-name conflicts, sidecar presence, and
-content hashes. An exact match lets `check` reuse the prior success and lets
-build/run reuse the emitted Go bytes, skipping parsing through emission.
-Bundled inputs are covered by the exact compiler-executable fingerprint.
-Artifacts carry a digest of their complete payload; invalid envelopes,
-structurally invalid emissions, missing inputs, hash mismatches, and cache I/O
-errors are ordinary misses.
+Every command discovers and validates the current graph through the filesystem
+provider — exact path casing, bundled-name conflicts, sidecar presence, and
+content hashes — and then reuses artifacts one module at a time. Nothing
+outranks that: there is no whole-project success record, so no command can skip
+the graph it is about to compile. Bundled inputs are covered by the exact
+compiler-executable fingerprint. Every artifact carries a digest of its
+complete payload; invalid envelopes, structurally invalid emissions, missing
+inputs, hash mismatches, and cache I/O errors are ordinary misses.
 
-Batch compilation sessions have a test-only event observer. It records cache
-hits and misses and the parse, resolve, check, elaborate, semantic-lint,
-lowering, and emission stages with their owner. It never writes CLI output.
+Compilation sessions have a test-only event observer. It records the parse,
+resolve, check, elaborate, semantic-lint, lowering, and emission stages with
+their owner, and the checked and emitted artifact hits and misses separately
+from them, so a test can tell reuse from work. It never writes CLI output.
 
-`internal/check.Session` owns the uncached semantic path. The loader retains a
-merged AST only as a differential-test adapter; normal compilation consumes
+`internal/check` owns the semantic path, and its installer is shared: a batch
+command installs a whole entry graph, a REPL session installs its Prelude roots
+and then one prompt import increment at a time into the checker it keeps. The
+loader retains a merged AST only as a differential-test adapter; normal compilation consumes
 resolved modules in dependency-first order. Each module is checked against the
 declaration state already installed in the session, elaborated immediately,
 and semantically linted before the next module. The entry/dependency role and
@@ -125,8 +126,7 @@ Every cached state is still installed through the graph compatibility checks.
 Consequently independently cached branches cannot bypass duplicate-deriver,
 instance-overlap, or blanket-cycle validation. Batch event instrumentation
 reports `checked-cache-hit` and `checked-cache-miss` separately from actual
-`check`, `elaborate`, and `semantic-lint` work. The older exact whole-project
-shortcut remains until the module backend milestones can replace it.
+`check`, `elaborate`, and `semantic-lint` work.
 
 ## Parsing and surface lowering
 

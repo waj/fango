@@ -38,14 +38,13 @@ Scope for a first version: diagnostics, formatting, and coarse hover, as a
 
 ### Prerequisite: extract the check path
 
-`compileFileGraph` lives in `cmd/fango` and stops at the first stage that
-produces errors, so a single syntax error anywhere in the graph hides every
-type error everywhere. The
-[compilation-cache roadmap](roadmap-cache.md#shared-compilation-session) owns
-extracting the shared, provider-based session into `internal/check`, with the
-batch commands and REPL as clients. The language server should reuse that
-session. Accumulating diagnostics across failed stages remains language-server
-work; module caching does not imply error recovery or diagnostic accumulation.
+Compilation stops at the first stage that produces errors, so a single syntax
+error anywhere in the graph hides every type error everywhere. The shared
+session already exists: `internal/check` installs modules dependency-first for
+the batch commands and the REPL alike, and the language server should reuse it
+rather than growing a third path. Accumulating diagnostics across failed stages
+is the remaining language-server work; reusing checked modules does not imply
+error recovery or diagnostic accumulation.
 
 ### What a useful first version needs
 
@@ -114,10 +113,10 @@ way: it is the pre-server-start fallback and coexists with semantic tokens.
 
 ## REPL hardening
 
-Fresh-session artifact reuse and atomic installation of prompt imports belong
-to the [cache integration milestone](roadmap-cache.md#m7-integrate-fresh-repl-sessions-and-transactional-imports).
-The work below extends the session beyond that milestone; caching does not
-introduce reload or change declarations already accepted by a live session.
+Fresh-session artifact reuse and atomic installation of prompt imports are
+implemented ([REPL](design/repl.md#imports-and-resolution)). The work below
+extends the session beyond them; reusing artifacts introduces no reload and
+changes no declaration a live session has already accepted.
 
 - Add a grouped-input mechanism for multiple top-level function equations;
   today the prompt accepts only one exhaustive equation per input.
@@ -130,9 +129,9 @@ introduce reload or change declarations already accepted by a live session.
   changed modules plus their affected dependents, committing only on success.
   The checker gains owner/generation retraction for declaration tables,
   instances, and staging definitions while preserving the identities and
-  declaration cutoffs needed by existing closures. Build on the cache plan's
-  [module-state boundary](roadmap-cache.md#m3-introduce-in-memory-module-boundaries-and-explicit-summaries)
-  rather than depending on positional instance indexes; the operator
+  declaration cutoffs needed by existing closures. Build on the implemented
+  [module-state boundary](design/pipeline.md#pipeline) rather than depending on
+  positional instance indexes; the operator
   table is rebuilt from the current nodes plus the prompt's own fixity
   declarations; the prompt's import list is re-applied against the new
   interfaces and names that vanished are reported; old memo cells and

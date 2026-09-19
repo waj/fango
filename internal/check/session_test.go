@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/waj/fango/internal/core"
@@ -579,5 +580,125 @@ func TestCheckedCacheCoversNativeSidecarEntry(t *testing.T) {
 	_, events := compileEvents(t, entry, cache)
 	if events["checked-cache-hit"]["<entry>"] != 1 || events["check"]["<entry>"] != 0 {
 		t.Fatalf("native sidecar owner was not cacheable: %#v", events)
+	}
+}
+
+func TestFixityChangeReusesParsedUnitsAndRechecks(t *testing.T) {
+	d := t.TempDir()
+	ops := filepath.Join(d, "Ops.fango")
+	main := filepath.Join(d, "Main.fango")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(ops, "{-# no-prelude #-}\nmodule Ops exposing ((|+|))\n(|+|) : String -> String -> String\n(|+|) a b = a\ninfixl 6 (|+|)\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Ops exposing ((|+|))\nmain = \"a\" |+| \"b\" |+| \"c\"\n")
+	cache := newMemoryObjectCache()
+	compileEvents(t, main, cache)
+	// Only the operator table moves: the importer's own source is untouched,
+	// but the table its declarations are read under is not the same one.
+	write(ops, "{-# no-prelude #-}\nmodule Ops exposing ((|+|))\n(|+|) : String -> String -> String\n(|+|) a b = a\ninfixr 7 (|+|)\n")
+	_, events := compileEvents(t, main, cache)
+	if events["check"]["Ops"] != 1 {
+		t.Fatalf("the owner of the changed table was not rechecked: %#v", events)
+	}
+	if events["check"]["Main"] != 1 || events["checked-cache-hit"]["Main"] != 0 {
+		t.Fatalf("a checked artifact survived a graph fixity change: %#v", events)
+	}
+	if events["parse"]["Main"] != 0 {
+		t.Fatalf("an unchanged source was reparsed for a fixity change: %#v", events)
+	}
+}
+
+func TestEntriesShareDependencyArtifactsAndKeepRolesApart(t *testing.T) {
+	d := t.TempDir()
+	write := func(name, body string) string {
+		t.Helper()
+		path := filepath.Join(d, name+".fango")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	write("Shared", "{-# no-prelude #-}\nmodule Shared exposing (value)\nvalue = \"shared\"\n")
+	first := write("First", "{-# no-prelude #-}\nmodule First exposing (main)\nimport Shared\nmain = Shared.value\n")
+	second := write("Second", "{-# no-prelude #-}\nmodule Second exposing (main)\nimport Shared\nmain = Shared.value\n")
+	cache := newMemoryObjectCache()
+	compileEvents(t, first, cache)
+	_, events := compileEvents(t, second, cache)
+	if events["checked-cache-hit"]["Shared"] != 1 {
+		t.Fatalf("a second entry did not share the dependency artifact: %#v", events)
+	}
+	if events["check"]["Second"] != 1 {
+		t.Fatalf("the new entry was not checked: %#v", events)
+	}
+	// The same module in the other role is a different artifact: an entry
+	// carries entry-only obligations a dependency does not.
+	_, events = compileEvents(t, first, cache)
+	if events["checked-cache-hit"]["First"] != 1 {
+		t.Fatalf("the first entry lost its artifact to the second: %#v", events)
+	}
+	asDependency := write("Uses", "{-# no-prelude #-}\nmodule Uses exposing (main)\nimport First\nmain = First.main\n")
+	_, events = compileEvents(t, asDependency, cache)
+	if events["check"]["First"] != 1 || events["checked-cache-hit"]["First"] != 0 {
+		t.Fatalf("an entry artifact was reused for the same module as a dependency: %#v", events)
+	}
+}
+
+func TestExportedSchemeChangeInvalidatesConsumers(t *testing.T) {
+	d := t.TempDir()
+	lib := filepath.Join(d, "Lib.fango")
+	main := filepath.Join(d, "Main.fango")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (pick)\npick : String -> String -> String\npick a b = a\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.pick \"a\" \"b\"\n")
+	cache := newMemoryObjectCache()
+	compileEvents(t, main, cache)
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (pick)\npick : a -> a -> a\npick a b = a\n")
+	_, events := compileEvents(t, main, cache)
+	if events["check"]["Main"] != 1 || events["checked-cache-hit"]["Main"] != 0 {
+		t.Fatalf("an exported scheme change left its consumer cached: %#v", events)
+	}
+}
+
+// A dependency's comment edit must not make an importer's diagnostics point at
+// the positions its artifact was created under.
+func TestReusedArtifactsReportCurrentSourcePositions(t *testing.T) {
+	d := t.TempDir()
+	lib := filepath.Join(d, "Lib.fango")
+	main := filepath.Join(d, "Main.fango")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\nvalue : String\nvalue = \"one\"\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.value\n")
+	cache := newMemoryObjectCache()
+	compileEvents(t, main, cache)
+	// Lib's declaration moves down; its meaning does not.
+	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (value)\n-- a comment that shifts every span below it\n-- and another\nvalue : String\nvalue = \"one\"\n")
+	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.missing\n")
+	_, diagnostics, internalErr := (&Session{Cache: cache}).Compile(main)
+	if internalErr != nil {
+		t.Fatal(internalErr)
+	}
+	if len(diagnostics) == 0 {
+		t.Fatal("expected a diagnostic for the unknown name")
+	}
+	span := diagnostics[0].Span
+	if span.File == nil {
+		t.Fatalf("diagnostic has no source file: %#v", diagnostics[0])
+	}
+	if !strings.Contains(string(span.File.Content), "Lib.missing") {
+		t.Fatalf("diagnostic points at a stale source snapshot: %q", span.File.Name)
 	}
 }

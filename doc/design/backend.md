@@ -115,20 +115,27 @@ Go's cache reuses unchanged packages. Build copies the executable; run reuses it
 while inputs are unchanged. [Commands](../reference/commands.md) owns output
 paths and managed-directory safeguards.
 
-The source project also keeps successful batch artifacts beneath
-`.fango/cache/v1/<compiler fingerprint>/`. Artifacts use a versioned JSON
-envelope, payload digest, and atomic rename. Parsed-unit artifacts live in a
-separate kind namespace keyed by exact source hash; project artifacts contain
-the validated source manifest plus generated files for one entry/print-main
-mode. The compiler fingerprint is the SHA-256 of the running executable,
-computed once per process; both its value and any computation failure are
-stable for that process, so a failed fingerprint disables cache use. Compiler
-or schema changes select a cold namespace. Reads do not create directories. If
-source-local storage cannot be written, writes use a user-cache namespace keyed
-by the absolute source root; cache failures never become diagnostics.
-`FANGO_BUILD_DIR` affects generated build output only and never selects the
-compilation cache. The low-level parsed-artifact byte store has no dependency
-on modules, inference, or code generation; the module layer owns its codec.
+The source project keeps its artifacts beneath
+`.fango/cache/v1/<compiler fingerprint>/`, one namespace per artifact kind:
+parsed units keyed by exact source hash, checked module objects keyed as
+[pipeline](pipeline.md#pipeline) describes, and emitted Go keyed as above. Each
+uses a versioned JSON envelope, payload digest, and atomic rename, and each is
+validated independently before use. There is no whole-project artifact: every
+invocation discovers and validates the current graph, and one module-artifact
+pipeline decides what is still valid, so no command can be served a stale
+program by a shortcut that outranks its modules.
+
+The compiler fingerprint is the SHA-256 of the running executable, computed
+once per process; both its value and any computation failure are stable for
+that process, so a failed fingerprint disables cache use. Compiler or schema
+changes select a cold namespace, and artifacts an older compiler wrote are
+simply never read; `clean` removes them along with everything else. Reads do
+not create directories. If source-local storage cannot be written, writes use a
+user-cache namespace keyed by the absolute source root; cache failures never
+become diagnostics. `FANGO_BUILD_DIR` affects generated build output only and
+never selects the compilation cache. The low-level byte store has no dependency
+on modules, inference, or code generation; each layer above owns its own codec
+and validation.
 
 ## Self tail-call loops
 

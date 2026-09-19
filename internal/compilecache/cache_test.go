@@ -1,152 +1,83 @@
 package compilecache
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-
-	"github.com/waj/fango/internal/codegen"
-	"github.com/waj/fango/internal/modules"
 )
 
-func fixture(t *testing.T) (string, []modules.ManifestEntry) {
+func fixture(t *testing.T) string {
 	t.Helper()
 	d := t.TempDir()
 	entry := filepath.Join(d, "Main.fango")
-	source := []byte("main = 1\n")
-	if err := os.WriteFile(entry, source, 0o644); err != nil {
+	if err := os.WriteFile(entry, []byte("main = 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h := sha256.Sum256(source)
-	return entry, []modules.ManifestEntry{{Module: "<entry>", Path: "Main.fango", SHA256: hex.EncodeToString(h[:])}}
+	return entry
 }
 
-func localPath(t *testing.T, entry, mode string) string {
+func mustFingerprint(t *testing.T) string {
 	t.Helper()
-	ps, err := paths(entry, mode)
+	fp, err := compilerFingerprint()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ps[0]
+	return fp
 }
 
-func TestRoundTripAndInputValidation(t *testing.T) {
-	entry, inputs := fixture(t)
-	files := []codegen.File{{Path: "main.go", Data: []byte("package main\n")}}
-	Store(entry, "test", inputs, files)
-	got, manifest, ok := Load(entry, "test")
-	if !ok || string(got[0].Data) != string(files[0].Data) || len(manifest) != 1 {
-		t.Fatalf("cache miss or wrong artifact: %#v %#v %v", got, manifest, ok)
-	}
-	if err := os.WriteFile(entry, []byte("main = 2\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, ok := Load(entry, "test"); ok {
-		t.Fatal("changed source was a cache hit")
-	}
+func rootedAt(t *testing.T, local, fallback string) {
+	t.Helper()
+	old := cacheRoots
+	t.Cleanup(func() { cacheRoots = old })
+	cacheRoots = func(string) (string, string, error) { return local, fallback, nil }
 }
 
-func TestSidecarAdditionAndRemovalInvalidate(t *testing.T) {
-	entry, inputs := fixture(t)
-	Store(entry, "sidecar-add", inputs, nil)
-	native := filepath.Join(filepath.Dir(entry), "Main.native.go")
-	content := []byte("package native\n")
-	if err := os.WriteFile(native, content, 0o644); err != nil {
-		t.Fatal(err)
+func TestStoresRoundTripUnderTheCompilerNamespace(t *testing.T) {
+	entry := fixture(t)
+	local := filepath.Join(t.TempDir(), "local")
+	rootedAt(t, local, "")
+	hash := strings.Repeat("ab", 32)
+	NewParsedStore(entry).StoreParsed(hash, []byte("unit"))
+	NewModuleStore(entry).StoreObject(hash, []byte("object"))
+	NewEmissionStore(entry).Store(hash, []byte("emitted"))
+	if got, ok := NewParsedStore(entry).LoadParsed(hash); !ok || string(got) != "unit" {
+		t.Fatalf("parsed = %q, %v", got, ok)
 	}
-	if _, _, ok := Load(entry, "sidecar-add"); ok {
-		t.Fatal("new native sidecar was a cache hit")
+	if got, ok := NewModuleStore(entry).LoadObject(hash); !ok || string(got) != "object" {
+		t.Fatalf("object = %q, %v", got, ok)
 	}
-	h := sha256.Sum256(content)
-	withNative := append(append([]modules.ManifestEntry(nil), inputs...), modules.ManifestEntry{Module: "<entry>", Path: "Main.native.go", SHA256: hex.EncodeToString(h[:])})
-	Store(entry, "sidecar-remove", withNative, nil)
-	if err := os.Remove(native); err != nil {
-		t.Fatal(err)
+	if got, ok := NewEmissionStore(entry).Load(hash); !ok || string(got) != "emitted" {
+		t.Fatalf("emitted = %q, %v", got, ok)
 	}
-	if _, _, ok := Load(entry, "sidecar-remove"); ok {
-		t.Fatal("removed native sidecar was a cache hit")
+	// Every artifact kind lives beneath the running compiler's namespace, so
+	// a different compiler starts cold rather than reading these.
+	namespace := filepath.Join(local, "v1", mustFingerprint(t))
+	for _, kind := range []string{"parsed", "checked", "emitted"} {
+		if _, err := os.Stat(filepath.Join(namespace, kind)); err != nil {
+			t.Fatalf("%s artifacts are not under the compiler namespace: %v", kind, err)
+		}
 	}
 }
 
-func TestMalformedAndDamagedArtifactsAreMisses(t *testing.T) {
-	entry, inputs := fixture(t)
-	for _, tc := range []struct {
-		name, data string
-	}{
-		{"empty object", `{}`},
-		{"truncated", `{truncated`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			p := localPath(t, entry, tc.name)
-			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(p, []byte(tc.data), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			if _, _, ok := Load(entry, tc.name); ok {
-				t.Fatal("malformed artifact was a cache hit")
-			}
-		})
+func TestMalformedKeysAreRejected(t *testing.T) {
+	entry := fixture(t)
+	local := filepath.Join(t.TempDir(), "local")
+	rootedAt(t, local, "")
+	for _, key := range []string{"", "zz", strings.Repeat("ab", 31), "../escape"} {
+		NewParsedStore(entry).StoreParsed(key, []byte("unit"))
+		NewModuleStore(entry).StoreObject(key, []byte("object"))
+		NewEmissionStore(entry).Store(key, []byte("emitted"))
+		if _, ok := NewModuleStore(entry).LoadObject(key); ok {
+			t.Fatalf("key %q was accepted", key)
+		}
+		if _, ok := NewEmissionStore(entry).Load(key); ok {
+			t.Fatalf("key %q was accepted", key)
+		}
 	}
-
-	Store(entry, "damaged", inputs, []codegen.File{{Path: "main.go", Data: []byte("package main\n")}})
-	p := localPath(t, entry, "damaged")
-	b, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var a artifact
-	if err := json.Unmarshal(b, &a); err != nil {
-		t.Fatal(err)
-	}
-	a.Payload.Files[0].Data[0] ^= 1
-	b, _ = json.Marshal(a) // Deliberately retain the old payload digest.
-	if err := os.WriteFile(p, b, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, ok := Load(entry, "damaged"); ok {
-		t.Fatal("damaged payload was a cache hit")
-	}
-}
-
-func TestInvalidEmissionStructureIsMiss(t *testing.T) {
-	entry, inputs := fixture(t)
-	p := payload{Entry: mustAbs(t, entry), Mode: "emit:print-main=false", Inputs: inputs, Files: []codegen.File{{Path: "../main.go", Data: []byte("x")}}}
-	digest, _ := payloadHash(p)
-	b, _ := json.Marshal(artifact{Schema: schema, Kind: artifactKind, PayloadSHA256: digest, Payload: p})
-	path := localPath(t, entry, p.Mode)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, b, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, ok := Load(entry, p.Mode); ok {
-		t.Fatal("invalid emitted path was a cache hit")
-	}
-}
-
-func TestMissingEntryInputIsMiss(t *testing.T) {
-	entry, _ := fixture(t)
-	p := payload{Entry: mustAbs(t, entry), Mode: "check", Inputs: []modules.ManifestEntry{}, Files: []codegen.File{}}
-	digest, _ := payloadHash(p)
-	b, _ := json.Marshal(artifact{Schema: schema, Kind: artifactKind, PayloadSHA256: digest, Payload: p})
-	path := localPath(t, entry, p.Mode)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, b, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, ok := Load(entry, p.Mode); ok {
-		t.Fatal("artifact without its entry input was a cache hit")
+	if _, err := os.Stat(local); !os.IsNotExist(err) {
+		t.Fatalf("a rejected key created storage: %v", err)
 	}
 }
 
@@ -172,8 +103,8 @@ func TestFingerprintFailureIsSticky(t *testing.T) {
 }
 
 func TestReadDoesNotCreateCacheDirectories(t *testing.T) {
-	entry, _ := fixture(t)
-	if _, _, ok := Load(entry, "absent"); ok {
+	entry := fixture(t)
+	if _, ok := NewModuleStore(entry).LoadObject(strings.Repeat("cd", 32)); ok {
 		t.Fatal("unexpected hit")
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(entry), ".fango")); !os.IsNotExist(err) {
@@ -181,52 +112,28 @@ func TestReadDoesNotCreateCacheDirectories(t *testing.T) {
 	}
 }
 
-func TestStoreFallsBackWhenLocalStorageFails(t *testing.T) {
-	entry, inputs := fixture(t)
+func TestStorageFallsBackWhenLocalIsUnwritable(t *testing.T) {
+	entry := fixture(t)
 	local := filepath.Join(t.TempDir(), "local")
 	fallback := filepath.Join(t.TempDir(), "fallback")
-	oldRoots, oldFiles := cacheRoots, cacheFiles
-	t.Cleanup(func() { cacheRoots, cacheFiles = oldRoots, oldFiles })
-	cacheRoots = func(string) (string, string, error) { return local, fallback, nil }
-	localNamespace := filepath.Join(local, "v1", mustFingerprint(t))
-	if err := os.MkdirAll(localNamespace, 0o755); err != nil {
+	rootedAt(t, local, fallback)
+	if err := os.MkdirAll(local, 0o555); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(localNamespace, 0o555); err != nil {
-		t.Fatal(err)
+	t.Cleanup(func() { _ = os.Chmod(local, 0o755) })
+	key := strings.Repeat("ef", 32)
+	NewModuleStore(entry).StoreObject(key, []byte("object"))
+	if got, ok := NewModuleStore(entry).LoadObject(key); !ok || string(got) != "object" {
+		t.Fatalf("fallback artifact was not readable: %q, %v", got, ok)
 	}
-	cacheFiles.createTemp = func(dir, pattern string) (*os.File, error) {
-		if dir == localNamespace {
-			return nil, errors.New("injected read-only local cache")
-		}
-		return os.CreateTemp(dir, pattern)
-	}
-	Store(entry, "fallback", inputs, nil)
-	if _, _, ok := Load(entry, "fallback"); !ok {
-		t.Fatal("fallback artifact was not readable")
-	}
-}
-
-func TestConcurrentAtomicWriters(t *testing.T) {
-	entry, inputs := fixture(t)
-	files := []codegen.File{{Path: "main.go", Data: []byte("package main\n")}}
-	var wg sync.WaitGroup
-	for range 16 {
-		wg.Add(1)
-		go func() { defer wg.Done(); Store(entry, "writers", inputs, files) }()
-	}
-	wg.Wait()
-	if _, _, ok := Load(entry, "writers"); !ok {
-		t.Fatal("concurrent writers did not leave a valid artifact")
+	if _, err := os.Stat(filepath.Join(fallback, "v1", mustFingerprint(t), "checked", key+".json")); err != nil {
+		t.Fatalf("artifact did not land in the fallback namespace: %v", err)
 	}
 }
 
 func TestModuleStoreKeepsImmutableCandidates(t *testing.T) {
-	entry, _ := fixture(t)
-	root := filepath.Join(t.TempDir(), "module-cache")
-	oldRoots := cacheRoots
-	t.Cleanup(func() { cacheRoots = oldRoots })
-	cacheRoots = func(string) (string, string, error) { return root, "", nil }
+	entry := fixture(t)
+	rootedAt(t, filepath.Join(t.TempDir(), "module-cache"), "")
 	store := NewModuleStore(entry)
 	base := strings.Repeat("ab", 32)
 	object := strings.Repeat("cd", 32)
@@ -241,22 +148,4 @@ func TestModuleStoreKeepsImmutableCandidates(t *testing.T) {
 	if got, ok := store.LoadObject(object); !ok || string(got) != "payload" {
 		t.Fatalf("object = %q, %v", got, ok)
 	}
-}
-
-func mustAbs(t *testing.T, path string) string {
-	t.Helper()
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return abs
-}
-
-func mustFingerprint(t *testing.T) string {
-	t.Helper()
-	fp, err := compilerFingerprint()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return fp
 }

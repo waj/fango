@@ -9,7 +9,6 @@ import (
 	"github.com/waj/fango/internal/backend"
 	compilecheck "github.com/waj/fango/internal/check"
 	"github.com/waj/fango/internal/codegen"
-	"github.com/waj/fango/internal/compilecache"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/infer"
@@ -106,12 +105,6 @@ func emitProjectManifest(entry string, printMain bool, stderr io.Writer) ([]code
 }
 
 func emitProjectManifestSession(entry string, printMain bool, stderr io.Writer, session *compilationSession) ([]codegen.File, []modules.ManifestEntry, bool) {
-	mode := fmt.Sprintf("emit:print-main=%t", printMain)
-	if files, manifest, ok := compilecache.Load(entry, mode); ok {
-		session.event("cache-hit", filepath.Base(entry))
-		return files, manifest, true
-	}
-	session.event("cache-miss", filepath.Base(entry))
 	result, ok := checkGraph(entry, stderr, session)
 	if !ok {
 		return nil, nil, false
@@ -149,7 +142,6 @@ func emitProjectManifestSession(entry string, printMain bool, stderr io.Writer, 
 			codegen.File{Path: dir + "native.go", Data: data},
 			codegen.File{Path: dir + "host.go", Data: hostSource})
 	}
-	compilecache.Store(entry, mode, manifest, files)
 	return files, manifest, true
 }
 
@@ -164,15 +156,8 @@ func cmdCheckSession(args []string, stderr io.Writer, session *compilationSessio
 		usage(stderr)
 		return 2
 	}
-	if _, _, ok := compilecache.Load(args[0], "check"); ok {
-		session.event("cache-hit", filepath.Base(args[0]))
-		return 0
-	}
-	session.event("cache-miss", filepath.Base(args[0]))
-	if _, _, manifest, _, _, ok := compileFileGraphSession(args[0], stderr, session); !ok {
+	if _, _, _, _, _, ok := compileFileGraphSession(args[0], stderr, session); !ok {
 		return 1
-	} else {
-		compilecache.Store(args[0], "check", manifest, nil)
 	}
 	return 0
 }
