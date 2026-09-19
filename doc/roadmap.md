@@ -46,7 +46,10 @@ Artifact framing, the binary object encoding, and deferred stage sections are
   and nothing removes the previous one but `clean`, so a developer rebuilding
   the compiler accumulates whole namespaces. An entry program's own slots
   outlive the file when it is renamed or deleted, which is the smaller half of
-  the same question.
+  the same question — and now so do its generated package, its executable, and
+  its entry in the build directory's manifest, which also pins the modules only
+  it reached. Deciding when a program is gone would answer both, and would say
+  whether `clean` should become per-program rather than per-directory.
 - Decode artifacts in parallel. Decoding is pure and the objects are
   independent, but coordination cost is real for small graphs. `fango build
   -vv` now measures what decoding costs a build, so the question is whether a

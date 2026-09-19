@@ -39,9 +39,10 @@ program `run` is about to start.
 every argument after the source path to the program; an optional `--` is
 removed first. `check` runs
 through parsing, inference, elaboration, and Core validation without generating
-Go. `clean` removes the source file's persistent `.fango/` build and compilation
-cache artifacts, its source-root fallback compilation cache, and the legacy
-per-entry fallback namespace when present.
+Go. `clean` removes the persistent `.fango/` build and compilation cache
+artifacts of the directory the source file is in — every program there, not
+only that one — along with that directory's fallback compilation cache and the
+legacy per-entry fallback namespace when present.
 `repl` starts an interactive session whose source root is `dir`, or the
 working directory; see [REPL](repl.md).
 
@@ -51,7 +52,10 @@ there, and recompiling replaces them, so the cache grows with the modules a
 project has rather than with its edit history — and restoring a file to an
 earlier state recompiles it rather than finding what that state compiled to
 before. Entry programs in one directory share the modules they have in common
-and keep their own entry results, so alternating between them stays warm.
+and keep their own entry results, so alternating between them stays warm. The
+build directory beside it works the same way: each program is compiled and
+linked as a package of its own, so building one leaves the others' generated
+packages and executables alone.
 
 Every command discovers, parses, and validates the current source
 graph, and then reuses what is still valid: a checked module whose sources,
@@ -144,9 +148,10 @@ there is no pause to attribute:
 Discovery is one line, because nothing in it is cacheable: every command
 reparses and revalidates the whole graph, so the count is all there is to
 report. `Checking` and `Emitting` name one module each, in dependency order; an
-entry file that declares no module header is named `<entry>`. A
-build whose generated sources are all unchanged relinks nothing and prints no
-`Linking` line. `check` stops after `Checking`.
+entry file that declares no module header is named `<entry>`. A build whose
+program compiles the same Go as the binary beside it relinks nothing and prints
+no `Linking` line — including when a source edit changed nothing the Go
+depends on, such as a comment. `check` stops after `Checking`.
 
 `-vv` names the work running under each `Checking` line — elaborating, building
 stage Core, linting Core — because most of a slow module's cost falls after its
@@ -244,9 +249,13 @@ built at the workspace root, or `fango` from `PATH`.
 `build --emit-go` writes a complete Go project instead of an executable. For
 `Main.fango`, its default destination is the `Main.out` directory in the
 current working directory; `-o DIR` selects another directory. The project has
-one `go.mod`, a root `main.go`, the shared `fangort` package, and one package per
-imported Fango module beneath `modules/`. It can be compiled by running
-`go build .` inside the directory without network access. Emission is quiet on
+one `go.mod`, the shared `fangort` package, one package per imported Fango
+module beneath `modules/`, and the program itself as a package main beneath
+`entries/`, named after the source file. It can be compiled by running
+`go build ./entries/Main` inside the directory without network access. It is
+the same layout the build directory uses, which is what lets a program that
+was built export without being generated again; exporting a second program
+into one directory adds it beside the first rather than replacing it. Emission is quiet on
 success unless a [verbosity flag](#build-progress-and-statistics) asks
 otherwise; it stops before the Go toolchain, so it reports no linking stage. A
 missing, empty, or previously Fango-generated destination is

@@ -37,7 +37,7 @@ func TestExitWorkerEmitsOutcomePropagationWhileDirectWorkerStaysPlain(t *testing
 			Body: &core.Let{Name: "unused", Rhs: exit, Body: tick, Ty: b.Unit}},
 	}}
 
-	data, err := emitUnit(p, b, Unit{Name: "Main", Entry: true}, false)
+	data, err := emitUnit(p, b, Unit{Name: "Main", Program: "Main", Entry: true}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestCleanupScopeEmitsBothFamiliesWithoutAContinuation(t *testing.T) {
 	}}}
 	core.InferCaptures(p, b)
 
-	data, err := emitUnit(p, b, Unit{Name: "Main", Entry: true}, false)
+	data, err := emitUnit(p, b, Unit{Name: "Main", Program: "Main", Entry: true}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

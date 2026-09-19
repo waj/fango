@@ -7,9 +7,7 @@ package backend
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/waj/fango/internal/check"
@@ -83,7 +81,7 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 	for _, unit := range units {
 		owner := ownerLabel(unit.Name)
 		record, recorded := emissionRecord(result, unit, summaries, closure, links, printMain)
-		slot := unitSlot(entry, unit)
+		slot := unitSlot(unit)
 		if cache != nil {
 			if !recorded {
 				// An owner with nothing to compare against is emitted every
@@ -126,12 +124,12 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 }
 
 // unitSlot names the one artifact this owner keeps. The entry answers to its
-// file stem, which is also its sidecar name, because a headerless entry has no
-// module name of its own.
-func unitSlot(entry string, unit codegen.Unit) string {
+// file stem, which is also its sidecar name and the package it emits into,
+// because a headerless entry has no module name of its own. The loader spells
+// that stem once, on the unit.
+func unitSlot(unit codegen.Unit) string {
 	if unit.Entry {
-		base := filepath.Base(entry)
-		return compilecache.Slot(true, strings.TrimSuffix(base, filepath.Ext(base)))
+		return compilecache.Slot(true, unit.Program)
 	}
 	return compilecache.Slot(false, unit.Name)
 }

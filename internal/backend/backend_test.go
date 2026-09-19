@@ -47,7 +47,7 @@ func compile(t *testing.T, entry string, cache check.ObjectCache) *check.Result 
 func unitsOf(result *check.Result) []codegen.Unit {
 	units := make([]codegen.Unit, len(result.Graph.Units))
 	for i, unit := range result.Graph.Units {
-		units[i] = codegen.Unit{Name: unit.Name, Imports: unit.Imports, Entry: unit.Entry}
+		units[i] = codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry}
 	}
 	return units
 }

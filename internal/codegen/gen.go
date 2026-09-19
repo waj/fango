@@ -2,6 +2,8 @@ package codegen
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	goast "go/ast"
 	"go/format"
@@ -20,8 +22,14 @@ import (
 
 // Unit describes one Fango source module for package emission. Units must be
 // dependency-first and contain exactly one entry.
+//
+// Program is the entry file's stem, and names the package the entry emits
+// into. It is meaningless on a dependency, and it is carried on the unit rather
+// than passed alongside it so that whole-program emission and the module
+// backend agree on where the entry lands: they are compared path by path.
 type Unit struct {
 	Name    string
+	Program string
 	Imports []string
 	Entry   bool
 }
@@ -122,11 +130,13 @@ func EmitUnit(p *core.Prog, mp *machineir.Prog, b *types.Builtins, unit Unit, pr
 }
 
 // UnitPath is the generated file one unit owns, relative to the Go module
-// root. The entry module is package main at the root; dependencies live below
-// modules/ in their logical source layout.
+// root. Each entry program is a package main of its own beneath entries/, so
+// several programs from one source directory share a build tree instead of
+// overwriting each other; dependencies live below modules/ in their logical
+// source layout, where two programs that import the same module share it.
 func UnitPath(unit Unit) string {
 	if unit.Entry {
-		return "main.go"
+		return filepath.ToSlash(filepath.Join("entries", EntryLinkName(unit.Program), "main.go"))
 	}
 	return filepath.ToSlash(filepath.Join("modules", strings.ReplaceAll(unit.Name, ".", "/"), "module.go"))
 }
@@ -419,6 +429,61 @@ func nativeImportPath(name string) string { return "fangobuild/native/" + Native
 // A.B/A_dB collision a plain replacement would create.
 func NativeLinkName(name string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(name, "_", "_u"), ".", "_d")
+}
+
+// EntryLinkName is the path component an entry program's package occupies. A
+// module name is an identifier, but an entry's stem is a file name and can
+// hold anything the filesystem allows, while the package sits at
+// fangobuild/entries/<component> — and Go rejects a space, a trailing tilde
+// and digits, and the Windows device names on every platform. A stem Go would
+// take is used as it is; anything else is sanitized and disambiguated by a
+// digest of the stem it came from, which no usable stem can collide with
+// because only the escaped form contains a hyphen.
+func EntryLinkName(stem string) string {
+	if usablePathComponent(stem) && !strings.Contains(stem, "-") {
+		return stem
+	}
+	var b strings.Builder
+	for i := 0; i < len(stem); i++ {
+		c := stem[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' {
+			b.WriteByte(c)
+		}
+	}
+	name := b.String()
+	if len(name) > 24 {
+		name = name[:24]
+	}
+	if name == "" {
+		name = "entry"
+	}
+	sum := sha256.Sum256([]byte(stem))
+	return name + "-" + hex.EncodeToString(sum[:4])
+}
+
+// deviceNames are rejected as a path component by the Go tool whatever the
+// host, so a program whose file is named after one cannot use its own stem.
+var deviceNames = map[string]bool{"con": true, "prn": true, "aux": true, "nul": true,
+	"com1": true, "com2": true, "com3": true, "com4": true, "com5": true,
+	"com6": true, "com7": true, "com8": true, "com9": true,
+	"lpt1": true, "lpt2": true, "lpt3": true, "lpt4": true, "lpt5": true,
+	"lpt6": true, "lpt7": true, "lpt8": true, "lpt9": true}
+
+func usablePathComponent(name string) bool {
+	if name == "" || strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".") {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-' {
+			continue
+		}
+		return false
+	}
+	// The tool compares the part before the first dot, so Point.aux is fine
+	// and aux.Point is not.
+	head, _, _ := strings.Cut(name, ".")
+	return !deviceNames[strings.ToLower(head)]
 }
 
 func moduleImportPath(name string) string {

@@ -38,7 +38,7 @@ func TestPureFactoryHasConsumerIndependentMachineRepresentation(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatal(errs)
 	}
-	units := []Unit{{Name: "Factory"}, {Name: "Main", Imports: []string{"Factory"}, Entry: true}}
+	units := []Unit{{Name: "Factory"}, {Name: "Main", Program: "Main", Imports: []string{"Factory"}, Entry: true}}
 	files, err := EmitMachineProject(p, mp, b, units, false)
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestPureFactoryHasConsumerIndependentMachineRepresentation(t *testing.T) {
 	for _, f := range sources {
 		write(f.Path, f.Data)
 	}
-	write("factory_test.go", []byte(`package main
+	write("entries/Main/factory_test.go", []byte(`package main
 import("testing";"fangobuild/fangort")
 type pause struct {value int64; pc int}
 func(p *pause) Clear(){*p=pause{}}
@@ -99,7 +99,7 @@ func TestFactory(t *testing.T){
  e,err=m.Resume(int64(73));if err!=nil || !e.Done || e.Value!=int64(73){t.Fatalf("return: %#v %v",e,err)}
 }
 `))
-	cmd := exec.Command("go", "test", ".")
+	cmd := exec.Command("go", "test", "./entries/Main")
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		for _, f := range files {

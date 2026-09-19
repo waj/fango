@@ -106,34 +106,40 @@ func hasMain(p *core.Prog) bool {
 
 // emitProjectManifest emits the complete multi-package Go project used by
 // build, run, --emit-go, and backend structural tests. printMain makes a
-// value-typed entry print its value through the shared formatter.
-func emitProjectManifest(entry string, printMain bool, stderr io.Writer) ([]codegen.File, []modules.ManifestEntry, bool) {
+// value-typed entry print its value through the shared formatter. The program
+// it returns is the entry's stem, which names both its generated package and
+// its cached artifacts.
+func emitProjectManifest(entry string, printMain bool, stderr io.Writer) ([]codegen.File, []modules.ManifestEntry, string, bool) {
 	return emitProjectManifestSession(entry, printMain, stderr, nil)
 }
 
-func emitProjectManifestSession(entry string, printMain bool, stderr io.Writer, session *compilationSession) ([]codegen.File, []modules.ManifestEntry, bool) {
+func emitProjectManifestSession(entry string, printMain bool, stderr io.Writer, session *compilationSession) ([]codegen.File, []modules.ManifestEntry, string, bool) {
 	result, ok := checkGraph(entry, stderr, session)
 	if !ok {
-		return nil, nil, false
+		return nil, nil, "", false
 	}
 	manifest, loadedUnits, nativeSources := result.Graph.Manifest, result.Graph.Units, result.Graph.Natives
 	if !hasMain(result.Program) {
 		fmt.Fprintf(stderr, "fango: %s has no `main` — a program needs `main = ...`\n", entry)
-		return nil, nil, false
+		return nil, nil, "", false
 	}
 	units := make([]codegen.Unit, len(loadedUnits))
+	program := ""
 	for i, unit := range loadedUnits {
-		units[i] = codegen.Unit{Name: unit.Name, Imports: unit.Imports, Entry: unit.Entry}
+		units[i] = codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry}
+		if unit.Entry {
+			program = unit.Program
+		}
 	}
 	files, err := (&backend.Session{Observe: session.observer(), DisableCache: session.disableCache()}).EmitProject(entry, result, units, printMain)
 	if err != nil {
 		reportInternal(stderr, err)
-		return nil, nil, false
+		return nil, nil, "", false
 	}
 	hostSource, err := runtimefiles.NativeHost()
 	if err != nil {
 		reportInternal(stderr, err)
-		return nil, nil, false
+		return nil, nil, "", false
 	}
 	for _, native := range nativeSources {
 		data := native.Content
@@ -145,7 +151,7 @@ func emitProjectManifestSession(entry string, printMain bool, stderr io.Writer, 
 			codegen.File{Path: dir + "native.go", Data: data},
 			codegen.File{Path: dir + "host.go", Data: hostSource})
 	}
-	return files, manifest, true
+	return files, manifest, program, true
 }
 
 // cmdCheck parses and typechecks only: quiet on success (exit 0),

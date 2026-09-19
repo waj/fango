@@ -48,7 +48,7 @@ func TestMachineEmitterBuildsIterativeTypedFrame(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("machine lowering: %v", errs)
 	}
-	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Scope"}, {Name: "Main", Imports: []string{"Scope"}, Entry: true}}, false)
+	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Scope"}, {Name: "Main", Program: "Main", Imports: []string{"Scope"}, Entry: true}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestOrdinaryEmitterDoesNotAcquireMachineRuntime(t *testing.T) {
 	b := types.NewBuiltins(sup)
 	p := &core.Prog{Entry: "Main.main", Defs: []core.Def{{Name: "Main.main", Owner: "Main", Type: b.Int,
 		Body: &core.IntLit{Val: 1, Ty: b.Int}}}}
-	files, err := EmitProject(p, b, []Unit{{Name: "Main", Entry: true}}, false)
+	files, err := EmitProject(p, b, []Unit{{Name: "Main", Program: "Main", Entry: true}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestIteratorOwnerRootsMachineProducerInDirectCaller(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("machine lowering: %v", errs)
 	}
-	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Stream", Imports: []string{"Maybe", "Iterator"}}, {Name: "Main", Imports: []string{"Maybe", "Iterator", "Stream"}, Entry: true}}, false)
+	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Stream", Imports: []string{"Maybe", "Iterator"}}, {Name: "Main", Program: "Main", Imports: []string{"Maybe", "Iterator", "Stream"}, Entry: true}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestIteratorOwnerRootsMachineProducerInDirectCaller(t *testing.T) {
 	for _, file := range runtimeSources {
 		write(file.Path, file.Data)
 	}
-	write("iterator_owner_test.go", []byte("package main\n\nimport \"testing\"\n\nfunc TestIteratorOwner(t *testing.T) { main() }\n"))
+	write("entries/Main/iterator_owner_test.go", []byte("package main\n\nimport \"testing\"\n\nfunc TestIteratorOwner(t *testing.T) { main() }\n"))
 	cmd := exec.Command("go", "test", "./...")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOCACHE="+filepath.Join(dir, "gocache"))
@@ -258,7 +258,7 @@ func TestGeneratedMachineFrameExecutes(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("machine lowering: %v", errs)
 	}
-	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Scope"}, {Name: "Main", Imports: []string{"Scope"}, Entry: true}}, false)
+	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Scope"}, {Name: "Main", Program: "Main", Imports: []string{"Scope"}, Entry: true}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestGeneratedMachineFrameExecutes(t *testing.T) {
 	for _, file := range runtimeSources {
 		write(file.Path, file.Data)
 	}
-	write("machine_test.go", []byte(`package main
+	write("entries/Main/machine_test.go", []byte(`package main
 
 import (
     "testing"
@@ -366,7 +366,7 @@ func TestFixture(t *testing.T) {
     if !ok || payload != 73 { t.Fatalf("descriptor lost across suspension: %v %v", payload, ok) }
 }
 `))
-	cmd := exec.Command("go", "test", ".")
+	cmd := exec.Command("go", "test", "./entries/Main")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOCACHE="+filepath.Join(dir, "gocache"))
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -395,7 +395,7 @@ func TestMachineFramesCrossModuleThroughExportedConstructors(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("machine lowering: %v", errs)
 	}
-	units := []Unit{{Name: "Dep"}, {Name: "Main", Imports: []string{"Dep"}, Entry: true}}
+	units := []Unit{{Name: "Dep"}, {Name: "Main", Program: "Main", Imports: []string{"Dep"}, Entry: true}}
 	files, err := EmitMachineProject(p, mp, b, units, false)
 	if err != nil {
 		t.Fatal(err)
@@ -408,7 +408,7 @@ func TestMachineFramesCrossModuleThroughExportedConstructors(t *testing.T) {
 		switch file.Path {
 		case "modules/Dep/module.go":
 			dep = string(file.Data)
-		case "main.go":
+		case "entries/Main/main.go":
 			mainGo = string(file.Data)
 		}
 	}
@@ -440,7 +440,7 @@ func TestMachineFramesCrossModuleThroughExportedConstructors(t *testing.T) {
 	for _, file := range runtimeSources {
 		write(file.Path, file.Data)
 	}
-	write("machine_cross_module_test.go", []byte(`package main
+	write("entries/Main/machine_cross_module_test.go", []byte(`package main
 import (
     "testing"
     "fangobuild/fangort"
@@ -453,7 +453,7 @@ func TestCrossModuleCallback(t *testing.T) {
     if err != nil || !event.Done || event.Value != int64(31) { t.Fatalf("completion = %#v, %v", event, err) }
 }
 `))
-	cmd := exec.Command("go", "test", ".")
+	cmd := exec.Command("go", "test", "./entries/Main")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOCACHE="+filepath.Join(dir, "gocache"))
 	if output, err := cmd.CombinedOutput(); err != nil {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/waj/fango/internal/build"
+	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/modules"
 )
 
@@ -62,56 +63,63 @@ Progress goes to stderr; a compiled program's own output is untouched.
 `)
 }
 
-// compileToDir runs the pipeline for entry and leaves a ready-to-build main.go
-// in the build directory, reporting whether any input changed.
-func compileToDir(entry, dir string, stderr io.Writer, session *compilationSession, report *reporter) (changed bool, ok bool) {
+// compileToDir runs the pipeline for entry and leaves its package, the modules
+// it reaches, and the shared runtime ready to build in dir. It reports the
+// program the entry generated as, the files the Go toolchain will read for it,
+// and whether anything was written.
+func compileToDir(entry, dir string, stderr io.Writer, session *compilationSession, report *reporter) (program string, files []codegen.File, changed bool, ok bool) {
 	printMain := os.Getenv("FANGO_INTERNAL_PRINT_MAIN") == "1"
-	files, manifest, ok := emitProjectManifestSession(entry, printMain, stderr, session)
+	files, manifest, program, ok := emitProjectManifestSession(entry, printMain, stderr, session)
 	if !ok {
-		return false, false
+		return "", nil, false, false
 	}
 	syncStart := time.Now()
 	defer func() { report.phase("write + sync", syncStart) }()
 	fixed, err := build.RuntimeFiles()
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
-		return false, false
+		return "", nil, false, false
 	}
-	wrote, err := build.SyncGenerated(dir, append(files, fixed...))
+	files = append(files, fixed...)
+	compiled := append([]codegen.File(nil), files...)
+	// sources.json records what the build was made from. It rides along with
+	// the program's own files so that one sync writes and prunes everything,
+	// but it is not compiled, so it stays out of what the link is stamped on.
+	files = append(files, codegen.File{
+		Path: build.EntryDir(program) + "/sources.json",
+		Data: modules.ManifestJSON(manifest),
+	})
+	wrote, err := build.SyncGenerated(dir, program, files)
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
-		return false, false
+		return "", nil, false, false
 	}
-	manifestWrote, err := build.WriteIfChanged(filepath.Join(dir, "sources.json"), modules.ManifestJSON(manifest))
-	if err != nil {
-		fmt.Fprintf(stderr, "fango: %v\n", err)
-		return false, false
-	}
-	return wrote || manifestWrote, true
+	return program, compiled, wrote, true
 }
 
-func ensureBuilt(entry string, stderr io.Writer, session *compilationSession, report *reporter) (dir string, ok bool) {
+func ensureBuilt(entry string, stderr io.Writer, session *compilationSession, report *reporter) (dir, program string, ok bool) {
 	dir, err := build.Dir(entry)
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
-		return "", false
+		return "", "", false
 	}
-	changed, ok := compileToDir(entry, dir, stderr, session, report)
+	program, compiled, _, ok := compileToDir(entry, dir, stderr, session, report)
 	if !ok {
-		return "", false
+		return "", "", false
 	}
-	// A binary already matching unchanged sources needs no toolchain run, so
-	// a warm build reports no linking stage at all.
-	if _, statErr := os.Stat(build.BinaryPath(dir)); changed || statErr != nil {
+	// A binary already linked from exactly these files needs no toolchain run,
+	// so a warm build reports no linking stage at all.
+	if !build.Linked(dir, program, compiled) {
 		linkStart := time.Now()
-		err := build.GoBuild(dir)
+		err := build.GoBuild(dir, program)
 		report.phase("go build", linkStart)
 		if err != nil {
 			fmt.Fprintf(stderr, "%v\n", err)
-			return "", false
+			return "", "", false
 		}
+		build.RecordLink(dir, program, compiled)
 	}
-	return dir, true
+	return dir, program, true
 }
 
 // reporting registers the verbosity flags shared by the commands that compile,
@@ -156,21 +164,21 @@ func cmdBuild(args []string, _ io.Writer, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "fango: %v\n", err)
 			return 1
 		}
-		if _, ok := compileToDir(entry, dest, stderr, session, report); !ok {
+		if _, _, _, ok := compileToDir(entry, dest, stderr, session, report); !ok {
 			return 1
 		}
 		report.finish(dest)
 		return 0
 	}
-	dir, ok := ensureBuilt(entry, stderr, session, report)
+	dir, program, ok := ensureBuilt(entry, stderr, session, report)
 	if !ok {
 		return 1
 	}
 	dest := *out
 	if dest == "" {
-		dest = strings.TrimSuffix(filepath.Base(entry), ".fango")
+		dest = program
 	}
-	data, err := os.ReadFile(build.BinaryPath(dir))
+	data, err := os.ReadFile(build.BinaryPath(dir, program))
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
 		return 1
@@ -196,7 +204,7 @@ func cmdRun(args []string, stderr io.Writer) int {
 	}
 	session, report := observed()
 	args = fs.Args()
-	dir, ok := ensureBuilt(args[0], stderr, session, report)
+	dir, program, ok := ensureBuilt(args[0], stderr, session, report)
 	if !ok {
 		return 1
 	}
@@ -205,7 +213,7 @@ func cmdRun(args []string, stderr io.Writer) int {
 	if len(programArgs) > 0 && programArgs[0] == "--" {
 		programArgs = programArgs[1:]
 	}
-	code, err := build.RunBinary(dir, programArgs...)
+	code, err := build.RunBinary(dir, program, programArgs...)
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
 		return 1

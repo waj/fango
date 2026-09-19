@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/waj/fango/internal/build"
+	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/nativehost"
@@ -162,22 +163,36 @@ func TestDependencyManifestInvalidatesBuild(t *testing.T) {
 	}
 	buildDir := t.TempDir()
 	var stderr bytes.Buffer
-	changed, ok := compileToDir(entry, buildDir, &stderr, nil, nil)
+	program, compiled, changed, ok := compileToDir(entry, buildDir, &stderr, nil, nil)
 	if !ok || !changed {
 		t.Fatalf("first compile changed=%v ok=%v: %s", changed, ok, stderr.String())
 	}
-	changed, ok = compileToDir(entry, buildDir, &stderr, nil, nil)
-	if !ok || changed {
+	// Stand in for the link the driver would run here, so the rest of the
+	// test can ask what each edit does to it.
+	if err := os.MkdirAll(filepath.Join(buildDir, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(build.BinaryPath(buildDir, program), []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	build.RecordLink(buildDir, program, compiled)
+
+	if _, _, changed, ok = compileToDir(entry, buildDir, &stderr, nil, nil); !ok || changed {
 		t.Fatalf("unchanged compile changed=%v ok=%v: %s", changed, ok, stderr.String())
 	}
 	if err := os.WriteFile(dep, []byte("module Dep exposing (answer)\nanswer = 42\n-- comment-only edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	changed, ok = compileToDir(entry, buildDir, &stderr, nil, nil)
+	_, compiled, changed, ok = compileToDir(entry, buildDir, &stderr, nil, nil)
 	if !ok || !changed {
 		t.Fatalf("dependency edit changed=%v ok=%v: %s", changed, ok, stderr.String())
 	}
-	manifest, err := os.ReadFile(filepath.Join(buildDir, "sources.json"))
+	// The record of what the build was made from moved, which is what changed
+	// reports; the Go it compiles did not, so the binary still stands.
+	if !build.Linked(buildDir, program, compiled) {
+		t.Fatal("a comment-only edit forced a link")
+	}
+	manifest, err := os.ReadFile(filepath.Join(buildDir, filepath.FromSlash(build.EntryDir(program)), "sources.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +200,7 @@ func TestDependencyManifestInvalidatesBuild(t *testing.T) {
 		t.Fatalf("manifest: %s", manifest)
 	}
 	depGo := filepath.Join(buildDir, "modules", "Dep", "module.go")
-	mainGo := filepath.Join(buildDir, "main.go")
+	mainGo := filepath.Join(buildDir, filepath.FromSlash(build.EntryDir(program)), "main.go")
 	depBefore, err := os.ReadFile(depGo)
 	if err != nil {
 		t.Fatal(err)
@@ -197,8 +212,11 @@ func TestDependencyManifestInvalidatesBuild(t *testing.T) {
 	if err := os.WriteFile(dep, []byte("module Dep exposing (answer)\nanswer = 43\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if changed, ok = compileToDir(entry, buildDir, &stderr, nil, nil); !ok || !changed {
+	if _, compiled, changed, ok = compileToDir(entry, buildDir, &stderr, nil, nil); !ok || !changed {
 		t.Fatalf("dependency implementation edit changed=%v ok=%v: %s", changed, ok, stderr.String())
+	}
+	if build.Linked(buildDir, program, compiled) {
+		t.Fatal("a dependency implementation edit did not force a link")
 	}
 	depAfter, _ := os.ReadFile(depGo)
 	mainAfter, _ := os.ReadFile(mainGo)
@@ -212,11 +230,69 @@ func TestDependencyManifestInvalidatesBuild(t *testing.T) {
 	if err := os.WriteFile(entry, []byte("module Main exposing (main)\nmain = 0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if changed, ok = compileToDir(entry, buildDir, &stderr, nil, nil); !ok || !changed {
+	if _, _, changed, ok = compileToDir(entry, buildDir, &stderr, nil, nil); !ok || !changed {
 		t.Fatalf("dependency removal changed=%v ok=%v: %s", changed, ok, stderr.String())
 	}
 	if _, err := os.Stat(depGo); !os.IsNotExist(err) {
 		t.Fatalf("stale dependency file remains: %v", err)
+	}
+}
+
+// Two programs in one directory share the modules they both import, so one
+// program's build can leave the other's binary stale while that other program
+// writes nothing at all. Its link has to follow what it compiles, not what its
+// own synchronization happened to touch.
+func TestSiblingBuildInvalidatesTheOtherProgramsBinary(t *testing.T) {
+	t.Parallel()
+	src := t.TempDir()
+	shared := filepath.Join(src, "Shared.fango")
+	if err := os.WriteFile(shared, []byte("module Shared exposing (answer)\nanswer = 42\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"First", "Second"} {
+		body := "module " + name + " exposing (main)\nimport Shared\nmain = Shared.answer\n"
+		if err := os.WriteFile(filepath.Join(src, name+".fango"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	buildDir := t.TempDir()
+	var stderr bytes.Buffer
+	compile := func(name string) []codegen.File {
+		t.Helper()
+		program, compiled, _, ok := compileToDir(filepath.Join(src, name+".fango"), buildDir, &stderr, nil, nil)
+		if !ok {
+			t.Fatalf("compiling %s: %s", name, stderr.String())
+		}
+		if program != name {
+			t.Fatalf("program for %s = %q", name, program)
+		}
+		return compiled
+	}
+
+	first := compile("First")
+	if err := os.MkdirAll(filepath.Join(buildDir, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(build.BinaryPath(buildDir, "First"), []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	build.RecordLink(buildDir, "First", first)
+
+	compile("Second")
+	// Building the sibling must leave the first program's package alone.
+	if _, err := os.Stat(filepath.Join(buildDir, filepath.FromSlash(build.EntryDir("First")), "main.go")); err != nil {
+		t.Fatalf("sibling build pruned the first program: %v", err)
+	}
+	if first = compile("First"); !build.Linked(buildDir, "First", first) {
+		t.Fatal("the first program relinked although nothing it compiles moved")
+	}
+
+	if err := os.WriteFile(shared, []byte("module Shared exposing (answer)\nanswer = 43\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile("Second")
+	if first = compile("First"); build.Linked(buildDir, "First", first) {
+		t.Fatal("a shared module rebuilt by the sibling left the first program's binary standing")
 	}
 }
 
@@ -231,14 +307,14 @@ func TestEmitGoProjectDirectory(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("emit stdout = %q", stdout.String())
 	}
-	for _, rel := range []string{"go.mod", "main.go", "fangort/fangort.go", "modules/Geometry/Point/module.go", "sources.json", ".fango-generated.json"} {
+	for _, rel := range []string{"go.mod", "entries/Main/main.go", "fangort/fangort.go", "modules/Geometry/Point/module.go", "entries/Main/sources.json", ".fango-generated.json"} {
 		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(rel))); err != nil {
 			t.Errorf("missing %s: %v", rel, err)
 		}
 	}
 	// GOPROXY=off is what proves the emitted project is self-contained; the
 	// ambient build cache is shared with every other compiled leg.
-	cmd := exec.Command("go", "build", ".")
+	cmd := exec.Command("go", "build", "./entries/Main")
 	cmd.Dir = out
 	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOTOOLCHAIN=local")
 	if data, err := cmd.CombinedOutput(); err != nil {
@@ -251,7 +327,7 @@ func TestEmitGoProjectDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("go list emitted project: %v\n%s", err, listed)
 	}
-	for _, pkg := range []string{"fangobuild\n", "fangobuild/fangort\n", "fangobuild/modules/Geometry/Point\n"} {
+	for _, pkg := range []string{"fangobuild/entries/Main\n", "fangobuild/fangort\n", "fangobuild/modules/Geometry/Point\n"} {
 		if !bytes.Contains(listed, []byte(pkg)) {
 			t.Errorf("go list missing %q:\n%s", strings.TrimSpace(pkg), listed)
 		}
@@ -269,7 +345,7 @@ func TestEmitGoDefaultAndSafeDestination(t *testing.T) {
 	if code := run([]string{"build", "--emit-go", entry}, &stdout, &stderr); code != 0 {
 		t.Fatalf("default emit exit %d: %s", code, stderr.String())
 	}
-	if _, err := os.Stat(filepath.Join(work, "Main.out", "main.go")); err != nil {
+	if _, err := os.Stat(filepath.Join(work, "Main.out", "entries", "Main", "main.go")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -329,11 +405,11 @@ main() =
 `)
 	t.Setenv("FANGO_BUILD_DIR", filepath.Join(root, "build"))
 	var stderr bytes.Buffer
-	dir, ok := ensureBuilt(entry, &stderr, nil, nil)
+	dir, program, ok := ensureBuilt(entry, &stderr, nil, nil)
 	if !ok {
 		t.Fatalf("build: %s", stderr.String())
 	}
-	stdout, err := exec.Command(build.BinaryPath(dir)).Output()
+	stdout, err := exec.Command(build.BinaryPath(dir, program)).Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +417,7 @@ main() =
 	if string(stdout) != want {
 		t.Fatalf("output %q, want %q", stdout, want)
 	}
-	mainGo, err := os.ReadFile(filepath.Join(dir, "main.go"))
+	mainGo, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(build.EntryDir(program)), "main.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,11 +484,11 @@ main() = print (Hash.twice (Hash.constant (print "before")))
 	buildDir := filepath.Join(root, "build")
 	t.Setenv("FANGO_BUILD_DIR", buildDir)
 	t.Setenv("FANGO_INTERNAL_PRINT_MAIN", "1")
-	dir, ok := ensureBuilt(entry, &stderr, nil, nil)
+	dir, program, ok := ensureBuilt(entry, &stderr, nil, nil)
 	if !ok {
 		t.Fatalf("build: %s", stderr.String())
 	}
-	out, err := exec.Command(build.BinaryPath(dir)).Output()
+	out, err := exec.Command(build.BinaryPath(dir, program)).Output()
 	if err != nil || string(out) != "before\n84\n" {
 		t.Fatalf("compiled output %q, err %v", out, err)
 	}
@@ -425,13 +501,13 @@ func Twice(x int64) int64 { return x * 3 }
 func Constant() int64 { return 42 }
 func Tick() int64 { return 42 }
 `)
-	if changed, ok := compileToDir(entry, buildDir, &stderr, nil, nil); !ok || !changed {
+	if _, _, changed, ok := compileToDir(entry, buildDir, &stderr, nil, nil); !ok || !changed {
 		t.Fatalf("sidecar edit changed=%v ok=%v: %s", changed, ok, stderr.String())
 	}
-	if err := build.GoBuild(buildDir); err != nil {
+	if err := build.GoBuild(buildDir, program); err != nil {
 		t.Fatalf("rebuild: %v", err)
 	}
-	out, err = exec.Command(build.BinaryPath(dir)).Output()
+	out, err = exec.Command(build.BinaryPath(dir, program)).Output()
 	if err != nil || string(out) != "before\n126\n" {
 		t.Fatalf("rebuilt output %q, err %v", out, err)
 	}
@@ -444,7 +520,7 @@ constant _ = 42
 	if err := os.Remove(filepath.Join(root, "Hash.native.go")); err != nil {
 		t.Fatal(err)
 	}
-	if changed, ok := compileToDir(entry, buildDir, &stderr, nil, nil); !ok || !changed {
+	if _, _, changed, ok := compileToDir(entry, buildDir, &stderr, nil, nil); !ok || !changed {
 		t.Fatalf("sidecar removal changed=%v ok=%v: %s", changed, ok, stderr.String())
 	}
 	if _, err := os.Stat(filepath.Join(buildDir, "native", "Hash", "native.go")); !os.IsNotExist(err) {

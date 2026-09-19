@@ -63,8 +63,16 @@ Its balance invariant belongs to its module; it needs no compiler representation
 
 ## Module emission and build cache
 
-One generated Go module contains the entry package main, dependencies beneath
-modules/, shared fangort, and native sidecar packages. Cross-package workers,
+One generated Go module contains a package main per entry program beneath
+entries/, dependencies beneath modules/, shared fangort, and native sidecar
+packages. The build directory belongs to a source directory rather than to one
+program, as the compilation cache does, so the programs in a directory share
+the modules they have in common and keep their own entry package and binary
+rather than overwriting each other's. An entry's package is named after its
+file's stem; a stem the Go tool refuses as a path component — a space, a
+trailing tilde and digits, one of the device names it rejects on every host —
+is spelled with a sanitized name and a digest of the stem, because a program
+that compiles today has to keep compiling. Cross-package workers,
 types, constructors, dictionaries, and effect evidence use a typed exported
 internal ABI. Direct source imports remain Go edges even if unused; generated
 types may add transitive type-owner imports.
@@ -125,18 +133,31 @@ end of a warm build into one lookup per owner, and a build that reuses its
 checked objects but re-emits is several times a fully warm one.
 
 The driver writes only changed files beneath persistent .fango/build and removes
-only stale generated paths recorded in its manifest. The manifest covers the
-private module's fixed sources — its go.mod and the fangort package read from
-the library root — as well as the emitted packages and native sidecars, because
-those are equally generated and a runtime source the library root stops shipping
-has to leave with them: a stale generated module is inert, since `go build .`
-never reaches a package nothing imports, while a stale fangort file is in the
-package every generated module imports. sources.json lists logical
-names, root-relative or `<stdlib>/` paths, and SHA-256 hashes in deterministic
-dependency order. Source/graph changes trigger Go build even when Go bytes match;
-Go's cache reuses unchanged packages. Build copies the executable; run reuses it
-while inputs are unchanged. [Commands](../reference/commands.md) owns output
-paths and managed-directory safeguards.
+only stale generated paths recorded in its manifest. The manifest is in two
+parts because the two are pruned by different rules. The private module's fixed
+sources — its go.mod and the fangort package read from the library root — are
+regenerated in full by every build, so each build replaces that list and a
+runtime source the library root stops shipping leaves with it; refcounting them
+per program would keep a dropped one alive behind a program that has not
+rebuilt, and that file is in the package every generated module imports. What
+each program generated is listed under that program, and a build prunes only
+what its own program listed before and no sibling lists now, so the modules two
+programs share survive either one's build. A generated module no program
+reaches is inert — `go build` never compiles a package nothing imports — so
+leaving one costs storage and nothing else.
+
+Each program's sources.json, beside its entry package, lists logical names,
+root-relative or `<stdlib>/` paths, and SHA-256 hashes in deterministic
+dependency order: the record of what that build was made from. It does not
+decide whether to link. That is decided from a stamp beside the binary, of the
+toolchain and the files it compiles, because a program cannot tell from its own
+writes whether it needs relinking — a sibling's build can update a shared
+module and leave this program's binary stale while this program writes nothing.
+Stamping what is compiled also means a source edit that produces the same Go
+produces the same binary and does not relink. Go's cache reuses unchanged
+packages. Build copies the executable; run reuses it while inputs are
+unchanged. [Commands](../reference/commands.md) owns output paths and
+managed-directory safeguards.
 
 The source project keeps its artifacts beneath
 `.fango/cache/v1/<compiler fingerprint>/<kind>/<group>/<name>.json`, one

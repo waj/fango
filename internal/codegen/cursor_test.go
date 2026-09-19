@@ -38,7 +38,7 @@ func TestGeneratedTypedCursorAdvancement(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatal(errs)
 	}
-	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Main", Imports: []string{"Maybe", "Iterator"}, Entry: true}}, false)
+	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Main", Program: "Main", Imports: []string{"Maybe", "Iterator"}, Entry: true}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestGeneratedTypedCursorAdvancement(t *testing.T) {
 	for _, file := range runtimeSources {
 		write(file.Path, file.Data)
 	}
-	write("cursor_test.go", []byte(`package main
+	write("entries/Main/cursor_test.go", []byte(`package main
 import (
  "testing"
  "fangobuild/fangort"
@@ -86,7 +86,7 @@ func TestPulls(t *testing.T) {
  }
 }
 `))
-	cmd := exec.Command("go", "test", ".")
+	cmd := exec.Command("go", "test", "./entries/Main")
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		for _, file := range files {
@@ -105,7 +105,7 @@ func TestGeneratedCursorScopeClosesBeforeReturning(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatal(errs)
 	}
-	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Stream", Imports: []string{"Maybe", "Iterator"}}, {Name: "Main", Imports: []string{"Maybe", "Iterator", "Stream"}, Entry: true}}, false)
+	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Stream", Imports: []string{"Maybe", "Iterator"}}, {Name: "Main", Program: "Main", Imports: []string{"Maybe", "Iterator", "Stream"}, Entry: true}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestGeneratedCursorScopeClosesBeforeReturning(t *testing.T) {
 	for _, file := range sources {
 		write(file.Path, file.Data)
 	}
-	write("cursor_test.go", []byte(`package main
+	write("entries/Main/cursor_test.go", []byte(`package main
 import (
  "testing"
  "fangobuild/fangort"
@@ -154,7 +154,7 @@ func TestScope(t *testing.T) {
  }
 }
 `))
-	cmd := exec.Command("go", "test", ".")
+	cmd := exec.Command("go", "test", "./entries/Main")
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		for _, f := range files {
@@ -173,7 +173,7 @@ func TestGeneratedSynchronousCursorScope(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatal(errs)
 	}
-	units := []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Stream", Imports: []string{"Maybe", "Iterator"}}, {Name: "Main", Imports: []string{"Maybe", "Iterator", "Stream"}, Entry: true}}
+	units := []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Stream", Imports: []string{"Maybe", "Iterator"}}, {Name: "Main", Program: "Main", Imports: []string{"Maybe", "Iterator", "Stream"}, Entry: true}}
 	files, err := EmitMachineProject(p, mp, b, units, false)
 	if err != nil {
 		t.Fatal(err)
@@ -200,14 +200,14 @@ func TestGeneratedSynchronousCursorScope(t *testing.T) {
 	for _, f := range sources {
 		write(f.Path, f.Data)
 	}
-	write("cursor_test.go", []byte(`package main
+	write("entries/Main/cursor_test.go", []byte(`package main
 import("testing";m_Maybe "fangobuild/modules/Maybe")
 func TestSynchronous(t *testing.T){
  value,ok:=V_Main_dot_main.(*m_Maybe.C_Maybe_dot_Just[int64])
  if !ok || value.F0!=42 {t.Fatalf("result: %#v",V_Main_dot_main)}
 }
 `))
-	cmd := exec.Command("go", "test", ".")
+	cmd := exec.Command("go", "test", "./entries/Main")
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		for _, f := range files {

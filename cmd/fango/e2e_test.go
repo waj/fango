@@ -40,7 +40,7 @@ import (
 // fangort formatter.
 //
 // The run fixtures' compiled legs share one Go project (fixtureBatch): each
-// entry module becomes its own package under progs/, the bundled packages
+// entry module becomes its own package under entries/, the bundled packages
 // they all emit are written once, and a single `go build` produces every
 // binary. The examples and the multi-module fixtures instead go through the
 // real CLI once per differential runner; dedicated command cases cover
@@ -205,7 +205,7 @@ func emitRunFixtures() fixtureEmissions {
 		wg.Go(func() {
 			for path := range work {
 				var stderr bytes.Buffer
-				files, _, ok := emitProjectManifest(path, true, &stderr)
+				files, _, _, ok := emitProjectManifest(path, true, &stderr)
 				if !ok {
 					results <- result{path: path, err: fmt.Errorf("%s: emit failed:\n%s", path, stderr.String())}
 					continue
@@ -285,8 +285,8 @@ func buildFixtureBatch(emitted *fixtureEmissions) fixtureBatch {
 		name := strings.TrimSuffix(filepath.Base(path), ".fango")
 		for _, file := range emitted.files[path] {
 			rel := filepath.FromSlash(file.Path)
-			if file.Path == "main.go" {
-				rel = filepath.Join("progs", name, "main.go")
+			if strings.HasPrefix(file.Path, "entries/") {
+				// Each fixture's entry already has a package of its own.
 			} else if first, seen := owner[file.Path]; seen {
 				existing, err := os.ReadFile(filepath.Join(dir, rel))
 				if err != nil {
@@ -323,7 +323,7 @@ func buildFixtureBatch(emitted *fixtureEmissions) fixtureBatch {
 		b.err = err
 		return b
 	}
-	if err := build.GoBuildPackages(dir, binDir+string(filepath.Separator), "./progs/..."); err != nil {
+	if err := build.GoBuildPackages(dir, binDir+string(filepath.Separator), "./entries/..."); err != nil {
 		b.err = err
 	}
 	return b
@@ -649,11 +649,24 @@ func runErrorCase(t *testing.T, path, wantSubstr string) {
 func emittedProject(t *testing.T, path string) []codegen.File {
 	t.Helper()
 	var stderr bytes.Buffer
-	files, _, ok := emitProjectManifestSession(path, false, &stderr, &compilationSession{noCache: true})
+	files, _, _, ok := emitProjectManifestSession(path, false, &stderr, &compilationSession{noCache: true})
 	if !ok {
 		t.Fatalf("emit failed:\n%s", stderr.String())
 	}
 	return files
+}
+
+// entryFile is the generated program's own package. Its path is derived from
+// the entry file's name, so tests that want the entry ask for it by role.
+func entryFile(t *testing.T, files []codegen.File) []byte {
+	t.Helper()
+	for _, file := range files {
+		if strings.HasPrefix(file.Path, "entries/") && strings.HasSuffix(file.Path, "/main.go") {
+			return file.Data
+		}
+	}
+	t.Fatal("generated project has no entry package")
+	return nil
 }
 
 func generatedFile(t *testing.T, files []codegen.File, path string) []byte {
@@ -712,11 +725,11 @@ func TestProjectEmitDeterministicAndFormatted(t *testing.T) {
 	for _, path := range paths {
 		t.Run(filepath.Base(filepath.Dir(path))+"/"+filepath.Base(path), func(t *testing.T) {
 			var stderr bytes.Buffer
-			a, _, ok := emitProjectManifest(path, false, &stderr)
+			a, _, _, ok := emitProjectManifest(path, false, &stderr)
 			if !ok {
 				t.Fatalf("first emit failed:\n%s", stderr.String())
 			}
-			b, _, ok := emitProjectManifest(path, false, &stderr)
+			b, _, _, ok := emitProjectManifest(path, false, &stderr)
 			if !ok || len(a) != len(b) {
 				t.Fatalf("second emit failed or changed file count: %s", stderr.String())
 			}
@@ -837,7 +850,7 @@ func TestTailLoopGeneratedShape(t *testing.T) {
 	}
 	for _, tc := range cases {
 		path := filepath.Join("..", "..", "testdata", "run", tc.fixture)
-		src := generatedFile(t, emittedProject(t, path), "main.go")
+		src := entryFile(t, emittedProject(t, path))
 		file, err := goparser.ParseFile(gotoken.NewFileSet(), tc.fixture+".go", src, 0)
 		if err != nil {
 			t.Fatalf("%s: generated Go does not parse: %v", tc.fixture, err)
@@ -874,7 +887,7 @@ func TestGeneratedGoUsesImplicitConcreteUnitABI(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"explicit_unit_calls.fango", "effect_handler.fango"} {
 		path := filepath.Join("..", "..", "testdata", "run", name)
-		src := generatedFile(t, emittedProject(t, path), "main.go")
+		src := entryFile(t, emittedProject(t, path))
 		file, err := goparser.ParseFile(gotoken.NewFileSet(), path+".go", src, 0)
 		if err != nil {
 			t.Fatalf("%s: generated Go does not parse: %v", name, err)
@@ -901,7 +914,7 @@ func TestGeneratedGoUsesImplicitConcreteUnitABI(t *testing.T) {
 func TestGeneratedGoMaterializesNativeUnitOnlyInValueContext(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "mandelbrot.fango")
-	src := string(generatedFile(t, emittedProject(t, path), "main.go"))
+	src := string(entryFile(t, emittedProject(t, path)))
 	if strings.Contains(src, "n_IO.Write(\" \")\n\t\t\treturn fangort.UnitValue") {
 		t.Fatalf("statement-position IO.write unnecessarily materialized Unit:\n%s", src)
 	}
@@ -931,7 +944,7 @@ func TestBundledListUsesRuntimeRepresentationAndLocalListDoesNot(t *testing.T) {
 	}
 	// The same fixture declares its own `LocalList`, and its bracket syntax
 	// still means the bundled constructors.
-	main := string(generatedFile(t, bundled, "main.go"))
+	main := string(entryFile(t, bundled))
 	for _, want := range []string{"type T_LocalList interface", "C_Cons", "fangort.ListCons[int64]"} {
 		if !strings.Contains(main, want) {
 			t.Errorf("entry module is missing %q:\n%s", want, main)
@@ -941,7 +954,7 @@ func TestBundledListUsesRuntimeRepresentationAndLocalListDoesNot(t *testing.T) {
 	// A user type of List's exact shape, in a program that never uses the
 	// bundled one, keeps the ordinary cons lowering.
 	local := emittedProject(t, filepath.Join("..", "..", "testdata", "run", "poly_eq_nested.fango"))
-	entry := string(generatedFile(t, local, "main.go"))
+	entry := string(entryFile(t, local))
 	if !strings.Contains(entry, "interface") {
 		t.Errorf("user ADTs stopped emitting marker interfaces:\n%s", entry)
 	}

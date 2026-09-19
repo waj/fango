@@ -113,12 +113,15 @@ the direct module's declared public interface, never its dependencies. Import
 cycles are rejected with the complete cycle chain. The generated build
 directory compiles each Fango module as a separate Go package within one
 private Go module, allowing unchanged packages to use Go's build cache. It
-includes `sources.json`, containing each transitive Fango source and native
-sidecar's logical name, path, and SHA-256 hash for build invalidation. Local
-paths are relative to the source root; bundled paths begin with `<stdlib>/`.
-It records what a build was made from and drives the Go build's change
-detection; the compilation cache reuses modules one at a time on their own
-keys, which cover bundled and local sources alike.
+belongs to the directory the entry file is in rather than to one program, so
+every program there is a package main of its own and they share the modules
+they both import. Each one has a `sources.json` beside its entry package,
+containing each transitive Fango source and native sidecar's logical name,
+path, and SHA-256 hash. Local paths are relative to the source root; bundled
+paths begin with `<stdlib>/`. It records what that build was made from; what
+decides whether a program is recompiled or relinked is the compilation cache
+and the generated Go itself, module at a time, on keys that cover bundled and
+local sources alike.
 
 ## Current naming limitation
 

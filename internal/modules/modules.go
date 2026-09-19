@@ -197,8 +197,11 @@ type NativeSource struct {
 
 // Unit is one source module in dependency-first build order. Name is empty
 // for a headerless entry file; imports always contain logical named modules.
+// Program is the entry file's stem, set on the entry unit only — the same
+// string the entry's cached artifacts are named after.
 type Unit struct {
 	Name    string
+	Program string
 	Imports []string
 	Entry   bool
 }
@@ -334,7 +337,11 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 		if n.private {
 			unitName = ""
 		}
-		units = append(units, Unit{Name: unitName, Imports: explicitDependencyNames(n), Entry: name == entryName})
+		unit := Unit{Name: unitName, Imports: explicitDependencyNames(n), Entry: name == entryName}
+		if unit.Entry {
+			unit.Program = wantEntry
+		}
+		units = append(units, unit)
 	}
 	entrySymbol := "main"
 	if !private {

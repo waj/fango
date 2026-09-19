@@ -99,13 +99,14 @@ main() =
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := build.SyncGenerated(dir, append(files, fixed...)); err != nil {
+	program := strings.TrimSuffix(filepath.Base(path), ".fango")
+	if _, err := build.SyncGenerated(dir, program, append(files, fixed...)); err != nil {
 		t.Fatal(err)
 	}
-	if err := build.GoBuild(dir); err != nil {
+	if err := build.GoBuild(dir, program); err != nil {
 		t.Fatal(err)
 	}
-	compiled, status := runCompiled(t, exec.Command(build.BinaryPath(dir)), "", t.TempDir())
+	compiled, status := runCompiled(t, exec.Command(build.BinaryPath(dir, program)), "", t.TempDir())
 	if status != 0 || compiled != want {
 		t.Fatalf("compiled: status %d, %q, want %q", status, compiled, want)
 	}

@@ -56,7 +56,7 @@ func TestModuleBoundaryMatchesMergedEmission(t *testing.T) {
 
 	codeUnits := make([]codegen.Unit, len(units))
 	for i, unit := range units {
-		codeUnits[i] = codegen.Unit{Name: unit.Name, Imports: unit.Imports, Entry: unit.Entry}
+		codeUnits[i] = codegen.Unit{Name: unit.Name, Program: unit.Program, Imports: unit.Imports, Entry: unit.Entry}
 	}
 	got, err := codegen.EmitProject(modular, modularChecker.B, codeUnits, true)
 	if err != nil {

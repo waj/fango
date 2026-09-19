@@ -69,7 +69,7 @@ func TestDerivedEqAndShowForListDelegateToTheRuntime(t *testing.T) {
 		return string(data)
 	}
 	list := emit(Unit{Name: "List"})
-	emit(Unit{Name: "Main", Entry: true}) // the entry unit must still emit
+	emit(Unit{Name: "Main", Program: "Main", Entry: true}) // the entry unit must still emit
 
 	for _, c := range []struct{ where, got, want string }{
 		// The same exported names and generic signature an emitted pair has.
