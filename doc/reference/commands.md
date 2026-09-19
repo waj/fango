@@ -157,7 +157,9 @@ timed by the command itself, and time that belongs to no stage is reported as
 `other`, so the rows always reconcile with the total. Modules that arrive from
 cache defer their stage Core until some module is checked from source; the
 `stage Core` row and the count beneath the cache block are what reading it
-cost.
+cost. Each reuse count is over every module that stage covered, so a module
+whose generated code cannot be cached counts against reuse rather than
+disappearing from the ratio.
 
 `-timings json` writes the same measurements as one JSON object instead of the
 prose, for recording build cost over time. `-no-cache` ignores and publishes no

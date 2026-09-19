@@ -84,15 +84,23 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 		owner := ownerLabel(unit.Name)
 		record, recorded := emissionRecord(result, unit, summaries, closure, links, printMain)
 		slot := unitSlot(entry, unit)
-		if recorded && cache != nil {
-			lookupStart := time.Now()
-			data, read, hit := loadUnit(cache, slot, record)
-			if hit {
-				s.artifact("emitted-cache-hit", owner, lookupStart, read)
-				files = append(files, codegen.File{Path: codegen.UnitPath(unit), Data: data})
-				continue
+		if cache != nil {
+			if !recorded {
+				// An owner with nothing to compare against is emitted every
+				// build. Saying so is what keeps the reuse tally a count over
+				// every owner rather than over the ones a lookup was attempted
+				// for.
+				s.artifact("emitted-uncacheable", owner, time.Now(), 0)
+			} else {
+				lookupStart := time.Now()
+				data, read, hit := loadUnit(cache, slot, record)
+				if hit {
+					s.artifact("emitted-cache-hit", owner, lookupStart, read)
+					files = append(files, codegen.File{Path: codegen.UnitPath(unit), Data: data})
+					continue
+				}
+				s.artifact("emitted-cache-miss", owner, lookupStart, read)
 			}
-			s.artifact("emitted-cache-miss", owner, lookupStart, read)
 		}
 		unitProg := codegen.UnitProgram(result.Program, unit)
 		lowerStart := s.begin("lowering", owner)

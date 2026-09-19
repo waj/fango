@@ -95,10 +95,11 @@ main() =
 		}
 	}
 	dir := t.TempDir()
-	if _, err := build.SyncGenerated(dir, files); err != nil {
+	fixed, err := build.RuntimeFiles()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := build.Materialize(dir); err != nil {
+	if _, err := build.SyncGenerated(dir, append(files, fixed...)); err != nil {
 		t.Fatal(err)
 	}
 	if err := build.GoBuild(dir); err != nil {

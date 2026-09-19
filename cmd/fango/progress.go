@@ -148,6 +148,12 @@ var subStage = map[string]string{
 }
 
 func (r *reporter) tally(event compileevent.Event) {
+	if event.Stage == "emitted-uncacheable" {
+		// No lookup happened and none will, so this owner has no stage of its
+		// own to time — it counts only against the reuse it cannot have.
+		r.emitted.total++
+		return
+	}
 	label, known := stageLabel[event.Stage]
 	if !known {
 		return

@@ -72,12 +72,12 @@ func compileToDir(entry, dir string, stderr io.Writer, session *compilationSessi
 	}
 	syncStart := time.Now()
 	defer func() { report.phase("write + sync", syncStart) }()
-	materialized, err := build.Materialize(dir)
+	fixed, err := build.RuntimeFiles()
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
 		return false, false
 	}
-	wrote, err := build.SyncGenerated(dir, files)
+	wrote, err := build.SyncGenerated(dir, append(files, fixed...))
 	if err != nil {
 		fmt.Fprintf(stderr, "fango: %v\n", err)
 		return false, false
@@ -87,7 +87,7 @@ func compileToDir(entry, dir string, stderr io.Writer, session *compilationSessi
 		fmt.Fprintf(stderr, "fango: %v\n", err)
 		return false, false
 	}
-	return materialized || wrote || manifestWrote, true
+	return wrote || manifestWrote, true
 }
 
 func ensureBuilt(entry string, stderr io.Writer, session *compilationSession, report *reporter) (dir string, ok bool) {

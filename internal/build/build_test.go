@@ -35,6 +35,33 @@ func TestSyncGeneratedPrunesOnlyManagedSources(t *testing.T) {
 	}
 }
 
+// A runtime source the library root stops shipping must leave the build
+// directory: unlike a stale modules/ package, which `go build .` never reaches,
+// a leftover fangort file stays in the compiled package.
+func TestSyncGeneratedPrunesDroppedRuntimeSources(t *testing.T) {
+	dir := t.TempDir()
+	first := []codegen.File{
+		{Path: "main.go", Data: []byte("package main\n")},
+		{Path: "go.mod", Data: []byte(goModContent)},
+		{Path: "fangort/kept.go", Data: []byte("package fangort\n")},
+		{Path: "fangort/dropped.go", Data: []byte("package fangort\n")},
+	}
+	if changed, err := SyncGenerated(dir, first); err != nil || !changed {
+		t.Fatalf("first sync changed=%v err=%v", changed, err)
+	}
+	if changed, err := SyncGenerated(dir, first[:3]); err != nil || !changed {
+		t.Fatalf("pruning sync changed=%v err=%v", changed, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "fangort", "dropped.go")); !os.IsNotExist(err) {
+		t.Fatalf("stale runtime source remains: %v", err)
+	}
+	for _, rel := range []string{"go.mod", filepath.Join("fangort", "kept.go")} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			t.Fatalf("%s missing: %v", rel, err)
+		}
+	}
+}
+
 func TestSyncGeneratedRejectsUnsafePaths(t *testing.T) {
 	if _, err := SyncGenerated(t.TempDir(), []codegen.File{{Path: "../outside.go", Data: []byte("x")}}); err == nil {
 		t.Fatal("unsafe generated path accepted")

@@ -124,9 +124,10 @@ func ValidateExportDir(dir string) error {
 	return fmt.Errorf("refusing to replace non-empty directory %s because it is not a Fango-generated project", dir)
 }
 
-// SyncGenerated writes package sources and removes only stale files listed by
-// an earlier generated manifest. It never recursively removes an unmanaged
-// path.
+// SyncGenerated writes every file the build directory is made of — emitted
+// packages, native sidecars, and the fixed [RuntimeFiles] — and removes only
+// stale files listed by an earlier generated manifest. It never recursively
+// removes an unmanaged path.
 func SyncGenerated(dir string, files []codegen.File) (changed bool, err error) {
 	manifestPath := filepath.Join(dir, generatedManifestName)
 	var old generatedManifest
@@ -185,46 +186,28 @@ func validGeneratedSourcePath(rel string) bool {
 		return false
 	}
 	slash := filepath.ToSlash(rel)
-	return slash == "main.go" || strings.HasPrefix(slash, "modules/") && strings.HasSuffix(slash, "/module.go") ||
+	return slash == "main.go" || slash == "go.mod" ||
+		strings.HasPrefix(slash, "fangort/") && strings.HasSuffix(slash, ".go") ||
+		strings.HasPrefix(slash, "modules/") && strings.HasSuffix(slash, "/module.go") ||
 		strings.HasPrefix(slash, "native/") && (strings.HasSuffix(slash, "/native.go") || strings.HasSuffix(slash, "/host.go"))
 }
 
-// ValidateGeneratedFiles checks the structural contract of a cached emission.
-func ValidateGeneratedFiles(files []codegen.File) bool {
-	seen := make(map[string]bool, len(files))
-	hasMain := false
-	for _, file := range files {
-		rel := filepath.Clean(filepath.FromSlash(file.Path))
-		if !validGeneratedSourcePath(rel) || seen[filepath.ToSlash(rel)] || len(file.Data) == 0 {
-			return false
-		}
-		seen[filepath.ToSlash(rel)] = true
-		hasMain = hasMain || filepath.ToSlash(rel) == "main.go"
-	}
-	return hasMain
-}
-
-// Materialize ensures go.mod and the embedded fangort sources exist in dir,
-// reporting whether anything changed.
-func Materialize(dir string) (changed bool, err error) {
-	w, err := WriteIfChanged(filepath.Join(dir, "go.mod"), []byte(goModContent))
+// RuntimeFiles are the private module's fixed sources: its go.mod and the
+// fangort package read from the library root. They are generated output like
+// every other file the driver writes and go through the same manifest, so a
+// runtime source the library root stops shipping leaves the build directory
+// rather than staying in the package every generated module imports.
+func RuntimeFiles() ([]codegen.File, error) {
+	sources, err := runtimefiles.Packages("fangort")
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	changed = changed || w
-
-	files, err := runtimefiles.Packages("fangort")
-	if err != nil {
-		return changed, err
+	files := make([]codegen.File, 0, len(sources)+1)
+	files = append(files, codegen.File{Path: "go.mod", Data: []byte(goModContent)})
+	for _, source := range sources {
+		files = append(files, codegen.File{Path: source.Path, Data: source.Data})
 	}
-	for _, file := range files {
-		w, err := WriteIfChanged(filepath.Join(dir, filepath.FromSlash(file.Path)), file.Data)
-		if err != nil {
-			return changed, err
-		}
-		changed = changed || w
-	}
-	return changed, nil
+	return files, nil
 }
 
 // BinaryPath is where GoBuild leaves the compiled program.

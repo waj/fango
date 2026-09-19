@@ -307,9 +307,16 @@ func buildFixtureBatch(emitted *fixtureEmissions) fixtureBatch {
 			}
 		}
 	}
-	if _, err := build.Materialize(dir); err != nil {
+	fixed, err := build.RuntimeFiles()
+	if err != nil {
 		b.err = err
 		return b
+	}
+	for _, file := range fixed {
+		if _, err := build.WriteIfChanged(filepath.Join(dir, filepath.FromSlash(file.Path)), file.Data); err != nil {
+			b.err = err
+			return b
+		}
 	}
 	binDir := filepath.Join(dir, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {

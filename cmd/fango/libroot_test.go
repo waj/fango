@@ -164,3 +164,48 @@ func TestStdlibEditTakesEffectWithoutRebuildingTheCompiler(t *testing.T) {
 		t.Fatalf("after the edit: got %q, want %q", got, "103")
 	}
 }
+
+// A runtime source that disappears from the library root must disappear from
+// the build directory too. Generated modules the current program no longer
+// reaches are inert, because `go build .` never compiles them; a leftover
+// fangort file is in the package every generated module imports.
+func TestRemovedRuntimeSourceLeavesTheBuildDirectory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("compiles twice through the real CLI")
+	}
+	root := t.TempDir()
+	repo, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyTree(t, filepath.Join(repo, "stdlib"), filepath.Join(root, "stdlib"))
+	copyTree(t, filepath.Join(repo, "runtime"), filepath.Join(root, "runtime"))
+	spare := filepath.Join(root, "runtime", "fangort", "spare.go")
+	if err := os.WriteFile(spare, []byte("package fangort\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "Main.fango")
+	if err := os.WriteFile(entry, []byte("main = print 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	build := t.TempDir()
+	materialized := filepath.Join(build, "fangort", "spare.go")
+	if got := runWithLibrary(t, root, entry, build); got != "1" {
+		t.Fatalf("before the removal: got %q, want %q", got, "1")
+	}
+	if _, err := os.Stat(materialized); err != nil {
+		t.Fatalf("runtime source was not materialized: %v", err)
+	}
+
+	if err := os.Remove(spare); err != nil {
+		t.Fatal(err)
+	}
+	if got := runWithLibrary(t, root, entry, build); got != "1" {
+		t.Fatalf("after the removal: got %q, want %q", got, "1")
+	}
+	if _, err := os.Stat(materialized); !os.IsNotExist(err) {
+		t.Fatalf("removed runtime source remains in the build directory: %v", err)
+	}
+}
