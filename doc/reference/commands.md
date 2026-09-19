@@ -46,11 +46,19 @@ per-entry fallback namespace when present.
 working directory; see [REPL](repl.md).
 
 Compilation results are cached per module under `.fango/cache/v1/` beside the
-entry file. Every command discovers, parses, and validates the current source
+entry file. Each module keeps one checked result and one generated Go file
+there, and recompiling replaces them, so the cache grows with the modules a
+project has rather than with its edit history — and restoring a file to an
+earlier state recompiles it rather than finding what that state compiled to
+before. Entry programs in one directory share the modules they have in common
+and keep their own entry results, so alternating between them stays warm.
+
+Every command discovers, parses, and validates the current source
 graph, and then reuses what is still valid: a checked module whose sources,
 sidecar, operator table, and dependency contracts are unchanged, and generated
-Go for a module whose own implementation and every contract it links against
-are unchanged. So editing a function body recompiles its own module and relinks
+Go for a module whose own implementation and every contract it can reach
+through its dependencies are unchanged — a module elsewhere in the program that
+it cannot reach does not affect it. So editing a function body recompiles its own module and relinks
 the program, while modules that only call it keep their generated code; changing
 an exported type, instance, or calling convention recompiles the modules that
 depend on it; and editing a comment recompiles only the module it is in, while

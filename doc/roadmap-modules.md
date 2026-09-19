@@ -49,3 +49,20 @@ Core serialization is shared with the precompiled-source option above; reuse
 the implemented [module-object codec](design/pipeline.md#pipeline).
 Co-locating native values remains a separate proposal, not an implemented
 native ABI.
+
+## Scoping operator fixity to its module
+
+Fixity is [shared across a whole program](reference/syntax.md#declaring-operators):
+two modules declaring the same operator's fixity differently is an error, so a
+spelling has one precedence everywhere. The table is therefore built from every
+parsed file, and a module's checked-artifact key names the whole of it rather
+than the operators the module actually mentions. A program that declares an
+operator consequently gives every module it shares with a neighbouring program
+a different key, and the two stop sharing artifacts.
+
+The direction is to attach fixity to the operator's own declaration, so it
+travels with the declaring module's interface and reaches a consumer the way
+any other exported contract does. A module's key would then name only its own
+dependencies' contracts, and the graph-wide hash would leave it. Nothing forces
+this yet: only `Basics` declares operators in the library, so in practice the
+table is the same in every program.

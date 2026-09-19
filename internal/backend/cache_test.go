@@ -237,22 +237,102 @@ func TestUnitProgramWithholdsImportedBodies(t *testing.T) {
 // bytes as one checked from source. Nothing downstream distinguishes the two,
 // so a difference here is a decoded object that no longer describes what it
 // described when it was written — and the emission cache, which serves the
-// first run's bytes, is exactly what would hide it.
+// first run's bytes, is exactly what would hide it. The fixtures are the
+// shapes that carry identities an artifact has to restate: effect rows
+// deferred into a lambda, and resumes a handler clause names.
 func TestEmittingFromAReusedObjectMatchesEmittingFromSource(t *testing.T) {
+	for _, fixture := range []string{"stream_file.fango", "abort_effects.fango", "state_handlers.fango"} {
+		t.Run(fixture, func(t *testing.T) {
+			p := newProject(t)
+			p.entry = filepath.Join("..", "..", "testdata", "run", fixture)
+			fromSource := p.build(t)
+			// The objects stay; only the emitted artifacts go, so the second
+			// build installs every module from cache and does the backend work
+			// again.
+			p.emitted = newMemoryCache()
+			fromObjects := p.build(t)
+			if p.total("check") != 0 {
+				t.Fatalf("the second build checked from source: %#v", p.events)
+			}
+			if p.events["emission"]["<entry>"] != 1 {
+				t.Fatalf("the second build did not re-emit the entry: %#v", p.events)
+			}
+			assertSameFiles(t, "emission from a reused object", fromObjects, fromSource)
+		})
+	}
+}
+
+// An owner's bytes depend on what it can reach, not on what else happens to be
+// in the program around it. Two entry programs in one directory therefore
+// share a dependency's emitted unit, and adding an unrelated module to a
+// program does not invalidate anything already emitted for it.
+func TestUnrelatedModulesDoNotInvalidateEmittedUnits(t *testing.T) {
 	p := newProject(t)
-	// The fixture is the shape that matters: effect rows deferred into a
-	// lambda, whose identities the artifact records and installation remaps.
-	p.entry = filepath.Join("..", "..", "testdata", "run", "stream_file.fango")
-	fromSource := p.build(t)
-	// The objects stay; only the emitted artifacts go, so the second build
-	// installs every module from cache and does the backend work again.
+	p.write(t, "Shared.fango", "{-# no-prelude #-}\nmodule Shared exposing (value)\nvalue = \"shared\"\n")
+	p.write(t, "Aside.fango", "{-# no-prelude #-}\nmodule Aside exposing (pick)\npick x = x\n")
+	first := p.write(t, "First.fango", "{-# no-prelude #-}\nmodule First exposing (main)\nimport Shared\nmain = Shared.value\n")
+	second := p.write(t, "Second.fango", "{-# no-prelude #-}\nmodule Second exposing (main)\nimport Shared\nimport Aside\nmain = Aside.pick Shared.value\n")
+
+	p.entry = first
+	p.build(t)
+	p.entry = second
+	p.build(t)
+	if p.events["emitted-cache-hit"]["Shared"] != 1 || p.events["emission"]["Shared"] != 0 {
+		t.Fatalf("a second program re-emitted a dependency it shares: %#v", p.events)
+	}
+
+	// Editing the module neither program's Shared can reach leaves both alone.
+	p.write(t, "Aside.fango", "{-# no-prelude #-}\nmodule Aside exposing (pick)\npick x = again x\nagain y = y\n")
+	p.build(t)
+	if p.events["emission"]["Shared"] != 0 || p.events["emitted-cache-hit"]["Shared"] != 1 {
+		t.Fatalf("an unreachable module's edit re-emitted Shared: %#v", p.events)
+	}
+	p.entry = first
+	p.build(t)
+	if p.total("emission") != 0 {
+		t.Fatalf("the first program lost its emitted units to the second: %#v", p.events)
+	}
+}
+
+// An object must describe the body it ships with whatever identities the
+// installation it lands in happens to hand out. Building the second program
+// installs Handlers into a graph the first program's Filler is absent from, so
+// the identities it is given are not the ones its artifact was written with,
+// and lowering is what notices if the two stop agreeing.
+func TestReusedObjectsSurviveADifferentIdentityAllocation(t *testing.T) {
+	p := newProject(t)
+	p.write(t, "Handlers.fango", `module Handlers exposing (run)
+
+effect Ask
+    ask : Bool -> Int
+
+run() =
+    handle ask True + ask False of
+        ask valid -> if valid then resume 5 else resume 0
+        return total -> total
+`)
+	p.write(t, "Filler.fango", `module Filler exposing (filler)
+
+effect Note
+    note : Int -> Int
+
+filler() =
+    handle note 1 of
+        note n -> resume n
+        return total -> total
+`)
+	first := p.write(t, "First.fango", "module First exposing (main)\nimport Filler\nimport Handlers\nmain = Filler.filler() + Handlers.run()\n")
+	second := p.write(t, "Second.fango", "module Second exposing (main)\nimport Handlers\nmain = Handlers.run()\n")
+
+	p.entry = first
+	p.build(t)
+	p.entry = second
 	p.emitted = newMemoryCache()
-	fromObjects := p.build(t)
-	if p.total("check") != 0 {
-		t.Fatalf("the second build checked from source: %#v", p.events)
+	p.build(t)
+	if p.events["checked-cache-hit"]["Handlers"] != 1 {
+		t.Fatalf("the second program did not reuse Handlers: %#v", p.events)
 	}
-	if p.events["emission"]["<entry>"] != 1 {
-		t.Fatalf("the second build did not re-emit the entry: %#v", p.events)
+	if p.events["emission"]["Handlers"] != 1 {
+		t.Fatalf("the second program did not re-emit Handlers: %#v", p.events)
 	}
-	assertSameFiles(t, "emission from a reused object", fromObjects, fromSource)
 }

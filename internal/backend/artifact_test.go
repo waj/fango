@@ -7,10 +7,16 @@ import (
 	"github.com/waj/fango/internal/codegen"
 )
 
+func testRecord(path string) unitRecord {
+	return unitRecord{Schema: emissionSchema, Unit: "Lib", Path: path, Implementation: "impl", Semantic: "sem", ABI: "abi",
+		Linked: []linkedModule{{Module: "Basics", Semantic: "s", ABI: "a"}}}
+}
+
 func TestEmittedUnitRoundTripsSourceVerbatim(t *testing.T) {
 	file := codegen.File{Path: "modules/Lib/module.go", Data: []byte("package fangomod\n\nvar x = \"\xf0\x9f\x99\x82\"\n")}
-	data := encodeUnit("key", file)
-	got, ok := decodeUnit(data, "key", file.Path)
+	record := testRecord(file.Path)
+	data := encodeUnit(record, file)
+	got, ok := decodeUnit(data, record)
 	if !ok || !bytes.Equal(got, file.Data) {
 		t.Fatalf("round trip failed: %q %v", got, ok)
 	}
@@ -19,16 +25,35 @@ func TestEmittedUnitRoundTripsSourceVerbatim(t *testing.T) {
 	}
 }
 
-// The key and path an artifact was written for are part of it, so an artifact
-// reached under another identity is a miss rather than a wrong answer.
-func TestEmittedUnitAnsweringAnotherIdentityIsAMiss(t *testing.T) {
+// What an artifact was built from is part of it, so a slot holding bytes built
+// from anything else is a miss rather than a wrong answer.
+func TestEmittedUnitBuiltFromSomethingElseIsAMiss(t *testing.T) {
 	file := codegen.File{Path: "modules/Lib/module.go", Data: []byte("package fangomod\n")}
-	data := encodeUnit("key", file)
-	for _, c := range []struct{ name, key, path string }{
-		{"other key", "other", file.Path},
-		{"other path", "key", "modules/Other/module.go"},
+	record := testRecord(file.Path)
+	data := encodeUnit(record, file)
+	otherPath := testRecord("modules/Other/module.go")
+	otherOwn := testRecord(file.Path)
+	otherOwn.Implementation = "other"
+	otherLinked := testRecord(file.Path)
+	otherLinked.Linked = []linkedModule{{Module: "Basics", Semantic: "moved", ABI: "a"}}
+	extraLinked := testRecord(file.Path)
+	extraLinked.Linked = append(append([]linkedModule(nil), extraLinked.Linked...), linkedModule{Module: "List", Semantic: "s", ABI: "a"})
+	entryInputs := testRecord(file.Path)
+	entryInputs.Entry, entryInputs.EntrySymbol = true, "Main.main"
+	printMain := testRecord(file.Path)
+	printMain.PrintMain = true
+	for _, c := range []struct {
+		name string
+		want unitRecord
+	}{
+		{"another path", otherPath},
+		{"an edited owner", otherOwn},
+		{"a moved dependency contract", otherLinked},
+		{"a widened closure", extraLinked},
+		{"entry-only inputs", entryInputs},
+		{"another main form", printMain},
 	} {
-		if _, ok := decodeUnit(data, c.key, c.path); ok {
+		if _, ok := decodeUnit(data, c.want); ok {
 			t.Errorf("%s was accepted", c.name)
 		}
 	}
@@ -37,20 +62,11 @@ func TestEmittedUnitAnsweringAnotherIdentityIsAMiss(t *testing.T) {
 		wire []byte
 	}{
 		{"truncated", data[:len(data)/2]},
-		{"empty source", encodeUnit("key", codegen.File{Path: file.Path})},
+		{"empty source", encodeUnit(record, codegen.File{Path: file.Path})},
 		{"no frame", file.Data},
 	} {
-		if _, ok := decodeUnit(c.wire, "key", file.Path); ok {
+		if _, ok := decodeUnit(c.wire, record); ok {
 			t.Errorf("%s was accepted", c.name)
 		}
-	}
-}
-
-func TestUnrepresentableUnitIdentityStoresNothing(t *testing.T) {
-	if encodeUnit("key\nmore", codegen.File{Path: "a.go", Data: []byte("x")}) != nil {
-		t.Error("a key spanning lines was stored")
-	}
-	if encodeUnit("key", codegen.File{Path: "a\nb.go", Data: []byte("x")}) != nil {
-		t.Error("a path spanning lines was stored")
 	}
 }

@@ -485,6 +485,23 @@ var (
 	resumeType     = reflect.TypeOf(types.ResumeID(0))
 )
 
+// resumeID is the one mapping from a written resume identity to this
+// installation's. Both the typed identity in a body and the plain int a
+// capture flow records for a resume node go through it, so they cannot end up
+// naming different resumes.
+func (r *remapper) resumeID(old types.ResumeID) types.ResumeID {
+	if old == 0 {
+		return 0
+	}
+	n := r.resumes[old]
+	if n == 0 {
+		r.ck.ResumeGen++
+		n = r.ck.ResumeGen
+		r.resumes[old] = n
+	}
+	return n
+}
+
 func (r *remapper) rewrite(v reflect.Value) (reflect.Value, error) {
 	if !v.IsValid() {
 		return v, nil
@@ -521,18 +538,8 @@ func (r *remapper) rewrite(v reflect.Value) (reflect.Value, error) {
 		return out, nil
 	}
 	if v.Type() == resumeType {
-		old := types.ResumeID(v.Int())
-		if old == 0 {
-			return v, nil
-		}
-		n := r.resumes[old]
-		if n == 0 {
-			r.ck.ResumeGen++
-			n = r.ck.ResumeGen
-			r.resumes[old] = n
-		}
 		out := reflect.New(v.Type()).Elem()
-		out.SetInt(int64(n))
+		out.SetInt(int64(r.resumeID(types.ResumeID(v.Int()))))
 		return out, nil
 	}
 	if v.Kind() == reflect.Interface {
@@ -823,6 +830,12 @@ func (r *remapper) remapStruct(v reflect.Value) {
 			} else if r.err == nil {
 				r.err = fmt.Errorf("unknown deferred effect identity %d in capture flow", id)
 			}
+		}
+		// A resume node's Index is the resume identity it belongs to, held as
+		// a plain int. The body states the same identity in its own type, so
+		// both must go through the one mapping to keep agreeing.
+		if x.Kind == "resume" {
+			x.Index = int(r.resumeID(types.ResumeID(x.Index)))
 		}
 	case *types.CaptureRow:
 		for i, id := range x.Effects {

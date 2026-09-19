@@ -93,7 +93,12 @@ pool follows first encounter. Pointer identity and session allocation numbers ar
 installation interns builtin/imported nominal names, allocates fresh local
 nominal, type-variable, capture, scope, and resume identities, remaps template
 indices, and reconstructs stable instance cutoffs without changing positional
-parameter or evidence order.
+parameter or evidence order. Most identities carry their own type and are
+remapped wherever they appear; the exceptions are the ones a capture contract
+restates as plain integers — its effect and deferred-row identities, and the
+resume a resume node belongs to — which must go through the same mappings the
+typed occurrences do. An identity left behind names something from the run that
+wrote the artifact, and the contract stops describing the body it ships with.
 
 Interning an imported declaration reaches every copy of it, including a
 generated dictionary constructor that no name table exposes, and binds the

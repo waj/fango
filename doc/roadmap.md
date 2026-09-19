@@ -41,9 +41,12 @@ remain deferred.
 Artifact framing, the binary object encoding, and deferred stage sections are
 [implemented](design/backend.md#module-emission-and-build-cache). What remains:
 
-- Prune superseded compiler-fingerprint namespaces. Each compiler build selects
-  a cold namespace and nothing removes the previous one but `clean`, so a
-  developer rebuilding the compiler accumulates them.
+- Prune superseded namespaces. A namespace is now bounded — one artifact per
+  module, replaced in place — but each compiler build still selects a cold one
+  and nothing removes the previous one but `clean`, so a developer rebuilding
+  the compiler accumulates whole namespaces. An entry program's own slots
+  outlive the file when it is renamed or deleted, which is the smaller half of
+  the same question.
 - Decode artifacts in parallel. Decoding is pure and the objects are
   independent, but coordination cost is real for small graphs. `fango build
   -vv` now measures what decoding costs a build, so the question is whether a
@@ -134,6 +137,13 @@ generalization, preserving specialization and caller-supplied evidence. Decide
 termination for non-decreasing contexts, diagnostics, and displayed inferred
 signatures. Dict currently compares entries componentwise to avoid exposing a
 List-based equality constraint to callers.
+
+## Operator fixity scope
+
+[Modules and distribution](roadmap-modules.md#scoping-operator-fixity-to-its-module)
+proposes attaching fixity to the operator's own declaration, so a module's
+artifact key names its dependencies' contracts rather than the whole program's
+operator table. Nothing forces it while only `Basics` declares operators.
 
 ## Opaque native types
 
