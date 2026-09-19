@@ -28,12 +28,15 @@ complete payload; invalid frames, structurally invalid emissions, missing
 inputs, hash mismatches, and cache I/O errors are ordinary misses.
 
 Compilation sessions report through one event observer. It records the parse,
-resolve, check, elaborate, semantic-lint, lowering, and emission stages with
-their owner, and the checked and emitted artifact hits, misses, and stores, and
+resolve, check, elaborate, stage-snapshot, semantic-lint, lowering, and
+emission stages with their owner, and the checked and emitted artifact hits, misses, and stores, and
 the stage sections actually read, separately from them, so a caller can tell
 reuse from work. Every site reports after the work it names, so an event
 carries the elapsed time of its own stage rather than the gap to the next one,
-and artifact events carry the bytes they moved. Tests count the events; the CLI
+and artifact events carry the bytes they moved. Stages long enough to be worth
+watching also announce themselves before they run, so a caller can say what is
+running while it runs without inferring it from the previous event; a begin
+event carries no duration, and counting work means counting completions. Tests count the events; the CLI
 presents them as progress and build statistics behind its verbosity flags. An
 absent observer costs the pipeline nothing, which is what the commands install
 by default.

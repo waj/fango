@@ -41,6 +41,9 @@ type events struct {
 func newEvents() *events { return &events{counts: map[string]map[string]int{}} }
 
 func (e *events) record(event compileevent.Event) {
+	if event.Begin {
+		return
+	}
 	if e.counts[event.Stage] == nil {
 		e.counts[event.Stage] = map[string]int{}
 	}

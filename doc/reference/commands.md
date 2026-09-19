@@ -76,8 +76,11 @@ Parsing is never cached: every command reparses the whole source graph, and
 ## Build progress and statistics
 
 `build`, `run`, and `check` are silent on success by default. `-v` reports each
-module as it goes by, naming the stage as the verb and marking the ones served
-from cache:
+module as it is worked on, naming the stage as the verb and marking the ones
+served from cache. A line is printed when its work starts, so a build that
+pauses pauses beneath the line naming what it is doing; reuse is reported on
+completion instead, because a cache hit is the whole of that module's work and
+there is no pause to attribute:
 
 ```text
    Parsing  10 modules
@@ -96,7 +99,10 @@ entry file that declares no module header is named `<entry>`. A
 build whose generated sources are all unchanged relinks nothing and prints no
 `Linking` line. `check` stops after `Checking`.
 
-`-vv` adds a table of where the time went and what the cache moved. Stages that
+`-vv` names the work running under each `Checking` line — elaborating, building
+stage Core, linting Core — because most of a slow module's cost falls after its
+check, and the module line alone cannot say which part a pause belongs to. It
+then adds a table of where the time went and what the cache moved. Stages that
 belong to no module — writing the generated project, and the Go toolchain — are
 timed by the command itself, and time that belongs to no stage is reported as
 `other`, so the rows always reconcile with the total. Modules that arrive from

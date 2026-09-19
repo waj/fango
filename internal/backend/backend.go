@@ -46,6 +46,13 @@ func (s *Session) timed(stage, owner string, start time.Time) {
 	}
 }
 
+func (s *Session) begin(stage, owner string) time.Time {
+	if s == nil {
+		return time.Now()
+	}
+	return s.Observe.Begin(stage, owner)
+}
+
 // artifact reports a cache decision together with the bytes it moved.
 func (s *Session) artifact(stage, owner string, start time.Time, bytes int) {
 	if s != nil {
@@ -82,13 +89,13 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 			s.artifact("emitted-cache-miss", owner, lookupStart, read)
 		}
 		unitProg := codegen.UnitProgram(result.Program, unit)
-		lowerStart := time.Now()
+		lowerStart := s.begin("lowering", owner)
 		mp, lowerErrs := machineir.LowerUnit(unitProg, unit.Name, result.Checker.B)
 		s.timed("lowering", owner, lowerStart)
 		if len(lowerErrs) != 0 {
 			return nil, fmt.Errorf("machine lowering failed in module %s: %v", owner, lowerErrs[0])
 		}
-		emitStart := time.Now()
+		emitStart := s.begin("emission", owner)
 		file, err := codegen.EmitUnit(unitProg, mp, result.Checker.B, unit, printMain)
 		if err != nil {
 			return nil, err

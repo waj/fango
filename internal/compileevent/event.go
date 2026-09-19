@@ -15,6 +15,11 @@ type Event struct {
 	Stage string
 	// Owner is a module name, or "<entry>" for a headerless entry module.
 	Owner string
+	// Begin marks the start of a stage rather than its completion, so a
+	// caller can report what is running while it runs. A begin event
+	// carries no duration or size; the completion that follows carries
+	// both. Only stages a caller may need to announce emit one.
+	Begin bool
 	// Duration is the elapsed time of the work the stage names. It is zero
 	// for events that mark a decision rather than work.
 	Duration time.Duration
@@ -43,4 +48,11 @@ func (o Observer) Stage(stage, owner string) {
 // Timed reports a stage with the elapsed time since start.
 func (o Observer) Timed(stage, owner string, start time.Time) {
 	o.Report(Event{Stage: stage, Owner: owner, Duration: time.Since(start)})
+}
+
+// Begin announces that a stage is starting. Pair it with Timed so the stage is
+// both announced as it runs and measured when it ends.
+func (o Observer) Begin(stage, owner string) time.Time {
+	o.Report(Event{Stage: stage, Owner: owner, Begin: true})
+	return time.Now()
 }

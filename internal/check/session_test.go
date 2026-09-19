@@ -54,6 +54,11 @@ func compileEvents(t *testing.T, entry string, cache ObjectCache) (*Result, map[
 	t.Helper()
 	events := map[string]map[string]int{}
 	s := &Session{Cache: cache, Observe: func(event compileevent.Event) {
+		if event.Begin {
+			// A stage announces its start and its completion; counting
+			// work means counting completions.
+			return
+		}
 		if events[event.Stage] == nil {
 			events[event.Stage] = map[string]int{}
 		}

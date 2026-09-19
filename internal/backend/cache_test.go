@@ -62,6 +62,9 @@ func (p *project) write(t *testing.T, name, body string) string {
 }
 
 func (p *project) record(event compileevent.Event) {
+	if event.Begin {
+		return
+	}
 	if p.events[event.Stage] == nil {
 		p.events[event.Stage] = map[string]int{}
 	}

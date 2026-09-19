@@ -51,6 +51,8 @@ func (i *Installer) event(stage, owner string) { i.observe.Stage(stage, owner) }
 
 func (i *Installer) timed(stage, owner string, start time.Time) { i.observe.Timed(stage, owner, start) }
 
+func (i *Installer) begin(stage, owner string) time.Time { return i.observe.Begin(stage, owner) }
+
 // artifact reports a cache decision together with the bytes it moved.
 func (i *Installer) artifact(stage, owner string, start time.Time, bytes int) {
 	i.observe.Report(compileevent.Event{Stage: stage, Owner: owner, Duration: time.Since(start), Bytes: bytes})
@@ -129,7 +131,7 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		return nil, nil, err
 	}
 	i.stage.BeginModule(module.Name, module.NativeModule)
-	checkStart := time.Now()
+	checkStart := i.begin("check", owner)
 	checked, checkErrs := i.ck.CheckModule(module.Module, infer.ModuleOptions{Name: module.Name, Role: role, Entry: module.Entry})
 	i.timed("check", owner, checkStart)
 	if len(checkErrs) != 0 {
@@ -141,21 +143,26 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		intrinsics = append(intrinsics, name)
 	}
 	sort.Strings(intrinsics)
-	elaborateStart := time.Now()
+	elaborateStart := i.begin("elaborate", owner)
 	owned, elabErrs := elaborate.Increment(checked.Infos, checked.State.Instances, intrinsics, i.installed, i.ck)
 	i.timed("elaborate", owner, elaborateStart)
 	if len(elabErrs) != 0 {
 		return nil, elabErrs, nil
 	}
 	state := i.ck.CompleteModuleState(checked.State)
+	// Building this module's stage Core is a pass over its declarations in its
+	// own right, and for a module with many derived instances it rivals
+	// elaboration, so it answers for its own time rather than the caller's.
+	snapshotStart := i.begin("stage-snapshot", owner)
 	stageObject, stageErrs := i.stage.Snapshot()
+	i.timed("stage-snapshot", owner, snapshotStart)
 	if len(stageErrs) != 0 {
 		return nil, stageErrs, nil
 	}
 	if compatibilityErrs := infer.ValidateModuleStates(append(i.states, state)); len(compatibilityErrs) != 0 {
 		return nil, compatibilityErrs, nil
 	}
-	lintStart := time.Now()
+	lintStart := i.begin("semantic-lint", owner)
 	lintErrs := elaborate.LintProgIn(owned, i.installed, i.ck)
 	i.timed("semantic-lint", owner, lintStart)
 	if len(lintErrs) != 0 {

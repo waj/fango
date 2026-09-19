@@ -25,7 +25,7 @@ const (
 var stageOrder = []string{
 	"parse", "resolve",
 	"checked lookup", "checked store", "stage Core",
-	"check", "elaborate", "semantic-lint",
+	"check", "elaborate", "stage snapshot", "semantic-lint",
 	"emitted lookup", "emitted store", "lowering", "emission",
 	"write + sync", "go build",
 }
@@ -40,6 +40,7 @@ var stageLabel = map[string]string{
 	"checked-cache-miss":  "checked lookup",
 	"checked-cache-store": "checked store",
 	"stage-section":       "stage Core",
+	"stage-snapshot":      "stage snapshot",
 	"check":               "check",
 	"elaborate":           "elaborate",
 	"semantic-lint":       "semantic-lint",
@@ -105,7 +106,9 @@ func (r *reporter) observer() compileevent.Observer {
 }
 
 func (r *reporter) record(event compileevent.Event) {
-	r.tally(event)
+	if !event.Begin {
+		r.tally(event)
+	}
 	if event.Stage != "parse" && event.Stage != "resolve" {
 		// The loader finishes the whole graph before the first module is
 		// checked, so any later stage closes discovery.
@@ -114,18 +117,34 @@ func (r *reporter) record(event compileevent.Event) {
 	if r.level < progress || r.timing {
 		return
 	}
-	switch event.Stage {
-	case "parse":
+	// Work in progress is announced when it begins, so a build that pauses
+	// pauses under the line naming what it is doing. Reuse is announced on
+	// completion instead: a cache hit is the whole of that module's work, and
+	// there is no pause to attribute.
+	switch {
+	case event.Stage == "parse" && !event.Begin:
 		r.parsed++
-	case "checked-cache-hit":
+	case event.Stage == "checked-cache-hit":
 		r.line("Checking", event.Owner+" (from cache)")
-	case "check":
+	case event.Stage == "check" && event.Begin:
 		r.line("Checking", event.Owner)
-	case "emitted-cache-hit":
+	case event.Stage == "emitted-cache-hit":
 		r.line("Emitting", event.Owner+" (from cache)")
-	case "emission":
+	case event.Stage == "lowering" && event.Begin:
 		r.line("Emitting", event.Owner)
+	case r.level >= stats && event.Begin && subStage[event.Stage] != "":
+		// At -vv the module line alone cannot explain a long pause, because
+		// most of a module's cost falls after its check.
+		r.line("", "  "+subStage[event.Stage])
 	}
+}
+
+// subStage names the work that runs under a module's Checking line, which is
+// where a slow module spends nearly all of its time.
+var subStage = map[string]string{
+	"elaborate":      "elaborating",
+	"stage-snapshot": "building stage Core",
+	"semantic-lint":  "linting Core",
 }
 
 func (r *reporter) tally(event compileevent.Event) {
