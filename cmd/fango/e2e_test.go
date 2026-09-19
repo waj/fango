@@ -21,6 +21,7 @@ import (
 	"github.com/waj/fango/internal/build"
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/eval"
+	"github.com/waj/fango/internal/libroot"
 	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/nativehost"
 	"github.com/waj/fango/internal/natives"
@@ -130,6 +131,19 @@ func buildCLIBinary(t *testing.T, source, absSource string, b *cliBuild) string 
 }
 
 func TestMain(m *testing.M) {
+	// The suite builds the CLI into a temporary directory and runs it with
+	// working directories of its own, so neither the executable-relative
+	// install layout nor the checkout walk reaches the library this
+	// repository owns. Naming it explicitly is what every spawned command
+	// inherits, compiled fixtures and their native workers included. It is
+	// process-wide rather than per-test because this suite runs in parallel.
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "locating the Fango library: %v\n", err)
+		os.Exit(1)
+	}
+	os.Setenv(libroot.EnvRoot, root)
+
 	code := m.Run()
 	for _, dir := range []string{cliDir, batch.dir} {
 		if dir != "" {

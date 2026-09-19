@@ -1,5 +1,5 @@
-// Package runtimefiles reads the Go support sources shipped inside the Fango
-// binary and adapts their imports for a self-contained generated module.
+// Package runtimefiles reads the Go support sources shipped with the Fango
+// library and adapts their imports for a self-contained generated module.
 package runtimefiles
 
 import (
@@ -8,13 +8,12 @@ import (
 	"go/format"
 	goparser "go/parser"
 	gotoken "go/token"
-	"io/fs"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
-	fango "github.com/waj/fango"
+	"github.com/waj/fango/internal/libroot"
 )
 
 const repositoryRuntime = "github.com/waj/fango/runtime/"
@@ -29,24 +28,20 @@ type File struct {
 func Packages(names ...string) ([]File, error) {
 	var files []File
 	for _, name := range names {
-		entries, err := fs.ReadDir(fango.RuntimeFS, "runtime/"+name)
+		rels, err := libroot.RuntimePackage(name)
 		if err != nil {
 			return nil, err
 		}
-		for _, entry := range entries {
-			if entry.IsDir() || strings.HasSuffix(entry.Name(), "_test.go") {
-				continue
-			}
-			path := "runtime/" + name + "/" + entry.Name()
-			data, err := fs.ReadFile(fango.RuntimeFS, path)
+		for _, rel := range rels {
+			data, err := libroot.ReadRuntime(rel)
 			if err != nil {
 				return nil, err
 			}
-			data, err = forGeneratedModule(path, data)
+			data, err = forGeneratedModule("runtime/"+rel, data)
 			if err != nil {
 				return nil, err
 			}
-			files = append(files, File{Path: filepath.ToSlash(filepath.Join(name, entry.Name())), Data: data})
+			files = append(files, File{Path: filepath.ToSlash(rel), Data: data})
 		}
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
@@ -56,12 +51,12 @@ func Packages(names ...string) ([]File, error) {
 // NativeHost returns the package-local host binding compiled beside every
 // native sidecar.
 func NativeHost() ([]byte, error) {
-	const path = "stdlib/native_support.go"
-	data, err := fs.ReadFile(fango.StdlibFS, path)
+	const rel = "native_support.go"
+	data, err := libroot.ReadStdlib(rel)
 	if err != nil {
 		return nil, err
 	}
-	return forGeneratedModule(path, data)
+	return forGeneratedModule("stdlib/"+rel, data)
 }
 
 func forGeneratedModule(path string, source []byte) ([]byte, error) {
