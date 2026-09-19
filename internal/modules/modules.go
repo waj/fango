@@ -112,12 +112,13 @@ type ManifestEntry struct {
 }
 
 type Result struct {
-	Module   *ast.Module
-	Entry    string
-	Manifest []ManifestEntry
-	Units    []Unit
-	Fixity   fixity.Table
-	Natives  []NativeSource
+	Module     *ast.Module
+	Entry      string
+	FixityHash string
+	Manifest   []ManifestEntry
+	Units      []Unit
+	Fixity     fixity.Table
+	Natives    []NativeSource
 }
 
 type NativeSource struct {
@@ -208,6 +209,8 @@ type node struct {
 	name, path   string
 	content      []byte
 	mod          *ast.Module
+	parsed       *ParsedUnit
+	sourceHash   string
 	iface        *iface
 	private      bool
 	bundled      bool
@@ -235,11 +238,22 @@ func newIface() *iface {
 // Load uses the entry file's directory as the sole source root and returns a
 // dependency-first merged surface program with canonical top-level names.
 func Load(entry string) (*Result, []diag.Error) {
-	return LoadObserved(entry, nil)
+	return LoadWithOptions(entry, LoadOptions{})
 }
 
 // LoadObserved is Load with per-module parse and resolve notifications.
 func LoadObserved(entry string, observe StageObserver) (*Result, []diag.Error) {
+	return LoadWithOptions(entry, LoadOptions{Observe: observe})
+}
+
+type LoadOptions struct {
+	Observe StageObserver
+	Parsed  ParsedCache
+}
+
+// LoadWithOptions loads a batch graph with optional parsed-unit persistence
+// and test instrumentation.
+func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) {
 	abs, err := filepath.Abs(entry)
 	if err != nil {
 		return nil, []diag.Error{{Title: "SOURCE ERROR", Body: err.Error()}}
@@ -250,19 +264,21 @@ func LoadObserved(entry string, observe StageObserver) (*Result, []diag.Error) {
 	}
 	root := filepath.Dir(abs)
 	f := source.NewFile(filepath.Base(abs), content)
-	m, errs := parse(f)
+	parsed, hit, errs := parseUnit(f, options.Parsed)
 	if len(errs) > 0 {
 		return nil, errs
 	}
-	entryName, private := "<entry>", m.Header == nil
+	m := parsed.mod
+	entryName, private := "<entry>", !parsed.hasHeader
 	if !private {
-		entryName = m.Header.Name
+		entryName = parsed.header
 	}
-	if observe != nil {
-		observe("parse", entryName)
+	if options.Observe != nil && !hit {
+		options.Observe("parse", entryName)
 	}
 	g := newGraph(FSProvider{Root: root})
-	g.observe = observe
+	g.observe = options.Observe
+	g.parsed = options.Parsed
 	if !private {
 		if path, _, bundleErr := g.bundled.Source(entryName); bundleErr == nil {
 			return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; local modules cannot use bundled names.", entryName, path)}
@@ -272,7 +288,7 @@ func LoadObserved(entry string, observe StageObserver) (*Result, []diag.Error) {
 	if !private && m.Header.Name != wantEntry {
 		return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "MODULE/PATH MISMATCH", "The entry file `%s` must declare module `%s`, but declares `%s`.", filepath.Base(abs), wantEntry, m.Header.Name)}
 	}
-	rootNode := &node{name: entryName, path: filepath.Base(abs), content: content, mod: m, private: private, deps: implicitDeps(m, preludeDeps(m, entryName), entryName), nativeModule: wantEntry}
+	rootNode := &node{name: entryName, path: filepath.Base(abs), content: content, mod: m, parsed: parsed, sourceHash: hashBytes(content), private: private, deps: parsedDependencies(parsed, entryName), nativeModule: wantEntry}
 	rootNativePath := wantEntry + ".native.go"
 	if nb, ne := os.ReadFile(filepath.Join(root, rootNativePath)); ne == nil {
 		rootNode.nativePath, rootNode.native = rootNativePath, nb
@@ -299,8 +315,7 @@ func LoadObserved(entry string, observe StageObserver) (*Result, []diag.Error) {
 	var natives []NativeSource
 	for _, name := range order {
 		n := g.nodes[name]
-		h := sha256.Sum256(n.content)
-		manifest = append(manifest, ManifestEntry{Module: name, Path: n.path, SHA256: hex.EncodeToString(h[:])})
+		manifest = append(manifest, ManifestEntry{Module: name, Path: n.path, SHA256: n.sourceHash})
 		if n.native != nil {
 			nh := sha256.Sum256(n.native)
 			manifest = append(manifest, ManifestEntry{Module: name, Path: n.nativePath, SHA256: hex.EncodeToString(nh[:])})
@@ -322,7 +337,34 @@ func LoadObserved(entry string, observe StageObserver) (*Result, []diag.Error) {
 	if !private {
 		entrySymbol = canonical(entryName, "main")
 	}
-	return &Result{Module: merged, Entry: entrySymbol, Manifest: manifest, Units: units, Fixity: g.fixities, Natives: natives}, nil
+	return &Result{Module: merged, Entry: entrySymbol, FixityHash: fixity.Hash(g.fixities), Manifest: manifest, Units: units, Fixity: g.fixities, Natives: natives}, nil
+}
+
+func parseUnit(f *source.File, cache ParsedCache) (*ParsedUnit, bool, []diag.Error) {
+	hash := hashBytes(f.Content)
+	if cache != nil {
+		if data, ok := cache.LoadParsed(hash); ok {
+			if unit, err := decodeParsed(data, hash, f); err == nil {
+				return unit, true, nil
+			}
+		}
+	}
+	m, errs := parse(f)
+	if len(errs) > 0 {
+		return nil, false, errs
+	}
+	unit := newParsedUnit(m)
+	if cache != nil {
+		if data, err := encodeParsed(unit, hash); err == nil {
+			cache.StoreParsed(hash, data)
+		}
+	}
+	return unit, false, nil
+}
+
+func hashBytes(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
 }
 
 // PreludeModule declares the default scope. It holds nothing but imports,
@@ -351,29 +393,21 @@ const ListModule = "List"
 // TupleModule owns the Pair/Triple types and constructors used by `(a, b)`.
 const TupleModule = "Tuple"
 
-// preludeDeps seeds a module's dependency list with the prelude, unless the
-// module opted out. Depending on Prelude rather than on the modules it
-// imports is enough for instance visibility, which is already transitive.
-func preludeDeps(m *ast.Module, self string) []string {
-	if m.NoPrelude || self == PreludeModule {
-		return nil
+func parsedDependencies(u *ParsedUnit, self string) []string {
+	var deps []string
+	if !u.noPrelude && self != PreludeModule {
+		deps = append(deps, PreludeModule)
 	}
-	return []string{PreludeModule}
-}
-
-// implicitDeps adds the bundled modules a file needs because of the syntax it
-// used rather than because it imported them.
-func implicitDeps(m *ast.Module, deps []string, self string) []string {
-	if m.UsesStaging && self != MetaModule {
+	if u.staging && self != MetaModule {
 		deps = addDep(deps, MetaModule)
 	}
-	if self != DeriveModule && usesDeriving(m) {
+	if self != DeriveModule && u.deriving {
 		deps = addDep(deps, DeriveModule)
 	}
-	if m.UsesLists && self != ListModule {
+	if u.lists && self != ListModule {
 		deps = addDep(deps, ListModule)
 	}
-	if m.UsesTuples && self != TupleModule {
+	if u.tuples && self != TupleModule {
 		deps = addDep(deps, TupleModule)
 	}
 	return deps

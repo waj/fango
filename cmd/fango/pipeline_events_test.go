@@ -51,3 +51,27 @@ func TestCompilationSessionStageEvents(t *testing.T) {
 		t.Fatalf("cached events = %#v", events)
 	}
 }
+
+func TestRepeatedDiscoveryUsesPersistentParsedUnits(t *testing.T) {
+	d := t.TempDir()
+	entry := filepath.Join(d, "Main.fango")
+	if err := os.WriteFile(entry, []byte("main = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	countParses := func() int {
+		count := 0
+		session := &compilationSession{observe: func(event stageEvent) {
+			if event.Stage == "parse" {
+				count++
+			}
+		}}
+		var stderr bytes.Buffer
+		if _, _, _, _, _, ok := compileFileGraphSession(entry, &stderr, session); !ok {
+			t.Fatalf("compile failed: %s", stderr.String())
+		}
+		return count
+	}
+	if first, second := countParses(), countParses(); first == 0 || second != 0 {
+		t.Fatalf("parse counts = %d then %d", first, second)
+	}
+}

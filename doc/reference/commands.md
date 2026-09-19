@@ -46,12 +46,16 @@ Successful `check`, `build`, and `run` results are cached under
 `.fango/cache/v1/` beside the entry file. If every previously discovered local
 source and native sidecar still has the same content and discovery still finds
 the same exact paths, an unchanged command can skip source loading and
-compilation. When that directory cannot be written, artifacts use a shared
-user-cache namespace for the absolute source root. The cache is transparent:
-corrupt, incompatible, or unwritable entries are ignored and rebuilt, and
-there is no status or disable flag. `FANGO_BUILD_DIR` redirects generated build
-output, not this cache. Distinct compiler executables and build modes use
-distinct entries. `fmt` always parses its requested input and is not cached.
+compilation. Successful individual parses are also cached by exact source
+content, so unchanged files can skip lexing and parsing even after another file
+changes or a later compiler phase fails. Discovery and path validation still
+run on every command. When the source-local cache cannot be written, artifacts
+use a shared user-cache namespace for the absolute source root. The cache is
+transparent: corrupt, incompatible, or unwritable entries are ignored and
+rebuilt, and there is no status or disable flag. `FANGO_BUILD_DIR` redirects
+generated build output, not this cache. Distinct compiler executables and build
+modes use distinct entries. `fmt` always parses its requested input and is not
+cached.
 
 ## Formatting
 

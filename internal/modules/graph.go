@@ -33,6 +33,7 @@ type Graph struct {
 	// one place.
 	fixities fixity.Table
 	observe  StageObserver
+	parsed   ParsedCache
 }
 
 // Increment is what one import adds to a graph: the newly loaded modules in
@@ -160,21 +161,22 @@ func (g *Graph) load(pending map[string]*node, name string, at source.Span) []di
 		return []diag.Error{diag.Errorf(at, "MISSING MODULE", "I cannot find module `%s`; expected `%s` beneath the entry directory.", name, path)}
 	}
 	mf := source.NewFile(path, b)
-	mm, errs := parse(mf)
+	unit, hit, errs := parseUnit(mf, g.parsed)
 	if len(errs) > 0 {
 		return errs
 	}
-	if mm.Header == nil {
+	mm := unit.mod
+	if !unit.hasHeader {
 		return []diag.Error{diag.Errorf(at, "MISSING MODULE HEADER", "Imported file `%s` must declare `module %s exposing (...)`.", path, name)}
 	}
-	if mm.Header.Name != name {
-		return []diag.Error{diag.Errorf(mm.Header.NameSpan, "MODULE/PATH MISMATCH", "File `%s` must declare module `%s`, but declares `%s`.", path, name, mm.Header.Name)}
+	if unit.header != name {
+		return []diag.Error{diag.Errorf(unit.headerSp, "MODULE/PATH MISMATCH", "File `%s` must declare module `%s`, but declares `%s`.", path, name, unit.header)}
 	}
-	if g.observe != nil {
+	if g.observe != nil && !hit {
 		g.observe("parse", name)
 	}
-	n := &node{name: name, path: path, content: b, mod: mm, bundled: bundled, nativeModule: name}
-	n.deps = implicitDeps(mm, preludeDeps(mm, name), name)
+	n := &node{name: name, path: path, content: b, mod: mm, parsed: unit, sourceHash: hashBytes(b), bundled: bundled, nativeModule: name}
+	n.deps = parsedDependencies(unit, name)
 	var np string
 	var nb []byte
 	var ne error
@@ -194,8 +196,8 @@ func (g *Graph) load(pending map[string]*node, name string, at source.Span) []di
 // collecting every diagnostic rather than stopping at the first.
 func (g *Graph) loadDeps(pending map[string]*node, n *node, at source.Span) []diag.Error {
 	var errs []diag.Error
-	for _, im := range n.mod.Imports {
-		errs = append(errs, g.load(pending, im.Module, im.ModuleSpan)...)
+	for _, im := range n.parsed.imports {
+		errs = append(errs, g.load(pending, im.module, im.sp)...)
 	}
 	for _, dep := range n.deps {
 		errs = append(errs, g.load(pending, dep, at)...)
@@ -203,10 +205,19 @@ func (g *Graph) loadDeps(pending map[string]*node, n *node, at source.Span) []di
 	return errs
 }
 
-// complete validates, orders, and resolves the pending nodes against the
-// graph, then commits them. Nothing is committed on failure: the operator
-// table is extended on a copy, and the pending ASTs are simply dropped.
+// complete keeps discovery, graph validation, and per-module resolution as
+// explicit phases. Nothing is committed on failure.
 func (g *Graph) complete(pending map[string]*node) ([]string, []diag.Error) {
+	names, fixities, errs := g.validatePending(pending)
+	if len(errs) > 0 {
+		return nil, errs
+	}
+	return g.resolvePending(pending, names, fixities)
+}
+
+// validatePending checks the complete discovered graph and builds its
+// effective fixity table before any AST is rewritten or name-resolved.
+func (g *Graph) validatePending(pending map[string]*node) ([]string, fixity.Table, []diag.Error) {
 	names := make([]string, 0, len(pending))
 	for name := range pending {
 		names = append(names, name)
@@ -217,10 +228,10 @@ func (g *Graph) complete(pending map[string]*node) ([]string, []diag.Error) {
 		errs = append(errs, validateModuleDecls(pending[name])...)
 	}
 	if len(errs) > 0 {
-		return nil, errs
+		return nil, nil, errs
 	}
 	if errs := detectCycles(pending, names); len(errs) > 0 {
-		return nil, errs
+		return nil, nil, errs
 	}
 
 	// Fixity is graph-wide, so the table needs every parsed file; the
@@ -233,8 +244,15 @@ func (g *Graph) complete(pending map[string]*node) ([]string, []diag.Error) {
 		errs = append(errs, fixities.Collect(pending[name].mod.Decls)...)
 	}
 	if len(errs) > 0 {
-		return nil, errs
+		return nil, nil, errs
 	}
+	return names, fixities, nil
+}
+
+// resolvePending rewrites and resolves one fresh parsed tree at a time against
+// the already validated graph-wide fixity and interface context.
+func (g *Graph) resolvePending(pending map[string]*node, names []string, fixities fixity.Table) ([]string, []diag.Error) {
+	var errs []diag.Error
 	for _, name := range names {
 		errs = append(errs, fixities.Resolve(pending[name].mod)...)
 	}

@@ -153,41 +153,9 @@ semantic boundary without persistent checked-object reuse; M4 makes that
 boundary serializable; M5 enables persistence. Do not substitute whole-project
 cache hits for any milestone's module-level acceptance tests.
 
-### M2: add the parsed-unit codec and separate graph discovery
-
-Starting points are `modules.Graph`, `modules.Load`, the parser,
-and graph completion's fixity/interface/resolution work.
-
-Required work:
-
-- Split graph loading into source discovery, graph validation, and per-module
-  resolution. The existing graph completion method combines these operations.
-- Serialize the full unresolved AST before fixity rewriting or name
-  canonicalization.
-- Derive discovery metadata from the parser result once and retain it in
-  `ParsedUnit`; do not add a separate approximate header parser.
-- Decode a fresh AST for each resolution/check attempt. Cached trees must
-  never accumulate mutations from resolution, splices, or inference.
-- Keep provider/path/header/reserved-name checks active on every discovery,
-  including parsed hits.
-- Collect fixities from the entire reachable graph before resolving any
-  misses. Hash the complete effective table, including builtin rules.
-- Preserve dependency-first ordering, cycle diagnostics, implicit syntax
-  roots, Prelude opt-out, and the existing `sources.json` contents/order.
-- Persist successful parses immediately, even if graph validation or later
-  compiler phases fail.
-- Inject the parser-cache seam without introducing a package cycle: the
-  low-level store must not depend on `modules`, `infer`, or `codegen`.
-
-Acceptance: a repeated discovery performs zero lexing/parsing. Dependency
-semantic edits reuse unchanged importers' parsed artifacts. Tests cover all AST
-variants, malformed source, named/headerless entries, identical source under
-different filenames, implicit dependencies, cycles, and fixity changes.
-`fmt` continues to parse its requested input directly.
-
 ### M3: introduce in-memory module boundaries and explicit summaries
 
-Depends on M2. Establish correctness without persistent checked-object reuse.
+Establish correctness without persistent checked-object reuse.
 Starting points are `Checker.Module`, `elaborate.Module`,
 `elaborate.Increment`, Core lint/capture analysis, and backend ABI queries.
 

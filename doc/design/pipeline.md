@@ -47,6 +47,15 @@ bundled constructors. A trailing lambda uses ordinary application/lambda nodes.
 These forms introduce no second type or evaluation system. Tuple is a syntax
 root, always resolvable but never implicitly in scope.
 
+Each successful batch parse is persisted immediately as a content-addressed
+`ParsedUnit`, before graph validation or checking. Its versioned JSON payload
+contains the complete unresolved AST and discovery metadata derived by that
+same parse: header, imports, Prelude choice, and syntax-driven dependencies.
+Every cache use decodes a new tree, validates tagged variants and span bounds,
+and binds spans to the current source file, so fixity, resolution, staging, and
+inference mutations cannot accumulate in the artifact. Failed parses are not
+cached. The formatter continues to lex and parse its requested text directly.
+
 Operator runs remain flat until the complete graph is parsed. `internal/fixity`
 then groups them before name resolution, including inside quotes. Fixity belongs
 to a spelling and is graph-wide. No unresolved run reaches inference. Operators
@@ -55,11 +64,16 @@ Core has no operator node.
 
 ## Module graph and Prelude
 
-`modules.Graph` owns discovery, validation, public interfaces, dependency order,
-and resolution. Local modules come from the entry directory; bundled sources
-come from the embedded provider and reserve their module names. Ordering is
-dependency-first with lexical tie-breaking. Imported scopes expose only direct
-public interfaces, although instance visibility includes transitive dependencies.
+`modules.Graph` runs source discovery, complete-graph validation, and per-module
+resolution as separate phases. Discovery always rechecks provider paths,
+headers, reserved bundled names, and native sidecars, even on parsed-unit hits.
+Validation detects cycles and collects the complete effective fixity table,
+including builtins, before any fresh tree is rewritten; the sorted table also
+has a stable SHA-256 fingerprint. Resolution then processes modules in
+dependency-first order with lexical tie-breaking. Local modules come from the
+entry directory; bundled sources come from the embedded provider and reserve
+their module names. Imported scopes expose only direct public interfaces,
+although instance visibility includes transitive dependencies.
 
 Prelude contains only imports and emits no Go package. Its imports enter each
 non-opted-out module through the ordinary import path, qualifiers included.

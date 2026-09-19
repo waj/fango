@@ -48,7 +48,7 @@ func compileFileGraphSession(entry string, stderr io.Writer, session *compilatio
 	if session != nil && session.observe != nil {
 		observe = func(stage, owner string) { session.event(stage, owner) }
 	}
-	loaded, loadErrs := modules.LoadObserved(entry, observe)
+	loaded, loadErrs := modules.LoadWithOptions(entry, modules.LoadOptions{Observe: observe, Parsed: compilecache.NewParsedStore(entry)})
 	if report(stderr, loadErrs) {
 		return nil, nil, nil, nil, nil, false
 	}

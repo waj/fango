@@ -20,9 +20,32 @@
 package fixity
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"sort"
+	"strings"
+
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
 )
+
+// Hash returns a deterministic fingerprint of the complete effective table,
+// including language builtins already present in t.
+func Hash(t Table) string {
+	keys := make([]string, 0, len(t))
+	for op := range t {
+		keys = append(keys, op)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, op := range keys {
+		f := t[op]
+		fmt.Fprintf(&b, "%d:%s:%d:%d\n", len(op), op, f.Prec, f.Assoc)
+	}
+	h := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(h[:])
+}
 
 // Precedence bounds, as in Haskell: 9 binds tightest, and function
 // application binds tighter than every operator.

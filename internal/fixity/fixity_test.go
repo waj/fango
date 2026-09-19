@@ -27,6 +27,21 @@ func table(entries map[string]Fixity) Table {
 	return t
 }
 
+func TestHashIsDeterministicAndIncludesBuiltins(t *testing.T) {
+	a := Builtin()
+	a["+"] = Fixity{Prec: 6, Assoc: ast.AssocLeft}
+	b := Table{"+": {Prec: 6, Assoc: ast.AssocLeft}}
+	for op, f := range Builtin() {
+		b[op] = f
+	}
+	if Hash(a) != Hash(b) {
+		t.Fatal("fixity hash depends on insertion order")
+	}
+	if Hash(a) == Hash(Table{"+": {Prec: 6, Assoc: ast.AssocLeft}}) {
+		t.Fatal("fixity hash omitted builtin rules")
+	}
+}
+
 func TestGrouping(t *testing.T) {
 	std := table(map[string]Fixity{
 		"*":  {7, ast.AssocLeft},
