@@ -1,8 +1,5 @@
 -- Convert a deliberately small, line-oriented Markdown dialect to HTML.
 
-import IO
-import List exposing (List(..))
-import Maybe exposing (Maybe(..))
 import String
 
 type Builder = EmptyBuilder | Chunk String | Join Builder Builder
@@ -124,21 +121,21 @@ step input state =
 writePending : List Builder ->{IO} ()
 writePending pending =
     case pending of
-        Nil -> ()
-        Cons builder remaining ->
+        [] -> ()
+        [builder | remaining] ->
             case builder of
                 EmptyBuilder -> writePending remaining
                 Chunk value ->
                     IO.write value
                     writePending remaining
-                Join left right -> writePending (Cons left (Cons right remaining))
+                Join left right -> writePending [left, right | remaining]
 
 convert : State ->{IO} ()
 convert state =
     case readLine() of
         Nothing ->
             finished = flush state
-            writePending (Cons finished.document Nil)
+            writePending [finished.document]
         Just (IO.Line { text = input }) -> convert (step input state)
 
 main() = convert { block = NoBlock, document = EmptyBuilder }

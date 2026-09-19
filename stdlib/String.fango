@@ -2,7 +2,7 @@
 module String exposing (Uncons(..), byteLength, contains, fromChar, length, padLeft, padRight, slice, span, split, startsWith, toFloat, toInt, trim, uncons, words)
 
 import Basics exposing (..)
-import List exposing (List(..))
+import List exposing (List)
 import Maybe exposing (Maybe(..))
 
 type Uncons = { first : Char, rest : String }
@@ -86,21 +86,21 @@ scanWord text index size =
 reverseWords : List String -> List String -> List String
 reverseWords remaining result =
     case remaining of
-        Nil -> result
-        Cons word rest -> reverseWords rest (Cons word result)
+        [] -> result
+        [word | rest] -> reverseWords rest [word | result]
 
 wordsHelp : String -> Int -> Int -> List String -> List String
 wordsHelp text index size result =
     start = skipSpace text index size
     end = scanWord text start size
     if start >= size then
-        reverseWords result Nil
+        reverseWords result []
     else
-        wordsHelp text end size (Cons (byteSlice start end text) result)
+        wordsHelp text end size [byteSlice start end text | result]
 
 -- words splits on ASCII whitespace while preserving every non-whitespace byte.
 words : String -> List String
-words text = wordsHelp text 0 (byteLength text) Nil
+words text = wordsHelp text 0 (byteLength text) []
 
 -- Digits accumulate as a non-positive value so the most negative Int parses.
 -- finish rejects a non-negative result that only fits when negative; the
@@ -166,10 +166,10 @@ matchesAt separator sepSize text index size =
 splitHelp : String -> Int -> String -> Int -> Int -> Int -> List String -> List String
 splitHelp separator sepSize text start index size result =
     if index > size - sepSize then
-        reverseWords (Cons (byteSlice start size text) result) Nil
+        reverseWords [byteSlice start size text | result] []
     else if matchesAt separator sepSize text index size then
         piece = byteSlice start index text
-        splitHelp separator sepSize text (index + sepSize) (index + sepSize) size (Cons piece result)
+        splitHelp separator sepSize text (index + sepSize) (index + sepSize) size [piece | result]
     else
         splitHelp separator sepSize text start (index + 1) size result
 
@@ -180,9 +180,9 @@ split : String -> String -> List String
 split separator text =
     sepSize = byteLength separator
     if sepSize == 0 then
-        Cons text Nil
+        [text]
     else
-        splitHelp separator sepSize text 0 0 (byteLength text) Nil
+        splitHelp separator sepSize text 0 0 (byteLength text) []
 
 -- containsFrom is private: whether needle occurs at or after index.
 containsFrom : String -> Int -> String -> Int -> Int -> Bool

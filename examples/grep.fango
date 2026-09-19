@@ -20,7 +20,7 @@
 import Fail exposing (Fail, attempt)
 import File
 import IO exposing (Error, describeError)
-import List exposing (List(..), foldl)
+import List exposing (foldl)
 import Result exposing (Result(..))
 import String
 
@@ -70,15 +70,15 @@ searchPath options path outcome =
 withPaths : Bool -> String -> List String -> Maybe Options
 withPaths recursive pattern paths =
     case paths of
-        Nil -> Nothing
-        Cons _ rest -> Just ({ recursive = recursive, pattern = pattern, paths = paths, prefix = recursive || rest /= Nil })
+        [] -> Nothing
+        [_ | rest] -> Just ({ recursive = recursive, pattern = pattern, paths = paths, prefix = recursive || rest /= [] })
 
 parseOptions : List String -> Maybe Options
 parseOptions args =
     case args of
-        Cons "-r" (Cons pattern paths) -> withPaths True pattern paths
-        Cons pattern paths -> withPaths False pattern paths
-        Nil -> Nothing
+        ["-r", pattern | paths] -> withPaths True pattern paths
+        [pattern | paths] -> withPaths False pattern paths
+        [] -> Nothing
 
 main() =
     case parseOptions (IO.args()) of

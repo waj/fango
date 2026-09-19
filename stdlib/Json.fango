@@ -2,7 +2,7 @@
 module Json exposing (Encode(..), StringToken(..), parseString)
 
 import Basics exposing (..)
-import List exposing (List(..))
+import List exposing (List)
 import Maybe exposing (Maybe(..))
 import Meta exposing (Bound(..), BoundField(..), Code, Items(..), Lift(..), Shape(..), TypeInfo(..))
 import String
@@ -44,9 +44,9 @@ instance Encode ()
 encodeListItems : Encode a => List a -> String
 encodeListItems values =
     case values of
-        Nil -> ""
-        Cons value Nil -> encode value
-        Cons value rest -> encode value ++ "," ++ encodeListItems rest
+        [] -> ""
+        [value] -> encode value
+        [value | rest] -> encode value ++ "," ++ encodeListItems rest
 
 instance Encode a => Encode (List a)
     encode values = "[" ++ encodeListItems values ++ "]"

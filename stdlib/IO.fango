@@ -2,7 +2,7 @@
 module IO exposing (Error(..), IO, Kind(..), Line(..), args, describeError, exit, lineEnding, lineText, print, readFile, readLine, write, writeFile)
 
 import Basics exposing (..)
-import List exposing (List(..))
+import List exposing (List)
 import Maybe exposing (Maybe(..))
 
 type Line = { text : String, ending : String } deriving (Eq, Show)
@@ -60,9 +60,9 @@ print value = write (show value ++ "\n")
 argsFrom : Int -> Int ->{IO} List String
 argsFrom index count =
     if index >= count then
-        Nil
+        []
     else
-        Cons (argAt index) (argsFrom (index + 1) count)
+        [argAt index | argsFrom (index + 1) count]
 
 args : () ->{IO} List String
 args() = argsFrom 0 (argCount())

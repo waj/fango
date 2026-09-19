@@ -4,7 +4,7 @@ module File exposing (Handle, isDirectory, listDirectory, read, readLine, withAp
 import Basics exposing (..)
 import Fail exposing (Fail, attempt, fail, fromResult)
 import IO exposing (Error, IO, Line(..))
-import List exposing (List(..))
+import List exposing (List)
 import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
 import Scope
@@ -122,7 +122,7 @@ collectEntries directory found =
     if name == "" then
         List.reverse found
     else
-        collectEntries directory (Cons name found)
+        collectEntries directory [name | found]
 
 closeListing : Directory ->{IO, Fail Error} ()
 closeListing directory = fromResult (closeDirectory directory)
@@ -132,4 +132,4 @@ listDirectory : String ->{IO} Result Error (List String)
 listDirectory path =
     attempt (\_ ->
         Scope.bracket (\_ -> fromResult (openDirectory path)) closeListing (\directory ->
-            collectEntries directory Nil))
+            collectEntries directory []))

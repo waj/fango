@@ -19,4 +19,4 @@ next = native
 main() =
     first = mint "alpha"
     second = next first
-    each print (Cons (describe first) (Cons (describe second) (Cons (describe (mint "beta")) Nil)))
+    each print [describe first, describe second, describe (mint "beta")]

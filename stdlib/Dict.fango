@@ -6,7 +6,7 @@ module Dict exposing
     )
 
 import Basics exposing (..)
-import List exposing (List(..))
+import List exposing (List)
 import Maybe exposing (Maybe(..))
 import Tuple exposing (Pair(..), Triple(..))
 
@@ -223,34 +223,34 @@ keysHelp : Dict k v -> List k -> List k
 keysHelp dict acc =
     case dict of
         Tip -> acc
-        Bin _ key _ left right -> keysHelp left (Cons key (keysHelp right acc))
+        Bin _ key _ left right -> keysHelp left [key | keysHelp right acc]
 
 keys : Dict k v -> List k
-keys dict = keysHelp dict Nil
+keys dict = keysHelp dict []
 
 valuesHelp : Dict k v -> List v -> List v
 valuesHelp dict acc =
     case dict of
         Tip -> acc
-        Bin _ _ value left right -> valuesHelp left (Cons value (valuesHelp right acc))
+        Bin _ _ value left right -> valuesHelp left [value | valuesHelp right acc]
 
 values : Dict k v -> List v
-values dict = valuesHelp dict Nil
+values dict = valuesHelp dict []
 
 toListHelp : Dict k v -> List (k, v) -> List (k, v)
 toListHelp dict acc =
     case dict of
         Tip -> acc
-        Bin _ key value left right -> toListHelp left (Cons (key, value) (toListHelp right acc))
+        Bin _ key value left right -> toListHelp left [(key, value) | toListHelp right acc]
 
 toList : Dict k v -> List (k, v)
-toList dict = toListHelp dict Nil
+toList dict = toListHelp dict []
 
 fromListHelp : Ord k => List (k, v) -> Dict k v -> Dict k v
 fromListHelp entries dict =
     case entries of
-        Nil -> dict
-        Cons entry rest ->
+        [] -> dict
+        [entry | rest] ->
             case entry of
                 (key, value) -> fromListHelp rest (insert key value dict)
 
@@ -299,11 +299,11 @@ map transform dict =
 showEntries : (Show k, Show v) => List (k, v) -> String
 showEntries entries =
     case entries of
-        Nil -> "]"
-        Cons entry Nil ->
+        [] -> "]"
+        [entry] ->
             case entry of
                 (key, value) -> show key ++ " = " ++ show value ++ "]"
-        Cons entry rest ->
+        [entry | rest] ->
             case entry of
                 (key, value) -> show key ++ " = " ++ show value ++ ", " ++ showEntries rest
 
@@ -318,14 +318,14 @@ instance (Show k, Show v) => Show (Dict k v)
 sameEntries : (Eq k, Eq v) => List (k, v) -> List (k, v) -> Bool
 sameEntries left right =
     case left of
-        Nil ->
+        [] ->
             case right of
-                Nil -> True
-                Cons _ _ -> False
-        Cons leftEntry leftRest ->
+                [] -> True
+                _ -> False
+        [leftEntry | leftRest] ->
             case right of
-                Nil -> False
-                Cons rightEntry rightRest ->
+                [] -> False
+                [rightEntry | rightRest] ->
                     case leftEntry of
                         (leftKey, leftValue) ->
                             case rightEntry of

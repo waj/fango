@@ -6,10 +6,7 @@
 --
 -- State is compact JSON in todo.json in the current working directory.
 
-import IO
 import Json exposing (Encode(..))
-import List exposing (List(..))
-import Maybe exposing (Maybe(..))
 import String
 
 type Todo = { text : String, done : Bool } deriving (Encode)
@@ -46,13 +43,13 @@ parseTodo input =
 parseTodos : String -> Maybe TodosToken
 parseTodos input =
     case dropPrefix "]" input of
-        Just rest -> Just (TodosToken { todos = Nil, rest = rest })
+        Just rest -> Just (TodosToken { todos = [], rest = rest })
         Nothing ->
             case parseTodo input of
                 Nothing -> Nothing
                 Just (TodoToken { todo = todo, rest = afterTodo }) ->
                     case dropPrefix "]" afterTodo of
-                        Just rest -> Just (TodosToken { todos = Cons todo Nil, rest = rest })
+                        Just rest -> Just (TodosToken { todos = [todo], rest = rest })
                         Nothing ->
                             case dropPrefix "," afterTodo of
                                 Nothing -> Nothing
@@ -60,7 +57,7 @@ parseTodos input =
                                     case parseTodos afterComma of
                                         Nothing -> Nothing
                                         Just (TodosToken { todos = restTodos, rest = rest }) ->
-                                            Just (TodosToken { todos = Cons todo restTodos, rest = rest })
+                                            Just (TodosToken { todos = [todo | restTodos], rest = rest })
 
 decodeTodos : String -> Maybe (List Todo)
 decodeTodos input =
@@ -74,7 +71,7 @@ decodeTodos input =
 load : () ->{IO} Maybe (List Todo)
 load() =
     case IO.readFile storagePath of
-        Nothing -> Just Nil
+        Nothing -> Just []
         Just text -> decodeTodos text
 
 save : List Todo ->{IO} ()
@@ -83,32 +80,32 @@ save todos = IO.writeFile storagePath (encode todos)
 append : List Todo -> Todo -> List Todo
 append todos todo =
     case todos of
-        Nil -> Cons todo Nil
-        Cons first rest -> Cons first (append rest todo)
+        [] -> [todo]
+        [first | rest] -> [first | append rest todo]
 
 count : List a -> Int
 count values =
     case values of
-        Nil -> 0
-        Cons _ rest -> 1 + count rest
+        [] -> 0
+        [_ | rest] -> 1 + count rest
 
 completeAt : Int -> Int -> List Todo -> Maybe (List Todo)
 completeAt wanted index todos =
     case todos of
-        Nil -> Nothing
-        Cons todo rest ->
+        [] -> Nothing
+        [todo | rest] ->
             if wanted == index then
-                Just (Cons (Todo { text = todo.text, done = True }) rest)
+                Just [Todo { text = todo.text, done = True } | rest]
             else
                 case completeAt wanted (index + 1) rest of
                     Nothing -> Nothing
-                    Just changed -> Just (Cons todo changed)
+                    Just changed -> Just [todo | changed]
 
 printTodos : Int -> List Todo ->{IO} ()
 printTodos index todos =
     case todos of
-        Nil -> ()
-        Cons todo rest ->
+        [] -> ()
+        [todo | rest] ->
             marker = if todo.done then "[x]" else "[ ]"
             print (show index ++ " " ++ marker ++ " " ++ todo.text)
             printTodos (index + 1) rest
@@ -136,7 +133,7 @@ listTodos : () ->{IO} ()
 listTodos() =
     case load() of
         Nothing -> storageFailure()
-        Just Nil -> print "No todos."
+        Just [] -> print "No todos."
         Just todos -> printTodos 1 todos
 
 completeTodo : String ->{IO} ()

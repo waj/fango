@@ -3,7 +3,7 @@ module Stream exposing (Stream, Yield, filter, fold, forEach, fromList, generate
 
 import Basics exposing (..)
 import Iterator exposing (Iterator, Traversal, next)
-import List exposing (List(..))
+import List exposing (List)
 import Maybe exposing (Maybe(..))
 
 effect Yield a
@@ -69,7 +69,7 @@ forEach : (a ->{e} ()) -> Stream a e ->{e} ()
 forEach action source = fold (\value _ -> action value) () source
 
 toList : Stream a e ->{e} List a
-toList source = List.reverse (fold (\value values -> Cons value values) Nil source)
+toList source = List.reverse (fold (\value values -> [value | values]) [] source)
 
 zipCursors : Iterator a e -> Iterator b e ->{Traversal, Yield (a, b) | e} ()
 zipCursors left right = case next left of
