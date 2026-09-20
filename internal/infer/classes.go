@@ -365,7 +365,13 @@ func (ck *Checker) reduceObligations(obs []predObligation, given []types.Pred) (
 	for _, o := range obs {
 		r := ck.ResolveInstance(o.pred, ck.CurrentOwner, ck.instanceLimit(), given)
 		if r.Blocked {
-			residual = append(residual, o.pred)
+			// Evidence for a constructed type is composed from its arguments',
+			// so the arguments' predicates are what a context has to carry.
+			if len(r.Leaves) > 0 {
+				residual = append(residual, r.Leaves...)
+			} else {
+				residual = append(residual, o.pred)
+			}
 		}
 		if r.Error != nil {
 			err := *r.Error

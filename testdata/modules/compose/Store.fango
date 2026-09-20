@@ -1,0 +1,24 @@
+module Store exposing (Store(..), empty, put, entries, describe)
+
+-- The exported signatures carry constraints on the parameters, not on the
+-- List of pairs the bodies actually compare and display. A caller composes
+-- the evidence for that List from the dictionaries these contexts name, so
+-- the constructed type never reaches the module boundary.
+type Store k v = Store (List (k, v))
+
+empty : Store k v
+empty = Store []
+
+put : k -> v -> Store k v -> Store k v
+put key value store = case store of
+    Store pairs -> Store [(key, value) | pairs]
+
+entries : Store k v -> List (k, v)
+entries store = case store of
+    Store pairs -> pairs
+
+describe : (Show k, Show v) => Store k v -> String
+describe store = show (entries store)
+
+instance (Eq k, Eq v) => Eq (Store k v)
+    (==) left right = entries left == entries right

@@ -1,0 +1,10 @@
+Fango 0.1 — :help for commands
+> Box : a -> Box a
+> | | | instance Show (Box a)
+> render : Show a => a -> String
+> Show a => a -> String
+> box 1 : String
+> sameLists : Eq a => a -> a -> Bool
+> Eq a => a -> a -> Bool
+> True : Bool
+> 

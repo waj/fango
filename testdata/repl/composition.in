@@ -1,0 +1,12 @@
+type Box a = Box a
+instance Show a => Show (Box a)
+    show b = case b of
+        Box value -> "box " ++ show value
+
+render x = show (Box x)
+:type render
+render 1
+sameLists x y = [x] == [y]
+:type sameLists
+sameLists 1 1
+:quit

@@ -12,10 +12,13 @@ import (
 
 // InstanceResolution distinguishes deferred predicates, failed searches, and
 // successful evidence. A success with no Instance denotes given evidence.
+// Leaves, when a blocked predicate has them, are the predicates it composes
+// from and may stand in for it in a context still being built.
 type InstanceResolution struct {
 	Instance *InstanceInfo
 	Bindings map[int]types.Type
 	Blocked  bool
+	Leaves   []types.Pred
 	Error    *diag.Error
 }
 
@@ -23,7 +26,15 @@ type InstanceResolution struct {
 // Context failure permits another declaration of the SAME head, never a less
 // specific head. Cycles and ambiguity are errors rather than failed guards.
 func (ck *Checker) ResolveInstance(p types.Pred, owner string, limit int, given []types.Pred) InstanceResolution {
-	return ck.resolveInstance(p, owner, limit, given, nil)
+	r := ck.resolveInstance(p, owner, limit, given, nil)
+	if r.Blocked {
+		if _, con := ck.Sub.Apply(p.Ty).(*types.TCon); con {
+			if leaves, ok := ck.reduceLeaves(p, owner, limit, given, nil); ok {
+				r.Leaves = leaves
+			}
+		}
+	}
+	return r
 }
 
 func (ck *Checker) resolveInstance(p types.Pred, owner string, limit int, given []types.Pred, path []types.Pred) InstanceResolution {
@@ -33,9 +44,72 @@ func (ck *Checker) resolveInstance(p types.Pred, owner string, limit int, given 
 			return InstanceResolution{}
 		}
 	}
-	if hasTypeVars(p.Ty) {
+	// A metavariable can still become anything, so the answer could change as
+	// solving proceeds and the predicate must wait.
+	if containsMeta(p.Ty) {
 		return InstanceResolution{Blocked: true}
 	}
+	if !hasTypeVars(p.Ty) {
+		return ck.selectInstance(p, owner, limit, given, path)
+	}
+	// Rigid arguments remain: evidence for a constructed type is composed from
+	// its arguments' evidence. A bare variable is whatever the caller
+	// instantiates it to, so only a given discharges it, and a blanket head is
+	// less specific than any constructor head that could match at one of those
+	// instantiations, so composing through one could be overridden. Leaving
+	// the predicate whole is always sound — it is what happened before
+	// composition existed — so a failed composition never reports.
+	if _, con := p.Ty.(*types.TCon); !con {
+		return InstanceResolution{Blocked: true}
+	}
+	r := ck.selectInstance(p, owner, limit, given, path)
+	if r.Error != nil || (r.Instance != nil && !conHead(r.Instance.Head)) {
+		return InstanceResolution{Blocked: true}
+	}
+	return r
+}
+
+// reduceLeaves rewrites a predicate into the predicates its evidence is
+// composed from, reporting false when composition cannot decide. Only a
+// single-candidate head group reduces: with a choice, which candidate applies
+// depends on evidence the caller may or may not have, so the predicate must
+// stay whole and let the caller resolve it.
+func (ck *Checker) reduceLeaves(p types.Pred, owner string, limit int, given []types.Pred, path []types.Pred) ([]types.Pred, bool) {
+	p.Ty = ck.Sub.Apply(p.Ty)
+	for _, q := range given {
+		if p.Class == q.Class && types.Equal(p.Ty, ck.Sub.Apply(q.Ty)) {
+			return nil, true
+		}
+	}
+	if containsMeta(p.Ty) {
+		return nil, false
+	}
+	if !hasTypeVars(p.Ty) {
+		r := ck.selectInstance(p, owner, limit, given, path)
+		return nil, r.Error == nil && !r.Blocked
+	}
+	if _, con := p.Ty.(*types.TCon); !con {
+		return []types.Pred{p}, true
+	}
+	if ResolutionPathError(path, p, source.Span{}) != nil {
+		return nil, false
+	}
+	candidates := ck.matchingInstances(p, owner, limit)
+	if len(candidates) != 1 || !conHead(candidates[0].in.Head) {
+		return nil, false
+	}
+	var leaves []types.Pred
+	for _, q := range types.SubstPreds(candidates[0].in.Preds, candidates[0].bindings) {
+		sub, ok := ck.reduceLeaves(q, owner, limit, given, append(path, p))
+		if !ok {
+			return nil, false
+		}
+		leaves = append(leaves, sub...)
+	}
+	return leaves, true
+}
+
+func (ck *Checker) selectInstance(p types.Pred, owner string, limit int, given []types.Pred, path []types.Pred) InstanceResolution {
 	if err := ResolutionPathError(path, p, source.Span{}); err != nil {
 		return InstanceResolution{Error: err}
 	}

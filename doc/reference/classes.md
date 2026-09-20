@@ -39,6 +39,26 @@ use that evidence. A constraint variable absent from the annotated type is
 ambiguous. Local syntactic functions can generalize constraints; ordinary
 local values remain monomorphic.
 
+A constraint on a constructed type is satisfied by constraints on its
+arguments, because that is how its evidence is built. So comparing two lists
+asks only for the element's `Eq`, and an inferred context names the arguments
+rather than what the body constructed from them:
+
+```fango
+same : Eq a => List a -> List a -> Bool
+same xs ys = xs == ys
+
+render x = show (Just [x])      -- infers Show a => a -> String
+```
+
+Composition covers a constructed type only. A constraint on a bare variable
+must still be written out, and so must one whose type constructor has no
+instance of its own — a class whose only instance is a blanket does not
+compose, since the caller may instantiate the variable at a type with a more
+specific instance. A constraint the annotation already names is matched before
+any composition, so writing `Show (Box a) =>` still means the caller supplies
+that evidence.
+
 ## Instance heads and blanket instances
 
 Instance heads are either a bare type variable (a blanket instance) or a fully
@@ -103,8 +123,10 @@ This prints `42` and `alice [password omitted]`. An unannotated
 `forward x = logValue x` infers `LogValue a => a -> String`, so its caller
 supplies the specialized dictionary. Annotating it with only `Show a` instead
 reports `MISSING CONSTRAINT`: the blanket does not imply `LogValue a` inside
-a polymorphic body. The same rule applies to structured types:
-`render x = show (Box x)` infers `Show (Box a) => a -> String`.
+a polymorphic body. A blanket group does not compose either, so
+`forward x = logValue (Box x)` infers `LogValue (Box a) => a -> String` and
+leaves the choice to the caller, which may hold a `LogValue (Box …)` instance
+of its own.
 
 ## Instance selection
 
@@ -152,9 +174,11 @@ apply in the same module. A `(Show a, Eq a)` context beats either one when
 applicable.
 
 An unresolved
-type is never guessed from the set of instances. Predicates containing any
-unresolved or quantified variable retain their evidence requirement, even
-when only one instance currently matches. Concrete predicates resolve through
+type is never guessed from the set of instances. A predicate containing an
+unresolved variable retains its evidence requirement, even when only one
+instance currently matches. A predicate whose remaining variables are all
+fixed by an enclosing signature is composed instead, as
+[constraints](#constraints) describes. Concrete predicates resolve through
 instances; explicitly passed evidence takes precedence. If no context in the
 most-specific head group is satisfied, resolution does not fall back to a
 less-specific head. Cycles, nesting-limit failures, and ambiguity encountered
@@ -166,7 +190,12 @@ Structured contexts need not be smaller than their heads. For example,
 `Show (Box a) => Show (Wrapper a)` can delegate to a wrapper's `Box a` field.
 A circular requirement encountered at a concrete use reports
 `INSTANCE RESOLUTION` with its cycle; a growing chain reports the nesting
-limit instead. Declarations with such structural cycles are allowed, but
+limit instead. Both are errors only at a concrete use: composing a predicate
+whose arguments are still variables offers a shorter context and never
+reports, so a diverging chain there simply leaves the predicate whole, and it
+is the annotation that goes on to report `MISSING CONSTRAINT`.
+
+Declarations with such structural cycles are allowed, but
 nothing breaks one: a head specializing another's arguments is rejected, so
 every use of such a cycle fails. Blanket contexts must constrain only their
 head variable, and cycles between their class requirements are rejected at

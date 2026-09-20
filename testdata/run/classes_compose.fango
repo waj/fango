@@ -1,0 +1,45 @@
+-- Evidence for a constructed type is composed from its arguments' evidence,
+-- so a context over the arguments is all a signature has to carry. The
+-- composition is recursive, reaches into an instance's declared context, and
+-- bottoms out at the dictionaries the caller supplied -- which is why the
+-- caller's own instance for the element is the one that runs.
+import Dict
+import Meta exposing (Code)
+
+type Tri = Low | High
+
+-- Deliberately indiscriminate, so that seeing it run is unambiguous.
+instance Eq Tri
+    (==) a b = True
+
+sameLists : Eq a => List a -> List a -> Bool
+sameLists xs ys = xs == ys
+
+nested : Show a => a -> String
+nested x = show (Just [x])
+
+type Entries k v = Entries (List (k, v))
+
+instance (Eq k, Eq v) => Eq (Entries k v)
+    (==) left right = case left of
+        Entries ls -> case right of
+            Entries rs -> ls == rs
+
+type Tree a = Tree (List a) deriving (Eq, Show)
+
+-- Composition runs during compilation too, where the same resolution feeds
+-- the compile-time evaluator rather than the emitted program.
+chosen : Code
+chosen = if sameLists [1, 2] [1, 2] then quote "staged same" else quote "staged different"
+
+main() =
+    print (sameLists [1, 2] [1, 2])
+    print (sameLists [1, 2] [1, 3])
+    print (sameLists [Low] [High])
+    print (nested 5)
+    print (Entries [(1, "a")] == Entries [(1, "a")])
+    print (Entries [(1, "a")] == Entries [(1, "b")])
+    print (Tree [1, 2] == Tree [1, 2])
+    print (Tree ["x"])
+    print (Dict.toList (Dict.fromList [(1, "a")]) == [(1, "a")])
+    print $(chosen)

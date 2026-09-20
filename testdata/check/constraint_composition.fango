@@ -1,0 +1,43 @@
+-- Evidence for a constructed type is composed from its arguments' evidence,
+-- so an inferred context carries the arguments' predicates rather than the
+-- constructed one. What this pins is the shape of the contexts inference
+-- produces: reduced through a single-candidate head group, reduced
+-- recursively, and left whole where a group still has a choice.
+--
+-- The checker harness has no module resolution, so this inlines its own
+-- miniatures rather than using List and Maybe.
+type Items a = None | More a (Items a)
+type Opt a = Absent | Present a
+type Box a = Box a
+
+instance Show a => Show (Items a)
+    show items = "items"
+
+instance Show a => Show (Opt a)
+    show opt = "opt"
+
+-- One candidate: Show (Items a) composes to Show a.
+renderItems x = show (More x None)
+
+-- Composition recurses through both constructors.
+renderNested x = show (Present (More x None))
+
+-- Two candidates, and which applies depends on whether the caller has Eq, so
+-- the predicate stays whole for the caller to resolve.
+instance Show (Box a)
+    show box = "box"
+
+instance Eq a => Show (Box a)
+    show box = "comparable box"
+
+renderBox x = show (Box x)
+
+-- A context the annotation already names is matched before composition, so
+-- naming the constructed type still means the caller supplies it.
+givenWhole : Show (Items a) => Items a -> String
+givenWhole items = show items
+
+-- A derived instance adopts what its generated methods need, so its context
+-- is composed down to the parameter too. The mangled instance symbols below
+-- carry their contexts, which is where that is visible.
+type Wrapped a = Wrapped (Items a) deriving (Show)

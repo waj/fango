@@ -1,0 +1,38 @@
+-- Composition stops where it could disagree with a concrete use, and the
+-- predicate stays whole for the caller to resolve. A blanket head is less
+-- specific than a constructor head that might match at some instantiation,
+-- and a head group whose candidate contexts are not all decided here can
+-- resolve either way, so both wait. The caller then picks per instantiation.
+class Inspect a
+    inspect : a -> String
+
+instance Inspect a
+    inspect x = "blanket"
+
+instance Inspect (List a)
+    inspect x = "list"
+
+type Box a = Box a
+type Opaque = Opaque
+
+class Tag a
+    tag : a -> String
+instance Tag (Box a)
+    tag x = "plain"
+instance Eq a => Tag (Box a)
+    tag x = "comparable"
+
+viaBlanket : Inspect (Maybe a) => a -> String
+viaBlanket x = inspect (Just x)
+
+viaList : Inspect (List a) => a -> String
+viaList x = inspect [x]
+
+viaGroup : Tag (Box a) => a -> String
+viaGroup x = tag (Box x)
+
+main() =
+    print (viaBlanket 1)
+    print (viaList 1)
+    print (viaGroup 1)
+    print (viaGroup Opaque)

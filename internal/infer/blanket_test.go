@@ -18,11 +18,11 @@ type Box a = Box a deriving (Show)
 	for _, tc := range []struct{ name, src, want string }{
 		{"bare variable", "f x = inspect x", "Inspect a => a -> String"},
 		{"method value", "f = inspect", "Inspect a => a -> String"},
-		{"structural", "f x = show (Box x)", "Show (Box a) => a -> String"},
+		{"structural", "f x = show (Box x)", "Show a => a -> String"},
 		{"explicit structural", "f : Show (Box a) => a -> String\nf x = show (Box x)", "Show (Box a) => a -> String"},
 		{"local", "f x =\n    local y = inspect y\n    local x", "Inspect a => a -> String"},
-		{"captured structural", "f x =\n    local y = show (Box x) ++ y\n    local \"!\"", "Show (Box a) => a -> String"},
-		{"local structural", "f x =\n    local y = show (Box y)\n    local x", "Show (Box a) => a -> String"},
+		{"captured structural", "f x =\n    local y = show (Box x) ++ y\n    local \"!\"", "Show a => a -> String"},
+		{"local structural", "f x =\n    local y = show (Box y)\n    local x", "Show a => a -> String"},
 		{"numeric default", "main = inspect 42", "String"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,7 +47,8 @@ type Wrap a = Wrap a
 `
 	for _, tc := range []struct{ name, src, title string }{
 		{"annotation must name class", "instance Show a => A a\n    aa x = show x\nf : Show a => a -> String\nf x = aa x", "MISSING CONSTRAINT"},
-		{"structural annotation", "instance Show a => Show (Box a)\n    show x = \"box\"\nf : Show a => Box a -> String\nf x = show x", "MISSING CONSTRAINT"},
+		{"composition waits on an undecided candidate", "instance A (Box a)\n    aa x = \"box\"\ninstance B a => A (Box a)\n    aa x = \"conditional\"\nf : A a => Box a -> String\nf x = aa x", "MISSING CONSTRAINT"},
+		{"composition skips a blanket group", "instance Show a => A a\n    aa x = show x\nf : Show a => Box a -> String\nf x = aa x", "MISSING CONSTRAINT"},
 		{"local annotation", "instance A a\n    aa x = \"a\"\nf x =\n    local : Show a => a -> String\n    local y = aa y\n    local x", "MISSING CONSTRAINT"},
 		{"duplicate blanket", "instance Show a => A a\n    aa x = show x\ninstance Show b => A b\n    aa x = show x", "OVERLAPPING INSTANCE"},
 		{"self blanket cycle", "instance A a => A a\n    aa x = \"a\"", "INSTANCE CONTEXT"},

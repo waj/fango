@@ -1,0 +1,12 @@
+-- A growing structural context diverges. At a concrete use that is an
+-- INSTANCE RESOLUTION error, but composition only ever offers a shorter
+-- context and never reports, so here the predicate simply stays whole and
+-- the annotation is the thing that does not cover the body.
+type Box a = Box a
+instance Show (Box (Box a)) => Show (Box a)
+    show box = show (Box box)
+
+render : Show a => Box a -> String
+render box = show box
+
+main() = print (render (Box True))

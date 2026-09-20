@@ -1,0 +1,22 @@
+module Main exposing (main)
+
+import Store exposing (Store(..))
+
+-- A polymorphic caller passes its own parameter dictionaries on; the Store
+-- module never asked for anything about the pairs.
+sameStores : (Eq k, Eq v) => Store k v -> Store k v -> Bool
+sameStores left right = left == right
+
+type Tri = Low | High
+
+-- Deliberately indiscriminate, so that seeing it run is unambiguous.
+instance Eq Tri
+    (==) a b = True
+
+main() =
+    one = Store.put 1 "a" Store.empty
+    other = Store.put 1 "a" Store.empty
+    print (sameStores one other)
+    print (sameStores one (Store.put 2 "b" Store.empty))
+    print (sameStores (Store.put Low Low Store.empty) (Store.put High High Store.empty))
+    print (Store.describe one)

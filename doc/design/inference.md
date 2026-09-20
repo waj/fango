@@ -70,11 +70,31 @@ Numeric defaulting and source diagnostics are defined in
 ## Class evidence and instance environments
 
 `Scheme.Preds` stores nominal single-parameter obligations; instantiation
-substitutes predicates with the body type. Resolution is directional and selects
-only concrete predicates. Any metavariable or quantified variable defers the
-whole predicate, including `Show (Box a)`. Given evidence takes precedence.
-Generalization keeps residual predicates as dictionary parameters rather than
-reducing them through an instance prematurely.
+substitutes predicates with the body type. Resolution is directional. Given
+evidence takes precedence, then a metavariable defers the whole predicate
+because solving could still change the answer.
+
+A predicate whose remaining variables are all rigid is composed: its evidence
+is assembled from its arguments' evidence, which the classes reference owns as
+[one head per type constructor](../reference/classes.md#instance-heads-and-blanket-instances).
+Composition applies only to a constructed type. A bare variable is whatever the
+caller instantiates it to, so only a given discharges it, and a blanket head is
+less specific than a constructor head that could match at one of those
+instantiations, so a blanket group defers as well. Composition has two results.
+Discharging proves the predicate from the givens, and may use a head group with
+several candidates: a candidate whose context a given satisfies is applicable
+at every instantiation, while a candidate whose context is undecided here
+defers the whole group. Reducing replaces the predicate with the predicates it
+composes from, for a context still being built — an inferred scheme, a derived
+instance — and requires a single candidate, since with a choice the applicable
+one depends on evidence the caller may or may not have.
+
+Leaving a predicate whole is always sound; it is the answer before composition
+is attempted. So a composition that cannot finish — a cycle, the nesting limit,
+a missing or ambiguous instance — defers rather than reporting, and only a
+concrete use raises those as errors. Composition can therefore discharge an
+obligation that would have been `MISSING CONSTRAINT`, and never turns a
+checking program into a failing one.
 
 Overlap checks cover the entire graph; use-site visibility covers the defining
 module and its transitive dependencies. Registration is source-ordered even
