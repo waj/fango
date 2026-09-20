@@ -310,34 +310,9 @@ showEntries entries =
 instance (Show k, Show v) => Show (Dict k v)
     show dict = "Dict [" ++ showEntries (toList dict)
 
--- sameEntries compares the pairs componentwise rather than through
--- Eq (List (k, v)). That is not a style choice: a constraint on a
--- parameterized type is not simplified to constraints on its arguments, so
--- `a == b` on two entry lists would demand `Eq (List (k, v))` in the instance
--- context and leak into every caller of `==` on a Dict. See the roadmap.
-sameEntries : (Eq k, Eq v) => List (k, v) -> List (k, v) -> Bool
-sameEntries left right =
-    case left of
-        [] ->
-            case right of
-                [] -> True
-                _ -> False
-        [leftEntry | leftRest] ->
-            case right of
-                [] -> False
-                [rightEntry | rightRest] ->
-                    case leftEntry of
-                        (leftKey, leftValue) ->
-                            case rightEntry of
-                                (rightKey, rightValue) ->
-                                    if leftKey == rightKey && leftValue == rightValue then
-                                        sameEntries leftRest rightRest
-                                    else
-                                        False
-
 -- Equality compares entries in key order, never tree shape: the same entries
 -- inserted in different orders build differently shaped trees. Deriving Eq
 -- here would be wrong, not merely slower. The size test short-circuits the
 -- common unequal case before either list is built.
 instance (Eq k, Eq v) => Eq (Dict k v)
-    (==) left right = size left == size right && sameEntries (toList left) (toList right)
+    (==) left right = size left == size right && toList left == toList right

@@ -132,15 +132,6 @@ per-callable summary strong enough that a second root can reuse it without
 reinterpreting the callee, which is the same question the contract already
 answers for dependency modules and does not answer within a module.
 
-## Constraint simplification for parameterized types
-
-Known-head constraints containing rigid arguments remain whole predicates:
-`Eq a` does not discharge `Eq (List a)`. Consider context reduction during
-generalization, preserving specialization and caller-supplied evidence. Decide
-termination for non-decreasing contexts, diagnostics, and displayed inferred
-signatures. Dict currently compares entries componentwise to avoid exposing a
-List-based equality constraint to callers.
-
 ## Operator fixity scope
 
 [Modules and distribution](roadmap-modules.md#scoping-operator-fixity-to-its-module)
@@ -164,6 +155,14 @@ These are directions, not commitments or an ordering:
   Also decide whether resolution should disambiguate `Wrap { x = 1 }` as a
   constructor call; today inferred record arguments require parentheses.
 - Numeric semantics beyond Int/Float: overflow, division, conversions, arbitrary precision.
+- Behaviour for a whole constructed type, such as displaying `List Char` as a
+  string. A second instance head specializing a constructor's arguments is
+  rejected, so the composition-consistent form is a hook method on the
+  element's class that the constructed instance consults.
+- Hoisting composed dictionaries. A composed dictionary inside a recursive body
+  is rebuilt per call: ANF lifts only non-Direct or polymorphic slots and there
+  is no CSE pass. Memoizing per definition and binding at entry is the fix, once
+  a consumer shows it matters.
 - Superclasses, method-local polymorphism, higher kinds, default methods, mutually
   recursive deriving groups, and richer Show-deriver precedence/display.
 - Inline native instance methods: stable method identity, class-specialized ABI,
