@@ -158,7 +158,11 @@ These are directions, not commitments or an ordering:
 - Behaviour for a whole constructed type, such as displaying `List Char` as a
   string. A second instance head specializing a constructor's arguments is
   rejected, so the composition-consistent form is a hook method on the
-  element's class that the constructed instance consults.
+  element's class that the constructed instance consults: `Show a` would gain
+  a `showList`, and `Show (List a)` would call it. That works already when
+  every instance writes the hook; what it waits on is default methods, so only
+  the types that differ from the generic answer declare one, and derivers that
+  supply it.
 - Hoisting composed dictionaries. A composed dictionary inside a recursive body
   is rebuilt per call: ANF lifts only non-Direct or polymorphic slots and there
   is no CSE pass. Memoizing per definition and binding at entry is the fix, once
