@@ -43,13 +43,8 @@ func ValidateModuleStates(states []*ModuleState) []diag.Error {
 				if old.Class.Name != in.Class.Name {
 					continue
 				}
-				oldGeq := headAtLeastAsSpecific(old.Head, in.Head)
-				newGeq := headAtLeastAsSpecific(in.Head, old.Head)
-				switch {
-				case oldGeq && newGeq && contextIncludes(in.Head, in.Preds, old.Head, old.Preds) && contextIncludes(old.Head, old.Preds, in.Head, in.Preds):
-					errs = append(errs, diag.Errorf(in.Span, "OVERLAPPING INSTANCE", "Instance `%s %s` duplicates the instance declared at %v.", types.SurfaceName(in.Class.Name), types.Show(in.Head), old.Span.StartPos()))
-				case !oldGeq && !newGeq && headsUnify(old.Head, in.Head):
-					errs = append(errs, diag.Errorf(in.Span, "OVERLAPPING INSTANCE", "Instance `%s %s` overlaps the instance declared at %v; neither is more specific, so some uses would be ambiguous.", types.SurfaceName(in.Class.Name), types.Show(in.Head), old.Span.StartPos()))
+				if why := instanceOverlap(old, in.Head, in.Preds); why != "" {
+					errs = append(errs, diag.Errorf(in.Span, "OVERLAPPING INSTANCE", "Instance `%s` %s", types.ShowPred(in.Class.Name, in.Head), why))
 				}
 			}
 			if _, blanket := in.Head.(*types.TVar); blanket {

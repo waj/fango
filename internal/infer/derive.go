@@ -297,8 +297,8 @@ func (ck *Checker) instanceWithInferredContext(d *ast.InstanceDecl) ([]DeclInfo,
 		}
 		if !ok {
 			return nil, []diag.Error{diag.Errorf(d.Head.Sp, "CANNOT DERIVE",
-				"The generated methods require `%s %s`, which I cannot express as an\ninstance constraint on this head.",
-				types.SurfaceName(p.Class), types.Show(p.Ty))}
+				"The generated methods require `%s`, which I cannot express as an\ninstance constraint on this head.",
+				types.ShowPred(p.Class, p.Ty))}
 		}
 		d.Preds = append(d.Preds, ast.PredExpr{Class: p.Class, Ty: te, Sp: d.Head.Sp})
 	}

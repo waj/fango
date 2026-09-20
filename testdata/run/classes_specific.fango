@@ -1,15 +1,22 @@
+-- Specificity still orders a blanket default against a constructor head: the
+-- constructor instance wins wherever it matches, including through evidence
+-- the caller supplied. Two heads for the same constructor cannot differ in
+-- their arguments, so this is the only specialization axis left.
 type Box a = Box a
 
-instance Show (Box a)
-    show b = "generic box"
+class Inspect a
+    inspect : a -> String
 
-instance Show (Box Int)
-    show b = "int box"
+instance Inspect a
+    inspect x = "generic"
 
-viaEvidence : Show (Box a) => Box a -> String
-viaEvidence b = show b
+instance Inspect (Box a)
+    inspect b = "box"
+
+viaEvidence : Inspect a => a -> String
+viaEvidence x = inspect x
 
 main =
-    print (Box 1)
-    print (Box "s")
+    print (inspect (Box 1))
+    print (inspect 1)
     print (viaEvidence (Box 3))

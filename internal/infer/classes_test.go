@@ -29,8 +29,8 @@ func TestStructuralInstanceHeads(t *testing.T) {
 		{"specialized instance resolves after defaulting",
 			"type Box a = Box a\nclass C a\n    c : a -> Int\ninstance C (Box Int)\n    c x = 1\nf = c (Box 0)",
 			"Int"},
-		{"generic instance still yields a scheme constraint",
-			"type Box a = Box a\ninstance Show (Box Int)\n    show b = \"int\"\ninstance Show a => Show (Box a)\n    show b = \"box\"\nf b = show (Box b)",
+		{"a head group with a choice keeps the whole predicate",
+			"type Box a = Box a\ninstance Show (Box a)\n    show b = \"box\"\ninstance Show a => Show (Box a)\n    show b = \"shown\"\nf b = show (Box b)",
 			"Show (Box a) => a -> String"},
 		{"repeated head variable",
 			"type Pair a b = Pair a b\ninstance Eq (Pair a a)\n    (==) x y = True\nf : Pair Int Int -> Bool\nf p = p == p",
@@ -38,9 +38,6 @@ func TestStructuralInstanceHeads(t *testing.T) {
 		{"nested head with context",
 			"type Box a = Box a\ntype Wrap a = Wrap a\ninstance Show a => Show (Box (Wrap a))\n    show x = \"bw\"\nf : Box (Wrap Int) -> String\nf x = show x",
 			"Box (Wrap Int) -> String"},
-		{"comparable overlap accepted",
-			"type Box a = Box a\nclass C a\n    c : a -> Int\ninstance C (Box a)\n    c x = 0\ninstance C (Box Int)\n    c x = 1\nf : Box String -> Int\nf b = c b",
-			"Box String -> Int"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ck, infos, errs := check(t, tc.src)
@@ -93,7 +90,9 @@ func TestClassDiagnostics(t *testing.T) {
 		{"function instance head", "class C a\n    c : a -> a\ninstance C (Int -> Int)\n    c x = x", "INSTANCE HEAD"},
 		{"structural duplicate", "type Box a = Box a\nclass C a\n    c : a -> a\ninstance C (Box a)\n    c x = x\ninstance C (Box b)\n    c x = x", "OVERLAPPING INSTANCE"},
 		{"incomparable overlap", "type Pair a b = Pair a b\nclass C a\n    c : a -> a\ninstance C (Pair Int a)\n    c x = x\ninstance C (Pair a Int)\n    c x = x", "OVERLAPPING INSTANCE"},
-		{"undetermined instance choice", "type Box a = Box\nclass C a\n    c : a -> Bool\ninstance C (Box Int)\n    c x = True\ninstance C (Box a)\n    c x = False\nf = c Box", "AMBIGUOUS CONSTRAINT"},
+		{"undetermined instance choice", "type Box a = Box\nclass C a\n    c : a -> Bool\ninstance C (Box Int)\n    c x = True\nf = c Box", "AMBIGUOUS CONSTRAINT"},
+		{"specialized argument", "type Box a = Box a\nclass C a\n    c : a -> Int\ninstance C (Box a)\n    c x = 0\ninstance C (Box Int)\n    c x = 1", "OVERLAPPING INSTANCE"},
+		{"specialized nested argument", "type Box a = Box a\ntype Wrap a = Wrap a\nclass C a\n    c : a -> Int\ninstance C (Box a)\n    c x = 0\ninstance C (Box (Wrap Int))\n    c x = 1", "OVERLAPPING INSTANCE"},
 		{"missing method", "class C a\n    c : a -> a\n    d : a -> a\ninstance C Int\n    c x = x", "MISSING METHOD"},
 		{"duplicate method", "class C a\n    c : a -> a\n    d : a -> a\ninstance C Int\n    c x = x\n    d x = x\n    c y = y", "DUPLICATE METHOD"},
 		{"unknown method", "class C a\n    c : a -> a\ninstance C Int\n    c x = x\n    d x = x", "UNKNOWN METHOD"},

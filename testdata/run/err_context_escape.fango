@@ -1,3 +1,7 @@
+-- A concrete specialization used to break a structural instance cycle by
+-- giving one head a base case. Instances for a constructed type are composed
+-- from their arguments' instances, which cannot consult such a head, so the
+-- specialization is refused at its declaration and the cycle stands.
 type LeftBox a = LeftBox a
 type RightBox a = RightBox a
 instance Show (RightBox a) => Show (LeftBox a)
@@ -9,14 +13,4 @@ instance Show (LeftBox a) => Show (RightBox a)
 instance Show (RightBox Bool)
     show value = "escape"
 
-class Label a
-    label : a -> String
-instance Label a
-    label value = "anything"
-
-identity : Int -> Int
-identity x = x
-
-main() =
-    print (LeftBox True)
-    print (label identity)
+main() = print (LeftBox True)

@@ -54,10 +54,25 @@ type Box a = Box a
 instance Show a => Show (Box a)
     show box = case box of
         Box value -> "Box " ++ show value
+```
 
-instance Show (Box Int)
+A blanket instance is an overridable default: it is resolved wherever the
+concrete type is known, so a more specific instance applies even to a call
+whose own type is still a variable. An instance for a constructed type is
+composed instead: its evidence is assembled from its arguments' evidence, the
+way the `Box` instance above delegates to `show value`. One type constructor
+therefore has one head per class, and a second head specializing its arguments
+reports `OVERLAPPING INSTANCE`:
+
+```fango
+instance Show (Box Int)      -- OVERLAPPING INSTANCE
     show box = "integer box"
 ```
+
+Composition happens wherever the arguments are not yet known, and cannot
+consult such a head, so the two would disagree depending on the call site.
+Overriding the element's own instance works from anywhere, because that is the
+part composition delegates to.
 
 Blanket instances provide implementations for types satisfying their context.
 For example, an application can use ordinary display as its logging default
@@ -89,15 +104,16 @@ This prints `42` and `alice [password omitted]`. An unannotated
 supplies the specialized dictionary. Annotating it with only `Show a` instead
 reports `MISSING CONSTRAINT`: the blanket does not imply `LogValue a` inside
 a polymorphic body. The same rule applies to structured types:
-`render x = show (Box x)` infers `Show (Box a) => a -> String`, preserving the
-caller's `Show (Box Int)` specialization.
+`render x = show (Box x)` infers `Show (Box a) => a -> String`.
 
 ## Instance selection
 
-Matching first selects the most specific visible head. Equivalent heads may
-have different contexts. Duplicate head/context pairs and incomparable
-overlapping heads report `OVERLAPPING INSTANCE`; renaming variables, reordering
-constraints, or repeating a constraint does not make a distinct instance.
+Matching first selects the most specific visible head, which orders a blanket
+against a constructor head. Equivalent heads may have different contexts.
+Duplicate head/context pairs, incomparable overlapping heads, and one
+constructor head specializing another's arguments all report
+`OVERLAPPING INSTANCE`; renaming variables, reordering constraints, or
+repeating a constraint does not make a distinct instance.
 
 Within the selected head group, only candidates whose contexts are satisfied
 are applicable. A strict superset of constraints takes precedence over its
@@ -150,11 +166,11 @@ Structured contexts need not be smaller than their heads. For example,
 `Show (Box a) => Show (Wrapper a)` can delegate to a wrapper's `Box a` field.
 A circular requirement encountered at a concrete use reports
 `INSTANCE RESOLUTION` with its cycle; a growing chain reports the nesting
-limit instead. Declarations with such structural cycles are allowed, and a
-concrete specialization can break a cycle. Blanket contexts must constrain
-only their head variable, and cycles between their class requirements are
-rejected at declaration time with `INSTANCE CONTEXT`, even when a concrete
-specialization could break the cycle for some types.
+limit instead. Declarations with such structural cycles are allowed, but
+nothing breaks one: a head specializing another's arguments is rejected, so
+every use of such a cycle fails. Blanket contexts must constrain only their
+head variable, and cycles between their class requirements are rejected at
+declaration time with `INSTANCE CONTEXT`.
 
 Inside an instance method, its own head is available as self evidence using
 the instance's declared context. This permits direct recursive implementations

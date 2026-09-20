@@ -2439,7 +2439,7 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 			for _, p := range left {
 				if mentionsAny(p.Ty, quant) {
 					if bind.Ann != nil {
-						g.errs = append(g.errs, diag.Errorf(bind.NameSpan, "MISSING CONSTRAINT", "Add `%s %s` to the annotation.", types.SurfaceName(p.Class), types.Show(p.Ty)))
+						g.errs = append(g.errs, diag.Errorf(bind.NameSpan, "MISSING CONSTRAINT", "Add `%s` to the annotation.", types.ShowPred(p.Class, p.Ty)))
 					} else {
 						scheme.Preds = append(scheme.Preds, p)
 					}

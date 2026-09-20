@@ -176,6 +176,16 @@ func (p *Printer) varName(v *TVar) string {
 // Show renders one type with a fresh printer (single-type contexts).
 func Show(t Type) string { return NewPrinter().Type(t) }
 
+// Pred renders a constraint the way it is written in source: the class name
+// applied to a type that is parenthesized when an application would otherwise
+// read as two arguments, as in `Eq (List a)`.
+func (p *Printer) Pred(class string, t Type) string {
+	return SurfaceName(class) + " " + p.atom(t)
+}
+
+// ShowPred renders one constraint with a fresh printer.
+func ShowPred(class string, t Type) string { return NewPrinter().Pred(class, t) }
+
 func (p *Printer) Scheme(s Scheme) string {
 	body := p.Type(s.Body)
 	if len(s.Preds) == 0 {
@@ -183,7 +193,7 @@ func (p *Printer) Scheme(s Scheme) string {
 	}
 	parts := make([]string, len(s.Preds))
 	for i, pred := range s.Preds {
-		parts[i] = SurfaceName(pred.Class) + " " + p.atom(pred.Ty)
+		parts[i] = p.Pred(pred.Class, pred.Ty)
 	}
 	context := strings.Join(parts, ", ")
 	if len(parts) > 1 {

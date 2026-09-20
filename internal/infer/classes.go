@@ -174,13 +174,8 @@ func (ck *Checker) registerInstance(d *ast.InstanceDecl) (*InstanceInfo, []diag.
 		if old.Class != cl {
 			continue
 		}
-		oldGeq := headAtLeastAsSpecific(old.Head, head)
-		newGeq := headAtLeastAsSpecific(head, old.Head)
-		switch {
-		case oldGeq && newGeq && contextIncludes(head, ps, old.Head, old.Preds) && contextIncludes(old.Head, old.Preds, head, ps):
-			errs = append(errs, diag.Errorf(d.Head.Sp, "OVERLAPPING INSTANCE", "Instance `%s %s` duplicates the instance declared at %v.", types.SurfaceName(cl.Name), types.Show(head), old.Span.StartPos()))
-		case !oldGeq && !newGeq && headsUnify(old.Head, head):
-			errs = append(errs, diag.Errorf(d.Head.Sp, "OVERLAPPING INSTANCE", "Instance `%s %s` overlaps the instance declared at %v; neither is more specific, so some uses would be ambiguous.", types.SurfaceName(cl.Name), types.Show(head), old.Span.StartPos()))
+		if why := instanceOverlap(old, head, ps); why != "" {
+			errs = append(errs, diag.Errorf(d.Head.Sp, "OVERLAPPING INSTANCE", "Instance `%s` %s", types.ShowPred(cl.Name, head), why))
 		}
 	}
 	if _, blanket := head.(*types.TVar); blanket {
@@ -391,7 +386,7 @@ func (ck *Checker) DefaultPreds(ps []types.Pred, sp source.Span) []diag.Error {
 	}
 	left, errs := ck.reduceObligations(obs, nil)
 	for _, p := range left {
-		errs = append(errs, diag.Errorf(sp, "AMBIGUOUS CONSTRAINT", "Cannot determine the type for `%s %s`.", types.SurfaceName(p.Class), types.Show(p.Ty)))
+		errs = append(errs, diag.Errorf(sp, "AMBIGUOUS CONSTRAINT", "Cannot determine the type for `%s`.", types.ShowPred(p.Class, p.Ty)))
 	}
 	return errs
 }
@@ -414,7 +409,7 @@ func (ck *Checker) qualify(sch types.Scheme, obs []predObligation, given []types
 				// rather than declaring a context up front.
 				*ck.inferringContext = append(*ck.inferringContext, p)
 			} else if annotated {
-				errs = append(errs, diag.Errorf(sp, "MISSING CONSTRAINT", "The annotation requires the additional constraint `%s %s`.", types.SurfaceName(p.Class), types.Show(p.Ty)))
+				errs = append(errs, diag.Errorf(sp, "MISSING CONSTRAINT", "The annotation requires the additional constraint `%s`.", types.ShowPred(p.Class, p.Ty)))
 			} else {
 				sch.Preds = append(sch.Preds, p)
 			}

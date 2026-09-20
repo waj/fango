@@ -66,7 +66,7 @@ func (ck *Checker) resolveInstance(p types.Pred, owner string, limit int, given 
 	}
 	if len(applicable) == 0 {
 		if missing == nil {
-			err := diag.Errorf(source.Span{}, "MISSING INSTANCE", "No instance provides `%s %s`.", types.SurfaceName(p.Class), types.Show(p.Ty))
+			err := diag.Errorf(source.Span{}, "MISSING INSTANCE", "No instance provides `%s`.", types.ShowPred(p.Class, p.Ty))
 			missing = &err
 		}
 		return InstanceResolution{Error: missing}
@@ -102,7 +102,7 @@ func (ck *Checker) resolveInstance(p types.Pred, owner string, limit int, given 
 		}
 	}
 	if len(finalists) > 1 {
-		err := diag.Errorf(source.Span{}, "AMBIGUOUS INSTANCE", "Multiple modules provide equally preferred instances for `%s %s`.", types.SurfaceName(p.Class), types.Show(p.Ty))
+		err := diag.Errorf(source.Span{}, "AMBIGUOUS INSTANCE", "Multiple modules provide equally preferred instances for `%s`.", types.ShowPred(p.Class, p.Ty))
 		for _, c := range finalists {
 			location := c.in.Owner
 			if c.in.Span.File != nil {
@@ -151,6 +151,28 @@ func (ck *Checker) matchingInstances(p types.Pred, owner string, limit int) []in
 		}
 	}
 	return best
+}
+
+// instanceOverlap reports why an instance with this head and context may not
+// coexist with old, or "" when they may. Registration and the whole-graph
+// recheck share it so the two cannot drift apart.
+func instanceOverlap(old *InstanceInfo, head types.Type, preds []types.Pred) string {
+	oldGeq := headAtLeastAsSpecific(old.Head, head)
+	newGeq := headAtLeastAsSpecific(head, old.Head)
+	at := old.Span.StartPos()
+	switch {
+	case oldGeq && newGeq && contextIncludes(head, preds, old.Head, old.Preds) && contextIncludes(old.Head, old.Preds, head, preds):
+		return fmt.Sprintf("duplicates the instance declared at %v.", at)
+	case !oldGeq && !newGeq && headsUnify(old.Head, head):
+		return fmt.Sprintf("overlaps the instance declared at %v; neither is more specific, so some uses would be ambiguous.", at)
+	case oldGeq != newGeq && conHead(old.Head) && conHead(head):
+		// One head specializes the other's arguments. Evidence for a
+		// constructed type is composed from its arguments' evidence wherever
+		// those arguments are not yet known, and composition cannot consult
+		// such a specialization, so the two would disagree by call site.
+		return fmt.Sprintf("specializes the instance declared at %v. An instance for a constructed type is composed from its arguments' instances, so a specialized argument would be ignored wherever that argument is not yet known.", at)
+	}
+	return ""
 }
 
 // contextIncludes aligns equivalent heads before comparing predicate sets.

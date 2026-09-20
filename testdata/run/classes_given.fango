@@ -1,9 +1,15 @@
+-- A polymorphic function uses the evidence its caller supplies, so the same
+-- body selects different instances at different instantiations. The two
+-- instances share a head and differ only in context, which is what context
+-- precedence resolves.
 type Box a = Box a
+type Opaque = Opaque
+
+instance Show (Box a)
+    show box = "fallback"
 instance Show a => Show (Box a)
     show box = case box of
         Box value -> "generic " ++ show value
-instance Show (Box Int)
-    show box = "specific"
 
 render : Show (Box a) => Box a -> String
 render box = show box
@@ -12,5 +18,5 @@ renderer = show
 
 main =
     print (render (Box "hi"))
-    print (render (Box 1))
+    print (render (Box Opaque))
     print (renderer (Box 2))

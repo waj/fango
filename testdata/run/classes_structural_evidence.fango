@@ -2,9 +2,6 @@ type Box a = Box a
 instance Show a => Show (Box a)
     show box = case box of
         Box value -> "box " ++ show value
-instance Show (Box String)
-    show box = "special string box"
-
 type Wrapper a = Wrapper (Box a)
 instance Show (Box a) => Show (Wrapper a)
     show wrapper = case wrapper of

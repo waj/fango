@@ -171,6 +171,14 @@ func headAtLeastAsSpecific(a, b types.Type) bool {
 	return matchHead(b, a, map[int]types.Type{}) == headYes
 }
 
+// conHead distinguishes a constructor-headed instance from a blanket one.
+// Only constructor heads are composed at a not-yet-known argument, so only
+// they are held to one head per type constructor.
+func conHead(t types.Type) bool {
+	_, ok := t.(*types.TCon)
+	return ok
+}
+
 // canonicalHeadKey renders an instance head deterministically for name
 // mangling: fully-qualified constructor names (including the distinct "()"), arguments in
 // parentheses only when present, and variables as $<i> by first occurrence,
