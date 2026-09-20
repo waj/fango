@@ -133,7 +133,7 @@ of its own.
 Matching first selects the most specific visible head, which orders a blanket
 against a constructor head. Equivalent heads may have different contexts.
 Duplicate head/context pairs, incomparable overlapping heads, and one
-constructor head specializing another's arguments all report
+constructor head whose arguments are more specific than another's all report
 `OVERLAPPING INSTANCE`; renaming variables, reordering constraints, or
 repeating a constraint does not make a distinct instance.
 

@@ -31,6 +31,11 @@ type Pos struct {
 	Line, Col int
 }
 
+// String renders a position the way editors and the rest of the tooling
+// spell one, so a diagnostic pointing at another declaration reads as a
+// place rather than a pair of numbers.
+func (p Pos) String() string { return fmt.Sprintf("%d:%d", p.Line, p.Col) }
+
 // Span is a half-open byte range [Start, End) in File.
 type Span struct {
 	File       *File

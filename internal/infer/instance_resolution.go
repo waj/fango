@@ -244,7 +244,16 @@ func instanceOverlap(old *InstanceInfo, head types.Type, preds []types.Pred) str
 		// constructed type is composed from its arguments' evidence wherever
 		// those arguments are not yet known, and composition cannot consult
 		// such a specialization, so the two would disagree by call site.
-		return fmt.Sprintf("specializes the instance declared at %v. An instance for a constructed type is composed from its arguments' instances, so a specialized argument would be ignored wherever that argument is not yet known.", at)
+		general := old.Head
+		if oldGeq {
+			general = head
+		}
+		con := general
+		if t, ok := general.(*types.TCon); ok {
+			con = &types.TCon{Unique: t.Unique, Name: t.Name}
+		}
+		return fmt.Sprintf("is more specific than `%s` at %v.\nAn instance for `%s` is chosen by what its arguments can do, never by\nwhich types they are, so this one would be skipped everywhere the\nargument type is not known yet. Constrain the arguments instead, or\ngive this form a named type of its own.",
+			types.ShowPred(old.Class.Name, general), at, types.Show(con))
 	}
 	return ""
 }
