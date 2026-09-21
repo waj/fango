@@ -1,0 +1,20 @@
+-- A bound closure keeps reaching its own activation when it is called inside
+-- an unrelated handler of the same effect: the inner activation is innermost
+-- at the call, and answers nothing here.
+effect Counter
+    tick : () -> Int
+
+type Cell = Cell (() -> Int)
+
+counter : Int -> (Cell ->{IO} a) ->{IO} a
+counter start use =
+    handle use (Cell (\_ -> tick())) with n = start of
+        tick () -> resume n with n + 1
+
+main() =
+    counter 0 (\outer ->
+        case outer of
+            Cell ta ->
+                print (ta())
+                counter 500 (\_ -> print (ta()))
+                print (ta()))

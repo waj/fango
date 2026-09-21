@@ -44,9 +44,10 @@ exhaust once. A parser needs lookahead over a retained buffer. The right
 relationship is that a reader *offers* a `Stream Bytes`, not that it is built
 from one.
 
-And an operation always reaches the innermost handler, so two readers cannot
-be driven at once. [Handler instances](roadmap-instances.md) closes that gap
-and this layer depends on it.
+And a reader has to reach its own handler rather than the innermost one, so
+that two readers can be driven at once. Binding a closure to an activation
+does that, and this layer depends on the part of it that
+[handler instances](roadmap-instances.md) still owns.
 
 ## Step 1 — three compiler defects
 
@@ -141,13 +142,13 @@ for.
 
 ### Handler instances
 
-[Handler instances](roadmap-instances.md) owns the design. This layer needs
-one thing from it: inside a handler's subject, a closure performing the
-handled effect may be adapted to an arrow carrying the handler's residual row
-instead, which binds it to that activation. A reader is then an ordinary
-record of such closures, and two readers are two records. Both effects here
-are unparameterized, so the row-label rule change discussed in that document
-is not on this path.
+The rule this layer needs is implemented for closed, concrete rows:
+[effects](reference/effects.md#binding-a-closure-to-a-handler-activation) owns
+it. A reader is an ordinary record of closures bound to one activation, and two
+readers are two records. What is still missing is the row-polymorphic wrapper
+shape and the transport of a bound closure, both owned by
+[handler instances](roadmap-instances.md). Both effects here are
+unparameterized, so the row-label rule discussed there is not on this path.
 
 ### A closed row as a type argument
 
@@ -491,11 +492,11 @@ segfault repro above compiles and runs, with fixtures covering a
 row-polymorphic handler instantiated at same-module, cross-module, and `IO`
 effects.
 
-**2. Prerequisites.** The binding rule's acceptance is in
-[that document](roadmap-instances.md#a-the-rule). A closed row is accepted
-as a type argument and rejected at a non-row parameter with a kind error.
-`ignore` lands in `Basics`. The accumulator `Writer` is gone from the library,
-the reference, and the fixtures.
+**2. Prerequisites.** What the binding rule still owes this layer is in
+[that document](roadmap-instances.md#the-row-polymorphic-wrapper-shape). A
+closed row is accepted as a type argument and rejected at a non-row parameter
+with a kind error. `ignore` lands in `Basics`. The accumulator `Writer` is gone
+from the library, the reference, and the fixtures.
 
 **3. `Bytes`.** Differential interpreter/compiler coverage for every operation,
 including empty, out-of-range, and invalid-UTF-8 inputs. A scan over a large

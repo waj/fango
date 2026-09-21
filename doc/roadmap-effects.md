@@ -365,10 +365,6 @@ These do not block the committed sequence unless a concrete API requires them:
   Go's generic-field/method restrictions cannot be bypassed with unchecked `any`.
 - **Complete builtin IO interception:** wait until actual native declarations and
   class evidence fit that ABI; fixed-signature domain interpretations work now.
-- **Named effect instances:** now proposed in
-  [handler instances](roadmap-instances.md) as a rule binding a closure to the
-  activation whose subject it is written in; the duplicate-row-label rule is
-  recorded there as related work.
 - **Non-tail resumption and escaping computation owners:** neither is needed for
   scoped streams/tasks. Require a concrete consumer and a checked ownership
   contract before scheduling them. Raw escaping resume and multi-shot cloning

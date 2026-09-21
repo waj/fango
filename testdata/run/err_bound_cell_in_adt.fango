@@ -1,0 +1,13 @@
+-- Wrapping the bound closure in an ADT does not shorten what it retains.
+effect Counter
+    tick : () -> Int
+
+type Cell = Cell (() -> Int)
+type Boxed = Boxed Cell
+
+leak : Int -> Boxed
+leak start =
+    handle Boxed (Cell (\_ -> tick())) with n = start of
+        tick () -> resume n with n + 1
+
+main = 0

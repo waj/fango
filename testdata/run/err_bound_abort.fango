@@ -1,0 +1,15 @@
+-- An abort unwinds to its own activation, so it cannot be bound to one.
+effect Stop
+    abort stop : () -> value
+
+type Halt = Halt (() -> Int)
+
+guarded : (Halt -> Int) -> Int
+guarded use =
+    handle use (Halt (\_ -> stop())) of
+        stop () -> 0
+
+main() =
+    print (guarded (\h ->
+        case h of
+            Halt bail -> bail()))

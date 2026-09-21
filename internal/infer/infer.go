@@ -61,6 +61,11 @@ type Constraint struct {
 	Subsume   bool
 	ADTs      map[int]*types.ADTInfo
 	Invariant []types.Type
+	// Bind holds the handler activations whose subjects lexically contain the
+	// closure this constraint adapts, outermost first. It carries the handler
+	// instance rule of doc/reference/effects.md: a label one of them handles
+	// may be replaced by what that handler's clauses perform.
+	Bind []*HandlerInfo
 }
 
 // Env maps top-level names to schemes; block scopes and function parameters
@@ -398,6 +403,11 @@ type HandlerInfo struct {
 	BodyResult types.Type
 	StateType  types.Type
 	Clauses    []HandlerClauseInfo
+	// ClauseEffects are the rows the operation clauses perform, recorded as
+	// the clause bodies are generated. A `resume` call is left out: it
+	// returns to the perform site, whose remaining effects belong to that site
+	// rather than to a closure bound to this activation.
+	ClauseEffects []types.Type
 }
 
 // Module checks declarations: type headers first (so types may be mutually
@@ -1377,6 +1387,44 @@ type generator struct {
 	patternBinder     string
 	annotationAmbient *types.Row
 	localAnnotations  []localAnnotation
+	// subjectHandlers are the handlers whose subject the generator is inside,
+	// outermost first, and lambdaBinders records that stack for every lambda
+	// written there. clauseEffects collects into the handler currently having
+	// its clauses generated, and is nil wherever the ambient row is not that
+	// handler's clause row.
+	subjectHandlers []*HandlerInfo
+	lambdaBinders   map[ast.Expr][]*HandlerInfo
+	clauseEffects   *[]types.Type
+}
+
+// performs records that the ambient row absorbs eff, and that the handler
+// whose clauses are being generated performs it. A resume call carries the
+// residual row of its own handler, which the continuation performs at the
+// perform site, so it is not something the clause itself performs.
+func (g *generator) performs(eff types.Type, span source.Span, resume bool) {
+	g.cs = append(g.cs, Constraint{Left: eff, Right: g.ambient, Span: span, Why: Why{Kind: WhyCall}, Include: true})
+	if g.clauseEffects != nil && !resume {
+		*g.clauseEffects = append(*g.clauseEffects, eff)
+	}
+}
+
+// argument builds the compatibility constraint for an argument or record
+// field, carrying the handler activations a lambda written there may bind to.
+func (g *generator) argument(actual, want types.Type, e ast.Expr) Constraint {
+	return Constraint{Left: actual, Right: want, Span: e.Span(), Why: Why{Kind: WhyCall},
+		Subsume: true, ADTs: g.ck.ADTs, Bind: g.lambdaBinders[e]}
+}
+
+// enterAmbient switches the ambient row and suspends clause-effect recording,
+// which describes only what runs directly in the clause it belongs to.
+func (g *generator) enterAmbient(row types.Row) (types.Row, *[]types.Type) {
+	saved, sink := g.ambient, g.clauseEffects
+	g.ambient, g.clauseEffects = row, nil
+	return saved, sink
+}
+
+func (g *generator) leaveAmbient(row types.Row, sink *[]types.Type) {
+	g.ambient, g.clauseEffects = row, sink
 }
 
 func (g *generator) isDefaultPrint(op *types.EffectOp) bool {
@@ -1496,7 +1544,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			if idx < 0 {
 				g.errs = append(g.errs, diag.Errorf(f.NameSpan, "UNKNOWN FIELD", "Record `%s` has no field named `%s`.", types.SurfaceName(adt.Con.Name), f.Name))
 			} else {
-				g.cs = append(g.cs, Constraint{Left: ft, Right: fieldTys[idx], Span: f.Value.Span(), Why: Why{Kind: WhyCall}, Subsume: true, ADTs: g.ck.ADTs})
+				g.cs = append(g.cs, g.argument(ft, fieldTys[idx], f.Value))
 			}
 		}
 		for _, f := range adt.RecordFields {
@@ -1539,7 +1587,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			args := appArgs(e)
 			for i, a := range args {
 				at := g.exprWant(a, params[i])
-				g.cs = append(g.cs, Constraint{Left: at, Right: params[i], Span: a.Span(), Why: Why{Kind: WhyCall}, Subsume: true, ADTs: g.ck.ADTs})
+				g.cs = append(g.cs, g.argument(at, params[i], a))
 			}
 			cur := inst
 			var last *types.TFun
@@ -1547,7 +1595,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 				last = cur.(*types.TFun)
 				cur = last.Ret
 			}
-			g.cs = append(g.cs, Constraint{Left: last.Eff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
+			g.performs(last.Eff, e.Span(), false)
 			ty = result
 			g.ck.OpCalls[e] = op
 			if len(op.LocalVars) > 0 && !op.Abort && op.Native == nil && !g.isDefaultPrint(op) {
@@ -1570,13 +1618,14 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			Span:  e.Fn.Span(),
 			Why:   Why{Kind: WhyCall},
 		})
-		g.cs = append(g.cs, Constraint{Left: argTy, Right: paramTy, Span: e.Arg.Span(), Why: Why{Kind: WhyCall}, Subsume: true, ADTs: g.ck.ADTs})
-		g.cs = append(g.cs, Constraint{Left: callEff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
+		g.cs = append(g.cs, g.argument(argTy, paramTy, e.Arg))
+		_, isResume := e.Fn.(*ast.Resume)
+		g.performs(callEff, e.Span(), isResume)
 		ty = r
 		if op, n := g.operationSpine(e); op != nil && n < op.Arity {
 			g.ck.OpCalls[e] = op
 		}
-		if _, ok := e.Fn.(*ast.Resume); ok {
+		if isResume {
 			g.ck.ResumeCalls[e] = true
 		}
 	case *ast.Neg:
@@ -1610,13 +1659,20 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		paramTys := g.bindParams(scope, e.Params)
 		g.patternBinder = oldBinder
 		g.patternPins = oldPins
-		savedAmbient := g.ambient
 		bodyAmbient := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
-		g.ambient = bodyAmbient
+		savedAmbient, savedSink := g.enterAmbient(bodyAmbient)
 		bodyTy := g.expr(e.Body)
-		g.ambient = savedAmbient
+		g.leaveAmbient(savedAmbient, savedSink)
 		g.locals = scope.parent
 		funTy := g.wrapFunction(paramTys, bodyTy, bodyAmbient)
+		// A closure written in a handler's subject may be bound to that
+		// handler's activation where the position it goes to omits the label.
+		if len(g.subjectHandlers) > 0 {
+			if g.lambdaBinders == nil {
+				g.lambdaBinders = map[ast.Expr][]*HandlerInfo{}
+			}
+			g.lambdaBinders[e] = append([]*HandlerInfo(nil), g.subjectHandlers...)
+		}
 		ty = funTy
 	case *ast.Handle:
 		ty = g.handle(e)
@@ -1740,15 +1796,22 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	if e.State != nil {
 		stateTy = g.expr(e.State.Initial)
 	}
-	g.ambient = types.Row{Labels: []types.EffLabel{label}, Tail: residualVar}
+	info := &HandlerInfo{Effect: label, Residual: residual, Scope: g.ck.Sup.FreshScope(), Scoped: first.Owner.Scoped || e.State != nil, Result: result, StateType: stateTy}
+	// The subject is where a closure may be bound to this activation; the
+	// state initializer above runs before the activation exists, and the
+	// clauses below run outside it.
+	g.subjectHandlers = append(g.subjectHandlers, info)
+	savedSink := g.clauseEffects
+	g.ambient, g.clauseEffects = types.Row{Labels: []types.EffLabel{label}, Tail: residualVar}, nil
 	bodyTy := g.expr(e.Body)
+	g.subjectHandlers = g.subjectHandlers[:len(g.subjectHandlers)-1]
+	info.BodyResult = bodyTy
 	clauseAmbient := residual
 	if g.annotationAmbient != nil {
 		clauseAmbient = *g.annotationAmbient
 		g.cs = append(g.cs, Constraint{Left: clauseAmbient, Right: savedAmbient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
 	}
-	g.ambient = clauseAmbient
-	info := &HandlerInfo{Effect: label, Residual: residual, Scope: g.ck.Sup.FreshScope(), Scoped: first.Owner.Scoped || e.State != nil, Result: result, BodyResult: bodyTy, StateType: stateTy}
+	g.ambient, g.clauseEffects = clauseAmbient, &info.ClauseEffects
 	g.ck.ScopeSpans[info.Scope] = e.Sp
 	seen := map[string]bool{}
 	for i := range e.Clauses {
@@ -1853,6 +1916,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			g.errs = append(g.errs, diag.Errorf(e.Sp, "INCOMPLETE HANDLER", "The handler is missing a clause for `%s`.", op.Name))
 		}
 	}
+	g.clauseEffects = nil
 	if e.Return != nil {
 		eqs := e.Return.Equations
 		if len(eqs) == 0 {
@@ -1882,8 +1946,8 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	}
 	// Only the handled label is removed. Any residual effects from the body,
 	// clauses, or return clause compose into the surrounding expression.
-	g.cs = append(g.cs, Constraint{Left: residual, Right: savedAmbient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
-	g.ambient = savedAmbient
+	g.ambient, g.clauseEffects = savedAmbient, savedSink
+	g.performs(residual, e.Span(), false)
 	g.ck.HandleInfos[e] = info
 	return result
 }
@@ -2153,9 +2217,9 @@ func (g *generator) intrinsicCall(e *ast.App, name string) types.Type {
 			break
 		}
 		at := g.exprWant(arg, params[i])
-		g.cs = append(g.cs, Constraint{Left: at, Right: params[i], Span: arg.Span(), Why: Why{Kind: WhyCall}, Subsume: true, ADTs: g.ck.ADTs})
+		g.cs = append(g.cs, g.argument(at, params[i], arg))
 	}
-	g.cs = append(g.cs, Constraint{Left: last.Eff, Right: g.ambient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
+	g.performs(last.Eff, e.Span(), false)
 	return result
 }
 
@@ -2262,12 +2326,11 @@ func (g *generator) functionEquations(name string, nameSpan source.Span, eqs []a
 		}
 		g.patternBinder = oldBinder
 		g.patternPins = oldPins
-		savedAmbient := g.ambient
 		savedAnnotationAmbient := g.annotationAmbient
 		g.annotationAmbient = annotationAmbient
-		g.ambient = bodyAmbient
+		savedAmbient, savedSink := g.enterAmbient(bodyAmbient)
 		bodyTy := g.expr(eq.Body)
-		g.ambient = savedAmbient
+		g.leaveAmbient(savedAmbient, savedSink)
 		g.annotationAmbient = savedAnnotationAmbient
 		g.cs = append(g.cs, Constraint{Left: resultTy, Right: bodyTy, Span: eq.NameSpan, Why: Why{Kind: WhyRecursion, Name: name}})
 	}

@@ -1,0 +1,17 @@
+-- A closure that reaches the bound closure retains the activation too.
+effect Counter
+    tick : () -> Int
+
+type Cell = Cell (() -> Int)
+
+wrap : Cell -> () -> Int
+wrap c _ =
+    case c of
+        Cell step -> step()
+
+leak : Int -> (() -> Int)
+leak start =
+    handle wrap (Cell (\_ -> tick())) with n = start of
+        tick () -> resume n with n + 1
+
+main = 0

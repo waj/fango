@@ -201,6 +201,73 @@ expression and name the owning operation clause's location. Nested operation
 clauses bind their own resume, while nested handled bodies and return groups
 retain the surrounding resume binding.
 
+## Binding a closure to a handler activation
+
+An operation resolves to the innermost handler at the moment it is performed,
+whenever the effect is still named in the performing closure's row. Inside the
+subject of a `handle`, a closure whose row names the handled effect may instead
+be adapted to an arrow that does not name it. The adaptation binds every
+performance of that effect in the closure to the activation this `handle`
+installs, so the closure reaches that activation however many handlers of the
+same effect are installed when it is finally called:
+
+```fango
+effect Counter
+    tick : () -> Int
+
+type Cell = Cell (() -> Int)
+
+counter : Int -> (Cell ->{IO} a) ->{IO} a
+counter start use =
+    handle use (Cell (\_ -> tick())) with n = start of
+        tick () -> resume n with n + 1
+```
+
+Two nested counters answer independently, and the outer cell keeps counting
+from inside the inner activation:
+
+```fango
+main() =
+    counter 0 (\a ->
+        counter 100 (\b ->
+            case (a, b) of
+                (Cell ta, Cell tb) ->
+                    print (ta())
+                    print (tb())
+                    print (ta())))
+```
+
+prints `0`, `100`, `1`. Nothing else changes: a bare `tick()` written in the
+same subject still resolves to whichever handler is innermost when it runs, and
+the instance type is an ordinary user-declared type. There is no keyword and no
+new type former.
+
+The adaptation replaces the handled label with what the handler's clauses
+perform, because calling the bound closure runs those clauses. A closure bound
+in a handler whose clauses print cannot be adapted to a pure arrow; that is a
+`HANDLER CLAUSE EFFECTS` error naming the clause effects and the effects the
+position allows. A `resume` is not one of them: it returns to the perform site,
+whose remaining effects belong to that site.
+
+An abort-only operation cannot be bound. An abort unwinds to its own
+activation, so a bound abort called after that activation finished would
+unwind to a target nothing awaits; binding one is a `BOUND ABORT OPERATION`
+error.
+
+Binding changes nothing about lifetimes. A bound closure retains its
+activation's capability, so the [handler lifetimes](#handler-lifetimes) below
+apply unchanged: a parameterized handler is scoped, and its bound closure
+reported as a result, inside an ADT, captured by a closure, or stored in an
+outer handler is rejected with `STATE RESULT ESCAPES` or `RESOURCE ESCAPES`.
+Passing it inward to the handled computation, including into an inner
+activation of the same effect, is an inner owner retaining an outer resource
+and is permitted.
+
+Rows stay exact about the effects a bound closure performs, not about the
+handler's own state: a bound `() -> Int` is typed pure and still answers
+differently on each call, the same gap
+[`Stream.withCursor`](library-streams.md) leaves for a cursor.
+
 ## Handler lifetimes
 
 Ordinary stateless user-declared effects have durable evidence: returning a pure closure

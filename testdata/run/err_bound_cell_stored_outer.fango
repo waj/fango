@@ -1,0 +1,22 @@
+-- Storing the bound closure in an outer handler's state outlives the
+-- activation that answers it.
+effect Counter
+    tick : () -> Int
+
+type Cell = Cell (() -> Int)
+
+effect Store
+    keep : Cell -> ()
+
+inner : Int -> () ->{Store} ()
+inner start () =
+    handle keep (Cell (\_ -> tick())) with n = start of
+        tick () -> resume n with n + 1
+
+main() =
+    kept =
+        handle inner 0 () with saved = Cell (\_ -> 0) of
+            keep c -> resume () with c
+            return _ -> saved
+    case kept of
+        Cell step -> print (step())

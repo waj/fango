@@ -2,7 +2,7 @@
 
 Handler evidence, state, abort routing, cleanup, and callable execution modes.
 
-[Design index](../design.md). Source and checks: [Control contracts](../../internal/core/control.go), [Evidence](../../internal/core/evidence.go), [Runtime outcomes](../../runtime/fangort/outcome.go), [Control tests](../../internal/codegen/control_test.go), [Cleanup tests](../../internal/core/synchronous_scope_test.go).
+[Design index](../design.md). Source and checks: [Control contracts](../../internal/core/control.go), [Evidence](../../internal/core/evidence.go), [Activation binding](../../internal/infer/bind.go), [Runtime outcomes](../../runtime/fangort/outcome.go), [Control tests](../../internal/codegen/control_test.go), [Cleanup tests](../../internal/core/synchronous_scope_test.go).
 
 ## Arrows and operation discipline
 
@@ -43,6 +43,47 @@ Stateless source handlers are durable by default; parameterized handlers are
 scoped. Compiler-owned APIs may additionally mark evidence scoped, operation
 results borrowed, or arguments retained. All use the same
 [capture proof](ownership.md), without trusted runner-name exemptions.
+
+## Binding a closure to an activation
+
+Discharge is the switch between call-site and captured evidence, and the
+handler instance rule is the way a program asks for it. Inference carries, on
+every argument or field constraint that adapts a lambda written in a handler's
+subject, the enclosing activations that subject belongs to. When such an
+inclusion can hold only by losing a label one of them handles, the label is
+replaced by what that handler's clauses perform and the inclusion is solved
+again; the clause row is collected while the clause bodies are generated,
+leaving out the `resume` call, whose row describes the perform site's
+continuation rather than the clause. Those constraints are solved after the
+ordinary bounds, because a subject is generated before the clauses whose row it
+inherits. An abort-only label is refused instead: its runtime exit target
+belongs to one activation, which a bound abort could outlive.
+
+Nothing is recorded for elaboration. The lambda's row still names the label
+while the position it flows into does not, which is exactly the case
+`adaptFunctionValue` already answers by substituting the innermost lexical
+activation's captures into the body and dropping the lambda's evidence
+parameter — the same discharge that gives a `Scope.bracket` release closure its
+definition-site evidence. The closure then carries that activation's record of
+operation closures, so nested activations of one effect stay distinct without a
+special case, and the existing capture proof sees it retaining that scope.
+
+The Go backend materializes an activation's record at the transport of the
+worker that installed it. A bound closure whose own row fixes a lower transport
+than that worker's therefore has no member to call; the
+[roadmap](../roadmap-instances.md) owns that defect and the fix it needs.
+
+> **Invariant.** A pass that reorders, hoists, or shares calls must treat an
+> arrow whose parameters or captures include a resource-typed value or a value
+> bound to a handler activation as impure, whatever its row says.
+
+Rows are exact about the effects such an arrow performs, not about the state
+its activation owns, so a bound `() -> Int` is typed pure and still answers
+differently on each call. Discharge leaves the same gap for cursors. Nothing
+escapes unhandled — a scoped value exists only inside its own scope, so the
+activation is live whenever an operation runs — but the purity claim is
+inaccurate, and compile-time evaluation stays contained only because a splice
+can reach only an activation it created itself.
 
 ## Abort and cleanup protocol
 

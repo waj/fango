@@ -67,6 +67,8 @@ The bundled library is experimental and versioned with the compiler.
 
 [Effects and handlers](reference/effects.md#effects-and-handlers) — Operations, aborts, stateful handlers, and resume discipline.
 
+[Binding a closure to a handler activation](reference/effects.md#binding-a-closure-to-a-handler-activation) — Addressing one activation instead of the innermost handler.
+
 ## Cleanup scopes
 
 [Cleanup scopes](reference/resources.md) — Scope API, release ordering, failure precedence, and resource lifetimes.

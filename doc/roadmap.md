@@ -35,13 +35,14 @@ on the [effects roadmap](roadmap-effects.md).
 
 ## Addressing a specific handler
 
-[Handler instances](roadmap-instances.md) proposes one typing rule: inside a
-handler's subject, a closure performing the handled effect may be adapted to
-the handler's residual row, which binds it to that activation rather than to
-whichever handler is innermost when it is called. It adds no keyword or type
-former, supersedes the effects roadmap's deferred named-instance entry, and is
-a committed prerequisite of the byte IO layer, whose readers are such bound
-closures.
+The typing rule is implemented: inside a handler's subject, a closure
+performing the handled effect may be adapted to an arrow that omits it, which
+binds it to that activation rather than to whichever handler is innermost when
+it is called. [Effects](reference/effects.md#binding-a-closure-to-a-handler-activation)
+owns it. [Handler instances](roadmap-instances.md) now owns what the byte IO
+layer still needs from it: the row-polymorphic wrapper shape, and the backend
+defect that a bound closure's transport must be materializable below the
+worker that installed its activation.
 
 ## List representation
 

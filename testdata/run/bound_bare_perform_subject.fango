@@ -1,0 +1,31 @@
+-- A subject may both bind a closure and perform the effect bare. Only the
+-- binding is resolved once: the bare `tick()` written in the inner subject
+-- still reaches whichever handler is innermost when it runs, while the cell
+-- built in the outer subject keeps answering from the outer activation even
+-- though the inner one handles the same effect.
+effect Counter
+    tick : () -> Int
+
+type Cell = Cell (() -> Int)
+
+both : (Cell ->{IO} a) ->{IO} a
+both use =
+    handle
+        case Cell (\_ -> tick()) of
+            outerCell ->
+                handle
+                    case tick() of
+                        seen ->
+                            print seen
+                            use outerCell
+                with m = 100 of
+                    tick () -> resume m with m + 1
+    with n = 0 of
+        tick () -> resume n with n + 1
+
+main() =
+    both (\c ->
+        case c of
+            Cell ta ->
+                print (ta())
+                print (ta()))
