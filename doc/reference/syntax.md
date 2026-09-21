@@ -32,6 +32,12 @@ Bindings are eager and sequential. Unit-valued expression statements may be
 placed before the final result, which is how effectful work is sequenced.
 There is no `let ... in` expression.
 
+A call answering anything other than Unit is not a statement, and binding it
+would need a name nothing reads. `ignore : a -> ()`, declared in `Basics` and
+exposed by `Prelude`, is how a caller says it wants the effects and not the
+answer: `ignore (reader.skip 4)`. Its argument is evaluated before the call,
+like every argument.
+
 The same block may be written inline with `;` between its items. This works in
 every statement-bearing body: after `=`, `->`, `then`, and `else`, including
 case branches and handler clauses:

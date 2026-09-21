@@ -8,7 +8,7 @@ module Prelude exposing ()
 
 import Basics exposing
     ( Eq, Num, Ord, Show
-    , show
+    , ignore, show
     , (*), (+), (++), (-), (/), (/=), (<), (<=), (<|), (==), (>), (>=), (|>)
     )
 import IO exposing (IO, print, readLine)

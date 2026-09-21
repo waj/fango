@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Basics exposing (Eq(..), Num(..), Ord(..), Show(..), modBy, quotientBy, remainderBy, (++), (/), (/=), (<|), (|>))
+module Basics exposing (Eq(..), Num(..), Ord(..), Show(..), ignore, modBy, quotientBy, remainderBy, (++), (/), (/=), (<|), (|>))
 
 class Num a
     fromInt : Int -> a
@@ -239,6 +239,13 @@ modBy modulus x =
 -- A zero divisor crashes the program.
 quotientBy : Int -> Int -> Int
 quotientBy = native "$2 / $1"
+
+-- Discard an answer. A call stands as a statement only where its type is
+-- Unit, and a binding needs a name it would never read, so `ignore (f x)` is
+-- how a caller says it wants the effects and not the result. The argument is
+-- evaluated before the call, as every argument is.
+ignore : a -> ()
+ignore _ = ()
 
 -- Strict application, with the callback effects on the final arrow.
 (|>) : a -> (a ->{e} b) ->{e} b

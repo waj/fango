@@ -15,18 +15,18 @@ produce() =
     Stream.yield 1
     Stream.yield 2
 
-ignore : a -> Int
-ignore cursor = 42
+retain : a -> Int
+retain cursor = 42
 
 consume : Iterator.Iterator Int (State.State (Maybe (() -> Int))) ->{Iterator.Traversal, State.State (Maybe (() -> Int))} ()
 consume cursor =
     step element previous =
         case previous of
-            Empty -> Saved (\_ -> ignore cursor)
+            Empty -> Saved (\_ -> retain cursor)
             Saved read ->
                 State.put (Just read)
                 Empty
-    ignored = foldCursor step Empty cursor
+    unused = foldCursor step Empty cursor
     ()
 
 escape() = State.run Nothing (\_ -> Stream.withCursor (Stream.generate produce) consume)

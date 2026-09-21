@@ -3,8 +3,8 @@ import Iterator
 import State
 import Maybe exposing (Maybe(..))
 
-ignore cursor = 42
-save cursor = State.put (Just (\_ -> ignore cursor))
+retain cursor = 42
+save cursor = State.put (Just (\_ -> retain cursor))
 
 escape() =
     State.run Nothing (\_ ->
