@@ -22,6 +22,24 @@ for otherwise unavailable semantics or measured performance needs.
   insertion-order fixtures prove correctness rather than balance. A manual
   n-log-n versus quadratic benchmark is the proposed check.
 
+## Byte IO, buffered readers and writers
+
+[Bytes and readers](roadmap-io.md) owns the proposed `Bytes` value, `Reader`
+and `Writer` as handler activations over abstract byte sources, and the file,
+memory, and socket adapters beneath them, driven by an HTTP server as its
+consumer. `Bytes` is its only new runtime primitive; it depends on
+[handler instances](roadmap-instances.md) below, and it records the three
+compiler defects found on its path. A concurrent server additionally depends
+on the [effects roadmap](roadmap-effects.md).
+
+## Addressing a specific handler
+
+[Handler instances](roadmap-instances.md) proposes reifying a handler
+activation as a value, so an operation reaches a chosen activation rather
+than the innermost one. It supersedes the effects roadmap's deferred
+named-instance entry and is a committed prerequisite of the byte IO layer,
+whose readers and writers are activations.
+
 ## List representation
 
 [Lists](roadmap-list.md) owns chunk-size/growth experiments, length/indexing
