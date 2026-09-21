@@ -61,7 +61,16 @@ protocol-error paths clear frames, state, handlers, and suspension storage.
 ## Handlers and cleanup
 
 Machine handler bodies and clauses are separate typed workers with lexical
-evidence in frame fields. Stateful clauses carry an opaque cell token. Abort
+evidence in frame fields. Stateful clauses carry an opaque cell token.
+
+An activation the body reaches at Direct is the exception: its clauses neither
+exit nor suspend, so they stay ordinary closures and only the body is a machine
+region. Their state is one escaping variable they share, held through the
+machine's state stack so unwinding still accounts for it and the return clause
+reads the final value; the locals they read are snapshotted where the
+activation is installed and are live there. This is what lets a closure bound
+to such an activation keep its own Direct protocol inside a suspending
+computation. Abort
 routing unwinds only to its exact target before invoking the clause.
 
 A Machine Bracket has Exit acquire/release slots and a Machine body. Explicit

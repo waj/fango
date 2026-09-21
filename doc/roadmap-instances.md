@@ -5,19 +5,18 @@ is implemented. [Effects](reference/effects.md#binding-a-closure-to-a-handler-ac
 owns its behavior and diagnostics; [effect execution](design/effects.md#binding-a-closure-to-an-activation)
 owns the binding mechanism and the optimizer invariant it forces. This document
 now owns only what is left: the wrapper shape the [byte IO layer](roadmap-io.md)
-needs, and one backend defect the rule exposes. It replaces the "named effect
-instances" entry previously deferred in the
-[effects roadmap](roadmap-effects.md#deferred-topics).
+needs. It replaces the "named effect instances" entry previously deferred in
+the [effects roadmap](roadmap-effects.md#deferred-topics).
 
 Unless a block says otherwise, Fango below is an acceptance specification
 rather than a fixture that compiles today.
 
 ## The row-polymorphic wrapper shape
 
-The fixtures so far bind closures whose rows are closed and concrete, inside
-wrappers that are themselves fixed Direct. The byte IO readers are not: their
-operations expose the residual row of the source they read, so both the wrapper
-and the bound closures are transport-polymorphic.
+The fixtures so far bind closures whose rows are closed and concrete. The byte
+IO readers are not: their operations expose the residual row of the source they
+read, so the bound closures are transport-polymorphic and select a member per
+context rather than fixing one.
 
 ```fango
 effect Reading
@@ -64,43 +63,6 @@ way are not the rule's:
   `step : () -> Int` infers the field as `() ->{IO} a` from the ambient row
   before the obligation resolves, and then disagrees with the declaration.
   This predates the rule and blocks every record of bound closures.
-
-## A bound closure under machine lowering
-
-A bound closure's transport is its own row's, so the activation it captures has
-to be materialized there rather than at the transport of the worker that
-installed it. That now holds everywhere except under machine lowering, which
-still hands the handler's body worker a Machine-mode record unconditionally
-(`lowerHandle` in [machine lowering](../internal/machine/lower.go)).
-
-```fango
-effect Counter
-    tick : () -> Int
-
-type Cell = Cell (() -> Int)
-
--- The handled label in the callback's row is what gives this wrapper a
--- Machine variant; with `(Cell ->{IO} a)` the same program runs.
-counter : Int -> (Cell ->{Counter, IO} a) ->{IO} a
-counter start use =
-    handle use (Cell (\_ -> tick())) with n = start of
-        tick () -> resume n with n + 1
-```
-
-The Machine variant emits a `Direct` member for the bound closure whose body
-calls the Machine record, and Go rejects the generated package. The variant is
-reached only by a caller whose callback suspends, but it is emitted whether or
-not anyone calls it, so this is a compile failure on the program above rather
-than a latent one.
-
-The remaining work is to let an activation below Machine keep ordinary clauses
-inside a machine worker: the evidence record becomes ordinary Go closures over
-the handler's state instead of frame workers over a machine state token, and
-only the handler's body stays a machine region. The body's performs already
-lower correctly — a Direct `Perform` inside a machine worker is an ordinary
-evaluation — so the work is in `lowerHandle`, the `Handle` terminator's
-emission, and machine lint. It needs a fixture where the callback actually
-suspends, not only one where the variant is emitted.
 
 ## Related work, not required here
 

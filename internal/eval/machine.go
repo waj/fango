@@ -531,11 +531,13 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 		case *machineir.Handle:
 			h := term.Node
 			stateToken := -1
+			var initialState Value
 			if term.State != nil {
 				initial, err := eval(term.State.Initial)
 				if err != nil {
 					return MachineEvent{}, err
 				}
+				initialState = initial
 				stateToken = len(s.states)
 				s.states = append(s.states, initial)
 				if len(s.states) > s.stats.MaxStates {
@@ -543,6 +545,23 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				}
 			}
 			installed := &evidence{machineOps: map[int]*machineOperation{}}
+			if term.Ordinary {
+				// The activation's clauses neither exit nor suspend, so they
+				// stay ordinary Core over a snapshot of the locals they read,
+				// exactly as they would outside a machine. A closure bound to
+				// this activation then finds an interpretation it can run.
+				vars := make(map[string]Value, len(term.OrdinaryCaptures))
+				for _, capture := range term.OrdinaryCaptures {
+					vars[capture.Name] = frame.vars[capture.Name]
+				}
+				installed = &evidence{handler: h, frame: &Frame{vars: vars, rows: frame.rows, types: frame.types},
+					outer: cloneEvidence(frame.evidence), state: initialState}
+				if term.State != nil {
+					// The state lives on the activation; the slot keeps the
+					// handler's depth so unwinding still accounts for it.
+					s.states[stateToken] = installed
+				}
+			}
 			for _, clause := range term.Clauses {
 				worker := s.workers[clause.Worker]
 				values := make([]Value, len(clause.Captures))
@@ -720,7 +739,13 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			s.frames[len(s.frames)-1].vars[bind] = value
 			if stateName != "" {
 				i := len(s.states) - 1
-				s.frames[len(s.frames)-1].vars[stateName] = s.states[i]
+				final := s.states[i]
+				if activation, ok := final.(*evidence); ok {
+					// An activation with ordinary clauses owns its state; the
+					// slot only held its depth.
+					final = activation.state
+				}
+				s.frames[len(s.frames)-1].vars[stateName] = final
 				s.states[i] = nil
 				s.states = s.states[:i]
 			}

@@ -62,7 +62,9 @@ func lintClosure(closure Closure, workers map[string]*Worker) []error {
 				return false
 			}
 		}
-		return a.Control == (types.Control{Transport: types.Machine})
+		// The lowered side is pinned to the protocol the closure reaches this
+		// interpretation at, which is Direct only for a fixed Direct activation.
+		return a.Control == (types.Control{Transport: Mode(b.Control)})
 	}
 	needed := core.FreeEvidence(closure.Expr)
 	for _, ev := range closure.CapturedEvidence {
@@ -226,7 +228,9 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 						continue
 					}
 					actual := ev
-					actual.Control = types.Control{Transport: types.Machine}
+					// A worker reaches each interpretation at the protocol
+					// machineEvidence pinned it to.
+					actual.Control = types.Control{Transport: Mode(ev.Control)}
 					if !core.EqualEvidenceActivation(actual, expected) {
 						errs = append(errs, fmt.Errorf("%s: stale residual evidence activation", blockWhere))
 					}
@@ -421,9 +425,12 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 					errs = append(errs, fmt.Errorf("%s: abort result binding has the wrong type", blockWhere))
 				}
 			}
-			if term.Node == nil || len(term.Clauses) == 0 {
+			if term.Node == nil || (len(term.Clauses) == 0) != term.Ordinary {
 				errs = append(errs, fmt.Errorf("%s: malformed or unsupported machine handler", blockWhere))
 				break
+			}
+			if term.Ordinary && (term.Abort || Mode(term.Node.Effect.Control) != types.Direct) {
+				errs = append(errs, fmt.Errorf("%s: ordinary handler clauses at a machine activation", blockWhere))
 			}
 			if !core.EqualValueRepresentation(term.Bind.Ty, term.Node.Body.Type()) {
 				errs = append(errs, fmt.Errorf("%s: normal handler result binding has the wrong type", blockWhere))

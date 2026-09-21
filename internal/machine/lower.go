@@ -246,10 +246,22 @@ func localRefTypes(e core.Expr) map[string]types.Type {
 
 func identityType(t types.Type) types.Type { return t }
 
+// Mode is the protocol a lowered frame reaches an interpretation at. An
+// abstract capability, an abort target, and anything that may suspend are all
+// taken at Machine. A concrete activation whose clauses neither exit nor
+// suspend keeps Direct, so the worker calls that record as an ordinary
+// function and a closure bound to it has a member to call.
+func Mode(c types.Control) types.Transport {
+	if c == (types.Control{}) {
+		return types.Direct
+	}
+	return types.Machine
+}
+
 func machineEvidence(evidence []core.EffectInstance) []core.EffectInstance {
 	out := append([]core.EffectInstance(nil), evidence...)
 	for i := range out {
-		out[i].Control = types.Control{Transport: types.Machine}
+		out[i].Control = types.Control{Transport: Mode(out[i].Control)}
 	}
 	return out
 }
@@ -442,7 +454,8 @@ func (b *builder) lowerHandle(h *core.Handle, bind Local, next BlockID) BlockID 
 		}
 	}
 	handled := h.Effect
-	handled.Control = types.Control{Transport: types.Machine}
+	handled.Control = types.Control{Transport: Mode(h.Effect.Control)}
+	ordinary := handled.Control.Transport != types.Machine
 	inner = append(inner, handled)
 
 	bodyCaptures := b.regionCaptures(h.Body)
@@ -463,9 +476,22 @@ func (b *builder) lowerHandle(h *core.Handle, bind Local, next BlockID) BlockID 
 		handlerNext = b.lowerInto(transformed, bind, next)
 	}
 	term := &Handle{Node: h, BodyWorker: bodyWorker, BodyCaptures: bodyCaptures, Bind: handlerBind, Next: handlerNext,
-		Abort: abort, AbortNext: next, AbortBind: bind,
+		Ordinary: ordinary, Abort: abort, AbortNext: next, AbortBind: bind,
 		State: h.State, StateResult: stateResult}
+	seenCapture := map[string]bool{}
 	for _, clause := range h.Clauses {
+		if ordinary {
+			// The clause stays ordinary Go over the handler's state; only the
+			// Machine callbacks written inside it need frames of their own.
+			b.registerMachineLambdas(clause.Body)
+			for _, capture := range b.regionCaptures(clause.Body) {
+				if !seenCapture[capture.Name] {
+					seenCapture[capture.Name] = true
+					term.OrdinaryCaptures = append(term.OrdinaryCaptures, capture)
+				}
+			}
+			continue
+		}
 		captures := b.regionCaptures(clause.Body)
 		body := core.Rewrite(clause.Body, identityType, func(e core.Expr) core.Expr {
 			if resume, ok := e.(*core.ResumeTail); ok && resume.Owner == clause.ResumeID && h.State == nil && !abort {

@@ -39,10 +39,8 @@ The typing rule is implemented: inside a handler's subject, a closure
 performing the handled effect may be adapted to an arrow that omits it, which
 binds it to that activation rather than to whichever handler is innermost when
 it is called. [Effects](reference/effects.md#binding-a-closure-to-a-handler-activation)
-owns it. [Handler instances](roadmap-instances.md) now owns what the byte IO
-layer still needs from it: the row-polymorphic wrapper shape, and letting an
-activation keep ordinary clauses inside a machine worker so a bound closure
-below Machine has a record to call.
+owns it. [Handler instances](roadmap-instances.md) now owns only what the byte
+IO layer still needs from it: the row-polymorphic wrapper shape.
 
 ## List representation
 

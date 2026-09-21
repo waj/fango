@@ -175,6 +175,13 @@ type Handle struct {
 	ReturnCaptures []Local
 	Bind           Local
 	Next           BlockID
+	// Ordinary marks an activation the body reaches at Direct: its clauses
+	// neither exit nor suspend, so they stay ordinary closures over the
+	// handler's state rather than frame workers, and Clauses is empty.
+	// OrdinaryCaptures are the locals those clause bodies read, which have to
+	// be live where the activation is installed and are snapshotted there.
+	Ordinary         bool
+	OrdinaryCaptures []Local
 	// Abort selects the non-resumptive exit-routing protocol. AbortNext is
 	// reached after an abort clause returns; ordinary completion uses Next.
 	Abort       bool

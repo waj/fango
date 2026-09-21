@@ -42,11 +42,12 @@ uses an activation cell; Go uses a captured local. No continuation is captured.
 An installed activation's evidence carries the transport its own clauses need,
 not the enclosing worker's: the interpretation is known where the handler is
 written, so a handler whose clauses neither exit nor suspend stays Direct
-inside an Exit worker and a perform there wraps its plain result, the same
-adaptation a Direct evidence record passed to a wider callee already gets.
-Machine lowering is the exception and still installs a Machine-mode record.
-Discharge carries that transport with the captures it substitutes, so a
-closure bound to the activation calls the record that actually exists.
+inside an Exit or Machine worker, and a perform there wraps its plain result,
+the same adaptation a Direct evidence record passed to a wider callee already
+gets. Under machine lowering such an activation keeps
+[ordinary clauses](machines.md#handlers-and-cleanup). Discharge carries that
+transport with the captures it substitutes, so a closure bound to the
+activation calls the record that actually exists.
 
 Stateless source handlers are durable by default; parameterized handlers are
 scoped. Compiler-owned APIs may additionally mark evidence scoped, operation
@@ -77,10 +78,9 @@ definition-site evidence. The closure then carries that activation's record of
 operation closures, so nested activations of one effect stay distinct without a
 special case, and the existing capture proof sees it retaining that scope.
 
-A bound closure's transport is its own row's, so the activation it captures has
-to be materialized there. That holds except under machine lowering, which still
-installs a Machine-mode record; the [roadmap](../roadmap-instances.md) owns what
-is left.
+A bound closure's transport is its own row's, so the activation it captures is
+materialized there, whatever protocol the worker that installed it was compiled
+for.
 
 > **Invariant.** A pass that reorders, hoists, or shares calls must treat an
 > arrow whose parameters or captures include a resource-typed value or a value

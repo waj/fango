@@ -146,8 +146,7 @@ The rule this layer needs is implemented for closed, concrete rows:
 [effects](reference/effects.md#binding-a-closure-to-a-handler-activation) owns
 it. A reader is an ordinary record of closures bound to one activation, and two
 readers are two records. What is still missing is the row-polymorphic wrapper
-shape and a bound closure under machine lowering, both owned by
-[handler instances](roadmap-instances.md). Both effects here are
+shape, owned by [handler instances](roadmap-instances.md). Both effects here are
 unparameterized, so the row-label rule discussed there is not on this path.
 
 ### A closed row as a type argument

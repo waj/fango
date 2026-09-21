@@ -117,6 +117,9 @@ func termUses(term Term, known map[string]bool) map[string]bool {
 				out[capture.Name] = true
 			}
 		}
+		for _, capture := range term.OrdinaryCaptures {
+			out[capture.Name] = true
+		}
 		for _, capture := range term.ReturnCaptures {
 			out[capture.Name] = true
 		}

@@ -1755,56 +1755,19 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	}
 	evidenceMode := e.Effect.Control.Resolve(g.control)
 	stateCell := ""
+	var state *handlerState
 	if e.State != nil {
 		stateCell = fmt.Sprintf("t_state%d", g.tmp)
 		g.tmp++
+		state = &handlerState{
+			read:  func() goast.Expr { return ident(stateCell) },
+			write: func(next goast.Expr) goast.Stmt { return assignStmt(stateCell, next) },
+		}
 	}
-	fields := make([]*goast.Field, len(e.Clauses))
-	elts := make([]goast.Expr, len(e.Clauses))
-	for i, c := range e.Clauses {
-		params := make([]paramSpec, 0, len(c.Params))
-		for j, p := range c.Params {
-			if p == "()" || p == "_" {
-				p = "_"
-			} else {
-				p = mangleValue(p)
-			}
-			if g.isUnit(c.Op.ParamTypes[j]) {
-				continue
-			}
-			params = append(params, paramSpec{name: p, typ: g.goType(c.ParamTypes[j])})
-		}
-		results := &goast.FieldList{}
-		if evidenceMode == types.Exit {
-			results = &goast.FieldList{List: []*goast.Field{{Type: g.outcomeType(c.ResultType)}}}
-		} else if !g.isUnit(c.Op.ResultType) {
-			results = &goast.FieldList{List: []*goast.Field{{Type: g.goType(c.ResultType)}}}
-		}
-		ft := &goast.FuncType{Params: paramFields(params), Results: results}
-		fields[i] = &goast.Field{Names: []*goast.Ident{ident("Op_" + linkName(c.Op.Name))}, Type: ft}
-		var clausePrefix []goast.Stmt
-		if e.State != nil {
-			clausePrefix = append(clausePrefix,
-				varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), ident(stateCell)),
-				assignBlank(ident(mangleValue(e.State.Name))))
-		}
-		oldControl, oldResult := g.control, g.resultType
-		g.control, g.resultType = evidenceMode, c.ResultType
-		clauseBody := g.resumeStmtsFor(c.Body, c.ResumeID, g.isUnit(c.Op.ResultType), stateCell, func() types.Type {
-			if e.State != nil {
-				return e.State.Ty
-			}
-			return nil
-		}())
-		g.control, g.resultType = oldControl, oldResult
-		fn := &goast.FuncLit{Type: ft, Body: &goast.BlockStmt{List: append(clausePrefix, clauseBody...)}}
-		elts[i] = &goast.KeyValueExpr{Key: ident("Op_" + linkName(c.Op.Name)), Value: fn}
-	}
-	_ = fields
-	st := g.effectType(e.Effect)
+	st, record := g.handlerEvidence(e, evidenceMode, state)
 	name := fmt.Sprintf("ev%d", g.tmp)
 	g.tmp++
-	decl := varDeclStmt(name, st, &goast.CompositeLit{Type: st, Elts: elts})
+	decl := varDeclStmt(name, st, record)
 	g.evidence[e.Effect.Unique] = append(g.evidence[e.Effect.Unique], ident(name))
 	g.evidenceModes[e.Effect.Unique] = append(g.evidenceModes[e.Effect.Unique], evidenceMode)
 	body := g.expr(e.Body, 0)
@@ -2188,7 +2151,62 @@ func (g *gen) zeroReturn(t types.Type) []goast.Stmt {
 // becomes a direct return of v from the evidence operation field; the
 // caller's ordinary Go continuation then proceeds with that operation
 // result. No continuation object or non-local control transfer is needed.
-func (g *gen) resumeStmtsFor(e core.Expr, owner types.ResumeID, unitResult bool, stateCell string, stateType types.Type) []goast.Stmt {
+// handlerState is where a parameterized handler's mutable state lives while
+// its activation is installed. An ordinary handler uses a Go local; a handler
+// whose body is a machine region cannot, because the local does not survive
+// the body suspending, so it uses a cell the machine holds instead.
+type handlerState struct {
+	read  func() goast.Expr
+	write func(goast.Expr) goast.Stmt
+}
+
+// handlerEvidence builds an installed activation's record of operation
+// closures: one ordinary Go function per clause over the handler's state. The
+// record's protocol is the activation's own — its clauses' — so this is also
+// how a handler installs an ordinary record inside a machine worker, when its
+// clauses neither exit nor suspend.
+func (g *gen) handlerEvidence(e *core.Handle, mode types.Transport, state *handlerState) (goast.Expr, goast.Expr) {
+	elts := make([]goast.Expr, len(e.Clauses))
+	for i, c := range e.Clauses {
+		params := make([]paramSpec, 0, len(c.Params))
+		for j, p := range c.Params {
+			if p == "()" || p == "_" {
+				p = "_"
+			} else {
+				p = mangleValue(p)
+			}
+			if g.isUnit(c.Op.ParamTypes[j]) {
+				continue
+			}
+			params = append(params, paramSpec{name: p, typ: g.goType(c.ParamTypes[j])})
+		}
+		results := &goast.FieldList{}
+		if mode == types.Exit {
+			results = &goast.FieldList{List: []*goast.Field{{Type: g.outcomeType(c.ResultType)}}}
+		} else if !g.isUnit(c.Op.ResultType) {
+			results = &goast.FieldList{List: []*goast.Field{{Type: g.goType(c.ResultType)}}}
+		}
+		ft := &goast.FuncType{Params: paramFields(params), Results: results}
+		var clausePrefix []goast.Stmt
+		var stateType types.Type
+		if e.State != nil {
+			stateType = e.State.Ty
+			clausePrefix = append(clausePrefix,
+				varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), state.read()),
+				assignBlank(ident(mangleValue(e.State.Name))))
+		}
+		oldControl, oldResult := g.control, g.resultType
+		g.control, g.resultType = mode, c.ResultType
+		clauseBody := g.resumeStmtsFor(c.Body, c.ResumeID, g.isUnit(c.Op.ResultType), state, stateType)
+		g.control, g.resultType = oldControl, oldResult
+		fn := &goast.FuncLit{Type: ft, Body: &goast.BlockStmt{List: append(clausePrefix, clauseBody...)}}
+		elts[i] = &goast.KeyValueExpr{Key: ident("Op_" + linkName(c.Op.Name)), Value: fn}
+	}
+	st := g.effectTypeMode(e.Effect, mode)
+	return st, &goast.CompositeLit{Type: st, Elts: elts}
+}
+
+func (g *gen) resumeStmtsFor(e core.Expr, owner types.ResumeID, unitResult bool, state *handlerState, stateType types.Type) []goast.Stmt {
 	switch e := e.(type) {
 	case *core.ControlExit:
 		if g.control != types.Exit {
@@ -2212,7 +2230,7 @@ func (g *gen) resumeStmtsFor(e core.Expr, owner types.ResumeID, unitResult bool,
 			}
 			stmts = append(stmts,
 				varDeclStmt(nextName, g.goType(stateType), g.expr(e.NextState, 0)),
-				assignStmt(stateCell, ident(nextName)))
+				state.write(ident(nextName)))
 			if unitResult {
 				if g.control == types.Exit {
 					return append(stmts, returnStmt(g.normalOutcome(g.resultType, g.unitValue())))
@@ -2244,13 +2262,13 @@ func (g *gen) resumeStmtsFor(e core.Expr, owner types.ResumeID, unitResult bool,
 				returnStmt(g.propagateOutcome(g.resultType, selector(outcome, "Exit"))),
 			}
 		}
-		return append(g.letBindingStmts(e), g.resumeStmtsFor(e.Body, owner, unitResult, stateCell, stateType)...)
+		return append(g.letBindingStmts(e), g.resumeStmtsFor(e.Body, owner, unitResult, state, stateType)...)
 	case *core.Seq:
-		return append(g.stmts(e.First), g.resumeStmtsFor(e.Then, owner, unitResult, stateCell, stateType)...)
+		return append(g.stmts(e.First), g.resumeStmtsFor(e.Then, owner, unitResult, state, stateType)...)
 	case *core.If:
-		return []goast.Stmt{ifStmt(g.expr(e.Cond, 0), g.resumeStmtsFor(e.Then, owner, unitResult, stateCell, stateType), g.resumeStmtsFor(e.Else, owner, unitResult, stateCell, stateType))}
+		return []goast.Stmt{ifStmt(g.expr(e.Cond, 0), g.resumeStmtsFor(e.Then, owner, unitResult, state, stateType), g.resumeStmtsFor(e.Else, owner, unitResult, state, stateType))}
 	case *core.Case:
-		return g.caseStmts(e, func(x core.Expr) []goast.Stmt { return g.resumeStmtsFor(x, owner, unitResult, stateCell, stateType) })
+		return g.caseStmts(e, func(x core.Expr) []goast.Stmt { return g.resumeStmtsFor(x, owner, unitResult, state, stateType) })
 	default:
 		panic(fmt.Sprintf("codegen: non-tail-resumptive clause node %T", e))
 	}

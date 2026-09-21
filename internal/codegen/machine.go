@@ -194,7 +194,7 @@ func (g *gen) machineStepDecl(worker *machineir.Worker, frameName string, stored
 	for _, ev := range worker.EffectParams {
 		name := machineEvidenceName(ev)
 		g.evidence[ev.Unique] = append(g.evidence[ev.Unique], ident(name))
-		g.evidenceModes[ev.Unique] = append(g.evidenceModes[ev.Unique], types.Machine)
+		g.evidenceModes[ev.Unique] = append(g.evidenceModes[ev.Unique], machineir.Mode(ev.Control))
 	}
 	defer func() {
 		for _, ev := range worker.EffectParams {
@@ -389,7 +389,23 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			if len(stack) == 0 {
 				panic("codegen: missing lexical machine evidence")
 			}
-			args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
+			// A generated frame takes each interpretation at the protocol its
+			// own declaration pinned, which is not this argument's: a caller
+			// holding a Direct activation still reaches a worker that declared
+			// the capability abstractly through its Machine record. A function
+			// value's Machine member takes them all at Machine, because that
+			// ABI follows the arrow type and is shared with code that was
+			// never lowered.
+			want := types.Machine
+			if callee := g.machineWorkers[term.Callee]; term.Callee != "" && callee != nil {
+				for _, param := range callee.EffectParams {
+					if param.Unique == ev.Unique {
+						want = machineir.Mode(param.Control)
+						break
+					}
+				}
+			}
+			args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), want))
 		}
 		if term.Callee != "" {
 			args = append(args, g.machineRowArgs(g.machineWorkers[term.Callee], g.rowArgument(term.Row))...)
@@ -432,18 +448,43 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		h := term.Node
 		var statePrefix []goast.Stmt
 		stateToken := ""
+		var state *handlerState
 		if term.State != nil {
 			initialPrefix, initial := value(term.State.Initial)
 			initial = callExpr(g.goType(term.State.Ty), initial)
-			stateToken = fmt.Sprintf("machineHandlerState%d", g.tmp)
-			g.tmp++
-			statePrefix = append(initialPrefix, varDeclStmt(stateToken, ident("int"),
-				callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PushState")}, initial)))
+			if term.Ordinary {
+				// The clause closures outlive this Step, so the state cannot be
+				// one of its locals. They share one escaping variable, and the
+				// machine holds a pointer to it, so unwinding still pops this
+				// handler's state and the return clause reads the final value.
+				cell := fmt.Sprintf("machineHandlerState%d", g.tmp)
+				g.tmp++
+				statePrefix = append(initialPrefix,
+					varDeclStmt(cell, g.goType(term.State.Ty), initial),
+					exprStmt(callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PushState")},
+						&goast.UnaryExpr{Op: gotoken.AND, X: ident(cell)})))
+				state = &handlerState{
+					read:  func() goast.Expr { return ident(cell) },
+					write: func(next goast.Expr) goast.Stmt { return assignStmt(cell, next) },
+				}
+			} else {
+				stateToken = fmt.Sprintf("machineHandlerState%d", g.tmp)
+				g.tmp++
+				statePrefix = append(initialPrefix, varDeclStmt(stateToken, ident("int"),
+					callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PushState")}, initial)))
+			}
 		}
 		evidenceName := fmt.Sprintf("machineHandlerEvidence%d", g.tmp)
 		g.tmp++
 		evidenceType := g.effectTypeMode(core.EffectInstance{Unique: h.Effect.Unique, Name: h.Effect.Name, Args: h.Effect.Args,
 			Control: types.Control{Transport: types.Machine}}, types.Machine)
+		var record goast.Expr
+		if term.Ordinary {
+			// This activation's own protocol is Direct, so it installs the
+			// ordinary record of clause closures: performs in the body worker
+			// are plain calls, and a closure bound to it has a member to call.
+			evidenceType, record = g.handlerEvidence(h, types.Direct, state)
+		}
 		elts := make([]goast.Expr, 0, len(term.Clauses))
 		targetName := ""
 		if term.Abort {
@@ -473,7 +514,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 				if len(stack) == 0 {
 					panic("codegen: machine handler clause captures unavailable evidence")
 				}
-				ctorArgs = append(ctorArgs, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
+				ctorArgs = append(ctorArgs, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), machineir.Mode(ev.Control)))
 			}
 			ctorArgs = append(ctorArgs, g.machineRowArgs(clauseWorker, ident("nil"))...)
 			if clauseWorker.StateToken {
@@ -499,7 +540,10 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			fn := funcLitParams(params, selector("fangort", "MachineFrame"), []goast.Stmt{returnStmt(callExpr(ctor, ctorArgs...))})
 			elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + linkName(clause.Op.Name)), Value: fn})
 		}
-		decl := varDeclStmt(evidenceName, evidenceType, &goast.CompositeLit{Type: evidenceType, Elts: elts})
+		if record == nil {
+			record = &goast.CompositeLit{Type: evidenceType, Elts: elts}
+		}
+		decl := varDeclStmt(evidenceName, evidenceType, record)
 		bodyWorker := g.machineWorkers[term.BodyWorker]
 		bodyArgs := g.descriptorParamArgs(bodyWorker.TyParams)
 		for _, ev := range bodyWorker.EffectParams {
@@ -511,7 +555,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			if len(stack) == 0 {
 				panic("codegen: machine handler body captures unavailable evidence")
 			}
-			bodyArgs = append(bodyArgs, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
+			bodyArgs = append(bodyArgs, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), machineir.Mode(ev.Control)))
 		}
 		bodyArgs = append(bodyArgs, g.machineRowArgs(bodyWorker, ident("nil"))...)
 		for _, capture := range term.BodyCaptures {
@@ -558,7 +602,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 					if len(stack) == 0 {
 						panic("codegen: abort clause captures unavailable evidence")
 					}
-					args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
+					args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), machineir.Mode(ev.Control)))
 				}
 				args = append(args, g.machineRowArgs(clauseWorker, ident("nil"))...)
 				if clauseWorker.StateToken {
@@ -588,14 +632,12 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			first = append(first, resumed...)
 			aborted := resume(term.AbortBind, term.AbortNext)
 			if term.State != nil {
-				state := &goast.TypeAssertExpr{X: callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PopState")}), Type: g.goType(term.State.Ty)}
-				aborted = append(aborted[:1], append([]goast.Stmt{assignStmt(machineLocalName(term.StateResult.Name), state)}, aborted[1:]...)...)
+				aborted = append(aborted[:1], append([]goast.Stmt{assignStmt(machineLocalName(term.StateResult.Name), g.machineFinalState(term))}, aborted[1:]...)...)
 			}
 			return stmts, [][]goast.Stmt{first, aborted}
 		}
 		if term.State != nil {
-			state := &goast.TypeAssertExpr{X: callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PopState")}), Type: g.goType(term.State.Ty)}
-			resumed = append(resumed[:1], append([]goast.Stmt{assignStmt(machineLocalName(term.StateResult.Name), state)}, resumed[1:]...)...)
+			resumed = append(resumed[:1], append([]goast.Stmt{assignStmt(machineLocalName(term.StateResult.Name), g.machineFinalState(term))}, resumed[1:]...)...)
 		}
 		return stmts, [][]goast.Stmt{resumed}
 	case *machineir.PushCleanup:
@@ -786,7 +828,7 @@ func (g *gen) machineLambdaExpr(lam *core.Lambda) goast.Expr {
 		if len(stack) == 0 {
 			panic("codegen: machine closure captures unavailable evidence")
 		}
-		args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), types.Machine))
+		args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), machineir.Mode(ev.Control)))
 	}
 	for _, ev := range closure.CallEvidence {
 		name := machineClosureEvidenceName(ev)
@@ -863,4 +905,15 @@ func machineFrameEvidenceField(ev core.EffectInstance) goast.Expr {
 }
 func assignMachinePC(pc int) goast.Stmt {
 	return &goast.AssignStmt{Lhs: []goast.Expr{machinePC()}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{intLit(int64(pc))}}
+}
+
+// machineFinalState reads a handler's state back after its body has returned.
+// A machine-lowered handler stores the value itself; one whose clauses stayed
+// ordinary stores a pointer to the variable they share.
+func (g *gen) machineFinalState(term *machineir.Handle) goast.Expr {
+	popped := callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PopState")})
+	if term.Ordinary {
+		return &goast.StarExpr{X: &goast.TypeAssertExpr{X: popped, Type: &goast.StarExpr{X: g.goType(term.State.Ty)}}}
+	}
+	return &goast.TypeAssertExpr{X: popped, Type: g.goType(term.State.Ty)}
 }
