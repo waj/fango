@@ -1,8 +1,8 @@
 # Failure, state, and randomness
 
-Fail and Failure reports, State, Writer, and Random runners.
+Fail and Failure reports, State, and Random runners.
 
-[Reference index](../reference.md). Sources: [Fail](../../stdlib/Fail.fango), [Failure](../../stdlib/Failure.fango), [State](../../stdlib/State.fango), [Writer](../../stdlib/Writer.fango), [Random](../../stdlib/Random.fango).
+[Reference index](../reference.md). Sources: [Fail](../../stdlib/Fail.fango), [Failure](../../stdlib/Failure.fango), [State](../../stdlib/State.fango), [Random](../../stdlib/Random.fango).
 
 ## Fail and Failure
 
@@ -77,23 +77,6 @@ private cell, and returns both the action value and final state. `get()` reads
 the current state and `put next` replaces it. Cells belong to handler
 activations, so nested runs—including two runs of the same `State s`—are
 independent.
-
-## Writer
-
-`Writer` packages the same mechanism as an immutable accumulator:
-
-```fango
-effect Writer w
-    tell : w -> ()
-
-type WriterResult w a = { value : a, output : w }
-
-run : (w -> w -> w) -> w
-    -> (() ->{Writer w | e} a) ->{e} WriterResult w a
-```
-
-`Writer.run combine empty action` updates the accumulator with
-`combine output item` for each `tell item`, preserving source order.
 
 ## Random
 

@@ -1,5 +1,4 @@
 import State
-import Writer
 import List
 
 type Counter = { count : Int }
@@ -11,11 +10,6 @@ counterProgram() =
     State.put (Counter { count = before.count + 1 })
     after = State.get()
     before.count + after.count
-
-writerProgram() =
-    Writer.tell "alpha"
-    Writer.tell "-beta"
-    7
 
 increment _ =
     value = State.get()
@@ -89,13 +83,10 @@ runSnapshots() =
 
 main() =
     counter = State.run (Counter { count = 10 }) counterProgram
-    written = Writer.run (++) "" writerProgram
     traversed = State.run 0 (\_ -> List.each increment [1, 2, 3])
     evaluated = State.run 0 (\_ -> evaluate 10 (Add Env (Lit 2)))
     print counter.value
     print counter.state.count
-    print written.value
-    print written.output
     print traversed.state
     print evaluated.value
     print evaluated.state

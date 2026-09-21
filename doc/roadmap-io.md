@@ -1,12 +1,11 @@
 # Roadmap: bytes, buffered readers and writers, and sockets
 
 This document owns the proposed byte-oriented IO layer and its delivery
-sequence: two small language prerequisites, an immutable `Bytes` value,
-`Reader` and `Writer` as records bound to handler activations over abstract
-byte sources and sinks, and the file, memory, and socket adapters beneath
-them. Its motivating consumer is an HTTP server written in Fango, so
-acceptance is stated in terms of what a server needs rather than library
-breadth.
+sequence: an immutable `Bytes` value, `Reader` and `Writer` as records bound
+to handler activations over abstract byte sources and sinks, and the file,
+memory, and socket adapters beneath them. Its motivating consumer is an HTTP
+server written in Fango, so acceptance is stated in terms of what a server
+needs rather than library breadth.
 
 Implemented contracts remain in [design](design.md) and
 [reference](reference.md); the main
@@ -55,34 +54,15 @@ effects here are unparameterized, so keying row labels by their arguments,
 [deferred in the effects roadmap](roadmap-effects.md#deferred-topics), is not
 on this path.
 
-## Step 1 — language prerequisites
+The language prerequisites are done. A row literal stands as a type argument
+at a [row-kinded parameter](reference/functions.md#row-kinded-parameters), so
+`Source {IO, Fail IO.Error}` is writable; `ignore : a -> ()` in `Basics`
+discards an answer the caller does not want, which the readers below do
+constantly; and the accumulator `Writer` module is gone, freeing the name for
+the byte writer. An accumulator is a `State` handler with a combine function,
+which anyone needing one writes in a few lines.
 
-### A closed row as a type argument
-
-An effect-indexed type at a known row — `Source {IO, Fail IO.Error}` — cannot
-be written today: a row is only accepted after an arrow. The adapters below
-are library functions, every library function carries a signature, and their
-result types are exactly such values. Admit a row literal in type-argument
-position, at the kind the parameter's use in the declaration already fixes.
-Nothing else about rows changes.
-
-### Discarding a result
-
-A result cannot be discarded: `_ = expr` reports `PATTERN BINDING` and a bare
-non-Unit statement is a type error, so every ignored answer would need an
-invented name, and the readers below ignore answers constantly. A call is a
-legal statement whenever its type is Unit, so `ignore : a -> ()` in `Basics`
-resolves it with no language change.
-
-### Retiring the accumulator `Writer`
-
-The stdlib `Writer` module is a `State` handler with a combine function and a
-`tell` operation. Its name goes to the byte writer below, so the module, its
-section in [library effects](reference/library-effects.md#writer), and its one
-fixture are removed. Anyone needing the accumulator writes it over `State` in
-a few lines.
-
-## Step 2 — Bytes
+## Step 1 — Bytes
 
 `Bytes` is an immutable sequence of bytes with a compiler-known runtime
 representation, recognized at its declaration by canonical symbol exactly as
@@ -120,7 +100,7 @@ Core operations are inline templates over `fangort` helpers, the form `Basics`
 already uses (`intShow = native "fangort.ShowInt($1)"`), so they need no
 extension to the sidecar ABI. Natives that *produce* `Bytes` from outside —
 counted file reads, socket reads — do need the bundled boundary to accept
-`[]byte`, which is part of step 4.
+`[]byte`, which is part of step 3.
 
 Three alternatives were rejected. `List Int` costs eight bytes per byte and
 forfeits `bytes.Index`. An opaque handle into a native table, the mechanism
@@ -133,7 +113,7 @@ again; a native reading into a scratch slice copies on the way out. This is
 what makes `slice` free everywhere else, and it is the one rule a reviewer of
 the native code must check.
 
-## Step 3 — Reader and Writer
+## Step 2 — Reader and Writer
 
 ### The leaves
 
@@ -307,13 +287,12 @@ IO.stdout : Sink {IO}
 IO.stdin : Source {IO}
 ```
 
-These signatures need the closed-row type argument from step 1.
 `Memory.source` is pure, so a fixture-driven test performs no effects at all
 and the same parsing code runs over it and over a socket. `File` gains counted
 byte natives beside its existing line natives, which keep their contracts; the
 unbuffered `File.write` stays as it is.
 
-## Step 4 — sockets, HTTP, and a concurrent server
+## Step 3 — sockets, HTTP, and a concurrent server
 
 ```fango
 {-# resource #-}
@@ -355,7 +334,8 @@ Reader.over (Memory.source fixture) \input ->
         Http.writeResponse output (respond (Http.readRequest input))
 ```
 
-A proxy holds two readers at once, which is what step 1 bought:
+A proxy holds two readers at once, which is what a reader being a value
+bought:
 
 ```fango
 Reader.over (Net.source client) \downstream ->
@@ -379,29 +359,23 @@ document's acceptance program.
 | Handler activations, their state cells, and closure binding | `Reader` and `Writer` and every stage above them |
 | Scope ownership and resource escape proofs | `Reader.over`, `Writer.over`, `Net` scopes |
 | Counted file and socket reads and writes | `Source` and `Sink` adapters |
-| Closed rows in type-argument position | — |
 | — | Framing, limits, chunked decoding, HTTP |
 
 `Bytes`, `Reader`, `Writer`, and the adapters are library names and need no
-grammar change. The closed-row type argument is a grammar change and requires a
-TextMate check that rows inside type arguments tokenize. Both backends must
-agree on the `Bytes` representation; the interpreter uses the same `fangort`
-value the compiled program does, as it does for `List`.
+grammar change. Both backends must agree on the `Bytes` representation; the
+interpreter uses the same `fangort` value the compiled program does, as it
+does for `List`.
 
 ## Delivery and acceptance
 
 Each step is usable without the ones after it.
 
-**1. Prerequisites.** A closed row is accepted as a type argument and rejected
-at a non-row parameter with a kind error. `ignore` lands in `Basics`. The accumulator `Writer` is gone
-from the library, the reference, and the fixtures.
-
-**2. `Bytes`.** Differential interpreter/compiler coverage for every operation,
+**1. `Bytes`.** Differential interpreter/compiler coverage for every operation,
 including empty, out-of-range, and invalid-UTF-8 inputs. A scan over a large
 input allocates nothing per match. No native returns a slice of a buffer it
 will write again.
 
-**3. `Reader`/`Writer`.** The same parsing code passes over a memory source
+**2. `Reader`/`Writer`.** The same parsing code passes over a memory source
 and a file source, and the memory path performs no effects. Two readers are
 driven alternately and neither disturbs the other. A writer emits one
 underlying write per flush window. Reading a file through `Reader.chunks`
@@ -411,7 +385,7 @@ consuming nothing, and `limited` leaving the parent correctly positioned are
 all covered. A reader cannot outlive its source's scope, and a reader cannot
 outlive its own `over`.
 
-**4. Sockets and HTTP.** A client fetches over a loopback connection; a
+**3. Sockets and HTTP.** A client fetches over a loopback connection; a
 listener serves one connection at a time; a peer closing mid-read and
 mid-write is an ordinary typed failure; no handle outlives its scope. A
 scripted request set covers a malformed request, an oversized header block, a

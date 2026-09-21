@@ -51,7 +51,7 @@ the real CLI once per runner, preserving isolation when temporary sources change
 Dedicated command tests cover the run wrapper.
 
 Interpreter legs are serialized because native workers/host contexts are process-level
-infrastructure. Handler-local State/Writer/Random cells are independent. Correctness
+infrastructure. Handler-local State and Random cells are independent. Correctness
 commands use Go test parallelism sixteen to let structural/compiled checks advance
 while interpreter access is serialized. Generated Go must be deterministic and
 gofmt-idempotent; consumer-independent emission is a cross-fixture invariant.
