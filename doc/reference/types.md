@@ -21,6 +21,12 @@ type. Update expressions are evaluated left to right and the original value is
 evaluated once. A projection or update receiver must already have a known
 nominal record type.
 
+A projected function may be called wherever more effects are allowed than its
+field declares: a field typed `() -> Int` is callable in a body performing `IO`
+or a user effect, the same widening a function argument gets. The field's
+declared row states what calling it performs, not what the body around the call
+may do.
+
 ## Inferred records
 
 A literal may omit its type name when the expected type already says which

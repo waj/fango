@@ -40,6 +40,7 @@ const (
 	WhyEffectMismatch                  // an annotation's effect row disagrees with its body
 	WhyEffectNotAllowed                // an effect row does not fit the surrounding row
 	WhySpliceOperand                   // `$(…)` needs an operand that evaluates to code
+	WhyProjection                      // a projected field must fit the use it is put to
 )
 
 type Why struct {
@@ -2690,7 +2691,15 @@ func (g *generator) recordPass(final bool, from int) int {
 			case !visible(ob.candidates):
 				g.errs = append(g.errs, diag.Errorf(ob.fieldSpan, "PRIVATE RECORD FIELD", "The fields of record `%s` are not exposed to this module.", types.SurfaceName(adt.Con.Name)))
 			default:
-				constraints = append(constraints, Constraint{Left: ob.result, Right: fieldTypes[idx], Span: ob.fieldSpan, Why: Why{Kind: WhyCall}})
+				// The stored field is what the projection has, and the use
+				// site is what it must fit, so this is subsumption in that
+				// direction rather than an equality. A field declared at a
+				// pure arrow is usable in an effectful body for the same
+				// reason a pure argument is: the row a caller allows is an
+				// upper bound, not a description of the value. Unifying here
+				// instead let the use site's ambient row reach the field
+				// first, and a closed declaration then disagreed with it.
+				constraints = append(constraints, Constraint{Left: fieldTypes[idx], Right: ob.result, Span: ob.fieldSpan, Why: Why{Kind: WhyProjection, Name: ob.field}, Subsume: true, ADTs: g.ck.ADTs})
 			}
 		}
 		for _, u := range ob.updates {

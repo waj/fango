@@ -1,0 +1,18 @@
+-- The same covariant widening as `record_field_widened_row`, at a field whose
+-- arrow is closed and pure. The row a use site allows is an upper bound, so a
+-- stored `() -> Int` is usable in a body that performs `Extra`; the projection
+-- is what adapts, supplying the evidence the wider arrow takes while the
+-- binder keeps the shape the constructor stored.
+effect Extra
+    bump : Int -> Int
+
+type R = { f : () -> Int }
+
+use : R ->{Extra} Int
+use r = r.f() + bump 1
+
+main() =
+    answer =
+        handle use (R { f = \_ -> 5 }) of
+            bump n -> resume (n + 1)
+    print answer

@@ -147,6 +147,13 @@ Resolve obligations to a fixed point: a field's type may determine another
 receiver, or an outer literal may determine an inner one. Only obligations
 owned by the binding being closed may fail when a pass learns nothing.
 
+Discharge a projection by subsumption from the stored field to the use, not by
+equality. The use site is typed before the receiver names a record, so its
+demand reaches the projection first; equating the two would make a field
+declared at a closed row disagree with any body performing more than that row
+names, though the row a use allows is an upper bound. Widening adapts at the
+projection, which is also where the wider arrow's evidence comes from.
+
 Every generalizing checker resolves records before predicates: top-level and
 local functions, prompt expressions, instance methods, and deriver methods.
 When an inferred form needs its annotation as context, unify that annotation

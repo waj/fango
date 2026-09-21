@@ -191,6 +191,8 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 		e = diag.Errorf(c.Span, "TYPE MISMATCH",
 			"I cannot use (%s) with this operand:\n\n    %s\n\nIt does not match the other side:\n\n    %s",
 			c.Why.Op, left, right)
+	case WhyProjection:
+		e = diag.Errorf(c.Span, "TYPE MISMATCH", "The field `%s` holds:\n\n    %s\n\nbut it is used here as:\n\n    %s", c.Why.Name, left, right)
 	case WhyCall:
 		if c.Subsume {
 			e = diag.Errorf(c.Span, "TYPE MISMATCH", "This argument has type:\n\n    %s\n\nbut the function expects:\n\n    %s", left, right)
