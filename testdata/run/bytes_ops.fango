@@ -1,0 +1,36 @@
+import Bytes exposing (Bytes)
+
+show3 : Maybe Int -> String
+show3 value =
+    case value of
+        Nothing -> "-"
+        Just code -> show code
+
+main() =
+    hello = Bytes.fromString "hello"
+    print (Bytes.length Bytes.empty)
+    print (Bytes.length hello)
+    print (show3 (Bytes.byteAt 0 hello))
+    print (show3 (Bytes.byteAt 4 hello))
+    print (show3 (Bytes.byteAt 5 hello))
+    print (show3 (Bytes.byteAt (-1) hello))
+    print (show3 (Bytes.byteAt 0 Bytes.empty))
+    -- slice clamps both ends and answers empty for a reversed range.
+    print (Bytes.slice 1 3 hello)
+    print (Bytes.slice (-4) 99 hello)
+    print (Bytes.slice 3 1 hello)
+    print (Bytes.slice 5 5 hello)
+    print (Bytes.append hello (Bytes.fromString ", world"))
+    print (Bytes.append Bytes.empty hello)
+    print (Bytes.append hello Bytes.empty)
+    print (Bytes.concat [])
+    print (Bytes.concat [hello, Bytes.empty, Bytes.fromString "!"])
+    print (Bytes.startsWith (Bytes.fromString "hel") hello)
+    print (Bytes.startsWith (Bytes.fromString "ell") hello)
+    print (Bytes.startsWith Bytes.empty hello)
+    print (Bytes.startsWith hello Bytes.empty)
+    -- A slice shares storage; appending to it must not disturb the original.
+    prefix = Bytes.slice 0 3 hello
+    ignore (Bytes.append prefix (Bytes.fromString "XX"))
+    print hello
+    print prefix

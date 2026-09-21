@@ -21,6 +21,7 @@ The bundled library is experimental and versioned with the compiler.
 | --- | --- |
 | List, Range, Maybe, Tuple, Dict, Result | [Collections](reference/library-collections.md) |
 | String, Basics integer helpers | [Text and numeric helpers](reference/library-text.md) |
+| Bytes | [Byte sequences](reference/library-bytes.md) |
 | IO, File | [Console, process, files, and IO.Error](reference/library-io.md) |
 | Fail, Failure, State, Random | [Effect APIs](reference/library-effects.md) |
 | Json | [Encoding and string tokens](reference/library-json.md) |

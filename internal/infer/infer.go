@@ -1002,6 +1002,7 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 		ck.Ctors[c.Name] = info
 	}
 	errs = append(errs, markListRepr(adt, td.NameSpan)...)
+	errs = append(errs, markBytesRepr(adt, td.NameSpan)...)
 	for i := range adt.Params {
 		adt.ParamKindsKnown[i] = true
 	}

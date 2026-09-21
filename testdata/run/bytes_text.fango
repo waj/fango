@@ -1,0 +1,29 @@
+import Bytes exposing (Bytes)
+
+text : Maybe String -> String
+text value =
+    case value of
+        Nothing -> "<not text>"
+        Just s -> s
+
+main() =
+    print (Bytes.toList (Bytes.fromString "AZ"))
+    print (Bytes.toList Bytes.empty)
+    -- fromList truncates each element to its low eight bits.
+    print (Bytes.toList (Bytes.fromList [0, 65, 255, 256, 300, -1]))
+    print (Bytes.toList (Bytes.fromList []))
+    -- Multi-byte scalars are bytes here, not characters.
+    naive = Bytes.fromString "año"
+    print (Bytes.length naive)
+    print (text (Bytes.toString naive))
+    print (Bytes.toStringLossy naive)
+    -- A lone continuation byte is not text.
+    broken = Bytes.fromList [104, 105, 255, 33]
+    print (text (Bytes.toString broken))
+    print (Bytes.toStringLossy broken)
+    print (Bytes.length (Bytes.fromString (Bytes.toStringLossy broken)))
+    -- Cutting a scalar in half is invalid too, and lossy replaces the piece.
+    half = Bytes.slice 0 2 naive
+    print (text (Bytes.toString half))
+    print (Bytes.toStringLossy half)
+    print (text (Bytes.toString Bytes.empty))

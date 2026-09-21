@@ -18,6 +18,9 @@ func Show(v Value, ty types.Type, b *types.Builtins) string {
 	if cv, ok := v.(*CtorVal); ok {
 		return showCtorVal(cv, false)
 	}
+	if b, ok := v.(fangort.Bytes); ok {
+		return fangort.BytesShow(b)
+	}
 	if l, ok := v.(fangort.List[Value]); ok {
 		return fangort.ListShow(showFieldValueNested, l, false)
 	}
@@ -74,6 +77,8 @@ func showFieldValue(f Value) string {
 		return fangort.ShowUnit()
 	case *CtorVal:
 		return showCtorVal(f, true)
+	case fangort.Bytes:
+		return fangort.BytesShow(f)
 	case fangort.List[Value]:
 		return fangort.ListShow(showFieldValueNested, f, true)
 	default:

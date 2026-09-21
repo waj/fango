@@ -61,6 +61,40 @@ Dict is an ordinary opaque Fango [weight-balanced tree](../../stdlib/Dict.fango)
 with cached subtree sizes.
 Its balance invariant belongs to its module; it needs no compiler representation.
 
+## Bytes representation
+
+The bundled Bytes is recognized the same way List is: once by canonical symbol,
+at its declaration, with its shape validated rather than assumed. The backends
+share fangort.Bytes, an immutable Go `[]byte`.
+
+`type Bytes = Bytes` declares one nullary constructor, which is the empty
+sequence. That is what the type needs to be nameable without a grammar change
+and without a second compiler-known primitive: a nullary constructor binds
+nothing, so a match on it — possible only inside the module, since the
+constructor is not exposed — discriminates nothing and observes nothing the
+representation hides. Bytes emits no marker interface or constructor struct,
+takes no type arguments, and its eq/show keep the exported names ordinary
+lowering gives them while delegating to runtime support, exactly as List's do.
+
+The invariant the layer rests on is that a Bytes never aliases storage anything
+will write again. Slicing therefore shares its backing array, capped so nothing
+can be appended into what follows it, and every operation that builds a value
+allocates its own array. A native filling a scratch buffer owes the same copy
+on the way out; that is the one rule a reviewer of native code checks.
+
+A `List Int` would cost eight bytes per byte and forfeit `bytes.Index`, and an
+opaque handle into a native table — the mechanism `File.Handle` uses — is
+never collected, so a reader would leak one entry per chunk. Relaxing String
+to admit invalid UTF-8 would instead invalidate every String contract and the
+boundary validation protecting the Go side. Scanning is therefore a native
+over Go's `bytes.Index`, so a parser searching a block never crosses the
+language boundary once per byte.
+
+Operations crossing a list come in pairs over one implementation, because
+generated code holds a `List[int64]` or a `List[Bytes]` where the interpreter
+holds the same list with its elements erased. Public contracts belong in
+[byte sequences](../reference/library-bytes.md).
+
 ## Module emission and build cache
 
 One generated Go module contains a package main per entry program beneath

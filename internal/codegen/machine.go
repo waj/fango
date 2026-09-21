@@ -783,6 +783,17 @@ func (g *gen) machineCtorSwitch(term *machineir.SwitchCtor, jump func(machineir.
 		}
 		return []goast.Stmt{ifStmt(callExpr(&goast.SelectorExpr{X: scrut, Sel: ident("IsEmpty")}), emptyBody, consBody)}
 	}
+	if term.ADT.Repr == types.ReprBytes {
+		// One nullary constructor, so the match discriminates nothing — the
+		// same rule bytesSwitch applies to a Direct match. Only Bytes' own
+		// module can name the constructor, and it has nothing machine
+		// lowering reaches, so this stands against that changing rather than
+		// leaving a type switch on []byte to miscompile.
+		if len(term.Cases) > 0 {
+			return caseBody(term.Cases[0], nil)
+		}
+		return defaultBody()
+	}
 
 	tagArgs := g.goTypes(runtimeADTArgs(term.ADT, scrutTy.Args))
 	tsName := fmt.Sprintf("machineCase%d", g.tmp)

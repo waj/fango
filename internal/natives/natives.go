@@ -51,6 +51,7 @@ var Table = func() map[string]Spec {
 	t := map[string]Spec{}
 	installMeta(t)
 	installScalarInstances(t)
+	installBytes(t)
 	// The operator-named Basics values. The registry key is the canonical
 	// symbol, so it wears the operator spelling; the evaluator tag stays
 	// the alphabetic name of the scalar operation it dispatches to.

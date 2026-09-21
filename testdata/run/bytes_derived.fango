@@ -1,0 +1,53 @@
+import Bytes exposing (Bytes)
+import Dict exposing (Dict)
+import Fail
+import Failure
+import Scope
+import Result exposing (Result(..))
+
+-- Bytes is an ordinary nominal type to the deriver, so a type holding one
+-- derives like any other.
+type Packet = Packet Bytes Int deriving (Eq, Ord, Show)
+
+effect Wire
+    abort send : Bytes -> ()
+
+-- A Bytes payload is inspectable, and its descriptor is not String's.
+showSuppressed : Failure.Failure ->{IO} ()
+showSuppressed failure =
+    print (Failure.operationName failure)
+    payload : Maybe Bytes
+    payload = Failure.argument 0 failure
+    print payload
+    text : Maybe String
+    text = Failure.argument 0 failure
+    print text
+
+report : () ->{IO, Wire} ()
+report () =
+    result : Result (Fail.Report Bytes) Int
+    result =
+        Fail.attemptReport (\_ ->
+            Scope.finally (\_ ->
+                Fail.fail (Bytes.fromString "body")
+                1) (\_ -> send (Bytes.fromString "close\r\n")))
+    case result of
+        Err failed ->
+            print failed.primary
+            List.each showSuppressed failed.suppressed
+        Ok value -> print value
+
+main() =
+    first = Packet (Bytes.fromString "ab") 1
+    second = Packet (Bytes.fromString "ac") 1
+    print first
+    print (first == first)
+    print (first == second)
+    print (first < second)
+    print [first, second]
+    -- Ord makes Bytes a Dict key.
+    table = Dict.insert (Bytes.fromString "k") 7 Dict.empty
+    print (Dict.get (Bytes.fromString "k") table)
+    print (Dict.get (Bytes.fromString "j") table)
+    handle report () of
+        send _ -> print "unexpected abort"

@@ -1,0 +1,21 @@
+import Bytes exposing (Bytes)
+
+main() =
+    print (Bytes.fromString "abc" == Bytes.fromString "abc")
+    print (Bytes.fromString "abc" == Bytes.fromString "abd")
+    print (Bytes.empty == Bytes.empty)
+    print (Bytes.fromString "abc" /= Bytes.fromString "ab")
+    -- Lexicographic on unsigned bytes: a prefix orders before its extension.
+    print (Bytes.fromString "ab" < Bytes.fromString "abc")
+    print (Bytes.fromString "abc" <= Bytes.fromString "abc")
+    print (Bytes.empty < Bytes.fromString "a")
+    print (Bytes.fromList [128] > Bytes.fromList [127])
+    print (Bytes.fromList [128] > Bytes.fromList [0])
+    -- Show is a quoted escaped form at every position.
+    print (Bytes.fromString "plain")
+    print (Bytes.fromList [34, 92, 10, 9, 13])
+    print (Bytes.fromList [0, 31, 127, 255])
+    print Bytes.empty
+    print [Bytes.fromString "a", Bytes.fromList [1]]
+    print (Just (Bytes.fromString "a\nb"))
+    print (show (Bytes.fromString "x") ++ "!")

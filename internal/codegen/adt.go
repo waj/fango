@@ -27,9 +27,9 @@ func fieldName(i int) string { return fmt.Sprintf("F%d", i) }
 func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 	var decls []goast.Decl
 	for _, adt := range adts {
-		if adt.Repr == types.ReprList {
-			// The bundled List has a runtime type instead of an emitted one
-			// (doc/roadmap-list.md); there is nothing to declare for it.
+		if adt.Repr != types.ReprADT {
+			// The bundled List and Bytes have runtime types instead of emitted
+			// ones (doc/design/backend.md); there is nothing to declare for them.
 			continue
 		}
 		runtimeParams := runtimeADTParams(adt)
@@ -122,6 +122,12 @@ func (g *gen) ctorLit(e *core.App) goast.Expr {
 	if adt != nil {
 		typeArgs = runtimeADTArgs(adt, typeArgs)
 	}
+	if e.Ctor.Repr == types.ReprBytes {
+		// The declaration's one constructor is the empty sequence
+		// (internal/infer/bytes.go); it carries no fields to evaluate.
+		g.usesFangort = true
+		return callExpr(selector("fangort", "BytesEmpty"))
+	}
 	if e.Ctor.Repr == types.ReprList {
 		// Go evaluates call arguments left to right, exactly as it does
 		// composite-literal elements, so the source evaluation order a cons
@@ -187,6 +193,9 @@ func (g *gen) treeStmts(t core.Tree, leaf func(core.Expr) []goast.Stmt) []goast.
 		}
 		if t.ADT.Repr == types.ReprList {
 			return g.listSwitch(t, leaf)
+		}
+		if t.ADT.Repr == types.ReprBytes {
+			return g.bytesSwitch(t, leaf)
 		}
 		return g.ctorSwitch(t, leaf)
 	case *core.SwitchLit:
@@ -266,6 +275,19 @@ func (g *gen) listSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) 
 	return []goast.Stmt{ifStmt(callExpr(selector(mangleValue(t.Scrut), "IsEmpty")),
 		branch(listNilIndex),
 		branch(listConsIndex))}
+}
+
+// bytesSwitch: the bundled Bytes declares one nullary constructor, so a match
+// on it discriminates nothing and binds nothing. Emit the branch, or the
+// default when the tree covers the type that way.
+func (g *gen) bytesSwitch(t *core.SwitchCtor, leaf func(core.Expr) []goast.Stmt) []goast.Stmt {
+	if len(t.Cases) > 0 {
+		return g.treeStmts(t.Cases[0].Tree, leaf)
+	}
+	if t.Default == nil {
+		panic("codegen: Bytes switch with neither a case nor a default — coverage is broken")
+	}
+	return g.treeStmts(t.Default, leaf)
 }
 
 // ctorSwitch emits a Go type switch. Full coverage turns the LAST case into
@@ -437,6 +459,10 @@ func (g *gen) derivedDecls(adts []*types.ADTInfo) []goast.Decl {
 			decls = append(decls, g.listEqDecl(adt))
 			continue
 		}
+		if adt.Repr == types.ReprBytes {
+			decls = append(decls, g.bytesEqDecl(adt))
+			continue
+		}
 		decls = append(decls, g.eqDecl(adt))
 	}
 	for _, adt := range adts {
@@ -445,6 +471,10 @@ func (g *gen) derivedDecls(adts []*types.ADTInfo) []goast.Decl {
 		}
 		if adt.Repr == types.ReprList {
 			decls = append(decls, g.listShowDecl(adt))
+			continue
+		}
+		if adt.Repr == types.ReprBytes {
+			decls = append(decls, g.bytesShowDecl(adt))
 			continue
 		}
 		decls = append(decls, g.showDecl(adt))
@@ -505,6 +535,43 @@ func (g *gen) listShowDecl(adt *types.ADTInfo) goast.Decl {
 		},
 		Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(
 			callExpr(selector("fangort", "ListShow"), ident(show), ident("v"), ident("nested")))}},
+	}
+}
+
+// bytesEqDecl and bytesShowDecl do for Bytes what listEqDecl and
+// listShowDecl do for List: keep the exported name and signature the emitted
+// derivations have, and only change the body to the runtime implementation.
+// Bytes takes no type parameters, so neither takes an element operation.
+func (g *gen) bytesEqDecl(adt *types.ADTInfo) goast.Decl {
+	g.usesFangort = true
+	return &goast.FuncDecl{
+		Name: ident(g.eqName(adt)),
+		Type: &goast.FuncType{
+			Params: &goast.FieldList{List: []*goast.Field{
+				{Names: []*goast.Ident{ident("a"), ident("b")}, Type: selector("fangort", "Bytes")},
+			}},
+			Results: &goast.FieldList{List: []*goast.Field{{Type: ident("bool")}}},
+		},
+		Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(
+			callExpr(selector("fangort", "BytesEq"), ident("a"), ident("b")))}},
+	}
+}
+
+// The `nested` parameter is accepted and ignored: the quoted escaped form
+// needs no parentheses at any depth.
+func (g *gen) bytesShowDecl(adt *types.ADTInfo) goast.Decl {
+	g.usesFangort = true
+	return &goast.FuncDecl{
+		Name: ident(g.showName(adt)),
+		Type: &goast.FuncType{
+			Params: &goast.FieldList{List: []*goast.Field{
+				{Names: []*goast.Ident{ident("v")}, Type: selector("fangort", "Bytes")},
+				{Names: []*goast.Ident{ident("_")}, Type: ident("bool")},
+			}},
+			Results: &goast.FieldList{List: []*goast.Field{{Type: ident("string")}}},
+		},
+		Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(
+			callExpr(selector("fangort", "BytesShow"), ident("v")))}},
 	}
 }
 

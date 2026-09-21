@@ -24,12 +24,13 @@ for otherwise unavailable semantics or measured performance needs.
 
 ## Byte IO, buffered readers and writers
 
-[Bytes and readers](roadmap-io.md) owns the proposed `Bytes` value, `Reader`
-and `Writer` as records bound to handler activations over abstract byte
-sources and sinks, and the file, memory, and socket adapters beneath them,
-driven by an HTTP server as its consumer. `Bytes` is its only new runtime
-primitive; its language prerequisites are done. A concurrent server
-additionally depends on the [effects roadmap](roadmap-effects.md).
+`Bytes` is [implemented](reference/library-bytes.md), which was the layer's
+only new runtime primitive. [Readers and writers](roadmap-io.md) owns what is
+left: `Reader` and `Writer` as records bound to handler activations over
+abstract byte sources and sinks, and the file, memory, and socket adapters
+beneath them, driven by an HTTP server as its consumer. Its language
+prerequisites are done. A concurrent server additionally depends on the
+[effects roadmap](roadmap-effects.md).
 
 ## Addressing a specific handler
 

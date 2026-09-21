@@ -1,0 +1,27 @@
+import Bytes exposing (Bytes)
+
+at : Maybe Int -> String
+at value =
+    case value of
+        Nothing -> "-"
+        Just index -> show index
+
+main() =
+    header = Bytes.fromString "Host: example\r\nAccept: */*\r\n\r\n"
+    crlf = Bytes.fromString "\r\n"
+    print (at (Bytes.indexOf crlf header))
+    print (at (Bytes.indexOfFrom 14 crlf header))
+    print (at (Bytes.indexOfFrom 99 crlf header))
+    print (at (Bytes.indexOfFrom (-5) crlf header))
+    print (at (Bytes.indexOf (Bytes.fromString "nowhere") header))
+    -- An empty needle matches at the clamped start, everywhere.
+    print (at (Bytes.indexOf Bytes.empty header))
+    print (at (Bytes.indexOfFrom 3 Bytes.empty header))
+    print (at (Bytes.indexOf crlf Bytes.empty))
+    print (at (Bytes.indexOf Bytes.empty Bytes.empty))
+    -- Overlapping occurrences: the scan resumes past the start, not past
+    -- the match, so a delimiter straddling a refill is still found.
+    aaa = Bytes.fromString "aaaa"
+    print (at (Bytes.indexOf (Bytes.fromString "aa") aaa))
+    print (at (Bytes.indexOfFrom 1 (Bytes.fromString "aa") aaa))
+    print (at (Bytes.indexOfFrom 3 (Bytes.fromString "aa") aaa))

@@ -877,6 +877,11 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				}
 				fields[i] = v
 			}
+			if e.Ctor.Repr == types.ReprBytes {
+				// The declaration's one constructor is the empty sequence
+				// (internal/infer/bytes.go).
+				return fangort.BytesEmpty(), nil
+			}
 			if e.Ctor.Repr == types.ReprList {
 				// The bundled List shares the compiled backend's runtime
 				// representation (doc/roadmap-list.md). The discriminator is on
@@ -1013,6 +1018,8 @@ func (in *interp) showValue(v Value) (string, error) {
 		s = fangort.ShowBool(v)
 	case *CtorVal:
 		s = showCtorVal(v, false)
+	case fangort.Bytes:
+		s = fangort.BytesShow(v)
 	case fangort.List[Value]:
 		s = fangort.ListShow(showFieldValueNested, v, false)
 	default:
@@ -1084,6 +1091,14 @@ func (in *interp) tree(t core.Tree, fr *Frame, leaf func(core.Expr, *Frame) (Val
 					}
 				}
 				return in.tree(c.Tree, &Frame{parent: fr, vars: vars}, leaf)
+			}
+			return in.tree(t.Default, fr, leaf)
+		}
+		if _, isBytes := v.(fangort.Bytes); isBytes {
+			// Bytes declares one nullary constructor, so the match
+			// discriminates nothing and binds nothing.
+			if len(t.Cases) > 0 {
+				return in.tree(t.Cases[0].Tree, fr, leaf)
 			}
 			return in.tree(t.Default, fr, leaf)
 		}
@@ -1177,6 +1192,10 @@ const (
 )
 
 func eqValue(l, r Value) bool {
+	if lb, ok := l.(fangort.Bytes); ok {
+		// Like List below, Bytes is deliberately not comparable with Go ==.
+		return fangort.BytesEq(lb, r.(fangort.Bytes))
+	}
 	if ll, ok := l.(fangort.List[Value]); ok {
 		// Must precede the scalar fallback: List is deliberately not
 		// comparable with Go ==, so reaching the fallback would panic rather

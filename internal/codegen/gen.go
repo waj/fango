@@ -1147,6 +1147,12 @@ func (g *gen) goType(t types.Type) goast.Expr {
 			return g.unitType()
 		default:
 			if adt, ok := g.adts[t.Unique]; ok {
+				if adt.Repr == types.ReprBytes {
+					// The bundled Bytes is an immutable []byte and takes no
+					// type arguments (doc/design/backend.md).
+					g.usesFangort = true
+					return selector("fangort", "Bytes")
+				}
 				if adt.Repr == types.ReprList {
 					// The bundled List is one runtime type for both ABI
 					// families: its own fields cannot be controlled, so the

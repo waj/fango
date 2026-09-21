@@ -960,6 +960,27 @@ func TestBundledListUsesRuntimeRepresentationAndLocalListDoesNot(t *testing.T) {
 	}
 }
 
+// The bundled Bytes is recognized at its declaration and given a []byte
+// representation, so its module emits no constructor struct and no marker
+// interface, exactly as the bundled List emits none.
+func TestBundledBytesUsesRuntimeRepresentation(t *testing.T) {
+	t.Parallel()
+	project := emittedProject(t, filepath.Join("..", "..", "testdata", "run", "bytes_ops.fango"))
+	module := string(generatedFile(t, project, filepath.Join("modules", "Bytes", "module.go")))
+	for _, unwanted := range []string{"type T_Bytes_dot_Bytes", "isT_Bytes_dot_Bytes", "C_Bytes_dot_Bytes"} {
+		if strings.Contains(module, unwanted) {
+			t.Errorf("bundled Bytes still emits %q:\n%s", unwanted, module)
+		}
+	}
+	if !strings.Contains(module, "fangort.Bytes") {
+		t.Errorf("bundled Bytes module never names fangort.Bytes:\n%s", module)
+	}
+	// The private constructor is the empty sequence.
+	if !strings.Contains(module, "fangort.BytesEmpty()") {
+		t.Errorf("Bytes.empty is not the runtime empty value:\n%s", module)
+	}
+}
+
 func TestCsvExample(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "csv.fango")

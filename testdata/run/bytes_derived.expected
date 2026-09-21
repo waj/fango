@@ -1,0 +1,11 @@
+Packet "ab" 1
+True
+False
+True
+[Packet "ab" 1, Packet "ac" 1]
+Just 7
+Nothing
+"body"
+send
+Just "close\r\n"
+Nothing

@@ -367,8 +367,9 @@ func Equal(a, b Type) bool {
 type Repr uint8
 
 const (
-	ReprADT  Repr = iota // marker interface plus one struct per constructor
-	ReprList             // fangort.List, the bundled List type
+	ReprADT   Repr = iota // marker interface plus one struct per constructor
+	ReprList              // fangort.List, the bundled List type
+	ReprBytes             // fangort.Bytes, the bundled Bytes type
 )
 
 // CtorInfo is one constructor's row in the constructor table (doc/design.md, "Type inference"), shared
@@ -407,7 +408,8 @@ type ADTInfo struct {
 	ParamKindsKnown []bool
 	Ctors           []*CtorInfo
 	// Repr selects the backends' runtime representation. Every source type is
-	// ReprADT; the bundled List is recognized at declaration (doc/roadmap-list.md).
+	// ReprADT; the bundled List and Bytes are recognized at their declarations
+	// (doc/design/backend.md).
 	Repr Repr
 	// RecordFields is non-nil for a standalone nominal record. The sole
 	// synthetic constructor remains an internal representation detail.

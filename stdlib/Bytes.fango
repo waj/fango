@@ -1,0 +1,133 @@
+{-# no-prelude #-}
+module Bytes exposing (Bytes, append, byteAt, concat, empty, fromList, fromString, indexOf, indexOfFrom, length, slice, startsWith, toList, toString, toStringLossy)
+
+import Basics exposing (..)
+import List exposing (List)
+import Maybe exposing (Maybe(..))
+
+{- An immutable sequence of bytes.
+
+`String` is a sequence of characters and is valid UTF-8 by contract, so it
+cannot hold a response body, an image, or anything else that is merely bytes.
+`Bytes` can, and it indexes and slices by byte rather than by Unicode scalar.
+
+The compiler knows this declaration by name and gives it a `[]byte`
+representation (doc/design/backend.md, "Bytes representation"). Its one
+constructor is the empty sequence and stays private; everything else is built
+from `fromString`, `fromList`, and the combinators below. Nothing writes to a
+value's storage after it is built, which is what lets `slice` share it. -}
+
+type Bytes = Bytes
+
+empty : Bytes
+empty = Bytes
+
+length : Bytes -> Int
+length = native "fangort.BytesLength($1)"
+
+-- byteAtRaw is private: the byte at a 0-based index, or -1 out of range.
+byteAtRaw : Int -> Bytes -> Int
+byteAtRaw = native "fangort.BytesByteAt($1, $2)"
+
+byteAt : Int -> Bytes -> Maybe Int
+byteAt index bytes =
+    code = byteAtRaw index bytes
+    if code < 0 then Nothing else Just code
+
+-- slice clamps half-open byte indices and shares storage.
+slice : Int -> Int -> Bytes -> Bytes
+slice = native "fangort.BytesSlice($1, $2, $3)"
+
+append : Bytes -> Bytes -> Bytes
+append = native "fangort.BytesAppend($1, $2)"
+
+-- concat sizes the result once, so joining a list allocates once.
+concat : List Bytes -> Bytes
+concat = native "fangort.BytesConcat($1)"
+
+-- indexOfRaw and indexOfFromRaw are private: the index, or -1 for no match.
+indexOfRaw : Bytes -> Bytes -> Int
+indexOfRaw = native "fangort.BytesIndexOf($1, $2)"
+
+indexOfFromRaw : Int -> Bytes -> Bytes -> Int
+indexOfFromRaw = native "fangort.BytesIndexOfFrom($1, $2, $3)"
+
+found : Int -> Maybe Int
+found at = if at < 0 then Nothing else Just at
+
+-- indexOf answers the first index at which needle occurs in bytes. The scan
+-- runs inside the native, so searching a block never crosses the boundary
+-- once per byte.
+indexOf : Bytes -> Bytes -> Maybe Int
+indexOf needle bytes = found (indexOfRaw needle bytes)
+
+-- indexOfFrom resumes the scan at a clamped start, which keeps a repeated
+-- search over a growing window linear in the window.
+indexOfFrom : Int -> Bytes -> Bytes -> Maybe Int
+indexOfFrom start needle bytes = found (indexOfFromRaw start needle bytes)
+
+startsWith : Bytes -> Bytes -> Bool
+startsWith = native "fangort.BytesStartsWith($1, $2)"
+
+-- fromList truncates each element to its low eight bits. It is for fixtures
+-- and binary framing, not for bulk data.
+fromList : List Int -> Bytes
+fromList = native "fangort.BytesFromList($1)"
+
+toList : Bytes -> List Int
+toList = native "fangort.BytesToList($1)"
+
+fromString : String -> Bytes
+fromString = native "fangort.BytesFromString($1)"
+
+-- isUtf8 and unvalidatedString are private, and only toString pairs them.
+isUtf8 : Bytes -> Bool
+isUtf8 = native "fangort.BytesIsUtf8($1)"
+
+unvalidatedString : Bytes -> String
+unvalidatedString = native "fangort.BytesUnvalidatedString($1)"
+
+-- toString answers Nothing for bytes that are not text, so nothing silently
+-- rewrites a body that is not UTF-8.
+toString : Bytes -> Maybe String
+toString bytes =
+    if isUtf8 bytes then Just (unvalidatedString bytes) else Nothing
+
+-- toStringLossy substitutes U+FFFD for each malformed byte. It is the
+-- reporting path, not a conversion.
+toStringLossy : Bytes -> String
+toStringLossy = native "fangort.BytesToStringLossy($1)"
+
+bytesEq : Bytes -> Bytes -> Bool
+bytesEq = native "fangort.BytesEq($1, $2)"
+
+bytesLt : Bytes -> Bytes -> Bool
+bytesLt = native "fangort.BytesLt($1, $2)"
+
+bytesGt : Bytes -> Bytes -> Bool
+bytesGt = native "fangort.BytesGt($1, $2)"
+
+bytesLe : Bytes -> Bytes -> Bool
+bytesLe = native "fangort.BytesLe($1, $2)"
+
+bytesGe : Bytes -> Bytes -> Bool
+bytesGe = native "fangort.BytesGe($1, $2)"
+
+bytesShow : Bytes -> String
+bytesShow = native "fangort.BytesShow($1)"
+
+instance Eq Bytes
+    (==) x y = bytesEq x y
+
+-- Lexicographic on unsigned byte values, so a prefix orders before what
+-- extends it.
+instance Ord Bytes
+    (<) x y = bytesLt x y
+    (>) x y = bytesGt x y
+    (<=) x y = bytesLe x y
+    (>=) x y = bytesGe x y
+
+-- A quoted escaped form: printable ASCII passes through, `\\`, `\"`, `\n`,
+-- `\t` and `\r` are spelled as escapes, and every other byte is `\xNN`.
+instance Show Bytes
+    show x = bytesShow x

@@ -1,11 +1,11 @@
-# Roadmap: bytes, buffered readers and writers, and sockets
+# Roadmap: buffered readers and writers, and sockets
 
-This document owns the proposed byte-oriented IO layer and its delivery
-sequence: an immutable `Bytes` value, `Reader` and `Writer` as records bound
-to handler activations over abstract byte sources and sinks, and the file,
-memory, and socket adapters beneath them. Its motivating consumer is an HTTP
-server written in Fango, so acceptance is stated in terms of what a server
-needs rather than library breadth.
+This document owns the proposed buffered IO layer and its delivery sequence:
+`Reader` and `Writer` as records bound to handler activations over abstract
+byte sources and sinks, and the file, memory, and socket adapters beneath
+them. Its motivating consumer is an HTTP server written in Fango, so
+acceptance is stated in terms of what a server needs rather than library
+breadth.
 
 Implemented contracts remain in [design](design.md) and
 [reference](reference.md); the main
@@ -13,24 +13,19 @@ Implemented contracts remain in [design](design.md) and
 priorities. Everything below is **proposed**. Fango blocks are acceptance
 specifications rather than fixtures that compile today.
 
-The commitments are: one immutable byte value with cheap slicing and native
-scanning; buffering that lives in a handler's own state rather than in any new
-mutable primitive; readers and writers that are ordinary values, so two byte
-sources can be driven at once; operations with one-line contracts and no
-hidden policy; hot loops that scan inside a native and cross the Fango
+The commitments are: buffering that lives in a handler's own state rather than
+in any new mutable primitive; readers and writers that are ordinary values, so
+two byte sources can be driven at once; operations with one-line contracts and
+no hidden policy; hot loops that scan inside a native and cross the Fango
 boundary once per line or per chunk; and lifetimes proven by the existing
 capture checker.
 
-**`Bytes` is the only new runtime primitive in the whole plan.** Everything
-else is ordinary Fango over the effect system, which is the point.
+`Bytes` was the whole plan's one new runtime primitive and it is now
+implemented — [byte sequences](reference/library-bytes.md) owns its contracts
+and [backend](design/backend.md#bytes-representation) its representation.
+Everything left is ordinary Fango over the effect system, which is the point.
 
 ## What today's library cannot do
-
-`String` is the only sequence of characters and it is valid UTF-8 by contract:
-the native boundary validates it, `File.read` replaces malformed input with
-U+FFFD, and `String`'s operations index by Unicode scalar. An HTTP body is
-arbitrary bytes, so no amount of `String` work reaches it, and a layer that
-silently rewrites a PNG is worse than no layer.
 
 `File.Handle` is the right lifetime model at the wrong granularity. Reading is
 `readLine`, whose contract is a `String` and its terminator; there is no
@@ -54,7 +49,7 @@ effects here are unparameterized, so keying row labels by their arguments,
 [deferred in the effects roadmap](roadmap-effects.md#deferred-topics), is not
 on this path.
 
-The language prerequisites are done. A row literal stands as a type argument
+The remaining prerequisites are done. A row literal stands as a type argument
 at a [row-kinded parameter](reference/functions.md#row-kinded-parameters), so
 `Source {IO, Fail IO.Error}` is writable; `ignore : a -> ()` in `Basics`
 discards an answer the caller does not want, which the readers below do
@@ -62,58 +57,7 @@ constantly; and the accumulator `Writer` module is gone, freeing the name for
 the byte writer. An accumulator is a `State` handler with a combine function,
 which anyone needing one writes in a few lines.
 
-## Step 1 — Bytes
-
-`Bytes` is an immutable sequence of bytes with a compiler-known runtime
-representation, recognized at its declaration by canonical symbol exactly as
-the bundled `List` is (see [backend](design/backend.md#list-representation)
-and `internal/infer/list.go`). It is a Go `[]byte` that nothing writes to after
-construction, so slicing shares backing and costs nothing.
-
-```fango
-Bytes.empty : Bytes
-Bytes.length : Bytes -> Int
-Bytes.byteAt : Int -> Bytes -> Maybe Int
-Bytes.slice : Int -> Int -> Bytes -> Bytes
-Bytes.append : Bytes -> Bytes -> Bytes
-Bytes.concat : List Bytes -> Bytes
-Bytes.indexOf : Bytes -> Bytes -> Maybe Int
-Bytes.indexOfFrom : Int -> Bytes -> Bytes -> Maybe Int
-Bytes.startsWith : Bytes -> Bytes -> Bool
-Bytes.fromList : List Int -> Bytes
-Bytes.toList : Bytes -> List Int
-Bytes.fromString : String -> Bytes
-Bytes.toString : Bytes -> Maybe String
-Bytes.toStringLossy : Bytes -> String
-```
-
-`slice` clamps half-open byte indices and shares storage. `indexOf` is where an
-HTTP parser spends its time and is a native over Go's `bytes.Index`, so
-scanning a header block never crosses the boundary per byte; `indexOfFrom` is
-what keeps a growing-window delimiter search linear. `toString` validates
-UTF-8 and answers `Nothing` for a body that is not text; `toStringLossy`
-substitutes U+FFFD and is the reporting path. `fromList` masks each element to
-a byte and exists for fixtures and binary framing, not for bulk data. `Bytes`
-derives `Eq`, `Ord`, and `Show`, with `Show` producing a quoted escaped form.
-
-Core operations are inline templates over `fangort` helpers, the form `Basics`
-already uses (`intShow = native "fangort.ShowInt($1)"`), so they need no
-extension to the sidecar ABI. Natives that *produce* `Bytes` from outside —
-counted file reads, socket reads — do need the bundled boundary to accept
-`[]byte`, which is part of step 3.
-
-Three alternatives were rejected. `List Int` costs eight bytes per byte and
-forfeits `bytes.Index`. An opaque handle into a native table, the mechanism
-`File.Handle` uses, is never collected and would leak one entry per chunk.
-Relaxing `String` to admit invalid UTF-8 would invalidate every existing
-`String` contract and the boundary validation protecting the Go side.
-
-**Runtime invariant.** A `Bytes` never aliases a buffer that will be written
-again; a native reading into a scratch slice copies on the way out. This is
-what makes `slice` free everywhere else, and it is the one rule a reviewer of
-the native code must check.
-
-## Step 2 — Reader and Writer
+## Step 1 — Reader and Writer
 
 ### The leaves
 
@@ -292,7 +236,7 @@ and the same parsing code runs over it and over a socket. `File` gains counted
 byte natives beside its existing line natives, which keep their contracts; the
 unbuffered `File.write` stays as it is.
 
-## Step 3 — sockets, HTTP, and a concurrent server
+## Step 2 — sockets, HTTP, and a concurrent server
 
 ```fango
 {-# resource #-}
@@ -307,10 +251,13 @@ Net.source : Connection -> Source {IO, Fail IO.Error}
 Net.sink : Connection -> Sink {IO, Fail IO.Error}
 ```
 
-Same lifetime shape as `File`, with the same private handle table. Two
-compiler-side questions come with it. Fallible natives that the boundary turns
-into `Result IO.Error a` are spelled for the bundled `File` module alone, and
-the [general case is deferred](roadmap-effects.md#deferred-topics) pending
+Same lifetime shape as `File`, with the same private handle table. Three
+compiler-side questions come with it. The bundled native boundary accepts only
+scalars, so a native answering `Bytes` — a counted file read, a socket read —
+is the first that needs `[]byte` admitted to it. Fallible natives that the
+boundary turns into `Result IO.Error a` are spelled for the bundled `File`
+module alone, and the
+[general case is deferred](roadmap-effects.md#deferred-topics) pending
 resolved error identities; admitting a second bundled module is the smallest
 form of that. And socket failures — connection refused, reset by peer, address
 in use — have no member in `IO.Error`'s `Kind`.
@@ -355,27 +302,20 @@ document's acceptance program.
 
 | Compiler or runtime | Ordinary Fango library |
 | --- | --- |
-| `Bytes` representation, slicing, scanning, UTF-8 validation | `Bytes` combinators |
 | Handler activations, their state cells, and closure binding | `Reader` and `Writer` and every stage above them |
 | Scope ownership and resource escape proofs | `Reader.over`, `Writer.over`, `Net` scopes |
 | Counted file and socket reads and writes | `Source` and `Sink` adapters |
 | — | Framing, limits, chunked decoding, HTTP |
 
-`Bytes`, `Reader`, `Writer`, and the adapters are library names and need no
-grammar change. Both backends must agree on the `Bytes` representation; the
-interpreter uses the same `fangort` value the compiled program does, as it
-does for `List`.
+`Reader`, `Writer`, and the adapters are library names and need no grammar
+change, as `Bytes` needed none. Everything they are built from — activations,
+rows, scopes — already exists.
 
 ## Delivery and acceptance
 
 Each step is usable without the ones after it.
 
-**1. `Bytes`.** Differential interpreter/compiler coverage for every operation,
-including empty, out-of-range, and invalid-UTF-8 inputs. A scan over a large
-input allocates nothing per match. No native returns a slice of a buffer it
-will write again.
-
-**2. `Reader`/`Writer`.** The same parsing code passes over a memory source
+**1. `Reader`/`Writer`.** The same parsing code passes over a memory source
 and a file source, and the memory path performs no effects. Two readers are
 driven alternately and neither disturbs the other. A writer emits one
 underlying write per flush window. Reading a file through `Reader.chunks`
@@ -385,7 +325,7 @@ consuming nothing, and `limited` leaving the parent correctly positioned are
 all covered. A reader cannot outlive its source's scope, and a reader cannot
 outlive its own `over`.
 
-**3. Sockets and HTTP.** A client fetches over a loopback connection; a
+**2. Sockets and HTTP.** A client fetches over a loopback connection; a
 listener serves one connection at a time; a peer closing mid-read and
 mid-write is an ordinary typed failure; no handle outlives its scope. A
 scripted request set covers a malformed request, an oversized header block, a
@@ -417,6 +357,6 @@ Retain the [repository gates](../AGENTS.md) and
 [verification contracts](design/verification.md): the Core linter, the
 interpreter/compiler differential suite, functional tests, `go vet`, and
 updated goldens for intentional language changes. Both backends must produce
-identical bytes for every `Bytes` and reader fixture. Capture, escape, and
+identical bytes for every reader and writer fixture. Capture, escape, and
 cursor fixtures must be rerun rather than assumed, because a bound record is
 the first library use of an activation as a value.

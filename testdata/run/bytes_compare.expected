@@ -1,0 +1,16 @@
+True
+False
+True
+True
+True
+True
+True
+True
+True
+"plain"
+"\"\\\n\t\r"
+"\x00\x1F\x7F\xFF"
+""
+["a", "\x01"]
+Just "a\nb"
+"x"!
