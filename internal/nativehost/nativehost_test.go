@@ -39,6 +39,8 @@ func Boom() { panic("broken") }
 func Emit(s string) { if err := FangoHost.WriteOutput([]byte(s)); err != nil { panic(err) } }
 func Environment() string { return FangoHost.Arguments()[1] + FangoHost.WorkingDirectory() }
 func Quit(code int64) { FangoHost.Exit(int(code)) }
+func Blob(data []byte) []byte { return append(append([]byte{}, data...), 0) }
+func Nothing() []byte { return nil }
 `)}
 	executor, err := New([]Source{source})
 	if err != nil {
@@ -76,6 +78,19 @@ func Quit(code int64) { FangoHost.Exit(int(code)) }
 	if got, err := executor.Call(context.Background(), host, "Probe.environment", nil); err != nil || got != "two/work" {
 		t.Fatalf("host environment = %v, %v", got, err)
 	}
+	// Bytes crosses as a plain []byte, unvalidated: it carries what no String
+	// could. gob does not distinguish nil from empty, so an empty answer comes
+	// back nil, which is what Bytes.empty already is.
+	if got, err := executor.Call(context.Background(), host, "Probe.blob", []any{[]byte{0xff, 0xfe}}); err != nil || string(got.([]byte)) != "\xff\xfe\x00" {
+		t.Fatalf("bytes round trip = %q, %v", got, err)
+	}
+	if got, err := executor.Call(context.Background(), host, "Probe.blob", []any{[]byte{}}); err != nil || len(got.([]byte)) != 1 {
+		t.Fatalf("empty bytes argument = %q, %v", got, err)
+	}
+	if got, err := executor.Call(context.Background(), host, "Probe.nothing", nil); err != nil || len(got.([]byte)) != 0 {
+		t.Fatalf("empty bytes result = %q, %v", got, err)
+	}
+
 	_, err = executor.Call(context.Background(), host, "Probe.quit", []any{int64(7)})
 	var exit *ExitError
 	if !errors.As(err, &exit) || exit.Code != 7 {

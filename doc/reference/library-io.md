@@ -100,7 +100,9 @@ withFile : String -> (File.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Er
 withOutput : String -> (File.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
 withAppend : String -> (File.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
 readLine : File.Handle ->{IO, Fail IO.Error} Maybe IO.Line
+readBytes : File.Handle -> Int ->{IO, Fail IO.Error} Maybe Bytes
 write : File.Handle -> String ->{IO, Fail IO.Error} ()
+writeBytes : File.Handle -> Bytes ->{IO, Fail IO.Error} ()
 read : String ->{IO} Result IO.Error String
 writeAll : String -> String ->{IO} Result IO.Error ()
 listDirectory : String ->{IO} Result IO.Error (List String)
@@ -116,9 +118,14 @@ anything is acquired; a failed close after a successful body is the scope's
 failure, and after a failed body it is recorded alongside the body's failure.
 `readLine` has the console `readLine`'s contract — `Nothing` at end of file,
 otherwise the text and its exact terminator — and `write` writes a string as
-given. Both raise `Fail IO.Error` on a system failure, so a body that only
-reads and writes needs no `case` of its own; `attempt` around the scope
-collects the failure. `read` and `writeAll` handle a whole file without a
+given. `readBytes file count` answers `Nothing` at end of file and otherwise up
+to `count` bytes, which may be fewer; a non-positive count answers an empty
+`Bytes`, which is not end of file. It shares the handle's buffered reader with
+`readLine`, so counted reads and line reads interleave on one handle, and it is
+the only read that can carry a byte no `String` holds. `writeBytes` writes a
+`Bytes` as given. All four raise `Fail IO.Error` on a system failure, so a body
+that only reads and writes needs no `case` of its own; `attempt` around the
+scope collects the failure. `read` and `writeAll` handle a whole file without a
 handle and answer a `Result` instead. `listDirectory` names a directory's
 entries in sorted order, and `isDirectory` answers whether a path names one;
 a missing path is an `Err` with kind `NotFound` for both.

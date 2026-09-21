@@ -130,6 +130,7 @@ var Table = func() map[string]Spec {
 var fileNatives = map[string]int{
 	"File.openRead": 1, "File.openWrite": 1, "File.openAppend": 1, "File.closeHandle": 1,
 	"File.handleHasInput": 1, "File.readHandleLine": 1, "File.writeHandle": 2,
+	"File.readHandleBytes": 2, "File.writeHandleBytes": 2,
 	"File.readFileResult": 1, "File.writeFileResult": 2,
 	"File.openDirectory": 1, "File.readDirectoryEntry": 1, "File.closeDirectory": 1,
 	"File.isDirectoryPath": 1,

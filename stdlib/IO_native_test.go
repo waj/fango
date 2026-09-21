@@ -26,8 +26,13 @@ func (h *testHost) HasInput() (bool, error) {
 func (h *testHost) ReadInputLine() ([]byte, error) { return h.in.ReadBytes('\n') }
 func (h *testHost) WriteOutput(b []byte) error     { _, err := h.out.Write(b); return err }
 func (h *testHost) Arguments() []string            { return h.args }
-func (*testHost) WorkingDirectory() string         { return "." }
-func (h *testHost) Exit(code int)                  { h.exited = code }
+func (h *testHost) WorkingDirectory() string {
+	if h.dir == "" {
+		return "."
+	}
+	return h.dir
+}
+func (h *testHost) Exit(code int) { h.exited = code }
 
 func TestIOLineAndOutput(t *testing.T) {
 	old := FangoHost

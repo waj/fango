@@ -284,6 +284,7 @@ func TestNativeSidecarValidation(t *testing.T) {
 		{"package", "value : Int -> Int\nvalue = native\n", "package wrong\nfunc Value(x int64) int64 { return x }\n", "NATIVE PACKAGE NAME"},
 		{"external import", "value : Int -> Int\nvalue = native\n", "package native\nimport _ \"example.com/nope\"\nfunc Value(x int64) int64 { return x }\n", "NATIVE IMPORT NOT ALLOWED"},
 		{"shape", "value : Int -> Int\nvalue = native\n", "package native\nfunc Value(x string) int64 { return 0 }\n", "NATIVE ABI"},
+		{"bundled bytes in a user sidecar", "import Bytes exposing (Bytes)\nvalue : Bytes -> Int\nvalue = native\n", "package native\nfunc Value(data []byte) int64 { return int64(len(data)) }\n", "NATIVE ABI"},
 		{"template", "value : Int -> Int\nvalue = native \"$1\"\n", "", "NATIVE TEMPLATE NOT ALLOWED"},
 		{"fixity without definition", "value = 1\ninfixl 6 (<+>)\n", "", "FIXITY WITHOUT DEFINITION"},
 		{"duplicate fixity", "(<+>) : Int -> Int -> Int\n(<+>) a b = a\ninfixl 6 (<+>)\ninfixl 6 (<+>)\n", "", "DUPLICATE FIXITY"},
@@ -383,4 +384,29 @@ func TestResourceExportsAreOpaque(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A module that declares its own `Bytes` means that type, not the bundled one,
+// so the spelling keeps crossing as whatever scalar it wraps. The bundled
+// Bytes is admitted only in the library's own sidecars, so the same spelling
+// against a `[]byte` parameter is refused here.
+func TestLocalBytesTypeKeepsItsOwnBoundary(t *testing.T) {
+	t.Run("local wrapper", func(t *testing.T) {
+		d := t.TempDir()
+		entry := write(t, d, "Main.fango", "module Main exposing (main)\ntype Bytes = Bytes Int\nvalue : Bytes -> Int\nvalue = native\nmain = 0\n")
+		write(t, d, "Main.native.go", "package native\nfunc Value(id int64) int64 { return id }\n")
+		if _, errs := Load(entry); len(errs) > 0 {
+			t.Fatalf("local Bytes wrapper: %v", errs)
+		}
+	})
+
+	t.Run("local wrapper against a byte slice", func(t *testing.T) {
+		d := t.TempDir()
+		entry := write(t, d, "Main.fango", "module Main exposing (main)\ntype Bytes = Bytes Int\nvalue : Bytes -> Int\nvalue = native\nmain = 0\n")
+		write(t, d, "Main.native.go", "package native\nfunc Value(data []byte) int64 { return int64(len(data)) }\n")
+		_, errs := Load(entry)
+		if len(errs) == 0 || errs[0].Title != "NATIVE ABI" {
+			t.Fatalf("errors: %#v", errs)
+		}
+	})
 }

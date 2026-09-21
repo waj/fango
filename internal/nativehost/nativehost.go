@@ -318,6 +318,11 @@ func encodeValue(v any) (wireValue, error) {
 		return wireValue{Kind: "char", R: int32(v)}, nil
 	case bool:
 		return wireValue{Kind: "bool", B: v}, nil
+	case []byte:
+		// The interpreter holds a Bytes as a bare fangort.Bytes, which is
+		// []byte. It crosses unvalidated: unlike String and Char, Bytes has no
+		// well-formedness contract to check.
+		return wireValue{Kind: "bytes", Bytes: v}, nil
 	default:
 		return wireValue{}, fmt.Errorf("unsupported argument type %T", v)
 	}
@@ -344,6 +349,8 @@ func decodeValue(v wireValue) (any, error) {
 		return r, nil
 	case "bool":
 		return v.B, nil
+	case "bytes":
+		return fangort.Bytes(v.Bytes), nil
 	default:
 		return nil, fmt.Errorf("native worker returned unknown value kind %q", v.Kind)
 	}

@@ -1,7 +1,8 @@
 {-# no-prelude #-}
-module File exposing (Handle, isDirectory, listDirectory, read, readLine, withAppend, withFile, withOutput, write, writeAll)
+module File exposing (Handle, isDirectory, listDirectory, read, readBytes, readLine, withAppend, withFile, withOutput, write, writeAll, writeBytes)
 
 import Basics exposing (..)
+import Bytes exposing (Bytes)
 import Fail exposing (Fail, attempt, fail, fromResult)
 import IO exposing (Error, IO, Line(..))
 import List exposing (List)
@@ -48,8 +49,14 @@ handleHasInput = native
 readHandleLine : Handle ->{IO} Result Error String
 readHandleLine = native
 
+readHandleBytes : Handle -> Int ->{IO} Result Error Bytes
+readHandleBytes = native
+
 writeHandle : Handle -> String ->{IO} Result Error ()
 writeHandle = native
+
+writeHandleBytes : Handle -> Bytes ->{IO} Result Error ()
+writeHandleBytes = native
 
 readFileResult : String ->{IO} Result Error String
 readFileResult = native
@@ -104,6 +111,20 @@ readLine file =
 
 write : Handle -> String ->{IO, Fail Error} ()
 write file text = fromResult (writeHandle file text)
+
+-- readBytes answers Nothing at end of file and otherwise up to count bytes,
+-- which may be fewer than asked for; it shares the handle's buffered reader
+-- with readLine, so the two interleave. This is already the shape a
+-- Bytes.Source needs.
+readBytes : Handle -> Int ->{IO, Fail Error} Maybe Bytes
+readBytes file count =
+    if fromResult (handleHasInput file) then
+        Just (fromResult (readHandleBytes file count))
+    else
+        Nothing
+
+writeBytes : Handle -> Bytes ->{IO, Fail Error} ()
+writeBytes file data = fromResult (writeHandleBytes file data)
 
 -- Whole-file operations need no handle and report failure as a Result.
 

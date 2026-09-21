@@ -1,0 +1,9 @@
+import Bytes exposing (Bytes)
+
+-- `Bytes` crosses the sidecar boundary only in compiler-bundled modules; a
+-- user sidecar has no way to keep the immutability invariant honest.
+
+probe : Bytes -> Int
+probe = native
+
+main() = print "unreachable"

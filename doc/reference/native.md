@@ -36,6 +36,13 @@ results are validated, and an invalid UTF-8 string or non-scalar rune panics at
 the native boundary. Unit parameters are omitted from
 the Go function and a Unit result is represented by no Go result.
 
+The bundled [`Bytes`](library-bytes.md) also crosses, as a plain `[]byte`, in
+compiler-bundled sidecars only; a user sidecar naming it is a `NATIVE ABI`
+error. It is not validated on the way out the way String and Char are, because
+`Bytes` has no well-formedness contract — that is the point of it. A native
+must answer storage nothing will write again, never a view into a buffer it
+reuses, because a `Bytes` never aliases what something else can change.
+
 One kind of declared type also crosses: a type the same module declares with
 exactly one constructor holding exactly one boundary scalar, such as
 `type Token = Token Int`, may appear as a parameter or result. The Go function

@@ -747,7 +747,12 @@ func validateSidecar(n *node, decls map[string]*ast.ValueDecl, opDecls map[strin
 		}
 	}
 	used := map[string]bool{}
-	boundary := nativeBoundary{wrappers: localWrapperTypes(n.mod.Decls), fallibleAllowed: n.bundled && n.name == fallibleNativeModule}
+	boundary := nativeBoundary{
+		wrappers:        localWrapperTypes(n.mod.Decls),
+		localTypes:      localTypeNames(n.mod.Decls),
+		fallibleAllowed: n.bundled && n.name == fallibleNativeModule,
+		bytesAllowed:    n.bundled,
+	}
 	for name, d := range decls {
 		goName := exportNativeName(name)
 		fn := funcs[goName]
@@ -781,10 +786,25 @@ func exportNativeName(name string) string {
 // checking re-establishes both shapes on resolved types.
 type nativeBoundary struct {
 	wrappers        map[string]string // local wrapper type name -> Go scalar type
+	localTypes      map[string]bool   // every type name this module declares
 	fallibleAllowed bool
+	bytesAllowed    bool
 }
 
-// localWrapperTypes finds the module's `type T = T Scalar` declarations: one
+// localTypeNames answers every type name the module declares, so a spelling
+// that matches the bundled Bytes can be told apart from a module.s own type of
+// that name before resolution has run.
+func localTypeNames(decls []ast.Decl) map[string]bool {
+	out := map[string]bool{}
+	for _, d := range decls {
+		if td, ok := d.(*ast.TypeDecl); ok {
+			out[td.Name] = true
+		}
+	}
+	return out
+}
+
+// localWrapperTypes finds the module.s `type T = T Scalar` declarations: one
 // constructor, one boundary-scalar field, no parameters, not a record.
 func localWrapperTypes(decls []ast.Decl) map[string]string {
 	out := map[string]string{}
@@ -846,7 +866,7 @@ func (b nativeBoundary) validateNativeShape(d *ast.ValueDecl, fn *goast.FuncDecl
 		}
 		for range count {
 			if want := b.nativeGoType(params[i]); want == "" || goTypeName(field.Type) != want {
-				errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Parameter %d of `%s` must use the scalar Go type for its Fango annotation, or a type this module declares as a single-constructor wrapper around one.", i+1, fn.Name.Name))
+				errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Parameter %d of `%s` must use the scalar Go type for its Fango annotation, or a type this module declares as a single-constructor wrapper around one. `Bytes` crosses as `[]byte`, in bundled sidecars only.", i+1, fn.Name.Name))
 			}
 			i++
 		}
@@ -869,7 +889,7 @@ func (b nativeBoundary) validateNativeShape(d *ast.ValueDecl, fn *goast.FuncDecl
 			errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Function `%s` must return no value for Fango Unit.", fn.Name.Name))
 		}
 	} else if fieldCount(fn.Type.Results) != 1 || len(fn.Type.Results.List) != 1 || goTypeName(fn.Type.Results.List[0].Type) != b.nativeGoType(t) {
-		errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Function `%s` must return exactly the scalar Go type in native `%s`'s annotation, or a type this module declares as a single-constructor wrapper around one.", fn.Name.Name, d.Name))
+		errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Function `%s` must return exactly the scalar Go type in native `%s`'s annotation, or a type this module declares as a single-constructor wrapper around one. `Bytes` crosses as `[]byte`, in bundled sidecars only.", fn.Name.Name, d.Name))
 	}
 	if fn.Type.TypeParams != nil {
 		errs = append(errs, diag.Errorf(d.Native.Sp, "NATIVE ABI", "Function `%s` cannot declare Go type parameters.", fn.Name.Name))
@@ -907,6 +927,12 @@ func (b nativeBoundary) nativeGoType(t ast.TypeExpr) string {
 	if !ok {
 		return ""
 	}
+	// The bundled Bytes is the one non-scalar boundary type, and only a
+	// bundled sidecar may name it. The spelling is checked before resolution,
+	// so a module declaring its own type of that name keeps meaning its own.
+	if b.bytesAllowed && !b.localTypes[n.Name] && (n.Name == "Bytes" || n.Name == "Bytes.Bytes") {
+		return goBytesType
+	}
 	return b.wrappers[n.Name]
 }
 
@@ -943,9 +969,20 @@ func resultTypeNames(fs *goast.FieldList) []string {
 	return out
 }
 
+// goBytesType is the only Go spelling a sidecar can use for Bytes: sidecars
+// may not import fangort, whose Bytes is an alias for this.
+const goBytesType = "[]byte"
+
 func goTypeName(e goast.Expr) string {
-	if id, ok := e.(*goast.Ident); ok {
-		return id.Name
+	switch e := e.(type) {
+	case *goast.Ident:
+		return e.Name
+	case *goast.ArrayType:
+		if e.Len == nil {
+			if elem := goTypeName(e.Elt); elem == "byte" || elem == "uint8" {
+				return goBytesType
+			}
+		}
 	}
 	return ""
 }

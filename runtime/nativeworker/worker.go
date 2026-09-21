@@ -82,6 +82,8 @@ func decode(v nativewire.Value) reflect.Value {
 		return reflect.ValueOf(rune(v.R))
 	case "bool":
 		return reflect.ValueOf(v.B)
+	case "bytes":
+		return reflect.ValueOf(fangort.Bytes(v.Bytes))
 	default:
 		panic("unknown native argument kind " + v.Kind)
 	}
@@ -99,9 +101,13 @@ func encode(v reflect.Value) nativewire.Value {
 		return nativewire.Value{Kind: "char", R: int32(v.Int())}
 	case reflect.Bool:
 		return nativewire.Value{Kind: "bool", B: v.Bool()}
-	default:
-		panic(fmt.Sprintf("unsupported native result type %s", v.Type()))
 	}
+	// Bytes is the one non-scalar result. The exact type is checked rather
+	// than the kind, because Value.Bytes panics on any other slice.
+	if v.Type() == bytesType {
+		return nativewire.Value{Kind: "bytes", Bytes: v.Bytes()}
+	}
+	panic(fmt.Sprintf("unsupported native result type %s", v.Type()))
 }
 
 func invoke(functions map[string]any, name string, args []nativewire.Value) (result nativewire.Message) {
@@ -142,7 +148,10 @@ func invoke(functions map[string]any, name string, args []nativewire.Value) (res
 	return result
 }
 
-var errorType = reflect.TypeFor[error]()
+var (
+	errorType = reflect.TypeFor[error]()
+	bytesType = reflect.TypeFor[fangort.Bytes]()
+)
 
 // Run connects to the interpreter, installs its host in every linked sidecar,
 // and serves native calls until the interpreter closes the connection.

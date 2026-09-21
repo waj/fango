@@ -2,13 +2,18 @@
 // and its native worker process.
 package nativewire
 
+// Value is one native argument or result. Kind names which field carries it;
+// "bytes" is the bundled Bytes, which crosses as an ordinary []byte. gob does
+// not distinguish a nil slice from an empty one, so an empty Bytes arrives
+// nil — harmless, because Bytes.empty is nil.
 type Value struct {
-	Kind string
-	I    int64
-	F    float64
-	S    string
-	R    int32
-	B    bool
+	Kind  string
+	I     int64
+	F     float64
+	S     string
+	R     int32
+	B     bool
+	Bytes []byte
 }
 
 type Message struct {

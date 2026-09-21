@@ -125,6 +125,49 @@ func ReadHandleLine(id int64) (string, error) {
 	return strings.ToValidUTF8(line, "�"), nil
 }
 
+// maxByteRead bounds one counted read's allocation, so a program naming an
+// absurd count gets its answer in pieces rather than an allocation the size of
+// the count. A short read is part of the contract either way.
+const maxByteRead = 1 << 16
+
+// ReadHandleBytes answers at most max bytes, fewer when fewer are available,
+// and empty at end of file, which HandleHasInput distinguishes as it does for
+// ReadHandleLine. It reads through the handle's buffered reader, so counted
+// reads and line reads interleave on one handle.
+//
+// The result is its own array. A Bytes may never alias a buffer something will
+// write again (doc/design/backend.md, "Bytes representation"), which is why
+// this allocates and copies rather than handing out a Peek into the reader.
+func ReadHandleBytes(id int64, max int64) ([]byte, error) {
+	h, err := lookup(id)
+	if err != nil {
+		return nil, err
+	}
+	if max <= 0 {
+		return nil, nil
+	}
+	if max > maxByteRead {
+		max = maxByteRead
+	}
+	buf := make([]byte, max)
+	n, err := h.reader.Read(buf)
+	if err != nil && err != io.EOF {
+		return nil, relabel(err, h.path)
+	}
+	return buf[:n:n], nil
+}
+
+func WriteHandleBytes(id int64, data []byte) error {
+	h, err := lookup(id)
+	if err != nil {
+		return err
+	}
+	if _, err := h.file.Write(data); err != nil {
+		return relabel(err, h.path)
+	}
+	return nil
+}
+
 func WriteHandle(id int64, text string) error {
 	h, err := lookup(id)
 	if err != nil {

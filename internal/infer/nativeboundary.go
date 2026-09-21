@@ -7,14 +7,15 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// The native boundary admits two shapes beyond plain scalars (doc/design.md,
+// The native boundary admits three shapes beyond plain scalars (doc/design.md,
 // "Go backend and runtime"): a single-constructor, single-scalar-field type
 // declared in the sidecar's own module, erased to its scalar at the Go call;
-// and, for the bundled File module only, a `Result IO.Error T` result produced
-// from a Go `(T, error)`. Module validation checks the Go signatures against
-// the spelling of these shapes before name resolution; this file resolves
-// the same shapes semantically and records the constructors both backends
-// construct, so neither re-derives them from names.
+// the bundled Bytes, in bundled sidecars only, crossing as an ordinary []byte
+// and erased to nothing; and, for the bundled File module only, a
+// `Result IO.Error T` result produced from a Go `(T, error)`. Module validation
+// checks the Go signatures against the spelling of these shapes before name
+// resolution; this file resolves the same shapes semantically and records the
+// constructors both backends construct, so neither re-derives them from names.
 
 const (
 	fallibleNativeModule = "File"
@@ -98,6 +99,18 @@ func (ck *Checker) boundaryWrapper(t types.Type, module string) *types.CtorInfo 
 	return adt.Ctors[0]
 }
 
+// isBytesType answers the bundled Bytes, the one non-scalar boundary type. It
+// tests the representation the checker assigned at the declaration (bytes.go),
+// so a user type named `Bytes` is not it.
+func (ck *Checker) isBytesType(t types.Type) bool {
+	con, ok := t.(*types.TCon)
+	if !ok || len(con.Args) != 0 {
+		return false
+	}
+	adt := ck.ADTs[con.Unique]
+	return adt != nil && adt.Repr == types.ReprBytes
+}
+
 func (ck *Checker) isBoundaryScalar(t types.Type) bool {
 	con, ok := t.(*types.TCon)
 	if !ok || len(con.Args) != 0 {
@@ -167,8 +180,8 @@ func (ck *Checker) fallibleShape(t types.Type, n *types.NativeInfo, sp source.Sp
 		}
 	}
 	payload := con.Args[1]
-	if !ck.isBoundaryScalar(payload) && !types.Equal(payload, ck.B.Unit) && ck.boundaryWrapper(payload, symbolModule(n.Name)) == nil {
-		return bad("A fallible native's payload must be a boundary scalar, Unit, or a local scalar wrapper type.")
+	if !ck.isBoundaryScalar(payload) && !ck.isBytesType(payload) && !types.Equal(payload, ck.B.Unit) && ck.boundaryWrapper(payload, symbolModule(n.Name)) == nil {
+		return bad("A fallible native's payload must be a boundary scalar, `Bytes`, Unit, or a local scalar wrapper type.")
 	}
 	var errCtor, okCtor *types.CtorInfo
 	for _, c := range result.Ctors {

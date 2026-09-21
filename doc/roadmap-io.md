@@ -31,16 +31,12 @@ existing capture checker.
 
 ## What today's library cannot do
 
-`File.Handle` is the right lifetime model at the wrong granularity. Reading is
-`readLine`, whose contract is a `String` and its terminator; there is no
-counted read, so no `Source` can be built over a file that carries bytes a
-`String` cannot hold. Writing goes straight to the `*os.File`, so a response
-assembled from a status line, several headers, and a body costs that many
-syscalls even though a `Writer` above it would have batched them.
-
-Filling that in needs one compiler change. The bundled native boundary accepts
-only scalars, so a native answering `Bytes` — a counted file read, later a
-socket read — is the first that needs `[]byte` admitted to it.
+`File` now reads and writes counted bytes, and `Bytes` crosses the sidecar
+boundary, so the pieces a `Source` and a `Sink` are made of exist. What is
+missing is the two adapters themselves, and the same pair over a socket.
+Writing still goes straight to the `*os.File`, so a response assembled from a
+status line, several headers, and a body costs that many syscalls until a
+`Writer` sits over a `File.sink`.
 
 ## Step 1 — the adapters
 
@@ -51,10 +47,11 @@ IO.stdout : Sink {IO}
 IO.stdin : Source {IO}
 ```
 
-`File` gains counted byte natives beside its existing line natives, which keep
-their contracts; the unbuffered `File.write` stays as it is. `IO.stdout` and
-`IO.stdin` wait for a program that needs them, because reaching them from `IO`
-puts `Bytes` in every program's Prelude closure.
+Both are a few lines over `File.readBytes` and `File.writeBytes`; the
+unbuffered `File.write` stays as it is. `IO.stdout` and `IO.stdin` wait for a
+program that needs them, because reaching them from `IO` puts `Bytes` in every
+program's Prelude closure.
+
 ## Step 2 — sockets, HTTP, and a concurrent server
 
 ```fango
@@ -71,11 +68,9 @@ Net.sink : Connection -> Sink {IO, Fail IO.Error}
 ```
 
 Same lifetime shape as `File`, with the same private handle table. Two
-compiler-side questions come with it beyond the byte boundary Step 1 opens.
-Fallible natives that the
-boundary turns into `Result IO.Error a` are spelled for the bundled `File`
-module alone, and the
-[general case is deferred](roadmap-effects.md#deferred-topics) pending
+compiler-side questions come with it. Fallible natives that the boundary turns
+into `Result IO.Error a` are spelled for the bundled `File` module alone, and
+the [general case is deferred](roadmap-effects.md#deferred-topics) pending
 resolved error identities; admitting a second bundled module is the smallest
 form of that. And socket failures — connection refused, reset by peer, address
 in use — have no member in `IO.Error`'s `Kind`.
@@ -154,6 +149,13 @@ identical output and a read-throughput measurement recorded on an idle host.
 
 - Whether socket failures extend `IO.Error`'s `Kind` or introduce `Net.Error`,
   and whether a limit overflow should ever be raised rather than returned.
+- Whether `Bytes` should cross the sidecar boundary in user modules too. The
+  syntactic check matches a spelling before resolution, and in a user module
+  `Bytes` could be the bundled type, the module's own, or one imported
+  unqualified from a third; the last would be taken for a scalar wrapper and
+  miscompile. Lifting the bundled-only restriction needs a resolved-type
+  backstop over every boundary position, not just the fallible payload, which
+  would also start diagnosing shapes the loader rejects today.
 - Whether `Bytes.fromString` and `Bytes.toString` may share storage rather than
   copy. Both directions are safe for immutable values, but the Go spelling
   needs `unsafe`, which no part of the runtime uses today.

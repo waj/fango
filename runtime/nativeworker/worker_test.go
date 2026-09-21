@@ -136,3 +136,40 @@ func TestProxy(t *testing.T) {
 		t.Fatalf("EOF response = %v", err)
 	}
 }
+
+// Bytes is the one non-scalar the boundary admits. It crosses verbatim and
+// unvalidated, empty and nil are the same value on the way back, and a slice
+// that is not []byte is still refused rather than reinterpreted.
+func TestInvokeBytes(t *testing.T) {
+	functions := map[string]any{
+		"echo":    func(data []byte) []byte { return append(append([]byte{}, data...), '!') },
+		"size":    func(data []byte) int64 { return int64(len(data)) },
+		"nothing": func() []byte { return nil },
+		"read": func(fail bool) ([]byte, error) {
+			if fail {
+				return nil, errors.New("closed handle")
+			}
+			return []byte{0xff, 0x00}, nil
+		},
+		"codes": func() []int64 { return []int64{1} },
+	}
+	got := invoke(functions, "echo", []nativewire.Value{{Kind: "bytes", Bytes: []byte{0xff, 0x00}}})
+	if got.Panic != "" || got.Value.Kind != "bytes" || string(got.Value.Bytes) != "\xff\x00!" {
+		t.Fatalf("echo = %#v", got)
+	}
+	if got := invoke(functions, "size", []nativewire.Value{{Kind: "bytes"}}); got.Value.Kind != "int" || got.Value.I != 0 {
+		t.Fatalf("size of nil = %#v", got)
+	}
+	if got := invoke(functions, "nothing", nil); got.Value.Kind != "bytes" || len(got.Value.Bytes) != 0 {
+		t.Fatalf("nothing = %#v", got)
+	}
+	if got := invoke(functions, "read", []nativewire.Value{{Kind: "bool", B: false}}); got.Failure != nil || string(got.Value.Bytes) != "\xff\x00" {
+		t.Fatalf("read ok = %#v", got)
+	}
+	if got := invoke(functions, "read", []nativewire.Value{{Kind: "bool", B: true}}); got.Failure == nil || got.Failure.Message != "closed handle" {
+		t.Fatalf("read failing = %#v", got)
+	}
+	if got := invoke(functions, "codes", nil); !strings.Contains(got.Panic, "unsupported native result type") {
+		t.Fatalf("a non-byte slice result must be refused, got %#v", got)
+	}
+}

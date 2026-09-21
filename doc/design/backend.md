@@ -80,7 +80,9 @@ The invariant the layer rests on is that a Bytes never aliases storage anything
 will write again. Slicing therefore shares its backing array, capped so nothing
 can be appended into what follows it, and every operation that builds a value
 allocates its own array. A native filling a scratch buffer owes the same copy
-on the way out; that is the one rule a reviewer of native code checks.
+on the way out; that is the one rule a reviewer of native code checks, and it
+is why fangort.Bytes is an alias rather than a defined type — a sidecar reading
+a file or a socket hands the boundary an ordinary `[]byte`.
 
 A `List Int` would cost eight bytes per byte and forfeit `bytes.Index`, and an
 opaque handle into a native table — the mechanism `File.Handle` uses — is
@@ -272,10 +274,11 @@ predeclared names, and fangort. Emission reparses, scrubs positions, and substit
 typed AST expressions with precedence intact.
 
 Bundled and user call-form sidecars follow the same declaration correspondence,
-standard-library import restriction, and Unit-erased scalar ABI. Go compilation
-checks function bodies/types. Native effect operations supply a default only when
-no Fango handler handles them. Each sidecar's hash enters sources.json and edits
-or removals invalidate/prune generated packages.
+standard-library import restriction, and Unit-erased ABI over scalars and Bytes.
+Go compilation checks function bodies and types. Native effect operations
+supply a default only when no Fango handler handles them. Each sidecar's hash
+enters sources.json and edits or removals invalidate or prune generated
+packages.
 
 Every materialized sidecar gets FangoHost, a reserved process-global interface
 for input/output, arguments, directory, and exit, without hidden call parameters.
@@ -290,6 +293,13 @@ native metadata, never re-derived by backends:
 - A same-module single-constructor/single-scalar wrapper is projected before a
   call and reconstructed after it. The loader recognizes its declared shape;
   checking confirms resolved types. Interpreter CtorVal wrapping matches Go.
+- The bundled Bytes crosses as a plain `[]byte`, admitted in bundled sidecars
+  only and recognized by the representation the checker assigned at the
+  declaration rather than by name, so a user type of that name keeps its own
+  boundary. It is erased to nothing: nothing is projected, rebuilt, or
+  validated, because Bytes has no well-formedness contract. A sidecar spells it
+  `[]byte` because sidecars cannot import fangort, and owes the copy-out every
+  Bytes producer owes.
 - Bundled File value natives additionally map Go `(T, error)` to Result IO.Error.
   fangort.ClassifyIOError supplies one shared kind/path/message classification;
   checked IO.Kind constructor order is its ABI. Go emits the Result construction
@@ -310,9 +320,12 @@ imports, registry, and FangoHost bindings. Support files come from the library
 root and are materialized with AST-rewritten repository imports. Cache keys hash sorted destination paths
 and exact bytes of the entire module, including fixed support sources.
 
-A framed scalar protocol carries calls and reverse host requests over a dedicated
-loopback connection, leaving process stdio outside the control channel. The active
-interpreter host answers requests, sharing one buffered reader with the prompt.
+A framed protocol carries calls and reverse host requests over a dedicated
+loopback connection. Its values are the boundary scalars plus one bytes kind,
+carried verbatim by gob, which does not distinguish an empty slice from a nil
+one — harmless, because the empty Bytes is nil. Process stdio stays outside the
+control channel. The active interpreter host answers requests, sharing one
+buffered reader with the prompt.
 Globals persist across calls, but importing new sidecars rebuilds the worker.
 Panics are reported and reproduced; host exit becomes an interpreter exit error.
 This is lifecycle isolation, not a security sandbox.
