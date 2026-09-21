@@ -38,8 +38,8 @@ byte IO layer needs: inside a handler's subject, a closure performing the
 handled effect may be adapted to an arrow that omits it, which binds it to that
 activation rather than to whichever handler is innermost when it is called.
 [Effects](reference/effects.md#binding-a-closure-to-a-handler-activation) owns
-it. [Handler instances](roadmap-instances.md) now owns only the questions the
-rule leaves open.
+it. The questions it leaves open are with the other deferred effect work, in
+the [effects roadmap](roadmap-effects.md#handler-instances-open-questions).
 
 ## List representation
 

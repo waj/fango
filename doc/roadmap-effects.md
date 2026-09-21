@@ -1,6 +1,7 @@
 # Roadmap: direct effects, streams, and structured tasks
 
-This document owns proposed APIs and the work needed to make them usable.
+This document owns proposed APIs and the work needed to make them usable, and
+the questions left open by the effect rules already shipped.
 The implemented contract remains in [design](design/effects.md)
 and [reference](reference/effects.md#effects-and-handlers); the main
 [roadmap](roadmap.md#effects-state-and-resource-scopes) summarizes priorities.
@@ -363,6 +364,15 @@ These do not block the committed sequence unless a concrete API requires them:
   request packages or module-owned specialization, including local dictionaries,
   handler skolems, existential payload scope, answer types, and indirect calls.
   Go's generic-field/method restrictions cannot be bypassed with unchecked `any`.
+- **Row labels keyed by their arguments:** a parameterized effect may appear in
+  a row only once, so `{Box Int, Box Bool}` is rejected. Keying label identity
+  on the effect together with its arguments would lift that. The hard part is
+  unification rather than the rule: `{Box a, Box Int}` has two distinct labels
+  only if `a` is not `Int`, so row unification acquires a disequality it cannot
+  generally decide, and the plausible restriction is to require repeated
+  labels' arguments to be rigid or ground where the row is formed. Nothing in
+  the byte IO layer needs it: varying types live on the bound record, and the
+  effects stay unparameterized.
 - **Complete builtin IO interception:** wait until actual native declarations and
   class evidence fit that ABI; fixed-signature domain interpretations work now.
 - **Non-tail resumption and escaping computation owners:** neither is needed for
@@ -381,6 +391,36 @@ These do not block the committed sequence unless a concrete API requires them:
 Handlers do not roll back arbitrary external writes. Search can use explicit
 worklists and fresh computations without continuation cloning. Neither release
 attempts nor ownership proofs guarantee successful external close or termination.
+
+## Handler instances: open questions
+
+The rule that addresses a *specific* handler activation through a value is
+implemented, including the row-indexed wrapper shape the
+[byte IO layer](roadmap-io.md) was waiting on.
+[Effects](reference/effects.md#binding-a-closure-to-a-handler-activation) owns
+its behavior and diagnostics;
+[effect execution](design/effects.md#binding-a-closure-to-an-activation) owns
+the binding mechanism and the optimizer invariant it forces. These questions
+would revise shipped behavior rather than schedule unstarted work, and they
+settle what was once deferred here as "named effect instances":
+
+- Whether the adaptation should stay implicit. A lambda that used to be a type
+  error inside a handler subject now compiles and binds to that handler, which
+  is the reading its author most plausibly intended, but an explicit marker on
+  the lambda would remove the doubt at the cost of syntax.
+- Whether an abort-only operation may be bound once a consumer exists, and if
+  so whether by forcing the activation scoped or by another guard. Today it is
+  refused, because an abort carries a runtime exit target for its exact
+  activation and a bound abort could outlive it.
+- Whether the rule should extend beyond the subject to closures written in the
+  handler's clauses, which run outside the activation and today could bind
+  only to an enclosing one.
+- Whether rows should ever say *which* activation. Doing so means naming
+  instances in types, with a fresh rigid name per handler; the index infects
+  every type that holds one, and discharge inside a library wrapper rather
+  than a syntactic `handle` needs rank-2, which Fango does not have. The
+  current rule deliberately leaves rows exact about effects and silent about
+  identity.
 
 ## Acceptance and verification
 

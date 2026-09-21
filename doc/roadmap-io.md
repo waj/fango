@@ -51,8 +51,9 @@ does that, including at the row-indexed record shape `Reader e` needs: a reader
 is an ordinary record of closures bound to one activation, and two readers are
 two records. The `reader_over_*` fixtures drive `over` at a same-module effect,
 at `State`, and at `IO`, and `reader_two_readers` drives two at once. Both
-effects here are unparameterized, so the row-label rule discussed in
-[handler instances](roadmap-instances.md) is not on this path.
+effects here are unparameterized, so keying row labels by their arguments,
+[deferred in the effects roadmap](roadmap-effects.md#deferred-topics), is not
+on this path.
 
 ## Step 1 — language prerequisites
 
