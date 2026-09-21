@@ -1,0 +1,26 @@
+import Bytes exposing (Bytes)
+import Reader exposing (Reader)
+
+-- Reading a value already in memory. `parse` is annotated at the pure row, so
+-- the compiler proves this path performs nothing at all: the clauses of
+-- `overBytes` reach a source that has already ended, and a definition
+-- annotation is exact about the effects on its arrows.
+parse : Reader {} -> (Maybe Bytes, Bytes, Bool)
+parse input =
+    head = Reader.readExactly input 5
+    rest = Reader.readUpTo input 99
+    (head, rest, Reader.atEnd input)
+
+main() =
+    print (Reader.overBytes (Bytes.fromString "hello, world") parse)
+    print (Reader.overBytes Bytes.empty parse)
+    -- A failed readExactly consumes nothing, so the caller still holds
+    -- everything it could not frame.
+    print (Reader.overBytes (Bytes.fromString "abc") (\input ->
+        (Reader.readExactly input 99, Reader.readUpTo input 99)))
+    -- Counts outside the buffer are clamped rather than rejected.
+    print (Reader.overBytes (Bytes.fromString "abc") (\input ->
+        (Reader.readExactly input 0, Reader.readUpTo input (-1), Reader.readUpTo input 2)))
+    -- ensure grows the buffer and consumes nothing.
+    print (Reader.overBytes (Bytes.fromString "abc") (\input ->
+        (Reader.ensure input 3, Reader.ensure input 4, Reader.readUpTo input 99)))

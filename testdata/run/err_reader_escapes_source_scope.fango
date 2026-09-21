@@ -1,0 +1,18 @@
+import Bytes exposing (Bytes, Source(..))
+import Fail exposing (Fail, attempt)
+import File
+import IO exposing (Error)
+
+-- A source built over an open file captures the handle, so it cannot outlive
+-- the scope that owns it; a reader over it would pull from a closed file.
+
+lineSource : File.Handle -> Source {IO, Fail Error}
+lineSource file =
+    Source { pull = \_ ->
+        case File.readLine file of
+            Nothing -> Nothing
+            Just line -> Just (Bytes.fromString (line.text ++ line.ending)) }
+
+main() =
+    case attempt (\_ -> File.withFile "input.txt" lineSource) of
+        _ -> print "unreachable"

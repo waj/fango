@@ -1,0 +1,42 @@
+import Bytes exposing (Bytes, Source(..))
+import Reader exposing (Reader)
+import Stream
+
+-- Handing the buffered bytes on, either to a callback or as a Stream. The
+-- Stream's producer captures a record bound to the `over` activation, which is
+-- an owner nested inside that activation's lifetime and therefore allowed; a
+-- Stream that left the scope would be rejected instead. Stream's rule that a
+-- yielded value may not retain producer-local resources holds trivially,
+-- because Bytes captures nothing.
+
+effect Feed
+    next : () -> Maybe Bytes
+
+paced : Source {Feed | e}
+paced = Source { pull = \_ -> next() }
+
+drive : List Bytes -> (Reader {Feed | e} ->{Feed | e} a) ->{e} a
+drive pieces use =
+    handle Reader.over paced use with rest = pieces of
+        next () ->
+            case rest of
+                [] -> resume Nothing with []
+                [chunk | more] -> resume (Just chunk) with more
+
+pieces : List Bytes
+pieces = [Bytes.fromString "ab", Bytes.empty, Bytes.fromString "cde", Bytes.fromString "f"]
+
+main() =
+    -- A memory reader has everything in hand, so it is one chunk.
+    print (Reader.overBytes (Bytes.fromString "abcdef") (\input -> Stream.toList (Reader.chunks input)))
+    -- Over a paced source the consumer sees the source's own chunking, with
+    -- the empty pull absorbed by refill.
+    print (drive pieces (\input -> Stream.toList (Reader.chunks input)))
+    -- The same bytes, and the same chunking, through the callback primitive.
+    drive pieces (\input -> Reader.forEachChunk input print)
+    -- Rejoining the chunks answers what was read, byte for byte.
+    print (drive pieces (\input -> Bytes.concat (Stream.toList (Reader.chunks input))))
+    -- Chunks after a partial read start where the read left off.
+    print (drive pieces (\input ->
+        (Reader.readExactly input 3, Stream.toList (Reader.chunks input))))
+    print (Reader.overBytes Bytes.empty (\input -> Stream.toList (Reader.chunks input)))

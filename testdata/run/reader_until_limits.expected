@@ -1,0 +1,9 @@
+(Found "ab", "cd")
+(Ended "ab\r", True)
+(Overflowed, "abcdef\n")
+Found "abc"
+Overflowed
+Overflowed
+Found "ab\r"
+(Found "", "abc")
+Ended ""

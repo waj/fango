@@ -1,0 +1,40 @@
+import Bytes exposing (Bytes, Sink(..))
+import Fail exposing (Fail, attempt, fail)
+import Writer exposing (Writer)
+
+-- `collecting` performs nothing at all, so the same writing code runs in a
+-- fixture with no effects and the caller receives everything or nothing.
+
+render : Writer {} -> Int
+render output =
+    Writer.writeString output "status"
+    output.flush()
+    Writer.write output (Bytes.fromString ": ")
+    Writer.writeString output "ok"
+    2
+
+trace : Sink {IO, Fail String}
+trace = Sink { write = \chunk -> print ("write " ++ show chunk) }
+
+-- A body that aborts never reaches the return clause, so nothing is flushed
+-- and no reader receives a truncated message. A caller that wants that
+-- guarantee for a whole body writes into `collecting` instead.
+partial : Bool -> Writer {IO, Fail String} ->{IO, Fail String} ()
+partial ok output =
+    Writer.writeString output "head"
+    if ok then () else fail "stopped"
+    Writer.writeString output "tail"
+
+main() =
+    print (Writer.collecting render)
+    -- Many small emits join once; flush has nowhere to push to.
+    print (Writer.collecting (\output ->
+        Writer.writeString output "a"
+        output.flush()
+        Writer.writeString output "b"
+        Writer.writeString output "c"))
+    print (Writer.collecting (\output -> ()))
+    print (attempt (\_ -> Writer.over trace 99 (partial True)))
+    print (attempt (\_ -> Writer.over trace 99 (partial False)))
+    -- The same body under collecting: an abort discards the whole answer.
+    print (attempt (\_ -> Writer.collecting (partial False)))

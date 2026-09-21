@@ -1,0 +1,9 @@
+import Bytes
+import Reader
+
+-- A reader is a record of closures bound to its `over` activation, so it
+-- cannot outlive it.
+
+main() =
+    reader = Reader.overBytes (Bytes.fromString "abc") (\input -> input)
+    print (Reader.readUpTo reader 99)

@@ -1,0 +1,11 @@
+write 10 "abcdefghij"
+write 1 "k"
+---
+write 10 "abcdefghij"
+---
+write 2 "ab"
+write 1 "c"
+---
+write 1 "a"
+write 1 "b"
+---

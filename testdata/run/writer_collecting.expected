@@ -1,0 +1,7 @@
+(2, "status: ok")
+((), "abc")
+((), "")
+write "headtail"
+Ok ()
+Err stopped
+Err stopped

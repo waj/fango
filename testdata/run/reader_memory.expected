@@ -1,0 +1,5 @@
+(Just "hello", ", world", True)
+(Nothing, "", True)
+(Nothing, "abc")
+(Just "", "", "ab")
+(True, False, "abc")

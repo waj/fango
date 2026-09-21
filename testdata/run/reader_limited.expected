@@ -1,0 +1,6 @@
+(("abcde", True), "fghij")
+(Just "abc", "defghij")
+(True, "abcdefghij")
+("abc", True)
+("abcd", "efghij")
+(Found "ab", "cdef")

@@ -1,0 +1,36 @@
+import Bytes exposing (Bytes)
+import Reader exposing (Read(..), Reader)
+
+-- A stage over a parent reader. Every byte it hands out is skipped through the
+-- parent, so when the scope ends the parent is positioned after what was
+-- consumed rather than after the allowance. Because a reader is a value the
+-- parent stays reachable, and a caller can hold both the framed and the raw
+-- reader.
+
+alphabet : Bytes
+alphabet = Bytes.fromString "abcdefghij"
+
+main() =
+    -- The frame ends at the allowance even though the parent has more.
+    print (Reader.overBytes alphabet (\input ->
+        framed = Reader.limited input 5 (\frame -> (Reader.readUpTo frame 99, Reader.atEnd frame))
+        (framed, Reader.readUpTo input 99)))
+    -- Consuming part of the frame leaves the parent after exactly that part.
+    print (Reader.overBytes alphabet (\input ->
+        framed = Reader.limited input 5 (\frame -> Reader.readExactly frame 3)
+        (framed, Reader.readUpTo input 99)))
+    -- A zero allowance is immediately at end and consumes nothing.
+    print (Reader.overBytes alphabet (\input ->
+        (Reader.limited input 0 Reader.atEnd, Reader.readUpTo input 99)))
+    -- An allowance past the input still ends where the input does.
+    print (Reader.overBytes (Bytes.fromString "abc") (\input ->
+        Reader.limited input 99 (\frame -> (Reader.readUpTo frame 99, Reader.atEnd frame))))
+    -- Stages nest, and the inner allowance clamps against the outer one.
+    print (Reader.overBytes alphabet (\input ->
+        inner = Reader.limited input 4 (\outer ->
+            Reader.limited outer 99 (\frame -> Reader.readUpTo frame 99))
+        (inner, Reader.readUpTo input 99)))
+    -- A frame reads to its own delimiter, and the parent resumes after it.
+    print (Reader.overBytes (Bytes.fromString "ab\ncdef") (\input ->
+        line = Reader.limited input 6 (\frame -> Reader.readLine frame 99)
+        (line, Reader.readUpTo input 99)))

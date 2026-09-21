@@ -1,0 +1,5 @@
+(True, "a", True)
+(True, False, "a")
+("a", "b", Just "cd")
+(Found "ab", Found "cd", True)
+Found "b"

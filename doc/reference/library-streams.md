@@ -90,7 +90,9 @@ prefix path =
 ```
 
 Import `File` and handle the pipeline's `Fail IO.Error` effect at traversal.
-File acquisition and release are synchronous. A custom stage can use
+File acquisition and release are synchronous. A byte-oriented producer is
+[`Reader.chunks`](library-readers.md), which yields a buffered reader's
+chunks as they are pulled. A custom stage can use
 `withCursor` inside `generate`, reading several input elements and yielding
 zero or more outputs. A parser can retain bounded lookahead in ordinary values.
 Yielded values may retain resources owned by an enclosing scope, but cannot

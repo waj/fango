@@ -1,0 +1,45 @@
+import Bytes exposing (Bytes, Source(..))
+import Reader exposing (Read(..), Reader)
+
+-- A source that answers one byte per pull and an empty chunk before each one.
+-- An empty chunk is not end of input, so `refill` has to pull through it: that
+-- is what lets it promise it never answers True without growing the buffer,
+-- and therefore what makes a loop on it terminate.
+
+effect Feed
+    next : () -> Maybe Bytes
+
+trickle : Source Feed
+trickle = Source { pull = \_ -> next() }
+
+drive : Bytes -> (Reader Feed ->{Feed} a) ->{IO} a
+drive text use =
+    handle Reader.over trickle use with pending = (True, text) of
+        next () ->
+            case pending of
+                (True, rest) -> resume (Just Bytes.empty) with (False, rest)
+                (False, rest) ->
+                    if Bytes.length rest == 0 then
+                        resume Nothing with (False, rest)
+                    else
+                        resume (Just (Bytes.slice 0 1 rest)) with (True, Bytes.slice 1 (Bytes.length rest) rest)
+
+crlf : Bytes
+crlf = Bytes.fromString "\r\n"
+
+main() =
+    -- refill answers True only when the buffer grew, and False exactly once
+    -- the source has ended.
+    print (drive (Bytes.fromString "ab") (\input ->
+        (input.refill(), input.buffered(), input.refill())))
+    print (drive (Bytes.fromString "a") (\input ->
+        (input.refill(), input.refill(), input.buffered())))
+    -- A short read is not end of input.
+    print (drive (Bytes.fromString "abcd") (\input ->
+        (Reader.readUpTo input 99, Reader.readUpTo input 99, Reader.readExactly input 2)))
+    -- A delimiter straddling a refill is still found.
+    print (drive (Bytes.fromString "ab\r\ncd\r\n") (\input ->
+        (Reader.readUntil input crlf 99, Reader.readUntil input crlf 99, Reader.atEnd input)))
+    -- Overlapping occurrences: the scan resumes past the start of the previous
+    -- scan, not past a match, so the first "aa" in "aaaa" wins.
+    print (drive (Bytes.fromString "baaa") (\input -> Reader.readUntil input (Bytes.fromString "aa") 99))

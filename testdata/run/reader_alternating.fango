@@ -1,0 +1,42 @@
+import Bytes exposing (Bytes, Source(..))
+import Reader exposing (Reader)
+
+-- Two buffered readers driven at once, which is what binding the record's
+-- fields to their own activation buys. Each `refill` reaches its own source
+-- even though the inner scope handles the same effect and is innermost while
+-- both are in use.
+
+effect FeedA
+    nextA : () -> Maybe Bytes
+
+effect FeedB
+    nextB : () -> Maybe Bytes
+
+sourceA : Source FeedA
+sourceA = Source { pull = \_ -> nextA() }
+
+sourceB : Source FeedB
+sourceB = Source { pull = \_ -> nextB() }
+
+step : Bytes -> Maybe Bytes
+step text = if Bytes.length text == 0 then Nothing else Just (Bytes.slice 0 2 text)
+
+after : Bytes -> Bytes
+after text = Bytes.slice 2 (Bytes.length text) text
+
+main() =
+    handle
+        handle
+            Reader.over sourceA (\left ->
+                Reader.over sourceB (\right ->
+                    print (Reader.readExactly left 3)
+                    print (Reader.readExactly right 3)
+                    print (Reader.readUpTo left 99)
+                    print (Reader.readUpTo right 99)
+                    -- A memory reader nested inside both keeps its own buffer.
+                    print (Reader.overBytes (Bytes.fromString "zz") (\inner -> Reader.readUpTo inner 99))
+                    print (Reader.atEnd left)))
+        with b = Bytes.fromString "wxyz" of
+            nextB () -> resume (step b) with after b
+    with a = Bytes.fromString "abcdef" of
+        nextA () -> resume (step a) with after a

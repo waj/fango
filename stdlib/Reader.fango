@@ -1,0 +1,225 @@
+{-# no-prelude #-}
+module Reader exposing (Read(..), Reader(..), atEnd, chunks, ensure, forEachChunk, limited, over, overBytes, readExactly, readLine, readUntil, readUpTo)
+
+import Basics exposing (..)
+import Bytes exposing (Bytes, Source(..))
+import Maybe exposing (Maybe(..))
+import Stream exposing (Stream, yield)
+
+{- Buffered reading over an abstract byte source.
+
+A `Reader e` is a record of closures bound to one `over` activation, so two
+readers are two records and each `refill` reaches its own source rather than
+whichever handler is innermost when it is called. `e` is what a call actually
+performs: nothing for `overBytes`, `IO` and `Fail IO.Error` for a file or a
+socket.
+
+The buffer is the activation's own state cell. Clauses see an immutable
+snapshot and the commit happens on `resume`, so no new mutable primitive is
+introduced and none is wanted.
+
+`Reading` is private and named apart from `Reader` because a module may not
+declare a type and an effect of one name. Its labels reach no signature: the
+effect is discharged inside the scopes below and a consumer sees only `e`.
+Because an operation name occupies the module's value namespace, `buffered`,
+`refill`, and `skip` are not also functions here; a caller projects them off
+the reader. -}
+
+type Reader e =
+    { buffered : () ->{e} Bytes
+    , refill : () ->{e} Bool
+    , skip : Int ->{e} Int
+    }
+
+effect Reading
+    buffered : () -> Bytes
+    refill : () -> Bool
+    skip : Int -> Int
+
+-- clamp keeps every count inside what is actually in hand, so no caller can
+-- skip past the buffer or ask for a negative amount.
+clamp : Int -> Int -> Int
+clamp wanted available =
+    if wanted < 0 then 0 else if wanted > available then available else wanted
+
+-- grow pulls until the source answers bytes or ends. An empty chunk is not end
+-- of input, so it is pulled through rather than reported: that is what lets
+-- `refill` promise it never answers True without growing the buffer, and
+-- therefore what makes a loop on `refill` terminate.
+grow : Source e -> Bytes ->{e} Bytes
+grow source pending =
+    case source.pull() of
+        Nothing -> pending
+        Just chunk ->
+            if Bytes.length chunk == 0 then grow source pending else Bytes.append pending chunk
+
+-- buffering is the one handler behind both scopes, differing only in what it
+-- starts with. Its clauses answer from the activation state and, when the
+-- buffer is short, call the source, which is how the source's effects reach
+-- both the result row and the record's fields.
+buffering : Bytes -> Source e -> (Reader e ->{e} a) ->{e} a
+buffering initial source use =
+    handle use { buffered = \_ -> buffered(), refill = \_ -> refill(), skip = \n -> skip n } with pending = initial of
+        buffered () -> resume pending with pending
+        refill () ->
+            grown = grow source pending
+            resume (Bytes.length grown > Bytes.length pending) with grown
+        skip n ->
+            taken = clamp n (Bytes.length pending)
+            resume taken with Bytes.slice taken (Bytes.length pending) pending
+
+-- limited stages a reader over a parent, clamping every answer to a remaining
+-- allowance held in its own activation state. Chunked transfer decoding, a
+-- decompressor, and a TLS layer later are the same shape. Because a reader is
+-- a value the parent stays reachable, so a caller can hold both the framed and
+-- the raw reader.
+--
+-- Every byte handed out here is skipped through the parent, so when the scope
+-- ends the parent is positioned after what was consumed rather than after the
+-- allowance; a caller that wants the rest of the frame discarded skips it
+-- before leaving.
+limited : Reader e -> Int -> (Reader e ->{e} a) ->{e} a
+limited parent allowance use =
+    handle use { buffered = \_ -> buffered(), refill = \_ -> refill(), skip = \n -> skip n } with remaining = clamp allowance allowance of
+        buffered () ->
+            window = parent.buffered()
+            resume (Bytes.slice 0 (clamp remaining (Bytes.length window)) window) with remaining
+        refill () ->
+            if Bytes.length (parent.buffered()) >= remaining then
+                resume False with remaining
+            else
+                resume (parent.refill()) with remaining
+        skip n ->
+            taken = parent.skip (clamp n remaining)
+            resume taken with remaining - taken
+
+over : Source e -> (Reader e ->{e} a) ->{e} a
+over source use = buffering Bytes.empty source use
+
+-- overBytes reads a value already in memory. The activation's cell is the
+-- buffer, so the whole thing is the starting buffer over a source that has
+-- already ended; nothing here performs anything, and the reader therefore
+-- stands at any row including the pure one. It is the memory end of the pair
+-- `Writer.collecting` is the other half of.
+overBytes : Bytes -> (Reader e ->{e} a) ->{e} a
+overBytes contents use = buffering contents { pull = \_ -> Nothing } use
+
+-- ensure loops on a real terminator rather than on a length comparison: it
+-- stops because the source said end of input, never because two numbers
+-- stopped changing. It grows the buffer and consumes nothing, which is what
+-- lets a failed read leave everything in hand.
+ensure : Reader e -> Int ->{e} Bool
+ensure reader n =
+    if Bytes.length (reader.buffered()) >= n then
+        True
+    else if reader.refill() then
+        ensure reader n
+    else
+        False
+
+atEnd : Reader e ->{e} Bool
+atEnd reader = if ensure reader 1 then False else True
+
+-- readUpTo answers what is in hand once there is anything at all, so it never
+-- waits for bytes the caller said were optional. A short answer is not end of
+-- input; an empty one is.
+readUpTo : Reader e -> Int ->{e} Bytes
+readUpTo reader n =
+    if n <= 0 then
+        Bytes.empty
+    else
+        ignore (ensure reader 1)
+        window = reader.buffered()
+        take = clamp n (Bytes.length window)
+        ignore (reader.skip take)
+        Bytes.slice 0 take window
+
+-- readExactly consumes nothing when it answers Nothing, so a caller can try a
+-- longer frame, a different framing, or report the truncation with the bytes
+-- still buffered.
+readExactly : Reader e -> Int ->{e} Maybe Bytes
+readExactly reader n =
+    if n <= 0 then
+        Just Bytes.empty
+    else if ensure reader n then
+        text = Bytes.slice 0 n (reader.buffered())
+        ignore (reader.skip n)
+        Just text
+    else
+        Nothing
+
+-- The three genuinely distinct answers to a delimited read: the run before a
+-- delimiter that was found and consumed, the unterminated remainder at end of
+-- input, and a limit reached before either.
+type Read = Found Bytes | Ended Bytes | Overflowed deriving (Eq, Show)
+
+-- A delimiter straddling a refill begins at most one byte short of a full
+-- delimiter before the end of what was already scanned, so restarting there
+-- finds it and rescans nothing else.
+resumeAt : Int -> Int -> Int
+resumeAt scanned delimiterLength = clamp (scanned - delimiterLength + 1) scanned
+
+-- scanning doubles what it asks for between scans, so a long run costs a
+-- bounded number of native scans rather than one per pull. `ensure` answering
+-- False does not mean the window stopped growing — the source can end part way
+-- to the target — so the window is remeasured before end of input is believed.
+scanning : Reader e -> Bytes -> Int -> Int ->{e} Read
+scanning reader delimiter limit scanned =
+    window = reader.buffered()
+    case Bytes.indexOfFrom (resumeAt scanned (Bytes.length delimiter)) delimiter window of
+        Just at ->
+            taken = at + Bytes.length delimiter
+            if taken > limit then
+                Overflowed
+            else
+                run = Bytes.slice 0 at window
+                ignore (reader.skip taken)
+                Found run
+        Nothing ->
+            have = Bytes.length window
+            if have >= limit then
+                Overflowed
+            else if ensure reader (clamp (if have < 1 then 1 else have * 2) limit) then
+                scanning reader delimiter limit have
+            else if Bytes.length (reader.buffered()) > have then
+                scanning reader delimiter limit have
+            else
+                ignore (reader.skip have)
+                Ended window
+
+-- readUntil consumes the delimiter and does not answer it. `limit` bounds the
+-- run and its delimiter together, which is the number of bytes the call will
+-- ever buffer: a server reading an unbounded header line from an untrusted
+-- peer has a memory bug, so there is no unlimited spelling. `Overflowed`
+-- consumes nothing, so the caller still holds what it refused.
+readUntil : Reader e -> Bytes -> Int ->{e} Read
+readUntil reader delimiter limit =
+    if limit <= 0 then Overflowed else scanning reader delimiter limit 0
+
+newline : Bytes
+newline = Bytes.fromString "\n"
+
+-- readLine is readUntil at a newline. A CRLF terminator leaves the carriage
+-- return on the run, because whether that byte is framing or content is the
+-- caller's question; a protocol that says CRLF reads readUntil at its own
+-- delimiter.
+readLine : Reader e -> Int ->{e} Read
+readLine reader limit = readUntil reader newline limit
+
+-- forEachChunk hands over whatever one refill produced, so a consumer sees the
+-- source's own chunking rather than a size this module invented and no chunk
+-- is copied on the way.
+forEachChunk : Reader e -> (Bytes ->{e} ()) ->{e} ()
+forEachChunk reader action =
+    if ensure reader 1 then
+        window = reader.buffered()
+        ignore (reader.skip (Bytes.length window))
+        action window
+        forEachChunk reader action
+    else
+        ()
+
+-- chunks bridges to Stream. Stream's rule that a yielded value may not retain
+-- producer-local resources holds trivially: Bytes captures nothing.
+chunks : Reader e -> Stream Bytes e
+chunks reader = Stream.generate (\_ -> forEachChunk reader yield)

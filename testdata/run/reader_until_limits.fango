@@ -1,0 +1,32 @@
+import Bytes exposing (Bytes)
+import Reader exposing (Read(..))
+
+-- readUntil's three answers, and what each of them consumes. The limit bounds
+-- the run together with its delimiter, because that is the number of bytes the
+-- call will ever buffer.
+
+crlf : Bytes
+crlf = Bytes.fromString "\r\n"
+
+main() =
+    -- The delimiter is consumed and not answered.
+    print (Reader.overBytes (Bytes.fromString "ab\r\ncd") (\input ->
+        (Reader.readUntil input crlf 99, Reader.readUpTo input 99)))
+    -- End of input before a delimiter: the unterminated remainder, consumed.
+    print (Reader.overBytes (Bytes.fromString "ab\r") (\input ->
+        (Reader.readUntil input crlf 99, Reader.atEnd input)))
+    -- Overflow consumes nothing, so the caller still holds what it refused.
+    print (Reader.overBytes (Bytes.fromString "abcdef\n") (\input ->
+        (Reader.readLine input 3, Reader.readUpTo input 99)))
+    -- "abc\n" is four bytes: the limit admits it and one less refuses it.
+    print (Reader.overBytes (Bytes.fromString "abc\ndef") (\input -> Reader.readLine input 4))
+    print (Reader.overBytes (Bytes.fromString "abc\ndef") (\input -> Reader.readLine input 3))
+    print (Reader.overBytes (Bytes.fromString "abc") (\input -> Reader.readLine input 0))
+    -- A CRLF terminator leaves the carriage return on the run: whether that
+    -- byte is framing or content is the caller's question.
+    print (Reader.overBytes (Bytes.fromString "ab\r\n") (\input -> Reader.readLine input 99))
+    -- The empty delimiter is found at the start of everything.
+    print (Reader.overBytes (Bytes.fromString "abc") (\input ->
+        (Reader.readUntil input Bytes.empty 99, Reader.readUpTo input 99)))
+    -- Nothing buffered and nothing to come.
+    print (Reader.overBytes Bytes.empty (\input -> Reader.readLine input 99))

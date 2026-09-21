@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Bytes exposing (Bytes, append, byteAt, concat, empty, fromList, fromString, indexOf, indexOfFrom, length, slice, startsWith, toList, toString, toStringLossy)
+module Bytes exposing (Bytes, Sink(..), Source(..), append, byteAt, concat, empty, fromList, fromString, indexOf, indexOfFrom, length, slice, startsWith, toList, toString, toStringLossy)
 
 import Basics exposing (..)
 import List exposing (List)
@@ -131,3 +131,21 @@ instance Ord Bytes
 -- `\t` and `\r` are spelled as escapes, and every other byte is `\xNN`.
 instance Show Bytes
     show x = bytesShow x
+
+{- A byte source and a byte sink.
+
+They live here, with the value they carry, because everything that produces or
+consumes bytes has to name them: the buffered `Reader` and `Writer`, the `File`
+adapters beneath those, and later a socket. Declaring them in `Reader` and
+`Writer` instead would make a file import the buffering layer in order to name
+the interface it implements.
+
+`pull` answers `Nothing` at end of input and otherwise whatever is available,
+which may be short; an empty chunk is not end of input. `write` accepts a chunk
+and writes all of it before returning. Neither carries a close: closing belongs
+to the scope owning the file or socket, and a leaf outliving that scope is
+already rejected because it captures the handle. -}
+
+type Source e = { pull : () ->{e} Maybe Bytes }
+
+type Sink e = { write : Bytes ->{e} () }

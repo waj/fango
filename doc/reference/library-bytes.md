@@ -75,3 +75,17 @@ through, `\\`, `\"`, `\n`, `\t`, and `\r` are spelled as escapes, and every
 other byte is `\xNN` with uppercase hex. A byte is not a Unicode scalar, so
 this is a display form rather than a literal the lexer reads back — there is
 no `Bytes` literal syntax.
+
+## Source and Sink
+
+`Bytes` also declares the two leaves the buffered IO layer is built on:
+
+```fango
+type Source e = { pull : () ->{e} Maybe Bytes }
+type Sink e = { write : Bytes ->{e} () }
+```
+
+They live here, with the value they carry, because everything that produces or
+consumes bytes has to name them — the buffered `Reader` and `Writer`, the
+`File` adapters beneath those, and later a socket. Their contracts belong with
+their consumers, in [buffered readers and writers](library-readers.md).
