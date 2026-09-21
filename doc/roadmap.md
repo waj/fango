@@ -25,20 +25,23 @@ for otherwise unavailable semantics or measured performance needs.
 ## Byte IO, buffered readers and writers
 
 [Bytes and readers](roadmap-io.md) owns the proposed `Bytes` value, `Reader`
-and `Writer` as handler activations over abstract byte sources, and the file,
-memory, and socket adapters beneath them, driven by an HTTP server as its
-consumer. `Bytes` is its only new runtime primitive; it depends on
-[handler instances](roadmap-instances.md) below, and it records the three
+and `Writer` as records bound to handler activations over abstract byte
+sources and sinks, and the file, memory, and socket adapters beneath them,
+driven by an HTTP server as its consumer. `Bytes` is its only new runtime
+primitive; it depends on [handler instances](roadmap-instances.md) below and
+on a closed row being writable as a type argument, and it records the three
 compiler defects found on its path. A concurrent server additionally depends
 on the [effects roadmap](roadmap-effects.md).
 
 ## Addressing a specific handler
 
-[Handler instances](roadmap-instances.md) proposes reifying a handler
-activation as a value, so an operation reaches a chosen activation rather
-than the innermost one. It supersedes the effects roadmap's deferred
-named-instance entry and is a committed prerequisite of the byte IO layer,
-whose readers and writers are activations.
+[Handler instances](roadmap-instances.md) proposes one typing rule: inside a
+handler's subject, a closure performing the handled effect may be adapted to
+the handler's residual row, which binds it to that activation rather than to
+whichever handler is innermost when it is called. It adds no keyword or type
+former, supersedes the effects roadmap's deferred named-instance entry, and is
+a committed prerequisite of the byte IO layer, whose readers are such bound
+closures.
 
 ## List representation
 
