@@ -1,0 +1,52 @@
+import Bytes exposing (Bytes)
+import Fail exposing (Fail, attempt)
+import File
+import IO exposing (Error, describeError)
+import Reader exposing (Read(..), Reader)
+import Result exposing (Result(..))
+import Stream
+import Writer
+
+-- The same parsing code over memory and over a file. `parse` names only the
+-- row its reader performs, so it is the identical definition in both places;
+-- only the scope around it differs.
+
+parse : Reader e -> List Bytes ->{e} List Bytes
+parse input found =
+    case Reader.readLine input 99 of
+        Found run -> parse input [run | found]
+        Ended rest ->
+            if Bytes.length rest == 0 then List.reverse found else List.reverse [rest | found]
+        Overflowed -> List.reverse found
+
+report : Show a => String -> Result Error a ->{IO} ()
+report label outcome =
+    case outcome of
+        Ok value -> print (label ++ ": " ++ show value)
+        Err error -> print (label ++ ": " ++ describeError error)
+
+fixture : Bytes
+fixture = Bytes.fromList [97, 10, 255, 10]
+
+main() =
+    print (Reader.overBytes fixture (\input -> parse input []))
+    report "file" (attempt (\_ ->
+        File.withFile "input.bin" (\file -> Reader.over (File.source file) (\input -> parse input []))))
+    -- Rejoining the chunks answers the file's bytes, and File.read would have
+    -- rewritten the ones that are not text.
+    report "chunks" (attempt (\_ ->
+        File.withFile "input.bin" (\file ->
+            Reader.over (File.source file) (\input -> Bytes.concat (Stream.toList (Reader.chunks input))))))
+    -- A writer over a file sink batches its parts and answers the bytes that
+    -- were written, including the one File.read would have rewritten.
+    report "written" (attempt (\_ ->
+        File.withOutput "out.bin" (\file ->
+            Writer.over (File.sink file) 8 (\output ->
+                Writer.writeString output "ab"
+                Writer.write output (Bytes.fromList [255])
+                Writer.writeString output "cd"))
+        File.withFile "out.bin" (\file -> File.readBytes file 99)))
+    -- Reading it back through the same parser closes the loop.
+    report "reparsed" (attempt (\_ ->
+        File.withFile "out.bin" (\file ->
+            Reader.over (File.source file) (\input -> parse input []))))

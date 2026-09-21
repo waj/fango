@@ -395,8 +395,8 @@ attempts nor ownership proofs guarantee successful external close or termination
 ## Handler instances: open questions
 
 The rule that addresses a *specific* handler activation through a value is
-implemented, including the row-indexed wrapper shape the
-[byte IO layer](roadmap-io.md) was waiting on.
+implemented, including the row-indexed wrapper shape
+[`Reader` and `Writer`](reference/library-readers.md) are built from.
 [Effects](reference/effects.md#binding-a-closure-to-a-handler-activation) owns
 its behavior and diagnostics;
 [effect execution](design/effects.md#binding-a-closure-to-an-activation) owns

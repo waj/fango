@@ -22,22 +22,24 @@ for otherwise unavailable semantics or measured performance needs.
   insertion-order fixtures prove correctness rather than balance. A manual
   n-log-n versus quadratic benchmark is the proposed check.
 
-## Byte IO, buffered readers and writers
+## Byte IO, sockets, and an HTTP server
 
-`Bytes` and the buffering over it are implemented: [byte
-sequences](reference/library-bytes.md) owns the value and its `Source` and
-`Sink`, and [buffered readers and writers](reference/library-readers.md) owns
-`Reader`, `Writer`, and every stage above them. [Readers and
-writers](roadmap-io.md) owns what is left: the file and socket adapters
-beneath them, driven by an HTTP server as its consumer. A concurrent server
-additionally depends on the [effects roadmap](roadmap-effects.md).
+Byte IO is implemented through files: [byte
+sequences](reference/library-bytes.md) owns `Bytes` and its `Source` and
+`Sink`, [buffered readers and writers](reference/library-readers.md) owns
+`Reader`, `Writer`, and every stage above them, and [IO and
+files](reference/library-io.md) owns the file adapters. [Sockets and an HTTP
+server](roadmap-io.md) owns what is left: the same adapters over a socket, and
+the server that motivated the layer. A concurrent server additionally depends
+on the [effects roadmap](roadmap-effects.md).
 
 ## Addressing a specific handler
 
-The typing rule is implemented, including the row-indexed wrapper shape the
-byte IO layer needs: inside a handler's subject, a closure performing the
-handled effect may be adapted to an arrow that omits it, which binds it to that
-activation rather than to whichever handler is innermost when it is called.
+The typing rule is implemented, including the row-indexed wrapper shape
+[`Reader` and `Writer`](reference/library-readers.md) are built from: inside a
+handler's subject, a closure performing the handled effect may be adapted to an
+arrow that omits it, which binds it to that activation rather than to whichever
+handler is innermost when it is called.
 [Effects](reference/effects.md#binding-a-closure-to-a-handler-activation) owns
 it. The questions it leaves open are with the other deferred effect work, in
 the [effects roadmap](roadmap-effects.md#handler-instances-open-questions).

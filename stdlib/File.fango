@@ -1,8 +1,8 @@
 {-# no-prelude #-}
-module File exposing (Handle, isDirectory, listDirectory, read, readBytes, readLine, withAppend, withFile, withOutput, write, writeAll, writeBytes)
+module File exposing (Handle, isDirectory, listDirectory, read, readBytes, readLine, sink, source, withAppend, withFile, withOutput, write, writeAll, writeBytes)
 
 import Basics exposing (..)
-import Bytes exposing (Bytes)
+import Bytes exposing (Bytes, Sink(..), Source(..))
 import Fail exposing (Fail, attempt, fail, fromResult)
 import IO exposing (Error, IO, Line(..))
 import List exposing (List)
@@ -125,6 +125,20 @@ readBytes file count =
 
 writeBytes : Handle -> Bytes ->{IO, Fail Error} ()
 writeBytes file data = fromResult (writeHandleBytes file data)
+
+-- chunk is how much one pull asks for. A pull answers what is there, so a
+-- smaller read is ordinary and the number only bounds the ask.
+chunk : Int
+chunk = 8192
+
+-- source and sink adapt an open file to the leaves a Reader and a Writer are
+-- built over. Each captures the handle, so neither can outlive the scope that
+-- owns it, and neither closes anything: closing belongs to that scope.
+source : Handle -> Source {IO, Fail Error}
+source file = Source { pull = \_ -> readBytes file chunk }
+
+sink : Handle -> Sink {IO, Fail Error}
+sink file = Sink { write = \data -> writeBytes file data }
 
 -- Whole-file operations need no handle and report failure as a Result.
 

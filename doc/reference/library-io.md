@@ -101,8 +101,10 @@ withOutput : String -> (File.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.
 withAppend : String -> (File.Handle ->{IO, Fail IO.Error | e} a) ->{IO, Fail IO.Error | e} a
 readLine : File.Handle ->{IO, Fail IO.Error} Maybe IO.Line
 readBytes : File.Handle -> Int ->{IO, Fail IO.Error} Maybe Bytes
+source : File.Handle -> Bytes.Source {IO, Fail IO.Error}
 write : File.Handle -> String ->{IO, Fail IO.Error} ()
 writeBytes : File.Handle -> Bytes ->{IO, Fail IO.Error} ()
+sink : File.Handle -> Bytes.Sink {IO, Fail IO.Error}
 read : String ->{IO} Result IO.Error String
 writeAll : String -> String ->{IO} Result IO.Error ()
 listDirectory : String ->{IO} Result IO.Error (List String)
@@ -125,7 +127,13 @@ to `count` bytes, which may be fewer; a non-positive count answers an empty
 the only read that can carry a byte no `String` holds. `writeBytes` writes a
 `Bytes` as given. All four raise `Fail IO.Error` on a system failure, so a body
 that only reads and writes needs no `case` of its own; `attempt` around the
-scope collects the failure. `read` and `writeAll` handle a whole file without a
+scope collects the failure.
+
+`source` and `sink` adapt an open file to the leaves a
+[buffered reader and writer](library-readers.md) are built over, so a file and
+a memory buffer drive the same parsing code. Both capture the handle and are
+therefore bound to its scope; neither closes anything, because closing belongs
+to the scope. A pull answers whatever the file had, which may be short. `read` and `writeAll` handle a whole file without a
 handle and answer a `Result` instead. `listDirectory` names a directory's
 entries in sorted order, and `isDirectory` answers whether a path names one;
 a missing path is an `Err` with kind `NotFound` for both.

@@ -1,0 +1,5 @@
+["a", "\xFF"]
+file: ["alpha", "beta", "\xFF\xFE binary", "gamma"]
+chunks: "alpha\nbeta\n\xFF\xFE binary\ngamma"
+written: Just "ab\xFFcd"
+reparsed: ["ab\xFFcd"]
