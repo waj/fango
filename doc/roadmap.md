@@ -41,6 +41,17 @@ activation rather than to whichever handler is innermost when it is called.
 it. [Handler instances](roadmap-instances.md) now owns only the questions the
 rule leaves open.
 
+## Calling a record's pure field
+
+Projecting a field whose arrow is closed and pure and calling it inside an
+effectful body is rejected: `c.step()` where `step : () -> Int` infers the
+field as `() ->{IO} a` from the ambient row before the record obligation
+resolves, and then disagrees with the declaration. The same closure inside an
+ADT constructor is accepted, and a row-indexed field escapes it because the row
+argument absorbs the ambient effects, so the shapes the library needs have a
+spelling that works. It is an inference-order bug rather than a rule, and it
+predates handler instances.
+
 ## List representation
 
 [Lists](roadmap-list.md) owns chunk-size/growth experiments, length/indexing
