@@ -52,16 +52,25 @@ func constraintRows(c Constraint, sub Subst) (types.Row, types.Row, bool) {
 	return left, right, lok && rok
 }
 
-// bindable reports whether this inclusion can only hold through the binding
-// rule, which is what makes it this rule's constraint rather than a mismatch.
-// It is decided before the ordinary solver runs, because a failing row
-// unification can bind variables on its way to the failure.
+// bindable reports whether the binding rule may have to answer this inclusion,
+// which is what makes it this rule's constraint rather than a mismatch. It is
+// decided before the ordinary solver runs, because a failing row unification
+// can bind variables on its way to the failure.
+//
+// A position whose row is still open is a candidate too, rather than an
+// absorption settled on the spot. A closure inside a row-indexed record or
+// constructor reaches its field through the container's row argument, which is
+// a fresh variable until the container itself is checked; absorbing the label
+// there carries it out on the container's type, where the inclusion that
+// finally rejects it names no handler to bind to. Whether such a position can
+// absorb is not known until the group is solved, and solveBound answers the
+// ones that still can by ordinary inclusion.
 func bindable(c Constraint, sub Subst) bool {
 	if !c.Include || len(c.Bind) == 0 {
 		return false
 	}
 	left, right, ok := constraintRows(c, sub)
-	if !ok || rowAbsorbs(right) {
+	if !ok {
 		return false
 	}
 	for _, l := range left.Labels {
@@ -102,6 +111,15 @@ func solveBound(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply) 
 	left, right, ok := constraintRows(c, sub)
 	if !ok {
 		return mismatchError(c, &mismatch{a: c.Left, b: c.Right, effect: true, note: "effect inclusion requires two rows"}, sub), true
+	}
+	// The label reached a position that can still take it, so nothing was ever
+	// addressed to this activation: the diversion only held the question open
+	// until the surrounding row was decided.
+	if rowAbsorbs(right) {
+		if m := includeRows(left, right, sub, bi, sup); m != nil {
+			return mismatchError(c, m, sub), true
+		}
+		return diag.Error{}, false
 	}
 	var adapted, clauses types.Row
 	for _, l := range left.Labels {

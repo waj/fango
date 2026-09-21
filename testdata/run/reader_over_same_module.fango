@@ -7,13 +7,13 @@ effect Reading
     refill : () -> Bool
 
 type Reader e =
-    { buffered : () ->{Reading | e} String
-    , refill : () ->{Reading | e} Bool
+    { buffered : () ->{e} String
+    , refill : () ->{e} Bool
     }
 
 type Source e = { pull : () ->{e} String }
 
-over : Source e -> (Reader e ->{Reading | e} a) ->{e} a
+over : Source e -> (Reader e ->{e} a) ->{e} a
 over source use =
     handle use (Reader { buffered = \_ -> buffered(), refill = \_ -> refill() }) with pending = "" of
         buffered () -> resume pending with pending
@@ -21,7 +21,7 @@ over source use =
             chunk = source.pull()
             resume (chunk /= "") with pending ++ chunk
 
-readAll : Reader e ->{Reading | e} String
+readAll : Reader e ->{e} String
 readAll reader =
     if reader.refill() then readAll reader
     else reader.buffered()

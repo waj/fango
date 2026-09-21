@@ -1,0 +1,20 @@
+-- The clause-effect check reaches the row-indexed shape: `tick`'s clause also
+-- performs `Log`, so calling the bound field would perform it too, and the
+-- field's row says only `e`. The report names the field rather than the
+-- container, because that is the position whose arrow is too narrow.
+effect Counter
+    tick : () -> Int
+
+effect Log
+    note : String -> ()
+
+type Cell e = { step : () ->{e} Int }
+
+counter : (Cell e ->{e} a) ->{Log | e} a
+counter use =
+    handle use { step = \_ -> tick() } with n = 0 of
+        tick () ->
+            note "tick"
+            resume n with n + 1
+
+main() = print (counter (\c -> c.step()))

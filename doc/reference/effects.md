@@ -267,6 +267,32 @@ in a handler whose clauses print cannot be adapted to a pure arrow; that is a
 position allows. A `resume` is not one of them: it returns to the perform site,
 whose remaining effects belong to that site.
 
+The arrow the closure is adapted to may be indexed by a row rather than fixed,
+which is how one wrapper type serves every source its handler can run over:
+
+```fango
+type Reader e =
+    { buffered : () ->{e} String
+    , refill : () ->{e} Bool
+    }
+
+over : Source e -> (Reader e ->{e} a) ->{e} a
+over source use =
+    handle use (Reader { buffered = \_ -> buffered(), refill = \_ -> refill() })
+        with pending = "" of
+        buffered () -> resume pending with pending
+        refill () ->
+            chunk = source.pull()
+            resume (chunk /= "") with pending ++ chunk
+```
+
+Each field binds to the activation whose subject built the record, and the
+label it loses is replaced by `e` — what the clauses perform through the
+source. Two `over` activations therefore hand out two readers with separate
+buffers, drivable at once. The container may equally be a constructor, and a
+record literal need not name its type: an inferred `{ buffered = ..., refill =
+... }` binds the same way.
+
 An abort-only operation cannot be bound. An abort unwinds to its own
 activation, so a bound abort called after that activation finished would
 unwind to a target nothing awaits; binding one is a `BOUND ABORT OPERATION`

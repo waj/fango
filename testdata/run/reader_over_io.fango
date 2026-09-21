@@ -1,20 +1,20 @@
 -- `Reader.over`'s shape: a row-polymorphic handler whose clauses reach the
 -- source, and therefore perform the abstract row, while its subject hands the
--- callback a record of closures indexed by that same row. Here the row is
--- `IO`, so every projected field is an `IO` arrow although the constructor
--- stores one that only performs `Reading`.
+-- callback a record of closures indexed by that same row. The fields do not
+-- name `Reading`, so each one binds to the activation whose subject built it
+-- and every projected field is the row's arrow — here `IO`.
 effect Reading
     buffered : () -> String
     refill : () -> Bool
 
 type Reader e =
-    { buffered : () ->{Reading | e} String
-    , refill : () ->{Reading | e} Bool
+    { buffered : () ->{e} String
+    , refill : () ->{e} Bool
     }
 
 type Source e = { pull : () ->{e} String }
 
-over : Source e -> (Reader e ->{Reading | e} a) ->{e} a
+over : Source e -> (Reader e ->{e} a) ->{e} a
 over source use =
     handle use (Reader { buffered = \_ -> buffered(), refill = \_ -> refill() }) with pending = "" of
         buffered () -> resume pending with pending

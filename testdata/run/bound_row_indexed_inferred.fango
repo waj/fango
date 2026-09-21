@@ -1,0 +1,21 @@
+-- The same binding through an inferred record literal, which names no record
+-- type. Its fields reach their declared types through the record obligation
+-- rather than through a field constraint, so the obligation carries the
+-- subject's activations too. The row index is what the constructor form
+-- already answers; what is new here is that the literal has no name.
+effect Counter
+    tick : () -> Int
+
+type Cell e = { step : () ->{e} Int }
+
+counter : Int -> (Cell e ->{e} a) ->{e} a
+counter start use =
+    handle use { step = \_ -> tick() } with n = start of
+        tick () -> resume n with n + 1
+
+main() =
+    counter 0 (\a ->
+        counter 100 (\b ->
+            print (a.step())
+            print (b.step())
+            print (a.step())))

@@ -28,18 +28,18 @@ for otherwise unavailable semantics or measured performance needs.
 and `Writer` as records bound to handler activations over abstract byte
 sources and sinks, and the file, memory, and socket adapters beneath them,
 driven by an HTTP server as its consumer. `Bytes` is its only new runtime
-primitive; it depends on [handler instances](roadmap-instances.md) below and
-on a closed row being writable as a type argument. A concurrent server
-additionally depends on the [effects roadmap](roadmap-effects.md).
+primitive; it depends on a closed row being writable as a type argument. A
+concurrent server additionally depends on the [effects roadmap](roadmap-effects.md).
 
 ## Addressing a specific handler
 
-The typing rule is implemented: inside a handler's subject, a closure
-performing the handled effect may be adapted to an arrow that omits it, which
-binds it to that activation rather than to whichever handler is innermost when
-it is called. [Effects](reference/effects.md#binding-a-closure-to-a-handler-activation)
-owns it. [Handler instances](roadmap-instances.md) now owns only what the byte
-IO layer still needs from it: the row-polymorphic wrapper shape.
+The typing rule is implemented, including the row-indexed wrapper shape the
+byte IO layer needs: inside a handler's subject, a closure performing the
+handled effect may be adapted to an arrow that omits it, which binds it to that
+activation rather than to whichever handler is innermost when it is called.
+[Effects](reference/effects.md#binding-a-closure-to-a-handler-activation) owns
+it. [Handler instances](roadmap-instances.md) now owns only the questions the
+rule leaves open.
 
 ## List representation
 

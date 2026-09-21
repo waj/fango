@@ -45,24 +45,16 @@ relationship is that a reader *offers* a `Stream Bytes`, not that it is built
 from one.
 
 And a reader has to reach its own handler rather than the innermost one, so
-that two readers can be driven at once. Binding a closure to an activation
-does that, and this layer depends on the part of it that
-[handler instances](roadmap-instances.md) still owns.
+that two readers can be driven at once.
+[Binding a closure to an activation](reference/effects.md#binding-a-closure-to-a-handler-activation)
+does that, including at the row-indexed record shape `Reader e` needs: a reader
+is an ordinary record of closures bound to one activation, and two readers are
+two records. The `reader_over_*` fixtures drive `over` at a same-module effect,
+at `State`, and at `IO`, and `reader_two_readers` drives two at once. Both
+effects here are unparameterized, so the row-label rule discussed in
+[handler instances](roadmap-instances.md) is not on this path.
 
 ## Step 1 — language prerequisites
-
-### Handler instances
-
-The rule this layer needs is implemented for closed, concrete rows:
-[effects](reference/effects.md#binding-a-closure-to-a-handler-activation) owns
-it. A reader is an ordinary record of closures bound to one activation, and two
-readers are two records. `over`'s shape runs today as long as `Reading` stays
-in the record's field rows — the `reader_over_*` fixtures drive it at a
-same-module effect, at `State`, and at `IO`. Dropping the label from those
-fields, which is what a consumer's signatures need and what makes each reader
-reach its own activation, is the row-polymorphic wrapper shape owned by
-[handler instances](roadmap-instances.md). Both effects here are
-unparameterized, so the row-label rule discussed there is not on this path.
 
 ### A closed row as a type argument
 
@@ -390,8 +382,7 @@ document's acceptance program.
 | — | Framing, limits, chunked decoding, HTTP |
 
 `Bytes`, `Reader`, `Writer`, and the adapters are library names and need no
-grammar change; the binding rule in step 1 is a typing rule and needs none
-either. The closed-row type argument is a grammar change and requires a
+grammar change. The closed-row type argument is a grammar change and requires a
 TextMate check that rows inside type arguments tokenize. Both backends must
 agree on the `Bytes` representation; the interpreter uses the same `fangort`
 value the compiled program does, as it does for `List`.
@@ -400,10 +391,8 @@ value the compiled program does, as it does for `List`.
 
 Each step is usable without the ones after it.
 
-**1. Prerequisites.** What the binding rule still owes this layer is in
-[that document](roadmap-instances.md#the-row-polymorphic-wrapper-shape). A
-closed row is accepted as a type argument and rejected at a non-row parameter
-with a kind error. `ignore` lands in `Basics`. The accumulator `Writer` is gone
+**1. Prerequisites.** A closed row is accepted as a type argument and rejected
+at a non-row parameter with a kind error. `ignore` lands in `Basics`. The accumulator `Writer` is gone
 from the library, the reference, and the fixtures.
 
 **2. `Bytes`.** Differential interpreter/compiler coverage for every operation,

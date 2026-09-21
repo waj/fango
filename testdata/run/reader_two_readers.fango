@@ -1,0 +1,45 @@
+-- Two readers driven at once, which is what dropping `Reading` from the
+-- record's field rows buys. Each `over` activation hands out closures bound to
+-- itself, so `a` and `b` keep separate `pending` cells and pull from separate
+-- sources even though the inner activation handles the same effect and is the
+-- innermost one while both are in use.
+effect Reading
+    buffered : () -> String
+    refill : () -> Bool
+
+type Reader e =
+    { buffered : () ->{e} String
+    , refill : () ->{e} Bool
+    }
+
+type Source e = { pull : () ->{e} String }
+
+over : Source e -> (Reader e ->{e} a) ->{e} a
+over source use =
+    handle use (Reader { buffered = \_ -> buffered(), refill = \_ -> refill() }) with pending = "" of
+        buffered () -> resume pending with pending
+        refill () ->
+            chunk = source.pull()
+            resume (chunk /= "") with pending ++ chunk
+
+effect FeedA
+    nextA : () -> String
+
+effect FeedB
+    nextB : () -> String
+
+main() =
+    handle
+        handle
+            over (Source { pull = \_ -> nextA() }) (\a ->
+                over (Source { pull = \_ -> nextB() }) (\b ->
+                    grewA = a.refill()
+                    grewB = b.refill()
+                    againA = a.refill()
+                    print (a.buffered())
+                    print (b.buffered())
+                    print (grewA && grewB && againA)))
+        with i = 0 of
+            nextB () -> resume (if i == 0 then "XY" else "") with i + 1
+    with j = 0 of
+        nextA () -> resume (if j == 0 then "ab" else if j == 1 then "cd" else "") with j + 1

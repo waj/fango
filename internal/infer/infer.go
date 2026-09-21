@@ -1369,6 +1369,11 @@ type recordUpdateObligation struct {
 	span       source.Span
 	ty         types.Type
 	candidates []string
+	// bind carries the handler activations a lambda written in this field may
+	// bind to. An inferred literal names no record, so its fields reach their
+	// declared types through this obligation rather than through a field
+	// constraint, and the rule would otherwise never see them.
+	bind []*HandlerInfo
 }
 
 type generator struct {
@@ -1568,7 +1573,8 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 				g.errs = append(g.errs, diag.Errorf(f.NameSpan, "RECORD FIELDS", "The field `%s` is updated more than once.", f.Name))
 			}
 			seen[f.Name] = true
-			ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, ty: g.expr(f.Value), candidates: f.Records})
+			fieldTy := g.expr(f.Value)
+			ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, ty: fieldTy, candidates: f.Records, bind: g.lambdaBinders[f.Value]})
 		}
 		if len(e.Fields) == 0 {
 			g.errs = append(g.errs, diag.Errorf(e.Sp, "RECORD FIELDS", "A record update needs at least one replacement field."))
@@ -2563,7 +2569,8 @@ func (g *generator) inferredRecord(e *ast.RecordLit, want types.Type) types.Type
 			g.errs = append(g.errs, diag.Errorf(f.NameSpan, "RECORD FIELDS", "The field `%s` is provided more than once.", f.Name))
 		}
 		seen[f.Name] = true
-		ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, ty: g.expr(f.Value), candidates: f.Records})
+		fieldTy := g.expr(f.Value)
+		ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, ty: fieldTy, candidates: f.Records, bind: g.lambdaBinders[f.Value]})
 	}
 	g.records = append(g.records, ob)
 	return recv
@@ -2694,7 +2701,7 @@ func (g *generator) recordPass(final bool, from int) int {
 			case !visible(u.candidates):
 				g.errs = append(g.errs, diag.Errorf(u.span, "PRIVATE RECORD FIELD", "The fields of record `%s` are not exposed to this module.", types.SurfaceName(adt.Con.Name)))
 			default:
-				constraints = append(constraints, Constraint{Left: u.ty, Right: fieldTypes[idx], Span: u.span, Why: Why{Kind: WhyCall}, Subsume: ob.kind != recordMatch, ADTs: g.ck.ADTs})
+				constraints = append(constraints, Constraint{Left: u.ty, Right: fieldTypes[idx], Span: u.span, Why: Why{Kind: WhyCall}, Subsume: ob.kind != recordMatch, ADTs: g.ck.ADTs, Bind: u.bind})
 			}
 		}
 		if ob.kind == recordBuild {

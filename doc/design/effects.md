@@ -59,15 +59,27 @@ results borrowed, or arguments retained. All use the same
 Discharge is the switch between call-site and captured evidence, and the
 handler instance rule is the way a program asks for it. Inference carries, on
 every argument or field constraint that adapts a lambda written in a handler's
-subject, the enclosing activations that subject belongs to. When such an
-inclusion can hold only by losing a label one of them handles, the label is
-replaced by what that handler's clauses perform and the inclusion is solved
-again; the clause row is collected while the clause bodies are generated,
-leaving out the `resume` call, whose row describes the perform site's
-continuation rather than the clause. Those constraints are solved after the
-ordinary bounds, because a subject is generated before the clauses whose row it
-inherits. An abort-only label is refused instead: its runtime exit target
-belongs to one activation, which a bound abort could outlive.
+subject, the enclosing activations that subject belongs to. An inferred record
+literal names no type, so its fields reach their declared types through the
+record obligation rather than through a field constraint; the obligation
+carries the same activations. When such an inclusion can hold only by losing a
+label one of them handles, the label is replaced by what that handler's clauses
+perform and the inclusion is solved again; the clause row is collected while
+the clause bodies are generated, leaving out the `resume` call, whose row
+describes the perform site's continuation rather than the clause. An abort-only
+label is refused instead: its runtime exit target belongs to one activation,
+which a bound abort could outlive.
+
+Every inclusion the rule might have to answer is diverted and solved after the
+ordinary bounds, including one whose position can still absorb the label. A
+subject is generated before the clauses whose row it inherits, so the
+replacement row is not known earlier; and a position's row may not be decided
+earlier either. A closure inside a row-indexed record or constructor reaches
+its field through the container's row argument, a fresh variable while the
+container is checked, and absorbing the label there would carry it out on the
+container's type, where the inclusion that finally rejects it names no handler
+to bind to. A diverted position whose row is still open once the group is
+solved never addressed an activation at all, and ordinary inclusion answers it.
 
 Nothing is recorded for elaboration. The lambda's row still names the label
 while the position it flows into does not, which is exactly the case
