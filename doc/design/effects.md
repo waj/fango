@@ -39,6 +39,15 @@ succeed, and returns through the existing evidence call. Core retains the state
 binder/type and update expressions for lint/capture checks. The interpreter
 uses an activation cell; Go uses a captured local. No continuation is captured.
 
+An installed activation's evidence carries the transport its own clauses need,
+not the enclosing worker's: the interpretation is known where the handler is
+written, so a handler whose clauses neither exit nor suspend stays Direct
+inside an Exit worker and a perform there wraps its plain result, the same
+adaptation a Direct evidence record passed to a wider callee already gets.
+Machine lowering is the exception and still installs a Machine-mode record.
+Discharge carries that transport with the captures it substitutes, so a
+closure bound to the activation calls the record that actually exists.
+
 Stateless source handlers are durable by default; parameterized handlers are
 scoped. Compiler-owned APIs may additionally mark evidence scoped, operation
 results borrowed, or arguments retained. All use the same
@@ -68,10 +77,10 @@ definition-site evidence. The closure then carries that activation's record of
 operation closures, so nested activations of one effect stay distinct without a
 special case, and the existing capture proof sees it retaining that scope.
 
-The Go backend materializes an activation's record at the transport of the
-worker that installed it. A bound closure whose own row fixes a lower transport
-than that worker's therefore has no member to call; the
-[roadmap](../roadmap-instances.md) owns that defect and the fix it needs.
+A bound closure's transport is its own row's, so the activation it captures has
+to be materialized there. That holds except under machine lowering, which still
+installs a Machine-mode record; the [roadmap](../roadmap-instances.md) owns what
+is left.
 
 > **Invariant.** A pass that reorders, hoists, or shares calls must treat an
 > arrow whose parameters or captures include a resource-typed value or a value

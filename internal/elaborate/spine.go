@@ -514,6 +514,7 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 		}
 		var kept []core.EffectInstance
 		sub := map[types.CaptureVar]types.CaptureSet{}
+		control := map[types.CaptureVar]types.Control{}
 		for _, ev := range e.EffectParams {
 			retained := false
 			for _, label := range wantFn.Eff.Labels {
@@ -532,9 +533,10 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 			}
 			for _, v := range ev.Captures.Vars {
 				sub[v] = el.evidenceCaptures(ev.Unique)
+				control[v] = el.evidenceControl(ev.Unique)
 			}
 		}
-		e.Body = core.SubstituteCaptureVars(e.Body, sub)
+		e.Body = core.SubstituteCaptureVars(e.Body, sub, control)
 		e.EffectParams = kept
 		e.Body = el.adaptFunctionValue(e.Body, wantFn.Ret)
 		e.Ty = want

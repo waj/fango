@@ -61,7 +61,7 @@ func TestResidualRowsAndDeferredEvidenceSurviveRewriteAndContractChecks(t *testi
 		t.Fatal(errs)
 	}
 	p.Defs[0].CaptureContract = inferCaptureContract(&p.Defs[0])
-	rewritten := SubstituteCaptureVars(lam, map[types.CaptureVar]types.CaptureSet{3: types.VarCapture(4)}).(*Lambda)
+	rewritten := SubstituteCaptureVars(lam, map[types.CaptureVar]types.CaptureSet{3: types.VarCapture(4)}, nil).(*Lambda)
 	if rewritten.RowEffects[0].Captures.Vars[0] != 4 || rewritten.Body.(*App).Row.Effects[0].Captures.Vars[0] != 4 || lam.RowEffects[0].Captures.Vars[0] != 3 {
 		t.Fatal("row evidence substitution was lost or mutated its source")
 	}

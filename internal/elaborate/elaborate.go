@@ -1338,7 +1338,17 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 		el.popScope(pushed)
 		ret = &core.ReturnClause{Param: name, Body: retBody}
 	}
-	control := types.Control{Polymorphic: true}
+	// An installed activation's transport is its own clauses', not the
+	// enclosing context's. The interpretation is known here, so a handler
+	// whose clauses neither exit nor suspend stays Direct inside an Exit or
+	// Machine worker, and a perform widens to the caller's protocol the way
+	// Direct evidence passed to a wider callee already does. A closure bound
+	// to the activation depends on this: its own row fixes its transport, and
+	// the record it captures has to exist there.
+	var control types.Control
+	for _, clause := range clauses {
+		control = types.JoinControl(control, core.ExprControl(clause.Body))
+	}
 	if info.Effect.Abort {
 		control = types.Control{Transport: types.Exit}
 	}

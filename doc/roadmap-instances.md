@@ -65,14 +65,13 @@ way are not the rule's:
   before the obligation resolves, and then disagrees with the declaration.
   This predates the rule and blocks every record of bound closures.
 
-## A bound closure's transport must be materializable
+## A bound closure under machine lowering
 
-This is the committed blocker, found while building the rule. The Go backend
-materializes a handler activation's record at the transport of the worker that
-installed it: `handleExpr` resolves the activation's polymorphic control
-against the enclosing definition's, and machine lowering hands the body worker
-a Machine-mode record unconditionally. A bound closure whose own row fixes a
-*lower* transport than that worker's therefore has no member to call.
+A bound closure's transport is its own row's, so the activation it captures has
+to be materialized there rather than at the transport of the worker that
+installed it. That now holds everywhere except under machine lowering, which
+still hands the handler's body worker a Machine-mode record unconditionally
+(`lowerHandle` in [machine lowering](../internal/machine/lower.go)).
 
 ```fango
 effect Counter
@@ -80,35 +79,28 @@ effect Counter
 
 type Cell = Cell (() -> Int)
 
--- The handled label in the callback's row is what makes this wrapper
--- transport-polymorphic; with `(Cell ->{IO} a)` the same program runs.
+-- The handled label in the callback's row is what gives this wrapper a
+-- Machine variant; with `(Cell ->{IO} a)` the same program runs.
 counter : Int -> (Cell ->{Counter, IO} a) ->{IO} a
 counter start use =
     handle use (Cell (\_ -> tick())) with n = start of
         tick () -> resume n with n + 1
 ```
 
-Two symptoms, depending on which variant the wrapper needs. The Machine
-variant emits a `Direct`-typed member whose body calls the Machine record, and
-Go rejects the generated package. The Exit variant compiles with the closure's
-`Direct` member absent, so reaching it is a nil dereference at runtime. The
-same shape with `Fail`-style abort in the callback row reproduces the second.
+The Machine variant emits a `Direct` member for the bound closure whose body
+calls the Machine record, and Go rejects the generated package. The variant is
+reached only by a caller whose callback suspends, but it is emitted whether or
+not anyone calls it, so this is a compile failure on the program above rather
+than a latent one.
 
-The `Reader e` shape above does not hit this: its bound closures are
-transport-polymorphic, so they carry every member and select one per context.
-What hits it is a bound closure whose row fixes Direct or Exit, which is the
-plain case a reader of this document will write first, so it cannot stay
-silently accepted.
-
-The fix is to materialize the activation at its clauses' own transport rather
-than the installing worker's, so a Direct handler stays Direct inside an Exit
-or Machine worker and performs widen to the caller's protocol the way Direct
-evidence passed to a wider callee already does. That is contained for the Exit
-variant. For the Machine variant it is not: machine lowering turns the clauses
-into frame workers and the state into a machine state token, which nothing
-outside that machine can drive, so the handler would have to stay ordinary Go
-while only its body is a machine region. Refusing the shape with a diagnostic
-is the cheaper half and should land first.
+The remaining work is to let an activation below Machine keep ordinary clauses
+inside a machine worker: the evidence record becomes ordinary Go closures over
+the handler's state instead of frame workers over a machine state token, and
+only the handler's body stays a machine region. The body's performs already
+lower correctly — a Direct `Perform` inside a machine worker is an ordinary
+evaluation — so the work is in `lowerHandle`, the `Handle` terminator's
+emission, and machine lint. It needs a fixture where the callback actually
+suspends, not only one where the variant is emitted.
 
 ## Related work, not required here
 

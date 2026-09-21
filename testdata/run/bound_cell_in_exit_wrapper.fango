@@ -1,0 +1,33 @@
+-- The wrapper's callback may abort, so `counter` is compiled for the Exit
+-- protocol as well. The bound closure's own row is empty, so it is Direct, and
+-- the activation it captures has to exist at that protocol: its clauses only
+-- read and advance the cell. A record materialized at the enclosing worker's
+-- protocol instead would leave the closure with nothing to call.
+effect Oops error
+    abort oops : error -> value
+
+effect Counter
+    tick : () -> Int
+
+type Cell = Cell (() -> Int)
+
+counter : Int -> (Cell ->{Oops String, IO} a) ->{Oops String, IO} a
+counter start use =
+    handle use (Cell (\_ -> tick())) with n = start of
+        tick () -> resume n with n + 1
+
+body : () ->{Oops String, IO} Int
+body() =
+    counter 0 (\c ->
+        case c of
+            Cell ta ->
+                print (ta())
+                print (ta())
+                1)
+
+main() =
+    answer =
+        handle body() of
+            oops _ -> 0 - 1
+            return v -> v
+    print answer
