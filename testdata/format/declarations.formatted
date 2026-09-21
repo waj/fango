@@ -44,3 +44,12 @@ class Show a
 class Num a
     (+) : a -> a -> a
     fromInt : Int -> a
+
+pureFn : Fn {}
+pureFn = Pure Nothing
+
+listedFn : Fn {Console, Fail String}
+listedFn = Pure Nothing
+
+openFn : Fn {Console | e}
+openFn = Pure Nothing

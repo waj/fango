@@ -1516,8 +1516,11 @@ func (p *parser) parseTypeApp() ast.TypeExpr {
 	return &ast.TApp{Name: head.Name, NameSp: head.Sp, Args: args}
 }
 
+// A `{` heads a row literal, which is a type atom only in argument position:
+// a record type is read straight after a `type` declaration's `=`, before any
+// atom is, and an arrow's row is consumed by parseTypeExpr after the `->`.
 func isTypeAtomStart(k token.Kind) bool {
-	return k == token.UIDENT || k == token.LIDENT || k == token.LPAREN
+	return k == token.UIDENT || k == token.LIDENT || k == token.LPAREN || k == token.LBRACE
 }
 
 func (p *parser) parseTypeAtom() ast.TypeExpr {
@@ -1533,6 +1536,12 @@ func (p *parser) parseTypeAtom() ast.TypeExpr {
 	case token.LIDENT:
 		p.next()
 		return &ast.TVarName{Name: t.Text, Sp: t.Span}
+	case token.LBRACE:
+		row := p.parseEffRow()
+		if row == nil {
+			return nil
+		}
+		return &ast.TRow{Row: row}
 	case token.LPAREN:
 		p.next()
 		if p.peekInExpr().Kind == token.RPAREN {

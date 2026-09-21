@@ -255,20 +255,7 @@ func DumpTypeExpr(t TypeExpr) string {
 		return t.Name
 	case *TFunExpr:
 		if t.Eff != nil {
-			var row strings.Builder
-			row.WriteString("(effects")
-			for _, label := range t.Eff.Labels {
-				fmt.Fprintf(&row, " (%s", label.Name)
-				for _, arg := range label.Args {
-					fmt.Fprintf(&row, " %s", DumpTypeExpr(arg))
-				}
-				row.WriteString(")")
-			}
-			if t.Eff.Tail != "" {
-				fmt.Fprintf(&row, " (tail %s)", t.Eff.Tail)
-			}
-			row.WriteString(")")
-			return fmt.Sprintf("(-> %s %s %s)", DumpTypeExpr(t.Arg), row.String(), DumpTypeExpr(t.Ret))
+			return fmt.Sprintf("(-> %s %s %s)", DumpTypeExpr(t.Arg), dumpEffRow(t.Eff), DumpTypeExpr(t.Ret))
 		}
 		return fmt.Sprintf("(-> %s %s)", DumpTypeExpr(t.Arg), DumpTypeExpr(t.Ret))
 	case *TApp:
@@ -279,9 +266,30 @@ func DumpTypeExpr(t TypeExpr) string {
 		}
 		b.WriteString(")")
 		return b.String()
+	case *TRow:
+		return dumpEffRow(t.Row)
 	default:
 		panic(fmt.Sprintf("ast.DumpTypeExpr: unhandled %T", t))
 	}
+}
+
+// dumpEffRow renders a row identically wherever it stands: on an arrow, or
+// alone as a type argument.
+func dumpEffRow(r *EffRow) string {
+	var b strings.Builder
+	b.WriteString("(effects")
+	for _, label := range r.Labels {
+		fmt.Fprintf(&b, " (%s", label.Name)
+		for _, arg := range label.Args {
+			fmt.Fprintf(&b, " %s", DumpTypeExpr(arg))
+		}
+		b.WriteString(")")
+	}
+	if r.Tail != "" {
+		fmt.Fprintf(&b, " (tail %s)", r.Tail)
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // DumpPattern renders a pattern: `_`, `(pvar x)`, `(pint 3)`, and

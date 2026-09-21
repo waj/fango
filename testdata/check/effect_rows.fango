@@ -26,3 +26,16 @@ riskyFirst : (() ->{e} ()) -> (() ->{Note | e} ()) ->{Note | e} ()
 riskyFirst plain risky =
     risky()
     plain()
+
+-- A row literal in type-argument position is the row the annotation names,
+-- so the inferred scheme keeps it closed where it was written closed.
+type Source e = { pull : () ->{e} Int }
+
+quiet : Source {}
+quiet = { pull = \_ -> 0 }
+
+noted : Source {Note}
+noted = { pull = \_ -> stop "no" }
+
+tailed : Source {Note | e}
+tailed = { pull = \_ -> stop "no" }

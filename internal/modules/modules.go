@@ -1648,14 +1648,22 @@ func (r *resolver) typ(t ast.TypeExpr) {
 	case *ast.TFunExpr:
 		r.typ(t.Arg)
 		r.typ(t.Ret)
-		if t.Eff != nil {
-			for i := range t.Eff.Labels {
-				l := &t.Eff.Labels[i]
-				l.Name = r.qualified(l.Name, r.tys, "type", l.NameSp)
-				for _, a := range l.Args {
-					r.typ(a)
-				}
-			}
+		r.effRow(t.Eff)
+	case *ast.TRow:
+		r.effRow(t.Row)
+	}
+}
+
+// effRow resolves the effect names in a row, wherever the row stands.
+func (r *resolver) effRow(row *ast.EffRow) {
+	if row == nil {
+		return
+	}
+	for i := range row.Labels {
+		l := &row.Labels[i]
+		l.Name = r.qualified(l.Name, r.tys, "type", l.NameSp)
+		for _, a := range l.Args {
+			r.typ(a)
 		}
 	}
 }

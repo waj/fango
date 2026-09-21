@@ -137,6 +137,9 @@ func TestPolyNegative(t *testing.T) {
 		{"type T a = MkT b", "NAMING ERROR", 1},
 		{"type T a a = MkT a", "SHADOWING", 1},
 		{"type Inner eff = Inner (() ->{IO | eff} ())\ntype Bad a = Bad (Inner a) a", "KIND MISMATCH", 2},
+		// A row literal fills a row-kinded parameter and nothing else.
+		{"x : Maybe {IO}\nx = Nothing", "KIND MISMATCH", 1},
+		{"type Box a = MkBox a\ntype Bad = MkBad (Box {IO})", "KIND MISMATCH", 2},
 		// A generalized block binding's annotation must not claim a variable
 		// the enclosing definition pins down. (Value bindings don't
 		// generalize — the monomorphism restriction — so the check applies

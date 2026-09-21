@@ -186,7 +186,8 @@ func (*InstanceDecl) isDecl() {}
 func (*DeriverDecl) isDecl()  {}
 
 // TypeExpr is the surface type grammar: ground names, `()`, `->` arrows,
-// effect rows attached to arrows, and type variables.
+// effect rows attached to arrows or standing as a type argument, and type
+// variables.
 type TypeExpr interface {
 	isTypeExpr()
 	Span() source.Span
@@ -238,15 +239,24 @@ type TApp struct {
 	Sugared bool       // parser-generated bundled type (tuple); bypasses import lookup
 }
 
+// TRow is a row literal in type-argument position, `Source {IO, Fail e}`.
+// It has effect-row kind and nothing else, so it resolves only where the
+// parameter it fills is row-kinded; anywhere else is a kind error.
+type TRow struct {
+	Row *EffRow
+}
+
 func (*TName) isTypeExpr()    {}
 func (*TVarName) isTypeExpr() {}
 func (*TFunExpr) isTypeExpr() {}
 func (*TApp) isTypeExpr()     {}
+func (*TRow) isTypeExpr()     {}
 
 func (t *TName) Span() source.Span    { return t.Sp }
 func (t *TVarName) Span() source.Span { return t.Sp }
 func (t *TFunExpr) Span() source.Span { return t.Arg.Span().Merge(t.Ret.Span()) }
 func (t *TApp) Span() source.Span     { return t.NameSp.Merge(t.Args[len(t.Args)-1].Span()) }
+func (t *TRow) Span() source.Span     { return t.Row.Sp }
 
 // BinOp stays a distinct node rather than desugaring to App: errors should
 // point at the operator, and `&&`/`||` are surface syntax with no value.

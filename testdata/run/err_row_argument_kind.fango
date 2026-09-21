@@ -1,0 +1,6 @@
+-- A row literal has effect-row kind and nothing else, so filling an ordinary
+-- type parameter with one is a kind error rather than a name lookup.
+absent : Maybe {IO}
+absent = Nothing
+
+main() = print (show absent)

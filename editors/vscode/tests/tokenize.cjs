@@ -31,6 +31,18 @@ async function main() {
   const separator = sequenceTokens.find(t => t.startIndex <= sequence.indexOf(";") && t.endIndex > sequence.indexOf(";"));
   assert(separator.scopes.includes("punctuation.separator.statement.fango"));
 
+  // A row literal is an effect row wherever it stands: the grammar's row rule
+  // is not anchored to an arrow, so a row filling a type argument gets the
+  // same scopes as one after `->`.
+  const rowArgument = 'listen : Source {Console, Fail String | e}';
+  const rowTokens = grammar.tokenizeLine(rowArgument).tokens;
+  const rowScopeAt = index => rowTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+  assert(rowScopeAt(rowArgument.indexOf("Source")).includes("entity.name.type.fango"));
+  assert(rowScopeAt(rowArgument.indexOf("{")).includes("punctuation.definition.effect-row.begin.fango"));
+  assert(rowScopeAt(rowArgument.indexOf("Console")).includes("entity.name.type.effect.fango"));
+  assert(rowScopeAt(rowArgument.indexOf("|")).includes("keyword.operator.pipe.fango"));
+  assert(rowScopeAt(rowArgument.indexOf("}")).includes("punctuation.definition.effect-row.end.fango"));
+
   const pragma = grammar.tokenizeLine('{-# resource #-}').tokens;
   assert(pragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
   assert(grammar.tokenizeLine('resource = 1').tokens.every(t => !t.scopes.includes('keyword.control.directive.fango')));

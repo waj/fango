@@ -127,7 +127,11 @@ The row parameter may be used in effect rows, but not as an ordinary value type.
 When an ADT parameter is known to be row-kinded,
 an effect name is accepted as a singleton row argument, so `Foo IO` means
 `Foo {IO}`; parameterized effects use the corresponding application, such as
-`Foo (State Int)`. Row-kinded parameters are source-level metadata and are
+`Foo (State Int)`. A row itself is also accepted there, written exactly as it
+is on an arrow — `Foo {}` for the pure row, `Foo {IO, Fail String}`,
+`Foo {IO | e}` — which is the only spelling for a row of more than one label.
+A row filling a parameter of ordinary kind is a `KIND MISMATCH`, because a row
+has row kind and no other reading. Row-kinded parameters are source-level metadata and are
 erased from Core and generated Go representations; the declaration remains
 available to inference and reflection.
 

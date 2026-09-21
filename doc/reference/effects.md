@@ -4,7 +4,9 @@ Per-arrow effects, row compatibility, handlers, aborts, and resume discipline.
 
 [Reference index](../reference.md).
 
-Effects appear only on function arrows. `A ->{IO} B` applies an `A` argument,
+Effects appear on function arrows and, as a type argument, at a
+[row-kinded parameter](functions.md#row-kinded-parameters).
+`A ->{IO} B` applies an `A` argument,
 performs `IO`, and returns a `B`. `{Console, Fail String | e}` is a row with two
 known labels and an open tail; `{e}` is the compact open-tail spelling. Pure
 arrows omit a row, so `A ->{} B` is rejected as redundant. The spaced

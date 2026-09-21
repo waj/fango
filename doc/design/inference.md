@@ -11,7 +11,10 @@ annotations, and effect rows. Constraints carry reasons; solving uses
 unification with an occurs check. Variables have general or row kind. An ADT
 parameter used as a row tail becomes row-kinded without explicit kind syntax;
 its runtime argument erases to Unit and its Go generic parameter is omitted.
-Effect names in row-kinded argument positions resolve as singleton rows.
+Effect names in row-kinded argument positions resolve as singleton rows, and a
+row written in one resolves as itself; the parameter's kind, which its use in
+the declaration fixes, decides which reading a type argument gets, so a row at
+a general-kinded parameter is a kind error rather than a name lookup.
 
 Annotation variables are rigid skolems. A label-free open row normalizes to
 its tail, allowing the fresh row of a call to unify with an annotated tail.

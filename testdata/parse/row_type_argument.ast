@@ -1,0 +1,6 @@
+(module
+  (type Source (params e) (ctor Source (-> () (effects (tail e)) String)))
+  (def pure (ann (Source (effects))) (app (ctor Source) (lambda (_) (string ""))))
+  (def listed (ann (Source (effects (Console) (Fail String)))) (app (ctor Source) (lambda (_) (string ""))))
+  (def open (ann (Source (effects (Console) (tail e)))) (app (ctor Source) (lambda (_) (string ""))))
+  (def nested (ann (Maybe (Source (effects (Console))))) (ctor Nothing)))

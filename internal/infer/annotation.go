@@ -120,6 +120,16 @@ func (ck *Checker) ResolveTypeExpr(te ast.TypeExpr, tv *TypeVars) (types.Type, [
 
 func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.VarKind) (types.Type, []diag.Error) {
 	switch te := te.(type) {
+	case *ast.TRow:
+		// A row literal has effect-row kind and no other reading, so it is
+		// accepted wherever the parameter it fills is row-kinded and refused
+		// everywhere else. kindAny is a parameter whose kind the declaration
+		// has not fixed yet, which a row is still the only reading of.
+		if want != types.RowVar && want != kindAny {
+			return nil, []diag.Error{diag.Errorf(te.Span(), "KIND MISMATCH",
+				"An effect row has effect-row kind, not ordinary type kind.")}
+		}
+		return ck.resolveEffRow(te.Row, tv)
 	case *ast.TName:
 		if want == types.RowVar {
 			if effect := ck.Effects[te.Name]; effect != nil && len(effect.Params) == 0 {
