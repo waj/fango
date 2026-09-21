@@ -1213,7 +1213,16 @@ func (el *elab) recordGet(e *ast.RecordGet, ty types.Type) core.Expr {
 	field := fmt.Sprintf("_field%d", el.tmp)
 	el.tmp++
 	binds[idx] = field
-	return &core.Case{Scrut: el.expr(e.Record), Bind: bind, Ty: ty, Tree: &core.SwitchCtor{Scrut: bind, ADT: adt, Cases: []core.CtorCase{{Ctor: adt.Ctors[0], Binds: binds, Tree: &core.Leaf{Body: &core.VarRef{Name: field, Ty: ty, Local: true}}}}}}
+	record := el.expr(e.Record)
+	// The binder holds what the constructor stores, so an effect-indexed
+	// field projected at a wider row is adapted here rather than retagged,
+	// the same way a function value flowing into a wider position is.
+	bound := ty
+	if con, ok := record.Type().(*types.TCon); ok && len(con.Args) == len(adt.Params) {
+		bound = el.eraseRuntimeKinds(eraseRows(adt.InstFields(adt.Ctors[0], con.Args)[idx]))
+	}
+	leaf := el.adaptFunctionValue(&core.VarRef{Name: field, Ty: bound, Local: true}, ty)
+	return &core.Case{Scrut: record, Bind: bind, Ty: ty, Tree: &core.SwitchCtor{Scrut: bind, ADT: adt, Cases: []core.CtorCase{{Ctor: adt.Ctors[0], Binds: binds, Tree: &core.Leaf{Body: leaf}}}}}
 }
 
 func (el *elab) recordUpdate(e *ast.RecordUpdate, ty types.Type) core.Expr {

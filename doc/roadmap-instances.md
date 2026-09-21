@@ -46,23 +46,43 @@ The three lambdas perform `Reading`; the fields want `e`; the clauses perform
 Direct, Exit, or Machine transport per arrow from its row, so a reader over
 memory compiles to direct calls while a reader over a socket carries exits.
 
-Wanted, in order: a record of bound closures at a same-module effect, at a
-cross-module effect, and at `IO`, the last being where the
-[codegen defect](roadmap-io.md#codegen-segfaults-on-a-row-polymorphic-handler-at-a-cross-module-effect)
-lives.
+The three instantiations exist as the `reader_over_*` fixtures — a record of
+closures in a row-polymorphic handler's subject, driven at a same-module
+effect, at `State`, and at `IO` — but with `Reading` still named in the
+record's field rows. Nothing is bound there: every call re-resolves to the
+innermost activation, which is indistinguishable while there is one. Dropping
+the label from those fields is what is left, and it is what lets two readers
+be driven at once.
 
 A named record literal's field positions already carry the rule, so a fixed-row
-wrapper such as `Cell { step = \_ -> tick() }` binds today. Two things on the
-way are not the rule's:
+wrapper such as `Cell { step = \_ -> tick() }` binds today. What a row-indexed
+one meets instead is that the field constraint carries the handler stack only
+when the argument it adapts is the lambda itself. A closure inside a
+row-indexed constructor or record literal reaches its position through the
+container's row argument, and the inclusion that argument produces names no
+handler to bind to, so the label is an ordinary mismatch:
+
+```
+It performs:
+
+    {Counter | e}
+
+but only these effects are available here:
+
+    {e2}
+```
+
+Two more things on the way are not the rule's:
 
 - An inferred record literal, `{ step = \_ -> tick() }` with no constructor
   name, resolves through the deferred record obligations instead of a field
   constraint, and so never reaches the rule.
-- Projecting a field whose arrow is pure and calling it inside an effectful
-  body is rejected outright, with or without a handler: `c.step()` where
-  `step : () -> Int` infers the field as `() ->{IO} a` from the ambient row
-  before the obligation resolves, and then disagrees with the declaration.
-  This predates the rule and blocks every record of bound closures.
+- Projecting a field whose arrow is closed and pure and calling it inside an
+  effectful body is rejected outright, with or without a handler: `c.step()`
+  where `step : () -> Int` infers the field as `() ->{IO} a` from the ambient
+  row before the obligation resolves, and then disagrees with the declaration.
+  This predates the rule. A row-indexed field escapes it, because the row
+  argument absorbs the ambient effects instead.
 
 ## Related work, not required here
 

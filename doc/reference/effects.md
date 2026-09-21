@@ -79,9 +79,11 @@ binding or other uses.
 
 The rule also applies to stored callbacks and covariant effect-indexed values.
 For example, `type Test e = Test (() ->{e} ())` permits pure and IO tests in
-one list, in either order. Open row parameters can also widen: a consumer of
-an effect-indexed source may add its own
-effects to the shared row. The enclosing annotation must permit those effects.
+one list, in either order. Reading one back widens the same way: a record
+field declared `() ->{Cell | e} Int` may be projected and called in a body
+that performs more than that arrow names. Open row parameters can also widen:
+a consumer of an effect-indexed source may add its own effects to the shared
+row. The enclosing annotation must permit those effects.
 The compiler derives variance from fields, including
 recursive types and imported abstract types. Function inputs reverse the
 direction: a function accepting only pure callbacks cannot stand in for one
@@ -99,7 +101,23 @@ own definition performs IO. Annotation type variables and residual row tails
 remain rigid.
 
 An effect outside the permitted row reports `EFFECT MISMATCH`, naming the
-performed and available effects.
+performed and available effects. A report prints an arrow's row whenever the
+row variable ending it appears anywhere else in the same type, an
+effect-indexed value's row argument included, so two types that differ only in
+such a tail are never shown as one:
+
+```
+The annotation says:
+
+    Iterator Int e -> Maybe Int
+
+but the body requires:
+
+    Iterator Int e ->{e} Maybe Int
+```
+
+A row variable an arrow alone carries says only that the caller chooses, and
+stays elided.
 
 ## Effects and handlers
 

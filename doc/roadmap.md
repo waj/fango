@@ -29,9 +29,8 @@ and `Writer` as records bound to handler activations over abstract byte
 sources and sinks, and the file, memory, and socket adapters beneath them,
 driven by an HTTP server as its consumer. `Bytes` is its only new runtime
 primitive; it depends on [handler instances](roadmap-instances.md) below and
-on a closed row being writable as a type argument, and it records the three
-compiler defects found on its path. A concurrent server additionally depends
-on the [effects roadmap](roadmap-effects.md).
+on a closed row being writable as a type argument. A concurrent server
+additionally depends on the [effects roadmap](roadmap-effects.md).
 
 ## Addressing a specific handler
 

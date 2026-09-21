@@ -1,12 +1,12 @@
 # Roadmap: bytes, buffered readers and writers, and sockets
 
 This document owns the proposed byte-oriented IO layer and its delivery
-sequence: three compiler defects on its path, two small language
-prerequisites, an immutable `Bytes` value, `Reader` and `Writer` as records
-bound to handler activations over abstract byte sources and sinks, and the
-file, memory, and socket adapters beneath them. Its motivating consumer is an
-HTTP server written in Fango, so acceptance is stated in terms of what a
-server needs rather than library breadth.
+sequence: two small language prerequisites, an immutable `Bytes` value,
+`Reader` and `Writer` as records bound to handler activations over abstract
+byte sources and sinks, and the file, memory, and socket adapters beneath
+them. Its motivating consumer is an HTTP server written in Fango, so
+acceptance is stated in terms of what a server needs rather than library
+breadth.
 
 Implemented contracts remain in [design](design.md) and
 [reference](reference.md); the main
@@ -49,104 +49,19 @@ that two readers can be driven at once. Binding a closure to an activation
 does that, and this layer depends on the part of it that
 [handler instances](roadmap-instances.md) still owns.
 
-## Step 1 — three compiler defects
-
-All three are independent of this layer and all three were found on its path.
-The first and third block step 4.
-
-### Core lint rejects a widened effect-indexed record field
-
-```fango
-effect Cell
-    get : () -> Int
-
-type Ops e = { read : () ->{Cell | e} Int }
-
-withCell : (Ops e ->{Cell | e} a) ->{e} a
-withCell use =
-    handle use ({ read = \_ -> get() }) of
-        get () -> resume 7
-
-main() = print (withCell (\o -> o.read()))
-```
-
-```
-fango: internal compiler error: Core invariants violated in module <entry>:
-  def main: reference `_field1` changes its binding type from () ->{Cell} Int to () ->{IO, Cell} Int
-```
-
-Inference accepts the covariant widening that
-[row inclusion](reference/effects.md#row-inclusion-and-callback-compatibility)
-promises for effect-indexed values; Core records the projected field at the
-rigid instantiation, and lint compares the two. The defect is a crash on
-plausible source. Establish which side is right — whether Core should carry
-the widened binding or the projection should be adapted — before changing
-either. `Reader e` below is an effect-indexed record whose fields are
-projected at a rigid `e` and widened by every consumer, so this shape recurs
-throughout the layer.
-
-### `EFFECT MISMATCH` can print two identical types
-
-```fango
-leak : Iterator Int e -> Maybe Int
-leak cursor = Stream.withCursor (Stream.fromList [9, 9, 9]) (\_ -> Iterator.next cursor)
-```
-
-```
-The annotation says:
-
-    Iterator Int e -> Maybe Int
-
-but the body requires:
-
-    Iterator Int e -> Maybe Int
-```
-
-The rejection is correct — the body's row is the cursor's latent `e`, which
-the pure annotation does not list — but the rendering elides exactly the
-difference it reports. The note beneath carries the real information. This
-belongs with the diagnostic work in
-[product polish](roadmap.md#product-polish); it is recorded here because row
-diagnostics are what a user of this layer meets most often.
-
-### Codegen segfaults on a row-polymorphic handler at a cross-module effect
-
-```fango
-import State exposing (State(..))
-type Source e = { pull : () ->{e} String }
-effect Reading
-    peek : () -> String
-over : Source e -> (() ->{Reading | e} a) ->{e} a
-over source use =
-    handle use() of
-        peek () -> resume (source.pull())
-stated = Source { pull = \_ -> get() }
-main() =
-    r = State.run "S" (\_ -> over stated (\_ -> peek()))
-    print r.value
-```
-
-`fango check` passes. `fango run` panics with a nil dereference reached from
-`internal/codegen.emitUnitWithMachine` (`internal/codegen/gen.go:330`).
-
-The trigger is a row-polymorphic handler wrapper whose clause performs the
-abstract row, instantiated at a concrete effect declared in **another module**.
-The same shape at `IO` runs. The same shape at a user effect declared in the
-same file runs. The stdlib `State` crashes it.
-
-This is a hard blocker: `Reader.over : Source e -> ... ->{e} a` used with a
-source that is not `IO` is exactly the pure-fixture path this design exists
-for.
-
-## Step 2 — language prerequisites
+## Step 1 — language prerequisites
 
 ### Handler instances
 
 The rule this layer needs is implemented for closed, concrete rows:
 [effects](reference/effects.md#binding-a-closure-to-a-handler-activation) owns
 it. A reader is an ordinary record of closures bound to one activation, and two
-readers are two records. What is still missing is the row-polymorphic wrapper
-shape, owned by [handler instances](roadmap-instances.md). Both effects here are
+readers are two records. `over`'s shape runs today as long as `Reading` stays
+in the record's field rows — the `reader_over_*` fixtures drive it at a
+same-module effect, at `State`, and at `IO`. Dropping the label from those
+fields, which is what a consumer's signatures need and what makes each reader
+reach its own activation, is the row-polymorphic wrapper shape owned by
+[handler instances](roadmap-instances.md). Both effects here are
 unparameterized, so the row-label rule discussed there is not on this path.
 
 ### A closed row as a type argument
@@ -174,7 +89,7 @@ section in [library effects](reference/library-effects.md#writer), and its one
 fixture are removed. Anyone needing the accumulator writes it over `State` in
 a few lines.
 
-## Step 3 — Bytes
+## Step 2 — Bytes
 
 `Bytes` is an immutable sequence of bytes with a compiler-known runtime
 representation, recognized at its declaration by canonical symbol exactly as
@@ -212,7 +127,7 @@ Core operations are inline templates over `fangort` helpers, the form `Basics`
 already uses (`intShow = native "fangort.ShowInt($1)"`), so they need no
 extension to the sidecar ABI. Natives that *produce* `Bytes` from outside —
 counted file reads, socket reads — do need the bundled boundary to accept
-`[]byte`, which is part of step 5.
+`[]byte`, which is part of step 4.
 
 Three alternatives were rejected. `List Int` costs eight bytes per byte and
 forfeits `bytes.Index`. An opaque handle into a native table, the mechanism
@@ -225,7 +140,7 @@ again; a native reading into a scratch slice copies on the way out. This is
 what makes `slice` free everywhere else, and it is the one rule a reviewer of
 the native code must check.
 
-## Step 4 — Reader and Writer
+## Step 3 — Reader and Writer
 
 ### The leaves
 
@@ -241,8 +156,8 @@ type Sink e = Sink (Bytes ->{e} ())
 which may be short; empty is not end of input. A sink accepts a chunk and
 writes all of it before returning. Neither carries a close: closing belongs to
 the scope owning the file or socket, and a leaf outliving that scope is
-already rejected because it captures the handle. Whether these can be records
-rather than single-constructor wrappers depends on the first defect.
+already rejected because it captures the handle. These may equally be records:
+a record's effect-indexed field is projected and widened like any other value.
 
 ### The effects and the records
 
@@ -399,13 +314,13 @@ IO.stdout : Sink {IO}
 IO.stdin : Source {IO}
 ```
 
-These signatures need the closed-row type argument from step 2.
+These signatures need the closed-row type argument from step 1.
 `Memory.source` is pure, so a fixture-driven test performs no effects at all
 and the same parsing code runs over it and over a socket. `File` gains counted
 byte natives beside its existing line natives, which keep their contracts; the
 unbuffered `File.write` stays as it is.
 
-## Step 5 — sockets, HTTP, and a concurrent server
+## Step 4 — sockets, HTTP, and a concurrent server
 
 ```fango
 {-# resource #-}
@@ -447,7 +362,7 @@ Reader.over (Memory.source fixture) \input ->
         Http.writeResponse output (respond (Http.readRequest input))
 ```
 
-A proxy holds two readers at once, which is what step 2 bought:
+A proxy holds two readers at once, which is what step 1 bought:
 
 ```fango
 Reader.over (Net.source client) \downstream ->
@@ -475,7 +390,7 @@ document's acceptance program.
 | — | Framing, limits, chunked decoding, HTTP |
 
 `Bytes`, `Reader`, `Writer`, and the adapters are library names and need no
-grammar change; the binding rule in step 2 is a typing rule and needs none
+grammar change; the binding rule in step 1 is a typing rule and needs none
 either. The closed-row type argument is a grammar change and requires a
 TextMate check that rows inside type arguments tokenize. Both backends must
 agree on the `Bytes` representation; the interpreter uses the same `fangort`
@@ -485,24 +400,18 @@ value the compiled program does, as it does for `List`.
 
 Each step is usable without the ones after it.
 
-**1. Defects.** The widening crash is fixed with a regression fixture on both
-sides of the decision it forces. The diagnostic prints the differing rows. The
-segfault repro above compiles and runs, with fixtures covering a
-row-polymorphic handler instantiated at same-module, cross-module, and `IO`
-effects.
-
-**2. Prerequisites.** What the binding rule still owes this layer is in
+**1. Prerequisites.** What the binding rule still owes this layer is in
 [that document](roadmap-instances.md#the-row-polymorphic-wrapper-shape). A
 closed row is accepted as a type argument and rejected at a non-row parameter
 with a kind error. `ignore` lands in `Basics`. The accumulator `Writer` is gone
 from the library, the reference, and the fixtures.
 
-**3. `Bytes`.** Differential interpreter/compiler coverage for every operation,
+**2. `Bytes`.** Differential interpreter/compiler coverage for every operation,
 including empty, out-of-range, and invalid-UTF-8 inputs. A scan over a large
 input allocates nothing per match. No native returns a slice of a buffer it
 will write again.
 
-**4. `Reader`/`Writer`.** The same parsing code passes over a memory source
+**3. `Reader`/`Writer`.** The same parsing code passes over a memory source
 and a file source, and the memory path performs no effects. Two readers are
 driven alternately and neither disturbs the other. A writer emits one
 underlying write per flush window. Reading a file through `Reader.chunks`
@@ -512,7 +421,7 @@ consuming nothing, and `limited` leaving the parent correctly positioned are
 all covered. A reader cannot outlive its source's scope, and a reader cannot
 outlive its own `over`.
 
-**5. Sockets and HTTP.** A client fetches over a loopback connection; a
+**4. Sockets and HTTP.** A client fetches over a loopback connection; a
 listener serves one connection at a time; a peer closing mid-read and
 mid-write is an ordinary typed failure; no handle outlives its scope. A
 scripted request set covers a malformed request, an oversized header block, a

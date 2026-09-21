@@ -102,8 +102,16 @@ func (p *Printer) rowText(r Row) string {
 	return "{" + inside + "}"
 }
 
+// A row variable is elided from an arrow that is its only occurrence, since
+// there it only says the arrow performs whatever its caller allows. Counting
+// every occurrence, an effect-indexed value's row argument included, keeps the
+// arrow that shares one with such a value printing the row it performs.
 func (p *Printer) countRows(t Type) {
 	switch t := t.(type) {
+	case *TVar:
+		if t.Kind == RowVar {
+			p.rows[t.ID]++
+		}
 	case *TCon:
 		for _, a := range t.Args {
 			p.countRows(a)

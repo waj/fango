@@ -71,10 +71,13 @@ func TestPolyPositive(t *testing.T) {
 		// Patterns instantiate constructors too.
 		{"type Opt a = None | Some a\nf m = case m of\n    None -> 0\n    Some n -> n + 1", "f : Num a => Opt a -> a"},
 		{"type Box a = MkBox a\nunbox b = case b of\n    MkBox x -> x", "unbox : Box a -> a"},
-		{"type Foo eff = Foo (() ->{IO | eff} ())\nwrap action = Foo action", "wrap : (() ->{IO} ()) -> Foo e"},
+		// An arrow sharing its row tail with an effect-indexed type's
+		// argument prints that tail: it is what the value's index makes the
+		// arrow perform, not a row the caller is free to choose.
+		{"type Foo eff = Foo (() ->{IO | eff} ())\nwrap action = Foo action", "wrap : (() ->{IO | e} ()) -> Foo e"},
 		{"type Test eff = TestCase (() ->{eff} ())\nsuite : Test IO\nsuite = TestCase (\\_ -> print ())", "suite : Test {IO}"},
-		{"type Test eff = Wrap (Test eff) | Bar (() ->{eff} ())\nmake action = Bar action", "make : (() -> ()) -> Test e"},
-		{"effect Expectation\n    abort fail : String -> e\ntype Test eff = TestCase (() ->{Expectation | eff} ())\nrunHelper : Test eff ->{IO | eff} ()\nrunHelper (TestCase action) =\n    handle action() of\n        fail msg -> print msg", "runHelper : Test e ->{IO} ()"},
+		{"type Test eff = Wrap (Test eff) | Bar (() ->{eff} ())\nmake action = Bar action", "make : (() ->{e} ()) -> Test e"},
+		{"effect Expectation\n    abort fail : String -> e\ntype Test eff = TestCase (() ->{Expectation | eff} ())\nrunHelper : Test eff ->{IO | eff} ()\nrunHelper (TestCase action) =\n    handle action() of\n        fail msg -> print msg", "runHelper : Test e ->{IO | e} ()"},
 		// Applied types in annotations.
 		{"type Opt a = None | Some a\nx : Opt Int\nx = Some 1", "x : Opt Int"},
 		{"type Opt a = None | Some a\nf : Opt a -> Opt a\nf m = m", "f : Opt a -> Opt a"},

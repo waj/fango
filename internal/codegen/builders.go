@@ -69,23 +69,27 @@ func funcLitParams(params []paramSpec, result goast.Expr, body []goast.Stmt) goa
 	return &goast.FuncLit{
 		Type: &goast.FuncType{
 			Params:  paramFields(params),
-			Results: &goast.FieldList{List: []*goast.Field{{Type: result}}},
+			Results: resultFields(result),
 		},
 		Body: &goast.BlockStmt{List: body},
 	}
 }
 
+// A nil result is the void signature a Unit-returning member is declared with.
+func resultFields(result goast.Expr) *goast.FieldList {
+	if result == nil {
+		return &goast.FieldList{}
+	}
+	return &goast.FieldList{List: []*goast.Field{{Type: result}}}
+}
+
 // workerDecl is a top-level uncurried worker: func v_f(v_x T, …) R { … }.
 func workerDecl(name string, params []paramSpec, result goast.Expr, body []goast.Stmt) goast.Decl {
-	results := &goast.FieldList{}
-	if result != nil {
-		results = &goast.FieldList{List: []*goast.Field{{Type: result}}}
-	}
 	return &goast.FuncDecl{
 		Name: ident(name),
 		Type: &goast.FuncType{
 			Params:  paramFields(params),
-			Results: results,
+			Results: resultFields(result),
 		},
 		Body: &goast.BlockStmt{List: body},
 	}

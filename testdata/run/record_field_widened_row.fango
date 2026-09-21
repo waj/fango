@@ -1,0 +1,17 @@
+-- A record's row argument has no runtime content, so a field declared
+-- `() ->{Cell | e} Int` is stored at the arrow that row erases to. Projecting
+-- it in a body that performs more than that arrow names is the covariant
+-- widening row inclusion promises. The binder keeps what the constructor
+-- stored and the projection adapts to the wider arrow: retagging the binder
+-- would claim the stored closure has a shape it does not.
+effect Cell
+    get : () -> Int
+
+type Ops e = { read : () ->{Cell | e} Int }
+
+withCell : (Ops e ->{Cell | e} a) ->{e} a
+withCell use =
+    handle use (Ops { read = \_ -> get() }) of
+        get () -> resume 7
+
+main() = print (withCell (\o -> o.read()))

@@ -1,0 +1,43 @@
+-- The same shape with the source performing `State`, declared in another
+-- module. The source is a top-level value, so its closure takes the row its
+-- caller supplies and finds `State` in it rather than in a lexical
+-- activation; `put` answers Unit, which is the member the residual row has to
+-- materialize.
+import State exposing (State(..))
+
+effect Reading
+    buffered : () -> String
+    refill : () -> Bool
+
+type Reader e =
+    { buffered : () ->{Reading | e} String
+    , refill : () ->{Reading | e} Bool
+    }
+
+type Source e = { pull : () ->{e} String }
+
+over : Source e -> (Reader e ->{Reading | e} a) ->{e} a
+over source use =
+    handle use (Reader { buffered = \_ -> buffered(), refill = \_ -> refill() }) with pending = "" of
+        buffered () -> resume pending with pending
+        refill () ->
+            chunk = source.pull()
+            resume (chunk /= "") with pending ++ chunk
+
+readAll : Reader e ->{Reading | e} String
+readAll reader =
+    if reader.refill() then readAll reader
+    else reader.buffered()
+
+takeRest : () ->{State String} String
+takeRest() =
+    current = get()
+    put ""
+    current
+
+stateSource = Source { pull = \_ -> takeRest() }
+
+main() =
+    answer = State.run "cd" (\_ -> over stateSource readAll)
+    print answer.value
+    print answer.state

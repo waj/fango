@@ -1,0 +1,3 @@
+but the body requires:
+
+    Iterator Int e ->{e} Maybe Int
