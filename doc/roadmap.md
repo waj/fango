@@ -137,6 +137,15 @@ executor; measured optimization; written capture/borrowing contracts. Preserve
 compiler-proved resume discipline and ordinary calls/explicit machines, without
 host-stack copying or goroutine-based continuations.
 
+## Shared state and transactional memory
+
+[Transactional memory](roadmap-stm.md) owns the proposed answer to shared
+mutable state: transactional variables, atomic transactions with an abort-only
+`retry`, and the one native boundary they need. The control layer is ordinary
+Fango over the implemented handler rules; what it waits on is the async
+sequence above, and a general `TVar a` additionally waits on a polymorphic
+value crossing the native boundary opaquely.
+
 ## Capture-flow analysis cost
 
 The analysis interprets every definition as its own root, from a checker that

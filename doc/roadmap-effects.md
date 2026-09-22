@@ -380,13 +380,15 @@ These do not block the committed sequence unless a concrete API requires them:
   contract before scheduling them. Raw escaping resume and multi-shot cloning
   remain outside the chosen model.
 - **Shared mutable state:** requires an explicit sharing protocol; cooperative
-  `get; await; put` is not atomic. Detached tasks/subscriptions, general multicast,
+  `get; await; put` is not atomic. [Transactional memory](roadmap-stm.md) owns
+  the proposed protocol and the primitives it needs; it depends on this sequence
+  rather than blocking it. Detached tasks/subscriptions, general multicast,
   replay, and public channels/select remain outside scope.
 - **General fallible sidecars:** extend the current bundled File boundary only
   with resolved error identities or a declared marker and a chosen error
   vocabulary. Trusted adapters required above do not imply arbitrary foreign
   suspension or a universal FFI. Rich opaque native values remain in the
-  [main roadmap](roadmap.md#opaque-native-types).
+  [main roadmap](roadmap.md#longer-term-candidates).
 
 Handlers do not roll back arbitrary external writes. Search can use explicit
 worklists and fresh computations without continuation cloning. Neither release
