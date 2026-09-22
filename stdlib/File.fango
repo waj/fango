@@ -7,6 +7,7 @@ import Fail exposing (Fail, attempt, fail, fromResult)
 import IO exposing (Error, IO, Line(..))
 import List exposing (List)
 import Maybe exposing (Maybe(..))
+import Native
 import Result exposing (Result(..))
 import Scope
 
@@ -17,15 +18,14 @@ Show nor Eq, so a program can neither build, inspect, nor compare one; the
 only way to obtain a handle is inside a `with*` scope, and the compiler treats
 the type as a capability so the handle cannot outlive that scope.
 
-Both `Handle` and `Directory` wrap the sidecar's table id. The compiler erases
-the wrapper to its Int at the Go boundary and nowhere else (doc/design.md,
-"Go backend and runtime"). -}
+Both `Handle` and `Directory` wrap an opaque Go value. The compiler erases the
+wrapper to `any` at the Go boundary and nowhere else. -}
 
 {-# resource #-}
-type Handle = Handle Int
+type Handle = Handle Native.Any
 
 {-# resource #-}
-type Directory = Directory Int
+type Directory = Directory Native.Any
 
 -- The fallible natives. Each Go function returns an error that the compiler
 -- classifies into `IO.Error` at the boundary. None is exposed; the scoped API

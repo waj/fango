@@ -15,12 +15,9 @@ import (
 // path the program supplied, because filePath joins onto the working
 // directory and the absolute form would differ from run to run.
 //
-// Handles live in this package's globals: a compiled program owns one table
-// per process, and the interpreter's native worker keeps its globals for the
-// session, so both backends share the same code and the same lifetime. Ids
-// are never reused, so a stale handle is an ordinary "closed handle" failure
-// rather than a silent alias of a newer file. A Fango program cannot reach
-// that failure: File.Handle is abstract and its scope closes exactly once.
+// Handles cross the native boundary as opaque Go values. File.Handle and
+// File.Directory remain distinct nominal Fango types even though both carry
+// `any`; no module-owned id table is needed to keep the Go object alive.
 
 type handle struct {
 	path    string
@@ -28,12 +25,8 @@ type handle struct {
 	reader  *bufio.Reader
 	entries []string // directory listings, in os.ReadDir's sorted order
 	next    int
+	closed  bool
 }
-
-var (
-	handles          = map[int64]*handle{}
-	nextHandle int64 = 1
-)
 
 func filePath(path string) string {
 	if filepath.IsAbs(path) {
@@ -42,16 +35,9 @@ func filePath(path string) string {
 	return filepath.Join(FangoHost.WorkingDirectory(), path)
 }
 
-func register(h *handle) int64 {
-	id := nextHandle
-	nextHandle++
-	handles[id] = h
-	return id
-}
-
-func lookup(id int64) (*handle, error) {
-	h, ok := handles[id]
-	if !ok {
+func lookup(value any) (*handle, error) {
+	h, ok := value.(*handle)
+	if !ok || h == nil || h.closed {
 		return nil, &fs.PathError{Op: "use", Path: "", Err: errors.New("closed handle")}
 	}
 	return h, nil
@@ -66,30 +52,30 @@ func relabel(err error, path string) error {
 	return err
 }
 
-func openWith(path string, open func(string) (*os.File, error)) (int64, error) {
+func openWith(path string, open func(string) (*os.File, error)) (any, error) {
 	file, err := open(filePath(path))
 	if err != nil {
-		return 0, relabel(err, path)
+		return nil, relabel(err, path)
 	}
-	return register(&handle{path: path, file: file, reader: bufio.NewReader(file)}), nil
+	return &handle{path: path, file: file, reader: bufio.NewReader(file)}, nil
 }
 
-func OpenRead(path string) (int64, error) { return openWith(path, os.Open) }
+func OpenRead(path string) (any, error) { return openWith(path, os.Open) }
 
-func OpenWrite(path string) (int64, error) { return openWith(path, os.Create) }
+func OpenWrite(path string) (any, error) { return openWith(path, os.Create) }
 
-func OpenAppend(path string) (int64, error) {
+func OpenAppend(path string) (any, error) {
 	return openWith(path, func(p string) (*os.File, error) {
 		return os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	})
 }
 
-func CloseHandle(id int64) error {
-	h, err := lookup(id)
+func CloseHandle(value any) error {
+	h, err := lookup(value)
 	if err != nil {
 		return err
 	}
-	delete(handles, id)
+	h.closed = true
 	if err := h.file.Close(); err != nil {
 		return relabel(err, h.path)
 	}
@@ -97,8 +83,8 @@ func CloseHandle(id int64) error {
 }
 
 // HandleHasInput distinguishes end of file from a read failure by peeking.
-func HandleHasInput(id int64) (bool, error) {
-	h, err := lookup(id)
+func HandleHasInput(value any) (bool, error) {
+	h, err := lookup(value)
 	if err != nil {
 		return false, err
 	}
@@ -113,8 +99,8 @@ func HandleHasInput(id int64) (bool, error) {
 
 // ReadHandleLine has IO.readRawLine's contract: the line with its terminator,
 // or the unterminated remainder at end of file, with invalid UTF-8 replaced.
-func ReadHandleLine(id int64) (string, error) {
-	h, err := lookup(id)
+func ReadHandleLine(value any) (string, error) {
+	h, err := lookup(value)
 	if err != nil {
 		return "", err
 	}
@@ -138,8 +124,8 @@ const maxByteRead = 1 << 16
 // The result is its own array. A Bytes may never alias a buffer something will
 // write again (doc/design/backend.md, "Bytes representation"), which is why
 // this allocates and copies rather than handing out a Peek into the reader.
-func ReadHandleBytes(id int64, max int64) ([]byte, error) {
-	h, err := lookup(id)
+func ReadHandleBytes(value any, max int64) ([]byte, error) {
+	h, err := lookup(value)
 	if err != nil {
 		return nil, err
 	}
@@ -157,8 +143,8 @@ func ReadHandleBytes(id int64, max int64) ([]byte, error) {
 	return buf[:n:n], nil
 }
 
-func WriteHandleBytes(id int64, data []byte) error {
-	h, err := lookup(id)
+func WriteHandleBytes(value any, data []byte) error {
+	h, err := lookup(value)
 	if err != nil {
 		return err
 	}
@@ -168,8 +154,8 @@ func WriteHandleBytes(id int64, data []byte) error {
 	return nil
 }
 
-func WriteHandle(id int64, text string) error {
-	h, err := lookup(id)
+func WriteHandle(value any, text string) error {
+	h, err := lookup(value)
 	if err != nil {
 		return err
 	}
@@ -196,21 +182,21 @@ func WriteFileResult(path, text string) error {
 
 // OpenDirectory reads the whole listing at open, so a listing failure is
 // reported where the directory is named rather than on a later entry.
-func OpenDirectory(path string) (int64, error) {
+func OpenDirectory(path string) (any, error) {
 	entries, err := os.ReadDir(filePath(path))
 	if err != nil {
-		return 0, relabel(err, path)
+		return nil, relabel(err, path)
 	}
 	names := make([]string, len(entries))
 	for i, entry := range entries {
 		names[i] = entry.Name()
 	}
-	return register(&handle{path: path, entries: names}), nil
+	return &handle{path: path, entries: names}, nil
 }
 
 // ReadDirectoryEntry answers "" after the last entry; names are never empty.
-func ReadDirectoryEntry(id int64) (string, error) {
-	h, err := lookup(id)
+func ReadDirectoryEntry(value any) (string, error) {
+	h, err := lookup(value)
 	if err != nil {
 		return "", err
 	}
@@ -222,11 +208,13 @@ func ReadDirectoryEntry(id int64) (string, error) {
 	return strings.ToValidUTF8(name, "�"), nil
 }
 
-func CloseDirectory(id int64) error {
-	if _, err := lookup(id); err != nil {
+func CloseDirectory(value any) error {
+	h, err := lookup(value)
+	if err != nil {
 		return err
 	}
-	delete(handles, id)
+	h.closed = true
+	h.entries = nil
 	return nil
 }
 
