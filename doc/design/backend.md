@@ -17,6 +17,7 @@ It does not depend on Go runtime internals, stack maps, barriers, or scheduler A
 | Unit | Shared fangort.Unit/UnitValue when represented |
 | Function | Typed Direct/Exit/Machine callable record |
 | Ordinary ADT | Typed marker interface and constructor structs |
+| Native.Any | Go `any`; opaque and valid only behind a private wrapper |
 | Parameterized definition | Go generics with explicit instantiation |
 
 Row-kinded ADT parameters are omitted from Go generics; their Core arguments
@@ -85,8 +86,8 @@ is why fangort.Bytes is an alias rather than a defined type — a sidecar readin
 a file or a socket hands the boundary an ordinary `[]byte`.
 
 A `List Int` would cost eight bytes per byte and forfeit `bytes.Index`, and an
-opaque handle into a native table — the mechanism `File.Handle` uses — is
-never collected, so a reader would leak one entry per chunk. Relaxing String
+opaque handle table is not used: `Native.Any` lets a scoped wrapper retain the
+Go object directly, and ordinary Go reachability collects it. Relaxing String
 to admit invalid UTF-8 would instead invalidate every String contract and the
 boundary validation protecting the Go side. Scanning is therefore a native
 over Go's `bytes.Index`, so a parser searching a block never crosses the
@@ -274,7 +275,7 @@ predeclared names, and fangort. Emission reparses, scrubs positions, and substit
 typed AST expressions with precedence intact.
 
 Bundled and user call-form sidecars follow the same declaration correspondence,
-standard-library import restriction, and Unit-erased ABI over scalars and Bytes.
+standard-library import restriction, and Unit-erased ABI over boundary values.
 Go compilation checks function bodies and types. Native effect operations
 supply a default only when no Fango handler handles them. Each sidecar's hash
 enters sources.json and edits or removals invalidate or prune generated
@@ -284,15 +285,20 @@ Every materialized sidecar gets FangoHost, a reserved process-global interface
 for input/output, arguments, directory, and exit, without hidden call parameters.
 Its single source declaration is copied beside each sidecar with rewritten runtime
 imports. Module-specific logic remains in its owner: IO owns console behavior,
-File owns file/directory tables, Random supplies system entropy; deterministic
+File owns file/directory objects, Net owns sockets, and Random supplies system entropy; deterministic
 PRNG transitions and state remain Fango handler code.
 
 Boundary shapes are resolved once after constructor declaration and stored in
 native metadata, never re-derived by backends:
 
-- A same-module single-constructor/single-scalar wrapper is projected before a
+- A same-module single-constructor/single-boundary-value wrapper is projected before a
   call and reconstructed after it. The loader recognizes its declared shape;
   checking confirms resolved types. Interpreter CtorVal wrapping matches Go.
+- The bundled `Native.Any` is represented as Go `any`. Its constructor is
+  private and carries no usable value; libraries expose only nominal wrappers
+  such as `File.Handle` and `Net.Connection`. It has no Eq, Show, matching, or
+  serialization contract. Resolved-type validation prevents an imported type
+  merely named `Any` from acquiring this ABI.
 - The bundled Bytes crosses as a plain `[]byte`, admitted in bundled sidecars
   only and recognized by the representation the checker assigned at the
   declaration rather than by name, so a user type of that name keeps its own
@@ -300,32 +306,31 @@ native metadata, never re-derived by backends:
   validated, because Bytes has no well-formedness contract. A sidecar spells it
   `[]byte` because sidecars cannot import fangort, and owes the copy-out every
   Bytes producer owes.
-- Bundled File value natives additionally map Go `(T, error)` to Result IO.Error.
-  fangort.ClassifyIOError supplies one shared kind/path/message classification;
-  checked IO.Kind constructor order is its ABI. Go emits the Result construction
-  at the call site; the worker sends failure separately from infrastructure errors
-  and panics. User sidecars do not get this fallible shape.
+- Bundled File and Net value natives additionally map Go `(T, error)` to their
+  declared Result error. fangort supplies the shared classifiers; checked Kind
+  constructor order is their ABI. Go emits the Result construction at the call
+  site. User sidecars do not get this fallible shape.
 
-File handle IDs are never reused. Tables persist per compiled process or native
-worker session. Errors retain the caller's path rather than host-expanded absolute
-paths. Opaque resource/lifetime checks prevent accepted Fango from using stale
-handles; native code is trusted. Raw operations stay unexposed and native calls
-are emitted only where wrappers reference them.
+File and socket wrappers carry pointers to their native objects directly; there
+is no native ID table and no release primitive. Cleanup scopes close objects,
+and Go GC reclaims unreachable closed wrappers. File errors retain the caller's
+path rather than host-expanded absolute paths. Resource/lifetime checks prevent
+accepted Fango from using stale handles; native code is trusted.
 
 ## Interpreter native worker
 
-Ordinary call-form evaluation uses one persistent process per sidecar set. Shared
-nativehost/nativewire packages own protocol and execution; generation supplies
-imports, registry, and FangoHost bindings. Support files come from the library
-root and are materialized with AST-rewritten repository imports. Cache keys hash sorted destination paths
-and exact bytes of the entire module, including fixed support sources.
+Evaluation involving sidecars uses one persistent process per sidecar set.
+Checking and elaboration remain in the compiler process; checked Core and its
+selective Machine program are serialized to the worker, where the evaluator and
+sidecars share one Go heap. A `Native.Any` therefore passes from Core to a Go
+function as the original object and never crosses IPC. Support sources come
+from the library root, and cache keys hash their sorted paths and exact bytes.
 
-A framed protocol carries calls and reverse host requests over a dedicated
-loopback connection. Its values are the boundary scalars plus one bytes kind,
-carried verbatim by gob, which does not distinguish an empty slice from a nil
-one — harmless, because the empty Bytes is nil. Process stdio stays outside the
-control channel. The active interpreter host answers requests, sharing one
-buffered reader with the prompt.
+A framed protocol carries serialized executable Core, scalar results, and
+reverse host requests over a dedicated loopback connection. The object codec
+drops source spans but preserves shared identities needed by checked Core and
+Machine closures. Process stdio stays outside the control channel. The active
+interpreter host answers requests, sharing one buffered reader with the prompt.
 Globals persist across calls, but importing new sidecars rebuilds the worker.
 Panics are reported and reproduced; host exit becomes an interpreter exit error.
 This is lifecycle isolation, not a security sandbox.

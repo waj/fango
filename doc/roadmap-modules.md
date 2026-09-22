@@ -1,6 +1,6 @@
-# Roadmap: modules, distribution, and native values
+# Roadmap: modules and distribution
 
-Open source-distribution and foreign-value designs. Current loading and worker
+Open source-distribution designs. Current loading and worker
 contracts are in [pipeline](design/pipeline.md) and [backend](design/backend.md).
 
 ## Distributing the bundled sources
@@ -28,27 +28,6 @@ something other than source.
   avoid incompatible parallel mechanisms.
 
 Package fetching and independent library versioning remain deferred.
-
-## Opaque native types
-
-The proposed GoAny type would hold a native Go object without Eq/Show. Compiled
-code could use Go any after extending native validation; the difficult boundary
-is the interpreter's scalar worker protocol, which cannot transmit pointers.
-The implemented same-module scalar wrappers suit explicitly closed files and
-connections, not persistent structures where an ID table would retain every version.
-
-The proposed direction is to move Core interpretation into the sidecar worker,
-keep checking in the REPL process, and send serialized Core. Interpreter/native
-values then share a heap and GC, with no pointer wire encoding. The evaluator's
-package dependencies exclude inference, so that split has an existing boundary.
-
-Loading/unloading changes would respawn and replay pure declarations, coordinated
-with [REPL generations](roadmap-tooling.md#repl-hardening). Go plugins do not supply
-unloading and require matching build artifacts, so they do not solve this lifecycle.
-Core serialization is shared with the precompiled-source option above; reuse
-the implemented [module-object codec](design/pipeline.md#pipeline).
-Co-locating native values remains a separate proposal, not an implemented
-native ABI.
 
 ## Scoping operator fixity to its module
 

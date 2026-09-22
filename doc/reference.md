@@ -23,7 +23,7 @@ The bundled library is experimental and versioned with the compiler.
 | String, Basics integer helpers | [Text and numeric helpers](reference/library-text.md) |
 | Bytes | [Byte sequences](reference/library-bytes.md) |
 | Reader, Writer, Bytes.Source, Bytes.Sink | [Buffered readers and writers](reference/library-readers.md) |
-| IO, File | [Console, process, files, and IO.Error](reference/library-io.md) |
+| IO, File, Net | [Console, process, files, sockets, and structured errors](reference/library-io.md) |
 | Fail, Failure, State, Random | [Effect APIs](reference/library-effects.md) |
 | Json | [Encoding and string tokens](reference/library-json.md) |
 | Scope | [Cleanup scopes](reference/resources.md) |

@@ -43,22 +43,29 @@ error. It is not validated on the way out the way String and Char are, because
 must answer storage nothing will write again, never a view into a buffer it
 reuses, because a `Bytes` never aliases what something else can change.
 
+The bundled `Native.Any` crosses as Go `any`. It is intended only as the private
+field of a nominal wrapper owned by a library with a Go sidecar. Its constructor
+is not exposed, and the type has no equality, display, pattern-matching, or wire
+format. The interpreter evaluates Core beside the sidecars, so the Go object
+stays on one heap rather than being encoded as an ID in a native table.
+
 One kind of declared type also crosses: a type the same module declares with
-exactly one constructor holding exactly one boundary scalar, such as
+exactly one constructor holding exactly one boundary value, such as
 `type Token = Token Int`, may appear as a parameter or result. The Go function
-sees the scalar (`int64` here); the compiler projects the field on the way in
+sees the underlying value (`int64` here, or `any` for `Native.Any`); the compiler projects the field on the way in
 and rebuilds the constructor on the way out, in both backends. Keep the
 constructor out of the module's exposing list and derive no `Show` or `Eq`,
 and callers hold an opaque handle they can neither forge nor inspect — the
-bundled `File.Handle` is exactly this, with `{-# resource #-}` adding its scoped
-capability contract. Anything else — functions, other ADTs,
+bundled `File.Handle`, `Net.Listener`, and `Net.Connection` use this with
+`Native.Any`, with `{-# resource #-}` adding their scoped capability contract.
+Anything else — functions, other ADTs,
 records, polymorphic variables, class constraints, Go type parameters, and
 multiple results — is a `NATIVE ABI` error. A Go `error` result is likewise
-rejected in user sidecars (`FALLIBLE NATIVE NOT ALLOWED`); only the bundled
-`File` module's natives return one, which the compiler turns into
-`Result IO.Error a`. Effect rows on native value types
+rejected in user sidecars (`FALLIBLE NATIVE NOT ALLOWED`); the bundled `File`
+and `Net` modules use their declared `IO.Error` and `Net.Error` results.
+Effect rows on native value types
 are preserved for checking and may contain `IO` or user-declared effects; the
-sidecar call itself uses the same scalar ABI and does not receive a hidden
+sidecar call itself uses the same boundary ABI and does not receive a hidden
 evidence argument. Sidecars may import only Go standard-library packages.
 Every call-form declaration needs its matching exported function, and every
 exported sidecar function needs a declaration.
@@ -92,8 +99,9 @@ Native sidecars participate in `check`, build manifests, incremental rebuilds,
 `build`, `run`, and `--emit-go`. Bundled standard-library modules use the same
 sidecar form, host, and ABI; their sidecars are materialized into generated
 projects just like user sidecars. During ordinary interpreter and REPL
-evaluation, call-form sidecars run in a cached persistent worker process.
-Package globals persist for the session. Panics are reported across the worker
+evaluation, checked Core runs in a cached persistent worker process beside
+the call-form sidecars. Package globals and opaque Go values persist for the
+session. Panics are reported across the worker
 boundary and reproduced as native panics; `FangoHost.Exit` becomes a
 program-exit error instead of terminating the REPL. Native sidecars are trusted
 code and are not sandboxed.

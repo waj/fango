@@ -1,0 +1,87 @@
+{-# no-prelude #-}
+module Net exposing (Connection, Error(..), Kind(..), Listener, accept, sink, source, withClient, withListener)
+
+import Basics exposing (..)
+import Bytes exposing (Bytes, Sink(..), Source(..))
+import Fail exposing (Fail, fromResult)
+import IO exposing (IO)
+import Maybe exposing (Maybe(..))
+import Native
+import Result exposing (Result(..))
+import Scope
+
+{- TCP sockets as scoped resources. Listener and Connection contain opaque Go
+values, but their constructors stay private; the resource checker prevents a
+socket, or an adapter that captures it, from escaping its scope. -}
+
+type Kind = ConnectionRefused | ConnectionReset | AddressInUse | TimedOut | Other deriving (Eq, Show)
+
+type Error = { kind : Kind, address : String, message : String } deriving (Eq, Show)
+
+{-# resource #-}
+type Listener = Listener Native.Any
+
+{-# resource #-}
+type Connection = Connection Native.Any
+
+listen : Int ->{IO} Result Error Listener
+listen = native
+
+closeListener : Listener ->{IO} Result Error ()
+closeListener = native
+
+acceptConnection : Listener ->{IO} Result Error Connection
+acceptConnection = native
+
+dial : String -> Int ->{IO} Result Error Connection
+dial = native
+
+closeConnection : Connection ->{IO} Result Error ()
+closeConnection = native
+
+connectionHasInput : Connection ->{IO} Result Error Bool
+connectionHasInput = native
+
+readConnectionBytes : Connection -> Int ->{IO} Result Error Bytes
+readConnectionBytes = native
+
+writeConnectionBytes : Connection -> Bytes ->{IO} Result Error ()
+writeConnectionBytes = native
+
+closeListenerFail : Listener ->{IO, Fail Error} ()
+closeListenerFail listener = fromResult (closeListener listener)
+
+closeConnectionFail : Connection ->{IO, Fail Error} ()
+closeConnectionFail connection = fromResult (closeConnection connection)
+
+-- withListener binds the wildcard address on port and closes the listener on
+-- every exit from use.
+withListener : Int -> (Listener ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+withListener port use =
+    Scope.bracket (\_ -> fromResult (listen port)) closeListenerFail use
+
+-- accept waits for one client and scopes the accepted connection.
+accept : Listener -> (Connection ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+accept listener use =
+    Scope.bracket (\_ -> fromResult (acceptConnection listener)) closeConnectionFail use
+
+-- withClient connects to host and port and scopes the connection.
+withClient : String -> Int -> (Connection ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
+withClient host port use =
+    Scope.bracket (\_ -> fromResult (dial host port)) closeConnectionFail use
+
+chunk : Int
+chunk = 8192
+
+readBytes : Connection ->{IO, Fail Error} Maybe Bytes
+readBytes connection =
+    if fromResult (connectionHasInput connection) then
+        Just (fromResult (readConnectionBytes connection chunk))
+    else
+        Nothing
+
+source : Connection -> Source {IO, Fail Error}
+source connection = Source { pull = \_ -> readBytes connection }
+
+sink : Connection -> Sink {IO, Fail Error}
+sink connection = Sink { write = \data -> fromResult (writeConnectionBytes connection data) }

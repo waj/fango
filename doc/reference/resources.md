@@ -97,8 +97,10 @@ Libraries mark opaque resource types with a declaration pragma:
 ```fango
 module Connection exposing (Handle, withConnection)
 
+import Native
+
 {-# resource #-}
-type Handle = Handle Int
+type Handle = Handle Native.Any
 
 withConnection address use =
     Scope.bracket (\_ -> openConnection address) closeConnection use
@@ -111,7 +113,9 @@ types. It takes no arguments, cannot be repeated for one declaration, and is
 not a file-header directive. `resource` remains an ordinary identifier outside
 the pragma. The declaration works at the REPL as well.
 
-A resource type carries a capability even when represented by an `Int`.
+A resource type carries a capability independently of its representation.
+Bundled native resources wrap `Native.Any`, so their Go object is held directly
+without an integer handle table.
 Export it as `Handle`; exporting its representation with `Handle(..)` or
 `exposing (..)` reports `RESOURCE REPRESENTATION EXPOSED`. Importers cannot
 inspect its constructors, record fields, or reflected schema. Native code and

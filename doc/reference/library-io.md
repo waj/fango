@@ -1,4 +1,4 @@
-# IO and files
+# IO, files, and sockets
 
 Console and process IO, structured IO.Error values, and scoped File APIs.
 
@@ -142,3 +142,29 @@ a missing path is an `Err` with kind `NotFound` for both.
 It is available only inside a `with*` scope and obeys the ordinary
 [resource escape and wrapper rules](resources.md#resource-escape-checks).
 Named callbacks may perform fewer effects than the wrapper permits.
+
+## Net
+
+`Net` supplies scoped TCP listeners and connections. `withListener port use`
+binds the wildcard address, runs `use`, and closes the listener on every exit.
+`accept listener use` waits for one connection and scopes it; `withClient host
+port use` connects and scopes the client side.
+
+```fango
+withListener : Int -> (Net.Listener ->{IO, Fail Net.Error | e} a) ->{IO, Fail Net.Error | e} a
+accept : Net.Listener -> (Net.Connection ->{IO, Fail Net.Error | e} a) ->{IO, Fail Net.Error | e} a
+withClient : String -> Int -> (Net.Connection ->{IO, Fail Net.Error | e} a) ->{IO, Fail Net.Error | e} a
+source : Net.Connection -> Bytes.Source {IO, Fail Net.Error}
+sink : Net.Connection -> Bytes.Sink {IO, Fail Net.Error}
+```
+
+`source` blocks until bytes arrive or the peer reaches end of stream, then
+answers at most 8192 bytes per pull. `sink` writes the complete supplied block.
+Neither adapter closes the connection; the surrounding scope owns cleanup.
+
+`Net.Error` is `{ kind : Net.Kind, address : String, message : String }`.
+The portable kinds are `ConnectionRefused`, `ConnectionReset`, `AddressInUse`,
+and `TimedOut`; other failures use `Other` and retain the system message.
+`address` is the endpoint Go associates with the failed operation when one is
+available. Listener and connection values are abstract resource wrappers over
+`Native.Any`; no native handle table or public release operation exists.

@@ -22,15 +22,14 @@ for otherwise unavailable semantics or measured performance needs.
   insertion-order fixtures prove correctness rather than balance. A manual
   n-log-n versus quadratic benchmark is the proposed check.
 
-## Byte IO, sockets, and an HTTP server
+## HTTP and a concurrent server
 
-Byte IO is implemented through files: [byte
+Byte IO is implemented through files and sockets: [byte
 sequences](reference/library-bytes.md) owns `Bytes` and its `Source` and
 `Sink`, [buffered readers and writers](reference/library-readers.md) owns
 `Reader`, `Writer`, and every stage above them, and [IO and
-files](reference/library-io.md) owns the file adapters. [Sockets and an HTTP
-server](roadmap-io.md) owns what is left: the same adapters over a socket, and
-the server that motivated the layer. A concurrent server additionally depends
+files](reference/library-io.md) owns the file and socket adapters. [HTTP and a
+server](roadmap-io.md) owns what is left. A concurrent server additionally depends
 on the [effects roadmap](roadmap-effects.md).
 
 ## Addressing a specific handler
@@ -160,12 +159,6 @@ answers for dependency modules and does not answer within a module.
 proposes attaching fixity to the operator's own declaration, so a module's
 artifact key names its dependencies' contracts rather than the whole program's
 operator table. Nothing forces it while only `Basics` declares operators.
-
-## Opaque native types
-
-[Modules and native values](roadmap-modules.md#opaque-native-types) proposes
-co-locating the interpreter with sidecars so opaque Go objects share its heap;
-this depends on serialized Core and REPL replay/generation decisions.
 
 ## Directing a type-polymorphic call
 

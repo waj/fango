@@ -10,8 +10,9 @@ Functions/type variables can retain captures; scalars cannot; ADTs can when a
 field can. A nominal resource pragma marks a type capture-capable independently
 of representation. It remains nominal metadata after resolution and requires
 opaque exports, hiding constructors, fields, and reflected schema. The defining
-module and native code own representation correctness. File handles use this
-mechanism, with no resource-name registry.
+module and native code own representation correctness. File and socket handles
+use this mechanism over `Native.Any`, with no resource-name or native handle
+registry.
 
 Handlers and cleanup/cursor scopes have distinct ScopeIDs. Scope.bracket binds
 its owner to a capture-capable resource; ordinary scalar resources, including

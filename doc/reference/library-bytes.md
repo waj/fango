@@ -87,5 +87,5 @@ type Sink e = { write : Bytes ->{e} () }
 
 They live here, with the value they carry, because everything that produces or
 consumes bytes has to name them — the buffered `Reader` and `Writer`, the
-`File` adapters beneath those, and later a socket. Their contracts belong with
+`File` and `Net` adapters beneath those. Their contracts belong with
 their consumers, in [buffered readers and writers](library-readers.md).
