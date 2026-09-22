@@ -113,14 +113,14 @@ func TestWorkerManifestDeterministicAndComplete(t *testing.T) {
 		t.Fatalf("reordered sources changed digest: %s != %s", first.digest, second.digest)
 	}
 	wanted := map[string]bool{
-		"go.mod":                 false,
-		"main.go":                false,
-		"native/A/host.go":       false,
-		"native/A/native.go":     false,
-		"native/B/host.go":       false,
-		"native/B/native.go":     false,
-		"nativewire/wire.go":     false,
-		"nativeworker/worker.go": false,
+		"go.mod":                         false,
+		"main.go":                        false,
+		"native/A/host.go":               false,
+		"native/A/native.go":             false,
+		"native/B/host.go":               false,
+		"native/B/native.go":             false,
+		"runtime/nativewire/wire.go":     false,
+		"runtime/nativeworker/worker.go": false,
 	}
 	for _, file := range first.files {
 		if _, ok := wanted[file.Path]; ok {

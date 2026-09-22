@@ -9,13 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/execcodec"
 	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/meta"
-	"github.com/waj/fango/internal/nativehost"
 	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/types"
 	"github.com/waj/fango/runtime/fangort"
@@ -114,10 +115,24 @@ type IOContext struct {
 	Writer io.Writer
 	Args   []string
 	Dir    string
-	// Natives selects the sidecar worker for this session. Nil uses the
-	// bundled standard-library worker lazily.
-	Natives *nativehost.Executor
+	// Natives selects a sidecar caller for this evaluator. Nil uses the shared
+	// bundled caller lazily.
+	Natives NativeCaller
 }
+
+// NativeCaller is the runtime sidecar seam. The compiler-hosted evaluator can
+// use an out-of-process caller for scalar-only tests; the generated evaluation
+// worker installs a direct caller so Native.Any values never leave its heap.
+type NativeCaller interface {
+	Has(string) bool
+	Call(context.Context, fangort.SessionHost, string, []any) (any, error)
+}
+
+type programExecutor interface {
+	Execute(context.Context, fangort.SessionHost, *execcodec.Payload) (any, error)
+}
+
+type NativeHost = fangort.SessionHost
 
 func NewIOContext(r io.Reader, w io.Writer) *IOContext {
 	br, ok := r.(*bufio.Reader)
@@ -145,13 +160,6 @@ func (c *IOContext) WriteOutput(data []byte) error {
 func (c *IOContext) Arguments() []string { return c.Args }
 
 func (c *IOContext) WorkingDirectory() string { return c.Dir }
-
-func (c *IOContext) nativeExecutor() (*nativehost.Executor, error) {
-	if c.Natives != nil {
-		return c.Natives, nil
-	}
-	return nativehost.Bundled()
-}
 
 type evidence struct {
 	row        *fangort.EvidenceRow
@@ -182,7 +190,10 @@ type Env struct {
 	// natives is the program's sidecar declaration metadata, keyed by
 	// canonical name. A sidecar call reads its boundary shapes from here
 	// (doc/design.md, "Go backend and runtime").
-	natives map[string]*types.NativeInfo
+	natives    map[string]*types.NativeInfo
+	defs       map[string]core.Def
+	effects    map[int]*types.EffectInfo
+	intrinsics map[string]bool
 
 	// Templates is the compiler's quote table, installed only for the
 	// compile-time environment. The Meta natives that assemble generated
@@ -266,7 +277,7 @@ func (f *Frame) lookup(name string) (Value, bool) {
 }
 
 func NewEnv() *Env {
-	return &Env{adts: map[int]*types.ADTInfo{}, cells: map[string]*Cell{}, workers: map[string]*core.Def{}, machineClosures: map[*core.Lambda]*machineir.Closure{}, tails: map[*core.Def]*core.TailLoop{}, natives: map[string]*types.NativeInfo{}}
+	return &Env{adts: map[int]*types.ADTInfo{}, cells: map[string]*Cell{}, workers: map[string]*core.Def{}, machineClosures: map[*core.Lambda]*machineir.Closure{}, tails: map[*core.Def]*core.TailLoop{}, natives: map[string]*types.NativeInfo{}, defs: map[string]core.Def{}, effects: map[int]*types.EffectInfo{}, intrinsics: map[string]bool{}}
 }
 
 // tailLoop reports (and caches) whether def executes as a frame-reuse loop.
@@ -287,12 +298,14 @@ func (e *Env) tailLoop(def *core.Def) *core.TailLoop {
 func (e *Env) Define(name string, body core.Expr) {
 	e.cells[name] = &Cell{Body: body}
 	delete(e.workers, name)
+	e.defs[name] = core.Def{Name: name, Type: body.Type(), Body: body}
 }
 
 // DefineWorker installs (or replaces) a top-level function definition.
 func (e *Env) DefineWorker(d *core.Def) {
 	e.workers[d.Name] = d
 	delete(e.cells, d.Name)
+	e.defs[d.Name] = *d
 }
 
 // DefineProg installs every definition of a Core program. Nullary generic
@@ -309,14 +322,44 @@ func (e *Env) DefineProg(p *core.Prog) {
 	for name, n := range p.Natives {
 		e.natives[name] = n
 	}
+	for _, effect := range p.Effects {
+		e.effects[effect.Unique] = effect
+	}
+	for name, present := range p.Intrinsics {
+		e.intrinsics[name] = present
+	}
 	for i := range p.Defs {
 		d := &p.Defs[i]
 		if d.IsWorker() {
 			e.DefineWorker(d)
 		} else {
 			e.Define(d.Name, d.Body)
+			e.defs[d.Name] = *d
 		}
 	}
+}
+
+func (e *Env) program() *core.Prog {
+	adts := make([]*types.ADTInfo, 0, len(e.adts))
+	for _, adt := range e.adts {
+		adts = append(adts, adt)
+	}
+	sort.Slice(adts, func(i, j int) bool { return adts[i].Con.Unique < adts[j].Con.Unique })
+	effects := make([]*types.EffectInfo, 0, len(e.effects))
+	for _, effect := range e.effects {
+		effects = append(effects, effect)
+	}
+	sort.Slice(effects, func(i, j int) bool { return effects[i].Unique < effects[j].Unique })
+	names := make([]string, 0, len(e.defs))
+	for name := range e.defs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	defs := make([]core.Def, len(names))
+	for i, name := range names {
+		defs[i] = e.defs[name]
+	}
+	return &core.Prog{ADTs: adts, Effects: effects, Defs: defs, Natives: e.natives, Intrinsics: e.intrinsics, Entry: e.entry}
 }
 
 // DefineMachineProg installs the selective lowering that corresponds to the
@@ -390,6 +433,9 @@ func Eval(ctx context.Context, e core.Expr, env *Env, out io.Writer) (Value, err
 }
 
 func EvalIO(ctx context.Context, e core.Expr, env *Env, ioctx *IOContext) (Value, error) {
+	if executor, ok := ioctx.Natives.(programExecutor); ok {
+		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Machine: env.machine, Expr: e})
+	}
 	return (&interp{ctx: ctx, env: env, out: ioctx.Writer, ioctx: ioctx, evidence: map[int]*evidence{}}).eval(e, nil)
 }
 
@@ -413,6 +459,9 @@ func Force(ctx context.Context, name string, env *Env, out io.Writer) (Value, er
 }
 
 func ForceIO(ctx context.Context, name string, env *Env, ioctx *IOContext) (Value, error) {
+	if executor, ok := ioctx.Natives.(programExecutor); ok {
+		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Machine: env.machine, Force: name})
+	}
 	return (&interp{ctx: ctx, env: env, out: ioctx.Writer, ioctx: ioctx, evidence: map[int]*evidence{}}).force(name)
 }
 
@@ -530,11 +579,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			args[i] = v
 		}
-		if !in.compileTime {
-			executor, err := in.ioctx.nativeExecutor()
-			if err != nil {
-				return nil, err
-			}
+		if !in.compileTime && in.ioctx.Natives != nil {
+			executor := in.ioctx.Natives
 			// The worker registers sidecar functions under their link module,
 			// which a headerless entry's bare canonical symbol does not carry.
 			key := e.Name
@@ -620,15 +666,17 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			key = e.Op.Native.Name
 		}
 		if !in.compileTime && e.Op.Native != nil && e.Op.Native.Template == nil {
-			executor, err := in.ioctx.nativeExecutor()
-			if err != nil {
-				return nil, err
-			}
-			if executor.Has(key) {
+			executor := in.ioctx.Natives
+			if executor != nil && executor.Has(key) {
 				return in.sidecarCall(executor, key, e.Op.Native, args)
 			}
 		}
-		if spec, ok := natives.Lookup(key); ok && spec.Effect {
+		spec, ok := natives.Lookup(key)
+		if !ok {
+			key = types.SurfaceName(e.Op.Owner.Name) + "." + types.SurfaceName(e.Op.Name)
+			spec, ok = natives.Lookup(key)
+		}
+		if ok && spec.Effect {
 			if in.compileTime {
 				return nil, &UnsafeNativeError{Name: key, Reason: "performs an effect"}
 			}
@@ -881,6 +929,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				// The declaration's one constructor is the empty sequence
 				// (internal/infer/bytes.go).
 				return fangort.BytesEmpty(), nil
+			}
+			if e.Ctor.Repr == types.ReprNativeAny {
+				return nil, nil
 			}
 			if e.Ctor.Repr == types.ReprList {
 				// The bundled List shares the compiled backend's runtime

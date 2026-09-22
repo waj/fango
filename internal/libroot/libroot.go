@@ -1,10 +1,10 @@
-// Package libroot locates the Fango library tree — the standard library and
-// the Go runtime support sources — on disk. Those sources were once embedded
+// Package libroot locates the Fango library tree — the standard library, Go
+// runtime, and interpreter-worker support sources — on disk. Those sources were once embedded
 // in the compiler executable, which made them unreachable without a rebuild;
 // resolving them from a root instead is what lets an installed compiler and a
 // working checkout share one mechanism.
 //
-// A root holds stdlib/ and runtime/ side by side. Resolution is process-wide
+// A root holds stdlib/, runtime/, and internal/ side by side. Resolution is process-wide
 // and computed once: both the value and any failure to find one are stable for
 // the process, so every session in it agrees on which library it is compiling
 // against.
@@ -68,7 +68,7 @@ func (e *ErrNotFound) Error() string {
 	if len(e.Searched) > 0 {
 		where = strings.Join(e.Searched, ", ")
 	}
-	return fmt.Sprintf("no Fango library found; looked beside the executable and in the enclosing %s checkout (%s); set %s to the directory holding stdlib/ and runtime/",
+	return fmt.Sprintf("no Fango library found; looked beside the executable and in the enclosing %s checkout (%s); set %s to the directory holding stdlib/, runtime/, and internal/",
 		goModule, where, EnvRoot)
 }
 
@@ -195,6 +195,8 @@ func ReadStdlib(name string) ([]byte, error) { return read("stdlib", name, 0) }
 // plain name, for example "fangort/list.go".
 func ReadRuntime(rel string) ([]byte, error) { return read("runtime", rel, 1) }
 
+func ReadInternal(rel string) ([]byte, error) { return read("internal", rel, 1) }
+
 func read(root, rel string, depth int) ([]byte, error) {
 	sub, name, ok := split(rel, depth)
 	if !ok {
@@ -242,6 +244,30 @@ func RuntimePackage(pkg string) ([]string, error) {
 		names[i] = pkg + "/" + name
 	}
 	return names, nil
+}
+
+func InternalPackage(pkg string) ([]string, error) {
+	t, err := lookup("internal/" + pkg)
+	if err != nil {
+		return nil, err
+	}
+	names := t.list(func(name string) bool {
+		return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
+	})
+	for i, name := range names {
+		names[i] = pkg + "/" + name
+	}
+	return names, nil
+}
+
+func StdlibGoFiles() ([]string, error) {
+	t, err := lookup("stdlib")
+	if err != nil {
+		return nil, err
+	}
+	return t.list(func(name string) bool {
+		return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
+	}), nil
 }
 
 // Missing reports whether err is a failure to find a library tree at all, as

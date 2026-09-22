@@ -92,9 +92,10 @@ Parsing is never cached: every command reparses the whole source graph, and
 
 ## The library root
 
-The standard library and the Go runtime support are files the compiler reads,
-not part of the executable, so editing one takes effect on the next build. They
-live in a single root holding `stdlib/` and `runtime/`, found in this order:
+The standard library, Go runtime, and interpreter-worker support are files the
+compiler reads, not part of the executable, so editing one takes effect on the
+next build. They live in a single root holding `stdlib/`, `runtime/`, and
+`internal/`, found in this order:
 
 1. `FANGO_ROOT`, when set.
 2. `lib/fango` beside the compiler, as `../lib/fango` then `lib/fango` relative
@@ -116,6 +117,7 @@ An installed layout therefore looks like:
 <prefix>/bin/fango
 <prefix>/lib/fango/stdlib/
 <prefix>/lib/fango/runtime/
+<prefix>/lib/fango/internal/
 ```
 
 A compiled program is self-contained and needs no root: the runtime support it

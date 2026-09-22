@@ -24,6 +24,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/waj/fango/internal/codegen"
+	"github.com/waj/fango/internal/execcodec"
 	"github.com/waj/fango/internal/libroot"
 	"github.com/waj/fango/internal/runtimefiles"
 	"github.com/waj/fango/runtime/fangort"
@@ -36,17 +37,9 @@ type Source struct {
 }
 
 // Host is the interpreter session observed by a native call.
-type Host interface {
-	HasInput() (bool, error)
-	ReadInputLine() ([]byte, error)
-	WriteOutput([]byte) error
-	Arguments() []string
-	WorkingDirectory() string
-}
+type Host = fangort.SessionHost
 
-type ExitError struct{ Code int }
-
-func (e *ExitError) Error() string { return fmt.Sprintf("program exited with status %d", e.Code) }
+type ExitError = fangort.ExitError
 
 type wireValue = nativewire.Value
 type message = nativewire.Message
@@ -104,15 +97,17 @@ func New(sources []Source) (*Executor, error) {
 }
 
 func (e *Executor) workerFiles() ([]workerFile, error) {
-	files := []workerFile{{Path: "go.mod", Data: []byte("module fangobuild\n\ngo 1.26\n")}}
-	runtimeSources, err := runtimefiles.Packages("fangort", "nativewire", "nativeworker")
+	files := []workerFile{{Path: "go.mod", Data: []byte("module github.com/waj/fango\n\ngo 1.26\n")}}
+	runtimeSources, err := runtimefiles.WorkerSources(
+		[]string{"ast", "core", "eval", "execcodec", "machine", "meta", "natives", "objectcodec", "source", "types"},
+		[]string{"fangort", "nativewire", "nativeworker"})
 	if err != nil {
 		return nil, err
 	}
 	for _, file := range runtimeSources {
 		files = append(files, workerFile{Path: file.Path, Data: file.Data})
 	}
-	hostSource, err := runtimefiles.NativeHost()
+	hostSource, err := runtimefiles.RepositoryNativeHost()
 	if err != nil {
 		return nil, err
 	}
@@ -187,13 +182,8 @@ func BundledSources() ([]Source, error) {
 }
 
 func (e *Executor) Call(ctx context.Context, host Host, name string, args []any) (any, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	if !e.Has(name) {
 		return nil, fmt.Errorf("native worker has no function %s", name)
-	}
-	if err := e.start(); err != nil {
-		return nil, err
 	}
 	values := make([]wireValue, 0, len(args))
 	for _, arg := range args {
@@ -205,6 +195,27 @@ func (e *Executor) Call(ctx context.Context, host Host, name string, args []any)
 			return nil, fmt.Errorf("native %s: %w", name, err)
 		}
 		values = append(values, v)
+	}
+	return e.exchange(ctx, host, message{Kind: "call", Name: name, Args: values}, "native "+name)
+}
+
+// Execute installs checked Core in the worker and evaluates there. Keeping the
+// evaluator and sidecars in one process is what lets Native.Any carry an
+// arbitrary Go value without serializing it or assigning it a process-global
+// handle.
+func (e *Executor) Execute(ctx context.Context, host Host, payload *execcodec.Payload) (any, error) {
+	data, err := execcodec.Encode(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode worker evaluation: %w", err)
+	}
+	return e.exchange(ctx, host, message{Kind: "execute", Data: data}, "worker evaluation")
+}
+
+func (e *Executor) exchange(ctx context.Context, host Host, request message, label string) (any, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err := e.start(); err != nil {
+		return nil, err
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = e.conn.SetDeadline(deadline)
@@ -231,7 +242,7 @@ func (e *Executor) Call(ctx context.Context, host Host, name string, args []any)
 			<-watcherDone
 		}
 	}()
-	if err := e.enc.Encode(message{Kind: "call", Name: name, Args: values}); err != nil {
+	if err := e.enc.Encode(request); err != nil {
 		e.stop()
 		return nil, fmt.Errorf("native worker: %w", err)
 	}
@@ -264,7 +275,7 @@ func (e *Executor) Call(ctx context.Context, host Host, name string, args []any)
 				return nil, errors.New(m.Error)
 			}
 			if m.Panic != "" {
-				panic(fmt.Sprintf("native %s panicked: %s", name, m.Panic))
+				panic(fmt.Sprintf("%s panicked: %s", label, m.Panic))
 			}
 			if m.Code != 0 || m.Value.Kind == "exit" {
 				return nil, &ExitError{Code: m.Code}

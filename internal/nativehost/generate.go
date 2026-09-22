@@ -14,14 +14,14 @@ import (
 
 func (e *Executor) workerSource() ([]byte, error) {
 	imports := []goast.Spec{
-		importSpec("fangort", "fangobuild/fangort"),
-		importSpec("nativeworker", "fangobuild/nativeworker"),
+		importSpec("fangort", "github.com/waj/fango/runtime/fangort"),
+		importSpec("nativeworker", "github.com/waj/fango/runtime/nativeworker"),
 	}
 	functions := &goast.CompositeLit{Type: &goast.MapType{Key: goast.NewIdent("string"), Value: goast.NewIdent("any")}}
 	var installs []goast.Stmt
 	for i, source := range e.sources {
 		alias := fmt.Sprintf("native%d", i)
-		imports = append(imports, importSpec(alias, "fangobuild/native/"+codegen.NativeLinkName(source.Module)))
+		imports = append(imports, importSpec(alias, "github.com/waj/fango/native/"+codegen.NativeLinkName(source.Module)))
 		installs = append(installs, &goast.AssignStmt{
 			Lhs: []goast.Expr{&goast.SelectorExpr{X: goast.NewIdent(alias), Sel: goast.NewIdent("FangoHost")}},
 			Tok: gotoken.ASSIGN,

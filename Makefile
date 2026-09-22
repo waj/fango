@@ -25,6 +25,13 @@ install: build
 			install -m 644 "$$f" $(LIBDIR)/runtime/$$pkg; \
 		done; \
 	done
+	for pkg in ast core eval execcodec machine meta natives objectcodec source types; do \
+		install -d $(LIBDIR)/internal/$$pkg; \
+		for f in internal/$$pkg/*.go; do \
+			case "$$f" in *_test.go) continue;; esac; \
+			install -m 644 "$$f" $(LIBDIR)/internal/$$pkg; \
+		done; \
+	done
 
 # The correctness suite: deterministic, asserting nothing about elapsed time.
 # This includes the full compiler/interpreter differential suite.

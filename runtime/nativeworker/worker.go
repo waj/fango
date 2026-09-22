@@ -3,6 +3,7 @@
 package nativeworker
 
 import (
+	"context"
 	"encoding/gob"
 	"errors"
 	"fmt"
@@ -10,10 +11,48 @@ import (
 	"net"
 	"os"
 	"reflect"
+	"strings"
 
+	"github.com/waj/fango/internal/eval"
+	"github.com/waj/fango/internal/execcodec"
 	"github.com/waj/fango/runtime/fangort"
 	"github.com/waj/fango/runtime/nativewire"
 )
+
+type directCaller struct{ functions map[string]any }
+
+func (d *directCaller) Has(name string) bool { return d.functions[name] != nil }
+
+func (d *directCaller) Call(_ context.Context, _ fangort.SessionHost, name string, args []any) (value any, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			if exit, ok := p.(exitSignal); ok {
+				err = &fangort.ExitError{Code: exit.code}
+				return
+			}
+			panic(p)
+		}
+	}()
+	fn := reflect.ValueOf(d.functions[name])
+	in := make([]reflect.Value, 0, len(args))
+	for _, arg := range args {
+		if _, unit := arg.(struct{}); unit {
+			continue
+		}
+		in = append(in, reflect.ValueOf(arg))
+	}
+	out := fn.Call(in)
+	if n := len(out); n > 0 && out[n-1].Type() == errorType {
+		if !out[n-1].IsNil() {
+			return classifyError(name, out[n-1].Interface().(error)), nil
+		}
+		out = out[:n-1]
+	}
+	if len(out) == 0 {
+		return struct{}{}, nil
+	}
+	return out[0].Interface(), nil
+}
 
 type proxy struct {
 	enc *gob.Encoder
@@ -90,6 +129,9 @@ func decode(v nativewire.Value) reflect.Value {
 }
 
 func encode(v reflect.Value) nativewire.Value {
+	if v.Kind() == reflect.Struct && v.NumField() == 0 {
+		return nativewire.Value{}
+	}
 	switch v.Kind() {
 	case reflect.Int64:
 		return nativewire.Value{Kind: "int", I: v.Int()}
@@ -136,7 +178,7 @@ func invoke(functions map[string]any, name string, args []nativewire.Value) (res
 	// here, in the process that saw it, and travels as an ordinary value.
 	if n := len(out); n > 0 && out[n-1].Type() == errorType {
 		if !out[n-1].IsNil() {
-			failure := fangort.ClassifyIOError(out[n-1].Interface().(error))
+			failure := classifyError(name, out[n-1].Interface().(error))
 			result.Failure = &nativewire.Failure{Kind: failure.Kind, Path: failure.Path, Message: failure.Message}
 			return result
 		}
@@ -146,6 +188,13 @@ func invoke(functions map[string]any, name string, args []nativewire.Value) (res
 		result.Value = encode(out[0])
 	}
 	return result
+}
+
+func classifyError(name string, err error) fangort.IOFailure {
+	if strings.HasPrefix(name, "Net.") {
+		return fangort.ClassifyNetError(err)
+	}
+	return fangort.ClassifyIOError(err)
 }
 
 var (
@@ -165,17 +214,69 @@ func Run(functions map[string]any, installHost func(fangort.NativeHost)) {
 	if err := enc.Encode(nativewire.Message{Kind: "hello", Auth: os.Getenv("FANGO_NATIVE_TOKEN")}); err != nil {
 		panic(err)
 	}
-	installHost(&proxy{enc: enc, dec: dec})
+	host := &proxy{enc: enc, dec: dec}
+	installHost(host)
+	env := eval.NewEnv()
+	caller := &directCaller{functions: functions}
 	for {
 		var request nativewire.Message
 		if err := dec.Decode(&request); err != nil {
 			return
 		}
-		if request.Kind != "call" {
+		var response nativewire.Message
+		switch request.Kind {
+		case "call":
+			response = invoke(functions, request.Name, request.Args)
+		case "execute":
+			response = execute(request.Data, env, caller, host)
+		default:
 			panic("unknown request " + request.Kind)
 		}
-		if err := enc.Encode(invoke(functions, request.Name, request.Args)); err != nil {
+		if err := enc.Encode(response); err != nil {
 			return
 		}
 	}
+}
+
+func execute(data []byte, env *eval.Env, caller *directCaller, host *proxy) (result nativewire.Message) {
+	result.Kind = "result"
+	defer func() {
+		if p := recover(); p != nil {
+			result.Panic = fmt.Sprint(p)
+		}
+	}()
+	payload, err := execcodec.Decode(data)
+	if err != nil {
+		result.Error = err.Error()
+		return
+	}
+	if payload.Program != nil {
+		env.DefineProg(payload.Program)
+	}
+	if payload.Machine != nil {
+		if err := env.DefineMachineProg(payload.Machine); err != nil {
+			result.Error = err.Error()
+			return
+		}
+	}
+	ioctx := eval.NewIOContext(strings.NewReader(""), io.Discard)
+	ioctx.Natives = caller
+	ioctx.Args = host.Arguments()
+	ioctx.Dir = host.WorkingDirectory()
+	if payload.Force != "" {
+		_, err = eval.ForceIO(context.Background(), payload.Force, env, ioctx)
+	} else if payload.Expr != nil {
+		var value any
+		value, err = eval.EvalIO(context.Background(), payload.Expr, env, ioctx)
+		if err == nil {
+			result.Value = encode(reflect.ValueOf(value))
+		}
+	}
+	if exit, ok := err.(*fangort.ExitError); ok {
+		result.Value.Kind = "exit"
+		result.Code = exit.Code
+	} else if err != nil {
+		result.Error = err.Error()
+	}
+	return
 }

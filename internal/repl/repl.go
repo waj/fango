@@ -578,6 +578,7 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 	var loaded []string
 	var natives []nativehost.Source
 	var pending []core.Def
+	needsOpaqueWorker := false
 	for _, im := range m.Imports {
 		inc, errs := s.prompt.Import(im)
 		if len(errs) > 0 {
@@ -595,6 +596,9 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 		}
 		pending = append(pending, defs...)
 		loaded = append(loaded, inc.Modules...)
+		for _, name := range inc.Modules {
+			needsOpaqueWorker = needsOpaqueWorker || name == "File" || name == "Net"
+		}
 		for _, n := range inc.Natives {
 			natives = append(natives, nativehost.Source{Module: n.Module, Content: n.Content})
 		}
@@ -602,7 +606,7 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 	// The worker is built, but neither installed nor swapped in, before the
 	// transaction commits: a failure here must not close the running one.
 	var exec *nativehost.Executor
-	if len(natives) > 0 {
+	if len(natives) > 0 || needsOpaqueWorker && s.exec == nil {
 		prepared, err := s.prepareNatives(natives)
 		if err != nil {
 			return fail([]diag.Error{{Title: "NATIVE WORKER ERROR", Body: err.Error()}})

@@ -149,6 +149,9 @@ func (g *gen) ctorLit(e *core.App) goast.Expr {
 // Native-boundary emission shares this with ctorLit so a Result or a wrapper
 // built at a sidecar call has exactly the representation a literal has.
 func (g *gen) ctorValue(ctor *types.CtorInfo, typeArgs []types.Type, elts ...goast.Expr) goast.Expr {
+	if ctor.Repr == types.ReprNativeAny {
+		return ident("nil")
+	}
 	litType := indexExpr(g.ctorRef(ctor), g.goTypes(typeArgs))
 	return &goast.UnaryExpr{
 		Op: gotoken.AND,

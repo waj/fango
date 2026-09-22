@@ -7,10 +7,13 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/meta"
-	"github.com/waj/fango/internal/nativehost"
+	"github.com/waj/fango/runtime/fangort"
 	stdlib "github.com/waj/fango/stdlib"
 )
 
@@ -32,7 +35,7 @@ type Runtime struct {
 // ExitError is how the interpreter represents IO.exit without terminating
 // the compiler or test process that hosts it. A compiled program calls
 // os.Exit through fangort and therefore has the same observable status.
-type ExitError = nativehost.ExitError
+type ExitError = fangort.ExitError
 
 type Spec struct {
 	Arity    int
@@ -102,6 +105,71 @@ var Table = func() map[string]Spec {
 	t["IO.lineEnding"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return lineEnding(args[0].(string)), nil
 	}}
+	t["IO.hasInput"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
+		_, err := rt.Reader.Peek(1)
+		if err == io.EOF {
+			return false, nil
+		}
+		if err != nil {
+			panic(err)
+		}
+		return true, nil
+	}}
+	t["IO.readRawLine"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
+		line, err := rt.Reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			panic(err)
+		}
+		return string([]rune(line)), nil
+	}}
+	t["IO.write"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
+		if _, err := io.WriteString(rt.Writer, args[0].(string)); err != nil {
+			panic(err)
+		}
+		return struct{}{}, nil
+	}}
+	t["IO.argCount"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
+		return int64(len(rt.Args)), nil
+	}}
+	t["IO.argAt"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
+		index := args[0].(int64)
+		if index < 0 || index >= int64(len(rt.Args)) {
+			panic(fmt.Sprintf("argument index %d is out of range", index))
+		}
+		return rt.Args[index], nil
+	}}
+	nativePath := func(rt *Runtime, path string) string {
+		if filepath.IsAbs(path) {
+			return path
+		}
+		return filepath.Join(rt.Dir, path)
+	}
+	t["IO.pathExists"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
+		_, err := os.Stat(nativePath(rt, args[0].(string)))
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		if err != nil {
+			panic(err)
+		}
+		return true, nil
+	}}
+	t["IO.readFileText"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
+		data, err := os.ReadFile(nativePath(rt, args[0].(string)))
+		if err != nil {
+			panic(err)
+		}
+		return strings.ToValidUTF8(string(data), "\uFFFD"), nil
+	}}
+	t["IO.writeFile"] = Spec{Arity: 2, Effect: true, Eval: func(rt *Runtime, args []any) (any, error) {
+		if err := os.WriteFile(nativePath(rt, args[0].(string)), []byte(args[1].(string)), 0o644); err != nil {
+			panic(err)
+		}
+		return struct{}{}, nil
+	}}
+	t["IO.exit"] = Spec{Arity: 1, Effect: true, Eval: func(_ *Runtime, args []any) (any, error) {
+		return nil, &ExitError{Code: int(args[0].(int64))}
+	}}
 	t["Random.entropySeed"] = Spec{Arity: 1, Eval: func(_ *Runtime, _ []any) (any, error) {
 		return stdlib.EntropySeed(), nil
 	}}
@@ -114,13 +182,19 @@ var Table = func() map[string]Spec {
 			return nil, fmt.Errorf("native %s requires the sidecar worker", name)
 		}}
 	}
+	for name, arity := range netNatives {
+		t[name] = Spec{Arity: arity, Eval: func(_ *Runtime, _ []any) (any, error) {
+			return nil, fmt.Errorf("native %s requires the sidecar worker", name)
+		}}
+	}
 	// Bundled natives are compile-time-safe by default: they are pure
 	// functions of their arguments. System entropy is Random's one exclusion,
 	// and the File natives observe the file system; seeded draws now use
 	// explicit handler-local state.
 	for name, spec := range t {
 		_, file := fileNatives[name]
-		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed" && !file
+		_, network := netNatives[name]
+		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed" && !file && !network
 		t[name] = spec
 	}
 	return t
@@ -134,6 +208,12 @@ var fileNatives = map[string]int{
 	"File.readFileResult": 1, "File.writeFileResult": 2,
 	"File.openDirectory": 1, "File.readDirectoryEntry": 1, "File.closeDirectory": 1,
 	"File.isDirectoryPath": 1,
+}
+
+var netNatives = map[string]int{
+	"Net.listen": 1, "Net.closeListener": 1, "Net.acceptConnection": 1,
+	"Net.dial": 2, "Net.closeConnection": 1, "Net.connectionHasInput": 1,
+	"Net.readConnectionBytes": 2, "Net.writeConnectionBytes": 2,
 }
 
 func Lookup(name string) (Spec, bool) { spec, ok := Table[name]; return spec, ok }

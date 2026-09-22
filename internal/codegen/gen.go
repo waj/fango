@@ -1147,6 +1147,9 @@ func (g *gen) goType(t types.Type) goast.Expr {
 			return g.unitType()
 		default:
 			if adt, ok := g.adts[t.Unique]; ok {
+				if adt.Repr == types.ReprNativeAny {
+					return ident("any")
+				}
 				if adt.Repr == types.ReprBytes {
 					// The bundled Bytes is an immutable []byte and takes no
 					// type arguments (doc/design/backend.md).
@@ -1309,11 +1312,15 @@ func (g *gen) fallibleNativeResult(call *core.NativeCall, n *types.NativeInfo, i
 	}
 	fields := make([]goast.Expr, 3)
 	fields[shape.KindIdx] = kind
-	fields[shape.PathIdx] = selector("t_failure", "Path")
+	fields[shape.LocationIdx] = selector("t_failure", "Path")
 	fields[shape.MessageIdx] = selector("t_failure", "Message")
 	failure := g.ctorValue(shape.Err, resultArgs, g.ctorValue(shape.Error, nil, fields...))
+	classifier := "ClassifyIOError"
+	if shape.Classifier == "net" {
+		classifier = "ClassifyNetError"
+	}
 	body = append(body, ifStmt(binExpr(gotoken.NEQ, ident("t_err"), ident("nil")), []goast.Stmt{
-		varDeclStmt("t_failure", selector("fangort", "IOFailure"), callExpr(selector("fangort", "ClassifyIOError"), ident("t_err"))),
+		varDeclStmt("t_failure", selector("fangort", "IOFailure"), callExpr(selector("fangort", classifier), ident("t_err"))),
 		returnStmt(failure),
 	}, nil))
 	var payload goast.Expr

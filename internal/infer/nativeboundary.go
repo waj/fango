@@ -8,25 +8,27 @@ import (
 )
 
 // The native boundary admits three shapes beyond plain scalars (doc/design.md,
-// "Go backend and runtime"): a single-constructor, single-scalar-field type
-// declared in the sidecar's own module, erased to its scalar at the Go call;
-// the bundled Bytes, in bundled sidecars only, crossing as an ordinary []byte
-// and erased to nothing; and, for the bundled File module only, a
-// `Result IO.Error T` result produced from a Go `(T, error)`. Module validation
+// "Go backend and runtime"): a single-constructor, single-boundary-value type
+// declared in the sidecar's own module, erased to its field at the Go call;
+// the bundled Bytes, in bundled sidecars only, crossing as an ordinary []byte;
+// and a bundled File or Net error result produced from a Go `(T, error)`.
+// Module validation
 // checks the Go signatures against the spelling of these shapes before name
 // resolution; this file resolves the same shapes semantically and records the
 // constructors both backends construct, so neither re-derives them from names.
 
 const (
-	fallibleNativeModule = "File"
-	ioErrorName          = "IO.Error"
-	ioKindName           = "IO.Kind"
-	resultTypeName       = "Result.Result"
+	ioErrorName    = "IO.Error"
+	ioKindName     = "IO.Kind"
+	netErrorName   = "Net.Error"
+	netKindName    = "Net.Kind"
+	resultTypeName = "Result.Result"
 )
 
 // ioKindCtors is IO.Kind's constructor order, the compiler's contract with
 // fangort.ClassifyIOError's kind codes.
 var ioKindCtors = []string{"NotFound", "PermissionDenied", "AlreadyExists", "IsDirectory", "NotDirectory", "Other"}
+var netKindCtors = []string{"ConnectionRefused", "ConnectionReset", "AddressInUse", "TimedOut", "Other"}
 
 // resolveNativeBoundaries fills the boundary metadata of every sidecar native
 // the module declares. It runs after the module's constructors are declared,
@@ -61,29 +63,37 @@ func (ck *Checker) resolveNativeBoundary(n *types.NativeInfo, sp source.Span) []
 	// native's own symbol, not its sidecar link name, is the locality key.
 	module := symbolModule(n.Name)
 	n.ParamWrappers = make([]*types.CtorInfo, 0, n.Arity)
+	var errs []diag.Error
 	t := n.Scheme.Body
-	for range n.Arity {
+	for i := range n.Arity {
 		fn, ok := t.(*types.TFun)
 		if !ok {
 			return nil // the declaration was already diagnosed
 		}
-		n.ParamWrappers = append(n.ParamWrappers, ck.boundaryWrapper(fn.Arg, module))
+		wrapper := ck.boundaryWrapper(fn.Arg, module)
+		n.ParamWrappers = append(n.ParamWrappers, wrapper)
+		if !types.Equal(fn.Arg, ck.B.Unit) && !ck.isBoundaryValue(fn.Arg) && !ck.isBytesType(fn.Arg) && wrapper == nil {
+			errs = append(errs, diag.Errorf(sp, "NATIVE DECLARATION", "Parameter %d of native `%s` does not resolve to a boundary value.", i+1, n.Name))
+		}
 		t = fn.Ret
 	}
 	if ck.isResultType(t) {
-		shape, errs := ck.fallibleShape(t, n, sp)
+		shape, shapeErrs := ck.fallibleShape(t, n, sp)
 		n.Fallible = shape
 		if shape != nil {
 			n.ResultWrapper = ck.boundaryWrapper(shape.Payload, module)
 		}
-		return errs
+		return append(errs, shapeErrs...)
 	}
 	n.ResultWrapper = ck.boundaryWrapper(t, module)
-	return nil
+	if !types.Equal(t, ck.B.Unit) && !ck.isBoundaryValue(t) && !ck.isBytesType(t) && n.ResultWrapper == nil {
+		errs = append(errs, diag.Errorf(sp, "NATIVE DECLARATION", "The result of native `%s` does not resolve to a boundary value.", n.Name))
+	}
+	return errs
 }
 
 // boundaryWrapper answers the constructor a type is erased through at the
-// boundary, or nil for anything that is not a local single-scalar wrapper.
+// boundary, or nil for anything that is not a local one-field wrapper.
 func (ck *Checker) boundaryWrapper(t types.Type, module string) *types.CtorInfo {
 	con, ok := t.(*types.TCon)
 	if !ok || len(con.Args) != 0 {
@@ -93,7 +103,7 @@ func (ck *Checker) boundaryWrapper(t types.Type, module string) *types.CtorInfo 
 	if adt == nil || adt.IsRecord() || len(adt.Params) != 0 || len(adt.Ctors) != 1 || len(adt.Ctors[0].Fields) != 1 {
 		return nil
 	}
-	if symbolModule(adt.Con.Name) != module || !ck.isBoundaryScalar(adt.Ctors[0].Fields[0]) {
+	if symbolModule(adt.Con.Name) != module || !ck.isBoundaryValue(adt.Ctors[0].Fields[0]) {
 		return nil
 	}
 	return adt.Ctors[0]
@@ -109,6 +119,19 @@ func (ck *Checker) isBytesType(t types.Type) bool {
 	}
 	adt := ck.ADTs[con.Unique]
 	return adt != nil && adt.Repr == types.ReprBytes
+}
+
+func (ck *Checker) isNativeAnyType(t types.Type) bool {
+	con, ok := t.(*types.TCon)
+	if !ok || len(con.Args) != 0 {
+		return false
+	}
+	adt := ck.ADTs[con.Unique]
+	return adt != nil && adt.Repr == types.ReprNativeAny
+}
+
+func (ck *Checker) isBoundaryValue(t types.Type) bool {
+	return ck.isBoundaryScalar(t) || ck.isNativeAnyType(t)
 }
 
 func (ck *Checker) isBoundaryScalar(t types.Type) bool {
@@ -132,56 +155,58 @@ func (ck *Checker) isResultType(t types.Type) bool {
 	return adt != nil && adt.Con.Name == resultTypeName
 }
 
-// fallibleShape checks a `Result IO.Error T` native result and gathers the
-// constructors the backends build. Only the bundled File module's value
-// natives may declare one: module validation already rejects the Go signature
-// elsewhere, so this is the semantic backstop rather than the user-facing
-// diagnostic.
+// fallibleShape checks a bundled File or Net error result and gathers the
+// constructors the backends build. Module validation already rejects the Go
+// signature elsewhere; this is the resolved-type backstop.
 func (ck *Checker) fallibleShape(t types.Type, n *types.NativeInfo, sp source.Span) (*types.FallibleShape, []diag.Error) {
 	bad := func(format string, args ...any) (*types.FallibleShape, []diag.Error) {
 		return nil, []diag.Error{diag.Errorf(sp, "NATIVE DECLARATION", format, args...)}
 	}
-	if n.Effect != nil || n.Module != fallibleNativeModule {
-		return bad("Only value natives of the bundled `File` module may declare a fallible native result.")
+	if n.Effect != nil || n.Module != "File" && n.Module != "Net" {
+		return bad("Only value natives of the bundled `File` and `Net` modules may declare a fallible native result.")
+	}
+	errorName, kindName, locationName, classifier, kindNames := ioErrorName, ioKindName, "path", "io", ioKindCtors
+	if n.Module == "Net" {
+		errorName, kindName, locationName, classifier, kindNames = netErrorName, netKindName, "address", "net", netKindCtors
 	}
 	con := t.(*types.TCon)
 	result := ck.ADTs[con.Unique]
 	if len(con.Args) != 2 || len(result.Ctors) != 2 {
-		return bad("A fallible native result must be `Result IO.Error T`.")
+		return bad("A fallible native result must be `Result %s T`.", errorName)
 	}
 	errCon, ok := con.Args[0].(*types.TCon)
-	if !ok || ck.ADTs[errCon.Unique] == nil || ck.ADTs[errCon.Unique].Con.Name != ioErrorName {
-		return bad("A fallible native result must be `Result IO.Error T`; its error type is not `IO.Error`.")
+	if !ok || ck.ADTs[errCon.Unique] == nil || ck.ADTs[errCon.Unique].Con.Name != errorName {
+		return bad("A fallible native result must use `%s` as its error type.", errorName)
 	}
 	errADT := ck.ADTs[errCon.Unique]
 	if !errADT.IsRecord() || len(errADT.RecordFields) != 3 {
-		return bad("`IO.Error` must be a record of `kind`, `path`, and `message`.")
+		return bad("`%s` must be a record of `kind`, `%s`, and `message`.", errorName, locationName)
 	}
 	kindIdx, kindField := errADT.RecordField("kind")
-	pathIdx, pathField := errADT.RecordField("path")
+	locationIdx, locationField := errADT.RecordField(locationName)
 	messageIdx, messageField := errADT.RecordField("message")
-	if kindField == nil || pathField == nil || messageField == nil {
-		return bad("`IO.Error` must be a record of `kind`, `path`, and `message`.")
+	if kindField == nil || locationField == nil || messageField == nil {
+		return bad("`%s` must be a record of `kind`, `%s`, and `message`.", errorName, locationName)
 	}
-	if !types.Equal(pathField.Type, ck.B.String) || !types.Equal(messageField.Type, ck.B.String) {
-		return bad("`IO.Error`'s `path` and `message` fields must be strings.")
+	if !types.Equal(locationField.Type, ck.B.String) || !types.Equal(messageField.Type, ck.B.String) {
+		return bad("`%s`'s `%s` and `message` fields must be strings.", errorName, locationName)
 	}
 	kindCon, ok := kindField.Type.(*types.TCon)
-	if !ok || ck.ADTs[kindCon.Unique] == nil || ck.ADTs[kindCon.Unique].Con.Name != ioKindName {
-		return bad("`IO.Error`'s `kind` field must be `IO.Kind`.")
+	if !ok || ck.ADTs[kindCon.Unique] == nil || ck.ADTs[kindCon.Unique].Con.Name != kindName {
+		return bad("`%s`'s `kind` field must be `%s`.", errorName, kindName)
 	}
 	kindADT := ck.ADTs[kindCon.Unique]
-	if len(kindADT.Ctors) != len(ioKindCtors) {
-		return bad("`IO.Kind` must declare exactly the constructors %v, in that order.", ioKindCtors)
+	if len(kindADT.Ctors) != len(kindNames) {
+		return bad("`%s` must declare exactly the constructors %v, in that order.", kindName, kindNames)
 	}
 	for i, c := range kindADT.Ctors {
-		if types.SurfaceName(c.Name) != ioKindCtors[i] || len(c.Fields) != 0 {
-			return bad("`IO.Kind` must declare exactly the constructors %v, in that order.", ioKindCtors)
+		if types.SurfaceName(c.Name) != kindNames[i] || len(c.Fields) != 0 {
+			return bad("`%s` must declare exactly the constructors %v, in that order.", kindName, kindNames)
 		}
 	}
 	payload := con.Args[1]
-	if !ck.isBoundaryScalar(payload) && !ck.isBytesType(payload) && !types.Equal(payload, ck.B.Unit) && ck.boundaryWrapper(payload, symbolModule(n.Name)) == nil {
-		return bad("A fallible native's payload must be a boundary scalar, `Bytes`, Unit, or a local scalar wrapper type.")
+	if !ck.isBoundaryValue(payload) && !ck.isBytesType(payload) && !types.Equal(payload, ck.B.Unit) && ck.boundaryWrapper(payload, symbolModule(n.Name)) == nil {
+		return bad("A fallible native's payload must be a boundary value, `Bytes`, Unit, or a local wrapper type.")
 	}
 	var errCtor, okCtor *types.CtorInfo
 	for _, c := range result.Ctors {
@@ -197,6 +222,6 @@ func (ck *Checker) fallibleShape(t types.Type, n *types.NativeInfo, sp source.Sp
 	}
 	return &types.FallibleShape{
 		Err: errCtor, Ok: okCtor, Error: errADT.Ctors[0], Kinds: kindADT.Ctors,
-		KindIdx: kindIdx, PathIdx: pathIdx, MessageIdx: messageIdx, Payload: payload,
+		Classifier: classifier, KindIdx: kindIdx, LocationIdx: locationIdx, MessageIdx: messageIdx, Payload: payload,
 	}, nil
 }

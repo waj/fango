@@ -1,0 +1,7 @@
+{-# no-prelude #-}
+module Native exposing (Any)
+
+-- An opaque Go value carried by native sidecars. The compiler gives this
+-- declaration an `any` representation; its constructor stays private so only
+-- native code can introduce useful values.
+type Any = Any

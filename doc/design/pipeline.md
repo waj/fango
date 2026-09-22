@@ -207,10 +207,10 @@ Core has no operator node.
 
 ## The library root
 
-The standard library and the Go runtime support are a tree on disk rather than
-bytes in the compiler executable, so editing either takes effect on the next
-build. `internal/libroot` resolves one root holding `stdlib/` and `runtime/`
-side by side: `FANGO_ROOT`, then the install layout beside the executable, then
+The standard library, Go runtime, and interpreter-worker support are a tree on
+disk rather than bytes in the compiler executable, so editing them takes effect
+on the next build. `internal/libroot` resolves one root holding `stdlib/`,
+`runtime/`, and `internal/` side by side: `FANGO_ROOT`, then the install layout beside the executable, then
 the enclosing checkout, which is what lets the repository's own tests and
 `go run ./cmd/fango` work with nothing configured. A root is accepted only if
 `stdlib/Prelude.fango` is readable beneath it, so a partial tree misses rather

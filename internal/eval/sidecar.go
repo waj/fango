@@ -3,7 +3,6 @@ package eval
 import (
 	"fmt"
 
-	"github.com/waj/fango/internal/nativehost"
 	"github.com/waj/fango/internal/types"
 	"github.com/waj/fango/runtime/fangort"
 )
@@ -14,7 +13,7 @@ import (
 // rebuilt around the returned scalar, and a fallible native's outcome becomes
 // an ordinary `Result` value. The constructors come from the checked
 // declaration, so this mirrors generated Go rather than re-deriving anything.
-func (in *interp) sidecarCall(executor *nativehost.Executor, key string, n *types.NativeInfo, args []Value) (Value, error) {
+func (in *interp) sidecarCall(executor NativeCaller, key string, n *types.NativeInfo, args []Value) (Value, error) {
 	wire := args
 	if n != nil {
 		copied := false
@@ -57,7 +56,7 @@ func (in *interp) sidecarCall(executor *nativehost.Executor, key string, n *type
 func failureValue(shape *types.FallibleShape, failure fangort.IOFailure) Value {
 	fields := make([]Value, 3)
 	fields[shape.KindIdx] = &CtorVal{Ctor: shape.Kinds[failure.Kind]}
-	fields[shape.PathIdx] = failure.Path
+	fields[shape.LocationIdx] = failure.Path
 	fields[shape.MessageIdx] = failure.Message
 	return &CtorVal{Ctor: shape.Err, Fields: []Value{&CtorVal{Ctor: shape.Error, Fields: fields}}}
 }

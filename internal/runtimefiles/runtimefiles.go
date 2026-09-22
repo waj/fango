@@ -48,6 +48,49 @@ func Packages(names ...string) ([]File, error) {
 	return files, nil
 }
 
+func WorkerSources(internalPkgs, runtimePkgs []string) ([]File, error) {
+	var files []File
+	for _, pkg := range internalPkgs {
+		rels, err := libroot.InternalPackage(pkg)
+		if err != nil {
+			return nil, err
+		}
+		for _, rel := range rels {
+			data, err := libroot.ReadInternal(rel)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, File{Path: "internal/" + filepath.ToSlash(rel), Data: data})
+		}
+	}
+	for _, pkg := range runtimePkgs {
+		rels, err := libroot.RuntimePackage(pkg)
+		if err != nil {
+			return nil, err
+		}
+		for _, rel := range rels {
+			data, err := libroot.ReadRuntime(rel)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, File{Path: "runtime/" + filepath.ToSlash(rel), Data: data})
+		}
+	}
+	stdlib, err := libroot.StdlibGoFiles()
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range stdlib {
+		data, err := libroot.ReadStdlib(name)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, File{Path: "stdlib/" + name, Data: data})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	return files, nil
+}
+
 // NativeHost returns the package-local host binding compiled beside every
 // native sidecar.
 func NativeHost() ([]byte, error) {
@@ -57,6 +100,12 @@ func NativeHost() ([]byte, error) {
 		return nil, err
 	}
 	return forGeneratedModule("stdlib/"+rel, data)
+}
+
+// RepositoryNativeHost returns the same binding without rewriting its import;
+// the interpreter worker is itself a temporary github.com/waj/fango module.
+func RepositoryNativeHost() ([]byte, error) {
+	return libroot.ReadStdlib("native_support.go")
 }
 
 func forGeneratedModule(path string, source []byte) ([]byte, error) {

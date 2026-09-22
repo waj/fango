@@ -47,6 +47,9 @@ const (
 type Context struct {
 	Types   map[string]reflect.Type
 	Sources map[string]*source.File
+	// DropSpans permits runtime execution payloads to discard diagnostic-only
+	// source provenance. Persistent compiler objects leave this false.
+	DropSpans bool
 }
 
 var spanType = reflect.TypeOf(source.Span{})
@@ -788,6 +791,9 @@ func (d *decoder) span(c *cursor, tag byte) (reflect.Value, error) {
 	after, err := read()
 	if err != nil {
 		return reflect.Value{}, err
+	}
+	if d.context.DropSpans {
+		return reflect.ValueOf(source.Span{}), nil
 	}
 	f := d.context.Sources[name]
 	if f == nil {

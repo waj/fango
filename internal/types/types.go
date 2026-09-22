@@ -202,7 +202,7 @@ type NativeInfo struct {
 	Arity        int
 	Template     *string
 	Effect       *EffectInfo
-	// ParamWrappers[i] is the single-scalar-field constructor parameter i
+	// ParamWrappers[i] is the single-boundary-value constructor parameter i
 	// is wrapped in, or nil for a plain scalar or Unit. Its length is Arity.
 	ParamWrappers []*CtorInfo
 	// ResultWrapper wraps the plain result, or the Ok payload when Fallible
@@ -220,8 +220,11 @@ type FallibleShape struct {
 	Err, Ok *CtorInfo
 	Error   *CtorInfo
 	Kinds   []*CtorInfo
+	// Classifier selects the runtime mapping from a Go error to this error
+	// record. It is "io" for File and "net" for Net.
+	Classifier string
 	// Field positions inside Error's constructor.
-	KindIdx, PathIdx, MessageIdx int
+	KindIdx, LocationIdx, MessageIdx int
 	// Payload is T, the Ok field's type; Unit when the Go function returns
 	// only an error.
 	Payload Type
@@ -367,9 +370,10 @@ func Equal(a, b Type) bool {
 type Repr uint8
 
 const (
-	ReprADT   Repr = iota // marker interface plus one struct per constructor
-	ReprList              // fangort.List, the bundled List type
-	ReprBytes             // fangort.Bytes, the bundled Bytes type
+	ReprADT       Repr = iota // marker interface plus one struct per constructor
+	ReprList                  // fangort.List, the bundled List type
+	ReprBytes                 // fangort.Bytes, the bundled Bytes type
+	ReprNativeAny             // Go any, the bundled Native.Any type
 )
 
 // CtorInfo is one constructor's row in the constructor table (doc/design.md, "Type inference"), shared

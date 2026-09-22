@@ -2,19 +2,28 @@ package fangort
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"os"
 )
 
-// NativeHost is the ambient process interface made available to Go native
-// sidecars. Generated programs install SystemNativeHost; the interpreter's
-// native worker replaces it with a proxy to the active interpreter session.
-type NativeHost interface {
+type ExitError struct{ Code int }
+
+func (e *ExitError) Error() string { return fmt.Sprintf("program exited with status %d", e.Code) }
+
+// SessionHost is the ambient state an interpreter session exposes to its
+// worker. Exit remains worker-only because it is reported back as control.
+type SessionHost interface {
 	HasInput() (bool, error)
 	ReadInputLine() ([]byte, error)
 	WriteOutput([]byte) error
 	Arguments() []string
 	WorkingDirectory() string
+}
+
+// NativeHost is made available to Go native sidecars.
+type NativeHost interface {
+	SessionHost
 	Exit(int)
 }
 
