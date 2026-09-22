@@ -168,3 +168,12 @@ and `TimedOut`; other failures use `Other` and retain the system message.
 `address` is the endpoint Go associates with the failed operation when one is
 available. Listener and connection values are abstract resource wrappers over
 `Native.Any`; no native handle table or public release operation exists.
+
+The runnable [echo server](../../examples/echo.fango) shows the adapters used
+together with a bounded `Reader` and a flushing `Writer.over` loop. It listens
+on port 8000 by default, or on the port passed as its sole argument:
+
+```sh
+fango run examples/echo.fango -- 8000
+telnet 127.0.0.1 8000
+```

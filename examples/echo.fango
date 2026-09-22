@@ -1,0 +1,89 @@
+-- A line-oriented TCP echo server.
+--
+-- Run it on the default port:
+--
+--     fango run examples/echo.fango
+--
+-- Or choose a port:
+--
+--     fango run examples/echo.fango -- 8000
+--     telnet 127.0.0.1 8000
+--
+-- Each accepted connection is scoped and closed when its peer reaches end of
+-- input. The server then waits for the next client. Lines are limited to 64
+-- KiB so an untrusted peer cannot make the reader buffer without bound.
+
+import Bytes
+import Fail exposing (Fail, attempt)
+import IO
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Net
+import Reader exposing (Read(..), Reader)
+import Result exposing (Result(..))
+import String
+import Writer exposing (Writer)
+
+lineLimit : Int
+lineLimit = 65536
+
+writeLine : Writer {IO, Fail Net.Error} -> Bytes.Bytes ->{IO, Fail Net.Error} ()
+writeLine writer line =
+    Writer.write writer line
+    Writer.writeString writer "\n"
+    writer.flush()
+
+echoLines : Reader {IO, Fail Net.Error} -> Writer {IO, Fail Net.Error} ->{IO, Fail Net.Error} ()
+echoLines reader writer =
+    case Reader.readLine reader lineLimit of
+        Found line ->
+            writeLine writer line
+            echoLines reader writer
+        Ended tail ->
+            if Bytes.length tail == 0 then
+                ()
+            else
+                Writer.write writer tail
+                writer.flush()
+        Overflowed -> ()
+
+echoReader : Net.Connection -> Reader {IO, Fail Net.Error} ->{IO, Fail Net.Error} ()
+echoReader connection reader = Writer.over (Net.sink connection) 8192 (echoLines reader)
+
+echoConnection : Net.Connection ->{IO, Fail Net.Error} ()
+echoConnection connection = Reader.over (Net.source connection) (echoReader connection)
+
+serve : Net.Listener ->{IO, Fail Net.Error} ()
+serve listener =
+    Net.accept listener echoConnection
+    serve listener
+
+portFrom : List String -> Maybe Int
+portFrom arguments =
+    case arguments of
+        [] -> Just 8000
+        [raw] ->
+            case String.toInt raw of
+                Just port -> if port > 0 && port <= 65535 then Just port else Nothing
+                Nothing -> Nothing
+        _ -> Nothing
+
+runListener : Int -> Net.Listener ->{IO, Fail Net.Error} ()
+runListener port listener =
+    print ("Echo server listening on port " ++ show port)
+    serve listener
+
+run : Int ->{IO, Fail Net.Error} ()
+run port = Net.withListener port (runListener port)
+
+main() =
+    case portFrom (IO.args()) of
+        Nothing ->
+            print "Usage: echo [PORT]"
+            IO.exit 2
+        Just port ->
+            case attempt (\_ -> run port) of
+                Ok _ -> ()
+                Err error ->
+                    print ("echo: " ++ error.message)
+                    IO.exit 1
