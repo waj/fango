@@ -10,13 +10,15 @@ Correctness gates, differential fixtures, generated-code stability, and manual p
 | --- | --- |
 | make test | Correctness, including full interpreter/compiler differential tests |
 | make test-short | Short-mode tests without compiled differential legs |
+| make test-grammar | TextMate tokenization of every .fango file under stdlib, testdata, and examples |
 | make ci | Go/Fango formatting, go vet, and correctness |
 | make update-goldens | Intentional lexer/parser/infer/elaborate/REPL/formatter golden updates |
 | go vet ./benchmarks | Build-check benchmarks without timing them |
 | make test-perf | Manual latency and runtime-ratio gates on an idle machine |
 
 Timing gates are excluded from correctness and CI. Do not run them during ordinary
-development. Syntax changes also require the TextMate checks in
+development. Syntax changes also require `make test-grammar`, whose Node and grammar
+packages come from the Nix development shell; see
 [repository instructions](../../AGENTS.md). No documentation change weakens these gates.
 
 ## Differential fixtures and examples

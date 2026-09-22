@@ -18,7 +18,17 @@
             gopls    # LSP for editors
             gotools  # goimports etc.
             gnumake  # Makefile convenience targets
+            nodejs   # runs the TextMate grammar check
           ];
+
+          # The grammar check tokenizes with vscode-textmate. Build its two
+          # pure-JS packages from editors/vscode/package-lock.json and put
+          # them on NODE_PATH, so the check needs no npm install and leaves no
+          # node_modules in the checkout.
+          env.NODE_PATH = "${pkgs.importNpmLock.buildNodeModules {
+            npmRoot = ./editors/vscode;
+            inherit (pkgs) nodejs;
+          }}/node_modules";
         };
       });
 

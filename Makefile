@@ -1,7 +1,7 @@
 # Convenience wrappers for the repository verification gates; see
 # doc/design.md, "Testing and performance".
 
-.PHONY: build install test test-short test-perf update-goldens update-baselines fmt fmt-fango vet ci clean
+.PHONY: build install test test-short test-grammar test-perf update-goldens update-baselines fmt fmt-fango vet ci clean
 
 build:
 	go build -o fango ./cmd/fango
@@ -37,6 +37,13 @@ install: build
 # This includes the full compiler/interpreter differential suite.
 test:
 	go test -parallel 16 $$(go list ./... | grep -v benchmarks)
+
+# The TextMate grammar in editors/vscode/ encodes exact lexer rules, so a
+# change to the surface syntax must be re-checked against it: this tokenizes
+# every .fango file under stdlib, testdata, and examples. Node and the two
+# grammar packages come from the Nix development shell.
+test-grammar:
+	node editors/vscode/tests/tokenize.cjs
 
 # The compile-latency and runtime-ratio gates measure elapsed time, so they
 # answer to host load and, for latency, to the machine that recorded the
