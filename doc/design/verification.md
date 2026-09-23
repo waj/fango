@@ -60,6 +60,37 @@ gofmt-idempotent; consumer-independent emission is a cross-fixture invariant.
 
 ## Performance evidence
 
+The opt-in Stream comparison runs separately from `make test` and `make ci`:
+
+```sh
+go run ./benchmarks/streamcompare -out /tmp/fango-stream-evidence
+```
+
+The output directory must not exist. The runner snapshots the historical
+pre-coroutine revision, pre-Stream-migration revision, current HEAD, and working
+tree; builds them with one Go toolchain; and verifies independently computed
+checksums. Generated Go test harnesses time the Fango worker in-process and
+report bytes and allocations. Input sizes are identical, repetitions are
+calibrated using the fastest build, execution order alternates, and compilation,
+printing and process startup are outside the timer. Default measurements use
+one Go worker, 15 samples, and two rounds. Run on an otherwise idle host.
+
+Cases cover direct traversal, cursor consumers, pipeline depth, lists, zip,
+early stop, reopening, residual State and cleanup. Revisions supporting
+the C2 Coroutine/Iterator API additionally run direct Coroutine, Iterator, an
+independently compiled Pull abstraction, handwritten frames using the same
+runtime, and a specialized Go pull state machine. These diagnostic controls do not replace the historical
+Stream gate. Instrumented binaries count dispatcher steps, frame factories and
+nonempty evidence extensions separately; their timings never enter comparisons.
+Allocation profiles and raw JSON are retained beside the source snapshots.
+
+Full parity requires every primary case's median optimized/baseline ratio to
+be at most 1.00, its bootstrapped upper 95% bound at most 1.03, and no increase
+in bytes or allocations, in both rounds. Partial runs are inconclusive. These
+are manual same-host evidence requirements, not portable CI timing thresholds.
+The original checked Core remains the semantic reference; an internal
+optimization-disabled lowering path supports deterministic differential tests.
+
 Latency benchmarks cover cold, warm-unchanged, and warm-changed builds against
 machine-specific baselines. Compact local-helper diamonds, pure and under Fail.attempt,
 exercise capture sharing; deterministic Core tests assert context/object growth and

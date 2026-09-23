@@ -5,6 +5,7 @@ import "github.com/waj/fango/internal/types"
 // SummarizeABI computes body-derived ABI facts for p. Context is treated as
 // installed dependency metadata: only its existing summaries are consulted.
 func SummarizeABI(p *Prog, context []Def) {
+	ExportWrapperTemplates(p)
 	adts := map[int]*types.ADTInfo{}
 	for _, adt := range p.ADTs {
 		adts[adt.Con.Unique] = adt

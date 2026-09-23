@@ -49,6 +49,18 @@ the [dispatcher](../runtime/fangort/machine.go),
 [nested transfers](../runtime/fangort/traversal.go), and
 [cursor owner](../runtime/fangort/iterator.go).
 
+## Performance prerequisite
+
+Further coroutine/Async implementation is gated on the manual
+[Stream performance recovery comparison](design/verification.md#performance-evidence).
+Bounded wrapper expansion and immediate-result elimination are implemented, but
+full parity with revision `0043640bcf46c6418c5ca4ee1fb84374eee5ce96` must be
+demonstrated before treating the performance prerequisite as satisfied. Recurring
+producer, consumer, and callback/handler frame allocation remains to be reduced
+without bypassing cleanup or execution checkpoints. Validate that work with the
+independent pull library as well as Stream; library names must not become compiler
+primitives.
+
 ## Proposed public interface
 
 The scoped interface is implemented in [Coroutine](reference/library-coroutines.md).

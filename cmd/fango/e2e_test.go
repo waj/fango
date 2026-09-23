@@ -557,7 +557,10 @@ func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner,
 		env := eval.NewEnv()
 		env.DefineProg(prog)
 		if prog.Intrinsics[types.CoroutineWithName] {
-			machineProg, errs := machineir.Lower(prog, ck.B)
+			// Keep the semantic reference independent of backend optimizations.
+			reference := *prog
+			reference.DisableOptimizations = true
+			machineProg, errs := machineir.Lower(&reference, ck.B)
 			if len(errs) > 0 {
 				t.Fatalf("machine lowering: %v", errs)
 			}

@@ -142,9 +142,9 @@ func UnitPath(unit Unit) string {
 }
 
 // UnitProgram narrows p to one owner. Imported definitions keep their headers
-// — type, control, evidence order, and ABI summary — and lose their bodies, so
-// emission cannot rediscover a dependency's calling convention from its
-// implementation.
+// — type, control, evidence order, ABI summary and bounded execution template —
+// and lose their ordinary bodies. Emission cannot rediscover a dependency's
+// calling convention from its implementation.
 func UnitProgram(p *core.Prog, unit Unit) *core.Prog {
 	out := *p
 	out.Defs = make([]core.Def, len(p.Defs))

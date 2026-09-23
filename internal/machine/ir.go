@@ -40,10 +40,11 @@ type Local struct {
 }
 
 type Worker struct {
-	Name     string
-	Owner    string
-	TyParams []*types.TVar
-	Params   []Local
+	Optimized bool
+	Name      string
+	Owner     string
+	TyParams  []*types.TVar
+	Params    []Local
 	// EffectParams are explicit lexical evidence inputs. Unlike term locals,
 	// they keep nominal effect identity and capture metadata through lowering.
 	EffectParams []core.EffectInstance

@@ -1,0 +1,27 @@
+
+emitPause pause n =
+    if n <= 0 then ()
+    else
+        pause n
+        emitPause pause (n - 1)
+
+sumCoroutine work acc = case Coroutine.advance work () of
+    Coroutine.Suspended value -> sumCoroutine work (acc + value)
+    Coroutine.Finished _ -> acc
+    Coroutine.Closed -> acc
+
+emitPull n =
+    if n <= 0 then ()
+    else
+        Pull.emit n
+        emitPull (n - 1)
+
+sumPull work acc = case Pull.read work of
+    Nothing -> acc
+    Just value -> sumPull work (acc + value)
+
+diagnostic : Int -> Int -> Int
+diagnostic which n = case which of
+    9 -> Coroutine.with (\pause _ -> emitPause pause n) (\work -> sumCoroutine work 0)
+    10 -> Coroutine.with (\pause _ -> emitPause pause n) (\work -> sumCursor (Iterator.fromCoroutine work) 0)
+    _ -> Pull.withValues (\_ -> emitPull n) (\work -> sumPull work 0)

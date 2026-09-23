@@ -345,6 +345,23 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 	}
 	switch term := block.Term.(type) {
 	case *machineir.Eval:
+		if match := machineir.ConstructorMatch(worker, term); match != nil {
+			a := term.Value.(*core.App)
+			var stmts []goast.Stmt
+			var values []string
+			for _, arg := range a.Args {
+				name := fmt.Sprintf("machineField%d", g.tmp)
+				g.tmp++
+				values = append(values, name)
+				stmts = append(stmts, varDeclStmt(name, g.goType(arg.Type()), g.machineExpr(arg)), assignBlank(ident(name)))
+			}
+			for i, bind := range match.Binds {
+				if bind.Name != "" {
+					stmts = append(stmts, assignStmt(machineLocalName(bind.Name), ident(values[i])))
+				}
+			}
+			return append(stmts, continueStmt(match.Next)...), nil
+		}
 		prefix, normal := value(term.Value)
 		prefix = append(prefix, assignStmt(machineLocalName(term.Bind.Name), normal))
 		return append(prefix, continueStmt(term.Next)...), nil
@@ -381,6 +398,22 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		}
 		if term.Close {
 			resumed = append(resumed, assignStmt(machineLocalName(term.Bind.Name), g.unitValue()), assignMachinePC(int(term.Next)), &goast.BranchStmt{Tok: gotoken.CONTINUE})
+			return stmts, [][]goast.Stmt{resumed}
+		}
+		if match := machineir.AdvanceMatch(worker, term); match != nil {
+			branches := make([][]goast.Stmt, 3)
+			for i, ctor := range term.Result.Ctors {
+				for _, c := range match.Cases {
+					if c.Ctor != ctor {
+						continue
+					}
+					if i < 2 && len(c.Binds) != 0 && c.Binds[0].Name != "" {
+						branches[i] = append(branches[i], assignStmt(machineLocalName(c.Binds[0].Name), &goast.TypeAssertExpr{X: selector(name, "Value"), Type: g.goType(c.Binds[0].Ty)}))
+					}
+					branches[i] = append(branches[i], assignMachinePC(int(c.Next)), &goast.BranchStmt{Tok: gotoken.CONTINUE})
+				}
+			}
+			resumed = append(resumed, ifStmt(selector(name, "Present"), branches[0], []goast.Stmt{ifStmt(selector(name, "Finished"), branches[1], branches[2])}))
 			return stmts, [][]goast.Stmt{resumed}
 		}
 		assign := func(index int) []goast.Stmt {

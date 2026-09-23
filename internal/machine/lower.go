@@ -130,7 +130,11 @@ func lower(p *core.Prog, owner *string) (*Prog, []error) {
 	for len(queue) != 0 {
 		name := queue[0]
 		queue = queue[1:]
-		w, aux, closures, stateAux, es := lowerWorker(defs[name], selected, stateWorkers[name])
+		templates := defs
+		if p.DisableOptimizations {
+			templates = nil
+		}
+		w, aux, closures, stateAux, es := lowerWorker(defs[name], selected, stateWorkers[name], templates)
 		if len(es) != 0 {
 			errs = append(errs, es...)
 			continue
@@ -274,23 +278,28 @@ func machineEvidence(evidence []core.EffectInstance) []core.EffectInstance {
 }
 
 type builder struct {
-	def      *core.Def
-	selected map[string]bool
-	blocks   []Block
-	locals   map[string]types.Type
-	tmp      int
-	errs     []error
-	aux      []core.Def
-	closures []Closure
-	stateAux map[string]bool
-	lambdas  map[*core.Lambda]bool
-	lambdaN  int
+	templates                map[string]*core.Def
+	inlineDepth, inlineNodes int
+	def                      *core.Def
+	selected                 map[string]bool
+	blocks                   []Block
+	locals                   map[string]types.Type
+	tmp                      int
+	errs                     []error
+	aux                      []core.Def
+	closures                 []Closure
+	stateAux                 map[string]bool
+	lambdas                  map[*core.Lambda]bool
+	lambdaN                  int
 }
 
-func lowerWorker(d *core.Def, selected map[string]bool, stateToken bool) (Worker, []core.Def, []Closure, map[string]bool, []error) {
+func lowerWorker(d *core.Def, selected map[string]bool, stateToken bool, templates ...map[string]*core.Def) (Worker, []core.Def, []Closure, map[string]bool, []error) {
 	source := d
 	d, synchronousParams := synchronousScopeMember(d)
 	b := &builder{def: d, selected: selected, locals: map[string]types.Type{}, lambdas: map[*core.Lambda]bool{}, stateAux: map[string]bool{}}
+	if len(templates) != 0 {
+		b.templates = templates[0]
+	}
 	argTys, result := core.PeelFun(d.Type, len(d.Params))
 	params := make([]Local, len(d.Params))
 	for i, name := range d.Params {
@@ -312,7 +321,8 @@ func lowerWorker(d *core.Def, selected map[string]bool, stateToken bool) (Worker
 	}
 	sort.Slice(locals, func(i, j int) bool { return locals[i].Name < locals[j].Name })
 	w := Worker{Name: d.Name, Owner: d.Owner, TyParams: d.TyParams, Params: params, EffectParams: d.EffectParams,
-		Result: result, Entry: entry, Blocks: b.blocks, Locals: locals, Def: source, StateToken: stateToken, SynchronousParams: synchronousParams,
+		Optimized: b.templates != nil,
+		Result:    result, Entry: entry, Blocks: b.blocks, Locals: locals, Def: source, StateToken: stateToken, SynchronousParams: synchronousParams,
 		RowParam: d.RowParam, Rows: workerRows(d), RowEffects: machineEvidence(d.RowEffects)}
 	w.EffectParams = machineEvidence(w.EffectParams)
 	analyze(&w)
@@ -396,6 +406,12 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 		}
 	case *core.App:
 		if e.Control.Resolve(types.Machine) == types.Machine {
+			if expanded := b.inlineWrapper(e); expanded != nil {
+				b.inlineDepth++
+				entry := b.lowerInto(expanded, bind, next)
+				b.inlineDepth--
+				return entry
+			}
 			ref, known := e.Callee.(*core.VarRef)
 			if e.CalleeKind == core.Worker && (!known || !b.selected[ref.Name]) {
 				b.errorf("%s: unresolved Machine worker call", b.def.Name)
@@ -743,6 +759,9 @@ func (b *builder) errorf(format string, args ...any) {
 }
 
 func (b *builder) isReturnOf(id BlockID, local Local) bool {
+	if b.templates != nil && forwardingReturn(b.blocks, id, local) {
+		return true
+	}
 	if int(id) < 0 || int(id) >= len(b.blocks) {
 		return false
 	}

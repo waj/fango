@@ -662,6 +662,9 @@ unregistration. General multicast/replay remain outside scope.
 
 ## Implementation stages
 
+Before extending these stages, satisfy the
+[Stream performance prerequisite](roadmap-coroutines.md#performance-prerequisite).
+
 Stage IDs are local to Async. The dependency table is authoritative; general
 language work is specified once in the coroutine roadmap.
 

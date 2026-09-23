@@ -110,6 +110,22 @@ Both variants are emitted by the defining module regardless of consumers.
 Strict Let bindings prevent duplication and preserve beta-reduction order.
 The generic worker remains available and all variants pass ordinary lint.
 
+Checked definitions also expose bounded execution templates for small Machine
+wrappers. The whitelist permits strict bindings, matches, constructors, known
+calls, and coroutine advancement, but no callbacks, evidence binders, resource
+owners, state, cleanup, or staging nodes. Recursive call cycles and bodies over
+48 expression nodes are excluded. Templates remain unexpanded semantic Core;
+the original body and capture contract are the interpreter and ownership
+reference. Their contents participate in the module ABI fingerprint.
+
+After semantic Core validation, Machine lowering may instantiate these
+templates at saturated, statically known calls. It substitutes types, freshens
+local bindings and decision-tree names, and forwards the caller's checked
+residual evidence. Arguments become strict bindings in their original order.
+Expansion is limited to four nested templates and 128 added expression nodes
+per worker. Calls outside this whitelist or budget retain their ordinary ABI.
+This is an automatic execution optimization; it introduces no source pragma.
+
 ## Lint boundaries and control normalization
 
 Core lint rejects unsolved metavariables, malformed instantiations, mismatched

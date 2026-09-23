@@ -1,0 +1,36 @@
+package main
+
+import "fangobuild/fangort"
+
+// These controls retain pull demand. The runtime version uses the same
+// dispatcher, forwarding evidence and close protocol as generated Fango.
+func probe(which,n int64) int64 {
+ if which<9 {return V_run(which,n)}
+ if which<12 {return V_diagnostic(which,n)}
+ if which==12 {return runtimePull(n)}
+ p:=goPull{n:n};var total int64
+ for {value,ok:=p.next();if !ok{return total};total+=value}
+}
+type goPull struct{n int64}
+func(p *goPull)next()(int64,bool){if p.n==0{return 0,false};v:=p.n;p.n--;return v,true}
+
+type producerFrame struct{n int64; waiting bool;owner *fangort.YieldOwner}
+func(f *producerFrame)Clear(){*f=producerFrame{}}
+func(f *producerFrame)Step(m *fangort.Machine)fangort.MachineStep{
+ if f.waiting{m.TakeResult();f.n--;f.waiting=false}
+ if f.n==0{return fangort.MachineStep{Kind:fangort.MachineReturn,Value:fangort.UnitValue}}
+ f.waiting=true
+ return fangort.MachineStep{Kind:fangort.MachineSuspend,Owner:f.owner,Request:f.n}
+}
+type consumerFrame struct{cursor *fangort.MachineIterator;sum int64;waiting bool}
+func(f *consumerFrame)Clear(){*f=consumerFrame{}}
+func(f *consumerFrame)Step(m *fangort.Machine)fangort.MachineStep{
+ if f.waiting{r:=m.TakeResult().(fangort.CursorResult);if r.Exit!=nil{return fangort.MachineStep{Kind:fangort.MachineExit,Exit:r.Exit}};if !r.Present{return fangort.MachineStep{Kind:fangort.MachineReturn,Value:f.sum}};f.sum+=r.Value.(int64)}
+ f.waiting=true
+ return fangort.MachineStep{Kind:fangort.MachineAdvance,Cursor:f.cursor,Reply:fangort.UnitValue}
+}
+func runtimePull(n int64)int64{
+ owner:=fangort.NewYieldOwner()
+ cursor:=fangort.StartMachineCoroutine(owner,fangort.NewCursorEvidence(nil),func(any)fangort.MachineFrame{return &producerFrame{n:n,owner:owner}})
+ return fangort.RequireNormal(fangort.RunCursorConsumer[int64](cursor,&consumerFrame{cursor:cursor}))
+}

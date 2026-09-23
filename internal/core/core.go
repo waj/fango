@@ -8,6 +8,8 @@ import "github.com/waj/fango/internal/types"
 import "github.com/waj/fango/internal/source"
 
 type Prog struct {
+	// DisableOptimizations is an internal differential-test switch.
+	DisableOptimizations    bool `object:"omit"`
 	CaptureContractsChecked bool
 	// CaptureFlowsProven says the caller already discharged these exact
 	// definitions' lifetime obligations. Lint still reconstructs the summaries
@@ -65,7 +67,10 @@ type Def struct {
 	CaptureContract *types.CaptureContract
 	Control         types.Control
 	Body            Expr
-	ABI             ABISummary
+	// InlineBody is the bounded checked wrapper body exposed to importing
+	// execution lowerers. Ordinary dependency bodies remain private.
+	InlineBody Expr
+	ABI        ABISummary
 }
 
 // ABISummary records backend representation facts that require inspecting an

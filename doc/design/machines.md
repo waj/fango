@@ -47,6 +47,22 @@ frame. Slices hold pointers/interfaces to separately allocated frames and handle
 boundaries retain integer depths; no pointer to a relocatable slice slot escapes.
 Statistics expose maximum live depth, frame capacity, cleanup, and state storage.
 
+The Go emitter can avoid an intermediate advancement result when its only use
+is an immediate exhaustive protocol match, following identity bindings. It
+selects the suspended/finished/closed edge and binds its typed payload directly;
+failure is propagated first. The same non-escape check removes a constructor
+immediately consumed by a case, including conversions between different ADTs.
+An escaping or separately observed result keeps its ordinary representation.
+The checked Machine graph remains the reference, and the emitter proves this
+local use restriction before bypassing its packaging blocks.
+
+Identity bindings and Unit erasure on a return path also permit a tail
+transfer. In particular, a stateless forwarding handler need not retain an
+otherwise empty continuation across a pause. This does not turn frame factories
+into recursively executing calls: the dispatcher still owns execution, and
+the callback/handler frames themselves can still allocate. State updates,
+cleanup and observable work prevent this return-path simplification.
+
 Completed frames are cleared. At suspension/non-tail boundaries the evaluator
 drops locals outside LiveOut; Go zeros the frame and copies back only live fields.
 Closures over mutable locals snapshot only referenced values and can retain both
