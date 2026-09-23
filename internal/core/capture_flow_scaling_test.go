@@ -306,6 +306,39 @@ func TestFlowRecursiveAllocationAncestry(t *testing.T) {
 	}
 }
 
+func TestFlowRecursiveInputsKeepNestedCursorOwnersDistinct(t *testing.T) {
+	f := testFlowChecker()
+	f.generation = 1
+	context := &flowContext{id: "activation"}
+	f.contexts[context.id] = context
+	f.calls = []*flowContext{context}
+	closure := &types.CaptureFlow{ID: 1, Kind: "lambda", Name: "ignored", Children: []*types.CaptureFlow{{ID: 2, Kind: "var", Name: "held"}}}
+	wrap := func(site string, owner int) flowValue {
+		env := emptyFlowEnv()
+		env.values["held"] = flowValue{caps: []int{owner}}
+		id := f.alloc(site, flowObject{kind: "lambda", code: closure, env: env})
+		return flowValue{refs: []int{id}}
+	}
+	first := f.owner(&types.CaptureFlow{ID: 3, Kind: "iterator", Scoped: true}, emptyFlowEnv(), context.id, nil)
+	second := f.owner(&types.CaptureFlow{ID: 4, Kind: "iterator", Scoped: true}, emptyFlowEnv(), context.id, nil)
+	previous, next := emptyFlowEnv(), emptyFlowEnv()
+	previous.values["callback"] = wrap("first callback", first)
+	next.values["callback"] = wrap("second callback", second)
+	if f.recursiveInputs(context.id, previous, next) {
+		t.Fatal("folded callbacks retaining distinct cursor owners")
+	}
+
+	// Other scope owners can still widen through recursive allocation;
+	// escape checking handles their uncertain dynamic identity separately.
+	firstScope := f.owner(&types.CaptureFlow{ID: 5, Kind: "scope", Scoped: true}, emptyFlowEnv(), context.id, nil)
+	secondScope := f.owner(&types.CaptureFlow{ID: 6, Kind: "scope", Scoped: true}, emptyFlowEnv(), context.id, nil)
+	previous.values["callback"] = wrap("first scope callback", firstScope)
+	next.values["callback"] = wrap("second scope callback", secondScope)
+	if !f.recursiveInputs(context.id, previous, next) {
+		t.Fatal("distinct cleanup scope owners prevented recursive widening")
+	}
+}
+
 func TestFlowRecursiveTypeWideningPreservesResources(t *testing.T) {
 	f := testFlowChecker()
 	f.generation = 1

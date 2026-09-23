@@ -649,6 +649,17 @@ func (f *flowChecker) callDef(name string, args []flowValue, typeArgs []types.Ty
 // recursively, so those are widened into its finite summary instead.
 func (f *flowChecker) recursiveInputs(context string, previous, next flowEnv) bool {
 	for name, value := range next.values {
+		// A cursor supplied by a nested owner is a distinct resource even when
+		// its allocation happened inside this activation. Folding it into the
+		// enclosing invocation would mix the two exclusive-access contracts.
+		// Other scope owners can widen: recursiveOwner makes uncertain lifetime
+		// equality fail closed during escape checking.
+		previousCaps := f.captures(previous.values[name])
+		for _, owner := range f.captures(value) {
+			if !slices.Contains(previousCaps, owner) && f.owners[owner].code.Kind == "iterator" {
+				return false
+			}
+		}
 		for _, ref := range value.refs {
 			allocated := false
 			for _, ctx := range f.objects[ref].ancestry {

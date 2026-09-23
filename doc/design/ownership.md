@@ -71,7 +71,10 @@ Recursive calls join an enclosing context at a repeated target and lexical
 call site only when inputs identify the same existing values or values allocated
 inside that activation. Explicit allocation ancestry uses stable context IDs;
 invocation ancestry joins even on cached returns. Distinct pre-existing callbacks
-and descriptions keep nested helper invocations independent.
+and descriptions keep nested helper invocations independent. A fresh cursor
+owner remains distinct from a cursor passed to the enclosing invocation, even
+when both cursors were allocated inside that invocation. Folding them together
+would merge their exclusive-advancement obligations.
 
 Each generation merges incoming environments and evaluates a context once,
 joining folded resume owners. Busy/already-evaluated contexts return their current

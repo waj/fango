@@ -1,0 +1,9 @@
+import Stream
+
+double x = x * 2
+
+main() =
+    Stream.fromList [1, 2, 3]
+        |> Stream.map double
+        |> Stream.map double
+        |> Stream.forEach print
