@@ -55,11 +55,12 @@ not by recognizing a scheduler's name.
 
 The [coroutine stages](roadmap-coroutines.md#implementation-stages) define
 the control implementation sequence; the [Async dependency table](roadmap-async.md#implementation-stages)
-defines its consumers. Start by investigating C0's owner-sensitive control,
-C4's dynamic-owner design, and A0's typed task representation together. This
-feasibility gate precedes implementation and prevents a completed Stream
-migration from becoming the first test of whether the intended library Async
-encoding is possible.
+defines its consumers. The joint C0/A0/C4-design feasibility contract is selected;
+review it before C1. [C0](roadmap-coroutines.md#c0-control-and-ownership-contracts)
+owns the additional general prerequisites, and
+[A0](roadmap-async.md#a0-library-representation-contract) records the evidence
+and its limits. Revalidate the proposed encoding against real compiler support
+before the C2 Stream migration; the test-only models do not implement the APIs.
 
 The first usable control delivery is scoped typed coroutines, ordinary
 Stream/Iterator wrappers, and a deterministic cooperative scheduling example
@@ -191,6 +192,15 @@ These are not automatically prerequisites for the first coroutine milestone:
   one or two labels before `a` is known. A rigid/ground restriction is a possible
   answer, not an implemented rule. Nullary control markers and typed callbacks
   avoid requiring this extension for heterogeneous coroutines.
+- **Row-kinded effect parameters.** Unlike row-indexed ADTs, effect headers
+  currently fix parameters to value kind. Generalizing them is not required by
+  the nullary Async encoding; its hidden budgets use the
+  [scoped work contract](roadmap-execution-contracts.md#scoped-effects-and-work-packages).
+  Independently, invalid row-kind use needs a diagnostic: declaring
+  `effect Scheduling e` with `enqueue : Job e -> ()`, where `Job` is row-indexed,
+  then using `submit : Job e ->{Scheduling e | e} ()` can reach nil-type
+  substitution instead of rejection. Do not interpret header acceptance as
+  support for the feature.
 - **Complete builtin IO interception.** It still depends on actual native
   declarations and evidence fitting a checked operation ABI. Fixed-signature
   domain effects and suspending interpretations remain useful independently.

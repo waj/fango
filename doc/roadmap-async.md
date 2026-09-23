@@ -18,7 +18,7 @@ histories or changing stage IDs and titles.
 The [API tour](#proposed-api-and-behavior) describes intended programs;
 [representation](#api-representation-gate),
 [registration](#registration-races), and [failure selection](#failure-selection-gate)
-identify decisions that gate implementation. The
+specify selected contracts and remaining implementation gates. The
 [stage table](#implementation-stages) gives the delivery order and links the
 language prerequisites to their owning roadmap.
 
@@ -144,6 +144,12 @@ one completion. Initial reusable success values are immutable and transitively
 capture-free. Completion storage must not turn a resource or a bound state
 closure into a shareable result.
 
+The same publication check covers primary and suppressed failure payloads.
+General completion capture preserves resource obligations; the Async wrapper
+rejects a completion retaining a scoped value, including through an opaque
+failure snapshot. A capture-free result may contain ordinary immutable ADTs
+such as `Result error a`; a task handle remains scoped even after completion.
+
 Children cannot capture parent-local mutable handlers, a borrowed cursor, or
 another capability whose access/lifetime is incompatible with independent
 execution. The same restriction applies cooperatively: a parent doing
@@ -173,7 +179,11 @@ applicable cancellation check. A task waiting on itself is a deterministic
 error to diagnose during execution; broader wait-cycle detection is deferred.
 For a cooperative context with only internal waits and no possible producer or
 external registration, the driver must report stalled progress rather than
-spin. The typed error vocabulary is an A1 entry decision.
+spin. The selected typed vocabulary is `Async.Error` with
+`InvalidWorkerCount Int`, `SelfAwait`, and `Stalled`. A1 must implement detection,
+not choose new error meanings. Stalled means the relevant driver has no
+ready/draining work and no external registration capable of progress; an inner
+context awaiting live outer work is not stalled because its own queue is empty.
 
 ### Executor selection
 
@@ -193,15 +203,50 @@ The proposed constructor names are `cooperative`, `parallel`, and `mixed`.
 does not promise an OS thread per task. `mixed n` bounds the number of cooperative
 execution workers, while `parallel` has no configured worker-count bound.
 `run` means cooperative execution, and `runOn` also establishes a root context.
-Mixed worker count must be positive; A0 selects the common typed
-configuration-error contract before implementation.
+Mixed worker count must be positive; `runOn` validates this before starting
+the root action, using `InvalidWorkerCount n`.
 Nested `context` keeps the executor; executor switching within an active task
 and nested independent runners are deferred pending explicit lifetime rules.
 
+The proposed public signatures are:
+
+```fango
+spawn : (() ->{Async | e} a) ->{Async | e} Task a e
+await : Task a e ->{Async | e} a
+yield : () ->{Async} ()
+context : (() ->{Async | e} a) ->{Async | e} a
+run : (() ->{Async | e} a) ->{e} Result Error a
+runOn : Executor -> (() ->{Async | e} a) ->{e} Result Error a
+
+type Error = InvalidWorkerCount Int | SelfAwait | Stalled
+```
+
+`Executor` is abstract; `Executor.cooperative : Executor`,
+`Executor.parallel : Executor`, and `Executor.mixed : Int -> Executor` describe
+policy values. `runOn` validates a mixed count. `run` is `runOn cooperative`.
+Both runners return `Ok` only after successful drain, or `Err Async.Error` after
+a scheduler error and drain; domain failures still propagate through `e` under
+the [failure policy](#failure-selection-gate). This avoids trying to add
+`Fail Async.Error` to a row already containing `Fail DomainError`. Nested
+`context` routes scheduler errors to its enclosing runner instead of adding
+another Result layer. The earlier run examples therefore return Result values.
+The driver records a scheduler error and initiates private owner stop; a source
+`Fail` handler cannot swallow that stop. The runner constructs `Err` after drain.
+
+`Async` is nullary. `Task a e` retains the residual row needed to replay its
+typed failure; it does not parameterize scheduling or require every child to
+have the same row. Spawn charges the child's residual effects even when its
+handle is ignored. Yield has no child effects to charge. These signature schemas
+also carry the inferred scoped-effect, capture/control and service obligations
+below; matching printed rows alone never authorizes a capture or registration.
+
 ### API representation gate
 
-The examples specify user behavior, not a claim that this is a legal effect
-body today:
+The selected representation uses ordinary polymorphic functions around a
+**nullary** scheduling effect, with the execution scope's permitted effects
+tracked in a hidden contract. The selected names are `Task a e`,
+`Coroutine.scope`/`create`, and `Async.Error`. The following
+tempting operation declarations remain unsupported:
 
 ```text
 effect Async
@@ -209,34 +254,83 @@ effect Async
     await : Task a -> a
 ```
 
-Each call would choose a different `a` and possibly residual effects. Current
-operation-local polymorphism does not support this shape. A0 must demonstrate
-a fully typed library encoding before committing full public type signatures.
-`Task a` in discussion is shorthand; whether its representation needs an
-additional row index must be settled with failure/evidence propagation.
+Each call would choose its own `a`. Instead, private monomorphic operations
+obtain `Context` and submit `Request`; polymorphic `spawn`/`await` are ordinary
+functions. A context has a hidden owner identity and effect budget `b`, inferred
+from its subject and registered work. Each child's independent row `e` must be
+included in that budget. Neither `Context`, `Request`, nor the queue's `Job`
+needs a public row parameter. This is not unchecked row erasure: C0's general
+[scoped work contract](roadmap-execution-contracts.md#scoped-effects-and-work-packages)
+preserves and independently verifies the association.
 
-Prefer polymorphic ordinary functions around a smaller scheduling protocol,
-with typed result storage and appropriately packaged Unit-producing actions.
-Prove that handles for Int and String tasks can coexist in one context while
-each await retains its own type. A heterogeneous queue of coroutine owners
-also needs an explicit checked representation; it is not solved by renaming a
-Go `any` field. If the proposed encoding requires a new general facility,
-record that dependency in effects/coroutines before implementing it.
+Budgets may contain IO, resumptive domain effects and multiple distinct abort
+labels. Two incompatible parameterizations of the same nominal `Fail` label
+still cannot occupy one budget; normalize them in child code. Nested contexts
+may have narrower budgets, and awaiting an outer task introduces that task's
+observation effects without moving its owner. Captured context evidence keeps
+its original owner and budget, not the invoking context's.
 
-The decision must cover residual effect rows, context identity, child failure
-payloads, local dictionaries, both backend representations, and capture-free
-result checking. Do not claim C0–C3 automatically solve dynamic allocation or
-polymorphic task completion.
+The representation, in dependency order:
 
-Locate mutable scheduling state explicitly. A library handler cannot bypass
-the ban on shared parent-local State merely because it implements Async.
-Cooperative queue mutation can belong to the driver, reached through task
-requests; shared native state needs an explicit synchronization/transfer contract.
-Show how the context evidence used by children satisfies those rules. Any
-general native value or retention facility required by the chosen encoding
-becomes an A1 prerequisite, even if real IO is not delivered until A3. Name the
-required C6a–C6d contracts explicitly. C6c's transferable-capture rules apply
-from the first independently scheduled child, even with one cooperative driver.
+1. `Context` retains a checked registration facet of a C4 `Scope b`, stable
+   context identity, and authorized shared services. The facet hides `b` while
+   retaining its owner/effect contract. Ordinary helpers obtain caller evidence;
+   a bound closure retains its definition-site context. C6c's **split service evidence** supplies
+   the invoking task's producer authority separately. A context contains no
+   parent pause closure or mutable parent State cell. See the exact general
+   [C0 prerequisites](roadmap-coroutines.md#c0-control-and-ownership-contracts).
+2. For each spawn at type `a`, allocate a scope-owned C6a write-once cell holding
+   a typed completion indexed by `a` and that child's `e`. A `Task a e` contains
+   its read capability, owner identity and registration key. It does not expose a coroutine
+   handle, publisher or unchecked cast. All public observations retain `a`/`e`.
+3. Package the action into a Unit-producing coroutine. Its local scheduling
+   interpretation turns operations into `Request` through that producer's
+   scoped pause callback. The general typed-completion boundary intercepts
+   outward failures and publishes only after cleanup. An adapter closes over the
+   cell at its concrete `a`; its outer coroutine is
+   `Coroutine Request () () e`. A general work-package operation seals this
+   coroutine with its owner, evidence adapters and a proof that `e` fits `b`.
+   The resulting `Job` hides `e` without exposing a cast. Captured local
+   dictionaries are checked with the rest of the explicit and hidden captures.
+4. The Fango driver's queue contains these checked packages, never arbitrary
+   result payloads. Requests distinguish yield, wait keys and enqueue of a Job.
+   The owning driver opens a package under its scope's budget and sole execution
+   authority. A same-shaped job for another owner is not interchangeable.
+   Enqueue acknowledges immediately to the spawning parent after adding the child
+   at the FIFO tail;
+   it does not switch to the child merely because spawn ran.
+5. Await registers against the handle's key, then reads its typed cell. Success
+   is reusable; failure replays the typed completion through the **awaiting**
+   execution's current residual evidence. No operation reruns the action.
+   The context keeps its independent failure record even if an await is caught.
+   A checked injection from the child's completion row to the owner's budget
+   carries unobserved failures, including nested suppressed reports, to context
+   drain. It supplies fresh owner evidence there, never a stale exit target.
+
+Registering work exports an owner-indexed latent obligation in addition to the
+ordinary call row. A handler around the spawn call cannot consume that
+obligation: the independently scheduled child has not failed there. A handler
+inside the child can remove an effect before registration. The owning runner
+includes remaining obligations in its outward row even if all handles are
+ignored; annotations or imported wrappers cannot erase them. C0 owns the exact
+inference and packaging contract, rather than granting Async-specific privilege.
+
+Queue mutation and task-state transitions belong to the driver. C4 owns the
+cleanup registry and scoped registration facet; C6a owns opaque completion
+storage; C6c owns publisher/reader and shared-context permissions. Native code stores a completion
+as an opaque same-type value, including any generated replay adapter, and never
+invokes it. Merely storing an opaque value is not C6b callback invocation.
+No native retained request or Fango callback service is needed by A1.
+
+This is a conditional implementation contract, not a claim that the whole
+encoding already typechecks. C0 selects owner-indexed control and scoped effects,
+checked work packages, detached typed completion/replay, and private owner stop;
+C6c adds shared service evidence with invocation authority. Current Fango can check
+ordinary row-indexed Task/Job packaging and the nullary scheduling arrow shapes,
+but not the scoped work-package facility. Row-kinded effect parameters are not
+a prerequisite for this encoding.
+The [source probes](../internal/infer/async_feasibility_test.go) and
+[scoped-row model](../internal/feasibility/scoped_rows_test.go) distinguish those facts.
 
 ## Scheduler state and authority
 
@@ -317,7 +411,10 @@ Context failure or cancellation requests cancellation of remaining children,
 then drains them before exiting. Distinguish cancellation from ordinary typed
 failure and early successful stream stop. Application code cannot accidentally
 catch an internal cancellation marker as a normal `Fail error` and suppress the
-context's obligation to drain; the A0 encoding must make that boundary explicit.
+context's obligation to drain. C0's private owner-stop outcome is the selected
+encoding. It is not an abort-only source effect and has no application-level
+handler. At a checkpoint it unwinds through cleanup to the owned execution
+boundary, which publishes cancellation separately from success/failure.
 
 For unstarted work, cancel without executing its body. For parked work, revoke
 its pending normal wait and schedule the cleanup path. For running work, record
@@ -348,13 +445,40 @@ cross a task boundary as completion, not as an attempt to unwind a parent's
 currently executing stack. The parent routes an exit only from its own execution
 after the necessary drain. Snapshots alone do not authorize a stale exit target.
 
-Before A2 ships, define concurrent primary selection and secondary ordering.
-The policy must distinguish body failure, failed children, cleanup failures, and
-cancellation, preserve the existing within-task precedence, and avoid depending
-on a reproducible parallel interleaving. Stable context-local task sequence
-numbers are a candidate ordering key; wall-clock timestamps are not a typing or
-ordering proof. Specify how nested reports preserve their structure and how an
-await reports failure without consuming the stored completion.
+The selected policy applies to the **recorded set after drain**, not to a
+promised parallel interleaving:
+
+1. A non-cancellation context-body failure is primary. Its within-task cleanup
+   failures remain attached in release order.
+2. Otherwise the failed child with the lowest context-local spawn sequence is
+   primary. Assign sequence numbers at registration, before publishing handles;
+   never reuse them during the context lifetime. Each nested context contributes
+   one report at its owning task's position, preserving its internal tree.
+3. Attach other child reports in increasing spawn sequence, then context-owner
+   cleanup failures in release-attempt order (LIFO). If no body/child failed,
+   the first owner cleanup failure becomes primary. Copy reports when combining
+   them; do not mutate a reusable task's completion or flatten nested reports.
+4. Cancellation alone contributes no ordinary failure payload. A cleanup failure
+   encountered during cancellation is still a failure; an externally stopped
+   root propagates private stop to its host after drain. Structured cancellation
+   of a nested context propagates through its parent's same private path.
+
+The first observed failure starts cancellation immediately; selection waits for
+drain. Another already-running child may still fail, so neither this ordering
+nor FIFO can promise the same observed failure set across executors. A body
+cancelled because of a child contributes no synthetic body failure that could
+hide the child. Scheduler errors use the separate runner error channel selected
+in the public signatures; they trigger the same cancel/drain protocol. If a
+typed body/child/cleanup failure is also recorded, that failure takes precedence
+over a scheduler error. Otherwise choose the first driver-recorded scheduler
+error; only the driver's observation order is promised for competing errors.
+
+Await replays the stored primary through the awaiter's live evidence with the
+same suppressed tree. It never consumes the completion or acknowledges away the
+context failure. Context exit replays its selected report through the context
+caller's evidence **after** draining. C0 owns the new typed replay capability;
+the [model](../internal/feasibility/tasks_test.go) exercises different typed
+payloads and two different observing targets without storing an old exit target.
 
 Before A7 ships, separately settle race winner and timeout deadline/completion
 ties. Promptly initiating sibling cancellation and deterministically ordering
@@ -367,12 +491,25 @@ gates, not permission to flatten errors into strings or defer cleanup.
 ### General native prerequisites
 
 The [C6 contracts](roadmap-coroutines.md#c6-native-retention-and-transfer)
-separate typed opaque values (C6a), scoped requests/retained callbacks (C6b),
-shared and transferable capabilities (C6c), and concurrent invocation/runtime
-safety (C6d). A0 selects any C6a/C6b prerequisites for task representation;
-C6c gates independently scheduled child captures, C6b gates native readiness,
-and C6d gates both concurrent executors. C5 is additionally required whenever
-native completion needs suspending cleanup.
+are selected precisely as follows. The general compiler contracts in C0 are
+additional prerequisites; none of these native contracts substitutes for them.
+
+| Consumer | Required contracts | Boundary crossed |
+| --- | --- | --- |
+| A1 fake-readiness tasks | C4, C6a, C6c | Scope-owned same-type completion cells; checked phantom/row indices; one publisher/multiple readers; split shared context evidence and child captures |
+| A1 queue/driver | C0 checked work packages, C4 registration facet; no C6b or C6d | Fango queues of scoped packages; no native callback invocation or background request |
+| A3 native readiness | C6b, plus C6a already delivered | Scoped registration and host/request retention, generation checks, bounded admission, cancellation and quiescent drain; opaque adapter payloads keep their same-type obligation |
+| A4 suspending cleanup | C5 in addition | Retained request/owner survives suspended release |
+| A5 and A6 concurrent executors | C6d in addition to C6a–C6c and C5 | Concurrent callback invocation, launch/join, synchronized publication, runtime and native-host audit |
+
+C6a must support the initial completion cell's entire typed payload, including
+the residual-row completion package, records/recursive ADTs and generated replay
+adapters. A nominal phantom around `Native.Any` alone is insufficient. Storage
+retains captures and never executes a callable. C6c grants only the specific
+cell protocol and scoped shared-service operations; it must not make arbitrary
+State, cursor or resource wrappers shareable. C6b is **not** an A1 prerequisite
+for this encoding; it becomes mandatory at A3 even if notifications contain only
+scalar keys. C5 is required whenever native completion needs suspending cleanup.
 
 Async sidecars implement these general contracts for goroutine launch/join,
 synchronized queues, timer registration, and readiness/completion signalling.
@@ -529,8 +666,8 @@ language work is specified once in the coroutine roadmap.
 
 | Stage | Dependencies | Usable result |
 | --- | --- | --- |
-| A0: Library representation contract | C0/C4 contract drafts; no C1–C4 implementation prerequisite | Early feasibility gate for typed task/context/request design |
-| A1: Deterministic cooperative tasks | A0, C4, C6c; C6a/C6b if selected by A0 | Dynamic spawn/yield/await with fake waits |
+| A0: Library representation contract | C0/C4 contract drafts; no C1–C4 implementation prerequisite | DONE: selected representation and proof models; review before C1 |
+| A1: Deterministic cooperative tasks | A0, C4, C6a, C6c (including shared service evidence); C1 implements C0's general extensions | Dynamic spawn/yield/await with fake waits; no C6b prerequisite |
 | A2: Structured contexts and failures | A1 | Root/nested lifetimes, cancellation, reusable results, synchronous cleanup |
 | A3: Native readiness and IO | A2, C6b; C6a if adapter values require it | Overlapping IO with bounded native work |
 | A4: Suspending cleanup integration | A3, C5 | Cancellation/drain through asynchronous acquire/release |
@@ -554,32 +691,47 @@ diagnostics. The full target includes all three executors and A8 responsiveness.
 
 ### A0: Library representation contract
 
-Run this feasibility gate alongside C0 and the design portion of C4, before C1
-implementation. It consumes proposed contracts and focused inference/Core
-fixtures or narrow prototypes, not completed coroutine or allocation APIs.
-Revalidate the encoding against executable C1 before the C2 Stream migration.
+**DONE — feasibility contract and focused proof models, conditional on the
+explicit general prerequisites below.** No public Async behavior is implemented.
 
-Resolve the API representation gate: dynamic owner association, task/result
-storage, heterogeneously typed tasks, residual effects, completion exits,
-cancellation representation, and general sidecar requirements. Choose full
-public signatures and the typed configuration/stalled-progress error vocabulary.
-Retain abstract context identity through captured evidence.
+The selected [representation](#api-representation-gate),
+[failure policy](#failure-selection-gate) and
+[native prerequisite table](#general-native-prerequisites) are authoritative.
+C0 owns owner-sensitive control, scoped effects/work packages, detached typed completion
+and replay, and private owner stop. C4 owns scope/create, the cleanup registry
+and its checked registration facet. The public effect is nullary `Async`;
+`Task a e` retains its own observation row. Row-kinded effects are not required.
+C6a supplies typed completion cells; C6c supplies checked child captures and
+shared service evidence whose context and execution authorities are separate.
+Current ordinary captured evidence cannot supply the latter automatically.
+C6b is not needed for fake waits, and C6d is not needed for cooperative execution.
 
-**Acceptance:** small typed examples cover Int and String tasks in one context,
-helpers and stored closures, an outer handle awaited inside an inner context,
-expected child failure as Result, and rejected escaping context/resource values.
-Show each required compiler capability is general and owned by C0–C6d, or record
-a specific additional language dependency before proceeding. Select C6a/C6b
-only where the representation requires them; C6c is mandatory for child captures.
-Include typed failure/evidence routing and cancellation that cannot be swallowed
-as an ordinary Fail payload. A renamed erased runtime field is not a typed
-heterogeneous-task representation.
+**Evidence and limits:** the [source probes](../internal/infer/async_feasibility_test.go)
+check ordinary Task/Job packaging and nullary scheduling arrow shapes, helpers
+and stored callbacks with Int/String results, wrong-result rejection, unsupported
+polymorphic operations and native boundaries, and rejected omission of unawaited
+IO. The [scoped-row model](../internal/feasibility/scoped_rows_test.go) additionally
+checks latent registration effects through handlers, nested owners and imported
+summaries; its unindexed queue seals work with distinct child rows and typed
+failure injections into a hidden owner budget. It passes the budget skolem and
+adapters explicitly at the compiler-contract boundary, so their source inference
+and lowering remain unimplemented. The [typed model](../internal/feasibility/tasks_test.go)
+has no erased heterogeneous payload register: generic task/cell types feed
+uniform execution closures. It exercises repeated observation, outer task inside
+inner context, captured outer service with a different producer, typed expected
+Result, child failure plus cleanup, fresh-evidence replay, unstarted cancellation,
+stable failure ordering, descendant allocation after body completion and removal
+of finished execution entries. The [ownership model](../internal/feasibility/control_test.go)
+rejects escaped handles/pause, short-lived replies and unsafe child captures.
+These are narrow models, not new Fango inference or a delivered scheduler; native
+storage, generic row adapters, source capture reconstruction and both backend
+implementations remain acceptance obligations of their owning stages.
 
-**Stopping point:** implementable library contract before the shared execution
-migration begins. If the encoding needs another general facility, specify its
-contract and dependency here before proceeding; do not silently substitute an
-Async-specific intrinsic. Examples dependent on unimplemented facilities remain
-clearly marked, not advertised as working.
+**Stopping point:** joint C0/A0/C4-design gate for review, **before C1**. Implement
+and validate C0's extensions in C1, then recheck the task representation before
+the C2 Stream migration. Repeat scope allocation/storage/service proofs with
+real C4/C6a/C6c APIs before A1; never treat a successful Go model as proof that
+the current source language accepts those APIs.
 
 ### A1: Deterministic cooperative tasks
 
@@ -597,7 +749,7 @@ wait and a stalled internal context. Completion releases execution storage.
 
 Expose run/context with implicit root ownership, nested lifetime rules,
 reusable capture-free results, child completion, and synchronous cancellation
-cleanup. Finalize the failure selection gate. Detect cancellation at explicit
+cleanup. Implement the selected failure policy. Detect cancellation at explicit
 checkpoints and reject unsafe captures even in cooperative mode.
 
 **Acceptance:** root owns direct spawns; nested contexts drain only their own

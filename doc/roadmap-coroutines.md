@@ -107,11 +107,11 @@ two coroutines may use different types without introducing two differently
 parameterized labels into one effect row. Effect names record control, while
 capability identity records which owner the control belongs to.
 
-These signatures specify the intended ordinary-arrow interface, not an assertion
-that today's inference can prove their discharge rules. C0 must establish the
-owner-sensitive contract, including foreign suspension, before making them a
-public supported boundary. Adding a compiler exception for an Async name is
-not an acceptable way to close that proof.
+These are signature schemas with the [C0 control contract](#discharge-proof-gate),
+not sufficient plain nominal-row signatures on today's compiler. Inference must
+also export owner-indexed control obligations; `e` includes surviving foreign
+control, even when its printed label is also `Suspension` or `Drive`. No new
+source instance-name syntax or compiler exception for an Async name is selected.
 
 ### Typed exchange example
 
@@ -268,9 +268,11 @@ advance outer coroutine with temporary file → reject if retained there
 
 An immutable String reply has no such resource capture. Capture obligations
 must remain visible through generic types and module boundaries; erasing to a
-runtime register cannot erase the source lifetime constraint. C0 determines the
-conservative inferred retention contract before accepting more precise
-non-retaining exceptions.
+runtime register cannot erase the source lifetime constraint. The selected
+conservative contract treats **every** input/reply as retained until the receiving
+owner closes, including initial input and terminal advances. Captures must
+outlive that owner even if a body ignores the value. C1 has no non-retaining
+exception. Wrappers export this obligation and check it after substitution.
 
 ### Scope escape
 
@@ -326,13 +328,45 @@ its inferred residual contract. In particular, putting an outer `pause` in an
 inner producer must not make an externally suspending call appear synchronous
 because both callbacks mention `Suspension`.
 
-C0 must give accepted and rejected examples for nested owners, different
-exchange types, captured outer callbacks, and nested Drive boundaries. It must
-show the resulting row and transport as well as execution routing. If today's
-row/capture representation cannot express this distinction, extend the general
-control contract and document the minimum necessary signature adjustment before
-C1. Do not silently change the rule to swallow every occurrence of a nominal
-label. No general source instance-name syntax is assumed.
+The selected extension adds finite owner-indexed obligations to arrow/capture
+contracts: `suspend(owner)` and `drive(owner)`, with symbolic owner parameters
+substituted at calls and fresh identities at allocation. These are proof
+notation, not source syntax. The existing nominal row and `Control.Transport`
+alone cannot express subtraction of one owner. Join obligations across aliases,
+branches and recursive summaries; an unknown owner remains outward control.
+Reconstruct them from executable Core, serialize them across modules, and check
+them independently after transformations. A claimed Direct annotation cannot
+erase an obligation. Allocation-site folding must never prove uncertain owners
+equal; conservative rejection is preferable to discharging a foreign owner.
+
+An advance consumes only `suspend` addressed to its producer, retaining its
+exclusive access through foreign suspension. A lexical boundary consumes only
+the drives it owns; a dynamic scope consumes drives of its registered owners.
+Project the remaining control set to nominal labels **after** owner subtraction.
+Control-label projection is idempotent, so a foreign `Suspension` may survive a
+boundary that also introduces local `Suspension`; it must not be excluded by a
+nominal row-tail lacks constraint. Ordinary non-control row rules stay intact.
+This is a general inference/contract extension required by C1, not implemented
+by the feasibility model.
+
+| Expression in the scheduler/pull example | Remaining control (proof notation) | Printed row, omitting unrelated effects | Transport |
+| --- | --- | --- | --- |
+| Inner producer pauses locally and through captured outer callback | suspend(pull), suspend(task) | Suspension | Machine |
+| Advance inner cursor | drive(pull), suspend(task) | Drive, Suspension | Machine |
+| Inner cursor boundary | suspend(task) | Suspension | Machine |
+| Advance outer task | drive(task) | Drive | Machine inside its driver |
+| Outer owner boundary with synchronous driver | none | empty | Direct; Exit if other residual effects can abort |
+
+Different request/reply/result types belong to owner protocols, never to the
+nullary labels. A nested boundary around a foreign handle preserves its Drive
+obligation. The outer pause is legal only on the synchronous descendant path of
+its active producer; calling it from the driver or publishing it in any value
+is rejected. Reentrant advance or close is rejected even through an alias.
+The [control model](../internal/feasibility/control_test.go) checks these cases,
+including missing owner, mismatched protocol and falsely synchronous summaries.
+Existing [Core ownership tests](../internal/core/iterator_ownership_test.go) prove
+reconstruction for today's Iterator; C1 must extend that real linter to the new
+operations rather than trusting the test-only model.
 
 ## Stream and Iterator migration
 
@@ -426,35 +460,45 @@ checkpoint; C1–C3 together are the first usable replacement foundation.
 
 | Stage | Required predecessors | Stopping point |
 | --- | --- | --- |
-| C0: Control and ownership contracts | Implemented Iterator foundation | Checked interface and proof rules |
+| C0: Control and ownership contracts | Implemented Iterator foundation | DONE: feasibility contract and focused models; review before C1 |
 | C1: General typed execution | C0, early Async A0 contract gate | Executable scoped Coroutine API |
 | C2: Ordinary Stream and Iterator | C1 | Stream behavior with no Stream-specific intrinsics |
 | C3: Cooperative scheduling demonstration | C2 | Shared foundation demonstrated without native concurrency |
 | C4: Scope-owned dynamic allocation | C3, A0; scope design begins with C0 | Coroutines safely retained by a live dynamic owner |
 | C5: Suspending acquisition and cleanup | C1; nested fixtures from C3/C4 | Owners remain live through suspended cleanup |
-| C6a: Typed opaque values | C0/A0 representation decisions; C4 if storage is scope-owned | Checked native storage and same-type return |
+| C6a: Typed opaque values | C0/A0 representation decisions; C4 for selected task cells | Checked native storage and same-type return; required before A1 |
 | C6b: Scoped native requests and retention | C4; C5 only for suspending cleanup | Bounded requests and callbacks with checked quiescence |
 | C6c: Shared and transferable capabilities | C0/A0 capture contracts; C4 ownership | Safe child captures, including explicitly shared native values |
 | C6d: Concurrent invocation and runtime safety | C6b, C6c; C6a when values cross opaquely | Checked concurrent callbacks and race-safe runtime representations |
 | C7: General execution checkpoints | C1; Async A2 as integration consumer | Compiler-generated scheduling/cancellation points in CPU work |
 
 C0, the design part of C4, and [Async A0](roadmap-async.md#a0-library-representation-contract)
-are a joint feasibility investigation. A0 uses contract drafts and focused proof
-fixtures; it does not wait for C1–C3 or C4 implementation. Settle any additional
-general language prerequisite before C1, and recheck the chosen encoding against
-executable coroutines before removing the old Stream route in C2. This is an
-early design gate followed by implementation validation, not a circular build
-dependency.
+form the joint feasibility gate. The contract is selected with focused source
+probes and test-only models; no Coroutine or Async API is implemented. **Stop
+for review before C1.** C1 must validate the actual inference/Core/backend
+extensions, and the selected task encoding must be rechecked before removing
+the old Stream route in C2. C4/C6 implementations are later prerequisites of A1,
+not circular prerequisites of this design gate.
 
 ### C0: Control and ownership contracts
 
+**DONE — feasibility contract and focused proof models.** Production checking
+and execution of the proposed contracts remain C1/C4/C6 work. This status does
+not advertise the proposed APIs as implemented language behavior.
+
 **Dependencies:** the implemented cursor/instance foundation.
 
-Settle the proposed interface's row and transport rules, producer capability,
-reply retention, foreign suspension, and exclusive close/advance obligations.
-Use small inference/Core fixtures before changing Stream. Document any required
-general contract extension; surface examples remain proposed until both
-backends implement them.
+Selected contracts are authoritative in [ownership](#ownership-and-lifetime-contracts),
+[owner-sensitive discharge](#discharge-proof-gate), and [C4](#c4-scope-owned-dynamic-allocation).
+No operation-local polymorphism, public continuation, or Async-specific intrinsic
+is required. Plain nominal-row subtraction is insufficient.
+
+Additional general prerequisites are specified in the
+[execution contract topic](roadmap-execution-contracts.md): scoped effects and
+checked work packages, detached typed completion/replay, private owner stop, and
+shared service evidence with invocation authority. C1 implements the first three;
+C6c implements shared service evidence before A1. These are general facilities,
+not exemptions for Async names.
 
 **Acceptance:** typed exchange can be represented without operation-local
 polymorphism; distinct owners/types remain distinct; escaping pause, retained
@@ -462,14 +506,29 @@ short-lived replies, reentrant advancement, and falsely synchronous foreign
 suspension are rejected. Malformed Core cannot bypass those checks. Explicitly
 show rows and transport for the nested scheduler/pull case.
 
-**Stopping point:** a checked contract and tests sufficient to implement C1,
-not a public executable API or a claimed scheduler.
+**Evidence:** [control/retention model](../internal/feasibility/control_test.go),
+[typed completion/registry model](../internal/feasibility/tasks_test.go),
+[scoped-effect/package model](../internal/feasibility/scoped_rows_test.go), and
+[typed Machine exchange probe](../internal/feasibility/exchange_test.go).
+The latter exercises the existing private Machine with distinct request,
+reply and result types; today's cursor transfer still replies Unit and drops
+the final value. Existing runtime foreign-transfer/evidence tests and Core
+ownership tests cover reuse of that foundation. Models operate on explicit
+capture sets and closed evidence records: they do **not** prove inference over
+arbitrary source closures, module serialization, or both future backend ABIs.
+
+**Stopping point:** selected implementable contracts and explicit compiler
+prerequisites, ready for review; C1 has not begun. The source spelling is not yet
+fully checkable. Revalidate the model's positive/negative cases as real inference,
+malformed-Core and differential fixtures during implementation.
 
 ### C1: General typed execution
 
 **Dependencies:** C0 and the early Async A0 contract gate.
 
-Implement general Core/Machine owner operations, typed replies/results,
+Implement the general prerequisites selected in C0 (owner-sensitive control,
+scoped effects/work packages, typed completion/replay and private owner stop),
+then general Core/Machine owner operations, typed replies/results,
 terminal states, synchronous close, forwarding, and both backend paths. Add
 module serialization and stale-artifact handling with the new representation.
 Keep the old Stream path temporarily so failures can be isolated.
@@ -525,11 +584,59 @@ coroutines. Allocation registers cleanup before publishing a handle. Captures
 of the new body must be valid for that scope; completed/closed work must release
 execution storage without retaining every completed frame until scope exit.
 
-Before implementation, settle the public scope/allocation spelling, inferred
-retention summary, and how heterogeneous exchange/result types enter an owned
-registry without unchecked casts. The minimal contract is allocation into an
-explicit live capability; do not add a special exception for Async.context.
-Keep `Coroutine.with` as the convenient single-owner wrapper.
+**Design portion resolved at C0/A0; implementation remains open.** Selected
+spelling and signature schemas (subject to C0's owner-sensitive control):
+
+```fango
+scope : (Scope e ->{Drive | e} a) ->{e} a
+create
+    : Scope e
+    -> ((request ->{Suspension} reply) -> reply ->{Suspension | e} result)
+    -> Coroutine request reply result e
+```
+
+`Scope e` is abstract and resource-bearing. `create` installs a lazy producer
+and a cleanup entry atomically before publishing its handle; it runs neither
+producer application. It has no outward effect, but its scoped-capability
+argument makes it subject to the existing prohibition on treating resource
+calls as pure for reordering/sharing. Allocation retains the producer, captures,
+and definition-site evidence until completion/close; each must outlive the
+**destination scope**, not merely the helper call. `e` bounds residual execution
+and cleanup effects. Close/advance retain their Drive contracts. `with` remains
+the single-owner convenience boundary.
+
+Every allocation gets a distinct execution owner beneath the scope. Registry
+entries erase request/reply/result types by closing over the **typed** handle
+in a uniform `() ->{Drive | e} ()` close action; they never project a handle
+back from an integer or `Native.Any`. Only the scope's cleanup driver invokes
+these actions. The C0 owner obligation still names the captured handle, and
+scope discharge accepts it only with proof of registry membership. A queue may
+hold differently typed handles through this closure packaging without existential
+source types. Typed task result cells are a separate C6a requirement.
+
+For a nullary scheduling service, C4 additionally exposes a checked registration
+facet that hides this scope's row parameter while retaining its owner/budget
+contract. Registering a coroutine with a different residual row uses C0's
+[scoped work package](roadmap-execution-contracts.md#scoped-effects-and-work-packages):
+prove inclusion in the scope budget and retain typed execution/failure adapters.
+The scope boundary includes those deferred obligations when inferring its
+outward row. The simpler same-row cleanup closure above does not by itself prove
+this hidden-row case. A package never acquires a different owner by entering
+another queue, and neither the facet nor its packages may escape the live scope.
+
+Completion/close unlinks the entry and clears producer frames, captures and
+forwarding links immediately; a remaining handle has only terminal state and
+its static lifetime. Remove registry links as well as frames: no append-only
+list of historical cleanup closures. Scope exit closes unfinished owners in
+reverse registration order; synchronous failures follow existing precedence.
+Once closing starts, allocation is forbidden. A normal Async context body
+finishing is **not** this transition: its library driver remains inside the
+scope while children can create grandchildren, then exits after the live set
+drains. C5 later permits the closing driver itself to suspend.
+
+Explicit capability passing chooses the destination; captured context evidence
+can supply it through ordinary library code. Neither `Async.context` nor a
+native registry receives an exception to retention or sole execution authority.
 
 **Acceptance:** a helper creates work owned by its caller's live scope; an
 attempt to retain a helper-local resource fails. Queued work cannot escape the
@@ -575,16 +682,19 @@ remains authoritative until each extension lands.
 **Dependencies:** the representation decisions from C0/A0; C4 when storage is
 retained by a dynamic scope.
 
-Resolve opaque typed-value round trips and phantom wrappers with the
+Implement opaque typed-value round trips and phantom wrappers with the
 [STM boundary requirement](roadmap-stm.md#what-todays-rules-block). A0 decides
-whether task completion needs this facility before A1; general `TVar a` needs
-it independently. Phantom-wrapper validation and opaque-value round trips have
+to require this facility before A1 for scope-owned write-once completion cells;
+general `TVar a` needs it independently. Phantom-wrapper validation and opaque-value round trips have
 separate acceptance obligations: scalar STM needs the former to expose
 `TVar Int`, while arbitrary payload storage additionally needs the latter.
 Representation-blind native storage must return a value at its original type
 without inspecting evaluator or generated-Go representations.
-Specify how a heterogeneous registry preserves that type association without
-making an unchecked cast available to Fango code.
+Each selected task cell is created/read/written at exactly one payload type,
+including its residual row index, with a checked scoped owner. No retrieval by
+an untyped task ID, index-changing coercion, or public cast is allowed. A task
+queue holds homogeneous Unit jobs that close over these typed cells; it does
+not contain untyped payloads. Native storage never invokes a stored callable.
 
 Storage preserves the value's capture and lifetime obligations. An opaque box
 does not make a borrowed resource or stateful closure transferable, and it does
@@ -646,6 +756,15 @@ before its first release; a later executor cannot retroactively justify earlier
 sharing. A shared handle's owner stays live until every authorized child and
 native request has drained. The declaration must not grant arbitrary sharing
 to every resource wrapper with the same representation.
+
+A1 requires three specific capabilities: C4's synchronized allocation service,
+C6a's write-once completion cell (one publisher, multiple readers), and C0's
+[split service evidence](roadmap-execution-contracts.md). Implement and validate
+that opt-in evidence/adapter contract here; its declaration spelling remains an
+implementation review decision. The [service model](../internal/feasibility/tasks_test.go)
+passes execution authority explicitly and tests captured outer context from a
+different producer. This is a required general extension, not something ordinary
+evidence does today.
 
 **Acceptance:** safe child-local resources and declared shared values work;
 explicit and hidden parent-state/cursor captures fail through closures, ADTs,
