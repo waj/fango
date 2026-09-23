@@ -64,10 +64,10 @@ func InspectPruned(e Expr, visit func(Expr) bool) {
 		}
 	case *Suspend:
 		walk(e.Request)
-	case *IteratorNext:
+	case *CoroutineAdvance:
 		walk(e.Cursor)
 		walk(e.Reply)
-	case *IteratorScope:
+	case *CoroutineScope:
 		walk(e.Producer)
 		walk(e.Consumer)
 

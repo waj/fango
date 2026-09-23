@@ -159,9 +159,7 @@ func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args [
 		effectParams = el.bindEffectParams(executingEffects(arrowAt(opTy, len(args)), op.Arity-len(args)))
 	}
 	var body core.Expr
-	if op.Owner.Suspension && (op.Name == types.StreamYieldName) {
-		body = &core.Suspend{Owner: el.effectInstance(op, rawTy), Request: coreArgs[0], Ty: ret}
-	} else if op.Abort {
+	if op.Abort {
 		inst := el.effectInstance(op, rawTy)
 		body = &core.ControlExit{Effect: inst, Op: op, Payload: coreArgs, Ty: ret}
 	} else {

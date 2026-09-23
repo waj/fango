@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
+	"slices"
 )
 
-func (l *linter) coroutineScope(e *IteratorScope, where string) {
+func (l *linter) coroutineScope(e *CoroutineScope, where string) {
 	l.control(e.Control, where)
 	if !l.intrinsics[types.CoroutineWithName] || l.defName != types.CoroutineWithName {
 		l.errorf("%s: coroutine scope outside Coroutine.with", where)
@@ -44,7 +45,7 @@ func (l *linter) coroutineScope(e *IteratorScope, where string) {
 	l.expr(e.Consumer, where)
 }
 
-func (l *linter) coroutineAdvance(e *IteratorNext, where string) {
+func (l *linter) coroutineAdvance(e *CoroutineAdvance, where string) {
 	name := types.CoroutineAdvanceName
 	if e.Close {
 		name = types.CoroutineCloseName
@@ -58,6 +59,10 @@ func (l *linter) coroutineAdvance(e *IteratorNext, where string) {
 	}
 	if e.Access != types.ExclusiveAdvance {
 		l.errorf("%s: coroutine operation lacks exclusive access proof", where)
+	}
+	if e.Cursor == nil {
+		l.errorf("%s: coroutine operation has no handle", where)
+		return
 	}
 	if err := CheckCoroutineAdvance(e.Cursor.Type(), e.Reply, e.Close, e.Ty, e.Result); err != nil {
 		l.errorf("%s: %v", where, err)
@@ -80,9 +85,19 @@ func (e OwnerControlError) Detail() string {
 	return fmt.Sprintf("`%s` may %s the owner %s, but its execution contract is synchronous.", e.In, e.Operation, e.Owner)
 }
 
-func (f *flowChecker) requireControl(call *flowContext, owner int, operation string) {
+func (f *flowChecker) requireControl(call *flowContext, owner int, operation string, effects ...int) {
 	if f.collectControlNeed != nil {
 		for _, row := range call.sourceRows {
+			viaEvidence := false
+			for r, ok := row.(types.Row); ok; r, ok = r.Tail.(types.Row) {
+				for _, label := range r.Labels {
+					viaEvidence = viaEvidence || slices.Contains(effects, label.Unique)
+				}
+			}
+			if operation == "suspend" && viaEvidence {
+				continue
+			}
+
 			f.collectControlNeed(ControlNeed{Row: row, Operation: operation, Span: call.origin, In: call.def})
 		}
 		return

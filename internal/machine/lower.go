@@ -350,16 +350,12 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 		tree := b.lowerTree(e.Tree, bind, next)
 		return b.add(&Eval{Bind: scrut, Value: e.Scrut, Next: tree})
 	case *core.Suspend:
-		owner := e.Owner
-		if owner.Unique != 0 {
-			owner.Control = types.Control{Transport: types.Machine}
-		}
 		if machineControl(e.Request) {
 			b.errorf("%s: suspension request itself requires Machine control", b.def.Name)
 			return next
 		}
-		return b.add(&Suspend{Owner: owner, Request: e.Request, Bind: bind, Next: next})
-	case *core.IteratorNext:
+		return b.add(&Suspend{Request: e.Request, Bind: bind, Next: next})
+	case *core.CoroutineAdvance:
 		return b.add(&CursorAdvance{Cursor: e.Cursor, Reply: e.Reply, Close: e.Close, Result: e.Result, Access: e.Access, Bind: bind, Next: next, Row: e.Row})
 	case *core.Completion:
 		if e.Name == types.CompletionCaptureName {
@@ -372,7 +368,7 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 			n.Control = types.Control{Transport: types.Exit}
 			return b.add(&Eval{Bind: bind, Value: &n, Next: next})
 		}
-	case *core.IteratorScope:
+	case *core.CoroutineScope:
 		if e.Control.Resolve(types.Machine) == types.Machine {
 			cursor := Local{Name: b.fresh("cursor"), Ty: e.CursorTy}
 			b.declare(cursor)

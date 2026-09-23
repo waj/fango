@@ -10,23 +10,8 @@ import (
 )
 
 func TestCursorAdvanceProofAndLiveness(t *testing.T) {
-	sup := &types.Supply{}
-	b := types.NewBuiltins(sup)
-	a := sup.FreshRigid(types.General)
-	con := &types.TCon{Unique: sup.NextUnique(), Name: "Maybe.Maybe", Args: []types.Type{a}}
-	nothing := &types.CtorInfo{Name: "Maybe.Nothing", Index: 0, Result: con}
-	just := &types.CtorInfo{Name: "Maybe.Just", Index: 1, Fields: []types.Type{a}, Result: con}
-	adt := &types.ADTInfo{Con: con, Params: []*types.TVar{a}, Ctors: []*types.CtorInfo{nothing, just}}
-	result := &types.TCon{Unique: con.Unique, Name: con.Name, Args: []types.Type{b.Int}}
-	cursor := &types.TCon{Unique: sup.NextUnique(), Name: types.IteratorTypeName, Args: []types.Type{b.Int, b.Unit}}
-	control := types.Control{Transport: types.Machine}
-	fn := &types.TFun{Arg: cursor, Ret: result, Control: control}
-	p := &core.Prog{Intrinsics: map[string]bool{types.IteratorNextName: true}, ADTs: []*types.ADTInfo{adt}, Defs: []core.Def{
-		{Name: "producer", Type: b.Unit, Control: control, Body: &core.Seq{
-			First: &core.Suspend{Request: &core.IntLit{Val: 42, Ty: b.Int}, Ty: b.Unit}, Then: &core.UnitLit{Ty: b.Unit}, Ty: b.Unit}},
-		{Name: types.IteratorNextName, Type: fn, Params: []string{"cursor"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture()}, Control: control,
-			Body: &core.IteratorNext{Row: &core.RowArgument{}, Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: cursor}, Result: adt, Access: types.ExclusiveAdvance, Ty: result}},
-	}}
+	p, b := coretest.CursorScope()
+	adt := p.ADTs[0]
 	if errs := core.InferCaptures(p, b); len(errs) != 0 {
 		t.Fatal(errs)
 	}
@@ -54,10 +39,14 @@ func TestCursorAdvanceProofAndLiveness(t *testing.T) {
 	}{
 		{"missing access", func(c *CursorAdvance) { c.Access = 0 }, "exclusive"},
 		{"wrong element", func(c *CursorAdvance) {
-			c.Cursor = &core.VarRef{Name: "cursor", Local: true, Ty: &types.TCon{Name: types.IteratorTypeName, Args: []types.Type{b.String, b.Unit}}}
-		}, "invalid Maybe"},
-		{"missing descriptor", func(c *CursorAdvance) { c.Result = nil }, "invalid Maybe"},
-		{"missing constructor", func(c *CursorAdvance) { copy := *adt; copy.Ctors = []*types.CtorInfo{nil, just}; c.Result = &copy }, "invalid Maybe constructors"},
+			c.Cursor = &core.VarRef{Name: "cursor", Local: true, Ty: &types.TCon{Name: types.CoroutineTypeName, Args: []types.Type{b.String, b.Unit, b.Unit, b.Unit}}}
+		}, "invalid coroutine Step result"},
+		{"missing descriptor", func(c *CursorAdvance) { c.Result = nil }, "invalid coroutine Step result"},
+		{"missing constructor", func(c *CursorAdvance) {
+			copy := *adt
+			copy.Ctors = []*types.CtorInfo{nil, adt.Ctors[1], adt.Ctors[2]}
+			c.Result = &copy
+		}, "invalid coroutine Step constructors"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			damaged := original
@@ -75,7 +64,7 @@ func TestCursorAdvanceProofAndLiveness(t *testing.T) {
 		t.Fatalf("stale live storage accepted: %s", got)
 	}
 	block.LiveOut = old
-	node := p.Defs[1].Body.(*core.IteratorNext)
+	node := p.Defs[0].Body.(*core.CoroutineAdvance)
 	node.Access = 0
 	if got := errorsText(core.LintMachineInput(p, b)); !strings.Contains(got, "exclusive access proof") || !strings.Contains(got, "capture contract is stale") {
 		t.Fatalf("Core accepted stale access: %s", got)
@@ -131,24 +120,26 @@ func TestCursorScopeChecksCleanupOwnerAndSetupProof(t *testing.T) {
 func TestCoreSynchronousTraversalBoundaryRequiresProof(t *testing.T) {
 	for _, test := range []struct {
 		name   string
-		damage func(*core.Prog, *core.IteratorScope)
+		damage func(*core.Prog, *core.CoroutineScope)
 		want   string
 	}{
-		{"missing ownership", func(_ *core.Prog, s *core.IteratorScope) { s.Traversal = core.EffectInstance{} }, "disagrees with consumer"},
-		{"stale scope", func(_ *core.Prog, s *core.IteratorScope) { s.Traversal.Captures = types.ScopeCapture(s.Scope + 1) }, "invalid Traversal ownership"},
-		{"unhandled residual", func(p *core.Prog, s *core.IteratorScope) {
+		{"missing ownership", func(_ *core.Prog, s *core.CoroutineScope) { s.Traversal = core.EffectInstance{} }, "invalid coroutine control owner"},
+		{"stale scope", func(_ *core.Prog, s *core.CoroutineScope) { s.Traversal.Captures = types.ScopeCapture(s.Scope + 1) }, "invalid coroutine control owner"},
+		{"unhandled residual", func(p *core.Prog, s *core.CoroutineScope) {
 			failure := &types.EffectInfo{Unique: 1000, Name: "Test.Fail"}
 			p.Effects = append(p.Effects, failure)
 			fn := s.Consumer.Type().(*types.TFun)
 			fn.Eff.Labels = append(fn.Eff.Labels, types.EffLabel{Unique: failure.Unique, Name: failure.Name, Abort: true})
-		}, "stale residual Traversal control"},
+
+			s.Control = types.Control{Transport: types.Exit}
+		}, "stale coroutine boundary control"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			p, b := coretest.SynchronousCursorScope()
 			if errs := core.InferCaptures(p, b); len(errs) != 0 {
 				t.Fatal(errs)
 			}
-			scope := p.Defs[1].Body.(*core.IteratorScope)
+			scope := p.Defs[1].Body.(*core.CoroutineScope)
 			test.damage(p, scope)
 			if got := errorsText(core.LintMachineInput(p, b)); !strings.Contains(got, test.want) {
 				t.Fatalf("got %s, want %s", got, test.want)

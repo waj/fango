@@ -333,14 +333,6 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				}
 			}
 		case *machineir.Suspend:
-			var owner *fangort.YieldOwner
-			if term.Owner.Unique != 0 {
-				ev := resolveEvidence(frame.evidence[term.Owner.Unique])
-				if ev == nil || ev.yieldOwner == nil {
-					return MachineEvent{}, fmt.Errorf("eval: suspension has no lexical owner")
-				}
-				owner = ev.yieldOwner
-			}
 			request, err := eval(term.Request)
 			if err != nil {
 				return MachineEvent{}, err
@@ -357,7 +349,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			s.prune(frame, block.LiveOut, term.Bind.Name)
 			bind := term.Bind
 			s.waiting = &bind
-			return MachineEvent{Owner: owner, Request: request}, nil
+			return MachineEvent{Request: request}, nil
 		case *machineir.CursorAdvance:
 			value, err := eval(term.Cursor)
 			if err != nil {
@@ -691,42 +683,18 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			if !ok {
 				return MachineEvent{}, fmt.Errorf("eval: cursor producer is not a Machine callback")
 			}
-			if _, _, _, ok := types.CoroutineProtocol(term.Cursor.Ty); ok {
-				row, err := s.interp.argumentRow(term.Row, locals)
-				if err != nil {
-					return MachineEvent{}, err
-				}
-				cursor := s.interp.openCoroutine(s.program, producer, row)
-				frame.vars[term.Cursor.Name] = cursor
-				s.cleanups = append(s.cleanups, cursor.Close)
-				if len(s.cleanups) > s.stats.MaxCleanups {
-					s.stats.MaxCleanups = len(s.cleanups)
-				}
-				frame.block = term.Next
-				continue
-			}
-			callEvidence := cloneEvidence(s.interp.evidence)
-			var owner *fangort.YieldOwner
-			if term.Yield.Unique != 0 {
-				owner = fangort.NewYieldOwner()
-				callEvidence[term.Yield.Unique] = &evidence{yieldOwner: owner}
-			}
-			row, rowErr := s.interp.argumentRow(term.Row, locals)
-			if rowErr != nil {
-				return MachineEvent{}, rowErr
-			}
-			cursorEvidence := fangort.NewCursorEvidence(row)
-			producerSession, err := s.interp.startMachineClosure(s.program, producer.machine, struct{}{}, callEvidence, cursorEvidence.Row())
+			row, err := s.interp.argumentRow(term.Row, locals)
 			if err != nil {
 				return MachineEvent{}, err
 			}
-			cursor := &MachineIteratorSession{owner: owner, session: producerSession, evidence: cursorEvidence}
+			cursor := s.interp.openCoroutine(s.program, producer, row)
 			frame.vars[term.Cursor.Name] = cursor
 			s.cleanups = append(s.cleanups, cursor.Close)
 			if len(s.cleanups) > s.stats.MaxCleanups {
 				s.stats.MaxCleanups = len(s.cleanups)
 			}
 			frame.block = term.Next
+			continue
 		case *machineir.CursorClose, *machineir.PopCleanup:
 			exit, err := s.popCleanup(nil)
 			if err != nil {

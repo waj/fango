@@ -36,9 +36,7 @@ func SubstituteCaptureVars(e Expr, m map[types.CaptureVar]types.CaptureSet, cont
 			x.Control = x.Effect.Control
 		case *ControlExit:
 			sub(&x.Effect)
-		case *Suspend:
-			sub(&x.Owner)
-		case *IteratorScope:
+		case *CoroutineScope:
 			sub(&x.Yield)
 			sub(&x.Traversal)
 		case *Handle:

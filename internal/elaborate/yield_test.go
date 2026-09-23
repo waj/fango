@@ -10,16 +10,16 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-func TestStreamYieldElaboratesToSuspend(t *testing.T) {
+func TestStreamYieldElaboratesToOrdinaryOperation(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	ck := infer.NewChecker(sup, b, infer.NewEnv())
 	elem := sup.FreshRigid(types.General)
 	row := sup.FreshRigid(types.RowVar)
-	effect := &types.EffectInfo{Unique: sup.NextUnique(), Name: types.StreamYieldEffectName, Params: []*types.TVar{elem}, Suspension: true}
-	label := types.EffLabel{Unique: effect.Unique, Name: effect.Name, Args: []types.Type{elem}, Suspension: true}
+	effect := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Stream.Yield", Params: []*types.TVar{elem}}
+	label := types.EffLabel{Unique: effect.Unique, Name: effect.Name, Args: []types.Type{elem}}
 	ty := &types.TFun{Arg: elem, Eff: types.Row{Labels: []types.EffLabel{label}, Tail: row}, Ret: b.Unit}
-	op := &types.EffectOp{Owner: effect, Name: types.StreamYieldName, Scheme: types.Scheme{Vars: []*types.TVar{elem, row}, Body: ty}, Arity: 1, ParamTypes: []types.Type{elem}, ResultType: b.Unit}
+	op := &types.EffectOp{Owner: effect, Name: "Stream.yield", Scheme: types.Scheme{Vars: []*types.TVar{elem, row}, Body: ty}, Arity: 1, ParamTypes: []types.Type{elem}, ResultType: b.Unit}
 	effect.Ops = []*types.EffectOp{op}
 	ck.Effects[effect.Name] = effect
 	ck.EffectsByUnique[effect.Unique] = effect
@@ -35,14 +35,14 @@ func TestStreamYieldElaboratesToSuspend(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("elaboration diagnostics: %+v", errs)
 	}
-	suspend, ok := got.(*core.Suspend)
+	perform, ok := got.(*core.Perform)
 	if !ok {
-		t.Fatalf("yield Core = %T, want *core.Suspend", got)
+		t.Fatalf("yield Core = %T, want *core.Perform", got)
 	}
-	if value, ok := suspend.Request.(*core.StringLit); !ok || value.Val != "one" || !types.Equal(suspend.Type(), b.Unit) {
-		t.Fatalf("suspend = %#v", suspend)
+	if value, ok := perform.Args[0].(*core.StringLit); !ok || value.Val != "one" || !types.Equal(perform.Type(), b.Unit) {
+		t.Fatalf("perform = %#v", perform)
 	}
-	if control := core.ExprControl(suspend); control.Transport != types.Machine {
-		t.Fatalf("suspend control = %+v, want Machine", control)
+	if control := core.ExprControl(perform); control.Transport == types.Machine {
+		t.Fatalf("ordinary yield selected Machine without handler evidence: %+v", control)
 	}
 }

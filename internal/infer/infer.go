@@ -651,7 +651,7 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 	for i, param := range params {
 		functionParam := false
 		switch d.Name {
-		case types.ScopeBracketName, types.StreamWithProducerName:
+		case types.ScopeBracketName:
 			functionParam = true
 		}
 		if _, isFn := param.(*types.TFun); functionParam && !isFn {
@@ -663,12 +663,6 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 	if d.Name == types.CoroutineWithName || d.Name == types.CoroutineAdvanceName || d.Name == types.CoroutineCloseName {
 		if !types.CoroutineShape(d.Name, ty) {
 			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic %s has an invalid coroutine protocol.", ast.Spelling(d.Name)))
-		}
-	}
-	if d.Name == types.IteratorNextName {
-		if !types.IteratorNextShape(ty) {
-			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION",
-				"The intrinsic `%s` must have shape `Iterator a e ->{Traversal | e} Maybe a`.", ast.Spelling(d.Name)))
 		}
 	}
 	if types.WorkIntrinsic(d.Name) && !types.WorkShape(d.Name, ty) {
@@ -1694,7 +1688,12 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		g.patternPins = oldPins
 		bodyAmbient := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
 		savedAmbient, savedSink := g.enterAmbient(bodyAmbient)
+		// The enclosing declaration's annotation constrains its own arrow,
+		// not a nested callback's handler clauses (which may call pause).
+		savedAnnotationAmbient := g.annotationAmbient
+		g.annotationAmbient = nil
 		bodyTy := g.expr(e.Body)
+		g.annotationAmbient = savedAnnotationAmbient
 		g.leaveAmbient(savedAmbient, savedSink)
 		g.locals = scope.parent
 		funTy := g.wrapFunction(paramTys, bodyTy, bodyAmbient)
@@ -1815,7 +1814,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	}
 	if first.Owner.Suspension {
 		g.errs = append(g.errs, diag.Errorf(e.Sp, "COMPILER-OWNED EFFECT",
-			"Effect `%s` belongs to its compiler-owned traversal scope and cannot be handled by an ordinary handler.", ast.Spelling(first.Owner.Name)))
+			"Effect `%s` describes compiler-owned coroutine control and cannot be handled by an ordinary handler.", ast.Spelling(first.Owner.Name)))
 	}
 	residualVar := g.ck.Sup.FreshVar(types.RowVar)
 	residual := types.Row{Tail: residualVar}

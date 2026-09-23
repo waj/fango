@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	moduleObjectSchema = 3
+	moduleObjectSchema = 4
 	moduleObjectKind   = "module-object"
 	stageSection       = "stage"
 )
@@ -162,7 +162,7 @@ func objectTypes() map[string]reflect.Type {
 		(*meta.Template)(nil), (*meta.TypeRepr)(nil), (*meta.Code)(nil),
 		(*core.IntLit)(nil), (*core.FloatLit)(nil), (*core.StringLit)(nil), (*core.CharLit)(nil), (*core.UnitLit)(nil), (*core.BoolLit)(nil),
 		(*core.Neg)(nil), (*core.If)(nil), (*core.Perform)(nil), (*core.ControlExit)(nil), (*core.Suspend)(nil),
-		(*core.IteratorScope)(nil), (*core.IteratorNext)(nil), (*core.Work)(nil), (*core.FailureInspect)(nil), (*core.Completion)(nil), (*core.Handle)(nil), (*core.ResumeTail)(nil),
+		(*core.CoroutineScope)(nil), (*core.CoroutineAdvance)(nil), (*core.Work)(nil), (*core.FailureInspect)(nil), (*core.Completion)(nil), (*core.Handle)(nil), (*core.ResumeTail)(nil),
 		(*core.Bracket)(nil), (*core.Seq)(nil), (*core.Let)(nil), (*core.Lambda)(nil), (*core.VarRef)(nil), (*core.Quote)(nil),
 		(*core.TypeOf)(nil), (*core.NativeCall)(nil), (*core.App)(nil), (*core.Case)(nil),
 		(*core.Guard)(nil), (*core.Unreachable)(nil), (*core.Leaf)(nil), (*core.SwitchCtor)(nil), (*core.SwitchLit)(nil),

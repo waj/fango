@@ -104,12 +104,7 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 				d.active = cursor.session
 			}
 			if cursor.started {
-				if err := d.active.resumeLocal(func() Value {
-					if cursor.exchange {
-						return request.input
-					}
-					return struct{}{}
-				}()); err != nil {
+				if err := d.active.resumeLocal(request.input); err != nil {
 					return MachineEvent{}, err
 				}
 			}
@@ -200,23 +195,15 @@ func (m *MachineSession) completeAdvance(term *machineir.CursorAdvance, value Va
 		m.frames[len(m.frames)-1].vars[term.Bind.Name] = struct{}{}
 		return
 	}
-	if term.Reply != nil {
-		index := 2
-		if present {
-			index = 0
-		} else if finished {
-			index = 1
-		}
-		result := &CtorVal{Ctor: term.Result.Ctors[index]}
-		if index != 2 {
-			result.Fields = []Value{value}
-		}
-		m.frames[len(m.frames)-1].vars[term.Bind.Name] = result
-		return
-	}
-	result := &CtorVal{Ctor: term.Result.Ctors[0]}
+	index := 2
 	if present {
-		result = &CtorVal{Ctor: term.Result.Ctors[1], Fields: []Value{value}}
+		index = 0
+	} else if finished {
+		index = 1
+	}
+	result := &CtorVal{Ctor: term.Result.Ctors[index]}
+	if index != 2 {
+		result.Fields = []Value{value}
 	}
 	m.frames[len(m.frames)-1].vars[term.Bind.Name] = result
 }

@@ -27,10 +27,9 @@ func LintIn(p *Prog, context []Def, b *types.Builtins) []error {
 }
 
 // LintMachineInput checks semantic Core immediately before selective machine
-// lowering. It admits compiler-only Suspend nodes and Machine transport while
-// retaining every ordinary Core invariant. Ordinary Lint admits the same
-// private nodes only when the resolved Stream.withProducer intrinsic is
-// present; that declaration is the source activation boundary.
+// lowering. It admits host-driven Suspend fixtures and Machine transport while
+// retaining every ordinary Core invariant. Source suspension uses typed calls
+// to the producer's pause capability.
 func LintMachineInput(p *Prog, b *types.Builtins) []error {
 	return lint(p, nil, b, true, false)
 }
@@ -55,7 +54,7 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowMachine, allowStage bo
 		tyParams: map[int]bool{}, evidence: map[int]int{}, evidenceCaptures: map[int][]types.CaptureSet{},
 		captureVars: map[types.CaptureVar]bool{}, scopeIDs: map[types.ScopeID]bool{}, activeScopes: map[types.ScopeID]bool{},
 		resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives, intrinsics: p.Intrinsics,
-		allowMachine: allowMachine || (p.Intrinsics[types.StreamWithProducerName] || p.Intrinsics[types.IteratorNextName] || p.Intrinsics[types.CoroutineWithName]), allowStage: allowStage}
+		allowMachine: allowMachine || p.Intrinsics[types.CoroutineWithName], allowSuspend: allowMachine, allowStage: allowStage}
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
 	}
@@ -306,6 +305,7 @@ type linter struct {
 	resumeState      types.Type
 	defName          string
 	allowMachine     bool
+	allowSuspend     bool
 	allowStage       bool
 	errs             []error
 }
@@ -597,136 +597,21 @@ func (l *linter) expr(e Expr, where string) {
 			l.expr(a, where)
 		}
 	case *Suspend:
-		if !l.allowMachine {
+		if !l.allowSuspend {
 			l.errorf("%s: compiler-only suspension reached ordinary Core", where)
 		}
 		if e.Request == nil {
 			l.errorf("%s: suspension has no request", where)
 			return
 		}
-		if e.Owner.Unique != 0 {
-			l.effectInstance(e.Owner, where)
-			effect := l.effects[e.Owner.Unique]
-			if effect == nil || !effect.Suspension || effect.Name != e.Owner.Name || e.Owner.Control.Transport != types.Machine {
-				l.errorf("%s: suspension has invalid owner effect", where)
-			}
-			l.evidenceAvailable(e.Owner, where)
-			if len(e.Owner.Args) != 1 || !EqualValueRepresentation(e.Owner.Args[0], e.Request.Type()) || l.unique(e.Ty) != l.b.Unit.Unique {
-				l.errorf("%s: owned yield request/result disagrees with owner type", where)
-			}
-		} else {
-			for _, effect := range l.effects {
-				if effect.Suspension {
-					l.errorf("%s: source suspension lacks lexical owner evidence", where)
-					break
-				}
-			}
-		}
 		if c := ExprControl(e.Request); c.Transport != types.Direct || c.Polymorphic {
 			l.errorf("%s: suspension request control %s is not direct", where, ControlName(c))
 		}
 		l.expr(e.Request, where)
-	case *IteratorScope:
-		if _, _, _, ok := types.CoroutineProtocol(e.CursorTy); ok {
-			l.coroutineScope(e, where)
-			break
-		}
-		l.control(e.Control, where)
-		if e.Scope == 0 || l.scopeIDs[e.Scope] {
-			l.errorf("%s: iterator scope has invalid or reused scope identity %d", where, e.Scope)
-		}
-		l.scopeIDs[e.Scope] = true
-		if !l.intrinsics[l.defName] || (l.defName != types.StreamWithProducerName) {
-			l.errorf("%s: iterator scope outside the declared `%s` intrinsic", where, types.StreamWithProducerName)
-		}
-		cursor, ok := e.CursorTy.(*types.TCon)
-		if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 2 {
-			l.errorf("%s: iterator scope cursor typed %s, want `%s a e`", where, types.Show(e.CursorTy), types.IteratorTypeName)
-		}
-		producer, ok := e.Producer.Type().(*types.TFun)
-		if e.Yield.Unique != 0 {
-			l.effectInstance(e.Yield, where)
-			if effect := l.effects[e.Yield.Unique]; effect == nil || !effect.Suspension || e.Yield.Control.Transport != types.Machine {
-				l.errorf("%s: iterator scope has invalid Yield evidence", where)
-			}
-			if cursor == nil || len(cursor.Args) != 2 || len(e.Yield.Args) != 1 || !EqualValueRepresentation(cursor.Args[0], e.Yield.Args[0]) {
-				l.errorf("%s: iterator cursor element disagrees with Yield owner", where)
-			}
-		}
-		if !ok {
-			l.errorf("%s: iterator producer is not a function", where)
-		} else {
-			if l.unique(producer.Arg) != l.b.Unit.Unique || l.unique(producer.Ret) != l.b.Unit.Unique {
-				l.errorf("%s: iterator producer must have shape `() -> ()`", where)
-			}
-			if types.FunctionControl(producer).Transport != types.Machine {
-				l.errorf("%s: iterator producer does not use Machine transport", where)
-			}
-			for _, label := range producer.Eff.Labels {
-				if label.Suspension && (e.Yield.Unique != label.Unique || e.Yield.Name != label.Name || len(e.Yield.Args) != 1 || len(label.Args) != 1 || !EqualValueRepresentation(e.Yield.Args[0], label.Args[0]) || !types.EqualCaptures(e.Yield.Captures, types.ScopeCapture(e.Scope))) {
-					l.errorf("%s: iterator scope lacks matching lexical Yield ownership", where)
-				}
-			}
-		}
-		consumer, ok := e.Consumer.Type().(*types.TFun)
-		if !ok {
-			l.errorf("%s: iterator consumer is not a function", where)
-		} else {
-			if !EqualValueRepresentation(consumer.Arg, e.CursorTy) || !EqualValueRepresentation(consumer.Ret, e.Ty) {
-				l.errorf("%s: iterator consumer type disagrees with cursor or result", where)
-			}
-			if e.Traversal.Unique == 0 {
-				if want := types.FunctionControl(consumer); e.Control != want {
-					l.errorf("%s: iterator scope control %s disagrees with consumer %s", where, ControlName(e.Control), ControlName(want))
-				}
-			} else {
-				l.effectInstance(e.Traversal, where)
-				effect := l.effects[e.Traversal.Unique]
-				if effect == nil || effect.Name != types.IteratorTraversalEffectName || !effect.Suspension || e.Yield.Unique == 0 || e.Traversal.Control.Transport != types.Machine || len(e.Traversal.Args) != 0 || !types.EqualCaptures(e.Traversal.Captures, types.ScopeCapture(e.Scope)) {
-					l.errorf("%s: iterator scope has invalid Traversal ownership", where)
-				}
-				found := false
-				residual := &types.TFun{Eff: types.Row{Tail: consumer.Eff.Tail}}
-				for _, label := range consumer.Eff.Labels {
-					if label.Unique == e.Traversal.Unique {
-						found = true
-					} else {
-						residual.Eff.Labels = append(residual.Eff.Labels, label)
-					}
-				}
-				minimum := types.FunctionControl(residual)
-				if !found || minimum.Transport > e.Control.Transport || minimum.Polymorphic && !e.Control.Polymorphic || l.workers[l.defName] == nil || ArrowControl(l.workers[l.defName].Type, len(l.workers[l.defName].Params)) != e.Control {
-					l.errorf("%s: iterator scope has stale residual Traversal control", where)
-				}
-			}
-		}
-		l.expr(e.Producer, where)
-		l.expr(e.Consumer, where)
-
-	case *IteratorNext:
-		if e.Cursor != nil {
-			if _, _, _, ok := types.CoroutineProtocol(e.Cursor.Type()); ok {
-				l.coroutineAdvance(e, where)
-				break
-			}
-		}
-		if e.Close || e.Reply != nil {
-			l.errorf("%s: Iterator has coroutine-only operands", where)
-		}
-		if !l.intrinsics[types.IteratorNextName] || l.defName != types.IteratorNextName {
-			l.errorf("%s: advancement outside the declared Iterator.next intrinsic", where)
-		}
-		if e.Access != types.ExclusiveAdvance {
-			l.errorf("%s: cursor advancement lacks exclusive access proof", where)
-		}
-		if e.Cursor == nil {
-			l.errorf("%s: cursor advancement has no cursor", where)
-		} else {
-			if err := CheckCursorResult(e.Cursor.Type(), e.Ty, e.Result); err != nil {
-				l.errorf("%s: %v", where, err)
-			}
-			l.expr(e.Cursor, where)
-		}
+	case *CoroutineScope:
+		l.coroutineScope(e, where)
+	case *CoroutineAdvance:
+		l.coroutineAdvance(e, where)
 
 	case *Completion:
 		if !l.intrinsics[e.Name] || l.defName != e.Name || !types.CompletionIntrinsic(e.Name) {
@@ -1704,7 +1589,7 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		}
 	case *Suspend:
 		directSlot(e.Request, "suspension request")
-	case *IteratorNext:
+	case *CoroutineAdvance:
 		directSlot(e.Cursor, "cursor advancement operand")
 		if e.Reply != nil {
 			directSlot(e.Reply, "coroutine reply")
@@ -1727,10 +1612,10 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		l.verifyControlANF(e.Acquire, true, where)
 		l.verifyControlANF(e.Body, true, where)
 		l.verifyControlANF(e.Release, true, where)
-	case *IteratorScope:
+	case *CoroutineScope:
 		// The node owns invocation. Its two stored expressions only construct
 		// callback values; their latent transports are represented by their
-		// function types and by IteratorScope.Control.
+		// function types and by CoroutineScope.Control.
 		directSlot(e.Producer, "iterator producer")
 		directSlot(e.Consumer, "iterator consumer")
 

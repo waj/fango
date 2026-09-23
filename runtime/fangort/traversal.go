@@ -96,12 +96,7 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 				d.active = cursor.machine
 			}
 			if cursor.started {
-				if err := d.active.resumeLocal(func() any {
-					if cursor.exchange {
-						return event.reply
-					}
-					return UnitValue
-				}()); err != nil {
+				if err := d.active.resumeLocal(event.reply); err != nil {
 					return MachineEvent{}, err
 				}
 			}

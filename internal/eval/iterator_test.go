@@ -51,8 +51,8 @@ func TestIteratorScopeRunsThroughInstalledMachineLowering(t *testing.T) {
 	main := &p.Defs[2]
 	call := main.Body.(*core.App)
 	producer := call.Args[0].(*core.Lambda)
-	label := producer.EffectParams[0]
-	producer.Body = &core.Seq{First: &core.Suspend{Owner: label, Request: &core.VarRef{Name: "captured", Local: true, Ty: b.Int}, Ty: b.Unit}, Then: &core.Suspend{Owner: label, Request: &core.IntLit{Val: 8, Ty: b.Int}, Ty: b.Unit}, Ty: b.Unit}
+	body := producer.Body.(*core.Lambda)
+	body.Body = &core.Seq{First: coretest.Pause(producer, &core.VarRef{Name: "captured", Local: true, Ty: b.Int}), Then: coretest.Pause(producer, &core.IntLit{Val: 8, Ty: b.Int}), Ty: b.Unit}
 	main.Body = &core.Let{Name: "captured", Rhs: &core.IntLit{Val: 7, Ty: b.Int}, Body: call, Ty: main.Type}
 	if errs := core.InferCaptures(p, b); len(errs) != 0 {
 		t.Fatalf("capture inference: %v", errs)
@@ -70,12 +70,12 @@ func TestIteratorScopeRunsThroughInstalledMachineLowering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item, ok := value.(*CtorVal); !ok || item.Ctor.Name != "Maybe.Just" || item.Fields[0] != int64(7) {
+	if item, ok := value.(*CtorVal); !ok || item.Ctor.Name != "Coroutine.Suspended" || item.Fields[0] != int64(7) {
 		t.Fatalf("iterator scope result = %#v, want Just 7", value)
 	}
 	producerWorker := ""
 	for _, closure := range mp.Closures {
-		if closure.Expr == producer {
+		if closure.Expr == body {
 			producerWorker = closure.Worker
 		}
 	}
@@ -84,15 +84,30 @@ func TestIteratorScopeRunsThroughInstalledMachineLowering(t *testing.T) {
 	}
 	left, right := fangort.NewYieldOwner(), fangort.NewYieldOwner()
 	for _, token := range []*fangort.YieldOwner{left, right} {
-		session, err := startMachine(context.Background(), mp, producerWorker, []Value{int64(7), struct{}{}},
-			map[int]*evidence{label.Unique: {yieldOwner: token}}, env, NewIOContext(strings.NewReader(""), io.Discard), false)
+		pause := &Closure{pauseOwner: token, control: types.Control{Transport: types.Machine}}
+		var args []Value
+		for _, closure := range mp.Closures {
+			if closure.Expr != body {
+				continue
+			}
+			for _, capture := range closure.Captures {
+				if capture.Name == "captured" {
+					args = append(args, int64(7))
+				} else {
+					args = append(args, pause)
+				}
+			}
+		}
+		args = append(args, struct{}{})
+		session, err := startMachine(context.Background(), mp, producerWorker, args,
+			nil, env, NewIOContext(strings.NewReader(""), io.Discard), false)
 		if err != nil {
 			t.Fatal(err)
 		}
 		ambient := &evidence{yieldOwner: fangort.NewYieldOwner()}
-		session.interp.evidence = map[int]*evidence{label.Unique: ambient}
+		session.interp.evidence = map[int]*evidence{999: ambient}
 		event, err := session.Run()
-		if err != nil || event.Owner != token || event.Request != int64(7) || session.interp.evidence[label.Unique] != ambient {
+		if err != nil || event.Owner != token || event.Request != int64(7) || session.interp.evidence[999] != ambient {
 			t.Fatalf("yield lost lexical evidence or changed caller evidence: %+v %v", event, err)
 		}
 		event, err = session.Resume(struct{}{})

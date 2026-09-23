@@ -167,21 +167,15 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 		n.Children = append(n.Children, b.tree(e.Tree))
 	case *Suspend:
 		n.Kind = "suspend"
-		if e.Owner.Unique != 0 {
-			effects([]EffectInstance{e.Owner})
-		}
 		children(e.Request)
-	case *IteratorScope:
-		n.Kind, n.Scope, n.Scoped = "iterator", e.Scope, true
+	case *CoroutineScope:
+		n.Kind, n.Scope, n.Scoped = "coroutine", e.Scope, true
 		n.TypeArgs = []types.Type{e.CursorTy}
-		if _, _, _, ok := types.CoroutineProtocol(e.CursorTy); ok {
-			n.Kind = "coroutine"
-			if first, ok := b.sourceType.(*types.TFun); ok {
-				if second, ok := first.Ret.(*types.TFun); ok {
-					if driver, ok := second.Arg.(*types.TFun); ok {
-						if cursor, ok := driver.Arg.(*types.TCon); ok && cursor.Name == types.CoroutineTypeName && len(cursor.Args) == 4 {
-							n.SourceType = cursor.Args[3]
-						}
+		if first, ok := b.sourceType.(*types.TFun); ok {
+			if second, ok := first.Ret.(*types.TFun); ok {
+				if driver, ok := second.Arg.(*types.TFun); ok {
+					if cursor, ok := driver.Arg.(*types.TCon); ok && cursor.Name == types.CoroutineTypeName && len(cursor.Args) == 4 {
+						n.SourceType = cursor.Args[3]
 					}
 				}
 			}
@@ -194,12 +188,10 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 		}
 		children(e.Producer, e.Consumer)
 
-	case *IteratorNext:
-		n.Kind, n.Access = "next", e.Access
+	case *CoroutineAdvance:
+		n.Kind, n.Access = "advance", e.Access
 		if e.Close {
 			n.Kind = "close"
-		} else if e.Reply != nil {
-			n.Kind = "advance"
 		}
 		children(e.Cursor, e.Reply)
 

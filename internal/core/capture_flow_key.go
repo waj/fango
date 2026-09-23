@@ -337,8 +337,6 @@ func (f *flowChecker) keyValue(v flowValue) {
 		b = strconv.AppendInt(b, int64(o.ctor), 10)
 		b = append(b, ':')
 		b = strconv.AppendInt(b, int64(o.owner), 10)
-		b = append(b, ':')
-		b = strconv.AppendInt(b, int64(o.yieldEffect), 10)
 		b = append(b, '{')
 		if o.kind == "completion-abort" {
 			b = append(b, "exit"...)

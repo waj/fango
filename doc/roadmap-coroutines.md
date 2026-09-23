@@ -39,26 +39,15 @@ and see `between` printed before receiving 20. Calling a consumer from an
 ordinary tail-resumptive handler is a push traversal; it does not preserve
 this independently drivable position after the consumer's first call returns.
 
-Reuse the current machinery rather than implementing a second stack model:
-
-| Existing component | General role | Required change |
-| --- | --- | --- |
-| Typed Machine frames and live-local analysis | Saved execution | Keep the representation and selective lowering |
-| Yield owner carried through evidence | Exact suspension destination | Generalize away from Stream identity |
-| Cursor scope and capture contracts | Owned lifetime | General coroutine type and producer capability |
-| Exclusive cursor advancement | One active execution per owner | Cover advance and close, including aliases |
-| Nested pull transfer stack | Calls between owned coroutines | Carry typed replies and completion values |
-| Cursor evidence forwarding | Current advancement's residual handlers | Preserve captured handlers separately |
-| Machine abandonment and cleanup | Disposing of unfinished execution | General close; later allow cleanup to suspend |
-| Maybe packaging | Iterator's public result | Move to a Fango wrapper over a general Step |
-
-See [machines](design/machines.md) and [capture contracts](design/ownership.md)
-for implemented invariants. Source entrypoints include
+The implemented [typed coroutine protocol](design/coroutines.md) reuses
+[Machine frames and dispatch](design/machines.md) and
+[capture contracts](design/ownership.md). Later stages extend that foundation
+with dynamic ownership, suspending cleanup, and native capabilities.
+Source entrypoints include
 [semantic Core](../internal/core/core.go), [Machine IR](../internal/machine/ir.go),
 the [dispatcher](../runtime/fangort/machine.go),
 [nested transfers](../runtime/fangort/traversal.go), and
-[cursor owner](../runtime/fangort/iterator.go). These are starting points for
-refactoring, not a second specification of their existing behavior.
+[cursor owner](../runtime/fangort/iterator.go).
 
 ## Proposed public interface
 
@@ -113,8 +102,8 @@ forwarding and definition-site evidence.
 
 ### Foreign suspension
 
-Nested coroutine execution is implemented. The Stream migration and scheduler
-consumers remain [C2](#c2-ordinary-stream-and-iterator) and
+Nested coroutine execution and the [Stream wrappers](design/coroutines.md#ordinary-pull-libraries)
+are implemented. The scheduler demonstration remains
 [C3](#c3-cooperative-scheduling-demonstration).
 
 ### Discharge proof gate
@@ -126,59 +115,10 @@ regression gate, alongside production inference, codec, and backend tests.
 
 ## Stream and Iterator migration
 
-Source compatibility is not a delivery constraint for this compiler. Keep
-Iterator as the deliberately chosen pull-consumer abstraction: its ordinary
-`next` wrapper hides Unit replies and Step packaging from Stream consumers.
-Do not keep old compiler paths or introduce aliases solely to preserve prior
-contracts. Migrate bundled sources, annotations, diagnostics, and reference
-examples together when the new boundary lands.
-
-Keep `Stream a e` as an ordinary reusable description of a producer. Make
-`Stream.Yield` an ordinary user-handleable effect. Open the generic coroutine
-and install its interpretation inside the producer:
-
-```fango
--- Proposed wrapper skeleton; makeIterator packages next's ordinary closure.
-withProducer producer consumer =
-    Coroutine.with
-        (\pause _ ->
-            handle producer() of
-                Stream.yield value -> resume (pause value))
-        (\work -> consumer (makeIterator work))
-```
-
-Iterator's private wrapper uses a coroutine with Unit reply and result.
-`next` advances with Unit and maps `Suspended value` to `Just value`; both
-`Finished ()` and `Closed` become `Nothing`. Failure propagates before result
-packaging. The compiler need not know Maybe's constructors for this wrapper.
-
-The consumer surface becomes:
-
-```fango
--- Proposed signatures; import Coroutine.Drive explicitly.
-withCursor
-    : Stream a e
-    -> (Iterator a e ->{Drive | e} result)
-    ->{e} result
-
-next : Iterator a e ->{Drive | e} Maybe a
-```
-
-Remove `Iterator.Traversal` and migrate annotations deliberately. Imported
-effects cannot currently be re-exported, and no effect alias feature is added
-merely to preserve that spelling. No compatibility intrinsic remains for it.
-
-Keep `generate`, `yield`, `fromList`, `map`, `filter`, `take`, `fold`, `forEach`,
-`toList`, and `zip` with their current meaning. Preserve first-pull execution,
-reopening effects, `take n` doing no upstream production for nonpositive `n`,
-left-first zip with its possible unmatched left element, bounded stage
-buffering, and stable exhaustion. Yielded capture checks remain in force even
-though the library handler now translates the operation into a generic pause.
-
-After parity tests pass, remove special recognition of `Stream.withProducer`,
-`Stream.Yield`, `Stream.yield`, `Iterator.Iterator`, `Iterator.next`, and
-`Iterator.Traversal`. Compiler-owned general types/operations take their place;
-renaming the Stream module must not affect proof or lowering behavior.
+**DONE.** Stream and Iterator use the [ordinary wrappers](design/coroutines.md#ordinary-pull-libraries)
+over Coroutine. The [reference](reference/library-streams.md) owns their
+signatures, ordinary Yield handling, Drive annotations, demand, and ownership.
+There are no Stream-specific intrinsics or compatibility aliases.
 
 ## Compiler and backend work
 
@@ -198,7 +138,7 @@ checkpoint; C1–C3 together are the first usable replacement foundation.
 | --- | --- | --- |
 | C0: Control and ownership contracts | Implemented Iterator foundation | DONE: feasibility contract and focused models |
 | C1: General typed execution | C0, early Async A0 contract gate | DONE: executable scoped Coroutine, Work, and Completion APIs |
-| C2: Ordinary Stream and Iterator | C1 | Stream behavior with no Stream-specific intrinsics |
+| C2: Ordinary Stream and Iterator | C1 | DONE: Stream behavior with no Stream-specific intrinsics |
 | C3: Cooperative scheduling demonstration | C2 | Shared foundation demonstrated without native concurrency |
 | C4: Scope-owned dynamic allocation | C3, A0; scope design begins with C0 | Coroutines safely retained by a live dynamic owner |
 | C5: Suspending acquisition and cleanup | C1; nested fixtures from C3/C4 | Owners remain live through suspended cleanup |
@@ -211,8 +151,8 @@ checkpoint; C1–C3 together are the first usable replacement foundation.
 C0, the design part of C4, and [Async A0](roadmap-async.md#a0-library-representation-contract)
 form the joint feasibility gate. Focused source probes and test-only models
 remain prerequisite checks for the implemented scoped API. The selected Async
-task encoding must be rechecked against that API before removing the old Stream
-route in C2. C4/C6 implementations are later prerequisites of A1, not circular
+task encoding is rechecked by the [executable C1 representation probe](../testdata/run/async_c1_representation.fango)
+used by C2. C4/C6 implementations are later prerequisites of A1, not circular
 prerequisites of this design gate.
 
 ### C0: Control and ownership contracts
@@ -244,9 +184,8 @@ show rows and transport for the nested scheduler/pull case.
 [typed completion/registry model](../internal/feasibility/tasks_test.go),
 [scoped-effect/package model](../internal/feasibility/scoped_rows_test.go), and
 [typed Machine exchange probe](../internal/feasibility/exchange_test.go).
-The latter exercises the existing private Machine with distinct request,
-reply and result types; the historical Iterator protocol replies Unit and
-drops the final value. Existing runtime foreign-transfer/evidence tests and Core
+The latter exercises the private Machine with distinct request,
+reply and result types. Runtime foreign-transfer/evidence tests and Core
 ownership tests cover reuse of that foundation. Models operate on explicit
 capture sets and closed evidence records: they do **not** prove inference over
 arbitrary source closures, module serialization, or both future backend ABIs.
@@ -266,7 +205,7 @@ Implemented behavior belongs in [Coroutine](reference/library-coroutines.md),
 [Work](reference/library-work.md), and [Completion](reference/library-completion.md).
 The [Coroutine design](design/coroutines.md) owns inference, independent
 Core/Machine proofs, both backend paths, private stop, and serialization.
-Stream retains its original path until C2.
+Stream uses that protocol through the [ordinary C2 wrappers](design/coroutines.md#ordinary-pull-libraries).
 
 **Acceptance:** identical event traces for typed exchange, lazy start, terminal
 reads, failure then Closed, nested owners, captured/per-advance evidence, and
@@ -277,19 +216,15 @@ ordinary direct handlers direct.
 
 ### C2: Ordinary Stream and Iterator
 
-**Dependencies:** C1; validate A0's representation against the executable API.
+**DONE — ordinary wrappers on the generic Coroutine foundation.**
 
-Implement wrappers, migrate Drive annotations, allow ordinary handlers for
-Stream.Yield, and remove Stream-specific compiler recognition and IR. Update
-stdlib, examples, test fixtures, reference signatures, and diagnostics together.
+**Dependencies:** C1 and the executable [A0 representation check](roadmap-async.md#a0-library-representation-contract).
 
-**Acceptance:** existing stream behavior passes through the new route, including
-zip, nested owners, borrowed values, early stop, failure, and bounded lookahead.
-A user module implements another pull abstraction with no compiler registration.
-All old intrinsic identity checks are gone; no compatibility-only compiler path
-remains.
-
-**Stopping point:** existing Stream functionality on the general foundation.
+The [implemented architecture](design/coroutines.md#ordinary-pull-libraries) and
+[reference](reference/library-streams.md) own the contract. Differential fixtures
+cover zip, nested owners, borrowed values, early stop, failure, bounded demand,
+ordinary Yield handlers, and an independently compiled pull library. Stream and
+Iterator have no intrinsic identity checks or compatibility compiler path.
 
 ### C3: Cooperative scheduling demonstration
 

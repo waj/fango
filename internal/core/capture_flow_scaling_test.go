@@ -199,14 +199,14 @@ func TestFlowCachedObligationsReplay(t *testing.T) {
 		t.Run(fmt.Sprint(busy), func(t *testing.T) {
 			f := testFlowChecker()
 			f.generation = 1
-			owner := f.owner(&types.CaptureFlow{ID: 1, Kind: "iterator"}, emptyFlowEnv(), "outside", nil)
+			owner := f.owner(&types.CaptureFlow{ID: 1, Kind: "coroutine"}, emptyFlowEnv(), "outside", nil)
 			f.active[owner] = 1
 			f.synchronous = []synchronousFlow{{phase: "release"}}
 			body := &types.CaptureFlow{ID: 2, Kind: "scalar"}
 			f.invoke("helper", "helper", body, emptyFlowEnv(), flowSite{phase: "left"}, nil, 0)
 			c := f.contexts["c1"]
 			c.accesses = []int{owner}
-			c.suspensions = []int{0}
+			c.suspensions = []flowSuspension{{owner: 0}}
 			c.busy = busy
 			f.location = source.Span{File: source.NewFile("caller.fango", []byte("call")), End: 4}
 			f.invoke("helper", "helper", body, emptyFlowEnv(), flowSite{phase: "right"}, nil, 0)
@@ -319,8 +319,8 @@ func TestFlowRecursiveInputsKeepNestedCursorOwnersDistinct(t *testing.T) {
 		id := f.alloc(site, flowObject{kind: "lambda", code: closure, env: env})
 		return flowValue{refs: []int{id}}
 	}
-	first := f.owner(&types.CaptureFlow{ID: 3, Kind: "iterator", Scoped: true}, emptyFlowEnv(), context.id, nil)
-	second := f.owner(&types.CaptureFlow{ID: 4, Kind: "iterator", Scoped: true}, emptyFlowEnv(), context.id, nil)
+	first := f.owner(&types.CaptureFlow{ID: 3, Kind: "coroutine", Scoped: true}, emptyFlowEnv(), context.id, nil)
+	second := f.owner(&types.CaptureFlow{ID: 4, Kind: "coroutine", Scoped: true}, emptyFlowEnv(), context.id, nil)
 	previous, next := emptyFlowEnv(), emptyFlowEnv()
 	previous.values["callback"] = wrap("first callback", first)
 	next.values["callback"] = wrap("second callback", second)

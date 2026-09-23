@@ -139,15 +139,9 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		}
 		return strings.Join(parts, " ") + " " + pr.Type(e.Ty) + ")"
 	case *Suspend:
-		if e.Owner.Unique != 0 {
-			return fmt.Sprintf("(suspend owner=%s %s %s)", dumpEffect(e.Owner, pr), pr.Type(e.Ty), dumpExpr(e.Request, pr))
-		}
 		return fmt.Sprintf("(suspend %s %s)", pr.Type(e.Ty), dumpExpr(e.Request, pr))
-	case *IteratorScope:
-		form := "iterator-scope"
-		if _, _, _, ok := types.CoroutineProtocol(e.CursorTy); ok {
-			form = "coroutine-scope"
-		}
+	case *CoroutineScope:
+		form := "coroutine-scope"
 		if e.Traversal.Unique != 0 {
 			form += " traversal=" + dumpEffect(e.Traversal, pr)
 		}
@@ -155,14 +149,11 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 			form += "/" + ControlName(e.Control)
 		}
 		return fmt.Sprintf("(%s %d %s %s %s %s)", form, e.Scope, pr.Type(e.CursorTy), pr.Type(e.Ty), dumpExpr(e.Producer, pr), dumpExpr(e.Consumer, pr))
-	case *IteratorNext:
+	case *CoroutineAdvance:
 		if e.Close {
 			return fmt.Sprintf("(coroutine-close access=%d %s)", e.Access, dumpExpr(e.Cursor, pr))
 		}
-		if e.Reply != nil {
-			return fmt.Sprintf("(coroutine-advance access=%d %s %s %s)", e.Access, pr.Type(e.Ty), dumpExpr(e.Cursor, pr), dumpExpr(e.Reply, pr))
-		}
-		return fmt.Sprintf("(iterator-next access=%d %s %s)", e.Access, pr.Type(e.Ty), dumpExpr(e.Cursor, pr))
+		return fmt.Sprintf("(coroutine-advance access=%d %s %s %s)", e.Access, pr.Type(e.Ty), dumpExpr(e.Cursor, pr), dumpExpr(e.Reply, pr))
 	case *Work:
 		parts := []string{"(work", e.Kind, pr.Type(e.Ty)}
 		for _, arg := range e.Args {

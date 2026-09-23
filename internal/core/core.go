@@ -146,26 +146,18 @@ type ControlExit struct {
 	Ty      types.Type
 }
 
-// Suspend is the suspension point produced by Stream.yield elaboration.
-// Request is evaluated before yielding; advancement resumes it with Unit.
-// Host-driven Machine fixtures may use arbitrary resumed types.
-//
-// A Suspend is legal only at the semantic-Core proof boundary accepted by
-// LintMachineInput or below the resolved Stream.withProducer activation
-// boundary accepted by ordinary Lint.
+// Suspend is an explicit Machine suspension used by host-driven IR fixtures.
+// Source programs suspend by invoking a Coroutine pause callback.
 type Suspend struct {
-	// Owner identifies lexical Yield evidence for source suspension. The zero
-	// value is reserved for host-driven, ownerless Machine fixtures.
-	Owner   EffectInstance
 	Request Expr
 	Ty      types.Type
 }
 
-// IteratorScope is the lexical cursor owner boundary. Producer is a Unit callback
-// with Machine transport; Consumer receives the opaque borrowed cursor. The
+// CoroutineScope is the lexical coroutine owner boundary. Producer is a lazy
+// factory accepting a typed pause callback; Consumer receives the owned handle. The
 // boundary drives Producer's machine, so its own Control describes only the
 // residual execution protocol visible to the enclosing computation.
-type IteratorScope struct {
+type CoroutineScope struct {
 	Row       *RowArgument
 	Yield     EffectInstance
 	Traversal EffectInstance
@@ -177,11 +169,11 @@ type IteratorScope struct {
 	Control   types.Control
 }
 
-// IteratorNext advances exactly once. Result supplies the checked Maybe
+// CoroutineAdvance advances exactly once. Result supplies the checked Step
 // constructors used to package the result after the producer transfers back.
-type IteratorNext struct {
-	// Reply selects typed exchange; Close abandons without advancing. Both are
-	// absent on the legacy Iterator operation.
+type CoroutineAdvance struct {
+	// Reply supplies the initial input or the response to a pause. Close
+	// abandons without advancing and has no Reply or Result descriptor.
 	Reply  Expr
 	Close  bool
 	Row    *RowArgument
@@ -415,59 +407,59 @@ func (*Leaf) isTree()       {}
 func (*SwitchCtor) isTree() {}
 func (*SwitchLit) isTree()  {}
 
-func (*IntLit) isExpr()         {}
-func (*FloatLit) isExpr()       {}
-func (*StringLit) isExpr()      {}
-func (*CharLit) isExpr()        {}
-func (*UnitLit) isExpr()        {}
-func (*BoolLit) isExpr()        {}
-func (*VarRef) isExpr()         {}
-func (*Neg) isExpr()            {}
-func (*NativeCall) isExpr()     {}
-func (*Quote) isExpr()          {}
-func (*TypeOf) isExpr()         {}
-func (*If) isExpr()             {}
-func (*Perform) isExpr()        {}
-func (*ControlExit) isExpr()    {}
-func (*Suspend) isExpr()        {}
-func (*IteratorScope) isExpr()  {}
-func (*IteratorNext) isExpr()   {}
-func (*FailureInspect) isExpr() {}
-func (*Handle) isExpr()         {}
-func (*Bracket) isExpr()        {}
-func (*ResumeTail) isExpr()     {}
-func (*Seq) isExpr()            {}
-func (*Let) isExpr()            {}
-func (*Lambda) isExpr()         {}
-func (*App) isExpr()            {}
-func (*Case) isExpr()           {}
+func (*IntLit) isExpr()           {}
+func (*FloatLit) isExpr()         {}
+func (*StringLit) isExpr()        {}
+func (*CharLit) isExpr()          {}
+func (*UnitLit) isExpr()          {}
+func (*BoolLit) isExpr()          {}
+func (*VarRef) isExpr()           {}
+func (*Neg) isExpr()              {}
+func (*NativeCall) isExpr()       {}
+func (*Quote) isExpr()            {}
+func (*TypeOf) isExpr()           {}
+func (*If) isExpr()               {}
+func (*Perform) isExpr()          {}
+func (*ControlExit) isExpr()      {}
+func (*Suspend) isExpr()          {}
+func (*CoroutineScope) isExpr()   {}
+func (*CoroutineAdvance) isExpr() {}
+func (*FailureInspect) isExpr()   {}
+func (*Handle) isExpr()           {}
+func (*Bracket) isExpr()          {}
+func (*ResumeTail) isExpr()       {}
+func (*Seq) isExpr()              {}
+func (*Let) isExpr()              {}
+func (*Lambda) isExpr()           {}
+func (*App) isExpr()              {}
+func (*Case) isExpr()             {}
 
-func (e *IntLit) Type() types.Type         { return e.Ty }
-func (e *FloatLit) Type() types.Type       { return e.Ty }
-func (e *StringLit) Type() types.Type      { return e.Ty }
-func (e *CharLit) Type() types.Type        { return e.Ty }
-func (e *UnitLit) Type() types.Type        { return e.Ty }
-func (e *BoolLit) Type() types.Type        { return e.Ty }
-func (e *VarRef) Type() types.Type         { return e.Ty }
-func (e *Neg) Type() types.Type            { return e.Ty }
-func (e *NativeCall) Type() types.Type     { return e.Ty }
-func (e *Quote) Type() types.Type          { return e.Ty }
-func (e *TypeOf) Type() types.Type         { return e.Ty }
-func (e *If) Type() types.Type             { return e.Ty }
-func (e *Perform) Type() types.Type        { return e.Ty }
-func (e *ControlExit) Type() types.Type    { return e.Ty }
-func (e *Suspend) Type() types.Type        { return e.Ty }
-func (e *IteratorScope) Type() types.Type  { return e.Ty }
-func (e *IteratorNext) Type() types.Type   { return e.Ty }
-func (e *FailureInspect) Type() types.Type { return e.Ty }
-func (e *Handle) Type() types.Type         { return e.Ty }
-func (e *Bracket) Type() types.Type        { return e.Ty }
-func (e *ResumeTail) Type() types.Type     { return e.ClauseResult }
-func (e *Seq) Type() types.Type            { return e.Ty }
-func (e *Let) Type() types.Type            { return e.Ty }
-func (e *Lambda) Type() types.Type         { return e.Ty }
-func (e *App) Type() types.Type            { return e.Ty }
-func (e *Case) Type() types.Type           { return e.Ty }
+func (e *IntLit) Type() types.Type           { return e.Ty }
+func (e *FloatLit) Type() types.Type         { return e.Ty }
+func (e *StringLit) Type() types.Type        { return e.Ty }
+func (e *CharLit) Type() types.Type          { return e.Ty }
+func (e *UnitLit) Type() types.Type          { return e.Ty }
+func (e *BoolLit) Type() types.Type          { return e.Ty }
+func (e *VarRef) Type() types.Type           { return e.Ty }
+func (e *Neg) Type() types.Type              { return e.Ty }
+func (e *NativeCall) Type() types.Type       { return e.Ty }
+func (e *Quote) Type() types.Type            { return e.Ty }
+func (e *TypeOf) Type() types.Type           { return e.Ty }
+func (e *If) Type() types.Type               { return e.Ty }
+func (e *Perform) Type() types.Type          { return e.Ty }
+func (e *ControlExit) Type() types.Type      { return e.Ty }
+func (e *Suspend) Type() types.Type          { return e.Ty }
+func (e *CoroutineScope) Type() types.Type   { return e.Ty }
+func (e *CoroutineAdvance) Type() types.Type { return e.Ty }
+func (e *FailureInspect) Type() types.Type   { return e.Ty }
+func (e *Handle) Type() types.Type           { return e.Ty }
+func (e *Bracket) Type() types.Type          { return e.Ty }
+func (e *ResumeTail) Type() types.Type       { return e.ClauseResult }
+func (e *Seq) Type() types.Type              { return e.Ty }
+func (e *Let) Type() types.Type              { return e.Ty }
+func (e *Lambda) Type() types.Type           { return e.Ty }
+func (e *App) Type() types.Type              { return e.Ty }
+func (e *Case) Type() types.Type             { return e.Ty }
 
 // Mentions reports whether name occurs in e. No-shadowing makes a plain
 // occurrence check exact: nothing inside e can rebind name. Used by the
@@ -487,10 +479,10 @@ func Mentions(e Expr, name string) bool {
 		return false
 	case *Suspend:
 		return Mentions(e.Request, name)
-	case *IteratorScope:
+	case *CoroutineScope:
 		return Mentions(e.Producer, name) || Mentions(e.Consumer, name)
 
-	case *IteratorNext:
+	case *CoroutineAdvance:
 		return Mentions(e.Cursor, name) || Mentions(e.Reply, name)
 	case *Work:
 		for _, arg := range e.Args {

@@ -1,9 +1,10 @@
 import Stream
+import Coroutine
 import Iterator
 import Maybe exposing (Maybe(..))
 import Scope
 
-eachCursor : (a ->{e} ()) -> Iterator.Iterator a e ->{Iterator.Traversal | e} ()
+eachCursor : (a ->{e} ()) -> Iterator.Iterator a e ->{Coroutine.Drive | e} ()
 eachCursor action cursor = case Iterator.next cursor of
     Nothing -> ()
     Just value ->

@@ -49,7 +49,7 @@ func workDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 		con := ck.TypeNames[types.CoroutineTypeName].(*types.TCon)
 		cursor := &types.TCon{Unique: con.Unique, Name: con.Name, Args: []types.Type{q, r, a, ck.B.Unit}}
 		open := &core.Work{Kind: "open", Args: refs[:2], Ty: cursor}
-		n := &core.IteratorNext{Cursor: open, Close: name == types.WorkCloseName, Access: types.ExclusiveAdvance, Ty: result}
+		n := &core.CoroutineAdvance{Cursor: open, Close: name == types.WorkCloseName, Access: types.ExclusiveAdvance, Ty: result}
 		if !n.Close {
 			n.Reply = refs[2]
 			n.Result = ck.ADTs[result.(*types.TCon).Unique]

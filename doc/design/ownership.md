@@ -127,13 +127,14 @@ Iterator is an opaque resource carrying its owner's fresh capability. Aliases,
 helpers, named consumers, constructor fields, and stored callbacks preserve it.
 Independent nested owner sites remain distinct even through the same wrapper.
 
-IteratorNext carries exclusive-advancement metadata. Substitute the actual
+CoroutineAdvance carries exclusive-advancement metadata. Substitute the actual
 cursor and execute its producer contract under that borrow; consumer callbacks
 run after advancement completes. Access summaries remain active at recursive
 joins and across unfinished foreign suspension. Possible overlap is rejected,
 while sequential reads, including reads after exhaustion, are valid.
 
-Yield tracks actual element flow into advancement results and terminal callbacks.
+The producer pause callback tracks actual request flow into advancement results
+and terminal callbacks; Stream's ordinary Yield handler calls that callback.
 Elements may borrow enclosing resources but cannot carry producer-local resources
 past a yield. Recursive accumulator captures reach a fixed point, including
 callback effects reached through a prior iteration. Retained outer residual rows

@@ -54,9 +54,9 @@ intrinsic-specific checks concern ownership and lowering.
 | ResumeTail | Exactly one owning tail resume on each normal path |
 | ControlExit | Operation descriptor, payload, and lexical target agree |
 | Bracket | Only in Scope.bracket; unique scope, Unit release, joined child control |
-| IteratorScope | Only in Stream.withProducer; cursor/Yield owner and callbacks agree |
-| IteratorNext | Checked cursor, Maybe descriptor, residual row, exclusive access |
-| Suspend | Source producer is canonical Stream.yield with available owner evidence |
+| CoroutineScope | Only in Coroutine.with; owner, pause factory, and driver protocols agree |
+| CoroutineAdvance | Checked handle, reply/Step protocol, residual row, exclusive access; close returns Unit |
+| Suspend | Unowned host-driven Machine fixture boundary; not emitted from source |
 | FailureInspect | Checked descriptor and Maybe packaging; no target/resumption access |
 
 ## Residual evidence rows
@@ -123,8 +123,9 @@ and return transformations are ANF-hoisted. Exit emission must inspect an
 Outcome before evaluating the next source expression. Lint checks conventions
 on callees/evidence and rejects control-producing nodes in unhandled slots.
 
-Ordinary lint rejects Machine Core unless the canonical iterator owner enables
-the private boundary. Pre-machine lint admits checked Machine/Suspend nodes
+Ordinary lint rejects Machine Core unless the canonical Coroutine.with owner
+enables the private boundary, and always rejects raw host Suspend nodes.
+Pre-machine lint admits checked Machine/Suspend nodes
 while preserving other semantic invariants; staging additionally admits checked
 quotes/reflected constants. Emission rejects compile-time values. Core dumps
 show non-Direct conventions so ABI decisions remain reviewable.

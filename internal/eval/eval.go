@@ -715,8 +715,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		return &ExitRequest{Target: target, Op: e.Op, Payload: payload, PayloadTypes: descriptors}, nil
 	case *core.Suspend:
 		return nil, fmt.Errorf("eval: compiler-only suspension reached recursive evaluator")
-	case *core.IteratorScope:
-		return in.evalIteratorScope(e, fr)
+	case *core.CoroutineScope:
+		return in.evalCoroutineScope(e, fr)
 
 	case *core.ResumeTail:
 		return nil, fmt.Errorf("eval: ResumeTail outside verified handler-clause evaluation")

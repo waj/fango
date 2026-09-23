@@ -24,6 +24,8 @@ is defined on its outgoing edge, not saved before it exists. Machine lint
 independently recomputes liveness/layout, reachability, successors, and types.
 It proves one cleanup depth at every normal join and no worker-owned pending
 cleanup at return, and checks retained semantic evidence/ownership contracts.
+ANF-generated references retain their local-variable identity so liveness also
+preserves intermediate call results used by later constructor expressions.
 
 Factories and frame fields use the same value representation as ordinary code.
 Open callbacks retain a Machine member even inside otherwise Direct definitions.
@@ -89,55 +91,39 @@ cleanup failure rather than discarding it.
 
 ## Cursor owner and advancement
 
-Stream is an ordinary abstract effect-indexed ADT storing a producer closure.
-Construction, stages, and terminal consumers are Fango; only ownership,
-advancement, and yield need compiler support. Construction and arguments are
-strict, while production begins on first pull. There are no terminal-traversal
-Core nodes.
+[Stream and Iterator](coroutines.md#ordinary-pull-libraries) are ordinary
+library wrappers over typed coroutines. Construction and arguments are strict,
+while production begins on first pull. Core has only the general
+CoroutineScope/CoroutineAdvance boundaries; no Stream or Maybe protocol is
+recognized by lowering.
 
-For the Iterator protocol, IteratorScope appears in the private
-Stream.withProducer intrinsic. The same nodes also implement the distinct
-[typed Coroutine protocol](coroutines.md). The Iterator scope
-retains producer and consumer callbacks, a fresh ScopeID, owned Yield evidence,
-and the opaque Iterator type. Its visible control is the consumer's residual
-control: latent producer Machine transport terminates at the owner. Ordinary
-compilation activates this boundary by canonical identity, not spelling or a
-user-selectable machine flag.
+Both backends open a private pull owner with a lazy pause factory and pass its
+handle to the driver. Advance supplies the initial input or a suspended call's
+reply and drives to a request, completion, or exit. The generated caller and
+interpreter package requests/completion into checked Step constructors; close
+returns Unit. Machine lint independently checks access, evidence, protocol
+types, descriptors, and live locals.
 
-Both backends open a private pull owner and pass it only to the consumer.
-Next resumes the prior yield with Unit and drives to one yield or completion;
-tagged exits remain distinct. Close abandons unfinished production and is safe
-after exhaustion. Failed production leaves the cursor exhausted. Interpreter
-frame factories are keyed by the exact semantic lambda identity; the REPL must
-lower the same expression it displays/evaluates.
-
-Stream.Yield is a reserved compiler-owned effect. Every cursor supplies a fresh
-runtime owner token through normal hidden evidence. Workers, factories, and
-closures preserve it; no ambient current-cursor slot chooses the destination.
-Stream.yield becomes Suspend with owner, element request, and Unit resumed type.
-Source and Core reject ordinary handlers for Yield. Private host fixtures may
-use ownerless suspension with other resumed types.
-
-IteratorNext lowers to CursorAdvance carrying exclusive access and a checked
-nominal Maybe descriptor. It packages yield as Just and exhaustion as Nothing;
-exits propagate before reading the result register. Machine lint independently
-checks access, evidence, element type, descriptor, and live locals.
-
-Each dispatcher has an iterative producer/caller transfer stack. A yield to an
+Each dispatcher has an iterative producer/caller transfer stack. A pause to an
 enclosing owner parks unfinished inner advancements there, retaining their
 exclusive borrows. Abandonment drains inner producers before callers and clears
-transfers. CursorOpen creates the frame and registers closure without running
+transfers. CursorOpen retains the factory and registers closure without running
 producer instructions. CursorClose and unwind share the cleanup protocol. Lint
 tracks exact lexical cursor identities, rejecting a different owner or an
 ordinary cleanup pop in place of cursor closure.
 
-Iterator.Traversal is an owned marker with no runtime evidence parameter; the
-cursor carries advancement identity. Iterator.next's intrinsic annotation must
-expose exactly the cursor's residual row plus nullary Traversal. An owner removes
-only Traversal from outward control. Stream.withCursor uses a synchronous
-Direct/Exit boundary to drive its Machine consumer, registering producer closure
-before the first step. That boundary returns an ordinary value/exit after closing
-and rejects unexpected foreign suspension.
+The producer's pause callback retains a fresh runtime owner token. Workers,
+factories, and closures preserve it; no ambient current-cursor slot chooses the
+destination. Interpreter frame factories are keyed by the exact semantic lambda
+identity; the REPL lowers the same expression it displays/evaluates. Private
+host fixtures can also drive unowned Machine suspension directly.
+
+Drive and Suspension are owned control labels without runtime evidence
+parameters. Owner-sensitive checking determines which obligations a lexical
+boundary consumes; see the [control proof](coroutines.md#protocol-and-control-proof).
+A synchronous Direct/Exit boundary drives its Machine consumer, registering
+producer closure before the first step. It returns an ordinary value/exit
+after closing and rejects unexpected foreign suspension.
 
 ## Residual rows during pulls
 

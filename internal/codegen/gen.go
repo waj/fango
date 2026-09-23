@@ -1132,7 +1132,7 @@ func (g *gen) goType(t types.Type) goast.Expr {
 			g.usesFangort = true
 			return &goast.StarExpr{X: selector("fangort", "WorkPackage")}
 		}
-		if t.Name == types.IteratorTypeName || t.Name == types.CoroutineTypeName {
+		if t.Name == types.CoroutineTypeName {
 			g.usesFangort = true
 			return &goast.StarExpr{X: selector("fangort", "MachineIterator")}
 		}
@@ -1675,8 +1675,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return g.handleExpr(e)
 	case *core.Bracket:
 		return g.bracketExpr(e)
-	case *core.IteratorScope:
-		return g.iteratorScopeExpr(e)
+	case *core.CoroutineScope:
+		return g.coroutineScopeExpr(e)
 
 	default:
 		panic(fmt.Sprintf("codegen: node %T arrives in a later slice", e))
@@ -1952,105 +1952,6 @@ func (g *gen) bracketExpr(e *core.Bracket) goast.Expr {
 		stmts = append(stmts, returnStmt(ident(bodyName)))
 	}
 	return callExpr(funcLit(result, stmts))
-}
-
-// iteratorScopeExpr owns one nested producer machine for the dynamic extent of
-// its consumer callback. The consumer-facing cursor is the runtime owner
-// itself; inferred contracts govern aliases, helper calls, and advancement.
-func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
-	if _, _, _, ok := types.CoroutineProtocol(e.CursorTy); ok {
-		return g.coroutineScopeExpr(e)
-	}
-	overall := e.Control.Resolve(g.control)
-	oldControl, oldResult := g.control, g.resultType
-	g.control, g.resultType = overall, e.Ty
-
-	name := func(kind string) string {
-		n := fmt.Sprintf("t_iterator%s%d", kind, g.tmp)
-		g.tmp++
-		return n
-	}
-	iterator := name("Owner")
-	consumerResult := name("Result")
-	closeExit := name("CloseExit")
-
-	var ownerDecl []goast.Stmt
-	var producerArgs []goast.Expr
-	owner := name("Yield")
-	if e.Yield.Unique != 0 {
-		ownerDecl = append(ownerDecl, varDeclStmt(owner, &goast.StarExpr{X: selector("fangort", "YieldOwner")}, callExpr(selector("fangort", "NewYieldOwner"))))
-		producerArgs = append(producerArgs, ident(owner))
-	}
-	boundary, cursorRow := name("Row"), name("RowOwner")
-	if e.Row != nil {
-		ownerDecl = append(ownerDecl, varDeclStmt(boundary, g.rowType(), g.rowArgument(e.Row)),
-			varDeclStmt(cursorRow, &goast.StarExpr{X: selector("fangort", "CursorEvidence")}, callExpr(selector("fangort", "NewCursorEvidence"), ident(boundary))))
-		producerArgs = append(producerArgs, callExpr(selector(cursorRow, "Row")))
-	}
-	producerArgs = append(producerArgs, g.unitValue())
-	producerFrame := callExpr(callbackMember(g.machineExpr(e.Producer), types.Machine), producerArgs...)
-	start := callExpr(selector("fangort", "StartMachineIterator"), producerFrame)
-	if e.Yield.Unique != 0 {
-		start = callExpr(selector("fangort", "StartOwnedMachineIterator"), ident(owner), producerFrame)
-	}
-	if e.Row != nil {
-		var ownerValue goast.Expr = ident("nil")
-		if e.Yield.Unique != 0 {
-			ownerValue = ident(owner)
-		}
-		start = callExpr(selector("fangort", "StartCursorWithEvidence"), ownerValue, ident(cursorRow), producerFrame)
-	}
-	consumerArgs := []goast.Expr{}
-	if e.Row != nil {
-		consumerArgs = append(consumerArgs, ident(boundary))
-	}
-	consumerArgs = append(consumerArgs, ident(iterator))
-	if e.Traversal.Unique != 0 {
-		consumerFrame := callExpr(callbackMember(g.machineExpr(e.Consumer), types.Machine), consumerArgs...)
-		consume := callExpr(indexExpr(selector("fangort", "RunCursorConsumer"), []goast.Expr{g.goType(e.Ty)}), ident(iterator), consumerFrame)
-		result := g.outcomeType(e.Ty)
-		if overall == types.Direct {
-			consume = callExpr(selector("fangort", "RequireNormal"), consume)
-			result = g.goType(e.Ty)
-		}
-		stmts := append(ownerDecl, varDeclStmt(iterator, &goast.StarExpr{X: selector("fangort", "MachineIterator")}, start), returnStmt(consume))
-		g.control, g.resultType = oldControl, oldResult
-		return callExpr(funcLit(result, stmts))
-	}
-	consume := callExpr(callbackMember(g.expr(e.Consumer, 0), overall), consumerArgs...)
-	resultType := g.goType(e.Ty)
-	consumerExits := overall == types.Exit
-	if consumerExits {
-		resultType = g.outcomeType(e.Ty)
-	}
-	stmts := []goast.Stmt{
-		varDeclStmt(iterator, &goast.StarExpr{X: selector("fangort", "MachineIterator")}, start),
-		varDeclStmt(consumerResult, resultType, consume),
-		varDeclStmt(closeExit, &goast.StarExpr{X: selector("fangort", "ExitRequest")},
-			callExpr(selector("fangort", "CloseMachineIterator"), ident(iterator))),
-	}
-	stmts = append(ownerDecl, stmts...)
-
-	var iifeResult goast.Expr = g.goType(e.Ty)
-	if consumerExits {
-		g.usesFangort = true
-		consumerExit := selector(consumerResult, "Exit")
-		joined := callExpr(selector("fangort", "Suppress"), consumerExit, ident(closeExit))
-		stmts = append(stmts,
-			&goast.IfStmt{Cond: &goast.BinaryExpr{X: consumerExit, Op: gotoken.NEQ, Y: ident("nil")},
-				Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, joined))}}},
-			&goast.IfStmt{Cond: &goast.BinaryExpr{X: ident(closeExit), Op: gotoken.NEQ, Y: ident("nil")},
-				Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(g.propagateOutcome(e.Ty, ident(closeExit)))}}},
-			returnStmt(g.normalOutcome(e.Ty, selector(consumerResult, "Value"))))
-		iifeResult = g.outcomeType(e.Ty)
-	} else {
-		stmts = append(stmts,
-			exprStmt(callExpr(selector("fangort", "AssertNoMachineExit"), ident(closeExit))),
-			returnStmt(ident(consumerResult)))
-	}
-
-	g.control, g.resultType = oldControl, oldResult
-	return callExpr(funcLit(iifeResult, stmts))
 }
 
 // abortHandleExpr installs only a unique target token. Performing an abort

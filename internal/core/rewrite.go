@@ -161,11 +161,10 @@ func (r rewriter) expr(e Expr) Expr {
 		out = &n
 	case *Suspend:
 		n := *e
-		n.Owner = r.effect(e.Owner)
 		n.Ty = r.typ(e.Ty)
 		n.Request = r.expr(e.Request)
 		out = &n
-	case *IteratorScope:
+	case *CoroutineScope:
 		n := *e
 		n.Row = r.row(e.Row)
 		n.Yield = r.effect(e.Yield)
@@ -175,7 +174,7 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Producer = r.expr(e.Producer)
 		n.Consumer = r.expr(e.Consumer)
 		out = &n
-	case *IteratorNext:
+	case *CoroutineAdvance:
 		n := *e
 		n.Row = r.row(e.Row)
 		n.Ty, n.Cursor, n.Reply = r.typ(e.Ty), r.expr(e.Cursor), r.expr(e.Reply)

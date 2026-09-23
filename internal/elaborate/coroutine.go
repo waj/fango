@@ -16,14 +16,14 @@ func coroutineWithDef(ty types.Type, ck *infer.Checker) core.Def {
 	}
 	control := core.ArrowControl(ty, 2)
 	return core.Def{Name: types.CoroutineWithName, Owner: "Coroutine", Type: ty, TyParams: runtimeRigidVars(ty), Params: []string{"_producer", "_consumer"}, ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture()}, Control: control,
-		Body: &core.IteratorScope{Yield: effect(types.CoroutineSuspensionName), Traversal: effect(types.CoroutineDriveName), Scope: scope, Producer: &core.VarRef{Name: "_producer", Local: true, Ty: producer}, Consumer: &core.VarRef{Name: "_consumer", Local: true, Ty: consumer}, CursorTy: consumer.Arg, Ty: result, Control: control}}
+		Body: &core.CoroutineScope{Yield: effect(types.CoroutineSuspensionName), Traversal: effect(types.CoroutineDriveName), Scope: scope, Producer: &core.VarRef{Name: "_producer", Local: true, Ty: producer}, Consumer: &core.VarRef{Name: "_consumer", Local: true, Ty: consumer}, CursorTy: consumer.Arg, Ty: result, Control: control}}
 }
 
 func coroutineAdvanceDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 	arity := types.IntrinsicArity(name)
 	args, result := core.PeelFun(ty, arity)
 	d := core.Def{Name: name, Owner: "Coroutine", Type: ty, TyParams: runtimeRigidVars(ty), Params: []string{"_cursor"}, ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture()}, Control: core.ArrowControl(ty, arity)}
-	n := &core.IteratorNext{Cursor: &core.VarRef{Name: "_cursor", Local: true, Ty: args[0]}, Access: types.ExclusiveAdvance, Ty: result, Close: name == types.CoroutineCloseName}
+	n := &core.CoroutineAdvance{Cursor: &core.VarRef{Name: "_cursor", Local: true, Ty: args[0]}, Access: types.ExclusiveAdvance, Ty: result, Close: name == types.CoroutineCloseName}
 	if !n.Close {
 		d.Params = append(d.Params, "_reply")
 		d.ParamCaptures = append(d.ParamCaptures, ck.Sup.FreshCapture())

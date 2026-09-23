@@ -120,9 +120,6 @@ type LitCase struct {
 // Resumption defines Bind and continues at Next. No continuation value is
 // represented in this IR.
 type Suspend struct {
-	// Owner is preserved from semantic Core, never inferred from the active
-	// dispatcher or cursor. A source yield must name a worker evidence slot.
-	Owner   core.EffectInstance
 	Request core.Expr
 	Bind    Local
 	Next    BlockID

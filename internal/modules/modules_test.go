@@ -23,23 +23,21 @@ func write(t *testing.T, root, rel, body string) string {
 	return p
 }
 
-func TestOnlyBundledYieldEffectGetsSuspensionIdentity(t *testing.T) {
-	decl := func() *ast.EffectDecl { return &ast.EffectDecl{Name: "Yield"} }
-	bundledDecl := decl()
-	bundled := &node{name: "Stream", bundled: true, mod: &ast.Module{Decls: []ast.Decl{bundledDecl}}}
-	if errs := validateModuleDecls(bundled); len(errs) != 0 {
-		t.Fatalf("bundled validation: %+v", errs)
-	}
-	if !bundledDecl.CompilerSuspension {
-		t.Fatal("bundled Yield effect did not receive compiler suspension identity")
-	}
-	localDecl := decl()
-	local := &node{name: "Stream", mod: &ast.Module{Decls: []ast.Decl{localDecl}}}
-	if errs := validateModuleDecls(local); len(errs) != 0 {
-		t.Fatalf("local validation: %+v", errs)
-	}
-	if localDecl.CompilerSuspension {
-		t.Fatal("local Yield spelling received compiler suspension identity")
+func TestOnlyBundledCoroutineControlGetsSuspensionIdentity(t *testing.T) {
+	for _, module := range []string{"Coroutine", "Stream", "Renamed"} {
+		for _, name := range []string{"Suspension", "Drive", "Yield"} {
+			for _, bundled := range []bool{false, true} {
+				decl := &ast.EffectDecl{Name: name}
+				n := &node{name: module, bundled: bundled, mod: &ast.Module{Decls: []ast.Decl{decl}}}
+				if errs := validateModuleDecls(n); len(errs) != 0 {
+					t.Fatal(errs)
+				}
+				want := bundled && module == "Coroutine" && (name == "Suspension" || name == "Drive")
+				if decl.CompilerSuspension != want {
+					t.Fatalf("%s.%s bundled=%v suspension=%v want=%v", module, name, bundled, decl.CompilerSuspension, want)
+				}
+			}
+		}
 	}
 }
 

@@ -71,6 +71,9 @@ func matchSourceRows(pattern, actual types.Type, into map[int]types.Type) {
 	switch p := pattern.(type) {
 	case *types.TVar:
 		if p.Rigid {
+			if row, ok := actual.(types.Row); ok {
+				actual, _ = workRow(row)
+			}
 			// The argument's nominal index identifies the stored computation.
 			// Directional arrow adaptation may widen a later execution view;
 			// it must not overwrite that index with the surrounding driver's row.
@@ -86,11 +89,17 @@ func matchSourceRows(pattern, actual types.Type, into map[int]types.Type) {
 		}
 	case *types.TFun:
 		if a, ok := actual.(*types.TFun); ok {
-			matchSourceRows(p.Arg, a.Arg, into)
+			// A stored value's nominal row index takes precedence over a
+			// widened execution view. Match outward rows along the curried
+			// spine before callback arguments: subtracting a callback's
+			// explicit labels first would lose foreign effects in that row.
+			matchSourceNominalArgs(p, a, into)
 			matchSourceRows(p.Eff, a.Eff, into)
 			matchSourceRows(p.Ret, a.Ret, into)
+			matchSourceRows(p.Arg, a.Arg, into)
 		}
 	case types.Row:
+		p, _ = workRow(p)
 		a, ok := actual.(types.Row)
 		if !ok {
 			if p.Tail != nil && len(p.Labels) == 0 {
@@ -98,6 +107,7 @@ func matchSourceRows(pattern, actual types.Type, into map[int]types.Type) {
 			}
 			return
 		}
+		a, _ = workRow(a)
 		remaining := types.Row{Tail: a.Tail}
 		for _, label := range a.Labels {
 			found := false
@@ -117,6 +127,23 @@ func matchSourceRows(pattern, actual types.Type, into map[int]types.Type) {
 		}
 		if p.Tail != nil {
 			matchSourceRows(p.Tail, remaining, into)
+		}
+	}
+}
+
+// Stored row indices also occur in driver callback parameters and later
+// curried arguments. Find them before any widened execution view binds a row.
+func matchSourceNominalArgs(pattern, actual *types.TFun, into map[int]types.Type) {
+	if _, nominal := pattern.Arg.(*types.TCon); nominal {
+		matchSourceRows(pattern.Arg, actual.Arg, into)
+	} else if p, ok := pattern.Arg.(*types.TFun); ok {
+		if a, ok := actual.Arg.(*types.TFun); ok {
+			matchSourceNominalArgs(p, a, into)
+		}
+	}
+	if p, ok := pattern.Ret.(*types.TFun); ok {
+		if a, ok := actual.Ret.(*types.TFun); ok {
+			matchSourceNominalArgs(p, a, into)
 		}
 	}
 }

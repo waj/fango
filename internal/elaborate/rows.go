@@ -128,13 +128,13 @@ func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[i
 			for i := range e.EvidenceArgs {
 				resolve(&e.EvidenceArgs[i])
 			}
-		case *core.IteratorScope:
+		case *core.CoroutineScope:
 			arity := 1
 			if _, _, _, ok := types.CoroutineProtocol(e.CursorTy); ok {
 				arity = 2
 			}
 			bind(&e.Row, core.ArrowOpenRow(e.Producer.Type(), arity))
-		case *core.IteratorNext:
+		case *core.CoroutineAdvance:
 			bind(&e.Row, true)
 		case *core.Completion:
 			bind(&e.Row, e.Name != types.CompletionFailureName)
@@ -142,8 +142,6 @@ func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[i
 			resolve(&e.Effect)
 		case *core.ControlExit:
 			resolve(&e.Effect)
-		case *core.Suspend:
-			resolve(&e.Owner)
 		}
 		return true
 	})

@@ -4,35 +4,27 @@ package types
 // nodes. Recognition uses resolved declaration identity, never user spelling.
 const (
 	// ScopeBracketName owns synchronous resource cleanup on normal and abort exits.
-	ScopeBracketName        = "Scope.bracket"
-	CoroutineTypeName       = "Coroutine.Coroutine"
-	CoroutineStepName       = "Coroutine.Step"
-	CoroutineWithName       = "Coroutine.with"
-	CoroutineAdvanceName    = "Coroutine.advance"
-	CoroutineCloseName      = "Coroutine.close"
-	CoroutineSuspensionName = "Coroutine.Suspension"
-	CoroutineDriveName      = "Coroutine.Drive"
-	// StreamWithProducerName owns a private cursor for its consumer's extent.
-	StreamWithProducerName = "Stream.withProducer"
-	// StreamYieldEffectName carries the lexical owner token for suspension.
-	StreamYieldEffectName       = "Stream.Yield"
-	StreamYieldName             = "Stream.yield"
-	IteratorTypeName            = "Iterator.Iterator"
-	IteratorNextName            = "Iterator.next"
-	IteratorTraversalEffectName = "Iterator.Traversal"
-	FailureTypeName             = "Failure.Failure"
-	FailureArgumentName         = "Failure.argument"
-	FailureEffectName           = "Failure.effectName"
-	FailureOperationName        = "Failure.operationName"
-	FailureArgumentCountName    = "Failure.argumentCount"
-	FailureSuppressedName       = "Failure.suppressed"
-	FailAttemptReportName       = "Fail.attemptReport"
+	ScopeBracketName         = "Scope.bracket"
+	CoroutineTypeName        = "Coroutine.Coroutine"
+	CoroutineStepName        = "Coroutine.Step"
+	CoroutineWithName        = "Coroutine.with"
+	CoroutineAdvanceName     = "Coroutine.advance"
+	CoroutineCloseName       = "Coroutine.close"
+	CoroutineSuspensionName  = "Coroutine.Suspension"
+	CoroutineDriveName       = "Coroutine.Drive"
+	FailureTypeName          = "Failure.Failure"
+	FailureArgumentName      = "Failure.argument"
+	FailureEffectName        = "Failure.effectName"
+	FailureOperationName     = "Failure.operationName"
+	FailureArgumentCountName = "Failure.argumentCount"
+	FailureSuppressedName    = "Failure.suppressed"
+	FailAttemptReportName    = "Fail.attemptReport"
 )
 
 // RuntimeEvidenceEffect reports whether a row label needs runtime evidence.
-// IO is ambient. Traversal uses the cursor's checked advancement identity.
+// IO is ambient. Coroutine control uses checked owner identities.
 func RuntimeEvidenceEffect(label EffLabel) bool {
-	return SurfaceName(label.Name) != "IO" && !(label.Suspension && (label.Name == IteratorTraversalEffectName || label.Name == CoroutineDriveName || label.Name == CoroutineSuspensionName))
+	return SurfaceName(label.Name) != "IO" && !(label.Suspension && (label.Name == CoroutineDriveName || label.Name == CoroutineSuspensionName))
 }
 
 // CursorAccess is advancement proof metadata. Zero is deliberately invalid.
@@ -56,9 +48,9 @@ func IntrinsicArity(name string) int {
 		return 3
 	case ScopeBracketName:
 		return 3
-	case StreamWithProducerName, CoroutineWithName, CoroutineAdvanceName, FailureArgumentName:
+	case CoroutineWithName, CoroutineAdvanceName, FailureArgumentName:
 		return 2
-	case CoroutineCloseName, IteratorNextName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailAttemptReportName:
+	case CoroutineCloseName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailAttemptReportName:
 		return 1
 	}
 	return 0

@@ -6,7 +6,7 @@ import "fmt"
 // Its argument and both suspension edges have the protocol checked by Core and
 // Machine lint; generated module code performs their concrete projections.
 func StartMachineCoroutine(owner *YieldOwner, evidence *CursorEvidence, start func(any) MachineFrame) *MachineIterator {
-	return &MachineIterator{owner: owner, evidence: evidence, start: start, exchange: true}
+	return &MachineIterator{owner: owner, evidence: evidence, start: start}
 }
 
 func (it *MachineIterator) begin(input any) error {

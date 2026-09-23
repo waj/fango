@@ -292,7 +292,7 @@ func (ev *evaluator) run(operand ast.Expr) (any, []diag.Error) {
 			return nil, es
 		}
 	}
-	if ev.ck.Intrinsics[types.StreamWithProducerName].Body != nil || ev.ck.Intrinsics[types.IteratorNextName].Body != nil || ev.ck.Intrinsics[types.CoroutineWithName].Body != nil {
+	if ev.ck.Intrinsics[types.CoroutineWithName].Body != nil {
 		defs := ev.executionDefs(body, aux)
 		p := ev.program(defs)
 		if captureErrs := core.InferCaptures(p, ev.ck.B); len(captureErrs) > 0 {

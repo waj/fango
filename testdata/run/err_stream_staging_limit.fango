@@ -1,9 +1,10 @@
 import Stream
+import Coroutine
 import Iterator
 import Maybe exposing (Maybe(..))
 import Meta exposing (Code)
 
-foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Iterator.Traversal | e} b
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Coroutine.Drive | e} b
 foldCursor combine initial cursor = case Iterator.next cursor of
     Nothing -> initial
     Just value -> foldCursor combine (combine value initial) cursor

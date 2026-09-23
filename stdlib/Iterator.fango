@@ -1,16 +1,18 @@
 {-# no-prelude #-}
-module Iterator exposing (Iterator, Traversal, next)
+module Iterator exposing (Iterator, fromCoroutine, next)
 
 import Basics exposing (..)
+import Coroutine exposing (Coroutine, Drive, Step(..), advance)
 import Maybe exposing (Maybe(..))
 
-effect Traversal
-    advance : () -> ()
-
--- The private field establishes the element and latent effect-row kinds.
--- Cursor values and their producer state are supplied by the compiler.
 {-# resource #-}
-type Iterator a e = Iterator (() ->{e} a)
+type Iterator a e = Iterator (Coroutine a () () e)
 
-next : Iterator a e ->{Traversal | e} Maybe a
-next = native
+fromCoroutine : Coroutine a () () e -> Iterator a e
+fromCoroutine work = Iterator work
+
+next : Iterator a e ->{Drive | e} Maybe a
+next (Iterator work) = case advance work () of
+    Suspended value -> Just value
+    Finished () -> Nothing
+    Closed -> Nothing

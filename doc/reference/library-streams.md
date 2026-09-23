@@ -32,7 +32,10 @@ toList : Stream a e ->{e} List a
 zip : Stream a e -> Stream b e -> Stream (a, b) e
 ```
 
-These names belong to `Stream`, including its compiler-owned `Yield` effect.
+These names belong to `Stream`, including its ordinary, user-handleable `Yield`
+effect. Stream interprets `yield` with the producer's scoped
+[Coroutine pause callback](library-coroutines.md); a user handler can instead
+interpret it like any other resumptive operation.
 `fold` passes the element before the accumulator. `take n` starts no upstream
 production when `n <= 0`. `zip` pulls left first and can consume one unmatched
 left element when right ends. Stages retain bounded buffering; `toList`
@@ -43,20 +46,24 @@ Custom consumers use `Stream.withCursor` and `Iterator.next`:
 ```fango
 withCursor
     : Stream a e
-    -> (Iterator a e ->{Traversal | e} result)
+    -> (Iterator a e ->{Drive | e} result)
     ->{e} result
 
-next : Iterator a e ->{Traversal | e} Maybe a
+next : Iterator a e ->{Drive | e} Maybe a
+fromCoroutine : Coroutine a () () e -> Iterator a e
 ```
 
-`Iterator a e` is an opaque resource, and `Iterator.Traversal` is a
-compiler-owned effect. Named consumers, aliases, sequential reads, helper
+Import `Coroutine.Drive` for consumer annotations. `Iterator a e` is an ordinary
+opaque resource wrapping `Coroutine a () () e`; `Iterator.fromCoroutine` adapts
+an existing coroutine without changing its owner or lifetime. `next` advances
+with Unit and maps `Suspended value` to `Just value`, and both `Finished ()` and
+`Closed` to `Nothing`. Named consumers, aliases, sequential reads, helper
 calls, and temporary ADTs or closures can use a cursor within its owner.
 Returning it, returning a closure or ADT that retains it, or storing it in an
 outer handler reports `RESOURCE ESCAPES`. Unrelated closures may be returned.
 Overlapping or possibly overlapping advancement reports
-`ITERATOR ADVANCEMENT CONFLICT`. Ordinary handling of `Yield` or `Traversal`
-reports `COMPILER-OWNED EFFECT`.
+`ITERATOR ADVANCEMENT CONFLICT`. Ordinary handling of Coroutine's `Drive` or
+`Suspension` reports `COMPILER-OWNED EFFECT`.
 
 Exhaustion keeps returning `Nothing`. A producer failure closes its cursor.
 When a producer's residual effect has no handler at description construction,

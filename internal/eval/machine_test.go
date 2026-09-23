@@ -431,6 +431,9 @@ func startMachineTest(t *testing.T, p *core.Prog, mp *machineir.Prog, entry stri
 	t.Helper()
 	env := NewEnv()
 	env.DefineProg(p)
+	if err := env.DefineMachineProg(mp); err != nil {
+		t.Fatal(err)
+	}
 	session, err := StartMachine(context.Background(), mp, entry, args, env, NewIOContext(strings.NewReader(""), io.Discard))
 	if err != nil {
 		t.Fatalf("StartMachine: %v", err)

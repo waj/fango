@@ -88,7 +88,7 @@ type Session struct {
 	// promptDefs is the active Core generation of each prompt-defined worker
 	// or value. The ordinary evaluator installs these incrementally; selective
 	// machine lowering needs the same active set when a later expression passes
-	// a named producer to Stream.withProducer.
+	// a named producer to Coroutine.with.
 	promptDefs map[string]core.Def
 }
 
@@ -727,7 +727,7 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	display := elaborate.Display(coreExpr, s.ck, "")
-	if s.ck.Intrinsics[types.StreamWithProducerName].Body != nil || s.ck.Intrinsics[types.IteratorNextName].Body != nil || s.ck.Intrinsics[types.CoroutineWithName].Body != nil {
+	if s.ck.Intrinsics[types.CoroutineWithName].Body != nil {
 		defs := append(s.activeExecutionDefs(), aux...)
 		defs = append(defs, core.Def{Name: "_repl_expression", Type: display.Type(), Control: core.ExprControl(display), Body: display})
 		machineProg, lowerErrs := machineir.Lower(s.program(defs), s.ck.B)

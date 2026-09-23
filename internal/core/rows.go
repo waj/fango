@@ -95,9 +95,9 @@ func ExpressionRow(e Expr) *RowArgument {
 		return e.Row
 	case *App:
 		return e.Row
-	case *IteratorScope:
+	case *CoroutineScope:
 		return e.Row
-	case *IteratorNext:
+	case *CoroutineAdvance:
 		return e.Row
 	}
 	return nil
@@ -180,13 +180,9 @@ func CheckRowEvidence(p *Prog) []error {
 				} else if e.CalleeKind == Value {
 					needsRow = ArrowOpenRow(e.Callee.Type(), 1)
 				}
-			case *IteratorScope:
-				arity := 1
-				if _, _, _, ok := types.CoroutineProtocol(e.CursorTy); ok {
-					arity = 2
-				}
-				needsRow = ArrowOpenRow(e.Producer.Type(), arity)
-			case *IteratorNext:
+			case *CoroutineScope:
+				needsRow = ArrowOpenRow(e.Producer.Type(), 2)
+			case *CoroutineAdvance:
 				needsRow = true
 			case *Completion:
 				needsRow = e.Name != types.CompletionFailureName

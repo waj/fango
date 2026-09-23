@@ -51,15 +51,13 @@ func FreeEvidence(expr Expr) map[int]EffectInstance {
 				use(e.Effect)
 			case *ControlExit:
 				use(e.Effect)
-			case *Suspend:
-				use(e.Owner)
-			case *IteratorScope:
+			case *CoroutineScope:
 				if e.Row != nil {
 					for _, ev := range e.Row.Effects {
 						use(ev)
 					}
 				}
-			case *IteratorNext:
+			case *CoroutineAdvance:
 				if e.Row != nil {
 					for _, ev := range e.Row.Effects {
 						use(ev)

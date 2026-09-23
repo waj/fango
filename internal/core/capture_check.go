@@ -329,13 +329,10 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		r.uses = types.UnionCaptures(r.uses, RowCaptures(e.Row))
 		return r
 	case *Suspend:
-		// Yield retains its request's captures in the ownership flow graph;
-		// its ordinary expression result is Unit.
 		r := a.expr(e.Request, env, evidence)
-		r.uses = types.UnionCaptures(r.uses, e.Owner.Captures, captureEvidence(evidence, e.Owner.Unique))
 		r.value = types.CaptureSet{}
 		return r
-	case *IteratorScope:
+	case *CoroutineScope:
 		producer := a.expr(e.Producer, env, evidence)
 		consumer := a.expr(e.Consumer, env, evidence)
 		value := types.UnionCaptures(producer.value, consumer.value)
@@ -343,7 +340,7 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			value = types.CaptureSet{}
 		}
 		return captureResult{value: value, uses: types.UnionCaptures(producer.uses, consumer.uses, RowCaptures(e.Row))}
-	case *IteratorNext:
+	case *CoroutineAdvance:
 		r := children(e.Cursor, e.Reply)
 		r.uses = types.UnionCaptures(r.uses, RowCaptures(e.Row))
 		if !a.canCarry(e.Ty, nil) {

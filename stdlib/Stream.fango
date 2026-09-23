@@ -2,7 +2,8 @@
 module Stream exposing (Stream, Yield, filter, fold, forEach, fromList, generate, map, take, toList, withCursor, yield, zip)
 
 import Basics exposing (..)
-import Iterator exposing (Iterator, Traversal, next)
+import Coroutine exposing (Drive)
+import Iterator exposing (Iterator, next)
 import List exposing (List)
 import Maybe exposing (Maybe(..))
 
@@ -14,17 +15,20 @@ type Stream a e = Stream (() ->{Yield a | e} ())
 generate : (() ->{Yield a | e} ()) -> Stream a e
 generate producer = Stream producer
 
-withProducer : (() ->{Yield a | e} ()) -> (Iterator a e ->{Traversal | e} result) ->{e} result
-withProducer = native
+withProducer : (() ->{Yield a | e} ()) -> (Iterator a e ->{Drive | e} result) ->{e} result
+withProducer producer consumer = Coroutine.with
+    (\pause _ -> handle producer () of
+        yield value -> resume (pause value))
+    (\work -> consumer (Iterator.fromCoroutine work))
 
-withCursor : Stream a e -> (Iterator a e ->{Traversal | e} result) ->{e} result
+withCursor : Stream a e -> (Iterator a e ->{Drive | e} result) ->{e} result
 withCursor source consumer = case source of
     Stream producer -> withProducer producer consumer
 
 fromList : List a -> Stream a e
 fromList values = generate (\_ -> List.each yield values)
 
-mapCursor : (a ->{e} b) -> Iterator a e ->{Traversal, Yield b | e} ()
+mapCursor : (a ->{e} b) -> Iterator a e ->{Drive, Yield b | e} ()
 mapCursor action cursor = case next cursor of
     Nothing -> ()
     Just value ->
@@ -34,7 +38,7 @@ mapCursor action cursor = case next cursor of
 map : (a ->{e} b) -> Stream a e -> Stream b e
 map action source = generate (\_ -> withCursor source (mapCursor action))
 
-filterCursor : (a ->{e} Bool) -> Iterator a e ->{Traversal, Yield a | e} ()
+filterCursor : (a ->{e} Bool) -> Iterator a e ->{Drive, Yield a | e} ()
 filterCursor predicate cursor = case next cursor of
     Nothing -> ()
     Just value ->
@@ -44,7 +48,7 @@ filterCursor predicate cursor = case next cursor of
 filter : (a ->{e} Bool) -> Stream a e -> Stream a e
 filter predicate source = generate (\_ -> withCursor source (filterCursor predicate))
 
-takeCursor : Int -> Iterator a e ->{Traversal, Yield a | e} ()
+takeCursor : Int -> Iterator a e ->{Drive, Yield a | e} ()
 takeCursor count cursor =
     if count <= 0 then ()
     else
@@ -57,7 +61,7 @@ takeCursor count cursor =
 take : Int -> Stream a e -> Stream a e
 take count source = generate (\_ -> if count <= 0 then () else withCursor source (takeCursor count))
 
-foldCursor : (a -> b ->{e} b) -> b -> Iterator a e ->{Traversal | e} b
+foldCursor : (a -> b ->{e} b) -> b -> Iterator a e ->{Drive | e} b
 foldCursor combine accumulator cursor = case next cursor of
     Nothing -> accumulator
     Just value -> foldCursor combine (combine value accumulator) cursor
@@ -71,7 +75,7 @@ forEach action source = fold (\value _ -> action value) () source
 toList : Stream a e ->{e} List a
 toList source = List.reverse (fold (\value values -> [value | values]) [] source)
 
-zipCursors : Iterator a e -> Iterator b e ->{Traversal, Yield (a, b) | e} ()
+zipCursors : Iterator a e -> Iterator b e ->{Drive, Yield (a, b) | e} ()
 zipCursors left right = case next left of
     Nothing -> ()
     Just a -> case next right of
@@ -80,5 +84,8 @@ zipCursors left right = case next left of
             yield (a, b)
             zipCursors left right
 
+zipLeft : Stream b e -> Iterator a e ->{Drive, Yield (a, b) | e} ()
+zipLeft right leftCursor = withCursor right (zipCursors leftCursor)
+
 zip : Stream a e -> Stream b e -> Stream (a, b) e
-zip left right = generate (\_ -> withCursor left (\leftCursor -> withCursor right (zipCursors leftCursor)))
+zip left right = generate (\_ -> withCursor left (zipLeft right))

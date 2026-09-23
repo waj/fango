@@ -38,9 +38,9 @@ func ExprControl(e Expr) types.Control {
 		return types.Control{Transport: types.Exit}
 	case *Suspend:
 		return types.JoinControl(types.Control{Transport: types.Machine}, ExprControl(e.Request))
-	case *IteratorNext:
+	case *CoroutineAdvance:
 		return types.JoinControl(types.Control{Transport: types.Machine}, ExprControl(e.Cursor), ExprControl(e.Reply))
-	case *IteratorScope:
+	case *CoroutineScope:
 		// Producer's latent Machine protocol is consumed by this owner rather
 		// than joined into the enclosing computation.
 		return types.JoinControl(e.Control, ExprControl(e.Producer), ExprControl(e.Consumer))

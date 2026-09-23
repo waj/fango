@@ -102,13 +102,14 @@ func TestCoroutineContractsSurviveCodecsAndRejectStaleProofs(t *testing.T) {
 		name, worker, want string
 		damage             func(core.Expr)
 	}{
-		{"scope identity", types.CoroutineWithName, "invalid or reused coroutine owner", func(e core.Expr) { e.(*core.IteratorScope).Scope = 0 }},
-		{"scope evidence", types.CoroutineWithName, "invalid coroutine control owner", func(e core.Expr) { e.(*core.IteratorScope).Yield.Captures = types.CaptureSet{} }},
-		{"producer protocol", types.CoroutineWithName, "inconsistent request/reply/result protocol", func(e core.Expr) { s := e.(*core.IteratorScope); s.Producer = s.Consumer }},
-		{"typed reply", types.CoroutineAdvanceName, "reply type disagrees", func(e core.Expr) { n := e.(*core.IteratorNext); n.Reply = n.Cursor }},
-		{"Step descriptor", types.CoroutineAdvanceName, "invalid coroutine Step result", func(e core.Expr) { e.(*core.IteratorNext).Result = nil }},
-		{"exclusive access", types.CoroutineAdvanceName, "lacks exclusive access proof", func(e core.Expr) { e.(*core.IteratorNext).Access = 0 }},
-		{"close protocol", types.CoroutineCloseName, "invalid coroutine close protocol", func(e core.Expr) { n := e.(*core.IteratorNext); n.Reply = n.Cursor }},
+		{"scope identity", types.CoroutineWithName, "invalid or reused coroutine owner", func(e core.Expr) { e.(*core.CoroutineScope).Scope = 0 }},
+		{"scope evidence", types.CoroutineWithName, "invalid coroutine control owner", func(e core.Expr) { e.(*core.CoroutineScope).Yield.Captures = types.CaptureSet{} }},
+		{"producer protocol", types.CoroutineWithName, "inconsistent request/reply/result protocol", func(e core.Expr) { s := e.(*core.CoroutineScope); s.Producer = s.Consumer }},
+		{"typed reply", types.CoroutineAdvanceName, "reply type disagrees", func(e core.Expr) { n := e.(*core.CoroutineAdvance); n.Reply = n.Cursor }},
+		{"missing handle", types.CoroutineAdvanceName, "has no handle", func(e core.Expr) { e.(*core.CoroutineAdvance).Cursor = nil }},
+		{"Step descriptor", types.CoroutineAdvanceName, "invalid coroutine Step result", func(e core.Expr) { e.(*core.CoroutineAdvance).Result = nil }},
+		{"exclusive access", types.CoroutineAdvanceName, "lacks exclusive access proof", func(e core.Expr) { e.(*core.CoroutineAdvance).Access = 0 }},
+		{"close protocol", types.CoroutineCloseName, "invalid coroutine close protocol", func(e core.Expr) { n := e.(*core.CoroutineAdvance); n.Reply = n.Cursor }},
 	} {
 		t.Run("Core/"+test.name, func(t *testing.T) {
 			p := restore(t)

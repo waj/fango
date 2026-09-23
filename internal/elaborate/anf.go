@@ -106,7 +106,7 @@ func (el *elab) anfSlot(e core.Expr) (core.Expr, []hoist) {
 		norm, hoists := el.anfAssign(e)
 		name := fmt.Sprintf("_h%d", el.tmp)
 		el.tmp++
-		return &core.VarRef{Name: name, Ty: norm.Type()}, append(hoists, hoist{name: name, rhs: norm})
+		return &core.VarRef{Name: name, Local: true, Ty: norm.Type()}, append(hoists, hoist{name: name, rhs: norm})
 	case *core.Let:
 		// A Let in an expression slot stays put (codegen's IIFE handles it);
 		// normalize inside without leaking hoists across the binding.
@@ -119,7 +119,7 @@ func (el *elab) anfSlot(e core.Expr) (core.Expr, []hoist) {
 		if control := core.ExprControl(out); control.Transport != types.Direct || control.Polymorphic {
 			name := fmt.Sprintf("_control%d", el.tmp)
 			el.tmp++
-			return &core.VarRef{Name: name, Ty: out.Type()}, []hoist{{name: name, rhs: out}}
+			return &core.VarRef{Name: name, Local: true, Ty: out.Type()}, []hoist{{name: name, rhs: out}}
 		}
 		return out, nil
 	default:
@@ -127,7 +127,7 @@ func (el *elab) anfSlot(e core.Expr) (core.Expr, []hoist) {
 		if control := core.ExprControl(out); control.Transport != types.Direct || control.Polymorphic {
 			name := fmt.Sprintf("_control%d", el.tmp)
 			el.tmp++
-			return &core.VarRef{Name: name, Ty: out.Type()}, append(hoists, hoist{name: name, rhs: out})
+			return &core.VarRef{Name: name, Local: true, Ty: out.Type()}, append(hoists, hoist{name: name, rhs: out})
 		}
 		return out, hoists
 	}
@@ -189,11 +189,11 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		}
 		return &core.Perform{Origin: e.Origin, Op: e.Op, Effect: e.Effect, Args: args, Ty: e.Ty, Control: e.Control}, hoists
 	case *core.Suspend:
-		return &core.Suspend{Owner: e.Owner, Request: slot(e.Request), Ty: e.Ty}, hoists
-	case *core.IteratorNext:
-		return &core.IteratorNext{Cursor: slot(e.Cursor), Reply: slot(e.Reply), Close: e.Close, Result: e.Result, Access: e.Access, Ty: e.Ty, Row: e.Row}, hoists
-	case *core.IteratorScope:
-		return &core.IteratorScope{Yield: e.Yield, Traversal: e.Traversal, Scope: e.Scope, Producer: slot(e.Producer), Consumer: slot(e.Consumer), CursorTy: e.CursorTy, Ty: e.Ty, Control: e.Control, Row: e.Row}, hoists
+		return &core.Suspend{Request: slot(e.Request), Ty: e.Ty}, hoists
+	case *core.CoroutineAdvance:
+		return &core.CoroutineAdvance{Cursor: slot(e.Cursor), Reply: slot(e.Reply), Close: e.Close, Result: e.Result, Access: e.Access, Ty: e.Ty, Row: e.Row}, hoists
+	case *core.CoroutineScope:
+		return &core.CoroutineScope{Yield: e.Yield, Traversal: e.Traversal, Scope: e.Scope, Producer: slot(e.Producer), Consumer: slot(e.Consumer), CursorTy: e.CursorTy, Ty: e.Ty, Control: e.Control, Row: e.Row}, hoists
 
 	case *core.ResumeTail:
 		var next core.Expr

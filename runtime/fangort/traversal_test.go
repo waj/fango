@@ -46,7 +46,7 @@ func (f *forwardingFrame) Step(m *Machine) MachineStep {
 		input := f.input
 		m.PushCleanup(func() *ExitRequest { return CloseMachineIterator(input) })
 		f.pc = 1
-		return MachineStep{Kind: MachineAdvance, Cursor: f.input, Evidence: f.row}
+		return MachineStep{Kind: MachineAdvance, Cursor: f.input, Reply: UnitValue, Evidence: f.row}
 	case 1:
 		result := m.TakeResult().(CursorResult)
 		if result.Exit != nil {
@@ -60,7 +60,7 @@ func (f *forwardingFrame) Step(m *Machine) MachineStep {
 	default:
 		m.TakeResult()
 		f.pc = 1
-		return MachineStep{Kind: MachineAdvance, Cursor: f.input, Evidence: f.row}
+		return MachineStep{Kind: MachineAdvance, Cursor: f.input, Reply: UnitValue, Evidence: f.row}
 	}
 }
 func (f *forwardingFrame) Clear() { *f = forwardingFrame{} }
@@ -93,7 +93,7 @@ func (f *collectingFrame) Step(m *Machine) MachineStep {
 			return MachineStep{Kind: MachineReturn, Value: f.limit}
 		}
 	}
-	return MachineStep{Kind: MachineAdvance, Cursor: f.input}
+	return MachineStep{Kind: MachineAdvance, Cursor: f.input, Reply: UnitValue}
 }
 func (f *collectingFrame) Clear() { *f = collectingFrame{} }
 

@@ -1,0 +1,49 @@
+import Coroutine
+import Completion
+import Work
+import Fail
+import Scope
+
+-- Executable A0 representation probe. C6a's cells are still required to retain
+-- these typed observations independently of their publication callbacks.
+type Task a e = Task (Completion.Completion a e)
+
+await : Task a e ->{e} a
+await (Task completed) = Completion.replay completed
+
+captureTask : (() ->{e} a) ->{e} Task a e
+captureTask action = Task (Completion.capture action)
+
+effect Async
+    checkpoint : () -> ()
+
+job : (() ->{e} a) -> (Task a e ->{e} ()) -> (() ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension | e} ()
+job action publish pause () =
+    handle checkpoint () of
+        checkpoint () -> resume (pause ())
+    completed = captureTask action
+    publish completed
+
+runJobs : Work.Owner e -> List (Work.Work () () ()) ->{Coroutine.Drive | e} ()
+runJobs owner jobs = List.each (\work ->
+    printStep (Work.advance owner work ())
+    printStep (Work.advance owner work ())) jobs
+
+printStep : Coroutine.Step () () -> ()
+printStep _ = ()
+
+dispatch : Coroutine.Coroutine () () () e -> Coroutine.Coroutine () () () e ->{Coroutine.Drive | e} ()
+dispatch left right = Work.run (\owner ->
+    jobs = [Work.pack (Work.facet owner) left, Work.pack (Work.facet owner) right]
+    runJobs owner jobs)
+
+main() =
+    print (Fail.attempt (\_ ->
+        Coroutine.with (job (\_ -> 42) (\task ->
+            print (await task)
+            print (await task))) (\intWork ->
+            Coroutine.with (job (\_ -> Scope.finally (\_ ->
+                Fail.fail "String failure"
+                "unreachable") (\_ -> print "released")) (\task ->
+                    print (Fail.attempt (\_ -> await task))
+                    print (Fail.attempt (\_ -> await task)))) (dispatch intWork))))

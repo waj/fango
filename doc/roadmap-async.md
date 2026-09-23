@@ -326,9 +326,10 @@ This is a conditional implementation contract, not a claim that the whole
 encoding already typechecks. C0 selects owner-indexed control and scoped effects,
 checked work packages, detached typed completion/replay, and private owner stop;
 C6c adds shared service evidence with invocation authority. Current Fango can check
-ordinary row-indexed Task/Job packaging and the nullary scheduling arrow shapes,
-but not the scoped work-package facility. Row-kinded effect parameters are not
-a prerequisite for this encoding.
+ordinary row-indexed Task/Job packaging, nullary scheduling arrow shapes,
+scoped Work packages, and typed Completion capture/replay. Dynamic allocation,
+typed cells, and shared service authority remain C4/C6 prerequisites.
+Row-kinded effect parameters are not a prerequisite for this encoding.
 The [source probes](../internal/infer/async_feasibility_test.go) and
 [scoped-row model](../internal/feasibility/scoped_rows_test.go) distinguish those facts.
 
@@ -714,8 +715,16 @@ IO. The [scoped-row model](../internal/feasibility/scoped_rows_test.go) addition
 checks latent registration effects through handlers, nested owners and imported
 summaries; its unindexed queue seals work with distinct child rows and typed
 failure injections into a hidden owner budget. It passes the budget skolem and
-adapters explicitly at the compiler-contract boundary, so their source inference
-and lowering remain unimplemented. The [typed model](../internal/feasibility/tasks_test.go)
+adapters explicitly at the compiler-contract boundary. C1 implements the
+[Work contract](reference/library-work.md) and
+[Completion contract](reference/library-completion.md). The
+[executable representation probe](../testdata/run/async_c1_representation.fango)
+rechecks these APIs in both backends: Int/String Task observations, homogeneous
+Unit work packages, a nullary effect interpreted with a local pause callback,
+cleanup before typed failure publication, and repeated success/failure replay.
+Its ordinary publication callbacks stand in for C6a's future typed cells;
+it does not implement dynamic spawn or the shared scheduling service. The
+[typed model](../internal/feasibility/tasks_test.go)
 has no erased heterogeneous payload register: generic task/cell types feed
 uniform execution closures. It exercises repeated observation, outer task inside
 inner context, captured outer service with a different producer, typed expected
@@ -723,13 +732,12 @@ Result, child failure plus cleanup, fresh-evidence replay, unstarted cancellatio
 stable failure ordering, descendant allocation after body completion and removal
 of finished execution entries. The [ownership model](../internal/feasibility/control_test.go)
 rejects escaped handles/pause, short-lived replies and unsafe child captures.
-These are narrow models, not new Fango inference or a delivered scheduler; native
-storage, generic row adapters, source capture reconstruction and both backend
-implementations remain acceptance obligations of their owning stages.
+The models cover proposed behavior beyond that executable probe. Native storage,
+dynamic allocation, and shared service/capture contracts remain acceptance
+obligations of their owning stages; no scheduler is delivered here.
 
-**Stopping point:** joint C0/A0/C4-design gate for review, **before C1**. Implement
-and validate C0's extensions in C1, then recheck the task representation before
-the C2 Stream migration. Repeat scope allocation/storage/service proofs with
+**Stopping point:** joint C0/A0/C4-design gate, with C1's executable facilities
+rechecked by C2. Repeat scope allocation/storage/service proofs with
 real C4/C6a/C6c APIs before A1; never treat a successful Go model as proof that
 the current source language accepts those APIs.
 

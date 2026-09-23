@@ -1,5 +1,0 @@
-import Stream
-
-main() =
-    handle Stream.yield 1 of
-        Stream.yield value -> resume ()

@@ -288,23 +288,6 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 		case *Suspend:
 			checkBind(term.Bind)
 			checkExpr(term.Request, "suspension request", false)
-			if term.Owner.Unique != 0 && !seenEvidence[term.Owner.Unique] {
-				errs = append(errs, fmt.Errorf("%s: suspension has unavailable owner evidence", blockWhere))
-			}
-			for _, ev := range w.EffectParams {
-				if ev.Name == types.StreamYieldEffectName && term.Owner.Unique == 0 {
-					errs = append(errs, fmt.Errorf("%s: suspension lacks lexical owner evidence", blockWhere))
-				}
-				if ev.Unique == term.Owner.Unique && (!types.EqualCaptures(ev.Captures, term.Owner.Captures) || ev.Name != term.Owner.Name || ev.Control != term.Owner.Control) {
-					errs = append(errs, fmt.Errorf("%s: suspension owner evidence is stale", blockWhere))
-				}
-				if ev.Unique == term.Owner.Unique && (len(ev.Args) != 1 || len(term.Owner.Args) != 1 || !core.EqualValueRepresentation(ev.Args[0], term.Owner.Args[0])) {
-					errs = append(errs, fmt.Errorf("%s: suspension owner type arguments are stale", blockWhere))
-				}
-			}
-			if term.Owner.Unique != 0 && (term.Owner.Control.Transport != types.Machine || len(term.Owner.Args) != 1 || term.Request == nil || !core.EqualValueRepresentation(term.Owner.Args[0], term.Request.Type())) {
-				errs = append(errs, fmt.Errorf("%s: suspension owner/request type mismatch", blockWhere))
-			}
 		case *CursorAdvance:
 			checkRow(term.Row, true)
 			checkBind(term.Bind)
@@ -316,15 +299,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				errs = append(errs, fmt.Errorf("%s: cursor advancement lacks exclusive access proof", blockWhere))
 			}
 			if term.Cursor != nil {
-				if err := func() error {
-					if _, _, _, ok := types.CoroutineProtocol(term.Cursor.Type()); ok {
-						return core.CheckCoroutineAdvance(term.Cursor.Type(), term.Reply, term.Close, term.Bind.Ty, term.Result)
-					}
-					if term.Close || term.Reply != nil {
-						return fmt.Errorf("Iterator has coroutine-only operands")
-					}
-					return core.CheckCursorResult(term.Cursor.Type(), term.Bind.Ty, term.Result)
-				}(); err != nil {
+				if err := core.CheckCoroutineAdvance(term.Cursor.Type(), term.Reply, term.Close, term.Bind.Ty, term.Result); err != nil {
 					errs = append(errs, fmt.Errorf("%s: %v", blockWhere, err))
 				}
 			}
@@ -543,51 +518,20 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				}
 			}
 		case *CursorOpen:
-			arity := 1
-			if _, _, _, ok := types.CoroutineProtocol(term.Cursor.Ty); ok {
-				arity = 2
-			}
-			checkRow(term.Row, term.Producer != nil && core.ArrowOpenRow(term.Producer.Type(), arity))
+			checkRow(term.Row, term.Producer != nil && core.ArrowOpenRow(term.Producer.Type(), 2))
 			checkBind(term.Cursor)
 			checkExpr(term.Producer, "cursor producer", false)
 			if term.Scope == 0 || seenCursorScopes[term.Scope] {
 				errs = append(errs, fmt.Errorf("%s: invalid or reused cursor scope", blockWhere))
 			}
 			seenCursorScopes[term.Scope] = true
-			if _, _, _, ok := types.CoroutineProtocol(term.Cursor.Ty); ok {
-				if term.Producer == nil {
-					errs = append(errs, fmt.Errorf("%s: missing coroutine producer", blockWhere))
-				} else if err := core.CheckCoroutineProducer(term.Cursor.Ty, term.Producer.Type()); err != nil {
-					errs = append(errs, fmt.Errorf("%s: %v", blockWhere, err))
-				}
-				if term.Yield.Unique == 0 || term.Yield.Name != types.CoroutineSuspensionName || len(term.Yield.Args) != 0 || term.Yield.Control.Transport != types.Machine || !types.EqualCaptures(term.Yield.Captures, types.ScopeCapture(term.Scope)) {
-					errs = append(errs, fmt.Errorf("%s: invalid coroutine owner", blockWhere))
-				}
-				break
+			if term.Producer == nil {
+				errs = append(errs, fmt.Errorf("%s: missing coroutine producer", blockWhere))
+			} else if err := core.CheckCoroutineProducer(term.Cursor.Ty, term.Producer.Type()); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %v", blockWhere, err))
 			}
-			cursor, ok := term.Cursor.Ty.(*types.TCon)
-			if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 2 {
-				errs = append(errs, fmt.Errorf("%s: cursor setup has invalid Iterator type", blockWhere))
-			}
-			if term.Yield.Unique != 0 && (term.Yield.Control.Transport != types.Machine || !types.EqualCaptures(term.Yield.Captures, types.ScopeCapture(term.Scope)) || cursor == nil || len(cursor.Args) != 2 || len(term.Yield.Args) != 1 || !core.EqualValueRepresentation(cursor.Args[0], term.Yield.Args[0])) {
-				errs = append(errs, fmt.Errorf("%s: cursor setup has stale Yield ownership", blockWhere))
-			}
-			if term.Producer != nil {
-				fn, ok := term.Producer.Type().(*types.TFun)
-				if !ok || types.FunctionControl(fn).Transport != types.Machine {
-					errs = append(errs, fmt.Errorf("%s: cursor producer must use Machine transport", blockWhere))
-				} else {
-					arg, argOK := fn.Arg.(*types.TCon)
-					ret, retOK := fn.Ret.(*types.TCon)
-					if !argOK || !retOK || arg.Name != "()" || ret.Name != "()" || len(arg.Args) != 0 || len(ret.Args) != 0 {
-						errs = append(errs, fmt.Errorf("%s: cursor producer must have shape () -> ()", blockWhere))
-					}
-					for _, label := range fn.Eff.Labels {
-						if label.Suspension && label.Unique != term.Yield.Unique {
-							errs = append(errs, fmt.Errorf("%s: cursor producer lacks lexical Yield owner", blockWhere))
-						}
-					}
-				}
+			if term.Yield.Unique == 0 || term.Yield.Name != types.CoroutineSuspensionName || len(term.Yield.Args) != 0 || term.Yield.Control.Transport != types.Machine || !types.EqualCaptures(term.Yield.Captures, types.ScopeCapture(term.Scope)) {
+				errs = append(errs, fmt.Errorf("%s: invalid coroutine owner", blockWhere))
 			}
 		case *CursorClose:
 		case *PopCleanup:

@@ -1,14 +1,15 @@
+import Coroutine
 import Stream
 import Iterator
 import Maybe exposing (Maybe(..))
 
-foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Iterator.Traversal | e} b
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Coroutine.Drive | e} b
 foldCursor combine initial cursor = case Iterator.next cursor of
     Nothing -> initial
     Just value -> foldCursor combine (combine value initial) cursor
 
 type Held a e = Held (Iterator.Iterator a e)
-type Consumer e = Consumer (Iterator.Iterator Int e ->{Iterator.Traversal | e} Int)
+type Consumer e = Consumer (Iterator.Iterator Int e ->{Coroutine.Drive | e} Int)
 
 produce : () ->{Stream.Yield Int | e} ()
 produce() =
@@ -16,7 +17,7 @@ produce() =
     Stream.yield 2
     Stream.yield 3
 
-sumCursor : Iterator.Iterator Int e ->{Iterator.Traversal | e} Int
+sumCursor : Iterator.Iterator Int e ->{Coroutine.Drive | e} Int
 sumCursor cursor = foldCursor (\element acc -> element + acc) 0 cursor
 
 sumHeld (Held cursor) = sumCursor cursor
@@ -35,7 +36,7 @@ runStored source =
         Consumer consume -> Stream.withCursor (Stream.generate source) consume
 
 class Consume a
-    consume : Iterator.Iterator a IO ->{Iterator.Traversal, IO} Int
+    consume : Iterator.Iterator a IO ->{Coroutine.Drive, IO} Int
 
 instance Consume Int
     consume cursor = sumCursor cursor

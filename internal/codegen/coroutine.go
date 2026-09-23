@@ -33,7 +33,7 @@ func (g *gen) coroutineStart(producer core.Expr, owner, row goast.Expr) goast.Ex
 	}), g.machineExpr(producer), owner, row)
 }
 
-func (g *gen) coroutineScopeExpr(e *core.IteratorScope) goast.Expr {
+func (g *gen) coroutineScopeExpr(e *core.CoroutineScope) goast.Expr {
 	overall := e.Control.Resolve(g.control)
 	oldControl, oldResult := g.control, g.resultType
 	g.control, g.resultType = overall, e.Ty

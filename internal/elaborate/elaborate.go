@@ -338,10 +338,6 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 			defs = append(defs, coroutineWithDef(ty, ck))
 		} else if name == types.CoroutineAdvanceName || name == types.CoroutineCloseName {
 			defs = append(defs, coroutineAdvanceDef(name, ty, ck))
-		} else if name == types.StreamWithProducerName {
-			defs = append(defs, withProducerDef(name, ty, ck))
-		} else if name == types.IteratorNextName {
-			defs = append(defs, iteratorNextDef(name, ty, ck))
 		} else if types.CompletionIntrinsic(name) {
 			defs = append(defs, completionDef(name, ty, ck))
 		} else if types.FailureInspection(name) {
@@ -355,57 +351,6 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 	}
 	bindRows(defs, ck)
 	return defs
-}
-
-func iteratorNextDef(name string, ty types.Type, ck *infer.Checker) core.Def {
-	args, result := core.PeelFun(ty, 1)
-	maybe := result.(*types.TCon)
-	return core.Def{Name: name, Owner: symbolOwner(name), Type: ty, TyParams: runtimeRigidVars(ty), Params: []string{"_cursor"}, ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture()}, Control: core.ArrowControl(ty, 1),
-		Body: &core.IteratorNext{Cursor: &core.VarRef{Name: "_cursor", Local: true, Ty: args[0]}, Result: ck.ADTs[maybe.Unique], Access: types.ExclusiveAdvance, Ty: result}}
-}
-
-func withProducerDef(name string, ty types.Type, ck *infer.Checker) core.Def {
-	args, result := core.PeelFun(ty, 2)
-	producer := args[0].(*types.TFun)
-	consumer := args[1].(*types.TFun)
-	params := []string{"_producer", "_consumer"}
-	paramCaptures := []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture()}
-	scope := ck.Sup.FreshScope()
-	var yield core.EffectInstance
-	var traversal core.EffectInstance
-	for _, label := range producer.Eff.Labels {
-		if label.Suspension {
-			yield = core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Captures: types.ScopeCapture(scope), Control: types.Control{Transport: types.Machine}}
-		}
-	}
-	control := types.FunctionControl(consumer)
-	if name == types.StreamWithProducerName {
-		control = core.ArrowControl(ty, len(params))
-		for _, label := range consumer.Eff.Labels {
-			if label.Name == types.IteratorTraversalEffectName {
-				traversal = core.EffectInstance{Unique: label.Unique, Name: label.Name, Captures: types.ScopeCapture(scope), Control: types.Control{Transport: types.Machine}}
-			}
-		}
-	}
-	return core.Def{
-		Name:          name,
-		Owner:         symbolOwner(name),
-		Type:          ty,
-		TyParams:      runtimeRigidVars(ty),
-		Params:        params,
-		ParamCaptures: paramCaptures,
-		Control:       core.ArrowControl(ty, len(params)),
-		Body: &core.IteratorScope{
-			Yield:     yield,
-			Traversal: traversal,
-			Scope:     scope,
-			Producer:  &core.VarRef{Name: params[0], Local: true, Ty: producer},
-			Consumer:  &core.VarRef{Name: params[1], Local: true, Ty: consumer},
-			CursorTy:  consumer.Arg,
-			Ty:        result,
-			Control:   control,
-		},
-	}
 }
 
 // scopeBracketDef builds the cleanup-scope intrinsic: three callback

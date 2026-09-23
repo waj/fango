@@ -361,11 +361,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		return []goast.Stmt{&goast.SwitchStmt{Tag: ident(machineLocalName(term.Scrut)), Body: &goast.BlockStmt{List: clauses}}}, nil
 	case *machineir.Suspend:
 		stmts := append(save(), assignMachinePC(resumePC))
-		var owner goast.Expr = ident("nil")
-		if term.Owner.Unique != 0 {
-			owner = ident(machineEvidenceName(term.Owner))
-		}
-		stmts = append(stmts, step("MachineSuspend", "Request", g.machineBoxedValue(term.Request), &goast.KeyValueExpr{Key: ident("Owner"), Value: owner}))
+		stmts = append(stmts, step("MachineSuspend", "Request", g.machineBoxedValue(term.Request)))
 		return stmts, [][]goast.Stmt{resume(term.Bind, term.Next)}
 	case *machineir.CursorAdvance:
 		stmts := append(save(), assignMachinePC(resumePC))
@@ -387,22 +383,14 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			resumed = append(resumed, assignStmt(machineLocalName(term.Bind.Name), g.unitValue()), assignMachinePC(int(term.Next)), &goast.BranchStmt{Tok: gotoken.CONTINUE})
 			return stmts, [][]goast.Stmt{resumed}
 		}
-		if term.Reply != nil {
-			assign := func(index int) []goast.Stmt {
-				var args []goast.Expr
-				if index < 2 {
-					args = append(args, &goast.TypeAssertExpr{X: selector(name, "Value"), Type: g.goType(resultTy.Args[index])})
-				}
-				return []goast.Stmt{assignStmt(machineLocalName(term.Bind.Name), g.ctorValue(term.Result.Ctors[index], resultTy.Args, args...))}
+		assign := func(index int) []goast.Stmt {
+			var args []goast.Expr
+			if index < 2 {
+				args = append(args, &goast.TypeAssertExpr{X: selector(name, "Value"), Type: g.goType(resultTy.Args[index])})
 			}
-			resumed = append(resumed, ifStmt(selector(name, "Present"), assign(0), []goast.Stmt{ifStmt(selector(name, "Finished"), assign(1), assign(2))}), assignMachinePC(int(term.Next)), &goast.BranchStmt{Tok: gotoken.CONTINUE})
-			return stmts, [][]goast.Stmt{resumed}
+			return []goast.Stmt{assignStmt(machineLocalName(term.Bind.Name), g.ctorValue(term.Result.Ctors[index], resultTy.Args, args...))}
 		}
-		value := &goast.TypeAssertExpr{X: selector(name, "Value"), Type: g.goType(resultTy.Args[0])}
-		assign := func(value goast.Expr) goast.Stmt {
-			return &goast.AssignStmt{Lhs: []goast.Expr{ident(machineLocalName(term.Bind.Name))}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{value}}
-		}
-		resumed = append(resumed, &goast.IfStmt{Cond: selector(name, "Present"), Body: &goast.BlockStmt{List: []goast.Stmt{assign(g.ctorValue(term.Result.Ctors[1], resultTy.Args, value))}}, Else: &goast.BlockStmt{List: []goast.Stmt{assign(g.ctorValue(term.Result.Ctors[0], resultTy.Args))}}}, assignMachinePC(int(term.Next)), &goast.BranchStmt{Tok: gotoken.CONTINUE})
+		resumed = append(resumed, ifStmt(selector(name, "Present"), assign(0), []goast.Stmt{ifStmt(selector(name, "Finished"), assign(1), assign(2))}), assignMachinePC(int(term.Next)), &goast.BranchStmt{Tok: gotoken.CONTINUE})
 		return stmts, [][]goast.Stmt{resumed}
 	case *machineir.Call:
 		args := g.typeDescriptorArgs(term.TyArgs)
@@ -693,50 +681,15 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		)
 		return append(stmts, continueStmt(term.Next)...), nil
 	case *machineir.CursorOpen:
-		if _, _, _, ok := types.CoroutineProtocol(term.Cursor.Ty); ok {
-			owner := fmt.Sprintf("machineOwner%d", block.ID)
-			row := fmt.Sprintf("machineForwarding%d", block.ID)
-			captured := fmt.Sprintf("machineCoroutine%d", block.ID)
-			stmts := []goast.Stmt{
-				varDeclStmt(owner, &goast.StarExpr{X: selector("fangort", "YieldOwner")}, callExpr(selector("fangort", "NewYieldOwner"))),
-				varDeclStmt(row, &goast.StarExpr{X: selector("fangort", "CursorEvidence")}, callExpr(selector("fangort", "NewCursorEvidence"), g.rowArgument(term.Row))),
-				varDeclStmt(captured, &goast.StarExpr{X: selector("fangort", "MachineIterator")}, g.coroutineStart(term.Producer, ident(owner), ident(row))),
-				assignStmt(machineLocalName(term.Cursor.Name), ident(captured)),
-			}
-			cleanup := funcLit(&goast.StarExpr{X: selector("fangort", "ExitRequest")}, []goast.Stmt{returnStmt(callExpr(selector("fangort", "CloseMachineIterator"), ident(captured)))})
-			stmts = append(stmts, exprStmt(callExpr(selector("m", "PushCleanup"), cleanup)))
-			return append(stmts, continueStmt(term.Next)...), nil
+		owner := fmt.Sprintf("machineOwner%d", block.ID)
+		row := fmt.Sprintf("machineForwarding%d", block.ID)
+		captured := fmt.Sprintf("machineCoroutine%d", block.ID)
+		stmts := []goast.Stmt{
+			varDeclStmt(owner, &goast.StarExpr{X: selector("fangort", "YieldOwner")}, callExpr(selector("fangort", "NewYieldOwner"))),
+			varDeclStmt(row, &goast.StarExpr{X: selector("fangort", "CursorEvidence")}, callExpr(selector("fangort", "NewCursorEvidence"), g.rowArgument(term.Row))),
+			varDeclStmt(captured, &goast.StarExpr{X: selector("fangort", "MachineIterator")}, g.coroutineStart(term.Producer, ident(owner), ident(row))),
+			assignStmt(machineLocalName(term.Cursor.Name), ident(captured)),
 		}
-		owner := fmt.Sprintf("machineYield%d", block.ID)
-		var stmts []goast.Stmt
-		var args []goast.Expr
-		if term.Yield.Unique != 0 {
-			stmts = append(stmts, varDeclStmt(owner, &goast.StarExpr{X: selector("fangort", "YieldOwner")}, callExpr(selector("fangort", "NewYieldOwner"))))
-			args = append(args, ident(owner))
-		}
-		rowName := fmt.Sprintf("machineCursorRow%d", block.ID)
-		if term.Row != nil {
-			stmts = append(stmts, varDeclStmt(rowName, &goast.StarExpr{X: selector("fangort", "CursorEvidence")}, callExpr(selector("fangort", "NewCursorEvidence"), g.rowArgument(term.Row))))
-			args = append(args, callExpr(selector(rowName, "Row")))
-		}
-		args = append(args, g.unitValue())
-		producer := callExpr(callbackMember(g.machineExpr(term.Producer), types.Machine), args...)
-		start := callExpr(selector("fangort", "StartMachineIterator"), producer)
-		if term.Yield.Unique != 0 {
-			start = callExpr(selector("fangort", "StartOwnedMachineIterator"), ident(owner), producer)
-		}
-		if term.Row != nil {
-			var ownerValue goast.Expr = ident("nil")
-			if term.Yield.Unique != 0 {
-				ownerValue = ident(owner)
-			}
-			start = callExpr(selector("fangort", "StartCursorWithEvidence"), ownerValue, ident(rowName), producer)
-		}
-		cursor := machineLocalName(term.Cursor.Name)
-		// Capture the cursor in a separate binding: generated frame locals are
-		// reassigned when execution loops back through this scope.
-		captured := fmt.Sprintf("machineCursor%d", block.ID)
-		stmts = append(stmts, assignStmt(cursor, start), varDeclStmt(captured, &goast.StarExpr{X: selector("fangort", "MachineIterator")}, ident(cursor)))
 		cleanup := funcLit(&goast.StarExpr{X: selector("fangort", "ExitRequest")}, []goast.Stmt{returnStmt(callExpr(selector("fangort", "CloseMachineIterator"), ident(captured)))})
 		stmts = append(stmts, exprStmt(callExpr(selector("m", "PushCleanup"), cleanup)))
 		return append(stmts, continueStmt(term.Next)...), nil

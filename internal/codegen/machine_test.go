@@ -99,7 +99,7 @@ func TestIteratorOwnerRootsMachineProducerInDirectCaller(t *testing.T) {
 	main := &p.Defs[2]
 	call := main.Body.(*core.App)
 	producer := call.Args[0].(*core.Lambda)
-	producer.Body.(*core.Seq).First.(*core.Suspend).Request = &core.VarRef{Name: "captured", Local: true, Ty: b.Int}
+	producer.Body.(*core.Lambda).Body.(*core.Seq).First = coretest.Pause(producer, &core.VarRef{Name: "captured", Local: true, Ty: b.Int})
 	main.Body = &core.Let{Name: "captured", Rhs: &core.IntLit{Val: 7, Ty: b.Int}, Body: call, Ty: main.Type}
 	if errs := core.InferCaptures(p, b); len(errs) != 0 {
 		t.Fatalf("capture inference: %v", errs)
@@ -108,7 +108,7 @@ func TestIteratorOwnerRootsMachineProducerInDirectCaller(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("machine lowering: %v", errs)
 	}
-	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Maybe"}, {Name: "Iterator", Imports: []string{"Maybe"}}, {Name: "Stream", Imports: []string{"Maybe", "Iterator"}}, {Name: "Main", Program: "Main", Imports: []string{"Maybe", "Iterator", "Stream"}, Entry: true}}, false)
+	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Coroutine"}, {Name: "Main", Program: "Main", Imports: []string{"Coroutine"}, Entry: true}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestIteratorOwnerRootsMachineProducerInDirectCaller(t *testing.T) {
 	for _, file := range files {
 		generated += string(file.Data)
 	}
-	for _, want := range []string{"fangort.StartOwnedMachineIterator", "fangort.NewYieldOwner", "fangort.RunCursorConsumer", "MachineFrame_Main_dot_main_machine_lambda", "v_captured int64 = 7"} {
+	for _, want := range []string{"fangort.StartMachineCoroutine", "fangort.NewYieldOwner", "fangort.RunCursorConsumer", "MachineFrame_Main_dot_main_machine_lambda", "v_captured int64 = 7"} {
 		if !strings.Contains(generated, want) {
 			t.Fatalf("generated iterator owner missing %q:\n%s", want, generated)
 		}
@@ -313,11 +313,11 @@ func TestFixture(t *testing.T) {
     event, err = scoped.Resume(fangort.UnitValue)
     if err != nil || !event.Done || event.Value != int64(3) { t.Fatalf("scope done: %#v %v", event, err) }
 
-    iterator := fangort.StartMachineIterator(m_Scope.MachineFrame_Scope_dot_bracket())
-    yieldedValue, yielded, iteratorExit, err := iterator.Next()
-    if err != nil || !yielded || iteratorExit != nil || yieldedValue != int64(3) { t.Fatalf("iterator: %#v %v/%v/%v", yieldedValue, yielded, iteratorExit, err) }
-    if iterator.Stats().MaxCleanups != 1 { t.Fatalf("iterator cleanup stats: %#v", iterator.Stats()) }
-    if iteratorExit, err = iterator.Close(); err != nil || iteratorExit != nil { t.Fatalf("iterator close: %#v %v", iteratorExit, err) }
+    abandoned := fangort.StartMachine(m_Scope.MachineFrame_Scope_dot_bracket())
+    event, err = abandoned.Run()
+    if err != nil || event.Done || event.Request != int64(3) { t.Fatalf("abandon fixture: %#v %v", event, err) }
+    if abandoned.Stats().MaxCleanups != 1 { t.Fatalf("abandon cleanup stats: %#v", abandoned.Stats()) }
+    if exit, err := abandoned.Abandon(); err != nil || exit != nil { t.Fatalf("abandon: %#v %v", exit, err) }
 
     callback := fangort.StartMachine(MachineFrame_Main_dot_callback())
     event, err = callback.Run()

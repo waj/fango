@@ -21,12 +21,9 @@ func stageIterator(t *testing.T, sup *types.Supply, b *types.Builtins, body core
 	p := coretest.SynchronousCursorScopeWith(sup, b)
 	call := p.Defs[2].Body.(*core.App)
 	producer := call.Args[0].(*core.Lambda)
-	owner := producer.EffectParams[0]
-	producer.Body = core.Rewrite(body, func(t types.Type) types.Type { return t }, func(e core.Expr) core.Expr {
-		if suspension, ok := e.(*core.Suspend); ok && suspension.Owner.Unique == 0 {
-			copied := *suspension
-			copied.Owner = owner
-			return &copied
+	producer.Body.(*core.Lambda).Body = core.Rewrite(body, func(t types.Type) types.Type { return t }, func(e core.Expr) core.Expr {
+		if suspension, ok := e.(*core.Suspend); ok {
+			return coretest.Pause(producer, suspension.Request)
 		}
 		return e
 	})

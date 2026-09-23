@@ -12,7 +12,7 @@ func (in *interp) openCoroutine(p *machineir.Prog, producer *Closure, row *fango
 	owner := fangort.NewYieldOwner()
 	evidence := fangort.NewCursorEvidence(row)
 	callEvidence := cloneEvidence(in.evidence)
-	it := &MachineIteratorSession{owner: owner, evidence: evidence, exchange: true}
+	it := &MachineIteratorSession{owner: owner, evidence: evidence}
 	it.start = func(input Value) (*MachineSession, error) {
 		pause := &Closure{pauseOwner: owner, control: types.Control{Transport: types.Machine}}
 		value, err := in.callClosure(producer, pause)
@@ -46,7 +46,7 @@ func (it *MachineIteratorSession) begin(input Value) error {
 	return nil
 }
 
-func (in *interp) evalCoroutineScope(scope *core.IteratorScope, fr *Frame) (Value, error) {
+func (in *interp) evalCoroutineScope(scope *core.CoroutineScope, fr *Frame) (Value, error) {
 	value, err := in.eval(scope.Producer, fr)
 	if err != nil {
 		return nil, err

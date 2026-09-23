@@ -75,4 +75,41 @@ func TestWorkSourceRowRetainsNominalArgumentIndex(t *testing.T) {
 	if !types.Equal(m[e.ID], child) {
 		t.Fatalf("stored row was widened to %s", types.Show(m[e.ID]))
 	}
+	// The same index may be nested in a driver callback. Its enclosing
+	// execution arrow includes foreign Drive without changing the stored row.
+	m = map[int]types.Type{}
+	matchSourceRows(&types.TFun{Arg: pattern, Eff: types.Row{Tail: e}}, &types.TFun{Arg: actual, Eff: driver}, m)
+	if !types.Equal(m[e.ID], child) {
+		t.Fatalf("nested stored row was widened to %s", types.Show(m[e.ID]))
+	}
+}
+
+func TestSourceRowsPreserveCurriedBoundaryResidual(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	e := sup.FreshRigid(types.RowVar)
+	yield := func(arg types.Type) types.EffLabel {
+		return types.EffLabel{Unique: 100, Name: "Emit", Args: []types.Type{arg}}
+	}
+	producer := func(row types.Row) types.Type { return &types.TFun{Arg: b.Unit, Eff: row, Ret: b.Unit} }
+	boundary := func(arg types.Type, row types.Row) types.Type {
+		return &types.TFun{Arg: arg, Eff: types.Row{}, Ret: &types.TFun{Arg: b.Unit, Eff: row, Ret: b.Unit}}
+	}
+	pattern := boundary(producer(types.Row{Labels: []types.EffLabel{yield(b.Int)}, Tail: e}), types.Row{Tail: e})
+	residual := types.Row{Labels: []types.EffLabel{yield(b.String)}}
+	actual := boundary(producer(types.Row{Labels: []types.EffLabel{yield(b.Int)}}), residual)
+	subst := map[int]types.Type{}
+	matchSourceRows(pattern, actual, subst)
+	if !types.Equal(subst[e.ID], residual) {
+		t.Fatalf("callback subtraction erased the boundary residual: %s", types.Show(subst[e.ID]))
+	}
+
+	// Substitution embeds rows in tails. Equivalent recursive invocations must
+	// retain their substitution when the abstract environments are joined.
+	nested := boundary(producer(types.Row{Labels: []types.EffLabel{yield(b.Int)}}), types.Row{Tail: types.Row{Tail: residual}})
+	next := map[int]types.Type{}
+	matchSourceRows(pattern, nested, next)
+	if !types.Equal(subst[e.ID], next[e.ID]) {
+		t.Fatal("nested row tails changed the source instantiation")
+	}
 }

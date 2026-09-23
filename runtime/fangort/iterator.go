@@ -1,7 +1,6 @@
 package fangort
 
 import (
-	"errors"
 	"fmt"
 )
 
@@ -11,78 +10,18 @@ type YieldOwner struct{ marker byte }
 
 func NewYieldOwner() *YieldOwner { return &YieldOwner{marker: 1} }
 
-// MachineIterator is the private pull owner used by E8's scoped iterator
+// MachineIterator is the private pull owner used by typed coroutine
 // lowering. It owns exactly one machine. Source programs can alias the opaque
 // cursor within its scope; checked capture and access contracts govern those
 // aliases before the private runtime representation is selected.
 type MachineIterator struct {
 	start    func(any) MachineFrame
-	exchange bool
 	evidence *CursorEvidence
 	busy     bool
 	owner    *YieldOwner
 	machine  *Machine
 	started  bool
 	done     bool
-}
-
-func StartMachineIterator(entry MachineFrame) *MachineIterator {
-	return &MachineIterator{machine: StartMachine(entry)}
-}
-
-func StartOwnedMachineIterator(owner *YieldOwner, entry MachineFrame) *MachineIterator {
-	return &MachineIterator{owner: owner, machine: StartMachine(entry)}
-}
-
-func StartCursorWithEvidence(owner *YieldOwner, evidence *CursorEvidence, entry MachineFrame) *MachineIterator {
-	return &MachineIterator{owner: owner, evidence: evidence, machine: StartMachine(entry)}
-}
-
-// Next advances to one suspension. A normal machine return ends iteration;
-// a machine exit is reported separately. The yielded request is the iterator
-// element and Unit is supplied when production continues.
-func (it *MachineIterator) Next() (value any, yielded bool, exit *ExitRequest, err error) {
-	return it.NextWithEvidence(nil)
-}
-
-func (it *MachineIterator) NextWithEvidence(row *EvidenceRow) (value any, yielded bool, exit *ExitRequest, err error) {
-	if it == nil || it.machine == nil {
-		return nil, false, nil, fmt.Errorf("fangort: iterator has no machine")
-	}
-	if it.done {
-		return nil, false, nil, nil
-	}
-	if it.busy {
-		return nil, false, nil, fmt.Errorf("fangort: overlapping cursor advancement")
-	}
-	it.evidence.Bind(row)
-	defer func() {
-		if it.done {
-			it.evidence.Clear()
-		} else {
-			it.evidence.Restore()
-		}
-	}()
-	var event MachineEvent
-	if it.started {
-		event, err = it.machine.Resume(UnitValue)
-	} else {
-		it.started = true
-		event, err = it.machine.Run()
-	}
-	if err != nil {
-		it.done = true
-		return nil, false, event.Exit, err
-	}
-	if !event.Done {
-		if event.Owner != it.owner {
-			exit, closeErr := it.Close()
-			return nil, false, exit, errors.Join(fmt.Errorf("fangort: suspension reached a different cursor owner"), closeErr)
-		}
-		return event.Request, true, nil, nil
-	}
-	it.done = true
-	return nil, false, event.Exit, nil
 }
 
 // Close consumes unfinished production and returns a cleanup failure, if any.
@@ -124,7 +63,7 @@ func CloseMachineIterator(it *MachineIterator) *ExitRequest {
 	return exit
 }
 
-// RunCursorConsumer is the checked Direct/Exit boundary for an owned Traversal.
+// RunCursorConsumer is the checked Direct/Exit boundary for owned Drive control.
 // Advancement is handled by the dispatcher; residual suspension is forbidden
 // by the scope's Core control contract. Register closure before the first step
 // so internal failures also unwind the producer.
@@ -143,12 +82,4 @@ func RunCursorConsumer[A any](it *MachineIterator, entry MachineFrame) Outcome[A
 		return Propagate[A](event.Exit)
 	}
 	return Normal(event.Value.(A))
-}
-
-// AssertNoMachineExit guards a statically Direct owner path. Reaching it
-// indicates a compiler/runtime protocol mismatch, never source-level control.
-func AssertNoMachineExit(exit *ExitRequest) {
-	if exit != nil {
-		panic(exit)
-	}
 }

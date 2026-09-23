@@ -1,9 +1,10 @@
+import Coroutine
 import Stream
 import Iterator
 import Maybe exposing (Maybe(..))
 import State
 
-foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Iterator.Traversal | e} b
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Coroutine.Drive | e} b
 foldCursor combine initial cursor = case Iterator.next cursor of
     Nothing -> initial
     Just value -> foldCursor combine (combine value initial) cursor
@@ -18,7 +19,7 @@ produce() =
 retain : a -> Int
 retain cursor = 42
 
-consume : Iterator.Iterator Int (State.State (Maybe (() -> Int))) ->{Iterator.Traversal, State.State (Maybe (() -> Int))} ()
+consume : Iterator.Iterator Int (State.State (Maybe (() -> Int))) ->{Coroutine.Drive, State.State (Maybe (() -> Int))} ()
 consume cursor =
     step element previous =
         case previous of

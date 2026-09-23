@@ -6,12 +6,17 @@ import (
 )
 
 func TestStreamIntegration(t *testing.T) {
-	for _, name := range []string{"stream_operations", "stream_demand", "stream_cleanup", "stream_file", "stream_parser", "stream_stored_callbacks", "stream_evidence_shadow", "stream_recovery", "failure_reports"} {
+	for _, name := range []string{"stream_operations", "stream_demand", "stream_cleanup", "stream_file", "stream_parser", "stream_stored_callbacks", "stream_evidence_shadow", "stream_recovery", "stream_handler", "async_c1_representation", "failure_reports"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", "testdata", "run", name+".fango")
 			runDifferentialCase(t, path, batchRunner(path))
 		})
 	}
+}
+
+func TestIndependentPullAbstraction(t *testing.T) {
+	path := filepath.Join("..", "..", "testdata", "modules", "pull", "Main.fango")
+	runDifferentialCase(t, path, cliRunner(path))
 }
 
 func TestFailureReportCapture(t *testing.T) {
