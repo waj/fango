@@ -97,6 +97,7 @@ type CtorVal struct {
 // never materialize as values — elaboration eta-expanded every first-class
 // use, so *Partial from the doc/design.md, "Interpreter and REPL" sketch is not needed.
 type Closure struct {
+	pauseOwner *fangort.YieldOwner
 	Param      string
 	Body       core.Expr
 	Env        *Frame
@@ -515,7 +516,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			frame := &Frame{parent: closureFrame(lam, fr), vars: map[string]Value{}}
 			frame.vars[e.Name] = in.plainClosure(lam, frame)
-			return in.eval(e.Body, frame)
+			// Only the escaping closure uses the restricted snapshot. The
+			// surrounding body can still refer to every current Machine local.
+			return in.eval(e.Body, &Frame{parent: fr, vars: frame.vars})
 		}
 		// Eager, in order — identical to the compiled backend's locals.
 		v, err := in.eval(e.Rhs, fr)
@@ -565,8 +568,12 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		return &meta.Code{Template: e.Template, Holes: holes}, nil
 	case *core.TypeOf:
 		return e.Repr, nil
+	case *core.Work:
+		return in.evalWork(e, fr)
 	case *core.FailureInspect:
 		return in.inspectFailure(e, fr)
+	case *core.Completion:
+		return in.evalCompletion(e, fr)
 	case *core.NativeCall:
 		args := make([]Value, len(e.Args))
 		for i, a := range e.Args {
@@ -998,7 +1005,7 @@ func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID, e
 			}
 			frame := &Frame{parent: closureFrame(lam, fr), vars: map[string]Value{}}
 			frame.vars[e.Name] = in.plainClosure(lam, frame)
-			return in.evalResumeTail(e.Body, frame, owner, ev)
+			return in.evalResumeTail(e.Body, &Frame{parent: fr, vars: frame.vars}, owner, ev)
 		}
 		v, err := in.eval(e.Rhs, fr)
 		if err != nil {

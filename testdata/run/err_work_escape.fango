@@ -1,0 +1,7 @@
+import Coroutine
+import Work
+
+main() =
+    Coroutine.with (\_ () -> ()) (\cursor ->
+        item = Work.run (\owner -> Work.pack (Work.facet owner) cursor)
+        ())

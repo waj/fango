@@ -1,0 +1,7 @@
+import Coroutine
+import File
+
+bad() = Coroutine.with (\_ () ->
+    File.withFile "local.txt" (\file -> file)) (\work -> Coroutine.advance work ())
+
+main() = print "unreachable"

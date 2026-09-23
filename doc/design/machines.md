@@ -49,7 +49,8 @@ Completed frames are cleared. At suspension/non-tail boundaries the evaluator
 drops locals outside LiveOut; Go zeros the frame and copies back only live fields.
 Closures over mutable locals snapshot only referenced values and can retain both
 ordinary bodies and Machine factories. Calling selects a protocol; storage does
-not erase either representation.
+not erase either representation. A recursive binding ties its self-reference in
+that snapshot; its surrounding body still evaluates in the full lexical frame.
 
 Producer execution shares its caller's policy and step counter across Core,
 tail loops, and dispatch, including loops that never yield. Reopening a producer
@@ -94,7 +95,9 @@ advancement, and yield need compiler support. Construction and arguments are
 strict, while production begins on first pull. There are no terminal-traversal
 Core nodes.
 
-IteratorScope appears only in the private Stream.withProducer intrinsic. It
+For the Iterator protocol, IteratorScope appears in the private
+Stream.withProducer intrinsic. The same nodes also implement the distinct
+[typed Coroutine protocol](coroutines.md). The Iterator scope
 retains producer and consumer callbacks, a fresh ScopeID, owned Yield evidence,
 and the opaque Iterator type. Its visible control is the consumer's residual
 control: latent producer Machine transport terminates at the owner. Ordinary
@@ -165,3 +168,7 @@ ADTs. Core checks the binder's snapshot/list identities and intrinsic owner;
 Machine lint checks its typed clause parameter and retained contract. FailureInspect
 uses checked Maybe packaging and never invokes payloads. Snapshot lifetime checks
 remain part of [ownership analysis](ownership.md#failure-snapshots).
+
+Replayable [typed completion](completion.md) retains the complete result/row
+contract and adds checked current-evidence replay; a Failure snapshot alone
+does not authorize an abort.

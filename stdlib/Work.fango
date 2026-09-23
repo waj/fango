@@ -1,0 +1,29 @@
+{-# no-prelude #-}
+module Work exposing (Facet, Owner, Work, advance, close, facet, pack, run)
+
+import Basics exposing (..)
+import Coroutine exposing (Coroutine, Drive, Step)
+
+{-# resource #-}
+type Owner e = Owner (() ->{e} ())
+
+{-# resource #-}
+type Facet = Facet ()
+
+{-# resource #-}
+type Work request reply result = Work (request -> reply -> result)
+
+run : (Owner e ->{Drive | e} a) ->{Drive | e} a
+run = native
+
+facet : Owner e -> Facet
+facet = native
+
+pack : Facet -> Coroutine request reply result e ->{e} Work request reply result
+pack = native
+
+advance : Owner e -> Work request reply result -> reply ->{Drive | e} Step request result
+advance = native
+
+close : Owner e -> Work request reply result ->{Drive | e} ()
+close = native

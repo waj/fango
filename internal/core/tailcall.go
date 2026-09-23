@@ -176,7 +176,16 @@ func capturesMutated(e Expr, mutated map[string]bool) bool {
 			// stored closures.
 			return walk(e.Acquire) || walk(e.Release) || walk(e.Body)
 		case *IteratorNext:
-			return walk(e.Cursor)
+			return walk(e.Cursor) || walk(e.Reply)
+		case *Completion:
+			return walk(e.Value)
+		case *Work:
+			for _, arg := range e.Args {
+				if walk(arg) {
+					return true
+				}
+			}
+			return false
 		case *FailureInspect:
 			for _, arg := range e.Args {
 				if walk(arg) {

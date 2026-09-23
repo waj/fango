@@ -556,7 +556,7 @@ func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner,
 
 		env := eval.NewEnv()
 		env.DefineProg(prog)
-		if prog.Intrinsics[types.StreamWithProducerName] || prog.Intrinsics[types.IteratorNextName] {
+		if prog.Intrinsics[types.StreamWithProducerName] || prog.Intrinsics[types.IteratorNextName] || prog.Intrinsics[types.CoroutineWithName] {
 			machineProg, errs := machineir.Lower(prog, ck.B)
 			if len(errs) > 0 {
 				t.Fatalf("machine lowering: %v", errs)

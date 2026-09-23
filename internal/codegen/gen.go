@@ -1124,9 +1124,21 @@ func (g *gen) goType(t types.Type) goast.Expr {
 	case *types.TFun:
 		return g.callbackType(t)
 	case *types.TCon:
-		if t.Name == types.IteratorTypeName {
+		if t.Name == types.WorkOwnerTypeName || t.Name == types.WorkFacetTypeName {
+			g.usesFangort = true
+			return &goast.StarExpr{X: selector("fangort", "WorkOwner")}
+		}
+		if t.Name == types.WorkTypeName {
+			g.usesFangort = true
+			return &goast.StarExpr{X: selector("fangort", "WorkPackage")}
+		}
+		if t.Name == types.IteratorTypeName || t.Name == types.CoroutineTypeName {
 			g.usesFangort = true
 			return &goast.StarExpr{X: selector("fangort", "MachineIterator")}
+		}
+		if t.Name == types.CompletionTypeName {
+			g.usesFangort = true
+			return indexExpr(selector("fangort", "Completion"), []goast.Expr{g.goType(t.Args[0])})
 		}
 		if t.Name == types.FailureTypeName {
 			g.usesFangort = true
@@ -1534,8 +1546,12 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			operand = &goast.ParenExpr{X: operand}
 		}
 		return parenIf(parentPrec > 0, &goast.UnaryExpr{Op: gotoken.SUB, X: operand})
+	case *core.Work:
+		return g.workExpr(e)
 	case *core.FailureInspect:
 		return g.failureInspectExpr(e)
+	case *core.Completion:
+		return g.completionExpr(e)
 	case *core.NativeCall:
 		return g.nativeExpr(e, parentPrec)
 	case *core.If:
@@ -1942,6 +1958,9 @@ func (g *gen) bracketExpr(e *core.Bracket) goast.Expr {
 // its consumer callback. The consumer-facing cursor is the runtime owner
 // itself; inferred contracts govern aliases, helper calls, and advancement.
 func (g *gen) iteratorScopeExpr(e *core.IteratorScope) goast.Expr {
+	if _, _, _, ok := types.CoroutineProtocol(e.CursorTy); ok {
+		return g.coroutineScopeExpr(e)
+	}
 	overall := e.Control.Resolve(g.control)
 	oldControl, oldResult := g.control, g.resultType
 	g.control, g.resultType = overall, e.Ty

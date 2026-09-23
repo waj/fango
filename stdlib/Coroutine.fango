@@ -1,0 +1,25 @@
+{-# no-prelude #-}
+module Coroutine exposing (Coroutine, Drive, Step(..), Suspension, advance, close, with)
+
+import Basics exposing (..)
+
+-- Operations are private: only the scoped callback can suspend its producer.
+effect Suspension
+    suspension : () -> ()
+
+effect Drive
+    drive : () -> ()
+
+{-# resource #-}
+type Coroutine request reply result e = Coroutine (request -> reply ->{e} result)
+
+type Step request result = Suspended request | Finished result | Closed deriving (Eq, Show)
+
+with : ((request ->{Suspension} reply) -> reply ->{Suspension | e} result) -> (Coroutine request reply result e ->{Drive | e} a) ->{e} a
+with = native
+
+advance : Coroutine request reply result e -> reply ->{Drive | e} Step request result
+advance = native
+
+close : Coroutine request reply result e ->{Drive | e} ()
+close = native

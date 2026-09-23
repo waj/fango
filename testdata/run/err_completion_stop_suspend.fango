@@ -1,0 +1,14 @@
+import Coroutine
+import Fail exposing (fail)
+import Scope
+
+main() =
+    print (Fail.attempt (\_ -> Coroutine.with (\pause () ->
+        handle Scope.finally (\_ ->
+            pause "ready"
+            7) (\_ -> Fail.fail "cleanup") of
+            fail message ->
+                pause ("cleanup handler " ++ message)
+                0) (\work ->
+        first = Coroutine.advance work ()
+        Coroutine.close work)))

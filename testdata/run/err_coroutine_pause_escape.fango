@@ -1,0 +1,5 @@
+import Coroutine
+escape() = Coroutine.with (\pause () ->
+    pause 1
+    \_ -> pause 2) (\work -> Coroutine.advance work ())
+main() = print "unreachable"

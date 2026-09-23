@@ -57,7 +57,7 @@ func unitsOf(result *check.Result) []codegen.Unit {
 func referenceFiles(t *testing.T, result *check.Result, units []codegen.Unit, printMain bool) []codegen.File {
 	t.Helper()
 	prog := result.Program
-	if prog.Intrinsics[types.StreamWithProducerName] || prog.Intrinsics[types.IteratorNextName] {
+	if prog.Intrinsics[types.StreamWithProducerName] || prog.Intrinsics[types.IteratorNextName] || prog.Intrinsics[types.CoroutineWithName] {
 		mp, errs := machineir.Lower(prog, result.Checker.B)
 		if len(errs) != 0 {
 			t.Fatal(errs[0])

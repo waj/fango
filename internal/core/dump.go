@@ -145,6 +145,9 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		return fmt.Sprintf("(suspend %s %s)", pr.Type(e.Ty), dumpExpr(e.Request, pr))
 	case *IteratorScope:
 		form := "iterator-scope"
+		if _, _, _, ok := types.CoroutineProtocol(e.CursorTy); ok {
+			form = "coroutine-scope"
+		}
 		if e.Traversal.Unique != 0 {
 			form += " traversal=" + dumpEffect(e.Traversal, pr)
 		}
@@ -153,13 +156,27 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 		}
 		return fmt.Sprintf("(%s %d %s %s %s %s)", form, e.Scope, pr.Type(e.CursorTy), pr.Type(e.Ty), dumpExpr(e.Producer, pr), dumpExpr(e.Consumer, pr))
 	case *IteratorNext:
+		if e.Close {
+			return fmt.Sprintf("(coroutine-close access=%d %s)", e.Access, dumpExpr(e.Cursor, pr))
+		}
+		if e.Reply != nil {
+			return fmt.Sprintf("(coroutine-advance access=%d %s %s %s)", e.Access, pr.Type(e.Ty), dumpExpr(e.Cursor, pr), dumpExpr(e.Reply, pr))
+		}
 		return fmt.Sprintf("(iterator-next access=%d %s %s)", e.Access, pr.Type(e.Ty), dumpExpr(e.Cursor, pr))
+	case *Work:
+		parts := []string{"(work", e.Kind, pr.Type(e.Ty)}
+		for _, arg := range e.Args {
+			parts = append(parts, dumpExpr(arg, pr))
+		}
+		return strings.Join(parts, " ") + ")"
 	case *FailureInspect:
 		parts := []string{"(failure-inspect", e.Name, pr.Type(e.Ty)}
 		for _, arg := range e.Args {
 			parts = append(parts, dumpExpr(arg, pr))
 		}
 		return strings.Join(parts, " ") + ")"
+	case *Completion:
+		return fmt.Sprintf("(completion %s %s %s)", e.Name, pr.Type(e.Ty), dumpExpr(e.Value, pr))
 
 	case *ResumeTail:
 		if e.NextState != nil {

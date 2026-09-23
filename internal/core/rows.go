@@ -91,6 +91,8 @@ func FreeRows(expr Expr) map[types.CaptureVar]bool {
 
 func ExpressionRow(e Expr) *RowArgument {
 	switch e := e.(type) {
+	case *Completion:
+		return e.Row
 	case *App:
 		return e.Row
 	case *IteratorScope:
@@ -179,9 +181,15 @@ func CheckRowEvidence(p *Prog) []error {
 					needsRow = ArrowOpenRow(e.Callee.Type(), 1)
 				}
 			case *IteratorScope:
-				needsRow = ArrowOpenRow(e.Producer.Type(), 1)
+				arity := 1
+				if _, _, _, ok := types.CoroutineProtocol(e.CursorTy); ok {
+					arity = 2
+				}
+				needsRow = ArrowOpenRow(e.Producer.Type(), arity)
 			case *IteratorNext:
 				needsRow = true
+			case *Completion:
+				needsRow = e.Name != types.CompletionFailureName
 			default:
 				return true
 			}

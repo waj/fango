@@ -5,9 +5,10 @@ import "fmt"
 // CursorResult is the private advancement result register. Generated code
 // packages Value/Present into Maybe and propagates Exit before using Value.
 type CursorResult struct {
-	Value   any
-	Present bool
-	Exit    *ExitRequest
+	Finished bool
+	Value    any
+	Present  bool
+	Exit     *ExitRequest
 }
 
 type machinePull struct {
@@ -69,12 +70,20 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 			if cursor.busy {
 				return MachineEvent{}, fmt.Errorf("fangort: overlapping cursor advancement")
 			}
+			if event.close {
+				exit, err := cursor.Close()
+				if err != nil {
+					return MachineEvent{}, err
+				}
+				d.active.result = CursorResult{Exit: exit}
+				continue
+			}
 			if cursor.done {
 				d.active.result = CursorResult{}
 				continue
 			}
-			if cursor.machine == nil {
-				return MachineEvent{}, fmt.Errorf("fangort: cursor has no producer")
+			if err := cursor.begin(event.reply); err != nil {
+				return MachineEvent{}, err
 			}
 			cursor.busy = true
 			cursor.evidence.Bind(event.evidence)
@@ -87,7 +96,12 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 				d.active = cursor.machine
 			}
 			if cursor.started {
-				if err := d.active.resumeLocal(UnitValue); err != nil {
+				if err := d.active.resumeLocal(func() any {
+					if cursor.exchange {
+						return event.reply
+					}
+					return UnitValue
+				}()); err != nil {
 					return MachineEvent{}, err
 				}
 			}
@@ -109,7 +123,7 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 			pull.cursor.done, pull.cursor.busy = true, false
 			pull.cursor.evidence.Clear()
 			d.active = pull.caller
-			d.active.result = CursorResult{Exit: event.Exit}
+			d.active.result = CursorResult{Exit: event.Exit, Value: event.Value, Finished: event.Exit == nil}
 			continue
 		}
 		matched := -1

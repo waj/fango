@@ -93,7 +93,11 @@ pool follows first encounter. Pointer identity and session allocation numbers ar
 installation interns builtin/imported nominal names, allocates fresh local
 nominal, type-variable, capture, scope, and resume identities, remaps template
 indices, and reconstructs stable instance cutoffs without changing positional
-parameter or evidence order. Most identities carry their own type and are
+parameter or evidence order. A result summary can retain a durable handler
+scope introduced by a dependency. Objects identify these foreign scopes by
+their defining capture contract and node, and installation aligns them with
+the installed dependency instead of allocating another local scope.
+Most identities carry their own type and are
 remapped wherever they appear; the exceptions are the ones a capture contract
 restates as plain integers — its effect and deferred-row identities, and the
 resume a resume node belongs to — which must go through the same mappings the

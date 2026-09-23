@@ -29,6 +29,8 @@ func (b *moduleCheck) inferGroup(group []int) {
 		d := b.values[i]
 		b.context(i, symbolModule(d.Name), func() { qs[k] = ck.prepareDecl(d, true) })
 		all.cs = append(all.cs, qs[k].g.cs...)
+		all.executionRoots = append(all.executionRoots, qs[k].g.executionRoots...)
+		all.workRows = append(all.workRows, qs[k].g.workRows...)
 		all.preds = append(all.preds, qs[k].g.preds...)
 		b.errs = append(b.errs, qs[k].errs...)
 		b.errs = append(b.errs, qs[k].g.errs...)

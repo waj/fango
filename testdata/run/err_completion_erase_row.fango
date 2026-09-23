@@ -1,0 +1,6 @@
+import Completion exposing (Completion)
+
+forget : Completion Int e -> Int
+forget value = Completion.replay value
+
+main = 0

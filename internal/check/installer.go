@@ -182,6 +182,7 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		Runtime: append([]core.Def(nil), owned...), Stage: stageObject.Defs, StageGroups: stageObject.Groups,
 		TemplateBase: templateStart, Templates: i.ck.Templates.Snapshot(templateStart),
 		StageDependencies: stageDependencies, CheckStageDependencies: checkStageDependencies}
+	object.ScopeNames = foreignScopeNames(i.ck.CaptureSummaries, state.Captures, object)
 	ownSemantic, ownABI, ownImplementation := ownFingerprints(object)
 	ownStage := ownStageFingerprint(object, object.Stage)
 	semanticDeps, semanticOK := dependencyFingerprints(module.Dependencies, i.summaries, func(s moduleSummary) string { return s.Semantic })

@@ -38,17 +38,20 @@ func equalFlow(a, b flowValue) bool {
 }
 
 type flowEnv struct {
-	values   map[string]flowValue
-	evidence map[int][]int
-	types    map[int]types.Type
-	rows     map[types.CaptureVar]flowRow
+	controlRow types.Type
+	invocation types.Type
+	values     map[string]flowValue
+	evidence   map[int][]int
+	types      map[int]types.Type
+	rows       map[types.CaptureVar]flowRow
 }
 
 func (e flowEnv) clone() flowEnv {
-	return flowEnv{maps.Clone(e.values), maps.Clone(e.evidence), maps.Clone(e.types), maps.Clone(e.rows)}
+	return flowEnv{controlRow: e.controlRow, invocation: e.invocation, values: maps.Clone(e.values), evidence: maps.Clone(e.evidence), types: maps.Clone(e.types), rows: maps.Clone(e.rows)}
 }
 
 type flowObject struct {
+	budget      types.Type
 	allocation  string
 	ancestry    []string
 	kind        string
@@ -94,6 +97,9 @@ type flowEdge struct {
 var rootFlowSite = flowSite{phase: "root"}
 
 type flowContext struct {
+	sourceRows         []types.Type
+	control            types.Control
+	completionFailures flowValue
 	// entry is the invocation state used for sharing; env is its monotone
 	// recursive widening. Both refer to the live heap. Stable incoming edges
 	// keep supplying growth even after widening changes the sharing key.
@@ -117,6 +123,7 @@ type flowContext struct {
 	scopes      []int
 	def         string
 	accesses    []int
+	drives      []int
 	suspensions []int
 }
 type flowOwner struct {
@@ -134,6 +141,8 @@ type flowOwner struct {
 	state    flowValue
 	answer   flowValue
 	yielded  flowValue
+	reply    flowValue
+	finished flowValue
 }
 
 type CaptureFlowError struct {
@@ -185,17 +194,20 @@ type flowPull struct {
 }
 
 type flowChecker struct {
-	shape     *captureAnalyzer
-	defs      map[string]*Def
-	objects   []*flowObject
-	objectIDs map[string]int
-	owners    []*flowOwner
-	ownerIDs  map[string]int
-	contexts  map[string]*flowContext
-	key       flowKey
-	byTarget  map[string][]*flowContext
-	edges     map[flowEdge]string
-	revision  int
+	collectWorkNeed    func(WorkNeed)
+	collectControlNeed func(ControlNeed)
+	detached           []*detachedFlow
+	shape              *captureAnalyzer
+	defs               map[string]*Def
+	objects            []*flowObject
+	objectIDs          map[string]int
+	owners             []*flowOwner
+	ownerIDs           map[string]int
+	contexts           map[string]*flowContext
+	key                flowKey
+	byTarget           map[string][]*flowContext
+	edges              map[flowEdge]string
+	revision           int
 	// heapRevision counts only the mutations a sharing key can observe: an
 	// object's fields and a closure object's environment. Every other kind of
 	// growth leaves every key intact.
@@ -210,6 +222,13 @@ type flowChecker struct {
 	synchronous     []synchronousFlow
 	suspensionCalls []*flowContext
 	pulls           []flowPull
+}
+
+type detachedFlow struct {
+	site      flowSite
+	callDepth int
+	outer     []int
+	failures  flowValue
 }
 
 func checkCaptureFlows(a *captureAnalyzer) []error {
@@ -322,6 +341,10 @@ func (f *flowChecker) mergeEnv(dst *flowEnv, src flowEnv) {
 func (f *flowChecker) alloc(key string, o flowObject) int {
 	if id := f.objectIDs[key]; id != 0 {
 		old := f.objects[id]
+		if old.kind == "work-owner" && old.budget != nil && !types.Equal(old.budget, o.budget) {
+			old.budget = nil
+			f.grow()
+		}
 		f.mergeAncestry(&old.ancestry)
 		f.mergeObjectEnv(&old.env, o.env)
 		// A sharing key reads an object's fields, so their growth is a heap
@@ -369,7 +392,7 @@ func (f *flowChecker) owner(n *types.CaptureFlow, env flowEnv, ctx string, scope
 		if len(n.TypeArgs) > 0 {
 			name += " for `" + types.Show(types.SubstRigid(n.TypeArgs[0], env.types)) + "`"
 		}
-	} else if n.Kind == "iterator" {
+	} else if n.Kind == "iterator" || n.Kind == "coroutine" {
 		name = "cursor scope"
 	}
 	id := len(f.owners)
@@ -537,7 +560,7 @@ func flowEffects(n *types.CaptureFlow) map[int]bool {
 				}
 			}
 		}
-		if n.Kind == "iterator" {
+		if n.Kind == "iterator" || n.Kind == "coroutine" {
 			// The scope supplies Yield evidence when it starts production;
 			// constructing its callback arguments still uses outer evidence.
 			for _, child := range n.Children {
@@ -628,6 +651,8 @@ func (f *flowChecker) callDef(name string, args []flowValue, typeArgs []types.Ty
 	}
 	env := emptyFlowEnv()
 	f.bindFlowRow(&env, contract.RowParam, contract.RowEffects, caller.rows[0])
+	matchSourceRows(contract.SourceType, caller.invocation, env.types)
+	env.controlRow = executionRow(types.SubstRigid(contract.SourceType, env.types), len(contract.Params))
 	for i, p := range contract.Params {
 		if i < len(args) {
 			env.values[p] = args[i]
@@ -641,7 +666,7 @@ func (f *flowChecker) callDef(name string, args []flowValue, typeArgs []types.Ty
 			env.types[tv] = types.SubstRigid(typeArgs[i], caller.types)
 		}
 	}
-	return f.invoke("def:"+name, name, contract.Body, env, site, scopes, 0)
+	return f.invoke("def:"+name, name, contract.Body, env, site, scopes, 0, d.Control)
 }
 
 // Distinct pre-existing callbacks and descriptions distinguish nested uses of
@@ -656,7 +681,7 @@ func (f *flowChecker) recursiveInputs(context string, previous, next flowEnv) bo
 		// equality fail closed during escape checking.
 		previousCaps := f.captures(previous.values[name])
 		for _, owner := range f.captures(value) {
-			if !slices.Contains(previousCaps, owner) && f.owners[owner].code.Kind == "iterator" {
+			if !slices.Contains(previousCaps, owner) && (f.owners[owner].code.Kind == "iterator" || f.owners[owner].code.Kind == "coroutine") {
 				return false
 			}
 		}
@@ -673,11 +698,16 @@ func (f *flowChecker) recursiveInputs(context string, previous, next flowEnv) bo
 	return true
 }
 
-func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env flowEnv, site flowSite, scopes []int, resume int) flowValue {
+func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env flowEnv, site flowSite, scopes []int, resume int, controls ...types.Control) flowValue {
+	var control types.Control
+	if len(controls) > 0 {
+		control = controls[0]
+	}
 	parent := ""
 	if len(f.calls) > 0 {
 		parent = f.calls[len(f.calls)-1].id
 	}
+	sourceRow := env.controlRow
 	env = f.relevantFlowEnv(body, env, nil, nil, 0)
 	key := ""
 	boundary := f.boundaryKey()
@@ -722,7 +752,7 @@ func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env fl
 		// revision -1 marks the key as never computed: heap revision 0 is a
 		// real state, so a zero here would pass off the empty string as this
 		// context's key.
-		c = &flowContext{id: key, revision: -1, entry: env.clone(), boundary: boundary, evaluations: map[int]int{}, origin: f.location, target: target, site: callSite, parent: parent, def: def, scopes: slices.Clone(scopes)}
+		c = &flowContext{control: control, id: key, revision: -1, entry: env.clone(), boundary: boundary, evaluations: map[int]int{}, origin: f.location, target: target, site: callSite, parent: parent, def: def, scopes: slices.Clone(scopes)}
 		f.contexts[key] = c
 		if f.byTarget == nil {
 			f.byTarget = map[string][]*flowContext{}
@@ -735,6 +765,19 @@ func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env fl
 			f.edges = map[flowEdge]string{}
 		}
 		f.edges[edge] = key
+	}
+	if sourceRow != nil {
+		found := false
+		for _, row := range c.sourceRows {
+			if types.Equal(row, sourceRow) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.sourceRows = append(c.sourceRows, sourceRow)
+			f.grow()
+		}
 	}
 	f.mergeEnv(&c.env, env)
 	f.mergeAncestry(&c.ancestry)
@@ -749,12 +792,19 @@ func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env fl
 	// A recursive edge may reuse a busy summary. Its already-discovered access
 	// obligations still apply; skipping them would accept reentrant helpers.
 	for _, owner := range c.accesses {
-		f.requireAdvance(owner)
+		f.checkAdvance(owner)
+	}
+	for _, owner := range c.drives {
+		f.requireDrive(owner)
 	}
 	for _, target := range c.suspensions {
 		f.suspend(target)
 	}
 	if c.busy || c.evaluated == f.generation {
+		if len(f.detached) > 0 {
+			boundary := f.detached[len(f.detached)-1]
+			boundary.failures = joinFlow(boundary.failures, c.completionFailures)
+		}
 		return c.result
 	}
 	c.evaluated = f.generation
@@ -777,6 +827,35 @@ func (f *flowChecker) apply(fn flowValue, args []flowValue, env flowEnv, site fl
 	for _, id := range fn.refs {
 		o := f.objects[id]
 		switch o.kind {
+		case "abstract-control":
+			fn := o.code.Type.(*types.TFun)
+			for _, l := range fn.Eff.Labels {
+				if l.Name == types.CoroutineSuspensionName {
+					f.suspend(0)
+				}
+				if l.Name == types.CoroutineDriveName {
+					if _, _, _, ok := types.CoroutineProtocol(fn.Arg); ok && len(args) > 0 {
+						f.advance(args[0], flowValue{unknown: true}, env, site.within("abstract-drive"), scopes)
+						continue
+					}
+					for _, call := range f.calls {
+						f.requireControl(call, 0, "drive")
+					}
+				}
+			}
+			result = joinFlow(result, flowValue{unknown: true})
+		case "pause":
+			if len(args) != 1 {
+				panic("malformed pause capture call")
+			}
+			if f.active[o.owner] == 0 {
+				err := fmt.Errorf("COROUTINE PRODUCER AUTHORITY: pause owned by %s is invoked outside its active producer", f.owners[o.owner].name)
+				f.errors[err.Error()] = err
+			}
+			f.suspend(o.owner)
+			f.crossing(args[0], o.owner, "coroutine request")
+			f.merge(&f.owners[o.owner].yielded, args[0])
+			result = joinFlow(result, f.owners[o.owner].reply)
 		case "global":
 			result = joinFlow(result, f.callDef(o.def, args, o.code.TypeArgs, env, site, scopes))
 		case "lambda":
@@ -784,12 +863,18 @@ func (f *flowChecker) apply(fn flowValue, args []flowValue, env flowEnv, site fl
 				continue
 			}
 			inner := o.env.clone()
+			matchSourceRows(o.code.SourceType, env.invocation, inner.types)
 			f.bindFlowRow(&inner, o.code.RowParam, o.code.Deferred, env.rows[0])
 			inner.values[o.code.Name] = args[0]
+			inner.controlRow = executionRow(types.SubstRigid(o.code.SourceType, inner.types), 1)
 			for _, ev := range o.code.Effects {
 				inner.evidence[ev] = env.evidence[ev]
 			}
-			got := f.invoke(fmt.Sprintf("lambda:%s:%d", o.def, o.code.ID), o.def, o.code.Children[0], inner, site, scopes, 0)
+			control := types.Control{Polymorphic: true}
+			if fn, ok := o.code.Type.(*types.TFun); ok {
+				control = types.FunctionControl(fn)
+			}
+			got := f.invoke(fmt.Sprintf("lambda:%s:%d", o.def, o.code.ID), o.def, o.code.Children[0], inner, site, scopes, 0, control)
 			if len(args) > 1 {
 				got = f.apply(got, args[1:], env, site.within("apply"), scopes)
 			}
@@ -823,6 +908,51 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 	}
 	var result flowValue
 	switch n.Kind {
+	case "work-begin":
+		ref := f.alloc(key.within("budget").allocation(), flowObject{kind: "work-owner", budget: types.SubstRigid(n.SourceType, env.types)})
+		result = flowValue{refs: []int{ref}}
+	case "work-end":
+		for i := range n.Children {
+			child(i)
+		}
+	case "work-facet":
+		result = child(0)
+	case "work-pack":
+		facet, cursor := child(0), child(1)
+		f.checkWorkTransfer(cursor)
+		need := types.SubstRigid(n.SourceType, env.types)
+		if f.collectWorkNeed != nil {
+			f.collectWorkNeed(WorkNeed{Need: need, Immediate: true, Span: f.location, In: f.root})
+		}
+		f.checkWorkBudget(facet, need)
+		if f.collectWorkNeed == nil {
+			for _, ref := range cursor.refs {
+				if actual := f.objects[ref]; actual.kind == "coroutine" && !workRowIncludes(need, actual.budget) {
+					err := fmt.Errorf("WORK EFFECT BUDGET: package proof does not cover the actual coroutine residual in %s", f.root)
+					f.errors[err.Error()] = err
+				}
+			}
+		}
+		for _, owner := range f.captures(facet) {
+			f.store(cursor, owner, "work package")
+		}
+		ref := f.alloc(key.within("package").allocation(), flowObject{kind: "work", fields: []flowValue{facet, cursor}})
+		result = flowValue{refs: []int{ref}}
+	case "work-open":
+		owner, work := child(0), child(1)
+		for _, ref := range work.refs {
+			o := f.objects[ref]
+			if o.kind != "work" {
+				continue
+			}
+			want, got := f.workOwnerIDs(owner), f.workOwnerIDs(o.fields[0])
+			if !owner.unknown && !o.fields[0].unknown && (len(want) != 1 || len(got) != 1 || want[0] != got[0]) {
+				err := fmt.Errorf("WORK OWNER MISMATCH: package does not belong to the selected Work.run owner in %s", f.root)
+				f.errors[err.Error()] = err
+			}
+			result = joinFlow(result, o.fields[1])
+		}
+		result.unknown = result.unknown || work.unknown
 	case "var":
 		result = env.values[n.Name]
 	case "global":
@@ -837,6 +967,46 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		}
 	case "native":
 		result = joinFlow(all(0)...)
+	case "completion_failure", "completion_replay":
+		completed := child(0)
+		result.unknown = completed.unknown
+		for _, id := range completed.refs {
+			object := f.objects[id]
+			if object.kind != "completion" || len(object.fields) != 2 {
+				result = joinFlow(result, completed)
+				continue
+			}
+			if n.Kind == "completion_failure" {
+				result = joinFlow(result, object.fields[1])
+				continue
+			}
+			result = joinFlow(result, object.fields[0])
+			for _, failureID := range object.fields[1].refs {
+				failure := f.objects[failureID]
+				if failure.kind != "completion-abort" || failure.code == nil {
+					continue
+				}
+				inner := invocationFlowRow(env, n.Row)
+				inner.evidence = maps.Clone(inner.rows[0].evidence)
+				replayed := *failure.code
+				replayed.ID = n.ID
+				replayed.Children = nil
+				for i, payload := range failure.fields {
+					name := fmt.Sprintf("_completionPayload%d", i)
+					inner.values[name] = payload
+					replayed.Children = append(replayed.Children, &types.CaptureFlow{ID: n.ID, Kind: "var", Name: name})
+				}
+				result = joinFlow(result, f.eval(&replayed, inner, ctx, scopes, resumes))
+			}
+		}
+	case "completion_capture":
+		fn := child(0)
+		boundary := &detachedFlow{site: key, callDepth: len(f.calls), outer: slices.Clone(scopes)}
+		f.detached = append(f.detached, boundary)
+		result = f.apply(fn, []flowValue{{}}, invocationFlowRow(env, n.Row), key, scopes)
+		f.detached = f.detached[:len(f.detached)-1]
+		id := f.alloc(key.allocation(), flowObject{kind: "completion", fields: []flowValue{result, boundary.failures}})
+		result = flowValue{refs: []int{id}}
 	case "scalar":
 		all(0)
 	case "branch":
@@ -870,6 +1040,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		fn := child(0)
 		args := all(1)
 		env = invocationFlowRow(env, n.Row)
+		env.invocation = types.SubstRigid(n.SourceType, env.types)
 		_, local := env.values[n.Children[0].Name]
 		if n.Children[0].Kind == "global" && !local {
 			result = f.callDef(n.Children[0].Name, args, n.TypeArgs, env, key, scopes)
@@ -949,6 +1120,29 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 	case "perform", "exit":
 		args := all(0)
 		targets := env.evidence[n.Effects[0]]
+		if n.Kind == "exit" && len(f.detached) > 0 {
+			boundary := f.detached[len(f.detached)-1]
+			outward := len(targets) == 0
+			for _, target := range targets {
+				outward = outward || target == 0 || slices.Contains(boundary.outer, target)
+			}
+			if outward {
+				failureID := f.alloc(key.within("detached").allocation(), flowObject{kind: "completion-abort", code: n, fields: args})
+				failure := flowValue{refs: []int{failureID}}
+				boundary.failures = joinFlow(boundary.failures, failure)
+				for _, context := range f.calls[boundary.callDepth:] {
+					f.merge(&context.completionFailures, failure)
+				}
+				for _, arg := range args {
+					for _, owner := range f.captures(arg) {
+						if !slices.Contains(boundary.outer, owner) {
+							f.escape(arg, owner, "completion failure payload", "the completion destination")
+						}
+					}
+				}
+				break
+			}
+		}
 		cleanupExit := false
 		if n.Kind == "exit" {
 			for _, obligation := range f.synchronous {
@@ -1024,7 +1218,16 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 					// the contract interpreter visits it at the operation site.
 					f.synchronous = nil
 					for _, obligation := range savedSync {
-						if !slices.Contains(obligation.enclosing, id) {
+						ownedRelease := false
+						if obligation.phase == "release" {
+							for _, active := range f.active {
+								ownedRelease = ownedRelease || active > 0
+							}
+						}
+						// An owned producer may be stopped while this release is
+						// pending. Its captured abort clause then executes as
+						// part of synchronous close, without producer resumption.
+						if !slices.Contains(obligation.enclosing, id) || ownedRelease {
 							f.synchronous = append(f.synchronous, obligation)
 						}
 					}
@@ -1036,7 +1239,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 						}
 					}
 				}
-				got := f.invoke(fmt.Sprintf("clause:%s:%d", f.contextDef(o.context), cl.Body.ID), f.contextDef(o.context), cl.Body, inner, key, scopes, id)
+				got := f.invoke(fmt.Sprintf("clause:%s:%d", f.contextDef(o.context), cl.Body.ID), f.contextDef(o.context), cl.Body, inner, key, scopes, id, types.Control{Polymorphic: true})
 				f.synchronous, f.suspensionCalls = savedSync, savedCalls
 				if n.Kind == "exit" {
 					f.merge(&o.answer, got)
@@ -1088,7 +1291,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 			}
 		}
 		result = flowValue{}
-	case "iterator":
+	case "iterator", "coroutine":
 		producer, consumer := child(0), child(1)
 		env = invocationFlowRow(env, n.Row)
 		owner := f.owner(n, env, ctx, scopes)
@@ -1096,13 +1299,37 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		if len(n.Effects) != 0 {
 			yieldEffect = n.Effects[0]
 		}
-		cursor := f.alloc(key.within("cursor").allocation(), flowObject{kind: "cursor", owner: owner, yieldEffect: yieldEffect, fields: []flowValue{producer}})
+		kind := "cursor"
+		if n.Kind == "coroutine" {
+			kind = "coroutine"
+		}
+		cursor := f.alloc(key.within("cursor").allocation(), flowObject{kind: kind, budget: types.SubstRigid(n.SourceType, env.types), owner: owner, yieldEffect: yieldEffect, fields: []flowValue{producer}})
 		inside := append(slices.Clone(scopes), owner)
 		result = f.apply(consumer, []flowValue{{refs: []int{cursor}, caps: []int{owner}}}, env, key.within("consumer"), inside)
 		f.escape(result, owner, "cursor scope result", "The returned value")
 
+	case "close":
+		cursor := child(0)
+		for _, ref := range cursor.refs {
+			if o := f.objects[ref]; o.kind == "coroutine" {
+				f.requireAdvance(o.owner)
+			}
+		}
+	case "advance":
+		cursor, input := child(0), child(1)
+		value := f.advance(cursor, input, invocationFlowRow(env, n.Row), key, scopes)
+		var finished flowValue
+		for _, ref := range cursor.refs {
+			if o := f.objects[ref]; o.kind == "coroutine" {
+				finished = joinFlow(finished, f.owners[o.owner].finished)
+			}
+		}
+		for i, fields := range [][]flowValue{{value}, {finished}, nil} {
+			id := f.alloc(key.within(fmt.Sprintf("step%d", i)).allocation(), flowObject{kind: "ctor", ctor: i, fields: fields})
+			result.refs = append(result.refs, id)
+		}
 	case "next":
-		value := f.advance(child(0), invocationFlowRow(env, n.Row), key, scopes)
+		value := f.advance(child(0), flowValue{}, invocationFlowRow(env, n.Row), key, scopes)
 		some := f.alloc(key.within("some").allocation(), flowObject{kind: "ctor", ctor: 1, fields: []flowValue{value}})
 		none := f.alloc(key.within("none").allocation(), flowObject{kind: "ctor", ctor: 0})
 		result.refs = []int{some, none}
@@ -1110,10 +1337,41 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 	default:
 		panic("unknown capture flow: " + n.Kind)
 	}
+	// A clause's structural wrappers carry the handler answer type, while
+	// ResumeTail returns the operation payload to this flow interpreter. The
+	// leaf already checked that payload's own type; trimming it to the answer
+	// type here would erase a facet/resource resumed through a scalar handler.
+	if len(resumes) > 0 {
+		switch n.Kind {
+		case "let", "seq", "branch", "choice", "case", "switch":
+			return result
+		}
+	}
 	return f.trim(result, n.Type, env)
 }
 
+func (f *flowChecker) requireDrive(owner int) {
+	if f.owners[owner].code.Kind == "coroutine" {
+		for i := len(f.calls) - 1; i >= 0; i-- {
+			call := f.calls[i]
+			if call.id == f.owners[owner].context && !f.recursiveOwner(owner) {
+				break
+			}
+			if !slices.Contains(call.drives, owner) {
+				call.drives = append(call.drives, owner)
+				f.grow()
+			}
+			f.requireControl(call, owner, "drive")
+		}
+	}
+}
+
 func (f *flowChecker) requireAdvance(owner int) {
+	f.requireDrive(owner)
+	f.checkAdvance(owner)
+}
+
+func (f *flowChecker) checkAdvance(owner int) {
 	for _, call := range f.calls {
 		if !slices.Contains(call.accesses, owner) {
 			call.accesses = append(call.accesses, owner)
@@ -1136,14 +1394,18 @@ func (f *flowChecker) requireAdvance(owner int) {
 // Yield does not release that borrow within the contract: any call reached
 // before the producer returns to its caller is checked against the same owner.
 // Consumer callbacks run after this method returns, with the borrow discharged.
-func (f *flowChecker) advance(cursor flowValue, env flowEnv, site flowSite, scopes []int) flowValue {
+func (f *flowChecker) advance(cursor, input flowValue, env flowEnv, site flowSite, scopes []int) flowValue {
 	result := flowValue{unknown: cursor.unknown}
 	for _, ref := range cursor.refs {
 		o := f.objects[ref]
-		if o.kind != "cursor" {
+		if o.kind != "cursor" && o.kind != "coroutine" {
 			continue
 		}
 		owner := o.owner
+		if o.kind == "coroutine" {
+			f.store(input, owner, "coroutine reply")
+			f.merge(&f.owners[owner].reply, input)
+		}
 		f.requireAdvance(owner)
 		if f.active[owner] != 0 {
 			continue
@@ -1158,7 +1420,15 @@ func (f *flowChecker) advance(cursor flowValue, env flowEnv, site flowSite, scop
 		if o.yieldEffect != 0 {
 			producerEnv.evidence[o.yieldEffect] = []int{owner}
 		}
-		f.apply(o.fields[0], []flowValue{{}}, producerEnv, site.within("advance"), scopes)
+		if o.kind == "coroutine" {
+			pause := f.alloc(site.within("pause").allocation(), flowObject{kind: "pause", owner: owner})
+			body := f.apply(o.fields[0], []flowValue{{refs: []int{pause}, caps: []int{owner}}}, producerEnv, site.within("factory"), scopes)
+			answer := f.apply(body, []flowValue{f.owners[owner].reply}, producerEnv, site.within("advance"), scopes)
+			f.crossing(answer, owner, "coroutine result")
+			f.merge(&f.owners[owner].finished, answer)
+		} else {
+			f.apply(o.fields[0], []flowValue{{}}, producerEnv, site.within("advance"), scopes)
+		}
 		f.synchronous, f.suspensionCalls = saved, calls
 		f.pulls = f.pulls[:len(f.pulls)-1]
 		f.active[owner]--
@@ -1178,13 +1448,16 @@ func (f *flowChecker) suspend(target int) {
 	calls, synchronous := f.suspensionCalls, f.synchronous
 	for i := len(f.pulls) - 1; i >= 0; i-- {
 		pull := f.pulls[i]
-		if target == 0 || pull.owner == target {
+		if target != 0 && pull.owner == target {
 			break
 		}
 		calls = append(slices.Clone(pull.calls), calls...)
 		synchronous = append(slices.Clone(pull.synchronous), synchronous...)
 	}
 	for _, call := range calls {
+		if target == 0 && f.collectControlNeed != nil || target != 0 && f.owners[target].code.Kind == "coroutine" {
+			f.requireControl(call, target, "suspend")
+		}
 		if !slices.Contains(call.suspensions, target) {
 			call.suspensions = append(call.suspensions, target)
 			f.grow()
@@ -1200,4 +1473,12 @@ func (f *flowChecker) suspend(target int) {
 	}
 	err := SuspensionError{Span: span, In: f.root, Phase: obligation.phase}
 	f.errors[err.Error()] = err
+}
+
+func (f *flowChecker) crossing(value flowValue, owner int, description string) {
+	for _, id := range f.captures(value) {
+		if !slices.Contains(f.owners[owner].parent, id) || f.recursiveOwner(id) {
+			f.escape(value, id, description, "the coroutine driver")
+		}
+	}
 }

@@ -1,0 +1,33 @@
+import Completion
+import Fail
+import Failure
+import Scope
+import Result exposing (Result(..))
+
+effect Stop
+    abort stop : String -> Int -> value
+
+main() =
+    print (Completion.replay (Completion.capture (\_ -> 42)))
+    print (Fail.attempt (\_ ->
+        completed = Completion.capture (\_ ->
+            Fail.fail "detached"
+            0)
+        print "captured"
+        Fail.attempt (\_ -> Completion.replay completed)))
+    handle (\_ ->
+        completed = Completion.capture (\_ -> stop "tuple" 7)
+        case Completion.failure completed of
+            Just failure -> print (Failure.argumentCount failure)
+            Nothing -> print 0
+        handle Completion.replay completed of
+            stop text number -> print (text ++ show number))() of
+        stop _ _ -> print "stale target"
+    print (Fail.attempt (\_ ->
+        completed = Completion.capture (\_ -> Scope.finally (\_ ->
+            Fail.fail "primary"
+            0) (\_ -> Fail.fail "cleanup"))
+        case Completion.failure completed of
+            Just failure -> print (List.length (Failure.suppressed failure))
+            Nothing -> print 0
+        Completion.replay completed))

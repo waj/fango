@@ -21,7 +21,13 @@ func InspectPruned(e Expr, visit func(Expr) bool) {
 	switch e := e.(type) {
 	case *Neg:
 		walk(e.Operand)
+	case *Completion:
+		walk(e.Value)
 	case *NativeCall:
+		for _, arg := range e.Args {
+			walk(arg)
+		}
+	case *Work:
 		for _, arg := range e.Args {
 			walk(arg)
 		}
@@ -60,6 +66,7 @@ func InspectPruned(e Expr, visit func(Expr) bool) {
 		walk(e.Request)
 	case *IteratorNext:
 		walk(e.Cursor)
+		walk(e.Reply)
 	case *IteratorScope:
 		walk(e.Producer)
 		walk(e.Consumer)

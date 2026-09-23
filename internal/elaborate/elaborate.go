@@ -294,6 +294,7 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 		paramCaptures[i] = ck.Sup.FreshCapture()
 	}
 	def := core.Def{
+		SourceType:    prependTypes(dictTypes, rawType),
 		Name:          info.Name,
 		Type:          prependTypes(dictTypes, defType),
 		TyParams:      runtimeRigidVars(rawType),
@@ -328,17 +329,28 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 			continue
 		}
 		ty := (&elab{ck: ck}).eraseRuntimeKinds(eraseRows(ck.Intrinsics[name].Body))
-		if name == types.ScopeBracketName {
+		if types.WorkIntrinsic(name) {
+			defs = append(defs, workDef(name, ty, ck))
+		} else if name == types.ScopeBracketName {
 			// The declaration keeps its open row tail; Core does not.
 			defs = append(defs, scopeBracketDef(name, ty, ck))
+		} else if name == types.CoroutineWithName {
+			defs = append(defs, coroutineWithDef(ty, ck))
+		} else if name == types.CoroutineAdvanceName || name == types.CoroutineCloseName {
+			defs = append(defs, coroutineAdvanceDef(name, ty, ck))
 		} else if name == types.StreamWithProducerName {
 			defs = append(defs, withProducerDef(name, ty, ck))
 		} else if name == types.IteratorNextName {
 			defs = append(defs, iteratorNextDef(name, ty, ck))
+		} else if types.CompletionIntrinsic(name) {
+			defs = append(defs, completionDef(name, ty, ck))
 		} else if types.FailureInspection(name) {
 			defs = append(defs, failureInspectDef(name, ty, ck))
 		} else if name == types.FailAttemptReportName {
 			defs = append(defs, attemptReportDef(name, ty, ck))
+		}
+		if len(defs) > 0 && defs[len(defs)-1].Name == name {
+			defs[len(defs)-1].SourceType = ck.Intrinsics[name].Body
 		}
 	}
 	bindRows(defs, ck)
@@ -454,7 +466,8 @@ func symbolOwner(name string) string {
 }
 
 // runtimeRigidVars includes value-type variables and variables appearing
-// only in effect-label arguments, while excluding erased row-tail variables.
+// only in executing effect-label arguments, while excluding erased nominal
+// row indexes and row-tail variables.
 // The former still parameterize typed evidence even when an effect parameter
 // is phantom in every operation signature.
 func runtimeRigidVars(t types.Type) []*types.TVar {
@@ -470,6 +483,9 @@ func runtimeRigidVars(t types.Type) []*types.TVar {
 			}
 		case *types.TCon:
 			for _, a := range t.Args {
+				if _, rowIndex := a.(types.Row); rowIndex {
+					continue
+				}
 				walk(a)
 			}
 		case *types.TFun:
@@ -619,7 +635,14 @@ func captureDiagnostics(errs []error, ck *infer.Checker, fallback source.Span) [
 		var flow core.CaptureFlowError
 		var access core.CursorAccessError
 		var suspension core.SuspensionError
+		var control core.OwnerControlError
 		switch {
+		case errors.As(err, &control):
+			sp := control.Span
+			if sp.File == nil {
+				sp = at(control.In)
+			}
+			out = append(out, diag.Errorf(sp, "FOREIGN COROUTINE CONTROL", "%s", control.Detail()))
 		case errors.As(err, &suspension):
 			sp := suspension.Span
 			if sp.File == nil {
@@ -1069,7 +1092,8 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 		return &core.If{Cond: cond, Then: &core.BoolLit{Val: true, Ty: ty}, Else: el.expr(e.R), Ty: ty}
 	case *ast.Lambda:
 		el.defaultFree(el.apply(el.ck.ExprTypes[e]))
-		return el.lambda(e.Params, e.Body, el.eraseRuntimeKinds(eraseRows(el.apply(el.ck.ExprTypes[e]))))
+		raw := el.apply(el.ck.ExprTypes[e])
+		return sourceLambdas(el.lambda(e.Params, e.Body, el.eraseRuntimeKinds(eraseRows(raw))), raw, len(e.Params))
 	case *ast.Case:
 		return el.caseExpr(e, ty)
 	case *ast.Handle:
@@ -1129,6 +1153,9 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 				}
 			} else {
 				rhs = el.expr(bind.Body)
+			}
+			if len(bind.Params) > 0 {
+				rhs = sourceLambdas(rhs, el.apply(bindTy), len(bind.Params))
 			}
 			if !isFn {
 				el.pushScope(bind.Name, rhs.Type())

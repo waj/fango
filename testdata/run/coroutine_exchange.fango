@@ -1,0 +1,10 @@
+import Coroutine
+main() =
+    Coroutine.with
+        (\pause initial ->
+            answer = pause ("hello " ++ initial)
+            answer ++ "!")
+        (\work ->
+            print (Coroutine.advance work "Ada")
+            print (Coroutine.advance work "received")
+            print (Coroutine.advance work "ignored"))

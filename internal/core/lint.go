@@ -55,7 +55,7 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowMachine, allowStage bo
 		tyParams: map[int]bool{}, evidence: map[int]int{}, evidenceCaptures: map[int][]types.CaptureSet{},
 		captureVars: map[types.CaptureVar]bool{}, scopeIDs: map[types.ScopeID]bool{}, activeScopes: map[types.ScopeID]bool{},
 		resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives, intrinsics: p.Intrinsics,
-		allowMachine: allowMachine || (p.Intrinsics[types.StreamWithProducerName] || p.Intrinsics[types.IteratorNextName]), allowStage: allowStage}
+		allowMachine: allowMachine || (p.Intrinsics[types.StreamWithProducerName] || p.Intrinsics[types.IteratorNextName] || p.Intrinsics[types.CoroutineWithName]), allowStage: allowStage}
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
 	}
@@ -221,6 +221,7 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowMachine, allowStage bo
 		}
 	}
 	l.errs = append(l.errs, verifyCapturesIn(p, context, b)...)
+	l.errs = append(l.errs, SourceEffectErrors(p)...)
 	l.errs = append(l.errs, CheckRowEvidence(p)...)
 	return l.errs
 }
@@ -626,6 +627,10 @@ func (l *linter) expr(e Expr, where string) {
 		}
 		l.expr(e.Request, where)
 	case *IteratorScope:
+		if _, _, _, ok := types.CoroutineProtocol(e.CursorTy); ok {
+			l.coroutineScope(e, where)
+			break
+		}
 		l.control(e.Control, where)
 		if e.Scope == 0 || l.scopeIDs[e.Scope] {
 			l.errorf("%s: iterator scope has invalid or reused scope identity %d", where, e.Scope)
@@ -699,6 +704,15 @@ func (l *linter) expr(e Expr, where string) {
 		l.expr(e.Consumer, where)
 
 	case *IteratorNext:
+		if e.Cursor != nil {
+			if _, _, _, ok := types.CoroutineProtocol(e.Cursor.Type()); ok {
+				l.coroutineAdvance(e, where)
+				break
+			}
+		}
+		if e.Close || e.Reply != nil {
+			l.errorf("%s: Iterator has coroutine-only operands", where)
+		}
 		if !l.intrinsics[types.IteratorNextName] || l.defName != types.IteratorNextName {
 			l.errorf("%s: advancement outside the declared Iterator.next intrinsic", where)
 		}
@@ -714,6 +728,36 @@ func (l *linter) expr(e Expr, where string) {
 			l.expr(e.Cursor, where)
 		}
 
+	case *Completion:
+		if !l.intrinsics[e.Name] || l.defName != e.Name || !types.CompletionIntrinsic(e.Name) {
+			l.errorf("%s: completion outside its declared intrinsic", where)
+		}
+		if e.Value == nil || !types.CompletionShape(e.Name, e.Value.Type(), e.Ty) {
+			l.errorf("%s: invalid completion signature", where)
+			return
+		}
+		l.expr(e.Value, where)
+		completion := e.Value.Type()
+		if e.Name == types.CompletionCaptureName {
+			completion = e.Ty
+		}
+		con := completion.(*types.TCon)
+		if adt := l.adts[con.Unique]; adt == nil || adt.Con.Name != types.CompletionTypeName {
+			l.errorf("%s: completion has no declared nominal identity", where)
+		}
+		if worker := l.workers[e.Name]; worker == nil || e.Control != ArrowControl(worker.Type, 1) {
+			l.errorf("%s: stale completion control proof", where)
+		}
+		if e.Name == types.CompletionFailureName {
+			con := e.Ty.(*types.TCon)
+			if e.Result == nil || l.adts[con.Unique] != e.Result || len(e.Result.Ctors) != 2 || e.Result.Ctors[0].Name != "Maybe.Nothing" || len(e.Result.Ctors[0].Fields) != 0 || e.Result.Ctors[1].Name != "Maybe.Just" || len(e.Result.Ctors[1].Fields) != 1 || !EqualValueRepresentation(e.Result.InstFields(e.Result.Ctors[1], con.Args)[0], con.Args[0]) {
+				l.errorf("%s: invalid completion Maybe proof", where)
+			}
+		} else if e.Result != nil {
+			l.errorf("%s: unexpected completion Maybe proof", where)
+		}
+	case *Work:
+		l.work(e, where)
 	case *FailureInspect:
 		if !l.intrinsics[e.Name] || l.defName != e.Name || !types.FailureInspection(e.Name) {
 			l.errorf("%s: failure inspection outside its declared intrinsic", where)
@@ -810,7 +854,7 @@ func (l *linter) expr(e Expr, where string) {
 		// Elaboration is the only producer, and it emits exactly one scope, as
 		// the body of the bundled intrinsic. A Bracket anywhere else would mean
 		// a transform copied or moved a pending cleanup obligation.
-		if l.defName != types.ScopeBracketName {
+		if l.defName != types.ScopeBracketName && l.defName != types.WorkRunName {
 			l.errorf("%s: cleanup scope outside the `%s` intrinsic", where, types.ScopeBracketName)
 		}
 		if e.Resource == "" || e.ResourceTy == nil || e.Acquire == nil || e.Release == nil || e.Body == nil {
@@ -1014,7 +1058,7 @@ func (l *linter) expr(e Expr, where string) {
 			}
 		}
 	case *App:
-		if con, ok := e.Ty.(*types.TCon); ok && con.Name == types.FailureTypeName && e.CalleeKind == Ctor {
+		if con, ok := e.Ty.(*types.TCon); ok && (con.Name == types.FailureTypeName || con.Name == types.CompletionTypeName) && e.CalleeKind == Ctor {
 			l.errorf("%s: opaque failure snapshot constructed as an ordinary ADT", where)
 		}
 		l.control(e.Control, where)
@@ -1184,7 +1228,7 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: App with unknown CalleeKind %d", where, e.CalleeKind)
 		}
 	case *Case:
-		if con, ok := e.Scrut.Type().(*types.TCon); ok && con.Name == types.FailureTypeName {
+		if con, ok := e.Scrut.Type().(*types.TCon); ok && (con.Name == types.FailureTypeName || con.Name == types.CompletionTypeName) {
 			l.errorf("%s: opaque failure snapshot matched as an ordinary ADT", where)
 		}
 		if e.Bind == "" {
@@ -1640,6 +1684,12 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		for _, a := range e.Args {
 			directSlot(a, "failure inspection argument")
 		}
+	case *Work:
+		for _, a := range e.Args {
+			directSlot(a, "work package argument")
+		}
+	case *Completion:
+		directSlot(e.Value, "completion argument")
 	case *Quote:
 		for _, h := range e.Holes {
 			directSlot(h, "quote hole")
@@ -1656,6 +1706,9 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		directSlot(e.Request, "suspension request")
 	case *IteratorNext:
 		directSlot(e.Cursor, "cursor advancement operand")
+		if e.Reply != nil {
+			directSlot(e.Reply, "coroutine reply")
+		}
 	case *App:
 		if e.CalleeKind == Value {
 			directSlot(e.Callee, "indirect callee")

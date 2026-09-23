@@ -119,6 +119,10 @@ Core lint reconstructs these checks too.
 
 ## Exclusive cursor advancement and yield
 
+[Coroutine ownership](coroutines.md#protocol-and-control-proof) extends these
+contracts to typed replies/results, close, and a separate producer pause
+capability.
+
 Iterator is an opaque resource carrying its owner's fresh capability. Aliases,
 helpers, named consumers, constructor fields, and stored callbacks preserve it.
 Independent nested owner sites remain distinct even through the same wrapper.
@@ -143,3 +147,31 @@ those owners enclose the destination. This includes failures targeting another
 handler that become secondary during release. Release-local handlers can consume
 their failures before exiting. Ordinary fields, ADTs, and closures preserve
 snapshot captures; inspectability is separate from lifetime safety.
+
+## Scoped work budgets
+
+Work owners use the same lexical cleanup scope and finite capture-flow engine
+as other scoped resources. A package stores two independent identities: its
+Work owner determines membership and the hidden effect budget, while its
+coroutine determines lifetime, producer authority, and exclusive advancement.
+Opening a package returns that original coroutine to the checked advancement
+node; it cannot manufacture a driver from an erased thunk.
+
+Source effect rows survive erasure as `SourceType` on definitions, closures, and calls,
+and as source-row proofs on Work introduction and packaging nodes. Capture
+contracts retain these fields. Source substitutions accompany the existing
+value-flow interpretation, independently of runtime type arguments and
+residual evidence rows; the latter omit IO and therefore cannot establish a
+complete effect budget. The owning scope retains packaging obligations even
+when an intervening handler removes their immediate charge.
+
+Core lint reconstructs each Work capture graph, validates the nominal protocol
+and source-row proof against the intrinsic declaration and the actual retained
+coroutine, and rechecks owner membership and lifetime. Missing source contracts
+are rejected; an exact eta forwarding adapter can reconstruct its contract
+from the underlying call. A call's source proof preserves the runtime callee's
+explicit effects; an open-row ABI may acquire additional source effects, which
+must still fit the caller's source row. ANF, substitution, module objects, and interpreter
+execution objects preserve the proof metadata. Both runtime paths keep an
+opaque owner identity beside the underlying coroutine; neither opens the
+package through an unchecked protocol cast.

@@ -98,6 +98,7 @@ func termUses(term Term, known map[string]bool) map[string]bool {
 		add(term.Request)
 	case *CursorAdvance:
 		add(term.Cursor)
+		add(term.Reply)
 	case *CursorOpen:
 		add(term.Producer)
 	case *Call:

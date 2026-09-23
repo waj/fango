@@ -241,6 +241,13 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 		case *Eval:
 			checkBind(term.Bind)
 			checkExpr(term.Value, "evaluated expression", true)
+			if completion, ok := term.Value.(*core.Completion); ok {
+				checkRow(completion.Row, completion.Name != types.CompletionFailureName)
+				valid := completion.Value != nil && types.CompletionShape(completion.Name, completion.Value.Type(), completion.Ty)
+				if !valid || w.Name != completion.Name || !core.CaptureContractCurrent(w.Def) || completion.Name == types.CompletionCaptureName {
+					errs = append(errs, fmt.Errorf("%s: completion elimination lacks its current intrinsic proof", blockWhere))
+				}
+			}
 			if term.Value != nil && term.Bind.Ty != nil && !core.EqualValueRepresentation(term.Value.Type(), term.Bind.Ty) {
 				errs = append(errs, fmt.Errorf("%s: evaluated result type disagrees with binding", blockWhere))
 			}
@@ -302,11 +309,22 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			checkRow(term.Row, true)
 			checkBind(term.Bind)
 			checkExpr(term.Cursor, "cursor operand", false)
+			if term.Reply != nil {
+				checkExpr(term.Reply, "coroutine reply", false)
+			}
 			if term.Access != types.ExclusiveAdvance {
 				errs = append(errs, fmt.Errorf("%s: cursor advancement lacks exclusive access proof", blockWhere))
 			}
 			if term.Cursor != nil {
-				if err := core.CheckCursorResult(term.Cursor.Type(), term.Bind.Ty, term.Result); err != nil {
+				if err := func() error {
+					if _, _, _, ok := types.CoroutineProtocol(term.Cursor.Type()); ok {
+						return core.CheckCoroutineAdvance(term.Cursor.Type(), term.Reply, term.Close, term.Bind.Ty, term.Result)
+					}
+					if term.Close || term.Reply != nil {
+						return fmt.Errorf("Iterator has coroutine-only operands")
+					}
+					return core.CheckCursorResult(term.Cursor.Type(), term.Bind.Ty, term.Result)
+				}(); err != nil {
 					errs = append(errs, fmt.Errorf("%s: %v", blockWhere, err))
 				}
 			}
@@ -349,7 +367,14 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 					if len(term.Args) != 1 || !core.EqualValueRepresentation(term.Args[0].Type(), fn.Arg) {
 						errs = append(errs, fmt.Errorf("%s: indirect machine call argument disagrees with function", blockWhere))
 					}
-					if !core.EqualValueRepresentation(term.Bind.Ty, fn.Ret) {
+					validResult := core.EqualValueRepresentation(term.Bind.Ty, fn.Ret)
+					if term.Capture {
+						validResult = !term.Tail && types.CompletionShape(types.CompletionCaptureName, fn, term.Bind.Ty)
+						if w.Name != types.CompletionCaptureName || !core.CaptureContractCurrent(w.Def) {
+							errs = append(errs, fmt.Errorf("%s: completion capture lacks its current intrinsic proof", blockWhere))
+						}
+					}
+					if !validResult {
 						errs = append(errs, fmt.Errorf("%s: indirect machine call result disagrees with function", blockWhere))
 					}
 					wantEvidence := 0
@@ -518,13 +543,28 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				}
 			}
 		case *CursorOpen:
-			checkRow(term.Row, term.Producer != nil && core.ArrowOpenRow(term.Producer.Type(), 1))
+			arity := 1
+			if _, _, _, ok := types.CoroutineProtocol(term.Cursor.Ty); ok {
+				arity = 2
+			}
+			checkRow(term.Row, term.Producer != nil && core.ArrowOpenRow(term.Producer.Type(), arity))
 			checkBind(term.Cursor)
 			checkExpr(term.Producer, "cursor producer", false)
 			if term.Scope == 0 || seenCursorScopes[term.Scope] {
 				errs = append(errs, fmt.Errorf("%s: invalid or reused cursor scope", blockWhere))
 			}
 			seenCursorScopes[term.Scope] = true
+			if _, _, _, ok := types.CoroutineProtocol(term.Cursor.Ty); ok {
+				if term.Producer == nil {
+					errs = append(errs, fmt.Errorf("%s: missing coroutine producer", blockWhere))
+				} else if err := core.CheckCoroutineProducer(term.Cursor.Ty, term.Producer.Type()); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %v", blockWhere, err))
+				}
+				if term.Yield.Unique == 0 || term.Yield.Name != types.CoroutineSuspensionName || len(term.Yield.Args) != 0 || term.Yield.Control.Transport != types.Machine || !types.EqualCaptures(term.Yield.Captures, types.ScopeCapture(term.Scope)) {
+					errs = append(errs, fmt.Errorf("%s: invalid coroutine owner", blockWhere))
+				}
+				break
+			}
 			cursor, ok := term.Cursor.Ty.(*types.TCon)
 			if !ok || cursor.Name != types.IteratorTypeName || len(cursor.Args) != 2 {
 				errs = append(errs, fmt.Errorf("%s: cursor setup has invalid Iterator type", blockWhere))

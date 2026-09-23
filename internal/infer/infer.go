@@ -58,6 +58,13 @@ type Constraint struct {
 	// It expresses composition without claiming the surrounding function call
 	// performs exactly the callee's effects.
 	Include bool
+	// A registration's immediate charge waits for the stored computation's
+	// row to be determined; equating a flexible tail with the surrounding row
+	// would accidentally add the driver's own control effect to that child.
+	WorkCharge bool
+	// Project foreign owner obligations before ordinary row bounds close the
+	// residual tails of a local coroutine boundary.
+	ControlNeed bool
 	// Subsume checks value compatibility, including variance-directed rows.
 	Subsume   bool
 	ADTs      map[int]*types.ADTInfo
@@ -653,11 +660,19 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 			return errs
 		}
 	}
+	if d.Name == types.CoroutineWithName || d.Name == types.CoroutineAdvanceName || d.Name == types.CoroutineCloseName {
+		if !types.CoroutineShape(d.Name, ty) {
+			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic %s has an invalid coroutine protocol.", ast.Spelling(d.Name)))
+		}
+	}
 	if d.Name == types.IteratorNextName {
 		if !types.IteratorNextShape(ty) {
 			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION",
 				"The intrinsic `%s` must have shape `Iterator a e ->{Traversal | e} Maybe a`.", ast.Spelling(d.Name)))
 		}
+	}
+	if types.WorkIntrinsic(d.Name) && !types.WorkShape(d.Name, ty) {
+		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic %s has an invalid work package protocol.", ast.Spelling(d.Name)))
 	}
 	if types.FailureInspection(d.Name) {
 		pure := true
@@ -670,6 +685,9 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 		if !pure || !types.FailureInspectionShape(d.Name, params, rest) {
 			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic `%s` has an invalid failure inspection signature.", ast.Spelling(d.Name)))
 		}
+	}
+	if types.CompletionIntrinsic(d.Name) && !types.CompletionDeclarationShape(d.Name, ty) {
+		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "Invalid typed completion signature."))
 	}
 	if d.Name == types.FailAttemptReportName && !types.AttemptReportShape(ty) {
 		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic `%s` must preserve the action's residual row and return `Result (Report error) value`.", ast.Spelling(d.Name)))
@@ -1124,6 +1142,7 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, allowEffects bool) *declInferen
 			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
 		}
 	}
+	g.executionRoots = append(g.executionRoots, DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Equations: d.Equations, Body: d.Body, Type: ty})
 	return &declInference{originalAnn: originalAnn, d: d, g: g, ty: ty, annTy: annTy, given: given, errs: errs, allowEffects: allowEffects, isMain: isMain}
 }
 
@@ -1296,6 +1315,7 @@ func (ck *Checker) Expr(e ast.Expr) (types.Type, []diag.Error) {
 func (ck *Checker) ExprWhere(e ast.Expr, allowEffects bool) (types.Type, []diag.Error) {
 	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	ty := g.expr(e)
+	g.executionRoots = append(g.executionRoots, DeclInfo{Name: "$expression", Body: e, Type: ty})
 	var preds []types.Pred // the typeclass seam: always empty in the MVP
 	sub, residual, solveErrs := g.solveConstraints(preds)
 	ck.Sub = sub
@@ -1395,6 +1415,10 @@ type generator struct {
 	patternBinder     string
 	annotationAmbient *types.Row
 	localAnnotations  []localAnnotation
+	executionRoots    []DeclInfo
+	// Keep package row provenance before a local binding can solve/generalize
+	// a partial application; whole-definition flow adds imported obligations.
+	workRows []types.Type
 	// subjectHandlers are the handlers whose subject the generator is inside,
 	// outermost first, and lambdaBinders records that stack for every lambda
 	// written there. clauseEffects collects into the handler currently having
@@ -2228,7 +2252,11 @@ func (g *generator) intrinsicCall(e *ast.App, name string) types.Type {
 		at := g.exprWant(arg, params[i])
 		g.cs = append(g.cs, g.argument(at, params[i], arg))
 	}
+
 	g.performs(last.Eff, e.Span(), false)
+	if name == types.WorkPackName {
+		g.cs[len(g.cs)-1].WorkCharge = true
+	}
 	return result
 }
 
@@ -2965,7 +2993,15 @@ func (g *generator) instantiateAt(s types.Scheme, sp source.Span, op string) typ
 	for _, p := range types.SubstPreds(s.Preds, m) {
 		g.preds = append(g.preds, predObligation{pred: p, span: sp, op: op})
 	}
-	return types.SubstRigid(s.Body, m)
+	t := types.SubstRigid(s.Body, m)
+	if op == types.WorkPackName && g.ck.Intrinsics[op].Body != nil {
+		if fn, ok := t.(*types.TFun); ok {
+			if last, ok := fn.Ret.(*types.TFun); ok {
+				g.workRows = append(g.workRows, last.Eff)
+			}
+		}
+	}
+	return t
 }
 
 // instantiateCtor returns a constructor's field and result types with the

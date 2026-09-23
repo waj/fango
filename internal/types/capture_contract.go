@@ -7,6 +7,7 @@ import "github.com/waj/fango/internal/source"
 // can substitute the actual callback and handler interpretations. It contains
 // no scalar computation and is erased before execution.
 type CaptureContract struct {
+	SourceType Type
 	Params     []string
 	Effects    []int
 	RowParam   CaptureVar
@@ -18,26 +19,27 @@ type CaptureContract struct {
 // CaptureFlow describes value flow and access to a lifetime owner. Node IDs
 // are local to the defining contract and stable across independent inference.
 type CaptureFlow struct {
-	Origin   source.Span
-	ID       int
-	Kind     string
-	Name     string
-	Type     Type
-	TypeArgs []Type
-	Names    []string
-	Effects  []int
-	RowParam CaptureVar
-	Deferred []int
-	Row      *CaptureRow
-	Scope    ScopeID
-	Scoped   bool
-	Borrow   bool
-	Retain   bool
-	Access   CursorAccess
-	Index    int
-	Rec      bool
-	Children []*CaptureFlow
-	Clauses  []CaptureClause
+	SourceType Type
+	Origin     source.Span
+	ID         int
+	Kind       string
+	Name       string
+	Type       Type
+	TypeArgs   []Type
+	Names      []string
+	Effects    []int
+	RowParam   CaptureVar
+	Deferred   []int
+	Row        *CaptureRow
+	Scope      ScopeID
+	Scoped     bool
+	Borrow     bool
+	Retain     bool
+	Access     CursorAccess
+	Index      int
+	Rec        bool
+	Children   []*CaptureFlow
+	Clauses    []CaptureClause
 }
 
 type CaptureRow struct {

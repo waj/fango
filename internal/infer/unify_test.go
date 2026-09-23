@@ -175,3 +175,21 @@ func TestSharedTailStillRejectsConflictingEffectArguments(t *testing.T) {
 		t.Fatal("conflicting nominal effect arguments accepted")
 	}
 }
+
+func TestDeferredWorkRowKeepsImmediateAmbientOutOfChild(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	child := sup.FreshVar(types.RowVar)
+	owner := sup.FreshVar(types.RowVar)
+	dispatch := types.EffLabel{Unique: sup.NextUnique(), Name: "Dispatch"}
+	sub := Subst{}
+	if m := includeRowsBound(types.Row{Tail: child}, types.Row{Labels: []types.EffLabel{dispatch}, Tail: owner}, sub, b, sup, true); m != nil {
+		t.Fatal(m)
+	}
+	if !types.Equal(sub.Apply(child), child) {
+		t.Fatalf("ambient operation contaminated child residual: %s", types.Show(sub.Apply(child)))
+	}
+	if !types.Equal(sub.Apply(owner), child) {
+		t.Fatalf("owner did not retain symbolic child need: %s", types.Show(sub.Apply(owner)))
+	}
+}

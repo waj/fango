@@ -1,0 +1,17 @@
+import Coroutine
+import Work
+
+effect Counter
+    tick : () -> Int
+
+withRead : ((() -> Int) ->{e} a) ->{e} a
+withRead use =
+    handle use (\_ -> tick()) with current = 0 of
+        tick () -> resume current with current + 1
+
+main() =
+    withRead (\read ->
+        Coroutine.with (\_ () -> read()) (\cursor ->
+            Work.run (\owner ->
+                item = Work.pack (Work.facet owner) cursor
+                ())))

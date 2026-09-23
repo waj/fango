@@ -10,6 +10,7 @@ import (
 
 // cursorAdvanceRequest retains the checked result packaging at the transfer.
 type cursorAdvanceRequest struct {
+	input  Value
 	row    *fangort.EvidenceRow
 	cursor *MachineIteratorSession
 	term   *machineir.CursorAdvance
@@ -77,12 +78,20 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 			if cursor.busy {
 				return MachineEvent{}, fmt.Errorf("eval: overlapping cursor advancement")
 			}
-			if cursor.done {
-				d.active.completeAdvance(request.term, nil, false, nil)
+			if request.term.Close {
+				exit, err := cursor.Close()
+				if err != nil {
+					return MachineEvent{}, err
+				}
+				d.active.completeAdvance(request.term, nil, false, false, exit)
 				continue
 			}
-			if cursor.session == nil {
-				return MachineEvent{}, fmt.Errorf("eval: cursor has no producer")
+			if cursor.done {
+				d.active.completeAdvance(request.term, nil, false, false, nil)
+				continue
+			}
+			if err := cursor.begin(request.input); err != nil {
+				return MachineEvent{}, err
 			}
 			cursor.busy = true
 			cursor.evidence.Bind(request.row)
@@ -95,7 +104,12 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 				d.active = cursor.session
 			}
 			if cursor.started {
-				if err := d.active.resumeLocal(struct{}{}); err != nil {
+				if err := d.active.resumeLocal(func() Value {
+					if cursor.exchange {
+						return request.input
+					}
+					return struct{}{}
+				}()); err != nil {
 					return MachineEvent{}, err
 				}
 			}
@@ -117,7 +131,7 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 			pull.cursor.done, pull.cursor.busy = true, false
 			pull.cursor.evidence.Clear()
 			d.active = pull.caller
-			d.active.completeAdvance(pull.term, nil, false, event.Exit)
+			d.active.completeAdvance(pull.term, event.Value, false, event.Exit == nil, event.Exit)
 			continue
 		}
 		matched := -1
@@ -141,7 +155,7 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 		pull.cursor.busy = false
 		pull.cursor.evidence.Restore()
 		d.active = pull.caller
-		d.active.completeAdvance(pull.term, event.Request, true, nil)
+		d.active.completeAdvance(pull.term, event.Request, true, false, nil)
 	}
 }
 
@@ -177,9 +191,27 @@ func (m *MachineSession) Abandon() (*ExitRequest, error) {
 	return primary, failure
 }
 
-func (m *MachineSession) completeAdvance(term *machineir.CursorAdvance, value Value, present bool, exit *ExitRequest) {
+func (m *MachineSession) completeAdvance(term *machineir.CursorAdvance, value Value, present, finished bool, exit *ExitRequest) {
 	if exit != nil {
 		m.pendingExit = exit
+		return
+	}
+	if term.Close {
+		m.frames[len(m.frames)-1].vars[term.Bind.Name] = struct{}{}
+		return
+	}
+	if term.Reply != nil {
+		index := 2
+		if present {
+			index = 0
+		} else if finished {
+			index = 1
+		}
+		result := &CtorVal{Ctor: term.Result.Ctors[index]}
+		if index != 2 {
+			result.Fields = []Value{value}
+		}
+		m.frames[len(m.frames)-1].vars[term.Bind.Name] = result
 		return
 	}
 	result := &CtorVal{Ctor: term.Result.Ctors[0]}

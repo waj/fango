@@ -4,6 +4,7 @@ package fangort
 // effect instance. Entries below its required transport are absent.
 type EvidenceFamily struct {
 	Direct, Exit, Machine any
+	AbortReplay           func(*Failure) *ExitRequest
 }
 
 type EvidenceBinding struct {

@@ -1,0 +1,13 @@
+import Coroutine
+import Work
+
+select flag first second = if flag then first else second
+
+main() =
+    Coroutine.with (\_ () -> ()) (\cursor ->
+        Work.run (\first ->
+            Work.run (\second ->
+                selected = select True first second
+                item = Work.pack (Work.facet selected) cursor
+                other = select False first second
+                Work.close other item)))

@@ -1,0 +1,16 @@
+import Coroutine
+import Scope
+import String
+
+main() =
+    Coroutine.with (\outer initial ->
+        Scope.finally (\_ ->
+            Coroutine.with (\inner input ->
+                Scope.finally (\_ ->
+                    reply = outer (input + String.length initial)
+                    answer = inner (reply ++ " inner")
+                    answer == 5) (\_ -> print "inner release")) (\work ->
+                print (Coroutine.advance work 4)
+                print (Coroutine.advance work 5))) (\_ -> print "outer release")) (\work ->
+        print (Coroutine.advance work "Ada")
+        print (Coroutine.advance work "ready"))

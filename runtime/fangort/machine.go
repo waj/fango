@@ -46,6 +46,8 @@ func (f *immediateMachineFrame) Step(*Machine) MachineStep {
 func (f *immediateMachineFrame) Clear() { f.run = nil }
 
 type MachineStep struct {
+	Reply    any
+	Close    bool
 	Evidence *EvidenceRow
 	Cursor   *MachineIterator
 	Owner    *YieldOwner
@@ -62,6 +64,8 @@ type MachineStep struct {
 func InvalidMachineStep(message string) MachineStep { panic(message) }
 
 type MachineEvent struct {
+	reply    any
+	close    bool
 	evidence *EvidenceRow
 	advance  *MachineIterator
 	Owner    *YieldOwner
@@ -91,20 +95,35 @@ type MachineCleanup func() *ExitRequest
 // pending result register is consumed by the parent frame after a call return
 // or by the suspended frame after Resume. Generated code uses TakeResult
 // exactly once on that edge.
+// terminalCause is never an effect payload. Owner stop bypasses user handlers
+// and completion capture, while typed cleanup failures remain ordinary exits.
+type terminalCause uint8
+
+const (
+	terminalNormal terminalCause = iota
+	terminalAbort
+	terminalOwnerStop
+)
+
 type Machine struct {
-	traversal *machineTraversal
-	frames    []MachineFrame
-	cleanups  []MachineCleanup
-	states    []any
-	handlers  []machineHandler
-	caught    *ExitRequest
-	result    any
-	waiting   bool
-	finished  bool
-	stats     MachineStats
+	stopRouting      bool
+	parentStateOwner *Machine
+	parentStateCount int
+	cause            terminalCause
+	traversal        *machineTraversal
+	frames           []MachineFrame
+	cleanups         []MachineCleanup
+	states           []any
+	handlers         []machineHandler
+	caught           *ExitRequest
+	result           any
+	waiting          bool
+	finished         bool
+	stats            MachineStats
 }
 
 type machineHandler struct {
+	completion   bool
 	target       *ExitTarget
 	frameDepth   int
 	cleanupDepth int
@@ -168,6 +187,7 @@ func (m *Machine) runLocal() (event MachineEvent, err error) {
 			m.frames = m.frames[:len(m.frames)-1]
 			if len(m.frames) == 0 {
 				if exit := m.unwind(nil, 0); exit != nil {
+					m.cause = terminalAbort
 					m.clearFrames()
 					m.finished = true
 					return MachineEvent{Done: true, Exit: exit}, nil
@@ -184,11 +204,12 @@ func (m *Machine) runLocal() (event MachineEvent, err error) {
 			if step.Cursor == nil {
 				return MachineEvent{}, fmt.Errorf("fangort: advancement has no cursor")
 			}
-			return MachineEvent{advance: step.Cursor, evidence: step.Evidence}, nil
+			return MachineEvent{advance: step.Cursor, evidence: step.Evidence, reply: step.Reply, close: step.Close}, nil
 		case MachineExit:
 			if m.routeExit(step.Exit) {
 				continue
 			}
+			m.cause = terminalAbort
 			step.Exit = m.unwind(step.Exit, 0)
 			m.clearFrames()
 			m.finished = true
@@ -219,6 +240,7 @@ func (m *Machine) abandonLocal() (*ExitRequest, error) {
 	if m.finished {
 		return nil, fmt.Errorf("fangort: machine already completed")
 	}
+	m.cause = terminalOwnerStop
 	exit := m.unwind(nil, 0)
 	m.clearFrames()
 	m.waiting = false
@@ -250,6 +272,9 @@ func (m *Machine) PushState(value any) int {
 }
 
 func (m *Machine) State(token int) any {
+	if m.parentStateOwner != nil && token >= 0 && token < m.parentStateCount {
+		return m.parentStateOwner.State(token)
+	}
 	if token < 0 || token >= len(m.states) {
 		panic("fangort: invalid machine state token")
 	}
@@ -266,6 +291,10 @@ func (m *Machine) TopStateToken() int {
 }
 
 func (m *Machine) SetState(token int, value any) {
+	if m.parentStateOwner != nil && token >= 0 && token < m.parentStateCount {
+		m.parentStateOwner.SetState(token, value)
+		return
+	}
 	if token < 0 || token >= len(m.states) {
 		panic("fangort: invalid machine state token")
 	}
@@ -301,7 +330,10 @@ func (m *Machine) PopHandler() {
 func (m *Machine) routeExit(exit *ExitRequest) bool {
 	for i := len(m.handlers) - 1; i >= 0; i-- {
 		h := m.handlers[i]
-		if exit.Target != h.target {
+		if m.cause == terminalOwnerStop && h.completion {
+			continue
+		}
+		if !h.completion && exit.Target != h.target {
 			continue
 		}
 		exit = m.unwind(exit, h.cleanupDepth)
@@ -359,6 +391,9 @@ func (m *Machine) unwind(primary *ExitRequest, depth int) *ExitRequest {
 		m.cleanups[i] = nil
 		m.cleanups = m.cleanups[:i]
 		if secondary := cleanup(); secondary != nil {
+			if m.cause == terminalOwnerStop && !m.stopRouting {
+				secondary = m.resolveStopExit(secondary)
+			}
 			primary = Suppress(primary, secondary)
 		}
 	}
@@ -366,6 +401,8 @@ func (m *Machine) unwind(primary *ExitRequest, depth int) *ExitRequest {
 }
 
 func (m *Machine) clearFrames() {
+	m.parentStateOwner = nil
+	m.parentStateCount = 0
 	for i := len(m.frames) - 1; i >= 0; i-- {
 		if m.frames[i] != nil {
 			m.frames[i].Clear()

@@ -85,6 +85,10 @@ func specializeScalars(p *core.Prog, infos []infer.DeclInfo, ck *infer.Checker) 
 			variant.def.ParamCaptures = append([]types.CaptureVar(nil), d.ParamCaptures[len(variant.dictionaries):]...)
 			_, bodyType := core.PeelFun(d.Type, len(variant.dictionaries))
 			variant.def.Type = types.SubstRigid(bodyType, variant.types)
+			if d.SourceType != nil {
+				_, sourceBody := core.PeelFun(d.SourceType, len(variant.dictionaries))
+				variant.def.SourceType = types.SubstRigid(sourceBody, variant.types)
+			}
 			if s.variants[d.Name] == nil {
 				s.variants[d.Name] = map[int]*scalarVariant{}
 			}
@@ -193,6 +197,7 @@ func (s *scalarSpecializer) redirect(e core.Expr) core.Expr {
 	}
 	n := *a
 	n.Callee = &core.VarRef{Name: variant.def.Name, Ty: variant.def.Type}
+	n.SourceType = variant.def.SourceType
 	n.TyArgs = nil
 	n.Args = append([]core.Expr(nil), a.Args[len(variant.dictionaries):]...)
 	return &n

@@ -16,6 +16,8 @@ func NewYieldOwner() *YieldOwner { return &YieldOwner{marker: 1} }
 // cursor within its scope; checked capture and access contracts govern those
 // aliases before the private runtime representation is selected.
 type MachineIterator struct {
+	start    func(any) MachineFrame
+	exchange bool
 	evidence *CursorEvidence
 	busy     bool
 	owner    *YieldOwner
@@ -88,10 +90,18 @@ func (it *MachineIterator) NextWithEvidence(row *EvidenceRow) (value any, yielde
 // iterator normally. Overlapping advancement is checked statically; repeated
 // sequential reads observe stable exhaustion.
 func (it *MachineIterator) Close() (*ExitRequest, error) {
-	if it == nil || it.machine == nil || it.done {
+	if it == nil || it.done {
 		return nil, nil
 	}
+	if it.busy {
+		return nil, fmt.Errorf("fangort: overlapping coroutine close")
+	}
 	it.done = true
+	it.start = nil
+	if it.machine == nil {
+		it.evidence.Clear()
+		return nil, nil
+	}
 	it.evidence.Restore()
 	exit, err := it.machine.Abandon()
 	it.evidence.Clear()

@@ -107,7 +107,7 @@ func TestCursorAccessContractsSubstituteAliasesAndRecursiveHelpers(t *testing.T)
 			for {
 				f.generation++
 				f.changed = false
-				f.advance(flowValue{refs: []int{a}}, env, rootFlowSite, []int{ownerA, ownerB})
+				f.advance(flowValue{refs: []int{a}}, flowValue{}, env, rootFlowSite, []int{ownerA, ownerB})
 				if !f.changed {
 					break
 				}

@@ -4,7 +4,14 @@ package types
 // nodes. Recognition uses resolved declaration identity, never user spelling.
 const (
 	// ScopeBracketName owns synchronous resource cleanup on normal and abort exits.
-	ScopeBracketName = "Scope.bracket"
+	ScopeBracketName        = "Scope.bracket"
+	CoroutineTypeName       = "Coroutine.Coroutine"
+	CoroutineStepName       = "Coroutine.Step"
+	CoroutineWithName       = "Coroutine.with"
+	CoroutineAdvanceName    = "Coroutine.advance"
+	CoroutineCloseName      = "Coroutine.close"
+	CoroutineSuspensionName = "Coroutine.Suspension"
+	CoroutineDriveName      = "Coroutine.Drive"
 	// StreamWithProducerName owns a private cursor for its consumer's extent.
 	StreamWithProducerName = "Stream.withProducer"
 	// StreamYieldEffectName carries the lexical owner token for suspension.
@@ -25,7 +32,7 @@ const (
 // RuntimeEvidenceEffect reports whether a row label needs runtime evidence.
 // IO is ambient. Traversal uses the cursor's checked advancement identity.
 func RuntimeEvidenceEffect(label EffLabel) bool {
-	return SurfaceName(label.Name) != "IO" && !(label.Suspension && label.Name == IteratorTraversalEffectName)
+	return SurfaceName(label.Name) != "IO" && !(label.Suspension && (label.Name == IteratorTraversalEffectName || label.Name == CoroutineDriveName || label.Name == CoroutineSuspensionName))
 }
 
 // CursorAccess is advancement proof metadata. Zero is deliberately invalid.
@@ -37,12 +44,21 @@ func Intrinsic(name string) bool { return IntrinsicArity(name) != 0 }
 
 // IntrinsicArity is fixed by the compiler, not read from the declaration.
 func IntrinsicArity(name string) int {
+	if CompletionIntrinsic(name) {
+		return 1
+	}
 	switch name {
+	case WorkRunName, WorkFacetName:
+		return 1
+	case WorkPackName, WorkCloseName:
+		return 2
+	case WorkAdvanceName:
+		return 3
 	case ScopeBracketName:
 		return 3
-	case StreamWithProducerName, FailureArgumentName:
+	case StreamWithProducerName, CoroutineWithName, CoroutineAdvanceName, FailureArgumentName:
 		return 2
-	case IteratorNextName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailAttemptReportName:
+	case CoroutineCloseName, IteratorNextName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailAttemptReportName:
 		return 1
 	}
 	return 0

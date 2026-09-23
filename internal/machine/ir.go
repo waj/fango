@@ -129,6 +129,8 @@ type Suspend struct {
 }
 
 type CursorAdvance struct {
+	Reply  core.Expr
+	Close  bool
 	Row    *core.RowArgument
 	Cursor core.Expr
 	Result *types.ADTInfo
@@ -140,6 +142,7 @@ type CursorAdvance struct {
 // Call transfers to another machine worker. The caller frame remains below
 // the callee unless Tail is true. Resumption/return defines Bind at Next.
 type Call struct {
+	Capture         bool
 	Row             *core.RowArgument
 	Callee          string // non-empty for a statically known worker
 	CalleeExpr      core.Expr

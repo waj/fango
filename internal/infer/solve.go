@@ -34,7 +34,7 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			if !lok || !rok {
 				m = &mismatch{a: c.Left, b: c.Right, effect: true, note: "effect inclusion requires two rows"}
 			} else {
-				m = includeRows(left, right, sub, bi, sup)
+				m = includeRowsBound(left, right, sub, bi, sup, c.WorkCharge)
 			}
 		} else {
 			m = unify(c.Left, c.Right, sub, bi, sup)
@@ -48,6 +48,7 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 	var deferred []pending
 	var bounds []pending
 	var bound []pending
+	var registrations []pending
 	for i, c := range cs {
 		if c.Subsume {
 			if vs == nil {
@@ -68,7 +69,19 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 		}
 	}
 	for _, p := range bounds {
+		if p.c.ControlNeed {
+			solve(p.at, p.c)
+		}
+	}
+	for _, p := range bounds {
+		if p.c.ControlNeed {
+			continue
+		}
 		i, constraint := p.at, p.c
+		if constraint.WorkCharge {
+			registrations = append(registrations, p)
+			continue
+		}
 		// An inclusion that only the handler instance rule can answer waits
 		// for the whole group: the clauses whose effects the bound closure
 		// inherits are generated after the subject that holds it. It is
@@ -124,6 +137,9 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 		if err, failed := solveBound(p.c, sub, bi, sup); failed {
 			failures = append(failures, failure{at: p.at, err: err})
 		}
+	}
+	for _, p := range registrations {
+		solve(p.at, p.c)
 	}
 	sort.SliceStable(failures, func(i, j int) bool { return failures[i].at < failures[j].at })
 	errs := make([]diag.Error, 0, len(failures))

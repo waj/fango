@@ -1,0 +1,6 @@
+import Coroutine
+
+hide : Coroutine.Coroutine Int () () {} -> Coroutine.Step Int ()
+hide outer = Coroutine.with (\_ () -> ()) (\_ -> Coroutine.advance outer ())
+
+main() = print "unreachable"

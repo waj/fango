@@ -1,0 +1,10 @@
+import Coroutine
+import Work
+import Fail
+
+register : Work.Facet -> Coroutine.Coroutine () () () {Fail.Fail String} -> Work.Work () () ()
+register facet cursor =
+    packer = Work.pack facet
+    packer cursor
+
+main() = ()

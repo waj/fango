@@ -65,7 +65,7 @@ func combinedFingerprint(kind, own string, dependencies []string) string {
 func canonicalDigest(value any, object *ModuleObject) string {
 	w := &canonicalWriter{
 		seen: map[visit]int{}, ids: map[reflect.Type]map[int64]int{},
-		nominals: object.Nominals, effects: object.EffectNames,
+		nominals: object.Nominals, effects: object.EffectNames, scopes: object.ScopeNames,
 		templateBase: object.TemplateBase,
 	}
 	w.write(reflect.ValueOf(value), "")
@@ -84,6 +84,7 @@ type canonicalWriter struct {
 	ids          map[reflect.Type]map[int64]int
 	nominals     map[int]string
 	effects      map[int]string
+	scopes       map[types.ScopeID]string
 	templateBase int
 }
 
@@ -138,6 +139,13 @@ func (w *canonicalWriter) write(v reflect.Value, field string) {
 	}
 	if v.Type() == captureReflectType || v.Type() == scopeReflectType || v.Type() == resumeReflectType {
 		w.token(v.Type().String())
+		if v.Type() == scopeReflectType {
+			if name := w.scopes[types.ScopeID(v.Int())]; name != "" {
+				w.token("imported")
+				w.token(name)
+				return
+			}
+		}
 		w.token(strconv.Itoa(w.logicalID(v.Type(), v.Int())))
 		return
 	}

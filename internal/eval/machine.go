@@ -36,16 +36,17 @@ type MachineStats struct {
 }
 
 type machineFrame struct {
-	rows          rowEnv
-	types         descriptorEnv
-	worker        *machineir.Worker
-	block         machineir.BlockID
-	vars          map[string]Value
-	evidence      map[int]*evidence
-	returnBind    string
-	returnState   string
-	stateToken    int
-	returnHandler bool
+	returnCompletion bool
+	rows             rowEnv
+	types            descriptorEnv
+	worker           *machineir.Worker
+	block            machineir.BlockID
+	vars             map[string]Value
+	evidence         map[int]*evidence
+	returnBind       string
+	returnState      string
+	stateToken       int
+	returnHandler    bool
 }
 
 type machineClosure struct {
@@ -66,11 +67,12 @@ type machineOperation struct {
 }
 
 type machineHandler struct {
-	target       *evidence
-	frameDepth   int
-	cleanupDepth int
-	stateDepth   int
-	term         *machineir.Handle
+	completionBind string
+	target         *evidence
+	frameDepth     int
+	cleanupDepth   int
+	stateDepth     int
+	term           *machineir.Handle
 }
 
 // MachineSession owns one suspended computation. Frame objects live separately
@@ -78,20 +80,34 @@ type machineHandler struct {
 // so slice relocation cannot invalidate a live frame. The session, its frames,
 // and Resume are compiler-internal Go APIs; no copyable continuation value
 // exists in Fango or Core.
+// Owner stop is private control state, separate from source abort effects.
+type terminalCause uint8
+
+const (
+	terminalNormal terminalCause = iota
+	terminalAbort
+	terminalOwnerStop
+)
+
 type MachineSession struct {
-	program     *machineir.Prog
-	traversal   *machineTraversal
-	pendingExit *ExitRequest
-	interp      *interp
-	workers     map[string]*machineir.Worker
-	closures    map[*core.Lambda]*machineir.Closure
-	frames      []*machineFrame
-	waiting     *machineir.Local
-	finished    bool
-	stats       MachineStats
-	cleanups    []func() (*ExitRequest, error)
-	states      []Value
-	handlers    []machineHandler
+	stopRouting      bool
+	stopCaught       *ExitRequest
+	parentStateOwner *MachineSession
+	parentStateCount int
+	cause            terminalCause
+	program          *machineir.Prog
+	traversal        *machineTraversal
+	pendingExit      *ExitRequest
+	interp           *interp
+	workers          map[string]*machineir.Worker
+	closures         map[*core.Lambda]*machineir.Closure
+	frames           []*machineFrame
+	waiting          *machineir.Local
+	finished         bool
+	stats            MachineStats
+	cleanups         []func() (*ExitRequest, error)
+	states           []Value
+	handlers         []machineHandler
 }
 
 // StartMachine validates and initializes an iterative machine evaluation.
@@ -355,13 +371,21 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			if rowErr != nil {
 				return MachineEvent{}, rowErr
 			}
+			var input Value
+			if term.Reply != nil {
+				input, err = eval(term.Reply)
+				if err != nil {
+					return MachineEvent{}, err
+				}
+			}
 			frame.block = term.Next
 			s.prune(frame, block.LiveOut, term.Bind.Name)
-			return MachineEvent{advance: &cursorAdvanceRequest{cursor: cursor, term: term, row: row}}, nil
+			return MachineEvent{advance: &cursorAdvanceRequest{cursor: cursor, term: term, row: row, input: input}}, nil
 		case *machineir.Call:
 			callee := s.workers[term.Callee]
 			var closure *machineClosure
 			var synchronous *Closure
+			var pause *fangort.YieldOwner
 			var operation *machineOperation
 			if term.Operation != nil {
 				ev := resolveEvidence(frame.evidence[term.Effect.Unique])
@@ -398,10 +422,11 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 					return MachineEvent{}, err
 				}
 				fn, ok := value.(*Closure)
-				if !ok || fn.machine == nil && fn.control.Transport == types.Machine {
+				if !ok || fn.machine == nil && fn.pauseOwner == nil && fn.control.Transport == types.Machine {
 					return MachineEvent{}, fmt.Errorf("eval: indirect machine call of %T", value)
 				}
 				closure = fn.machine
+				pause = fn.pauseOwner
 				if closure != nil {
 					callee = s.workers[closure.desc.Worker]
 				} else {
@@ -428,6 +453,15 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			if rowErr != nil {
 				return MachineEvent{}, rowErr
 			}
+			if pause != nil {
+				if len(values) != 1 {
+					return MachineEvent{}, fmt.Errorf("eval: invalid pause arity")
+				}
+				frame.block = term.Next
+				s.prune(frame, block.LiveOut, term.Bind.Name)
+				s.waiting = &term.Bind
+				return MachineEvent{Owner: pause, Request: values[0]}, nil
+			}
 			if synchronous != nil {
 				if len(values) != 1 {
 					return MachineEvent{}, fmt.Errorf("eval: synchronous Machine adapter requires one argument")
@@ -442,6 +476,9 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				s.interp.evidence = frame.evidence
 				if err != nil {
 					return MachineEvent{}, err
+				}
+				if term.Capture {
+					value = detachCompletion(value)
 				}
 				if exit, ok := asExit(value); ok {
 					if caught, err := s.catchExit(exit); err != nil {
@@ -461,7 +498,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			} else if operation != nil {
 				prefix := append([]Value(nil), operation.values...)
 				if operation.stateToken >= 0 {
-					prefix = append(prefix, s.states[operation.stateToken])
+					prefix = append(prefix, s.stateAt(operation.stateToken))
 				}
 				values = append(prefix, values...)
 			}
@@ -489,6 +526,10 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			}
 			child := &machineFrame{worker: callee, block: callee.Entry, vars: childVars, evidence: childEvidence,
 				returnBind: term.Bind.Name, stateToken: -1}
+			if term.Capture {
+				child.returnCompletion = true
+				s.handlers = append(s.handlers, machineHandler{completionBind: term.Bind.Name, frameDepth: len(s.frames), cleanupDepth: len(s.cleanups), stateDepth: len(s.states)})
+			}
 			if closure != nil {
 				child.rows = maps.Clone(closure.rows)
 				child.types = closure.types
@@ -515,6 +556,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				child.returnBind = frame.returnBind
 				child.returnState = frame.returnState
 				child.returnHandler = frame.returnHandler
+				child.returnCompletion = frame.returnCompletion
 				clearMachineFrame(frame)
 				s.frames[len(s.frames)-1] = child
 			} else {
@@ -544,7 +586,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 					s.stats.MaxStates = len(s.states)
 				}
 			}
-			installed := &evidence{machineOps: map[int]*machineOperation{}}
+			installed := &evidence{machineOps: map[int]*machineOperation{}, handler: h, frame: &Frame{vars: frame.vars, rows: frame.rows, types: frame.types}}
 			if term.Ordinary {
 				// The activation's clauses neither exit nor suspend, so they
 				// stay ordinary Core over a snapshot of the locals they read,
@@ -559,7 +601,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				if term.State != nil {
 					// The state lives on the activation; the slot keeps the
 					// handler's depth so unwinding still accounts for it.
-					s.states[stateToken] = installed
+					s.setStateAt(stateToken, installed)
 				}
 			}
 			for _, clause := range term.Clauses {
@@ -646,8 +688,22 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				return MachineEvent{}, err
 			}
 			producer, ok := value.(*Closure)
-			if !ok || producer.machine == nil {
+			if !ok {
 				return MachineEvent{}, fmt.Errorf("eval: cursor producer is not a Machine callback")
+			}
+			if _, _, _, ok := types.CoroutineProtocol(term.Cursor.Ty); ok {
+				row, err := s.interp.argumentRow(term.Row, locals)
+				if err != nil {
+					return MachineEvent{}, err
+				}
+				cursor := s.interp.openCoroutine(s.program, producer, row)
+				frame.vars[term.Cursor.Name] = cursor
+				s.cleanups = append(s.cleanups, cursor.Close)
+				if len(s.cleanups) > s.stats.MaxCleanups {
+					s.stats.MaxCleanups = len(s.cleanups)
+				}
+				frame.block = term.Next
+				continue
 			}
 			callEvidence := cloneEvidence(s.interp.evidence)
 			var owner *fangort.YieldOwner
@@ -702,7 +758,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			if frame.stateToken < 0 || frame.stateToken >= len(s.states) {
 				return MachineEvent{}, fmt.Errorf("eval: invalid machine handler state token")
 			}
-			s.states[frame.stateToken] = next
+			s.setStateAt(frame.stateToken, next)
 			frame.vars[term.Bind.Name] = value
 			frame.block = term.Next
 		case *machineir.Return:
@@ -719,6 +775,10 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				return s.finishExit(exit)
 			}
 			bind, stateName, returnHandler := frame.returnBind, frame.returnState, frame.returnHandler
+			if frame.returnCompletion {
+				value = detachCompletion(value)
+				s.handlers = s.handlers[:len(s.handlers)-1]
+			}
 			clearMachineFrame(frame)
 			s.frames[len(s.frames)-1] = nil
 			s.frames = s.frames[:len(s.frames)-1]
@@ -739,7 +799,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			s.frames[len(s.frames)-1].vars[bind] = value
 			if stateName != "" {
 				i := len(s.states) - 1
-				final := s.states[i]
+				final := s.stateAt(i)
 				if activation, ok := final.(*evidence); ok {
 					// An activation with ordinary clauses owns its state; the
 					// slot only held its depth.
@@ -793,6 +853,7 @@ func (s *MachineSession) abandonLocal() (*ExitRequest, error) {
 	if s.finished {
 		return nil, fmt.Errorf("eval: machine session already completed")
 	}
+	s.cause = terminalOwnerStop
 	exit, err := s.unwind(nil)
 	s.clear()
 	return exit, err
@@ -801,6 +862,8 @@ func (s *MachineSession) abandonLocal() (*ExitRequest, error) {
 // clear drops live execution state on every terminal path. Program
 // descriptors and high-water statistics remain available for diagnostics.
 func (s *MachineSession) clear() {
+	s.parentStateOwner = nil
+	s.parentStateCount = 0
 	for i, frame := range s.frames {
 		clearMachineFrame(frame)
 		s.frames[i] = nil
@@ -820,6 +883,7 @@ func (s *MachineSession) clear() {
 func (s *MachineSession) Stats() MachineStats { return s.stats }
 
 func (s *MachineSession) finishExit(exit *ExitRequest) (MachineEvent, error) {
+	s.cause = terminalAbort
 	exit, err := s.unwind(exit)
 	s.clear()
 	return MachineEvent{Done: true, Exit: exit}, err
@@ -832,7 +896,10 @@ func (s *MachineSession) finishExit(exit *ExitRequest) (MachineEvent, error) {
 func (s *MachineSession) catchExit(exit *ExitRequest) (bool, error) {
 	for i := len(s.handlers) - 1; i >= 0; i-- {
 		h := s.handlers[i]
-		if exit.Target != h.target {
+		if s.cause == terminalOwnerStop && h.completionBind != "" {
+			continue
+		}
+		if h.completionBind == "" && exit.Target != h.target {
 			continue
 		}
 		var err error
@@ -852,6 +919,13 @@ func (s *MachineSession) catchExit(exit *ExitRequest) (bool, error) {
 			s.states = s.states[:last]
 		}
 		s.handlers = s.handlers[:i]
+		if s.stopRouting {
+			s.stopCaught = exit
+		}
+		if h.completionBind != "" {
+			s.frames[len(s.frames)-1].vars[h.completionBind] = detachCompletion(exit)
+			return true, nil
+		}
 		var clause machineir.HandlerClause
 		found := false
 		for _, c := range h.term.Clauses {
@@ -878,7 +952,7 @@ func (s *MachineSession) catchExit(exit *ExitRequest) (bool, error) {
 		stateToken := -1
 		if clause.StateName != "" {
 			stateToken = len(s.states) - 1
-			vars[worker.Params[param].Name] = s.states[stateToken]
+			vars[worker.Params[param].Name] = s.stateAt(stateToken)
 			param++
 		}
 		for j, value := range exit.Payload {
@@ -917,6 +991,11 @@ func (s *MachineSession) popCleanup(primary *ExitRequest) (*ExitRequest, error) 
 	s.cleanups[i] = nil
 	s.cleanups = s.cleanups[:i]
 	secondary, err := cleanup()
+	if secondary != nil && s.cause == terminalOwnerStop && !s.stopRouting {
+		var handlerErr error
+		secondary, handlerErr = s.resolveStopExit(secondary)
+		err = errors.Join(err, handlerErr)
+	}
 	return suppress(primary, secondary), err
 }
 

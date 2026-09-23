@@ -1,7 +1,8 @@
 # Roadmap: owned coroutines and the Stream foundation
 
-This document owns the **proposed** general suspension capability, its reuse
-of Iterator, and the migration of Stream onto an ordinary library surface.
+This document owns remaining coroutine capabilities and the migration of Stream
+onto an ordinary library surface. Scoped typed execution is described in the
+[reference](reference/library-coroutines.md) and [design](design/coroutines.md).
 [Effects](roadmap-effects.md) owns the surrounding language direction and
 unrelated handler questions. [Async](roadmap-async.md) owns scheduling and task
 policy. Nothing here changes the implemented [stream contract](reference/library-streams.md)
@@ -61,312 +62,67 @@ refactoring, not a second specification of their existing behavior.
 
 ## Proposed public interface
 
-Introduce a bundled `Coroutine` module. The coroutine type is abstract and
-resource-bearing. `Suspension` and `Drive` are abstract nullary control labels;
-there are no public operations with which to implement arbitrary handlers for
-those labels. `Step` is an ordinary public ADT.
-
-A coroutine here is an owned resumable computation with typed requests, replies,
-and a final result. Pull iteration specializes that protocol to Unit replies and
-Unit completion; the public abstraction is not restricted to yielding stream
-elements. A scheduler is another driver of the same protocol, not another kind
-of saved continuation.
-
-```fango
--- Proposed declarations; the abstract Coroutine representation is omitted.
-type Step request result
-    = Suspended request
-    | Finished result
-    | Closed
-
-with
-    : ((request ->{Suspension} reply)
-        -> reply ->{Suspension | e} result)
-    -> (Coroutine request reply result e ->{Drive | e} a)
-    ->{e} a
-
-advance
-    : Coroutine request reply result e
-    -> reply
-    ->{Drive | e} Step request result
-
-close
-    : Coroutine request reply result e
-    ->{Drive | e} ()
-```
-
-`with`, `advance`, and `close` are the initial compiler-supported operations.
-The scoped suspension callback is constructed by `with`; there is no public
-raw continuation or globally callable polymorphic `suspend` operation. General
-resource cleanup remains compiler-supported. This boundary is a deliberate
-small control API, not a promise of zero compiler intrinsics.
-
-`request`, `reply`, and `result` are ordinary type parameters. `e` is the
-residual effect row. A particular coroutine fixes its exchange types;
-two coroutines may use different types without introducing two differently
-parameterized labels into one effect row. Effect names record control, while
-capability identity records which owner the control belongs to.
-
-These are signature schemas with the [C0 control contract](#discharge-proof-gate),
-not sufficient plain nominal-row signatures on today's compiler. Inference must
-also export owner-indexed control obligations; `e` includes surviving foreign
-control, even when its printed label is also `Suspension` or `Drive`. No new
-source instance-name syntax or compiler exception for an Async name is selected.
+The scoped interface is implemented in [Coroutine](reference/library-coroutines.md).
+[Work](reference/library-work.md) and [Completion](reference/library-completion.md)
+provide the supporting package and outcome APIs. Dynamic allocation remains [C4](#c4-scope-owned-dynamic-allocation).
 
 ### Typed exchange example
 
-```fango
--- Proposed example; Coroutine is imported qualified.
-Coroutine.with
-    (\pause initial ->
-        answer = pause ("hello " ++ initial)
-        answer ++ "!")
-    (\work ->
-        first = Coroutine.advance work "Ada"
-        second = Coroutine.advance work "received"
-        (first, second))
-```
-
-The results are `Suspended "hello Ada"` and `Finished "received!"`.
-The first String starts the body; the second answers its suspended request.
-There is no separate start/resume typestate protocol. Further advancement
-returns `Closed` and never restarts the producer.
-
-For Stream, reply and result are both Unit. For a dialogue, a request can be a
-question ADT and the reply a validated answer ADT. For a scheduler, a request
-can distinguish voluntary yield from waiting on a registration. A wakeup-only
-scheduler may choose Unit replies and retrieve typed results separately.
+See the implemented [exchange example](reference/library-coroutines.md#exchange-and-lifecycle).
 
 ### Meaning of the producer callback
 
-The first arrow supplies `pause` and is pure; the final arrow runs the body.
-The boundary must not execute either producer application before the first
-advancement. Ordinary argument evaluation remains strict: constructing and
-passing an action is not a promise to defer effects already evaluated while
-building its arguments.
-
-`pause request` sends a request to this coroutine's driver and, when that
-driver advances it again, returns the supplied reply. The same `pause` callback
-may be called at multiple sequential suspension sites. It is not a resume
-callback: invoking it does not replay a previously suspended continuation.
-The current continuation remains owned internally by the coroutine.
-
-No general non-tail resume is needed for an ordinary handler to use it:
-
-```fango
--- Proposed handler inside a producer supplied with pause.
-handle emitValues() of
-    emit value -> resume (pause value)
-```
-
-The operation clause waits inside `pause` and then performs its one tail
-resume. The [general resume roadmap](roadmap-effects.md#resume-discipline)
-owns broader handler composition.
+The [producer contract](reference/library-coroutines.md#exchange-and-lifecycle)
+includes lazy application, strict arguments, and typed initial input/replies.
 
 ## Lifecycle and outcomes
 
-The following states describe private execution, not new source constructors.
-Every transition preserves a single authority to advance or close the owner.
-
-| State and operation | Action | Outcome/state |
-| --- | --- | --- |
-| Open with a driver | Register owner cleanup, invoke driver | Unstarted producer |
-| Advance unstarted with input | Supply pause and initial input; run producer | Running |
-| Advance suspended with reply | Define suspended call's result; continue | Running |
-| Running reaches its own pause | Retain execution and cleanup; return request | Suspended; `Suspended request` |
-| Running returns normally | Complete cleanup before publishing value | Terminal; `Finished result` once |
-| Running exits to an outer handler | Unwind producer regions and propagate exit | Terminal before outer handling |
-| Advance terminal | Evaluate ordinary call arguments, execute no producer code | `Closed` |
-| Close unstarted | Discard producer without invoking it | Terminal |
-| Close suspended | Abandon saved execution and drain its cleanup | Terminal; Unit or cleanup failure |
-| Close terminal | No new release attempt | Unit |
-| Owner scope exits | Close unfinished production before leaving | Driver answer or combined exit |
-
-An explicit close that fails still leaves the owner closed; automatic scope
-cleanup must not retry releases. If driver execution already failed, its
-failure stays primary and close failures are suppressed using the existing
-[cleanup precedence](reference/resources.md#cleanup-failures). Successful
-production whose cleanup fails emits no `Finished` value. Failure caught
-around one advance leaves later advances observing `Closed`.
-
-The first release-capable implementation uses synchronous acquisition/release.
-C5 extends the same lifecycle with a private closing state that may suspend;
-there is no new `AsyncScope` API. Neither version promises completion of a
-nonterminating body or release.
+The [lifecycle table](reference/library-coroutines.md#exchange-and-lifecycle)
+owns terminal states and synchronous close. [C5](#c5-suspending-acquisition-and-cleanup)
+extends acquisition/release to suspension.
 
 ## Ownership and lifetime contracts
 
 ### Handles and exclusive execution
 
-A handle may be aliased inside its owning scope. Advancing one alias advances
-the same current coroutine; it does not create a copy of execution.
-Sequential use is legal:
-
-```text
-alias = work
-advance(work, firstInput)
-advance(alias, secondInput)
-```
-
-The following must be rejected when the producer can reach the second advance:
-
-```text
-advance(work, input)
-    producer calls a helper that advances alias-of-work
-```
-
-Close conflicts with active advancement for the same reason. A runtime `busy`
-flag is a defensive invariant check, not the source-language proof. Generalize
-existing exclusive-access contracts through aliases, ADTs, named helpers,
-stored callbacks, indirect calls, and recursive summaries. Diagnostics should
-name the owner and the conflicting accesses; exact wording is selected with
-the implementation fixtures.
-
-If an advance suspends to a different owner, that advance is still unfinished.
-Its exclusive access remains held until it returns, exits, or is abandoned by
-its enclosing owner. A scheduler must not interpret a foreign suspension as
-permission to advance every nested handle independently.
+See [ownership and effects](reference/library-coroutines.md#ownership-and-effects)
+for aliases and exclusive advancement, including foreign suspension.
 
 ### Producer execution capability
 
-`pause` retains a producer execution capability as well as its destination.
-It may be invoked by the producer or by synchronous descendants, including a
-nested coroutine reached through that producer's active advancement. It may
-not be called independently by the driver or another task.
-
-Reject exposing `pause` in a request, a completion value, a returned closure,
-an ADT, or a longer-lived store. A bare resource marker on the outer coroutine
-handle is not enough: the driver can hold that handle, but cannot acquire the
-producer's authority to suspend. Keep those capabilities distinct in the flow
-proof even if their runtime representation shares an owner token.
+Pause authority is separate from a driver handle; the implemented
+[control proof](design/coroutines.md#protocol-and-control-proof) tracks it.
 
 ### Values crossing the boundary
 
-Requests and final results must not retain producer-local resources whose
-lifetime could end on resumption or completion. Existing Stream rules for
-yielded resources are the baseline:
-
-```text
-producer opens a local file
-producer pauses with that file       → reject
-producer pauses with bytes read     → accept
-```
-
-Resources from a scope enclosing the coroutine may be carried while their
-existing owner remains live. Closing the coroutine does not give a consumer
-permission to keep a resource beyond its original scope.
-
-Inputs and replies may remain in locals across future suspensions. Therefore
-an input's captured capabilities must outlive the receiving coroutine, not
-merely this call to advance:
-
-```text
-open coroutine in outer scope
-open temporary file in inner scope
-advance outer coroutine with temporary file → reject if retained there
-```
-
-An immutable String reply has no such resource capture. Capture obligations
-must remain visible through generic types and module boundaries; erasing to a
-runtime register cannot erase the source lifetime constraint. The selected
-conservative contract treats **every** input/reply as retained until the receiving
-owner closes, including initial input and terminal advances. Captures must
-outlive that owner even if a body ignores the value. C1 has no non-retaining
-exception. Wrappers export this obligation and check it after substitution.
+The [reference](reference/library-coroutines.md#ownership-and-effects) owns
+request/result lifetime and conservative input/reply retention.
 
 ### Scope escape
 
-Returning a coroutine handle, hiding it in a result, or storing it in an
-outer handler is rejected. Returning unrelated values remains legal. Closing
-a handle does not retroactively erase its static scope identity or turn a
-scoped value into an unrestricted one.
-
-C4 changes where an owner may allocate a coroutine. It does not remove these
-rules or permit detachment from a live scope.
+The [reference](reference/library-coroutines.md#ownership-and-effects) owns
+lexical non-escape. [C4](#c4-scope-owned-dynamic-allocation) changes allocation
+ownership without permitting detached scoped resources.
 
 ## Effect routing and nested suspension
 
 ### Captured and per-advance evidence
 
-Preserve both existing paths:
-
-- A handler captured when a closure was constructed keeps that activation.
-- A residual effect not captured there receives the current advance's
-  interpretation. Two pulls under different handlers can therefore interpret
-  the same uncaptured operation differently.
-
-Do not bind every residual operation at coroutine creation, and do not use a
-worker-global current-handler slot. Restore forwarding references between
-completed advances and before abandonment; retain them across an unfinished
-foreign suspension. Cleanup uses definition-site evidence. Runtime tags and
-registration generations coordinate execution, not source lifetime proofs.
+See [dispatch](design/coroutines.md#lowering-and-dispatch) for implemented
+forwarding and definition-site evidence.
 
 ### Foreign suspension
 
-The important composition test is a stream producer calling an operation that
-suspends to an enclosing scheduler. The sequence is:
-
-1. A task calls `next` on its stream cursor.
-2. The producer calls `fetch`; its interpretation requests a network wait.
-3. The scheduler receives that wait, with the task and unfinished pull saved.
-4. Readiness resumes the task inside `fetch`.
-5. The producer yields an element to its own cursor owner.
-6. `next` finally returns that element to the task.
-
-Only step 5 completes the cursor advance. Steps 3–4 must preserve the cursor's
-exclusive access and every intervening resource scope. Early abandonment of
-the outer task drains nested production before its callers.
-
-The same test can use fake readiness and an ordinary `Wait` effect; network
-support is not a prerequisite for proving the composition.
+Nested coroutine execution is implemented. The Stream migration and scheduler
+consumers remain [C2](#c2-ordinary-stream-and-iterator) and
+[C3](#c3-cooperative-scheduling-demonstration).
 
 ### Discharge proof gate
 
-A nullary marker cannot by itself identify an owner. A boundary must discharge
-only its locally owned suspension/advancement and preserve foreign control in
-its inferred residual contract. In particular, putting an outer `pause` in an
-inner producer must not make an externally suspending call appear synchronous
-because both callbacks mention `Suspension`.
-
-The selected extension adds finite owner-indexed obligations to arrow/capture
-contracts: `suspend(owner)` and `drive(owner)`, with symbolic owner parameters
-substituted at calls and fresh identities at allocation. These are proof
-notation, not source syntax. The existing nominal row and `Control.Transport`
-alone cannot express subtraction of one owner. Join obligations across aliases,
-branches and recursive summaries; an unknown owner remains outward control.
-Reconstruct them from executable Core, serialize them across modules, and check
-them independently after transformations. A claimed Direct annotation cannot
-erase an obligation. Allocation-site folding must never prove uncertain owners
-equal; conservative rejection is preferable to discharging a foreign owner.
-
-An advance consumes only `suspend` addressed to its producer, retaining its
-exclusive access through foreign suspension. A lexical boundary consumes only
-the drives it owns; a dynamic scope consumes drives of its registered owners.
-Project the remaining control set to nominal labels **after** owner subtraction.
-Control-label projection is idempotent, so a foreign `Suspension` may survive a
-boundary that also introduces local `Suspension`; it must not be excluded by a
-nominal row-tail lacks constraint. Ordinary non-control row rules stay intact.
-This is a general inference/contract extension required by C1, not implemented
-by the feasibility model.
-
-| Expression in the scheduler/pull example | Remaining control (proof notation) | Printed row, omitting unrelated effects | Transport |
-| --- | --- | --- | --- |
-| Inner producer pauses locally and through captured outer callback | suspend(pull), suspend(task) | Suspension | Machine |
-| Advance inner cursor | drive(pull), suspend(task) | Drive, Suspension | Machine |
-| Inner cursor boundary | suspend(task) | Suspension | Machine |
-| Advance outer task | drive(task) | Drive | Machine inside its driver |
-| Outer owner boundary with synchronous driver | none | empty | Direct; Exit if other residual effects can abort |
-
-Different request/reply/result types belong to owner protocols, never to the
-nullary labels. A nested boundary around a foreign handle preserves its Drive
-obligation. The outer pause is legal only on the synchronous descendant path of
-its active producer; calling it from the driver or publishing it in any value
-is rejected. Reentrant advance or close is rejected even through an alias.
-The [control model](../internal/feasibility/control_test.go) checks these cases,
-including missing owner, mismatched protocol and falsely synchronous summaries.
-Existing [Core ownership tests](../internal/core/iterator_ownership_test.go) prove
-reconstruction for today's Iterator; C1 must extend that real linter to the new
-operations rather than trusting the test-only model.
+Owner-sensitive inference and independent Core reconstruction are described in
+[the implemented control proof](design/coroutines.md#protocol-and-control-proof).
+The [C0 model](../internal/feasibility/control_test.go) remains a prerequisite
+regression gate, alongside production inference, codec, and backend tests.
 
 ## Stream and Iterator migration
 
@@ -426,31 +182,11 @@ renaming the Stream module must not affect proof or lowering behavior.
 
 ## Compiler and backend work
 
-| Subsystem | Required responsibility |
-| --- | --- |
-| Resolution and inference | Validate general intrinsic shapes, preserve reply/result types, infer owner-sensitive residual control |
-| Capture analysis | Separate driver and producer capabilities; track retained replies and exclusive advance/close |
-| Semantic Core | Express general owner creation, advance, close, and typed suspension without Stream names |
-| Core lint | Reconstruct owner, capture, row, access, and intrinsic contracts independently |
-| Machine lowering/lint | Generalize cursor transitions, reply bindings, result packaging, liveness, and cleanup joins |
-| Evaluator | Preserve typed protocol and evidence using its own value representation |
-| Go backend/runtime | Emit typed frames/callback families around the private dispatcher and checked result projections |
-| Modules and codecs | Serialize new nodes/contracts, invalidate incompatible cached artifacts, retain deterministic ABI families |
-| Staging and REPL | Use the same proofs and execution boundaries; preserve budgets, forbidden-native rules, and rollback |
-
-Factories remain lazy. Non-tail calls push explicit frames; tail transfers
-replace them. Saved locals come from verified liveness, not a blanket capture
-of all state. Clear finished frames and forwarding links. There is no host
-stack copying, goroutine per suspension, or recursive dispatcher handoff.
-
-A runtime erased register is acceptable only where source/Core/Machine proofs
-establish its concrete type on both edges. It is not permission to expose
-unchecked casts or polymorphic native storage. C6a owns that separate boundary.
-
-Keep ordinary synchronous functions and handlers on Direct/Exit paths. The
-coroutine owner, not every enclosing function, determines where latent
-Machine transport is driven. Cross-module callable families remain chosen by
-the defining module rather than specialized for every consumer.
+Implemented scoped execution is described in [the Coroutine design](design/coroutines.md).
+Later stages extend these checked nodes, contracts, and dispatch paths; they
+must preserve synchronous Direct/Exit code, verified liveness, module-owned
+callable families, and typed projections on both sides of private registers.
+Native storage remains the separate [C6a](#c6a-typed-opaque-values) boundary.
 
 ## Implementation stages
 
@@ -460,8 +196,8 @@ checkpoint; C1–C3 together are the first usable replacement foundation.
 
 | Stage | Required predecessors | Stopping point |
 | --- | --- | --- |
-| C0: Control and ownership contracts | Implemented Iterator foundation | DONE: feasibility contract and focused models; review before C1 |
-| C1: General typed execution | C0, early Async A0 contract gate | Executable scoped Coroutine API |
+| C0: Control and ownership contracts | Implemented Iterator foundation | DONE: feasibility contract and focused models |
+| C1: General typed execution | C0, early Async A0 contract gate | DONE: executable scoped Coroutine, Work, and Completion APIs |
 | C2: Ordinary Stream and Iterator | C1 | Stream behavior with no Stream-specific intrinsics |
 | C3: Cooperative scheduling demonstration | C2 | Shared foundation demonstrated without native concurrency |
 | C4: Scope-owned dynamic allocation | C3, A0; scope design begins with C0 | Coroutines safely retained by a live dynamic owner |
@@ -473,18 +209,16 @@ checkpoint; C1–C3 together are the first usable replacement foundation.
 | C7: General execution checkpoints | C1; Async A2 as integration consumer | Compiler-generated scheduling/cancellation points in CPU work |
 
 C0, the design part of C4, and [Async A0](roadmap-async.md#a0-library-representation-contract)
-form the joint feasibility gate. The contract is selected with focused source
-probes and test-only models; no Coroutine or Async API is implemented. **Stop
-for review before C1.** C1 must validate the actual inference/Core/backend
-extensions, and the selected task encoding must be rechecked before removing
-the old Stream route in C2. C4/C6 implementations are later prerequisites of A1,
-not circular prerequisites of this design gate.
+form the joint feasibility gate. Focused source probes and test-only models
+remain prerequisite checks for the implemented scoped API. The selected Async
+task encoding must be rechecked against that API before removing the old Stream
+route in C2. C4/C6 implementations are later prerequisites of A1, not circular
+prerequisites of this design gate.
 
 ### C0: Control and ownership contracts
 
-**DONE — feasibility contract and focused proof models.** Production checking
-and execution of the proposed contracts remain C1/C4/C6 work. This status does
-not advertise the proposed APIs as implemented language behavior.
+**DONE — feasibility contract and focused proof models.** Production scoped
+execution belongs to C1; dynamic allocation and native transfer remain C4/C6.
 
 **Dependencies:** the implemented cursor/instance foundation.
 
@@ -511,27 +245,28 @@ show rows and transport for the nested scheduler/pull case.
 [scoped-effect/package model](../internal/feasibility/scoped_rows_test.go), and
 [typed Machine exchange probe](../internal/feasibility/exchange_test.go).
 The latter exercises the existing private Machine with distinct request,
-reply and result types; today's cursor transfer still replies Unit and drops
-the final value. Existing runtime foreign-transfer/evidence tests and Core
+reply and result types; the historical Iterator protocol replies Unit and
+drops the final value. Existing runtime foreign-transfer/evidence tests and Core
 ownership tests cover reuse of that foundation. Models operate on explicit
 capture sets and closed evidence records: they do **not** prove inference over
 arbitrary source closures, module serialization, or both future backend ABIs.
 
 **Stopping point:** selected implementable contracts and explicit compiler
-prerequisites, ready for review; C1 has not begun. The source spelling is not yet
-fully checkable. Revalidate the model's positive/negative cases as real inference,
-malformed-Core and differential fixtures during implementation.
+prerequisites. Production counterparts are documented in the
+[Coroutine design](design/coroutines.md), with real inference, malformed-Core,
+codec, and differential fixtures.
 
 ### C1: General typed execution
 
+**DONE.**
+
 **Dependencies:** C0 and the early Async A0 contract gate.
 
-Implement the general prerequisites selected in C0 (owner-sensitive control,
-scoped effects/work packages, typed completion/replay and private owner stop),
-then general Core/Machine owner operations, typed replies/results,
-terminal states, synchronous close, forwarding, and both backend paths. Add
-module serialization and stale-artifact handling with the new representation.
-Keep the old Stream path temporarily so failures can be isolated.
+Implemented behavior belongs in [Coroutine](reference/library-coroutines.md),
+[Work](reference/library-work.md), and [Completion](reference/library-completion.md).
+The [Coroutine design](design/coroutines.md) owns inference, independent
+Core/Machine proofs, both backend paths, private stop, and serialization.
+Stream retains its original path until C2.
 
 **Acceptance:** identical event traces for typed exchange, lazy start, terminal
 reads, failure then Closed, nested owners, captured/per-advance evidence, and

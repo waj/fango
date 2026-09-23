@@ -88,6 +88,7 @@ func (el *elab) liftBinding(bind *ast.LocalBind, sch types.Scheme) {
 		paramCaptures[i] = el.ck.Sup.FreshCapture()
 	}
 	el.aux = append(el.aux, core.Def{
+		SourceType:    rawGenTy,
 		Name:          lf.defName,
 		Type:          genTy,
 		TyParams:      lf.vars,

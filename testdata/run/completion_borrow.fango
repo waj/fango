@@ -1,0 +1,15 @@
+import Completion
+import Scope
+
+type Port = { emit : String ->{IO} () }
+
+effect Escape
+    abort escape : (String ->{IO} ()) -> Int
+
+main() =
+    Scope.bracket (\_ -> Port { emit = print }) (\_ -> ()) (\port ->
+        handle (\_ ->
+            completed = Completion.capture (\_ -> escape port.emit)
+            Completion.replay completed)() of
+            escape emit -> emit "live resource"
+            return _ -> ())

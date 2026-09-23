@@ -275,6 +275,17 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 	for _, class := range object.State.Classes {
 		r.ownedClasses[class] = true
 	}
+	installedScopes := map[string]types.ScopeID{}
+	for id, name := range captureScopeNames(ck.CaptureSummaries) {
+		installedScopes[name] = id
+	}
+	for id, name := range object.ScopeNames {
+		if installed := installedScopes[name]; installed != 0 {
+			r.scopes[id] = installed
+		} else {
+			r.err = fmt.Errorf("unknown imported capture scope %s", name)
+		}
+	}
 	r.extend(reflect.ValueOf(object))
 	return r
 }
@@ -324,7 +335,9 @@ func (r *remapper) extend(v reflect.Value) {
 	}
 	sort.Ints(scopeIDs)
 	for _, id := range scopeIDs {
-		r.scopes[types.ScopeID(id)] = ck.Sup.FreshScope()
+		if _, aligned := r.scopes[types.ScopeID(id)]; !aligned {
+			r.scopes[types.ScopeID(id)] = ck.Sup.FreshScope()
+		}
 	}
 	var resumeIDs []int
 	for id := range resumes {

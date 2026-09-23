@@ -1,0 +1,21 @@
+import Coroutine
+
+type Callback a b e = { run : a ->{e} b }
+type Box a = Box a
+
+nested outer = Coroutine.with (\_ () -> outer 7) (\inner ->
+    ignored = Coroutine.advance inner ()
+    ())
+
+select 0 value = value
+select count value = select (count - 1) value
+
+through boxed =
+    Box callback = select 2 boxed
+    original = Callback { run = callback }
+    stored = { original | run = original.run }
+    nested stored.run
+
+main() = Coroutine.with (\pause () -> through (Box pause)) (\outer ->
+    print (Coroutine.advance outer ())
+    print (Coroutine.advance outer ()))

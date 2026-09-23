@@ -1,0 +1,11 @@
+import Coroutine
+import Work
+
+main() =
+    Coroutine.with (\pause () ->
+        Coroutine.with (\_ () -> pause ()) (\inner ->
+            Work.run (\owner ->
+                item = Work.pack (Work.facet owner) inner
+                ()))) (\outer ->
+        ignored = Coroutine.advance outer ()
+        ())

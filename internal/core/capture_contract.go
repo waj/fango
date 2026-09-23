@@ -15,8 +15,8 @@ func CaptureContractCurrent(d *Def) bool {
 // inferCaptureContract erases scalar computation while preserving all capture
 // and access paths. Lint rebuilds this graph independently from semantic Core.
 func inferCaptureContract(d *Def) *types.CaptureContract {
-	b := captureBuilder{}
-	c := &types.CaptureContract{Params: append([]string(nil), d.Params...), Body: b.expr(d.Body), RowParam: d.RowParam}
+	b := captureBuilder{sourceType: d.SourceType}
+	c := &types.CaptureContract{SourceType: d.SourceType, Params: append([]string(nil), d.Params...), Body: b.expr(d.Body), RowParam: d.RowParam}
 	for _, ev := range d.RowEffects {
 		c.RowEffects = append(c.RowEffects, ev.Unique)
 	}
@@ -29,7 +29,10 @@ func inferCaptureContract(d *Def) *types.CaptureContract {
 	return c
 }
 
-type captureBuilder struct{ next int }
+type captureBuilder struct {
+	next       int
+	sourceType types.Type
+}
 
 func (b *captureBuilder) node(kind string, ty types.Type) *types.CaptureFlow {
 	b.next++
@@ -68,9 +71,22 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 	case *NativeCall:
 		n.Kind = "native"
 		children(e.Args...)
+	case *Work:
+		n.Kind = "work-" + e.Kind
+		n.SourceType = e.SourceRow
+		children(e.Args...)
 	case *FailureInspect:
 		n.Kind = "native"
 		children(e.Args...)
+	case *Completion:
+		n.Kind = "completion_failure"
+		if e.Name == types.CompletionReplayName {
+			n.Kind = "completion_replay"
+		}
+		if e.Name == types.CompletionCaptureName {
+			n.Kind = "completion_capture"
+		}
+		children(e.Value)
 	case *Quote:
 		n.Kind = "native"
 		children(e.Holes...)
@@ -86,6 +102,7 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 		n.Kind, n.Name, n.Rec = "let", e.Name, e.Rec
 		children(e.Rhs, e.Body)
 	case *Lambda:
+		n.SourceType = e.SourceType
 		n.Kind, n.Name = "lambda", e.Param
 		n.RowParam = e.RowParam
 		for _, ev := range e.RowEffects {
@@ -94,6 +111,7 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 		effects(e.EffectParams)
 		children(e.Body)
 	case *App:
+		n.SourceType = e.SourceType
 		n.Origin = e.Origin
 		n.Kind, n.TypeArgs = "call", e.TyArgs
 		effects(e.EvidenceArgs)
@@ -156,6 +174,18 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 	case *IteratorScope:
 		n.Kind, n.Scope, n.Scoped = "iterator", e.Scope, true
 		n.TypeArgs = []types.Type{e.CursorTy}
+		if _, _, _, ok := types.CoroutineProtocol(e.CursorTy); ok {
+			n.Kind = "coroutine"
+			if first, ok := b.sourceType.(*types.TFun); ok {
+				if second, ok := first.Ret.(*types.TFun); ok {
+					if driver, ok := second.Arg.(*types.TFun); ok {
+						if cursor, ok := driver.Arg.(*types.TCon); ok && cursor.Name == types.CoroutineTypeName && len(cursor.Args) == 4 {
+							n.SourceType = cursor.Args[3]
+						}
+					}
+				}
+			}
+		}
 		if e.Yield.Unique != 0 {
 			effects([]EffectInstance{e.Yield})
 		}
@@ -166,7 +196,12 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 
 	case *IteratorNext:
 		n.Kind, n.Access = "next", e.Access
-		children(e.Cursor)
+		if e.Close {
+			n.Kind = "close"
+		} else if e.Reply != nil {
+			n.Kind = "advance"
+		}
+		children(e.Cursor, e.Reply)
 
 	default:
 		panic(fmt.Sprintf("capture contract: unhandled Core expression %T", e))

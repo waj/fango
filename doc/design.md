@@ -47,6 +47,10 @@ completion order, stage-only values, evaluator integration, and rollback.
 adapters, specialization, ANF, and independent lint.
 [Machines and cursors](design/machines.md) — selective lowering, liveness,
 dispatch, cleanup, pull owners, residual-row forwarding, and failure snapshots.
+[Typed coroutines](design/coroutines.md) — owner-sensitive control, typed exchange,
+and private abandonment.
+[Typed completion](design/completion.md) — detached outcomes, checked replay,
+and capture-preserving execution boundaries.
 
 ## Go backend and runtime
 

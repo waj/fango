@@ -41,18 +41,19 @@ func sameDescriptor(left, right *TypeDescriptor) bool {
 // Failure is a detached snapshot. It contains immutable payload data and nested
 // snapshots, never handler targets, frames, or resumptions.
 type Failure struct {
-	effect      string
-	operation   string
-	arguments   []any
-	descriptors []*TypeDescriptor
-	suppressed  []*Failure
+	operationIndex int
+	effect         string
+	operation      string
+	arguments      []any
+	descriptors    []*TypeDescriptor
+	suppressed     []*Failure
 }
 
 func SnapshotFailure(exit *ExitRequest) *Failure {
 	if exit == nil {
 		return nil
 	}
-	failure := &Failure{effect: exit.Effect, operation: exit.OperationName,
+	failure := &Failure{effect: exit.Effect, operation: exit.OperationName, operationIndex: exit.Operation,
 		arguments: append([]any(nil), exit.Payload...), descriptors: append([]*TypeDescriptor(nil), exit.PayloadTypes...)}
 	for _, secondary := range exit.Suppressed {
 		failure.suppressed = append(failure.suppressed, SnapshotFailure(secondary))

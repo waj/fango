@@ -1,0 +1,11 @@
+import Coroutine
+import Work
+import Fail
+
+schedule : Coroutine.Coroutine () () () {Fail.Fail String} ->{Coroutine.Drive} ()
+schedule cursor =
+    Work.run (\owner ->
+        ignored = Fail.attempt (\_ -> Work.pack (Work.facet owner) cursor)
+        ())
+
+main() = ()

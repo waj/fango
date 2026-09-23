@@ -183,7 +183,7 @@ func instanceDefinition(in *infer.InstanceInfo, ck *infer.Checker) (core.Def, []
 	for i, name := range in.Methods {
 		mt := types.SubstRigid(in.Class.Methods[i].Type, map[int]types.Type{in.Class.Param.ID: in.Head})
 		want := el.zonkDefault(mt)
-		fields = append(fields, el.adaptFunctionValue(el.valueReference(name, mt), want))
+		fields = append(fields, el.adaptFunctionValue(el.valueReference(name, mt), want, el.apply(mt), el.apply(mt)))
 	}
 	ct := types.Type(ty)
 	for i := len(fields) - 1; i >= 0; i-- {
@@ -195,7 +195,14 @@ func instanceDefinition(in *infer.InstanceInfo, ck *infer.Checker) (core.Def, []
 		paramCaptures[i] = ck.Sup.FreshCapture()
 	}
 	fullType := prependTypes(dictTypes, ty)
-	return core.Def{Name: in.Name, Owner: in.Owner, Type: fullType, TyParams: in.Vars,
+	var sourceDicts []types.Type
+	for _, pred := range in.Preds {
+		if class := ck.Classes[pred.Class]; class != nil {
+			sourceDicts = append(sourceDicts, class.DictType(el.apply(pred.Ty)))
+		}
+	}
+	sourceType := prependTypes(sourceDicts, el.apply(in.Class.DictType(in.Head)))
+	return core.Def{Name: in.Name, Owner: in.Owner, Type: fullType, SourceType: sourceType, TyParams: in.Vars,
 		Params: params, ParamCaptures: paramCaptures, Control: core.ArrowControl(fullType, len(params)), Body: el.anf(body)}, el.errs
 }
 

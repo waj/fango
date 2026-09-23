@@ -1,0 +1,16 @@
+import Coroutine
+import Work
+
+producer : (Int ->{Coroutine.Suspension} Int) -> Int ->{Coroutine.Suspension} Int
+producer pause initial =
+    value = pause (initial + 1)
+    value + 2
+
+main() =
+    Coroutine.with producer (\cursor ->
+        Work.run (\owner ->
+            item = Work.pack (Work.facet owner) cursor
+            print (Work.advance owner item 10)
+            print (Work.advance owner item 20)
+            Work.close owner item
+            print (Work.advance owner item 30)))

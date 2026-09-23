@@ -108,6 +108,9 @@ func (f *flowChecker) contextFingerprint(c *flowContext) string {
 // not. Cached obligations are replayed at the actual invocation's location.
 func (f *flowChecker) boundaryKey() string {
 	var b strings.Builder
+	for _, completion := range f.detached {
+		fmt.Fprintf(&b, "completion%v:%v;", completion.site, completion.outer)
+	}
 	for _, owner := range slices.Sorted(maps.Keys(f.active)) {
 		if f.active[owner] != 0 {
 			fmt.Fprintf(&b, "borrow%d;", owner)
@@ -337,6 +340,11 @@ func (f *flowChecker) keyValue(v flowValue) {
 		b = append(b, ':')
 		b = strconv.AppendInt(b, int64(o.yieldEffect), 10)
 		b = append(b, '{')
+		if o.kind == "completion-abort" {
+			b = append(b, "exit"...)
+			b = appendInts(b, o.code.Effects)
+			b = strconv.AppendInt(b, int64(o.code.Index), 10)
+		}
 		if o.kind == "lambda" {
 			b = append(b, "code"...)
 			b = strconv.AppendInt(b, int64(o.code.ID), 10)

@@ -1,0 +1,14 @@
+module Helpers exposing (Box(..), publish, publisher, drive, close)
+
+import Coroutine
+import Work
+
+type Box a = Box a
+
+publish facet cursor = Work.pack facet cursor
+
+publisher facet = \cursor -> publish facet cursor
+
+drive owner (Box item) reply = Work.advance owner item reply
+
+close owner (Box item) = Work.close owner item

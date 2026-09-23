@@ -1,0 +1,3 @@
+import Coroutine
+escape() = Coroutine.with (\_ input -> input) (\work -> (\_ -> Coroutine.close work))
+main() = print "unreachable"

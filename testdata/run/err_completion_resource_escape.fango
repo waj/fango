@@ -1,0 +1,14 @@
+import Completion
+import Fail
+import Scope
+
+type Port = { emit : String ->{IO} () }
+
+main() =
+    escaped = Fail.attempt (\_ -> Scope.bracket
+        (\_ -> Port { emit = print })
+        (\_ -> ())
+        (\port -> Completion.capture (\_ ->
+            Fail.fail port.emit
+            0)))
+    ()

@@ -1,0 +1,26 @@
+import Actions exposing (..)
+import Completion
+import Failure
+import Helpers
+import Fail
+
+observe flag =
+    handle (handle (\_ ->
+        completed = Actions.captureAction flag
+        case Completion.failure completed of
+            Just failure -> print (Failure.argumentCount failure)
+            Nothing -> print 0
+        print (Helpers.replay completed))() of
+            reject text number -> print (text ++ show number)) of
+        halt reason -> print reason
+
+main() =
+    observe True
+    observe False
+    print (Fail.attempt (\_ ->
+        completed = Completion.capture (\_ ->
+            Fail.fail "saved"
+            0)
+        case Helpers.inspect completed of
+            Just failure -> Failure.argumentCount failure
+            Nothing -> 0))

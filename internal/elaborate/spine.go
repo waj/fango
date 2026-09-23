@@ -400,6 +400,7 @@ func (c callee) saturatedApp(args []core.Expr) *core.App {
 		control = types.Control{}
 	}
 	return &core.App{
+		SourceType:   c.raw,
 		CalleeKind:   c.kind,
 		Callee:       &core.VarRef{Name: c.name, Ty: c.ty},
 		Args:         append(append([]core.Expr{}, c.pre...), args...),
@@ -458,7 +459,13 @@ func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
 	case len(args) == missing: // saturated: a direct call / struct literal
 		coreArgs := make([]core.Expr, len(args))
 		for i, a := range args {
-			coreArgs[i] = el.adaptFunctionValue(el.expr(a), argTys[len(c.pre)+i])
+			var rawWant types.Type
+			if c.raw != nil {
+				if fn, ok := arrowAt(c.raw, len(c.pre)+i).(*types.TFun); ok {
+					rawWant = fn.Arg
+				}
+			}
+			coreArgs[i] = el.adaptFunctionValue(el.expr(a), argTys[len(c.pre)+i], el.apply(el.ck.ExprTypes[a]), rawWant)
 		}
 		return c.saturatedApp(coreArgs)
 
@@ -481,7 +488,31 @@ func (el *elab) calleeCall(c callee, args []ast.Expr) core.Expr {
 // adaptFunctionValue retags an eta-expanded callback to a generic callee's
 // erased row ABI. Its concrete handler evidence remains captured by the
 // wrapper at the creation site.
-func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
+func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...types.Type) core.Expr {
+	var sourceActual, sourceWant types.Type
+	if len(sourceTypes) == 2 {
+		sourceActual, sourceWant = sourceTypes[0], sourceTypes[1]
+	}
+	if sourceActual == nil {
+		if lambda, ok := e.(*core.Lambda); ok {
+			sourceActual = lambda.SourceType
+		}
+	}
+	if sourceWant == nil {
+		sourceWant = sourceActual
+	}
+	sourceRet := func(t types.Type) types.Type {
+		if fn, ok := t.(*types.TFun); ok {
+			return fn.Ret
+		}
+		return nil
+	}
+	sourceArg := func(t types.Type) types.Type {
+		if fn, ok := t.(*types.TFun); ok {
+			return fn.Arg
+		}
+		return nil
+	}
 	actualFn, _ := e.Type().(*types.TFun)
 	if sameValueABI(e.Type(), want) {
 		return e
@@ -538,19 +569,19 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 		}
 		e.Body = core.SubstituteCaptureVars(e.Body, sub, control)
 		e.EffectParams = kept
-		e.Body = el.adaptFunctionValue(e.Body, wantFn.Ret)
+		e.Body = el.adaptFunctionValue(e.Body, wantFn.Ret, sourceRet(sourceActual), sourceRet(sourceWant))
 		e.Ty = want
 		return e
 	case *core.If:
-		e.Then = el.adaptFunctionValue(e.Then, want)
-		e.Else = el.adaptFunctionValue(e.Else, want)
+		e.Then = el.adaptFunctionValue(e.Then, want, sourceActual, sourceWant)
+		e.Else = el.adaptFunctionValue(e.Else, want, sourceActual, sourceWant)
 		e.Ty = want
 		return e
 	}
 	if !isAtom(e) {
 		name := fmt.Sprintf("_adaptValue%d", el.tmp)
 		el.tmp++
-		body := el.adaptFunctionValue(&core.VarRef{Name: name, Local: true, Ty: e.Type()}, want)
+		body := el.adaptFunctionValue(&core.VarRef{Name: name, Local: true, Ty: e.Type()}, want, sourceActual, sourceWant)
 		return &core.Let{Name: name, Rhs: e, Body: body, Ty: want}
 	}
 
@@ -561,7 +592,8 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 	// supplied there), while the generic callee receives its row-erased ABI.
 	name := fmt.Sprintf("_adapt%d", el.tmp)
 	el.tmp++
-	arg := &core.VarRef{Name: name, Local: true, Ty: wantFn.Arg}
+	var arg core.Expr = &core.VarRef{Name: name, Local: true, Ty: wantFn.Arg}
+	arg = el.adaptFunctionValue(arg, actualFn.Arg, sourceArg(sourceWant), sourceArg(sourceActual))
 	effectParams := el.bindEffectParams(executingEffects(want, 1))
 	var rowEffects []core.EffectInstance
 	for _, label := range actualFn.Eff.Labels {
@@ -571,6 +603,9 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 	}
 	rowEffects = el.bindEffectParams(rowEffects)
 	body := el.valueApp(e, arg)
+	if app, ok := body.(*core.App); ok {
+		app.SourceType = sourceActual
+	}
 	if app, ok := body.(*core.App); ok && app.Row != nil {
 		app.Row = el.residualArgument(wantFn.Eff, actualFn.Eff)
 		if types.FunctionOpenRow(wantFn) {
@@ -579,8 +614,8 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type) core.Expr {
 	}
 	el.popEvidence(rowEffects)
 	el.popEvidence(effectParams)
-	body = el.adaptFunctionValue(body, wantFn.Ret)
-	return &core.Lambda{Param: name, Body: body, Ty: &types.TFun{Arg: wantFn.Arg, Eff: wantFn.Eff, Ret: wantFn.Ret, Control: wantFn.Control, OpenRow: wantFn.OpenRow},
+	body = el.adaptFunctionValue(body, wantFn.Ret, sourceRet(sourceActual), sourceRet(sourceWant))
+	return &core.Lambda{SourceType: sourceWant, Param: name, Body: body, Ty: &types.TFun{Arg: wantFn.Arg, Eff: wantFn.Eff, Ret: wantFn.Ret, Control: wantFn.Control, OpenRow: wantFn.OpenRow},
 		ParamCapture: el.ck.Sup.FreshCapture(), EffectParams: effectParams, RowEffects: rowEffects}
 }
 
@@ -604,7 +639,13 @@ func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 	var hoists []hoist
 	coreArgs := make([]core.Expr, 0, arity)
 	for i, a := range given {
-		ca := el.adaptFunctionValue(el.expr(a), argTys[len(c.pre)+i])
+		var rawWant types.Type
+		if c.raw != nil {
+			if fn, ok := arrowAt(c.raw, len(c.pre)+i).(*types.TFun); ok {
+				rawWant = fn.Arg
+			}
+		}
+		ca := el.adaptFunctionValue(el.expr(a), argTys[len(c.pre)+i], el.apply(el.ck.ExprTypes[a]), rawWant)
 		if isAtom(ca) {
 			coreArgs = append(coreArgs, ca)
 			continue
@@ -653,6 +694,9 @@ func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 	}
 	for i := missing - 1; i >= 0; i-- {
 		lam := &core.Lambda{Param: lamParams[i], Body: body, Ty: tys[i], ParamCapture: el.ck.Sup.FreshCapture()}
+		if c.raw != nil {
+			lam.SourceType = arrowAt(c.raw, taken+i)
+		}
 		if i == missing-1 {
 			lam.EffectParams = effectParams
 		}

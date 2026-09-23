@@ -7,12 +7,15 @@ import (
 
 	"github.com/waj/fango/internal/core"
 	machineir "github.com/waj/fango/internal/machine"
+	"github.com/waj/fango/internal/types"
 	"github.com/waj/fango/runtime/fangort"
 )
 
 // MachineIteratorSession owns one interpreter-side producer traversal. Source
 // cursor lifetimes and access are checked by capture contracts before execution.
 type MachineIteratorSession struct {
+	start    func(Value) (*MachineSession, error)
+	exchange bool
 	evidence *fangort.CursorEvidence
 	busy     bool
 	owner    *fangort.YieldOwner
@@ -74,10 +77,18 @@ func (it *MachineIteratorSession) NextWithEvidence(row *fangort.EvidenceRow) (va
 }
 
 func (it *MachineIteratorSession) Close() (*ExitRequest, error) {
-	if it == nil || it.session == nil || it.done {
+	if it == nil || it.done {
 		return nil, nil
 	}
+	if it.busy {
+		return nil, fmt.Errorf("eval: overlapping coroutine close")
+	}
 	it.done = true
+	it.start = nil
+	if it.session == nil {
+		it.evidence.Clear()
+		return nil, nil
+	}
 	it.evidence.Restore()
 	exit, err := it.session.Abandon()
 	it.evidence.Clear()
@@ -92,6 +103,9 @@ func (it *MachineIteratorSession) Stats() MachineStats {
 }
 
 func (in *interp) evalIteratorScope(scope *core.IteratorScope, fr *Frame) (Value, error) {
+	if _, _, _, ok := types.CoroutineProtocol(scope.CursorTy); ok {
+		return in.evalCoroutineScope(scope, fr)
+	}
 	producerValue, err := in.eval(scope.Producer, fr)
 	if err != nil {
 		return nil, err

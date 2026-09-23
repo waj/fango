@@ -339,6 +339,10 @@ func unifyRows(a, b types.Row, sub Subst, bi *types.Builtins, sup *types.Supply)
 // weakened to the complete surrounding row; a closed subrow contributes
 // only its explicit labels.
 func includeRows(subrow, superrow types.Row, sub Subst, bi *types.Builtins, sup *types.Supply) *mismatch {
+	return includeRowsBound(subrow, superrow, sub, bi, sup, false)
+}
+
+func includeRowsBound(subrow, superrow types.Row, sub Subst, bi *types.Builtins, sup *types.Supply, deferredNeed bool) *mismatch {
 	subrow, superrow = sub.applyRow(subrow), sub.applyRow(superrow)
 	if left, ok := subrow.Tail.(*types.TVar); ok {
 		if right, ok := superrow.Tail.(*types.TVar); ok && left.ID == right.ID {
@@ -379,6 +383,46 @@ func includeRows(subrow, superrow types.Row, sub Subst, bi *types.Builtins, sup 
 		}
 	}
 	if subrow.Tail != nil {
+		// Registration retains the child's actual residual row. Ambient
+		// effects such as a facet-providing operation belong to the caller;
+		// only the destination budget grows to include the child.
+		if target, ok := superrow.Tail.(*types.TVar); ok && !target.Rigid && deferredNeed {
+			missing := make([]types.EffLabel, 0, len(subrow.Labels))
+			for _, label := range subrow.Labels {
+				found := false
+				for _, allowed := range superrow.Labels {
+					if label.Unique == allowed.Unique {
+						found = true
+						if m := unifyRows(types.Row{Labels: []types.EffLabel{label}}, types.Row{Labels: []types.EffLabel{allowed}}, sub, bi, sup); m != nil {
+							return m
+						}
+					}
+				}
+				if !found {
+					missing = append(missing, label)
+				}
+			}
+			if len(missing) == 0 {
+				return bindVar(target, subrow.Tail, sub, bi)
+			}
+			return bindVar(target, types.Row{Labels: missing, Tail: subrow.Tail}, sub, bi)
+		}
+		// An owner callback's nominal protocol does not become a foreign
+		// obligation of its unresolved residual row. Owner flow supplies
+		// those obligations independently, before ordinary bounds solve.
+		if tail, ok := subrow.Tail.(*types.TVar); ok && !tail.Rigid {
+			labels := make([]types.EffLabel, 0, len(superrow.Labels))
+			for _, label := range superrow.Labels {
+				keep := label.Name != types.CoroutineDriveName && label.Name != types.CoroutineSuspensionName
+				for _, required := range subrow.Labels {
+					keep = keep || required.Unique == label.Unique
+				}
+				if keep {
+					labels = append(labels, label)
+				}
+			}
+			superrow.Labels = labels
+		}
 		if len(subrow.Labels) == 0 {
 			if sv, ok := subrow.Tail.(*types.TVar); ok && sv.Rigid && sv.Kind == types.RowVar {
 				if tv, ok := superrow.Tail.(*types.TVar); ok && tv.Rigid && tv.ID == sv.ID {

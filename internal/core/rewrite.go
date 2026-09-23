@@ -85,10 +85,21 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Ty = r.typ(e.Ty)
 		n.Args = r.exprs(e.Args)
 		out = &n
+	case *Work:
+		n := *e
+		n.Ty, n.Args = r.typ(e.Ty), r.exprs(e.Args)
+		if e.SourceRow != nil {
+			n.SourceRow = r.typ(e.SourceRow)
+		}
+		out = &n
 	case *FailureInspect:
 		n := *e
 		n.Ty = r.typ(e.Ty)
 		n.Args = r.exprs(e.Args)
+		out = &n
+	case *Completion:
+		n := *e
+		n.Ty, n.Value, n.Row = r.typ(e.Ty), r.expr(e.Value), r.row(e.Row)
 		out = &n
 	case *Quote:
 		n := *e
@@ -111,6 +122,9 @@ func (r rewriter) expr(e Expr) Expr {
 		out = &n
 	case *Lambda:
 		n := *e
+		if e.SourceType != nil {
+			n.SourceType = r.typ(e.SourceType)
+		}
 		n.EffectParams = append([]EffectInstance(nil), e.EffectParams...)
 		for i, ev := range n.EffectParams {
 			n.EffectParams[i] = r.effect(ev)
@@ -164,7 +178,7 @@ func (r rewriter) expr(e Expr) Expr {
 	case *IteratorNext:
 		n := *e
 		n.Row = r.row(e.Row)
-		n.Ty, n.Cursor = r.typ(e.Ty), r.expr(e.Cursor)
+		n.Ty, n.Cursor, n.Reply = r.typ(e.Ty), r.expr(e.Cursor), r.expr(e.Reply)
 		out = &n
 
 	case *Bracket:
@@ -200,6 +214,9 @@ func (r rewriter) expr(e Expr) Expr {
 		out = &n
 	case *App:
 		n := *e
+		if e.SourceType != nil {
+			n.SourceType = r.typ(e.SourceType)
+		}
 		n.Row = r.row(e.Row)
 		n.Ty = r.typ(e.Ty)
 		n.Callee = r.expr(e.Callee)

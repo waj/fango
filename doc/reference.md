@@ -25,6 +25,9 @@ The bundled library is experimental and versioned with the compiler.
 | Reader, Writer, Bytes.Source, Bytes.Sink | [Buffered readers and writers](reference/library-readers.md) |
 | IO, File, Net | [Console, process, files, sockets, and structured errors](reference/library-io.md) |
 | Fail, Failure, State, Random | [Effect APIs](reference/library-effects.md) |
+| Coroutine | [Scoped typed exchange and ownership](reference/library-coroutines.md) |
+| Completion | [Detached typed results and abort replay](reference/library-completion.md) |
+| Work | [Scoped work packages](reference/library-work.md) |
 | Json | [Encoding and string tokens](reference/library-json.md) |
 | Scope | [Cleanup scopes](reference/resources.md) |
 | Meta, Derive | [Metaprogramming](reference/metaprogramming.md) |

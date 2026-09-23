@@ -46,6 +46,9 @@ type Def struct {
 	Name  string
 	Owner string     // defining source module; empty for headerless files and REPL inputs
 	Type  types.Type // the full curried Fango type
+	// SourceType preserves quantified source rows for owner-budget contracts.
+	// Runtime representation still uses Type, whose row-kind arguments erase.
+	SourceType types.Type
 
 	// TyParams are the definition's quantified type variables (rigid, first
 	// occurrence order in Type) — Go type parameters at codegen. Non-empty
@@ -177,6 +180,10 @@ type IteratorScope struct {
 // IteratorNext advances exactly once. Result supplies the checked Maybe
 // constructors used to package the result after the producer transfers back.
 type IteratorNext struct {
+	// Reply selects typed exchange; Close abandons without advancing. Both are
+	// absent on the legacy Iterator operation.
+	Reply  Expr
+	Close  bool
 	Row    *RowArgument
 	Cursor Expr
 	Result *types.ADTInfo
@@ -273,9 +280,10 @@ type Let struct {
 // compositional type mapping T⟦a->b⟧ = func(A) B — one Go func literal,
 // one interpreter closure. Multi-parameter surface lambdas nest.
 type Lambda struct {
-	Param string
-	Body  Expr
-	Ty    types.Type // a TFun; Ty.Ret == Body type
+	SourceType types.Type
+	Param      string
+	Body       Expr
+	Ty         types.Type // a TFun; Ty.Ret == Body type
 	// ParamCapture and EffectParams bind symbolic captures used by Core's
 	// non-escape analysis. They have no runtime representation.
 	ParamCapture types.CaptureVar
@@ -329,6 +337,7 @@ const (
 )
 
 type App struct {
+	SourceType   types.Type
 	Origin       source.Span
 	CalleeKind   CalleeKind
 	Callee       Expr
@@ -482,14 +491,24 @@ func Mentions(e Expr, name string) bool {
 		return Mentions(e.Producer, name) || Mentions(e.Consumer, name)
 
 	case *IteratorNext:
-		return Mentions(e.Cursor, name)
-	case *FailureInspect:
+		return Mentions(e.Cursor, name) || Mentions(e.Reply, name)
+	case *Work:
 		for _, arg := range e.Args {
 			if Mentions(arg, name) {
 				return true
 			}
 		}
 		return false
+	case *FailureInspect:
+
+		for _, arg := range e.Args {
+			if Mentions(arg, name) {
+				return true
+			}
+		}
+		return false
+	case *Completion:
+		return Mentions(e.Value, name)
 	case *NativeCall:
 		for _, a := range e.Args {
 			if Mentions(a, name) {

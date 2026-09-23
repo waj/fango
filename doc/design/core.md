@@ -10,6 +10,9 @@ Every Core definition/expression is typed. Generic definitions declare type
 parameters and uses supply explicit instantiations. Applications identify
 workers, constructors, natives, operations, or indirect functions. Core contains
 no imports, operators, structural records, or unresolved source effect tails.
+Type variables appearing only inside erased nominal row indexes do not become
+runtime type parameters. Variables in executing arrow evidence remain runtime
+parameters, including effects whose operation signatures do not use them.
 
 One pattern-matrix compiler handles case, equations, lambdas, handler groups,
 and destructuring, including multiple argument columns. It checks coverage and

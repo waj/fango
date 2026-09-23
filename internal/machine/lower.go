@@ -226,7 +226,14 @@ func (b *builder) registerOwnedRoots(body core.Expr) {
 			inside.EffectParams = shadowEvidence(shadowEvidence(outer.EffectParams, outer.RowEffects), shadowEvidence(lambda.EffectParams, lambda.RowEffects))
 			inside.RowEffects = nil
 			b.def = &inside
+			outerLocals := b.locals
+			b.locals = make(map[string]types.Type, len(outerLocals)+1)
+			for name, ty := range outerLocals {
+				b.locals[name] = ty
+			}
+			b.locals[lambda.Param] = lambda.Ty.(*types.TFun).Arg
 			b.registerOwnedRoots(lambda.Body)
+			b.locals = outerLocals
 			b.def = outer
 			return false
 		}
@@ -353,7 +360,18 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 		}
 		return b.add(&Suspend{Owner: owner, Request: e.Request, Bind: bind, Next: next})
 	case *core.IteratorNext:
-		return b.add(&CursorAdvance{Cursor: e.Cursor, Result: e.Result, Access: e.Access, Bind: bind, Next: next, Row: e.Row})
+		return b.add(&CursorAdvance{Cursor: e.Cursor, Reply: e.Reply, Close: e.Close, Result: e.Result, Access: e.Access, Bind: bind, Next: next, Row: e.Row})
+	case *core.Completion:
+		if e.Name == types.CompletionCaptureName {
+			fn := e.Value.Type().(*types.TFun)
+			b.registerMachineLambdas(e.Value)
+			return b.add(&Call{Capture: true, CalleeExpr: e.Value, Args: []core.Expr{&core.UnitLit{Ty: fn.Arg}}, Row: e.Row, Bind: bind, Next: next})
+		}
+		if e.Name == types.CompletionReplayName {
+			n := *e
+			n.Control = types.Control{Transport: types.Exit}
+			return b.add(&Eval{Bind: bind, Value: &n, Next: next})
+		}
 	case *core.IteratorScope:
 		if e.Control.Resolve(types.Machine) == types.Machine {
 			cursor := Local{Name: b.fresh("cursor"), Ty: e.CursorTy}

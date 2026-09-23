@@ -1,0 +1,8 @@
+import Coroutine
+import Work
+
+main() =
+    Coroutine.with (\_ () -> ()) (\cursor ->
+        Work.run (\first ->
+            item = Work.pack (Work.facet first) cursor
+            Work.run (\second -> Work.close second item)))

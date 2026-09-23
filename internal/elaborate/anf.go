@@ -37,7 +37,7 @@ func (el *elab) anf(e core.Expr) core.Expr {
 		out := core.Expr(&core.Case{Scrut: scrut, Bind: e.Bind, Tree: el.anfTree(e.Tree), Ty: e.Ty})
 		return wrapHoists(hoists, out)
 	case *core.Lambda:
-		return &core.Lambda{Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty,
+		return &core.Lambda{SourceType: e.SourceType, Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty,
 			ParamCapture: e.ParamCapture, EffectParams: e.EffectParams, RowParam: e.RowParam, RowEffects: e.RowEffects}
 	case *core.Handle:
 		clauses := make([]core.HandlerClause, len(e.Clauses))
@@ -112,7 +112,7 @@ func (el *elab) anfSlot(e core.Expr) (core.Expr, []hoist) {
 		// normalize inside without leaking hoists across the binding.
 		return el.anf(e), nil
 	case *core.Lambda:
-		return &core.Lambda{Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty,
+		return &core.Lambda{SourceType: e.SourceType, Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty,
 			ParamCapture: e.ParamCapture, EffectParams: e.EffectParams, RowParam: e.RowParam, RowEffects: e.RowEffects}, nil
 	case *core.Handle, *core.Seq:
 		out := el.anf(e)
@@ -159,12 +159,23 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 			args[i] = slot(a)
 		}
 		return &core.NativeCall{Name: e.Name, Module: e.Module, Args: args, Ty: e.Ty}, hoists
+	case *core.Work:
+		n := *e
+		n.Args = make([]core.Expr, len(e.Args))
+		for i, a := range e.Args {
+			n.Args[i] = slot(a)
+		}
+		return &n, hoists
 	case *core.FailureInspect:
 		args := make([]core.Expr, len(e.Args))
 		for i, a := range e.Args {
 			args[i] = slot(a)
 		}
 		return &core.FailureInspect{Name: e.Name, Args: args, Result: e.Result, Ty: e.Ty}, hoists
+	case *core.Completion:
+		n := *e
+		n.Value = slot(e.Value)
+		return &n, hoists
 	case *core.Quote:
 		holes := make([]core.Expr, len(e.Holes))
 		for i, h := range e.Holes {
@@ -180,7 +191,7 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 	case *core.Suspend:
 		return &core.Suspend{Owner: e.Owner, Request: slot(e.Request), Ty: e.Ty}, hoists
 	case *core.IteratorNext:
-		return &core.IteratorNext{Cursor: slot(e.Cursor), Result: e.Result, Access: e.Access, Ty: e.Ty, Row: e.Row}, hoists
+		return &core.IteratorNext{Cursor: slot(e.Cursor), Reply: slot(e.Reply), Close: e.Close, Result: e.Result, Access: e.Access, Ty: e.Ty, Row: e.Row}, hoists
 	case *core.IteratorScope:
 		return &core.IteratorScope{Yield: e.Yield, Traversal: e.Traversal, Scope: e.Scope, Producer: slot(e.Producer), Consumer: slot(e.Consumer), CursorTy: e.CursorTy, Ty: e.Ty, Control: e.Control, Row: e.Row}, hoists
 
@@ -202,7 +213,7 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		for i, a := range e.Args {
 			args[i] = slot(a)
 		}
-		return &core.App{Origin: e.Origin, CalleeKind: e.CalleeKind, Callee: callee, Args: args,
+		return &core.App{SourceType: e.SourceType, Origin: e.Origin, CalleeKind: e.CalleeKind, Callee: callee, Args: args,
 			TyArgs: e.TyArgs, Ty: e.Ty, Ctor: e.Ctor, EvidenceArgs: e.EvidenceArgs, Control: e.Control, Row: e.Row}, hoists
 	default:
 		panic(fmt.Sprintf("elaborate: anf unhandled node %T", e))

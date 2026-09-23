@@ -312,11 +312,21 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		r := children(e.Payload...)
 		r.value = types.CaptureSet{}
 		return r
+	case *Work:
+		r := children(e.Args...)
+		if !a.canCarry(e.Ty, nil) {
+			r.value = types.CaptureSet{}
+		}
+		return r
 	case *FailureInspect:
 		r := children(e.Args...)
 		if !a.canCarry(e.Ty, nil) {
 			r.value = types.CaptureSet{}
 		}
+		return r
+	case *Completion:
+		r := children(e.Value)
+		r.uses = types.UnionCaptures(r.uses, RowCaptures(e.Row))
 		return r
 	case *Suspend:
 		// Yield retains its request's captures in the ownership flow graph;
@@ -334,7 +344,7 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		}
 		return captureResult{value: value, uses: types.UnionCaptures(producer.uses, consumer.uses, RowCaptures(e.Row))}
 	case *IteratorNext:
-		r := a.expr(e.Cursor, env, evidence)
+		r := children(e.Cursor, e.Reply)
 		r.uses = types.UnionCaptures(r.uses, RowCaptures(e.Row))
 		if !a.canCarry(e.Ty, nil) {
 			r.value = types.CaptureSet{}

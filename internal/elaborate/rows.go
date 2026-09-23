@@ -35,6 +35,7 @@ func (el *elab) residualArgument(actual, explicit types.Row) *core.RowArgument {
 
 func (el *elab) valueAppWithRow(callee, arg core.Expr, raw types.Type) core.Expr {
 	app := el.valueApp(callee, arg).(*core.App)
+	app.SourceType = raw
 	if app.Row != nil {
 		app.Row = el.residualArgument(raw.(*types.TFun).Eff, callee.Type().(*types.TFun).Eff)
 	}
@@ -128,9 +129,15 @@ func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[i
 				resolve(&e.EvidenceArgs[i])
 			}
 		case *core.IteratorScope:
-			bind(&e.Row, core.ArrowOpenRow(e.Producer.Type(), 1))
+			arity := 1
+			if _, _, _, ok := types.CoroutineProtocol(e.CursorTy); ok {
+				arity = 2
+			}
+			bind(&e.Row, core.ArrowOpenRow(e.Producer.Type(), arity))
 		case *core.IteratorNext:
 			bind(&e.Row, true)
+		case *core.Completion:
+			bind(&e.Row, e.Name != types.CompletionFailureName)
 		case *core.Perform:
 			resolve(&e.Effect)
 		case *core.ControlExit:

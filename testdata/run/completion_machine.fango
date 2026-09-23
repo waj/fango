@@ -1,0 +1,36 @@
+import Completion
+import Coroutine
+import Fail
+import Failure
+import Scope
+
+main() =
+    print (Fail.attempt (\_ -> Coroutine.with
+        (\pause () ->
+            completed = Completion.capture (\_ -> Scope.finally (\_ ->
+                pause "before"
+                Fail.fail "machine body"
+                0) (\_ -> Fail.fail "machine cleanup"))
+            pause "captured"
+            case Completion.failure completed of
+                Just failure -> print (List.length (Failure.suppressed failure))
+                Nothing -> print 0
+            Completion.replay completed)
+        (\work ->
+            print (Coroutine.advance work ())
+            print (Coroutine.advance work ())
+            print (Coroutine.advance work ()))))
+    print (Fail.attempt (\_ ->
+        completed = Completion.capture (\_ -> Coroutine.with
+            (\pause () -> Scope.finally (\_ ->
+                pause "opened"
+                7) (\_ -> Fail.fail "owner cleanup"))
+            (\work ->
+                print (Coroutine.advance work ())
+                9))
+        print "owner captured"
+        Completion.replay completed))
+    print (Completion.replay (Completion.capture (\_ ->
+        Fail.attempt (\_ ->
+            Fail.fail "local"
+            1))))

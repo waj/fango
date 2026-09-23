@@ -69,6 +69,9 @@ func (g *gen) rowArgument(row *core.RowArgument) goast.Expr {
 			}
 			members = append(members, &goast.KeyValueExpr{Key: ident(memberName(mode)), Value: g.evidenceArg(ev, value, actual, mode)})
 		}
+		if replay := g.abortReplayAdapter(ev, value); replay != nil {
+			members = append(members, &goast.KeyValueExpr{Key: ident("AbortReplay"), Value: replay})
+		}
 		args = append(args, &goast.CompositeLit{Type: selector("fangort", "EvidenceBinding"), Elts: []goast.Expr{
 			&goast.KeyValueExpr{Key: ident("Name"), Value: stringLit(ev.Name)},
 			&goast.KeyValueExpr{Key: ident("Family"), Value: &goast.CompositeLit{Type: selector("fangort", "EvidenceFamily"), Elts: members}},

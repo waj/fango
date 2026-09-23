@@ -39,7 +39,7 @@ func ExprControl(e Expr) types.Control {
 	case *Suspend:
 		return types.JoinControl(types.Control{Transport: types.Machine}, ExprControl(e.Request))
 	case *IteratorNext:
-		return types.JoinControl(types.Control{Transport: types.Machine}, ExprControl(e.Cursor))
+		return types.JoinControl(types.Control{Transport: types.Machine}, ExprControl(e.Cursor), ExprControl(e.Reply))
 	case *IteratorScope:
 		// Producer's latent Machine protocol is consumed by this owner rather
 		// than joined into the enclosing computation.
@@ -49,8 +49,12 @@ func ExprControl(e Expr) types.Control {
 		return ExprControl(e.Operand)
 	case *NativeCall:
 		return join(e.Args...)
+	case *Work:
+		return join(e.Args...)
 	case *FailureInspect:
 		return join(e.Args...)
+	case *Completion:
+		return types.JoinControl(e.Control, ExprControl(e.Value))
 	case *Quote:
 		return join(e.Holes...)
 	case *If:

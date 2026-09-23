@@ -1,0 +1,51 @@
+import Coroutine
+import Scope
+import Fail
+
+unused : (Int ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension, IO} Int
+unused pause =
+    unused pause
+
+complete : (Int ->{Coroutine.Suspension} Int) -> Int -> Int
+complete _ initial = initial + 1
+
+failed : (Int ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension, IO, Fail.Fail String} Bool
+failed pause () = Scope.finally (\_ ->
+    pause 10
+    Fail.fail "body") (\_ -> print "failed release")
+
+type Producer request reply result e = Producer ((request ->{Coroutine.Suspension} reply) -> reply ->{Coroutine.Suspension | e} result)
+failureSource = Producer failed
+withProducer (Producer producer) use = Coroutine.with producer use
+
+main() =
+    Coroutine.with unused (\work ->
+        Coroutine.close work
+        Coroutine.close work
+        print (Coroutine.advance work ()))
+    Coroutine.with complete (\work ->
+        print (Coroutine.advance work 40)
+        print (Coroutine.advance work 90)
+        Coroutine.close work)
+    Coroutine.with (\pause initial ->
+        Scope.finally (\_ ->
+            print initial
+            answer = pause 7
+            print answer
+            True) (\_ -> print "release")) (\work ->
+        alias = work
+        print (Coroutine.advance work "start")
+        print (Coroutine.advance alias "reply")
+        print (Coroutine.advance work "terminal"))
+    Coroutine.with (\pause () ->
+        Scope.finally (\_ ->
+            pause 8
+            pause 9) (\_ -> print "early release")) (\work ->
+        print (Coroutine.advance work ())
+        Coroutine.close work
+        Coroutine.close work
+        print (Coroutine.advance work ()))
+    print (Fail.attempt (\_ -> withProducer failureSource (\work ->
+        print (Fail.attempt (\_ -> Coroutine.advance work ()))
+        print (Fail.attempt (\_ -> Coroutine.advance work ()))
+        print (Fail.attempt (\_ -> Coroutine.advance work ())))))

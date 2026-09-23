@@ -1,0 +1,18 @@
+{-# no-prelude #-}
+module Completion exposing (Completion, capture, failure, replay)
+
+import Basics exposing (..)
+import Failure exposing (Failure)
+import Maybe exposing (Maybe)
+
+-- The row remains part of the checked type; no callback is stored at runtime.
+type Completion a e = Completion (() ->{e} a)
+
+capture : (() ->{e} a) ->{e} Completion a e
+capture = native
+
+replay : Completion a e ->{e} a
+replay = native
+
+failure : Completion a e -> Maybe Failure
+failure = native
