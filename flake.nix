@@ -19,6 +19,7 @@
             gotools  # goimports etc.
             gnumake  # Makefile convenience targets
             nodejs   # runs the TextMate grammar check
+            python3  # repository scripts and ad hoc development tools
           ];
 
           # The grammar check tokenizes with vscode-textmate. Build its two

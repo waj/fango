@@ -4,7 +4,8 @@ Compiler setup, command behavior, formatting, generated projects, and main.
 
 [Reference index](../reference.md).
 
-The repository uses Go 1.26 and provides a Nix development environment:
+The repository uses Go 1.26 and provides a Nix development environment with
+Python 3 for development helpers:
 
 ```sh
 nix develop

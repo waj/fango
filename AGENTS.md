@@ -1,5 +1,9 @@
 # Repository instructions
 
+Run Python helpers with `python3` from the Nix development shell (`nix develop`
+or the direnv environment). The macOS `/usr/bin/python3` stub is not a usable
+fallback when Python is absent from the shell.
+
 Before architectural or implementation work, read the `doc/design.md` and
 `doc/roadmap.md` entry pages, then follow only task-relevant topic links.
 For user-visible changes, consult the relevant `doc/reference.md` topics.
