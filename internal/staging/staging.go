@@ -217,8 +217,10 @@ func (s *Session) InstallCore(defs []core.Def, groups []Group) {
 	if s.ev.installedIntrinsics == nil {
 		s.ev.installedIntrinsics = map[string]bool{}
 	}
-	for name := range s.ev.ck.Intrinsics {
-		s.ev.baseIntrinsics[name], s.ev.installedIntrinsics[name] = true, true
+	for _, def := range defs {
+		if _, intrinsic := s.ev.ck.Intrinsics[def.Name]; intrinsic {
+			s.ev.baseIntrinsics[def.Name], s.ev.installedIntrinsics[def.Name] = true, true
+		}
 	}
 }
 

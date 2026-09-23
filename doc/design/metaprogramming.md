@@ -64,7 +64,9 @@ Stage-specific semantic lint admits checked quotes/reflected values and lowers
 the exact operand plus reachable completed definitions through the same Machine IR.
 A deriving dictionary still being expanded is not executable. The stage environment
 retains elaborated definitions for capture substitution and lowering, incrementally
-installs imported intrinsics, and rebuilds after rollback.
+installs imported intrinsics, and rebuilds after rollback. A cached stage section
+may omit an unused intrinsic; installation records only definitions it contains,
+so the evaluator materializes any newly needed intrinsic before a later splice.
 
 Cached stage installation appends validated templates and completed Core groups
 directly, without replaying `DeclInfo` AST through elaboration. Group metadata
