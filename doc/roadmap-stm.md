@@ -3,20 +3,19 @@
 This document owns the proposed shared-mutable-state layer: transactional
 variables, atomic transactions, and the primitives they need. The [effects
 roadmap](roadmap-effects.md#deferred-topics) defers shared mutable state to
-here and keeps the committed async sequence; the main
+here; [Async](roadmap-async.md) owns scheduling and executors, while the main
 [roadmap](roadmap.md#shared-state-and-transactional-memory) summarizes priority.
 Implemented contracts live in [effects](reference/effects.md), [native
 sidecars](reference/native.md), and [capture contracts and resource
 ownership](design/ownership.md). The APIs below are **proposed**, and nothing
-here precedes [cooperative structured
-async](roadmap-effects.md#4-cooperative-structured-async).
+here precedes [structured cooperative tasks](roadmap-async.md#a2-structured-contexts-and-failures).
 
 ## Why transactions rather than locks
 
-Fango's ownership model is single-owner: a child task cannot capture
-parent-local mutable state, and there is no shared cell to lock. Adding one
-requires choosing a sharing protocol, and transactions fit the existing rules
-where locks do not.
+The proposed task ownership model rejects child captures of parent-local
+mutable state, and the implemented language has no shared cell to lock. Adding
+one requires choosing a sharing protocol, and transactions fit the existing
+rules where locks do not.
 
 - The discipline a transaction needs — no un-replayable effect inside it — is an
   ordinary closed effect row, not a new judgment. A body typed `(Txn ->{Stm, Retry} a)`
@@ -105,8 +104,9 @@ representation-blind — it stores values it never inspects, because the
 interpreter and the Go backend hand it different representations — which is
 affordable because validation compares versions and never values. And commit
 must be shielded from cancellation, the same shielding
-[suspending cleanup](roadmap-effects.md#5-suspending-cleanup) defines for
-release.
+[Async cancellation and cleanup](roadmap-async.md#cancellation-and-cleanup)
+defines for release. The suspension-safe resource lifetime itself belongs to
+[general coroutines](roadmap-coroutines.md#c5-suspending-acquisition-and-cleanup).
 
 Blocking `retry` is not irreducible. Re-running the transaction after yielding
 is correct, and parking on the read set until a conflicting commit wakes it is a
@@ -119,23 +119,29 @@ introducing a second one.
   results are the scalar set, `Bytes` in bundled sidecars, `Native.Any`, and a
   local single-boundary-value wrapper; a polymorphic variable is a `NATIVE ABI`
   error. `Native.Any`'s constructor is private to its module, so Fango code
-  cannot box a value into one either. `TVar Int` and the other scalar
-  instantiations are therefore implementable with no compiler change, and a
-  general `TVar a` needs one new boundary kind: a Fango value crossing opaquely
+  cannot box a value into one either. Scalar transaction payloads need no new
+  value representation, but the public `TVar Int` shape still needs the wrapper
+  extension below, and sharing needs the checked capability contract. A general
+  `TVar a` additionally needs one new boundary kind: a Fango value crossing opaquely
   and returning at the same type — `Native.Any` with a phantom index. That
   extension also keeps the heterogeneous log in Go, where it is a plain `any`,
-  so Fango needs no existential.
+  so Fango needs no existential. Coordinate this representation contract with
+  [typed opaque values](roadmap-coroutines.md#c6a-typed-opaque-values)
+  rather than introducing a separate unchecked box for task completion.
 - **Wrapper types may not take type parameters.** The boundary check accepts a
   one-constructor, one-boundary-value type declared with no parameters
   (`internal/modules/modules.go`), so `type TVar a = TVar Native.Any` is
   rejected today although its field is monomorphic. Admitting a phantom
-  parameter is a small relaxation with one real question behind it: what the
-  parameter promises when the sidecar cannot see it.
+  parameter requires a checked promise about its index when the sidecar cannot
+  see it. C6a owns phantom-wrapper validation separately from arbitrary opaque
+  payload round trips; the scalar stage needs that wrapper contract already.
 - **The resource pragma scopes a capability to one owner.** A `TVar` exists to
-  be shared with child tasks, so it is the first value wanting the transferable
-  capture the [parallel executor](roadmap-effects.md#7-parallel-executor)
-  requires. That milestone gates usefulness under real parallelism, not
-  implementability.
+  be shared with child tasks, so it requires
+  [shared and transferable capabilities](roadmap-coroutines.md#c6c-shared-and-transferable-capabilities)
+  before even the cooperative scalar stage. Executor-independent capture rules
+  do not permit delaying this contract until parallel execution. Executors
+  consume the shared native contract rather than providing a TVar-specific
+  exception; concurrent runtime safety is the separate C6d gate.
 - **The handle-free spelling needs deferred type-system work.** Writing the
   accesses as operations of an `Stm` effect —
 
@@ -158,17 +164,24 @@ introducing a second one.
 
 Each stage is usable without the ones after it.
 
-1. **Scalar variables.** `TVar Int`, `TVar Float`, `TVar String`, `TVar Bytes`
+1. **Scalar variables and sharing.** `TVar Int`, `TVar Float`, `TVar String`, `TVar Bytes`
    with the full control layer, spinning `retry`, and a cooperative executor.
-   No compiler change. Acceptance: a transfer that preserves a total across
+   Dependencies: Async A2, C6c's shared-capability contract, and C6a's
+   phantom-wrapper validation. Scalar payloads use the existing ABI; do not
+   describe that as eliminating the wrapper and sharing prerequisites.
+   Acceptance: a transfer that preserves a total across
    contending tasks, and a bounded queue whose consumer blocks on `retry`.
-2. **General variables.** The opaque boxed boundary kind and the phantom wrapper
-   parameter, giving `TVar a`. Acceptance: a variable holding a record and a
-   recursive ADT, with both backends agreeing.
-3. **Parking.** `retry` registers on its read set and a conflicting commit wakes
-   it, with live registrations counted rather than inferred.
-4. **Parallel.** Transferable capture for `TVar`, and the same fixtures under
-   `Executor.parallel`.
+2. **General variables.** C6a's typed opaque-value round trips extend the same
+   wrapper to arbitrary `TVar a` payloads. Acceptance: a variable holding a record
+   and a recursive ADT, with both backends agreeing.
+3. **Parking.** C6b's scoped request/registration contract lets `retry` register
+   on its read set and a conflicting commit wake it. Count live registrations,
+   and test commit before/during/after publication and cancellation during wait.
+4. **Parallel.** After C6d and the corresponding Async executor stage, run the
+   same fixtures under `Executor.parallel` and `Executor.mixed`. Both use the
+   sharing contract already required by stage 1; this stage validates concurrent
+   native transaction access and publication rather than introducing permission
+   to share a TVar for the first time.
 5. **Handle-free spelling**, if operation-local polymorphism lands for its own
    reasons.
 
@@ -192,7 +205,7 @@ Retain the [repository gates](../AGENTS.md) and
 [verification contracts](design/verification.md), including the Core linter, the
 interpreter/compiler differential suite, and `go vet`. Fixtures assert final
 state and invariants, never interleavings: contention retries are
-nondeterministic by construction, and the effects roadmap already declines to
-promise identical concurrent interleaving across executors. A transaction that
-retries must show exactly one commit and no partial writes, and a cancelled
+nondeterministic by construction, and the [Async executor contract](roadmap-async.md#goals-and-boundaries)
+does not promise identical concurrent interleaving across executors. A transaction
+that retries must show exactly one commit and no partial writes, and a cancelled
 transaction must leave no live registration.

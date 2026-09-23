@@ -23,7 +23,8 @@ live in [CLI tests](../cmd/fango/e2e_test.go).
 - Add the unimplemented grep-lite performance comparison against Go.
 - **Parallel downloader or multi-file word count:** a consumer for structured
   concurrency, cancellation, and network/process APIs. This follows the
-  [effects roadmap](roadmap-effects.md).
+  [Async roadmap](roadmap-async.md#implementation-stages): native readiness for
+  overlapping downloads, or a parallel/mixed executor for CPU parallelism.
 
 ## Delivery requirements
 

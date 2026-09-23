@@ -11,9 +11,22 @@ work. Keep design/reference limited to implemented behavior. Edit the authoritat
 explanation rather than appending change summaries; link instead of duplicating,
 and keep examples only for distinct rules.
 Keep entry pages as navigation; split growing topics at coherent boundaries
-and update links. Remove completed roadmap work after promoting durable results
-into design/reference. Do not add implementation diaries or completed plan files;
-Git history is the archive.
+and update links. Promote completed roadmap work into design/reference, then
+remove its roadmap entry or mark it `DONE` under the milestone rules below.
+Do not add implementation diaries or completed plan files; Git history is the
+archive.
+
+Roadmap milestone IDs, numbers, and titles are stable identifiers. Do not rename,
+renumber, or repurpose existing stages unless the user explicitly requests it.
+Adding, splitting, reordering, or removing work must not change the identities of
+other stages. Allocate unused IDs or new substage suffixes for new work; never
+reuse an ID retired by completion or removal. Do not delete unfinished milestones
+without an explicit user request. Completed milestones may be removed or marked
+`DONE`; when retaining one, put the status below its unchanged heading so its
+title and anchor stay stable. Update dependency tables and links when a milestone
+is removed, directing references to the implemented design/reference contract
+where appropriate. Leave numbering gaps rather than compacting the remaining
+stages, and check Git history before allocating an ID that may have been retired.
 
 The VS Code extension in `editors/vscode/` is part of the language's
 user-visible surface. When changing the surface syntax — keywords, operators,

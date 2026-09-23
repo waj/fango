@@ -5,6 +5,11 @@ Open representation/API choices. The implemented persistence invariant lives in
 [collections](reference/library-collections.md#list), and comparative callback/
 recursion measurements in [calls](roadmap-calls.md#what-the-measurements-say).
 
+Concurrent executors additionally require the [general runtime safety
+gate](roadmap-coroutines.md#c6d-concurrent-invocation-and-runtime-safety). It owns
+replacement of the single-threaded chunk-frontier claim and concurrent shared-list
+acceptance; source-level persistence alone does not establish thread safety.
+
 ## Open questions
 
 - **Retune listChunk.** It is 32 because bytes/element saturates for scalar and

@@ -3,8 +3,9 @@
 Priorities, unfinished work, and open decisions. Follow topic links only as
 needed; [design](design.md) and [reference](reference.md) own implemented contracts.
 Library growth follows [concrete example programs](roadmap-examples.md).
-The sections below do not imply a new global ordering; the effects roadmap
-has its own committed dependency sequence.
+The sections below do not imply a new global ordering. The coroutine and
+Async roadmaps name their stages and cross-document dependencies. Stage IDs and
+titles follow the [repository milestone rules](../AGENTS.md).
 
 ## Standard library expansion
 
@@ -30,7 +31,7 @@ sequences](reference/library-bytes.md) owns `Bytes` and its `Source` and
 `Reader`, `Writer`, and every stage above them, and [IO and
 files](reference/library-io.md) owns the file and socket adapters. [HTTP and a
 server](roadmap-io.md) owns what is left. A concurrent server additionally depends
-on the [effects roadmap](roadmap-effects.md).
+on [Async with native readiness](roadmap-async.md#a3-native-readiness-and-io).
 
 ## Addressing a specific handler
 
@@ -131,20 +132,33 @@ Deferred until a consumer needs them:
 
 ## Effects, state, and resource scopes
 
-[Effects](roadmap-effects.md) owns the committed sequence: cooperative structured
-async; suspending cleanup; bounded concurrent streams/events; a bounded parallel
-executor; measured optimization; written capture/borrowing contracts. Preserve
-compiler-proved resume discipline and ordinary calls/explicit machines, without
-host-stack copying or goroutine-based continuations.
+[Effects](roadmap-effects.md) owns general handler and language extensions.
+[Owned coroutines](roadmap-coroutines.md) details the shared suspension API,
+Iterator machinery reuse, Stream migration, dynamic scope ownership, suspending
+cleanup, general native retention/transfer contracts, and execution checkpoints.
+Preserve checked ownership and ordinary calls/explicit machines; Stream and Async
+names do not become compiler primitives.
+
+## Structured Async and executors
+
+[Async](roadmap-async.md) owns library task/context semantics, cooperative
+scheduling, native readiness, parallel and mixed worker-pool executors,
+and bounded concurrent streams/events. It builds on the coroutine stages.
+Initial cancellation uses explicit checkpoints; [CPU responsiveness](roadmap-async.md#a8-cpu-responsiveness)
+adds generated polling later. Both concurrent executors require the general
+runtime safety gate. Goroutines drive coroutines rather than represent effect
+continuations.
 
 ## Shared state and transactional memory
 
 [Transactional memory](roadmap-stm.md) owns the proposed answer to shared
 mutable state: transactional variables, atomic transactions with an abort-only
 `retry`, and the one native boundary they need. The control layer is ordinary
-Fango over the implemented handler rules; what it waits on is the async
-sequence above, and a general `TVar a` additionally waits on a polymorphic
-value crossing the native boundary opaquely.
+Fango over the implemented handler rules; scheduling dependencies belong to
+[Async](roadmap-async.md#implementation-stages), and a general `TVar a` also needs
+the [typed opaque-value boundary](roadmap-coroutines.md#c6a-typed-opaque-values).
+Scalar STM already needs checked shared-capability and phantom-wrapper contracts;
+cooperative scheduling does not remove those prerequisites.
 
 ## Capture-flow analysis cost
 

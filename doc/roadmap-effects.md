@@ -1,469 +1,228 @@
-# Roadmap: direct effects, streams, and structured tasks
+# Roadmap: effects, instances, and owned coroutines
 
-This document owns proposed APIs and the work needed to make them usable, and
-the questions left open by the effect rules already shipped.
-The implemented contract remains in [design](design/effects.md)
-and [reference](reference/effects.md#effects-and-handlers); the main
-[roadmap](roadmap.md#effects-state-and-resource-scopes) summarizes priorities.
-The APIs below are **proposed**, with their delivery milestones identified.
-Callback subsumption, trailing lambdas, and pipes are implemented foundations;
-see the [reference](reference/effects.md).
-Fango blocks use intended Fango syntax and omit routine imports; application
-functions such as `fetch` and `consume` stand for domain code. Lifetime
-contracts are explicitly schematic, not new source syntax.
+This document owns unfinished general effect-language work. The shared
+[coroutine roadmap](roadmap-coroutines.md) owns the proposed control API,
+Iterator reuse, Stream migration, and their implementation stages. The
+[Async roadmap](roadmap-async.md) owns tasks, schedulers, native readiness,
+executors, and concurrent combinators. The [main roadmap](roadmap.md) is the
+navigation entry point, not another specification of these contracts.
 
-The commitments are direct-style effects, one stream API for pure, effectful,
-and suspending work, scoped borrowing, ordinary library combinators, and
-structured tasks with reusable results. Deliver cooperative execution first,
-then suspending cleanup, bounded concurrency and event adapters, and a bounded
-parallel executor. Experimental APIs may be replaced without compatibility
-wrappers. Promote durable results into design/reference when implemented and
-remove completed roadmap work; Git history is the archive.
+Everything proposed here remains unimplemented. Implemented behavior belongs
+to [effects](reference/effects.md), [resources](reference/resources.md), and
+[streams](reference/library-streams.md); implemented architecture belongs to
+[effect execution](design/effects.md), [machines](design/machines.md), and
+[ownership](design/ownership.md). Promote durable results there when a stage
+lands, then remove that completed work or mark its stage DONE under the
+[repository milestone rules](../AGENTS.md). Stage IDs and titles remain stable;
+Git history is the implementation archive.
 
-## API tour
+## Direction and compiler boundary
 
-### Effects and real IO
+Generalize the owned coroutine behind Iterator rather than adding another
+domain-specific continuation engine. Stream and Async should be ordinary
+libraries over general control capabilities. A small bundled control API may
+use compiler intrinsics; this is not a promise to eliminate all intrinsics.
+In particular, cleanup across an arbitrary residual exit still needs the
+general resource-scope machinery.
 
-**Proposed example — milestone 4 for the suspending interpretation.** Ordinary declarations, direct calls,
-tail-resumptive handlers, and `Fail` retain their existing meaning:
+Three identities have different jobs:
 
-```fango
-effect Catalog
-    lookup : String -> String
+| Identity | Question it answers | Example |
+| --- | --- | --- |
+| Handler activation | Which interpretation does this operation use? | Two independent state handlers answer different `get` calls |
+| Coroutine owner | Who owns these suspended frames and may advance them? | Two producers retain separate positions between pulls |
+| Library context | Which work shares a lifetime and policy? | Several children belong to one task context |
 
-loadName : String ->{Catalog} String
-loadName key = lookup key
+The existing instance-binding rule addresses the first question. It does not
+by itself answer the second. A handler that calls a consumer and immediately
+resumes can implement a push traversal; returning from `next`, doing unrelated
+work, and calling `next` again needs saved execution. Several coroutines can
+also use one handler, so one handler instance must not imply one saved stack.
 
-inTest action =
-    handle action() of
-        lookup key -> resume ("fixture:" ++ key)
+| General compiler/runtime support | Ordinary Fango library | Trusted native sidecars |
+| --- | --- | --- |
+| Effect dispatch, instance identity, targeted exits | Domain effects and interpretations | Host operations |
+| Scoped coroutines, typed suspension, exclusive advancement | Stream/Iterator wrappers and stages | External readiness and timer registration |
+| Capture, retention, transfer, and lifetime proofs | Task contexts, queues, waits, completion policy | Synchronization and goroutine execution |
+| Resource scopes and cleanup execution | Cancellation policy, race, timeout, event adapters | Bounded blocking-operation bridges |
 
-fetch : String ->{IO, Async, Fail Error} String
-fetch url = Network.get url
+Names such as `Stream.yield`, `Iterator.next`, `Async.spawn`, and
+`Async.await` must not receive compiler privileges in the target design.
+General control and native contracts are checked by behavior and ownership,
+not by recognizing a scheduler's name.
 
-inProduction action =
-    handle action() of
-        lookup key ->
-            value = fetch key
-            resume value
-```
+## Shared foundation and delivery order
 
-`Network.get` is a proposed milestone 4 adapter. A real interpretation can
-perform IO or call a suspending library function before its tail `resume`.
-The operation's apparent result type does not determine its execution mode:
-the supplied interpretation does. `Async` describes execution, `IO` external
-interaction, and `Fail Error` typed failure; none erases the others.
+The [coroutine stages](roadmap-coroutines.md#implementation-stages) define
+the control implementation sequence; the [Async dependency table](roadmap-async.md#implementation-stages)
+defines its consumers. Start by investigating C0's owner-sensitive control,
+C4's dynamic-owner design, and A0's typed task representation together. This
+feasibility gate precedes implementation and prevents a completed Stream
+migration from becoming the first test of whether the intended library Async
+encoding is possible.
 
-### Async stream pipelines
+The first usable control delivery is scoped typed coroutines, ordinary
+Stream/Iterator wrappers, and a deterministic cooperative scheduling example
+that suspends inside an unfinished pull. Source compatibility is not a constraint:
+the new Coroutine API and its ordinary Iterator wrapper are the chosen target,
+and bundled callers migrate with the implementation rather than keeping obsolete
+compiler paths alive.
 
-The synchronous Stream API, scoped cursors, custom stages, and file pipelines
-are implemented; see [Streams and cursors](reference/library-streams.md).
-The next extension admits suspending callbacks through those same combinators.
+Later general stages add scope-owned dynamic allocation, suspending cleanup,
+and checked native retention/transfer. These are separate obligations:
+lexically nesting two coroutines does not prove that a dynamic task registry
+is safe, and safe sequential advancement does not prove safe goroutine transfer.
+The native work is split into typed values, scoped requests, shared/transferable
+capabilities, and concurrent invocation/runtime safety. Consumers depend only
+on the contracts they use, while every independently scheduled child must meet
+the same capture rules. The Async roadmap links to these stages instead of
+defining a competing owner or cleanup model.
 
-**Proposed async network pipeline — milestone 4:**
+The first practical Async release is cooperative structured IO at A3. It does
+not wait for all three executors or generated CPU polling. Suspending cleanup
+then supports bounded concurrent combinators and events without requiring
+parallel execution. Both concurrent executors consume the same C6d safety gate;
+neither is an architectural prerequisite for the other. C7/A8 subsequently
+complete the CPU responsiveness contract, and can proceed before parallelism
+when their own prerequisites are ready. Exact dependencies and acceptance live
+in the two stage tables, not in a second global milestone numbering here.
 
-```fango
-Async.run \_ ->
-    requests
-        |> Stream.map fetch
-        |> Stream.filter wanted
-        |> Stream.forEach consume
-```
+Keep Direct and Exit fast paths. Select explicit Machine execution only where
+control requires it; do not require a scheduler, goroutine, or channel for a
+synchronous effect handler or pipeline. Preserve per-curried-arrow timing,
+definition-site evidence, deep handler behavior, normal-only return clauses,
+deterministic module-owned callable families, and independent Core/Machine
+verification. Staging, generated expressions, batch builds, and the REPL must
+enter the same applicable proof boundaries.
 
-This still fetches sequentially. The network adapter supplies readiness or a
-bounded blocking-native bridge; neither `map` nor the call to `fetch` needs an
-async-specific spelling. Residual IO and failure remain visible to the caller.
+Stored execution remains explicit frames, without host-stack copying or
+runtime internals. A goroutine executor may drive those frames; it must not
+implement each effect continuation with a parked goroutine. Unbounded suspended
+recursion still needs storage, and lifetime proofs do not imply Go stack
+allocation. Optimization follows evidence, not the number of library layers.
 
-### Structured async
+## Resume discipline
 
-**Proposed example — milestone 4:**
-
-```fango
-Async.run \_ ->
-    first = Async.spawn (\_ -> fetch firstUrl)
-    second = Async.spawn (\_ -> fetch secondUrl)
-    a = Async.await first
-    b = Async.await second
-    combine a b
-```
-
-Calling a suspending function is an ordinary call. `spawn` starts a child owned
-by an implicit task context and takes only its action. `Async.run` selects the
-cooperative executor and establishes a root context, so spawning needs no
-additional scope block. `await` observes stored completion; repeated awaits do
-not rerun work. Initial reusable results must be immutable and capture-free, and handles
-remain scoped to their owning context. Result reuse does not permit sharing
-mutable capabilities.
-
-**Proposed nested context — milestone 4:**
-
-```fango
-Async.run \_ ->
-    first = Async.spawn (\_ -> fetch firstUrl)
-
-    b = Async.context \_ ->
-        second = Async.spawn (\_ -> fetch secondUrl)
-        Async.await second
-
-    a = Async.await first
-    combine a b
-```
-
-`Async.context` requires async execution and establishes a nested task lifetime
-and cancellation boundary on the same executor. Its callback receives Unit.
-Here `second` must finish before the inner context exits; `first` belongs to
-the root and must finish before `run` exits. Awaiting an outer task inside an
-inner context is allowed and does not change its owner.
-
-Context ownership flows through scoped effect evidence. An ordinary helper
-receives that evidence from its caller; a closure that captured a definition-site
-context keeps that owner even when invoked inside a different context. Ownership
-does not come from a mutable ambient current-context slot. Task handles and
-closures retaining a context cannot outlive it, including through returned ADTs
-or stores into outer handlers. Child actions inherit their owning context unless
-they establish a nested one; exit waits for tasks spawned by children as well.
-Spawning without an async runner remains an unhandled effect, and detached tasks
-remain outside the proposal.
-
-Successful context exit waits for all owned tasks. Failure or cancellation cancels
-remaining children and drains their cleanup before exit. Unobserved child
-failures still fail the context: catching a failure from `await` does not erase
-a failed child's completion. Handle expected failures inside the child and
-return a `Result`. Timeout and race cancel and drain losing work explicitly.
-
-Parent-local mutable state and borrowed cursors cannot be captured by children
-in the initial API, even on the cooperative executor; children may create their
-own local state and resources.
-
-**Proposed executor selection — milestone 7:**
+Keep existing user handlers tail-resumptive or abort-only initially. A
+tail-resumptive clause may call the scoped coroutine's `pause` callback
+before its final resume:
 
 ```fango
-Async.runOn (Executor.parallel 4) \_ ->
-    task = Async.spawn (\_ -> fetch url)
-    Async.await task
+-- Proposed use of the coroutine capability; routine imports omitted.
+handle producer() of
+    emit value -> resume (pause value)
 ```
 
-`Async.runOn` also establishes a root context. Parallel execution requires
-checked transferable captures, including captured effect evidence. An effect
-row alone is not a transfer proof. The executor uses
-bounded workers and preserves the same context, resource, and cancellation
-semantics as cooperative execution.
+The handler itself obeys today's tail-resume discipline. The general control
+boundary saves the unfinished execution while `pause` waits for a reply.
+There is no Fango value representing the handler's raw continuation.
 
-### Concurrent streams and external events
+This differs from non-tail resumption:
 
-**Proposed example — milestone 6:**
-
-```fango
-requests
-    |> Stream.mapConcurrent 8 fetch
-    |> Stream.forEach consume
+```text
+result = resume savedContinuation answer
+print "the resumed coroutine finished"
+return result
 ```
 
-`mapConcurrent` preserves input order and bounds both active work and retained
-results by its positive capacity. If an early request is slow, completed later
-results occupy that bound and stop further admission. A separately named
-`Stream.mapConcurrentUnordered` delivers in readiness order. Early downstream
-termination cancels and drains active work before closing upstream traversal.
-
-**Proposed subscription API shape — milestone 6:**
-
-```fango
-Events.withSubscription source 32 Events.DropOldest \events ->
-    events
-        |> Stream.take 10
-        |> Stream.forEach consume
-```
-
-The explicit scope bounds subscription lifetime. Subscription starts on
-traversal, not description construction, and ends on traversal cleanup, always
-before subscription scope exit. Each reopening makes a new subscription.
-Capacities must be positive; policies are `Events.Fail`, `Events.DropOldest`,
-and `Events.DropNewest`. Overflow failure is typed and cancels/drains traversal.
-An adapter may offer backpressure only if the source supports it. External
-callbacks enter a bounded adapter queue, never a public resumption callback.
-General multicast, replay, detached subscriptions, and public channels/select
-are outside the committed scope.
-
-## Language foundations and compiler boundary
-
-The implemented effect, Stream, cursor, and representation contracts are in
-the [design](design/core.md). The task APIs above remain
-unimplemented and must preserve those boundaries.
-
-- **Effect subsumption:** extend the implemented callback inclusion and nominal
-  variance rules to task APIs; never erase a real effect.
-- **Exclusive borrowing:** preserve sole advancement authority across task
-  suspension, cancellation, and transfers between executors.
-- **Task boundaries:** validate captures and separate child completion from an
-  exit targeted at a parent handler. A child executor never unwinds a parent's
-  stack directly; it reports completion for parent-side routing after drain.
-- **Surface convenience:** trailing final lambdas retain `\_ ->` for Unit
-  callbacks. `Basics` supplies `(|>)` (`infixl 0`) and `(<|)` (`infixr 0`),
-  exported by `Prelude`, as ordinary functions. No `async` keyword or `do`
-  block is required. No additional call syntax is proposed here.
-
-| Compiler/runtime | Ordinary Fango library |
-| --- | --- |
-| Effect dispatch and exits | Domain effects and interpretations |
-| Scope ownership, cleanup, and capture checking | Resource wrappers |
-| Yield and owned cursor advancement | Stream stages and consumers |
-| Task ownership, waiting, cancellation, executor integration | Concurrent combinators, race, timeout |
-| Trusted native resource/readiness boundaries | File, network, and event-facing APIs |
-
-Raw continuation and readiness callbacks stay private. The compiler proves
-resume discipline, non-escape, and exclusive advancement before erasure; runtime
-consumed flags or panics cannot substitute for these proofs. Runtime tags,
-program counters, and registration generations coordinate legal execution.
-Native implementations remain trusted without receiving a public raw resume.
-
-Preserve Direct and Exit fast paths and select state machines only for actual
-Machine computations. Preserve definition-site evidence, deep handler behavior,
-per-curried-arrow effect timing, normal-only return transformations, deterministic
-module-owned ABI families, and independent Core verification. Expanded source,
-staging, batch builds, and the REPL enter the same applicable proof boundaries.
-Machine lowering uses typed live locals and explicit loop transitions, never
-host-stack copying, runtime internals, or a goroutine-based continuation engine.
-
-No thread or channel is required per task or pipeline stage. Suspension can
-still require frames, allocation, and dispatch; unbounded suspended recursion
-requires storage. Library composition does not automatically fuse stages.
-Fusion is a measured later optimization, and source non-escape does not guarantee
-Go stack allocation.
-
-## Delivery milestones
-
-Each stopping point is usable without the remaining sequence. All inherit the
-API tour's semantics and the verification gates below.
-
-### 4. Cooperative structured async
-
-- **API and dependencies:** build on the implemented stream/cursor foundation to deliver `Async.run` with an implicit root
-  context, nested `Async.context`, action-only `spawn`, reusable `await`, and the
-  network interpretation/pipeline in the tour.
-- **Implementation and soundness:** sole advancement authority transfers from
-  running frame to wait registration to ready queue and back, then to completion
-  or cancellation/drain. Duplicate readiness and cancellation races cannot
-  create a second owner. Store immutable capture-free task results, keep handles
-  in their owning context, reject unsafe captures, and route child exits via
-  completion. Preserve context identity through effect evidence and captured
-  closures, and drain all owned tasks, including those spawned by children.
-- **Native and cancellation protocol:** use deterministic readiness simulation
-  first. Blocking-native bridges have bounded workers, explicit capacity and
-  admission backpressure. Cancellation drains outstanding native requests before
-  releasing resources they may access. Poll at safe points, including tight
-  generated loops. Register release atomically with acquisition-success ownership
-  transfer; acquisition owns partial-failure cleanup. Reject suspending acquire/
-  release until 5. Shield synchronous release from repeated cancellation.
-- **Generated code:** scheduler dispatch only for suspending work; no mandatory
-  goroutine per child/wait and no reliance on Go netpoll internals.
-- **Acceptance/stopping point:** two fetches overlap; repeated await executes once;
-  root and nested contexts enforce ownership and drain before exit; unobserved
-  failure cancels siblings and drains cleanup. Ctrl-C cancels active
-  REPL work and native requests, restores input ownership, and preserves session
-  state. Test queued-readiness and `readLine` interruption. This is a useful
-  cooperative task system with synchronous cleanup.
-
-### 5. Suspending cleanup
-
-**Proposed example — milestone 5:**
-
-```fango
-Scope.bracket (\_ -> connect address) closeAsync \connection ->
-    exchange connection
-```
-
-Here acquisition and release may both suspend; no separate async scope API is
-introduced. These domain functions retain their IO and failure effects.
-
-- **API and dependencies:** after 4, extend the same `Scope.bracket` API to
-  suspending acquire/release; a connection's close may now wait for completion.
-- **Implementation and soundness:** ownership registration remains inseparable
-  from acquisition success. Keep the cancelling owner alive while release waits,
-  shield release from repeated cancellation, and drain nested releases in reverse
-  acquisition order before reporting completion. Preserve definition-site evidence
-  and typed primary/inspectable secondary failures.
-- **Generated code:** cleanup frames participate in the same Machine and readiness
-  ownership protocol; never clear an owner while its release is waiting.
-- **Acceptance/stopping point:** cancel during acquire, body, and release, with
-  duplicate readiness and failing nested release; prove one release attempt per
-  acquired resource. Suspending cleanup is committed, but completion cannot be
-  promised if cleanup itself does not terminate.
-
-### 6. Bounded concurrent streams and events
-
-- **API and dependencies:** after 4–5, deliver ordered `mapConcurrent`,
-  `mapConcurrentUnordered`, `Async.race`, `Async.timeout`, and scoped subscriptions.
-  Race/timeout return only after cancelling and draining losers.
-- **Implementation and soundness:** ordinary Fango combinators over structured
-  tasks; bound in-flight work and retained results, including head-of-line stalls.
-  Native event bridges own bounded registrations/queues with explicit overflow.
-  Specify race winner/timeout completion and typed overflow reporting using the
-  failure model below; nonpositive capacities receive a documented rejection.
-- **Generated code:** reuse task and scope primitives; no compiler recognition of
-  combinator names, unbounded result queues, or thread per pipeline stage.
-- **Acceptance/stopping point:** test slow-first ordered mapping, readiness-order
-  delivery, downstream early stop, event overflow under each policy, and
-  event/close races. Subscriptions and losing tasks leave no live registrations.
-
-### 7. Parallel executor
-
-- **API and dependencies:** after 4–6, `Async.runOn (Executor.parallel 4)` selects
-  bounded parallel execution explicitly and establishes a root context;
-  `Async.run` remains cooperative.
-- **Implementation and soundness:** check transfer of values and captured effect
-  evidence across executor boundaries. Reject parent-local mutable state and
-  borrowed cursors. Permit child-owned local state/resources. Enforce single-owner
-  machine advancement while readiness, cancellation, and worker completion race.
-- **Generated code:** bounded worker scheduling, no worker/thread per task;
-  compatible module-owned Machine ABIs and the same cleanup protocol.
-- **Acceptance/stopping point:** safe CPU tasks run concurrently; unsafe captures
-  fail statically. Run equivalent context/resource/cancellation fixtures on both
-  executors, without promising an identical concurrent effect interleaving.
-
-### 8. Measured optimization
-
-- **API and dependencies:** after the stream foundation and milestones 4–7, retain the same tour API and semantics.
-- **Implementation and soundness:** measure frame reuse, synchronous-completion
-  paths, callback overhead, and selective stage fusion. Transformations must
-  preserve demand, effect order, cleanup, captures, and sole advancement authority.
-  Coordinate worker-call work with [the calls roadmap](roadmap-calls.md).
-- **Generated code:** reduce measured allocations/dispatch rather than claiming
-  automatic fusion; keep Direct/Exit paths and deterministic module ABIs.
-- **Acceptance/stopping point:** explain generated-code changes and allocation/
-  latency results on an idle host; keep an optimization only with demonstrated
-  benefit and all semantic gates passing. No optimization gates earlier API use.
-
-### 9. Explicit capture and borrowing annotations
-
-- **API and dependencies:** after the inferred contracts and access checks in
-  the preceding milestones, add source syntax for written capture, retention,
-  and borrowing contracts. Ordinary helpers continue to infer them.
-- **Implementation and soundness:** check annotations against inferred bodies;
-  preserve contracts across exported interfaces, callback adaptation, and
-  staging. An annotation cannot weaken a proven lifetime or access obligation.
-- **Acceptance/stopping point:** library authors can document and constrain a
-  helper's contract, with diagnostics identifying mismatches and conflicting
-  accesses. Settle the spelling and annotation placement during this milestone;
-  the schematic notation in this roadmap is not a syntax commitment.
-
-## Failure reporting prerequisite
-
-Concurrent failure selection remains open. Define primary selection and deterministic
-secondary ordering without assuming deterministic scheduler order. Distinguish
-ordinary failure, early stop, and cancellation. Preserve the implemented
-[cleanup precedence](reference/resources.md#cleanup-failures) and
-[typed snapshots](reference/library-effects.md#fail-and-failure); do not flatten
-failures into strings or defer cleanup while choosing concurrent policy.
-
-## Deferred topics
-
-These do not block the committed sequence unless a concrete API requires them:
-
-- **General operation-local polymorphism:** parameterized effects are different
-  from `fetch : Key a -> a` instantiated per operation. Choose a checked ABI for
-  request packages or module-owned specialization, including local dictionaries,
-  handler skolems, existential payload scope, answer types, and indirect calls.
-  Go's generic-field/method restrictions cannot be bypassed with unchecked `any`.
-- **Row labels keyed by their arguments:** a parameterized effect may appear in
-  a row only once, so `{Box Int, Box Bool}` is rejected. Keying label identity
-  on the effect together with its arguments would lift that. The hard part is
-  unification rather than the rule: `{Box a, Box Int}` has two distinct labels
-  only if `a` is not `Int`, so row unification acquires a disequality it cannot
-  generally decide, and the plausible restriction is to require repeated
-  labels' arguments to be rigid or ground where the row is formed. Nothing in
-  the byte IO layer needs it: varying types live on the bound record, and the
-  effects stay unparameterized.
-- **Complete builtin IO interception:** wait until actual native declarations and
-  class evidence fit that ABI; fixed-signature domain interpretations work now.
-- **Non-tail resumption and escaping computation owners:** neither is needed for
-  scoped streams/tasks. Require a concrete consumer and a checked ownership
-  contract before scheduling them. Raw escaping resume and multi-shot cloning
-  remain outside the chosen model.
-- **Shared mutable state:** requires an explicit sharing protocol; cooperative
-  `get; await; put` is not atomic. [Transactional memory](roadmap-stm.md) owns
-  the proposed protocol and the primitives it needs; it depends on this sequence
-  rather than blocking it. Detached tasks/subscriptions, general multicast,
-  replay, and public channels/select remain outside scope.
-- **General fallible sidecars:** extend the current bundled File boundary only
-  with resolved error identities or a declared marker and a chosen error
-  vocabulary. Trusted adapters required above do not imply arbitrary foreign
-  suspension or a universal FFI. Rich opaque native values remain in the
-  [main roadmap](roadmap.md#longer-term-candidates).
-
-Handlers do not roll back arbitrary external writes. Search can use explicit
-worklists and fresh computations without continuation cloning. Neither release
-attempts nor ownership proofs guarantee successful external close or termination.
+The second example requires a return path back into the handler after its
+resumed subject finishes. That is a separate language feature, not an implicit
+consequence of adding scoped coroutines. A concrete consumer and checked
+answer/lifetime contract must justify it. Multi-shot cloning and arbitrary
+escaping resume callbacks remain outside this direction.
 
 ## Handler instances: open questions
 
-The rule that addresses a *specific* handler activation through a value is
-implemented, including the row-indexed wrapper shape
-[`Reader` and `Writer`](reference/library-readers.md) are built from.
-[Effects](reference/effects.md#binding-a-closure-to-a-handler-activation) owns
-its behavior and diagnostics;
-[effect execution](design/effects.md#binding-a-closure-to-an-activation) owns
-the binding mechanism and the optimizer invariant it forces. These questions
-would revise shipped behavior rather than schedule unstarted work, and they
-settle what was once deferred here as "named effect instances":
+Binding a closure to a particular activation is implemented, including the
+row-indexed wrapper shape used by Reader and Writer. See the
+[reference rule](reference/effects.md#binding-a-closure-to-a-handler-activation)
+and [implementation invariant](design/effects.md#binding-a-closure-to-an-activation).
+The following would revise shipped behavior, rather than enable an already
+specified Async operation:
 
-- Whether the adaptation should stay implicit. A lambda that used to be a type
-  error inside a handler subject now compiles and binds to that handler, which
-  is the reading its author most plausibly intended, but an explicit marker on
-  the lambda would remove the doubt at the cost of syntax.
-- Whether an abort-only operation may be bound once a consumer exists, and if
-  so whether by forcing the activation scoped or by another guard. Today it is
-  refused, because an abort carries a runtime exit target for its exact
-  activation and a bound abort could outlive it.
-- Whether the rule should extend beyond the subject to closures written in the
-  handler's clauses, which run outside the activation and today could bind
-  only to an enclosing one.
-- Whether rows should ever say *which* activation. Doing so means naming
-  instances in types, with a fresh rigid name per handler; the index infects
-  every type that holds one, and discharge inside a library wrapper rather
-  than a syntactic `handle` needs rank-2, which Fango does not have. The
-  current rule deliberately leaves rows exact about effects and silent about
-  identity.
+- Whether binding should remain implicit when an expected arrow drops the
+  handled label, or whether an explicit marker should request the adaptation.
+- Whether abort-only operations may be bound once a consumer exists. A bound
+  abort retains a particular exit target; merely saving its operation closure
+  cannot make that target live after its owner finishes.
+- Whether binding should extend from the handler subject into clause bodies.
+  Clauses run outside their own activation today, so their enclosing evidence
+  is different from the subject's evidence.
+- Whether rows should name activation identities. Generative instance names
+  would flow through stored types, and hiding them in ordinary library wrappers
+  needs an explicit quantification/discharge design. The current language has
+  no general rank-2 facility.
 
-## Acceptance and verification
+The coroutine proposal uses existing activation identity and generalizes
+owned control boundaries. It does not silently resolve these questions by
+introducing a new source-level instance syntax. Its specific foreign-suspension
+proof is an [entry gate](roadmap-coroutines.md#c0-control-and-ownership-contracts).
 
-The API tour is the implementation acceptance-suite specification:
+## Explicit capture and borrowing annotations
 
-- Pure, IO, failing, and suspending callbacks compose through identical helpers,
-  including named callbacks, stored functions, ADTs, dictionaries, and modules.
-- Independent consumers and resource wrappers require no compiler registration.
-- Early termination closes files exactly once through nested scopes and failing
-  cleanup. Borrowed values cannot escape through closures, ADTs, outer effect
-  handlers, or child tasks; reentrant/concurrent cursor advancement is rejected.
-- Zip, bounded lookahead, and many-input/many-output stages work; repeated await
-  observes one execution. Concurrent mapping meets ordering and storage bounds.
-- Root contexts own direct spawns without an explicit context block. Nested
-  contexts drain their own tasks before exit, and outer tasks can be awaited
-  inside them without changing ownership. Context exit also waits for tasks
-  spawned by children after the context body's result is available.
-- Ordinary helper calls use caller-supplied context evidence; closures capturing
-  an outer context keep that owner when invoked inside an inner context. Reject
-  task handles and context-retaining closures escaping their owner directly,
-  through ADTs, or through outer handlers. Spawning without an async runner
-  reports an unhandled effect.
-- Context failure, timeout, duplicate readiness, and cancellation races preserve
-  sole advancement authority and drain tasks/resources. Count live registrations,
-  frames, handles, and native requests; goroutine counts alone are insufficient.
-- Parallel execution rejects unsafe captures. Generated synchronous pipelines
-  contain no required scheduler, goroutine, or channel machinery.
+Written contracts should follow the working inferred contracts. They can
+describe capture, retention, exclusive access, and transfer obligations for
+library authors, but must not weaken what the implementation proves.
 
-For roadmap changes, check internal links, API spelling,
-milestone dependencies, proposed/implemented labels, and single ownership of
-syntax proposals. Proposed snippets are acceptance specifications, not fixtures
-claimed to compile with today's compiler.
+A future stage must choose the spelling and placement, check annotations
+against inferred bodies, export them through module interfaces, and preserve
+them across adaptation and staging. A wrong annotation must identify the
+conflicting owner or access in its diagnostic. Ordinary helpers continue to
+infer their contracts; annotations are not a prerequisite for every callback.
 
-For implementation, retain the [repository gates](../AGENTS.md) and
-[verification contracts](design/verification.md), including independent semantic
-and Machine lint with malformed-IR tests. Exercise early curried effects, equation
-groups, nested handlers, staging, step limits, and rollback. Syntax changes require
-exact TextMate updates and representative tokenization; library API names alone
-do not become keywords.
+No notation in these roadmaps is a commitment to capture-annotation syntax.
+If syntax is introduced, update parser, formatter, reference, TextMate grammar,
+and representative tokenization fixtures in the same implementation change.
 
-For performance work on an idle host, distinguish setup, hot operations, callback/
-evidence adapters, allocation, live frame storage, cancellation/drain latency,
-native capacity, compile latency, and output size. Explain results with allocation
-profiles and escape reports; source lifetime proofs do not promise stack allocation.
+## Deferred topics
+
+These are not automatically prerequisites for the first coroutine milestone:
+
+- **Operation-local polymorphism.** A declaration such as `fetch : Key a -> a`
+  instantiated independently at each operation is different from an effect
+  parameter fixed for its handler. General support needs checked request
+  packaging, clause skolems, dictionary transport, answer types, and indirect
+  calls. Go generic-field/method restrictions cannot be bypassed by unchecked
+  casts. Typed coroutine replies use a callback whose types are fixed when
+  the owner is opened. The task API must separately resolve its
+  [polymorphic packaging gate](roadmap-async.md#api-representation-gate).
+- **Rows keyed by effect arguments.** `{Box Int, Box Bool}` is rejected today.
+  Supporting it introduces questions such as whether `{Box a, Box Int}` names
+  one or two labels before `a` is known. A rigid/ground restriction is a possible
+  answer, not an implemented rule. Nullary control markers and typed callbacks
+  avoid requiring this extension for heterogeneous coroutines.
+- **Complete builtin IO interception.** It still depends on actual native
+  declarations and evidence fitting a checked operation ABI. Fixed-signature
+  domain effects and suspending interpretations remain useful independently.
+- **Escaping coroutine owners and raw resumptions.** The chosen owner stays
+  scoped. Dynamic allocation means allocation into a live owner, not detachment
+  from every owner. Raw resume escape and continuation cloning are not included.
+- **General fallible sidecars.** Extend the bundled File/Net shape only with
+  resolved error identities or a declared marker and a documented error
+  vocabulary. The necessary callback/value contracts are described in the
+  [general native stage](roadmap-coroutines.md#c6-native-retention-and-transfer);
+  they do not imply a universal foreign-function interface.
+- **Shared mutable state.** [STM](roadmap-stm.md) owns that proposed protocol.
+  Cooperative `get; wait; put` is not atomic, and the coroutine owner itself
+  is not a shared cell. Scheduling policy and its exclusions belong to
+  [Async](roadmap-async.md#boundaries-and-non-goals).
+
+Handlers do not roll back arbitrary external writes. Search may replay fresh
+actions without cloning continuations. Cleanup guarantees an attempt, not
+successful external close or termination of user release code.
+
+## Verification and documentation lifecycle
+
+The detailed [coroutine acceptance matrix](roadmap-coroutines.md#acceptance-and-verification)
+and [Async acceptance matrix](roadmap-async.md#acceptance-and-verification)
+own their fixtures. Preserve the [repository gates](../AGENTS.md) and
+[verification contracts](design/verification.md), including independent lint,
+malformed-IR rejection, differential and functional tests, deterministic
+emission, and `go vet`.
+
+For a roadmap edit, check local links, anchors, dependencies, proposed labels,
+API spelling, and ownership of explanations. Proposed examples are acceptance
+specifications, not fixtures claimed to compile today. Do not run timing
+benchmarks for documentation work. Implementation timing work belongs on an
+otherwise idle machine, with setup, execution, allocations, live storage,
+compile latency, and output size reported separately.
