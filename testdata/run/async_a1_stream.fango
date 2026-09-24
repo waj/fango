@@ -1,0 +1,27 @@
+import Async
+import Async.Cooperative
+import Iterator
+import Runtime.Scope
+import Stream
+
+streamer() =
+    source = Stream.generate (\_ -> Runtime.Scope.finally (\_ ->
+        print "pull waiting"
+        Async.waitSignal 12
+        Stream.yield 41) (\_ -> print "pull released"))
+    value = Stream.withCursor source (\cursor -> Iterator.next cursor)
+    print value
+    value
+
+notifier() =
+    print "notify"
+    Async.signal 12
+    Async.signal 12
+    1
+
+main() = print (Async.Cooperative.run (\_ ->
+    pullTask = Async.spawn streamer
+    signalTask = Async.spawn notifier
+    print (Async.await pullTask)
+    print (Async.await signalTask)
+    1))

@@ -1,0 +1,71 @@
+{-# no-prelude #-}
+module Async exposing (Async, Error(..), Request(..), Task, await, makeTask, poll, signal, spawn, taskKey, waitSignal, worker, yield)
+
+-- Executor-neutral task operations and the checked work protocol. A runner
+-- supplies the scope facet and handles each worker's requests.
+
+import Basics exposing (..)
+import IO exposing (IO)
+import Maybe exposing (Maybe(..))
+import Runtime.Cell
+import Runtime.Coroutine
+import Runtime.Work
+
+type Error = SelfAwait | Stalled deriving (Eq, Show)
+
+type Request = Spawn (Runtime.Work.Work Request Int ()) | Yield | WaitTask Int | WaitSignal Int | Signal Int
+
+effect Async
+    owner : () -> Runtime.Coroutine.Facet
+    request : Request -> Int
+
+{-# resource #-}
+type Task a = Task Int (Runtime.Cell.Reader a)
+
+makeTask : Int -> Runtime.Cell.Reader a -> Task a
+makeTask key reader = Task key reader
+
+taskKey : Task a -> Int
+taskKey (Task key _) = key
+
+poll : Task a ->{IO} Maybe a
+poll (Task _ reader) = Runtime.Cell.read reader
+
+spawn : (() ->{Async | e} a) ->{Async, IO | e} Task a
+spawn action =
+    facet = owner()
+    publisher = Runtime.Cell.createIn facet
+    work = Runtime.Work.register facet (worker action facet publisher)
+    key = request (Spawn work)
+    Task key (Runtime.Cell.reader publisher)
+
+await : Task a ->{Async, IO} a
+await task =
+    case poll task of
+        Just value -> value
+        Nothing ->
+            reply = request (WaitTask (taskKey task))
+            await task
+
+yield : () ->{Async} ()
+yield() =
+    reply = request Yield
+    ()
+
+waitSignal key =
+    reply = request (WaitSignal key)
+    ()
+
+signal key =
+    reply = request (Signal key)
+    ()
+
+-- The runner passes its own facet and producer pause to this adapter. The
+-- child's residual effects remain checked by Work.register.
+worker : (() ->{Async | e} a) -> Runtime.Coroutine.Facet -> Runtime.Cell.Publisher a -> (Request ->{Runtime.Coroutine.Suspension} Int) -> Int ->{Runtime.Coroutine.Suspension, IO | e} ()
+worker action facet publisher pause initial =
+    value = handle action() of
+        owner () -> resume facet
+        request value -> resume (pause value)
+    published = Runtime.Cell.publish publisher value
+    ()

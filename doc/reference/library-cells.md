@@ -6,12 +6,16 @@ registered in that scope.
 
 ```fango
 create : Runtime.Coroutine.Scope e ->{IO} Publisher a
+createIn : Runtime.Coroutine.Facet ->{IO} Publisher a
 reader : Publisher a -> Reader a
 publish : Publisher a -> a ->{IO} Bool
 read : Reader a ->{IO} Maybe a
 ```
 
-`create` allocates an empty cell and its sole publication capability. `reader`
+`create` allocates an empty cell and its sole publication capability. `createIn`
+uses the same checked scope identity through a hidden-row registration facet;
+it supports dynamic clients such as the [cooperative task
+driver](library-async-cooperative.md). `reader`
 creates a read-only view; multiple views share the same readiness and value.
 `publish` returns `True` for the first publication and `False` thereafter,
 preserving the first value. Aliases of a publisher refer to that same write-once

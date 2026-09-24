@@ -184,8 +184,9 @@ terminal owner and frame counts are zero. The gate allows a fixed ceiling of
 Terminal owners must release factories and exclusive access; frames, cleanup,
 handlers, state and traversal links must be empty. These are structural counts,
 not timing benchmarks. This demonstrates shared Stream/scheduling control;
-dynamic spawn, reusable task results and concurrent execution remain outside
-this scoped example.
+Dynamic spawn and reusable successful task results use the separate
+[cooperative task driver](async-cooperative.md). Concurrent execution remains
+outside this scoped example.
 
 ## Abandonment and completion
 

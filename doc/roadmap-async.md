@@ -7,8 +7,10 @@ readiness, and concurrent combinators. It depends on the shared
 contracts apply without compiler recognition of Async names. The
 [effects roadmap](roadmap-effects.md) owns general language extensions.
 
-The APIs and examples below are acceptance specifications, not implemented
-features. Ordinary calls, trailing Unit lambdas, callback subsumption, scopes,
+The structured APIs and examples below remain acceptance specifications. The
+[A1 Async surface](reference/library-async-cooperative.md) implements neutral task
+operations with a separate cooperative runner and an internal scripted driver.
+Ordinary calls, trailing Unit lambdas, callback subsumption, scopes,
 and effect instances are implemented foundations; their contracts remain in
 the [reference](reference.md). Promote completed behavior there and architecture
 into design as stages land; remove completed work or mark its stage DONE under
@@ -675,7 +677,7 @@ language work is specified once in the coroutine roadmap.
 | Stage | Dependencies | Usable result |
 | --- | --- | --- |
 | A0: Library representation contract | C0/C4 contract drafts; no C1–C4 implementation prerequisite | DONE: selected representation and proof models; review before C1 |
-| A1: Deterministic cooperative tasks | A0, C4, C6a, C6c (including shared service evidence); C1 implements C0's general extensions | Dynamic spawn/yield/await with fake waits; no C6b prerequisite |
+| A1: Deterministic cooperative tasks | A0, C4, C6a, C6c (including shared service evidence); C1 implements C0's general extensions | DONE: executor-neutral Async operations with cooperative dynamic spawn/yield/await and scripted waits; no C6b prerequisite |
 | A2: Structured contexts and failures | A1 | Root/nested lifetimes, cancellation, reusable results, synchronous cleanup |
 | A3: Native readiness and IO | A2, C6b; C6a if adapter values require it | Overlapping IO with bounded native work |
 | A4: Suspending cleanup integration | A3, C5 | Cancellation/drain through asynchronous acquire/release |
@@ -752,15 +754,17 @@ model as proof that the current source language accepts those APIs.
 
 ### A1: Deterministic cooperative tasks
 
-Implement a Fango driver, FIFO ready queue, task records, spawn, yield, and
-wait/await with scripted readiness. Dynamic allocation uses C4; do not keep a
-recursive lexical scope open for every historical spawn. The initial runner is
-an internal foundation for A2 rather than a public partial Async.run contract.
-
-**Acceptance:** two tasks alternate; a parked task is absent from the ready
-queue; early/duplicate notification cannot lose or duplicate work; repeated
-await observes one coroutine. A task suspends within a Stream pull. Test self
-wait and a stalled internal context. Completion releases execution storage.
+**DONE.** The [A1 Async API](reference/library-async-cooperative.md)
+and [driver design](design/async-cooperative.md) own the implemented contract.
+Its differential fixtures cover alternating tasks, parked work, early and
+duplicate notification, repeated await, Stream pull suspension, self wait, and
+stalled progress. Task bodies call `Async` functions; `Async.Cooperative.run`
+selects the executor only at the root. `Async` has no dependency on the
+cooperative driver. A closed-row check rejects an unawaited child's
+unhandled effect. The dynamic storage gate checks A1 terminal execution in the
+generated backend and the shared C4 cleanup primitive in the interpreter. A2
+still owns structured contexts, cancellation, typed child failures, and the
+executor-selecting `runOn` interface.
 
 ### A2: Structured contexts and failures
 

@@ -1,0 +1,28 @@
+import Async
+import Async.Cooperative
+
+first : () ->{Async.Async, IO} Int
+first() =
+    print "A1"
+    Async.yield()
+    print "A2"
+    Async.waitSignal 7
+    print "A3"
+    42
+
+second() =
+    print "B1"
+    Async.yield()
+    print "B2"
+    Async.signal 7
+    99
+
+main() =
+    print (Async.Cooperative.run (\_ ->
+        a = Async.spawn first
+        b = Async.spawn second
+        print "spawned"
+        print (Async.await a)
+        print (Async.await a)
+        print (Async.await b)
+        1))

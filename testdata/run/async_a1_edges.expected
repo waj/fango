@@ -1,0 +1,11 @@
+early once
+Ok 1
+park
+script once
+Ok 2
+Err SelfAwait
+Err Stalled
+Err Stalled
+Err Stalled
+task one complete
+Err Stalled

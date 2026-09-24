@@ -130,8 +130,10 @@ still handle cleanup failures.
 
 ## Limits
 
-Acquisition and release must remain synchronous. There is no public scheduler,
-public cancellation operation, or concurrent execution API.
+Acquisition and release must remain synchronous. There is no structured public
+Async runner, public cancellation operation, or concurrent execution API. The
+[internal cooperative task foundation](library-async-cooperative.md) exercises
+dynamic scheduling with scripted readiness.
 The ordinary [cooperative scheduler fixture](../../testdata/run/coroutine_scheduler.fango)
 demonstrates lexical coroutines, a FIFO ready queue, voluntary yield, fake waits,
 typed completion, and abandonment while a task is suspended inside a Stream pull.

@@ -67,21 +67,29 @@ func TestCoroutineDynamicStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := c3Read(t, filepath.Join(root, "testdata/run/coroutine_dynamic_lifecycle.fango"))
-	for _, count := range []int{2, 200} {
-		t.Run(fmt.Sprint(count), func(t *testing.T) {
+	cases := []struct {
+		name    string
+		program string
+	}{
+		{"2", strings.ReplaceAll(source, "repeat scope 100", "repeat scope 2")},
+		{"200", strings.ReplaceAll(source, "repeat scope 100", "repeat scope 200")},
+		{"async_a1", c3Read(t, filepath.Join(root, "testdata/run/async_a1_cooperative.fango"))},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			fixture := filepath.Join(dir, "Dynamic.fango")
-			program := strings.ReplaceAll(source, "repeat scope 100", fmt.Sprintf("repeat scope %d", count))
-			c3Write(t, fixture, program)
-			t.Run("interpreter", func(t *testing.T) {
-				machinePath := filepath.Join(root, "internal/eval/iterator.go")
-				coroutinePath := filepath.Join(root, "internal/eval/coroutine.go")
-				machine, coroutine := c4Instrument(t, c3Read(t, machinePath), c3Read(t, coroutinePath), true)
-				c3Write(t, filepath.Join(dir, "machine.go"), machine)
-				c3Write(t, filepath.Join(dir, "coroutine.go"), coroutine)
-				// The overlay test uses the same checked, optimization-disabled
-				// interpreter path as the ordinary differential suite.
-				child := `package main
+			c3Write(t, fixture, tc.program)
+			if tc.name != "async_a1" {
+				t.Run("interpreter", func(t *testing.T) {
+					machinePath := filepath.Join(root, "internal/eval/iterator.go")
+					coroutinePath := filepath.Join(root, "internal/eval/coroutine.go")
+					machine, coroutine := c4Instrument(t, c3Read(t, machinePath), c3Read(t, coroutinePath), true)
+					c3Write(t, filepath.Join(dir, "machine.go"), machine)
+					c3Write(t, filepath.Join(dir, "coroutine.go"), coroutine)
+					// The overlay test uses the same checked, optimization-disabled
+					// interpreter path as the ordinary differential suite.
+					child := `package main
 import (
     "bytes"
     "context"
@@ -105,24 +113,25 @@ func TestC4StorageOverlay(t *testing.T) {
     t.Logf("peak registry entries, terminal registry entries, allocations: %v", eval.C4Check())
 }
 `
-				c3Write(t, filepath.Join(dir, "overlay_test.go"), child)
-				overlay, err := json.Marshal(map[string]any{"Replace": map[string]string{
-					machinePath:   filepath.Join(dir, "machine.go"),
-					coroutinePath: filepath.Join(dir, "coroutine.go"),
-					filepath.Join(root, "cmd/fango/c4_storage_overlay_test.go"): filepath.Join(dir, "overlay_test.go"),
-				}})
-				if err != nil {
-					t.Fatal(err)
-				}
-				c3Write(t, filepath.Join(dir, "overlay.json"), string(overlay))
-				cmd := exec.Command("go", "test", "-overlay", filepath.Join(dir, "overlay.json"), "-run", "^TestC4StorageOverlay$", "-v", "./cmd/fango")
-				cmd.Dir = root
-				out, err := cmd.CombinedOutput()
-				if err != nil {
-					t.Fatalf("interpreter probe: %v\n%s", err, out)
-				}
-				t.Log(string(out))
-			})
+					c3Write(t, filepath.Join(dir, "overlay_test.go"), child)
+					overlay, err := json.Marshal(map[string]any{"Replace": map[string]string{
+						machinePath:   filepath.Join(dir, "machine.go"),
+						coroutinePath: filepath.Join(dir, "coroutine.go"),
+						filepath.Join(root, "cmd/fango/c4_storage_overlay_test.go"): filepath.Join(dir, "overlay_test.go"),
+					}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					c3Write(t, filepath.Join(dir, "overlay.json"), string(overlay))
+					cmd := exec.Command("go", "test", "-overlay", filepath.Join(dir, "overlay.json"), "-run", "^TestC4StorageOverlay$", "-v", "./cmd/fango")
+					cmd.Dir = root
+					out, err := cmd.CombinedOutput()
+					if err != nil {
+						t.Fatalf("interpreter probe: %v\n%s", err, out)
+					}
+					t.Log(string(out))
+				})
+			}
 			t.Run("compiled", func(t *testing.T) {
 				project := filepath.Join(dir, "compiled")
 				files := emittedProject(t, fixture)

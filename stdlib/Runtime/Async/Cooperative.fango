@@ -1,0 +1,136 @@
+{-# no-prelude #-}
+module Runtime.Async.Cooperative exposing (await, run, signal, spawn, waitSignal, waitTask, yield)
+
+-- Cooperative interpreter of the executor-neutral Async request protocol.
+-- Low-level probes install their own service pause authority; ordinary task
+-- bodies use Async and enter here through Async.Cooperative.run.
+
+import Async exposing (Error(..), Request(..), Task)
+import Basics exposing (..)
+import IO exposing (IO)
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import Runtime.Cell
+import Runtime.Coroutine
+import Runtime.Service
+import Runtime.Work
+
+type Key = TaskKey Int | SignalKey Int deriving (Eq)
+type Job = Job Int Int (Runtime.Work.Work Request Int ())
+type Waiting = Waiting Key Job
+type Queue = Queue (List Job) (List Job)
+type State = State Queue (List Waiting) (List Key) Int (List Int)
+type Decision = Continue State | Done (Result Error ())
+
+enqueue : Job -> Queue -> Queue
+enqueue value (Queue front back) = Queue front [value | back]
+
+prepend : Job -> Queue -> Queue
+prepend value (Queue front back) = Queue [value | front] back
+
+dequeue : Queue -> Maybe (Job, Queue)
+dequeue (Queue [] []) = Nothing
+dequeue (Queue [] back) = dequeue (Queue (List.reverse back) [])
+dequeue (Queue [value | rest] back) = Just (value, Queue rest back)
+
+contains : Key -> List Key -> Bool
+contains key values =
+    case values of
+        [] -> False
+        [value | rest] -> if key == value then True else contains key rest
+
+-- Notification state is sticky, so early and duplicate delivery cannot create
+-- a second ready entry or lose a later wait registration.
+wake : Key -> List Waiting -> Queue -> (List Waiting, Queue)
+wake key waits ready =
+    case waits of
+        [] -> ([], ready)
+        [Waiting wanted job | rest] ->
+            (remaining, next) = wake key rest ready
+            if wanted == key then (remaining, enqueue job next)
+            else ([Waiting wanted job | remaining], next)
+
+spawn : Runtime.Coroutine.Facet -> Runtime.Work.Work Request Int () -> Runtime.Cell.Reader a ->{Runtime.Service.Invocation Request Int} Task a
+spawn owner work reader =
+    key = Runtime.Service.invoke (Spawn work)
+    Async.makeTask key reader
+
+await : Task a ->{Runtime.Service.Invocation Request Int, IO} a
+await task =
+    case Async.poll task of
+        Just value -> value
+        Nothing ->
+            reply = waitTask (Async.taskKey task)
+            await task
+
+yield : () ->{Runtime.Service.Invocation Request Int} ()
+yield() =
+    reply = Runtime.Service.invoke Yield
+    ()
+
+waitSignal : Int ->{Runtime.Service.Invocation Request Int} ()
+waitSignal key =
+    reply = Runtime.Service.invoke (WaitSignal key)
+    ()
+
+signal : Int ->{Runtime.Service.Invocation Request Int} ()
+signal key =
+    reply = Runtime.Service.invoke (Signal key)
+    ()
+
+-- Internal probe for the deterministic self-wait diagnostic. Root key is 0.
+waitTask : Int ->{Runtime.Service.Invocation Request Int} ()
+waitTask key =
+    reply = Runtime.Service.invoke (WaitTask key)
+    ()
+
+step owner (State ready waiting notified nextKey script) =
+    case dequeue ready of
+        Just (Job key reply work, remainingQueue) ->
+            case Runtime.Work.advance owner work reply of
+                Runtime.Coroutine.Suspended request ->
+                    case request of
+                        Spawn child ->
+                            Continue (State (prepend (Job key nextKey work) (enqueue (Job nextKey 0 child) remainingQueue)) waiting notified (nextKey + 1) script)
+                        Yield -> Continue (State (enqueue (Job key 0 work) remainingQueue) waiting notified nextKey script)
+                        WaitTask target ->
+                            if target == key then Done (Err SelfAwait)
+                            else if contains (TaskKey target) notified then Done (Err Stalled)
+                            else Continue (State remainingQueue [Waiting (TaskKey target) (Job key 0 work) | waiting] notified nextKey script)
+                        WaitSignal target ->
+                            if contains (SignalKey target) notified then Continue (State (enqueue (Job key 0 work) remainingQueue) waiting notified nextKey script)
+                            else Continue (State remainingQueue [Waiting (SignalKey target) (Job key 0 work) | waiting] notified nextKey script)
+                        Signal target ->
+                            (remaining, awoken) = wake (SignalKey target) waiting remainingQueue
+                            Continue (State (enqueue (Job key 0 work) awoken) remaining [SignalKey target | notified] nextKey script)
+                Runtime.Coroutine.Finished () ->
+                    (remaining, awoken) = wake (TaskKey key) waiting remainingQueue
+                    Continue (State awoken remaining [TaskKey key | notified] nextKey script)
+                Runtime.Coroutine.Closed -> Done (Err Stalled)
+        Nothing ->
+            case script of
+                [key | remainingScript] ->
+                    (remaining, awoken) = wake (SignalKey key) waiting ready
+                    Continue (State awoken remaining [SignalKey key | notified] nextKey remainingScript)
+                [] -> case waiting of
+                    [] -> Done (Ok ())
+                    _ -> Done (Err Stalled)
+
+dispatch owner state =
+    case step owner state of
+        Continue next -> dispatch owner next
+        Done result -> result
+
+run : List Int -> (Runtime.Coroutine.Facet -> Runtime.Cell.Publisher a -> (Request ->{Runtime.Coroutine.Suspension} Int) -> Int ->{Runtime.Coroutine.Suspension, IO | e} ()) ->{IO | e} Result Error a
+run script make = Runtime.Coroutine.scope (\scope ->
+    owner = Runtime.Coroutine.facet scope
+    publisher = Runtime.Cell.create scope
+    worker = make owner publisher
+    work = Runtime.Work.register owner worker
+    result = dispatch (Runtime.Work.owner scope) (State (Queue [Job 0 0 work] []) [] [] 1 script)
+    case result of
+        Err error -> Err error
+        Ok () -> case Runtime.Cell.read (Runtime.Cell.reader publisher) of
+            Just value -> Ok value
+            Nothing -> Err Stalled)

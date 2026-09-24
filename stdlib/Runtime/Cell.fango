@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Runtime.Cell exposing (Publisher, Reader, create, publish, read, reader)
+module Runtime.Cell exposing (Publisher, Reader, create, createIn, publish, read, reader)
 
 -- A scope-owned cell that accepts one value and then allows repeated reads.
 -- Create it in a Coroutine scope, give its Reader to children in that scope,
@@ -55,7 +55,12 @@ cellRead = native
 -- Allocate an empty cell owned by `scope` and return its Publisher. The cell
 -- and any Readers derived from it cannot outlive that scope.
 create : Runtime.Coroutine.Scope e ->{IO} Publisher a
-create scope = Publisher (Runtime.Coroutine.facet scope) (cellNew())
+create scope = createIn (Runtime.Coroutine.facet scope)
+
+-- Allocate through a checked registration facet when the scope's effect row
+-- is hidden by a shared scheduling service.
+createIn : Runtime.Coroutine.Facet ->{IO} Publisher a
+createIn owner = Publisher owner (cellNew())
 
 -- Make a read-only view of this Publisher. Multiple Readers observe the same
 -- first published value; none can publish through this view.
