@@ -1,5 +1,5 @@
-import Coroutine
+import Runtime.Coroutine
 import File
-bad() = Coroutine.with (\pause () ->
-    File.withFile "local.txt" (\file -> pause file)) (\work -> Coroutine.advance work ())
+bad() = Runtime.Coroutine.with (\pause () ->
+    File.withFile "local.txt" (\file -> pause file)) (\work -> Runtime.Coroutine.advance work ())
 main() = print "unreachable"

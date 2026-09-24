@@ -245,7 +245,7 @@ below; matching printed rows alone never authorizes a capture or registration.
 The selected representation uses ordinary polymorphic functions around a
 **nullary** scheduling effect, with the execution scope's permitted effects
 tracked in a hidden contract. The selected names are `Task a e`,
-`Coroutine.scope`/`create`, and `Async.Error`. The following
+`Runtime.Coroutine.scope`/`create`, and `Async.Error`. The following
 tempting operation declarations remain unsupported:
 
 ```text
@@ -508,7 +508,7 @@ additional prerequisites; none of these native contracts substitutes for them.
 
 C6a must support the initial completion cell's entire typed payload, including
 the residual-row completion package, records/recursive ADTs and generated replay
-adapters. A nominal phantom around `Native.Any` alone is insufficient. Storage
+adapters. A nominal phantom around `Runtime.Native.Any` alone is insufficient. Storage
 retains captures and never executes a callable. C6c grants only the specific
 cell protocol and scoped shared-service operations; it must not make arbitrary
 State, cursor or resource wrappers shareable. C6b is **not** an A1 prerequisite
@@ -802,7 +802,7 @@ host operation promptly rather than claiming universal interruption.
 
 Use C5 for asynchronous acquisition/release. Keep cancelling owners scheduled
 until drain finishes; shield releases against repeated cancellation. Keep the
-same Scope.bracket surface and domain IO/failure effects.
+same Runtime.Scope.bracket surface and domain IO/failure effects.
 
 **Acceptance:** cancel during acquire, body, and release; deliver duplicate
 readiness; fail nested releases; verify one release attempt and reverse order.

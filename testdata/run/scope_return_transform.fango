@@ -1,4 +1,4 @@
-import Scope
+import Runtime.Scope
 import Result exposing (Result(..))
 
 -- A failure raised by a handler's return transformation is still an exit from
@@ -32,7 +32,7 @@ failingReturn token =
 
 main() =
     outcome = attempt (\_ ->
-        Scope.bracket (\_ -> open "a") close failingReturn)
+        Runtime.Scope.bracket (\_ -> open "a") close failingReturn)
     case outcome of
         Ok value -> print "ok"
         Err error -> print ("err " ++ error)

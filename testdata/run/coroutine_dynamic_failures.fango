@@ -1,10 +1,10 @@
-import Coroutine
+import Runtime.Coroutine
 import Fail
 import Failure
-import Scope
+import Runtime.Scope
 import Result exposing (Result(..))
 
-child name pause () = Scope.finally (\_ -> pause ()) (\_ -> Fail.fail name)
+child name pause () = Runtime.Scope.finally (\_ -> pause ()) (\_ -> Fail.fail name)
 
 showFailure failure =
     message : Maybe String
@@ -19,11 +19,11 @@ showReport result = case result of
         print report.primary
         List.each showFailure report.suppressed
 
-run failBody = Fail.attemptReport (\_ -> Coroutine.scope (\scope ->
-    a = Coroutine.create scope (child "a")
-    b = Coroutine.create scope (child "b")
-    ignoredA = Coroutine.advance a ()
-    ignoredB = Coroutine.advance b ()
+run failBody = Fail.attemptReport (\_ -> Runtime.Coroutine.scope (\scope ->
+    a = Runtime.Coroutine.create scope (child "a")
+    b = Runtime.Coroutine.create scope (child "b")
+    ignoredA = Runtime.Coroutine.advance a ()
+    ignoredB = Runtime.Coroutine.advance b ()
     if failBody then Fail.fail "body" else ()))
 
 main() =

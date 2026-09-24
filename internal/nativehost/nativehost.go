@@ -176,7 +176,9 @@ func BundledSources() ([]Source, error) {
 		if err != nil {
 			return nil, err
 		}
-		sources = append(sources, Source{Module: strings.TrimSuffix(name, ".native.go"), Content: data})
+		module := strings.TrimSuffix(name, ".native.go")
+		module = strings.ReplaceAll(module, "/", ".")
+		sources = append(sources, Source{Module: module, Content: data})
 	}
 	return sources, nil
 }
@@ -200,7 +202,7 @@ func (e *Executor) Call(ctx context.Context, host Host, name string, args []any)
 }
 
 // Execute installs checked Core in the worker and evaluates there. Keeping the
-// evaluator and sidecars in one process is what lets Native.Any carry an
+// evaluator and sidecars in one process is what lets Runtime.Native.Any carry an
 // arbitrary Go value without serializing it or assigning it a process-global
 // handle.
 func (e *Executor) Execute(ctx context.Context, host Host, payload *execcodec.Payload) (any, error) {

@@ -53,8 +53,8 @@ intrinsic-specific checks concern ownership and lowering.
 | --- | --- |
 | ResumeTail | Exactly one owning tail resume on each normal path |
 | ControlExit | Operation descriptor, payload, and lexical target agree |
-| Bracket | Only in Scope.bracket; unique scope, Unit release, joined child control |
-| CoroutineScope | Only in Coroutine.with; owner, pause factory, and driver protocols agree |
+| Bracket | Only in Runtime.Scope.bracket; unique scope, Unit release, joined child control |
+| CoroutineScope | Only in Runtime.Coroutine.with; owner, pause factory, and driver protocols agree |
 | CoroutineAdvance | Checked handle, reply/Step protocol, residual row, exclusive access; close returns Unit |
 | Suspend | Unowned host-driven Machine fixture boundary; not emitted from source |
 | FailureInspect | Checked descriptor and Maybe packaging; no target/resumption access |
@@ -139,7 +139,7 @@ and return transformations are ANF-hoisted. Exit emission must inspect an
 Outcome before evaluating the next source expression. Lint checks conventions
 on callees/evidence and rejects control-producing nodes in unhandled slots.
 
-Ordinary lint rejects Machine Core unless the canonical Coroutine.with owner
+Ordinary lint rejects Machine Core unless the canonical Runtime.Coroutine.with owner
 enables the private boundary, and always rejects raw host Suspend nodes.
 Pre-machine lint admits checked Machine/Suspend nodes
 while preserving other semantic invariants; staging additionally admits checked

@@ -31,7 +31,7 @@ Partial application and functions as values are supported. Lambdas use
 `\x y -> expression`. A final lambda argument may omit parentheses:
 
 ```fango
-Scope.bracket acquire release \resource ->
+Runtime.Scope.bracket acquire release \resource ->
     use resource
 ```
 

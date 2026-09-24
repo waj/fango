@@ -17,10 +17,9 @@ import (
 // bundled module that the embedded provider, and the local one beside it
 // (modules.FSProvider), both refuse.
 //
-// Directories are flat. The embed patterns listed `stdlib/*.fango` and
-// `runtime/<pkg>/*.go` without recursion, so a dotted module never named a
-// nested file. Reading from disk would quietly start resolving them, which is
-// a language change rather than a distribution one.
+// Library trees are indexed recursively, with slash-separated paths kept
+// case-exact. This supports nested standard-library modules without allowing
+// a case-insensitive filesystem to change module identity.
 //
 // Bytes are read once and retained, so every reader in a process sees the same
 // library even if it is edited underneath them mid-compile. Entries are keyed
@@ -40,8 +39,8 @@ var (
 	trees   = map[string]*tree{}
 )
 
-// lookup returns the index for one flat directory named relative to the root,
-// for example "stdlib" or "runtime/fangort".
+// lookup returns an exact-name index for one directory tree relative to the
+// root, for example "stdlib" or "runtime/fangort".
 func lookup(rel string) (*tree, error) {
 	root, err := Root()
 	if err != nil {
@@ -56,7 +55,10 @@ func lookup(rel string) (*tree, error) {
 	}
 	treesMu.Unlock()
 
-	dir := filepath.Join(root, filepath.FromSlash(rel))
+	dir, err := exactDirectory(root, rel)
+	if err != nil {
+		return nil, err
+	}
 	t.once.Do(func() {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -64,16 +66,53 @@ func lookup(rel string) (*tree, error) {
 			return
 		}
 		t.names = make(map[string]bool, len(entries))
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				t.names[entry.Name()] = true
+		t.err = filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
 			}
-		}
+			if entry.IsDir() || path == dir {
+				return nil
+			}
+			rel, err := filepath.Rel(dir, path)
+			if err != nil {
+				return err
+			}
+			t.names[filepath.ToSlash(rel)] = true
+			return nil
+		})
 	})
 	if t.err != nil {
 		return nil, t.err
 	}
 	return t, nil
+}
+
+func exactDirectory(root, rel string) (string, error) {
+	dir := root
+	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+		if part == "" || part == "." || part == ".." {
+			return "", &fs.PathError{Op: "open", Path: rel, Err: fs.ErrNotExist}
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return "", err
+		}
+		found := false
+		for _, entry := range entries {
+			if entry.Name() == part && entry.IsDir() {
+				found = true
+				break
+			}
+			if strings.EqualFold(entry.Name(), part) {
+				return "", &fs.PathError{Op: "open", Path: rel, Err: fs.ErrNotExist}
+			}
+		}
+		if !found {
+			return "", &fs.PathError{Op: "open", Path: rel, Err: fs.ErrNotExist}
+		}
+		dir = filepath.Join(dir, part)
+	}
+	return dir, nil
 }
 
 func (t *tree) read(dir, name string) ([]byte, error) {
@@ -106,17 +145,20 @@ func (t *tree) list(keep func(string) bool) []string {
 	return names
 }
 
-// split separates a slash-separated library path into its directory and file,
-// rejecting anything that is not a plain name in a flat directory.
+// split validates a slash-separated library path. A nonnegative depth fixes
+// the number of directory components; -1 allows any nonempty relative path.
 func split(rel string, depth int) (dir, name string, ok bool) {
 	parts := strings.Split(rel, "/")
-	if len(parts) != depth+1 {
-		return "", "", false
-	}
 	for _, part := range parts {
 		if part == "" || part == "." || part == ".." {
 			return "", "", false
 		}
+	}
+	if len(parts) == 0 || (depth >= 0 && len(parts) != depth+1) {
+		return "", "", false
+	}
+	if depth < 0 {
+		depth = len(parts) - 1
 	}
 	return strings.Join(parts[:depth], "/"), parts[depth], true
 }

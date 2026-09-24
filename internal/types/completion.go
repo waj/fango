@@ -1,11 +1,11 @@
 package types
 
 const (
-	NativeRequestImmediateName = "NativeRequest.immediate"
-	CompletionTypeName         = "Completion.Completion"
-	CompletionCaptureName      = "Completion.capture"
-	CompletionReplayName       = "Completion.replay"
-	CompletionFailureName      = "Completion.failure"
+	NativeRequestImmediateName = "Runtime.NativeRequest.immediate"
+	CompletionTypeName         = "Runtime.Completion.Completion"
+	CompletionCaptureName      = "Runtime.Completion.capture"
+	CompletionReplayName       = "Runtime.Completion.replay"
+	CompletionFailureName      = "Runtime.Completion.failure"
 )
 
 func CompletionIntrinsic(name string) bool {

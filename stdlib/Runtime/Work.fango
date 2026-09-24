@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Work exposing (Facet, Owner, Work, advance, close, facet, owner, pack, register, run)
+module Runtime.Work exposing (Facet, Owner, Work, advance, close, facet, owner, pack, register, run)
 
 -- Scoped packages for coroutines whose effect rows differ. A package keeps
 -- the coroutine's request, reply, and result types, but hides its effect row
@@ -8,7 +8,7 @@ module Work exposing (Facet, Owner, Work, advance, close, facet, owner, pack, re
 -- advancing or closing a package acts on its original coroutine.
 
 import Basics exposing (..)
-import Coroutine exposing (Coroutine, Drive, Step, Suspension)
+import Runtime.Coroutine exposing (Coroutine, Drive, Step, Suspension)
 
 -- Identity and effect budget of a packaging scope. `e` lists the effects
 -- permitted for every coroutine packaged under this owner.
@@ -56,11 +56,11 @@ close = native
 
 -- Get the Work owner of an existing Coroutine scope. Repeated calls return
 -- the same identity; use it to drive packages registered in that scope.
-owner : Coroutine.Scope e -> Owner e
+owner : Runtime.Coroutine.Scope e -> Owner e
 owner = native
 
 -- Create a lazy coroutine in the scope selected by a Coroutine facet and
 -- package it under that scope's Work owner. Its effects must fit the scope's
 -- budget. The producer does not run until the package is advanced.
-register : Coroutine.Facet -> ((request ->{Suspension} reply) -> reply ->{Suspension | e} result) ->{e} Work request reply result
+register : Runtime.Coroutine.Facet -> ((request ->{Suspension} reply) -> reply ->{Suspension | e} result) ->{e} Work request reply result
 register = native

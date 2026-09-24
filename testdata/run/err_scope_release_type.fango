@@ -1,7 +1,7 @@
-import Scope
+import Runtime.Scope
 
 -- A scope's release runs for its effect, so it must return (). Anything else
 -- is a plain type error rather than a special diagnostic.
 
 main() =
-    print (Scope.bracket (\_ -> "a") (\token -> token ++ "!") (\token -> token ++ "?"))
+    print (Runtime.Scope.bracket (\_ -> "a") (\token -> token ++ "!") (\token -> token ++ "?"))

@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Scope exposing (bracket, finally)
+module Runtime.Scope exposing (bracket, finally)
 
 import Basics exposing (..)
 

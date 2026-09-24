@@ -27,7 +27,7 @@ func workDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 	arity := types.IntrinsicArity(name)
 	args, result := core.PeelFun(ty, arity)
 	rawArgs, _ := core.PeelFun(ck.Intrinsics[name].Body, arity)
-	d := core.Def{Name: name, Owner: "Work", Type: ty, TyParams: runtimeRigidVars(ty), Control: core.ArrowControl(ty, arity)}
+	d := core.Def{Name: name, Owner: "Runtime.Work", Type: ty, TyParams: runtimeRigidVars(ty), Control: core.ArrowControl(ty, arity)}
 	refs := make([]core.Expr, arity)
 	for i, n := range []string{"_owner", "_work", "_reply"}[:arity] {
 		d.Params = append(d.Params, n)

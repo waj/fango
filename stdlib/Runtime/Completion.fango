@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Completion exposing (Completion, capture, failure, replay)
+module Runtime.Completion exposing (Completion, capture, failure, replay)
 
 -- A detached result of an action that has already run: either its value or an
 -- outward failure. Capture runs the action now; replay returns its value or

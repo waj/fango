@@ -1,7 +1,7 @@
-import Coroutine
+import Runtime.Coroutine
 
 type Queue a = Queue (List a)
 
-main = Coroutine.scope (\scope ->
-    work = Coroutine.create scope (\_ () -> 42)
-    Queue [\_ -> Coroutine.advance work ()])
+main = Runtime.Coroutine.scope (\scope ->
+    work = Runtime.Coroutine.create scope (\_ () -> 42)
+    Queue [\_ -> Runtime.Coroutine.advance work ()])

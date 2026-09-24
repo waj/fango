@@ -19,7 +19,7 @@ func checkWorkLatentRows(t *testing.T, name string) {
 	cache := newMemoryObjectCache()
 	compileEvents(t, entry, cache)
 	result, events := compileEvents(t, entry, cache)
-	if events["checked-cache-hit"]["Work"] != 1 {
+	if events["checked-cache-hit"]["Runtime.Work"] != 1 {
 		t.Fatalf("Work object was not restored: %#v", events)
 	}
 	scheme, ok := result.Checker.Env.Lookup("schedule")

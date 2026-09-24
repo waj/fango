@@ -1,11 +1,11 @@
 # Scope-owned write-once cells
 
 `Cell` stores a value at one fixed type, including any residual effect-row index.
-A cell belongs to a `Coroutine.scope` and can be shared by cooperative children
+A cell belongs to a `Runtime.Coroutine.scope` and can be shared by cooperative children
 registered in that scope.
 
 ```fango
-create : Coroutine.Scope e ->{IO} Publisher a
+create : Runtime.Coroutine.Scope e ->{IO} Publisher a
 reader : Publisher a -> Reader a
 publish : Publisher a -> a ->{IO} Bool
 read : Reader a ->{IO} Maybe a
@@ -29,7 +29,7 @@ Publication requires a transitively capture-free payload. A closure retaining
 mutable handler state or a borrowed cursor/resource cannot be hidden in a cell.
 Records, recursive ADTs, Unit, and capture-free function values can be stored;
 the native implementation neither inspects nor invokes the payload. A
-`Completion.Completion a e` retains its full value and row index under these
+`Runtime.Completion.Completion a e` retains its full value and row index under these
 same rules.
 
 Native readiness and publication use a mutex. This is the cell's synchronization

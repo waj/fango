@@ -1,20 +1,20 @@
-import Coroutine
-import Service
+import Runtime.Coroutine
+import Runtime.Service
 
 {-# service #-}
 effect Dispatch
-    submit : Int ->{Service.Invocation Int ()} ()
+    submit : Int ->{Runtime.Service.Invocation Int ()} ()
 
 action() =
     submit 1
     submit 2
     42
 
-producer pause () = Service.run pause (\_ ->
+producer pause () = Runtime.Service.run pause (\_ ->
     handle action() of
-        submit value -> resume (Service.invoke (value + 10)))
+        submit value -> resume (Runtime.Service.invoke (value + 10)))
 
-main() = Coroutine.with producer (\cursor ->
-    print (Coroutine.advance cursor ())
-    print (Coroutine.advance cursor ())
-    print (Coroutine.advance cursor ()))
+main() = Runtime.Coroutine.with producer (\cursor ->
+    print (Runtime.Coroutine.advance cursor ())
+    print (Runtime.Coroutine.advance cursor ())
+    print (Runtime.Coroutine.advance cursor ()))

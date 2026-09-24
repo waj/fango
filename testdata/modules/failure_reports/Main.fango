@@ -1,6 +1,6 @@
 import Fail
 import Failure
-import Scope
+import Runtime.Scope
 import Secret
 import Result exposing (Result(..))
 
@@ -25,12 +25,12 @@ inspect report =
         print wrong) values
 
 privateRun() =
-    case Fail.attemptReport (\_ -> Scope.finally (\_ -> Fail.fail "body") (\_ -> privateError (Secret.make [1, 2]))) of
+    case Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ -> Fail.fail "body") (\_ -> privateError (Secret.make [1, 2]))) of
         Err report -> inspect report
         Ok _ -> print "unexpected success"
 
 opaqueRun() =
-    case Fail.attemptReport (\_ -> Scope.finally (\_ -> Fail.fail "body") (\_ -> opaqueError (Opaque (\_ -> ())))) of
+    case Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ -> Fail.fail "body") (\_ -> opaqueError (Opaque (\_ -> ())))) of
         Err report -> List.each (\failure ->
             opaque : Maybe Opaque
             opaque = Failure.argument 0 failure

@@ -1,8 +1,8 @@
 import Stream
-import Scope
+import Runtime.Scope
 import Fail
 
-source label = Stream.generate (\_ -> Scope.finally (\_ ->
+source label = Stream.generate (\_ -> Runtime.Scope.finally (\_ ->
     print label
     Stream.yield 1
     Stream.yield 2) (\_ -> print "close"))
@@ -12,10 +12,10 @@ main() =
     print (Stream.toList (source "exhaust"))
     Stream.withCursor (source "unused") (\_ -> ())
     print (Fail.attempt (\_ -> Stream.toList (Stream.generate (\_ ->
-        Scope.finally (\_ ->
+        Runtime.Scope.finally (\_ ->
             Stream.yield 3
             Fail.fail "body") (\_ -> print "failed producer closed")))))
     print (Fail.attempt (\_ -> Stream.toList (Stream.take 1 (Stream.generate (\_ ->
-        Scope.finally (\_ ->
+        Runtime.Scope.finally (\_ ->
             Stream.yield 4
             Stream.yield 5) (\_ -> Fail.fail "cleanup"))))))

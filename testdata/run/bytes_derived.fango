@@ -2,7 +2,7 @@ import Bytes exposing (Bytes)
 import Dict exposing (Dict)
 import Fail
 import Failure
-import Scope
+import Runtime.Scope
 import Result exposing (Result(..))
 
 -- Bytes is an ordinary nominal type to the deriver, so a type holding one
@@ -28,7 +28,7 @@ report () =
     result : Result (Fail.Report Bytes) Int
     result =
         Fail.attemptReport (\_ ->
-            Scope.finally (\_ ->
+            Runtime.Scope.finally (\_ ->
                 Fail.fail (Bytes.fromString "body")
                 1) (\_ -> send (Bytes.fromString "close\r\n")))
     case result of

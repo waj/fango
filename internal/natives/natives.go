@@ -229,16 +229,16 @@ var netNatives = map[string]int{
 }
 
 var cellNatives = map[string]int{
-	"Cell.cellNew": 1, "Cell.cellReader": 1, "Cell.cellPublish": 2,
-	"Cell.cellReady": 1, "Cell.cellRead": 1,
+	"Runtime.Cell.cellNew": 1, "Runtime.Cell.cellReader": 1, "Runtime.Cell.cellPublish": 2,
+	"Runtime.Cell.cellReady": 1, "Runtime.Cell.cellRead": 1,
 }
 
 var requestNatives = map[string]int{
-	"NativeRequest.hostNew": 1, "NativeRequest.hostClose": 1,
-	"NativeRequest.reserve": 1, "NativeRequest.admitted": 1,
-	"NativeRequest.claim": 2, "NativeRequest.cancelRegistration": 1,
-	"NativeRequest.drainRegistration": 1, "NativeRequest.liveCount": 1,
-	"NativeRequest.registrationCount": 1,
+	"Runtime.NativeRequest.hostNew": 1, "Runtime.NativeRequest.hostClose": 1,
+	"Runtime.NativeRequest.reserve": 1, "Runtime.NativeRequest.admitted": 1,
+	"Runtime.NativeRequest.claim": 2, "Runtime.NativeRequest.cancelRegistration": 1,
+	"Runtime.NativeRequest.drainRegistration": 1, "Runtime.NativeRequest.liveCount": 1,
+	"Runtime.NativeRequest.registrationCount": 1,
 }
 
 func Lookup(name string) (Spec, bool) { spec, ok := Table[name]; return spec, ok }

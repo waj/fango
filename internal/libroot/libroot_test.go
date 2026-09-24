@@ -108,16 +108,20 @@ func TestSetForTestOverridesAndRestores(t *testing.T) {
 
 func TestReadsAndListsBothTrees(t *testing.T) {
 	dir := library(t, map[string]string{
-		"stdlib/List.fango":         "module List exposing ()\n",
-		"stdlib/IO.native.go":       "package native\n",
-		"stdlib/String.native.go":   "package native\n",
-		"runtime/fangort/list.go":   "package fangort\n",
-		"runtime/fangort/x_test.go": "package fangort\n",
+		"stdlib/List.fango":             "module List exposing ()\n",
+		"stdlib/IO.native.go":           "package native\n",
+		"stdlib/String.native.go":       "package native\n",
+		"stdlib/Runtime/Cell.native.go": "package native\n",
+		"runtime/fangort/list.go":       "package fangort\n",
+		"runtime/fangort/x_test.go":     "package fangort\n",
 	})
 	defer SetForTest(dir)()
 
 	if b, err := ReadStdlib("List.fango"); err != nil || !strings.Contains(string(b), "module List") {
 		t.Fatalf("ReadStdlib = %q, %v", b, err)
+	}
+	if b, err := ReadStdlib("Runtime/Cell.native.go"); err != nil || !strings.Contains(string(b), "package native") {
+		t.Fatalf("nested ReadStdlib = %q, %v", b, err)
 	}
 	if b, err := ReadRuntime("fangort/list.go"); err != nil || !strings.Contains(string(b), "package fangort") {
 		t.Fatalf("ReadRuntime = %q, %v", b, err)
@@ -126,8 +130,15 @@ func TestReadsAndListsBothTrees(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"IO.native.go", "String.native.go"}; !equal(natives, want) {
+	if want := []string{"IO.native.go", "Runtime/Cell.native.go", "String.native.go"}; !equal(natives, want) {
 		t.Fatalf("StdlibNatives = %v, want %v", natives, want)
+	}
+	goFiles, err := StdlibGoFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"IO.native.go", "Runtime/Cell.native.go", "String.native.go", "native_support.go"}; !equal(goFiles, want) {
+		t.Fatalf("StdlibGoFiles = %v, want %v", goFiles, want)
 	}
 	// Test files are excluded: a generated module compiles these sources and
 	// cannot satisfy test-only dependencies.
@@ -173,12 +184,14 @@ func TestNamesAreCaseExact(t *testing.T) {
 	}
 }
 
-// The embed patterns were flat, so a dotted module never named a nested file.
-// Resolving them from disk must not quietly start.
-func TestNestedStdlibPathsDoNotResolve(t *testing.T) {
-	defer SetForTest(library(t, map[string]string{"stdlib/Foo/Bar.fango": "module Foo.Bar exposing ()\n"}))()
-	if _, err := ReadStdlib("Foo/Bar.fango"); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("err = %v, want fs.ErrNotExist for a nested name", err)
+// Nested module paths retain exact directory casing on case-insensitive hosts.
+func TestNestedStdlibPathsAreCaseExact(t *testing.T) {
+	defer SetForTest(library(t, map[string]string{"stdlib/Runtime/Cell.fango": "module Runtime.Cell exposing ()\n"}))()
+	if _, err := ReadStdlib("Runtime/Cell.fango"); err != nil {
+		t.Fatalf("exact nested name: %v", err)
+	}
+	if _, err := ReadStdlib("runtime/Cell.fango"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("err = %v, want fs.ErrNotExist for a mis-cased directory", err)
 	}
 }
 

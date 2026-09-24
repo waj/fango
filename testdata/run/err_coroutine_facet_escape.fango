@@ -1,2 +1,2 @@
-import Coroutine
-main = Coroutine.scope (\scope -> Coroutine.facet scope)
+import Runtime.Coroutine
+main = Runtime.Coroutine.scope (\scope -> Runtime.Coroutine.facet scope)

@@ -1,4 +1,4 @@
-import Coroutine
+import Runtime.Coroutine
 import Stream
 import Iterator
 import String
@@ -8,7 +8,7 @@ digit char = case String.toInt (String.fromChar char) of
     Just value -> value
     Nothing -> 0
 
-numberTail : Int -> Iterator.Iterator Char e ->{Coroutine.Drive | e} (Int, Maybe Char)
+numberTail : Int -> Iterator.Iterator Char e ->{Runtime.Coroutine.Drive | e} (Int, Maybe Char)
 numberTail value cursor = case Iterator.next cursor of
     Nothing -> (value, Nothing)
     Just char ->
@@ -18,7 +18,7 @@ numberTail value cursor = case Iterator.next cursor of
             (value, Just char)
 
 -- The parser retains one lookahead character and one numeric accumulator.
-parseNumbers : Maybe Char -> Iterator.Iterator Char e ->{Coroutine.Drive, Stream.Yield Int | e} ()
+parseNumbers : Maybe Char -> Iterator.Iterator Char e ->{Runtime.Coroutine.Drive, Stream.Yield Int | e} ()
 parseNumbers pending cursor =
     token = case pending of
         Just char -> Just char
@@ -35,7 +35,7 @@ parseNumbers pending cursor =
 
 numbers source = Stream.generate (\_ -> Stream.withCursor source (parseNumbers Nothing))
 
-expandCursor : Iterator.Iterator Int e ->{Coroutine.Drive, Stream.Yield Int | e} ()
+expandCursor : Iterator.Iterator Int e ->{Runtime.Coroutine.Drive, Stream.Yield Int | e} ()
 expandCursor cursor = case Iterator.next cursor of
     Nothing -> ()
     Just value ->

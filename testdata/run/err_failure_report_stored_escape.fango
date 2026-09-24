@@ -1,5 +1,5 @@
 import Fail
-import Scope
+import Runtime.Scope
 import Result exposing (Result(..))
 
 type Port = { emit : String ->{IO} () }
@@ -8,7 +8,7 @@ effect Release
     abort release : (String ->{IO} ()) -> ()
 
 main() =
-    report = Scope.bracket (\_ -> Port { emit = print }) (\_ -> ()) (\port ->
-        handle Fail.attemptReport (\_ -> Scope.finally (\_ -> Fail.fail "body") (\_ -> release port.emit)) of
+    report = Runtime.Scope.bracket (\_ -> Port { emit = print }) (\_ -> ()) (\port ->
+        handle Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ -> Fail.fail "body") (\_ -> release port.emit)) of
             release _ -> Ok ())
     ()

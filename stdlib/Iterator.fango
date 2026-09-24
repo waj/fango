@@ -2,8 +2,8 @@
 module Iterator exposing (Iterator, fromCoroutine, next)
 
 import Basics exposing (..)
-import Coroutine exposing (Coroutine, Drive, Step(..), advance)
 import Maybe exposing (Maybe(..))
+import Runtime.Coroutine exposing (Coroutine, Drive, Step(..), advance)
 
 {-# resource #-}
 type Iterator a e = Iterator (Coroutine a () () e)

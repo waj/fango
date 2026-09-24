@@ -7,9 +7,9 @@ import Fail exposing (Fail, attempt, fail, fromResult)
 import IO exposing (Error, IO, Line(..))
 import List exposing (List)
 import Maybe exposing (Maybe(..))
-import Native
 import Result exposing (Result(..))
-import Scope
+import Runtime.Native
+import Runtime.Scope
 
 {- Files as scoped resources.
 
@@ -22,10 +22,10 @@ Both `Handle` and `Directory` wrap an opaque Go value. The compiler erases the
 wrapper to `any` at the Go boundary and nowhere else. -}
 
 {-# resource #-}
-type Handle = Handle Native.Any
+type Handle = Handle Runtime.Native.Any
 
 {-# resource #-}
-type Directory = Directory Native.Any
+type Directory = Directory Runtime.Native.Any
 
 -- The fallible natives. Each Go function returns an error that the compiler
 -- classifies into `IO.Error` at the boundary. None is exposed; the scoped API
@@ -85,7 +85,7 @@ close : Handle ->{IO, Fail Error} ()
 close file = fromResult (closeHandle file)
 
 withOpened : (String ->{IO} Result Error Handle) -> String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
-withOpened open path use = Scope.bracket (\_ -> fromResult (open path)) close use
+withOpened open path use = Runtime.Scope.bracket (\_ -> fromResult (open path)) close use
 
 -- withFile opens path for reading and runs use on the handle.
 withFile : String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
@@ -166,5 +166,5 @@ closeListing directory = fromResult (closeDirectory directory)
 listDirectory : String ->{IO} Result Error (List String)
 listDirectory path =
     attempt (\_ ->
-        Scope.bracket (\_ -> fromResult (openDirectory path)) closeListing (\directory ->
+        Runtime.Scope.bracket (\_ -> fromResult (openDirectory path)) closeListing (\directory ->
             collectEntries directory []))

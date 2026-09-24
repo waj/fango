@@ -21,11 +21,11 @@ even when foreign control has the same printed label.
 ## Exchange and lifecycle
 
 ```fango
-Coroutine.with (\pause initial ->
+Runtime.Coroutine.with (\pause initial ->
     answer = pause ("hello " ++ initial)
     answer ++ "!") (\work ->
-    first = Coroutine.advance work "Ada"
-    second = Coroutine.advance work "received"
+    first = Runtime.Coroutine.advance work "Ada"
+    second = Runtime.Coroutine.advance work "received"
     (first, second))
 ```
 
@@ -90,7 +90,7 @@ library's context-body helper does not close the scope: its driver can continue
 advancing children, which may create further work in that same live scope.
 
 `facet` hides the scope's row parameter for a nullary registration service.
-[`Work.register` and `Work.owner`](library-work.md#dynamic-registration) retain
+[`Runtime.Work.register` and `Runtime.Work.owner`](library-work.md#dynamic-registration) retain
 its identity and check each child's deferred effects against its budget.
 
 ## Ownership and effects

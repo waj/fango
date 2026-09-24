@@ -1,16 +1,16 @@
-import Completion
-import Coroutine
+import Runtime.Completion
+import Runtime.Coroutine
 import Fail
-import Scope
+import Runtime.Scope
 
 main() =
-    print (Fail.attempt (\_ -> Coroutine.with (\pause () -> Scope.finally (\_ ->
-        completed = Fail.attempt (\_ -> Completion.capture (\_ ->
+    print (Fail.attempt (\_ -> Runtime.Coroutine.with (\pause () -> Runtime.Scope.finally (\_ ->
+        completed = Fail.attempt (\_ -> Runtime.Completion.capture (\_ ->
             pause "ready"
             Fail.fail "unreached"
             7))
         print "published completion"
         ()) (\_ -> Fail.fail "stop cleanup")) (\work ->
-        print (Fail.attempt (\_ -> Coroutine.advance work ()))
-        print (Fail.attempt (\_ -> Coroutine.close work))
-        print (Fail.attempt (\_ -> Coroutine.advance work ())))))
+        print (Fail.attempt (\_ -> Runtime.Coroutine.advance work ()))
+        print (Fail.attempt (\_ -> Runtime.Coroutine.close work))
+        print (Fail.attempt (\_ -> Runtime.Coroutine.advance work ())))))

@@ -42,13 +42,13 @@ func TestMachineEmitterBuildsIterativeTypedFrame(t *testing.T) {
 	p := &core.Prog{Entry: "Main.main", ADTs: []*types.ADTInfo{adt}, Defs: []core.Def{
 		{Name: "Main.main", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: body},
 		{Name: "Main.match", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: matchBody},
-		{Name: types.ScopeBracketName, Owner: "Scope", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: bracket},
+		{Name: types.ScopeBracketName, Owner: "Runtime.Scope", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: bracket},
 	}}
 	mp, errs := machineir.Lower(p, b)
 	if len(errs) != 0 {
 		t.Fatalf("machine lowering: %v", errs)
 	}
-	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Scope"}, {Name: "Main", Program: "Main", Imports: []string{"Scope"}, Entry: true}}, false)
+	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Runtime.Scope"}, {Name: "Main", Program: "Main", Imports: []string{"Runtime.Scope"}, Entry: true}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestIteratorOwnerRootsMachineProducerInDirectCaller(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("machine lowering: %v", errs)
 	}
-	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Coroutine"}, {Name: "Main", Program: "Main", Imports: []string{"Coroutine"}, Entry: true}}, false)
+	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Runtime.Coroutine"}, {Name: "Main", Program: "Main", Imports: []string{"Runtime.Coroutine"}, Entry: true}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,13 +252,13 @@ func TestGeneratedMachineFrameExecutes(t *testing.T) {
 		{Name: "Main.handler", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: handler},
 		{Name: "Main.abort", Owner: "Main", Type: b.Bool, Control: types.Control{Transport: types.Machine}, Body: abort},
 		{Name: "Main.stateful", Owner: "Main", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: stateful},
-		{Name: types.ScopeBracketName, Owner: "Scope", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: bracket},
+		{Name: types.ScopeBracketName, Owner: "Runtime.Scope", Type: b.Int, Control: types.Control{Transport: types.Machine}, Body: bracket},
 	}}
 	mp, errs := machineir.Lower(p, b)
 	if len(errs) != 0 {
 		t.Fatalf("machine lowering: %v", errs)
 	}
-	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Scope"}, {Name: "Main", Program: "Main", Imports: []string{"Scope"}, Entry: true}}, false)
+	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Runtime.Scope"}, {Name: "Main", Program: "Main", Imports: []string{"Runtime.Scope"}, Entry: true}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestGeneratedMachineFrameExecutes(t *testing.T) {
 import (
     "testing"
     "fangobuild/fangort"
-    m_Scope "fangobuild/modules/Scope"
+    m_Scope "fangobuild/modules/Runtime/Scope"
 )
 
 func TestFixture(t *testing.T) {
@@ -307,13 +307,13 @@ func TestFixture(t *testing.T) {
     event, err = match.Resume(int64(99))
     if err != nil || !event.Done || event.Value != int64(7) { t.Fatalf("match done: %#v %v", event, err) }
 
-    scoped := fangort.StartMachine(m_Scope.MachineFrame_Scope_dot_bracket())
+    scoped := fangort.StartMachine(m_Scope.MachineFrame_Runtime_dot_Scope_dot_bracket())
     event, err = scoped.Run()
     if err != nil || event.Done || event.Request != int64(3) || scoped.Stats().MaxCleanups != 1 { t.Fatalf("scope: %#v %v", event, err) }
     event, err = scoped.Resume(fangort.UnitValue)
     if err != nil || !event.Done || event.Value != int64(3) { t.Fatalf("scope done: %#v %v", event, err) }
 
-    abandoned := fangort.StartMachine(m_Scope.MachineFrame_Scope_dot_bracket())
+    abandoned := fangort.StartMachine(m_Scope.MachineFrame_Runtime_dot_Scope_dot_bracket())
     event, err = abandoned.Run()
     if err != nil || event.Done || event.Request != int64(3) { t.Fatalf("abandon fixture: %#v %v", event, err) }
     if abandoned.Stats().MaxCleanups != 1 { t.Fatalf("abandon cleanup stats: %#v", abandoned.Stats()) }

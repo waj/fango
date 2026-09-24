@@ -1,16 +1,16 @@
-import Coroutine
+import Runtime.Coroutine
 
 effect Pull
     pull : () -> Int
 
-type Producer request reply result e = Producer ((request ->{Coroutine.Suspension} reply) -> reply ->{Coroutine.Suspension | e} result)
+type Producer request reply result e = Producer ((request ->{Runtime.Coroutine.Suspension} reply) -> reply ->{Runtime.Coroutine.Suspension | e} result)
 source = Producer (\pause () -> pause (pull()))
-withProducer (Producer producer) use = Coroutine.with producer use
+withProducer (Producer producer) use = Runtime.Coroutine.with producer use
 
 main() = print (handle withProducer source (\cursor ->
     alias = cursor
-    handle Coroutine.advance cursor () of
+    handle Runtime.Coroutine.advance cursor () of
         pull() ->
-            Coroutine.close alias
+            Runtime.Coroutine.close alias
             resume 1) of
     pull() -> resume 0)

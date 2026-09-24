@@ -1,4 +1,4 @@
-import Scope
+import Runtime.Scope
 import Result exposing (Result(..))
 
 -- The two nestings of a cleanup scope and a handler have different traces.
@@ -28,14 +28,14 @@ failingBody token =
     fail "requested"
 
 scopeInsideHandler() =
-    handle Scope.bracket (\_ -> open "inner-first") close failingBody of
+    handle Runtime.Scope.bracket (\_ -> open "inner-first") close failingBody of
         fail error ->
             print ("clause sees " ++ error)
             Err error
         return value -> Ok value
 
 handlerInsideScope() =
-    Scope.bracket (\_ -> open "outer-first") close (\token ->
+    Runtime.Scope.bracket (\_ -> open "outer-first") close (\token ->
         handle failingBody token of
             fail error ->
                 print ("clause sees " ++ error)
@@ -48,7 +48,7 @@ noted token =
 
 -- A resumptive handler's operation clauses also run inside the scope.
 counted() =
-    Scope.bracket (\_ -> open "counted") close (\token ->
+    Runtime.Scope.bracket (\_ -> open "counted") close (\token ->
         handle noted token of
             say message ->
                 print ("note " ++ message)

@@ -7,9 +7,9 @@ import (
 )
 
 const wrapperLibrary = `module Read exposing (read)
-import Coroutine exposing (Coroutine, Drive, Step(..))
+import Runtime.Coroutine exposing (Coroutine, Drive, Step(..))
 read : Coroutine Int () () e ->{Drive | e} Maybe Int
-read work = case Coroutine.advance work () of
+read work = case Runtime.Coroutine.advance work () of
     Suspended value -> RESULT
     Finished _ -> Nothing
     Closed -> Nothing
@@ -18,8 +18,8 @@ read work = case Coroutine.advance work () of
 func TestWrapperExpansionAcrossModuleBoundary(t *testing.T) {
 	p := newProject(t)
 	p.write(t, "Main.fango", `import Read
-import Coroutine
-main() = print (Coroutine.with (\pause _ -> pause 42) (\work -> Read.read work))
+import Runtime.Coroutine
+main() = print (Runtime.Coroutine.with (\pause _ -> pause 42) (\work -> Read.read work))
 `)
 	p.entry = p.dir + "/Main.fango"
 	p.write(t, "Read.fango", strings.ReplaceAll(wrapperLibrary, "RESULT", "Just value"))
@@ -48,7 +48,7 @@ main() = print (Coroutine.with (\pause _ -> pause 42) (\work -> Read.read work))
 	calls := 0
 	for _, w := range plain.Workers {
 		for _, block := range w.Blocks {
-			if c, ok := block.Term.(*machine.Call); ok && c.Callee == "Coroutine.advance" {
+			if c, ok := block.Term.(*machine.Call); ok && c.Callee == "Runtime.Coroutine.advance" {
 				calls++
 			}
 		}

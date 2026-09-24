@@ -1,14 +1,14 @@
 module Helpers exposing (capture, replay, inspect)
 
-import Completion exposing (Completion)
+import Runtime.Completion exposing (Completion)
 import Fail
 import Failure
 
 capture : (() ->{e} a) ->{e} Completion a e
-capture action = Completion.capture action
+capture action = Runtime.Completion.capture action
 
 replay : Completion a e ->{e} a
-replay completed = Completion.replay completed
+replay completed = Runtime.Completion.replay completed
 
 inspect : Completion Int {Fail.Fail error} -> Maybe Failure.Failure
-inspect completed = Completion.failure completed
+inspect completed = Runtime.Completion.failure completed

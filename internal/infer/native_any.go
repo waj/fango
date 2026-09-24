@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	NativeAnyTypeName = "Native.Any"
-	NativeAnyCtorName = "Native.Any"
+	NativeAnyTypeName = "Runtime.Native.Any"
+	NativeAnyCtorName = "Runtime.Native.Any"
 )
 
 func markNativeAnyRepr(adt *types.ADTInfo, at source.Span) []diag.Error {

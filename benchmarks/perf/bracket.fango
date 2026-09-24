@@ -1,4 +1,4 @@
-import Scope
+import Runtime.Scope
 
 -- Scope setup and the normal path, at fixed nesting depth: each iteration
 -- acquires, uses, and releases twice, so the measurement is per-scope cost
@@ -6,8 +6,8 @@ import Scope
 
 step : Int -> Int
 step total =
-    Scope.bracket (\_ -> total) (\_ -> ()) (\outer ->
-        Scope.bracket (\_ -> outer + 1) (\_ -> ()) (\inner -> inner + 1))
+    Runtime.Scope.bracket (\_ -> total) (\_ -> ()) (\outer ->
+        Runtime.Scope.bracket (\_ -> outer + 1) (\_ -> ()) (\inner -> inner + 1))
 
 drive : Int -> Int -> Int
 drive n total = if n <= 0 then total else drive (n - 1) (step total)

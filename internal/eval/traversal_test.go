@@ -81,7 +81,7 @@ func TestMachineCursorScopeClosesOnReturnAndAbandon(t *testing.T) {
 				t.Fatalf("return: %#v %v", event, err)
 			}
 			value := event.Value.(*CtorVal)
-			if value.Ctor.Name != "Coroutine.Suspended" || value.Fields[0] != int64(42) {
+			if value.Ctor.Name != "Runtime.Coroutine.Suspended" || value.Fields[0] != int64(42) {
 				t.Fatalf("result: %#v", value)
 			}
 		}
@@ -107,7 +107,7 @@ func TestSynchronousScopeDrivesMachineConsumer(t *testing.T) {
 		t.Fatal(err)
 	}
 	item, ok := value.(*CtorVal)
-	if !ok || item.Ctor.Name != "Coroutine.Suspended" || item.Fields[0] != int64(42) {
+	if !ok || item.Ctor.Name != "Runtime.Coroutine.Suspended" || item.Fields[0] != int64(42) {
 		t.Fatalf("value: %#v", value)
 	}
 }

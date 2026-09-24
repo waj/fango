@@ -843,7 +843,7 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 		if info.Service {
 			row := arrows[len(arrows)-1].Eff
 			if len(row.Labels) != 1 || row.Tail != nil || len(row.Labels[0].Args) != 2 || ck.EffectsByUnique[row.Labels[0].Unique] == nil || !ck.EffectsByUnique[row.Labels[0].Unique].Invocation || op.Abort || op.Native != nil {
-				errs = append(errs, diag.Errorf(op.NameSpan, "SERVICE PROTOCOL", "Each service operation must declare one fixed Service.Invocation request reply row and cannot be aborting or native."))
+				errs = append(errs, diag.Errorf(op.NameSpan, "SERVICE PROTOCOL", "Each service operation must declare one fixed Runtime.Service.Invocation request reply row and cannot be aborting or native."))
 			} else {
 				label := row.Labels[0]
 				invocation = &label
@@ -987,7 +987,7 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 	}
 	if td.RecordFields != nil {
 		if td.Shared {
-			errs = append(errs, diag.Errorf(td.ResourceSpan, "SHARED RESOURCE", "A shared native resource must wrap exactly one Native.Any field."))
+			errs = append(errs, diag.Errorf(td.ResourceSpan, "SHARED RESOURCE", "A shared native resource must wrap exactly one Runtime.Native.Any field."))
 		}
 		seenFields := map[string]bool{}
 		fields := make([]types.Type, len(td.RecordFields))
@@ -1041,7 +1041,7 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 	errs = append(errs, markBytesRepr(adt, td.NameSpan)...)
 	errs = append(errs, markNativeAnyRepr(adt, td.NameSpan)...)
 	if td.Shared && (len(adt.Ctors) != 1 || len(adt.Ctors[0].Fields) != 1 || !ck.isNativeAnyType(adt.Ctors[0].Fields[0])) {
-		errs = append(errs, diag.Errorf(td.ResourceSpan, "SHARED RESOURCE", "A shared native resource must wrap exactly one Native.Any field."))
+		errs = append(errs, diag.Errorf(td.ResourceSpan, "SHARED RESOURCE", "A shared native resource must wrap exactly one Runtime.Native.Any field."))
 	}
 	for i := range adt.Params {
 		adt.ParamKindsKnown[i] = true
@@ -1847,7 +1847,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		g.errs = append(g.errs, diag.Errorf(e.Sp, "BUILTIN IO HANDLING NOT READY", "Handlers for builtin IO are staged until polymorphic print evidence is available."))
 	}
 	if first.Owner.Invocation {
-		g.errs = append(g.errs, diag.Errorf(e.Sp, "INVOCATION AUTHORITY", "Only Service.run may install producer invocation authority."))
+		g.errs = append(g.errs, diag.Errorf(e.Sp, "INVOCATION AUTHORITY", "Only Runtime.Service.run may install producer invocation authority."))
 	}
 	if first.Owner.Service && e.State != nil {
 		g.errs = append(g.errs, diag.Errorf(e.Sp, "SERVICE STATE", "Shared service evidence cannot own mutable handler state."))

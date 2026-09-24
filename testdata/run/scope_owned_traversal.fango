@@ -1,10 +1,10 @@
-import Coroutine
+import Runtime.Coroutine
 import Stream
 import Iterator
 import Maybe exposing (Maybe(..))
-import Scope
+import Runtime.Scope
 
-foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Coroutine.Drive | e} b
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Runtime.Coroutine.Drive | e} b
 foldCursor combine initial cursor = case Iterator.next cursor of
     Nothing -> initial
     Just value -> foldCursor combine (combine value initial) cursor
@@ -14,6 +14,6 @@ total() = Stream.withCursor (Stream.generate (\_ ->
     Stream.yield 10
     Stream.yield 20)) (foldCursor (\value acc -> value + acc) 0)
 
-main() = Scope.bracket total (\value ->
+main() = Runtime.Scope.bracket total (\value ->
     print value
     print (total())) print

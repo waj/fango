@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Native exposing (Any)
+module Runtime.Native exposing (Any)
 
 -- An opaque Go value carried by native sidecars. The compiler gives this
 -- declaration an `any` representation; its constructor stays private so only

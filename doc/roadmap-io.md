@@ -33,7 +33,7 @@ serialization. It should not introduce compiler or runtime primitives.
 ## Concurrent server
 
 `Net.withListener`, `Net.accept`, `Net.withClient`, `Net.source`, and `Net.sink`
-are implemented with scoped `Native.Any` resources and typed `Net.Error`
+are implemented with scoped `Runtime.Native.Any` resources and typed `Net.Error`
 failures. They are sufficient for a listener that handles one connection at a
 time. A connection per task still depends on
 [cooperative Async with native readiness](roadmap-async.md#a3-native-readiness-and-io).

@@ -51,7 +51,7 @@ func CheckServiceEffect(effect *EffectInfo, effects map[int]*EffectInfo) error {
 			return fmt.Errorf("invalid compiler-owned invocation effect")
 		}
 		op := effect.Ops[0]
-		if op.Name != "Service.invoke" || op.Arity != 1 || len(op.ParamTypes) != 1 || op.Abort || op.Native != nil || !Equal(op.ParamTypes[0], effect.Params[0]) || !Equal(op.ResultType, effect.Params[1]) {
+		if op.Name != "Runtime.Service.invoke" || op.Arity != 1 || len(op.ParamTypes) != 1 || op.Abort || op.Native != nil || !Equal(op.ParamTypes[0], effect.Params[0]) || !Equal(op.ResultType, effect.Params[1]) {
 			return fmt.Errorf("invalid compiler-owned invocation protocol")
 		}
 	} else if effect.Name == ServiceInvocationName {

@@ -6,12 +6,12 @@ Scope acquisition/release ordering, failure precedence, and resource lifetimes.
 
 A handler releases a resource only for the failure it handles. Cleanup that
 must also run when an arbitrary residual effect leaves the region needs a
-scope, which the bundled `Scope` module provides through ordinary function
+scope, which the bundled `Runtime.Scope` module provides through ordinary function
 application — there is no `try`, `catch`, `finally`, `using`, or `defer`
 syntax:
 
 ```fango
-module Scope exposing (bracket, finally)
+module Runtime.Scope exposing (bracket, finally)
 
 bracket : (() ->{e} resource) -> (resource ->{e} ())
        -> (resource ->{e} result) ->{e} result
@@ -21,7 +21,7 @@ finally : (() ->{e} result) -> (() ->{e} ()) ->{e} result
 
 ```fango
 withResource label action =
-    Scope.bracket (\_ -> open label) close action
+    Runtime.Scope.bracket (\_ -> open label) close action
 
 main() =
     text = withResource "input" (\resource -> readAll resource)
@@ -97,13 +97,13 @@ Libraries mark opaque resource types with a declaration pragma:
 ```fango
 module Connection exposing (Handle, withConnection)
 
-import Native
+import Runtime.Native
 
 {-# resource #-}
-type Handle = Handle Native.Any
+type Handle = Handle Runtime.Native.Any
 
 withConnection address use =
-    Scope.bracket (\_ -> openConnection address) closeConnection use
+    Runtime.Scope.bracket (\_ -> openConnection address) closeConnection use
 ```
 
 Here `openConnection` and `closeConnection` are private library functions.
@@ -114,7 +114,7 @@ not a file-header directive. `resource` remains an ordinary identifier outside
 the pragma. The declaration works at the REPL as well.
 
 A resource type carries a capability independently of its representation.
-Bundled native resources wrap `Native.Any`, so their Go object is held directly
+Bundled native resources wrap `Runtime.Native.Any`, so their Go object is held directly
 without an integer handle table.
 Export it as `Handle`; exporting its representation with `Handle(..)` or
 `exposing (..)` reports `RESOURCE REPRESENTATION EXPOSED`. Importers cannot
@@ -138,7 +138,7 @@ Contracts are conservative at recursive joins where distinct dynamic owners
 cannot be proved identical. Cursor advancement additionally carries exclusive
 access obligations. Written capture contracts are not implemented.
 
-`Scope.bracket` remains a compiler intrinsic for cleanup and lifetime handling.
+`Runtime.Scope.bracket` remains a compiler intrinsic for cleanup and lifetime handling.
 Its callbacks use the ordinary argument-inclusion rule: acquisition and release
 may use IO while the body also fails. Partial applications and ordinary wrappers
 have the same effect compatibility, subject to the existing resource restrictions.

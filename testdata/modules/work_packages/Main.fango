@@ -1,13 +1,13 @@
-import Coroutine
-import Work
+import Runtime.Coroutine
+import Runtime.Work
 import Helpers exposing (Box(..))
 
 main() =
-    Coroutine.with (\pause start ->
+    Runtime.Coroutine.with (\pause start ->
         reply = pause (start + 1)
         reply + 2) (\cursor ->
-        Work.run (\owner ->
-            make = Helpers.publisher (Work.facet owner)
+        Runtime.Work.run (\owner ->
+            make = Helpers.publisher (Runtime.Work.facet owner)
             item = Box (make cursor)
             print (Helpers.drive owner item 10)
             print (Helpers.drive owner item 20)

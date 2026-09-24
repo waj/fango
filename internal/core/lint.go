@@ -59,7 +59,7 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowMachine, allowStage bo
 		l.adts[adt.Con.Unique] = adt
 	}
 	for _, adt := range p.ADTs {
-		if adt.Con.Name == "NativeRequest.Host" || adt.Con.Name == types.NativeRegistrationName {
+		if adt.Con.Name == "Runtime.NativeRequest.Host" || adt.Con.Name == types.NativeRegistrationName {
 			valid := adt.Resource && !adt.Shared && len(adt.Params) == 0 && !adt.IsRecord() && len(adt.Ctors) == 1 && len(adt.Ctors[0].Fields) == 1
 			if valid {
 				field, ok := adt.Ctors[0].Fields[0].(*types.TCon)

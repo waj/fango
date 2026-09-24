@@ -108,7 +108,7 @@ func TestWorkRejectsForgedPackageSourceRow(t *testing.T) {
 		})
 	}
 	if !changed {
-		t.Fatal("missing Work.pack call")
+		t.Fatal("missing Runtime.Work.pack call")
 	}
 	// Rebuild the generic ownership certificate: the independent check must
 	// reject the forged row even when the other certificate agrees with it.

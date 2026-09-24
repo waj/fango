@@ -150,8 +150,8 @@ instance Query Box
     query (Box action) = action()
 withBox use = handle use (Box (\_ -> tick())) with current = 0 of
     tick () -> resume current with current + 1
-main() = withBox (\box -> Coroutine.scope (\scope ->
-    child = Work.register (Coroutine.facet scope) (\_ () -> query box)
+main() = withBox (\box -> Runtime.Coroutine.scope (\scope ->
+    child = Runtime.Work.register (Runtime.Coroutine.facet scope) (\_ () -> query box)
     ()))
 `},
 		{"service hidden context", `effect Counter
@@ -161,30 +161,30 @@ withRead use = handle use (\_ -> tick()) with current = 0 of
     tick () -> resume current with current + 1
 {-# service #-}
 effect Dispatch
-    send : () ->{Service.Invocation Int ()} ()
-type Bound = Bound (() ->{Service.Invocation Int ()} ())
+    send : () ->{Runtime.Service.Invocation Int ()} ()
+type Bound = Bound (() ->{Runtime.Service.Invocation Int ()} ())
 bind read = handle Bound (\_ -> send()) of
-    send () -> resume (Service.invoke (read()))
-producer (Bound action) pause () = Service.run pause action
+    send () -> resume (Runtime.Service.invoke (read()))
+producer (Bound action) pause () = Runtime.Service.run pause action
 main() = withRead (\read ->
     context = bind read
-    Coroutine.scope (\scope ->
-        child = Work.register (Coroutine.facet scope) (producer context)
+    Runtime.Coroutine.scope (\scope ->
+        child = Runtime.Work.register (Runtime.Coroutine.facet scope) (producer context)
         ()))
 `},
 		{"cursor through ADT", `type Box a = Box a
-bad() = Coroutine.scope (\scope ->
-    sibling = Coroutine.create scope (\_ () -> 42)
+bad() = Runtime.Coroutine.scope (\scope ->
+    sibling = Runtime.Coroutine.create scope (\_ () -> 42)
     box = Box sibling
-    child = Work.register (Coroutine.facet scope) (\_ () -> case box of
-        Box cursor -> Coroutine.advance cursor ())
+    child = Runtime.Work.register (Runtime.Coroutine.facet scope) (\_ () -> case box of
+        Box cursor -> Runtime.Coroutine.advance cursor ())
     ())
 main() = ()
 `},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "Main.fango")
-			if err := os.WriteFile(path, []byte("import Coroutine\nimport Work\nimport Service\n"+tc.source), 0600); err != nil {
+			if err := os.WriteFile(path, []byte("import Runtime.Coroutine\nimport Runtime.Work\nimport Runtime.Service\n"+tc.source), 0600); err != nil {
 				t.Fatal(err)
 			}
 			_, ds, err := (&Session{}).Compile(path)
@@ -207,7 +207,7 @@ func TestSharedServiceModuleObject(t *testing.T) {
 	cache := newMemoryObjectCache()
 	compileEvents(t, path, cache)
 	_, events := compileEvents(t, path, cache)
-	if events["checked-cache-hit"]["Context"] != 1 || events["checked-cache-hit"]["Service"] != 1 {
+	if events["checked-cache-hit"]["Context"] != 1 || events["checked-cache-hit"]["Runtime.Service"] != 1 {
 		t.Fatalf("missing cached service contracts: %v", events)
 	}
 }

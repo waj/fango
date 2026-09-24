@@ -27,9 +27,9 @@ func cursorScopeWith(sup *types.Supply, b *types.Builtins, synchronous bool) *co
 	control := types.Control{Transport: types.Machine}
 	a, z := sup.FreshRigid(types.General), sup.FreshRigid(types.General)
 	con := &types.TCon{Unique: sup.NextUnique(), Name: types.CoroutineStepName, Args: []types.Type{a, z}}
-	suspended := &types.CtorInfo{Name: "Coroutine.Suspended", Index: 0, Fields: []types.Type{a}, Result: con}
-	finished := &types.CtorInfo{Name: "Coroutine.Finished", Index: 1, Fields: []types.Type{z}, Result: con}
-	closed := &types.CtorInfo{Name: "Coroutine.Closed", Index: 2, Result: con}
+	suspended := &types.CtorInfo{Name: "Runtime.Coroutine.Suspended", Index: 0, Fields: []types.Type{a}, Result: con}
+	finished := &types.CtorInfo{Name: "Runtime.Coroutine.Finished", Index: 1, Fields: []types.Type{z}, Result: con}
+	closed := &types.CtorInfo{Name: "Runtime.Coroutine.Closed", Index: 2, Result: con}
 	adt := &types.ADTInfo{Con: con, Params: []*types.TVar{a, z}, Ctors: []*types.CtorInfo{suspended, finished, closed}}
 	step := &types.TCon{Unique: con.Unique, Name: con.Name, Args: []types.Type{b.Int, b.Unit}}
 	cursor := &types.TCon{Unique: sup.NextUnique(), Name: types.CoroutineTypeName, Args: []types.Type{b.Int, b.Unit, b.Unit, b.Unit}}
@@ -38,7 +38,7 @@ func cursorScopeWith(sup *types.Supply, b *types.Builtins, synchronous bool) *co
 	producerTy := &types.TFun{Arg: pauseTy, Ret: bodyTy}
 	consumerTy := &types.TFun{Arg: cursor, Ret: step, Control: control}
 	advanceTy := &types.TFun{Arg: cursor, Ret: &types.TFun{Arg: b.Unit, Ret: step, Control: control}}
-	next := core.Def{Name: types.CoroutineAdvanceName, Owner: "Coroutine", Type: advanceTy, Params: []string{"cursor", "reply"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()}, Control: control,
+	next := core.Def{Name: types.CoroutineAdvanceName, Owner: "Runtime.Coroutine", Type: advanceTy, Params: []string{"cursor", "reply"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()}, Control: control,
 		Body: &core.CoroutineAdvance{Row: &core.RowArgument{}, Cursor: &core.VarRef{Name: "cursor", Local: true, Ty: cursor}, Reply: &core.VarRef{Name: "reply", Local: true, Ty: b.Unit}, Result: adt, Access: types.ExclusiveAdvance, Ty: step}}
 	boundaryControl := control
 	if synchronous {
@@ -48,7 +48,7 @@ func cursorScopeWith(sup *types.Supply, b *types.Builtins, synchronous bool) *co
 	owner := sup.FreshScope()
 	suspension := core.EffectInstance{Unique: sup.NextUnique(), Name: types.CoroutineSuspensionName, Captures: types.ScopeCapture(owner), Control: control}
 	drive := core.EffectInstance{Unique: sup.NextUnique(), Name: types.CoroutineDriveName, Captures: types.ScopeCapture(owner), Control: control}
-	scope := core.Def{Name: types.CoroutineWithName, Owner: "Coroutine", Type: scopeTy, Params: []string{"producer", "consumer"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()}, Control: boundaryControl,
+	scope := core.Def{Name: types.CoroutineWithName, Owner: "Runtime.Coroutine", Type: scopeTy, Params: []string{"producer", "consumer"}, ParamCaptures: []types.CaptureVar{sup.FreshCapture(), sup.FreshCapture()}, Control: boundaryControl,
 		Body: &core.CoroutineScope{Scope: owner, Yield: suspension, Traversal: drive, Producer: &core.VarRef{Name: "producer", Local: true, Ty: producerTy}, Consumer: &core.VarRef{Name: "consumer", Local: true, Ty: consumerTy}, CursorTy: cursor, Ty: step, Control: boundaryControl}}
 	producer := &core.Lambda{Param: "pause", ParamCapture: sup.FreshCapture(), Ty: producerTy}
 	producer.Body = &core.Lambda{Param: "unit", ParamCapture: sup.FreshCapture(), Ty: bodyTy, Body: &core.Seq{First: Pause(producer, &core.IntLit{Val: 42, Ty: b.Int}), Then: &core.UnitLit{Ty: b.Unit}, Ty: b.Unit}}

@@ -13,13 +13,13 @@ import (
 
 func TestCompletionContractsSurviveModuleAndExecutionCodecs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "Main.fango")
-	if err := os.WriteFile(path, []byte("import Completion\nmain = Completion.replay (Completion.capture (\\_ -> 42))\n"), 0644); err != nil {
+	if err := os.WriteFile(path, []byte("import Runtime.Completion\nmain = Runtime.Completion.replay (Runtime.Completion.capture (\\_ -> 42))\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	cache := newMemoryObjectCache()
 	compileEvents(t, path, cache)
 	result, events := compileEvents(t, path, cache)
-	if events["checked-cache-hit"]["Completion"] != 1 {
+	if events["checked-cache-hit"]["Runtime.Completion"] != 1 {
 		t.Fatalf("completion module not restored: %#v", events)
 	}
 	lowered, errs := machine.Lower(result.Program, result.Checker.B)

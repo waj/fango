@@ -11,7 +11,7 @@ import (
 // handler's clauses perform: the closure then reaches this activation at every
 // call instead of whichever handler is innermost when it is called.
 // Elaboration completes the binding by substituting the activation's captures
-// into the closure's body, the same discharge that gives a `Scope.bracket`
+// into the closure's body, the same discharge that gives a `Runtime.Scope.bracket`
 // release closure its definition-site evidence.
 //
 // [Reference](../../doc/reference/effects.md), "Binding a closure to a handler

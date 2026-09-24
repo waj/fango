@@ -1,22 +1,22 @@
-import Cell
-import Coroutine
-import Work
+import Runtime.Cell
+import Runtime.Coroutine
+import Runtime.Work
 
 type Payload = {value : Int, text : String} deriving (Show)
 
 worker cell pause () =
     pause ()
-    print (Cell.publish cell (Payload {value = 42, text = "ready"}))
-    print (Cell.publish cell (Payload {value = 99, text = "ignored"}))
+    print (Runtime.Cell.publish cell (Payload {value = 42, text = "ready"}))
+    print (Runtime.Cell.publish cell (Payload {value = 99, text = "ignored"}))
 
-main() = Coroutine.scope (\scope ->
-    cell = Cell.create scope
-    view = Cell.reader cell
-    child = Work.register (Coroutine.facet scope) (worker cell)
-    print (Cell.read view)
-    print (Work.advance (Work.owner scope) child ())
-    print (Work.advance (Work.owner scope) child ())
-    case Cell.read view of
+main() = Runtime.Coroutine.scope (\scope ->
+    cell = Runtime.Cell.create scope
+    view = Runtime.Cell.reader cell
+    child = Runtime.Work.register (Runtime.Coroutine.facet scope) (worker cell)
+    print (Runtime.Cell.read view)
+    print (Runtime.Work.advance (Runtime.Work.owner scope) child ())
+    print (Runtime.Work.advance (Runtime.Work.owner scope) child ())
+    case Runtime.Cell.read view of
         Just value ->
             print value.value
             print value.text

@@ -171,10 +171,10 @@ func TestSuspendingCleanupRejectedAndRolledBackInREPL(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader(`import Stream
 import Iterator
-import Scope
+import Runtime.Scope
 pause : () ->{Stream.Yield Int} ()
 pause() = Stream.yield 1
-withCleanup action cleanup = Scope.finally action cleanup
+withCleanup action cleanup = Runtime.Scope.finally action cleanup
 bad() = Stream.forEach print (Stream.generate (\_ -> withCleanup (\_ -> ()) pause))
 :type bad
 Stream.forEach print (Stream.generate pause)

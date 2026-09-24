@@ -243,7 +243,7 @@ type ResumeTail struct {
 // is the compiler-owned capability identity the acquired resource carries, so
 // the existing non-escape analysis applies to it exactly as to a scoped
 // handler activation. Elaboration is its only producer: the node is the body
-// of the bundled `Scope.bracket` intrinsic and occurs nowhere else.
+// of the bundled `Runtime.Scope.bracket` intrinsic and occurs nowhere else.
 type Bracket struct {
 	Scope      types.ScopeID
 	Resource   string

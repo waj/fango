@@ -1,6 +1,6 @@
 import Fail
 import Failure
-import Scope
+import Runtime.Scope
 import Stream
 import Result exposing (Result(..))
 
@@ -46,20 +46,20 @@ showReport result =
         Ok value -> print value
 
 main() =
-    showReport (Fail.attemptReport (\_ -> Scope.finally (\_ ->
+    showReport (Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ ->
         Fail.fail "body"
         0) (\_ -> Fail.fail "close")))
-    showReport (Fail.attemptReport (\_ -> Scope.finally (\_ -> 7) (\_ -> Fail.fail "close after success")))
+    showReport (Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ -> 7) (\_ -> Fail.fail "close after success")))
     showReport (Fail.attemptReport (\_ -> Stream.toList (Stream.take 1 (Stream.generate (\_ ->
-        Scope.finally (\_ ->
+        Runtime.Scope.finally (\_ ->
             Stream.yield 1
             Stream.yield 2) (\_ -> Fail.fail "close after take"))))))
-    handle showHeterogeneous (Fail.attemptReport (\_ -> Scope.finally (\_ ->
+    handle showHeterogeneous (Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ ->
         Fail.fail "heterogeneous body") (\_ -> close 42))) of
         close _ -> print "unexpected close handler"
     print (Stream.toList (Stream.generate (\_ ->
         result : Result (Fail.Report String) ()
-        result = Fail.attemptReport (\_ -> Scope.finally (\_ ->
+        result = Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ ->
             Stream.yield "before failure"
             Fail.fail "machine body") (\_ -> Fail.fail "machine close"))
         case result of
@@ -70,10 +70,10 @@ main() =
                     message = Failure.argument 0 failure
                     Stream.yield (Maybe.withDefault "missing" message)) report.suppressed
             Ok _ -> Stream.yield "unexpected success")))
-    showReport (Fail.attemptReport (\_ -> Scope.finally (\_ ->
-        Scope.finally (\_ ->
+    showReport (Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ ->
+        Runtime.Scope.finally (\_ ->
             Fail.fail "nested body"
             0) (\_ -> Fail.fail "inner close")) (\_ ->
-        Scope.finally (\_ -> Fail.fail "outer close") (\_ -> Fail.fail "outer nested close"))))
-    showReport (Fail.attemptReport (\_ -> Scope.finally (\_ ->
-        Scope.finally (\_ -> 99) (\_ -> Fail.fail "first cleanup")) (\_ -> Fail.fail "second cleanup")))
+        Runtime.Scope.finally (\_ -> Fail.fail "outer close") (\_ -> Fail.fail "outer nested close"))))
+    showReport (Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ ->
+        Runtime.Scope.finally (\_ -> 99) (\_ -> Fail.fail "first cleanup")) (\_ -> Fail.fail "second cleanup")))

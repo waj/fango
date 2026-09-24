@@ -1,3 +1,3 @@
-import Coroutine
-escape() = Coroutine.with (\_ input -> input) (\work -> (\_ -> Coroutine.close work))
+import Runtime.Coroutine
+escape() = Runtime.Coroutine.with (\_ input -> input) (\work -> (\_ -> Runtime.Coroutine.close work))
 main() = print "unreachable"

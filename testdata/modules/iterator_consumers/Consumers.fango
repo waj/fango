@@ -1,17 +1,17 @@
 module Consumers exposing (Consumer, escape, make, prefix, run)
 
-import Coroutine
+import Runtime.Coroutine
 import Iterator exposing (Iterator)
 import Maybe exposing (Maybe(..))
 
-foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Coroutine.Drive | e} b
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Runtime.Coroutine.Drive | e} b
 foldCursor combine initial cursor = case Iterator.next cursor of
     Nothing -> initial
     Just value -> foldCursor combine (combine value initial) cursor
 
-type Consumer e = Consumer (Iterator Int e ->{Coroutine.Drive | e} Int)
+type Consumer e = Consumer (Iterator Int e ->{Runtime.Coroutine.Drive | e} Int)
 
-sum : Iterator Int e ->{Coroutine.Drive | e} Int
+sum : Iterator Int e ->{Runtime.Coroutine.Drive | e} Int
 sum cursor = foldCursor (\element acc -> element + acc) 0 cursor
 
 twice cursor =
@@ -23,10 +23,10 @@ twice cursor =
 make : () -> Consumer e
 make() = Consumer twice
 
-run : Consumer e -> Iterator Int e ->{Coroutine.Drive | e} Int
+run : Consumer e -> Iterator Int e ->{Runtime.Coroutine.Drive | e} Int
 run (Consumer action) cursor = action cursor
 
-prefix : Int ->{IO} (Iterator Int e ->{Coroutine.Drive | e} Int)
+prefix : Int ->{IO} (Iterator Int e ->{Runtime.Coroutine.Drive | e} Int)
 prefix extra =
     print "prefix"
     \cursor -> sum cursor + extra

@@ -225,7 +225,7 @@ func TestMachineSessionKeepsCleanupPendingAcrossSuspension(t *testing.T) {
 	bracket := &core.Bracket{Scope: sup.FreshScope(), Resource: "resource", ResourceTy: b.Int,
 		Acquire: machineInt(b, 1), Release: &core.UnitLit{Ty: b.Unit}, Body: body, Ty: b.Int,
 		Control: types.Control{Transport: types.Machine}}
-	p := &core.Prog{Defs: []core.Def{{Name: types.ScopeBracketName, Owner: "Scope", Type: b.Int,
+	p := &core.Prog{Defs: []core.Def{{Name: types.ScopeBracketName, Owner: "Runtime.Scope", Type: b.Int,
 		Control: types.Control{Transport: types.Machine}, Body: bracket}}}
 	mp := lowerMachineTest(t, p, b)
 	session := startMachineTest(t, p, mp, types.ScopeBracketName, nil)

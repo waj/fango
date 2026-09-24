@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Coroutine exposing (Coroutine, Drive, Facet, Scope, Step(..), Suspension, advance, close, create, facet, scope, with)
+module Runtime.Coroutine exposing (Coroutine, Drive, Facet, Scope, Step(..), Suspension, advance, close, create, facet, scope, with)
 
 -- Owned, resumable computations with a typed request, reply, and final result.
 -- A producer can pause; its driver resumes it by supplying a reply. Every
@@ -62,7 +62,7 @@ scope = native
 create : Scope e -> ((request ->{Suspension} reply) -> reply ->{Suspension | e} result) -> Coroutine request reply result e
 create = native
 
--- A reference to a dynamic scope that hides its effect row. Work.register
+-- A reference to a dynamic scope that hides its effect row. Runtime.Work.register
 -- uses it to select where a child is created without exposing that row.
 {-# resource #-}
 type Facet = Facet ()

@@ -88,7 +88,7 @@ type Session struct {
 	// promptDefs is the active Core generation of each prompt-defined worker
 	// or value. The ordinary evaluator installs these incrementally; selective
 	// machine lowering needs the same active set when a later expression passes
-	// a named producer to Coroutine.with.
+	// a named producer to Runtime.Coroutine.with.
 	promptDefs map[string]core.Def
 }
 

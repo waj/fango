@@ -38,12 +38,12 @@ call (Box action) = action()
 func TestYieldedResourcesRespectProducerLifetime(t *testing.T) {
 	const prelude = `import Stream
 import Iterator
-import Scope
+import Runtime.Scope
 import Maybe exposing (Maybe(..))
 {-# resource #-}
 type Handle = Handle Int
 type Box a = Box a
-withHandle action = Scope.bracket (\_ -> Handle 7) (\_ -> ()) action
+withHandle action = Runtime.Scope.bracket (\_ -> Handle 7) (\_ -> ()) action
 read (Handle value) = value
 identity value = value
 `

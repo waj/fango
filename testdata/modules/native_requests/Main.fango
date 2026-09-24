@@ -1,23 +1,23 @@
 import Device
-import NativeRequest
-import Scope
-import Coroutine
-import Work
+import Runtime.NativeRequest
+import Runtime.Scope
+import Runtime.Coroutine
+import Runtime.Work
 import Maybe exposing (Maybe(..))
 
-producer : (String ->{Coroutine.Suspension} ()) -> () ->{IO, Coroutine.Suspension} ()
-producer pause () = Scope.bracket Device.openDevice Device.closeDevice (\device ->
-    NativeRequest.scope 1 (\host ->
-        case NativeRequest.register host (\token -> Device.submit token device 2) (\_ -> print "unexpected callback") of
+producer : (String ->{Runtime.Coroutine.Suspension} ()) -> () ->{IO, Runtime.Coroutine.Suspension} ()
+producer pause () = Runtime.Scope.bracket Device.openDevice Device.closeDevice (\device ->
+    Runtime.NativeRequest.scope 1 (\host ->
+        case Runtime.NativeRequest.register host (\token -> Device.submit token device 2) (\_ -> print "unexpected callback") of
             Nothing -> print "rejected"
             Just _ ->
-                print (NativeRequest.counts host)
+                print (Runtime.NativeRequest.counts host)
                 pause "running"))
 
-main() = Coroutine.scope (\scope ->
-    first = Work.register (Coroutine.facet scope) producer
-    second = Work.register (Coroutine.facet scope) producer
-    owner = Work.owner scope
-    print (Work.advance owner first ())
-    print (Work.advance owner second ())
+main() = Runtime.Coroutine.scope (\scope ->
+    first = Runtime.Work.register (Runtime.Coroutine.facet scope) producer
+    second = Runtime.Work.register (Runtime.Coroutine.facet scope) producer
+    owner = Runtime.Work.owner scope
+    print (Runtime.Work.advance owner first ())
+    print (Runtime.Work.advance owner second ())
     print "draining children")

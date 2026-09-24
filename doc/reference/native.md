@@ -43,7 +43,7 @@ error. It is not validated on the way out the way String and Char are, because
 must answer storage nothing will write again, never a view into a buffer it
 reuses, because a `Bytes` never aliases what something else can change.
 
-The bundled `Native.Any` crosses as Go `any`. It is intended only as the private
+The bundled `Runtime.Native.Any` crosses as Go `any`. It is intended only as the private
 field of a nominal wrapper owned by a library with a Go sidecar. Its constructor
 is not exposed, and the type has no equality, display, pattern-matching, or wire
 format. The interpreter evaluates Core beside the sidecars, so the Go object
@@ -52,12 +52,12 @@ stays on one heap rather than being encoded as an ID in a native table.
 One kind of declared type also crosses: a type the same module declares with
 exactly one constructor holding exactly one boundary value, such as
 `type Token = Token Int`, may appear as a parameter or result. The Go function
-sees the underlying value (`int64` here, or `any` for `Native.Any`); the compiler projects the field on the way in
+sees the underlying value (`int64` here, or `any` for `Runtime.Native.Any`); the compiler projects the field on the way in
 and rebuilds the constructor on the way out, in both backends. Keep the
 constructor out of the module's exposing list and derive no `Show` or `Eq`,
 and callers hold an opaque handle they can neither forge nor inspect — the
 bundled `File.Handle`, `Net.Listener`, and `Net.Connection` use this with
-`Native.Any`, with `{-# resource #-}` adding their scoped capability contract.
+`Runtime.Native.Any`, with `{-# resource #-}` adding their scoped capability contract.
 The indexed storage forms below additionally admit opaque typed payloads.
 Other direct functions, ADTs, records, polymorphic variables, class constraints,
 Go type parameters, and multiple results are `NATIVE ABI` errors. A Go `error` result is likewise
@@ -79,11 +79,11 @@ as an indexed native wrapper, its constructor cannot be applied or matched in
 Fango, even in its defining module (`NATIVE HANDLE REPRESENTATION`). This
 prevents unpacking and rebuilding a handle at another index.
 
-Representation-blind storage uses a resource wrapper over `Native.Any`:
+Representation-blind storage uses a resource wrapper over `Runtime.Native.Any`:
 
 ```fango
 {-# resource #-}
-type Box a = Box Native.Any
+type Box a = Box Runtime.Native.Any
 
 box : a ->{IO} Box a
 box = native
@@ -112,7 +112,7 @@ Storage alone grants no sharing permission. The bundled
 ## Shared native resources
 
 `{-# shared-resource #-}` implies `resource` and requires exactly one constructor
-with one canonical `Native.Any` field. It declares that the native operations
+with one canonical `Runtime.Native.Any` field. It declares that the native operations
 provide their own synchronization. Sharing is nominal: another resource type
 with the same Go representation remains unshared. Native implementations are
 trusted to honor this declaration.
@@ -148,7 +148,7 @@ a hidden context argument. Sidecars may use `FangoHost` only during a native
 call and must not replace it or retain it for asynchronous work.
 
 Background work instead uses [NativeRequest's scoped token protocol](library-native-requests.md).
-The canonical `NativeRequest.Registration` is an imported boundary wrapper for
+The canonical `Runtime.NativeRequest.Registration` is an imported boundary wrapper for
 checked Unit-returning submissions. Its `FangoRequest` support alias carries
 readiness and quiescence authority, never a Fango callback or process host.
 

@@ -1,6 +1,6 @@
 import Stream
 import List
-import Coroutine
+import Runtime.Coroutine
 
 produce : Int ->{Stream.Yield (() -> Int)} ()
 produce n =
@@ -12,12 +12,12 @@ produce n =
 main() =
     callbacks = Stream.toList (Stream.generate (\_ -> produce 5))
     print (List.map (\f -> f ()) callbacks)
-    print (Coroutine.with
+    print (Runtime.Coroutine.with
         (\pause _ ->
             shifted x = pause (x + 100)
             shifted 7 + 1)
-        (\work -> case Coroutine.advance work 0 of
-            Coroutine.Suspended request -> case Coroutine.advance work 40 of
-                Coroutine.Finished value -> (request, value)
+        (\work -> case Runtime.Coroutine.advance work 0 of
+            Runtime.Coroutine.Suspended request -> case Runtime.Coroutine.advance work 40 of
+                Runtime.Coroutine.Finished value -> (request, value)
                 _ -> (0, 0)
             _ -> (0, 0)))

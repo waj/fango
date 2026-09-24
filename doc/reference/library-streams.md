@@ -53,7 +53,7 @@ next : Iterator a e ->{Drive | e} Maybe a
 fromCoroutine : Coroutine a () () e -> Iterator a e
 ```
 
-Import `Coroutine.Drive` for consumer annotations. `Iterator a e` is an ordinary
+Import `Runtime.Coroutine.Drive` for consumer annotations. `Iterator a e` is an ordinary
 opaque resource wrapping `Coroutine a () () e`; `Iterator.fromCoroutine` adapts
 an existing coroutine without changing its owner or lifetime. `next` advances
 with Unit and maps `Suspended value` to `Just value`, and both `Finished ()` and

@@ -1,34 +1,34 @@
-import Coroutine
-import Service
-import Work
+import Runtime.Coroutine
+import Runtime.Service
+import Runtime.Work
 
 {-# service #-}
 effect Dispatch
-    submit : Int ->{Service.Invocation Int ()} ()
+    submit : Int ->{Runtime.Service.Invocation Int ()} ()
 
-type Bound = Bound (Int ->{Service.Invocation Int ()} ())
+type Bound = Bound (Int ->{Runtime.Service.Invocation Int ()} ())
 
 bind offset = handle Bound (\value -> submit value) of
-    submit value -> resume (Service.invoke (value + offset))
+    submit value -> resume (Runtime.Service.invoke (value + offset))
 
 class Submit context
-    deliver : context -> Int ->{Service.Invocation Int ()} ()
+    deliver : context -> Int ->{Runtime.Service.Invocation Int ()} ()
 
 instance Submit Bound
     deliver (Bound service) value = service value
 
-worker service pause () = Service.run pause (\_ ->
+worker service pause () = Runtime.Service.run pause (\_ ->
     deliver service 1
     42)
 
 context = bind 10
 
 main() =
-    Coroutine.scope (\scope ->
-        first = Work.register (Coroutine.facet scope) (worker context)
-        second = Work.register (Coroutine.facet scope) (worker context)
-        owner = Work.owner scope
-        print (Work.advance owner first ())
-        print (Work.advance owner second ())
-        print (Work.advance owner first ())
-        print (Work.advance owner second ()))
+    Runtime.Coroutine.scope (\scope ->
+        first = Runtime.Work.register (Runtime.Coroutine.facet scope) (worker context)
+        second = Runtime.Work.register (Runtime.Coroutine.facet scope) (worker context)
+        owner = Runtime.Work.owner scope
+        print (Runtime.Work.advance owner first ())
+        print (Runtime.Work.advance owner second ())
+        print (Runtime.Work.advance owner first ())
+        print (Runtime.Work.advance owner second ()))

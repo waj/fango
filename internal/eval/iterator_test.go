@@ -22,7 +22,7 @@ func TestMachineIteratorSessionClosesSuspendedCleanupScope(t *testing.T) {
 	bracket := &core.Bracket{Scope: sup.FreshScope(), Resource: "resource", ResourceTy: b.Int,
 		Acquire: &core.IntLit{Val: 7, Ty: b.Int}, Release: &core.UnitLit{Ty: b.Unit}, Body: body, Ty: b.Unit,
 		Control: types.Control{Transport: types.Machine}}
-	p := &core.Prog{Defs: []core.Def{{Name: types.ScopeBracketName, Owner: "Scope", Type: b.Unit,
+	p := &core.Prog{Defs: []core.Def{{Name: types.ScopeBracketName, Owner: "Runtime.Scope", Type: b.Unit,
 		Control: types.Control{Transport: types.Machine}, Body: bracket}}}
 	mp, errs := machineir.Lower(p, b)
 	if len(errs) != 0 {
@@ -70,7 +70,7 @@ func TestIteratorScopeRunsThroughInstalledMachineLowering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item, ok := value.(*CtorVal); !ok || item.Ctor.Name != "Coroutine.Suspended" || item.Fields[0] != int64(7) {
+	if item, ok := value.(*CtorVal); !ok || item.Ctor.Name != "Runtime.Coroutine.Suspended" || item.Fields[0] != int64(7) {
 		t.Fatalf("iterator scope result = %#v, want Just 7", value)
 	}
 	producerWorker := ""

@@ -14,7 +14,7 @@ func TestDynamicCoroutineContractsAcrossModuleObjects(t *testing.T) {
 			path := filepath.Join("..", "..", "testdata", "run", fixture+".fango")
 			compileEvents(t, path, cache)
 			_, events := compileEvents(t, path, cache)
-			if events["checked-cache-hit"]["Coroutine"] != 1 || events["checked-cache-hit"]["Work"] != 1 {
+			if events["checked-cache-hit"]["Runtime.Coroutine"] != 1 || events["checked-cache-hit"]["Runtime.Work"] != 1 {
 				t.Fatalf("missing cached contracts: %v", events)
 			}
 		})

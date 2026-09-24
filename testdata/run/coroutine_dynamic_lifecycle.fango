@@ -1,51 +1,51 @@
-import Coroutine
-import Scope
+import Runtime.Coroutine
+import Runtime.Scope
 import Fail
 
-unstarted : (String ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension, IO} ()
+unstarted : (String ->{Runtime.Coroutine.Suspension} ()) -> () ->{Runtime.Coroutine.Suspension, IO} ()
 unstarted pause = unstarted pause
 
 producer name pause () =
     print ("start " ++ name)
-    Scope.finally (\_ ->
+    Runtime.Scope.finally (\_ ->
         pause name
         print ("finish " ++ name)) (\_ -> print ("cleanup " ++ name))
 
 repeat scope n =
     if n == 0 then ()
     else
-        work = Coroutine.create scope (\_ () -> n)
-        ignored = Coroutine.advance work ()
+        work = Runtime.Coroutine.create scope (\_ () -> n)
+        ignored = Runtime.Coroutine.advance work ()
         repeat scope (n - 1)
 
-body scope = Coroutine.create scope (\pause () ->
+body scope = Runtime.Coroutine.create scope (\pause () ->
     print "child"
-    grandchild = Coroutine.create scope (\childPause () ->
+    grandchild = Runtime.Coroutine.create scope (\childPause () ->
         ignored = if False then childPause () else ()
         42)
     pause ()
     grandchild)
 
 main() =
-    Coroutine.scope (\scope ->
-        never = Coroutine.create scope unstarted
-        Coroutine.close never
-        Coroutine.close never
-        a = Coroutine.create scope (producer "a")
-        b = Coroutine.create scope (producer "b")
-        print (Coroutine.advance a ())
-        print (Coroutine.advance b ())
+    Runtime.Coroutine.scope (\scope ->
+        never = Runtime.Coroutine.create scope unstarted
+        Runtime.Coroutine.close never
+        Runtime.Coroutine.close never
+        a = Runtime.Coroutine.create scope (producer "a")
+        b = Runtime.Coroutine.create scope (producer "b")
+        print (Runtime.Coroutine.advance a ())
+        print (Runtime.Coroutine.advance b ())
         repeat scope 100)
-    Coroutine.scope (\scope ->
+    Runtime.Coroutine.scope (\scope ->
         child = body scope
         print "body done"
-        ignored = Coroutine.advance child ()
-        case Coroutine.advance child () of
-            Coroutine.Finished grandchild -> print (Coroutine.advance grandchild ())
+        ignored = Runtime.Coroutine.advance child ()
+        case Runtime.Coroutine.advance child () of
+            Runtime.Coroutine.Finished grandchild -> print (Runtime.Coroutine.advance grandchild ())
             _ -> ())
-    result = Fail.attempt (\_ -> Coroutine.scope (\scope ->
-        a = Coroutine.create scope (producer "failed-driver")
-        ignored = Coroutine.advance a ()
+    result = Fail.attempt (\_ -> Runtime.Coroutine.scope (\scope ->
+        a = Runtime.Coroutine.create scope (producer "failed-driver")
+        ignored = Runtime.Coroutine.advance a ()
         Fail.fail "driver"
         ()))
     print result

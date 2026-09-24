@@ -15,16 +15,16 @@ import (
 
 func TestOrdinaryHandlerStaysDirectAcrossOwnedCoroutine(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "Main.fango")
-	source := `import Coroutine
+	source := `import Runtime.Coroutine
 effect Ask
     ask : () -> Int
 askOne : () ->{Ask} Int
 askOne _ = ask ()
 main =
     handle
-        (Coroutine.with
+        (Runtime.Coroutine.with
             (\pause initial -> pause (askOne () + initial))
-            (\work -> Coroutine.advance work 1)) of
+            (\work -> Runtime.Coroutine.advance work 1)) of
         ask () -> resume 2
 `
 	if err := os.WriteFile(path, []byte(source), 0644); err != nil {
@@ -66,13 +66,13 @@ main =
 
 func TestCoroutineContractsSurviveCodecsAndRejectStaleProofs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "Main.fango")
-	if err := os.WriteFile(path, []byte("import Coroutine\nmain = Coroutine.with (\\pause initial -> pause initial) (\\work -> Coroutine.advance work 42)\n"), 0644); err != nil {
+	if err := os.WriteFile(path, []byte("import Runtime.Coroutine\nmain = Runtime.Coroutine.with (\\pause initial -> pause initial) (\\work -> Runtime.Coroutine.advance work 42)\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	cache := newMemoryObjectCache()
 	compileEvents(t, path, cache)
 	result, events := compileEvents(t, path, cache)
-	if events["checked-cache-hit"]["Coroutine"] != 1 {
+	if events["checked-cache-hit"]["Runtime.Coroutine"] != 1 {
 		t.Fatalf("Coroutine cache miss: %#v", events)
 	}
 	lowered, errs := machine.Lower(result.Program, result.Checker.B)

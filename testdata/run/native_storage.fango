@@ -1,7 +1,7 @@
-import Native
+import Runtime.Native
 
 {-# resource #-}
-type Box a = Box Native.Any
+type Box a = Box Runtime.Native.Any
 
 box : a ->{IO} Box a
 box = native

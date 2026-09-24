@@ -44,6 +44,11 @@ filename, so `Main.fango` declares `Main`. Headerless entry files remain
 compatible, receive a private synthetic identity, and cannot themselves be
 imported.
 
+Bundled modules use the same dotted-name path convention beneath `stdlib/`.
+For example, `Runtime.Coroutine` is stored at `stdlib/Runtime/Coroutine.fango`;
+its native sidecar, when present, sits beside it as
+`stdlib/Runtime/Coroutine.native.go`.
+
 ## Prelude and implicit dependencies
 
 Fango also ships standard-library modules, in the

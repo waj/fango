@@ -16,6 +16,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -189,7 +190,7 @@ func SetForTest(dir string) func() {
 // "List.fango" or "IO.native.go". A name that is not exactly an entry of
 // stdlib/ misses with fs.ErrNotExist, which is how a caller distinguishes a
 // module the library does not have from a library it cannot find.
-func ReadStdlib(name string) ([]byte, error) { return read("stdlib", name, 0) }
+func ReadStdlib(name string) ([]byte, error) { return read("stdlib", name, -1) }
 
 // ReadRuntime reads one Go runtime support file named by its package and
 // plain name, for example "fangort/list.go".
@@ -220,13 +221,25 @@ func read(root, rel string, depth int) ([]byte, error) {
 	return t.read(filepath.Join(abs, filepath.FromSlash(dir)), name)
 }
 
-// StdlibNatives lists the standard library's Go sidecars by plain name.
+// StdlibNatives lists the standard library's Go sidecars by path relative to
+// stdlib/, including sidecars belonging to nested modules.
 func StdlibNatives() ([]string, error) {
+	return stdlibFiles(func(name string) bool { return strings.HasSuffix(name, ".native.go") })
+}
+
+func stdlibFiles(keep func(string) bool) ([]string, error) {
 	t, err := lookup("stdlib")
 	if err != nil {
 		return nil, err
 	}
-	return t.list(func(name string) bool { return strings.HasSuffix(name, ".native.go") }), nil
+	var names []string
+	for name := range t.names {
+		if keep(name) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 // RuntimePackage lists one runtime package's Go sources, each as
@@ -238,7 +251,7 @@ func RuntimePackage(pkg string) ([]string, error) {
 		return nil, err
 	}
 	names := t.list(func(name string) bool {
-		return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
+		return !strings.Contains(name, "/") && strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
 	})
 	for i, name := range names {
 		names[i] = pkg + "/" + name
@@ -252,7 +265,7 @@ func InternalPackage(pkg string) ([]string, error) {
 		return nil, err
 	}
 	names := t.list(func(name string) bool {
-		return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
+		return !strings.Contains(name, "/") && strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
 	})
 	for i, name := range names {
 		names[i] = pkg + "/" + name

@@ -1,5 +1,5 @@
 import Actions exposing (..)
-import Completion
+import Runtime.Completion
 import Failure
 import Helpers
 import Fail
@@ -7,7 +7,7 @@ import Fail
 observe flag =
     handle (handle (\_ ->
         completed = Actions.captureAction flag
-        case Completion.failure completed of
+        case Runtime.Completion.failure completed of
             Just failure -> print (Failure.argumentCount failure)
             Nothing -> print 0
         print (Helpers.replay completed))() of
@@ -18,7 +18,7 @@ main() =
     observe True
     observe False
     print (Fail.attempt (\_ ->
-        completed = Completion.capture (\_ ->
+        completed = Runtime.Completion.capture (\_ ->
             Fail.fail "saved"
             0)
         case Helpers.inspect completed of

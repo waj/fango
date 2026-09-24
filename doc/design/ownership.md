@@ -11,12 +11,12 @@ field can. A nominal resource pragma marks a type capture-capable independently
 of representation. It remains nominal metadata after resolution and requires
 opaque exports, hiding constructors, fields, and reflected schema. The defining
 module and native code own representation correctness. File and socket handles
-use this mechanism over `Native.Any`, with no resource-name or native handle
+use this mechanism over `Runtime.Native.Any`, with no resource-name or native handle
 registry.
 
-Handlers and cleanup/cursor scopes have distinct ScopeIDs. Scope.bracket binds
+Handlers and cleanup/cursor scopes have distinct ScopeIDs. Runtime.Scope.bracket binds
 its owner to a capture-capable resource; ordinary scalar resources, including
-Scope.finally's Unit, introduce no borrowed capture. Parameterized handlers are
+the Unit result of `Runtime.Scope.finally` introduces no borrowed capture. Parameterized handlers are
 scoped even if their nominal effect is normally durable.
 
 A result may not retain a scoped activation/resource, including through ADTs,

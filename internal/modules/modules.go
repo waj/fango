@@ -959,7 +959,7 @@ func (b nativeBoundary) nativeGoType(t ast.TypeExpr) string {
 	if b.bytesAllowed && !b.localTypes[n.Name] && (n.Name == "Bytes" || n.Name == "Bytes.Bytes") {
 		return goBytesType
 	}
-	if !b.localTypes[n.Name] && (n.Name == "Native.Any" || n.Name == "Any") {
+	if !b.localTypes[n.Name] && (n.Name == "Runtime.Native.Any" || n.Name == "Any") {
 		return "any"
 	}
 	return b.wrappers[n.Name]
@@ -978,7 +978,7 @@ func boundaryGoTypeSpelling(t ast.TypeExpr) string {
 		return scalar
 	}
 	n, ok := t.(*ast.TName)
-	if ok && (n.Name == "Native.Any" || n.Name == "Any") {
+	if ok && (n.Name == "Runtime.Native.Any" || n.Name == "Any") {
 		return "any"
 	}
 	return ""

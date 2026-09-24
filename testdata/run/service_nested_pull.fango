@@ -1,17 +1,17 @@
-import Coroutine
-import Service
+import Runtime.Coroutine
+import Runtime.Service
 import Stream
 
 {-# service #-}
 effect Dispatch
-    submit : Int ->{Service.Invocation Int ()} ()
+    submit : Int ->{Runtime.Service.Invocation Int ()} ()
 
-type Bound = Bound (Int ->{Service.Invocation Int ()} ())
+type Bound = Bound (Int ->{Runtime.Service.Invocation Int ()} ())
 
 bind offset = handle Bound (\value -> submit value) of
-    submit value -> resume (Service.invoke (value + offset))
+    submit value -> resume (Runtime.Service.invoke (value + offset))
 
-producer (Bound service) pause () = Service.run pause (\_ ->
+producer (Bound service) pause () = Runtime.Service.run pause (\_ ->
     Stream.toList (Stream.generate (\_ ->
         service 1
         Stream.yield "first"
@@ -20,7 +20,7 @@ producer (Bound service) pause () = Service.run pause (\_ ->
 
 main() =
     context = bind 20
-    Coroutine.with (producer context) (\cursor ->
-        print (Coroutine.advance cursor ())
-        print (Coroutine.advance cursor ())
-        print (Coroutine.advance cursor ()))
+    Runtime.Coroutine.with (producer context) (\cursor ->
+        print (Runtime.Coroutine.advance cursor ())
+        print (Runtime.Coroutine.advance cursor ())
+        print (Runtime.Coroutine.advance cursor ()))

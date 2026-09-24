@@ -1,29 +1,29 @@
-import Coroutine
-import Work
+import Runtime.Coroutine
+import Runtime.Work
 import Fail
-import Scope
+import Runtime.Scope
 import Result exposing (Result)
 
-failed : (() ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension, Fail.Fail String} Int
-failed pause () = Scope.finally (\_ ->
+failed : (() ->{Runtime.Coroutine.Suspension} ()) -> () ->{Runtime.Coroutine.Suspension, Fail.Fail String} Int
+failed pause () = Runtime.Scope.finally (\_ ->
     pause ()
     Fail.fail "child") (\_ -> Fail.fail "cleanup")
 
-type Producer request reply result e = Producer ((request ->{Coroutine.Suspension} reply) -> reply ->{Coroutine.Suspension | e} result)
+type Producer request reply result e = Producer ((request ->{Runtime.Coroutine.Suspension} reply) -> reply ->{Runtime.Coroutine.Suspension | e} result)
 source : Producer () () Int {Fail.Fail String}
 source = Producer failed
-register : Coroutine.Facet -> Producer request reply result e ->{e} Work.Work request reply result
-register facet (Producer producer) = Work.register facet producer
+register : Runtime.Coroutine.Facet -> Producer request reply result e ->{e} Runtime.Work.Work request reply result
+register facet (Producer producer) = Runtime.Work.register facet producer
 
 attempt : (() ->{Fail.Fail String | e} a) ->{e} Result String a
 attempt = Fail.attempt
 
-observe : Coroutine.Scope {IO, Fail.Fail String} ->{Coroutine.Drive, IO, Fail.Fail String} ()
+observe : Runtime.Coroutine.Scope {IO, Fail.Fail String} ->{Runtime.Coroutine.Drive, IO, Fail.Fail String} ()
 observe scope =
-    work = register (Coroutine.facet scope) source
-    owner = Work.owner scope
-    print (attempt (\_ -> Work.advance owner work ()))
-    print (attempt (\_ -> Work.advance owner work ()))
-    print (attempt (\_ -> Work.advance owner work ()))
+    work = register (Runtime.Coroutine.facet scope) source
+    owner = Runtime.Work.owner scope
+    print (attempt (\_ -> Runtime.Work.advance owner work ()))
+    print (attempt (\_ -> Runtime.Work.advance owner work ()))
+    print (attempt (\_ -> Runtime.Work.advance owner work ()))
 
-main() = print (attempt (\_ -> Coroutine.scope observe))
+main() = print (attempt (\_ -> Runtime.Coroutine.scope observe))

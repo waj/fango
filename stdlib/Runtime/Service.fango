@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Service exposing (Invocation(..), run)
+module Runtime.Service exposing (Invocation(..), run)
 
 -- Call a shared service from the coroutine that is currently doing the work.
 -- A service handler may retain its context across calls, while each call uses
@@ -8,7 +8,7 @@ module Service exposing (Invocation(..), run)
 -- through the caller's pause callback.
 
 import Basics exposing (..)
-import Coroutine exposing (Suspension)
+import Runtime.Coroutine exposing (Suspension)
 
 -- The request/reply protocol used by a service call. Every operation of a
 -- service effect must use the same protocol. Invocation authority comes from

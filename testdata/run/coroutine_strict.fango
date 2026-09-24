@@ -1,4 +1,4 @@
-import Coroutine
+import Runtime.Coroutine
 
 mark label value =
     print label
@@ -7,15 +7,15 @@ mark label value =
 keep first _ = first
 
 main() =
-    Coroutine.with (\pause initial -> pause initial) (\work ->
-        print (Coroutine.advance work (mark "input" 1))
-        print (Coroutine.advance work (mark "reply" 2))
-        print (Coroutine.advance work (mark "terminal" 3)))
-    Coroutine.with (\outer () ->
-        Coroutine.with (\_ () -> outer 7) (\inner ->
-            pending = keep (Coroutine.advance inner ())
+    Runtime.Coroutine.with (\pause initial -> pause initial) (\work ->
+        print (Runtime.Coroutine.advance work (mark "input" 1))
+        print (Runtime.Coroutine.advance work (mark "reply" 2))
+        print (Runtime.Coroutine.advance work (mark "terminal" 3)))
+    Runtime.Coroutine.with (\outer () ->
+        Runtime.Coroutine.with (\_ () -> outer 7) (\inner ->
+            pending = keep (Runtime.Coroutine.advance inner ())
             print "partial evaluated"
             ignored = pending ()
             ())) (\work ->
-        print (Coroutine.advance work ())
-        print (Coroutine.advance work ()))
+        print (Runtime.Coroutine.advance work ())
+        print (Runtime.Coroutine.advance work ()))

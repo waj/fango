@@ -6,9 +6,9 @@ import Bytes exposing (Bytes, Sink(..), Source(..))
 import Fail exposing (Fail, fromResult)
 import IO exposing (IO)
 import Maybe exposing (Maybe(..))
-import Native
 import Result exposing (Result(..))
-import Scope
+import Runtime.Native
+import Runtime.Scope
 
 {- TCP sockets as scoped resources. Listener and Connection contain opaque Go
 values, but their constructors stay private; the resource checker prevents a
@@ -19,10 +19,10 @@ type Kind = ConnectionRefused | ConnectionReset | AddressInUse | TimedOut | Othe
 type Error = { kind : Kind, address : String, message : String } deriving (Eq, Show)
 
 {-# resource #-}
-type Listener = Listener Native.Any
+type Listener = Listener Runtime.Native.Any
 
 {-# resource #-}
-type Connection = Connection Native.Any
+type Connection = Connection Runtime.Native.Any
 
 listen : Int ->{IO} Result Error Listener
 listen = native
@@ -58,17 +58,17 @@ closeConnectionFail connection = fromResult (closeConnection connection)
 -- every exit from use.
 withListener : Int -> (Listener ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withListener port use =
-    Scope.bracket (\_ -> fromResult (listen port)) closeListenerFail use
+    Runtime.Scope.bracket (\_ -> fromResult (listen port)) closeListenerFail use
 
 -- accept waits for one client and scopes the accepted connection.
 accept : Listener -> (Connection ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 accept listener use =
-    Scope.bracket (\_ -> fromResult (acceptConnection listener)) closeConnectionFail use
+    Runtime.Scope.bracket (\_ -> fromResult (acceptConnection listener)) closeConnectionFail use
 
 -- withClient connects to host and port and scopes the connection.
 withClient : String -> Int -> (Connection ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withClient host port use =
-    Scope.bracket (\_ -> fromResult (dial host port)) closeConnectionFail use
+    Runtime.Scope.bracket (\_ -> fromResult (dial host port)) closeConnectionFail use
 
 chunk : Int
 chunk = 8192

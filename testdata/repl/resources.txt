@@ -1,11 +1,11 @@
 Fango 0.1 — :help for commands
-> loaded Scope
+> loaded Runtime.Scope
 > | | Handle : Int -> Handle
 withHandle : (Handle ->{e} a) ->{e} a
 > 42 : Num a => a
 > -- RESOURCE ESCAPES ------------------------------------- <repl>
 
-`scope result` retains the resource owned by cleanup scope for `Handle` in `Scope.bracket`. The returned value outlives that resource's scope.
+`scope result` retains the resource owned by cleanup scope for `Handle` in `Runtime.Scope.bracket`. The returned value outlives that resource's scope.
 
 1| withHandle (\resource -> resource)
    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

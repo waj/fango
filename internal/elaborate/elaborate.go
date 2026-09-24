@@ -129,7 +129,7 @@ func intrinsicIdentities(ck *infer.Checker) map[string]bool {
 //
 // intrinsics names the compiler intrinsics the increment declared; their
 // synthesized definitions are installed with it, exactly as Module installs
-// them for a program, so a module that calls `Scope.bracket` lints and runs.
+// them for a program, so a module that calls `Runtime.Scope.bracket` lints and runs.
 // context holds the session's already-installed definitions, which the
 // capture analysis reads for the call-site rules (core.InferCapturesIn).
 func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsics []string, context []core.Def, ck *infer.Checker) ([]core.Def, []diag.Error) {

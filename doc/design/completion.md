@@ -7,7 +7,7 @@ Completion introduction, replay evidence, and capture preservation.
 
 ## Core and evidence
 
-The bundled `Completion.capture`, `Completion.replay`, and `Completion.failure`
+The bundled `Runtime.Completion.capture`, `Runtime.Completion.replay`, and `Runtime.Completion.failure`
 intrinsics elaborate to `core.Completion`. Their public result/row relationship
 is checked before row erasure. Core retains the result type, operation identity,
 residual invocation row, execution control, and checked Maybe descriptor for

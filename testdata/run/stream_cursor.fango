@@ -1,14 +1,14 @@
-import Coroutine
+import Runtime.Coroutine
 import Stream
 import Iterator
 import Maybe exposing (Maybe(..))
 
-foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Coroutine.Drive | e} b
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Runtime.Coroutine.Drive | e} b
 foldCursor combine initial cursor = case Iterator.next cursor of
     Nothing -> initial
     Just value -> foldCursor combine (combine value initial) cursor
 
-eachCursor : (a ->{e} ()) -> Iterator.Iterator a e ->{Coroutine.Drive | e} ()
+eachCursor : (a ->{e} ()) -> Iterator.Iterator a e ->{Runtime.Coroutine.Drive | e} ()
 eachCursor action cursor = case Iterator.next cursor of
     Nothing -> ()
     Just value ->

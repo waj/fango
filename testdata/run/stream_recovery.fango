@@ -1,10 +1,10 @@
 import Stream
 import Iterator
 import Fail
-import Scope
+import Runtime.Scope
 
 source = Stream.generate (\_ ->
-    Scope.finally (\_ ->
+    Runtime.Scope.finally (\_ ->
         Stream.yield 9
         Fail.fail "producer failed") (\_ -> print "closed"))
 

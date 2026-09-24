@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Cell exposing (Publisher, Reader, create, publish, read, reader)
+module Runtime.Cell exposing (Publisher, Reader, create, publish, read, reader)
 
 -- A scope-owned cell that accepts one value and then allows repeated reads.
 -- Create it in a Coroutine scope, give its Reader to children in that scope,
@@ -8,29 +8,29 @@ module Cell exposing (Publisher, Reader, create, publish, read, reader)
 -- Stored values must be safe to share and cannot retain borrowed resources.
 
 import Basics exposing (..)
-import Coroutine
 import IO exposing (IO)
 import Maybe exposing (Maybe(..))
-import Native
+import Runtime.Coroutine
+import Runtime.Native
 
 -- Private native storage behind the publication capability. Its type index
 -- fixes the value type for this cell, even though the payload is opaque here.
 {-# shared-resource #-}
-type PublisherHandle a = PublisherHandle Native.Any
+type PublisherHandle a = PublisherHandle Runtime.Native.Any
 
 -- Private native view of the same storage, limited to readiness and reads.
 {-# shared-resource #-}
-type ReaderHandle a = ReaderHandle Native.Any
+type ReaderHandle a = ReaderHandle Runtime.Native.Any
 
 -- The capability to try to publish one value of type `a`. It retains the
 -- creating Coroutine scope, so it cannot escape that scope's lifetime.
 {-# resource #-}
-type Publisher a = Publisher Coroutine.Facet (PublisherHandle a)
+type Publisher a = Publisher Runtime.Coroutine.Facet (PublisherHandle a)
 
 -- A read-only view of the cell. It shares the stored value and readiness with
 -- every other Reader of this Publisher and retains the same scope lifetime.
 {-# resource #-}
-type Reader a = Reader Coroutine.Facet (ReaderHandle a)
+type Reader a = Reader Runtime.Coroutine.Facet (ReaderHandle a)
 
 -- Allocate empty native storage for a value of one fixed type.
 cellNew : () ->{IO} PublisherHandle a
@@ -54,8 +54,8 @@ cellRead = native
 
 -- Allocate an empty cell owned by `scope` and return its Publisher. The cell
 -- and any Readers derived from it cannot outlive that scope.
-create : Coroutine.Scope e ->{IO} Publisher a
-create scope = Publisher (Coroutine.facet scope) (cellNew())
+create : Runtime.Coroutine.Scope e ->{IO} Publisher a
+create scope = Publisher (Runtime.Coroutine.facet scope) (cellNew())
 
 -- Make a read-only view of this Publisher. Multiple Readers observe the same
 -- first published value; none can publish through this view.

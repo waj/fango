@@ -123,7 +123,7 @@ type IOContext struct {
 
 // NativeCaller is the runtime sidecar seam. The compiler-hosted evaluator can
 // use an out-of-process caller for scalar-only tests; the generated evaluation
-// worker installs a direct caller so Native.Any values never leave its heap.
+// worker installs a direct caller so Runtime.Native.Any values never leave its heap.
 type NativeCaller interface {
 	Has(string) bool
 	Call(context.Context, fangort.SessionHost, string, []any) (any, error)

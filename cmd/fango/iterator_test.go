@@ -36,9 +36,9 @@ main() = print "unreachable"
 func TestImportedScopeContractRejectsSuspendingCallbacks(t *testing.T) {
 	dir := t.TempDir()
 	wrapper := `module Resource exposing (withResource)
-import Scope
+import Runtime.Scope
 
-withResource acquire release use = Scope.bracket acquire release use
+withResource acquire release use = Runtime.Scope.bracket acquire release use
 `
 	if err := os.WriteFile(filepath.Join(dir, "Resource.fango"), []byte(wrapper), 0600); err != nil {
 		t.Fatal(err)

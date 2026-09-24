@@ -15,14 +15,14 @@ func coroutineWithDef(ty types.Type, ck *infer.Checker) core.Def {
 		return core.EffectInstance{Unique: e.Unique, Name: e.Name, Captures: types.ScopeCapture(scope), Control: types.Control{Transport: types.Machine}}
 	}
 	control := core.ArrowControl(ty, 2)
-	return core.Def{Name: types.CoroutineWithName, Owner: "Coroutine", Type: ty, TyParams: runtimeRigidVars(ty), Params: []string{"_producer", "_consumer"}, ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture()}, Control: control,
+	return core.Def{Name: types.CoroutineWithName, Owner: "Runtime.Coroutine", Type: ty, TyParams: runtimeRigidVars(ty), Params: []string{"_producer", "_consumer"}, ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture()}, Control: control,
 		Body: &core.CoroutineScope{Yield: effect(types.CoroutineSuspensionName), Traversal: effect(types.CoroutineDriveName), Scope: scope, Producer: &core.VarRef{Name: "_producer", Local: true, Ty: producer}, Consumer: &core.VarRef{Name: "_consumer", Local: true, Ty: consumer}, CursorTy: consumer.Arg, Ty: result, Control: control}}
 }
 
 func coroutineAdvanceDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 	arity := types.IntrinsicArity(name)
 	args, result := core.PeelFun(ty, arity)
-	d := core.Def{Name: name, Owner: "Coroutine", Type: ty, TyParams: runtimeRigidVars(ty), Params: []string{"_cursor"}, ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture()}, Control: core.ArrowControl(ty, arity)}
+	d := core.Def{Name: name, Owner: "Runtime.Coroutine", Type: ty, TyParams: runtimeRigidVars(ty), Params: []string{"_cursor"}, ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture()}, Control: core.ArrowControl(ty, arity)}
 	n := &core.CoroutineAdvance{Cursor: &core.VarRef{Name: "_cursor", Local: true, Ty: args[0]}, Access: types.ExclusiveAdvance, Ty: result, Close: name == types.CoroutineCloseName}
 	if !n.Close {
 		d.Params = append(d.Params, "_reply")
@@ -37,7 +37,7 @@ func coroutineAdvanceDef(name string, ty types.Type, ck *infer.Checker) core.Def
 func coroutineDynamicDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 	arity := types.IntrinsicArity(name)
 	args, result := core.PeelFun(ty, arity)
-	d := core.Def{Name: name, Owner: "Coroutine", Type: ty, TyParams: runtimeRigidVars(ty), Control: core.ArrowControl(ty, arity)}
+	d := core.Def{Name: name, Owner: "Runtime.Coroutine", Type: ty, TyParams: runtimeRigidVars(ty), Control: core.ArrowControl(ty, arity)}
 	refs := make([]core.Expr, arity)
 	for i, n := range []string{"_scope", "_producer"}[:arity] {
 		d.Params = append(d.Params, n)

@@ -16,6 +16,25 @@ type testHost struct {
 	out strings.Builder
 }
 
+func TestBundledSourcesUseCanonicalNestedModuleNames(t *testing.T) {
+	sources, err := BundledSources()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundCell, foundRequests := false, false
+	for _, source := range sources {
+		switch source.Module {
+		case "Runtime.Cell":
+			foundCell = true
+		case "Runtime.NativeRequest":
+			foundRequests = true
+		}
+	}
+	if !foundCell || !foundRequests {
+		t.Fatalf("nested bundled sidecars missing: Cell=%v NativeRequest=%v", foundCell, foundRequests)
+	}
+}
+
 func (h *testHost) HasInput() (bool, error) {
 	_, err := h.in.Peek(1)
 	if err == io.EOF {

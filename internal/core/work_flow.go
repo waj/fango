@@ -25,7 +25,7 @@ type WorkNeed struct {
 // checking their rows. Inference solves these inclusions before generalization;
 // the ordinary Core flow pass reconstructs and checks them after elaboration.
 // Unknown parameter owners remain latent in the callable's contract until a
-// call substitutes an actual Work.run owner. Unknown rows are returned intact.
+// call substitutes an actual Runtime.Work.run owner. Unknown rows are returned intact.
 func CollectWorkNeeds(p *Prog, context []Def, b *types.Builtins) []WorkNeed {
 	a := newCaptureAnalyzer(p, b)
 	for i := range context {
@@ -209,7 +209,7 @@ func (f *flowChecker) checkWorkBudget(facet flowValue, need types.Type) {
 				}
 				return types.Show(t)
 			}
-			err := fmt.Errorf("WORK EFFECT BUDGET: registered effects %s exceed destination Work.run owner's budget %s in %s", show(need), show(o.budget), f.root)
+			err := fmt.Errorf("WORK EFFECT BUDGET: registered effects %s exceed destination Runtime.Work.run owner's budget %s in %s", show(need), show(o.budget), f.root)
 			f.errors[err.Error()] = err
 		}
 	}

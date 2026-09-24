@@ -1,7 +1,7 @@
 # Native retention and driver callbacks
 
 [NativeRequest](../reference/library-native-requests.md) owns the public API and
-sidecar protocol. Its scope uses ordinary `Scope.bracket`; registration and
+sidecar protocol. Its scope uses ordinary `Runtime.Scope.bracket`; registration and
 release are synchronous, so no owner can disappear during a drain. Dynamically
 owned coroutines may create their own request scopes and abandonment runs their
 drains before enclosing device cleanup.
@@ -23,7 +23,7 @@ ordinary ADT and closure flow propagates them into callback bindings. The graph
 exports the same obligations through helpers and module objects. Execution
 codecs preserve them, and the Core linter rejects missing or forged metadata.
 
-`NativeRequest.immediate` is a checked Completion introduction with an exported
+`Runtime.NativeRequest.immediate` is a checked Completion introduction with an exported
 non-suspension obligation. Capture analysis checks the actual action and its
 interpreted evidence using the same synchronous boundary as acquisition/release.
 It preserves the typed outcome and all capture obligations without inventing a

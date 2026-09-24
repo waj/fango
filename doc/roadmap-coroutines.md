@@ -148,7 +148,7 @@ regression gate, alongside production inference, codec, and backend tests.
 ## Stream and Iterator migration
 
 **DONE.** Stream and Iterator use the [ordinary wrappers](design/coroutines.md#ordinary-pull-libraries)
-over Coroutine. The [reference](reference/library-streams.md) owns their
+over Runtime.Coroutine. The [reference](reference/library-streams.md) owns their
 signatures, ordinary Yield handling, Drive annotations, demand, and ownership.
 There are no Stream-specific intrinsics or compatibility aliases.
 
@@ -294,7 +294,7 @@ C6a/C6c supply typed cells and shared service authority.
 
 **Dependencies:** C1; use C3/C4 consumers to exercise nested ownership.
 
-Extend existing Scope.bracket rather than adding a parallel API. Acquisition
+Extend existing Runtime.Scope.bracket rather than adding a parallel API. Acquisition
 may suspend; successful acquisition and registration of its release are one
 ownership transfer. Before success, acquisition owns partial-failure cleanup.
 Release may suspend while its owner remains in a closing state. Preserve LIFO

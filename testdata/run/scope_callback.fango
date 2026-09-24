@@ -1,4 +1,4 @@
-import Scope
+import Runtime.Scope
 import List exposing (List(..))
 import Result exposing (Result(..))
 
@@ -21,10 +21,10 @@ open label =
 close label = print ("close " ++ label)
 
 scoped : String ->{IO} String
-scoped label = Scope.bracket (\_ -> open label) close (\token -> "<" ++ token ++ ">")
+scoped label = Runtime.Scope.bracket (\_ -> open label) close (\token -> "<" ++ token ++ ">")
 
 guarded label =
-    Scope.bracket (\_ -> open label) close (\token ->
+    Runtime.Scope.bracket (\_ -> open label) close (\token ->
         if token == "stop" then fail "stopped" else "<" ++ token ++ ">")
 
 collect : (String ->{e} String) -> List String ->{e} String

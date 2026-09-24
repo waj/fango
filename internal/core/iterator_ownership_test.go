@@ -18,9 +18,9 @@ func iteratorProofFixture() (*Prog, *types.Builtins, *CoroutineScope, *Coroutine
 	a, z := sup.FreshRigid(types.General), sup.FreshRigid(types.General)
 	con := &types.TCon{Unique: sup.NextUnique(), Name: types.CoroutineStepName, Args: []types.Type{a, z}}
 	result := &types.ADTInfo{Con: con, Params: []*types.TVar{a, z}, Ctors: []*types.CtorInfo{
-		{Name: "Coroutine.Suspended", Index: 0, Fields: []types.Type{a}, Result: con},
-		{Name: "Coroutine.Finished", Index: 1, Fields: []types.Type{z}, Result: con},
-		{Name: "Coroutine.Closed", Index: 2, Result: con}}}
+		{Name: "Runtime.Coroutine.Suspended", Index: 0, Fields: []types.Type{a}, Result: con},
+		{Name: "Runtime.Coroutine.Finished", Index: 1, Fields: []types.Type{z}, Result: con},
+		{Name: "Runtime.Coroutine.Closed", Index: 2, Result: con}}}
 	step := &types.TCon{Unique: con.Unique, Name: con.Name, Args: []types.Type{b.Int, b.Unit}}
 	owner := sup.FreshScope()
 	suspension := EffectInstance{Unique: sup.NextUnique(), Name: types.CoroutineSuspensionName, Captures: types.ScopeCapture(owner), Control: control}

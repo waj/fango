@@ -9,9 +9,9 @@ import (
 
 func TestNativeStorageTypeAndLifetimeContracts(t *testing.T) {
 	const cell = `module StorageFixture exposing (Box, box, read, write)
-import Native
+import Runtime.Native
 {-# resource #-}
-type Box a = Box Native.Any
+type Box a = Box Runtime.Native.Any
 box : a ->{IO} Box a
 box = native
 read : Box a ->{IO} a
@@ -87,37 +87,37 @@ main() =
 
 func TestCompletionCellContracts(t *testing.T) {
 	for _, tc := range []struct{ name, source, want string }{
-		{"one index", `main() = Coroutine.scope (\scope ->
-    cell : Cell.Publisher Int
-    cell = Cell.create scope
-    first = Cell.publish cell 1
-    second = Cell.publish cell "wrong"
+		{"one index", `main() = Runtime.Coroutine.scope (\scope ->
+    cell : Runtime.Cell.Publisher Int
+    cell = Runtime.Cell.create scope
+    first = Runtime.Cell.publish cell 1
+    second = Runtime.Cell.publish cell "wrong"
     ())
 `, "TYPE MISMATCH"},
-		{"owner escape", `bad() = Coroutine.scope (\scope -> Cell.create scope)
+		{"owner escape", `bad() = Runtime.Coroutine.scope (\scope -> Runtime.Cell.create scope)
 main() = ()
 `, "ESCAPE"},
-		{"reader escape", `bad() = Coroutine.scope (\scope -> Cell.reader (Cell.create scope))
+		{"reader escape", `bad() = Runtime.Coroutine.scope (\scope -> Runtime.Cell.reader (Runtime.Cell.create scope))
 main() = ()
 `, "ESCAPE"},
-		{"private publisher", `main() = Cell.cellNew()
+		{"private publisher", `main() = Runtime.Cell.cellNew()
 `, "PRIVATE OR UNKNOWN NAME"},
-		{"borrowed payload", `main() = Coroutine.scope (\scope ->
-    cell : Cell.Publisher (() -> Int)
-    cell = Cell.create scope
-    stored = handle Cell.publish cell (\_ -> State.get()) with current = 0 of
+		{"borrowed payload", `main() = Runtime.Coroutine.scope (\scope ->
+    cell : Runtime.Cell.Publisher (() -> Int)
+    cell = Runtime.Cell.create scope
+    stored = handle Runtime.Cell.publish cell (\_ -> State.get()) with current = 0 of
         State.get () -> resume current with current
         State.put next -> resume () with next
     ())
 `, "ESCAPE"},
-		{"row index", `write : Cell.Publisher (Completion.Completion Int e) -> Completion.Completion Int f ->{IO} Bool
-write cell value = Cell.publish cell value
+		{"row index", `write : Runtime.Cell.Publisher (Runtime.Completion.Completion Int e) -> Runtime.Completion.Completion Int f ->{IO} Bool
+write cell value = Runtime.Cell.publish cell value
 main() = ()
 `, "EFFECT MISMATCH"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "Main.fango")
-			if err := os.WriteFile(path, []byte("import Cell\nimport Coroutine\nimport State\nimport Completion\n"+tc.source), 0600); err != nil {
+			if err := os.WriteFile(path, []byte("import Runtime.Cell\nimport Runtime.Coroutine\nimport State\nimport Runtime.Completion\n"+tc.source), 0600); err != nil {
 				t.Fatal(err)
 			}
 			_, diagnostics, err := (&Session{}).Compile(path)
@@ -141,12 +141,12 @@ func TestIndexedNativeDeclarations(t *testing.T) {
 		{"rebuild index", "cast : Box Int -> Box String\ncast (Box raw) = Box raw\n", "", "NATIVE HANDLE REPRESENTATION"},
 		{"native cast", "cast : Box a -> Box b\ncast = native\n", "func Cast(value any) any { return value }\n", "NATIVE STORAGE"},
 		{"untyped lookup", "find : Int -> Box a\nfind = native\n", "func Find(key int64) any { return nil }\n", "NATIVE STORAGE"},
-		{"foreign index", "{-# resource #-}\ntype Other a = Other Native.Any\ncast : Box a -> Other b\ncast = native\n", "func Cast(value any) any { return value }\n", "NATIVE STORAGE"},
+		{"foreign index", "{-# resource #-}\ntype Other a = Other Runtime.Native.Any\ncast : Box a -> Other b\ncast = native\n", "func Cast(value any) any { return value }\n", "NATIVE STORAGE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "Main.fango")
-			source := "import Native\n{-# resource #-}\ntype Box a = Box Native.Any\nnew : a -> Box a\nnew = native\n" + tc.declaration + "main() = ()\n"
+			source := "import Runtime.Native\n{-# resource #-}\ntype Box a = Box Runtime.Native.Any\nnew : a -> Box a\nnew = native\n" + tc.declaration + "main() = ()\n"
 			if err := os.WriteFile(path, []byte(source), 0600); err != nil {
 				t.Fatal(err)
 			}

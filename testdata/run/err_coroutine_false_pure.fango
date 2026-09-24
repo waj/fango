@@ -1,8 +1,8 @@
-import Coroutine
-hide : (Int ->{Coroutine.Suspension} ()) -> ()
-hide outer = Coroutine.with (\_ () -> outer 1) (\inner ->
-    ignored = Coroutine.advance inner ()
+import Runtime.Coroutine
+hide : (Int ->{Runtime.Coroutine.Suspension} ()) -> ()
+hide outer = Runtime.Coroutine.with (\_ () -> outer 1) (\inner ->
+    ignored = Runtime.Coroutine.advance inner ()
     ())
-main() = Coroutine.with (\pause () -> hide pause) (\outer ->
-    ignored = Coroutine.advance outer ()
+main() = Runtime.Coroutine.with (\pause () -> hide pause) (\outer ->
+    ignored = Runtime.Coroutine.advance outer ()
     ())

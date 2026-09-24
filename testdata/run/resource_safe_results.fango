@@ -1,11 +1,11 @@
-import Scope
+import Runtime.Scope
 
 type Box a = Box a
 
 {-# resource #-}
 type Handle = Handle Int
 
-withHandle action = Scope.bracket (\_ -> Handle 1) (\_ -> ()) action
+withHandle action = Runtime.Scope.bracket (\_ -> Handle 1) (\_ -> ()) action
 
 identity value = value
 invoke callback value = callback value

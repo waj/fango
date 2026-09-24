@@ -139,5 +139,5 @@ func opaqueWrapper(wrapper *CtorInfo) bool {
 		return false
 	}
 	field, ok := wrapper.Fields[0].(*TCon)
-	return ok && field.Name == "Native.Any" && len(field.Args) == 0
+	return ok && field.Name == "Runtime.Native.Any" && len(field.Args) == 0
 }

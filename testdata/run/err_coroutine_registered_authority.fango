@@ -1,8 +1,8 @@
-import Coroutine
-import Work
-bad() = Coroutine.scope (\scope ->
-    sibling = Coroutine.create scope (\_ () -> 42)
-    item = Work.register (Coroutine.facet scope) (\_ () -> Coroutine.advance sibling ())
+import Runtime.Coroutine
+import Runtime.Work
+bad() = Runtime.Coroutine.scope (\scope ->
+    sibling = Runtime.Coroutine.create scope (\_ () -> 42)
+    item = Runtime.Work.register (Runtime.Coroutine.facet scope) (\_ () -> Runtime.Coroutine.advance sibling ())
     ())
 
 main() = ()

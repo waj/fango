@@ -1,7 +1,7 @@
-import Coroutine
+import Runtime.Coroutine
 import Iterator
 import List
-import Scope
+import Runtime.Scope
 import Stream
 
 type Request = Yield | Wait Int deriving (Show)
@@ -16,7 +16,7 @@ dequeue (Queue [value | rest] back) = Just (value, Queue rest back)
 
 -- One advance returns to this loop; a wait is kept out of the ready queue.
 -- Signals are deterministic fake registrations, delivered only when ready is empty.
-dispatch : Int -> Queue (Job (Coroutine.Coroutine Request () Result {IO | e})) -> List (Int, Job (Coroutine.Coroutine Request () Result {IO | e})) ->{Coroutine.Drive, IO | e} ()
+dispatch : Int -> Queue (Job (Runtime.Coroutine.Coroutine Request () Result {IO | e})) -> List (Int, Job (Runtime.Coroutine.Coroutine Request () Result {IO | e})) ->{Runtime.Coroutine.Drive, IO | e} ()
 dispatch budget ready waiting =
     if budget == 0 then print "abandon"
     else
@@ -28,31 +28,31 @@ dispatch budget ready waiting =
                     dispatch budget (enqueue job ready) remainingWaits
             Just (Job name work, rest) ->
                 print ("run " ++ name)
-                step = Coroutine.advance work ()
+                step = Runtime.Coroutine.advance work ()
                 case step of
-                    Coroutine.Suspended Yield ->
+                    Runtime.Coroutine.Suspended Yield ->
                         dispatch (budget - 1) (enqueue (Job name work) rest) waiting
-                    Coroutine.Suspended (Wait key) ->
+                    Runtime.Coroutine.Suspended (Wait key) ->
                         print ("wait " ++ name ++ " " ++ show key)
                         dispatch (budget - 1) rest [(key, Job name work) | waiting]
-                    Coroutine.Finished result ->
+                    Runtime.Coroutine.Finished result ->
                         print result
                         dispatch (budget - 1) rest waiting
-                    Coroutine.Closed ->
+                    Runtime.Coroutine.Closed ->
                         print "unexpected closed"
 
-rounds : (Request ->{Coroutine.Suspension} ()) -> String -> Int ->{Coroutine.Suspension, IO} ()
+rounds : (Request ->{Runtime.Coroutine.Suspension} ()) -> String -> Int ->{Runtime.Coroutine.Suspension, IO} ()
 rounds pause name 0 = ()
 rounds pause name count =
     print ("yield " ++ name)
     pause Yield
     rounds pause name (count - 1)
 
-first : Int -> (Request ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension, IO} Result
-first count pause () = Scope.finally (\_ ->
+first : Int -> (Request ->{Runtime.Coroutine.Suspension} ()) -> () ->{Runtime.Coroutine.Suspension, IO} Result
+first count pause () = Runtime.Scope.finally (\_ ->
     rounds pause "A" count
     -- The scheduler's pause happens while Iterator.next still owns its advance.
-    source = Stream.generate (\_ -> Scope.finally (\_ ->
+    source = Stream.generate (\_ -> Runtime.Scope.finally (\_ ->
         pause (Wait 7)
         Stream.yield 41) (\_ -> print "cleanup stream"))
     value = Stream.withCursor source (\cursor -> Iterator.next cursor)
@@ -60,22 +60,22 @@ first count pause () = Scope.finally (\_ ->
         Just number -> Result "A" (number + 1)
         Nothing -> Result "A" 0) (\_ -> print "cleanup A")
 
-second : Int -> (Request ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension, IO} Result
-second count pause () = Scope.finally (\_ ->
+second : Int -> (Request ->{Runtime.Coroutine.Suspension} ()) -> () ->{Runtime.Coroutine.Suspension, IO} Result
+second count pause () = Runtime.Scope.finally (\_ ->
     rounds pause "B" count
     pause Yield
     Result "B" 99) (\_ -> print "cleanup B")
 
-run count budget = Coroutine.with (first count) (\a ->
-    Coroutine.with (second count) (\b ->
+run count budget = Runtime.Coroutine.with (first count) (\a ->
+    Runtime.Coroutine.with (second count) (\b ->
         dispatch budget (Queue [Job "A" a, Job "B" b] []) []
         -- Repeated terminal close must not repeat cleanup.
-        Coroutine.close b
-        Coroutine.close b
-        Coroutine.close a
-        Coroutine.close a
-        print (Coroutine.advance a ())
-        print (Coroutine.advance b ())))
+        Runtime.Coroutine.close b
+        Runtime.Coroutine.close b
+        Runtime.Coroutine.close a
+        Runtime.Coroutine.close a
+        print (Runtime.Coroutine.advance a ())
+        print (Runtime.Coroutine.advance b ())))
 
 main() =
     print "complete"

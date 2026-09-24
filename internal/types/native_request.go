@@ -5,12 +5,12 @@ import (
 	"strings"
 )
 
-const NativeRegistrationName = "NativeRequest.Registration"
+const NativeRegistrationName = "Runtime.NativeRequest.Registration"
 
 // CheckNativeRequest reconstructs the retention boundary from the public
 // scheme. Only the registration token crosses modules; a host never does.
 func CheckNativeRequest(n *NativeInfo) (bool, error) {
-	if strings.HasPrefix(n.Name, "NativeRequest.") || n.Template != nil {
+	if strings.HasPrefix(n.Name, "Runtime.NativeRequest.") || n.Template != nil {
 		return false, nil
 	}
 	rest := n.Scheme.Body

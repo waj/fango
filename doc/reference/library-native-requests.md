@@ -61,11 +61,11 @@ driver. Fango callback captures retain their ordinary lifetime obligations.
 
 ## Sidecar protocol
 
-A value native may accept the canonical `NativeRequest.Registration` as its
+A value native may accept the canonical `Runtime.NativeRequest.Registration` as its
 first parameter, followed by ordinary boundary arguments, and return Unit:
 
 ```fango
-submit : NativeRequest.Registration -> Device ->{IO} ()
+submit : Runtime.NativeRequest.Registration -> Device ->{IO} ()
 submit = native
 ```
 

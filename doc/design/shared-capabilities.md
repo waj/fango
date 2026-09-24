@@ -10,7 +10,7 @@ An indexed native wrapper has one monomorphic boundary field and phantom source
 parameters. Resolved native metadata seals its constructors against source
 construction and projection, including in its defining module. Native signatures
 cannot change a wrapper index, including by crossing between two wrapper types.
-An opaque payload can cross only with a checked same-index Native.Any resource
+An opaque payload can cross only with a checked same-index Runtime.Native.Any resource
 wrapper. The storage contract records allocation, read, write, or same-index
 alias edges; Core reconstructs it independently from the native scheme.
 
@@ -32,12 +32,12 @@ capture-free publication into its native storage. Its mutex protects readiness
 and a single successful publication. No request outlives a native call.
 
 `shared-resource` is a nominal opt-in for a resource with one canonical
-Native.Any field. It promises synchronized native operations. Other wrappers
+Runtime.Native.Any field. It promises synchronized native operations. Other wrappers
 with the same representation gain no sharing authority. Work transfer traverses
 closures, ADTs, dictionaries, storage payloads, and hidden handler evidence;
 it rejects parent mutable state, borrowed cursors/pauses, and native resources
 without that opt-in. Child-local acquisition remains valid. A shared resource
-borrowed from `Scope.bracket` must enclose the registry so child draining precedes
+borrowed from `Runtime.Scope.bracket` must enclose the registry so child draining precedes
 release. Native requests with longer retention use the separate
 [scoped request contract](native-requests.md).
 
@@ -50,7 +50,7 @@ evidence retains only immutable context; each operation worker receives the
 callback supplied at the actual call site. This metadata survives interfaces,
 substitution, specialization, Core ANF, module objects, and execution codecs.
 
-`Service.run` validates an active pause, then installs a scoped Invocation
+`Runtime.Service.run` validates an active pause, then installs a scoped Invocation
 adapter. A service operation constructs a checked callback that forwards to the
 caller's lexical Invocation evidence. Its worker installs a fresh local adapter
 around the clause computation and removes it before tail-resuming the handled
@@ -61,7 +61,7 @@ its own slot. There is no global current-task variable.
 
 Core verifies declaration/metadata agreement, the hidden argument type and
 forwarding shape, the authority introducing each Invocation handler, and the
-Service.run source contract. Capture-flow independently checks active producer
+Runtime.Service.run source contract. Capture-flow independently checks active producer
 ownership, scoped retention, and transfer. Source cannot supply an unproven
 adapter, handle Invocation directly, or attach mutable state to service evidence.
 

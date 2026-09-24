@@ -24,7 +24,7 @@ func write(t *testing.T, root, rel, body string) string {
 }
 
 func TestOnlyBundledCoroutineControlGetsSuspensionIdentity(t *testing.T) {
-	for _, module := range []string{"Coroutine", "Stream", "Renamed"} {
+	for _, module := range []string{"Runtime.Coroutine", "Stream", "Renamed"} {
 		for _, name := range []string{"Suspension", "Drive", "Yield"} {
 			for _, bundled := range []bool{false, true} {
 				decl := &ast.EffectDecl{Name: name}
@@ -32,7 +32,7 @@ func TestOnlyBundledCoroutineControlGetsSuspensionIdentity(t *testing.T) {
 				if errs := validateModuleDecls(n); len(errs) != 0 {
 					t.Fatal(errs)
 				}
-				want := bundled && module == "Coroutine" && (name == "Suspension" || name == "Drive")
+				want := bundled && module == "Runtime.Coroutine" && (name == "Suspension" || name == "Drive")
 				if decl.CompilerSuspension != want {
 					t.Fatalf("%s.%s bundled=%v suspension=%v want=%v", module, name, bundled, decl.CompilerSuspension, want)
 				}

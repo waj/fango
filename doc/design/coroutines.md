@@ -89,10 +89,10 @@ cleanup scopes until that advance actually completes.
 
 ## Dynamic scope registry
 
-`Coroutine.scope` uses the same Core scope boundary and Machine cleanup stack as
+`Runtime.Coroutine.scope` uses the same Core scope boundary and Machine cleanup stack as
 `with`. Its resource protocol identifies a registry rather than one producer;
 a checked Unit producer sentinel distinguishes that boundary in Core and Machine
-IR. `Coroutine.create` introduces a distinct child execution owner beneath the
+IR. `Runtime.Coroutine.create` introduces a distinct child execution owner beneath the
 selected registry. Capture-flow lifetime checks use the destination's ancestry,
 not the helper's current scope stack. Drive discharge stops at that registry's
 boundary only for a child with proven membership. Foreign Drive and Suspension
@@ -110,8 +110,8 @@ the ordinary primary/suppressed failure precedence. Completed entries are not
 retained until scope exit. A scope's saved evidence supplies the baseline for
 child cleanup; advances still install their own current residual evidence.
 
-`Coroutine.facet` retains registry identity while hiding its source row.
-`Work.register` combines checked child creation and packaging; `Work.owner`
+`Runtime.Coroutine.facet` retains registry identity while hiding its source row.
+`Runtime.Work.register` combines checked child creation and packaging; `Runtime.Work.owner`
 selects the same registry's Work identity. Source-row inclusion is reconstructed
 by the existing [Work budget analysis](ownership.md#scoped-work-budgets), including
 latent charges through handlers. The three typed protocol indices remain in the
@@ -142,7 +142,7 @@ registry links or execution storage. These are structural checks, not timings.
 ## Ordinary pull libraries
 
 Stream stores a reusable producer closure with an ordinary `Yield a` effect.
-Its private `withProducer` opens Coroutine.with, then handles Yield inside
+Its private `withProducer` opens Runtime.Coroutine.with, then handles Yield inside
 the producer by tail-resuming with the pause callback's result. Different
 stages can yield different element types: each handler removes its own Yield
 before the coroutine boundary receives the residual row. No Stream name or

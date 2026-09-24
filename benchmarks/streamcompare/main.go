@@ -175,7 +175,7 @@ func run() error {
 		if _, err = command(srcRoot, env, "go", "build", "-o", cli, "./cmd/fango"); err != nil {
 			return err
 		}
-		_, statErr := os.Stat(filepath.Join(srcRoot, "stdlib", "Coroutine.fango"))
+		_, statErr := os.Stat(filepath.Join(srcRoot, "stdlib", "Runtime", "Coroutine.fango"))
 		if statErr == nil {
 			iteratorSource, e := os.ReadFile(filepath.Join(srcRoot, "stdlib", "Iterator.fango"))
 			if e != nil {
@@ -189,7 +189,7 @@ func run() error {
 		sourceText := workload
 		controls := "package main\nfunc probe(which,n int64)int64{return V_run(which,n)}\n"
 		if b.Modern {
-			sourceText = "import Coroutine\nimport Pull\n" + workload + diagnostic
+			sourceText = "import Runtime.Coroutine\nimport Pull\n" + workload + diagnostic
 			controls = goControls
 			if err = os.WriteFile(filepath.Join(b.Root, "Pull.fango"), []byte(pullLibrary), 0644); err != nil {
 				return err

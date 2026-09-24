@@ -18,17 +18,17 @@ func TestCoroutineCompletionPreservesStagingNativePolicy(t *testing.T) {
 		}
 	}
 	var out strings.Builder
-	RunWith(strings.NewReader(`import Coroutine
-import Completion
+	RunWith(strings.NewReader(`import Runtime.Coroutine
+import Runtime.Completion
 import Meta
 import Secret
-unsafe : () -> Coroutine.Step Int Int
-unsafe() = Coroutine.with (\_ input -> Secret.read input) (\work -> Coroutine.advance work 7)
+unsafe : () -> Runtime.Coroutine.Step Int Int
+unsafe() = Runtime.Coroutine.with (\_ input -> Secret.read input) (\work -> Runtime.Coroutine.advance work 7)
 denied : String
-denied = $(Meta.lift (show (Completion.replay (Completion.capture (\_ -> unsafe())))))
+denied = $(Meta.lift (show (Runtime.Completion.replay (Runtime.Completion.capture (\_ -> unsafe())))))
 :type denied
 constant : () -> Int
-constant() = Completion.replay (Completion.capture (\_ -> 42))
+constant() = Runtime.Completion.replay (Runtime.Completion.capture (\_ -> 42))
 answer : Int
 answer = $(Meta.lift (constant()))
 answer
@@ -42,18 +42,18 @@ answer
 
 func TestCoroutineCompletionREPLStagingAndRollback(t *testing.T) {
 	var out strings.Builder
-	Run(strings.NewReader(`import Coroutine
-import Completion
+	Run(strings.NewReader(`import Runtime.Coroutine
+import Runtime.Completion
 import Meta
-exchange() = Coroutine.with (\pause initial ->
+exchange() = Runtime.Coroutine.with (\pause initial ->
     reply = pause (initial + 1)
     reply + 1) (\work ->
-    first = Coroutine.advance work 10
-    second = Coroutine.advance work 20
-    third = Coroutine.advance work 30
+    first = Runtime.Coroutine.advance work 10
+    second = Runtime.Coroutine.advance work 20
+    third = Runtime.Coroutine.advance work 30
     (first, second, third))
 exchange()
-staged() = Completion.replay (Completion.capture (\_ -> exchange()))
+staged() = Runtime.Completion.replay (Runtime.Completion.capture (\_ -> exchange()))
 bad : Int
 bad = $(Meta.lift (show (staged())))
 :type bad
@@ -71,16 +71,16 @@ staged()
 
 func TestCoroutineCompletionCloseFailureInREPL(t *testing.T) {
 	var out strings.Builder
-	Run(strings.NewReader(`import Coroutine
-import Completion
+	Run(strings.NewReader(`import Runtime.Coroutine
+import Runtime.Completion
 import Fail
-import Scope
-closed() = Fail.attempt (\_ -> Completion.replay (Completion.capture (\_ ->
-    Coroutine.with (\pause () -> Scope.finally (\_ ->
+import Runtime.Scope
+closed() = Fail.attempt (\_ -> Runtime.Completion.replay (Runtime.Completion.capture (\_ ->
+    Runtime.Coroutine.with (\pause () -> Runtime.Scope.finally (\_ ->
         pause "ready"
         7) (\_ -> Fail.fail "close failed")) (\work ->
-        first = Coroutine.advance work ()
-        Coroutine.close work
+        first = Runtime.Coroutine.advance work ()
+        Runtime.Coroutine.close work
         first))))
 closed()
 closed()

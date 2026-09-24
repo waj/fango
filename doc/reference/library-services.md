@@ -6,11 +6,11 @@ its caller. It supports cooperative coroutines and nested pulls.
 ```fango
 {-# service #-}
 effect Dispatch
-    submit : Int ->{Service.Invocation Int ()} ()
+    submit : Int ->{Runtime.Service.Invocation Int ()} ()
 ```
 
 Every operation of a `service` effect declares the same fixed
-`Service.Invocation request reply` protocol. Its types may depend on the effect's
+`Runtime.Service.Invocation request reply` protocol. Its types may depend on the effect's
 parameters, but not on operation-local variables. Native and aborting operations
 are excluded. Invalid declarations report `SERVICE PROTOCOL`.
 
@@ -22,14 +22,14 @@ keep their existing binding rules.
 
 Calling a service operation supplies a compiler-generated invocation argument
 separately from its retained context. There is no additional source parameter.
-Inside the clause, `Service.invoke request` sends through that argument and
+Inside the clause, `Runtime.Service.invoke request` sends through that argument and
 returns its typed reply. A clause finishes with ordinary tail `resume`.
 
 ```fango
-type Bound = Bound (Int ->{Service.Invocation Int ()} ())
+type Bound = Bound (Int ->{Runtime.Service.Invocation Int ()} ())
 
 bind offset = handle Bound (\value -> submit value) of
-    submit value -> resume (Service.invoke (value + offset))
+    submit value -> resume (Runtime.Service.invoke (value + offset))
 ```
 
 The stored callable retains this handler's `offset`. Each later call receives
@@ -39,12 +39,12 @@ class dictionaries.
 ## Installing invocation authority
 
 ```fango
-Service.run : (request ->{Coroutine.Suspension} reply)
-    -> (() ->{Service.Invocation request reply | e} a)
-    ->{Coroutine.Suspension | e} a
+Runtime.Service.run : (request ->{Runtime.Coroutine.Suspension} reply)
+    -> (() ->{Runtime.Service.Invocation request reply | e} a)
+    ->{Runtime.Coroutine.Suspension | e} a
 ```
 
-A producer calls `Service.run pause action` with its active pause capability.
+A producer calls `Runtime.Service.run pause action` with its active pause capability.
 The matching slot is scoped to `action`. The compiler threads it through calls;
 a nested `Stream` pull forwards this slot even when that stream's own pause has
 a different request type. An independently registered child installs a fresh

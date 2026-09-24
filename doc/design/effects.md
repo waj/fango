@@ -85,7 +85,7 @@ Nothing is recorded for elaboration. The lambda's row still names the label
 while the position it flows into does not, which is exactly the case
 `adaptFunctionValue` already answers by substituting the innermost lexical
 activation's captures into the body and dropping the lambda's evidence
-parameter — the same discharge that gives a `Scope.bracket` release closure its
+parameter — the same discharge that gives a `Runtime.Scope.bracket` release closure its
 definition-site evidence. The closure then carries that activation's record of
 operation closures, so nested activations of one effect stay distinct without a
 special case, and the existing capture proof sees it retaining that scope.
@@ -115,7 +115,7 @@ outer evidence and invokes the clause after unwinding. Foreign exits propagate;
 exits from a clause or return transformation never re-enter that activation.
 Canonical effect names keep generated envelopes independent of graph-local IDs.
 
-Scope.bracket introduces a separate cleanup region. Its release closure retains
+Runtime.Scope.bracket introduces a separate cleanup region. Its release closure retains
 definition-site evidence. Direct execution is acquire/body/release with plain
 results. Exit execution checks each Outcome: failed acquisition releases nothing;
 a body failure remains primary and a failed release is appended through the

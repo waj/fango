@@ -1,10 +1,10 @@
-import Coroutine
-import Work
+import Runtime.Coroutine
+import Runtime.Work
 import Fail
 
 bad : () -> ()
-bad() = Coroutine.scope (\scope ->
-    ignored = Fail.attempt (\_ -> Work.register (Coroutine.facet scope) (\_ () -> Fail.fail "late"))
+bad() = Runtime.Coroutine.scope (\scope ->
+    ignored = Fail.attempt (\_ -> Runtime.Work.register (Runtime.Coroutine.facet scope) (\_ () -> Fail.fail "late"))
     ())
 
 main() = ()

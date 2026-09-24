@@ -1,12 +1,12 @@
-import Coroutine
-import Work
+import Runtime.Coroutine
+import Runtime.Work
 import Helpers
 
-main() = Coroutine.scope (\scope ->
+main() = Runtime.Coroutine.scope (\scope ->
     cursor = Helpers.allocate scope
-    make = Helpers.register (Coroutine.facet scope)
+    make = Helpers.register (Runtime.Coroutine.facet scope)
     work = make
-    print (Coroutine.advance cursor 10)
-    print (Coroutine.advance cursor 20)
-    print (Helpers.drive (Work.owner scope) work "hello")
-    print (Helpers.drive (Work.owner scope) work "done"))
+    print (Runtime.Coroutine.advance cursor 10)
+    print (Runtime.Coroutine.advance cursor 20)
+    print (Helpers.drive (Runtime.Work.owner scope) work "hello")
+    print (Helpers.drive (Runtime.Work.owner scope) work "done"))

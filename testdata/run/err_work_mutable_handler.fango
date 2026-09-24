@@ -1,5 +1,5 @@
-import Coroutine
-import Work
+import Runtime.Coroutine
+import Runtime.Work
 
 effect Counter
     tick : () -> Int
@@ -11,7 +11,7 @@ withRead use =
 
 main() =
     withRead (\read ->
-        Coroutine.with (\_ () -> read()) (\cursor ->
-            Work.run (\owner ->
-                item = Work.pack (Work.facet owner) cursor
+        Runtime.Coroutine.with (\_ () -> read()) (\cursor ->
+            Runtime.Work.run (\owner ->
+                item = Runtime.Work.pack (Runtime.Work.facet owner) cursor
                 ())))

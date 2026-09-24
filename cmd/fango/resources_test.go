@@ -10,7 +10,7 @@ import (
 
 func TestResourceCaptureContracts(t *testing.T) {
 	const prelude = `import Random
-import Scope
+import Runtime.Scope
 import State
 import Fail exposing (Fail, fail, attempt)
 
@@ -19,7 +19,7 @@ type Port = Port Int
 
 openPort() = Port 1
 closePort port = ()
-withPort use = Scope.bracket openPort closePort use
+withPort use = Runtime.Scope.bracket openPort closePort use
 readPort (Port n) = n
 identity value = value
 apply action arg = action arg
@@ -118,7 +118,7 @@ main =
     42)`, ""},
 		{"abort payload", `main = attempt (\_ -> withPort (\port -> fail port))`, "RESOURCE ESCAPES"},
 		{"release retention", `main =
-    handle Scope.bracket openPort (\port -> save port) (\_ -> ()) with saved = Nothing of
+    handle Runtime.Scope.bracket openPort (\port -> save port) (\_ -> ()) with saved = Nothing of
         save port -> resume () with Just port
         return _ -> ()`, "RESOURCE ESCAPES"},
 		{"callback ADT", `type Box a = Box a

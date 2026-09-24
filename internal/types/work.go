@@ -1,16 +1,16 @@
 package types
 
 const (
-	WorkOwnerTypeName = "Work.Owner"
-	WorkFacetTypeName = "Work.Facet"
-	WorkTypeName      = "Work.Work"
-	WorkOwnerName     = "Work.owner"
-	WorkRegisterName  = "Work.register"
-	WorkRunName       = "Work.run"
-	WorkFacetName     = "Work.facet"
-	WorkPackName      = "Work.pack"
-	WorkAdvanceName   = "Work.advance"
-	WorkCloseName     = "Work.close"
+	WorkOwnerTypeName = "Runtime.Work.Owner"
+	WorkFacetTypeName = "Runtime.Work.Facet"
+	WorkTypeName      = "Runtime.Work.Work"
+	WorkOwnerName     = "Runtime.Work.owner"
+	WorkRegisterName  = "Runtime.Work.register"
+	WorkRunName       = "Runtime.Work.run"
+	WorkFacetName     = "Runtime.Work.facet"
+	WorkPackName      = "Runtime.Work.pack"
+	WorkAdvanceName   = "Runtime.Work.advance"
+	WorkCloseName     = "Runtime.Work.close"
 )
 
 func WorkIntrinsic(name string) bool {

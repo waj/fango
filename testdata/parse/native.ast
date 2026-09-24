@@ -1,4 +1,4 @@
-(module Native (exposing)
+(module Runtime.Native (exposing)
   (def twice (ann (-> Int Int)) (native))
   (def add (ann (-> number (-> number number))) (native "$1 + $2"))
   (effect Console (op write (-> String ()) (native "sink($1)"))))

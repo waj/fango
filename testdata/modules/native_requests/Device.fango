@@ -1,13 +1,13 @@
 module Device exposing (Device, openDevice, closeDevice, submit, finish)
-import NativeRequest
-import Native
+import Runtime.NativeRequest
+import Runtime.Native
 {-# resource #-}
-type Device = Device Native.Any
+type Device = Device Runtime.Native.Any
 openDevice : () ->{IO} Device
 openDevice = native
 closeDevice : Device ->{IO} ()
 closeDevice = native
-submit : NativeRequest.Registration -> Device -> Int ->{IO} ()
+submit : Runtime.NativeRequest.Registration -> Device -> Int ->{IO} ()
 submit = native
 finish : Device ->{IO} ()
 finish = native

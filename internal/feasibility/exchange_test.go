@@ -8,7 +8,7 @@ import (
 
 type question struct{ prompt string }
 
-// This exercises the existing private Machine register, not Coroutine.advance
+// This exercises the existing private Machine register, not Runtime.Coroutine.advance
 // (whose cursor transfer currently supplies Unit and discards final results).
 type dialogue struct {
 	pc      int

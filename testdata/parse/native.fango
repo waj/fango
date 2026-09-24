@@ -1,4 +1,4 @@
-module Native exposing ()
+module Runtime.Native exposing ()
 
 twice : Int -> Int
 twice = native

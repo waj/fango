@@ -104,7 +104,7 @@ func serviceRunDef(ty types.Type, ck *infer.Checker) core.Def {
 	call := &core.App{CalleeKind: core.Value, Callee: &core.VarRef{Name: "_action", Local: true, Ty: action}, Args: []core.Expr{&core.UnitLit{Ty: ck.B.Unit}}, EvidenceArgs: []core.EffectInstance{ev}, Ty: result, Control: types.FunctionControl(action)}
 	body := invocationHandler(call, &core.VarRef{Name: "_active", Local: true, Ty: pause}, ev, ck)
 	body = &core.Let{Name: "_active", Rhs: active, Body: body, Ty: result}
-	return core.Def{Name: types.ServiceRunName, Owner: "Service", Type: ty, TyParams: runtimeRigidVars(ty), Params: []string{"_pause", "_action"}, ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture()}, Control: core.ArrowControl(ty, 2), Body: body}
+	return core.Def{Name: types.ServiceRunName, Owner: "Runtime.Service", Type: ty, TyParams: runtimeRigidVars(ty), Params: []string{"_pause", "_action"}, ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture(), ck.Sup.FreshCapture()}, Control: core.ArrowControl(ty, 2), Body: body}
 }
 
 func (el *elab) invocationArgument(label types.EffLabel) core.Expr {

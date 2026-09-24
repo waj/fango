@@ -11,15 +11,15 @@ import (
 )
 
 const requestFixture = `module Requests exposing (Device, open, close, submit)
-import NativeRequest
-import Native
+import Runtime.NativeRequest
+import Runtime.Native
 {-# resource #-}
-type Device = Device Native.Any
+type Device = Device Runtime.Native.Any
 open : () ->{IO} Device
 open = native
 close : Device ->{IO} ()
 close = native
-submit : NativeRequest.Registration -> Device ->{IO} ()
+submit : Runtime.NativeRequest.Registration -> Device ->{IO} ()
 submit = native
 `
 const requestSidecar = `package native
@@ -30,48 +30,48 @@ func Submit(token, device any) { r := token.(*FangoRequest); if r.Begin(nil) { r
 
 func TestNativeRequestOwnershipContracts(t *testing.T) {
 	for _, tc := range []struct{ name, source, want string }{
-		{"enclosing resource", `main() = Scope.bracket Requests.open Requests.close (\device -> NativeRequest.scope 1 (\host ->
-    ignored = NativeRequest.register host (\token -> Requests.submit token device) (\_ -> ())
+		{"enclosing resource", `main() = Runtime.Scope.bracket Requests.open Requests.close (\device -> Runtime.NativeRequest.scope 1 (\host ->
+    ignored = Runtime.NativeRequest.register host (\token -> Requests.submit token device) (\_ -> ())
     ()))`, ""},
-		{"shorter resource", `main() = NativeRequest.scope 1 (\host -> Scope.bracket Requests.open Requests.close (\device ->
-    ignored = NativeRequest.register host (\token -> Requests.submit token device) (\_ -> ())
+		{"shorter resource", `main() = Runtime.NativeRequest.scope 1 (\host -> Runtime.Scope.bracket Requests.open Requests.close (\device ->
+    ignored = Runtime.NativeRequest.register host (\token -> Requests.submit token device) (\_ -> ())
     ()))`, "ESCAPE"},
-		{"host escapes", `bad() = NativeRequest.scope 1 (\host -> host)
+		{"host escapes", `bad() = Runtime.NativeRequest.scope 1 (\host -> host)
 main() = ()`, "ESCAPE"},
-		{"callback escapes", `bad() = NativeRequest.scope 1 (\host -> NativeRequest.register host (\_ -> ()) (\_ -> 42))
+		{"callback escapes", `bad() = Runtime.NativeRequest.scope 1 (\host -> Runtime.NativeRequest.register host (\_ -> ()) (\_ -> 42))
 main() = ()`, "ESCAPE"},
-		{"token escapes through data", `type Saved = Saved NativeRequest.Registration
+		{"token escapes through data", `type Saved = Saved Runtime.NativeRequest.Registration
 effect Save
     save : Saved -> ()
-bad() = NativeRequest.scope 1 (\host ->
-    ignored = NativeRequest.register host (\token -> save (Saved token)) (\_ -> ())
+bad() = Runtime.NativeRequest.scope 1 (\host ->
+    ignored = Runtime.NativeRequest.register host (\token -> save (Saved token)) (\_ -> ())
     ())
 main() = handle bad() with saved = Nothing of
     save value -> resume () with Just value`, "ESCAPE"},
-		{"callback suspends", `producer : (Int ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension} ()
+		{"callback suspends", `producer : (Int ->{Runtime.Coroutine.Suspension} ()) -> () ->{Runtime.Coroutine.Suspension} ()
 producer pause () =
-    ignored = NativeRequest.immediate (\_ -> pause 1)
+    ignored = Runtime.NativeRequest.immediate (\_ -> pause 1)
     ()
-main() = Coroutine.with producer (\cursor ->
-    ignored = Coroutine.advance cursor ()
+main() = Runtime.Coroutine.with producer (\cursor ->
+    ignored = Runtime.Coroutine.advance cursor ()
     ())`, "SUSPENDING"},
-		{"callback cleanup suspends", `producer : (Int ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension} ()
+		{"callback cleanup suspends", `producer : (Int ->{Runtime.Coroutine.Suspension} ()) -> () ->{Runtime.Coroutine.Suspension} ()
 producer pause () =
-    ignored = NativeRequest.immediate (\_ -> Scope.finally (\_ -> ()) (\_ -> pause 1))
+    ignored = Runtime.NativeRequest.immediate (\_ -> Runtime.Scope.finally (\_ -> ()) (\_ -> pause 1))
     ()
-main() = Coroutine.with producer (\cursor ->
-    ignored = Coroutine.advance cursor ()
+main() = Runtime.Coroutine.with producer (\cursor ->
+    ignored = Runtime.Coroutine.advance cursor ()
     ())`, "SUSPENDING"},
-		{"foreign work driver", `main() = NativeRequest.scope 1 (\host -> Coroutine.scope (\scope ->
-    child = Work.register (Coroutine.facet scope) (\_ () -> NativeRequest.counts host)
+		{"foreign work driver", `main() = Runtime.NativeRequest.scope 1 (\host -> Runtime.Coroutine.scope (\scope ->
+    child = Runtime.Work.register (Runtime.Coroutine.facet scope) (\_ () -> Runtime.NativeRequest.counts host)
     ()))`, "WORK CAPABILITY TRANSFER"},
-		{"row mismatch", `bad : NativeRequest.Callback Int {IO, Fail.Fail String} -> NativeRequest.Callback Int {IO}
+		{"row mismatch", `bad : Runtime.NativeRequest.Callback Int {IO, Fail.Fail String} -> Runtime.NativeRequest.Callback Int {IO}
 bad callback = callback
 main() = ()`, "EFFECT"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			for name, source := range map[string]string{"Requests.fango": requestFixture, "Requests.native.go": requestSidecar, "Main.fango": "import Requests\nimport NativeRequest\nimport Scope\nimport Coroutine\nimport Work\nimport Fail\n" + tc.source + "\n"} {
+			for name, source := range map[string]string{"Requests.fango": requestFixture, "Requests.native.go": requestSidecar, "Main.fango": "import Requests\nimport Runtime.NativeRequest\nimport Runtime.Scope\nimport Runtime.Coroutine\nimport Runtime.Work\nimport Fail\n" + tc.source + "\n"} {
 				if err := os.WriteFile(filepath.Join(dir, name), []byte(source), 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -118,22 +118,22 @@ func TestNativeRequestModuleObject(t *testing.T) {
 	cache := newMemoryObjectCache()
 	compileEvents(t, path, cache)
 	_, events := compileEvents(t, path, cache)
-	if events["checked-cache-hit"]["Device"] != 1 || events["checked-cache-hit"]["NativeRequest"] != 1 {
+	if events["checked-cache-hit"]["Device"] != 1 || events["checked-cache-hit"]["Runtime.NativeRequest"] != 1 {
 		t.Fatalf("missing request cache contracts: %v", events)
 	}
 }
 
 func TestNativeRequestDeclarations(t *testing.T) {
 	for _, tc := range []struct{ name, declaration, sidecar string }{
-		{"wrong position", "submit : Int -> NativeRequest.Registration ->{IO} ()", "func Submit(n int64, token any) {}"},
-		{"token allocation", "submit : () ->{IO} NativeRequest.Registration", "func Submit() any { return nil }"},
-		{"result", "submit : NativeRequest.Registration ->{IO} Int", "func Submit(token any) int64 { return 0 }"},
-		{"host boundary", "submit : NativeRequest.Host ->{IO} ()", "func Submit(host any) {}"},
+		{"wrong position", "submit : Int -> Runtime.NativeRequest.Registration ->{IO} ()", "func Submit(n int64, token any) {}"},
+		{"token allocation", "submit : () ->{IO} Runtime.NativeRequest.Registration", "func Submit() any { return nil }"},
+		{"result", "submit : Runtime.NativeRequest.Registration ->{IO} Int", "func Submit(token any) int64 { return 0 }"},
+		{"host boundary", "submit : Runtime.NativeRequest.Host ->{IO} ()", "func Submit(host any) {}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "Main.fango")
-			if err := os.WriteFile(path, []byte("import NativeRequest\n"+tc.declaration+"\nsubmit = native\nmain() = ()\n"), 0600); err != nil {
+			if err := os.WriteFile(path, []byte("import Runtime.NativeRequest\n"+tc.declaration+"\nsubmit = native\nmain() = ()\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(dir, "Main.native.go"), []byte("package native\n"+tc.sidecar+"\n"), 0600); err != nil {

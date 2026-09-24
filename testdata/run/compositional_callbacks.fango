@@ -1,4 +1,4 @@
-import Scope
+import Runtime.Scope
 
 effect Boom
     abort boom : () -> Int
@@ -74,7 +74,7 @@ staged first =
     print first
     \second -> first + second
 
-scoped() = Scope.bracket pure (\_ -> print "release") \_ ->
+scoped() = Runtime.Scope.bracket pure (\_ -> print "release") \_ ->
     pair emit fail
 
 main() =

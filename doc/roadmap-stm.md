@@ -75,7 +75,7 @@ The whole control layer, with no compiler or runtime knowledge of these names:
   the action again with a fresh transaction, a `return` clause validates and
   commits.
 - Rollback needs no new machinery either, but it is a cleanup scope rather than
-  handler state, because the write set lives in the sidecar: `Scope.bracket`
+  handler state, because the write set lives in the sidecar: `Runtime.Scope.bracket`
   acquires the transaction and abandons an uncommitted one on every exit,
   including an abort aimed at an outer handler and cancellation. Anything the
   handler keeps in its own `with` state is discarded with the activation for
@@ -96,7 +96,7 @@ Nothing in Fango expresses shared mutable memory; `State` is a per-activation
 snapshot and cannot be shared. One sidecar owns the variable and its version,
 the per-transaction read and write sets, and validate-and-commit under a
 critical section, in the shape `File` and `Net` already use: an opaque
-single-constructor wrapper over `Native.Any` with a `{-# resource #-}` contract
+single-constructor wrapper over `Runtime.Native.Any` with a `{-# resource #-}` contract
 and an unexported constructor.
 
 Two obligations follow from that boundary. The sidecar must be

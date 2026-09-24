@@ -12,10 +12,10 @@ func TestNativeAnyRepresentationIsCanonical(t *testing.T) {
 	ctor := &types.CtorInfo{Name: NativeAnyCtorName, Result: con}
 	adt := &types.ADTInfo{Con: con, Ctors: []*types.CtorInfo{ctor}}
 	if errs := markNativeAnyRepr(adt, source.Span{}); len(errs) != 0 {
-		t.Fatalf("mark Native.Any: %v", errs)
+		t.Fatalf("mark Runtime.Native.Any: %v", errs)
 	}
 	if adt.Repr != types.ReprNativeAny || ctor.Repr != types.ReprNativeAny {
-		t.Fatal("Native.Any did not receive its opaque runtime representation")
+		t.Fatal("Runtime.Native.Any did not receive its opaque runtime representation")
 	}
 
 	lookalikeCon := &types.TCon{Name: "Mine.Any"}

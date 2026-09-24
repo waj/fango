@@ -1,10 +1,10 @@
 import Stream
-import Coroutine
+import Runtime.Coroutine
 import Iterator
 import Maybe exposing (Maybe(..))
-import Scope
+import Runtime.Scope
 
-eachCursor : (a ->{e} ()) -> Iterator.Iterator a e ->{Coroutine.Drive | e} ()
+eachCursor : (a ->{e} ()) -> Iterator.Iterator a e ->{Runtime.Coroutine.Drive | e} ()
 eachCursor action cursor = case Iterator.next cursor of
     Nothing -> ()
     Just value ->
@@ -18,4 +18,4 @@ runCleanup (Cleanup cleanup) = cleanup()
 main() =
     cleanup = Cleanup (\_ -> Stream.yield 1)
     Stream.withCursor (Stream.generate (\_ ->
-        Scope.finally (\_ -> ()) (\_ -> runCleanup cleanup))) (eachCursor print)
+        Runtime.Scope.finally (\_ -> ()) (\_ -> runCleanup cleanup))) (eachCursor print)

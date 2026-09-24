@@ -13,11 +13,17 @@ build:
 # doc/reference/commands.md, "The library root".
 PREFIX ?= /usr/local
 LIBDIR = $(PREFIX)/lib/fango
+FANGO_SOURCES = $(shell find stdlib examples -name '*.fango' -type f -print)
 
 install: build
 	install -d $(PREFIX)/bin $(LIBDIR)/stdlib
 	install -m 755 fango $(PREFIX)/bin/fango
-	install -m 644 stdlib/*.fango stdlib/*.native.go stdlib/native_support.go $(LIBDIR)/stdlib
+	find stdlib -type f \( -name '*.fango' -o -name '*.native.go' -o -name 'native_support.go' \) -print | while IFS= read -r f; do \
+		rel=$${f#stdlib/}; \
+		case "$$rel" in */*) dest=$(LIBDIR)/stdlib/$${rel%/*};; *) dest=$(LIBDIR)/stdlib;; esac; \
+		install -d "$$dest"; \
+		install -m 644 "$$f" "$$dest"; \
+	done
 	for pkg in fangort nativewire nativeworker; do \
 		install -d $(LIBDIR)/runtime/$$pkg; \
 		for f in runtime/$$pkg/*.go; do \
@@ -71,14 +77,14 @@ fmt:
 # does for the Go sources. testdata is excluded: it deliberately holds malformed
 # and oddly laid out inputs. The `ci` gate checks the same set without writing.
 fmt-fango:
-	go run ./cmd/fango fmt -w stdlib/*.fango examples/*.fango
+	go run ./cmd/fango fmt -w $(FANGO_SOURCES)
 
 vet:
 	go vet ./...
 
 ci:
 	test -z "$$(gofmt -l .)"
-	go run ./cmd/fango fmt -l stdlib/*.fango examples/*.fango
+	go run ./cmd/fango fmt -l $(FANGO_SOURCES)
 	go vet ./...
 	go test -parallel 16 $$(go list ./... | grep -v benchmarks)
 

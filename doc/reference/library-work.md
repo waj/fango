@@ -6,11 +6,11 @@ queues. Dynamic registration allocates work in a Coroutine scope; scheduling
 remains the caller's responsibility.
 
 ```fango
-run : (Owner e ->{Coroutine.Drive | e} a) ->{Coroutine.Drive | e} a
+run : (Owner e ->{Runtime.Coroutine.Drive | e} a) ->{Runtime.Coroutine.Drive | e} a
 facet : Owner e -> Facet
 pack : Facet -> Coroutine request reply result e ->{e} Work request reply result
-advance : Owner e -> Work request reply result -> reply ->{Coroutine.Drive | e} Step request result
-close : Owner e -> Work request reply result ->{Coroutine.Drive | e} ()
+advance : Owner e -> Work request reply result -> reply ->{Runtime.Coroutine.Drive | e} Step request result
+close : Owner e -> Work request reply result ->{Runtime.Coroutine.Drive | e} ()
 ```
 
 `Owner`, `Facet`, and `Work` are abstract resource types. `run` supplies a fresh
@@ -23,7 +23,7 @@ its owner, including inside a closure or another data structure.
 do not make two owners interchangeable. Opening is rejected when flow from
 different owners leaves the selected identity ambiguous. The operations use
 the coroutine's original exclusive driver authority, reply/result checks, terminal states, and cleanup
-behavior. `run` does not discharge `Coroutine.Drive`; the enclosing coroutine
+behavior. `run` does not discharge `Runtime.Coroutine.Drive`; the enclosing coroutine
 boundary does. Its lexical scope adds no dynamic coroutine registry.
 
 Each package charges its residual effects immediately and retains the same
@@ -43,15 +43,15 @@ resource without a nominal `shared-resource` contract.
 ## Dynamic registration
 
 ```fango
-owner : Coroutine.Scope e -> Owner e
-register : Coroutine.Facet
-    -> ((request ->{Coroutine.Suspension} reply)
-        -> reply ->{Coroutine.Suspension | e} result)
+owner : Runtime.Coroutine.Scope e -> Owner e
+register : Runtime.Coroutine.Facet
+    -> ((request ->{Runtime.Coroutine.Suspension} reply)
+        -> reply ->{Runtime.Coroutine.Suspension | e} result)
     ->{e} Work request reply result
 ```
 
 `owner` gives the execution-budget view of an existing Coroutine scope; repeated
-calls select the same owner. `register` uses its `Coroutine.facet` to allocate
+calls select the same owner. `register` uses its `Runtime.Coroutine.facet` to allocate
 and package a new lazy coroutine in that scope. It preserves the three protocol
 types while hiding the child's residual row. Different child rows may share a
 scope when each fits its budget. No producer application runs during registration.
@@ -62,11 +62,11 @@ obligation, just like `pack`. An intervening handler or an unused result cannot
 remove the latter from the scope's outward row. Registration also checks producer
 captures against the destination scope and retains the existing
 `WORK CAPABILITY TRANSFER` restriction. A nullary effect may return
-`Coroutine.Facet` to select the destination without exposing its row parameter;
+`Runtime.Coroutine.Facet` to select the destination without exposing its row parameter;
 this does not grant shared mutable service evidence or transfer authority.
 
 Scope exit and live-entry removal follow
-[dynamic ownership](library-coroutines.md#dynamic-ownership). `Work.run` still
+[dynamic ownership](library-coroutines.md#dynamic-ownership). `Runtime.Work.run` still
 provides only a lexical packaging budget, and `pack` never changes a coroutine's
 execution owner. [Shared native resources](native.md#shared-native-resources),
 [write-once cells](library-cells.md), and [service contexts](library-services.md)

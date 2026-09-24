@@ -375,7 +375,7 @@ const (
 	ReprADT       Repr = iota // marker interface plus one struct per constructor
 	ReprList                  // fangort.List, the bundled List type
 	ReprBytes                 // fangort.Bytes, the bundled Bytes type
-	ReprNativeAny             // Go any, the bundled Native.Any type
+	ReprNativeAny             // Go any, the bundled Runtime.Native.Any type
 )
 
 // CtorInfo is one constructor's row in the constructor table (doc/design.md, "Type inference"), shared

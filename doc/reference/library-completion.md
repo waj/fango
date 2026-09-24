@@ -36,16 +36,16 @@ API](library-effects.md); inspecting it does not perform the abort. Replay
 preserves opaque payloads even when public inspection cannot expose them.
 
 ```fango
-import Completion
+import Runtime.Completion
 import Fail
 
 main() =
     print (Fail.attempt (\_ ->
-        completed = Completion.capture (\_ ->
+        completed = Runtime.Completion.capture (\_ ->
             Fail.fail "saved"
             0)
         print "captured"
-        Fail.attempt (\_ -> Completion.replay completed)))
+        Fail.attempt (\_ -> Runtime.Completion.replay completed)))
 ```
 
 This prints `captured` followed by `Ok Err saved`: the inner handler installed
@@ -58,7 +58,7 @@ from its owning cleanup scope is a `RESOURCE ESCAPES` error. The same check
 applies through wrappers and stored callbacks.
 
 To include a coroutine's final cleanup in a completion, capture the entire
-`Coroutine.with` call. A capture inside the producer encloses only cleanup
+`Runtime.Coroutine.with` call. A capture inside the producer encloses only cleanup
 inside that action. Source code has no owner-stop operation; closing an owner
 abandons its unfinished computation and reports cleanup failures through the
 coroutine lifecycle contract.

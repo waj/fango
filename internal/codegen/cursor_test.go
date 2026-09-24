@@ -21,7 +21,7 @@ func runCoroutineProof(t *testing.T, p *core.Prog, b *types.Builtins, source str
 	if len(errs) != 0 {
 		t.Fatal(errs)
 	}
-	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Coroutine"}, {Name: "Main", Program: "Main", Imports: []string{"Coroutine"}, Entry: true}}, false)
+	files, err := EmitMachineProject(p, mp, b, []Unit{{Name: "Runtime.Coroutine"}, {Name: "Main", Program: "Main", Imports: []string{"Runtime.Coroutine"}, Entry: true}}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,16 +63,16 @@ func TestGeneratedTypedCoroutineAdvancement(t *testing.T) {
 	p.Defs = []core.Def{p.Defs[0], producer}
 	p.Entry = producer.Name
 	runCoroutineProof(t, p, b, `package main
-import("testing";"fangobuild/fangort";c "fangobuild/modules/Coroutine")
+import("testing";"fangobuild/fangort";c "fangobuild/modules/Runtime/Coroutine")
 func TestPulls(t *testing.T){
  cursor:=fangort.StartMachineCoroutine(nil,nil,func(any)fangort.MachineFrame{return MachineFrame_Main_dot_producer()})
  for i:=0;i<4;i++ {
-  m:=fangort.StartMachine(c.MachineFrame_Coroutine_dot_advance(cursor,fangort.UnitValue))
+  m:=fangort.StartMachine(c.MachineFrame_Runtime_dot_Coroutine_dot_advance(cursor,fangort.UnitValue))
   event,err:=m.Run();if err!=nil||!event.Done||event.Exit!=nil {t.Fatalf("pull %d: %#v %v",i,event,err)}
   switch i {
-  case 0:v,ok:=event.Value.(*c.C_Coroutine_dot_Suspended[int64,fangort.Unit]);if !ok||v.F0!=42 {t.Fatalf("suspension: %#v",event.Value)}
-  case 1:if _,ok:=event.Value.(*c.C_Coroutine_dot_Finished[int64,fangort.Unit]);!ok {t.Fatalf("finished: %#v",event.Value)}
-  default:if _,ok:=event.Value.(*c.C_Coroutine_dot_Closed[int64,fangort.Unit]);!ok {t.Fatalf("closed: %#v",event.Value)}
+  case 0:v,ok:=event.Value.(*c.C_Runtime_dot_Coroutine_dot_Suspended[int64,fangort.Unit]);if !ok||v.F0!=42 {t.Fatalf("suspension: %#v",event.Value)}
+  case 1:if _,ok:=event.Value.(*c.C_Runtime_dot_Coroutine_dot_Finished[int64,fangort.Unit]);!ok {t.Fatalf("finished: %#v",event.Value)}
+  default:if _,ok:=event.Value.(*c.C_Runtime_dot_Coroutine_dot_Closed[int64,fangort.Unit]);!ok {t.Fatalf("closed: %#v",event.Value)}
   }
  }
 }
@@ -81,7 +81,7 @@ func TestPulls(t *testing.T){
 func TestGeneratedCoroutineScopeClosesBeforeReturning(t *testing.T) {
 	p, b := coretest.CursorScope()
 	runCoroutineProof(t, p, b, `package main
-import("testing";"fangobuild/fangort";c "fangobuild/modules/Coroutine")
+import("testing";"fangobuild/fangort";c "fangobuild/modules/Runtime/Coroutine")
 func TestScope(t *testing.T){
  for _,abandon:=range []bool{false,true} {
   m:=fangort.StartMachine(MachineFrame_Main_dot_main());event,err:=m.Run()
@@ -89,7 +89,7 @@ func TestScope(t *testing.T){
   if m.Stats().MaxCleanups!=1 {t.Fatalf("owners: %#v",m.Stats())}
   if abandon {if exit,err:=m.Abandon();exit!=nil||err!=nil {t.Fatalf("abandon: %#v %v",exit,err)}} else {
    event,err=m.Resume(fangort.UnitValue);if err!=nil||!event.Done||event.Exit!=nil {t.Fatalf("completion: %#v %v",event,err)}
-   v,ok:=event.Value.(*c.C_Coroutine_dot_Suspended[int64,fangort.Unit]);if !ok||v.F0!=42 {t.Fatalf("result: %#v",event.Value)}
+   v,ok:=event.Value.(*c.C_Runtime_dot_Coroutine_dot_Suspended[int64,fangort.Unit]);if !ok||v.F0!=42 {t.Fatalf("result: %#v",event.Value)}
   }
  }
 }
@@ -98,9 +98,9 @@ func TestScope(t *testing.T){
 func TestGeneratedSynchronousCoroutineScope(t *testing.T) {
 	p, b := coretest.SynchronousCursorScope()
 	runCoroutineProof(t, p, b, `package main
-import("testing";"fangobuild/fangort";c "fangobuild/modules/Coroutine")
+import("testing";"fangobuild/fangort";c "fangobuild/modules/Runtime/Coroutine")
 func TestScope(t *testing.T){
- v,ok:=V_Main_dot_main.(*c.C_Coroutine_dot_Suspended[int64,fangort.Unit]);if !ok||v.F0!=42 {t.Fatalf("result: %#v",v)}
+ v,ok:=V_Main_dot_main.(*c.C_Runtime_dot_Coroutine_dot_Suspended[int64,fangort.Unit]);if !ok||v.F0!=42 {t.Fatalf("result: %#v",v)}
 }
 `)
 }

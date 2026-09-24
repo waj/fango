@@ -989,7 +989,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		for _, ref := range result.refs {
 			o := f.objects[ref]
 			if o.kind != "pause" || f.active[o.owner] == 0 {
-				err := fmt.Errorf("INVOCATION AUTHORITY: Service.run requires its active producer's pause capability")
+				err := fmt.Errorf("INVOCATION AUTHORITY: Runtime.Service.run requires its active producer's pause capability")
 				f.errors[err.Error()] = err
 			}
 		}
@@ -1077,7 +1077,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 			}
 			want, got := f.workOwnerIDs(owner), f.workOwnerIDs(o.fields[0])
 			if !owner.unknown && !o.fields[0].unknown && (len(want) != 1 || len(got) != 1 || want[0] != got[0]) {
-				err := fmt.Errorf("WORK OWNER MISMATCH: package does not belong to the selected Work.run owner in %s", f.root)
+				err := fmt.Errorf("WORK OWNER MISMATCH: package does not belong to the selected Runtime.Work.run owner in %s", f.root)
 				f.errors[err.Error()] = err
 			}
 			result = joinFlow(result, o.fields[1])

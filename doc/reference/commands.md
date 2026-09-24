@@ -117,6 +117,7 @@ An installed layout therefore looks like:
 ```text
 <prefix>/bin/fango
 <prefix>/lib/fango/stdlib/
+<prefix>/lib/fango/stdlib/Runtime/
 <prefix>/lib/fango/runtime/
 <prefix>/lib/fango/internal/
 ```

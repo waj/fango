@@ -1,18 +1,18 @@
 import Context
-import Coroutine
-import Service
-import Work
+import Runtime.Coroutine
+import Runtime.Service
+import Runtime.Work
 
-make pause () = Service.run pause (\_ -> Context.bind 30)
+make pause () = Runtime.Service.run pause (\_ -> Context.bind 30)
 
-main() = Coroutine.with make (\root ->
-    case Coroutine.advance root () of
-        Coroutine.Finished context -> Coroutine.scope (\scope ->
-            first = Work.register (Coroutine.facet scope) (Context.producer context)
-            second = Work.register (Coroutine.facet scope) (Context.producer context)
-            owner = Work.owner scope
-            print (Work.advance owner first ())
-            print (Work.advance owner second ())
-            print (Work.advance owner first ())
-            print (Work.advance owner second ()))
+main() = Runtime.Coroutine.with make (\root ->
+    case Runtime.Coroutine.advance root () of
+        Runtime.Coroutine.Finished context -> Runtime.Coroutine.scope (\scope ->
+            first = Runtime.Work.register (Runtime.Coroutine.facet scope) (Context.producer context)
+            second = Runtime.Work.register (Runtime.Coroutine.facet scope) (Context.producer context)
+            owner = Runtime.Work.owner scope
+            print (Runtime.Work.advance owner first ())
+            print (Runtime.Work.advance owner second ())
+            print (Runtime.Work.advance owner first ())
+            print (Runtime.Work.advance owner second ()))
         _ -> print "unexpected")

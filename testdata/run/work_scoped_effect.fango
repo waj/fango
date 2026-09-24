@@ -1,26 +1,26 @@
-import Coroutine
-import Work
+import Runtime.Coroutine
+import Runtime.Work
 import Fail
 
 effect Dispatch
-    context : () -> Work.Facet
+    context : () -> Runtime.Work.Facet
 
 register cursor =
-    packer = Work.pack (context())
+    packer = Runtime.Work.pack (context())
     send child = Fail.attempt (\_ -> packer child)
     ignored = send cursor
     ()
 
 schedule cursor =
-    Work.run (\owner ->
+    Runtime.Work.run (\owner ->
         handle register cursor of
             context () ->
-                selected = Work.facet owner
-                if True then resume selected else resume (Work.facet owner))
+                selected = Runtime.Work.facet owner
+                if True then resume selected else resume (Runtime.Work.facet owner))
 
 main() =
     result = Fail.attempt (\_ ->
-        Coroutine.with (\_ () -> Fail.fail "unstarted") (\cursor ->
+        Runtime.Coroutine.with (\_ () -> Fail.fail "unstarted") (\cursor ->
             schedule cursor
             print "registered through effect"))
     print result

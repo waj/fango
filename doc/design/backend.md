@@ -17,7 +17,7 @@ It does not depend on Go runtime internals, stack maps, barriers, or scheduler A
 | Unit | Shared fangort.Unit/UnitValue when represented |
 | Function | Typed Direct/Exit/Machine callable record |
 | Ordinary ADT | Typed marker interface and constructor structs |
-| Native.Any | Go `any`; opaque and valid only behind a private wrapper |
+| Runtime.Native.Any | Go `any`; opaque and valid only behind a private wrapper |
 | Parameterized definition | Go generics with explicit instantiation |
 
 Row-kinded ADT parameters are omitted from Go generics; their Core arguments
@@ -93,7 +93,7 @@ is why fangort.Bytes is an alias rather than a defined type — a sidecar readin
 a file or a socket hands the boundary an ordinary `[]byte`.
 
 A `List Int` would cost eight bytes per byte and forfeit `bytes.Index`, and an
-opaque handle table is not used: `Native.Any` lets a scoped wrapper retain the
+opaque handle table is not used: `Runtime.Native.Any` lets a scoped wrapper retain the
 Go object directly, and ordinary Go reachability collects it. Relaxing String
 to admit invalid UTF-8 would instead invalidate every String contract and the
 boundary validation protecting the Go side. Scanning is therefore a native
@@ -310,7 +310,7 @@ native metadata, never re-derived by backends:
   checking confirms resolved types. Interpreter CtorVal wrapping matches Go.
   Phantom indices and opaque payload tokens follow the
   [native storage contract](shared-capabilities.md#native-storage-and-sharing).
-- The bundled `Native.Any` is represented as Go `any`. Its constructor is
+- The bundled `Runtime.Native.Any` is represented as Go `any`. Its constructor is
   private and carries no usable value; libraries expose only nominal wrappers
   such as `File.Handle` and `Net.Connection`. It has no Eq, Show, matching, or
   serialization contract. Resolved-type validation prevents an imported type
@@ -338,7 +338,7 @@ accepted Fango from using stale handles; native code is trusted.
 Evaluation involving sidecars uses one persistent process per sidecar set.
 Checking and elaboration remain in the compiler process; checked Core and its
 selective Machine program are serialized to the worker, where the evaluator and
-sidecars share one Go heap. A `Native.Any` therefore passes from Core to a Go
+sidecars share one Go heap. A `Runtime.Native.Any` therefore passes from Core to a Go
 function as the original object and never crosses IPC. Support sources come
 from the library root, and cache keys hash their sorted paths and exact bytes.
 

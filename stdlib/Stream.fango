@@ -2,10 +2,10 @@
 module Stream exposing (Stream, Yield, filter, fold, forEach, fromList, generate, map, take, toList, withCursor, yield, zip)
 
 import Basics exposing (..)
-import Coroutine exposing (Drive)
 import Iterator exposing (Iterator, next)
 import List exposing (List)
 import Maybe exposing (Maybe(..))
+import Runtime.Coroutine exposing (Drive)
 
 effect Yield a
     yield : a -> ()
@@ -16,7 +16,7 @@ generate : (() ->{Yield a | e} ()) -> Stream a e
 generate producer = Stream producer
 
 withProducer : (() ->{Yield a | e} ()) -> (Iterator a e ->{Drive | e} result) ->{e} result
-withProducer producer consumer = Coroutine.with
+withProducer producer consumer = Runtime.Coroutine.with
     (\pause _ -> handle producer () of
         yield value -> resume (pause value))
     (\work -> consumer (Iterator.fromCoroutine work))

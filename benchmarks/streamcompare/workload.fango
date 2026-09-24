@@ -1,7 +1,7 @@
 import Stream
 import Iterator
 import State
-import Scope
+import Runtime.Scope
 import Basics exposing (quotientBy)
 
 emit : Int ->{Stream.Yield Int} ()

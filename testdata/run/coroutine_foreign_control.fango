@@ -1,10 +1,10 @@
-import Coroutine
+import Runtime.Coroutine
 
 type Callback a b e = { run : a ->{e} b }
 type Box a = Box a
 
-nested outer = Coroutine.with (\_ () -> outer 7) (\inner ->
-    ignored = Coroutine.advance inner ()
+nested outer = Runtime.Coroutine.with (\_ () -> outer 7) (\inner ->
+    ignored = Runtime.Coroutine.advance inner ()
     ())
 
 select 0 value = value
@@ -16,6 +16,6 @@ through boxed =
     stored = { original | run = original.run }
     nested stored.run
 
-main() = Coroutine.with (\pause () -> through (Box pause)) (\outer ->
-    print (Coroutine.advance outer ())
-    print (Coroutine.advance outer ()))
+main() = Runtime.Coroutine.with (\pause () -> through (Box pause)) (\outer ->
+    print (Runtime.Coroutine.advance outer ())
+    print (Runtime.Coroutine.advance outer ()))

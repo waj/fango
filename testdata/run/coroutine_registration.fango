@@ -1,31 +1,31 @@
-import Coroutine
-import Work
+import Runtime.Coroutine
+import Runtime.Work
 import Fail
 
 effect Dispatch
-    context : () -> Coroutine.Facet
+    context : () -> Runtime.Coroutine.Facet
 
-number : (Int ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension} Int
+number : (Int ->{Runtime.Coroutine.Suspension} ()) -> () ->{Runtime.Coroutine.Suspension} Int
 number pause () =
     pause 1
     42
 
-text : (String ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension, IO} String
+text : (String ->{Runtime.Coroutine.Suspension} ()) -> () ->{Runtime.Coroutine.Suspension, IO} String
 text pause () =
     print "text started"
     pause "ready"
     "done"
 
 registerAll() =
-    a = Work.register (context()) number
-    b = Work.register (context()) text
+    a = Runtime.Work.register (context()) number
+    b = Runtime.Work.register (context()) text
     (a, b)
 
-main() = Coroutine.scope (\scope ->
+main() = Runtime.Coroutine.scope (\scope ->
     (a, b) = handle registerAll() of
-        context () -> resume (Coroutine.facet scope)
-    owner = Work.owner scope
-    print (Work.advance owner a ())
-    print (Work.advance owner b ())
-    print (Work.advance owner a ())
-    print (Work.advance owner b ()))
+        context () -> resume (Runtime.Coroutine.facet scope)
+    owner = Runtime.Work.owner scope
+    print (Runtime.Work.advance owner a ())
+    print (Runtime.Work.advance owner b ())
+    print (Runtime.Work.advance owner a ())
+    print (Runtime.Work.advance owner b ()))
