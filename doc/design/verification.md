@@ -57,6 +57,11 @@ infrastructure. Handler-local State and Random cells are independent. Correctnes
 commands use Go test parallelism sixteen to let structural/compiled checks advance
 while interpreter access is serialized. Generated Go must be deterministic and
 gofmt-idempotent; consumer-independent emission is a cross-fixture invariant.
+The scheduler storage probe runs short and long schedules in one instrumented
+fixture, checking bounded live state after both schedules. The interpreter
+probe emits the generated Go after its checked compilation, reusing its Fango
+module objects; the compiled probe then runs those bytes in a private project.
+The probe runs alongside the other parallel checks.
 
 ## Performance evidence
 
