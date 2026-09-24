@@ -1,0 +1,7 @@
+import Coroutine
+import Work
+main() = Coroutine.scope (\outer ->
+    work = Work.register (Coroutine.facet outer) (\_ () -> 42)
+    Coroutine.scope (\inner ->
+        ignored = Work.advance (Work.owner inner) work ()
+        ()))

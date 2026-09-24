@@ -35,6 +35,10 @@ func workDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 		refs[i] = &core.VarRef{Name: n, Local: true, Ty: args[i]}
 	}
 	switch name {
+	case types.WorkOwnerName:
+		d.Body = &core.Work{Kind: "registry-owner", Args: refs, Ty: result}
+	case types.WorkRegisterName:
+		d.Body = &core.Work{Kind: "register", Args: refs, SourceRow: rawArgs[1].(*types.TFun).Ret.(*types.TFun).Eff.Tail, Ty: result}
 	case types.WorkRunName:
 		fn := args[0].(*types.TFun)
 		resource := &core.VarRef{Name: "_budget", Local: true, Ty: fn.Arg}

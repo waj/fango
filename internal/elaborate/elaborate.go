@@ -334,6 +334,8 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 		} else if name == types.ScopeBracketName {
 			// The declaration keeps its open row tail; Core does not.
 			defs = append(defs, scopeBracketDef(name, ty, ck))
+		} else if name == types.CoroutineFacetName || name == types.CoroutineScopeName || name == types.CoroutineCreateName {
+			defs = append(defs, coroutineDynamicDef(name, ty, ck))
 		} else if name == types.CoroutineWithName {
 			defs = append(defs, coroutineWithDef(ty, ck))
 		} else if name == types.CoroutineAdvanceName || name == types.CoroutineCloseName {

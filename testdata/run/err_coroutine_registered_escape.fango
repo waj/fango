@@ -1,0 +1,3 @@
+import Coroutine
+import Work
+main = Coroutine.scope (\scope -> Work.register (Coroutine.facet scope) (\_ () -> 42))

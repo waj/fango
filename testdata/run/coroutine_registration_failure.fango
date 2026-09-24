@@ -1,0 +1,29 @@
+import Coroutine
+import Work
+import Fail
+import Scope
+import Result exposing (Result)
+
+failed : (() ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension, Fail.Fail String} Int
+failed pause () = Scope.finally (\_ ->
+    pause ()
+    Fail.fail "child") (\_ -> Fail.fail "cleanup")
+
+type Producer request reply result e = Producer ((request ->{Coroutine.Suspension} reply) -> reply ->{Coroutine.Suspension | e} result)
+source : Producer () () Int {Fail.Fail String}
+source = Producer failed
+register : Coroutine.Facet -> Producer request reply result e ->{e} Work.Work request reply result
+register facet (Producer producer) = Work.register facet producer
+
+attempt : (() ->{Fail.Fail String | e} a) ->{e} Result String a
+attempt = Fail.attempt
+
+observe : Coroutine.Scope {IO, Fail.Fail String} ->{Coroutine.Drive, IO, Fail.Fail String} ()
+observe scope =
+    work = register (Coroutine.facet scope) source
+    owner = Work.owner scope
+    print (attempt (\_ -> Work.advance owner work ()))
+    print (attempt (\_ -> Work.advance owner work ()))
+    print (attempt (\_ -> Work.advance owner work ()))
+
+main() = print (attempt (\_ -> Coroutine.scope observe))

@@ -116,7 +116,9 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 			d.pulls[i] = machinePull{}
 			d.pulls = d.pulls[:i]
 			pull.cursor.done, pull.cursor.busy = true, false
+			pull.cursor.unlink()
 			pull.cursor.evidence.Clear()
+			pull.cursor.clearRegistered()
 			d.active = pull.caller
 			d.active.result = CursorResult{Exit: event.Exit, Value: event.Value, Finished: event.Exit == nil}
 			continue
@@ -171,7 +173,9 @@ func (m *Machine) Abandon() (*ExitRequest, error) {
 			pull := d.pulls[i]
 			d.pulls[i] = machinePull{}
 			pull.cursor.done, pull.cursor.busy = true, false
+			pull.cursor.unlink()
 			pull.cursor.evidence.Clear()
+			pull.cursor.clearRegistered()
 			active = pull.caller
 		}
 	}

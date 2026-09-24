@@ -749,6 +749,9 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			varDeclStmt(captured, &goast.StarExpr{X: selector("fangort", "MachineIterator")}, g.coroutineStart(term.Producer, ident(owner), ident(row))),
 			assignStmt(machineLocalName(term.Cursor.Name), ident(captured)),
 		}
+		if types.CoroutineScopeType(term.Cursor.Ty) {
+			stmts = stmts[1:]
+		}
 		cleanup := funcLit(&goast.StarExpr{X: selector("fangort", "ExitRequest")}, []goast.Stmt{returnStmt(callExpr(selector("fangort", "CloseMachineIterator"), ident(captured)))})
 		stmts = append(stmts, exprStmt(callExpr(selector("m", "PushCleanup"), cleanup)))
 		return append(stmts, continueStmt(term.Next)...), nil

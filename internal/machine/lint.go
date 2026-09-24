@@ -518,16 +518,21 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				}
 			}
 		case *CursorOpen:
-			checkRow(term.Row, term.Producer != nil && core.ArrowOpenRow(term.Producer.Type(), 2))
+			checkRow(term.Row, types.CoroutineScopeType(term.Cursor.Ty) || term.Producer != nil && core.ArrowOpenRow(term.Producer.Type(), 2))
 			checkBind(term.Cursor)
 			checkExpr(term.Producer, "cursor producer", false)
 			if term.Scope == 0 || seenCursorScopes[term.Scope] {
 				errs = append(errs, fmt.Errorf("%s: invalid or reused cursor scope", blockWhere))
 			}
 			seenCursorScopes[term.Scope] = true
+			if types.CoroutineScopeType(term.Cursor.Ty) {
+				if _, ok := term.Producer.(*core.UnitLit); !ok {
+					errs = append(errs, fmt.Errorf("%s: invalid coroutine owner/producer type", blockWhere))
+				}
+			}
 			if term.Producer == nil {
 				errs = append(errs, fmt.Errorf("%s: missing coroutine producer", blockWhere))
-			} else if err := core.CheckCoroutineProducer(term.Cursor.Ty, term.Producer.Type()); err != nil {
+			} else if err := core.CheckCoroutineProducer(term.Cursor.Ty, term.Producer.Type()); !types.CoroutineScopeType(term.Cursor.Ty) && err != nil {
 				errs = append(errs, fmt.Errorf("%s: %v", blockWhere, err))
 			}
 			if term.Yield.Unique == 0 || term.Yield.Name != types.CoroutineSuspensionName || len(term.Yield.Args) != 0 || term.Yield.Control.Transport != types.Machine || !types.EqualCaptures(term.Yield.Captures, types.ScopeCapture(term.Scope)) {

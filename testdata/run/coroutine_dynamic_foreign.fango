@@ -1,0 +1,12 @@
+import Coroutine
+
+main() = Coroutine.with (\outerPause () ->
+    Coroutine.scope (\scope ->
+        work = Coroutine.create scope (\innerPause () ->
+            ignored = if False then innerPause () else ()
+            outerPause "foreign"
+            42)
+        Coroutine.advance work ())) (\outer ->
+    print (Coroutine.advance outer ())
+    print (Coroutine.advance outer ())
+    print (Coroutine.advance outer ()))

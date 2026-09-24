@@ -134,7 +134,7 @@ Deferred until a consumer needs them:
 
 [Effects](roadmap-effects.md) owns general handler and language extensions.
 [Owned coroutines](roadmap-coroutines.md) details the shared suspension API,
-Iterator machinery reuse, Stream migration, dynamic scope ownership, suspending
+implemented dynamic scope ownership and remaining suspending
 cleanup, general native retention/transfer contracts, and execution checkpoints.
 Preserve checked ownership and ordinary calls/explicit machines; Stream and Async
 names do not become compiler primitives.

@@ -11,6 +11,20 @@ func (g *gen) workExpr(e *core.Work) goast.Expr {
 	for i, arg := range e.Args {
 		args[i] = g.expr(arg, 0)
 	}
+	if e.Kind == "registration" {
+		return args[0]
+	}
+	if e.Kind == "registry-owner" {
+		return callExpr(selector("fangort", "CoroutineWorkOwner"), args[0])
+	}
+	if e.Kind == "create" || e.Kind == "register" {
+		cursor := g.coroutineStart(e.Args[1], callExpr(selector("fangort", "NewYieldOwner")), callExpr(selector("fangort", "NewCursorEvidence"), callExpr(selector("fangort", "CoroutineScopeEvidence"), args[0])))
+		registered := callExpr(selector("fangort", "RegisterCoroutine"), args[0], cursor)
+		if e.Kind == "register" {
+			return callExpr(selector("fangort", "PackWork"), callExpr(selector("fangort", "CoroutineWorkOwner"), args[0]), registered)
+		}
+		return registered
+	}
 	if e.Kind == "facet" {
 		return args[0]
 	}

@@ -16,6 +16,9 @@ func (it *MachineIterator) begin(input any) error {
 		entry := start(input)
 		if entry == nil {
 			it.done = true
+			it.unlink()
+			it.evidence.Clear()
+			it.clearRegistered()
 			return fmt.Errorf("fangort: coroutine factory returned no frame")
 		}
 		it.machine = StartMachine(entry)

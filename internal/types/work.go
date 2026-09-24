@@ -4,6 +4,8 @@ const (
 	WorkOwnerTypeName = "Work.Owner"
 	WorkFacetTypeName = "Work.Facet"
 	WorkTypeName      = "Work.Work"
+	WorkOwnerName     = "Work.owner"
+	WorkRegisterName  = "Work.register"
 	WorkRunName       = "Work.run"
 	WorkFacetName     = "Work.facet"
 	WorkPackName      = "Work.pack"
@@ -13,7 +15,7 @@ const (
 
 func WorkIntrinsic(name string) bool {
 	switch name {
-	case WorkRunName, WorkFacetName, WorkPackName, WorkAdvanceName, WorkCloseName:
+	case WorkOwnerName, WorkRegisterName, WorkRunName, WorkFacetName, WorkPackName, WorkAdvanceName, WorkCloseName:
 		return true
 	}
 	return false
@@ -65,6 +67,23 @@ func WorkShape(name string, ty Type) bool {
 	}
 	last := effects[len(effects)-1]
 	switch name {
+	case WorkOwnerName:
+		scope, s := con(args[0], CoroutineScopeTypeName, 1)
+		owner, o := con(rest, WorkOwnerTypeName, 1)
+		return s && o && Equal(scope.Args[0], owner.Args[0]) && row(last, nil, false)
+	case WorkRegisterName:
+		_, f := con(args[0], CoroutineFacetTypeName, 0)
+		work, w := con(rest, WorkTypeName, 3)
+		factory, ok := args[1].(*TFun)
+		if !f || !w || !ok || !row(factory.Eff, nil, false) {
+			return false
+		}
+		pause, p := factory.Arg.(*TFun)
+		body, b := factory.Ret.(*TFun)
+		if !p || !b || len(pause.Eff.Labels) != 1 || pause.Eff.Tail != nil || pause.Eff.Labels[0].Name != CoroutineSuspensionName || !pause.Eff.Labels[0].Suspension || pause.Eff.Labels[0].Abort || len(pause.Eff.Labels[0].Args) != 0 {
+			return false
+		}
+		return Equal(pause.Arg, work.Args[0]) && Equal(pause.Ret, work.Args[1]) && Equal(body.Arg, work.Args[1]) && Equal(body.Ret, work.Args[2]) && len(body.Eff.Labels) == 1 && body.Eff.Labels[0].Name == CoroutineSuspensionName && body.Eff.Labels[0].Suspension && !body.Eff.Labels[0].Abort && len(body.Eff.Labels[0].Args) == 0 && row(last, body.Eff.Tail, false)
 	case WorkRunName:
 		f, ok := args[0].(*TFun)
 		if !ok {

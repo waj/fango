@@ -33,3 +33,29 @@ func coroutineAdvanceDef(name string, ty types.Type, ck *infer.Checker) core.Def
 	d.Body = n
 	return d
 }
+
+func coroutineDynamicDef(name string, ty types.Type, ck *infer.Checker) core.Def {
+	arity := types.IntrinsicArity(name)
+	args, result := core.PeelFun(ty, arity)
+	d := core.Def{Name: name, Owner: "Coroutine", Type: ty, TyParams: runtimeRigidVars(ty), Control: core.ArrowControl(ty, arity)}
+	refs := make([]core.Expr, arity)
+	for i, n := range []string{"_scope", "_producer"}[:arity] {
+		d.Params = append(d.Params, n)
+		d.ParamCaptures = append(d.ParamCaptures, ck.Sup.FreshCapture())
+		refs[i] = &core.VarRef{Name: n, Local: true, Ty: args[i]}
+	}
+	if name == types.CoroutineFacetName {
+		d.Body = &core.Work{Kind: "registration", Args: refs, Ty: result}
+	} else if name == types.CoroutineCreateName {
+		raw, _ := core.PeelFun(ck.Intrinsics[name].Body, arity)
+		d.Body = &core.Work{Kind: "create", Args: refs, SourceRow: raw[0].(*types.TCon).Args[0], Ty: result}
+	} else {
+		scope := ck.Sup.FreshScope()
+		effect := func(name string) core.EffectInstance {
+			e := ck.Effects[name]
+			return core.EffectInstance{Unique: e.Unique, Name: e.Name, Captures: types.ScopeCapture(scope), Control: types.Control{Transport: types.Machine}}
+		}
+		d.Body = &core.CoroutineScope{Scope: scope, Yield: effect(types.CoroutineSuspensionName), Traversal: effect(types.CoroutineDriveName), Producer: &core.UnitLit{Ty: ck.B.Unit}, Consumer: refs[0], CursorTy: args[0].(*types.TFun).Arg, Ty: result, Control: d.Control}
+	}
+	return d
+}

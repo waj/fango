@@ -1,8 +1,8 @@
 # Typed coroutine execution
 
 [Public behavior](../reference/library-coroutines.md) owns lifecycle and API
-rules. The compiler supports a scoped owner, typed advancement, synchronous
-close, and a producer-local pause callback. Stream and Iterator are ordinary
+rules. The compiler supports lexical and dynamic scope owners, typed advancement,
+synchronous close, and a producer-local pause callback. Stream and Iterator are ordinary
 library wrappers over this protocol.
 
 ## Protocol and control proof
@@ -86,6 +86,58 @@ Captured evidence remains fixed. Per-advance forwarding installs the current
 residual evidence and restores it when advancement completes or is abandoned.
 Foreign suspension preserves forwarding, exclusive access, and intervening
 cleanup scopes until that advance actually completes.
+
+## Dynamic scope registry
+
+`Coroutine.scope` uses the same Core scope boundary and Machine cleanup stack as
+`with`. Its resource protocol identifies a registry rather than one producer;
+a checked Unit producer sentinel distinguishes that boundary in Core and Machine
+IR. `Coroutine.create` introduces a distinct child execution owner beneath the
+selected registry. Capture-flow lifetime checks use the destination's ancestry,
+not the helper's current scope stack. Drive discharge stops at that registry's
+boundary only for a child with proven membership. Foreign Drive and Suspension
+obligations remain outward. Distinct destination registries retain separate
+execution identities even at a shared allocation site.
+
+Both runtimes install a lazy child and its close capability in a doubly linked
+live list before returning the handle. Cleanup never reconstructs a typed handle
+from an integer or untyped payload: it invokes the existing child's synchronous
+close operation. Completion, failure and explicit close unlink in constant time,
+clear both neighbor links and the parent link, and release the producer factory,
+frames and evidence forwarding. Scope exit marks the registry closing before
+walking remaining entries backwards, drains every synchronous cleanup, and uses
+the ordinary primary/suppressed failure precedence. Completed entries are not
+retained until scope exit. A scope's saved evidence supplies the baseline for
+child cleanup; advances still install their own current residual evidence.
+
+`Coroutine.facet` retains registry identity while hiding its source row.
+`Work.register` combines checked child creation and packaging; `Work.owner`
+selects the same registry's Work identity. Source-row inclusion is reconstructed
+by the existing [Work budget analysis](ownership.md#scoped-work-budgets), including
+latent charges through handlers. The three typed protocol indices remain in the
+package and its opening adapter. Dynamic handles separate lifetime from execution
+identity, so the Work transfer check also walks retained handles in closures and
+ADTs rather than inferring execution authority solely from lifetime captures.
+Recursive context sharing makes the same distinction, keeping nested observation
+handlers separate when their callbacks retain different dynamic executions.
+A closed producer contract supplies its actual residual budget; callback
+adaptation can widen an invocation view without adding effects to stored work.
+Open producers retain their declared row proof. Deferred registration provenance
+also excludes aliases introduced by a producer's own Suspension protocol.
+Core checks declaration shapes, source budgets and protocol edges independently;
+object and execution serialization preserve those contracts.
+
+The [differential lifecycle fixture](../../testdata/run/coroutine_dynamic_lifecycle.fango)
+checks lazy allocation, reverse cleanup, repeated completion, and descendant
+creation after a context-body helper returns. The
+[registration fixture](../../testdata/run/coroutine_registration.fango) uses a
+nullary service to package different protocols and residual rows. Negative
+fixtures reject short-lived captures, escaped queues/facets/packages, wrong
+owners and erased latent effects. The
+[storage gate](../../cmd/fango/coroutine_dynamic_test.go) pins all allocated
+children in temporary instrumented versions of both backends: 2 and 200 repeated
+completions have the same peak of three live registry entries and leave no
+registry links or execution storage. These are structural checks, not timings.
 
 ## Ordinary pull libraries
 

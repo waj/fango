@@ -1,0 +1,14 @@
+module Helpers exposing (allocate, register, drive)
+
+import Coroutine
+import Work
+
+allocate scope = Coroutine.create scope (\pause start ->
+    reply = pause (start + 1)
+    reply + 2)
+
+register facet = Work.register facet (\pause start ->
+    reply = pause (start ++ "?")
+    reply ++ "!")
+
+drive owner work reply = Work.advance owner work reply

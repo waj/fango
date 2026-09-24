@@ -35,7 +35,7 @@ func (g *generator) solveConstraints(ps []types.Pred) (Subst, []types.Pred, []di
 			for _, need := range needs {
 				if need.Immediate {
 					for i := range cs {
-						if cs[i].Include && !cs[i].WorkCharge && (sharesWorkRow(cs[i].Left, need.Need) || sharesWorkRow(sub.Apply(cs[i].Left), sub.Apply(need.Need))) {
+						if cs[i].Include && !cs[i].WorkCharge && (sharesWorkRow(cs[i].Left, need.Need) || (!hasSuspension(sub.Apply(cs[i].Left)) && sharesWorkRow(sub.Apply(cs[i].Left), sub.Apply(need.Need)))) {
 							cs[i].WorkCharge = true
 							grew = true
 						}
@@ -277,4 +277,21 @@ func subsumption(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply,
 	}
 	m := check(c.Left, c.Right)
 	return rows, m
+}
+
+// Solver aliases can connect a producer-local pause row with its residual row.
+// They are not provenance for a deferred registration charge: doing so exports
+// the producer's own Suspension. Concrete foreign control is projected by the
+// owner-flow constraints separately.
+func hasSuspension(t types.Type) bool {
+	r, ok := t.(types.Row)
+	if !ok {
+		return false
+	}
+	for _, label := range r.Labels {
+		if label.Name == types.CoroutineSuspensionName {
+			return true
+		}
+	}
+	return false
 }

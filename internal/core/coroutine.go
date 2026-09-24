@@ -9,8 +9,13 @@ import (
 
 func (l *linter) coroutineScope(e *CoroutineScope, where string) {
 	l.control(e.Control, where)
-	if !l.intrinsics[types.CoroutineWithName] || l.defName != types.CoroutineWithName {
-		l.errorf("%s: coroutine scope outside Coroutine.with", where)
+	name := types.CoroutineWithName
+	dynamic := types.CoroutineScopeType(e.CursorTy)
+	if dynamic {
+		name = types.CoroutineScopeName
+	}
+	if !l.intrinsics[name] || l.defName != name {
+		l.errorf("%s: coroutine scope outside %s", where, name)
 	}
 	if e.Scope == 0 || l.scopeIDs[e.Scope] {
 		l.errorf("%s: invalid or reused coroutine owner", where)
@@ -20,7 +25,15 @@ func (l *linter) coroutineScope(e *CoroutineScope, where string) {
 		l.errorf("%s: missing coroutine callbacks", where)
 		return
 	}
-	if err := CheckCoroutineProducer(e.CursorTy, e.Producer.Type()); err != nil {
+	if dynamic {
+		if d := l.workers[l.defName]; d == nil || !types.CoroutineShape(name, d.SourceType) {
+			l.errorf("%s: invalid dynamic scope source contract", where)
+		}
+		if _, ok := e.Producer.(*UnitLit); !ok {
+			l.errorf("%s: invalid coroutine owner/producer type", where)
+		}
+	}
+	if err := CheckCoroutineProducer(e.CursorTy, e.Producer.Type()); !dynamic && err != nil {
 		l.errorf("%s: %v", where, err)
 	}
 	for i, ev := range []EffectInstance{e.Yield, e.Traversal} {

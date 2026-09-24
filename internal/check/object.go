@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	moduleObjectSchema = 5
+	moduleObjectSchema = 6
 	moduleObjectKind   = "module-object"
 	stageSection       = "stage"
 )

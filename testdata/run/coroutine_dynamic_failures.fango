@@ -1,0 +1,31 @@
+import Coroutine
+import Fail
+import Failure
+import Scope
+import Result exposing (Result(..))
+
+child name pause () = Scope.finally (\_ -> pause ()) (\_ -> Fail.fail name)
+
+showFailure failure =
+    message : Maybe String
+    message = Failure.argument 0 failure
+    print message
+    List.each showFailure (Failure.suppressed failure)
+
+showReport : Result (Fail.Report String) () ->{IO} ()
+showReport result = case result of
+    Ok _ -> print "unexpected success"
+    Err report ->
+        print report.primary
+        List.each showFailure report.suppressed
+
+run failBody = Fail.attemptReport (\_ -> Coroutine.scope (\scope ->
+    a = Coroutine.create scope (child "a")
+    b = Coroutine.create scope (child "b")
+    ignoredA = Coroutine.advance a ()
+    ignoredB = Coroutine.advance b ()
+    if failBody then Fail.fail "body" else ()))
+
+main() =
+    showReport (run False)
+    showReport (run True)

@@ -1132,7 +1132,7 @@ func (g *gen) goType(t types.Type) goast.Expr {
 			g.usesFangort = true
 			return &goast.StarExpr{X: selector("fangort", "WorkPackage")}
 		}
-		if t.Name == types.CoroutineTypeName {
+		if t.Name == types.CoroutineTypeName || t.Name == types.CoroutineScopeTypeName || t.Name == types.CoroutineFacetTypeName {
 			g.usesFangort = true
 			return &goast.StarExpr{X: selector("fangort", "MachineIterator")}
 		}

@@ -1,0 +1,11 @@
+import Coroutine
+import File
+
+helper scope = File.withFile "short.txt" (\file ->
+    Coroutine.create scope (\_ () -> File.readLine file))
+
+bad() = Coroutine.scope (\scope ->
+    work = helper scope
+    ())
+
+main() = ()

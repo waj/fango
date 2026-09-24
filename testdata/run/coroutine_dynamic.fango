@@ -1,0 +1,11 @@
+import Coroutine
+
+makeWork scope = Coroutine.create scope (\pause initial ->
+    reply = pause (initial + 1)
+    reply + 10)
+
+main() = Coroutine.scope (\scope ->
+    work = makeWork scope
+    print (Coroutine.advance work 1)
+    print (Coroutine.advance work 5)
+    print (Coroutine.advance work 9))

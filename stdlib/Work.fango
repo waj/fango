@@ -1,8 +1,8 @@
 {-# no-prelude #-}
-module Work exposing (Facet, Owner, Work, advance, close, facet, pack, run)
+module Work exposing (Facet, Owner, Work, advance, close, facet, owner, pack, register, run)
 
 import Basics exposing (..)
-import Coroutine exposing (Coroutine, Drive, Step)
+import Coroutine exposing (Coroutine, Drive, Step, Suspension)
 
 {-# resource #-}
 type Owner e = Owner (() ->{e} ())
@@ -27,3 +27,9 @@ advance = native
 
 close : Owner e -> Work request reply result ->{Drive | e} ()
 close = native
+
+owner : Coroutine.Scope e -> Owner e
+owner = native
+
+register : Coroutine.Facet -> ((request ->{Suspension} reply) -> reply ->{Suspension | e} result) ->{e} Work request reply result
+register = native

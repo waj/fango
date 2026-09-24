@@ -9,6 +9,9 @@ import (
 )
 
 func (in *interp) openCoroutine(p *machineir.Prog, producer *Closure, row *fangort.EvidenceRow) *MachineIteratorSession {
+	if producer == nil {
+		return newCoroutineScope(row)
+	}
 	owner := fangort.NewYieldOwner()
 	evidence := fangort.NewCursorEvidence(row)
 	callEvidence := cloneEvidence(in.evidence)
@@ -35,6 +38,9 @@ func (it *MachineIteratorSession) begin(input Value) error {
 		session, err := start(input)
 		if err != nil {
 			it.done = true
+			it.unlink()
+			it.evidence.Clear()
+			it.clearRegistered()
 			it.evidence.Clear()
 			return err
 		}
@@ -55,7 +61,7 @@ func (in *interp) evalCoroutineScope(scope *core.CoroutineScope, fr *Frame) (Val
 		return value, nil
 	}
 	producer, ok := value.(*Closure)
-	if !ok {
+	if !ok && !types.CoroutineScopeType(scope.CursorTy) {
 		return nil, fmt.Errorf("eval: coroutine producer is not a callback")
 	}
 	row, err := in.argumentRow(scope.Row, fr)

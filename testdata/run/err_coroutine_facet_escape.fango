@@ -1,0 +1,2 @@
+import Coroutine
+main = Coroutine.scope (\scope -> Coroutine.facet scope)

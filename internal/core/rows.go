@@ -182,6 +182,9 @@ func CheckRowEvidence(p *Prog) []error {
 				}
 			case *CoroutineScope:
 				needsRow = ArrowOpenRow(e.Producer.Type(), 2)
+				if types.CoroutineScopeType(e.CursorTy) {
+					needsRow = ArrowOpenRow(e.Consumer.Type(), 1)
+				}
 			case *CoroutineAdvance:
 				needsRow = true
 			case *Completion:

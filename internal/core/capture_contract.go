@@ -170,6 +170,14 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 		children(e.Request)
 	case *CoroutineScope:
 		n.Kind, n.Scope, n.Scoped = "coroutine", e.Scope, true
+		if types.CoroutineScopeType(e.CursorTy) {
+			n.Kind = "coroutine-scope"
+			if fn, ok := b.sourceType.(*types.TFun); ok {
+				if driver, ok := fn.Arg.(*types.TFun); ok && types.CoroutineScopeType(driver.Arg) {
+					n.SourceType = driver.Arg.(*types.TCon).Args[0]
+				}
+			}
+		}
 		n.TypeArgs = []types.Type{e.CursorTy}
 		if first, ok := b.sourceType.(*types.TFun); ok {
 			if second, ok := first.Ret.(*types.TFun); ok {

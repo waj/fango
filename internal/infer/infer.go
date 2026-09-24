@@ -660,7 +660,7 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 			return errs
 		}
 	}
-	if d.Name == types.CoroutineWithName || d.Name == types.CoroutineAdvanceName || d.Name == types.CoroutineCloseName {
+	if d.Name == types.CoroutineFacetName || d.Name == types.CoroutineScopeName || d.Name == types.CoroutineCreateName || d.Name == types.CoroutineWithName || d.Name == types.CoroutineAdvanceName || d.Name == types.CoroutineCloseName {
 		if !types.CoroutineShape(d.Name, ty) {
 			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic %s has an invalid coroutine protocol.", ast.Spelling(d.Name)))
 		}
@@ -2253,7 +2253,7 @@ func (g *generator) intrinsicCall(e *ast.App, name string) types.Type {
 	}
 
 	g.performs(last.Eff, e.Span(), false)
-	if name == types.WorkPackName {
+	if name == types.WorkPackName || name == types.WorkRegisterName {
 		g.cs[len(g.cs)-1].WorkCharge = true
 	}
 	return result
@@ -2993,7 +2993,7 @@ func (g *generator) instantiateAt(s types.Scheme, sp source.Span, op string) typ
 		g.preds = append(g.preds, predObligation{pred: p, span: sp, op: op})
 	}
 	t := types.SubstRigid(s.Body, m)
-	if op == types.WorkPackName && g.ck.Intrinsics[op].Body != nil {
+	if (op == types.WorkPackName || op == types.WorkRegisterName) && g.ck.Intrinsics[op].Body != nil {
 		if fn, ok := t.(*types.TFun); ok {
 			if last, ok := fn.Ret.(*types.TFun); ok {
 				g.workRows = append(g.workRows, last.Eff)

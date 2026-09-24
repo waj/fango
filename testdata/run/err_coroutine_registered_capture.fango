@@ -1,0 +1,10 @@
+import Coroutine
+import Work
+import File
+
+bad() = Coroutine.scope (\scope ->
+    File.withFile "short.txt" (\file ->
+        item = Work.register (Coroutine.facet scope) (\_ () -> File.readLine file)
+        ()))
+
+main() = ()

@@ -12,7 +12,7 @@ func controlledRepresentation(t Type, adts map[int]*ADTInfo, visiting map[int]bo
 		control := FunctionControl(t)
 		return control.Polymorphic && control.Transport < Machine || controlledRepresentation(t.Arg, adts, visiting) || controlledRepresentation(t.Ret, adts, visiting)
 	case *TCon:
-		if t.Name == CoroutineTypeName || t.Name == CompletionTypeName || t.Name == WorkOwnerTypeName || t.Name == WorkFacetTypeName || t.Name == WorkTypeName {
+		if t.Name == CoroutineTypeName || t.Name == CoroutineScopeTypeName || t.Name == CoroutineFacetTypeName || t.Name == CompletionTypeName || t.Name == WorkOwnerTypeName || t.Name == WorkFacetTypeName || t.Name == WorkTypeName {
 			return false
 		}
 		for _, arg := range t.Args {

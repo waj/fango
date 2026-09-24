@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Coroutine exposing (Coroutine, Drive, Step(..), Suspension, advance, close, with)
+module Coroutine exposing (Coroutine, Drive, Facet, Scope, Step(..), Suspension, advance, close, create, facet, scope, with)
 
 import Basics exposing (..)
 
@@ -23,3 +23,18 @@ advance = native
 
 close : Coroutine request reply result e ->{Drive | e} ()
 close = native
+
+{-# resource #-}
+type Scope e = Scope (() ->{e} ())
+
+scope : (Scope e ->{Drive | e} a) ->{e} a
+scope = native
+
+create : Scope e -> ((request ->{Suspension} reply) -> reply ->{Suspension | e} result) -> Coroutine request reply result e
+create = native
+
+{-# resource #-}
+type Facet = Facet ()
+
+facet : Scope e -> Facet
+facet = native

@@ -1,0 +1,16 @@
+import Coroutine
+import Work
+import Fail
+
+failed : (() ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension, Fail.Fail String} ()
+failed pause () =
+    pause ()
+    Fail.fail "never started"
+
+register facet =
+    ignored = Fail.attempt (\_ -> Work.register facet failed)
+    ()
+
+main() = print (Fail.attempt (\_ -> Coroutine.scope (\scope ->
+    register (Coroutine.facet scope)
+    print "registered")))

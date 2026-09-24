@@ -10,7 +10,18 @@ import (
 // row to its enclosing execution; IO is checked here despite having no runtime
 // evidence. Ordinary evidence/representation lint still checks runtime edges.
 func SourceEffectErrors(p *Prog) []error {
-	if !p.Intrinsics[types.WorkRunName] {
+	dynamic := false
+	for _, d := range p.Defs {
+		if types.Intrinsic(d.Name) {
+			continue
+		}
+		Inspect(d.Body, func(e Expr) {
+			if v, ok := e.(*VarRef); ok && (v.Name == types.CoroutineScopeName || v.Name == types.CoroutineCreateName) {
+				dynamic = true
+			}
+		})
+	}
+	if !p.Intrinsics[types.WorkRunName] && !dynamic {
 		return nil
 	}
 	var errors []error
@@ -47,7 +58,7 @@ func SourceEffectErrors(p *Prog) []error {
 				if e.SourceType != nil && !sourceValueRepresentation(e.SourceType, e.Callee.Type(), true) {
 					errors = append(errors, fmt.Errorf("%s: source call proof disagrees with runtime callee: %s / %s", where, types.Show(e.SourceType), types.Show(e.Callee.Type())))
 				}
-				if ref, ok := e.Callee.(*VarRef); ok && types.WorkIntrinsic(ref.Name) && e.SourceType == nil {
+				if ref, ok := e.Callee.(*VarRef); ok && (types.WorkIntrinsic(ref.Name) || ref.Name == types.CoroutineScopeName || ref.Name == types.CoroutineCreateName || ref.Name == types.CoroutineFacetName) && e.SourceType == nil {
 					errors = append(errors, fmt.Errorf("%s: missing work source call proof", where))
 				}
 				if !known || e.SourceType == nil {

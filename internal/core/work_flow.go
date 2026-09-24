@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
+	"maps"
 )
 
 // WorkNeed is one latent registration constraint. Budget and Need still carry
@@ -194,7 +195,7 @@ func workRowIncludes(budget, need types.Type) bool {
 func (f *flowChecker) checkWorkBudget(facet flowValue, need types.Type) {
 	for _, ref := range facet.refs {
 		o := f.objects[ref]
-		if o.kind != "work-owner" {
+		if o.kind != "work-owner" && o.kind != "coroutine-registry" {
 			continue
 		}
 		if f.collectWorkNeed != nil {
@@ -217,7 +218,7 @@ func (f *flowChecker) checkWorkBudget(facet flowValue, need types.Type) {
 func (f *flowChecker) workOwnerIDs(value flowValue) []int {
 	var owners []int
 	for _, ref := range value.refs {
-		if f.objects[ref].kind == "work-owner" {
+		if f.objects[ref].kind == "work-owner" || f.objects[ref].kind == "coroutine-registry" {
 			owners = append(owners, ref)
 		}
 	}
@@ -230,7 +231,7 @@ func (f *flowChecker) checkWorkTransfer(cursor flowValue) {
 		if o.kind != "coroutine" || len(o.fields) == 0 {
 			continue
 		}
-		for _, owner := range f.captures(o.fields[0]) {
+		for _, owner := range append(f.captures(o.fields[0]), f.retainedExecutions(o.fields[0])...) {
 			captured := f.owners[owner]
 			if captured.code.Kind == "coroutine" || captured.code.Kind == "handle" && captured.code.Name != "" {
 				err := fmt.Errorf("WORK CAPABILITY TRANSFER: packaged producer retains execution authority or mutable handler evidence from %s", captured.name)
@@ -238,4 +239,93 @@ func (f *flowChecker) checkWorkTransfer(cursor flowValue) {
 			}
 		}
 	}
+}
+
+// Lifetime and execution identity coincide for lexical cursors, but dynamic
+// handles live as long as their registry. Work transfer must still inspect the
+// captured execution identities, including handles nested inside closures/ADTs.
+func (f *flowChecker) retainedExecutions(value flowValue) []int {
+	seen := map[int]bool{}
+	var owners []int
+	var visit func(flowValue)
+	visit = func(value flowValue) {
+		for _, ref := range value.refs {
+			if seen[ref] {
+				continue
+			}
+			seen[ref] = true
+			o := f.objects[ref]
+			if o.kind == "coroutine" || o.kind == "pause" {
+				owners = append(owners, o.owner)
+			}
+			for _, field := range o.fields {
+				visit(field)
+			}
+			if o.kind == "lambda" {
+				for name := range f.shape.free(o.code.Children[0], []string{o.code.Name}) {
+					visit(o.env.values[name])
+				}
+			}
+		}
+	}
+	visit(value)
+	return owners
+}
+
+// Callback adaptation may widen an execution row with the surrounding driver's
+// control. A closed producer contract identifies the actual stored residual;
+// use it rather than charging that widened invocation view to the registry.
+// Open or abstract producers retain the declared proof conservatively.
+func (f *flowChecker) registeredBudget(producer flowValue, proof types.Type) types.Type {
+	if producer.unknown || len(producer.refs) == 0 {
+		return proof
+	}
+	var actual types.Row
+	for _, ref := range producer.refs {
+		o := f.objects[ref]
+		var source types.Type
+		if o.kind == "lambda" {
+			source = types.SubstRigid(o.code.SourceType, o.env.types)
+		}
+		if o.kind == "global" {
+			if d := f.defs[o.def]; d != nil {
+				sub := maps.Clone(o.env.types)
+				for i, tv := range d.TyParams {
+					if i < len(o.code.TypeArgs) {
+						sub[tv.ID] = types.SubstRigid(o.code.TypeArgs[i], o.env.types)
+					}
+				}
+				source = types.SubstRigid(d.SourceType, sub)
+			}
+		}
+		factory, ok := source.(*types.TFun)
+		if !ok {
+			return proof
+		}
+		body, ok := factory.Ret.(*types.TFun)
+		if !ok {
+			return proof
+		}
+		row, ok := workRow(body.Eff)
+		if !ok || row.Tail != nil {
+			return proof
+		}
+		for _, label := range row.Labels {
+			if label.Name == types.CoroutineSuspensionName {
+				continue
+			}
+			found := false
+			for _, old := range actual.Labels {
+				found = found || types.Equal(types.Row{Labels: []types.EffLabel{old}}, types.Row{Labels: []types.EffLabel{label}})
+			}
+			if !found {
+				actual.Labels = append(actual.Labels, label)
+			}
+		}
+	}
+	if f.collectWorkNeed == nil && f.collectControlNeed == nil && !workRowIncludes(proof, actual) {
+		err := fmt.Errorf("WORK EFFECT BUDGET: registration proof does not cover the actual producer residual in %s", f.root)
+		f.errors[err.Error()] = err
+	}
+	return actual
 }

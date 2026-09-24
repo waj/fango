@@ -1,0 +1,31 @@
+import Coroutine
+import Work
+import Fail
+
+effect Dispatch
+    context : () -> Coroutine.Facet
+
+number : (Int ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension} Int
+number pause () =
+    pause 1
+    42
+
+text : (String ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension, IO} String
+text pause () =
+    print "text started"
+    pause "ready"
+    "done"
+
+registerAll() =
+    a = Work.register (context()) number
+    b = Work.register (context()) text
+    (a, b)
+
+main() = Coroutine.scope (\scope ->
+    (a, b) = handle registerAll() of
+        context () -> resume (Coroutine.facet scope)
+    owner = Work.owner scope
+    print (Work.advance owner a ())
+    print (Work.advance owner b ())
+    print (Work.advance owner a ())
+    print (Work.advance owner b ()))

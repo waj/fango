@@ -1,0 +1,7 @@
+import Coroutine
+
+type Queue a = Queue (List a)
+
+main = Coroutine.scope (\scope ->
+    work = Coroutine.create scope (\_ () -> 42)
+    Queue [\_ -> Coroutine.advance work ()])

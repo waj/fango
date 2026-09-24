@@ -23,6 +23,41 @@ func CoroutineShape(name string, ty Type) bool {
 		return l.Name == name && l.Suspension && !l.Abort && len(l.Args) == 0
 	}
 	pure := func(r Row) bool { return len(r.Labels) == 0 && r.Tail == nil }
+	if name == CoroutineFacetName {
+		facet, ok := fn.Ret.(*TCon)
+		return CoroutineScopeType(fn.Arg) && ok && facet.Name == CoroutineFacetTypeName && len(facet.Args) == 0 && pure(fn.Eff)
+	}
+	if name == CoroutineScopeName {
+		driver, ok := fn.Arg.(*TFun)
+		if !ok || !CoroutineScopeType(driver.Arg) {
+			return false
+		}
+		e := driver.Arg.(*TCon).Args[0]
+		return row(driver.Eff, CoroutineDriveName, e) && Equal(driver.Ret, fn.Ret) && len(fn.Eff.Labels) == 0 && Equal(fn.Eff.Tail, e)
+	}
+	if name == CoroutineCreateName {
+		last, ok := fn.Ret.(*TFun)
+		if !ok || !CoroutineScopeType(fn.Arg) || !pure(fn.Eff) || !pure(last.Eff) {
+			return false
+		}
+		q, r, a, ok := CoroutineProtocol(last.Ret)
+		if !ok || !Equal(last.Ret.(*TCon).Args[3], fn.Arg.(*TCon).Args[0]) {
+			return false
+		}
+		factory, ok := last.Arg.(*TFun)
+		if !ok || !pure(factory.Eff) {
+			return false
+		}
+		pause, ok := factory.Arg.(*TFun)
+		if !ok {
+			return false
+		}
+		body, ok := factory.Ret.(*TFun)
+		if !ok {
+			return false
+		}
+		return Equal(pause.Arg, q) && Equal(pause.Ret, r) && row(pause.Eff, CoroutineSuspensionName, nil) && Equal(body.Arg, r) && Equal(body.Ret, a) && row(body.Eff, CoroutineSuspensionName, fn.Arg.(*TCon).Args[0])
+	}
 	if name == CoroutineWithName {
 		producer, ok := fn.Arg.(*TFun)
 		if !ok || !pure(fn.Eff) || !pure(producer.Eff) {
@@ -68,4 +103,9 @@ func CoroutineShape(name string, ty Type) bool {
 	}
 	step, ok := next.Ret.(*TCon)
 	return ok && step.Name == CoroutineStepName && len(step.Args) == 2 && Equal(step.Args[0], request) && Equal(step.Args[1], result)
+}
+
+func CoroutineScopeType(t Type) bool {
+	c, ok := t.(*TCon)
+	return ok && c.Name == CoroutineScopeTypeName && len(c.Args) == 1
 }

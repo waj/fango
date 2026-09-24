@@ -7,6 +7,11 @@ const (
 	ScopeBracketName         = "Scope.bracket"
 	CoroutineTypeName        = "Coroutine.Coroutine"
 	CoroutineStepName        = "Coroutine.Step"
+	CoroutineFacetTypeName   = "Coroutine.Facet"
+	CoroutineFacetName       = "Coroutine.facet"
+	CoroutineScopeName       = "Coroutine.scope"
+	CoroutineCreateName      = "Coroutine.create"
+	CoroutineScopeTypeName   = "Coroutine.Scope"
 	CoroutineWithName        = "Coroutine.with"
 	CoroutineAdvanceName     = "Coroutine.advance"
 	CoroutineCloseName       = "Coroutine.close"
@@ -40,17 +45,17 @@ func IntrinsicArity(name string) int {
 		return 1
 	}
 	switch name {
-	case WorkRunName, WorkFacetName:
+	case WorkRunName, WorkFacetName, WorkOwnerName, CoroutineFacetName:
 		return 1
-	case WorkPackName, WorkCloseName:
+	case WorkPackName, WorkCloseName, WorkRegisterName:
 		return 2
 	case WorkAdvanceName:
 		return 3
 	case ScopeBracketName:
 		return 3
-	case CoroutineWithName, CoroutineAdvanceName, FailureArgumentName:
+	case CoroutineCreateName, CoroutineWithName, CoroutineAdvanceName, FailureArgumentName:
 		return 2
-	case CoroutineCloseName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailAttemptReportName:
+	case CoroutineScopeName, CoroutineCloseName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailAttemptReportName:
 		return 1
 	}
 	return 0

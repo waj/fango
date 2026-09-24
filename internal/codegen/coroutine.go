@@ -7,6 +7,9 @@ import (
 )
 
 func (g *gen) coroutineStart(producer core.Expr, owner, row goast.Expr) goast.Expr {
+	if _, ok := producer.(*core.UnitLit); ok {
+		return callExpr(selector("fangort", "NewCoroutineScope"), row)
+	}
 	factoryTy := producer.Type().(*types.TFun)
 	pauseTy := factoryTy.Arg.(*types.TFun)
 	bodyTy := factoryTy.Ret.(*types.TFun)
@@ -44,6 +47,9 @@ func (g *gen) coroutineScopeExpr(e *core.CoroutineScope) goast.Expr {
 		varDeclStmt("owner", &goast.StarExpr{X: selector("fangort", "YieldOwner")}, callExpr(selector("fangort", "NewYieldOwner"))),
 		varDeclStmt("forwarding", &goast.StarExpr{X: selector("fangort", "CursorEvidence")}, callExpr(selector("fangort", "NewCursorEvidence"), ident("boundary"))),
 		varDeclStmt("coroutine", &goast.StarExpr{X: selector("fangort", "MachineIterator")}, g.coroutineStart(e.Producer, ident("owner"), ident("forwarding"))),
+	}
+	if types.CoroutineScopeType(e.CursorTy) {
+		stmts = append(stmts[:1], stmts[2:]...)
 	}
 	args := []goast.Expr{}
 	if core.ArrowOpenRow(e.Consumer.Type(), 1) {

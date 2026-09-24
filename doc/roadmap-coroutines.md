@@ -11,9 +11,10 @@ implementation stage lands.
 
 The first usable milestone is C0–C3, with Async's early A0 representation gate:
 checked typed coroutines, ordinary Stream/Iterator wrappers, and a deterministic
-scheduler demonstration. C4–C7 are separately gated capabilities needed by later
-consumers. Stage numbers are local to this document; dependencies name stages
-rather than assuming one unbroken global ordering.
+scheduler demonstration. C4 adds implemented dynamic ownership; C5–C7 remain
+separately gated capabilities needed by later consumers. Stage numbers are local
+to this document; dependencies name stages rather than assuming one unbroken
+global ordering.
 
 Read the [interface](#proposed-public-interface) for the library surface,
 [ownership](#ownership-and-lifetime-contracts) and
@@ -82,7 +83,8 @@ Remaining performance work is nonblocking for the next stages:
 
 The scoped interface is implemented in [Coroutine](reference/library-coroutines.md).
 [Work](reference/library-work.md) and [Completion](reference/library-completion.md)
-provide the supporting package and outcome APIs. Dynamic allocation remains [C4](#c4-scope-owned-dynamic-allocation).
+provide the supporting package and outcome APIs, including
+[dynamic allocation](reference/library-coroutines.md#dynamic-ownership).
 
 ### Typed exchange example
 
@@ -119,8 +121,8 @@ request/result lifetime and conservative input/reply retention.
 ### Scope escape
 
 The [reference](reference/library-coroutines.md#ownership-and-effects) owns
-lexical non-escape. [C4](#c4-scope-owned-dynamic-allocation) changes allocation
-ownership without permitting detached scoped resources.
+non-escape for lexical and dynamic ownership. Dynamic allocation does not
+permit detached scoped resources.
 
 ## Effect routing and nested suspension
 
@@ -169,7 +171,7 @@ checkpoint; C1–C3 together are the first usable replacement foundation.
 | C1: General typed execution | C0, early Async A0 contract gate | DONE: executable scoped Coroutine, Work, and Completion APIs |
 | C2: Ordinary Stream and Iterator | C1 | DONE: Stream behavior with no Stream-specific intrinsics |
 | C3: Cooperative scheduling demonstration | C2 | DONE: shared foundation demonstrated without native concurrency |
-| C4: Scope-owned dynamic allocation | C3, A0; scope design begins with C0 | Coroutines safely retained by a live dynamic owner |
+| C4: Scope-owned dynamic allocation | C3, A0; scope design begins with C0 | DONE: live registry ownership and checked registration |
 | C5: Suspending acquisition and cleanup | C1; nested fixtures from C3/C4 | Owners remain live through suspended cleanup |
 | C6a: Typed opaque values | C0/A0 representation decisions; C4 for selected task cells | Checked native storage and same-type return; required before A1 |
 | C6b: Scoped native requests and retention | C4; C5 only for suspending cleanup | Bounded requests and callbacks with checked quiescence |
@@ -181,13 +183,13 @@ C0, the design part of C4, and [Async A0](roadmap-async.md#a0-library-representa
 form the joint feasibility gate. Focused source probes and test-only models
 remain prerequisite checks for the implemented scoped API. The selected Async
 task encoding is rechecked by the [executable C1 representation probe](../testdata/run/async_c1_representation.fango)
-used by C2. C4/C6 implementations are later prerequisites of A1, not circular
+used by C2. C4/C6 are implementation prerequisites of A1, not circular
 prerequisites of this design gate.
 
 ### C0: Control and ownership contracts
 
 **DONE — feasibility contract and focused proof models.** Production scoped
-execution belongs to C1; dynamic allocation and native transfer remain C4/C6.
+execution belongs to C1, dynamic allocation to C4, and native transfer remains C6.
 
 **Dependencies:** the implemented cursor/instance foundation.
 
@@ -269,75 +271,23 @@ not the public Async API.
 
 ### C4: Scope-owned dynamic allocation
 
-**Dependencies:** C3 and A0 for implementation. Begin the scope/registry design
-alongside C0, so A0 can assess dynamic spawn before the Stream migration.
+**DONE — dynamic coroutine scopes and checked hidden-row registration.**
 
-Add a general live scope capable of owning multiple dynamically allocated
-coroutines. Allocation registers cleanup before publishing a handle. Captures
-of the new body must be valid for that scope; completed/closed work must release
-execution storage without retaining every completed frame until scope exit.
+**Dependencies:** C3 and A0; their scheduler and representation gates remain
+prerequisites for the implementation.
 
-**Design portion resolved at C0/A0; implementation remains open.** Selected
-spelling and signature schemas (subject to C0's owner-sensitive control):
+[Dynamic ownership](reference/library-coroutines.md#dynamic-ownership) owns
+`scope`, `create`, lifetime and cleanup behavior.
+[Work registration](reference/library-work.md#dynamic-registration) owns the
+checked registration facet and deferred budget contract. The
+[registry design and verification](design/coroutines.md#dynamic-scope-registry)
+cover both backends, distinct execution owners, immediate entry removal,
+caller-owned helper allocation, rejected local captures and escaped queues,
+and child allocation after the context-body helper has returned.
 
-```fango
-scope : (Scope e ->{Drive | e} a) ->{e} a
-create
-    : Scope e
-    -> ((request ->{Suspension} reply) -> reply ->{Suspension | e} result)
-    -> Coroutine request reply result e
-```
-
-`Scope e` is abstract and resource-bearing. `create` installs a lazy producer
-and a cleanup entry atomically before publishing its handle; it runs neither
-producer application. It has no outward effect, but its scoped-capability
-argument makes it subject to the existing prohibition on treating resource
-calls as pure for reordering/sharing. Allocation retains the producer, captures,
-and definition-site evidence until completion/close; each must outlive the
-**destination scope**, not merely the helper call. `e` bounds residual execution
-and cleanup effects. Close/advance retain their Drive contracts. `with` remains
-the single-owner convenience boundary.
-
-Every allocation gets a distinct execution owner beneath the scope. Registry
-entries erase request/reply/result types by closing over the **typed** handle
-in a uniform `() ->{Drive | e} ()` close action; they never project a handle
-back from an integer or `Native.Any`. Only the scope's cleanup driver invokes
-these actions. The C0 owner obligation still names the captured handle, and
-scope discharge accepts it only with proof of registry membership. A queue may
-hold differently typed handles through this closure packaging without existential
-source types. Typed task result cells are a separate C6a requirement.
-
-For a nullary scheduling service, C4 additionally exposes a checked registration
-facet that hides this scope's row parameter while retaining its owner/budget
-contract. Registering a coroutine with a different residual row uses C0's
-[scoped work package](roadmap-execution-contracts.md#scoped-effects-and-work-packages):
-prove inclusion in the scope budget and retain typed execution/failure adapters.
-The scope boundary includes those deferred obligations when inferring its
-outward row. The simpler same-row cleanup closure above does not by itself prove
-this hidden-row case. A package never acquires a different owner by entering
-another queue, and neither the facet nor its packages may escape the live scope.
-
-Completion/close unlinks the entry and clears producer frames, captures and
-forwarding links immediately; a remaining handle has only terminal state and
-its static lifetime. Remove registry links as well as frames: no append-only
-list of historical cleanup closures. Scope exit closes unfinished owners in
-reverse registration order; synchronous failures follow existing precedence.
-Once closing starts, allocation is forbidden. A normal Async context body
-finishing is **not** this transition: its library driver remains inside the
-scope while children can create grandchildren, then exits after the live set
-drains. C5 later permits the closing driver itself to suspend.
-
-Explicit capability passing chooses the destination; captured context evidence
-can supply it through ordinary library code. Neither `Async.context` nor a
-native registry receives an exception to retention or sole execution authority.
-
-**Acceptance:** a helper creates work owned by its caller's live scope; an
-attempt to retain a helper-local resource fails. Queued work cannot escape the
-scope. Repeated creation/completion does not accumulate dead execution storage.
-A child may create further owned work while the context body is already done.
-
-**Stopping point:** a safe dynamic owner facility; task failure/join policy is
-still an Async library responsibility.
+**Stopping point:** a safe dynamic owner facility. Task failure/join policy,
+shared service authority, typed task cells and concurrent execution remain
+separate Async and C6 obligations.
 
 ### C5: Suspending acquisition and cleanup
 

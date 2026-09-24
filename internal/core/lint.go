@@ -54,7 +54,7 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowMachine, allowStage bo
 		tyParams: map[int]bool{}, evidence: map[int]int{}, evidenceCaptures: map[int][]types.CaptureSet{},
 		captureVars: map[types.CaptureVar]bool{}, scopeIDs: map[types.ScopeID]bool{}, activeScopes: map[types.ScopeID]bool{},
 		resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives, intrinsics: p.Intrinsics,
-		allowMachine: allowMachine || p.Intrinsics[types.CoroutineWithName], allowSuspend: allowMachine, allowStage: allowStage}
+		allowMachine: allowMachine || p.Intrinsics[types.CoroutineScopeName] || p.Intrinsics[types.CoroutineWithName], allowSuspend: allowMachine, allowStage: allowStage}
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
 	}

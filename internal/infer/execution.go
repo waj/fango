@@ -605,7 +605,7 @@ type executionNeed struct {
 }
 
 func (g *generator) executionNeeds(sub Subst) []executionNeed {
-	if len(g.executionRoots) == 0 || (g.ck.Intrinsics[types.WorkRunName].Body == nil && g.ck.Intrinsics[types.CoroutineWithName].Body == nil) {
+	if len(g.executionRoots) == 0 || (g.ck.Intrinsics[types.CoroutineScopeName].Body == nil && g.ck.Intrinsics[types.WorkRunName].Body == nil && g.ck.Intrinsics[types.CoroutineWithName].Body == nil) {
 		return nil
 	}
 	b := &executionBuilder{ck: g.ck, sub: sub, defs: map[string]*core.Def{}}

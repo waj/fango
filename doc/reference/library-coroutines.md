@@ -55,6 +55,44 @@ cleanup failure prevents `Finished`; a failed close still leaves the owner
 closed. Driver failures remain primary, with close failures suppressed under
 the usual [cleanup precedence](resources.md#cleanup-failures).
 
+## Dynamic ownership
+
+```fango
+scope : (Scope e ->{Drive | e} a) ->{e} a
+create : Scope e
+    -> ((request ->{Suspension} reply) -> reply ->{Suspension | e} result)
+    -> Coroutine request reply result e
+facet : Scope e -> Facet
+```
+
+`Scope` and `Facet` are abstract resources. `scope` runs its callback immediately.
+`create` registers a lazy producer with the supplied scope before returning its
+handle; neither producer application runs until advancement. Each allocation
+has distinct execution authority. Allocation has no outward effect, but the
+resource capability prevents treating it as a freely reorderable or shareable
+pure calculation. `with` remains the single-coroutine convenience boundary.
+
+A helper may return a coroutine owned by its caller's scope. Its producer,
+captures, and definition-site evidence must outlive that destination, including
+when allocation happens inside a shorter-lived helper or cleanup scope.
+Violations report `RESOURCE ESCAPES`. Handles, registration facets, queued
+closures and work packages cannot escape the scope; closing a handle does not
+shorten its static lifetime.
+
+Completion and explicit close immediately unlink the live cleanup entry and
+clear execution storage. Scope exit closes the remaining children in reverse
+registration order. The driver failure stays primary; otherwise the first
+cleanup failure becomes primary, with later failures suppressed. The registry
+cleanup is one release, so its later failures remain nested under its first
+failure when the driver already failed. Cleanup is
+synchronous, and allocation into a closing scope is forbidden. Returning from a
+library's context-body helper does not close the scope: its driver can continue
+advancing children, which may create further work in that same live scope.
+
+`facet` hides the scope's row parameter for a nullary registration service.
+[`Work.register` and `Work.owner`](library-work.md#dynamic-registration) retain
+its identity and check each child's deferred effects against its budget.
+
 ## Ownership and effects
 
 Aliases share the same execution. Sequential use is legal; overlapping advance
@@ -92,8 +130,8 @@ still handle cleanup failures.
 
 ## Limits
 
-Acquisition and release must remain synchronous. There is no dynamic allocation
-scope, public scheduler, public cancellation operation, or concurrent execution API.
+Acquisition and release must remain synchronous. There is no public scheduler,
+public cancellation operation, or concurrent execution API.
 The ordinary [cooperative scheduler fixture](../../testdata/run/coroutine_scheduler.fango)
 demonstrates lexical coroutines, a FIFO ready queue, voluntary yield, fake waits,
 typed completion, and abandonment while a task is suspended inside a Stream pull.

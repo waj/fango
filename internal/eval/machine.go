@@ -680,7 +680,7 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				return MachineEvent{}, err
 			}
 			producer, ok := value.(*Closure)
-			if !ok {
+			if !ok && !types.CoroutineScopeType(term.Cursor.Ty) {
 				return MachineEvent{}, fmt.Errorf("eval: cursor producer is not a Machine callback")
 			}
 			row, err := s.interp.argumentRow(term.Row, locals)

@@ -327,8 +327,9 @@ encoding already typechecks. C0 selects owner-indexed control and scoped effects
 checked work packages, detached typed completion/replay, and private owner stop;
 C6c adds shared service evidence with invocation authority. Current Fango can check
 ordinary row-indexed Task/Job packaging, nullary scheduling arrow shapes,
-scoped Work packages, and typed Completion capture/replay. Dynamic allocation,
-typed cells, and shared service authority remain C4/C6 prerequisites.
+scoped Work packages, typed Completion capture/replay, and
+[dynamic registration](reference/library-work.md#dynamic-registration). Typed
+cells and shared service authority remain C6 prerequisites.
 Row-kinded effect parameters are not a prerequisite for this encoding.
 The [source probes](../internal/infer/async_feasibility_test.go) and
 [scoped-row model](../internal/feasibility/scoped_rows_test.go) distinguish those facts.
@@ -736,14 +737,15 @@ Result, child failure plus cleanup, fresh-evidence replay, unstarted cancellatio
 stable failure ordering, descendant allocation after body completion and removal
 of finished execution entries. The [ownership model](../internal/feasibility/control_test.go)
 rejects escaped handles/pause, short-lived replies and unsafe child captures.
-The models cover proposed behavior beyond that executable probe. Native storage,
-dynamic allocation, and shared service/capture contracts remain acceptance
-obligations of their owning stages; no scheduler is delivered here.
+The models cover proposed behavior beyond that executable probe. C4 additionally
+verifies real [dynamic allocation and registration](design/coroutines.md#dynamic-scope-registry)
+in both backends. Native storage and shared service/capture contracts remain
+acceptance obligations of their C6 stages; no public scheduler is delivered here.
 
 **Stopping point:** joint C0/A0/C4-design gate, with C1's executable facilities
-rechecked by C2. Repeat scope allocation/storage/service proofs with
-real C4/C6a/C6c APIs before A1; never treat a successful Go model as proof that
-the current source language accepts those APIs.
+rechecked by C2 and scope allocation/storage/registration verified by C4. Repeat
+the combined proofs with real C6a/C6c APIs before A1; never treat a successful Go
+model as proof that the current source language accepts those APIs.
 
 ### A1: Deterministic cooperative tasks
 

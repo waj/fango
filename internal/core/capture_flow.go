@@ -126,6 +126,7 @@ type flowContext struct {
 	suspensions []flowSuspension
 }
 type flowOwner struct {
+	registry int
 	failures flowValue
 	origin   source.Span
 	scope    types.ScopeID
@@ -341,7 +342,7 @@ func (f *flowChecker) mergeEnv(dst *flowEnv, src flowEnv) {
 func (f *flowChecker) alloc(key string, o flowObject) int {
 	if id := f.objectIDs[key]; id != 0 {
 		old := f.objects[id]
-		if old.kind == "work-owner" && old.budget != nil && !types.Equal(old.budget, o.budget) {
+		if (old.kind == "work-owner" || old.kind == "coroutine-registry") && old.budget != nil && !types.Equal(old.budget, o.budget) {
 			old.budget = nil
 			f.grow()
 		}
@@ -714,8 +715,8 @@ func (f *flowChecker) recursiveInputs(context string, previous, next flowEnv) bo
 		// enclosing invocation would mix the two exclusive-access contracts.
 		// Other scope owners can widen: recursiveOwner makes uncertain lifetime
 		// equality fail closed during escape checking.
-		previousCaps := f.captures(previous.values[name])
-		for _, owner := range f.captures(value) {
+		previousCaps := append(f.captures(previous.values[name]), f.retainedExecutions(previous.values[name])...)
+		for _, owner := range append(f.captures(value), f.retainedExecutions(value)...) {
 			if !slices.Contains(previousCaps, owner) && f.owners[owner].code.Kind == "coroutine" {
 				return false
 			}
@@ -974,6 +975,47 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 	}
 	var result flowValue
 	switch n.Kind {
+	case "work-registration", "work-registry-owner":
+		result = child(0)
+	case "work-create", "work-register":
+		destination, producer := child(0), child(1)
+		need := f.registeredBudget(producer, types.SubstRigid(n.SourceType, env.types))
+		if n.Kind == "work-register" && f.collectWorkNeed != nil {
+			f.collectWorkNeed(WorkNeed{Need: types.SubstRigid(n.SourceType, env.types), Immediate: true, Span: f.location, In: f.root})
+		}
+		for _, ref := range destination.refs {
+			scope := f.objects[ref]
+			if scope.kind != "coroutine-registry" {
+				continue
+			}
+			f.store(producer, scope.owner, "coroutine producer")
+			f.checkWorkBudget(destination, need)
+			parents := append(slices.Clone(f.owners[scope.owner].parent), scope.owner)
+			code := *n
+			code.Kind = "coroutine"
+			code.Scoped = true
+			// One allocation site can select among destination scopes. Keep
+			// its execution identities distinct even when the call is shared.
+			owner := f.owner(&code, env, fmt.Sprintf("%s/registry%d", ctx, ref), parents)
+			f.owners[owner].context = ctx
+			f.owners[owner].registry = scope.owner
+			cursor := f.alloc(key.within(fmt.Sprintf("registered%d", ref)).allocation(), flowObject{kind: "coroutine", budget: need, owner: owner, fields: []flowValue{producer}})
+			value := flowValue{refs: []int{cursor}, caps: []int{scope.owner}}
+			if n.Kind == "work-register" {
+				f.checkWorkTransfer(value)
+				packaged := f.alloc(key.within(fmt.Sprintf("package%d", ref)).allocation(), flowObject{kind: "work", fields: []flowValue{destination, value}})
+				value = flowValue{refs: []int{packaged}}
+			}
+			result = joinFlow(result, value)
+		}
+		result.unknown = destination.unknown
+	case "coroutine-scope":
+		consumer := child(1)
+		owner := f.owner(n, invocationFlowRow(env, n.Row), ctx, scopes)
+		registry := f.alloc(key.within("registry").allocation(), flowObject{kind: "coroutine-registry", owner: owner, budget: types.SubstRigid(n.SourceType, env.types)})
+		inside := append(slices.Clone(scopes), owner)
+		result = f.apply(consumer, []flowValue{{refs: []int{registry}, caps: []int{owner}}}, env, key.within("consumer"), inside)
+		f.escape(result, owner, "coroutine scope result", "The returned value")
 	case "work-begin":
 		ref := f.alloc(key.within("budget").allocation(), flowObject{kind: "work-owner", budget: types.SubstRigid(n.SourceType, env.types)})
 		result = flowValue{refs: []int{ref}}
@@ -1395,7 +1437,11 @@ func (f *flowChecker) requireDrive(owner int) {
 			call := f.calls[i]
 			// A recursive ancestor does not make this live lexical boundary
 			// ambiguous. Only folding this boundary's own activation does.
-			if call.id == f.owners[owner].context && !call.recursive {
+			boundary := owner
+			if f.owners[owner].registry != 0 {
+				boundary = f.owners[owner].registry
+			}
+			if call.id == f.owners[boundary].context && !call.recursive {
 				break
 			}
 			if !slices.Contains(call.drives, owner) {

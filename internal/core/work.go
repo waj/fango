@@ -18,6 +18,68 @@ func (*Work) isExpr()            {}
 func (w *Work) Type() types.Type { return w.Ty }
 
 func (l *linter) work(w *Work, where string) {
+	if w.Kind == "registration" || w.Kind == "registry-owner" {
+		name := types.CoroutineFacetName
+		if w.Kind == "registry-owner" {
+			name = types.WorkOwnerName
+		}
+		d := l.workers[l.defName]
+		valid := d != nil && (types.CoroutineShape(name, d.SourceType) || types.WorkShape(name, d.SourceType))
+		if l.defName != name || !l.intrinsics[name] || !valid || len(w.Args) != 1 || !types.CoroutineScopeType(w.Args[0].Type()) {
+			l.errorf("%s: invalid coroutine registration facet", where)
+			return
+		}
+		args, result := PeelFun(d.Type, 1)
+		if !EqualValueRepresentation(args[0], w.Args[0].Type()) || !EqualValueRepresentation(result, w.Ty) {
+			l.errorf("%s: invalid coroutine registration protocol", where)
+		}
+		l.expr(w.Args[0], where)
+		return
+	}
+	if w.Kind == "register" {
+		d := l.workers[l.defName]
+		if l.defName != types.WorkRegisterName || !l.intrinsics[l.defName] || d == nil || !types.WorkShape(l.defName, d.SourceType) {
+			l.errorf("%s: invalid registered work source contract", where)
+			return
+		}
+		args, result := PeelFun(d.Type, 2)
+		raw, _ := PeelFun(d.SourceType, 2)
+		if w.SourceRow == nil || !types.Equal(w.SourceRow, raw[1].(*types.TFun).Ret.(*types.TFun).Eff.Tail) {
+			l.errorf("%s: invalid registered work budget", where)
+		}
+		if len(w.Args) != 2 || !EqualValueRepresentation(args[0], w.Args[0].Type()) || !EqualValueRepresentation(args[1], w.Args[1].Type()) || !EqualValueRepresentation(result, w.Ty) {
+			l.errorf("%s: invalid registered work protocol", where)
+			return
+		}
+		for _, arg := range w.Args {
+			l.expr(arg, where)
+		}
+		return
+	}
+	if w.Kind == "create" {
+		d := l.workers[l.defName]
+		if l.defName != types.CoroutineCreateName || !l.intrinsics[l.defName] || d == nil || !types.CoroutineShape(l.defName, d.SourceType) {
+			l.errorf("%s: invalid dynamic coroutine source contract", where)
+			return
+		}
+		args, result := PeelFun(d.Type, 2)
+		raw, _ := PeelFun(d.SourceType, 2)
+		if w.SourceRow == nil || !types.Equal(w.SourceRow, raw[0].(*types.TCon).Args[0]) {
+			l.errorf("%s: invalid dynamic coroutine budget", where)
+		}
+		if len(w.Args) != 2 || !EqualValueRepresentation(args[0], w.Args[0].Type()) || !EqualValueRepresentation(args[1], w.Args[1].Type()) || !EqualValueRepresentation(result, w.Ty) {
+			l.errorf("%s: invalid dynamic coroutine destination", where)
+			return
+		}
+		if err := CheckCoroutineProducer(w.Ty, w.Args[1].Type()); err != nil {
+			l.errorf("%s: %v", where, err)
+		}
+		for _, arg := range w.Args {
+			l.expr(arg, where)
+		}
+		return
+	}
+
 	if (w.Kind == "begin" || w.Kind == "pack") && w.SourceRow == nil {
 		l.errorf("%s: missing work effect-budget proof", where)
 	}

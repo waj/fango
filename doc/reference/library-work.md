@@ -2,7 +2,8 @@
 
 `Work` hides a coroutine's residual effect row while retaining its request,
 reply, and result types. It provides lexical ownership for uniform library
-queues; it does not create or schedule coroutines.
+queues. Dynamic registration allocates work in a Coroutine scope; scheduling
+remains the caller's responsibility.
 
 ```fango
 run : (Owner e ->{Coroutine.Drive | e} a) ->{Coroutine.Drive | e} a
@@ -38,5 +39,33 @@ The checker reports `WORK OWNER MISMATCH` for a foreign owner,
 lifetime violations. `WORK CAPABILITY TRANSFER` rejects producers retaining
 another coroutine's execution authority or mutable handler evidence.
 
-Dynamic allocation, scope-owned registration, and shared service evidence are
-later [coroutine stages](../roadmap-coroutines.md#implementation-stages).
+## Dynamic registration
+
+```fango
+owner : Coroutine.Scope e -> Owner e
+register : Coroutine.Facet
+    -> ((request ->{Coroutine.Suspension} reply)
+        -> reply ->{Coroutine.Suspension | e} result)
+    ->{e} Work request reply result
+```
+
+`owner` gives the execution-budget view of an existing Coroutine scope; repeated
+calls select the same owner. `register` uses its `Coroutine.facet` to allocate
+and package a new lazy coroutine in that scope. It preserves the three protocol
+types while hiding the child's residual row. Different child rows may share a
+scope when each fits its budget. No producer application runs during registration.
+Use `advance` and `close` with that scope's `owner`.
+
+Registration retains both its immediate effect charge and its deferred budget
+obligation, just like `pack`. An intervening handler or an unused result cannot
+remove the latter from the scope's outward row. Registration also checks producer
+captures against the destination scope and retains the existing
+`WORK CAPABILITY TRANSFER` restriction. A nullary effect may return
+`Coroutine.Facet` to select the destination without exposing its row parameter;
+this does not grant shared mutable service evidence or transfer authority.
+
+Scope exit and live-entry removal follow
+[dynamic ownership](library-coroutines.md#dynamic-ownership). `Work.run` still
+provides only a lexical packaging budget, and `pack` never changes a coroutine's
+execution owner. Shared service evidence and native storage remain later
+[coroutine stages](../roadmap-coroutines.md#implementation-stages).

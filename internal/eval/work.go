@@ -24,6 +24,19 @@ func (in *interp) evalWork(e *core.Work, fr *Frame) (Value, error) {
 		args[i] = v
 	}
 	switch e.Kind {
+	case "registration":
+		return args[0], nil
+	case "registry-owner":
+		return args[0].(*MachineIteratorSession).work, nil
+	case "register":
+		scope := args[0].(*MachineIteratorSession)
+		cursor, err := registerCoroutine(scope, in.openCoroutine(in.env.machine, args[1].(*Closure), args[0].(*MachineIteratorSession).evidence.Row()))
+		if err != nil {
+			return nil, err
+		}
+		return &workPackage{owner: scope.work, cursor: cursor}, nil
+	case "create":
+		return registerCoroutine(args[0].(*MachineIteratorSession), in.openCoroutine(in.env.machine, args[1].(*Closure), args[0].(*MachineIteratorSession).evidence.Row()))
 	case "begin":
 		return &workOwner{}, nil
 	case "facet":
