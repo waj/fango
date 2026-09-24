@@ -1,0 +1,34 @@
+import Native
+
+{-# resource #-}
+type Box a = Box Native.Any
+
+box : a ->{IO} Box a
+box = native
+
+read : Box a ->{IO} a
+read = native
+
+write : Box a -> a ->{IO} ()
+write = native
+
+type Record = { number : Int, text : String }
+type Tree = Leaf Int | Branch Tree Tree deriving (Show)
+
+main() =
+    integer = box 42
+    text = box "hello"
+    record = box (Record { number = 7, text = "record" })
+    tree = box (Branch (Leaf 1) (Branch (Leaf 2) (Leaf 3)))
+    unit = box ()
+    function = box (\x -> x + 1)
+    print (read integer)
+    print (read text)
+    r = read record
+    print r.number
+    print r.text
+    print (read tree)
+    read unit
+    print ((read function) 9)
+    write integer 43
+    print (read integer)

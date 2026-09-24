@@ -1,0 +1,5 @@
+(module
+  (import Native)
+  (import Service)
+  (type Shared (pragma shared-resource) (params a) (ctor Shared Native.Any))
+  (effect Dispatch (pragma service) (op submit (-> Int (effects (Service.Invocation Int ())) ()))))

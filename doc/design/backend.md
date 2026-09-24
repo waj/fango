@@ -306,6 +306,8 @@ native metadata, never re-derived by backends:
 - A same-module single-constructor/single-boundary-value wrapper is projected before a
   call and reconstructed after it. The loader recognizes its declared shape;
   checking confirms resolved types. Interpreter CtorVal wrapping matches Go.
+  Phantom indices and opaque payload tokens follow the
+  [native storage contract](shared-capabilities.md#native-storage-and-sharing).
 - The bundled `Native.Any` is represented as Go `any`. Its constructor is
   private and carries no usable value; libraries expose only nominal wrappers
   such as `File.Handle` and `Net.Connection`. It has no Eq, Show, matching, or

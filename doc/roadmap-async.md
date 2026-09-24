@@ -328,8 +328,10 @@ checked work packages, detached typed completion/replay, and private owner stop;
 C6c adds shared service evidence with invocation authority. Current Fango can check
 ordinary row-indexed Task/Job packaging, nullary scheduling arrow shapes,
 scoped Work packages, typed Completion capture/replay, and
-[dynamic registration](reference/library-work.md#dynamic-registration). Typed
-cells and shared service authority remain C6 prerequisites.
+[dynamic registration](reference/library-work.md#dynamic-registration),
+[typed cells](reference/library-cells.md), and
+[shared service authority](reference/library-services.md). A1 must integrate
+these implemented prerequisites.
 Row-kinded effect parameters are not a prerequisite for this encoding.
 The [source probes](../internal/infer/async_feasibility_test.go) and
 [scoped-row model](../internal/feasibility/scoped_rows_test.go) distinguish those facts.
@@ -727,7 +729,7 @@ adapters explicitly at the compiler-contract boundary. C1 implements the
 rechecks these APIs in both backends: Int/String Task observations, homogeneous
 Unit work packages, a nullary effect interpreted with a local pause callback,
 cleanup before typed failure publication, and repeated success/failure replay.
-Its ordinary publication callbacks stand in for C6a's future typed cells;
+Its ordinary publication callbacks stand in for the typed Cell API;
 it does not implement dynamic spawn or the shared scheduling service. The
 [typed model](../internal/feasibility/tasks_test.go)
 has no erased heterogeneous payload register: generic task/cell types feed
@@ -739,12 +741,13 @@ of finished execution entries. The [ownership model](../internal/feasibility/con
 rejects escaped handles/pause, short-lived replies and unsafe child captures.
 The models cover proposed behavior beyond that executable probe. C4 additionally
 verifies real [dynamic allocation and registration](design/coroutines.md#dynamic-scope-registry)
-in both backends. Native storage and shared service/capture contracts remain
-acceptance obligations of their C6 stages; no public scheduler is delivered here.
+in both backends. C6a/C6c additionally verify real typed storage and implicit
+service adapters, including independently registered children and nested pulls.
+No public scheduler is delivered here.
 
 **Stopping point:** joint C0/A0/C4-design gate, with C1's executable facilities
-rechecked by C2 and scope allocation/storage/registration verified by C4. Repeat
-the combined proofs with real C6a/C6c APIs before A1; never treat a successful Go
+rechecked by C2 and scope allocation/storage/registration verified by C4. Retain
+the C6a/C6c API proofs when implementing A1; never treat a successful Go
 model as proof that the current source language accepts those APIs.
 
 ### A1: Deterministic cooperative tasks

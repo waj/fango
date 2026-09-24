@@ -58,6 +58,15 @@ func (ck *Checker) resolveNativeBoundaries(m *ast.Module) []diag.Error {
 }
 
 func (ck *Checker) resolveNativeBoundary(n *types.NativeInfo, sp source.Span) []diag.Error {
+	defer func() {
+		for _, wrapper := range append(append([]*types.CtorInfo(nil), n.ParamWrappers...), n.ResultWrapper) {
+			if wrapper != nil {
+				if adt := ck.ADTs[wrapper.Result.Unique]; adt != nil && len(adt.Params) > 0 {
+					adt.NativeIndexed = true
+				}
+			}
+		}
+	}()
 	// A wrapper must be declared in the native's own module. Canonical symbols
 	// carry that module as their prefix — none for a headerless entry — so the
 	// native's own symbol, not its sidecar link name, is the locality key.
@@ -72,7 +81,8 @@ func (ck *Checker) resolveNativeBoundary(n *types.NativeInfo, sp source.Span) []
 		}
 		wrapper := ck.boundaryWrapper(fn.Arg, module)
 		n.ParamWrappers = append(n.ParamWrappers, wrapper)
-		if !types.Equal(fn.Arg, ck.B.Unit) && !ck.isBoundaryValue(fn.Arg) && !ck.isBytesType(fn.Arg) && wrapper == nil {
+		_, opaque := fn.Arg.(*types.TVar)
+		if !opaque && !types.Equal(fn.Arg, ck.B.Unit) && !ck.isBoundaryValue(fn.Arg) && !ck.isBytesType(fn.Arg) && wrapper == nil {
 			errs = append(errs, diag.Errorf(sp, "NATIVE DECLARATION", "Parameter %d of native `%s` does not resolve to a boundary value.", i+1, n.Name))
 		}
 		t = fn.Ret
@@ -86,8 +96,27 @@ func (ck *Checker) resolveNativeBoundary(n *types.NativeInfo, sp source.Span) []
 		return append(errs, shapeErrs...)
 	}
 	n.ResultWrapper = ck.boundaryWrapper(t, module)
-	if !types.Equal(t, ck.B.Unit) && !ck.isBoundaryValue(t) && !ck.isBytesType(t) && n.ResultWrapper == nil {
+	_, opaque := t.(*types.TVar)
+	if !opaque && !types.Equal(t, ck.B.Unit) && !ck.isBoundaryValue(t) && !ck.isBytesType(t) && n.ResultWrapper == nil {
 		errs = append(errs, diag.Errorf(sp, "NATIVE DECLARATION", "The result of native `%s` does not resolve to a boundary value.", n.Name))
+	}
+	storage, err := types.CheckNativeStorage(n)
+	if err != nil {
+		errs = append(errs, diag.Errorf(sp, "NATIVE STORAGE", "%s", err))
+	} else {
+		n.Storage = storage
+		if storage.Kind != "" {
+			if n.Effect != nil {
+				errs = append(errs, diag.Errorf(sp, "NATIVE STORAGE", "Opaque storage uses value natives; wrap them in ordinary effect handlers."))
+			}
+			wrapper := n.ResultWrapper
+			if storage.Handle >= 0 {
+				wrapper = n.ParamWrappers[storage.Handle]
+			}
+			if wrapper == nil || !ck.ADTs[wrapper.Result.Unique].Resource {
+				errs = append(errs, diag.Errorf(sp, "NATIVE STORAGE", "Opaque storage requires a resource wrapper with a private representation."))
+			}
+		}
 	}
 	return errs
 }
@@ -96,11 +125,11 @@ func (ck *Checker) resolveNativeBoundary(n *types.NativeInfo, sp source.Span) []
 // boundary, or nil for anything that is not a local one-field wrapper.
 func (ck *Checker) boundaryWrapper(t types.Type, module string) *types.CtorInfo {
 	con, ok := t.(*types.TCon)
-	if !ok || len(con.Args) != 0 {
+	if !ok {
 		return nil
 	}
 	adt := ck.ADTs[con.Unique]
-	if adt == nil || adt.IsRecord() || len(adt.Params) != 0 || len(adt.Ctors) != 1 || len(adt.Ctors[0].Fields) != 1 {
+	if adt == nil || adt.IsRecord() || len(con.Args) != len(adt.Params) || len(adt.Ctors) != 1 || len(adt.Ctors[0].Fields) != 1 {
 		return nil
 	}
 	if symbolModule(adt.Con.Name) != module || !ck.isBoundaryValue(adt.Ctors[0].Fields[0]) {

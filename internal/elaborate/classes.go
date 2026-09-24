@@ -159,7 +159,7 @@ func (el *elab) matchInstance(p types.Pred) (*infer.InstanceInfo, map[int]types.
 func (el *elab) valueReference(name string, raw types.Type) core.Expr {
 	ty := el.zonkDefault(raw)
 	if n := el.ck.Natives[name]; n != nil {
-		return el.nativeValue(n, ty)
+		return el.nativeValue(n, ty, raw)
 	}
 	if arity, ok := el.ck.Workers[name]; ok {
 		return el.curriedWorkerRef(name, ty, raw, arity)

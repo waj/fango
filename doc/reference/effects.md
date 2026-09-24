@@ -142,6 +142,10 @@ The compiler adds the declaring effect to each operation's type. Functions may
 annotate closed or open effect rows. An operation with a Unit argument is
 called explicitly with `()`.
 
+An effect marked `{-# service #-}` separates retained handler context from
+the caller's implicit invocation authority. See [shared service contexts](library-services.md)
+for its protocol and handler restrictions.
+
 ## Abort-only effects
 
 An abort-only effect marks every operation with `abort`:

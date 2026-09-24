@@ -231,9 +231,16 @@ func (f *flowChecker) checkWorkTransfer(cursor flowValue) {
 		if o.kind != "coroutine" || len(o.fields) == 0 {
 			continue
 		}
+		f.checkSharedNative(o.fields[0])
 		for _, owner := range append(f.captures(o.fields[0]), f.retainedExecutions(o.fields[0])...) {
 			captured := f.owners[owner]
-			if captured.code.Kind == "coroutine" || captured.code.Kind == "handle" && captured.code.Name != "" {
+			unsafe := captured.code.Kind == "coroutine" || captured.code.Kind == "handle" && captured.code.Name != ""
+			if captured.code.Kind == "scope" && len(captured.code.TypeArgs) > 0 {
+				resource := types.SubstRigid(captured.code.TypeArgs[0], captured.env.types)
+				con, ok := resource.(*types.TCon)
+				unsafe = !ok || f.shape.adts[con.Unique] == nil || !f.shape.adts[con.Unique].Shared
+			}
+			if unsafe {
 				err := fmt.Errorf("WORK CAPABILITY TRANSFER: packaged producer retains execution authority or mutable handler evidence from %s", captured.name)
 				f.errors[err.Error()] = err
 			}
@@ -245,31 +252,25 @@ func (f *flowChecker) checkWorkTransfer(cursor flowValue) {
 // handles live as long as their registry. Work transfer must still inspect the
 // captured execution identities, including handles nested inside closures/ADTs.
 func (f *flowChecker) retainedExecutions(value flowValue) []int {
-	seen := map[int]bool{}
 	var owners []int
-	var visit func(flowValue)
-	visit = func(value flowValue) {
-		for _, ref := range value.refs {
-			if seen[ref] {
-				continue
-			}
-			seen[ref] = true
-			o := f.objects[ref]
-			if o.kind == "coroutine" || o.kind == "pause" {
-				owners = append(owners, o.owner)
-			}
-			for _, field := range o.fields {
-				visit(field)
-			}
-			if o.kind == "lambda" {
-				for name := range f.shape.free(o.code.Children[0], []string{o.code.Name}) {
-					visit(o.env.values[name])
-				}
+	f.captureObjects(value, func(o *flowObject) {
+		if o.kind == "coroutine" || o.kind == "pause" {
+			owners = append(owners, o.owner)
+		}
+	})
+	return owners
+}
+
+func (f *flowChecker) checkSharedNative(value flowValue) {
+	f.captureObjects(value, func(o *flowObject) {
+		if o.kind == "native-resource" || o.kind == "native-storage" {
+			con, ok := o.code.Type.(*types.TCon)
+			if !ok || f.shape.adts[con.Unique] == nil || !f.shape.adts[con.Unique].Shared {
+				err := fmt.Errorf("WORK CAPABILITY TRANSFER: packaged producer retains a native resource without a shared-resource contract")
+				f.errors[err.Error()] = err
 			}
 		}
-	}
-	visit(value)
-	return owners
+	})
 }
 
 // Callback adaptation may widen an execution row with the surrounding driver's

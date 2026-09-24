@@ -61,10 +61,10 @@ observe task = task.read()
 wrong : Task Int e ->{e} String
 wrong task = observe task
 `, "TYPE MISMATCH"},
-		{"opaque polymorphic native storage", `
+		{"unindexed polymorphic native", `
 store : a -> a
 store = native
-`, "NATIVE DECLARATION"},
+`, "NATIVE STORAGE"},
 		{"retained native callback", `
 register : (() -> ()) -> ()
 register = native

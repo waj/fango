@@ -3,6 +3,8 @@ package types
 // Compiler intrinsics are bundled native declarations implemented as Core
 // nodes. Recognition uses resolved declaration identity, never user spelling.
 const (
+	ServiceRunName        = "Service.run"
+	ServiceInvocationName = "Service.Invocation"
 	// ScopeBracketName owns synchronous resource cleanup on normal and abort exits.
 	ScopeBracketName         = "Scope.bracket"
 	CoroutineTypeName        = "Coroutine.Coroutine"
@@ -45,6 +47,8 @@ func IntrinsicArity(name string) int {
 		return 1
 	}
 	switch name {
+	case ServiceRunName:
+		return 2
 	case WorkRunName, WorkFacetName, WorkOwnerName, CoroutineFacetName:
 		return 1
 	case WorkPackName, WorkCloseName, WorkRegisterName:

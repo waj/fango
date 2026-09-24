@@ -417,6 +417,10 @@ func (f *flowChecker) owner(n *types.CaptureFlow, env flowEnv, ctx string, scope
 	return id
 }
 func (f *flowChecker) captures(v flowValue) []int {
+	return f.captureObjects(v, nil)
+}
+
+func (f *flowChecker) captureObjects(v flowValue, object func(*flowObject)) []int {
 	caps := slices.Clone(v.caps)
 	seen := map[int]bool{}
 	owners := map[int]bool{}
@@ -466,6 +470,9 @@ func (f *flowChecker) captures(v flowValue) []int {
 			}
 			seen[id] = true
 			o := f.objects[id]
+			if object != nil {
+				object(o)
+			}
 			for _, v := range o.fields {
 				visit(v)
 			}
@@ -894,6 +901,8 @@ func (f *flowChecker) apply(fn flowValue, args []flowValue, env flowEnv, site fl
 			result = joinFlow(result, f.owners[o.owner].reply)
 		case "global":
 			result = joinFlow(result, f.callDef(o.def, args, o.code.TypeArgs, env, site, scopes))
+		case "service-argument":
+			result = joinFlow(result, f.apply(o.fields[0], args, env, site.within("service"), scopes))
 		case "lambda":
 			if len(args) == 0 {
 				continue
@@ -975,6 +984,19 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 	}
 	var result flowValue
 	switch n.Kind {
+	case "work-invocation-slot":
+		result = child(0)
+		for _, ref := range result.refs {
+			o := f.objects[ref]
+			if o.kind != "pause" || f.active[o.owner] == 0 {
+				err := fmt.Errorf("INVOCATION AUTHORITY: Service.run requires its active producer's pause capability")
+				f.errors[err.Error()] = err
+			}
+		}
+	case "work-invocation-argument":
+		callback := child(0)
+		id := f.alloc(key.allocation(), flowObject{kind: "service-argument", fields: []flowValue{callback}})
+		result.refs = []int{id}
 	case "work-registration", "work-registry-owner":
 		result = child(0)
 	case "work-create", "work-register":
@@ -1075,6 +1097,74 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		}
 	case "native":
 		result = joinFlow(all(0)...)
+		if con, ok := n.Type.(*types.TCon); ok && f.shape.adts[con.Unique] != nil && f.shape.adts[con.Unique].Resource {
+			id := f.alloc(key.allocation(), flowObject{kind: "native-resource", code: n, fields: []flowValue{result}})
+			result = flowValue{refs: []int{id}}
+		}
+	case "native-new":
+		args := all(0)
+		if n.NativeStorage.Payload >= len(args) || n.NativeStorage.Payload < -1 {
+			err := fmt.Errorf("invalid native storage payload proof")
+			f.errors[err.Error()] = err
+			break
+		}
+		var payload flowValue
+		if n.NativeStorage.Payload >= 0 {
+			payload = args[n.NativeStorage.Payload]
+		}
+		id := f.alloc(key.allocation(), flowObject{kind: "native-storage", code: n, fields: []flowValue{payload}})
+		result.refs = []int{id}
+	case "native-read":
+		args := all(0)
+		if n.NativeStorage.Handle < 0 || n.NativeStorage.Handle >= len(args) {
+			err := fmt.Errorf("invalid native storage handle proof")
+			f.errors[err.Error()] = err
+			break
+		}
+		handle := args[n.NativeStorage.Handle]
+		result.unknown = handle.unknown
+		for _, ref := range handle.refs {
+			o := f.objects[ref]
+			if o.kind == "native-storage" {
+				result = joinFlow(result, o.fields[0])
+			} else {
+				result = joinFlow(result, handle)
+			}
+		}
+	case "native-alias":
+		args := all(0)
+		if n.NativeStorage.Handle < 0 || n.NativeStorage.Handle >= len(args) {
+			err := fmt.Errorf("invalid native storage alias proof")
+			f.errors[err.Error()] = err
+			break
+		}
+		result = args[n.NativeStorage.Handle]
+	case "native-write":
+		args := all(0)
+		if n.NativeStorage.Handle < 0 || n.NativeStorage.Handle >= len(args) || n.NativeStorage.Payload < 0 || n.NativeStorage.Payload >= len(args) {
+			err := fmt.Errorf("invalid native storage write proof")
+			f.errors[err.Error()] = err
+			break
+		}
+		handle, payload := args[n.NativeStorage.Handle], args[n.NativeStorage.Payload]
+		owners := f.captures(handle)
+		for _, owner := range owners {
+			f.store(payload, owner, "native storage payload")
+		}
+		if len(owners) == 0 && !handle.unknown {
+			for _, owner := range f.captures(payload) {
+				f.escape(payload, owner, "native storage payload", "unscoped native storage")
+			}
+		}
+		for _, ref := range handle.refs {
+			if o := f.objects[ref]; o.kind == "native-storage" {
+				before := f.revision
+				f.merge(&o.fields[0], payload)
+				if f.revision != before {
+					f.heapRevision++
+				}
+			}
+		}
 	case "completion_failure", "completion_replay":
 		completed := child(0)
 		result.unknown = completed.unknown
@@ -1227,6 +1317,18 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		}
 	case "perform", "exit":
 		args := all(0)
+		if n.Service {
+			valid := len(args) > 0 && !args[len(args)-1].unknown && len(args[len(args)-1].refs) > 0
+			if valid {
+				for _, ref := range args[len(args)-1].refs {
+					valid = valid && f.objects[ref].kind == "service-argument"
+				}
+			}
+			if !valid {
+				err := fmt.Errorf("INVOCATION AUTHORITY: service operation lacks its checked invocation adapter")
+				f.errors[err.Error()] = err
+			}
+		}
 		targets := env.evidence[n.Effects[0]]
 		if n.Kind == "exit" && len(f.detached) > 0 {
 			boundary := f.detached[len(f.detached)-1]

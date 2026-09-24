@@ -70,7 +70,7 @@ func (el *elab) app(e *ast.App) core.Expr {
 					return el.expr(args[0])
 				}
 				if name := in.NativeMethods[method.Index]; name != "" {
-					return el.nativeApply(el.ck.Natives[name], el.zonkDefault(raw), args)
+					return el.nativeApply(el.ck.Natives[name], el.zonkDefault(raw), raw, args)
 				}
 				name := in.Methods[method.Index]
 				if arity, ok := el.ck.Workers[name]; ok {
@@ -79,7 +79,7 @@ func (el *elab) app(e *ast.App) core.Expr {
 			}
 		}
 		if n := el.ck.Natives[v.Name]; n != nil && n.Effect == nil {
-			return el.nativeApply(n, el.zonkDefault(el.ck.ExprTypes[head]), args)
+			return el.nativeApply(n, el.zonkDefault(el.ck.ExprTypes[head]), el.apply(el.ck.ExprTypes[head]), args)
 		}
 	}
 
@@ -164,13 +164,21 @@ func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args [
 		body = &core.ControlExit{Effect: inst, Op: op, Payload: coreArgs, Ty: ret}
 	} else {
 		inst := el.effectInstance(op, rawTy)
+		if op.Invocation != nil {
+			last := arrowAt(rawTy, op.Arity-1).(*types.TFun)
+			for _, label := range last.Eff.Labels {
+				if label.Unique == op.Invocation.Unique {
+					coreArgs = append(coreArgs, el.invocationArgument(label))
+				}
+			}
+		}
 		body = &core.Perform{Op: op, Effect: inst, Args: coreArgs, Ty: ret, Control: inst.Control}
 	}
 	if len(effectParams) > 0 {
 		el.popEvidence(effectParams)
 	}
 	for i := op.Arity - 1; i >= len(args); i-- {
-		lam := &core.Lambda{Param: coreArgs[i].(*core.VarRef).Name, Body: body, Ty: arrowAt(opTy, i), ParamCapture: el.ck.Sup.FreshCapture()}
+		lam := &core.Lambda{SourceType: arrowAt(rawTy, i), Param: coreArgs[i].(*core.VarRef).Name, Body: body, Ty: arrowAt(opTy, i), ParamCapture: el.ck.Sup.FreshCapture()}
 		if i == op.Arity-1 {
 			lam.EffectParams = effectParams
 		}
@@ -189,9 +197,9 @@ func (el *elab) operationValue(op *types.EffectOp, ty, raw types.Type) core.Expr
 	return el.operationCall(op, ty, raw, nil)
 }
 
-func (el *elab) nativeApply(n *types.NativeInfo, nativeTy types.Type, args []ast.Expr) core.Expr {
+func (el *elab) nativeApply(n *types.NativeInfo, nativeTy, raw types.Type, args []ast.Expr) core.Expr {
 	if len(args) > n.Arity {
-		res := el.nativeApply(n, nativeTy, args[:n.Arity])
+		res := el.nativeApply(n, nativeTy, raw, args[:n.Arity])
 		for _, a := range args[n.Arity:] {
 			res = el.valueApp(res, el.expr(a))
 		}
@@ -207,15 +215,15 @@ func (el *elab) nativeApply(n *types.NativeInfo, nativeTy types.Type, args []ast
 		el.tmp++
 		coreArgs = append(coreArgs, &core.VarRef{Name: name, Local: true, Ty: argTys[i]})
 	}
-	var body core.Expr = el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Args: coreArgs, Ty: ret})
+	var body core.Expr = el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Storage: n.Storage, Args: coreArgs, Ty: ret})
 	for i := n.Arity - 1; i >= len(args); i-- {
-		body = &core.Lambda{Param: coreArgs[i].(*core.VarRef).Name, Body: body, Ty: arrowAt(nativeTy, i), ParamCapture: el.ck.Sup.FreshCapture()}
+		body = &core.Lambda{SourceType: arrowAt(raw, i), Param: coreArgs[i].(*core.VarRef).Name, Body: body, Ty: arrowAt(nativeTy, i), ParamCapture: el.ck.Sup.FreshCapture()}
 	}
 	return body
 }
 
-func (el *elab) nativeValue(n *types.NativeInfo, ty types.Type) core.Expr {
-	return el.nativeApply(n, ty, nil)
+func (el *elab) nativeValue(n *types.NativeInfo, ty, raw types.Type) core.Expr {
+	return el.nativeApply(n, ty, raw, nil)
 }
 
 // valueApp is one typed indirect application: callee(arg).

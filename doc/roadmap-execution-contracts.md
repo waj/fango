@@ -5,7 +5,7 @@ The joint [C0](roadmap-coroutines.md#c0-control-and-ownership-contracts)/
 contracts for typed execution. Implemented scoped behavior belongs in
 [Coroutine](reference/library-coroutines.md), [Work](reference/library-work.md),
 and [Completion](reference/library-completion.md); this topic owns their
-remaining dynamic-allocation and shared-service integration.
+remaining integration into Async.
 
 ## General capabilities required before delivery
 
@@ -17,31 +17,12 @@ and cleanup before publishing completion; initial Async results and all failure
 payloads/reports must be transitively capture-free. General completion preserves
 captures and does not make values shareable.
 
-- **Shared service evidence with invocation authority**, owned by C6c for A1.
-  A captured context cannot simply contain the parent's pause
-  closure. Select an opt-in general evidence contract with two separate inputs:
-  retained immutable scoped service data, and a non-retainable execution argument
-  supplied by the caller. A service operation may submit a request through that
-  argument only while its producer is active. Binding the service captures its
-  lifetime/context identity, never the execution argument. This requires explicit
-  evidence/callable adapter metadata, propagation through helpers, dictionaries
-  and modules, and independent Core validation; ordinary captured handlers retain
-  their current semantics. C1 must preserve the seam for the C6c implementation.
-  No ambient current-task slot or global public suspend function is introduced.
-
-The service contract fixes its request/reply protocol at the effect instance;
-an adapter cannot accept an arbitrary coroutine's execution argument. A task
-root installs a scoped slot containing its matching pause capability. Calls
-thread this slot explicitly, including through a nested stream producer, so an
-unfinished pull still suspends to the task. A nested pull does not overwrite the
-slot with its differently typed local pause. An independently started child
-installs a fresh slot. A captured service remembers its original context data,
-but its operation worker receives this invocation slot, not a captured slot.
-Reject invocation without a matching active producer, retention of the slot,
-and transfer of an existing slot to independently scheduled work. Core lint
-checks protocol equality, scope, and producer ancestry on the implicit argument
-just as it checks an explicit callback. This is opt-in compiler contract support
-for general scoped services; it does not change ordinary handler binding.
+Shared service evidence with a separate implicit invocation argument is
+implemented by [Service](reference/library-services.md). Its fixed protocol,
+producer slot, nested-pull forwarding, capture rules, and independent Core
+proofs are owned by [the design contract](design/shared-capabilities.md).
+[Cell](reference/library-cells.md) supplies the scope-owned publication boundary.
+Async A1 must combine these facilities with its scheduling and failure policy.
 
 ## Scoped effects and work packages
 
@@ -56,8 +37,8 @@ publishing a handle/package, preserve the original typed completion index,
 and clear dead execution storage on completion/close. Future heterogeneous
 task cells and detached-failure injection must preserve nominal operation
 identity, typed payloads, and all suppressed reports without unchecked casts.
-[C6c](roadmap-coroutines.md#c6c-shared-and-transferable-capabilities) extends
-transfer beyond the current conservative capability checks.
+[Shared capabilities](design/shared-capabilities.md) define the implemented
+transfer boundary.
 
 ## Validation boundary
 
@@ -66,5 +47,5 @@ The [source probes](../internal/infer/async_feasibility_test.go) and
 checks. Production C1 tests add real source inference, module/codec proofs,
 malformed Core/Machine, and interpreter/generated-Go execution. C2 must
 revalidate A0's representation against the executable API before migrating
-Stream. C4 and C6c must validate dynamic registration and shared service
-adapters through stored closures, dictionaries, and modules before A1.
+Stream. C4 and C6c validate dynamic registration and shared service adapters through
+stored closures, dictionaries, and modules; A1 must keep these gates.

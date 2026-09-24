@@ -105,7 +105,7 @@ func (g *gen) deferredEvidence(ev core.EffectInstance, row goast.Expr, mode type
 		for _, op := range effect.Ops {
 			var params []paramSpec
 			var args []goast.Expr
-			for i, raw := range op.ParamTypes {
+			for i, raw := range op.RuntimeParamTypes() {
 				ty := types.SubstRigid(raw, sub)
 				if g.isUnit(ty) {
 					continue

@@ -870,7 +870,30 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			// Workers see no caller locals — matching compiled scoping.
 			var out Value
 			var err error
-			if in.env.tailLoop(def) != nil {
+			if def.Control.Transport == types.Machine && in.env.machine != nil {
+				args := make([]Value, len(def.Params))
+				for i, name := range def.Params {
+					args[i] = vars[name]
+				}
+				var session *MachineSession
+				session, err = startMachine(in.ctx, in.env.machine, def.Name, args, callEvidence, in.env, in.ioctx, false)
+				if err == nil {
+					session.interp = in
+					session.frames[0].types, session.frames[0].rows = descriptors, rows
+					var event MachineEvent
+					event, err = session.Run()
+					if err == nil {
+						if event.Exit != nil {
+							out = event.Exit
+						} else if event.Done {
+							out = event.Value
+						} else {
+							_, _ = session.Abandon()
+							err = fmt.Errorf("eval: Machine worker suspended outside a producer")
+						}
+					}
+				}
+			} else if in.env.tailLoop(def) != nil {
 				// Self tail calls run as a frame-reuse loop (doc/design.md,
 				// "Interpreter and REPL") — constant Go stack, like the
 				// compiled backend's for-loop rewrite.
@@ -1227,7 +1250,29 @@ func (in *interp) force(name string) (Value, error) {
 		return nil, fmt.Errorf("eval: `%s` depends on itself", name)
 	}
 	cell.forcing = true
-	v, err := in.eval(cell.Body, nil)
+	var v Value
+	var err error
+	if def := in.env.defs[name]; def.Control.Transport == types.Machine && in.env.machine != nil {
+		var session *MachineSession
+		session, err = startMachine(in.ctx, in.env.machine, name, nil, nil, in.env, in.ioctx, true)
+		if err == nil {
+			session.interp = in
+			var event MachineEvent
+			event, err = session.Run()
+			if err == nil {
+				if event.Exit != nil {
+					v = event.Exit
+				} else if event.Done {
+					v = event.Value
+				} else {
+					_, _ = session.Abandon()
+					err = fmt.Errorf("eval: Machine value suspended outside a producer")
+				}
+			}
+		}
+	} else {
+		v, err = in.eval(cell.Body, nil)
+	}
 	cell.forcing = false
 	if err != nil {
 		return nil, err

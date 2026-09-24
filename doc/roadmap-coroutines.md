@@ -157,7 +157,7 @@ Implemented scoped execution is described in [the Coroutine design](design/corou
 Later stages extend these checked nodes, contracts, and dispatch paths; they
 must preserve synchronous Direct/Exit code, verified liveness, module-owned
 callable families, and typed projections on both sides of private registers.
-Native storage remains the separate [C6a](#c6a-typed-opaque-values) boundary.
+Native storage follows the implemented [C6a](#c6a-typed-opaque-values) boundary.
 
 ## Implementation stages
 
@@ -173,9 +173,9 @@ checkpoint; C1–C3 together are the first usable replacement foundation.
 | C3: Cooperative scheduling demonstration | C2 | DONE: shared foundation demonstrated without native concurrency |
 | C4: Scope-owned dynamic allocation | C3, A0; scope design begins with C0 | DONE: live registry ownership and checked registration |
 | C5: Suspending acquisition and cleanup | C1; nested fixtures from C3/C4 | Owners remain live through suspended cleanup |
-| C6a: Typed opaque values | C0/A0 representation decisions; C4 for selected task cells | Checked native storage and same-type return; required before A1 |
+| C6a: Typed opaque values | C0/A0 representation decisions; C4 for selected task cells | DONE: checked native storage and scope-owned write-once cells |
 | C6b: Scoped native requests and retention | C4; C5 only for suspending cleanup | Bounded requests and callbacks with checked quiescence |
-| C6c: Shared and transferable capabilities | C0/A0 capture contracts; C4 ownership | Safe child captures, including explicitly shared native values |
+| C6c: Shared and transferable capabilities | C0/A0 capture contracts; C4 ownership | DONE: checked shared values and implicit service invocation authority |
 | C6d: Concurrent invocation and runtime safety | C6b, C6c; C6a when values cross opaquely | Checked concurrent callbacks and race-safe runtime representations |
 | C7: General execution checkpoints | C1; Async A2 as integration consumer | Compiler-generated scheduling/cancellation points in CPU work |
 
@@ -202,7 +202,7 @@ Additional general prerequisites are specified in the
 [execution contract topic](roadmap-execution-contracts.md): scoped effects and
 checked work packages, detached typed completion/replay, private owner stop, and
 shared service evidence with invocation authority. C1 implements the first three;
-C6c implements shared service evidence before A1. These are general facilities,
+C6c implements shared service evidence for A1. These are general facilities,
 not exemptions for Async names.
 
 **Acceptance:** typed exchange can be represented without operation-local
@@ -285,9 +285,9 @@ cover both backends, distinct execution owners, immediate entry removal,
 caller-owned helper allocation, rejected local captures and escaped queues,
 and child allocation after the context-body helper has returned.
 
-**Stopping point:** a safe dynamic owner facility. Task failure/join policy,
-shared service authority, typed task cells and concurrent execution remain
-separate Async and C6 obligations.
+**Stopping point:** a safe dynamic owner facility. Task failure/join policy
+and concurrent execution remain separate Async and C6 obligations;
+C6a/C6c supply typed cells and shared service authority.
 
 ### C5: Suspending acquisition and cleanup
 
@@ -322,35 +322,14 @@ remains authoritative until each extension lands.
 
 #### C6a: Typed opaque values
 
-**Dependencies:** the representation decisions from C0/A0; C4 when storage is
-retained by a dynamic scope.
+**DONE — checked phantom indices and same-type opaque storage.**
 
-Implement opaque typed-value round trips and phantom wrappers with the
-[STM boundary requirement](roadmap-stm.md#what-todays-rules-block). A0 decides
-to require this facility before A1 for scope-owned write-once completion cells;
-general `TVar a` needs it independently. Phantom-wrapper validation and opaque-value round trips have
-separate acceptance obligations: scalar STM needs the former to expose
-`TVar Int`, while arbitrary payload storage additionally needs the latter.
-Representation-blind native storage must return a value at its original type
-without inspecting evaluator or generated-Go representations.
-Each selected task cell is created/read/written at exactly one payload type,
-including its residual row index, with a checked scoped owner. No retrieval by
-an untyped task ID, index-changing coercion, or public cast is allowed. A task
-queue holds homogeneous Unit jobs that close over these typed cells; it does
-not contain untyped payloads. Native storage never invokes a stored callable.
-
-Storage preserves the value's capture and lifetime obligations. An opaque box
-does not make a borrowed resource or stateful closure transferable, and it does
-not authorize concurrent access. Validate declarations and preserve contracts
-through inference, Core, wrappers, module interfaces, and both backend ABIs.
-
-**Acceptance:** phantom wrappers preserve their type index and cannot be forged
-or confused across native calls. Distinct Int/String entries and values containing
-records or recursive ADTs round-trip at their original types; mismatched retrieval and
-longer-lived retention of a borrowed value are rejected. Both backends agree.
-
-**Stopping point:** checked typed native storage, independently of asynchronous
-callbacks or concurrent execution.
+[Native storage](reference/native.md#indexed-native-storage) and
+[scope-owned write-once cells](reference/library-cells.md) own the public
+contracts. [Shared-capability design](design/shared-capabilities.md) owns token
+representation, capture preservation, independent Core reconstruction, and
+both backend ABIs. C0/A0 representation and C4 ownership prerequisites are
+covered by the executable representation, ownership, and registry suites.
 
 #### C6b: Scoped native requests and retention
 
@@ -384,39 +363,20 @@ without a claim that the Fango evaluator or callbacks are thread-safe.
 
 #### C6c: Shared and transferable capabilities
 
-**Dependencies:** C0/A0 capture contracts and C4 ownership; C6a only for opaque
-polymorphic payloads.
+**DONE — nominal shared values and split service invocation authority.**
 
-Prove transfer of explicit captures and effect evidence. Reject parent-local
-mutable handler state and borrowed advancement capabilities; permit child-owned
-resources and explicitly supported shared native values. Distinguish moving the
-sole authority over an execution from sharing a value whose native operations
-provide their own synchronization and lifetime protocol.
+[Shared resources](reference/native.md#shared-native-resources),
+[service contexts](reference/library-services.md), and
+[the implementation invariants](design/shared-capabilities.md) own these
+contracts. The acceptance suite exercises dynamically owned cooperative
+children, child draining before shared-resource release, typed write-once
+cells, retained service contexts used by different producers, nested pull
+forwarding, rejected authority/capture transfers, and module/Core codecs in
+both backends. C0/A0 and C4 remain prerequisite regression gates.
 
-The same capture rule applies to cooperative and concurrent executors. In
-particular, an STM variable shared by cooperative children needs this contract
-before its first release; a later executor cannot retroactively justify earlier
-sharing. A shared handle's owner stays live until every authorized child and
-native request has drained. The declaration must not grant arbitrary sharing
-to every resource wrapper with the same representation.
-
-A1 requires three specific capabilities: C4's synchronized allocation service,
-C6a's write-once completion cell (one publisher, multiple readers), and C0's
-[split service evidence](roadmap-execution-contracts.md). Implement and validate
-that opt-in evidence/adapter contract here; its declaration spelling remains an
-implementation review decision. The [service model](../internal/feasibility/tasks_test.go)
-passes execution authority explicitly and tests captured outer context from a
-different producer. This is a required general extension, not something ordinary
-evidence does today.
-
-**Acceptance:** safe child-local resources and declared shared values work;
-explicit and hidden parent-state/cursor captures fail through closures, ADTs,
-dictionaries, and evidence. A scalar shared-native-cell fixture exercises two
-dynamically owned coroutines cooperatively without depending on Async or STM
-implementation. STM later repeats the sharing proof through its transaction API.
-
-**Stopping point:** checked child capture and shared-capability contracts.
-Concurrent execution additionally requires C6d's runtime audit.
+This subset has no retained native request or callback and therefore requires
+no C6b extension. C6b remains unfinished for native readiness; concurrent
+execution additionally requires C6d.
 
 #### C6d: Concurrent invocation and runtime safety
 

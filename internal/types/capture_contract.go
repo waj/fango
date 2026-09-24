@@ -19,27 +19,29 @@ type CaptureContract struct {
 // CaptureFlow describes value flow and access to a lifetime owner. Node IDs
 // are local to the defining contract and stable across independent inference.
 type CaptureFlow struct {
-	SourceType Type
-	Origin     source.Span
-	ID         int
-	Kind       string
-	Name       string
-	Type       Type
-	TypeArgs   []Type
-	Names      []string
-	Effects    []int
-	RowParam   CaptureVar
-	Deferred   []int
-	Row        *CaptureRow
-	Scope      ScopeID
-	Scoped     bool
-	Borrow     bool
-	Retain     bool
-	Access     CursorAccess
-	Index      int
-	Rec        bool
-	Children   []*CaptureFlow
-	Clauses    []CaptureClause
+	Service       bool
+	NativeStorage NativeStorage
+	SourceType    Type
+	Origin        source.Span
+	ID            int
+	Kind          string
+	Name          string
+	Type          Type
+	TypeArgs      []Type
+	Names         []string
+	Effects       []int
+	RowParam      CaptureVar
+	Deferred      []int
+	Row           *CaptureRow
+	Scope         ScopeID
+	Scoped        bool
+	Borrow        bool
+	Retain        bool
+	Access        CursorAccess
+	Index         int
+	Rec           bool
+	Children      []*CaptureFlow
+	Clauses       []CaptureClause
 }
 
 type CaptureRow struct {

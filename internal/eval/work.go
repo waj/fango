@@ -24,7 +24,7 @@ func (in *interp) evalWork(e *core.Work, fr *Frame) (Value, error) {
 		args[i] = v
 	}
 	switch e.Kind {
-	case "registration":
+	case "registration", "invocation-slot", "invocation-argument":
 		return args[0], nil
 	case "registry-owner":
 		return args[0].(*MachineIteratorSession).work, nil

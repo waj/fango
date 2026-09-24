@@ -278,21 +278,34 @@ func (p *parser) parseDecl() ast.Decl {
 	}
 	if t.Kind == token.PRAGMA {
 		p.next()
-		if t.Text != "resource" {
-			p.errorAt(t.Span, "MISPLACED PRAGMA", "Only `{-# resource #-}` may precede a declaration; file pragmas belong above the module header.")
+		if t.Text == "service" {
+			if p.peek().Kind != token.KwEffect {
+				p.errorAt(t.Span, "MISPLACED SERVICE PRAGMA", "`{-# service #-}` must precede one effect declaration.")
+				return nil
+			}
+			d := p.parseDecl()
+			if ed, ok := d.(*ast.EffectDecl); ok {
+				ed.Service = true
+				ed.Sp.Start = t.Span.Start
+			}
+			return d
+		}
+		if t.Text != "resource" && t.Text != "shared-resource" {
+			p.errorAt(t.Span, "MISPLACED PRAGMA", "Only `resource`, `shared-resource`, or `service` pragmas may precede a declaration; file pragmas belong above the module header.")
 			return nil
 		}
 		if p.peek().Kind == token.EOF {
-			p.errorAt(t.Span, TitleUnexpectedEOF, "After `{-# resource #-}` I expect a type declaration.")
+			p.errorAt(t.Span, TitleUnexpectedEOF, "After `{-# "+t.Text+" #-}` I expect a type declaration.")
 			return nil
 		}
 		if p.peek().Kind != token.KwType {
-			p.errorAt(p.peek().Span, "MISPLACED RESOURCE PRAGMA", "`{-# resource #-}` must immediately precede one type declaration.")
+			p.errorAt(p.peek().Span, "MISPLACED RESOURCE PRAGMA", "`{-# "+t.Text+" #-}` must immediately precede one type declaration.")
 			return nil
 		}
 		d := p.parseDecl()
 		if td, ok := d.(*ast.TypeDecl); ok {
 			td.Resource = true
+			td.Shared = t.Text == "shared-resource"
 			td.ResourceSpan = t.Span
 		}
 		return d

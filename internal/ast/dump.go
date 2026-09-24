@@ -108,7 +108,9 @@ func dumpDecl(d Decl) string {
 	case *TypeDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(type %s", d.Name)
-		if d.Resource {
+		if d.Shared {
+			b.WriteString(" (pragma shared-resource)")
+		} else if d.Resource {
 			b.WriteString(" (pragma resource)")
 		}
 		if p := dumpParams(d.Params); p != "" {
@@ -140,6 +142,9 @@ func dumpDecl(d Decl) string {
 	case *EffectDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(effect %s", d.Name)
+		if d.Service {
+			b.WriteString(" (pragma service)")
+		}
 		if p := dumpParams(d.Params); p != "" {
 			fmt.Fprintf(&b, " %s", p)
 		}

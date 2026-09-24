@@ -1,0 +1,33 @@
+import Cell
+import Completion
+import Coroutine
+import Fail
+import Scope
+import Work
+
+action : () ->{IO, Fail.Fail String} String
+action() = Scope.finally (\_ ->
+    Fail.fail "failed"
+    "unreachable") (\_ -> print "released")
+
+job : Cell.Publisher (Completion.Completion String {IO, Fail.Fail String}) -> (() ->{Coroutine.Suspension} ()) -> () ->{Coroutine.Suspension, IO, Fail.Fail String} ()
+job cell pause () =
+    pause ()
+    completed : Completion.Completion String {IO, Fail.Fail String}
+    completed = Completion.capture action
+    print (Cell.publish cell completed)
+
+observe view = case Cell.read view of
+    Nothing -> "pending"
+    Just completed -> Completion.replay completed
+
+main() = print (Fail.attempt (\_ -> Coroutine.scope (\scope ->
+    cell = Cell.create scope
+    first = Cell.reader cell
+    second = Cell.reader cell
+    child = Work.register (Coroutine.facet scope) (job cell)
+    print (observe first)
+    print (Work.advance (Work.owner scope) child ())
+    print (Work.advance (Work.owner scope) child ())
+    print (Fail.attempt (\_ -> observe first))
+    print (Fail.attempt (\_ -> observe second)))))

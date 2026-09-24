@@ -176,3 +176,8 @@ must still fit the caller's source row. ANF, substitution, module objects, and i
 execution objects preserve the proof metadata. Both runtime paths keep an
 opaque owner identity beside the underlying coroutine; neither opens the
 package through an unchecked protocol cast.
+
+Shared native payloads and retained service contexts follow
+[the shared-capability contract](shared-capabilities.md). Transfer traverses
+hidden evidence as well as ordinary closure/data fields; synchronization never
+erases capture or execution-owner obligations.

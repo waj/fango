@@ -1,0 +1,15 @@
+{-# resource #-}
+type Token a = Token Int
+
+number : Int -> Token Int
+number = native
+
+text : Int -> Token String
+text = native
+
+value : Token a -> Int
+value = native
+
+main() =
+    print (value (number 7))
+    print (value (text 8))

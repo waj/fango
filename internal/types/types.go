@@ -63,7 +63,7 @@ func FunctionControl(fn *TFun) Control {
 		out.Polymorphic = true
 	}
 	for _, label := range fn.Eff.Labels {
-		if label.Suspension {
+		if label.Suspension || label.Name == ServiceInvocationName {
 			out.Transport = Machine
 		} else if label.Abort {
 			if out.Transport < Exit {
@@ -197,6 +197,7 @@ func (c *ClassInfo) DictType(t Type) *TCon {
 // runtime"). They are resolved once, after the module's types are declared,
 // so both backends read the same constructors instead of re-deriving them.
 type NativeInfo struct {
+	Storage      NativeStorage
 	Name, Module string
 	Scheme       Scheme
 	Arity        int
@@ -403,6 +404,9 @@ func (c *CtorInfo) ValueType() Type {
 // vars (empty for monomorphic types); constructor Fields and Result are
 // expressed over them.
 type ADTInfo struct {
+	// Shared opts this nominal native resource into synchronized sharing.
+	Shared        bool
+	NativeIndexed bool // phantom native handle; its representation cannot be opened by Fango
 	// Resource marks an opaque scoped capability regardless of representation.
 	Resource bool
 	Con      *TCon
@@ -440,10 +444,12 @@ func (a *ADTInfo) RecordField(name string) (int, *RecordFieldInfo) {
 // shared by its operation schemes; identity follows the same generational
 // Unique discipline as type constructors.
 type EffectInfo struct {
-	Unique int
-	Name   string
-	Params []*TVar
-	Ops    []*EffectOp
+	Service    bool
+	Invocation bool
+	Unique     int
+	Name       string
+	Params     []*TVar
+	Ops        []*EffectOp
 	// Scoped is compiler-owned policy. Source effect declarations are durable
 	// by default; State/resource milestones mark the capabilities whose
 	// handler activation must not escape.
@@ -457,6 +463,9 @@ type EffectInfo struct {
 // operation. Scheme includes effect parameters, operation-local variables,
 // and row variables; Params/Result describe its fully saturated call.
 type EffectOp struct {
+	// Invocation is the service's fixed protocol. Its execution capability is
+	// passed separately at each invocation, never retained by service evidence.
+	Invocation *EffLabel
 	Owner      *EffectInfo
 	Index      int
 	Name       string

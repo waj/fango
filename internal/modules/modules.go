@@ -557,6 +557,9 @@ func validateModuleDecls(n *node) []diag.Error {
 			if name := canonical(n.name, d.Name); n.bundled && (name == types.CoroutineSuspensionName || name == types.CoroutineDriveName) {
 				d.CompilerSuspension = true
 			}
+			if n.bundled && canonical(n.name, d.Name) == types.ServiceInvocationName {
+				d.CompilerInvocation = true
+			}
 			for _, op := range d.Ops {
 				declared[op.Name] = true
 				if op.Native == nil {
@@ -805,12 +808,13 @@ func localTypeNames(decls []ast.Decl) map[string]bool {
 }
 
 // localWrapperTypes finds the module's one-constructor, one-boundary-value
-// wrappers with no parameters.
+// wrappers. Parameters may be phantom: the field must itself be a boundary
+// value, so no parameter can affect the erased representation.
 func localWrapperTypes(decls []ast.Decl) map[string]string {
 	out := map[string]string{}
 	for _, d := range decls {
 		td, ok := d.(*ast.TypeDecl)
-		if !ok || len(td.Params) != 0 || td.RecordFields != nil || len(td.Ctors) != 1 || len(td.Ctors[0].Args) != 1 {
+		if !ok || td.RecordFields != nil || len(td.Ctors) != 1 || len(td.Ctors[0].Args) != 1 {
 			continue
 		}
 		if goType := boundaryGoTypeSpelling(td.Ctors[0].Args[0]); goType != "" {
@@ -933,6 +937,12 @@ func isUnitType(t ast.TypeExpr) bool {
 // nativeGoType is the Go type a Fango boundary type crosses as: a scalar's
 // own Go type, or the field type of one of this module's wrapper types.
 func (b nativeBoundary) nativeGoType(t ast.TypeExpr) string {
+	if _, ok := t.(*ast.TVarName); ok {
+		return "any" // Resolved checking requires a same-index storage edge.
+	}
+	if app, ok := t.(*ast.TApp); ok {
+		return b.wrappers[app.Name]
+	}
 	if goType := scalarGoType(t); goType != "" {
 		return goType
 	}

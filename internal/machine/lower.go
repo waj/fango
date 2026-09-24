@@ -400,6 +400,7 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 					b.errorf("%s: Machine operation argument was not ANF-hoisted", b.def.Name)
 					return next
 				}
+				b.registerMachineLambdas(arg)
 			}
 			return b.add(&Call{Operation: e.Op, Effect: e.Effect, Args: e.Args, Bind: bind, Next: next,
 				Tail: b.isReturnOf(next, bind)})

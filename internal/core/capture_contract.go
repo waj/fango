@@ -70,6 +70,10 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 		}
 	case *NativeCall:
 		n.Kind = "native"
+		if e.Storage.Kind != "" {
+			n.Kind = "native-" + e.Storage.Kind
+			n.NativeStorage = e.Storage
+		}
 		children(e.Args...)
 	case *Work:
 		n.Kind = "work-" + e.Kind
@@ -125,6 +129,7 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 		}
 		children(e.Args...)
 	case *Perform:
+		n.Service = e.Op.Invocation != nil
 		n.Origin = e.Origin
 		n.Kind, n.Index = "perform", e.Op.Index
 		n.Effects = []int{e.Effect.Unique}

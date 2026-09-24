@@ -235,7 +235,11 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			if lam, ok := expr.(*core.Lambda); ok {
 				return s.interp.makeClosure(lam, locals, s.closures[lam])
 			}
-			return s.interp.eval(expr, locals)
+			value, err := s.interp.eval(expr, locals)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", frame.worker.Name, err)
+			}
+			return value, nil
 		}
 		switch term := block.Term.(type) {
 		case *machineir.Eval:

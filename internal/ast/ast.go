@@ -593,6 +593,7 @@ func (*PatternDecl) isDecl() {}
 // types and matching"). Its RHS is either constructor alternatives or a
 // standalone record schema. Params declare polymorphic types.
 type TypeDecl struct {
+	Shared       bool
 	Resource     bool
 	ResourceSpan source.Span
 	Name         string
@@ -633,6 +634,8 @@ func (*TypeDecl) isDecl() {}
 // TypeDecl.Params. Operation signatures are ordinary type expressions; the
 // checker attaches the effect's own label to the operation's arrow.
 type EffectDecl struct {
+	Service            bool
+	CompilerInvocation bool
 	Name               string
 	NameSpan           source.Span
 	Params             []Param

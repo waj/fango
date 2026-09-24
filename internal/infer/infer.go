@@ -396,10 +396,12 @@ type DeclInfo struct {
 }
 
 type HandlerClauseInfo struct {
-	Op         *types.EffectOp
-	ParamTypes []types.Type
-	OpResult   types.Type
-	ResumeID   types.ResumeID
+	Invocation      *types.EffLabel
+	InvocationScope types.ScopeID
+	Op              *types.EffectOp
+	ParamTypes      []types.Type
+	OpResult        types.Type
+	ResumeID        types.ResumeID
 }
 
 type HandlerInfo struct {
@@ -668,6 +670,9 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 	if types.WorkIntrinsic(d.Name) && !types.WorkShape(d.Name, ty) {
 		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic %s has an invalid work package protocol.", ast.Spelling(d.Name)))
 	}
+	if d.Name == types.ServiceRunName && !types.ServiceRunShape(ty) {
+		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "Invalid service invocation scope protocol."))
+	}
 	if types.FailureInspection(d.Name) {
 		pure := true
 		arrow := ty
@@ -770,7 +775,7 @@ func (ck *Checker) declareEffectHeader(ed *ast.EffectDecl, batch bool) []diag.Er
 		seen[p.Name] = true
 		params[i] = ck.Sup.FreshRigid(types.General)
 	}
-	info := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: ed.Name, Params: params, Suspension: ed.CompilerSuspension}
+	info := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: ed.Name, Params: params, Suspension: ed.CompilerSuspension, Service: ed.Service, Invocation: ed.CompilerInvocation, Scoped: ed.CompilerInvocation}
 	ck.Effects[ed.Name], ck.EffectsByUnique[info.Unique] = info, info
 	if ed.Name == "IO.IO" || ed.Name == "IO" {
 		ck.IO = info
@@ -834,12 +839,25 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 			cur = next
 		}
 		rowVars := make([]*types.TVar, len(arrows))
+		var invocation *types.EffLabel
+		if info.Service {
+			row := arrows[len(arrows)-1].Eff
+			if len(row.Labels) != 1 || row.Tail != nil || len(row.Labels[0].Args) != 2 || ck.EffectsByUnique[row.Labels[0].Unique] == nil || !ck.EffectsByUnique[row.Labels[0].Unique].Invocation || op.Abort || op.Native != nil {
+				errs = append(errs, diag.Errorf(op.NameSpan, "SERVICE PROTOCOL", "Each service operation must declare one fixed Service.Invocation request reply row and cannot be aborting or native."))
+			} else {
+				label := row.Labels[0]
+				invocation = &label
+			}
+		}
 		for i, arrow := range arrows {
 			rowVars[i] = ck.Sup.FreshRigid(types.RowVar)
 			arrow.Eff = types.Row{Tail: rowVars[i]}
 		}
 		inner := arrows[len(arrows)-1]
 		inner.Eff.Labels = []types.EffLabel{{Unique: info.Unique, Name: info.Name, Args: labelArgs, Abort: op.Abort, Suspension: info.Suspension}}
+		if invocation != nil {
+			inner.Eff.Labels = append(inner.Eff.Labels, *invocation)
+		}
 		vars := append([]*types.TVar(nil), info.Params...)
 		vars = append(vars, scope.Minted()...)
 		vars = append(vars, rowVars...)
@@ -865,7 +883,7 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 			}
 		}
 		meta := &types.EffectOp{Owner: info, Index: len(info.Ops), Name: op.Name, Scheme: sch,
-			Arity: len(arrows), ParamTypes: params, ResultType: arrows[len(arrows)-1].Ret, LocalVars: local, Abort: op.Abort}
+			Arity: len(arrows), ParamTypes: params, ResultType: arrows[len(arrows)-1].Ret, LocalVars: local, Abort: op.Abort, Invocation: invocation}
 		if op.Native != nil {
 			n := &types.NativeInfo{Name: op.Name, Module: symbolModule(op.Name), Scheme: sch, Arity: len(arrows), Template: op.Native.Template, Effect: info}
 			meta.Native = n
@@ -874,6 +892,9 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 		info.Ops = append(info.Ops, meta)
 		ck.Operations[op.Name] = meta
 		ck.Env.Bind(op.Name, sch)
+	}
+	if err := types.CheckServiceEffect(info, ck.EffectsByUnique); err != nil {
+		errs = append(errs, diag.Errorf(ed.Sp, "SERVICE PROTOCOL", "%s", err))
 	}
 	return errs
 }
@@ -936,7 +957,7 @@ func (ck *Checker) declareTypeHeader(td *ast.TypeDecl) (*types.ADTInfo, []diag.E
 		params[i] = ck.Sup.FreshRigid(types.General)
 	}
 	con := &types.TCon{Unique: ck.Sup.NextUnique(), Name: td.Name}
-	adt := &types.ADTInfo{Resource: td.Resource, Con: con, Params: params, ParamKindsKnown: make([]bool, len(params))}
+	adt := &types.ADTInfo{Resource: td.Resource, Shared: td.Shared, Con: con, Params: params, ParamKindsKnown: make([]bool, len(params))}
 	ck.TypeNames[td.Name] = con
 	ck.ADTs[con.Unique] = adt
 	ck.ADTOrder = append(ck.ADTOrder, adt)
@@ -965,6 +986,9 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 		result = &types.TCon{Unique: adt.Con.Unique, Name: adt.Con.Name, Args: args}
 	}
 	if td.RecordFields != nil {
+		if td.Shared {
+			errs = append(errs, diag.Errorf(td.ResourceSpan, "SHARED RESOURCE", "A shared native resource must wrap exactly one Native.Any field."))
+		}
 		seenFields := map[string]bool{}
 		fields := make([]types.Type, len(td.RecordFields))
 		for i, f := range td.RecordFields {
@@ -1016,6 +1040,9 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 	errs = append(errs, markListRepr(adt, td.NameSpan)...)
 	errs = append(errs, markBytesRepr(adt, td.NameSpan)...)
 	errs = append(errs, markNativeAnyRepr(adt, td.NameSpan)...)
+	if td.Shared && (len(adt.Ctors) != 1 || len(adt.Ctors[0].Fields) != 1 || !ck.isNativeAnyType(adt.Ctors[0].Fields[0])) {
+		errs = append(errs, diag.Errorf(td.ResourceSpan, "SHARED RESOURCE", "A shared native resource must wrap exactly one Native.Any field."))
+	}
 	for i := range adt.Params {
 		adt.ParamKindsKnown[i] = true
 	}
@@ -1499,6 +1526,9 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		if name := g.ck.Aliases[e.Name]; name != "" {
 			e.Name = name
 		}
+		if ctor := g.ck.Ctors[e.Name]; ctor != nil && g.ck.ADTs[ctor.Result.Unique] != nil && g.ck.ADTs[ctor.Result.Unique].NativeIndexed {
+			g.errs = append(g.errs, diag.Errorf(e.Sp, "NATIVE HANDLE REPRESENTATION", "Indexed native handles can only be created by their checked native operations."))
+		}
 		if localScheme, ok := g.locals.lookup(e.Name); ok {
 			g.ck.ExprSchemes[e] = localScheme
 			g.ck.ExprCaptures[e] = g.instantiateCaptures(localScheme)
@@ -1534,6 +1564,9 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			break
 		}
 		fields, result := g.instantiateCtor(info)
+		if g.ck.ADTs[info.Result.Unique] != nil && g.ck.ADTs[info.Result.Unique].NativeIndexed {
+			g.errs = append(g.errs, diag.Errorf(e.Span(), "NATIVE HANDLE REPRESENTATION", "An indexed native handle's representation cannot be constructed in Fango."))
+		}
 		ty = result
 		for i := len(fields) - 1; i >= 0; i-- {
 			ty = &types.TFun{Arg: fields[i], Eff: types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}, Ret: ty}
@@ -1697,6 +1730,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		g.leaveAmbient(savedAmbient, savedSink)
 		g.locals = scope.parent
 		funTy := g.wrapFunction(paramTys, bodyTy, bodyAmbient)
+		funTy = g.ck.runnerControl(funTy, len(e.Params), []ast.Equation{{Params: e.Params, Body: e.Body}})
 		// A closure written in a handler's subject may be bound to that
 		// handler's activation where the position it goes to omits the label.
 		if len(g.subjectHandlers) > 0 {
@@ -1812,6 +1846,12 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	if first.Owner == g.ck.IO {
 		g.errs = append(g.errs, diag.Errorf(e.Sp, "BUILTIN IO HANDLING NOT READY", "Handlers for builtin IO are staged until polymorphic print evidence is available."))
 	}
+	if first.Owner.Invocation {
+		g.errs = append(g.errs, diag.Errorf(e.Sp, "INVOCATION AUTHORITY", "Only Service.run may install producer invocation authority."))
+	}
+	if first.Owner.Service && e.State != nil {
+		g.errs = append(g.errs, diag.Errorf(e.Sp, "SERVICE STATE", "Shared service evidence cannot own mutable handler state."))
+	}
 	if first.Owner.Suspension {
 		g.errs = append(g.errs, diag.Errorf(e.Sp, "COMPILER-OWNED EFFECT",
 			"Effect `%s` describes compiler-owned coroutine control and cannot be handled by an ordinary handler.", ast.Spelling(first.Owner.Name)))
@@ -1888,6 +1928,17 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		if len(cl.Params) != op.Arity {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "HANDLER ARITY", "The operation `%s` takes %d argument(s), but this clause has %d.", op.Name, op.Arity, len(cl.Params)))
 		}
+		var invocation *types.EffLabel
+		g.ambient = clauseAmbient
+		if op.Invocation != nil {
+			for _, extra := range last.Eff.Labels {
+				if extra.Unique == op.Invocation.Unique {
+					label := extra
+					invocation = &label
+					g.ambient.Labels = append(append([]types.EffLabel(nil), clauseAmbient.Labels...), extra)
+				}
+			}
+		}
 		eqs := cl.Equations
 		if len(eqs) == 0 {
 			eqs = []ast.Equation{{Params: cl.Params, Body: cl.Body, NameSpan: cl.OpSpan}}
@@ -1941,8 +1992,13 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 				}
 			}
 		}
-		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, ParamTypes: paramTys, OpResult: opResult, ResumeID: resumeID})
+		var invocationScope types.ScopeID
+		if invocation != nil {
+			invocationScope = g.ck.Sup.FreshScope()
+		}
+		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, ParamTypes: paramTys, OpResult: opResult, ResumeID: resumeID, Invocation: invocation, InvocationScope: invocationScope})
 	}
+	g.ambient = clauseAmbient
 	for _, op := range first.Owner.Ops {
 		if !seen[op.Name] {
 			g.errs = append(g.errs, diag.Errorf(e.Sp, "INCOMPLETE HANDLER", "The handler is missing a clause for `%s`.", op.Name))
@@ -2917,6 +2973,9 @@ func (g *generator) patternInner(p ast.Pattern, scope *blockScope) types.Type {
 				g.pattern(a, scope)
 			}
 			return result
+		}
+		if adt := g.ck.ADTs[info.Result.Unique]; adt != nil && adt.NativeIndexed {
+			g.errs = append(g.errs, diag.Errorf(p.Span(), "NATIVE HANDLE REPRESENTATION", "An indexed native handle's representation cannot be opened or re-indexed in Fango."))
 		}
 		for i, a := range p.Args {
 			argTy := g.pattern(a, scope)

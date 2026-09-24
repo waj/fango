@@ -1,0 +1,11 @@
+{-# no-prelude #-}
+module Service exposing (Invocation(..), run)
+
+import Basics exposing (..)
+import Coroutine exposing (Suspension)
+
+effect Invocation request reply
+    invoke : request -> reply
+
+run : (request ->{Suspension} reply) -> (() ->{Invocation request reply | e} a) ->{Suspension | e} a
+run = native

@@ -1,0 +1,9 @@
+import Native
+import Service
+
+{-# shared-resource #-}
+type Shared a = Shared Native.Any
+
+{-# service #-}
+effect Dispatch
+    submit : Int ->{Service.Invocation Int ()} ()

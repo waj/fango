@@ -28,6 +28,8 @@ The bundled library is experimental and versioned with the compiler.
 | Coroutine | [Scoped typed exchange and ownership](reference/library-coroutines.md) |
 | Completion | [Detached typed results and abort replay](reference/library-completion.md) |
 | Work | [Scoped work packages](reference/library-work.md) |
+| Cell | [Scope-owned write-once cells](reference/library-cells.md) |
+| Service | [Shared contexts and invocation authority](reference/library-services.md) |
 | Json | [Encoding and string tokens](reference/library-json.md) |
 | Scope | [Cleanup scopes](reference/resources.md) |
 | Meta, Derive | [Metaprogramming](reference/metaprogramming.md) |

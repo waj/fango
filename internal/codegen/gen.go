@@ -250,7 +250,9 @@ func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, un
 		if d == mainDef && mainIsUnit {
 			continue // no package var: the effect runs inside func main()
 		}
-		if machineWorkers[d.Name] != nil && d.Control.Transport == types.Machine {
+		// Only source values have a closed initialization contract. Raw
+		// Machine definitions expose frame constructors to their driver.
+		if (d.IsWorker() || d.SourceType == nil) && machineWorkers[d.Name] != nil && d.Control.Transport == types.Machine {
 			continue
 		}
 		if d.IsWorker() {
@@ -293,9 +295,13 @@ func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, un
 
 	switch {
 	case mainDef != nil && machineWorkers[mainDef.Name] != nil:
-		// The private fixture driver owns Run/Resume. Keep a valid entry
-		// package without choosing a source-level suspension policy.
-		decls = append(decls, funcDecl("main", assignBlank(callExpr(g.machineConstructorRef(mainDef.Name)))))
+		var args []goast.Expr
+		for range mainDef.Params {
+			args = append(args, selector("fangort", "UnitValue"))
+		}
+		frame := callExpr(g.machineConstructorRef(mainDef.Name), args...)
+		g.usesFangort = true
+		decls = append(decls, funcDecl("main", exprStmt(callExpr(selector("fangort", "RunMachineEntry"), frame))))
 	case mainIsUnit:
 		decls = append(decls, funcDecl("main", g.stmts(mainDef.Body)...))
 	case mainIsFn:
@@ -342,6 +348,11 @@ func (g *gen) topValueDecl(d *core.Def, mode types.Transport) goast.Decl {
 		name += "_exit"
 	} else if mode == types.Machine {
 		name += "_machine"
+	}
+	if d.Control.Transport == types.Machine {
+		g.usesFangort = true
+		value := callExpr(indexExpr(selector("fangort", "RunMachineValue"), []goast.Expr{g.goType(d.Type)}), callExpr(g.machineConstructorRef(d.Name)))
+		return varDecl(name, g.goType(d.Type), value)
 	}
 	return varDecl(name, g.goType(d.Type), g.expr(d.Body, 0))
 }
@@ -1224,13 +1235,14 @@ func (g *gen) goTypes(ts []types.Type) []goast.Expr {
 func (g *gen) nativeSidecarCall(call *core.NativeCall, n *types.NativeInfo) ([]goast.Stmt, goast.Expr) {
 	g.nativeImports[n.Module] = true
 	args := make([]goast.Expr, 0, len(call.Args))
-	needsSequence := false
+	needsSequence := n.Storage.Kind != ""
 	for i, arg := range call.Args {
 		needsSequence = needsSequence || g.isUnit(arg.Type()) && !unitAtom(arg) || g.paramWrapper(n, i) != nil
 	}
 	var prelude []goast.Stmt
 	for i, arg := range call.Args {
-		if g.isUnit(arg.Type()) {
+		opaque := (n.Storage.Kind == "new" || n.Storage.Kind == "write") && i == n.Storage.Payload
+		if g.isUnit(arg.Type()) && !opaque {
 			if needsSequence {
 				prelude = append(prelude, g.stmts(arg)...)
 			}
@@ -1246,12 +1258,20 @@ func (g *gen) nativeSidecarCall(call *core.NativeCall, n *types.NativeInfo) ([]g
 			value = g.expr(arg, 0)
 		}
 		if wrapper := g.paramWrapper(n, i); wrapper != nil {
-			value = g.unwrapBoundary(wrapper, value)
+			value = g.unwrapBoundaryAt(wrapper, arg.Type(), value)
+		}
+		if opaque {
+			g.usesFangort = true
+			value = callExpr(selector("fangort", "PackNativeValue"), value)
 		}
 		args = append(args, value)
 	}
 	fn := selector(nativeAlias(n.Module), exportNativeName(types.SurfaceName(n.Name)))
 	var result goast.Expr = callExpr(fn, args...)
+	if n.Storage.Kind == "read" {
+		g.usesFangort = true
+		return prelude, callExpr(indexExpr(selector("fangort", "UnpackNativeValue"), []goast.Expr{g.goType(call.Ty)}), result)
+	}
 	if n.Fallible != nil {
 		return prelude, g.fallibleNativeResult(call, n, result)
 	}
@@ -1269,7 +1289,19 @@ func (g *gen) paramWrapper(n *types.NativeInfo, i int) *types.CtorInfo {
 // A wrapper has exactly one constructor, so the assertion is a projection
 // that cannot fail, not a type check.
 func (g *gen) unwrapBoundary(wrapper *types.CtorInfo, value goast.Expr) goast.Expr {
-	asserted := &goast.TypeAssertExpr{X: value, Type: &goast.StarExpr{X: g.ctorRef(wrapper)}}
+	return g.unwrapBoundaryAt(wrapper, wrapper.Result, value)
+}
+
+func (g *gen) boundaryTypeArgs(wrapper *types.CtorInfo, ty types.Type) []types.Type {
+	if con, ok := ty.(*types.TCon); ok {
+		return runtimeADTArgs(g.adts[wrapper.Result.Unique], con.Args)
+	}
+	return nil
+}
+
+func (g *gen) unwrapBoundaryAt(wrapper *types.CtorInfo, ty types.Type, value goast.Expr) goast.Expr {
+	ctor := indexExpr(g.ctorRef(wrapper), g.goTypes(g.boundaryTypeArgs(wrapper, ty)))
+	asserted := &goast.TypeAssertExpr{X: value, Type: &goast.StarExpr{X: ctor}}
 	return &goast.SelectorExpr{X: asserted, Sel: ident(fieldName(0))}
 }
 
@@ -1282,7 +1314,7 @@ func (g *gen) wrapBoundaryResult(n *types.NativeInfo, ty types.Type, result goas
 	}
 	result = g.validatedScalar(n.Name, scalar, result)
 	if n.ResultWrapper != nil {
-		result = g.ctorValue(n.ResultWrapper, nil, result)
+		result = g.ctorValue(n.ResultWrapper, g.boundaryTypeArgs(n.ResultWrapper, ty), result)
 	}
 	return result
 }
@@ -2108,7 +2140,7 @@ func (g *gen) handlerEvidence(e *core.Handle, mode types.Transport, state *handl
 			} else {
 				p = mangleValue(p)
 			}
-			if g.isUnit(c.Op.ParamTypes[j]) {
+			if g.isUnit(c.ParamTypes[j]) {
 				continue
 			}
 			params = append(params, paramSpec{name: p, typ: g.goType(c.ParamTypes[j])})
@@ -2269,7 +2301,7 @@ func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want
 		for _, op := range eff.Ops {
 			var params []paramSpec
 			var args []goast.Expr
-			for i, raw := range op.ParamTypes {
+			for i, raw := range op.RuntimeParamTypes() {
 				ty := types.SubstRigid(raw, sub)
 				if g.isUnit(ty) {
 					continue
@@ -2317,7 +2349,7 @@ func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want
 	for _, op := range eff.Ops {
 		var params []paramSpec
 		var args []goast.Expr
-		for i, raw := range op.ParamTypes {
+		for i, raw := range op.RuntimeParamTypes() {
 			ty := types.SubstRigid(raw, sub)
 			if g.isUnit(ty) {
 				continue
@@ -2370,8 +2402,8 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 				if op.Abort {
 					continue
 				}
-				ps := make([]paramSpec, 0, len(op.ParamTypes))
-				for _, t := range op.ParamTypes {
+				ps := make([]paramSpec, 0, len(op.RuntimeParamTypes()))
+				for _, t := range op.RuntimeParamTypes() {
 					if g.isUnit(t) {
 						continue
 					}

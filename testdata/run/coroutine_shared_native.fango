@@ -1,0 +1,39 @@
+import Coroutine
+import Work
+import Scope
+import Native
+
+{-# shared-resource #-}
+type Cell = Cell Native.Any
+
+new : Int ->{IO} Cell
+new = native
+
+increment : Cell ->{IO} ()
+increment = native
+
+read : Cell ->{IO} Int
+read = native
+
+release : Cell ->{IO} ()
+release = native
+
+worker cell pause () = Scope.bracket (\_ -> ()) (\_ -> print "child released") (\_ ->
+    increment cell
+    pause ()
+    increment cell
+    read cell)
+
+main() = Scope.bracket (\_ -> new 0) release (\cell ->
+    Coroutine.scope (\scope ->
+        first = Work.register (Coroutine.facet scope) (worker cell)
+        second = Work.register (Coroutine.facet scope) (worker cell)
+        owner = Work.owner scope
+        print (Work.advance owner first ())
+        print (Work.advance owner second ())
+        print (read cell)
+        print (Work.advance owner first ())
+        print (Work.advance owner second ())
+        print (read cell)
+        abandoned = Work.register (Coroutine.facet scope) (worker cell)
+        print (Work.advance owner abandoned ())))

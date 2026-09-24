@@ -18,6 +18,10 @@ func (*Work) isExpr()            {}
 func (w *Work) Type() types.Type { return w.Ty }
 
 func (l *linter) work(w *Work, where string) {
+	if w.Kind == "invocation-slot" || w.Kind == "invocation-argument" {
+		l.serviceWork(w, where)
+		return
+	}
 	if w.Kind == "registration" || w.Kind == "registry-owner" {
 		name := types.CoroutineFacetName
 		if w.Kind == "registry-owner" {

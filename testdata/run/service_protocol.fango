@@ -1,0 +1,21 @@
+import Coroutine
+import Service
+
+{-# service #-}
+effect Query request reply
+    query : request ->{Service.Invocation request reply} reply
+    checkpoint : () ->{Service.Invocation request reply} reply
+
+calls() =
+    first = query "hello"
+    second = checkpoint()
+    first + second
+
+producer pause initial = Service.run pause (\_ -> handle calls() of
+    query value -> resume (Service.invoke value)
+    checkpoint () -> resume (Service.invoke "again"))
+
+main() = Coroutine.with producer (\cursor ->
+    print (Coroutine.advance cursor 0)
+    print (Coroutine.advance cursor 40)
+    print (Coroutine.advance cursor 2))

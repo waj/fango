@@ -37,7 +37,8 @@ definition-site evidence remains bound to the original handler activation.
 The checker reports `WORK OWNER MISMATCH` for a foreign owner,
 `WORK EFFECT BUDGET` for an insufficient budget, and `RESOURCE ESCAPES` for
 lifetime violations. `WORK CAPABILITY TRANSFER` rejects producers retaining
-another coroutine's execution authority or mutable handler evidence.
+another coroutine's execution authority, mutable handler evidence, or a native
+resource without a nominal `shared-resource` contract.
 
 ## Dynamic registration
 
@@ -67,5 +68,6 @@ this does not grant shared mutable service evidence or transfer authority.
 Scope exit and live-entry removal follow
 [dynamic ownership](library-coroutines.md#dynamic-ownership). `Work.run` still
 provides only a lexical packaging budget, and `pack` never changes a coroutine's
-execution owner. Shared service evidence and native storage remain later
-[coroutine stages](../roadmap-coroutines.md#implementation-stages).
+execution owner. [Shared native resources](native.md#shared-native-resources),
+[write-once cells](library-cells.md), and [service contexts](library-services.md)
+provide checked sharing without transferring a producer’s pause or driver.

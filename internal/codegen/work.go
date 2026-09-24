@@ -11,7 +11,7 @@ func (g *gen) workExpr(e *core.Work) goast.Expr {
 	for i, arg := range e.Args {
 		args[i] = g.expr(arg, 0)
 	}
-	if e.Kind == "registration" {
+	if e.Kind == "registration" || e.Kind == "invocation-slot" || e.Kind == "invocation-argument" {
 		return args[0]
 	}
 	if e.Kind == "registry-owner" {

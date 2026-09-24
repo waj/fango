@@ -115,33 +115,17 @@ introducing a second one.
 
 ## What today's rules block
 
-- **Polymorphic values cannot cross the native boundary.** Parameters and
-  results are the scalar set, `Bytes` in bundled sidecars, `Native.Any`, and a
-  local single-boundary-value wrapper; a polymorphic variable is a `NATIVE ABI`
-  error. `Native.Any`'s constructor is private to its module, so Fango code
-  cannot box a value into one either. Scalar transaction payloads need no new
-  value representation, but the public `TVar Int` shape still needs the wrapper
-  extension below, and sharing needs the checked capability contract. A general
-  `TVar a` additionally needs one new boundary kind: a Fango value crossing opaquely
-  and returning at the same type — `Native.Any` with a phantom index. That
-  extension also keeps the heterogeneous log in Go, where it is a plain `any`,
-  so Fango needs no existential. Coordinate this representation contract with
-  [typed opaque values](roadmap-coroutines.md#c6a-typed-opaque-values)
-  rather than introducing a separate unchecked box for task completion.
-- **Wrapper types may not take type parameters.** The boundary check accepts a
-  one-constructor, one-boundary-value type declared with no parameters
-  (`internal/modules/modules.go`), so `type TVar a = TVar Native.Any` is
-  rejected today although its field is monomorphic. Admitting a phantom
-  parameter requires a checked promise about its index when the sidecar cannot
-  see it. C6a owns phantom-wrapper validation separately from arbitrary opaque
-  payload round trips; the scalar stage needs that wrapper contract already.
-- **The resource pragma scopes a capability to one owner.** A `TVar` exists to
-  be shared with child tasks, so it requires
-  [shared and transferable capabilities](roadmap-coroutines.md#c6c-shared-and-transferable-capabilities)
-  before even the cooperative scalar stage. Executor-independent capture rules
-  do not permit delaying this contract until parallel execution. Executors
-  consume the shared native contract rather than providing a TVar-specific
-  exception; concurrent runtime safety is the separate C6d gate.
+- **Transaction-specific storage still needs its protocol.**
+  [Indexed native storage](reference/native.md#indexed-native-storage) now admits
+  phantom wrappers and same-type opaque payloads. STM must use those checked
+  allocation/read/write contracts and preserve its transaction log's type and
+  lifetime obligations; it must not introduce an unchecked cast or ID lookup.
+- **Sharing is an explicit native contract.**
+  [Shared native resources](reference/native.md#shared-native-resources) now
+  permit nominal synchronized values in cooperative children. STM must opt its
+  TVar implementation into that contract and repeat the transfer/lifetime
+  proof through the transaction API before shipping scalar variables.
+
 - **The handle-free spelling needs deferred type-system work.** Writing the
   accesses as operations of an `Stm` effect —
 

@@ -17,6 +17,11 @@ func (in *interp) sidecarCall(executor NativeCaller, key string, n *types.Native
 	wire := args
 	if n != nil {
 		copied := false
+		if (n.Storage.Kind == "new" || n.Storage.Kind == "write") && n.Storage.Payload >= 0 {
+			wire = append([]Value(nil), args...)
+			copied = true
+			wire[n.Storage.Payload] = fangort.PackNativeValue(args[n.Storage.Payload])
+		}
 		for i, wrapper := range n.ParamWrappers {
 			if wrapper == nil || i >= len(args) {
 				continue
@@ -35,6 +40,9 @@ func (in *interp) sidecarCall(executor NativeCaller, key string, n *types.Native
 	v, err := executor.Call(in.ctx, in.ioctx, key, wire)
 	if err != nil || n == nil {
 		return v, err
+	}
+	if n.Storage.Kind == "read" {
+		return fangort.UnpackNativeValue[any](v), nil
 	}
 	if failure, ok := v.(fangort.IOFailure); ok {
 		if n.Fallible == nil {

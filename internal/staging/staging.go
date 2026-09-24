@@ -341,7 +341,7 @@ func (ev *evaluator) recordStageOwner(owner string) {
 // source order, rather than pretending the entire prefix is a finished module.
 func (ev *evaluator) executionDefs(body core.Expr, aux []core.Def) []core.Def {
 	all := append(append([]core.Def(nil), ev.defs...), aux...)
-	root := core.Def{Name: "_stage_expression", Type: body.Type(), Control: core.ExprControl(body), Body: body}
+	root := core.Def{Name: "_stage_expression", Type: body.Type(), SourceType: body.Type(), Control: core.ExprControl(body), Body: body}
 	all = append(all, root)
 	byName := make(map[string]*core.Def, len(all))
 	for i := range all {

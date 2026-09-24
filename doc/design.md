@@ -51,6 +51,8 @@ dispatch, cleanup, pull owners, residual-row forwarding, and failure snapshots.
 dynamic scope registries, and private abandonment.
 [Typed completion](design/completion.md) — detached outcomes, checked replay,
 and capture-preserving execution boundaries.
+[Shared capabilities](design/shared-capabilities.md) — indexed native storage,
+synchronized values, and split service evidence.
 
 ## Go backend and runtime
 

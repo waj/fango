@@ -1,0 +1,47 @@
+{-# no-prelude #-}
+module Cell exposing (Publisher, Reader, create, publish, read, reader)
+
+import Basics exposing (..)
+import Coroutine
+import IO exposing (IO)
+import Maybe exposing (Maybe(..))
+import Native
+
+{-# shared-resource #-}
+type PublisherHandle a = PublisherHandle Native.Any
+
+{-# shared-resource #-}
+type ReaderHandle a = ReaderHandle Native.Any
+
+{-# resource #-}
+type Publisher a = Publisher Coroutine.Facet (PublisherHandle a)
+
+{-# resource #-}
+type Reader a = Reader Coroutine.Facet (ReaderHandle a)
+
+cellNew : () ->{IO} PublisherHandle a
+cellNew = native
+
+cellReader : PublisherHandle a -> ReaderHandle a
+cellReader = native
+
+cellPublish : PublisherHandle a -> a ->{IO} Bool
+cellPublish = native
+
+cellReady : ReaderHandle a ->{IO} Bool
+cellReady = native
+
+cellRead : ReaderHandle a ->{IO} a
+cellRead = native
+
+create : Coroutine.Scope e ->{IO} Publisher a
+create scope = Publisher (Coroutine.facet scope) (cellNew())
+
+reader : Publisher a -> Reader a
+reader (Publisher owner cell) = Reader owner (cellReader cell)
+
+publish : Publisher a -> a ->{IO} Bool
+publish (Publisher _ cell) value = cellPublish cell value
+
+read : Reader a ->{IO} Maybe a
+read (Reader _ cell) = if cellReady cell then Just (cellRead cell) else Nothing

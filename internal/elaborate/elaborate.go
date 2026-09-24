@@ -304,6 +304,9 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 		Control:       core.ArrowControl(prependTypes(dictTypes, defType), len(allParams)),
 		Body:          el.anf(body),
 	}
+	if control := core.ExprControl(def.Body); !def.IsWorker() && control.Transport == types.Machine {
+		def.Control = control
+	}
 	return append([]core.Def{def}, el.aux...), el.errs
 }
 
@@ -331,6 +334,8 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 		ty := (&elab{ck: ck}).eraseRuntimeKinds(eraseRows(ck.Intrinsics[name].Body))
 		if types.WorkIntrinsic(name) {
 			defs = append(defs, workDef(name, ty, ck))
+		} else if name == types.ServiceRunName {
+			defs = append(defs, serviceRunDef(ty, ck))
 		} else if name == types.ScopeBracketName {
 			// The declaration keeps its open row tail; Core does not.
 			defs = append(defs, scopeBracketDef(name, ty, ck))
@@ -469,7 +474,7 @@ func executingEffects(t types.Type, arity int) []core.EffectInstance {
 			if l.Abort {
 				control = types.Control{Transport: types.Exit}
 			}
-			if l.Suspension {
+			if l.Suspension || l.Name == types.ServiceInvocationName {
 				control = types.Control{Transport: types.Machine}
 			}
 			out = append(out, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Control: control})
@@ -489,7 +494,7 @@ func rowControl(row types.Row, ck *infer.Checker) types.Control {
 		if eff := ck.EffectsByUnique[label.Unique]; eff != nil && len(eff.Ops) > 0 {
 			abort = eff.Ops[0].Abort
 		}
-		if label.Suspension {
+		if label.Suspension || label.Name == types.ServiceInvocationName {
 			out.Transport = types.Machine
 		} else if abort {
 			out.Transport = types.Exit
@@ -958,7 +963,7 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 			return el.operationValue(op, ty, el.apply(el.ck.ExprTypes[e]))
 		}
 		if n := el.ck.Natives[e.Name]; n != nil {
-			return el.nativeValue(n, ty)
+			return el.nativeValue(n, ty, el.apply(el.ck.ExprTypes[e]))
 		}
 		// A lifted local in first-class position gets the same curried-
 		// wrapper treatment as a worker (its frees are the leading args).
@@ -1250,6 +1255,19 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 			pts[j] = el.zonkDefault(p)
 		}
 		var clauseBody core.Expr
+		var invocation *core.EffectInstance
+		implicit := ""
+		var implicitType types.Type
+		if ci.Invocation != nil {
+			label := el.apply(types.Row{Labels: []types.EffLabel{*ci.Invocation}}).(types.Row).Labels[0]
+			scope := ci.InvocationScope
+			ev := core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Captures: types.ScopeCapture(scope), Control: types.Control{Transport: types.Machine}}
+			invocation = &ev
+			implicit = fmt.Sprintf("_invocation%d", el.tmp)
+			el.tmp++
+			implicitType = types.InvocationCallback(label)
+			el.pushEvidence([]core.EffectInstance{ev})
+		}
 		pushed := 0
 		if e.State != nil {
 			el.pushScope(e.State.Name, el.zonkDefault(info.StateType))
@@ -1284,6 +1302,17 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 			clauseBody = el.matchPatternRows(patterns, bodies, spans, occs, cl.OpSpan, "handler clause")
 		}
 		el.popScope(pushed)
+		if invocation != nil {
+			el.popEvidence([]core.EffectInstance{*invocation})
+			params = append(params, implicit)
+			pts = append(pts, implicitType)
+			answer := clauseBody.Type()
+			valueType := el.zonkDefault(ci.OpResult)
+			value := serviceResumeValue(clauseBody, ci.ResumeID, valueType)
+			value = invocationHandler(value, &core.VarRef{Name: implicit, Local: true, Ty: implicitType}, *invocation, el.ck)
+			name := implicit + "_result"
+			clauseBody = &core.Let{Name: name, Rhs: value, Body: &core.ResumeTail{Owner: ci.ResumeID, Value: &core.VarRef{Name: name, Local: true, Ty: valueType}, ClauseResult: answer}, Ty: answer}
+		}
 		clauses[i] = core.HandlerClause{Op: ci.Op, ResumeID: ci.ResumeID, Params: params, ParamTypes: pts,
 			ResultType: el.zonkDefault(ci.OpResult), Body: clauseBody}
 	}

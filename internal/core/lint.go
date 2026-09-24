@@ -53,16 +53,43 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowMachine, allowStage bo
 		adts: map[int]*types.ADTInfo{}, effects: map[int]*types.EffectInfo{},
 		tyParams: map[int]bool{}, evidence: map[int]int{}, evidenceCaptures: map[int][]types.CaptureSet{},
 		captureVars: map[types.CaptureVar]bool{}, scopeIDs: map[types.ScopeID]bool{}, activeScopes: map[types.ScopeID]bool{},
-		resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives, intrinsics: p.Intrinsics,
+		resumeIDs: map[types.ResumeID]bool{}, serviceAuthority: map[string]types.Type{}, natives: p.Natives, intrinsics: p.Intrinsics,
 		allowMachine: allowMachine || p.Intrinsics[types.CoroutineScopeName] || p.Intrinsics[types.CoroutineWithName], allowSuspend: allowMachine, allowStage: allowStage}
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
+	}
+	for _, adt := range p.ADTs {
+		if !adt.Shared {
+			continue
+		}
+		valid := adt.Resource && !adt.IsRecord() && len(adt.Ctors) == 1 && len(adt.Ctors[0].Fields) == 1
+		if valid {
+			field, ok := adt.Ctors[0].Fields[0].(*types.TCon)
+			valid = ok && l.adts[field.Unique] != nil && l.adts[field.Unique].Repr == types.ReprNativeAny
+		}
+		if !valid {
+			l.errorf("type %s: invalid shared native resource contract", adt.Con.Name)
+		}
 	}
 	for _, eff := range p.Effects {
 		if old := l.effects[eff.Unique]; old != nil {
 			l.errorf("effect unique %d is shared by `%s` and `%s`", eff.Unique, old.Name, eff.Name)
 		}
 		l.effects[eff.Unique] = eff
+	}
+	for _, eff := range p.Effects {
+		if err := types.CheckServiceEffect(eff, l.effects); err != nil {
+			l.errorf("effect %s: %s", eff.Name, err)
+		}
+	}
+	for _, n := range p.Natives {
+		for _, wrapper := range append(append([]*types.CtorInfo(nil), n.ParamWrappers...), n.ResultWrapper) {
+			if wrapper != nil {
+				if adt := l.adts[wrapper.Result.Unique]; adt != nil && len(adt.Params) > 0 && !adt.NativeIndexed {
+					l.errorf("native %s: unsealed indexed wrapper", n.Name)
+				}
+			}
+		}
 	}
 	// The worker table is complete up front (self-calls need it); the
 	// no-shadow scope fills in SOURCE ORDER, matching the checker — a
@@ -303,6 +330,7 @@ type linter struct {
 	resumeArg        types.Type
 	resumeRet        types.Type
 	resumeState      types.Type
+	serviceAuthority map[string]types.Type
 	defName          string
 	allowMachine     bool
 	allowSuspend     bool
@@ -442,6 +470,21 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: native `%s` arity mismatch", where, e.Name)
 		} else {
 			decl := n.Scheme.Body
+			if storage, err := types.CheckNativeStorage(n); err != nil || storage != n.Storage || storage != e.Storage {
+				l.errorf("%s: native `%s` has an invalid storage contract", where, e.Name)
+			}
+			if n.Storage.Kind != "" {
+				if n.Effect != nil {
+					l.errorf("%s: opaque storage cannot be a native effect operation", where)
+				}
+				wrapper := n.ResultWrapper
+				if n.Storage.Handle >= 0 && n.Storage.Handle < len(n.ParamWrappers) {
+					wrapper = n.ParamWrappers[n.Storage.Handle]
+				}
+				if !l.nativeStorageWrapper(wrapper) || n.Storage.Kind == "alias" && !l.nativeStorageWrapper(n.ResultWrapper) {
+					l.errorf("%s: native storage lacks a canonical opaque resource wrapper", where)
+				}
+			}
 			sub := map[int]types.Type{}
 			for i, arg := range e.Args {
 				fn, ok := decl.(*types.TFun)
@@ -487,7 +530,11 @@ func (l *linter) expr(e Expr, where string) {
 			l.scope[e.Name] = true
 			l.localTypes[e.Name] = e.Rhs.Type()
 		}
+		if w, ok := e.Rhs.(*Work); ok && w.Kind == "invocation-slot" {
+			l.serviceAuthority[e.Name] = w.Ty
+		}
 		l.expr(e.Body, where)
+		delete(l.serviceAuthority, e.Name)
 		delete(l.scope, e.Name)
 		delete(l.localTypes, e.Name)
 	case *Lambda:
@@ -571,10 +618,10 @@ func (l *linter) expr(e Expr, where string) {
 		} else if e.Op != nil && !e.Op.Builtin && e.Op.Native == nil {
 			l.evidenceAvailable(e.Effect, where)
 		}
-		if e.Op != nil && len(e.Args) != e.Op.Arity {
+		if e.Op != nil && len(e.Args) != len(e.Op.RuntimeParamTypes()) {
 			l.errorf("%s: Perform `%s` arity mismatch", where, e.Op.Name)
 		}
-		if e.Op != nil && len(e.Args) == e.Op.Arity {
+		if e.Op != nil && len(e.Args) == len(e.Op.RuntimeParamTypes()) {
 			wantArgs, wantResult := l.operationTypes(e.Op, e.Effect)
 			isPrint := types.SurfaceName(e.Op.Owner.Name) == "IO" && types.SurfaceName(e.Op.Name) == "print"
 			for i, a := range e.Args {
@@ -773,6 +820,14 @@ func (l *linter) expr(e Expr, where string) {
 	case *Handle:
 		l.control(e.Control, where)
 		l.effectInstance(e.Effect, where)
+		if effect := l.effects[e.Effect.Unique]; effect != nil {
+			if effect.Invocation {
+				l.invocationHandle(e, where)
+			}
+			if effect.Service && e.State != nil {
+				l.errorf("%s: shared service evidence owns mutable state", where)
+			}
+		}
 		if effect := l.effects[e.Effect.Unique]; effect != nil && effect.Suspension {
 			l.errorf("%s: ordinary handler intercepts compiler-owned suspension effect", where)
 		}
@@ -839,7 +894,7 @@ func (l *linter) expr(e Expr, where string) {
 			}
 			seen[c.Op.Name] = true
 			wantParams, opResult := l.operationTypes(c.Op, e.Effect)
-			if len(c.Params) != c.Op.Arity || len(c.ParamTypes) != c.Op.Arity {
+			if len(c.Params) != len(c.Op.RuntimeParamTypes()) || len(c.ParamTypes) != len(c.Op.RuntimeParamTypes()) {
 				l.errorf("%s: handler clause `%s` arity mismatch", where, c.Op.Name)
 			}
 			for i, pt := range c.ParamTypes {
@@ -899,7 +954,13 @@ func (l *linter) expr(e Expr, where string) {
 				l.tailResume(c.Body, c.ResumeID, opResult, e.Ty, state, where)
 				l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = c.ResumeID, opResult, e.Ty, state
 			}
+			if c.Op.Invocation != nil && len(c.Params) == len(c.ParamTypes) && len(c.Params) > 0 {
+				l.serviceAuthority[c.Params[len(c.Params)-1]] = c.ParamTypes[len(c.Params)-1]
+			}
 			l.expr(c.Body, where)
+			for _, name := range c.Params {
+				delete(l.serviceAuthority, name)
+			}
 			delete(l.scope, c.SuppressedParam)
 			delete(l.localTypes, c.SuppressedParam)
 			l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = oldOwner, oldArg, oldRet, oldState
@@ -1076,6 +1137,9 @@ func (l *linter) expr(e Expr, where string) {
 				return
 			}
 			adt := l.adts[e.Ctor.Result.Unique]
+			if adt != nil && adt.NativeIndexed {
+				l.errorf("%s: indexed native handle construction", where)
+			}
 			if adt == nil && e.Ctor.Result.Unique == l.b.Bool.Unique {
 				// True/False never reach App{Ctor} (they are BoolLits).
 				l.errorf("%s: App{Ctor} at Bool", where)
@@ -1318,6 +1382,9 @@ func (l *linter) tree(t Tree, want types.Type, where string) {
 		}
 		l.expr(t.Body, where)
 	case *SwitchCtor:
+		if t.ADT.NativeIndexed {
+			l.errorf("%s: indexed native handle representation opened", where)
+		}
 		if !l.scope[t.Scrut] {
 			l.errorf("%s: SwitchCtor tests `%s`, which is not in scope", where, t.Scrut)
 		}
@@ -1461,8 +1528,8 @@ func (l *linter) operationTypes(op *types.EffectOp, inst EffectInstance) ([]type
 			m[p.ID] = inst.Args[i]
 		}
 	}
-	args := make([]types.Type, len(op.ParamTypes))
-	for i, p := range op.ParamTypes {
+	args := make([]types.Type, len(op.RuntimeParamTypes()))
+	for i, p := range op.RuntimeParamTypes() {
 		args[i] = types.SubstRigid(p, m)
 	}
 	return args, types.SubstRigid(op.ResultType, m)

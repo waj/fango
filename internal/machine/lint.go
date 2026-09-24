@@ -328,7 +328,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 				if term.Effect.Unique == 0 || !seenEvidence[term.Effect.Unique] {
 					errs = append(errs, fmt.Errorf("%s: machine operation %q has unavailable evidence", blockWhere, term.Operation.Name))
 				}
-				if len(term.Args) != len(term.Operation.ParamTypes) {
+				if len(term.Args) != len(term.Operation.RuntimeParamTypes()) {
 					errs = append(errs, fmt.Errorf("%s: machine operation %q argument arity mismatch", blockWhere, term.Operation.Name))
 				}
 				break

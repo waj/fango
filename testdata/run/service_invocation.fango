@@ -1,0 +1,20 @@
+import Coroutine
+import Service
+
+{-# service #-}
+effect Dispatch
+    submit : Int ->{Service.Invocation Int ()} ()
+
+action() =
+    submit 1
+    submit 2
+    42
+
+producer pause () = Service.run pause (\_ ->
+    handle action() of
+        submit value -> resume (Service.invoke (value + 10)))
+
+main() = Coroutine.with producer (\cursor ->
+    print (Coroutine.advance cursor ())
+    print (Coroutine.advance cursor ())
+    print (Coroutine.advance cursor ()))

@@ -1,0 +1,34 @@
+import Coroutine
+import Service
+import Work
+
+{-# service #-}
+effect Dispatch
+    submit : Int ->{Service.Invocation Int ()} ()
+
+type Bound = Bound (Int ->{Service.Invocation Int ()} ())
+
+bind offset = handle Bound (\value -> submit value) of
+    submit value -> resume (Service.invoke (value + offset))
+
+class Submit context
+    deliver : context -> Int ->{Service.Invocation Int ()} ()
+
+instance Submit Bound
+    deliver (Bound service) value = service value
+
+worker service pause () = Service.run pause (\_ ->
+    deliver service 1
+    42)
+
+context = bind 10
+
+main() =
+    Coroutine.scope (\scope ->
+        first = Work.register (Coroutine.facet scope) (worker context)
+        second = Work.register (Coroutine.facet scope) (worker context)
+        owner = Work.owner scope
+        print (Work.advance owner first ())
+        print (Work.advance owner second ())
+        print (Work.advance owner first ())
+        print (Work.advance owner second ()))
