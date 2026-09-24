@@ -522,11 +522,11 @@ an Async-specific compiler node. C6d's runtime audit includes List's shared chun
 frontier: capture-free immutable values alone do not prove their runtime
 representations safe under concurrent use.
 
-Current sidecars accept neither Fango functions nor general polymorphic values.
-Current FangoHost may only be used during a native call and cannot be retained
-for asynchronous work. Follow the [native reference](reference/native.md) until
-C6b extends it. Background work needing input/output must use an explicitly
-scoped request/host protocol, not capture that global object illegally.
+Sidecars do not receive Fango callback functions. Typed payloads use
+[checked opaque storage](reference/native.md#indexed-native-storage); background
+work uses [NativeRequest](reference/library-native-requests.md). FangoHost may
+only be used during a native call and cannot be retained for asynchronous work.
+A3 must build its IO adapters on these scoped retention and drain contracts.
 
 Interpreter Core executes beside sidecars in a worker process, but that shared
 heap does not make evaluator state thread-safe. Isolate per-execution evidence,
@@ -783,8 +783,9 @@ synchronous cleanup, without a real-IO responsiveness claim.
 ### A3: Native readiness and IO
 
 Add scoped timers/network or bounded blocking bridges, synchronized registration,
-admission backpressure, and native request draining. Establish C6b and any C6a
-adapter storage before crossing values/callbacks they would otherwise forbid.
+admission backpressure, and native request draining. Integrate the implemented
+[NativeRequest](reference/library-native-requests.md) C6b boundary and C6a
+adapter storage before crossing values they would otherwise forbid.
 Integrate REPL host/input cancellation using the same ownership protocol.
 
 **Acceptance:** two fetches overlap and a sequential Stream pipeline can suspend

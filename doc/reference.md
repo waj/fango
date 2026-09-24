@@ -30,6 +30,7 @@ The bundled library is experimental and versioned with the compiler.
 | Work | [Scoped work packages](reference/library-work.md) |
 | Cell | [Scope-owned write-once cells](reference/library-cells.md) |
 | Service | [Shared contexts and invocation authority](reference/library-services.md) |
+| NativeRequest | [Bounded native retention and driver callbacks](reference/library-native-requests.md) |
 | Json | [Encoding and string tokens](reference/library-json.md) |
 | Scope | [Cleanup scopes](reference/resources.md) |
 | Meta, Derive | [Metaprogramming](reference/metaprogramming.md) |

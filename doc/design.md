@@ -53,6 +53,8 @@ dynamic scope registries, and private abandonment.
 and capture-preserving execution boundaries.
 [Shared capabilities](design/shared-capabilities.md) — indexed native storage,
 synchronized values, and split service evidence.
+[Native requests](design/native-requests.md) — scoped retention, quiescent drain,
+and driver-owned callback completion.
 
 ## Go backend and runtime
 

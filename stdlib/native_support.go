@@ -7,3 +7,9 @@ import "github.com/waj/fango/runtime/fangort"
 type FangoNativeHost = fangort.NativeHost
 
 var FangoHost FangoNativeHost = fangort.SystemNativeHost
+
+// These scoped tokens carry no authority to invoke Fango or access FangoHost.
+type FangoRequest = fangort.NativeRequest
+type FangoRequestHost = fangort.NativeRequestHost
+
+var FangoNewRequestHost = fangort.NewNativeRequestHost

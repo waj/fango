@@ -215,7 +215,7 @@ func (el *elab) nativeApply(n *types.NativeInfo, nativeTy, raw types.Type, args 
 		el.tmp++
 		coreArgs = append(coreArgs, &core.VarRef{Name: name, Local: true, Ty: argTys[i]})
 	}
-	var body core.Expr = el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Storage: n.Storage, Args: coreArgs, Ty: ret})
+	var body core.Expr = el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Storage: n.Storage, RetainsRequest: n.RetainsRequest, Args: coreArgs, Ty: ret})
 	for i := n.Arity - 1; i >= len(args); i-- {
 		body = &core.Lambda{SourceType: arrowAt(raw, i), Param: coreArgs[i].(*core.VarRef).Name, Body: body, Ty: arrowAt(nativeTy, i), ParamCapture: el.ck.Sup.FreshCapture()}
 	}

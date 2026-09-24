@@ -1,0 +1,18 @@
+Counts { live = 0, registrations = 1 }
+Ok 42
+pending
+Err before begin
+Counts { live = 0, registrations = 0 }
+Err after begin
+Counts { live = 0, registrations = 0 }
+pending
+full
+callback
+callback cleanup
+Err callback failed
+Counts { live = 0, registrations = 0 }
+Counts { live = 1, registrations = 1 }
+Counts { live = 0, registrations = 0 }
+scope draining
+device released
+Ok ()

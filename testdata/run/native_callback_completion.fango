@@ -1,0 +1,26 @@
+import NativeRequest
+import Completion
+import Coroutine
+import Fail
+import Failure
+import List
+import Scope
+
+main() =
+    print (Completion.replay (NativeRequest.immediate (\_ -> 42)))
+    completed = NativeRequest.immediate (\_ -> Coroutine.with (\pause () ->
+        pause "local"
+        7) (\cursor ->
+        print (Coroutine.advance cursor ())
+        print (Coroutine.advance cursor ())
+        9))
+    print (Completion.replay completed)
+    print (Fail.attempt (\_ ->
+        failed = NativeRequest.immediate (\_ -> Scope.finally (\_ ->
+            Fail.fail "body"
+            0) (\_ -> Fail.fail "cleanup"))
+        case Completion.failure failed of
+            Just failure -> print (List.length (Failure.suppressed failure))
+            Nothing -> print "unexpected success"
+        print (Fail.attempt (\_ -> Completion.replay failed))
+        print (Fail.attempt (\_ -> Completion.replay failed))))

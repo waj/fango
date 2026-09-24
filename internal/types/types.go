@@ -197,12 +197,13 @@ func (c *ClassInfo) DictType(t Type) *TCon {
 // runtime"). They are resolved once, after the module's types are declared,
 // so both backends read the same constructors instead of re-deriving them.
 type NativeInfo struct {
-	Storage      NativeStorage
-	Name, Module string
-	Scheme       Scheme
-	Arity        int
-	Template     *string
-	Effect       *EffectInfo
+	RetainsRequest bool
+	Storage        NativeStorage
+	Name, Module   string
+	Scheme         Scheme
+	Arity          int
+	Template       *string
+	Effect         *EffectInfo
 	// ParamWrappers[i] is the single-boundary-value constructor parameter i
 	// is wrapped in, or nil for a plain scalar or Unit. Its length is Arity.
 	ParamWrappers []*CtorInfo

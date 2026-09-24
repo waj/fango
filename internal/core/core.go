@@ -316,11 +316,12 @@ type TypeOf struct {
 
 // NativeCall is a saturated call to a declaration-backed primitive.
 type NativeCall struct {
-	Storage types.NativeStorage
-	Name    string
-	Module  string
-	Args    []Expr
-	Ty      types.Type
+	Storage        types.NativeStorage
+	RetainsRequest bool
+	Name           string
+	Module         string
+	Args           []Expr
+	Ty             types.Type
 }
 
 // CalleeKind classifies application spines after saturation analysis

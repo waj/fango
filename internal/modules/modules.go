@@ -729,12 +729,12 @@ func validateSidecar(n *node, decls map[string]*ast.ValueDecl, opDecls map[strin
 			for _, raw := range gd.Specs {
 				switch spec := raw.(type) {
 				case *goast.TypeSpec:
-					if spec.Name.Name == "FangoHost" || spec.Name.Name == "FangoNativeHost" {
+					if spec.Name.Name == "FangoHost" || reservedRequestIdentifier(spec.Name.Name) || spec.Name.Name == "FangoNativeHost" {
 						errs = append(errs, diag.Errorf(source.Span{}, "RESERVED NATIVE IDENTIFIER", "%s declares generated identifier `%s`.", n.nativePath, spec.Name.Name))
 					}
 				case *goast.ValueSpec:
 					for _, name := range spec.Names {
-						if name.Name == "FangoHost" || name.Name == "FangoNativeHost" {
+						if name.Name == "FangoHost" || reservedRequestIdentifier(name.Name) || name.Name == "FangoNativeHost" {
 							errs = append(errs, diag.Errorf(source.Span{}, "RESERVED NATIVE IDENTIFIER", "%s declares generated identifier `%s`.", n.nativePath, name.Name))
 						}
 					}
@@ -742,7 +742,7 @@ func validateSidecar(n *node, decls map[string]*ast.ValueDecl, opDecls map[strin
 			}
 		}
 		if fn, ok := d.(*goast.FuncDecl); ok && fn.Recv == nil && goast.IsExported(fn.Name.Name) {
-			if fn.Name.Name == "FangoHost" || fn.Name.Name == "FangoNativeHost" {
+			if fn.Name.Name == "FangoHost" || reservedRequestIdentifier(fn.Name.Name) || fn.Name.Name == "FangoNativeHost" {
 				errs = append(errs, diag.Errorf(source.Span{}, "RESERVED NATIVE IDENTIFIER", "%s declares generated identifier `%s`.", n.nativePath, fn.Name.Name))
 				continue
 			}
@@ -937,6 +937,9 @@ func isUnitType(t ast.TypeExpr) bool {
 // nativeGoType is the Go type a Fango boundary type crosses as: a scalar's
 // own Go type, or the field type of one of this module's wrapper types.
 func (b nativeBoundary) nativeGoType(t ast.TypeExpr) string {
+	if n, ok := t.(*ast.TName); ok && (strings.HasSuffix(n.Name, ".Registration") || n.Name == "Registration") && !b.localTypes[n.Name] {
+		return "any" // Resolved checking verifies the scoped request protocol.
+	}
 	if _, ok := t.(*ast.TVarName); ok {
 		return "any" // Resolved checking requires a same-index storage edge.
 	}
@@ -2008,4 +2011,8 @@ func (r *resolver) patternInner(p ast.Pattern, locals, outer map[string]bool, va
 func ManifestJSON(entries []ManifestEntry) []byte {
 	b, _ := json.MarshalIndent(entries, "", "  ")
 	return append(b, '\n')
+}
+
+func reservedRequestIdentifier(name string) bool {
+	return name == "FangoRequest" || name == "FangoRequestHost" || name == "FangoNewRequestHost"
 }

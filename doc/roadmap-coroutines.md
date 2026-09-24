@@ -11,8 +11,9 @@ implementation stage lands.
 
 The first usable milestone is C0–C3, with Async's early A0 representation gate:
 checked typed coroutines, ordinary Stream/Iterator wrappers, and a deterministic
-scheduler demonstration. C4 adds implemented dynamic ownership; C5–C7 remain
-separately gated capabilities needed by later consumers. Stage numbers are local
+scheduler demonstration. C4 adds implemented dynamic ownership; C6a–C6c add
+checked storage, requests, and sharing. C5, C6d, and C7 remain separately gated
+capabilities needed by later consumers. Stage numbers are local
 to this document; dependencies name stages rather than assuming one unbroken
 global ordering.
 
@@ -174,7 +175,7 @@ checkpoint; C1–C3 together are the first usable replacement foundation.
 | C4: Scope-owned dynamic allocation | C3, A0; scope design begins with C0 | DONE: live registry ownership and checked registration |
 | C5: Suspending acquisition and cleanup | C1; nested fixtures from C3/C4 | Owners remain live through suspended cleanup |
 | C6a: Typed opaque values | C0/A0 representation decisions; C4 for selected task cells | DONE: checked native storage and scope-owned write-once cells |
-| C6b: Scoped native requests and retention | C4; C5 only for suspending cleanup | Bounded requests and callbacks with checked quiescence |
+| C6b: Scoped native requests and retention | C4; C5 only for suspending cleanup | DONE: bounded requests and callbacks with checked quiescence |
 | C6c: Shared and transferable capabilities | C0/A0 capture contracts; C4 ownership | DONE: checked shared values and implicit service invocation authority |
 | C6d: Concurrent invocation and runtime safety | C6b, C6c; C6a when values cross opaquely | Checked concurrent callbacks and race-safe runtime representations |
 | C7: General execution checkpoints | C1; Async A2 as integration consumer | Compiler-generated scheduling/cancellation points in CPU work |
@@ -333,33 +334,21 @@ covered by the executable representation, ownership, and registry suites.
 
 #### C6b: Scoped native requests and retention
 
-**Dependencies:** C4 for retained scoped work; C5 before exposing callbacks whose
-completion requires suspending cleanup. Use C6a only if requests retain opaque
-Fango values.
+**DONE — bounded scoped requests and driver-owned callback completion.**
 
-Define general contracts for immediate and retained Fango callbacks and native
-requests. State whether invocation is once or repeatable, which execution owner
-may invoke a callback, what scope bounds retention, how completion/exits are
-represented, and what native quiescence means before that scope can close.
-Registration must cover both immediate completion and later notification.
-Cancellation revokes normal delivery but does not free resources still used by
-native work. Validate and export the obligations as for C6a.
+[NativeRequest](reference/library-native-requests.md) owns registration,
+cardinality, driver authority, cancellation, and synchronous quiescence.
+[The design contract](design/native-requests.md) owns checked retention edges,
+module/Core proofs, and the shared backend runtime. Acceptance covers immediate
+and delayed completion, completion during registration, duplicate/stale signals,
+partial acquisition failure, bounded admission, live counts, and drain before
+resource release, including dynamically owned children.
 
-A background Go operation may publish readiness to a synchronized queue while
-Fango callbacks execute only on their authorized driver. This subset does not
-permit concurrent Fango callback invocation. Provide an explicitly scoped
-request/host protocol: current FangoHost rules forbid retaining that global
-object for background work. Synchronous release may cancel/join or drain a
-request; suspension during release additionally requires C5.
-
-**Acceptance:** immediate/delayed completion, completion during registration,
-duplicate or stale notification, cancellation, partial acquisition failure,
-bounded admission, and drain before resource release. Count live requests and
-registrations. Language exits return as completion, never by unwinding a native
-caller's unrelated execution.
-
-**Stopping point:** the trusted boundary required by cooperative native IO,
-without a claim that the Fango evaluator or callbacks are thread-safe.
+C4 ownership is exercised by child abandonment fixtures. C6a remains the
+boundary for opaque result storage. Callbacks and registration actions cannot
+suspend; cleanup synchronously drains native work, so this contract does not
+require C5. Suspending release remains C5 and concurrent Fango callbacks remain
+C6d.
 
 #### C6c: Shared and transferable capabilities
 
@@ -375,8 +364,8 @@ forwarding, rejected authority/capture transfers, and module/Core codecs in
 both backends. C0/A0 and C4 remain prerequisite regression gates.
 
 This subset has no retained native request or callback and therefore requires
-no C6b extension. C6b remains unfinished for native readiness; concurrent
-execution additionally requires C6d.
+no C6b extension. [Native requests](reference/library-native-requests.md) provide
+the separate C6b contract; concurrent execution additionally requires C6d.
 
 #### C6d: Concurrent invocation and runtime safety
 

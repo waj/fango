@@ -59,6 +59,16 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowMachine, allowStage bo
 		l.adts[adt.Con.Unique] = adt
 	}
 	for _, adt := range p.ADTs {
+		if adt.Con.Name == "NativeRequest.Host" || adt.Con.Name == types.NativeRegistrationName {
+			valid := adt.Resource && !adt.Shared && len(adt.Params) == 0 && !adt.IsRecord() && len(adt.Ctors) == 1 && len(adt.Ctors[0].Fields) == 1
+			if valid {
+				field, ok := adt.Ctors[0].Fields[0].(*types.TCon)
+				valid = ok && l.adts[field.Unique] != nil && l.adts[field.Unique].Repr == types.ReprNativeAny
+			}
+			if !valid {
+				l.errorf("type %s: invalid scoped native request capability", adt.Con.Name)
+			}
+		}
 		if !adt.Shared {
 			continue
 		}
@@ -470,6 +480,21 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: native `%s` arity mismatch", where, e.Name)
 		} else {
 			decl := n.Scheme.Body
+			if request, err := types.CheckNativeRequest(n); err != nil || request != n.RetainsRequest || request != e.RetainsRequest {
+				l.errorf("%s: native `%s` has an invalid request retention contract", where, e.Name)
+			}
+			if n.RetainsRequest && len(n.ParamWrappers) > 0 && n.ParamWrappers[0] != nil {
+				wrapper := n.ParamWrappers[0]
+				adt := l.adts[wrapper.Result.Unique]
+				valid := adt != nil && adt.Con.Name == types.NativeRegistrationName && adt.Resource && !adt.Shared && len(adt.Params) == 0 && len(adt.Ctors) == 1 && len(adt.Ctors[0].Fields) == 1
+				if valid {
+					field, ok := adt.Ctors[0].Fields[0].(*types.TCon)
+					valid = ok && l.adts[field.Unique] != nil && l.adts[field.Unique].Repr == types.ReprNativeAny && wrapper.Name == adt.Ctors[0].Name && len(wrapper.Fields) == 1 && types.Equal(field, wrapper.Fields[0])
+				}
+				if !valid {
+					l.errorf("%s: invalid scoped native registration", where)
+				}
+			}
 			if storage, err := types.CheckNativeStorage(n); err != nil || storage != n.Storage || storage != e.Storage {
 				l.errorf("%s: native `%s` has an invalid storage contract", where, e.Name)
 			}
@@ -670,7 +695,7 @@ func (l *linter) expr(e Expr, where string) {
 		}
 		l.expr(e.Value, where)
 		completion := e.Value.Type()
-		if e.Name == types.CompletionCaptureName {
+		if types.CapturesCompletion(e.Name) {
 			completion = e.Ty
 		}
 		con := completion.(*types.TCon)

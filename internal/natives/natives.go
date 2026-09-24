@@ -192,6 +192,11 @@ var Table = func() map[string]Spec {
 			return nil, fmt.Errorf("native %s requires the sidecar worker", name)
 		}}
 	}
+	for name, arity := range requestNatives {
+		t[name] = Spec{Arity: arity, Eval: func(_ *Runtime, _ []any) (any, error) {
+			return nil, fmt.Errorf("native %s requires the sidecar worker", name)
+		}}
+	}
 	// Bundled natives are compile-time-safe by default: they are pure
 	// functions of their arguments. System entropy is Random's one exclusion,
 	// and the File natives observe the file system; seeded draws now use
@@ -200,7 +205,8 @@ var Table = func() map[string]Spec {
 		_, file := fileNatives[name]
 		_, network := netNatives[name]
 		_, cell := cellNatives[name]
-		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed" && !file && !network && !cell
+		_, request := requestNatives[name]
+		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed" && !file && !network && !cell && !request
 		t[name] = spec
 	}
 	return t
@@ -225,6 +231,14 @@ var netNatives = map[string]int{
 var cellNatives = map[string]int{
 	"Cell.cellNew": 1, "Cell.cellReader": 1, "Cell.cellPublish": 2,
 	"Cell.cellReady": 1, "Cell.cellRead": 1,
+}
+
+var requestNatives = map[string]int{
+	"NativeRequest.hostNew": 1, "NativeRequest.hostClose": 1,
+	"NativeRequest.reserve": 1, "NativeRequest.admitted": 1,
+	"NativeRequest.claim": 2, "NativeRequest.cancelRegistration": 1,
+	"NativeRequest.drainRegistration": 1, "NativeRequest.liveCount": 1,
+	"NativeRequest.registrationCount": 1,
 }
 
 func Lookup(name string) (Spec, bool) { spec, ok := Table[name]; return spec, ok }

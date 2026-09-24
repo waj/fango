@@ -244,7 +244,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			if completion, ok := term.Value.(*core.Completion); ok {
 				checkRow(completion.Row, completion.Name != types.CompletionFailureName)
 				valid := completion.Value != nil && types.CompletionShape(completion.Name, completion.Value.Type(), completion.Ty)
-				if !valid || w.Name != completion.Name || !core.CaptureContractCurrent(w.Def) || completion.Name == types.CompletionCaptureName {
+				if !valid || w.Name != completion.Name || !core.CaptureContractCurrent(w.Def) || types.CapturesCompletion(completion.Name) {
 					errs = append(errs, fmt.Errorf("%s: completion elimination lacks its current intrinsic proof", blockWhere))
 				}
 			}
@@ -345,7 +345,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 					validResult := core.EqualValueRepresentation(term.Bind.Ty, fn.Ret)
 					if term.Capture {
 						validResult = !term.Tail && types.CompletionShape(types.CompletionCaptureName, fn, term.Bind.Ty)
-						if w.Name != types.CompletionCaptureName || !core.CaptureContractCurrent(w.Def) {
+						if !types.CapturesCompletion(w.Name) || !core.CaptureContractCurrent(w.Def) {
 							errs = append(errs, fmt.Errorf("%s: completion capture lacks its current intrinsic proof", blockWhere))
 						}
 					}

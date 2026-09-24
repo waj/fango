@@ -1,0 +1,67 @@
+{-# no-prelude #-}
+module NativeRequest exposing (Callback, Counts, Host, Registration, cancel, counts, drain, immediate, poll, register, scope)
+
+import Basics exposing (..)
+import Completion exposing (Completion)
+import IO exposing (IO)
+import Maybe exposing (Maybe(..))
+import Native
+import Scope
+
+{-# resource #-}
+type Host = Host Native.Any
+
+{-# resource #-}
+type Registration = Registration Native.Any
+
+type Callback a e = Callback Registration (() ->{e} a)
+
+type Counts = { live : Int, registrations : Int } deriving (Show)
+
+hostNew : Int ->{IO} Host
+hostNew = native
+hostClose : Host ->{IO} ()
+hostClose = native
+reserve : Host ->{IO} Registration
+reserve = native
+admitted : Registration -> Bool
+admitted = native
+claim : Host -> Registration ->{IO} Bool
+claim = native
+cancelRegistration : Registration ->{IO} ()
+cancelRegistration = native
+drainRegistration : Registration ->{IO} ()
+drainRegistration = native
+liveCount : Host ->{IO} Int
+liveCount = native
+registrationCount : Host ->{IO} Int
+registrationCount = native
+
+scope : Int -> (Host ->{IO | e} a) ->{IO | e} a
+scope capacity body = Scope.bracket (\_ -> hostNew capacity) hostClose body
+
+immediate : (() ->{e} a) ->{e} Completion a e
+immediate = native
+
+register : Host -> (Registration ->{IO | e} ()) -> (() ->{IO | f} a) ->{IO | e} Maybe (Callback a {IO | f})
+register host start callback =
+    token = reserve host
+    if admitted token then
+        started = immediate (\_ -> start token)
+        case Completion.failure started of
+            Just _ -> drainRegistration token
+            Nothing -> ()
+        Completion.replay started
+        Just (Callback token callback)
+    else Nothing
+
+poll : Host -> Callback a {IO | e} ->{IO | e} Maybe (Completion a {IO | e})
+poll host (Callback token action) =
+    if claim host token then Just (immediate action) else Nothing
+
+cancel : Callback a e ->{IO} ()
+cancel (Callback token _) = cancelRegistration token
+drain : Callback a e ->{IO} ()
+drain (Callback token _) = drainRegistration token
+counts : Host ->{IO} Counts
+counts host = Counts { live = liveCount host, registrations = registrationCount host }

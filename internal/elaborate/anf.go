@@ -158,7 +158,7 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		for i, a := range e.Args {
 			args[i] = slot(a)
 		}
-		return &core.NativeCall{Name: e.Name, Module: e.Module, Storage: e.Storage, Args: args, Ty: e.Ty}, hoists
+		return &core.NativeCall{Name: e.Name, Module: e.Module, Storage: e.Storage, RetainsRequest: e.RetainsRequest, Args: args, Ty: e.Ty}, hoists
 	case *core.Work:
 		n := *e
 		n.Args = make([]core.Expr, len(e.Args))

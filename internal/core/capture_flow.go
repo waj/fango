@@ -1095,6 +1095,21 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 			id := f.alloc(key.allocation(), flowObject{kind: "global", def: n.Name, code: n, env: env.clone()})
 			result.refs = []int{id}
 		}
+	case "native-request":
+		args := all(0)
+		if len(args) > 0 {
+			owners := f.captures(args[0])
+			for _, arg := range args[1:] {
+				for _, owner := range owners {
+					f.store(arg, owner, "native request retention")
+				}
+				if len(owners) == 0 && !args[0].unknown {
+					for _, owner := range f.captures(arg) {
+						f.escape(arg, owner, "native request retention", "unscoped request")
+					}
+				}
+			}
+		}
 	case "native":
 		result = joinFlow(all(0)...)
 		if con, ok := n.Type.(*types.TCon); ok && f.shape.adts[con.Unique] != nil && f.shape.adts[con.Unique].Resource {
@@ -1197,6 +1212,10 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 				result = joinFlow(result, f.eval(&replayed, inner, ctx, scopes, resumes))
 			}
 		}
+	case "completion_immediate":
+		capture := *n
+		capture.Kind = "completion_capture"
+		result = f.syncEval("native callback", &capture, env, ctx, scopes, resumes)
 	case "completion_capture":
 		fn := child(0)
 		boundary := &detachedFlow{site: key, callDepth: len(f.calls), outer: slices.Clone(scopes)}

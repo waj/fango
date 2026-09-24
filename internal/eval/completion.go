@@ -38,7 +38,7 @@ func (in *interp) evalCompletion(e *core.Completion, fr *Frame) (Value, error) {
 	if _, ok := asExit(value); ok {
 		return value, nil
 	}
-	if e.Name == types.CompletionCaptureName {
+	if types.CapturesCompletion(e.Name) {
 		fn, ok := value.(*Closure)
 		if !ok {
 			return nil, fmt.Errorf("eval: completion capture requires callback")

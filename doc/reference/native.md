@@ -147,6 +147,11 @@ proxy to the active interpreter session. Native function signatures never gain
 a hidden context argument. Sidecars may use `FangoHost` only during a native
 call and must not replace it or retain it for asynchronous work.
 
+Background work instead uses [NativeRequest's scoped token protocol](library-native-requests.md).
+The canonical `NativeRequest.Registration` is an imported boundary wrapper for
+checked Unit-returning submissions. Its `FangoRequest` support alias carries
+readiness and quiescence authority, never a Fango callback or process host.
+
 ## Build and interpreter lifecycle
 
 Native sidecars participate in `check`, build manifests, incremental rebuilds,

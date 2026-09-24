@@ -295,6 +295,8 @@ packages.
 
 Every materialized sidecar gets FangoHost, a reserved process-global interface
 for input/output, arguments, directory, and exit, without hidden call parameters.
+Scoped background retention uses [native request tokens](native-requests.md)
+instead of retaining this global host.
 Its single source declaration is copied beside each sidecar with rewritten runtime
 imports. Module-specific logic remains in its owner: IO owns console behavior,
 File owns file/directory objects, Net owns sockets, and Random supplies system entropy; deterministic

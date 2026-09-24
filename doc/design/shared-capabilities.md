@@ -38,7 +38,8 @@ closures, ADTs, dictionaries, storage payloads, and hidden handler evidence;
 it rejects parent mutable state, borrowed cursors/pauses, and native resources
 without that opt-in. Child-local acquisition remains valid. A shared resource
 borrowed from `Scope.bracket` must enclose the registry so child draining precedes
-release. Native requests with longer retention are outside this boundary.
+release. Native requests with longer retention use the separate
+[scoped request contract](native-requests.md).
 
 ## Split service evidence
 
@@ -71,5 +72,6 @@ factories to completion; a closed program entry may construct them without
 exposing suspension. Machine operation arguments register their nested callback
 workers just like ordinary call arguments.
 
-These contracts establish cooperative sharing. Concurrent execution and native
-requests retaining callbacks still require their separate roadmap gates.
+These contracts establish cooperative sharing. Native requests retain
+[scoped registration tokens](native-requests.md), with Fango callbacks invoked
+only by their driver. Concurrent execution remains a separate roadmap gate.

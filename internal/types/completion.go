@@ -1,14 +1,15 @@
 package types
 
 const (
-	CompletionTypeName    = "Completion.Completion"
-	CompletionCaptureName = "Completion.capture"
-	CompletionReplayName  = "Completion.replay"
-	CompletionFailureName = "Completion.failure"
+	NativeRequestImmediateName = "NativeRequest.immediate"
+	CompletionTypeName         = "Completion.Completion"
+	CompletionCaptureName      = "Completion.capture"
+	CompletionReplayName       = "Completion.replay"
+	CompletionFailureName      = "Completion.failure"
 )
 
 func CompletionIntrinsic(name string) bool {
-	return name == CompletionCaptureName || name == CompletionReplayName || name == CompletionFailureName
+	return CapturesCompletion(name) || name == CompletionReplayName || name == CompletionFailureName
 }
 
 // CompletionDeclarationShape additionally verifies the unerased source row.
@@ -18,7 +19,7 @@ func CompletionDeclarationShape(name string, t Type) bool {
 		return false
 	}
 	con, _ := fn.Arg.(*TCon)
-	if name == CompletionCaptureName {
+	if CapturesCompletion(name) {
 		con = fn.Ret.(*TCon)
 	}
 	row, ok := con.Args[1].(*TVar)
@@ -31,7 +32,7 @@ func CompletionDeclarationShape(name string, t Type) bool {
 	if len(fn.Eff.Labels) != 0 || fn.Eff.Tail == nil || !Equal(fn.Eff.Tail, row) {
 		return false
 	}
-	if name == CompletionCaptureName {
+	if CapturesCompletion(name) {
 		action := fn.Arg.(*TFun)
 		return len(action.Eff.Labels) == 0 && action.Eff.Tail != nil && Equal(action.Eff.Tail, row)
 	}
@@ -40,7 +41,7 @@ func CompletionDeclarationShape(name string, t Type) bool {
 
 func CompletionShape(name string, arg, result Type) bool {
 	var completion Type = arg
-	if name == CompletionCaptureName {
+	if CapturesCompletion(name) {
 		completion = result
 	}
 	con, ok := completion.(*TCon)
@@ -48,7 +49,7 @@ func CompletionShape(name string, arg, result Type) bool {
 		return false
 	}
 	switch name {
-	case CompletionCaptureName:
+	case CompletionCaptureName, NativeRequestImmediateName:
 		fn, ok := arg.(*TFun)
 		if !ok {
 			return false
@@ -66,4 +67,8 @@ func CompletionShape(name string, arg, result Type) bool {
 		return ok && failure.Name == FailureTypeName && len(failure.Args) == 0
 	}
 	return false
+}
+
+func CapturesCompletion(name string) bool {
+	return name == CompletionCaptureName || name == NativeRequestImmediateName
 }

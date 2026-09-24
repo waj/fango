@@ -74,6 +74,9 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 			n.Kind = "native-" + e.Storage.Kind
 			n.NativeStorage = e.Storage
 		}
+		if e.RetainsRequest {
+			n.Kind = "native-request"
+		}
 		children(e.Args...)
 	case *Work:
 		n.Kind = "work-" + e.Kind
@@ -87,8 +90,11 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 		if e.Name == types.CompletionReplayName {
 			n.Kind = "completion_replay"
 		}
-		if e.Name == types.CompletionCaptureName {
+		if types.CapturesCompletion(e.Name) {
 			n.Kind = "completion_capture"
+		}
+		if e.Name == types.NativeRequestImmediateName {
+			n.Kind = "completion_immediate"
 		}
 		children(e.Value)
 	case *Quote:

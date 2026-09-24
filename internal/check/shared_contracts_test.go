@@ -14,7 +14,7 @@ import (
 )
 
 func TestSharedContractsSurviveObjectsAndExecutionCodec(t *testing.T) {
-	for _, fixture := range []string{"native_storage", "native_phantom", "completion_cell_replay", "completion_cell", "coroutine_shared_native", "service_context", "service_nested_pull"} {
+	for _, fixture := range []string{"native_requests", "native_storage", "native_phantom", "completion_cell_replay", "completion_cell", "coroutine_shared_native", "service_context", "service_nested_pull"} {
 		t.Run(fixture, func(t *testing.T) {
 			path := filepath.Join("..", "..", "testdata", "run", fixture+".fango")
 			cache := newMemoryObjectCache()

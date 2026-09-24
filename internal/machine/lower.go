@@ -368,7 +368,7 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 	case *core.CoroutineAdvance:
 		return b.add(&CursorAdvance{Cursor: e.Cursor, Reply: e.Reply, Close: e.Close, Result: e.Result, Access: e.Access, Bind: bind, Next: next, Row: e.Row})
 	case *core.Completion:
-		if e.Name == types.CompletionCaptureName {
+		if types.CapturesCompletion(e.Name) {
 			fn := e.Value.Type().(*types.TFun)
 			b.registerMachineLambdas(e.Value)
 			return b.add(&Call{Capture: true, CalleeExpr: e.Value, Args: []core.Expr{&core.UnitLit{Ty: fn.Arg}}, Row: e.Row, Bind: bind, Next: next})
