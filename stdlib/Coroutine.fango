@@ -1,40 +1,73 @@
 {-# no-prelude #-}
 module Coroutine exposing (Coroutine, Drive, Facet, Scope, Step(..), Suspension, advance, close, create, facet, scope, with)
 
+-- Owned, resumable computations with a typed request, reply, and final result.
+-- A producer can pause; its driver resumes it by supplying a reply. Every
+-- coroutine belongs to a lexical `with` boundary or a dynamic `scope`, which
+-- closes unfinished work on exit. Use Work when a queue must hold coroutines
+-- with different effect rows but the same request, reply, and result types.
+
 import Basics exposing (..)
 
--- Operations are private: only the scoped callback can suspend its producer.
+-- Control used by a producer's private pause callback. The operation is not
+-- exported: only the callback supplied to that producer can pause it.
 effect Suspension
+    -- Private operation invoked by the producer's pause callback.
     suspension : () -> ()
 
+-- Control required to advance or close a coroutine. Its owning `with` or
+-- `scope` boundary handles it; an unrelated boundary cannot do so.
 effect Drive
+    -- Private control marker for driving the owning coroutine.
     drive : () -> ()
 
+-- A handle to one producer. The first three parameters are the request sent
+-- at a pause, the reply supplied at the next advance, and the final result.
+-- `e` is the producer's remaining effects. Aliases refer to the same execution.
 {-# resource #-}
 type Coroutine request reply result e = Coroutine (request -> reply ->{e} result)
 
+-- The outcome of one advance: a request to answer, the producer's final
+-- result, or a handle that has already finished or been closed.
 type Step request result = Suspended request | Finished result | Closed deriving (Eq, Show)
 
+-- Run a driver with one lazily started producer. The first advance passes its
+-- reply as the producer's initial input; later advances answer pending pauses.
+-- On return, close the producer if it is still unfinished.
 with : ((request ->{Suspension} reply) -> reply ->{Suspension | e} result) -> (Coroutine request reply result e ->{Drive | e} a) ->{e} a
 with = native
 
+-- Start or resume this coroutine with a reply and return its next Step.
+-- Advancing a finished or closed handle returns Closed.
 advance : Coroutine request reply result e -> reply ->{Drive | e} Step request result
 advance = native
 
+-- Stop this coroutine and run any pending cleanup. Closing before the first
+-- advance discards the producer without running it; closing again is harmless.
 close : Coroutine request reply result e ->{Drive | e} ()
 close = native
 
+-- A dynamic owner for multiple coroutines. Children created in this scope
+-- cannot outlive it; each child still has its own execution identity.
 {-# resource #-}
 type Scope e = Scope (() ->{e} ())
 
+-- Run a callback with a fresh scope. On exit, close unfinished children in
+-- reverse creation order. The callback runs immediately.
 scope : (Scope e ->{Drive | e} a) ->{e} a
 scope = native
 
+-- Register a lazy producer in this scope and return its handle. The producer
+-- does not run until its first advance. Each call creates a distinct child.
 create : Scope e -> ((request ->{Suspension} reply) -> reply ->{Suspension | e} result) -> Coroutine request reply result e
 create = native
 
+-- A reference to a dynamic scope that hides its effect row. Work.register
+-- uses it to select where a child is created without exposing that row.
 {-# resource #-}
 type Facet = Facet ()
 
+-- Get the hidden-row registration facet of this scope. It retains the scope's
+-- identity and cannot outlive the scope.
 facet : Scope e -> Facet
 facet = native

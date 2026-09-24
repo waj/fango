@@ -1,35 +1,66 @@
 {-# no-prelude #-}
 module Work exposing (Facet, Owner, Work, advance, close, facet, owner, pack, register, run)
 
+-- Scoped packages for coroutines whose effect rows differ. A package keeps
+-- the coroutine's request, reply, and result types, but hides its effect row
+-- behind an owner's checked budget. This lets a library queue store and drive
+-- compatible coroutines uniformly. Work adds no execution of its own:
+-- advancing or closing a package acts on its original coroutine.
+
 import Basics exposing (..)
 import Coroutine exposing (Coroutine, Drive, Step, Suspension)
 
+-- Identity and effect budget of a packaging scope. `e` lists the effects
+-- permitted for every coroutine packaged under this owner.
 {-# resource #-}
 type Owner e = Owner (() ->{e} ())
 
+-- A reference to an Owner that hides its effect row while keeping its identity.
+-- A facet is valid only while that owner is live.
 {-# resource #-}
 type Facet = Facet ()
 
+-- A coroutine packaged under an Owner. Its effect row is hidden, while its
+-- request, reply, and result types remain available to a driver. Packaging
+-- retains the original coroutine rather than creating another execution.
 {-# resource #-}
 type Work request reply result = Work (request -> reply -> result)
 
+-- Run a callback with a fresh lexical Work owner. This sets the budget and
+-- lifetime for packages; it does not create or run a coroutine. An enclosing
+-- coroutine boundary must still handle Drive when the callback advances work.
 run : (Owner e ->{Drive | e} a) ->{Drive | e} a
 run = native
 
+-- Hide this owner's effect row for code that needs to package a coroutine.
+-- The returned facet still identifies this exact owner.
 facet : Owner e -> Facet
 facet = native
 
+-- Package an existing coroutine under the selected owner without starting it.
+-- Its effects must fit the owner's budget, and the coroutine must outlive the
+-- owner. The package cannot escape that owner.
 pack : Facet -> Coroutine request reply result e ->{e} Work request reply result
 pack = native
 
+-- Advance the original coroutine and return its next Step. The supplied
+-- owner must be the exact one used to package it; its budget covers the
+-- coroutine's hidden effects.
 advance : Owner e -> Work request reply result -> reply ->{Drive | e} Step request result
 advance = native
 
+-- Close the original coroutine, running pending cleanup. Requires the same
+-- owner used to package it; repeated closes are harmless.
 close : Owner e -> Work request reply result ->{Drive | e} ()
 close = native
 
+-- Get the Work owner of an existing Coroutine scope. Repeated calls return
+-- the same identity; use it to drive packages registered in that scope.
 owner : Coroutine.Scope e -> Owner e
 owner = native
 
+-- Create a lazy coroutine in the scope selected by a Coroutine facet and
+-- package it under that scope's Work owner. Its effects must fit the scope's
+-- budget. The producer does not run until the package is advanced.
 register : Coroutine.Facet -> ((request ->{Suspension} reply) -> reply ->{Suspension | e} result) ->{e} Work request reply result
 register = native

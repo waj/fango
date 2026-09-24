@@ -1,11 +1,25 @@
 {-# no-prelude #-}
 module Service exposing (Invocation(..), run)
 
+-- Call a shared service from the coroutine that is currently doing the work.
+-- A service handler may retain its context across calls, while each call uses
+-- the caller's own pause authority. A producer installs that authority with
+-- `run`; a handler clause can then use `invoke` to send a typed request back
+-- through the caller's pause callback.
+
 import Basics exposing (..)
 import Coroutine exposing (Suspension)
 
+-- The request/reply protocol used by a service call. Every operation of a
+-- service effect must use the same protocol. Invocation authority comes from
+-- an active producer's `run`, not from a retained service context.
 effect Invocation request reply
+    -- Send a request through the current caller's pause and receive its reply.
     invoke : request -> reply
 
+-- Install the active producer's pause as invocation authority for `action`.
+-- Service operations reached inside the action use this caller's authority,
+-- including through helpers and nested pulls. The pause must belong to the
+-- active producer; an independently registered child installs its own.
 run : (request ->{Suspension} reply) -> (() ->{Invocation request reply | e} a) ->{Suspension | e} a
 run = native
