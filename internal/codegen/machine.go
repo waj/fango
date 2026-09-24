@@ -246,19 +246,24 @@ func (g *gen) machineStepDecl(worker *machineir.Worker, frameName string, stored
 	}
 
 	var clauses []goast.Stmt
+	var blocks []goast.Stmt
+	emitBlock := func(pc int, stmts []goast.Stmt) {
+		clauses = append(clauses, &goast.CaseClause{List: []goast.Expr{intLit(int64(pc))}, Body: machineJump(pc)})
+		blocks = append(blocks, &goast.LabeledStmt{Label: ident(fmt.Sprintf("machineBlock%d", pc)), Stmt: &goast.BlockStmt{List: stmts}})
+	}
 	resumePC := len(worker.Blocks)
 	for _, block := range worker.Blocks {
 		stmts, resumes := g.machineBlockStmts(worker, frameName, &block, resumePC, stored)
-		clauses = append(clauses, &goast.CaseClause{List: []goast.Expr{intLit(int64(block.ID))}, Body: stmts})
+		emitBlock(int(block.ID), stmts)
 		for _, resume := range resumes {
-			clauses = append(clauses, &goast.CaseClause{List: []goast.Expr{intLit(int64(resumePC))}, Body: resume})
+			emitBlock(resumePC, resume)
 			resumePC++
 		}
 	}
 	clauses = append(clauses, &goast.CaseClause{Body: []goast.Stmt{returnStmt(callExpr(selector("fangort", "InvalidMachineStep"), stringLit("invalid generated machine PC")))}})
-	body = append(body, &goast.ForStmt{Body: &goast.BlockStmt{List: []goast.Stmt{&goast.SwitchStmt{
+	body = append(body, &goast.ForStmt{Body: &goast.BlockStmt{List: append([]goast.Stmt{&goast.SwitchStmt{
 		Tag: machinePC(), Body: &goast.BlockStmt{List: clauses},
-	}}}})
+	}}, blocks...)}})
 	return &goast.FuncDecl{
 		Recv: &goast.FieldList{List: []*goast.Field{{Names: []*goast.Ident{ident("f")}, Type: &goast.StarExpr{X: indexExpr(ident(frameName), machineTypeParamIdents(worker.TyParams))}}}},
 		Name: ident("Step"),
@@ -268,9 +273,15 @@ func (g *gen) machineStepDecl(worker *machineir.Worker, frameName string, stored
 	}
 }
 
+// Only entry/resumption dispatches on the saved PC. Local edges stay inside
+// this Step activation and jump directly to their generated basic block.
+func machineJump(pc int) []goast.Stmt {
+	return []goast.Stmt{&goast.BranchStmt{Tok: gotoken.GOTO, Label: ident(fmt.Sprintf("machineBlock%d", pc))}}
+}
+
 func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, block *machineir.Block, resumePC int, stored []machineir.Local) ([]goast.Stmt, [][]goast.Stmt) {
 	continueStmt := func(next machineir.BlockID) []goast.Stmt {
-		return []goast.Stmt{assignMachinePC(int(next)), &goast.BranchStmt{Tok: gotoken.CONTINUE}}
+		return machineJump(int(next))
 	}
 	resume := func(bind machineir.Local, next machineir.BlockID) []goast.Stmt {
 		value := &goast.TypeAssertExpr{X: callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("TakeResult")}), Type: g.goType(bind.Ty)}
@@ -394,11 +405,12 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		name := fmt.Sprintf("machinePull%d", g.tmp)
 		g.tmp++
 		resultTy := term.Bind.Ty.(*types.TCon)
-		resumed := []goast.Stmt{varDeclStmt(name, selector("fangort", "CursorResult"), &goast.TypeAssertExpr{X: callExpr(selector("m", "TakeResult")), Type: selector("fangort", "CursorResult")}),
+		resumed := []goast.Stmt{varDeclStmt(name, selector("fangort", "CursorResult"), callExpr(selector("m", "TakeCursorResult"))),
 			&goast.IfStmt{Cond: &goast.BinaryExpr{X: selector(name, "Exit"), Op: gotoken.NEQ, Y: ident("nil")}, Body: &goast.BlockStmt{List: []goast.Stmt{step("MachineExit", "Exit", selector(name, "Exit"))}}},
 		}
 		if term.Close {
-			resumed = append(resumed, assignStmt(machineLocalName(term.Bind.Name), g.unitValue()), assignMachinePC(int(term.Next)), &goast.BranchStmt{Tok: gotoken.CONTINUE})
+			resumed = append(resumed, assignStmt(machineLocalName(term.Bind.Name), g.unitValue()))
+			resumed = append(resumed, continueStmt(term.Next)...)
 			return stmts, [][]goast.Stmt{resumed}
 		}
 		if match := machineir.AdvanceMatch(worker, term); match != nil {
@@ -411,7 +423,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 					if i < 2 && len(c.Binds) != 0 && c.Binds[0].Name != "" {
 						branches[i] = append(branches[i], assignStmt(machineLocalName(c.Binds[0].Name), &goast.TypeAssertExpr{X: selector(name, "Value"), Type: g.goType(c.Binds[0].Ty)}))
 					}
-					branches[i] = append(branches[i], assignMachinePC(int(c.Next)), &goast.BranchStmt{Tok: gotoken.CONTINUE})
+					branches[i] = append(branches[i], continueStmt(c.Next)...)
 				}
 			}
 			resumed = append(resumed, ifStmt(selector(name, "Present"), branches[0], []goast.Stmt{ifStmt(selector(name, "Finished"), branches[1], branches[2])}))
@@ -424,7 +436,8 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			}
 			return []goast.Stmt{assignStmt(machineLocalName(term.Bind.Name), g.ctorValue(term.Result.Ctors[index], resultTy.Args, args...))}
 		}
-		resumed = append(resumed, ifStmt(selector(name, "Present"), assign(0), []goast.Stmt{ifStmt(selector(name, "Finished"), assign(1), assign(2))}), assignMachinePC(int(term.Next)), &goast.BranchStmt{Tok: gotoken.CONTINUE})
+		resumed = append(resumed, ifStmt(selector(name, "Present"), assign(0), []goast.Stmt{ifStmt(selector(name, "Finished"), assign(1), assign(2))}))
+		resumed = append(resumed, continueStmt(term.Next)...)
 		return stmts, [][]goast.Stmt{resumed}
 	case *machineir.Call:
 		args := g.typeDescriptorArgs(term.TyArgs)

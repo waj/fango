@@ -889,6 +889,11 @@ Measure synchronous completion paths, queueing, frame reuse, result retention,
 callback/evidence adapters, and selective stage fusion. Preserve demand,
 effect order, cleanup, captures, and exclusive advancement. Coordinate with
 [calling conventions](roadmap-calls.md). No optimization gates earlier API use.
+The implemented [cooperative comparison](design/verification.md#cooperative-async-comparison)
+retains the historical native Async baseline and a 1.10 sustained-yield target;
+extend its coverage as structured contexts and native readiness are implemented.
+Reduce the setup and completion overhead exposed by its short-task and
+no-yield controls.
 
 Use an otherwise idle machine. Separate setup, hot execution, allocation,
 maximum live frames, cancellation/drain latency, native capacity, compilation

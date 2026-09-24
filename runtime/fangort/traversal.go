@@ -75,11 +75,11 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 				if err != nil {
 					return MachineEvent{}, err
 				}
-				d.active.result = CursorResult{Exit: exit}
+				d.active.setCursorResult(CursorResult{Exit: exit})
 				continue
 			}
 			if cursor.done {
-				d.active.result = CursorResult{}
+				d.active.setCursorResult(CursorResult{})
 				continue
 			}
 			if err := cursor.begin(event.reply); err != nil {
@@ -120,7 +120,7 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 			pull.cursor.evidence.Clear()
 			pull.cursor.clearRegistered()
 			d.active = pull.caller
-			d.active.result = CursorResult{Exit: event.Exit, Value: event.Value, Finished: event.Exit == nil}
+			d.active.setCursorResult(CursorResult{Exit: event.Exit, Value: event.Value, Finished: event.Exit == nil})
 			continue
 		}
 		matched := -1
@@ -135,8 +135,13 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 			return event, nil
 		}
 		pull := d.pulls[matched]
-		pull.cursor.machine.traversal = &machineTraversal{active: d.active,
-			pulls: append([]machinePull(nil), d.pulls[matched+1:]...), suspended: true}
+		// An innermost pause needs only the producer's saved result edge.
+		// Allocate parked traversal state only for a foreign pause that also
+		// retains unfinished inner advancements.
+		if matched+1 < len(d.pulls) {
+			pull.cursor.machine.traversal = &machineTraversal{active: d.active,
+				pulls: append([]machinePull(nil), d.pulls[matched+1:]...), suspended: true}
+		}
 		for i := matched; i < len(d.pulls); i++ {
 			d.pulls[i] = machinePull{}
 		}
@@ -144,7 +149,7 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 		pull.cursor.busy = false
 		pull.cursor.evidence.Restore()
 		d.active = pull.caller
-		d.active.result = CursorResult{Value: event.Request, Present: true}
+		d.active.setCursorResult(CursorResult{Value: event.Request, Present: true})
 	}
 }
 

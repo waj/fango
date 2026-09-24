@@ -320,6 +320,7 @@ func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, un
 	// the scalar element-op helpers their synthesis demanded.
 	decls = append(decls, g.derivedDecls(adts)...)
 	decls = append(decls, g.scalarHelperDecls()...)
+	decls = append(decls, g.descriptorDecls...)
 	// Imports come from emission (fangort for prints, math for float
 	// specials), so they are prepended last — in a fixed order, for
 	// deterministic output.
@@ -358,13 +359,15 @@ func (g *gen) topValueDecl(d *core.Def, mode types.Transport) goast.Decl {
 }
 
 type gen struct {
-	b           *types.Builtins
-	adts        map[int]*types.ADTInfo
-	neededEq    map[int]bool
-	neededShow  map[int]bool
-	tmp         int // type-switch binding counter (ts0, ts1, …)
-	usesFangort bool
-	usesMath    bool
+	b               *types.Builtins
+	adts            map[int]*types.ADTInfo
+	neededEq        map[int]bool
+	neededShow      map[int]bool
+	tmp             int // type-switch binding counter (ts0, ts1, …)
+	usesFangort     bool
+	usesMath        bool
+	descriptorNames map[string]string
+	descriptorDecls []goast.Decl
 
 	// tyParamNames maps the rigid vars of the definition (or derived
 	// function) currently being emitted to their Go type-parameter names

@@ -67,6 +67,9 @@ func TestCoroutineTypedExchangeAndTerminalClearing(t *testing.T) {
 				t.Fatal("producer started eagerly")
 			}
 			first := exchange(t, cursor, "initial", false)
+			if cursor.machine.traversal != nil {
+				t.Fatal("innermost pause retained an unnecessary traversal")
+			}
 			if !first.Present || first.Finished || first.Value != 7 || factoryCalls != 1 || cleared || cleaned {
 				t.Fatalf("initial reply/suspension: %+v calls=%d cleared=%v cleaned=%v", first, factoryCalls, cleared, cleaned)
 			}
@@ -78,6 +81,9 @@ func TestCoroutineTypedExchangeAndTerminalClearing(t *testing.T) {
 				t.Fatal("terminal owner retained producer/evidence or skipped cleanup")
 			}
 			m := cursor.machine
+			if m.hasCursorResult || m.cursorResult.Value != nil || m.cursorResult.Exit != nil {
+				t.Fatal("terminal machine retained an advancement result")
+			}
 			if len(m.frames) != 0 || len(m.cleanups) != 0 || len(m.handlers) != 0 || len(m.states) != 0 {
 				t.Fatal("terminal machine retained frames")
 			}

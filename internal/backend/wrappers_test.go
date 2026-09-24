@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/machine"
 	"strings"
 	"testing"
@@ -66,4 +67,47 @@ main() = print (Runtime.Coroutine.with (\pause _ -> pause 42) (\work -> Read.rea
 	if p.events["emitted-cache-miss"]["<entry>"] != 1 {
 		t.Fatal("inline template body edit did not invalidate importer")
 	}
+}
+
+func TestWorkAdvanceWrapperPreservesOwnerCheckAndExposesMatch(t *testing.T) {
+	p := newProject(t)
+	p.write(t, "Main.fango", `import Async
+import Async.Cooperative
+main() = print (Async.Cooperative.run (\_ ->
+    task = Async.spawn (\_ ->
+        Async.yield()
+        42)
+    Async.await task))
+`)
+	p.entry = p.dir + "/Main.fango"
+	result := p.check(t)
+	lowered, errs := machine.Lower(result.Program, result.Checker.B)
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	found := false
+	for i := range lowered.Workers {
+		w := &lowered.Workers[i]
+		if w.Name != "Runtime.Async.Cooperative.dispatch" {
+			continue
+		}
+		for _, block := range w.Blocks {
+			advance, ok := block.Term.(*machine.CursorAdvance)
+			if !ok {
+				continue
+			}
+			open, ok := advance.Cursor.(*core.Work)
+			if !ok || open.Kind != "open" || len(open.Args) != 2 {
+				t.Fatal("advance lost its checked owner/package opening")
+			}
+			if machine.AdvanceMatch(w, advance) == nil {
+				t.Fatal("advance result still requires packaging")
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("scheduler did not expand the Work advancement wrapper")
+	}
+	p.build(t)
 }

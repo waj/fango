@@ -65,6 +65,30 @@ The probe runs alongside the other parallel checks.
 
 ## Performance evidence
 
+### Cooperative Async comparison
+
+```sh
+go run ./benchmarks/asynccompare -out /tmp/fango-async-evidence -profile
+```
+
+The output directory must not exist. The runner snapshots the historical native
+Async implementation at `b102a4e10bb6c4199fd5445ca9003fa42b29be02` and the tracked
+working tree, builds both with the same Go toolchain, and retains sources,
+binaries, raw JSON samples and optional CPU/allocation profiles. The shared
+workload differs only at the runner boundary (`Async.run` versus
+`Async.Cooperative.run` and its Result). Each worker counts and yields, and the
+driver awaits every result; checksums are verified before and after timing.
+
+Timing invokes generated code in-process, excluding compilation, startup and
+printing. Repetitions are calibrated from the faster build; order alternates
+over seven samples and two rounds, with one Go worker by default. Run on an
+otherwise idle host. Sustained cases use 1, 2, 16 and 128 workers with 320,000
+total yields; short-task and no-yield cases expose setup and completion costs.
+The sustained-yield target is a current/baseline median ratio at most 1.10 in
+each round. This is manual same-host evidence, not a portable CI timing gate.
+
+### Stream comparison
+
 The opt-in Stream comparison runs separately from `make test` and `make ci`:
 
 ```sh

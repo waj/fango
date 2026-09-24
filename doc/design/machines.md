@@ -35,12 +35,16 @@ The defining module determines all these members, independent of consumers.
 
 The evaluator has an explicit frame slice and uses recursive Core evaluation
 only for non-Machine expressions that finish before the next transition. Go
-emits typed frames with PC, parameters, and computed live locals. Step runs local
-blocks in a loop and returns only for suspension, call/tail transfer, return,
+emits typed frames with PC, parameters, and computed live locals. Step selects
+its entry or resumption block from the saved PC, then uses direct Go jumps for
+local edges. It returns only for suspension, call/tail transfer, return,
 or exit; only the shared runtime dispatcher invokes Step.
 
 Calls requiring a frame push it; tail calls replace the active frame. Return uses one erased
-runtime register that the typed caller projects. Exported module-owned frame
+runtime register that the typed caller projects. Advancement uses a separate
+typed `CursorResult` register, consumed and cleared without interface boxing;
+terminal clearing and handled exits clear that register as well.
+Exported module-owned frame
 constructors avoid runtime imports of generated packages and preserve the DAG.
 Tail-call arguments, captures, and evidence evaluate before clearing the old
 frame. Slices hold pointers/interfaces to separately allocated frames and handler

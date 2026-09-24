@@ -119,6 +119,8 @@ type Machine struct {
 	handlers         []machineHandler
 	caught           *ExitRequest
 	result           any
+	cursorResult     CursorResult
+	hasCursorResult  bool
 	waiting          bool
 	finished         bool
 	stats            MachineStats
@@ -269,9 +271,28 @@ func (m *Machine) abandonLocal() (*ExitRequest, error) {
 }
 
 func (m *Machine) TakeResult() any {
+	if m.hasCursorResult {
+		return m.TakeCursorResult()
+	}
 	value := m.result
 	m.result = nil
 	return value
+}
+
+// TakeCursorResult consumes the advancement register without boxing it into
+// the general call-result interface. The compatibility path in TakeResult is
+// also used by handwritten frames.
+func (m *Machine) TakeCursorResult() CursorResult {
+	value := m.cursorResult
+	m.cursorResult = CursorResult{}
+	m.hasCursorResult = false
+	return value
+}
+
+func (m *Machine) setCursorResult(value CursorResult) {
+	m.result = nil
+	m.cursorResult = value
+	m.hasCursorResult = true
 }
 
 func (m *Machine) TakeCaughtExit() *ExitRequest {
@@ -370,6 +391,7 @@ func (m *Machine) routeExit(exit *ExitRequest) bool {
 		}
 		m.handlers = m.handlers[:i]
 		m.result = nil
+		m.TakeCursorResult()
 		m.caught = exit
 		return true
 	}
@@ -432,6 +454,7 @@ func (m *Machine) clearFrames() {
 	}
 	m.frames = nil
 	m.result = nil
+	m.TakeCursorResult()
 	for i := range m.cleanups {
 		m.cleanups[i] = nil
 	}

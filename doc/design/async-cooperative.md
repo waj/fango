@@ -25,8 +25,15 @@ entry also stores the reply for its next advance: a spawn reply is the assigned
 child ID, while other replies are zero. This keeps task identity out of ambient
 worker state.
 
-One `step` computes a transition; the tail-recursive `dispatch` loop applies
-steps. Spawn appends the child at the FIFO tail and resumes the parent next, so
+One tail-recursive `dispatch` computes and applies each transition in the same
+Machine frame. Its ready queue is separate from waiting/notification state,
+which a yield retains unchanged. Its private linked ready lists avoid the
+unused chunk capacity of the general-purpose List for small queues.
+Queue inspection avoids an intermediate
+dequeue result; yielding reuses jobs whose reply is already zero. With just one
+ready job, it retains the existing queue while still returning through the
+coroutine's suspension and advancement boundaries.
+Spawn appends the child at the FIFO tail and resumes the parent next, so
 the parent receives its ID and continues before the child starts. Yield enqueues
 only the current task.
 Wait removes it from ready and adds one registration unless its key is already

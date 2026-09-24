@@ -33,3 +33,14 @@ func TestWrapperTemplatesAreBoundedAndExcludeCycles(t *testing.T) {
 		t.Fatal("oversized template accepted")
 	}
 }
+
+func TestWorkWrapperOnlyOpensExistingAuthority(t *testing.T) {
+	b := types.NewBuiltins(&types.Supply{})
+	d := &Def{Params: []string{"owner", "work"}, Control: types.Control{Transport: types.Machine}}
+	for _, kind := range []string{"open", "begin", "register", "pack", "end", "registry-owner"} {
+		body := &Work{Kind: kind, Args: []Expr{&VarRef{Name: "owner", Local: true, Ty: b.Int}, &VarRef{Name: "work", Local: true, Ty: b.Int}}, Ty: b.Int}
+		if got := WrapperSize(d, body) > 0; got != (kind == "open") {
+			t.Fatalf("Work %s template eligibility: %v", kind, got)
+		}
+	}
+}

@@ -32,6 +32,12 @@ capability. Module-owned Machine families export both frame constructors and
 start factories; the latter may omit proven forwarding frames. These are
 generated-code ABI details, not additional source calling conventions.
 
+Closed nominal type descriptors are immutable package values shared by all
+invocations in that generated module. Descriptors containing type parameters
+remain invocation-dependent; they reuse the closed descriptors of their
+concrete arguments. Descriptor equality and failure inspection retain the
+same nominal and inspectability checks.
+
 Concrete Unit parameters/results erase at direct worker and operation boundaries,
 but remain values at first-class, polymorphic, ADT, and handler-closure boundaries.
 Erasing an argument never erases its evaluation: preserve left-to-right effects

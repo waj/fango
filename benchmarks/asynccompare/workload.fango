@@ -1,0 +1,24 @@
+countTo n total =
+    if n <= 0 then total
+    else
+        Async.yield()
+        countTo (n - 1) (total + 1)
+
+countPure : Int -> Int -> Int
+countPure n total =
+    if n <= 0 then total else countPure (n - 1) (total + 1)
+
+spawnMany n limit yielding =
+    if n <= 0 then []
+    else
+        child = Async.spawn (\_ -> if yielding then countTo limit 0 else countPure limit 0)
+        [child | spawnMany (n - 1) limit yielding]
+
+awaitSum tasks =
+    case tasks of
+        [] -> 0
+        [task | rest] -> Async.await task + awaitSum rest
+
+runWorkers workers limit yielding =
+    tasks = spawnMany workers limit yielding
+    awaitSum tasks

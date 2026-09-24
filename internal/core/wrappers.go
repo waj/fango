@@ -22,6 +22,10 @@ func WrapperSize(d *Def, body Expr) int {
 		case *App:
 			valid = valid && e.CalleeKind != Value && len(e.EvidenceArgs) == 0
 		case *CoroutineAdvance:
+		case *Work:
+			// Opening checks an existing package against its existing owner;
+			// it introduces neither a scope nor execution authority.
+			valid = valid && e.Kind == "open"
 		default:
 			valid = false
 		}

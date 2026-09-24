@@ -112,7 +112,9 @@ The generic worker remains available and all variants pass ordinary lint.
 
 Checked definitions also expose bounded execution templates for small Machine
 wrappers. The whitelist permits strict bindings, matches, constructors, known
-calls, and coroutine advancement, but no callbacks, evidence binders, resource
+calls, coroutine advancement, and opening an existing Work package against its
+owner. Work opening preserves the runtime owner check and introduces no
+authority. The whitelist admits no callbacks, evidence binders, resource
 owners, state, cleanup, or staging nodes. Recursive call cycles and bodies over
 48 expression nodes are excluded. Templates remain unexpanded semantic Core;
 the original body and capture contract are the interpreter and ownership

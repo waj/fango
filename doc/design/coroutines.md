@@ -86,6 +86,9 @@ Captured evidence remains fixed. Per-advance forwarding installs the current
 residual evidence and restores it when advancement completes or is abandoned.
 Foreign suspension preserves forwarding, exclusive access, and intervening
 cleanup scopes until that advance actually completes.
+An innermost pause retains only the producer's saved result edge; parked
+traversal storage is needed only when a foreign pause also retains unfinished
+inner advancements.
 
 ## Dynamic scope registry
 

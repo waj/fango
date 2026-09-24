@@ -1,9 +1,12 @@
 package codegen
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/waj/fango/internal/types"
 	goast "go/ast"
+	"go/format"
+	"go/token"
 )
 
 func descriptorParamName(name string) string { return "type_" + name }
@@ -12,6 +15,47 @@ func (g *gen) descriptorType() goast.Expr {
 	return &goast.StarExpr{X: selector("fangort", "TypeDescriptor")}
 }
 func (g *gen) typeDescriptor(t types.Type) goast.Expr {
+	expr := g.typeDescriptorExpr(t)
+	if !closedDescriptor(t) {
+		return expr
+	}
+	// Closed descriptors are immutable and independent of the invocation.
+	// Share them within the generated module, including nested arguments.
+	var key bytes.Buffer
+	if err := format.Node(&key, token.NewFileSet(), expr); err != nil {
+		panic(err)
+	}
+	if name, ok := g.descriptorNames[key.String()]; ok {
+		return ident(name)
+	}
+	if g.descriptorNames == nil {
+		g.descriptorNames = make(map[string]string)
+	}
+	name := fmt.Sprintf("typeDescriptor%d", len(g.descriptorNames))
+	g.descriptorNames[key.String()] = name
+	g.descriptorDecls = append(g.descriptorDecls, &goast.GenDecl{Tok: token.VAR, Specs: []goast.Spec{
+		&goast.ValueSpec{Names: []*goast.Ident{ident(name)}, Values: []goast.Expr{expr}},
+	}})
+	return ident(name)
+}
+
+func closedDescriptor(t types.Type) bool {
+	switch t := t.(type) {
+	case *types.TFun:
+		return true // Functions always have the same opaque descriptor.
+	case *types.TCon:
+		for _, arg := range t.Args {
+			if !closedDescriptor(arg) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func (g *gen) typeDescriptorExpr(t types.Type) goast.Expr {
 	g.usesFangort = true
 	switch t := t.(type) {
 	case *types.TVar:

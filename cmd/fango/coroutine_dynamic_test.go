@@ -55,6 +55,9 @@ func C4Check() [3]int {
  return counts
 }
 `, machine, cursor, cursor, cursor, session)
+	if !interpreter {
+		iterator = strings.Replace(iterator, "|| s.traversal!=nil", "|| s.traversal!=nil || s.hasCursorResult || s.cursorResult.Value!=nil || s.cursorResult.Exit!=nil", 1)
+	}
 	return iterator, coroutine
 }
 
