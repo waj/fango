@@ -1,0 +1,10 @@
+import Async
+import Result exposing (Result(..))
+
+type Wrapped = Wrapped (Async.Task Int {IO})
+
+main() =
+    result = Async.run (\_ -> Wrapped (Async.spawn (\_ -> 1)))
+    case result of
+        Ok (Wrapped task) -> print "escaped"
+        Err error -> print error

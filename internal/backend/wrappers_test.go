@@ -88,7 +88,7 @@ main() = print (Async.Cooperative.run (\_ ->
 	found := false
 	for i := range lowered.Workers {
 		w := &lowered.Workers[i]
-		if w.Name != "Runtime.Async.Cooperative.dispatch" {
+		if w.Name != "Async.stepDriver" {
 			continue
 		}
 		for _, block := range w.Blocks {

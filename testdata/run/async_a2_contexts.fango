@@ -1,0 +1,30 @@
+import Async
+import Runtime.Executor
+import Runtime.Scope
+
+outer() =
+    print "outer start"
+    Async.yield()
+    print "outer done"
+    7
+
+grandchild() =
+    print "grandchild"
+    3
+
+child() =
+    print "child"
+    grand = Async.spawn grandchild
+    print "child done"
+    2
+
+main() = print (Async.runOn Runtime.Executor.cooperative (\_ ->
+    outside = Async.spawn outer
+    inside = Async.context (\_ ->
+        spawned = Async.spawn child
+        print (Async.await outside)
+        print "inner body done"
+        11)
+    print inside
+    print (Async.await outside)
+    1))

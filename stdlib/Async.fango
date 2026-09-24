@@ -1,71 +1,472 @@
 {-# no-prelude #-}
-module Async exposing (Async, Error(..), Request(..), Task, await, makeTask, poll, signal, spawn, taskKey, waitSignal, worker, yield)
-
--- Executor-neutral task operations and the checked work protocol. A runner
--- supplies the scope facet and handles each worker's requests.
+module Async exposing (Async, Error(..), Request(..), Task, await, bind, context, poll, run, runOn, signal, spawn, waitSignal, worker, yield)
 
 import Basics exposing (..)
+import Failure exposing (Failure)
 import IO exposing (IO)
+import List exposing (List(..))
 import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
 import Runtime.Cell
+import Runtime.Completion
 import Runtime.Coroutine
+import Runtime.Executor
+import Runtime.Scope
+import Runtime.Service
 import Runtime.Work
 
-type Error = SelfAwait | Stalled deriving (Eq, Show)
+type Error = InvalidWorkerCount Int | SelfAwait | Stalled deriving (Eq, Show)
+type Key = TaskKey (List Int) Int | ContextKey (List Int) | SignalKey Int deriving (Eq)
+type ContextOutcome = ContextSuccess | ContextFailure Failure | ContextError Error
+type Request
+    = Spawn (Runtime.Work.Work Request Int ())
+    | Start (List Int) (Runtime.Work.Work Request Int ())
+    | StartContext (List Int) (Runtime.Work.Work Request Int ()) (Runtime.Cell.Publisher ContextOutcome)
+    | Yield
+    | WaitTask Int
+    | AwaitTask Key
+    | WaitSignal Int
+    | Signal Int
+    | NewContext
+    | Check
+    | Published
+    | Report Failure (Runtime.Work.Work () () ())
+    | Fault Error
 
-type Request = Spawn (Runtime.Work.Work Request Int ()) | Yield | WaitTask Int | WaitSignal Int | Signal Int
-
+{-# service #-}
 effect Async
-    owner : () -> Runtime.Coroutine.Facet
-    request : Request -> Int
+    owner : () ->{Runtime.Service.Invocation Request Int} Runtime.Coroutine.Facet
+    path : () ->{Runtime.Service.Invocation Request Int} List Int
+    request : Request ->{Runtime.Service.Invocation Request Int} Int
 
 {-# resource #-}
-type Task a = Task Int (Runtime.Cell.Reader a)
+type Task a e = Task Key (Runtime.Cell.Reader (Runtime.Completion.Completion a e))
 
-makeTask : Int -> Runtime.Cell.Reader a -> Task a
-makeTask key reader = Task key reader
-
-taskKey : Task a -> Int
-taskKey (Task key _) = key
-
-poll : Task a ->{IO} Maybe a
+poll : Task a e ->{IO} Maybe (Runtime.Completion.Completion a e)
 poll (Task _ reader) = Runtime.Cell.read reader
 
-spawn : (() ->{Async | e} a) ->{Async, IO | e} Task a
+bind : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) ->{Async, Runtime.Service.Invocation Request Int} () ->{Runtime.Service.Invocation Request Int, IO | e} a
+bind action =
+    facet = owner()
+    taskPath = path()
+    \_ -> handle action() of
+        owner () -> resume facet
+        path () -> resume taskPath
+        request value -> resume (Runtime.Service.invoke value)
+
+spawn : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) ->{Async, Runtime.Service.Invocation Request Int, IO | e} Task a {IO | e}
 spawn action =
     facet = owner()
+    taskPath = path()
     publisher = Runtime.Cell.createIn facet
-    work = Runtime.Work.register facet (worker action facet publisher)
-    key = request (Spawn work)
-    Task key (Runtime.Cell.reader publisher)
+    reader = Runtime.Cell.reader publisher
+    work = Runtime.Work.register facet (worker action facet taskPath publisher)
+    key = request (Start taskPath work)
+    Task (TaskKey taskPath key) reader
 
-await : Task a ->{Async, IO} a
+await : Task a e ->{Async, Runtime.Service.Invocation Request Int, IO | e} a
 await task =
     case poll task of
-        Just value -> value
+        Just completed ->
+            checked = request Check
+            Runtime.Completion.replay completed
         Nothing ->
-            reply = request (WaitTask (taskKey task))
+            Task key _ = task
+            reply = request (AwaitTask key)
             await task
 
-yield : () ->{Async} ()
+yield : () ->{Async, Runtime.Service.Invocation Request Int} ()
 yield() =
     reply = request Yield
     ()
 
+waitSignal : Int ->{Async, Runtime.Service.Invocation Request Int} ()
 waitSignal key =
     reply = request (WaitSignal key)
     ()
 
+signal : Int ->{Async, Runtime.Service.Invocation Request Int} ()
 signal key =
     reply = request (Signal key)
     ()
 
--- The runner passes its own facet and producer pause to this adapter. The
--- child's residual effects remain checked by Work.register.
-worker : (() ->{Async | e} a) -> Runtime.Coroutine.Facet -> Runtime.Cell.Publisher a -> (Request ->{Runtime.Coroutine.Suspension} Int) -> Int ->{Runtime.Coroutine.Suspension, IO | e} ()
-worker action facet publisher pause initial =
-    value = handle action() of
+worker : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) -> Runtime.Coroutine.Facet -> List Int -> Runtime.Cell.Publisher (Runtime.Completion.Completion a {IO | e}) -> (Request ->{Runtime.Coroutine.Suspension} Int) -> Int ->{Runtime.Coroutine.Suspension, IO | e} ()
+worker action facet taskPath publisher pause initial =
+    completed = Runtime.Completion.dropSuspension (Runtime.Completion.capture (\_ -> Runtime.Service.run pause (\_ -> handle action() of
         owner () -> resume facet
-        request value -> resume (pause value)
-    published = Runtime.Cell.publish publisher value
-    ()
+        path () -> resume taskPath
+        request value -> resume (Runtime.Service.invoke value))))
+    published = Runtime.Cell.publish publisher completed
+    case Runtime.Completion.failure completed of
+        Nothing -> ()
+        Just failure ->
+            replayWork = Runtime.Work.register facet (replayWorker (Runtime.Cell.reader publisher))
+            observed = Runtime.Service.run pause (\_ -> Runtime.Service.invoke Published)
+            reply = Runtime.Service.run pause (\_ -> Runtime.Service.invoke (Report failure replayWork))
+            ()
+
+replayWorker reader pause initial =
+    case Runtime.Cell.read reader of
+        Nothing -> ()
+        Just completed ->
+            value = Runtime.Completion.replay completed
+            ()
+
+type Job = Job Int Int (List Int) (Runtime.Work.Work Request Int ())
+type Jobs = NoJobs | Jobs Job Jobs
+type Queue = Queue Jobs Jobs
+type Waiting = Waiting Key Job
+type FailureReport e = ChildReport Int Failure (Runtime.Work.Work () () ()) | CleanupReport Failure (Runtime.Completion.Completion () e)
+type ContextRecord e = ContextRecord (List Int) (Runtime.Cell.Publisher ContextOutcome) (List (FailureReport e)) (List (FailureReport e)) (Maybe Error)
+type State e =
+    { ready : Queue
+    , waiting : List Waiting
+    , notified : List Key
+    , live : List Job
+    , nextKey : Int
+    , reports : List (FailureReport e)
+    , cleanup : List (FailureReport e)
+    , contexts : List (ContextRecord e)
+    , error : Maybe Error
+    }
+type Decision e = Continue (State e) | Complete (State e) | Forward Key (State e)
+
+enqueue job (Queue front back) = Queue front (Jobs job back)
+
+reverseJobs values result =
+    case values of
+        NoJobs -> result
+        Jobs job rest -> reverseJobs rest (Jobs job result)
+
+appendJobs first second =
+    case first of
+        NoJobs -> second
+        Jobs job rest -> Jobs job (appendJobs rest second)
+
+queueFront (Queue front back) =
+    case front of
+        NoJobs -> reverseJobs back NoJobs
+        _ -> front
+
+queueBack (Queue front back) =
+    case front of
+        NoJobs -> NoJobs
+        _ -> back
+
+contains key values =
+    case values of
+        [] -> False
+        [value | rest] -> if value == key then True else contains key rest
+
+removeLive key live =
+    case live of
+        [] -> []
+        [job | rest] ->
+            Job current _ _ _ = job
+            if current == key then rest else [job | removeLive key rest]
+
+wake key waits ready =
+    case waits of
+        [] -> ([], ready)
+        [Waiting wanted job | rest] ->
+            (remaining, next) = wake key rest ready
+            if wanted == key then (remaining, enqueue job next)
+            else ([Waiting wanted job | remaining], next)
+
+insertReport report reports =
+    case report of
+        CleanupReport _ _ -> reports
+        ChildReport key _ _ ->
+            case reports of
+                [] -> [report]
+                [first | rest] ->
+                    case first of
+                        CleanupReport _ _ -> [report | reports]
+                        ChildReport firstKey _ _ ->
+                            if key < firstKey then [report | reports]
+                            else [first | insertReport report rest]
+
+append values tail =
+    case values of
+        [] -> tail
+        [first | rest] -> [first | append rest tail]
+
+closeLive : Runtime.Work.Owner e -> List Job -> List (FailureReport e) ->{Runtime.Coroutine.Drive | e} List (FailureReport e)
+closeLive workOwner live cleanup =
+    case live of
+        [] -> cleanup
+        [Job key _ _ work | rest] ->
+            closed = Runtime.Completion.dropDrive (Runtime.Completion.capture (\_ -> Runtime.Work.close workOwner work))
+            next = case Runtime.Completion.failure closed of
+                Nothing -> cleanup
+                Just failure -> append cleanup [CleanupReport failure closed]
+            closeLive workOwner rest next
+
+cancel : Runtime.Work.Owner e -> Runtime.Coroutine.Facet -> State e -> Maybe Error ->{Runtime.Coroutine.Drive | e} State e
+cancel workOwner facet state reason =
+    more = closeLive workOwner state.live state.cleanup
+    { state | ready = Queue NoJobs NoJobs, waiting = [], live = [], cleanup = more, error = reason }
+
+prefix wanted actual =
+    case (wanted, actual) of
+        ([], _) -> True
+        ([_ | _], []) -> False
+        ([first | rest], [value | tail]) -> first == value && prefix rest tail
+
+owned contextPath (Job _ _ jobPath _) = prefix contextPath jobPath
+
+keepJobs contextPath jobs =
+    case jobs of
+        NoJobs -> NoJobs
+        Jobs job rest ->
+            next = keepJobs contextPath rest
+            if owned contextPath job then next else Jobs job next
+
+keepWaiting contextPath waits =
+    case waits of
+        [] -> []
+        [Waiting key job | rest] ->
+            next = keepWaiting contextPath rest
+            if owned contextPath job then next else [Waiting key job | next]
+
+closeOwned : Runtime.Work.Owner e -> List Int -> List Job -> List Job -> List (FailureReport e) ->{Runtime.Coroutine.Drive | e} (List Job, List (FailureReport e))
+closeOwned workOwner contextPath jobs kept cleanup =
+    case jobs of
+        [] -> (List.reverse kept, cleanup)
+        [job | rest] ->
+            if owned contextPath job then
+                Job _ _ _ work = job
+                closed = Runtime.Completion.dropDrive (Runtime.Completion.capture (\_ -> Runtime.Work.close workOwner work))
+                next = case Runtime.Completion.failure closed of
+                    Nothing -> cleanup
+                    Just failure -> append cleanup [CleanupReport failure closed]
+                closeOwned workOwner contextPath rest kept next
+            else closeOwned workOwner contextPath rest [job | kept] cleanup
+
+recordReport : List Int -> FailureReport e -> State e -> State e
+recordReport contextPath report state =
+    case contextPath of
+        [] -> { state | reports = insertReport report state.reports }
+        _ -> { state | contexts = recordContextReport contextPath report state.contexts }
+
+recordContextReport contextPath report contexts =
+    case contexts of
+        [] -> []
+        [ContextRecord current publisher reports cleanup error | rest] ->
+            if current == contextPath then [ContextRecord current publisher (insertReport report reports) cleanup error | rest]
+            else [ContextRecord current publisher reports cleanup error | recordContextReport contextPath report rest]
+
+recordContextCleanup contextPath more contexts =
+    case contexts of
+        [] -> []
+        [ContextRecord current publisher reports cleanup error | rest] ->
+            if current == contextPath then [ContextRecord current publisher reports (append cleanup more) error | rest]
+            else [ContextRecord current publisher reports cleanup error | recordContextCleanup contextPath more rest]
+
+recordContextError contextPath reason contexts =
+    case contexts of
+        [] -> []
+        [ContextRecord current publisher reports cleanup error | rest] ->
+            if current == contextPath then [ContextRecord current publisher reports cleanup (Just reason) | rest]
+            else [ContextRecord current publisher reports cleanup error | recordContextError contextPath reason rest]
+
+cancelContext : Runtime.Work.Owner e -> List Int -> State e -> Maybe Error ->{Runtime.Coroutine.Drive | e} State e
+cancelContext workOwner contextPath state reason =
+    (live, cleanup) = closeOwned workOwner contextPath state.live [] []
+    Queue front back = state.ready
+    contexts = recordContextCleanup contextPath cleanup state.contexts
+    updated = case reason of
+        Nothing -> contexts
+        Just error -> recordContextError contextPath error contexts
+    { state | ready = Queue (keepJobs contextPath front) (keepJobs contextPath back), waiting = keepWaiting contextPath state.waiting, live = live, contexts = updated }
+
+hasLive contextPath jobs =
+    case jobs of
+        [] -> False
+        [job | rest] -> owned contextPath job || hasLive contextPath rest
+
+settleContexts : Runtime.Work.Owner {IO | e} -> State {IO | e} ->{Runtime.Coroutine.Drive, IO | e} State {IO | e}
+settleContexts workOwner state =
+    case state.contexts of
+        [] -> state
+        [record | rest] ->
+            ContextRecord contextPath publisher reports cleanup error = record
+            tailState = settleContexts workOwner { state | contexts = rest }
+            if hasLive contextPath tailState.live then { tailState | contexts = [record | tailState.contexts] }
+            else
+                allReports = append reports cleanup
+                outcome = case allReports of
+                    [] -> case error of
+                        Nothing -> ContextSuccess
+                        Just reason -> ContextError reason
+                    _ ->
+                        completed = Runtime.Completion.dropDrive (Runtime.Completion.capture (\_ -> replayReports workOwner allReports))
+                        case Runtime.Completion.failure completed of
+                            Nothing -> ContextSuccess
+                            Just failure -> ContextFailure failure
+                published = Runtime.Cell.publish publisher outcome
+                (waiting, ready) = wake (ContextKey contextPath) tailState.waiting tailState.ready
+                { tailState | ready = ready, waiting = waiting, notified = [ContextKey contextPath | tailState.notified] }
+
+stepDriver : List Int -> Runtime.Work.Owner e -> Runtime.Coroutine.Facet -> State e ->{Runtime.Coroutine.Drive | e} Decision e
+stepDriver localPath workOwner facet state =
+    case queueFront state.ready of
+        Jobs job rest ->
+            Job key reply jobPath work = job
+            remaining = Queue rest (queueBack state.ready)
+            case Runtime.Work.advance workOwner work reply of
+                Runtime.Coroutine.Suspended requestValue ->
+                    case requestValue of
+                        Start ownerPath child ->
+                            childJob = Job state.nextKey 0 ownerPath child
+                            next = { state | ready = Queue (Jobs (Job key state.nextKey jobPath work) rest) (Jobs childJob (queueBack state.ready)), live = [childJob | state.live], nextKey = state.nextKey + 1 }
+                            Continue next
+                        StartContext childPath child publisher ->
+                            childJob = Job state.nextKey 0 childPath child
+                            contextRecord = ContextRecord childPath publisher [] [] Nothing
+                            next = { state | ready = Queue (Jobs (Job key state.nextKey jobPath work) rest) (Jobs childJob (queueBack state.ready)), live = [childJob | state.live], nextKey = state.nextKey + 1, contexts = [contextRecord | state.contexts] }
+                            Continue next
+                        Spawn child ->
+                            childJob = Job state.nextKey 0 jobPath child
+                            next = { state | ready = Queue (Jobs (Job key state.nextKey jobPath work) rest) (Jobs childJob (queueBack state.ready)), live = [childJob | state.live], nextKey = state.nextKey + 1 }
+                            Continue next
+                        NewContext ->
+                            next = { state | ready = enqueue (Job key state.nextKey jobPath work) remaining, nextKey = state.nextKey + 1 }
+                            Continue next
+                        Yield ->
+                            next = { state | ready = enqueue (Job key 0 jobPath work) remaining }
+                            Continue next
+                        Check ->
+                            next = { state | ready = Queue (Jobs (Job key 0 jobPath work) (queueFront remaining)) (queueBack remaining) }
+                            Continue next
+                        Published ->
+                            completedKey = TaskKey jobPath key
+                            (waiting, observers) = wake completedKey state.waiting (Queue NoJobs NoJobs)
+                            front = appendJobs (queueFront observers) (Jobs (Job key 0 jobPath work) (queueFront remaining))
+                            next = { state | ready = Queue front (queueBack remaining), waiting = waiting, notified = [completedKey | state.notified] }
+                            Continue next
+                        AwaitTask taskTarget ->
+                            if taskTarget == TaskKey jobPath key then
+                                Complete (cancel workOwner facet state (Just SelfAwait))
+                            else if contains taskTarget state.notified then
+                                Complete (cancel workOwner facet state (Just Stalled))
+                            else
+                                next = { state | ready = remaining, waiting = [Waiting taskTarget (Job key 0 jobPath work) | state.waiting] }
+                                Continue next
+                        WaitTask target ->
+                            if target == key then Complete (cancel workOwner facet state (Just SelfAwait))
+                            else
+                                next = { state | ready = remaining, waiting = [Waiting (TaskKey jobPath target) (Job key 0 jobPath work) | state.waiting] }
+                                Continue next
+                        WaitSignal target ->
+                            wanted = SignalKey target
+                            if contains wanted state.notified then
+                                Continue ({ state | ready = enqueue (Job key 0 jobPath work) remaining })
+                            else
+                                Continue ({ state | ready = remaining, waiting = [Waiting wanted (Job key 0 jobPath work) | state.waiting] })
+                        Signal target ->
+                            wanted = SignalKey target
+                            (waiting, ready) = wake wanted state.waiting remaining
+                            next = { state | ready = enqueue (Job key 0 jobPath work) ready, waiting = waiting, notified = [wanted | state.notified] }
+                            Continue next
+                        Report failure replay ->
+                            recorded = ChildReport key failure replay
+                            next = recordReport jobPath recorded state
+                            if jobPath == [] then Complete (cancel workOwner facet next state.error)
+                            else Continue (cancelContext workOwner jobPath next Nothing)
+                        Fault error ->
+                            if jobPath == [] then Complete (cancel workOwner facet state (Just error))
+                            else Continue (cancelContext workOwner jobPath state (Just error))
+                Runtime.Coroutine.Finished () ->
+                    (waiting, ready) = wake (TaskKey jobPath key) state.waiting remaining
+                    next = { state | ready = ready, waiting = waiting, notified = [TaskKey jobPath key | state.notified], live = removeLive key state.live }
+                    Continue next
+                Runtime.Coroutine.Closed -> Complete (cancel workOwner facet state (Just Stalled))
+        NoJobs ->
+            case state.waiting of
+                [] -> Complete state
+                _ -> Complete (cancel workOwner facet state (Just Stalled))
+
+dispatch localPath workOwner facet state =
+    case stepDriver localPath workOwner facet state of
+        Continue next -> dispatch localPath workOwner facet (settleContexts workOwner next)
+        decision -> decision
+
+replayReport workOwner report =
+    case report of
+        ChildReport _ _ replay ->
+            step = Runtime.Work.advance workOwner replay ()
+            ()
+        CleanupReport _ completed -> Runtime.Completion.replay completed
+
+replayWithSuppressed workOwner primary reversed =
+    case reversed of
+        [] -> replayReport workOwner primary
+        [secondary | rest] ->
+            Runtime.Scope.finally
+                (\_ -> replayWithSuppressed workOwner primary rest)
+                (\_ -> replayReport workOwner secondary)
+
+replayReports workOwner reports =
+    case reports of
+        [] -> ()
+        [primary | rest] -> replayWithSuppressed workOwner primary (List.reverse rest)
+
+initialState : Job -> State e
+initialState root = { ready = Queue (Jobs root NoJobs) NoJobs, waiting = [], notified = [], live = [root], nextKey = 1, reports = [], cleanup = [], contexts = [], error = Nothing }
+
+run : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) ->{IO | e} Result Error a
+run action = Runtime.Coroutine.scope (\scope ->
+    facet = Runtime.Coroutine.facet scope
+    workOwner = Runtime.Work.owner scope
+    publisher = Runtime.Cell.create scope
+    reader = Runtime.Cell.reader publisher
+    body = Runtime.Work.register facet (worker action facet [] publisher)
+    root = Job 0 0 [] body
+    final = case dispatch [] workOwner facet (initialState root) of
+        Complete result -> result
+        Forward key pending -> cancel workOwner facet pending (Just Stalled)
+        Continue pending -> cancel workOwner facet pending (Just Stalled)
+    allReports = append final.reports final.cleanup
+    case allReports of
+        [] ->
+            case final.error of
+                Just error -> Err error
+                Nothing ->
+                    case Runtime.Cell.read reader of
+                        Nothing -> Err Stalled
+                        Just completed -> Ok (Runtime.Completion.replay completed)
+        _ ->
+            replayReports workOwner allReports
+            Err Stalled)
+
+runOn : Runtime.Executor.Executor -> (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) ->{IO | e} Result Error a
+runOn executor action = run action
+
+foreverFault error =
+    reply = request (Fault error)
+    foreverFault error
+
+context : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) ->{Async, Runtime.Service.Invocation Request Int, IO | e} a
+context action =
+    parent = path()
+    number = request NewContext
+    childPath = append parent [number]
+    facet = owner()
+    publisher = Runtime.Cell.createIn facet
+    reader = Runtime.Cell.reader publisher
+    outcomePublisher = Runtime.Cell.createIn facet
+    outcomeReader = Runtime.Cell.reader outcomePublisher
+    body = Runtime.Work.register facet (worker action facet childPath publisher)
+    started = request (StartContext childPath body outcomePublisher)
+    done = request (AwaitTask (ContextKey childPath))
+    case Runtime.Cell.read outcomeReader of
+        Just ContextSuccess ->
+            case Runtime.Cell.read reader of
+                Nothing -> foreverFault Stalled
+                Just completed -> Runtime.Completion.replay completed
+        Just (ContextFailure failure) ->
+            replayed = Runtime.Completion.replay (Runtime.Completion.fromFailure failure)
+            foreverFault Stalled
+        Just (ContextError error) -> foreverFault error
+        Nothing -> foreverFault Stalled

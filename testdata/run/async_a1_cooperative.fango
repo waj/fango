@@ -1,7 +1,8 @@
 import Async
 import Async.Cooperative
+import Runtime.Service
 
-first : () ->{Async.Async, IO} Int
+first : () ->{Async.Async, Runtime.Service.Invocation Async.Request Int, IO} Int
 first() =
     print "A1"
     Async.yield()

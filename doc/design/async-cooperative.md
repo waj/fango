@@ -1,54 +1,79 @@
-# Cooperative task driver
+# Cooperative Async driver
 
-The [A1 API](../reference/library-async-cooperative.md) puts a nullary `Async`
-effect, `Task`, `Request`, `Error`, and ordinary task operations in `Async`.
-`Async.Cooperative.run` selects the current executor at the root. `Async` imports
-only the shared Coroutine, Work, and Cell mechanisms; the cooperative driver
-imports `Async` to interpret its requests. The implementation uses C4 dynamic
-Coroutine scopes and C6a typed cells. The runner owns one registry and one `Runtime.Work.Owner`
-for its root and children. A child is registered before a `Spawn` request reaches
-the driver. The request carries a uniform checked Work package; its typed
-publisher and reader remain in the worker and Task, never in the queue.
+The [Async reference](../reference/library-async-cooperative.md) owns the public
+behavior. The cooperative runner drives all tasks in one dynamic Coroutine
+scope. `Async.run` and `Async.runOn Runtime.Executor.cooperative` create that scope;
+`Async.Cooperative.run` is the same policy-specific entry point.
 
-Each `Async` worker handles the effect locally and translates an operation to
-its own scoped pause callback. The worker's explicit effect annotation retains
-the action's residual row in its Work registration and discharges `Async` before
-the driver advances it. `Async` exports this generic worker adapter for runners;
-it does not contain queue or executor policy. The lower-level
-`Runtime.Async.Cooperative` probes use C6c `Runtime.Service.run` to exercise the
-same request protocol through shared service invocation.
+## Execution and context authority
 
-The driver alone advances Work and interprets requests. Its state has a FIFO
-ready queue, a list of parked registrations, disjoint task and signal
-notification keys, the next task ID, and a finite scripted signal list. A queue
-entry also stores the reply for its next advance: a spawn reply is the assigned
-child ID, while other replies are zero. This keeps task identity out of ambient
-worker state.
+Each task is a checked `Runtime.Work.Work Request Int ()` under the root scope's
+facet. Its typed `Runtime.Cell` holds a `Runtime.Completion` for repeated
+observation; the ready queue contains only uniform Work packages. A worker
+installs `Runtime.Service.run` with its own pause, then handles `Async` with a
+fixed facet and logical context path. The service invocation uses the active
+worker's pause even when a bound closure retains an earlier context. This
+keeps execution authority separate from context ownership.
 
-One tail-recursive `dispatch` computes and applies each transition in the same
-Machine frame. Its ready queue is separate from waiting/notification state,
-which a yield retains unchanged. Its private linked ready lists avoid the
-unused chunk capacity of the general-purpose List for small queues.
-Queue inspection avoids an intermediate
-dequeue result; yielding reuses jobs whose reply is already zero. With just one
-ready job, it retains the existing queue while still returning through the
-coroutine's suspension and advancement boundaries.
-Spawn appends the child at the FIFO tail and resumes the parent next, so
-the parent receives its ID and continues before the child starts. Yield enqueues
-only the current task.
-Wait removes it from ready and adds one registration unless its key is already
-notified. Signal and completion claim matching registrations and enqueue them
-once. A wait for a completed task whose cell is still empty reports Stalled
-instead of requeueing forever. When ready is empty, the driver consumes the
-next scripted signal; with no script and parked work it reports Stalled. Self
-wait reports SelfAwait immediately. Scope exit closes all unfinished children; finished children
-unlink and clear execution storage before the driver returns.
+The driver is the sole Work advancer. A `Job` carries its assigned task key,
+next reply, logical owner path, and Work. A spawn request carries the owner
+path chosen by the `Async` evidence used at the call. The driver assigns a
+monotone key before it enqueues the child, so registration order determines
+failure order. `Async.bind` captures the current facet and path in a closure
+whose later service invocations still use the active worker's pause. Its
+resource capture cannot outlive the runner.
 
-The [neutral task fixture](../../testdata/run/async_a1_cooperative.fango),
-[low-level edge cases](../../testdata/run/async_a1_edges.fango), and
-[Stream suspension](../../testdata/run/async_a1_stream.fango) check exact traces
-in both backends. The [dynamic storage gate](../../cmd/fango/coroutine_dynamic_test.go)
-pins allocated owners and sessions in temporary instrumented runtimes and
-checks that A1 completion leaves no registry links, frames, or traversal state
-in the generated backend. The existing C4 interpreter probe checks the same
-dynamic registry and execution cleanup primitives without a native cell worker.
+`Async.context` allocates a child path, registers its body as another root-scope
+Work package, and parks the caller on a context key. The driver keeps a record
+for that path and wakes the caller only when no live job remains under it.
+Children can therefore create grandchildren after the context body has
+finished. A task spawned through evidence bound to an outer path stays in that
+outer context. One Coroutine scope is necessary here: parking an outer worker
+while it drives a separate inner Coroutine scope would abandon the inner
+scope before outer work could make progress.
+
+## Queue, completion, and failure
+
+The FIFO queue uses two linked lists and one tail-recursive dispatcher.
+Spawn continues the parent before the child starts; yield appends the current
+job. Await and signal waits remove jobs from ready and install a single
+registration. Completion and sticky signal notification wake matching waiters
+once. A failed worker publishes its completion, then sends a `Published`
+notification that places its awaiters ahead of unrelated ready work and its
+own failure report. An awaiter can replay and catch that saved failure; the
+later report still fails the owning context. The driver diagnoses self-await
+and lack of runnable or notified work as
+`Async.Error` rather than spinning. An already published completion still
+passes through a scheduling checkpoint before replay.
+
+The worker captures the whole task action, including its synchronous cleanup,
+then publishes one completion. A failed completion also sends a detached
+failure report and a replay Work package to the driver. The completion's row
+retains the task's effect obligations; its value and primary/suppressed
+payloads must pass the Cell publication capture check. Await replays from the
+cell through the awaiter's current evidence without rerunning the action.
+
+The first reported failure closes still-live jobs in the owning logical context. Close
+attempts run newest first, and their typed completion failures are retained in
+release-attempt order. The driver selects the context body first when it
+failed; otherwise it selects the lowest registered failed child, then attaches
+other child reports and cleanup failures. A nested context publishes the
+resulting detached failure tree to its caller after its jobs drain. The caller
+replays it through fresh evidence; the root replays its selected report after
+drain. Scheduler errors use the separate `Result Async.Error` path unless a
+typed failure was recorded. Closing unstarted Work does not execute its body.
+
+`Runtime.Completion.dropSuspension` and `dropDrive` remove private control
+labels only after an action has completed, so its saved result cannot resume
+that producer or driver. `fromFailure` reconstructs a Unit completion from a
+detached context report; replay validates the observing row's typed abort
+adapter and selects a fresh target. The interpreter and generated runtime use
+the same detached payload and suppressed-tree checks.
+
+The [A2 differential fixtures](../../testdata/run/async_a2_contexts.fango)
+cover nested lifetimes, outer waits, bound definition-site context, typed
+failure ordering, cleanup, caught awaits, expected failures, parent and
+unstarted cancellation, and
+direct/indirect escape rejection. The low-level
+`Runtime.Async.Cooperative` probes continue to exercise the A1 request and
+signal protocol independently of the public runner.

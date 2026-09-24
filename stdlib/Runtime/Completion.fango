@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Runtime.Completion exposing (Completion, capture, failure, replay)
+module Runtime.Completion exposing (Completion, capture, dropDrive, dropSuspension, failure, fromFailure, replay)
 
 -- A detached result of an action that has already run: either its value or an
 -- outward failure. Capture runs the action now; replay returns its value or
@@ -10,6 +10,7 @@ module Runtime.Completion exposing (Completion, capture, failure, replay)
 import Basics exposing (..)
 import Failure exposing (Failure)
 import Maybe exposing (Maybe)
+import Runtime.Coroutine exposing (Drive, Suspension)
 
 -- A completed value or saved outward failure. `a` is the success type; `e`
 -- records the effects needed to observe it. The action has finished, and no
@@ -31,3 +32,16 @@ replay = native
 -- Returns Nothing after success or Just a detached failure snapshot.
 failure : Completion a e -> Maybe Failure
 failure = native
+
+-- Rebind a detached failure to a completion row when a structured context
+-- has finished draining. Replay still validates the current typed evidence.
+fromFailure : Failure -> Completion () e
+fromFailure = native
+
+-- A finished action can retain only a value or an abort. Its producer's
+-- private resumptive pause cannot be replayed after completion.
+dropSuspension : Completion a {Suspension | e} -> Completion a e
+dropSuspension = native
+
+dropDrive : Completion a {Drive | e} -> Completion a e
+dropDrive = native

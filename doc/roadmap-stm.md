@@ -162,7 +162,7 @@ Each stage is usable without the ones after it.
    on its read set and a conflicting commit wake it. Count live registrations,
    and test commit before/during/after publication and cancellation during wait.
 4. **Parallel.** After C6d and the corresponding Async executor stage, run the
-   same fixtures under `Executor.parallel` and `Executor.mixed`. Both use the
+   same fixtures under `Runtime.Executor.parallel` and `Runtime.Executor.mixed`. Both use the
    sharing contract already required by stage 1; this stage validates concurrent
    native transaction access and publication rather than introducing permission
    to share a TVar for the first time.

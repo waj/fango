@@ -242,7 +242,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			checkBind(term.Bind)
 			checkExpr(term.Value, "evaluated expression", true)
 			if completion, ok := term.Value.(*core.Completion); ok {
-				checkRow(completion.Row, completion.Name != types.CompletionFailureName)
+				checkRow(completion.Row, completion.Name != types.CompletionFailureName && completion.Name != types.CompletionFromFailureName && completion.Name != types.CompletionDropSuspensionName && completion.Name != types.CompletionDropDriveName)
 				valid := completion.Value != nil && types.CompletionShape(completion.Name, completion.Value.Type(), completion.Ty)
 				if !valid || w.Name != completion.Name || !core.CaptureContractCurrent(w.Def) || types.CapturesCompletion(completion.Name) {
 					errs = append(errs, fmt.Errorf("%s: completion elimination lacks its current intrinsic proof", blockWhere))

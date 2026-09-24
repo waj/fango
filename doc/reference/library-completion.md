@@ -10,6 +10,9 @@ unwinding its caller. It is independent of Stream and can be used inside a
 capture : (() ->{e} a) ->{e} Completion a e
 replay : Completion a e ->{e} a
 failure : Completion a e -> Maybe Failure.Failure
+fromFailure : Failure.Failure -> Completion () e
+dropSuspension : Completion a {Runtime.Coroutine.Suspension | e} -> Completion a e
+dropDrive : Completion a {Runtime.Coroutine.Drive | e} -> Completion a e
 ```
 
 `Completion a e` is abstract. `capture action` runs `action()` immediately.
@@ -34,6 +37,15 @@ not run the original action or its cleanup again.
 abort. The snapshot uses the ordinary [Failure inspection
 API](library-effects.md); inspecting it does not perform the abort. Replay
 preserves opaque payloads even when public inspection cannot expose them.
+
+`fromFailure` forms a Unit completion from a detached snapshot after a
+structured context has drained. Its row must provide the failure effect when
+replayed; replay checks the operation and payload against a typed adapter in
+the observing row and chooses a fresh handler target. A missing or mismatched
+adapter is an invalid replay, not a way to perform an unchecked abort.
+`dropSuspension` and `dropDrive` remove the private coroutine control label
+from an already completed result. They do not discard ordinary IO or failure
+effects, or make a retained resource shareable.
 
 ```fango
 import Runtime.Completion

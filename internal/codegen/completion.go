@@ -12,6 +12,11 @@ func (g *gen) completionExpr(e *core.Completion) goast.Expr {
 	mode := e.Control.Resolve(g.control)
 	value := g.expr(e.Value, 0)
 	switch e.Name {
+	case types.CompletionDropSuspensionName, types.CompletionDropDriveName:
+		return value
+	case types.CompletionFromFailureName:
+		con := e.Ty.(*types.TCon)
+		return callExpr(indexExpr(selector("fangort", "CompletionFromFailure"), []goast.Expr{g.goType(con.Args[0])}), value)
 	case types.CompletionCaptureName, types.NativeRequestImmediateName:
 		fn := e.Value.Type().(*types.TFun)
 		args := []goast.Expr{}

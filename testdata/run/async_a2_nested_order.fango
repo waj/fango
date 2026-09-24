@@ -1,0 +1,38 @@
+import Async
+import Fail
+import Failure
+import List
+import Maybe
+import Result exposing (Result(..))
+import Runtime.Scope
+
+typedArgument : Failure.Failure -> Maybe.Maybe String
+typedArgument failure = Failure.argument 0 failure
+
+innerFail() = Runtime.Scope.finally (\_ ->
+    Async.yield()
+    Fail.fail "inner") (\_ -> Fail.fail "inner cleanup")
+
+innerWait() = Runtime.Scope.finally (\_ ->
+    Async.waitSignal 8
+    print "bad") (\_ -> Fail.fail "inner sibling cleanup")
+
+outerWait() = Runtime.Scope.finally (\_ ->
+    Async.waitSignal 8
+    print "bad") (\_ -> Fail.fail "outer cleanup")
+
+main() =
+    report = Fail.attemptReport (\_ -> Async.run (\_ ->
+        outer = Async.spawn outerWait
+        inner = Async.context (\_ ->
+            first = Async.spawn innerFail
+            second = Async.spawn innerWait
+            Async.yield()
+            5)
+        print inner
+        1))
+    case report of
+        Ok value -> print value
+        Err detail ->
+            print detail.primary
+            print (List.map typedArgument detail.suppressed)

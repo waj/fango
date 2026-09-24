@@ -5,7 +5,7 @@ module Runtime.Async.Cooperative exposing (await, run, signal, spawn, waitSignal
 -- Low-level probes install their own service pause authority; ordinary task
 -- bodies use Async and enter here through Async.Cooperative.run.
 
-import Async exposing (Error(..), Request(..), Task)
+import Async exposing (Error(..), Request(..))
 import Basics exposing (..)
 import IO exposing (IO)
 import List exposing (List(..))
@@ -17,6 +17,7 @@ import Runtime.Service
 import Runtime.Work
 
 type Key = TaskKey Int | SignalKey Int deriving (Eq)
+type Task a = Task Int (Runtime.Cell.Reader a)
 type Job = Job Int Int (Runtime.Work.Work Request Int ())
 type Waiting = Waiting Key Job
 type Jobs = NoJobs | Jobs Job Jobs
@@ -67,14 +68,15 @@ wake key waits ready =
 spawn : Runtime.Coroutine.Facet -> Runtime.Work.Work Request Int () -> Runtime.Cell.Reader a ->{Runtime.Service.Invocation Request Int} Task a
 spawn owner work reader =
     key = Runtime.Service.invoke (Spawn work)
-    Async.makeTask key reader
+    Task key reader
 
 await : Task a ->{Runtime.Service.Invocation Request Int, IO} a
 await task =
-    case Async.poll task of
+    Task key reader = task
+    case Runtime.Cell.read reader of
         Just value -> value
         Nothing ->
-            reply = waitTask (Async.taskKey task)
+            reply = waitTask key
             await task
 
 yield : () ->{Runtime.Service.Invocation Request Int} ()
@@ -130,6 +132,14 @@ dispatch owner ready state =
                             Signal target ->
                                 (remaining, awoken) = wake (SignalKey target) waiting (Queue rest back)
                                 Continue (enqueue (Job key 0 work) awoken) (State remaining [SignalKey target | notified] nextKey script)
+                            Start _ _ -> Done (Err Stalled)
+                            StartContext _ _ _ -> Done (Err Stalled)
+                            AwaitTask _ -> Done (Err Stalled)
+                            NewContext -> Done (Err Stalled)
+                            Check -> Done (Err Stalled)
+                            Published -> Done (Err Stalled)
+                            Report _ _ -> Done (Err Stalled)
+                            Fault error -> Done (Err error)
                     Runtime.Coroutine.Finished () ->
                         (remaining, awoken) = wake (TaskKey key) waiting (Queue rest back)
                         Continue awoken (State remaining [TaskKey key | notified] nextKey script)

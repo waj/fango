@@ -1180,6 +1180,12 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 				}
 			}
 		}
+	case "completion_drop":
+		result = child(0)
+	case "completion_from_failure":
+		failure := child(0)
+		id := f.alloc(key.allocation(), flowObject{kind: "completion", fields: []flowValue{{}, failure}})
+		result = flowValue{refs: []int{id}}
 	case "completion_failure", "completion_replay":
 		completed := child(0)
 		result.unknown = completed.unknown

@@ -7,7 +7,8 @@ Completion introduction, replay evidence, and capture preservation.
 
 ## Core and evidence
 
-The bundled `Runtime.Completion.capture`, `Runtime.Completion.replay`, and `Runtime.Completion.failure`
+The bundled `Runtime.Completion.capture`, `Runtime.Completion.replay`, `Runtime.Completion.failure`,
+`Runtime.Completion.fromFailure`, `dropSuspension`, and `dropDrive`
 intrinsics elaborate to `core.Completion`. Their public result/row relationship
 is checked before row erasure. Core retains the result type, operation identity,
 residual invocation row, execution control, and checked Maybe descriptor for
@@ -20,6 +21,9 @@ detached failure tree. Every failure keeps the canonical effect/operation,
 operation index, complete payload tuple, and nominal payload descriptors.
 Targets, handler frames, resumptions, and invocation evidence are excluded.
 Suppressed reports are recursively copied on capture and replay.
+`fromFailure` restores a detached context report to a Unit completion without
+an old target; replay still selects and validates current evidence. The two
+drop operations change only private control labels after capture has finished.
 
 Concrete residual evidence bindings include a typed abort-replay adapter
 generated with the binding's effect declaration and instantiated parameters.

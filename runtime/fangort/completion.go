@@ -11,6 +11,15 @@ func CaptureCompletion[A any](outcome Outcome[A]) Completion[A] {
 	return Completion[A]{value: outcome.Value, failure: SnapshotFailure(outcome.Exit)}
 }
 
+func CompletionFromFailure[A any](failure *Failure) Completion[A] {
+	if failure == nil {
+		panic("fango: missing completion failure")
+	}
+	return Completion[A]{failure: failure}
+}
+
+func DetachedFailureExit(failure *Failure) *ExitRequest { return detachedExit(failure) }
+
 func (c Completion[A]) Failure() *Failure { return c.failure }
 
 func ReplayCompletion[A any](c Completion[A], row *EvidenceRow) Outcome[A] {

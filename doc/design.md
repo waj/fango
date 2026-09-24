@@ -53,8 +53,8 @@ dynamic scope registries, and private abandonment.
 and capture-preserving execution boundaries.
 [Shared capabilities](design/shared-capabilities.md) — indexed native storage,
 synchronized values, and split service evidence.
-[Cooperative task driver](design/async-cooperative.md) — neutral Async operations,
-dynamic FIFO tasks, scripted waits, typed results, and driver authority.
+[Cooperative task driver](design/async-cooperative.md) — structured root and
+nested contexts, FIFO tasks, typed failure selection, and driver authority.
 [Native requests](design/native-requests.md) — scoped retention, quiescent drain,
 and driver-owned callback completion.
 

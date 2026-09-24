@@ -74,6 +74,7 @@ func snapshotFailure(exit *ExitRequest) *fangort.Failure {
 		result := &fangort.ExitRequest{Payload: exit.Payload, PayloadTypes: exit.PayloadTypes}
 		if exit.Op != nil {
 			result.OperationName = exit.Op.Name
+			result.Operation = exit.Op.Index
 			if exit.Op.Owner != nil {
 				result.Effect = exit.Op.Owner.Name
 			}

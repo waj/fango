@@ -188,7 +188,7 @@ func CheckRowEvidence(p *Prog) []error {
 			case *CoroutineAdvance:
 				needsRow = true
 			case *Completion:
-				needsRow = e.Name != types.CompletionFailureName
+				needsRow = e.Name != types.CompletionFailureName && e.Name != types.CompletionFromFailureName && e.Name != types.CompletionDropSuspensionName && e.Name != types.CompletionDropDriveName
 			default:
 				return true
 			}

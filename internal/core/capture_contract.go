@@ -87,8 +87,14 @@ func (b *captureBuilder) expr(e Expr) *types.CaptureFlow {
 		children(e.Args...)
 	case *Completion:
 		n.Kind = "completion_failure"
+		if e.Name == types.CompletionDropSuspensionName || e.Name == types.CompletionDropDriveName {
+			n.Kind = "completion_drop"
+		}
 		if e.Name == types.CompletionReplayName {
 			n.Kind = "completion_replay"
+		}
+		if e.Name == types.CompletionFromFailureName {
+			n.Kind = "completion_from_failure"
 		}
 		if types.CapturesCompletion(e.Name) {
 			n.Kind = "completion_capture"

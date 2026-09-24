@@ -5,7 +5,8 @@ import Async
 import Basics exposing (..)
 import IO exposing (IO)
 import Result exposing (Result)
-import Runtime.Async.Cooperative
+import Runtime.Executor
+import Runtime.Service
 
-run : (() ->{Async.Async | e} a) ->{IO | e} Result Async.Error a
-run action = Runtime.Async.Cooperative.run [] (Async.worker action)
+run : (() ->{Async.Async, Runtime.Service.Invocation Async.Request Int, IO | e} a) ->{IO | e} Result Async.Error a
+run action = Async.runOn Runtime.Executor.cooperative action

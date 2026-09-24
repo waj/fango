@@ -695,7 +695,7 @@ func (l *linter) expr(e Expr, where string) {
 		}
 		l.expr(e.Value, where)
 		completion := e.Value.Type()
-		if types.CapturesCompletion(e.Name) {
+		if types.CapturesCompletion(e.Name) || e.Name == types.CompletionFromFailureName {
 			completion = e.Ty
 		}
 		con := completion.(*types.TCon)

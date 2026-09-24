@@ -1,0 +1,15 @@
+import Async
+
+main() = print (Async.run (\_ ->
+    outerAction = \_ ->
+        Async.waitSignal 8
+        print "root-owned"
+        5
+    makeOuter = Async.bind (\_ -> Async.spawn outerAction)
+    inside = Async.context (\_ ->
+        task = makeOuter()
+        print "inner done"
+        2)
+    print inside
+    Async.signal 8
+    1))

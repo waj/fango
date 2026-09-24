@@ -141,7 +141,7 @@ func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[i
 		case *core.CoroutineAdvance:
 			bind(&e.Row, true)
 		case *core.Completion:
-			bind(&e.Row, e.Name != types.CompletionFailureName)
+			bind(&e.Row, e.Name != types.CompletionFailureName && e.Name != types.CompletionFromFailureName && e.Name != types.CompletionDropSuspensionName && e.Name != types.CompletionDropDriveName)
 		case *core.Perform:
 			resolve(&e.Effect)
 		case *core.ControlExit:

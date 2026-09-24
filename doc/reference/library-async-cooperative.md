@@ -1,84 +1,90 @@
 # Cooperative Async tasks
 
-`Async` provides the A1 task surface. A task body uses the nullary `Async.Async`
-effect and calls `Async.spawn`, `Async.await`, `Async.yield`, `Async.waitSignal`,
-or `Async.signal`. Executor choice occurs at the root runner. The available
-runner is `Async.Cooperative.run`. Parallel and mixed executors are not
-implemented yet.
+`Async` supplies structured tasks on the cooperative executor. `Async.run`
+creates the implicit root context; `Async.runOn Runtime.Executor.cooperative` and
+`Async.Cooperative.run` select the same policy. `Runtime.Executor` currently exposes
+only `cooperative`. Parallel and mixed policies, native readiness, and
+suspending cleanup remain [roadmap work](../roadmap-async.md#implementation-stages).
 
 ```fango
-spawn : (() ->{Async | e} a) ->{Async, IO | e} Task a
-await : Task a ->{Async, IO} a
-yield : () ->{Async} ()
-Async.Cooperative.run : (() ->{Async | e} a) ->{IO | e} Result Async.Error a
+spawn : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a)
+    ->{Async, Runtime.Service.Invocation Request Int, IO | e} Task a {IO | e}
+await : Task a e ->{Async, Runtime.Service.Invocation Request Int, IO | e} a
+context : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a)
+    ->{Async, Runtime.Service.Invocation Request Int, IO | e} a
+run : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a)
+    ->{IO | e} Result Error a
+runOn : Runtime.Executor.Executor -> (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a)
+    ->{IO | e} Result Error a
 ```
 
-`spawn` registers the child without running it, then enqueues it at the FIFO
-tail. The parent continues until its next scheduling checkpoint. The child's
-remaining effects flow through `spawn` and `Async.Cooperative.run` even when its Task
-is ignored. Allocation and reading of the typed result cell charge `IO`.
-`await` returns a published value repeatedly without rerunning the task; while
-the cell is empty it parks the caller. `yield` moves the caller to the ready
-tail. `waitSignal` parks until a matching signal is delivered. `signal` uses
-sticky notifications, so early or duplicate delivery cannot lose or duplicate
-a wakeup.
+`Async` is a nullary service effect. An explicit annotation for a task body
+that calls Async operations includes both `Async` and the shared
+`Runtime.Service.Invocation Async.Request Int` row. Inferred annotations can
+leave those labels implicit. `IO` accounts for typed completion cells. The
+child's remaining effects flow through `spawn` and the runner even if its
+handle is ignored.
 
-The A1 Task contains a successful value only. Its root runner returns `Err
-SelfAwait` for an internal self-wait and `Err Stalled` when parked work has no
-remaining wakeup or a finished task omitted publication. Typed child failures,
-unobserved failure selection, cancellation, nested contexts, and the common
-`runOn` executor selector belong to later [Async stages](../roadmap-async.md#implementation-stages).
+`spawn` registers a child without executing its body, then enqueues it at the
+FIFO tail. The parent continues until a scheduling checkpoint. `await` parks
+while the completion is unavailable. It observes one stored result, so repeated
+and simultaneous awaits do not rerun work. `poll : Task a e ->{IO} Maybe
+(Runtime.Completion.Completion a e)` checks readiness without waiting. A
+published completion can be replayed later under fresh failure evidence.
 
-`Async` owns the task handle, request type, and generic worker adapter.
-`Runtime.Async.Cooperative` imports that protocol and interprets it. The
-low-level driver is also used for ownership and edge-case probes. Its runner
-accepts a scripted list of integer signals and worker factories. A worker
-registers each child in the runner's checked
-Coroutine facet, then passes its work package and typed cell reader to `spawn`.
-Its protocol is:
+`Async.context` makes a nested lifetime boundary on the same executor. It
+waits for every task it owns before returning, including grandchildren made
+after its body produced a value. A task created in the root remains root-owned
+when awaited inside the nested context. The root similarly waits for its
+outstanding children. Task handles retain their owning scope and cannot escape
+through a return, ADT, or store. An unhandled Async operation outside a runner
+is a compile-time effect error.
+
+Ordinary effectful callbacks use the context supplied at their call. To retain
+a definition-site context in a callback used later inside another context,
+call `Async.bind` while the intended context is active:
 
 ```fango
-run : List Int
-    -> (Runtime.Coroutine.Facet -> Runtime.Cell.Publisher a
-        -> (Async.Request ->{Runtime.Coroutine.Suspension} Int)
-        -> Int ->{Runtime.Coroutine.Suspension, IO | e} ())
-    ->{IO | e} Result Async.Error a
-
-spawn : Runtime.Coroutine.Facet -> Runtime.Work.Work Async.Request Int ()
-    -> Runtime.Cell.Reader a ->{Runtime.Service.Invocation Async.Request Int} Async.Task a
-await : Async.Task a ->{Runtime.Service.Invocation Async.Request Int, IO} a
-yield : () ->{Runtime.Service.Invocation Async.Request Int} ()
-waitSignal : Int ->{Runtime.Service.Invocation Async.Request Int} ()
-signal : Int ->{Runtime.Service.Invocation Async.Request Int} ()
-waitTask : Int ->{Runtime.Service.Invocation Async.Request Int} ()
-
-type Async.Error = SelfAwait | Stalled
+Async.run (\_ ->
+    makeOuter = Async.bind (\_ -> Async.spawn (\_ -> 5))
+    Async.context (\_ ->
+        outerTask = makeOuter()
+        Async.await outerTask))
 ```
 
-`Async.Task` has private constructors. `run` creates one
-dynamic Coroutine scope, schedules the root as task zero, and drives a FIFO
-ready queue. Each worker installs its own invocation authority with
-`Runtime.Service.run pause`. The worker publishes its successful result through
-the supplied cell before finishing. `spawn` enqueues an already registered
-child at the queue tail and returns its typed Task; the parent keeps running
-until its next scheduling checkpoint. `await` reads the cell repeatedly and
-parks while it is empty. It never advances the child's coroutine itself.
+The bound callback retains the original owner, while its scheduling requests
+use the worker currently executing it. A bound callback is scoped and cannot
+outlive that owner. The [driver design](../design/async-cooperative.md)
+explains the two authorities.
 
-`yield` moves the current task to the ready tail. `waitSignal` parks it until
-the matching signal is delivered. `signal` and the runner's script use the same
-sticky notification state: arrival before registration is remembered, duplicate
-arrival does not enqueue a task twice, and a parked task is absent from the
-ready queue. Task completion wakes every waiter for that task. Task and signal
-keys are separate namespaces even when their integers match. A task waiting
-for its own key through the internal `waitTask` probe makes the runner return
-`Err SelfAwait`; no ready work and no
-remaining scripted signal while tasks are parked makes it return `Err Stalled`.
-Awaiting a finished worker that omitted publication also returns `Err Stalled`.
-The runner drains its scope on either error. Completion unlinks the execution
-from the dynamic registry and clears its coroutine storage; the cell retains
-the value for repeated awaits while the scope is live.
+A child may fail with an ordinary typed effect. The task stores its completion;
+`await` replays its saved failure through the awaiter's current handler.
+Catching that replay does not change the stored failure or its context's
+obligation to report it. Catch expected failure inside the child and return a
+`Result` to make the child successful. After a failure, the driver cancels its
+siblings at supported checkpoints, closes unfinished work, and waits for
+synchronous cleanup before the context exits. Closing work that has not
+started does not run its body. The context body has failure precedence;
+otherwise the lowest registered failed child is primary. Other child failures
+follow in registration order, then owner cleanup failures in reverse close
+order. Primary and suppressed payloads retain their types. Nested reports
+remain nested and replay under the caller's current evidence.
 
-The current API has successful, capture-free results only. External native
-readiness belongs to later [Async stages](../roadmap-async.md#implementation-stages).
-The [design](../design/async-cooperative.md) describes the driver and its
-authority model.
+`Async.yield()` gives other ready tasks a turn; `Async.waitSignal key` parks,
+and `Async.signal key` publishes a sticky notification. These are scripted
+cooperative readiness tools, not a real IO readiness adapter. Yield, waits,
+startup, context entry/exit, and await of an already published result are the
+supported cancellation checkpoints. `Async.Error` has `SelfAwait`, `Stalled`,
+and `InvalidWorkerCount Int`. `SelfAwait` detects a task waiting on itself;
+`Stalled` reports no runnable work or possible notification. The worker count
+case is reserved for the later mixed executor. Scheduler errors are returned as
+`Err`; a typed failure recorded during drain takes precedence and exits through
+its ordinary effect handler.
+
+`Runtime.Async.Cooperative` remains a low-level A1 probe driver. It takes a
+scripted signal list and worker factories and directly handles `Async.Request`
+with `Runtime.Service.run`. Its private Task contains only successful values;
+it does not implement public structured contexts or typed child failure
+selection. The [A1 fixtures](../../testdata/run/async_a1_cooperative.fango)
+and [A2 fixtures](../../testdata/run/async_a2_contexts.fango) run in both the
+Core interpreter and generated backend.

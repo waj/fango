@@ -1,15 +1,14 @@
 # Roadmap: structured Async and execution models
 
-This document owns the **proposed** Async library: tasks and contexts,
-cooperative scheduling, parallel and mixed execution, cancellation, native
-readiness, and concurrent combinators. It depends on the shared
+This document owns the remaining Async work: parallel and mixed execution,
+native readiness, suspending cleanup, and concurrent combinators. It depends on the shared
 [coroutine foundation](roadmap-coroutines.md), whose ownership/control
 contracts apply without compiler recognition of Async names. The
 [effects roadmap](roadmap-effects.md) owns general language extensions.
 
-The structured APIs and examples below remain acceptance specifications. The
-[A1 Async surface](reference/library-async-cooperative.md) implements neutral task
-operations with a separate cooperative runner and an internal scripted driver.
+The structured APIs and examples below specify the full target. The
+[A2 Async surface](reference/library-async-cooperative.md) implements structured
+cooperative tasks, with an internal scripted A1 driver.
 Ordinary calls, trailing Unit lambdas, callback subsumption, scopes,
 and effect instances are implemented foundations; their contracts remain in
 the [reference](reference.md). Promote completed behavior there and architecture
@@ -190,13 +189,13 @@ context awaiting live outer work is not stalled because its own queue is empty.
 ### Executor selection
 
 ```fango
-Async.runOn Executor.cooperative \_ ->
+Async.runOn Runtime.Executor.cooperative \_ ->
     Async.await (Async.spawn (\_ -> fetch url))
 
-Async.runOn Executor.parallel \_ ->
+Async.runOn Runtime.Executor.parallel \_ ->
     Async.await (Async.spawn (\_ -> fetch url))
 
-Async.runOn (Executor.mixed 4) \_ ->
+Async.runOn (Runtime.Executor.mixed 4) \_ ->
     Async.await (Async.spawn (\_ -> fetch url))
 ```
 
@@ -218,13 +217,14 @@ await : Task a e ->{Async | e} a
 yield : () ->{Async} ()
 context : (() ->{Async | e} a) ->{Async | e} a
 run : (() ->{Async | e} a) ->{e} Result Error a
-runOn : Executor -> (() ->{Async | e} a) ->{e} Result Error a
+runOn : Runtime.Executor.Executor -> (() ->{Async | e} a) ->{e} Result Error a
 
 type Error = InvalidWorkerCount Int | SelfAwait | Stalled
 ```
 
-`Executor` is abstract; `Executor.cooperative : Executor`,
-`Executor.parallel : Executor`, and `Executor.mixed : Int -> Executor` describe
+`Runtime.Executor.Executor` is abstract; `Runtime.Executor.cooperative : Runtime.Executor.Executor`,
+`Runtime.Executor.parallel : Runtime.Executor.Executor`, and
+`Runtime.Executor.mixed : Int -> Runtime.Executor.Executor` describe
 policy values. `runOn` validates a mixed count. `run` is `runOn cooperative`.
 Both runners return `Ok` only after successful drain, or `Err Async.Error` after
 a scheduler error and drain; domain failures still propagate through `e` under
@@ -577,7 +577,7 @@ that never reaches a checkpoint.
 
 ### Goroutine executor
 
-`Executor.parallel` allocates one goroutine per task to drive its coroutine to
+`Runtime.Executor.parallel` allocates one goroutine per task to drive its coroutine to
 events. On yield,
 check cancellation and call a general sidecar implementing `runtime.Gosched`
 before continuing. This offers other goroutines a scheduling opportunity;
@@ -678,7 +678,7 @@ language work is specified once in the coroutine roadmap.
 | --- | --- | --- |
 | A0: Library representation contract | C0/C4 contract drafts; no C1–C4 implementation prerequisite | DONE: selected representation and proof models; review before C1 |
 | A1: Deterministic cooperative tasks | A0, C4, C6a, C6c (including shared service evidence); C1 implements C0's general extensions | DONE: executor-neutral Async operations with cooperative dynamic spawn/yield/await and scripted waits; no C6b prerequisite |
-| A2: Structured contexts and failures | A1 | Root/nested lifetimes, cancellation, reusable results, synchronous cleanup |
+| A2: Structured contexts and failures | A1 | DONE: root/nested lifetimes, cancellation, reusable results, synchronous cleanup |
 | A3: Native readiness and IO | A2, C6b; C6a if adapter values require it | Overlapping IO with bounded native work |
 | A4: Suspending cleanup integration | A3, C5 | Cancellation/drain through asynchronous acquire/release |
 | A5: Goroutine executor | A4, C6d | One driver goroutine per task |
@@ -763,26 +763,18 @@ selects the executor only at the root. `Async` has no dependency on the
 cooperative driver. A closed-row check rejects an unawaited child's
 unhandled effect. The dynamic storage gate checks A1 terminal execution in the
 generated backend and the shared C4 cleanup primitive in the interpreter. A2
-still owns structured contexts, cancellation, typed child failures, and the
-executor-selecting `runOn` interface.
+extended this task protocol with structured contexts, typed child failures,
+and `runOn`.
 
 ### A2: Structured contexts and failures
 
-Expose run/context with implicit root ownership, nested lifetime rules,
-reusable capture-free results, child completion, and synchronous cancellation
-cleanup. Implement the selected failure policy. Detect cancellation at explicit
-checkpoints and reject unsafe captures even in cooperative mode.
-
-**Acceptance:** root owns direct spawns; nested contexts drain only their own
-work; awaiting an outer task does not transfer it; a definition-site closure
-retains its original context. Context exit includes grandchildren spawned after
-body completion. Failed children cancel siblings; catching await does not erase
-a failure; expected failures handled in children do not fail the context.
-Cancellation before first execution runs no child body. Cleanup failure reports
-remain typed and ordered under the selected policy.
-
-**Stopping point:** a useful structured task library with fake readiness and
-synchronous cleanup, without a real-IO responsiveness claim.
+**DONE.** The [structured Async API](reference/library-async-cooperative.md)
+and [cooperative driver design](design/async-cooperative.md) own the implemented
+contract. The [A2 differential fixtures](../testdata/run/async_a2_contexts.fango)
+cover nested and root ownership, outer awaits, bound definition-site context,
+grandchildren, caught await without failure erasure, parent cancellation,
+and typed cleanup ordering in both
+backends. A3 adds real IO readiness; A4 adds suspending cleanup.
 
 ### A3: Native readiness and IO
 
@@ -817,7 +809,7 @@ has the documented non-completion behavior.
 
 ### A5: Goroutine executor
 
-Implement runOn with Executor.parallel over C6d's checked concurrent callbacks,
+Implement runOn with Runtime.Executor.parallel over C6d's checked concurrent callbacks,
 launch/join, synchronization, and host protocol. Use one goroutine per task and
 Gosched for voluntary yield; preserve explicit coroutine frames.
 
@@ -831,7 +823,7 @@ invariants, not interleaving traces.
 
 ### A6: Mixed executor
 
-Implement Executor.mixed with a positive worker count and the shared ready queue,
+Implement Runtime.Executor.mixed with a positive worker count and the shared ready queue,
 after A4 and C6d. A5 may precede it for test reuse but is not required.
 Make ownership handoff explicit from worker to registration/queue and back.
 Start without work stealing or worker affinity.
@@ -891,7 +883,7 @@ effect order, cleanup, captures, and exclusive advancement. Coordinate with
 [calling conventions](roadmap-calls.md). No optimization gates earlier API use.
 The implemented [cooperative comparison](design/verification.md#cooperative-async-comparison)
 retains the historical native Async baseline and a 1.10 sustained-yield target;
-extend its coverage as structured contexts and native readiness are implemented.
+extend its coverage when native readiness is implemented.
 Reduce the setup and completion overhead exposed by its short-task and
 no-yield controls.
 
