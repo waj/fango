@@ -27,7 +27,7 @@ func (g *gen) synchronousMachineCallback(arg core.Expr) goast.Expr {
 	}
 	params = append(params, paramSpec{name: param, typ: g.goType(fn.Arg)})
 	args = append(args, ident(param))
-	frame := callExpr(callbackMember(ident(name), types.Machine), args...)
+	frame := callExpr(selector("fangort", "StartFrame"), callExpr(callbackMember(ident(name), types.Machine), args...))
 	outcome := callExpr(indexExpr(selector("fangort", "RunSynchronousMachine"), []goast.Expr{g.goType(fn.Ret)}), frame)
 	exit := funcLitParams(params, g.outcomeType(fn.Ret), []goast.Stmt{returnStmt(outcome)})
 	value := &goast.CompositeLit{Type: g.goType(fn), Elts: []goast.Expr{&goast.KeyValueExpr{Key: ident("Exit"), Value: exit}}}

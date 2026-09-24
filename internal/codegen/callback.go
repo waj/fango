@@ -36,12 +36,13 @@ func (g *gen) callbackMemberType(fn *types.TFun, mode types.Transport) *goast.Fu
 	if mode == types.Exit {
 		result = g.outcomeType(fn.Ret)
 	} else if mode == types.Machine {
-		result = selector("fangort", "MachineFrame")
+		result = selector("fangort", "MachineStart")
 	}
 	return &goast.FuncType{Params: paramFields(params), Results: &goast.FieldList{List: []*goast.Field{{Type: result}}}}
 }
 func (g *gen) callbackType(fn *types.TFun) goast.Expr {
 	fields := []*goast.Field{}
+	fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("PauseOwner")}, Type: &goast.StarExpr{X: selector("fangort", "YieldOwner")}})
 	for _, mode := range []types.Transport{types.Direct, types.Exit, types.Machine} {
 		fields = append(fields, &goast.Field{Names: []*goast.Ident{ident(memberName(mode))}, Type: g.callbackMemberType(fn, mode)})
 	}
@@ -52,6 +53,18 @@ func (g *gen) callbackValue(lam *core.Lambda) goast.Expr {
 	fn := lam.Ty.(*types.TFun)
 	minimum := g.callbackMinimum(lam)
 	var fields []goast.Expr
+	if closure := g.machineClosures[lam]; closure != nil {
+		if target, request := forwardedPause(g.machineWorkers[closure.Worker]); target != nil {
+			arg, identity := request.(*core.VarRef)
+			callee := target.(*core.VarRef)
+			calleeType := callee.Ty.(*types.TFun)
+			if identity && arg.Name == lam.Param && callee.Name != lam.Param && types.Equal(fn.Arg, calleeType.Arg) && types.Equal(fn.Ret, calleeType.Ret) {
+				// Identity adapters may widen an unused row, but cannot change
+				// the request/reply protocol or perform work before forwarding.
+				fields = append(fields, &goast.KeyValueExpr{Key: ident("PauseOwner"), Value: &goast.SelectorExpr{X: g.machineExpr(callee), Sel: ident("PauseOwner")}})
+			}
+		}
+	}
 	for _, mode := range []types.Transport{types.Direct, types.Exit} {
 		if minimum > mode {
 			continue
@@ -89,7 +102,7 @@ func (g *gen) callbackValue(lam *core.Lambda) goast.Expr {
 			body = []goast.Stmt{&goast.ReturnStmt{Results: []goast.Expr{invoke, ident("nil")}}}
 		}
 		run := &goast.FuncLit{Type: &goast.FuncType{Params: &goast.FieldList{}, Results: &goast.FieldList{List: []*goast.Field{{Type: ident("any")}, {Type: &goast.StarExpr{X: selector("fangort", "ExitRequest")}}}}}, Body: &goast.BlockStmt{List: body}}
-		machine = funcLitParams(params, selector("fangort", "MachineFrame"), []goast.Stmt{returnStmt(callExpr(selector("fangort", "ImmediateMachine"), run))})
+		machine = funcLitParams(params, selector("fangort", "MachineStart"), []goast.Stmt{returnStmt(callExpr(selector("fangort", "ImmediateStart"), run))})
 	}
 	fields = append(fields, &goast.KeyValueExpr{Key: ident("Machine"), Value: machine})
 	return &goast.CompositeLit{Type: g.callbackType(fn), Elts: fields}

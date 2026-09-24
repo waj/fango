@@ -14,6 +14,7 @@ const (
 	MachineSuspend
 	MachineExit
 	MachineAdvance
+	MachineRun
 )
 
 // MachineFrame is implemented by module-owned generated frame types. Step
@@ -106,6 +107,7 @@ const (
 )
 
 type Machine struct {
+	pendingRun       func() (any, *ExitRequest)
 	stopRouting      bool
 	parentStateOwner *Machine
 	parentStateCount int
@@ -160,10 +162,28 @@ func (m *Machine) runLocal() (event MachineEvent, err error) {
 	for len(m.frames) != 0 {
 		m.stats.Steps++
 		active := m.frames[len(m.frames)-1]
-		step := active.Step(m)
+		var step MachineStep
+		if m.pendingRun != nil {
+			run := m.pendingRun
+			m.pendingRun = nil
+			value, exit := run()
+			if exit == nil {
+				m.result = value
+				continue
+			}
+			step = MachineStep{Kind: MachineExit, Exit: exit}
+		} else {
+			step = active.Step(m)
+		}
 		switch step.Kind {
 		case MachineContinue:
 			continue
+		case MachineRun:
+			run, ok := step.Value.(func() (any, *ExitRequest))
+			if !ok || run == nil {
+				return MachineEvent{}, fmt.Errorf("fangort: machine invocation has no body")
+			}
+			m.pendingRun = run
 		case MachineCall:
 			if step.Frame == nil {
 				return MachineEvent{}, fmt.Errorf("fangort: machine call has no frame")
@@ -401,6 +421,7 @@ func (m *Machine) unwind(primary *ExitRequest, depth int) *ExitRequest {
 }
 
 func (m *Machine) clearFrames() {
+	m.pendingRun = nil
 	m.parentStateOwner = nil
 	m.parentStateCount = 0
 	for i := len(m.frames) - 1; i >= 0; i-- {

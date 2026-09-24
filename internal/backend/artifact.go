@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	emissionSchema = 4
+	emissionSchema = 5
 	emissionKind   = "emitted-unit"
 )
 

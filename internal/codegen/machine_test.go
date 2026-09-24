@@ -325,7 +325,7 @@ func TestFixture(t *testing.T) {
     event, err = callback.Resume(int64(42))
     if err != nil || !event.Done || event.Value != int64(42) { t.Fatalf("callback done: %#v %v", event, err) }
 
-    polymorphic := fangort.StartMachine(MachineFrame_Main_dot_applyCallback(struct{Direct func(int64)int64;Exit func(int64)fangort.Outcome[int64];Machine func(int64)fangort.MachineFrame}{Machine:func(value int64)fangort.MachineFrame{return MachineFrame_Main_dot_generic[int64](fangort.NominalType("Int",true),value)}}))
+    polymorphic := fangort.StartMachine(MachineFrame_Main_dot_applyCallback(struct{PauseOwner *fangort.YieldOwner;Direct func(int64)int64;Exit func(int64)fangort.Outcome[int64];Machine func(int64)fangort.MachineStart}{Machine:func(value int64)fangort.MachineStart{return fangort.FrameStart(MachineFrame_Main_dot_generic[int64](fangort.NominalType("Int",true),value))}}))
     event, err = polymorphic.Run()
     if err != nil || event.Done || event.Request != int64(17) { t.Fatalf("polymorphic callback: %#v %v", event, err) }
     event, err = polymorphic.Resume(int64(71))
@@ -416,7 +416,7 @@ func TestMachineFramesCrossModuleThroughExportedConstructors(t *testing.T) {
 		t.Fatalf("dependency does not export its frame constructor:\n%s", dep)
 	}
 	if !strings.Contains(mainGo, `m_Dep "fangobuild/modules/Dep"`) ||
-		!strings.Contains(mainGo, "m_Dep.MachineFrame_Dep_dot_invoke(") {
+		!strings.Contains(mainGo, "m_Dep.MachineStart_Dep_dot_invoke(") {
 		t.Fatalf("entry does not call the dependency-owned constructor:\n%s", mainGo)
 	}
 	runtimeSources, err := runtimefiles.Packages("fangort")

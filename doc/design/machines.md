@@ -39,13 +39,33 @@ emits typed frames with PC, parameters, and computed live locals. Step runs loca
 blocks in a loop and returns only for suspension, call/tail transfer, return,
 or exit; only the shared runtime dispatcher invokes Step.
 
-Non-tail calls push a frame; tail calls replace it. Return uses one erased
+Calls requiring a frame push it; tail calls replace the active frame. Return uses one erased
 runtime register that the typed caller projects. Exported module-owned frame
 constructors avoid runtime imports of generated packages and preserve the DAG.
 Tail-call arguments, captures, and evidence evaluate before clearing the old
 frame. Slices hold pointers/interfaces to separately allocated frames and handler
 boundaries retain integer depths; no pointer to a relocatable slice slot escapes.
 Statistics expose maximum live depth, frame capacity, cleanup, and state storage.
+
+Generated self-tail calls at identity type instantiation can reset the current
+frame instead of allocating a replacement. The complete argument/evidence tuple
+is evaluated before overwriting it; unused fields are cleared. Re-entry returns
+MachineContinue to the dispatcher, giving each iteration a fresh Step activation
+and preserving captured-local snapshots. Stateful clause frames and captured
+completion calls retain their ordinary path.
+
+Machine callables and operation records return a lazy MachineStart value: a
+frame, deferred synchronous work, or an owned pause request. Ordinary calls save
+their result continuation before entering it. Deferred work executes on its own
+dispatcher turn without an adapter frame; pause returns to the same saved result
+edge after receiving its reply. Owning and completion boundaries materialize an
+entry frame when needed. Factories never execute user code.
+
+Suspension needs retained continuation state, but does not require a new heap
+frame for every source call. Self-tail re-entry reuses the same state storage;
+primitive work without independent continuation state uses its caller's saved
+result edge. Both paths preserve dispatcher boundaries rather than recursively
+executing the next continuation inside a factory.
 
 The Go emitter can avoid an intermediate advancement result when its only use
 is an immediate exhaustive protocol match, following identity bindings. It
@@ -58,10 +78,14 @@ local use restriction before bypassing its packaging blocks.
 
 Identity bindings and Unit erasure on a return path also permit a tail
 transfer. In particular, a stateless forwarding handler need not retain an
-otherwise empty continuation across a pause. This does not turn frame factories
-into recursively executing calls: the dispatcher still owns execution, and
-the callback/handler frames themselves can still allocate. State updates,
-cleanup and observable work prevent this return-path simplification.
+otherwise empty continuation across a pause. A bounded entry check additionally
+recognizes atomic aliases followed by a tail call to a tagged pause capability.
+Its start factory forwards the typed request and lexical owner directly, without
+a handler or pause frame. Identity argument adapters retain the tag only when
+both request and reply types are unchanged; forwarding an existing row is allowed,
+but extending evidence is excluded. An opaque callback takes the ordinary frame
+path; no factory recursively invokes its unknown callee. State updates, cleanup, and
+observable work prevent this forwarding shortcut.
 
 Completed frames are cleared. At suspension/non-tail boundaries the evaluator
 drops locals outside LiveOut; Go zeros the frame and copies back only live fields.

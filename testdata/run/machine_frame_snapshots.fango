@@ -1,0 +1,23 @@
+import Stream
+import List
+import Coroutine
+
+produce : Int ->{Stream.Yield (() -> Int)} ()
+produce n =
+    if n <= 0 then ()
+    else
+        Stream.yield (\_ -> n)
+        produce (n - 1)
+
+main() =
+    callbacks = Stream.toList (Stream.generate (\_ -> produce 5))
+    print (List.map (\f -> f ()) callbacks)
+    print (Coroutine.with
+        (\pause _ ->
+            shifted x = pause (x + 100)
+            shifted 7 + 1)
+        (\work -> case Coroutine.advance work 0 of
+            Coroutine.Suspended request -> case Coroutine.advance work 40 of
+                Coroutine.Finished value -> (request, value)
+                _ -> (0, 0)
+            _ -> (0, 0)))

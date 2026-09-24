@@ -662,8 +662,9 @@ unregistration. General multicast/replay remain outside scope.
 
 ## Implementation stages
 
-Before extending these stages, satisfy the
-[Stream performance prerequisite](roadmap-coroutines.md#performance-prerequisite).
+The [Stream performance prerequisite](roadmap-coroutines.md#performance-prerequisite)
+is satisfied with explicitly accepted remaining costs. Continue these stages
+with the same comparison as regression evidence and their own acceptance gates.
 
 Stage IDs are local to Async. The dependency table is authoritative; general
 language work is specified once in the coroutine roadmap.

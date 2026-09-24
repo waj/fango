@@ -11,8 +11,9 @@ func (g *gen) coroutineStart(producer core.Expr, owner, row goast.Expr) goast.Ex
 	pauseTy := factoryTy.Arg.(*types.TFun)
 	bodyTy := factoryTy.Ret.(*types.TFun)
 	pause := &goast.CompositeLit{Type: g.callbackType(pauseTy), Elts: []goast.Expr{
-		&goast.KeyValueExpr{Key: ident("Machine"), Value: funcLitParams([]paramSpec{{name: "request", typ: g.goType(pauseTy.Arg)}}, selector("fangort", "MachineFrame"), []goast.Stmt{
-			returnStmt(callExpr(selector("fangort", "SuspendMachine"), ident("pauseOwner"), ident("request"))),
+		&goast.KeyValueExpr{Key: ident("PauseOwner"), Value: ident("pauseOwner")},
+		&goast.KeyValueExpr{Key: ident("Machine"), Value: funcLitParams([]paramSpec{{name: "request", typ: g.goType(pauseTy.Arg)}}, selector("fangort", "MachineStart"), []goast.Stmt{
+			returnStmt(callExpr(selector("fangort", "PauseStart"), ident("pauseOwner"), ident("request"))),
 		})},
 	}}
 	args := []goast.Expr{}
@@ -22,7 +23,7 @@ func (g *gen) coroutineStart(producer core.Expr, owner, row goast.Expr) goast.Ex
 	args = append(args, &goast.TypeAssertExpr{X: ident("input"), Type: g.goType(bodyTy.Arg)})
 	factory := funcLitParams([]paramSpec{{name: "input", typ: ident("any")}}, selector("fangort", "MachineFrame"), []goast.Stmt{
 		varDeclStmt("body", g.goType(bodyTy), callExpr(callbackMember(ident("producer"), types.Direct), pause)),
-		returnStmt(callExpr(callbackMember(ident("body"), types.Machine), args...)),
+		returnStmt(callExpr(selector("fangort", "StartFrame"), callExpr(callbackMember(ident("body"), types.Machine), args...))),
 	})
 	return callExpr(funcLitParams([]paramSpec{
 		{name: "producer", typ: g.goType(factoryTy)},
@@ -49,7 +50,7 @@ func (g *gen) coroutineScopeExpr(e *core.CoroutineScope) goast.Expr {
 		args = append(args, ident("boundary"))
 	}
 	args = append(args, ident("coroutine"))
-	frame := callExpr(callbackMember(g.machineExpr(e.Consumer), types.Machine), args...)
+	frame := callExpr(selector("fangort", "StartFrame"), callExpr(callbackMember(g.machineExpr(e.Consumer), types.Machine), args...))
 	result := callExpr(indexExpr(selector("fangort", "RunCursorConsumer"), []goast.Expr{g.goType(e.Ty)}), ident("coroutine"), frame)
 	resultTy := g.outcomeType(e.Ty)
 	if overall == types.Direct {

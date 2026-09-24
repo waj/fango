@@ -2296,8 +2296,8 @@ func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want
 					{Type: ident("any")}, {Type: &goast.StarExpr{X: selector("fangort", "ExitRequest")}},
 				}},
 			}, Body: &goast.BlockStmt{List: runBody}}
-			body := []goast.Stmt{returnStmt(callExpr(selector("fangort", "ImmediateMachine"), run))}
-			fn := funcLitParams(params, selector("fangort", "MachineFrame"), body)
+			body := []goast.Stmt{returnStmt(callExpr(selector("fangort", "ImmediateStart"), run))}
+			fn := funcLitParams(params, selector("fangort", "MachineStart"), body)
 			elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + linkName(op.Name)), Value: fn})
 		}
 		return &goast.CompositeLit{Type: g.effectTypeMode(desired, types.Machine), Elts: elts}
@@ -2380,7 +2380,7 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 				results := &goast.FieldList{}
 				if mode == types.Machine {
 					g.usesFangort = true
-					results = &goast.FieldList{List: []*goast.Field{{Type: selector("fangort", "MachineFrame")}}}
+					results = &goast.FieldList{List: []*goast.Field{{Type: selector("fangort", "MachineStart")}}}
 				} else if mode == types.Exit {
 					results = &goast.FieldList{List: []*goast.Field{{Type: g.outcomeType(op.ResultType)}}}
 				} else if !g.isUnit(op.ResultType) {

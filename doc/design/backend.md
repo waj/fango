@@ -25,6 +25,13 @@ erase to Unit. Class dictionaries and factories use the ordinary typed internal
 ABI. [Effect transport](effects.md#direct-exit-and-machine) and
 [Core](core.md) own family/evidence contracts.
 
+The Machine callable member returns a lazy
+[MachineStart](machines.md#dispatch-and-frame-lifetime) description. Callable
+records also carry a private pause-owner tag, set only for a scoped pause
+capability. Module-owned Machine families export both frame constructors and
+start factories; the latter may omit proven forwarding frames. These are
+generated-code ABI details, not additional source calling conventions.
+
 Concrete Unit parameters/results erase at direct worker and operation boundaries,
 but remain values at first-class, polymorphic, ADT, and handler-closure boundaries.
 Erasing an argument never erases its evaluation: preserve left-to-right effects

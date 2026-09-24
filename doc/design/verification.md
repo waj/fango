@@ -88,8 +88,25 @@ Full parity requires every primary case's median optimized/baseline ratio to
 be at most 1.00, its bootstrapped upper 95% bound at most 1.03, and no increase
 in bytes or allocations, in both rounds. Partial runs are inconclusive. These
 are manual same-host evidence requirements, not portable CI timing thresholds.
+The runner reports full parity independently of a project decision to accept
+specific remaining costs; that decision and unfinished optimization work belong
+to the [coroutine roadmap](../roadmap-coroutines.md#performance-prerequisite).
+Keep the historical baseline and compare against the accepted implementation
+as well when evaluating subsequent changes.
 The original checked Core remains the semantic reference; an internal
 optimization-disabled lowering path supports deterministic differential tests.
+
+Distinguish setup cost from per-element cost: compare long traversals with
+repeated short ones, then count frames, dispatcher steps, and evidence extensions
+at multiple input sizes. Bounded live depth alone does not prove bounded frame
+allocation, and constant frame allocation does not eliminate boxing or closures.
+Use the independent Pull library to check that improvements generalize beyond
+Stream, the handwritten runtime control to isolate dispatcher overhead, and the
+specialized Go control to show remaining representation costs. These controls
+do not establish that every gap is removable. Check profile sample quality before
+attributing CPU time; profiles dominated by host event waits cannot locate a
+compiler hot path reliably. Retain uninstrumented timing and instrumented counts
+as separate evidence.
 
 Latency benchmarks cover cold, warm-unchanged, and warm-changed builds against
 machine-specific baselines. Compact local-helper diamonds, pure and under Fail.attempt,

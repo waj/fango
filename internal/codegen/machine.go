@@ -178,7 +178,8 @@ func (g *gen) machineWorkerDecls(worker *machineir.Worker) []goast.Decl {
 		}}},
 	}
 	step := g.machineStepDecl(worker, frameName, stored)
-	return []goast.Decl{frameDecl, ctor, clear, step}
+	start := g.machineStartDecl(worker, params)
+	return []goast.Decl{frameDecl, ctor, clear, step, start}
 }
 
 func (g *gen) machineStepDecl(worker *machineir.Worker, frameName string, stored []machineir.Local) goast.Decl {
@@ -462,6 +463,30 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 				args = append(args, g.machineExpr(arg))
 			}
 		}
+		if g.reusesMachineFrame(worker, term) {
+			fields := []string{}
+			for _, param := range worker.TyParams {
+				fields = append(fields, "T_"+g.tyParamNames[param.ID])
+			}
+			for _, ev := range worker.EffectParams {
+				fields = append(fields, machineEvidenceFieldName(ev))
+			}
+			for i := range worker.Rows {
+				fields = append(fields, fmt.Sprintf("R%d", i))
+			}
+			for _, param := range worker.Params {
+				fields = append(fields, machineFieldName(param.Name))
+			}
+			values := []goast.Expr{&goast.KeyValueExpr{Key: ident("PC"), Value: intLit(int64(worker.Entry))}}
+			for i, field := range fields {
+				values = append(values, &goast.KeyValueExpr{Key: ident(field), Value: args[i]})
+			}
+			// The complete RHS is evaluated before overwriting f. Omitted
+			// fields are zeroed, and the dispatcher retains its step boundary.
+			reset := &goast.AssignStmt{Lhs: []goast.Expr{&goast.StarExpr{X: ident("f")}}, Tok: gotoken.ASSIGN,
+				Rhs: []goast.Expr{&goast.CompositeLit{Type: indexExpr(ident(frameName), machineTypeParamIdents(worker.TyParams)), Elts: values}}}
+			return []goast.Stmt{reset, step("MachineContinue", "", nil)}, nil
+		}
 		var child goast.Expr
 		if term.Operation != nil {
 			stack := g.evidence[term.Effect.Unique]
@@ -479,17 +504,18 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		} else if term.Callee == "" {
 			child = callExpr(callbackMember(g.machineExpr(term.CalleeExpr), types.Machine), args...)
 		} else {
-			child = callExpr(indexExpr(g.machineConstructorRef(term.Callee), g.goTypes(term.TyArgs)), args...)
+			child = callExpr(indexExpr(g.machineStartRef(term.Callee), g.goTypes(term.TyArgs)), args...)
 		}
 		if term.Capture {
 			result := term.Bind.Ty.(*types.TCon).Args[0]
-			child = callExpr(indexExpr(selector("fangort", "CompletionMachine"), []goast.Expr{g.goType(result)}), child)
-		}
-		if term.Tail {
-			return []goast.Stmt{step("MachineTailCall", "Frame", child)}, nil
+			child = callExpr(selector("fangort", "FrameStart"), callExpr(indexExpr(selector("fangort", "CompletionMachine"), []goast.Expr{g.goType(result)}), callExpr(selector("fangort", "StartFrame"), child)))
 		}
 		stmts := append(save(), assignMachinePC(resumePC))
-		stmts = append(stmts, step("MachineCall", "Frame", child))
+		tail := "false"
+		if term.Tail {
+			tail = "true"
+		}
+		stmts = append(stmts, returnStmt(callExpr(selector("fangort", "StartCall"), child, ident(tail))))
 		return stmts, [][]goast.Stmt{resume(term.Bind, term.Next)}
 	case *machineir.Handle:
 		h := term.Node
@@ -583,8 +609,8 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 				params = append(params, paramSpec{name: name, typ: g.goType(source.ParamTypes[i])})
 				ctorArgs = append(ctorArgs, ident(name))
 			}
-			ctor := indexExpr(g.machineConstructorRef(clause.Worker), machineTypeParamIdents(clauseWorker.TyParams))
-			fn := funcLitParams(params, selector("fangort", "MachineFrame"), []goast.Stmt{returnStmt(callExpr(ctor, ctorArgs...))})
+			ctor := indexExpr(g.machineStartRef(clause.Worker), machineTypeParamIdents(clauseWorker.TyParams))
+			fn := funcLitParams(params, selector("fangort", "MachineStart"), []goast.Stmt{returnStmt(callExpr(ctor, ctorArgs...))})
 			elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + linkName(clause.Op.Name)), Value: fn})
 		}
 		if record == nil {
@@ -887,8 +913,8 @@ func (g *gen) machineLambdaExpr(lam *core.Lambda) goast.Expr {
 	paramName := machineLocalName(lam.Param)
 	params = append(params, paramSpec{name: paramName, typ: g.goType(fn.Arg)})
 	args = append(args, ident(paramName))
-	ctor := indexExpr(g.machineConstructorRef(closure.Worker), machineTypeParamIdents(worker.TyParams))
-	return funcLitParams(params, selector("fangort", "MachineFrame"), []goast.Stmt{returnStmt(callExpr(ctor, args...))})
+	ctor := indexExpr(g.machineStartRef(closure.Worker), machineTypeParamIdents(worker.TyParams))
+	return funcLitParams(params, selector("fangort", "MachineStart"), []goast.Stmt{returnStmt(callExpr(ctor, args...))})
 }
 
 func machineStoredLocals(worker *machineir.Worker) []machineir.Local {

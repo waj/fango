@@ -51,15 +51,32 @@ the [dispatcher](../runtime/fangort/machine.go),
 
 ## Performance prerequisite
 
-Further coroutine/Async implementation is gated on the manual
-[Stream performance recovery comparison](design/verification.md#performance-evidence).
-Bounded wrapper expansion and immediate-result elimination are implemented, but
-full parity with revision `0043640bcf46c6418c5ca4ee1fb84374eee5ce96` must be
-demonstrated before treating the performance prerequisite as satisfied. Recurring
-producer, consumer, and callback/handler frame allocation remains to be reduced
-without bypassing cleanup or execution checkpoints. Validate that work with the
-independent pull library as well as Stream; library names must not become compiler
-primitives.
+**Satisfied for continuing coroutine/Async development.** The project accepts
+the measured remaining costs against pre-Async revision
+`0043640bcf46c6418c5ca4ee1fb84374eee5ce96`: zip takes about 3% longer, and repeated
+short-lived traversals take about 11% longer with about 4% more allocated bytes.
+The other seven primary cases meet the original full-parity requirements in
+both measurement rounds. This is an explicit acceptance of these remaining
+costs, not a full-parity result or a portable regression allowance.
+
+Keep the strict [comparison](design/verification.md#performance-evidence) and
+use the accepted implementation as an additional regression reference during
+later stages. The [implemented optimizations](design/machines.md#dispatch-and-frame-lifetime)
+recover steady-state execution through general frame reuse and primitive-call
+forwarding; the independent Pull library benefits too. Library names must not
+become compiler primitives. Each scheduling stage still needs its own semantic,
+retention, cleanup, and performance evidence.
+
+Remaining performance work is nonblocking for the next stages:
+
+- Separate owner/setup costs from per-element work in zip and repeated short
+  traversals; obtain usable profiles before attributing the remaining time.
+- Reduce remaining frame allocation in list traversal and stateful handlers
+  where a proof preserves state, cleanup, captured locals, and checkpoints.
+- Measure boxing, closure, and evidence-row allocation after frame removal;
+  constant frame counts do not mean allocation-free execution.
+- Investigate the roughly 2% dispatcher overhead in the handwritten Go runtime
+  control while retaining deferred execution and the existing step payload size.
 
 ## Proposed public interface
 

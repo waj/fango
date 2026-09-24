@@ -119,7 +119,7 @@ func (g *gen) deferredEvidence(ev core.EffectInstance, row goast.Expr, mode type
 			invoke := callExpr(&goast.SelectorExpr{X: lookup, Sel: ident("Op_" + linkName(op.Name))}, args...)
 			body := []goast.Stmt{returnStmt(invoke)}
 			if mode == types.Machine {
-				result = selector("fangort", "MachineFrame")
+				result = selector("fangort", "MachineStart")
 			} else if mode == types.Exit {
 				result = g.outcomeType(resultTy)
 			} else if g.isUnit(resultTy) {

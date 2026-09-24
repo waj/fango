@@ -56,16 +56,12 @@ func instrument(root string) error {
 						return true
 					}
 					for i, s := range block.List {
-						a, ok := s.(*ast.AssignStmt)
-						if !ok || len(a.Rhs) != 1 {
-							continue
-						}
-						call, ok := a.Rhs[0].(*ast.CallExpr)
+						a, ok := s.(*ast.IncDecStmt)
 						if !ok {
 							continue
 						}
-						sel, ok := call.Fun.(*ast.SelectorExpr)
-						if !ok || sel.Sel.Name != "Step" {
+						sel, ok := a.X.(*ast.SelectorExpr)
+						if !ok || sel.Sel.Name != "Steps" {
 							continue
 						}
 						list := append([]ast.Stmt(nil), block.List[:i]...)
