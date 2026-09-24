@@ -719,6 +719,7 @@ func TestProjectEmitDeterministicAndFormatted(t *testing.T) {
 	t.Parallel()
 	paths := []string{
 		filepath.Join("..", "..", "testdata", "run", "poly_eq_nested.fango"),
+		filepath.Join("..", "..", "testdata", "run", "coroutine_scheduler.fango"),
 		// Compile-time evaluation is pure, bounded, and native-restricted, so
 		// splicing must leave generated Go byte-identical between runs.
 		filepath.Join("..", "..", "testdata", "run", "meta_splice.fango"),

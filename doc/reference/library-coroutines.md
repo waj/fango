@@ -93,7 +93,10 @@ still handle cleanup failures.
 ## Limits
 
 Acquisition and release must remain synchronous. There is no dynamic allocation
-scope, scheduler, public cancellation operation, or concurrent execution API.
-Stream and Iterator retain their existing implementation. Staging and the REPL
+scope, public scheduler, public cancellation operation, or concurrent execution API.
+The ordinary [cooperative scheduler fixture](../../testdata/run/coroutine_scheduler.fango)
+demonstrates lexical coroutines, a FIFO ready queue, voluntary yield, fake waits,
+typed completion, and abandonment while a task is suspended inside a Stream pull.
+Stream and Iterator use the same Coroutine protocol. Staging and the REPL
 use the same ownership checks and retain their existing native-call policy.
 Later work is listed in the [coroutine roadmap](../roadmap-coroutines.md#implementation-stages).

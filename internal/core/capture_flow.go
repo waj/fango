@@ -1456,7 +1456,9 @@ func (f *flowChecker) advance(cursor, input flowValue, env flowEnv, site flowSit
 		f.pulls = append(f.pulls, flowPull{owner: owner, synchronous: saved, calls: calls})
 		f.synchronous, f.suspensionCalls = nil, nil
 		producerEnv := env.clone()
-		pause := f.alloc(site.within("pause").allocation(), flowObject{kind: "pause", owner: owner})
+		// A queue can bring distinct owners to the same advance site. Pause
+		// authority belongs to the selected owner, not to that call site.
+		pause := f.alloc(site.within(fmt.Sprintf("pause%d", owner)).allocation(), flowObject{kind: "pause", owner: owner})
 		body := f.apply(o.fields[0], []flowValue{{refs: []int{pause}, caps: []int{owner}}}, producerEnv, site.within("factory"), scopes)
 		answer := f.apply(body, []flowValue{f.owners[owner].reply}, producerEnv, site.within("advance"), scopes)
 		f.crossing(answer, owner, "coroutine result")

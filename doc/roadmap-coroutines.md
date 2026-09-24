@@ -168,7 +168,7 @@ checkpoint; C1–C3 together are the first usable replacement foundation.
 | C0: Control and ownership contracts | Implemented Iterator foundation | DONE: feasibility contract and focused models |
 | C1: General typed execution | C0, early Async A0 contract gate | DONE: executable scoped Coroutine, Work, and Completion APIs |
 | C2: Ordinary Stream and Iterator | C1 | DONE: Stream behavior with no Stream-specific intrinsics |
-| C3: Cooperative scheduling demonstration | C2 | Shared foundation demonstrated without native concurrency |
+| C3: Cooperative scheduling demonstration | C2 | DONE: shared foundation demonstrated without native concurrency |
 | C4: Scope-owned dynamic allocation | C3, A0; scope design begins with C0 | Coroutines safely retained by a live dynamic owner |
 | C5: Suspending acquisition and cleanup | C1; nested fixtures from C3/C4 | Owners remain live through suspended cleanup |
 | C6a: Typed opaque values | C0/A0 representation decisions; C4 for selected task cells | Checked native storage and same-type return; required before A1 |
@@ -257,21 +257,15 @@ Iterator have no intrinsic identity checks or compatibility compiler path.
 
 ### C3: Cooperative scheduling demonstration
 
-**Dependencies:** C2.
+**DONE — ordinary lexical scheduling over the shared Coroutine protocol.**
 
-Write an ordinary Fango fixture/example with two lexically owned coroutines,
-a FIFO ready queue, voluntary yield, and deterministic fake wait registrations.
-Requests are an ordinary ADT. Return to the dispatch loop after a step rather
-than recursively invoking the next continuation. Keep all queued handles inside
-their owners. The demonstration is not the public Async API.
+**Dependencies:** C2, including its executable A0 representation check.
 
-**Acceptance:** deterministic alternating trace, waiting work not requeued
-until signalled, typed completion, early abandonment, and a task that suspends
-inside `next`. Count retained owners/frames and show cleanup occurs once. No
-native callback support or goroutine is needed.
-
-**Stopping point:** shared control demonstrably serves Stream and scheduling.
-This does not yet prove dynamic spawn, reusable task results, or parallelism.
+The [implemented demonstration](design/coroutines.md#cooperative-dispatch-demonstration)
+owns the queue, fake-wait, typed completion, nested `next`, and cleanup contract.
+Its differential fixture and instrumented storage gate exercise both backends.
+Dynamic spawn, reusable task results, and parallelism remain later work; this is
+not the public Async API.
 
 ### C4: Scope-owned dynamic allocation
 

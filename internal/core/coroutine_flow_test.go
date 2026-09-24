@@ -70,3 +70,25 @@ func TestAbstractDriveDoesNotHideUnknownWrapperFields(t *testing.T) {
 		}
 	}
 }
+
+func TestQueuedAdvanceKeepsDistinctPauseOwners(t *testing.T) {
+	f := testFlowChecker()
+	for i := 1; i <= 2; i++ {
+		f.owners = append(f.owners, &flowOwner{code: &types.CaptureFlow{Kind: "coroutine"}})
+		f.objects = append(f.objects, &flowObject{kind: "coroutine", owner: i, fields: []flowValue{{unknown: true}}})
+	}
+	// A merged queue element denotes either live lexical owner. Revisiting the
+	// same dispatch site must reuse each owner's capability without conflating it.
+	for pass := 0; pass < 2; pass++ {
+		f.advance(flowValue{refs: []int{1, 2}}, flowValue{}, emptyFlowEnv(), rootFlowSite, nil)
+	}
+	counts := map[int]int{}
+	for _, object := range f.objects[1:] {
+		if object.kind == "pause" {
+			counts[object.owner]++
+		}
+	}
+	if len(counts) != 2 || counts[1] != 1 || counts[2] != 1 {
+		t.Fatalf("pause capabilities per owner = %v, want one each", counts)
+	}
+}

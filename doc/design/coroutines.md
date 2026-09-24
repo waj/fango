@@ -14,6 +14,9 @@ producer execution authority, exclusive accesses, and outward suspension.
 Aliases retain identity; distinct allocations and unknown owners cannot be
 assumed equal. An advance consumes its own producer's suspension; the lexical
 owner consumes its own drive obligations. Foreign obligations survive both.
+When one advance site selects among queued handles, each candidate keeps a
+separate owner-indexed pause capability. Sharing a dispatch site does not merge
+producer authority.
 
 For an inner producer reached during an outer producer's active advancement,
 owner subtraction precedes projection to printed labels:
@@ -100,6 +103,37 @@ failure propagation, and cleanup as any other coroutine client. The
 [Stream reference](../reference/library-streams.md) owns demand and ordering.
 The separately compiled [Pull fixture](../../testdata/modules/pull/Pull.fango)
 exercises another effect and private wrapper without compiler registration.
+
+## Cooperative dispatch demonstration
+
+The ordinary [scheduler fixture](../../testdata/run/coroutine_scheduler.fango)
+keeps two coroutines and its FIFO ready queue inside both lexical owners.
+Requests are an ADT with voluntary yield and a fake wait key; replies are Unit
+and completion carries a named integer result. Each advance returns a Step to
+the tail-recursive dispatch loop. Yield appends the job to the queue, wait
+removes it until a deterministic signal, and completion drops it.
+
+One task pauses its scheduler owner from inside `Iterator.next` on a Stream.
+The inner pull remains pending and exclusively borrowed until the task resumes;
+the scheduler can run the other task in the meantime. Early abandonment closes
+the pending pull and both tasks, with each cleanup running once. Repeated close
+and terminal advance do not rerun cleanup. The differential trace checks FIFO
+alternation, no advance of a waiting task before its signal, typed results, and
+normal and abandoned cleanup order.
+
+The [storage gate](../../cmd/fango/coroutine_scheduler_test.go) instruments only
+temporary interpreter and generated-runtime sources. It pins observed owners
+and sessions, counts retained frames across them, and checks bounded live storage
+at 2 and 200 yield rounds per task, including abandonment inside `next`.
+Both sizes peak at three live owners (two tasks and the Stream cursor), with
+15 interpreter frames or 13 generated-runtime frames across all sessions;
+terminal owner and frame counts are zero. The gate allows a fixed ceiling of
+32 frames so harmless frame-layout changes do not change the storage contract.
+Terminal owners must release factories and exclusive access; frames, cleanup,
+handlers, state and traversal links must be empty. These are structural counts,
+not timing benchmarks. This demonstrates shared Stream/scheduling control;
+dynamic spawn, reusable task results and concurrent execution remain outside
+this scoped example.
 
 ## Abandonment and completion
 
