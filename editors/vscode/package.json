@@ -5,6 +5,7 @@
   "version": "0.2.0",
   "publisher": "fango",
   "license": "MIT",
+  "icon": "images/icon.png",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -34,7 +35,11 @@
         "extensions": [
           ".fango"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./images/fango-file.svg",
+          "dark": "./images/fango-file.svg"
+        }
       }
     ],
     "grammars": [

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="fango.jpg" alt="Fango logo" width="260">
+  <img src="fango.svg" alt="Fango logo" width="120">
 </p>
 
 # Fango
