@@ -1307,7 +1307,9 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		}
 		result = joinFlow(result, child(0))
 	case "scope":
-		acquired := f.syncEval("acquisition", n.Children[0], env, ctx, scopes, resumes)
+		// Acquisition has not transferred ownership to the scope yet. It may
+		// suspend; only a successful result installs the release obligation.
+		acquired := f.eval(n.Children[0], env, ctx, scopes, resumes)
 		id := f.owner(n, env, ctx, scopes)
 		resource := acquired
 		if len(n.TypeArgs) > 0 && f.carry(n.TypeArgs[0], env) {

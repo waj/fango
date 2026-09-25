@@ -237,8 +237,9 @@ type ResumeTail struct {
 	ClauseResult types.Type
 }
 
-// Bracket is a synchronous cleanup scope. Acquire runs once; on a successful
-// acquisition Release runs exactly once on every exit from the scope,
+// Bracket is a cleanup scope with a synchronous release. Acquire runs once and
+// may suspend; on a successful acquisition Release runs exactly once on every
+// exit from the scope,
 // including a tagged exit raised by Body and aimed at an outer handler. Scope
 // is the compiler-owned capability identity the acquired resource carries, so
 // the existing non-escape analysis applies to it exactly as to a scoped

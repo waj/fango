@@ -1,0 +1,19 @@
+import Async
+import Async.IO
+import Fail
+import Runtime.Scope
+
+acquiring() = Runtime.Scope.bracket
+    (\_ ->
+        print "acquiring"
+        Async.IO.sleep 3000
+        print "acquired"
+        ())
+    (\_ -> print "released")
+    (\_ -> print "body")
+
+main() = print (Fail.attempt (\_ -> Async.run (\_ ->
+    sleeper = Async.spawn acquiring
+    failing = Async.spawn (\_ -> Fail.fail "stop")
+    Async.yield()
+    ())))

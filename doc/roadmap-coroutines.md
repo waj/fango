@@ -99,8 +99,8 @@ includes lazy application, strict arguments, and typed initial input/replies.
 ## Lifecycle and outcomes
 
 The [lifecycle table](reference/library-coroutines.md#exchange-and-lifecycle)
-owns terminal states and synchronous close. [C5](#c5-suspending-acquisition-and-cleanup)
-extends acquisition/release to suspension.
+owns terminal states and synchronous close. Acquisition may suspend; [C5](#c5-suspending-acquisition-and-cleanup)
+still needs suspending release and executable abandonment drain.
 
 ## Ownership and lifetime contracts
 
@@ -294,9 +294,10 @@ C6a/C6c supply typed cells and shared service authority.
 
 **Dependencies:** C1; use C3/C4 consumers to exercise nested ownership.
 
-Extend existing Runtime.Scope.bracket rather than adding a parallel API. Acquisition
-may suspend; successful acquisition and registration of its release are one
-ownership transfer. Before success, acquisition owns partial-failure cleanup.
+Extend existing Runtime.Scope.bracket rather than adding a parallel API.
+Acquisition may suspend, and successful acquisition registers its release before
+the body runs. Before success, acquisition owns partial-failure cleanup. The
+remaining C5 work is suspension during release and abandonment drain.
 Release may suspend while its owner remains in a closing state. Preserve LIFO
 order, definition-site evidence, and typed primary/suppressed failures.
 

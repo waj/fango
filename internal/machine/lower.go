@@ -437,7 +437,7 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 			if e.CalleeKind == core.Worker {
 				call.Callee = ref.Name
 				if ref.Name == types.ScopeBracketName {
-					call.SynchronousArgs = []int{0, 1}
+					call.SynchronousArgs = []int{1}
 				}
 			} else {
 				call.CalleeExpr = e.Callee
@@ -447,10 +447,6 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 			return b.add(call)
 		}
 	case *core.Bracket:
-		if machineControl(e.Acquire) {
-			b.errorf("%s: suspending cleanup acquisition is not implemented", b.def.Name)
-			return next
-		}
 		if machineControl(e.Release) {
 			b.errorf("%s: cleanup release may not suspend", b.def.Name)
 			return next
@@ -459,6 +455,12 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 		b.declare(resource)
 		pop := b.add(&PopCleanup{Next: next})
 		body := b.lowerInto(e.Body, bind, pop)
+		if machineControl(e.Acquire) {
+			// A Machine call can yield or exit before acquisition succeeds.
+			// Register the release only on the successful continuation.
+			register := b.add(&PushCleanup{Acquire: &core.VarRef{Name: resource.Name, Local: true, Ty: resource.Ty}, Resource: resource, Release: e.Release, Next: body})
+			return b.lowerInto(e.Acquire, resource, register)
+		}
 		return b.add(&PushCleanup{Acquire: e.Acquire, Resource: resource, Release: e.Release, Next: body})
 	case *core.Handle:
 		return b.lowerHandle(e, bind, next)

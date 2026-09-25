@@ -40,13 +40,13 @@ func TestMachineScopeChecksSynchronousCallbackProofs(t *testing.T) {
 	}{
 		{"valid", func(*Worker) {}, ""},
 		{"missing parameter proof", func(w *Worker) { w.SynchronousParams = nil }, "invalid synchronous callback parameters"},
-		{"wrong slot", func(w *Worker) { w.SynchronousParams = []int{0, 2} }, "invalid synchronous callback parameters"},
+		{"wrong slot", func(w *Worker) { w.SynchronousParams = []int{0} }, "invalid synchronous callback parameters"},
 		{"stale scope", func(w *Worker) { w.Def.Body.(*core.Bracket).Scope++ }, "stale synchronous source contract"},
 		{"stale acquisition", func(w *Worker) {
 			w.Def.Body.(*core.Bracket).Acquire.(*core.App).Callee.(*core.VarRef).Name = "unchecked"
 		}, "stale synchronous source contract"},
 		{"missing source", func(w *Worker) { w.Def = nil }, "missing synchronous source contract"},
-		{"machine acquisition", func(w *Worker) { w.Params[0].Ty.(*types.TFun).Control = types.Control{Transport: types.Machine} }, "synchronous parameter must use Exit"},
+		{"machine release", func(w *Worker) { w.Params[1].Ty.(*types.TFun).Control = types.Control{Transport: types.Machine} }, "synchronous parameter must use Exit"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p, _ := synchronousScopeFixture(t)

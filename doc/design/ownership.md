@@ -107,11 +107,12 @@ without re-deriving the same answer from the same inputs. Any disagreement is
 stale, is reported, and discharges them anyway. The whole-program path states
 nothing and always discharges.
 
-## Synchronous acquisition and release
+## Synchronous release
 
-Contracts export non-suspension obligations for actual acquisition/release
-callbacks through helpers, stored values, and definition-site evidence,
-independently of widened rows. Recursive summaries retain outward obligations.
+Contracts export non-suspension obligations for actual release callbacks through
+helpers, stored values, and definition-site evidence, independently of widened
+rows. Acquisition may suspend before registering the release. Recursive
+summaries retain outward obligations.
 A pull consumes its own producer's suspension, so a callback may traverse a
 producer synchronously. Resumptive interpretations remain inside the callback;
 an abort clause outside it executes after unwind and is outside its obligation.

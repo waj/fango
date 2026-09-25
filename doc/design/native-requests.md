@@ -1,8 +1,8 @@
 # Native retention and driver callbacks
 
 [NativeRequest](../reference/library-native-requests.md) owns the public API and
-sidecar protocol. Its scope uses ordinary `Runtime.Scope.bracket`; registration and
-release are synchronous, so no owner can disappear during a drain. Dynamically
+sidecar protocol. Its scope uses ordinary `Runtime.Scope.bracket`; release is
+synchronous, so no owner can disappear during a drain. Dynamically
 owned coroutines may create their own request scopes and abandonment runs their
 drains before enclosing device cleanup.
 
@@ -30,7 +30,7 @@ of resource outliving, so this buffer does not expose a Fango resource handle.
 
 `Runtime.NativeRequest.immediate` is a checked Completion introduction with an exported
 non-suspension obligation. Capture analysis checks the actual action and its
-interpreted evidence using the same synchronous boundary as acquisition/release.
+interpreted evidence using the same synchronous boundary as release.
 It preserves the typed outcome and all capture obligations without inventing a
 new resource owner for the returned completion. The evaluator and generated Go
 use the existing Completion machinery; Machine lowering retains the same

@@ -56,12 +56,15 @@ A release runs with the evidence where it was written, not with whatever
 handlers happened to be installed where the body exited, and may itself use
 nested handlers.
 
-Acquisition and release must complete synchronously. A callback that suspends
-reports `SUSPENDING RESOURCE CALLBACK`, including through named wrappers,
-stored callbacks, and resumptive effect handlers. These obligations follow the
-actual callback rather than its widened effect row. A callback may synchronously
-consume a producer using its own iterator scope. An abort clause outside the
-callback runs after unwinding and is outside this restriction.
+Acquisition may suspend. The release obligation is registered only after
+acquisition succeeds; a failed acquisition is responsible for its own partial
+cleanup. Release must still complete synchronously. A release callback that
+suspends reports `SUSPENDING RESOURCE CALLBACK`, including through named
+wrappers, stored callbacks, and resumptive effect handlers. This obligation
+follows the actual callback rather than its widened effect row. A release
+callback may synchronously consume a producer using its own iterator scope.
+An abort clause outside the callback runs after unwinding and is outside this
+restriction.
 
 ## Cleanup failures
 

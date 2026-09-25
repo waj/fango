@@ -197,8 +197,9 @@ Normal return, outward abort, and owner stop are distinct private outcomes.
 Stop discards the producer continuation and drains cleanup once; it never
 publishes a successful result or becomes a catchable user abort. Cleanup-local
 handlers may handle cleanup failures without resuming abandoned production.
-Unhandled failures preserve primary/suppressed precedence. Acquisition/release
-remain subject to the synchronous-callback proof.
+Unhandled failures preserve primary/suppressed precedence. Acquisition may
+suspend before the release is registered. Release remains subject to the
+synchronous-callback proof.
 
 [Typed completion](completion.md) is a separate capture/replay boundary. It
 retains typed abort payloads and reports without saving a runtime exit target;

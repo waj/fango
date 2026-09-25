@@ -1,0 +1,34 @@
+import Runtime.Coroutine
+import Runtime.Scope
+import Stream
+import Iterator
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+
+effect Fail error
+    abort fail : error -> value
+
+attempt action =
+    handle action() of
+        fail error -> Err error
+        return value -> Ok value
+
+eachCursor : (a ->{e} ()) -> Iterator.Iterator a e ->{Runtime.Coroutine.Drive | e} ()
+eachCursor action cursor = case Iterator.next cursor of
+    Nothing -> ()
+    Just value ->
+        action value
+        eachCursor action cursor
+
+main() =
+    result = attempt (\_ -> Stream.withCursor (Stream.generate (\_ ->
+        Runtime.Scope.bracket
+            (\_ ->
+                print "acquire"
+                Stream.yield 1
+                fail "incomplete")
+            (\_ -> print "release")
+            (\_ -> print "body"))) (eachCursor print))
+    case result of
+        Ok _ -> print "unexpected success"
+        Err error -> print ("error " ++ error)

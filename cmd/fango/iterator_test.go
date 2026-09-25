@@ -33,7 +33,7 @@ main() = print "unreachable"
 	runErrorCase(t, entry, "RESOURCE ESCAPES")
 }
 
-func TestImportedScopeContractRejectsSuspendingCallbacks(t *testing.T) {
+func TestImportedScopeContractAllowsAcquisitionAndRejectsSuspendingRelease(t *testing.T) {
 	dir := t.TempDir()
 	wrapper := `module Resource exposing (withResource)
 import Runtime.Scope
@@ -64,7 +64,20 @@ main() = Stream.forEach print (Stream.generate (\_ -> Resource.withResource ` + 
 			if err := os.WriteFile(entry, []byte(program), 0600); err != nil {
 				t.Fatal(err)
 			}
-			runErrorCase(t, entry, "SUSPENDING RESOURCE CALLBACK")
+			if phase == "acquire" {
+				runDifferentialCaseWith(t, entry, cliRunner(entry), fixtureInputs{}, "1\n")
+			} else {
+				runErrorCase(t, entry, "SUSPENDING RESOURCE CALLBACK")
+			}
+		})
+	}
+}
+
+func TestSuspendingAcquisitionPaths(t *testing.T) {
+	for _, name := range []string{"scope_suspending_acquire", "scope_suspending_recursive", "scope_suspending_acquire_failure", "async_cancel_acquire"} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join("..", "..", "testdata", "run", name+".fango")
+			runDifferentialCase(t, path, cliRunner(path))
 		})
 	}
 }

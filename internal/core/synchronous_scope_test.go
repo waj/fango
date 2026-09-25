@@ -38,7 +38,7 @@ func TestCoreReconstructsSynchronousScopeObligations(t *testing.T) {
 						t.Errorf("unexpected error: %v", err)
 					}
 				}
-				if found != (phase != "body") {
+				if found != (phase == "release") {
 					t.Fatalf("%s suspension errors: %v", phase, errs)
 				}
 			}
@@ -46,11 +46,8 @@ func TestCoreReconstructsSynchronousScopeObligations(t *testing.T) {
 			check(LintMachineInput(p, b))
 			// Even a forged contract that erases the callback suspension cannot
 			// bypass the independent proof reconstructed from executable Core.
-			if phase != "body" {
-				index := 0
-				if phase == "release" {
-					index = 2
-				}
+			if phase == "release" {
+				index := 2
 				p.Defs[0].CaptureContract.Body.Children[index].Kind = "scalar"
 				errs := LintMachineInput(p, b)
 				var stale, rejected bool
@@ -91,12 +88,12 @@ func TestSynchronousCallbackHandlerBoundaries(t *testing.T) {
 			handler := node("handle", nil, call, nil)
 			handler.Scope, handler.Effects = sup.FreshScope(), []int{1}
 			handler.Clauses = []types.CaptureClause{{Index: 0, Body: pause}}
-			scope := node("scope", operation, unit, unit)
+			scope := node("scope", unit, unit, operation)
 			scope.Scope, scope.Name, scope.TypeArgs = sup.FreshScope(), "resource", []types.Type{b.Unit}
 			root, helper := handler, scope
 			if mode == "inner abort" {
 				root, helper = scope, operation
-				scope.Children[0] = handler
+				scope.Children[2] = handler
 			}
 			p := &Prog{Defs: []Def{
 				{Name: "root", CaptureContract: &types.CaptureContract{Body: root}},

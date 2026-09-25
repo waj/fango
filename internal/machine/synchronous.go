@@ -5,8 +5,8 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// Scope's source contract checks actual acquisition/release callbacks before
-// row widening. Its Machine member transports these two slots synchronously.
+// Scope's source contract checks the release callback before row widening.
+// Its Machine member transports that callback synchronously.
 func synchronousScopeMember(source *core.Def) (*core.Def, []int) {
 	if _, ok := source.Body.(*core.Bracket); !ok {
 		return source, nil
@@ -42,7 +42,7 @@ func synchronousScopeSignature(source *core.Def) (*core.Def, []int) {
 		return source, nil
 	}
 	args, result := core.PeelFun(source.Type, 3)
-	for _, i := range []int{0, 1} {
+	for _, i := range []int{1} {
 		fn := *args[i].(*types.TFun)
 		fn.Control = types.Control{Transport: types.Exit}
 		args[i] = &fn
@@ -60,5 +60,5 @@ func synchronousScopeSignature(source *core.Def) (*core.Def, []int) {
 		fn.Arg, fn.Ret, fn.Control = args[i], copy.Type, core.ArrowControl(source.Type, i+1)
 		copy.Type = &fn
 	}
-	return &copy, []int{0, 1}
+	return &copy, []int{1}
 }

@@ -117,7 +117,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 		errs = append(errs, fmt.Errorf("%s: missing or stale failure report source contract", where))
 	}
 	if w.Name == types.ScopeBracketName && (len(w.Params) == 3 || len(w.SynchronousParams) > 0 || w.Def != nil && len(w.Def.Params) == 3) {
-		wantSynchronous = []int{0, 1}
+		wantSynchronous = []int{1}
 		if w.Def == nil {
 			errs = append(errs, fmt.Errorf("%s: missing synchronous source contract", where))
 		} else if scope, ok := w.Def.Body.(*core.Bracket); !ok || scope.Scope == 0 || !core.CaptureContractCurrent(w.Def) {
@@ -314,7 +314,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			checkRow(term.Row, requiresRow)
 			wantSynchronous := []int(nil)
 			if term.Callee == types.ScopeBracketName {
-				wantSynchronous = []int{0, 1}
+				wantSynchronous = []int{1}
 			}
 			if !slices.Equal(term.SynchronousArgs, wantSynchronous) {
 				errs = append(errs, fmt.Errorf("%s: missing or stale synchronous argument obligations", blockWhere))

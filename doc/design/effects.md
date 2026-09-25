@@ -123,8 +123,9 @@ copying Suppress operation. Successful-body cleanup failure becomes primary.
 Nested cleanup is inner-to-outer. Go defer is not used because ordering depends
 on the body's language-level result, not on host function return.
 
-Acquisition/release must be synchronous; actual callback obligations are checked
-before row widening. Machine cleanup follows the same primary/secondary rules.
+Acquisition may suspend. Release must be synchronous; its actual callback
+obligation is checked before row widening. Machine cleanup follows the same
+primary/secondary rules.
 [Resource semantics](../reference/resources.md) owns the complete event table.
 
 ## Direct, Exit, and Machine

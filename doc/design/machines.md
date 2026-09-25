@@ -120,17 +120,18 @@ to such an activation keep its own Direct protocol inside a suspending
 computation. Abort
 routing unwinds only to its exact target before invoking the clause.
 
-A Machine Bracket has Exit acquire/release slots and a Machine body. Explicit
-synchronous-argument obligations survive lowering and lint. An adapter may drive
-a Machine callback synchronously only in a checked slot; unexpected suspension
-drains cleanup and fails an invariant. Actual non-suspension is proved by
-[capture analysis](ownership.md#synchronous-acquisition-and-release).
+A Machine Bracket allows a Machine acquisition and has a checked Exit release
+slot. Explicit synchronous-argument obligations survive lowering and lint. An
+adapter may drive a Machine callback synchronously only in the checked release
+slot; unexpected suspension drains cleanup and fails an invariant. Actual
+non-suspension is proved by [capture analysis](ownership.md#synchronous-release).
 
 After successful acquisition, register a synchronous release closure before the
-body starts. Suspension keeps the LIFO cleanup stack; normal completion pops
-exactly once; partial unwind drains only the exited regions. Cleanup uses the
-same copying Suppress protocol as synchronous scopes. Explicit abandonment
-consumes unfinished production, drains all cleanup, clears storage, and returns
+body starts. A suspending acquisition continues into registration only after
+it returns successfully. Suspension keeps the LIFO cleanup stack; normal
+completion pops exactly once; partial unwind drains only the exited regions.
+Cleanup uses the same copying Suppress protocol as synchronous scopes. Explicit
+abandonment consumes unfinished production, drains all cleanup, clears storage, and returns
 cleanup failure rather than discarding it.
 
 ## Cursor owner and advancement
