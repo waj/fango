@@ -6,6 +6,7 @@ import (
 )
 
 const NativeRegistrationName = "Runtime.NativeRequest.Registration"
+const NativeEventBridgeName = "Runtime.Async.Native.Bridge"
 
 // CheckNativeRequest reconstructs the retention boundary from the public
 // scheme. Only the registration token crosses modules; a host never does.
@@ -30,6 +31,9 @@ func CheckNativeRequest(n *NativeInfo) (bool, error) {
 	}
 	if con, ok := rest.(*TCon); ok && con.Name == NativeRegistrationName {
 		return false, fmt.Errorf("only NativeRequest may allocate registration tokens")
+	}
+	if con, ok := rest.(*TCon); ok && con.Name == NativeEventBridgeName && !strings.HasPrefix(n.Name, "Runtime.Async.Native.") {
+		return false, fmt.Errorf("only Runtime.Async.Native may allocate event bridges")
 	}
 	if request {
 		unit, ok := rest.(*TCon)

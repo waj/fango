@@ -1,0 +1,9 @@
+import Async
+import Async.IO
+
+main() = print (Async.run (\_ ->
+    first = Async.spawn (\_ -> Async.IO.sleep 1)
+    second = Async.spawn (\_ -> Async.IO.sleep 1)
+    Async.await first
+    Async.await second
+    "timers complete"))

@@ -145,19 +145,10 @@ changes no declaration a live session has already accepted.
   cannot be confused with old values or closures.
 - Decide dependency invalidation and whether removed declarations remain
   addressable by existing closures only.
-- Connect Ctrl-C to the cleanup and cancellation protocol in
-  [Async native-readiness integration](roadmap-async.md#a3-native-readiness-and-io)
-  without corrupting the session or consuming input intended for `readLine`.
-  Respect the [explicit-checkpoint policy](roadmap-async.md#checkpoint-policy);
-  the first release does not promise prompt cleanup for arbitrary non-yielding
-  generated code. Repeat cancellation/recovery coverage when the later
+- Repeat interruption coverage when the later
   [CPU responsiveness stage](roadmap-async.md#a8-cpu-responsiveness) adds generated
-  checkpoints; native input still needs its request-specific interruption/drain
-  contract.
-  Preserve existing evaluator interruption checks. Basic prompt cancellation may
-  ship earlier once its active execution path has the corresponding cleanup
-  guarantees.
-- Add transcript coverage for reload, cross-generation errors,
-  cancellation, handler interaction, and recovery after failures.
+  checkpoints, including interactions with handlers and non-yielding code.
+- Add transcript coverage for reload, cross-generation errors, handler
+  interaction, and recovery after failures.
 
 - Add interactive line editing and persistent history.

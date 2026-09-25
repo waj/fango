@@ -139,7 +139,7 @@ func (ck *Checker) boundaryWrapper(t types.Type, module string) *types.CtorInfo 
 	if adt == nil || adt.IsRecord() || len(con.Args) != len(adt.Params) || len(adt.Ctors) != 1 || len(adt.Ctors[0].Fields) != 1 {
 		return nil
 	}
-	if symbolModule(adt.Con.Name) != module && adt.Con.Name != types.NativeRegistrationName || !ck.isBoundaryValue(adt.Ctors[0].Fields[0]) {
+	if symbolModule(adt.Con.Name) != module && adt.Con.Name != types.NativeRegistrationName && adt.Con.Name != types.NativeEventBridgeName || !ck.isBoundaryValue(adt.Ctors[0].Fields[0]) {
 		return nil
 	}
 	return adt.Ctors[0]

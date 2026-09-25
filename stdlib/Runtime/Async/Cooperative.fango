@@ -129,6 +129,8 @@ dispatch owner ready state =
                             WaitSignal target ->
                                 if contains (SignalKey target) notified then Continue (Queue rest (Jobs (Job key 0 work) back)) state
                                 else Continue (Queue rest back) (State [Waiting (SignalKey target) (Job key 0 work) | waiting] notified nextKey script)
+                            WaitNative _ -> Done (Err Stalled)
+                            WaitCapacity -> Done (Err Stalled)
                             Signal target ->
                                 (remaining, awoken) = wake (SignalKey target) waiting (Queue rest back)
                                 Continue (enqueue (Job key 0 work) awoken) (State remaining [SignalKey target | notified] nextKey script)

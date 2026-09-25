@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Async exposing (Async, Error(..), Request(..), Task, await, bind, context, poll, run, runOn, signal, spawn, waitSignal, worker, yield)
+module Async exposing (Async, Error(..), Request(..), Task, await, bind, context, nativeBridge, nativeReserve, nativeWait, poll, run, runOn, runWithCapacity, signal, spawn, waitSignal, worker, yield)
 
 import Basics exposing (..)
 import Failure exposing (Failure)
@@ -7,6 +7,7 @@ import IO exposing (IO)
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 import Result exposing (Result(..))
+import Runtime.Async.Native
 import Runtime.Cell
 import Runtime.Completion
 import Runtime.Coroutine
@@ -15,8 +16,8 @@ import Runtime.Scope
 import Runtime.Service
 import Runtime.Work
 
-type Error = InvalidWorkerCount Int | SelfAwait | Stalled deriving (Eq, Show)
-type Key = TaskKey (List Int) Int | ContextKey (List Int) | SignalKey Int deriving (Eq)
+type Error = InvalidWorkerCount Int | InvalidNativeCapacity Int | Interrupted | SelfAwait | Stalled deriving (Eq, Show)
+type Key = TaskKey (List Int) Int | ContextKey (List Int) | SignalKey Int | NativeKey Int | CapacityKey deriving (Eq)
 type ContextOutcome = ContextSuccess | ContextFailure Failure | ContextError Error
 type Request
     = Spawn (Runtime.Work.Work Request Int ())
@@ -26,6 +27,8 @@ type Request
     | WaitTask Int
     | AwaitTask Key
     | WaitSignal Int
+    | WaitNative Int
+    | WaitCapacity
     | Signal Int
     | NewContext
     | Check
@@ -38,6 +41,7 @@ effect Async
     owner : () ->{Runtime.Service.Invocation Request Int} Runtime.Coroutine.Facet
     path : () ->{Runtime.Service.Invocation Request Int} List Int
     request : Request ->{Runtime.Service.Invocation Request Int} Int
+    bridge : () ->{Runtime.Service.Invocation Request Int} Runtime.Async.Native.Bridge
 
 {-# resource #-}
 type Task a e = Task Key (Runtime.Cell.Reader (Runtime.Completion.Completion a e))
@@ -49,18 +53,21 @@ bind : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) ->{Async
 bind action =
     facet = owner()
     taskPath = path()
+    eventBridge = bridge()
     \_ -> handle action() of
         owner () -> resume facet
         path () -> resume taskPath
+        bridge () -> resume eventBridge
         request value -> resume (Runtime.Service.invoke value)
 
 spawn : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) ->{Async, Runtime.Service.Invocation Request Int, IO | e} Task a {IO | e}
 spawn action =
     facet = owner()
     taskPath = path()
+    eventBridge = bridge()
     publisher = Runtime.Cell.createIn facet
     reader = Runtime.Cell.reader publisher
-    work = Runtime.Work.register facet (worker action facet taskPath publisher)
+    work = Runtime.Work.register facet (worker action facet taskPath eventBridge publisher)
     key = request (Start taskPath work)
     Task (TaskKey taskPath key) reader
 
@@ -90,11 +97,28 @@ signal key =
     reply = request (Signal key)
     ()
 
-worker : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) -> Runtime.Coroutine.Facet -> List Int -> Runtime.Cell.Publisher (Runtime.Completion.Completion a {IO | e}) -> (Request ->{Runtime.Coroutine.Suspension} Int) -> Int ->{Runtime.Coroutine.Suspension, IO | e} ()
-worker action facet taskPath publisher pause initial =
+nativeBridge : () ->{Async, Runtime.Service.Invocation Request Int} Runtime.Async.Native.Bridge
+nativeBridge() = bridge()
+
+nativeReserve : () ->{Async, Runtime.Service.Invocation Request Int, IO} Int
+nativeReserve() =
+    ticket = Runtime.Async.Native.reserve (bridge())
+    if ticket == 0 then
+        ignored = request WaitCapacity
+        nativeReserve()
+    else ticket
+
+nativeWait : Int ->{Async, Runtime.Service.Invocation Request Int} ()
+nativeWait ticket =
+    ignored = request (WaitNative ticket)
+    ()
+
+worker : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) -> Runtime.Coroutine.Facet -> List Int -> Runtime.Async.Native.Bridge -> Runtime.Cell.Publisher (Runtime.Completion.Completion a {IO | e}) -> (Request ->{Runtime.Coroutine.Suspension} Int) -> Int ->{Runtime.Coroutine.Suspension, IO | e} ()
+worker action facet taskPath eventBridge publisher pause initial =
     completed = Runtime.Completion.dropSuspension (Runtime.Completion.capture (\_ -> Runtime.Service.run pause (\_ -> handle action() of
         owner () -> resume facet
         path () -> resume taskPath
+        bridge () -> resume eventBridge
         request value -> resume (Runtime.Service.invoke value))))
     published = Runtime.Cell.publish publisher completed
     case Runtime.Completion.failure completed of
@@ -308,8 +332,8 @@ settleContexts workOwner state =
                 (waiting, ready) = wake (ContextKey contextPath) tailState.waiting tailState.ready
                 { tailState | ready = ready, waiting = waiting, notified = [ContextKey contextPath | tailState.notified] }
 
-stepDriver : List Int -> Runtime.Work.Owner e -> Runtime.Coroutine.Facet -> State e ->{Runtime.Coroutine.Drive | e} Decision e
-stepDriver localPath workOwner facet state =
+stepDriver : Runtime.Async.Native.Bridge -> Runtime.Work.Owner {IO | e} -> Runtime.Coroutine.Facet -> State {IO | e} ->{Runtime.Coroutine.Drive, IO | e} Decision {IO | e}
+stepDriver eventBridge workOwner facet state =
     case queueFront state.ready of
         Jobs job rest ->
             Job key reply jobPath work = job
@@ -364,6 +388,17 @@ stepDriver localPath workOwner facet state =
                                 Continue ({ state | ready = enqueue (Job key 0 jobPath work) remaining })
                             else
                                 Continue ({ state | ready = remaining, waiting = [Waiting wanted (Job key 0 jobPath work) | state.waiting] })
+                        WaitNative ticket ->
+                            wanted = NativeKey ticket
+                            if Runtime.Async.Native.ready eventBridge ticket then
+                                Continue ({ state | ready = enqueue (Job key 0 jobPath work) remaining })
+                            else
+                                Continue ({ state | ready = remaining, waiting = [Waiting wanted (Job key 0 jobPath work) | state.waiting] })
+                        WaitCapacity ->
+                            if Runtime.Async.Native.available eventBridge then
+                                Continue ({ state | ready = enqueue (Job key 0 jobPath work) remaining })
+                            else
+                                Continue ({ state | ready = remaining, waiting = [Waiting CapacityKey (Job key 0 jobPath work) | state.waiting] })
                         Signal target ->
                             wanted = SignalKey target
                             (waiting, ready) = wake wanted state.waiting remaining
@@ -385,11 +420,35 @@ stepDriver localPath workOwner facet state =
         NoJobs ->
             case state.waiting of
                 [] -> Complete state
-                _ -> Complete (cancel workOwner facet state (Just Stalled))
+                _ ->
+                    if hasNativeWait state.waiting then
+                        event = Runtime.Async.Native.wait eventBridge
+                        if event == -2 then Complete (cancel workOwner facet state (Just Interrupted))
+                        else if event < 0 then Complete (cancel workOwner facet state (Just Stalled))
+                        else Continue (notifyNative event state)
+                    else Complete (cancel workOwner facet state (Just Stalled))
 
-dispatch localPath workOwner facet state =
-    case stepDriver localPath workOwner facet state of
-        Continue next -> dispatch localPath workOwner facet (settleContexts workOwner next)
+hasNativeWait waits =
+    case waits of
+        [] -> False
+        [Waiting key _ | rest] ->
+            case key of
+                NativeKey _ -> True
+                CapacityKey -> True
+                _ -> hasNativeWait rest
+
+notifyNative : Int -> State e -> State e
+notifyNative ticket state =
+    key = if ticket == 0 then CapacityKey else NativeKey ticket
+    (waiting, ready) = wake key state.waiting state.ready
+    { state | ready = ready, waiting = waiting }
+
+dispatch eventBridge workOwner facet state =
+    event = Runtime.Async.Native.take eventBridge
+    current = if event < 0 then state else notifyNative event state
+    if event == -2 then Complete (cancel workOwner facet state (Just Interrupted))
+    else case stepDriver eventBridge workOwner facet current of
+        Continue next -> dispatch eventBridge workOwner facet (settleContexts workOwner next)
         decision -> decision
 
 replayReport workOwner report =
@@ -416,14 +475,21 @@ initialState : Job -> State e
 initialState root = { ready = Queue (Jobs root NoJobs) NoJobs, waiting = [], notified = [], live = [root], nextKey = 1, reports = [], cleanup = [], contexts = [], error = Nothing }
 
 run : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) ->{IO | e} Result Error a
-run action = Runtime.Coroutine.scope (\scope ->
+run action = runWithCapacity 32 action
+
+runWithCapacity : Int -> (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) ->{IO | e} Result Error a
+runWithCapacity capacity action =
+    if capacity <= 0 then Err (InvalidNativeCapacity capacity)
+    else runBounded capacity action
+
+runBounded capacity action = Runtime.Scope.bracket (\_ -> Runtime.Async.Native.new capacity) Runtime.Async.Native.close (\eventBridge -> Runtime.Coroutine.scope (\scope ->
     facet = Runtime.Coroutine.facet scope
     workOwner = Runtime.Work.owner scope
     publisher = Runtime.Cell.create scope
     reader = Runtime.Cell.reader publisher
-    body = Runtime.Work.register facet (worker action facet [] publisher)
+    body = Runtime.Work.register facet (worker action facet [] eventBridge publisher)
     root = Job 0 0 [] body
-    final = case dispatch [] workOwner facet (initialState root) of
+    final = case dispatch eventBridge workOwner facet (initialState root) of
         Complete result -> result
         Forward key pending -> cancel workOwner facet pending (Just Stalled)
         Continue pending -> cancel workOwner facet pending (Just Stalled)
@@ -438,7 +504,7 @@ run action = Runtime.Coroutine.scope (\scope ->
                         Just completed -> Ok (Runtime.Completion.replay completed)
         _ ->
             replayReports workOwner allReports
-            Err Stalled)
+            Err Stalled))
 
 runOn : Runtime.Executor.Executor -> (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) ->{IO | e} Result Error a
 runOn executor action = run action
@@ -453,11 +519,12 @@ context action =
     number = request NewContext
     childPath = append parent [number]
     facet = owner()
+    eventBridge = bridge()
     publisher = Runtime.Cell.createIn facet
     reader = Runtime.Cell.reader publisher
     outcomePublisher = Runtime.Cell.createIn facet
     outcomeReader = Runtime.Cell.reader outcomePublisher
-    body = Runtime.Work.register facet (worker action facet childPath publisher)
+    body = Runtime.Work.register facet (worker action facet childPath eventBridge publisher)
     started = request (StartContext childPath body outcomePublisher)
     done = request (AwaitTask (ContextKey childPath))
     case Runtime.Cell.read outcomeReader of

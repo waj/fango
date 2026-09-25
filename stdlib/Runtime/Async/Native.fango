@@ -1,0 +1,28 @@
+{-# no-prelude #-}
+module Runtime.Async.Native exposing (Bridge, available, close, new, ready, release, reserve, take, wait)
+
+import Basics exposing (..)
+import IO exposing (IO)
+import Runtime.Native
+
+-- One driver owns this bridge. Cooperative children may submit native work
+-- through it; its capacity counts both running and completed but unclaimed work.
+{-# shared-resource #-}
+type Bridge = Bridge Runtime.Native.Any
+
+new : Int ->{IO} Bridge
+new = native
+close : Bridge ->{IO} ()
+close = native
+reserve : Bridge ->{IO} Int
+reserve = native
+available : Bridge ->{IO} Bool
+available = native
+ready : Bridge -> Int ->{IO} Bool
+ready = native
+release : Bridge -> Int ->{IO} ()
+release = native
+take : Bridge ->{IO} Int
+take = native
+wait : Bridge ->{IO} Int
+wait = native

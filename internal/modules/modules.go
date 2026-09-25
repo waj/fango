@@ -940,6 +940,9 @@ func (b nativeBoundary) nativeGoType(t ast.TypeExpr) string {
 	if n, ok := t.(*ast.TName); ok && (strings.HasSuffix(n.Name, ".Registration") || n.Name == "Registration") && !b.localTypes[n.Name] {
 		return "any" // Resolved checking verifies the scoped request protocol.
 	}
+	if n, ok := t.(*ast.TName); ok && n.Name == "Runtime.Async.Native.Bridge" && !b.localTypes[n.Name] {
+		return "any" // Resolved checking verifies the canonical shared bridge.
+	}
 	if _, ok := t.(*ast.TVarName); ok {
 		return "any" // Resolved checking requires a same-index storage edge.
 	}
@@ -2014,5 +2017,5 @@ func ManifestJSON(entries []ManifestEntry) []byte {
 }
 
 func reservedRequestIdentifier(name string) bool {
-	return name == "FangoRequest" || name == "FangoRequestHost" || name == "FangoNewRequestHost"
+	return name == "FangoRequest" || name == "FangoRequestHost" || name == "FangoNewRequestHost" || name == "FangoEventBridge" || name == "FangoNewEventBridge"
 }

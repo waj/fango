@@ -22,6 +22,11 @@ and no source value escapes. Allocation propagates host captures into tokens;
 ordinary ADT and closure flow propagates them into callback bindings. The graph
 exports the same obligations through helpers and module objects. Execution
 codecs preserve them, and the Core linter rejects missing or forged metadata.
+The Async adapter's bridge is a checked shared resource owned outside all
+request hosts. Its private result buffer is acquired outside the request host
+and closed after that host drains; its native close operation checks that no
+worker is still using it. Folded recursive owner IDs remain insufficient proof
+of resource outliving, so this buffer does not expose a Fango resource handle.
 
 `Runtime.NativeRequest.immediate` is a checked Completion introduction with an exported
 non-suspension obligation. Capture analysis checks the actual action and its
@@ -41,6 +46,9 @@ The host never retains FangoHost, evaluator frames, or Fango callback functions.
 
 Begin publishes a cancellation hook before native work starts. Complete only
 publishes readiness; Done acknowledges the end of native resource access.
+An optional native `OnDone` hook runs before Done closes the quiescence channel;
+this lets a native event source wake a driver without a gap between notification
+and claimable completion. The hook cannot call back into its request host.
 Delivery claims require both, match the host, and succeed at most once.
 Cancellation revokes claim before running its hook outside the mutex. Draining
 waits for the worker and any in-flight cancellation hook. Map entries stay live

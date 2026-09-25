@@ -113,6 +113,13 @@ type Closure struct {
 
 type IOContext struct {
 	Reader *bufio.Reader
+	// Input can supply one owned line stream to both the prompt and host RPCs.
+	// The REPL uses it so interruption never leaves a blocked read racing the
+	// next prompt for bytes.
+	Input interface {
+		HasInput() (bool, error)
+		ReadInputLine() ([]byte, error)
+	}
 	Writer io.Writer
 	Args   []string
 	Dir    string
@@ -144,6 +151,9 @@ func NewIOContext(r io.Reader, w io.Writer) *IOContext {
 }
 
 func (c *IOContext) HasInput() (bool, error) {
+	if c.Input != nil {
+		return c.Input.HasInput()
+	}
 	_, err := c.Reader.Peek(1)
 	if err == io.EOF {
 		return false, nil
@@ -151,7 +161,12 @@ func (c *IOContext) HasInput() (bool, error) {
 	return err == nil, err
 }
 
-func (c *IOContext) ReadInputLine() ([]byte, error) { return c.Reader.ReadBytes('\n') }
+func (c *IOContext) ReadInputLine() ([]byte, error) {
+	if c.Input != nil {
+		return c.Input.ReadInputLine()
+	}
+	return c.Reader.ReadBytes('\n')
+}
 
 func (c *IOContext) WriteOutput(data []byte) error {
 	_, err := c.Writer.Write(data)
@@ -1110,7 +1125,7 @@ func (in *interp) showValue(v Value) (string, error) {
 }
 
 func (in *interp) nativeRuntime() *natives.Runtime {
-	return &natives.Runtime{Reader: in.ioctx.Reader, Writer: in.ioctx.Writer, Args: in.ioctx.Args, Dir: in.ioctx.Dir, Equal: eqValue, Show: in.showValue, Expand: in.env.Expand}
+	return &natives.Runtime{Reader: in.ioctx.Reader, Host: in.ioctx, Writer: in.ioctx.Writer, Args: in.ioctx.Args, Dir: in.ioctx.Dir, Equal: eqValue, Show: in.showValue, Expand: in.env.Expand}
 }
 
 // tree walks a decision tree, mirroring the compiled backend's switches.

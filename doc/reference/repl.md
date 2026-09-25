@@ -81,6 +81,14 @@ Supported commands are:
 :quit, :q      leave the REPL (Ctrl-D also exits)
 ```
 
-`:reload`, cancellation, and interactive history are not implemented; a
-module edited on disk after it was imported is not re-read in the same
-session.
+Ctrl-C clears a partial prompt input. During evaluation it interrupts at the
+supported evaluator or cooperative Async checkpoints, restores the prompt, and
+keeps accepted definitions. Native Async requests are cancelled and drained
+before an interrupted run returns `Err Interrupted`. A blocked console
+`readLine` is interrupted without assigning the next line to the old
+expression. Opaque host operations that do not respond to cancellation may
+delay the prompt; CPU polling beyond the current evaluator checkpoints remains
+[roadmap work](../roadmap-async.md#a8-cpu-responsiveness).
+
+`:reload` and interactive history are not implemented; a module edited on disk
+after it was imported is not re-read in the same session.

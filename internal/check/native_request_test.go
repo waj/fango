@@ -10,8 +10,9 @@ import (
 	"github.com/waj/fango/internal/core"
 )
 
-const requestFixture = `module Requests exposing (Device, open, close, submit)
+const requestFixture = `module Requests exposing (Device, open, close, submit, submitBridge)
 import Runtime.NativeRequest
+import Runtime.Async.Native
 import Runtime.Native
 {-# resource #-}
 type Device = Device Runtime.Native.Any
@@ -21,11 +22,14 @@ close : Device ->{IO} ()
 close = native
 submit : Runtime.NativeRequest.Registration -> Device ->{IO} ()
 submit = native
+submitBridge : Runtime.NativeRequest.Registration -> Runtime.Async.Native.Bridge ->{IO} ()
+submitBridge = native
 `
 const requestSidecar = `package native
 func Open() any { return nil }
 func Close(value any) {}
 func Submit(token, device any) { r := token.(*FangoRequest); if r.Begin(nil) { r.Complete(); r.Done() } }
+func SubmitBridge(token, bridge any) { r := token.(*FangoRequest); if r.Begin(nil) { r.Complete(); r.Done() } }
 `
 
 func TestNativeRequestOwnershipContracts(t *testing.T) {
@@ -33,6 +37,12 @@ func TestNativeRequestOwnershipContracts(t *testing.T) {
 		{"enclosing resource", `main() = Runtime.Scope.bracket Requests.open Requests.close (\device -> Runtime.NativeRequest.scope 1 (\host ->
     ignored = Runtime.NativeRequest.register host (\token -> Requests.submit token device) (\_ -> ())
     ()))`, ""},
+		{"enclosing bridge", `main() = Runtime.Scope.bracket (\_ -> Runtime.Async.Native.new 1) Runtime.Async.Native.close (\bridge -> Runtime.NativeRequest.scope 1 (\host ->
+    ignored = Runtime.NativeRequest.register host (\token -> Requests.submitBridge token bridge) (\_ -> ())
+    ()))`, ""},
+		{"shorter bridge", `main() = Runtime.NativeRequest.scope 1 (\host -> Runtime.Scope.bracket (\_ -> Runtime.Async.Native.new 1) Runtime.Async.Native.close (\bridge ->
+    ignored = Runtime.NativeRequest.register host (\token -> Requests.submitBridge token bridge) (\_ -> ())
+    ()))`, "ESCAPE"},
 		{"shorter resource", `main() = Runtime.NativeRequest.scope 1 (\host -> Runtime.Scope.bracket Requests.open Requests.close (\device ->
     ignored = Runtime.NativeRequest.register host (\token -> Requests.submit token device) (\_ -> ())
     ()))`, "ESCAPE"},
@@ -71,7 +81,7 @@ main() = ()`, "EFFECT"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			for name, source := range map[string]string{"Requests.fango": requestFixture, "Requests.native.go": requestSidecar, "Main.fango": "import Requests\nimport Runtime.NativeRequest\nimport Runtime.Scope\nimport Runtime.Coroutine\nimport Runtime.Work\nimport Fail\n" + tc.source + "\n"} {
+			for name, source := range map[string]string{"Requests.fango": requestFixture, "Requests.native.go": requestSidecar, "Main.fango": "import Requests\nimport Runtime.NativeRequest\nimport Runtime.Async.Native\nimport Runtime.Scope\nimport Runtime.Coroutine\nimport Runtime.Work\nimport Fail\n" + tc.source + "\n"} {
 				if err := os.WriteFile(filepath.Join(dir, name), []byte(source), 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -127,13 +137,14 @@ func TestNativeRequestDeclarations(t *testing.T) {
 	for _, tc := range []struct{ name, declaration, sidecar string }{
 		{"wrong position", "submit : Int -> Runtime.NativeRequest.Registration ->{IO} ()", "func Submit(n int64, token any) {}"},
 		{"token allocation", "submit : () ->{IO} Runtime.NativeRequest.Registration", "func Submit() any { return nil }"},
+		{"bridge allocation", "submit : () ->{IO} Runtime.Async.Native.Bridge", "func Submit() any { return nil }"},
 		{"result", "submit : Runtime.NativeRequest.Registration ->{IO} Int", "func Submit(token any) int64 { return 0 }"},
 		{"host boundary", "submit : Runtime.NativeRequest.Host ->{IO} ()", "func Submit(host any) {}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "Main.fango")
-			if err := os.WriteFile(path, []byte("import Runtime.NativeRequest\n"+tc.declaration+"\nsubmit = native\nmain() = ()\n"), 0600); err != nil {
+			if err := os.WriteFile(path, []byte("import Runtime.NativeRequest\nimport Runtime.Async.Native\n"+tc.declaration+"\nsubmit = native\nmain() = ()\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(dir, "Main.native.go"), []byte("package native\n"+tc.sidecar+"\n"), 0600); err != nil {

@@ -82,6 +82,12 @@ The token crosses as Go `any`. Every materialized sidecar has the reserved
    Readiness alone never authorizes releasing resources. Results needed by the
    Fango action must remain readable after this acknowledgement.
 
+After `Begin`, a sidecar may install one native-only `OnDone(func())` hook. It
+runs once inside `Done`, before quiescence is acknowledged, even when the
+request was cancelled. A cooperative adapter uses it to publish a scalar event
+after native results are stable. The hook must not invoke Fango, access
+`FangoHost`, block on its own host, or call back into the same request host.
+
 Cancellation hooks must revoke or signal native work without invoking Fango.
 They may run concurrently with that native work and must synchronize shared
 state. A hook must not call `Drain` or close its own request host. Native work

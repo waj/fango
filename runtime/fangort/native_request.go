@@ -17,6 +17,7 @@ type NativeRequest struct {
 	host                                             *NativeRequestHost
 	admitted, begun, ready, done, claimed, cancelled bool
 	cancel                                           func()
+	onDone                                           func()
 	quiescent                                        chan struct{}
 	cancelling                                       bool
 	cancelDone                                       chan struct{}
@@ -55,6 +56,19 @@ func (r *NativeRequest) Begin(cancel func()) bool {
 	return true
 }
 
+// OnDone installs a native-only notification that runs before quiescence is
+// acknowledged. It must not call back into Fango or this request host.
+func (r *NativeRequest) OnDone(notify func()) bool {
+	h := r.host
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !r.begun || r.done || r.onDone != nil {
+		return false
+	}
+	r.onDone = notify
+	return true
+}
+
 // Complete publishes readiness once; it does not imply native quiescence.
 func (r *NativeRequest) Complete() bool {
 	h := r.host
@@ -77,6 +91,10 @@ func (r *NativeRequest) Done() {
 		return
 	}
 	r.done, r.cancel = true, nil
+	if r.onDone != nil {
+		r.onDone()
+		r.onDone = nil
+	}
 	close(r.quiescent)
 	if (r.cancelled || r.claimed) && !r.cancelling {
 		delete(h.requests, r)

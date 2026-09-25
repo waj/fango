@@ -19,6 +19,7 @@ import (
 
 type Runtime struct {
 	Reader *bufio.Reader
+	Host   fangort.SessionHost
 	Writer io.Writer
 	Args   []string
 	Dir    string
@@ -106,6 +107,13 @@ var Table = func() map[string]Spec {
 		return lineEnding(args[0].(string)), nil
 	}}
 	t["IO.hasInput"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
+		if rt.Host != nil {
+			ok, err := rt.Host.HasInput()
+			if err != nil {
+				panic(err)
+			}
+			return ok, nil
+		}
 		_, err := rt.Reader.Peek(1)
 		if err == io.EOF {
 			return false, nil
@@ -116,6 +124,13 @@ var Table = func() map[string]Spec {
 		return true, nil
 	}}
 	t["IO.readRawLine"] = Spec{Arity: 1, Effect: true, Eval: func(rt *Runtime, _ []any) (any, error) {
+		if rt.Host != nil {
+			line, err := rt.Host.ReadInputLine()
+			if err != nil && err != io.EOF {
+				panic(err)
+			}
+			return string([]rune(string(line))), nil
+		}
 		line, err := rt.Reader.ReadString('\n')
 		if err != nil && err != io.EOF {
 			panic(err)
@@ -197,6 +212,11 @@ var Table = func() map[string]Spec {
 			return nil, fmt.Errorf("native %s requires the sidecar worker", name)
 		}}
 	}
+	for name, arity := range asyncNativeNatives {
+		t[name] = Spec{Arity: arity, Eval: func(_ *Runtime, _ []any) (any, error) {
+			return nil, fmt.Errorf("native %s requires the sidecar worker", name)
+		}}
+	}
 	// Bundled natives are compile-time-safe by default: they are pure
 	// functions of their arguments. System entropy is Random's one exclusion,
 	// and the File natives observe the file system; seeded draws now use
@@ -206,7 +226,8 @@ var Table = func() map[string]Spec {
 		_, network := netNatives[name]
 		_, cell := cellNatives[name]
 		_, request := requestNatives[name]
-		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed" && !file && !network && !cell && !request
+		_, asyncNative := asyncNativeNatives[name]
+		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed" && !file && !network && !cell && !request && !asyncNative
 		t[name] = spec
 	}
 	return t
@@ -239,6 +260,17 @@ var requestNatives = map[string]int{
 	"Runtime.NativeRequest.claim": 2, "Runtime.NativeRequest.cancelRegistration": 1,
 	"Runtime.NativeRequest.drainRegistration": 1, "Runtime.NativeRequest.liveCount": 1,
 	"Runtime.NativeRequest.registrationCount": 1,
+}
+
+var asyncNativeNatives = map[string]int{
+	"Runtime.Async.Native.new": 1, "Runtime.Async.Native.close": 1,
+	"Runtime.Async.Native.reserve": 1, "Runtime.Async.Native.available": 1,
+	"Runtime.Async.Native.ready":   2,
+	"Runtime.Async.Native.release": 2, "Runtime.Async.Native.take": 1,
+	"Runtime.Async.Native.wait": 1,
+	"Async.IO.newState":         1, "Async.IO.closeState": 1,
+	"Async.IO.submitSleep": 5, "Async.IO.submitGet": 5,
+	"Async.IO.ok": 1, "Async.IO.body": 1, "Async.IO.errorText": 1,
 }
 
 func Lookup(name string) (Spec, bool) { spec, ok := Table[name]; return spec, ok }

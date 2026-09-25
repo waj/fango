@@ -31,7 +31,7 @@ The bundled library is experimental and versioned with the compiler.
 | Runtime.Work | [Scoped work packages](reference/library-work.md) |
 | Runtime.Cell | [Scope-owned write-once cells](reference/library-cells.md) |
 | Runtime.Service | [Shared contexts and invocation authority](reference/library-services.md) |
-| Async, Runtime.Executor, Async.Cooperative, Runtime.Async.Cooperative | [Structured cooperative tasks and internal driver](reference/library-async-cooperative.md) |
+| Async, Async.IO, Runtime.Executor, Async.Cooperative, Runtime.Async.Cooperative | [Structured cooperative tasks, native IO, and internal driver](reference/library-async-cooperative.md) |
 | Runtime.NativeRequest | [Bounded native retention and driver callbacks](reference/library-native-requests.md) |
 | Runtime.Native | [Native Go sidecars](reference/native.md) |
 | Json | [Encoding and string tokens](reference/library-json.md) |

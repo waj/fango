@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -55,11 +56,26 @@ type Executor struct {
 	digest  string
 	files   []workerFile
 
-	mu   sync.Mutex
-	cmd  *exec.Cmd
-	conn net.Conn
-	enc  *gob.Encoder
-	dec  *gob.Decoder
+	mu               sync.Mutex
+	cmd              *exec.Cmd
+	conn             net.Conn
+	enc              *gob.Encoder
+	dec              *gob.Decoder
+	process          atomic.Pointer[os.Process]
+	pendingInterrupt atomic.Bool
+}
+
+// Interrupt asks the live worker to stop at its next supported checkpoint.
+// The worker keeps its heap and drains scoped native requests before replying.
+func (e *Executor) Interrupt() {
+	if e == nil {
+		return
+	}
+	if process := e.process.Load(); process != nil {
+		_ = process.Signal(os.Interrupt)
+	} else {
+		e.pendingInterrupt.Store(true)
+	}
 }
 
 func New(sources []Source) (*Executor, error) {
@@ -376,6 +392,7 @@ func (e *Executor) Close() error {
 }
 
 func (e *Executor) stop() error {
+	e.process.Store(nil)
 	if e.conn != nil {
 		_ = e.conn.Close()
 	}
@@ -433,6 +450,10 @@ func (e *Executor) start() error {
 		return fmt.Errorf("native worker authentication failed")
 	}
 	e.cmd, e.conn, e.enc, e.dec = cmd, conn, enc, dec
+	e.process.Store(cmd.Process)
+	if e.pendingInterrupt.Swap(false) {
+		_ = cmd.Process.Signal(os.Interrupt)
+	}
 	return nil
 }
 

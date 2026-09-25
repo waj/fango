@@ -8,11 +8,15 @@ package repl
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/check"
@@ -56,11 +60,13 @@ func (o Options) objectCache(root string) check.ObjectCache {
 }
 
 type Session struct {
-	ck    *infer.Checker
-	env   *eval.Env
-	gen   int // generation counter incremented on redefinition
-	out   io.Writer
-	ioctx *eval.IOContext
+	ck         *infer.Checker
+	env        *eval.Env
+	gen        int // generation counter incremented on redefinition
+	out        io.Writer
+	ioctx      *eval.IOContext
+	evalExec   atomic.Pointer[nativehost.Executor]
+	interrupts <-chan struct{}
 
 	// graph holds every module the session has resolved, the bundled prelude
 	// closure included; prompt is the resolver scope prompts and imports
@@ -180,7 +186,32 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 	defer s.Close()
 	fmt.Fprintln(out, banner)
 	reader := bufio.NewReader(in)
-	s.ioctx = &eval.IOContext{Reader: reader, Writer: out, Natives: s.ioctx.Natives}
+	signals := make(chan os.Signal, 1)
+	interrupts := make(chan struct{}, 1)
+	stopped := make(chan struct{})
+	signal.Notify(signals, os.Interrupt)
+	defer signal.Stop(signals)
+	defer close(stopped)
+	go func() {
+		for {
+			select {
+			case <-signals:
+				if executor := s.evalExec.Load(); executor != nil {
+					executor.Interrupt()
+				}
+				select {
+				case interrupts <- struct{}{}:
+				default:
+				}
+			case <-stopped:
+				return
+			}
+		}
+	}()
+	input := newLinePump(reader, interrupts)
+	defer input.Close()
+	s.interrupts = interrupts
+	s.ioctx = &eval.IOContext{Reader: reader, Input: input, Writer: out, Natives: s.ioctx.Natives}
 	var buf strings.Builder
 	flush := func() {
 		if buf.Len() > 0 {
@@ -194,7 +225,13 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 		} else {
 			fmt.Fprint(out, "| ")
 		}
-		line, err := reader.ReadString('\n')
+		data, err := input.next()
+		if errors.Is(err, errInterruptedInput) {
+			buf.Reset()
+			fmt.Fprintln(out)
+			continue
+		}
+		line := string(data)
 		if err != nil && len(line) == 0 {
 			fmt.Fprintln(out)
 			flush()
@@ -597,7 +634,10 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 		pending = append(pending, defs...)
 		loaded = append(loaded, inc.Modules...)
 		for _, name := range inc.Modules {
-			needsOpaqueWorker = needsOpaqueWorker || name == "File" || name == "Net"
+			switch name {
+			case "File", "Net", "Runtime.Cell", "Runtime.NativeRequest", "Runtime.Async.Native", "Async.IO":
+				needsOpaqueWorker = true
+			}
 		}
 		for _, n := range inc.Natives {
 			natives = append(natives, nativehost.Source{Module: n.Module, Content: n.Content})
@@ -729,7 +769,7 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 	display := elaborate.Display(coreExpr, s.ck, "")
 	if s.ck.Intrinsics[types.CoroutineWithName].Body != nil {
 		defs := append(s.activeExecutionDefs(), aux...)
-		defs = append(defs, core.Def{Name: "_repl_expression", Type: display.Type(), Control: core.ExprControl(display), Body: display})
+		defs = append(defs, core.Def{Name: "_repl_expression", Type: display.Type(), SourceType: display.Type(), Control: core.ExprControl(display), Body: display})
 		machineProg, lowerErrs := machineir.Lower(s.program(defs), s.ck.B)
 		if len(lowerErrs) > 0 {
 			fmt.Fprintf(s.out, "runtime error: internal machine lowering failed: %v\n", lowerErrs[0])
@@ -743,13 +783,34 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 	for i := range aux {
 		s.env.DefineWorker(&aux[i])
 	}
-	v, err := eval.EvalIO(context.Background(), display, s.env, s.ioctx)
+	if s.exec != nil {
+		s.evalExec.Store(s.exec)
+	} else if bundled, bundledErr := nativehost.Bundled(); bundledErr == nil {
+		s.evalExec.Store(bundled)
+	}
+	v, err := s.evalDisplay(display)
+	s.evalExec.Store(nil)
+	if s.interrupts != nil {
+		select {
+		case <-s.interrupts:
+		default:
+		}
+	}
 	if err != nil {
 		fmt.Fprintf(s.out, "runtime error: %v\n", err)
 		return inputDone
 	}
 	fmt.Fprintf(s.out, "%s : %s\n", v.(string), shownTy)
 	return inputDone
+}
+
+func (s *Session) evalDisplay(display core.Expr) (value eval.Value, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("%v", recovered)
+		}
+	}()
+	return eval.EvalIO(context.Background(), display, s.env, s.ioctx)
 }
 
 func (s *Session) activeExecutionDefs() []core.Def {

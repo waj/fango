@@ -10,8 +10,10 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/signal"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/execcodec"
@@ -205,6 +207,34 @@ var (
 // Run connects to the interpreter, installs its host in every linked sidecar,
 // and serves native calls until the interpreter closes the connection.
 func Run(functions map[string]any, installHost func(fangort.NativeHost)) {
+	interrupts := make(chan os.Signal, 1)
+	signal.Notify(interrupts, os.Interrupt)
+	defer signal.Stop(interrupts)
+	stopped := make(chan struct{})
+	defer close(stopped)
+	active := struct {
+		sync.Mutex
+		cancel      context.CancelFunc
+		interrupted bool
+	}{}
+	go func() {
+		for {
+			select {
+			case <-interrupts:
+				active.Lock()
+				cancel, already := active.cancel, active.interrupted
+				if cancel != nil {
+					active.interrupted = true
+				}
+				active.Unlock()
+				if cancel != nil && !already && !fangort.InterruptNativeBridges() {
+					cancel()
+				}
+			case <-stopped:
+				return
+			}
+		}
+	}()
 	conn, err := net.Dial("tcp", os.Getenv("FANGO_NATIVE_ADDR"))
 	if err != nil {
 		panic(err)
@@ -228,7 +258,16 @@ func Run(functions map[string]any, installHost func(fangort.NativeHost)) {
 		case "call":
 			response = invoke(functions, request.Name, request.Args)
 		case "execute":
-			response = execute(request.Data, env, caller, host)
+			ctx, cancel := context.WithCancel(context.Background())
+			active.Lock()
+			active.cancel = cancel
+			active.interrupted = false
+			active.Unlock()
+			response = execute(ctx, request.Data, env, caller, host)
+			active.Lock()
+			active.cancel = nil
+			active.Unlock()
+			cancel()
 		default:
 			panic("unknown request " + request.Kind)
 		}
@@ -238,7 +277,7 @@ func Run(functions map[string]any, installHost func(fangort.NativeHost)) {
 	}
 }
 
-func execute(data []byte, env *eval.Env, caller *directCaller, host *proxy) (result nativewire.Message) {
+func execute(ctx context.Context, data []byte, env *eval.Env, caller *directCaller, host *proxy) (result nativewire.Message) {
 	result.Kind = "result"
 	defer func() {
 		if p := recover(); p != nil {
@@ -264,10 +303,10 @@ func execute(data []byte, env *eval.Env, caller *directCaller, host *proxy) (res
 	ioctx.Args = host.Arguments()
 	ioctx.Dir = host.WorkingDirectory()
 	if payload.Force != "" {
-		_, err = eval.ForceIO(context.Background(), payload.Force, env, ioctx)
+		_, err = eval.ForceIO(ctx, payload.Force, env, ioctx)
 	} else if payload.Expr != nil {
 		var value any
-		value, err = eval.EvalIO(context.Background(), payload.Expr, env, ioctx)
+		value, err = eval.EvalIO(ctx, payload.Expr, env, ioctx)
 		if err == nil {
 			result.Value = encode(reflect.ValueOf(value))
 		}

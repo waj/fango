@@ -11,5 +11,7 @@ var FangoHost FangoNativeHost = fangort.SystemNativeHost
 // These scoped tokens carry no authority to invoke Fango or access FangoHost.
 type FangoRequest = fangort.NativeRequest
 type FangoRequestHost = fangort.NativeRequestHost
+type FangoEventBridge = fangort.NativeEventBridge
 
 var FangoNewRequestHost = fangort.NewNativeRequestHost
+var FangoNewEventBridge = fangort.NewNativeEventBridge

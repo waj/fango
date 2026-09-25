@@ -3,8 +3,9 @@
 `Async` supplies structured tasks on the cooperative executor. `Async.run`
 creates the implicit root context; `Async.runOn Runtime.Executor.cooperative` and
 `Async.Cooperative.run` select the same policy. `Runtime.Executor` currently exposes
-only `cooperative`. Parallel and mixed policies, native readiness, and
-suspending cleanup remain [roadmap work](../roadmap-async.md#implementation-stages).
+only `cooperative`. Scoped native waits and HTTP GET are available through
+`Async.IO`. Parallel and mixed policies and suspending cleanup remain
+[roadmap work](../roadmap-async.md#implementation-stages).
 
 ```fango
 spawn : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a)
@@ -15,6 +16,8 @@ context : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a)
 run : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a)
     ->{IO | e} Result Error a
 runOn : Runtime.Executor.Executor -> (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a)
+    ->{IO | e} Result Error a
+runWithCapacity : Int -> (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a)
     ->{IO | e} Result Error a
 ```
 
@@ -71,15 +74,33 @@ order. Primary and suppressed payloads retain their types. Nested reports
 remain nested and replay under the caller's current evidence.
 
 `Async.yield()` gives other ready tasks a turn; `Async.waitSignal key` parks,
-and `Async.signal key` publishes a sticky notification. These are scripted
-cooperative readiness tools, not a real IO readiness adapter. Yield, waits,
-startup, context entry/exit, and await of an already published result are the
-supported cancellation checkpoints. `Async.Error` has `SelfAwait`, `Stalled`,
-and `InvalidWorkerCount Int`. `SelfAwait` detects a task waiting on itself;
+and `Async.signal key` publishes a sticky notification for scripted readiness.
+`Async.IO.sleep millis` parks a task on a native timer. `Async.IO.get url` makes
+an HTTP GET request and returns `Result String String`; it accepts UTF-8 text
+responses up to one MiB and response headers up to 64 KiB. Network, timeout,
+HTTP status 400 or higher, invalid
+UTF-8, and size failures return `Err` with a message. A request is scoped to
+its task, and cancellation drains native work before releasing its state.
+`Async.runWithCapacity n` selects the maximum number of native requests in one
+runner, including completed requests whose callbacks are not yet claimed.
+`run` and `runOn cooperative` use 32 slots. Admission above the limit parks the
+task until a slot is released. A nonpositive capacity returns
+`Err (InvalidNativeCapacity n)` before running the action.
+
+Yield, waits, native completion, startup, context entry/exit, and await of an
+already published result are the supported cancellation checkpoints. In the
+REPL, Ctrl-C during a cooperative run returns `Err Interrupted` after native
+requests and synchronous cleanup drain. `Async.Error` also has `SelfAwait`,
+`Stalled`, and `InvalidWorkerCount Int`. `SelfAwait` detects a task waiting on itself;
 `Stalled` reports no runnable work or possible notification. The worker count
 case is reserved for the later mixed executor. Scheduler errors are returned as
 `Err`; a typed failure recorded during drain takes precedence and exits through
 its ordinary effect handler.
+
+`Async.IO.get` cancels its Go HTTP request when the task is closed. DNS and
+host network calls may take time to return after cancellation; scope exit waits
+for them. Existing synchronous `File` and `Net` operations still occupy the
+cooperative driver while their host call blocks.
 
 `Runtime.Async.Cooperative` remains a low-level A1 probe driver. It takes a
 scripted signal list and worker factories and directly handles `Async.Request`
@@ -87,4 +108,7 @@ with `Runtime.Service.run`. Its private Task contains only successful values;
 it does not implement public structured contexts or typed child failure
 selection. The [A1 fixtures](../../testdata/run/async_a1_cooperative.fango)
 and [A2 fixtures](../../testdata/run/async_a2_contexts.fango) run in both the
-Core interpreter and generated backend.
+Core interpreter and generated backend. The [A3 fixtures](../../testdata/run/async_a3_io.fango)
+cover overlapping HTTP fetches and suspension inside a Stream pull; the
+[capacity fixture](../../testdata/run/async_a3_capacity.fango) covers admission,
+cancellation, and cleanup failure.

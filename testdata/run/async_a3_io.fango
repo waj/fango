@@ -1,0 +1,33 @@
+import Async
+import Async.IO
+import Iterator
+import Runtime.Native
+import Runtime.Scope
+import Stream
+
+{-# resource #-}
+type Server = Server Runtime.Native.Any
+
+openServer : () ->{IO} Server
+openServer = native
+closeServer : Server ->{IO} ()
+closeServer = native
+serverURL : Server ->{IO} String
+serverURL = native
+
+pull() =
+    source = Stream.generate (\_ ->
+        Async.IO.sleep 1
+        Stream.yield 7)
+    pipeline = Stream.take 1 (Stream.map (\value -> value + 1) source)
+    Stream.withCursor pipeline (\cursor -> Iterator.next cursor)
+
+main() = Runtime.Scope.bracket openServer closeServer (\server ->
+    url = serverURL server
+    print (Async.runWithCapacity 2 (\_ ->
+        first = Async.spawn (\_ -> Async.IO.get (url ++ "/first"))
+        second = Async.spawn (\_ -> Async.IO.get (url ++ "/second"))
+        print (Async.await first)
+        print (Async.await second)
+        print (pull())
+        "complete")))

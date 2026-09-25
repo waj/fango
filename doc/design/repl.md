@@ -32,6 +32,15 @@ old memoized values or closures. Class redefinition is rejected; type redefiniti
 has fresh nominal identity and may install new instances. Identity allocations are
 not reused on rollback.
 
+The prompt and its native host RPCs consume one line pump. Ctrl-C revokes the
+current prompt input or signals the active worker. A host read interrupted in
+the middle leaves the line pump as the sole reader; the next prompt receives
+the next line. The worker handles the signal without discarding its persistent
+heap. If a cooperative Async bridge is active, it wakes the driver so owned
+work can close and drain; otherwise the worker cancels the evaluator context
+at its supported polling points. Runtime errors leave installed definitions
+and the worker available for subsequent inputs.
+
 Parser incompleteness/layout drives multiline input. Prompt inputs are sequential,
 even though imported module functions have module-wide visibility. Effectful ordinary
 declarations are rejected; effectful expressions run and installed functions wait
@@ -74,5 +83,5 @@ modules published are immutable and stay valid, so the retry reuses them.
 Resource checking uses installed definitions as context, so imported wrappers obey
 the same non-escape rules at the prompt as in a source program. Machine lowering
 uses the exact displayed/evaluated Core expression to preserve lambda identities.
-Future reload, cancellation, and editing work belongs in the
+Future reload and editing work belongs in the
 [tooling roadmap](../roadmap-tooling.md#repl-hardening).

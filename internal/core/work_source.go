@@ -89,7 +89,10 @@ func SourceEffectErrors(p *Prog) []error {
 		}
 		cur := d.SourceType
 		row := types.Row{}
-		known := true
+		// Prompt expressions have no source arrow whose row can describe the
+		// effects of evaluating the expression itself. The prompt checker
+		// checked that root; nested calls still carry their own source proofs.
+		known := d.Name != "_repl_expression"
 		for range len(d.Params) {
 			fn, ok := cur.(*types.TFun)
 			if !ok {

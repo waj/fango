@@ -23,6 +23,18 @@ failure order. `Async.bind` captures the current facet and path in a closure
 whose later service invocations still use the active worker's pause. Its
 resource capture cannot outlive the runner.
 
+The root also owns one shared native event bridge with a bounded ticket table.
+Each native adapter reserves a ticket before starting its own scoped
+`NativeRequest` host. Its native worker stores a stable result, publishes
+readiness, and uses the request's `OnDone` hook to notify the bridge before
+quiescence. A ticket is never reused. Completion before wait registration is
+read from bridge state; duplicate and stale events cannot wake another task.
+The driver drains scalar notifications between task turns and blocks on the
+bridge only when no task is ready and a native wait remains. Capacity waiters
+retry when a drained request releases a slot. The bridge coalesces capacity
+notifications and removes stale completion entries on release, bounding its
+queue by admitted work.
+
 `Async.context` allocates a child path, registers its body as another root-scope
 Work package, and parks the caller on a context key. The driver keeps a record
 for that path and wakes the caller only when no live job remains under it.
@@ -62,6 +74,9 @@ resulting detached failure tree to its caller after its jobs drain. The caller
 replays it through fresh evidence; the root replays its selected report after
 drain. Scheduler errors use the separate `Result Async.Error` path unless a
 typed failure was recorded. Closing unstarted Work does not execute its body.
+An interrupt closes live jobs at a cooperative checkpoint, drains their native
+requests through synchronous cleanup, and returns `Err Interrupted` after
+quiescence. The bridge closes after its owning Coroutine scope has drained.
 
 `Runtime.Completion.dropSuspension` and `dropDrive` remove private control
 labels only after an action has completed, so its saved result cannot resume
@@ -76,4 +91,7 @@ failure ordering, cleanup, caught awaits, expected failures, parent and
 unstarted cancellation, and
 direct/indirect escape rejection. The low-level
 `Runtime.Async.Cooperative` probes continue to exercise the A1 request and
-signal protocol independently of the public runner.
+signal protocol independently of the public runner. The
+[A3 IO fixture](../../testdata/run/async_a3_io.fango) exercises overlapping
+fetches and a Stream pull; the [capacity fixture](../../testdata/run/async_a3_capacity.fango)
+exercises saturated admission, cancellation, and cleanup failure.

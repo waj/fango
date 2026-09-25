@@ -126,3 +126,30 @@ func TestNativeRequestPartialRegistrationCleanup(t *testing.T) {
 		t.Fatal("negative admission")
 	}
 }
+
+func TestNativeRequestDoneNotificationPrecedesQuiescence(t *testing.T) {
+	h := NewNativeRequestHost(1)
+	r := h.Reserve()
+	if !r.Begin(nil) {
+		t.Fatal("begin")
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	if !r.OnDone(func() { close(entered); <-release }) || r.OnDone(func() {}) {
+		t.Fatal("completion notification must be installed once")
+	}
+	if !r.Complete() {
+		t.Fatal("complete")
+	}
+	go r.Done()
+	<-entered
+	drained := make(chan struct{})
+	go func() { r.Drain(); close(drained) }()
+	select {
+	case <-drained:
+		t.Fatal("drained before completion notification stopped using retained data")
+	default:
+	}
+	close(release)
+	<-drained
+	requestCounts(t, h, 0, 0)
+}

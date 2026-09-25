@@ -1,14 +1,14 @@
 # Roadmap: structured Async and execution models
 
 This document owns the remaining Async work: parallel and mixed execution,
-native readiness, suspending cleanup, and concurrent combinators. It depends on the shared
+suspending cleanup, and concurrent combinators. It depends on the shared
 [coroutine foundation](roadmap-coroutines.md), whose ownership/control
 contracts apply without compiler recognition of Async names. The
 [effects roadmap](roadmap-effects.md) owns general language extensions.
 
 The structured APIs and examples below specify the full target. The
-[A2 Async surface](reference/library-async-cooperative.md) implements structured
-cooperative tasks, with an internal scripted A1 driver.
+[cooperative Async surface](reference/library-async-cooperative.md) implements
+structured tasks and native IO, with an internal scripted A1 driver.
 Ordinary calls, trailing Unit lambdas, callback subsumption, scopes,
 and effect instances are implemented foundations; their contracts remain in
 the [reference](reference.md). Promote completed behavior there and architecture
@@ -528,7 +528,8 @@ Sidecars do not receive Fango callback functions. Typed payloads use
 [checked opaque storage](reference/native.md#indexed-native-storage); background
 work uses [NativeRequest](reference/library-native-requests.md). FangoHost may
 only be used during a native call and cannot be retained for asynchronous work.
-A3 must build its IO adapters on these scoped retention and drain contracts.
+The [A3 adapters](reference/library-async-cooperative.md) use these scoped
+retention and drain contracts.
 
 Interpreter Core executes beside sidecars in a worker process, but that shared
 heap does not make evaluator state thread-safe. Isolate per-execution evidence,
@@ -538,11 +539,11 @@ and REPL session recovery. Generated Go requires the same semantic contract.
 
 ### Readiness and blocking operations
 
-Start with deterministic readiness simulation. A real adapter then submits
-work, publishes its wait registration, and returns control without blocking a
-cooperative execution driver. When no task is runnable, the driver may block
-waiting for its event source; that is different from blocking while runnable
-work exists.
+A1 supplied deterministic readiness simulation; the A3 timer and HTTP adapters
+submit scoped requests and return control to the cooperative driver. The driver
+blocks on its native event source only when no task is runnable. The
+[implemented protocol](design/async-cooperative.md) is the basis for later
+adapters.
 
 The current Net/File sidecars perform blocking Go calls. Go's runtime can let
 other goroutines run, but it cannot advance other Fango coroutines assigned
@@ -550,18 +551,18 @@ to the blocked cooperative driver. Use documented readiness operations or a
 bounded blocking bridge with explicit queue capacity and admission backpressure.
 Do not depend on Go netpoll internals.
 
-Separate request capacity from execution-worker count. A slow operation must
-not create an unbounded goroutine, result queue, or retained buffer. Admission
-itself may need to wait and respond to cancellation. Readiness, native completion,
-and cleanup registration must be tested in both immediate and delayed paths.
+Keep request capacity separate from execution-worker count in later adapters.
+A slow operation must not create an unbounded goroutine, result queue, or
+retained buffer. Admission must wait and respond to cancellation where a
+bounded worker bridge is used.
 
 Specify the lifetime of a wait request separately from the lifetime of the
 resource used by native work. A producer-local connection cannot simply be
 yielded to a scheduler under the coroutine output rules. A registration token
-must have a checked/native contract that keeps the request within the resource's
-live execution and guarantees drain before release. Replacing the resource with
-an integer ID is not a proof that native retention is safe. Make this ownership
-case part of the A3 adapter design and its cancellation tests.
+must keep a request within the resource's live execution and guarantee drain
+before release. Replacing the resource with an integer ID is not a proof that
+native retention is safe. Future connection adapters must retain this
+ownership case and its cancellation coverage.
 
 ### Cooperative executor
 
@@ -679,7 +680,7 @@ language work is specified once in the coroutine roadmap.
 | A0: Library representation contract | C0/C4 contract drafts; no C1–C4 implementation prerequisite | DONE: selected representation and proof models; review before C1 |
 | A1: Deterministic cooperative tasks | A0, C4, C6a, C6c (including shared service evidence); C1 implements C0's general extensions | DONE: executor-neutral Async operations with cooperative dynamic spawn/yield/await and scripted waits; no C6b prerequisite |
 | A2: Structured contexts and failures | A1 | DONE: root/nested lifetimes, cancellation, reusable results, synchronous cleanup |
-| A3: Native readiness and IO | A2, C6b; C6a if adapter values require it | Overlapping IO with bounded native work |
+| A3: Native readiness and IO | A2, C6b; C6a if adapter values require it | DONE: bounded native timers and HTTP GET, cooperative wakeup and REPL interruption |
 | A4: Suspending cleanup integration | A3, C5 | Cancellation/drain through asynchronous acquire/release |
 | A5: Goroutine executor | A4, C6d | One driver goroutine per task |
 | A6: Mixed executor | A4, C6d | Bounded pool advancing cooperative tasks |
@@ -693,11 +694,10 @@ may provide a useful test harness, but it is not a semantic prerequisite for the
 worker pool. A8 can begin after A2/C7 without waiting for parallel execution,
 and its tests must be repeated for subsequently delivered executors.
 
-A3 is the first practical Async release and the gate for a real concurrent
-server, not merely A1's simulated scheduler. It includes cooperative structured
-IO and synchronous release. Neither the other executors nor generated CPU polling
-blocks that release; their absence must remain explicit in its behavior and
-diagnostics. The full target includes all three executors and A8 responsiveness.
+A3 supplies the first practical cooperative IO release. The concurrent server
+still needs the wider adapter and executor work in the
+[IO roadmap](roadmap-io.md). The full Async target includes all three executors
+and A8 responsiveness.
 
 ### A0: Library representation contract
 
@@ -774,25 +774,23 @@ contract. The [A2 differential fixtures](../testdata/run/async_a2_contexts.fango
 cover nested and root ownership, outer awaits, bound definition-site context,
 grandchildren, caught await without failure erasure, parent cancellation,
 and typed cleanup ordering in both
-backends. A3 adds real IO readiness; A4 adds suspending cleanup.
+backends. A4 adds suspending cleanup.
 
 ### A3: Native readiness and IO
 
-Add scoped timers/network or bounded blocking bridges, synchronized registration,
-admission backpressure, and native request draining. Integrate the implemented
-[NativeRequest](reference/library-native-requests.md) C6b boundary and C6a
-adapter storage before crossing values they would otherwise forbid.
-Integrate REPL host/input cancellation using the same ownership protocol.
-
-**Acceptance:** two fetches overlap and a sequential Stream pipeline can suspend
-inside a pull. Exercise saturated bridge capacity, completion-before-register,
-duplicate/stale notifications, cancellation during native work, and cleanup
-failure. Ctrl-C at supported checkpoints drains outstanding native work,
-restores prompt/input ownership, and preserves session state; include queued
-readiness and readLine interruption. Document adapters that cannot interrupt a
-host operation promptly rather than claiming universal interruption.
-
-**Stopping point:** real cooperative structured IO with synchronous release.
+**DONE.** [Cooperative Async](reference/library-async-cooperative.md) owns the
+timers, HTTP GET, capacity, errors, and cancellation contract;
+[the driver](design/async-cooperative.md) and
+[native requests](design/native-requests.md) own its lifetime and wakeup
+invariants. The [IO differential fixture](../testdata/run/async_a3_io.fango)
+requires two local HTTP requests to overlap and suspends a Stream pull. The
+[capacity fixture](../testdata/run/async_a3_capacity.fango) covers saturation,
+immediate completion, cancellation during native work, and cleanup failure in
+both backends. Native bridge and request runtime checks cover duplicate and
+stale events, queued readiness at interruption, and quiescent drain. The
+[REPL integration check](../cmd/fango/repl_interrupt_test.go) covers Ctrl-C
+during native wait and readLine, with prompt and session recovery. C6b's
+retention checker verifies enclosing and shorter-lived bridge captures.
 
 ### A4: Suspending cleanup integration
 
