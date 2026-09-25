@@ -162,19 +162,14 @@ cooperative scheduling does not remove those prerequisites.
 
 ## Capture-flow analysis cost
 
-The analysis interprets every definition as its own root, from a checker that
-shares nothing with the other roots, so a helper reached from many definitions
-is interpreted once per root that reaches it. A module of mutually recursive
-functions over a recursive polymorphic type — `Dict` is the standard library's
-one example — pays that multiplier in full, and remains by a wide margin the
-most expensive module to compile.
-
-Sharing work across roots is a redesign rather than an optimization: object
-identities, owners, and allocation ancestry are all relative to the root being
-checked, and a diagnostic names the root it was found from. What is wanted is a
-per-callable summary strong enough that a second root can reuse it without
-reinterpreting the callee, which is the same question the contract already
-answers for dependency modules and does not answer within a module.
+[Compile latency](roadmap-compile-latency.md) owns the cold-build cost of the
+compiler. The capture-flow analysis is most of it: one module is interpreted
+several times over the batch pipeline, and every definition is its own root,
+so a helper reached from many definitions is interpreted once per root. The
+redundant discharges and the allocation shape are ordinary optimization;
+[sharing work across roots](roadmap-compile-latency.md#cl5-sharing-interpretation-across-roots)
+is a redesign, because object identities, owners, and allocation ancestry are
+relative to the root being checked.
 
 ## Operator fixity scope
 
