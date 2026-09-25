@@ -57,6 +57,11 @@ infrastructure. Handler-local State and Random cells are independent. Correctnes
 commands use Go test parallelism sixteen to let structural/compiled checks advance
 while interpreter access is serialized. Generated Go must be deterministic and
 gofmt-idempotent; consumer-independent emission is a cross-fixture invariant.
+Generated-project tests share Go's build cache with the rest of the suite. CI
+removes the unused Android SDK from the Ubuntu runner before restoring that cache,
+leaving disk space for the generated projects and Go's temporary build files.
+CI gives packages a 45-minute timeout because the full differential suite runs
+many compiled fixtures on a shared runner.
 The scheduler storage probe runs short and long schedules in one instrumented
 fixture, checking bounded live state after both schedules. The interpreter
 probe emits the generated Go after its checked compilation, reusing its Fango

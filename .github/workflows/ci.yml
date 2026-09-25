@@ -16,14 +16,22 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     env:
-      # cmd/fango's differential suite compiles every fixture serially, each
-      # with a full `go build` of generated Go — slow but deterministic, and
-      # enough to make the default 10m per-package test timeout tight on a
-      # shared runner. `go` ignores GOFLAGS entries a subcommand does not
-      # accept, so `go vet` is unaffected.
-      GOFLAGS: -timeout=30m
+      # cmd/fango builds the generated fixture batch and native workers while
+      # other packages compile generated projects. This makes even a 30m
+      # per-package timeout tight on a shared runner. `go` ignores GOFLAGS
+      # entries a subcommand does not accept, so `go vet` is unaffected.
+      GOFLAGS: -timeout=45m
     steps:
       - uses: actions/checkout@v4
+
+      # The differential suite builds many generated Go projects. The Ubuntu
+      # image's Android SDK is unused here and occupies much of the runner's
+      # available disk space.
+      - name: Free space for generated Go builds
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android
+          df -h /
 
       # GOTOOLCHAIN=local in internal/build means the runner's own go must
       # satisfy the go directive in go.mod; it will not download a toolchain.

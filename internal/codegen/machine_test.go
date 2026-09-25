@@ -147,7 +147,6 @@ func TestIteratorOwnerRootsMachineProducerInDirectCaller(t *testing.T) {
 	write("entries/Main/iterator_owner_test.go", []byte("package main\n\nimport \"testing\"\n\nfunc TestIteratorOwner(t *testing.T) { main() }\n"))
 	cmd := exec.Command("go", "test", "./...")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOCACHE="+filepath.Join(dir, "gocache"))
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("generated iterator-owner project failed: %v\n%s\n%s", err, output, generated)
 	}
@@ -368,7 +367,6 @@ func TestFixture(t *testing.T) {
 `))
 	cmd := exec.Command("go", "test", "./entries/Main")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOCACHE="+filepath.Join(dir, "gocache"))
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("generated Machine project failed: %v\n%s", err, output)
 	}
@@ -455,7 +453,6 @@ func TestCrossModuleCallback(t *testing.T) {
 `))
 	cmd := exec.Command("go", "test", "./entries/Main")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOCACHE="+filepath.Join(dir, "gocache"))
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("generated cross-module callback failed: %v\n%s", err, output)
 	}
