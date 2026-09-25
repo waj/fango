@@ -10,7 +10,9 @@ import "time"
 // work it names, so Duration always covers that work and never the gap to the
 // next event. Stage names are the pipeline vocabulary: parse, resolve,
 // checked-cache-hit, checked-cache-miss, check, elaborate, semantic-lint,
-// stage-section, emitted-cache-hit, emitted-cache-miss, lowering, emission.
+// stage-section, emitted-cache-hit, emitted-cache-miss, lowering, emission,
+// and capture-flow, which reports the capture-flow analysis wherever it runs
+// and so falls inside another stage's duration.
 type Event struct {
 	Stage string
 	// Owner is a module name, or "<entry>" for a headerless entry module.
@@ -26,6 +28,10 @@ type Event struct {
 	// Bytes is cache payload read or written, and zero for stages that
 	// touch no artifact.
 	Bytes int
+	// Roots and Contexts count, for a capture-flow event, the definitions
+	// the flow interpreter checked from and the call contexts it created.
+	// They are zero for every other stage.
+	Roots, Contexts int
 }
 
 // Observer receives events as they happen. A nil observer has no cost and no

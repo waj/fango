@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/waj/fango/internal/types"
 )
@@ -12,6 +13,8 @@ import (
 // Unknown rows remain intact, and abstract callback destinations stay outward
 // until a call supplies a concrete owner.
 func CollectExecutionNeeds(p *Prog, context []Def, b *types.Builtins) ([]WorkNeed, []ControlNeed) {
+	start := time.Now()
+	contexts := 0
 	a := newCaptureAnalyzer(p, b)
 	for i := range context {
 		if a.defs[context[i].Name] == nil {
@@ -58,6 +61,8 @@ func CollectExecutionNeeds(p *Prog, context []Def, b *types.Builtins) ([]WorkNee
 				break
 			}
 		}
+		contexts += len(f.contexts)
 	}
+	reportFlow(p, start, len(p.Defs), contexts)
 	return work, control
 }

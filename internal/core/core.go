@@ -5,6 +5,7 @@
 package core
 
 import "github.com/waj/fango/internal/types"
+import "time"
 import "github.com/waj/fango/internal/source"
 
 type Prog struct {
@@ -16,6 +17,10 @@ type Prog struct {
 	// and contracts independently; it may skip re-discharging obligations it
 	// has just confirmed it would derive from identical inputs.
 	CaptureFlowsProven bool
+	// ObserveFlow, when set, receives one report per run of the flow
+	// interpreter over this program, so a build can attribute the analysis
+	// apart from the pass that invoked it. It never affects the result.
+	ObserveFlow func(FlowRun) `object:"omit"`
 	// ADTs lists declared types in declaration order — codegen emits marker
 	// interfaces, constructor structs, and derived eq/show from it. Bool is
 	// absent (native Go bool forever, doc/design.md, "Go backend and runtime").
@@ -27,6 +32,13 @@ type Prog struct {
 	// Entry selects the entry module's main definition by canonical symbol.
 	Entry        string
 	EntryDisplay Expr // optional, pure String observation used by tests and tooling
+}
+
+// FlowRun is one run of the capture-flow interpreter: its elapsed time, the
+// definitions it checked from as roots, and the call contexts it created.
+type FlowRun struct {
+	Duration        time.Duration
+	Roots, Contexts int
 }
 
 type EffectInstance struct {

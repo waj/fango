@@ -25,8 +25,9 @@ the compiler's time is the
 [capture-flow analysis](design/ownership.md#capture-flow-graph-and-abstract-heap):
 `core.checkCaptureFlows` and `core.CollectExecutionNeeds`. Nearly all of that
 is the `Async` module. Inference, elaboration, lowering, and emission proper
-are small by comparison; the stage table `fango build -vv` prints hides this
-because the analysis runs under four different rows.
+are small by comparison. `fango build -vv` now gives the analysis its own
+[row and counts](reference/commands.md#build-progress-and-statistics), carved
+out of the stages it runs under.
 
 The cost is not one slow pass. The same module is interpreted, root by root,
 four times over the batch pipeline:
@@ -60,10 +61,10 @@ which appends, sorts, and compacts on every join, and `maps.Clone`, mostly the
 `let` case of `eval` copying the whole value environment for every local
 binding, so a function's cost grows with the square of its bindings. The
 garbage collector is not the lever — raising `GOGC` recovers about a tenth —
-the volume is. A side effect of the checker's deep recursion is that the Go
-runtime's default heap-profile sampling spends close to a tenth of the build
-unwinding those stacks; the Go compiler disables that sampling for the same
-reason.
+the volume is. The command disables the Go runtime's heap-profile sampling,
+as the Go compiler does, because the checker's recursion makes each sampled
+stack long; profiled through a test harness it looked like close to a tenth
+of the build, but measured on the command itself it is within noise.
 
 A prototype of the first three stages below, each behind a toggle, brought the
 in-process build from about 2.7s to about 1.1s and the wall-clock build from
@@ -93,21 +94,16 @@ build` at all.
 ### CL1 Allocation in joins and environments
 
 Pure optimization of the checker's data structures, accepted only by identical
-output on every fixture.
+output on every fixture. The linear-merge `joinFlow` and the disabled
+heap-profile sampling are implemented; together they took the cold `import
+Async` build from about 2.8s to about 2.2s, all of it from `joinFlow`. What
+remains:
 
-- `joinFlow` unions sorted, duplicate-free inputs by linear merge into an
-  exact-size result, returns an input directly when the other side is empty or
-  a subset of it, and falls back to sort-and-compact when an input is not
-  sorted. Returned inputs are capacity-clipped: the evaluator appends to
-  result values in place, and a shared backing array with spare capacity
-  would let two such appends overwrite each other.
 - The value environment becomes a chain — a small map of local bindings over
   a parent — rather than a map cloned per `let`, branch, and lambda
   allocation. Lookups walk the chain; the sharing key and `mergeEnv` iterate
   it as a whole. Closure objects and context entries keep snapshotting, since
   their environments are what fingerprints read.
-- The command sets `runtime.MemProfileRate` to zero unless profiling is
-  requested.
 
 ### CL2 One discharge per module in the batch pipeline
 
@@ -207,10 +203,6 @@ the sharing key would actually fold.
   entirely, not just its discharge, and answers the cache roadmap's "shrink
   stage Core" item. What it costs is that a consumer module that splices into
   a dependency for the first time elaborates that dependency's closure itself.
-- **Attributing the analysis in `-vv`.** The stage table hides the analysis
-  under check, elaborate, stage snapshot, and lowering. A row for it, or a
-  count of roots and contexts, is what would have made this document's
-  measurements a one-line observation, and is what will show a regression.
 - **Profiling entry point.** The command has no way to write a CPU profile;
   this work was profiled through a throwaway test. Whether `fango build`
   should accept a profile flag, or the benchmark package should own a

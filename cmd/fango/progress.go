@@ -27,6 +27,7 @@ var stageOrder = []string{
 	"checked lookup", "checked store", "stage Core",
 	"check", "elaborate", "stage snapshot", "semantic-lint",
 	"emitted lookup", "emitted store", "lowering", "emission",
+	"capture flow",
 	"write + sync", "go build",
 }
 
@@ -49,6 +50,12 @@ var stageLabel = map[string]string{
 	"emitted-cache-store": "emitted store",
 	"lowering":            "lowering",
 	"emission":            "emission",
+	"capture-flow":        "capture flow",
+}
+
+// flowTally counts the capture-flow analysis's work over a build.
+type flowTally struct {
+	runs, roots, contexts int
 }
 
 type stageTally struct {
@@ -76,6 +83,15 @@ type reporter struct {
 	checked artifactTally
 	emitted artifactTally
 	forced  int
+
+	// The capture-flow analysis runs inside check, elaboration, stage
+	// snapshots, lint, and lowering. Its time is carved out of whichever of
+	// those is running, so the rows still reconcile with the total: running
+	// names the stage whose begin event came last and carved what the
+	// analysis spent inside it so far.
+	running string
+	carved  time.Duration
+	flow    flowTally
 
 	// cached and compiled count modules by how they were obtained, which
 	// stays accurate when the cache is off and no artifact event fires.
@@ -106,7 +122,9 @@ func (r *reporter) observer() compileevent.Observer {
 }
 
 func (r *reporter) record(event compileevent.Event) {
-	if !event.Begin {
+	if event.Begin {
+		r.running, r.carved = event.Stage, 0
+	} else {
 		r.tally(event)
 	}
 	if event.Stage != "parse" && event.Stage != "resolve" {
@@ -158,7 +176,20 @@ func (r *reporter) tally(event compileevent.Event) {
 	if !known {
 		return
 	}
-	r.add(label, event.Owner, event.Duration)
+	duration := event.Duration
+	switch {
+	case event.Stage == "capture-flow":
+		r.flow.runs++
+		r.flow.roots += event.Roots
+		r.flow.contexts += event.Contexts
+		if r.running != "" {
+			r.carved += duration
+		}
+	case event.Stage == r.running:
+		duration -= r.carved
+		r.running, r.carved = "", 0
+	}
+	r.add(label, event.Owner, duration)
 	switch event.Stage {
 	case "checked-cache-hit":
 		r.checked.reused++
@@ -246,6 +277,7 @@ func (r *reporter) finish(name string) {
 	}
 	if r.level >= stats {
 		r.writeStages()
+		r.writeFlow()
 		r.writeCache()
 	}
 	r.line("Finished", r.summary(name))
@@ -314,6 +346,16 @@ func (r *reporter) rows() []string {
 	return append(rows, extra...)
 }
 
+// writeFlow sizes the capture-flow analysis, whose row alone cannot say
+// whether a slow build interpreted more definitions or larger ones.
+func (r *reporter) writeFlow() {
+	if r.flow.runs == 0 {
+		return
+	}
+	fmt.Fprintf(r.w, "\n  %-6s %s over %s, %s\n", "flow", plural(r.flow.runs, "run"),
+		plural(r.flow.roots, "root"), plural(r.flow.contexts, "context"))
+}
+
 func (r *reporter) writeCache() {
 	if r.noCache {
 		fmt.Fprintf(r.w, "\n  %-6s disabled by -no-cache\n\n", "cache")
@@ -341,6 +383,13 @@ type timings struct {
 	TotalNS int64         `json:"total_ns"`
 	Stages  []stageTiming `json:"stages"`
 	Cache   cacheTiming   `json:"cache"`
+	Flow    flowTiming    `json:"capture_flow"`
+}
+
+type flowTiming struct {
+	Runs     int `json:"runs"`
+	Roots    int `json:"roots"`
+	Contexts int `json:"contexts"`
 }
 
 type stageTiming struct {
@@ -365,7 +414,8 @@ type artifactTiming struct {
 func (r *reporter) writeTimings(name string) {
 	total := time.Since(r.start)
 	out := timings{Output: name, TotalNS: total.Nanoseconds(),
-		Cache: cacheTiming{Checked: r.checked.timing(), Emitted: r.emitted.timing(), Forced: r.forced}}
+		Cache: cacheTiming{Checked: r.checked.timing(), Emitted: r.emitted.timing(), Forced: r.forced},
+		Flow:  flowTiming{Runs: r.flow.runs, Roots: r.flow.roots, Contexts: r.flow.contexts}}
 	var measured time.Duration
 	for _, label := range r.rows() {
 		tally := r.stages[label]

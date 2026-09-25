@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"time"
 
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
@@ -20,7 +21,29 @@ type flowValue struct {
 	unknown bool
 }
 
+// joinFlow unions flow values. Inputs are normally sorted and duplicate-free,
+// so a linear merge suffices, and an input that already contains the other
+// side is returned rather than copied. Results never have spare capacity:
+// the evaluator appends to values in place, and two appends to one shared
+// backing array would overwrite each other.
 func joinFlow(vs ...flowValue) flowValue {
+	var r flowValue
+	for _, v := range vs {
+		if !strictlySorted(v.refs) || !strictlySorted(v.caps) {
+			return sortedJoinFlow(vs)
+		}
+	}
+	for _, v := range vs {
+		r.refs = unionSorted(r.refs, v.refs)
+		r.caps = unionSorted(r.caps, v.caps)
+		r.unknown = r.unknown || v.unknown
+	}
+	return r
+}
+
+// sortedJoinFlow is the fallback for inputs that are not sorted sets, such as
+// a value an owner or allocation id was appended to.
+func sortedJoinFlow(vs []flowValue) flowValue {
 	var r flowValue
 	for _, v := range vs {
 		r.refs = append(r.refs, v.refs...)
@@ -28,11 +51,70 @@ func joinFlow(vs ...flowValue) flowValue {
 		r.unknown = r.unknown || v.unknown
 	}
 	slices.Sort(r.refs)
-	r.refs = slices.Compact(r.refs)
+	r.refs = slices.Clip(slices.Compact(r.refs))
 	slices.Sort(r.caps)
-	r.caps = slices.Compact(r.caps)
+	r.caps = slices.Clip(slices.Compact(r.caps))
 	return r
 }
+
+func strictlySorted(s []int) bool {
+	for i := 1; i < len(s); i++ {
+		if s[i-1] >= s[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// unionSorted merges two sorted, duplicate-free slices into an exact-size
+// result, or returns an input when it already holds the union.
+func unionSorted(a, b []int) []int {
+	if len(b) == 0 {
+		return slices.Clip(a)
+	}
+	if len(a) == 0 {
+		return slices.Clip(b)
+	}
+	n, i, j := 0, 0, 0
+	for i < len(a) && j < len(b) {
+		switch {
+		case a[i] < b[j]:
+			i++
+		case a[i] > b[j]:
+			j++
+		default:
+			i++
+			j++
+		}
+		n++
+	}
+	n += len(a) - i + len(b) - j
+	if n == len(a) {
+		return slices.Clip(a)
+	}
+	if n == len(b) {
+		return slices.Clip(b)
+	}
+	r := make([]int, 0, n)
+	i, j = 0, 0
+	for i < len(a) && j < len(b) {
+		switch {
+		case a[i] < b[j]:
+			r = append(r, a[i])
+			i++
+		case a[i] > b[j]:
+			r = append(r, b[j])
+			j++
+		default:
+			r = append(r, a[i])
+			i++
+			j++
+		}
+	}
+	r = append(r, a[i:]...)
+	return append(r, b[j:]...)
+}
+
 func equalFlow(a, b flowValue) bool {
 	return a.unknown == b.unknown && slices.Equal(a.refs, b.refs) && slices.Equal(a.caps, b.caps)
 }
@@ -233,6 +315,8 @@ type detachedFlow struct {
 }
 
 func checkCaptureFlows(a *captureAnalyzer) []error {
+	start := time.Now()
+	contexts := 0
 	var out []error
 	names := make([]string, 0, len(a.p.Defs))
 	for _, d := range a.p.Defs {
@@ -260,6 +344,7 @@ func checkCaptureFlows(a *captureAnalyzer) []error {
 				break
 			}
 		}
+		contexts += len(f.contexts)
 		keys := make([]string, 0, len(f.errors))
 		for k := range f.errors {
 			keys = append(keys, k)
@@ -269,7 +354,15 @@ func checkCaptureFlows(a *captureAnalyzer) []error {
 			out = append(out, f.errors[k])
 		}
 	}
+	reportFlow(a.p, start, len(names), contexts)
 	return out
+}
+
+// reportFlow reports one run of the flow interpreter over roots definitions.
+func reportFlow(p *Prog, start time.Time, roots, contexts int) {
+	if p.ObserveFlow != nil {
+		p.ObserveFlow(FlowRun{Duration: time.Since(start), Roots: roots, Contexts: contexts})
+	}
 }
 func (f *flowChecker) carry(t types.Type, env flowEnv) bool {
 	if t == nil {

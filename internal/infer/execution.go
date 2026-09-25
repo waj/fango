@@ -652,7 +652,7 @@ func (g *generator) executionNeeds(sub Subst) []executionNeed {
 			defs = append(defs, *d)
 		}
 	}
-	p := &core.Prog{Defs: defs, ADTs: g.ck.ADTOrder}
+	p := &core.Prog{Defs: defs, ADTs: g.ck.ADTOrder, ObserveFlow: g.ck.ObserveFlow}
 	work, controlNeeds := core.CollectExecutionNeeds(p, context, g.ck.B)
 	var needs []executionNeed
 	for _, n := range work {

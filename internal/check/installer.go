@@ -133,6 +133,7 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		return nil, nil, err
 	}
 	i.stage.BeginModule(module.Name, module.NativeModule)
+	i.ck.ObserveFlow = FlowObserver(i.observe, owner)
 	checkStart := i.begin("check", owner)
 	checked, checkErrs := i.ck.CheckModule(module.Module, infer.ModuleOptions{Name: module.Name, Role: role, Entry: module.Entry})
 	i.timed("check", owner, checkStart)

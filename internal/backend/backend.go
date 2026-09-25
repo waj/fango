@@ -125,6 +125,7 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 			}
 		}
 		unitProg := codegen.UnitProgram(result.Program, unit)
+		unitProg.ObserveFlow = check.FlowObserver(s.Observe, owner)
 		lowerStart := s.begin("lowering", owner)
 		mp, lowerErrs := machineir.LowerUnit(unitProg, unit.Name, result.Checker.B)
 		s.timed("lowering", owner, lowerStart)

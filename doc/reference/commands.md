@@ -178,8 +178,18 @@ cost. Each reuse count is over every module that stage covered, so a module
 whose generated code cannot be cached counts against reuse rather than
 disappearing from the ratio.
 
+The [capture-flow analysis](../design/ownership.md#capture-flow-graph-and-abstract-heap)
+runs inside several stages — inference, elaboration, stage snapshots, and
+lowering each interpret definitions through it — and on an uncached build it
+is usually most of the compiler's time. It has its own `capture flow` row, and
+its time is subtracted from the row of the stage it ran inside, so those rows
+show only their own work. A `flow` line beneath the table sizes it: how many
+times it ran, how many definitions it interpreted from as roots, and how many
+call contexts those interpretations created.
+
 `-timings json` writes the same measurements as one JSON object instead of the
-prose, for recording build cost over time. `-no-cache` ignores and publishes no
+prose, for recording build cost over time; the `flow` line is its
+`capture_flow` object. `-no-cache` ignores and publishes no
 artifacts, so a cold build can be measured against a warm one in place.
 
 All of this goes to standard error. A program started by `run` still owns

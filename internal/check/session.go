@@ -16,6 +16,18 @@ import (
 
 type Observer = compileevent.Observer
 
+// FlowObserver reports capture-flow analysis runs on behalf of owner as
+// capture-flow events. The analysis runs inside other stages, so the caller
+// names the module whose stage it is.
+func FlowObserver(observe Observer, owner string) func(core.FlowRun) {
+	if observe == nil {
+		return nil
+	}
+	return func(run core.FlowRun) {
+		observe.Report(compileevent.Event{Stage: "capture-flow", Owner: owner, Duration: run.Duration, Roots: run.Roots, Contexts: run.Contexts})
+	}
+}
+
 type Session struct {
 	Observe            Observer
 	Cache              ObjectCache

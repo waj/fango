@@ -53,7 +53,7 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 			adts = append(adts, adt)
 		}
 	}
-	p := &core.Prog{ADTs: adts, Effects: effects, Entry: ck.EntryName, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck)}
+	p := &core.Prog{ADTs: adts, Effects: effects, Entry: ck.EntryName, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck), ObserveFlow: ck.ObserveFlow}
 	var errs []diag.Error
 	for _, inst := range ck.Instances {
 		if ck.IsCompileTimeOnly(inst.Class.DictType(inst.Head)) {
@@ -162,7 +162,7 @@ func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsi
 	if len(errs) > 0 {
 		return defs, errs
 	}
-	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
+	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, ObserveFlow: ck.ObserveFlow}
 	specializeScalars(p, kept, ck)
 	bindRows(p.Defs, ck)
 	errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, source.Span{})...)
@@ -175,7 +175,7 @@ func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsi
 // context of the checker's current types, effects, and natives — the REPL's
 // counterpart to the lint the batch pipeline runs on a whole program.
 func LintProg(defs []core.Def, ck *infer.Checker) []error {
-	return core.Lint(&core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck)}, ck.B)
+	return core.Lint(&core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck), ObserveFlow: ck.ObserveFlow}, ck.B)
 }
 
 // LintProgIn validates an owned module increment against installed dependency
@@ -185,7 +185,7 @@ func LintProg(defs []core.Def, ck *infer.Checker) []error {
 // reconstructs without discharging them a second time.
 func LintProgIn(defs, context []core.Def, ck *infer.Checker, flowsProven bool) []error {
 	return core.LintIn(&core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives,
-		Intrinsics: intrinsicIdentities(ck), CaptureFlowsProven: flowsProven}, context, ck.B)
+		Intrinsics: intrinsicIdentities(ck), CaptureFlowsProven: flowsProven, ObserveFlow: ck.ObserveFlow}, context, ck.B)
 }
 
 // AssembleModuleProgram joins already checked and owner-linted module Core.
@@ -252,7 +252,7 @@ func DeclsIn(infos []infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]c
 		info = infos[0]
 	}
 	if len(errs) == 0 {
-		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
+		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, ObserveFlow: ck.ObserveFlow}
 		bindRows(p.Defs, ck)
 		errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, info.NameSpan)...)
 		installCaptureSummaries(defs, ck)
@@ -526,7 +526,7 @@ func ExprIn(e ast.Expr, context []core.Def, ck *infer.Checker) (core.Expr, []cor
 		defs := append([]core.Def(nil), el.aux...)
 		defs = append(defs, core.Def{Name: "_expression", Type: ce.Type(), Control: core.ExprControl(ce), Body: ce})
 		bindRows(defs, ck)
-		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
+		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, ObserveFlow: ck.ObserveFlow}
 		el.errs = append(el.errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, e.Span())...)
 		for _, err := range core.VerifyResumeStructure(ce) {
 			el.errs = append(el.errs, diag.Errorf(e.Span(), "INTERNAL RESUME INVARIANT", "%v", err))

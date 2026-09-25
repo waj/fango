@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
+	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/fixity"
 	"github.com/waj/fango/internal/meta"
@@ -245,6 +246,10 @@ type Checker struct {
 	// Derivers maps a class to the compile-time generator that implements
 	// `deriving` for it (doc/design.md, "Compile-time metaprogramming").
 	Derivers map[string]*DeriverInfo
+
+	// ObserveFlow receives every capture-flow analysis run in this session;
+	// each Core program built from the checker carries it.
+	ObserveFlow func(core.FlowRun)
 
 	// inferringContext is non-nil while a generated instance is being probed
 	// for the context its own body needs. A residual predicate that would

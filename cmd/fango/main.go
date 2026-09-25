@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -16,7 +17,24 @@ import (
 )
 
 func main() {
+	// Heap-profile sampling records a stack for every sampled allocation, and
+	// the capture-flow checker's deep recursion makes those stacks long enough
+	// to cost a noticeable share of a build. Nothing reads the profile unless
+	// GODEBUG=memprofilerate asks for one, which the runtime has already
+	// applied. Tests call run directly and keep the default.
+	if !memProfileRequested(os.Getenv("GODEBUG")) {
+		runtime.MemProfileRate = 0
+	}
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func memProfileRequested(godebug string) bool {
+	for _, setting := range strings.Split(godebug, ",") {
+		if strings.HasPrefix(strings.TrimSpace(setting), "memprofilerate=") {
+			return true
+		}
+	}
+	return false
 }
 
 func run(args []string, stdout, stderr io.Writer) int {

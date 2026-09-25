@@ -444,5 +444,5 @@ func (ev *evaluator) program(defs []core.Def) *core.Prog {
 	for name := range ev.ck.Intrinsics {
 		intrinsics[name] = true
 	}
-	return &core.Prog{ADTs: ev.ck.ADTOrder, Effects: effects, Defs: defs, Natives: ev.ck.Natives, Intrinsics: intrinsics}
+	return &core.Prog{ADTs: ev.ck.ADTOrder, Effects: effects, Defs: defs, Natives: ev.ck.Natives, Intrinsics: intrinsics, ObserveFlow: ev.ck.ObserveFlow}
 }
