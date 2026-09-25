@@ -1,0 +1,11 @@
+import Runtime.Coroutine
+import Runtime.Scope
+
+main() = Runtime.Coroutine.with
+    (\pause () -> Runtime.Scope.finally
+        (\_ -> pause "body")
+        (\_ -> pause "release"))
+    (\work ->
+        print (Runtime.Coroutine.advance work ())
+        print (Runtime.Coroutine.stop work)
+        print (Runtime.Coroutine.advance work ()))

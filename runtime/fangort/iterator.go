@@ -27,6 +27,72 @@ type MachineIterator struct {
 	machine                      *Machine
 	started                      bool
 	done                         bool
+	closing                      bool
+	stopped                      bool
+	reportStop                   bool
+	stopFailure                  *Failure
+}
+
+type closeIteratorFrame struct {
+	it      *MachineIterator
+	waiting bool
+	started bool
+	primary *ExitRequest
+}
+
+func (f *closeIteratorFrame) Step(m *Machine) MachineStep {
+	if f.waiting {
+		if exit, ok := m.TakeResult().(*ExitRequest); ok {
+			f.primary = Suppress(f.primary, exit)
+		}
+		f.waiting = false
+	}
+	if f.it.registry {
+		if child := f.it.last; child != nil {
+			f.waiting = true
+			m.PushMachineCleanup(func() *Machine { return StartCloseMachineIterator(child) })
+			return MachineStep{Kind: MachinePopCleanup}
+		}
+	} else if f.it.machine != nil && !f.started {
+		child := f.it.machine
+		f.started = true
+		f.waiting = true
+		m.PushMachineCleanup(func() *Machine { return startStopMachine(child, false) })
+		return MachineStep{Kind: MachinePopCleanup}
+	}
+	f.it.finishClose()
+	if f.primary != nil {
+		return MachineStep{Kind: MachineExit, Exit: f.primary}
+	}
+	return MachineStep{Kind: MachineReturn, Value: Unit{}}
+}
+
+func (f *closeIteratorFrame) Clear() { f.it = nil; f.primary = nil }
+
+func (it *MachineIterator) finishClose() {
+	it.done, it.closing, it.busy = true, false, false
+	it.unlink()
+	it.evidence.Clear()
+	it.clearRegistered()
+}
+
+// StartCloseMachineIterator starts an executable, suspendable owner drain.
+func StartCloseMachineIterator(it *MachineIterator) *Machine {
+	if it == nil || it.done {
+		return StartMachine(ImmediateMachine(func() (any, *ExitRequest) { return Unit{}, nil }))
+	}
+	if it.closing {
+		panic("fangort: overlapping coroutine close")
+	}
+	it.closing = true
+	it.stopped = true
+	it.start = nil
+	if it.registry {
+		it.work.closed = true
+	} else {
+		it.evidence.Restore()
+	}
+	return StartMachine(&closeIteratorFrame{it: it})
 }
 
 // Close consumes unfinished production and returns a cleanup failure, if any.

@@ -28,6 +28,13 @@ func analyze(w *Worker) {
 					unionInto(out, liveIn[succ])
 				}
 			}
+			if h, ok := w.Blocks[i].Term.(*Handle); ok {
+				for _, clause := range h.Clauses {
+					for _, capture := range clause.Captures {
+						out[capture.Name] = true
+					}
+				}
+			}
 			in := transfer(w.Blocks[i].Term, liveIn, out)
 			unionInto(in, termUses(w.Blocks[i].Term, known))
 			if !equalSet(out, liveOut[i]) || !equalSet(in, liveIn[i]) {
@@ -56,6 +63,8 @@ func analyze(w *Worker) {
 				delete(across, term.Bind.Name)
 				unionInto(frame, across)
 			}
+		case *PopCleanup, *CursorClose:
+			unionInto(frame, liveOut[i])
 		case *Handle:
 			across := cloneSet(liveOut[i])
 			delete(across, term.Bind.Name)

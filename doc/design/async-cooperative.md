@@ -58,25 +58,30 @@ and lack of runnable or notified work as
 `Async.Error` rather than spinning. An already published completion still
 passes through a scheduling checkpoint before replay.
 
-The worker captures the whole task action, including its synchronous cleanup,
+The worker captures the whole task action, including its cleanup,
 then publishes one completion. A failed completion also sends a detached
 failure report and a replay Work package to the driver. The completion's row
 retains the task's effect obligations; its value and primary/suppressed
 payloads must pass the Cell publication capture check. Await replays from the
 cell through the awaiter's current evidence without rerunning the action.
 
-The first reported failure closes still-live jobs in the owning logical context. Close
-attempts run newest first, and their typed completion failures are retained in
-release-attempt order. The driver selects the context body first when it
+The first reported failure schedules still-live jobs in the owning logical
+context for stop, newest first. A stopped job remains live while its release
+requests move through the ordinary ready, signal, and native-wait queues.
+After its terminal `Closed` step, `Work.stopCompletion` captures typed cleanup
+failures in release-attempt order. The driver selects the context body first when it
 failed; otherwise it selects the lowest registered failed child, then attaches
 other child reports and cleanup failures. A nested context publishes the
 resulting detached failure tree to its caller after its jobs drain. The caller
 replays it through fresh evidence; the root replays its selected report after
 drain. Scheduler errors use the separate `Result Async.Error` path unless a
 typed failure was recorded. Closing unstarted Work does not execute its body.
-An interrupt closes live jobs at a cooperative checkpoint, drains their native
-requests through synchronous cleanup, and returns `Err Interrupted` after
-quiescence. The bridge closes after its owning Coroutine scope has drained.
+An interrupt schedules live jobs for stop at a cooperative checkpoint. During
+the drain, the bridge still delivers native readiness but shields repeated
+interrupts from a release waiting on that readiness. The driver returns
+`Err Interrupted` after quiescence. The bridge closes after its owning
+Coroutine scope has drained. A release that never terminates keeps its owner
+and native requests live and prevents runner completion.
 
 `Runtime.Completion.dropSuspension` and `dropDrive` remove private control
 labels only after an action has completed, so its saved result cannot resume
@@ -94,4 +99,7 @@ direct/indirect escape rejection. The low-level
 signal protocol independently of the public runner. The
 [A3 IO fixture](../../testdata/run/async_a3_io.fango) exercises overlapping
 fetches and a Stream pull; the [capacity fixture](../../testdata/run/async_a3_capacity.fango)
-exercises saturated admission, cancellation, and cleanup failure.
+exercises saturated admission, cancellation, and cleanup failure. The
+[A4 cancellation fixtures](../../testdata/run/async_a4_cancel_release.fango)
+exercise suspended release, typed failure selection, and native readiness
+during drain in both backends.

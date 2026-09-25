@@ -17,9 +17,11 @@ type cursorAdvanceRequest struct {
 }
 
 type machinePull struct {
-	caller *MachineSession
-	term   *machineir.CursorAdvance
-	cursor *MachineIteratorSession
+	caller  *MachineSession
+	term    *machineir.CursorAdvance
+	cursor  *MachineIteratorSession
+	cleanup bool
+	close   bool
 }
 
 // A traversal owns the currently executing producer and its explicit callers.
@@ -79,11 +81,8 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 				return MachineEvent{}, fmt.Errorf("eval: overlapping cursor advancement")
 			}
 			if request.term.Close {
-				exit, err := cursor.Close()
-				if err != nil {
-					return MachineEvent{}, err
-				}
-				d.active.completeAdvance(request.term, nil, false, false, exit)
+				d.pulls = append(d.pulls, machinePull{caller: d.active, cursor: cursor, term: request.term, close: true})
+				d.active = startCloseIterator(d.active.interp, cursor)
 				continue
 			}
 			if cursor.done {
@@ -114,6 +113,11 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 			}
 			continue
 		}
+		if cleanup := event.cleanup; cleanup != nil {
+			d.pulls = append(d.pulls, machinePull{caller: d.active, cleanup: true})
+			d.active = cleanup
+			continue
+		}
 		if event.Done {
 			if len(d.pulls) == 0 {
 				m.traversal = nil
@@ -123,17 +127,35 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 			pull := d.pulls[i]
 			d.pulls[i] = machinePull{}
 			d.pulls = d.pulls[:i]
+			if pull.cleanup {
+				d.active = pull.caller
+				d.active.completeCleanup(event.Exit)
+				continue
+			}
+			if pull.close {
+				d.active = pull.caller
+				if pull.cursor.reportStop && event.Exit != nil {
+					pull.cursor.stopExit = detachCompletionExit(event.Exit)
+					event.Exit = nil
+				}
+				d.active.completeAdvance(pull.term, nil, false, false, event.Exit)
+				continue
+			}
 			pull.cursor.done, pull.cursor.busy = true, false
+			if pull.cursor.reportStop && event.Exit != nil {
+				pull.cursor.stopExit = detachCompletionExit(event.Exit)
+				event.Exit = nil
+			}
 			pull.cursor.unlink()
 			pull.cursor.evidence.Clear()
 			pull.cursor.clearRegistered()
 			d.active = pull.caller
-			d.active.completeAdvance(pull.term, event.Value, false, event.Exit == nil, event.Exit)
+			d.active.completeAdvance(pull.term, event.Value, false, event.Exit == nil && !pull.cursor.stopped, event.Exit)
 			continue
 		}
 		matched := -1
 		for i := len(d.pulls) - 1; i >= 0; i-- {
-			if d.pulls[i].cursor.owner == event.Owner {
+			if d.pulls[i].cursor != nil && d.pulls[i].cursor.owner == event.Owner {
 				matched = i
 				break
 			}
@@ -160,34 +182,15 @@ func (m *MachineSession) Abandon() (*ExitRequest, error) {
 	if m.finished && m.traversal == nil {
 		return nil, fmt.Errorf("eval: machine already completed")
 	}
-	d := m.traversal
-	m.traversal = nil
-	if d == nil {
-		return m.abandonLocal()
+	stop := startStopSession(m, false)
+	event, err := stop.Run()
+	if err != nil {
+		return nil, err
 	}
-	var primary *ExitRequest
-	for _, pull := range d.pulls {
-		pull.cursor.evidence.Restore()
+	if !event.Done {
+		return nil, fmt.Errorf("eval: suspending abandonment requires an execution driver")
 	}
-	var failure error
-	active := d.active
-	for i := len(d.pulls) - 1; i >= -1; i-- {
-		if !active.finished {
-			exit, err := active.abandonLocal()
-			failure = errors.Join(failure, err)
-			primary = suppress(primary, exit)
-		}
-		if i >= 0 {
-			pull := d.pulls[i]
-			d.pulls[i] = machinePull{}
-			pull.cursor.done, pull.cursor.busy = true, false
-			pull.cursor.unlink()
-			pull.cursor.evidence.Clear()
-			pull.cursor.clearRegistered()
-			active = pull.caller
-		}
-	}
-	return primary, failure
+	return event.Exit, nil
 }
 
 func (m *MachineSession) completeAdvance(term *machineir.CursorAdvance, value Value, present, finished bool, exit *ExitRequest) {
@@ -195,7 +198,7 @@ func (m *MachineSession) completeAdvance(term *machineir.CursorAdvance, value Va
 		m.pendingExit = exit
 		return
 	}
-	if term.Close {
+	if term.Close && term.Result == nil {
 		m.frames[len(m.frames)-1].vars[term.Bind.Name] = struct{}{}
 		return
 	}

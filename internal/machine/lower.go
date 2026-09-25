@@ -178,10 +178,6 @@ func declaredWorkers(defs map[string]*core.Def, selected map[string]bool, owns f
 // from its declaration: parameter, evidence, row, and result types, with no
 // blocks. Only its owner lowers and validates its implementation.
 func declareWorker(d *core.Def) Worker {
-	synchronousParams := []int(nil)
-	if signature, params := synchronousScopeSignature(d); params != nil {
-		d, synchronousParams = signature, params
-	}
 	argTys, result := core.PeelFun(d.Type, len(d.Params))
 	params := make([]Local, len(d.Params))
 	for i, name := range d.Params {
@@ -195,7 +191,7 @@ func declareWorker(d *core.Def) Worker {
 	}
 	return Worker{Name: d.Name, Owner: d.Owner, TyParams: d.TyParams, Params: params,
 		EffectParams: machineEvidence(d.EffectParams), RowEffects: machineEvidence(d.RowEffects),
-		RowParam: d.RowParam, Rows: rows, Result: result, Def: d, SynchronousParams: synchronousParams}
+		RowParam: d.RowParam, Rows: rows, Result: result, Def: d}
 }
 
 func (b *builder) registerOwnedRoots(body core.Expr) {
@@ -295,7 +291,6 @@ type builder struct {
 
 func lowerWorker(d *core.Def, selected map[string]bool, stateToken bool, templates ...map[string]*core.Def) (Worker, []core.Def, []Closure, map[string]bool, []error) {
 	source := d
-	d, synchronousParams := synchronousScopeMember(d)
 	b := &builder{def: d, selected: selected, locals: map[string]types.Type{}, lambdas: map[*core.Lambda]bool{}, stateAux: map[string]bool{}}
 	if len(templates) != 0 {
 		b.templates = templates[0]
@@ -322,7 +317,7 @@ func lowerWorker(d *core.Def, selected map[string]bool, stateToken bool, templat
 	sort.Slice(locals, func(i, j int) bool { return locals[i].Name < locals[j].Name })
 	w := Worker{Name: d.Name, Owner: d.Owner, TyParams: d.TyParams, Params: params, EffectParams: d.EffectParams,
 		Optimized: b.templates != nil,
-		Result:    result, Entry: entry, Blocks: b.blocks, Locals: locals, Def: source, StateToken: stateToken, SynchronousParams: synchronousParams,
+		Result:    result, Entry: entry, Blocks: b.blocks, Locals: locals, Def: source, StateToken: stateToken,
 		RowParam: d.RowParam, Rows: workerRows(d), RowEffects: machineEvidence(d.RowEffects)}
 	w.EffectParams = machineEvidence(w.EffectParams)
 	analyze(&w)
@@ -436,9 +431,6 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 			call := &Call{TyArgs: e.TyArgs, Args: e.Args, EvidenceArgs: e.EvidenceArgs, Bind: bind, Next: next, Row: e.Row}
 			if e.CalleeKind == core.Worker {
 				call.Callee = ref.Name
-				if ref.Name == types.ScopeBracketName {
-					call.SynchronousArgs = []int{1}
-				}
 			} else {
 				call.CalleeExpr = e.Callee
 				b.registerMachineLambdas(e.Callee)
@@ -447,10 +439,6 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 			return b.add(call)
 		}
 	case *core.Bracket:
-		if machineControl(e.Release) {
-			b.errorf("%s: cleanup release may not suspend", b.def.Name)
-			return next
-		}
 		resource := Local{Name: e.Resource, Ty: e.ResourceTy}
 		b.declare(resource)
 		pop := b.add(&PopCleanup{Next: next})

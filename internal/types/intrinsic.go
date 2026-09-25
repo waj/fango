@@ -5,7 +5,7 @@ package types
 const (
 	ServiceRunName        = "Runtime.Service.run"
 	ServiceInvocationName = "Runtime.Service.Invocation"
-	// ScopeBracketName owns synchronous resource cleanup on normal and abort exits.
+	// ScopeBracketName owns resource cleanup on normal and abort exits.
 	ScopeBracketName         = "Runtime.Scope.bracket"
 	CoroutineTypeName        = "Runtime.Coroutine.Coroutine"
 	CoroutineStepName        = "Runtime.Coroutine.Step"
@@ -17,6 +17,7 @@ const (
 	CoroutineWithName        = "Runtime.Coroutine.with"
 	CoroutineAdvanceName     = "Runtime.Coroutine.advance"
 	CoroutineCloseName       = "Runtime.Coroutine.close"
+	CoroutineStopName        = "Runtime.Coroutine.stop"
 	CoroutineSuspensionName  = "Runtime.Coroutine.Suspension"
 	CoroutineDriveName       = "Runtime.Coroutine.Drive"
 	FailureTypeName          = "Failure.Failure"
@@ -51,7 +52,7 @@ func IntrinsicArity(name string) int {
 		return 2
 	case WorkRunName, WorkFacetName, WorkOwnerName, CoroutineFacetName:
 		return 1
-	case WorkPackName, WorkCloseName, WorkRegisterName:
+	case WorkPackName, WorkCloseName, WorkStopName, WorkStopCompletionName, WorkRegisterName:
 		return 2
 	case WorkAdvanceName:
 		return 3
@@ -59,7 +60,7 @@ func IntrinsicArity(name string) int {
 		return 3
 	case CoroutineCreateName, CoroutineWithName, CoroutineAdvanceName, FailureArgumentName:
 		return 2
-	case CoroutineScopeName, CoroutineCloseName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailAttemptReportName:
+	case CoroutineScopeName, CoroutineCloseName, CoroutineStopName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailAttemptReportName:
 		return 1
 	}
 	return 0

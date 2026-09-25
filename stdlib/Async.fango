@@ -152,6 +152,8 @@ type State e =
     , cleanup : List (FailureReport e)
     , contexts : List (ContextRecord e)
     , error : Maybe Error
+    , cancelling : Bool
+    , cancelledContexts : List (List Int)
     }
 type Decision e = Continue (State e) | Complete (State e) | Forward Key (State e)
 
@@ -215,21 +217,15 @@ append values tail =
         [] -> tail
         [first | rest] -> [first | append rest tail]
 
-closeLive : Runtime.Work.Owner e -> List Job -> List (FailureReport e) ->{Runtime.Coroutine.Drive | e} List (FailureReport e)
-closeLive workOwner live cleanup =
+jobsFromLive live =
     case live of
-        [] -> cleanup
-        [Job key _ _ work | rest] ->
-            closed = Runtime.Completion.dropDrive (Runtime.Completion.capture (\_ -> Runtime.Work.close workOwner work))
-            next = case Runtime.Completion.failure closed of
-                Nothing -> cleanup
-                Just failure -> append cleanup [CleanupReport failure closed]
-            closeLive workOwner rest next
+        [] -> NoJobs
+        [Job key _ jobPath work | rest] -> Jobs (Job key (0 - 1) jobPath work) (jobsFromLive rest)
 
-cancel : Runtime.Work.Owner e -> Runtime.Coroutine.Facet -> State e -> Maybe Error ->{Runtime.Coroutine.Drive | e} State e
+cancel : Runtime.Work.Owner e -> Runtime.Coroutine.Facet -> State e -> Maybe Error -> State e
 cancel workOwner facet state reason =
-    more = closeLive workOwner state.live state.cleanup
-    { state | ready = Queue NoJobs NoJobs, waiting = [], live = [], cleanup = more, error = reason }
+    if state.cancelling then state
+    else { state | ready = Queue (jobsFromLive state.live) NoJobs, waiting = [], cancelling = True, error = reason }
 
 prefix wanted actual =
     case (wanted, actual) of
@@ -238,6 +234,11 @@ prefix wanted actual =
         ([first | rest], [value | tail]) -> first == value && prefix rest tail
 
 owned contextPath (Job _ _ jobPath _) = prefix contextPath jobPath
+
+cancelledPath jobPath paths =
+    case paths of
+        [] -> False
+        [contextPath | rest] -> prefix contextPath jobPath || cancelledPath jobPath rest
 
 keepJobs contextPath jobs =
     case jobs of
@@ -253,19 +254,10 @@ keepWaiting contextPath waits =
             next = keepWaiting contextPath rest
             if owned contextPath job then next else [Waiting key job | next]
 
-closeOwned : Runtime.Work.Owner e -> List Int -> List Job -> List Job -> List (FailureReport e) ->{Runtime.Coroutine.Drive | e} (List Job, List (FailureReport e))
-closeOwned workOwner contextPath jobs kept cleanup =
+ownedJobs contextPath jobs =
     case jobs of
-        [] -> (List.reverse kept, cleanup)
-        [job | rest] ->
-            if owned contextPath job then
-                Job _ _ _ work = job
-                closed = Runtime.Completion.dropDrive (Runtime.Completion.capture (\_ -> Runtime.Work.close workOwner work))
-                next = case Runtime.Completion.failure closed of
-                    Nothing -> cleanup
-                    Just failure -> append cleanup [CleanupReport failure closed]
-                closeOwned workOwner contextPath rest kept next
-            else closeOwned workOwner contextPath rest [job | kept] cleanup
+        [] -> []
+        [job | rest] -> if owned contextPath job then [job | ownedJobs contextPath rest] else ownedJobs contextPath rest
 
 recordReport : List Int -> FailureReport e -> State e -> State e
 recordReport contextPath report state =
@@ -291,18 +283,26 @@ recordContextError contextPath reason contexts =
     case contexts of
         [] -> []
         [ContextRecord current publisher reports cleanup error | rest] ->
-            if current == contextPath then [ContextRecord current publisher reports cleanup (Just reason) | rest]
+            if current == contextPath then [ContextRecord current publisher reports cleanup (if error == Nothing then Just reason else error) | rest]
             else [ContextRecord current publisher reports cleanup error | recordContextError contextPath reason rest]
 
-cancelContext : Runtime.Work.Owner e -> List Int -> State e -> Maybe Error ->{Runtime.Coroutine.Drive | e} State e
+recordFault : List Int -> Error -> State e -> State e
+recordFault jobPath reason state =
+    if jobPath == [] then { state | error = if state.error == Nothing then Just reason else state.error }
+    else { state | contexts = recordContextError jobPath reason state.contexts }
+
+cancelContext : Runtime.Work.Owner e -> List Int -> State e -> Maybe Error -> State e
 cancelContext workOwner contextPath state reason =
-    (live, cleanup) = closeOwned workOwner contextPath state.live [] []
     Queue front back = state.ready
-    contexts = recordContextCleanup contextPath cleanup state.contexts
+    contexts = state.contexts
     updated = case reason of
         Nothing -> contexts
         Just error -> recordContextError contextPath error contexts
-    { state | ready = Queue (keepJobs contextPath front) (keepJobs contextPath back), waiting = keepWaiting contextPath state.waiting, live = live, contexts = updated }
+    if contains contextPath state.cancelledContexts then { state | contexts = updated }
+    else
+        selected = ownedJobs contextPath state.live
+        ready = Queue (appendJobs (jobsFromLive selected) (keepJobs contextPath front)) (keepJobs contextPath back)
+        { state | ready = ready, waiting = keepWaiting contextPath state.waiting, cancelledContexts = [contextPath | state.cancelledContexts], contexts = updated }
 
 hasLive contextPath jobs =
     case jobs of
@@ -333,25 +333,28 @@ settleContexts workOwner state =
                 { tailState | ready = ready, waiting = waiting, notified = [ContextKey contextPath | tailState.notified] }
 
 stepDriver : Runtime.Async.Native.Bridge -> Runtime.Work.Owner {IO | e} -> Runtime.Coroutine.Facet -> State {IO | e} ->{Runtime.Coroutine.Drive, IO | e} Decision {IO | e}
-stepDriver eventBridge workOwner facet state =
-    case queueFront state.ready of
+stepDriver eventBridge workOwner facet previous =
+    case queueFront previous.ready of
         Jobs job rest ->
             Job key reply jobPath work = job
-            remaining = Queue rest (queueBack state.ready)
-            case Runtime.Work.advance workOwner work reply of
+            remaining = Queue rest (queueBack previous.ready)
+            state = previous
+            draining = state.cancelling || cancelledPath jobPath state.cancelledContexts
+            step = if reply == (0 - 1) then Runtime.Work.stop workOwner work else Runtime.Work.advance workOwner work reply
+            case step of
                 Runtime.Coroutine.Suspended requestValue ->
                     case requestValue of
                         Start ownerPath child ->
-                            childJob = Job state.nextKey 0 ownerPath child
+                            childJob = Job state.nextKey (if draining then 0 - 1 else 0) ownerPath child
                             next = { state | ready = Queue (Jobs (Job key state.nextKey jobPath work) rest) (Jobs childJob (queueBack state.ready)), live = [childJob | state.live], nextKey = state.nextKey + 1 }
                             Continue next
                         StartContext childPath child publisher ->
-                            childJob = Job state.nextKey 0 childPath child
+                            childJob = Job state.nextKey (if draining then 0 - 1 else 0) childPath child
                             contextRecord = ContextRecord childPath publisher [] [] Nothing
                             next = { state | ready = Queue (Jobs (Job key state.nextKey jobPath work) rest) (Jobs childJob (queueBack state.ready)), live = [childJob | state.live], nextKey = state.nextKey + 1, contexts = [contextRecord | state.contexts] }
                             Continue next
                         Spawn child ->
-                            childJob = Job state.nextKey 0 jobPath child
+                            childJob = Job state.nextKey (if draining then 0 - 1 else 0) jobPath child
                             next = { state | ready = Queue (Jobs (Job key state.nextKey jobPath work) rest) (Jobs childJob (queueBack state.ready)), live = [childJob | state.live], nextKey = state.nextKey + 1 }
                             Continue next
                         NewContext ->
@@ -371,14 +374,18 @@ stepDriver eventBridge workOwner facet state =
                             Continue next
                         AwaitTask taskTarget ->
                             if taskTarget == TaskKey jobPath key then
-                                Complete (cancel workOwner facet state (Just SelfAwait))
+                                if draining then Continue ({ state | ready = remaining, waiting = [Waiting taskTarget (Job key 0 jobPath work) | state.waiting] })
+                                else Continue (cancel workOwner facet state (Just SelfAwait))
                             else if contains taskTarget state.notified then
-                                Complete (cancel workOwner facet state (Just Stalled))
+                                if draining then Continue ({ state | ready = remaining, waiting = [Waiting taskTarget (Job key 0 jobPath work) | state.waiting] })
+                                else Continue (cancel workOwner facet state (Just Stalled))
                             else
                                 next = { state | ready = remaining, waiting = [Waiting taskTarget (Job key 0 jobPath work) | state.waiting] }
                                 Continue next
                         WaitTask target ->
-                            if target == key then Complete (cancel workOwner facet state (Just SelfAwait))
+                            if target == key then
+                                if draining then Continue ({ state | ready = remaining, waiting = [Waiting (TaskKey jobPath target) (Job key 0 jobPath work) | state.waiting] })
+                                else Continue (cancel workOwner facet state (Just SelfAwait))
                             else
                                 next = { state | ready = remaining, waiting = [Waiting (TaskKey jobPath target) (Job key 0 jobPath work) | state.waiting] }
                                 Continue next
@@ -407,26 +414,41 @@ stepDriver eventBridge workOwner facet state =
                         Report failure replay ->
                             recorded = ChildReport key failure replay
                             next = recordReport jobPath recorded state
-                            if jobPath == [] then Complete (cancel workOwner facet next state.error)
+                            if draining then Continue ({ next | ready = enqueue (Job key 0 jobPath work) remaining })
+                            else if jobPath == [] then Continue (cancel workOwner facet next state.error)
                             else Continue (cancelContext workOwner jobPath next Nothing)
                         Fault error ->
-                            if jobPath == [] then Complete (cancel workOwner facet state (Just error))
+                            if draining then
+                                faultState = recordFault jobPath error state
+                                Continue ({ faultState | ready = enqueue (Job key 0 jobPath work) remaining })
+                            else if jobPath == [] then Continue (cancel workOwner facet state (Just error))
                             else Continue (cancelContext workOwner jobPath state (Just error))
                 Runtime.Coroutine.Finished () ->
                     (waiting, ready) = wake (TaskKey jobPath key) state.waiting remaining
                     next = { state | ready = ready, waiting = waiting, notified = [TaskKey jobPath key | state.notified], live = removeLive key state.live }
                     Continue next
-                Runtime.Coroutine.Closed -> Complete (cancel workOwner facet state (Just Stalled))
+                Runtime.Coroutine.Closed ->
+                    if draining then
+                        completion = Runtime.Work.stopCompletion workOwner work
+                        updated = case Runtime.Completion.failure completion of
+                            Nothing -> state
+                            Just issue ->
+                                report = CleanupReport issue completion
+                                if jobPath == [] then { state | cleanup = append state.cleanup [report] }
+                                else { state | contexts = recordContextCleanup jobPath [report] state.contexts }
+                        Continue ({ updated | ready = remaining, live = removeLive key updated.live })
+                    else Continue (cancel workOwner facet state (Just Stalled))
         NoJobs ->
+            state = previous
             case state.waiting of
                 [] -> Complete state
                 _ ->
                     if hasNativeWait state.waiting then
-                        event = Runtime.Async.Native.wait eventBridge
-                        if event == -2 then Complete (cancel workOwner facet state (Just Interrupted))
-                        else if event < 0 then Complete (cancel workOwner facet state (Just Stalled))
+                        event = if state.cancelling then Runtime.Async.Native.waitDrain eventBridge else Runtime.Async.Native.wait eventBridge
+                        if event == -2 then Continue (cancel workOwner facet state (Just Interrupted))
+                        else if event < 0 then Continue (cancel workOwner facet state (Just Stalled))
                         else Continue (notifyNative event state)
-                    else Complete (cancel workOwner facet state (Just Stalled))
+                    else Continue (cancel workOwner facet state (Just Stalled))
 
 hasNativeWait waits =
     case waits of
@@ -444,9 +466,9 @@ notifyNative ticket state =
     { state | ready = ready, waiting = waiting }
 
 dispatch eventBridge workOwner facet state =
-    event = Runtime.Async.Native.take eventBridge
+    event = if state.cancelling then Runtime.Async.Native.takeDrain eventBridge else Runtime.Async.Native.take eventBridge
     current = if event < 0 then state else notifyNative event state
-    if event == -2 then Complete (cancel workOwner facet state (Just Interrupted))
+    if event == -2 && state.cancelling == False then Continue (cancel workOwner facet state (Just Interrupted))
     else case stepDriver eventBridge workOwner facet current of
         Continue next -> dispatch eventBridge workOwner facet (settleContexts workOwner next)
         decision -> decision
@@ -472,7 +494,7 @@ replayReports workOwner reports =
         [primary | rest] -> replayWithSuppressed workOwner primary (List.reverse rest)
 
 initialState : Job -> State e
-initialState root = { ready = Queue (Jobs root NoJobs) NoJobs, waiting = [], notified = [], live = [root], nextKey = 1, reports = [], cleanup = [], contexts = [], error = Nothing }
+initialState root = { ready = Queue (Jobs root NoJobs) NoJobs, waiting = [], notified = [], live = [root], nextKey = 1, reports = [], cleanup = [], contexts = [], error = Nothing, cancelling = False, cancelledContexts = [] }
 
 run : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) ->{IO | e} Result Error a
 run action = runWithCapacity 32 action

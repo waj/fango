@@ -93,7 +93,18 @@ func directMachineTerms(worker *machineir.Worker) error {
 			if err := check(term.Acquire, true); err != nil {
 				return err
 			}
-			if err := check(term.Release, true); err != nil {
+			if core.ExprControl(term.Release).Resolve(types.Machine) == types.Machine {
+				app, ok := term.Release.(*core.App)
+				if !ok || app.CalleeKind != core.Value || len(app.Args) != 1 {
+					return fmt.Errorf("codegen: Machine cleanup release must be a unary callback")
+				}
+				if _, ok := app.Callee.(*core.VarRef); !ok {
+					return fmt.Errorf("codegen: Machine cleanup release has no local callback")
+				}
+				if err := check(app.Args[0], false); err != nil {
+					return err
+				}
+			} else if err := check(term.Release, true); err != nil {
 				return err
 			}
 		case *machineir.PopCleanup:
@@ -408,7 +419,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		resumed := []goast.Stmt{varDeclStmt(name, selector("fangort", "CursorResult"), callExpr(selector("m", "TakeCursorResult"))),
 			&goast.IfStmt{Cond: &goast.BinaryExpr{X: selector(name, "Exit"), Op: gotoken.NEQ, Y: ident("nil")}, Body: &goast.BlockStmt{List: []goast.Stmt{step("MachineExit", "Exit", selector(name, "Exit"))}}},
 		}
-		if term.Close {
+		if term.Close && term.Result == nil {
 			resumed = append(resumed, assignStmt(machineLocalName(term.Bind.Name), g.unitValue()))
 			resumed = append(resumed, continueStmt(term.Next)...)
 			return stmts, [][]goast.Stmt{resumed}
@@ -728,6 +739,25 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		return stmts, [][]goast.Stmt{resumed}
 	case *machineir.PushCleanup:
 		acquirePrefix, acquired := value(term.Acquire)
+		if core.ExprControl(term.Release).Resolve(types.Machine) == types.Machine {
+			app := term.Release.(*core.App)
+			args := []goast.Expr{}
+			if core.ArrowOpenRow(app.Callee.Type(), 1) {
+				args = append(args, g.rowArgument(app.Row))
+			}
+			for _, arg := range app.Args {
+				args = append(args, g.machineExpr(arg))
+			}
+			start := callExpr(callbackMember(g.machineExpr(app.Callee), types.Machine), args...)
+			factory := funcLit(&goast.StarExpr{X: selector("fangort", "Machine")}, []goast.Stmt{
+				returnStmt(callExpr(selector("fangort", "StartMachine"), callExpr(selector("fangort", "StartFrame"), start))),
+			})
+			stmts := append(acquirePrefix,
+				assignStmt(machineLocalName(term.Resource.Name), acquired),
+				exprStmt(callExpr(selector("m", "PushMachineCleanup"), factory)),
+			)
+			return append(stmts, continueStmt(term.Next)...), nil
+		}
 		oldControl, oldResult := g.control, g.resultType
 		releaseControl := core.ExprControl(term.Release)
 		if releaseControl.Transport == types.Exit {
@@ -765,25 +795,29 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 		if types.CoroutineScopeType(term.Cursor.Ty) {
 			stmts = stmts[1:]
 		}
-		cleanup := funcLit(&goast.StarExpr{X: selector("fangort", "ExitRequest")}, []goast.Stmt{returnStmt(callExpr(selector("fangort", "CloseMachineIterator"), ident(captured)))})
-		stmts = append(stmts, exprStmt(callExpr(selector("m", "PushCleanup"), cleanup)))
+		cleanup := funcLit(&goast.StarExpr{X: selector("fangort", "Machine")}, []goast.Stmt{returnStmt(callExpr(selector("fangort", "StartCloseMachineIterator"), ident(captured)))})
+		stmts = append(stmts, exprStmt(callExpr(selector("m", "PushMachineCleanup"), cleanup)))
 		return append(stmts, continueStmt(term.Next)...), nil
-	case *machineir.CursorClose, *machineir.PopCleanup:
-		exitName := fmt.Sprintf("machineCleanupExit%d", block.ID)
-		exitValue := callExpr(&goast.SelectorExpr{X: ident("m"), Sel: ident("PopCleanup")})
-		failure := []goast.Stmt{step("MachineExit", "Exit", ident(exitName))}
-		stmts := []goast.Stmt{
-			varDeclStmt(exitName, &goast.StarExpr{X: selector("fangort", "ExitRequest")}, exitValue),
-			&goast.IfStmt{Cond: binExpr(gotoken.NEQ, ident(exitName), ident("nil")), Body: &goast.BlockStmt{List: failure}},
+	case *machineir.PopCleanup:
+		resultName := fmt.Sprintf("machineCleanupResult%d", block.ID)
+		resumed := []goast.Stmt{
+			varDeclStmt(resultName, ident("any"), callExpr(selector("m", "TakeResult"))),
+			&goast.IfStmt{Cond: binExpr(gotoken.NEQ, ident(resultName), ident("nil")), Body: &goast.BlockStmt{List: []goast.Stmt{
+				step("MachineExit", "Exit", &goast.TypeAssertExpr{X: ident(resultName), Type: &goast.StarExpr{X: selector("fangort", "ExitRequest")}}),
+			}}},
 		}
-		var next machineir.BlockID
-		switch close := term.(type) {
-		case *machineir.CursorClose:
-			next = close.Next
-		case *machineir.PopCleanup:
-			next = close.Next
+		resumed = append(resumed, continueStmt(term.Next)...)
+		stmts := append(save(), assignMachinePC(resumePC), step("MachinePopCleanup", "", nil))
+		return stmts, [][]goast.Stmt{resumed}
+	case *machineir.CursorClose:
+		resultName := fmt.Sprintf("machineCleanupResult%d", block.ID)
+		resumed := []goast.Stmt{
+			varDeclStmt(resultName, ident("any"), callExpr(selector("m", "TakeResult"))),
+			&goast.IfStmt{Cond: binExpr(gotoken.NEQ, ident(resultName), ident("nil")), Body: &goast.BlockStmt{List: []goast.Stmt{
+				step("MachineExit", "Exit", &goast.TypeAssertExpr{X: ident(resultName), Type: &goast.StarExpr{X: selector("fangort", "ExitRequest")}}),
+			}}},
 		}
-		return append(stmts, continueStmt(next)...), nil
+		return append(save(), assignMachinePC(resumePC), step("MachinePopCleanup", "", nil)), [][]goast.Stmt{append(resumed, continueStmt(term.Next)...)}
 	case *machineir.StateResume:
 		resultName := fmt.Sprintf("machineResumeResult%d", g.tmp)
 		g.tmp++

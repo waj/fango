@@ -18,6 +18,7 @@ import (
 // to Fango source; E8 supplies the ownership contract for source consumers.
 type MachineEvent struct {
 	advance *cursorAdvanceRequest
+	cleanup *MachineSession
 	Owner   *fangort.YieldOwner
 	Request Value
 	Done    bool
@@ -75,6 +76,21 @@ type machineHandler struct {
 	term           *machineir.Handle
 }
 
+type machineCleanupEntry struct {
+	sync  func() (*ExitRequest, error)
+	start func() (*MachineSession, error)
+}
+
+type machineDrain struct {
+	primary *ExitRequest
+	depth   int
+	handler int
+	failure error
+	pending *ExitRequest
+	clause  bool
+	prior   *ExitRequest
+}
+
 // MachineSession owns one suspended computation. Frame objects live separately
 // from the append-grown pointer slice, and handler boundaries retain depths,
 // so slice relocation cannot invalidate a live frame. The session, its frames,
@@ -103,9 +119,15 @@ type MachineSession struct {
 	closures         map[*core.Lambda]*machineir.Closure
 	frames           []*machineFrame
 	waiting          *machineir.Local
+	replaySuspension bool
+	lastSuspend      MachineEvent
 	finished         bool
 	stats            MachineStats
-	cleanups         []func() (*ExitRequest, error)
+	cleanups         []machineCleanupEntry
+	drain            *machineDrain
+	service          func(*MachineSession) (MachineEvent, error)
+	serviceExit      *ExitRequest
+	serviceReady     bool
 	states           []Value
 	handlers         []machineHandler
 }
@@ -199,8 +221,19 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 	if s.finished {
 		return MachineEvent{}, fmt.Errorf("eval: machine session already completed")
 	}
+	if s.waiting != nil && s.replaySuspension {
+		s.replaySuspension = false
+		return s.lastSuspend, nil
+	}
 	if s.waiting != nil {
 		return MachineEvent{}, fmt.Errorf("eval: suspended machine must be resumed")
+	}
+	if s.service != nil {
+		event, err = s.service(s)
+		if event.Done {
+			s.clear()
+		}
+		return event, err
 	}
 	// Production runs with its lexical evidence. Restore the caller's evidence
 	// after each yield or failure, including when both share an interpreter.
@@ -223,6 +256,15 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 		}
 	}
 	for len(s.frames) != 0 {
+		if s.drain != nil {
+			drained, ready, err := s.advanceDrain()
+			if err != nil || ready {
+				return drained, err
+			}
+			if s.drain != nil {
+				continue
+			}
+		}
 		s.stats.Steps++
 		if err := s.interp.tick(); err != nil {
 			return MachineEvent{}, err
@@ -353,7 +395,8 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			s.prune(frame, block.LiveOut, term.Bind.Name)
 			bind := term.Bind
 			s.waiting = &bind
-			return MachineEvent{Request: request}, nil
+			s.lastSuspend = MachineEvent{Request: request}
+			return s.lastSuspend, nil
 		case *machineir.CursorAdvance:
 			value, err := eval(term.Cursor)
 			if err != nil {
@@ -456,7 +499,8 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				frame.block = term.Next
 				s.prune(frame, block.LiveOut, term.Bind.Name)
 				s.waiting = &term.Bind
-				return MachineEvent{Owner: pause, Request: values[0]}, nil
+				s.lastSuspend = MachineEvent{Owner: pause, Request: values[0]}
+				return s.lastSuspend, nil
 			}
 			if synchronous != nil {
 				if len(values) != 1 {
@@ -663,17 +707,46 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			releaseEvidence := cloneEvidence(s.interp.evidence)
 			releaseTypes := frame.types
 			releaseRows := frame.rows
-			s.cleanups = append(s.cleanups, func() (*ExitRequest, error) {
-				saved := s.interp.evidence
-				s.interp.evidence = cloneEvidence(releaseEvidence)
-				value, err := s.interp.eval(term.Release, &Frame{vars: releaseVars, types: releaseTypes, rows: releaseRows})
-				s.interp.evidence = saved
-				if err != nil {
-					return nil, err
+			cleanup := machineCleanupEntry{}
+			if core.ExprControl(term.Release).Resolve(types.Machine) == types.Machine {
+				app, ok := term.Release.(*core.App)
+				if !ok || len(app.Args) != 1 {
+					return MachineEvent{}, fmt.Errorf("eval: suspending cleanup release is not a unary call")
 				}
-				exit, _ := asExit(value)
-				return exit, nil
-			})
+				capture := &Frame{vars: releaseVars, types: releaseTypes, rows: releaseRows}
+				callee, err := s.interp.eval(app.Callee, capture)
+				if err != nil {
+					return MachineEvent{}, err
+				}
+				fn, ok := callee.(*Closure)
+				if !ok || fn.machine == nil {
+					return MachineEvent{}, fmt.Errorf("eval: suspending cleanup release has no Machine callback")
+				}
+				arg, err := s.interp.eval(app.Args[0], capture)
+				if err != nil {
+					return MachineEvent{}, err
+				}
+				row, err := s.interp.argumentRow(app.Row, capture)
+				if err != nil {
+					return MachineEvent{}, err
+				}
+				cleanup.start = func() (*MachineSession, error) {
+					return s.interp.startMachineClosure(s.program, fn.machine, arg, releaseEvidence, row)
+				}
+			} else {
+				cleanup.sync = func() (*ExitRequest, error) {
+					saved := s.interp.evidence
+					s.interp.evidence = cloneEvidence(releaseEvidence)
+					value, err := s.interp.eval(term.Release, &Frame{vars: releaseVars, types: releaseTypes, rows: releaseRows})
+					s.interp.evidence = saved
+					if err != nil {
+						return nil, err
+					}
+					exit, _ := asExit(value)
+					return exit, nil
+				}
+			}
+			s.cleanups = append(s.cleanups, cleanup)
 			if len(s.cleanups) > s.stats.MaxCleanups {
 				s.stats.MaxCleanups = len(s.cleanups)
 			}
@@ -693,13 +766,29 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			}
 			cursor := s.interp.openCoroutine(s.program, producer, row)
 			frame.vars[term.Cursor.Name] = cursor
-			s.cleanups = append(s.cleanups, cursor.Close)
+			s.cleanups = append(s.cleanups, machineCleanupEntry{start: func() (*MachineSession, error) { return startCloseIterator(s.interp, cursor), nil }})
 			if len(s.cleanups) > s.stats.MaxCleanups {
 				s.stats.MaxCleanups = len(s.cleanups)
 			}
 			frame.block = term.Next
 			continue
-		case *machineir.CursorClose, *machineir.PopCleanup:
+		case *machineir.PopCleanup:
+			if len(s.cleanups) == 0 {
+				return MachineEvent{}, fmt.Errorf("eval: machine cleanup stack underflow")
+			}
+			i := len(s.cleanups) - 1
+			if s.cleanups[i].start != nil {
+				cleanup := s.cleanups[i]
+				s.cleanups[i] = machineCleanupEntry{}
+				s.cleanups = s.cleanups[:i]
+				child, err := cleanup.start()
+				if err != nil {
+					return MachineEvent{}, err
+				}
+				frame.block = term.Next
+				s.prune(frame, block.LiveOut, "")
+				return MachineEvent{cleanup: child}, nil
+			}
 			exit, err := s.popCleanup(nil)
 			if err != nil {
 				return MachineEvent{}, err
@@ -712,12 +801,34 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				}
 				return s.finishExit(exit)
 			}
-			switch close := term.(type) {
-			case *machineir.CursorClose:
-				frame.block = close.Next
-			case *machineir.PopCleanup:
-				frame.block = close.Next
+			frame.block = term.Next
+		case *machineir.CursorClose:
+			if len(s.cleanups) != 0 && s.cleanups[len(s.cleanups)-1].start != nil {
+				i := len(s.cleanups) - 1
+				cleanup := s.cleanups[i]
+				s.cleanups[i] = machineCleanupEntry{}
+				s.cleanups = s.cleanups[:i]
+				child, err := cleanup.start()
+				if err != nil {
+					return MachineEvent{}, err
+				}
+				frame.block = term.Next
+				s.prune(frame, block.LiveOut, "")
+				return MachineEvent{cleanup: child}, nil
 			}
+			exit, err := s.popCleanup(nil)
+			if err != nil {
+				return MachineEvent{}, err
+			}
+			if exit != nil {
+				if caught, err := s.catchExit(exit); err != nil {
+					return MachineEvent{}, err
+				} else if caught {
+					continue
+				}
+				return s.finishExit(exit)
+			}
+			frame.block = term.Next
 		case *machineir.StateResume:
 			value, err := eval(term.Value)
 			if err != nil {
@@ -816,6 +927,7 @@ func (s *MachineSession) resumeLocal(value Value) error {
 	frame := s.frames[len(s.frames)-1]
 	frame.vars[s.waiting.Name] = value
 	s.waiting = nil
+	s.lastSuspend = MachineEvent{}
 	return nil
 }
 
@@ -834,6 +946,9 @@ func (s *MachineSession) abandonLocal() (*ExitRequest, error) {
 // clear drops live execution state on every terminal path. Program
 // descriptors and high-water statistics remain available for diagnostics.
 func (s *MachineSession) clear() {
+	s.service = nil
+	s.serviceExit = nil
+	s.serviceReady = false
 	s.parentStateOwner = nil
 	s.parentStateCount = 0
 	for i, frame := range s.frames {
@@ -846,6 +961,7 @@ func (s *MachineSession) clear() {
 	}
 	s.states = nil
 	s.cleanups = nil
+	s.drain = nil
 	s.handlers = nil
 	s.waiting = nil
 	s.pendingExit = nil
@@ -856,6 +972,11 @@ func (s *MachineSession) Stats() MachineStats { return s.stats }
 
 func (s *MachineSession) finishExit(exit *ExitRequest) (MachineEvent, error) {
 	s.cause = terminalAbort
+	if s.hasSuspendingCleanup(0) {
+		s.drain = &machineDrain{primary: exit, handler: -1}
+		event, _, err := s.advanceDrain()
+		return event, err
+	}
 	exit, err := s.unwind(exit)
 	s.clear()
 	return MachineEvent{Done: true, Exit: exit}, err
@@ -873,6 +994,10 @@ func (s *MachineSession) catchExit(exit *ExitRequest) (bool, error) {
 		}
 		if h.completionBind == "" && exit.Target != h.target {
 			continue
+		}
+		if s.hasSuspendingCleanup(h.cleanupDepth) {
+			s.drain = &machineDrain{primary: exit, depth: h.cleanupDepth, handler: i}
+			return true, nil
 		}
 		var err error
 		exit, err = s.unwindTo(exit, h.cleanupDepth)
@@ -954,15 +1079,126 @@ func (s *MachineSession) catchExit(exit *ExitRequest) (bool, error) {
 	return false, nil
 }
 
+func (s *MachineSession) hasSuspendingCleanup(depth int) bool {
+	for i := len(s.cleanups) - 1; i >= depth; i-- {
+		if s.cleanups[i].start != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *MachineSession) completeCleanup(exit *ExitRequest) {
+	if s.drain != nil {
+		if s.cause == terminalOwnerStop {
+			if s.drain.clause {
+				s.drain.clause = false
+				if exit != nil {
+					exit = suppress(exit, s.drain.prior)
+				}
+				s.drain.prior = nil
+			}
+			s.drain.pending = suppress(s.drain.pending, exit)
+			return
+		}
+		s.drain.primary = suppress(s.drain.primary, exit)
+	} else if s.service != nil {
+		s.serviceExit, s.serviceReady = exit, true
+	} else {
+		s.pendingExit = exit
+	}
+}
+
+func (s *MachineSession) advanceDrain() (MachineEvent, bool, error) {
+	d := s.drain
+	limit := d.depth
+	if s.cause == terminalOwnerStop && d.pending != nil {
+		match := -1
+		for i := len(s.handlers) - 1; i >= 0; i-- {
+			h := s.handlers[i]
+			if h.completionBind == "" && h.target == d.pending.Target {
+				match = i
+				break
+			}
+		}
+		if match < 0 {
+			d.primary = suppress(d.primary, d.pending)
+			d.pending = nil
+		} else if len(s.cleanups) <= s.handlers[match].cleanupDepth {
+			pending := d.pending
+			d.pending = nil
+			s.stopRouting = true
+			caught, err := s.catchExit(pending)
+			s.stopRouting = false
+			if err != nil {
+				return MachineEvent{}, true, err
+			}
+			if !caught {
+				return MachineEvent{}, true, fmt.Errorf("eval: cleanup handler disappeared during stop")
+			}
+			s.stopCaught = nil
+			last := len(s.frames) - 1
+			frame := s.frames[last]
+			s.frames[last] = nil
+			s.frames = s.frames[:last]
+			clause := &MachineSession{program: s.program, interp: s.interp, workers: s.workers, closures: s.closures,
+				frames: []*machineFrame{frame}, states: append([]Value(nil), s.states...), parentStateOwner: s, parentStateCount: len(s.states)}
+			d.clause, d.prior = true, pending
+			return MachineEvent{cleanup: clause}, true, nil
+		} else {
+			limit = s.handlers[match].cleanupDepth
+		}
+	}
+	for len(s.cleanups) > limit {
+		i := len(s.cleanups) - 1
+		cleanup := s.cleanups[i]
+		s.cleanups[i] = machineCleanupEntry{}
+		s.cleanups = s.cleanups[:i]
+		if cleanup.start != nil {
+			child, err := cleanup.start()
+			if err != nil {
+				return MachineEvent{}, true, err
+			}
+			return MachineEvent{cleanup: child}, true, nil
+		}
+		secondary, err := cleanup.sync()
+		d.failure = errors.Join(d.failure, err)
+		if secondary != nil && s.cause == terminalOwnerStop {
+			d.pending = suppress(d.pending, secondary)
+			return MachineEvent{}, false, d.failure
+		}
+		d.primary = suppress(d.primary, secondary)
+	}
+	if d.pending != nil {
+		return MachineEvent{}, false, d.failure
+	}
+	s.drain = nil
+	if d.handler < 0 {
+		s.clear()
+		return MachineEvent{Done: true, Exit: d.primary}, true, d.failure
+	}
+	caught, err := s.catchExit(d.primary)
+	if err != nil {
+		return MachineEvent{}, true, errors.Join(d.failure, err)
+	}
+	if !caught {
+		return MachineEvent{}, true, fmt.Errorf("eval: cleanup drain lost abort handler")
+	}
+	return MachineEvent{}, false, d.failure
+}
+
 func (s *MachineSession) popCleanup(primary *ExitRequest) (*ExitRequest, error) {
 	if len(s.cleanups) == 0 {
 		return nil, fmt.Errorf("eval: machine cleanup stack underflow")
 	}
 	i := len(s.cleanups) - 1
 	cleanup := s.cleanups[i]
-	s.cleanups[i] = nil
+	s.cleanups[i] = machineCleanupEntry{}
 	s.cleanups = s.cleanups[:i]
-	secondary, err := cleanup()
+	if cleanup.start != nil {
+		return nil, fmt.Errorf("eval: suspending cleanup requires machine drain")
+	}
+	secondary, err := cleanup.sync()
 	if secondary != nil && s.cause == terminalOwnerStop && !s.stopRouting {
 		var handlerErr error
 		secondary, handlerErr = s.resolveStopExit(secondary)

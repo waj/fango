@@ -167,7 +167,7 @@ $(Meta.lift (total()))
 	}
 }
 
-func TestSuspendingCleanupRejectedAndRolledBackInREPL(t *testing.T) {
+func TestSuspendingCleanupAvailableInREPL(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader(`import Stream
 import Iterator
@@ -181,11 +181,11 @@ Stream.forEach print (Stream.generate pause)
 :quit
 `), &out)
 	got := out.String()
-	if !strings.Contains(got, "SUSPENDING RESOURCE CALLBACK") || !strings.Contains(got, "I don't know a value named `bad`.") || !strings.Contains(got, "1\n") {
-		t.Fatalf("cleanup contract or rollback failed:\n%s", got)
+	if !strings.Contains(got, "bad : () ->{IO} ()") || !strings.Contains(got, "1\n") {
+		t.Fatalf("cleanup contract or following traversal failed:\n%s", got)
 	}
 	if strings.Contains(got, "INTERNAL") || strings.Contains(got, "CAPTURE CHECK ERROR") {
-		t.Fatalf("cleanup rejection escaped the source proof boundary:\n%s", got)
+		t.Fatalf("cleanup escaped the source proof boundary:\n%s", got)
 	}
 }
 

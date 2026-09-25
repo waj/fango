@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Runtime.Async.Native exposing (Bridge, available, close, new, ready, release, reserve, take, wait)
+module Runtime.Async.Native exposing (Bridge, available, close, new, ready, release, reserve, take, takeDrain, wait, waitDrain)
 
 import Basics exposing (..)
 import IO exposing (IO)
@@ -26,3 +26,9 @@ take : Bridge ->{IO} Int
 take = native
 wait : Bridge ->{IO} Int
 wait = native
+
+takeDrain : Bridge ->{IO} Int
+takeDrain = native
+
+waitDrain : Bridge ->{IO} Int
+waitDrain = native

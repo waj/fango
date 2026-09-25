@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Runtime.Work exposing (Facet, Owner, Work, advance, close, facet, owner, pack, register, run)
+module Runtime.Work exposing (Facet, Owner, Work, advance, close, facet, owner, pack, register, run, stop, stopCompletion)
 
 -- Scoped packages for coroutines whose effect rows differ. A package keeps
 -- the coroutine's request, reply, and result types, but hides its effect row
@@ -8,6 +8,7 @@ module Runtime.Work exposing (Facet, Owner, Work, advance, close, facet, owner, 
 -- advancing or closing a package acts on its original coroutine.
 
 import Basics exposing (..)
+import Runtime.Completion
 import Runtime.Coroutine exposing (Coroutine, Drive, Step, Suspension)
 
 -- Identity and effect budget of a packaging scope. `e` lists the effects
@@ -53,6 +54,16 @@ advance = native
 -- owner used to package it; repeated closes are harmless.
 close : Owner e -> Work request reply result ->{Drive | e} ()
 close = native
+
+-- Start a resumable stop. Each Suspended request must be answered with
+-- advance; the owner and work package stay live until terminal completion.
+stop : Owner e -> Work request reply result ->{Drive | e} Step request result
+stop = native
+
+-- Read the terminal cleanup report after stop/advance has finished draining.
+-- The owner row supplies the typed replay evidence when a failure is reported.
+stopCompletion : Owner e -> Work request reply result -> Runtime.Completion.Completion () e
+stopCompletion = native
 
 -- Get the Work owner of an existing Coroutine scope. Repeated calls return
 -- the same identity; use it to drive packages registered in that scope.

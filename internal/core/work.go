@@ -87,7 +87,7 @@ func (l *linter) work(w *Work, where string) {
 	if (w.Kind == "begin" || w.Kind == "pack") && w.SourceRow == nil {
 		l.errorf("%s: missing work effect-budget proof", where)
 	}
-	name := map[string]string{"begin": types.WorkRunName, "end": types.WorkRunName, "facet": types.WorkFacetName, "pack": types.WorkPackName, "open": l.defName}[w.Kind]
+	name := map[string]string{"begin": types.WorkRunName, "end": types.WorkRunName, "facet": types.WorkFacetName, "pack": types.WorkPackName, "open": l.defName, "open-stop": types.WorkStopName, "stop-completion": types.WorkStopCompletionName}[w.Kind]
 	if name == "" || !l.intrinsics[name] || l.defName != name || w.Kind == "open" && name != types.WorkAdvanceName && name != types.WorkCloseName {
 		l.errorf("%s: work operation outside its checked intrinsic", where)
 	}
@@ -123,11 +123,17 @@ func (l *linter) work(w *Work, where string) {
 			x, y, z, p := types.WorkProtocol(w.Ty)
 			ok = c && p && EqualValueRepresentation(q, x) && EqualValueRepresentation(r, y) && EqualValueRepresentation(a, z)
 		}
-	case "open":
+	case "open", "open-stop":
 		if len(w.Args) == 2 && con(w.Args[0].Type(), types.WorkOwnerTypeName, 1) {
 			q, r, a, c := types.WorkProtocol(w.Args[1].Type())
 			x, y, z, p := types.CoroutineProtocol(w.Ty)
 			ok = c && p && EqualValueRepresentation(q, x) && EqualValueRepresentation(r, y) && EqualValueRepresentation(a, z)
+		}
+	case "stop-completion":
+		if len(w.Args) == 2 && con(w.Args[0].Type(), types.WorkOwnerTypeName, 1) && con(w.Args[1].Type(), types.WorkTypeName, 3) {
+			owner := w.Args[0].Type().(*types.TCon)
+			completion, shape := w.Ty.(*types.TCon)
+			ok = shape && completion.Name == types.CompletionTypeName && len(completion.Args) == 2 && con(completion.Args[0], "()", 0) && types.Equal(completion.Args[1], owner.Args[0])
 		}
 	}
 	if !ok {

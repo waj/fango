@@ -1,7 +1,7 @@
 # Roadmap: structured Async and execution models
 
-This document owns the remaining Async work: parallel and mixed execution,
-suspending cleanup, and concurrent combinators. It depends on the shared
+This document owns the remaining Async work: parallel and mixed execution
+and concurrent combinators. It depends on the shared
 [coroutine foundation](roadmap-coroutines.md), whose ownership/control
 contracts apply without compiler recognition of Async names. The
 [effects roadmap](roadmap-effects.md) owns general language extensions.
@@ -681,7 +681,7 @@ language work is specified once in the coroutine roadmap.
 | A1: Deterministic cooperative tasks | A0, C4, C6a, C6c (including shared service evidence); C1 implements C0's general extensions | DONE: executor-neutral Async operations with cooperative dynamic spawn/yield/await and scripted waits; no C6b prerequisite |
 | A2: Structured contexts and failures | A1 | DONE: root/nested lifetimes, cancellation, reusable results, synchronous cleanup |
 | A3: Native readiness and IO | A2, C6b; C6a if adapter values require it | DONE: bounded native timers and HTTP GET, cooperative wakeup and REPL interruption |
-| A4: Suspending cleanup integration | A3, C5 | Cancellation/drain through asynchronous acquire/release |
+| A4: Suspending cleanup integration | A3, C5 | DONE: cancellation/drain through asynchronous acquire/release |
 | A5: Goroutine executor | A4, C6d | One driver goroutine per task |
 | A6: Mixed executor | A4, C6d | Bounded pool advancing cooperative tasks |
 | A7: Concurrent combinators and events | A4; repeat executor coverage after A5/A6 | Bounded mapping, race, timeout, subscriptions |
@@ -774,7 +774,7 @@ contract. The [A2 differential fixtures](../testdata/run/async_a2_contexts.fango
 cover nested and root ownership, outer awaits, bound definition-site context,
 grandchildren, caught await without failure erasure, parent cancellation,
 and typed cleanup ordering in both
-backends. A4 adds suspending cleanup.
+backends. A4 extends cleanup to suspended releases.
 
 ### A3: Native readiness and IO
 
@@ -793,6 +793,9 @@ during native wait and readLine, with prompt and session recovery. C6b's
 retention checker verifies enclosing and shorter-lived bridge captures.
 
 ### A4: Suspending cleanup integration
+
+**DONE.** See [cooperative cancellation](reference/library-async-cooperative.md)
+and the [driver design](design/async-cooperative.md#queue-completion-and-failure).
 
 Use C5 for asynchronous acquisition/release. Keep cancelling owners scheduled
 until drain finishes; shield releases against repeated cancellation. Keep the

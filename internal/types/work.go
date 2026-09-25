@@ -1,21 +1,23 @@
 package types
 
 const (
-	WorkOwnerTypeName = "Runtime.Work.Owner"
-	WorkFacetTypeName = "Runtime.Work.Facet"
-	WorkTypeName      = "Runtime.Work.Work"
-	WorkOwnerName     = "Runtime.Work.owner"
-	WorkRegisterName  = "Runtime.Work.register"
-	WorkRunName       = "Runtime.Work.run"
-	WorkFacetName     = "Runtime.Work.facet"
-	WorkPackName      = "Runtime.Work.pack"
-	WorkAdvanceName   = "Runtime.Work.advance"
-	WorkCloseName     = "Runtime.Work.close"
+	WorkOwnerTypeName      = "Runtime.Work.Owner"
+	WorkFacetTypeName      = "Runtime.Work.Facet"
+	WorkTypeName           = "Runtime.Work.Work"
+	WorkOwnerName          = "Runtime.Work.owner"
+	WorkRegisterName       = "Runtime.Work.register"
+	WorkRunName            = "Runtime.Work.run"
+	WorkFacetName          = "Runtime.Work.facet"
+	WorkPackName           = "Runtime.Work.pack"
+	WorkAdvanceName        = "Runtime.Work.advance"
+	WorkCloseName          = "Runtime.Work.close"
+	WorkStopName           = "Runtime.Work.stop"
+	WorkStopCompletionName = "Runtime.Work.stopCompletion"
 )
 
 func WorkIntrinsic(name string) bool {
 	switch name {
-	case WorkOwnerName, WorkRegisterName, WorkRunName, WorkFacetName, WorkPackName, WorkAdvanceName, WorkCloseName:
+	case WorkOwnerName, WorkRegisterName, WorkRunName, WorkFacetName, WorkPackName, WorkAdvanceName, WorkCloseName, WorkStopName, WorkStopCompletionName:
 		return true
 	}
 	return false
@@ -108,7 +110,7 @@ func WorkShape(name string, ty Type) bool {
 			}
 		}
 		return true
-	case WorkAdvanceName, WorkCloseName:
+	case WorkAdvanceName, WorkCloseName, WorkStopName:
 		owner, o := con(args[0], WorkOwnerTypeName, 1)
 		work, w := con(args[1], WorkTypeName, 3)
 		if !o || !w || !row(last, owner.Args[0], true) {
@@ -119,7 +121,16 @@ func WorkShape(name string, ty Type) bool {
 			return unit
 		}
 		step, s := con(rest, CoroutineStepName, 2)
-		return s && Equal(args[2], work.Args[1]) && Equal(step.Args[0], work.Args[0]) && Equal(step.Args[1], work.Args[2])
+		return s && (name == WorkStopName || Equal(args[2], work.Args[1])) && Equal(step.Args[0], work.Args[0]) && Equal(step.Args[1], work.Args[2])
+	case WorkStopCompletionName:
+		owner, o := con(args[0], WorkOwnerTypeName, 1)
+		_, w := con(args[1], WorkTypeName, 3)
+		completion, c := con(rest, CompletionTypeName, 2)
+		if !o || !w || !c {
+			return false
+		}
+		_, unit := con(completion.Args[0], "()", 0)
+		return unit && Equal(completion.Args[1], owner.Args[0]) && row(last, nil, false)
 	}
 	return false
 }

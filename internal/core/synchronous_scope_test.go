@@ -7,7 +7,7 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-func TestCoreReconstructsSynchronousScopeObligations(t *testing.T) {
+func TestCoreReconstructsScopeSuspensionObligations(t *testing.T) {
 	for _, phase := range []string{"acquisition", "release", "body"} {
 		t.Run(phase, func(t *testing.T) {
 			sup := &types.Supply{}
@@ -38,7 +38,7 @@ func TestCoreReconstructsSynchronousScopeObligations(t *testing.T) {
 						t.Errorf("unexpected error: %v", err)
 					}
 				}
-				if found != (phase == "release") {
+				if found {
 					t.Fatalf("%s suspension errors: %v", phase, errs)
 				}
 			}
@@ -50,12 +50,11 @@ func TestCoreReconstructsSynchronousScopeObligations(t *testing.T) {
 				index := 2
 				p.Defs[0].CaptureContract.Body.Children[index].Kind = "scalar"
 				errs := LintMachineInput(p, b)
-				var stale, rejected bool
+				var stale bool
 				for _, err := range errs {
 					stale = stale || strings.Contains(err.Error(), "capture contract is stale")
-					rejected = rejected || strings.Contains(err.Error(), "SUSPENDING RESOURCE CALLBACK")
 				}
-				if !stale || !rejected {
+				if !stale {
 					t.Fatalf("forged contract accepted: %v", errs)
 				}
 			}
@@ -100,7 +99,7 @@ func TestSynchronousCallbackHandlerBoundaries(t *testing.T) {
 				{Name: "helper", CaptureContract: &types.CaptureContract{Effects: []int{1}, Body: helper}},
 			}}
 			errs := checkCaptureFlows(newCaptureAnalyzer(p, b))
-			if (len(errs) == 0) != (mode == "outer abort") {
+			if len(errs) != 0 {
 				t.Fatalf("%s: %v", mode, errs)
 			}
 			for _, err := range errs {

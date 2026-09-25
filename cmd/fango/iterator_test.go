@@ -33,7 +33,7 @@ main() = print "unreachable"
 	runErrorCase(t, entry, "RESOURCE ESCAPES")
 }
 
-func TestImportedScopeContractAllowsAcquisitionAndRejectsSuspendingRelease(t *testing.T) {
+func TestImportedScopeContractAllowsSuspendingCallbacks(t *testing.T) {
 	dir := t.TempDir()
 	wrapper := `module Resource exposing (withResource)
 import Runtime.Scope
@@ -64,11 +64,7 @@ main() = Stream.forEach print (Stream.generate (\_ -> Resource.withResource ` + 
 			if err := os.WriteFile(entry, []byte(program), 0600); err != nil {
 				t.Fatal(err)
 			}
-			if phase == "acquire" {
-				runDifferentialCaseWith(t, entry, cliRunner(entry), fixtureInputs{}, "1\n")
-			} else {
-				runErrorCase(t, entry, "SUSPENDING RESOURCE CALLBACK")
-			}
+			runDifferentialCaseWith(t, entry, cliRunner(entry), fixtureInputs{}, "1\n")
 		})
 	}
 }
@@ -78,6 +74,19 @@ func TestSuspendingAcquisitionPaths(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", "testdata", "run", name+".fango")
 			runDifferentialCase(t, path, cliRunner(path))
+		})
+	}
+}
+
+func TestSuspendingReleasePaths(t *testing.T) {
+	for _, tc := range []struct{ name, output string }{
+		{"scope_suspending_release", "1\n"},
+		{"scope_suspending_handler", "1\n"},
+		{"scope_suspending_release_abort", "1\nErr body\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join("..", "..", "testdata", "run", tc.name+".fango")
+			runDifferentialCaseWith(t, path, cliRunner(path), fixtureInputs{}, tc.output)
 		})
 	}
 }

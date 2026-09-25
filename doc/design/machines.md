@@ -101,7 +101,7 @@ that snapshot; its surrounding body still evaluates in the full lexical frame.
 Producer execution shares its caller's policy and step counter across Core,
 tail loops, and dispatch, including loops that never yield. Reopening a producer
 cannot reset a staging budget or permit a forbidden native. Dispatch restores
-caller evidence on suspension/completion. Evaluator errors drain synchronous
+caller evidence on suspension/completion. Evaluator errors drain
 cleanup and retain cleanup errors while attempting outer releases. Terminal and
 protocol-error paths clear frames, state, handlers, and suspension storage.
 
@@ -120,19 +120,20 @@ to such an activation keep its own Direct protocol inside a suspending
 computation. Abort
 routing unwinds only to its exact target before invoking the clause.
 
-A Machine Bracket allows a Machine acquisition and has a checked Exit release
-slot. Explicit synchronous-argument obligations survive lowering and lint. An
-adapter may drive a Machine callback synchronously only in the checked release
-slot; unexpected suspension drains cleanup and fails an invariant. Actual
-non-suspension is proved by [capture analysis](ownership.md#synchronous-release).
+A Machine Bracket has Machine acquisition and release callbacks. After
+successful acquisition it registers a release factory before starting the body;
+failed acquisition retains responsibility for its own partial cleanup. A
+release starts as a child Machine and may suspend. The cleanup stack pops each
+obligation exactly once, then waits for that child to finish before proceeding
+to the outer obligation. The closing owner retains captured state and lexical
+evidence throughout the wait. Exit routing gives a cleanup failure to its
+definition-site handler and preserves typed primary/suppressed order when it
+remains unhandled.
 
-After successful acquisition, register a synchronous release closure before the
-body starts. A suspending acquisition continues into registration only after
-it returns successfully. Suspension keeps the LIFO cleanup stack; normal
-completion pops exactly once; partial unwind drains only the exited regions.
-Cleanup uses the same copying Suppress protocol as synchronous scopes. Explicit
-abandonment consumes unfinished production, drains all cleanup, clears storage, and returns
-cleanup failure rather than discarding it.
+Explicit abandonment builds a stop Machine from the unfinished advancement
+chain, innermost first. It replays a pending release request for the driver,
+then resumes the release with the reply. A cursor or scope is cleared only after
+the drain returns; a release that never returns keeps it live.
 
 ## Cursor owner and advancement
 
@@ -147,7 +148,8 @@ handle to the driver. Advance supplies the initial input or a suspended call's
 reply and drives to a request, completion, or exit. The generated caller and
 interpreter package requests/completion into checked Step constructors; close
 returns Unit. Machine lint independently checks access, evidence, protocol
-types, descriptors, and live locals.
+types, descriptors, and live locals. `stop` uses the same Step protocol to
+expose cleanup requests; `advance` supplies their replies.
 
 Each dispatcher has an iterative producer/caller transfer stack. A pause to an
 enclosing owner parks unfinished inner advancements there, retaining their

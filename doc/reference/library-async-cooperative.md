@@ -4,7 +4,7 @@
 creates the implicit root context; `Async.runOn Runtime.Executor.cooperative` and
 `Async.Cooperative.run` select the same policy. `Runtime.Executor` currently exposes
 only `cooperative`. Scoped native waits and HTTP GET are available through
-`Async.IO`. Parallel and mixed policies and suspending cleanup remain
+`Async.IO`. Parallel and mixed policies remain
 [roadmap work](../roadmap-async.md#implementation-stages).
 
 ```fango
@@ -65,13 +65,20 @@ A child may fail with an ordinary typed effect. The task stores its completion;
 Catching that replay does not change the stored failure or its context's
 obligation to report it. Catch expected failure inside the child and return a
 `Result` to make the child successful. After a failure, the driver cancels its
-siblings at supported checkpoints, closes unfinished work, and waits for
-synchronous cleanup before the context exits. Closing work that has not
+siblings at supported checkpoints, schedules unfinished work for a suspendable
+cleanup drain, and waits for it before the context exits. Stopping work that has not
 started does not run its body. The context body has failure precedence;
 otherwise the lowest registered failed child is primary. Other child failures
 follow in registration order, then owner cleanup failures in reverse close
 order. Primary and suppressed payloads retain their types. Nested reports
 remain nested and replay under the caller's current evidence.
+
+Acquisition, body, and release can pause on Async requests. Cancelling a
+parked task revokes its ordinary wait, then drives its pending release requests
+through the same scheduler. Repeated interruption does not interrupt that drain;
+native readiness remains available to a waiting release. The owner and its
+native requests stay live until cleanup completes. A release that never
+finishes keeps the context open.
 
 `Async.yield()` gives other ready tasks a turn; `Async.waitSignal key` parks,
 and `Async.signal key` publishes a sticky notification for scripted readiness.
@@ -90,7 +97,7 @@ task until a slot is released. A nonpositive capacity returns
 Yield, waits, native completion, startup, context entry/exit, and await of an
 already published result are the supported cancellation checkpoints. In the
 REPL, Ctrl-C during a cooperative run returns `Err Interrupted` after native
-requests and synchronous cleanup drain. `Async.Error` also has `SelfAwait`,
+requests and cleanup drain. `Async.Error` also has `SelfAwait`,
 `Stalled`, and `InvalidWorkerCount Int`. `SelfAwait` detects a task waiting on itself;
 `Stalled` reports no runnable work or possible notification. The worker count
 case is reserved for the later mixed executor. Scheduler errors are returned as
@@ -112,3 +119,6 @@ Core interpreter and generated backend. The [A3 fixtures](../../testdata/run/asy
 cover overlapping HTTP fetches and suspension inside a Stream pull; the
 [capacity fixture](../../testdata/run/async_a3_capacity.fango) covers admission,
 cancellation, and cleanup failure.
+The [A4 cancellation fixture](../../testdata/run/async_a4_cancel_release.fango)
+covers two releases suspended during cancellation; related fixtures cover
+typed failure precedence and native release readiness.

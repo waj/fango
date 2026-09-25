@@ -84,7 +84,7 @@ func (in *interp) evalCoroutineScope(scope *core.CoroutineScope, fr *Frame) (Val
 	if err != nil {
 		return nil, err
 	}
-	session.cleanups = append(session.cleanups, cursor.Close)
+	session.cleanups = append(session.cleanups, machineCleanupEntry{sync: cursor.Close})
 	event, err := session.Run()
 	if err != nil {
 		return nil, err

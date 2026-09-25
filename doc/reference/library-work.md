@@ -11,6 +11,8 @@ facet : Owner e -> Facet
 pack : Facet -> Coroutine request reply result e ->{e} Work request reply result
 advance : Owner e -> Work request reply result -> reply ->{Runtime.Coroutine.Drive | e} Step request result
 close : Owner e -> Work request reply result ->{Runtime.Coroutine.Drive | e} ()
+stop : Owner e -> Work request reply result ->{Runtime.Coroutine.Drive | e} Step request result
+stopCompletion : Owner e -> Work request reply result -> Runtime.Completion.Completion () e
 ```
 
 `Owner`, `Facet`, and `Work` are abstract resource types. `run` supplies a fresh
@@ -19,12 +21,20 @@ identity. `pack` retains an already existing coroutine; packing does not start
 it. The coroutine must outlive the work owner. A facet or package cannot escape
 its owner, including inside a closure or another data structure.
 
-`advance` and `close` require the exact owner used by `pack`. Equal effect rows
+`advance`, `close`, `stop`, and `stopCompletion` require the exact owner used by
+`pack`. Equal effect rows
 do not make two owners interchangeable. Opening is rejected when flow from
 different owners leaves the selected identity ambiguous. The operations use
 the coroutine's original exclusive driver authority, reply/result checks, terminal states, and cleanup
 behavior. `run` does not discharge `Runtime.Coroutine.Drive`; the enclosing coroutine
 boundary does. Its lexical scope adds no dynamic coroutine registry.
+
+`stop` begins an executable abandonment drain. Each suspended cleanup request
+is returned as `Suspended`; answer it with `advance` until the Work returns
+`Closed`. After that terminal step, `stopCompletion` returns the captured Unit
+completion of the drain, including any typed cleanup failure. The completion
+can be inspected or replayed using current failure evidence. Calling
+`stopCompletion` before terminal stop is an error.
 
 Each package charges its residual effects immediately and retains the same
 obligation on its owner. Handling an effect around `pack` can handle the
@@ -55,7 +65,7 @@ calls select the same owner. `register` uses its `Runtime.Coroutine.facet` to al
 and package a new lazy coroutine in that scope. It preserves the three protocol
 types while hiding the child's residual row. Different child rows may share a
 scope when each fits its budget. No producer application runs during registration.
-Use `advance` and `close` with that scope's `owner`.
+Use `advance`, `stop`, and `close` with that scope's `owner`.
 
 Registration retains both its immediate effect charge and its deferred budget
 obligation, just like `pack`. An intervening handler or an unused result cannot

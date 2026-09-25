@@ -28,7 +28,7 @@ func (g *gen) workExpr(e *core.Work) goast.Expr {
 	if e.Kind == "facet" {
 		return args[0]
 	}
-	name := map[string]string{"begin": "NewWorkOwner", "end": "CloseWorkOwner", "pack": "PackWork", "open": "OpenWork"}[e.Kind]
+	name := map[string]string{"begin": "NewWorkOwner", "end": "CloseWorkOwner", "pack": "PackWork", "open": "OpenWork", "open-stop": "OpenWorkForStop", "stop-completion": "WorkStopCompletion"}[e.Kind]
 	if name == "" {
 		panic("codegen: invalid work operation")
 	}

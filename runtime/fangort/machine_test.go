@@ -97,6 +97,72 @@ func TestMachineAbandonRunsPendingCleanupAndClearsFrames(t *testing.T) {
 	}
 }
 
+type suspendingCleanupParent struct {
+	phase int
+	exit  *ExitRequest
+}
+
+func (f *suspendingCleanupParent) Step(m *Machine) MachineStep {
+	if f.phase == 0 {
+		f.phase = 1
+		if f.exit != nil {
+			return MachineStep{Kind: MachineExit, Exit: f.exit}
+		}
+		return MachineStep{Kind: MachinePopCleanup}
+	}
+	if exit := m.TakeResult(); exit != nil {
+		return MachineStep{Kind: MachineExit, Exit: exit.(*ExitRequest)}
+	}
+	return MachineStep{Kind: MachineReturn, Value: 7}
+}
+
+func TestMachineAbortDrainsSuspendingReleasesInReverseOrder(t *testing.T) {
+	primary := &ExitRequest{Operation: 1}
+	m := StartMachine(&suspendingCleanupParent{exit: primary})
+	order := []string{}
+	for i, name := range []string{"outer", "inner"} {
+		label := name
+		value := i + 1
+		m.PushMachineCleanup(func() *Machine {
+			order = append(order, label+" start")
+			return StartMachine(&repeatFrame{remaining: 1, value: value})
+		})
+	}
+	event, err := m.Run()
+	if err != nil || event.Done || event.Request != 2 || len(order) != 1 || order[0] != "inner start" || m.finished {
+		t.Fatalf("inner drain: event=%#v err=%v order=%v finished=%v", event, err, order, m.finished)
+	}
+	event, err = m.Resume(2)
+	if err != nil || event.Done || event.Request != 1 || len(order) != 2 || order[1] != "outer start" || m.finished {
+		t.Fatalf("outer drain: event=%#v err=%v order=%v finished=%v", event, err, order, m.finished)
+	}
+	event, err = m.Resume(1)
+	if err != nil || !event.Done || event.Exit != primary || !m.finished {
+		t.Fatalf("abort after drain: event=%#v err=%v order=%v finished=%v", event, err, order, m.finished)
+	}
+}
+
+func (f *suspendingCleanupParent) Clear() {}
+
+func TestMachineReleaseCanSuspendBeforeScopeCompletes(t *testing.T) {
+	parentFrame := &suspendingCleanupParent{}
+	parent := StartMachine(parentFrame)
+	release := &repeatFrame{remaining: 1, value: 3}
+	started := 0
+	parent.PushMachineCleanup(func() *Machine {
+		started++
+		return StartMachine(release)
+	})
+	event, err := parent.Run()
+	if err != nil || event.Done || event.Request != 3 || started != 1 || parent.finished {
+		t.Fatalf("release pause: event=%#v err=%v started=%d finished=%v", event, err, started, parent.finished)
+	}
+	event, err = parent.Resume(4)
+	if err != nil || !event.Done || event.Value != 7 || !release.cleared || started != 1 {
+		t.Fatalf("release completion: event=%#v err=%v cleared=%v started=%d parentPhase=%d", event, err, release.cleared, started, parentFrame.phase)
+	}
+}
+
 func TestMachineCallAndTailCallManageExplicitStack(t *testing.T) {
 	leaf := &repeatFrame{value: 9}
 	caller := &callFrame{child: leaf}

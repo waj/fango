@@ -117,11 +117,10 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 		errs = append(errs, fmt.Errorf("%s: missing or stale failure report source contract", where))
 	}
 	if w.Name == types.ScopeBracketName && (len(w.Params) == 3 || len(w.SynchronousParams) > 0 || w.Def != nil && len(w.Def.Params) == 3) {
-		wantSynchronous = []int{1}
 		if w.Def == nil {
-			errs = append(errs, fmt.Errorf("%s: missing synchronous source contract", where))
+			errs = append(errs, fmt.Errorf("%s: missing scope source contract", where))
 		} else if scope, ok := w.Def.Body.(*core.Bracket); !ok || scope.Scope == 0 || !core.CaptureContractCurrent(w.Def) {
-			errs = append(errs, fmt.Errorf("%s: stale synchronous source contract", where))
+			errs = append(errs, fmt.Errorf("%s: stale scope source contract", where))
 		}
 	}
 	if !slices.Equal(w.SynchronousParams, wantSynchronous) {
@@ -313,9 +312,6 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			}
 			checkRow(term.Row, requiresRow)
 			wantSynchronous := []int(nil)
-			if term.Callee == types.ScopeBracketName {
-				wantSynchronous = []int{1}
-			}
 			if !slices.Equal(term.SynchronousArgs, wantSynchronous) {
 				errs = append(errs, fmt.Errorf("%s: missing or stale synchronous argument obligations", blockWhere))
 			}
@@ -508,14 +504,21 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 		case *PushCleanup:
 			checkBind(term.Resource)
 			checkExpr(term.Acquire, "cleanup acquisition", true)
-			checkExpr(term.Release, "cleanup release", true)
+			if term.Release != nil && core.ExprControl(term.Release).Resolve(types.Machine) == types.Machine {
+				app, ok := term.Release.(*core.App)
+				if !ok || app.CalleeKind != core.Value || len(app.Args) != 1 {
+					errs = append(errs, fmt.Errorf("%s: suspending cleanup release must be a unary callback", blockWhere))
+				} else {
+					if ref, ok := app.Callee.(*core.VarRef); !ok || !ref.Local || locals[ref.Name] == nil {
+						errs = append(errs, fmt.Errorf("%s: suspending cleanup release has no local callback", blockWhere))
+					}
+					checkExpr(app.Args[0], "cleanup release argument", false)
+				}
+			} else {
+				checkExpr(term.Release, "cleanup release", true)
+			}
 			if term.Acquire != nil && term.Resource.Ty != nil && !core.EqualValueRepresentation(term.Acquire.Type(), term.Resource.Ty) {
 				errs = append(errs, fmt.Errorf("%s: cleanup acquisition and resource types differ", blockWhere))
-			}
-			if term.Release != nil {
-				if control := core.ExprControl(term.Release); control.Transport == types.Machine || control.Polymorphic {
-					errs = append(errs, fmt.Errorf("%s: cleanup release may suspend", blockWhere))
-				}
 			}
 		case *CursorOpen:
 			checkRow(term.Row, types.CoroutineScopeType(term.Cursor.Ty) || term.Producer != nil && core.ArrowOpenRow(term.Producer.Type(), 2))

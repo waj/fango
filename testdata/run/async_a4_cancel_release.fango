@@ -1,0 +1,22 @@
+import Async
+import Fail
+import Runtime.Scope
+
+child label () = Runtime.Scope.finally
+    (\_ ->
+        print ("body " ++ label)
+        Async.yield())
+    (\_ ->
+        print ("release start " ++ label)
+        Async.yield()
+        print ("release end " ++ label))
+
+root() =
+    first = Async.spawn (child "first")
+    second = Async.spawn (child "second")
+    Async.yield()
+    Async.yield()
+    Fail.fail "stop"
+    ()
+
+main() = print (Fail.attempt (\_ -> Async.run root))

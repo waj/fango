@@ -1,0 +1,33 @@
+import Async
+import Fail
+import Failure
+import Runtime.Scope
+import Result exposing (Result(..))
+
+child label () = Runtime.Scope.finally
+    (\_ -> Async.yield())
+    (\_ ->
+        print ("start " ++ label)
+        Async.yield()
+        print ("end " ++ label)
+        Fail.fail label)
+
+root() =
+    first = Async.spawn (child "first")
+    second = Async.spawn (child "second")
+    Async.yield()
+    Fail.fail "root"
+    ()
+
+showFailure failure =
+    message : Maybe String
+    message = Failure.argument 0 failure
+    print message
+
+main() =
+    result = Fail.attemptReport (\_ -> Async.run root)
+    case result of
+        Ok _ -> print "unexpected success"
+        Err report ->
+            print report.primary
+            List.each showFailure report.suppressed

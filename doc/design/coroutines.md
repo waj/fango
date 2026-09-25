@@ -2,7 +2,7 @@
 
 [Public behavior](../reference/library-coroutines.md) owns lifecycle and API
 rules. The compiler supports lexical and dynamic scope owners, typed advancement,
-synchronous close, and a producer-local pause callback. Stream and Iterator are ordinary
+suspendable stop, and a producer-local pause callback. Stream and Iterator are ordinary
 library wrappers over this protocol.
 
 ## Protocol and control proof
@@ -69,8 +69,8 @@ The object schema version rejects older representations.
 ## Lowering and dispatch
 
 Core's CoroutineScope/CoroutineAdvance operations and Machine's cursor
-operations support one typed coroutine protocol. Close has no reply and returns Unit,
-while advance carries a typed reply and checked Step constructor descriptors.
+operations support one typed coroutine protocol. Close has no reply and returns Unit;
+stop and advance use checked Step constructor descriptors to carry requests.
 Machine lint rechecks ownership, protocols, evidence, liveness, and cleanup
 depth against retained semantic Core.
 
@@ -104,11 +104,12 @@ execution identities even at a shared allocation site.
 
 Both runtimes install a lazy child and its close capability in a doubly linked
 live list before returning the handle. Cleanup never reconstructs a typed handle
-from an integer or untyped payload: it invokes the existing child's synchronous
-close operation. Completion, failure and explicit close unlink in constant time,
+from an integer or untyped payload: it invokes the existing child's close
+operation. Completion, failure and fully drained close unlink in constant time,
 clear both neighbor links and the parent link, and release the producer factory,
 frames and evidence forwarding. Scope exit marks the registry closing before
-walking remaining entries backwards, drains every synchronous cleanup, and uses
+walking remaining entries backwards, drains every cleanup before clearing its
+owner, and uses
 the ordinary primary/suppressed failure precedence. Completed entries are not
 retained until scope exit. A scope's saved evidence supplies the baseline for
 child cleanup; advances still install their own current residual evidence.
@@ -198,8 +199,8 @@ Stop discards the producer continuation and drains cleanup once; it never
 publishes a successful result or becomes a catchable user abort. Cleanup-local
 handlers may handle cleanup failures without resuming abandoned production.
 Unhandled failures preserve primary/suppressed precedence. Acquisition may
-suspend before the release is registered. Release remains subject to the
-synchronous-callback proof.
+suspend before the release is registered. Release can suspend as a child
+Machine; its pending request and owner survive until the driver replies.
 
 [Typed completion](completion.md) is a separate capture/replay boundary. It
 retains typed abort payloads and reports without saving a runtime exit target;

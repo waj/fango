@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Runtime.Coroutine exposing (Coroutine, Drive, Facet, Scope, Step(..), Suspension, advance, close, create, facet, scope, with)
+module Runtime.Coroutine exposing (Coroutine, Drive, Facet, Scope, Step(..), Suspension, advance, close, create, facet, scope, stop, with)
 
 -- Owned, resumable computations with a typed request, reply, and final result.
 -- A producer can pause; its driver resumes it by supplying a reply. Every
@@ -46,6 +46,11 @@ advance = native
 -- advance discards the producer without running it; closing again is harmless.
 close : Coroutine request reply result e ->{Drive | e} ()
 close = native
+
+-- Begin stopping production and return each request made by a suspending
+-- release. Resume a Suspended result with advance until it finishes.
+stop : Coroutine request reply result e ->{Drive | e} Step request result
+stop = native
 
 -- A dynamic owner for multiple coroutines. Children created in this scope
 -- cannot outlive it; each child still has its own execution identity.

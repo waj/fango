@@ -22,3 +22,20 @@ func OpenWork(owner *WorkOwner, work *WorkPackage) *MachineIterator {
 	}
 	return work.cursor
 }
+
+func OpenWorkForStop(owner *WorkOwner, work *WorkPackage) *MachineIterator {
+	it := OpenWork(owner, work)
+	it.reportStop = true
+	return it
+}
+
+func WorkStopCompletion(owner *WorkOwner, work *WorkPackage) Completion[Unit] {
+	it := OpenWork(owner, work)
+	if !it.done {
+		panic("work stop is not complete")
+	}
+	if it.stopFailure != nil {
+		return CompletionFromFailure[Unit](it.stopFailure)
+	}
+	return CaptureCompletion(Normal(Unit{}))
+}

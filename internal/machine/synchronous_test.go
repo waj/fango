@@ -32,21 +32,19 @@ func synchronousScopeFixture(t *testing.T) (*Prog, *types.Builtins) {
 	return mp, b
 }
 
-func TestMachineScopeChecksSynchronousCallbackProofs(t *testing.T) {
+func TestMachineScopeChecksSourceContract(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		damage func(*Worker)
 		want   string
 	}{
 		{"valid", func(*Worker) {}, ""},
-		{"missing parameter proof", func(w *Worker) { w.SynchronousParams = nil }, "invalid synchronous callback parameters"},
-		{"wrong slot", func(w *Worker) { w.SynchronousParams = []int{0} }, "invalid synchronous callback parameters"},
-		{"stale scope", func(w *Worker) { w.Def.Body.(*core.Bracket).Scope++ }, "stale synchronous source contract"},
+		{"stale scope", func(w *Worker) { w.Def.Body.(*core.Bracket).Scope++ }, "stale scope source contract"},
 		{"stale acquisition", func(w *Worker) {
 			w.Def.Body.(*core.Bracket).Acquire.(*core.App).Callee.(*core.VarRef).Name = "unchecked"
-		}, "stale synchronous source contract"},
-		{"missing source", func(w *Worker) { w.Def = nil }, "missing synchronous source contract"},
-		{"machine release", func(w *Worker) { w.Params[1].Ty.(*types.TFun).Control = types.Control{Transport: types.Machine} }, "synchronous parameter must use Exit"},
+		}, "stale scope source contract"},
+		{"missing source", func(w *Worker) { w.Def = nil }, "missing scope source contract"},
+		{"machine release", func(w *Worker) { w.Params[1].Ty.(*types.TFun).Control = types.Control{Transport: types.Machine} }, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p, _ := synchronousScopeFixture(t)

@@ -210,7 +210,7 @@ func TestFlowCachedObligationsReplay(t *testing.T) {
 			c.busy = busy
 			f.location = source.Span{File: source.NewFile("caller.fango", []byte("call")), End: 4}
 			f.invoke("helper", "helper", body, emptyFlowEnv(), flowSite{phase: "right"}, nil, 0)
-			if len(f.errors) != 2 {
+			if len(f.errors) != 1 {
 				t.Fatalf("cached access/suspension obligations were lost: %v", f.errors)
 			}
 			for _, err := range f.errors {

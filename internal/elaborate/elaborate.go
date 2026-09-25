@@ -343,7 +343,7 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 			defs = append(defs, coroutineDynamicDef(name, ty, ck))
 		} else if name == types.CoroutineWithName {
 			defs = append(defs, coroutineWithDef(ty, ck))
-		} else if name == types.CoroutineAdvanceName || name == types.CoroutineCloseName {
+		} else if name == types.CoroutineAdvanceName || name == types.CoroutineCloseName || name == types.CoroutineStopName {
 			defs = append(defs, coroutineAdvanceDef(name, ty, ck))
 		} else if types.CompletionIntrinsic(name) {
 			defs = append(defs, completionDef(name, ty, ck))

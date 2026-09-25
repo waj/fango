@@ -105,8 +105,8 @@ func TestMachineErrorClosesCursorAndPreservesCleanupFailures(t *testing.T) {
 	innerExit, outerExit := &ExitRequest{Payload: []Value{"inner"}}, &ExitRequest{Payload: []Value{"outer"}}
 	var order []string
 	session.cleanups = append(session.cleanups,
-		func() (*ExitRequest, error) { order = append(order, "outer"); return outerExit, outerErr },
-		func() (*ExitRequest, error) { order = append(order, "inner"); return innerExit, innerErr })
+		machineCleanupEntry{sync: func() (*ExitRequest, error) { order = append(order, "outer"); return outerExit, outerErr }},
+		machineCleanupEntry{sync: func() (*ExitRequest, error) { order = append(order, "inner"); return innerExit, innerErr }})
 	// Force the next dispatch to exceed the caller's budget before executing
 	// another producer instruction. Cleanup still drains every acquired scope.
 	session.interp.steps, session.interp.budget = pollEvery-1, 1
@@ -138,9 +138,9 @@ func TestMachineExitRetainsPrimaryWhenCleanupEvaluationFails(t *testing.T) {
 	primary := &ExitRequest{Payload: []Value{"body"}}
 	secondary := &ExitRequest{Payload: []Value{"cleanup"}}
 	errCleanup := errors.New("cleanup evaluator error")
-	session := &MachineSession{cleanups: []func() (*ExitRequest, error){
-		func() (*ExitRequest, error) { return secondary, nil },
-		func() (*ExitRequest, error) { return nil, errCleanup },
+	session := &MachineSession{cleanups: []machineCleanupEntry{
+		{sync: func() (*ExitRequest, error) { return secondary, nil }},
+		{sync: func() (*ExitRequest, error) { return nil, errCleanup }},
 	}}
 	event, err := session.finishExit(primary)
 	if !event.Done || !errors.Is(err, errCleanup) || event.Exit == nil || event.Exit.Payload[0] != "body" || len(event.Exit.Suppressed) != 1 || event.Exit.Suppressed[0] != secondary {

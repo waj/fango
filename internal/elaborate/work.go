@@ -48,14 +48,22 @@ func workDef(name string, ty types.Type, ck *infer.Checker) core.Def {
 		d.Body = &core.Work{Kind: "facet", Args: refs, Ty: result}
 	case types.WorkPackName:
 		d.Body = &core.Work{Kind: "pack", SourceRow: rawArgs[1].(*types.TCon).Args[3], Args: refs, Ty: result}
-	case types.WorkAdvanceName, types.WorkCloseName:
+	case types.WorkStopCompletionName:
+		d.Body = &core.Work{Kind: "stop-completion", Args: refs, Ty: result}
+	case types.WorkAdvanceName, types.WorkCloseName, types.WorkStopName:
 		q, r, a, _ := types.WorkProtocol(args[1])
 		con := ck.TypeNames[types.CoroutineTypeName].(*types.TCon)
 		cursor := &types.TCon{Unique: con.Unique, Name: con.Name, Args: []types.Type{q, r, a, ck.B.Unit}}
-		open := &core.Work{Kind: "open", Args: refs[:2], Ty: cursor}
-		n := &core.CoroutineAdvance{Cursor: open, Close: name == types.WorkCloseName, Access: types.ExclusiveAdvance, Ty: result}
-		if !n.Close {
-			n.Reply = refs[2]
+		kind := "open"
+		if name == types.WorkStopName {
+			kind = "open-stop"
+		}
+		open := &core.Work{Kind: kind, Args: refs[:2], Ty: cursor}
+		n := &core.CoroutineAdvance{Cursor: open, Close: name != types.WorkAdvanceName, Access: types.ExclusiveAdvance, Ty: result}
+		if name != types.WorkCloseName {
+			if !n.Close {
+				n.Reply = refs[2]
+			}
 			n.Result = ck.ADTs[result.(*types.TCon).Unique]
 		}
 		d.Body = n

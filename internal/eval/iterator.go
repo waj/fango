@@ -21,6 +21,17 @@ type MachineIteratorSession struct {
 	session                      *MachineSession
 	started                      bool
 	done                         bool
+	closing                      bool
+	stopped                      bool
+	reportStop                   bool
+	stopExit                     *ExitRequest
+}
+
+func (it *MachineIteratorSession) finishClose() {
+	it.done, it.closing, it.busy = true, false, false
+	it.unlink()
+	it.evidence.Clear()
+	it.clearRegistered()
 }
 
 func (it *MachineIteratorSession) Close() (*ExitRequest, error) {

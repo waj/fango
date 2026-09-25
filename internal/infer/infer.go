@@ -662,7 +662,7 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 			return errs
 		}
 	}
-	if d.Name == types.CoroutineFacetName || d.Name == types.CoroutineScopeName || d.Name == types.CoroutineCreateName || d.Name == types.CoroutineWithName || d.Name == types.CoroutineAdvanceName || d.Name == types.CoroutineCloseName {
+	if d.Name == types.CoroutineFacetName || d.Name == types.CoroutineScopeName || d.Name == types.CoroutineCreateName || d.Name == types.CoroutineWithName || d.Name == types.CoroutineAdvanceName || d.Name == types.CoroutineCloseName || d.Name == types.CoroutineStopName {
 		if !types.CoroutineShape(d.Name, ty) {
 			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic %s has an invalid coroutine protocol.", ast.Spelling(d.Name)))
 		}

@@ -11,4 +11,5 @@ main() =
                 pause ("cleanup handler " ++ message)
                 0) (\work ->
         first = Runtime.Coroutine.advance work ()
-        Runtime.Coroutine.close work)))
+        print (Runtime.Coroutine.stop work)
+        print (Runtime.Coroutine.advance work ()))))

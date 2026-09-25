@@ -12,7 +12,7 @@ implementation stage lands.
 The first usable milestone is C0–C3, with Async's early A0 representation gate:
 checked typed coroutines, ordinary Stream/Iterator wrappers, and a deterministic
 scheduler demonstration. C4 adds implemented dynamic ownership; C6a–C6c add
-checked storage, requests, and sharing. C5, C6d, and C7 remain separately gated
+checked storage, requests, and sharing. C5 adds suspending cleanup; C6d and C7 remain separately gated
 capabilities needed by later consumers. Stage numbers are local
 to this document; dependencies name stages rather than assuming one unbroken
 global ordering.
@@ -99,8 +99,9 @@ includes lazy application, strict arguments, and typed initial input/replies.
 ## Lifecycle and outcomes
 
 The [lifecycle table](reference/library-coroutines.md#exchange-and-lifecycle)
-owns terminal states and synchronous close. Acquisition may suspend; [C5](#c5-suspending-acquisition-and-cleanup)
-still needs suspending release and executable abandonment drain.
+owns terminal states and suspending cleanup drain. The completed
+[C5](#c5-suspending-acquisition-and-cleanup) contract is described in the
+[resource reference](reference/resources.md).
 
 ## Ownership and lifetime contracts
 
@@ -173,7 +174,7 @@ checkpoint; C1–C3 together are the first usable replacement foundation.
 | C2: Ordinary Stream and Iterator | C1 | DONE: Stream behavior with no Stream-specific intrinsics |
 | C3: Cooperative scheduling demonstration | C2 | DONE: shared foundation demonstrated without native concurrency |
 | C4: Scope-owned dynamic allocation | C3, A0; scope design begins with C0 | DONE: live registry ownership and checked registration |
-| C5: Suspending acquisition and cleanup | C1; nested fixtures from C3/C4 | Owners remain live through suspended cleanup |
+| C5: Suspending acquisition and cleanup | C1; nested fixtures from C3/C4 | DONE: owners remain live through suspended cleanup |
 | C6a: Typed opaque values | C0/A0 representation decisions; C4 for selected task cells | DONE: checked native storage and scope-owned write-once cells |
 | C6b: Scoped native requests and retention | C4; C5 only for suspending cleanup | DONE: bounded requests and callbacks with checked quiescence |
 | C6c: Shared and transferable capabilities | C0/A0 capture contracts; C4 ownership | DONE: checked shared values and implicit service invocation authority |
@@ -292,12 +293,16 @@ C6a/C6c supply typed cells and shared service authority.
 
 ### C5: Suspending acquisition and cleanup
 
+**DONE.** See [cleanup behavior](reference/resources.md), the
+[coroutine stop protocol](reference/library-coroutines.md#exchange-and-lifecycle),
+and [machine drain design](design/machines.md#handlers-and-cleanup).
+
 **Dependencies:** C1; use C3/C4 consumers to exercise nested ownership.
 
 Extend existing Runtime.Scope.bracket rather than adding a parallel API.
 Acquisition may suspend, and successful acquisition registers its release before
 the body runs. Before success, acquisition owns partial-failure cleanup. The
-remaining C5 work is suspension during release and abandonment drain.
+stage includes suspension during release and abandonment drain.
 Release may suspend while its owner remains in a closing state. Preserve LIFO
 order, definition-site evidence, and typed primary/suppressed failures.
 
@@ -348,7 +353,7 @@ resource release, including dynamically owned children.
 C4 ownership is exercised by child abandonment fixtures. C6a remains the
 boundary for opaque result storage. Callbacks and registration actions cannot
 suspend; cleanup synchronously drains native work, so this contract does not
-require C5. Suspending release remains C5 and concurrent Fango callbacks remain
+require C5. Suspending release is provided by C5; concurrent Fango callbacks remain
 C6d.
 
 #### C6c: Shared and transferable capabilities

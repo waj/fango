@@ -12,8 +12,10 @@ type CursorResult struct {
 }
 
 type machinePull struct {
-	caller *Machine
-	cursor *MachineIterator
+	caller  *Machine
+	cursor  *MachineIterator
+	cleanup bool
+	close   bool
 }
 
 // A traversal owns the currently executing producer and its explicit callers.
@@ -71,11 +73,8 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 				return MachineEvent{}, fmt.Errorf("fangort: overlapping cursor advancement")
 			}
 			if event.close {
-				exit, err := cursor.Close()
-				if err != nil {
-					return MachineEvent{}, err
-				}
-				d.active.setCursorResult(CursorResult{Exit: exit})
+				d.pulls = append(d.pulls, machinePull{caller: d.active, cursor: cursor, close: true})
+				d.active = StartCloseMachineIterator(cursor)
 				continue
 			}
 			if cursor.done {
@@ -106,6 +105,11 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 			}
 			continue
 		}
+		if cleanup := event.cleanup; cleanup != nil {
+			d.pulls = append(d.pulls, machinePull{caller: d.active, cleanup: true})
+			d.active = cleanup
+			continue
+		}
 		if event.Done {
 			if len(d.pulls) == 0 {
 				m.traversal = nil
@@ -115,17 +119,35 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 			pull := d.pulls[i]
 			d.pulls[i] = machinePull{}
 			d.pulls = d.pulls[:i]
+			if pull.cleanup {
+				d.active = pull.caller
+				d.active.completeCleanup(event.Exit)
+				continue
+			}
+			if pull.close {
+				d.active = pull.caller
+				if pull.cursor.reportStop && event.Exit != nil {
+					pull.cursor.stopFailure = SnapshotFailure(event.Exit)
+					event.Exit = nil
+				}
+				d.active.setCursorResult(CursorResult{Exit: event.Exit})
+				continue
+			}
 			pull.cursor.done, pull.cursor.busy = true, false
+			if pull.cursor.reportStop && event.Exit != nil {
+				pull.cursor.stopFailure = SnapshotFailure(event.Exit)
+				event.Exit = nil
+			}
 			pull.cursor.unlink()
 			pull.cursor.evidence.Clear()
 			pull.cursor.clearRegistered()
 			d.active = pull.caller
-			d.active.setCursorResult(CursorResult{Exit: event.Exit, Value: event.Value, Finished: event.Exit == nil})
+			d.active.setCursorResult(CursorResult{Exit: event.Exit, Value: event.Value, Finished: event.Exit == nil && !pull.cursor.stopped})
 			continue
 		}
 		matched := -1
 		for i := len(d.pulls) - 1; i >= 0; i-- {
-			if d.pulls[i].cursor.owner == event.Owner {
+			if d.pulls[i].cursor != nil && d.pulls[i].cursor.owner == event.Owner {
 				matched = i
 				break
 			}
@@ -157,32 +179,13 @@ func (m *Machine) Abandon() (*ExitRequest, error) {
 	if m.finished && m.traversal == nil {
 		return nil, fmt.Errorf("fangort: machine already completed")
 	}
-	d := m.traversal
-	m.traversal = nil
-	if d == nil {
-		return m.abandonLocal()
+	stop := startStopMachine(m, false)
+	event, err := stop.Run()
+	if err != nil {
+		return nil, err
 	}
-	var primary *ExitRequest
-	// Restore every unfinished cursor before any cleanup runs. Inner cleanup
-	// can itself refer through an enclosing cursor's residual row.
-	for _, pull := range d.pulls {
-		pull.cursor.evidence.Restore()
+	if !event.Done {
+		return nil, fmt.Errorf("fangort: suspending abandonment requires an execution driver")
 	}
-	active := d.active
-	for i := len(d.pulls) - 1; i >= -1; i-- {
-		if !active.finished {
-			exit, _ := active.abandonLocal()
-			primary = Suppress(primary, exit)
-		}
-		if i >= 0 {
-			pull := d.pulls[i]
-			d.pulls[i] = machinePull{}
-			pull.cursor.done, pull.cursor.busy = true, false
-			pull.cursor.unlink()
-			pull.cursor.evidence.Clear()
-			pull.cursor.clearRegistered()
-			active = pull.caller
-		}
-	}
-	return primary, nil
+	return event.Exit, nil
 }

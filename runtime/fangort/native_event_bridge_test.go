@@ -46,3 +46,21 @@ func TestNativeEventBridgeInterruptWinsQueuedReadiness(t *testing.T) {
 	b.Release(ticket)
 	b.Close()
 }
+
+func TestNativeEventBridgeDrainServicesReadinessAfterInterrupt(t *testing.T) {
+	b := NewNativeEventBridge(1)
+	defer b.Close()
+	ticket := b.Reserve()
+	b.Interrupt()
+	ready := make(chan int64, 1)
+	go func() { ready <- b.WaitDraining() }()
+	b.Notify(ticket)
+	b.Notify(ticket)
+	if got := <-ready; got != ticket || b.TakeDraining() != -1 || !b.Ready(ticket) || b.Reserve() != 0 {
+		t.Fatal("drain lost or duplicated native readiness")
+	}
+	b.Release(ticket)
+	if b.TakeDraining() != 0 {
+		t.Fatal("drain lost capacity readiness")
+	}
+}

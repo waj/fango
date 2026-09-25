@@ -97,6 +97,10 @@ func CoroutineShape(name string, ty Type) bool {
 	if name == CoroutineCloseName {
 		return row(fn.Eff, CoroutineDriveName, e) && func() bool { c, ok := fn.Ret.(*TCon); return ok && c.Name == "()" && len(c.Args) == 0 }()
 	}
+	if name == CoroutineStopName {
+		step, ok := fn.Ret.(*TCon)
+		return row(fn.Eff, CoroutineDriveName, e) && ok && step.Name == CoroutineStepName && len(step.Args) == 2 && Equal(step.Args[0], request) && Equal(step.Args[1], result)
+	}
 	next, ok := fn.Ret.(*TFun)
 	if !ok || !pure(fn.Eff) || !Equal(next.Arg, reply) || !row(next.Eff, CoroutineDriveName, e) {
 		return false

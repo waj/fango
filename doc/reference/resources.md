@@ -58,13 +58,13 @@ nested handlers.
 
 Acquisition may suspend. The release obligation is registered only after
 acquisition succeeds; a failed acquisition is responsible for its own partial
-cleanup. Release must still complete synchronously. A release callback that
-suspends reports `SUSPENDING RESOURCE CALLBACK`, including through named
-wrappers, stored callbacks, and resumptive effect handlers. This obligation
-follows the actual callback rather than its widened effect row. A release
-callback may synchronously consume a producer using its own iterator scope.
-An abort clause outside the callback runs after unwinding and is outside this
-restriction.
+cleanup. Release may also suspend. The owner remains in its closing state,
+retaining the resource and definition-site handlers until the driver resumes
+the release. An inner release finishes before an outer release starts, even
+when either pauses. Abandoning an unfinished coroutine starts the same drain;
+use `Runtime.Coroutine.stop` or `Runtime.Work.stop` to receive cleanup requests
+and `advance` to reply to them. A release that never completes prevents its
+owner or enclosing context from completing.
 
 ## Cleanup failures
 

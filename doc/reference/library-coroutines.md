@@ -11,6 +11,7 @@ with : ((request ->{Suspension} reply) -> reply ->{Suspension | e} result)
     -> (Coroutine request reply result e ->{Drive | e} a) ->{e} a
 advance : Coroutine request reply result e -> reply ->{Drive | e} Step request result
 close : Coroutine request reply result e ->{Drive | e} ()
+stop : Coroutine request reply result e ->{Drive | e} Step request result
 ```
 
 `Coroutine` is an abstract resource type. `Suspension` and `Drive` are nullary
@@ -46,6 +47,7 @@ arguments to terminal advances and partial applications.
 | Advance a terminal owner | Return `Closed` |
 | Close before starting | Discard the producer without invoking it |
 | Close suspended production | Abandon execution and run pending cleanup |
+| Stop suspended production | Return each cleanup request as `Suspended`; resume with `advance` until `Closed` |
 | Close a terminal owner | Return Unit without retrying cleanup |
 | Leave `with` | Close unfinished production before returning the driver answer |
 
@@ -79,13 +81,13 @@ Violations report `RESOURCE ESCAPES`. Handles, registration facets, queued
 closures and work packages cannot escape the scope; closing a handle does not
 shorten its static lifetime.
 
-Completion and explicit close immediately unlink the live cleanup entry and
-clear execution storage. Scope exit closes the remaining children in reverse
+Completion and fully drained close unlink the live cleanup entry and clear
+execution storage. Scope exit closes the remaining children in reverse
 registration order. The driver failure stays primary; otherwise the first
 cleanup failure becomes primary, with later failures suppressed. The registry
 cleanup is one release, so its later failures remain nested under its first
-failure when the driver already failed. Cleanup is
-synchronous, and allocation into a closing scope is forbidden. Returning from a
+failure when the driver already failed. A suspended cleanup retains its owner
+and evidence until it resumes; allocation into a closing scope is forbidden. Returning from a
 library's context-body helper does not close the scope: its driver can continue
 advancing children, which may create further work in that same live scope.
 
@@ -130,7 +132,10 @@ still handle cleanup failures.
 
 ## Limits
 
-Scope acquisition may suspend; release and coroutine close remain synchronous.
+Scope acquisition and release may suspend. `stop` exposes requests made during
+abandonment; `close` returns Unit and is suitable when cleanup finishes without
+a request needing an external reply. A nonterminating release prevents close
+from completing.
 [Cooperative Async](library-async-cooperative.md) supplies structured scheduling
 and native readiness. Parallel and mixed executors are not implemented.
 The ordinary [cooperative scheduler fixture](../../testdata/run/coroutine_scheduler.fango)

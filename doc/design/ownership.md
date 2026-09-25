@@ -107,16 +107,14 @@ without re-deriving the same answer from the same inputs. Any disagreement is
 stale, is reported, and discharges them anyway. The whole-program path states
 nothing and always discharges.
 
-## Synchronous release
+## Suspending acquisition and release
 
-Contracts export non-suspension obligations for actual release callbacks through
-helpers, stored values, and definition-site evidence, independently of widened
-rows. Acquisition may suspend before registering the release. Recursive
-summaries retain outward obligations.
-A pull consumes its own producer's suspension, so a callback may traverse a
-producer synchronously. Resumptive interpretations remain inside the callback;
-an abort clause outside it executes after unwind and is outside its obligation.
-Core lint reconstructs these checks too.
+Capture contracts retain resource lifetime and definition-site evidence
+through acquisition and release callbacks, including helpers and stored
+values. Acquisition registers a release only after success. A release may
+suspend while the resource stays owned by its closing scope. Recursive
+summaries retain outward control obligations; an inner pull consumes only its
+own producer's suspension. Core lint independently reconstructs these checks.
 
 ## Exclusive cursor advancement and yield
 

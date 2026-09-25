@@ -267,8 +267,9 @@ var asyncNativeNatives = map[string]int{
 	"Runtime.Async.Native.reserve": 1, "Runtime.Async.Native.available": 1,
 	"Runtime.Async.Native.ready":   2,
 	"Runtime.Async.Native.release": 2, "Runtime.Async.Native.take": 1,
-	"Runtime.Async.Native.wait": 1,
-	"Async.IO.newState":         1, "Async.IO.closeState": 1,
+	"Runtime.Async.Native.wait":      1,
+	"Runtime.Async.Native.takeDrain": 1, "Runtime.Async.Native.waitDrain": 1,
+	"Async.IO.newState": 1, "Async.IO.closeState": 1,
 	"Async.IO.submitSleep": 5, "Async.IO.submitGet": 5,
 	"Async.IO.ok": 1, "Async.IO.body": 1, "Async.IO.errorText": 1,
 }

@@ -71,7 +71,9 @@ each pull supplies its interpretation. A consumer can catch a failure around
 one `Iterator.next`; subsequent reads then return `Nothing`. An interpretation
 captured lexically when a callback is constructed keeps its original identity.
 Scope exit closes unfinished production before returning or propagating
-failure. Distinct nested cursors have separate identities. Each yield routes
+failure. Early stop drives upstream release to completion, including release
+callbacks that yield; their yielded values are discarded after the consumer
+has stopped. Distinct nested cursors have separate identities. Each yield routes
 to its lexical owner, including across nested producer suspensions.
 
 A pure traversal can run in a splice. Compile-time native restrictions and

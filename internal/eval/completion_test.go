@@ -17,7 +17,7 @@ func TestOwnerStopBypassesInterpreterCompletion(t *testing.T) {
 		t.Fatalf("suspend: %#v %v", event, err)
 	}
 	cleanup := &ExitRequest{Payload: []Value{"cleanup"}}
-	session.cleanups = append(session.cleanups, func() (*ExitRequest, error) { return cleanup, nil })
+	session.cleanups = append(session.cleanups, machineCleanupEntry{sync: func() (*ExitRequest, error) { return cleanup, nil }})
 	session.handlers = append(session.handlers, machineHandler{completionBind: "published", frameDepth: len(session.frames)})
 	exit, err := session.Abandon()
 	if err != nil || exit != cleanup || session.cause != terminalOwnerStop {

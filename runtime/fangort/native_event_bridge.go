@@ -125,10 +125,21 @@ func (b *NativeEventBridge) Take() int64 {
 	return b.takeLocked()
 }
 
+// TakeDraining ignores the cancellation wake while cleanup owns the bridge.
+func (b *NativeEventBridge) TakeDraining() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.takeQueuedLocked()
+}
+
 func (b *NativeEventBridge) takeLocked() int64 {
 	if b.interrupted {
 		return -2
 	}
+	return b.takeQueuedLocked()
+}
+
+func (b *NativeEventBridge) takeQueuedLocked() int64 {
 	if len(b.queued) == 0 {
 		return -1
 	}
@@ -148,6 +159,17 @@ func (b *NativeEventBridge) Wait() int64 {
 		b.cond.Wait()
 	}
 	return b.takeLocked()
+}
+
+// WaitDraining blocks for native readiness after cancellation. An interrupt
+// cannot revoke the cleanup driver's authority to finish a release.
+func (b *NativeEventBridge) WaitDraining() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for len(b.queued) == 0 && !b.closed {
+		b.cond.Wait()
+	}
+	return b.takeQueuedLocked()
 }
 
 func (b *NativeEventBridge) Close() {

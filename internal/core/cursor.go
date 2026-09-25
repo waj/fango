@@ -30,14 +30,19 @@ func CheckCoroutineAdvance(cursor types.Type, reply Expr, close bool, result typ
 		return fmt.Errorf("advance requires a Coroutine owner")
 	}
 	if close {
-		u, unit := result.(*types.TCon)
-		if reply != nil || adt != nil || !unit || u.Name != "()" {
+		if reply != nil {
 			return fmt.Errorf("invalid coroutine close protocol")
 		}
-		return nil
+		if adt == nil {
+			u, unit := result.(*types.TCon)
+			if !unit || u.Name != "()" {
+				return fmt.Errorf("invalid coroutine close protocol")
+			}
+			return nil
+		}
 	}
 	r, step := result.(*types.TCon)
-	if reply == nil || !EqualValueRepresentation(reply.Type(), input) {
+	if !close && (reply == nil || !EqualValueRepresentation(reply.Type(), input)) {
 		return fmt.Errorf("coroutine reply type disagrees with its owner")
 	}
 	if !step || r.Name != types.CoroutineStepName || len(r.Args) != 2 || !EqualValueRepresentation(r.Args[0], request) || !EqualValueRepresentation(r.Args[1], output) || adt == nil || adt.Con == nil || adt.Con.Unique != r.Unique || len(adt.Params) != 2 || len(adt.Ctors) != 3 {

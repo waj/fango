@@ -62,8 +62,11 @@ func (l *linter) coroutineAdvance(e *CoroutineAdvance, where string) {
 	name := types.CoroutineAdvanceName
 	if e.Close {
 		name = types.CoroutineCloseName
+		if e.Result != nil {
+			name = types.CoroutineStopName
+		}
 	}
-	work := l.defName == types.WorkAdvanceName && !e.Close || l.defName == types.WorkCloseName && e.Close
+	work := l.defName == types.WorkAdvanceName && !e.Close || l.defName == types.WorkCloseName && e.Close && e.Result == nil || l.defName == types.WorkStopName && e.Close && e.Result != nil
 	if work {
 		name = l.defName
 	}

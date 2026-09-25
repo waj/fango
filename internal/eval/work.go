@@ -50,13 +50,23 @@ func (in *interp) evalWork(e *core.Work, fr *Frame) (Value, error) {
 			return nil, fmt.Errorf("eval: work package has no live owner")
 		}
 		return &workPackage{owner: owner, cursor: args[1]}, nil
-	case "open":
+	case "open", "open-stop", "stop-completion":
 		owner, ok := args[0].(*workOwner)
 		work, valid := args[1].(*workPackage)
 		if !ok || !valid || owner.closed || work.owner != owner {
 			return nil, fmt.Errorf("eval: work package belongs to a different owner")
 		}
-		return work.cursor, nil
+		cursor := work.cursor.(*MachineIteratorSession)
+		if e.Kind == "open-stop" {
+			cursor.reportStop = true
+		}
+		if e.Kind == "stop-completion" {
+			if !cursor.done {
+				return nil, fmt.Errorf("eval: work stop is not complete")
+			}
+			return &completionValue{failure: cursor.stopExit}, nil
+		}
+		return cursor, nil
 	}
 	return nil, fmt.Errorf("eval: invalid work operation %q", e.Kind)
 }

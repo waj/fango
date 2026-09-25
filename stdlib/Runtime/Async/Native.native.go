@@ -10,5 +10,7 @@ func Ready(value any, ticket int64) bool { return value.(*FangoEventBridge).Read
 func Release(value any, ticket int64) {
 	value.(*FangoEventBridge).Release(ticket)
 }
-func Take(value any) int64 { return value.(*FangoEventBridge).Take() }
-func Wait(value any) int64 { return value.(*FangoEventBridge).Wait() }
+func Take(value any) int64      { return value.(*FangoEventBridge).Take() }
+func Wait(value any) int64      { return value.(*FangoEventBridge).Wait() }
+func TakeDrain(value any) int64 { return value.(*FangoEventBridge).TakeDraining() }
+func WaitDrain(value any) int64 { return value.(*FangoEventBridge).WaitDraining() }

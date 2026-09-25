@@ -5,7 +5,7 @@ import Basics exposing (..)
 import Iterator exposing (Iterator, next)
 import List exposing (List)
 import Maybe exposing (Maybe(..))
-import Runtime.Coroutine exposing (Drive)
+import Runtime.Coroutine exposing (Coroutine, Drive)
 
 effect Yield a
     yield : a -> ()
@@ -19,7 +19,22 @@ withProducer : (() ->{Yield a | e} ()) -> (Iterator a e ->{Drive | e} result) ->
 withProducer producer consumer = Runtime.Coroutine.with
     (\pause _ -> handle producer () of
         yield value -> resume (pause value))
-    (\work -> consumer (Iterator.fromCoroutine work))
+    (\work ->
+        result = consumer (Iterator.fromCoroutine work)
+        drain work
+        result)
+
+drain : Coroutine a () () e ->{Drive | e} ()
+drain work =
+    case Runtime.Coroutine.stop work of
+        Runtime.Coroutine.Suspended _ -> finishDrain work
+        _ -> ()
+
+finishDrain : Coroutine a () () e ->{Drive | e} ()
+finishDrain work =
+    case Runtime.Coroutine.advance work () of
+        Runtime.Coroutine.Suspended _ -> finishDrain work
+        _ -> ()
 
 withCursor : Stream a e -> (Iterator a e ->{Drive | e} result) ->{e} result
 withCursor source consumer = case source of

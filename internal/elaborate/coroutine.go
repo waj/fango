@@ -23,11 +23,13 @@ func coroutineAdvanceDef(name string, ty types.Type, ck *infer.Checker) core.Def
 	arity := types.IntrinsicArity(name)
 	args, result := core.PeelFun(ty, arity)
 	d := core.Def{Name: name, Owner: "Runtime.Coroutine", Type: ty, TyParams: runtimeRigidVars(ty), Params: []string{"_cursor"}, ParamCaptures: []types.CaptureVar{ck.Sup.FreshCapture()}, Control: core.ArrowControl(ty, arity)}
-	n := &core.CoroutineAdvance{Cursor: &core.VarRef{Name: "_cursor", Local: true, Ty: args[0]}, Access: types.ExclusiveAdvance, Ty: result, Close: name == types.CoroutineCloseName}
-	if !n.Close {
-		d.Params = append(d.Params, "_reply")
-		d.ParamCaptures = append(d.ParamCaptures, ck.Sup.FreshCapture())
-		n.Reply = &core.VarRef{Name: "_reply", Local: true, Ty: args[1]}
+	n := &core.CoroutineAdvance{Cursor: &core.VarRef{Name: "_cursor", Local: true, Ty: args[0]}, Access: types.ExclusiveAdvance, Ty: result, Close: name != types.CoroutineAdvanceName}
+	if name != types.CoroutineCloseName {
+		if !n.Close {
+			d.Params = append(d.Params, "_reply")
+			d.ParamCaptures = append(d.ParamCaptures, ck.Sup.FreshCapture())
+			n.Reply = &core.VarRef{Name: "_reply", Local: true, Ty: args[1]}
+		}
 		n.Result = ck.ADTs[result.(*types.TCon).Unique]
 	}
 	d.Body = n

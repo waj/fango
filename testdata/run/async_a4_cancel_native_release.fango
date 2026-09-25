@@ -1,0 +1,19 @@
+import Async
+import Async.IO
+import Fail
+import Runtime.Scope
+
+child() = Runtime.Scope.finally
+    (\_ -> Async.yield())
+    (\_ ->
+        print "native release start"
+        Async.IO.sleep 2
+        print "native release done")
+
+root() =
+    task = Async.spawn child
+    Async.yield()
+    Fail.fail "stop"
+    ()
+
+main() = print (Fail.attempt (\_ -> Async.runWithCapacity 1 root))

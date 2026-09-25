@@ -1068,7 +1068,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		}
 		ref := f.alloc(key.within("package").allocation(), flowObject{kind: "work", fields: []flowValue{facet, cursor}})
 		result = flowValue{refs: []int{ref}}
-	case "work-open":
+	case "work-open", "work-open-stop", "work-stop-completion":
 		owner, work := child(0), child(1)
 		for _, ref := range work.refs {
 			o := f.objects[ref]
@@ -1080,7 +1080,9 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 				err := fmt.Errorf("WORK OWNER MISMATCH: package does not belong to the selected Runtime.Work.run owner in %s", f.root)
 				f.errors[err.Error()] = err
 			}
-			result = joinFlow(result, o.fields[1])
+			if n.Kind != "work-stop-completion" {
+				result = joinFlow(result, o.fields[1])
+			}
 		}
 		result.unknown = result.unknown || work.unknown
 	case "var":
@@ -1685,10 +1687,18 @@ func (f *flowChecker) suspendThrough(target int, through []int) {
 			f.grow()
 		}
 	}
-	if len(synchronous) == 0 {
+	// A release keeps its scope and definition-site evidence across a pause.
+	// Other enclosing synchronous boundaries still reject that pause.
+	var obligation synchronousFlow
+	for i := len(synchronous) - 1; i >= 0; i-- {
+		if synchronous[i].phase != "release" {
+			obligation = synchronous[i]
+			break
+		}
+	}
+	if obligation.phase == "" {
 		return
 	}
-	obligation := synchronous[len(synchronous)-1]
 	span := f.location
 	if span.File == nil {
 		span = obligation.span
