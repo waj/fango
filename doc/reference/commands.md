@@ -274,6 +274,27 @@ missing, empty, or previously Fango-generated destination is
 accepted; a non-empty unmanaged directory is rejected. Exported `.out`
 directories are output artifacts and are not removed by `fango clean`.
 
+## Interpreting in WebAssembly
+
+`cmd/fango-wasm` runs one program through the Core interpreter instead of
+generating Go, so it needs no Go toolchain at run time. It builds for WASI:
+
+```sh
+GOOS=wasip1 GOARCH=wasm go build -o fango.wasm ./cmd/fango-wasm
+```
+
+The host supplies a filesystem holding a [library root](#the-library-root)
+(only `stdlib/` is read) named by `FANGO_ROOT`, and passes the entry file as
+the only argument (default `/src/main.fango`). Standard input is the
+program's, output goes to stdout and diagnostics to stderr. The exit status is
+the program's own, `1` for a compile error, and `2` for an internal error. A
+non-Unit `main` value is printed, as in the REPL.
+
+The interpreter runs without a native worker, so natives that need one (File,
+Net, Runtime.Cell, Runtime.NativeRequest and the modules built on them, such as
+Async) and user sidecars fail with an error rather than building one. The
+website's playground runs programs this way in the browser.
+
 ## Entry points
 
 A file passed to `build` or `run` must define `main`. A pure value is valid:
