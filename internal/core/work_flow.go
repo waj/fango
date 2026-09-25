@@ -1,7 +1,6 @@
 package core
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/types"
@@ -19,48 +18,6 @@ type WorkNeed struct {
 	Immediate bool
 	Span      source.Span
 	Owner, In string
-}
-
-// CollectWorkNeeds interprets source capture contracts without closing or
-// checking their rows. Inference solves these inclusions before generalization;
-// the ordinary Core flow pass reconstructs and checks them after elaboration.
-// Unknown parameter owners remain latent in the callable's contract until a
-// call substitutes an actual Runtime.Work.run owner. Unknown rows are returned intact.
-func CollectWorkNeeds(p *Prog, context []Def, b *types.Builtins) []WorkNeed {
-	a := newCaptureAnalyzer(p, b)
-	for i := range context {
-		if a.defs[context[i].Name] == nil {
-			a.defs[context[i].Name] = &context[i]
-		}
-	}
-	var out []WorkNeed
-	seen := map[string]bool{}
-	for _, d := range p.Defs {
-		f := &flowChecker{shape: a, defs: a.defs, objects: []*flowObject{nil}, objectIDs: map[string]int{}, owners: []*flowOwner{nil}, ownerIDs: map[string]int{}, contexts: map[string]*flowContext{}, errors: map[string]error{}, root: d.Name, active: map[int]int{}}
-		f.collectWorkNeed = func(n WorkNeed) {
-			data, _ := json.Marshal([]types.Type{n.Budget, n.Need})
-			key := n.In + "/" + n.Owner + "/" + string(data)
-			if !seen[key] {
-				seen[key] = true
-				out = append(out, n)
-			}
-		}
-		args := make([]flowValue, len(d.Params))
-		for i := range args {
-			args[i].unknown = true
-		}
-		env := emptyFlowEnv()
-		env.rows[0] = flowRow{unknown: true}
-		for {
-			f.generation++
-			f.changed = false
-			f.callDef(d.Name, args, nil, env, rootFlowSite, nil)
-			if !f.changed {
-				break
-			}
-		}
-	}
-	return out
 }
 
 // Source row substitutions are independent of runtime generic arguments: row

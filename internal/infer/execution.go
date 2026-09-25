@@ -653,11 +653,12 @@ func (g *generator) executionNeeds(sub Subst) []executionNeed {
 		}
 	}
 	p := &core.Prog{Defs: defs, ADTs: g.ck.ADTOrder}
+	work, controlNeeds := core.CollectExecutionNeeds(p, context, g.ck.B)
 	var needs []executionNeed
-	for _, n := range core.CollectWorkNeeds(p, context, g.ck.B) {
+	for _, n := range work {
 		needs = append(needs, executionNeed{WorkNeed: n})
 	}
-	for _, control := range core.CollectControlNeeds(p, context, g.ck.B) {
+	for _, control := range controlNeeds {
 		name := types.CoroutineSuspensionName
 		if control.Operation == "drive" {
 			name = types.CoroutineDriveName

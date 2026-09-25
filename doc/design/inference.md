@@ -44,6 +44,11 @@ A pure handler runner may still need a polymorphic transport contract. Infer
 this from controlled parameter types and executed call contracts, including
 calls inside handlers but excluding latent lambda bodies. Handling an effect
 does not convert an Exit-family callback into a Direct value.
+Work-budget and coroutine-control obligations come from one interpretation of
+the source capture contracts per execution root. Both use the same symbolic
+arguments and flow contexts; their resulting row constraints are
+solved together, repeating the interpretation only when the constraint set
+grows.
 
 ## Dependency groups and generalization
 
