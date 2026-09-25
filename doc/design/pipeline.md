@@ -162,6 +162,12 @@ survive a later entry failure.
 Semantic and ABI summaries are canonical, source-position-independent views of
 the installed declaration state and Core headers. Stage summaries cover
 declarative stage Core and templates, with allocation identities normalized.
+Publication records the owner's semantic and ABI fingerprints in the framed
+object. A cache hit verifies the frame and source/dependency record, then
+combines those stored own fingerprints with the current dependency summaries;
+it does not traverse the decoded Core again to recompute them. The owner's
+implementation fingerprint is likewise computed at publication and carried by
+the verified frame. Schema changes select a fresh cache namespace.
 The staging evaluator records the complete Core closure reached by every splice
 or deriver, including dictionary definitions, ordinary helpers, quote holes,
 callbacks, and native owners. An owner answers to its sidecar package name as

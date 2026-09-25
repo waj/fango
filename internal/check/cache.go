@@ -141,21 +141,21 @@ func loadCachedObject(cache ObjectCache, slot, base string, module modules.Resol
 			return nil, read, false
 		}
 	}
-	ownSemantic, ownABI, ownImplementation := ownFingerprints(object)
-	// The object records its own stage fingerprint, and the artifact frame
-	// already proves the bytes are the ones that were written. Recomputing
-	// it here would mean decoding stage Core on every hit, which is what
-	// deferring the section exists to avoid; reading the section checks it.
+	// The frame verifies the object bytes, including the own fingerprints
+	// computed when it was published. Recomputing them over the decoded Core
+	// on every hit costs more than decoding the object itself.
+	ownSemantic, ownABI := object.OwnSemantic, object.OwnABI
+	// The stage fingerprint is checked against stage Core when that deferred
+	// section is read, rather than forcing it on every cache hit.
 	ownStage := object.StageImplementation
 	semanticDeps, semanticOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.Semantic })
 	abiDeps, abiOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.ABI })
 	stageDeps, stageOK := dependencyFingerprints(object.StageDependencies, summaries, func(s moduleSummary) string { return s.Stage })
-	if !semanticOK || !abiOK || !stageOK || ownStage == "" {
+	if !semanticOK || !abiOK || !stageOK || ownSemantic == "" || ownABI == "" || ownStage == "" || object.Implementation == "" {
 		return nil, read, false
 	}
 	if object.Semantic != combinedFingerprint("semantic", ownSemantic, semanticDeps) ||
-		object.ABI != combinedFingerprint("abi", ownABI, abiDeps) ||
-		object.Implementation != ownImplementation {
+		object.ABI != combinedFingerprint("abi", ownABI, abiDeps) {
 		return nil, read, false
 	}
 	object.StageFingerprint = combinedFingerprint("stage", ownStage, stageDeps)

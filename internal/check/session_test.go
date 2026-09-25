@@ -524,6 +524,40 @@ func TestModuleObjectRejectsCorruptEnvelope(t *testing.T) {
 	}
 }
 
+func TestCachedObjectRejectsInconsistentOwnSummary(t *testing.T) {
+	d := t.TempDir()
+	entry := filepath.Join(d, "Main.fango")
+	if err := os.WriteFile(entry, []byte("{-# no-prelude #-}\nmodule Main exposing (main)\nmain = ()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := newMemoryObjectCache()
+	result, _ := compileEvents(t, entry, cache)
+	slot := compilecache.Slot(true, "Main")
+	record, _, err := SplitObject(cache.objects[slot])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"semantic", "ABI"} {
+		t.Run(field, func(t *testing.T) {
+			object := *result.Objects[len(result.Objects)-1]
+			if field == "semantic" {
+				object.OwnSemantic = "wrong"
+			} else {
+				object.OwnABI = "wrong"
+			}
+			data, err := EncodeObject(&object, record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cache.StoreObject(slot, data)
+			_, events := compileEvents(t, entry, cache)
+			if events["checked-cache-miss"]["Main"] != 1 || events["check"]["Main"] != 1 {
+				t.Fatalf("inconsistent %s summary was reused: %#v", field, events)
+			}
+		})
+	}
+}
+
 func TestInstallObjectRollsBackAllPublishedState(t *testing.T) {
 	d := t.TempDir()
 	entry := filepath.Join(d, "Base.fango")

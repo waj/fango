@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	moduleObjectSchema = 8
+	moduleObjectSchema = 9
 	moduleObjectKind   = "module-object"
 	stageSection       = "stage"
 )
@@ -27,6 +27,8 @@ const (
 type ModuleObject struct {
 	State                  *infer.ModuleState
 	Resolver               modules.Interface
+	OwnSemantic            string
+	OwnABI                 string
 	Semantic               string
 	ABI                    string
 	Implementation         string

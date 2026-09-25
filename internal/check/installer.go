@@ -191,6 +191,8 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 	// A dependency outside the summarized graph leaves this owner, and every
 	// later consumer of it, unsummarized rather than uncompilable.
 	if semanticOK && abiOK && stageOK {
+		object.OwnSemantic = ownSemantic
+		object.OwnABI = ownABI
 		object.Semantic = combinedFingerprint("semantic", ownSemantic, semanticDeps)
 		object.ABI = combinedFingerprint("abi", ownABI, abiDeps)
 		object.StageImplementation = ownStage
