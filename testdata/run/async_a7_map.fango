@@ -1,0 +1,26 @@
+import Async
+import Async.IO
+import List
+import Stream
+import Stream.Concurrent
+
+work value =
+    Async.IO.sleep (if value == 1 then 20 else 2)
+    value * 10
+
+unorderedWork value =
+    if value == 1 then Async.waitSignal 99 else ()
+    value * 10
+
+unordered() =
+    reversed = Stream.fold (\value seen ->
+        if List.length seen == 1 then Async.signal 99 else ()
+        [value | seen]) [] (Stream.Concurrent.mapUnordered 3 unorderedWork (Stream.fromList [1, 2, 3]))
+    List.reverse reversed
+
+main() =
+    print (Async.run (\_ -> Stream.toList (Stream.Concurrent.map 3 work (Stream.fromList [1, 2, 3]))))
+    print (Async.run unordered)
+    print (Async.run (\_ -> Stream.toList (Stream.take 1 (Stream.Concurrent.map 3 work (Stream.fromList [1, 2, 3])))))
+    print (Async.run (\_ -> Stream.toList (Stream.Concurrent.map 0 work (Stream.fromList [1]))))
+    print (Async.run (\_ -> Stream.toList (Stream.Concurrent.mapUnordered (0 - 1) work (Stream.fromList [1]))))

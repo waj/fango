@@ -125,7 +125,10 @@ is spelled with a sanitized name and a digest of the stem, because a program
 that compiles today has to keep compiling. Cross-package workers,
 types, constructors, dictionaries, and effect evidence use a typed exported
 internal ABI. Direct source imports remain Go edges even if unused; generated
-types may add transitive type-owner imports.
+types may add transitive type-owner imports. An import gets a named Go alias
+only when a selector survives final representation lowering; erased references
+keep a blank import for initialization without triggering Go's unused-import
+check.
 
 Aliases and batch lifted names are deterministic and independent of numeric
 identity allocation. Symbol mangling spells separators/operator characters as

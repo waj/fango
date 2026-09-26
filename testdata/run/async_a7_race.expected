@@ -1,0 +1,6 @@
+LeftWon 10
+RightWon 20
+Ok Just 30
+Ok Nothing
+Err InvalidTimeout -1
+Ok 1

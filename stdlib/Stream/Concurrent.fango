@@ -1,0 +1,89 @@
+{-# no-prelude #-}
+module Stream.Concurrent exposing (map, mapUnordered)
+
+import Async
+import Basics exposing (..)
+import IO exposing (IO)
+import Iterator exposing (Iterator, next)
+import List exposing (List)
+import Maybe exposing (Maybe(..))
+import Runtime.Coroutine exposing (Drive)
+import Runtime.Scope
+import Runtime.Service
+import Stream exposing (Stream, Yield, generate, withCursor, yield)
+
+collectBatch : Int -> Iterator a e ->{Drive | e} List a
+collectBatch capacity cursor =
+    if capacity <= 0 then []
+    else case next cursor of
+        Nothing -> []
+        Just value -> [value | collectBatch (capacity - 1) cursor]
+
+spawnBatch : (a ->{Async.Async, Runtime.Service.Invocation Async.Request Int, IO} b) -> List a ->{Async.Async, Runtime.Service.Invocation Async.Request Int, IO} List (Async.Task b {IO})
+spawnBatch action values = case values of
+    [] -> []
+    [value | rest] ->
+        task = Async.spawn (\_ -> action value)
+        [task | spawnBatch action rest]
+
+cancelBatch : List (Async.Task a {IO}) ->{Async.Async, Runtime.Service.Invocation Async.Request Int} ()
+cancelBatch tasks = case tasks of
+    [] -> ()
+    [task | rest] ->
+        Async.cancelAndWait task
+        cancelBatch rest
+
+emitOrdered : List (Async.Task a {IO}) ->{Yield a, Async.Async, Runtime.Service.Invocation Async.Request Int, IO} ()
+emitOrdered tasks = case tasks of
+    [] -> ()
+    [task | rest] ->
+        yield (Async.await task)
+        emitOrdered rest
+
+emitUnordered : List (Async.Task a {IO}) ->{Yield a, Async.Async, Runtime.Service.Invocation Async.Request Int, IO} ()
+emitUnordered tasks = case tasks of
+    [] -> ()
+    _ ->
+        (task, rest) = Async.selectCompleted tasks
+        yield (Async.await task)
+        emitUnordered rest
+
+runOrderedBatch : (a ->{Async.Async, Runtime.Service.Invocation Async.Request Int, IO} b) -> List a ->{Yield b, Async.Async, Runtime.Service.Invocation Async.Request Int, IO} ()
+runOrderedBatch action values = Runtime.Scope.bracket
+    (\_ -> spawnBatch action values)
+    cancelBatch
+    emitOrdered
+
+runUnorderedBatch : (a ->{Async.Async, Runtime.Service.Invocation Async.Request Int, IO} b) -> List a ->{Yield b, Async.Async, Runtime.Service.Invocation Async.Request Int, IO} ()
+runUnorderedBatch action values = Runtime.Scope.bracket
+    (\_ -> spawnBatch action values)
+    cancelBatch
+    emitUnordered
+
+mapCursor : Int -> (a ->{Async.Async, Runtime.Service.Invocation Async.Request Int, IO} b) -> Iterator a e ->{Drive, Yield b, Async.Async, Runtime.Service.Invocation Async.Request Int, IO | e} ()
+mapCursor capacity action cursor =
+    values = collectBatch capacity cursor
+    case values of
+        [] -> ()
+        _ ->
+            runOrderedBatch action values
+            mapCursor capacity action cursor
+
+mapUnorderedCursor : Int -> (a ->{Async.Async, Runtime.Service.Invocation Async.Request Int, IO} b) -> Iterator a e ->{Drive, Yield b, Async.Async, Runtime.Service.Invocation Async.Request Int, IO | e} ()
+mapUnorderedCursor capacity action cursor =
+    values = collectBatch capacity cursor
+    case values of
+        [] -> ()
+        _ ->
+            runUnorderedBatch action values
+            mapUnorderedCursor capacity action cursor
+
+map : Int -> (a ->{Async.Async, Runtime.Service.Invocation Async.Request Int, IO} b) -> Stream a e -> Stream b {Async.Async, Runtime.Service.Invocation Async.Request Int, IO | e}
+map capacity action source = generate (\_ ->
+    Async.requirePositiveCapacity capacity
+    withCursor source (mapCursor capacity action))
+
+mapUnordered : Int -> (a ->{Async.Async, Runtime.Service.Invocation Async.Request Int, IO} b) -> Stream a e -> Stream b {Async.Async, Runtime.Service.Invocation Async.Request Int, IO | e}
+mapUnordered capacity action source = generate (\_ ->
+    Async.requirePositiveCapacity capacity
+    withCursor source (mapUnorderedCursor capacity action))

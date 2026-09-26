@@ -1,0 +1,34 @@
+import Async
+import Async.Events
+import Async.IO
+import Fail
+import List
+import Result exposing (Result(..))
+import Stream
+
+slowFirst value =
+    if value == 0 then Async.IO.sleep 30 else ()
+    value
+
+collect policy = Fail.attempt (\_ ->
+    Async.Events.withSubscription (Async.Events.ticks 1 8) 2 policy (\events ->
+        Stream.toList (Stream.map slowFirst events)))
+
+validDrop policy = case collect policy of
+    Err _ -> False
+    Ok values -> List.length values > 0 && List.length values <= 3
+
+reopen() = Async.Events.withSubscription (Async.Events.ticks 1 3) 3 Async.Events.DropNewest (\events ->
+    first = Stream.toList (Stream.take 1 events)
+    second = Stream.toList events
+    (first, second))
+
+main() =
+    print (Async.run (\_ -> Fail.attempt (\_ ->
+        Async.Events.withSubscription (Async.Events.ticks 1 3) 3 Async.Events.DropNewest (\events -> Stream.toList events))))
+    print (Async.run (\_ -> Fail.attempt (\_ ->
+        Async.Events.withSubscription (Async.Events.ticks 1 3) 0 Async.Events.DropNewest (\events -> Stream.toList events))))
+    print (Async.run (\_ -> collect Async.Events.Fail))
+    print (Async.run (\_ -> validDrop Async.Events.DropOldest))
+    print (Async.run (\_ -> validDrop Async.Events.DropNewest))
+    print (Async.run (\_ -> Fail.attempt reopen))

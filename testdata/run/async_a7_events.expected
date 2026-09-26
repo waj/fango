@@ -1,0 +1,6 @@
+Ok Ok [0, 1, 2]
+Ok Err InvalidCapacity 0
+Ok Err Overflow
+Ok True
+Ok True
+Ok Ok ([0], [0, 1, 2])

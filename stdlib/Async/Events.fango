@@ -1,0 +1,71 @@
+{-# no-prelude #-}
+module Async.Events exposing (Error(..), Policy(..), Source, ticks, withSubscription)
+
+import Async
+import Basics exposing (..)
+import Fail
+import IO exposing (IO)
+import Result exposing (Result(..))
+import Runtime.Async.Native
+import Runtime.Native
+import Runtime.Scope
+import Runtime.Service
+import Stream
+
+type Error = InvalidCapacity Int | Overflow deriving (Eq, Show)
+type Policy = Fail | DropOldest | DropNewest deriving (Eq, Show)
+type Source = Ticks Int Int
+
+ticks : Int -> Int -> Source
+ticks interval count = Ticks interval count
+
+{-# resource #-}
+type State = State Runtime.Native.Any
+
+eventNew : Int -> Int -> Int -> Int ->{IO} State
+eventNew = native
+eventClose : State ->{IO} ()
+eventClose = native
+start : State -> Runtime.Async.Native.Bridge ->{IO} ()
+start = native
+takeEvent : State ->{IO} Int
+takeEvent = native
+arm : State -> Int ->{IO} ()
+arm = native
+disarm : State -> Int ->{IO} ()
+disarm = native
+
+policyCode policy = case policy of
+    Fail -> 0
+    DropOldest -> 1
+    DropNewest -> 2
+
+emit state =
+    event = takeEvent state
+    if event == (0 - 1) then
+        ticket = Async.nativeReserve()
+        Runtime.Scope.finally
+            (\_ ->
+                arm state ticket
+                Async.nativeWait ticket)
+            (\_ ->
+                disarm state ticket
+                Runtime.Async.Native.release (Async.nativeBridge()) ticket)
+        emit state
+    else if event == (0 - 2) then ()
+    else if event == (0 - 3) then Fail.fail Overflow
+    else
+        Stream.yield event
+        emit state
+
+produce source capacity policy = case source of
+    Ticks interval count -> Runtime.Scope.bracket
+        (\_ -> eventNew interval count capacity (policyCode policy))
+        eventClose
+        (\state ->
+            start state (Async.nativeBridge())
+            emit state)
+
+withSubscription source capacity policy consume =
+    if capacity <= 0 then Fail.fail (InvalidCapacity capacity)
+    else consume (Stream.generate (\_ -> produce source capacity policy))

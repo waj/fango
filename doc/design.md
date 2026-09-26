@@ -55,6 +55,8 @@ and capture-preserving execution boundaries.
 synchronized values, and split service evidence.
 [Cooperative task driver](design/async-cooperative.md) — structured contexts,
 FIFO tasks, typed failure selection, native readiness, and driver authority.
+[Concurrent combinators](design/async-combinators.md) — completion selection,
+targeted drain, bounded Stream batches, and event subscription ownership.
 [Native requests](design/native-requests.md) — scoped retention, quiescent drain,
 and driver-owned callback completion.
 

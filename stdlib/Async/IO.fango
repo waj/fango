@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Async.IO exposing (get, sleep)
+module Async.IO exposing (get, sleep, timeout)
 
 import Async
 import Basics exposing (..)
@@ -66,3 +66,10 @@ get url =
                     awaitNative host callback ticket
                     if ok state then Ok (body state) else Err (errorText state))))
         (\_ -> Runtime.Async.Native.release eventBridge ticket)
+
+timeout : Int -> (() ->{Async.Async, Runtime.Service.Invocation Async.Request Int, IO | e} a) ->{Async.Async, Runtime.Service.Invocation Async.Request Int, IO | e} Result Async.Error (Maybe a)
+timeout millis action =
+    if millis < 0 then Err (Async.InvalidTimeout millis)
+    else case Async.race action (\_ -> sleep millis) of
+        Async.LeftWon value -> Ok (Just value)
+        Async.RightWon _ -> Ok Nothing

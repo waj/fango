@@ -1,7 +1,7 @@
 # Roadmap: structured Async and execution models
 
 This document owns the remaining Async work: parallel and mixed execution
-and concurrent combinators. It depends on the shared
+and CPU responsiveness. It depends on the shared
 [coroutine foundation](roadmap-coroutines.md), whose ownership/control
 contracts apply without compiler recognition of Async names. The
 [effects roadmap](roadmap-effects.md) owns general language extensions.
@@ -9,6 +9,8 @@ contracts apply without compiler recognition of Async names. The
 The structured APIs and examples below specify the full target. The
 [cooperative Async surface](reference/library-async-cooperative.md) implements
 structured tasks and native IO, with an internal scripted A1 driver.
+[Concurrent combinators](reference/library-async-combinators.md) implement A7
+on the delivered cooperative executor.
 Ordinary calls, trailing Unit lambdas, callback subsumption, scopes,
 and effect instances are implemented foundations; their contracts remain in
 the [reference](reference.md). Promote completed behavior there and architecture
@@ -486,11 +488,11 @@ caller's evidence **after** draining. C0 owns the new typed replay capability;
 the [model](../internal/feasibility/tasks_test.go) exercises different typed
 payloads and two different observing targets without storing an old exit target.
 
-Before A7 ships, separately settle race winner and timeout deadline/completion
-ties. Promptly initiating sibling cancellation and deterministically ordering
-already-recorded reports are different requirements. No policy can promise the
-same set of observed failures under all schedules. These are explicit entry
-gates, not permission to flatten errors into strings or defer cleanup.
+[A7](reference/library-async-combinators.md#race-and-timeout) selects race and
+timeout winners by driver-recorded completion order. Promptly initiating
+sibling cancellation and deterministically ordering already-recorded reports
+are different requirements. No policy can promise the same set of observed
+failures under all schedules.
 
 ## Native integration and executor mechanics
 
@@ -615,56 +617,11 @@ registrations, and native capacity in addition to worker goroutines.
 
 ## Concurrent streams and events
 
-The sequential pipeline remains ordinary Stream code:
-
-```fango
-Async.run \_ ->
-    requests
-        |> Stream.map fetch
-        |> Stream.filter wanted
-        |> Stream.forEach consume
-```
-
-`map` waits for each result before requesting the next; suspension alone does
-not imply concurrency. The coroutine foundation must let fetch suspend while
-an upstream pull is unfinished, without losing exclusive advancement.
-
-The proposed concurrent variants explicitly introduce children:
-
-```fango
-requests
-    |> Stream.mapConcurrent 8 fetch
-    |> Stream.forEach consume
-```
-
-`mapConcurrent` preserves input order. Its positive capacity bounds admitted
-work and retained completed results together: a slow first result can fill the
-bound with later completions, at which point upstream admission stops.
-`mapConcurrentUnordered` delivers in readiness order under the same storage
-bound. Early downstream stop cancels and drains children before closing upstream
-traversal. No compiler recognizes either combinator name.
-
-`Async.race` and `Async.timeout` return only after cancelling/draining losing
-work. Their exact result types, ties, and typed configuration errors are A7
-entry decisions linked to the failure gate. A deadline requests cancellation;
-it is not permission to free resources still used by losing work.
-
-```fango
--- Proposed scoped event adapter.
-Events.withSubscription source 32 Events.DropOldest \events ->
-    events
-        |> Stream.take 10
-        |> Stream.forEach consume
-```
-
-Subscription starts on traversal, not stream-description construction. Each
-reopening creates a fresh subscription; traversal cleanup unregisters it before
-subscription-scope exit. Capacity is positive and bounded. Policies are
-`Events.Fail`, `Events.DropOldest`, and `Events.DropNewest`; overflow failure is
-typed and drains traversal. Backpressure may be offered only if the external
-source supports it. External callbacks enter an adapter queue, never a public
-resume callback. Test notifications racing with overflow, cancellation, and
-unregistration. General multicast/replay remain outside scope.
+[Sequential Stream](reference/library-streams.md) retains its existing demand
+behavior. [Concurrent mapping, race, timeout, and native tick subscriptions](reference/library-async-combinators.md)
+are implemented on the cooperative executor. General multicast, replay, and
+source-specific adapters beyond ticks remain outside the delivered surface.
+Backpressure for a future external source requires that source to support it.
 
 ## Implementation stages
 
@@ -684,12 +641,11 @@ language work is specified once in the coroutine roadmap.
 | A4: Suspending cleanup integration | A3, C5 | DONE: cancellation/drain through asynchronous acquire/release |
 | A5: Goroutine executor | A4, C6d | One driver goroutine per task |
 | A6: Mixed executor | A4, C6d | Bounded pool advancing cooperative tasks |
-| A7: Concurrent combinators and events | A4; repeat executor coverage after A5/A6 | Bounded mapping, race, timeout, subscriptions |
+| A7: Concurrent combinators and events | A4; repeat executor coverage after A5/A6 | DONE: bounded mapping, race, timeout, tick subscriptions on cooperative executor |
 | A8: CPU responsiveness | A2, C7; repeat coverage for every delivered executor | Scheduling/cancellation checkpoints in generated CPU work |
 | A9: Measured optimization | Functional stages under measurement complete | Evidence-backed improvements without semantic changes |
 
-A7 need not wait for parallel execution: it can first ship cooperatively after
-A4. A5 and A6 share the C6d safety gate; implementing goroutine-per-task first
+A7 shipped without parallel execution. A5 and A6 share the C6d safety gate; implementing goroutine-per-task first
 may provide a useful test harness, but it is not a semantic prerequisite for the
 worker pool. A8 can begin after A2/C7 without waiting for parallel execution,
 and its tests must be repeated for subsequently delivered executors.
@@ -841,16 +797,15 @@ regardless of which concurrent policy is implemented first.
 
 ### A7: Concurrent combinators and events
 
-Choose result types and tie/error policies, then implement bounded ordered and
-unordered mapping, race, timeout, and subscriptions as library combinators.
-Add only source-specific native event registration where needed.
-
-**Acceptance:** slow-first ordered mapping bounds retained results; unordered
-mapping follows readiness; take/early failure cancels/drains before upstream
-close. Race/timeout drain losers. Exercise all overflow policies, reopening,
-zero/negative capacities, and callback/unregister races. After completion no
-registration, unfinished task, or native request remains owned accidentally.
-Repeat the applicable cases across all delivered executors.
+**DONE.** [Concurrent combinators and events](reference/library-async-combinators.md)
+own their behavior; [design](design/async-combinators.md) owns completion
+selection, targeted drain, bounded batches, and subscription registration.
+The [race and timeout](../testdata/run/async_a7_race.fango),
+[mapping](../testdata/run/async_a7_map.fango),
+[cleanup](../testdata/run/async_a7_cleanup.fango), and
+[events](../testdata/run/async_a7_events.fango) fixtures run in both backends.
+Native event tests cover exact overflow policies and unregistration races.
+Repeat applicable cases when A5 and A6 deliver more executors.
 
 ### A8: CPU responsiveness
 

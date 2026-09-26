@@ -40,6 +40,8 @@ interpret it like any other resumptive operation.
 production when `n <= 0`. `zip` pulls left first and can consume one unmatched
 left element when right ends. Stages retain bounded buffering; `toList`
 intentionally retains every output element.
+[Concurrent mapping](library-async-combinators.md#concurrent-stream-mapping)
+is available through `Stream.Concurrent` under an Async runner.
 
 Custom consumers use `Stream.withCursor` and `Iterator.next`:
 

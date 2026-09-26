@@ -272,6 +272,9 @@ var asyncNativeNatives = map[string]int{
 	"Async.IO.newState": 1, "Async.IO.closeState": 1,
 	"Async.IO.submitSleep": 5, "Async.IO.submitGet": 5,
 	"Async.IO.ok": 1, "Async.IO.body": 1, "Async.IO.errorText": 1,
+	"Async.Events.eventNew": 4, "Async.Events.eventClose": 1,
+	"Async.Events.start": 2, "Async.Events.takeEvent": 1,
+	"Async.Events.arm": 2, "Async.Events.disarm": 2,
 }
 
 func Lookup(name string) (Spec, bool) { spec, ok := Table[name]; return spec, ok }

@@ -1,0 +1,29 @@
+import Async
+import Async.IO
+import Fail
+import Runtime.Scope
+import Stream
+import Stream.Concurrent
+
+source() = Stream.generate (\_ -> Runtime.Scope.finally
+    (\_ ->
+        Stream.yield 1
+        Stream.yield 2)
+    (\_ -> print "source closed"))
+
+work value = Runtime.Scope.finally
+    (\_ ->
+        if value == 2 then Async.waitSignal 99 else ()
+        value * 10)
+    (\_ ->
+        Async.IO.sleep 1
+        print ("child closed " ++ show value))
+
+early() = Stream.toList (Stream.take 1 (Stream.Concurrent.map 2 work (source())))
+
+failed() = Fail.attempt (\_ ->
+    Stream.forEach (\_ -> Fail.fail "stop") (Stream.Concurrent.map 2 work (source())))
+
+main() =
+    print (Async.run early)
+    print (Async.run failed)

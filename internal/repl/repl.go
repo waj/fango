@@ -635,7 +635,7 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 		loaded = append(loaded, inc.Modules...)
 		for _, name := range inc.Modules {
 			switch name {
-			case "File", "Net", "Runtime.Cell", "Runtime.NativeRequest", "Runtime.Async.Native", "Async.IO":
+			case "File", "Net", "Runtime.Cell", "Runtime.NativeRequest", "Runtime.Async.Native", "Async.IO", "Async.Events":
 				needsOpaqueWorker = true
 			}
 		}

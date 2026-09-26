@@ -6,6 +6,8 @@ creates the implicit root context; `Async.runOn Runtime.Executor.cooperative` an
 only `cooperative`. Scoped native waits and HTTP GET are available through
 `Async.IO`. Parallel and mixed policies remain
 [roadmap work](../roadmap-async.md#implementation-stages).
+[Concurrent race, timeout, Stream mapping, and subscriptions](library-async-combinators.md)
+use this executor and lifetime contract.
 
 ```fango
 spawn : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a)
@@ -103,6 +105,8 @@ requests and cleanup drain. `Async.Error` also has `SelfAwait`,
 case is reserved for the later mixed executor. Scheduler errors are returned as
 `Err`; a typed failure recorded during drain takes precedence and exits through
 its ordinary effect handler.
+`InvalidConcurrentCapacity Int` and `InvalidTimeout Int` belong to the
+[concurrent combinators](library-async-combinators.md).
 
 `Async.IO.get` cancels its Go HTTP request when the task is closed. DNS and
 host network calls may take time to return after cancellation; scope exit waits
@@ -122,3 +126,5 @@ cancellation, and cleanup failure.
 The [A4 cancellation fixture](../../testdata/run/async_a4_cancel_release.fango)
 covers two releases suspended during cancellation; related fixtures cover
 typed failure precedence and native release readiness.
+The [A7 fixtures](../../testdata/run/async_a7_cleanup.fango) cover race and
+timeout, ordered and unordered mapping, event queues, and early cleanup.

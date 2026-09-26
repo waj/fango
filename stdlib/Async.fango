@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Async exposing (Async, Error(..), Request(..), Task, await, bind, context, nativeBridge, nativeReserve, nativeWait, poll, run, runOn, runWithCapacity, signal, spawn, waitSignal, worker, yield)
+module Async exposing (Async, Error(..), Race(..), Request(..), Task, await, bind, cancelAndWait, context, firstCompleted, nativeBridge, nativeReserve, nativeWait, poll, race, requirePositiveCapacity, run, runOn, runWithCapacity, selectCompleted, signal, spawn, waitSignal, worker, yield)
 
 import Basics exposing (..)
 import Failure exposing (Failure)
@@ -16,8 +16,9 @@ import Runtime.Scope
 import Runtime.Service
 import Runtime.Work
 
-type Error = InvalidWorkerCount Int | InvalidNativeCapacity Int | Interrupted | SelfAwait | Stalled deriving (Eq, Show)
-type Key = TaskKey (List Int) Int | ContextKey (List Int) | SignalKey Int | NativeKey Int | CapacityKey deriving (Eq)
+type Error = InvalidWorkerCount Int | InvalidNativeCapacity Int | InvalidConcurrentCapacity Int | InvalidTimeout Int | Interrupted | SelfAwait | Stalled deriving (Eq, Show)
+type Race a b = LeftWon a | RightWon b deriving (Eq, Show)
+type Key = TaskKey (List Int) Int | DoneKey Int | ContextKey (List Int) | SignalKey Int | NativeKey Int | CapacityKey | AnyKey (List Int) deriving (Eq)
 type ContextOutcome = ContextSuccess | ContextFailure Failure | ContextError Error
 type Request
     = Spawn (Runtime.Work.Work Request Int ())
@@ -26,6 +27,10 @@ type Request
     | Yield
     | WaitTask Int
     | AwaitTask Key
+    | AwaitAny (List Int)
+    | WaitDone Int
+    | CancelTask Int
+    | ForgetTask Int
     | WaitSignal Int
     | WaitNative Int
     | WaitCapacity
@@ -81,6 +86,69 @@ await task =
             Task key _ = task
             reply = request (AwaitTask key)
             await task
+
+taskKey : Task a e -> Key
+taskKey (Task key _) = key
+taskNumber : Task a e -> Int
+taskNumber task = case taskKey task of
+    TaskKey _ number -> number
+    _ -> 0
+
+taskKeys : List (Task a e) -> List Int
+taskKeys tasks = case tasks of
+    [] -> []
+    [task | rest] -> [taskNumber task | taskKeys rest]
+
+findTask : Int -> List (Task a e) ->{Async, Runtime.Service.Invocation Request Int} Task a e
+findTask number tasks = case tasks of
+    [] -> foreverFault Stalled
+    [task | rest] -> if taskNumber task == number then task else findTask number rest
+
+firstCompleted : List (Task a e) ->{Async, Runtime.Service.Invocation Request Int} Task a e
+firstCompleted tasks = case tasks of
+    [] -> foreverFault Stalled
+    _ -> findTask (request (AwaitAny (taskKeys tasks))) tasks
+
+removeSelected : Int -> List (Task a e) ->{Async, Runtime.Service.Invocation Request Int} (Task a e, List (Task a e))
+removeSelected number tasks = case tasks of
+    [] -> foreverFault Stalled
+    [task | rest] ->
+        if taskNumber task == number then (task, rest)
+        else
+            (selected, remaining) = removeSelected number rest
+            (selected, [task | remaining])
+
+selectCompleted : List (Task a e) ->{Async, Runtime.Service.Invocation Request Int} (Task a e, List (Task a e))
+selectCompleted tasks = case tasks of
+    [] -> foreverFault Stalled
+    _ -> removeSelected (request (AwaitAny (taskKeys tasks))) tasks
+
+cancelAndWait : Task a e ->{Async, Runtime.Service.Invocation Request Int} ()
+cancelAndWait task =
+    stopped = request (CancelTask (taskNumber task))
+    done = request (WaitDone (taskNumber task))
+    forgotten = request (ForgetTask (taskNumber task))
+    ()
+
+requirePositiveCapacity : Int ->{Async, Runtime.Service.Invocation Request Int} ()
+requirePositiveCapacity capacity =
+    if capacity <= 0 then foreverFault (InvalidConcurrentCapacity capacity)
+    else ()
+
+race : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) -> (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} b) ->{Async, Runtime.Service.Invocation Request Int, IO | e} Race a b
+race left right = Runtime.Scope.bracket
+    (\_ -> (spawn left, spawn right))
+    (\(first, second) ->
+        cancelAndWait first
+        cancelAndWait second)
+    (\(first, second) ->
+        winner = request (AwaitAny [taskNumber first, taskNumber second])
+        if winner == taskNumber first then
+            firstValue = await first
+            LeftWon firstValue
+        else
+            secondValue = await second
+            RightWon secondValue)
 
 yield : () ->{Async, Runtime.Service.Invocation Request Int} ()
 yield() =
@@ -154,6 +222,7 @@ type State e =
     , error : Maybe Error
     , cancelling : Bool
     , cancelledContexts : List (List Int)
+    , cancelledTasks : List Int
     }
 type Decision e = Continue (State e) | Complete (State e) | Forward Key (State e)
 
@@ -196,8 +265,33 @@ wake key waits ready =
         [] -> ([], ready)
         [Waiting wanted job | rest] ->
             (remaining, next) = wake key rest ready
-            if wanted == key then (remaining, enqueue job next)
+            if matches key wanted then
+                Job number _ jobPath work = job
+                (remaining, enqueue (Job number (keyNumber key) jobPath work) next)
             else ([Waiting wanted job | remaining], next)
+
+matches key wanted = case wanted of
+    AnyKey keys -> contains (keyNumber key) keys && keyNumber key /= 0
+    _ -> wanted == key
+
+keyNumber key = case key of
+    TaskKey _ number -> number
+    _ -> 0
+
+firstNotified keys notified = case notified of
+    [] -> Nothing
+    [key | rest] -> case firstNotified keys rest of
+        Just found -> Just found
+        Nothing -> if contains (keyNumber key) keys && keyNumber key /= 0 then Just (keyNumber key) else Nothing
+
+forgetNotification target notified = case notified of
+    [] -> []
+    [key | rest] ->
+        tail = forgetNotification target rest
+        case key of
+            TaskKey _ number -> if number == target then tail else [key | tail]
+            DoneKey number -> if number == target then tail else [key | tail]
+            _ -> [key | tail]
 
 insertReport report reports =
     case report of
@@ -253,6 +347,26 @@ keepWaiting contextPath waits =
         [Waiting key job | rest] ->
             next = keepWaiting contextPath rest
             if owned contextPath job then next else [Waiting key job | next]
+
+keepOtherJobs target jobs = case jobs of
+    NoJobs -> NoJobs
+    Jobs job rest ->
+        Job number _ _ _ = job
+        next = keepOtherJobs target rest
+        if number == target then next else Jobs job next
+
+keepOtherWaiting target waits = case waits of
+    [] -> []
+    [Waiting key job | rest] ->
+        Job number _ _ _ = job
+        next = keepOtherWaiting target rest
+        if number == target then next else [Waiting key job | next]
+
+findLive target jobs = case jobs of
+    [] -> Nothing
+    [job | rest] ->
+        Job number _ _ _ = job
+        if number == target then Just job else findLive target rest
 
 ownedJobs contextPath jobs =
     case jobs of
@@ -339,7 +453,7 @@ stepDriver eventBridge workOwner facet previous =
             Job key reply jobPath work = job
             remaining = Queue rest (queueBack previous.ready)
             state = previous
-            draining = state.cancelling || cancelledPath jobPath state.cancelledContexts
+            draining = state.cancelling || cancelledPath jobPath state.cancelledContexts || contains key state.cancelledTasks
             step = if reply == (0 - 1) then Runtime.Work.stop workOwner work else Runtime.Work.advance workOwner work reply
             case step of
                 Runtime.Coroutine.Suspended requestValue ->
@@ -382,6 +496,30 @@ stepDriver eventBridge workOwner facet previous =
                             else
                                 next = { state | ready = remaining, waiting = [Waiting taskTarget (Job key 0 jobPath work) | state.waiting] }
                                 Continue next
+                        AwaitAny keys ->
+                            case firstNotified keys state.notified of
+                                Just winner -> Continue ({ state | ready = Queue (Jobs (Job key winner jobPath work) (queueFront remaining)) (queueBack remaining) })
+                                Nothing -> Continue ({ state | ready = remaining, waiting = [Waiting (AnyKey keys) (Job key 0 jobPath work) | state.waiting] })
+                        WaitDone target ->
+                            wanted = DoneKey target
+                            case findLive target state.live of
+                                Nothing -> Continue ({ state | ready = enqueue (Job key 0 jobPath work) remaining })
+                                Just _ -> Continue ({ state | ready = remaining, waiting = [Waiting wanted (Job key 0 jobPath work) | state.waiting] })
+                        ForgetTask target ->
+                            next = { state | ready = enqueue (Job key 0 jobPath work) remaining, notified = forgetNotification target state.notified }
+                            Continue next
+                        CancelTask target ->
+                            case findLive target state.live of
+                                Nothing -> Continue ({ state | ready = enqueue (Job key 0 jobPath work) remaining })
+                                Just victim ->
+                                    Job victimKey _ victimPath victimWork = victim
+                                    if target == key || contains target state.cancelledTasks || state.cancelling || cancelledPath victimPath state.cancelledContexts || contains (TaskKey victimPath target) state.notified then
+                                        Continue ({ state | ready = enqueue (Job key 0 jobPath work) remaining })
+                                    else
+                                        Queue front back = remaining
+                                        ready = Queue (Jobs (Job victimKey (0 - 1) victimPath victimWork) (keepOtherJobs target front)) (keepOtherJobs target back)
+                                        next = { state | ready = enqueue (Job key 0 jobPath work) ready, waiting = keepOtherWaiting target state.waiting, cancelledTasks = [target | state.cancelledTasks] }
+                                        Continue next
                         WaitTask target ->
                             if target == key then
                                 if draining then Continue ({ state | ready = remaining, waiting = [Waiting (TaskKey jobPath target) (Job key 0 jobPath work) | state.waiting] })
@@ -424,7 +562,8 @@ stepDriver eventBridge workOwner facet previous =
                             else if jobPath == [] then Continue (cancel workOwner facet state (Just error))
                             else Continue (cancelContext workOwner jobPath state (Just error))
                 Runtime.Coroutine.Finished () ->
-                    (waiting, ready) = wake (TaskKey jobPath key) state.waiting remaining
+                    (waitingTask, readyTask) = wake (TaskKey jobPath key) state.waiting remaining
+                    (waiting, ready) = wake (DoneKey key) waitingTask readyTask
                     next = { state | ready = ready, waiting = waiting, notified = [TaskKey jobPath key | state.notified], live = removeLive key state.live }
                     Continue next
                 Runtime.Coroutine.Closed ->
@@ -436,7 +575,9 @@ stepDriver eventBridge workOwner facet previous =
                                 report = CleanupReport issue completion
                                 if jobPath == [] then { state | cleanup = append state.cleanup [report] }
                                 else { state | contexts = recordContextCleanup jobPath [report] state.contexts }
-                        Continue ({ updated | ready = remaining, live = removeLive key updated.live })
+                        (waitingTask, readyTask) = wake (TaskKey jobPath key) updated.waiting remaining
+                        (waiting, ready) = wake (DoneKey key) waitingTask readyTask
+                        Continue ({ updated | ready = ready, waiting = waiting, notified = [TaskKey jobPath key | updated.notified], live = removeLive key updated.live })
                     else Continue (cancel workOwner facet state (Just Stalled))
         NoJobs ->
             state = previous
@@ -494,7 +635,7 @@ replayReports workOwner reports =
         [primary | rest] -> replayWithSuppressed workOwner primary (List.reverse rest)
 
 initialState : Job -> State e
-initialState root = { ready = Queue (Jobs root NoJobs) NoJobs, waiting = [], notified = [], live = [root], nextKey = 1, reports = [], cleanup = [], contexts = [], error = Nothing, cancelling = False, cancelledContexts = [] }
+initialState root = { ready = Queue (Jobs root NoJobs) NoJobs, waiting = [], notified = [], live = [root], nextKey = 1, reports = [], cleanup = [], contexts = [], error = Nothing, cancelling = False, cancelledContexts = [], cancelledTasks = [] }
 
 run : (() ->{Async, Runtime.Service.Invocation Request Int, IO | e} a) ->{IO | e} Result Error a
 run action = runWithCapacity 32 action

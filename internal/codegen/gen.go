@@ -324,7 +324,7 @@ func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, un
 	// Imports come from emission (fangort for prints, math for float
 	// specials), so they are prepended last — in a fixed order, for
 	// deterministic output.
-	if imports := g.importsDecl(); imports != nil {
+	if imports := g.importsDecl(decls); imports != nil {
 		decls = append([]goast.Decl{imports}, decls...)
 	}
 
@@ -642,7 +642,21 @@ func (g *gen) derivable(t types.Type, visiting map[int]bool) bool {
 	}
 }
 
-func (g *gen) importsDecl() goast.Decl {
+func (g *gen) importsDecl(decls []goast.Decl) goast.Decl {
+	// Representation-only references can mark an owner during emission even
+	// when the final Go type erases that reference. Keep its initialization
+	// dependency, but do not give an unused import a named alias.
+	used := make(map[string]bool)
+	for _, decl := range decls {
+		goast.Inspect(decl, func(node goast.Node) bool {
+			if selected, ok := node.(*goast.SelectorExpr); ok {
+				if owner, ok := selected.X.(*goast.Ident); ok {
+					used[owner.Name] = true
+				}
+			}
+			return true
+		})
+	}
 	type spec struct{ alias, path string }
 	var specs []spec
 	if g.usesFangort {
@@ -658,7 +672,7 @@ func (g *gen) importsDecl() goast.Decl {
 	sort.Strings(nativeNames)
 	for _, name := range nativeNames {
 		alias := "_"
-		if g.nativeImports[name] {
+		if g.nativeImports[name] && used[nativeAlias(name)] {
 			alias = nativeAlias(name)
 		}
 		specs = append(specs, spec{alias: alias, path: nativeImportPath(name)})
@@ -679,7 +693,7 @@ func (g *gen) importsDecl() goast.Decl {
 	sort.Strings(names)
 	for _, name := range names {
 		alias := "_"
-		if g.imports[name] {
+		if g.imports[name] && used[moduleAlias(name)] {
 			alias = moduleAlias(name)
 		}
 		specs = append(specs, spec{alias: alias, path: moduleImportPath(name)})
