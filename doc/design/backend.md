@@ -53,26 +53,21 @@ drops an exit or turns a language type check into a failed host assertion.
 
 The bundled List is recognized once by canonical symbol and validated shape;
 subsequent passes compare nominal identity. Checking, deriving, reflection, Core,
-and lint still treat it as an ordinary parameterized ADT. User cons types keep
-normal lowering. The backends share fangort.List: a spine of fixed-size inline
-arrays filled downward behind a two-word value.
+and lint treat it as an ordinary parameterized ADT. User cons types keep normal
+lowering. Both backends use `fangort.List`, an immutable cons spine.
 
-List emits no marker interface/constructor structs. Construction is a runtime
-call and matching uses emptiness/head/tail instead of a type switch. Its own
-fields cannot be controlled; family differences are carried by its element type.
-Eq/show retain the exported names and generic signatures of ordinary lowering
-but delegate to runtime support, keeping element-operation synthesis independent
-of storage.
+Each cons allocates a node containing its element and tail. No operation changes
+a published node, including when several tasks extend one shared tail. Cons,
+head, and tail have constant cost and require no mutex or atomic operations.
+Traversal allocates nothing. This uses one allocation per element; the previous
+chunk representation's lower linear-build allocation count is not preserved.
 
-A chunk watermark only decreases. Cons may claim the slot below it only when
-the extended list owns the frontier; every existing value's offset is at or above
-the watermark at creation. A chunk mutex serializes the frontier check, element
-write, and watermark publication. The lock is released before the new list is
-returned, so another branch cannot publish a tail containing an unwritten slot.
-Readers touch only previously published offsets and need no lock. New cons is
-invisible to all prior values, without copying, and has worst-case constant cost
-even when children extend one tail concurrently. The interpreter uses the same
-runtime representation. Public complexity belongs in
+List construction uses runtime calls and matching uses emptiness/head/tail.
+Eq/show retain ordinary exported names and generic signatures, delegating to
+runtime support. Equality remains structural even for identical list pointers,
+so a list containing NaN does not compare equal to itself.
+`ListMap` builds an unpublished spine in a forward pass, invoking callbacks in
+source order, then publishes the complete result. Public complexity belongs in
 [collections](../reference/library-collections.md#list).
 
 Dict is an ordinary opaque Fango [weight-balanced tree](../../stdlib/Dict.fango)

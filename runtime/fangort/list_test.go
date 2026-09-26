@@ -52,9 +52,9 @@ func TestListEmptyAndSingleton(t *testing.T) {
 	}
 }
 
-// Building linearly must preserve order across many chunk boundaries.
-func TestListLinearBuildCrossesChunks(t *testing.T) {
-	for _, n := range []int{1, listChunk - 1, listChunk, listChunk + 1, 3*listChunk + 5, 1000} {
+// Building linearly must preserve order at varied sizes.
+func TestListLinearBuild(t *testing.T) {
+	for _, n := range []int{1, 32 - 1, 32, 32 + 1, 3*32 + 5, 1000} {
 		want := make([]int, n)
 		for i := range want {
 			want[i] = i
@@ -65,9 +65,9 @@ func TestListLinearBuildCrossesChunks(t *testing.T) {
 	}
 }
 
-// Dropping k elements must be the same list however far into a chunk it lands.
+// Dropping k elements must preserve the remaining suffix.
 func TestListTailAtEveryOffset(t *testing.T) {
-	n := 3*listChunk + 7
+	n := 3*32 + 7
 	all := make([]int, n)
 	for i := range all {
 		all[i] = i
@@ -97,7 +97,7 @@ func TestListBranchingIsIndependent(t *testing.T) {
 			return listOf(0, 1, 2, 3).Tail(), []int{1, 2, 3}
 		},
 		"chunk boundary": func() (List[int], []int) {
-			all := make([]int, listChunk)
+			all := make([]int, 32)
 			for i := range all {
 				all[i] = i
 			}
@@ -135,7 +135,7 @@ func TestListBranchingIsIndependent(t *testing.T) {
 }
 
 // Every child extends the same published value. The race detector checks the
-// frontier claim while these assertions check that no branch can see another
+// shared storage while these assertions check that no branch can see another
 // branch's head or change the shared tail.
 func TestListConcurrentBranching(t *testing.T) {
 	shared := listOf(1, 2, 3)
@@ -201,7 +201,7 @@ func TestListAgainstSliceModel(t *testing.T) {
 
 func TestListEq(t *testing.T) {
 	eq := func(a, b int) bool { return a == b }
-	long := make([]int, 2*listChunk+3)
+	long := make([]int, 2*32+3)
 	for i := range long {
 		long[i] = i
 	}
@@ -264,7 +264,7 @@ func TestListShow(t *testing.T) {
 // Iteration is allocation-free: Tail returns a value, so generated Go keeps it
 // in locals rather than on the heap. doc/roadmap-list.md depends on this.
 func TestListTraversalDoesNotAllocate(t *testing.T) {
-	all := make([]int, 5*listChunk)
+	all := make([]int, 5*32)
 	for i := range all {
 		all[i] = i
 	}
@@ -283,10 +283,9 @@ func TestListTraversalDoesNotAllocate(t *testing.T) {
 	}
 }
 
-// Linear building allocates one chunk per listChunk elements, not one per
-// element.
-func TestListLinearBuildAllocatesPerChunk(t *testing.T) {
-	const n = 10 * listChunk
+// Linear building allocates one immutable node per element.
+func TestListLinearBuildAllocatesPerElement(t *testing.T) {
+	const n = 10 * 32
 	got := testing.AllocsPerRun(100, func() {
 		l := ListNil[int]()
 		for i := 0; i < n; i++ {
@@ -296,7 +295,7 @@ func TestListLinearBuildAllocatesPerChunk(t *testing.T) {
 			t.Fatal("unreachable")
 		}
 	})
-	if want := float64(n / listChunk); got != want {
+	if want := float64(n); got != want {
 		t.Fatalf("building %d elements allocated %v times, want %v", n, got, want)
 	}
 }
