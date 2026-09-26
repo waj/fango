@@ -16,3 +16,4 @@ next (Iterator work) = case advance work () of
     Suspended value -> Just value
     Finished () -> Nothing
     Closed -> Nothing
+    Polled -> next (Iterator work)

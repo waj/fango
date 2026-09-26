@@ -425,7 +425,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			return stmts, [][]goast.Stmt{resumed}
 		}
 		if match := machineir.AdvanceMatch(worker, term); match != nil {
-			branches := make([][]goast.Stmt, 3)
+			branches := make([][]goast.Stmt, 4)
 			for i, ctor := range term.Result.Ctors {
 				for _, c := range match.Cases {
 					if c.Ctor != ctor {
@@ -437,7 +437,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 					branches[i] = append(branches[i], continueStmt(c.Next)...)
 				}
 			}
-			resumed = append(resumed, ifStmt(selector(name, "Present"), branches[0], []goast.Stmt{ifStmt(selector(name, "Finished"), branches[1], branches[2])}))
+			resumed = append(resumed, ifStmt(selector(name, "Present"), branches[0], []goast.Stmt{ifStmt(selector(name, "Finished"), branches[1], []goast.Stmt{ifStmt(selector(name, "Polled"), branches[3], branches[2])})}))
 			return stmts, [][]goast.Stmt{resumed}
 		}
 		assign := func(index int) []goast.Stmt {
@@ -447,7 +447,7 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 			}
 			return []goast.Stmt{assignStmt(machineLocalName(term.Bind.Name), g.ctorValue(term.Result.Ctors[index], resultTy.Args, args...))}
 		}
-		resumed = append(resumed, ifStmt(selector(name, "Present"), assign(0), []goast.Stmt{ifStmt(selector(name, "Finished"), assign(1), assign(2))}))
+		resumed = append(resumed, ifStmt(selector(name, "Present"), assign(0), []goast.Stmt{ifStmt(selector(name, "Finished"), assign(1), []goast.Stmt{ifStmt(selector(name, "Polled"), assign(3), assign(2))})}))
 		resumed = append(resumed, continueStmt(term.Next)...)
 		return stmts, [][]goast.Stmt{resumed}
 	case *machineir.Call:
@@ -830,6 +830,8 @@ func (g *gen) machineBlockStmts(worker *machineir.Worker, frameName string, bloc
 	case *machineir.Return:
 		prefix, normal := value(term.Value)
 		return append(prefix, step("MachineReturn", "Value", callExpr(g.goType(term.Value.Type()), normal))), nil
+	case *machineir.Unreachable:
+		return []goast.Stmt{returnStmt(callExpr(selector("fangort", "InvalidMachineStep"), stringLit("unreachable generated machine branch")))}, nil
 	default:
 		panic(fmt.Sprintf("codegen: unknown machine term %T", block.Term))
 	}

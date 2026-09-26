@@ -1,4 +1,4 @@
 (core
   (type Shape (ctor Circle Float) (ctor Rect Float Float))
-  (def area (params shape) Shape -> Float (case Float (var shape Shape) _s0 (switchctor _s0 (Circle _c1 (leaf (let r Float (var _c1 Float) (native Basics.floatMul (native Basics.floatMul (var r Float) (var r Float) Float) (float 3.14159 Float) Float)))) (Rect _c2 _c3 (leaf (let w Float (var _c2 Float) (let h Float (var _c3 Float) (native Basics.floatMul (var w Float) (var h Float) Float))))))))
+  (def area (params shape) Shape -> Float (case Float (var shape Shape) _s0 (switchctor _s0 (Circle _c4 (leaf (let _pattern1 Float (var _c4 Float) (native Basics.floatMul (native Basics.floatMul (var _pattern1 Float) (var _pattern1 Float) Float) (float 3.14159 Float) Float)))) (Rect _c5 _c6 (leaf (let _pattern2 Float (var _c5 Float) (let _pattern3 Float (var _c6 Float) (native Basics.floatMul (var _pattern2 Float) (var _pattern3 Float) Float))))))))
   (def main Float (app/worker (var area Shape -> Float) (app/ctor (var Circle Float -> Shape) (float 2 Float) Shape) Float)))

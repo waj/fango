@@ -23,6 +23,13 @@ failure order. `Async.bind` captures the current facet and path in a closure
 whose later service invocations still use the active worker's pause. Its
 resource capture cannot outlive the runner.
 
+A packaged Work cursor reports `Polled` after a bounded number of generated
+Machine steps. The driver appends that job to the FIFO tail and checks native
+bridge and cancellation state before taking another job. Its reply remains
+pending, and no other job can advance that cursor. A poll during cancellation
+uses the same stop and drain path as an explicit yield. Release work keeps
+polling while repeated interruption is shielded until the owner is quiescent.
+
 The root also owns one shared native event bridge with a bounded ticket table.
 Each native adapter reserves a ticket before starting its own scoped
 `NativeRequest` host. Its native worker stores a stable result, publishes
@@ -103,3 +110,8 @@ exercises saturated admission, cancellation, and cleanup failure. The
 [A4 cancellation fixtures](../../testdata/run/async_a4_cancel_release.fango)
 exercise suspended release, typed failure selection, and native readiness
 during drain in both backends.
+[A8 CPU fixtures](../../testdata/run/async_a8_cpu.fango) cover progress,
+[Exit helpers](../../testdata/run/async_a8_exit.fango) cover typed failure,
+[nested cancellation](../../testdata/run/async_a8_cancel.fango) covers polled
+release, and the [module fixture](../../testdata/modules/async_a8_cpu/Main.fango)
+covers stored callbacks and separately compiled Direct helpers.

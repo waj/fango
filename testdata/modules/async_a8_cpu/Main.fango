@@ -1,0 +1,15 @@
+import Async
+import Helpers
+
+cpu() =
+    callback = Helpers.store (\_ -> Helpers.countdown 10000)
+    Helpers.runStored callback
+    print "cpu done"
+
+other() = print "other"
+
+main() = print (Async.run (\_ ->
+    first = Async.spawn cpu
+    second = Async.spawn other
+    Async.await first
+    Async.await second))

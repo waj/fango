@@ -726,8 +726,9 @@ func (el *elab) evidenceControl(unique int) types.Control {
 }
 
 type scopeVar struct {
-	name string
-	ty   types.Type // zonked at binding time
+	source string
+	name   string
+	ty     types.Type // zonked at binding time
 }
 
 type localPatternLet struct {
@@ -735,16 +736,21 @@ type localPatternLet struct {
 	rhs     core.Expr
 	subject string
 	ty      types.Type
+	names   map[string]string
 }
 
 func (el *elab) pushScope(name string, ty types.Type) {
-	el.scopeIdx[name] = len(el.scope)
-	el.scope = append(el.scope, scopeVar{name, ty})
+	el.pushScopeAs(name, name, ty)
+}
+
+func (el *elab) pushScopeAs(source, name string, ty types.Type) {
+	el.scopeIdx[source] = len(el.scope)
+	el.scope = append(el.scope, scopeVar{source: source, name: name, ty: ty})
 }
 
 func (el *elab) popScope(n int) {
 	for i := len(el.scope) - n; i < len(el.scope); i++ {
-		delete(el.scopeIdx, el.scope[i].name)
+		delete(el.scopeIdx, el.scope[i].source)
 	}
 	el.scope = el.scope[:len(el.scope)-n]
 }
@@ -961,7 +967,7 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 		return &core.UnitLit{Ty: ty}
 	case *ast.Var:
 		if index, local := el.scopeIdx[e.Name]; local {
-			return &core.VarRef{Name: e.Name, Ty: el.scope[index].ty, Local: true}
+			return &core.VarRef{Name: el.scope[index].name, Ty: el.scope[index].ty, Local: true}
 		}
 		if method := el.ck.Methods[e.Name]; method != nil {
 			return el.methodValue(method, el.ck.ExprTypes[e])
@@ -1086,8 +1092,9 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 				rhs := el.expr(bind.Body)
 				subject := fmt.Sprintf("_bind%d", el.tmp)
 				el.tmp++
-				pushed += el.pushPatternVars(bind.Pattern, rhs.Type())
-				order = append(order, localPatternLet{pattern: bind.Pattern, rhs: rhs, subject: subject, ty: rhs.Type()})
+				n := el.pushPatternVars(bind.Pattern, rhs.Type())
+				pushed += n
+				order = append(order, localPatternLet{pattern: bind.Pattern, rhs: rhs, subject: subject, ty: rhs.Type(), names: el.patternNames(n)})
 				continue
 			}
 			bindTy := el.ck.BindTypes[bind]
@@ -1142,7 +1149,7 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 			case core.Expr:
 				body = &core.Seq{First: x, Then: body, Ty: body.Type()}
 			case localPatternLet:
-				body = el.bindPatternCore(x.pattern, x.rhs, x.subject, x.ty, body)
+				body = el.bindPatternCore(x.pattern, x.rhs, x.subject, x.ty, x.names, body)
 			}
 		}
 		return body

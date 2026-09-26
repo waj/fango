@@ -14,6 +14,7 @@ read work = case Runtime.Coroutine.advance work () of
     Suspended value -> RESULT
     Finished _ -> Nothing
     Closed -> Nothing
+    Polled -> Nothing
 `
 
 func TestWrapperExpansionAcrossModuleBoundary(t *testing.T) {

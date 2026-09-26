@@ -6,11 +6,13 @@ Selective state-machine lowering, frame lifetime, pull ownership, and failure in
 
 ## Selective lowering
 
-`internal/machine` is a typed execution IR below semantic Core. It selects
-concrete Machine roots and every transport-polymorphic worker's Machine member.
-Fixed Direct/Exit definitions keep their ordinary path; their stored Machine
-callbacks get separate frame factories. Root lambdas inside synchronous cursor
-owners do not force their enclosing definition into Machine execution.
+`internal/machine` is a typed execution IR below semantic Core. It emits a
+Machine member for every worker and function closure, including fixed Direct
+and Exit definitions. Their ordinary members remain the synchronous path;
+the Machine members preserve continuations when scheduled Work reaches them
+through direct calls, stored callbacks, or module imports. The defining module
+owns these members independently of consumers. A synchronous cursor owner
+still runs through its ordinary member unless a scheduled Work advance reaches it.
 
 Lowering splits ANF Let/Seq/If computations at suspensions and Machine calls,
 shares branch continuations, and marks calls whose only continuation is return
@@ -29,7 +31,6 @@ preserves intermediate call results used by later constructor expressions.
 
 Factories and frame fields use the same value representation as ordinary code.
 Open callbacks retain a Machine member even inside otherwise Direct definitions.
-The defining module determines all these members, independent of consumers.
 
 ## Dispatch and frame lifetime
 
@@ -65,6 +66,22 @@ dispatcher turn without an adapter frame; pause returns to the same saved result
 edge after receiving its reply. Owning and completion boundaries materialize an
 entry frame when needed. Factories never execute user code.
 
+Packaging a cursor as Work gives it a shared poll budget. Each 256 Machine
+dispatch steps, before the next frame step, the dispatcher returns an internal
+poll event. Nested cursor and cleanup machines borrow the same budget. Traversal
+parks the entire live frame stack at the Work cursor, restores its evidence,
+and reports `Polled` to the driver. The next advance resumes those frames
+without consuming the poll reply as a suspension answer. This is an execution
+capability of Work packaging, independent of Async names. Synchronous calls
+outside packaged Work have no poll budget. A single opaque native call or an
+individual primitive evaluation is not interrupted by these dispatch polls.
+The interpreter keeps its compile-time budget and ordinary host interruption
+checks; scheduled Work lets its driver route interruption through cleanup.
+The [typed reply fixture](../../testdata/run/work_poll_reply.fango) checks that
+both backends return `Polled` and preserve the pending reply through resumption.
+The [close fixture](../../testdata/run/work_close_poll.fango) checks that a
+synchronous close drains CPU-heavy cleanup before returning.
+
 Suspension needs retained continuation state, but does not require a new heap
 frame for every source call. Self-tail re-entry reuses the same state storage;
 primitive work without independent continuation state uses its caller's saved
@@ -73,7 +90,7 @@ executing the next continuation inside a factory.
 
 The Go emitter can avoid an intermediate advancement result when its only use
 is an immediate exhaustive protocol match, following identity bindings. It
-selects the suspended/finished/closed edge and binds its typed payload directly;
+selects the suspended/finished/closed/polled edge and binds its typed payload directly;
 failure is propagated first. The same non-escape check removes a constructor
 immediately consumed by a case, including conversions between different ADTs.
 An escaping or separately observed result keeps its ordinary representation.
@@ -109,6 +126,9 @@ protocol-error paths clear frames, state, handlers, and suspension storage.
 
 Machine handler bodies and clauses are separate typed workers with lexical
 evidence in frame fields. Stateful clauses carry an opaque cell token.
+When a nested cursor starts under a live handler, its Machine inherits a view
+of the parent's state stack. Captured clause operations update the owning
+Machine's cell through that view, including across foreign suspension.
 
 An activation the body reaches at Direct is the exception: its clauses neither
 exit nor suspend, so they stay ordinary closures and only the body is a machine

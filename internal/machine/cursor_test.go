@@ -44,7 +44,7 @@ func TestCursorAdvanceProofAndLiveness(t *testing.T) {
 		{"missing descriptor", func(c *CursorAdvance) { c.Result = nil }, "invalid coroutine Step result"},
 		{"missing constructor", func(c *CursorAdvance) {
 			copy := *adt
-			copy.Ctors = []*types.CtorInfo{nil, adt.Ctors[1], adt.Ctors[2]}
+			copy.Ctors = []*types.CtorInfo{nil, adt.Ctors[1], adt.Ctors[2], adt.Ctors[3]}
 			c.Result = &copy
 		}, "invalid coroutine Step constructors"},
 	} {

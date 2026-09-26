@@ -25,7 +25,10 @@ type MachineIterator struct {
 	busy                         bool
 	owner                        *YieldOwner
 	machine                      *Machine
+	closeMachine                 *Machine
 	started                      bool
+	polled                       bool
+	poll                         *pollBudget
 	done                         bool
 	closing                      bool
 	stopped                      bool
@@ -71,6 +74,7 @@ func (f *closeIteratorFrame) Clear() { f.it = nil; f.primary = nil }
 
 func (it *MachineIterator) finishClose() {
 	it.done, it.closing, it.busy = true, false, false
+	it.closeMachine = nil
 	it.unlink()
 	it.evidence.Clear()
 	it.clearRegistered()

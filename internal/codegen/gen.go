@@ -294,7 +294,7 @@ func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, un
 	}
 
 	switch {
-	case mainDef != nil && machineWorkers[mainDef.Name] != nil:
+	case mainDef != nil && machineWorkers[mainDef.Name] != nil && mainDef.Control.Resolve(types.Direct) == types.Machine:
 		var args []goast.Expr
 		for range mainDef.Params {
 			args = append(args, selector("fangort", "UnitValue"))

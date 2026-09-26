@@ -231,6 +231,10 @@ type Return struct {
 	Value core.Expr
 }
 
+// Unreachable is a statically excluded decision-tree path. If entered because
+// an invariant is broken, both backends fail instead of using an unbound result.
+type Unreachable struct{}
+
 func (*Eval) isTerm()          {}
 func (*Branch) isTerm()        {}
 func (*SwitchCtor) isTerm()    {}
@@ -245,3 +249,4 @@ func (*CursorOpen) isTerm()    {}
 func (*CursorClose) isTerm()   {}
 func (*PopCleanup) isTerm()    {}
 func (*Return) isTerm()        {}
+func (*Unreachable) isTerm()   {}

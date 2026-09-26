@@ -19,7 +19,10 @@ type MachineIteratorSession struct {
 	busy                         bool
 	owner                        *fangort.YieldOwner
 	session                      *MachineSession
+	closeSession                 *MachineSession
 	started                      bool
+	polled                       bool
+	poll                         *evalPollBudget
 	done                         bool
 	closing                      bool
 	stopped                      bool
@@ -29,6 +32,7 @@ type MachineIteratorSession struct {
 
 func (it *MachineIteratorSession) finishClose() {
 	it.done, it.closing, it.busy = true, false, false
+	it.closeSession = nil
 	it.unlink()
 	it.evidence.Clear()
 	it.clearRegistered()

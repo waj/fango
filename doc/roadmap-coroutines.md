@@ -12,8 +12,8 @@ implementation stage lands.
 The first usable milestone is C0–C3, with Async's early A0 representation gate:
 checked typed coroutines, ordinary Stream/Iterator wrappers, and a deterministic
 scheduler demonstration. C4 adds implemented dynamic ownership; C6a–C6c add
-checked storage, requests, and sharing. C5 adds suspending cleanup; C6d and C7 remain separately gated
-capabilities needed by later consumers. Stage numbers are local
+checked storage, requests, and sharing. C5 adds suspending cleanup and C7 adds
+execution checkpoints; C6d remains separately gated for later executors. Stage numbers are local
 to this document; dependencies name stages rather than assuming one unbroken
 global ordering.
 
@@ -179,7 +179,7 @@ checkpoint; C1–C3 together are the first usable replacement foundation.
 | C6b: Scoped native requests and retention | C4; C5 only for suspending cleanup | DONE: bounded requests and callbacks with checked quiescence |
 | C6c: Shared and transferable capabilities | C0/A0 capture contracts; C4 ownership | DONE: checked shared values and implicit service invocation authority |
 | C6d: Concurrent invocation and runtime safety | C6b, C6c; C6a when values cross opaquely | Checked concurrent callbacks and race-safe runtime representations |
-| C7: General execution checkpoints | C1; Async A2 as integration consumer | Compiler-generated scheduling/cancellation points in CPU work |
+| C7: General execution checkpoints | C1; Async A2 as integration consumer | DONE: packaged Work polls generated CPU execution |
 
 C0, the design part of C4, and [Async A0](roadmap-async.md#a0-library-representation-contract)
 form the joint feasibility gate. Focused source probes and test-only models
@@ -411,41 +411,10 @@ independently by goroutine-per-task and worker-pool executors.
 
 ### C7: General execution checkpoints
 
-**Dependencies:** C1, with Async A2 as the structured cancellation consumer.
-This is a later responsiveness milestone, not a prerequisite for explicit-yield
-cooperative IO.
-
-Introduce compiler-generated scheduling/cancellation checkpoints for long CPU
-work. Cover generated loops, self-tail loops, general Machine dispatch, and
-Direct/Exit callees reachable from a task. Wrapping an uninterruptible callback
-in ImmediateMachine does not provide a checkpoint inside it. A poll that can
-yield must preserve the live execution as explicit frames; merely observing a
-flag cannot implement cooperative scheduling.
-
-Before implementation, specify poll placement/frequency, cancellation routing,
-transport and callable-family changes, and the execution capability that enables
-polling. It must be general execution support rather than recognition of Async
-names. Preserve the ordinary Direct/Exit fast paths outside scheduled execution,
-definition-site evidence, module-owned ABIs, staging budgets, and existing
-evaluator interruption checks. Explain how indirect and separately compiled
-calls receive the execution context without ambient worker identity.
-
-Cancellation must enter the same owned drain protocol as explicit checkpoints;
-it cannot skip cleanup, interrupt a shielded release repeatedly, or surface as a
-catchable ordinary failure. Opaque native work keeps its C6b cancellation/drain
-contract; compiler polling does not make every host call interruptible.
-
-**Acceptance:** CPU-only loops and Direct helpers reached through stored or
-cross-module calls let another ready task progress and observe cancellation in
-both backends. Nested resources release once, handler identities survive a
-scheduling switch, and no task is resumed concurrently. Test progress using
-controlled work/poll counts and synchronization rather than fragile elapsed-time
-thresholds. Measure overhead and cancellation latency separately on an idle
-machine, including synchronous code outside Async.
-
-**Stopping point:** generated Fango CPU work reaches documented safe points.
-Async's A8 integration owns executor behavior; no guarantee is made that arbitrary
-native calls or nonterminating cleanup complete within a deadline.
+**DONE.** [Machine dispatch](design/machines.md#dispatch-and-frame-lifetime)
+owns poll placement, frame retention, and callable families;
+[Work](reference/library-work.md) owns the public `Polled` protocol. Async's
+[A8](roadmap-async.md#a8-cpu-responsiveness) supplies the task driver.
 
 ## Acceptance and verification
 

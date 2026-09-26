@@ -134,8 +134,8 @@ Deferred until a consumer needs them:
 
 [Effects](roadmap-effects.md) owns general handler and language extensions.
 [Owned coroutines](roadmap-coroutines.md) details the shared suspension API,
-implemented dynamic scope ownership and remaining suspending
-cleanup, general native retention/transfer contracts, and execution checkpoints.
+implemented dynamic scope ownership, suspending cleanup, native
+retention/transfer contracts, and execution checkpoints.
 Preserve checked ownership and ordinary calls/explicit machines; Stream and Async
 names do not become compiler primitives.
 
@@ -144,8 +144,8 @@ names do not become compiler primitives.
 [Async](roadmap-async.md) owns library task/context semantics, cooperative
 scheduling, native readiness, parallel and mixed worker-pool executors,
 and bounded concurrent streams/events. It builds on the coroutine stages.
-Initial cancellation uses explicit checkpoints; [CPU responsiveness](roadmap-async.md#a8-cpu-responsiveness)
-adds generated polling later. Both concurrent executors require the general
+The cooperative executor also schedules generated CPU work at
+[automatic checkpoints](reference/library-async-cooperative.md). Both concurrent executors require the general
 runtime safety gate. Goroutines drive coroutines rather than represent effect
 continuations.
 

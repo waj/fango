@@ -45,6 +45,7 @@ func (it *MachineIteratorSession) begin(input Value) error {
 			return err
 		}
 		it.session = session
+		it.session.poll = it.poll
 	}
 	if it.session == nil {
 		return fmt.Errorf("eval: coroutine has no producer")

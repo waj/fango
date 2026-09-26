@@ -17,6 +17,7 @@ import (
 // completed nil/Unit-like value from suspension. This protocol is not exposed
 // to Fango source; E8 supplies the ownership contract for source consumers.
 type MachineEvent struct {
+	poll    *evalPollBudget
 	advance *cursorAdvanceRequest
 	cleanup *MachineSession
 	Owner   *fangort.YieldOwner
@@ -106,6 +107,7 @@ const (
 )
 
 type MachineSession struct {
+	poll             *evalPollBudget
 	stopRouting      bool
 	stopCaught       *ExitRequest
 	parentStateOwner *MachineSession
@@ -131,6 +133,10 @@ type MachineSession struct {
 	states           []Value
 	handlers         []machineHandler
 }
+
+const evalMachinePollInterval = 256
+
+type evalPollBudget struct{ steps uint64 }
 
 // StartMachine validates and initializes an iterative machine evaluation.
 // Call Run to reach the first suspension or completion.
@@ -218,6 +224,10 @@ func (in *interp) startMachineClosure(p *machineir.Prog, closure *machineClosure
 
 // Run advances until the next suspension, normal completion, or exit.
 func (s *MachineSession) runLocal() (event MachineEvent, err error) {
+	if s.poll != nil {
+		s.interp.pollOwned++
+		defer func() { s.interp.pollOwned-- }()
+	}
 	if s.finished {
 		return MachineEvent{}, fmt.Errorf("eval: machine session already completed")
 	}
@@ -266,6 +276,12 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 			}
 		}
 		s.stats.Steps++
+		if s.poll != nil {
+			s.poll.steps++
+			if s.poll.steps%evalMachinePollInterval == 0 {
+				return MachineEvent{poll: s.poll}, nil
+			}
+		}
 		if err := s.interp.tick(); err != nil {
 			return MachineEvent{}, err
 		}
@@ -892,6 +908,8 @@ func (s *MachineSession) runLocal() (event MachineEvent, err error) {
 				s.states[i] = nil
 				s.states = s.states[:i]
 			}
+		case *machineir.Unreachable:
+			return MachineEvent{}, fmt.Errorf("eval: unreachable machine branch")
 		default:
 			return MachineEvent{}, fmt.Errorf("eval: unknown machine terminator %T", block.Term)
 		}

@@ -177,76 +177,142 @@ func transfer(term Term, liveIn []map[string]bool, ordinaryOut map[string]bool) 
 	}
 }
 
-// freeLocalRefs relies on Core's no-shadowing invariant: binder names are
-// unique throughout an expression, so collecting then subtracting every
-// nested binder is equivalent to a scope-sensitive free-variable walk.
+// freeLocalRefs walks binders by lexical scope. Generated equation parameters
+// can reuse a spelling in a nested lambda; subtracting every binder in the
+// entire expression would hide a reference to the enclosing parameter.
 func freeLocalRefs(e core.Expr) map[string]bool {
 	refs := map[string]bool{}
-	bound := map[string]bool{}
-	var treeBinders func(core.Tree)
-	treeBinders = func(tree core.Tree) {
-		switch tree := tree.(type) {
-		case *core.Guard:
-			treeBinders(tree.Then)
-			treeBinders(tree.Else)
-		case *core.SwitchCtor:
-			for _, c := range tree.Cases {
-				for _, name := range c.Binds {
-					if name != "" {
-						bound[name] = true
-					}
-				}
-				treeBinders(c.Tree)
+	bound := map[string]int{}
+	with := func(names []string, body func()) {
+		for _, name := range names {
+			if name != "" && name != "_" && name != "()" {
+				bound[name]++
 			}
-			if tree.Default != nil {
-				treeBinders(tree.Default)
+		}
+		body()
+		for _, name := range names {
+			if name != "" && name != "_" && name != "()" {
+				bound[name]--
 			}
-		case *core.SwitchLit:
-			for _, c := range tree.Cases {
-				treeBinders(c.Tree)
-			}
-			treeBinders(tree.Default)
 		}
 	}
-	core.Rewrite(e, identityType, func(x core.Expr) core.Expr {
+	var walk func(core.Expr)
+	var walkTree func(core.Tree)
+	walkTree = func(tree core.Tree) {
+		switch tree := tree.(type) {
+		case nil, *core.Unreachable:
+		case *core.Leaf:
+			walk(tree.Body)
+		case *core.Guard:
+			walk(tree.Cond)
+			walkTree(tree.Then)
+			walkTree(tree.Else)
+		case *core.SwitchCtor:
+			for _, c := range tree.Cases {
+				with(c.Binds, func() { walkTree(c.Tree) })
+			}
+			walkTree(tree.Default)
+		case *core.SwitchLit:
+			for _, c := range tree.Cases {
+				walk(c.Lit)
+				walkTree(c.Tree)
+			}
+			walkTree(tree.Default)
+		}
+	}
+	walk = func(x core.Expr) {
+		if x == nil {
+			return
+		}
 		switch x := x.(type) {
 		case *core.VarRef:
-			if x.Local {
+			if x.Local && bound[x.Name] == 0 {
 				refs[x.Name] = true
 			}
 		case *core.Let:
-			if x.Name != "_" {
-				bound[x.Name] = true
+			if x.Rec {
+				with([]string{x.Name}, func() { walk(x.Rhs); walk(x.Body) })
+			} else {
+				walk(x.Rhs)
+				with([]string{x.Name}, func() { walk(x.Body) })
 			}
 		case *core.Lambda:
-			if x.Param != "_" {
-				bound[x.Param] = true
-			}
+			with([]string{x.Param}, func() { walk(x.Body) })
 		case *core.Case:
-			bound[x.Bind] = true
-			treeBinders(x.Tree)
+			walk(x.Scrut)
+			with([]string{x.Bind}, func() { walkTree(x.Tree) })
 		case *core.Handle:
+			state := ""
 			if x.State != nil {
-				bound[x.State.Name] = true
+				walk(x.State.Initial)
+				state = x.State.Name
 			}
-			for _, clause := range x.Clauses {
-				for _, name := range clause.Params {
-					if name != "_" && name != "()" {
-						bound[name] = true
-					}
+			with([]string{state}, func() {
+				walk(x.Body)
+				for _, clause := range x.Clauses {
+					with(clause.Params, func() { walk(clause.Body) })
 				}
-			}
-			if x.Return != nil && x.Return.Param != "_" && x.Return.Param != "()" {
-				bound[x.Return.Param] = true
-			}
+				if x.Return != nil {
+					with([]string{x.Return.Param}, func() { walk(x.Return.Body) })
+				}
+			})
 		case *core.Bracket:
-			bound[x.Resource] = true
+			walk(x.Acquire)
+			with([]string{x.Resource}, func() { walk(x.Body); walk(x.Release) })
+		case *core.If:
+			walk(x.Cond)
+			walk(x.Then)
+			walk(x.Else)
+		case *core.Seq:
+			walk(x.First)
+			walk(x.Then)
+		case *core.App:
+			walk(x.Callee)
+			for _, arg := range x.Args {
+				walk(arg)
+			}
+		case *core.Perform:
+			for _, arg := range x.Args {
+				walk(arg)
+			}
+		case *core.NativeCall:
+			for _, arg := range x.Args {
+				walk(arg)
+			}
+		case *core.Work:
+			for _, arg := range x.Args {
+				walk(arg)
+			}
+		case *core.FailureInspect:
+			for _, arg := range x.Args {
+				walk(arg)
+			}
+		case *core.ControlExit:
+			for _, arg := range x.Payload {
+				walk(arg)
+			}
+		case *core.Quote:
+			for _, hole := range x.Holes {
+				walk(hole)
+			}
+		case *core.Completion:
+			walk(x.Value)
+		case *core.Neg:
+			walk(x.Operand)
+		case *core.Suspend:
+			walk(x.Request)
+		case *core.CoroutineAdvance:
+			walk(x.Cursor)
+			walk(x.Reply)
+		case *core.CoroutineScope:
+			walk(x.Producer)
+			walk(x.Consumer)
+		case *core.ResumeTail:
+			walk(x.Value)
+			walk(x.NextState)
 		}
-		return x
-	})
-	for name := range bound {
-		delete(refs, name)
 	}
+	walk(e)
 	return refs
 }
 

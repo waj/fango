@@ -40,6 +40,8 @@ dispatch budget ready waiting =
                         dispatch (budget - 1) rest waiting
                     Runtime.Coroutine.Closed ->
                         print "unexpected closed"
+                    Runtime.Coroutine.Polled ->
+                        print "unexpected poll"
 
 rounds : (Request ->{Runtime.Coroutine.Suspension} ()) -> String -> Int ->{Runtime.Coroutine.Suspension, IO} ()
 rounds pause name 0 = ()

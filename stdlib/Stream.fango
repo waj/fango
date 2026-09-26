@@ -28,12 +28,14 @@ drain : Coroutine a () () e ->{Drive | e} ()
 drain work =
     case Runtime.Coroutine.stop work of
         Runtime.Coroutine.Suspended _ -> finishDrain work
+        Runtime.Coroutine.Polled -> finishDrain work
         _ -> ()
 
 finishDrain : Coroutine a () () e ->{Drive | e} ()
 finishDrain work =
     case Runtime.Coroutine.advance work () of
         Runtime.Coroutine.Suspended _ -> finishDrain work
+        Runtime.Coroutine.Polled -> finishDrain work
         _ -> ()
 
 withCursor : Stream a e -> (Iterator a e ->{Drive | e} result) ->{e} result

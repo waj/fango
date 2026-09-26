@@ -34,6 +34,7 @@ func (in *interp) evalWork(e *core.Work, fr *Frame) (Value, error) {
 		if err != nil {
 			return nil, err
 		}
+		cursor.poll = &evalPollBudget{}
 		return &workPackage{owner: scope.work, cursor: cursor}, nil
 	case "create":
 		return registerCoroutine(args[0].(*MachineIteratorSession), in.openCoroutine(in.env.machine, args[1].(*Closure), args[0].(*MachineIteratorSession).evidence.Row()))
@@ -49,7 +50,11 @@ func (in *interp) evalWork(e *core.Work, fr *Frame) (Value, error) {
 		if !ok || owner.closed {
 			return nil, fmt.Errorf("eval: work package has no live owner")
 		}
-		return &workPackage{owner: owner, cursor: args[1]}, nil
+		cursor := args[1].(*MachineIteratorSession)
+		if cursor.poll == nil {
+			cursor.poll = &evalPollBudget{}
+		}
+		return &workPackage{owner: owner, cursor: cursor}, nil
 	case "open", "open-stop", "stop-completion":
 		owner, ok := args[0].(*workOwner)
 		work, valid := args[1].(*workPackage)

@@ -81,12 +81,27 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 				return MachineEvent{}, fmt.Errorf("eval: overlapping cursor advancement")
 			}
 			if request.term.Close {
+				callerPoll := d.active.poll
 				d.pulls = append(d.pulls, machinePull{caller: d.active, cursor: cursor, term: request.term, close: true})
-				d.active = startCloseIterator(d.active.interp, cursor)
+				if cursor.polled && cursor.closeSession != nil {
+					parked := cursor.closeSession.traversal
+					cursor.closeSession.traversal = nil
+					d.active = parked.active
+					d.pulls = append(d.pulls, parked.pulls...)
+				} else {
+					cursor.closeSession = startCloseIterator(d.active.interp, cursor)
+					d.active = cursor.closeSession
+				}
+				cursor.polled = false
+				if cursor.reportStop && cursor.poll != nil {
+					d.active.poll = cursor.poll
+				} else {
+					d.active.poll = callerPoll
+				}
 				continue
 			}
 			if cursor.done {
-				d.active.completeAdvance(request.term, nil, false, false, nil)
+				d.active.completeAdvance(request.term, nil, false, false, false, nil)
 				continue
 			}
 			if err := cursor.begin(request.input); err != nil {
@@ -102,10 +117,18 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 			} else {
 				d.active = cursor.session
 			}
+			if cursor.poll != nil {
+				d.active.poll = cursor.poll
+			} else if d.active.poll == nil {
+				d.active.poll = d.pulls[len(d.pulls)-1].caller.poll
+			}
 			if cursor.started {
-				if err := d.active.resumeLocal(request.input); err != nil {
-					return MachineEvent{}, err
+				if !cursor.polled {
+					if err := d.active.resumeLocal(request.input); err != nil {
+						return MachineEvent{}, err
+					}
 				}
+				cursor.polled = false
 			}
 			cursor.started = true
 			if len(d.pulls) > m.stats.MaxPullDepth {
@@ -114,6 +137,7 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 			continue
 		}
 		if cleanup := event.cleanup; cleanup != nil {
+			cleanup.poll = d.active.poll
 			d.pulls = append(d.pulls, machinePull{caller: d.active, cleanup: true})
 			d.active = cleanup
 			continue
@@ -138,7 +162,7 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 					pull.cursor.stopExit = detachCompletionExit(event.Exit)
 					event.Exit = nil
 				}
-				d.active.completeAdvance(pull.term, nil, false, false, event.Exit)
+				d.active.completeAdvance(pull.term, nil, false, false, false, event.Exit)
 				continue
 			}
 			pull.cursor.done, pull.cursor.busy = true, false
@@ -150,7 +174,36 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 			pull.cursor.evidence.Clear()
 			pull.cursor.clearRegistered()
 			d.active = pull.caller
-			d.active.completeAdvance(pull.term, event.Value, false, event.Exit == nil && !pull.cursor.stopped, event.Exit)
+			d.active.completeAdvance(pull.term, event.Value, false, event.Exit == nil && !pull.cursor.stopped, false, event.Exit)
+			continue
+		}
+		if event.poll != nil {
+			matched := -1
+			for i := len(d.pulls) - 1; i >= 0; i-- {
+				if d.pulls[i].cursor != nil && d.pulls[i].cursor.poll == event.poll {
+					matched = i
+					break
+				}
+			}
+			if matched < 0 {
+				return event, nil
+			}
+			pull := d.pulls[matched]
+			root := pull.cursor.session
+			if pull.close {
+				root = pull.cursor.closeSession
+			}
+			root.traversal = &machineTraversal{active: d.active,
+				pulls: append([]machinePull(nil), d.pulls[matched+1:]...)}
+			for i := matched; i < len(d.pulls); i++ {
+				d.pulls[i] = machinePull{}
+			}
+			d.pulls = d.pulls[:matched]
+			pull.cursor.busy = false
+			pull.cursor.polled = true
+			pull.cursor.evidence.Restore()
+			d.active = pull.caller
+			d.active.completeAdvance(pull.term, nil, false, false, true, nil)
 			continue
 		}
 		matched := -1
@@ -174,7 +227,7 @@ func (m *MachineSession) drive() (event MachineEvent, err error) {
 		pull.cursor.busy = false
 		pull.cursor.evidence.Restore()
 		d.active = pull.caller
-		d.active.completeAdvance(pull.term, event.Request, true, false, nil)
+		d.active.completeAdvance(pull.term, event.Request, true, false, false, nil)
 	}
 }
 
@@ -193,7 +246,7 @@ func (m *MachineSession) Abandon() (*ExitRequest, error) {
 	return event.Exit, nil
 }
 
-func (m *MachineSession) completeAdvance(term *machineir.CursorAdvance, value Value, present, finished bool, exit *ExitRequest) {
+func (m *MachineSession) completeAdvance(term *machineir.CursorAdvance, value Value, present, finished, polled bool, exit *ExitRequest) {
 	if exit != nil {
 		m.pendingExit = exit
 		return
@@ -207,6 +260,8 @@ func (m *MachineSession) completeAdvance(term *machineir.CursorAdvance, value Va
 		index = 0
 	} else if finished {
 		index = 1
+	} else if polled {
+		index = 3
 	}
 	result := &CtorVal{Ctor: term.Result.Ctors[index]}
 	if index != 2 {

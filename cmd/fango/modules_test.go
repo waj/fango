@@ -26,6 +26,12 @@ func TestMultiModuleDifferential(t *testing.T) {
 	}
 }
 
+func TestAsyncA8CrossModule(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join("..", "..", "testdata", "modules", "async_a8_cpu", "Main.fango")
+	runDifferentialCase(t, path, cliRunner(path))
+}
+
 func TestCrossModuleBlanketCycle(t *testing.T) {
 	t.Parallel()
 	entry := filepath.Join("..", "..", "testdata", "modules", "blanket_cycle", "Main.fango")

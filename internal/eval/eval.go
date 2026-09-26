@@ -404,6 +404,9 @@ type interp struct {
 	ioctx    *IOContext
 	evidence map[int]*evidence
 	steps    int
+	// Scheduled Work reports interruption through its driver so cleanup drains.
+	// Ordinary and staged evaluation keep the host interruption check.
+	pollOwned int
 
 	// compileTime restricts the interpreter to what a compiler may run: a
 	// step budget, and no native that observes external state or lives in a Go
@@ -486,10 +489,12 @@ func ForceIO(ctx context.Context, name string, env *Env, ioctx *IOContext) (Valu
 func (in *interp) tick() error {
 	in.steps++
 	if in.steps%pollEvery == 0 {
-		select {
-		case <-in.ctx.Done():
-			return fmt.Errorf("interrupted")
-		default:
+		if in.pollOwned == 0 || in.compileTime {
+			select {
+			case <-in.ctx.Done():
+				return fmt.Errorf("interrupted")
+			default:
+			}
 		}
 		if in.budget > 0 && in.steps > in.budget {
 			return ErrStepBudget

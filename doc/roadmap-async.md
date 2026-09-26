@@ -54,14 +54,10 @@ No `async`/`await` keywords, special blocks, raw continuation callbacks,
 continuation cloning, detached tasks, general public channels/select, multicast,
 or replay are included. Shared mutable state has its own [STM roadmap](roadmap-stm.md).
 
-The first release uses explicit yield/wait checkpoints; it does not preempt a
-Fango coroutine running on the same cooperative worker. Compiler-generated
-polling is a committed later responsiveness stage, [A8](#a8-cpu-responsiveness),
-over [general execution checkpoints](roadmap-coroutines.md#c7-general-execution-checkpoints).
-Preserve existing evaluator interruption/budget checks; before that stage they
-are not a portable promise that arbitrary generated loops can be cancelled and
-cleaned up promptly. Polling does not imply forced termination of native calls
-or nonterminating cleanup.
+The cooperative executor now schedules generated Fango work at
+[automatic checkpoints](reference/library-async-cooperative.md), in addition
+to explicit yield and waits. Polling does not imply forced termination of native
+calls or nonterminating cleanup.
 
 Native code may execute concurrently for readiness or IO while the cooperative
 executor still runs at most one Fango coroutine at a time. Cooperative does
@@ -400,18 +396,11 @@ not just goroutines.
 
 ### Checkpoint policy
 
-Initial checkpoints are explicit yield and wait operations, including awaiting
-completed work and native wait entry/return. Structured-context entry/exit and
-task startup also check pending cancellation. Spawn must not admit unbounded
-new work into a context already cancelling; reject it through the same internal
-cancellation path rather than adding an orphan task.
-
-An arithmetic loop with no checkpoint can occupy a cooperative worker forever.
-Go may preempt a goroutine in the parallel executor, but that does not make the
-Fango action observe cancellation or run cleanup. No stage promises to kill such
-action and safely free resources underneath it. Generated loop polling belongs
-to the later C7/A8 execution-checkpoint milestone. Until it lands, the first
-release's supported cancellation points remain exactly those listed above.
+The implemented [cooperative checkpoint policy](reference/library-async-cooperative.md)
+includes generated CPU work. Spawn must not admit new work into a context
+already cancelling; reject it through the internal cancellation path rather
+than adding an orphan task. Future executors must keep that cancellation
+coverage: Go goroutine preemption alone does not make a Fango action run cleanup.
 
 ### Cancellation and draining
 
@@ -642,18 +631,17 @@ language work is specified once in the coroutine roadmap.
 | A5: Goroutine executor | A4, C6d | One driver goroutine per task |
 | A6: Mixed executor | A4, C6d | Bounded pool advancing cooperative tasks |
 | A7: Concurrent combinators and events | A4; repeat executor coverage after A5/A6 | DONE: bounded mapping, race, timeout, tick subscriptions on cooperative executor |
-| A8: CPU responsiveness | A2, C7; repeat coverage for every delivered executor | Scheduling/cancellation checkpoints in generated CPU work |
+| A8: CPU responsiveness | A2, C7; repeat coverage for every delivered executor | DONE: cooperative executor schedules generated CPU work |
 | A9: Measured optimization | Functional stages under measurement complete | Evidence-backed improvements without semantic changes |
 
-A7 shipped without parallel execution. A5 and A6 share the C6d safety gate; implementing goroutine-per-task first
+A7 and A8 shipped without parallel execution. A5 and A6 share the C6d safety gate; implementing goroutine-per-task first
 may provide a useful test harness, but it is not a semantic prerequisite for the
-worker pool. A8 can begin after A2/C7 without waiting for parallel execution,
-and its tests must be repeated for subsequently delivered executors.
+worker pool. A8's coverage must be repeated for subsequently delivered executors.
 
 A3 supplies the first practical cooperative IO release. The concurrent server
 still needs the wider adapter and executor work in the
 [IO roadmap](roadmap-io.md). The full Async target includes all three executors
-and A8 responsiveness.
+and responsive generated work on each executor.
 
 ### A0: Library representation contract
 
@@ -809,27 +797,11 @@ Repeat applicable cases when A5 and A6 deliver more executors.
 
 ### A8: CPU responsiveness
 
-Integrate C7's general checkpoints with the task lifecycle and every delivered
-executor. A cooperative poll can return the task to the ready queue; a pool poll
-releases its worker; parallel mode observes cancellation and offers a scheduling
-opportunity. The same program must not lose cancellation coverage when executor
-selection changes. Specify the relationship between automatic polling and
-explicit yield without promising identical schedules or strict fairness.
-
-**Acceptance:** a CPU-only task and another ready task both make progress; cancel
-CPU work reached through generated loops, self-tail calls, Direct helpers,
-stored callbacks, and module boundaries. Verify typed failure propagation,
-one release attempt per acquired resource, shielding, and sole advancement.
-Exercise the interpreter and emitted Go, including already-completed awaits and
-polls racing with context cancellation. Native requests still obey their own
-drain contract, and a release that never finishes still prevents context exit.
-
-**Stopping point:** every delivered executor supports documented scheduling and
-cancellation safe points for generated CPU work as well as explicit waits;
-later executors must satisfy the same coverage before delivery.
-Deterministic progress fixtures gate correctness; idle-host measurements cover
-polling overhead and latency without turning load-sensitive timing into ordinary
-test requirements.
+**DONE for the delivered cooperative executor.**
+[Task behavior](reference/library-async-cooperative.md) and the
+[driver design](design/async-cooperative.md) describe automatic polls,
+explicit yield, cancellation, and drain. A5 and A6 remain future executors;
+each must provide the same generated-work coverage before delivery.
 
 ### A9: Measured optimization
 

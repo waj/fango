@@ -58,9 +58,13 @@ func TestLowerSharesBranchContinuation(t *testing.T) {
 		t.Fatalf("Lower: %s", errorsText(errs))
 	}
 	w := mp.Workers[0]
-	branch, ok := w.Blocks[w.Entry].Term.(*Branch)
+	condition, ok := w.Blocks[w.Entry].Term.(*Eval)
 	if !ok {
-		t.Fatalf("entry = %T, want Branch", w.Blocks[w.Entry].Term)
+		t.Fatalf("entry = %T, want condition evaluation", w.Blocks[w.Entry].Term)
+	}
+	branch, ok := w.Blocks[condition.Next].Term.(*Branch)
+	if !ok {
+		t.Fatalf("after condition = %T, want Branch", w.Blocks[condition.Next].Term)
 	}
 	thenSuspend := w.Blocks[branch.Then].Term.(*Suspend)
 	elseSuspend := w.Blocks[branch.Else].Term.(*Suspend)
@@ -123,12 +127,12 @@ func TestLowerEmitsFactoryClosuresIndependentlyOfMachineConsumers(t *testing.T) 
 	if len(errs) != 0 {
 		t.Fatal(errs)
 	}
-	if len(mp.Workers) != 2 || mp.Workers[0].Name != "Library.factory_machine_lambda1" || len(mp.Closures) != 1 {
+	if len(mp.Workers) != 3 || mp.Workers[0].Name != "Library.factory" || mp.Workers[2].Name != "Library.factory_machine_lambda1" || len(mp.Closures) != 1 {
 		t.Fatalf("factory lacks its module-owned Machine closure: %v, %v", workerNames(mp), mp.Closures)
 	}
 	p.Defs = p.Defs[:1]
 	onlyFactory, errs := Lower(p, b)
-	if len(errs) != 0 || len(onlyFactory.Workers) != 1 || onlyFactory.Workers[0].Name != mp.Workers[0].Name || len(onlyFactory.Closures) != 1 {
+	if len(errs) != 0 || len(onlyFactory.Workers) != 2 || onlyFactory.Workers[0].Name != mp.Workers[0].Name || onlyFactory.Workers[1].Name != mp.Workers[2].Name || len(onlyFactory.Closures) != 1 {
 		t.Fatalf("factory depends on downstream Machine consumer: %v, %v", workerNames(onlyFactory), errs)
 	}
 }

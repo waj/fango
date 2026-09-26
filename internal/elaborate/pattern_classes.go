@@ -54,25 +54,29 @@ func (m *matcher) ordered(patterns [][]ast.Pattern, occs []occurrence, i int) co
 		failure = m.ordered(patterns, occs, i+1)
 	}
 	for j := len(patterns[i]) - 1; j >= 0; j-- {
-		success = m.orderedPattern(patterns[i][j], occs[j], success, failure)
+		success = m.orderedPattern(patterns[i][j], occs[j], m.rows[i].names, success, failure)
 	}
 	return success
 }
 
-func (m *matcher) orderedPattern(p ast.Pattern, occ occurrence, success, failure core.Tree) core.Tree {
+func (m *matcher) orderedPattern(p ast.Pattern, occ occurrence, names map[string]string, success, failure core.Tree) core.Tree {
 	el := m.el
 	ref := &core.VarRef{Name: occ.name, Ty: occ.ty, Local: true}
 	switch p := p.(type) {
 	case *ast.PWildcard, *ast.PUnit:
 		return success
 	case *ast.PVar:
-		if !core.TreeMentions(success, p.Name) {
+		name := names[p.Name]
+		if name == "" {
+			name = p.Name
+		}
+		if !core.TreeMentions(success, name) {
 			return success
 		}
 		// A one-field irrefutable binding is represented as a Case with a
 		// leaf, so the success tree can retain its constructor occurrences.
 		ty := m.bodies[0].Type()
-		body := &core.Case{Scrut: ref, Bind: p.Name, Tree: success, Ty: ty}
+		body := &core.Case{Scrut: ref, Bind: name, Tree: success, Ty: ty}
 		return &core.Leaf{Body: body}
 	case *ast.PCtor:
 		ctor := el.ck.Ctors[p.Name]
@@ -84,7 +88,7 @@ func (m *matcher) orderedPattern(p ast.Pattern, occ occurrence, success, failure
 			el.tmp++
 		}
 		for i := len(p.Args) - 1; i >= 0; i-- {
-			success = m.orderedPattern(p.Args[i], occurrence{name: binds[i], ty: fts[i]}, success, failure)
+			success = m.orderedPattern(p.Args[i], occurrence{name: binds[i], ty: fts[i]}, names, success, failure)
 		}
 		for i, n := range binds {
 			if !core.TreeMentions(success, n) {

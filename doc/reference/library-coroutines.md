@@ -5,7 +5,7 @@ and final results. Import it qualified; `Step` has public constructors and
 derived `Eq` and `Show` instances.
 
 ```fango
-type Step request result = Suspended request | Finished result | Closed
+type Step request result = Suspended request | Finished result | Closed | Polled
 
 with : ((request ->{Suspension} reply) -> reply ->{Suspension | e} result)
     -> (Coroutine request reply result e ->{Drive | e} a) ->{e} a
@@ -43,6 +43,7 @@ arguments to terminal advances and partial applications.
 | Advance an unstarted owner | Apply the producer to its pause callback and initial input |
 | Advance a suspended owner | Return the reply from its pending pause and continue |
 | Producer pauses locally | Return `Suspended request`, retaining execution and cleanup |
+| Packaged Work reaches a generated poll | Return `Polled`, retaining execution and the pending reply |
 | Producer returns | Complete cleanup, then return `Finished result` exactly once |
 | Advance a terminal owner | Return `Closed` |
 | Close before starting | Discard the producer without invoking it |
@@ -50,6 +51,10 @@ arguments to terminal advances and partial applications.
 | Stop suspended production | Return each cleanup request as `Suspended`; resume with `advance` until `Closed` |
 | Close a terminal owner | Return Unit without retrying cleanup |
 | Leave `with` | Close unfinished production before returning the driver answer |
+
+`Polled` is possible when a coroutine is packaged as
+[`Runtime.Work`](library-work.md). Advance it again with the same reply to
+continue. It does not answer a pending producer pause or release the owner.
 
 An outward failure terminates production before reaching the outer handler.
 Catching it around an advance leaves later advances returning `Closed`. A

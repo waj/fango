@@ -6,6 +6,7 @@ import "fmt"
 // packages Value/Present into Maybe and propagates Exit before using Value.
 type CursorResult struct {
 	Finished bool
+	Polled   bool
 	Value    any
 	Present  bool
 	Exit     *ExitRequest
@@ -73,8 +74,23 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 				return MachineEvent{}, fmt.Errorf("fangort: overlapping cursor advancement")
 			}
 			if event.close {
+				callerPoll := d.active.poll
 				d.pulls = append(d.pulls, machinePull{caller: d.active, cursor: cursor, close: true})
-				d.active = StartCloseMachineIterator(cursor)
+				if cursor.polled && cursor.closeMachine != nil {
+					parked := cursor.closeMachine.traversal
+					cursor.closeMachine.traversal = nil
+					d.active = parked.active
+					d.pulls = append(d.pulls, parked.pulls...)
+				} else {
+					cursor.closeMachine = StartCloseMachineIterator(cursor)
+					d.active = cursor.closeMachine
+				}
+				cursor.polled = false
+				if cursor.reportStop && cursor.poll != nil {
+					d.active.poll = cursor.poll
+				} else {
+					d.active.poll = callerPoll
+				}
 				continue
 			}
 			if cursor.done {
@@ -83,6 +99,11 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 			}
 			if err := cursor.begin(event.reply); err != nil {
 				return MachineEvent{}, err
+			}
+			if !cursor.started && len(d.active.states) != 0 {
+				cursor.machine.states = append([]any(nil), d.active.states...)
+				cursor.machine.parentStateOwner = d.active
+				cursor.machine.parentStateCount = len(d.active.states)
 			}
 			cursor.busy = true
 			cursor.evidence.Bind(event.evidence)
@@ -94,10 +115,18 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 			} else {
 				d.active = cursor.machine
 			}
+			if cursor.poll != nil {
+				d.active.poll = cursor.poll
+			} else if d.active.poll == nil {
+				d.active.poll = d.pulls[len(d.pulls)-1].caller.poll
+			}
 			if cursor.started {
-				if err := d.active.resumeLocal(event.reply); err != nil {
-					return MachineEvent{}, err
+				if !cursor.polled {
+					if err := d.active.resumeLocal(event.reply); err != nil {
+						return MachineEvent{}, err
+					}
 				}
+				cursor.polled = false
 			}
 			cursor.started = true
 			if len(d.pulls) > m.stats.MaxPullDepth {
@@ -106,6 +135,7 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 			continue
 		}
 		if cleanup := event.cleanup; cleanup != nil {
+			cleanup.poll = d.active.poll
 			d.pulls = append(d.pulls, machinePull{caller: d.active, cleanup: true})
 			d.active = cleanup
 			continue
@@ -143,6 +173,35 @@ func (m *Machine) drive() (event MachineEvent, err error) {
 			pull.cursor.clearRegistered()
 			d.active = pull.caller
 			d.active.setCursorResult(CursorResult{Exit: event.Exit, Value: event.Value, Finished: event.Exit == nil && !pull.cursor.stopped})
+			continue
+		}
+		if event.poll != nil {
+			matched := -1
+			for i := len(d.pulls) - 1; i >= 0; i-- {
+				if d.pulls[i].cursor != nil && d.pulls[i].cursor.poll == event.poll {
+					matched = i
+					break
+				}
+			}
+			if matched < 0 {
+				return event, nil
+			}
+			pull := d.pulls[matched]
+			root := pull.cursor.machine
+			if pull.close {
+				root = pull.cursor.closeMachine
+			}
+			root.traversal = &machineTraversal{active: d.active,
+				pulls: append([]machinePull(nil), d.pulls[matched+1:]...)}
+			for i := matched; i < len(d.pulls); i++ {
+				d.pulls[i] = machinePull{}
+			}
+			d.pulls = d.pulls[:matched]
+			pull.cursor.busy = false
+			pull.cursor.polled = true
+			pull.cursor.evidence.Restore()
+			d.active = pull.caller
+			d.active.setCursorResult(CursorResult{Polled: true})
 			continue
 		}
 		matched := -1

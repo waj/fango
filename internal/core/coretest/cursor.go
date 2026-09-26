@@ -30,7 +30,8 @@ func cursorScopeWith(sup *types.Supply, b *types.Builtins, synchronous bool) *co
 	suspended := &types.CtorInfo{Name: "Runtime.Coroutine.Suspended", Index: 0, Fields: []types.Type{a}, Result: con}
 	finished := &types.CtorInfo{Name: "Runtime.Coroutine.Finished", Index: 1, Fields: []types.Type{z}, Result: con}
 	closed := &types.CtorInfo{Name: "Runtime.Coroutine.Closed", Index: 2, Result: con}
-	adt := &types.ADTInfo{Con: con, Params: []*types.TVar{a, z}, Ctors: []*types.CtorInfo{suspended, finished, closed}}
+	polled := &types.CtorInfo{Name: "Runtime.Coroutine.Polled", Index: 3, Result: con}
+	adt := &types.ADTInfo{Con: con, Params: []*types.TVar{a, z}, Ctors: []*types.CtorInfo{suspended, finished, closed, polled}}
 	step := &types.TCon{Unique: con.Unique, Name: con.Name, Args: []types.Type{b.Int, b.Unit}}
 	cursor := &types.TCon{Unique: sup.NextUnique(), Name: types.CoroutineTypeName, Args: []types.Type{b.Int, b.Unit, b.Unit, b.Unit}}
 	pauseTy := &types.TFun{Arg: b.Int, Ret: b.Unit, Control: control}

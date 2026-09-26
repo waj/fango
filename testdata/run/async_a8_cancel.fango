@@ -1,0 +1,31 @@
+import Async
+import Runtime.Scope
+
+countdown n = if n == 0 then () else countdown (n - 1)
+
+cpu() = Runtime.Scope.finally
+    (\_ -> Runtime.Scope.finally
+        (\_ ->
+            print "cpu started"
+            countdown 100000
+            print "too late"
+            1)
+        (\_ ->
+            print "inner release started"
+            countdown 10000
+            Async.yield()
+            print "inner release finished"))
+    (\_ ->
+        print "outer release started"
+        countdown 10000
+        Async.yield()
+        print "outer release finished")
+
+quick() =
+    print "quick"
+    2
+
+main() = print (Async.run (\_ ->
+    case Async.race cpu quick of
+        Async.LeftWon value -> value
+        Async.RightWon value -> value))

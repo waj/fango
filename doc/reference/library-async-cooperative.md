@@ -82,6 +82,16 @@ native readiness remains available to a waiting release. The owner and its
 native requests stay live until cleanup completes. A release that never
 finishes keeps the context open.
 
+Generated CPU work also reaches automatic scheduling polls while running in a
+task. Each poll returns that task to the ready queue and lets the runner check
+for cancellation. Direct helpers, stored callbacks, and module calls reached
+from the task participate; ordinary synchronous calls outside packaged Work
+keep their existing execution path. `Async.yield()` requests a turn explicitly,
+so it remains useful at a chosen point. Polling provides opportunities for
+progress and cancellation without promising an exact schedule or strict
+fairness. An opaque native call and a single primitive evaluation remain
+uninterruptible by generated polls.
+
 `Async.yield()` gives other ready tasks a turn; `Async.waitSignal key` parks,
 and `Async.signal key` publishes a sticky notification for scripted readiness.
 `Async.IO.sleep millis` parks a task on a native timer. `Async.IO.get url` makes
@@ -96,8 +106,8 @@ runner, including completed requests whose callbacks are not yet claimed.
 task until a slot is released. A nonpositive capacity returns
 `Err (InvalidNativeCapacity n)` before running the action.
 
-Yield, waits, native completion, startup, context entry/exit, and await of an
-already published result are the supported cancellation checkpoints. In the
+Yield, generated polls, waits, native completion, startup, context entry/exit,
+and await of an already published result are cancellation checkpoints. In the
 REPL, Ctrl-C during a cooperative run returns `Err Interrupted` after native
 requests and cleanup drain. `Async.Error` also has `SelfAwait`,
 `Stalled`, and `InvalidWorkerCount Int`. `SelfAwait` detects a task waiting on itself;
@@ -128,3 +138,7 @@ covers two releases suspended during cancellation; related fixtures cover
 typed failure precedence and native release readiness.
 The [A7 fixtures](../../testdata/run/async_a7_cleanup.fango) cover race and
 timeout, ordered and unordered mapping, event queues, and early cleanup.
+The [A8 CPU fixture](../../testdata/run/async_a8_cpu.fango) and
+[cross-module fixture](../../testdata/modules/async_a8_cpu/Main.fango) show
+automatic polling; the [cancellation fixture](../../testdata/run/async_a8_cancel.fango)
+shows nested releases during CPU cancellation.

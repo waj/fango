@@ -548,6 +548,7 @@ func lintWorker(w *Worker, workers map[string]*Worker) []error {
 			if term.Value != nil && !core.EqualValueRepresentation(term.Value.Type(), w.Result) {
 				errs = append(errs, fmt.Errorf("%s: return type %s, want %s", blockWhere, types.Show(term.Value.Type()), types.Show(w.Result)))
 			}
+		case *Unreachable:
 		default:
 			errs = append(errs, fmt.Errorf("%s: unknown terminator %T", blockWhere, block.Term))
 		}

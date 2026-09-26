@@ -28,8 +28,8 @@ effect Drive
 type Coroutine request reply result e = Coroutine (request -> reply ->{e} result)
 
 -- The outcome of one advance: a request to answer, the producer's final
--- result, or a handle that has already finished or been closed.
-type Step request result = Suspended request | Finished result | Closed deriving (Eq, Show)
+-- result, a handle that has finished or closed, or a Work scheduling poll.
+type Step request result = Suspended request | Finished result | Closed | Polled deriving (Eq, Show)
 
 -- Run a driver with one lazily started producer. The first advance passes its
 -- reply as the producer's initial input; later advances answer pending pauses.
@@ -38,6 +38,7 @@ with : ((request ->{Suspension} reply) -> reply ->{Suspension | e} result) -> (C
 with = native
 
 -- Start or resume this coroutine with a reply and return its next Step.
+-- After Polled, call again with the same reply.
 -- Advancing a finished or closed handle returns Closed.
 advance : Coroutine request reply result e -> reply ->{Drive | e} Step request result
 advance = native

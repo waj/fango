@@ -14,6 +14,9 @@ func PackWork(owner *WorkOwner, cursor *MachineIterator) *WorkPackage {
 	if owner == nil || owner.closed {
 		panic("work package has no live owner")
 	}
+	if cursor.poll == nil {
+		cursor.poll = &pollBudget{}
+	}
 	return &WorkPackage{owner: owner, cursor: cursor}
 }
 func OpenWork(owner *WorkOwner, work *WorkPackage) *MachineIterator {

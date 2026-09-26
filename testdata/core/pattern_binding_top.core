@@ -1,6 +1,6 @@
 (core
   (type Pair (ctor Pair Int Int))
   (def _pattern_1 Pair (app/ctor (var Pair Int -> Int -> Pair) (int 1 Int) (int 2 Int) Pair))
-  (def leftCount Int (case Int (var _pattern_1 Pair) _s0 (switchctor _s0 (Pair _c1 _c2 (leaf (let _pattern_var_0 Int (var _c1 Int) (let _pattern_var_1 Int (var _c2 Int) (var _pattern_var_0 Int))))))))
-  (def rightCount Int (case Int (var _pattern_1 Pair) _s0 (switchctor _s0 (Pair _c1 _c2 (leaf (let _pattern_var_0 Int (var _c1 Int) (let _pattern_var_1 Int (var _c2 Int) (var _pattern_var_1 Int))))))))
+  (def leftCount Int (case Int (var _pattern_1 Pair) _s0 (switchctor _s0 (Pair _c3 _c4 (leaf (let _pattern1 Int (var _c3 Int) (let _pattern2 Int (var _c4 Int) (var _pattern1 Int))))))))
+  (def rightCount Int (case Int (var _pattern_1 Pair) _s0 (switchctor _s0 (Pair _c3 _c4 (leaf (let _pattern1 Int (var _c3 Int) (let _pattern2 Int (var _c4 Int) (var _pattern2 Int))))))))
   (def main Int (native Basics.intAdd (var leftCount Int) (var rightCount Int) Int)))

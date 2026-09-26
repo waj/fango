@@ -21,6 +21,15 @@ identity. `pack` retains an already existing coroutine; packing does not start
 it. The coroutine must outlive the work owner. A facet or package cannot escape
 its owner, including inside a closure or another data structure.
 
+Packaging enables automatic polling while the Work is advanced. After a
+bounded number of generated Machine steps, `advance` or `stop` may return
+`Polled`. Retry `advance` with the same reply, or retry `stop` if that call
+polled. The suspended computation,
+including its cleanup and handler evidence, stays owned by that package.
+Ordinary synchronous calls outside Work do not report `Polled`.
+`close` drains internal polls before returning; use `stop` when a driver needs
+to schedule between cleanup steps.
+
 `advance`, `close`, `stop`, and `stopCompletion` require the exact owner used by
 `pack`. Equal effect rows
 do not make two owners interchangeable. Opening is rejected when flow from

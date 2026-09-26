@@ -67,7 +67,7 @@ func lower(p *core.Prog, owner *string) (*Prog, []error) {
 	for i := range p.Defs {
 		d := &p.Defs[i]
 		defs[d.Name] = d
-		if d.Control.Resolve(types.Machine) == types.Machine {
+		if d.Control.Resolve(types.Machine) == types.Machine || d.IsWorker() {
 			selected[d.Name] = true
 		}
 	}
@@ -216,25 +216,7 @@ func (b *builder) registerOwnedRoots(body core.Expr) {
 			return false
 		}
 		if lambda, ok := e.(*core.Lambda); ok {
-			control := types.FunctionControl(lambda.Ty.(*types.TFun))
-			if control.Resolve(types.Machine) == types.Machine {
-				b.registerMachineLambda(lambda)
-				return false
-			}
-			outer := b.def
-			inside := *outer
-			inside.EffectParams = shadowEvidence(shadowEvidence(outer.EffectParams, outer.RowEffects), shadowEvidence(lambda.EffectParams, lambda.RowEffects))
-			inside.RowEffects = nil
-			b.def = &inside
-			outerLocals := b.locals
-			b.locals = make(map[string]types.Type, len(outerLocals)+1)
-			for name, ty := range outerLocals {
-				b.locals[name] = ty
-			}
-			b.locals[lambda.Param] = lambda.Ty.(*types.TFun).Arg
-			b.registerOwnedRoots(lambda.Body)
-			b.locals = outerLocals
-			b.def = outer
+			b.registerMachineLambda(lambda)
 			return false
 		}
 		return true
@@ -338,35 +320,35 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 		b.declare(discard)
 		return b.lowerInto(e.First, discard, body)
 	case *core.If:
-		if machineControl(e.Cond) {
-			b.errorf("%s: machine-producing If condition was not ANF-hoisted", b.def.Name)
-			return next
-		}
 		thenBlock := b.lowerInto(e.Then, bind, next)
 		elseBlock := b.lowerInto(e.Else, bind, next)
-		return b.add(&Branch{Cond: e.Cond, Then: thenBlock, Else: elseBlock})
+		condition := Local{Name: b.fresh("condition"), Ty: e.Cond.Type()}
+		b.declare(condition)
+		branch := b.add(&Branch{Cond: localRef(condition), Then: thenBlock, Else: elseBlock})
+		return b.lowerInto(e.Cond, condition, branch)
 	case *core.Case:
-		if machineControl(e.Scrut) {
-			b.errorf("%s: machine-producing Case scrutinee was not ANF-hoisted", b.def.Name)
-			return next
-		}
 		scrut := Local{Name: b.localName(e.Bind), Ty: e.Scrut.Type()}
 		b.declare(scrut)
 		tree := b.lowerTree(e.Tree, bind, next)
-		return b.add(&Eval{Bind: scrut, Value: e.Scrut, Next: tree})
+		return b.lowerInto(e.Scrut, scrut, tree)
 	case *core.Suspend:
 		if machineControl(e.Request) {
 			b.errorf("%s: suspension request itself requires Machine control", b.def.Name)
 			return next
 		}
-		return b.add(&Suspend{Request: e.Request, Bind: bind, Next: next})
+		term := &Suspend{Request: e.Request, Bind: bind, Next: next}
+		return b.splitScheduled(&term.Request, b.add(term), "request")
 	case *core.CoroutineAdvance:
-		return b.add(&CursorAdvance{Cursor: e.Cursor, Reply: e.Reply, Close: e.Close, Result: e.Result, Access: e.Access, Bind: bind, Next: next, Row: e.Row})
+		term := &CursorAdvance{Cursor: e.Cursor, Reply: e.Reply, Close: e.Close, Result: e.Result, Access: e.Access, Bind: bind, Next: next, Row: e.Row}
+		entry := b.add(term)
+		entry = b.splitScheduled(&term.Reply, entry, "reply")
+		return b.splitScheduled(&term.Cursor, entry, "cursor")
 	case *core.Completion:
 		if types.CapturesCompletion(e.Name) {
 			fn := e.Value.Type().(*types.TFun)
 			b.registerMachineLambdas(e.Value)
-			return b.add(&Call{Capture: true, CalleeExpr: e.Value, Args: []core.Expr{&core.UnitLit{Ty: fn.Arg}}, Row: e.Row, Bind: bind, Next: next})
+			call := &Call{Capture: true, CalleeExpr: e.Value, Args: []core.Expr{&core.UnitLit{Ty: fn.Arg}}, Row: e.Row, Bind: bind, Next: next}
+			return b.splitScheduled(&call.CalleeExpr, b.add(call), "completion")
 		}
 		if e.Name == types.CompletionReplayName {
 			n := *e
@@ -389,20 +371,26 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 		}
 		return b.lowerInto(e.Value, bind, next)
 	case *core.Perform:
-		if e.Control.Resolve(types.Machine) == types.Machine {
-			for _, arg := range e.Args {
-				if machineControl(arg) {
-					b.errorf("%s: Machine operation argument was not ANF-hoisted", b.def.Name)
-					return next
-				}
-				b.registerMachineLambdas(arg)
-			}
-			return b.add(&Call{Operation: e.Op, Effect: e.Effect, Args: e.Args, Bind: bind, Next: next,
-				Tail: b.isReturnOf(next, bind)})
+		if e.Control.Resolve(types.Machine) == types.Direct {
+			return b.add(&Eval{Bind: bind, Value: e, Next: next})
 		}
+		for _, arg := range e.Args {
+			if machineControl(arg) {
+				b.errorf("%s: Machine operation argument was not ANF-hoisted", b.def.Name)
+				return next
+			}
+			b.registerMachineLambdas(arg)
+		}
+		call := &Call{Operation: e.Op, Effect: e.Effect, Args: append([]core.Expr(nil), e.Args...), Bind: bind, Next: next,
+			Tail: b.isReturnOf(next, bind)}
+		entry := b.add(call)
+		for i := len(call.Args) - 1; i >= 0; i-- {
+			entry = b.splitScheduled(&call.Args[i], entry, "operation_arg")
+		}
+		return entry
 	case *core.App:
-		if e.Control.Resolve(types.Machine) == types.Machine {
-			if expanded := b.inlineWrapper(e); expanded != nil {
+		if e.CalleeKind == core.Worker || e.CalleeKind == core.Value {
+			if expanded := b.inlineWrapper(e); expanded != nil && machineControl(e) {
 				b.inlineDepth++
 				entry := b.lowerInto(expanded, bind, next)
 				b.inlineDepth--
@@ -417,18 +405,10 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 				b.errorf("%s: unsupported Machine call target", b.def.Name)
 				return next
 			}
-			if e.CalleeKind == core.Value && machineControl(e.Callee) {
-				b.errorf("%s: Machine indirect callee was not ANF-hoisted", b.def.Name)
-				return next
-			}
 			for _, arg := range e.Args {
-				if machineControl(arg) {
-					b.errorf("%s: Machine call argument was not ANF-hoisted", b.def.Name)
-					return next
-				}
 				b.registerMachineLambdas(arg)
 			}
-			call := &Call{TyArgs: e.TyArgs, Args: e.Args, EvidenceArgs: e.EvidenceArgs, Bind: bind, Next: next, Row: e.Row}
+			call := &Call{TyArgs: e.TyArgs, Args: append([]core.Expr(nil), e.Args...), EvidenceArgs: e.EvidenceArgs, Bind: bind, Next: next, Row: e.Row}
 			if e.CalleeKind == core.Worker {
 				call.Callee = ref.Name
 			} else {
@@ -436,14 +416,32 @@ func (b *builder) lowerInto(e core.Expr, bind Local, next BlockID) BlockID {
 				b.registerMachineLambdas(e.Callee)
 			}
 			call.Tail = b.isReturnOf(next, bind)
-			return b.add(call)
+			entry := b.add(call)
+			for i := len(call.Args) - 1; i >= 0; i-- {
+				entry = b.splitScheduled(&call.Args[i], entry, "argument")
+			}
+			if call.CalleeExpr != nil {
+				entry = b.splitScheduled(&call.CalleeExpr, entry, "callee")
+			}
+			return entry
 		}
+		// Constructor fields may contain immediate Direct calls. Evaluate them
+		// through Machine members before building the value: a field can hold a
+		// callback whose Direct member is absent in this Machine context.
+		b.registerMachineLambdas(e)
+		value := *e
+		value.Args = append([]core.Expr(nil), e.Args...)
+		entry := b.add(&Eval{Bind: bind, Value: &value, Next: next})
+		for i := len(value.Args) - 1; i >= 0; i-- {
+			entry = b.splitScheduled(&value.Args[i], entry, "constructor_arg")
+		}
+		return entry
 	case *core.Bracket:
 		resource := Local{Name: e.Resource, Ty: e.ResourceTy}
 		b.declare(resource)
 		pop := b.add(&PopCleanup{Next: next})
 		body := b.lowerInto(e.Body, bind, pop)
-		if machineControl(e.Acquire) {
+		if machineControl(e.Acquire) || scheduledCall(e.Acquire) {
 			// A Machine call can yield or exit before acquisition succeeds.
 			// Register the release only on the successful continuation.
 			register := b.add(&PushCleanup{Acquire: &core.VarRef{Name: resource.Name, Local: true, Ty: resource.Ty}, Resource: resource, Release: e.Release, Next: body})
@@ -614,8 +612,7 @@ func (b *builder) registerMachineLambda(e core.Expr) {
 	if !ok || b.lambdas[lam] {
 		return
 	}
-	fn, ok := lam.Ty.(*types.TFun)
-	if !ok || types.FunctionControl(fn).Resolve(types.Machine) != types.Machine {
+	if _, ok := lam.Ty.(*types.TFun); !ok {
 		return
 	}
 	b.lambdas[lam] = true
@@ -665,13 +662,12 @@ func (b *builder) lowerTree(tree core.Tree, bind Local, next BlockID) BlockID {
 	case *core.Leaf:
 		return b.lowerInto(tree.Body, bind, next)
 	case *core.Guard:
-		if machineControl(tree.Cond) {
-			b.errorf("%s: machine-producing decision-tree guard was not ANF-hoisted", b.def.Name)
-			return next
-		}
 		thenBlock := b.lowerTree(tree.Then, bind, next)
 		elseBlock := b.lowerTree(tree.Else, bind, next)
-		return b.add(&Branch{Cond: tree.Cond, Then: thenBlock, Else: elseBlock})
+		condition := Local{Name: b.fresh("guard"), Ty: tree.Cond.Type()}
+		b.declare(condition)
+		branch := b.add(&Branch{Cond: localRef(condition), Then: thenBlock, Else: elseBlock})
+		return b.lowerInto(tree.Cond, condition, branch)
 	case *core.SwitchCtor:
 		scrutTy, ok := b.locals[tree.Scrut].(*types.TCon)
 		if !ok {
@@ -704,8 +700,7 @@ func (b *builder) lowerTree(tree core.Tree, bind Local, next BlockID) BlockID {
 		}
 		return b.add(term)
 	case *core.Unreachable:
-		b.errorf("%s: reachable decision-tree Unreachable cannot enter Machine IR", b.def.Name)
-		return next
+		return b.add(&Unreachable{})
 	default:
 		b.errorf("%s: unknown decision tree %T", b.def.Name, tree)
 		return next
@@ -714,6 +709,27 @@ func (b *builder) lowerTree(tree core.Tree, bind Local, next BlockID) BlockID {
 
 func machineControl(e core.Expr) bool {
 	return core.ExprControl(e).Resolve(types.Machine) == types.Machine
+}
+
+func scheduledCall(e core.Expr) bool {
+	if app, ok := e.(*core.App); ok && (app.CalleeKind == core.Worker || app.CalleeKind == core.Value) {
+		return true
+	}
+	return machineControl(e)
+}
+
+// splitScheduled makes an immediate Fango call in an expression slot a frame
+// transition. Processing slots from right to left keeps source evaluation
+// order when the resulting entries are linked in front of their consumer.
+func (b *builder) splitScheduled(slot *core.Expr, entry BlockID, prefix string) BlockID {
+	if !scheduledCall(*slot) {
+		return entry
+	}
+	value := *slot
+	local := Local{Name: b.fresh(prefix), Ty: value.Type()}
+	b.declare(local)
+	*slot = localRef(local)
+	return b.lowerInto(value, local, entry)
 }
 
 func (b *builder) add(term Term) BlockID {

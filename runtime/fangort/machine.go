@@ -66,6 +66,7 @@ type MachineStep struct {
 func InvalidMachineStep(message string) MachineStep { panic(message) }
 
 type MachineEvent struct {
+	poll     *pollBudget
 	reply    any
 	close    bool
 	evidence *EvidenceRow
@@ -114,6 +115,7 @@ const (
 )
 
 type Machine struct {
+	poll             *pollBudget
 	pendingRun       func() (any, *ExitRequest)
 	stopRouting      bool
 	parentStateOwner *Machine
@@ -135,6 +137,12 @@ type Machine struct {
 	finished         bool
 	stats            MachineStats
 }
+
+const machinePollInterval = 256
+
+// A Work package owns the budget. Nested machines borrow it while that Work
+// is being advanced; an ordinary synchronous machine has no polling cost.
+type pollBudget struct{ steps uint64 }
 
 type machineDrain struct {
 	primary *ExitRequest
@@ -196,6 +204,12 @@ func (m *Machine) runLocal() (event MachineEvent, err error) {
 			}
 		}
 		m.stats.Steps++
+		if m.poll != nil {
+			m.poll.steps++
+			if m.poll.steps%machinePollInterval == 0 {
+				return MachineEvent{poll: m.poll}, nil
+			}
+		}
 		active := m.frames[len(m.frames)-1]
 		var step MachineStep
 		if m.pendingRun != nil {

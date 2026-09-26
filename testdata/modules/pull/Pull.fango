@@ -19,3 +19,4 @@ read (Pull work) = case Runtime.Coroutine.advance work () of
     Suspended value -> Just value
     Finished () -> Nothing
     Closed -> Nothing
+    Polled -> read (Pull work)

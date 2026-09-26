@@ -2,5 +2,5 @@
   (type Point (record (field x Int) (field y Int)))
   (def named Point (let _record0 Point (int 1 Int) (let _record1 Point (int 2 Int) (app/ctor (var Point.__record Int -> Int -> Point) (var _record0 Int) (var _record1 Int) Point))))
   (def inferred Point (let _record0 Point (int 1 Int) (let _record1 Point (int 2 Int) (app/ctor (var Point.__record Int -> Int -> Point) (var _record0 Int) (var _record1 Int) Point))))
-  (def namedPattern (params _arg0) Point -> Int (case Int (var _arg0 Point) _match3 (switchctor _match3 (Point.__record _c1 _ (leaf (let x Int (var _c1 Int) (var x Int)))))))
-  (def inferredPattern (params _arg0) Point -> Int (case Int (var _arg0 Point) _match3 (switchctor _match3 (Point.__record _c1 _ (leaf (let x Int (var _c1 Int) (var x Int))))))))
+  (def namedPattern (params _arg0) Point -> Int (case Int (var _arg0 Point) _match4 (switchctor _match4 (Point.__record _c2 _ (leaf (let _pattern1 Int (var _c2 Int) (var _pattern1 Int)))))))
+  (def inferredPattern (params _arg0) Point -> Int (case Int (var _arg0 Point) _match4 (switchctor _match4 (Point.__record _c2 _ (leaf (let _pattern1 Int (var _c2 Int) (var _pattern1 Int))))))))

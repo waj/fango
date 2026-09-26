@@ -1,3 +1,3 @@
 (core
   (type Pair (ctor Pair Int Int))
-  (def main Int (case Int (app/ctor (var Pair Int -> Int -> Pair) (int 1 Int) (int 2 Int) Pair) _bind0 (switchctor _bind0 (Pair _c1 _c2 (leaf (let left Int (var _c1 Int) (let right Int (var _c2 Int) (native Basics.intAdd (var left Int) (var right Int) Int)))))))))
+  (def main Int (case Int (app/ctor (var Pair Int -> Int -> Pair) (int 1 Int) (int 2 Int) Pair) _bind0 (switchctor _bind0 (Pair _c3 _c4 (leaf (let _pattern1 Int (var _c3 Int) (let _pattern2 Int (var _c4 Int) (native Basics.intAdd (var _pattern1 Int) (var _pattern2 Int) Int)))))))))

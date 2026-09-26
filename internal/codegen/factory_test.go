@@ -60,7 +60,7 @@ func TestPureFactoryHasConsumerIndependentMachineRepresentation(t *testing.T) {
 			t.Fatalf("factory depends on consumer:\n%s\n%s", f.Data, dependency)
 		}
 	}
-	if !strings.Contains(string(dependency), "func V_Factory_dot_wrap_machine") || strings.Contains(string(dependency), "MachineFrame_Factory_dot_wrap") {
+	if !strings.Contains(string(dependency), "func V_Factory_dot_wrap_machine") || !strings.Contains(string(dependency), "MachineFrame_Factory_dot_wrap") {
 		t.Fatalf("factory changed execution transport:\n%s", dependency)
 	}
 	dir := t.TempDir()

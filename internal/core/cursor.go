@@ -45,18 +45,18 @@ func CheckCoroutineAdvance(cursor types.Type, reply Expr, close bool, result typ
 	if !close && (reply == nil || !EqualValueRepresentation(reply.Type(), input)) {
 		return fmt.Errorf("coroutine reply type disagrees with its owner")
 	}
-	if !step || r.Name != types.CoroutineStepName || len(r.Args) != 2 || !EqualValueRepresentation(r.Args[0], request) || !EqualValueRepresentation(r.Args[1], output) || adt == nil || adt.Con == nil || adt.Con.Unique != r.Unique || len(adt.Params) != 2 || len(adt.Ctors) != 3 {
+	if !step || r.Name != types.CoroutineStepName || len(r.Args) != 2 || !EqualValueRepresentation(r.Args[0], request) || !EqualValueRepresentation(r.Args[1], output) || adt == nil || adt.Con == nil || adt.Con.Unique != r.Unique || len(adt.Params) != 2 || len(adt.Ctors) != 4 {
 		return fmt.Errorf("invalid coroutine Step result")
 	}
-	for i, name := range []string{"Runtime.Coroutine.Suspended", "Runtime.Coroutine.Finished", "Runtime.Coroutine.Closed"} {
+	for i, name := range []string{"Runtime.Coroutine.Suspended", "Runtime.Coroutine.Finished", "Runtime.Coroutine.Closed", "Runtime.Coroutine.Polled"} {
 		c := adt.Ctors[i]
 		if c == nil || c.Name != name {
 			return fmt.Errorf("invalid coroutine Step constructors")
 		}
 		fields := adt.InstFields(c, r.Args)
-		if i == 2 {
+		if i >= 2 {
 			if len(fields) != 0 {
-				return fmt.Errorf("Closed carries a value")
+				return fmt.Errorf("terminal Step constructor carries a value")
 			}
 			continue
 		}

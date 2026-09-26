@@ -39,12 +39,14 @@ func (el *elab) caseExpr(e *ast.Case, ty types.Type) core.Expr {
 		br := &e.Branches[i]
 		br.Pattern = el.lowerRecordPattern(br.Pattern)
 		n := el.pushPatternVars(br.Pattern, scrut.Type())
+		names := el.patternNames(n)
 		m.bodies[i] = el.adaptFunctionValue(el.expr(br.Body), ty)
 		el.popScope(n)
 		m.spans[i] = br.Pattern.Span()
-		rows[i] = row{pats: []ast.Pattern{br.Pattern}, idx: i}
+		rows[i] = row{pats: []ast.Pattern{br.Pattern}, idx: i, names: names}
 		witnessMatrix[i] = []ast.Pattern{br.Pattern}
 	}
+	m.rows = rows
 
 	if w := m.witness([]types.Type{scrut.Type()}, witnessMatrix); w != nil {
 		el.errs = append(el.errs, diag.Errorf(e.Sp, "MISSING PATTERNS",
@@ -99,10 +101,12 @@ func (el *elab) matchPatternRows(patterns [][]ast.Pattern, bodies []ast.Expr, sp
 		for j, p := range matrix[i] {
 			n += el.pushPatternVars(p, occs[j].ty)
 		}
+		names := el.patternNames(n)
 		m.bodies[i] = el.expr(bodies[i])
 		el.popScope(n)
-		rows[i] = row{pats: matrix[i], idx: i}
+		rows[i] = row{pats: matrix[i], idx: i, names: names}
 	}
+	m.rows = rows
 	if w := m.witness(tys, matrix); w != nil {
 		example := strings.Join(w, " ")
 		el.errs = append(el.errs, diag.Errorf(at, "MISSING PATTERNS",
@@ -164,7 +168,7 @@ func rootScrutinee(tree core.Tree, bind string) string {
 	return ""
 }
 
-func (el *elab) bindPatternCore(pattern ast.Pattern, rhs core.Expr, subject string, subjectTy types.Type, body core.Expr) core.Expr {
+func (el *elab) bindPatternCore(pattern ast.Pattern, rhs core.Expr, subject string, subjectTy types.Type, names map[string]string, body core.Expr) core.Expr {
 	p := el.lowerRecordPattern(pattern)
 	m := &matcher{el: el, bodies: []core.Expr{body}, spans: []source.Span{pattern.Span()}, used: []bool{false}}
 	if w := m.witness([]types.Type{subjectTy}, [][]ast.Pattern{{p}}); w != nil {
@@ -172,7 +176,7 @@ func (el *elab) bindPatternCore(pattern ast.Pattern, rhs core.Expr, subject stri
 			"This destructuring binding is refutable. For example, it does not handle:\n\n    %s", w[0]))
 		return &core.Let{Name: subject, Rhs: rhs, Body: body, Ty: body.Type()}
 	}
-	tree := m.compile([]occurrence{{name: subject, ty: subjectTy}}, []row{{pats: []ast.Pattern{p}, idx: 0}})
+	tree := m.compile([]occurrence{{name: subject, ty: subjectTy}}, []row{{pats: []ast.Pattern{p}, idx: 0, names: names}})
 	if leaf, ok := tree.(*core.Leaf); ok {
 		return &core.Let{Name: subject, Rhs: rhs, Body: leaf.Body, Ty: body.Type()}
 	}
@@ -222,6 +226,14 @@ type row struct {
 	pats  []ast.Pattern
 	binds []patBind
 	idx   int
+	names map[string]string
+}
+
+func (r row) variable(name string) string {
+	if internal := r.names[name]; internal != "" {
+		return internal
+	}
+	return name
 }
 
 type patBind struct {
@@ -235,6 +247,7 @@ type matcher struct {
 	bodies []core.Expr
 	spans  []source.Span
 	used   []bool
+	rows   []row
 }
 
 func irrefutable(p ast.Pattern) bool {
@@ -275,7 +288,9 @@ func (el *elab) pushPatternVars(p ast.Pattern, ty types.Type) int {
 	walk = func(p ast.Pattern, ty types.Type) {
 		switch p := p.(type) {
 		case *ast.PVar:
-			el.pushScope(p.Name, el.zonkDefault(ty))
+			name := fmt.Sprintf("_pattern%d", el.tmp)
+			el.tmp++
+			el.pushScopeAs(p.Name, name, el.zonkDefault(ty))
 			n++
 		case *ast.PCtor:
 			ctor := el.ck.Ctors[p.Name]
@@ -292,6 +307,14 @@ func (el *elab) pushPatternVars(p ast.Pattern, ty types.Type) int {
 	}
 	walk(p, ty)
 	return n
+}
+
+func (el *elab) patternNames(n int) map[string]string {
+	names := make(map[string]string, n)
+	for _, v := range el.scope[len(el.scope)-n:] {
+		names[v.source] = v.name
+	}
+	return names
 }
 
 // ---------------------------------------------------------------------------
@@ -422,7 +445,7 @@ func (m *matcher) compile(occs []occurrence, rows []row) core.Tree {
 		binds := append([]patBind{}, first.binds...)
 		for j, p := range first.pats {
 			if pv, ok := p.(*ast.PVar); ok {
-				binds = append(binds, patBind{name: pv.Name, occ: occs[j].name, ty: occs[j].ty})
+				binds = append(binds, patBind{name: first.variable(pv.Name), occ: occs[j].name, ty: occs[j].ty})
 			}
 		}
 		body := m.bodies[first.idx]
@@ -430,7 +453,7 @@ func (m *matcher) compile(occs []occurrence, rows []row) core.Tree {
 			b := binds[i]
 			body = &core.Let{
 				Name: b.name,
-				Rhs:  &core.VarRef{Name: b.occ, Ty: b.ty},
+				Rhs:  &core.VarRef{Name: b.occ, Ty: b.ty, Local: true},
 				Body: body,
 				Ty:   body.Type(),
 			}
@@ -489,18 +512,21 @@ func (m *matcher) switchCtor(occs []occurrence, rows []row, col int, adt *types.
 					pats:  splicePats(r.pats, col, p.Args),
 					binds: r.binds,
 					idx:   r.idx,
+					names: r.names,
 				})
 			case *ast.PVar:
 				spec = append(spec, row{
 					pats:  splicePats(r.pats, col, wildcards(len(ctor.Fields))),
-					binds: append(append([]patBind{}, r.binds...), patBind{name: p.Name, occ: occs[col].name, ty: occs[col].ty}),
+					binds: append(append([]patBind{}, r.binds...), patBind{name: r.variable(p.Name), occ: occs[col].name, ty: occs[col].ty}),
 					idx:   r.idx,
+					names: r.names,
 				})
 			case *ast.PWildcard, *ast.PUnit:
 				spec = append(spec, row{
 					pats:  splicePats(r.pats, col, wildcards(len(ctor.Fields))),
 					binds: r.binds,
 					idx:   r.idx,
+					names: r.names,
 				})
 			}
 		}
@@ -523,11 +549,12 @@ func (m *matcher) switchCtor(occs []occurrence, rows []row, col int, adt *types.
 			case *ast.PVar:
 				defRows = append(defRows, row{
 					pats:  removePat(r.pats, col),
-					binds: append(append([]patBind{}, r.binds...), patBind{name: p.Name, occ: occs[col].name, ty: occs[col].ty}),
+					binds: append(append([]patBind{}, r.binds...), patBind{name: r.variable(p.Name), occ: occs[col].name, ty: occs[col].ty}),
 					idx:   r.idx,
+					names: r.names,
 				})
 			case *ast.PWildcard, *ast.PUnit:
-				defRows = append(defRows, row{pats: removePat(r.pats, col), binds: r.binds, idx: r.idx})
+				defRows = append(defRows, row{pats: removePat(r.pats, col), binds: r.binds, idx: r.idx, names: r.names})
 			}
 		}
 		def = m.compile(removeOcc(occs, col), defRows)
@@ -562,22 +589,23 @@ func (m *matcher) switchLit(occs []occurrence, rows []row, col int) core.Tree {
 			// Var rows match every literal and the default.
 			nr := row{
 				pats:  removePat(r.pats, col),
-				binds: append(append([]patBind{}, r.binds...), patBind{name: p.Name, occ: occ.name, ty: occ.ty}),
+				binds: append(append([]patBind{}, r.binds...), patBind{name: r.variable(p.Name), occ: occ.name, ty: occ.ty}),
 				idx:   r.idx,
+				names: r.names,
 			}
 			for _, k := range caseKeys {
 				specs[k] = append(specs[k], nr)
 			}
 			specs["_default"] = append(specs["_default"], nr)
 		case *ast.PWildcard, *ast.PUnit:
-			nr := row{pats: removePat(r.pats, col), binds: r.binds, idx: r.idx}
+			nr := row{pats: removePat(r.pats, col), binds: r.binds, idx: r.idx, names: r.names}
 			for _, k := range caseKeys {
 				specs[k] = append(specs[k], nr)
 			}
 			specs["_default"] = append(specs["_default"], nr)
 		default:
 			k := litKey(m.litExpr(p, occ.ty))
-			specs[k] = append(specs[k], row{pats: removePat(r.pats, col), binds: r.binds, idx: r.idx})
+			specs[k] = append(specs[k], row{pats: removePat(r.pats, col), binds: r.binds, idx: r.idx, names: r.names})
 		}
 	}
 

@@ -2,6 +2,40 @@ package fangort
 
 import "testing"
 
+type cpuFrame struct{ remaining int }
+
+func (f *cpuFrame) Step(*Machine) MachineStep {
+	if f.remaining == 0 {
+		return MachineStep{Kind: MachineReturn, Value: 1}
+	}
+	f.remaining--
+	return MachineStep{Kind: MachineContinue}
+}
+
+func (f *cpuFrame) Clear() { f.remaining = 0 }
+
+func TestMachinePollRetainsCPUFrame(t *testing.T) {
+	frame := &cpuFrame{remaining: 600}
+	m := StartMachine(frame)
+	budget := &pollBudget{}
+	m.poll = budget
+	for _, remaining := range []int{345, 90} {
+		event, err := m.Run()
+		if err != nil || event.poll != budget || event.Done || frame.remaining != remaining {
+			t.Fatalf("poll = %#v, %v; remaining = %d, want %d", event, err, frame.remaining, remaining)
+		}
+	}
+	event, err := m.Run()
+	if err != nil || !event.Done || event.Value != 1 || budget.steps != 603 {
+		t.Fatalf("completion = %#v, %v; steps = %d", event, err, budget.steps)
+	}
+	ordinary := StartMachine(&cpuFrame{remaining: 600})
+	event, err = ordinary.Run()
+	if err != nil || !event.Done || event.Value != 1 || event.poll != nil {
+		t.Fatalf("ordinary completion = %#v, %v", event, err)
+	}
+}
+
 type repeatFrame struct {
 	pc        uint8
 	remaining int

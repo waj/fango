@@ -70,6 +70,18 @@ The probe runs alongside the other parallel checks.
 
 ## Performance evidence
 
+### C7 execution checkpoints
+
+The synchronous entry path retains Direct/Exit execution; packaged Work uses
+Machine dispatch. On an idle host, the runtime-ratio gate passed after C7,
+including State at 1.15× and Bracket at 1.55× the handwritten Go controls
+(limit 2.5×). The compile-latency gate still fails against its recorded
+machine-specific thresholds. A clean archive of the pre-C7 checked-in revision
+fails the same gate on this host: its hello cold/unchanged medians were
+578/58 ms, versus 602/56 ms for C7. The checked-in latency baseline also
+lacks the capture-graph entries required by the current test. These results do
+not justify replacing the baseline or claiming a portable latency limit.
+
 ### Cooperative Async comparison
 
 ```sh

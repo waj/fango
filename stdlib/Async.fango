@@ -566,6 +566,8 @@ stepDriver eventBridge workOwner facet previous =
                     (waiting, ready) = wake (DoneKey key) waitingTask readyTask
                     next = { state | ready = ready, waiting = waiting, notified = [TaskKey jobPath key | state.notified], live = removeLive key state.live }
                     Continue next
+                Runtime.Coroutine.Polled ->
+                    Continue ({ state | ready = enqueue (Job key reply jobPath work) remaining })
                 Runtime.Coroutine.Closed ->
                     if draining then
                         completion = Runtime.Work.stopCompletion workOwner work

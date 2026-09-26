@@ -21,12 +21,18 @@ func TestRootedClosuresCaptureNearestLexicalEvidence(t *testing.T) {
 	// callback. Lexical scanning must enter both the factory and the handler.
 	factory := &core.Lambda{Param: "ignored", Ty: &types.TFun{Arg: b.Unit, Ret: fn}, Body: &core.Handle{Effect: inner, Body: callback, Ty: fn}}
 	d := &core.Def{Name: "make", EffectParams: []core.EffectInstance{outer}}
-	builder := &builder{def: d, locals: map[string]types.Type{}, lambdas: map[*core.Lambda]bool{}}
-	builder.registerMachineLambdas(factory)
-	if len(builder.closures) != 1 {
-		t.Fatalf("closures: %d", len(builder.closures))
+	root := &builder{def: d, locals: map[string]types.Type{}, lambdas: map[*core.Lambda]bool{}}
+	root.registerMachineLambdas(factory)
+	if len(root.closures) != 1 || root.closures[0].Expr != factory || len(root.aux) != 1 {
+		t.Fatalf("factory closure: %+v, auxiliaries: %+v", root.closures, root.aux)
 	}
-	captures := builder.closures[0].CapturedEvidence
+	aux := &root.aux[0]
+	nested := &builder{def: aux, locals: localRefTypes(aux.Body), lambdas: map[*core.Lambda]bool{}}
+	nested.registerMachineLambdas(aux.Body)
+	if len(nested.closures) != 1 || nested.closures[0].Expr != callback {
+		t.Fatalf("callback closure: %+v", nested.closures)
+	}
+	captures := nested.closures[0].CapturedEvidence
 	if len(captures) != 1 || !types.EqualCaptures(captures[0].Captures, inner.Captures) {
 		t.Fatalf("captures: %#v", captures)
 	}

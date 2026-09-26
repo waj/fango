@@ -149,6 +149,7 @@ dispatch owner ready state =
                     Runtime.Coroutine.Finished () ->
                         (remaining, awoken) = wake (TaskKey key) waiting (Queue rest back)
                         Continue awoken (State remaining [TaskKey key | notified] nextKey script)
+                    Runtime.Coroutine.Polled -> Continue (Queue rest (Jobs (Job key reply work) back)) state
                     Runtime.Coroutine.Closed -> Done (Err Stalled)
             NoJobs ->
                 case script of

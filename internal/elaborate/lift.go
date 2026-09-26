@@ -180,8 +180,8 @@ func (el *elab) freeLocals(bind *ast.LocalBind) []scopeVar {
 			}
 			return
 		}
-		if _, ok := el.scopeIdx[name]; ok {
-			need[name] = true
+		if index, ok := el.scopeIdx[name]; ok {
+			need[el.scope[index].name] = true
 		}
 	}
 	visit = func(e ast.Expr) {
