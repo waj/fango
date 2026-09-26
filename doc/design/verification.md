@@ -14,6 +14,8 @@ Correctness gates, differential fixtures, generated-code stability, and manual p
 | make ci | Go/Fango formatting, go vet, and correctness |
 | make update-goldens | Intentional lexer/parser/infer/elaborate/REPL/formatter golden updates |
 | go vet ./benchmarks | Build-check benchmarks without timing them |
+| go test -race ./runtime/fangort ./runtime/nativeworker ./internal/eval ./internal/nativehost ./stdlib/... | Race checks for shared storage, callback drain, native hosts, and bundled adapters |
+| go test -race ./cmd/fango -run TestConcurrentSharedListBackends | Interpreter and emitted Direct/Machine shared-List race fixture |
 | make test-perf | Manual latency and runtime-ratio gates on an idle machine |
 
 Timing gates are excluded from correctness and CI. Do not run them during ordinary
@@ -67,6 +69,12 @@ fixture, checking bounded live state after both schedules. The interpreter
 probe emits the generated Go after its checked compilation, reusing its Fango
 module objects; the compiled probe then runs those bytes in a private project.
 The probe runs alongside the other parallel checks.
+The shared-List concurrency fixture runs in the interpreter and emits a separate
+Go project whose Direct and Machine workers extend the same published list.
+Its emitted leg invokes `go test -race` even when the parent suite runs without
+the race detector; run the parent under `-race` to instrument the interpreter
+leg too. This checks runtime reentrancy before a source-level concurrent
+executor is available.
 
 ## Performance evidence
 

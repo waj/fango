@@ -3,6 +3,7 @@ package fangort
 import (
 	"math"
 	"strconv"
+	"sync"
 	"testing"
 )
 
@@ -130,6 +131,38 @@ func TestListBranchingIsIndependent(t *testing.T) {
 				t.Errorf("shared tail mutated: %v want %v", got, base)
 			}
 		})
+	}
+}
+
+// Every child extends the same published value. The race detector checks the
+// frontier claim while these assertions check that no branch can see another
+// branch's head or change the shared tail.
+func TestListConcurrentBranching(t *testing.T) {
+	shared := listOf(1, 2, 3)
+	const children = 64
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	results := make([]List[int], children)
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			results[i] = ListCons(100+i, shared)
+			if got := elems(results[i]); !eqInts(got, []int{100 + i, 1, 2, 3}) {
+				t.Errorf("child %d = %v", i, got)
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	for i, result := range results {
+		if got := elems(result); !eqInts(got, []int{100 + i, 1, 2, 3}) {
+			t.Errorf("published child %d = %v", i, got)
+		}
+	}
+	if got := elems(shared); !eqInts(got, []int{1, 2, 3}) {
+		t.Errorf("shared tail = %v", got)
 	}
 }
 

@@ -6,28 +6,32 @@ import "sync"
 // It never contains Fango callbacks, interpreter state, or a NativeHost.
 type NativeRequestHost struct {
 	mu       sync.Mutex
+	idle     *sync.Cond
 	limit    int
 	closed   bool
+	running  int
 	requests map[*NativeRequest]bool
 }
 
 // NativeRequest is the only authority a sidecar may retain. Begin must precede
 // starting native work, and Done must follow its last access to retained data.
 type NativeRequest struct {
-	host                                             *NativeRequestHost
-	admitted, begun, ready, done, claimed, cancelled bool
-	cancel                                           func()
-	onDone                                           func()
-	quiescent                                        chan struct{}
-	cancelling                                       bool
-	cancelDone                                       chan struct{}
+	host                                                       *NativeRequestHost
+	admitted, begun, ready, done, claimed, finished, cancelled bool
+	cancel                                                     func()
+	onDone                                                     func()
+	quiescent                                                  chan struct{}
+	cancelling                                                 bool
+	cancelDone                                                 chan struct{}
 }
 
 func NewNativeRequestHost(limit int64) *NativeRequestHost {
 	if limit < 0 {
 		limit = 0
 	}
-	return &NativeRequestHost{limit: int(limit), requests: make(map[*NativeRequest]bool)}
+	h := &NativeRequestHost{limit: int(limit), requests: make(map[*NativeRequest]bool)}
+	h.idle = sync.NewCond(&h.mu)
+	return h
 }
 
 func (h *NativeRequestHost) Reserve() *NativeRequest {
@@ -112,8 +116,23 @@ func (h *NativeRequestHost) Claim(r *NativeRequest) bool {
 		return false
 	}
 	r.claimed = true
+	h.running++
 	delete(h.requests, r)
 	return true
+}
+
+// Finish acknowledges that the claimed Fango action and its cleanup have
+// finished. Closing the host joins these actions as well as native workers.
+func (r *NativeRequest) Finish() {
+	h := r.host
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !r.claimed || r.finished {
+		return
+	}
+	r.finished = true
+	h.running--
+	h.idle.Broadcast()
 }
 
 func (r *NativeRequest) Cancel() {
@@ -175,6 +194,11 @@ func (h *NativeRequestHost) Close() {
 	for _, r := range requests {
 		r.Drain()
 	}
+	h.mu.Lock()
+	for h.running != 0 {
+		h.idle.Wait()
+	}
+	h.mu.Unlock()
 }
 
 func (h *NativeRequestHost) Counts() (live, registrations int64) {

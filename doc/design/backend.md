@@ -66,9 +66,13 @@ of storage.
 
 A chunk watermark only decreases. Cons may claim the slot below it only when
 the extended list owns the frontier; every existing value's offset is at or above
-the watermark at creation. New cons is therefore invisible to all prior values,
-without copying, and has worst-case constant cost even under branching. The
-interpreter uses the same runtime representation. Public complexity belongs in
+the watermark at creation. A chunk mutex serializes the frontier check, element
+write, and watermark publication. The lock is released before the new list is
+returned, so another branch cannot publish a tail containing an unwritten slot.
+Readers touch only previously published offsets and need no lock. New cons is
+invisible to all prior values, without copying, and has worst-case constant cost
+even when children extend one tail concurrently. The interpreter uses the same
+runtime representation. Public complexity belongs in
 [collections](../reference/library-collections.md#list).
 
 Dict is an ordinary opaque Fango [weight-balanced tree](../../stdlib/Dict.fango)
@@ -311,7 +315,10 @@ packages.
 
 Every materialized sidecar gets FangoHost, a reserved process-global interface
 for input/output, arguments, directory, and exit, without hidden call parameters.
-Scoped background retention uses [native request tokens](native-requests.md)
+The system host serializes input-buffer access and each output write. The
+interpreter worker serializes complete reverse-host request/reply exchanges so
+concurrent native calls cannot take one another's replies. Scoped background
+retention uses [native request tokens](native-requests.md)
 instead of retaining this global host.
 Its single source declaration is copied beside each sidecar with rewritten runtime
 imports. Module-specific logic remains in its owner: IO owns console behavior,

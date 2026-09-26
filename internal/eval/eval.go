@@ -11,6 +11,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
@@ -79,6 +80,8 @@ func asExit(v Value) (*ExitRequest, bool) {
 // replaces cells wholesale.
 type Cell struct {
 	Body    core.Expr
+	mu      sync.Mutex
+	ready   chan struct{}
 	memo    Value
 	forced  bool
 	forcing bool
@@ -112,7 +115,9 @@ type Closure struct {
 }
 
 type IOContext struct {
-	Reader *bufio.Reader
+	inputMu  sync.Mutex
+	outputMu sync.Mutex
+	Reader   *bufio.Reader
 	// Input can supply one owned line stream to both the prompt and host RPCs.
 	// The REPL uses it so interruption never leaves a blocked read racing the
 	// next prompt for bytes.
@@ -151,6 +156,8 @@ func NewIOContext(r io.Reader, w io.Writer) *IOContext {
 }
 
 func (c *IOContext) HasInput() (bool, error) {
+	c.inputMu.Lock()
+	defer c.inputMu.Unlock()
 	if c.Input != nil {
 		return c.Input.HasInput()
 	}
@@ -162,6 +169,8 @@ func (c *IOContext) HasInput() (bool, error) {
 }
 
 func (c *IOContext) ReadInputLine() ([]byte, error) {
+	c.inputMu.Lock()
+	defer c.inputMu.Unlock()
 	if c.Input != nil {
 		return c.Input.ReadInputLine()
 	}
@@ -169,8 +178,16 @@ func (c *IOContext) ReadInputLine() ([]byte, error) {
 }
 
 func (c *IOContext) WriteOutput(data []byte) error {
+	c.outputMu.Lock()
+	defer c.outputMu.Unlock()
 	_, err := c.Writer.Write(data)
 	return err
+}
+
+func (c *IOContext) Write(data []byte) (int, error) {
+	c.outputMu.Lock()
+	defer c.outputMu.Unlock()
+	return c.Writer.Write(data)
 }
 
 func (c *IOContext) Arguments() []string { return c.Args }
@@ -190,6 +207,9 @@ type evidence struct {
 
 // Env holds top-level cells and workers.
 type Env struct {
+	tailMu  sync.Mutex
+	waitMu  sync.Mutex
+	waits   map[*Cell]*Cell
 	adts    map[int]*types.ADTInfo
 	cells   map[string]*Cell
 	workers map[string]*core.Def
@@ -301,6 +321,8 @@ func NewEnv() *Env {
 // capture exclusion its own fresh frames would not need — so both backends
 // optimize the same set of definitions.
 func (e *Env) tailLoop(def *core.Def) *core.TailLoop {
+	e.tailMu.Lock()
+	defer e.tailMu.Unlock()
 	if tl, ok := e.tails[def]; ok {
 		return tl
 	}
@@ -403,6 +425,8 @@ type interp struct {
 	out      io.Writer
 	ioctx    *IOContext
 	evidence map[int]*evidence
+	forcing  map[*Cell]bool
+	stack    []*Cell
 	steps    int
 	// Scheduled Work reports interruption through its driver so cleanup drains.
 	// Ordinary and staged evaluation keep the host interruption check.
@@ -440,7 +464,7 @@ const DefaultBudget = 10_000_000
 // compiler executes a splice operand; ordinary programs never take this path.
 func EvalCompileTime(ctx context.Context, e core.Expr, env *Env, budget int) (Value, error) {
 	ioctx := NewIOContext(strings.NewReader(""), io.Discard)
-	in := &interp{ctx: ctx, env: env, out: ioctx.Writer, ioctx: ioctx,
+	in := &interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx,
 		evidence: map[int]*evidence{}, compileTime: true, budget: budget}
 	return in.eval(e, nil)
 }
@@ -455,7 +479,7 @@ func EvalIO(ctx context.Context, e core.Expr, env *Env, ioctx *IOContext) (Value
 	if executor, ok := ioctx.Natives.(programExecutor); ok {
 		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Machine: env.machine, Expr: e})
 	}
-	return (&interp{ctx: ctx, env: env, out: ioctx.Writer, ioctx: ioctx, evidence: map[int]*evidence{}}).eval(e, nil)
+	return (&interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[int]*evidence{}}).eval(e, nil)
 }
 
 // EvalOutcome exposes the interpreter's control protocol to compiler tests and
@@ -481,7 +505,7 @@ func ForceIO(ctx context.Context, name string, env *Env, ioctx *IOContext) (Valu
 	if executor, ok := ioctx.Natives.(programExecutor); ok {
 		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Machine: env.machine, Force: name})
 	}
-	return (&interp{ctx: ctx, env: env, out: ioctx.Writer, ioctx: ioctx, evidence: map[int]*evidence{}}).force(name)
+	return (&interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[int]*evidence{}}).force(name)
 }
 
 // tick is shared by Core evaluation, tail loops, and producer machines. A
@@ -1130,7 +1154,7 @@ func (in *interp) showValue(v Value) (string, error) {
 }
 
 func (in *interp) nativeRuntime() *natives.Runtime {
-	return &natives.Runtime{Reader: in.ioctx.Reader, Host: in.ioctx, Writer: in.ioctx.Writer, Args: in.ioctx.Args, Dir: in.ioctx.Dir, Equal: eqValue, Show: in.showValue, Expand: in.env.Expand}
+	return &natives.Runtime{Reader: in.ioctx.Reader, Host: in.ioctx, Writer: in.ioctx, Args: in.ioctx.Args, Dir: in.ioctx.Dir, Equal: eqValue, Show: in.showValue, Expand: in.env.Expand}
 }
 
 // tree walks a decision tree, mirroring the compiled backend's switches.
@@ -1263,15 +1287,68 @@ func (in *interp) force(name string) (Value, error) {
 		}
 		return nil, fmt.Errorf("eval: undefined name `%s` (checker should have caught this)", name)
 	}
-	if cell.forced {
-		return cell.memo, nil
+	for {
+		cell.mu.Lock()
+		if cell.forced {
+			memo := cell.memo
+			cell.mu.Unlock()
+			return memo, nil
+		}
+		if !cell.forcing {
+			cell.forcing = true
+			cell.ready = make(chan struct{})
+			cell.mu.Unlock()
+			break
+		}
+		ready := cell.ready
+		cell.mu.Unlock()
+		if in.forcing[cell] {
+			return nil, fmt.Errorf("eval: `%s` depends on itself", name)
+		}
+		if len(in.stack) != 0 {
+			from := in.stack[len(in.stack)-1]
+			if !in.env.beginCellWait(from, cell) {
+				return nil, fmt.Errorf("eval: `%s` depends on itself", name)
+			}
+			<-ready
+			in.env.endCellWait(from, cell)
+			continue
+		}
+		<-ready
 	}
-	if cell.forcing {
-		return nil, fmt.Errorf("eval: `%s` depends on itself", name)
+	if in.forcing == nil {
+		in.forcing = make(map[*Cell]bool)
 	}
-	cell.forcing = true
+	var parent *Cell
+	if len(in.stack) != 0 {
+		parent = in.stack[len(in.stack)-1]
+		if !in.env.beginCellWait(parent, cell) {
+			cell.mu.Lock()
+			cell.forcing = false
+			close(cell.ready)
+			cell.mu.Unlock()
+			return nil, fmt.Errorf("eval: `%s` depends on itself", name)
+		}
+	}
+	in.forcing[cell] = true
+	in.stack = append(in.stack, cell)
 	var v Value
 	var err error
+	success := false
+	defer func() {
+		if parent != nil {
+			in.env.endCellWait(parent, cell)
+		}
+		in.stack = in.stack[:len(in.stack)-1]
+		delete(in.forcing, cell)
+		cell.mu.Lock()
+		if success {
+			cell.memo, cell.forced = v, true
+		}
+		cell.forcing = false
+		close(cell.ready)
+		cell.mu.Unlock()
+	}()
 	if def := in.env.defs[name]; def.Control.Transport == types.Machine && in.env.machine != nil {
 		var session *MachineSession
 		session, err = startMachine(in.ctx, in.env.machine, name, nil, nil, in.env, in.ioctx, true)
@@ -1293,15 +1370,40 @@ func (in *interp) force(name string) (Value, error) {
 	} else {
 		v, err = in.eval(cell.Body, nil)
 	}
-	cell.forcing = false
 	if err != nil {
 		return nil, err
 	}
 	if _, ok := asExit(v); ok {
 		return v, nil
 	}
-	cell.memo, cell.forced = v, true
+	success = true
 	return v, nil
+}
+
+// Dependencies across evaluator goroutines can form a cycle even though neither
+// evaluator recursively forces one of its own cells. Record both nested forces
+// and waits, and reject an edge that would close such a cycle.
+func (e *Env) beginCellWait(from, target *Cell) bool {
+	e.waitMu.Lock()
+	defer e.waitMu.Unlock()
+	for at := target; at != nil; at = e.waits[at] {
+		if at == from {
+			return false
+		}
+	}
+	if e.waits == nil {
+		e.waits = make(map[*Cell]*Cell)
+	}
+	e.waits[from] = target
+	return true
+}
+
+func (e *Env) endCellWait(from, target *Cell) {
+	e.waitMu.Lock()
+	if e.waits[from] == target {
+		delete(e.waits, from)
+	}
+	e.waitMu.Unlock()
 }
 
 // eqValue is structural equality — the interpreter's mirror of the derived

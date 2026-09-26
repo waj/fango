@@ -7,7 +7,10 @@ import (
 	"io"
 	"math"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/types"
@@ -56,6 +59,104 @@ func TestArith(t *testing.T) {
 	e := binOp("+", ty, &core.IntLit{Val: 1, Ty: ty}, binOp("*", ty, &core.IntLit{Val: 2, Ty: ty}, &core.IntLit{Val: 3, Ty: ty}))
 	if v := run(t, e); v != int64(7) {
 		t.Errorf("got %v, want 7", v)
+	}
+}
+
+func TestConcurrentLazyGlobalForce(t *testing.T) {
+	env := NewEnv()
+	env.Define("answer", &core.IntLit{Val: 42, Ty: intTy()})
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			got, err := Force(context.Background(), "answer", env, io.Discard)
+			if err != nil || got != int64(42) {
+				t.Errorf("force = %v, %v", got, err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+}
+
+func TestConcurrentLazyGlobalWaitCycle(t *testing.T) {
+	env := NewEnv()
+	a, b, c := new(Cell), new(Cell), new(Cell)
+	if !env.beginCellWait(a, b) || !env.beginCellWait(b, c) {
+		t.Fatal("independent waits should be admitted")
+	}
+	if env.beginCellWait(c, a) {
+		t.Fatal("cross-goroutine force cycle was admitted")
+	}
+	env.endCellWait(b, c)
+	if !env.beginCellWait(c, a) {
+		t.Fatal("completed wait still blocks an acyclic force")
+	}
+	env.endCellWait(a, b)
+	env.endCellWait(c, a)
+}
+
+type forceBarrierWriter struct {
+	entered atomic.Int32
+	ready   chan struct{}
+}
+
+func (w *forceBarrierWriter) Write(p []byte) (int, error) {
+	if w.entered.Add(1) == 2 {
+		close(w.ready)
+	}
+	<-w.ready
+	return len(p), nil
+}
+
+func TestConcurrentLazyGlobalForceCycleDoesNotDeadlock(t *testing.T) {
+	env := NewEnv()
+	for _, pair := range [][2]string{{"a", "b"}, {"b", "a"}} {
+		env.Define(pair[0], &core.Seq{First: writeExpr(pair[0]),
+			Then: &core.VarRef{Name: pair[1], Ty: intTy()}, Ty: intTy()})
+	}
+	writer := &forceBarrierWriter{ready: make(chan struct{})}
+	results := make(chan error, 2)
+	for _, name := range []string{"a", "b"} {
+		go func(name string) {
+			_, err := ForceIO(context.Background(), name, env, NewIOContext(strings.NewReader(""), writer))
+			results <- err
+		}(name)
+	}
+	for range 2 {
+		select {
+		case err := <-results:
+			if err == nil || !strings.Contains(err.Error(), "depends on itself") {
+				t.Errorf("force cycle = %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("cross-worker force cycle deadlocked")
+		}
+	}
+}
+
+func TestConcurrentIOContextOutput(t *testing.T) {
+	var output bytes.Buffer
+	ioctx := NewIOContext(strings.NewReader(""), &output)
+	var wg sync.WaitGroup
+	for range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := ioctx.WriteOutput([]byte("x")); err != nil {
+				t.Error(err)
+			}
+			if _, err := ioctx.Write([]byte("y")); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := output.Len(); got != 128 {
+		t.Fatalf("output length = %d, want 128", got)
 	}
 }
 

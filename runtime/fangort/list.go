@@ -1,6 +1,9 @@
 package fangort
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
 // The runtime representation of the bundled Fango `List` type (see
 // doc/roadmap-list.md). `List` is an ordinary ADT to the checker, the deriver,
@@ -9,9 +12,10 @@ import "strings"
 //
 // Elements live in fixed-size inline arrays filled downward. A chunk's `lo`
 // watermark records how far it has been filled; slots [lo, listChunk) are
-// written and frozen, and `lo` only ever decreases. Cons claims the slot below
-// the watermark when the list it extends owns the frontier, and otherwise
-// starts a fresh chunk pointing at that list, so no cons ever copies.
+// written and frozen, and `lo` only ever decreases. A mutex serializes the
+// frontier claim and the write: another cons may only observe the new frontier
+// after its element is initialized. Readers use only their already published
+// offset, so they do not need to acquire the mutex.
 //
 // Persistence: every value has off >= node.lo at creation (a cons sets
 // off = lo; a tail sets off+1 > off >= lo; a `next` was a value created
@@ -21,9 +25,8 @@ import "strings"
 // exact rather than conservative: when off > node.lo, slot off-1 is already
 // published and the copy-free path is correctly refused.
 //
-// The watermark is a benign non-atomic mutation only because evaluation is
-// single-threaded. Under concurrency the frontier claim would have to become a
-// compare-and-swap on lo.
+// A bare CAS on lo is insufficient: a second cons could publish a list whose
+// tail includes the first claimed slot before its element has been written.
 
 // listChunk is the number of elements one chunk holds. Bytes per element
 // saturates here, so a larger chunk only doubles the waste a short list and a
@@ -31,6 +34,7 @@ import "strings"
 const listChunk = 32
 
 type chunk[T any] struct {
+	mu    sync.Mutex
 	lo    int
 	elems [listChunk]T
 	next  List[T]
@@ -53,10 +57,16 @@ func ListNil[T any]() List[T] { return List[T]{} }
 // listChunk elements when building linearly, one chunk when branching off a
 // list that no longer owns its chunk's frontier, and never copies.
 func ListCons[T any](head T, tail List[T]) List[T] {
-	if n := tail.node; n != nil && tail.off == n.lo && n.lo > 0 {
-		n.lo--
-		n.elems[n.lo] = head
-		return List[T]{node: n, off: n.lo}
+	if n := tail.node; n != nil {
+		n.mu.Lock()
+		if tail.off == n.lo && n.lo > 0 {
+			off := n.lo - 1
+			n.elems[off] = head
+			n.lo = off
+			n.mu.Unlock()
+			return List[T]{node: n, off: off}
+		}
+		n.mu.Unlock()
 	}
 	n := &chunk[T]{lo: listChunk - 1, next: tail}
 	n.elems[listChunk-1] = head

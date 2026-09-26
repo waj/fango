@@ -52,6 +52,9 @@ cancelRegistration = native
 -- Cancel and wait until native work and its cancellation hook are quiescent.
 drainRegistration : Registration ->{IO} ()
 drainRegistration = native
+-- Mark a claimed callback finished after its typed action and cleanup return.
+finishRegistration : Registration ->{IO} ()
+finishRegistration = native
 -- Count native work or cancellation hooks that have not yet finished.
 liveCount : Host ->{IO} Int
 liveCount = native
@@ -91,7 +94,11 @@ register host start callback =
 -- already delivered, or foreign-host bindings.
 poll : Host -> Callback a {IO | e} ->{IO | e} Maybe (Completion a {IO | e})
 poll host (Callback token action) =
-    if claim host token then Just (immediate action) else Nothing
+    if claim host token then
+        result = immediate action
+        finishRegistration token
+        Just result
+    else Nothing
 
 -- Revoke delivery and call the native cancellation hook at most once. Native
 -- work may still be running when this returns.

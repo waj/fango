@@ -145,7 +145,9 @@ Every materialized sidecar package receives the reserved process-global
 Compiled programs install the system host; the interpreter worker installs a
 proxy to the active interpreter session. Native function signatures never gain
 a hidden context argument. Sidecars may use `FangoHost` only during a native
-call and must not replace it or retain it for asynchronous work.
+call and must not replace it or retain it for asynchronous work. Host input
+buffer access and individual output writes are serialized. In the interpreter
+worker, concurrent host calls keep each request paired with its own reply.
 
 Background work instead uses [NativeRequest's scoped token protocol](library-native-requests.md).
 The canonical `Runtime.NativeRequest.Registration` is an imported boundary wrapper for

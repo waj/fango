@@ -258,7 +258,8 @@ var requestNatives = map[string]int{
 	"Runtime.NativeRequest.hostNew": 1, "Runtime.NativeRequest.hostClose": 1,
 	"Runtime.NativeRequest.reserve": 1, "Runtime.NativeRequest.admitted": 1,
 	"Runtime.NativeRequest.claim": 2, "Runtime.NativeRequest.cancelRegistration": 1,
-	"Runtime.NativeRequest.drainRegistration": 1, "Runtime.NativeRequest.liveCount": 1,
+	"Runtime.NativeRequest.drainRegistration": 1, "Runtime.NativeRequest.finishRegistration": 1,
+	"Runtime.NativeRequest.liveCount":         1,
 	"Runtime.NativeRequest.registrationCount": 1,
 }
 

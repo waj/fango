@@ -8,6 +8,13 @@ Core evaluation, persistent prompt state, imports, generations, and transaction 
 
 internal/eval executes Core with a uniform Go value representation. Environments
 distinguish typed workers, lazy memoized top-level cells, and eager block frames.
+Each cell publishes a successful memo under a mutex. Concurrent forces of the
+same cell wait for that evaluation to finish; recursive force by its current
+evaluator still reports a cycle. Active waits between evaluators form a checked
+dependency graph, so a cross-worker force cycle also reports an error rather
+than deadlocking. The shared tail-loop analysis cache is also
+locked. A per-evaluator instance keeps effect evidence, frames, and execution
+steps local to its worker.
 EvalIO/ForceIO are explicit IO entry points. List and represented Unit use shared
 fangort runtime types. Structural list equality must precede the scalar Go-equality
 fallback because a list is deliberately not comparable.

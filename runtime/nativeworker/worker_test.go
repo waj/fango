@@ -6,7 +6,9 @@ import (
 	"io"
 	"io/fs"
 	"net"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 
@@ -134,6 +136,45 @@ func TestProxy(t *testing.T) {
 	}
 	if err := responseError(nativewire.Message{Error: io.EOF.Error()}); err != io.EOF {
 		t.Fatalf("EOF response = %v", err)
+	}
+}
+
+func TestConcurrentProxyRequestsKeepRepliesPaired(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	p := &proxy{enc: gob.NewEncoder(client), dec: gob.NewDecoder(client)}
+	const count = 64
+	done := make(chan error, 1)
+	go func() {
+		dec, enc := gob.NewDecoder(server), gob.NewEncoder(server)
+		for range count {
+			var request nativewire.Message
+			if err := dec.Decode(&request); err != nil {
+				done <- err
+				return
+			}
+			if err := enc.Encode(nativewire.Message{Kind: "host_reply", Error: string(request.Data)}); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	var wg sync.WaitGroup
+	for i := range count {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			id := strconv.Itoa(i)
+			if got := p.request(nativewire.Message{Kind: "host_write", Data: []byte(id)}); got.Error != id {
+				t.Errorf("request %s received reply %q", id, got.Error)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 

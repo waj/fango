@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 )
 
 type ExitError struct{ Code int }
@@ -27,9 +28,15 @@ type NativeHost interface {
 	Exit(int)
 }
 
-type systemNativeHost struct{ in *bufio.Reader }
+type systemNativeHost struct {
+	in       *bufio.Reader
+	inputMu  sync.Mutex
+	outputMu sync.Mutex
+}
 
 func (h *systemNativeHost) HasInput() (bool, error) {
+	h.inputMu.Lock()
+	defer h.inputMu.Unlock()
 	_, err := h.in.Peek(1)
 	if err == io.EOF {
 		return false, nil
@@ -38,6 +45,8 @@ func (h *systemNativeHost) HasInput() (bool, error) {
 }
 
 func (h *systemNativeHost) ReadInputLine() ([]byte, error) {
+	h.inputMu.Lock()
+	defer h.inputMu.Unlock()
 	b, err := h.in.ReadBytes('\n')
 	if err == io.EOF && len(b) > 0 {
 		err = nil
@@ -45,7 +54,9 @@ func (h *systemNativeHost) ReadInputLine() ([]byte, error) {
 	return b, err
 }
 
-func (*systemNativeHost) WriteOutput(b []byte) error {
+func (h *systemNativeHost) WriteOutput(b []byte) error {
+	h.outputMu.Lock()
+	defer h.outputMu.Unlock()
 	_, err := os.Stdout.Write(b)
 	return err
 }

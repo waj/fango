@@ -28,7 +28,9 @@ published readiness and acknowledged quiescence, or when the binding is
 cancelled, already delivered, or belongs to another host. On successful claim,
 it invokes the stored action once on the calling Fango driver and returns its
 typed `Completion`. Aliases cannot invoke that registration twice. The action's
-cleanup finishes before the completion becomes observable. Outward language
+cleanup finishes before the completion becomes observable. A concurrent host
+close waits for a claimed action to finish as well as for native work to drain;
+once close begins, no later poll can claim a callback. Outward language
 aborts become completion values; replay is explicit and selects the handler
 at replay time. IO remains in the callback's row index.
 
@@ -42,9 +44,10 @@ drive a nested coroutine whose suspension is consumed locally. See
 `cancel` revokes delivery and invokes the native cancellation hook at most
 once. It does not imply that native work has stopped. `drain` cancels and then
 blocks until both native work and its cancellation hook are quiescent. Scope
-exit revokes all deliveries and drains all requests before returning or
-propagating a language failure. A native operation that never acknowledges
-quiescence prevents scope closure; it is never forcefully discarded.
+exit revokes all deliveries, drains all requests, and joins claimed actions
+before returning or propagating a language failure. A native operation that
+never acknowledges quiescence prevents scope closure; it is never forcefully
+discarded.
 
 `Counts` has `live : Int` and `registrations : Int` fields. Live counts include
 unfinished native work and cancellation hooks. A completed but unclaimed

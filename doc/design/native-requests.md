@@ -49,16 +49,20 @@ publishes readiness; Done acknowledges the end of native resource access.
 An optional native `OnDone` hook runs before Done closes the quiescence channel;
 this lets a native event source wake a driver without a gap between notification
 and claimable completion. The hook cannot call back into its request host.
-Delivery claims require both, match the host, and succeed at most once.
+Delivery claims require both, match the host, and succeed at most once. A claim
+increments the host's active Fango-action count. The driver acknowledges the
+claim after the action's typed completion, including cleanup, is captured;
+closing the host joins these actions after draining native work. A closed host
+cannot grant another claim.
 Cancellation revokes claim before running its hook outside the mutex. Draining
 waits for the worker and any in-flight cancellation hook. Map entries stay live
 until both are quiescent; completed readiness consumes admission until claimed.
 Closing the host first forbids all publication/claims and further admission,
-then cancels and drains outstanding entries.
+then cancels and drains outstanding entries and joins claimed actions.
 
 Sidecar support aliases refer to the same runtime token implementation in both
 backends. In the interpreter, native work stays on the worker heap and publishes
 readiness without reverse-host RPC. Only a later driver call invokes Fango and
 captures its outcome. In generated Go, the same source library and token state
-machine implement delivery. Synchronization here protects native requests; it
-does not establish concurrent safety for Fango execution.
+machine implement delivery. Host synchronization protects delivery and its
+quiescence; the separate concurrent execution gate still governs Fango workers.

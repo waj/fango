@@ -386,12 +386,10 @@ different value layouts.
 
 Audit the complete runtime before either concurrent executor is enabled.
 Source-level immutability is insufficient when an implementation mutates shared
-storage. In particular, [List's chunk frontier](../runtime/fangort/list.go)
-currently uses a non-atomic claim justified by single-threaded evaluation.
-Replace it with a proved thread-safe claim/publication path or a representation
-that avoids shared mutation. Test two children extending the same list, not
-just independently allocated lists. Preserve persistent values and their
-documented complexity.
+storage. Keep [List's synchronized claim/publication
+path](design/backend.md#list-representation) and the two-children-one-tail race
+fixture as regression gates; independently allocated lists do not exercise the
+frontier. Preserve persistent values and their documented complexity.
 
 Also audit generated closure captures, effect evidence, state cells, evaluator
 execution state, lazy globals, descriptor caches, failure snapshots, cleanup

@@ -57,11 +57,14 @@ func (d *directCaller) Call(_ context.Context, _ fangort.SessionHost, name strin
 }
 
 type proxy struct {
+	mu  sync.Mutex
 	enc *gob.Encoder
 	dec *gob.Decoder
 }
 
 func (p *proxy) request(m nativewire.Message) nativewire.Message {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if err := p.enc.Encode(m); err != nil {
 		panic(err)
 	}

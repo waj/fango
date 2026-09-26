@@ -179,7 +179,7 @@ func startMachine(ctx context.Context, p *machineir.Prog, entry string, args []V
 	}
 	s := &MachineSession{
 		program:  p,
-		interp:   &interp{ctx: ctx, env: env, out: ioctx.Writer, ioctx: ioctx, evidence: map[int]*evidence{}},
+		interp:   &interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[int]*evidence{}},
 		workers:  workers,
 		closures: closures,
 		frames:   []*machineFrame{{worker: worker, block: worker.Entry, vars: vars, evidence: cloneEvidence(initialEvidence), stateToken: -1}},

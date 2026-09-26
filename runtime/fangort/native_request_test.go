@@ -38,6 +38,7 @@ func TestNativeRequestPublicationAndAdmission(t *testing.T) {
 	if !h.Claim(r) || h.Claim(r) {
 		t.Fatal("delivery must happen once")
 	}
+	r.Finish()
 	requestCounts(t, h, 0, 0)
 	r = h.Reserve()
 	h.Close()
@@ -45,6 +46,34 @@ func TestNativeRequestPublicationAndAdmission(t *testing.T) {
 		t.Fatal("closed scope admitted work")
 	}
 	requestCounts(t, h, 0, 0)
+}
+
+func TestNativeRequestCloseJoinsClaimedCallback(t *testing.T) {
+	h := NewNativeRequestHost(1)
+	r := h.Reserve()
+	if !r.Begin(nil) || !r.Complete() {
+		t.Fatal("registration")
+	}
+	r.Done()
+	if !h.Claim(r) {
+		t.Fatal("claim")
+	}
+	closed := make(chan struct{})
+	go func() { h.Close(); close(closed) }()
+	select {
+	case <-closed:
+		t.Fatal("host closed before claimed callback finished")
+	default:
+	}
+	if h.Claim(r) {
+		t.Fatal("closed host revived a callback")
+	}
+	r.Finish()
+	r.Finish()
+	<-closed
+	if h.Reserve().Admitted() {
+		t.Fatal("closed host admitted work")
+	}
 }
 
 func TestNativeRequestDrainWaitsForWorkerAndCancellation(t *testing.T) {
