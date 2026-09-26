@@ -541,13 +541,20 @@ type detachedFlow struct {
 	failures  flowValue
 }
 
-func checkCaptureFlows(a *captureAnalyzer) []error {
+// checkCaptureFlows discharges the obligations of every definition of a.p
+// not named in proven, each from its own root.
+func checkCaptureFlows(a *captureAnalyzer, proven map[string]bool) []error {
 	start := time.Now()
 	contexts := 0
 	var out []error
 	names := make([]string, 0, len(a.p.Defs))
 	for _, d := range a.p.Defs {
-		names = append(names, d.Name)
+		if !proven[d.Name] {
+			names = append(names, d.Name)
+		}
+	}
+	if len(names) == 0 {
+		return nil
 	}
 	// A definition's graph exports deferred obligations on its abstract
 	// parameters. Checking all definitions also rejects unconditional escapes in

@@ -4,6 +4,7 @@ import (
 	"github.com/waj/fango/internal/compileevent"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/waj/fango/internal/check"
@@ -348,5 +349,55 @@ filler() =
 	}
 	if p.events["emission"]["Handlers"] != 1 {
 		t.Fatalf("the second program did not re-emit Handlers: %#v", p.events)
+	}
+}
+
+// Lowering lints an owner's Core without discharging its obligations again,
+// because the installer discharged them — or published them only after doing
+// so — and nothing rewrites installed Core in between. That skip is conditional
+// on lint agreeing with every contract it reconstructs, so a contract gone
+// stale between install and lowering is still reported, from a fresh object
+// and from a reused one alike, and the obligations are discharged anyway.
+func TestLoweringReportsAStaleContractItWasToldWasProven(t *testing.T) {
+	p := libraryProject(t)
+	for _, run := range []string{"from source", "from cache"} {
+		t.Run(run, func(t *testing.T) {
+			result := p.check(t)
+			if run == "from cache" && p.total("checked-cache-hit") == 0 {
+				t.Fatal("no object was reused; the test proves nothing")
+			}
+			if !result.FlowsProven["Lib"] {
+				t.Fatalf("Lib is not recorded as proven: %v", result.FlowsProven)
+			}
+			flows := func() (count int, err error) {
+				observe := func(event compileevent.Event) {
+					if event.Stage == "capture-flow" {
+						count++
+					}
+				}
+				_, err = (&Session{DisableCache: true, Observe: observe}).EmitProject(p.entry, result, unitsOf(result), false)
+				return count, err
+			}
+			if count, err := flows(); err != nil || count != 0 {
+				t.Fatalf("lowering proven Core: %d flow runs, err %v", count, err)
+			}
+			damaged := false
+			for i := range result.Program.Defs {
+				if result.Program.Defs[i].Name == "Lib.twice" {
+					result.Program.Defs[i].CaptureContract = nil
+					damaged = true
+				}
+			}
+			if !damaged {
+				t.Fatal("Lib.twice is not in the program")
+			}
+			count, err := flows()
+			if err == nil || !strings.Contains(err.Error(), "capture contract is stale") {
+				t.Fatalf("got %v, want a stale contract", err)
+			}
+			if count == 0 {
+				t.Fatal("a stale contract did not discharge the obligations anyway")
+			}
+		})
 	}
 }

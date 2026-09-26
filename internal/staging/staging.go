@@ -180,10 +180,16 @@ func (s *Session) StageReferences(defs []core.Def, names ...string) []string {
 // Snapshot completes and returns the stage Core added since the prior
 // snapshot. It is declarative Core; evaluator closures and memo cells are not
 // exposed to module objects.
-
-func (s *Session) Snapshot() (SnapshotObject, []diag.Error) {
+//
+// proven names the definitions the module's runtime elaboration has just
+// discharged. The stage elaboration of the same declarations still solves
+// their summaries and contracts but does not discharge them again; whatever
+// exists only here — compile-time-only declarations above all — gets its one
+// discharge now. The set is consulted by this call alone: a splice's sync
+// runs before the runtime elaboration and proves everything it elaborates.
+func (s *Session) Snapshot(proven map[string]bool) (SnapshotObject, []diag.Error) {
 	beforeDefs, beforeGroups := len(s.ev.defs), len(s.ev.groups)
-	if errs := s.ev.sync(); len(errs) != 0 {
+	if errs := s.ev.syncProven(proven); len(errs) != 0 {
 		return SnapshotObject{}, errs
 	}
 	groups := append([]Group(nil), s.ev.groups[beforeGroups:]...)
@@ -376,7 +382,9 @@ func (ev *evaluator) executionDefs(body core.Expr, aux []core.Def) []core.Def {
 // sync elaborates newly completed groups together, so capture analysis and
 // evaluator installation see every recursive member. Instance registration
 // stays source-ordered and is bounded by the current splice's cutoff.
-func (ev *evaluator) sync() []diag.Error {
+func (ev *evaluator) sync() []diag.Error { return ev.syncProven(nil) }
+
+func (ev *evaluator) syncProven(proven map[string]bool) []diag.Error {
 	var defs []core.Def
 	var errs []diag.Error
 	add := func(ds []core.Def, es []diag.Error) {
@@ -405,7 +413,7 @@ func (ev *evaluator) sync() []diag.Error {
 	for i := ev.installedGroups; i < nextGroups; i++ {
 		group := ev.ck.CompletionGroups[i]
 		context := append(append([]core.Def(nil), ev.defs...), defs...)
-		add(elaborate.DeclsIn(group.Infos, context, ev.ck))
+		add(elaborate.DeclsProvenIn(group.Infos, context, proven, ev.ck))
 		groupEnds = append(groupEnds, len(defs))
 		groupCutoffs = append(groupCutoffs, group.Cutoff)
 	}

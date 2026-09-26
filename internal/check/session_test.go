@@ -900,3 +900,53 @@ func artifactPaths(t *testing.T, dir string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// A compile-time-only declaration exists only in stage Core: the runtime
+// elaboration leaves it out, so the stage elaboration, which skips what the
+// runtime one discharged, is where its obligations are discharged at all.
+func TestStageCoreDischargesCompileTimeOnlyDeclarations(t *testing.T) {
+	d := t.TempDir()
+	main := filepath.Join(d, "main.fango")
+	source := `import Meta exposing (Code)
+
+effect Counter
+    readCounter : () -> Int
+
+keep : (() ->{e} Int) -> () ->{e} Int
+keep action = action
+
+leak : Code -> () ->{Counter} Int
+leak code =
+    handle keep (\_ -> readCounter()) with state = code of
+        readCounter () -> resume 1 with state
+
+main() = print "ok"
+`
+	if err := os.WriteFile(main, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var snapshots, lints int
+	s := &Session{DisableObjectCache: true, Observe: func(event compileevent.Event) {
+		if event.Begin || event.Owner != "<entry>" {
+			return
+		}
+		switch event.Stage {
+		case "stage-snapshot":
+			snapshots++
+		case "semantic-lint":
+			lints++
+		}
+	}}
+	result, diagnostics, internalErr := s.Compile(main)
+	if internalErr != nil || result != nil {
+		t.Fatalf("result=%v internal=%v", result, internalErr)
+	}
+	if len(diagnostics) != 1 || diagnostics[0].Title != "STATE RESULT ESCAPES" {
+		t.Fatalf("got %v, want the escape from leak", diagnostics)
+	}
+	// Runtime elaboration succeeded and the stage snapshot rejected the
+	// module, so the diagnostic is the stage discharge's own.
+	if snapshots != 1 || lints != 0 {
+		t.Fatalf("stage snapshots %d, lints %d: the escape was not found building stage Core", snapshots, lints)
+	}
+}

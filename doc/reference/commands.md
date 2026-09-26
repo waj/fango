@@ -179,8 +179,9 @@ whose generated code cannot be cached counts against reuse rather than
 disappearing from the ratio.
 
 The [capture-flow analysis](../design/ownership.md#capture-flow-graph-and-abstract-heap)
-runs inside several stages — inference, elaboration, stage snapshots, and
-lowering each interpret definitions through it — and on an uncached build it
+runs inside several stages — inference, elaboration, and stage snapshots each
+interpret definitions through it, and lowering does only when a contract it
+reconstructs disagrees with the one installed — and on an uncached build it
 is usually most of the compiler's time. It has its own `capture flow` row, and
 its time is subtracted from the row of the stage it ran inside, so those rows
 show only their own work. A `flow` line beneath the table sizes it: how many

@@ -126,6 +126,10 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 		}
 		unitProg := codegen.UnitProgram(result.Program, unit)
 		unitProg.ObserveFlow = check.FlowObserver(s.Observe, owner)
+		// Nothing rewrites installed Core before lowering, so the discharge
+		// the installer already made (or published) covers this owner. Lint
+		// still reconstructs and compares every contract and summary.
+		unitProg.CaptureFlowsProven = result.FlowsProven[unit.Name]
 		lowerStart := s.begin("lowering", owner)
 		mp, lowerErrs := machineir.LowerUnit(unitProg, unit.Name, result.Checker.B)
 		s.timed("lowering", owner, lowerStart)

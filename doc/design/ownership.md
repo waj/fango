@@ -109,8 +109,17 @@ Reconstruction is unconditional; discharging the reconstructed obligations again
 is not. A caller that has just discharged them for these same definitions, with
 no transform in between, says so, and lint then compares what it reconstructs
 without re-deriving the same answer from the same inputs. Any disagreement is
-stale, is reported, and discharges them anyway. The whole-program path states
-nothing and always discharges.
+stale, is reported, and discharges them anyway. The batch pipeline discharges
+each definition once. Runtime elaboration discharges the module's runtime
+definitions. The owner lint after it states that, and so does lowering, which
+reads the same installed Core, whether this session checked it or decoded it
+from an object published only after its own check. Stage elaboration
+discharges only what runtime elaboration did not see, chiefly compile-time-only
+declarations (see [metaprogramming](metaprogramming.md#evaluator-and-completion-order)).
+The discharge is per root, from a checker of its own, so leaving a root out
+omits exactly that definition's discharge; summaries and contracts are still
+solved for every definition. The whole-program reference path, the REPL's
+prompt lint, and a splice's elaboration state nothing and always discharge.
 
 ## Suspending acquisition and release
 

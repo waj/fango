@@ -52,6 +52,13 @@ before capture analysis/evaluation. Checked is an append-only completion log,
 not a source prefix. The shared batch session also snapshots each completed
 module's declarative stage Core for its installable module object; this includes
 compile-time-only definitions and ordinary functions a later splice may call.
+The snapshot runs after runtime elaboration and runs the same `decl`. The
+runtime Core differs only by scalar specialization, which erases values the
+analysis already treats as scalars. So the snapshot solves every definition's
+summaries and contracts but discharges only definitions runtime elaboration did
+not return. Compile-time-only declarations get their one discharge here. A
+group elaborated earlier for a splice precedes runtime elaboration and is
+discharged in full.
 
 Operands may execute only completed groups whose declarations and transitive
 dependencies precede the splice. Source checks and the elaborated closure,

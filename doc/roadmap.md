@@ -166,7 +166,7 @@ cooperative scheduling does not remove those prerequisites.
 compiler. The capture-flow analysis is most of it: one module is interpreted
 several times over the batch pipeline, and every definition is its own root,
 so a helper reached from many definitions is interpreted once per root. The
-redundant discharges are ordinary optimization;
+remaining redundant interpretation, at inference, is ordinary optimization;
 [sharing work across roots](roadmap-compile-latency.md#cl5-sharing-interpretation-across-roots)
 is a redesign, because object identities, owners, and allocation ancestry are
 relative to the root being checked.

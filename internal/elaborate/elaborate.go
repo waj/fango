@@ -236,6 +236,14 @@ func DeclIn(info infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]core.
 
 // DeclsIn elaborates complete dependency groups before analyzing captures.
 func DeclsIn(infos []infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]core.Def, []diag.Error) {
+	return DeclsProvenIn(infos, context, nil, ck)
+}
+
+// DeclsProvenIn is DeclsIn for definitions some of which another elaboration
+// of the same declarations has already discharged: those named in proven get
+// their summaries and contracts but are not interpreted as flow roots again
+// (core.InferCapturesProvenIn).
+func DeclsProvenIn(infos []infer.DeclInfo, context []core.Def, proven map[string]bool, ck *infer.Checker) ([]core.Def, []diag.Error) {
 	var defs []core.Def
 	var errs []diag.Error
 	for _, info := range infos {
@@ -254,7 +262,7 @@ func DeclsIn(infos []infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]c
 	if len(errs) == 0 {
 		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, ObserveFlow: ck.ObserveFlow}
 		bindRows(p.Defs, ck)
-		errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, info.NameSpan)...)
+		errs = append(errs, captureDiagnostics(core.InferCapturesProvenIn(p, context, proven, ck.B), ck, info.NameSpan)...)
 		installCaptureSummaries(defs, ck)
 		for i := range defs {
 			for _, err := range core.VerifyResumeStructure(defs[i].Body) {

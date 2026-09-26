@@ -100,34 +100,13 @@ with flat snapshots where fingerprints read it.
 
 ### CL2 One discharge per module in the batch pipeline
 
-The design's rule that reconstruction is unconditional and re-discharge is not
-is applied to the two places that still re-discharge.
-
-- **Lowering.** The unit program the backend hands to `machine.LowerUnit`
-  states `CaptureFlowsProven` when the owner's Core was checked in this
-  session, on the same slice `Increment` discharged, or decoded from a
-  verified object that was published after that discharge. Nothing rewrites
-  Core between install and lowering — `AssembleModuleProgram` performs entry
-  validation only — so the argument is the one `installer.go` already makes
-  for the install-time lint. Lint still reconstructs every contract and
-  summary and discharges on any disagreement.
-- **Stage Core.** The stage elaboration of a completion group skips the
-  discharge for roots `Increment` has already proven, and discharges the
-  rest: compile-time-only declarations exist only in stage Core and get their
-  one discharge there. Both elaborations run the same `decl`; the runtime
-  Core additionally receives scalar specialization, which erases values the
-  analysis already treats as scalars. The discharge is per root from a fresh
-  checker, so skipping a root is exactly "do not re-discharge this
-  definition", and summaries and contracts are still solved for every
-  definition because later splices and lint read them.
-
-The [ownership design](design/ownership.md#evidence-and-independent-reconstruction)
-changes its last sentence — the whole-program path is no longer the only one
-that states nothing — and the [pipeline](design/pipeline.md#pipeline) and
-[metaprogramming](design/metaprogramming.md#evaluator-and-completion-order)
-entries name which pass owns a definition's discharge. Once
-[lazy stage Core](#open-decisions) is decided, the stage half of this stage
-may be subsumed by it.
+DONE. Each definition's obligations are discharged once in the batch
+pipeline: runtime elaboration for runtime definitions, the stage snapshot for
+compile-time-only ones. Owner lint and lowering
+[reconstruct and compare](design/ownership.md#evidence-and-independent-reconstruction)
+without discharging again unless they disagree. Once
+[lazy stage Core](#open-decisions) is decided, the stage half may be subsumed
+by it.
 
 ### CL3 Execution needs across solve iterations
 

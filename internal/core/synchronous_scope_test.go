@@ -98,7 +98,7 @@ func TestSynchronousCallbackHandlerBoundaries(t *testing.T) {
 				{Name: "root", CaptureContract: &types.CaptureContract{Body: root}},
 				{Name: "helper", CaptureContract: &types.CaptureContract{Effects: []int{1}, Body: helper}},
 			}}
-			errs := checkCaptureFlows(newCaptureAnalyzer(p, b))
+			errs := checkCaptureFlows(newCaptureAnalyzer(p, b), nil)
 			if len(errs) != 0 {
 				t.Fatalf("%s: %v", mode, errs)
 			}

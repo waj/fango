@@ -21,6 +21,16 @@ func InferCaptures(p *Prog, b *types.Builtins) []error {
 // prompt calling `State.run` or `File.withFile` is checked exactly as the
 // same call inside a program would be.
 func InferCapturesIn(p *Prog, context []Def, b *types.Builtins) []error {
+	return InferCapturesProvenIn(p, context, nil, b)
+}
+
+// InferCapturesProvenIn is InferCapturesIn for a caller that has already
+// discharged some of p's definitions. Summaries and contracts are still
+// solved for every definition, because later passes read them; only the
+// definitions not named in proven are interpreted as roots of the flow check.
+// Each root is checked from a checker of its own, so leaving one out is
+// exactly not discharging that definition again.
+func InferCapturesProvenIn(p *Prog, context []Def, proven map[string]bool, b *types.Builtins) []error {
 	a := newCaptureAnalyzer(p, b)
 	for i := range context {
 		if _, own := a.defs[context[i].Name]; !own {
@@ -32,7 +42,7 @@ func InferCapturesIn(p *Prog, context []Def, b *types.Builtins) []error {
 	for i := range p.Defs {
 		p.Defs[i].CaptureContract = inferCaptureContract(&p.Defs[i])
 	}
-	return checkCaptureFlows(a)
+	return checkCaptureFlows(a, proven)
 }
 
 func verifyCaptures(p *Prog, b *types.Builtins) []error {
@@ -72,7 +82,7 @@ func verifyCapturesIn(p *Prog, context []Def, b *types.Builtins) []error {
 	if p.CaptureFlowsProven && len(errs) == 0 {
 		return errs
 	}
-	return append(errs, checkCaptureFlows(a)...)
+	return append(errs, checkCaptureFlows(a, nil)...)
 }
 
 type captureResult struct {

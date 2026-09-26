@@ -48,7 +48,12 @@ and then one prompt import increment at a time into the checker it keeps. The
 loader retains a merged AST only as a differential-test adapter; normal compilation consumes
 resolved modules in dependency-first order. Each module is checked against the
 declaration state already installed in the session, elaborated immediately,
-and semantically linted before the next module. The entry/dependency role and
+and semantically linted before the next module. Each definition's lifetime
+obligations are discharged by one pass: runtime elaboration for runtime
+definitions, the stage snapshot for compile-time-only ones. Owner lint and
+lowering reconstruct and compare without discharging again unless they
+disagree ([ownership](ownership.md#evidence-and-independent-reconstruction)).
+The entry/dependency role and
 entry symbol are explicit inputs, so an imported declaration named `main` has
 no entry-only obligations.
 

@@ -40,6 +40,9 @@ type Result struct {
 	Graph   *modules.Result
 	States  []*infer.ModuleState
 	Objects []*ModuleObject
+	// FlowsProven holds the owners whose Core in Program has had its lifetime
+	// obligations discharged, before anything but entry validation touched it.
+	FlowsProven map[string]bool
 }
 
 // Compile discovers a graph and checks, elaborates, and semantically lints one
@@ -68,7 +71,7 @@ func (s *Session) Compile(entry string) (*Result, []diag.Error, error) {
 	if len(entryErrs) != 0 {
 		return nil, entryErrs, nil
 	}
-	return &Result{Program: prog, Checker: ck, Graph: loaded, States: installer.States(), Objects: installer.Objects()}, nil, nil
+	return &Result{Program: prog, Checker: ck, Graph: loaded, States: installer.States(), Objects: installer.Objects(), FlowsProven: installer.FlowsProven()}, nil, nil
 }
 
 func nominalNames(ck *infer.Checker) map[int]string {
