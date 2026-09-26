@@ -65,10 +65,11 @@ func writeAtomic(path string, data []byte) error {
 	if err := tmp.Chmod(0o644); err != nil {
 		return err
 	}
+	// No fsync: the rename is what readers rely on, and every artifact is
+	// validated against its framed digest before use, so an object a crash
+	// leaves empty or torn is an ordinary cache miss. Nothing stored here is
+	// anything a build cannot reproduce.
 	if _, err := tmp.Write(data); err != nil {
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
 		return err
 	}
 	if err := tmp.Close(); err != nil {

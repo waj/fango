@@ -237,7 +237,14 @@ that name it imports. Each artifact is framed with its kind, payload schema,
 and payload digest on a single header line, followed by the payload bytes
 themselves, and each is written by atomic rename and validated before use — so
 a reader sees one complete artifact and the record that describes it, never a
-record paired with bytes it did not ship with. Framing the payload as opaque
+record paired with bytes it did not ship with. The store does not sync an
+artifact to disk, per object or per build: the rename orders it against
+concurrent readers, and the digest is what makes a crash harmless, since a
+file a lost write leaves empty, zeroed, or truncated fails validation and is
+an ordinary miss, and a rename that did not survive leaves the previous
+complete artifact, which its record then accepts or rejects. Nothing in the
+cache is anything a build cannot reproduce, so durability would buy only the
+cost of rebuilding what was lost. Framing the payload as opaque
 bytes is what lets a reader find and verify it without parsing it, and what
 makes the digest cover the bytes as stored rather than a re-encoded copy of
 them. Every payload leads with the record of what its artifact was built from,

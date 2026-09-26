@@ -117,12 +117,8 @@ the memo recovers essentially the whole of the unconditional-reuse bound.
 
 ### CL4 Cache writes
 
-The checked store syncs every module object to disk as it is published, and
-those syncs are a noticeable share of what remains after the stages above.
-Whether to sync once per build, or to leave durability to the rename and
-accept a torn object as a cache miss, is a cache-integrity question the
-[artifact framing](design/backend.md#module-emission-and-build-cache) may
-already answer; this stage decides it and measures the result.
+DONE. The store no longer syncs artifacts; a torn object is a cache miss by
+[the framing's digest](design/backend.md#module-emission-and-build-cache).
 
 ### CL5 Sharing interpretation across roots
 

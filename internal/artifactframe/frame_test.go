@@ -48,6 +48,9 @@ func TestForeignAndDamagedFramesAreInvalid(t *testing.T) {
 		{"no header", "module-object", payload},
 		{"empty", "module-object", nil},
 		{"damaged payload", "module-object", append(append([]byte(nil), framed...), '!')},
+		// What an unsynced write can leave behind after a crash.
+		{"truncated payload", "module-object", framed[:len(framed)-1]},
+		{"zeroed", "module-object", make([]byte, len(framed))},
 		{"damaged digest", "module-object", flipDigest(framed)},
 		{"extra header field", "module-object", []byte(strings.Replace(string(framed), "fango-artifact 1 ", "fango-artifact 1 x ", 1))},
 		{"other frame version", "module-object", []byte(strings.Replace(string(framed), "fango-artifact 1 ", "fango-artifact 2 ", 1))},
