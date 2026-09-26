@@ -48,7 +48,10 @@ Work-budget and coroutine-control obligations come from one interpretation of
 the source capture contracts per execution root. Both use the same symbolic
 arguments and flow contexts; their resulting row constraints are
 solved together, repeating the interpretation only when the constraint set
-grows.
+grows. A repeat whose definitions, built under the new substitution, are
+identical to the previous iteration's — same installed contracts, same
+variable identities and spans — reuses its needs; one that refined a root's
+type is interpreted again.
 
 ## Dependency groups and generalization
 

@@ -110,14 +110,10 @@ by it.
 
 ### CL3 Execution needs across solve iterations
 
-The interpreted input of `CollectExecutionNeeds` is a deterministic function
-of the roots' definitions as built under the current substitution and the
-installed contracts. The generator fingerprints that input and returns the
-previous iteration's needs when it has not changed. The prototype's upper
-bound, reusing the first iteration's needs unconditionally, is what a correct
-memo can save; a correct memo must key on the built definitions, not on the
-iteration count, because a substitution that changed a root's type can change
-what its body interprets to.
+DONE. A solver repeat that builds the same definitions under the new
+substitution [reuses the previous needs](design/inference.md#types-rows-and-annotations).
+In the `Async` build most repeats match and those that do not are cheap, so
+the memo recovers essentially the whole of the unconditional-reuse bound.
 
 ### CL4 Cache writes
 

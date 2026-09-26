@@ -163,11 +163,10 @@ cooperative scheduling does not remove those prerequisites.
 ## Capture-flow analysis cost
 
 [Compile latency](roadmap-compile-latency.md) owns the cold-build cost of the
-compiler. The capture-flow analysis is most of it: one module is interpreted
-several times over the batch pipeline, and every definition is its own root,
-so a helper reached from many definitions is interpreted once per root. The
-remaining redundant interpretation, at inference, is ordinary optimization;
-[sharing work across roots](roadmap-compile-latency.md#cl5-sharing-interpretation-across-roots)
+compiler. The capture-flow analysis is most of it: every definition is its
+own root, so a helper reached from many definitions is interpreted once per
+root.
+[Sharing work across roots](roadmap-compile-latency.md#cl5-sharing-interpretation-across-roots)
 is a redesign, because object identities, owners, and allocation ancestry are
 relative to the root being checked.
 

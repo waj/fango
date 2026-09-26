@@ -1442,6 +1442,9 @@ type generator struct {
 	annotationAmbient *types.Row
 	localAnnotations  []localAnnotation
 	executionRoots    []DeclInfo
+	// executionMemo is the last interpreted execution-needs input and what
+	// it collected; see executionNeeds.
+	executionMemo *executionMemo
 	// Keep package row provenance before a local binding can solve/generalize
 	// a partial application; whole-definition flow adds imported obligations.
 	workRows []types.Type

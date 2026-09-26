@@ -3,6 +3,8 @@ package infer
 import (
 	"fmt"
 	"maps"
+	"reflect"
+	"slices"
 	"sort"
 
 	"github.com/waj/fango/internal/ast"
@@ -623,6 +625,7 @@ func (g *generator) executionNeeds(sub Subst) []executionNeed {
 		d := core.Def{Name: name, Type: c.SourceType, SourceType: c.SourceType, Params: c.Params, CaptureContract: c, Control: types.Control{Polymorphic: true}}
 		context = append(context, d)
 	}
+	installed := len(context)
 	for i := range context {
 		b.defs[context[i].Name] = &context[i]
 	}
@@ -653,6 +656,15 @@ func (g *generator) executionNeeds(sub Subst) []executionNeed {
 		}
 	}
 	p := &core.Prog{Defs: defs, ADTs: g.ck.ADTOrder, ObserveFlow: g.ck.ObserveFlow}
+	// The interpretation is a function of the installed contracts and of the
+	// definitions as built under sub. The solver's next iteration usually
+	// builds the same definitions again, so the memo keys on what was built,
+	// not on how often the solver asked: a substitution that refines a root's
+	// type changes what its body interprets to.
+	memo := newExecutionMemo(p, context, installed)
+	if g.executionMemo.matches(memo) {
+		return slices.Clip(g.executionMemo.needs)
+	}
 	work, controlNeeds := core.CollectExecutionNeeds(p, context, g.ck.B)
 	var needs []executionNeed
 	for _, n := range work {
@@ -667,7 +679,37 @@ func (g *generator) executionNeeds(sub Subst) []executionNeed {
 			needs = append(needs, executionNeed{WorkNeed: core.WorkNeed{Budget: control.Row, Need: types.Row{Labels: []types.EffLabel{{Unique: eff.Unique, Name: eff.Name, Suspension: true}}}, Span: control.Span, In: control.In}, control: true})
 		}
 	}
-	return needs
+	memo.needs = needs
+	g.executionMemo = memo
+	return slices.Clip(needs)
+}
+
+type executionMemo struct {
+	// Installed contracts are immutable once published, so identity stands
+	// for their content; so does the ADT order's.
+	contracts []*types.CaptureContract
+	adts      []*types.ADTInfo
+	// roots and built are the definitions built under the substitution, kept
+	// whole: the collected needs carry their variable identities and spans,
+	// so a repeat must match exactly. Comparing only when the solver asks
+	// again costs a first call nothing.
+	roots, built []core.Def
+	needs        []executionNeed
+}
+
+// newExecutionMemo splits the interpreted input: context's first installed
+// entries are the installed contracts, the rest were built.
+func newExecutionMemo(p *core.Prog, context []core.Def, installed int) *executionMemo {
+	m := &executionMemo{adts: p.ADTs, roots: p.Defs, built: context[installed:]}
+	for _, d := range context[:installed] {
+		m.contracts = append(m.contracts, d.CaptureContract)
+	}
+	return m
+}
+
+func (m *executionMemo) matches(next *executionMemo) bool {
+	return m != nil && slices.Equal(m.contracts, next.contracts) && slices.Equal(m.adts, next.adts) &&
+		reflect.DeepEqual(m.roots, next.roots) && reflect.DeepEqual(m.built, next.built)
 }
 
 // sharesWorkRow recognizes an immediate execution bound belonging to a stored
