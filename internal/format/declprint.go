@@ -21,9 +21,7 @@ func (p *printer) printDecl(d ast.Decl, sp source.Span) bool {
 		p.typeDeclLines(d, sp)
 		return true
 	case *ast.EffectDecl:
-		if d.Service {
-			p.line(0, "{-# service #-}")
-		}
+
 		p.sigBlock("effect "+d.Name, paramNames(d.Params), d.Ops)
 		return true
 	case *ast.ClassDecl:
@@ -130,9 +128,8 @@ func fixityText(d *ast.FixityDecl) string {
 // a leading `=` and `|`, exactly when the author wrote them that way. A broken
 // right-hand side always gives its deriving clause a line of its own.
 func (p *printer) typeDeclLines(d *ast.TypeDecl, sp source.Span) {
-	if d.Shared {
-		p.line(0, "{-# shared-resource #-}")
-	} else if d.Resource {
+
+	if d.Resource {
 		p.line(0, "{-# resource #-}")
 	}
 	head := "type " + d.Name

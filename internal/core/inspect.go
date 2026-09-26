@@ -2,8 +2,7 @@ package core
 
 // Inspect visits the original Core nodes in depth-first order without
 // rebuilding them. Use Rewrite for transforms; Inspect exists for analyses
-// whose result is keyed by expression pointer identity, such as Machine
-// closure registration.
+// whose result is keyed by expression pointer identity.
 func Inspect(e Expr, visit func(Expr)) {
 	InspectPruned(e, func(e Expr) bool { visit(e); return true })
 }
@@ -21,16 +20,15 @@ func InspectPruned(e Expr, visit func(Expr) bool) {
 	switch e := e.(type) {
 	case *Neg:
 		walk(e.Operand)
-	case *Completion:
-		walk(e.Value)
+
+	case *TaskSpawn:
+		walk(e.Scope)
+		walk(e.Input)
 	case *NativeCall:
 		for _, arg := range e.Args {
 			walk(arg)
 		}
-	case *Work:
-		for _, arg := range e.Args {
-			walk(arg)
-		}
+
 	case *FailureInspect:
 		for _, arg := range e.Args {
 			walk(arg)
@@ -62,14 +60,6 @@ func InspectPruned(e Expr, visit func(Expr) bool) {
 		for _, payload := range e.Payload {
 			walk(payload)
 		}
-	case *Suspend:
-		walk(e.Request)
-	case *CoroutineAdvance:
-		walk(e.Cursor)
-		walk(e.Reply)
-	case *CoroutineScope:
-		walk(e.Producer)
-		walk(e.Consumer)
 
 	case *Bracket:
 		walk(e.Acquire)

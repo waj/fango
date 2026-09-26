@@ -44,14 +44,9 @@ A pure handler runner may still need a polymorphic transport contract. Infer
 this from controlled parameter types and executed call contracts, including
 calls inside handlers but excluding latent lambda bodies. Handling an effect
 does not convert an Exit-family callback into a Direct value.
-Work-budget and coroutine-control obligations come from one interpretation of
-the source capture contracts per execution root. Both use the same symbolic
-arguments and flow contexts; their resulting row constraints are
-solved together, repeating the interpretation only when the constraint set
-grows. A repeat whose definitions, built under the new substitution, are
-identical to the previous iteration's — same installed contracts, same
-variable identities and spans — reuses its needs; one that refined a root's
-type is interpreted again.
+Task transfer is a structural check over concrete types. Functions and native
+handles cannot cross the spawn boundary; no execution-root flow interpretation
+is needed. See [tasks](tasks.md).
 
 ## Dependency groups and generalization
 

@@ -34,7 +34,7 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			if !lok || !rok {
 				m = &mismatch{a: c.Left, b: c.Right, effect: true, note: "effect inclusion requires two rows"}
 			} else {
-				m = includeRowsBound(left, right, sub, bi, sup, c.WorkCharge)
+				m = includeRows(left, right, sub, bi, sup)
 			}
 		} else {
 			m = unify(c.Left, c.Right, sub, bi, sup)
@@ -47,8 +47,6 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 	}
 	var deferred []pending
 	var bounds []pending
-	var bound []pending
-	var registrations []pending
 	for i, c := range cs {
 		if c.Subsume {
 			if vs == nil {
@@ -69,28 +67,7 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 		}
 	}
 	for _, p := range bounds {
-		if p.c.ControlNeed {
-			solve(p.at, p.c)
-		}
-	}
-	for _, p := range bounds {
-		if p.c.ControlNeed {
-			continue
-		}
 		i, constraint := p.at, p.c
-		if constraint.WorkCharge {
-			registrations = append(registrations, p)
-			continue
-		}
-		// An inclusion that only the handler instance rule can answer waits
-		// for the whole group: the clauses whose effects the bound closure
-		// inherits are generated after the subject that holds it. It is
-		// diverted before the ordinary solver runs, because a row unification
-		// can bind variables on its way to failing.
-		if bindable(constraint, sub) {
-			bound = append(bound, pending{at: i, c: constraint})
-			continue
-		}
 		labels, tail, split := splitRigidTail(constraint, sub)
 		if !split {
 			solve(i, constraint)
@@ -131,14 +108,6 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 	// What is left performs nothing beyond the annotated tail, so binding the
 	// surrounding row to that tail is the answer rather than a guess.
 	for _, p := range deferred {
-		solve(p.at, p.c)
-	}
-	for _, p := range bound {
-		if err, failed := solveBound(p.c, sub, bi, sup); failed {
-			failures = append(failures, failure{at: p.at, err: err})
-		}
-	}
-	for _, p := range registrations {
 		solve(p.at, p.c)
 	}
 	sort.SliceStable(failures, func(i, j int) bool { return failures[i].at < failures[j].at })

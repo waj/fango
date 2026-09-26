@@ -18,8 +18,7 @@ import (
 
 func main() {
 	// Heap-profile sampling records a stack for every sampled allocation, and
-	// the capture-flow checker's deep recursion makes those stacks long enough
-	// to cost a noticeable share of a build. Nothing reads the profile unless
+	// compilation allocates many short-lived objects. Nothing reads the profile unless
 	// GODEBUG=memprofilerate asks for one, which the runtime has already
 	// applied. Tests call run directly and keep the default.
 	if !memProfileRequested(os.Getenv("GODEBUG")) {

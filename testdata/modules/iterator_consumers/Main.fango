@@ -1,13 +1,10 @@
 import Consumers
 import Stream
 
-produce : () ->{Stream.Yield Int, IO} ()
-produce() =
-    print "produce"
-    Stream.yield 1
-    Stream.yield 2
-    Stream.yield 3
+produce = Stream.unfold 1 (\value ->
+    if value == 1 then print "produce" else ()
+    if value > 3 then Nothing else Just (value, value + 1))
 
 main() =
-    print (Stream.withCursor (Stream.generate produce) (Consumers.run (Consumers.make())))
-    print (Stream.withCursor (Stream.generate produce) (Consumers.prefix 4))
+    print (Stream.withCursor produce (Consumers.run (Consumers.make())))
+    print (Stream.withCursor produce (Consumers.prefix 4))

@@ -1,11 +1,12 @@
 package repl
 
 import (
-	"github.com/waj/fango/internal/compileevent"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/waj/fango/internal/compileevent"
 )
 
 type objectCache struct {

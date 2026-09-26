@@ -1,11 +1,12 @@
 package parser
 
 import (
+	"strings"
+	"testing"
+
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/lexer"
 	"github.com/waj/fango/internal/source"
-	"strings"
-	"testing"
 )
 
 func TestResourcePragma(t *testing.T) {

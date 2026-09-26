@@ -16,7 +16,7 @@ import Runtime.Scope
 A `Handle` is an open file. Its constructor is private and it derives neither
 Show nor Eq, so a program can neither build, inspect, nor compare one; the
 only way to obtain a handle is inside a `with*` scope, and the compiler treats
-the type as a capability so the handle cannot outlive that scope.
+the representation as opaque. Calls after the scope closes fail at runtime.
 
 Both `Handle` and `Directory` wrap an opaque Go value. The compiler erases the
 wrapper to `any` at the Go boundary and nowhere else. -}
@@ -132,8 +132,8 @@ chunk : Int
 chunk = 8192
 
 -- source and sink adapt an open file to the leaves a Reader and a Writer are
--- built over. Each captures the handle, so neither can outlive the scope that
--- owns it, and neither closes anything: closing belongs to that scope.
+-- built over. Each captures the handle and checks its validity on use.
+-- Neither closes it: closing belongs to the scope.
 source : Handle -> Source {IO, Fail Error}
 source file = Source { pull = \_ -> readBytes file chunk }
 

@@ -8,7 +8,7 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-func TestStageMachineLintKeepsEmissionBoundary(t *testing.T) {
+func TestStageCoreLintKeepsEmissionBoundary(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	code := &types.TCon{Unique: sup.NextUnique(), Name: "Meta.Code"}
@@ -23,16 +23,16 @@ func TestStageMachineLintKeepsEmissionBoundary(t *testing.T) {
 		if errs := InferCaptures(p, b); len(errs) != 0 {
 			t.Fatal(errs)
 		}
-		if errs := LintStageMachineInput(p, b); len(errs) != 0 {
+		if errs := LintStage(p, b); len(errs) != 0 {
 			t.Fatalf("stage rejected %T: %v", body, errs)
 		}
-		if errs := LintMachineInput(p, b); len(errs) == 0 {
+		if errs := Lint(p, b); len(errs) == 0 {
 			t.Fatalf("emission accepted %T", body)
 		}
 	}
 }
 
-func TestStageMachineLintRejectsMalformedConstants(t *testing.T) {
+func TestStageCoreLintRejectsMalformedConstants(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		body func(*types.Builtins, *types.TCon, *types.TCon) Expr
@@ -60,7 +60,7 @@ func TestStageMachineLintRejectsMalformedConstants(t *testing.T) {
 			body := test.body(b, code, repr)
 			p := &Prog{ADTs: []*types.ADTInfo{{Con: code}, {Con: repr}}, Defs: []Def{{Name: "stage", Type: body.Type(), Body: body}}}
 			var messages []string
-			for _, err := range LintStageMachineInput(p, b) {
+			for _, err := range LintStage(p, b) {
 				messages = append(messages, err.Error())
 			}
 			if !strings.Contains(strings.Join(messages, "\n"), test.want) {

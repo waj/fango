@@ -15,7 +15,7 @@ Correctness gates, differential fixtures, generated-code stability, and manual p
 | make update-goldens | Intentional lexer/parser/infer/elaborate/REPL/formatter golden updates |
 | go vet ./benchmarks | Build-check benchmarks without timing them |
 | go test -race ./runtime/fangort ./runtime/nativeworker ./internal/eval ./internal/nativehost ./stdlib/... | Race checks for shared storage, callback drain, native hosts, and bundled adapters |
-| go test -race ./cmd/fango -run TestConcurrentSharedListBackends | Interpreter and emitted Direct/Machine shared-List race fixture |
+| go test -race ./cmd/fango -run TestConcurrentSharedListBackends | Interpreter and emitted Direct shared-List race fixture |
 | make test-perf | Manual latency and runtime-ratio gates on an idle machine |
 
 Timing gates are excluded from correctness and CI. Do not run them during ordinary
@@ -70,7 +70,7 @@ probe emits the generated Go after its checked compilation, reusing its Fango
 module objects; the compiled probe then runs those bytes in a private project.
 The probe runs alongside the other parallel checks.
 The shared-List concurrency fixture runs in the interpreter and emits a separate
-Go project whose Direct and Machine workers extend the same published list.
+Go project whose Direct workers extend the same published list.
 Its emitted leg invokes `go test -race` even when the parent suite runs without
 the race detector; run the parent under `-race` to instrument the interpreter
 leg too. This checks runtime reentrancy before a source-level concurrent
@@ -78,19 +78,12 @@ executor is available.
 
 ## Performance evidence
 
-### C7 execution checkpoints
+The immutable List and native task redesign has no new timing measurements.
+Run performance comparisons only on an idle host. Existing thresholds and
+historical sources remain available; passing build and correctness checks does
+not establish performance parity.
 
-The synchronous entry path retains Direct/Exit execution; packaged Work uses
-Machine dispatch. On an idle host, the runtime-ratio gate passed after C7,
-including State at 1.15× and Bracket at 1.55× the handwritten Go controls
-(limit 2.5×). The compile-latency gate still fails against its recorded
-machine-specific thresholds. A clean archive of the pre-C7 checked-in revision
-fails the same gate on this host: its hello cold/unchanged medians were
-578/58 ms, versus 602/56 ms for C7. The checked-in latency baseline also
-lacks the capture-graph entries required by the current test. These results do
-not justify replacing the baseline or claiming a portable latency limit.
-
-### Cooperative Async comparison
+### Task comparison
 
 ```sh
 go run ./benchmarks/asynccompare -out /tmp/fango-async-evidence -profile
@@ -99,10 +92,11 @@ go run ./benchmarks/asynccompare -out /tmp/fango-async-evidence -profile
 The output directory must not exist. The runner snapshots the historical native
 Async implementation at `b102a4e10bb6c4199fd5445ca9003fa42b29be02` and the tracked
 working tree, builds both with the same Go toolchain, and retains sources,
-binaries, raw JSON samples and optional CPU/allocation profiles. The shared
-workload differs only at the runner boundary (`Async.run` versus
-`Async.Cooperative.run` and its Result). Each worker counts and yields, and the
-driver awaits every result; checksums are verified before and after timing.
+binaries, raw JSON samples and optional CPU/allocation profiles. Historical
+revisions retain their Async workloads; the current workload uses named native
+tasks with explicit cancellation checks. A check does not yield to a cooperative
+scheduler, so the comparison measures the architectural change as well as costs.
+Checksums are verified before and after timing.
 
 Timing invokes generated code in-process, excluding compilation, startup and
 printing. Repetitions are calibrated from the faster build; order alternates
@@ -129,7 +123,8 @@ calibrated using the fastest build, execution order alternates, and compilation,
 printing and process startup are outside the timer. Default measurements use
 one Go worker, 15 samples, and two rounds. Run on an otherwise idle host.
 
-Cases cover direct traversal, cursor consumers, pipeline depth, lists, zip,
+Current sources use explicit iterator state; archived revisions retain their
+generator-based workloads. Cases cover direct traversal, cursor consumers, pipeline depth, lists, zip,
 early stop, reopening, residual State and cleanup. Revisions supporting
 the C2 Coroutine/Iterator API additionally run direct Coroutine, Iterator, an
 independently compiled Pull abstraction, handwritten frames using the same

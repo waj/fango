@@ -9,14 +9,12 @@ Source loading, parsing, name resolution, and the boundary between inference and
 ```text
 source -> lexer -> parser -> AST -> fixity/name resolution
        -> inference -> typed AST -> elaboration -> Core -> Core lint
-       -> module-owned machine lowering -> Go AST -> go build
+       -> Go AST -> go build
 ```
 
-The interpreter executes the same semantic Core. Go emission materializes
-module-owned Machine families even for Direct entry points; the interpreter
-installs Machine lowering when cursor intrinsics require it. Staging uses a
-separate lint entry and lowers the exact splice operand and reachable completed
-definitions (see [metaprogramming](metaprogramming.md)).
+The interpreter executes the same semantic Core. Emission selects Direct/Exit
+members from each module's checked ABI. Staging uses a separate lint entry that
+admits quotes and reflected constants; it evaluates Core directly.
 
 Every command discovers and validates the current graph through the filesystem
 provider — exact path casing, bundled-name conflicts, sidecar presence, and
@@ -29,7 +27,7 @@ complete payload; invalid frames, structurally invalid emissions, missing
 inputs, hash mismatches, and cache I/O errors are ordinary misses.
 
 Compilation sessions report through one event observer. It records the parse,
-resolve, check, elaborate, stage-snapshot, semantic-lint, lowering, and
+resolve, check, elaborate, stage-snapshot, semantic-lint, and
 emission stages with their owner, and the checked and emitted artifact hits, misses, and stores, and
 the stage sections actually read, separately from them, so a caller can tell
 reuse from work. Every site reports after the work it names, so an event
@@ -48,11 +46,9 @@ and then one prompt import increment at a time into the checker it keeps. The
 loader retains a merged AST only as a differential-test adapter; normal compilation consumes
 resolved modules in dependency-first order. Each module is checked against the
 declaration state already installed in the session, elaborated immediately,
-and semantically linted before the next module. Each definition's lifetime
-obligations are discharged by one pass: runtime elaboration for runtime
-definitions, the stage snapshot for compile-time-only ones. Owner lint and
-lowering reconstruct and compare without discharging again unless they
-disagree ([ownership](ownership.md#evidence-and-independent-reconstruction)).
+and semantically linted before the next module. Runtime and stage elaborations check their respective definitions. Core lint
+reconstructs structural summaries after transforms; it performs no lifetime flow
+analysis. Emission rechecks the owned Core against dependency signatures.
 The entry/dependency role and
 entry symbol are explicit inputs, so an imported declaration named `main` has
 no entry-only obligations.
@@ -67,10 +63,10 @@ module state use module/source declaration references; live checker indexes are
 only transient checking machinery.
 
 Owner-scoped elaboration and lint use installed dependency worker signatures,
-result-capture summaries, and validated capture contracts as context. They do
+structural result-capture summaries as context. They do
 not traverse or revalidate dependency runtime bodies. Core definitions carry
 an ABI summary for body-derived facts used by emission, including controlled
-callback invocation and passive Machine-factory classification. Graph assembly
+callback invocation. Graph assembly
 concatenates already validated Core and applies only entry-specific checks.
 Instance overlap, blanket-context cycles, and duplicate derivers also have an
 explicit graph compatibility pass over module states; declaration collisions
@@ -98,23 +94,12 @@ pool follows first encounter. Pointer identity and session allocation numbers ar
 installation interns builtin/imported nominal names, allocates fresh local
 nominal, type-variable, capture, scope, and resume identities, remaps template
 indices, and reconstructs stable instance cutoffs without changing positional
-parameter or evidence order. A result summary can retain a durable handler
-scope introduced by a dependency. Objects identify these foreign scopes by
-their defining capture contract and node, and installation aligns them with
-the installed dependency instead of allocating another local scope.
-Most identities carry their own type and are
-remapped wherever they appear; the exceptions are the ones a capture contract
-restates as plain integers — its effect and deferred-row identities, and the
-resume a resume node belongs to — which must go through the same mappings the
-typed occurrences do. An identity left behind names something from the run that
-wrote the artifact, and the contract stops describing the body it ships with.
+parameter or evidence order. Structural capture summaries are recomputed and
+checked against Core after installation.
 
-Interning an imported declaration reaches every copy of it, including a
-generated dictionary constructor that no name table exposes, and binds the
-decoded declaration parameters to the installed ones. Otherwise a type reached
-only by value — a capture contract's recorded clause fields, for instance —
-would receive fresh variables and contradict the interned declaration it
-describes.
+Interning imported declarations reaches every copy, including generated
+dictionary constructors, and binds decoded declaration parameters to the
+installed ones. Types carried only in metadata use the same identity mapping.
 
 Source spans carry their source identity, exact text, and bounded surrounding
 anchors. Decoding binds them to caller-supplied current source files, validates
@@ -140,7 +125,7 @@ installation therefore does not recompute.
 
 Module installation validates all decoded state before publication and uses a
 checker checkpoint for the remaining mutation. Types, effects, classes,
-instances, native/intrinsic metadata, IO identity, capture contracts,
+instances, native/intrinsic metadata, IO identity, structural capture summaries,
 visibility, templates, and the staging evaluator commit together. Rollback
 retains fresh-supply advancement but restores every published table. Persistent
 lookup treats any decode or compatibility failure as a miss and checks the
@@ -243,8 +228,8 @@ The trees are read through an exact-name index rather than joined paths, which
 preserves what embedding gave for free. Names stay case-exact, including
 directory components, which a case-insensitive filesystem would otherwise lose
 and which the local provider beside it enforces deliberately. Dotted bundled
-module names map to nested paths such as `Runtime.Coroutine` to
-`stdlib/Runtime/Coroutine.fango`. Bytes are read once and retained, so every
+module names map to nested paths such as `Runtime.Ref` to
+`stdlib/Runtime/Ref.fango`. Bytes are read once and retained, so every
 reader in a process sees one library and a mid-compile edit cannot tear a build
 across two versions of it.
 
@@ -286,7 +271,7 @@ Only focused tests without a resolver bind exposed surface names directly.
 Batch builds fill a fresh graph. REPL imports stage new nodes and a copied
 operator table, committing only if the increment succeeds. Committed nodes are
 already resolved and are not reprocessed. Incremental elaboration installs
-intrinsics, native boundary metadata, and capture contracts under the same
+intrinsics, native boundary metadata, and structural capture summaries under the same
 rules as a batch program; prompt checks use all installed definitions.
 
 ## Identities and visibility

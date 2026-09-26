@@ -32,17 +32,13 @@ type Installer struct {
 	states    []*infer.ModuleState
 	objects   []*ModuleObject
 	infos     []infer.DeclInfo
-	// proven holds the owners whose installed Core has had its lifetime
-	// obligations discharged: checked here, or decoded from an object that
-	// was published only after its own check discharged them.
-	proven map[string]bool
 }
 
 // NewInstaller adopts an existing checker and staging session. cache may be
 // nil, which compiles normally without reusing or publishing artifacts.
 func NewInstaller(ck *infer.Checker, stage *staging.Session, cache ObjectCache, observe Observer) *Installer {
 	return &Installer{ck: ck, stage: stage, cache: cache, observe: observe,
-		summaries: map[string]moduleSummary{}, sources: map[string]*source.File{}, proven: map[string]bool{}}
+		summaries: map[string]moduleSummary{}, sources: map[string]*source.File{}}
 }
 
 // Adopt records definitions already installed in the checker by another path,
@@ -69,17 +65,6 @@ func (i *Installer) Installed() []core.Def { return i.installed }
 func (i *Installer) Objects() []*ModuleObject     { return i.objects }
 func (i *Installer) States() []*infer.ModuleState { return i.states }
 func (i *Installer) Infos() []infer.DeclInfo      { return i.infos }
-
-// FlowsProven reports the definition owners whose installed Core has had its
-// lifetime obligations discharged. Definitions taken in through Adopt are not
-// among them.
-func (i *Installer) FlowsProven() map[string]bool { return i.proven }
-
-func (i *Installer) prove(defs []core.Def) {
-	for _, d := range defs {
-		i.proven[d.Owner] = true
-	}
-}
 
 // Install takes in one dependency-ordered group of modules under the given
 // effective fixity table. It returns the definitions the group added; the
@@ -135,7 +120,6 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 				i.states = append(i.states, object.State)
 				i.objects = append(i.objects, object)
 				i.installed = append(i.installed, object.Runtime...)
-				i.prove(object.Runtime)
 				i.summaries[module.Name] = moduleSummary{Semantic: object.Semantic, ABI: object.ABI, Stage: object.StageFingerprint}
 				return object.Runtime, nil, nil
 			}
@@ -149,7 +133,6 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		return nil, nil, err
 	}
 	i.stage.BeginModule(module.Name, module.NativeModule)
-	i.ck.ObserveFlow = FlowObserver(i.observe, owner)
 	checkStart := i.begin("check", owner)
 	checked, checkErrs := i.ck.CheckModule(module.Module, infer.ModuleOptions{Name: module.Name, Role: role, Entry: module.Entry})
 	i.timed("check", owner, checkStart)
@@ -175,12 +158,8 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 	// Increment has just discharged every definition it returned, and the
 	// stage elaboration runs the same decl over the same declarations, so it
 	// discharges only what Increment did not see.
-	proven := make(map[string]bool, len(owned))
-	for _, d := range owned {
-		proven[d.Name] = true
-	}
 	snapshotStart := i.begin("stage-snapshot", owner)
-	stageObject, stageErrs := i.stage.Snapshot(proven)
+	stageObject, stageErrs := i.stage.Snapshot()
 	i.timed("stage-snapshot", owner, snapshotStart)
 	if len(stageErrs) != 0 {
 		return nil, stageErrs, nil
@@ -191,7 +170,7 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 	lintStart := i.begin("semantic-lint", owner)
 	// Increment discharged these definitions' obligations moments ago, on this
 	// same slice, before any transform could touch it.
-	lintErrs := elaborate.LintProgIn(owned, i.installed, i.ck, true)
+	lintErrs := elaborate.LintProgIn(owned, i.installed, i.ck)
 	i.timed("semantic-lint", owner, lintStart)
 	if len(lintErrs) != 0 {
 		parts := make([]string, len(lintErrs))
@@ -231,7 +210,6 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 	i.states = append(i.states, state)
 	i.objects = append(i.objects, object)
 	i.installed = append(i.installed, owned...)
-	i.prove(owned)
 	return owned, nil, nil
 }
 

@@ -19,28 +19,11 @@ func captureScopeNames(summaries map[string]types.CaptureSummary) map[types.Scop
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		contract := summaries[name].Contract
-		if contract == nil {
-			continue
-		}
-		var visit func(*types.CaptureFlow)
-		visit = func(node *types.CaptureFlow) {
-			if node == nil {
-				return
-			}
-			if node.Scope != 0 {
-				if _, known := out[node.Scope]; !known {
-					out[node.Scope] = fmt.Sprintf("%s#%d", name, node.ID)
-				}
-			}
-			for _, child := range node.Children {
-				visit(child)
-			}
-			for _, clause := range node.Clauses {
-				visit(clause.Body)
+		for i, id := range summaries[name].Captures.Scopes {
+			if _, known := out[id]; !known {
+				out[id] = fmt.Sprintf("%s#%d", name, i)
 			}
 		}
-		visit(contract.Body)
 	}
 	return out
 }

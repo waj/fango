@@ -22,8 +22,7 @@ type Sink e = { write : Bytes ->{e} () }
 which may be short; an empty chunk is not end of input, and a reader pulls
 through it. `write chunk` accepts a chunk and writes all of it before
 returning. Neither carries a close: closing belongs to the scope owning the
-file or socket, and a leaf outliving that scope is already rejected because it
-captures the handle.
+file or socket. Native operations reject use of a closed handle.
 
 `e` is what the leaf performs, so a memory leaf is pure and a socket leaf is
 not. The row is an ordinary [row-kinded
@@ -32,38 +31,36 @@ argument](functions.md#row-kinded-parameters): `Source {IO, Fail IO.Error}` and
 
 ## Reader
 
-A `Reader e` is a record of closures bound to one `over` activation, so two
-readers are two records and each `refill` reaches its own source rather than
-whichever handler is innermost when it is called. The buffer is the
-activation's own state cell, which is why nothing here needs a mutable
-primitive.
+A `Reader e` is a record of IO-marked operations with its own mutable buffer.
+Each reader captures a private native reference; two readers remain independent.
+The row `e` describes additional source effects.
 
 ```fango
 import Reader exposing (Read(..), Reader)
 
 type Reader e =
-    { buffered : () ->{e} Bytes
-    , refill : () ->{e} Bool
-    , skip : Int ->{e} Int
+    { buffered : () ->{IO | e} Bytes
+    , refill : () ->{IO | e} Bool
+    , skip : Int ->{IO | e} Int
     }
 
 type Read = Found Bytes | Ended Bytes | Overflowed deriving (Eq, Show)
 
-over : Source e -> (Reader e ->{e} a) ->{e} a
-overBytes : Bytes -> (Reader e ->{e} a) ->{e} a
-limited : Reader e -> Int -> (Reader e ->{e} a) ->{e} a
-ensure : Reader e -> Int ->{e} Bool
-atEnd : Reader e ->{e} Bool
-readUpTo : Reader e -> Int ->{e} Bytes
-readExactly : Reader e -> Int ->{e} Maybe Bytes
-readUntil : Reader e -> Bytes -> Int ->{e} Read
-readLine : Reader e -> Int ->{e} Read
-forEachChunk : Reader e -> (Bytes ->{e} ()) ->{e} ()
-chunks : Reader e -> Stream Bytes e
+over : Source e -> (Reader e ->{IO | e} a) ->{IO | e} a
+overBytes : Bytes -> (Reader e ->{IO | e} a) ->{IO | e} a
+limited : Reader e -> Int -> (Reader e ->{IO | e} a) ->{IO | e} a
+ensure : Reader e -> Int ->{IO | e} Bool
+atEnd : Reader e ->{IO | e} Bool
+readUpTo : Reader e -> Int ->{IO | e} Bytes
+readExactly : Reader e -> Int ->{IO | e} Maybe Bytes
+readUntil : Reader e -> Bytes -> Int ->{IO | e} Read
+readLine : Reader e -> Int ->{IO | e} Read
+forEachChunk : Reader e -> (Bytes ->{IO | e} ()) ->{IO | e} ()
+chunks : Reader e -> Stream () Bytes {IO | e}
 ```
 
 The three fields are the primitives and carry no policy. `buffered()` answers
-what is in hand and performs no IO. `refill()` pulls until the buffer grows,
+what is in hand through an IO-marked reference read. `refill()` pulls until the buffer grows,
 answering `True`, or the source ends, answering `False`; it never answers
 `True` without growing, so a loop on it makes progress. `skip n` consumes from
 the buffer and answers how many bytes it took, which is `n` clamped to what was
@@ -71,14 +68,13 @@ there. A caller projects them off the reader — they are operation names, so
 they are not module functions.
 
 `over source use` runs `use` with a reader over `source`. `overBytes contents
-use` reads a value already in memory: the activation's cell is the buffer, so
-the whole value is the starting buffer over a source that has already ended.
-Nothing in that path performs anything, so a memory reader stands at any row,
-including the pure `Reader {}`, and parsing code written against `Reader e`
-runs unchanged over memory and over a file.
+use` starts with the contents in its buffer over an exhausted source. Reading
+that buffer still has effect IO. `Reader {}` means the source has no additional
+effects, and its reader operations still require IO. Parsing code written against
+`Reader e` runs over both memory and file sources.
 
 `limited parent n use` stages a reader over a parent, clamping every answer to
-a remaining allowance held in its own activation state. Every byte it hands out
+a remaining allowance held in its own reference. Every byte it hands out
 is skipped through the parent, so when the scope ends the parent is positioned
 after what was consumed rather than after the allowance; a caller that wants
 the rest of a frame discarded skips it before leaving. Because a reader is a
@@ -109,28 +105,26 @@ is the caller's question.
 `forEachChunk reader action` hands each buffered chunk to `action` until the
 source ends, so a consumer sees the source's own chunking rather than a size
 this module invented. `chunks` is the same thing as a
-[`Stream`](library-streams.md); `Stream`'s rule that a yielded value may not
-retain producer-local resources holds trivially, because `Bytes` captures
-nothing.
+[`Stream`](library-streams.md) with unit state whose step advances the reader.
+Repeated traversals share the current reader position.
 
 ## Writer
 
-A `Writer e` is a record of closures bound to one `over` or `collecting`
-activation, so a response assembled from a status line, several headers, and a
+A `Writer e` is a record of IO-marked operations over a private buffer, so a response assembled from a status line, several headers, and a
 body costs one underlying write per flush window rather than one per part.
 
 ```fango
 import Writer exposing (Writer)
 
 type Writer e =
-    { emit : Bytes ->{e} ()
-    , flush : () ->{e} ()
+    { emit : Bytes ->{IO | e} ()
+    , flush : () ->{IO | e} ()
     }
 
-over : Sink e -> Int -> (Writer e ->{e} a) ->{e} a
-collecting : (Writer e ->{e} a) ->{e} (a, Bytes)
-write : Writer e -> Bytes ->{e} ()
-writeString : Writer e -> String ->{e} ()
+over : Sink e -> Int -> (Writer e ->{IO | e} a) ->{IO | e} a
+collecting : (Writer e ->{IO | e} a) ->{IO | e} (a, Bytes)
+write : Writer e -> Bytes ->{IO | e} ()
+writeString : Writer e -> String ->{IO | e} ()
 ```
 
 `emit chunk` accepts bytes for eventual writing and `flush()` pushes everything
@@ -146,19 +140,14 @@ a body that fails emits nothing further, so no reader receives a truncated
 message it would have to guess at.
 
 `collecting use` answers the body's value together with everything written,
-and performs nothing of its own, so the same writing code runs in a test with
-no effects at all and a caller that wants all-or-nothing gets it for the whole
-body. Its `flush()` has nowhere to push to and does nothing.
+using IO-marked storage. Its bytes become available only on successful
+completion. Its `flush()` has nowhere to push to and does nothing.
 
 ## Lifetimes
 
-A reader and a writer are [bound to their
-activation](effects.md#binding-a-closure-to-a-handler-activation), so the
-handler lifetime rules apply unchanged: reporting one as a result, storing it
-in an ADT, capturing it in a returned closure, or storing it in an outer
-handler is rejected with `STATE RESULT ESCAPES`. A `Stream` from `chunks`
-retains the reader and obeys the same rule — it may be consumed inside the
-scope and not carried out of it. A `Source` built over an open file captures
-the handle and cannot outlive the scope that owns it, which reports
-`RESOURCE ESCAPES`. Passing a reader inward, including into an inner activation
-of the same effect, is permitted.
+Readers and writers may be returned or stored. Memory buffers remain available
+while referenced. A source or sink backed by a file or socket still depends on
+that handle being open; operations after its scope closes fail at runtime.
+Consume resource-backed streams inside the resource's cleanup scope.
+Reader/Writer values contain functions and references and are not transferable
+task data. Each task constructs its own buffered objects.

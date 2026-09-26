@@ -26,20 +26,15 @@ The bundled library is experimental and versioned with the compiler.
 | IO, File, Net | [Console, process, files, sockets, and structured errors](reference/library-io.md) |
 | Fail, Failure, State, Random | [Effect APIs](reference/library-effects.md) |
 | Runtime.Scope | [Cleanup scopes](reference/resources.md) |
-| Runtime.Coroutine | [Scoped typed exchange and ownership](reference/library-coroutines.md) |
-| Runtime.Completion | [Detached typed results and abort replay](reference/library-completion.md) |
-| Runtime.Work | [Scoped work packages](reference/library-work.md) |
-| Runtime.Cell | [Scope-owned write-once cells](reference/library-cells.md) |
-| Runtime.Service | [Shared contexts and invocation authority](reference/library-services.md) |
-| Async, Async.IO, Runtime.Executor, Async.Cooperative, Runtime.Async.Cooperative | [Structured cooperative tasks and native IO](reference/library-async-cooperative.md); [concurrent combinators and events](reference/library-async-combinators.md) |
-| Runtime.NativeRequest | [Bounded native retention and driver callbacks](reference/library-native-requests.md) |
+| Task | [Native tasks](reference/library-tasks.md) |
+| Runtime.Ref | [IO references](reference/native.md#io-references) |
 | Runtime.Native | [Native Go sidecars](reference/native.md) |
 | Json | [Encoding and string tokens](reference/library-json.md) |
 | Meta, Derive | [Metaprogramming](reference/metaprogramming.md) |
 
 ### Streams and cursors
 
-[Stream and Iterator](reference/library-streams.md) — production, traversal, and ownership; [concurrent mapping](reference/library-async-combinators.md#concurrent-stream-mapping) is a separate Stream.Concurrent module.
+[Stream and Iterator](reference/library-streams.md) — explicit state, traversal, and composition.
 
 ## Native Go sidecars
 
@@ -77,7 +72,7 @@ The bundled library is experimental and versioned with the compiler.
 
 [Effects and handlers](reference/effects.md#effects-and-handlers) — Operations, aborts, stateful handlers, and resume discipline.
 
-[Binding a closure to a handler activation](reference/effects.md#binding-a-closure-to-a-handler-activation) — Addressing one activation instead of the innermost handler.
+[Effectful closures](reference/effects.md#closures-and-handler-effects) — Effects remain visible in callable types.
 
 ## Cleanup scopes
 

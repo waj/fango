@@ -16,81 +16,34 @@ import (
 // (and under a debug flag later) — instantiation plumbing bugs are the
 // design's top risk, and this is the tripwire.
 func Lint(p *Prog, b *types.Builtins) []error {
-	return lint(p, nil, b, false, false)
+	return lint(p, nil, b, false)
 }
 
 // LintIn validates only p's owned definitions while using context as an
 // already-validated signature and capture-contract environment. Dependency
 // bodies are neither traversed nor revalidated.
 func LintIn(p *Prog, context []Def, b *types.Builtins) []error {
-	return lint(p, context, b, false, false)
+	return lint(p, context, b, false)
 }
 
-// LintMachineInput checks semantic Core immediately before selective machine
-// lowering. It admits host-driven Suspend fixtures and Machine transport while
-// retaining every ordinary Core invariant. Source suspension uses typed calls
-// to the producer's pause capability.
-func LintMachineInput(p *Prog, b *types.Builtins) []error {
-	return lint(p, nil, b, true, false)
-}
+// LintStage permits metaprogramming nodes in the compile-time interpreter.
+func LintStage(p *Prog, b *types.Builtins) []error { return lint(p, nil, b, true) }
 
-// LintMachineInputIn applies the same proofs to one owner's definitions.
-// Context supplies the installed declarations its calls resolve against; those
-// definitions were proven when their own module was checked.
-func LintMachineInputIn(p *Prog, context []Def, b *types.Builtins) []error {
-	return lint(p, context, b, true, false)
-}
-
-// LintStageMachineInput applies the same ownership, capture, and transport
-// proofs to a splice's execution program. Quote and TypeOf are values at this
-// boundary only; the ordinary emission boundary continues to reject them.
-func LintStageMachineInput(p *Prog, b *types.Builtins) []error {
-	return lint(p, nil, b, true, true)
-}
-
-func lint(p *Prog, context []Def, b *types.Builtins, allowMachine, allowStage bool) []error {
+func lint(p *Prog, context []Def, b *types.Builtins, allowStage bool) []error {
 	l := &linter{b: b, scope: map[string]bool{}, localTypes: map[string]types.Type{}, workers: map[string]*Def{},
 		adts: map[int]*types.ADTInfo{}, effects: map[int]*types.EffectInfo{},
 		tyParams: map[int]bool{}, evidence: map[int]int{}, evidenceCaptures: map[int][]types.CaptureSet{},
 		captureVars: map[types.CaptureVar]bool{}, scopeIDs: map[types.ScopeID]bool{}, activeScopes: map[types.ScopeID]bool{},
-		resumeIDs: map[types.ResumeID]bool{}, serviceAuthority: map[string]types.Type{}, natives: p.Natives, intrinsics: p.Intrinsics,
-		allowMachine: allowMachine || p.Intrinsics[types.CoroutineScopeName] || p.Intrinsics[types.CoroutineWithName], allowSuspend: allowMachine, allowStage: allowStage}
+		resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives, intrinsics: p.Intrinsics,
+		allowStage: allowStage}
 	for _, adt := range p.ADTs {
 		l.adts[adt.Con.Unique] = adt
-	}
-	for _, adt := range p.ADTs {
-		if adt.Con.Name == "Runtime.NativeRequest.Host" || adt.Con.Name == types.NativeRegistrationName {
-			valid := adt.Resource && !adt.Shared && len(adt.Params) == 0 && !adt.IsRecord() && len(adt.Ctors) == 1 && len(adt.Ctors[0].Fields) == 1
-			if valid {
-				field, ok := adt.Ctors[0].Fields[0].(*types.TCon)
-				valid = ok && l.adts[field.Unique] != nil && l.adts[field.Unique].Repr == types.ReprNativeAny
-			}
-			if !valid {
-				l.errorf("type %s: invalid scoped native request capability", adt.Con.Name)
-			}
-		}
-		if !adt.Shared {
-			continue
-		}
-		valid := adt.Resource && !adt.IsRecord() && len(adt.Ctors) == 1 && len(adt.Ctors[0].Fields) == 1
-		if valid {
-			field, ok := adt.Ctors[0].Fields[0].(*types.TCon)
-			valid = ok && l.adts[field.Unique] != nil && l.adts[field.Unique].Repr == types.ReprNativeAny
-		}
-		if !valid {
-			l.errorf("type %s: invalid shared native resource contract", adt.Con.Name)
-		}
 	}
 	for _, eff := range p.Effects {
 		if old := l.effects[eff.Unique]; old != nil {
 			l.errorf("effect unique %d is shared by `%s` and `%s`", eff.Unique, old.Name, eff.Name)
 		}
 		l.effects[eff.Unique] = eff
-	}
-	for _, eff := range p.Effects {
-		if err := types.CheckServiceEffect(eff, l.effects); err != nil {
-			l.errorf("effect %s: %s", eff.Name, err)
-		}
 	}
 	for _, n := range p.Natives {
 		for _, wrapper := range append(append([]*types.CtorInfo(nil), n.ParamWrappers...), n.ResultWrapper) {
@@ -257,7 +210,6 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowMachine, allowStage bo
 		}
 	}
 	l.errs = append(l.errs, verifyCapturesIn(p, context, b)...)
-	l.errs = append(l.errs, SourceEffectErrors(p)...)
 	l.errs = append(l.errs, CheckRowEvidence(p)...)
 	return l.errs
 }
@@ -340,12 +292,11 @@ type linter struct {
 	resumeArg        types.Type
 	resumeRet        types.Type
 	resumeState      types.Type
-	serviceAuthority map[string]types.Type
-	defName          string
-	allowMachine     bool
-	allowSuspend     bool
-	allowStage       bool
-	errs             []error
+
+	defName string
+
+	allowStage bool
+	errs       []error
 }
 
 func (l *linter) errorf(format string, args ...any) {
@@ -387,6 +338,8 @@ func (l *linter) printable(t types.Type) bool {
 func (l *linter) expr(e Expr, where string) {
 	l.typ(e.Type(), where)
 	switch e := e.(type) {
+	case *TaskSpawn:
+		l.taskSpawn(e, where)
 	case *IntLit:
 		// An integer literal in a Number-generic body stays at the rigid
 		// var's type: Go untyped constants are assignable to the type-set
@@ -480,21 +433,6 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: native `%s` arity mismatch", where, e.Name)
 		} else {
 			decl := n.Scheme.Body
-			if request, err := types.CheckNativeRequest(n); err != nil || request != n.RetainsRequest || request != e.RetainsRequest {
-				l.errorf("%s: native `%s` has an invalid request retention contract", where, e.Name)
-			}
-			if n.RetainsRequest && len(n.ParamWrappers) > 0 && n.ParamWrappers[0] != nil {
-				wrapper := n.ParamWrappers[0]
-				adt := l.adts[wrapper.Result.Unique]
-				valid := adt != nil && adt.Con.Name == types.NativeRegistrationName && adt.Resource && !adt.Shared && len(adt.Params) == 0 && len(adt.Ctors) == 1 && len(adt.Ctors[0].Fields) == 1
-				if valid {
-					field, ok := adt.Ctors[0].Fields[0].(*types.TCon)
-					valid = ok && l.adts[field.Unique] != nil && l.adts[field.Unique].Repr == types.ReprNativeAny && wrapper.Name == adt.Ctors[0].Name && len(wrapper.Fields) == 1 && types.Equal(field, wrapper.Fields[0])
-				}
-				if !valid {
-					l.errorf("%s: invalid scoped native registration", where)
-				}
-			}
 			if storage, err := types.CheckNativeStorage(n); err != nil || storage != n.Storage || storage != e.Storage {
 				l.errorf("%s: native `%s` has an invalid storage contract", where, e.Name)
 			}
@@ -555,11 +493,8 @@ func (l *linter) expr(e Expr, where string) {
 			l.scope[e.Name] = true
 			l.localTypes[e.Name] = e.Rhs.Type()
 		}
-		if w, ok := e.Rhs.(*Work); ok && w.Kind == "invocation-slot" {
-			l.serviceAuthority[e.Name] = w.Ty
-		}
 		l.expr(e.Body, where)
-		delete(l.serviceAuthority, e.Name)
+
 		delete(l.scope, e.Name)
 		delete(l.localTypes, e.Name)
 	case *Lambda:
@@ -668,53 +603,7 @@ func (l *linter) expr(e Expr, where string) {
 		for _, a := range e.Args {
 			l.expr(a, where)
 		}
-	case *Suspend:
-		if !l.allowSuspend {
-			l.errorf("%s: compiler-only suspension reached ordinary Core", where)
-		}
-		if e.Request == nil {
-			l.errorf("%s: suspension has no request", where)
-			return
-		}
-		if c := ExprControl(e.Request); c.Transport != types.Direct || c.Polymorphic {
-			l.errorf("%s: suspension request control %s is not direct", where, ControlName(c))
-		}
-		l.expr(e.Request, where)
-	case *CoroutineScope:
-		l.coroutineScope(e, where)
-	case *CoroutineAdvance:
-		l.coroutineAdvance(e, where)
 
-	case *Completion:
-		if !l.intrinsics[e.Name] || l.defName != e.Name || !types.CompletionIntrinsic(e.Name) {
-			l.errorf("%s: completion outside its declared intrinsic", where)
-		}
-		if e.Value == nil || !types.CompletionShape(e.Name, e.Value.Type(), e.Ty) {
-			l.errorf("%s: invalid completion signature", where)
-			return
-		}
-		l.expr(e.Value, where)
-		completion := e.Value.Type()
-		if types.CapturesCompletion(e.Name) || e.Name == types.CompletionFromFailureName {
-			completion = e.Ty
-		}
-		con := completion.(*types.TCon)
-		if adt := l.adts[con.Unique]; adt == nil || adt.Con.Name != types.CompletionTypeName {
-			l.errorf("%s: completion has no declared nominal identity", where)
-		}
-		if worker := l.workers[e.Name]; worker == nil || e.Control != ArrowControl(worker.Type, 1) {
-			l.errorf("%s: stale completion control proof", where)
-		}
-		if e.Name == types.CompletionFailureName {
-			con := e.Ty.(*types.TCon)
-			if e.Result == nil || l.adts[con.Unique] != e.Result || len(e.Result.Ctors) != 2 || e.Result.Ctors[0].Name != "Maybe.Nothing" || len(e.Result.Ctors[0].Fields) != 0 || e.Result.Ctors[1].Name != "Maybe.Just" || len(e.Result.Ctors[1].Fields) != 1 || !EqualValueRepresentation(e.Result.InstFields(e.Result.Ctors[1], con.Args)[0], con.Args[0]) {
-				l.errorf("%s: invalid completion Maybe proof", where)
-			}
-		} else if e.Result != nil {
-			l.errorf("%s: unexpected completion Maybe proof", where)
-		}
-	case *Work:
-		l.work(e, where)
 	case *FailureInspect:
 		if !l.intrinsics[e.Name] || l.defName != e.Name || !types.FailureInspection(e.Name) {
 			l.errorf("%s: failure inspection outside its declared intrinsic", where)
@@ -811,7 +700,7 @@ func (l *linter) expr(e Expr, where string) {
 		// Elaboration is the only producer, and it emits exactly one scope, as
 		// the body of the bundled intrinsic. A Bracket anywhere else would mean
 		// a transform copied or moved a pending cleanup obligation.
-		if l.defName != types.ScopeBracketName && l.defName != types.WorkRunName {
+		if l.defName != types.ScopeBracketName {
 			l.errorf("%s: cleanup scope outside the `%s` intrinsic", where, types.ScopeBracketName)
 		}
 		if e.Resource == "" || e.ResourceTy == nil || e.Acquire == nil || e.Release == nil || e.Body == nil {
@@ -845,17 +734,6 @@ func (l *linter) expr(e Expr, where string) {
 	case *Handle:
 		l.control(e.Control, where)
 		l.effectInstance(e.Effect, where)
-		if effect := l.effects[e.Effect.Unique]; effect != nil {
-			if effect.Invocation {
-				l.invocationHandle(e, where)
-			}
-			if effect.Service && e.State != nil {
-				l.errorf("%s: shared service evidence owns mutable state", where)
-			}
-		}
-		if effect := l.effects[e.Effect.Unique]; effect != nil && effect.Suspension {
-			l.errorf("%s: ordinary handler intercepts compiler-owned suspension effect", where)
-		}
 		if e.State != nil {
 			if e.State.Name == "" || e.State.Ty == nil || e.State.Initial == nil {
 				l.errorf("%s: parameterized handler has incomplete state metadata", where)
@@ -979,13 +857,7 @@ func (l *linter) expr(e Expr, where string) {
 				l.tailResume(c.Body, c.ResumeID, opResult, e.Ty, state, where)
 				l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = c.ResumeID, opResult, e.Ty, state
 			}
-			if c.Op.Invocation != nil && len(c.Params) == len(c.ParamTypes) && len(c.Params) > 0 {
-				l.serviceAuthority[c.Params[len(c.Params)-1]] = c.ParamTypes[len(c.Params)-1]
-			}
 			l.expr(c.Body, where)
-			for _, name := range c.Params {
-				delete(l.serviceAuthority, name)
-			}
 			delete(l.scope, c.SuppressedParam)
 			delete(l.localTypes, c.SuppressedParam)
 			l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = oldOwner, oldArg, oldRet, oldState
@@ -1004,6 +876,9 @@ func (l *linter) expr(e Expr, where string) {
 					l.errorf("%s: handler is missing a clause for `%s`", where, op.Name)
 				}
 			}
+		}
+		if e.Return == nil && !EqualValueRepresentation(e.Body.Type(), e.Ty) {
+			l.errorf("%s: handler body does not exactly match the handler type", where)
 		}
 		if e.Return != nil {
 			if e.State != nil {
@@ -1029,7 +904,7 @@ func (l *linter) expr(e Expr, where string) {
 			}
 		}
 	case *App:
-		if con, ok := e.Ty.(*types.TCon); ok && (con.Name == types.FailureTypeName || con.Name == types.CompletionTypeName) && e.CalleeKind == Ctor {
+		if con, ok := e.Ty.(*types.TCon); ok && (con.Name == types.FailureTypeName) && e.CalleeKind == Ctor {
 			l.errorf("%s: opaque failure snapshot constructed as an ordinary ADT", where)
 		}
 		l.control(e.Control, where)
@@ -1202,7 +1077,7 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: App with unknown CalleeKind %d", where, e.CalleeKind)
 		}
 	case *Case:
-		if con, ok := e.Scrut.Type().(*types.TCon); ok && (con.Name == types.FailureTypeName || con.Name == types.CompletionTypeName) {
+		if con, ok := e.Scrut.Type().(*types.TCon); ok && (con.Name == types.FailureTypeName) {
 			l.errorf("%s: opaque failure snapshot matched as an ordinary ADT", where)
 		}
 		if e.Bind == "" {
@@ -1598,9 +1473,7 @@ func (l *linter) control(c types.Control, where string) {
 	if !c.Valid() {
 		l.errorf("%s: invalid control transport %d", where, c.Transport)
 	}
-	if c.Transport == types.Machine && !l.allowMachine {
-		l.errorf("%s: Machine control survived before machine lowering is implemented", where)
-	}
+
 }
 
 // controlInstance reports whether a call's control is an instance of its
@@ -1653,6 +1526,9 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		l.verifyControlTree(e.Tree, tail, where)
 	case *Neg:
 		directSlot(e.Operand, "negation operand")
+	case *TaskSpawn:
+		directSlot(e.Scope, "task scope")
+		directSlot(e.Input, "task input")
 	case *NativeCall:
 		for _, a := range e.Args {
 			directSlot(a, "native argument")
@@ -1661,12 +1537,7 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		for _, a := range e.Args {
 			directSlot(a, "failure inspection argument")
 		}
-	case *Work:
-		for _, a := range e.Args {
-			directSlot(a, "work package argument")
-		}
-	case *Completion:
-		directSlot(e.Value, "completion argument")
+
 	case *Quote:
 		for _, h := range e.Holes {
 			directSlot(h, "quote hole")
@@ -1679,13 +1550,7 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		for _, p := range e.Payload {
 			directSlot(p, "exit payload")
 		}
-	case *Suspend:
-		directSlot(e.Request, "suspension request")
-	case *CoroutineAdvance:
-		directSlot(e.Cursor, "cursor advancement operand")
-		if e.Reply != nil {
-			directSlot(e.Reply, "coroutine reply")
-		}
+
 	case *App:
 		if e.CalleeKind == Value {
 			directSlot(e.Callee, "indirect callee")
@@ -1704,12 +1569,6 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		l.verifyControlANF(e.Acquire, true, where)
 		l.verifyControlANF(e.Body, true, where)
 		l.verifyControlANF(e.Release, true, where)
-	case *CoroutineScope:
-		// The node owns invocation. Its two stored expressions only construct
-		// callback values; their latent transports are represented by their
-		// function types and by CoroutineScope.Control.
-		directSlot(e.Producer, "iterator producer")
-		directSlot(e.Consumer, "iterator consumer")
 
 	case *Handle:
 		if e.State != nil {
@@ -1821,7 +1680,7 @@ func (l *linter) runtimeType(t types.Type) types.Type {
 			for j, a := range label.Args {
 				args[j] = l.runtimeType(a)
 			}
-			labels[i] = types.EffLabel{Unique: label.Unique, Name: label.Name, Args: args, Abort: label.Abort, Suspension: label.Suspension}
+			labels[i] = types.EffLabel{Unique: label.Unique, Name: label.Name, Args: args, Abort: label.Abort}
 		}
 		return types.Row{Labels: labels}
 	default:

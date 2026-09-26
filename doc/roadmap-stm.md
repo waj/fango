@@ -1,5 +1,10 @@
 # Roadmap: shared state and transactional memory
 
+**Direction superseded.** The [simplification roadmap](roadmap-simplification.md)
+is authoritative for new work. Existing stage IDs and headings remain stable;
+unfinished stages below are deferred. Current contracts are documented in
+design/reference; links to removed APIs point to their historical revision.
+
 This document owns the proposed shared-mutable-state layer: transactional
 variables, atomic transactions, and the primitives they need. The [effects
 roadmap](roadmap-effects.md#deferred-topics) defers shared mutable state to

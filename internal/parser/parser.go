@@ -278,20 +278,9 @@ func (p *parser) parseDecl() ast.Decl {
 	}
 	if t.Kind == token.PRAGMA {
 		p.next()
-		if t.Text == "service" {
-			if p.peek().Kind != token.KwEffect {
-				p.errorAt(t.Span, "MISPLACED SERVICE PRAGMA", "`{-# service #-}` must precede one effect declaration.")
-				return nil
-			}
-			d := p.parseDecl()
-			if ed, ok := d.(*ast.EffectDecl); ok {
-				ed.Service = true
-				ed.Sp.Start = t.Span.Start
-			}
-			return d
-		}
-		if t.Text != "resource" && t.Text != "shared-resource" {
-			p.errorAt(t.Span, "MISPLACED PRAGMA", "Only `resource`, `shared-resource`, or `service` pragmas may precede a declaration; file pragmas belong above the module header.")
+
+		if t.Text != "resource" {
+			p.errorAt(t.Span, "MISPLACED PRAGMA", "Only the `resource` pragma may precede a declaration; file pragmas belong above the module header.")
 			return nil
 		}
 		if p.peek().Kind == token.EOF {
@@ -305,7 +294,6 @@ func (p *parser) parseDecl() ast.Decl {
 		d := p.parseDecl()
 		if td, ok := d.(*ast.TypeDecl); ok {
 			td.Resource = true
-			td.Shared = t.Text == "shared-resource"
 			td.ResourceSpan = t.Span
 		}
 		return d

@@ -4,18 +4,12 @@ import State
 import Runtime.Scope
 import Basics exposing (quotientBy)
 
-emit : Int ->{Stream.Yield Int} ()
-emit n =
-    if n <= 0 then ()
-    else
-        Stream.yield n
-        emit (n - 1)
-
-source n = Stream.generate (\_ -> emit n)
+source n = Stream.unfold n (\remaining ->
+    if remaining <= 0 then Nothing else Just (remaining, remaining - 1))
 
 sumCursor cursor acc = case Iterator.next cursor of
     Nothing -> acc
-    Just value -> sumCursor cursor (acc + value)
+    Just (value, next) -> sumCursor next (acc + value)
 
 build n acc = if n <= 0 then acc else build (n - 1) [n | acc]
 
@@ -23,18 +17,17 @@ reopen n acc =
     if n <= 0 then acc
     else reopen (n - 1) (acc + Stream.fold (\x total -> x + total) 0 (source 8))
 
-emitState : Int ->{State.State Int, Stream.Yield Int} ()
-emitState n =
-    if n <= 0 then ()
+stepState remaining =
+    if remaining <= 0 then Nothing
     else
-        State.put (State.get () + 1)
-        Stream.yield n
-        emitState (n - 1)
+        State.put (State.get() + 1)
+        Just (remaining, remaining - 1)
 
 effectful n =
     result = State.run 0 (\_ ->
-        values = Stream.generate (\_ -> Scope.finally (\_ -> emitState n) (\_ -> State.put (State.get () + 1000)))
-        Stream.fold (\x acc -> x + acc) 0 (Stream.take (quotientBy 2 n) values))
+        Runtime.Scope.finally
+            (\_ -> Stream.fold (\x acc -> x + acc) 0 (Stream.take (quotientBy 2 n) (Stream.unfold n stepState)))
+            (\_ -> State.put (State.get() + 1000)))
     result.value + result.state
 
 run : Int -> Int -> Int

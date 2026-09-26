@@ -1,0 +1,21 @@
+import Task
+import Fail
+import Result exposing (Result(..))
+
+waiter : Task.Context -> Int ->{IO} Int
+waiter context value =
+    ignore (Task.sleep context 60000)
+    value
+
+main() =
+    Task.scope (\scope ->
+        child = Task.spawn scope waiter 7
+        Task.cancel child
+        print (Task.await child)
+        print (Task.await child))
+    stopped = Fail.attempt (\_ -> Task.scope (\scope ->
+        child = Task.spawn scope waiter 9
+        Fail.fail child))
+    case stopped of
+        Err child -> print (Task.await child)
+        Ok _ -> print "unexpected success"

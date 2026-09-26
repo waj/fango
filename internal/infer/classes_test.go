@@ -1,8 +1,9 @@
 package infer_test
 
 import (
-	"github.com/waj/fango/internal/types"
 	"testing"
+
+	"github.com/waj/fango/internal/types"
 )
 
 func TestClassConstraints(t *testing.T) {

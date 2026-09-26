@@ -45,9 +45,9 @@ compatible, receive a private synthetic identity, and cannot themselves be
 imported.
 
 Bundled modules use the same dotted-name path convention beneath `stdlib/`.
-For example, `Runtime.Coroutine` is stored at `stdlib/Runtime/Coroutine.fango`;
+For example, `Runtime.Ref` is stored at `stdlib/Runtime/Ref.fango`;
 its native sidecar, when present, sits beside it as
-`stdlib/Runtime/Coroutine.native.go`.
+`stdlib/Runtime/Ref.native.go`.
 
 ## Prelude and implicit dependencies
 

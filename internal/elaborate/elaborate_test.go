@@ -63,7 +63,7 @@ func TestGoldens(t *testing.T) {
 	}
 }
 
-func TestScopedCallbackAdapterCannotEscape(t *testing.T) {
+func TestEffectfulCallbackRetainsItsEffect(t *testing.T) {
 	src := `effect Borrow
     read : () -> Int
 
@@ -102,13 +102,19 @@ main = 0
 	if !ck.MarkEffectScoped("Borrow") {
 		t.Fatal("Borrow effect was not installed")
 	}
-	_, elabErrs := elaborate.Module(infos, ck)
-	if len(elabErrs) != 1 || elabErrs[0].Title != "RESOURCE ESCAPES" {
-		t.Fatalf("elaboration errors = %v, want RESOURCE ESCAPES", elabErrs)
+	prog, elabErrs := elaborate.Module(infos, ck)
+	if len(elabErrs) != 0 {
+		t.Fatal(elabErrs)
 	}
-	if line := elabErrs[0].Span.StartPos().Line; line != 8 {
-		t.Fatalf("RESOURCE ESCAPES points at line %d, want handler line 8", line)
+	for _, d := range prog.Defs {
+		if d.Name == "saved" {
+			fn, ok := d.Type.(*types.TFun)
+			if !ok || len(fn.Eff.Labels) == 0 {
+				t.Fatal("returned callback lost its effect")
+			}
+		}
 	}
+
 }
 
 // Keep fixture dumps focused on their source. The complete executable prelude

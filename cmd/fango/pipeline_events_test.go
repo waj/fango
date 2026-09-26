@@ -26,7 +26,6 @@ func TestCompilationSessionStageEvents(t *testing.T) {
 		"check":         false,
 		"elaborate":     false,
 		"semantic-lint": false,
-		"lowering":      false,
 		"emission":      false,
 	}
 	for _, event := range events {

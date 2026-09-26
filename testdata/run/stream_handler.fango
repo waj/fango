@@ -1,7 +1,10 @@
 import Stream
 
+effect Observe
+    observe : Int -> ()
+
 main() =
-    handle Stream.yield 1 of
-        Stream.yield value ->
+    handle Stream.forEach observe (Stream.fromList [1]) of
+        observe value ->
             print value
             resume ()

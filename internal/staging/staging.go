@@ -10,9 +10,10 @@ import (
 
 	"context"
 	"fmt"
-	"github.com/waj/fango/internal/compileevent"
 	"sort"
 	"strings"
+
+	"github.com/waj/fango/internal/compileevent"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
@@ -20,7 +21,6 @@ import (
 	"github.com/waj/fango/internal/elaborate"
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/infer"
-	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -180,16 +180,9 @@ func (s *Session) StageReferences(defs []core.Def, names ...string) []string {
 // Snapshot completes and returns the stage Core added since the prior
 // snapshot. It is declarative Core; evaluator closures and memo cells are not
 // exposed to module objects.
-//
-// proven names the definitions the module's runtime elaboration has just
-// discharged. The stage elaboration of the same declarations still solves
-// their summaries and contracts but does not discharge them again; whatever
-// exists only here — compile-time-only declarations above all — gets its one
-// discharge now. The set is consulted by this call alone: a splice's sync
-// runs before the runtime elaboration and proves everything it elaborates.
-func (s *Session) Snapshot(proven map[string]bool) (SnapshotObject, []diag.Error) {
+func (s *Session) Snapshot() (SnapshotObject, []diag.Error) {
 	beforeDefs, beforeGroups := len(s.ev.defs), len(s.ev.groups)
-	if errs := s.ev.syncProven(proven); len(errs) != 0 {
+	if errs := s.ev.sync(); len(errs) != 0 {
 		return SnapshotObject{}, errs
 	}
 	groups := append([]Group(nil), s.ev.groups[beforeGroups:]...)
@@ -298,20 +291,6 @@ func (ev *evaluator) run(operand ast.Expr) (any, []diag.Error) {
 			return nil, es
 		}
 	}
-	if ev.ck.Intrinsics[types.CoroutineWithName].Body != nil {
-		defs := ev.executionDefs(body, aux)
-		p := ev.program(defs)
-		if captureErrs := core.InferCaptures(p, ev.ck.B); len(captureErrs) > 0 {
-			return nil, []diag.Error{diag.Errorf(operand.Span(), "INTERNAL CAPTURE INVARIANT", "%v", captureErrs[0])}
-		}
-		mp, lowerErrs := machineir.LowerStage(p, ev.ck.B)
-		if len(lowerErrs) > 0 {
-			return nil, []diag.Error{diag.Errorf(operand.Span(), "INTERNAL MACHINE INVARIANT", "%v", lowerErrs[0])}
-		}
-		if err := ev.env.DefineMachineProg(mp); err != nil {
-			return nil, []diag.Error{infer.CompileTimeError(err, operand.Span())}
-		}
-	}
 	for i := range aux {
 		ev.env.DefineWorker(&aux[i])
 	}
@@ -382,9 +361,7 @@ func (ev *evaluator) executionDefs(body core.Expr, aux []core.Def) []core.Def {
 // sync elaborates newly completed groups together, so capture analysis and
 // evaluator installation see every recursive member. Instance registration
 // stays source-ordered and is bounded by the current splice's cutoff.
-func (ev *evaluator) sync() []diag.Error { return ev.syncProven(nil) }
-
-func (ev *evaluator) syncProven(proven map[string]bool) []diag.Error {
+func (ev *evaluator) sync() []diag.Error {
 	var defs []core.Def
 	var errs []diag.Error
 	add := func(ds []core.Def, es []diag.Error) {
@@ -413,7 +390,7 @@ func (ev *evaluator) syncProven(proven map[string]bool) []diag.Error {
 	for i := ev.installedGroups; i < nextGroups; i++ {
 		group := ev.ck.CompletionGroups[i]
 		context := append(append([]core.Def(nil), ev.defs...), defs...)
-		add(elaborate.DeclsProvenIn(group.Infos, context, proven, ev.ck))
+		add(elaborate.DeclsIn(group.Infos, context, ev.ck))
 		groupEnds = append(groupEnds, len(defs))
 		groupCutoffs = append(groupCutoffs, group.Cutoff)
 	}
@@ -452,5 +429,5 @@ func (ev *evaluator) program(defs []core.Def) *core.Prog {
 	for name := range ev.ck.Intrinsics {
 		intrinsics[name] = true
 	}
-	return &core.Prog{ADTs: ev.ck.ADTOrder, Effects: effects, Defs: defs, Natives: ev.ck.Natives, Intrinsics: intrinsics, ObserveFlow: ev.ck.ObserveFlow}
+	return &core.Prog{ADTs: ev.ck.ADTOrder, Effects: effects, Defs: defs, Natives: ev.ck.Natives, Intrinsics: intrinsics}
 }

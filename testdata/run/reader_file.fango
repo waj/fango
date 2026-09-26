@@ -11,7 +11,7 @@ import Writer
 -- row its reader performs, so it is the identical definition in both places;
 -- only the scope around it differs.
 
-parse : Reader e -> List Bytes ->{e} List Bytes
+parse : Reader e -> List Bytes ->{IO | e} List Bytes
 parse input found =
     case Reader.readLine input 99 of
         Found run -> parse input [run | found]

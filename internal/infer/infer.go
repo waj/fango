@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
-	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/fixity"
 	"github.com/waj/fango/internal/meta"
@@ -59,22 +58,10 @@ type Constraint struct {
 	// It expresses composition without claiming the surrounding function call
 	// performs exactly the callee's effects.
 	Include bool
-	// A registration's immediate charge waits for the stored computation's
-	// row to be determined; equating a flexible tail with the surrounding row
-	// would accidentally add the driver's own control effect to that child.
-	WorkCharge bool
-	// Project foreign owner obligations before ordinary row bounds close the
-	// residual tails of a local coroutine boundary.
-	ControlNeed bool
 	// Subsume checks value compatibility, including variance-directed rows.
 	Subsume   bool
 	ADTs      map[int]*types.ADTInfo
 	Invariant []types.Type
-	// Bind holds the handler activations whose subjects lexically contain the
-	// closure this constraint adapts, outermost first. It carries the handler
-	// instance rule of doc/reference/effects.md: a label one of them handles
-	// may be replaced by what that handler's clauses perform.
-	Bind []*HandlerInfo
 }
 
 // Env maps top-level names to schemes; block scopes and function parameters
@@ -247,10 +234,6 @@ type Checker struct {
 	// `deriving` for it (doc/design.md, "Compile-time metaprogramming").
 	Derivers map[string]*DeriverInfo
 
-	// ObserveFlow receives every capture-flow analysis run in this session;
-	// each Core program built from the checker carries it.
-	ObserveFlow func(core.FlowRun)
-
 	// inferringContext is non-nil while a generated instance is being probed
 	// for the context its own body needs. A residual predicate that would
 	// otherwise be MISSING CONSTRAINT is collected here instead.
@@ -401,12 +384,10 @@ type DeclInfo struct {
 }
 
 type HandlerClauseInfo struct {
-	Invocation      *types.EffLabel
-	InvocationScope types.ScopeID
-	Op              *types.EffectOp
-	ParamTypes      []types.Type
-	OpResult        types.Type
-	ResumeID        types.ResumeID
+	Op         *types.EffectOp
+	ParamTypes []types.Type
+	OpResult   types.Type
+	ResumeID   types.ResumeID
 }
 
 type HandlerInfo struct {
@@ -418,11 +399,6 @@ type HandlerInfo struct {
 	BodyResult types.Type
 	StateType  types.Type
 	Clauses    []HandlerClauseInfo
-	// ClauseEffects are the rows the operation clauses perform, recorded as
-	// the clause bodies are generated. A `resume` call is left out: it
-	// returns to the perform site, whose remaining effects belong to that site
-	// rather than to a closure bound to this activation.
-	ClauseEffects []types.Type
 }
 
 // Module checks declarations: type headers first (so types may be mutually
@@ -667,17 +643,7 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 			return errs
 		}
 	}
-	if d.Name == types.CoroutineFacetName || d.Name == types.CoroutineScopeName || d.Name == types.CoroutineCreateName || d.Name == types.CoroutineWithName || d.Name == types.CoroutineAdvanceName || d.Name == types.CoroutineCloseName || d.Name == types.CoroutineStopName {
-		if !types.CoroutineShape(d.Name, ty) {
-			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic %s has an invalid coroutine protocol.", ast.Spelling(d.Name)))
-		}
-	}
-	if types.WorkIntrinsic(d.Name) && !types.WorkShape(d.Name, ty) {
-		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic %s has an invalid work package protocol.", ast.Spelling(d.Name)))
-	}
-	if d.Name == types.ServiceRunName && !types.ServiceRunShape(ty) {
-		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "Invalid service invocation scope protocol."))
-	}
+
 	if types.FailureInspection(d.Name) {
 		pure := true
 		arrow := ty
@@ -690,9 +656,7 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic `%s` has an invalid failure inspection signature.", ast.Spelling(d.Name)))
 		}
 	}
-	if types.CompletionIntrinsic(d.Name) && !types.CompletionDeclarationShape(d.Name, ty) {
-		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "Invalid typed completion signature."))
-	}
+
 	if d.Name == types.FailAttemptReportName && !types.AttemptReportShape(ty) {
 		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic `%s` must preserve the action's residual row and return `Result (Report error) value`.", ast.Spelling(d.Name)))
 	}
@@ -780,7 +744,7 @@ func (ck *Checker) declareEffectHeader(ed *ast.EffectDecl, batch bool) []diag.Er
 		seen[p.Name] = true
 		params[i] = ck.Sup.FreshRigid(types.General)
 	}
-	info := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: ed.Name, Params: params, Suspension: ed.CompilerSuspension, Service: ed.Service, Invocation: ed.CompilerInvocation, Scoped: ed.CompilerInvocation}
+	info := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: ed.Name, Params: params}
 	ck.Effects[ed.Name], ck.EffectsByUnique[info.Unique] = info, info
 	if ed.Name == "IO.IO" || ed.Name == "IO" {
 		ck.IO = info
@@ -844,25 +808,13 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 			cur = next
 		}
 		rowVars := make([]*types.TVar, len(arrows))
-		var invocation *types.EffLabel
-		if info.Service {
-			row := arrows[len(arrows)-1].Eff
-			if len(row.Labels) != 1 || row.Tail != nil || len(row.Labels[0].Args) != 2 || ck.EffectsByUnique[row.Labels[0].Unique] == nil || !ck.EffectsByUnique[row.Labels[0].Unique].Invocation || op.Abort || op.Native != nil {
-				errs = append(errs, diag.Errorf(op.NameSpan, "SERVICE PROTOCOL", "Each service operation must declare one fixed Runtime.Service.Invocation request reply row and cannot be aborting or native."))
-			} else {
-				label := row.Labels[0]
-				invocation = &label
-			}
-		}
+
 		for i, arrow := range arrows {
 			rowVars[i] = ck.Sup.FreshRigid(types.RowVar)
 			arrow.Eff = types.Row{Tail: rowVars[i]}
 		}
 		inner := arrows[len(arrows)-1]
-		inner.Eff.Labels = []types.EffLabel{{Unique: info.Unique, Name: info.Name, Args: labelArgs, Abort: op.Abort, Suspension: info.Suspension}}
-		if invocation != nil {
-			inner.Eff.Labels = append(inner.Eff.Labels, *invocation)
-		}
+		inner.Eff.Labels = []types.EffLabel{{Unique: info.Unique, Name: info.Name, Args: labelArgs, Abort: op.Abort}}
 		vars := append([]*types.TVar(nil), info.Params...)
 		vars = append(vars, scope.Minted()...)
 		vars = append(vars, rowVars...)
@@ -888,7 +840,7 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 			}
 		}
 		meta := &types.EffectOp{Owner: info, Index: len(info.Ops), Name: op.Name, Scheme: sch,
-			Arity: len(arrows), ParamTypes: params, ResultType: arrows[len(arrows)-1].Ret, LocalVars: local, Abort: op.Abort, Invocation: invocation}
+			Arity: len(arrows), ParamTypes: params, ResultType: arrows[len(arrows)-1].Ret, LocalVars: local, Abort: op.Abort}
 		if op.Native != nil {
 			n := &types.NativeInfo{Name: op.Name, Module: symbolModule(op.Name), Scheme: sch, Arity: len(arrows), Template: op.Native.Template, Effect: info}
 			meta.Native = n
@@ -897,9 +849,6 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 		info.Ops = append(info.Ops, meta)
 		ck.Operations[op.Name] = meta
 		ck.Env.Bind(op.Name, sch)
-	}
-	if err := types.CheckServiceEffect(info, ck.EffectsByUnique); err != nil {
-		errs = append(errs, diag.Errorf(ed.Sp, "SERVICE PROTOCOL", "%s", err))
 	}
 	return errs
 }
@@ -962,7 +911,7 @@ func (ck *Checker) declareTypeHeader(td *ast.TypeDecl) (*types.ADTInfo, []diag.E
 		params[i] = ck.Sup.FreshRigid(types.General)
 	}
 	con := &types.TCon{Unique: ck.Sup.NextUnique(), Name: td.Name}
-	adt := &types.ADTInfo{Resource: td.Resource, Shared: td.Shared, Con: con, Params: params, ParamKindsKnown: make([]bool, len(params))}
+	adt := &types.ADTInfo{Resource: td.Resource, Con: con, Params: params, ParamKindsKnown: make([]bool, len(params))}
 	ck.TypeNames[td.Name] = con
 	ck.ADTs[con.Unique] = adt
 	ck.ADTOrder = append(ck.ADTOrder, adt)
@@ -991,9 +940,7 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 		result = &types.TCon{Unique: adt.Con.Unique, Name: adt.Con.Name, Args: args}
 	}
 	if td.RecordFields != nil {
-		if td.Shared {
-			errs = append(errs, diag.Errorf(td.ResourceSpan, "SHARED RESOURCE", "A shared native resource must wrap exactly one Runtime.Native.Any field."))
-		}
+
 		seenFields := map[string]bool{}
 		fields := make([]types.Type, len(td.RecordFields))
 		for i, f := range td.RecordFields {
@@ -1045,9 +992,7 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 	errs = append(errs, markListRepr(adt, td.NameSpan)...)
 	errs = append(errs, markBytesRepr(adt, td.NameSpan)...)
 	errs = append(errs, markNativeAnyRepr(adt, td.NameSpan)...)
-	if td.Shared && (len(adt.Ctors) != 1 || len(adt.Ctors[0].Fields) != 1 || !ck.isNativeAnyType(adt.Ctors[0].Fields[0])) {
-		errs = append(errs, diag.Errorf(td.ResourceSpan, "SHARED RESOURCE", "A shared native resource must wrap exactly one Runtime.Native.Any field."))
-	}
+
 	for i := range adt.Params {
 		adt.ParamKindsKnown[i] = true
 	}
@@ -1168,7 +1113,6 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, allowEffects bool) *declInferen
 			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
 		}
 	}
-	g.executionRoots = append(g.executionRoots, DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Equations: d.Equations, Body: d.Body, Type: ty})
 	return &declInference{originalAnn: originalAnn, d: d, g: g, ty: ty, annTy: annTy, given: given, errs: errs, allowEffects: allowEffects, isMain: isMain}
 }
 
@@ -1341,7 +1285,6 @@ func (ck *Checker) Expr(e ast.Expr) (types.Type, []diag.Error) {
 func (ck *Checker) ExprWhere(e ast.Expr, allowEffects bool) (types.Type, []diag.Error) {
 	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	ty := g.expr(e)
-	g.executionRoots = append(g.executionRoots, DeclInfo{Name: "$expression", Body: e, Type: ty})
 	var preds []types.Pred // the typeclass seam: always empty in the MVP
 	sub, residual, solveErrs := g.solveConstraints(preds)
 	ck.Sub = sub
@@ -1422,7 +1365,7 @@ type recordUpdateObligation struct {
 	// bind to. An inferred literal names no record, so its fields reach their
 	// declared types through this obligation rather than through a field
 	// constraint, and the rule would otherwise never see them.
-	bind []*HandlerInfo
+
 }
 
 type generator struct {
@@ -1441,21 +1384,9 @@ type generator struct {
 	patternBinder     string
 	annotationAmbient *types.Row
 	localAnnotations  []localAnnotation
-	executionRoots    []DeclInfo
-	// executionMemo is the last interpreted execution-needs input and what
-	// it collected; see executionNeeds.
-	executionMemo *executionMemo
 	// Keep package row provenance before a local binding can solve/generalize
 	// a partial application; whole-definition flow adds imported obligations.
-	workRows []types.Type
-	// subjectHandlers are the handlers whose subject the generator is inside,
-	// outermost first, and lambdaBinders records that stack for every lambda
-	// written there. clauseEffects collects into the handler currently having
-	// its clauses generated, and is nil wherever the ambient row is not that
-	// handler's clause row.
-	subjectHandlers []*HandlerInfo
-	lambdaBinders   map[ast.Expr][]*HandlerInfo
-	clauseEffects   *[]types.Type
+
 }
 
 // performs records that the ambient row absorbs eff, and that the handler
@@ -1464,28 +1395,19 @@ type generator struct {
 // perform site, so it is not something the clause itself performs.
 func (g *generator) performs(eff types.Type, span source.Span, resume bool) {
 	g.cs = append(g.cs, Constraint{Left: eff, Right: g.ambient, Span: span, Why: Why{Kind: WhyCall}, Include: true})
-	if g.clauseEffects != nil && !resume {
-		*g.clauseEffects = append(*g.clauseEffects, eff)
-	}
 }
 
 // argument builds the compatibility constraint for an argument or record
 // field, carrying the handler activations a lambda written there may bind to.
 func (g *generator) argument(actual, want types.Type, e ast.Expr) Constraint {
 	return Constraint{Left: actual, Right: want, Span: e.Span(), Why: Why{Kind: WhyCall},
-		Subsume: true, ADTs: g.ck.ADTs, Bind: g.lambdaBinders[e]}
+		Subsume: true, ADTs: g.ck.ADTs}
 }
 
-// enterAmbient switches the ambient row and suspends clause-effect recording,
-// which describes only what runs directly in the clause it belongs to.
-func (g *generator) enterAmbient(row types.Row) (types.Row, *[]types.Type) {
-	saved, sink := g.ambient, g.clauseEffects
-	g.ambient, g.clauseEffects = row, nil
-	return saved, sink
-}
-
-func (g *generator) leaveAmbient(row types.Row, sink *[]types.Type) {
-	g.ambient, g.clauseEffects = row, sink
+func (g *generator) enterAmbient(row types.Row) types.Row {
+	saved := g.ambient
+	g.ambient = row
+	return saved
 }
 
 func (g *generator) isDefaultPrint(op *types.EffectOp) bool {
@@ -1636,7 +1558,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			}
 			seen[f.Name] = true
 			fieldTy := g.expr(f.Value)
-			ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, ty: fieldTy, candidates: f.Records, bind: g.lambdaBinders[f.Value]})
+			ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, ty: fieldTy, candidates: f.Records})
 		}
 		if len(e.Fields) == 0 {
 			g.errs = append(g.errs, diag.Errorf(e.Sp, "RECORD FIELDS", "A record update needs at least one replacement field."))
@@ -1728,25 +1650,19 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		g.patternBinder = oldBinder
 		g.patternPins = oldPins
 		bodyAmbient := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
-		savedAmbient, savedSink := g.enterAmbient(bodyAmbient)
+		savedAmbient := g.enterAmbient(bodyAmbient)
 		// The enclosing declaration's annotation constrains its own arrow,
 		// not a nested callback's handler clauses (which may call pause).
 		savedAnnotationAmbient := g.annotationAmbient
 		g.annotationAmbient = nil
 		bodyTy := g.expr(e.Body)
 		g.annotationAmbient = savedAnnotationAmbient
-		g.leaveAmbient(savedAmbient, savedSink)
+		g.ambient = savedAmbient
 		g.locals = scope.parent
 		funTy := g.wrapFunction(paramTys, bodyTy, bodyAmbient)
 		funTy = g.ck.runnerControl(funTy, len(e.Params), []ast.Equation{{Params: e.Params, Body: e.Body}})
 		// A closure written in a handler's subject may be bound to that
 		// handler's activation where the position it goes to omits the label.
-		if len(g.subjectHandlers) > 0 {
-			if g.lambdaBinders == nil {
-				g.lambdaBinders = map[ast.Expr][]*HandlerInfo{}
-			}
-			g.lambdaBinders[e] = append([]*HandlerInfo(nil), g.subjectHandlers...)
-		}
 		ty = funTy
 	case *ast.Handle:
 		ty = g.handle(e)
@@ -1854,23 +1770,14 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	if first.Owner == g.ck.IO {
 		g.errs = append(g.errs, diag.Errorf(e.Sp, "BUILTIN IO HANDLING NOT READY", "Handlers for builtin IO are staged until polymorphic print evidence is available."))
 	}
-	if first.Owner.Invocation {
-		g.errs = append(g.errs, diag.Errorf(e.Sp, "INVOCATION AUTHORITY", "Only Runtime.Service.run may install producer invocation authority."))
-	}
-	if first.Owner.Service && e.State != nil {
-		g.errs = append(g.errs, diag.Errorf(e.Sp, "SERVICE STATE", "Shared service evidence cannot own mutable handler state."))
-	}
-	if first.Owner.Suspension {
-		g.errs = append(g.errs, diag.Errorf(e.Sp, "COMPILER-OWNED EFFECT",
-			"Effect `%s` describes compiler-owned coroutine control and cannot be handled by an ordinary handler.", ast.Spelling(first.Owner.Name)))
-	}
+
 	residualVar := g.ck.Sup.FreshVar(types.RowVar)
 	residual := types.Row{Tail: residualVar}
 	labelArgs := make([]types.Type, len(first.Owner.Params))
 	for i := range labelArgs {
 		labelArgs[i] = g.ck.Sup.FreshVar(types.General)
 	}
-	label := types.EffLabel{Unique: first.Owner.Unique, Name: first.Owner.Name, Args: labelArgs, Abort: first.Abort, Suspension: first.Owner.Suspension}
+	label := types.EffLabel{Unique: first.Owner.Unique, Name: first.Owner.Name, Args: labelArgs, Abort: first.Abort}
 	savedAmbient := g.ambient
 	var stateTy types.Type
 	if e.State != nil {
@@ -1880,18 +1787,15 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	// The subject is where a closure may be bound to this activation; the
 	// state initializer above runs before the activation exists, and the
 	// clauses below run outside it.
-	g.subjectHandlers = append(g.subjectHandlers, info)
-	savedSink := g.clauseEffects
-	g.ambient, g.clauseEffects = types.Row{Labels: []types.EffLabel{label}, Tail: residualVar}, nil
+	g.ambient = types.Row{Labels: []types.EffLabel{label}, Tail: residualVar}
 	bodyTy := g.expr(e.Body)
-	g.subjectHandlers = g.subjectHandlers[:len(g.subjectHandlers)-1]
 	info.BodyResult = bodyTy
 	clauseAmbient := residual
 	if g.annotationAmbient != nil {
 		clauseAmbient = *g.annotationAmbient
 		g.cs = append(g.cs, Constraint{Left: clauseAmbient, Right: savedAmbient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
 	}
-	g.ambient, g.clauseEffects = clauseAmbient, &info.ClauseEffects
+	g.ambient = clauseAmbient
 	g.ck.ScopeSpans[info.Scope] = e.Sp
 	seen := map[string]bool{}
 	for i := range e.Clauses {
@@ -1936,17 +1840,9 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		if len(cl.Params) != op.Arity {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "HANDLER ARITY", "The operation `%s` takes %d argument(s), but this clause has %d.", op.Name, op.Arity, len(cl.Params)))
 		}
-		var invocation *types.EffLabel
+
 		g.ambient = clauseAmbient
-		if op.Invocation != nil {
-			for _, extra := range last.Eff.Labels {
-				if extra.Unique == op.Invocation.Unique {
-					label := extra
-					invocation = &label
-					g.ambient.Labels = append(append([]types.EffLabel(nil), clauseAmbient.Labels...), extra)
-				}
-			}
-		}
+
 		eqs := cl.Equations
 		if len(eqs) == 0 {
 			eqs = []ast.Equation{{Params: cl.Params, Body: cl.Body, NameSpan: cl.OpSpan}}
@@ -2000,11 +1896,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 				}
 			}
 		}
-		var invocationScope types.ScopeID
-		if invocation != nil {
-			invocationScope = g.ck.Sup.FreshScope()
-		}
-		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, ParamTypes: paramTys, OpResult: opResult, ResumeID: resumeID, Invocation: invocation, InvocationScope: invocationScope})
+		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, ParamTypes: paramTys, OpResult: opResult, ResumeID: resumeID})
 	}
 	g.ambient = clauseAmbient
 	for _, op := range first.Owner.Ops {
@@ -2012,7 +1904,6 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			g.errs = append(g.errs, diag.Errorf(e.Sp, "INCOMPLETE HANDLER", "The handler is missing a clause for `%s`.", op.Name))
 		}
 	}
-	g.clauseEffects = nil
 	if e.Return != nil {
 		eqs := e.Return.Equations
 		if len(eqs) == 0 {
@@ -2042,7 +1933,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	}
 	// Only the handled label is removed. Any residual effects from the body,
 	// clauses, or return clause compose into the surrounding expression.
-	g.ambient, g.clauseEffects = savedAmbient, savedSink
+	g.ambient = savedAmbient
 	g.performs(residual, e.Span(), false)
 	g.ck.HandleInfos[e] = info
 	return result
@@ -2317,9 +2208,7 @@ func (g *generator) intrinsicCall(e *ast.App, name string) types.Type {
 	}
 
 	g.performs(last.Eff, e.Span(), false)
-	if name == types.WorkPackName || name == types.WorkRegisterName {
-		g.cs[len(g.cs)-1].WorkCharge = true
-	}
+
 	return result
 }
 
@@ -2428,9 +2317,9 @@ func (g *generator) functionEquations(name string, nameSpan source.Span, eqs []a
 		g.patternPins = oldPins
 		savedAnnotationAmbient := g.annotationAmbient
 		g.annotationAmbient = annotationAmbient
-		savedAmbient, savedSink := g.enterAmbient(bodyAmbient)
+		savedAmbient := g.enterAmbient(bodyAmbient)
 		bodyTy := g.expr(eq.Body)
-		g.leaveAmbient(savedAmbient, savedSink)
+		g.ambient = savedAmbient
 		g.annotationAmbient = savedAnnotationAmbient
 		g.cs = append(g.cs, Constraint{Left: resultTy, Right: bodyTy, Span: eq.NameSpan, Why: Why{Kind: WhyRecursion, Name: name}})
 	}
@@ -2664,7 +2553,7 @@ func (g *generator) inferredRecord(e *ast.RecordLit, want types.Type) types.Type
 		}
 		seen[f.Name] = true
 		fieldTy := g.expr(f.Value)
-		ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, ty: fieldTy, candidates: f.Records, bind: g.lambdaBinders[f.Value]})
+		ob.updates = append(ob.updates, recordUpdateObligation{name: f.Name, span: f.NameSpan, ty: fieldTy, candidates: f.Records})
 	}
 	g.records = append(g.records, ob)
 	return recv
@@ -2803,7 +2692,7 @@ func (g *generator) recordPass(final bool, from int) int {
 			case !visible(u.candidates):
 				g.errs = append(g.errs, diag.Errorf(u.span, "PRIVATE RECORD FIELD", "The fields of record `%s` are not exposed to this module.", types.SurfaceName(adt.Con.Name)))
 			default:
-				constraints = append(constraints, Constraint{Left: u.ty, Right: fieldTypes[idx], Span: u.span, Why: Why{Kind: WhyCall}, Subsume: ob.kind != recordMatch, ADTs: g.ck.ADTs, Bind: u.bind})
+				constraints = append(constraints, Constraint{Left: u.ty, Right: fieldTypes[idx], Span: u.span, Why: Why{Kind: WhyCall}, Subsume: ob.kind != recordMatch, ADTs: g.ck.ADTs})
 			}
 		}
 		if ob.kind == recordBuild {
@@ -3060,13 +2949,7 @@ func (g *generator) instantiateAt(s types.Scheme, sp source.Span, op string) typ
 		g.preds = append(g.preds, predObligation{pred: p, span: sp, op: op})
 	}
 	t := types.SubstRigid(s.Body, m)
-	if (op == types.WorkPackName || op == types.WorkRegisterName) && g.ck.Intrinsics[op].Body != nil {
-		if fn, ok := t.(*types.TFun); ok {
-			if last, ok := fn.Ret.(*types.TFun); ok {
-				g.workRows = append(g.workRows, last.Eff)
-			}
-		}
-	}
+
 	return t
 }
 

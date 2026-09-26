@@ -22,7 +22,6 @@ type CaptureSet struct {
 }
 
 type CaptureSummary struct {
-	Contract *CaptureContract
 	Vars     []CaptureVar
 	Captures CaptureSet
 }

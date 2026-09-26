@@ -1,7 +1,0 @@
-import Runtime.Coroutine
-import File
-bad() = Runtime.Coroutine.with (\pause input ->
-    next = pause ()
-    File.readLine input) (\work ->
-        File.withFile "short.txt" (\file -> Runtime.Coroutine.advance work file))
-main() = print "unreachable"

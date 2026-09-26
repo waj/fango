@@ -14,27 +14,23 @@ type ResumeID int
 
 // Transport is the concrete execution protocol of one function arrow.  Direct
 // arrows return their result normally; Exit arrows return an Outcome carrying
-// either that result or a non-local exit. Machine is reserved for the selective
-// execution-machine lowering described by the effects roadmap.
+// either that result or a non-local exit.
 type Transport uint8
 
 const (
 	Direct Transport = iota
 	Exit
-	Machine
 )
 
 // Control is compiler-only function-arrow metadata. Polymorphic means that the
 // defining module emits the bounded Direct/Exit ABI family and a use selects a
-// member from its enclosing control context. Transport is the fixed lower
-// bound, so a future Machine-polymorphic arrow can be represented without
-// changing this shape.
+// member from its enclosing control context. Transport is the fixed lower bound.
 type Control struct {
 	Transport   Transport
 	Polymorphic bool
 }
 
-func (c Control) Valid() bool { return c.Transport <= Machine }
+func (c Control) Valid() bool { return c.Transport <= Exit }
 
 func (c Control) Resolve(context Transport) Transport {
 	if c.Polymorphic && context > c.Transport {
@@ -63,9 +59,7 @@ func FunctionControl(fn *TFun) Control {
 		out.Polymorphic = true
 	}
 	for _, label := range fn.Eff.Labels {
-		if label.Suspension || label.Name == ServiceInvocationName {
-			out.Transport = Machine
-		} else if label.Abort {
+		if label.Abort {
 			if out.Transport < Exit {
 				out.Transport = Exit
 			}
@@ -130,11 +124,11 @@ type Row struct {
 // EffLabel identifies an effect by its generation-stable Unique. Name is
 // diagnostic syntax; Args instantiate parameterized effects such as Fail e.
 type EffLabel struct {
-	Unique     int
-	Name       string
-	Args       []Type
-	Abort      bool // every operation in this (uniform-discipline) effect aborts
-	Suspension bool // compiler-owned Machine suspension with lexical owner evidence
+	Unique int
+	Name   string
+	Args   []Type
+	Abort  bool // every operation in this (uniform-discipline) effect aborts
+
 }
 
 func (r Row) Empty() bool { return len(r.Labels) == 0 && r.Tail == nil }
@@ -154,12 +148,11 @@ func SortedRow(r Row) Row {
 // CaptureVars are independently freshened at a value occurrence; they never
 // appear in user-facing type printing.
 type Scheme struct {
-	Vars            []*TVar
-	Preds           []Pred
-	Body            Type
-	CaptureVars     []CaptureVar
-	Captures        CaptureSet
-	CaptureContract *CaptureContract
+	Vars        []*TVar
+	Preds       []Pred
+	Body        Type
+	CaptureVars []CaptureVar
+	Captures    CaptureSet
 }
 
 // Pred is a typeclass-shaped obligation. Eq, Ord, and Show are currently
@@ -197,13 +190,12 @@ func (c *ClassInfo) DictType(t Type) *TCon {
 // runtime"). They are resolved once, after the module's types are declared,
 // so both backends read the same constructors instead of re-deriving them.
 type NativeInfo struct {
-	RetainsRequest bool
-	Storage        NativeStorage
-	Name, Module   string
-	Scheme         Scheme
-	Arity          int
-	Template       *string
-	Effect         *EffectInfo
+	Storage      NativeStorage
+	Name, Module string
+	Scheme       Scheme
+	Arity        int
+	Template     *string
+	Effect       *EffectInfo
 	// ParamWrappers[i] is the single-boundary-value constructor parameter i
 	// is wrapped in, or nil for a plain scalar or Unit. Its length is Arity.
 	ParamWrappers []*CtorInfo
@@ -274,7 +266,7 @@ func substRigidRow(r Row, m map[int]Type) Row {
 		for j, a := range l.Args {
 			args[j] = SubstRigid(a, m)
 		}
-		labels[i] = EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Suspension: l.Suspension}
+		labels[i] = EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort}
 	}
 	var tail Type
 	if r.Tail != nil {
@@ -405,10 +397,8 @@ func (c *CtorInfo) ValueType() Type {
 // vars (empty for monomorphic types); constructor Fields and Result are
 // expressed over them.
 type ADTInfo struct {
-	// Shared opts this nominal native resource into synchronized sharing.
-	Shared        bool
 	NativeIndexed bool // phantom native handle; its representation cannot be opened by Fango
-	// Resource marks an opaque scoped capability regardless of representation.
+	// Resource marks opaque native storage regardless of representation.
 	Resource bool
 	Con      *TCon
 	Params   []*TVar
@@ -445,19 +435,17 @@ func (a *ADTInfo) RecordField(name string) (int, *RecordFieldInfo) {
 // shared by its operation schemes; identity follows the same generational
 // Unique discipline as type constructors.
 type EffectInfo struct {
-	Service    bool
-	Invocation bool
-	Unique     int
-	Name       string
-	Params     []*TVar
-	Ops        []*EffectOp
+	Unique int
+	Name   string
+	Params []*TVar
+	Ops    []*EffectOp
 	// Scoped is compiler-owned policy. Source effect declarations are durable
 	// by default; State/resource milestones mark the capabilities whose
 	// handler activation must not escape.
 	Scoped bool
 	// Suspension is set only by the bundled-module loader. Its operations
 	// elaborate to compiler-owned suspension rather than evidence dispatch.
-	Suspension bool
+
 }
 
 // EffectOp is the runtime-relevant, declaration-ordered description of an
@@ -466,7 +454,6 @@ type EffectInfo struct {
 type EffectOp struct {
 	// Invocation is the service's fixed protocol. Its execution capability is
 	// passed separately at each invocation, never retained by service evidence.
-	Invocation *EffLabel
 	Owner      *EffectInfo
 	Index      int
 	Name       string

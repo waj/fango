@@ -2,10 +2,9 @@ import Bytes exposing (Bytes, Sink(..))
 import Fail exposing (Fail, attempt, fail)
 import Writer exposing (Writer)
 
--- `collecting` performs nothing at all, so the same writing code runs in a
--- fixture with no effects and the caller receives everything or nothing.
+-- Collecting uses IO state and publishes the buffer only after success.
 
-render : Writer {} -> Int
+render : Writer {} ->{IO} Int
 render output =
     Writer.writeString output "status"
     output.flush()

@@ -26,7 +26,6 @@ import (
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/libroot"
-	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/types"
 )
@@ -57,20 +56,6 @@ func run(entry string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	env := eval.NewEnv()
 	env.DefineProg(prog)
-	if prog.Intrinsics[types.CoroutineWithName] {
-		machineProg, lowerErrs := machineir.Lower(prog, ck.B)
-		if len(lowerErrs) > 0 {
-			fmt.Fprintf(stderr, "fango: machine lowering: %v\n", lowerErrs)
-			return 2
-		}
-		if err := env.DefineMachineProg(machineProg); err != nil {
-			fmt.Fprintf(stderr, "fango: %v\n", err)
-			return 2
-		}
-	}
-
-	// No ioctx.Natives: every native runs in-process or reports that it needs
-	// the worker, so nothing is ever built or spawned.
 	ioctx := eval.NewIOContext(stdin, stdout)
 	ctx := context.Background()
 	_, err := eval.ForceIO(ctx, "main", env, ioctx)

@@ -1,5 +1,10 @@
 # Roadmap: structured Async and execution models
 
+**Direction superseded.** The [simplification roadmap](roadmap-simplification.md)
+is authoritative for new work. Existing stage IDs and headings remain stable;
+unfinished stages below are deferred. Current contracts are documented in
+design/reference; links to removed APIs point to their historical revision.
+
 This document owns the remaining Async work: parallel and mixed execution
 and CPU responsiveness. It depends on the shared
 [coroutine foundation](roadmap-coroutines.md), whose ownership/control
@@ -7,9 +12,9 @@ contracts apply without compiler recognition of Async names. The
 [effects roadmap](roadmap-effects.md) owns general language extensions.
 
 The structured APIs and examples below specify the full target. The
-[cooperative Async surface](reference/library-async-cooperative.md) implements
+[cooperative Async surface](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-async-cooperative.md) implements
 structured tasks and native IO, with an internal scripted A1 driver.
-[Concurrent combinators](reference/library-async-combinators.md) implement A7
+[Concurrent combinators](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-async-combinators.md) implement A7
 on the delivered cooperative executor.
 Ordinary calls, trailing Unit lambdas, callback subsumption, scopes,
 and effect instances are implemented foundations; their contracts remain in
@@ -55,7 +60,7 @@ continuation cloning, detached tasks, general public channels/select, multicast,
 or replay are included. Shared mutable state has its own [STM roadmap](roadmap-stm.md).
 
 The cooperative executor now schedules generated Fango work at
-[automatic checkpoints](reference/library-async-cooperative.md), in addition
+[automatic checkpoints](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-async-cooperative.md), in addition
 to explicit yield and waits. Polling does not imply forced termination of native
 calls or nonterminating cleanup.
 
@@ -328,13 +333,13 @@ checked work packages, detached typed completion/replay, and private owner stop;
 C6c adds shared service evidence with invocation authority. Current Fango can check
 ordinary row-indexed Task/Job packaging, nullary scheduling arrow shapes,
 scoped Work packages, typed Completion capture/replay, and
-[dynamic registration](reference/library-work.md#dynamic-registration),
-[typed cells](reference/library-cells.md), and
-[shared service authority](reference/library-services.md). A1 must integrate
+[dynamic registration](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-work.md#dynamic-registration),
+[typed cells](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-cells.md), and
+[shared service authority](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-services.md). A1 must integrate
 these implemented prerequisites.
 Row-kinded effect parameters are not a prerequisite for this encoding.
 The [source probes](../internal/infer/async_feasibility_test.go) and
-[scoped-row model](../internal/feasibility/scoped_rows_test.go) distinguish those facts.
+[scoped-row model](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/internal/feasibility/scoped_rows_test.go) distinguish those facts.
 
 ## Scheduler state and authority
 
@@ -396,7 +401,7 @@ not just goroutines.
 
 ### Checkpoint policy
 
-The implemented [cooperative checkpoint policy](reference/library-async-cooperative.md)
+The implemented [cooperative checkpoint policy](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-async-cooperative.md)
 includes generated CPU work. Spawn must not admit new work into a context
 already cancelling; reject it through the internal cancellation path rather
 than adding an orphan task. Future executors must keep that cancellation
@@ -474,10 +479,10 @@ Await replays the stored primary through the awaiter's live evidence with the
 same suppressed tree. It never consumes the completion or acknowledges away the
 context failure. Context exit replays its selected report through the context
 caller's evidence **after** draining. C0 owns the new typed replay capability;
-the [model](../internal/feasibility/tasks_test.go) exercises different typed
+the [model](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/internal/feasibility/tasks_test.go) exercises different typed
 payloads and two different observing targets without storing an old exit target.
 
-[A7](reference/library-async-combinators.md#race-and-timeout) selects race and
+[A7](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-async-combinators.md#race-and-timeout) selects race and
 timeout winners by driver-recorded completion order. Promptly initiating
 sibling cancellation and deterministically ordering already-recorded reports
 are different requirements. No policy can promise the same set of observed
@@ -517,9 +522,9 @@ representations safe under concurrent use.
 
 Sidecars do not receive Fango callback functions. Typed payloads use
 [checked opaque storage](reference/native.md#indexed-native-storage); background
-work uses [NativeRequest](reference/library-native-requests.md). FangoHost may
+work uses [NativeRequest](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-native-requests.md). FangoHost may
 only be used during a native call and cannot be retained for asynchronous work.
-The [A3 adapters](reference/library-async-cooperative.md) use these scoped
+The [A3 adapters](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-async-cooperative.md) use these scoped
 retention and drain contracts.
 
 Interpreter Core executes beside sidecars in a worker process, but that shared
@@ -533,7 +538,7 @@ and REPL session recovery. Generated Go requires the same semantic contract.
 A1 supplied deterministic readiness simulation; the A3 timer and HTTP adapters
 submit scoped requests and return control to the cooperative driver. The driver
 blocks on its native event source only when no task is runnable. The
-[implemented protocol](design/async-cooperative.md) is the basis for later
+[implemented protocol](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/async-cooperative.md) is the basis for later
 adapters.
 
 The current Net/File sidecars perform blocking Go calls. Go's runtime can let
@@ -607,7 +612,7 @@ registrations, and native capacity in addition to worker goroutines.
 ## Concurrent streams and events
 
 [Sequential Stream](reference/library-streams.md) retains its existing demand
-behavior. [Concurrent mapping, race, timeout, and native tick subscriptions](reference/library-async-combinators.md)
+behavior. [Concurrent mapping, race, timeout, and native tick subscriptions](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-async-combinators.md)
 are implemented on the cooperative executor. General multicast, replay, and
 source-specific adapters beyond ticks remain outside the delivered surface.
 Backpressure for a future external source requires that source to support it.
@@ -664,29 +669,29 @@ C6b is not needed for fake waits, and C6d is not needed for cooperative executio
 check ordinary Task/Job packaging and nullary scheduling arrow shapes, helpers
 and stored callbacks with Int/String results, wrong-result rejection, unsupported
 polymorphic operations and native boundaries, and rejected omission of unawaited
-IO. The [scoped-row model](../internal/feasibility/scoped_rows_test.go) additionally
+IO. The [scoped-row model](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/internal/feasibility/scoped_rows_test.go) additionally
 checks latent registration effects through handlers, nested owners and imported
 summaries; its unindexed queue seals work with distinct child rows and typed
 failure injections into a hidden owner budget. It passes the budget skolem and
 adapters explicitly at the compiler-contract boundary. C1 implements the
-[Work contract](reference/library-work.md) and
-[Completion contract](reference/library-completion.md). The
-[executable representation probe](../testdata/run/async_c1_representation.fango)
+[Work contract](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-work.md) and
+[Completion contract](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-completion.md). The
+[executable representation probe](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/testdata/run/async_c1_representation.fango)
 rechecks these APIs in both backends: Int/String Task observations, homogeneous
 Unit work packages, a nullary effect interpreted with a local pause callback,
 cleanup before typed failure publication, and repeated success/failure replay.
 Its ordinary publication callbacks stand in for the typed Cell API;
 it does not implement dynamic spawn or the shared scheduling service. The
-[typed model](../internal/feasibility/tasks_test.go)
+[typed model](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/internal/feasibility/tasks_test.go)
 has no erased heterogeneous payload register: generic task/cell types feed
 uniform execution closures. It exercises repeated observation, outer task inside
 inner context, captured outer service with a different producer, typed expected
 Result, child failure plus cleanup, fresh-evidence replay, unstarted cancellation,
 stable failure ordering, descendant allocation after body completion and removal
-of finished execution entries. The [ownership model](../internal/feasibility/control_test.go)
+of finished execution entries. The [ownership model](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/internal/feasibility/control_test.go)
 rejects escaped handles/pause, short-lived replies and unsafe child captures.
 The models cover proposed behavior beyond that executable probe. C4 additionally
-verifies real [dynamic allocation and registration](design/coroutines.md#dynamic-scope-registry)
+verifies real [dynamic allocation and registration](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md#dynamic-scope-registry)
 in both backends. C6a/C6c additionally verify real typed storage and implicit
 service adapters, including independently registered children and nested pulls.
 No public scheduler is delivered here.
@@ -698,8 +703,8 @@ model as proof that the current source language accepts those APIs.
 
 ### A1: Deterministic cooperative tasks
 
-**DONE.** The [A1 Async API](reference/library-async-cooperative.md)
-and [driver design](design/async-cooperative.md) own the implemented contract.
+**DONE.** The [A1 Async API](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-async-cooperative.md)
+and [driver design](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/async-cooperative.md) own the implemented contract.
 Its differential fixtures cover alternating tasks, parked work, early and
 duplicate notification, repeated await, Stream pull suspension, self wait, and
 stalled progress. Task bodies call `Async` functions; `Async.Cooperative.run`
@@ -712,9 +717,9 @@ and `runOn`.
 
 ### A2: Structured contexts and failures
 
-**DONE.** The [structured Async API](reference/library-async-cooperative.md)
-and [cooperative driver design](design/async-cooperative.md) own the implemented
-contract. The [A2 differential fixtures](../testdata/run/async_a2_contexts.fango)
+**DONE.** The [structured Async API](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-async-cooperative.md)
+and [cooperative driver design](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/async-cooperative.md) own the implemented
+contract. The [A2 differential fixtures](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/testdata/run/async_a2_contexts.fango)
 cover nested and root ownership, outer awaits, bound definition-site context,
 grandchildren, caught await without failure erasure, parent cancellation,
 and typed cleanup ordering in both
@@ -722,13 +727,13 @@ backends. A4 extends cleanup to suspended releases.
 
 ### A3: Native readiness and IO
 
-**DONE.** [Cooperative Async](reference/library-async-cooperative.md) owns the
+**DONE.** [Cooperative Async](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-async-cooperative.md) owns the
 timers, HTTP GET, capacity, errors, and cancellation contract;
-[the driver](design/async-cooperative.md) and
-[native requests](design/native-requests.md) own its lifetime and wakeup
-invariants. The [IO differential fixture](../testdata/run/async_a3_io.fango)
+[the driver](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/async-cooperative.md) and
+[native requests](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/native-requests.md) own its lifetime and wakeup
+invariants. The [IO differential fixture](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/testdata/run/async_a3_io.fango)
 requires two local HTTP requests to overlap and suspends a Stream pull. The
-[capacity fixture](../testdata/run/async_a3_capacity.fango) covers saturation,
+[capacity fixture](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/testdata/run/async_a3_capacity.fango) covers saturation,
 immediate completion, cancellation during native work, and cleanup failure in
 both backends. Native bridge and request runtime checks cover duplicate and
 stale events, queued readiness at interruption, and quiescent drain. The
@@ -738,8 +743,8 @@ retention checker verifies enclosing and shorter-lived bridge captures.
 
 ### A4: Suspending cleanup integration
 
-**DONE.** See [cooperative cancellation](reference/library-async-cooperative.md)
-and the [driver design](design/async-cooperative.md#queue-completion-and-failure).
+**DONE.** See [cooperative cancellation](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-async-cooperative.md)
+and the [driver design](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/async-cooperative.md#queue-completion-and-failure).
 
 Use C5 for asynchronous acquisition/release. Keep cancelling owners scheduled
 until drain finishes; shield releases against repeated cancellation. Keep the
@@ -785,21 +790,21 @@ regardless of which concurrent policy is implemented first.
 
 ### A7: Concurrent combinators and events
 
-**DONE.** [Concurrent combinators and events](reference/library-async-combinators.md)
-own their behavior; [design](design/async-combinators.md) owns completion
+**DONE.** [Concurrent combinators and events](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-async-combinators.md)
+own their behavior; [design](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/async-combinators.md) owns completion
 selection, targeted drain, bounded batches, and subscription registration.
-The [race and timeout](../testdata/run/async_a7_race.fango),
-[mapping](../testdata/run/async_a7_map.fango),
-[cleanup](../testdata/run/async_a7_cleanup.fango), and
-[events](../testdata/run/async_a7_events.fango) fixtures run in both backends.
+The [race and timeout](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/testdata/run/async_a7_race.fango),
+[mapping](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/testdata/run/async_a7_map.fango),
+[cleanup](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/testdata/run/async_a7_cleanup.fango), and
+[events](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/testdata/run/async_a7_events.fango) fixtures run in both backends.
 Native event tests cover exact overflow policies and unregistration races.
 Repeat applicable cases when A5 and A6 deliver more executors.
 
 ### A8: CPU responsiveness
 
 **DONE for the delivered cooperative executor.**
-[Task behavior](reference/library-async-cooperative.md) and the
-[driver design](design/async-cooperative.md) describe automatic polls,
+[Task behavior](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-async-cooperative.md) and the
+[driver design](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/async-cooperative.md) describe automatic polls,
 explicit yield, cancellation, and drain. A5 and A6 remain future executors;
 each must provide the same generated-work coverage before delivery.
 

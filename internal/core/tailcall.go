@@ -155,6 +155,8 @@ func capturesMutated(e Expr, mutated map[string]bool) bool {
 	var walkTree func(t Tree) bool
 	walk = func(e Expr) bool {
 		switch e := e.(type) {
+		case *TaskSpawn:
+			return walk(e.Scope) || walk(e.Input)
 		case *Lambda:
 			return mentionsAny(e.Body)
 		case *Handle:
@@ -175,17 +177,7 @@ func capturesMutated(e Expr, mutated map[string]bool) bool {
 			// handled body, so its children are walked rather than treated as
 			// stored closures.
 			return walk(e.Acquire) || walk(e.Release) || walk(e.Body)
-		case *CoroutineAdvance:
-			return walk(e.Cursor) || walk(e.Reply)
-		case *Completion:
-			return walk(e.Value)
-		case *Work:
-			for _, arg := range e.Args {
-				if walk(arg) {
-					return true
-				}
-			}
-			return false
+
 		case *FailureInspect:
 			for _, arg := range e.Args {
 				if walk(arg) {
@@ -193,11 +185,7 @@ func capturesMutated(e Expr, mutated map[string]bool) bool {
 				}
 			}
 			return false
-		case *CoroutineScope:
-			return walk(e.Producer) || walk(e.Consumer)
 
-		case *Suspend:
-			return walk(e.Request)
 		case *Neg:
 			return walk(e.Operand)
 		case *NativeCall:

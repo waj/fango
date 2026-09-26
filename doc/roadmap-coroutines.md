@@ -1,8 +1,13 @@
 # Roadmap: owned coroutines and the Stream foundation
 
+**Direction superseded.** The [simplification roadmap](roadmap-simplification.md)
+is authoritative for new work. Existing stage IDs and headings remain stable;
+unfinished stages below are deferred. Current contracts are documented in
+design/reference; links to removed APIs point to their historical revision.
+
 This document owns remaining coroutine capabilities and the migration of Stream
 onto an ordinary library surface. Scoped typed execution is described in the
-[reference](reference/library-coroutines.md) and [design](design/coroutines.md).
+[reference](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-coroutines.md) and [design](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md).
 [Effects](roadmap-effects.md) owns the surrounding language direction and
 unrelated handler questions. [Async](roadmap-async.md) owns scheduling and task
 policy. Nothing here changes the implemented [stream contract](reference/library-streams.md)
@@ -41,15 +46,15 @@ and see `between` printed before receiving 20. Calling a consumer from an
 ordinary tail-resumptive handler is a push traversal; it does not preserve
 this independently drivable position after the consumer's first call returns.
 
-The implemented [typed coroutine protocol](design/coroutines.md) reuses
-[Machine frames and dispatch](design/machines.md) and
+The implemented [typed coroutine protocol](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md) reuses
+[Machine frames and dispatch](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/machines.md) and
 [capture contracts](design/ownership.md). Later stages extend that foundation
 with dynamic ownership, suspending cleanup, and native capabilities.
 Source entrypoints include
-[semantic Core](../internal/core/core.go), [Machine IR](../internal/machine/ir.go),
-the [dispatcher](../runtime/fangort/machine.go),
-[nested transfers](../runtime/fangort/traversal.go), and
-[cursor owner](../runtime/fangort/iterator.go).
+[semantic Core](../internal/core/core.go), [Machine IR](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/internal/machine/ir.go),
+the [dispatcher](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/runtime/fangort/machine.go),
+[nested transfers](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/runtime/fangort/traversal.go), and
+[cursor owner](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/runtime/fangort/iterator.go).
 
 ## Performance prerequisite
 
@@ -63,7 +68,7 @@ costs, not a full-parity result or a portable regression allowance.
 
 Keep the strict [comparison](design/verification.md#performance-evidence) and
 use the accepted implementation as an additional regression reference during
-later stages. The [implemented optimizations](design/machines.md#dispatch-and-frame-lifetime)
+later stages. The [implemented optimizations](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/machines.md#dispatch-and-frame-lifetime)
 recover steady-state execution through general frame reuse and primitive-call
 forwarding; the independent Pull library benefits too. Library names must not
 become compiler primitives. Each scheduling stage still needs its own semantic,
@@ -82,23 +87,23 @@ Remaining performance work is nonblocking for the next stages:
 
 ## Proposed public interface
 
-The scoped interface is implemented in [Coroutine](reference/library-coroutines.md).
-[Work](reference/library-work.md) and [Completion](reference/library-completion.md)
+The scoped interface is implemented in [Coroutine](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-coroutines.md).
+[Work](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-work.md) and [Completion](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-completion.md)
 provide the supporting package and outcome APIs, including
-[dynamic allocation](reference/library-coroutines.md#dynamic-ownership).
+[dynamic allocation](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-coroutines.md#dynamic-ownership).
 
 ### Typed exchange example
 
-See the implemented [exchange example](reference/library-coroutines.md#exchange-and-lifecycle).
+See the implemented [exchange example](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-coroutines.md#exchange-and-lifecycle).
 
 ### Meaning of the producer callback
 
-The [producer contract](reference/library-coroutines.md#exchange-and-lifecycle)
+The [producer contract](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-coroutines.md#exchange-and-lifecycle)
 includes lazy application, strict arguments, and typed initial input/replies.
 
 ## Lifecycle and outcomes
 
-The [lifecycle table](reference/library-coroutines.md#exchange-and-lifecycle)
+The [lifecycle table](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-coroutines.md#exchange-and-lifecycle)
 owns terminal states and suspending cleanup drain. The completed
 [C5](#c5-suspending-acquisition-and-cleanup) contract is described in the
 [resource reference](reference/resources.md).
@@ -107,22 +112,22 @@ owns terminal states and suspending cleanup drain. The completed
 
 ### Handles and exclusive execution
 
-See [ownership and effects](reference/library-coroutines.md#ownership-and-effects)
+See [ownership and effects](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-coroutines.md#ownership-and-effects)
 for aliases and exclusive advancement, including foreign suspension.
 
 ### Producer execution capability
 
 Pause authority is separate from a driver handle; the implemented
-[control proof](design/coroutines.md#protocol-and-control-proof) tracks it.
+[control proof](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md#protocol-and-control-proof) tracks it.
 
 ### Values crossing the boundary
 
-The [reference](reference/library-coroutines.md#ownership-and-effects) owns
+The [reference](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-coroutines.md#ownership-and-effects) owns
 request/result lifetime and conservative input/reply retention.
 
 ### Scope escape
 
-The [reference](reference/library-coroutines.md#ownership-and-effects) owns
+The [reference](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-coroutines.md#ownership-and-effects) owns
 non-escape for lexical and dynamic ownership. Dynamic allocation does not
 permit detached scoped resources.
 
@@ -130,32 +135,32 @@ permit detached scoped resources.
 
 ### Captured and per-advance evidence
 
-See [dispatch](design/coroutines.md#lowering-and-dispatch) for implemented
+See [dispatch](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md#lowering-and-dispatch) for implemented
 forwarding and definition-site evidence.
 
 ### Foreign suspension
 
-Nested coroutine execution and the [Stream wrappers](design/coroutines.md#ordinary-pull-libraries)
+Nested coroutine execution and the [Stream wrappers](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md#ordinary-pull-libraries)
 are implemented. The scheduler demonstration remains
 [C3](#c3-cooperative-scheduling-demonstration).
 
 ### Discharge proof gate
 
 Owner-sensitive inference and independent Core reconstruction are described in
-[the implemented control proof](design/coroutines.md#protocol-and-control-proof).
-The [C0 model](../internal/feasibility/control_test.go) remains a prerequisite
+[the implemented control proof](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md#protocol-and-control-proof).
+The [C0 model](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/internal/feasibility/control_test.go) remains a prerequisite
 regression gate, alongside production inference, codec, and backend tests.
 
 ## Stream and Iterator migration
 
-**DONE.** Stream and Iterator use the [ordinary wrappers](design/coroutines.md#ordinary-pull-libraries)
+**DONE.** Stream and Iterator use the [ordinary wrappers](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md#ordinary-pull-libraries)
 over Runtime.Coroutine. The [reference](reference/library-streams.md) owns their
 signatures, ordinary Yield handling, Drive annotations, demand, and ownership.
 There are no Stream-specific intrinsics or compatibility aliases.
 
 ## Compiler and backend work
 
-Implemented scoped execution is described in [the Coroutine design](design/coroutines.md).
+Implemented scoped execution is described in [the Coroutine design](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md).
 Later stages extend these checked nodes, contracts, and dispatch paths; they
 must preserve synchronous Direct/Exit code, verified liveness, module-owned
 callable families, and typed projections on both sides of private registers.
@@ -184,7 +189,7 @@ checkpoint; C1–C3 together are the first usable replacement foundation.
 C0, the design part of C4, and [Async A0](roadmap-async.md#a0-library-representation-contract)
 form the joint feasibility gate. Focused source probes and test-only models
 remain prerequisite checks for the implemented scoped API. The selected Async
-task encoding is rechecked by the [executable C1 representation probe](../testdata/run/async_c1_representation.fango)
+task encoding is rechecked by the [executable C1 representation probe](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/testdata/run/async_c1_representation.fango)
 used by C2. C4/C6 are implementation prerequisites of A1, not circular
 prerequisites of this design gate.
 
@@ -213,10 +218,10 @@ short-lived replies, reentrant advancement, and falsely synchronous foreign
 suspension are rejected. Malformed Core cannot bypass those checks. Explicitly
 show rows and transport for the nested scheduler/pull case.
 
-**Evidence:** [control/retention model](../internal/feasibility/control_test.go),
-[typed completion/registry model](../internal/feasibility/tasks_test.go),
-[scoped-effect/package model](../internal/feasibility/scoped_rows_test.go), and
-[typed Machine exchange probe](../internal/feasibility/exchange_test.go).
+**Evidence:** [control/retention model](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/internal/feasibility/control_test.go),
+[typed completion/registry model](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/internal/feasibility/tasks_test.go),
+[scoped-effect/package model](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/internal/feasibility/scoped_rows_test.go), and
+[typed Machine exchange probe](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/internal/feasibility/exchange_test.go).
 The latter exercises the private Machine with distinct request,
 reply and result types. Runtime foreign-transfer/evidence tests and Core
 ownership tests cover reuse of that foundation. Models operate on explicit
@@ -225,7 +230,7 @@ arbitrary source closures, module serialization, or both future backend ABIs.
 
 **Stopping point:** selected implementable contracts and explicit compiler
 prerequisites. Production counterparts are documented in the
-[Coroutine design](design/coroutines.md), with real inference, malformed-Core,
+[Coroutine design](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md), with real inference, malformed-Core,
 codec, and differential fixtures.
 
 ### C1: General typed execution
@@ -234,11 +239,11 @@ codec, and differential fixtures.
 
 **Dependencies:** C0 and the early Async A0 contract gate.
 
-Implemented behavior belongs in [Coroutine](reference/library-coroutines.md),
-[Work](reference/library-work.md), and [Completion](reference/library-completion.md).
-The [Coroutine design](design/coroutines.md) owns inference, independent
+Implemented behavior belongs in [Coroutine](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-coroutines.md),
+[Work](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-work.md), and [Completion](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-completion.md).
+The [Coroutine design](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md) owns inference, independent
 Core/Machine proofs, both backend paths, private stop, and serialization.
-Stream uses that protocol through the [ordinary C2 wrappers](design/coroutines.md#ordinary-pull-libraries).
+Stream uses that protocol through the [ordinary C2 wrappers](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md#ordinary-pull-libraries).
 
 **Acceptance:** identical event traces for typed exchange, lazy start, terminal
 reads, failure then Closed, nested owners, captured/per-advance evidence, and
@@ -253,7 +258,7 @@ ordinary direct handlers direct.
 
 **Dependencies:** C1 and the executable [A0 representation check](roadmap-async.md#a0-library-representation-contract).
 
-The [implemented architecture](design/coroutines.md#ordinary-pull-libraries) and
+The [implemented architecture](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md#ordinary-pull-libraries) and
 [reference](reference/library-streams.md) own the contract. Differential fixtures
 cover zip, nested owners, borrowed values, early stop, failure, bounded demand,
 ordinary Yield handlers, and an independently compiled pull library. Stream and
@@ -265,7 +270,7 @@ Iterator have no intrinsic identity checks or compatibility compiler path.
 
 **Dependencies:** C2, including its executable A0 representation check.
 
-The [implemented demonstration](design/coroutines.md#cooperative-dispatch-demonstration)
+The [implemented demonstration](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md#cooperative-dispatch-demonstration)
 owns the queue, fake-wait, typed completion, nested `next`, and cleanup contract.
 Its differential fixture and instrumented storage gate exercise both backends.
 Dynamic spawn, reusable task results, and parallelism remain later work; this is
@@ -278,11 +283,11 @@ not the public Async API.
 **Dependencies:** C3 and A0; their scheduler and representation gates remain
 prerequisites for the implementation.
 
-[Dynamic ownership](reference/library-coroutines.md#dynamic-ownership) owns
+[Dynamic ownership](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-coroutines.md#dynamic-ownership) owns
 `scope`, `create`, lifetime and cleanup behavior.
-[Work registration](reference/library-work.md#dynamic-registration) owns the
+[Work registration](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-work.md#dynamic-registration) owns the
 checked registration facet and deferred budget contract. The
-[registry design and verification](design/coroutines.md#dynamic-scope-registry)
+[registry design and verification](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/coroutines.md#dynamic-scope-registry)
 cover both backends, distinct execution owners, immediate entry removal,
 caller-owned helper allocation, rejected local captures and escaped queues,
 and child allocation after the context-body helper has returned.
@@ -294,8 +299,8 @@ C6a/C6c supply typed cells and shared service authority.
 ### C5: Suspending acquisition and cleanup
 
 **DONE.** See [cleanup behavior](reference/resources.md), the
-[coroutine stop protocol](reference/library-coroutines.md#exchange-and-lifecycle),
-and [machine drain design](design/machines.md#handlers-and-cleanup).
+[coroutine stop protocol](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-coroutines.md#exchange-and-lifecycle),
+and [machine drain design](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/machines.md#handlers-and-cleanup).
 
 **Dependencies:** C1; use C3/C4 consumers to exercise nested ownership.
 
@@ -332,8 +337,8 @@ remains authoritative until each extension lands.
 **DONE — checked phantom indices and same-type opaque storage.**
 
 [Native storage](reference/native.md#indexed-native-storage) and
-[scope-owned write-once cells](reference/library-cells.md) own the public
-contracts. [Shared-capability design](design/shared-capabilities.md) owns token
+[scope-owned write-once cells](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-cells.md) own the public
+contracts. [Shared-capability design](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/shared-capabilities.md) owns token
 representation, capture preservation, independent Core reconstruction, and
 both backend ABIs. C0/A0 representation and C4 ownership prerequisites are
 covered by the executable representation, ownership, and registry suites.
@@ -342,9 +347,9 @@ covered by the executable representation, ownership, and registry suites.
 
 **DONE — bounded scoped requests and driver-owned callback completion.**
 
-[NativeRequest](reference/library-native-requests.md) owns registration,
+[NativeRequest](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-native-requests.md) owns registration,
 cardinality, driver authority, cancellation, and synchronous quiescence.
-[The design contract](design/native-requests.md) owns checked retention edges,
+[The design contract](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/native-requests.md) owns checked retention edges,
 module/Core proofs, and the shared backend runtime. Acceptance covers immediate
 and delayed completion, completion during registration, duplicate/stale signals,
 partial acquisition failure, bounded admission, live counts, and drain before
@@ -361,8 +366,8 @@ C6d.
 **DONE — nominal shared values and split service invocation authority.**
 
 [Shared resources](reference/native.md#shared-native-resources),
-[service contexts](reference/library-services.md), and
-[the implementation invariants](design/shared-capabilities.md) own these
+[service contexts](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-services.md), and
+[the implementation invariants](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/shared-capabilities.md) own these
 contracts. The acceptance suite exercises dynamically owned cooperative
 children, child draining before shared-resource release, typed write-once
 cells, retained service contexts used by different producers, nested pull
@@ -370,7 +375,7 @@ forwarding, rejected authority/capture transfers, and module/Core codecs in
 both backends. C0/A0 and C4 remain prerequisite regression gates.
 
 This subset has no retained native request or callback and therefore requires
-no C6b extension. [Native requests](reference/library-native-requests.md) provide
+no C6b extension. [Native requests](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-native-requests.md) provide
 the separate C6b contract; concurrent execution additionally requires C6d.
 
 #### C6d: Concurrent invocation and runtime safety
@@ -386,8 +391,8 @@ different value layouts.
 
 Audit the complete runtime before either concurrent executor is enabled.
 Source-level immutability is insufficient when an implementation mutates shared
-storage. Keep [List's synchronized claim/publication
-path](design/backend.md#list-representation) and the two-children-one-tail race
+storage. Keep [List's immutable storage
+contract](design/backend.md#list-representation) and the two-children-one-tail race
 fixture as regression gates; independently allocated lists do not exercise the
 frontier. Preserve persistent values and their documented complexity.
 
@@ -409,9 +414,9 @@ independently by goroutine-per-task and worker-pool executors.
 
 ### C7: General execution checkpoints
 
-**DONE.** [Machine dispatch](design/machines.md#dispatch-and-frame-lifetime)
+**DONE.** [Machine dispatch](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/machines.md#dispatch-and-frame-lifetime)
 owns poll placement, frame retention, and callable families;
-[Work](reference/library-work.md) owns the public `Polled` protocol. Async's
+[Work](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/reference/library-work.md) owns the public `Polled` protocol. Async's
 [A8](roadmap-async.md#a8-cpu-responsiveness) supplies the task driver.
 
 ## Acceptance and verification

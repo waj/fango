@@ -80,27 +80,29 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Ty = r.typ(e.Ty)
 		n.Operand = r.expr(e.Operand)
 		out = &n
+	case *TaskSpawn:
+		n := *e
+		n.Scope = r.expr(e.Scope)
+		n.Input = r.expr(e.Input)
+		n.Ty = r.typ(e.Ty)
+		n.WorkerType = r.typ(e.WorkerType)
+		n.TyArgs = make([]types.Type, len(e.TyArgs))
+		for i, t := range e.TyArgs {
+			n.TyArgs[i] = r.typ(t)
+		}
+		out = &n
 	case *NativeCall:
 		n := *e
 		n.Ty = r.typ(e.Ty)
 		n.Args = r.exprs(e.Args)
 		out = &n
-	case *Work:
-		n := *e
-		n.Ty, n.Args = r.typ(e.Ty), r.exprs(e.Args)
-		if e.SourceRow != nil {
-			n.SourceRow = r.typ(e.SourceRow)
-		}
-		out = &n
+
 	case *FailureInspect:
 		n := *e
 		n.Ty = r.typ(e.Ty)
 		n.Args = r.exprs(e.Args)
 		out = &n
-	case *Completion:
-		n := *e
-		n.Ty, n.Value, n.Row = r.typ(e.Ty), r.expr(e.Value), r.row(e.Row)
-		out = &n
+
 	case *Quote:
 		n := *e
 		n.Ty = r.typ(e.Ty)
@@ -158,26 +160,6 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Ty = r.typ(e.Ty)
 		n.Payload = r.exprs(e.Payload)
 		n.Effect = r.effect(e.Effect)
-		out = &n
-	case *Suspend:
-		n := *e
-		n.Ty = r.typ(e.Ty)
-		n.Request = r.expr(e.Request)
-		out = &n
-	case *CoroutineScope:
-		n := *e
-		n.Row = r.row(e.Row)
-		n.Yield = r.effect(e.Yield)
-		n.Traversal = r.effect(e.Traversal)
-		n.Ty = r.typ(e.Ty)
-		n.CursorTy = r.typ(e.CursorTy)
-		n.Producer = r.expr(e.Producer)
-		n.Consumer = r.expr(e.Consumer)
-		out = &n
-	case *CoroutineAdvance:
-		n := *e
-		n.Row = r.row(e.Row)
-		n.Ty, n.Cursor, n.Reply = r.typ(e.Ty), r.expr(e.Cursor), r.expr(e.Reply)
 		out = &n
 
 	case *Bracket:

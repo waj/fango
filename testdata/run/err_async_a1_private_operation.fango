@@ -1,3 +1,0 @@
-import Async
-
-main() = print (Async.owner())

@@ -269,7 +269,7 @@ func (s *scalarSpecializer) simplify(e core.Expr) core.Expr {
 						return e.Args[0]
 					}
 					if name := method.instance.NativeMethods[method.index]; name != "" {
-						return s.folder.fold(&core.NativeCall{Name: name, Module: s.ck.Natives[name].Module, Storage: s.ck.Natives[name].Storage, RetainsRequest: s.ck.Natives[name].RetainsRequest, Args: e.Args, Ty: e.Ty})
+						return s.folder.fold(&core.NativeCall{Name: name, Module: s.ck.Natives[name].Module, Storage: s.ck.Natives[name].Storage, Args: e.Args, Ty: e.Ty})
 					}
 				}
 			}
@@ -298,7 +298,7 @@ func (s *scalarSpecializer) methodValue(method scalarMethod, ty types.Type) core
 	if method.instance.IdentityMethods[method.index] {
 		body = args[0]
 	} else if name := method.instance.NativeMethods[method.index]; name != "" {
-		body = &core.NativeCall{Name: name, Module: s.ck.Natives[name].Module, Storage: s.ck.Natives[name].Storage, RetainsRequest: s.ck.Natives[name].RetainsRequest, Args: args, Ty: ret}
+		body = &core.NativeCall{Name: name, Module: s.ck.Natives[name].Module, Storage: s.ck.Natives[name].Storage, Args: args, Ty: ret}
 	} else {
 		body = &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: method.instance.Methods[method.index], Ty: ty}, Args: args, Ty: ret, Control: core.ArrowControl(ty, len(args))}
 	}

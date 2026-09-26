@@ -131,16 +131,15 @@ scope collects the failure.
 
 `source` and `sink` adapt an open file to the leaves a
 [buffered reader and writer](library-readers.md) are built over, so a file and
-a memory buffer drive the same parsing code. Both capture the handle and are
-therefore bound to its scope; neither closes anything, because closing belongs
-to the scope. A pull answers whatever the file had, which may be short. `read` and `writeAll` handle a whole file without a
+a memory buffer drive the same parsing code. Both capture the handle. Calls after the owning scope closes report
+a closed-resource error; closing belongs to the scope. A pull answers whatever the file had, which may be short. `read` and `writeAll` handle a whole file without a
 handle and answer a `Result` instead. `listDirectory` names a directory's
 entries in sorted order, and `isDirectory` answers whether a path names one;
 a missing path is an `Err` with kind `NotFound` for both.
 
 `File.Handle` is abstract, with no accessible constructor, `Show`, or `Eq`.
-It is available only inside a `with*` scope and obeys the ordinary
-[resource escape and wrapper rules](resources.md#resource-escape-checks).
+A `with*` scope owns its lifetime. Returning a handle does not extend that
+lifetime; [resource validity](resources.md) is checked at runtime.
 Named callbacks may perform fewer effects than the wrapper permits.
 
 ## Net

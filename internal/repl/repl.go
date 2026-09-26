@@ -27,7 +27,6 @@ import (
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/lexer"
-	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/modules"
 	"github.com/waj/fango/internal/nativehost"
 	"github.com/waj/fango/internal/parser"
@@ -91,10 +90,7 @@ type Session struct {
 	// first: the Core lint checks a program, and an imported module's calls
 	// into modules imported earlier are only well-formed against it.
 	installed []core.Def
-	// promptDefs is the active Core generation of each prompt-defined worker
-	// or value. The ordinary evaluator installs these incrementally; selective
-	// machine lowering needs the same active set when a later expression passes
-	// a named producer to Runtime.Coroutine.with.
+	// promptDefs retains the active Core generation of prompt definitions.
 	promptDefs map[string]core.Def
 }
 
@@ -633,12 +629,21 @@ func (s *Session) importInput(m *ast.Module) inputResult {
 		}
 		pending = append(pending, defs...)
 		loaded = append(loaded, inc.Modules...)
-		for _, name := range inc.Modules {
-			switch name {
-			case "File", "Net", "Runtime.Cell", "Runtime.NativeRequest", "Runtime.Async.Native", "Async.IO", "Async.Events":
-				needsOpaqueWorker = true
+		for _, n := range s.ck.Natives {
+			for _, wrapper := range append(append([]*types.CtorInfo(nil), n.ParamWrappers...), n.ResultWrapper) {
+				if wrapper == nil {
+					continue
+				}
+				for _, field := range wrapper.Fields {
+					if con, ok := field.(*types.TCon); ok {
+						if adt := s.ck.ADTs[con.Unique]; adt != nil && adt.Repr == types.ReprNativeAny {
+							needsOpaqueWorker = true
+						}
+					}
+				}
 			}
 		}
+
 		for _, n := range inc.Natives {
 			natives = append(natives, nativehost.Source{Module: n.Module, Content: n.Content})
 		}
@@ -767,19 +772,6 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	display := elaborate.Display(coreExpr, s.ck, "")
-	if s.ck.Intrinsics[types.CoroutineWithName].Body != nil {
-		defs := append(s.activeExecutionDefs(), aux...)
-		defs = append(defs, core.Def{Name: "_repl_expression", Type: display.Type(), SourceType: display.Type(), Control: core.ExprControl(display), Body: display})
-		machineProg, lowerErrs := machineir.Lower(s.program(defs), s.ck.B)
-		if len(lowerErrs) > 0 {
-			fmt.Fprintf(s.out, "runtime error: internal machine lowering failed: %v\n", lowerErrs[0])
-			return inputDone
-		}
-		if err := s.env.DefineMachineProg(machineProg); err != nil {
-			fmt.Fprintf(s.out, "runtime error: %v\n", err)
-			return inputDone
-		}
-	}
 	for i := range aux {
 		s.env.DefineWorker(&aux[i])
 	}

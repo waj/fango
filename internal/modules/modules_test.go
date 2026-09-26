@@ -23,24 +23,6 @@ func write(t *testing.T, root, rel, body string) string {
 	return p
 }
 
-func TestOnlyBundledCoroutineControlGetsSuspensionIdentity(t *testing.T) {
-	for _, module := range []string{"Runtime.Coroutine", "Stream", "Renamed"} {
-		for _, name := range []string{"Suspension", "Drive", "Yield"} {
-			for _, bundled := range []bool{false, true} {
-				decl := &ast.EffectDecl{Name: name}
-				n := &node{name: module, bundled: bundled, mod: &ast.Module{Decls: []ast.Decl{decl}}}
-				if errs := validateModuleDecls(n); len(errs) != 0 {
-					t.Fatal(errs)
-				}
-				want := bundled && module == "Runtime.Coroutine" && (name == "Suspension" || name == "Drive")
-				if decl.CompilerSuspension != want {
-					t.Fatalf("%s.%s bundled=%v suspension=%v want=%v", module, name, bundled, decl.CompilerSuspension, want)
-				}
-			}
-		}
-	}
-}
-
 func TestNativeTemplateValidation(t *testing.T) {
 	for _, tt := range []struct {
 		name, template, title string

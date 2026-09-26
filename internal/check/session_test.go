@@ -389,7 +389,7 @@ main = $(Base.make)
 	}
 	// false keeps this exercising the full reconstruction, obligations and
 	// all, rather than the batch pipeline's shortcut.
-	if lintErrs := elaborate.LintProgIn(defs, context, ck, false); len(lintErrs) != 0 {
+	if lintErrs := elaborate.LintProgIn(defs, context, ck); len(lintErrs) != 0 {
 		t.Fatal(lintErrs)
 	}
 }
@@ -458,7 +458,7 @@ func TestInstalledObjectSupportsSubsequentInference(t *testing.T) {
 	if len(elabErrs) != 0 {
 		t.Fatal(elabErrs)
 	}
-	if lintErrs := elaborate.LintProgIn(defs, decoded.Runtime, ck, false); len(lintErrs) != 0 {
+	if lintErrs := elaborate.LintProgIn(defs, decoded.Runtime, ck); len(lintErrs) != 0 {
 		t.Fatal(lintErrs)
 	}
 }
@@ -904,7 +904,7 @@ func artifactPaths(t *testing.T, dir string) []string {
 // A compile-time-only declaration exists only in stage Core: the runtime
 // elaboration leaves it out, so the stage elaboration, which skips what the
 // runtime one discharged, is where its obligations are discharged at all.
-func TestStageCoreDischargesCompileTimeOnlyDeclarations(t *testing.T) {
+func TestStageCoreChecksCompileTimeOnlyDeclarations(t *testing.T) {
 	d := t.TempDir()
 	main := filepath.Join(d, "main.fango")
 	source := `import Meta exposing (Code)
@@ -938,15 +938,16 @@ main() = print "ok"
 		}
 	}}
 	result, diagnostics, internalErr := s.Compile(main)
-	if internalErr != nil || result != nil {
-		t.Fatalf("result=%v internal=%v", result, internalErr)
+	if internalErr != nil || result == nil || len(diagnostics) != 0 {
+		t.Fatalf("result=%v diagnostics=%v internal=%v", result, diagnostics, internalErr)
 	}
-	if len(diagnostics) != 1 || diagnostics[0].Title != "STATE RESULT ESCAPES" {
-		t.Fatalf("got %v, want the escape from leak", diagnostics)
+	if snapshots != 1 || lints != 1 {
+		t.Fatalf("snapshots=%d lints=%d", snapshots, lints)
 	}
-	// Runtime elaboration succeeded and the stage snapshot rejected the
-	// module, so the diagnostic is the stage discharge's own.
-	if snapshots != 1 || lints != 0 {
-		t.Fatalf("stage snapshots %d, lints %d: the escape was not found building stage Core", snapshots, lints)
+	for _, d := range result.Program.Defs {
+		if d.Name == "leak" {
+			t.Fatal("compile-time-only declaration reached runtime Core")
+		}
 	}
+
 }

@@ -115,7 +115,7 @@ func New(sources []Source) (*Executor, error) {
 func (e *Executor) workerFiles() ([]workerFile, error) {
 	files := []workerFile{{Path: "go.mod", Data: []byte("module github.com/waj/fango\n\ngo 1.26\n")}}
 	runtimeSources, err := runtimefiles.WorkerSources(
-		[]string{"ast", "core", "eval", "execcodec", "machine", "meta", "natives", "objectcodec", "source", "types"},
+		[]string{"ast", "core", "eval", "execcodec", "meta", "natives", "objectcodec", "source", "types"},
 		[]string{"fangort", "nativewire", "nativeworker"})
 	if err != nil {
 		return nil, err

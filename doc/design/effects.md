@@ -2,7 +2,7 @@
 
 Handler evidence, state, abort routing, cleanup, and callable execution modes.
 
-[Design index](../design.md). Source and checks: [Control contracts](../../internal/core/control.go), [Evidence](../../internal/core/evidence.go), [Activation binding](../../internal/infer/bind.go), [Runtime outcomes](../../runtime/fangort/outcome.go), [Control tests](../../internal/codegen/control_test.go), [Cleanup tests](../../internal/core/synchronous_scope_test.go).
+[Design index](../design.md). Source and checks: [Control contracts](../../internal/core/control.go), [Evidence](../../internal/core/evidence.go), [Runtime outcomes](../../runtime/fangort/outcome.go), [Control tests](../../internal/codegen/control_test.go), [Cleanup tests](../../internal/core/lint_test.go).
 
 ## Arrows and operation discipline
 
@@ -39,72 +39,15 @@ succeed, and returns through the existing evidence call. Core retains the state
 binder/type and update expressions for lint/capture checks. The interpreter
 uses an activation cell; Go uses a captured local. No continuation is captured.
 
-An installed activation's evidence carries the transport its own clauses need,
-not the enclosing worker's: the interpretation is known where the handler is
-written, so a handler whose clauses neither exit nor suspend stays Direct
-inside an Exit or Machine worker, and a perform there wraps its plain result,
-the same adaptation a Direct evidence record passed to a wider callee already
-gets. Under machine lowering such an activation keeps
-[ordinary clauses](machines.md#handlers-and-cleanup). Discharge carries that
-transport with the captures it substitutes, so a closure bound to the
-activation calls the record that actually exists.
+An installed activation's evidence carries the transport its own clauses need.
+A Direct handler inside an Exit worker still uses Direct evidence; calls adapt
+the plain result to the caller's protocol. Open-row callback adapters receive
+evidence at invocation, including when constructed inside a matching handler.
 
-Stateless source handlers are durable by default; parameterized handlers are
-scoped. Compiler-owned APIs may additionally mark evidence scoped, operation
-results borrowed, or arguments retained. All use the same
-[capture proof](ownership.md), without trusted runner-name exemptions.
-
-## Binding a closure to an activation
-
-Discharge is the switch between call-site and captured evidence, and the
-handler instance rule is the way a program asks for it. Inference carries, on
-every argument or field constraint that adapts a lambda written in a handler's
-subject, the enclosing activations that subject belongs to. An inferred record
-literal names no type, so its fields reach their declared types through the
-record obligation rather than through a field constraint; the obligation
-carries the same activations. When such an inclusion can hold only by losing a
-label one of them handles, the label is replaced by what that handler's clauses
-perform and the inclusion is solved again; the clause row is collected while
-the clause bodies are generated, leaving out the `resume` call, whose row
-describes the perform site's continuation rather than the clause. An abort-only
-label is refused instead: its runtime exit target belongs to one activation,
-which a bound abort could outlive.
-
-Every inclusion the rule might have to answer is diverted and solved after the
-ordinary bounds, including one whose position can still absorb the label. A
-subject is generated before the clauses whose row it inherits, so the
-replacement row is not known earlier; and a position's row may not be decided
-earlier either. A closure inside a row-indexed record or constructor reaches
-its field through the container's row argument, a fresh variable while the
-container is checked, and absorbing the label there would carry it out on the
-container's type, where the inclusion that finally rejects it names no handler
-to bind to. A diverted position whose row is still open once the group is
-solved never addressed an activation at all, and ordinary inclusion answers it.
-
-Nothing is recorded for elaboration. The lambda's row still names the label
-while the position it flows into does not, which is exactly the case
-`adaptFunctionValue` already answers by substituting the innermost lexical
-activation's captures into the body and dropping the lambda's evidence
-parameter — the same discharge that gives a `Runtime.Scope.bracket` release closure its
-definition-site evidence. The closure then carries that activation's record of
-operation closures, so nested activations of one effect stay distinct without a
-special case, and the existing capture proof sees it retaining that scope.
-
-A bound closure's transport is its own row's, so the activation it captures is
-materialized there, whatever protocol the worker that installed it was compiled
-for.
-
-> **Invariant.** A pass that reorders, hoists, or shares calls must treat an
-> arrow whose parameters or captures include a resource-typed value or a value
-> bound to a handler activation as impure, whatever its row says.
-
-Rows are exact about the effects such an arrow performs, not about the state
-its activation owns, so a bound `() -> Int` is typed pure and still answers
-differently on each call. Discharge leaves the same gap for cursors. Nothing
-escapes unhandled — a scoped value exists only inside its own scope, so the
-activation is live whenever an operation runs — but the purity claim is
-inaccurate, and compile-time evaluation stays contained only because a splice
-can reach only an activation it created itself.
+Closure compatibility is ordinary effect-row inclusion. A handled label is not
+removed from a returned callable simply because it was created in the subject.
+Mutable library closures expose IO. [Resources and evidence](ownership.md)
+describes the retained structural metadata.
 
 ## Abort and cleanup protocol
 
@@ -123,12 +66,10 @@ copying Suppress operation. Successful-body cleanup failure becomes primary.
 Nested cleanup is inner-to-outer. Go defer is not used because ordering depends
 on the body's language-level result, not on host function return.
 
-Acquisition may suspend. Release must be synchronous; its actual callback
-obligation is checked before row widening. Machine cleanup follows the same
-primary/secondary rules.
-[Resource semantics](../reference/resources.md) owns the complete event table.
+Acquisition, body, and release are synchronous calls and may perform effects.
+[Resource semantics](../reference/resources.md) owns failure ordering.
 
-## Direct, Exit, and Machine
+## Direct and Exit
 
 Execution transport is separate from effect rows and operation discipline.
 Every Core arrow, callable, application, and evidence slot records a lower bound
@@ -138,24 +79,22 @@ and whether its mode is selected by an enclosing control context.
 | --- | --- |
 | Direct | Plain value/void result |
 | Exit | Checked Outcome carrying a normal value or targeted exit |
-| Machine | Typed frame driven by the private dispatcher |
 
 Open rows and abstract custom evidence are transport-polymorphic because their
-interpretations may exit or suspend. Contracts are per arrow and joined, not
+interpretations may exit. Contracts are per arrow and joined, not
 one variant for each combination of callback modes. Each defining module emits
-its available Direct/Exit/Machine workers independently of downstream consumers.
+its available Direct/Exit workers independently of downstream consumers.
 
 Function values carry typed callable members together in a Go record. Members
 below the body's/captured evidence's minimum mode are absent; checked contracts
 prevent selecting them. Construction runs no body. Pure curried arrows remain
-Direct, and synchronous Machine members defer work until frame stepping.
+Direct.
 
 ADTs and dictionaries share one value representation across transport families;
 exported family type names are aliases. Pure factories run once and return
-complete callback records without driving a Machine. Evidence records also
+complete callback records without executing their bodies. Evidence records also
 carry separate members and preserve explicit and captured lexical evidence.
-Names use nominal declarations, not graph-local numbers. Opaque cursors retain
-one owner representation.
+Names use nominal declarations, not graph-local numbers.
 
 A checked Direct call may select a polymorphic worker's Exit member in an Exit
 context. RequireNormal projects it and treats an unexpected exit as a compiler

@@ -1,26 +1,23 @@
--- `Reader.over`'s shape: a row-polymorphic handler whose clauses reach the
--- source, and therefore perform the abstract row, while its subject hands the
--- callback a record of closures indexed by that same row. The fields do not
--- name `Reading`, so each one binds to the activation whose subject built it
--- and every projected field is the row's arrow — here `IO`.
-effect Reading
-    buffered : () -> String
-    refill : () -> Bool
+-- Explicit IO references keep independent reader state.
+import Runtime.Ref
 
 type Reader e =
-    { buffered : () ->{e} String
-    , refill : () ->{e} Bool
+    { buffered : () ->{IO | e} String
+    , refill : () ->{IO | e} Bool
     }
 
 type Source e = { pull : () ->{e} String }
 
-over : Source e -> (Reader e ->{e} a) ->{e} a
+over : Source e -> (Reader e ->{IO | e} a) ->{IO | e} a
 over source use =
-    handle use (Reader { buffered = \_ -> buffered(), refill = \_ -> refill() }) with pending = "" of
-        buffered () -> resume pending with pending
-        refill () ->
+    pending = Runtime.Ref.new ""
+    use (Reader {
+        buffered = \_ -> Runtime.Ref.read pending,
+        refill = \_ ->
             chunk = source.pull()
-            resume (chunk /= "") with pending ++ chunk
+            Runtime.Ref.write pending (Runtime.Ref.read pending ++ chunk)
+            chunk /= ""
+    })
 
 trace : String ->{IO} String
 trace chunk =

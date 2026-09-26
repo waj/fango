@@ -16,7 +16,6 @@ import (
 	"strings"
 
 	"github.com/waj/fango/internal/core"
-	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -46,30 +45,19 @@ type File struct {
 // command uses it: internal/backend emits each owner from its own Core and the
 // declarations it links against, and must stay byte-identical to this.
 func EmitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
-	mp, errs := machineir.Lower(p, b)
-	if len(errs) != 0 {
-		return nil, fmt.Errorf("codegen: Machine representation families: %v", errs[0])
+	if errs := core.Lint(p, b); len(errs) != 0 {
+		return nil, fmt.Errorf("codegen: malformed Core: %v", errs[0])
 	}
-	return emitProject(p, mp, b, units, printMain)
+	return emitProject(p, b, units, printMain)
 }
 
-// EmitMachineProject is the whole-program reference for a pre-lowered Machine
-// program: selective Machine definitions become iterative fangort frames while
-// every other definition retains the ordinary Direct/Exit path.
-func EmitMachineProject(p *core.Prog, mp *machineir.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
-	if errs := machineir.Lint(mp); len(errs) != 0 {
-		return nil, fmt.Errorf("codegen: malformed machine IR: %v", errs[0])
-	}
-	return emitProject(p, mp, b, units, printMain)
-}
-
-func emitProject(p *core.Prog, mp *machineir.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
+func emitProject(p *core.Prog, b *types.Builtins, units []Unit, printMain bool) ([]File, error) {
 	if err := ValidateUnits(p, units); err != nil {
 		return nil, err
 	}
 	files := make([]File, 0, len(units))
 	for _, unit := range units {
-		file, err := EmitUnit(UnitProgram(p, unit), mp, b, unit, printMain)
+		file, err := EmitUnit(UnitProgram(p, unit), b, unit, printMain)
 		if err != nil {
 			return nil, err
 		}
@@ -118,11 +106,23 @@ func ValidateUnits(p *core.Prog, units []Unit) error {
 }
 
 // EmitUnit emits one owner's Go package. p carries that owner's Core together
-// with the installed dependency headers its calls link against; mp carries the
-// Machine families the owner materialized. Nothing here reads a dependency
+// with the installed dependency headers its calls link against. It reads no dependency
 // body, so an owner can be emitted from its checked object alone.
-func EmitUnit(p *core.Prog, mp *machineir.Prog, b *types.Builtins, unit Unit, printMain bool) (File, error) {
-	data, err := emitUnitWithMachine(p, mp, b, unit, printMain)
+func EmitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) (File, error) {
+	owned := *p
+	owned.Defs = nil
+	var context []core.Def
+	for _, d := range p.Defs {
+		if d.Owner == unit.Name {
+			owned.Defs = append(owned.Defs, d)
+		} else {
+			context = append(context, d)
+		}
+	}
+	if errs := core.LintIn(&owned, context, b); len(errs) != 0 {
+		return File{}, fmt.Errorf("core lint: %v", errs)
+	}
+	data, err := emitUnit(p, b, unit, printMain)
 	if err != nil {
 		return File{}, err
 	}
@@ -158,31 +158,25 @@ func UnitProgram(p *core.Prog, unit Unit) *core.Prog {
 }
 
 func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byte, error) {
-	return emitUnitWithMachine(p, nil, b, unit, printMain)
-}
-
-func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byte, error) {
 	g := &gen{
-		b:               b,
-		adts:            map[int]*types.ADTInfo{},
-		neededEq:        map[int]bool{},
-		neededShow:      map[int]bool{},
-		scalarEq:        map[int]bool{},
-		scalarShow:      map[int]bool{},
-		caseVarTys:      map[string]types.Type{},
-		evidence:        map[int][]goast.Expr{},
-		evidenceModes:   map[int][]types.Transport{},
-		defs:            map[string]*core.Def{},
-		unit:            unit.Name,
-		imports:         map[string]bool{},
-		nativeImports:   map[string]bool{},
-		direct:          map[string]bool{},
-		natives:         p.Natives,
-		effects:         map[int]*types.EffectInfo{},
-		control:         types.Direct,
-		abi:             types.Direct,
-		machineClosures: map[*core.Lambda]*machineir.Closure{},
-		machineWorkers:  map[string]*machineir.Worker{},
+		b:             b,
+		adts:          map[int]*types.ADTInfo{},
+		neededEq:      map[int]bool{},
+		neededShow:    map[int]bool{},
+		scalarEq:      map[int]bool{},
+		scalarShow:    map[int]bool{},
+		caseVarTys:    map[string]types.Type{},
+		evidence:      map[int][]goast.Expr{},
+		evidenceModes: map[int][]types.Transport{},
+		defs:          map[string]*core.Def{},
+		unit:          unit.Name,
+		imports:       map[string]bool{},
+		nativeImports: map[string]bool{},
+		direct:        map[string]bool{},
+		natives:       p.Natives,
+		effects:       map[int]*types.EffectInfo{},
+		control:       types.Direct,
+		abi:           types.Direct,
 	}
 	for _, name := range unit.Imports {
 		g.direct[name] = true
@@ -205,23 +199,10 @@ func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, un
 	}
 
 	var mainDef *core.Def
-	machineWorkers := map[string]*machineir.Worker{}
-	if mp != nil {
-		for i := range mp.Workers {
-			machineWorkers[mp.Workers[i].Name] = &mp.Workers[i]
-			g.machineWorkers[mp.Workers[i].Name] = &mp.Workers[i]
-		}
-		for i := range mp.Closures {
-			g.machineClosures[mp.Closures[i].Expr] = &mp.Closures[i]
-		}
-		// Imported families are link contracts only: they supply row and
-		// evidence shapes at call sites and are declared by their own owner.
-		for i := range mp.Declared {
-			if g.machineWorkers[mp.Declared[i].Name] == nil {
-				g.machineWorkers[mp.Declared[i].Name] = &mp.Declared[i]
-			}
-		}
-	}
+
+	// Imported families are link contracts only: they supply row and
+	// evidence shapes at call sites and are declared by their own owner.
+
 	entry := p.Entry
 	if entry == "" {
 		entry = "main"
@@ -250,11 +231,6 @@ func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, un
 		if d == mainDef && mainIsUnit {
 			continue // no package var: the effect runs inside func main()
 		}
-		// Only source values have a closed initialization contract. Raw
-		// Machine definitions expose frame constructors to their driver.
-		if (d.IsWorker() || d.SourceType == nil) && machineWorkers[d.Name] != nil && d.Control.Transport == types.Machine {
-			continue
-		}
 		if d.IsWorker() {
 			// Includes nullary generic workers — polymorphic values emit as
 			// zero-parameter generic functions (doc/design.md, "Go backend and runtime").
@@ -273,35 +249,18 @@ func emitUnitWithMachine(p *core.Prog, mp *machineir.Prog, b *types.Builtins, un
 				}
 				decls = append(decls, g.workerDef(d, execution, types.Exit))
 			}
-			if g.passiveMachineFactory(d) {
-				decls = append(decls, g.workerDef(d, types.Direct, types.Machine))
-			}
+
 			continue
 		}
 		g.tyParamNames = nil
 		decls = append(decls, g.topValueDecl(d, types.Direct))
 		if g.controlledType(d.Type, nil) {
 			decls = append(decls, g.topValueDecl(d, types.Exit))
-			decls = append(decls, g.topValueDecl(d, types.Machine))
 		}
-	}
-	if mp != nil {
-		machineDecls, err := g.machineDecls(mp)
-		if err != nil {
-			return nil, err
-		}
-		decls = append(decls, machineDecls...)
 	}
 
 	switch {
-	case mainDef != nil && machineWorkers[mainDef.Name] != nil && mainDef.Control.Resolve(types.Direct) == types.Machine:
-		var args []goast.Expr
-		for range mainDef.Params {
-			args = append(args, selector("fangort", "UnitValue"))
-		}
-		frame := callExpr(g.machineConstructorRef(mainDef.Name), args...)
-		g.usesFangort = true
-		decls = append(decls, funcDecl("main", exprStmt(callExpr(selector("fangort", "RunMachineEntry"), frame))))
+
 	case mainIsUnit:
 		decls = append(decls, funcDecl("main", g.stmts(mainDef.Body)...))
 	case mainIsFn:
@@ -347,14 +306,8 @@ func (g *gen) topValueDecl(d *core.Def, mode types.Transport) goast.Decl {
 	name := g.topValueName(d.Name)
 	if mode == types.Exit {
 		name += "_exit"
-	} else if mode == types.Machine {
-		name += "_machine"
 	}
-	if d.Control.Transport == types.Machine {
-		g.usesFangort = true
-		value := callExpr(indexExpr(selector("fangort", "RunMachineValue"), []goast.Expr{g.goType(d.Type)}), callExpr(g.machineConstructorRef(d.Name)))
-		return varDecl(name, g.goType(d.Type), value)
-	}
+
 	return varDecl(name, g.goType(d.Type), g.expr(d.Body, 0))
 }
 
@@ -405,10 +358,8 @@ type gen struct {
 	// Unlike control, it does not change when emission enters a pure nested
 	// lambda: that lambda still consumes and produces the enclosing family's
 	// representations even though its own call returns directly.
-	abi             types.Transport
-	resultType      types.Type
-	machineClosures map[*core.Lambda]*machineir.Closure
-	machineWorkers  map[string]*machineir.Worker
+	abi        types.Transport
+	resultType types.Type
 }
 
 func symbolOwner(name string) string {
@@ -528,9 +479,8 @@ func (g *gen) topValueRefMode(name string, mode types.Transport) goast.Expr {
 	link := g.topValueName(name)
 	if mode == types.Exit {
 		link += "_exit"
-	} else if mode == types.Machine {
-		link += "_machine"
 	}
+
 	return g.qualified(owner, link)
 }
 
@@ -547,8 +497,7 @@ func (g *gen) typeRef(adt *types.ADTInfo) goast.Expr {
 		switch g.representationMode() {
 		case types.Exit:
 			name += "_exit"
-		case types.Machine:
-			name += "_machine"
+
 		}
 	}
 	return g.qualified(symbolOwner(adt.Con.Name), name)
@@ -560,8 +509,7 @@ func (g *gen) ctorRef(ctor *types.CtorInfo) goast.Expr {
 		switch g.representationMode() {
 		case types.Exit:
 			name += "_exit"
-		case types.Machine:
-			name += "_machine"
+
 		}
 	}
 	return g.qualified(symbolOwner(ctor.Result.Name), name)
@@ -826,9 +774,8 @@ func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
 	name := g.topValueName(d.Name)
 	if abi == types.Exit {
 		name += "_exit"
-	} else if abi == types.Machine {
-		name += "_machine"
 	}
+
 	decl := workerDecl(name, params, result, body).(*goast.FuncDecl)
 	for _, ev := range d.EffectParams {
 		g.evidence[ev.Unique] = g.evidence[ev.Unique][:len(g.evidence[ev.Unique])-1]
@@ -863,9 +810,7 @@ func (g *gen) workerCallStmts(name string, args []goast.Expr) []goast.Stmt {
 }
 
 func (g *gen) workerCallABI(d *core.Def, execution types.Transport) types.Transport {
-	if g.representationMode() == types.Machine && g.passiveMachineFactory(d) {
-		return types.Machine
-	}
+
 	if execution == types.Exit {
 		return types.Exit
 	}
@@ -893,43 +838,6 @@ func (g *gen) workerNeedsABIFamily(d *core.Def) bool {
 // Passive factories transfer stored callbacks without executing or constructing
 // them. Their representation family follows their values, while their execution
 // remains Direct. Closure-producing factories also need module-owned lowering.
-func (g *gen) passiveMachineFactory(d *core.Def) bool {
-	if d != nil && d.ABI.Valid {
-		return d.ABI.PassiveMachineFactory
-	}
-	return g.passiveMachineFactorySeen(d, map[string]bool{})
-}
-
-func (g *gen) passiveMachineFactorySeen(d *core.Def, seen map[string]bool) bool {
-	if d == nil || d.Control != (types.Control{}) || !g.workerNeedsABIFamily(d) {
-		return false
-	}
-	if seen[d.Name] {
-		return true
-	}
-	seen[d.Name] = true
-	passive := true
-	core.InspectPruned(d.Body, func(e core.Expr) bool {
-		switch e := e.(type) {
-		case *core.Lambda:
-			return false
-		case *core.App:
-			if e.CalleeKind == core.Value || e.Control != (types.Control{}) {
-				passive = false
-			}
-			if e.CalleeKind == core.Worker {
-				if ref, ok := e.Callee.(*core.VarRef); ok {
-					callee := g.defs[ref.Name]
-					if callee != nil && g.workerNeedsABIFamily(callee) && !g.passiveMachineFactorySeen(callee, seen) {
-						passive = false
-					}
-				}
-			}
-		}
-		return true
-	})
-	return passive
-}
 
 // workerCallsControlledArg reports whether the worker actually invokes one of
 // its controlled function parameters. Merely storing such a callback (for
@@ -1152,22 +1060,6 @@ func (g *gen) goType(t types.Type) goast.Expr {
 	case *types.TFun:
 		return g.callbackType(t)
 	case *types.TCon:
-		if t.Name == types.WorkOwnerTypeName || t.Name == types.WorkFacetTypeName {
-			g.usesFangort = true
-			return &goast.StarExpr{X: selector("fangort", "WorkOwner")}
-		}
-		if t.Name == types.WorkTypeName {
-			g.usesFangort = true
-			return &goast.StarExpr{X: selector("fangort", "WorkPackage")}
-		}
-		if t.Name == types.CoroutineTypeName || t.Name == types.CoroutineScopeTypeName || t.Name == types.CoroutineFacetTypeName {
-			g.usesFangort = true
-			return &goast.StarExpr{X: selector("fangort", "MachineIterator")}
-		}
-		if t.Name == types.CompletionTypeName {
-			g.usesFangort = true
-			return indexExpr(selector("fangort", "Completion"), []goast.Expr{g.goType(t.Args[0])})
-		}
 		if t.Name == types.FailureTypeName {
 			g.usesFangort = true
 			return &goast.StarExpr{X: selector("fangort", "Failure")}
@@ -1595,12 +1487,12 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			operand = &goast.ParenExpr{X: operand}
 		}
 		return parenIf(parentPrec > 0, &goast.UnaryExpr{Op: gotoken.SUB, X: operand})
-	case *core.Work:
-		return g.workExpr(e)
+
 	case *core.FailureInspect:
 		return g.failureInspectExpr(e)
-	case *core.Completion:
-		return g.completionExpr(e)
+
+	case *core.TaskSpawn:
+		return g.taskSpawn(e)
 	case *core.NativeCall:
 		return g.nativeExpr(e, parentPrec)
 	case *core.If:
@@ -1724,8 +1616,6 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return g.handleExpr(e)
 	case *core.Bracket:
 		return g.bracketExpr(e)
-	case *core.CoroutineScope:
-		return g.coroutineScopeExpr(e)
 
 	default:
 		panic(fmt.Sprintf("codegen: node %T arrives in a later slice", e))
@@ -2261,16 +2151,11 @@ func (g *gen) effectType(e core.EffectInstance) goast.Expr {
 }
 
 func (g *gen) effectTypeMode(e core.EffectInstance, mode types.Transport) goast.Expr {
-	if effect := g.effects[e.Unique]; effect != nil && effect.Suspension {
-		g.usesFangort = true
-		return &goast.StarExpr{X: selector("fangort", "YieldOwner")}
-	}
 	name := "Eff_" + linkName(e.Name)
 	switch e.Control.Resolve(mode) {
 	case types.Exit:
 		name += "_exit"
-	case types.Machine:
-		name += "_machine"
+
 	}
 	return indexExpr(g.qualified(symbolOwner(e.Name), name), g.goTypes(e.Args))
 }
@@ -2296,61 +2181,10 @@ func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want
 		return value
 	}
 	eff := g.effects[ev.Unique]
-	if eff == nil || eff.Suspension {
+	if eff == nil {
 		return value
 	}
-	if want == types.Machine {
-		desired := ev
-		desired.Control = types.Control{Transport: types.Machine}
-		if len(eff.Ops) > 0 && eff.Ops[0].Abort {
-			return &goast.CompositeLit{Type: g.effectTypeMode(desired, types.Machine), Elts: []goast.Expr{
-				&goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: value, Sel: ident("Target")}},
-			}}
-		}
-		g.usesFangort = true
-		elts := make([]goast.Expr, 0, len(eff.Ops))
-		sub := make(map[int]types.Type, len(eff.Params))
-		for i, p := range eff.Params {
-			if i < len(ev.Args) {
-				sub[p.ID] = ev.Args[i]
-			}
-		}
-		for _, op := range eff.Ops {
-			var params []paramSpec
-			var args []goast.Expr
-			for i, raw := range op.RuntimeParamTypes() {
-				ty := types.SubstRigid(raw, sub)
-				if g.isUnit(ty) {
-					continue
-				}
-				name := fmt.Sprintf("t_evarg%d", i)
-				params = append(params, paramSpec{name: name, typ: g.goType(ty)})
-				args = append(args, ident(name))
-			}
-			resultTy := types.SubstRigid(op.ResultType, sub)
-			call := callExpr(&goast.SelectorExpr{X: value, Sel: ident("Op_" + linkName(op.Name))}, args...)
-			var runBody []goast.Stmt
-			if actual == types.Exit {
-				outcome := fmt.Sprintf("t_evout%d", g.tmp)
-				g.tmp++
-				runBody = append(runBody, varDeclStmt(outcome, g.outcomeType(resultTy), call))
-				runBody = append(runBody, &goast.ReturnStmt{Results: []goast.Expr{selector(outcome, "Value"), selector(outcome, "Exit")}})
-			} else if g.isUnit(resultTy) {
-				runBody = append(runBody, exprStmt(call), &goast.ReturnStmt{Results: []goast.Expr{g.unitValue(), ident("nil")}})
-			} else {
-				runBody = append(runBody, &goast.ReturnStmt{Results: []goast.Expr{call, ident("nil")}})
-			}
-			run := &goast.FuncLit{Type: &goast.FuncType{
-				Params: &goast.FieldList{}, Results: &goast.FieldList{List: []*goast.Field{
-					{Type: ident("any")}, {Type: &goast.StarExpr{X: selector("fangort", "ExitRequest")}},
-				}},
-			}, Body: &goast.BlockStmt{List: runBody}}
-			body := []goast.Stmt{returnStmt(callExpr(selector("fangort", "ImmediateStart"), run))}
-			fn := funcLitParams(params, selector("fangort", "MachineStart"), body)
-			elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + linkName(op.Name)), Value: fn})
-		}
-		return &goast.CompositeLit{Type: g.effectTypeMode(desired, types.Machine), Elts: elts}
-	}
+
 	if want != types.Exit || actual == types.Exit || (len(eff.Ops) > 0 && eff.Ops[0].Abort) {
 		return value
 	}
@@ -2392,10 +2226,10 @@ func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want
 func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 	var out []goast.Decl
 	for _, eff := range effects {
-		if types.SurfaceName(eff.Name) == "IO" || eff.Suspension {
+		if types.SurfaceName(eff.Name) == "IO" {
 			continue
 		}
-		modes := []types.Transport{types.Direct, types.Exit, types.Machine}
+		modes := []types.Transport{types.Direct, types.Exit}
 		for _, mode := range modes {
 			oldNames, oldControl, oldABI := g.tyParamNames, g.control, g.abi
 			g.tyParamNames, g.control, g.abi = map[int]string{}, mode, mode
@@ -2427,10 +2261,8 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 					ps = append(ps, paramSpec{typ: g.goType(t)})
 				}
 				results := &goast.FieldList{}
-				if mode == types.Machine {
-					g.usesFangort = true
-					results = &goast.FieldList{List: []*goast.Field{{Type: selector("fangort", "MachineStart")}}}
-				} else if mode == types.Exit {
+
+				if mode == types.Exit {
 					results = &goast.FieldList{List: []*goast.Field{{Type: g.outcomeType(op.ResultType)}}}
 				} else if !g.isUnit(op.ResultType) {
 					results = &goast.FieldList{List: []*goast.Field{{Type: g.goType(op.ResultType)}}}
@@ -2440,9 +2272,8 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 			name := "Eff_" + linkName(eff.Name)
 			if mode == types.Exit {
 				name += "_exit"
-			} else if mode == types.Machine {
-				name += "_machine"
 			}
+
 			spec := &goast.TypeSpec{Name: ident(name), Type: &goast.StructType{Fields: &goast.FieldList{List: fields}}}
 			if len(eff.Params) > 0 {
 				fs := make([]*goast.Field, len(eff.Params))

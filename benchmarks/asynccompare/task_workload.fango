@@ -1,0 +1,31 @@
+import Result exposing (Result(..))
+import Task
+
+countTo context n total =
+    if n <= 0 then total
+    else if Task.isCancelled context then total
+    else countTo context (n - 1) (total + 1)
+
+countPure : Int -> Int -> Int
+countPure n total = if n <= 0 then total else countPure (n - 1) (total + 1)
+
+worker context (limit, checking) =
+    if checking then countTo context limit 0 else countPure limit 0
+
+spawnMany scope n limit checking =
+    if n <= 0 then []
+    else
+        child = Task.spawn scope worker (limit, checking)
+        [child | spawnMany scope (n - 1) limit checking]
+
+awaitSum tasks = case tasks of
+    [] -> 0
+    [task | rest] -> case Task.await task of
+        Ok value -> value + awaitSum rest
+        Err _ -> -1
+
+probe : Int -> Int -> Bool ->{IO} Int
+probe workers limit checking = Task.scope (\scope ->
+    awaitSum (spawnMany scope workers limit checking))
+
+main() = print (probe 16 20000 True)

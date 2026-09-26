@@ -3,38 +3,17 @@ module Reader exposing (Read(..), Reader(..), atEnd, chunks, ensure, forEachChun
 
 import Basics exposing (..)
 import Bytes exposing (Bytes, Source(..))
+-- Buffered IO operations keep their mutable state in task-local references.
+import IO exposing (IO)
 import Maybe exposing (Maybe(..))
-import Stream exposing (Stream, yield)
-
-{- Buffered reading over an abstract byte source.
-
-A `Reader e` is a record of closures bound to one `over` activation, so two
-readers are two records and each `refill` reaches its own source rather than
-whichever handler is innermost when it is called. `e` is what a call actually
-performs: nothing for `overBytes`, `IO` and `Fail IO.Error` for a file or a
-socket.
-
-The buffer is the activation's own state cell. Clauses see an immutable
-snapshot and the commit happens on `resume`, so no new mutable primitive is
-introduced and none is wanted.
-
-`Reading` is private and named apart from `Reader` because a module may not
-declare a type and an effect of one name. Its labels reach no signature: the
-effect is discharged inside the scopes below and a consumer sees only `e`.
-Because an operation name occupies the module's value namespace, `buffered`,
-`refill`, and `skip` are not also functions here; a caller projects them off
-the reader. -}
+import Runtime.Ref
+import Stream exposing (Stream)
 
 type Reader e =
-    { buffered : () ->{e} Bytes
-    , refill : () ->{e} Bool
-    , skip : Int ->{e} Int
+    { buffered : () ->{IO | e} Bytes
+    , refill : () ->{IO | e} Bool
+    , skip : Int ->{IO | e} Int
     }
-
-effect Reading
-    buffered : () -> Bytes
-    refill : () -> Bool
-    skip : Int -> Int
 
 -- clamp keeps every count inside what is actually in hand, so no caller can
 -- skip past the buffer or ask for a negative amount.
@@ -53,62 +32,51 @@ grow source pending =
         Just chunk ->
             if Bytes.length chunk == 0 then grow source pending else Bytes.append pending chunk
 
--- buffering is the one handler behind both scopes, differing only in what it
--- starts with. Its clauses answer from the activation state and, when the
--- buffer is short, call the source, which is how the source's effects reach
--- both the result row and the record's fields.
-buffering : Bytes -> Source e -> (Reader e ->{e} a) ->{e} a
+buffering : Bytes -> Source e -> (Reader e ->{IO | e} a) ->{IO | e} a
 buffering initial source use =
-    handle use { buffered = \_ -> buffered(), refill = \_ -> refill(), skip = \n -> skip n } with pending = initial of
-        buffered () -> resume pending with pending
-        refill () ->
-            grown = grow source pending
-            resume (Bytes.length grown > Bytes.length pending) with grown
-        skip n ->
-            taken = clamp n (Bytes.length pending)
-            resume taken with Bytes.slice taken (Bytes.length pending) pending
+    pending = Runtime.Ref.new initial
+    use
+        { buffered = \_ -> Runtime.Ref.read pending
+        , refill = \_ ->
+            before = Runtime.Ref.read pending
+            grown = grow source before
+            Runtime.Ref.write pending grown
+            Bytes.length grown > Bytes.length before
+        , skip = \n ->
+            before = Runtime.Ref.read pending
+            taken = clamp n (Bytes.length before)
+            Runtime.Ref.write pending (Bytes.slice taken (Bytes.length before) before)
+            taken
+        }
 
--- limited stages a reader over a parent, clamping every answer to a remaining
--- allowance held in its own activation state. Chunked transfer decoding, a
--- decompressor, and a TLS layer later are the same shape. Because a reader is
--- a value the parent stays reachable, so a caller can hold both the framed and
--- the raw reader.
---
--- Every byte handed out here is skipped through the parent, so when the scope
--- ends the parent is positioned after what was consumed rather than after the
--- allowance; a caller that wants the rest of the frame discarded skips it
--- before leaving.
-limited : Reader e -> Int -> (Reader e ->{e} a) ->{e} a
+limited : Reader e -> Int -> (Reader e ->{IO | e} a) ->{IO | e} a
 limited parent allowance use =
-    handle use { buffered = \_ -> buffered(), refill = \_ -> refill(), skip = \n -> skip n } with remaining = clamp allowance allowance of
-        buffered () ->
+    remaining = Runtime.Ref.new (clamp allowance allowance)
+    use
+        { buffered = \_ ->
             window = parent.buffered()
-            resume (Bytes.slice 0 (clamp remaining (Bytes.length window)) window) with remaining
-        refill () ->
-            if Bytes.length (parent.buffered()) >= remaining then
-                resume False with remaining
-            else
-                resume (parent.refill()) with remaining
-        skip n ->
-            taken = parent.skip (clamp n remaining)
-            resume taken with remaining - taken
+            Bytes.slice 0 (clamp (Runtime.Ref.read remaining) (Bytes.length window)) window
+        , refill = \_ ->
+            if Bytes.length (parent.buffered()) >= Runtime.Ref.read remaining then False
+            else parent.refill()
+        , skip = \n ->
+            before = Runtime.Ref.read remaining
+            taken = parent.skip (clamp n before)
+            Runtime.Ref.write remaining (before - taken)
+            taken
+        }
 
-over : Source e -> (Reader e ->{e} a) ->{e} a
+over : Source e -> (Reader e ->{IO | e} a) ->{IO | e} a
 over source use = buffering Bytes.empty source use
 
--- overBytes reads a value already in memory. The activation's cell is the
--- buffer, so the whole thing is the starting buffer over a source that has
--- already ended; nothing here performs anything, and the reader therefore
--- stands at any row including the pure one. It is the memory end of the pair
--- `Writer.collecting` is the other half of.
-overBytes : Bytes -> (Reader e ->{e} a) ->{e} a
+overBytes : Bytes -> (Reader e ->{IO | e} a) ->{IO | e} a
 overBytes contents use = buffering contents { pull = \_ -> Nothing } use
 
 -- ensure loops on a real terminator rather than on a length comparison: it
 -- stops because the source said end of input, never because two numbers
 -- stopped changing. It grows the buffer and consumes nothing, which is what
 -- lets a failed read leave everything in hand.
-ensure : Reader e -> Int ->{e} Bool
+ensure : Reader e -> Int ->{IO | e} Bool
 ensure reader n =
     if Bytes.length (reader.buffered()) >= n then
         True
@@ -117,13 +85,13 @@ ensure reader n =
     else
         False
 
-atEnd : Reader e ->{e} Bool
+atEnd : Reader e ->{IO | e} Bool
 atEnd reader = if ensure reader 1 then False else True
 
 -- readUpTo answers what is in hand once there is anything at all, so it never
 -- waits for bytes the caller said were optional. A short answer is not end of
 -- input; an empty one is.
-readUpTo : Reader e -> Int ->{e} Bytes
+readUpTo : Reader e -> Int ->{IO | e} Bytes
 readUpTo reader n =
     if n <= 0 then
         Bytes.empty
@@ -137,7 +105,7 @@ readUpTo reader n =
 -- readExactly consumes nothing when it answers Nothing, so a caller can try a
 -- longer frame, a different framing, or report the truncation with the bytes
 -- still buffered.
-readExactly : Reader e -> Int ->{e} Maybe Bytes
+readExactly : Reader e -> Int ->{IO | e} Maybe Bytes
 readExactly reader n =
     if n <= 0 then
         Just Bytes.empty
@@ -163,7 +131,7 @@ resumeAt scanned delimiterLength = clamp (scanned - delimiterLength + 1) scanned
 -- bounded number of native scans rather than one per pull. `ensure` answering
 -- False does not mean the window stopped growing — the source can end part way
 -- to the target — so the window is remeasured before end of input is believed.
-scanning : Reader e -> Bytes -> Int -> Int ->{e} Read
+scanning : Reader e -> Bytes -> Int -> Int ->{IO | e} Read
 scanning reader delimiter limit scanned =
     window = reader.buffered()
     case Bytes.indexOfFrom (resumeAt scanned (Bytes.length delimiter)) delimiter window of
@@ -192,7 +160,7 @@ scanning reader delimiter limit scanned =
 -- ever buffer: a server reading an unbounded header line from an untrusted
 -- peer has a memory bug, so there is no unlimited spelling. `Overflowed`
 -- consumes nothing, so the caller still holds what it refused.
-readUntil : Reader e -> Bytes -> Int ->{e} Read
+readUntil : Reader e -> Bytes -> Int ->{IO | e} Read
 readUntil reader delimiter limit =
     if limit <= 0 then Overflowed else scanning reader delimiter limit 0
 
@@ -203,13 +171,13 @@ newline = Bytes.fromString "\n"
 -- return on the run, because whether that byte is framing or content is the
 -- caller's question; a protocol that says CRLF reads readUntil at its own
 -- delimiter.
-readLine : Reader e -> Int ->{e} Read
+readLine : Reader e -> Int ->{IO | e} Read
 readLine reader limit = readUntil reader newline limit
 
 -- forEachChunk hands over whatever one refill produced, so a consumer sees the
 -- source's own chunking rather than a size this module invented and no chunk
 -- is copied on the way.
-forEachChunk : Reader e -> (Bytes ->{e} ()) ->{e} ()
+forEachChunk : Reader e -> (Bytes ->{IO | e} ()) ->{IO | e} ()
 forEachChunk reader action =
     if ensure reader 1 then
         window = reader.buffered()
@@ -219,7 +187,13 @@ forEachChunk reader action =
     else
         ()
 
--- chunks bridges to Stream. Stream's rule that a yielded value may not retain
--- producer-local resources holds trivially: Bytes captures nothing.
-chunks : Reader e -> Stream Bytes e
-chunks reader = Stream.generate (\_ -> forEachChunk reader yield)
+-- The reader owns IO state; the stream itself carries only an explicit Unit position.
+chunkStep reader _ =
+    if ensure reader 1 then
+        window = reader.buffered()
+        ignore (reader.skip (Bytes.length window))
+        Just (window, ())
+    else Nothing
+
+chunks : Reader e -> Stream () Bytes {IO | e}
+chunks reader = Stream.unfold () (chunkStep reader)

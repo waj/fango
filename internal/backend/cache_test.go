@@ -1,11 +1,13 @@
 package backend
 
 import (
-	"github.com/waj/fango/internal/compileevent"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/waj/fango/internal/compileevent"
+	"github.com/waj/fango/internal/types"
 
 	"github.com/waj/fango/internal/check"
 	"github.com/waj/fango/internal/codegen"
@@ -146,7 +148,7 @@ func TestCheckThenBuildRunsOnlyBackendWork(t *testing.T) {
 	if p.total("check", "elaborate", "semantic-lint") != 0 {
 		t.Fatalf("build repeated semantic work: %#v", p.events)
 	}
-	if p.total("lowering") != len(files) || p.total("emission") != len(files) {
+	if p.total("lowering") != 0 || p.total("emission") != len(files) {
 		t.Fatalf("build did not run exactly the missing backend work: %#v", p.events)
 	}
 }
@@ -366,9 +368,6 @@ func TestLoweringReportsAStaleContractItWasToldWasProven(t *testing.T) {
 			if run == "from cache" && p.total("checked-cache-hit") == 0 {
 				t.Fatal("no object was reused; the test proves nothing")
 			}
-			if !result.FlowsProven["Lib"] {
-				t.Fatalf("Lib is not recorded as proven: %v", result.FlowsProven)
-			}
 			flows := func() (count int, err error) {
 				observe := func(event compileevent.Event) {
 					if event.Stage == "capture-flow" {
@@ -384,7 +383,7 @@ func TestLoweringReportsAStaleContractItWasToldWasProven(t *testing.T) {
 			damaged := false
 			for i := range result.Program.Defs {
 				if result.Program.Defs[i].Name == "Lib.twice" {
-					result.Program.Defs[i].CaptureContract = nil
+					result.Program.Defs[i].ResultCaptures = types.ScopeCapture(9999)
 					damaged = true
 				}
 			}
@@ -392,11 +391,11 @@ func TestLoweringReportsAStaleContractItWasToldWasProven(t *testing.T) {
 				t.Fatal("Lib.twice is not in the program")
 			}
 			count, err := flows()
-			if err == nil || !strings.Contains(err.Error(), "capture contract is stale") {
+			if err == nil || !strings.Contains(err.Error(), "result capture summary is stale") {
 				t.Fatalf("got %v, want a stale contract", err)
 			}
-			if count == 0 {
-				t.Fatal("a stale contract did not discharge the obligations anyway")
+			if count != 0 {
+				t.Fatal("unexpected capture-flow analysis")
 			}
 		})
 	}

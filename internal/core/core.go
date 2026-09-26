@@ -4,23 +4,14 @@
 // ground types on numeric operators, empty effect rows.
 package core
 
-import "github.com/waj/fango/internal/types"
-import "time"
-import "github.com/waj/fango/internal/source"
+import (
+	"github.com/waj/fango/internal/source"
+	"github.com/waj/fango/internal/types"
+)
 
 type Prog struct {
 	// DisableOptimizations is an internal differential-test switch.
-	DisableOptimizations    bool `object:"omit"`
-	CaptureContractsChecked bool
-	// CaptureFlowsProven says the caller already discharged these exact
-	// definitions' lifetime obligations. Lint still reconstructs the summaries
-	// and contracts independently; it may skip re-discharging obligations it
-	// has just confirmed it would derive from identical inputs.
-	CaptureFlowsProven bool
-	// ObserveFlow, when set, receives one report per run of the flow
-	// interpreter over this program, so a build can attribute the analysis
-	// apart from the pass that invoked it. It never affects the result.
-	ObserveFlow func(FlowRun) `object:"omit"`
+	DisableOptimizations bool `object:"omit"`
 	// ADTs lists declared types in declaration order — codegen emits marker
 	// interfaces, constructor structs, and derived eq/show from it. Bool is
 	// absent (native Go bool forever, doc/design.md, "Go backend and runtime").
@@ -32,13 +23,6 @@ type Prog struct {
 	// Entry selects the entry module's main definition by canonical symbol.
 	Entry        string
 	EntryDisplay Expr // optional, pure String observation used by tests and tooling
-}
-
-// FlowRun is one run of the capture-flow interpreter: its elapsed time, the
-// definitions it checked from as roots, and the call contexts it created.
-type FlowRun struct {
-	Duration        time.Duration
-	Roots, Contexts int
 }
 
 type EffectInstance struct {
@@ -70,28 +54,25 @@ type Def struct {
 	// as a function, re-evaluated per use.
 	TyParams []*types.TVar
 
-	Params          []string // non-empty ⇒ worker (doc/design.md, "Go backend and runtime"); uncurried Go signature = peeling len(Params) arrows off Type
-	ParamCaptures   []types.CaptureVar
-	EffectParams    []EffectInstance
-	RowParam        types.CaptureVar
-	RowEffects      []EffectInstance
-	ResultCaptures  types.CaptureSet
-	CaptureContract *types.CaptureContract
-	Control         types.Control
-	Body            Expr
-	// InlineBody is the bounded checked wrapper body exposed to importing
-	// execution lowerers. Ordinary dependency bodies remain private.
-	InlineBody Expr
-	ABI        ABISummary
+	Params         []string // non-empty ⇒ worker (doc/design.md, "Go backend and runtime"); uncurried Go signature = peeling len(Params) arrows off Type
+	ParamCaptures  []types.CaptureVar
+	EffectParams   []EffectInstance
+	RowParam       types.CaptureVar
+	RowEffects     []EffectInstance
+	ResultCaptures types.CaptureSet
+
+	Control types.Control
+	Body    Expr
+
+	ABI ABISummary
 }
 
 // ABISummary records backend representation facts that require inspecting an
 // owned body. Installed dependency objects expose this summary, not the body.
 type ABISummary struct {
-	Valid                 bool
-	NeedsFamily           bool
-	CallsControlledArg    bool
-	PassiveMachineFactory bool
+	Valid              bool
+	NeedsFamily        bool
+	CallsControlledArg bool
 }
 
 // IsWorker reports whether the definition emits as a function: it has term
@@ -161,43 +142,6 @@ type ControlExit struct {
 	Op      *types.EffectOp
 	Payload []Expr
 	Ty      types.Type
-}
-
-// Suspend is an explicit Machine suspension used by host-driven IR fixtures.
-// Source programs suspend by invoking a Coroutine pause callback.
-type Suspend struct {
-	Request Expr
-	Ty      types.Type
-}
-
-// CoroutineScope is the lexical coroutine owner boundary. Producer is a lazy
-// factory accepting a typed pause callback; Consumer receives the owned handle. The
-// boundary drives Producer's machine, so its own Control describes only the
-// residual execution protocol visible to the enclosing computation.
-type CoroutineScope struct {
-	Row       *RowArgument
-	Yield     EffectInstance
-	Traversal EffectInstance
-	Scope     types.ScopeID
-	Producer  Expr
-	Consumer  Expr
-	CursorTy  types.Type
-	Ty        types.Type
-	Control   types.Control
-}
-
-// CoroutineAdvance advances exactly once. Result supplies the checked Step
-// constructors used to package the result after the producer transfers back.
-type CoroutineAdvance struct {
-	// Reply supplies the initial input or the response to a pause. Close
-	// abandons without advancing and has no Reply or Result descriptor.
-	Reply  Expr
-	Close  bool
-	Row    *RowArgument
-	Cursor Expr
-	Result *types.ADTInfo
-	Access types.CursorAccess
-	Ty     types.Type
 }
 
 // FailureInspect is a pure projection from detached failure data. Argument
@@ -329,12 +273,12 @@ type TypeOf struct {
 
 // NativeCall is a saturated call to a declaration-backed primitive.
 type NativeCall struct {
-	Storage        types.NativeStorage
-	RetainsRequest bool
-	Name           string
-	Module         string
-	Args           []Expr
-	Ty             types.Type
+	Storage types.NativeStorage
+
+	Name   string
+	Module string
+	Args   []Expr
+	Ty     types.Type
 }
 
 // CalleeKind classifies application spines after saturation analysis
@@ -427,65 +371,61 @@ func (*Leaf) isTree()       {}
 func (*SwitchCtor) isTree() {}
 func (*SwitchLit) isTree()  {}
 
-func (*IntLit) isExpr()           {}
-func (*FloatLit) isExpr()         {}
-func (*StringLit) isExpr()        {}
-func (*CharLit) isExpr()          {}
-func (*UnitLit) isExpr()          {}
-func (*BoolLit) isExpr()          {}
-func (*VarRef) isExpr()           {}
-func (*Neg) isExpr()              {}
-func (*NativeCall) isExpr()       {}
-func (*Quote) isExpr()            {}
-func (*TypeOf) isExpr()           {}
-func (*If) isExpr()               {}
-func (*Perform) isExpr()          {}
-func (*ControlExit) isExpr()      {}
-func (*Suspend) isExpr()          {}
-func (*CoroutineScope) isExpr()   {}
-func (*CoroutineAdvance) isExpr() {}
-func (*FailureInspect) isExpr()   {}
-func (*Handle) isExpr()           {}
-func (*Bracket) isExpr()          {}
-func (*ResumeTail) isExpr()       {}
-func (*Seq) isExpr()              {}
-func (*Let) isExpr()              {}
-func (*Lambda) isExpr()           {}
-func (*App) isExpr()              {}
-func (*Case) isExpr()             {}
+func (*IntLit) isExpr()         {}
+func (*FloatLit) isExpr()       {}
+func (*StringLit) isExpr()      {}
+func (*CharLit) isExpr()        {}
+func (*UnitLit) isExpr()        {}
+func (*BoolLit) isExpr()        {}
+func (*VarRef) isExpr()         {}
+func (*Neg) isExpr()            {}
+func (*NativeCall) isExpr()     {}
+func (*Quote) isExpr()          {}
+func (*TypeOf) isExpr()         {}
+func (*If) isExpr()             {}
+func (*Perform) isExpr()        {}
+func (*ControlExit) isExpr()    {}
+func (*FailureInspect) isExpr() {}
+func (*Handle) isExpr()         {}
+func (*Bracket) isExpr()        {}
+func (*ResumeTail) isExpr()     {}
+func (*Seq) isExpr()            {}
+func (*Let) isExpr()            {}
+func (*Lambda) isExpr()         {}
+func (*App) isExpr()            {}
+func (*Case) isExpr()           {}
 
-func (e *IntLit) Type() types.Type           { return e.Ty }
-func (e *FloatLit) Type() types.Type         { return e.Ty }
-func (e *StringLit) Type() types.Type        { return e.Ty }
-func (e *CharLit) Type() types.Type          { return e.Ty }
-func (e *UnitLit) Type() types.Type          { return e.Ty }
-func (e *BoolLit) Type() types.Type          { return e.Ty }
-func (e *VarRef) Type() types.Type           { return e.Ty }
-func (e *Neg) Type() types.Type              { return e.Ty }
-func (e *NativeCall) Type() types.Type       { return e.Ty }
-func (e *Quote) Type() types.Type            { return e.Ty }
-func (e *TypeOf) Type() types.Type           { return e.Ty }
-func (e *If) Type() types.Type               { return e.Ty }
-func (e *Perform) Type() types.Type          { return e.Ty }
-func (e *ControlExit) Type() types.Type      { return e.Ty }
-func (e *Suspend) Type() types.Type          { return e.Ty }
-func (e *CoroutineScope) Type() types.Type   { return e.Ty }
-func (e *CoroutineAdvance) Type() types.Type { return e.Ty }
-func (e *FailureInspect) Type() types.Type   { return e.Ty }
-func (e *Handle) Type() types.Type           { return e.Ty }
-func (e *Bracket) Type() types.Type          { return e.Ty }
-func (e *ResumeTail) Type() types.Type       { return e.ClauseResult }
-func (e *Seq) Type() types.Type              { return e.Ty }
-func (e *Let) Type() types.Type              { return e.Ty }
-func (e *Lambda) Type() types.Type           { return e.Ty }
-func (e *App) Type() types.Type              { return e.Ty }
-func (e *Case) Type() types.Type             { return e.Ty }
+func (e *IntLit) Type() types.Type         { return e.Ty }
+func (e *FloatLit) Type() types.Type       { return e.Ty }
+func (e *StringLit) Type() types.Type      { return e.Ty }
+func (e *CharLit) Type() types.Type        { return e.Ty }
+func (e *UnitLit) Type() types.Type        { return e.Ty }
+func (e *BoolLit) Type() types.Type        { return e.Ty }
+func (e *VarRef) Type() types.Type         { return e.Ty }
+func (e *Neg) Type() types.Type            { return e.Ty }
+func (e *NativeCall) Type() types.Type     { return e.Ty }
+func (e *Quote) Type() types.Type          { return e.Ty }
+func (e *TypeOf) Type() types.Type         { return e.Ty }
+func (e *If) Type() types.Type             { return e.Ty }
+func (e *Perform) Type() types.Type        { return e.Ty }
+func (e *ControlExit) Type() types.Type    { return e.Ty }
+func (e *FailureInspect) Type() types.Type { return e.Ty }
+func (e *Handle) Type() types.Type         { return e.Ty }
+func (e *Bracket) Type() types.Type        { return e.Ty }
+func (e *ResumeTail) Type() types.Type     { return e.ClauseResult }
+func (e *Seq) Type() types.Type            { return e.Ty }
+func (e *Let) Type() types.Type            { return e.Ty }
+func (e *Lambda) Type() types.Type         { return e.Ty }
+func (e *App) Type() types.Type            { return e.Ty }
+func (e *Case) Type() types.Type           { return e.Ty }
 
 // Mentions reports whether name occurs in e. No-shadowing makes a plain
 // occurrence check exact: nothing inside e can rebind name. Used by the
 // elaborator (Rec detection) and codegen (unused-binding keep-alives).
 func Mentions(e Expr, name string) bool {
 	switch e := e.(type) {
+	case *TaskSpawn:
+		return e.Worker == name || Mentions(e.Scope, name) || Mentions(e.Input, name)
 	case *VarRef:
 		return e.Name == name
 	case *Neg:
@@ -497,20 +437,7 @@ func Mentions(e Expr, name string) bool {
 			}
 		}
 		return false
-	case *Suspend:
-		return Mentions(e.Request, name)
-	case *CoroutineScope:
-		return Mentions(e.Producer, name) || Mentions(e.Consumer, name)
 
-	case *CoroutineAdvance:
-		return Mentions(e.Cursor, name) || Mentions(e.Reply, name)
-	case *Work:
-		for _, arg := range e.Args {
-			if Mentions(arg, name) {
-				return true
-			}
-		}
-		return false
 	case *FailureInspect:
 
 		for _, arg := range e.Args {
@@ -519,8 +446,7 @@ func Mentions(e Expr, name string) bool {
 			}
 		}
 		return false
-	case *Completion:
-		return Mentions(e.Value, name)
+
 	case *NativeCall:
 		for _, a := range e.Args {
 			if Mentions(a, name) {

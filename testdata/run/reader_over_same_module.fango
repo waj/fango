@@ -1,27 +1,25 @@
--- The same shape as `reader_over_io`, with the source performing an effect
--- declared in this module. `readAll` drives the reader through the row it is
--- indexed by, so the loop's calls are ordinary direct calls: nothing here
--- exits or suspends.
-effect Reading
-    buffered : () -> String
-    refill : () -> Bool
+-- Explicit IO references keep independent reader state.
+import Runtime.Ref
 
 type Reader e =
-    { buffered : () ->{e} String
-    , refill : () ->{e} Bool
+    { buffered : () ->{IO | e} String
+    , refill : () ->{IO | e} Bool
     }
 
 type Source e = { pull : () ->{e} String }
 
-over : Source e -> (Reader e ->{e} a) ->{e} a
+over : Source e -> (Reader e ->{IO | e} a) ->{IO | e} a
 over source use =
-    handle use (Reader { buffered = \_ -> buffered(), refill = \_ -> refill() }) with pending = "" of
-        buffered () -> resume pending with pending
-        refill () ->
+    pending = Runtime.Ref.new ""
+    use (Reader {
+        buffered = \_ -> Runtime.Ref.read pending,
+        refill = \_ ->
             chunk = source.pull()
-            resume (chunk /= "") with pending ++ chunk
+            Runtime.Ref.write pending (Runtime.Ref.read pending ++ chunk)
+            chunk /= ""
+    })
 
-readAll : Reader e ->{e} String
+readAll : Reader e ->{IO | e} String
 readAll reader =
     if reader.refill() then readAll reader
     else reader.buffered()

@@ -25,12 +25,6 @@ func (ck *Checker) runnerControl(ty types.Type, arity int, equations []ast.Equat
 		controlled = controlled || ck.controlledValue(fn.Arg, map[int]bool{})
 		last, cur = fn, fn.Ret
 	}
-	for _, eq := range equations {
-		if ck.serviceActivation(eq.Body) {
-			last.Control = types.Control{Transport: types.Machine}
-			return t
-		}
-	}
 	if !controlled || types.FunctionControl(last).Polymorphic {
 		return ty
 	}
@@ -41,99 +35,6 @@ func (ck *Checker) runnerControl(ty types.Type, arity int, equations []ast.Equat
 		}
 	}
 	return ty
-}
-
-// Installing service evidence constructs Machine operation workers even when
-// the subject only returns a bound callable. The factory's source row stays
-// pure; its transport still has to support constructing those workers.
-func (ck *Checker) serviceActivation(e ast.Expr) bool {
-	if d := ck.Desugared[e]; d != nil {
-		return ck.serviceActivation(d)
-	}
-	call := ck.serviceActivation
-	switch e := e.(type) {
-	case *ast.Handle:
-		if len(e.Clauses) > 0 {
-			if op := ck.Operations[e.Clauses[0].Op]; op != nil && op.Owner.Service {
-				return true
-			}
-		}
-		if call(e.Body) || e.State != nil && call(e.State.Initial) {
-			return true
-		}
-		for _, c := range e.Clauses {
-			if call(c.Body) {
-				return true
-			}
-			for _, eq := range c.Equations {
-				if call(eq.Body) {
-					return true
-				}
-			}
-		}
-		if e.Return != nil {
-			if call(e.Return.Body) {
-				return true
-			}
-			for _, eq := range e.Return.Equations {
-				if call(eq.Body) {
-					return true
-				}
-			}
-		}
-	case *ast.App:
-		if ty := ck.ExprTypes[e.Fn]; ty != nil {
-			if fn, ok := ck.Sub.Apply(ty).(*types.TFun); ok && types.FunctionControl(fn).Transport == types.Machine && fn.Eff.Empty() {
-				return true
-			}
-		}
-		return call(e.Fn) || call(e.Arg)
-	case *ast.If:
-		return call(e.Cond) || call(e.Then) || call(e.Else)
-	case *ast.Block:
-		for _, b := range e.Binds {
-			if len(b.Params) == 0 && call(b.Body) {
-				return true
-			}
-		}
-		for _, item := range e.Items {
-			if item.Expr != nil && call(item.Expr) {
-				return true
-			}
-		}
-		return call(e.Result)
-	case *ast.Case:
-		if call(e.Scrutinee) {
-			return true
-		}
-		for _, b := range e.Branches {
-			if call(b.Body) {
-				return true
-			}
-		}
-	case *ast.RecordLit:
-		for _, field := range e.Fields {
-			if call(field.Value) {
-				return true
-			}
-		}
-	case *ast.RecordGet:
-		return call(e.Record)
-	case *ast.RecordUpdate:
-		if call(e.Record) {
-			return true
-		}
-		for _, field := range e.Fields {
-			if call(field.Value) {
-				return true
-			}
-		}
-	case *ast.Neg:
-		return call(e.Operand)
-	case *ast.BinOp:
-		return call(e.L) || call(e.R)
-	}
-	return false
 }
 
 func (ck *Checker) controlledValue(t types.Type, seen map[int]bool) bool {

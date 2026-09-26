@@ -2,15 +2,14 @@ import Stream
 import File
 import Fail
 
-emitLines file = case File.readLine file of
-    Nothing -> ()
+lineStep file = case File.readLine file of
+    Nothing -> Nothing
     Just line ->
         print ("read " ++ line.text)
-        Stream.yield line.text
-        emitLines file
+        Just (line.text, file)
 
-lines path = Stream.generate (\_ -> File.withFile path emitLines)
-
-pipeline() = Stream.toList (Stream.take 2 (Stream.filter (\line -> line /= "skip") (lines "input.txt")))
+pipeline() = File.withFile "input.txt" (\file ->
+    source = Stream.unfold file lineStep
+    Stream.toList (Stream.take 2 (Stream.filter (\line -> line /= "skip") source)))
 
 main() = print (Fail.attempt pipeline)

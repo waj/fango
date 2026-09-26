@@ -5,21 +5,8 @@ import (
 	goast "go/ast"
 
 	"github.com/waj/fango/internal/core"
-	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/types"
 )
-
-func (g *gen) machineRowArgs(worker *machineir.Worker, callRow goast.Expr) []goast.Expr {
-	var args []goast.Expr
-	for _, row := range worker.Rows {
-		if row == worker.RowParam {
-			args = append(args, callRow)
-		} else {
-			args = append(args, g.rowValue(row))
-		}
-	}
-	return args
-}
 
 func (g *gen) rowType() goast.Expr {
 	g.usesFangort = true
@@ -62,15 +49,12 @@ func (g *gen) rowArgument(row *core.RowArgument) goast.Expr {
 		value, actual := stack[len(stack)-1], g.currentEvidenceMode(ev.Unique)
 		var members []goast.Expr
 		effect := g.effects[ev.Unique]
-		lossless := effect != nil && (effect.Suspension || len(effect.Ops) > 0 && effect.Ops[0].Abort)
-		for _, mode := range []types.Transport{types.Direct, types.Exit, types.Machine} {
+		lossless := effect != nil && (len(effect.Ops) > 0 && effect.Ops[0].Abort)
+		for _, mode := range []types.Transport{types.Direct, types.Exit} {
 			if mode < actual && !lossless {
 				continue
 			}
 			members = append(members, &goast.KeyValueExpr{Key: ident(memberName(mode)), Value: g.evidenceArg(ev, value, actual, mode)})
-		}
-		if replay := g.abortReplayAdapter(ev, value); replay != nil {
-			members = append(members, &goast.KeyValueExpr{Key: ident("AbortReplay"), Value: replay})
 		}
 		args = append(args, &goast.CompositeLit{Type: selector("fangort", "EvidenceBinding"), Elts: []goast.Expr{
 			&goast.KeyValueExpr{Key: ident("Name"), Value: stringLit(ev.Name)},
@@ -90,9 +74,7 @@ func (g *gen) deferredEvidence(ev core.EffectInstance, row goast.Expr, mode type
 	if effect == nil {
 		panic("codegen: deferred evidence has no declaration")
 	}
-	if effect.Suspension {
-		panic("codegen: owned suspension cannot have deferred evidence")
-	}
+
 	var fields []goast.Expr
 	if len(effect.Ops) > 0 && effect.Ops[0].Abort {
 		resolver := funcLitParams(nil, &goast.StarExpr{X: selector("fangort", "ExitTarget")}, []goast.Stmt{returnStmt(&goast.SelectorExpr{X: lookup, Sel: ident("Target")})})
@@ -118,9 +100,8 @@ func (g *gen) deferredEvidence(ev core.EffectInstance, row goast.Expr, mode type
 			var result goast.Expr = g.goType(resultTy)
 			invoke := callExpr(&goast.SelectorExpr{X: lookup, Sel: ident("Op_" + linkName(op.Name))}, args...)
 			body := []goast.Stmt{returnStmt(invoke)}
-			if mode == types.Machine {
-				result = selector("fangort", "MachineStart")
-			} else if mode == types.Exit {
+
+			if mode == types.Exit {
 				result = g.outcomeType(resultTy)
 			} else if g.isUnit(resultTy) {
 				result, body = nil, []goast.Stmt{exprStmt(invoke)}

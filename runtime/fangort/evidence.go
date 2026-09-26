@@ -3,8 +3,7 @@ package fangort
 // EvidenceFamily carries the module-owned representations of one checked
 // effect instance. Entries below its required transport are absent.
 type EvidenceFamily struct {
-	Direct, Exit, Machine any
-	AbortReplay           func(*Failure) *ExitRequest
+	Direct, Exit any
 }
 
 type EvidenceBinding struct {
@@ -13,8 +12,7 @@ type EvidenceBinding struct {
 }
 
 // EvidenceRow is an explicit residual argument, never a global handler stack.
-// Ordinary extensions are immutable. Only a cursor's private forwarding node
-// changes between advances; closures using that node observe the current pull.
+// Extensions and bindings are immutable.
 type EvidenceRow struct {
 	tail   *EvidenceRow
 	fields map[string]EvidenceFamily
@@ -39,7 +37,6 @@ type EvidenceMode uint8
 const (
 	DirectEvidence EvidenceMode = iota
 	ExitEvidence
-	MachineEvidence
 )
 
 // RowEvidence projects a representation whose nominal type and availability
@@ -53,8 +50,6 @@ func RowEvidence[T any](row *EvidenceRow, name string, mode EvidenceMode) T {
 				value = family.Direct
 			case ExitEvidence:
 				value = family.Exit
-			case MachineEvidence:
-				value = family.Machine
 			}
 			if typed, ok := value.(T); ok {
 				return typed
@@ -64,41 +59,4 @@ func RowEvidence[T any](row *EvidenceRow, name string, mode EvidenceMode) T {
 		row = row.tail
 	}
 	panic("fangort: missing residual evidence")
-}
-
-// CursorEvidence is the stable reference supplied to a producer. Its boundary
-// is restored between pulls and before early-stop cleanup.
-type CursorEvidence struct {
-	row      EvidenceRow
-	boundary *EvidenceRow
-}
-
-func NewCursorEvidence(boundary *EvidenceRow) *CursorEvidence {
-	return &CursorEvidence{row: EvidenceRow{tail: boundary}, boundary: boundary}
-}
-
-func (e *CursorEvidence) Row() *EvidenceRow { return &e.row }
-
-func (e *CursorEvidence) Bind(row *EvidenceRow) {
-	if e == nil {
-		return
-	}
-	for parent := row; parent != nil; parent = parent.tail {
-		if parent == &e.row {
-			panic("fangort: cyclic cursor evidence")
-		}
-	}
-	e.row.tail = row
-}
-
-func (e *CursorEvidence) Restore() {
-	if e != nil {
-		e.row.tail = e.boundary
-	}
-}
-
-func (e *CursorEvidence) Clear() {
-	if e != nil {
-		e.row.tail, e.boundary = nil, nil
-	}
 }

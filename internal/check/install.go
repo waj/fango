@@ -114,7 +114,7 @@ func InstallObject(ck *infer.Checker, stage *staging.Session, object *ModuleObje
 	for name, summary := range state.Captures {
 		ck.CaptureSummaries[name] = summary
 		if scheme, ok := ck.Env.Lookup(name); ok {
-			scheme.CaptureVars, scheme.Captures, scheme.CaptureContract = append([]types.CaptureVar(nil), summary.Vars...), summary.Captures, summary.Contract
+			scheme.CaptureVars, scheme.Captures = append([]types.CaptureVar(nil), summary.Vars...), summary.Captures
 			ck.Env.Bind(name, scheme)
 		}
 	}
@@ -499,9 +499,7 @@ var (
 )
 
 // resumeID is the one mapping from a written resume identity to this
-// installation's. Both the typed identity in a body and the plain int a
-// capture flow records for a resume node go through it, so they cannot end up
-// naming different resumes.
+// installation's. All occurrences use the same mapping.
 func (r *remapper) resumeID(old types.ResumeID) types.ResumeID {
 	if old == 0 {
 		return 0
@@ -804,59 +802,6 @@ func (r *remapper) remapStruct(v reflect.Value) {
 			r.effect[old] = installed.Unique
 		} else if r.err == nil {
 			r.err = fmt.Errorf("unknown effect identity %q (%d)", x.Name, old)
-		}
-	case *types.CaptureContract:
-		for i, id := range x.Effects {
-			if n, ok := r.effect[id]; ok {
-				x.Effects[i] = n
-			} else if r.err == nil {
-				r.err = fmt.Errorf("unknown effect identity %d in capture contract", id)
-			}
-		}
-		for i, id := range x.RowEffects {
-			if n, ok := r.effect[id]; ok {
-				x.RowEffects[i] = n
-			} else if r.err == nil {
-				r.err = fmt.Errorf("unknown row effect identity %d in capture contract", id)
-			}
-		}
-		for i, id := range x.TypeParams {
-			if n, ok := r.vars[id]; ok {
-				x.TypeParams[i] = n
-			}
-		}
-	case *types.CaptureFlow:
-		for i, id := range x.Effects {
-			if n, ok := r.effect[id]; ok {
-				x.Effects[i] = n
-			} else if r.err == nil {
-				r.err = fmt.Errorf("unknown effect identity %d in capture flow", id)
-			}
-		}
-		// A lambda's deferred row effects are the same identities its
-		// evidence parameters are, so they are remapped with them; left
-		// behind, they name effects from the run that wrote the artifact and
-		// the contract stops matching the body it describes.
-		for i, id := range x.Deferred {
-			if n, ok := r.effect[id]; ok {
-				x.Deferred[i] = n
-			} else if r.err == nil {
-				r.err = fmt.Errorf("unknown deferred effect identity %d in capture flow", id)
-			}
-		}
-		// A resume node's Index is the resume identity it belongs to, held as
-		// a plain int. The body states the same identity in its own type, so
-		// both must go through the one mapping to keep agreeing.
-		if x.Kind == "resume" {
-			x.Index = int(r.resumeID(types.ResumeID(x.Index)))
-		}
-	case *types.CaptureRow:
-		for i, id := range x.Effects {
-			if n, ok := r.effect[id]; ok {
-				x.Effects[i] = n
-			} else if r.err == nil {
-				r.err = fmt.Errorf("unknown effect identity %d in capture row", id)
-			}
 		}
 	case *core.Quote:
 		if x.Template >= r.templateOld {

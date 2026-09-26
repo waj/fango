@@ -3,10 +3,11 @@ package codegen
 import (
 	"bytes"
 	"fmt"
-	"github.com/waj/fango/internal/types"
 	goast "go/ast"
 	"go/format"
 	"go/token"
+
+	"github.com/waj/fango/internal/types"
 )
 
 func descriptorParamName(name string) string { return "type_" + name }

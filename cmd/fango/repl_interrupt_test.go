@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestREPLAsyncInterruptAndInputRecovery(t *testing.T) {
+func TestREPLTaskInterruptAndInputRecovery(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, cliBinary(t), "repl")
@@ -70,14 +70,14 @@ func TestREPLAsyncInterruptAndInputRecovery(t *testing.T) {
 		}
 	}
 	waitFor("> ")
-	write("import Async\nimport Async.IO\n")
-	waitFor("loaded Async.IO")
-	write("work() = Async.run (\\_ ->\n    print \"started\"\n    Async.IO.sleep 3000\n    1)\n\nwork()\n")
+	write("import Task\n")
+	waitFor("loaded Task")
+	write("worker : Task.Context -> Int ->{IO} Int\nworker context value =\n    print \"started\"\n    ignore (Task.sleep context 60000)\n    value\n\nwork() = Task.scope (\\scope -> Task.await (Task.spawn scope worker 1))\nwork()\n")
 	waitFor("started")
 	if err := cmd.Process.Signal(os.Interrupt); err != nil {
 		t.Fatal(err)
 	}
-	waitFor("Err Interrupted")
+	waitFor("Err Cancelled")
 	write("line() =\n    print \"reading\"\n    readLine()\n\nline()\n")
 	waitFor("reading")
 	if err := cmd.Process.Signal(os.Interrupt); err != nil {

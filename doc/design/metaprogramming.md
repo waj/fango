@@ -68,7 +68,7 @@ cutoffs preserve concrete evidence between staging and final elaboration; operan
 use instances visible at the splice site.
 
 Stage-specific semantic lint admits checked quotes/reflected values and lowers
-the exact operand plus reachable completed definitions through the same Machine IR.
+the exact operand plus reachable completed definitions through the same Core evaluator.
 A deriving dictionary still being expanded is not executable. The stage environment
 retains elaborated definitions for capture substitution and lowering, incrementally
 installs imported intrinsics, and rebuilds after rollback. A cached stage section

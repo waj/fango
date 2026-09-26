@@ -46,8 +46,8 @@ async function main() {
   const pragma = grammar.tokenizeLine('{-# resource #-}').tokens;
   assert(pragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
   const sharedPragma = grammar.tokenizeLine('{-# shared-resource #-}').tokens;
-  assert(sharedPragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
-  assert(grammar.tokenizeLine('{-# service #-}').tokens.some(t => t.scopes.includes('keyword.control.directive.fango')));
+  assert(!sharedPragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
+  assert(!grammar.tokenizeLine('{-# service #-}').tokens.some(t => t.scopes.includes('keyword.control.directive.fango')));
   assert(grammar.tokenizeLine('resource = 1').tokens.every(t => !t.scopes.includes('keyword.control.directive.fango')));
 
   const root = path.resolve(__dirname, "../../..");

@@ -2,23 +2,12 @@ package eval
 
 import (
 	"fmt"
+
 	"github.com/waj/fango/internal/types"
 	"github.com/waj/fango/runtime/fangort"
 )
 
 type descriptorEnv map[int]*fangort.TypeDescriptor
-
-func (f *Frame) descriptors() descriptorEnv {
-	result := descriptorEnv{}
-	for frame := f; frame != nil; frame = frame.parent {
-		for id, descriptor := range frame.types {
-			if result[id] == nil {
-				result[id] = descriptor
-			}
-		}
-	}
-	return result
-}
 
 func (in *interp) typeDescriptor(t types.Type, fr *Frame) (*fangort.TypeDescriptor, error) {
 	switch t := t.(type) {

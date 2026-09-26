@@ -1,0 +1,13 @@
+effect Counter
+    readCounter : () -> Int
+
+keep : (() ->{e} Int) -> () ->{e} Int
+keep action = action
+
+leak =
+    handle keep (\_ -> readCounter()) with state = 0 of
+        readCounter () -> resume state with state
+
+main =
+    handle leak() of
+        readCounter () -> resume 41

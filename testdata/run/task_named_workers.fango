@@ -1,0 +1,11 @@
+import Task
+worker : Task.Context -> Int ->{IO} Int
+worker context number =
+    ignore (Task.sleep context 1)
+    number * 2
+main() = Task.scope (\scope ->
+    first = Task.spawn scope worker 21
+    second = Task.spawn scope worker 10
+    print (Task.await first)
+    print (Task.await second)
+    print (Task.await first))

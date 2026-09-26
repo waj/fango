@@ -24,6 +24,9 @@ import (
 //go:embed workload.fango
 var workload string
 
+//go:embed task_workload.fango
+var taskWorkload string
+
 const baseline = "b102a4e10bb6c4199fd5445ca9003fa42b29be02"
 
 type sample struct {
@@ -116,6 +119,9 @@ func run() error {
 			ending = "probe workers limit yielding =\n    case Async.Cooperative.run (\\_ -> runWorkers workers limit yielding) of\n        Ok total -> total\n        Err _ -> -1\n"
 		}
 		source += "\n" + workload + "\n" + annotation + ending + "\nmain() = print (probe 16 20000 True)\n"
+		if _, err := os.Stat(filepath.Join(dir, "stdlib", "Task.fango")); err == nil {
+			source = taskWorkload
+		}
 		if err = os.Mkdir(filepath.Join(dir, "workload"), 0755); err != nil {
 			return err
 		}
@@ -221,7 +227,7 @@ func measure(b build, c scenario, reps, procs int, profile string) (sample, erro
 	return sample{}, fmt.Errorf("missing measurement: %s", out)
 }
 func snapshot(root, dest string) error {
-	data, err := command(root, nil, "git", "ls-files", "-z")
+	data, err := command(root, nil, "git", "ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	if err != nil {
 		return err
 	}

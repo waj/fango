@@ -1,29 +1,20 @@
-import Runtime.Coroutine
 import Stream
 import Iterator
 import Maybe exposing (Maybe(..))
 
-foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Runtime.Coroutine.Drive | e} b
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator state a e ->{e} b
 foldCursor combine initial cursor = case Iterator.next cursor of
     Nothing -> initial
-    Just value -> foldCursor combine (combine value initial) cursor
+    Just (value, next) -> foldCursor combine (combine value initial) next
 
-eachCursor : (a ->{e} ()) -> Iterator.Iterator a e ->{Runtime.Coroutine.Drive | e} ()
+eachCursor : (a ->{e} ()) -> Iterator.Iterator state a e ->{e} ()
 eachCursor action cursor = case Iterator.next cursor of
     Nothing -> ()
-    Just value ->
+    Just (value, next) ->
         action value
-        eachCursor action cursor
+        eachCursor action next
 
 main() =
-    Stream.withCursor (Stream.generate (\_ ->
-        Stream.yield 10
-        Stream.yield 20
-        Stream.yield 30)) (\iterator ->
-            eachCursor print iterator)
-    total = Stream.withCursor (Stream.generate (\_ ->
-        Stream.yield 10
-        Stream.yield 20
-        Stream.yield 30)) (\iterator ->
-            foldCursor (\value -> \sum -> value + sum) 0 iterator)
-    print total
+    source = Stream.fromList [10, 20, 30]
+    Stream.withCursor source (eachCursor print)
+    print (Stream.withCursor source (foldCursor (\value sum -> value + sum) 0))

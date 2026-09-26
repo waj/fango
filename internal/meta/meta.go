@@ -9,9 +9,11 @@
 // generated code points at the line the quote was written on.
 package meta
 
-import "github.com/waj/fango/internal/ast"
-import "github.com/waj/fango/internal/source"
-import "github.com/waj/fango/internal/types"
+import (
+	"github.com/waj/fango/internal/ast"
+	"github.com/waj/fango/internal/source"
+	"github.com/waj/fango/internal/types"
+)
 
 // Schema reads the declaration table a reflected type belongs to. The checker
 // implements it, which keeps this package below inference while still letting

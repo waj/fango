@@ -1,5 +1,10 @@
 # Roadmap: compile latency
 
+**Direction superseded.** The [simplification roadmap](roadmap-simplification.md)
+is authoritative for new work. Existing stage IDs and headings remain stable;
+unfinished stages below are deferred. Current contracts are documented in
+design/reference; links to removed APIs point to their historical revision.
+
 This document owns the cost of a cold build: what the compiler spends between
 parsing and handing generated Go to the toolchain, on a program whose modules
 are not yet in the [compilation cache](design/backend.md#module-emission-and-build-cache).
@@ -7,7 +12,7 @@ Warm builds, precompiled library artifacts, and the Go toolchain's own time are
 out of scope: [modules and distribution](roadmap-modules.md#distributing-the-bundled-sources)
 owns shipping prebuilt objects, and the [cache section](roadmap.md#compilation-cache)
 owns what the cache itself still lacks. The main
-[roadmap](roadmap.md#capture-flow-analysis-cost) summarizes priority.
+[roadmap](roadmap.md#deferred-concurrency-and-analysis-proposals) summarizes priority.
 
 Stage IDs and titles follow the [repository milestone rules](../AGENTS.md).
 Promote completed stages into [design](design.md) and remove them or mark them
@@ -156,7 +161,7 @@ the sharing key would actually fold.
 | CL2 | — | ownership, pipeline, metaprogramming |
 | CL3 | — | inference |
 | CL4 | — | backend (cache) |
-| CL5 | CL1, CL2, measurement | ownership; the [roadmap entry](roadmap.md#capture-flow-analysis-cost) |
+| CL5 | CL1, CL2, measurement | ownership; the [roadmap entry](roadmap.md#deferred-concurrency-and-analysis-proposals) |
 
 ## Open decisions
 

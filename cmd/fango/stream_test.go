@@ -6,7 +6,7 @@ import (
 )
 
 func TestStreamIntegration(t *testing.T) {
-	for _, name := range []string{"stream_operations", "stream_demand", "stream_cleanup", "stream_file", "stream_parser", "stream_stored_callbacks", "stream_evidence_shadow", "stream_recovery", "stream_handler", "async_c1_representation", "failure_reports"} {
+	for _, name := range []string{"stream_operations", "stream_demand", "stream_cleanup", "stream_file", "stream_parser", "stream_stored_callbacks", "stream_evidence_shadow", "stream_recovery", "stream_handler", "failure_reports"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", "testdata", "run", name+".fango")
 			runDifferentialCase(t, path, batchRunner(path))
@@ -20,17 +20,12 @@ func TestIndependentPullAbstraction(t *testing.T) {
 }
 
 func TestFailureReportCapture(t *testing.T) {
-	for _, name := range []string{"err_failure_report_resource_escape", "err_failure_report_stored_escape", "failure_report_borrow"} {
+	for _, name := range []string{"failure_report_borrow"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", "testdata", "run", name+".fango")
 			runDifferentialCase(t, path, batchRunner(path))
 		})
 	}
-}
-
-func TestStreamResidualOwnership(t *testing.T) {
-	path := filepath.Join("..", "..", "testdata", "run", "err_iterator_handler_reentrant.fango")
-	runDifferentialCase(t, path, batchRunner(path))
 }
 
 func TestResidualCallbackRepresentations(t *testing.T) {
@@ -47,7 +42,7 @@ func TestPrivateFailurePayloads(t *testing.T) {
 	runDifferentialCase(t, path, cliRunner(path))
 }
 
-func TestMachineStoredEffectfulResult(t *testing.T) {
+func TestStoredEffectfulResult(t *testing.T) {
 	for _, name := range []string{"state_independent_result", "scope_state", "state_handlers"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", "testdata", "run", name+".fango")

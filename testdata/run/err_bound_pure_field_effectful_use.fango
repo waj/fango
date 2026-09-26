@@ -1,0 +1,26 @@
+-- A handled closure cannot be coerced to an arrow that hides its effect.
+effect Ask
+    ask : () -> String
+
+effect Extra
+    bump : Int -> Int
+
+type AskInstance = { askNow : () -> String }
+
+withAsk : String -> (AskInstance ->{e} a) ->{e} a
+withAsk str f =
+    handle f (AskInstance { askNow = \_ -> ask() }) of
+        ask () -> resume str
+
+body : () ->{Extra} String
+body() =
+    withAsk "Hello" (\hello ->
+        withAsk "Bye" (\bye ->
+            n = bump 1
+            hello.askNow() ++ bye.askNow() ++ (if n > 1 then "!" else "?")))
+
+main() =
+    text =
+        handle body() of
+            bump n -> resume (n + 1)
+    print text

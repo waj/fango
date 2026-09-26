@@ -54,9 +54,7 @@ intrinsic-specific checks concern ownership and lowering.
 | ResumeTail | Exactly one owning tail resume on each normal path |
 | ControlExit | Operation descriptor, payload, and lexical target agree |
 | Bracket | Only in Runtime.Scope.bracket; unique scope, Unit release, joined child control |
-| CoroutineScope | Only in Runtime.Coroutine.with; owner, pause factory, and driver protocols agree |
-| CoroutineAdvance | Checked handle, reply/Step protocol, residual row, exclusive access; close returns Unit |
-| Suspend | Unowned host-driven Machine fixture boundary; not emitted from source |
+| TaskSpawn | Closed named worker, explicit transferable input/output, no inherited evidence |
 | FailureInspect | Checked descriptor and Maybe packaging; no target/resumption access |
 
 ## Residual evidence rows
@@ -76,15 +74,9 @@ cannot retag a stored value to a different residual-row ABI.
 The interpreter passes rows explicitly on worker/closure calls; deferred
 operations resolve through them at execution. Captured evidence stays fixed,
 and mutable-frame closure snapshots retain only referenced rows. Self-frame
-reuse requires forwarding the identical row without overlays. Machine calls
-and cursor transitions retain typed row inputs; lint rejects stale deferred
-evidence or missing call rows. Frames and handlers restore rows on completion.
-
-Direct, Exit, and Machine members share this explicit ABI. Elaboration records
-instantiated residual labels before erasure. Abort projections select a fixed
-activation before unwinding. Capture contracts substitute the actual row's
-owners while cursor advancement holds its borrow. Captured outer rows retain
-resource captures; invocation rows are local binders.
+reuse requires forwarding the identical row without overlays. Lint rejects
+missing call rows and stale evidence. Direct and Exit members share this ABI.
+Abort projections select a fixed activation before unwinding.
 
 ## Adapters and specialization
 
@@ -110,40 +102,19 @@ Both variants are emitted by the defining module regardless of consumers.
 Strict Let bindings prevent duplication and preserve beta-reduction order.
 The generic worker remains available and all variants pass ordinary lint.
 
-Checked definitions also expose bounded execution templates for small Machine
-wrappers. The whitelist permits strict bindings, matches, constructors, known
-calls, coroutine advancement, and opening an existing Work package against its
-owner. Work opening preserves the runtime owner check and introduces no
-authority. The whitelist admits no callbacks, evidence binders, resource
-owners, state, cleanup, or staging nodes. Recursive call cycles and bodies over
-48 expression nodes are excluded. Templates remain unexpanded semantic Core;
-the original body and capture contract are the interpreter and ownership
-reference. Their contents participate in the module ABI fingerprint.
-
-After semantic Core validation, Machine lowering may instantiate these
-templates at saturated, statically known calls. It substitutes types, freshens
-local bindings and decision-tree names, and forwards the caller's checked
-residual evidence. Arguments become strict bindings in their original order.
-Expansion is limited to four nested templates and 128 added expression nodes
-per worker. Calls outside this whitelist or budget retain their ordinary ABI.
-This is an automatic execution optimization; it introduces no source pragma.
-
 ## Lint boundaries and control normalization
 
 Core lint rejects unsolved metavariables, malformed instantiations, mismatched
 callee/evidence, invalid handlers, and residual open source rows. It reconstructs
 binding types for fields, handler parameters/state/results, and resources. It
-also independently reconstructs [capture contracts](ownership.md), compares
-complete lexical evidence stacks, and repeats ownership proofs after transforms.
+also independently reconstructs [structural evidence summaries](ownership.md)
+and compares lexical evidence stacks after transforms.
 
 Transport-polymorphic calls/operations in arguments, guards, fields, prefixes,
 and return transformations are ANF-hoisted. Exit emission must inspect an
 Outcome before evaluating the next source expression. Lint checks conventions
 on callees/evidence and rejects control-producing nodes in unhandled slots.
 
-Ordinary lint rejects Machine Core unless the canonical Runtime.Coroutine.with owner
-enables the private boundary, and always rejects raw host Suspend nodes.
-Pre-machine lint admits checked Machine/Suspend nodes
-while preserving other semantic invariants; staging additionally admits checked
-quotes/reflected constants. Emission rejects compile-time values. Core dumps
-show non-Direct conventions so ABI decisions remain reviewable.
+Stage lint additionally admits checked quotes and reflected constants for
+compile-time evaluation. Emission rejects compile-time values. Core dumps show
+non-Direct conventions so ABI decisions remain reviewable.

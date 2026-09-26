@@ -39,6 +39,9 @@ func (el *elab) app(e *ast.App) core.Expr {
 		args[len(rev)-1-i] = a
 	}
 	if v, ok := head.(*ast.Var); ok {
+		if v.Name == types.TaskSpawnName {
+			return el.taskSpawn(e, args)
+		}
 		if _, local := el.scopeIdx[v.Name]; local {
 			res := el.expr(head)
 			raw := el.apply(el.ck.ExprTypes[head])
@@ -164,14 +167,6 @@ func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args [
 		body = &core.ControlExit{Effect: inst, Op: op, Payload: coreArgs, Ty: ret}
 	} else {
 		inst := el.effectInstance(op, rawTy)
-		if op.Invocation != nil {
-			last := arrowAt(rawTy, op.Arity-1).(*types.TFun)
-			for _, label := range last.Eff.Labels {
-				if label.Unique == op.Invocation.Unique {
-					coreArgs = append(coreArgs, el.invocationArgument(label))
-				}
-			}
-		}
 		body = &core.Perform{Op: op, Effect: inst, Args: coreArgs, Ty: ret, Control: inst.Control}
 	}
 	if len(effectParams) > 0 {
@@ -215,7 +210,7 @@ func (el *elab) nativeApply(n *types.NativeInfo, nativeTy, raw types.Type, args 
 		el.tmp++
 		coreArgs = append(coreArgs, &core.VarRef{Name: name, Local: true, Ty: argTys[i]})
 	}
-	var body core.Expr = el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Storage: n.Storage, RetainsRequest: n.RetainsRequest, Args: coreArgs, Ty: ret})
+	var body core.Expr = el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Storage: n.Storage, Args: coreArgs, Ty: ret})
 	for i := n.Arity - 1; i >= len(args); i-- {
 		body = &core.Lambda{SourceType: arrowAt(raw, i), Param: coreArgs[i].(*core.VarRef).Name, Body: body, Ty: arrowAt(nativeTy, i), ParamCapture: el.ck.Sup.FreshCapture()}
 	}
@@ -564,7 +559,7 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...
 				kept = append(kept, ev)
 				continue
 			}
-			if len(el.evidence[ev.Unique]) == 0 && types.FunctionOpenRow(wantFn) {
+			if types.FunctionOpenRow(wantFn) {
 				e.RowEffects = append(e.RowEffects, ev)
 				continue
 			}
@@ -603,7 +598,7 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...
 	effectParams := el.bindEffectParams(executingEffects(want, 1))
 	var rowEffects []core.EffectInstance
 	for _, label := range actualFn.Eff.Labels {
-		if types.RuntimeEvidenceEffect(label) && len(el.evidence[label.Unique]) == 0 && types.FunctionOpenRow(wantFn) {
+		if types.RuntimeEvidenceEffect(label) && types.FunctionOpenRow(wantFn) {
 			rowEffects = append(rowEffects, core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Control: el.evidenceControl(label.Unique)})
 		}
 	}

@@ -104,25 +104,19 @@ polymorphic box by an untyped ID. Same-index aliases between opaque wrapper type
 are supported. Writes return Unit or Bool. These contracts apply to value
 natives; ordinary Fango effect handlers can wrap them.
 
-Storage preserves the payload's captures. Retaining a borrowed value beyond
-its owner is rejected, including through helper functions and opaque writes.
-Storage alone grants no sharing permission. The bundled
-[write-once cells](library-cells.md) combine this boundary with a scope owner.
+Storage keeps its typed payload alive but does not extend the lifetime of any
+external resource it references. Native resource operations check validity at
+runtime. [Runtime.Ref](../../stdlib/Runtime/Ref.fango) provides ordinary IO-marked
+mutable storage; native handles and functions cannot cross a task boundary.
+Native code must honor its declaration and may not invoke opaque Fango payloads.
 
-## Shared native resources
+## IO references
 
-`{-# shared-resource #-}` implies `resource` and requires exactly one constructor
-with one canonical `Runtime.Native.Any` field. It declares that the native operations
-provide their own synchronization. Sharing is nominal: another resource type
-with the same Go representation remains unshared. Native implementations are
-trusted to honor this declaration.
-
-Cooperative children may retain such a handle when its owner outlives their
-registry. The scope drains the children before releasing the shared handle.
-Parent mutable handler state, borrowed cursor/pause authority, and unshared
-native resources remain `WORK CAPABILITY TRANSFER` errors, including when hidden
-in closures, ADTs, dictionaries, or handler evidence. This declaration does not
-authorize concurrent Fango callbacks or background retention of `FangoHost`.
+`Runtime.Ref` provides `new : a ->{IO} Ref a`, `read : Ref a ->{IO} a`, and
+`write : Ref a -> a ->{IO} ()`. Aliases observe the latest write. The reference
+keeps its value alive until garbage collection; it has no close operation.
+Its representation is private, and references cannot cross the task boundary.
+Reader and Writer use this ordinary native module for their private buffers.
 
 ## Native effect operations
 
@@ -149,10 +143,8 @@ call and must not replace it or retain it for asynchronous work. Host input
 buffer access and individual output writes are serialized. In the interpreter
 worker, concurrent host calls keep each request paired with its own reply.
 
-Background work instead uses [NativeRequest's scoped token protocol](library-native-requests.md).
-The canonical `Runtime.NativeRequest.Registration` is an imported boundary wrapper for
-checked Unit-returning submissions. Its `FangoRequest` support alias carries
-readiness and quiescence authority, never a Fango callback or process host.
+Concurrent Fango invocation uses the restricted [task boundary](library-tasks.md).
+Arbitrary native background callbacks are not supported.
 
 ## Build and interpreter lifecycle
 

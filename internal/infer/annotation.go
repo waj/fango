@@ -267,7 +267,7 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 			args[i] = at
 		}
 		abort := len(info.Ops) > 0 && info.Ops[0].Abort
-		result.Labels = append(result.Labels, types.EffLabel{Unique: info.Unique, Name: info.Name, Args: args, Abort: abort, Suspension: info.Suspension})
+		result.Labels = append(result.Labels, types.EffLabel{Unique: info.Unique, Name: info.Name, Args: args, Abort: abort})
 	}
 	if row.Tail != "" {
 		if old, ok := tv.vars[row.Tail]; ok {

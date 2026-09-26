@@ -547,19 +547,9 @@ func validateModuleDecls(n *node) []diag.Error {
 				}
 			} else {
 				callDecls[d.Name] = d
-				if n.bundled {
-					if spec, ok := natives.Lookup(canonical(n.name, d.Name)); !ok || spec.Arity != nativeArity(d.Ann) || spec.Effect {
-						errs = append(errs, diag.Errorf(d.Native.Sp, "INVALID BUNDLED NATIVE", "Bundled native `%s.%s` does not match the interpreter registry.", n.name, d.Name))
-					}
-				}
 			}
 		case *ast.EffectDecl:
-			if name := canonical(n.name, d.Name); n.bundled && (name == types.CoroutineSuspensionName || name == types.CoroutineDriveName) {
-				d.CompilerSuspension = true
-			}
-			if n.bundled && canonical(n.name, d.Name) == types.ServiceInvocationName {
-				d.CompilerInvocation = true
-			}
+
 			for _, op := range d.Ops {
 				declared[op.Name] = true
 				if op.Native == nil {
@@ -729,12 +719,12 @@ func validateSidecar(n *node, decls map[string]*ast.ValueDecl, opDecls map[strin
 			for _, raw := range gd.Specs {
 				switch spec := raw.(type) {
 				case *goast.TypeSpec:
-					if spec.Name.Name == "FangoHost" || reservedRequestIdentifier(spec.Name.Name) || spec.Name.Name == "FangoNativeHost" {
+					if spec.Name.Name == "FangoHost" || spec.Name.Name == "FangoNativeHost" {
 						errs = append(errs, diag.Errorf(source.Span{}, "RESERVED NATIVE IDENTIFIER", "%s declares generated identifier `%s`.", n.nativePath, spec.Name.Name))
 					}
 				case *goast.ValueSpec:
 					for _, name := range spec.Names {
-						if name.Name == "FangoHost" || reservedRequestIdentifier(name.Name) || name.Name == "FangoNativeHost" {
+						if name.Name == "FangoHost" || name.Name == "FangoNativeHost" {
 							errs = append(errs, diag.Errorf(source.Span{}, "RESERVED NATIVE IDENTIFIER", "%s declares generated identifier `%s`.", n.nativePath, name.Name))
 						}
 					}
@@ -742,7 +732,7 @@ func validateSidecar(n *node, decls map[string]*ast.ValueDecl, opDecls map[strin
 			}
 		}
 		if fn, ok := d.(*goast.FuncDecl); ok && fn.Recv == nil && goast.IsExported(fn.Name.Name) {
-			if fn.Name.Name == "FangoHost" || reservedRequestIdentifier(fn.Name.Name) || fn.Name.Name == "FangoNativeHost" {
+			if fn.Name.Name == "FangoHost" || fn.Name.Name == "FangoNativeHost" {
 				errs = append(errs, diag.Errorf(source.Span{}, "RESERVED NATIVE IDENTIFIER", "%s declares generated identifier `%s`.", n.nativePath, fn.Name.Name))
 				continue
 			}
@@ -2014,8 +2004,4 @@ func (r *resolver) patternInner(p ast.Pattern, locals, outer map[string]bool, va
 func ManifestJSON(entries []ManifestEntry) []byte {
 	b, _ := json.MarshalIndent(entries, "", "  ")
 	return append(b, '\n')
-}
-
-func reservedRequestIdentifier(name string) bool {
-	return name == "FangoRequest" || name == "FangoRequestHost" || name == "FangoNewRequestHost" || name == "FangoEventBridge" || name == "FangoNewEventBridge"
 }

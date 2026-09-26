@@ -1,10 +1,11 @@
 package elaborate_test
 
 import (
-	"github.com/waj/fango/internal/elaborate"
-	"github.com/waj/fango/internal/staging"
 	"strings"
 	"testing"
+
+	"github.com/waj/fango/internal/elaborate"
+	"github.com/waj/fango/internal/staging"
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/infer"

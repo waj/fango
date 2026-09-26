@@ -15,7 +15,6 @@
 package elaborate
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -53,7 +52,7 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 			adts = append(adts, adt)
 		}
 	}
-	p := &core.Prog{ADTs: adts, Effects: effects, Entry: ck.EntryName, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck), ObserveFlow: ck.ObserveFlow}
+	p := &core.Prog{ADTs: adts, Effects: effects, Entry: ck.EntryName, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck)}
 	var errs []diag.Error
 	for _, inst := range ck.Instances {
 		if ck.IsCompileTimeOnly(inst.Class.DictType(inst.Head)) {
@@ -162,7 +161,7 @@ func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsi
 	if len(errs) > 0 {
 		return defs, errs
 	}
-	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, ObserveFlow: ck.ObserveFlow}
+	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
 	specializeScalars(p, kept, ck)
 	bindRows(p.Defs, ck)
 	errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, source.Span{})...)
@@ -175,17 +174,14 @@ func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsi
 // context of the checker's current types, effects, and natives — the REPL's
 // counterpart to the lint the batch pipeline runs on a whole program.
 func LintProg(defs []core.Def, ck *infer.Checker) []error {
-	return core.Lint(&core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck), ObserveFlow: ck.ObserveFlow}, ck.B)
+	return core.Lint(&core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck)}, ck.B)
 }
 
 // LintProgIn validates an owned module increment against installed dependency
 // signatures and capture contracts without traversing dependency bodies.
-// flowsProven says these exact definitions have already had their lifetime
-// obligations discharged, which lets lint compare the contracts it
-// reconstructs without discharging them a second time.
-func LintProgIn(defs, context []core.Def, ck *infer.Checker, flowsProven bool) []error {
+func LintProgIn(defs, context []core.Def, ck *infer.Checker) []error {
 	return core.LintIn(&core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives,
-		Intrinsics: intrinsicIdentities(ck), CaptureFlowsProven: flowsProven, ObserveFlow: ck.ObserveFlow}, context, ck.B)
+		Intrinsics: intrinsicIdentities(ck)}, context, ck.B)
 }
 
 // AssembleModuleProgram joins already checked and owner-linted module Core.
@@ -198,7 +194,7 @@ func AssembleModuleProgram(defs []core.Def, infos []infer.DeclInfo, entry string
 			adts = append(adts, adt)
 		}
 	}
-	p := &core.Prog{ADTs: adts, Effects: effectList(ck), Defs: defs, Entry: entry, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck), CaptureContractsChecked: true}
+	p := &core.Prog{ADTs: adts, Effects: effectList(ck), Defs: defs, Entry: entry, Natives: ck.Natives, Intrinsics: intrinsicIdentities(ck)}
 	spans := map[string]source.Span{}
 	for _, info := range infos {
 		spans[info.Name] = info.NameSpan
@@ -236,14 +232,6 @@ func DeclIn(info infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]core.
 
 // DeclsIn elaborates complete dependency groups before analyzing captures.
 func DeclsIn(infos []infer.DeclInfo, context []core.Def, ck *infer.Checker) ([]core.Def, []diag.Error) {
-	return DeclsProvenIn(infos, context, nil, ck)
-}
-
-// DeclsProvenIn is DeclsIn for definitions some of which another elaboration
-// of the same declarations has already discharged: those named in proven get
-// their summaries and contracts but are not interpreted as flow roots again
-// (core.InferCapturesProvenIn).
-func DeclsProvenIn(infos []infer.DeclInfo, context []core.Def, proven map[string]bool, ck *infer.Checker) ([]core.Def, []diag.Error) {
 	var defs []core.Def
 	var errs []diag.Error
 	for _, info := range infos {
@@ -260,9 +248,9 @@ func DeclsProvenIn(infos []infer.DeclInfo, context []core.Def, proven map[string
 		info = infos[0]
 	}
 	if len(errs) == 0 {
-		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, ObserveFlow: ck.ObserveFlow}
+		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
 		bindRows(p.Defs, ck)
-		errs = append(errs, captureDiagnostics(core.InferCapturesProvenIn(p, context, proven, ck.B), ck, info.NameSpan)...)
+		errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, info.NameSpan)...)
 		installCaptureSummaries(defs, ck)
 		for i := range defs {
 			for _, err := range core.VerifyResumeStructure(defs[i].Body) {
@@ -312,9 +300,7 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 		Control:       core.ArrowControl(prependTypes(dictTypes, defType), len(allParams)),
 		Body:          el.anf(body),
 	}
-	if control := core.ExprControl(def.Body); !def.IsWorker() && control.Transport == types.Machine {
-		def.Control = control
-	}
+
 	return append([]core.Def{def}, el.aux...), el.errs
 }
 
@@ -340,21 +326,8 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 			continue
 		}
 		ty := (&elab{ck: ck}).eraseRuntimeKinds(eraseRows(ck.Intrinsics[name].Body))
-		if types.WorkIntrinsic(name) {
-			defs = append(defs, workDef(name, ty, ck))
-		} else if name == types.ServiceRunName {
-			defs = append(defs, serviceRunDef(ty, ck))
-		} else if name == types.ScopeBracketName {
-			// The declaration keeps its open row tail; Core does not.
+		if name == types.ScopeBracketName {
 			defs = append(defs, scopeBracketDef(name, ty, ck))
-		} else if name == types.CoroutineFacetName || name == types.CoroutineScopeName || name == types.CoroutineCreateName {
-			defs = append(defs, coroutineDynamicDef(name, ty, ck))
-		} else if name == types.CoroutineWithName {
-			defs = append(defs, coroutineWithDef(ty, ck))
-		} else if name == types.CoroutineAdvanceName || name == types.CoroutineCloseName || name == types.CoroutineStopName {
-			defs = append(defs, coroutineAdvanceDef(name, ty, ck))
-		} else if types.CompletionIntrinsic(name) {
-			defs = append(defs, completionDef(name, ty, ck))
 		} else if types.FailureInspection(name) {
 			defs = append(defs, failureInspectDef(name, ty, ck))
 		} else if name == types.FailAttemptReportName {
@@ -482,9 +455,6 @@ func executingEffects(t types.Type, arity int) []core.EffectInstance {
 			if l.Abort {
 				control = types.Control{Transport: types.Exit}
 			}
-			if l.Suspension || l.Name == types.ServiceInvocationName {
-				control = types.Control{Transport: types.Machine}
-			}
 			out = append(out, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Control: control})
 			seen[l.Unique] = true
 		}
@@ -502,9 +472,7 @@ func rowControl(row types.Row, ck *infer.Checker) types.Control {
 		if eff := ck.EffectsByUnique[label.Unique]; eff != nil && len(eff.Ops) > 0 {
 			abort = eff.Ops[0].Abort
 		}
-		if label.Suspension || label.Name == types.ServiceInvocationName {
-			out.Transport = types.Machine
-		} else if abort {
+		if abort {
 			out.Transport = types.Exit
 		} else if types.SurfaceName(label.Name) != "IO" {
 			out.Polymorphic = true
@@ -534,7 +502,7 @@ func ExprIn(e ast.Expr, context []core.Def, ck *infer.Checker) (core.Expr, []cor
 		defs := append([]core.Def(nil), el.aux...)
 		defs = append(defs, core.Def{Name: "_expression", Type: ce.Type(), Control: core.ExprControl(ce), Body: ce})
 		bindRows(defs, ck)
-		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives, ObserveFlow: ck.ObserveFlow}
+		p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
 		el.errs = append(el.errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, e.Span())...)
 		for _, err := range core.VerifyResumeStructure(ce) {
 			el.errs = append(el.errs, diag.Errorf(e.Span(), "INTERNAL RESUME INVARIANT", "%v", err))
@@ -569,68 +537,13 @@ func installCaptureSummaries(defs []core.Def, ck *infer.Checker) {
 			vars = append(vars, ev.Captures.Vars...)
 		}
 		ck.SetCaptureSummary(d.Name, vars, d.ResultCaptures)
-		summary := ck.CaptureSummaries[d.Name]
-		summary.Contract = d.CaptureContract
-		ck.CaptureSummaries[d.Name] = summary
-		if sch, ok := ck.Env.Lookup(d.Name); ok {
-			sch.CaptureContract = d.CaptureContract
-			ck.Env.Bind(d.Name, sch)
-		}
 	}
 }
 
 func captureDiagnostics(errs []error, ck *infer.Checker, fallback source.Span) []diag.Error {
-	// A capture summary has no source position of its own, so an escape is
-	// reported at the definition whose body holds the offending call.
-	at := func(name string) source.Span {
-		for _, info := range ck.Checked {
-			if info.Name == name {
-				return info.NameSpan
-			}
-		}
-		return fallback
-	}
 	out := make([]diag.Error, 0, len(errs))
 	for _, err := range errs {
-		var flow core.CaptureFlowError
-		var access core.CursorAccessError
-		var suspension core.SuspensionError
-		var control core.OwnerControlError
-		switch {
-		case errors.As(err, &control):
-			sp := control.Span
-			if sp.File == nil {
-				sp = at(control.In)
-			}
-			out = append(out, diag.Errorf(sp, "FOREIGN COROUTINE CONTROL", "%s", control.Detail()))
-		case errors.As(err, &suspension):
-			sp := suspension.Span
-			if sp.File == nil {
-				sp = at(suspension.In)
-			}
-			out = append(out, diag.Errorf(sp, "SUSPENDING RESOURCE CALLBACK", "%s", suspension.Detail()))
-		case errors.As(err, &access):
-			sp := access.Span
-			if sp.File == nil {
-				sp = at(access.In)
-			}
-			out = append(out, diag.Errorf(sp, "ITERATOR ADVANCEMENT CONFLICT", "%s", access.Detail()))
-		case errors.As(err, &flow):
-			title := "RESOURCE ESCAPES"
-			if flow.State {
-				title = "STATE RESULT ESCAPES"
-			}
-			sp := flow.Span
-			if sp.File == nil {
-				sp = ck.ScopeSpans[flow.Scope]
-			}
-			if sp.File == nil {
-				sp = at(flow.In)
-			}
-			out = append(out, diag.Errorf(sp, title, "%s", flow.Detail()))
-		default:
-			out = append(out, diag.Errorf(fallback, "CAPTURE CHECK ERROR", "%v", err))
-		}
+		out = append(out, diag.Errorf(fallback, "CAPTURE CHECK ERROR", "%v", err))
 	}
 	return out
 }
@@ -966,6 +879,9 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 	case *ast.UnitLit:
 		return &core.UnitLit{Ty: ty}
 	case *ast.Var:
+		if e.Name == types.TaskSpawnName {
+			return el.taskSpawn(e, nil)
+		}
 		if index, local := el.scopeIdx[e.Name]; local {
 			return &core.VarRef{Name: el.scope[index].name, Ty: el.scope[index].ty, Local: true}
 		}
@@ -1270,19 +1186,6 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 			pts[j] = el.zonkDefault(p)
 		}
 		var clauseBody core.Expr
-		var invocation *core.EffectInstance
-		implicit := ""
-		var implicitType types.Type
-		if ci.Invocation != nil {
-			label := el.apply(types.Row{Labels: []types.EffLabel{*ci.Invocation}}).(types.Row).Labels[0]
-			scope := ci.InvocationScope
-			ev := core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Captures: types.ScopeCapture(scope), Control: types.Control{Transport: types.Machine}}
-			invocation = &ev
-			implicit = fmt.Sprintf("_invocation%d", el.tmp)
-			el.tmp++
-			implicitType = types.InvocationCallback(label)
-			el.pushEvidence([]core.EffectInstance{ev})
-		}
 		pushed := 0
 		if e.State != nil {
 			el.pushScope(e.State.Name, el.zonkDefault(info.StateType))
@@ -1317,17 +1220,6 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 			clauseBody = el.matchPatternRows(patterns, bodies, spans, occs, cl.OpSpan, "handler clause")
 		}
 		el.popScope(pushed)
-		if invocation != nil {
-			el.popEvidence([]core.EffectInstance{*invocation})
-			params = append(params, implicit)
-			pts = append(pts, implicitType)
-			answer := clauseBody.Type()
-			valueType := el.zonkDefault(ci.OpResult)
-			value := serviceResumeValue(clauseBody, ci.ResumeID, valueType)
-			value = invocationHandler(value, &core.VarRef{Name: implicit, Local: true, Ty: implicitType}, *invocation, el.ck)
-			name := implicit + "_result"
-			clauseBody = &core.Let{Name: name, Rhs: value, Body: &core.ResumeTail{Owner: ci.ResumeID, Value: &core.VarRef{Name: name, Local: true, Ty: valueType}, ClauseResult: answer}, Ty: answer}
-		}
 		clauses[i] = core.HandlerClause{Op: ci.Op, ResumeID: ci.ResumeID, Params: params, ParamTypes: pts,
 			ResultType: el.zonkDefault(ci.OpResult), Body: clauseBody}
 	}
@@ -1365,13 +1257,7 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 		el.popScope(pushed)
 		ret = &core.ReturnClause{Param: name, Body: retBody}
 	}
-	// An installed activation's transport is its own clauses', not the
-	// enclosing context's. The interpretation is known here, so a handler
-	// whose clauses neither exit nor suspend stays Direct inside an Exit or
-	// Machine worker, and a perform widens to the caller's protocol the way
-	// Direct evidence passed to a wider callee already does. A closure bound
-	// to the activation depends on this: its own row fixes its transport, and
-	// the record it captures has to exist there.
+	// An activation uses its clauses' transport, independently of its caller.
 	var control types.Control
 	for _, clause := range clauses {
 		control = types.JoinControl(control, core.ExprControl(clause.Body))
@@ -1385,6 +1271,7 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 	}
 	el.pushEvidence([]core.EffectInstance{inst})
 	body := el.expr(e.Body)
+	body = el.adaptFunctionValue(body, el.zonkDefault(info.BodyResult))
 	el.popEvidence([]core.EffectInstance{inst})
 	var state *core.HandlerState
 	if e.State != nil {
@@ -1519,7 +1406,7 @@ func (el *elab) eraseRuntimeKinds(t types.Type) types.Type {
 			for j, a := range l.Args {
 				args[j] = el.eraseRuntimeKinds(a)
 			}
-			labels[i] = types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Suspension: l.Suspension}
+			labels[i] = types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort}
 		}
 		return types.Row{Labels: labels}
 	default:
@@ -1573,7 +1460,7 @@ func eraseRowsFrom(origin, t types.Type) types.Type {
 			for i, a := range l.Args {
 				args[i] = eraseRowsFrom(a, a)
 			}
-			eff.Labels = append(eff.Labels, types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Suspension: l.Suspension})
+			eff.Labels = append(eff.Labels, types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort})
 		}
 		control := types.FunctionControl(t)
 		return &types.TFun{Arg: arg, Eff: eff, Ret: ret, Control: control, OpenRow: types.FunctionOpenRow(of)}

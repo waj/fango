@@ -1,19 +1,16 @@
 {-# no-prelude #-}
-module Iterator exposing (Iterator, fromCoroutine, next)
+module Iterator exposing (Iterator, next, start)
 
 import Basics exposing (..)
 import Maybe exposing (Maybe(..))
-import Runtime.Coroutine exposing (Coroutine, Drive, Step(..), advance)
 
-{-# resource #-}
-type Iterator a e = Iterator (Coroutine a () () e)
+-- An immutable position. Advancing returns a new position; aliases retain theirs.
+type Iterator state a e = { state : state, step : state ->{e} Maybe (a, state) }
 
-fromCoroutine : Coroutine a () () e -> Iterator a e
-fromCoroutine work = Iterator work
+start : state -> (state ->{e} Maybe (a, state)) -> Iterator state a e
+start state step = { state = state, step = step }
 
-next : Iterator a e ->{Drive | e} Maybe a
-next (Iterator work) = case advance work () of
-    Suspended value -> Just value
-    Finished () -> Nothing
-    Closed -> Nothing
-    Polled -> next (Iterator work)
+next : Iterator state a e ->{e} Maybe (a, Iterator state a e)
+next cursor = case cursor.step cursor.state of
+    Nothing -> Nothing
+    Just (value, state) -> Just (value, { state = state, step = cursor.step })

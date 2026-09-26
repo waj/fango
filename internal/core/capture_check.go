@@ -2,13 +2,12 @@ package core
 
 import (
 	"fmt"
-	"reflect"
 
 	"github.com/waj/fango/internal/types"
 )
 
 // InferCaptures computes symbolic result summaries and higher-order capture
-// contracts, then discharges their lifetime obligations. Lint independently
+// metadata for lexical evidence. Resources are checked at runtime. Lint independently
 // reconstructs both forms after elaboration transforms.
 func InferCaptures(p *Prog, b *types.Builtins) []error {
 	return InferCapturesIn(p, nil, b)
@@ -21,16 +20,6 @@ func InferCaptures(p *Prog, b *types.Builtins) []error {
 // prompt calling `State.run` or `File.withFile` is checked exactly as the
 // same call inside a program would be.
 func InferCapturesIn(p *Prog, context []Def, b *types.Builtins) []error {
-	return InferCapturesProvenIn(p, context, nil, b)
-}
-
-// InferCapturesProvenIn is InferCapturesIn for a caller that has already
-// discharged some of p's definitions. Summaries and contracts are still
-// solved for every definition, because later passes read them; only the
-// definitions not named in proven are interpreted as roots of the flow check.
-// Each root is checked from a checker of its own, so leaving one out is
-// exactly not discharging that definition again.
-func InferCapturesProvenIn(p *Prog, context []Def, proven map[string]bool, b *types.Builtins) []error {
 	a := newCaptureAnalyzer(p, b)
 	for i := range context {
 		if _, own := a.defs[context[i].Name]; !own {
@@ -38,11 +27,7 @@ func InferCapturesProvenIn(p *Prog, context []Def, proven map[string]bool, b *ty
 		}
 	}
 	a.solve()
-	p.CaptureContractsChecked = true
-	for i := range p.Defs {
-		p.Defs[i].CaptureContract = inferCaptureContract(&p.Defs[i])
-	}
-	return checkCaptureFlows(a, proven)
+	return nil
 }
 
 func verifyCaptures(p *Prog, b *types.Builtins) []error {
@@ -68,21 +53,8 @@ func verifyCapturesIn(p *Prog, context []Def, b *types.Builtins) []error {
 			errs = append(errs, fmt.Errorf("def %s: result capture summary is stale", p.Defs[i].Name))
 		}
 	}
-	for i := range p.Defs {
-		want := inferCaptureContract(&p.Defs[i])
-		if (p.CaptureContractsChecked || p.Defs[i].CaptureContract != nil) && !reflect.DeepEqual(p.Defs[i].CaptureContract, want) {
-			errs = append(errs, fmt.Errorf("def %s: capture contract is stale", p.Defs[i].Name))
-		}
-		copyProg.Defs[i].CaptureContract = want
-	}
-	// Reconstruction is what lint owes: summaries and contracts are re-derived
-	// above and compared. Discharging obligations again only repeats it when
-	// every comparison agreed, because the flow check reads nothing but the
-	// definitions and the contracts just proven identical.
-	if p.CaptureFlowsProven && len(errs) == 0 {
-		return errs
-	}
-	return append(errs, checkCaptureFlows(a, nil)...)
+
+	return errs
 }
 
 type captureResult struct {
@@ -91,17 +63,12 @@ type captureResult struct {
 }
 
 type captureAnalyzer struct {
-	p           *Prog
-	b           *types.Builtins
-	defs        map[string]*Def
-	adts        map[int]*types.ADTInfo
-	nextVar     types.CaptureVar
-	clauseVars  map[*Handle][][]types.CaptureVar
-	typeKeys    map[types.Type][]byte
-	freeKeys    map[flowWalkKey]map[string]bool
-	effectKeys  map[*types.CaptureFlow]map[int]bool
-	rowKeys     map[*types.CaptureFlow]map[types.CaptureVar]bool
-	typeArgKeys map[*types.CaptureFlow][]byte
+	p          *Prog
+	b          *types.Builtins
+	defs       map[string]*Def
+	adts       map[int]*types.ADTInfo
+	nextVar    types.CaptureVar
+	clauseVars map[*Handle][][]types.CaptureVar
 }
 
 func newCaptureAnalyzer(p *Prog, b *types.Builtins) *captureAnalyzer {
@@ -253,6 +220,8 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		r := a.expr(e.Operand, env, evidence)
 		r.value = types.CaptureSet{}
 		return r
+	case *TaskSpawn:
+		return children(e.Scope, e.Input)
 	case *NativeCall:
 		r := children(e.Args...)
 		if !a.canCarry(e.Ty, nil) {
@@ -322,37 +291,9 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		r := children(e.Payload...)
 		r.value = types.CaptureSet{}
 		return r
-	case *Work:
-		r := children(e.Args...)
-		if !a.canCarry(e.Ty, nil) {
-			r.value = types.CaptureSet{}
-		}
-		return r
+
 	case *FailureInspect:
 		r := children(e.Args...)
-		if !a.canCarry(e.Ty, nil) {
-			r.value = types.CaptureSet{}
-		}
-		return r
-	case *Completion:
-		r := children(e.Value)
-		r.uses = types.UnionCaptures(r.uses, RowCaptures(e.Row))
-		return r
-	case *Suspend:
-		r := a.expr(e.Request, env, evidence)
-		r.value = types.CaptureSet{}
-		return r
-	case *CoroutineScope:
-		producer := a.expr(e.Producer, env, evidence)
-		consumer := a.expr(e.Consumer, env, evidence)
-		value := types.UnionCaptures(producer.value, consumer.value)
-		if !a.canCarry(e.Ty, nil) {
-			value = types.CaptureSet{}
-		}
-		return captureResult{value: value, uses: types.UnionCaptures(producer.uses, consumer.uses, RowCaptures(e.Row))}
-	case *CoroutineAdvance:
-		r := children(e.Cursor, e.Reply)
-		r.uses = types.UnionCaptures(r.uses, RowCaptures(e.Row))
 		if !a.canCarry(e.Ty, nil) {
 			r.value = types.CaptureSet{}
 		}

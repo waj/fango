@@ -10,7 +10,7 @@ navigation entry point, not another specification of these contracts.
 Everything proposed here remains unimplemented. Implemented behavior belongs
 to [effects](reference/effects.md), [resources](reference/resources.md), and
 [streams](reference/library-streams.md); implemented architecture belongs to
-[effect execution](design/effects.md), [machines](design/machines.md), and
+[effect execution](design/effects.md), [machines](https://github.com/waj/fango/blob/2a8f313fec6897824549e0d5074d75d4c6be3441/doc/design/machines.md), and
 [ownership](design/ownership.md). Promote durable results there when a stage
 lands, then remove that completed work or mark its stage DONE under the
 [repository milestone rules](../AGENTS.md). Stage IDs and titles remain stable;

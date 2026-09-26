@@ -21,17 +21,17 @@ func TestBundledSourcesUseCanonicalNestedModuleNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	foundCell, foundRequests := false, false
+	foundRef, foundTask := false, false
 	for _, source := range sources {
 		switch source.Module {
-		case "Runtime.Cell":
-			foundCell = true
-		case "Runtime.NativeRequest":
-			foundRequests = true
+		case "Runtime.Ref":
+			foundRef = true
+		case "Task":
+			foundTask = true
 		}
 	}
-	if !foundCell || !foundRequests {
-		t.Fatalf("nested bundled sidecars missing: Cell=%v NativeRequest=%v", foundCell, foundRequests)
+	if !foundRef || !foundTask {
+		t.Fatalf("nested bundled sidecars missing: Ref=%v Task=%v", foundRef, foundTask)
 	}
 }
 

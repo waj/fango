@@ -11,8 +11,7 @@ import Runtime.Native
 import Runtime.Scope
 
 {- TCP sockets as scoped resources. Listener and Connection contain opaque Go
-values, but their constructors stay private; the resource checker prevents a
-socket, or an adapter that captures it, from escaping its scope. -}
+values with private constructors. Native operations reject sockets after closure. -}
 
 type Kind = ConnectionRefused | ConnectionReset | AddressInUse | TimedOut | Other deriving (Eq, Show)
 

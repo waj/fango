@@ -1,6 +1,0 @@
-import Runtime.Completion exposing (Completion)
-
-forget : Completion Int e -> Int
-forget value = Runtime.Completion.replay value
-
-main = 0

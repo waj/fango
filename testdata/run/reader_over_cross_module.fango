@@ -1,30 +1,27 @@
--- The same shape with the source performing `State`, declared in another
--- module. The source is a top-level value, so its closure takes the row its
--- caller supplies and finds `State` in it rather than in a lexical
--- activation; `put` answers Unit, which is the member the residual row has to
--- materialize.
+-- Explicit IO references keep independent reader state.
 import State exposing (State(..))
 
-effect Reading
-    buffered : () -> String
-    refill : () -> Bool
+import Runtime.Ref
 
 type Reader e =
-    { buffered : () ->{e} String
-    , refill : () ->{e} Bool
+    { buffered : () ->{IO | e} String
+    , refill : () ->{IO | e} Bool
     }
 
 type Source e = { pull : () ->{e} String }
 
-over : Source e -> (Reader e ->{e} a) ->{e} a
+over : Source e -> (Reader e ->{IO | e} a) ->{IO | e} a
 over source use =
-    handle use (Reader { buffered = \_ -> buffered(), refill = \_ -> refill() }) with pending = "" of
-        buffered () -> resume pending with pending
-        refill () ->
+    pending = Runtime.Ref.new ""
+    use (Reader {
+        buffered = \_ -> Runtime.Ref.read pending,
+        refill = \_ ->
             chunk = source.pull()
-            resume (chunk /= "") with pending ++ chunk
+            Runtime.Ref.write pending (Runtime.Ref.read pending ++ chunk)
+            chunk /= ""
+    })
 
-readAll : Reader e ->{e} String
+readAll : Reader e ->{IO | e} String
 readAll reader =
     if reader.refill() then readAll reader
     else reader.buffered()

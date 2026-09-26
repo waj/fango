@@ -1,9 +1,0 @@
-{-# no-prelude #-}
-module Runtime.Executor exposing (Executor, cooperative)
-
--- The executor choice is opaque. A2 ships the cooperative policy; later
--- stages add the parallel and mixed policies behind this same type.
-type Executor = Cooperative
-
-cooperative : Executor
-cooperative = Cooperative

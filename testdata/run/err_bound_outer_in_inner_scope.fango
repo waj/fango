@@ -1,0 +1,23 @@
+-- A handled closure cannot be coerced to an arrow that hides its effect.
+effect Counter
+    tick : () -> Int
+
+type Cell = Cell (() -> Int)
+type Both = Both Cell Cell
+
+counter : Int -> (Cell ->{IO} a) ->{IO} a
+counter start use =
+    handle use (Cell (\_ -> tick())) with n = start of
+        tick () -> resume n with n + 1
+
+report : Both ->{IO} ()
+report pair =
+    case pair of
+        Both (Cell ta) (Cell tb) ->
+            print (ta())
+            print (tb())
+            print (ta())
+
+main() =
+    counter 0 (\outer ->
+        counter 100 (\inner -> report (Both outer inner)))

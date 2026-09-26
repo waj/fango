@@ -15,7 +15,7 @@ It does not depend on Go runtime internals, stack maps, barriers, or scheduler A
 | String, Char | Valid UTF-8 string, Unicode-scalar rune |
 | Bool | bool; treated as True/False ADT by checking |
 | Unit | Shared fangort.Unit/UnitValue when represented |
-| Function | Typed Direct/Exit/Machine callable record |
+| Function | Typed Direct/Exit callable record |
 | Ordinary ADT | Typed marker interface and constructor structs |
 | Runtime.Native.Any | Go `any`; opaque and valid only behind a private wrapper |
 | Parameterized definition | Go generics with explicit instantiation |
@@ -25,29 +25,6 @@ erase to Unit. Class dictionaries and factories use the ordinary typed internal
 ABI. [Effect transport](effects.md#direct-exit-and-machine) and
 [Core](core.md) own family/evidence contracts.
 
-The Machine callable member returns a lazy
-[MachineStart](machines.md#dispatch-and-frame-lifetime) description. Callable
-records also carry a private pause-owner tag, set only for a scoped pause
-capability. Module-owned Machine families export both frame constructors and
-start factories; the latter may omit proven forwarding frames. These are
-generated-code ABI details, not additional source calling conventions.
-
-Closed nominal type descriptors are immutable package values shared by all
-invocations in that generated module. Descriptors containing type parameters
-remain invocation-dependent; they reuse the closed descriptors of their
-concrete arguments. Descriptor equality and failure inspection retain the
-same nominal and inspectability checks.
-
-Concrete Unit parameters/results erase at direct worker and operation boundaries,
-but remain values at first-class, polymorphic, ADT, and handler-closure boundaries.
-Erasing an argument never erases its evaluation: preserve left-to-right effects
-and materialize Unit only where a value is required. A handler return closure
-returns Unit even if its enclosing worker uses a void result.
-
-Expression-position If/Case/Seq use typed immediately invoked closures. In Exit
-mode each closure returns Outcome at its own expression type, not at the outer
-worker's result type. Normal leaves wrap at that same type. Propagation never
-drops an exit or turns a language type check into a failed host assertion.
 
 ## List representation
 
@@ -138,22 +115,19 @@ Project emission is the single generation path used by CLI and tests.
 
 Emission does not inspect dependency bodies to rediscover calling conventions.
 Owner-scoped Core elaboration records an ABI summary on every definition:
-whether its type needs a Direct/Exit/Machine representation family, whether it
-actually invokes a controlled callback parameter, and whether it is a passive
-Machine factory. Recursive classification may inspect bodies owned by the
-current module and consults only these summaries for installed dependencies.
+whether its type needs a Direct/Exit representation family and whether it
+invokes a controlled callback. Classification uses the owning module's body
+and consults only these summaries for installed dependencies.
 
 Each owner is lowered and emitted alone. Its unit program holds its own Core
 plus the installed declarations it links against. Ordinary dependency bodies
 are withheld; the only exposed bodies are the bounded
 [execution templates](core.md#adapters-and-specialization), explicitly included
 in the dependency ABI fingerprint. The backend therefore cannot depend on an
-implementation its key does not name. Machine
-selection follows a definition's own control rather than its call sites, so a
-consumer and the dependency's own module agree on which families exist without
-consulting each other; a family a consumer calls but does not own is a
-declaration carrying the parameter, evidence, row, and result contract, and its
-blocks are validated only by its owner. The whole-program lowering and emission
+implementation its key does not name. Each module independently validates its
+owned Core and emits the Direct/Exit families recorded in its ABI summaries.
+
+The whole-program lowering and emission
 path remains as the differential reference the module backend is compared
 against, and must stay byte-identical to it.
 
@@ -312,9 +286,7 @@ Every materialized sidecar gets FangoHost, a reserved process-global interface
 for input/output, arguments, directory, and exit, without hidden call parameters.
 The system host serializes input-buffer access and each output write. The
 interpreter worker serializes complete reverse-host request/reply exchanges so
-concurrent native calls cannot take one another's replies. Scoped background
-retention uses [native request tokens](native-requests.md)
-instead of retaining this global host.
+concurrent native calls cannot take one another's replies. Sidecars do not retain this host for background work.
 Its single source declaration is copied beside each sidecar with rewritten runtime
 imports. Module-specific logic remains in its owner: IO owns console behavior,
 File owns file/directory objects, Net owns sockets, and Random supplies system entropy; deterministic
@@ -327,7 +299,7 @@ native metadata, never re-derived by backends:
   call and reconstructed after it. The loader recognizes its declared shape;
   checking confirms resolved types. Interpreter CtorVal wrapping matches Go.
   Phantom indices and opaque payload tokens follow the
-  [native storage contract](shared-capabilities.md#native-storage-and-sharing).
+  [native storage contract](../reference/native.md).
 - The bundled `Runtime.Native.Any` is represented as Go `any`. Its constructor is
   private and carries no usable value; libraries expose only nominal wrappers
   such as `File.Handle` and `Net.Connection`. It has no Eq, Show, matching, or
@@ -348,14 +320,13 @@ native metadata, never re-derived by backends:
 File and socket wrappers carry pointers to their native objects directly; there
 is no native ID table and no release primitive. Cleanup scopes close objects,
 and Go GC reclaims unreachable closed wrappers. File errors retain the caller's
-path rather than host-expanded absolute paths. Resource/lifetime checks prevent
-accepted Fango from using stale handles; native code is trusted.
+path rather than host-expanded absolute paths. Native operations reject closed handles at runtime; native code is trusted.
 
 ## Interpreter native worker
 
 Evaluation involving sidecars uses one persistent process per sidecar set.
 Checking and elaboration remain in the compiler process; checked Core and its
-selective Machine program are serialized to the worker, where the evaluator and
+Core program are serialized to the worker, where the evaluator and
 sidecars share one Go heap. A `Runtime.Native.Any` therefore passes from Core to a Go
 function as the original object and never crosses IPC. Support sources come
 from the library root, and cache keys hash their sorted paths and exact bytes.
@@ -363,7 +334,7 @@ from the library root, and cache keys hash their sorted paths and exact bytes.
 A framed protocol carries serialized executable Core, scalar results, and
 reverse host requests over a dedicated loopback connection. The object codec
 drops source spans but preserves shared identities needed by checked Core and
-Machine closures. Process stdio stays outside the control channel. The active
+Core closures. Process stdio stays outside the control channel. The active
 interpreter host answers requests, sharing one buffered reader with the prompt.
 Globals persist across calls, but importing new sidecars rebuilds the worker.
 Panics are reported and reproduced; host exit becomes an interpreter exit error.

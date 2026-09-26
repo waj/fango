@@ -1,3 +1,0 @@
-import Runtime.Coroutine
-import Runtime.Work
-main = Runtime.Coroutine.scope (\scope -> Runtime.Work.register (Runtime.Coroutine.facet scope) (\_ () -> 42))

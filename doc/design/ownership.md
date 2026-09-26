@@ -1,196 +1,28 @@
-# Capture contracts and resource ownership
+# Resources and evidence
 
-Static non-escape, retention, synchronous-callback, and exclusive-cursor proofs.
+[Design index](../design.md). Public rules: [cleanup scopes](../reference/resources.md),
+[effects](../reference/effects.md), and [tasks](../reference/library-tasks.md).
 
-[Design index](../design.md). Source and checks: [Capture checking](../../internal/core/capture_check.go), [Flow analysis](../../internal/core/capture_flow.go), [Sharing keys](../../internal/core/capture_flow_key.go), [Scaling tests](../../internal/core/capture_flow_scaling_test.go), [Ownership tests](../../internal/core/iterator_ownership_test.go), [Yield tests](../../internal/core/yield_capture_test.go).
+## Runtime resources
 
-## Capabilities and lifetimes
+Bracket cleanup is deterministic for normal returns and language aborts. Native
+resource operations validate the handle's current state, including use after
+close. The compiler does not prove that a resource, wrapper, or closure cannot
+outlive the scope that acquired it. Sidecars own resource validity checks.
 
-Functions/type variables can retain captures; scalars cannot; ADTs can when a
-field can. A nominal resource pragma marks a type capture-capable independently
-of representation. It remains nominal metadata after resolution and requires
-opaque exports, hiding constructors, fields, and reflected schema. The defining
-module and native code own representation correctness. File and socket handles
-use this mechanism over `Runtime.Native.Any`, with no resource-name or native handle
-registry.
+The `resource` marker retains nominal native-storage restrictions; it is not a
+lifetime proof. Sealed indexed native storage cannot be rewrapped at a different
+type. Mutable storage is IO-marked and task transfer checking rejects it.
 
-Handlers and cleanup/cursor scopes have distinct ScopeIDs. Runtime.Scope.bracket binds
-its owner to a capture-capable resource; ordinary scalar resources, including
-the Unit result of `Runtime.Scope.finally` introduces no borrowed capture. Parameterized handlers are
-scoped even if their nominal effect is normally durable.
+## Evidence summaries
 
-A result may not retain a scoped activation/resource, including through ADTs,
-closures, dictionaries, or another worker. Stores into longer-lived evidence
-are checked even when the result is Unit. An inner owner may retain an outer
-resource within its lifetime. Proven non-retaining outer resumptive handlers
-may borrow synchronously; abort payloads cannot cross a cleanup boundary because
-clauses run after release. Independent returned functions remain legal.
+Core retains structural capture summaries for lexical evidence and explicit
+residual-row binders. Lint reconstructs result summaries and verifies evidence
+availability and representation after elaboration transforms. These summaries
+do not constitute a resource lifetime or retention analysis. There is no
+abstract heap, owner-flow graph, coroutine advancement proof, or sharing fixed
+point in the compiler.
 
-Wrappers infer/export these obligations from their implementations. Annotations
-do not erase contracts, and no runner/forwarding name receives an exemption.
-Source diagnostics and resource declaration syntax belong in
-[resources](../reference/resources.md).
-
-## Capture-flow graph and abstract heap
-
-Each definition exports symbolic result captures and a finite flow graph. The
-graph erases scalar computation but preserves calls, callback invocation,
-constructor fields, handler interpretations, state updates, and scope obligations.
-Abstract callback/evidence requirements remain until callers provide meanings.
-Schemes, module increments, and REPL checkpoints retain these contracts.
-
-Checking substitutes actual callbacks/evidence and joins branches. An
-allocation-site abstract heap tracks closures and fields; closures retain free
-values and definition-site evidence, excluding their own binders. Pattern
-bindings, partial applications, dictionaries, lifted locals, and adapters retain
-the same obligations. Adapter temporaries/dictionary references have binding
-identities and participate like source locals.
-
-Context IDs are stable and independent of invocation paths. Sharing compares
-callable identity, relevant arguments/free bindings, type substitutions, captured
-and invocation evidence, residual rows, live scopes, resume owners, and active
-borrow/acquire/release/pull boundaries. Closure fingerprints exclude their own
-value/evidence/row binders. Instantiated scalar types erase scalar values; fields
-that can carry capabilities or callables remain structural. Traversal preserves
-aliases, terminates cycles, and distinguishes concrete owners and unknown versus
-known-empty capability states. Globals use immutable callable identities.
-
-Fingerprints describe the current heap, not permanent identities. A fingerprint
-reads only an object's fields and a closure object's environment, so a monotone
-heap revision invalidates cached ones when either grows, and growth in owners,
-results, obligations, ancestry, or a context's widened environment leaves them
-intact; lookup refreshes candidates within the callable bucket. A fingerprint is
-compared only for equality, never ordered, stored, or shown. Stable invocation
-edges merge later input growth into their selected context even after widening.
-Sharing entry state and
-the widened environment are separate and both reference the evolving heap.
-Stored environments — closure objects, owners, and context entries — are flat
-private snapshots, the only ones fingerprints read and the ones joins grow in
-place. The interpreter's transient value environment is a chain of binding
-layers instead, and extending one behaves exactly as a copy: a later write on
-either side is invisible to the other.
-Disagreeing type substitutions are forgotten conservatively so prior scalar
-instantiation cannot erase a later resource.
-
-Recursive calls join an enclosing context at a repeated target and lexical
-call site only when inputs identify the same existing values or values allocated
-inside that activation. Explicit allocation ancestry uses stable context IDs;
-invocation ancestry joins even on cached returns. Distinct pre-existing callbacks
-and descriptions keep nested helper invocations independent. A fresh cursor
-owner remains distinct from a cursor passed to the enclosing invocation, even
-when both cursors were allocated inside that invocation. Folding them together
-would merge their exclusive-advancement obligations.
-
-Each generation merges incoming environments and evaluates a context once,
-joining folded resume owners. Busy/already-evaluated contexts return their current
-summaries. Growth requests another generation until a fixed point; there is no
-iteration-limit success fallback. Cached/busy returns replay access/suspension
-obligations at every invocation. Diagnostic origins do not affect sharing keys.
-
-Live scope/evidence IDs distinguish owners. Folded recursion cannot prove two
-dynamic owners equal, so retention requiring that equality is rejected.
-Concrete scalar results cannot carry captures. Handler interpretation propagates
-actual payloads, resumed results, snapshots, and abort answers.
-
-## Evidence and independent reconstruction
-
-Closure lowering computes free evidence through handlers and nested functions.
-An inner same-effect activation shadows its outer binding. Unused evidence and
-evidence received on invocation are not captured. The interpreter uses the same
-selection. Machine lint checks captured/invocation evidence against semantic
-lambdas and typed workers.
-
-Core lint reconstructs flow graphs from executable Core, rejects missing/stale
-contracts, recomputes result summaries, checks scope introduction and exact
-lexical evidence availability, and repeats the proof after ANF, lifting, callback
-adaptation, and specialization. Source summaries alone are not trusted.
-
-Reconstruction is unconditional; discharging the reconstructed obligations again
-is not. A caller that has just discharged them for these same definitions, with
-no transform in between, says so, and lint then compares what it reconstructs
-without re-deriving the same answer from the same inputs. Any disagreement is
-stale, is reported, and discharges them anyway. The batch pipeline discharges
-each definition once. Runtime elaboration discharges the module's runtime
-definitions. The owner lint after it states that, and so does lowering, which
-reads the same installed Core, whether this session checked it or decoded it
-from an object published only after its own check. Stage elaboration
-discharges only what runtime elaboration did not see, chiefly compile-time-only
-declarations (see [metaprogramming](metaprogramming.md#evaluator-and-completion-order)).
-The discharge is per root, from a checker of its own, so leaving a root out
-omits exactly that definition's discharge; summaries and contracts are still
-solved for every definition. The whole-program reference path, the REPL's
-prompt lint, and a splice's elaboration state nothing and always discharge.
-
-## Suspending acquisition and release
-
-Capture contracts retain resource lifetime and definition-site evidence
-through acquisition and release callbacks, including helpers and stored
-values. Acquisition registers a release only after success. A release may
-suspend while the resource stays owned by its closing scope. Recursive
-summaries retain outward control obligations; an inner pull consumes only its
-own producer's suspension. Core lint independently reconstructs these checks.
-
-## Exclusive cursor advancement and yield
-
-[Coroutine ownership](coroutines.md#protocol-and-control-proof) extends these
-contracts to typed replies/results, close, and a separate producer pause
-capability.
-
-Iterator is an opaque resource carrying its owner's fresh capability. Aliases,
-helpers, named consumers, constructor fields, and stored callbacks preserve it.
-Independent nested owner sites remain distinct even through the same wrapper.
-
-CoroutineAdvance carries exclusive-advancement metadata. Substitute the actual
-cursor and execute its producer contract under that borrow; consumer callbacks
-run after advancement completes. Access summaries remain active at recursive
-joins and across unfinished foreign suspension. Possible overlap is rejected,
-while sequential reads, including reads after exhaustion, are valid.
-
-The producer pause callback tracks actual request flow into advancement results
-and terminal callbacks; Stream's ordinary Yield handler calls that callback.
-Elements may borrow enclosing resources but cannot carry producer-local resources
-past a yield. Recursive accumulator captures reach a fixed point, including
-callback effects reached through a prior iteration. Retained outer residual rows
-also carry their handler captures. Core independently reconstructs access and
-scope metadata; Machine lint preserves it on CursorAdvance/Suspend transitions.
-
-## Failure snapshots
-
-Reports may retain opaque captures from secondary cleanup payloads only when
-those owners enclose the destination. This includes failures targeting another
-handler that become secondary during release. Release-local handlers can consume
-their failures before exiting. Ordinary fields, ADTs, and closures preserve
-snapshot captures; inspectability is separate from lifetime safety.
-
-## Scoped work budgets
-
-Work owners use the same lexical cleanup scope and finite capture-flow engine
-as other scoped resources. A package stores two independent identities: its
-Work owner determines membership and the hidden effect budget, while its
-coroutine determines lifetime, producer authority, and exclusive advancement.
-Opening a package returns that original coroutine to the checked advancement
-node; it cannot manufacture a driver from an erased thunk.
-
-Source effect rows survive erasure as `SourceType` on definitions, closures, and calls,
-and as source-row proofs on Work introduction and packaging nodes. Capture
-contracts retain these fields. Source substitutions accompany the existing
-value-flow interpretation, independently of runtime type arguments and
-residual evidence rows; the latter omit IO and therefore cannot establish a
-complete effect budget. The owning scope retains packaging obligations even
-when an intervening handler removes their immediate charge.
-
-Core lint reconstructs each Work capture graph, validates the nominal protocol
-and source-row proof against the intrinsic declaration and the actual retained
-coroutine, and rechecks owner membership and lifetime. Missing source contracts
-are rejected; an exact eta forwarding adapter can reconstruct its contract
-from the underlying call. A call's source proof preserves the runtime callee's
-explicit effects; an open-row ABI may acquire additional source effects, which
-must still fit the caller's source row. ANF, substitution, module objects, and interpreter
-execution objects preserve the proof metadata. Both runtime paths keep an
-opaque owner identity beside the underlying coroutine; neither opens the
-package through an unchecked protocol cast.
-
-Shared native payloads and retained service contexts follow
-[the shared-capability contract](shared-capabilities.md). Transfer traverses
-hidden evidence as well as ordinary closure/data fields; synchronization never
-erases capture or execution-owner obligations.
+Effect rows cannot lose an effect merely because a closure was created inside
+its handler. Mutable library objects expose IO on their operations. Synchronous
+state handlers remain ordinary lexical interpretations of effectful calls.

@@ -106,6 +106,8 @@ func DumpTree(t Tree) string { return dumpTree(t, types.NewPrinter()) }
 
 func dumpExpr(e Expr, pr *types.Printer) string {
 	switch e := e.(type) {
+	case *TaskSpawn:
+		return fmt.Sprintf("(task-spawn %s %s %s : %s)", e.Worker, dumpExpr(e.Scope, pr), dumpExpr(e.Input, pr), pr.Type(e.Ty))
 	case *IntLit:
 		return fmt.Sprintf("(int %d %s)", e.Val, pr.Type(e.Ty))
 	case *FloatLit:
@@ -138,36 +140,13 @@ func dumpExpr(e Expr, pr *types.Printer) string {
 			parts = append(parts, dumpExpr(p, pr))
 		}
 		return strings.Join(parts, " ") + " " + pr.Type(e.Ty) + ")"
-	case *Suspend:
-		return fmt.Sprintf("(suspend %s %s)", pr.Type(e.Ty), dumpExpr(e.Request, pr))
-	case *CoroutineScope:
-		form := "coroutine-scope"
-		if e.Traversal.Unique != 0 {
-			form += " traversal=" + dumpEffect(e.Traversal, pr)
-		}
-		if e.Control != (types.Control{}) {
-			form += "/" + ControlName(e.Control)
-		}
-		return fmt.Sprintf("(%s %d %s %s %s %s)", form, e.Scope, pr.Type(e.CursorTy), pr.Type(e.Ty), dumpExpr(e.Producer, pr), dumpExpr(e.Consumer, pr))
-	case *CoroutineAdvance:
-		if e.Close {
-			return fmt.Sprintf("(coroutine-close access=%d %s)", e.Access, dumpExpr(e.Cursor, pr))
-		}
-		return fmt.Sprintf("(coroutine-advance access=%d %s %s %s)", e.Access, pr.Type(e.Ty), dumpExpr(e.Cursor, pr), dumpExpr(e.Reply, pr))
-	case *Work:
-		parts := []string{"(work", e.Kind, pr.Type(e.Ty)}
-		for _, arg := range e.Args {
-			parts = append(parts, dumpExpr(arg, pr))
-		}
-		return strings.Join(parts, " ") + ")"
+
 	case *FailureInspect:
 		parts := []string{"(failure-inspect", e.Name, pr.Type(e.Ty)}
 		for _, arg := range e.Args {
 			parts = append(parts, dumpExpr(arg, pr))
 		}
 		return strings.Join(parts, " ") + ")"
-	case *Completion:
-		return fmt.Sprintf("(completion %s %s %s)", e.Name, pr.Type(e.Ty), dumpExpr(e.Value, pr))
 
 	case *ResumeTail:
 		if e.NextState != nil {

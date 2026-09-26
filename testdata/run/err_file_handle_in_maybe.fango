@@ -1,9 +1,0 @@
-import Fail exposing (attempt)
-import File
-
--- Hiding the handle inside ordinary data does not help: Maybe File.Handle can
--- carry the capability, so the scope's result is still rejected.
-
-main() =
-    case attempt (\_ -> File.withFile "input.txt" (\file -> Just file)) of
-        _ -> print "unreachable"

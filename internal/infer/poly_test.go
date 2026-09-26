@@ -1,10 +1,11 @@
 package infer_test
 
 import (
-	"github.com/waj/fango/internal/infer"
-	"github.com/waj/fango/internal/staging"
 	"strings"
 	"testing"
+
+	"github.com/waj/fango/internal/infer"
+	"github.com/waj/fango/internal/staging"
 
 	"github.com/waj/fango/internal/lexer"
 	"github.com/waj/fango/internal/parser"

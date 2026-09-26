@@ -14,8 +14,8 @@ func TestRuntimeRigidVarsEraseNominalRowsButKeepExecutingEvidence(t *testing.T) 
 	row := func(arg types.Type) types.Row {
 		return types.Row{Labels: []types.EffLabel{{Name: "Fail", Args: []types.Type{arg}, Abort: true}}}
 	}
-	completion := &types.TCon{Name: types.CompletionTypeName, Args: []types.Type{value, row(phantom)}}
-	wrapper := &types.TCon{Name: "Wrapper", Args: []types.Type{completion, rowTail}}
+	indexed := &types.TCon{Name: "RowIndexed", Args: []types.Type{value, row(phantom)}}
+	wrapper := &types.TCon{Name: "Wrapper", Args: []types.Type{indexed, rowTail}}
 	fn := &types.TFun{Arg: wrapper, Eff: row(effectArg), Ret: value}
 	got := runtimeRigidVars(fn)
 	if len(got) != 2 || got[0] != value || got[1] != effectArg {

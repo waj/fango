@@ -142,10 +142,6 @@ The compiler adds the declaring effect to each operation's type. Functions may
 annotate closed or open effect rows. An operation with a Unit argument is
 called explicitly with `()`.
 
-An effect marked `{-# service #-}` separates retained handler context from
-the caller's implicit invocation authority. See [shared service contexts](library-services.md)
-for its protocol and handler restrictions.
-
 ## Abort-only effects
 
 An abort-only effect marks every operation with `abort`:
@@ -225,121 +221,16 @@ expression and name the owning operation clause's location. Nested operation
 clauses bind their own resume, while nested handled bodies and return groups
 retain the surrounding resume binding.
 
-## Binding a closure to a handler activation
+## Closures and handler effects
 
-An operation resolves to the innermost handler at the moment it is performed,
-whenever the effect is still named in the performing closure's row. Inside the
-subject of a `handle`, a closure whose row names the handled effect may instead
-be adapted to an arrow that does not name it. The adaptation binds every
-performance of that effect in the closure to the activation this `handle`
-installs, so the closure reaches that activation however many handlers of the
-same effect are installed when it is finally called:
+A closure's effect row describes the effects performed when it is called.
+Creating it inside a handler does not allow an effectful arrow to be used as
+a pure arrow. Callback compatibility uses ordinary row inclusion. A mutable
+library object, such as Reader or Writer, exposes `IO` on its operations.
 
-```fango
-effect Counter
-    tick : () -> Int
+Handlers remain synchronous: a resumptive clause finishes with its owning tail
+`resume`, and an abort clause abandons the subject. Handlers do not capture a
+resumable stack and cannot implement general coroutine suspension.
 
-type Cell = Cell (() -> Int)
-
-counter : Int -> (Cell ->{IO} a) ->{IO} a
-counter start use =
-    handle use (Cell (\_ -> tick())) with n = start of
-        tick () -> resume n with n + 1
-```
-
-Two nested counters answer independently, and the outer cell keeps counting
-from inside the inner activation:
-
-```fango
-main() =
-    counter 0 (\a ->
-        counter 100 (\b ->
-            case (a, b) of
-                (Cell ta, Cell tb) ->
-                    print (ta())
-                    print (tb())
-                    print (ta())))
-```
-
-prints `0`, `100`, `1`. Nothing else changes: a bare `tick()` written in the
-same subject still resolves to whichever handler is innermost when it runs, and
-the instance type is an ordinary user-declared type. There is no keyword and no
-new type former.
-
-The adaptation replaces the handled label with what the handler's clauses
-perform, because calling the bound closure runs those clauses. A closure bound
-in a handler whose clauses print cannot be adapted to a pure arrow; that is a
-`HANDLER CLAUSE EFFECTS` error naming the clause effects and the effects the
-position allows. A `resume` is not one of them: it returns to the perform site,
-whose remaining effects belong to that site.
-
-The arrow the closure is adapted to may be indexed by a row rather than fixed,
-which is how one wrapper type serves every source its handler can run over:
-
-```fango
-type Reader e =
-    { buffered : () ->{e} String
-    , refill : () ->{e} Bool
-    }
-
-over : Source e -> (Reader e ->{e} a) ->{e} a
-over source use =
-    handle use (Reader { buffered = \_ -> buffered(), refill = \_ -> refill() })
-        with pending = "" of
-        buffered () -> resume pending with pending
-        refill () ->
-            chunk = source.pull()
-            resume (chunk /= "") with pending ++ chunk
-```
-
-Each field binds to the activation whose subject built the record, and the
-label it loses is replaced by `e` — what the clauses perform through the
-source. Two `over` activations therefore hand out two readers with separate
-buffers, drivable at once. The container may equally be a constructor, and a
-record literal need not name its type: an inferred `{ buffered = ..., refill =
-... }` binds the same way.
-
-An abort-only operation cannot be bound. An abort unwinds to its own
-activation, so a bound abort called after that activation finished would
-unwind to a target nothing awaits; binding one is a `BOUND ABORT OPERATION`
-error.
-
-Binding changes nothing about lifetimes. A bound closure retains its
-activation's capability, so the [handler lifetimes](#handler-lifetimes) below
-apply unchanged: a parameterized handler is scoped, and its bound closure
-reported as a result, inside an ADT, captured by a closure, or stored in an
-outer handler is rejected with `STATE RESULT ESCAPES` or `RESOURCE ESCAPES`.
-Passing it inward to the handled computation, including into an inner
-activation of the same effect, is an inner owner retaining an outer resource
-and is permitted.
-
-Rows stay exact about the effects a bound closure performs, not about the
-handler's own state: a bound `() -> Int` is typed pure and still answers
-differently on each call, the same gap
-[`Stream.withCursor`](library-streams.md) leaves for a cursor.
-
-## Handler lifetimes
-
-Ordinary stateless user-declared effects have durable evidence: returning a pure closure
-that captures an immutable Reader-style handler remains legal. There is no
-scope annotation in source syntax. Parameterized handlers are scoped: a result
-that can retain their local capability is rejected with `STATE RESULT ESCAPES`
-or `RESOURCE ESCAPES`. Inferred contracts distinguish functions that capture
-local evidence from functions that are independent of it. A partial operation
-that receives fresh evidence on its next application does not by itself retain
-the preceding handler. This does not shorten the lifetime of existing stateless
-handler values.
-
-Nested handlers of the same effect remain distinct. Stored callbacks use their
-nearest lexical binding and do not retain unrelated handler evidence.
-
-A reusable handler wrapper may annotate that residual flow with an open row
-tail. The handled label disappears from the callback's row while every other
-effect the callback performs passes through the wrapper's own row:
-
-```fango
-run : (() ->{Ask | e} a) ->{e} a
-run action =
-    handle action() of
-        ask () -> resume "yes"
-```
+Resources that outlive their acquiring scope are checked by native operations
+at runtime; see [cleanup scopes](resources.md).

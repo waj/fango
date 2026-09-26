@@ -1,0 +1,65 @@
+{-# no-prelude #-}
+module Task exposing (Context, Error(..), Scope, Task, await, awaitIn, cancel, isCancelled, scope, sleep, spawn)
+
+import Basics exposing (..)
+import IO exposing (IO)
+import Result exposing (Result(..))
+import Runtime.Native
+import Runtime.Scope
+
+type Context = Context Runtime.Native.Any
+type Scope = Scope Runtime.Native.Any
+{-# resource #-}
+type Task a = Task Runtime.Native.Any
+
+type Error = Cancelled | Panicked String | ClosedScope deriving (Eq, Show)
+
+-- This is the sole concurrent Fango invocation boundary. The worker must be
+-- named and top-level; input/output must be concrete immutable transferable data.
+spawn : Scope -> (Context -> input ->{IO} output) -> input ->{IO} Task output
+spawn = native
+
+newScope : () ->{IO} Scope
+newScope = native
+joinScope : Scope ->{IO} ()
+joinScope = native
+closeScope : Scope ->{IO} ()
+closeScope = native
+
+scope : (Scope ->{IO | e} a) ->{IO | e} a
+scope use = Runtime.Scope.bracket newScope closeScope (\owner ->
+    result = use owner
+    joinScope owner
+    result)
+
+cancel : Task a ->{IO} ()
+cancel = native
+wait : Task a ->{IO} ()
+wait = native
+waitIn : Context -> Task a ->{IO} Bool
+waitIn = native
+status : Task a ->{IO} Int
+status = native
+fault : Task a ->{IO} String
+fault = native
+result : Task a ->{IO} a
+result = native
+
+await : Task a ->{IO} Result Error a
+await task =
+    wait task
+    case status task of
+        0 -> Ok (result task)
+        1 -> Err Cancelled
+        2 -> Err (Panicked (fault task))
+        _ -> Err ClosedScope
+
+awaitIn : Context -> Task a ->{IO} Result Error a
+awaitIn context task = if waitIn context task then await task else Err Cancelled
+
+isCancelled : Context ->{IO} Bool
+isCancelled = native
+
+-- Returns False when cancelled; CPU loops check isCancelled explicitly.
+sleep : Context -> Int ->{IO} Bool
+sleep = native

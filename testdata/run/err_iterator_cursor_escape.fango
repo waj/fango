@@ -1,7 +1,0 @@
-import Stream
-import Iterator
-
-escape() =
-    Stream.withCursor (Stream.generate (\_ -> Stream.yield 1)) (\iterator -> iterator)
-
-main() = print "unreachable"

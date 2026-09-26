@@ -1,0 +1,19 @@
+{-# no-prelude #-}
+module Runtime.Ref exposing (Ref, new, read, write)
+
+import Basics exposing (..)
+import IO exposing (IO)
+import Runtime.Native
+
+-- Task-local mutable storage. IO is explicit on every operation.
+{-# resource #-}
+type Ref a = Ref Runtime.Native.Any
+
+new : a ->{IO} Ref a
+new = native
+
+read : Ref a ->{IO} a
+read = native
+
+write : Ref a -> a ->{IO} ()
+write = native

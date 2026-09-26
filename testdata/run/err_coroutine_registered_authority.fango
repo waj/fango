@@ -1,8 +1,0 @@
-import Runtime.Coroutine
-import Runtime.Work
-bad() = Runtime.Coroutine.scope (\scope ->
-    sibling = Runtime.Coroutine.create scope (\_ () -> 42)
-    item = Runtime.Work.register (Runtime.Coroutine.facet scope) (\_ () -> Runtime.Coroutine.advance sibling ())
-    ())
-
-main() = ()

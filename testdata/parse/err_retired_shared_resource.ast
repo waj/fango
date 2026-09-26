@@ -1,0 +1,9 @@
+(module
+  (type Handle (ctor Handle Int)))
+-- errors --
+-- UNKNOWN PRAGMA ------------ err_retired_shared_resource.fango
+
+I don't know the pragma `shared-resource`. Use `no-prelude` above the module header, or `resource` before a type declaration.
+
+1| {-# shared-resource #-}
+   ^^^^^^^^^^^^^^^^^^^^^^^

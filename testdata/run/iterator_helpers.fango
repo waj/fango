@@ -1,23 +1,19 @@
-import Runtime.Coroutine
 import Stream
 import Iterator
 import Maybe exposing (Maybe(..))
 
-foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Runtime.Coroutine.Drive | e} b
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator state a e ->{e} b
 foldCursor combine initial cursor = case Iterator.next cursor of
     Nothing -> initial
-    Just value -> foldCursor combine (combine value initial) cursor
+    Just (value, next) -> foldCursor combine (combine value initial) next
 
-type Held a e = Held (Iterator.Iterator a e)
-type Consumer e = Consumer (Iterator.Iterator Int e ->{Runtime.Coroutine.Drive | e} Int)
+type Held state a e = Held (Iterator.Iterator state a e)
+type Consumer state e = Consumer (Iterator.Iterator state Int e ->{e} Int)
 
-produce : () ->{Stream.Yield Int | e} ()
-produce() =
-    Stream.yield 1
-    Stream.yield 2
-    Stream.yield 3
+produce : Stream.Stream (List Int) Int e
+produce = Stream.fromList [1, 2, 3]
 
-sumCursor : Iterator.Iterator Int e ->{Runtime.Coroutine.Drive | e} Int
+sumCursor : Iterator.Iterator state Int e ->{e} Int
 sumCursor cursor = foldCursor (\element acc -> element + acc) 0 cursor
 
 sumHeld (Held cursor) = sumCursor cursor
@@ -33,26 +29,26 @@ makeConsumer() = Consumer twice
 
 runStored source =
     case makeConsumer() of
-        Consumer consume -> Stream.withCursor (Stream.generate source) consume
+        Consumer consume -> Stream.withCursor source consume
 
 class Consume a
-    consume : Iterator.Iterator a IO ->{Runtime.Coroutine.Drive, IO} Int
+    consume : Iterator.Iterator (List a) a IO ->{IO} Int
 
 instance Consume Int
     consume cursor = sumCursor cursor
 
-independent : Iterator.Iterator Int e -> (() -> Int)
+independent : Iterator.Iterator state Int e -> (() -> Int)
 independent cursor = \_ -> 42
 
 main() =
-    print (Stream.withCursor (Stream.generate produce) twice)
+    print (Stream.withCursor produce twice)
     print (runStored produce)
-    print (Stream.withCursor (Stream.generate produce) consume)
-    print (Stream.withCursor (Stream.generate produce) (\left ->
-        Stream.withCursor (Stream.generate produce) (\right ->
+    print (Stream.withCursor produce consume)
+    print (Stream.withCursor produce (\left ->
+        Stream.withCursor produce (\right ->
             a = sumCursor left
             b = sumCursor right
             c = sumCursor left
             a + b + c)))
-    saved = Stream.withCursor (Stream.generate produce) independent
+    saved = Stream.withCursor produce independent
     print (saved())

@@ -178,19 +178,8 @@ cost. Each reuse count is over every module that stage covered, so a module
 whose generated code cannot be cached counts against reuse rather than
 disappearing from the ratio.
 
-The [capture-flow analysis](../design/ownership.md#capture-flow-graph-and-abstract-heap)
-runs inside several stages — inference, elaboration, and stage snapshots each
-interpret definitions through it, and lowering does only when a contract it
-reconstructs disagrees with the one installed — and on an uncached build it
-is usually most of the compiler's time. It has its own `capture flow` row, and
-its time is subtracted from the row of the stage it ran inside, so those rows
-show only their own work. A `flow` line beneath the table sizes it: how many
-times it ran, how many definitions it interpreted from as roots, and how many
-call contexts those interpretations created.
-
-`-timings json` writes the same measurements as one JSON object instead of the
-prose, for recording build cost over time; the `flow` line is its
-`capture_flow` object. `-no-cache` ignores and publishes no
+`-timings json` writes these stage and cache measurements as one JSON object
+for recording build cost over time. `-no-cache` ignores and publishes no
 artifacts, so a cold build can be measured against a warm one in place.
 
 All of this goes to standard error. A program started by `run` still owns
@@ -303,7 +292,7 @@ non-Unit `main` value is printed, as in the REPL.
 
 The interpreter runs without a native worker, so natives that need one (File,
 Net, Runtime.Cell, Runtime.NativeRequest and the modules built on them, such as
-Async) and user sidecars fail with an error rather than building one. The
+Task) and user sidecars fail with an error rather than building one. The
 website's playground runs programs this way in the browser.
 
 ## Entry points

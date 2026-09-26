@@ -50,26 +50,20 @@ main() =
         Fail.fail "body"
         0) (\_ -> Fail.fail "close")))
     showReport (Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ -> 7) (\_ -> Fail.fail "close after success")))
-    showReport (Fail.attemptReport (\_ -> Stream.toList (Stream.take 1 (Stream.generate (\_ ->
-        Runtime.Scope.finally (\_ ->
-            Stream.yield 1
-            Stream.yield 2) (\_ -> Fail.fail "close after take"))))))
+    showReport (Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ ->
+        Stream.toList (Stream.take 1 (Stream.fromList [1, 2]))) (\_ -> Fail.fail "close after take")))
     handle showHeterogeneous (Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ ->
         Fail.fail "heterogeneous body") (\_ -> close 42))) of
         close _ -> print "unexpected close handler"
-    print (Stream.toList (Stream.generate (\_ ->
-        result : Result (Fail.Report String) ()
-        result = Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ ->
-            Stream.yield "before failure"
-            Fail.fail "machine body") (\_ -> Fail.fail "machine close"))
-        case result of
-            Err report ->
-                Stream.yield report.primary
-                List.each (\failure ->
-                    message : Maybe String
-                    message = Failure.argument 0 failure
-                    Stream.yield (Maybe.withDefault "missing" message)) report.suppressed
-            Ok _ -> Stream.yield "unexpected success")))
+    result : Result (Fail.Report String) ()
+    result = Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ ->
+        Fail.fail "body after value") (\_ -> Fail.fail "cleanup after value"))
+    case result of
+        Err report -> print ["before failure", report.primary | List.map (\failure ->
+            message : Maybe String
+            message = Failure.argument 0 failure
+            Maybe.withDefault "missing" message) report.suppressed]
+        Ok _ -> print "unexpected success"
     showReport (Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ ->
         Runtime.Scope.finally (\_ ->
             Fail.fail "nested body"

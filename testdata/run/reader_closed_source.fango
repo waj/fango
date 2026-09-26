@@ -1,0 +1,15 @@
+import Fail
+import File
+import Reader
+import State
+import Result exposing (Result(..))
+
+main() =
+    result = Fail.attempt (\_ ->
+        source = File.withFile "input.txt" File.source
+        Reader.over source (\reader ->
+            ignore (Reader.readUpTo reader 1)
+            Nothing))
+    print (case result of
+        Err _ -> True
+        Ok _ -> False)

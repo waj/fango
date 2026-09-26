@@ -1,7 +1,0 @@
-import Runtime.Coroutine
-import File
-
-bad() = Runtime.Coroutine.with (\_ () ->
-    File.withFile "local.txt" (\file -> file)) (\work -> Runtime.Coroutine.advance work ())
-
-main() = print "unreachable"
