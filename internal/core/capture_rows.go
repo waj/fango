@@ -16,7 +16,7 @@ type flowRow struct {
 }
 
 func emptyFlowEnv() flowEnv {
-	return flowEnv{values: map[string]flowValue{}, evidence: map[int][]int{}, types: map[int]types.Type{}, rows: map[types.CaptureVar]flowRow{}}
+	return flowEnv{values: newFlowScope(), evidence: map[int][]int{}, types: map[int]types.Type{}, rows: map[types.CaptureVar]flowRow{}}
 }
 
 func joinFlowRow(a, b flowRow) flowRow {
@@ -38,6 +38,7 @@ func equalFlowRow(a, b flowRow) bool {
 
 func invocationFlowRow(env flowEnv, arg *types.CaptureRow) flowEnv {
 	inner := env.clone()
+	inner.rows = maps.Clone(inner.rows)
 	if inner.rows == nil {
 		inner.rows = map[types.CaptureVar]flowRow{}
 	}

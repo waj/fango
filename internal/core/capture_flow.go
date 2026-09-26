@@ -122,14 +122,241 @@ func equalFlow(a, b flowValue) bool {
 type flowEnv struct {
 	controlRow types.Type
 	invocation types.Type
-	values     map[string]flowValue
+	values     *flowScope
 	evidence   map[int][]int
 	types      map[int]types.Type
 	rows       map[types.CaptureVar]flowRow
 }
 
+// clone extends the value environment rather than copying it, so a local
+// binding costs its own layer instead of every binding in scope. The other
+// maps are shared unless they belong to a stored environment, which mergeEnv
+// grows in place; a site that writes one of them copies it first.
 func (e flowEnv) clone() flowEnv {
-	return flowEnv{controlRow: e.controlRow, invocation: e.invocation, values: maps.Clone(e.values), evidence: maps.Clone(e.evidence), types: maps.Clone(e.types), rows: maps.Clone(e.rows)}
+	out := flowEnv{controlRow: e.controlRow, invocation: e.invocation, values: e.values.extend(), evidence: e.evidence, types: e.types, rows: e.rows}
+	if e.values != nil && e.values.stored {
+		out.evidence, out.types, out.rows = maps.Clone(e.evidence), maps.Clone(e.types), maps.Clone(e.rows)
+	}
+	return out
+}
+
+// snapshot is a private, flat copy for an environment that is stored: closure
+// objects, owners, and context entries outlive the evaluation that made them,
+// sharing keys read theirs, and mergeEnv grows them in place.
+func (e flowEnv) snapshot() flowEnv {
+	out := flowEnv{controlRow: e.controlRow, invocation: e.invocation, values: e.values.flatten(), evidence: maps.Clone(e.evidence), types: maps.Clone(e.types), rows: maps.Clone(e.rows)}
+	out.values.stored = true
+	return out
+}
+
+// flowScope is one layer of a chained value environment: the bindings a let,
+// branch, or lambda introduces over the environment it extends. A layer reads
+// as the union of its chain, the innermost binding of a name winning. Small
+// layers keep a slice, larger ones a map.
+//
+// Extending a layer must behave as the copy it replaces, so a later write to
+// the extended layer is invisible below it. Children therefore extend snap, a
+// frozen view sharing this layer's bindings, and the next write here copies
+// them first. Only layers held by an environment are written; frozen views are
+// reachable only as parents. A stored layer belongs to an environment that
+// mergeEnv grows, and copies of that environment's struct share it.
+type flowScope struct {
+	binds  []flowBinding
+	vars   map[string]flowValue
+	parent *flowScope
+	snap   *flowScope
+	depth  int
+	stored bool
+}
+
+type flowBinding struct {
+	name  string
+	value flowValue
+}
+
+const (
+	// maxFlowScopeDepth bounds lookup cost: extending a deeper chain flattens it.
+	maxFlowScopeDepth = 16
+	// maxFlowScopeBinds is the largest layer kept as a slice.
+	maxFlowScopeBinds = 8
+)
+
+func newFlowScope() *flowScope { return &flowScope{} }
+
+func (s *flowScope) len() int {
+	if s.vars != nil {
+		return len(s.vars)
+	}
+	return len(s.binds)
+}
+
+func (s *flowScope) extend() *flowScope {
+	switch {
+	case s == nil:
+		return newFlowScope()
+	case s.depth >= maxFlowScopeDepth:
+		return s.flatten()
+	case s.len() == 0:
+		return &flowScope{parent: s.parent, depth: s.depth}
+	}
+	if s.snap == nil {
+		s.snap = &flowScope{binds: s.binds, vars: s.vars, parent: s.parent, depth: s.depth}
+	}
+	return &flowScope{parent: s.snap, depth: s.depth + 1}
+}
+
+func (s *flowScope) own(name string) (flowValue, bool) {
+	if s.vars != nil {
+		v, ok := s.vars[name]
+		return v, ok
+	}
+	for _, b := range s.binds {
+		if b.name == name {
+			return b.value, true
+		}
+	}
+	return flowValue{}, false
+}
+
+func (s *flowScope) lookup(name string) (flowValue, bool) {
+	for ; s != nil; s = s.parent {
+		if v, ok := s.own(name); ok {
+			return v, true
+		}
+	}
+	return flowValue{}, false
+}
+
+func (s *flowScope) get(name string) flowValue {
+	v, _ := s.lookup(name)
+	return v
+}
+
+// unshare gives this layer bindings of its own before a write.
+func (s *flowScope) unshare() {
+	if s.snap != nil {
+		s.binds, s.vars, s.snap = slices.Clone(s.binds), maps.Clone(s.vars), nil
+	}
+}
+
+func (s *flowScope) set(name string, v flowValue) {
+	s.unshare()
+	if s.vars != nil {
+		s.vars[name] = v
+		return
+	}
+	for i := range s.binds {
+		if s.binds[i].name == name {
+			s.binds[i].value = v
+			return
+		}
+	}
+	if len(s.binds) < maxFlowScopeBinds {
+		s.binds = append(s.binds, flowBinding{name, v})
+		return
+	}
+	s.vars = make(map[string]flowValue, len(s.binds)+1)
+	for _, b := range s.binds {
+		s.vars[b.name] = b.value
+	}
+	s.vars[name] = v
+	s.binds = nil
+}
+
+func (s *flowScope) delete(name string) {
+	if s.parent != nil {
+		stored := s.stored
+		*s = *s.flatten()
+		s.stored = stored
+	}
+	s.unshare()
+	delete(s.vars, name)
+	s.binds = slices.DeleteFunc(s.binds, func(b flowBinding) bool { return b.name == name })
+}
+
+func (s *flowScope) ownAll(yield func(string, flowValue) bool) {
+	if s.vars != nil {
+		for name, v := range s.vars {
+			if !yield(name, v) {
+				return
+			}
+		}
+		return
+	}
+	for _, b := range s.binds {
+		if !yield(b.name, b.value) {
+			return
+		}
+	}
+}
+
+// all yields each visible name once, with its innermost binding.
+func (s *flowScope) all(yield func(string, flowValue) bool) {
+	if s == nil {
+		return
+	}
+	if s.parent == nil {
+		s.ownAll(yield)
+		return
+	}
+	seen := map[string]bool{}
+	for l := s; l != nil; l = l.parent {
+		for name, v := range l.ownAll {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			if !yield(name, v) {
+				return
+			}
+		}
+	}
+}
+
+// names lists the visible names in sorted order.
+func (s *flowScope) names() []string {
+	var names []string
+	for name := range s.all {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// flatten copies the visible bindings into a fresh single layer.
+func (s *flowScope) flatten() *flowScope {
+	out := newFlowScope()
+	if s == nil {
+		return out
+	}
+	if s.parent == nil {
+		out.binds, out.vars = slices.Clone(s.binds), maps.Clone(s.vars)
+		return out
+	}
+	n := 0
+	for l := s; l != nil; l = l.parent {
+		n += l.len()
+	}
+	if n > maxFlowScopeBinds {
+		out.vars = make(map[string]flowValue, n)
+		for l := s; l != nil; l = l.parent {
+			for name, v := range l.ownAll {
+				if _, ok := out.vars[name]; !ok {
+					out.vars[name] = v
+				}
+			}
+		}
+		return out
+	}
+	out.binds = make([]flowBinding, 0, n)
+	for l := s; l != nil; l = l.parent {
+		for name, v := range l.ownAll {
+			if _, ok := out.own(name); !ok {
+				out.binds = append(out.binds, flowBinding{name, v})
+			}
+		}
+	}
+	return out
 }
 
 type flowObject struct {
@@ -398,6 +625,7 @@ func (f *flowChecker) mergeObjectEnv(dst *flowEnv, src flowEnv) {
 func (f *flowChecker) mergeEnv(dst *flowEnv, src flowEnv) {
 	if dst.values == nil {
 		*dst = emptyFlowEnv()
+		dst.values.stored = true
 		dst.types = maps.Clone(src.types)
 	}
 	// Reentrant higher-order code can instantiate the same worker at different
@@ -410,10 +638,10 @@ func (f *flowChecker) mergeEnv(dst *flowEnv, src flowEnv) {
 			f.grow()
 		}
 	}
-	for k, v := range src.values {
-		old := dst.values[k]
+	for k, v := range src.values.all {
+		old := dst.values.get(k)
 		f.merge(&old, v)
-		dst.values[k] = old
+		dst.values.set(k, old)
 	}
 	for k, ids := range src.evidence {
 		joined := append(slices.Clone(dst.evidence[k]), ids...)
@@ -504,7 +732,7 @@ func (f *flowChecker) owner(n *types.CaptureFlow, env flowEnv, ctx string, scope
 		}
 		context = c.parent
 	}
-	f.owners = append(f.owners, &flowOwner{origin: origin, scope: n.Scope, parent: slices.Clone(scopes), name: name + " in `" + f.contextDef(ctx) + "`", in: f.root, scoped: n.Scoped || n.Kind == "scope", context: ctx, code: n, env: env.clone()})
+	f.owners = append(f.owners, &flowOwner{origin: origin, scope: n.Scope, parent: slices.Clone(scopes), name: name + " in `" + f.contextDef(ctx) + "`", in: f.root, scoped: n.Scoped || n.Kind == "scope", context: ctx, code: n, env: env.snapshot()})
 	f.mergeAncestry(&f.owners[id].ancestry)
 	f.grow()
 	return id
@@ -546,7 +774,7 @@ func (f *flowChecker) captureObjects(v flowValue, object func(*flowObject)) []in
 			visitRows(cl.Body, o.env, 0)
 			free := f.shape.free(cl.Body, cl.Names)
 			for name := range free {
-				visit(o.env.values[name])
+				visit(o.env.values.get(name))
 			}
 			for ev := range f.shape.effects(cl.Body) {
 				for _, outer := range o.env.evidence[ev] {
@@ -573,7 +801,7 @@ func (f *flowChecker) captureObjects(v flowValue, object func(*flowObject)) []in
 				visitRows(o.code.Children[0], o.env, o.code.RowParam)
 				free := f.shape.free(o.code.Children[0], []string{o.code.Name})
 				for name := range free {
-					visit(o.env.values[name])
+					visit(o.env.values.get(name))
 				}
 				// The cached set is shared, so an owner's own effects are
 				// skipped rather than deleted from it.
@@ -606,9 +834,10 @@ func flowFree(n *types.CaptureFlow, bound []string) map[string]bool {
 		if (n.Kind == "var" || n.Kind == "global") && !b[n.Name] {
 			out[n.Name] = true
 		}
-		inner := maps.Clone(b)
+		inner := b
 		switch n.Kind {
 		case "lambda", "let", "scope", "case":
+			inner = maps.Clone(b)
 			inner[n.Name] = true
 		}
 		for i, c := range n.Children {
@@ -757,7 +986,7 @@ func (f *flowChecker) callDef(name string, args []flowValue, typeArgs []types.Ty
 	env.controlRow = executionRow(types.SubstRigid(contract.SourceType, env.types), len(contract.Params))
 	for i, p := range contract.Params {
 		if i < len(args) {
-			env.values[p] = args[i]
+			env.values.set(p, args[i])
 		}
 	}
 	for _, ev := range contract.Effects {
@@ -804,18 +1033,18 @@ func (f *flowChecker) recursiveInputs(context string, previous, next flowEnv) bo
 			for _, field := range o.fields {
 				references(field, seen, frontier)
 			}
-			for _, captured := range o.env.values {
+			for _, captured := range o.env.values.all {
 				references(captured, seen, frontier)
 			}
 		}
 	}
-	for name, value := range next.values {
+	for name, value := range next.values.all {
 		// A cursor supplied by a nested owner is a distinct resource even when
 		// its allocation happened inside this activation. Folding it into the
 		// enclosing invocation would mix the two exclusive-access contracts.
 		// Other scope owners can widen: recursiveOwner makes uncertain lifetime
 		// equality fail closed during escape checking.
-		previousCaps := append(f.captures(previous.values[name]), f.retainedExecutions(previous.values[name])...)
+		previousCaps := append(f.captures(previous.values.get(name)), f.retainedExecutions(previous.values.get(name))...)
 		for _, owner := range append(f.captures(value), f.retainedExecutions(value)...) {
 			if !slices.Contains(previousCaps, owner) && f.owners[owner].code.Kind == "coroutine" {
 				return false
@@ -824,7 +1053,7 @@ func (f *flowChecker) recursiveInputs(context string, previous, next flowEnv) bo
 		// Fresh adapters must not hide distinct pre-existing descriptions.
 		// Inspect their reachable objects as well as the outer wrapper.
 		previousRefs, nextRefs := map[int]bool{}, map[int]bool{}
-		references(previous.values[name], map[int]bool{}, previousRefs)
+		references(previous.values.get(name), map[int]bool{}, previousRefs)
 		references(value, map[int]bool{}, nextRefs)
 		for ref := range nextRefs {
 			if !previousRefs[ref] {
@@ -889,7 +1118,7 @@ func (f *flowChecker) invoke(target, def string, body *types.CaptureFlow, env fl
 		// revision -1 marks the key as never computed: heap revision 0 is a
 		// real state, so a zero here would pass off the empty string as this
 		// context's key.
-		c = &flowContext{control: control, id: key, revision: -1, entry: env.clone(), boundary: boundary, evaluations: map[int]int{}, origin: f.location, target: target, site: callSite, parent: parent, def: def, scopes: slices.Clone(scopes)}
+		c = &flowContext{control: control, id: key, revision: -1, entry: env.snapshot(), boundary: boundary, evaluations: map[int]int{}, origin: f.location, target: target, site: callSite, parent: parent, def: def, scopes: slices.Clone(scopes)}
 		f.contexts[key] = c
 		if f.byTarget == nil {
 			f.byTarget = map[string][]*flowContext{}
@@ -1001,9 +1230,10 @@ func (f *flowChecker) apply(fn flowValue, args []flowValue, env flowEnv, site fl
 				continue
 			}
 			inner := o.env.clone()
+			inner.evidence, inner.types, inner.rows = maps.Clone(inner.evidence), maps.Clone(inner.types), maps.Clone(inner.rows)
 			matchSourceRows(o.code.SourceType, env.invocation, inner.types)
 			f.bindFlowRow(&inner, o.code.RowParam, o.code.Deferred, env.rows[0])
-			inner.values[o.code.Name] = args[0]
+			inner.values.set(o.code.Name, args[0])
 			inner.controlRow = executionRow(types.SubstRigid(o.code.SourceType, inner.types), 1)
 			for _, ev := range o.code.Effects {
 				inner.evidence[ev] = env.evidence[ev]
@@ -1179,15 +1409,15 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		}
 		result.unknown = result.unknown || work.unknown
 	case "var":
-		result = env.values[n.Name]
+		result = env.values.get(n.Name)
 	case "global":
-		if local, ok := env.values[n.Name]; ok {
+		if local, ok := env.values.lookup(n.Name); ok {
 			return f.trim(local, n.Type, env)
 		}
 		if d := f.defs[n.Name]; d != nil && !d.IsWorker() {
 			result = f.callDef(n.Name, nil, n.TypeArgs, env, key, scopes)
 		} else {
-			id := f.alloc(key.allocation(), flowObject{kind: "global", def: n.Name, code: n, env: env.clone()})
+			id := f.alloc(key.allocation(), flowObject{kind: "global", def: n.Name, code: n, env: env.snapshot()})
 			result.refs = []int{id}
 		}
 	case "native-request":
@@ -1307,7 +1537,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 				replayed.Children = nil
 				for i, payload := range failure.fields {
 					name := fmt.Sprintf("_completionPayload%d", i)
-					inner.values[name] = payload
+					inner.values.set(name, payload)
 					replayed.Children = append(replayed.Children, &types.CaptureFlow{ID: n.ID, Kind: "var", Name: name})
 				}
 				result = joinFlow(result, f.eval(&replayed, inner, ctx, scopes, resumes))
@@ -1338,7 +1568,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 	case "let":
 		inner := env.clone()
 		v := child(0)
-		inner.values[n.Name] = v
+		inner.values.set(n.Name, v)
 		if n.Rec {
 			for _, id := range v.refs {
 				o := f.objects[id]
@@ -1349,7 +1579,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		}
 		result = f.eval(n.Children[1], inner, ctx, scopes, resumes)
 	case "lambda":
-		id := f.alloc(key.allocation(), flowObject{kind: "lambda", code: n, def: f.contextDef(ctx), env: env.clone()})
+		id := f.alloc(key.allocation(), flowObject{kind: "lambda", code: n, def: f.contextDef(ctx), env: env.snapshot()})
 		result.refs = []int{id}
 	case "ctor":
 		id := f.alloc(key.allocation(), flowObject{kind: "ctor", ctor: n.Index, fields: all(0)})
@@ -1359,7 +1589,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		args := all(1)
 		env = invocationFlowRow(env, n.Row)
 		env.invocation = types.SubstRigid(n.SourceType, env.types)
-		_, local := env.values[n.Children[0].Name]
+		_, local := env.values.lookup(n.Children[0].Name)
 		if n.Children[0].Kind == "global" && !local {
 			result = f.callDef(n.Children[0].Name, args, n.TypeArgs, env, key, scopes)
 		} else {
@@ -1368,10 +1598,10 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 	case "case":
 		v := child(0)
 		inner := env.clone()
-		inner.values[n.Name] = v
+		inner.values.set(n.Name, v)
 		result = f.eval(n.Children[1], inner, ctx, scopes, resumes)
 	case "switch":
-		v := env.values[n.Name]
+		v := env.values.get(n.Name)
 		for _, cl := range n.Clauses {
 			inner := env.clone()
 			possible := v.unknown || len(v.refs) == 0
@@ -1381,7 +1611,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 					possible = true
 					for i, name := range cl.Names {
 						if i < len(o.fields) {
-							inner.values[name] = joinFlow(inner.values[name], o.fields[i])
+							inner.values.set(name, joinFlow(inner.values.get(name), o.fields[i]))
 						}
 					}
 				}
@@ -1390,13 +1620,13 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 				continue
 			}
 			for i, name := range cl.Names {
-				value := inner.values[name]
+				value := inner.values.get(name)
 				value.caps = append(value.caps, v.caps...)
 				value.unknown = value.unknown || v.unknown
 				if i < len(cl.Types) {
 					value = f.trim(value, cl.Types[i], env)
 				}
-				inner.values[name] = value
+				inner.values.set(name, value)
 			}
 			result = joinFlow(result, f.eval(cl.Body, inner, ctx, scopes, resumes))
 		}
@@ -1411,7 +1641,7 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 			resource.caps = append(resource.caps, id)
 		}
 		inner := env.clone()
-		inner.values[n.Name] = resource
+		inner.values.set(n.Name, resource)
 		inside := append(slices.Clone(scopes), id)
 		result = f.eval(n.Children[1], inner, ctx, inside, resumes)
 		f.syncEval("release", n.Children[2], inner, ctx, inside, resumes)
@@ -1423,13 +1653,14 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 		f.store(initial, id, "initial state")
 		f.merge(&o.state, initial)
 		inner := env.clone()
+		inner.evidence = maps.Clone(inner.evidence)
 		inner.evidence[n.Effects[0]] = []int{id}
 		result = f.eval(n.Children[1], inner, ctx, append(slices.Clone(scopes), id), resumes)
 		if n.Children[2] != nil {
 			ret := env.clone()
-			ret.values[n.Name] = o.state
+			ret.values.set(n.Name, o.state)
 			if len(n.Names) > 0 {
-				ret.values[n.Names[0]] = result
+				ret.values.set(n.Names[0], result)
 			}
 			result = f.eval(n.Children[2], ret, ctx, scopes, resumes)
 		}
@@ -1533,12 +1764,12 @@ func (f *flowChecker) eval(n *types.CaptureFlow, env flowEnv, ctx string, scopes
 				}
 				inner := o.env.clone()
 				if cl.Suppressed != "" {
-					inner.values[cl.Suppressed] = o.failures
+					inner.values.set(cl.Suppressed, o.failures)
 				}
-				inner.values[o.code.Name] = o.state
+				inner.values.set(o.code.Name, o.state)
 				for i, name := range cl.Names {
 					if i < len(args) {
-						inner.values[name] = args[i]
+						inner.values.set(name, args[i])
 					}
 				}
 				// Clause code runs with definition-site evidence. Its synchronous

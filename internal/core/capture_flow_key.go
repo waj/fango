@@ -12,17 +12,10 @@ import (
 )
 
 // Keep only definition-site bindings. Invocation binders must not accidentally
-// capture a previous activation's arguments, evidence, or residual row.
+// capture a previous activation's arguments, evidence, or residual row. The
+// result shares the substitution: callers only read it, and a context stores
+// it through snapshot or mergeEnv, which copy.
 func (f *flowChecker) relevantFlowEnv(body *types.CaptureFlow, env flowEnv, bound []string, effects []int, row types.CaptureVar) flowEnv {
-	out := f.filterFlowEnv(body, env, bound, effects, row)
-	out.types = maps.Clone(env.types)
-	return out
-}
-
-// readOnlyFlowEnv is relevantFlowEnv for a caller that only reads the result.
-// The sharing key is one such caller, and it rebuilds this for every closure
-// it reaches, so cloning the substitution there is pure waste.
-func (f *flowChecker) readOnlyFlowEnv(body *types.CaptureFlow, env flowEnv, bound []string, effects []int, row types.CaptureVar) flowEnv {
 	out := f.filterFlowEnv(body, env, bound, effects, row)
 	out.types = env.types
 	return out
@@ -31,8 +24,8 @@ func (f *flowChecker) readOnlyFlowEnv(body *types.CaptureFlow, env flowEnv, boun
 func (f *flowChecker) filterFlowEnv(body *types.CaptureFlow, env flowEnv, bound []string, effects []int, row types.CaptureVar) flowEnv {
 	out := emptyFlowEnv()
 	for name := range f.shape.free(body, bound) {
-		if v, ok := env.values[name]; ok {
-			out.values[name] = v
+		if v, ok := env.values.lookup(name); ok {
+			out.values.set(name, v)
 		}
 	}
 	// The cached set is shared, so bound effects are skipped rather than
@@ -262,11 +255,11 @@ func (f *flowChecker) flowFingerprint(env flowEnv) string {
 func (f *flowChecker) keyEnv(e flowEnv) {
 	b := f.key.b
 	b = append(b, "env{"...)
-	for _, name := range slices.Sorted(maps.Keys(e.values)) {
+	for _, name := range e.values.names() {
 		b = strconv.AppendQuote(b, name)
 		b = append(b, ':')
 		f.key.b = b
-		f.keyValue(e.values[name])
+		f.keyValue(e.values.get(name))
 		b = f.key.b
 	}
 	for _, ev := range slices.Sorted(maps.Keys(e.evidence)) {
@@ -349,7 +342,7 @@ func (f *flowChecker) keyValue(v flowValue) {
 			b = append(b, ':')
 			f.key.b = b
 			effects := append(slices.Clone(o.code.Effects), o.code.Deferred...)
-			f.keyEnv(f.readOnlyFlowEnv(o.code.Children[0], o.env, []string{o.code.Name}, effects, o.code.RowParam))
+			f.keyEnv(f.relevantFlowEnv(o.code.Children[0], o.env, []string{o.code.Name}, effects, o.code.RowParam))
 			b = f.key.b
 		}
 		for _, field := range o.fields {

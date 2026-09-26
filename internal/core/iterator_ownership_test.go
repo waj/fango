@@ -90,7 +90,7 @@ func TestCursorAccessContractsSubstituteAliasesAndRecursiveHelpers(t *testing.T)
 			shape := newCaptureAnalyzer(p, b)
 			f := &flowChecker{shape: shape, defs: shape.defs, objects: []*flowObject{nil}, objectIDs: map[string]int{},
 				owners: []*flowOwner{nil}, ownerIDs: map[string]int{}, contexts: map[string]*flowContext{}, errors: map[string]error{}, active: map[int]int{}, root: "test"}
-			env := flowEnv{values: map[string]flowValue{}, evidence: map[int][]int{}, types: map[int]types.Type{}}
+			env := flowEnv{values: newFlowScope(), evidence: map[int][]int{}, types: map[int]types.Type{}}
 			ownerA := f.owner(&types.CaptureFlow{ID: 10, Kind: "coroutine", Scoped: true, Scope: sup.FreshScope()}, env, "outer", nil)
 			ownerB := f.owner(&types.CaptureFlow{ID: 11, Kind: "coroutine", Scoped: true, Scope: sup.FreshScope()}, env, "inner", []int{ownerA})
 			empty := f.alloc("empty producer", flowObject{kind: "lambda", code: &types.CaptureFlow{ID: 20, Kind: "lambda", Name: "pause", Type: &types.TFun{Arg: fnTy, Ret: fnTy}, Children: []*types.CaptureFlow{action}}, env: env})
@@ -103,7 +103,7 @@ func TestCursorAccessContractsSubstituteAliasesAndRecursiveHelpers(t *testing.T)
 				actual = joinFlow(actual, flowValue{refs: []int{other}, caps: []int{ownerB}})
 			}
 			producerEnv := env.clone()
-			producerEnv.values["cursor"] = actual
+			producerEnv.values.set("cursor", actual)
 			producer := f.alloc("producer A", flowObject{kind: "lambda", code: &types.CaptureFlow{ID: 21, Kind: "lambda", Name: "pause", Type: &types.TFun{Arg: fnTy, Ret: fnTy}, Children: []*types.CaptureFlow{{ID: 12, Kind: "lambda", Name: "ignored", Type: fnTy, Children: []*types.CaptureFlow{call}}}}, env: producerEnv})
 			f.objects[a].fields[0] = flowValue{refs: []int{producer}}
 			for {

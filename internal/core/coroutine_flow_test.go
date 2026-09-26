@@ -42,7 +42,9 @@ func TestRecursiveInputsDistinguishWrappedDescriptions(t *testing.T) {
 		&flowObject{kind: "lambda", code: adapter, ancestry: []string{"owner"}, fields: []flowValue{{refs: []int{1}}}},
 		&flowObject{kind: "lambda", code: adapter, ancestry: []string{"owner"}, fields: []flowValue{{refs: []int{2}}}},
 	)
-	env := func(ref int) flowEnv { return flowEnv{values: map[string]flowValue{"producer": {refs: []int{ref}}}} }
+	env := func(ref int) flowEnv {
+		return flowEnv{values: &flowScope{vars: map[string]flowValue{"producer": {refs: []int{ref}}}}}
+	}
 	if f.recursiveInputs("owner", env(3), env(4)) {
 		t.Fatal("fresh adapters hid distinct pre-existing producers")
 	}

@@ -65,7 +65,7 @@ func TestFlowCapabilitySharing(t *testing.T) {
 	body := &types.CaptureFlow{Kind: "var", Name: "x"}
 	call := func(v flowValue, site string) flowValue {
 		env := emptyFlowEnv()
-		env.values["x"] = v
+		env.values.set("x", v)
 		return f.invoke("identity", "identity", body, env, flowSite{phase: site}, nil, 0)
 	}
 	call(flowValue{caps: []int{1}}, "left")
@@ -100,32 +100,32 @@ func TestFlowFingerprintCyclesAliasesAndGrowth(t *testing.T) {
 	lambda := &types.CaptureFlow{ID: 2, Kind: "lambda", Name: "argument", Children: []*types.CaptureFlow{body}}
 	makeCycle := func(site string, unrelated int) int {
 		env := emptyFlowEnv()
-		env.values["argument"] = flowValue{caps: []int{unrelated}}
-		env.values["unrelated"] = flowValue{caps: []int{unrelated}}
+		env.values.set("argument", flowValue{caps: []int{unrelated}})
+		env.values.set("unrelated", flowValue{caps: []int{unrelated}})
 		ref := f.alloc(site, flowObject{kind: "lambda", def: "cycle", code: lambda, env: env})
-		env.values["self"] = flowValue{refs: []int{ref}}
+		env.values.set("self", flowValue{refs: []int{ref}})
 		f.mergeObjectEnv(&f.objects[ref].env, env)
 		return ref
 	}
 	a, b := makeCycle("a", 10), makeCycle("b", 20)
 	envA, envB := emptyFlowEnv(), emptyFlowEnv()
-	envA.values["x"] = flowValue{refs: []int{a}}
-	envB.values["x"] = flowValue{refs: []int{b}}
+	envA.values.set("x", flowValue{refs: []int{a}})
+	envB.values.set("x", flowValue{refs: []int{b}})
 	if f.flowFingerprint(envA) != f.flowFingerprint(envB) {
 		t.Fatal("cyclic closures retain invocation or unrelated bindings")
 	}
-	envA.values["y"] = flowValue{refs: []int{a}}
-	envB.values["y"] = flowValue{refs: []int{a}}
+	envA.values.set("y", flowValue{refs: []int{a}})
+	envB.values.set("y", flowValue{refs: []int{a}})
 	if f.flowFingerprint(envA) == f.flowFingerprint(envB) {
 		t.Fatal("fingerprint erased alias relationships")
 	}
-	delete(envA.values, "y")
-	delete(envB.values, "y")
+	envA.values.delete("y")
+	envB.values.delete("y")
 	identity := &types.CaptureFlow{ID: 3, Kind: "var", Name: "x"}
 	f.invoke("identity", "identity", identity, envA, flowSite{phase: "first"}, nil, 0)
 	before := f.contextFingerprint(f.contexts["c1"])
 	grown := f.objects[a].env.clone()
-	grown.values["self"] = joinFlow(grown.values["self"], flowValue{caps: []int{9}})
+	grown.values.set("self", joinFlow(grown.values.get("self"), flowValue{caps: []int{9}}))
 	f.mergeObjectEnv(&f.objects[a].env, grown)
 	if before == f.contextFingerprint(f.contexts["c1"]) {
 		t.Fatal("heap growth left a stale fingerprint")
@@ -148,7 +148,7 @@ func TestFlowRowsTypesAndDynamicBoundaries(t *testing.T) {
 	b := types.NewBuiltins(sup)
 	body := &types.CaptureFlow{ID: 1, Kind: "var", Name: "x", Row: &types.CaptureRow{From: 7, Effects: []int{8}}}
 	env := emptyFlowEnv()
-	env.values["x"] = flowValue{unknown: true}
+	env.values.set("x", flowValue{unknown: true})
 	invoke := func() { f.invoke("same", "same", body, env, flowSite{phase: "call"}, nil, 0) }
 	invoke()
 	env.rows[7] = flowRow{unknown: true}
@@ -181,7 +181,7 @@ func TestFlowLateInputGrowthWaitsForNextGeneration(t *testing.T) {
 	body := &types.CaptureFlow{ID: 1, Kind: "var", Name: "x"}
 	env := emptyFlowEnv()
 	f.invoke("identity", "identity", body, env, rootFlowSite, nil, 0)
-	env.values["x"] = flowValue{caps: []int{1}}
+	env.values.set("x", flowValue{caps: []int{1}})
 	got := f.invoke("identity", "identity", body, env, rootFlowSite, nil, 0)
 	if len(got.caps) != 0 || !f.changed {
 		t.Fatal("late growth must schedule, not reevaluate, the context")
@@ -290,11 +290,11 @@ func TestFlowRecursiveAllocationAncestry(t *testing.T) {
 	inside := f.alloc("inside", flowObject{kind: "ctor"})
 	owner := f.owner(&types.CaptureFlow{ID: 1, Kind: "scope", Scoped: true}, emptyFlowEnv(), c.id, nil)
 	previous, next := emptyFlowEnv(), emptyFlowEnv()
-	next.values["x"] = flowValue{refs: []int{before}}
+	next.values.set("x", flowValue{refs: []int{before}})
 	if f.recursiveInputs(c.id, previous, next) {
 		t.Fatal("folded a pre-existing value")
 	}
-	next.values["x"] = flowValue{refs: []int{inside}}
+	next.values.set("x", flowValue{refs: []int{inside}})
 	if !f.recursiveInputs(c.id, previous, next) {
 		t.Fatal("failed to fold a growing recursive input")
 	}
@@ -315,15 +315,15 @@ func TestFlowRecursiveInputsKeepNestedCursorOwnersDistinct(t *testing.T) {
 	closure := &types.CaptureFlow{ID: 1, Kind: "lambda", Name: "ignored", Children: []*types.CaptureFlow{{ID: 2, Kind: "var", Name: "held"}}}
 	wrap := func(site string, owner int) flowValue {
 		env := emptyFlowEnv()
-		env.values["held"] = flowValue{caps: []int{owner}}
+		env.values.set("held", flowValue{caps: []int{owner}})
 		id := f.alloc(site, flowObject{kind: "lambda", code: closure, env: env})
 		return flowValue{refs: []int{id}}
 	}
 	first := f.owner(&types.CaptureFlow{ID: 3, Kind: "coroutine", Scoped: true}, emptyFlowEnv(), context.id, nil)
 	second := f.owner(&types.CaptureFlow{ID: 4, Kind: "coroutine", Scoped: true}, emptyFlowEnv(), context.id, nil)
 	previous, next := emptyFlowEnv(), emptyFlowEnv()
-	previous.values["callback"] = wrap("first callback", first)
-	next.values["callback"] = wrap("second callback", second)
+	previous.values.set("callback", wrap("first callback", first))
+	next.values.set("callback", wrap("second callback", second))
 	if f.recursiveInputs(context.id, previous, next) {
 		t.Fatal("folded callbacks retaining distinct cursor owners")
 	}
@@ -332,8 +332,8 @@ func TestFlowRecursiveInputsKeepNestedCursorOwnersDistinct(t *testing.T) {
 	// escape checking handles their uncertain dynamic identity separately.
 	firstScope := f.owner(&types.CaptureFlow{ID: 5, Kind: "scope", Scoped: true}, emptyFlowEnv(), context.id, nil)
 	secondScope := f.owner(&types.CaptureFlow{ID: 6, Kind: "scope", Scoped: true}, emptyFlowEnv(), context.id, nil)
-	previous.values["callback"] = wrap("first scope callback", firstScope)
-	next.values["callback"] = wrap("second scope callback", secondScope)
+	previous.values.set("callback", wrap("first scope callback", firstScope))
+	next.values.set("callback", wrap("second scope callback", secondScope))
 	if !f.recursiveInputs(context.id, previous, next) {
 		t.Fatal("distinct cleanup scope owners prevented recursive widening")
 	}
@@ -347,7 +347,7 @@ func TestFlowRecursiveTypeWideningPreservesResources(t *testing.T) {
 	f.shape.b = b
 	body := &types.CaptureFlow{ID: 1, Kind: "var", Name: "x", Type: &types.TVar{ID: 1, Rigid: true}}
 	env := emptyFlowEnv()
-	env.values["x"] = flowValue{caps: []int{7}}
+	env.values.set("x", flowValue{caps: []int{7}})
 	env.types[1] = b.Int
 	if got := f.invoke("identity", "identity", body, env, rootFlowSite, nil, 0); len(got.caps) != 0 {
 		t.Fatal("scalar retained captures")

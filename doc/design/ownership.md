@@ -64,6 +64,11 @@ compared only for equality, never ordered, stored, or shown. Stable invocation
 edges merge later input growth into their selected context even after widening.
 Sharing entry state and
 the widened environment are separate and both reference the evolving heap.
+Stored environments — closure objects, owners, and context entries — are flat
+private snapshots, the only ones fingerprints read and the ones joins grow in
+place. The interpreter's transient value environment is a chain of binding
+layers instead, and extending one behaves exactly as a copy: a later write on
+either side is invisible to the other.
 Disagreeing type substitutions are forgotten conservatively so prior scalar
 instantiation cannot erase a later resource.
 

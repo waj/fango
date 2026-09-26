@@ -93,17 +93,10 @@ build` at all.
 
 ### CL1 Allocation in joins and environments
 
-Pure optimization of the checker's data structures, accepted only by identical
-output on every fixture. The linear-merge `joinFlow` and the disabled
-heap-profile sampling are implemented; together they took the cold `import
-Async` build from about 2.8s to about 2.2s, all of it from `joinFlow`. What
-remains:
-
-- The value environment becomes a chain — a small map of local bindings over
-  a parent — rather than a map cloned per `let`, branch, and lambda
-  allocation. Lookups walk the chain; the sharing key and `mergeEnv` iterate
-  it as a whole. Closure objects and context entries keep snapshotting, since
-  their environments are what fingerprints read.
+DONE. Joins merge linearly, the command disables heap-profile sampling, and
+the flow checker's value environment is a
+[chain of layers](design/ownership.md#capture-flow-graph-and-abstract-heap)
+with flat snapshots where fingerprints read it.
 
 ### CL2 One discharge per module in the batch pipeline
 
@@ -188,7 +181,7 @@ the sharing key would actually fold.
 
 | Stage | Depends on | Documentation |
 | --- | --- | --- |
-| CL1 | — | none; behavior is unchanged |
+| CL1 | — | ownership (environment representation) |
 | CL2 | — | ownership, pipeline, metaprogramming |
 | CL3 | — | inference |
 | CL4 | — | backend (cache) |
