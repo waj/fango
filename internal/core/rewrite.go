@@ -80,17 +80,17 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Ty = r.typ(e.Ty)
 		n.Operand = r.expr(e.Operand)
 		out = &n
-	case *TaskSpawn:
+	case *ParallelMap:
+		out = &ParallelMap{Function: r.expr(e.Function), Input: r.expr(e.Input), Ty: r.typ(e.Ty)}
+	case *AsyncLaunch:
 		n := *e
-		n.Scope = r.expr(e.Scope)
-		n.Input = r.expr(e.Input)
+		n.Call = r.expr(e.Call).(*App)
 		n.Ty = r.typ(e.Ty)
-		n.WorkerType = r.typ(e.WorkerType)
-		n.TyArgs = make([]types.Type, len(e.TyArgs))
-		for i, t := range e.TyArgs {
-			n.TyArgs[i] = r.typ(t)
-		}
 		out = &n
+	case *AsyncRebase:
+		out = &AsyncRebase{Call: r.expr(e.Call).(*App)}
+	case *AsyncSupervise:
+		out = &AsyncSupervise{Call: r.expr(e.Call).(*App)}
 	case *NativeCall:
 		n := *e
 		n.Ty = r.typ(e.Ty)

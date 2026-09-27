@@ -5,7 +5,11 @@ package types
 const (
 
 	// LocalRunName owns isolated mutable state under a scoped callback.
-	LocalRunName = "Runtime.Local.run"
+	LocalRunName       = "Runtime.Local.run"
+	AsyncParMapName    = "Async.parMap"
+	AsyncLaunchName    = "Async.launch"
+	AsyncRebaseName    = "Async.rebase"
+	AsyncSuperviseName = "Async.supervise"
 
 	// ScopeBracketName owns resource cleanup on normal and abort exits.
 	ScopeBracketName = "Runtime.Scope.bracket"
@@ -30,11 +34,11 @@ func Intrinsic(name string) bool { return IntrinsicArity(name) != 0 }
 // IntrinsicArity is fixed by the compiler, not read from the declaration.
 func IntrinsicArity(name string) int {
 	switch name {
-	case TaskSpawnName, ScopeBracketName:
+	case ScopeBracketName:
 		return 3
-	case LocalRunName, FailureArgumentName:
+	case LocalRunName, FailureArgumentName, AsyncLaunchName, AsyncParMapName:
 		return 2
-	case FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailAttemptReportName:
+	case AsyncSuperviseName, AsyncRebaseName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailAttemptReportName:
 		return 1
 	}
 	return 0

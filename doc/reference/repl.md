@@ -82,7 +82,9 @@ Supported commands are:
 ```
 
 Ctrl-C clears a partial prompt input. During evaluation it cancels the host
-context and wakes cancellation-aware task waits. Accepted definitions remain
+context and wakes cancellation-aware Async operations. Async runners finish
+language cleanup and drain children before returning an outcome; root and child
+CPU loops must cooperate with cancellation. Accepted definitions remain
 installed. A blocked console `readLine` is interrupted without assigning the
 next line to the old expression. Native operations and task CPU loops that do
 not cooperate can delay the prompt; source task cancellation does not insert

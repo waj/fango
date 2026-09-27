@@ -54,7 +54,9 @@ intrinsic-specific checks concern ownership and lowering.
 | ResumeTail | Exactly one owning tail resume on each normal path |
 | ControlExit | Operation descriptor, payload, and lexical target agree |
 | Bracket | Only in Runtime.Scope.bracket; unique scope, Unit release, joined child control |
-| TaskSpawn | Closed named worker, explicit transferable input/output, no inherited evidence |
+| AsyncLaunch / AsyncRebase | Typed closure invocation, sealed result index, child evidence replacement |
+| ParallelMap | Pure callback, matching List indices, bounded concurrency |
+| AsyncSupervise | Runner thunk owning cooperative host cancellation through cleanup |
 | FailureInspect | Checked descriptor and Maybe packaging; no target/resumption access |
 
 ## Scoped state boundary
@@ -64,7 +66,7 @@ Let, Lambda, App, and NativeCall nodes: allocate a private `Runtime.Ref`, build
 read/write callbacks, and call the consumer. The cell's value index and callback
 row are checked against the bundled Cell declaration before lowering. No Core
 node recognizes Reader; `Reader.withBytes` is ordinary Fango code using this
-primitive. The native reference contains a plain mutable value, with no lock or
+primitive. The native reference synchronizes individual reads and writes, with no
 scheduler. Scope permissions require no runtime identities.
 
 Scoped definitions retain their quantified `SourceType` and a `Scoped` marker;

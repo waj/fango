@@ -38,7 +38,7 @@ func (in *interp) argumentRow(argument *core.RowArgument, fr *Frame) (*fangort.E
 		if ev == nil {
 			return nil, fmt.Errorf("eval: missing residual evidence %s", effect.Name)
 		}
-		bindings[i] = fangort.EvidenceBinding{Name: strconv.Itoa(effect.Unique), Family: fangort.EvidenceFamily{Direct: ev, Exit: ev}}
+		bindings[i] = fangort.EvidenceBinding{Name: strconv.Itoa(effect.Unique), Family: fangort.EvidenceFamily{Origin: projectedEvidenceOrigin(ev, effect.Name), Direct: ev, Exit: ev}}
 	}
 	return fangort.ExtendEvidenceRow(tail, bindings...), nil
 }

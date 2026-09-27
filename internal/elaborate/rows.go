@@ -4,6 +4,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/types"
@@ -142,4 +143,97 @@ func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[i
 		}
 		return true
 	})
+}
+
+// callbackResidual avoids treating a surrounding row's upper bound as the
+// requirements of a closed callback. A shared quantified tail is the union of
+// the concrete callback rows supplying it, less each callback's explicit row.
+// Open or structurally indirect sources retain ordinary abstract forwarding.
+func (el *elab) callbackResidual(name string, arity int, args []ast.Expr, fallback *core.RowArgument) *core.RowArgument {
+	if fallback == nil || len(args) < arity {
+		return fallback
+	}
+	scheme, ok := el.ck.Env.Lookup(name)
+	if !ok {
+		return fallback
+	}
+	params, _ := core.PeelFun(scheme.Body, arity)
+	final := arrowAt(scheme.Body, arity-1).(*types.TFun)
+	tail, ok := final.Eff.Tail.(*types.TVar)
+	if !ok {
+		return fallback
+	}
+	found := false
+	needed := types.Row{}
+	containsTail := func(ty types.Type) bool {
+		for _, v := range types.RigidVarsIn(ty) {
+			if v.ID == tail.ID {
+				return true
+			}
+		}
+		return false
+	}
+	for i, param := range params {
+		fn, ok := param.(*types.TFun)
+		if !ok {
+			if containsTail(param) {
+				return fallback
+			}
+			continue
+		}
+		if containsTail(fn.Arg) || containsTail(fn.Ret) {
+			return fallback
+		}
+		variable, ok := fn.Eff.Tail.(*types.TVar)
+		if !ok || variable.ID != tail.ID {
+			continue
+		}
+		actual, ok := el.callbackRequirements(args[i])
+		if !ok || actual.Tail != nil {
+			return fallback
+		}
+		found = true
+		for _, label := range actual.Labels {
+			if slices.ContainsFunc(fn.Eff.Labels, func(explicit types.EffLabel) bool { return explicit.Unique == label.Unique }) {
+				continue
+			}
+			if !slices.ContainsFunc(needed.Labels, func(existing types.EffLabel) bool { return existing.Unique == label.Unique }) {
+				needed.Labels = append(needed.Labels, label)
+			}
+		}
+	}
+	if !found {
+		return fallback
+	}
+	return el.residualArgument(needed, final.Eff)
+}
+
+// Lambda annotations can be widened by contextual row inclusion. Retain the
+// rows its body actually performs so unused ambient effects are not inherited.
+func (el *elab) callbackRequirements(expr ast.Expr) (types.Row, bool) {
+	if lambda, ok := expr.(*ast.Lambda); ok && len(lambda.Params) == 1 {
+		if performed, found := el.ck.LambdaEffects[lambda]; found {
+			row := types.Row{}
+			for _, effect := range performed {
+				actual, ok := el.apply(effect).(types.Row)
+				if !ok {
+					return types.Row{}, false
+				}
+				if actual.Tail != nil {
+					return actual, true
+				}
+				for _, label := range actual.Labels {
+					if !slices.ContainsFunc(row.Labels, func(existing types.EffLabel) bool { return existing.Unique == label.Unique }) {
+						row.Labels = append(row.Labels, label)
+					}
+				}
+			}
+			return row, true
+		}
+	}
+	fn, ok := el.apply(el.ck.ExprTypes[expr]).(*types.TFun)
+	if !ok {
+		return types.Row{}, false
+	}
+	return fn.Eff, true
 }

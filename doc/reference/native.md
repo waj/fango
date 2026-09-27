@@ -108,8 +108,8 @@ Storage keeps its typed payload alive but does not extend the lifetime of any
 external resource it references. Native resource operations check validity at
 runtime. [Runtime.Ref](../../stdlib/Runtime/Ref.fango) provides ordinary IO-marked
 mutable storage; its individual reads and writes are synchronized, but a
-read followed by a write is not an atomic update. The current `Task` API still
-excludes native handles and functions from its transfer boundary.
+read followed by a write is not an atomic update. [Async](library-async.md)
+callbacks may share native handles and functions.
 Native code must honor its declaration and may not invoke opaque Fango payloads.
 
 ## IO references
@@ -161,7 +161,8 @@ operation.
 
 Every materialized sidecar package receives the reserved process-global
 `FangoHost`. Its `HasInput`, `ReadInputLine`, `WriteOutput`, `Arguments`,
-`WorkingDirectory`, and `Exit` methods expose the surrounding Fango process.
+`WorkingDirectory`, `Exit`, and `ExecutionContext` methods expose the surrounding
+Fango process.
 Compiled programs install the system host; the interpreter worker installs a
 proxy to the active interpreter session. Native function signatures never gain
 a hidden context argument. Sidecars may use `FangoHost` only during a native
@@ -169,7 +170,12 @@ call and must not replace it or retain it for asynchronous work. Host input
 buffer access and individual output writes are serialized. In the interpreter
 worker, concurrent host calls keep each request paired with its own reply.
 
-Concurrent Fango invocation uses the restricted [task boundary](library-tasks.md).
+`ExecutionContext` returns the current evaluation's cancellation context; the
+system host returns a background context. A native operation may derive a context
+for work owned and drained by that evaluation, as the Async root does. This does
+not grant permission to retain the process-global host itself.
+
+Concurrent Fango invocation uses the checked [Async boundary](library-async.md).
 Arbitrary native background callbacks are not supported.
 
 ## Build and interpreter lifecycle

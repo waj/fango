@@ -189,6 +189,8 @@ func (c *IOContext) Arguments() []string { return c.Args }
 func (c *IOContext) WorkingDirectory() string { return c.Dir }
 
 type evidence struct {
+	origin    *fangort.EvidenceOrigin
+	typeArgs  []*fangort.TypeDescriptor
 	row       *fangort.EvidenceRow
 	rowEffect int
 	handler   *core.Handle
@@ -546,8 +548,14 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 	case *core.FailureInspect:
 		return in.inspectFailure(e, fr)
 
-	case *core.TaskSpawn:
-		return in.spawnTask(e, fr)
+	case *core.ParallelMap:
+		return in.parallelMap(e, fr)
+	case *core.AsyncLaunch:
+		return in.asyncLaunch(e, fr)
+	case *core.AsyncSupervise:
+		return in.asyncSupervise(e, fr)
+	case *core.AsyncRebase:
+		return in.asyncRebase(e, fr)
 	case *core.NativeCall:
 		args := make([]Value, len(e.Args))
 		for i, a := range e.Args {
@@ -745,6 +753,15 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		outer := cloneEvidence(in.evidence)
 		in.evidence[e.Effect.Unique] = &evidence{handler: e, frame: fr, outer: outer, state: fangort.NewHandlerState(state)}
 		installed := in.evidence[e.Effect.Unique]
+		for _, arg := range e.Effect.Args {
+			descriptor, err := in.typeDescriptor(arg, fr)
+			if err != nil {
+				in.evidence = outer
+				return nil, err
+			}
+			installed.typeArgs = append(installed.typeArgs, descriptor)
+		}
+		installEvidenceOrigin(installed)
 		v, err := in.eval(e.Body, fr)
 		in.evidence = outer
 		if err != nil {

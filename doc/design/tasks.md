@@ -1,29 +1,7 @@
 # Native tasks and explicit streams
 
-[Design index](../design.md). [Task semantics](../reference/library-tasks.md)
+[Design index](../design.md). [Async](../reference/library-async.md)
 and [stream semantics](../reference/library-streams.md) own the public contract.
-
-## Concurrent invocation boundary
-
-`TaskSpawn` is the only concurrent Core invocation node. It names a closed
-top-level worker and carries explicit input and result types. Elaboration and
-Core lint check transferable data structurally; they do not analyze closure
-bodies or infer sharing/retention graphs. Class dictionaries and residual
-handler evidence do not cross the boundary. Workers establish their own effects.
-
-Generated Go evaluates scope and input in source order, then starts a goroutine
-calling the worker. The interpreter uses the same task runtime and a fresh
-invocation environment with no inherited handler evidence. Installed definitions
-and immutable data may be shared; lazy global initialization retains its existing
-synchronization. Task completion publishes the result before closing a channel.
-The channel provides synchronization for repeated waits and result reads.
-
-The Task module implements structured scopes using `Runtime.Scope.bracket`.
-The runtime protects the scope's child registry with a mutex, cancels children
-on close, and joins every child. Context cancellation is explicit and cooperative.
-No coroutine dispatcher, transformed stack frame, or compiler poll is involved.
-Only `Task.spawn` needs a compiler invocation boundary; scope bookkeeping,
-waiting, cancellation, and timers are ordinary native sidecars.
 
 ## Library state and traversal
 
@@ -32,9 +10,8 @@ sealed type index ensures a reference cannot be read at a different type.
 The bundled Reader and Writer constructors use the
 [scoped state boundary](core.md#scoped-state-boundary) for local buffers.
 Their operations propagate complete rows; a runner discharges only its fresh
-permission, preserving source, sink, and consumer effects. Neither kind of
-mutable cell is transferable task data. Ordinary IO reference operations need
-no compiler cases.
+permission, preserving source, sink, and consumer effects. IO references may be shared by child tasks. Scoped local state must be
+installed inside the task. Ordinary IO reference operations need no compiler cases.
 
 Stream and Iterator are Fango records and ordinary recursive functions. State
 is explicit in each step's return value. No compiler node recognizes streams,
@@ -56,6 +33,41 @@ and future sends. A channel has no owning runner. File and socket wrappers
 serialize complete reads, allow close to interrupt blocking reads, and reject
 later operations on closed handles. Socket writes are serialized separately.
 
-These internal primitives are not a public Fango Async API yet. The checked
-closure/evidence boundary and library integration remain in the
-[task roadmap](../roadmap-scoped-effects.md).
+The [Async API](../reference/library-async.md) uses these primitives. Its Fango
+implementation installs child failure and cancellation boundaries before invoking
+the user's callback. `AsyncLaunch` owns the concurrent call and seals the complete
+`Result err value` under one native type index; `AsyncRebase` reconstructs its
+inherited evidence. `ParallelMap` invokes pure callbacks with bounded concurrency
+and preserves order without exposing task handles.
+
+Each handler activation carries an origin and a factory for rebuilding its
+operation closures. Rebuilding preserves the shared state cell and immutable
+lexical values; it substitutes child Async, cancellation, and matching Fail
+boundaries transitively. Origin memoization preserves activation aliases, and
+row shadowing retains the visible activation. Return clauses are not rebuilt.
+Abort origins have no factory: an unsupported abort dependency fails at runtime
+before the user callback executes. Type descriptors check replacement indices,
+including indirect dependencies and deferred row projections.
+
+Callback dependency summaries retain a known callee's own row rather than the
+ambient row's widened upper bound. Closed callback arguments narrow the residual
+row supplied to generic workers; open or indirect sources retain forwarding.
+This prevents unrelated parent effects from becoming child dependencies.
+
+The interpreter starts a fresh invocation environment and uses the same scope,
+channel, and evidence-rebuilding runtime as generated Go. Imported capture scopes
+retain their defining identities when loading cached modules, even when an
+importer's result summary also mentions them. Lazy global initialization retains
+its synchronization when tasks share the environment.
+
+`AsyncSupervise` marks the private thunk enclosing `Async.run`. Generated Go
+emits an ordinary invocation; the interpreter suspends periodic host polling
+through the runner and its cleanup. The native root takes its context from
+`FangoHost.ExecutionContext`, so host interruption cancels the whole task tree.
+Cancellation is observed at source Async operations; it cannot cut cleanup short
+at an incidental interpreter tick. Each worker evaluation has a fresh host
+context, so an interrupted runner does not cancel later REPL inputs.
+
+Pure parallel mapping inherits the caller's polling ownership. Outside a
+supervised runner, its workers return host interruption to the evaluator after
+joining; inside a runner, they cannot interrupt language cleanup.

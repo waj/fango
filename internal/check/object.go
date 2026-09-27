@@ -164,7 +164,7 @@ func objectTypes() map[string]reflect.Type {
 		(*core.IntLit)(nil), (*core.FloatLit)(nil), (*core.StringLit)(nil), (*core.CharLit)(nil), (*core.UnitLit)(nil), (*core.BoolLit)(nil),
 		(*core.Neg)(nil), (*core.If)(nil), (*core.Perform)(nil), (*core.ControlExit)(nil), (*core.FailureInspect)(nil), (*core.Handle)(nil), (*core.ResumeTail)(nil),
 		(*core.Bracket)(nil), (*core.Seq)(nil), (*core.Let)(nil), (*core.Lambda)(nil), (*core.VarRef)(nil), (*core.Quote)(nil),
-		(*core.TypeOf)(nil), (*core.TaskSpawn)(nil), (*core.NativeCall)(nil), (*core.App)(nil), (*core.Case)(nil),
+		(*core.TypeOf)(nil), (*core.ParallelMap)(nil), (*core.AsyncLaunch)(nil), (*core.AsyncRebase)(nil), (*core.AsyncSupervise)(nil), (*core.NativeCall)(nil), (*core.App)(nil), (*core.Case)(nil),
 		(*core.Guard)(nil), (*core.Unreachable)(nil), (*core.Leaf)(nil), (*core.SwitchCtor)(nil), (*core.SwitchLit)(nil),
 		(*ast.IntLit)(nil), (*ast.FloatLit)(nil), (*ast.StringLit)(nil), (*ast.CharLit)(nil), (*ast.UnitLit)(nil),
 		(*ast.Var)(nil), (*ast.Ctor)(nil), (*ast.RecordLit)(nil), (*ast.RecordGet)(nil), (*ast.RecordUpdate)(nil),

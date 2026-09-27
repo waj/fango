@@ -45,8 +45,8 @@ completion order, stage-only values, evaluator integration, and rollback.
 
 [Core](design/core.md) — typed nodes, dictionaries, residual evidence rows,
 adapters, specialization, ANF, and independent lint.
-[Native tasks and explicit streams](design/tasks.md) — the checked spawn
-boundary, goroutine runtime, IO references, and library traversal.
+[Native tasks and explicit streams](design/tasks.md) — closure invocation,
+handler inheritance, goroutine scopes, IO references, and library traversal.
 
 ## Go backend and runtime
 

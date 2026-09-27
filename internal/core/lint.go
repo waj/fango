@@ -346,8 +346,14 @@ func (l *linter) printable(t types.Type) bool {
 func (l *linter) expr(e Expr, where string) {
 	l.typ(e.Type(), where)
 	switch e := e.(type) {
-	case *TaskSpawn:
-		l.taskSpawn(e, where)
+	case *ParallelMap:
+		l.parallelMap(e, where)
+	case *AsyncLaunch:
+		l.asyncLaunch(e, where)
+	case *AsyncRebase:
+		l.asyncRebase(e, where)
+	case *AsyncSupervise:
+		l.asyncSupervise(e, where)
 	case *IntLit:
 		// An integer literal in a Number-generic body stays at the rigid
 		// var's type: Go untyped constants are assignable to the type-set
@@ -1534,9 +1540,15 @@ func (l *linter) verifyControlANF(e Expr, tail bool, where string) {
 		l.verifyControlTree(e.Tree, tail, where)
 	case *Neg:
 		directSlot(e.Operand, "negation operand")
-	case *TaskSpawn:
-		directSlot(e.Scope, "task scope")
-		directSlot(e.Input, "task input")
+	case *ParallelMap:
+		directSlot(e.Function, "parallel map callback")
+		directSlot(e.Input, "parallel map input")
+	case *AsyncLaunch:
+		l.verifyControlANF(e.Call, true, where)
+	case *AsyncRebase:
+		l.verifyControlANF(e.Call, tail, where)
+	case *AsyncSupervise:
+		l.verifyControlANF(e.Call, tail, where)
 	case *NativeCall:
 		for _, a := range e.Args {
 			directSlot(a, "native argument")

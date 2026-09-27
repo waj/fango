@@ -47,7 +47,7 @@ func (g *gen) rowArgument(row *core.RowArgument) goast.Expr {
 			panic("codegen: missing residual evidence")
 		}
 		value, actual := stack[len(stack)-1], g.currentEvidenceMode(ev.Unique)
-		var members []goast.Expr
+		members := []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: value, Sel: ident("Origin")}}}
 		effect := g.effects[ev.Unique]
 		lossless := effect != nil && (len(effect.Ops) > 0 && effect.Ops[0].Abort)
 		for _, mode := range []types.Transport{types.Direct, types.Exit} {
@@ -75,7 +75,7 @@ func (g *gen) deferredEvidence(ev core.EffectInstance, row goast.Expr, mode type
 		panic("codegen: deferred evidence has no declaration")
 	}
 
-	var fields []goast.Expr
+	fields := []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: callExpr(selector("fangort", "DeferredEvidenceOrigin"), row, stringLit(ev.Name))}}
 	if len(effect.Ops) > 0 && effect.Ops[0].Abort {
 		resolver := funcLitParams(nil, &goast.StarExpr{X: selector("fangort", "ExitTarget")}, []goast.Stmt{returnStmt(&goast.SelectorExpr{X: lookup, Sel: ident("Target")})})
 		fields = append(fields, &goast.KeyValueExpr{Key: ident("Target"), Value: callExpr(selector("fangort", "DeferredExitTarget"), resolver)})

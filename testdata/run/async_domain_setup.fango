@@ -1,6 +1,5 @@
--- End-to-end interpreter-placement probe. Job and Ticket are deliberately
--- monomorphic: this does not implement a generic effect-polymorphic Async API.
-import Task
+import Async
+import Fail exposing (Fail)
 import Result exposing (Result(..))
 
 effect Database
@@ -11,7 +10,7 @@ effect Http
 
 type Config = { database : Int, http : Int }
 type Job = Fetch Int
-type Ticket = Completed Int | Running (Task.Task Int)
+type Ticket = Completed Int | Running (Async.Task String Int)
 
 effect Scheduling
     submit : Job -> Ticket
@@ -27,31 +26,22 @@ interpret config action =
         lookup number -> resume (config.database + number)) of
         request number -> resume (config.http + number)
 
--- Only this boundary function exposes IO. It installs fresh interpretations
--- from explicit immutable configuration instead of inheriting parent evidence.
-worker : Task.Context -> (Config, Job) ->{IO} Int
-worker context (config, input) =
-    ignore (Task.isCancelled context)
-    interpret config (\_ -> job input)
-
 serial : Config -> (() ->{Scheduling | e} a) ->{e} a
 serial config action =
     handle action() of
         submit input -> resume (Completed (interpret config (\_ -> job input)))
         await ticket -> resume (case ticket of
-            Completed value -> value
-            Running _ -> -999)
+                Completed value -> value
+                Running _ -> -999)
 
-parallel : Config -> (() ->{Scheduling, IO | e} a) ->{IO | e} a
-parallel config action = Task.scope (\scope ->
+parallel : Config -> (() ->{Scheduling, IO | e} a) ->{IO | e} Async.Outcome (Result String a)
+parallel config action = Async.run (\_ ->
     handle action() of
-        submit input -> resume (Running (Task.spawn scope worker (config, input)))
+        submit input -> resume (Running (interpret config (\_ -> Async.spawn (\_ -> job input))))
         await ticket ->
             value = case ticket of
                 Completed ready -> ready
-                Running task -> case Task.await task of
-                    Ok ready -> ready
-                    Err _ -> -999
+                Running task -> Async.await task
             resume value)
 
 -- Application orchestration has domain and scheduling effects, but no IO.

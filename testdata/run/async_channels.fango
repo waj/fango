@@ -1,0 +1,51 @@
+import Async exposing (Outcome(..))
+import Fail exposing (Fail)
+import Result exposing (Result(..))
+
+runStrings : (() ->{Async.Async String, IO, Fail String | e} a) ->{IO | e} Outcome (Result String a)
+runStrings body = Async.run body
+
+main() =
+    print (runStrings (\_ ->
+        ch = Async.channel 0
+        sender = Async.spawn (\_ -> Async.send ch 42)
+        value = Async.receive ch
+        sent = Async.await sender
+        Async.close ch
+        print sent
+        print (Async.receive ch)
+        value))
+    escaped = runStrings (\_ ->
+        ch = Async.channel 2
+        ignore (Async.send ch "a")
+        ignore (Async.send ch "b")
+        Async.close ch
+        ch)
+    case escaped of
+        Completed (Ok ch) ->
+            print (runStrings (\_ ->
+                first = Async.receive ch
+                second = Async.receive ch
+                print first
+                print second
+                print (Async.send ch "c")
+                Async.receive ch))
+        _ -> print "unexpected"
+    task = runStrings (\_ -> Async.spawn (\_ -> 7))
+    case task of
+        Completed (Ok savedTask) ->
+            print (Async.wait savedTask)
+            print (Async.wait savedTask)
+        _ -> print "unexpected"
+    print (runStrings (\_ ->
+        ch : Async.Channel Int
+        ch = Async.channel 0
+        child = Async.spawn (\_ -> Async.receive ch)
+        Async.cancel child
+        Async.awaitResult child))
+    print (runStrings (\_ ->
+        child = Async.spawn (\_ ->
+            Async.cancelScope()
+            Async.checkpoint()
+            1)
+        Async.await child))

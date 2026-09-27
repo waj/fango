@@ -43,7 +43,13 @@ func (g *gen) typeDescriptor(t types.Type) goast.Expr {
 func closedDescriptor(t types.Type) bool {
 	switch t := t.(type) {
 	case *types.TFun:
-		return true // Functions always have the same opaque descriptor.
+		_, parts := types.FunctionDescriptorShape(t)
+		for _, part := range parts {
+			if !closedDescriptor(part) {
+				return false
+			}
+		}
+		return true
 	case *types.TCon:
 		for _, arg := range t.Args {
 			if !closedDescriptor(arg) {
@@ -66,7 +72,10 @@ func (g *gen) typeDescriptorExpr(t types.Type) goast.Expr {
 		}
 		return ident(descriptorParamName(name))
 	case *types.TFun:
-		return callExpr(selector("fangort", "NominalType"), stringLit("<function>"), ident("false"))
+		name, parts := types.FunctionDescriptorShape(t)
+		args := []goast.Expr{stringLit(name), ident("false")}
+		args = append(args, g.typeDescriptorArgs(parts)...)
+		return callExpr(selector("fangort", "NominalType"), args...)
 	case *types.TCon:
 		args := []goast.Expr{stringLit(t.Name), ident(fmt.Sprint(types.InspectionShapeSafe(t, g.adts)))}
 		args = append(args, g.typeDescriptorArgs(t.Args)...)

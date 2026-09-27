@@ -426,8 +426,14 @@ func (e *Case) Type() types.Type           { return e.Ty }
 // elaborator (Rec detection) and codegen (unused-binding keep-alives).
 func Mentions(e Expr, name string) bool {
 	switch e := e.(type) {
-	case *TaskSpawn:
-		return e.Worker == name || Mentions(e.Scope, name) || Mentions(e.Input, name)
+	case *ParallelMap:
+		return Mentions(e.Function, name) || Mentions(e.Input, name)
+	case *AsyncLaunch:
+		return Mentions(e.Call, name)
+	case *AsyncRebase:
+		return Mentions(e.Call, name)
+	case *AsyncSupervise:
+		return Mentions(e.Call, name)
 	case *VarRef:
 		return e.Name == name
 	case *Neg:

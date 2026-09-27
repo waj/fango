@@ -276,8 +276,12 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 		r.ownedClasses[class] = true
 	}
 	installedScopes := map[string]types.ScopeID{}
-	for id, name := range captureScopeNames(ck.CaptureSummaries) {
-		installedScopes[name] = id
+	// Keep every contract alias: importing another module can add an earlier
+	// alphabetical name for the same durable scope.
+	for name, summary := range ck.CaptureSummaries {
+		for index, id := range summary.Captures.Scopes {
+			installedScopes[fmt.Sprintf("%s#%d", name, index)] = id
+		}
 	}
 	for id, name := range object.ScopeNames {
 		if installed := installedScopes[name]; installed != 0 {

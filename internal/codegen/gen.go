@@ -1491,8 +1491,14 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 	case *core.FailureInspect:
 		return g.failureInspectExpr(e)
 
-	case *core.TaskSpawn:
-		return g.taskSpawn(e)
+	case *core.ParallelMap:
+		return g.parallelMap(e)
+	case *core.AsyncLaunch:
+		return g.asyncLaunch(e)
+	case *core.AsyncSupervise:
+		return g.expr(e.Call, parentPrec)
+	case *core.AsyncRebase:
+		return g.asyncRebase(e)
 	case *core.NativeCall:
 		return g.nativeExpr(e, parentPrec)
 	case *core.If:
@@ -1733,7 +1739,7 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 			write: func(next goast.Expr) goast.Stmt { return exprStmt(callExpr(selector(stateCell, "Store"), next)) },
 		}
 	}
-	st, record := g.handlerEvidence(e, evidenceMode, state)
+	st, record := g.forkableHandlerEvidence(e, evidenceMode, state)
 	name := fmt.Sprintf("ev%d", g.tmp)
 	g.tmp++
 	decl := varDeclStmt(name, st, record)
@@ -1927,6 +1933,7 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 	stmts = append(stmts, varDeclStmt(targetName, &goast.StarExpr{X: selector("fangort", "ExitTarget")}, target))
 	st := g.effectType(e.Effect)
 	evidenceValue := &goast.CompositeLit{Type: st, Elts: []goast.Expr{
+		&goast.KeyValueExpr{Key: ident("Origin"), Value: g.evidenceOrigin(e.Effect)},
 		&goast.KeyValueExpr{Key: ident("Target"), Value: ident(targetName)},
 	}}
 	stmts = append(stmts, varDeclStmt(evidenceName, st, evidenceValue), assignBlank(ident(evidenceName)))
@@ -2179,7 +2186,7 @@ func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want
 	if eff := g.effects[ev.Unique]; actual != want && eff != nil && len(eff.Ops) > 0 && eff.Ops[0].Abort {
 		desired := ev
 		desired.Control = types.Control{Transport: want}
-		return &goast.CompositeLit{Type: g.effectTypeMode(desired, want), Elts: []goast.Expr{&goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: value, Sel: ident("Target")}}}}
+		return &goast.CompositeLit{Type: g.effectTypeMode(desired, want), Elts: []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: value, Sel: ident("Origin")}}, &goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: value, Sel: ident("Target")}}}}
 	}
 	if actual == want || want == types.Direct {
 		return value
@@ -2194,7 +2201,7 @@ func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want
 	}
 	desired := ev
 	desired.Control = types.Control{Transport: types.Exit}
-	elts := make([]goast.Expr, 0, len(eff.Ops))
+	elts := []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: value, Sel: ident("Origin")}}}
 	sub := make(map[int]types.Type, len(eff.Params))
 	for i, p := range eff.Params {
 		if i < len(ev.Args) {
@@ -2238,6 +2245,8 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 			oldNames, oldControl, oldABI := g.tyParamNames, g.control, g.abi
 			g.tyParamNames, g.control, g.abi = map[int]string{}, mode, mode
 			var fields []*goast.Field
+			g.usesFangort = true
+			fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Origin")}, Type: &goast.StarExpr{X: selector("fangort", "EvidenceOrigin")}})
 			for i, p := range eff.Params {
 				g.tyParamNames[p.ID] = fmt.Sprintf("E%d", i)
 			}

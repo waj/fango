@@ -155,8 +155,14 @@ func capturesMutated(e Expr, mutated map[string]bool) bool {
 	var walkTree func(t Tree) bool
 	walk = func(e Expr) bool {
 		switch e := e.(type) {
-		case *TaskSpawn:
-			return walk(e.Scope) || walk(e.Input)
+		case *ParallelMap:
+			return walk(e.Function) || walk(e.Input)
+		case *AsyncLaunch:
+			return mentionsAny(e.Call)
+		case *AsyncRebase:
+			return mentionsAny(e.Call)
+		case *AsyncSupervise:
+			return mentionsAny(e.Call)
 		case *Lambda:
 			return mentionsAny(e.Body)
 		case *Handle:

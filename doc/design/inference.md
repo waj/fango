@@ -49,9 +49,10 @@ A pure handler runner may still need a polymorphic transport contract. Infer
 this from controlled parameter types and executed call contracts, including
 calls inside handlers but excluding latent lambda bodies. Handling an effect
 does not convert an Exit-family callback into a Direct value.
-Task transfer is a structural check over concrete types. Functions and native
-handles cannot cross the spawn boundary; no execution-root flow interpretation
-is needed. See [tasks](tasks.md).
+Async callbacks retain their effect requirements. Known unsupported aborts and
+scoped local permissions are rejected at the spawn boundary; dependencies hidden
+inside inherited handlers are checked when rebuilding child evidence. Functions
+and native handles may be shared. See [tasks](tasks.md).
 
 ## Scoped callback rows
 

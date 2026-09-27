@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestREPLTaskInterruptAndInputRecovery(t *testing.T) {
+func TestREPLAsyncInterruptAndInputRecovery(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, cliBinary(t), "repl")
@@ -70,14 +70,37 @@ func TestREPLTaskInterruptAndInputRecovery(t *testing.T) {
 		}
 	}
 	waitFor("> ")
-	write("import Task\n")
-	waitFor("loaded Task")
-	write("worker : Task.Context -> Int ->{IO} Int\nworker context value =\n    print \"started\"\n    ignore (Task.sleep context 60000)\n    value\n\nwork() = Task.scope (\\scope -> Task.await (Task.spawn scope worker 1))\nwork()\n")
+	write("import Async\n")
+	waitFor("loaded Async")
+	waitFor("> ")
+	write("import Result\n")
+	waitFor("> ")
+	write("import Runtime.Scope\n")
+	waitFor("> ")
+	write("count n = if n <= 0 then 0 else count (n - 1)\n")
+	waitFor("> ")
+	write("worker : Int -> () ->{IO, Async.Async String} Int\nworker value () = Runtime.Scope.bracket (\\_ -> ()) (\\_ ->\n    ignore (count 10000)\n    print \"child cleaned\") (\\_ ->\n    print \"started\"\n    Async.sleep 60000\n    value)\n\nwork() = Async.run (\\_ -> Async.await (Async.spawn (worker 1)))\nwork()\n")
 	waitFor("started")
 	if err := cmd.Process.Signal(os.Interrupt); err != nil {
 		t.Fatal(err)
 	}
-	waitFor("Err Cancelled")
+	waitFor("child cleaned")
+	waitFor("Cancelled")
+	// A root with no spawned task must also own host cancellation and cleanup.
+	write("root : () ->{IO} Async.Outcome (Result.Result String ())\nroot() = Async.run (\\_ -> Runtime.Scope.bracket (\\_ -> ()) (\\_ ->\n    ignore (Async.parMap count [10000, 10000])\n    print \"root cleaned\") (\\_ ->\n    print \"root sleeping\"\n    Async.sleep 60000))\n\nroot()\n")
+	waitFor("root sleeping")
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("root cleaned")
+	waitFor("Cancelled")
+	// Pure parallel mapping reports host interruption back to the evaluator.
+	write("mapped() =\n    print \"mapping\"\n    ignore (Async.parMap (\\_ -> count 1000000000) [1, 2, 3, 4])\n\nmapped()\n")
+	waitFor("mapping")
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("interrupted")
 	write("line() =\n    print \"reading\"\n    readLine()\n\nline()\n")
 	waitFor("reading")
 	if err := cmd.Process.Signal(os.Interrupt); err != nil {

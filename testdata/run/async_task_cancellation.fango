@@ -1,0 +1,22 @@
+import Async
+import Fail
+import Result exposing (Result(..))
+
+effect Stop
+    abort stop : Async.Task String Int -> ()
+
+waiter : Int -> () ->{Async.Async String} Int
+waiter value () =
+    Async.sleep 60000
+    value
+
+main() =
+    ignore (Async.run (\_ ->
+        child = Async.spawn (waiter 7)
+        Async.cancel child
+        print (Async.awaitResult child)
+        print (Async.awaitResult child)))
+    handle ignore (Async.run (\_ ->
+        child = Async.spawn (waiter 9)
+        stop child)) of
+        stop child -> print (Async.wait child)

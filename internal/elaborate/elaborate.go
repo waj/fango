@@ -327,7 +327,9 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 			continue
 		}
 		ty := (&elab{ck: ck}).eraseRuntimeKinds(eraseRows(ck.Intrinsics[name].Body))
-		if name == types.LocalRunName {
+		if name == types.AsyncParMapName {
+			defs = append(defs, parallelMapDef(name, ty, ck))
+		} else if name == types.LocalRunName {
 			defs = append(defs, localRunDef(name, ty, ck))
 		} else if name == types.ScopeBracketName {
 			defs = append(defs, scopeBracketDef(name, ty, ck))
@@ -883,8 +885,8 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 	case *ast.UnitLit:
 		return &core.UnitLit{Ty: ty}
 	case *ast.Var:
-		if e.Name == types.TaskSpawnName {
-			return el.taskSpawn(e, nil)
+		if e.Name == types.AsyncLaunchName || e.Name == types.AsyncRebaseName || e.Name == types.AsyncSuperviseName {
+			return el.asyncIntrinsic(e, e.Name, nil, e)
 		}
 		if index, local := el.scopeIdx[e.Name]; local {
 			return &core.VarRef{Name: el.scope[index].name, Ty: el.scope[index].ty, Local: true}

@@ -2,6 +2,7 @@ package fangort
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -26,6 +27,8 @@ type SessionHost interface {
 type NativeHost interface {
 	SessionHost
 	Exit(int)
+	// ExecutionContext is cancelled when the current host evaluation is interrupted.
+	ExecutionContext() context.Context
 }
 
 type systemNativeHost struct {
@@ -70,6 +73,8 @@ func (*systemNativeHost) WorkingDirectory() string {
 	}
 	return dir
 }
+
+func (*systemNativeHost) ExecutionContext() context.Context { return context.Background() }
 
 func (*systemNativeHost) Exit(code int) { os.Exit(code) }
 

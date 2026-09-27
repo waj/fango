@@ -153,11 +153,25 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		return &core.ControlExit{Origin: e.Origin, Effect: e.Effect, Op: e.Op, Payload: payload, Ty: e.Ty}, hoists
 	case *core.Neg:
 		return &core.Neg{Operand: slot(e.Operand), Ty: e.Ty}, hoists
-	case *core.TaskSpawn:
+	case *core.ParallelMap:
+		return &core.ParallelMap{Function: slot(e.Function), Input: slot(e.Input), Ty: e.Ty}, hoists
+	case *core.AsyncLaunch:
 		n := *e
-		n.Scope = slot(e.Scope)
-		n.Input = slot(e.Input)
+		c := *e.Call
+		c.Callee = slot(c.Callee)
+		c.Args = []core.Expr{slot(c.Args[0])}
+		n.Call = &c
 		return &n, hoists
+	case *core.AsyncRebase:
+		c := *e.Call
+		c.Callee = slot(c.Callee)
+		c.Args = []core.Expr{slot(c.Args[0])}
+		return &core.AsyncRebase{Call: &c}, hoists
+	case *core.AsyncSupervise:
+		c := *e.Call
+		c.Callee = slot(c.Callee)
+		c.Args = []core.Expr{slot(c.Args[0])}
+		return &core.AsyncSupervise{Call: &c}, hoists
 	case *core.NativeCall:
 		args := make([]core.Expr, len(e.Args))
 		for i, a := range e.Args {

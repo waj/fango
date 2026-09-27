@@ -38,15 +38,14 @@ sequences](reference/library-bytes.md) owns `Bytes` and its `Source` and
 `Sink`, [buffered readers and writers](reference/library-readers.md) owns
 `Reader`, `Writer`, and every stage above them, and [IO and
 files](reference/library-io.md) owns the file and socket adapters. [HTTP and a
-server](roadmap-io.md) owns what is left. Concurrent socket handoff awaits the [Async closure
-boundary](roadmap-scoped-effects.md); the current
-[Task boundary](reference/library-tasks.md) still excludes native handles.
+server](roadmap-io.md) owns what is left. The [Async boundary](reference/library-async.md) supports shared native handles;
+server applications and cancellation-aware blocking IO remain unfinished.
 
 ## Scoped readers and task effects
 
 [Scoped readers and effect-polymorphic tasks](roadmap-scoped-effects.md) owns
-the remaining generic scheduling representation and checked handler inheritance
-without ambient IO. [Scoped memory readers](reference/library-readers.md#reader)
+deferred serial-runner and type-system extensions after implementing generic
+Async scheduling, checked handler inheritance, and cooperative host interruption. [Scoped memory readers](reference/library-readers.md#reader)
 are implemented.
 
 ## Addressing a specific handler

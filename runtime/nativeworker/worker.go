@@ -57,9 +57,25 @@ func (d *directCaller) Call(_ context.Context, _ fangort.SessionHost, name strin
 }
 
 type proxy struct {
-	mu  sync.Mutex
-	enc *gob.Encoder
-	dec *gob.Decoder
+	contextMu sync.RWMutex
+	context   context.Context
+	mu        sync.Mutex
+	enc       *gob.Encoder
+	dec       *gob.Decoder
+}
+
+func (p *proxy) ExecutionContext() context.Context {
+	p.contextMu.RLock()
+	defer p.contextMu.RUnlock()
+	if p.context == nil {
+		return context.Background()
+	}
+	return p.context
+}
+func (p *proxy) setExecutionContext(ctx context.Context) {
+	p.contextMu.Lock()
+	p.context = ctx
+	p.contextMu.Unlock()
 }
 
 func (p *proxy) request(m nativewire.Message) nativewire.Message {
@@ -281,6 +297,8 @@ func Run(functions map[string]any, installHost func(fangort.NativeHost)) {
 }
 
 func execute(ctx context.Context, data []byte, env *eval.Env, caller *directCaller, host *proxy) (result nativewire.Message) {
+	host.setExecutionContext(ctx)
+	defer host.setExecutionContext(nil)
 	result.Kind = "result"
 	defer func() {
 		if p := recover(); p != nil {

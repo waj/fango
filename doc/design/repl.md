@@ -42,9 +42,11 @@ The prompt and its native host RPCs consume one line pump. Ctrl-C revokes the
 current prompt input or signals the active worker. A host read interrupted in
 the middle leaves the line pump as the sole reader; the next prompt receives
 the next line. The worker handles the signal without discarding its persistent
-heap. The worker cancels the host evaluation context and task contexts. Native
-cancellation-aware waits wake; ordinary evaluator checkpoints restore the prompt.
-Source task cancellation remains explicit and separate from this host interruption.
+heap. Each evaluation owns a fresh host context. Interruption cancels that
+context and all Async roots derived from it. Outside an Async runner, evaluator
+checkpoints restore the prompt. Inside a runner, the [supervisor](tasks.md#async-runtime-foundation)
+leaves cancellation to Async operations so language cleanup and child draining
+finish before returning an outcome.
 Runtime errors leave installed definitions and the worker available for subsequent inputs.
 
 Parser incompleteness/layout drives multiline input. Prompt inputs are sequential,

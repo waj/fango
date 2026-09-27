@@ -186,5 +186,5 @@ telnet 127.0.0.1 8000
 Connection reads serialize access to the shared input buffer. Writes have a
 separate lock covering the whole byte sequence. Closing a connection can
 interrupt a blocked read or write and makes later operations fail. These
-runtime guarantees do not change the current Task API's transfer restrictions;
-closure-based task sharing remains [unfinished](../roadmap-scoped-effects.md).
+runtime guarantees support shared handles in [Async tasks](library-async.md).
+Task cancellation does not automatically close the connection.

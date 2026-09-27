@@ -1,0 +1,236 @@
+{-# no-prelude #-}
+module Async exposing (Async, Channel, Outcome(..), Task, await, awaitResult, cancel, cancelScope, cancelled, channel, checkpoint, close, completed, parMap, receive, run, send, sleep, spawn, wait, within)
+
+import Basics exposing (..)
+import Fail exposing (Fail)
+import IO exposing (IO)
+import List exposing (List)
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import Runtime.Native
+import Runtime.Scope
+
+{-# resource #-}
+type Scope err = Scope Runtime.Native.Any
+
+type Context = Context Runtime.Native.Any
+
+{-# resource #-}
+type RawTask result = RawTask Runtime.Native.Any
+
+type Task err value = Task (RawTask (Result err value))
+
+{-# resource #-}
+type Channel value = Channel Runtime.Native.Any
+
+{-# resource #-}
+type ReadResult value = ReadResult Runtime.Native.Any
+
+type Outcome value = Completed value | Cancelled deriving (Eq, Show)
+
+effect Async err
+    current : () -> Scope err
+    active : () -> Scope err
+
+effect Cancellation
+    abort stopTask : () -> value
+
+newRoot : () -> Scope err
+newRoot = native
+childScope : Scope err -> Scope err
+childScope = native
+scopeContext : Scope err -> Context
+scopeContext = native
+scopeCancelled : Scope err -> Bool
+scopeCancelled = native
+cancelOwner : Scope err -> ()
+cancelOwner = native
+finishScope : Scope err -> Int -> ()
+finishScope = native
+scopeStatus : Scope err -> Int
+scopeStatus = native
+scopeFailure : Scope err -> err
+scopeFailure = native
+
+-- The checked invocation boundaries retain source rows and sealed result indices.
+launch : Scope err -> (Scope err ->{IO | effects} Outcome (Result err value)) ->{effects} RawTask (Result err value)
+launch = native
+rebase : (() ->{Async err, IO, Fail err, Cancellation | effects} value) ->{Async err, IO, Fail err, Cancellation | effects} value
+rebase = native
+supervise : (() ->{IO | effects} value) ->{IO | effects} value
+supervise = native
+
+newCompleted : result -> RawTask result
+newCompleted = native
+completeSuccess : Context -> RawTask result -> ()
+completeSuccess = native
+completeFailure : Scope err -> RawTask result -> err -> ()
+completeFailure = native
+cancelTask : RawTask result -> ()
+cancelTask = native
+waitTask : RawTask result ->{IO} ()
+waitTask = native
+waitTaskIn : Context -> RawTask result -> Bool
+waitTaskIn = native
+taskStatus : RawTask result -> Int
+taskStatus = native
+taskValue : RawTask result -> result
+taskValue = native
+sleepIn : Context -> Int -> Bool
+sleepIn = native
+
+newChannel : () -> Channel value
+newChannel = native
+setCapacity : Channel value -> Int -> ()
+setCapacity = native
+sendIn : Context -> Channel value -> value -> Bool
+sendIn = native
+receiveIn : Context -> Channel value -> ReadResult value
+receiveIn = native
+readStatus : ReadResult value -> Int
+readStatus = native
+readValue : ReadResult value -> value
+readValue = native
+closeChannel : Channel value -> ()
+closeChannel = native
+
+enter owner body =
+    handle body() of
+        current () -> resume owner
+        active () -> if scopeCancelled owner then stopTask() else resume owner
+
+capture owner body =
+    handle Completed (Fail.attempt (\_ -> enter owner body)) of
+        stopTask () -> Cancelled
+
+status outcome =
+    case outcome of
+        Cancelled -> 2
+        Completed (Err _) -> 1
+        Completed (Ok _) -> 0
+
+finish owner outcome =
+    finishScope owner (status outcome)
+    case outcome of
+        Completed (Err _) -> outcome
+        _ ->
+            case scopeStatus owner of
+                1 -> Completed (Err (scopeFailure owner))
+                2 -> Cancelled
+                _ -> outcome
+
+-- Cleanup drains even when an unrelated outer abort leaves the body.
+runIn owner body =
+    Runtime.Scope.bracket (\_ -> ()) (\_ -> finishScope owner 2) (\_ ->
+        outcome = capture owner body
+        finish owner outcome)
+
+run : (() ->{Async err, IO, Fail err | effects} value) ->{IO | effects} Outcome (Result err value)
+run body = supervise (\_ -> runIn (newRoot()) body)
+
+within : (() ->{Async err, Fail err | effects} value) ->{Async err, Fail err | effects} value
+within body =
+    owner = active()
+    outcome = runIn (childScope owner) body
+    case outcome of
+        Completed result -> Fail.fromResult result
+        Cancelled ->
+            cancelOwner owner
+            stopCurrent()
+
+spawn : (() ->{Async err, IO, Fail err | effects} value) ->{Async err | effects} Task err value
+spawn body =
+    owner = active()
+    Task (launch owner (\child -> runIn child (\_ -> rebase body)))
+
+completed : Result err value ->{Async err} Task err value
+completed result =
+    owner = active()
+    task = newCompleted result
+    case result of
+        Ok _ -> completeSuccess (scopeContext owner) task
+        Err error -> completeFailure owner task error
+    Task task
+
+observe task = if taskStatus task == 2 then Cancelled else Completed (taskValue task)
+
+wait : Task err value ->{IO} Outcome (Result err value)
+wait (Task task) =
+    waitTask task
+    observe task
+
+awaitResult : Task err value ->{Async err} Outcome (Result err value)
+awaitResult (Task task) =
+    owner = active()
+    if waitTaskIn (scopeContext owner) task then
+        observe task
+    else
+        stopCurrent()
+
+await : Task err value ->{Async err, Fail err} value
+await task =
+    case awaitResult task of
+        Completed result -> Fail.fromResult result
+        Cancelled ->
+            cancelScope()
+            stopCurrent()
+
+cancel : Task err value ->{Async err} ()
+cancel (Task task) =
+    ignore (current())
+    cancelTask task
+
+cancelScope : () ->{Async err} ()
+cancelScope() = cancelOwner (current())
+
+cancelled : () ->{Async err} Bool
+cancelled() = scopeCancelled (current())
+
+-- Called only after this scope is cancelled; active aborts to capture.
+stopCurrent : () ->{Async err} value
+stopCurrent() =
+    ignore (active())
+    stopCurrent()
+
+checkpoint : () ->{Async err} ()
+checkpoint() = ignore (active())
+
+sleep : Int ->{Async err} ()
+sleep milliseconds =
+    owner = active()
+    if sleepIn (scopeContext owner) milliseconds then () else checkpoint()
+
+channel : Int ->{Async err} Channel value
+channel capacity =
+    ignore (active())
+    result = newChannel()
+    setCapacity result capacity
+    result
+
+send : Channel value -> value ->{Async err} Bool
+send ch value =
+    owner = active()
+    sent = sendIn (scopeContext owner) ch value
+    if sent then True
+    else
+        checkpoint()
+        False
+
+receive : Channel value ->{Async err} Maybe value
+receive ch =
+    owner = active()
+    result = receiveIn (scopeContext owner) ch
+    case readStatus result of
+        0 -> Just (readValue result)
+        _ ->
+            checkpoint()
+            Nothing
+
+close : Channel value ->{Async err} ()
+close ch =
+    ignore (current())
+    closeChannel ch
+
+-- Pure ordered mapping with a bounded internal worker pool.
+parMap : (a -> b) -> List a -> List b
+parMap = native

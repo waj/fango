@@ -291,8 +291,7 @@ the program's own, `1` for a compile error, and `2` for an internal error. A
 non-Unit `main` value is printed, as in the REPL.
 
 The interpreter runs without a native worker, so natives that need one (File,
-Net, Runtime.Cell, Runtime.NativeRequest and the modules built on them, such as
-Task) and user sidecars fail with an error rather than building one. The
+Net, Runtime.Ref, and Async) and user sidecars fail with an error rather than building one. The
 website's playground runs programs this way in the browser.
 
 ## Entry points

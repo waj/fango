@@ -220,8 +220,14 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		r := a.expr(e.Operand, env, evidence)
 		r.value = types.CaptureSet{}
 		return r
-	case *TaskSpawn:
-		return children(e.Scope, e.Input)
+	case *ParallelMap:
+		return children(e.Function, e.Input)
+	case *AsyncLaunch:
+		return a.expr(e.Call, env, evidence)
+	case *AsyncRebase:
+		return a.expr(e.Call, env, evidence)
+	case *AsyncSupervise:
+		return a.expr(e.Call, env, evidence)
 	case *NativeCall:
 		r := children(e.Args...)
 		if !a.canCarry(e.Ty, nil) {

@@ -19,7 +19,16 @@ func (in *interp) typeDescriptor(t types.Type, fr *Frame) (*fangort.TypeDescript
 		}
 		return nil, fmt.Errorf("eval: missing descriptor for type parameter %d", t.ID)
 	case *types.TFun:
-		return fangort.NominalType("<function>", false), nil
+		name, parts := types.FunctionDescriptorShape(t)
+		args := make([]*fangort.TypeDescriptor, len(parts))
+		for i, part := range parts {
+			d, err := in.typeDescriptor(part, fr)
+			if err != nil {
+				return nil, err
+			}
+			args[i] = d
+		}
+		return fangort.NominalType(name, false, args...), nil
 	case *types.TCon:
 		args := make([]*fangort.TypeDescriptor, len(t.Args))
 		for i, arg := range t.Args {

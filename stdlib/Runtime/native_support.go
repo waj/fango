@@ -7,10 +7,3 @@ import "github.com/waj/fango/runtime/fangort"
 type FangoNativeHost = fangort.NativeHost
 
 var FangoHost FangoNativeHost = fangort.SystemNativeHost
-
-type FangoTask = fangort.Task
-type FangoTaskScope = fangort.TaskScope
-type FangoTaskContext = fangort.TaskContext
-
-var FangoNewTaskScope = fangort.NewTaskScope
-var FangoTaskSleep = fangort.TaskSleep

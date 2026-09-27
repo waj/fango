@@ -8,9 +8,14 @@ type FangoNativeHost = fangort.NativeHost
 
 var FangoHost FangoNativeHost = fangort.SystemNativeHost
 
-type FangoTask = fangort.Task
-type FangoTaskScope = fangort.TaskScope
-type FangoTaskContext = fangort.TaskContext
+type FangoAsyncScope = fangort.AsyncScope
+type FangoAsyncTask = fangort.AsyncTask
+type FangoAsyncCompletion = fangort.AsyncCompletion
+type FangoAsyncChannel = fangort.AsyncChannel[any]
 
-var FangoNewTaskScope = fangort.NewTaskScope
-var FangoTaskSleep = fangort.TaskSleep
+var FangoNewAsyncRoot = fangort.NewAsyncRoot
+var FangoNewAsyncScope = fangort.NewAsyncScope
+var FangoNewAsyncValue = fangort.NewAsyncValue
+var FangoPublishAsyncValue = fangort.PublishAsyncValue
+var FangoAsyncSleep = fangort.AsyncSleep
+var FangoNewAsyncChannel = fangort.NewAsyncChannel[any]

@@ -93,7 +93,7 @@ The output directory must not exist. The runner snapshots the historical native
 Async implementation at `b102a4e10bb6c4199fd5445ca9003fa42b29be02` and the tracked
 working tree, builds both with the same Go toolchain, and retains sources,
 binaries, raw JSON samples and optional CPU/allocation profiles. Historical
-revisions retain their Async workloads; the current workload uses named native
+revisions retain their Async workloads; the current workload uses closure-based Async
 tasks with explicit cancellation checks. A check does not yield to a cooperative
 scheduler, so the comparison measures the architectural change as well as costs.
 Checksums are verified before and after timing.

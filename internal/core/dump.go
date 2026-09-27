@@ -106,8 +106,14 @@ func DumpTree(t Tree) string { return dumpTree(t, types.NewPrinter()) }
 
 func dumpExpr(e Expr, pr *types.Printer) string {
 	switch e := e.(type) {
-	case *TaskSpawn:
-		return fmt.Sprintf("(task-spawn %s %s %s : %s)", e.Worker, dumpExpr(e.Scope, pr), dumpExpr(e.Input, pr), pr.Type(e.Ty))
+	case *ParallelMap:
+		return fmt.Sprintf("(parallel-map %s %s : %s)", dumpExpr(e.Function, pr), dumpExpr(e.Input, pr), pr.Type(e.Ty))
+	case *AsyncLaunch:
+		return fmt.Sprintf("(async-launch %s : %s)", dumpExpr(e.Call, pr), pr.Type(e.Ty))
+	case *AsyncRebase:
+		return fmt.Sprintf("(async-rebase %s)", dumpExpr(e.Call, pr))
+	case *AsyncSupervise:
+		return fmt.Sprintf("(async-supervise %s)", dumpExpr(e.Call, pr))
 	case *IntLit:
 		return fmt.Sprintf("(int %d %s)", e.Val, pr.Type(e.Ty))
 	case *FloatLit:

@@ -21,9 +21,15 @@ func InspectPruned(e Expr, visit func(Expr) bool) {
 	case *Neg:
 		walk(e.Operand)
 
-	case *TaskSpawn:
-		walk(e.Scope)
+	case *ParallelMap:
+		walk(e.Function)
 		walk(e.Input)
+	case *AsyncLaunch:
+		walk(e.Call)
+	case *AsyncRebase:
+		walk(e.Call)
+	case *AsyncSupervise:
+		walk(e.Call)
 	case *NativeCall:
 		for _, arg := range e.Args {
 			walk(arg)

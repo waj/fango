@@ -24,8 +24,8 @@ import (
 //go:embed workload.fango
 var workload string
 
-//go:embed task_workload.fango
-var taskWorkload string
+//go:embed native_workload.fango
+var nativeWorkload string
 
 const baseline = "b102a4e10bb6c4199fd5445ca9003fa42b29be02"
 
@@ -119,8 +119,8 @@ func run() error {
 			ending = "probe workers limit yielding =\n    case Async.Cooperative.run (\\_ -> runWorkers workers limit yielding) of\n        Ok total -> total\n        Err _ -> -1\n"
 		}
 		source += "\n" + workload + "\n" + annotation + ending + "\nmain() = print (probe 16 20000 True)\n"
-		if _, err := os.Stat(filepath.Join(dir, "stdlib", "Task.fango")); err == nil {
-			source = taskWorkload
+		if module, err := os.ReadFile(filepath.Join(dir, "stdlib", "Async.fango")); err == nil && bytes.Contains(module, []byte("effect Async err")) {
+			source = nativeWorkload
 		}
 		if err = os.Mkdir(filepath.Join(dir, "workload"), 0755); err != nil {
 			return err

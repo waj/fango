@@ -19,11 +19,14 @@ type AsyncCompletion struct {
 // AsyncScope owns only its children, not the resources their closures reference.
 // Each task has its own child scope, so cancellation follows the task tree.
 type AsyncScope struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	mu       sync.Mutex
-	children []*AsyncTask
-	closing  bool
+	ctx        context.Context
+	cancel     context.CancelFunc
+	mu         sync.Mutex
+	children   []*AsyncTask
+	closing    bool
+	finishOnce sync.Once
+	finished   chan struct{}
+	completion AsyncCompletion
 }
 
 type AsyncTask struct {
@@ -39,8 +42,13 @@ func NewAsyncScope(parent *AsyncScope) *AsyncScope {
 	if parent != nil {
 		ctx = parent.ctx
 	}
+	return NewAsyncRoot(ctx)
+}
+
+// NewAsyncRoot connects a source runner to its host evaluation.
+func NewAsyncRoot(ctx context.Context) *AsyncScope {
 	ctx, cancel := context.WithCancel(ctx)
-	return &AsyncScope{ctx: ctx, cancel: cancel}
+	return &AsyncScope{ctx: ctx, cancel: cancel, finished: make(chan struct{})}
 }
 
 func (s *AsyncScope) Context() context.Context { return s.ctx }
@@ -119,14 +127,21 @@ func (t *AsyncTask) Wait() AsyncCompletion {
 // Await stops waiting when the observer is cancelled. It does not observe the
 // target's outcome on that path, and does not implicitly cancel the target.
 func (t *AsyncTask) Await(observer *AsyncScope) AsyncCompletion {
+	result, _ := t.AwaitObserved(observer)
+	return result
+}
+
+// AwaitObserved reports whether the target was delivered. Cancellation after
+// selecting a completed target cannot retroactively hide that observation.
+func (t *AsyncTask) AwaitObserved(observer *AsyncScope) (AsyncCompletion, bool) {
 	if observer.Cancelled() {
-		return AsyncCompletion{Cancelled: true}
+		return AsyncCompletion{Cancelled: true}, false
 	}
 	select {
 	case <-t.done:
-		return t.observe()
+		return t.observe(), true
 	case <-observer.ctx.Done():
-		return AsyncCompletion{Cancelled: true}
+		return AsyncCompletion{Cancelled: true}, false
 	}
 }
 
@@ -134,6 +149,25 @@ func (t *AsyncTask) Await(observer *AsyncScope) AsyncCompletion {
 // Body failure wins; otherwise the earliest submitted, unobserved failed child
 // wins. All children finish before any result is returned.
 func (s *AsyncScope) Finish(body AsyncCompletion) AsyncCompletion {
+	s.finishOnce.Do(func() {
+		s.completion = s.finish(body)
+		close(s.finished)
+	})
+	if body.Failed {
+		return body
+	}
+	if s.completion.Failed || s.completion.Cancelled {
+		return s.completion
+	}
+	return body
+}
+
+func (s *AsyncScope) Completion() AsyncCompletion {
+	<-s.finished
+	return s.completion
+}
+
+func (s *AsyncScope) finish(body AsyncCompletion) AsyncCompletion {
 	s.mu.Lock()
 	s.closing = true
 	children := append([]*AsyncTask(nil), s.children...)
@@ -181,3 +215,24 @@ func AsyncSleep(scope *AsyncScope, milliseconds int64) bool {
 		return !scope.Cancelled()
 	}
 }
+
+// NewAsyncValue prepares a typed result before its owner publishes completion.
+func NewAsyncValue(value any) *AsyncTask {
+	return &AsyncTask{done: make(chan struct{}), result: AsyncCompletion{Value: value}}
+}
+
+func PublishAsyncValue(owner *AsyncScope, task *AsyncTask, failure any, failed bool) {
+	task.owner = owner
+	result := task.result
+	result.Failure, result.Failed = failure, failed
+	owner.mu.Lock()
+	if owner.closing {
+		result = AsyncCompletion{Cancelled: true}
+	} else {
+		owner.children = append(owner.children, task)
+	}
+	owner.mu.Unlock()
+	task.publish(result)
+}
+
+func (t *AsyncTask) Result() AsyncCompletion { <-t.done; return t.result }

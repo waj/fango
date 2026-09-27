@@ -29,10 +29,15 @@ func captureScopeNames(summaries map[string]types.CaptureSummary) map[types.Scop
 }
 
 func foreignScopeNames(all, own map[string]types.CaptureSummary, referenced any) map[types.ScopeID]string {
-	allNames := captureScopeNames(all)
-	for id := range captureScopeNames(own) {
-		delete(allNames, id)
+	// An owned definition may return captures introduced by an import. Its
+	// summary does not make those scopes locally owned.
+	imported := map[string]types.CaptureSummary{}
+	for name, summary := range all {
+		if _, local := own[name]; !local {
+			imported[name] = summary
+		}
 	}
+	allNames := captureScopeNames(imported)
 	ids := &remapIDs{permissions: map[int]bool{}, vars: map[int]*types.TVar{}, captures: map[types.CaptureVar]bool{}, scopes: map[types.ScopeID]bool{}, resumes: map[types.ResumeID]bool{}}
 	collectRemapIDs(reflect.ValueOf(referenced), map[uintptr]bool{}, ids)
 	for id := range allNames {

@@ -105,24 +105,27 @@ type Checker struct {
 	sourceLimit *int
 	recursive   *recursiveInference
 
-	Classes           map[string]*types.ClassInfo
-	Methods           map[string]*types.MethodInfo
-	Instances         []*InstanceInfo
-	checkingInstance  *InstanceInfo
-	InstanceImports   map[string]map[string]bool
-	CurrentOwner      string
-	PendingPreds      []types.Pred
-	ExprSchemes       map[ast.Expr]types.Scheme
-	ExprCaptures      map[ast.Expr]types.CaptureSet
-	Desugared         map[ast.Expr]ast.Expr
-	PreludeInfos      []DeclInfo
-	PreludeOwners     map[string]bool
-	Aliases           map[string]string
-	Sup               *types.Supply
-	B                 *types.Builtins
-	Env               *Env
-	Sub               Subst
-	ExprTypes         map[ast.Expr]types.Type
+	Classes          map[string]*types.ClassInfo
+	Methods          map[string]*types.MethodInfo
+	Instances        []*InstanceInfo
+	checkingInstance *InstanceInfo
+	InstanceImports  map[string]map[string]bool
+	CurrentOwner     string
+	PendingPreds     []types.Pred
+	ExprSchemes      map[ast.Expr]types.Scheme
+	ExprCaptures     map[ast.Expr]types.CaptureSet
+	Desugared        map[ast.Expr]ast.Expr
+	PreludeInfos     []DeclInfo
+	PreludeOwners    map[string]bool
+	Aliases          map[string]string
+	Sup              *types.Supply
+	B                *types.Builtins
+	Env              *Env
+	Sub              Subst
+	ExprTypes        map[ast.Expr]types.Type
+	// Body requirements before contextual row widening, used when selecting
+	// the evidence actually supplied to a closed callback.
+	LambdaEffects     map[*ast.Lambda][]types.Type
 	RecordUses        map[ast.Expr]*types.ADTInfo
 	RecordPatternUses map[*ast.PRecord]*types.ADTInfo
 	PinExprs          map[*ast.PPin]*ast.Var
@@ -318,6 +321,7 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		Env:               env,
 		Sub:               Subst{},
 		ExprTypes:         map[ast.Expr]types.Type{},
+		LambdaEffects:     map[*ast.Lambda][]types.Type{},
 		RecordUses:        map[ast.Expr]*types.ADTInfo{},
 		RecordPatternUses: map[*ast.PRecord]*types.ADTInfo{},
 		PinExprs:          map[*ast.PPin]*ast.Var{},
@@ -1693,6 +1697,12 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		g.cs = append(g.cs, g.argument(argTy, paramTy, e.Arg))
 		_, isResume := e.Fn.(*ast.Resume)
 		g.performs(callEff, e.Span(), isResume)
+		// Preserve a known callee's own row in dependency summaries. The
+		// fresh call-site row may later widen to its surrounding ambient row.
+		if fn, ok := g.ck.Sub.Apply(fnTy).(*types.TFun); ok && g.clauseEffects != nil && !isResume {
+			recorded := *g.clauseEffects
+			recorded[len(recorded)-1] = fn.Eff
+		}
 		ty = r
 		if op, n := g.operationSpine(e); op != nil && n < op.Arity {
 			g.ck.OpCalls[e] = op
@@ -1750,6 +1760,8 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		g.patternPins = oldPins
 		bodyAmbient := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
 		savedAmbient, savedSink := g.enterAmbient(bodyAmbient)
+		var performed []types.Type
+		g.clauseEffects = &performed
 		// The enclosing declaration's annotation constrains its own arrow,
 		// not a nested callback's handler clauses (which may call pause).
 		savedAnnotationAmbient := g.annotationAmbient
@@ -1759,6 +1771,7 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			g.annotationAmbient = &row
 		}
 		bodyTy := g.expr(e.Body)
+		g.ck.LambdaEffects[e] = performed
 		g.annotationAmbient = savedAnnotationAmbient
 		g.ambient, g.clauseEffects = savedAmbient, savedSink
 		g.locals = scope.parent

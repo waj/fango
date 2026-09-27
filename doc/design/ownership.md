@@ -1,7 +1,7 @@
 # Resources and evidence
 
 [Design index](../design.md). Public rules: [cleanup scopes](../reference/resources.md),
-[effects](../reference/effects.md), and [tasks](../reference/library-tasks.md).
+[effects](../reference/effects.md), and [tasks](../reference/library-async.md).
 
 ## Runtime resources
 
@@ -12,7 +12,7 @@ outlive the scope that acquired it. Sidecars own resource validity checks.
 
 The `resource` marker retains nominal native-storage restrictions; it is not a
 lifetime proof. Sealed indexed native storage cannot be rewrapped at a different
-type. Mutable storage is IO-marked and task transfer checking rejects it.
+type. Mutable storage is IO-marked; shared handlers and native resources own their synchronization.
 
 ## Evidence summaries
 

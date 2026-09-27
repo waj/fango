@@ -246,3 +246,59 @@ func TestAsyncCompletedFailureParticipatesInScope(t *testing.T) {
 		}
 	}
 }
+
+func TestAsyncSpawnFinishRace(t *testing.T) {
+	for range 20 {
+		root := NewAsyncScope(nil)
+		var workers sync.WaitGroup
+		for range 32 {
+			workers.Go(func() {
+				task := SpawnAsync(root, func(s *AsyncScope) AsyncCompletion {
+					<-s.Context().Done()
+					return AsyncCompletion{Cancelled: true}
+				})
+				if !task.Wait().Cancelled {
+					t.Error("cancelled scope published success")
+				}
+			})
+		}
+		var finishers sync.WaitGroup
+		for range 8 {
+			finishers.Go(func() { root.Finish(AsyncCompletion{Cancelled: true}) })
+		}
+		finishers.Wait()
+		workers.Wait()
+		late := SpawnAsync(root, func(*AsyncScope) AsyncCompletion { t.Error("closed scope started child"); return AsyncCompletion{} })
+		if !late.Wait().Cancelled {
+			t.Fatal("closed scope accepted child")
+		}
+	}
+}
+
+func TestAsyncHostCancellationDrainsCleanup(t *testing.T) {
+	host, cancel := context.WithCancel(context.Background())
+	root := NewAsyncRoot(host)
+	started, release := make(chan struct{}), make(chan struct{})
+	child := SpawnAsync(root, func(s *AsyncScope) AsyncCompletion {
+		close(started)
+		<-s.Context().Done()
+		<-release
+		return AsyncCompletion{Cancelled: true}
+	})
+	<-started
+	cancel()
+	if !root.Cancelled() {
+		t.Fatal("host cancellation did not reach root")
+	}
+	done := make(chan AsyncCompletion, 1)
+	go func() { done <- root.Finish(AsyncCompletion{}) }()
+	select {
+	case <-done:
+		t.Fatal("returned before child cleanup")
+	default:
+	}
+	close(release)
+	if !(<-done).Cancelled || !child.Wait().Cancelled {
+		t.Fatal("lost cancellation")
+	}
+}

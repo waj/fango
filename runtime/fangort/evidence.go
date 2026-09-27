@@ -3,6 +3,7 @@ package fangort
 // EvidenceFamily carries the module-owned representations of one checked
 // effect instance. Entries below its required transport are absent.
 type EvidenceFamily struct {
+	Origin       *EvidenceOrigin
 	Direct, Exit any
 }
 

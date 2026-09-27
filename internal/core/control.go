@@ -39,8 +39,14 @@ func ExprControl(e Expr) types.Control {
 
 	case *Neg:
 		return ExprControl(e.Operand)
-	case *TaskSpawn:
-		return join(e.Scope, e.Input)
+	case *ParallelMap:
+		return join(e.Function, e.Input)
+	case *AsyncLaunch:
+		return join(e.Call.Callee, e.Call.Args[0])
+	case *AsyncRebase:
+		return ExprControl(e.Call)
+	case *AsyncSupervise:
+		return ExprControl(e.Call)
 	case *NativeCall:
 		return join(e.Args...)
 

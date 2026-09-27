@@ -39,8 +39,11 @@ func (el *elab) app(e *ast.App) core.Expr {
 		args[len(rev)-1-i] = a
 	}
 	if v, ok := head.(*ast.Var); ok {
-		if v.Name == types.TaskSpawnName {
-			return el.taskSpawn(e, args)
+		if v.Name == "Async.spawn" && len(args) > 0 {
+			el.checkAsyncJob(args[0])
+		}
+		if v.Name == types.AsyncLaunchName || v.Name == types.AsyncRebaseName || v.Name == types.AsyncSuperviseName {
+			return el.asyncIntrinsic(e, v.Name, args, head)
 		}
 		if _, local := el.scopeIdx[v.Name]; local {
 			res := el.expr(head)
@@ -418,6 +421,7 @@ func (c callee) saturatedApp(args []core.Expr) *core.App {
 func (el *elab) workerCall(name string, workerTy, rawTy types.Type, arity int, args []ast.Expr) core.Expr {
 	c := el.workerCallee(name, workerTy, rawTy, arity)
 	c.evidence = el.workerEvidence(name, arity, c.tyArgs)
+	c.row = el.callbackResidual(name, arity, args, c.row)
 	return el.calleeCall(c, args)
 }
 
@@ -610,6 +614,13 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...
 	effectParams := el.bindEffectParams(executingEffects(want, 1))
 	var rowEffects []core.EffectInstance
 	for _, label := range actualFn.Eff.Labels {
+		explicit := false
+		for _, ev := range effectParams {
+			explicit = explicit || ev.Unique == label.Unique
+		}
+		if explicit {
+			continue
+		}
 		if types.RuntimeEvidenceEffect(label) && (len(el.evidence[label.Unique]) == 0 || forwards(label.Unique)) && types.FunctionOpenRow(wantFn) {
 			rowEffects = append(rowEffects, core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Control: el.evidenceControl(label.Unique)})
 		}
