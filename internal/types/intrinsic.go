@@ -4,6 +4,9 @@ package types
 // nodes. Recognition uses resolved declaration identity, never user spelling.
 const (
 
+	// LocalRunName owns isolated mutable state under a scoped callback.
+	LocalRunName = "Runtime.Local.run"
+
 	// ScopeBracketName owns resource cleanup on normal and abort exits.
 	ScopeBracketName = "Runtime.Scope.bracket"
 
@@ -17,9 +20,9 @@ const (
 )
 
 // RuntimeEvidenceEffect reports whether a row label needs runtime evidence.
-// IO is ambient.
+// IO is ambient; scoped permissions erase.
 func RuntimeEvidenceEffect(label EffLabel) bool {
-	return SurfaceName(label.Name) != "IO"
+	return !label.Scoped && SurfaceName(label.Name) != "IO"
 }
 
 func Intrinsic(name string) bool { return IntrinsicArity(name) != 0 }
@@ -29,7 +32,7 @@ func IntrinsicArity(name string) int {
 	switch name {
 	case TaskSpawnName, ScopeBracketName:
 		return 3
-	case FailureArgumentName:
+	case LocalRunName, FailureArgumentName:
 		return 2
 	case FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailAttemptReportName:
 		return 1

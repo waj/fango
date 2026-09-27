@@ -1,0 +1,16 @@
+import Bytes
+import Reader exposing (Reader)
+
+parsePair : Reader e -> Reader e ->{e} String
+parsePair first second =
+    a = Reader.readUpTo first 1
+    b = Reader.readUpTo second 1
+    c = Reader.readUpTo first 99
+    d = Reader.readUpTo second 99
+    Bytes.toStringLossy (Bytes.concat [a, b, c, d])
+
+parsed : String
+parsed = Reader.withBytes (Bytes.fromString "abc") (\first ->
+    Reader.withBytes (Bytes.fromString "XYZ") (\second -> parsePair first second))
+
+main() = print parsed

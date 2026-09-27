@@ -32,9 +32,9 @@ argument](functions.md#row-kinded-parameters): `Source {IO, Fail IO.Error}` and
 ## Reader
 
 A `Reader e` is a record whose operations perform exactly `e`. Parsing helpers
-propagate that row without adding IO. The bundled constructors capture private
-native references and therefore include IO in the reader row; two constructed
-readers remain independent.
+propagate that row without adding IO. `withBytes` provides scoped memory
+parsing without IO. The escapable `over`, `overBytes`, and `limited` constructors
+include IO in their reader row. Separate readers advance independently.
 
 ```fango
 import Reader exposing (Read(..), Reader)
@@ -46,6 +46,9 @@ type Reader e =
     }
 
 type Read = Found Bytes | Ended Bytes | Overflowed deriving (Eq, Show)
+
+{-# scoped s #-}
+withBytes : Bytes -> (Reader s ->{s} a) ->{e} a
 
 over : Source e -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
 overBytes : Bytes -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
@@ -67,6 +70,22 @@ answering `True`, or the source ends, answering `False`; it never answers
 the buffer and answers how many bytes it took, which is `n` clamped to what was
 there. A caller projects them off the reader — they are operation names, so
 they are not module functions.
+
+`withBytes contents use` creates a private advancing cursor over memory. Its
+[scoped callback](functions.md#scoped-callbacks) may read it and return parsed
+data. A consumer with no other effects gives a pure result:
+
+```fango
+prefix : Bytes -> Bytes
+prefix contents = Reader.withBytes contents (\reader -> Reader.readUpTo reader 4)
+```
+
+The callback row `s` extends the remaining row `e` with a fresh local permission.
+Database, network, IO, or other consumer effects remain in `e`; the runner only
+discharges its own cursor permission. Readers, their operation callbacks, and
+streams that advance them cannot escape this callback. Nested `withBytes` calls
+can pass independent readers to one parser; see the executable
+[two-reader example](../../testdata/run/reader_scoped_memory.fango).
 
 `over source use` runs `use` with a reader over `source`. `overBytes contents
 use` starts with the contents in its buffer over an exhausted source. Reading
@@ -148,7 +167,9 @@ completion. Its `flush()` has nowhere to push to and does nothing.
 
 ## Lifetimes
 
-Readers and writers may be returned or stored. Memory buffers remain available
+Readers from `over`, `overBytes`, and `limited`, and writers, may be returned or
+stored. Readers from `withBytes` obey its scoped callback restriction.
+Memory buffers remain available
 while referenced. A source or sink backed by a file or socket still depends on
 that handle being open; operations after its scope closes fail at runtime.
 Consume resource-backed streams inside the resource's cleanup scope.

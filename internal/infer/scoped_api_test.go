@@ -150,3 +150,26 @@ bad use = handle use { read = read } of
 		})
 	}
 }
+
+func TestScopedDeclarationErrors(t *testing.T) {
+	for _, src := range []string{
+		"{-# scoped missing #-}\nrun : (Int ->{s} a) ->{e} a\nrun use = use 0\n",
+		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{s} a\nrun use = use 0\n",
+		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun use = run use\n",
+		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun use = other use\nother use = run use\n",
+		"{-# scoped s #-}\nrun : Show a => (Int ->{s} a) ->{e} a\nrun use = use 0\n",
+		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun _ = 0\n",
+		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun = native\n",
+		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun use = use 0\nalias = run\n",
+	} {
+		t.Run(src, func(t *testing.T) {
+			_, _, errs := check(t, src)
+			for _, err := range errs {
+				if err.Error() == "SCOPED CALLBACK" {
+					return
+				}
+			}
+			t.Fatalf("missing scoped declaration diagnostic: %v", errs)
+		})
+	}
+}

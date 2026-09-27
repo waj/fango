@@ -1,0 +1,15 @@
+{-# no-prelude #-}
+module Runtime.Local exposing (Cell(..), run)
+
+import Basics exposing (..)
+import Runtime.Ref
+
+-- The row records permission to access this cell; it has no runtime identity.
+type Cell e a =
+    { read : () ->{e} a
+    , write : a ->{e} ()
+    }
+
+{-# scoped s #-}
+run : a -> (Cell s a ->{s} b) ->{e} b
+run = native

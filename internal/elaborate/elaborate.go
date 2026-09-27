@@ -290,6 +290,7 @@ func decl(info infer.DeclInfo, ck *infer.Checker, stableLifts bool) ([]core.Def,
 		paramCaptures[i] = ck.Sup.FreshCapture()
 	}
 	def := core.Def{
+		Scoped:        info.Scheme.ScopedRow != nil,
 		SourceType:    prependTypes(dictTypes, rawType),
 		Name:          info.Name,
 		Type:          prependTypes(dictTypes, defType),
@@ -326,7 +327,9 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 			continue
 		}
 		ty := (&elab{ck: ck}).eraseRuntimeKinds(eraseRows(ck.Intrinsics[name].Body))
-		if name == types.ScopeBracketName {
+		if name == types.LocalRunName {
+			defs = append(defs, localRunDef(name, ty, ck))
+		} else if name == types.ScopeBracketName {
 			defs = append(defs, scopeBracketDef(name, ty, ck))
 		} else if types.FailureInspection(name) {
 			defs = append(defs, failureInspectDef(name, ty, ck))
@@ -335,6 +338,7 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 		}
 		if len(defs) > 0 && defs[len(defs)-1].Name == name {
 			defs[len(defs)-1].SourceType = ck.Intrinsics[name].Body
+			defs[len(defs)-1].Scoped = ck.Intrinsics[name].ScopedRow != nil
 		}
 	}
 	bindRows(defs, ck)
@@ -1400,13 +1404,16 @@ func (el *elab) eraseRuntimeKinds(t types.Type) types.Type {
 	case *types.TFun:
 		return &types.TFun{Arg: el.eraseRuntimeKinds(t.Arg), Eff: el.eraseRuntimeKinds(t.Eff).(types.Row), Ret: el.eraseRuntimeKinds(t.Ret), Control: t.Control, OpenRow: types.FunctionOpenRow(t)}
 	case types.Row:
-		labels := make([]types.EffLabel, len(t.Labels))
-		for i, l := range t.Labels {
+		labels := make([]types.EffLabel, 0, len(t.Labels))
+		for _, l := range t.Labels {
+			if l.Scoped {
+				continue
+			}
 			args := make([]types.Type, len(l.Args))
 			for j, a := range l.Args {
 				args[j] = el.eraseRuntimeKinds(a)
 			}
-			labels[i] = types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort}
+			labels = append(labels, types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort})
 		}
 		return types.Row{Labels: labels}
 	default:
@@ -1446,6 +1453,9 @@ func eraseRowsFrom(origin, t types.Type) types.Type {
 		arg, ret := eraseRowsFrom(of.Arg, t.Arg), eraseRowsFrom(of.Ret, t.Ret)
 		var eff types.Row
 		for _, l := range types.SortedRow(t.Eff).Labels {
+			if l.Scoped {
+				continue
+			}
 			keep := false
 			for _, ol := range of.Eff.Labels {
 				if ol.Unique == l.Unique {
@@ -1460,7 +1470,7 @@ func eraseRowsFrom(origin, t types.Type) types.Type {
 			for i, a := range l.Args {
 				args[i] = eraseRowsFrom(a, a)
 			}
-			eff.Labels = append(eff.Labels, types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort})
+			eff.Labels = append(eff.Labels, types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Scoped: l.Scoped})
 		}
 		control := types.FunctionControl(t)
 		return &types.TFun{Arg: arg, Eff: eff, Ret: ret, Control: control, OpenRow: types.FunctionOpenRow(of)}

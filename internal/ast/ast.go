@@ -566,6 +566,8 @@ func (e *MetaValue) Span() source.Span { return e.Sp }
 type Decl interface{ isDecl() }
 
 type ValueDecl struct {
+	ScopedRow string // declaration-local scoped callback row binder
+
 	Name      string
 	NameSpan  source.Span
 	Params    []Pattern  // non-empty: a function definition (worker; see doc/design.md, "Go backend and runtime")

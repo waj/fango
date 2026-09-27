@@ -297,9 +297,21 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 // object already installed.
 func (r *remapper) extend(v reflect.Value) {
 	ck := r.ck
-	ids := &remapIDs{vars: map[int]*types.TVar{}, captures: map[types.CaptureVar]bool{}, scopes: map[types.ScopeID]bool{}, resumes: map[types.ResumeID]bool{}}
+	ids := &remapIDs{permissions: map[int]bool{}, vars: map[int]*types.TVar{}, captures: map[types.CaptureVar]bool{}, scopes: map[types.ScopeID]bool{}, resumes: map[types.ResumeID]bool{}}
 	collectRemapIDs(v, map[uintptr]bool{}, ids)
 	r.alignForeignParams(ids)
+	// Fresh permission labels have no module declaration to intern. Allocate
+	// them in source identity order, preserving sharing across deferred sections.
+	var permissionIDs []int
+	for id := range ids.permissions {
+		permissionIDs = append(permissionIDs, id)
+	}
+	sort.Ints(permissionIDs)
+	for _, id := range permissionIDs {
+		if _, ok := r.effect[id]; !ok {
+			r.effect[id] = ck.Sup.NextUnique()
+		}
+	}
 	vars, captures, scopes, resumes := ids.vars, ids.captures, ids.scopes, ids.resumes
 	var varIDs []int
 	for id := range vars {
@@ -399,18 +411,22 @@ func (r *remapper) alignForeignParams(ids *remapIDs) {
 // the foreign nominals whose declared parameters must align with the
 // installed declaration instead.
 type remapIDs struct {
-	vars     map[int]*types.TVar
-	captures map[types.CaptureVar]bool
-	scopes   map[types.ScopeID]bool
-	resumes  map[types.ResumeID]bool
-	adts     []*types.ADTInfo
-	effects  []*types.EffectInfo
-	classes  []*types.ClassInfo
+	permissions map[int]bool
+	vars        map[int]*types.TVar
+	captures    map[types.CaptureVar]bool
+	scopes      map[types.ScopeID]bool
+	resumes     map[types.ResumeID]bool
+	adts        []*types.ADTInfo
+	effects     []*types.EffectInfo
+	classes     []*types.ClassInfo
 }
 
 func collectRemapIDs(v reflect.Value, seen map[uintptr]bool, ids *remapIDs) {
 	if !v.IsValid() || v.Type() == reflect.TypeOf(source.Span{}) {
 		return
+	}
+	if v.Type() == effLabelReflectType && v.FieldByName("Scoped").Bool() {
+		ids.permissions[int(v.FieldByName("Unique").Int())] = true
 	}
 	if v.Type() == captureVarType {
 		ids.captures[types.CaptureVar(v.Int())] = true

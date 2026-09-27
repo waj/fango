@@ -9,11 +9,14 @@ import (
 
 // All members share these monotypes until every body and record obligation
 // has been solved. Generalization must never make a recursive edge polymorphic.
-type recursiveInference struct{ types map[string]types.Type }
+type recursiveInference struct {
+	types  map[string]types.Type
+	scoped map[string]bool
+}
 
 func (b *moduleCheck) inferGroup(group []int) {
 	ck := b.ck
-	rec := &recursiveInference{types: map[string]types.Type{}}
+	rec := &recursiveInference{types: map[string]types.Type{}, scoped: map[string]bool{}}
 	previous := ck.recursive
 	ck.recursive = rec
 	defer func() { ck.recursive = previous }()
@@ -21,6 +24,7 @@ func (b *moduleCheck) inferGroup(group []int) {
 		d := b.values[i]
 		ty := ck.Sup.FreshVar(types.General)
 		rec.types[d.Name] = ty
+		rec.scoped[d.Name] = d.ScopedRow != ""
 		ck.Env.Bind(d.Name, types.Scheme{Body: ty})
 		ck.Workers[d.Name] = len(d.Params)
 	}
@@ -30,6 +34,7 @@ func (b *moduleCheck) inferGroup(group []int) {
 		d := b.values[i]
 		b.context(i, symbolModule(d.Name), func() { qs[k] = ck.prepareDecl(d, true) })
 		all.cs = append(all.cs, qs[k].g.cs...)
+		all.scopeObligations = append(all.scopeObligations, qs[k].g.scopeObligations...)
 		all.preds = append(all.preds, qs[k].g.preds...)
 		b.errs = append(b.errs, qs[k].errs...)
 		b.errs = append(b.errs, qs[k].g.errs...)
@@ -106,6 +111,9 @@ func (b *moduleCheck) inferGroup(group []int) {
 			q.info.Scheme = types.Scheme{Body: q.info.Type}
 		} else {
 			q.info.Scheme = ck.generalize(q.info.Type, nil)
+			if q.d.ScopedRow != "" {
+				q.info.Scheme = markScopedScheme(q.info.Scheme, len(q.d.Params))
+			}
 		}
 	}
 	componentVars := map[int]*types.TVar{}
@@ -160,6 +168,12 @@ func (b *moduleCheck) inferGroup(group []int) {
 			b.errs = append(b.errs, es...)
 			b.errs = append(b.errs, ck.checkStageLeaks(q.d, q.info.Type, types.SurfaceName(q.d.Name))...)
 		})
+	}
+	if len(b.errs) > 0 {
+		return
+	}
+	for _, q := range qs {
+		b.errs = append(b.errs, q.g.checkScopeBoundaries()...)
 	}
 	if len(b.errs) > 0 {
 		return

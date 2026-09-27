@@ -124,6 +124,8 @@ type Row struct {
 // EffLabel identifies an effect by its generation-stable Unique. Name is
 // diagnostic syntax; Args instantiate parameterized effects such as Fail e.
 type EffLabel struct {
+	Scoped bool // compiler-only generative permission; no runtime evidence
+
 	Unique int
 	Name   string
 	Args   []Type
@@ -148,6 +150,10 @@ func SortedRow(r Row) Row {
 // CaptureVars are independently freshened at a value occurrence; they never
 // appear in user-facing type printing.
 type Scheme struct {
+	ScopedRow    *TVar // universally bound row in the final callback parameter
+	ScopedArity  int
+	CallbackBase *Row // lower bound when invoking a scoped callback parameter
+
 	Vars        []*TVar
 	Preds       []Pred
 	Body        Type
@@ -266,7 +272,7 @@ func substRigidRow(r Row, m map[int]Type) Row {
 		for j, a := range l.Args {
 			args[j] = SubstRigid(a, m)
 		}
-		labels[i] = EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort}
+		labels[i] = EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Scoped: l.Scoped}
 	}
 	var tail Type
 	if r.Tail != nil {

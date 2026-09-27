@@ -3,7 +3,7 @@
 -- errors --
 -- MISPLACED PRAGMA ----------------- err_pragma_misplaced.fango
 
-Only the `resource` pragma may precede a declaration; file pragmas belong above the module header.
+Only `resource` and `scoped` pragmas may precede declarations; file pragmas belong above the module header.
 
 5| {-# no-prelude #-}
    ^^^^^^^^^^^^^^^^^^

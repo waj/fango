@@ -60,7 +60,7 @@ func (s Subst) applyRow(r types.Row) types.Row {
 		for j, a := range l.Args {
 			args[j] = s.Apply(a)
 		}
-		labels[i] = types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort}
+		labels[i] = types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Scoped: l.Scoped}
 	}
 	var tail types.Type
 	if r.Tail != nil {

@@ -69,6 +69,27 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			solve(i, c)
 		}
 	}
+	// In scoped groups, apply fixed-tail upper bounds before growing flexible rows. In particular,
+	// a pure outer scope must be closed before nested callback rows compose;
+	// otherwise an inner fresh label can be needlessly assigned to its tail.
+	for len(scopes) > 0 {
+		var rest []pending
+		progress := false
+		for _, p := range bounds {
+			right, ok := sub.Apply(p.c.Right).(types.Row)
+			tail, rigidTail := right.Tail.(*types.TVar)
+			if ok && (right.Tail == nil || rigidTail && tail.Rigid) {
+				solve(p.at, p.c)
+				progress = true
+			} else {
+				rest = append(rest, p)
+			}
+		}
+		bounds = rest
+		if !progress {
+			break
+		}
+	}
 	for _, p := range bounds {
 		i, constraint := p.at, p.c
 		labels, tail, split := splitRigidTail(constraint, sub)

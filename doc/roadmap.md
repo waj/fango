@@ -44,8 +44,9 @@ server](roadmap-io.md) owns what is left. Concurrent socket handoff requires a n
 ## Scoped readers and task effects
 
 [Scoped readers and effect-polymorphic tasks](roadmap-scoped-effects.md) owns
-pure memory cursors, explicit child interpreters, and scheduling without ambient
-IO, including the fresh-scope and generic-operation prerequisites.
+the remaining generic scheduling representation and explicit child interpreters
+without ambient IO. [Scoped memory readers](reference/library-readers.md#reader)
+are implemented.
 
 ## Addressing a specific handler
 

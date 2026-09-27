@@ -44,6 +44,9 @@ func (p *printer) printDecl(d ast.Decl, sp source.Span) bool {
 // constructs are not printed yet, and declining leaves the declaration to be
 // copied with its own line structure intact.
 func (p *printer) valueDeclLines(d *ast.ValueDecl, ind int) bool {
+	if d.ScopedRow != "" {
+		p.line(ind, "{-# scoped "+d.ScopedRow+" #-}")
+	}
 	if d.Native != nil {
 		p.annotationLine(d, ind)
 		p.line(ind, declName(d.Name)+" = "+nativeText(d.Native))

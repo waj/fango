@@ -33,7 +33,7 @@ func foreignScopeNames(all, own map[string]types.CaptureSummary, referenced any)
 	for id := range captureScopeNames(own) {
 		delete(allNames, id)
 	}
-	ids := &remapIDs{vars: map[int]*types.TVar{}, captures: map[types.CaptureVar]bool{}, scopes: map[types.ScopeID]bool{}, resumes: map[types.ResumeID]bool{}}
+	ids := &remapIDs{permissions: map[int]bool{}, vars: map[int]*types.TVar{}, captures: map[types.CaptureVar]bool{}, scopes: map[types.ScopeID]bool{}, resumes: map[types.ResumeID]bool{}}
 	collectRemapIDs(reflect.ValueOf(referenced), map[uintptr]bool{}, ids)
 	for id := range allNames {
 		if !ids.scopes[id] {

@@ -626,6 +626,9 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 		return errs
 	}
 	arity := types.IntrinsicArity(d.Name)
+	if d.Name == types.LocalRunName && d.ScopedRow == "" {
+		return append(errs, diag.Errorf(d.NameSpan, "SCOPED CALLBACK", "Runtime.Local.run requires its scoped callback contract."))
+	}
 	// Elaboration reads the parameter types structurally when it builds the
 	// body, so a bundled annotation that does not match the shape the compiler
 	// implements is a declaration error rather than a later panic.
@@ -661,10 +664,30 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 		}
 	}
 
+	if d.Name == types.LocalRunName {
+		cell, ok := params[1].(*types.TFun)
+		if !ok {
+			return append(errs, diag.Errorf(d.NameSpan, "SCOPED CALLBACK", "Runtime.Local.run needs a Cell callback."))
+		}
+		con, ok := cell.Arg.(*types.TCon)
+		if !ok || con.Name != "Runtime.Local.Cell" || len(con.Args) != 2 || !types.Equal(con.Args[1], params[0]) || !types.Equal(con.Args[0], cell.Eff.Tail) || !types.Equal(cell.Ret, rest) {
+			return append(errs, diag.Errorf(d.NameSpan, "SCOPED CALLBACK", "Runtime.Local.run must preserve the cell's value type and callback result."))
+		}
+	}
+	if d.Name == types.LocalRunName {
+		errs = append(errs, ck.checkLocalCell(d, params)...)
+		if len(errs) != 0 {
+			return errs
+		}
+	}
 	if d.Name == types.FailAttemptReportName && !types.AttemptReportShape(ty) {
 		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic `%s` must preserve the action's residual row and return `Result (Report error) value`.", ast.Spelling(d.Name)))
 	}
 	sch := types.Scheme{Vars: scope.Minted(), Preds: scope.Preds(), Body: ty}
+	if d.ScopedRow != "" {
+		errs = append(errs, ck.checkScopedDeclaration(d, ty, scope)...)
+		sch = markScopedScheme(sch, arity)
+	}
 	ck.Intrinsics[d.Name] = sch
 	ck.Env.Bind(d.Name, sch)
 	ck.Workers[d.Name] = arity
@@ -686,6 +709,9 @@ func peelArrows(t types.Type, n int) ([]types.Type, types.Type) {
 }
 
 func (ck *Checker) declareNative(d *ast.ValueDecl) []diag.Error {
+	if d.ScopedRow != "" {
+		return []diag.Error{diag.Errorf(d.NameSpan, "SCOPED CALLBACK", "Native sidecars cannot declare scoped callback contracts; use an ordinary scoped wrapper.")}
+	}
 	if d.Ann == nil {
 		return []diag.Error{diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "A native declaration requires a type annotation.")}
 	}
@@ -1088,8 +1114,11 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, allowEffects bool) *declInferen
 		given, annErrs = ck.ResolvePreds(d.Ann.Preds, annScope)
 		errs = append(errs, annErrs...)
 	}
+	if d.ScopedRow != "" {
+		errs = append(errs, ck.checkScopedDeclaration(d, annTy, annScope)...)
+	}
 	originalAnn := annTy
-	if ck.recursive != nil && annTy != nil {
+	if ck.recursive != nil && annTy != nil && d.ScopedRow == "" {
 		replacements := map[int]types.Type{}
 		for _, v := range annScope.Minted() {
 			replacements[v.ID] = ck.Sup.FreshVar(v.Kind)
@@ -1098,6 +1127,10 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, allowEffects bool) *declInferen
 		given = types.SubstPreds(given, replacements)
 	}
 	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
+	if d.ScopedRow != "" && annScope != nil {
+		g.scopedParameter = annScope.vars[d.ScopedRow]
+		g.scopedDefinition = d.Name
+	}
 	var ty types.Type
 	if len(d.Params) == 0 {
 		ty = g.expr(d.Body)
@@ -1186,6 +1219,7 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 	ty = ck.runnerControl(ty, len(d.Params), declEquations(d))
 	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Equations: d.Equations, Type: ty, Body: d.Body, InstanceLimit: ck.instanceLimit()}
 	if ck.recursive != nil {
+		errs = append(errs, g.checkScopeBoundaries()...)
 		q.info = info
 		q.errs = errs
 		return info, errs
@@ -1207,6 +1241,10 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 	var predErrs []diag.Error
 	info.Scheme, predErrs = ck.qualify(info.Scheme, g.preds, given, d.Ann != nil, d.NameSpan)
 	errs = append(errs, predErrs...)
+	if d.ScopedRow != "" {
+		info.Scheme = markScopedScheme(info.Scheme, len(d.Params))
+	}
+	errs = append(errs, g.checkScopeBoundaries()...)
 	return info, errs
 }
 
@@ -1387,6 +1425,9 @@ type generator struct {
 	patternPins       *blockScope
 	patternBinder     string
 	annotationAmbient *types.Row
+	scopedParameter   *types.TVar
+	scopedDefinition  string
+	scopeObligations  []Constraint
 	localAnnotations  []localAnnotation
 	// Keep package row provenance before a local binding can solve/generalize
 	// a partial application; whole-definition flow adds imported obligations.
@@ -1457,6 +1498,9 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 	case *ast.UnitLit:
 		ty = g.ck.B.Unit
 	case *ast.Var:
+		if (g.ck.recursive != nil && g.ck.recursive.scoped[e.Name]) || (g.scopedParameter != nil && e.Name == g.scopedDefinition) {
+			g.errs = append(g.errs, diag.Errorf(e.Sp, "SCOPED CALLBACK", "Scoped runners cannot be recursive or mutually recursive."))
+		}
 		if name := g.ck.Aliases[e.Name]; name != "" {
 			e.Name = name
 		}
@@ -1474,6 +1518,9 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 					"I don't know a value named `%s`.", e.Name))
 				ty = g.ck.Sup.FreshVar(types.General) // recover with a hole
 				break
+			}
+			if scheme.ScopedRow != nil {
+				g.errs = append(g.errs, diag.Errorf(e.Sp, "SCOPED CALLBACK", "The scoped runner `%s` must be fully applied by name.", e.Name))
 			}
 			g.ck.ExprSchemes[e] = scheme
 			g.ck.ExprCaptures[e] = g.instantiateCaptures(scheme)
@@ -1570,6 +1617,10 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		g.records = append(g.records, ob)
 		ty = receiver
 	case *ast.App:
+		if name, sch, ok := g.scopedSpine(e); ok {
+			ty = g.scopedCall(e, name, sch)
+			break
+		}
 		if name, n := g.intrinsicSpine(e); name != "" && n == types.IntrinsicArity(name) {
 			ty = g.intrinsicCall(e, name)
 			break
@@ -1651,6 +1702,23 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		oldBinder := g.patternBinder
 		g.patternBinder = "parameter"
 		paramTys := g.bindParams(scope, e.Params)
+		// Scoped callback parameters must be known before checking a nested
+		// scope; otherwise a shared-row consumer can solve an unconstrained
+		// outer parameter to the inner scope before its boundary is checked.
+		cursor := want
+		for i, p := range e.Params {
+			fn, ok := cursor.(*types.TFun)
+			if !ok {
+				break
+			}
+			if hasScopedPermission(g.ck.Sub.Apply(fn.Arg)) {
+				if name, ok := p.(*ast.PVar); ok {
+					paramTys[i] = fn.Arg
+					scope.names[name.Name] = types.Scheme{Body: fn.Arg}
+				}
+			}
+			cursor = fn.Ret
+		}
 		g.patternBinder = oldBinder
 		g.patternPins = oldPins
 		bodyAmbient := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
@@ -1659,6 +1727,10 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		// not a nested callback's handler clauses (which may call pause).
 		savedAnnotationAmbient := g.annotationAmbient
 		g.annotationAmbient = nil
+		if fn, ok := want.(*types.TFun); ok && hasScopedPermission(g.ck.Sub.Apply(fn.Eff)) {
+			row := g.ck.Sub.Apply(fn.Eff).(types.Row)
+			g.annotationAmbient = &row
+		}
 		bodyTy := g.expr(e.Body)
 		g.annotationAmbient = savedAnnotationAmbient
 		g.ambient = savedAmbient
@@ -2337,6 +2409,11 @@ func (g *generator) functionEquations(name string, nameSpan source.Span, eqs []a
 		}
 		g.patternBinder = oldBinder
 		g.patternPins = oldPins
+		if g.scopedParameter != nil && name == g.scopedDefinition && len(eq.Params) > 0 {
+			if p, ok := eq.Params[len(eq.Params)-1].(*ast.PVar); ok {
+				scope.names[p.Name] = types.Scheme{Vars: []*types.TVar{g.scopedParameter}, Body: paramTys[len(paramTys)-1], CallbackBase: annotationAmbient}
+			}
+		}
 		savedAnnotationAmbient := g.annotationAmbient
 		g.annotationAmbient = annotationAmbient
 		savedAmbient := g.enterAmbient(bodyAmbient)
@@ -2971,7 +3048,9 @@ func (g *generator) instantiateAt(s types.Scheme, sp source.Span, op string) typ
 		g.preds = append(g.preds, predObligation{pred: p, span: sp, op: op})
 	}
 	t := types.SubstRigid(s.Body, m)
-
+	if s.CallbackBase != nil && len(s.Vars) == 1 {
+		g.cs = append(g.cs, Constraint{Left: *s.CallbackBase, Right: types.Row{Tail: m[s.Vars[0].ID]}, Include: true, Span: sp, Why: Why{Kind: WhyCall}})
+	}
 	return t
 }
 

@@ -8,6 +8,7 @@ package parser
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
@@ -93,13 +94,18 @@ func ParseExprInput(toks []token.Token, f *source.File) (ast.Expr, []diag.Error)
 	return e, p.errs
 }
 
+func isScopedPragma(text string) bool {
+	fields := strings.Fields(text)
+	return len(fields) > 0 && fields[0] == "scoped"
+}
+
 // parsePragmas consumes the `{-# ... #-}` directives that may precede the
-// module header. Declaration-local resource markers are left for parseDecl.
+// module header. Declaration-local markers are left for parseDecl.
 func (p *parser) parsePragmas(m *ast.Module) {
-	for p.peek().Kind == token.PRAGMA && p.peek().Text != "resource" {
+	for p.peek().Kind == token.PRAGMA && p.peek().Text != "resource" && !isScopedPragma(p.peek().Text) {
 		t := p.next()
 		if !p.applyPragma(m, t) {
-			p.errorAt(t.Span, "UNKNOWN PRAGMA", "I don't know the pragma `"+t.Text+"`. Use `no-prelude` above the module header, or `resource` before a type declaration.")
+			p.errorAt(t.Span, "UNKNOWN PRAGMA", "I don't know the pragma `"+t.Text+"`. Use `no-prelude` above the module header, `resource` before a type declaration, or `scoped row` before an annotated function.")
 		}
 	}
 }
@@ -279,8 +285,23 @@ func (p *parser) parseDecl() ast.Decl {
 	if t.Kind == token.PRAGMA {
 		p.next()
 
+		if isScopedPragma(t.Text) {
+			fields := strings.Fields(t.Text)
+			if len(fields) != 2 {
+				p.errorAt(t.Span, "SCOPED CALLBACK", "Use `{-# scoped row #-}` before an annotated function.")
+				return nil
+			}
+			d := p.parseDecl()
+			if vd, ok := d.(*ast.ValueDecl); ok && vd.Ann != nil && vd.ScopedRow == "" {
+				vd.ScopedRow = fields[1]
+				vd.Sp = t.Span.Merge(vd.Sp)
+				return vd
+			}
+			p.errorAt(t.Span, "SCOPED CALLBACK", "A scoped row marker must precede one annotated function.")
+			return d
+		}
 		if t.Text != "resource" {
-			p.errorAt(t.Span, "MISPLACED PRAGMA", "Only the `resource` pragma may precede a declaration; file pragmas belong above the module header.")
+			p.errorAt(t.Span, "MISPLACED PRAGMA", "Only `resource` and `scoped` pragmas may precede declarations; file pragmas belong above the module header.")
 			return nil
 		}
 		if p.peek().Kind == token.EOF {

@@ -8,20 +8,15 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// FreshEffect is a prototype generative effect identity. It uses the existing
-// nominal row machinery: two allocations have distinct identities even when
-// their diagnostic names agree. It is not an ordinary caller-selected type
-// parameter. No new runtime representation is implied by this checker API.
-//
-// Source integration still needs a quantified callback contract and evidence
-// lowering. In particular, callers must not publish this identity in a module
-// scheme or turn it into a native effect with unchecked implementations.
+// FreshEffect is a generative permission label for one scoped callback call.
+// Ordinary row inclusion composes it with other scopes and residual effects.
+// Its identity is rigid and erased before runtime evidence lowering.
 type FreshEffect struct {
 	label types.EffLabel
 }
 
 func NewFreshEffect(sup *types.Supply, name string) FreshEffect {
-	return FreshEffect{label: types.EffLabel{Unique: sup.NextUnique(), Name: name}}
+	return FreshEffect{label: types.EffLabel{Unique: sup.NextUnique(), Name: name, Scoped: true}}
 }
 
 // Within extends an ambient row for the subject. It preserves all outer
@@ -60,46 +55,11 @@ func (s *ScopeBoundary) check(sub Subst, sp source.Span) []diag.Error {
 	}
 	var errs []diag.Error
 	for _, root := range roots {
-		if containsEffect(sub.Apply(root.ty), s.Effect.label.Unique) {
+		if types.ContainsScopedEffect(sub.Apply(root.ty), s.Effect.label.Unique) {
 			errs = append(errs, diag.Errorf(sp, "SCOPE ESCAPE",
 				"The local effect `%s` occurs in the scope's %s. Keep values and callbacks that require it inside the scope.",
 				s.Effect.label.Name, root.name))
 		}
 	}
 	return errs
-}
-
-// Inspect every type position, not just an arrow's immediate effect row.
-// This includes latent callbacks, abstract/phantom ADT arguments, effect
-// arguments, and substitutions reached through row tails. Abstract schemas
-// cannot hide an instance selected by a caller without retaining it as an
-// argument; existential packages are not part of the current type language.
-func containsEffect(t types.Type, unique int) bool {
-	switch t := t.(type) {
-	case *types.TVar:
-		return false
-	case *types.TCon:
-		for _, arg := range t.Args {
-			if containsEffect(arg, unique) {
-				return true
-			}
-		}
-	case *types.TFun:
-		return containsEffect(t.Arg, unique) || containsEffect(t.Eff, unique) || containsEffect(t.Ret, unique)
-	case types.Row:
-		for _, label := range t.Labels {
-			if label.Unique == unique {
-				return true
-			}
-			for _, arg := range label.Args {
-				if containsEffect(arg, unique) {
-					return true
-				}
-			}
-		}
-		return t.Tail != nil && containsEffect(t.Tail, unique)
-	default:
-		panic(fmt.Sprintf("infer.containsEffect: unhandled %T", t))
-	}
-	return false
 }

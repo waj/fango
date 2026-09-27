@@ -237,3 +237,23 @@ func TestResourceMarkerStaysWithDeclaration(t *testing.T) {
 		}
 	}
 }
+
+func TestScopedMarkerStaysWithDeclaration(t *testing.T) {
+	for _, src := range []string{
+		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun use=use 0\n",
+		"{-# scoped s #-}\n-- callback comment\nrun : (Int ->{s} a) ->{e} a\nrun = native\n",
+		"{-# scoped s #-}\nrun : (Int ->{s} a) ->{e} a\nrun use =\n    -- body comment\n    use 0\n",
+	} {
+		out, errs := Source(source.NewFile("scoped.fango", []byte(src)))
+		if len(errs) > 0 {
+			t.Fatal(errs)
+		}
+		again, errs := Source(source.NewFile("scoped.fango", out))
+		if len(errs) > 0 || !bytes.Equal(out, again) {
+			t.Fatalf("not idempotent: %s; %v", out, errs)
+		}
+		if strings.Count(string(out), "{-# scoped s #-}") != 1 {
+			t.Fatalf("marker lost or duplicated: %s", out)
+		}
+	}
+}

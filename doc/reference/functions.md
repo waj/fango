@@ -135,6 +135,40 @@ has row kind and no other reading. Row-kinded parameters are source-level metada
 erased from Core and generated Go representations; the declaration remains
 available to inference and reflection.
 
+## Scoped callbacks
+
+A declaration pragma binds a row universally within the final callback:
+
+```fango
+{-# scoped s #-}
+withText : String -> (Reader s ->{s} a) ->{e} a
+withText text use = Reader.withBytes (Bytes.fromString text) use
+```
+
+At each call, `s` contains a fresh local permission plus the runner's residual
+row `e`. The callback may use both. The runner discharges its fresh permission;
+all other effects remain in `e`. Nested calls have distinct permissions and can
+use multiple readers together through ordinary row inclusion.
+
+The annotated declaration must bind its final callback to a name. That callback
+has one argument and exactly the annotated scoped row on its arrow. The binder
+may occur in the callback argument, but not its result, earlier runner
+parameters, the runner result, or the runner's own arrow effects. Within the
+implementation the callback can be instantiated at different rows extending
+the runner's residual row.
+
+Runners must be called by name with all parameters supplied. Partial application,
+first-class aliases, recursion, mutual recursion, class-constrained runner
+annotations, and scoped native sidecars are rejected with `SCOPED CALLBACK`.
+The bundled local-state intrinsic is the compiler-checked native exception.
+Ordinary consumers and parsing helpers remain ordinary first-class functions.
+
+A `SCOPE ESCAPE` rejects a local permission in a returned value, a latent
+callback, enclosing mutable storage, or residual effects. Wrapping the value in
+an ADT does not hide its permission. An older scope's reader can pass through an
+inner scope, since only the inner permission is discharged there. This is a
+permission check, not a resource close or an implicit IO handler.
+
 ## Tail-call guarantee
 
 Recursion is the language's loop, and self tail calls are guaranteed to run

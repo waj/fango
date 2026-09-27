@@ -42,7 +42,7 @@
       "patterns": [
         {
           "name": "keyword.control.directive.fango",
-          "match": "(?<![\\w-])(?:no-prelude|resource)(?![\\w-])"
+          "match": "(?<![\\w-])(?:no-prelude|resource|scoped)(?![\\w-])"
         }
       ]
     },

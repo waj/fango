@@ -57,6 +57,25 @@ intrinsic-specific checks concern ownership and lowering.
 | TaskSpawn | Closed named worker, explicit transferable input/output, no inherited evidence |
 | FailureInspect | Checked descriptor and Maybe packaging; no target/resumption access |
 
+## Scoped state boundary
+
+`Runtime.Local.run` is a general local-state intrinsic. It lowers to existing
+Let, Lambda, App, and NativeCall nodes: allocate a private `Runtime.Ref`, build
+read/write callbacks, and call the consumer. The cell's value index and callback
+row are checked against the bundled Cell declaration before lowering. No Core
+node recognizes Reader; `Reader.withBytes` is ordinary Fango code using this
+primitive. The native reference contains a plain mutable value, with no lock or
+scheduler. Scope permissions require no runtime identities.
+
+Scoped definitions retain their quantified `SourceType` and a `Scoped` marker;
+call sites retain their instantiated source signature. Core lint validates the
+restricted callback shape, full application, one fresh permission beyond the
+residual row, and absence of that permission in outward call types. It rejects
+permission labels in runtime function types. Exported schemes and serialized
+Core preserve this metadata. Environmental and outer-storage independence are
+proved by source inference before row erasure; Core's signature checks do not
+reconstruct that source environment.
+
 ## Residual evidence rows
 
 Source row tails erase after evidence requirements are derived. Each arrow

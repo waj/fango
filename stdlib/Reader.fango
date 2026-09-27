@@ -1,11 +1,12 @@
 {-# no-prelude #-}
-module Reader exposing (Read(..), Reader(..), atEnd, chunks, ensure, forEachChunk, limited, over, overBytes, readExactly, readLine, readUntil, readUpTo)
+module Reader exposing (Read(..), Reader(..), atEnd, chunks, ensure, forEachChunk, limited, over, overBytes, readExactly, readLine, readUntil, readUpTo, withBytes)
 
 import Basics exposing (..)
 import Bytes exposing (Bytes, Source(..))
 -- Buffered IO operations keep their mutable state in task-local references.
 import IO exposing (IO)
 import Maybe exposing (Maybe(..))
+import Runtime.Local
 import Runtime.Ref
 import Stream exposing (Stream)
 
@@ -71,6 +72,22 @@ over source use = buffering Bytes.empty source use
 
 overBytes : Bytes -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
 overBytes contents use = buffering contents { pull = \_ -> Nothing } use
+
+-- Each invocation introduces a fresh scoped row. The consumer may perform
+-- other effects; those remain in e after the local state effect is discharged.
+{-# scoped s #-}
+withBytes : Bytes -> (Reader s ->{s} a) ->{e} a
+withBytes contents use =
+    Runtime.Local.run contents (\pending ->
+        use
+            { buffered = pending.read
+            , refill = \_ -> False
+            , skip = \n ->
+                before = pending.read()
+                taken = clamp n (Bytes.length before)
+                pending.write (Bytes.slice taken (Bytes.length before) before)
+                taken
+            })
 
 -- ensure loops on a real terminator rather than on a length comparison: it
 -- stops because the source said end of input, never because two numbers

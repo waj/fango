@@ -53,33 +53,34 @@ Task transfer is a structural check over concrete types. Functions and native
 handles cannot cross the spawn boundary; no execution-root flow interpretation
 is needed. See [tasks](tasks.md).
 
-## Fresh-scope solver prototype
+## Scoped callback rows
 
-The solver accepts an internal `ScopeBoundary` constraint from
-[fresh_scope.go](../../internal/infer/fresh_scope.go). Source checking does not
-generate it yet; it does not enable scoped reader constructors or new syntax.
+The [scoped declaration](../reference/functions.md#scoped-callbacks) marks a
+restricted universal row binder on a named runner's final callback. The runner
+implementation instantiates that callback's row independently at each use,
+with its residual effect row as a lower bound. The binder cannot occur in the
+runner's other parameters, result, residual effects, or callback result.
+Recursive scoped runners and first-class runner values are rejected; ordinary
+rank-one schemes cannot preserve this callback contract on those paths.
 
-A `FreshEffect` allocates a fresh nominal label from the session supply;
-unification cannot change its identity. Two allocations with the same diagnostic name coexist in a
-row. `Within` extends the subject's ambient row with that label and preserves
-outer effects. No new row unification or effect-argument matching rule is needed
-for these concrete instances.
+Each saturated source call allocates a rigid permission label from the session
+supply and extends the runner's residual row with it. Distinct allocations
+coexist in ordinary effect rows. Expected scoped callback types are available
+while checking lambda parameters, so nested scopes do not infer an outer
+reader's row from the inner reader. In constraint groups containing scopes,
+fixed-tail row bounds solve before flexible bounds to preserve this direction.
 
-The boundary rejects its label anywhere in the solved result, residual effects,
-or supplied outer environment types. The structural walk includes latent
-arrows, abstract and phantom type arguments, and effect arguments. Outer roots
-must include storage slots, predicates, recursive bindings, and pending record
-obligations. This is a local type check, not a closure-retention analysis.
+A persistent `ScopeBoundary` rejects its label anywhere in the solved result,
+residual effects, or outer environment types. Its structural walk includes
+latent arrows, abstract and phantom type arguments, and effect arguments.
+Outer roots include storage slots, predicates, recursive bindings, earlier
+runner arguments, and pending record obligations. Obligations survive local
+generalization and record solving and are rechecked before the enclosing
+declaration group is published. This checks type-level permissions; it does not
+analyze which objects a closure physically retains.
 
-Boundary checks run after shape, subsumption, and deferred row constraints.
-The obligation must remain in the constraint set until its enclosing inference
-group is finalized: an earlier successful solve with open metavariables does
-not establish non-escape. Errors keep constraint order.
-
-[Scoped API work](../roadmap-scoped-effects.md#fresh-scopes-and-escape-checking)
-owns callback quantification, source integration, independent Core checking,
-and evidence lowering. The nominal-label solver prototype does not establish
-those contracts or runtime erasure.
+[Core](core.md#scoped-state-boundary) retains source signatures for contract
+validation and erases permission labels from runtime types and evidence.
 
 ## Dependency groups and generalization
 

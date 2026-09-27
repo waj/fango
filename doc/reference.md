@@ -27,6 +27,7 @@ The bundled library is experimental and versioned with the compiler.
 | Fail, Failure, State, Random | [Effect APIs](reference/library-effects.md) |
 | Runtime.Scope | [Cleanup scopes](reference/resources.md) |
 | Task | [Native tasks](reference/library-tasks.md) |
+| Runtime.Local | [Scoped local state](reference/native.md#scoped-local-state) |
 | Runtime.Ref | [IO references](reference/native.md#io-references) |
 | Runtime.Native | [Native Go sidecars](reference/native.md) |
 | Json | [Encoding and string tokens](reference/library-json.md) |

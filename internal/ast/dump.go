@@ -80,6 +80,9 @@ func dumpDecl(d Decl) string {
 	case *ValueDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(def %s", d.Name)
+		if d.ScopedRow != "" {
+			fmt.Fprintf(&b, " (pragma scoped %s)", d.ScopedRow)
+		}
 		if p := dumpPatternParams(d.Params); p != "" && len(d.Equations) == 0 {
 			fmt.Fprintf(&b, " %s", p)
 		}

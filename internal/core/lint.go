@@ -74,6 +74,13 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowStage bool) []error {
 	for i := range p.Defs {
 		d := &p.Defs[i]
 		where := "def " + d.Name
+		if d.Scoped {
+			if _, _, _, ok := types.ScopedCallback(d.SourceType, len(d.Params)); !ok {
+				l.errorf("%s: invalid scoped callback contract", where)
+			}
+		} else if d.Name == types.LocalRunName {
+			l.errorf("%s: missing scoped callback contract", where)
+		}
 		l.defName = d.Name
 		l.scope[d.Name] = true
 		l.tyParams = map[int]bool{}
@@ -211,6 +218,7 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowStage bool) []error {
 	}
 	l.errs = append(l.errs, verifyCapturesIn(p, context, b)...)
 	l.errs = append(l.errs, CheckRowEvidence(p)...)
+	l.errs = append(l.errs, checkScopedCalls(p, context)...)
 	return l.errs
 }
 
@@ -1639,6 +1647,11 @@ func (l *linter) typ(t types.Type, where string) {
 			l.typ(a, where)
 		}
 	case *types.TFun:
+		for _, label := range t.Eff.Labels {
+			if label.Scoped {
+				l.errorf("%s: scoped permission survived erasure", where)
+			}
+		}
 		if t.Eff.Tail != nil {
 			l.errorf("%s: source effect row survived elaboration", where)
 		}
@@ -1680,7 +1693,7 @@ func (l *linter) runtimeType(t types.Type) types.Type {
 			for j, a := range label.Args {
 				args[j] = l.runtimeType(a)
 			}
-			labels[i] = types.EffLabel{Unique: label.Unique, Name: label.Name, Args: args, Abort: label.Abort}
+			labels[i] = types.EffLabel{Unique: label.Unique, Name: label.Name, Args: args, Abort: label.Abort, Scoped: label.Scoped}
 		}
 		return types.Row{Labels: labels}
 	default:

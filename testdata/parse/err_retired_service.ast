@@ -3,7 +3,7 @@
 -- errors --
 -- UNKNOWN PRAGMA -------------------- err_retired_service.fango
 
-I don't know the pragma `service`. Use `no-prelude` above the module header, or `resource` before a type declaration.
+I don't know the pragma `service`. Use `no-prelude` above the module header, `resource` before a type declaration, or `scoped row` before an annotated function.
 
 1| {-# service #-}
    ^^^^^^^^^^^^^^^

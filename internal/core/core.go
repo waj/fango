@@ -41,6 +41,8 @@ type RowArgument struct {
 }
 
 type Def struct {
+	Scoped bool // SourceType binds the final callback row universally
+
 	Name  string
 	Owner string     // defining source module; empty for headerless files and REPL inputs
 	Type  types.Type // the full curried Fango type

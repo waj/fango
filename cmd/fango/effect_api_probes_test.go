@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-// These programs exercise the existing synchronous runtime. Their specialized
-// effects do not stand in for scope polymorphism or a generic scheduling API.
+// These programs exercise scoped memory readers and domain effects in both
+// synchronous backends. The specialized task probe is not a generic Async API.
 func TestEffectAPIProbes(t *testing.T) {
-	for _, name := range []string{"effect_api_memory_reader", "reader_pure_operations", "task_domain_setup"} {
+	for _, name := range []string{"effect_api_memory_reader", "reader_pure_operations", "reader_scoped_memory", "reader_scoped_domain", "task_domain_setup"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", "testdata", "run", name+".fango")
 			runDifferentialCase(t, path, cliRunner(path))

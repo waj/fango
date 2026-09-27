@@ -15,7 +15,8 @@ func (g *generator) solveConstraints(ps []types.Pred) (Subst, []types.Pred, []di
 	for i := range g.cs {
 		g.cs[i].Invariant = invariant
 	}
-	return Solve(g.cs, ps, maps.Clone(g.ck.Sub), g.ck.B, g.ck.Sup)
+	cs := append(append([]Constraint(nil), g.cs...), g.scopeObligations...)
+	return Solve(cs, ps, maps.Clone(g.ck.Sub), g.ck.B, g.ck.Sup)
 }
 
 // Polarity is a set of occurrences: absent, positive, negative, or both.
