@@ -46,6 +46,12 @@ map : (a ->{e} b) -> List a ->{e} List b
 A pure callback instantiates `e` to empty; an effectful callback propagates its
 row to the traversal call.
 
+A row holds one label per effect. When solving brings one effect into a row
+under two argument lists — a function whose own row names `Ctx p` passing a
+callback that performs `Ctx e` to a helper whose residual row it shares —
+the two argument lists are unified, because a nominal row means one instance
+of each effect, and an `EFFECT MISMATCH` names both when they cannot agree.
+
 A body may call arrows that carry the bare tail alongside arrows that add
 labels to it, in either order:
 

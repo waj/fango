@@ -1,0 +1,19 @@
+-- A row holds one label per effect. `reprovide` performs `Ctx p` itself and
+-- hands `provide` a callback that performs `Ctx e`; solving the inclusion
+-- of provide's residual row into reprovide's row would put both labels in
+-- one row, which the checker must reject rather than let through.
+
+effect Ctx e
+    current : () -> e
+
+provide : e -> (() ->{Ctx e | r} a) ->{r} a
+provide value body =
+    handle body() of
+        current () -> resume value
+
+reprovide : (() ->{Ctx e | r} a) -> e ->{Ctx p | r} a
+reprovide body value =
+    ignore (current())
+    provide value body
+
+main() = print (provide 1 (\_ -> reprovide (\_ -> current()) "x"))

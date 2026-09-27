@@ -12,7 +12,10 @@ returning a lambda may instead perform on its outer arrow. Function values
 execute only through application. Native value annotations retain their rows
 although their scalar sidecar ABI has no hidden evidence parameter.
 
-Rows contain distinct nominal labels and an optional tail. Operation-local
+Rows contain distinct nominal labels and an optional tail; binding a row
+variable can place an effect into a row that already carries it under other
+arguments, and the solver reconciles every row a constraint mentions once
+the group is solved, unifying the two argument lists. Operation-local
 polymorphism is limited to an abort-only operation's caller-selected result
 variable, absent from payloads. Partial operations are pure closures.
 

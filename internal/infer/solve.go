@@ -142,6 +142,20 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			failures = append(failures, failure{at: p.at, err: err})
 		}
 	}
+	// A row holds one label per effect. Binding a row variable can put a
+	// label into a row whose prefix already carries that effect under other
+	// arguments, and no constraint revisits that row afterwards; the rows the
+	// constraints mention are checked once everything else has been solved,
+	// and the two argument lists are unified, because a nominal row means one
+	// instance of each effect.
+	for i, c := range cs {
+		for _, side := range []types.Type{c.Left, c.Right} {
+			if m := reconcileRows(side, sub, bi, sup); m != nil {
+				failures = append(failures, failure{at: i, err: mismatchError(c, m, sub)})
+				break
+			}
+		}
+	}
 	sort.SliceStable(failures, func(i, j int) bool { return failures[i].at < failures[j].at })
 	errs := make([]diag.Error, 0, len(failures))
 	for _, f := range failures {
@@ -279,4 +293,53 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 		e.Notes = append(e.Notes, "Note: "+m.note)
 	}
 	return e
+}
+
+// reconcileRows walks a solved type and unifies the arguments of any effect
+// that appears twice in one row. Identical occurrences were already merged
+// by substitution; what remains is one effect under two argument lists,
+// which either agree, and the row is well formed again, or do not, which is
+// the mismatch answered here.
+func reconcileRows(t types.Type, sub Subst, bi *types.Builtins, sup *types.Supply) *mismatch {
+	switch t := sub.Apply(t).(type) {
+	case *types.TFun:
+		for _, part := range []types.Type{t.Arg, t.Eff, t.Ret} {
+			if m := reconcileRows(part, sub, bi, sup); m != nil {
+				return m
+			}
+		}
+	case *types.TCon:
+		for _, arg := range t.Args {
+			if m := reconcileRows(arg, sub, bi, sup); m != nil {
+				return m
+			}
+		}
+	case types.Row:
+		seen := map[int]types.EffLabel{}
+		for _, label := range t.Labels {
+			if first, dup := seen[label.Unique]; dup {
+				if len(first.Args) != len(label.Args) {
+					return &mismatch{a: t, b: t, effect: true, note: "the same effect label has different arity"}
+				}
+				for i := range first.Args {
+					if m := unify(first.Args[i], label.Args[i], sub, bi, sup); m != nil {
+						m.effect = true
+						m.note = "a parameterized effect may appear only once in a row, with one consistent set of arguments (distinct-label rule)"
+						return m
+					}
+				}
+				continue
+			}
+			seen[label.Unique] = label
+			for _, arg := range label.Args {
+				if m := reconcileRows(arg, sub, bi, sup); m != nil {
+					return m
+				}
+			}
+		}
+		if t.Tail != nil {
+			return reconcileRows(t.Tail, sub, bi, sup)
+		}
+	}
+	return nil
 }
