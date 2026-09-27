@@ -1,6 +1,11 @@
 # Roadmap: effects, instances, and owned coroutines
 
-This document owns unfinished general effect-language work. The shared
+The coroutine direction below is deferred by the
+[synchronous simplification](roadmap-simplification.md). It describes a historical
+proposal, not the current compiler. Active scoped Reader and Task API work lives
+in [scoped effects](roadmap-scoped-effects.md).
+
+This document retains unfinished general effect-language work. The shared
 [coroutine roadmap](roadmap-coroutines.md) owns the proposed control API,
 Iterator reuse, Stream migration, and their implementation stages. The
 [Async roadmap](roadmap-async.md) owns tasks, schedulers, native readiness,
@@ -33,7 +38,7 @@ Three identities have different jobs:
 | Coroutine owner | Who owns these suspended frames and may advance them? | Two producers retain separate positions between pulls |
 | Library context | Which work shares a lifetime and policy? | Several children belong to one task context |
 
-The existing instance-binding rule addresses the first question. It does not
+The former instance-binding rule addressed the first question. It does not
 by itself answer the second. A handler that calls a consumer and immediately
 resumes can implement a push traversal; returning from `next`, doing unrelated
 work, and calling `next` again needs saved execution. Several coroutines can
@@ -134,30 +139,15 @@ escaping resume callbacks remain outside this direction.
 
 ## Handler instances: open questions
 
-Binding a closure to a particular activation is implemented, including the
-row-indexed wrapper shape used by Reader and Writer. See the
-[reference rule](reference/effects.md#binding-a-closure-to-a-handler-activation)
-and [implementation invariant](design/effects.md#binding-a-closure-to-an-activation).
-The following would revise shipped behavior, rather than enable an already
-specified Async operation:
+Closures retain their invocation effect rows; implicit binding that drops the
+handled effect is no longer implemented. See the
+[reference rule](reference/effects.md#closures-and-handler-effects).
+Handler clauses run outside their own activation and may use enclosing handlers.
 
-- Whether binding should remain implicit when an expected arrow drops the
-  handled label, or whether an explicit marker should request the adaptation.
-- Whether abort-only operations may be bound once a consumer exists. A bound
-  abort retains a particular exit target; merely saving its operation closure
-  cannot make that target live after its owner finishes.
-- Whether binding should extend from the handler subject into clause bodies.
-  Clauses run outside their own activation today, so their enclosing evidence
-  is different from the subject's evidence.
-- Whether rows should name activation identities. Generative instance names
-  would flow through stored types, and hiding them in ordinary library wrappers
-  needs an explicit quantification/discharge design. The current language has
-  no general rank-2 facility.
-
-The coroutine proposal uses existing activation identity and generalizes
-owned control boundaries. It does not silently resolve these questions by
-introducing a new source-level instance syntax. Its specific foreign-suspension
-proof is an [entry gate](roadmap-coroutines.md#c0-control-and-ownership-contracts).
+The active proposal for explicit instance identities and local escape checking
+is [scoped readers and tasks](roadmap-scoped-effects.md). It owns the fresh
+quantification, identity-aware rows, and erased representation gates. The
+historical coroutine proposal does not settle those questions.
 
 ## Explicit capture and borrowing annotations
 
@@ -196,11 +186,9 @@ These are not automatically prerequisites for the first coroutine milestone:
   currently fix parameters to value kind. Generalizing them is not required by
   the nullary Async encoding; its hidden budgets use the
   [scoped work contract](roadmap-execution-contracts.md#scoped-effects-and-work-packages).
-  Independently, invalid row-kind use needs a diagnostic: declaring
-  `effect Scheduling e` with `enqueue : Job e -> ()`, where `Job` is row-indexed,
-  then using `submit : Job e ->{Scheduling e | e} ()` can reach nil-type
-  substitution instead of rejection. Do not interpret header acceptance as
-  support for the feature.
+  Invalid use of an effect parameter as both an ordinary type and a row
+  reports a kind mismatch; declaration acceptance alone does not establish
+  support for row-kinded effect parameters.
 - **Complete builtin IO interception.** It still depends on actual native
   declarations and evidence fitting a checked operation ABI. Fixed-signature
   domain effects and suspending interpretations remain useful independently.

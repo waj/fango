@@ -185,6 +185,11 @@ bypasses the handler's `return` clause; normal completion runs `return` once.
 An abort raised by an abort clause or return clause propagates outward rather
 than re-entering that activation.
 
+Handler clauses execute outside their own activation. They may use an enclosing
+handler, including another handler of the same effect. A function annotation
+does not need to expose effects discharged by those enclosing handlers;
+unhandled effects in clauses must still be permitted by the annotation.
+
 ## Stateful handlers
 
 A parameterized handler inserts `with snapshot = initial` between its subject

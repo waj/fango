@@ -41,6 +41,12 @@ files](reference/library-io.md) owns the file and socket adapters. [HTTP and a
 server](roadmap-io.md) owns what is left. Concurrent socket handoff requires a new ownership contract; the current
 [task boundary](reference/library-tasks.md) excludes native handles.
 
+## Scoped readers and task effects
+
+[Scoped readers and effect-polymorphic tasks](roadmap-scoped-effects.md) owns
+pure memory cursors, explicit child interpreters, and scheduling without ambient
+IO, including the fresh-scope and generic-operation prerequisites.
+
 ## Addressing a specific handler
 
 Effectful closures keep their effect rows. Explicit handler-instance APIs remain

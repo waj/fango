@@ -16,6 +16,11 @@ row written in one resolves as itself; the parameter's kind, which its use in
 the declaration fixes, decides which reading a type argument gets, so a row at
 a general-kinded parameter is a kind error rather than a name lookup.
 
+Inside a handler subject, the annotation effect budget includes the enclosing
+handled labels. Nested handler clauses use that lexical budget; a handler's own
+clauses remain outside its activation. Restoring the outer budget before
+checking those clauses prevents a handler from authorizing itself or ambient IO.
+
 Annotation variables are rigid skolems. A label-free open row normalizes to
 its tail, allowing the fresh row of a call to unify with an annotated tail.
 Row inclusion preserves rigid residual tails while combining effects around

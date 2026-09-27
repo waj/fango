@@ -8,6 +8,11 @@ The old coroutine and Async roadmap stage identities remain deferred.
 
 ## Remaining work
 
+- [Scoped readers and effect-polymorphic tasks](roadmap-scoped-effects.md):
+  direct-style pure memory readers, domain-only orchestration, explicit child
+  interpreters, and a pure eager test runner. Fresh scopes and generic task
+  packaging must pass their type and Go representation gates first.
+
 - Measure immutable cons allocation and task overhead on an idle host using the
   retained historical comparisons. Do not relax timing thresholds to manufacture
   parity; document any accepted allocation tradeoff.

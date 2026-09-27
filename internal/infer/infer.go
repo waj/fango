@@ -1784,11 +1784,29 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		stateTy = g.expr(e.State.Initial)
 	}
 	info := &HandlerInfo{Effect: label, Residual: residual, Scope: g.ck.Sup.FreshScope(), Scoped: first.Owner.Scoped || e.State != nil, Result: result, StateType: stateTy}
-	// The subject is where a closure may be bound to this activation; the
-	// state initializer above runs before the activation exists, and the
-	// clauses below run outside it.
+	// The subject can use this handler in addition to the declaration's
+	// annotated effects. Nested handlers must check their clauses against that
+	// lexical budget, not just the declaration's outermost row. This handler's
+	// own clauses remain outside its activation.
 	g.ambient = types.Row{Labels: []types.EffLabel{label}, Tail: residualVar}
+	savedAnnotation := g.annotationAmbient
+	if savedAnnotation != nil {
+		bodyAnnotation := *savedAnnotation
+		bodyAnnotation.Labels = append([]types.EffLabel(nil), savedAnnotation.Labels...)
+		found := false
+		for i, existing := range bodyAnnotation.Labels {
+			if existing.Unique == label.Unique {
+				bodyAnnotation.Labels[i], found = label, true
+				break
+			}
+		}
+		if !found {
+			bodyAnnotation.Labels = append(bodyAnnotation.Labels, label)
+		}
+		g.annotationAmbient = &bodyAnnotation
+	}
 	bodyTy := g.expr(e.Body)
+	g.annotationAmbient = savedAnnotation
 	info.BodyResult = bodyTy
 	clauseAmbient := residual
 	if g.annotationAmbient != nil {

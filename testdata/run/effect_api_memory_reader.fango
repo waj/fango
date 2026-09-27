@@ -1,0 +1,57 @@
+-- API feasibility probe, not a replacement Reader implementation.
+-- Distinct nominal effects stand in for two reader instances; the test does
+-- not claim that the compiler supports fresh scoped effect instances.
+import Bytes
+
+type Cursor e =
+    { buffered : () ->{e} Bytes.Bytes
+    , skip : Int ->{e} Int
+    }
+
+take : Cursor e -> Int ->{e} Bytes.Bytes
+take cursor wanted =
+    contents = cursor.buffered()
+    count = cursor.skip wanted
+    Bytes.slice 0 count contents
+
+clamp count size = if count < 0 then 0 else if count > size then size else count
+
+effect FirstInput
+    firstBuffer : () -> Bytes.Bytes
+    firstSkip : Int -> Int
+
+effect SecondInput
+    secondBuffer : () -> Bytes.Bytes
+    secondSkip : Int -> Int
+
+withFirst : Bytes.Bytes -> (Cursor FirstInput ->{FirstInput | e} a) ->{e} a
+withFirst bytes use =
+    handle use { buffered = firstBuffer, skip = firstSkip } with contents = bytes of
+        firstBuffer () -> resume contents with contents
+        firstSkip wanted ->
+            count = clamp wanted (Bytes.length contents)
+            resume count with Bytes.slice count (Bytes.length contents) contents
+
+withSecond : Bytes.Bytes -> (Cursor SecondInput ->{SecondInput | e} a) ->{e} a
+withSecond bytes use =
+    handle use { buffered = secondBuffer, skip = secondSkip } with contents = bytes of
+        secondBuffer () -> resume contents with contents
+        secondSkip wanted ->
+            count = clamp wanted (Bytes.length contents)
+            resume count with Bytes.slice count (Bytes.length contents) contents
+
+parsePair : Cursor e -> Cursor e ->{e} String
+parsePair first second =
+    a = take first 1
+    b = take second 1
+    c = take first 99
+    d = take second 99
+    Bytes.toStringLossy (Bytes.concat [a, b, c, d])
+
+-- The exact pure annotation is part of the test: both cursors are used inside
+-- the nested handler and the first still has its own independent position.
+parsed : String
+parsed = withFirst (Bytes.fromString "abc") (\first ->
+    withSecond (Bytes.fromString "XYZ") (\second -> parsePair first second))
+
+main = parsed

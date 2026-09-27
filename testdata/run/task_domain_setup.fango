@@ -1,0 +1,75 @@
+-- End-to-end interpreter-placement probe. Job and Ticket are deliberately
+-- monomorphic: this does not implement a generic effect-polymorphic Async API.
+import Task
+import Result exposing (Result(..))
+
+effect Database
+    lookup : Int -> Int
+
+effect Http
+    request : Int -> Int
+
+type Config = { database : Int, http : Int }
+type Job = Fetch Int
+type Ticket = Completed Int | Running (Task.Task Int)
+
+effect Scheduling
+    submit : Job -> Ticket
+    await : Ticket -> Int
+
+job : Job ->{Database, Http} Int
+job input = case input of
+    Fetch number -> lookup number + request number
+
+interpret : Config -> (() ->{Database, Http | e} a) ->{e} a
+interpret config action =
+    handle (handle action() of
+        lookup number -> resume (config.database + number)) of
+        request number -> resume (config.http + number)
+
+-- Only this boundary function exposes IO. It installs fresh interpretations
+-- from explicit immutable configuration instead of inheriting parent evidence.
+worker : Task.Context -> (Config, Job) ->{IO} Int
+worker context (config, input) =
+    ignore (Task.isCancelled context)
+    interpret config (\_ -> job input)
+
+serial : Config -> (() ->{Scheduling | e} a) ->{e} a
+serial config action =
+    handle action() of
+        submit input -> resume (Completed (interpret config (\_ -> job input)))
+        await ticket -> resume (case ticket of
+            Completed value -> value
+            Running _ -> -999)
+
+parallel : Config -> (() ->{Scheduling, IO | e} a) ->{IO | e} a
+parallel config action = Task.scope (\scope ->
+    handle action() of
+        submit input -> resume (Running (Task.spawn scope worker (config, input)))
+        await ticket ->
+            value = case ticket of
+                Completed ready -> ready
+                Running task -> case Task.await task of
+                    Ok ready -> ready
+                    Err _ -> -999
+            resume value)
+
+-- Application orchestration has domain and scheduling effects, but no IO.
+business : () ->{Database, Http, Scheduling} (Int, Int)
+business() =
+    parent = lookup 1 + request 2
+    first = submit (Fetch 3)
+    second = submit (Fetch 4)
+    (parent, await first + await second)
+
+parentConfig = Config { database = 1000, http = 2000 }
+childConfig = Config { database = 10, http = 20 }
+
+-- Exact pure annotation: the serial interpretation and in-memory domain
+-- handlers discharge every effect of the application.
+pureResult : (Int, Int)
+pureResult = interpret parentConfig (\_ -> serial childConfig business)
+
+main() =
+    print pureResult
+    print (interpret parentConfig (\_ -> parallel childConfig business))
