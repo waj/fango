@@ -1,0 +1,44 @@
+import Fail
+import Result exposing (Result(..))
+
+effect Counter
+    next : Bool -> Int
+
+sequence() =
+    first = next False
+    last = next True
+    (first, last)
+
+sharedRunner() =
+    handle sequence() with shared count = 10 of
+        next reject ->
+            if reject then Fail.fail "rejected" else resume count with count + 1
+        return value -> (value, count)
+
+localRunner() =
+    handle sequence() with taskLocal count = 20 of
+        next reject ->
+            if reject then Fail.fail "rejected" else resume count with count + 1
+        return value -> (value, count)
+
+-- Policy words remain ordinary names, including state binder names.
+ordinaryValue() =
+    shared = 3
+    taskLocal = 4
+    shared + taskLocal
+
+ordinaryRunner() =
+    handle next False with shared = ordinaryValue() of
+        next _ -> resume shared with shared + 1
+        return value -> (value, shared)
+
+success() =
+    handle (next False, next False) with shared count = 1 of
+        next _ -> resume count with count + 1
+        return value -> (value, count)
+
+main() =
+    print (Fail.attempt sharedRunner)
+    print (Fail.attempt localRunner)
+    print (ordinaryRunner())
+    print (success())

@@ -5,7 +5,8 @@ import Basics exposing (..)
 import IO exposing (IO)
 import Runtime.Native
 
--- Task-local mutable storage. IO is explicit on every operation.
+-- Synchronized mutable storage. IO is explicit on every operation.
+-- Individual reads/writes are atomic; a read followed by a write is not.
 {-# resource #-}
 type Ref a = Ref Runtime.Native.Any
 

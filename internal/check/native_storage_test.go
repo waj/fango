@@ -48,7 +48,7 @@ bad() = handle StorageFixture.box (freeze (\_ -> State.get())) with current = 0 
     State.get () -> resume current with current
     State.put next -> resume () with next
 main() = ()
-`, "EFFECT MISMATCH"},
+`, "HANDLER BINDING EFFECTS"},
 		{"borrowed stored payload", `save cell value = StorageFixture.write cell value
 main() =
     target : StorageFixture.Box (() -> Int)
@@ -57,7 +57,7 @@ main() =
         State.get () -> resume current with current
         State.put next -> resume () with next
     ()
-`, "EFFECT MISMATCH"},
+`, "HANDLER BINDING EFFECTS"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()

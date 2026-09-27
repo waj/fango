@@ -216,6 +216,14 @@ ordinary handlers continue to use `resume value`. The value and next-state
 expressions evaluate left to right exactly once, and the state is committed
 only after both finish successfully. The `return` clause sees the final state.
 
+The contextual modifiers `shared` and `taskLocal` may precede the state binder,
+for example `with shared current = initial`. Both serialize a complete operation:
+reading the snapshot, evaluating the clause, and committing its next state.
+An abort releases the operation lock without committing. The names remain
+ordinary identifiers elsewhere, including in `with shared = initial`.
+Child-task inheritance is not exposed yet; its remaining contract is in the
+[task roadmap](../roadmap-scoped-effects.md#async-orchestration-and-task-results).
+
 ## Resume discipline
 
 Resumptive handlers are deliberately restricted: every normally completing
@@ -235,11 +243,24 @@ retain the surrounding resume binding.
 ## Closures and handler effects
 
 A closure's effect row describes the effects performed when it is called.
-Creating it inside a handler does not allow an effectful arrow to be used as
-a pure arrow. Callback compatibility uses ordinary row inclusion. A mutable
-library object backed by `Runtime.Ref` exposes `IO` on its operations.
-The `Reader e` interface itself exposes only `e`; its reference-backed
-constructors include IO in that row.
+Creating it inside a handler does not make an effectful arrow pure. A closure
+passed to a callback or record field inside a resumptive handler's subject may
+bind to that activation when the expected row omits the handled label. Calling
+it then requires a fresh local permission and the effects of the handler's
+clauses. The permission cannot leave the handler through its result, residual
+row, or outer storage. Abort-only effects cannot be bound this way.
+
+A scoped runner can pass such a closure to its consumer through a row-indexed
+record. The [scoped binding fixture](../../testdata/run/handler_scoped_binding.fango)
+shows a counter retaining its original activation beneath another Counter
+handler. Attempting to pass the stateful operation as `() -> Int` is rejected
+with `HANDLER BINDING EFFECTS`; the local permission is never erased to claim
+purity. Ordinary closures that retain the nominal effect in their row still
+receive an interpretation at invocation.
+
+A mutable object backed by `Runtime.Ref` exposes `IO`. The scoped
+[Reader and Writer constructors](library-readers.md) instead discharge their
+private buffer permissions while preserving source, sink, and consumer effects.
 
 Handlers remain synchronous: a resumptive clause finishes with its owning tail
 `resume`, and an abort clause abandons the subject. Handlers do not capture a

@@ -224,7 +224,11 @@ func (p *printer) renderHandle(h *ast.Handle, ind int) bool {
 		if !initOK {
 			return false
 		}
-		head += " with " + h.State.Name + " = " + initial
+		head += " with "
+		if h.State.Policy != "" {
+			head += h.State.Policy + " "
+		}
+		head += h.State.Name + " = " + initial
 	}
 	p.emit(head + " of")
 

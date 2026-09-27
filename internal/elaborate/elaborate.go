@@ -1092,6 +1092,7 @@ func (el *elab) recordCtorApp(adt *types.ADTInfo, args []core.Expr, result types
 func (el *elab) recordLiteral(e *ast.RecordLit, ty types.Type) core.Expr {
 	adt := el.ck.RecordUses[e]
 	values := map[string]core.Expr{}
+	rawValues := map[string]types.Type{}
 	var binds []struct {
 		name  string
 		value core.Expr
@@ -1100,6 +1101,7 @@ func (el *elab) recordLiteral(e *ast.RecordLit, ty types.Type) core.Expr {
 		name := fmt.Sprintf("_record%d", el.tmp)
 		el.tmp++
 		value := el.expr(f.Value)
+		rawValues[f.Name] = el.apply(el.ck.ExprTypes[f.Value])
 		values[f.Name] = &core.VarRef{Name: name, Ty: value.Type(), Local: true}
 		binds = append(binds, struct {
 			name  string
@@ -1108,8 +1110,9 @@ func (el *elab) recordLiteral(e *ast.RecordLit, ty types.Type) core.Expr {
 	}
 	args := make([]core.Expr, len(adt.RecordFields))
 	fieldTypes := adt.InstFields(adt.Ctors[0], ty.(*types.TCon).Args)
+	rawFields := adt.InstFields(adt.Ctors[0], el.apply(el.ck.ExprTypes[e]).(*types.TCon).Args)
 	for i, f := range adt.RecordFields {
-		args[i] = el.adaptFunctionValue(values[f.Name], el.eraseRuntimeKinds(eraseRows(fieldTypes[i])))
+		args[i] = el.adaptFunctionValue(values[f.Name], el.eraseRuntimeKinds(eraseRows(fieldTypes[i])), rawValues[f.Name], rawFields[i])
 	}
 	body := el.recordCtorApp(adt, args, ty)
 	for i := len(binds) - 1; i >= 0; i-- {
@@ -1279,7 +1282,7 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 	el.popEvidence([]core.EffectInstance{inst})
 	var state *core.HandlerState
 	if e.State != nil {
-		state = &core.HandlerState{Name: e.State.Name, Initial: el.expr(e.State.Initial), Ty: el.zonkDefault(info.StateType)}
+		state = &core.HandlerState{Policy: e.State.Policy, Name: e.State.Name, Initial: el.expr(e.State.Initial), Ty: el.zonkDefault(info.StateType)}
 	}
 	residualType := el.apply(info.Residual)
 	el.defaultFree(residualType)

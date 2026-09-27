@@ -40,16 +40,24 @@ evidence installation. Clauses see immutable snapshots; the body does not. A
 stateful resume evaluates result then next state, commits only after both
 succeed, and returns through the existing evidence call. Core retains the state
 binder/type and update expressions for lint/capture checks. The interpreter
-uses an activation cell; Go uses a captured local. No continuation is captured.
+uses an activation cell; Go uses a captured local for unmarked state. Marked
+`shared` and `taskLocal` state uses a mutex-protected activation cell in both
+backends. The lock covers the whole operation and is released on every exit;
+a return clause reads a synchronized snapshot. No continuation is captured.
 
 An installed activation's evidence carries the transport its own clauses need.
 A Direct handler inside an Exit worker still uses Direct evidence; calls adapt
 the plain result to the caller's protocol. Open-row callback adapters receive
 evidence at invocation, including when constructed inside a matching handler.
 
-Closure compatibility is ordinary effect-row inclusion. A handled label is not
-removed from a returned callable simply because it was created in the subject.
-Library closures backed by native references expose IO. [Resources and evidence](ownership.md)
+Closure compatibility uses effect-row inclusion. Binding a closure to an
+activation replaces its nominal label with a fresh local permission plus the
+clause effects; it never erases mutable state access to an empty row. Source
+escape checks retain that permission until the enclosing inference group is
+solved. Optional handler permissions are not introduced into unrelated open
+callbacks merely because the handler can supply them. Elaboration captures the
+activation evidence when adapting a bound callable. Library closures backed
+by native references expose IO. [Resources and evidence](ownership.md)
 describes the retained structural metadata.
 
 ## Abort and cleanup protocol

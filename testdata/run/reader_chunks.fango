@@ -2,7 +2,7 @@ import Bytes exposing (Bytes, Source(..))
 import Reader exposing (Reader)
 import Stream
 
--- Streaming steps share this reader's explicit IO state.
+-- Streaming steps share this reader's scoped cursor.
 
 effect Feed
     next : () -> Maybe Bytes
@@ -10,7 +10,8 @@ effect Feed
 paced : Source {Feed | e}
 paced = Source { pull = \_ -> next() }
 
-drive : List Bytes -> (Reader {IO, Feed | e} ->{IO, Feed | e} a) ->{IO | e} a
+{-# scoped s #-}
+drive : List Bytes -> (Reader s ->{s} a) ->{e} a
 drive pieces use =
     handle Reader.over paced use with rest = pieces of
         next () ->

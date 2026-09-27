@@ -74,10 +74,8 @@ chunk = 8192
 
 readBytes : Connection ->{IO, Fail Error} Maybe Bytes
 readBytes connection =
-    if fromResult (connectionHasInput connection) then
-        Just (fromResult (readConnectionBytes connection chunk))
-    else
-        Nothing
+    data = fromResult (readConnectionBytes connection chunk)
+    if Bytes.length data == 0 then Nothing else Just data
 
 source : Connection -> Source {IO, Fail Error}
 source connection = Source { pull = \_ -> readBytes connection }

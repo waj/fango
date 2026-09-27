@@ -122,12 +122,18 @@ failure, and after a failed body it is recorded alongside the body's failure.
 otherwise the text and its exact terminator — and `write` writes a string as
 given. `readBytes file count` answers `Nothing` at end of file and otherwise up
 to `count` bytes, which may be fewer; a non-positive count answers an empty
-`Bytes`, which is not end of file. It shares the handle's buffered reader with
+`Bytes` while input remains, and `Nothing` at end of file. It shares the handle's buffered reader with
 `readLine`, so counted reads and line reads interleave on one handle, and it is
 the only read that can carry a byte no `String` holds. `writeBytes` writes a
 `Bytes` as given. All four raise `Fail IO.Error` on a system failure, so a body
 that only reads and writes needs no `case` of its own; `attempt` around the
 scope collects the failure.
+
+A handle serializes complete read operations, including access to its buffer.
+Concurrent readers consume successive input; there is no separate public
+peek/read window. Closing does not wait for a blocked read's lock: it closes
+the underlying file, which may interrupt that read. Later operations report a
+closed-resource error.
 
 `source` and `sink` adapt an open file to the leaves a
 [buffered reader and writer](library-readers.md) are built over, so a file and
@@ -176,3 +182,9 @@ on port 8000 by default, or on the port passed as its sole argument:
 fango run examples/echo.fango -- 8000
 telnet 127.0.0.1 8000
 ```
+
+Connection reads serialize access to the shared input buffer. Writes have a
+separate lock covering the whole byte sequence. Closing a connection can
+interrupt a blocked read or write and makes later operations fail. These
+runtime guarantees do not change the current Task API's transfer restrictions;
+closure-based task sharing remains [unfinished](../roadmap-scoped-effects.md).

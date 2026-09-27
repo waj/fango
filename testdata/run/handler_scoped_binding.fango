@@ -1,0 +1,19 @@
+effect Counter
+    step : () -> Int
+
+type CounterHandle e = { next : () ->{e} Int }
+
+{-# scoped s #-}
+counting : (CounterHandle s ->{s} a) ->{e} a
+counting use =
+    handle use { next = \_ -> step() } with n = 0 of
+        step () -> resume n with n + 1
+
+answer : (Int, Int, Int)
+answer = counting (\counter ->
+    first = counter.next()
+    middle = handle counter.next() of
+        step () -> resume 99
+    (first, middle, counter.next()))
+
+main() = print answer

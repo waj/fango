@@ -124,7 +124,8 @@ type Row struct {
 // EffLabel identifies an effect by its generation-stable Unique. Name is
 // diagnostic syntax; Args instantiate parameterized effects such as Fail e.
 type EffLabel struct {
-	Scoped bool // compiler-only generative permission; no runtime evidence
+	Scoped  bool // compiler-only generative permission; no runtime evidence
+	Binding bool // optional permission available for binding to an activation
 
 	Unique int
 	Name   string
@@ -272,7 +273,7 @@ func substRigidRow(r Row, m map[int]Type) Row {
 		for j, a := range l.Args {
 			args[j] = SubstRigid(a, m)
 		}
-		labels[i] = EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Scoped: l.Scoped}
+		labels[i] = EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Scoped: l.Scoped, Binding: l.Binding}
 	}
 	var tail Type
 	if r.Tail != nil {

@@ -18,6 +18,12 @@ func (el *elab) residualArgument(actual, explicit types.Row) *core.RowArgument {
 		row.From = pendingRow
 	}
 	for _, label := range types.SortedRow(actual).Labels {
+		if label.Scoped {
+			// The runner can interpret effects hidden behind its quantified
+			// callback row. Forward that row even when the call site's only
+			// visible label is an erased fresh permission.
+			row.From = pendingRow
+		}
 		if !types.RuntimeEvidenceEffect(label) {
 			continue
 		}

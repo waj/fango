@@ -1731,6 +1731,16 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 			read:  func() goast.Expr { return ident(stateCell) },
 			write: func(next goast.Expr) goast.Stmt { return assignStmt(stateCell, next) },
 		}
+		if e.State.Policy != "" {
+			state.read = func() goast.Expr { return selector(stateCell, "Value") }
+			state.write = func(next goast.Expr) goast.Stmt {
+				return &goast.AssignStmt{Lhs: []goast.Expr{selector(stateCell, "Value")}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{next}}
+			}
+			state.prefix = []goast.Stmt{
+				exprStmt(callExpr(selector(stateCell, "Lock"))),
+				&goast.DeferStmt{Call: callExpr(selector(stateCell, "Unlock")).(*goast.CallExpr)},
+			}
+		}
 	}
 	st, record := g.handlerEvidence(e, evidenceMode, state)
 	name := fmt.Sprintf("ev%d", g.tmp)
@@ -1746,7 +1756,13 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	// when no generated operation call refers to it.
 	var stmts []goast.Stmt
 	if e.State != nil {
-		stmts = append(stmts, varDeclStmt(stateCell, g.goType(e.State.Ty), g.expr(e.State.Initial, 0)))
+		initial := g.expr(e.State.Initial, 0)
+		stateType := g.goType(e.State.Ty)
+		if e.State.Policy != "" {
+			initial = callExpr(indexExpr(selector("fangort", "NewHandlerState"), []goast.Expr{stateType}), initial)
+			stateType = &goast.StarExpr{X: indexExpr(selector("fangort", "HandlerState"), []goast.Expr{stateType})}
+		}
+		stmts = append(stmts, varDeclStmt(stateCell, stateType, initial))
 	}
 	stmts = append(stmts, decl, assignBlank(ident(name)))
 	if e.Return == nil {
@@ -1775,7 +1791,11 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 		stmts = append(stmts, g.keepUnused(e.Return.Body, p, e.Body.Type())...)
 	}
 	if e.State != nil {
-		stmts = append(stmts, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), ident(stateCell)))
+		snapshot := state.read()
+		if e.State.Policy != "" {
+			snapshot = callExpr(selector(stateCell, "Snapshot"))
+		}
+		stmts = append(stmts, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), snapshot))
 		stmts = append(stmts, g.keepUnused(e.Return.Body, e.State.Name, e.State.Ty)...)
 	}
 	// The closure declares fangort.Unit, so a Unit body returns the
@@ -2028,8 +2048,9 @@ func (g *gen) zeroReturn(t types.Type) []goast.Stmt {
 // whose body is a machine region cannot, because the local does not survive
 // the body suspending, so it uses a cell the machine holds instead.
 type handlerState struct {
-	read  func() goast.Expr
-	write func(goast.Expr) goast.Stmt
+	prefix []goast.Stmt
+	read   func() goast.Expr
+	write  func(goast.Expr) goast.Stmt
 }
 
 // handlerEvidence builds an installed activation's record of operation
@@ -2063,6 +2084,7 @@ func (g *gen) handlerEvidence(e *core.Handle, mode types.Transport, state *handl
 		var stateType types.Type
 		if e.State != nil {
 			stateType = e.State.Ty
+			clausePrefix = append(clausePrefix, state.prefix...)
 			clausePrefix = append(clausePrefix,
 				varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), state.read()),
 				assignBlank(ident(mangleValue(e.State.Name))))
@@ -2084,7 +2106,11 @@ func (g *gen) resumeStmtsFor(e core.Expr, owner types.ResumeID, unitResult bool,
 		if g.control != types.Exit {
 			panic("codegen: abort terminal in a Direct resumptive clause")
 		}
-		return []goast.Stmt{returnStmt(g.expr(e, 0))}
+		// The source terminal has the handler subject's result type, but this
+		// callback returns the operation's result. Abort has no normal value.
+		terminal := *e
+		terminal.Ty = g.resultType
+		return []goast.Stmt{returnStmt(g.expr(&terminal, 0))}
 	case *core.ResumeTail:
 		if e.Owner != owner {
 			panic("codegen: ResumeTail owner does not match handler clause")

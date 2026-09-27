@@ -60,7 +60,7 @@ func (s Subst) applyRow(r types.Row) types.Row {
 		for j, a := range l.Args {
 			args[j] = s.Apply(a)
 		}
-		labels[i] = types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Scoped: l.Scoped}
+		labels[i] = types.EffLabel{Unique: l.Unique, Name: l.Name, Args: args, Abort: l.Abort, Scoped: l.Scoped, Binding: l.Binding}
 	}
 	var tail types.Type
 	if r.Tail != nil {
@@ -389,7 +389,20 @@ func includeRows(subrow, superrow types.Row, sub Subst, bi *types.Builtins, sup 
 				}
 			}
 		}
-		return unifyRows(subrow, superrow, sub, bi, sup)
+		// A fresh permission is an available capability, not an effect to
+		// invent when widening an unrelated open callback. In particular a
+		// handler's subject may bind closures, but an ordinary action passed
+		// into that subject must not acquire its local permission merely by
+		// being called there. Actual uses contribute the permission as an
+		// explicit lower bound.
+		allowed := superrow
+		allowed.Labels = nil
+		for _, label := range superrow.Labels {
+			if !label.Binding || rowHasLabel(subrow, label.Unique) {
+				allowed.Labels = append(allowed.Labels, label)
+			}
+		}
+		return unifyRows(subrow, allowed, sub, bi, sup)
 	}
 	seen := map[int]bool{}
 	for _, label := range subrow.Labels {

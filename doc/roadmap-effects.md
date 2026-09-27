@@ -139,8 +139,8 @@ escaping resume callbacks remain outside this direction.
 
 ## Handler instances: open questions
 
-Closures retain their invocation effect rows; implicit binding that drops the
-handled effect is no longer implemented. See the
+Scoped activation binding retains a fresh permission rather than claiming a
+stateful callable is pure. See the
 [reference rule](reference/effects.md#closures-and-handler-effects).
 Handler clauses run outside their own activation and may use enclosing handlers.
 

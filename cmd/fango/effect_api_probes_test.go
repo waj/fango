@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"path/filepath"
 	"testing"
 )
@@ -31,9 +32,8 @@ main() = Task.scope (\scope ->
 	runErrorCase(t, path, "EFFECT MISMATCH")
 }
 
-// The generic reader record is effect-polymorphic, but its existing native
-// reference-backed constructors must not acquire a pure type by adaptation.
-func TestReaderConstructorsRetainIO(t *testing.T) {
+// Scoped memory constructors discharge their local cursor permission.
+func TestReaderConstructorsArePure(t *testing.T) {
 	path := writeModuleFile(t, t.TempDir(), "Main.fango", `import Bytes
 import Reader
 
@@ -42,5 +42,8 @@ parse bytes = Reader.overBytes bytes (\reader -> Reader.readUpTo reader 1)
 
 main = parse Bytes.empty
 `)
-	runErrorCase(t, path, "EFFECT MISMATCH")
+	var out, errs bytes.Buffer
+	if code := run([]string{"check", path}, &out, &errs); code != 0 {
+		t.Fatal(errs.String())
+	}
 }

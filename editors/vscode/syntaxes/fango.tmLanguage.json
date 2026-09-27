@@ -482,8 +482,11 @@
       "match": "^\\s*(return)\\b(?=(?:[ \\t]+(?:\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\]|\\{[^{}]*\\}|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:\\\\.|[^'\\\\])'|-?[0-9][0-9_]*(?:\\.[0-9]+)?(?:[eE][-+]?[0-9]+)?|\\^?[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)*))+[ \\t]*->)"
     },
     "handler_state": {
-      "name": "keyword.control.with.fango",
-      "match": "(?<=\\bhandle\\b[^\\n]*)\\bwith\\b(?=[ \\t]+[a-z][A-Za-z0-9_]*[ \\t]*=(?![!#%&*+\\-/:<=>?@^|~]))"
+      "match": "(?<=\\bhandle\\b[^\\n]*)\\b(with)\\b(?:[ \\t]+(shared|taskLocal)\\b)?(?=[ \\t]+[a-z][A-Za-z0-9_]*[ \\t]*=(?![!#%&*+\\-/:<=>?@^|~]))",
+      "captures": {
+        "1": { "name": "keyword.control.with.fango" },
+        "2": { "name": "keyword.control.handler-policy.fango" }
+      }
     },
     "resume_expression": {
       "begin": "\\b(resume)\\b",

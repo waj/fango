@@ -1,6 +1,7 @@
 package infer
 
 import (
+	"maps"
 	"sort"
 
 	"github.com/waj/fango/internal/diag"
@@ -69,13 +70,60 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			solve(i, c)
 		}
 	}
-	// In scoped groups, apply fixed-tail upper bounds before growing flexible rows. In particular,
+	var bound, ordinary []pending
+	for _, p := range bounds {
+		if bindable(p.c, sub) {
+			bound = append(bound, p)
+		} else {
+			ordinary = append(ordinary, p)
+		}
+	}
+	bounds = ordinary
+	// Propagate explicit lower bounds before closing scoped rows. Otherwise
+	// an outer handler's upper bound can close a callback's residual row
+	// before a sibling constraint contributes (for example) Fail String.
+	if len(scopes) > 0 {
+		labels := func() int {
+			n := 0
+			for _, p := range bounds {
+				for _, side := range []types.Type{p.c.Left, p.c.Right} {
+					if r, ok := sub.Apply(side).(types.Row); ok {
+						n += len(r.Labels)
+					}
+				}
+			}
+			return n
+		}
+		for {
+			before := labels()
+			for _, p := range bounds {
+				left, lok := sub.Apply(p.c.Left).(types.Row)
+				right, rok := sub.Apply(p.c.Right).(types.Row)
+				if !lok || !rok || len(left.Labels) == 0 {
+					continue
+				}
+				trial := maps.Clone(sub)
+				if includeRows(types.Row{Labels: left.Labels}, right, trial, bi, sup) == nil {
+					maps.Copy(sub, trial)
+				}
+			}
+			if labels() == before {
+				break
+			}
+		}
+	}
+	// In scoped groups, apply fixed-tail upper bounds before growing flexible tails. In particular,
 	// a pure outer scope must be closed before nested callback rows compose;
 	// otherwise an inner fresh label can be needlessly assigned to its tail.
 	for len(scopes) > 0 {
 		var rest []pending
 		progress := false
 		for _, p := range bounds {
+			if bindable(p.c, sub) {
+				bound = append(bound, p)
+				progress = true
+				continue
+			}
 			right, ok := sub.Apply(p.c.Right).(types.Row)
 			tail, rigidTail := right.Tail.(*types.TVar)
 			if ok && (right.Tail == nil || rigidTail && tail.Rigid) {
@@ -92,6 +140,10 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 	}
 	for _, p := range bounds {
 		i, constraint := p.at, p.c
+		if bindable(constraint, sub) {
+			bound = append(bound, p)
+			continue
+		}
 		labels, tail, split := splitRigidTail(constraint, sub)
 		if !split {
 			solve(i, constraint)
@@ -134,11 +186,8 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 	for _, p := range deferred {
 		solve(p.at, p.c)
 	}
-	// Scope checks observe the final substitution, including deferred row
-	// bounds. Checking at the boundary's position in cs would let later
-	// constraints hide an escape behind a still-unsolved metavariable.
-	for _, p := range scopes {
-		for _, err := range p.c.Scope.check(sub, p.c.Span) {
+	for _, p := range bound {
+		if err, failed := solveBound(p.c, sub, bi, sup); failed {
 			failures = append(failures, failure{at: p.at, err: err})
 		}
 	}
@@ -149,11 +198,23 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 	// and the two argument lists are unified, because a nominal row means one
 	// instance of each effect.
 	for i, c := range cs {
+		// Scope obligations have roots rather than a pair of type operands.
+		// Their types are constrained by the surrounding ordinary constraints.
+		if c.Scope != nil {
+			continue
+		}
 		for _, side := range []types.Type{c.Left, c.Right} {
 			if m := reconcileRows(side, sub, bi, sup); m != nil {
 				failures = append(failures, failure{at: i, err: mismatchError(c, m, sub)})
 				break
 			}
+		}
+	}
+	// Scope checks must also observe substitutions introduced by reconciling
+	// duplicate labels, not just those from the deferred row bounds.
+	for _, p := range scopes {
+		for _, err := range p.c.Scope.check(sub, p.c.Span) {
+			failures = append(failures, failure{at: p.at, err: err})
 		}
 	}
 	sort.SliceStable(failures, func(i, j int) bool { return failures[i].at < failures[j].at })

@@ -12,7 +12,8 @@ effect Feed
 trickle : Source Feed
 trickle = Source { pull = \_ -> next() }
 
-drive : Bytes -> (Reader {IO, Feed} ->{IO, Feed} a) ->{IO} a
+{-# scoped s #-}
+drive : Bytes -> (Reader s ->{s} a) ->{e} a
 drive text use =
     handle Reader.over trickle use with pending = (True, text) of
         next () ->

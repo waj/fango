@@ -29,13 +29,33 @@ waiting, cancellation, and timers are ordinary native sidecars.
 
 `Runtime.Ref` is an ordinary native module for IO-marked mutable storage. Its
 sealed type index ensures a reference cannot be read at a different type.
-The bundled Reader and Writer constructors capture task-local references.
-Reader operations propagate their complete row. The escapable constructors
-include IO; `Reader.withBytes` uses the [scoped state boundary](core.md#scoped-state-boundary)
-to keep its cursor permission local. Neither kind of mutable cell is transferable
-task data. Ordinary IO reference operations need no compiler cases.
+The bundled Reader and Writer constructors use the
+[scoped state boundary](core.md#scoped-state-boundary) for local buffers.
+Their operations propagate complete rows; a runner discharges only its fresh
+permission, preserving source, sink, and consumer effects. Neither kind of
+mutable cell is transferable task data. Ordinary IO reference operations need
+no compiler cases.
 
 Stream and Iterator are Fango records and ordinary recursive functions. State
 is explicit in each step's return value. No compiler node recognizes streams,
 iterators, map, filter, take, zip, or fold. Resource ownership belongs to the
 scope performing the traversal, so there is no suspended-stack cleanup protocol.
+
+## Async runtime foundation
+
+The internal Async runtime separates application failure from cooperative
+cancellation, drains child scopes before publishing task completion, and
+reports the earliest submitted unobserved child failure unless the body itself
+failed. Repeated task observations are stable. Cancellation propagates down
+the task tree; cancelling one child does not cancel its parent. Go panics are
+not translated into application outcomes.
+
+Its channels linearize transfer, close, and cancellation withdrawal under one
+lock. Closed channels retain buffered values until drained and reject blocked
+and future sends. A channel has no owning runner. File and socket wrappers
+serialize complete reads, allow close to interrupt blocking reads, and reject
+later operations on closed handles. Socket writes are serialized separately.
+
+These internal primitives are not a public Fango Async API yet. The checked
+closure/evidence boundary and library integration remain in the
+[task roadmap](../roadmap-scoped-effects.md).

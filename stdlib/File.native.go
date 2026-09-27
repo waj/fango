@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 )
 
 // Every function here returns an error rather than panicking; the compiler
@@ -25,7 +27,8 @@ type handle struct {
 	reader  *bufio.Reader
 	entries []string // directory listings, in os.ReadDir's sorted order
 	next    int
-	closed  bool
+	closed  atomic.Bool
+	readMu  sync.Mutex
 }
 
 func filePath(path string) string {
@@ -37,7 +40,7 @@ func filePath(path string) string {
 
 func lookup(value any) (*handle, error) {
 	h, ok := value.(*handle)
-	if !ok || h == nil || h.closed {
+	if !ok || h == nil || h.closed.Load() {
 		return nil, &fs.PathError{Op: "use", Path: "", Err: errors.New("closed handle")}
 	}
 	return h, nil
@@ -75,7 +78,9 @@ func CloseHandle(value any) error {
 	if err != nil {
 		return err
 	}
-	h.closed = true
+	if h.closed.Swap(true) {
+		return &fs.PathError{Op: "close", Path: h.path, Err: errors.New("closed handle")}
+	}
 	if err := h.file.Close(); err != nil {
 		return relabel(err, h.path)
 	}
@@ -86,6 +91,11 @@ func CloseHandle(value any) error {
 func HandleHasInput(value any) (bool, error) {
 	h, err := lookup(value)
 	if err != nil {
+		return false, err
+	}
+	h.readMu.Lock()
+	defer h.readMu.Unlock()
+	if _, err := lookup(h); err != nil {
 		return false, err
 	}
 	if _, err := h.reader.Peek(1); err != nil {
@@ -102,6 +112,11 @@ func HandleHasInput(value any) (bool, error) {
 func ReadHandleLine(value any) (string, error) {
 	h, err := lookup(value)
 	if err != nil {
+		return "", err
+	}
+	h.readMu.Lock()
+	defer h.readMu.Unlock()
+	if _, err := lookup(h); err != nil {
 		return "", err
 	}
 	line, err := h.reader.ReadString('\n')
@@ -127,6 +142,11 @@ const maxByteRead = 1 << 16
 func ReadHandleBytes(value any, max int64) ([]byte, error) {
 	h, err := lookup(value)
 	if err != nil {
+		return nil, err
+	}
+	h.readMu.Lock()
+	defer h.readMu.Unlock()
+	if _, err := lookup(h); err != nil {
 		return nil, err
 	}
 	if max <= 0 {
@@ -200,6 +220,11 @@ func ReadDirectoryEntry(value any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	h.readMu.Lock()
+	defer h.readMu.Unlock()
+	if _, err := lookup(h); err != nil {
+		return "", err
+	}
 	if h.next >= len(h.entries) {
 		return "", nil
 	}
@@ -213,7 +238,11 @@ func CloseDirectory(value any) error {
 	if err != nil {
 		return err
 	}
-	h.closed = true
+	if h.closed.Swap(true) {
+		return &fs.PathError{Op: "close", Path: h.path, Err: errors.New("closed handle")}
+	}
+	h.readMu.Lock()
+	defer h.readMu.Unlock()
 	h.entries = nil
 	return nil
 }

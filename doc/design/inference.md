@@ -68,7 +68,9 @@ supply and extends the runner's residual row with it. Distinct allocations
 coexist in ordinary effect rows. Expected scoped callback types are available
 while checking lambda parameters, so nested scopes do not infer an outer
 reader's row from the inner reader. In constraint groups containing scopes,
-fixed-tail row bounds solve before flexible bounds to preserve this direction.
+explicit label lower bounds propagate before fixed-tail upper bounds close
+flexible rows. Known record projections contribute their rows before closure,
+so a source effect cannot hide a later local-state or failure requirement.
 
 A persistent `ScopeBoundary` rejects its label anywhere in the solved result,
 residual effects, or outer environment types. Its structural walk includes
@@ -80,7 +82,9 @@ declaration group is published. This checks type-level permissions; it does not
 analyze which objects a closure physically retains.
 
 [Core](core.md#scoped-state-boundary) retains source signatures for contract
-validation and erases permission labels from runtime types and evidence.
+validation and erases permission labels from runtime types and evidence. Calls
+under an abstract scoped callback still forward the invocation evidence row: a
+runner may have installed domain handlers hidden behind that callback binder.
 
 ## Dependency groups and generalization
 

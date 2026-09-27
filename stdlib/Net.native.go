@@ -7,22 +7,26 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"sync"
+	"sync/atomic"
 )
 
 type listener struct {
 	value  net.Listener
-	closed bool
+	closed atomic.Bool
 }
 
 type connection struct {
-	value  net.Conn
-	reader *bufio.Reader
-	closed bool
+	value   net.Conn
+	reader  *bufio.Reader
+	readMu  sync.Mutex
+	writeMu sync.Mutex
+	closed  atomic.Bool
 }
 
 func listenerValue(value any) (*listener, error) {
 	l, ok := value.(*listener)
-	if !ok || l == nil || l.closed {
+	if !ok || l == nil || l.closed.Load() {
 		return nil, errors.New("closed listener")
 	}
 	return l, nil
@@ -30,7 +34,7 @@ func listenerValue(value any) (*listener, error) {
 
 func connectionValue(value any) (*connection, error) {
 	c, ok := value.(*connection)
-	if !ok || c == nil || c.closed {
+	if !ok || c == nil || c.closed.Load() {
 		return nil, errors.New("closed connection")
 	}
 	return c, nil
@@ -49,7 +53,9 @@ func CloseListener(value any) error {
 	if err != nil {
 		return err
 	}
-	l.closed = true
+	if l.closed.Swap(true) {
+		return errors.New("closed listener")
+	}
 	return l.value.Close()
 }
 
@@ -78,7 +84,9 @@ func CloseConnection(value any) error {
 	if err != nil {
 		return err
 	}
-	c.closed = true
+	if c.closed.Swap(true) {
+		return errors.New("closed connection")
+	}
 	return c.value.Close()
 }
 
@@ -86,6 +94,11 @@ func CloseConnection(value any) error {
 func ConnectionHasInput(value any) (bool, error) {
 	c, err := connectionValue(value)
 	if err != nil {
+		return false, err
+	}
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+	if _, err := connectionValue(c); err != nil {
 		return false, err
 	}
 	if _, err := c.reader.Peek(1); err != nil {
@@ -102,6 +115,11 @@ const maxSocketRead = 1 << 16
 func ReadConnectionBytes(value any, max int64) ([]byte, error) {
 	c, err := connectionValue(value)
 	if err != nil {
+		return nil, err
+	}
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+	if _, err := connectionValue(c); err != nil {
 		return nil, err
 	}
 	if max <= 0 {
@@ -121,6 +139,11 @@ func ReadConnectionBytes(value any, max int64) ([]byte, error) {
 func WriteConnectionBytes(value any, data []byte) error {
 	c, err := connectionValue(value)
 	if err != nil {
+		return err
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if _, err := connectionValue(c); err != nil {
 		return err
 	}
 	for len(data) > 0 {

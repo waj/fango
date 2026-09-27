@@ -173,6 +173,7 @@ type ReturnClause struct {
 	Body  Expr
 }
 type HandlerState struct {
+	Policy  string
 	Name    string
 	Initial Expr
 	Ty      types.Type

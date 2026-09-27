@@ -2,9 +2,9 @@ import Bytes exposing (Bytes, Sink(..))
 import Fail exposing (Fail, attempt, fail)
 import Writer exposing (Writer)
 
--- Collecting uses IO state and publishes the buffer only after success.
+-- Collecting uses scoped local state and publishes the buffer only after success.
 
-render : Writer {} ->{IO} Int
+render : Writer e ->{e} Int
 render output =
     Writer.writeString output "status"
     output.flush()
@@ -18,7 +18,7 @@ trace = Sink { write = \chunk -> print ("write " ++ show chunk) }
 -- A body that aborts never reaches the return clause, so nothing is flushed
 -- and no reader receives a truncated message. A caller that wants that
 -- guarantee for a whole body writes into `collecting` instead.
-partial : Bool -> Writer {IO, Fail String} ->{IO, Fail String} ()
+partial : Bool -> Writer e ->{Fail String | e} ()
 partial ok output =
     Writer.writeString output "head"
     if ok then () else fail "stopped"

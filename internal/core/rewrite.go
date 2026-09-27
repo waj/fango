@@ -176,7 +176,7 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Effect = r.effect(e.Effect)
 		n.Body = r.expr(e.Body)
 		if e.State != nil {
-			n.State = &HandlerState{Name: e.State.Name, Initial: r.expr(e.State.Initial), Ty: r.typ(e.State.Ty)}
+			n.State = &HandlerState{Name: e.State.Name, Policy: e.State.Policy, Initial: r.expr(e.State.Initial), Ty: r.typ(e.State.Ty)}
 		}
 		n.Clauses = make([]HandlerClause, len(e.Clauses))
 		for i, c := range e.Clauses {

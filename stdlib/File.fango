@@ -103,11 +103,8 @@ withAppend path use = withOpened openAppend path use
 -- otherwise the line and its exact terminator.
 readLine : Handle ->{IO, Fail Error} Maybe Line
 readLine file =
-    if fromResult (handleHasInput file) then
-        raw = fromResult (readHandleLine file)
-        Just ({ text = IO.lineText raw, ending = IO.lineEnding raw })
-    else
-        Nothing
+    raw = fromResult (readHandleLine file)
+    if raw == "" then Nothing else Just ({ text = IO.lineText raw, ending = IO.lineEnding raw })
 
 write : Handle -> String ->{IO, Fail Error} ()
 write file text = fromResult (writeHandle file text)
@@ -118,10 +115,11 @@ write file text = fromResult (writeHandle file text)
 -- Bytes.Source needs.
 readBytes : Handle -> Int ->{IO, Fail Error} Maybe Bytes
 readBytes file count =
-    if fromResult (handleHasInput file) then
-        Just (fromResult (readHandleBytes file count))
+    if count <= 0 then
+        if fromResult (handleHasInput file) then Just Bytes.empty else Nothing
     else
-        Nothing
+        data = fromResult (readHandleBytes file count)
+        if Bytes.length data == 0 then Nothing else Just data
 
 writeBytes : Handle -> Bytes ->{IO, Fail Error} ()
 writeBytes file data = fromResult (writeHandleBytes file data)

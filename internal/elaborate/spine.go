@@ -514,6 +514,18 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...
 		}
 		return nil
 	}
+	// A nominal label retained in the source target is still supplied at
+	// invocation, even if its runtime slot is carried in an abstract row.
+	forwards := func(unique int) bool {
+		if fn, ok := sourceWant.(*types.TFun); ok {
+			for _, label := range fn.Eff.Labels {
+				if label.Unique == unique {
+					return true
+				}
+			}
+		}
+		return false
+	}
 	actualFn, _ := e.Type().(*types.TFun)
 	if sameValueABI(e.Type(), want) {
 		return e
@@ -559,7 +571,7 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...
 				kept = append(kept, ev)
 				continue
 			}
-			if types.FunctionOpenRow(wantFn) {
+			if (len(el.evidence[ev.Unique]) == 0 || forwards(ev.Unique)) && types.FunctionOpenRow(wantFn) {
 				e.RowEffects = append(e.RowEffects, ev)
 				continue
 			}
@@ -598,7 +610,7 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...
 	effectParams := el.bindEffectParams(executingEffects(want, 1))
 	var rowEffects []core.EffectInstance
 	for _, label := range actualFn.Eff.Labels {
-		if types.RuntimeEvidenceEffect(label) && types.FunctionOpenRow(wantFn) {
+		if types.RuntimeEvidenceEffect(label) && (len(el.evidence[label.Unique]) == 0 || forwards(label.Unique)) && types.FunctionOpenRow(wantFn) {
 			rowEffects = append(rowEffects, core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Control: el.evidenceControl(label.Unique)})
 		}
 	}

@@ -743,6 +743,12 @@ func (l *linter) expr(e Expr, where string) {
 		l.control(e.Control, where)
 		l.effectInstance(e.Effect, where)
 		if e.State != nil {
+			if e.State.Policy != "" && e.State.Policy != "shared" && e.State.Policy != "taskLocal" {
+				l.errorf("%s: invalid handler state policy", where)
+			}
+			if e.State.Policy != "" && len(e.Clauses) > 0 && e.Clauses[0].Op.Abort {
+				l.errorf("%s: abort handler cannot inherit state", where)
+			}
 			if e.State.Name == "" || e.State.Ty == nil || e.State.Initial == nil {
 				l.errorf("%s: parameterized handler has incomplete state metadata", where)
 			} else {

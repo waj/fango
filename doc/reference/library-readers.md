@@ -32,9 +32,8 @@ argument](functions.md#row-kinded-parameters): `Source {IO, Fail IO.Error}` and
 ## Reader
 
 A `Reader e` is a record whose operations perform exactly `e`. Parsing helpers
-propagate that row without adding IO. `withBytes` provides scoped memory
-parsing without IO. The escapable `over`, `overBytes`, and `limited` constructors
-include IO in their reader row. Separate readers advance independently.
+propagate that row without adding IO. The `withBytes`, `over`, `overBytes`, and
+`limited` constructors use scoped local state. Separate readers advance independently.
 
 ```fango
 import Reader exposing (Read(..), Reader)
@@ -50,9 +49,12 @@ type Read = Found Bytes | Ended Bytes | Overflowed deriving (Eq, Show)
 {-# scoped s #-}
 withBytes : Bytes -> (Reader s ->{s} a) ->{e} a
 
-over : Source e -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
-overBytes : Bytes -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
-limited : Reader e -> Int -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
+{-# scoped s #-}
+over : Source e -> (Reader s ->{s} a) ->{e} a
+{-# scoped s #-}
+overBytes : Bytes -> (Reader s ->{s} a) ->{e} a
+{-# scoped s #-}
+limited : Reader e -> Int -> (Reader s ->{s} a) ->{e} a
 ensure : Reader e -> Int ->{e} Bool
 atEnd : Reader e ->{e} Bool
 readUpTo : Reader e -> Int ->{e} Bytes
@@ -88,15 +90,16 @@ can pass independent readers to one parser; see the executable
 [two-reader example](../../testdata/run/reader_scoped_memory.fango).
 
 `over source use` runs `use` with a reader over `source`. `overBytes contents
-use` starts with the contents in its buffer over an exhausted source. Reading
-that buffer still has effect IO because this constructor uses a native reference.
+use` starts with the contents in its buffer over an exhausted source. These
+constructors follow the same scoped callback rule as `withBytes`: the local
+permission is discharged, while source and consumer effects remain visible.
 A `Reader {}` has pure operations, such as an exhausted reader with
 constant fields. Domain-specific readers can expose a domain effect without IO.
 Parsing code written against `Reader e` works with all these implementations;
 its effect row describes the reader operations, not just the underlying source.
 
 `limited parent n use` stages a reader over a parent, clamping every answer to
-a remaining allowance held in its own reference. Every byte it hands out
+a remaining allowance held in its own scoped cell. Every byte it hands out
 is skipped through the parent, so when the scope ends the parent is positioned
 after what was consumed rather than after the allowance; a caller that wants
 the rest of a frame discarded skips it before leaving. Because a reader is a
@@ -132,21 +135,23 @@ Repeated traversals share the current reader position.
 
 ## Writer
 
-A `Writer e` is a record of IO-marked operations over a private buffer, so a response assembled from a status line, several headers, and a
-body costs one underlying write per flush window rather than one per part.
+A `Writer e` is a record whose operations perform exactly `e`. Its scoped buffer
+combines several emits into one underlying write per flush window.
 
 ```fango
 import Writer exposing (Writer)
 
 type Writer e =
-    { emit : Bytes ->{IO | e} ()
-    , flush : () ->{IO | e} ()
+    { emit : Bytes ->{e} ()
+    , flush : () ->{e} ()
     }
 
-over : Sink e -> Int -> (Writer e ->{IO | e} a) ->{IO | e} a
-collecting : (Writer e ->{IO | e} a) ->{IO | e} (a, Bytes)
-write : Writer e -> Bytes ->{IO | e} ()
-writeString : Writer e -> String ->{IO | e} ()
+{-# scoped s #-}
+over : Sink e -> Int -> (Writer s ->{s} a) ->{e} a
+{-# scoped s #-}
+collecting : (Writer s ->{s} a) ->{e} (a, Bytes)
+write : Writer e -> Bytes ->{e} ()
+writeString : Writer e -> String ->{e} ()
 ```
 
 `emit chunk` accepts bytes for eventual writing and `flush()` pushes everything
@@ -162,16 +167,17 @@ a body that fails emits nothing further, so no reader receives a truncated
 message it would have to guess at.
 
 `collecting use` answers the body's value together with everything written,
-using IO-marked storage. Its bytes become available only on successful
-completion. Its `flush()` has nowhere to push to and does nothing.
+using scoped local storage. A consumer with no other effects gives a pure
+result. Its bytes become available only on successful completion. Its `flush()` has nowhere to push to and does nothing.
 
 ## Lifetimes
 
-Readers from `over`, `overBytes`, and `limited`, and writers, may be returned or
-stored. Readers from `withBytes` obey its scoped callback restriction.
-Memory buffers remain available
-while referenced. A source or sink backed by a file or socket still depends on
-that handle being open; operations after its scope closes fail at runtime.
-Consume resource-backed streams inside the resource's cleanup scope.
-Reader/Writer values contain functions and references and are not transferable
-task data. Each task constructs its own buffered objects.
+Readers and writers created by these constructors must stay inside their scoped
+callbacks. Parsed values, collected bytes, and other permission-independent
+results may leave. Their streams and operation callbacks retain the same local
+permission and cannot escape through containers or storage.
+
+A source or sink backed by a file or socket still depends on that handle being
+open; operations after its scope closes fail at runtime. Consume resource-backed
+streams inside the resource's cleanup scope. Each task constructs its own scoped
+buffered objects.

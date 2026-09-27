@@ -19,6 +19,14 @@ func NewFreshEffect(sup *types.Supply, name string) FreshEffect {
 	return FreshEffect{label: types.EffLabel{Unique: sup.NextUnique(), Name: name, Scoped: true}}
 }
 
+// NewHandlerPermission is available in the subject but is added to a callable
+// only when that callable is bound to this activation.
+func NewHandlerPermission(sup *types.Supply, name string) FreshEffect {
+	permission := NewFreshEffect(sup, name)
+	permission.label.Binding = true
+	return permission
+}
+
 // Within extends an ambient row for the subject. It preserves all outer
 // labels and the residual tail; it never authorizes removing another scope.
 func (s FreshEffect) Within(outer types.Row) types.Row {

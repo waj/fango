@@ -107,7 +107,9 @@ natives; ordinary Fango effect handlers can wrap them.
 Storage keeps its typed payload alive but does not extend the lifetime of any
 external resource it references. Native resource operations check validity at
 runtime. [Runtime.Ref](../../stdlib/Runtime/Ref.fango) provides ordinary IO-marked
-mutable storage; native handles and functions cannot cross a task boundary.
+mutable storage; its individual reads and writes are synchronized, but a
+read followed by a write is not an atomic update. The current `Task` API still
+excludes native handles and functions from its transfer boundary.
 Native code must honor its declaration and may not invoke opaque Fango payloads.
 
 ## IO references
@@ -116,7 +118,7 @@ Native code must honor its declaration and may not invoke opaque Fango payloads.
 `write : Ref a -> a ->{IO} ()`. Aliases observe the latest write. The reference
 keeps its value alive until garbage collection; it has no close operation.
 Its representation is private, and references cannot cross the task boundary.
-Reader and Writer use this ordinary native module for their private buffers.
+Scoped Reader and Writer buffers use `Runtime.Local` instead.
 
 ## Scoped local state
 

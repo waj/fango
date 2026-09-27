@@ -3,11 +3,8 @@ module Reader exposing (Read(..), Reader(..), atEnd, chunks, ensure, forEachChun
 
 import Basics exposing (..)
 import Bytes exposing (Bytes, Source(..))
--- Buffered IO operations keep their mutable state in task-local references.
-import IO exposing (IO)
 import Maybe exposing (Maybe(..))
 import Runtime.Local
-import Runtime.Ref
 import Stream exposing (Stream)
 
 type Reader e =
@@ -33,44 +30,46 @@ grow source pending =
         Just chunk ->
             if Bytes.length chunk == 0 then grow source pending else Bytes.append pending chunk
 
-buffering : Bytes -> Source e -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
+{-# scoped s #-}
+buffering : Bytes -> Source e -> (Reader s ->{s} a) ->{e} a
 buffering initial source use =
-    pending = Runtime.Ref.new initial
-    use
-        { buffered = \_ -> Runtime.Ref.read pending
+    Runtime.Local.run initial (\pending -> use
+        { buffered = pending.read
         , refill = \_ ->
-            before = Runtime.Ref.read pending
+            before = pending.read()
             grown = grow source before
-            Runtime.Ref.write pending grown
+            pending.write grown
             Bytes.length grown > Bytes.length before
         , skip = \n ->
-            before = Runtime.Ref.read pending
+            before = pending.read()
             taken = clamp n (Bytes.length before)
-            Runtime.Ref.write pending (Bytes.slice taken (Bytes.length before) before)
+            pending.write (Bytes.slice taken (Bytes.length before) before)
             taken
-        }
+        })
 
-limited : Reader e -> Int -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
+{-# scoped s #-}
+limited : Reader e -> Int -> (Reader s ->{s} a) ->{e} a
 limited parent allowance use =
-    remaining = Runtime.Ref.new (clamp allowance allowance)
-    use
+    Runtime.Local.run (clamp allowance allowance) (\remaining -> use
         { buffered = \_ ->
             window = parent.buffered()
-            Bytes.slice 0 (clamp (Runtime.Ref.read remaining) (Bytes.length window)) window
+            Bytes.slice 0 (clamp (remaining.read()) (Bytes.length window)) window
         , refill = \_ ->
-            if Bytes.length (parent.buffered()) >= Runtime.Ref.read remaining then False
+            if Bytes.length (parent.buffered()) >= remaining.read() then False
             else parent.refill()
         , skip = \n ->
-            before = Runtime.Ref.read remaining
+            before = remaining.read()
             taken = parent.skip (clamp n before)
-            Runtime.Ref.write remaining (before - taken)
+            remaining.write (before - taken)
             taken
-        }
+        })
 
-over : Source e -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
+{-# scoped s #-}
+over : Source e -> (Reader s ->{s} a) ->{e} a
 over source use = buffering Bytes.empty source use
 
-overBytes : Bytes -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
+{-# scoped s #-}
+overBytes : Bytes -> (Reader s ->{s} a) ->{e} a
 overBytes contents use = buffering contents { pull = \_ -> Nothing } use
 
 -- Each invocation introduces a fresh scoped row. The consumer may perform

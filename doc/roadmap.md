@@ -38,20 +38,22 @@ sequences](reference/library-bytes.md) owns `Bytes` and its `Source` and
 `Sink`, [buffered readers and writers](reference/library-readers.md) owns
 `Reader`, `Writer`, and every stage above them, and [IO and
 files](reference/library-io.md) owns the file and socket adapters. [HTTP and a
-server](roadmap-io.md) owns what is left. Concurrent socket handoff requires a new ownership contract; the current
-[task boundary](reference/library-tasks.md) excludes native handles.
+server](roadmap-io.md) owns what is left. Concurrent socket handoff awaits the [Async closure
+boundary](roadmap-scoped-effects.md); the current
+[Task boundary](reference/library-tasks.md) still excludes native handles.
 
 ## Scoped readers and task effects
 
 [Scoped readers and effect-polymorphic tasks](roadmap-scoped-effects.md) owns
-the remaining generic scheduling representation and explicit child interpreters
+the remaining generic scheduling representation and checked handler inheritance
 without ambient IO. [Scoped memory readers](reference/library-readers.md#reader)
 are implemented.
 
 ## Addressing a specific handler
 
-Effectful closures keep their effect rows. Explicit handler-instance APIs remain
-an open question in the [effects roadmap](roadmap-effects.md#handler-instances-open-questions).
+Scoped activation binding is implemented; see the
+[closure contract](reference/effects.md#closures-and-handler-effects). Further
+instance APIs remain in the [effects roadmap](roadmap-effects.md#handler-instances-open-questions).
 
 ## List representation
 
