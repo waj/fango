@@ -46,7 +46,7 @@ evidence at invocation, including when constructed inside a matching handler.
 
 Closure compatibility is ordinary effect-row inclusion. A handled label is not
 removed from a returned callable simply because it was created in the subject.
-Mutable library closures expose IO. [Resources and evidence](ownership.md)
+Library closures backed by native references expose IO. [Resources and evidence](ownership.md)
 describes the retained structural metadata.
 
 ## Abort and cleanup protocol

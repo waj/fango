@@ -1,8 +1,8 @@
 import Bytes exposing (Bytes)
 import Reader exposing (Reader)
 
--- Mutable reader state is explicit IO, including memory-backed readers.
-parse : Reader {} ->{IO} (Maybe Bytes, Bytes, Bool)
+-- Parsing propagates exactly the reader's effects. The constructors below use IO.
+parse : Reader e ->{e} (Maybe Bytes, Bytes, Bool)
 parse input =
     head = Reader.readExactly input 5
     rest = Reader.readUpTo input 99

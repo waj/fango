@@ -1,18 +1,8 @@
--- API feasibility probe, not a replacement Reader implementation.
+-- Pure parsing through the standard Reader API using specialized handlers.
 -- Distinct nominal effects stand in for two reader instances; the test does
 -- not claim that the compiler supports fresh scoped effect instances.
 import Bytes
-
-type Cursor e =
-    { buffered : () ->{e} Bytes.Bytes
-    , skip : Int ->{e} Int
-    }
-
-take : Cursor e -> Int ->{e} Bytes.Bytes
-take cursor wanted =
-    contents = cursor.buffered()
-    count = cursor.skip wanted
-    Bytes.slice 0 count contents
+import Reader exposing (Reader)
 
 clamp count size = if count < 0 then 0 else if count > size then size else count
 
@@ -24,28 +14,28 @@ effect SecondInput
     secondBuffer : () -> Bytes.Bytes
     secondSkip : Int -> Int
 
-withFirst : Bytes.Bytes -> (Cursor FirstInput ->{FirstInput | e} a) ->{e} a
+withFirst : Bytes.Bytes -> (Reader FirstInput ->{FirstInput | e} a) ->{e} a
 withFirst bytes use =
-    handle use { buffered = firstBuffer, skip = firstSkip } with contents = bytes of
+    handle use { buffered = firstBuffer, refill = \_ -> False, skip = firstSkip } with contents = bytes of
         firstBuffer () -> resume contents with contents
         firstSkip wanted ->
             count = clamp wanted (Bytes.length contents)
             resume count with Bytes.slice count (Bytes.length contents) contents
 
-withSecond : Bytes.Bytes -> (Cursor SecondInput ->{SecondInput | e} a) ->{e} a
+withSecond : Bytes.Bytes -> (Reader SecondInput ->{SecondInput | e} a) ->{e} a
 withSecond bytes use =
-    handle use { buffered = secondBuffer, skip = secondSkip } with contents = bytes of
+    handle use { buffered = secondBuffer, refill = \_ -> False, skip = secondSkip } with contents = bytes of
         secondBuffer () -> resume contents with contents
         secondSkip wanted ->
             count = clamp wanted (Bytes.length contents)
             resume count with Bytes.slice count (Bytes.length contents) contents
 
-parsePair : Cursor e -> Cursor e ->{e} String
+parsePair : Reader e -> Reader e ->{e} String
 parsePair first second =
-    a = take first 1
-    b = take second 1
-    c = take first 99
-    d = take second 99
+    a = Reader.readUpTo first 1
+    b = Reader.readUpTo second 1
+    c = Reader.readUpTo first 99
+    d = Reader.readUpTo second 99
     Bytes.toStringLossy (Bytes.concat [a, b, c, d])
 
 -- The exact pure annotation is part of the test: both cursors are used inside

@@ -51,6 +51,10 @@ type Why struct {
 }
 
 type Constraint struct {
+	// Scope closes a generative scope after ordinary constraints have solved.
+	// It is mutually exclusive with Left/Right, Include, and Subsume. This is
+	// an internal prototype; source syntax does not create these yet.
+	Scope       *ScopeBoundary
 	Left, Right types.Type
 	Span        source.Span
 	Why         Why

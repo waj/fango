@@ -29,7 +29,9 @@ waiting, cancellation, and timers are ordinary native sidecars.
 
 `Runtime.Ref` is an ordinary native module for IO-marked mutable storage. Its
 sealed type index ensures a reference cannot be read at a different type.
-Reader and Writer capture task-local references. Such references are not
+The bundled Reader and Writer constructors capture task-local references.
+Reader operations propagate their complete row; only reference-backed readers
+necessarily include IO. Such references are not
 transferable task data. Ordinary reference operations need no compiler cases.
 
 Stream and Iterator are Fango records and ordinary recursive functions. State

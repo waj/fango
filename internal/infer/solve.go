@@ -47,8 +47,11 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 	}
 	var deferred []pending
 	var bounds []pending
+	var scopes []pending
 	for i, c := range cs {
-		if c.Subsume {
+		if c.Scope != nil {
+			scopes = append(scopes, pending{at: i, c: c})
+		} else if c.Subsume {
 			if vs == nil {
 				vs = variances(c.ADTs)
 			}
@@ -109,6 +112,14 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 	// surrounding row to that tail is the answer rather than a guess.
 	for _, p := range deferred {
 		solve(p.at, p.c)
+	}
+	// Scope checks observe the final substitution, including deferred row
+	// bounds. Checking at the boundary's position in cs would let later
+	// constraints hide an escape behind a still-unsolved metavariable.
+	for _, p := range scopes {
+		for _, err := range p.c.Scope.check(sub, p.c.Span) {
+			failures = append(failures, failure{at: p.at, err: err})
+		}
 	}
 	sort.SliceStable(failures, func(i, j int) bool { return failures[i].at < failures[j].at })
 	errs := make([]diag.Error, 0, len(failures))

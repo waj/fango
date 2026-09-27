@@ -10,9 +10,9 @@ import Runtime.Ref
 import Stream exposing (Stream)
 
 type Reader e =
-    { buffered : () ->{IO | e} Bytes
-    , refill : () ->{IO | e} Bool
-    , skip : Int ->{IO | e} Int
+    { buffered : () ->{e} Bytes
+    , refill : () ->{e} Bool
+    , skip : Int ->{e} Int
     }
 
 -- clamp keeps every count inside what is actually in hand, so no caller can
@@ -32,7 +32,7 @@ grow source pending =
         Just chunk ->
             if Bytes.length chunk == 0 then grow source pending else Bytes.append pending chunk
 
-buffering : Bytes -> Source e -> (Reader e ->{IO | e} a) ->{IO | e} a
+buffering : Bytes -> Source e -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
 buffering initial source use =
     pending = Runtime.Ref.new initial
     use
@@ -49,7 +49,7 @@ buffering initial source use =
             taken
         }
 
-limited : Reader e -> Int -> (Reader e ->{IO | e} a) ->{IO | e} a
+limited : Reader e -> Int -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
 limited parent allowance use =
     remaining = Runtime.Ref.new (clamp allowance allowance)
     use
@@ -66,17 +66,17 @@ limited parent allowance use =
             taken
         }
 
-over : Source e -> (Reader e ->{IO | e} a) ->{IO | e} a
+over : Source e -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
 over source use = buffering Bytes.empty source use
 
-overBytes : Bytes -> (Reader e ->{IO | e} a) ->{IO | e} a
+overBytes : Bytes -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
 overBytes contents use = buffering contents { pull = \_ -> Nothing } use
 
 -- ensure loops on a real terminator rather than on a length comparison: it
 -- stops because the source said end of input, never because two numbers
 -- stopped changing. It grows the buffer and consumes nothing, which is what
 -- lets a failed read leave everything in hand.
-ensure : Reader e -> Int ->{IO | e} Bool
+ensure : Reader e -> Int ->{e} Bool
 ensure reader n =
     if Bytes.length (reader.buffered()) >= n then
         True
@@ -85,13 +85,13 @@ ensure reader n =
     else
         False
 
-atEnd : Reader e ->{IO | e} Bool
+atEnd : Reader e ->{e} Bool
 atEnd reader = if ensure reader 1 then False else True
 
 -- readUpTo answers what is in hand once there is anything at all, so it never
 -- waits for bytes the caller said were optional. A short answer is not end of
 -- input; an empty one is.
-readUpTo : Reader e -> Int ->{IO | e} Bytes
+readUpTo : Reader e -> Int ->{e} Bytes
 readUpTo reader n =
     if n <= 0 then
         Bytes.empty
@@ -105,7 +105,7 @@ readUpTo reader n =
 -- readExactly consumes nothing when it answers Nothing, so a caller can try a
 -- longer frame, a different framing, or report the truncation with the bytes
 -- still buffered.
-readExactly : Reader e -> Int ->{IO | e} Maybe Bytes
+readExactly : Reader e -> Int ->{e} Maybe Bytes
 readExactly reader n =
     if n <= 0 then
         Just Bytes.empty
@@ -131,7 +131,7 @@ resumeAt scanned delimiterLength = clamp (scanned - delimiterLength + 1) scanned
 -- bounded number of native scans rather than one per pull. `ensure` answering
 -- False does not mean the window stopped growing — the source can end part way
 -- to the target — so the window is remeasured before end of input is believed.
-scanning : Reader e -> Bytes -> Int -> Int ->{IO | e} Read
+scanning : Reader e -> Bytes -> Int -> Int ->{e} Read
 scanning reader delimiter limit scanned =
     window = reader.buffered()
     case Bytes.indexOfFrom (resumeAt scanned (Bytes.length delimiter)) delimiter window of
@@ -160,7 +160,7 @@ scanning reader delimiter limit scanned =
 -- ever buffer: a server reading an unbounded header line from an untrusted
 -- peer has a memory bug, so there is no unlimited spelling. `Overflowed`
 -- consumes nothing, so the caller still holds what it refused.
-readUntil : Reader e -> Bytes -> Int ->{IO | e} Read
+readUntil : Reader e -> Bytes -> Int ->{e} Read
 readUntil reader delimiter limit =
     if limit <= 0 then Overflowed else scanning reader delimiter limit 0
 
@@ -171,13 +171,13 @@ newline = Bytes.fromString "\n"
 -- return on the run, because whether that byte is framing or content is the
 -- caller's question; a protocol that says CRLF reads readUntil at its own
 -- delimiter.
-readLine : Reader e -> Int ->{IO | e} Read
+readLine : Reader e -> Int ->{e} Read
 readLine reader limit = readUntil reader newline limit
 
 -- forEachChunk hands over whatever one refill produced, so a consumer sees the
 -- source's own chunking rather than a size this module invented and no chunk
 -- is copied on the way.
-forEachChunk : Reader e -> (Bytes ->{IO | e} ()) ->{IO | e} ()
+forEachChunk : Reader e -> (Bytes ->{e} ()) ->{e} ()
 forEachChunk reader action =
     if ensure reader 1 then
         window = reader.buffered()
@@ -187,7 +187,7 @@ forEachChunk reader action =
     else
         ()
 
--- The reader owns IO state; the stream itself carries only an explicit Unit position.
+-- The stream carries the reader's effects and an explicit Unit position.
 chunkStep reader _ =
     if ensure reader 1 then
         window = reader.buffered()
@@ -195,5 +195,5 @@ chunkStep reader _ =
         Just (window, ())
     else Nothing
 
-chunks : Reader e -> Stream () Bytes {IO | e}
+chunks : Reader e -> Stream () Bytes {e}
 chunks reader = Stream.unfold () (chunkStep reader)

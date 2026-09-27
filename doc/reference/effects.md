@@ -231,7 +231,9 @@ retain the surrounding resume binding.
 A closure's effect row describes the effects performed when it is called.
 Creating it inside a handler does not allow an effectful arrow to be used as
 a pure arrow. Callback compatibility uses ordinary row inclusion. A mutable
-library object, such as Reader or Writer, exposes `IO` on its operations.
+library object backed by `Runtime.Ref` exposes `IO` on its operations.
+The `Reader e` interface itself exposes only `e`; its reference-backed
+constructors include IO in that row.
 
 Handlers remain synchronous: a resumptive clause finishes with its owning tail
 `resume`, and an abort clause abandons the subject. Handlers do not capture a

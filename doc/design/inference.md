@@ -53,6 +53,34 @@ Task transfer is a structural check over concrete types. Functions and native
 handles cannot cross the spawn boundary; no execution-root flow interpretation
 is needed. See [tasks](tasks.md).
 
+## Fresh-scope solver prototype
+
+The solver accepts an internal `ScopeBoundary` constraint from
+[fresh_scope.go](../../internal/infer/fresh_scope.go). Source checking does not
+generate it yet; it does not enable scoped reader constructors or new syntax.
+
+A `FreshEffect` allocates a fresh nominal label from the session supply;
+unification cannot change its identity. Two allocations with the same diagnostic name coexist in a
+row. `Within` extends the subject's ambient row with that label and preserves
+outer effects. No new row unification or effect-argument matching rule is needed
+for these concrete instances.
+
+The boundary rejects its label anywhere in the solved result, residual effects,
+or supplied outer environment types. The structural walk includes latent
+arrows, abstract and phantom type arguments, and effect arguments. Outer roots
+must include storage slots, predicates, recursive bindings, and pending record
+obligations. This is a local type check, not a closure-retention analysis.
+
+Boundary checks run after shape, subsumption, and deferred row constraints.
+The obligation must remain in the constraint set until its enclosing inference
+group is finalized: an earlier successful solve with open metavariables does
+not establish non-escape. Errors keep constraint order.
+
+[Scoped API work](../roadmap-scoped-effects.md#fresh-scopes-and-escape-checking)
+owns callback quantification, source integration, independent Core checking,
+and evidence lowering. The nominal-label solver prototype does not establish
+those contracts or runtime erasure.
+
 ## Dependency groups and generalization
 
 Resolved references, including callbacks and nested bodies, determine strongly

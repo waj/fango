@@ -10,7 +10,7 @@ effect Feed
 paced : Source {Feed | e}
 paced = Source { pull = \_ -> next() }
 
-drive : List Bytes -> (Reader {Feed | e} ->{IO, Feed | e} a) ->{IO | e} a
+drive : List Bytes -> (Reader {IO, Feed | e} ->{IO, Feed | e} a) ->{IO | e} a
 drive pieces use =
     handle Reader.over paced use with rest = pieces of
         next () ->

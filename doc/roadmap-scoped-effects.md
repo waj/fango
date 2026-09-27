@@ -1,19 +1,16 @@
 # Scoped readers and effect-polymorphic tasks
 
 Unfinished API and type-system work following the
-[synchronous foundation](roadmap-simplification.md). The contracts below are
+[synchronous foundation](roadmap-simplification.md). The remaining scope and task contracts below are
 targets, not implemented APIs. They do not reactivate the coroutine roadmap.
 Current behavior remains in [readers](reference/library-readers.md) and
 [tasks](reference/library-tasks.md).
 
 ## Reader: the complete effect row
 
-The target record operations expose exactly `e` in `Reader e`. A parser
-consuming that reader propagates `e`; it must not add IO merely to advance a
-cursor. A constructor backed by today's IO references would return
-`Reader {IO | e}`. A source using a domain effect would retain that effect.
-Keep the reader's operation row separate from additional effects performed by
-its consumer.
+The complete reader effect row is now a [reference contract](reference/library-readers.md#reader).
+A pure scoped memory constructor remains unfinished. Keep the reader's own
+operation row separate from additional effects performed by its consumer.
 
 Retain direct-style cursor advancement. A pure memory runner must create
 local cursor state, run the consumer, and discharge only its own state effect.
@@ -22,8 +19,8 @@ to the same parser. Readers and callbacks retaining their cursor may only be
 used within the owning runner.
 
 The executable [memory cursor probe](../testdata/run/effect_api_memory_reader.fango)
-shows ordinary synchronous stateful handlers can implement two cursors and a
-pure parser in both backends. It uses two distinct nominal effects; it does not
+uses the actual Reader parsing library with two cursors and a pure parser in
+both backends. It uses two distinct nominal effects; it does not
 implement a reusable generative reader constructor.
 
 ## Fresh scopes and escape checking
@@ -36,13 +33,21 @@ are insufficient. The [type probes](../internal/infer/scoped_api_test.go)
 demonstrate that a caller can return such a phantom token directly, inside a
 record/ADT, or inside a callback.
 
-Before implementation, specify and validate:
+The [solver prototype](design/inference.md#fresh-scope-solver-prototype)
+allocates fresh nominal labels, composes two instances through ordinary row
+inclusion, and checks non-escape after solving. It rejects returned readers,
+latent callbacks, outer storage writes, and residual-effect escape at the
+constraint level. It also preserves scope identity through row adaptation.
+It does not yet quantify a source callback or emit scoped Core.
+
+Before exposing the API, specify and validate:
 
 - The smallest scope quantification facility that admits runner callbacks,
   without requiring general impredicative types.
-- Scope identity in effect labels and reader types. Rows currently distinguish
-  nominal effect names, not their arguments, so two instances of one reader
-  effect cannot coexist merely by adding a phantom parameter.
+- Abstract scope identity in exported callback contracts. The prototype uses
+  distinct nominal labels for concrete instances; a reusable runner still needs
+  quantification and substitution of that identity. Effect arguments alone do
+  not distinguish instances in current rows.
 - Local rejection of escape through returned readers, nested data, latent
   callback effects, outer mutable storage, and residual effect rows. Callback
   row widening or abstraction must not erase the identity.
@@ -112,10 +117,10 @@ prerequisites.
 1. Validate fresh scope quantification and identity-aware rows with minimal
    compiler/Core probes. Reject all escape routes listed above, including
    callbacks hidden behind abstract wrappers.
-2. Implement the Reader row correction and scoped pure memory constructor
-   together with multiple-reader tests, reference contracts, and ordinary
-   File/Net adapter migration. IO-backed constructors retain IO in their
-   concrete reader row.
+2. Implement the scoped pure memory constructor with multiple-reader tests,
+   reference contracts, and ordinary File/Net adapter coverage. Reader
+   operations already expose their complete row; existing IO-backed
+   constructors retain IO in their concrete reader row.
 3. Validate heterogeneous task packaging and explicit child interpreter setup
    across modules in the evaluator and Go backend. Preserve worker transfer
    restrictions and reject implicit parent handler inheritance.

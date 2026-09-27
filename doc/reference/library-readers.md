@@ -31,36 +31,37 @@ argument](functions.md#row-kinded-parameters): `Source {IO, Fail IO.Error}` and
 
 ## Reader
 
-A `Reader e` is a record of IO-marked operations with its own mutable buffer.
-Each reader captures a private native reference; two readers remain independent.
-The row `e` describes additional source effects.
+A `Reader e` is a record whose operations perform exactly `e`. Parsing helpers
+propagate that row without adding IO. The bundled constructors capture private
+native references and therefore include IO in the reader row; two constructed
+readers remain independent.
 
 ```fango
 import Reader exposing (Read(..), Reader)
 
 type Reader e =
-    { buffered : () ->{IO | e} Bytes
-    , refill : () ->{IO | e} Bool
-    , skip : Int ->{IO | e} Int
+    { buffered : () ->{e} Bytes
+    , refill : () ->{e} Bool
+    , skip : Int ->{e} Int
     }
 
 type Read = Found Bytes | Ended Bytes | Overflowed deriving (Eq, Show)
 
-over : Source e -> (Reader e ->{IO | e} a) ->{IO | e} a
-overBytes : Bytes -> (Reader e ->{IO | e} a) ->{IO | e} a
-limited : Reader e -> Int -> (Reader e ->{IO | e} a) ->{IO | e} a
-ensure : Reader e -> Int ->{IO | e} Bool
-atEnd : Reader e ->{IO | e} Bool
-readUpTo : Reader e -> Int ->{IO | e} Bytes
-readExactly : Reader e -> Int ->{IO | e} Maybe Bytes
-readUntil : Reader e -> Bytes -> Int ->{IO | e} Read
-readLine : Reader e -> Int ->{IO | e} Read
-forEachChunk : Reader e -> (Bytes ->{IO | e} ()) ->{IO | e} ()
-chunks : Reader e -> Stream () Bytes {IO | e}
+over : Source e -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
+overBytes : Bytes -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
+limited : Reader e -> Int -> (Reader {IO | e} ->{IO | e} a) ->{IO | e} a
+ensure : Reader e -> Int ->{e} Bool
+atEnd : Reader e ->{e} Bool
+readUpTo : Reader e -> Int ->{e} Bytes
+readExactly : Reader e -> Int ->{e} Maybe Bytes
+readUntil : Reader e -> Bytes -> Int ->{e} Read
+readLine : Reader e -> Int ->{e} Read
+forEachChunk : Reader e -> (Bytes ->{e} ()) ->{e} ()
+chunks : Reader e -> Stream () Bytes {e}
 ```
 
 The three fields are the primitives and carry no policy. `buffered()` answers
-what is in hand through an IO-marked reference read. `refill()` pulls until the buffer grows,
+what is in hand, using the effects in `e`. `refill()` pulls until the buffer grows,
 answering `True`, or the source ends, answering `False`; it never answers
 `True` without growing, so a loop on it makes progress. `skip n` consumes from
 the buffer and answers how many bytes it took, which is `n` clamped to what was
@@ -69,9 +70,11 @@ they are not module functions.
 
 `over source use` runs `use` with a reader over `source`. `overBytes contents
 use` starts with the contents in its buffer over an exhausted source. Reading
-that buffer still has effect IO. `Reader {}` means the source has no additional
-effects, and its reader operations still require IO. Parsing code written against
-`Reader e` runs over both memory and file sources.
+that buffer still has effect IO because this constructor uses a native reference.
+A `Reader {}` has pure operations, such as an exhausted reader with
+constant fields. Domain-specific readers can expose a domain effect without IO.
+Parsing code written against `Reader e` works with all these implementations;
+its effect row describes the reader operations, not just the underlying source.
 
 `limited parent n use` stages a reader over a parent, clamping every answer to
 a remaining allowance held in its own reference. Every byte it hands out
