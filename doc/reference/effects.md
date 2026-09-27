@@ -223,7 +223,7 @@ earlier update. Handlers are responsible for operation-level serialization.
 The snapshot is taken before the clause starts, so a lock acquired inside the
 clause cannot protect that implicit read. For atomic updates, keep state in an
 explicit reference and protect its read and write together, or serialize calls
-to the handler. `shared` and `taskLocal` are ordinary identifiers, not modifiers.
+to the handler.
 
 Child-task inheritance is not exposed yet; its remaining contract is in the
 [task roadmap](../roadmap-scoped-effects.md#async-orchestration-and-task-results).

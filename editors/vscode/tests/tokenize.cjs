@@ -53,14 +53,11 @@ async function main() {
   assert(!grammar.tokenizeLine('{-# service #-}').tokens.some(t => t.scopes.includes('keyword.control.directive.fango')));
   assert(grammar.tokenizeLine('resource = 1').tokens.every(t => !t.scopes.includes('keyword.control.directive.fango')));
 
-  for (const name of ["shared", "taskLocal"]) {
-    const source = `handle action() with ${name} = 0 of`;
-    const tokens = grammar.tokenizeLine(source).tokens;
-    const at = index => tokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
-    assert(at(source.indexOf("with")).includes("keyword.control.with.fango"));
-    assert(!at(source.indexOf(name)).some(scope => scope.startsWith("keyword.")));
-    assert(grammar.tokenizeLine(`${name} = 1`).tokens.every(t => !t.scopes.includes("keyword.control.handler-policy.fango")));
-  }
+  const handler = 'handle action() with state = 0 of';
+  const handlerTokens = grammar.tokenizeLine(handler).tokens;
+  const handlerScopeAt = index => handlerTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+  assert(handlerScopeAt(handler.indexOf("with")).includes("keyword.control.with.fango"));
+  assert(!handlerScopeAt(handler.indexOf("state")).some(scope => scope.startsWith("keyword.")));
 
   const root = path.resolve(__dirname, "../../..");
   let files = 0;

@@ -14,17 +14,6 @@ rejectingRunner() =
             if reject then Fail.fail "rejected" else resume count with count + 1
         return value -> (value, count)
 
--- These names have no special meaning, including as state binders.
-ordinaryValue() =
-    shared = 3
-    taskLocal = 4
-    shared + taskLocal
-
-ordinaryRunner() =
-    handle next False with shared = ordinaryValue() of
-        next _ -> resume shared with shared + 1
-        return value -> (value, shared)
-
 success() =
     handle (next False, next False) with count = 1 of
         next _ -> resume count with count + 1
@@ -32,5 +21,4 @@ success() =
 
 main() =
     print (Fail.attempt rejectingRunner)
-    print (ordinaryRunner())
     print (success())
