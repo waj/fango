@@ -44,6 +44,11 @@ filename, so `Main.fango` declares `Main`. Headerless entry files remain
 compatible, receive a private synthetic identity, and cannot themselves be
 imported.
 
+Source paths are case-sensitive, including directory names. A differently
+cased local path produces a casing diagnostic when the complete module file
+exists; an unrelated directory with similar casing does not occupy a module
+name.
+
 Bundled modules use the same dotted-name path convention beneath `stdlib/`.
 For example, `Runtime.Ref` is stored at `stdlib/Runtime/Ref.fango`;
 its native sidecar, when present, sits beside it as

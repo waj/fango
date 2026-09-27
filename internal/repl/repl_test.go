@@ -90,6 +90,15 @@ func TestListSyntax(t *testing.T) {
 	}
 }
 
+func TestImportAsyncFromCheckoutRoot(t *testing.T) {
+	var out strings.Builder
+	RunWith(strings.NewReader("import Async\n:quit\n"), &out, Options{Root: filepath.Join("..", "..")})
+	got := out.String()
+	if !strings.Contains(got, "loaded Async\n") || strings.Contains(got, "RESERVED MODULE") {
+		t.Fatalf("Async import failed from source root containing runtime/:\n%s", got)
+	}
+}
+
 func TestExplicitStreamRunsInREPL(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader(`import Stream

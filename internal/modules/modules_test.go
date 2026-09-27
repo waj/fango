@@ -231,6 +231,21 @@ func TestBundledModuleNamesAreReserved(t *testing.T) {
 	})
 }
 
+func TestBundledImportWithUnrelatedCaseFoldedDirectory(t *testing.T) {
+	d := t.TempDir()
+	if err := os.Mkdir(filepath.Join(d, "runtime"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Async\nmain = 0\n")
+	if _, errs := Load(entry); len(errs) > 0 {
+		t.Fatalf("unrelated runtime directory blocked Async: %v", errs)
+	}
+	write(t, d, "runtime/Native.fango", "module Runtime.Native exposing (answer)\nanswer = 42\n")
+	if _, errs := Load(entry); len(errs) == 0 || errs[0].Title != "RESERVED MODULE" {
+		t.Fatalf("case-folded local module should conflict: %#v", errs)
+	}
+}
+
 func TestNativeSidecarValidation(t *testing.T) {
 	t.Run("effectful value", func(t *testing.T) {
 		d := t.TempDir()

@@ -63,6 +63,7 @@ func readExact(root, rel string) ([]byte, error) {
 		return nil, fmt.Errorf("module path escapes the source root")
 	}
 	cur := root
+	var casing *pathCaseError
 	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
 		entries, readErr := os.ReadDir(cur)
 		if readErr != nil {
@@ -78,10 +79,16 @@ func readExact(root, rel string) ([]byte, error) {
 				found = e.Name()
 			}
 		}
-		if found != "" && found != part {
-			return nil, pathCaseError{want: part, found: found}
+		if found == "" {
+			return nil, os.ErrNotExist
 		}
-		cur = filepath.Join(cur, part)
+		if found != part && casing == nil {
+			casing = &pathCaseError{want: part, found: found}
+		}
+		cur = filepath.Join(cur, found)
+	}
+	if casing != nil {
+		return nil, *casing
 	}
 	return os.ReadFile(path)
 }

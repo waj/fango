@@ -233,6 +233,11 @@ module names map to nested paths such as `Runtime.Ref` to
 reader in a process sees one library and a mid-compile edit cannot tear a build
 across two versions of it.
 
+The local provider checks every path component against directory entries and
+reports a casing mismatch only when the complete requested file exists with
+different casing. A similarly named directory without that file is an ordinary
+miss, so it cannot shadow a bundled module or trigger a reserved-name error.
+
 What the library cannot do is disagree with the compiler that reads it. Bundled
 native declarations are checked against the linked interpreter registry
 (`INVALID BUNDLED NATIVE`) and the bundled `List`'s constructor layout against
