@@ -1727,19 +1727,10 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	if e.State != nil {
 		stateCell = fmt.Sprintf("t_state%d", g.tmp)
 		g.tmp++
+		g.usesFangort = true
 		state = &handlerState{
-			read:  func() goast.Expr { return ident(stateCell) },
-			write: func(next goast.Expr) goast.Stmt { return assignStmt(stateCell, next) },
-		}
-		if e.State.Policy != "" {
-			state.read = func() goast.Expr { return selector(stateCell, "Value") }
-			state.write = func(next goast.Expr) goast.Stmt {
-				return &goast.AssignStmt{Lhs: []goast.Expr{selector(stateCell, "Value")}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{next}}
-			}
-			state.prefix = []goast.Stmt{
-				exprStmt(callExpr(selector(stateCell, "Lock"))),
-				&goast.DeferStmt{Call: callExpr(selector(stateCell, "Unlock")).(*goast.CallExpr)},
-			}
+			read:  func() goast.Expr { return callExpr(selector(stateCell, "Snapshot")) },
+			write: func(next goast.Expr) goast.Stmt { return exprStmt(callExpr(selector(stateCell, "Store"), next)) },
 		}
 	}
 	st, record := g.handlerEvidence(e, evidenceMode, state)
@@ -1758,10 +1749,8 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	if e.State != nil {
 		initial := g.expr(e.State.Initial, 0)
 		stateType := g.goType(e.State.Ty)
-		if e.State.Policy != "" {
-			initial = callExpr(indexExpr(selector("fangort", "NewHandlerState"), []goast.Expr{stateType}), initial)
-			stateType = &goast.StarExpr{X: indexExpr(selector("fangort", "HandlerState"), []goast.Expr{stateType})}
-		}
+		initial = callExpr(indexExpr(selector("fangort", "NewHandlerState"), []goast.Expr{stateType}), initial)
+		stateType = &goast.StarExpr{X: indexExpr(selector("fangort", "HandlerState"), []goast.Expr{stateType})}
 		stmts = append(stmts, varDeclStmt(stateCell, stateType, initial))
 	}
 	stmts = append(stmts, decl, assignBlank(ident(name)))
@@ -1792,9 +1781,6 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	}
 	if e.State != nil {
 		snapshot := state.read()
-		if e.State.Policy != "" {
-			snapshot = callExpr(selector(stateCell, "Snapshot"))
-		}
 		stmts = append(stmts, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), snapshot))
 		stmts = append(stmts, g.keepUnused(e.Return.Body, e.State.Name, e.State.Ty)...)
 	}
@@ -2039,18 +2025,11 @@ func (g *gen) zeroReturn(t types.Type) []goast.Stmt {
 	return []goast.Stmt{varDeclNoValue(name, g.goType(t)), returnStmt(ident(name))}
 }
 
-// resumeStmts lowers a proven tail-resumptive clause. A tail `resume v`
-// becomes a direct return of v from the evidence operation field; the
-// caller's ordinary Go continuation then proceeds with that operation
-// result. No continuation object or non-local control transfer is needed.
-// handlerState is where a parameterized handler's mutable state lives while
-// its activation is installed. An ordinary handler uses a Go local; a handler
-// whose body is a machine region cannot, because the local does not survive
-// the body suspending, so it uses a cell the machine holds instead.
+// handlerState supplies the snapshot and commit operations for an activation.
+// Each access publishes a complete value; no lock spans clause evaluation.
 type handlerState struct {
-	prefix []goast.Stmt
-	read   func() goast.Expr
-	write  func(goast.Expr) goast.Stmt
+	read  func() goast.Expr
+	write func(goast.Expr) goast.Stmt
 }
 
 // handlerEvidence builds an installed activation's record of operation
@@ -2084,7 +2063,6 @@ func (g *gen) handlerEvidence(e *core.Handle, mode types.Transport, state *handl
 		var stateType types.Type
 		if e.State != nil {
 			stateType = e.State.Ty
-			clausePrefix = append(clausePrefix, state.prefix...)
 			clausePrefix = append(clausePrefix,
 				varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), state.read()),
 				assignBlank(ident(mangleValue(e.State.Name))))

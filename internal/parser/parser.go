@@ -1736,15 +1736,9 @@ func (p *parser) parseHandle() ast.Expr {
 		return nil
 	}
 	var state *ast.HandlerState
-	policy := ""
 	if t := p.peek(); t.Kind == token.LIDENT && t.Text == "with" {
 		p.next()
 		name := p.peekInExpr()
-		if name.Kind == token.LIDENT && (name.Text == "shared" || name.Text == "taskLocal") && p.pos+1 < len(p.toks) && p.toks[p.pos+1].Kind == token.LIDENT {
-			policy = name.Text
-			p.next()
-			name = p.peekInExpr()
-		}
 		if name.Kind != token.LIDENT {
 			p.errorAt(name.Span, "SYNTAX PROBLEM", "I expect a lowercase state snapshot name after `with`.")
 			return nil
@@ -1757,7 +1751,7 @@ func (p *parser) parseHandle() ast.Expr {
 		if initial == nil {
 			return nil
 		}
-		state = &ast.HandlerState{Policy: policy, Name: name.Text, NameSpan: name.Span, Initial: initial}
+		state = &ast.HandlerState{Name: name.Text, NameSpan: name.Span, Initial: initial}
 	}
 	if !p.expect(token.KwOf, "I expect `of` after the expression being handled.") {
 		return nil
@@ -2532,13 +2526,7 @@ func (p *parser) parseRecordExprFieldsAfterOpen() ([]ast.RecordExprField, source
 
 // handlerStateStart recognizes contextual state syntax without reserving its words.
 func (p *parser) handlerStateStart(pos int) bool {
-	if pos+2 >= len(p.toks) || p.toks[pos].Kind != token.LIDENT || p.toks[pos].Text != "with" || p.toks[pos+1].Kind != token.LIDENT {
-		return false
-	}
-	if p.toks[pos+2].Kind == token.EQ {
-		return true
-	}
-	return pos+3 < len(p.toks) && (p.toks[pos+1].Text == "shared" || p.toks[pos+1].Text == "taskLocal") && p.toks[pos+2].Kind == token.LIDENT && p.toks[pos+3].Kind == token.EQ
+	return pos+2 < len(p.toks) && p.toks[pos].Kind == token.LIDENT && p.toks[pos].Text == "with" && p.toks[pos+1].Kind == token.LIDENT && p.toks[pos+2].Kind == token.EQ
 }
 
 // peek returns the current token, ignoring layout.

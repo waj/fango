@@ -313,7 +313,6 @@ type Handle struct {
 // `handle body with name = initial of`. Name denotes an immutable snapshot in
 // operation and return clauses; it is deliberately not in scope in Body.
 type HandlerState struct {
-	Policy   string // empty, shared, or taskLocal
 	Name     string
 	NameSpan source.Span
 	Initial  Expr

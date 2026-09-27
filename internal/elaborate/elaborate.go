@@ -1282,7 +1282,7 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 	el.popEvidence([]core.EffectInstance{inst})
 	var state *core.HandlerState
 	if e.State != nil {
-		state = &core.HandlerState{Policy: e.State.Policy, Name: e.State.Name, Initial: el.expr(e.State.Initial), Ty: el.zonkDefault(info.StateType)}
+		state = &core.HandlerState{Name: e.State.Name, Initial: el.expr(e.State.Initial), Ty: el.zonkDefault(info.StateType)}
 	}
 	residualType := el.apply(info.Residual)
 	el.defaultFree(residualType)

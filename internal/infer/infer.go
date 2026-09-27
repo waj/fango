@@ -1880,10 +1880,6 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		g.errs = append(g.errs, diag.Errorf(e.Sp, "BUILTIN IO HANDLING NOT READY", "Handlers for builtin IO are staged until polymorphic print evidence is available."))
 	}
 
-	if e.State != nil && e.State.Policy != "" && first.Abort {
-		g.errs = append(g.errs, diag.Errorf(e.State.NameSpan, "HANDLER INHERITANCE", "Only resumptive handlers can use shared or taskLocal state."))
-	}
-
 	residualVar := g.ck.Sup.FreshVar(types.RowVar)
 	residual := types.Row{Tail: residualVar}
 	labelArgs := make([]types.Type, len(first.Owner.Params))

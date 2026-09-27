@@ -2,23 +2,27 @@ package fangort
 
 import "sync"
 
-// HandlerState serializes an operation's snapshot, evaluation, and commit.
-// A task-local fork takes a shallow snapshot; values stored in the state are
-// immutable Fango values but may themselves contain shared native references.
+// HandlerState publishes complete state values between calls. Snapshot and
+// Store are individually synchronized; evaluating a clause between them is
+// not atomic and may overwrite another operation's update. Operation-level
+// serialization belongs to the handler, not this cell.
 type HandlerState[T any] struct {
 	mu    sync.Mutex
-	Value T // accessed only while holding the operation lock
+	value T
 }
 
 func NewHandlerState[T any](value T) *HandlerState[T] {
-	return &HandlerState[T]{Value: value}
+	return &HandlerState[T]{value: value}
 }
-
-func (s *HandlerState[T]) Lock()   { s.mu.Lock() }
-func (s *HandlerState[T]) Unlock() { s.mu.Unlock() }
 
 func (s *HandlerState[T]) Snapshot() T {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.Value
+	return s.value
+}
+
+func (s *HandlerState[T]) Store(value T) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.value = value
 }

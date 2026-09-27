@@ -40,10 +40,11 @@ evidence installation. Clauses see immutable snapshots; the body does not. A
 stateful resume evaluates result then next state, commits only after both
 succeed, and returns through the existing evidence call. Core retains the state
 binder/type and update expressions for lint/capture checks. The interpreter
-uses an activation cell; Go uses a captured local for unmarked state. Marked
-`shared` and `taskLocal` state uses a mutex-protected activation cell in both
-backends. The lock covers the whole operation and is released on every exit;
-a return clause reads a synchronized snapshot. No continuation is captured.
+and Go backend use the same generic activation cell. Its lock protects each
+snapshot and commit separately, including the return clause's snapshot; it is
+never held while executing a clause. This provides safe publication of complete
+values, not atomic read–modify–write operations. Handler implementations own
+operation-level synchronization. No continuation is captured.
 
 An installed activation's evidence carries the transport its own clauses need.
 A Direct handler inside an Exit worker still uses Direct evidence; calls adapt

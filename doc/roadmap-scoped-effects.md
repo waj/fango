@@ -97,25 +97,25 @@ must retain their source type index; an untyped result getter is not an encoding
 
 Inheritance must obey these rules:
 
-- Stateless resumptive handlers inherit only when their dependencies qualify.
-- `with shared state = initial` shares the state cell and serializes each entire
-  operation. `taskLocal` takes a shallow snapshot at spawn and gives the child
-  its own cell; native references inside that snapshot remain shared.
-- An unmarked stateful handler is rejected at compile time when inherited.
-  Check through generic helpers, imports, closures, records, and dictionaries.
-  A check confined to the lexical spawn expression is insufficient.
+- Resumptive handlers inherit their activation identity and share any state cell.
+  There are no state-policy modifiers or compile-time restrictions on inheriting
+  mutable state. Individual snapshots and commits publish complete values;
+  handlers own operation-level locking or serialization. Concurrent operations
+  may overwrite one another's updates.
+- Install a handler inside the task when independent state is wanted. Spawning
+  does not implicitly copy handler state.
 - Rebuild inherited evidence transitively, preserve aliasing and shadowing, and
   replace Async and matching Fail evidence with child boundaries. Never copy a
   parent's abort target into a child. Other abort effects must be handled inside
   the child; local scoped permissions cannot be inherited.
 - Parent return transformations do not transform child task results.
 
-The remaining compiler work includes a persistent inheritance requirement for
-higher-order function contracts, checking those requirements at handler use,
-and reconstructing child evidence in both backends. Existing result-capture
-summaries alone do not express which invocation of an abstract callback forks
-its supplied handler evidence. Do not substitute runtime rejection or assume
-all ambient handlers are inherited regardless of the child's effects.
+The remaining compiler work includes reconstructing child evidence in both
+backends while sharing inherited resumptive state cells, preserving lexical
+dependencies, and installing child control boundaries. Test these rules through
+higher-order functions and generic helpers; do not assume all ambient handlers
+are inherited regardless of the child's effects. No extra function-type
+qualification is needed merely to declare that handler state can be shared.
 
 ## Delivery gates
 
@@ -125,7 +125,7 @@ all ambient handlers are inherited regardless of the child's effects.
 2. DONE — Pure memory readers compose across multiple instances and consumer
    effect rows in both backends; see [readers](reference/library-readers.md#reader).
    Scoped constructors preserve source, sink, and consumer effects.
-3. Validate heterogeneous closure task packaging, inherited-handler policies,
+3. Validate heterogeneous closure task packaging, shared handler activations,
    and child abort boundaries across modules in the evaluator and Go backend.
    Include negative tests through higher-order and generic helper calls.
 4. Deliver the generic native orchestration API and migrate Task callers.

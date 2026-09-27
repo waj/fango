@@ -194,23 +194,7 @@ type evidence struct {
 	handler   *core.Handle
 	frame     *Frame
 	outer     map[int]*evidence
-	state     *handlerCell
-}
-
-// handlerCell is shared independently of an interpretation's outer evidence.
-// Only handlers explicitly marked for inheritance need operation locking.
-type handlerCell struct {
-	mu           sync.Mutex
-	value        Value
-	synchronized bool
-}
-
-func (s *handlerCell) snapshot() Value {
-	if s.synchronized {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-	}
-	return s.value
+	state     *fangort.HandlerState[Value]
 }
 
 // Env holds top-level cells and workers.
@@ -645,11 +629,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			vars := map[string]Value{}
 			if ev.handler.State != nil {
-				if ev.state.synchronized {
-					ev.state.mu.Lock()
-					defer ev.state.mu.Unlock()
-				}
-				vars[ev.handler.State.Name] = ev.state.value
+				vars[ev.handler.State.Name] = ev.state.Snapshot()
 			}
 			for i, p := range clause.Params {
 				if p != "_" && p != "()" {
@@ -763,7 +743,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 		}
 		outer := cloneEvidence(in.evidence)
-		in.evidence[e.Effect.Unique] = &evidence{handler: e, frame: fr, outer: outer, state: &handlerCell{value: state, synchronized: e.State != nil && e.State.Policy != ""}}
+		in.evidence[e.Effect.Unique] = &evidence{handler: e, frame: fr, outer: outer, state: fangort.NewHandlerState(state)}
 		installed := in.evidence[e.Effect.Unique]
 		v, err := in.eval(e.Body, fr)
 		in.evidence = outer
@@ -789,7 +769,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				vars[clause.SuppressedParam] = failureList(snapshotFailure(exit).Suppressed())
 			}
 			if e.State != nil {
-				vars[e.State.Name] = installed.state.snapshot()
+				vars[e.State.Name] = installed.state.Snapshot()
 			}
 			for i, p := range clause.Params {
 				if p != "_" && p != "()" {
@@ -803,7 +783,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		}
 		vars := map[string]Value{}
 		if e.State != nil {
-			vars[e.State.Name] = installed.state.snapshot()
+			vars[e.State.Name] = installed.state.Snapshot()
 		}
 		if e.Return.Param != "_" && e.Return.Param != "()" {
 			vars[e.Return.Param] = v
@@ -985,7 +965,7 @@ func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID, e
 			if _, ok := asExit(next); ok {
 				return next, nil
 			}
-			ev.state.value = next
+			ev.state.Store(next)
 		}
 		return value, nil
 	case *core.Let:

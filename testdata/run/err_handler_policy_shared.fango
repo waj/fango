@@ -1,0 +1,6 @@
+effect Counter
+    next : () -> Int
+
+main() =
+    print (handle next() with shared state = 0 of
+        next () -> resume state with state + 1)

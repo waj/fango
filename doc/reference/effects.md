@@ -216,11 +216,15 @@ ordinary handlers continue to use `resume value`. The value and next-state
 expressions evaluate left to right exactly once, and the state is committed
 only after both finish successfully. The `return` clause sees the final state.
 
-The contextual modifiers `shared` and `taskLocal` may precede the state binder,
-for example `with shared current = initial`. Both serialize a complete operation:
-reading the snapshot, evaluating the clause, and committing its next state.
-An abort releases the operation lock without committing. The names remain
-ordinary identifiers elsewhere, including in `with shared = initial`.
+State snapshots and commits are individually synchronized to publish complete
+values. The clause runs between them without an operation-wide lock: concurrent
+operations can read the same snapshot, and a later commit can overwrite an
+earlier update. Handlers are responsible for operation-level serialization.
+The snapshot is taken before the clause starts, so a lock acquired inside the
+clause cannot protect that implicit read. For atomic updates, keep state in an
+explicit reference and protect its read and write together, or serialize calls
+to the handler. `shared` and `taskLocal` are ordinary identifiers, not modifiers.
+
 Child-task inheritance is not exposed yet; its remaining contract is in the
 [task roadmap](../roadmap-scoped-effects.md#async-orchestration-and-task-results).
 

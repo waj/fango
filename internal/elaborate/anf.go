@@ -51,7 +51,7 @@ func (el *elab) anf(e core.Expr) core.Expr {
 		}
 		var state *core.HandlerState
 		if e.State != nil {
-			state = &core.HandlerState{Policy: e.State.Policy, Name: e.State.Name, Initial: el.anf(e.State.Initial), Ty: e.State.Ty}
+			state = &core.HandlerState{Name: e.State.Name, Initial: el.anf(e.State.Initial), Ty: e.State.Ty}
 		}
 		return &core.Handle{Body: el.anf(e.Body), State: state, Effect: e.Effect, Scope: e.Scope, Scoped: e.Scoped, Clauses: clauses, Return: ret, Ty: e.Ty, Control: e.Control}
 	case *core.Bracket:
