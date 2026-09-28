@@ -23,9 +23,9 @@ The restricted [scoped callback contract](reference/functions.md#scoped-callback
 [source escape checks](design/inference.md#scoped-callback-rows), and
 [erased local-state boundary](design/core.md#scoped-state-boundary) are implemented.
 General first-class rank-two types and recursive scoped runners are outside this
-contract; they are not prerequisites for the task API below. Executing scoped
-local state during compilation remains limited by the existing sidecar-native
-restriction; extending the stage native host is separate unfinished work.
+contract; they are not prerequisites for the task API below. Stage execution
+of other sidecar-native operations remains limited by the existing native-host
+restriction; extending that host is separate unfinished work.
 
 ## Async orchestration and Task results
 

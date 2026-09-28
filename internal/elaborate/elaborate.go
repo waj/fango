@@ -329,8 +329,6 @@ func intrinsicDefsNamed(names []string, ck *infer.Checker) []core.Def {
 		ty := (&elab{ck: ck}).eraseRuntimeKinds(eraseRows(ck.Intrinsics[name].Body))
 		if name == types.AsyncParMapName {
 			defs = append(defs, parallelMapDef(name, ty, ck))
-		} else if name == types.LocalRunName {
-			defs = append(defs, localRunDef(name, ty, ck))
 		} else if name == types.ScopeBracketName {
 			defs = append(defs, scopeBracketDef(name, ty, ck))
 		} else if types.FailureInspection(name) {

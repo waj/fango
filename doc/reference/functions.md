@@ -160,7 +160,6 @@ the runner's residual row.
 Runners must be called by name with all parameters supplied. Partial application,
 first-class aliases, recursion, mutual recursion, class-constrained runner
 annotations, and scoped native sidecars are rejected with `SCOPED CALLBACK`.
-The bundled local-state intrinsic is the compiler-checked native exception.
 Ordinary consumers and parsing helpers remain ordinary first-class functions.
 
 A `SCOPE ESCAPE` rejects a local permission in a returned value, a latent

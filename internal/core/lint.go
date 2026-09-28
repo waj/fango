@@ -78,8 +78,6 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowStage bool) []error {
 			if _, _, _, ok := types.ScopedCallback(d.SourceType, len(d.Params)); !ok {
 				l.errorf("%s: invalid scoped callback contract", where)
 			}
-		} else if d.Name == types.LocalRunName {
-			l.errorf("%s: missing scoped callback contract", where)
 		}
 		l.defName = d.Name
 		l.scope[d.Name] = true

@@ -61,13 +61,13 @@ intrinsic-specific checks concern ownership and lowering.
 
 ## Scoped state boundary
 
-`Runtime.Local.run` is a general local-state intrinsic. It lowers to existing
-Let, Lambda, App, and NativeCall nodes: allocate a private `Runtime.Ref`, build
-read/write callbacks, and call the consumer. The cell's value index and callback
-row are checked against the bundled Cell declaration before lowering. No Core
-node recognizes Reader; `Reader.withBytes` is ordinary Fango code using this
-primitive. The native reference synchronizes individual reads and writes, with no
-scheduler. Scope permissions require no runtime identities.
+`Runtime.Local.run` is ordinary Fango code: a private parameterized effect
+handler supplies read/write callbacks bound to its activation. Each activation
+owns a state cell; the scoped callback rule prevents those callbacks from
+escaping. Reader and Writer use this general runner. No Core node recognizes
+either library or local state, and scope permissions require no runtime
+identities. Handler state follows the snapshot and commit rules described in
+[effect execution](effects.md#handler-activations-and-state).
 
 Scoped definitions retain their quantified `SourceType` and a `Scoped` marker;
 call sites retain their instantiated source signature. Core lint validates the

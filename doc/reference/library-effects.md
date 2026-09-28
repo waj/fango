@@ -78,6 +78,30 @@ the current state and `put next` replaces it. Cells belong to handler
 activations, so nested runs—including two runs of the same `State s`—are
 independent.
 
+## Scoped local state
+
+`Runtime.Local` exposes local mutable state under a
+[scoped callback](functions.md#scoped-callbacks):
+
+```fango
+type Cell e a = { read : () ->{e} a, write : a ->{e} () }
+
+{-# scoped s #-}
+run : a -> (Cell s a ->{s} b) ->{e} b
+```
+
+`run initial use` creates a fresh cell, calls `use`, and returns its result.
+Reading returns the last written value, initially `initial`. Writing replaces
+that value. The cell's permission must stay inside `use`; parsed data or other
+permission-independent results may leave. Additional consumer effects remain
+in `e`. An entirely local computation is pure at the call boundary. `Cell`
+values contain functions and cannot cross a task boundary.
+
+`Runtime.Local.run` is ordinary Fango code using a private stateful effect
+handler. Each call has its own handler state, including when calls are nested.
+It is the foundation of [`Reader.withBytes`](library-readers.md#reader). A
+computation using only this local state can run during compile-time evaluation.
+
 ## Random
 
 `Random` declares a randomness effect and two ready-made handlers:

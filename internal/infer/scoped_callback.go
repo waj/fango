@@ -218,29 +218,3 @@ func hasScopedPermission(t types.Type) bool {
 	}
 	return false
 }
-
-func (ck *Checker) checkLocalCell(d *ast.ValueDecl, params []types.Type) []diag.Error {
-	fail := func(message string) []diag.Error {
-		return []diag.Error{diag.Errorf(d.NameSpan, "SCOPED CALLBACK", "%s", message)}
-	}
-	callback := params[1].(*types.TFun)
-	con := callback.Arg.(*types.TCon)
-	adt := ck.ADTs[con.Unique]
-	if adt == nil || len(adt.Ctors) != 1 || len(adt.Ctors[0].Fields) != 2 {
-		return fail("The local Cell must contain read and write callbacks.")
-	}
-	fields := adt.InstFields(adt.Ctors[0], con.Args)
-	read, readOK := fields[0].(*types.TFun)
-	write, writeOK := fields[1].(*types.TFun)
-	if !readOK || !writeOK || !types.Equal(read.Arg, ck.B.Unit) || !types.Equal(read.Ret, params[0]) ||
-		!types.Equal(write.Arg, params[0]) || !types.Equal(write.Ret, ck.B.Unit) ||
-		!types.Equal(read.Eff, callback.Eff) || !types.Equal(write.Eff, callback.Eff) {
-		return fail("The local Cell callbacks must preserve the scoped row and stored value type.")
-	}
-	for _, dependency := range []string{"Runtime.Ref.new", "Runtime.Ref.read", "Runtime.Ref.write"} {
-		if ck.Natives[dependency] == nil {
-			return fail("Runtime.Local.run requires the bundled Runtime.Ref operations.")
-		}
-	}
-	return nil
-}

@@ -633,9 +633,6 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 		return errs
 	}
 	arity := types.IntrinsicArity(d.Name)
-	if d.Name == types.LocalRunName && d.ScopedRow == "" {
-		return append(errs, diag.Errorf(d.NameSpan, "SCOPED CALLBACK", "Runtime.Local.run requires its scoped callback contract."))
-	}
 	// Elaboration reads the parameter types structurally when it builds the
 	// body, so a bundled annotation that does not match the shape the compiler
 	// implements is a declaration error rather than a later panic.
@@ -671,22 +668,6 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 		}
 	}
 
-	if d.Name == types.LocalRunName {
-		cell, ok := params[1].(*types.TFun)
-		if !ok {
-			return append(errs, diag.Errorf(d.NameSpan, "SCOPED CALLBACK", "Runtime.Local.run needs a Cell callback."))
-		}
-		con, ok := cell.Arg.(*types.TCon)
-		if !ok || con.Name != "Runtime.Local.Cell" || len(con.Args) != 2 || !types.Equal(con.Args[1], params[0]) || !types.Equal(con.Args[0], cell.Eff.Tail) || !types.Equal(cell.Ret, rest) {
-			return append(errs, diag.Errorf(d.NameSpan, "SCOPED CALLBACK", "Runtime.Local.run must preserve the cell's value type and callback result."))
-		}
-	}
-	if d.Name == types.LocalRunName {
-		errs = append(errs, ck.checkLocalCell(d, params)...)
-		if len(errs) != 0 {
-			return errs
-		}
-	}
 	if d.Name == types.FailAttemptReportName && !types.AttemptReportShape(ty) {
 		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic `%s` must preserve the action's residual row and return `Result (Report error) value`.", ast.Spelling(d.Name)))
 	}

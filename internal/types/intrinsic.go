@@ -3,9 +3,6 @@ package types
 // Compiler intrinsics are bundled native declarations implemented as Core
 // nodes. Recognition uses resolved declaration identity, never user spelling.
 const (
-
-	// LocalRunName owns isolated mutable state under a scoped callback.
-	LocalRunName       = "Runtime.Local.run"
 	AsyncParMapName    = "Async.parMap"
 	AsyncLaunchName    = "Async.launch"
 	AsyncRebaseName    = "Async.rebase"
@@ -36,7 +33,7 @@ func IntrinsicArity(name string) int {
 	switch name {
 	case ScopeBracketName:
 		return 3
-	case LocalRunName, FailureArgumentName, AsyncLaunchName, AsyncParMapName:
+	case FailureArgumentName, AsyncLaunchName, AsyncParMapName:
 		return 2
 	case AsyncSuperviseName, AsyncRebaseName, FailureEffectName, FailureOperationName, FailureArgumentCountName, FailureSuppressedName, FailAttemptReportName:
 		return 1

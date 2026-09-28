@@ -118,31 +118,8 @@ Native code must honor its declaration and may not invoke opaque Fango payloads.
 `write : Ref a -> a ->{IO} ()`. Aliases observe the latest write. The reference
 keeps its value alive until garbage collection; it has no close operation.
 Its representation is private, and references cannot cross the task boundary.
-Scoped Reader and Writer buffers use `Runtime.Local` instead.
-
-## Scoped local state
-
-`Runtime.Local` exposes local mutable state under a
-[scoped callback](functions.md#scoped-callbacks):
-
-```fango
-type Cell e a = { read : () ->{e} a, write : a ->{e} () }
-
-{-# scoped s #-}
-run : a -> (Cell s a ->{s} b) ->{e} b
-```
-
-`run initial use` creates a fresh cell, calls `use`, and returns its result.
-Reading returns the last written value, initially `initial`. Writing replaces
-that value. The cell's permission must stay inside `use`; parsed data or other
-permission-independent results may leave. Additional consumer effects remain
-in `e`. An entirely local computation is pure at the call boundary. `Cell`
-values contain functions and cannot cross a task boundary.
-
-This bundled intrinsic uses ordinary reference storage internally and is the
-foundation of [`Reader.withBytes`](library-readers.md#reader). Its reference
-sidecar is unavailable to compile-time evaluation, so executing either runner
-in a splice currently reports `COMPILE-TIME NATIVE`, despite a pure source row.
+Scoped Reader and Writer buffers use the Fango
+[`Runtime.Local` handler](library-effects.md#scoped-local-state) instead.
 
 ## Native effect operations
 

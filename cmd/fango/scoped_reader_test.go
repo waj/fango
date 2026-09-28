@@ -87,7 +87,8 @@ main = $(Meta.lift (Cursor.withNumber (\number -> number + 2)))
 	if !strings.Contains(staged, "Checking  Cursor (from cache)") {
 		t.Fatalf("stage wrapper not reused: %s", staged)
 	}
-	// Local state retains the existing stage restriction on sidecar natives.
+	// The cached scoped wrapper can now execute its Fango state handler during
+	// stage evaluation.
 	writeModuleFile(t, dir, "Main.fango", `import Cursor
 import Reader
 import Bytes
@@ -95,8 +96,8 @@ import Meta
 main = $(Meta.lift (Cursor.withText "abc" (\reader -> Bytes.length (Reader.readUpTo reader 1))))
 `)
 	var stageOut, stageErr bytes.Buffer
-	if code := run([]string{"check", "-v", path}, &stageOut, &stageErr); code == 0 || !strings.Contains(stageErr.String(), "COMPILE-TIME NATIVE") {
-		t.Fatalf("sidecar stage restriction lost: %s", stageErr.String())
+	if code := run([]string{"check", "-v", path}, &stageOut, &stageErr); code != 0 || !strings.Contains(stageErr.String(), "Checking  Cursor (from cache)") {
+		t.Fatalf("cached scoped stage evaluation failed: %s", stageErr.String())
 	}
 	writeModuleFile(t, dir, "Main.fango", `import Cursor
 bad = Cursor.withText "abc" (\reader -> reader)
