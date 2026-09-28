@@ -415,7 +415,11 @@ func DumpExpr(e Expr) string {
 				b.WriteString(" " + dumpLocalBind(bind))
 			}
 		}
-		fmt.Fprintf(&b, " %s)", DumpExpr(e.Result))
+		if e.MissingResultAt.File != nil {
+			b.WriteString(" (missing-result))")
+		} else {
+			fmt.Fprintf(&b, " %s)", DumpExpr(e.Result))
+		}
 		return b.String()
 	case *Case:
 		var b strings.Builder

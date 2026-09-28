@@ -144,7 +144,9 @@ main =
             return n -> n + 2)
 ```
 
-The compiler adds the declaring effect to each operation's type. Functions may
+Later operation signatures may outdent from the first while staying indented
+under the declaration; the formatter aligns them. The compiler adds the
+declaring effect to each operation's type. Functions may
 annotate closed or open effect rows. An operation with a Unit argument is
 called explicitly with `()`.
 
@@ -171,8 +173,9 @@ A handler handles one effect and must contain a clause group for every
 operation of that effect. Adjacent repetitions of an operation form one
 source-ordered, exhaustive, non-redundant pattern group; a noncontiguous repeat
 is a duplicate-clause error. An optional adjacent `return` group matches the
-handled computation's normal result under the same rules. All clauses align
-like `case` branches and accept full argument patterns. `resume value`
+handled computation's normal result under the same rules. Clauses accept full
+argument patterns and may vary in indentation like `case` branches; the
+formatter aligns them. `resume value`
 continues from a resumptive operation. An abort clause instead returns the
 handler answer directly and has no resume binding:
 

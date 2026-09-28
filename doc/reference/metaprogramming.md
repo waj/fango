@@ -65,6 +65,9 @@ deriver Tag
 type Colour = Red | Green Int deriving (Tag)
 ```
 
+Later deriver methods may outdent from the first while staying indented under
+`deriver`; the formatter aligns them.
+
 A deriver method's type is dictated by the class: for a class method with *n*
 arrows, its deriver method takes a `TypeInfo` plus *n* `Code` arguments and
 returns `Code`. A deriver is otherwise an ordinary Fango function, checked by

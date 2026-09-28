@@ -49,6 +49,25 @@ type checkErr struct {
 	line  int
 }
 
+func TestMissingBlockResultIsCheckedAfterParsing(t *testing.T) {
+	for _, src := range []string{
+		"value =\n    x = 1\n",
+		"value = (\\_ ->\n    x = 1\n)\n",
+		"value = x = 1\n",
+	} {
+		_, _, errs := check(t, src)
+		found := false
+		for _, err := range errs {
+			if err.Error() == "BLOCK RESULT" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%q: wanted BLOCK RESULT, got %v", src, errs)
+		}
+	}
+}
+
 func (e checkErr) Error() string { return e.title }
 
 func TestInstallPreludeUsesDeclaredMetadata(t *testing.T) {

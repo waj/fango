@@ -92,6 +92,9 @@ func (p *printer) renderBlock(b *ast.Block, ind int) bool {
 			return false
 		}
 	}
+	if b.MissingResultAt.File != nil {
+		return true
+	}
 	if !p.placeBefore(b.Result.Span().Start, ind) {
 		return false
 	}

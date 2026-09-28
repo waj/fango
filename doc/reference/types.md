@@ -182,7 +182,11 @@ and `>=` are generated together.
 
 ## Pattern matching
 
-`case` branches align with the first pattern after `of`. Patterns support
+`case` branches may start at different columns as long as each stays deeper
+than the lesser of the `case` keyword's column and its enclosing layout
+column. This preserves branches to the left of an inline `case`. At a changed
+column, a later branch's pattern and `->` must be on the same line. The
+formatter aligns branches. Patterns support
 constructors, nominal records, integer/float/string/Char literals, variables,
 pinned values, `()`, and `_`. Unit has exactly one inhabitant, so `()` is an
 exhaustive Unit pattern. `^expected` compares with an existing local, top-level,

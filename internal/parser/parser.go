@@ -475,7 +475,8 @@ func (p *parser) parseDeriverDecl() ast.Decl {
 	col := first.Pos().Col
 	p.lay.push(ctxBlock, col)
 	defer p.lay.pop()
-	for p.peek().Kind != token.EOF && p.peek().Pos().Col >= col {
+	for p.peek().Kind != token.EOF && p.peek().Pos().Col > 1 && p.peek().Pos().Col <= col {
+		p.stmtStart = p.pos
 		name, nameSpan, ok := p.parseMethodName("DERIVER METHOD",
 			"I expect a method name here, like `show` or `(==)`.")
 		if !ok {
@@ -722,11 +723,11 @@ func (p *parser) parseEffectDecl() ast.Decl {
 		}
 		ops = append(ops, ast.OpSig{Name: opName, NameSpan: opSpan, Type: ty, Native: native, Abort: abort})
 		nt := p.peek()
-		if nt.Kind == token.EOF || nt.Pos().Col < col {
+		if nt.Kind == token.EOF || nt.Pos().Col <= 1 {
 			break
 		}
-		if nt.Pos().Col != col {
-			p.errorAt(nt.Span, "SYNTAX PROBLEM", "Effect operation signatures must line up at the same column.")
+		if nt.Pos().Col > col {
+			p.errorAt(nt.Span, "SYNTAX PROBLEM", "This line is indented past the first operation signature and reads as a continuation.")
 			return nil
 		}
 	}
@@ -1257,6 +1258,9 @@ func (p *parser) parseInlineBlock() ast.Expr {
 
 		if p.peek().Kind != token.SEMICOLON {
 			if !isResult {
+				if len(binds) > 0 {
+					return p.blockMissingResult(binds, items, p.peek().Span)
+				}
 				p.errorAt(p.prevSpan(), "SYNTAX PROBLEM",
 					"This block ended without a result expression. Add `;` and the expression\nwhose value this block should return.")
 				return nil
@@ -1289,10 +1293,18 @@ func closesBlock(k token.Kind) bool {
 	return k == token.KwThen || k == token.KwElse || k == token.COMMA || k == token.RPAREN || k == token.RBRACKET || k == token.RBRACE
 }
 
+func (p *parser) blockMissingResult(binds []ast.LocalBind, items []ast.BlockItem, at source.Span) ast.Expr {
+	return &ast.Block{Binds: binds, Items: items, Result: &ast.UnitLit{Sp: p.prevSpan()}, MissingResultAt: at}
+}
+
 // parseBlock parses a statement block at the given column: `name = expr`
 // bindings (optionally annotated) followed by exactly one result expression.
 // Zero-binding blocks collapse to the plain result expression.
 func (p *parser) parseBlock(col int) ast.Expr {
+	owner := p.lay.innermost().col
+	if col <= owner && p.exprParenDepth > 0 {
+		owner = 0 // a parenthesized lambda uses its closing delimiter
+	}
 	p.lay.push(ctxBlock, col)
 	defer p.lay.pop()
 
@@ -1305,22 +1317,33 @@ func (p *parser) parseBlock(col int) ast.Expr {
 	for {
 		t := p.peek()
 		if t.Kind == token.EOF {
+			if pendingAnn == nil && (len(binds) > 0 || hasExprStmt) {
+				return p.blockMissingResult(binds, items, t.Span)
+			}
 			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
 				"This block has no result expression yet. A block is zero or more\n`name = …` bindings followed by one final expression.")
 			return nil
 		}
-		if t.Pos().Col < col {
+		if p.branchBoundary() || t.Pos().Col <= owner || closesBlock(t.Kind) {
 			if pendingAnn != nil {
 				p.errorAt(t.Span, "MISSING DEFINITION",
 					"The type annotation for `"+pendingAnnName.Text+"` must sit directly\nabove its binding.")
 				return nil
 			}
+			if len(binds) > 0 || hasExprStmt {
+				return p.blockMissingResult(binds, items, t.Span)
+			}
 			p.errorAt(t.Span, "SYNTAX PROBLEM",
 				"This block ended without a result expression. A block is zero or\nmore `name = …` bindings followed by one final expression.")
 			return nil
 		}
+		if t.Pos().Col > col {
+			p.errorAt(t.Span, "SYNTAX PROBLEM", "This line is indented past the first item of its block and reads as a continuation.")
+			return nil
+		}
 
-		switch p.classifyStmt(col) {
+		p.stmtStart = p.pos
+		switch p.classifyStmt(t.Pos().Col) {
 		case stmtLocalOp:
 			op, _ := p.opNameAt(p.pos)
 			p.errorAt(p.at(p.pos).Span.Merge(p.at(p.pos+2).Span), "OPERATOR DEFINITION",
@@ -1408,7 +1431,7 @@ func (p *parser) parseBlock(col int) ast.Expr {
 			if result == nil {
 				return nil
 			}
-			if nt := p.peek(); nt.Kind != token.EOF && nt.Pos().Col == col && !closesBlock(nt.Kind) {
+			if nt := p.peek(); nt.Kind != token.EOF && nt.Pos().Col > owner && nt.Pos().Col <= col && !p.branchBoundary() && !closesBlock(nt.Kind) {
 				items = append(items, ast.BlockItem{BindIndex: -1, Expr: result})
 				hasExprStmt = true
 				continue
@@ -1762,12 +1785,20 @@ func (p *parser) parseHandle() ast.Expr {
 	if !p.expect(token.KwOf, "I expect `of` after the expression being handled.") {
 		return nil
 	}
-	first := p.peekInExpr()
+	first := p.peek()
 	if first.Kind == token.EOF {
 		p.errorAt(p.prevSpan(), TitleUnexpectedEOF, "I expect at least one handler clause after `of`.")
 		return nil
 	}
-	p.lay.push(ctxCase, first.Pos().Col)
+	owner := h.Pos().Col
+	if parent := p.lay.innermost().col; parent < owner {
+		owner = parent
+	}
+	if first.Pos().Col <= owner {
+		p.errorAt(first.Span, "SYNTAX PROBLEM", "Handler clauses must be indented past their enclosing layout column.")
+		return nil
+	}
+	p.lay.pushBranch(ctxHandle, first.Pos().Col, owner)
 	defer p.lay.pop()
 	result := &ast.Handle{Body: body, State: state, Sp: h.Span}
 	lastClause := ""
@@ -1834,7 +1865,7 @@ func (p *parser) parseHandle() ast.Expr {
 		}
 		lastClause = opName
 		nt := p.peek()
-		if nt.Kind == token.EOF || !p.lay.atBranchCol(nt.Pos()) {
+		if nt.Kind == token.EOF || !p.branchBoundaryAt(len(p.lay.stack)-1) {
 			break
 		}
 	}
@@ -1878,10 +1909,9 @@ func (p *parser) parseLambda() ast.Expr {
 	return &ast.Lambda{Params: params, Body: body, Sp: bs.Span}
 }
 
-// parseCase parses `case scrutinee of` and its branches. The column of the
-// first pattern token after `of` defines branch alignment (layout rule 2,
-// doc/reference.md, "Modules, imports, and source layout"): a token at exactly that column starts a new branch, left of it ends
-// the case. Branch bodies are statement blocks (doc/design.md, "Language semantics") or inline expressions.
+// parseCase parses `case scrutinee of` and its branches. A branch head and
+// arrow on a later line start a sibling anywhere inside the enclosing layout.
+// Branch bodies are statement blocks or inline expressions.
 func (p *parser) parseCase() ast.Expr {
 	caseTok := p.next()
 	scrut := p.parseExpr()
@@ -1891,7 +1921,7 @@ func (p *parser) parseCase() ast.Expr {
 	if !p.expect(token.KwOf, "I expect `of` after the expression in a `case`.") {
 		return nil
 	}
-	first := p.peekInExpr()
+	first := p.peek()
 	if first.Kind == token.EOF {
 		if p.peek().Kind == token.EOF {
 			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
@@ -1902,7 +1932,15 @@ func (p *parser) parseCase() ast.Expr {
 		}
 		return nil
 	}
-	p.lay.push(ctxCase, first.Pos().Col)
+	owner := caseTok.Pos().Col
+	if parent := p.lay.innermost().col; parent < owner {
+		owner = parent
+	}
+	if first.Pos().Col <= owner {
+		p.errorAt(first.Span, "SYNTAX PROBLEM", "Case branches must be indented past their enclosing layout column.")
+		return nil
+	}
+	p.lay.pushBranch(ctxCase, first.Pos().Col, owner)
 	defer p.lay.pop()
 
 	var branches []ast.CaseBranch
@@ -1921,7 +1959,7 @@ func (p *parser) parseCase() ast.Expr {
 			return nil
 		}
 		branches = append(branches, ast.CaseBranch{Pattern: pat, Body: body})
-		if nt := p.peek(); nt.Kind == token.EOF || !p.lay.atBranchCol(nt.Pos()) {
+		if nt := p.peek(); nt.Kind == token.EOF || !p.branchBoundaryAt(len(p.lay.stack)-1) {
 			return &ast.Case{Scrutinee: scrut, Branches: branches, Sp: caseTok.Span}
 		}
 	}
@@ -2372,6 +2410,8 @@ func (p *parser) parseAtom() ast.Expr {
 		}
 		p.exprParenDepth++
 		defer func() { p.exprParenDepth-- }()
+		p.lay.push(ctxParen, 0)
+		defer p.lay.pop()
 		e := p.parseExpr()
 		if e == nil {
 			return nil
@@ -2540,9 +2580,8 @@ func (p *parser) handlerStateStart(pos int) bool {
 // peek returns the current token, ignoring layout.
 func (p *parser) peek() token.Token { return p.toks[p.pos] }
 
-// peekInExpr returns the current token, or a synthetic EOF if the offside
-// rule says the current construct is over (token at or left of the layout
-// column). This is how declaration boundaries end expressions.
+// peekInExpr returns the current token, or a synthetic EOF when the current
+// layout context or a later branch head ends the expression.
 func (p *parser) peekInExpr() token.Token {
 	t := p.toks[p.pos]
 	if t.Kind == token.EOF {
@@ -2551,10 +2590,75 @@ func (p *parser) peekInExpr() token.Token {
 	if p.stopWith > 0 && p.handlerStateStart(p.pos) {
 		return token.Token{Kind: token.EOF, Span: t.Span}
 	}
-	if p.pos != p.stmtStart && p.lay.checkOffside(t.Pos()) != offContinue {
+	// A ragged sibling may begin left of the first item. Its head still owns
+	// all tokens on that physical line, including `=`, `:`, and `->` at or
+	// left of the block's original alignment column.
+	if p.stmtStart >= 0 && p.pos > p.stmtStart && p.toks[p.stmtStart].Pos().Line == t.Pos().Line {
+		return t
+	}
+	if p.pos != p.stmtStart && (p.branchBoundary() || p.lay.checkOffside(t.Pos()) != offContinue) {
 		return token.Token{Kind: token.EOF, Span: t.Span}
 	}
 	return t
+}
+
+// branchBoundary recognizes a later case/handler branch by its head and arrow,
+// independently of its exact column. The innermost eligible branch group owns
+// the line; an outer group cannot steal a nested group's branch.
+func (p *parser) branchBoundary() bool {
+	if p.pos >= len(p.toks) {
+		return false
+	}
+	for i := len(p.lay.stack) - 1; i >= 0; i-- {
+		ctx := p.lay.stack[i]
+		if ctx.kind == ctxParen {
+			return false // a parenthesis closes before the outer branch group resumes
+		}
+		if (ctx.kind == ctxCase || ctx.kind == ctxHandle) && p.peek().Pos().Col > ctx.owner {
+			return p.branchBoundaryAt(i)
+		}
+	}
+	return false
+}
+
+func (p *parser) branchBoundaryAt(i int) bool {
+	if p.pos == 0 || p.pos == p.stmtStart || p.pos >= len(p.toks) {
+		return false
+	}
+	t := p.peek()
+	if t.Kind == token.EOF || p.toks[p.pos-1].Pos().Line == t.Pos().Line {
+		return false
+	}
+	ctx := p.lay.stack[i]
+	if (ctx.kind != ctxCase && ctx.kind != ctxHandle) || t.Pos().Col <= ctx.owner {
+		return false
+	}
+	if t.Pos().Col == ctx.col {
+		return true // preserve multiline heads at the established column
+	}
+	q := *p
+	q.lay = layout{stack: []layoutCtx{{kind: ctxDecl, col: 0}}}
+	q.stmtStart = q.pos
+	q.errs = nil
+	if ctx.kind == ctxCase {
+		if q.parsePattern() == nil {
+			return false
+		}
+	} else {
+		if t.Kind != token.LIDENT && t.Kind != token.UIDENT {
+			return false
+		}
+		if t.Kind == token.UIDENT {
+			_, final, _ := q.parseQualifiedName()
+			if final != token.LIDENT {
+				return false
+			}
+		} else {
+			q.next()
+		}
+		q.parseClauseParams()
+	}
+	return len(q.errs) == 0 && q.peek().Kind == token.ARROW && q.peek().Pos().Line == t.Pos().Line
 }
 
 func (p *parser) next() token.Token {

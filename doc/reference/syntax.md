@@ -18,8 +18,10 @@ bindings. Type names and constructor names are separate namespaces.
 
 ## Blocks and sequencing
 
-Indented declaration bodies are blocks. Statements align with the first item,
-and a block ends in exactly one result expression:
+Indented declaration bodies are blocks. The first item sets the block's
+indentation ceiling. Later items may start further left, but must remain deeper
+than the enclosing layout column; a line further right than the first item
+continues the preceding item. A block ends in exactly one result expression:
 
 ```fango
 hypotenuse =
@@ -28,6 +30,11 @@ hypotenuse =
     x * x + y * y
 ```
 
+The same outdent rule applies to indented effect and class signatures and to
+instance and deriver methods. The formatter aligns all items in each group.
+If a block ends after a binding, parsing and formatting still succeed; checking
+reports `BLOCK RESULT` because the block has no expression to return.
+
 Bindings are eager and sequential. Unit-valued expression statements may be
 placed before the final result, which is how effectful work is sequenced.
 There is no `let ... in` expression.
@@ -35,11 +42,15 @@ There is no `let ... in` expression.
 A closing parenthesis may align with the indentation of the line containing
 its opening parenthesis, even when an indented body ends immediately before it.
 Several closing parentheses may share that line.
+An expression inside grouping parentheses has a fresh layout boundary until
+the matching `)`.
 When a lambda is inside parentheses, its body may begin at any column on the
 next line, including left of the surrounding block. The closing parenthesis
-ends that body, so a following statement at the surrounding block's column
-belongs to that block. Without such parentheses, a multiline body must begin
-further right than the surrounding block's column.
+ends that body. Later items inside the body may outdent to the surrounding
+block's column and still belong to the lambda; the first body item remains
+their indentation ceiling. A statement after `)` at the surrounding block's
+column belongs to that block. Without such parentheses, a multiline body must
+begin further right than the surrounding block's column.
 
 A call answering anything other than Unit is not a statement, and binding it
 would need a name nothing reads. `ignore : a -> ()`, declared in `Basics` and

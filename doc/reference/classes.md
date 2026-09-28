@@ -5,7 +5,9 @@ Class declarations, dictionary constraints, instance selection, and defaulting.
 [Reference index](../reference.md).
 
 A class has exactly one type parameter and an indented block of method
-signatures. An instance supplies every method exactly once:
+signatures. Later signatures and instance methods may outdent from the first
+while staying indented under the declaration; the formatter aligns them. An
+instance supplies every method exactly once:
 
 ```fango
 class Label a

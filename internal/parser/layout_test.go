@@ -6,10 +6,7 @@ import (
 	"github.com/waj/fango/internal/source"
 )
 
-// Direct unit tests on the layout predicates: rules 2 and 3 have no parser
-// client, so the predicates are pinned down here (see doc/design.md,
-// "Testing and performance",
-// honest costs).
+// Direct unit tests on the layout boundary predicate.
 func TestCheckOffside(t *testing.T) {
 	var l layout
 	l.push(ctxDecl, 1)
@@ -37,17 +34,5 @@ func TestCheckOffside(t *testing.T) {
 	}
 	if got := l.checkOffside(source.Pos{Line: 1, Col: 2}); got != offContinue {
 		t.Errorf("top-level col 2: got %v, want offContinue", got)
-	}
-}
-
-func TestAtBranchCol(t *testing.T) {
-	var l layout
-	l.push(ctxDecl, 1)
-	l.push(ctxBlock, 7)
-	if !l.atBranchCol(source.Pos{Line: 3, Col: 7}) {
-		t.Error("col 7 should be at the branch column")
-	}
-	if l.atBranchCol(source.Pos{Line: 3, Col: 8}) {
-		t.Error("col 8 should not be at the branch column")
 	}
 }

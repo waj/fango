@@ -2,22 +2,23 @@ package parser
 
 import "github.com/waj/fango/internal/source"
 
-// The offside rule, isolated per doc/reference.md, "Modules, imports, and source layout". This is the full, final API:
-// a stack of indentation contexts plus two predicates: top-level
-// declarations (column 1), block statements (see doc/design.md, "Language
-// semantics"), and case branches push contexts at their alignment columns.
+// Layout contexts keep the first item column as a continuation boundary.
+// The parser separately recognizes outdented siblings and branch heads.
 
 type ctxKind int
 
 const (
-	ctxDecl  ctxKind = iota // top-level declarations, column 1
-	ctxBlock                // block statement alignment (doc/design.md, "Language semantics")
-	ctxCase                 // case-branch alignment
+	ctxDecl   ctxKind = iota // top-level declarations, column 1
+	ctxBlock                 // first block item column
+	ctxCase                  // first case branch column
+	ctxHandle                // first handler clause column
+	ctxParen                 // expression enclosed by `(` and `)`
 )
 
 type layoutCtx struct {
-	kind ctxKind
-	col  int
+	kind  ctxKind
+	col   int
+	owner int // enclosing layout boundary for case/handler; zero otherwise
 }
 
 type layout struct {
@@ -25,7 +26,11 @@ type layout struct {
 }
 
 func (l *layout) push(kind ctxKind, col int) {
-	l.stack = append(l.stack, layoutCtx{kind, col})
+	l.stack = append(l.stack, layoutCtx{kind: kind, col: col})
+}
+
+func (l *layout) pushBranch(kind ctxKind, col, owner int) {
+	l.stack = append(l.stack, layoutCtx{kind: kind, col: col, owner: owner})
 }
 
 func (l *layout) pop() {
@@ -55,10 +60,4 @@ func (l *layout) checkOffside(pos source.Pos) offsideResult {
 	default:
 		return offEnd
 	}
-}
-
-// atBranchCol reports whether the position sits exactly at the innermost
-// context's alignment column — the "starts a new branch/binding" predicate.
-func (l *layout) atBranchCol(pos source.Pos) bool {
-	return pos.Col == l.innermost().col
 }

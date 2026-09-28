@@ -1,23 +1,15 @@
-(module
-  (def bad1 (params x) (case (var x) (branch (pctor True) (app (int 1) (ctor False))))))
+(module)
 -- errors --
--- SYNTAX PROBLEM ------------------------------- err_case.fango
-
-The expression seemed complete, but then I ran into this.
-
-4|           False -> 2
-                   ^^
-
 -- SYNTAX PROBLEM ------------------------------- err_case.fango
 
 I expect `->` after a case branch's pattern.
 
-8|         Just -1 -> 1
+3|         Just -1 -> 1
                 ^
 
 -- UNFINISHED PROGRAM --------------------------- err_case.fango
 
 I expect at least one branch after `of`, like `True -> 1`.
 
-12|     case x of
-               ^^
+7|     case x of
+              ^^

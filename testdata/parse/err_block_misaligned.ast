@@ -1,9 +1,0 @@
-(module)
--- errors --
--- SYNTAX PROBLEM ------------------- err_block_misaligned.fango
-
-This block ended without a result expression. A block is zero or
-more `name = …` bindings followed by one final expression.
-
-3|    a + 1
-      ^

@@ -101,12 +101,90 @@ func TestParenthesizedLambdaBodyAtEnclosingBlockColumn(t *testing.T) {
 	}
 }
 
+func TestFlexibleIndentationKeepsCanonicalTree(t *testing.T) {
+	cases := []struct{ name, ragged, canonical string }{
+		{"case branches", "match x =\n    case x of\n        True -> 1\n      False -> 2\n          _ -> 3\n", "match x =\n    case x of\n        True -> 1\n        False -> 2\n        _ -> 3\n"},
+		{"nested cases", "match x y =\n    case x of\n        True ->\n            case y of\n                True -> 1\n              False -> 2\n      False -> 3\n", "match x y =\n    case x of\n        True ->\n            case y of\n                True -> 1\n                False -> 2\n        False -> 3\n"},
+		{"constructor result before branch", "match x =\n    case x of\n        Just y ->\n            if y then\n                1\n            else\n                Found y\n        Nothing -> 0\n", "match x =\n    case x of\n        Just y ->\n            if y then\n                1\n            else\n                Found y\n        Nothing -> 0\n"},
+		{"handler clauses", "run action =\n    handle action of\n        emit value -> resume value\n      log value -> resume value\n          return value -> value\n", "run action =\n    handle action of\n        emit value -> resume value\n        log value -> resume value\n        return value -> value\n"},
+		{"block items", "main =\n        x = 1\n      y = x + 2\n       y\n", "main =\n    x = 1\n    y = x + 2\n    y\n"},
+		{"nested blocks", "main =\n    x =\n            y = 1\n          y\n   x\n", "main =\n    x =\n        y = 1\n        y\n    x\n"},
+		{"parenthesized lambda outdent", "main =\n    foo (\\_ ->\n        foo\n    bar\n    )\n", "main =\n    foo (\\_ ->\n        foo\n        bar\n    )\n"},
+		{"parenthesized lambda binding outdent", "main =\n    foo (\\_ ->\n        x = 1\n    x\n    )\n", "main =\n    foo (\\_ ->\n        x = 1\n        x\n    )\n"},
+		{"effect signatures", "effect Console\n        print : String -> ()\n      read : () -> String\n", "effect Console\n    print : String -> ()\n    read : () -> String\n"},
+		{"short effect signature", "effect E\n        print : Int\n      x : Int\n", "effect E\n    print : Int\n    x : Int\n"},
+		{"class signatures", "class Show a\n        show : a -> String\n      debug : a -> String\n", "class Show a\n    show : a -> String\n    debug : a -> String\n"},
+		{"instance methods", "instance Show Int\n        show x = \"int\"\n      debug x = \"debug\"\n", "instance Show Int\n    show x = \"int\"\n    debug x = \"debug\"\n"},
+		{"short instance method", "instance Show Int\n        show x = \"int\"\n      x = 1\n", "instance Show Int\n    show x = \"int\"\n    x = 1\n"},
+		{"deriver methods", "deriver Show\n        show x = x\n      debug x = x\n", "deriver Show\n    show x = x\n    debug x = x\n"},
+		{"short deriver method", "deriver Show\n        show x = x\n      x = 1\n", "deriver Show\n    show x = x\n    x = 1\n"},
+	}
+	parse := func(t *testing.T, src string) string {
+		t.Helper()
+		f := source.NewFile("<test>", []byte(src))
+		toks, lexErrs := lexer.Lex(f)
+		if len(lexErrs) > 0 {
+			t.Fatalf("lex errors: %v", lexErrs)
+		}
+		m, errs := Parse(toks, f)
+		if len(errs) > 0 {
+			t.Fatalf("parse errors: %v", errs)
+		}
+		return ast.Dump(m)
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, want := parse(t, tc.ragged), parse(t, tc.canonical); got != want {
+				t.Errorf("different trees:\nragged: %s\ncanonical: %s", got, want)
+			}
+		})
+	}
+}
+
+func TestFlexibleIndentationKeepsOwnerBoundary(t *testing.T) {
+	for _, src := range []string{
+		"main =\n    x = 1\ny\n",
+		"main =\n    case x of\n        True -> 1\n    False -> 2\n",
+		"effect Console\n    print : String -> ()\nread : () -> String\n",
+		"main =\n    x = 1\n      y = 2\n    y\n",
+	} {
+		f := source.NewFile("<test>", []byte(src))
+		toks, lexErrs := lexer.Lex(f)
+		if len(lexErrs) > 0 {
+			t.Fatalf("lex errors: %v", lexErrs)
+		}
+		_, errs := Parse(toks, f)
+		if len(errs) == 0 {
+			t.Errorf("accepted %q", src)
+		}
+	}
+}
+
+func TestTrailingBindingParsesAsIncompleteBlock(t *testing.T) {
+	for _, src := range []string{
+		"main =\n    apply (\\_ ->\n    value = x\n        bar\n    )\n",
+		"main = x = 1\n",
+	} {
+		f := source.NewFile("<test>", []byte(src))
+		toks, lexErrs := lexer.Lex(f)
+		if len(lexErrs) > 0 {
+			t.Fatal(lexErrs)
+		}
+		m, errs := Parse(toks, f)
+		if len(errs) > 0 {
+			t.Fatalf("unexpected parse errors: %v", errs)
+		}
+		if got := ast.Dump(m); !strings.Contains(got, "(missing-result)") {
+			t.Fatalf("missing result marker in tree: %s", got)
+		}
+	}
+}
+
 func TestMalformedSemicolonBlocks(t *testing.T) {
 	for _, src := range []string{
 		"main = ; 1",
 		"main = print 1;; 2",
 		"main = print 1;",
-		"main = x = 1",
 	} {
 		f := source.NewFile("<test>", []byte(src))
 		toks, _ := lexer.Lex(f)

@@ -1,0 +1,2 @@
+(module
+  (def x (block (bind a (int 1)) (expr (binop + (var a) (int 1))) (bind b (int 2)) (missing-result))))

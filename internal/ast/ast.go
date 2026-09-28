@@ -105,6 +105,9 @@ type Block struct {
 	Binds  []LocalBind
 	Items  []BlockItem // ordered; nil for legacy binding-only blocks
 	Result Expr
+	// MissingResultAt marks an incomplete block. Result is a synthetic Unit
+	// placeholder so tree walkers remain total until checking reports the error.
+	MissingResultAt source.Span
 
 	// Semicolons is non-empty when explicit separators spell the block.
 	Semicolons []source.Span

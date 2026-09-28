@@ -237,6 +237,33 @@ func TestLayoutIsRenderedNotCopied(t *testing.T) {
 	}
 }
 
+func TestRaggedLayoutNormalizesAndRoundTrips(t *testing.T) {
+	cases := []struct{ input, want string }{
+		{"main =\n        x = 1\n      y = x + 2\n       y\n", "main =\n    x = 1\n    y = x + 2\n    y\n"},
+		{"main =\n        x = 1\n      -- next value\n      y = x + 2\n       y\n", "main =\n    x = 1\n    -- next value\n    y = x + 2\n    y\n"},
+		{"main =\n    foo (\\_ ->\n        foo\n    bar\n    )\n", "main =\n    foo (\\_ ->\n        foo\n        bar\n    )\n"},
+		{"main =\n    foo (\\_ ->\n        x = 1\n    x\n    )\n", "main =\n    foo (\\_ ->\n        x = 1\n        x\n    )\n"},
+		{"main =\n    foo (\\_ ->\n    value = x\n        bar\n    )\n", "main =\n    foo (\\_ ->\n        value = x\n            bar\n    )\n"},
+		{"main = x = 1\n", "main = x = 1\n"},
+		{"match x =\n    case x of\n        True -> 1\n      False -> 2\n          _ -> 3\n", "match x =\n    case x of\n        True -> 1\n        False -> 2\n        _ -> 3\n"},
+		{"run action =\n    handle action of\n        emit value -> resume value\n      log value -> resume value\n          return value -> value\n", "run action =\n    handle action of\n        emit value -> resume value\n        log value -> resume value\n        return value -> value\n"},
+		{"effect Console\n        print : String -> ()\n      read : () -> String\n", "effect Console\n    print : String -> ()\n    read : () -> String\n"},
+		{"class Show a\n        show : a -> String\n      debug : a -> String\n", "class Show a\n    show : a -> String\n    debug : a -> String\n"},
+		{"instance Show Int\n        show x = \"int\"\n      debug x = \"debug\"\n", "instance Show Int\n    show x = \"int\"\n    debug x = \"debug\"\n"},
+		{"deriver Show\n        show x = x\n      debug x = x\n", "deriver Show\n    show x = x\n    debug x = x\n"},
+	}
+	for _, tc := range cases {
+		out, errs := Source(source.NewFile("ragged.fango", []byte(tc.input)))
+		if len(errs) > 0 {
+			t.Errorf("formatting %q failed: %v", tc.input, errs)
+			continue
+		}
+		if string(out) != tc.want {
+			t.Errorf("formatting %q:\n got: %s\nwant: %s", tc.input, out, tc.want)
+		}
+	}
+}
+
 // A comment with an anchor is placed, and the declaration around it is
 // normalized like any other.
 func TestAnchoredCommentIsPlaced(t *testing.T) {

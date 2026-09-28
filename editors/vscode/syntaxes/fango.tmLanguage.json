@@ -299,6 +299,7 @@
       }
     },
     "binding": {
+      "comment": "Indented block bindings may outdent from the first item; recognition is independent of the preceding line's column.",
       "match": "^\\s*([a-z][A-Za-z0-9_]*)(?=\\s*=(?![!#%&*+\\-/:<=>?@^|~]))",
       "captures": {
         "1": { "name": "variable.other.definition.fango" }
@@ -343,7 +344,7 @@
       ]
     },
     "lambda": {
-      "comment": "A lambda may head an expression or follow application arguments. Its parameter header ends at the exact arrow token; the body uses the enclosing expression rules.",
+      "comment": "A lambda may head an expression or follow application arguments. Its parameter header ends at the exact arrow token; a surrounding parenthesis resets the body's layout boundary without changing token scopes.",
       "begin": "\\\\",
       "end": "(?<![!#%&*+\\-/:<=>?@^|~])->(?![!#%&*+\\-/:<=>?@^|~])",
       "beginCaptures": {
@@ -478,6 +479,7 @@
       ]
     },
     "return_clause": {
+      "comment": "Handler clauses may use different indentation columns within the enclosing layout.",
       "name": "keyword.control.return.fango",
       "match": "^\\s*(return)\\b(?=(?:[ \\t]+(?:\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\]|\\{[^{}]*\\}|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:\\\\.|[^'\\\\])'|-?[0-9][0-9_]*(?:\\.[0-9]+)?(?:[eE][-+]?[0-9]+)?|\\^?[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)*))+[ \\t]*->)"
     },

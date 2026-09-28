@@ -1,8 +1,3 @@
-bad1 x =
-    case x of
-        True -> 1
-          False -> 2
-
 bad2 x =
     case x of
         Just -1 -> 1

@@ -59,6 +59,31 @@ async function main() {
   assert(handlerScopeAt(handler.indexOf("with")).includes("keyword.control.with.fango"));
   assert(!handlerScopeAt(handler.indexOf("state")).some(scope => scope.startsWith("keyword.")));
 
+  // Declaration and handler-clause heads keep their scopes when later lines
+  // outdent from the first item of an indented group.
+  for (const line of ["        x = 1", "      y = x + 2"]) {
+    const tokens = grammar.tokenizeLine(line).tokens;
+    const head = line.indexOf(line.trimStart()[0]);
+    assert(tokens.find(t => t.startIndex <= head && t.endIndex > head).scopes.includes("variable.other.definition.fango"));
+  }
+  for (const line of ["        return value -> value", "      return value -> value"]) {
+    const tokens = grammar.tokenizeLine(line).tokens;
+    const head = line.indexOf("return");
+    assert(tokens.find(t => t.startIndex <= head && t.endIndex > head).scopes.includes("keyword.control.return.fango"));
+  }
+  let parenthesizedStack = textmate.INITIAL;
+  for (const line of ["main =", "    foo (\\_ ->", "        foo", "    bar", "    )"]) {
+    const result = grammar.tokenizeLine(line, parenthesizedStack);
+    assert(!result.stoppedEarly);
+    parenthesizedStack = result.ruleStack;
+  }
+  let incompleteBlockStack = textmate.INITIAL;
+  for (const line of ["main =", "    foo (\\_ ->", "    value = x", "        bar", "    )"]) {
+    const result = grammar.tokenizeLine(line, incompleteBlockStack);
+    assert(!result.stoppedEarly);
+    incompleteBlockStack = result.ruleStack;
+  }
+
   const root = path.resolve(__dirname, "../../..");
   let files = 0;
   function visit(dir) {

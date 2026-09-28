@@ -2643,6 +2643,10 @@ func (g *generator) block(e *ast.Block, want types.Type) types.Type {
 		g.ck.BindSchemes[bind] = scheme
 		g.locals.names[bind.Name] = scheme
 	}
+	if e.MissingResultAt.File != nil {
+		g.errs = append(g.errs, diag.Errorf(e.MissingResultAt, "BLOCK RESULT", "This block ends with a binding. Add an expression whose value the block should return."))
+		return g.ck.Sup.FreshVar(types.General)
+	}
 	return g.exprWant(e.Result, want)
 }
 

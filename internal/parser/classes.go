@@ -108,11 +108,11 @@ func (p *parser) parseInstanceDecl() ast.Decl {
 	}
 	p.lay.push(ctxBlock, col)
 	defer p.lay.pop()
-	for p.peek().Kind != token.EOF && p.peek().Pos().Col >= col {
+	for p.peek().Kind != token.EOF && p.peek().Pos().Col > 1 && p.peek().Pos().Col <= col {
 		p.stmtStart = p.pos
 		n := p.peekInExpr()
-		if (n.Kind != token.LIDENT && n.Kind != token.LPAREN) || n.Pos().Col != col {
-			p.errorAt(n.Span, "INSTANCE METHOD", "I expect aligned method definitions.")
+		if n.Kind != token.LIDENT && n.Kind != token.LPAREN {
+			p.errorAt(n.Span, "INSTANCE METHOD", "I expect a method definition.")
 			p.recoverToTopLevel(false)
 			return nil
 		}

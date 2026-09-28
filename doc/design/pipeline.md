@@ -181,6 +181,16 @@ reusing a module and checking one are never confused for each other.
 
 The lexer records byte spans and line/column positions without layout tokens.
 The recursive-descent parser applies the offside rule from token columns.
+Each indented group retains its first-item column as the ceiling for later
+siblings, while case and handler branches use a line-start head and `->` to
+recognize siblings across columns. An enclosing context still bounds every
+group, and nested branch groups claim their own lines before outer groups.
+An expression parenthesis pushes a column-zero layout boundary until its
+closing delimiter, so an indented body inside it can outdent across the
+surrounding block's column without ending there.
+For a block ending in a binding, the AST retains the bindings and a marked
+result placeholder. Inference reports `BLOCK RESULT` before elaboration; the
+formatter omits the placeholder and round-trips the incomplete source.
 Tokens opening constructs, an if's aligned then/else, and composite delimiters
 have explicit layout exceptions; [syntax](../reference/syntax.md) owns their
 surface rules. AST and diagnostic dumps are golden-test interfaces.

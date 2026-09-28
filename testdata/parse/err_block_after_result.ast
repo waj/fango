@@ -1,9 +1,0 @@
-(module)
--- errors --
--- UNFINISHED PROGRAM ------------- err_block_after_result.fango
-
-This block has no result expression yet. A block is zero or more
-`name = …` bindings followed by one final expression.
-
-4|     b = 2
-           ^
