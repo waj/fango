@@ -123,6 +123,22 @@ func TestDelimiterAlignedTuplesAtLayoutAnchor(t *testing.T) {
 	}
 }
 
+func TestClosingParenthesesAtEnclosingLayoutColumn(t *testing.T) {
+	src := "main =\n" +
+		"    map (\\value -> spawn (\\_ ->\n" +
+		"        answer = value\n" +
+		"        answer\n" +
+		"    )) values\n"
+	f := source.NewFile("<test>", []byte(src))
+	toks, lexErrs := lexer.Lex(f)
+	if len(lexErrs) > 0 {
+		t.Fatal(lexErrs)
+	}
+	if _, errs := Parse(toks, f); len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+}
+
 func TestWithRemainsAnOrdinaryIdentifier(t *testing.T) {
 	f := source.NewFile("<repl>", []byte("with 1"))
 	toks, lexErrs := lexer.Lex(f)

@@ -5,6 +5,7 @@ import (
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/source"
+	"github.com/waj/fango/internal/token"
 )
 
 // The layout constructs are the ones whose meaning is carried by columns:
@@ -438,19 +439,28 @@ func (p *printer) renderApp(e *ast.App, ind int) bool {
 			p.emit(" ")
 		}
 		// An argument with its own line structure is rendered rather than
-		// inlined, so a nest stays a nest. Its closing parenthesis lands at the
-		// end of its last line, which is where the author wrote it.
+		// inlined, so a nest stays a nest. A source break before its closing
+		// parenthesis is retained.
 		if brokeWithin(a.Span()) {
 			if atomic(a) {
 				if !p.renderExpr(a, contInd) {
 					return false
 				}
 			} else {
+				openIndent := p.lineIndent(ind)
+				close, hasClose := p.argumentClose(prevEnd, a.Span().Start)
 				p.emit("(")
 				if !p.renderExpr(a, contInd) {
 					return false
 				}
+				if hasClose && p.toks[close-1].Span.EndPos().Line < p.toks[close].Span.StartPos().Line {
+					p.start(openIndent)
+				}
 				p.emit(")")
+				if hasClose {
+					prevEnd = p.toks[close].Span.End
+					continue
+				}
 			}
 			prevEnd = a.Span().End
 			continue
@@ -463,6 +473,37 @@ func (p *printer) renderApp(e *ast.App, ind int) bool {
 		prevEnd = a.Span().End
 	}
 	return true
+}
+
+// argumentClose follows the source opening parenthesis for an application
+// argument. Expression spans omit grouping parentheses, so the matching token
+// supplies both the source break and the end of the argument for the next one.
+func (p *printer) argumentClose(prevEnd, argStart int) (int, bool) {
+	open := -1
+	for i, t := range p.toks {
+		if t.Span.Start >= argStart {
+			break
+		}
+		if t.Kind == token.LPAREN && t.Span.Start >= prevEnd {
+			open = i
+		}
+	}
+	if open < 0 {
+		return 0, false
+	}
+	depth := 0
+	for i := open; i < len(p.toks); i++ {
+		switch p.toks[i].Kind {
+		case token.LPAREN:
+			depth++
+		case token.RPAREN:
+			depth--
+			if depth == 0 {
+				return i, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // renderList writes a broken bracket list in the same leading-comma block

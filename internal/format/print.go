@@ -19,6 +19,7 @@ import (
 // author decides where the air goes.
 type printer struct {
 	f      *source.File
+	toks   []token.Token
 	buf    bytes.Buffer // completed lines, each ending in a newline
 	cur    []byte       // the line being built, without its indent
 	ind    int          // that line's indent
@@ -186,7 +187,7 @@ func lastTokenEnd(toks []token.Token, from, to int) int {
 // grammar still reach the output through their own source text.
 func printModule(f *source.File, m *ast.Module, toks []token.Token, comments []token.Comment) []byte {
 	cs := newCommentCursor(f, comments)
-	p := &printer{f: f, cs: cs}
+	p := &printer{f: f, toks: toks, cs: cs}
 
 	bodyStart := len(f.Content)
 	if len(m.Decls) > 0 {

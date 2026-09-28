@@ -35,6 +35,23 @@ func TestGoldens(t *testing.T) {
 	}
 }
 
+func TestClosingParenthesesKeepTheirLine(t *testing.T) {
+	src := "main =\n" +
+		"    map (\\value -> spawn (\\_ ->\n" +
+		"        answer = value\n" +
+		"        answer\n" +
+		"    )) values\n"
+	for _, input := range []string{src, strings.Replace(src, "    )) values", "        )) values", 1)} {
+		out, errs := Source(source.NewFile("<test>", []byte(input)))
+		if len(errs) > 0 {
+			t.Fatalf("formatting failed: %v", errs)
+		}
+		if string(out) != src {
+			t.Errorf("closing parentheses moved:\n%s", out)
+		}
+	}
+}
+
 // corpus is every .fango file the formatter should be able to handle: the
 // fixtures, the bundled standard library, the examples, and the test data for
 // the other stages. Files that do not lex or parse are skipped, since the

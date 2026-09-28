@@ -32,6 +32,10 @@ Bindings are eager and sequential. Unit-valued expression statements may be
 placed before the final result, which is how effectful work is sequenced.
 There is no `let ... in` expression.
 
+A closing parenthesis may align with the indentation of the line containing
+its opening parenthesis, even when an indented body ends immediately before it.
+Several closing parentheses may share that line.
+
 A call answering anything other than Unit is not a statement, and binding it
 would need a name nothing reads. `ignore : a -> ()`, declared in `Basics` and
 exposed by `Prelude`, is how a caller says it wants the effects and not the

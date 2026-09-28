@@ -212,6 +212,8 @@ keeps its branches one level in from there, and a `then` or `else` given a line
 of its own is anchored at the column of its `if`, so a chain of arms lines up
 instead of staircasing rightward. An `exposing` list the author moved below
 its keyword is printed in the leading-comma block form.
+Closing parentheses in a multiline application keep their source line; when
+they start a line, they use the indentation of the line containing the opener.
 
 A multiline nominal type is the exception: its `deriving` clause is always an
 indented line after its constructor alternatives or record schema. An inline

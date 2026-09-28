@@ -1565,7 +1565,7 @@ func (p *parser) parseTypeAtom() ast.TypeExpr {
 		return &ast.TRow{Row: row}
 	case token.LPAREN:
 		p.next()
-		if p.peekInExpr().Kind == token.RPAREN {
+		if p.peek().Kind == token.RPAREN {
 			rp := p.next()
 			return &ast.TName{Name: "()", Sp: t.Span.Merge(rp.Span)}
 		}
@@ -1576,7 +1576,7 @@ func (p *parser) parseTypeAtom() ast.TypeExpr {
 		if p.peek().Kind == token.COMMA {
 			return p.parseTupleTypeRest(t, inner)
 		}
-		if !p.expect(token.RPAREN, "I was expecting a closing `)` in this type.") {
+		if !p.expectRaw(token.RPAREN, "I was expecting a closing `)` in this type.") {
 			return nil
 		}
 		return inner
@@ -2045,7 +2045,7 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 		return nil
 	case token.LPAREN:
 		lp := p.next()
-		if p.peekInExpr().Kind == token.RPAREN {
+		if p.peek().Kind == token.RPAREN {
 			rp := p.next()
 			return &ast.PUnit{Sp: lp.Span.Merge(rp.Span)}
 		}
@@ -2056,7 +2056,7 @@ func (p *parser) parsePatternAtom() ast.Pattern {
 		if p.peek().Kind == token.COMMA {
 			return p.parseTuplePatternRest(lp, pat)
 		}
-		if !p.expect(token.RPAREN, "I was expecting a closing `)` in this pattern.") {
+		if !p.expectRaw(token.RPAREN, "I was expecting a closing `)` in this pattern.") {
 			return nil
 		}
 		return pat
@@ -2335,9 +2335,9 @@ func (p *parser) parseAtom() ast.Expr {
 		if operand == nil {
 			return nil
 		}
-		if inner := p.peekInExpr(); inner.Kind == token.RPAREN {
+		if inner := p.peek(); inner.Kind == token.RPAREN {
 			p.next()
-		} else if inner.Kind == token.EOF && p.peek().Kind == token.EOF {
+		} else if inner.Kind == token.EOF {
 			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
 				"I got to the end of the input while looking for the `)` that closes this splice.")
 			return nil
@@ -2348,7 +2348,7 @@ func (p *parser) parseAtom() ast.Expr {
 		return &ast.Splice{Operand: operand, Sp: t.Span.Merge(p.prevSpan())}
 	case token.LPAREN:
 		lp := p.next()
-		if p.peekInExpr().Kind == token.RPAREN {
+		if p.peek().Kind == token.RPAREN {
 			rp := p.next()
 			return &ast.UnitLit{Sp: lp.Span.Merge(rp.Span)}
 		}
@@ -2371,9 +2371,9 @@ func (p *parser) parseAtom() ast.Expr {
 		if p.peek().Kind == token.COMMA {
 			return p.parseTupleExprRest(lp, e)
 		}
-		if inner := p.peekInExpr(); inner.Kind == token.RPAREN {
+		if inner := p.peek(); inner.Kind == token.RPAREN {
 			p.next()
-		} else if inner.Kind == token.EOF && p.peek().Kind == token.EOF {
+		} else if inner.Kind == token.EOF {
 			p.errorAt(p.prevSpan(), TitleUnexpectedEOF,
 				"I got to the end of the input while looking for a closing `)`.")
 			return nil

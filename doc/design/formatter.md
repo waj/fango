@@ -29,6 +29,9 @@ align. Then/else anchor to their own if. Composite commas, pipes, and closing
 delimiters align with their opener; the parser admits that punctuation at an
 enclosing layout boundary. Failed printing rolls back the buffer before copying
 the declaration verbatim.
+Application parentheses retain a source break before the closing token. The
+printer consults the matching token because grouping parentheses are absent
+from expression spans.
 
 A broken nominal type body is a layout exception: its deriving clause is emitted
 as a separate indented line. A line break solely before `deriving` does not make
