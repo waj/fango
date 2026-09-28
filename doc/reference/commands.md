@@ -203,6 +203,9 @@ them. Grouping is not: an operator run is printed flat in the order it was
 written, never regrouped, and a run that was parenthesized keeps its
 parentheses. Literal spelling is preserved exactly — `1.50` and `1e3` are not
 rewritten — as is the difference between `f()` and `f ()`.
+Postfix unit calls bind tightly enough to appear directly as application
+arguments, so `foo bar()` stays `foo bar()`; other nested applications retain
+parentheses when removing them would change how the arguments are read.
 
 The formatter keeps the author's line breaks rather than reflowing to a width,
 except when moving a multiline closing parenthesis onto its own line. A

@@ -1,5 +1,9 @@
 {-# no-prelude #-}
-module Async exposing (Async, Channel, Outcome(..), Task, await, awaitResult, cancel, cancelScope, cancelled, channel, checkpoint, close, completed, parMap, receive, run, send, sleep, spawn, wait, within)
+module Async exposing
+    ( Async, Channel, Outcome(..), Task
+    , await, awaitResult, cancel, cancelScope, cancelled, channel, checkpoint
+    , close, completed, parMap, receive, run, send, sleep, spawn, wait, within
+    )
 
 import Basics exposing (..)
 import Fail exposing (Fail)
@@ -127,7 +131,7 @@ runIn owner body =
     )
 
 run : (() ->{Async err, IO, Fail err | effects} value) ->{IO | effects} Outcome (Result err value)
-run body = supervise (\_ -> runIn (newRoot()) body)
+run body = supervise (\_ -> runIn newRoot() body)
 
 within : (() ->{Async err, Fail err | effects} value) ->{Async err, Fail err | effects} value
 within body =
@@ -178,23 +182,23 @@ await task =
 
 cancel : Task err value ->{Async err} ()
 cancel (Task task) =
-    ignore (current())
+    ignore current()
     cancelTask task
 
 cancelScope : () ->{Async err} ()
-cancelScope() = cancelOwner (current())
+cancelScope() = cancelOwner current()
 
 cancelled : () ->{Async err} Bool
-cancelled() = scopeCancelled (current())
+cancelled() = scopeCancelled current()
 
 -- Called only after this scope is cancelled; active aborts to capture.
 stopCurrent : () ->{Async err} value
 stopCurrent() =
-    ignore (active())
+    ignore active()
     stopCurrent()
 
 checkpoint : () ->{Async err} ()
-checkpoint() = ignore (active())
+checkpoint() = ignore active()
 
 sleep : Int ->{Async err} ()
 sleep milliseconds =
@@ -203,7 +207,7 @@ sleep milliseconds =
 
 channel : Int ->{Async err} Channel value
 channel capacity =
-    ignore (active())
+    ignore active()
     result = newChannel()
     setCapacity result capacity
     result
@@ -229,7 +233,7 @@ receive ch =
 
 close : Channel value ->{Async err} ()
 close ch =
-    ignore (current())
+    ignore current()
     closeChannel ch
 
 -- Pure ordered mapping with a bounded internal worker pool.

@@ -81,7 +81,7 @@ parseOptions args =
         [] -> Nothing
 
 main() =
-    case parseOptions (IO.args()) of
+    case parseOptions IO.args() of
         Nothing ->
             print "Usage: grep [-r] PATTERN PATH..."
             IO.exit 2

@@ -42,7 +42,7 @@ collecting use =
             { emit = \chunk -> parts.write [chunk | parts.read()]
             , flush = \_ -> ()
             }
-        (result, Bytes.concat (List.reverse (parts.read())))
+        (result, Bytes.concat (List.reverse parts.read()))
     )
 
 write : Writer e -> Bytes ->{e} ()

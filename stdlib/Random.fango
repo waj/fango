@@ -35,4 +35,4 @@ runSeeded seed action =
 -- runSystem answers draws from a system-entropy seed: a fresh sequence on
 -- every run.
 runSystem : (() ->{Random | e} a) ->{IO | e} a
-runSystem action = runSeeded (entropySeed()) action
+runSystem action = runSeeded entropySeed() action

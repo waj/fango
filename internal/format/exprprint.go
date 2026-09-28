@@ -185,10 +185,16 @@ func atomic(e ast.Expr) bool {
 		if _, ok := asTuple(e); ok {
 			return true
 		}
-		// A postfix unit call binds tighter than application, so `f value()`
-		// would parse the same without parentheses — but `g (h()) x` reads as
-		// three arguments without them, so an application in argument position
-		// is parenthesized whatever its shape.
+		// A postfix unit call binds tighter than application, so it is safe as
+		// an argument: `foo bar()` stays distinct from `foo bar ()`.
+		_, args := spine(e)
+		if len(args) > 0 {
+			if _, isUnit := args[len(args)-1].(*ast.UnitLit); isUnit && adjacent(args[len(args)-1]) {
+				return true
+			}
+		}
+		// Other applications in argument position need parentheses: without
+		// them, `g (h x) y` would read as three arguments.
 		return false
 	}
 	return false

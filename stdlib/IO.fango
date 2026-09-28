@@ -65,7 +65,7 @@ argsFrom index count =
         [argAt index | argsFrom (index + 1) count]
 
 args : () ->{IO} List String
-args() = argsFrom 0 (argCount())
+args() = argsFrom 0 argCount()
 
 readFile : String ->{IO} Maybe String
 readFile path = if pathExists path then Just (readFileText path) else Nothing

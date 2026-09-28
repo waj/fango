@@ -77,7 +77,7 @@ run : Int ->{IO, Fail Net.Error} ()
 run port = Net.withListener port (runListener port)
 
 main() =
-    case portFrom (IO.args()) of
+    case portFrom IO.args() of
         Nothing ->
             print "Usage: echo [PORT]"
             IO.exit 2

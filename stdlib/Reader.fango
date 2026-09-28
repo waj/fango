@@ -94,7 +94,7 @@ withBytes contents use =
 -- lets a failed read leave everything in hand.
 ensure : Reader e -> Int ->{e} Bool
 ensure reader n =
-    if Bytes.length (reader.buffered()) >= n then
+    if Bytes.length reader.buffered() >= n then
         True
     else if reader.refill() then
         ensure reader n
@@ -126,7 +126,7 @@ readExactly reader n =
     if n <= 0 then
         Just Bytes.empty
     else if ensure reader n then
-        text = Bytes.slice 0 n (reader.buffered())
+        text = Bytes.slice 0 n reader.buffered()
         ignore (reader.skip n)
         Just text
     else
@@ -165,7 +165,7 @@ scanning reader delimiter limit scanned =
                 Overflowed
             else if ensure reader (clamp (if have < 1 then 1 else have * 2) limit) then
                 scanning reader delimiter limit have
-            else if Bytes.length (reader.buffered()) > have then
+            else if Bytes.length reader.buffered() > have then
                 scanning reader delimiter limit have
             else
                 ignore (reader.skip have)
