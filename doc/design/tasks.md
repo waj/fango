@@ -5,13 +5,11 @@ and [stream semantics](../reference/library-streams.md) own the public contract.
 
 ## Library state and traversal
 
-`Runtime.Ref` is an ordinary native module for IO-marked mutable storage. Its
-sealed type index ensures a reference cannot be read at a different type.
 The bundled Reader and Writer constructors use the
 [scoped state boundary](core.md#scoped-state-boundary) for local buffers.
 Their operations propagate complete rows; a runner discharges only its fresh
-permission, preserving source, sink, and consumer effects. IO references may be shared by child tasks. Scoped local state must be
-installed inside the task. Ordinary IO reference operations need no compiler cases.
+permission, preserving source, sink, and consumer effects. Scoped local state
+must be installed inside the task.
 
 Stream and Iterator are Fango records and ordinary recursive functions. State
 is explicit in each step's return value. No compiler node recognizes streams,

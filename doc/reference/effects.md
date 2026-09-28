@@ -262,8 +262,7 @@ with `HANDLER BINDING EFFECTS`; the local permission is never erased to claim
 purity. Ordinary closures that retain the nominal effect in their row still
 receive an interpretation at invocation.
 
-A mutable object backed by `Runtime.Ref` exposes `IO`. The scoped
-[Reader and Writer constructors](library-readers.md) instead discharge their
+The scoped [Reader and Writer constructors](library-readers.md) discharge their
 private buffer permissions while preserving source, sink, and consumer effects.
 
 Handlers remain synchronous: a resumptive clause finishes with its owning tail

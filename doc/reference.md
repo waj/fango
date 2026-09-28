@@ -27,7 +27,6 @@ The bundled library is experimental and versioned with the compiler.
 | Fail, Failure, State, Random, Runtime.Local | [Effect APIs](reference/library-effects.md) |
 | Runtime.Scope | [Cleanup scopes](reference/resources.md) |
 | Async | [Tasks, handlers, cancellation, and channels](reference/library-async.md) |
-| Runtime.Ref | [IO references](reference/native.md#io-references) |
 | Runtime.Native | [Native Go sidecars](reference/native.md) |
 | Json | [Encoding and string tokens](reference/library-json.md) |
 | Meta, Derive | [Metaprogramming](reference/metaprogramming.md) |

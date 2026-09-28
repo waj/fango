@@ -12,20 +12,14 @@ func TestScopedReaderEscapes(t *testing.T) {
 		{"callback", `bad = Reader.withBytes Bytes.empty (\r -> \_ -> Reader.readUpTo r 1)`},
 		{"wrapper", `type Box a = Box a
 bad = Reader.withBytes Bytes.empty (\r -> Box (\_ -> Reader.readUpTo r 1))`},
-		{"outer storage", `bad() =
-    slot = Runtime.Ref.new Nothing
-    Reader.withBytes Bytes.empty (\r -> Runtime.Ref.write slot (Just r))
-    ()`},
 		{"outer scoped storage", `bad = Runtime.Local.run Nothing (\slot ->
     Reader.withBytes Bytes.empty (\r -> slot.write (Just r)))`},
-		{"latent storage callback", `bad() =
-    slot = Runtime.Ref.new Nothing
-    save value = Runtime.Ref.write slot (Just value)
+		{"latent storage callback", `bad = Runtime.Local.run Nothing (\slot ->
+    save value = slot.write (Just value)
     Reader.withBytes Bytes.empty (\r ->
         saved = save (\_ -> Reader.readUpTo r 1)
         identity x = x
-        identity saved)
-    ()`},
+        identity saved))`},
 		{"nested local generalization", `bad = Runtime.Local.run Nothing (\slot ->
     Reader.withBytes Bytes.empty (\r ->
         remember value = slot.write (Just value)
@@ -38,7 +32,6 @@ bad = Reader.withBytes Bytes.empty (\r -> Box (\_ -> Reader.readUpTo r 1))`},
 			path := writeModuleFile(t, t.TempDir(), "Main.fango",
 				`import Bytes
 import Reader
-import Runtime.Ref
 import Runtime.Local
 `+tc.body+`
 main() = ()

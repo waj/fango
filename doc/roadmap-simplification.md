@@ -1,6 +1,6 @@
 # Synchronous foundation and native tasks
 
-The synchronous foundation, explicit streams, immutable Lists, IO references,
+The synchronous foundation, explicit streams, immutable Lists,
 and closure-based native Async tasks are implemented. Their contracts live in
 [effect execution](design/effects.md), [task architecture](design/tasks.md),
 [streams](reference/library-streams.md), and [Async](reference/library-async.md).

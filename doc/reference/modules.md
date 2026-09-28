@@ -50,9 +50,9 @@ exists; an unrelated directory with similar casing does not occupy a module
 name.
 
 Bundled modules use the same dotted-name path convention beneath `stdlib/`.
-For example, `Runtime.Ref` is stored at `stdlib/Runtime/Ref.fango`;
-its native sidecar, when present, sits beside it as
-`stdlib/Runtime/Ref.native.go`.
+For example, `Runtime.Local` is stored at `stdlib/Runtime/Local.fango`.
+A native sidecar for a dotted module follows the same nested path and uses
+the `.native.go` suffix beside its source.
 
 ## Prelude and implicit dependencies
 

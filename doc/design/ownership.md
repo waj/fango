@@ -12,7 +12,7 @@ outlive the scope that acquired it. Sidecars own resource validity checks.
 
 The `resource` marker retains nominal native-storage restrictions; it is not a
 lifetime proof. Sealed indexed native storage cannot be rewrapped at a different
-type. Mutable storage is IO-marked; shared handlers and native resources own their synchronization.
+type. Shared handlers and native resources own their synchronization.
 
 ## Evidence summaries
 

@@ -57,9 +57,8 @@ clause effects; it never erases mutable state access to an empty row. Source
 escape checks retain that permission until the enclosing inference group is
 solved. Optional handler permissions are not introduced into unrelated open
 callbacks merely because the handler can supply them. Elaboration captures the
-activation evidence when adapting a bound callable. Library closures backed
-by native references expose IO. [Resources and evidence](ownership.md)
-describes the retained structural metadata.
+activation evidence when adapting a bound callable. [Resources and
+evidence](ownership.md) describes the retained structural metadata.
 
 ## Abort and cleanup protocol
 

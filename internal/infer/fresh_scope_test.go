@@ -130,7 +130,7 @@ func TestFreshScopeEscapeWaitsForDeferredRowBounds(t *testing.T) {
 func TestFreshScopeRejectsOuterStorageEscape(t *testing.T) {
 	f := newScopeFixture()
 	stored := f.sup.FreshVar(types.General)
-	outerCell := &types.TCon{Unique: f.sup.NextUnique(), Name: "Ref", Args: []types.Type{stored}}
+	outerCell := &types.TCon{Unique: f.sup.NextUnique(), Name: "Cell", Args: []types.Type{stored}}
 	scope := NewFreshEffect(f.sup, "Cursor")
 	_, errs := f.solve(
 		Constraint{Scope: &ScopeBoundary{Effect: scope, Result: f.b.Unit, Outer: []types.Type{outerCell}}},

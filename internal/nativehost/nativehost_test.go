@@ -16,25 +16,6 @@ type testHost struct {
 	out strings.Builder
 }
 
-func TestBundledSourcesUseCanonicalNestedModuleNames(t *testing.T) {
-	sources, err := BundledSources()
-	if err != nil {
-		t.Fatal(err)
-	}
-	foundRef, foundAsync := false, false
-	for _, source := range sources {
-		switch source.Module {
-		case "Runtime.Ref":
-			foundRef = true
-		case "Async":
-			foundAsync = true
-		}
-	}
-	if !foundRef || !foundAsync {
-		t.Fatalf("nested bundled sidecars missing: Ref=%v Async=%v", foundRef, foundAsync)
-	}
-}
-
 func (h *testHost) HasInput() (bool, error) {
 	_, err := h.in.Peek(1)
 	if err == io.EOF {

@@ -106,20 +106,9 @@ natives; ordinary Fango effect handlers can wrap them.
 
 Storage keeps its typed payload alive but does not extend the lifetime of any
 external resource it references. Native resource operations check validity at
-runtime. [Runtime.Ref](../../stdlib/Runtime/Ref.fango) provides ordinary IO-marked
-mutable storage; its individual reads and writes are synchronized, but a
-read followed by a write is not an atomic update. [Async](library-async.md)
-callbacks may share native handles and functions.
+runtime. [Async](library-async.md) callbacks may share native handles and
+functions.
 Native code must honor its declaration and may not invoke opaque Fango payloads.
-
-## IO references
-
-`Runtime.Ref` provides `new : a ->{IO} Ref a`, `read : Ref a ->{IO} a`, and
-`write : Ref a -> a ->{IO} ()`. Aliases observe the latest write. The reference
-keeps its value alive until garbage collection; it has no close operation.
-Its representation is private, and references cannot cross the task boundary.
-Scoped Reader and Writer buffers use the Fango
-[`Runtime.Local` handler](library-effects.md#scoped-local-state) instead.
 
 ## Native effect operations
 

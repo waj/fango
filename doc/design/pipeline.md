@@ -228,8 +228,8 @@ The trees are read through an exact-name index rather than joined paths, which
 preserves what embedding gave for free. Names stay case-exact, including
 directory components, which a case-insensitive filesystem would otherwise lose
 and which the local provider beside it enforces deliberately. Dotted bundled
-module names map to nested paths such as `Runtime.Ref` to
-`stdlib/Runtime/Ref.fango`. Bytes are read once and retained, so every
+module names map to nested paths such as `Runtime.Local` to
+`stdlib/Runtime/Local.fango`. Bytes are read once and retained, so every
 reader in a process sees one library and a mid-compile edit cannot tear a build
 across two versions of it.
 
