@@ -15,6 +15,13 @@ language. It takes priority over the coroutine, executor, STM, and capture-flow
 optimization roadmaps. Those topics retain their milestone identities but do not
 authorize further expansion of the old architecture.
 
+## Builder blocks and generators
+
+[Builder blocks and generators](roadmap-builders.md) propose a module-directed
+source lowering to ordinary delayed producer values. The proposal is separate
+from the deferred coroutine machinery and does not change current Stream or
+handler behavior.
+
 ## Standard library expansion
 
 Add APIs when programs need them, preferably in Fango; use bundled natives only

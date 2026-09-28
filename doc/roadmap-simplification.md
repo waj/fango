@@ -23,7 +23,8 @@ The old coroutine and Async roadmap stage identities remain deferred.
   Sharing native handles is supported; cancellation does not implicitly interrupt
   arbitrary blocking IO.
 
-Generator syntax, STM, alternate executors, and general native background
-callbacks remain deferred. Recursive producers can use callback
-traversal; ordinary pull iteration uses explicit state. Expand common native ABI
-capabilities when needed rather than recognizing library operation names.
+The local [builder-block proposal](roadmap-builders.md), STM, alternate
+executors, and general native background callbacks remain deferred. Recursive
+producers can use callback traversal; ordinary pull iteration uses explicit state.
+Expand common native ABI capabilities when needed rather than recognizing
+library operation names.
