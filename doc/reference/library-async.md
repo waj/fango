@@ -129,3 +129,8 @@ parMap : (a -> b) -> List a -> List b
 `parMap` accepts a pure callback, preserves input order, and uses at most
 `GOMAXPROCS` workers per invocation. It exposes no task handles and supports
 ordinary partial application. An empty input does not invoke its callback.
+
+The runnable [Sudoku solver](../../examples/sudoku.fango) starts a task for
+each candidate at its first unresolved cell, sends solutions through a channel,
+and cancels the remaining searches. Its recursive search calls `checkpoint`
+to respond to cancellation.

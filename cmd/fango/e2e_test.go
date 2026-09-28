@@ -351,6 +351,12 @@ func TestMandelbrotExample(t *testing.T) {
 	runDifferentialCase(t, path, cliRunner(path))
 }
 
+func TestSudokuExample(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join("..", "..", "examples", "sudoku.fango")
+	runDifferentialCase(t, path, cliRunner(path))
+}
+
 func TestGuessingGameExample(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "guess.fango")

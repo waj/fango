@@ -1,0 +1,147 @@
+-- Solve a fixed Sudoku puzzle. Forced moves run in the parent; the first
+-- unresolved cell starts one task per candidate. The first solution sent on
+-- the channel wins, and the other searches are cancelled.
+
+import Async exposing (Outcome(..))
+import Basics exposing (modBy, quotientBy)
+import Fail exposing (Fail)
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import String
+
+type Choice = Solved | Dead | Pick Int (List Int)
+
+puzzle =
+    "100007090"
+        ++ "030020008"
+        ++ "009600500"
+        ++ "005300900"
+        ++ "010080002"
+        ++ "600004000"
+        ++ "300000010"
+        ++ "040000007"
+        ++ "007000300"
+
+digits text =
+    case String.uncons text of
+        Nothing -> []
+        Just part ->
+            case String.toInt (String.fromChar part.first) of
+                Just digit -> [digit | digits part.rest]
+                Nothing -> []
+
+setCell target value board = setAt target value 0 board
+
+setAt target value index board =
+    case board of
+        [] -> []
+        [cell | rest] ->
+            [if index == target then value else cell | setAt target value (index + 1) rest]
+
+sameGroup left right =
+    leftRow = quotientBy 9 left
+    rightRow = quotientBy 9 right
+    leftColumn = modBy 9 left
+    rightColumn = modBy 9 right
+    leftRow == rightRow
+        || leftColumn == rightColumn
+        || (quotientBy 3 leftRow == quotientBy 3 rightRow
+            && quotientBy 3 leftColumn == quotientBy 3 rightColumn)
+
+allowedAt target value index board =
+    case board of
+        [] -> True
+        [cell | rest] -> (index == target || cell /= value || sameGroup target index == False)
+            && allowedAt target value (index + 1) rest
+
+candidates board index =
+    List.filter (\value -> allowedAt index value 0 board) (List.range 1 9)
+
+chooseAt board index remaining best =
+    case remaining of
+        [] -> best
+        [cell | rest] ->
+            if cell /= 0 then
+                chooseAt board (index + 1) rest best
+            else
+                options = candidates board index
+                case options of
+                    [] -> Dead
+                    _ ->
+                        case best of
+                            Solved -> chooseAt board (index + 1) rest (Pick index options)
+                            Dead -> Dead
+                            Pick _ previous ->
+                                if List.length options < List.length previous then
+                                    chooseAt board (index + 1) rest (Pick index options)
+                                else
+                                    chooseAt board (index + 1) rest best
+
+prepare board =
+    case chooseAt board 0 board Solved of
+        Pick index [only] -> prepare (setCell index only board)
+        choice -> (board, choice)
+
+search board =
+    Async.checkpoint()
+    case prepare board of
+        (ready, Solved) -> Just ready
+        (_, Dead) -> Nothing
+        (ready, Pick index options) -> searchOptions ready index options
+
+searchOptions board index options =
+    case options of
+        [] -> Nothing
+        [value | rest] ->
+            case search (setCell index value board) of
+                Just answer -> Just answer
+                Nothing -> searchOptions board index rest
+
+startBranches board index options answers =
+    List.map (\value -> Async.spawn (\_ ->
+        answer = search (setCell index value board)
+        ignore (Async.send answers answer))) options
+
+firstAnswer answers remaining =
+    if remaining == 0 then
+        Nothing
+    else
+        case Async.receive answers of
+            Nothing -> Nothing
+            Just Nothing -> firstAnswer answers (remaining - 1)
+            Just (Just board) -> Just board
+
+parallelSolve board =
+    case prepare board of
+        (ready, Solved) -> Just ready
+        (_, Dead) -> Nothing
+        (ready, Pick index options) ->
+            answers = Async.channel (List.length options)
+            tasks = startBranches ready index options answers
+            result = firstAnswer answers (List.length options)
+            List.each Async.cancel tasks
+            result
+
+runSolve : List Int ->{IO} Outcome (Result String (Maybe (List Int)))
+runSolve board = Async.run (\_ -> parallelSolve board)
+
+printBoard board = printRows board 0 ""
+
+printRows remaining count row =
+    case remaining of
+        [] -> ()
+        [digit | rest] ->
+            next = row ++ show digit
+            if count == 8 then
+                print next
+                printRows rest 0 ""
+            else
+                printRows rest (count + 1) next
+
+main() =
+    case runSolve (digits puzzle) of
+        Completed (Ok (Just board)) -> printBoard board
+        Completed (Ok Nothing) -> print "No solution"
+        Completed (Err message) -> print message
+        Cancelled -> print "Cancelled"

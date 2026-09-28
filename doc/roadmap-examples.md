@@ -13,8 +13,6 @@ live in [CLI tests](../cmd/fango/e2e_test.go).
 
 ## Interpreters and solvers
 
-- **Sudoku solver:** parsing, grid representation, backtracking, early search exit,
-  and deep-recursion behavior.
 - **Lisp interpreter:** reader, Dict environments, closures, special forms, and a
   REPL loop; use it to assess language ergonomics across these features.
 
