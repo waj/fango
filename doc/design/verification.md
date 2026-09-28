@@ -32,7 +32,7 @@ pin diagnostic substrings. Focused checker/elaboration tests load the real bundl
 Prelude closure. Core lint runs in every batch compilation; malformed-Core tests
 exercise independent rejection.
 
-| Fixture sibling | Input/expectation |
+| Fixture file | Input/expectation |
 | --- | --- |
 | .expected | Exact output |
 | .stdin | Scripted standard input |
@@ -43,8 +43,10 @@ exercise independent rejection.
 
 Portable failure tests use missing paths or a directory opened as a file, not chmod.
 Stateful command examples run sequences in isolated directories with matched argv
-and working-directory contexts. Examples are runnable source under
-[examples](../../examples/), with coverage in the CLI tests; the
+and working-directory contexts. Example sources stay directly under
+[examples](../../examples/); their expectations, scripted inputs, arguments,
+and seed files live under [examples/fixtures](../../examples/fixtures/), with
+coverage in the CLI tests; the
 [example roadmap](../roadmap-examples.md) contains only unfinished work.
 
 Runnable fixtures share one generated Go project: each entry has its own package,

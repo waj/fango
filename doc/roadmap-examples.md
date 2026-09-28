@@ -1,8 +1,9 @@
 # Roadmap: example programs
 
-Unfinished programs that drive language/library growth. Implemented examples
-and expected outputs live in [examples](../examples/); their differential tests
-live in [CLI tests](../cmd/fango/e2e_test.go).
+Unfinished programs that drive language/library growth. Implemented source
+examples live in [examples](../examples/), with expected outputs and other
+fixture files in [examples/fixtures](../examples/fixtures/); their differential
+tests live in [CLI tests](../cmd/fango/e2e_test.go).
 
 ## Data structures, files, and OS APIs
 

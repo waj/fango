@@ -6,7 +6,7 @@ import (
 )
 
 // The grep-lite example runs through the ordinary differential harness: its
-// seed directory, arguments, and expected output sit beside the source.
+// seed directory, arguments, and expected output live under examples/fixtures.
 func TestGrepExample(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "grep.fango")

@@ -11,8 +11,8 @@ import (
 	"testing"
 )
 
-// fixtureInputs are the optional files beside a fixture's source: X.stdin is
-// scripted standard input, X.args lists one program argument per line,
+// fixtureInputs are the optional files beside a fixture's source, or under
+// examples/fixtures for runnable examples: X.stdin is scripted standard input,
 // X.status is the exit status the program must end with (0 when absent), and
 // X.files/ is a seed directory copied into a fresh working directory for each
 // leg, so a fixture can read, write, and fail on real files without touching
@@ -26,6 +26,7 @@ type fixtureInputs struct {
 
 func readFixtureInputs(t *testing.T, base string) fixtureInputs {
 	t.Helper()
+	base = fixtureSidecarBase(base)
 	var in fixtureInputs
 	if data, err := os.ReadFile(base + ".stdin"); err == nil {
 		in.stdin = string(data)
@@ -44,6 +45,15 @@ func readFixtureInputs(t *testing.T, base string) fixtureInputs {
 		in.files = base + ".files"
 	}
 	return in
+}
+
+// fixtureSidecarBase keeps example sources easy to scan while grouping their
+// inputs, expected output, and seed files under examples/fixtures.
+func fixtureSidecarBase(base string) string {
+	if filepath.Clean(filepath.Dir(base)) == filepath.Join("..", "..", "examples") {
+		return filepath.Join(filepath.Dir(base), "fixtures", filepath.Base(base))
+	}
+	return base
 }
 
 // seedDir gives one leg its own copy of the fixture's seed directory, or ""

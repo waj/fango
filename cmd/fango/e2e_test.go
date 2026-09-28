@@ -384,7 +384,7 @@ func TestMarkdownExample(t *testing.T) {
 func TestTodoExample(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "examples", "todo.fango")
-	want, err := os.ReadFile(strings.TrimSuffix(path, ".fango") + ".expected")
+	want, err := os.ReadFile(fixtureSidecarBase(strings.TrimSuffix(path, ".fango")) + ".expected")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +533,7 @@ func runDifferentialCase(t *testing.T, path string, compiled compiledRunner) {
 		runErrorCase(t, path, strings.TrimSpace(string(errData)))
 		return
 	}
-	expData, err := os.ReadFile(base + ".expected")
+	expData, err := os.ReadFile(fixtureSidecarBase(base) + ".expected")
 	if err != nil {
 		t.Fatalf("missing %s.expected (or .error): %v", base, err)
 	}
@@ -985,11 +985,11 @@ func TestCsvExample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := os.ReadFile(filepath.Join("..", "..", "examples", "csv.expected"))
+	want, err := os.ReadFile(filepath.Join("..", "..", "examples", "fixtures", "csv.expected"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	input, err := os.ReadFile(filepath.Join("..", "..", "examples", "expenses.csv"))
+	input, err := os.ReadFile(filepath.Join("..", "..", "examples", "fixtures", "expenses.csv"))
 	if err != nil {
 		t.Fatal(err)
 	}
