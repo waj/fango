@@ -23,11 +23,6 @@ make
 ```
 
 Find more runnable programs and their expected outputs in [examples](examples/).
-Run `./fango run examples/sudoku.fango` to see parallel search and cancellation
-with Async tasks.
-For a network example, start the line-oriented TCP echo server with
-`./fango run examples/echo.fango -- 8000`, then connect with
-`telnet 127.0.0.1 8000`.
 
 ## Documentation
 
