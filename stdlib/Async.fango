@@ -104,7 +104,7 @@ enter owner body =
         active () -> if scopeCancelled owner then stopTask() else resume owner
 
 capture owner body =
-    handle Completed (Fail.attempt (\_ -> enter owner body)) of
+    handle Completed (Fail.attempt { enter owner body }) of
         stopTask () -> Cancelled
 
 status outcome =
@@ -125,13 +125,13 @@ finish owner outcome =
 
 -- Cleanup drains even when an unrelated outer abort leaves the body.
 runIn owner body =
-    Runtime.Scope.bracket (\_ -> ()) (\_ -> finishScope owner 2) (\_ ->
+    Runtime.Scope.bracket { () } { finishScope owner 2 } {
         outcome = capture owner body
         finish owner outcome
-    )
+    }
 
 run : (() ->{Async err, IO, Fail err | effects} value) ->{IO | effects} Outcome (Result err value)
-run body = supervise (\_ -> runIn newRoot() body)
+run body = supervise { runIn newRoot() body }
 
 within : (() ->{Async err, Fail err | effects} value) ->{Async err, Fail err | effects} value
 within body =
@@ -146,7 +146,7 @@ within body =
 spawn : (() ->{Async err, IO, Fail err | effects} value) ->{Async err | effects} Task err value
 spawn body =
     owner = active()
-    Task (launch owner (\child -> runIn child (\_ -> rebase body)))
+    Task (launch owner { child -> runIn child { rebase body } })
 
 completed : Result err value ->{Async err} Task err value
 completed result =

@@ -9,7 +9,7 @@ import String
 type Counts = { lines : Int, words : Int, bytes : Int }
 
 wordsIn : IO.Line -> Int
-wordsIn line = List.foldl (\_ total -> total + 1) 0 (String.words line.text)
+wordsIn line = List.foldl { _ total -> total + 1 } 0 (String.words line.text)
 
 lineCount : IO.Line -> Int
 lineCount { ending = "" } = 0

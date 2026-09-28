@@ -6,7 +6,7 @@ type Cell = Cell (() -> Int)
 
 leak : Int -> Cell
 leak start =
-    handle Cell (\_ -> tick()) with n = start of
+    handle Cell ({ _ -> tick() }) with n = start of
         tick () -> resume n with n + 1
 
 main = 0

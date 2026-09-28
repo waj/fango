@@ -23,5 +23,5 @@ upto n = if n < 1 then Empty else Link n (upto (n - 1))
 
 main =
     xs = upto 10
-    small = filter (\x -> x < 6) xs
-    print (foldr (\x acc -> x + acc) 0 (map (\x -> x * x) small))
+    small = filter ({ x -> x < 6 }) xs
+    print (foldr ({ x acc -> x + acc }) 0 (map ({ x -> x * x }) small))

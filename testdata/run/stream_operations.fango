@@ -4,11 +4,11 @@ main() =
     source = Stream.fromList [1, 2, 3, 4]
     print (Stream.toList source)
     print (Stream.toList source)
-    print (Stream.toList (Stream.take 2 (Stream.filter (\x -> x > 1) (Stream.map (\x -> x * 2) source))))
-    print (Stream.fold (\x acc -> x - acc) 0 source)
+    print (Stream.toList (Stream.take 2 (Stream.filter ({ x -> x > 1 }) (Stream.map ({ x -> x * 2 }) source))))
+    print (Stream.fold ({ x acc -> x - acc }) 0 source)
     Stream.forEach print (Stream.take 2 source)
     print (Stream.toList (Stream.zip source (Stream.fromList [10, 20])))
-    Stream.withCursor (Stream.fromList [42]) (\cursor ->
+    Stream.withCursor (Stream.fromList [42]) ({ cursor ->
         case Iterator.next cursor of
             Nothing -> print "empty"
             Just (value, next) ->
@@ -18,4 +18,4 @@ main() =
                     Just _ -> False)
                 print (case Iterator.next next of
                     Nothing -> True
-                    Just _ -> False))
+                    Just _ -> False) })

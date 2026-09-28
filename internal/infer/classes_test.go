@@ -102,7 +102,7 @@ func TestClassDiagnostics(t *testing.T) {
 		{"ambiguous annotation", "f : Eq a => Int -> Int\nf x = x", "AMBIGUOUS CONSTRAINT"},
 		{"class source order", "f : C a => a -> a\nf x = x\nclass C a\n    c : a -> a", "UNKNOWN CLASS"},
 		{"no custom default", "class C a\n    c : a -> Bool\nf = c 1", "AMBIGUOUS CONSTRAINT"},
-		{"unknown projection receiver in a method", "opaque : (a -> Int) -> String\nopaque _ = \"opaque\"\nclass C a\n    c : a -> String\ninstance C Int\n    c n = opaque (\\r -> r.field)", "AMBIGUOUS FIELD"},
+		{"unknown projection receiver in a method", "opaque : (a -> Int) -> String\nopaque _ = \"opaque\"\nclass C a\n    c : a -> String\ninstance C Int\n    c n = opaque { r -> r.field }", "AMBIGUOUS FIELD"},
 		{"deriving a class with no deriver", "class C a\n    c : a -> Bool\ntype T = T deriving (C)", "CANNOT DERIVE"},
 		{"deriver for an unknown class", "deriver Missing\n    m info x = x", "UNKNOWN CLASS"},
 		{"deriver missing a method", "class C a\n    c : a -> Bool\n    d : a -> Bool\nderiver C\n    c info x = x", "MISSING METHOD"},

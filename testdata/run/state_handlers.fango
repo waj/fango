@@ -78,13 +78,13 @@ useSnapshots() =
 
 runSnapshots() =
     handle useSnapshots() with current = 3 of
-        take () -> resume (Saved (\_ -> current)) with current + 1
+        take () -> resume (Saved ({ _ -> current })) with current + 1
         return value -> value + current
 
 main() =
     counter = State.run (Counter { count = 10 }) counterProgram
-    traversed = State.run 0 (\_ -> List.each increment [1, 2, 3])
-    evaluated = State.run 0 (\_ -> evaluate 10 (Add Env (Lit 2)))
+    traversed = State.run 0 ({ _ -> List.each increment [1, 2, 3] })
+    evaluated = State.run 0 ({ _ -> evaluate 10 (Add Env (Lit 2)) })
     print counter.value
     print counter.state.count
     print traversed.state

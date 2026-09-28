@@ -13,6 +13,6 @@ readAndPrint source =
     read source
 
 printed : Source a e ->{IO | e} a
-printed source = withSource source (\cursor -> readAndPrint cursor)
+printed source = withSource source ({ cursor -> readAndPrint cursor })
 
-main() = print (printed (Source (\_ -> 42)))
+main() = print (printed (Source ({ _ -> 42 })))

@@ -12,7 +12,7 @@ const (
 	ctxBlock                 // first block item column
 	ctxCase                  // first case branch column
 	ctxHandle                // first handler clause column
-	ctxParen                 // expression enclosed by `(` and `)`
+	ctxParen                 // expression enclosed by parentheses or lambda braces
 )
 
 type layoutCtx struct {

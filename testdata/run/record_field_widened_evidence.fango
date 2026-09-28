@@ -13,13 +13,13 @@ type Ops e = { read : () ->{Cell | e} Int }
 
 withCell : (Ops e ->{Cell | e} a) ->{e} a
 withCell use =
-    handle use (Ops { read = \_ -> get() }) of
+    handle use (Ops { read = { _ -> get() } }) of
         get () -> resume 7
 
 body : () ->{Extra} Int
 body() =
     noisy = bump 1
-    withCell (\o -> o.read() + noisy)
+    withCell ({ o -> o.read() + noisy })
 
 main() =
     answer =

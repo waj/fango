@@ -11,4 +11,4 @@ group children = Group children
 total : Tree e ->{e} Int
 total tree = case tree of
     Leaf action -> action()
-    Group children -> List.foldl (\child sum -> sum + total child) 0 children
+    Group children -> List.foldl ({ child sum -> sum + total child }) 0 children

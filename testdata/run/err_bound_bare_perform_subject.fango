@@ -7,7 +7,7 @@ type Cell = Cell (() -> Int)
 both : (Cell ->{IO} a) ->{IO} a
 both use =
     handle
-        case Cell (\_ -> tick()) of
+        case Cell ({ _ -> tick() }) of
             outerCell ->
                 handle
                     case tick() of
@@ -20,8 +20,8 @@ both use =
         tick () -> resume n with n + 1
 
 main() =
-    both (\c ->
+    both ({ c ->
         case c of
             Cell ta ->
                 print (ta())
-                print (ta()))
+                print (ta()) })

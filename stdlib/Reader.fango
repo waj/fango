@@ -33,36 +33,45 @@ grow source pending =
 {-# scoped s #-}
 buffering : Bytes -> Source e -> (Reader s ->{s} a) ->{e} a
 buffering initial source use =
-    Runtime.Local.run initial (\pending -> use
-        { buffered = pending.read
-        , refill = \_ ->
-            before = pending.read()
-            grown = grow source before
-            pending.write grown
-            Bytes.length grown > Bytes.length before
-        , skip = \n ->
-            before = pending.read()
-            taken = clamp n (Bytes.length before)
-            pending.write (Bytes.slice taken (Bytes.length before) before)
-            taken
-        })
+    Runtime.Local.run initial { pending ->
+        use
+            { buffered = pending.read
+            , refill = {
+                before = pending.read()
+                grown = grow source before
+                pending.write grown
+                Bytes.length grown > Bytes.length before
+              }
+            , skip = { n ->
+                before = pending.read()
+                taken = clamp n (Bytes.length before)
+                pending.write (Bytes.slice taken (Bytes.length before) before)
+                taken
+              }
+            }
+    }
 
 {-# scoped s #-}
 limited : Reader e -> Int -> (Reader s ->{s} a) ->{e} a
 limited parent allowance use =
-    Runtime.Local.run (clamp allowance allowance) (\remaining -> use
-        { buffered = \_ ->
-            window = parent.buffered()
-            Bytes.slice 0 (clamp (remaining.read()) (Bytes.length window)) window
-        , refill = \_ ->
-            if Bytes.length (parent.buffered()) >= remaining.read() then False
-            else parent.refill()
-        , skip = \n ->
-            before = remaining.read()
-            taken = parent.skip (clamp n before)
-            remaining.write (before - taken)
-            taken
-        })
+    Runtime.Local.run (clamp allowance allowance) { remaining ->
+        use
+            { buffered = {
+                window = parent.buffered()
+                Bytes.slice 0 (clamp remaining.read() (Bytes.length window)) window
+              }
+            , refill = {
+                if Bytes.length parent.buffered() >= remaining.read() then False
+                else parent.refill()
+              }
+            , skip = { n ->
+                before = remaining.read()
+                taken = parent.skip (clamp n before)
+                remaining.write (before - taken)
+                taken
+              }
+            }
+    }
 
 {-# scoped s #-}
 over : Source e -> (Reader s ->{s} a) ->{e} a
@@ -70,23 +79,25 @@ over source use = buffering Bytes.empty source use
 
 {-# scoped s #-}
 overBytes : Bytes -> (Reader s ->{s} a) ->{e} a
-overBytes contents use = buffering contents { pull = \_ -> Nothing } use
+overBytes contents use = buffering contents { pull = { Nothing } } use
 
 -- Each invocation introduces a fresh scoped row. The consumer may perform
 -- other effects; those remain in e after the local state effect is discharged.
 {-# scoped s #-}
 withBytes : Bytes -> (Reader s ->{s} a) ->{e} a
 withBytes contents use =
-    Runtime.Local.run contents (\pending ->
+    Runtime.Local.run contents { pending ->
         use
             { buffered = pending.read
-            , refill = \_ -> False
-            , skip = \n ->
+            , refill = { False }
+            , skip = { n ->
                 before = pending.read()
                 taken = clamp n (Bytes.length before)
                 pending.write (Bytes.slice taken (Bytes.length before) before)
                 taken
-            })
+              }
+            }
+    }
 
 -- ensure loops on a real terminator rather than on a length comparison: it
 -- stops because the source said end of input, never because two numbers

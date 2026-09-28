@@ -44,7 +44,7 @@ returnedCallback n =
     go : Int ->{Fail.Fail String} (() -> Int)
     go remaining =
         value = returnedCallback remaining
-        \_ -> value
+        { _ -> value }
     if n == 0 then Fail.fail "returned" else if n < 0 then 7 else (go (n - 1))()
 
 main() =
@@ -56,7 +56,7 @@ main() =
     print (operatorCaller 41)
     print (left "mutual" False)
     print (right 42 False)
-    print (Fail.attempt (\_ -> fallible 3))
-    print (Fail.attempt (\_ -> selfFallible 3))
-    print (Fail.attempt (\_ -> annotatedFallible 3))
-    print (Fail.attempt (\_ -> returnedCallback 3))
+    print (Fail.attempt ({ _ -> fallible 3 }))
+    print (Fail.attempt ({ _ -> selfFallible 3 }))
+    print (Fail.attempt ({ _ -> annotatedFallible 3 }))
+    print (Fail.attempt ({ _ -> returnedCallback 3 }))

@@ -34,7 +34,7 @@ run : Tree e ->{e} Int
 run tree =
     case tree of
         Leaf action -> action()
-        Branch children -> List.foldl (\child total -> total + run child) 0 children
+        Branch children -> List.foldl ({ child total -> total + run child }) 0 children
 
 quiet = leaf pure
 loud = leaf emit
@@ -49,7 +49,7 @@ useBox box =
         Box action -> action()
 
 useFunctions : List (() ->{IO} Int) ->{IO} Int
-useFunctions actions = List.foldl (\action total -> total + action()) 0 actions
+useFunctions actions = List.foldl ({ action total -> total + action() }) 0 actions
 
 functions = [pure, pure]
 
@@ -65,17 +65,17 @@ runRecord : Record e ->{e} Int
 runRecord record = record.action()
 
 runRecords : List (Record e) ->{e} Int
-runRecords records = List.foldl (\record total -> total + runRecord record) 0 records
+runRecords records = List.foldl ({ record total -> total + runRecord record }) 0 records
 
 quietRecord = Record { action = pure }
 
 staged : Int ->{IO} (Int -> Int)
 staged first =
     print first
-    \second -> first + second
+    { second -> first + second }
 
-scoped() = Runtime.Scope.bracket pure (\_ -> print "release") \_ ->
-    pair emit fail
+scoped() = Runtime.Scope.bracket pure ({ _ -> print "release" }) { _ ->
+    pair emit fail }
 
 main() =
     print (pair pure emit)
@@ -96,13 +96,13 @@ main() =
     later = staged 10
     print (later 2)
     tests =
-        [ leaf \_ -> 4
-        , leaf \_ -> 5
+        [ leaf { _ -> 4 }
+        , leaf { _ -> 5 }
         ]
     print (run (branch tests))
     answer =
         handle scoped() of
             boom () -> 9
     print answer
-    3 |> (\n -> n + 1) |> print
+    3 |> ({ n -> n + 1 }) |> print
     print <| 5 + 1

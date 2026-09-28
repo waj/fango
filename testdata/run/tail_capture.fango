@@ -6,7 +6,7 @@
 type Fns = Done | Push (Int -> Int) Fns
 
 build : Int -> Fns -> Fns
-build n acc = if n < 1 then acc else build (n - 1) (Push (\k -> k + n) acc)
+build n acc = if n < 1 then acc else build (n - 1) (Push ({ k -> k + n }) acc)
 
 applyAll : Fns -> Int -> Int
 applyAll fs x =

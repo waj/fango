@@ -5,5 +5,5 @@ main =
     print
         (handle ask () of
             ask () ->
-                later = \() -> resume 1
+                later = { resume 1 }
                 resume 2)

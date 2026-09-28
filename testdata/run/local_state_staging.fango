@@ -2,8 +2,8 @@ import Meta
 import Runtime.Local
 
 compute : Int
-compute = Runtime.Local.run 1 (\cell ->
+compute = Runtime.Local.run 1 ({ cell ->
     cell.write 7
-    cell.read())
+    cell.read() })
 
 main() = print $(Meta.lift compute)

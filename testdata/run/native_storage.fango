@@ -21,7 +21,7 @@ main() =
     record = box (Record { number = 7, text = "record" })
     tree = box (Branch (Leaf 1) (Branch (Leaf 2) (Leaf 3)))
     unit = box ()
-    function = box (\x -> x + 1)
+    function = box ({ x -> x + 1 })
     print (read integer)
     print (read text)
     r = read record

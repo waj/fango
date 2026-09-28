@@ -13,7 +13,7 @@ class Blank a
 -- and binds every field, so a deriver never invents a binder.
 labelOf : Bound -> Code
 labelOf bound =
-    Meta.lift (Meta.foldItems (\text field -> text ++ "/" ++ Meta.typeName field.ty) bound.ctor.name bound.fields)
+    Meta.lift (Meta.foldItems ({ text field -> text ++ "/" ++ Meta.typeName field.ty }) bound.ctor.name bound.fields)
 
 deriver Tag
     tag subject valueCode = Meta.match subject valueCode labelOf

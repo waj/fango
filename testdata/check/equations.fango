@@ -23,7 +23,7 @@ classify ^limit = "limit"
 classify _ = "other"
 
 -- A patterned lambda has one row, so the row must be exhaustive.
-unwrap = \(Pair a _) -> a
+unwrap = { (Pair a _) -> a }
 
 main : () ->{IO} ()
 main() =

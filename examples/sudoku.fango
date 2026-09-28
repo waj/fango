@@ -56,7 +56,7 @@ allowedAt target value index board =
             && allowedAt target value (index + 1) rest
 
 candidates board index =
-    List.filter (\value -> allowedAt index value 0 board) (List.range 1 9)
+    List.filter { value -> allowedAt index value 0 board } (List.range 1 9)
 
 chooseAt board index remaining best =
     case remaining of
@@ -99,12 +99,12 @@ searchOptions board index options =
                 Nothing -> searchOptions board index rest
 
 startBranches board index options answers =
-    List.map (\value ->
-        Async.spawn (\_ ->
+    List.map { value ->
+        Async.spawn {
             answer = search (setCell index value board)
             ignore (Async.send answers answer)
-        )
-    ) options
+        }
+    } options
 
 firstAnswer answers remaining =
     if remaining == 0 then
@@ -127,7 +127,7 @@ parallelSolve board =
             result
 
 runSolve : List Int ->{IO} Outcome (Result String (Maybe (List Int)))
-runSolve board = Async.run (\_ -> parallelSolve board)
+runSolve board = Async.run { parallelSolve board }
 
 printBoard board = printRows board 0 ""
 

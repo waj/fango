@@ -52,7 +52,7 @@ type checkErr struct {
 func TestMissingBlockResultIsCheckedAfterParsing(t *testing.T) {
 	for _, src := range []string{
 		"value =\n    x = 1\n",
-		"value = (\\_ ->\n    x = 1\n)\n",
+		"value = { _ ->\n    x = 1\n}\n",
 		"value = x = 1\n",
 	} {
 		_, _, errs := check(t, src)
@@ -188,13 +188,14 @@ func TestPositive(t *testing.T) {
 		{"add x y = x + y", "add : Num a => a -> a -> a"},
 		{"inc n = n + 1\nmain = inc 41", "inc : Num a => a -> a, main : Int"},
 		{"fib n = if n < 2 then n else fib (n - 1) + fib (n - 2)", "fib : (Num a, Ord a) => a -> a"},
-		{"f = \\x -> x + 1", "f : Num a => a -> a"},
+		{"f = { x -> x + 1 }", "f : Num a => a -> a"},
+		{"deferred = { 41 }", "deferred : Num a => () -> a"},
 		{"add : Int -> Int -> Int\nadd x y = x + y", "add : Int -> Int -> Int"},
 		{"pure() = 1", "pure : Num a => () -> a"},
 		{"saved = readLine", "saved : () ->{IO} Maybe Line"},
 		{"main = print (readLine())", "main : ()"},
-		{"make : () ->{IO} (() -> ())\nmake() =\n  print \"now\"\n  \\_ -> ()", "make : () ->{IO} () -> ()"},
-		{"later : () -> (() ->{IO} ())\nlater() = \\_ -> print \"later\"", "later : () -> () ->{IO} ()"},
+		{"make : () ->{IO} (() -> ())\nmake() =\n  print \"now\"\n  { _ -> () }", "make : () ->{IO} () -> ()"},
+		{"later : () -> (() ->{IO} ())\nlater() = { _ -> print \"later\" }", "later : () -> () ->{IO} ()"},
 		{"add x y = x + y\ninc = add 1", "add : Num a => a -> a -> a, inc : Num b => b -> b"},
 		{"values = [1, 2]\nfirstOf xs = case xs of\n  [] -> 0\n  [first | _] -> first", "values : Num a => List a, firstOf : Num b => List b -> b"},
 		// Generalization: uses no longer pin the definition.
@@ -257,11 +258,11 @@ func TestNegative(t *testing.T) {
 		{"f : Int -> Int\nf = 1", "MISSING INSTANCE", 2},         // arrow annotation resolves, body mismatches
 		{"saved : String\nsaved = readLine", "TYPE MISMATCH", 2}, // bare Unit function is not forced
 		{"main x = x", "MAIN TAKES NO PARAMETERS", 1},
-		{"f x x = x", "SHADOWING", 1},           // duplicate params
-		{"f f = f", "SHADOWING", 1},             // param shadows the function itself
-		{"x = 1\nf x = x + 1", "SHADOWING", 2},  // param shadows a top-level name
-		{"f = \\x -> \\x -> x", "SHADOWING", 1}, // lambda param shadowing
-		{"f x = f", "TYPE MISMATCH", 1},         // occurs check via the recursion var
+		{"f x x = x", "SHADOWING", 1},               // duplicate params
+		{"f f = f", "SHADOWING", 1},                 // param shadows the function itself
+		{"x = 1\nf x = x + 1", "SHADOWING", 2},      // param shadows a top-level name
+		{"f = { x -> { x -> x } }", "SHADOWING", 1}, // lambda param shadowing
+		{"f x = f", "TYPE MISMATCH", 1},             // occurs check via the recursion var
 		{"type R = { value : Int }\nx = R {}", "RECORD FIELDS", 2},
 		{"type R = { value : Int }\nget : R -> Int\nget r = r.missing", "UNKNOWN FIELD", 3},
 		{"type R = { value : Int }\nget r = r.value", "AMBIGUOUS FIELD", 2},

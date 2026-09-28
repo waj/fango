@@ -33,10 +33,10 @@ query () =
 parallel action = Async.await (Async.spawn action)
 
 main() =
-    print (withDatabase (\_ -> Async.run (\_ -> parallel query)))
-    print (Fail.attempt (\_ -> withBrokenDatabase (\_ -> Async.run (\_ -> parallel query))))
-    print (Async.run (\_ -> parallel (\_ ->
-        result = withStop (\_ -> withStoppingDatabase query)
+    print (withDatabase ({ _ -> Async.run ({ _ -> parallel query }) }))
+    print (Fail.attempt ({ _ -> withBrokenDatabase ({ _ -> Async.run ({ _ -> parallel query }) }) }))
+    print (Async.run ({ _ -> parallel ({ _ ->
+        result = withStop ({ _ -> withStoppingDatabase query })
         case result of
             Ok value -> value
-            Err reason -> reason)))
+            Err reason -> reason }) }))

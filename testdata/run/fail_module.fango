@@ -21,16 +21,16 @@ report outcome =
         Err error -> print ("err " ++ error)
 
 main() =
-    report (attempt (\_ -> parsePositive "42"))
-    report (attempt (\_ -> parsePositive "x"))
-    report (attempt (\_ -> parsePositive "-3"))
-    report (attempt (\_ -> fromResult (decrement 10)))
-    report (attempt (\_ -> fromResult (decrement 0)))
-    report (attempt (\_ ->
-        inner = attempt (\_ -> parsePositive "oops")
+    report (attempt ({ _ -> parsePositive "42" }))
+    report (attempt ({ _ -> parsePositive "x" }))
+    report (attempt ({ _ -> parsePositive "-3" }))
+    report (attempt ({ _ -> fromResult (decrement 10) }))
+    report (attempt ({ _ -> fromResult (decrement 0) }))
+    report (attempt ({ _ ->
+        inner = attempt ({ _ -> parsePositive "oops" })
         case inner of
             Err _ -> fail "outer saw inner failure"
-            Ok n -> n))
+            Ok n -> n }))
     print (String.contains "ell" "hello")
     print (String.contains "" "hello")
     print (String.contains "hello!" "hello")

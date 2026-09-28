@@ -1,9 +1,9 @@
 class Echo a
     echo : a ->{IO} a
 instance Echo Int
-    echo = \value ->
+    echo = { value ->
         print "called"
-        value
+        value }
 argument : Int
 argument = 42
 main =

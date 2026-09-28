@@ -27,10 +27,10 @@ report : () ->{IO, Wire} ()
 report () =
     result : Result (Fail.Report Bytes) Int
     result =
-        Fail.attemptReport (\_ ->
-            Runtime.Scope.finally (\_ ->
+        Fail.attemptReport ({ _ ->
+            Runtime.Scope.finally ({ _ ->
                 Fail.fail (Bytes.fromString "body")
-                1) (\_ -> send (Bytes.fromString "close\r\n")))
+                1 }) ({ _ -> send (Bytes.fromString "close\r\n") }) })
     case result of
         Err failed ->
             print failed.primary

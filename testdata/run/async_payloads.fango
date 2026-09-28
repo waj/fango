@@ -10,12 +10,12 @@ worker : Payload ->{Async.Async String} (Int, Bytes.Bytes)
 worker payload = case payload of
     Payload numbers bytes ->
         ignore (Async.cancelled())
-        result = State.run 0 (\_ ->
-            List.each (\n -> State.put (State.get() + n)) numbers
-            State.get())
+        result = State.run 0 ({ _ ->
+            List.each ({ n -> State.put (State.get() + n) }) numbers
+            State.get() })
         (result.value, bytes)
 
-main() = ignore (Async.run (\_ ->
-    tasks = List.map (\_ -> Async.spawn (\_ -> worker (Payload shared (Bytes.fromString "abc")))) [1, 2, 3, 4]
-    List.each (\task -> case Async.await task of
-        (number, bytes) -> print (number, Bytes.length bytes)) tasks))
+main() = ignore (Async.run ({ _ ->
+    tasks = List.map ({ _ -> Async.spawn ({ _ -> worker (Payload shared (Bytes.fromString "abc")) }) }) [1, 2, 3, 4]
+    List.each ({ task -> case Async.await task of
+        (number, bytes) -> print (number, Bytes.length bytes) }) tasks }))

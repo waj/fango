@@ -4,11 +4,11 @@ import Writer
 
 assembled : Bytes.Bytes
 assembled =
-    (_, contents) = Writer.collecting (\writer ->
+    (_, contents) = Writer.collecting ({ writer ->
         Writer.writeString writer "abc"
-        Reader.overBytes (Bytes.fromString "XYZ") (\reader ->
-            Writer.write writer (Reader.readUpTo reader 2))
-        writer.flush())
+        Reader.overBytes (Bytes.fromString "XYZ") ({ reader ->
+            Writer.write writer (Reader.readUpTo reader 2) })
+        writer.flush() })
     contents
 
 main() = print assembled

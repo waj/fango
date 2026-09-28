@@ -42,12 +42,12 @@ tokenize text =
             if char == ' ' || char == '\t' then
                 tokenize rest
             else if isDigit char then
-                (number, tail) = String.span (\c -> isDigit c || c == '.') text
+                (number, tail) = String.span { c -> isDigit c || c == '.' } text
                 case String.toFloat number of
                     Just value -> [NumberToken value | tokenize tail]
                     Nothing -> fail "invalid number"
             else if isLetter char then
-                (name, tail) = String.span (\c -> isLetter c || isDigit c) text
+                (name, tail) = String.span { c -> isLetter c || isDigit c } text
                 [NameToken name | tokenize tail]
             else
                 token =
@@ -152,7 +152,7 @@ loop env =
                 "" ->
                     loop env
                 _ ->
-                    case Fail.attempt (\_ -> execute env (parseStatement (tokenize text))) of
+                    case Fail.attempt { execute env (parseStatement (tokenize text)) } of
                         Ok next -> loop next
                         Err message ->
                             print ("error: " ++ message)

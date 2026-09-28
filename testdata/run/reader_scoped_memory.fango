@@ -10,7 +10,7 @@ parsePair first second =
     Bytes.toStringLossy (Bytes.concat [a, b, c, d])
 
 parsed : String
-parsed = Reader.withBytes (Bytes.fromString "abc") (\first ->
-    Reader.withBytes (Bytes.fromString "XYZ") (\second -> parsePair first second))
+parsed = Reader.withBytes (Bytes.fromString "abc") ({ first ->
+    Reader.withBytes (Bytes.fromString "XYZ") ({ second -> parsePair first second }) })
 
 main() = print parsed

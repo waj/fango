@@ -30,13 +30,13 @@ effect FixedFail
     abort stop : String -> Int
 
 askWithAbort() =
-    attempt (\_ ->
+    attempt ({ _ ->
         handle ask True + ask False of
             ask valid ->
                 if valid then resume 5 else
                     stopped = fail "ask-failed"
                     stopped
-            return total -> total)
+            return total -> total })
 
 fixedFailure() =
     handle stop "fixed" of
@@ -54,7 +54,7 @@ consumeThenSucceed() =
     asInt 42
 
 backtrack original =
-    first = attempt (\_ -> State.run (asInt original) consumeThenFail)
+    first = attempt ({ _ -> State.run (asInt original) consumeThenFail })
     case first of
         Err _ -> State.run (asInt original) consumeThenSucceed
         Ok stateResult -> stateResult
@@ -91,9 +91,9 @@ markedError() =
     "marked"
 
 main() =
-    generic = attempt (\_ -> if False then asInt 9 else fail "number")
-    visible = State.run 0 (\_ -> attempt consumeThenFail)
-    discarded = attempt (\_ -> State.run 0 consumeThenFail)
+    generic = attempt ({ _ -> if False then asInt 9 else fail "number" })
+    visible = State.run 0 ({ _ -> attempt consumeThenFail })
+    discarded = attempt ({ _ -> State.run 0 consumeThenFail })
     retried = backtrack 0
     case generic of
         Err message -> print message
@@ -115,11 +115,11 @@ main() =
             return message -> message
     print recursive
     print $(compileChoice())
-    marked = attempt (\_ -> fail (markedError()))
+    marked = attempt ({ _ -> fail (markedError()) })
     case marked of
         Err message -> print message
         Ok _ -> ()
-    partial = attempt (\_ -> failInt "partial")
+    partial = attempt ({ _ -> failInt "partial" })
     case partial of
         Err message -> print message
         Ok number -> print number
@@ -128,7 +128,7 @@ main() =
         Err message -> print message
         Ok number -> print number
     print (fixedFailure())
-    loudResult = attemptLoud (\_ -> if True then fail "loud" else 0)
+    loudResult = attemptLoud ({ _ -> if True then fail "loud" else 0 })
     case loudResult of
         Err _ -> ()
         Ok _ -> ()

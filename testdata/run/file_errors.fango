@@ -18,17 +18,17 @@ showBool outcome = Result.map show outcome
 main() =
     report (File.read "missing.txt")
     report (File.read ".")
-    report (Result.map (\_ -> "written") (File.writeAll "missing/out.txt" "x"))
+    report (Result.map ({ _ -> "written" }) (File.writeAll "missing/out.txt" "x"))
     report (showBool (File.isDirectory "."))
     report (showBool (File.isDirectory "missing"))
-    report (Result.map (\_ -> "listed") (File.listDirectory "missing"))
+    report (Result.map ({ _ -> "listed" }) (File.listDirectory "missing"))
     -- Open succeeds on a directory; the first read fails after acquisition,
     -- so the scope releases and the failure reaches attempt.
-    report (attempt (\_ ->
-        File.withFile "." (\file ->
+    report (attempt ({ _ ->
+        File.withFile "." ({ file ->
             case File.readLine file of
                 Nothing -> "empty"
-                Just line -> line.text)))
+                Just line -> line.text }) }))
     -- The kind is data, not just text.
     case File.read "missing.txt" of
         Err error -> print (show error.kind)

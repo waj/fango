@@ -14,7 +14,7 @@ produce : Stream.Stream (List Int) Int e
 produce = Stream.fromList [1, 2, 3]
 
 sumCursor : Iterator.Iterator state Int e ->{e} Int
-sumCursor cursor = foldCursor (\element acc -> element + acc) 0 cursor
+sumCursor cursor = foldCursor ({ element acc -> element + acc }) 0 cursor
 
 sumHeld (Held cursor) = sumCursor cursor
 
@@ -38,17 +38,17 @@ instance Consume Int
     consume cursor = sumCursor cursor
 
 independent : Iterator.Iterator state Int e -> (() -> Int)
-independent cursor = \_ -> 42
+independent cursor = { _ -> 42 }
 
 main() =
     print (Stream.withCursor produce twice)
     print (runStored produce)
     print (Stream.withCursor produce consume)
-    print (Stream.withCursor produce (\left ->
-        Stream.withCursor produce (\right ->
+    print (Stream.withCursor produce ({ left ->
+        Stream.withCursor produce ({ right ->
             a = sumCursor left
             b = sumCursor right
             c = sumCursor left
-            a + b + c)))
+            a + b + c }) }))
     saved = Stream.withCursor produce independent
     print (saved())

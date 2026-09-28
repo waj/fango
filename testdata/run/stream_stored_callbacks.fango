@@ -8,9 +8,9 @@ runBox (Box action) value = action value
 makeBox : () ->{IO} Box IO
 makeBox() =
     print "factory"
-    Box (\value ->
+    Box ({ value ->
         print value
-        value + 1)
+        value + 1 })
 
 type Chain e = End | Link (Box e) (Chain e)
 
@@ -25,17 +25,17 @@ class Invoke a
 instance Invoke (Box IO)
     invoke = runBox
 
-once action = Stream.unfold False (\done ->
-    if done then Nothing else Just (action(), True))
+once action = Stream.unfold False ({ done ->
+    if done then Nothing else Just (action(), True) })
 
 emit : Invoke a => a -> Stream.Stream Bool Int IO
-emit stored = once (\_ -> invoke stored 4)
+emit stored = once ({ _ -> invoke stored 4 })
 
 main() =
     box = makeBox()
-    source = once (\_ -> runBox box 4)
+    source = once ({ _ -> runBox box 4 })
     Stream.forEach print source
     Stream.forEach print source
     chain = Link box (Link box End)
-    Stream.forEach print (once (\_ -> runChain chain 6))
+    Stream.forEach print (once ({ _ -> runChain chain 6 }))
     Stream.forEach print (emit box)

@@ -8,8 +8,8 @@ lineStep file = case File.readLine file of
         print ("read " ++ line.text)
         Just (line.text, file)
 
-pipeline() = File.withFile "input.txt" (\file ->
+pipeline() = File.withFile "input.txt" ({ file ->
     source = Stream.unfold file lineStep
-    Stream.toList (Stream.take 2 (Stream.filter (\line -> line /= "skip") source)))
+    Stream.toList (Stream.take 2 (Stream.filter ({ line -> line /= "skip" }) source)) })
 
 main() = print (Fail.attempt pipeline)

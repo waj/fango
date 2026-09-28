@@ -28,19 +28,19 @@ failingBody token =
     fail "requested"
 
 scopeInsideHandler() =
-    handle Runtime.Scope.bracket (\_ -> open "inner-first") close failingBody of
+    handle Runtime.Scope.bracket ({ _ -> open "inner-first" }) close failingBody of
         fail error ->
             print ("clause sees " ++ error)
             Err error
         return value -> Ok value
 
 handlerInsideScope() =
-    Runtime.Scope.bracket (\_ -> open "outer-first") close (\token ->
+    Runtime.Scope.bracket ({ _ -> open "outer-first" }) close ({ token ->
         handle failingBody token of
             fail error ->
                 print ("clause sees " ++ error)
                 Err error
-            return value -> Ok value)
+            return value -> Ok value })
 
 noted token =
     say token
@@ -48,12 +48,12 @@ noted token =
 
 -- A resumptive handler's operation clauses also run inside the scope.
 counted() =
-    Runtime.Scope.bracket (\_ -> open "counted") close (\token ->
+    Runtime.Scope.bracket ({ _ -> open "counted" }) close ({ token ->
         handle noted token of
             say message ->
                 print ("note " ++ message)
                 resume ()
-            return _ -> Ok "noted")
+            return _ -> Ok "noted" })
 
 main() =
     report (scopeInsideHandler())

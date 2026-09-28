@@ -4,4 +4,4 @@ import Runtime.Scope
 -- is a plain type error rather than a special diagnostic.
 
 main() =
-    print (Runtime.Scope.bracket (\_ -> "a") (\token -> token ++ "!") (\token -> token ++ "?"))
+    print (Runtime.Scope.bracket ({ _ -> "a" }) ({ token -> token ++ "!" }) ({ token -> token ++ "?" }))

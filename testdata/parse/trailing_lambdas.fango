@@ -1,17 +1,17 @@
-simple = apply 1 \x -> x + 2
+simple = apply 1 { x -> x + 2 }
 
-nested = outer \x -> inner \y -> x + y
+nested = outer { x -> inner { y -> x + y } }
 
 suite =
     describe "suite"
-        [ test "first" \_ ->
+        [ test "first" { _ ->
             print 1
-            ()
-        , test "second" \_ -> ()
+            () }
+        , test "second" { _ -> () }
         ]
 
-tuple = (apply \x -> x, apply \x -> x)
+tuple = (apply { x -> x }, apply { x -> x })
 
-pipes = value |> transform \x -> x |> finish
+pipes = value |> transform { x -> x |> finish }
 
-unitCalls = apply maker() \() -> answer()
+unitCalls = apply maker() { answer() }

@@ -5,9 +5,9 @@ import State
 import Result exposing (Result(..))
 
 main() =
-    result = Fail.attempt (\_ ->
-        file = File.withFile "input.txt" (\file -> file)
-        File.readLine file)
+    result = Fail.attempt ({ _ ->
+        file = File.withFile "input.txt" ({ file -> file })
+        File.readLine file })
     print (case result of
         Err _ -> True
         Ok _ -> False)

@@ -15,7 +15,7 @@ type Token = Token Int deriving (Show)
 body : () ->{Fail.Fail Token} ()
 body() = Fail.fail (Token 1)
 saved =
-    case Fail.attemptReport (\_ -> Runtime.Scope.finally body (\_ -> Fail.fail (Token 2))) of
+    case Fail.attemptReport { _ -> Runtime.Scope.finally body { _ -> Fail.fail (Token 2) } } of
         Err report -> report.suppressed
         Ok _ -> []
 readOld : Failure.Failure -> Maybe Token
@@ -45,7 +45,7 @@ import List exposing (List(..))
 message : () -> String
 message() =
     result : Result (Fail.Report String) ()
-    result = Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ -> Fail.fail "body") (\_ -> Fail.fail "close"))
+    result = Fail.attemptReport { _ -> Runtime.Scope.finally { _ -> Fail.fail "body" } { _ -> Fail.fail "close" } }
     case result of
         Err report ->
             case report.suppressed of

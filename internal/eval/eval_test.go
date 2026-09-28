@@ -386,7 +386,7 @@ func TestWorkersAndClosures(t *testing.T) {
 	if v, err := Eval(context.Background(), sat, env, io.Discard); err != nil || v != int64(42) {
 		t.Errorf("saturated: got %v, %v", v, err)
 	}
-	// Partial via eta-expansion: (\_w0 -> add 1 _w0) applied to 41.
+	// Partial via eta-expansion: `{ _w0 -> add 1 _w0 }` applied to 41.
 	partial := &core.Lambda{Param: "_w0", Ty: fnTy,
 		Body: &core.App{CalleeKind: core.Worker,
 			Callee: &core.VarRef{Name: "add", Ty: &types.TFun{Arg: it, Ret: fnTy}},

@@ -19,13 +19,13 @@ runStrings body = Async.run body
 parallel body = Async.await (Async.spawn body)
 
 main() =
-    print (withCounter (\_ -> runStrings (\_ ->
-        first = parallel (\_ -> next())
-        second = parallel (\_ -> next())
-        (first, second))))
-    print (runStrings (\_ -> parallel (\_ -> withCounter (\_ -> (next(), next())))))
-    handle ignore (runStrings (\_ ->
-        value = parallel (\_ -> 42)
+    print (withCounter ({ _ -> runStrings ({ _ ->
+        first = parallel ({ _ -> next() })
+        second = parallel ({ _ -> next() })
+        (first, second) }) }))
+    print (runStrings ({ _ -> parallel ({ _ -> withCounter ({ _ -> (next(), next()) }) }) }))
+    handle ignore (runStrings ({ _ ->
+        value = parallel ({ _ -> 42 })
         print value
-        stop())) of
+        stop() })) of
         stop () -> print "parent stopped"

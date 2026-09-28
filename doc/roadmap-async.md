@@ -78,12 +78,13 @@ replacement for captured effect-continuation frames.
 fetch : String ->{IO, Async, Fail Error} String
 fetch url = Network.get url
 
-Async.run \_ ->
-    first = Async.spawn (\_ -> fetch firstUrl)
-    second = Async.spawn (\_ -> fetch secondUrl)
+Async.run { _ ->
+    first = Async.spawn { _ -> fetch firstUrl }
+    second = Async.spawn { _ -> fetch secondUrl }
     a = Async.await first
     b = Async.await second
     combine a b
+}
 ```
 
 `Network.get` here is a proposed adapter, not a currently shipped module/API.
@@ -115,13 +116,15 @@ action, without a context argument at each call. `Async.context` establishes a
 nested lifetime/cancellation boundary on the same executor:
 
 ```fango
-Async.run \_ ->
-    outer = Async.spawn (\_ -> fetch firstUrl)
-    value = Async.context \_ ->
-        inner = Async.spawn (\_ -> fetch secondUrl)
+Async.run { _ ->
+    outer = Async.spawn { _ -> fetch firstUrl }
+    value = Async.context { _ ->
+        inner = Async.spawn { _ -> fetch secondUrl }
         earlier = Async.await outer
         combine earlier (Async.await inner)
+    }
     combine value (Async.await outer)
+}
 ```
 
 The inner context owns `inner`; the root owns `outer`. Awaiting the outer task
@@ -192,14 +195,17 @@ context awaiting live outer work is not stalled because its own queue is empty.
 ### Executor selection
 
 ```fango
-Async.runOn Runtime.Executor.cooperative \_ ->
-    Async.await (Async.spawn (\_ -> fetch url))
+Async.runOn Runtime.Executor.cooperative { _ ->
+    Async.await (Async.spawn { _ -> fetch url })
+}
 
-Async.runOn Runtime.Executor.parallel \_ ->
-    Async.await (Async.spawn (\_ -> fetch url))
+Async.runOn Runtime.Executor.parallel { _ ->
+    Async.await (Async.spawn { _ -> fetch url })
+}
 
-Async.runOn (Runtime.Executor.mixed 4) \_ ->
-    Async.await (Async.spawn (\_ -> fetch url))
+Async.runOn (Runtime.Executor.mixed 4) { _ ->
+    Async.await (Async.spawn { _ -> fetch url })
+}
 ```
 
 The proposed constructor names are `cooperative`, `parallel`, and `mixed`.

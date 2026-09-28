@@ -54,7 +54,7 @@ eqBound lhs rhs =
 
 deriver Eq
     (==) subject leftCode rightCode =
-        Meta.match subject leftCode (\lhs -> Meta.match subject rightCode (\rhs -> eqBound lhs rhs))
+        Meta.match subject leftCode { lhs -> Meta.match subject rightCode { rhs -> eqBound lhs rhs } }
 
 -- Show: a union constructor prints its name then its fields; a record prints
 -- its type name then `field = value` pairs.
@@ -62,7 +62,7 @@ deriver Eq
 unionShow : Bound -> Code
 unionShow bound =
     Meta.foldItems
-        (\sofar field -> appendCode sofar (appendCode (lift " ") (showCode field.value)))
+        { sofar field -> appendCode sofar (appendCode (lift " ") (showCode field.value)) }
         (lift bound.ctor.name)
         bound.fields
 
@@ -70,13 +70,13 @@ recordShow : Bound -> Code
 recordShow bound =
     appendCode
         (Meta.foldItems
-            (\sofar field ->
+            { sofar field ->
                 appendCode sofar
                     (appendCode
                         (lift ((if field.index == 0 then " " else ", ") ++ field.name ++ " = "))
                         (showCode field.value)
                     )
-            )
+            }
             (lift (bound.ctor.name ++ " {"))
             bound.fields
         )
@@ -90,7 +90,7 @@ showBound subject bound =
 
 deriver Show
     show subject valueCode =
-        Meta.match subject valueCode (\bound -> showBound subject bound)
+        Meta.match subject valueCode { bound -> showBound subject bound }
 
 -- Ord: constructors order by declaration position, then fields
 -- lexicographically. The three outcomes — less, greater, and equal — are what
@@ -121,7 +121,7 @@ ordBound whenLess whenGreater whenEqual lhs rhs =
 ordering : Bool -> Bool -> Bool -> TypeInfo -> Code -> Code -> Code
 ordering whenLess whenGreater whenEqual subject leftCode rightCode =
     Meta.match subject leftCode
-        (\lhs -> Meta.match subject rightCode (\rhs -> ordBound whenLess whenGreater whenEqual lhs rhs))
+        { lhs -> Meta.match subject rightCode { rhs -> ordBound whenLess whenGreater whenEqual lhs rhs } }
 
 deriver Ord
     (<) subject leftCode rightCode = ordering True False False subject leftCode rightCode

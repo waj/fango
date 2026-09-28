@@ -16,20 +16,31 @@ async function main() {
     loadGrammar: async () => textmate.parseRawGrammar(fs.readFileSync(grammarPath, "utf8"), grammarPath),
   });
   const grammar = await registry.loadGrammar("source.fango");
-  const sample = 'test "name" \\value -> value |> finish';
+  const sample = 'test "name" { value -> value |> finish }';
   const tokens = grammar.tokenizeLine(sample).tokens;
   const scopeAt = index => tokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
-  assert(scopeAt(sample.indexOf("\\")).includes("keyword.operator.lambda.fango"));
+  assert(scopeAt(sample.indexOf("{")).includes("punctuation.section.braces.begin.fango"));
   assert(scopeAt(sample.indexOf("value")).includes("variable.parameter.fango"));
   assert(scopeAt(sample.indexOf("->")).includes("keyword.operator.arrow.fango"));
   assert(scopeAt(sample.indexOf("|>")).includes("keyword.operator.fango"));
   assert(!scopeAt(sample.indexOf("|>")).includes("keyword.operator.pipe.fango"));
   assert(!scopeAt(sample.lastIndexOf("value")).includes("variable.parameter.fango"));
 
-  const sequence = 'apply \\a b -> print a; b + 1';
+  const sequence = 'apply { a b -> print a; b + 1 }';
   const sequenceTokens = grammar.tokenizeLine(sequence).tokens;
   const separator = sequenceTokens.find(t => t.startIndex <= sequence.indexOf(";") && t.endIndex > sequence.indexOf(";"));
   assert(separator.scopes.includes("punctuation.separator.statement.fango"));
+
+  for (const [sample, member] of [
+    ['{ x = 1 }', true],
+    ['{ value | x = 1 }', true],
+    ['Wrap { x = 1 }', true],
+    ['Wrap { foo }', false],
+    ['{ foo }', false],
+  ]) {
+    const tokens = grammar.tokenizeLine(sample).tokens;
+    assert.equal(tokens.some(t => t.scopes.includes('variable.other.member.fango')), member, sample);
+  }
 
   // A row literal is an effect row wherever it stands: the grammar's row rule
   // is not anchored to an arrow, so a row filling a type argument gets the
@@ -72,13 +83,13 @@ async function main() {
     assert(tokens.find(t => t.startIndex <= head && t.endIndex > head).scopes.includes("keyword.control.return.fango"));
   }
   let parenthesizedStack = textmate.INITIAL;
-  for (const line of ["main =", "    foo (\\_ ->", "        foo", "    bar", "    )"]) {
+  for (const line of ["main =", "    foo { _ ->", "        foo", "    bar", "    }"]) {
     const result = grammar.tokenizeLine(line, parenthesizedStack);
     assert(!result.stoppedEarly);
     parenthesizedStack = result.ruleStack;
   }
   let incompleteBlockStack = textmate.INITIAL;
-  for (const line of ["main =", "    foo (\\_ ->", "    value = x", "        bar", "    )"]) {
+  for (const line of ["main =", "    foo { _ ->", "    value = x", "        bar", "    }"]) {
     const result = grammar.tokenizeLine(line, incompleteBlockStack);
     assert(!result.stoppedEarly);
     incompleteBlockStack = result.ruleStack;
@@ -103,7 +114,7 @@ async function main() {
     }
   }
   for (const dir of ["stdlib", "testdata", "examples"]) visit(path.join(root, dir));
-  console.log(`Tokenized ${files} Fango files; trailing-lambda and pipe scopes passed.`);
+  console.log(`Tokenized ${files} Fango files; lambda, record, and pipe scopes passed.`);
   registry.dispose();
 }
 

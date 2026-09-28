@@ -23,7 +23,7 @@ counted v =
 run : Int ->{IO} ()
 run start =
     outcome =
-        handle (attempt (\_ -> withValue start (\v -> counted v))) with sum = 0 of
+        handle (attempt ({ _ -> withValue start ({ v -> counted v }) })) with sum = 0 of
             bump n -> resume () with sum + n
             readTotal () -> resume sum with sum
             return result -> (result, sum)
@@ -32,7 +32,7 @@ run start =
 main() =
     run 5
     run 50
-    print (handle (attempt (\_ -> withValue 7 (\v -> bump v))) with sum = 0 of
+    print (handle (attempt ({ _ -> withValue 7 ({ v -> bump v }) })) with sum = 0 of
         bump n -> resume () with sum + n
         readTotal () -> resume sum with sum
         return result -> (result, sum))

@@ -23,20 +23,20 @@ readAll file found =
 main() =
     -- A counted read picks up where a line read left off, because both go
     -- through the handle's own buffered reader.
-    report "mixed" (attempt (\_ -> File.withFile "input.bin" (\file ->
+    report "mixed" (attempt ({ _ -> File.withFile "input.bin" ({ file ->
         first = File.readLine file
         head =
             case first of
                 Nothing -> ""
                 Just line -> line.text
-        (head, File.readBytes file 99))))
+        (head, File.readBytes file 99) }) }))
     -- Short reads, then Nothing at end of file.
-    report "counted" (attempt (\_ -> File.withFile "input.bin" (\file -> readAll file [])))
+    report "counted" (attempt ({ _ -> File.withFile "input.bin" ({ file -> readAll file [] }) }))
     -- A count of zero answers empty, which is not end of file.
-    report "empty" (attempt (\_ -> File.withFile "input.bin" (\file -> File.readBytes file 0)))
+    report "empty" (attempt ({ _ -> File.withFile "input.bin" ({ file -> File.readBytes file 0 }) }))
     -- Writing bytes back and reading them again.
-    report "roundtrip" (attempt (\_ ->
-        File.withOutput "out.bin" (\file -> File.writeBytes file (Bytes.fromList [255, 0, 65]))
-        File.withFile "out.bin" (\file -> File.readBytes file 99)))
+    report "roundtrip" (attempt ({ _ ->
+        File.withOutput "out.bin" ({ file -> File.writeBytes file (Bytes.fromList [255, 0, 65]) })
+        File.withFile "out.bin" ({ file -> File.readBytes file 99 }) }))
     -- The failures are the ordinary ones.
-    report "missing" (attempt (\_ -> File.withFile "missing.bin" (\file -> File.readBytes file 1)))
+    report "missing" (attempt ({ _ -> File.withFile "missing.bin" ({ file -> File.readBytes file 1 }) }))

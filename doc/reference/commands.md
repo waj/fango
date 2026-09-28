@@ -208,7 +208,8 @@ arguments, so `foo bar()` stays `foo bar()`; other nested applications retain
 parentheses when removing them would change how the arguments are read.
 
 The formatter keeps the author's line breaks rather than reflowing to a width,
-except when moving a multiline closing parenthesis onto its own line. A
+except when placing a multiline closing parenthesis or lambda brace, or when
+making a lambda consistently inline or multiline. A
 construct written across several lines stays that way and one written inline
 stays inline. That extends to where a keyword sits: a body moved below
 its `=` or `->` stays below it, a `case` written on its declaration's own line
@@ -216,12 +217,19 @@ keeps its branches one level in from there, and a `then` or `else` given a line
 of its own is anchored at the column of its `if`, so a chain of arms lines up
 instead of staircasing rightward. An `exposing` list the author moved below
 its keyword is printed in the leading-comma block form.
-In a multiline application, a parenthesized argument closes on a new line.
-Consecutive closings share a line when their openers share a line; otherwise
-each closes on a separate line. A later argument may follow the closing
-parentheses on that line, as in `)) options`. Closing lines use the indentation
-of their opening lines. A parenthesized lambda body is indented below its
-enclosing statement, regardless of the source column the parser accepted.
+In a multiline application, a parenthesized argument or braced lambda closes
+on a new line. Consecutive closing parentheses and lambda braces share a line
+when their openers share a line; otherwise each closes on a separate line. A
+later argument may follow the closings on that line, as in `)) options`.
+Closing lines use the indentation of their opening lines. A braced lambda
+body is indented below its enclosing statement, regardless of the source
+column the parser accepted. When a lambda is a direct list item, tuple item,
+or record field value, its closing brace aligns with the item or field name
+after any leading comma and space. The container's own closing delimiter
+retains its alignment.
+A lambda whose body starts and ends on the opening line also closes there,
+even when its source closing brace was on the next line. When the body spans
+lines, it starts below `->`, or below `{` for a Unit lambda.
 
 A multiline nominal type is the exception: its `deriving` clause is always an
 indented line after its constructor alternatives or record schema. An inline

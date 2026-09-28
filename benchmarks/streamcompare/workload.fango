@@ -1,11 +1,12 @@
-import Stream
-import Iterator
-import State
-import Runtime.Scope
 import Basics exposing (quotientBy)
+import Iterator
+import Runtime.Scope
+import State
+import Stream
 
-source n = Stream.unfold n (\remaining ->
-    if remaining <= 0 then Nothing else Just (remaining, remaining - 1))
+source n = Stream.unfold n { remaining ->
+    if remaining <= 0 then Nothing else Just (remaining, remaining - 1)
+}
 
 sumCursor cursor acc = case Iterator.next cursor of
     Nothing -> acc
@@ -15,7 +16,7 @@ build n acc = if n <= 0 then acc else build (n - 1) [n | acc]
 
 reopen n acc =
     if n <= 0 then acc
-    else reopen (n - 1) (acc + Stream.fold (\x total -> x + total) 0 (source 8))
+    else reopen (n - 1) (acc + Stream.fold { x total -> x + total } 0 (source 8))
 
 stepState remaining =
     if remaining <= 0 then Nothing
@@ -24,21 +25,22 @@ stepState remaining =
         Just (remaining, remaining - 1)
 
 effectful n =
-    result = State.run 0 (\_ ->
+    result = State.run 0 { _ ->
         Runtime.Scope.finally
-            (\_ -> Stream.fold (\x acc -> x + acc) 0 (Stream.take (quotientBy 2 n) (Stream.unfold n stepState)))
-            (\_ -> State.put (State.get() + 1000)))
+            { _ -> Stream.fold { x acc -> x + acc } 0 (Stream.take (quotientBy 2 n) (Stream.unfold n stepState)) }
+            { _ -> State.put (State.get() + 1000) }
+    }
     result.value + result.state
 
 run : Int -> Int -> Int
 run which n = case which of
-    0 -> Stream.fold (\x acc -> x + acc) 0 (source n)
-    1 -> Stream.withCursor (source n) (\cursor -> sumCursor cursor 0)
-    2 -> Stream.fold (\x acc -> x + acc) 0 (Stream.filter (\x -> x > quotientBy 2 n) (Stream.map (\x -> x + 1) (source n)))
-    3 -> Stream.fold (\x acc -> x + acc) 0 (source n |> Stream.map (\x -> x + 1) |> Stream.map (\x -> x + 1) |> Stream.map (\x -> x + 1) |> Stream.map (\x -> x + 1))
-    4 -> Stream.fold (\x acc -> x + acc) 0 (Stream.fromList (build n []))
-    5 -> Stream.fold (\(a, b) acc -> a + b + acc) 0 (Stream.zip (source n) (source n))
-    6 -> Stream.fold (\x acc -> x + acc) 0 (Stream.take (quotientBy 2 n) (source n))
+    0 -> Stream.fold { x acc -> x + acc } 0 (source n)
+    1 -> Stream.withCursor (source n) { cursor -> sumCursor cursor 0 }
+    2 -> Stream.fold { x acc -> x + acc } 0 (Stream.filter { x -> x > quotientBy 2 n } (Stream.map { x -> x + 1 } (source n)))
+    3 -> Stream.fold { x acc -> x + acc } 0 (source n |> Stream.map { x -> x + 1 } |> Stream.map { x -> x + 1 } |> Stream.map { x -> x + 1 } |> Stream.map { x -> x + 1 })
+    4 -> Stream.fold { x acc -> x + acc } 0 (Stream.fromList (build n []))
+    5 -> Stream.fold { (a, b) acc -> a + b + acc } 0 (Stream.zip (source n) (source n))
+    6 -> Stream.fold { x acc -> x + acc } 0 (Stream.take (quotientBy 2 n) (source n))
     7 -> reopen n 0
     _ -> effectful n
 

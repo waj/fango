@@ -10,24 +10,24 @@ empty = Dict.empty
 
 main() =
     -- foldl ascends, foldr descends
-    print (Dict.foldl (\entry acc -> case entry of (k, _) -> acc ++ k) "" base)
-    print (Dict.foldr (\entry acc -> case entry of (k, _) -> acc ++ k) "" base)
-    print (Dict.foldl (\entry acc -> case entry of (_, v) -> acc + v) 0 base)
-    print (Dict.foldl (\entry acc -> case entry of (_, v) -> acc + v) 0 empty)
-    print (Dict.foldr (\entry acc -> case entry of (_, v) -> acc + v) 0 empty)
+    print (Dict.foldl ({ entry acc -> case entry of (k, _) -> acc ++ k }) "" base)
+    print (Dict.foldr ({ entry acc -> case entry of (k, _) -> acc ++ k }) "" base)
+    print (Dict.foldl ({ entry acc -> case entry of (_, v) -> acc + v }) 0 base)
+    print (Dict.foldl ({ entry acc -> case entry of (_, v) -> acc + v }) 0 empty)
+    print (Dict.foldr ({ entry acc -> case entry of (_, v) -> acc + v }) 0 empty)
     -- the row is open, so an effectful callback is allowed and its order is
     -- part of the contract rather than an accident
-    Dict.foldl (\entry acc -> case entry of (k, v) -> print (k ++ show v)) () base
+    Dict.foldl ({ entry acc -> case entry of (k, v) -> print (k ++ show v) }) () base
     print "--"
-    Dict.foldr (\entry acc -> case entry of (k, v) -> print (k ++ show v)) () base
+    Dict.foldr ({ entry acc -> case entry of (k, v) -> print (k ++ show v) }) () base
     print "--"
     -- map preserves keys, size and order while changing the value type
-    print (Dict.map (\entry -> case entry of (k, v) -> k ++ show v) base)
-    print (Dict.size (Dict.map (\entry -> case entry of (_, v) -> v * 2) base))
-    print (Dict.keys (Dict.map (\entry -> case entry of (_, v) -> v * 2) base))
-    print (Dict.map (\entry -> case entry of (_, v) -> v * 2) empty)
+    print (Dict.map ({ entry -> case entry of (k, v) -> k ++ show v }) base)
+    print (Dict.size (Dict.map ({ entry -> case entry of (_, v) -> v * 2 }) base))
+    print (Dict.keys (Dict.map ({ entry -> case entry of (_, v) -> v * 2 }) base))
+    print (Dict.map ({ entry -> case entry of (_, v) -> v * 2 }) empty)
     -- and its callback also runs in ascending order
-    traced = Dict.map (\entry -> case entry of (k, _) -> print k) base
+    traced = Dict.map ({ entry -> case entry of (k, _) -> print k }) base
     print (Dict.size traced)
     -- toList round-trips through fromList
     print (Dict.fromList (Dict.toList base) == base)

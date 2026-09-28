@@ -4,13 +4,13 @@ import Iterator
 step n = if n > 5 then Nothing else Just (n, n + 1)
 main() =
     source = Stream.unfold 1 step
-    print (Stream.toList (Stream.take 2 (Stream.filter (\n -> n > 2) source)))
+    print (Stream.toList (Stream.take 2 (Stream.filter ({ n -> n > 2 }) source)))
     print (Stream.toList (Stream.zip source (Stream.fromList [10, 20])))
-    Stream.withCursor source (\cursor ->
+    Stream.withCursor source ({ cursor ->
         case Iterator.next cursor of
             Nothing -> ()
             Just (value, next) ->
                 print value
                 case Iterator.next next of
                     Nothing -> ()
-                    Just (second, _) -> print second)
+                    Just (second, _) -> print second })

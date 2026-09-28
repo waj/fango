@@ -1,0 +1,8 @@
+(module)
+-- errors --
+-- SYNTAX PROBLEM ---------------- err_lambda_missing_body.fango
+
+I was expecting an expression here.
+
+1| f = { x -> }
+              ^

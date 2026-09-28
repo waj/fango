@@ -16,27 +16,27 @@ inspect : Fail.Report String ->{IO} ()
 inspect report =
     values : List Failure.Failure
     values = report.suppressed
-    List.each (\failure ->
+    List.each ({ failure ->
         actual : Maybe (Secret.Error (List Int))
         actual = Failure.argument 0 failure
         wrong : Maybe (Secret.Error (List String))
         wrong = Failure.argument 0 failure
         print actual
-        print wrong) values
+        print wrong }) values
 
 privateRun() =
-    case Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ -> Fail.fail "body") (\_ -> privateError (Secret.make [1, 2]))) of
+    case Fail.attemptReport ({ _ -> Runtime.Scope.finally ({ _ -> Fail.fail "body" }) ({ _ -> privateError (Secret.make [1, 2]) }) }) of
         Err report -> inspect report
         Ok _ -> print "unexpected success"
 
 opaqueRun() =
-    case Fail.attemptReport (\_ -> Runtime.Scope.finally (\_ -> Fail.fail "body") (\_ -> opaqueError (Opaque (\_ -> ())))) of
-        Err report -> List.each (\failure ->
+    case Fail.attemptReport ({ _ -> Runtime.Scope.finally ({ _ -> Fail.fail "body" }) ({ _ -> opaqueError (Opaque ({ _ -> () })) }) }) of
+        Err report -> List.each ({ failure ->
             opaque : Maybe Opaque
             opaque = Failure.argument 0 failure
             case opaque of
                 Nothing -> print "opaque"
-                Just _ -> print "unsafe inspection") report.suppressed
+                Just _ -> print "unsafe inspection" }) report.suppressed
         Ok _ -> print "unexpected success"
 
 main() =

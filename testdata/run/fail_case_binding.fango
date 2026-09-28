@@ -14,7 +14,7 @@ choose flag =
         Box value -> show value
 
 report flag =
-    case Fail.attempt (\_ -> choose flag) of
+    case Fail.attempt ({ _ -> choose flag }) of
         Ok value -> value
         Err _ -> "failed"
 

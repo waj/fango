@@ -322,16 +322,55 @@ func (p *printer) renderArm(arm ast.Expr, ind int) bool {
 }
 
 func (p *printer) renderLambda(e *ast.Lambda, ind int) bool {
-	p.emit("\\")
-	for i, param := range e.Params {
-		if i > 0 {
-			p.emit(" ")
+	return p.renderLambdaAt(e, ind, p.lineIndent(ind))
+}
+
+func (p *printer) renderLambdaAt(e *ast.Lambda, ind, closeIndent int) bool {
+	p.emit("{")
+	unit := false
+	if len(e.Params) == 1 {
+		_, unit = e.Params[0].(*ast.PUnit)
+	}
+	if !unit {
+		p.emit(" ")
+		for i, param := range e.Params {
+			if i > 0 {
+				p.emit(" ")
+			}
+			if !p.renderPatternArg(param, ind) {
+				return false
+			}
 		}
-		if !p.renderPatternArg(param, ind) {
+		p.emit(" ->")
+	}
+	// A break solely before `}` does not make the lambda multiline. When the
+	// body itself spans lines, start it below the arrow (or opening brace for
+	// the Unit form) so the lambda has one consistent layout.
+	bodyWasBelow := bodyOnOwnLine(e.Body.Span().File, e.Body.Span().Start)
+	bodyBroken := bodyWasBelow || brokeWithin(e.Body.Span())
+	if bodyBroken {
+		if !p.placeBefore(e.Body.Span().Start, ind+Indent) {
 			return false
 		}
+		p.start(ind + Indent)
+	} else {
+		p.emit(" ")
 	}
-	return p.renderArrow(e.Body, ind)
+	if !p.renderExpr(e.Body, ind+Indent) {
+		return false
+	}
+	// A multiline lambda closes at the indentation of its opening line.
+	// Consecutive closers stay together when their openers share that line.
+	if bodyBroken {
+		open, close, ok := p.delimiterTokens(e.Span(), token.LBRACE, token.RBRACE)
+		if !ok || (!bodyWasBelow && brokeWithin(e.Body.Span())) || !p.closeSharesLine(open, close) {
+			p.start(closeIndent)
+		}
+	} else {
+		p.emit(" ")
+	}
+	p.emit("}")
+	return true
 }
 
 // bodyOnOwnLine reports whether only whitespace and a newline separate the body
@@ -440,12 +479,15 @@ func (p *printer) renderApp(e *ast.App, ind int) bool {
 		// on its own line; closes share a line when their openers do.
 		if brokeWithin(a.Span()) {
 			if atomic(a) {
-				if brokeBetween(f, prevEnd, a.Span().Start) {
+				onOwnLine := brokeBetween(f, prevEnd, a.Span().Start)
+				argInd := ind
+				if onOwnLine {
 					p.start(contInd)
+					argInd = contInd
 				} else {
 					p.emit(" ")
 				}
-				if !p.renderExpr(a, contInd) {
+				if !p.renderExpr(a, argInd) {
 					return false
 				}
 			} else {
@@ -526,25 +568,53 @@ func (p *printer) argumentClose(prevEnd, argStart int) (int, int, bool) {
 	return 0, 0, false
 }
 
-// closeSharesLine keeps consecutive closes together only when their openers
-// were written on the same source line and no content follows the first close.
+// delimiterTokens finds the delimiters retained in an expression's span.
+func (p *printer) delimiterTokens(sp source.Span, left, right token.Kind) (int, int, bool) {
+	open, close := -1, -1
+	for i, t := range p.toks {
+		if t.Span.Start == sp.Start && t.Kind == left {
+			open = i
+		}
+		if t.Span.End == sp.End && t.Kind == right {
+			close = i
+		}
+		if t.Span.Start >= sp.End {
+			break
+		}
+	}
+	return open, close, open >= 0 && close > open
+}
+
+// closeSharesLine keeps consecutive parenthesis and brace closes together
+// only when their openers were written on the same source line.
 func (p *printer) closeSharesLine(open, close int) bool {
-	if close == 0 || p.toks[close-1].Kind != token.RPAREN || len(p.cur) == 0 {
+	if close == 0 || len(p.cur) == 0 {
+		return false
+	}
+	previous := p.toks[close-1].Kind
+	if previous != token.RPAREN && previous != token.RBRACE {
 		return false
 	}
 	for _, b := range p.cur {
-		if b != ')' {
+		if b != ')' && b != '}' {
 			return false
 		}
 	}
-	depth := 0
+	var expected []token.Kind
 	for i := close - 1; i >= 0; i-- {
 		switch p.toks[i].Kind {
 		case token.RPAREN:
-			depth++
-		case token.LPAREN:
-			depth--
-			if depth == 0 {
+			expected = append(expected, token.LPAREN)
+		case token.RBRACE:
+			expected = append(expected, token.LBRACE)
+		case token.RBRACKET:
+			expected = append(expected, token.LBRACKET)
+		case token.LPAREN, token.LBRACE, token.LBRACKET:
+			if len(expected) == 0 || expected[len(expected)-1] != p.toks[i].Kind {
+				return false
+			}
+			expected = expected[:len(expected)-1]
+			if len(expected) == 0 {
 				return p.toks[i].Pos().Line == p.toks[open].Pos().Line
 			}
 		}
@@ -570,7 +640,7 @@ func (p *printer) renderList(elems []ast.Expr, tail ast.Expr, ind int) bool {
 			}
 			p.emit(", ")
 		}
-		if !p.renderExpr(elem, base) {
+		if !p.renderContainerValue(elem, base, p.column()) {
 			return false
 		}
 		prevEnd = elem.Span().End
@@ -582,7 +652,7 @@ func (p *printer) renderList(elems []ast.Expr, tail ast.Expr, ind int) bool {
 		} else {
 			p.emit(" | ")
 		}
-		if !p.renderExpr(tail, base) {
+		if !p.renderContainerValue(tail, base, p.column()) {
 			return false
 		}
 	}
@@ -603,7 +673,7 @@ func (p *printer) renderTuple(elems []ast.Expr, ind int) bool {
 			}
 			p.emit(", ")
 		}
-		if !p.renderExpr(elem, base) {
+		if !p.renderContainerValue(elem, base, p.column()) {
 			return false
 		}
 		prevEnd = elem.Span().End
@@ -611,6 +681,15 @@ func (p *printer) renderTuple(elems []ast.Expr, ind int) bool {
 	p.start(base)
 	p.emit(")")
 	return true
+}
+
+// A direct lambda value closes at the start of its list item, tuple item, or
+// record field. The surrounding container keeps its own closing indentation.
+func (p *printer) renderContainerValue(e ast.Expr, ind, valueIndent int) bool {
+	if lambda, ok := e.(*ast.Lambda); ok && brokeWithin(e.Span()) {
+		return p.renderLambdaAt(lambda, ind, valueIndent)
+	}
+	return p.renderExpr(e, ind)
 }
 
 // brokeBetween reports whether the author put a newline between two offsets.
@@ -665,16 +744,17 @@ func (p *printer) renderRecordUpdate(e *ast.RecordUpdate, ind int) bool {
 // brace back at the block's own column.
 func (p *printer) recordFieldBlock(fields []ast.RecordExprField, lead string, ind int) bool {
 	for i, f := range fields {
-		value, ok := exprInline(f.Value)
-		if !ok || brokeWithin(f.Value.Span()) {
-			return false
-		}
 		open := ", "
 		if i == 0 {
 			open = lead
 		}
 		p.start(ind)
-		p.emit(open + f.Name + " = " + value)
+		p.emit(open)
+		valueIndent := p.column()
+		p.emit(f.Name + " = ")
+		if !p.renderContainerValue(f.Value, ind, valueIndent) {
+			return false
+		}
 	}
 	p.start(ind)
 	p.emit("}")

@@ -79,14 +79,14 @@ withToken : (Token r -> a) -> a
 withToken use = use Token
 
 chosenByCaller : Token Int
-chosenByCaller = withToken (\token -> token)
+chosenByCaller = withToken { token -> token }
 
 savedCallback : () -> Token Int
-savedCallback = withToken (\token -> \_ -> token)
+savedCallback = withToken { token -> { _ -> token } }
 
 type Box a = Box a
 wrapped : Box (Token Int)
-wrapped = withToken (\token -> Box token)
+wrapped = withToken { token -> Box token }
 `)
 	if len(errs) != 0 {
 		t.Fatal(errs)
@@ -111,7 +111,7 @@ both() = ()
 		{"generic task operation", `effect Scheduling
     submit : (() -> a) -> Int
 
-bad() = submit (\_ -> 1)
+bad() = submit { _ -> 1 }
 `, "OPERATION POLYMORPHISM NOT READY"},
 		{"effect row parameter", `type Job e = { run : () ->{e} () }
 

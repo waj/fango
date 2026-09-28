@@ -7,7 +7,7 @@ type Both = Both Cell Cell
 
 counter : Int -> (Cell ->{IO} a) ->{IO} a
 counter start use =
-    handle use (Cell (\_ -> tick())) with n = start of
+    handle use (Cell ({ _ -> tick() })) with n = start of
         tick () -> resume n with n + 1
 
 report : Both ->{IO} ()
@@ -19,5 +19,5 @@ report pair =
             print (ta())
 
 main() =
-    counter 0 (\outer ->
-        counter 100 (\inner -> report (Both outer inner)))
+    counter 0 ({ outer ->
+        counter 100 ({ inner -> report (Both outer inner) }) })

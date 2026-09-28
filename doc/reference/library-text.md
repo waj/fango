@@ -37,7 +37,7 @@ empty string. `fromChar` makes the corresponding one-scalar string.
 `String.span keep text` returns the longest prefix whose scalars satisfy `keep`
 and the remaining suffix. It calls `keep` once per scalar from left to right,
 including the first rejected scalar, then stops; callback effects propagate.
-For example, `String.span (\c -> c /= ' ') "hello world"` returns
+For example, `String.span { c -> c /= ' ' } "hello world"` returns
 `("hello", " world")`. Empty input returns `("", "")` without calling `keep`.
 `words` splits on ASCII space, tab, LF, CR, vertical tab, and form feed.
 `toInt` parses an optional `+`/`-` sign followed by base-10 digits. An empty digit

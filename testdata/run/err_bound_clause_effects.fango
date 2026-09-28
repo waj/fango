@@ -7,12 +7,12 @@ type Cell = Cell (() -> Int)
 
 noisy : Int -> (Cell ->{IO} a) ->{IO} a
 noisy start use =
-    handle use (Cell (\_ -> tick())) with n = start of
+    handle use (Cell ({ _ -> tick() })) with n = start of
         tick () ->
             print "tick"
             resume n with n + 1
 
 main() =
-    noisy 0 (\c ->
+    noisy 0 ({ c ->
         case c of
-            Cell ta -> print (ta()))
+            Cell ta -> print (ta()) })

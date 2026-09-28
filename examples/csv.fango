@@ -76,11 +76,11 @@ formatCents cents =
 -- the category has been seen before or not.
 addExpense : String -> Int -> Report -> Report
 addExpense category cents report =
-    totals = Dict.update category (\existing ->
+    totals = Dict.update category { existing ->
         case existing of
             Nothing -> Just ({ count = 1, cents = cents })
-            Just summary -> Just ({ summary | count = summary.count + 1, cents = summary.cents + cents })
-    ) report.totals
+            Just summary -> Just { summary | count = summary.count + 1, cents = summary.cents + cents }
+    } report.totals
     { report | totals = totals, count = report.count + 1, cents = report.cents + cents }
 
 addRow : Int -> String -> Report ->{IO} Report

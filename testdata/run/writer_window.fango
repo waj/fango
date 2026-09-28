@@ -6,34 +6,34 @@ import Writer exposing (Writer)
 -- costs one write per flush window rather than one per part.
 
 trace : Sink IO
-trace = Sink { write = \chunk -> print ("write " ++ show (Bytes.length chunk) ++ " " ++ show chunk) }
+trace = Sink { write = { chunk -> print ("write " ++ show (Bytes.length chunk) ++ " " ++ show chunk) } }
 
 main() =
     -- Four emits, one window: the buffer crosses eight at the third, and the
     -- return clause flushes the rest.
-    Writer.over trace 8 (\output ->
+    Writer.over trace 8 ({ output ->
         Writer.writeString output "abc"
         Writer.writeString output "de"
         Writer.writeString output "fghij"
-        Writer.writeString output "k")
+        Writer.writeString output "k" })
     print "---"
     -- An emit is never split, so a chunk larger than the window is one
     -- oversized write.
-    Writer.over trace 4 (\output -> Writer.writeString output "abcdefghij")
+    Writer.over trace 4 ({ output -> Writer.writeString output "abcdefghij" })
     print "---"
     -- An explicit flush writes below the window; a second one has nothing to
     -- push and writes nothing.
-    Writer.over trace 99 (\output ->
+    Writer.over trace 99 ({ output ->
         Writer.writeString output "ab"
         output.flush()
         output.flush()
-        Writer.writeString output "c")
+        Writer.writeString output "c" })
     print "---"
     -- A window below one byte writes every emit straight through.
-    Writer.over trace 0 (\output ->
+    Writer.over trace 0 ({ output ->
         Writer.write output (Bytes.fromString "a")
         Writer.write output Bytes.empty
-        Writer.write output (Bytes.fromString "b"))
+        Writer.write output (Bytes.fromString "b") })
     print "---"
     -- A body that writes nothing writes nothing.
-    Writer.over trace 8 (\output -> ())
+    Writer.over trace 8 ({ output -> () })

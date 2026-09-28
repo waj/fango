@@ -31,8 +31,8 @@ failingReturn token =
         return _ -> fail ("return failed for " ++ token)
 
 main() =
-    outcome = attempt (\_ ->
-        Runtime.Scope.bracket (\_ -> open "a") close failingReturn)
+    outcome = attempt ({ _ ->
+        Runtime.Scope.bracket ({ _ -> open "a" }) close failingReturn })
     case outcome of
         Ok value -> print "ok"
         Err error -> print ("err " ++ error)

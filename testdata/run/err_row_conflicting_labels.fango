@@ -16,4 +16,4 @@ reprovide body value =
     ignore (current())
     provide value body
 
-main() = print (provide 1 (\_ -> reprovide (\_ -> current()) "x"))
+main() = print (provide 1 ({ _ -> reprovide ({ _ -> current() }) "x" }))

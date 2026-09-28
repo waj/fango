@@ -14,16 +14,20 @@ must work over a socket or a memory fixture:
 
 ```fango
 serve connection =
-    Reader.over (Net.source connection) \input ->
-        Writer.over (Net.sink connection) 8192 \output ->
+    Reader.over (Net.source connection) { input ->
+        Writer.over (Net.sink connection) 8192 { output ->
             request = Http.readRequest input
             Http.writeResponse output (respond request)
+        }
+    }
 ```
 
 ```fango
-Reader.overBytes fixture \input ->
-    Writer.collecting \output ->
+Reader.overBytes fixture { input ->
+    Writer.collecting { output ->
         Http.writeResponse output (respond (Http.readRequest input))
+    }
+}
 ```
 
 The HTTP layer should own request-line and header parsing, framing limits,

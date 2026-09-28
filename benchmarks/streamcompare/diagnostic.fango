@@ -21,6 +21,6 @@ sumPull work acc = case Pull.read work of
 
 diagnostic : Int -> Int -> Int
 diagnostic which n = case which of
-    9 -> Runtime.Coroutine.with (\pause _ -> emitPause pause n) (\work -> sumCoroutine work 0)
-    10 -> Runtime.Coroutine.with (\pause _ -> emitPause pause n) (\work -> sumCursor (Iterator.fromCoroutine work) 0)
-    _ -> Pull.withValues (\_ -> emitPull n) (\work -> sumPull work 0)
+    9 -> Runtime.Coroutine.with { pause _ -> emitPause pause n } { work -> sumCoroutine work 0 }
+    10 -> Runtime.Coroutine.with { pause _ -> emitPause pause n } { work -> sumCursor (Iterator.fromCoroutine work) 0 }
+    _ -> Pull.withValues { _ -> emitPull n } { work -> sumPull work 0 }

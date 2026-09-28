@@ -3,5 +3,5 @@ class C a
 instance C Int
     c =
         print "dictionary effect"
-        \x -> x
+        { x -> x }
 main = print "main"

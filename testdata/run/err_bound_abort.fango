@@ -6,10 +6,10 @@ type Halt = Halt (() -> Int)
 
 guarded : (Halt -> Int) -> Int
 guarded use =
-    handle use (Halt (\_ -> stop())) of
+    handle use (Halt ({ _ -> stop() })) of
         stop () -> 0
 
 main() =
-    print (guarded (\h ->
+    print (guarded ({ h ->
         case h of
-            Halt bail -> bail()))
+            Halt bail -> bail() }))

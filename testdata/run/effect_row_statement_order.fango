@@ -18,7 +18,7 @@ finally action cleanup =
 bracket : (() ->{e} a) -> (a ->{Exception ex | e} b) -> (a ->{e} ()) ->{Exception ex | e} b
 bracket acquire use release =
     resource = acquire()
-    finally (\_ -> use resource) (\_ -> release resource)
+    finally ({ _ -> use resource }) ({ _ -> release resource })
 
 catch : (() ->{Exception ex | e} a) -> (ex ->{e} a) ->{e} a
 catch action handler =
@@ -42,9 +42,9 @@ report risky plain =
 
 main() =
     catch
-        (\_ ->
-            bracket (\_ -> open "one") (\name -> print ("use " ++ name)) close
-            report (\_ -> print "risky") (\_ -> print "plain")
-            bracket (\_ -> open "two") (\_ -> throw "boom") close
-            print "unreachable")
-        (\msg -> print ("caught " ++ msg))
+        ({ _ ->
+            bracket ({ _ -> open "one" }) ({ name -> print ("use " ++ name) }) close
+            report ({ _ -> print "risky" }) ({ _ -> print "plain" })
+            bracket ({ _ -> open "two" }) ({ _ -> throw "boom" }) close
+            print "unreachable" })
+        ({ msg -> print ("caught " ++ msg) })

@@ -17,7 +17,7 @@ countLines file count =
 
 countFile : String -> Bool ->{IO} Bool
 countFile path ok =
-    case attempt (\_ -> File.withFile path (\file -> countLines file 0)) of
+    case attempt ({ _ -> File.withFile path ({ file -> countLines file 0 }) }) of
         Ok count ->
             print (path ++ ": " ++ show count)
             ok

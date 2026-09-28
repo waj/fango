@@ -2,8 +2,8 @@ import Async
 import List
 
 main() =
-    scale = Async.parMap (\n -> n * 3)
+    scale = Async.parMap ({ n -> n * 3 })
     print (scale [1, 2, 3, 4])
-    print (Async.parMap (\n -> show n) [4, 2, 1])
-    print (Async.parMap (\n -> n + 1) [])
-    print (Async.parMap (\n -> Async.parMap (\m -> n + m) [1, 2]) [10, 20])
+    print (Async.parMap ({ n -> show n }) [4, 2, 1])
+    print (Async.parMap ({ n -> n + 1 }) [])
+    print (Async.parMap ({ n -> Async.parMap ({ m -> n + m }) [1, 2] }) [10, 20])

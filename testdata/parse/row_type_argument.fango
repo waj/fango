@@ -1,13 +1,13 @@
 type Source e = Source (() ->{e} String)
 
 pure : Source {}
-pure = Source (\_ -> "")
+pure = Source ({ _ -> "" })
 
 listed : Source {Console, Fail String}
-listed = Source (\_ -> "")
+listed = Source ({ _ -> "" })
 
 open : Source {Console | e}
-open = Source (\_ -> "")
+open = Source ({ _ -> "" })
 
 nested : Maybe (Source {Console})
 nested = Nothing

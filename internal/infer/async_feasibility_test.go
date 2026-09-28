@@ -20,17 +20,17 @@ observe : Task a e ->{e} a
 observe task = task.read()
 
 package : a -> (a ->{e} ()) -> Pair (Task a e) (Job e)
-package value publish = Pair (Task { read = \_ -> value }) (Job { run = \_ -> publish value })
+package value publish = Pair (Task { read = { _ -> value } }) (Job { run = { _ -> publish value } })
 
 useHelper task = observe task
 useStored task =
-    callback = \_ -> useHelper task
+    callback = { _ -> useHelper task }
     callback()
 
 mixed =
-    case package 42 (\_ -> ()) of
+    case package 42 { _ -> () } of
         Pair intTask intJob ->
-            case package "answer" (\_ -> ()) of
+            case package "answer" { _ -> () } of
                 Pair stringTask stringJob ->
                     jobs = [intJob, stringJob]
                     (useStored intTask, useStored stringTask, jobs)
@@ -52,7 +52,7 @@ func TestAsyncFeasibilityCurrentLanguageBoundaries(t *testing.T) {
 		{"polymorphic operation", `
 effect Scheduling
     start : (() -> a) -> a
-bad = start (\_ -> 1)
+bad = start { _ -> 1 }
 `, "OPERATION POLYMORPHISM NOT READY"},
 		{"confused result", `
 type Task a e = { read : () ->{e} a }
@@ -117,7 +117,7 @@ word() =
 
 helper action = deferWork action
 stored task =
-    callback = \_ -> observe task
+    callback = { _ -> observe task }
     callback()
 
 mixed() =
@@ -141,7 +141,7 @@ func TestAsyncFeasibilityUnawaitedWorkStillChargesItsRow(t *testing.T) {
 	_, _, errs := check(t, nullarySchedulingShapes+`
 forgotten : () ->{Scheduling} ()
 forgotten() =
-    pending = deferWork (\_ -> print "child")
+    pending = deferWork { _ -> print "child" }
     ()
 `)
 	for _, err := range errs {

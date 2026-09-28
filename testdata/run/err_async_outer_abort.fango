@@ -5,5 +5,5 @@ effect Stop
     abort stop : () -> value
 
 main() =
-    handle ignore (Async.run (\_ -> Async.spawn (\_ -> stop()))) of
+    handle ignore (Async.run ({ _ -> Async.spawn ({ _ -> stop() }) })) of
         stop () -> ()

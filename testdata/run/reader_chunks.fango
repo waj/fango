@@ -8,7 +8,7 @@ effect Feed
     next : () -> Maybe Bytes
 
 paced : Source {Feed | e}
-paced = Source { pull = \_ -> next() }
+paced = Source { pull = { _ -> next() } }
 
 {-# scoped s #-}
 drive : List Bytes -> (Reader s ->{s} a) ->{e} a
@@ -24,15 +24,15 @@ pieces = [Bytes.fromString "ab", Bytes.empty, Bytes.fromString "cde", Bytes.from
 
 main() =
     -- A memory reader has everything in hand, so it is one chunk.
-    print (Reader.overBytes (Bytes.fromString "abcdef") (\input -> Stream.toList (Reader.chunks input)))
+    print (Reader.overBytes (Bytes.fromString "abcdef") ({ input -> Stream.toList (Reader.chunks input) }))
     -- Over a paced source the consumer sees the source's own chunking, with
     -- the empty pull absorbed by refill.
-    print (drive pieces (\input -> Stream.toList (Reader.chunks input)))
+    print (drive pieces ({ input -> Stream.toList (Reader.chunks input) }))
     -- The same bytes, and the same chunking, through the callback primitive.
-    drive pieces (\input -> Reader.forEachChunk input print)
+    drive pieces ({ input -> Reader.forEachChunk input print })
     -- Rejoining the chunks answers what was read, byte for byte.
-    print (drive pieces (\input -> Bytes.concat (Stream.toList (Reader.chunks input))))
+    print (drive pieces ({ input -> Bytes.concat (Stream.toList (Reader.chunks input)) }))
     -- Chunks after a partial read start where the read left off.
-    print (drive pieces (\input ->
-        (Reader.readExactly input 3, Stream.toList (Reader.chunks input))))
-    print (Reader.overBytes Bytes.empty (\input -> Stream.toList (Reader.chunks input)))
+    print (drive pieces ({ input ->
+        (Reader.readExactly input 3, Stream.toList (Reader.chunks input)) }))
+    print (Reader.overBytes Bytes.empty ({ input -> Stream.toList (Reader.chunks input) }))

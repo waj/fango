@@ -51,10 +51,14 @@ RECORD`, even when exactly one record in scope has those labels. Once the type
 is known the schema is checked as usual, and a label whose schema this module
 cannot see still reports `PRIVATE RECORD FIELD`.
 
-A capitalized name immediately before `{` always names the record being built,
-so a constructor that takes a record parenthesizes an inferred literal
-(`Wrap ({ x = 1 })`); writing `Wrap { x = 1 }` reports `UNKNOWN RECORD` and
-says so.
+A capitalized name immediately before a record-shaped `{ ... }` names the
+record being built, so a constructor that takes an inferred record literal
+parenthesizes it (`Wrap ({ x = 1 })`); writing `Wrap { x = 1 }` reports
+`UNKNOWN RECORD` and says so. Other braced expressions remain arguments:
+`Wrap { value }` applies `Wrap` to a Unit callback, and
+`Wrap { value | x = 1 }` passes a record update. In expression position,
+`{ x = 1 }` remains a record literal, `{ value | x = 1 }` remains an update,
+and `{ x = 1; x }` is a lambda body with a local binding.
 
 ## Record patterns and visibility
 

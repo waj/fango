@@ -6,6 +6,6 @@ import Stream
 import Iterator exposing (Iterator)
 
 leak : Iterator state Int e -> Maybe (Int, Iterator state Int e)
-leak cursor = Stream.withCursor (Stream.fromList [9, 9, 9]) (\_ -> Iterator.next cursor)
+leak cursor = Stream.withCursor (Stream.fromList [9, 9, 9]) ({ _ -> Iterator.next cursor })
 
 main() = print "unreached"

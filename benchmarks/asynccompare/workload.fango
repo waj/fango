@@ -11,7 +11,7 @@ countPure n total =
 spawnMany n limit yielding =
     if n <= 0 then []
     else
-        child = Async.spawn (\_ -> if yielding then countTo limit 0 else countPure limit 0)
+        child = Async.spawn { _ -> if yielding then countTo limit 0 else countPure limit 0 }
         [child | spawnMany (n - 1) limit yielding]
 
 awaitSum tasks =

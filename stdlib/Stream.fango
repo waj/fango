@@ -56,10 +56,10 @@ fold : (a -> b ->{e} b) -> b -> Stream state a e ->{e} b
 fold combine initial source = foldStep combine source.step initial source.initial
 
 forEach : (a ->{e} ()) -> Stream state a e ->{e} ()
-forEach action source = fold (\value _ -> action value) () source
+forEach action source = fold { value _ -> action value } () source
 
 toList : Stream state a e ->{e} List a
-toList source = List.reverse (fold (\value values -> [value | values]) [] source)
+toList source = List.reverse (fold { value values -> [value | values] } [] source)
 
 zipStep left right (leftState, rightState) = case left leftState of
     Nothing -> Nothing

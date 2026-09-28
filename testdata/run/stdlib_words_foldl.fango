@@ -1,7 +1,7 @@
 import List
 import String
 
-wordCount text = List.foldl (\_ total -> total + 1) 0 (String.words text)
+wordCount text = List.foldl ({ _ total -> total + 1 }) 0 (String.words text)
 
 main() =
     print (wordCount "")

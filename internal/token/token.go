@@ -31,17 +31,16 @@ const (
 
 	// Punctuation. None of these characters is an operator character, so
 	// none of them ever takes part in an operator run.
-	LPAREN    // (
-	RPAREN    // )
-	COMMA     // ,
-	SEMICOLON // ; (statement separator)
-	DOT       // .
-	DOTDOT    // ..
-	LBRACE    // {
-	RBRACE    // }
-	LBRACKET  // [
-	RBRACKET  // ]
-	BACKSLASH
+	LPAREN      // (
+	RPAREN      // )
+	COMMA       // ,
+	SEMICOLON   // ; (statement separator)
+	DOT         // .
+	DOTDOT      // ..
+	LBRACE      // {
+	RBRACE      // }
+	LBRACKET    // [
+	RBRACKET    // ]
 	UNDERSCORE  // _ (wildcard pattern)
 	DOLLARPAREN // $( — opens a splice; `$` is never a token on its own
 
@@ -89,7 +88,7 @@ var kindNames = map[Kind]string{
 	LIDENT: "LIDENT", UIDENT: "UIDENT", PRAGMA: "PRAGMA",
 	OP:     "OP",
 	LPAREN: "LPAREN", RPAREN: "RPAREN", COMMA: "COMMA", SEMICOLON: "SEMICOLON", DOT: "DOT", DOTDOT: "DOTDOT",
-	LBRACE: "LBRACE", RBRACE: "RBRACE", LBRACKET: "LBRACKET", RBRACKET: "RBRACKET", BACKSLASH: "BACKSLASH",
+	LBRACE: "LBRACE", RBRACE: "RBRACE", LBRACKET: "LBRACKET", RBRACKET: "RBRACKET",
 	UNDERSCORE: "UNDERSCORE", DOLLARPAREN: "DOLLARPAREN",
 	EQ: "EQ", ARROW: "ARROW", DARROW: "DARROW", COLON: "COLON", PIPE: "PIPE", CARET: "CARET",
 	KwModule: "module", KwImport: "import", KwAs: "as", KwExposing: "exposing", KwLet: "let", KwIn: "in",
@@ -121,8 +120,8 @@ var Keywords = map[string]Kind{
 // (`r.field`), module qualification (`List.foldl`), and `..`; because a dot
 // in a name means "module separator" everywhere in name resolution, an
 // operator containing one could not be told from a qualified reference. `$`
-// would make `f $(x)` a splice but `f $ (x)` an application. `\` keeps
-// lambda unambiguous, and `,` `;` `(` `)` `{` `}` are punctuation.
+// would make `f $(x)` a splice but `f $ (x)` an application. `\` is reserved
+// for escapes in strings and characters; `,` `;` `(` `)` `{` `}` are punctuation.
 //
 // A run may not begin with `--`, which is a line comment and is consumed
 // before operator scanning.

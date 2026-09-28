@@ -6,11 +6,11 @@ effect Database
     lookup : () -> String
 
 parse : () ->{Database} String
-parse() = Reader.withBytes (Bytes.fromString "abc") (\first ->
-    Reader.withBytes (Bytes.fromString "XYZ") (\second ->
+parse() = Reader.withBytes (Bytes.fromString "abc") ({ first ->
+    Reader.withBytes (Bytes.fromString "XYZ") ({ second ->
         a = Reader.readUpTo first 1
         b = Reader.readUpTo second 1
-        Bytes.toStringLossy (Bytes.append a b) ++ lookup()))
+        Bytes.toStringLossy (Bytes.append a b) ++ lookup() }) })
 
 interpreted : String
 interpreted = handle parse() of
@@ -18,9 +18,9 @@ interpreted = handle parse() of
 
 -- An older reader may be returned through an inner scope.
 outerReader : String
-outerReader = Reader.withBytes (Bytes.fromString "old") (\outer ->
-    recovered = Reader.withBytes Bytes.empty (\_ -> outer)
-    Bytes.toStringLossy (Reader.readUpTo recovered 99))
+outerReader = Reader.withBytes (Bytes.fromString "old") ({ outer ->
+    recovered = Reader.withBytes Bytes.empty ({ _ -> outer })
+    Bytes.toStringLossy (Reader.readUpTo recovered 99) })
 
 -- A library wrapper preserves the scoped callback contract across calls.
 {-# scoped s #-}
@@ -31,16 +31,16 @@ readAll : Reader.Reader e ->{e} String
 readAll reader = Bytes.toStringLossy (Reader.readUpTo reader 99)
 
 withDomain : (() ->{e} String) ->{e} String
-withDomain action = withText "generic" (\reader -> readAll reader ++ action())
+withDomain action = withText "generic" ({ reader -> readAll reader ++ action() })
 
 generic : String
 generic = handle withDomain lookup of
     lookup () -> resume "db"
 
 counter : Int
-counter = Runtime.Local.run 0 (\cell ->
+counter = Runtime.Local.run 0 ({ cell ->
     cell.write (cell.read() + 1)
-    cell.read())
+    cell.read() })
 
 main() =
     print interpreted
@@ -49,5 +49,5 @@ main() =
     print generic
     print counter
     -- IO remains explicit when the consumer uses it.
-    Reader.withBytes (Bytes.fromString "io") (\r ->
-        print (Bytes.toStringLossy (Reader.readUpTo r 99)))
+    Reader.withBytes (Bytes.fromString "io") ({ r ->
+        print (Bytes.toStringLossy (Reader.readUpTo r 99)) })

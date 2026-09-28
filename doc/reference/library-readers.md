@@ -79,7 +79,7 @@ data. A consumer with no other effects gives a pure result:
 
 ```fango
 prefix : Bytes -> Bytes
-prefix contents = Reader.withBytes contents (\reader -> Reader.readUpTo reader 4)
+prefix contents = Reader.withBytes contents { reader -> Reader.readUpTo reader 4 }
 ```
 
 The callback row `s` extends the remaining row `e` with a fresh local permission.

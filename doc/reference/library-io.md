@@ -88,7 +88,7 @@ countLines file count =
         Just _ -> countLines file (count + 1)
 
 main() =
-    case attempt (\_ -> File.withFile "input.txt" (\file -> countLines file 0)) of
+    case attempt { File.withFile "input.txt" { file -> countLines file 0 } } of
         Ok count -> print count
         Err error -> print (IO.describeError error)
 ```

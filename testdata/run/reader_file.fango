@@ -29,24 +29,24 @@ fixture : Bytes
 fixture = Bytes.fromList [97, 10, 255, 10]
 
 main() =
-    print (Reader.overBytes fixture (\input -> parse input []))
-    report "file" (attempt (\_ ->
-        File.withFile "input.bin" (\file -> Reader.over (File.source file) (\input -> parse input []))))
+    print (Reader.overBytes fixture ({ input -> parse input [] }))
+    report "file" (attempt ({ _ ->
+        File.withFile "input.bin" ({ file -> Reader.over (File.source file) ({ input -> parse input [] }) }) }))
     -- Rejoining the chunks answers the file's bytes, and File.read would have
     -- rewritten the ones that are not text.
-    report "chunks" (attempt (\_ ->
-        File.withFile "input.bin" (\file ->
-            Reader.over (File.source file) (\input -> Bytes.concat (Stream.toList (Reader.chunks input))))))
+    report "chunks" (attempt ({ _ ->
+        File.withFile "input.bin" ({ file ->
+            Reader.over (File.source file) ({ input -> Bytes.concat (Stream.toList (Reader.chunks input)) }) }) }))
     -- A writer over a file sink batches its parts and answers the bytes that
     -- were written, including the one File.read would have rewritten.
-    report "written" (attempt (\_ ->
-        File.withOutput "out.bin" (\file ->
-            Writer.over (File.sink file) 8 (\output ->
+    report "written" (attempt ({ _ ->
+        File.withOutput "out.bin" ({ file ->
+            Writer.over (File.sink file) 8 ({ output ->
                 Writer.writeString output "ab"
                 Writer.write output (Bytes.fromList [255])
-                Writer.writeString output "cd"))
-        File.withFile "out.bin" (\file -> File.readBytes file 99)))
+                Writer.writeString output "cd" }) })
+        File.withFile "out.bin" ({ file -> File.readBytes file 99 }) }))
     -- Reading it back through the same parser closes the loop.
-    report "reparsed" (attempt (\_ ->
-        File.withFile "out.bin" (\file ->
-            Reader.over (File.source file) (\input -> parse input []))))
+    report "reparsed" (attempt ({ _ ->
+        File.withFile "out.bin" ({ file ->
+            Reader.over (File.source file) ({ input -> parse input [] }) }) }))

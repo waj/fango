@@ -6,8 +6,9 @@ import Runtime.Scope
 
 step : Int -> Int
 step total =
-    Runtime.Scope.bracket (\_ -> total) (\_ -> ()) (\outer ->
-        Runtime.Scope.bracket (\_ -> outer + 1) (\_ -> ()) (\inner -> inner + 1))
+    Runtime.Scope.bracket { _ -> total } { _ -> () } { outer ->
+        Runtime.Scope.bracket { _ -> outer + 1 } { _ -> () } { inner -> inner + 1 }
+    }
 
 drive : Int -> Int -> Int
 drive n total = if n <= 0 then total else drive (n - 1) (step total)

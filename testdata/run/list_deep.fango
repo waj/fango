@@ -3,16 +3,16 @@
 -- accidental quadratic in cons or tail shows up here as a timeout.
 import List
 
-length values = List.foldl (\_ acc -> acc + 1) 0 values
+length values = List.foldl ({ _ acc -> acc + 1 }) 0 values
 
-reverse values = List.foldl (\v acc -> [v | acc]) [] values
+reverse values = List.foldl ({ v acc -> [v | acc] }) [] values
 
 main() =
     xs = List.range 1 5000
     print (length xs)
-    print (List.foldl (\v acc -> v + acc) 0 xs)
+    print (List.foldl ({ v acc -> v + acc }) 0 xs)
     ys = reverse xs
     print (length ys)
-    print (List.foldl (\v acc -> v + acc) 0 ys)
+    print (List.foldl ({ v acc -> v + acc }) 0 ys)
     print (reverse ys == xs)
     print (xs == xs)

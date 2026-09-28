@@ -81,7 +81,7 @@ loud = leaf emit
 	for _, body := range []string{
 		"use() = pair pure emit", "use() = pair emit pure",
 		"use() = pair emit fail", "use() = pair fail emit",
-		"use() = pair (\\_ -> 1) emit", "use() = pair emit (\\_ -> 1)",
+		"use() = pair { _ -> 1 } emit", "use() = pair emit { _ -> 1 }",
 		"use = branch [quiet, loud]", "use = branch [loud, quiet]",
 	} {
 		t.Run(body, func(t *testing.T) {
@@ -113,7 +113,7 @@ readAndPrint source =
 			}
 			callback := "readAndPrint"
 			if !named {
-				callback = "(\\cursor -> readAndPrint cursor)"
+				callback = "{ cursor -> readAndPrint cursor }"
 			}
 			src := prefix + "\nprinted : Source a e ->{" + row + "} a\nprinted source = withSource source " + callback
 			_, _, errs := check(t, src)

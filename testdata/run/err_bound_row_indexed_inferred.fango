@@ -6,12 +6,12 @@ type Cell e = { step : () ->{e} Int }
 
 counter : Int -> (Cell e ->{e} a) ->{e} a
 counter start use =
-    handle use { step = \_ -> tick() } with n = start of
+    handle use { step = { _ -> tick() } } with n = start of
         tick () -> resume n with n + 1
 
 main() =
-    counter 0 (\a ->
-        counter 100 (\b ->
+    counter 0 ({ a ->
+        counter 100 ({ b ->
             print (a.step())
             print (b.step())
-            print (a.step())))
+            print (a.step()) }) })

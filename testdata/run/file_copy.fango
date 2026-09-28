@@ -19,9 +19,9 @@ copyLines input output count =
 
 copy : String -> String ->{IO} Result Error Int
 copy from to =
-    attempt (\_ ->
-        File.withFile from (\input ->
-            File.withOutput to (\output -> copyLines input output 0)))
+    attempt ({ _ ->
+        File.withFile from ({ input ->
+            File.withOutput to ({ output -> copyLines input output 0 }) }) })
 
 report : String -> Result Error Int ->{IO} ()
 report label outcome =

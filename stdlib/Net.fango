@@ -57,17 +57,17 @@ closeConnectionFail connection = fromResult (closeConnection connection)
 -- every exit from use.
 withListener : Int -> (Listener ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withListener port use =
-    Runtime.Scope.bracket (\_ -> fromResult (listen port)) closeListenerFail use
+    Runtime.Scope.bracket { fromResult (listen port) } closeListenerFail use
 
 -- accept waits for one client and scopes the accepted connection.
 accept : Listener -> (Connection ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 accept listener use =
-    Runtime.Scope.bracket (\_ -> fromResult (acceptConnection listener)) closeConnectionFail use
+    Runtime.Scope.bracket { fromResult (acceptConnection listener) } closeConnectionFail use
 
 -- withClient connects to host and port and scopes the connection.
 withClient : String -> Int -> (Connection ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withClient host port use =
-    Runtime.Scope.bracket (\_ -> fromResult (dial host port)) closeConnectionFail use
+    Runtime.Scope.bracket { fromResult (dial host port) } closeConnectionFail use
 
 chunk : Int
 chunk = 8192
@@ -78,7 +78,7 @@ readBytes connection =
     if Bytes.length data == 0 then Nothing else Just data
 
 source : Connection -> Source {IO, Fail Error}
-source connection = Source { pull = \_ -> readBytes connection }
+source connection = Source { pull = { readBytes connection } }
 
 sink : Connection -> Sink {IO, Fail Error}
-sink connection = Sink { write = \data -> fromResult (writeConnectionBytes connection data) }
+sink connection = Sink { write = { data -> fromResult (writeConnectionBytes connection data) } }

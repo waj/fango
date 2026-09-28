@@ -1,5 +1,5 @@
 type Choice = Yes | No
 
 main =
-    only = \Yes -> 1
+    only = { Yes -> 1 }
     only Yes

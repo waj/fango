@@ -32,9 +32,9 @@ These were settled when the design was drawn up and are not open:
   whose bodies are `() ->{Expect, IO} ()` — has simpler signatures but fixes
   the effects a test may perform; the row-indexed form lets a caller handle
   its own effect around the whole run.
-- **Shared call syntax.** Use the trailing final lambda `test "name" \_ ->`
-  and ordinary `(|>)` / `(<|)` already supplied by the language. Unit callbacks retain
-  `\_ ->`; no zero-pattern lambda or `do` keyword is planned here.
+- **Shared call syntax.** Use `test "name" { _ -> body }` and ordinary
+  `(|>)` / `(<|)` already supplied by the language. Unit callbacks may use
+  `{ body }`; no `do` keyword is planned here.
 - **First-version scope** is `describe`, `test`, `skip`, `todo`, `only`, the
   expectations below, a console report, and failure source positions. Fuzz
   testing is deferred, and the tree is shaped so it can be added without a
@@ -88,13 +88,15 @@ expectations sequenced as statements:
 suite : Test IO
 suite =
     describe "String.split"
-        [ test "splits on the separator" \_ ->
+        [ test "splits on the separator" { _ ->
             Expect.equal [ "a", "b" ] (String.split "," "a,b")
             Expect.equal [ "" ] (String.split "," "")
-        , test "reads the fixture" \_ ->
+          }
+        , test "reads the fixture" { _ ->
             text = Expect.ok (File.read "fixture.txt")
             Expect.equal 3 (List.length (String.split "\n" text))
-        , skip (test "unicode separators" \_ -> Expect.failWith "later")
+          }
+        , skip (test "unicode separators" { _ -> Expect.failWith "later" })
         , todo "empty separator"
         ]
 

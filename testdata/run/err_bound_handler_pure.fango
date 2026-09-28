@@ -5,7 +5,7 @@ pureUse : (() -> Int) -> Int
 pureUse action = action()
 
 bad : Int
-bad = handle pureUse (\_ -> step()) with n = 0 of
+bad = handle pureUse ({ _ -> step() }) with n = 0 of
     step () -> resume n with n + 1
 
 main() = print bad

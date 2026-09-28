@@ -9,15 +9,15 @@ type AskInstance = { askNow : () -> String }
 
 withAsk : String -> (AskInstance ->{e} a) ->{e} a
 withAsk str f =
-    handle f (AskInstance { askNow = \_ -> ask() }) of
+    handle f (AskInstance { askNow = { _ -> ask() } }) of
         ask () -> resume str
 
 body : () ->{Extra} String
 body() =
-    withAsk "Hello" (\hello ->
-        withAsk "Bye" (\bye ->
+    withAsk "Hello" ({ hello ->
+        withAsk "Bye" ({ bye ->
             n = bump 1
-            hello.askNow() ++ bye.askNow() ++ (if n > 1 then "!" else "?")))
+            hello.askNow() ++ bye.askNow() ++ (if n > 1 then "!" else "?") }) })
 
 main() =
     text =

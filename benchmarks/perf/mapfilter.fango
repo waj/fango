@@ -5,8 +5,8 @@ upto n = if n < 1 then [] else [n | upto (n - 1)]
 
 chain : Int -> Int
 chain n =
-    List.foldr (\x acc -> x + acc) 0
-        (List.map (\x -> x * 3) (List.filter (\x -> x < n) (upto n)))
+    List.foldr { x acc -> x + acc } 0
+        (List.map { x -> x * 3 } (List.filter { x -> x < n } (upto n)))
 
 loop : Int -> Int -> Int
 loop i acc = if i < 1 then acc else loop (i - 1) (acc + chain 30000)

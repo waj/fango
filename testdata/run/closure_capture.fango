@@ -1,3 +1,3 @@
-addn n = \m -> n + m
+addn n = { m -> n + m }
 add5 = addn 5
 main = print (add5 37)

@@ -10,9 +10,9 @@ foldCursor combine initial cursor = case Iterator.next cursor of
 produce = Stream.fromList [10, 20]
 
 total : () -> Int
-total() = Stream.withCursor produce (\cursor -> foldCursor (\element acc -> element + acc) 0 cursor)
+total() = Stream.withCursor produce ({ cursor -> foldCursor ({ element acc -> element + acc }) 0 cursor })
 
 
-main() = Runtime.Scope.bracket total (\value ->
+main() = Runtime.Scope.bracket total ({ value ->
     print value
-    print (total())) print
+    print (total()) }) print

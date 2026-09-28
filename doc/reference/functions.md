@@ -28,27 +28,33 @@ the ordinary whitespace-application grouping `(print foo) 1`. Whitespace or a
 comment before `()` makes it an ordinary application.
 
 Partial application and functions as values are supported. Lambdas use
-`\x y -> expression`. A final lambda argument may omit parentheses:
+`{ x y -> expression }`. The braced form is an expression atom, including
+when passed as an argument:
 
 ```fango
-Runtime.Scope.bracket acquire release \resource ->
+Runtime.Scope.bracket acquire release { resource ->
     use resource
+}
 ```
 
-The lambda body extends rightward, including operators and semicolon-separated
-statements, until its enclosing layout boundary or delimiter. A list comma
-ends the current element, so
-`[test "one" \_ -> checkOne(), test "two" \_ -> checkTwo()]` contains two
-calls. An indented lambda body may contain bindings and Unit statements.
-Parenthesized lambdas remain valid; a lambda always needs at least one pattern.
+The closing brace ends the body, including operators and semicolon-separated
+statements. A list comma follows the complete lambda, so
+`[test "one" { checkOne() }, test "two" { checkTwo() }]` contains two
+calls. An indented lambda body may contain bindings and Unit statements. A
+complete field list such as `{ x = 1 }` is a record; a sibling statement after
+a binding, as in `{ x = 1; x }`, makes it a Unit lambda.
+`{ expression }` is a function taking Unit; it is equivalent to
+`{ () -> expression }`. The body must end in a result expression, so `{}` is
+invalid. A lambda with explicit parameters needs at least one pattern.
 
 `value |> function` and `function <| value` are ordinary strict calls to
 operators declared in `Basics` and exposed by `Prelude`. They perform the
 callback's effects on the final application. For example,
 `values |> List.map double |> List.foldl (+) 0` chains leftward;
 `print <| 1 + 2` applies `print` to the sum. Mixing `|>` and `<|` without
-parentheses is an associativity conflict. In `apply \x -> x |> finish`, the
-pipe belongs to the lambda body.
+parentheses is an associativity conflict. In `apply { x -> x } |> finish`, the
+pipe follows the call; in `apply { x -> x |> finish }`, it belongs to the
+lambda body.
 
 ## Function equations
 
@@ -92,7 +98,7 @@ odd n = if n == 0 then False else even (n - 1)
 ```
 
 Same-name equation rows must still be contiguous. Ordinary values, including
-`f = \x -> x`, and local block bindings remain visible only after their
+`f = { x -> x }`, and local block bindings remain visible only after their
 declarations; native declaration rules are unchanged. Parameters and locals
 cannot shadow any module function name, including a later declaration.
 Dependencies are checked before callers without changing evaluation order.

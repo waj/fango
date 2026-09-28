@@ -1,18 +1,18 @@
 import Stream
 
-produce label values = Stream.unfold (False, values) (\(started, pending) ->
+produce label values = Stream.unfold (False, values) ({ (started, pending) ->
     if started then () else print label
     case pending of
         [] -> Nothing
         [value | rest] ->
             print value
-            Just (value, (True, rest)))
+            Just (value, (True, rest)) })
 
 makeMap() =
     print "construct callback"
-    \value ->
+    { value ->
         print "map"
-        value * 10
+        value * 10 }
 
 main() =
     source = produce "start" [1, 2, 3]

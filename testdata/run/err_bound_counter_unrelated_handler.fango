@@ -6,13 +6,13 @@ type Cell = Cell (() -> Int)
 
 counter : Int -> (Cell ->{IO} a) ->{IO} a
 counter start use =
-    handle use (Cell (\_ -> tick())) with n = start of
+    handle use (Cell ({ _ -> tick() })) with n = start of
         tick () -> resume n with n + 1
 
 main() =
-    counter 0 (\outer ->
+    counter 0 ({ outer ->
         case outer of
             Cell ta ->
                 print (ta())
-                counter 500 (\_ -> print (ta()))
-                print (ta()))
+                counter 500 ({ _ -> print (ta()) })
+                print (ta()) })

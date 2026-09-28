@@ -28,7 +28,7 @@ p = q --> r
 
 -- Reserved lexemes keep their own kinds, and are not OP.
 q : Int
-r = \x -> x
+r = { x -> x }
 s = ^pinned
 t = { rec | field = 1 }
 u = Eq a => a

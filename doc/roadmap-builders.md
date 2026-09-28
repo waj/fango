@@ -46,9 +46,10 @@ For example, this value describes two elements without running `print` when
 the value is constructed:
 
 ```fango
-numbers = Emit 10 (Defer (\_ ->
+numbers = Emit 10 (Defer { _ ->
     print "between"
-    Emit 20 (Done ())))
+    Emit 20 (Done ())
+})
 ```
 
 The first `next numbers` finds `Emit 10` and returns its `Defer` tail. The
@@ -80,7 +81,7 @@ countFrom n = Emit n (countFrom (n + 1))
 The recursive call must sit inside a closure:
 
 ```fango
-countFrom n = Emit n (Defer (\_ -> countFrom (n + 1)))
+countFrom n = Emit n (Defer { _ -> countFrom (n + 1) })
 ```
 
 Constructing `countFrom 0` now creates one `Emit` and one `Defer`. Each pull
@@ -98,7 +99,7 @@ numbers : Generator.Producer Int IO ()
 numbers =
     build Generator
         yield 10
-        Generator.lift (\_ -> print "between")
+        Generator.lift { _ -> print "between" }
         yield 20
         return ()
 ```
@@ -109,8 +110,8 @@ numbers =
 | --- | --- | --- |
 | `return value` | `Generator.pure value` | Complete with a result. |
 | `yield value` | `Generator.yield value` | Supply one element. Available only if the module exports `yield`. |
-| `action` | `Generator.bind action (\_ -> rest)` | Sequence an action returning Unit. A final action is the block result. |
-| `name = action` | `Generator.bind action (\name -> rest)` | Use an action's result in following statements. |
+| `action` | `Generator.bind action { _ -> rest }` | Sequence an action returning Unit. A final action is the block result. |
+| `name = action` | `Generator.bind action { name -> rest }` | Use an action's result in following statements. |
 
 The compiler wraps each block or remaining suffix in `Generator.delay` so
 its ordinary expressions run when the builder chooses, not while the block is
@@ -194,12 +195,13 @@ concrete:
 pure value = Done value
 delay work = Defer work
 yield value = Emit value (Done ())
-lift work = Defer (\_ -> Done (work()))
+lift work = Defer { _ -> Done (work()) }
 
-bind producer use = Defer (\_ -> case producer of
+bind producer use = Defer { _ -> case producer of
     Done value -> use value
     Emit value rest -> Emit value (bind rest use)
-    Defer work -> bind (work()) use)
+    Defer work -> bind (work()) use
+}
 ```
 
 Each call to `bind` constructs a `Defer`; it does not advance its input.
@@ -237,13 +239,13 @@ resolving its builder module and before type inference. In schematic notation,
 where `B` is that module and `rest` is the remaining block:
 
 ```text
-build B { return value }       => B.delay (\_ -> B.pure value)
-build B { yield value; rest }  => B.delay (\_ ->
-                                     B.bind (B.yield value) (\_ -> lower(rest)))
-build B { action; rest }       => B.delay (\_ ->
-                                     B.bind action (\_ -> lower(rest)))
-build B { name = action; rest } => B.delay (\_ ->
-                                       B.bind action (\name -> lower(rest)))
+build B { return value }        => B.delay { _ -> B.pure value }
+build B { yield value; rest }   => B.delay { _ ->
+                                     B.bind (B.yield value) { _ -> lower(rest) } }
+build B { action; rest }        => B.delay { _ ->
+                                     B.bind action { _ -> lower(rest) } }
+build B { name = action; rest } => B.delay { _ ->
+                                     B.bind action { name -> lower(rest) } }
 ```
 
 `lower(rest)` is itself delayed. A final bare action lowers to a delayed
@@ -267,9 +269,10 @@ build Generator
 becomes, schematically:
 
 ```fango
-Generator.delay (\_ ->
-    Generator.bind (Generator.yield 10) (\_ ->
-        Generator.delay (\_ -> Generator.pure ())))
+Generator.delay { _ ->
+    Generator.bind (Generator.yield 10) { _ ->
+        Generator.delay { _ -> Generator.pure () } }
+}
 ```
 
 Construction creates the outer delayed value. The first `next` invokes it,
@@ -281,10 +284,10 @@ so `print "between"` happens on the second pull.
 For the two-element example, the important shape is:
 
 ```text
-delay (\_ -> bind (yield 10) (\_ ->
-    delay (\_ -> bind (lift (\_ -> print "between")) (\_ ->
-        delay (\_ -> bind (yield 20) (\_ ->
-            delay (\_ -> pure ())))))))
+delay { _ -> bind (yield 10) { _ ->
+    delay { _ -> bind (lift { _ -> print "between" }) { _ ->
+        delay { _ -> bind (yield 20) { _ ->
+            delay { _ -> pure () } } } } }
 ```
 
 The actual AST need not duplicate `delay` where a builder law makes one
@@ -306,8 +309,8 @@ countFrom n =
 firstTen = Stream.toList (Stream.take 10 (Generator.toStream (countFrom 0)))
 ```
 
-The lowered value has the essential shape `Emit n (Defer (\_ -> countFrom
-(n + 1)))`. Constructing the producer does not recurse. Each pull advances
+The lowered value has the essential shape `Emit n (Defer { _ -> countFrom
+(n + 1) })`. Constructing the producer does not recurse. Each pull advances
 only until its next `Emit`; `take 10` can stop after ten pulls. Traversing the
 same initial value again reruns its effects, like the current Stream contract;
 this proposal does not add memoization or an independently mutable cursor.

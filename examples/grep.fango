@@ -49,7 +49,7 @@ report error outcome =
 searchFile : Options -> String -> Outcome ->{IO} Outcome
 searchFile options path outcome =
     label = if options.prefix then path ++ ":" else ""
-    case attempt (\_ -> File.withFile path (\file -> searchLines options.pattern label file 1 False)) of
+    case attempt { File.withFile path { file -> searchLines options.pattern label file 1 False } } of
         Ok found -> { outcome | matched = outcome.matched || found }
         Err error -> report error outcome
 
@@ -59,7 +59,7 @@ searchPath options path outcome =
         Ok True ->
             if options.recursive then
                 case File.listDirectory path of
-                    Ok names -> foldl (\name found -> searchPath options (path ++ "/" ++ name) found) outcome names
+                    Ok names -> foldl { name found -> searchPath options (path ++ "/" ++ name) found } outcome names
                     Err error -> report error outcome
             else
                 print (path ++ ": is a directory")

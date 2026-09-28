@@ -77,7 +77,7 @@ pair : (() ->{e} Int) -> (() ->{e} Int) ->{e} Int
 
 pair emit boom      -- e includes IO and Fail String
 pair boom emit      -- the same combined row
-pair (\_ -> emit()) boom
+pair { emit() } boom
 ```
 
 Argument order does not determine the permitted row. Partial applications and

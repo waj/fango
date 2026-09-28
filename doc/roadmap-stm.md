@@ -57,11 +57,12 @@ orElse     : (Txn ->{Stm, Retry} a) -> (Txn ->{Stm, Retry} a) -> Txn ->{Stm, Ret
 ```fango
 transfer : TVar Int -> TVar Int -> Int ->{IO | e} ()
 transfer from to amount =
-    atomically \txn ->
+    atomically { txn ->
         balance = read txn from
         check (balance >= amount)
         write txn from (balance - amount)
         write txn to (read txn to + amount)
+    }
 ```
 
 `Stm` is a marker effect: the accesses are native and perform no operation, but

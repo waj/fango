@@ -120,9 +120,9 @@ import Iterator
 import Fail
 import Meta
 source : Stream.Stream Int Int (Fail.Fail String)
-source = Stream.unfold 0 (\state ->
-    if state == 0 then Just (7, 1) else Fail.fail "finished")
-readAll() = Fail.attempt (\_ -> Stream.toList source)
+source = Stream.unfold 0 { state ->
+    if state == 0 then Just (7, 1) else Fail.fail "finished" }
+readAll() = Fail.attempt { _ -> Stream.toList source }
 readAll()
 answer : String
 answer = $(Meta.lift (show (readAll())))
@@ -145,7 +145,7 @@ import Stream
 import Iterator
 produce = Stream.fromList [10, 20]
 total : () -> Int
-total() = Stream.fold (\element acc -> element + acc) 0 produce
+total() = Stream.fold { element acc -> element + acc } 0 produce
 bad : String
 bad = $(Meta.lift (total()))
 :type bad
@@ -170,7 +170,7 @@ func TestStreamCleanupAvailableInREPL(t *testing.T) {
 import Iterator
 import Runtime.Scope
 withCleanup action cleanup = Runtime.Scope.finally action cleanup
-run() = withCleanup (\_ -> Stream.forEach print (Stream.fromList [1])) (\_ -> print "closed")
+run() = withCleanup { _ -> Stream.forEach print (Stream.fromList [1]) } { _ -> print "closed" }
 :type run
 run()
 :quit
@@ -317,7 +317,7 @@ func TestEffectfulInstanceConstructionRollsBack(t *testing.T) {
 instance C Int
     c =
         print "must not run"
-        \value -> value
+        { value -> value }
 
 instance C Int
     c value = value

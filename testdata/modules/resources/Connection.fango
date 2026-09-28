@@ -27,4 +27,4 @@ closeConnection connection =
     closeNative connection
 
 withConnection : Int -> (Handle ->{IO | e} a) ->{IO | e} a
-withConnection value use = Runtime.Scope.bracket (\_ -> openConnection value) closeConnection use
+withConnection value use = Runtime.Scope.bracket ({ _ -> openConnection value }) closeConnection use

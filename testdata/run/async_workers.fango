@@ -5,9 +5,9 @@ worker number () =
     Async.sleep 1
     number * 2
 
-main() = ignore (Async.run (\_ ->
+main() = ignore (Async.run ({ _ ->
     first = Async.spawn (worker 21)
-    second = Async.spawn (\_ -> worker 10 ())
+    second = Async.spawn ({ _ -> worker 10 () })
     print (Async.awaitResult first)
     print (Async.awaitResult second)
-    print (Async.awaitResult first)))
+    print (Async.awaitResult first) }))

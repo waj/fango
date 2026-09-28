@@ -197,8 +197,12 @@ surface rules. AST and diagnostic dumps are golden-test interfaces.
 
 Layout and semicolon blocks share one ordered AST form; explicit blocks retain
 separator spans for formatting. Bracket lists and tuples lower to canonical
-bundled constructors. A trailing lambda uses ordinary application/lambda nodes.
-These forms introduce no second type or evaluation system. Tuple is a syntax
+bundled constructors. Braced lambdas use ordinary application/lambda nodes;
+the no-arrow form supplies a Unit pattern. In expression position, complete
+record forms take precedence over a no-arrow lambda. A sibling statement at
+the field's indentation rules out a complete record, while a parameter row
+followed by `->` introduces an explicit lambda. These forms introduce no
+second type or evaluation system. Tuple is a syntax
 root, always resolvable but never implicitly in scope.
 
 Parses are not persisted. Every command parses each module in the graph from

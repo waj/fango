@@ -7,9 +7,9 @@ test : (() ->{Expectation} ()) -> Test
 test action = TestCase action
 
 viaOperator : Test
-viaOperator = TestCase <| \_ -> ()
+viaOperator = TestCase <| { _ -> () }
 
 viaWorker : Test
-viaWorker = test (\_ -> ())
+viaWorker = test ({ _ -> () })
 
 main() = ()

@@ -11,7 +11,7 @@ foldCursor combine initial cursor = case Iterator.next cursor of
 produce = Stream.fromList [10, 20, 30]
 
 total : () -> Int
-total() = Stream.withCursor produce (\cursor -> foldCursor (\element acc -> element + acc) 0 cursor)
+total() = Stream.withCursor produce ({ cursor -> foldCursor ({ element acc -> element + acc }) 0 cursor })
 
 -- A producer factory may already be memoized by an earlier expansion. Its
 -- next traversal must use the lowering installed for the current operand.
@@ -26,4 +26,4 @@ seven = 7
 
 main() =
     print $(answer)
-    print $(Meta.lift (Stream.withCursor (Stream.fromList [seven]) (\cursor -> foldCursor (\element acc -> element + acc) 0 cursor)))
+    print $(Meta.lift (Stream.withCursor (Stream.fromList [seven]) ({ cursor -> foldCursor ({ element acc -> element + acc }) 0 cursor })))

@@ -17,33 +17,36 @@ windowOf size = if size < 1 then 1 else size
 {-# scoped s #-}
 over : Sink e -> Int -> (Writer s ->{s} a) ->{e} a
 over sink size use =
-    Runtime.Local.run Bytes.empty (\pending ->
+    Runtime.Local.run Bytes.empty { pending ->
         writer =
-            { emit = \chunk ->
-                grown = Bytes.append (pending.read()) chunk
+            { emit = { chunk ->
+                grown = Bytes.append pending.read() chunk
                 if Bytes.length grown >= windowOf size then
                     sink.write grown
                     pending.write Bytes.empty
                 else pending.write grown
-            , flush = \_ ->
+              }
+            , flush = {
                 buffered = pending.read()
                 if Bytes.length buffered > 0 then sink.write buffered else ()
                 pending.write Bytes.empty
+              }
             }
         result = use writer
         writer.flush()
-        result)
+        result
+    }
 
 {-# scoped s #-}
 collecting : (Writer s ->{s} a) ->{e} (a, Bytes)
 collecting use =
-    Runtime.Local.run [] (\parts ->
+    Runtime.Local.run [] { parts ->
         result = use
-            { emit = \chunk -> parts.write [chunk | parts.read()]
-            , flush = \_ -> ()
+            { emit = { chunk -> parts.write [chunk | parts.read()] }
+            , flush = { () }
             }
         (result, Bytes.concat (List.reverse parts.read()))
-    )
+    }
 
 write : Writer e -> Bytes ->{e} ()
 write writer text = writer.emit text

@@ -23,7 +23,7 @@ func TestReaderConstructorsArePure(t *testing.T) {
 import Reader
 
 parse : Bytes.Bytes -> Bytes.Bytes
-parse bytes = Reader.overBytes bytes (\reader -> Reader.readUpTo reader 1)
+parse bytes = Reader.overBytes bytes ({ reader -> Reader.readUpTo reader 1 })
 
 main = parse Bytes.empty
 `)

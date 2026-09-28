@@ -7,8 +7,8 @@ effect Release
     abort release : (String ->{IO} ()) -> ()
 
 main() =
-    report = Fail.attemptReport (\_ ->
-        Runtime.Scope.bracket (\_ -> Port { emit = print }) (\_ -> ()) (\port ->
-            handle Runtime.Scope.finally (\_ -> Fail.fail "body") (\_ -> release port.emit) of
-                release _ -> ()))
+    report = Fail.attemptReport ({ _ ->
+        Runtime.Scope.bracket ({ _ -> Port { emit = print } }) ({ _ -> () }) ({ port ->
+            handle Runtime.Scope.finally ({ _ -> Fail.fail "body" }) ({ _ -> release port.emit }) of
+                release _ -> () }) })
     ()

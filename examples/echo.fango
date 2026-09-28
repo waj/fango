@@ -82,7 +82,7 @@ main() =
             print "Usage: echo [PORT]"
             IO.exit 2
         Just port ->
-            case attempt (\_ -> run port) of
+            case attempt { run port } of
                 Ok _ -> ()
                 Err error ->
                     print ("echo: " ++ error.message)

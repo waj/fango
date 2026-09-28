@@ -70,10 +70,10 @@ ifInline a = if a then 1 else 2
 
 lambdaBroken xs =
     map
-        (\x ->
+        { x ->
             y = x + 1
             y
-        )
+        }
         xs
 
 run = 1

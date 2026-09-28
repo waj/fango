@@ -25,4 +25,4 @@ bracket = native
 -- `finally` is an ordinary wrapper: its resource is Unit, so it carries no
 -- lifetime obligation and puts no restriction on the result it returns.
 finally : (() ->{e} result) -> (() ->{e} ()) ->{e} result
-finally action cleanup = bracket (\_ -> ()) (\_ -> cleanup()) (\_ -> action())
+finally action cleanup = bracket { () } { cleanup() } { action() }

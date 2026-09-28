@@ -43,7 +43,7 @@ mapItems change items =
         Item value rest -> Item (change value) (mapItems change rest)
 
 lengthItems : Items a -> Int
-lengthItems items = foldItems (\total _ -> total + 1) 0 items
+lengthItems items = foldItems { total _ -> total + 1 } 0 items
 
 -- Lifting a scalar builds a literal that keeps its own type.
 
@@ -264,7 +264,7 @@ boundOf scrutinee ctor =
 patternOf : Code -> Ctor -> Code
 patternOf scrutinee ctor =
     foldItems
-        (\sofar field -> patternBind sofar (binderName scrutinee ctor.index field.index))
+        { sofar field -> patternBind sofar (binderName scrutinee ctor.index field.index) }
         (patternStart ctor.symbol)
         ctor.fields
 
@@ -274,7 +274,7 @@ patternOf scrutinee ctor =
 match : TypeInfo -> Code -> (Bound -> Code) -> Code
 match subject scrutinee build =
     foldItems
-        (\sofar ctor -> matchBranch sofar (patternOf scrutinee ctor) (build (boundOf scrutinee ctor)))
+        { sofar ctor -> matchBranch sofar (patternOf scrutinee ctor) (build (boundOf scrutinee ctor)) }
         (matchStart scrutinee)
         (ctorsIn subject)
 

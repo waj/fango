@@ -59,7 +59,7 @@ right n = left n`)
 func TestModuleFunctionGroupErrors(t *testing.T) {
 	for _, tc := range []struct{ name, src, title string }{
 		{"value forward", "first = later\nlater = 1", "NAMING ERROR"},
-		{"lambda value forward", "first x = later x\nlater = \\x -> x", "NAMING ERROR"},
+		{"lambda value forward", "first x = later x\nlater = { x -> x }", "NAMING ERROR"},
 		{"local forward", "first x =\n    left y = right y\n    right y = y\n    left x", "NAMING ERROR"},
 		{"future parameter shadow", "first later = later\nlater x = x", "SHADOWING"},
 		{"future local shadow", "first x =\n    later = x\n    later\nlater x = x", "SHADOWING"},
@@ -100,7 +100,7 @@ other n = outer n`, ""},
     go : Int ->{Ask} (() -> Int)
     go x =
         value = other x
-        \_ -> value
+        { _ -> value }
     if n == 0 then ask() else (go (n - 1))()
 other n = outer n`, ""},
 		{"independent polymorphism", `outer n =
@@ -112,7 +112,7 @@ other n = if n == 0 then 0 else outer (n - 1)`, ""},
     go : Int ->{Ask} (() ->{Ask} Int)
     go x =
         value = other x
-        \_ -> value
+        { _ -> value }
     if n == 0 then ask() else (go (n - 1))()
 other n = outer n`, "EFFECT MISMATCH"},
 		{"nested annotated recursion", `outer n =

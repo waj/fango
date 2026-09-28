@@ -20,4 +20,4 @@ main() =
     print result
     print (String.span trace "" == ("", ""))
     -- Callback failures propagate out of span.
-    print (Fail.attempt (\_ -> String.span (\_ -> Fail.fail "stopped") "abc"))
+    print (Fail.attempt ({ _ -> String.span ({ _ -> Fail.fail "stopped" }) "abc" }))

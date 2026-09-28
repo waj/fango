@@ -13,7 +13,7 @@ render output =
     2
 
 trace : Sink {IO, Fail String}
-trace = Sink { write = \chunk -> print ("write " ++ show chunk) }
+trace = Sink { write = { chunk -> print ("write " ++ show chunk) } }
 
 -- A body that aborts never reaches the return clause, so nothing is flushed
 -- and no reader receives a truncated message. A caller that wants that
@@ -27,13 +27,13 @@ partial ok output =
 main() =
     print (Writer.collecting render)
     -- Many small emits join once; flush has nowhere to push to.
-    print (Writer.collecting (\output ->
+    print (Writer.collecting ({ output ->
         Writer.writeString output "a"
         output.flush()
         Writer.writeString output "b"
-        Writer.writeString output "c"))
-    print (Writer.collecting (\output -> ()))
-    print (attempt (\_ -> Writer.over trace 99 (partial True)))
-    print (attempt (\_ -> Writer.over trace 99 (partial False)))
+        Writer.writeString output "c" }))
+    print (Writer.collecting ({ output -> () }))
+    print (attempt ({ _ -> Writer.over trace 99 (partial True) }))
+    print (attempt ({ _ -> Writer.over trace 99 (partial False) }))
     -- The same body under collecting: an abort discards the whole answer.
-    print (attempt (\_ -> Writer.collecting (partial False)))
+    print (attempt ({ _ -> Writer.collecting (partial False) }))

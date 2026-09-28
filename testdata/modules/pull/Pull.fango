@@ -3,10 +3,10 @@ import Iterator
 
 type Pull state a e = Pull (Iterator.Iterator state a e)
 
-withValues values consumer = consumer (Pull (Iterator.start values (\pending ->
+withValues values consumer = consumer (Pull (Iterator.start values ({ pending ->
     case pending of
         [] -> Nothing
-        [value | rest] -> Just (value, rest))))
+        [value | rest] -> Just (value, rest) })))
 
 read (Pull cursor) = case Iterator.next cursor of
     Nothing -> Nothing

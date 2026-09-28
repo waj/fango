@@ -11,7 +11,7 @@ foldCursor combine initial cursor = case Iterator.next cursor of
 type Consumer state e = Consumer (Iterator state Int e ->{e} Int)
 
 sum : Iterator state Int e ->{e} Int
-sum cursor = foldCursor (\element acc -> element + acc) 0 cursor
+sum cursor = foldCursor ({ element acc -> element + acc }) 0 cursor
 
 twice cursor =
     alias = cursor
@@ -28,7 +28,7 @@ run (Consumer action) cursor = action cursor
 prefix : Int ->{IO} (Iterator state Int e ->{e} Int)
 prefix extra =
     print "prefix"
-    \cursor -> sum cursor + extra
+    { cursor -> sum cursor + extra }
 
 escape : Iterator state Int e -> (() -> Iterator state Int e)
-escape cursor = \_ -> cursor
+escape cursor = { _ -> cursor }

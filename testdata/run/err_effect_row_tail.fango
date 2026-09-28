@@ -11,4 +11,4 @@ run action =
             print "asking"
             resume "yes"
 
-main() = print (run (\_ -> ask()))
+main() = print (run ({ _ -> ask() }))

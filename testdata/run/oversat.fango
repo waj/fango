@@ -1,2 +1,2 @@
-mk x = \y -> x + y
+mk x = { y -> x + y }
 main = print (mk 40 2)

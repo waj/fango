@@ -19,22 +19,31 @@ adjacency distinguishes `f()` from `f ()`, and lookahead indexes the token slice
 ## Layout and source fidelity
 
 Author line breaks are preserved except when a multiline closing parenthesis
-needs its own line; the printer does not search for a page width.
+or lambda brace needs its own line, or a lambda's body and closing brace are
+split across lines while its body starts on the arrow's line. The printer
+does not search for a page width.
 Spans identify multiline constructs, while source bytes locate keywords and the
 definition name when AST NameSpan points at an annotation. Explicit semicolon
 blocks retain separators and line structure, with each separator owned by its
 left item.
 
-Layout children indent below their owner, including parenthesized lambda bodies
+Layout children indent below their owner, including braced lambda bodies
 that the parser accepts at any column. Case/handler branches and block items
 align. Then/else anchor to their own if. Composite commas, pipes, and closing
 delimiters align with their opener; the parser admits
 that punctuation at an enclosing layout boundary. Failed printing rolls back
 the buffer before copying the declaration verbatim.
-Application parentheses spanning lines close on a separate line. Consecutive
-closings share that line when their openers share a line. The printer consults
-the matching tokens because grouping parentheses are absent from expression
-spans.
+Application parentheses and lambda braces spanning lines close on a separate
+line at the indentation of their opening line. Consecutive closings, including
+mixed parentheses and braces, share that line when their openers share a line.
+A lambda whose body starts and ends on the opening line stays wholly inline,
+even if its source closing brace was on the next line. If the body itself spans
+lines, it starts below the arrow or, for a Unit lambda, below the opening brace.
+For a lambda used directly as a list item, tuple item, or record field value,
+the closing brace aligns with the item or field name after its leading
+punctuation. The container's own closing delimiter keeps its usual alignment.
+The printer consults matching tokens because grouping parentheses are absent
+from expression spans.
 
 A broken nominal type body is a layout exception: its deriving clause is emitted
 as a separate indented line. A line break solely before `deriving` does not make

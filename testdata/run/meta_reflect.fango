@@ -41,7 +41,7 @@ fieldNames repr =
             case Meta.ctorsIn schema of
                 NoItems -> Meta.lift "none"
                 Item ctor _ ->
-                    Meta.lift (Meta.foldItems (\text field -> text ++ field.name ++ ":" ++ Meta.typeName field.ty ++ " ") "" ctor.fields)
+                    Meta.lift (Meta.foldItems ({ text field -> text ++ field.name ++ ":" ++ Meta.typeName field.ty ++ " " }) "" ctor.fields)
 
 main() =
     print $(sameInt)

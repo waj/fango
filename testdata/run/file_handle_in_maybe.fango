@@ -5,11 +5,11 @@ import State
 import Result exposing (Result(..))
 
 main() =
-    result = Fail.attempt (\_ ->
-        wrapped = File.withFile "input.txt" (\file -> Just file)
+    result = Fail.attempt ({ _ ->
+        wrapped = File.withFile "input.txt" ({ file -> Just file })
         case wrapped of
             Just file -> File.readLine file
-            Nothing -> Nothing)
+            Nothing -> Nothing })
     print (case result of
         Err _ -> True
         Ok _ -> False)

@@ -3,6 +3,6 @@ type Foo eff = Foo (() ->{IO | eff} ())
 make action = Foo action
 
 main() =
-    foo = make (\_ -> print ())
+    foo = make ({ _ -> print () })
     case foo of
         Foo action -> action()

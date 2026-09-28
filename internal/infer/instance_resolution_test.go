@@ -23,7 +23,7 @@ type Box a = Box a
 		{"cyclic guard is an error", "instance Inspect (Box a)\n    inspect x = \"fallback\"\ninstance Other (Box a) => Inspect (Box a)\n    inspect x = \"conditional\"\ninstance Inspect (Box a) => Other (Box a)\n    other x = \"cycle\"\nmain = inspect (Box True)", "INSTANCE RESOLUTION"},
 		{"growing guard is an error", "instance Inspect (Box a)\n    inspect x = \"fallback\"\ninstance Inspect (Box (Box a)) => Inspect (Box a)\n    inspect x = \"conditional\"\nmain = inspect (Box True)", "INSTANCE RESOLUTION"},
 		{"no fallback to less specific head", "instance Inspect a\n    inspect x = \"fallback\"\ninstance Other a => Inspect (Box a)\n    inspect x = \"conditional\"\nmain = inspect (Box True)", "MISSING INSTANCE"},
-		{"no numeric seed", "instance Inspect a\n    inspect x = \"fallback\"\nmain = inspect (\\x -> x)", "AMBIGUOUS CONSTRAINT"},
+		{"no numeric seed", "instance Inspect a\n    inspect x = \"fallback\"\nmain = inspect { x -> x }", "AMBIGUOUS CONSTRAINT"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, errs := check(t, prefix+tc.src)

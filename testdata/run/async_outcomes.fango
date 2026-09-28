@@ -7,18 +7,18 @@ job : () ->{Fail String} Int
 job () = Fail.fail "missing"
 
 main() =
-    print (Async.run (\_ -> Async.awaitResult (Async.spawn job)))
-    print (Async.run (\_ -> Fail.attempt (\_ -> Async.await (Async.spawn job))))
-    print (Async.run (\_ -> Async.await (Async.spawn job)))
-    print (Async.run (\_ ->
+    print (Async.run ({ _ -> Async.awaitResult (Async.spawn job) }))
+    print (Async.run ({ _ -> Fail.attempt ({ _ -> Async.await (Async.spawn job) }) }))
+    print (Async.run ({ _ -> Async.await (Async.spawn job) }))
+    print (Async.run ({ _ ->
         ignore (Async.spawn job)
-        123))
-    print (Async.run (\_ ->
+        123 }))
+    print (Async.run ({ _ ->
         task = Async.completed (Ok 42)
         first = Async.await task
         second = Async.await task
-        if first == second then first else Fail.fail "unstable"))
-    print (Async.run (\_ ->
+        if first == second then first else Fail.fail "unstable" }))
+    print (Async.run ({ _ ->
         Runtime.Scope.finally
-            (\_ -> Async.await (Async.spawn job))
-            (\_ -> print "cleanup")))
+            ({ _ -> Async.await (Async.spawn job) })
+            ({ _ -> print "cleanup" }) }))

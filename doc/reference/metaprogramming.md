@@ -60,7 +60,7 @@ class Tag a
 
 deriver Tag
     tag subject valueCode =
-        Meta.match subject valueCode (\bound -> Meta.lift bound.ctor.name)
+        Meta.match subject valueCode { bound -> Meta.lift bound.ctor.name }
 
 type Colour = Red | Green Int deriving (Tag)
 ```

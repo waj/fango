@@ -25,7 +25,7 @@ func TestModuleBoundaryMatchesMergedEmission(t *testing.T) {
 		}
 	}
 	write("Lib.fango", "{-# no-prelude #-}\nmodule Lib exposing (main, twice)\nmain x y = x\ntwice f x = f (f x)\n")
-	write("Main.fango", "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.main (Lib.twice (\\x -> x) ()) ()\n")
+	write("Main.fango", "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = Lib.main (Lib.twice ({ x -> x }) ()) ()\n")
 
 	var stderr bytes.Buffer
 	modular, modularChecker, _, units, _, ok := compileFileGraphSession(entry, &stderr, nil)

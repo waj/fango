@@ -8,11 +8,11 @@ draws() =
 
 nested() =
     print (Random.int 1 1000)
-    print (Random.runSeeded 9 (\_ -> Random.int 1 1000))
+    print (Random.runSeeded 9 ({ _ -> Random.int 1 1000 }))
     print (Random.int 1 1000)
 
 main() =
     Random.runSeeded 42 draws
     Random.runSeeded 42 draws
     Random.runSeeded 42 nested
-    print (Random.runSeeded (-1) (\_ -> Random.int 1 100))
+    print (Random.runSeeded (-1) ({ _ -> Random.int 1 100 }))

@@ -4,18 +4,18 @@ import Fail
 import Runtime.Scope
 import Result exposing (Result(..))
 
-source = Stream.unfold 0 (\state ->
-    if state == 0 then Just (9, 1) else Fail.fail "producer failed")
+source = Stream.unfold 0 ({ state ->
+    if state == 0 then Just (9, 1) else Fail.fail "producer failed" })
 
-main() = print (Fail.attempt (\_ -> Runtime.Scope.finally (\_ ->
-    Stream.withCursor source (\cursor ->
+main() = print (Fail.attempt ({ _ -> Runtime.Scope.finally ({ _ ->
+    Stream.withCursor source ({ cursor ->
         case Iterator.next cursor of
             Nothing -> print "empty"
             Just (value, next) ->
                 print value
-                print (case Fail.attempt (\_ -> Iterator.next next) of
+                print (case Fail.attempt ({ _ -> Iterator.next next }) of
                     Err error -> error
                     Ok _ -> "unexpected success")
-                print (case Fail.attempt (\_ -> Iterator.next next) of
+                print (case Fail.attempt ({ _ -> Iterator.next next }) of
                     Err error -> error
-                    Ok _ -> "unexpected success"))) (\_ -> print "closed")))
+                    Ok _ -> "unexpected success") }) }) ({ _ -> print "closed" }) }))

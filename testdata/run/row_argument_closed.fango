@@ -8,22 +8,22 @@ import Fail exposing (Fail)
 type Source e = { pull : () ->{e} String }
 
 pure : Source {}
-pure = { pull = \_ -> "pure" }
+pure = { pull = { _ -> "pure" } }
 
 noisy : Source {IO}
-noisy = { pull = \_ ->
+noisy = { pull = { _ ->
     print "pulling"
-    "noisy" }
+    "noisy" } }
 
 failing : Source {IO, Fail String}
-failing = { pull = \_ ->
+failing = { pull = { _ ->
     print "failing"
-    Fail.fail "empty" }
+    Fail.fail "empty" } }
 
 open : Source {IO | e}
-open = { pull = \_ ->
+open = { pull = { _ ->
     print "open"
-    "open" }
+    "open" } }
 
 drain : Source e ->{e} String
 drain source = source.pull()
@@ -31,5 +31,5 @@ drain source = source.pull()
 main() =
     print (drain pure)
     print (drain noisy)
-    print (show (Fail.attempt \_ -> drain failing))
+    print (show (Fail.attempt { _ -> drain failing }))
     print (drain open)

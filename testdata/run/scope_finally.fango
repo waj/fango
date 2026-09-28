@@ -17,13 +17,13 @@ adder base offset = base + offset
 
 buildAdder : () ->{IO} (Int -> Int)
 buildAdder() =
-    Runtime.Scope.finally (\_ -> adder 10) (\_ -> print "cleanup built")
+    Runtime.Scope.finally ({ _ -> adder 10 }) ({ _ -> print "cleanup built" })
 
 main() =
     add = buildAdder()
     print (add 5)
-    outcome = attempt (\_ -> Runtime.Scope.finally (\_ -> fail "inside") (\_ -> print "cleanup failed path"))
+    outcome = attempt ({ _ -> Runtime.Scope.finally ({ _ -> fail "inside" }) ({ _ -> print "cleanup failed path" }) })
     case outcome of
         Ok value -> print ("ok " ++ value)
         Err error -> print ("err " ++ error)
-    print (Runtime.Scope.finally (\_ -> "plain") (\_ -> print "cleanup plain"))
+    print (Runtime.Scope.finally ({ _ -> "plain" }) ({ _ -> print "cleanup plain" }))

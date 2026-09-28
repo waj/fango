@@ -19,5 +19,5 @@ catch action handler =
 
 main() =
     catch
-        (\_ -> finally (\_ -> throw "boom") (\_ -> print "cleanup"))
-        (\msg -> print msg)
+        ({ _ -> finally ({ _ -> throw "boom" }) ({ _ -> print "cleanup" }) })
+        ({ msg -> print msg })

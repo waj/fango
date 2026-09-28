@@ -27,15 +27,15 @@ import IO
 import Result exposing (Result(..))
 
 main() =
-    case Fail.attemptReport (\_ -> File.withOutput "output.txt" (\file -> File.write file "data")) of
+    case Fail.attemptReport ({ _ -> File.withOutput "output.txt" ({ file -> File.write file "data" }) }) of
         Err report ->
             print (IO.describeError report.primary)
-            List.each (\failure ->
+            List.each ({ failure ->
                 error : Maybe IO.Error
                 error = Failure.argument 0 failure
                 case error of
                     Just value -> print (IO.describeError value)
-                    Nothing -> print "missing IO.Error") report.suppressed
+                    Nothing -> print "missing IO.Error" }) report.suppressed
         Ok _ -> print "unexpected success"
 `
 	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {

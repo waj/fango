@@ -29,4 +29,4 @@ type Fn = Fn Int (Int -> Int) deriving (Head)
 main() =
     print (before (Phantom 1) (Phantom 2))
     print seven
-    print (headOf (Fn 5 (\n -> n)))
+    print (headOf (Fn 5 ({ n -> n })))

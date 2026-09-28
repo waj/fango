@@ -11,7 +11,7 @@ wrap c _ =
 
 leak : Int -> (() -> Int)
 leak start =
-    handle wrap (Cell (\_ -> tick())) with n = start of
+    handle wrap (Cell ({ _ -> tick() })) with n = start of
         tick () -> resume n with n + 1
 
 main = 0

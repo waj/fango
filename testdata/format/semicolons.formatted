@@ -3,7 +3,7 @@ module Semicolons exposing (run)
 import Basics exposing (..)
 import IO exposing (print)
 
-compact = \a b -> print a; b + 1
+compact = { a b -> print a; b + 1 }
 locals x = y = x + 1; print y; y * 2
 annotated x = y : Int; y = x; y
 localFunction n = f 0 = 0; f x = x + 1; f n

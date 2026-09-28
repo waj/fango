@@ -29,20 +29,20 @@ interpret config action =
 serial : Config -> (() ->{Scheduling | e} a) ->{e} a
 serial config action =
     handle action() of
-        submit input -> resume (Completed (interpret config (\_ -> job input)))
+        submit input -> resume (Completed (interpret config ({ _ -> job input })))
         await ticket -> resume (case ticket of
                 Completed value -> value
                 Running _ -> -999)
 
 parallel : Config -> (() ->{Scheduling, IO | e} a) ->{IO | e} Async.Outcome (Result String a)
-parallel config action = Async.run (\_ ->
+parallel config action = Async.run ({ _ ->
     handle action() of
-        submit input -> resume (Running (interpret config (\_ -> Async.spawn (\_ -> job input))))
+        submit input -> resume (Running (interpret config ({ _ -> Async.spawn ({ _ -> job input }) })))
         await ticket ->
             value = case ticket of
                 Completed ready -> ready
                 Running task -> Async.await task
-            resume value)
+            resume value })
 
 -- Application orchestration has domain and scheduling effects, but no IO.
 business : () ->{Database, Http, Scheduling} (Int, Int)
@@ -58,8 +58,8 @@ childConfig = Config { database = 10, http = 20 }
 -- Exact pure annotation: the serial interpretation and in-memory domain
 -- handlers discharge every effect of the application.
 pureResult : (Int, Int)
-pureResult = interpret parentConfig (\_ -> serial childConfig business)
+pureResult = interpret parentConfig ({ _ -> serial childConfig business })
 
 main() =
     print pureResult
-    print (interpret parentConfig (\_ -> parallel childConfig business))
+    print (interpret parentConfig ({ _ -> parallel childConfig business }))

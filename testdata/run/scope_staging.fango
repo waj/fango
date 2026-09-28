@@ -6,7 +6,7 @@ import Meta exposing (Code)
 -- because they are effects, not because a scope is special.
 
 counted : Int -> Int
-counted start = Runtime.Scope.bracket (\_ -> start) (\_ -> ()) (\seed -> seed * 3 + 1)
+counted start = Runtime.Scope.bracket ({ _ -> start }) ({ _ -> () }) ({ seed -> seed * 3 + 1 })
 
 folded : Code
 folded = quote $(Meta.lift (counted 7))

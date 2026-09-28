@@ -136,12 +136,12 @@ type LocalBind struct {
 	Body      Expr
 }
 
-// Lambda is `\x -> e` / `\x y -> e` — multi-param in the AST for clean
+// Lambda is `{ x -> e }` / `{ x y -> e }` — multi-param in the AST for clean
 // spans and dumps; typing and elaboration treat it as curried.
 type Lambda struct {
 	Params []Pattern
 	Body   Expr
-	Sp     source.Span // the backslash
+	Sp     source.Span // opening through closing brace
 }
 
 // TypeAnn is a `name : Type` annotation line attached to the definition

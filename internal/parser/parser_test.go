@@ -63,8 +63,8 @@ func TestParseExprInput(t *testing.T) {
 	}
 }
 
-func TestTrailingLambdaNeedsParameterAndBody(t *testing.T) {
-	for _, src := range []string{"apply \\ -> 1", "apply \\x ->", "[apply \\x ->, 2]"} {
+func TestBracedLambdaNeedsBody(t *testing.T) {
+	for _, src := range []string{"apply { x -> }", "apply { }", "[apply { x -> }, 2]"} {
 		f := source.NewFile("<test>", []byte(src))
 		toks, _ := lexer.Lex(f)
 		_, errs := ParseExprInput(toks, f)
@@ -74,12 +74,12 @@ func TestTrailingLambdaNeedsParameterAndBody(t *testing.T) {
 	}
 }
 
-func TestParenthesizedLambdaBodyAtEnclosingBlockColumn(t *testing.T) {
+func TestBracedLambdaBodyAtEnclosingBlockColumn(t *testing.T) {
 	for _, src := range []string{
-		"main =\n    apply (\\x ->\n    value = x\n    value)\n    done",
-		"main =\n    apply (\\x ->\nvalue = x\nvalue)\n    done",
-		"main =\n    apply (\n        \\x ->\nvalue = x\nvalue\n    )\n    done",
-		"main =\n    map (\\x ->\n        spawn (\\_ ->\n        value = x\n        value\n    )) values",
+		"main =\n    apply { x ->\n    value = x\n    value }\n    done",
+		"main =\n    apply { x ->\nvalue = x\nvalue }\n    done",
+		"main =\n    apply { x ->\n        value = x\n        value\n    }\n    done",
+		"main =\n    map { x ->\n        spawn { _ ->\n        value = x\n        value\n    } } values",
 	} {
 		f := source.NewFile("<test>", []byte(src))
 		toks, lexErrs := lexer.Lex(f)
@@ -92,12 +92,12 @@ func TestParenthesizedLambdaBodyAtEnclosingBlockColumn(t *testing.T) {
 		}
 	}
 
-	src := "main =\n    apply \\x ->\n    x"
+	src := "main =\n    apply { x ->\n    x }"
 	f := source.NewFile("<test>", []byte(src))
 	toks, _ := lexer.Lex(f)
 	_, errs := Parse(toks, f)
-	if len(errs) == 0 {
-		t.Errorf("accepted unparenthesized lambda at the enclosing block column")
+	if len(errs) > 0 {
+		t.Errorf("rejected braced lambda at the enclosing block column: %v", errs)
 	}
 }
 
@@ -109,8 +109,8 @@ func TestFlexibleIndentationKeepsCanonicalTree(t *testing.T) {
 		{"handler clauses", "run action =\n    handle action of\n        emit value -> resume value\n      log value -> resume value\n          return value -> value\n", "run action =\n    handle action of\n        emit value -> resume value\n        log value -> resume value\n        return value -> value\n"},
 		{"block items", "main =\n        x = 1\n      y = x + 2\n       y\n", "main =\n    x = 1\n    y = x + 2\n    y\n"},
 		{"nested blocks", "main =\n    x =\n            y = 1\n          y\n   x\n", "main =\n    x =\n        y = 1\n        y\n    x\n"},
-		{"parenthesized lambda outdent", "main =\n    foo (\\_ ->\n        foo\n    bar\n    )\n", "main =\n    foo (\\_ ->\n        foo\n        bar\n    )\n"},
-		{"parenthesized lambda binding outdent", "main =\n    foo (\\_ ->\n        x = 1\n    x\n    )\n", "main =\n    foo (\\_ ->\n        x = 1\n        x\n    )\n"},
+		{"braced lambda outdent", "main =\n    foo { _ ->\n        foo\n    bar\n    }\n", "main =\n    foo { _ ->\n        foo\n        bar\n    }\n"},
+		{"braced lambda binding outdent", "main =\n    foo { _ ->\n        x = 1\n    x\n    }\n", "main =\n    foo { _ ->\n        x = 1\n        x\n    }\n"},
 		{"effect signatures", "effect Console\n        print : String -> ()\n      read : () -> String\n", "effect Console\n    print : String -> ()\n    read : () -> String\n"},
 		{"short effect signature", "effect E\n        print : Int\n      x : Int\n", "effect E\n    print : Int\n    x : Int\n"},
 		{"class signatures", "class Show a\n        show : a -> String\n      debug : a -> String\n", "class Show a\n    show : a -> String\n    debug : a -> String\n"},
@@ -162,7 +162,7 @@ func TestFlexibleIndentationKeepsOwnerBoundary(t *testing.T) {
 
 func TestTrailingBindingParsesAsIncompleteBlock(t *testing.T) {
 	for _, src := range []string{
-		"main =\n    apply (\\_ ->\n    value = x\n        bar\n    )\n",
+		"main =\n    apply { _ ->\n    value = x\n        bar\n    }\n",
 		"main = x = 1\n",
 	} {
 		f := source.NewFile("<test>", []byte(src))
@@ -197,7 +197,7 @@ func TestMalformedSemicolonBlocks(t *testing.T) {
 
 func TestInlineBodyClassificationStopsAtNestedDelimiters(t *testing.T) {
 	src := "main =\n" +
-		"    handle keep (\\_ -> readCounter()) with state = 0 of\n" +
+		"    handle keep { _ -> readCounter() } with state = 0 of\n" +
 		"        keepValue value -> resume value with state\n"
 	f := source.NewFile("<test>", []byte(src))
 	toks, lexErrs := lexer.Lex(f)
@@ -228,12 +228,12 @@ func TestDelimiterAlignedTuplesAtLayoutAnchor(t *testing.T) {
 	}
 }
 
-func TestClosingParenthesesAtEnclosingLayoutColumn(t *testing.T) {
+func TestClosingBracesAtEnclosingLayoutColumn(t *testing.T) {
 	src := "main =\n" +
-		"    map (\\value -> spawn (\\_ ->\n" +
+		"    map { value -> spawn { _ ->\n" +
 		"        answer = value\n" +
 		"        answer\n" +
-		"    )) values\n"
+		"    } } values\n"
 	f := source.NewFile("<test>", []byte(src))
 	toks, lexErrs := lexer.Lex(f)
 	if len(lexErrs) > 0 {
@@ -324,6 +324,13 @@ func TestInferredRecordVersusUpdate(t *testing.T) {
 		{"f { x = 1 }", "(app (var f) (record-inferred (x (int 1))))"},
 		// A capitalized name immediately before `{` always names the record.
 		{"Wrap { x = 1 }", "(record Wrap (x (int 1)))"},
+		{"{ foo }", "(lambda (()) (var foo))"},
+		{"{ { x = 1 } }", "(lambda (()) (record-inferred (x (int 1))))"},
+		{"{ a b c -> foo a b c }", "(lambda (a b c) (app (app (app (var foo) (var a)) (var b)) (var c)))"},
+		{"{ x = 1; x }", "(lambda (()) (block (bind x (int 1)) (var x)))"},
+		{"{\n    x = 1\n    x\n}", "(lambda (()) (block (bind x (int 1)) (var x)))"},
+		{"{\n    x = 1\n}", "(record-inferred (x (int 1)))"},
+		{"Wrap { foo }", "(app (ctor Wrap) (lambda (()) (var foo)))"},
 	}
 	for _, c := range cases {
 		f := source.NewFile("<test>", []byte(c.src))
@@ -343,6 +350,55 @@ func TestInferredRecordVersusUpdate(t *testing.T) {
 		}
 		if got := ast.DumpExpr(e); got != c.want {
 			t.Errorf("%q: got %s, want %s", c.src, got, c.want)
+		}
+	}
+}
+
+func TestBracedLambdaEndsBeforeFollowingOperator(t *testing.T) {
+	for _, tc := range []struct {
+		src          string
+		operatorBody bool
+	}{
+		{"f { x -> x } + y", false},
+		{"f { x -> x + y }", true},
+	} {
+		f := source.NewFile("<test>", []byte(tc.src))
+		toks, lexErrs := lexer.Lex(f)
+		if len(lexErrs) > 0 {
+			t.Fatal(lexErrs)
+		}
+		e, parseErrs := ParseExprInput(toks, f)
+		if len(parseErrs) > 0 {
+			t.Fatal(parseErrs)
+		}
+		e, fixErrs := fixity.Builtin().ResolveExpr(e)
+		if len(fixErrs) > 0 {
+			t.Fatal(fixErrs)
+		}
+		if tc.operatorBody {
+			app, ok := e.(*ast.App)
+			if !ok {
+				t.Fatalf("%s: wanted application, got %s", tc.src, ast.DumpExpr(e))
+			}
+			lambda, ok := app.Arg.(*ast.Lambda)
+			if !ok {
+				t.Fatalf("%s: wanted lambda argument, got %s", tc.src, ast.DumpExpr(e))
+			}
+			if _, ok := lambda.Body.(*ast.BinOp); !ok {
+				t.Fatalf("%s: wanted operator inside lambda, got %s", tc.src, ast.DumpExpr(e))
+			}
+		} else {
+			op, ok := e.(*ast.BinOp)
+			if !ok {
+				t.Fatalf("%s: wanted outer operator, got %s", tc.src, ast.DumpExpr(e))
+			}
+			app, ok := op.L.(*ast.App)
+			if !ok {
+				t.Fatalf("%s: wanted application on the left, got %s", tc.src, ast.DumpExpr(e))
+			}
+			if _, ok := app.Arg.(*ast.Lambda); !ok {
+				t.Fatalf("%s: wanted lambda argument, got %s", tc.src, ast.DumpExpr(e))
+			}
 		}
 	}
 }

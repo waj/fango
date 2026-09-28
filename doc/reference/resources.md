@@ -21,10 +21,10 @@ finally : (() ->{e} result) -> (() ->{e} ()) ->{e} result
 
 ```fango
 withResource label action =
-    Runtime.Scope.bracket (\_ -> open label) close action
+    Runtime.Scope.bracket { open label } close action
 
 main() =
-    text = withResource "input" (\resource -> readAll resource)
+    text = withResource "input" { resource -> readAll resource }
     print text
 ```
 
@@ -101,7 +101,7 @@ import Runtime.Native
 type Handle = Handle Runtime.Native.Any
 
 withConnection address use =
-    Runtime.Scope.bracket (\_ -> openConnection address) closeConnection use
+    Runtime.Scope.bracket { openConnection address } closeConnection use
 ```
 
 Here `openConnection` and `closeConnection` are private library functions.

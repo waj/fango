@@ -76,7 +76,7 @@ func TestPolyPositive(t *testing.T) {
 		// argument prints that tail: it is what the value's index makes the
 		// arrow perform, not a row the caller is free to choose.
 		{"type Foo eff = Foo (() ->{IO | eff} ())\nwrap action = Foo action", "wrap : (() ->{IO | e} ()) -> Foo e"},
-		{"type Test eff = TestCase (() ->{eff} ())\nsuite : Test IO\nsuite = TestCase (\\_ -> print ())", "suite : Test {IO}"},
+		{"type Test eff = TestCase (() ->{eff} ())\nsuite : Test IO\nsuite = TestCase { _ -> print () }", "suite : Test {IO}"},
 		{"type Test eff = Wrap (Test eff) | Bar (() ->{eff} ())\nmake action = Bar action", "make : (() ->{e} ()) -> Test e"},
 		{"effect Expectation\n    abort fail : String -> e\ntype Test eff = TestCase (() ->{Expectation | eff} ())\nrunHelper : Test eff ->{IO | eff} ()\nrunHelper (TestCase action) =\n    handle action() of\n        fail msg -> print msg", "runHelper : Test e ->{IO | e} ()"},
 		// Applied types in annotations.
@@ -145,7 +145,7 @@ func TestPolyNegative(t *testing.T) {
 		// the enclosing definition pins down. (Value bindings don't
 		// generalize — the monomorphism restriction — so the check applies
 		// to function and lambda bindings.)
-		{"outer x =\n  y : a -> a\n  y = \\z -> x\n  y", "ANNOTATION TOO GENERAL", 2},
+		{"outer x =\n  y : a -> a\n  y = { z -> x }\n  y", "ANNOTATION TOO GENERAL", 2},
 	}
 	for _, c := range cases {
 		_, _, errs := checkPoly(t, c.src)

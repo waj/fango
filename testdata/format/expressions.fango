@@ -39,9 +39,9 @@ recordArg = f (Point { x = 1, y = 2 })
 projection = point.x
 update = { point | x = 3 }
 
-lambdas = \x -> x
-lambdaMulti = \x y -> x + y
-lambdaArg = map (\x -> x + 1) xs
+lambdas = { x -> x }
+lambdaMulti = { x y -> x + y }
+lambdaArg = map ({ x -> x + 1 }) xs
 
 conditional = if a then b else c
 

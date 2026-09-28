@@ -44,7 +44,7 @@ main() = ()
 `, "TYPE MISMATCH"},
 		{"borrowed initial payload", `freeze : (() -> Int) -> (() -> Int)
 freeze action = action
-bad() = handle StorageFixture.box (freeze (\_ -> State.get())) with current = 0 of
+bad() = handle StorageFixture.box (freeze { _ -> State.get() }) with current = 0 of
     State.get () -> resume current with current
     State.put next -> resume () with next
 main() = ()
@@ -52,8 +52,8 @@ main() = ()
 		{"borrowed stored payload", `save cell value = StorageFixture.write cell value
 main() =
     target : StorageFixture.Box (() -> Int)
-    target = StorageFixture.box (\_ -> 0)
-    handle save target (\_ -> State.get()) with current = 0 of
+    target = StorageFixture.box { _ -> 0 }
+    handle save target { _ -> State.get() } with current = 0 of
         State.get () -> resume current with current
         State.put next -> resume () with next
     ()

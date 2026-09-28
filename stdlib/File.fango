@@ -85,7 +85,7 @@ close : Handle ->{IO, Fail Error} ()
 close file = fromResult (closeHandle file)
 
 withOpened : (String ->{IO} Result Error Handle) -> String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
-withOpened open path use = Runtime.Scope.bracket (\_ -> fromResult (open path)) close use
+withOpened open path use = Runtime.Scope.bracket { fromResult (open path) } close use
 
 -- withFile opens path for reading and runs use on the handle.
 withFile : String -> (Handle ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
@@ -133,10 +133,10 @@ chunk = 8192
 -- built over. Each captures the handle and checks its validity on use.
 -- Neither closes it: closing belongs to the scope.
 source : Handle -> Source {IO, Fail Error}
-source file = Source { pull = \_ -> readBytes file chunk }
+source file = Source { pull = { readBytes file chunk } }
 
 sink : Handle -> Sink {IO, Fail Error}
-sink file = Sink { write = \data -> writeBytes file data }
+sink file = Sink { write = { data -> writeBytes file data } }
 
 -- Whole-file operations need no handle and report failure as a Result.
 
@@ -163,8 +163,8 @@ closeListing directory = fromResult (closeDirectory directory)
 -- listDirectory names the entries of a directory in sorted order.
 listDirectory : String ->{IO} Result Error (List String)
 listDirectory path =
-    attempt (\_ ->
-        Runtime.Scope.bracket (\_ -> fromResult (openDirectory path)) closeListing (\directory ->
+    attempt {
+        Runtime.Scope.bracket { fromResult (openDirectory path) } closeListing { directory ->
             collectEntries directory []
-        )
-    )
+        }
+    }

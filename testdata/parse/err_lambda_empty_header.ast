@@ -1,0 +1,8 @@
+(module)
+-- errors --
+-- SYNTAX PROBLEM ---------------- err_lambda_empty_header.fango
+
+I was expecting an expression here.
+
+1| f = { -> 1 }
+         ^^

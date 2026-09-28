@@ -17,7 +17,7 @@ main() =
     IO.write "|"
     List.each mark floats
     write "|"
-    List.each (\_ -> IO.write "bad") empty
+    List.each ({ _ -> IO.write "bad" }) empty
     IO.write ""
     IO.write "二"
     print "done"

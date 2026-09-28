@@ -28,9 +28,8 @@ type parser struct {
 	pos  int
 	errs []diag.Error
 	lay  layout
-	// exprParenDepth tracks grouping parentheses while their contents are parsed.
-	// A lambda inside one may start its body at any column; the closing
-	// parenthesis supplies its boundary.
+	// exprParenDepth tracks expression delimiters that reset layout: grouping
+	// parentheses and braced lambdas. Their closing token supplies the boundary.
 	exprParenDepth int
 
 	// stmtStart is the index of a token allowed to sit exactly at the
@@ -1055,7 +1054,7 @@ func (p *parser) classifyInlineStmt() stmtKind {
 			if depth == 0 {
 				switch t.Kind {
 				case token.RPAREN, token.RBRACKET, token.RBRACE, token.COMMA,
-					token.ARROW, token.BACKSLASH, token.KwThen, token.KwElse, token.KwOf,
+					token.ARROW, token.KwThen, token.KwElse, token.KwOf,
 					token.KwIf, token.KwCase, token.KwHandle:
 					return false
 				}
@@ -1303,7 +1302,7 @@ func (p *parser) blockMissingResult(binds []ast.LocalBind, items []ast.BlockItem
 func (p *parser) parseBlock(col int) ast.Expr {
 	owner := p.lay.innermost().col
 	if col <= owner && p.exprParenDepth > 0 {
-		owner = 0 // a parenthesized lambda uses its closing delimiter
+		owner = 0 // the enclosing expression delimiter supplies the boundary
 	}
 	p.lay.push(ctxBlock, col)
 	defer p.lay.pop()
@@ -1672,7 +1671,7 @@ func (p *parser) parseUnary() ast.Expr {
 }
 
 // parseApply parses juxtaposition application, left-associative: one head,
-// then argument atoms and an optional final lambda. An attached empty `()` is
+// then argument atoms. An attached empty `()` is
 // folded into its atom first, so `f x()` is `f (x ())`, while `f x ()`
 // remains `(f x) ()`. `if` may head an expression but is not an atom, so
 // `print if …` needs parens (as in Elm).
@@ -1680,8 +1679,6 @@ func (p *parser) parseApply() ast.Expr {
 	switch p.peekInExpr().Kind {
 	case token.KwIf:
 		return p.parseIf()
-	case token.BACKSLASH:
-		return p.parseLambda()
 	case token.KwCase:
 		return p.parseCase()
 	case token.KwHandle:
@@ -1693,12 +1690,6 @@ func (p *parser) parseApply() ast.Expr {
 	}
 	for {
 		switch p.peekInExpr().Kind {
-		case token.BACKSLASH:
-			arg := p.parseLambda()
-			if arg == nil {
-				return nil
-			}
-			return &ast.App{Fn: fn, Arg: arg}
 		case token.INT, token.FLOAT, token.STRING, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.LBRACKET, token.KwResume, token.KwQuote, token.DOLLARPAREN:
 			arg := p.parsePostfixAtom()
 			if arg == nil {
@@ -1882,31 +1873,6 @@ func (p *parser) parseClauseParams() []ast.Pattern {
 		params = append(params, p.parsePatternAtom())
 	}
 	return params
-}
-
-// parseLambda parses `\x -> body` / `\x y -> body`. Like `if`, a lambda
-// may head an expression or be the final argument of an application. Its body
-// extends maximally right (or opens an indented block), up to a delimiter.
-func (p *parser) parseLambda() ast.Expr {
-	bs := p.next() // the backslash
-	var params []ast.Pattern
-	for isPatternAtomStart(p.peekInExpr().Kind) {
-		params = append(params, p.parsePatternAtom())
-	}
-	if len(params) == 0 {
-		p.errorAt(p.peek().Span, "SYNTAX PROBLEM",
-			"A lambda needs at least one parameter, like `\\x -> x + 1`.")
-		return nil
-	}
-	arrow := p.peekInExpr()
-	if !p.expect(token.ARROW, "I expect `->` after the lambda parameters.") {
-		return nil
-	}
-	body := p.parseBindBody(arrow)
-	if body == nil {
-		return nil
-	}
-	return &ast.Lambda{Params: params, Body: body, Sp: bs.Span}
 }
 
 // parseCase parses `case scrutinee of` and its branches. A branch head and
@@ -2313,7 +2279,8 @@ func (p *parser) parseAtom() ast.Expr {
 		return &ast.Var{Name: t.Text, Sp: t.Span}
 	case token.UIDENT:
 		name, final, sp := p.parseQualifiedName()
-		if final == token.UIDENT && p.peekInExpr().Kind == token.LBRACE {
+		if final == token.UIDENT && p.peekInExpr().Kind == token.LBRACE &&
+			(p.at(p.pos+1).Kind == token.RBRACE || p.braceIsRecordLiteral()) {
 			fields, end, ok := p.parseRecordExprFields()
 			if !ok {
 				return nil
@@ -2325,29 +2292,33 @@ func (p *parser) parseAtom() ast.Expr {
 		}
 		return &ast.Ctor{Name: name, Sp: sp}
 	case token.LBRACE:
-		lb := p.next()
-		if p.atInferredRecord() {
+		if p.braceIsRecordLiteral() {
+			lb := p.next()
 			fields, end, ok := p.parseRecordExprFieldsAfterOpen()
 			if !ok {
 				return nil
 			}
 			return &ast.RecordLit{NameSpan: lb.Span, Fields: fields, Sp: lb.Span.Merge(end)}
 		}
-		if p.peekInExpr().Kind == token.RBRACE {
-			// A record type needs at least one field, so `{}` is neither a
-			// literal nor an update and the update error would misdescribe it.
-			p.errorAt(lb.Span.Merge(p.peek().Span), "SYNTAX PROBLEM", "A record literal needs at least one field.")
+		if p.at(p.pos+1).Kind == token.RBRACE {
+			// Both record literals and lambdas need contents. Keep the
+			// established empty-record diagnostic for this spelling.
+			p.errorAt(t.Span.Merge(p.at(p.pos+1).Span), "SYNTAX PROBLEM", "A record literal needs at least one field.")
 			return nil
 		}
-		record := p.parseExpr()
-		if record == nil || !p.expect(token.PIPE, "I expect `|` after the record being updated.") {
-			return nil
+		if p.braceHasUpdatePipe() {
+			lb := p.next()
+			record := p.parseExpr()
+			if record == nil || !p.expect(token.PIPE, "I expect `|` after the record being updated.") {
+				return nil
+			}
+			fields, end, ok := p.parseRecordExprFieldsAfterOpen()
+			if !ok {
+				return nil
+			}
+			return &ast.RecordUpdate{Record: record, Fields: fields, Sp: lb.Span.Merge(end)}
 		}
-		fields, end, ok := p.parseRecordExprFieldsAfterOpen()
-		if !ok {
-			return nil
-		}
-		return &ast.RecordUpdate{Record: record, Fields: fields, Sp: lb.Span.Merge(end)}
+		return p.parseBracedLambda()
 	case token.LBRACKET:
 		return p.parseListExpr()
 	case token.KwResume:
@@ -2455,6 +2426,119 @@ func (p *parser) atInferredRecord() bool {
 	// column belongs to the next declaration, and reading it here would let the
 	// lookahead cross a boundary the offside rule has already closed.
 	return p.peekInExpr().Kind == token.LIDENT && p.at(p.pos+1).Kind == token.EQ
+}
+
+// braceIsRecordLiteral recognizes a complete field list. A leading `x =`
+// alone is insufficient: `{ x = 1; x }` is a lambda with a local binding.
+func (p *parser) braceIsRecordLiteral() bool {
+	if p.peekInExpr().Kind != token.LBRACE {
+		return false
+	}
+	// A sibling statement in the braces belongs to a lambda body. Without
+	// this check, the speculative record parse can consume its first token as
+	// another argument to the preceding field value.
+	first := p.at(p.pos + 1)
+	depth := 0
+	previousLine := first.Pos().Line
+	afterComma := false
+	for i := p.pos + 1; i < len(p.toks); i++ {
+		t := p.toks[i]
+		if depth == 0 && t.Kind == token.RBRACE {
+			break
+		}
+		if depth == 0 && t.Pos().Line > previousLine &&
+			t.Pos().Col <= first.Pos().Col && t.Kind != token.COMMA && !afterComma {
+			return false
+		}
+		if depth == 0 {
+			if t.Kind == token.COMMA {
+				afterComma = true
+			} else {
+				afterComma = false
+			}
+		}
+		if t.Kind == token.LPAREN || t.Kind == token.LBRACKET || t.Kind == token.LBRACE {
+			depth++
+		} else if t.Kind == token.RPAREN || t.Kind == token.RBRACKET || t.Kind == token.RBRACE {
+			depth--
+		}
+		previousLine = t.Pos().Line
+	}
+	q := *p
+	q.lay.stack = append([]layoutCtx(nil), p.lay.stack...)
+	q.errs = nil
+	q.next()
+	if !q.atInferredRecord() {
+		return false
+	}
+	_, _, ok := q.parseRecordExprFieldsAfterOpen()
+	return ok && len(q.errs) == 0
+}
+
+// An outer pipe introduces a record update. Pipes inside nested parentheses,
+// lists, or braces belong to those expressions instead.
+func (p *parser) braceHasUpdatePipe() bool {
+	depth := 0
+	for i := p.pos + 1; i < len(p.toks); i++ {
+		switch p.toks[i].Kind {
+		case token.LPAREN, token.LBRACKET, token.LBRACE:
+			depth++
+		case token.RPAREN, token.RBRACKET, token.RBRACE:
+			if depth == 0 {
+				return false
+			}
+			depth--
+		case token.PIPE:
+			if depth == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// parseBracedLambda parses `{ expression }` as a Unit callback and
+// `{ patterns -> body }` as a callback with explicit parameters.
+func (p *parser) parseBracedLambda() ast.Expr {
+	lb := p.next()
+	p.exprParenDepth++
+	defer func() { p.exprParenDepth-- }()
+	p.lay.push(ctxParen, 0)
+	defer p.lay.pop()
+
+	q := *p
+	q.lay.stack = append([]layoutCtx(nil), p.lay.stack...)
+	q.errs = nil
+	var params []ast.Pattern
+	for isPatternAtomStart(q.peekInExpr().Kind) {
+		pat := q.parsePatternAtom()
+		if pat == nil {
+			break
+		}
+		params = append(params, pat)
+	}
+	var body ast.Expr
+	if len(params) > 0 && len(q.errs) == 0 && q.peekInExpr().Kind == token.ARROW {
+		p.pos = q.pos
+		p.usesLists = q.usesLists
+		p.usesTuples = q.usesTuples
+		arrow := p.next()
+		body = p.parseBindBody(arrow)
+	} else {
+		params = []ast.Pattern{&ast.PUnit{Sp: lb.Span}}
+		if p.peek().Pos().Line == lb.Pos().Line {
+			body = p.parseInlineBlock()
+		} else {
+			body = p.parseBlock(p.peek().Pos().Col)
+		}
+	}
+	if body == nil {
+		return nil
+	}
+	if !p.expect(token.RBRACE, "I expect `}` to close this lambda.") {
+		return nil
+	}
+	return &ast.Lambda{Params: params, Body: body, Sp: lb.Span.Merge(p.prevSpan())}
 }
 
 func (p *parser) parseRecordExprFields() ([]ast.RecordExprField, source.Span, bool) {

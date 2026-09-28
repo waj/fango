@@ -34,10 +34,10 @@ mixed : List.List (Int ->{Fail String} Int)
 mixed = [guard, guard]
 
 main() =
-    print (attempt (\_ -> applyAll [double, double] 3))
-    print (attempt (\_ -> applyAll [guard, double] 2))
-    print (attempt (\_ -> applyAll [double, guard, double] 9))
+    print (attempt ({ _ -> applyAll [double, double] 3 }))
+    print (attempt ({ _ -> applyAll [guard, double] 2 }))
+    print (attempt ({ _ -> applyAll [double, guard, double] 9 }))
     -- The same list value reused across two handler activations.
-    print (attempt (\_ -> applyAll mixed 1))
-    print (attempt (\_ -> applyAll mixed 20))
-    print (attempt (\_ -> applyAll [] 7))
+    print (attempt ({ _ -> applyAll mixed 1 }))
+    print (attempt ({ _ -> applyAll mixed 20 }))
+    print (attempt ({ _ -> applyAll [] 7 }))

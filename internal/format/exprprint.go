@@ -70,9 +70,14 @@ func exprInline(e ast.Expr) (string, bool) {
 		f, ok3 := exprInline(e.Else)
 		return "if " + c + " then " + t + " else " + f, ok1 && ok2 && ok3
 	case *ast.Lambda:
-		params, ok1 := patternsInline(e.Params)
 		body, ok2 := exprInline(e.Body)
-		return "\\" + params + " -> " + body, ok1 && ok2
+		if len(e.Params) == 1 {
+			if _, unit := e.Params[0].(*ast.PUnit); unit {
+				return "{ " + body + " }", ok2
+			}
+		}
+		params, ok1 := patternsInline(e.Params)
+		return "{ " + params + " -> " + body + " }", ok1 && ok2
 	case *ast.Block:
 		return semicolonBlockInline(e)
 	case *ast.Resume:
@@ -172,6 +177,8 @@ func atomic(e ast.Expr) bool {
 		// Brackets itself, but see recordAfter: a brace directly after an
 		// uppercase name binds to that name instead.
 		return true
+	case *ast.Lambda:
+		return true
 	case *ast.Ctor:
 		return true
 	case *ast.Resume:
@@ -222,7 +229,7 @@ func exprOperandInline(e ast.Expr) (string, bool) {
 		return s, false
 	}
 	switch e.(type) {
-	case *ast.OpChain, *ast.BinOp, *ast.Lambda, *ast.If:
+	case *ast.OpChain, *ast.BinOp, *ast.If:
 		return "(" + s + ")", true
 	}
 	return s, true
@@ -274,7 +281,11 @@ func appInline(e *ast.App) (string, bool) {
 		if !argOK {
 			return "", false
 		}
-		parts = append(parts, recordAfter(parts[len(parts)-1], s))
+		if literal, isRecord := a.(*ast.RecordLit); isRecord && literal.Name == "" {
+			parts = append(parts, recordAfter(parts[len(parts)-1], s))
+		} else {
+			parts = append(parts, s)
+		}
 	}
 	return strings.Join(parts, " "), true
 }
@@ -406,10 +417,10 @@ func tupleInline(elems []ast.Expr) (string, bool) {
 	return "(" + strings.Join(parts, ", ") + ")", true
 }
 
-// recordAfter wraps a record literal or update in parentheses when it would
-// follow an uppercase name, because a brace there opens a *named* record:
+// recordAfter wraps an inferred record literal in parentheses when it would
+// follow an uppercase name, because a field list there opens a named record:
 // `Just { x = 1 }` is a literal of nominal type Just rather than Just applied
-// to a record, and the update form does not parse in that position at all.
+// to an inferred record.
 // After anything else — a lowercase name, a closing bracket, an operator — the
 // braces delimit the record on their own and the parentheses are noise.
 func recordAfter(prev, s string) string {

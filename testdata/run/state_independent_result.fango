@@ -10,8 +10,8 @@ makeDraw() =
 draw = Random.runSeeded 0 makeDraw
 
 main() =
-    print (Random.runSeeded 5 (\_ -> draw 1))
-    result = attempt (\_ ->
+    print (Random.runSeeded 5 ({ _ -> draw 1 }))
+    result = attempt ({ _ ->
         handle draw 1 of
-            int lo hi -> fail "fresh handler")
+            int lo hi -> fail "fresh handler" })
     print result

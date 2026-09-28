@@ -8,9 +8,9 @@ foldCursor combine initial cursor = case Iterator.next cursor of
     Nothing -> initial
     Just (value, next) -> foldCursor combine (combine value initial) next
 
-spin = Stream.unfold () (\_ -> Just (0, ()))
+spin = Stream.unfold () ({ _ -> Just (0, ()) })
 
 count : () -> Int
-count() = Stream.withCursor spin (\cursor -> foldCursor (\element acc -> element + acc) 0 cursor)
+count() = Stream.withCursor spin ({ cursor -> foldCursor ({ element acc -> element + acc }) 0 cursor })
 
 main() = print $(Meta.lift (count()))

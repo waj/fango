@@ -71,7 +71,7 @@ identity : (() ->{e} Int) -> (() ->{e} Int)
 identity action = action
 
 saved =
-    handle identity (\_ -> read()) of
+    handle identity { _ -> read() } of
         read () -> resume 1
 
 main = 0

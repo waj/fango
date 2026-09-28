@@ -35,34 +35,24 @@ func TestGoldens(t *testing.T) {
 	}
 }
 
-func TestClosingParenthesesKeepTheirLine(t *testing.T) {
-	src := "main =\n" +
-		"    map (\\value -> spawn (\\_ ->\n" +
-		"        answer = value\n" +
-		"        answer\n" +
-		"    )) values\n"
-	for _, input := range []string{src, strings.Replace(src, "    )) values", "        )) values", 1)} {
+func TestClosingBracesKeepTheirLine(t *testing.T) {
+	src := "main =\n    map { value ->\n        answer = value\n        answer\n    } values\n"
+	for _, input := range []string{src, strings.Replace(src, "    } values", "        } values", 1)} {
 		out, errs := Source(source.NewFile("<test>", []byte(input)))
 		if len(errs) > 0 {
 			t.Fatalf("formatting failed: %v", errs)
 		}
 		if string(out) != src {
-			t.Errorf("closing parentheses moved:\n%s", out)
+			t.Errorf("closing braces moved:\n%s", out)
 		}
 	}
 }
 
-func TestParenthesizedLambdaBodyIndented(t *testing.T) {
-	want := "main =\n" +
-		"    map (\\value ->\n" +
-		"        spawn (\\_ ->\n" +
-		"            answer = value\n" +
-		"            answer\n" +
-		"        )\n" +
-		"    ) values\n"
+func TestBracedLambdaBodyIndented(t *testing.T) {
+	want := "main =\n    map { value ->\n        answer = value\n        answer\n    } values\n"
 	for _, input := range []string{
-		strings.ReplaceAll(want, "            answer", "        answer"),
-		strings.ReplaceAll(want, "            answer", "    answer"),
+		strings.ReplaceAll(want, "        answer", "    answer"),
+		strings.ReplaceAll(want, "        answer", "  answer"),
 	} {
 		out, errs := Source(source.NewFile("<test>", []byte(input)))
 		if len(errs) > 0 {
@@ -74,15 +64,31 @@ func TestParenthesizedLambdaBodyIndented(t *testing.T) {
 	}
 }
 
-func TestMultilineParenthesisClosings(t *testing.T) {
+func TestMultilineBracedArguments(t *testing.T) {
 	for _, tc := range []struct{ input, want string }{
 		{
-			"main =\n    foo (bar (\\x ->\n        x)) baz\n",
-			"main =\n    foo (bar (\\x ->\n        x\n    )) baz\n",
+			"main =\n    foo (bar { x ->\n        x }) baz\n",
+			"main =\n    foo (bar { x ->\n            x\n    }) baz\n",
 		},
 		{
-			"main =\n    foo (\n        bar (\\x ->\n            x)) baz\n",
-			"main =\n    foo (\n        bar (\\x ->\n            x\n        )\n    ) baz\n",
+			"main =\n    foo { x ->\n        x } baz\n",
+			"main =\n    foo { x ->\n        x\n    } baz\n",
+		},
+		{
+			"main =\n    foo { x -> bar { y ->\n        y\n    } }\n",
+			"main =\n    foo { x ->\n        bar { y ->\n            y\n        }\n    }\n",
+		},
+		{
+			"main =\n    foo { x ->\n        bar { y ->\n            y } }\n",
+			"main =\n    foo { x ->\n        bar { y ->\n            y\n        }\n    }\n",
+		},
+		{
+			"main =\n    foo { x -> wrap (bar\n        x) }\n",
+			"main =\n    foo { x ->\n        wrap (bar\n                x\n        )\n    }\n",
+		},
+		{
+			"main = R { run = { x ->\n        x } }\n",
+			"main = R\n    { run = { x ->\n        x\n      }\n    }\n",
 		},
 	} {
 		out, errs := Source(source.NewFile("<test>", []byte(tc.input)))
@@ -92,6 +98,41 @@ func TestMultilineParenthesisClosings(t *testing.T) {
 		}
 		if string(out) != tc.want {
 			t.Errorf("formatting %q:\n got: %s\nwant: %s", tc.input, out, tc.want)
+		}
+	}
+}
+
+func TestLambdaInlineBodyKeepsClosingBraceInline(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"callback = { x -> foo\n}\n", "callback = { x -> foo }\n"},
+		{"callback = { foo\n}\n", "callback = { foo }\n"},
+		{"callback = { x ->\n    foo\n}\n", "callback = { x ->\n    foo\n}\n"},
+	} {
+		out, errs := Source(source.NewFile("lambda.fango", []byte(tc.input)))
+		if len(errs) > 0 {
+			t.Fatalf("formatting %q failed: %v", tc.input, errs)
+		}
+		if string(out) != tc.want {
+			t.Errorf("formatting %q:\n got: %s\nwant: %s", tc.input, out, tc.want)
+		}
+	}
+}
+
+func TestMultilineContainerLambdasAlignWithItems(t *testing.T) {
+	input := "testList =\n" +
+		"    [ { foo }\n    , { x ->\n        foo x\n    }\n    ]\n\n" +
+		"testRecord =\n" +
+		"    { a = { foo }\n    , b = { x ->\n        foo x\n    }\n    }\n\n" +
+		"testTuple =\n" +
+		"    ( { foo }\n    , { x ->\n        foo x\n    }\n    )\n"
+	want := strings.ReplaceAll(input, "        foo x\n    }", "        foo x\n      }")
+	for _, src := range []string{input, want} {
+		out, errs := Source(source.NewFile("containers.fango", []byte(src)))
+		if len(errs) > 0 {
+			t.Fatalf("formatting failed: %v", errs)
+		}
+		if string(out) != want {
+			t.Errorf("unexpected container lambda layout:\n%s", out)
 		}
 	}
 }
@@ -210,11 +251,30 @@ func TestInferredRecordPatternAfterConstructorKeepsGrouping(t *testing.T) {
 	for _, src := range []string{
 		"foo W ({ x = x }) = x\n",
 		"foo (S ({ x = x })) = x\n",
-		"foo = \\W ({ x = x }) -> x\n",
+		"foo = { W ({ x = x }) -> x }\n",
 	} {
 		out, errs := Source(source.NewFile("patterns.fango", []byte(src)))
 		if len(errs) > 0 {
 			t.Fatalf("%q: %s: %s", src, errs[0].Title, errs[0].Body)
+		}
+		if string(out) != src {
+			t.Errorf("formatted %q as %q", src, out)
+		}
+	}
+}
+
+func TestBracedLambdaAndRecordFormatting(t *testing.T) {
+	for _, src := range []string{
+		"callback = { foo }\n",
+		"wrapped = Wrap { foo }\n",
+		"record = Wrap { x = 1 }\n",
+		"updated = Wrap { value | x = 1 }\n",
+		"local = { x = 1; x }\n",
+		"nested = { { x = 1 } }\n",
+	} {
+		out, errs := Source(source.NewFile("braces.fango", []byte(src)))
+		if len(errs) > 0 {
+			t.Fatalf("%q: %v", src, errs)
 		}
 		if string(out) != src {
 			t.Errorf("formatted %q as %q", src, out)
@@ -241,9 +301,9 @@ func TestRaggedLayoutNormalizesAndRoundTrips(t *testing.T) {
 	cases := []struct{ input, want string }{
 		{"main =\n        x = 1\n      y = x + 2\n       y\n", "main =\n    x = 1\n    y = x + 2\n    y\n"},
 		{"main =\n        x = 1\n      -- next value\n      y = x + 2\n       y\n", "main =\n    x = 1\n    -- next value\n    y = x + 2\n    y\n"},
-		{"main =\n    foo (\\_ ->\n        foo\n    bar\n    )\n", "main =\n    foo (\\_ ->\n        foo\n        bar\n    )\n"},
-		{"main =\n    foo (\\_ ->\n        x = 1\n    x\n    )\n", "main =\n    foo (\\_ ->\n        x = 1\n        x\n    )\n"},
-		{"main =\n    foo (\\_ ->\n    value = x\n        bar\n    )\n", "main =\n    foo (\\_ ->\n        value = x\n            bar\n    )\n"},
+		{"main =\n    foo { _ ->\n        foo\n    bar\n    }\n", "main =\n    foo { _ ->\n        foo\n        bar\n    }\n"},
+		{"main =\n    foo { _ ->\n        x = 1\n    x\n    }\n", "main =\n    foo { _ ->\n        x = 1\n        x\n    }\n"},
+		{"main =\n    foo { _ ->\n    value = x\n        bar\n    }\n", "main =\n    foo { _ ->\n        value = x\n            bar\n    }\n"},
 		{"main = x = 1\n", "main = x = 1\n"},
 		{"match x =\n    case x of\n        True -> 1\n      False -> 2\n          _ -> 3\n", "match x =\n    case x of\n        True -> 1\n        False -> 2\n        _ -> 3\n"},
 		{"run action =\n    handle action of\n        emit value -> resume value\n      log value -> resume value\n          return value -> value\n", "run action =\n    handle action of\n        emit value -> resume value\n        log value -> resume value\n        return value -> value\n"},

@@ -1,4 +1,4 @@
 import Meta
 import Random
 
-main = $(Meta.lift (Random.runSystem (\_ -> Random.int 1 6)))
+main = $(Meta.lift (Random.runSystem ({ _ -> Random.int 1 6 })))

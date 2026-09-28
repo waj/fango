@@ -112,11 +112,11 @@ func run() error {
 		}
 		source := "import Async\nimport List\n"
 		annotation := "probe : Int -> Int -> Bool -> Int\n"
-		ending := "probe workers limit yielding = Async.run (\\_ -> runWorkers workers limit yielding)\n"
+		ending := "probe workers limit yielding = Async.run ({ _ -> runWorkers workers limit yielding })\n"
 		if name == "current" {
 			annotation = "probe : Int -> Int -> Bool ->{IO} Int\n"
 			source += "import Async.Cooperative\nimport Result exposing (Result(..))\n"
-			ending = "probe workers limit yielding =\n    case Async.Cooperative.run (\\_ -> runWorkers workers limit yielding) of\n        Ok total -> total\n        Err _ -> -1\n"
+			ending = "probe workers limit yielding =\n    case Async.Cooperative.run ({ _ -> runWorkers workers limit yielding }) of\n        Ok total -> total\n        Err _ -> -1\n"
 		}
 		source += "\n" + workload + "\n" + annotation + ending + "\nmain() = print (probe 16 20000 True)\n"
 		if module, err := os.ReadFile(filepath.Join(dir, "stdlib", "Async.fango")); err == nil && bytes.Contains(module, []byte("effect Async err")) {

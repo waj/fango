@@ -26,15 +26,15 @@ failingRelease label =
     fail ("close failed " ++ label)
 
 main() =
-    report "both succeed" (attempt (\_ ->
-        Runtime.Scope.bracket (\_ -> "a") quietRelease (\token -> "used " ++ token)))
-    report "cleanup fails" (attempt (\_ ->
-        Runtime.Scope.bracket (\_ -> "b") failingRelease (\token -> "used " ++ token)))
-    report "body fails" (attempt (\_ ->
-        Runtime.Scope.bracket (\_ -> "c") quietRelease (\_ -> fail "body failed c")))
-    report "both fail" (attempt (\_ ->
-        Runtime.Scope.bracket (\_ -> "d") failingRelease (\_ -> fail "body failed d")))
-    report "nested cleanup fails" (attempt (\_ ->
-        Runtime.Scope.bracket (\_ -> "outer") failingRelease (\outer ->
-            Runtime.Scope.bracket (\_ -> "inner") failingRelease (\inner ->
-                outer ++ "/" ++ inner))))
+    report "both succeed" (attempt ({ _ ->
+        Runtime.Scope.bracket ({ _ -> "a" }) quietRelease ({ token -> "used " ++ token }) }))
+    report "cleanup fails" (attempt ({ _ ->
+        Runtime.Scope.bracket ({ _ -> "b" }) failingRelease ({ token -> "used " ++ token }) }))
+    report "body fails" (attempt ({ _ ->
+        Runtime.Scope.bracket ({ _ -> "c" }) quietRelease ({ _ -> fail "body failed c" }) }))
+    report "both fail" (attempt ({ _ ->
+        Runtime.Scope.bracket ({ _ -> "d" }) failingRelease ({ _ -> fail "body failed d" }) }))
+    report "nested cleanup fails" (attempt ({ _ ->
+        Runtime.Scope.bracket ({ _ -> "outer" }) failingRelease ({ outer ->
+            Runtime.Scope.bracket ({ _ -> "inner" }) failingRelease ({ inner ->
+                outer ++ "/" ++ inner }) }) }))

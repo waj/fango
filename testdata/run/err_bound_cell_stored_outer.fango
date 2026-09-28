@@ -10,12 +10,12 @@ effect Store
 
 inner : Int -> () ->{Store} ()
 inner start () =
-    handle keep (Cell (\_ -> tick())) with n = start of
+    handle keep (Cell ({ _ -> tick() })) with n = start of
         tick () -> resume n with n + 1
 
 main() =
     kept =
-        handle inner 0 () with saved = Cell (\_ -> 0) of
+        handle inner 0 () with saved = Cell ({ _ -> 0 }) of
             keep c -> resume () with c
             return _ -> saved
     case kept of

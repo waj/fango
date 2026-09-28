@@ -3,5 +3,5 @@ import Reader
 
 
 main() =
-    reader = Reader.overBytes (Bytes.fromString "abc") (\input -> input)
+    reader = Reader.overBytes (Bytes.fromString "abc") ({ input -> input })
     print (Reader.readUpTo reader 99)

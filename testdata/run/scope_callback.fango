@@ -21,18 +21,18 @@ open label =
 close label = print ("close " ++ label)
 
 scoped : String ->{IO} String
-scoped label = Runtime.Scope.bracket (\_ -> open label) close (\token -> "<" ++ token ++ ">")
+scoped label = Runtime.Scope.bracket ({ _ -> open label }) close ({ token -> "<" ++ token ++ ">" })
 
 guarded label =
-    Runtime.Scope.bracket (\_ -> open label) close (\token ->
-        if token == "stop" then fail "stopped" else "<" ++ token ++ ">")
+    Runtime.Scope.bracket ({ _ -> open label }) close ({ token ->
+        if token == "stop" then fail "stopped" else "<" ++ token ++ ">" })
 
 collect : (String ->{e} String) -> List String ->{e} String
-collect step labels = List.foldl (\label sofar -> sofar ++ step label) "" labels
+collect step labels = List.foldl ({ label sofar -> sofar ++ step label }) "" labels
 
 main() =
-    print (collect (\label -> scoped label) [ "a", "b" ])
-    outcome = attempt (\_ -> collect (\label -> guarded label) [ "c", "stop", "d" ])
+    print (collect ({ label -> scoped label }) [ "a", "b" ])
+    outcome = attempt ({ _ -> collect ({ label -> guarded label }) [ "c", "stop", "d" ] })
     case outcome of
         Ok values -> print values
         Err error -> print ("err " ++ error)

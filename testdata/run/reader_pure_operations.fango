@@ -5,9 +5,9 @@ import Stream
 -- A lawful exhausted reader needs no mutable state or IO.
 emptyReader : Reader {}
 emptyReader =
-    { buffered = \_ -> Bytes.empty
-    , refill = \_ -> False
-    , skip = \_ -> 0
+    { buffered = { _ -> Bytes.empty }
+    , refill = { _ -> False }
+    , skip = { _ -> 0 }
     }
 
 -- Exact pure annotations catch accidental IO on the traversal helpers too.
@@ -15,7 +15,7 @@ summary : (Bool, Bool, List Bytes)
 summary = (Reader.ensure emptyReader 0, Reader.atEnd emptyReader, Stream.toList (Reader.chunks emptyReader))
 
 visit : ()
-visit = Reader.forEachChunk emptyReader (\_ -> ())
+visit = Reader.forEachChunk emptyReader ({ _ -> () })
 
 main() =
     print summary

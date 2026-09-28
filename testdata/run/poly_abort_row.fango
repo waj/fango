@@ -2,6 +2,6 @@ import Fail exposing (Fail, attempt, fail)
 import List exposing (each)
 
 checkAll : List Int ->{Fail String, IO | e} ()
-checkAll xs = each (\x -> if x > 2 then fail "big" else print x) xs
+checkAll xs = each ({ x -> if x > 2 then fail "big" else print x }) xs
 
-main() = print (attempt (\_ -> checkAll [1, 3]))
+main() = print (attempt ({ _ -> checkAll [1, 3] }))

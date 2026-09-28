@@ -4,10 +4,10 @@ import State
 import Maybe exposing (Maybe(..))
 
 retain cursor = 42
-save cursor = State.put (Just (\_ -> retain cursor))
+save cursor = State.put (Just ({ _ -> retain cursor }))
 
 escape() =
-    State.run Nothing (\_ ->
-        Stream.withCursor (Stream.fromList [1]) save)
+    State.run Nothing ({ _ ->
+        Stream.withCursor (Stream.fromList [1]) save })
 
 main() = print "unreachable"

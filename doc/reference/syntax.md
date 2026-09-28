@@ -44,13 +44,12 @@ its opening parenthesis, even when an indented body ends immediately before it.
 Several closing parentheses may share that line.
 An expression inside grouping parentheses has a fresh layout boundary until
 the matching `)`.
-When a lambda is inside parentheses, its body may begin at any column on the
-next line, including left of the surrounding block. The closing parenthesis
-ends that body. Later items inside the body may outdent to the surrounding
-block's column and still belong to the lambda; the first body item remains
-their indentation ceiling. A statement after `)` at the surrounding block's
-column belongs to that block. Without such parentheses, a multiline body must
-begin further right than the surrounding block's column.
+Braces give a lambda body a fresh layout boundary. Its body may begin at any
+column on the next line, including left of the surrounding block. The closing
+brace ends that body. Later items inside the body may outdent to the
+surrounding block's column and still belong to the lambda; the first body item
+remains their indentation ceiling. A statement after `}` at the surrounding
+block's column belongs to that block.
 
 A call answering anything other than Unit is not a statement, and binding it
 would need a name nothing reads. `ignore : a -> ()`, declared in `Basics` and
@@ -63,7 +62,7 @@ every statement-bearing body: after `=`, `->`, `then`, and `else`, including
 case branches and handler clauses:
 
 ```fango
-incrementAfterPrinting = \a b -> print a; b + 1
+incrementAfterPrinting = { a b -> print a; b + 1 }
 withLocal x = y = x + 1; print y; y * 2
 ```
 
@@ -182,8 +181,9 @@ An operator name is a run of one or more of these characters:
 The runs `=`, `->`, `=>`, `:`, `|`, and `^` are reserved by the grammar and
 cannot be declared. Other plausible characters are deliberately excluded: `.`
 is field access, module qualification, and `..`; `$` belongs to the splice
-opener `$(`; `\` is the lambda; and `,` `;` `(` `)` `{` `}` are punctuation. So
-`(.)`, `($)`, and `(<$>)` are unavailable, while `(<+>)`, `(|>)`, `(>>=)`,
+opener `$(`; braces delimit lambdas and records; and `,` `;` `(` `)` are
+punctuation. A backslash outside a string or character literal is rejected.
+So `(.)`, `($)`, and `(<$>)` are unavailable, while `(<+>)`, `(|>)`, `(>>=)`,
 and `(:::)` are all ordinary names.
 
 Operator characters group greedily: the longest run is one operator. So

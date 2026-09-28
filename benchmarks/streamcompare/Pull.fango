@@ -10,9 +10,10 @@ type Pull a e = Pull (Coroutine a () () e)
 
 withValues : (() ->{Emit a | e} ()) -> (Pull a e ->{Drive | e} result) ->{e} result
 withValues producer consumer = Runtime.Coroutine.with
-    (\pause _ -> handle producer () of
-        emit value -> resume (pause value))
-    (\work -> consumer (Pull work))
+    { pause _ -> handle producer () of
+            emit value -> resume (pause value)
+    }
+    { work -> consumer (Pull work) }
 
 read : Pull a e ->{Drive | e} Maybe a
 read (Pull work) = case Runtime.Coroutine.advance work () of

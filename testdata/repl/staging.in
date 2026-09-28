@@ -10,7 +10,7 @@ $(quote (print "no"))
 class Tag a
     tag : a -> String
 deriver Tag
-    tag subject valueCode = Meta.match subject valueCode (\bound -> Meta.lift bound.ctor.name)
+    tag subject valueCode = Meta.match subject valueCode { bound -> Meta.lift bound.ctor.name }
 type Colour = Red | Blue deriving (Tag)
 tag Blue
 class Never a

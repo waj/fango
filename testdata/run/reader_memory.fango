@@ -13,11 +13,11 @@ main() =
     print (Reader.overBytes Bytes.empty parse)
     -- A failed readExactly consumes nothing, so the caller still holds
     -- everything it could not frame.
-    print (Reader.overBytes (Bytes.fromString "abc") (\input ->
-        (Reader.readExactly input 99, Reader.readUpTo input 99)))
+    print (Reader.overBytes (Bytes.fromString "abc") ({ input ->
+        (Reader.readExactly input 99, Reader.readUpTo input 99) }))
     -- Counts outside the buffer are clamped rather than rejected.
-    print (Reader.overBytes (Bytes.fromString "abc") (\input ->
-        (Reader.readExactly input 0, Reader.readUpTo input (-1), Reader.readUpTo input 2)))
+    print (Reader.overBytes (Bytes.fromString "abc") ({ input ->
+        (Reader.readExactly input 0, Reader.readUpTo input (-1), Reader.readUpTo input 2) }))
     -- ensure grows the buffer and consumes nothing.
-    print (Reader.overBytes (Bytes.fromString "abc") (\input ->
-        (Reader.ensure input 3, Reader.ensure input 4, Reader.readUpTo input 99)))
+    print (Reader.overBytes (Bytes.fromString "abc") ({ input ->
+        (Reader.ensure input 3, Reader.ensure input 4, Reader.readUpTo input 99) }))

@@ -58,6 +58,14 @@ func TestSemicolonIsStatementPunctuation(t *testing.T) {
 	}
 }
 
+func TestBackslashLambdaIsRejected(t *testing.T) {
+	f := source.NewFile("old.fango", []byte(`value = \x -> x`))
+	_, errs := Lex(f)
+	if len(errs) == 0 || errs[0].Title != "UNEXPECTED CHARACTER" {
+		t.Fatalf("old lambda syntax errors = %#v", errs)
+	}
+}
+
 func TestGoldens(t *testing.T) {
 	files := testutil.GlobFango(t, filepath.Join("..", "..", "testdata", "lex"))
 	for _, path := range files {

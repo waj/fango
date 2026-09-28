@@ -599,7 +599,7 @@ other() = 2
 same False = 0
 main = same True`, diagnostic: "UNQUALIFIED COLLISION"},
 		{name: "internal component variable", src: `first unused stop = if stop then () else second()
-second() = first (\x -> x) True
+second() = first ({ x -> x }) True
 main = if second() == () then "ok" else "bad"`, want: "ok"},
 		{name: "internal numeric default", src: `first() = second 1
 second n = if n == 0 then True else first()
@@ -650,7 +650,7 @@ later() = quote 42`, diagnostic: "STAGE ERROR"},
 function() = value
 main = value`, diagnostic: "CYCLIC VALUE DEFINITION"},
 		{name: "lambda remains sequential", src: `early x = later x
-later = \x -> x
+later = { x -> x }
 main = early 42`, diagnostic: "NAMING ERROR"},
 		{name: "future function shadow", src: `early later = later
 later x = x

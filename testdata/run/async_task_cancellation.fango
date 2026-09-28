@@ -11,12 +11,12 @@ waiter value () =
     value
 
 main() =
-    ignore (Async.run (\_ ->
+    ignore (Async.run ({ _ ->
         child = Async.spawn (waiter 7)
         Async.cancel child
         print (Async.awaitResult child)
-        print (Async.awaitResult child)))
-    handle ignore (Async.run (\_ ->
+        print (Async.awaitResult child) }))
+    handle ignore (Async.run ({ _ ->
         child = Async.spawn (waiter 9)
-        stop child)) of
+        stop child })) of
         stop child -> print (Async.wait child)

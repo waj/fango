@@ -11,9 +11,9 @@ emit() =
 
 :type pair one emit
 :type pair emit one
-pair one \_ -> 2
-3 |> (\n -> n + 1)
-$(quote (pair one \_ -> 2))
+pair one { _ -> 2 }
+3 |> { n -> n + 1 }
+$(quote (pair one { _ -> 2 }))
 bad : () -> Int
 bad() = pair one emit
 

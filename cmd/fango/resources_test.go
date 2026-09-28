@@ -39,57 +39,58 @@ main = 0`, ""},
 keep : (() ->{e} Int) -> (() ->{e} Int)
 keep action = action
 leak =
-    handle keep (\_ -> readCounter()) with state = 0 of
+    handle keep ({ _ -> readCounter() }) with state = 0 of
         readCounter () -> resume state with state
 main = 0`, ""},
-		{"mutual resource escape", `first port stop = if stop then (\_ -> readPort port) else second port True
+		{"mutual resource escape", `first port stop = if stop then ({ _ -> readPort port }) else second port True
 second port stop = first port stop
-leak = withPort (\port -> first port False)
+leak = withPort ({ port -> first port False })
 main = 0`, ""},
 		{"mutual safe resource", `first port stop = if stop then readPort port else second port True
 second port stop = first port stop
-main = withPort (\port -> first port False)`, ""},
+main = withPort ({ port -> first port False })`, ""},
 		{"scalar helper", `loop port n = if n == 0 then readPort port else loop port (n - 1)
-main = withPort (\port -> loop port 3)`, ""},
+main = withPort ({ port -> loop port 3 })`, ""},
 		{"recursive owner store", `empty : Maybe Port
 empty = Nothing
 loop : Int ->{State.State (Maybe Port)} ()
-loop n = withPort (\port ->
+loop n = withPort ({ port ->
     if n == 0 then State.put (Just port) else
-        ignored = State.run empty (\_ -> loop (n - 1))
-        ())
-main = State.run empty (\_ -> loop 2)`, ""},
-		{"safe closure", `saved = withPort (\port -> \_ -> 42)
+        ignored = State.run empty ({ _ -> loop (n - 1) })
+        () })
+main = State.run empty ({ _ -> loop 2 })`, ""},
+		{"safe closure", `saved = withPort ({ port -> { _ -> 42 } })
 main = saved()`, ""},
-		{"safe higher order closure", `saved = withPort (\port -> identity (\_ -> 42))
+		{"safe higher order closure", `saved = withPort ({ port -> identity ({ _ -> 42 }) })
 main = saved()`, ""},
 		{"safe nested handler closure", `effect Counter
     readCounter : () -> Int
 keep : (() ->{e} Int) -> (() ->{e} Int)
 keep action = action
 safe =
-    handle keep (\_ ->
+    handle keep { _ ->
         handle readCounter() with inner = 7 of
-            readCounter () -> resume inner with inner) with outer = 0 of
+            readCounter () -> resume inner with inner
+    } with outer = 0 of
         readCounter () -> resume outer with outer
 main = safe()`, ""},
 		{"direct", `main = withPort identity`, ""},
-		{"closure", `saved = withPort (\port -> \_ -> readPort port)
+		{"closure", `saved = withPort ({ port -> { _ -> readPort port } })
 main = saved()`, ""},
-		{"ADT", `main = withPort (\port -> Just port)`, ""},
-		{"indirect", `main = withPort (\port -> apply identity port)`, ""},
-		{"nested polymorphic callback", `main = withPort (\port ->
-    apply (\_ -> apply identity port) 0)`, ""},
-		{"outer state Unit result", `main = State.run Nothing (\_ ->
-    withPort (\port -> State.put (Just port))
-    ())`, ""},
+		{"ADT", `main = withPort ({ port -> Just port })`, ""},
+		{"indirect", `main = withPort ({ port -> apply identity port })`, ""},
+		{"nested polymorphic callback", `main = withPort ({ port ->
+    apply ({ _ -> apply identity port }) 0 })`, ""},
+		{"outer state Unit result", `main = State.run Nothing ({ _ ->
+    withPort ({ port -> State.put (Just port) })
+    () })`, ""},
 		{"outer user handler", `main =
-    handle withPort (\port -> save (Just port)) with saved = Nothing of
+    handle withPort ({ port -> save (Just port) }) with saved = Nothing of
         save next -> resume () with next
         return _ -> ()`, ""},
 		{"indirect store", `retain port = save (Just port)
 main =
-    handle withPort (\port -> apply retain port) with saved = Nothing of
+    handle withPort ({ port -> apply retain port }) with saved = Nothing of
         save next -> resume () with next
         return _ -> ()`, ""},
 		{"dictionary store", `class SaveValue a
@@ -99,35 +100,35 @@ instance SaveValue Port
 throughDictionary : SaveValue a => a ->{Store a} ()
 throughDictionary port = saveValue port
 main =
-    handle withPort (\port -> throughDictionary port) with saved = Nothing of
+    handle withPort ({ port -> throughDictionary port }) with saved = Nothing of
         save next -> resume () with Just next
         return _ -> ()`, ""},
-		{"distinct nested owners", `main = withPort (\outer ->
-    withPort (\inner -> readPort outer + readPort inner))`, ""},
-		{"inner abort consumed", `main = withPort (\port ->
-    ignored = attempt (\_ -> fail port)
-    42)`, ""},
+		{"distinct nested owners", `main = withPort ({ outer ->
+    withPort ({ inner -> readPort outer + readPort inner }) })`, ""},
+		{"inner abort consumed", `main = withPort ({ port ->
+    ignored = attempt ({ _ -> fail port })
+    42 })`, ""},
 		{"outer synchronous borrow", `main =
-    handle withPort (\port -> save port) of
+    handle withPort ({ port -> save port }) of
         save port ->
             n = readPort port
             resume ()`, ""},
-		{"inner state", `main = withPort (\port -> State.run (Just port) (\_ -> ()))`, ""},
-		{"inner state consumed", `main = withPort (\port ->
-    ignored = State.run (Just port) (\_ -> ())
-    42)`, ""},
-		{"abort payload", `main = attempt (\_ -> withPort (\port -> fail port))`, ""},
+		{"inner state", `main = withPort ({ port -> State.run (Just port) ({ _ -> () }) })`, ""},
+		{"inner state consumed", `main = withPort ({ port ->
+    ignored = State.run (Just port) ({ _ -> () })
+    42 })`, ""},
+		{"abort payload", `main = attempt ({ _ -> withPort ({ port -> fail port }) })`, ""},
 		{"release retention", `main =
-    handle Runtime.Scope.bracket openPort (\port -> save port) (\_ -> ()) with saved = Nothing of
+    handle Runtime.Scope.bracket openPort ({ port -> save port }) ({ _ -> () }) with saved = Nothing of
         save port -> resume () with Just port
         return _ -> ()`, ""},
 		{"callback ADT", `type Box a = Box a
-main = withPort (\port ->
+main = withPort ({ port ->
     box = Box identity
     case box of
-        Box callback -> callback port)`, ""},
+        Box callback -> callback port })`, ""},
 		{"partial wrapper", `later = withPort
-main = later (\port -> port)`, ""},
+main = later ({ port -> port })`, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -165,7 +166,7 @@ func TestResourceLibraryAllowsIndirectRetention(t *testing.T) {
 		}
 	}
 	helper := `module Retention exposing (hide)
-hide value = Just (\_ -> value)
+hide value = Just ({ _ -> value })
 `
 	if err := os.WriteFile(filepath.Join(dir, "Retention.fango"), []byte(helper), 0600); err != nil {
 		t.Fatal(err)

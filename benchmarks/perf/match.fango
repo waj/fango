@@ -17,7 +17,7 @@ apply op n m =
 crunch op n =
     if n < 2 then
         apply op n 1
-     else
+    else
         apply op (crunch (tick op) (n - 1)) (crunch (tick (tick op)) (n - 2))
 
 main = print (crunch Add 37)

@@ -6,9 +6,9 @@ readAll cursor = case Pull.read cursor of
     Just (value, next) -> [value | readAll next]
 
 main() =
-    print (Runtime.Scope.finally (\_ -> Pull.withValues ["first", "second"] readAll) (\_ -> print "closed"))
-    Runtime.Scope.finally (\_ -> Pull.withValues [42] (\cursor ->
+    print (Runtime.Scope.finally ({ _ -> Pull.withValues ["first", "second"] readAll }) ({ _ -> print "closed" }))
+    Runtime.Scope.finally ({ _ -> Pull.withValues [42] ({ cursor ->
         case Pull.read cursor of
             Nothing -> print "empty"
-            Just (value, _) -> print (Just value))) (\_ -> print "early close")
+            Just (value, _) -> print (Just value) }) }) ({ _ -> print "early close" })
     print 7

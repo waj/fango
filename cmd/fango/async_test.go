@@ -32,10 +32,10 @@ job : () ->{IO, Database} Int
 job() =
     print "CHILD_STARTED"
     lookup()
-main() = withStop (\_ -> withDatabase (\_ ->
-    ignore (runStrings (\_ ->
+main() = withStop ({ _ -> withDatabase ({ _ ->
+    ignore (runStrings ({ _ ->
         task = Async.spawn job
-        Async.await task))))
+        Async.await task })) }) })
 `
 
 func TestAsyncUnsupportedInheritedAbort(t *testing.T) {

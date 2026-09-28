@@ -11,7 +11,7 @@ fields schema =
     case Meta.ctorsIn schema of
         NoItems -> "-"
         Item ctor _ ->
-            Meta.foldItems (\text field -> text ++ Meta.typeName field.ty ++ " ") (ctor.name ++ ":") ctor.fields
+            Meta.foldItems ({ text field -> text ++ Meta.typeName field.ty ++ " " }) (ctor.name ++ ":") ctor.fields
 
 describe : Meta.TypeRepr -> Code
 describe repr =

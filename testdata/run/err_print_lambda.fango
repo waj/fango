@@ -1,1 +1,1 @@
-main = (\x -> print x) 1
+main = ({ x -> print x }) 1

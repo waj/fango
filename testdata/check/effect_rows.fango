@@ -32,10 +32,10 @@ riskyFirst plain risky =
 type Source e = { pull : () ->{e} Int }
 
 quiet : Source {}
-quiet = { pull = \_ -> 0 }
+quiet = { pull = { _ -> 0 } }
 
 noted : Source {Note}
-noted = { pull = \_ -> stop "no" }
+noted = { pull = { _ -> stop "no" } }
 
 tailed : Source {Note | e}
-tailed = { pull = \_ -> stop "no" }
+tailed = { pull = { _ -> stop "no" } }

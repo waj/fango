@@ -2,7 +2,7 @@ import Meta exposing (Code)
 import Random
 
 roll : Int
-roll = Random.runSeeded 1 (\_ -> Random.int 1 6)
+roll = Random.runSeeded 1 ({ _ -> Random.int 1 6 })
 
 pick : Int -> Code
 pick n = if n > 3 then quote "high" else quote "low"

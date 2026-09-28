@@ -762,7 +762,7 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	// The displayed type is the pre-defaulting one — free variables print
-	// as the generalized scheme would (`\x -> x` echoes `a -> a`), doc/design.md, "Interpreter and REPL".
+	// as the generalized scheme would (`{ x -> x }` echoes `a -> a`), doc/design.md, "Interpreter and REPL".
 	// Elaboration then defaults for evaluation; the value renders at the
 	// defaulted (ground) type.
 	shownTy := types.ShowScheme(types.Scheme{Body: s.ck.Sub.Apply(ty), Preds: s.ck.PendingPreds})
@@ -856,7 +856,7 @@ func (s *Session) typeOf(src string) {
 		return
 	}
 	// Show the generalized view: free variables print as the scheme would
-	// (`:type \x -> x` says `a -> a`), no defaulting forced (doc/design.md, "Interpreter and REPL").
+	// (`:type { x -> x }` says `a -> a`), no defaulting forced (doc/design.md, "Interpreter and REPL").
 	fmt.Fprintln(s.out, types.ShowScheme(types.Scheme{Body: s.ck.Sub.Apply(ty), Preds: s.ck.PendingPreds}))
 }
 

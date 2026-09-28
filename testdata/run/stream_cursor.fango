@@ -17,4 +17,4 @@ eachCursor action cursor = case Iterator.next cursor of
 main() =
     source = Stream.fromList [10, 20, 30]
     Stream.withCursor source (eachCursor print)
-    print (Stream.withCursor source (foldCursor (\value sum -> value + sum) 0))
+    print (Stream.withCursor source (foldCursor ({ value sum -> value + sum }) 0))

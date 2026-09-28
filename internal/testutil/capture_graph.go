@@ -38,7 +38,7 @@ func CaptureGraph(depth, literal int, effectful bool) string {
 		fmt.Fprintf(&b, "    h%d value =\n        case value of\n            Stop -> h%d value\n            More rest -> h%d rest\n", i, i-1, i-1)
 	}
 	if effectful {
-		fmt.Fprintf(&b, "    case token of\n        Stop -> h%d token\n        More _ -> fail \"stop\"\n\nmain = attempt (\\_ -> walk Stop)\n", depth)
+		fmt.Fprintf(&b, "    case token of\n        Stop -> h%d token\n        More _ -> fail \"stop\"\n\nmain = attempt { _ -> walk Stop }\n", depth)
 	} else {
 		fmt.Fprintf(&b, "    h%d token\n\nmain = walk Stop\n", depth)
 	}
