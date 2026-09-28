@@ -114,7 +114,7 @@ func InstallObject(ck *infer.Checker, stage *staging.Session, object *ModuleObje
 	for name, summary := range state.Captures {
 		ck.CaptureSummaries[name] = summary
 		if scheme, ok := ck.Env.Lookup(name); ok {
-			scheme.CaptureVars, scheme.Captures, scheme.CaptureContract = append([]types.CaptureVar(nil), summary.Vars...), summary.Captures, summary.Contract
+			scheme.CaptureVars, scheme.Captures = append([]types.CaptureVar(nil), summary.Vars...), summary.Captures
 			ck.Env.Bind(name, scheme)
 		}
 	}
@@ -276,8 +276,12 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 		r.ownedClasses[class] = true
 	}
 	installedScopes := map[string]types.ScopeID{}
-	for id, name := range captureScopeNames(ck.CaptureSummaries) {
-		installedScopes[name] = id
+	// Keep every contract alias: importing another module can add an earlier
+	// alphabetical name for the same durable scope.
+	for name, summary := range ck.CaptureSummaries {
+		for index, id := range summary.Captures.Scopes {
+			installedScopes[fmt.Sprintf("%s#%d", name, index)] = id
+		}
 	}
 	for id, name := range object.ScopeNames {
 		if installed := installedScopes[name]; installed != 0 {
@@ -297,9 +301,21 @@ func newRemapper(ck *infer.Checker, object *ModuleObject, templateBase int) *rem
 // object already installed.
 func (r *remapper) extend(v reflect.Value) {
 	ck := r.ck
-	ids := &remapIDs{vars: map[int]*types.TVar{}, captures: map[types.CaptureVar]bool{}, scopes: map[types.ScopeID]bool{}, resumes: map[types.ResumeID]bool{}}
+	ids := &remapIDs{permissions: map[int]bool{}, vars: map[int]*types.TVar{}, captures: map[types.CaptureVar]bool{}, scopes: map[types.ScopeID]bool{}, resumes: map[types.ResumeID]bool{}}
 	collectRemapIDs(v, map[uintptr]bool{}, ids)
 	r.alignForeignParams(ids)
+	// Fresh permission labels have no module declaration to intern. Allocate
+	// them in source identity order, preserving sharing across deferred sections.
+	var permissionIDs []int
+	for id := range ids.permissions {
+		permissionIDs = append(permissionIDs, id)
+	}
+	sort.Ints(permissionIDs)
+	for _, id := range permissionIDs {
+		if _, ok := r.effect[id]; !ok {
+			r.effect[id] = ck.Sup.NextUnique()
+		}
+	}
 	vars, captures, scopes, resumes := ids.vars, ids.captures, ids.scopes, ids.resumes
 	var varIDs []int
 	for id := range vars {
@@ -399,18 +415,22 @@ func (r *remapper) alignForeignParams(ids *remapIDs) {
 // the foreign nominals whose declared parameters must align with the
 // installed declaration instead.
 type remapIDs struct {
-	vars     map[int]*types.TVar
-	captures map[types.CaptureVar]bool
-	scopes   map[types.ScopeID]bool
-	resumes  map[types.ResumeID]bool
-	adts     []*types.ADTInfo
-	effects  []*types.EffectInfo
-	classes  []*types.ClassInfo
+	permissions map[int]bool
+	vars        map[int]*types.TVar
+	captures    map[types.CaptureVar]bool
+	scopes      map[types.ScopeID]bool
+	resumes     map[types.ResumeID]bool
+	adts        []*types.ADTInfo
+	effects     []*types.EffectInfo
+	classes     []*types.ClassInfo
 }
 
 func collectRemapIDs(v reflect.Value, seen map[uintptr]bool, ids *remapIDs) {
 	if !v.IsValid() || v.Type() == reflect.TypeOf(source.Span{}) {
 		return
+	}
+	if v.Type() == effLabelReflectType && v.FieldByName("Scoped").Bool() {
+		ids.permissions[int(v.FieldByName("Unique").Int())] = true
 	}
 	if v.Type() == captureVarType {
 		ids.captures[types.CaptureVar(v.Int())] = true
@@ -499,9 +519,7 @@ var (
 )
 
 // resumeID is the one mapping from a written resume identity to this
-// installation's. Both the typed identity in a body and the plain int a
-// capture flow records for a resume node go through it, so they cannot end up
-// naming different resumes.
+// installation's. All occurrences use the same mapping.
 func (r *remapper) resumeID(old types.ResumeID) types.ResumeID {
 	if old == 0 {
 		return 0
@@ -804,59 +822,6 @@ func (r *remapper) remapStruct(v reflect.Value) {
 			r.effect[old] = installed.Unique
 		} else if r.err == nil {
 			r.err = fmt.Errorf("unknown effect identity %q (%d)", x.Name, old)
-		}
-	case *types.CaptureContract:
-		for i, id := range x.Effects {
-			if n, ok := r.effect[id]; ok {
-				x.Effects[i] = n
-			} else if r.err == nil {
-				r.err = fmt.Errorf("unknown effect identity %d in capture contract", id)
-			}
-		}
-		for i, id := range x.RowEffects {
-			if n, ok := r.effect[id]; ok {
-				x.RowEffects[i] = n
-			} else if r.err == nil {
-				r.err = fmt.Errorf("unknown row effect identity %d in capture contract", id)
-			}
-		}
-		for i, id := range x.TypeParams {
-			if n, ok := r.vars[id]; ok {
-				x.TypeParams[i] = n
-			}
-		}
-	case *types.CaptureFlow:
-		for i, id := range x.Effects {
-			if n, ok := r.effect[id]; ok {
-				x.Effects[i] = n
-			} else if r.err == nil {
-				r.err = fmt.Errorf("unknown effect identity %d in capture flow", id)
-			}
-		}
-		// A lambda's deferred row effects are the same identities its
-		// evidence parameters are, so they are remapped with them; left
-		// behind, they name effects from the run that wrote the artifact and
-		// the contract stops matching the body it describes.
-		for i, id := range x.Deferred {
-			if n, ok := r.effect[id]; ok {
-				x.Deferred[i] = n
-			} else if r.err == nil {
-				r.err = fmt.Errorf("unknown deferred effect identity %d in capture flow", id)
-			}
-		}
-		// A resume node's Index is the resume identity it belongs to, held as
-		// a plain int. The body states the same identity in its own type, so
-		// both must go through the one mapping to keep agreeing.
-		if x.Kind == "resume" {
-			x.Index = int(r.resumeID(types.ResumeID(x.Index)))
-		}
-	case *types.CaptureRow:
-		for i, id := range x.Effects {
-			if n, ok := r.effect[id]; ok {
-				x.Effects[i] = n
-			} else if r.err == nil {
-				r.err = fmt.Errorf("unknown effect identity %d in capture row", id)
-			}
 		}
 	case *core.Quote:
 		if x.Template >= r.templateOld {

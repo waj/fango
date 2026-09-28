@@ -2,6 +2,7 @@ package native
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"io"
 	"strings"
@@ -32,7 +33,8 @@ func (h *testHost) WorkingDirectory() string {
 	}
 	return h.dir
 }
-func (h *testHost) Exit(code int) { h.exited = code }
+func (*testHost) ExecutionContext() context.Context { return context.Background() }
+func (h *testHost) Exit(code int)                   { h.exited = code }
 
 func TestIOLineAndOutput(t *testing.T) {
 	old := FangoHost

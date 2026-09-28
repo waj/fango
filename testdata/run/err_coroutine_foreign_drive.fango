@@ -1,6 +1,0 @@
-import Runtime.Coroutine
-
-hide : Runtime.Coroutine.Coroutine Int () () {} -> Runtime.Coroutine.Step Int ()
-hide outer = Runtime.Coroutine.with (\_ () -> ()) (\_ -> Runtime.Coroutine.advance outer ())
-
-main() = print "unreachable"

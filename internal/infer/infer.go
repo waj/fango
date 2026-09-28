@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/waj/fango/internal/ast"
-	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/fixity"
 	"github.com/waj/fango/internal/meta"
@@ -52,6 +51,10 @@ type Why struct {
 }
 
 type Constraint struct {
+	// Scope closes a generative scope after ordinary constraints have solved.
+	// It is mutually exclusive with Left/Right, Include, and Subsume. This is
+	// an internal prototype; source syntax does not create these yet.
+	Scope       *ScopeBoundary
 	Left, Right types.Type
 	Span        source.Span
 	Why         Why
@@ -59,22 +62,11 @@ type Constraint struct {
 	// It expresses composition without claiming the surrounding function call
 	// performs exactly the callee's effects.
 	Include bool
-	// A registration's immediate charge waits for the stored computation's
-	// row to be determined; equating a flexible tail with the surrounding row
-	// would accidentally add the driver's own control effect to that child.
-	WorkCharge bool
-	// Project foreign owner obligations before ordinary row bounds close the
-	// residual tails of a local coroutine boundary.
-	ControlNeed bool
 	// Subsume checks value compatibility, including variance-directed rows.
 	Subsume   bool
 	ADTs      map[int]*types.ADTInfo
 	Invariant []types.Type
-	// Bind holds the handler activations whose subjects lexically contain the
-	// closure this constraint adapts, outermost first. It carries the handler
-	// instance rule of doc/reference/effects.md: a label one of them handles
-	// may be replaced by what that handler's clauses perform.
-	Bind []*HandlerInfo
+	Bind      []*HandlerInfo
 }
 
 // Env maps top-level names to schemes; block scopes and function parameters
@@ -113,24 +105,27 @@ type Checker struct {
 	sourceLimit *int
 	recursive   *recursiveInference
 
-	Classes           map[string]*types.ClassInfo
-	Methods           map[string]*types.MethodInfo
-	Instances         []*InstanceInfo
-	checkingInstance  *InstanceInfo
-	InstanceImports   map[string]map[string]bool
-	CurrentOwner      string
-	PendingPreds      []types.Pred
-	ExprSchemes       map[ast.Expr]types.Scheme
-	ExprCaptures      map[ast.Expr]types.CaptureSet
-	Desugared         map[ast.Expr]ast.Expr
-	PreludeInfos      []DeclInfo
-	PreludeOwners     map[string]bool
-	Aliases           map[string]string
-	Sup               *types.Supply
-	B                 *types.Builtins
-	Env               *Env
-	Sub               Subst
-	ExprTypes         map[ast.Expr]types.Type
+	Classes          map[string]*types.ClassInfo
+	Methods          map[string]*types.MethodInfo
+	Instances        []*InstanceInfo
+	checkingInstance *InstanceInfo
+	InstanceImports  map[string]map[string]bool
+	CurrentOwner     string
+	PendingPreds     []types.Pred
+	ExprSchemes      map[ast.Expr]types.Scheme
+	ExprCaptures     map[ast.Expr]types.CaptureSet
+	Desugared        map[ast.Expr]ast.Expr
+	PreludeInfos     []DeclInfo
+	PreludeOwners    map[string]bool
+	Aliases          map[string]string
+	Sup              *types.Supply
+	B                *types.Builtins
+	Env              *Env
+	Sub              Subst
+	ExprTypes        map[ast.Expr]types.Type
+	// Body requirements before contextual row widening, used when selecting
+	// the evidence actually supplied to a closed callback.
+	LambdaEffects     map[*ast.Lambda][]types.Type
 	RecordUses        map[ast.Expr]*types.ADTInfo
 	RecordPatternUses map[*ast.PRecord]*types.ADTInfo
 	PinExprs          map[*ast.PPin]*ast.Var
@@ -247,10 +242,6 @@ type Checker struct {
 	// `deriving` for it (doc/design.md, "Compile-time metaprogramming").
 	Derivers map[string]*DeriverInfo
 
-	// ObserveFlow receives every capture-flow analysis run in this session;
-	// each Core program built from the checker carries it.
-	ObserveFlow func(core.FlowRun)
-
 	// inferringContext is non-nil while a generated instance is being probed
 	// for the context its own body needs. A residual predicate that would
 	// otherwise be MISSING CONSTRAINT is collected here instead.
@@ -330,6 +321,7 @@ func NewChecker(sup *types.Supply, b *types.Builtins, env *Env) *Checker {
 		Env:               env,
 		Sub:               Subst{},
 		ExprTypes:         map[ast.Expr]types.Type{},
+		LambdaEffects:     map[*ast.Lambda][]types.Type{},
 		RecordUses:        map[ast.Expr]*types.ADTInfo{},
 		RecordPatternUses: map[*ast.PRecord]*types.ADTInfo{},
 		PinExprs:          map[*ast.PPin]*ast.Var{},
@@ -401,28 +393,23 @@ type DeclInfo struct {
 }
 
 type HandlerClauseInfo struct {
-	Invocation      *types.EffLabel
-	InvocationScope types.ScopeID
-	Op              *types.EffectOp
-	ParamTypes      []types.Type
-	OpResult        types.Type
-	ResumeID        types.ResumeID
+	Op         *types.EffectOp
+	ParamTypes []types.Type
+	OpResult   types.Type
+	ResumeID   types.ResumeID
 }
 
 type HandlerInfo struct {
-	Effect     types.EffLabel
-	Residual   types.Row
-	Scope      types.ScopeID
-	Scoped     bool
-	Result     types.Type
-	BodyResult types.Type
-	StateType  types.Type
-	Clauses    []HandlerClauseInfo
-	// ClauseEffects are the rows the operation clauses perform, recorded as
-	// the clause bodies are generated. A `resume` call is left out: it
-	// returns to the perform site, whose remaining effects belong to that site
-	// rather than to a closure bound to this activation.
+	Effect        types.EffLabel
+	Residual      types.Row
+	Scope         types.ScopeID
+	Scoped        bool
+	Result        types.Type
+	BodyResult    types.Type
+	StateType     types.Type
+	Clauses       []HandlerClauseInfo
 	ClauseEffects []types.Type
+	Permission    FreshEffect
 }
 
 // Module checks declarations: type headers first (so types may be mutually
@@ -667,17 +654,7 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 			return errs
 		}
 	}
-	if d.Name == types.CoroutineFacetName || d.Name == types.CoroutineScopeName || d.Name == types.CoroutineCreateName || d.Name == types.CoroutineWithName || d.Name == types.CoroutineAdvanceName || d.Name == types.CoroutineCloseName || d.Name == types.CoroutineStopName {
-		if !types.CoroutineShape(d.Name, ty) {
-			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic %s has an invalid coroutine protocol.", ast.Spelling(d.Name)))
-		}
-	}
-	if types.WorkIntrinsic(d.Name) && !types.WorkShape(d.Name, ty) {
-		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic %s has an invalid work package protocol.", ast.Spelling(d.Name)))
-	}
-	if d.Name == types.ServiceRunName && !types.ServiceRunShape(ty) {
-		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "Invalid service invocation scope protocol."))
-	}
+
 	if types.FailureInspection(d.Name) {
 		pure := true
 		arrow := ty
@@ -690,13 +667,15 @@ func (ck *Checker) declareIntrinsic(d *ast.ValueDecl) []diag.Error {
 			return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic `%s` has an invalid failure inspection signature.", ast.Spelling(d.Name)))
 		}
 	}
-	if types.CompletionIntrinsic(d.Name) && !types.CompletionDeclarationShape(d.Name, ty) {
-		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "Invalid typed completion signature."))
-	}
+
 	if d.Name == types.FailAttemptReportName && !types.AttemptReportShape(ty) {
 		return append(errs, diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "The intrinsic `%s` must preserve the action's residual row and return `Result (Report error) value`.", ast.Spelling(d.Name)))
 	}
 	sch := types.Scheme{Vars: scope.Minted(), Preds: scope.Preds(), Body: ty}
+	if d.ScopedRow != "" {
+		errs = append(errs, ck.checkScopedDeclaration(d, ty, scope)...)
+		sch = markScopedScheme(sch, arity)
+	}
 	ck.Intrinsics[d.Name] = sch
 	ck.Env.Bind(d.Name, sch)
 	ck.Workers[d.Name] = arity
@@ -718,6 +697,9 @@ func peelArrows(t types.Type, n int) ([]types.Type, types.Type) {
 }
 
 func (ck *Checker) declareNative(d *ast.ValueDecl) []diag.Error {
+	if d.ScopedRow != "" {
+		return []diag.Error{diag.Errorf(d.NameSpan, "SCOPED CALLBACK", "Native sidecars cannot declare scoped callback contracts; use an ordinary scoped wrapper.")}
+	}
 	if d.Ann == nil {
 		return []diag.Error{diag.Errorf(d.NameSpan, "NATIVE DECLARATION", "A native declaration requires a type annotation.")}
 	}
@@ -780,7 +762,7 @@ func (ck *Checker) declareEffectHeader(ed *ast.EffectDecl, batch bool) []diag.Er
 		seen[p.Name] = true
 		params[i] = ck.Sup.FreshRigid(types.General)
 	}
-	info := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: ed.Name, Params: params, Suspension: ed.CompilerSuspension, Service: ed.Service, Invocation: ed.CompilerInvocation, Scoped: ed.CompilerInvocation}
+	info := &types.EffectInfo{Unique: ck.Sup.NextUnique(), Name: ed.Name, Params: params}
 	ck.Effects[ed.Name], ck.EffectsByUnique[info.Unique] = info, info
 	if ed.Name == "IO.IO" || ed.Name == "IO" {
 		ck.IO = info
@@ -844,25 +826,13 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 			cur = next
 		}
 		rowVars := make([]*types.TVar, len(arrows))
-		var invocation *types.EffLabel
-		if info.Service {
-			row := arrows[len(arrows)-1].Eff
-			if len(row.Labels) != 1 || row.Tail != nil || len(row.Labels[0].Args) != 2 || ck.EffectsByUnique[row.Labels[0].Unique] == nil || !ck.EffectsByUnique[row.Labels[0].Unique].Invocation || op.Abort || op.Native != nil {
-				errs = append(errs, diag.Errorf(op.NameSpan, "SERVICE PROTOCOL", "Each service operation must declare one fixed Runtime.Service.Invocation request reply row and cannot be aborting or native."))
-			} else {
-				label := row.Labels[0]
-				invocation = &label
-			}
-		}
+
 		for i, arrow := range arrows {
 			rowVars[i] = ck.Sup.FreshRigid(types.RowVar)
 			arrow.Eff = types.Row{Tail: rowVars[i]}
 		}
 		inner := arrows[len(arrows)-1]
-		inner.Eff.Labels = []types.EffLabel{{Unique: info.Unique, Name: info.Name, Args: labelArgs, Abort: op.Abort, Suspension: info.Suspension}}
-		if invocation != nil {
-			inner.Eff.Labels = append(inner.Eff.Labels, *invocation)
-		}
+		inner.Eff.Labels = []types.EffLabel{{Unique: info.Unique, Name: info.Name, Args: labelArgs, Abort: op.Abort}}
 		vars := append([]*types.TVar(nil), info.Params...)
 		vars = append(vars, scope.Minted()...)
 		vars = append(vars, rowVars...)
@@ -888,7 +858,7 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 			}
 		}
 		meta := &types.EffectOp{Owner: info, Index: len(info.Ops), Name: op.Name, Scheme: sch,
-			Arity: len(arrows), ParamTypes: params, ResultType: arrows[len(arrows)-1].Ret, LocalVars: local, Abort: op.Abort, Invocation: invocation}
+			Arity: len(arrows), ParamTypes: params, ResultType: arrows[len(arrows)-1].Ret, LocalVars: local, Abort: op.Abort}
 		if op.Native != nil {
 			n := &types.NativeInfo{Name: op.Name, Module: symbolModule(op.Name), Scheme: sch, Arity: len(arrows), Template: op.Native.Template, Effect: info}
 			meta.Native = n
@@ -897,9 +867,6 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 		info.Ops = append(info.Ops, meta)
 		ck.Operations[op.Name] = meta
 		ck.Env.Bind(op.Name, sch)
-	}
-	if err := types.CheckServiceEffect(info, ck.EffectsByUnique); err != nil {
-		errs = append(errs, diag.Errorf(ed.Sp, "SERVICE PROTOCOL", "%s", err))
 	}
 	return errs
 }
@@ -962,7 +929,7 @@ func (ck *Checker) declareTypeHeader(td *ast.TypeDecl) (*types.ADTInfo, []diag.E
 		params[i] = ck.Sup.FreshRigid(types.General)
 	}
 	con := &types.TCon{Unique: ck.Sup.NextUnique(), Name: td.Name}
-	adt := &types.ADTInfo{Resource: td.Resource, Shared: td.Shared, Con: con, Params: params, ParamKindsKnown: make([]bool, len(params))}
+	adt := &types.ADTInfo{Resource: td.Resource, Con: con, Params: params, ParamKindsKnown: make([]bool, len(params))}
 	ck.TypeNames[td.Name] = con
 	ck.ADTs[con.Unique] = adt
 	ck.ADTOrder = append(ck.ADTOrder, adt)
@@ -991,9 +958,7 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 		result = &types.TCon{Unique: adt.Con.Unique, Name: adt.Con.Name, Args: args}
 	}
 	if td.RecordFields != nil {
-		if td.Shared {
-			errs = append(errs, diag.Errorf(td.ResourceSpan, "SHARED RESOURCE", "A shared native resource must wrap exactly one Runtime.Native.Any field."))
-		}
+
 		seenFields := map[string]bool{}
 		fields := make([]types.Type, len(td.RecordFields))
 		for i, f := range td.RecordFields {
@@ -1045,9 +1010,7 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 	errs = append(errs, markListRepr(adt, td.NameSpan)...)
 	errs = append(errs, markBytesRepr(adt, td.NameSpan)...)
 	errs = append(errs, markNativeAnyRepr(adt, td.NameSpan)...)
-	if td.Shared && (len(adt.Ctors) != 1 || len(adt.Ctors[0].Fields) != 1 || !ck.isNativeAnyType(adt.Ctors[0].Fields[0])) {
-		errs = append(errs, diag.Errorf(td.ResourceSpan, "SHARED RESOURCE", "A shared native resource must wrap exactly one Runtime.Native.Any field."))
-	}
+
 	for i := range adt.Params {
 		adt.ParamKindsKnown[i] = true
 	}
@@ -1139,8 +1102,11 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, allowEffects bool) *declInferen
 		given, annErrs = ck.ResolvePreds(d.Ann.Preds, annScope)
 		errs = append(errs, annErrs...)
 	}
+	if d.ScopedRow != "" {
+		errs = append(errs, ck.checkScopedDeclaration(d, annTy, annScope)...)
+	}
 	originalAnn := annTy
-	if ck.recursive != nil && annTy != nil {
+	if ck.recursive != nil && annTy != nil && d.ScopedRow == "" {
 		replacements := map[int]types.Type{}
 		for _, v := range annScope.Minted() {
 			replacements[v.ID] = ck.Sup.FreshVar(v.Kind)
@@ -1149,6 +1115,10 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, allowEffects bool) *declInferen
 		given = types.SubstPreds(given, replacements)
 	}
 	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
+	if d.ScopedRow != "" && annScope != nil {
+		g.scopedParameter = annScope.vars[d.ScopedRow]
+		g.scopedDefinition = d.Name
+	}
 	var ty types.Type
 	if len(d.Params) == 0 {
 		ty = g.expr(d.Body)
@@ -1168,7 +1138,6 @@ func (ck *Checker) prepareDecl(d *ast.ValueDecl, allowEffects bool) *declInferen
 			g.cs = append(g.cs, Constraint{Left: ty, Right: want, Span: d.Body.Span(), Why: Why{Kind: WhyAnnotation, Name: "main"}})
 		}
 	}
-	g.executionRoots = append(g.executionRoots, DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Equations: d.Equations, Body: d.Body, Type: ty})
 	return &declInference{originalAnn: originalAnn, d: d, g: g, ty: ty, annTy: annTy, given: given, errs: errs, allowEffects: allowEffects, isMain: isMain}
 }
 
@@ -1238,6 +1207,7 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 	ty = ck.runnerControl(ty, len(d.Params), declEquations(d))
 	info := DeclInfo{Name: d.Name, NameSpan: d.NameSpan, Params: d.Params, Equations: d.Equations, Type: ty, Body: d.Body, InstanceLimit: ck.instanceLimit()}
 	if ck.recursive != nil {
+		errs = append(errs, g.checkScopeBoundaries()...)
 		q.info = info
 		q.errs = errs
 		return info, errs
@@ -1259,6 +1229,10 @@ func (ck *Checker) finishDecl(q *declInference) (DeclInfo, []diag.Error) {
 	var predErrs []diag.Error
 	info.Scheme, predErrs = ck.qualify(info.Scheme, g.preds, given, d.Ann != nil, d.NameSpan)
 	errs = append(errs, predErrs...)
+	if d.ScopedRow != "" {
+		info.Scheme = markScopedScheme(info.Scheme, len(d.Params))
+	}
+	errs = append(errs, g.checkScopeBoundaries()...)
 	return info, errs
 }
 
@@ -1341,7 +1315,6 @@ func (ck *Checker) Expr(e ast.Expr) (types.Type, []diag.Error) {
 func (ck *Checker) ExprWhere(e ast.Expr, allowEffects bool) (types.Type, []diag.Error) {
 	g := &generator{ck: ck, ambient: types.Row{Tail: ck.Sup.FreshVar(types.RowVar)}}
 	ty := g.expr(e)
-	g.executionRoots = append(g.executionRoots, DeclInfo{Name: "$expression", Body: e, Type: ty})
 	var preds []types.Pred // the typeclass seam: always empty in the MVP
 	sub, residual, solveErrs := g.solveConstraints(preds)
 	ck.Sub = sub
@@ -1440,22 +1413,16 @@ type generator struct {
 	patternPins       *blockScope
 	patternBinder     string
 	annotationAmbient *types.Row
+	scopedParameter   *types.TVar
+	scopedDefinition  string
+	scopeObligations  []Constraint
+	subjectHandlers   []*HandlerInfo
+	lambdaBinders     map[ast.Expr][]*HandlerInfo
+	clauseEffects     *[]types.Type
 	localAnnotations  []localAnnotation
-	executionRoots    []DeclInfo
-	// executionMemo is the last interpreted execution-needs input and what
-	// it collected; see executionNeeds.
-	executionMemo *executionMemo
 	// Keep package row provenance before a local binding can solve/generalize
 	// a partial application; whole-definition flow adds imported obligations.
-	workRows []types.Type
-	// subjectHandlers are the handlers whose subject the generator is inside,
-	// outermost first, and lambdaBinders records that stack for every lambda
-	// written there. clauseEffects collects into the handler currently having
-	// its clauses generated, and is nil wherever the ambient row is not that
-	// handler's clause row.
-	subjectHandlers []*HandlerInfo
-	lambdaBinders   map[ast.Expr][]*HandlerInfo
-	clauseEffects   *[]types.Type
+
 }
 
 // performs records that the ambient row absorbs eff, and that the handler
@@ -1476,16 +1443,10 @@ func (g *generator) argument(actual, want types.Type, e ast.Expr) Constraint {
 		Subsume: true, ADTs: g.ck.ADTs, Bind: g.lambdaBinders[e]}
 }
 
-// enterAmbient switches the ambient row and suspends clause-effect recording,
-// which describes only what runs directly in the clause it belongs to.
 func (g *generator) enterAmbient(row types.Row) (types.Row, *[]types.Type) {
 	saved, sink := g.ambient, g.clauseEffects
 	g.ambient, g.clauseEffects = row, nil
 	return saved, sink
-}
-
-func (g *generator) leaveAmbient(row types.Row, sink *[]types.Type) {
-	g.ambient, g.clauseEffects = row, sink
 }
 
 func (g *generator) isDefaultPrint(op *types.EffectOp) bool {
@@ -1531,6 +1492,9 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 	case *ast.UnitLit:
 		ty = g.ck.B.Unit
 	case *ast.Var:
+		if (g.ck.recursive != nil && g.ck.recursive.scoped[e.Name]) || (g.scopedParameter != nil && e.Name == g.scopedDefinition) {
+			g.errs = append(g.errs, diag.Errorf(e.Sp, "SCOPED CALLBACK", "Scoped runners cannot be recursive or mutually recursive."))
+		}
 		if name := g.ck.Aliases[e.Name]; name != "" {
 			e.Name = name
 		}
@@ -1548,6 +1512,9 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 					"I don't know a value named `%s`.", e.Name))
 				ty = g.ck.Sup.FreshVar(types.General) // recover with a hole
 				break
+			}
+			if scheme.ScopedRow != nil {
+				g.errs = append(g.errs, diag.Errorf(e.Sp, "SCOPED CALLBACK", "The scoped runner `%s` must be fully applied by name.", e.Name))
 			}
 			g.ck.ExprSchemes[e] = scheme
 			g.ck.ExprCaptures[e] = g.instantiateCaptures(scheme)
@@ -1623,6 +1590,24 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		ty = result
 	case *ast.RecordGet:
 		receiver := g.expr(e.Record)
+		// A known projection contributes its effects before the row solver
+		// closes ambient tails. Deferring a scoped cell's read/write until
+		// after that solve can incorrectly close the row to a source's rigid
+		// residual row and then reject the cell's fresh permission.
+		if con, ok := g.ck.Sub.Apply(receiver).(*types.TCon); ok {
+			if adt := g.ck.ADTs[con.Unique]; adt != nil && adt.IsRecord() {
+				idx, _ := adt.RecordField(e.Field)
+				visible := e.Records == nil
+				for _, name := range e.Records {
+					visible = visible || name == adt.Con.Name
+				}
+				if idx >= 0 && visible {
+					g.ck.RecordUses[e] = adt
+					ty = adt.InstFields(adt.Ctors[0], con.Args)[idx]
+					break
+				}
+			}
+		}
 		result := g.ck.Sup.FreshVar(types.General)
 		g.records = append(g.records, &recordObligation{node: e, receiver: receiver, result: result, field: e.Field, fieldSpan: e.FieldSpan, candidates: e.Records})
 		ty = result
@@ -1644,6 +1629,10 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		g.records = append(g.records, ob)
 		ty = receiver
 	case *ast.App:
+		if name, sch, ok := g.scopedSpine(e); ok {
+			ty = g.scopedCall(e, name, sch)
+			break
+		}
 		if name, n := g.intrinsicSpine(e); name != "" && n == types.IntrinsicArity(name) {
 			ty = g.intrinsicCall(e, name)
 			break
@@ -1689,6 +1678,12 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		g.cs = append(g.cs, g.argument(argTy, paramTy, e.Arg))
 		_, isResume := e.Fn.(*ast.Resume)
 		g.performs(callEff, e.Span(), isResume)
+		// Preserve a known callee's own row in dependency summaries. The
+		// fresh call-site row may later widen to its surrounding ambient row.
+		if fn, ok := g.ck.Sub.Apply(fnTy).(*types.TFun); ok && g.clauseEffects != nil && !isResume {
+			recorded := *g.clauseEffects
+			recorded[len(recorded)-1] = fn.Eff
+		}
 		ty = r
 		if op, n := g.operationSpine(e); op != nil && n < op.Arity {
 			g.ck.OpCalls[e] = op
@@ -1725,17 +1720,41 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		oldBinder := g.patternBinder
 		g.patternBinder = "parameter"
 		paramTys := g.bindParams(scope, e.Params)
+		// Scoped callback parameters must be known before checking a nested
+		// scope; otherwise a shared-row consumer can solve an unconstrained
+		// outer parameter to the inner scope before its boundary is checked.
+		cursor := want
+		for i, p := range e.Params {
+			fn, ok := cursor.(*types.TFun)
+			if !ok {
+				break
+			}
+			if hasScopedPermission(g.ck.Sub.Apply(fn.Arg)) {
+				if name, ok := p.(*ast.PVar); ok {
+					paramTys[i] = fn.Arg
+					scope.names[name.Name] = types.Scheme{Body: fn.Arg}
+				}
+			}
+			cursor = fn.Ret
+		}
 		g.patternBinder = oldBinder
 		g.patternPins = oldPins
 		bodyAmbient := types.Row{Tail: g.ck.Sup.FreshVar(types.RowVar)}
 		savedAmbient, savedSink := g.enterAmbient(bodyAmbient)
+		var performed []types.Type
+		g.clauseEffects = &performed
 		// The enclosing declaration's annotation constrains its own arrow,
 		// not a nested callback's handler clauses (which may call pause).
 		savedAnnotationAmbient := g.annotationAmbient
 		g.annotationAmbient = nil
+		if fn, ok := want.(*types.TFun); ok && hasScopedPermission(g.ck.Sub.Apply(fn.Eff)) {
+			row := g.ck.Sub.Apply(fn.Eff).(types.Row)
+			g.annotationAmbient = &row
+		}
 		bodyTy := g.expr(e.Body)
+		g.ck.LambdaEffects[e] = performed
 		g.annotationAmbient = savedAnnotationAmbient
-		g.leaveAmbient(savedAmbient, savedSink)
+		g.ambient, g.clauseEffects = savedAmbient, savedSink
 		g.locals = scope.parent
 		funTy := g.wrapFunction(paramTys, bodyTy, bodyAmbient)
 		funTy = g.ck.runnerControl(funTy, len(e.Params), []ast.Equation{{Params: e.Params, Body: e.Body}})
@@ -1854,44 +1873,57 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	if first.Owner == g.ck.IO {
 		g.errs = append(g.errs, diag.Errorf(e.Sp, "BUILTIN IO HANDLING NOT READY", "Handlers for builtin IO are staged until polymorphic print evidence is available."))
 	}
-	if first.Owner.Invocation {
-		g.errs = append(g.errs, diag.Errorf(e.Sp, "INVOCATION AUTHORITY", "Only Runtime.Service.run may install producer invocation authority."))
-	}
-	if first.Owner.Service && e.State != nil {
-		g.errs = append(g.errs, diag.Errorf(e.Sp, "SERVICE STATE", "Shared service evidence cannot own mutable handler state."))
-	}
-	if first.Owner.Suspension {
-		g.errs = append(g.errs, diag.Errorf(e.Sp, "COMPILER-OWNED EFFECT",
-			"Effect `%s` describes compiler-owned coroutine control and cannot be handled by an ordinary handler.", ast.Spelling(first.Owner.Name)))
-	}
+
 	residualVar := g.ck.Sup.FreshVar(types.RowVar)
 	residual := types.Row{Tail: residualVar}
 	labelArgs := make([]types.Type, len(first.Owner.Params))
 	for i := range labelArgs {
 		labelArgs[i] = g.ck.Sup.FreshVar(types.General)
 	}
-	label := types.EffLabel{Unique: first.Owner.Unique, Name: first.Owner.Name, Args: labelArgs, Abort: first.Abort, Suspension: first.Owner.Suspension}
+	label := types.EffLabel{Unique: first.Owner.Unique, Name: first.Owner.Name, Args: labelArgs, Abort: first.Abort}
 	savedAmbient := g.ambient
 	var stateTy types.Type
 	if e.State != nil {
 		stateTy = g.expr(e.State.Initial)
 	}
-	info := &HandlerInfo{Effect: label, Residual: residual, Scope: g.ck.Sup.FreshScope(), Scoped: first.Owner.Scoped || e.State != nil, Result: result, StateType: stateTy}
-	// The subject is where a closure may be bound to this activation; the
-	// state initializer above runs before the activation exists, and the
-	// clauses below run outside it.
-	g.subjectHandlers = append(g.subjectHandlers, info)
+	info := &HandlerInfo{Effect: label, Residual: residual, Scope: g.ck.Sup.FreshScope(), Scoped: first.Owner.Scoped || e.State != nil, Result: result, StateType: stateTy, Permission: NewHandlerPermission(g.ck.Sup, "handler "+types.SurfaceName(label.Name))}
+	outer := g.scopeOuterTypes()
 	savedSink := g.clauseEffects
-	g.ambient, g.clauseEffects = types.Row{Labels: []types.EffLabel{label}, Tail: residualVar}, nil
+	g.clauseEffects = nil
+	g.subjectHandlers = append(g.subjectHandlers, info)
+	// The subject can use this handler in addition to the declaration's
+	// annotated effects. Nested handlers must check their clauses against that
+	// lexical budget, not just the declaration's outermost row. This handler's
+	// own clauses remain outside its activation.
+	g.ambient = info.Permission.Within(types.Row{Labels: []types.EffLabel{label}, Tail: residualVar})
+	savedAnnotation := g.annotationAmbient
+	if savedAnnotation != nil {
+		bodyAnnotation := *savedAnnotation
+		bodyAnnotation.Labels = append([]types.EffLabel(nil), savedAnnotation.Labels...)
+		found := false
+		for i, existing := range bodyAnnotation.Labels {
+			if existing.Unique == label.Unique {
+				bodyAnnotation.Labels[i], found = label, true
+				break
+			}
+		}
+		if !found {
+			bodyAnnotation.Labels = append(bodyAnnotation.Labels, label)
+		}
+		bodyAnnotation = info.Permission.Within(bodyAnnotation)
+		g.annotationAmbient = &bodyAnnotation
+	}
 	bodyTy := g.expr(e.Body)
+	g.annotationAmbient = savedAnnotation
 	g.subjectHandlers = g.subjectHandlers[:len(g.subjectHandlers)-1]
+	g.clauseEffects = &info.ClauseEffects
 	info.BodyResult = bodyTy
 	clauseAmbient := residual
 	if g.annotationAmbient != nil {
 		clauseAmbient = *g.annotationAmbient
 		g.cs = append(g.cs, Constraint{Left: clauseAmbient, Right: savedAmbient, Span: e.Span(), Why: Why{Kind: WhyCall}, Include: true})
 	}
-	g.ambient, g.clauseEffects = clauseAmbient, &info.ClauseEffects
+	g.ambient = clauseAmbient
 	g.ck.ScopeSpans[info.Scope] = e.Sp
 	seen := map[string]bool{}
 	for i := range e.Clauses {
@@ -1936,17 +1968,9 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		if len(cl.Params) != op.Arity {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "HANDLER ARITY", "The operation `%s` takes %d argument(s), but this clause has %d.", op.Name, op.Arity, len(cl.Params)))
 		}
-		var invocation *types.EffLabel
+
 		g.ambient = clauseAmbient
-		if op.Invocation != nil {
-			for _, extra := range last.Eff.Labels {
-				if extra.Unique == op.Invocation.Unique {
-					label := extra
-					invocation = &label
-					g.ambient.Labels = append(append([]types.EffLabel(nil), clauseAmbient.Labels...), extra)
-				}
-			}
-		}
+
 		eqs := cl.Equations
 		if len(eqs) == 0 {
 			eqs = []ast.Equation{{Params: cl.Params, Body: cl.Body, NameSpan: cl.OpSpan}}
@@ -2000,11 +2024,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 				}
 			}
 		}
-		var invocationScope types.ScopeID
-		if invocation != nil {
-			invocationScope = g.ck.Sup.FreshScope()
-		}
-		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, ParamTypes: paramTys, OpResult: opResult, ResumeID: resumeID, Invocation: invocation, InvocationScope: invocationScope})
+		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, ParamTypes: paramTys, OpResult: opResult, ResumeID: resumeID})
 	}
 	g.ambient = clauseAmbient
 	for _, op := range first.Owner.Ops {
@@ -2043,6 +2063,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 	// Only the handled label is removed. Any residual effects from the body,
 	// clauses, or return clause compose into the surrounding expression.
 	g.ambient, g.clauseEffects = savedAmbient, savedSink
+	g.scopeObligations = append(g.scopeObligations, Constraint{Scope: &ScopeBoundary{Effect: info.Permission, Result: result, Residual: residual, Outer: outer}, Span: e.Span()})
 	g.performs(residual, e.Span(), false)
 	g.ck.HandleInfos[e] = info
 	return result
@@ -2317,9 +2338,7 @@ func (g *generator) intrinsicCall(e *ast.App, name string) types.Type {
 	}
 
 	g.performs(last.Eff, e.Span(), false)
-	if name == types.WorkPackName || name == types.WorkRegisterName {
-		g.cs[len(g.cs)-1].WorkCharge = true
-	}
+
 	return result
 }
 
@@ -2426,11 +2445,16 @@ func (g *generator) functionEquations(name string, nameSpan source.Span, eqs []a
 		}
 		g.patternBinder = oldBinder
 		g.patternPins = oldPins
+		if g.scopedParameter != nil && name == g.scopedDefinition && len(eq.Params) > 0 {
+			if p, ok := eq.Params[len(eq.Params)-1].(*ast.PVar); ok {
+				scope.names[p.Name] = types.Scheme{Vars: []*types.TVar{g.scopedParameter}, Body: paramTys[len(paramTys)-1], CallbackBase: annotationAmbient}
+			}
+		}
 		savedAnnotationAmbient := g.annotationAmbient
 		g.annotationAmbient = annotationAmbient
 		savedAmbient, savedSink := g.enterAmbient(bodyAmbient)
 		bodyTy := g.expr(eq.Body)
-		g.leaveAmbient(savedAmbient, savedSink)
+		g.ambient, g.clauseEffects = savedAmbient, savedSink
 		g.annotationAmbient = savedAnnotationAmbient
 		g.cs = append(g.cs, Constraint{Left: resultTy, Right: bodyTy, Span: eq.NameSpan, Why: Why{Kind: WhyRecursion, Name: name}})
 	}
@@ -3060,12 +3084,8 @@ func (g *generator) instantiateAt(s types.Scheme, sp source.Span, op string) typ
 		g.preds = append(g.preds, predObligation{pred: p, span: sp, op: op})
 	}
 	t := types.SubstRigid(s.Body, m)
-	if (op == types.WorkPackName || op == types.WorkRegisterName) && g.ck.Intrinsics[op].Body != nil {
-		if fn, ok := t.(*types.TFun); ok {
-			if last, ok := fn.Ret.(*types.TFun); ok {
-				g.workRows = append(g.workRows, last.Eff)
-			}
-		}
+	if s.CallbackBase != nil && len(s.Vars) == 1 {
+		g.cs = append(g.cs, Constraint{Left: *s.CallbackBase, Right: types.Row{Tail: m[s.Vars[0].ID]}, Include: true, Span: sp, Why: Why{Kind: WhyCall}})
 	}
 	return t
 }

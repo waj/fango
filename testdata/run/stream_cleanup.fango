@@ -2,20 +2,17 @@ import Stream
 import Runtime.Scope
 import Fail
 
-source label = Stream.generate (\_ -> Runtime.Scope.finally (\_ ->
+withSource label use = Runtime.Scope.finally (\_ ->
     print label
-    Stream.yield 1
-    Stream.yield 2) (\_ -> print "close"))
+    use (Stream.fromList [1, 2])) (\_ -> print "close")
 
 main() =
-    print (Stream.toList (Stream.take 1 (source "early")))
-    print (Stream.toList (source "exhaust"))
-    Stream.withCursor (source "unused") (\_ -> ())
-    print (Fail.attempt (\_ -> Stream.toList (Stream.generate (\_ ->
-        Runtime.Scope.finally (\_ ->
-            Stream.yield 3
-            Fail.fail "body") (\_ -> print "failed producer closed")))))
-    print (Fail.attempt (\_ -> Stream.toList (Stream.take 1 (Stream.generate (\_ ->
-        Runtime.Scope.finally (\_ ->
-            Stream.yield 4
-            Stream.yield 5) (\_ -> Fail.fail "cleanup"))))))
+    print (withSource "early" (\source -> Stream.toList (Stream.take 1 source)))
+    print (withSource "exhaust" Stream.toList)
+    withSource "unused" (\_ -> ())
+    print (Fail.attempt (\_ -> Runtime.Scope.finally (\_ ->
+        source = Stream.unfold 0 (\state ->
+            if state == 0 then Just (3, 1) else Fail.fail "body")
+        Stream.toList source) (\_ -> print "failed producer closed")))
+    print (Fail.attempt (\_ -> Runtime.Scope.finally (\_ ->
+        Stream.toList (Stream.take 1 (Stream.fromList [4, 5]))) (\_ -> Fail.fail "cleanup")))

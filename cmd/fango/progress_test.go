@@ -8,9 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/waj/fango/internal/compileevent"
 )
 
 // buildVerbose runs one build in dir and returns what each stream received.
@@ -168,50 +165,6 @@ func TestTimingsJSON(t *testing.T) {
 	}
 	if measured > got.TotalNS {
 		t.Errorf("stages total %d ns, more than the build's %d ns", measured, got.TotalNS)
-	}
-}
-
-// The capture-flow analysis has a row and counts of its own, so a build that
-// interprets more than it used to says so.
-func TestTimingsAttributeCaptureFlow(t *testing.T) {
-	entry := writeEntry(t, "main = 1\n")
-	_, out := buildVerbose(t, entry, "-timings", "json", "-no-cache")
-	var got timings
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("decode %q: %v", out, err)
-	}
-	var flowNS int64
-	for _, stage := range got.Stages {
-		if stage.Stage == "capture flow" {
-			flowNS = stage.NS
-		}
-	}
-	if flowNS <= 0 || got.Flow.Runs == 0 || got.Flow.Roots == 0 || got.Flow.Contexts == 0 {
-		t.Errorf("a cold build attributed no capture-flow analysis: %s", out)
-	}
-}
-
-// Analysis time is carved out of the stage it ran inside rather than counted
-// twice, and analysis outside any running stage is carved from nothing.
-func TestCaptureFlowCarvedFromRunningStage(t *testing.T) {
-	r := newReporter(stats, true, false, &bytes.Buffer{})
-	r.record(compileevent.Event{Stage: "check", Owner: "M", Begin: true})
-	r.record(compileevent.Event{Stage: "capture-flow", Duration: 30 * time.Millisecond, Roots: 2, Contexts: 5})
-	r.record(compileevent.Event{Stage: "check", Owner: "M", Duration: 100 * time.Millisecond})
-	r.record(compileevent.Event{Stage: "capture-flow", Duration: 10 * time.Millisecond, Roots: 1, Contexts: 1})
-	r.record(compileevent.Event{Stage: "lowering", Owner: "M", Begin: true})
-	r.record(compileevent.Event{Stage: "lowering", Owner: "M", Duration: 20 * time.Millisecond})
-	if got := r.stages["check"].duration; got != 70*time.Millisecond {
-		t.Errorf("check = %v, want 70ms", got)
-	}
-	if got := r.stages["lowering"].duration; got != 20*time.Millisecond {
-		t.Errorf("lowering = %v, want 20ms", got)
-	}
-	if got := r.stages["capture flow"].duration; got != 40*time.Millisecond {
-		t.Errorf("capture flow = %v, want 40ms", got)
-	}
-	if r.flow != (flowTally{runs: 2, roots: 3, contexts: 6}) {
-		t.Errorf("flow = %+v", r.flow)
 	}
 }
 

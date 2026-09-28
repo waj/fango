@@ -1,0 +1,31 @@
+import Async exposing (Outcome(..))
+import Fail exposing (Fail)
+import Result exposing (Result(..))
+
+effect Counter
+    next : () -> Int
+
+effect Stop
+    abort stop : () -> value
+
+withCounter body =
+    handle body() with count = 0 of
+        next () -> resume count with count + 1
+        return value -> (value, count)
+
+runStrings : (() ->{Async.Async String, IO, Fail String | e} a) ->{IO | e} Outcome (Result String a)
+runStrings body = Async.run body
+
+parallel body = Async.await (Async.spawn body)
+
+main() =
+    print (withCounter (\_ -> runStrings (\_ ->
+        first = parallel (\_ -> next())
+        second = parallel (\_ -> next())
+        (first, second))))
+    print (runStrings (\_ -> parallel (\_ -> withCounter (\_ -> (next(), next())))))
+    handle ignore (runStrings (\_ ->
+        value = parallel (\_ -> 42)
+        print value
+        stop())) of
+        stop () -> print "parent stopped"

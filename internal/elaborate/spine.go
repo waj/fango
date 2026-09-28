@@ -39,6 +39,12 @@ func (el *elab) app(e *ast.App) core.Expr {
 		args[len(rev)-1-i] = a
 	}
 	if v, ok := head.(*ast.Var); ok {
+		if v.Name == "Async.spawn" && len(args) > 0 {
+			el.checkAsyncJob(args[0])
+		}
+		if v.Name == types.AsyncLaunchName || v.Name == types.AsyncRebaseName || v.Name == types.AsyncSuperviseName {
+			return el.asyncIntrinsic(e, v.Name, args, head)
+		}
 		if _, local := el.scopeIdx[v.Name]; local {
 			res := el.expr(head)
 			raw := el.apply(el.ck.ExprTypes[head])
@@ -164,14 +170,6 @@ func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args [
 		body = &core.ControlExit{Effect: inst, Op: op, Payload: coreArgs, Ty: ret}
 	} else {
 		inst := el.effectInstance(op, rawTy)
-		if op.Invocation != nil {
-			last := arrowAt(rawTy, op.Arity-1).(*types.TFun)
-			for _, label := range last.Eff.Labels {
-				if label.Unique == op.Invocation.Unique {
-					coreArgs = append(coreArgs, el.invocationArgument(label))
-				}
-			}
-		}
 		body = &core.Perform{Op: op, Effect: inst, Args: coreArgs, Ty: ret, Control: inst.Control}
 	}
 	if len(effectParams) > 0 {
@@ -215,7 +213,7 @@ func (el *elab) nativeApply(n *types.NativeInfo, nativeTy, raw types.Type, args 
 		el.tmp++
 		coreArgs = append(coreArgs, &core.VarRef{Name: name, Local: true, Ty: argTys[i]})
 	}
-	var body core.Expr = el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Storage: n.Storage, RetainsRequest: n.RetainsRequest, Args: coreArgs, Ty: ret})
+	var body core.Expr = el.fold(&core.NativeCall{Name: n.Name, Module: n.Module, Storage: n.Storage, Args: coreArgs, Ty: ret})
 	for i := n.Arity - 1; i >= len(args); i-- {
 		body = &core.Lambda{SourceType: arrowAt(raw, i), Param: coreArgs[i].(*core.VarRef).Name, Body: body, Ty: arrowAt(nativeTy, i), ParamCapture: el.ck.Sup.FreshCapture()}
 	}
@@ -423,6 +421,7 @@ func (c callee) saturatedApp(args []core.Expr) *core.App {
 func (el *elab) workerCall(name string, workerTy, rawTy types.Type, arity int, args []ast.Expr) core.Expr {
 	c := el.workerCallee(name, workerTy, rawTy, arity)
 	c.evidence = el.workerEvidence(name, arity, c.tyArgs)
+	c.row = el.callbackResidual(name, arity, args, c.row)
 	return el.calleeCall(c, args)
 }
 
@@ -519,6 +518,18 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...
 		}
 		return nil
 	}
+	// A nominal label retained in the source target is still supplied at
+	// invocation, even if its runtime slot is carried in an abstract row.
+	forwards := func(unique int) bool {
+		if fn, ok := sourceWant.(*types.TFun); ok {
+			for _, label := range fn.Eff.Labels {
+				if label.Unique == unique {
+					return true
+				}
+			}
+		}
+		return false
+	}
 	actualFn, _ := e.Type().(*types.TFun)
 	if sameValueABI(e.Type(), want) {
 		return e
@@ -564,7 +575,7 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...
 				kept = append(kept, ev)
 				continue
 			}
-			if len(el.evidence[ev.Unique]) == 0 && types.FunctionOpenRow(wantFn) {
+			if (len(el.evidence[ev.Unique]) == 0 || forwards(ev.Unique)) && types.FunctionOpenRow(wantFn) {
 				e.RowEffects = append(e.RowEffects, ev)
 				continue
 			}
@@ -603,7 +614,14 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...
 	effectParams := el.bindEffectParams(executingEffects(want, 1))
 	var rowEffects []core.EffectInstance
 	for _, label := range actualFn.Eff.Labels {
-		if types.RuntimeEvidenceEffect(label) && len(el.evidence[label.Unique]) == 0 && types.FunctionOpenRow(wantFn) {
+		explicit := false
+		for _, ev := range effectParams {
+			explicit = explicit || ev.Unique == label.Unique
+		}
+		if explicit {
+			continue
+		}
+		if types.RuntimeEvidenceEffect(label) && (len(el.evidence[label.Unique]) == 0 || forwards(label.Unique)) && types.FunctionOpenRow(wantFn) {
 			rowEffects = append(rowEffects, core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Control: el.evidenceControl(label.Unique)})
 		}
 	}

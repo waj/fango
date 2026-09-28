@@ -23,24 +23,6 @@ func write(t *testing.T, root, rel, body string) string {
 	return p
 }
 
-func TestOnlyBundledCoroutineControlGetsSuspensionIdentity(t *testing.T) {
-	for _, module := range []string{"Runtime.Coroutine", "Stream", "Renamed"} {
-		for _, name := range []string{"Suspension", "Drive", "Yield"} {
-			for _, bundled := range []bool{false, true} {
-				decl := &ast.EffectDecl{Name: name}
-				n := &node{name: module, bundled: bundled, mod: &ast.Module{Decls: []ast.Decl{decl}}}
-				if errs := validateModuleDecls(n); len(errs) != 0 {
-					t.Fatal(errs)
-				}
-				want := bundled && module == "Runtime.Coroutine" && (name == "Suspension" || name == "Drive")
-				if decl.CompilerSuspension != want {
-					t.Fatalf("%s.%s bundled=%v suspension=%v want=%v", module, name, bundled, decl.CompilerSuspension, want)
-				}
-			}
-		}
-	}
-}
-
 func TestNativeTemplateValidation(t *testing.T) {
 	for _, tt := range []struct {
 		name, template, title string
@@ -247,6 +229,21 @@ func TestBundledModuleNamesAreReserved(t *testing.T) {
 			t.Fatalf("errors: %#v", errs)
 		}
 	})
+}
+
+func TestBundledImportWithUnrelatedCaseFoldedDirectory(t *testing.T) {
+	d := t.TempDir()
+	if err := os.Mkdir(filepath.Join(d, "runtime"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Async\nmain = 0\n")
+	if _, errs := Load(entry); len(errs) > 0 {
+		t.Fatalf("unrelated runtime directory blocked Async: %v", errs)
+	}
+	write(t, d, "runtime/Native.fango", "module Runtime.Native exposing (answer)\nanswer = 42\n")
+	if _, errs := Load(entry); len(errs) == 0 || errs[0].Title != "RESERVED MODULE" {
+		t.Fatalf("case-folded local module should conflict: %#v", errs)
+	}
 }
 
 func TestNativeSidecarValidation(t *testing.T) {

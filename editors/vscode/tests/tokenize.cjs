@@ -45,10 +45,19 @@ async function main() {
 
   const pragma = grammar.tokenizeLine('{-# resource #-}').tokens;
   assert(pragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
+  const scopedPragma = grammar.tokenizeLine('{-# scoped s #-}').tokens;
+  assert(scopedPragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
+  assert(grammar.tokenizeLine('scoped = 1').tokens.every(t => !t.scopes.includes('keyword.control.directive.fango')));
   const sharedPragma = grammar.tokenizeLine('{-# shared-resource #-}').tokens;
-  assert(sharedPragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
-  assert(grammar.tokenizeLine('{-# service #-}').tokens.some(t => t.scopes.includes('keyword.control.directive.fango')));
+  assert(!sharedPragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
+  assert(!grammar.tokenizeLine('{-# service #-}').tokens.some(t => t.scopes.includes('keyword.control.directive.fango')));
   assert(grammar.tokenizeLine('resource = 1').tokens.every(t => !t.scopes.includes('keyword.control.directive.fango')));
+
+  const handler = 'handle action() with state = 0 of';
+  const handlerTokens = grammar.tokenizeLine(handler).tokens;
+  const handlerScopeAt = index => handlerTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+  assert(handlerScopeAt(handler.indexOf("with")).includes("keyword.control.with.fango"));
+  assert(!handlerScopeAt(handler.indexOf("state")).some(scope => scope.startsWith("keyword.")));
 
   const root = path.resolve(__dirname, "../../..");
   let files = 0;

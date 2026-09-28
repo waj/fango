@@ -1,0 +1,24 @@
+import Bytes exposing (Bytes)
+import Reader exposing (Reader)
+import Stream
+
+-- A lawful exhausted reader needs no mutable state or IO.
+emptyReader : Reader {}
+emptyReader =
+    { buffered = \_ -> Bytes.empty
+    , refill = \_ -> False
+    , skip = \_ -> 0
+    }
+
+-- Exact pure annotations catch accidental IO on the traversal helpers too.
+summary : (Bool, Bool, List Bytes)
+summary = (Reader.ensure emptyReader 0, Reader.atEnd emptyReader, Stream.toList (Reader.chunks emptyReader))
+
+visit : ()
+visit = Reader.forEachChunk emptyReader (\_ -> ())
+
+main() =
+    print summary
+    print visit
+    print (Reader.readExactly emptyReader 1)
+    print (Reader.readUntil emptyReader (Bytes.fromString "\n") 20)

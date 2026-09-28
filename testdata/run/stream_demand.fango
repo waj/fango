@@ -1,10 +1,12 @@
 import Stream
 
-produce label values = Stream.generate (\_ ->
-    print label
-    List.each (\value ->
-        print value
-        Stream.yield value) values)
+produce label values = Stream.unfold (False, values) (\(started, pending) ->
+    if started then () else print label
+    case pending of
+        [] -> Nothing
+        [value | rest] ->
+            print value
+            Just (value, (True, rest)))
 
 makeMap() =
     print "construct callback"

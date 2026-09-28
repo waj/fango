@@ -2,6 +2,7 @@ package elaborate
 
 import (
 	"fmt"
+
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/infer"
 	"github.com/waj/fango/internal/types"

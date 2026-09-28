@@ -9,8 +9,6 @@ import (
 
 	"github.com/waj/fango/internal/check"
 	"github.com/waj/fango/internal/codegen"
-	machineir "github.com/waj/fango/internal/machine"
-	"github.com/waj/fango/internal/types"
 )
 
 type memoryCache struct {
@@ -57,17 +55,6 @@ func unitsOf(result *check.Result) []codegen.Unit {
 func referenceFiles(t *testing.T, result *check.Result, units []codegen.Unit, printMain bool) []codegen.File {
 	t.Helper()
 	prog := result.Program
-	if prog.Intrinsics[types.CoroutineWithName] {
-		mp, errs := machineir.Lower(prog, result.Checker.B)
-		if len(errs) != 0 {
-			t.Fatal(errs[0])
-		}
-		files, err := codegen.EmitMachineProject(prog, mp, result.Checker.B, units, printMain)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return files
-	}
 	files, err := codegen.EmitProject(prog, result.Checker.B, units, printMain)
 	if err != nil {
 		t.Fatal(err)

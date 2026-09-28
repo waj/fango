@@ -1,11 +1,8 @@
 import Bytes exposing (Bytes)
 import Reader exposing (Reader)
 
--- Reading a value already in memory. `parse` is annotated at the pure row, so
--- the compiler proves this path performs nothing at all: the clauses of
--- `overBytes` reach a source that has already ended, and a definition
--- annotation is exact about the effects on its arrows.
-parse : Reader {} -> (Maybe Bytes, Bytes, Bool)
+-- Parsing propagates exactly the reader's effects. The constructors below use IO.
+parse : Reader e ->{e} (Maybe Bytes, Bytes, Bool)
 parse input =
     head = Reader.readExactly input 5
     rest = Reader.readUpTo input 99

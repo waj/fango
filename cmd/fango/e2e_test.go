@@ -22,7 +22,6 @@ import (
 	"github.com/waj/fango/internal/codegen"
 	"github.com/waj/fango/internal/eval"
 	"github.com/waj/fango/internal/libroot"
-	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/nativehost"
 	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/testutil"
@@ -556,18 +555,6 @@ func runDifferentialCaseWith(t *testing.T, path string, compiled compiledRunner,
 
 		env := eval.NewEnv()
 		env.DefineProg(prog)
-		if prog.Intrinsics[types.CoroutineWithName] {
-			// Keep the semantic reference independent of backend optimizations.
-			reference := *prog
-			reference.DisableOptimizations = true
-			machineProg, errs := machineir.Lower(&reference, ck.B)
-			if len(errs) > 0 {
-				t.Fatalf("machine lowering: %v", errs)
-			}
-			if err := env.DefineMachineProg(machineProg); err != nil {
-				t.Fatal(err)
-			}
-		}
 		var printed bytes.Buffer
 		ioctx := eval.NewIOContext(strings.NewReader(in.stdin), &printed)
 		ioctx.Args = in.args
@@ -719,7 +706,7 @@ func TestProjectEmitDeterministicAndFormatted(t *testing.T) {
 	t.Parallel()
 	paths := []string{
 		filepath.Join("..", "..", "testdata", "run", "poly_eq_nested.fango"),
-		filepath.Join("..", "..", "testdata", "run", "coroutine_scheduler.fango"),
+		filepath.Join("..", "..", "testdata", "run", "async_workers.fango"),
 		// Compile-time evaluation is pure, bounded, and native-restricted, so
 		// splicing must leave generated Go byte-identical between runs.
 		filepath.Join("..", "..", "testdata", "run", "meta_splice.fango"),
@@ -812,7 +799,7 @@ func TestGeneratedGoHasNoContinuationRuntime(t *testing.T) {
 						}
 						if sel, ok := n.Fun.(*goast.SelectorExpr); ok {
 							pkg, isIdent := sel.X.(*goast.Ident)
-							forbidden := map[string]bool{"RunGeneral": true, "Perform": true, "Resume": true, "Discard": true}
+							forbidden := map[string]bool{"RunGeneral": true, "Perform": true, "Resume": true, "Discard": true, "StartMachine": true, "NewMachine": true, "Poll": true}
 							if isIdent && pkg.Name == "fangort" && forbidden[sel.Sel.Name] {
 								t.Errorf("%s: generated forbidden continuation runtime call fangort.%s", generated.Path, sel.Sel.Name)
 							}

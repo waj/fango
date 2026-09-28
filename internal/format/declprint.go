@@ -21,9 +21,7 @@ func (p *printer) printDecl(d ast.Decl, sp source.Span) bool {
 		p.typeDeclLines(d, sp)
 		return true
 	case *ast.EffectDecl:
-		if d.Service {
-			p.line(0, "{-# service #-}")
-		}
+
 		p.sigBlock("effect "+d.Name, paramNames(d.Params), d.Ops)
 		return true
 	case *ast.ClassDecl:
@@ -46,6 +44,9 @@ func (p *printer) printDecl(d ast.Decl, sp source.Span) bool {
 // constructs are not printed yet, and declining leaves the declaration to be
 // copied with its own line structure intact.
 func (p *printer) valueDeclLines(d *ast.ValueDecl, ind int) bool {
+	if d.ScopedRow != "" {
+		p.line(ind, "{-# scoped "+d.ScopedRow+" #-}")
+	}
 	if d.Native != nil {
 		p.annotationLine(d, ind)
 		p.line(ind, declName(d.Name)+" = "+nativeText(d.Native))
@@ -130,9 +131,8 @@ func fixityText(d *ast.FixityDecl) string {
 // a leading `=` and `|`, exactly when the author wrote them that way. A broken
 // right-hand side always gives its deriving clause a line of its own.
 func (p *printer) typeDeclLines(d *ast.TypeDecl, sp source.Span) {
-	if d.Shared {
-		p.line(0, "{-# shared-resource #-}")
-	} else if d.Resource {
+
+	if d.Resource {
 		p.line(0, "{-# resource #-}")
 	}
 	head := "type " + d.Name

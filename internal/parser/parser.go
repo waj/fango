@@ -8,6 +8,7 @@ package parser
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/diag"
@@ -93,13 +94,18 @@ func ParseExprInput(toks []token.Token, f *source.File) (ast.Expr, []diag.Error)
 	return e, p.errs
 }
 
+func isScopedPragma(text string) bool {
+	fields := strings.Fields(text)
+	return len(fields) > 0 && fields[0] == "scoped"
+}
+
 // parsePragmas consumes the `{-# ... #-}` directives that may precede the
-// module header. Declaration-local resource markers are left for parseDecl.
+// module header. Declaration-local markers are left for parseDecl.
 func (p *parser) parsePragmas(m *ast.Module) {
-	for p.peek().Kind == token.PRAGMA && p.peek().Text != "resource" {
+	for p.peek().Kind == token.PRAGMA && p.peek().Text != "resource" && !isScopedPragma(p.peek().Text) {
 		t := p.next()
 		if !p.applyPragma(m, t) {
-			p.errorAt(t.Span, "UNKNOWN PRAGMA", "I don't know the pragma `"+t.Text+"`. Use `no-prelude` above the module header, or `resource` before a type declaration.")
+			p.errorAt(t.Span, "UNKNOWN PRAGMA", "I don't know the pragma `"+t.Text+"`. Use `no-prelude` above the module header, `resource` before a type declaration, or `scoped row` before an annotated function.")
 		}
 	}
 }
@@ -278,20 +284,24 @@ func (p *parser) parseDecl() ast.Decl {
 	}
 	if t.Kind == token.PRAGMA {
 		p.next()
-		if t.Text == "service" {
-			if p.peek().Kind != token.KwEffect {
-				p.errorAt(t.Span, "MISPLACED SERVICE PRAGMA", "`{-# service #-}` must precede one effect declaration.")
+
+		if isScopedPragma(t.Text) {
+			fields := strings.Fields(t.Text)
+			if len(fields) != 2 {
+				p.errorAt(t.Span, "SCOPED CALLBACK", "Use `{-# scoped row #-}` before an annotated function.")
 				return nil
 			}
 			d := p.parseDecl()
-			if ed, ok := d.(*ast.EffectDecl); ok {
-				ed.Service = true
-				ed.Sp.Start = t.Span.Start
+			if vd, ok := d.(*ast.ValueDecl); ok && vd.Ann != nil && vd.ScopedRow == "" {
+				vd.ScopedRow = fields[1]
+				vd.Sp = t.Span.Merge(vd.Sp)
+				return vd
 			}
+			p.errorAt(t.Span, "SCOPED CALLBACK", "A scoped row marker must precede one annotated function.")
 			return d
 		}
-		if t.Text != "resource" && t.Text != "shared-resource" {
-			p.errorAt(t.Span, "MISPLACED PRAGMA", "Only `resource`, `shared-resource`, or `service` pragmas may precede a declaration; file pragmas belong above the module header.")
+		if t.Text != "resource" {
+			p.errorAt(t.Span, "MISPLACED PRAGMA", "Only `resource` and `scoped` pragmas may precede declarations; file pragmas belong above the module header.")
 			return nil
 		}
 		if p.peek().Kind == token.EOF {
@@ -305,7 +315,6 @@ func (p *parser) parseDecl() ast.Decl {
 		d := p.parseDecl()
 		if td, ok := d.(*ast.TypeDecl); ok {
 			td.Resource = true
-			td.Shared = t.Text == "shared-resource"
 			td.ResourceSpan = t.Span
 		}
 		return d
@@ -1043,8 +1052,7 @@ func (p *parser) classifyInlineStmt() stmtKind {
 					token.KwIf, token.KwCase, token.KwHandle:
 					return false
 				}
-				if p.stopWith > 0 && t.Kind == token.LIDENT && t.Text == "with" &&
-					i+2 < len(p.toks) && p.toks[i+1].Kind == token.LIDENT && p.toks[i+2].Kind == token.EQ {
+				if p.stopWith > 0 && p.handlerStateStart(i) {
 					return false
 				}
 			}
@@ -2516,6 +2524,11 @@ func (p *parser) parseRecordExprFieldsAfterOpen() ([]ast.RecordExprField, source
 	return fields, p.prevSpan(), true
 }
 
+// handlerStateStart recognizes contextual state syntax without reserving its words.
+func (p *parser) handlerStateStart(pos int) bool {
+	return pos+2 < len(p.toks) && p.toks[pos].Kind == token.LIDENT && p.toks[pos].Text == "with" && p.toks[pos+1].Kind == token.LIDENT && p.toks[pos+2].Kind == token.EQ
+}
+
 // peek returns the current token, ignoring layout.
 func (p *parser) peek() token.Token { return p.toks[p.pos] }
 
@@ -2527,8 +2540,7 @@ func (p *parser) peekInExpr() token.Token {
 	if t.Kind == token.EOF {
 		return t
 	}
-	if p.stopWith > 0 && t.Kind == token.LIDENT && t.Text == "with" &&
-		p.pos+2 < len(p.toks) && p.toks[p.pos+1].Kind == token.LIDENT && p.toks[p.pos+2].Kind == token.EQ {
+	if p.stopWith > 0 && p.handlerStateStart(p.pos) {
 		return token.Token{Kind: token.EOF, Span: t.Span}
 	}
 	if p.pos != p.stmtStart && p.lay.checkOffside(t.Pos()) != offContinue {

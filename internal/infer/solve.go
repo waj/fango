@@ -1,6 +1,7 @@
 package infer
 
 import (
+	"maps"
 	"sort"
 
 	"github.com/waj/fango/internal/diag"
@@ -34,7 +35,7 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			if !lok || !rok {
 				m = &mismatch{a: c.Left, b: c.Right, effect: true, note: "effect inclusion requires two rows"}
 			} else {
-				m = includeRowsBound(left, right, sub, bi, sup, c.WorkCharge)
+				m = includeRows(left, right, sub, bi, sup)
 			}
 		} else {
 			m = unify(c.Left, c.Right, sub, bi, sup)
@@ -47,10 +48,11 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 	}
 	var deferred []pending
 	var bounds []pending
-	var bound []pending
-	var registrations []pending
+	var scopes []pending
 	for i, c := range cs {
-		if c.Subsume {
+		if c.Scope != nil {
+			scopes = append(scopes, pending{at: i, c: c})
+		} else if c.Subsume {
 			if vs == nil {
 				vs = variances(c.ADTs)
 			}
@@ -68,27 +70,78 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			solve(i, c)
 		}
 	}
+	var bound, ordinary []pending
 	for _, p := range bounds {
-		if p.c.ControlNeed {
-			solve(p.at, p.c)
+		if bindable(p.c, sub) {
+			bound = append(bound, p)
+		} else {
+			ordinary = append(ordinary, p)
+		}
+	}
+	bounds = ordinary
+	// Propagate explicit lower bounds before closing scoped rows. Otherwise
+	// an outer handler's upper bound can close a callback's residual row
+	// before a sibling constraint contributes (for example) Fail String.
+	if len(scopes) > 0 {
+		labels := func() int {
+			n := 0
+			for _, p := range bounds {
+				for _, side := range []types.Type{p.c.Left, p.c.Right} {
+					if r, ok := sub.Apply(side).(types.Row); ok {
+						n += len(r.Labels)
+					}
+				}
+			}
+			return n
+		}
+		for {
+			before := labels()
+			for _, p := range bounds {
+				left, lok := sub.Apply(p.c.Left).(types.Row)
+				right, rok := sub.Apply(p.c.Right).(types.Row)
+				if !lok || !rok || len(left.Labels) == 0 {
+					continue
+				}
+				trial := maps.Clone(sub)
+				if includeRows(types.Row{Labels: left.Labels}, right, trial, bi, sup) == nil {
+					maps.Copy(sub, trial)
+				}
+			}
+			if labels() == before {
+				break
+			}
+		}
+	}
+	// In scoped groups, apply fixed-tail upper bounds before growing flexible tails. In particular,
+	// a pure outer scope must be closed before nested callback rows compose;
+	// otherwise an inner fresh label can be needlessly assigned to its tail.
+	for len(scopes) > 0 {
+		var rest []pending
+		progress := false
+		for _, p := range bounds {
+			if bindable(p.c, sub) {
+				bound = append(bound, p)
+				progress = true
+				continue
+			}
+			right, ok := sub.Apply(p.c.Right).(types.Row)
+			tail, rigidTail := right.Tail.(*types.TVar)
+			if ok && (right.Tail == nil || rigidTail && tail.Rigid) {
+				solve(p.at, p.c)
+				progress = true
+			} else {
+				rest = append(rest, p)
+			}
+		}
+		bounds = rest
+		if !progress {
+			break
 		}
 	}
 	for _, p := range bounds {
-		if p.c.ControlNeed {
-			continue
-		}
 		i, constraint := p.at, p.c
-		if constraint.WorkCharge {
-			registrations = append(registrations, p)
-			continue
-		}
-		// An inclusion that only the handler instance rule can answer waits
-		// for the whole group: the clauses whose effects the bound closure
-		// inherits are generated after the subject that holds it. It is
-		// diverted before the ordinary solver runs, because a row unification
-		// can bind variables on its way to failing.
 		if bindable(constraint, sub) {
-			bound = append(bound, pending{at: i, c: constraint})
+			bound = append(bound, p)
 			continue
 		}
 		labels, tail, split := splitRigidTail(constraint, sub)
@@ -138,8 +191,31 @@ func Solve(cs []Constraint, ps []types.Pred, sub Subst, bi *types.Builtins, sup 
 			failures = append(failures, failure{at: p.at, err: err})
 		}
 	}
-	for _, p := range registrations {
-		solve(p.at, p.c)
+	// A row holds one label per effect. Binding a row variable can put a
+	// label into a row whose prefix already carries that effect under other
+	// arguments, and no constraint revisits that row afterwards; the rows the
+	// constraints mention are checked once everything else has been solved,
+	// and the two argument lists are unified, because a nominal row means one
+	// instance of each effect.
+	for i, c := range cs {
+		// Scope obligations have roots rather than a pair of type operands.
+		// Their types are constrained by the surrounding ordinary constraints.
+		if c.Scope != nil {
+			continue
+		}
+		for _, side := range []types.Type{c.Left, c.Right} {
+			if m := reconcileRows(side, sub, bi, sup); m != nil {
+				failures = append(failures, failure{at: i, err: mismatchError(c, m, sub)})
+				break
+			}
+		}
+	}
+	// Scope checks must also observe substitutions introduced by reconciling
+	// duplicate labels, not just those from the deferred row bounds.
+	for _, p := range scopes {
+		for _, err := range p.c.Scope.check(sub, p.c.Span) {
+			failures = append(failures, failure{at: p.at, err: err})
+		}
 	}
 	sort.SliceStable(failures, func(i, j int) bool { return failures[i].at < failures[j].at })
 	errs := make([]diag.Error, 0, len(failures))
@@ -278,4 +354,53 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 		e.Notes = append(e.Notes, "Note: "+m.note)
 	}
 	return e
+}
+
+// reconcileRows walks a solved type and unifies the arguments of any effect
+// that appears twice in one row. Identical occurrences were already merged
+// by substitution; what remains is one effect under two argument lists,
+// which either agree, and the row is well formed again, or do not, which is
+// the mismatch answered here.
+func reconcileRows(t types.Type, sub Subst, bi *types.Builtins, sup *types.Supply) *mismatch {
+	switch t := sub.Apply(t).(type) {
+	case *types.TFun:
+		for _, part := range []types.Type{t.Arg, t.Eff, t.Ret} {
+			if m := reconcileRows(part, sub, bi, sup); m != nil {
+				return m
+			}
+		}
+	case *types.TCon:
+		for _, arg := range t.Args {
+			if m := reconcileRows(arg, sub, bi, sup); m != nil {
+				return m
+			}
+		}
+	case types.Row:
+		seen := map[int]types.EffLabel{}
+		for _, label := range t.Labels {
+			if first, dup := seen[label.Unique]; dup {
+				if len(first.Args) != len(label.Args) {
+					return &mismatch{a: t, b: t, effect: true, note: "the same effect label has different arity"}
+				}
+				for i := range first.Args {
+					if m := unify(first.Args[i], label.Args[i], sub, bi, sup); m != nil {
+						m.effect = true
+						m.note = "a parameterized effect may appear only once in a row, with one consistent set of arguments (distinct-label rule)"
+						return m
+					}
+				}
+				continue
+			}
+			seen[label.Unique] = label
+			for _, arg := range label.Args {
+				if m := reconcileRows(arg, sub, bi, sup); m != nil {
+					return m
+				}
+			}
+		}
+		if t.Tail != nil {
+			return reconcileRows(t.Tail, sub, bi, sup)
+		}
+	}
+	return nil
 }

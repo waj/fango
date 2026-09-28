@@ -56,15 +56,11 @@ A release runs with the evidence where it was written, not with whatever
 handlers happened to be installed where the body exited, and may itself use
 nested handlers.
 
-Acquisition may suspend. The release obligation is registered only after
-acquisition succeeds; a failed acquisition is responsible for its own partial
-cleanup. Release may also suspend. The owner remains in its closing state,
-retaining the resource and definition-site handlers until the driver resumes
-the release. An inner release finishes before an outer release starts, even
-when either pauses. Abandoning an unfinished coroutine starts the same drain;
-use `Runtime.Coroutine.stop` or `Runtime.Work.stop` to receive cleanup requests
-and `advance` to reply to them. A release that never completes prevents its
-owner or enclosing context from completing.
+Acquisition, body, and release are synchronous effectful calls. Failed
+acquisition is responsible for its own partial cleanup. A release that never
+completes prevents its scope from completing. Cleanup guarantees cover normal
+returns and language aborts; they do not turn arbitrary native panics into
+language failures.
 
 ## Cleanup failures
 
@@ -79,19 +75,18 @@ When a release fails, the failure the body was already carrying stays primary:
 
 A recorded release failure is kept in the exit in deterministic inner-to-outer
 order. `Fail.attemptReport` exposes these failures as typed-inspectable snapshots.
-If successful completion or an early stream stop is followed by failed cleanup,
+If successful completion is followed by failed cleanup,
 the first cleanup failure becomes primary and later failures remain secondary.
 
 `finally action cleanup` is `bracket` without a resource. Because its resource
 is `()`, it places no restriction on the result it returns.
 
-## Resource escape checks
+## Resource lifetimes
 
-A scope rejects a result that retains its resource with `RESOURCE ESCAPES`.
-This includes a resource hidden in an ADT or captured by a returned function.
-An unrelated function may be returned when its inferred contract proves that
-it does not capture the resource. Scalars and transitively capture-free data
-remain valid results.
+A resource or a closure referring to it may outlive its acquiring scope. This
+does not keep the resource open: bracket release still runs at scope exit.
+Native resource operations validate the handle and report use after close.
+The compiler does not infer resource retention or non-escape contracts.
 
 ## Resource types
 
@@ -125,27 +120,12 @@ inspect its constructors, record fields, or reflected schema. Native code and
 the defining module remain responsible for resource representation and native
 correctness. The marker alone does not acquire or release resources.
 
-## Wrapper contracts
+## Wrappers and staging
 
-Wrappers and helpers infer and export capture and retention contracts without
-compiler registration or written lifetime annotations. A helper may borrow a
-resource synchronously. Returning it, retaining it through an indirect callback,
-or storing it in an outer handler reports `RESOURCE ESCAPES`, even when the
-enclosing result is `()`. A proven non-retaining outer resumptive handler may
-use it synchronously. Passing it as an abort payload across its cleanup boundary
-is rejected because the abort clause runs after release. Release callbacks obey
-the same retention checks. Diagnostics identify the owning scope and the value
-or destination that would outlive it.
+`Runtime.Scope.bracket` is an intrinsic for cleanup. Ordinary wrappers need no
+compiler registration. Its callbacks use ordinary row inclusion: acquisition
+and release may use IO while the body also fails. Partial applications have the
+same effect compatibility.
 
-Contracts are conservative at recursive joins where distinct dynamic owners
-cannot be proved identical. Cursor advancement additionally carries exclusive
-access obligations. Written capture contracts are not implemented.
-
-`Runtime.Scope.bracket` remains a compiler intrinsic for cleanup and lifetime handling.
-Its callbacks use the ordinary argument-inclusion rule: acquisition and release
-may use IO while the body also fails. Partial applications and ordinary wrappers
-have the same effect compatibility, subject to the existing resource restrictions.
-
-A scope does whatever its callbacks do, so a program whose parts are all
-stage-safe may run one at compile time. Resources and system entropy remain
-forbidden there because they are effects, not because a scope is special.
+A scope whose callbacks are stage-safe may run at compile time. Native resource
+operations and system entropy remain forbidden there because they are effects.

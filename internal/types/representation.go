@@ -1,8 +1,7 @@
 package types
 
 // ControlledRepresentation reports whether a type's stored function ABI can
-// vary with its enclosing transport family. Fixed Machine callbacks and opaque
-// cursors have a single representation.
+// vary with its enclosing Direct/Exit transport family.
 func ControlledRepresentation(t Type, adts map[int]*ADTInfo) bool {
 	return controlledRepresentation(t, adts, map[int]bool{})
 }
@@ -10,11 +9,8 @@ func controlledRepresentation(t Type, adts map[int]*ADTInfo, visiting map[int]bo
 	switch t := t.(type) {
 	case *TFun:
 		control := FunctionControl(t)
-		return control.Polymorphic && control.Transport < Machine || controlledRepresentation(t.Arg, adts, visiting) || controlledRepresentation(t.Ret, adts, visiting)
+		return control.Polymorphic || controlledRepresentation(t.Arg, adts, visiting) || controlledRepresentation(t.Ret, adts, visiting)
 	case *TCon:
-		if t.Name == CoroutineTypeName || t.Name == CoroutineScopeTypeName || t.Name == CoroutineFacetTypeName || t.Name == CompletionTypeName || t.Name == WorkOwnerTypeName || t.Name == WorkFacetTypeName || t.Name == WorkTypeName {
-			return false
-		}
 		for _, arg := range t.Args {
 			if controlledRepresentation(arg, adts, visiting) {
 				return true

@@ -1,0 +1,25 @@
+import Async exposing (Outcome(..))
+import Fail exposing (Fail)
+import Result exposing (Result(..))
+import Runtime.Scope
+
+runStrings : (() ->{Async.Async String, IO, Fail String | e} a) ->{IO | e} Outcome (Result String a)
+runStrings body = Async.run body
+
+main() =
+    print (runStrings (\_ -> Async.within (\_ -> Async.await (Async.spawn (\_ -> 7)))))
+    print (runStrings (\_ -> Fail.attempt (\_ -> Async.within (\_ ->
+        ignore (Async.spawn (\_ -> Fail.fail "nested"))
+        1))))
+    print (runStrings (\_ -> Runtime.Scope.finally
+        (\_ ->
+            Async.cancelScope()
+            Async.checkpoint()
+            1)
+        (\_ -> print "cancel cleanup")))
+    print (runStrings (\_ ->
+        ch = Async.channel 1
+        ignore (Async.send ch (\n -> n + 2))
+        case Async.receive ch of
+            Just fn -> fn 40
+            Nothing -> Fail.fail "closed"))

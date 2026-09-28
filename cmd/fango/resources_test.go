@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestResourceCaptureContracts(t *testing.T) {
+func TestResourceValuesMayOutliveScopes(t *testing.T) {
 	const prelude = `import Random
 import Runtime.Scope
 import State
@@ -41,11 +41,11 @@ keep action = action
 leak =
     handle keep (\_ -> readCounter()) with state = 0 of
         readCounter () -> resume state with state
-main = 0`, "STATE RESULT ESCAPES"},
+main = 0`, ""},
 		{"mutual resource escape", `first port stop = if stop then (\_ -> readPort port) else second port True
 second port stop = first port stop
 leak = withPort (\port -> first port False)
-main = 0`, "RESOURCE ESCAPES"},
+main = 0`, ""},
 		{"mutual safe resource", `first port stop = if stop then readPort port else second port True
 second port stop = first port stop
 main = withPort (\port -> first port False)`, ""},
@@ -58,7 +58,7 @@ loop n = withPort (\port ->
     if n == 0 then State.put (Just port) else
         ignored = State.run empty (\_ -> loop (n - 1))
         ())
-main = State.run empty (\_ -> loop 2)`, "RESOURCE ESCAPES"},
+main = State.run empty (\_ -> loop 2)`, ""},
 		{"safe closure", `saved = withPort (\port -> \_ -> 42)
 main = saved()`, ""},
 		{"safe higher order closure", `saved = withPort (\port -> identity (\_ -> 42))
@@ -73,25 +73,25 @@ safe =
             readCounter () -> resume inner with inner) with outer = 0 of
         readCounter () -> resume outer with outer
 main = safe()`, ""},
-		{"direct", `main = withPort identity`, "RESOURCE ESCAPES"},
+		{"direct", `main = withPort identity`, ""},
 		{"closure", `saved = withPort (\port -> \_ -> readPort port)
-main = saved()`, "RESOURCE ESCAPES"},
-		{"ADT", `main = withPort (\port -> Just port)`, "RESOURCE ESCAPES"},
-		{"indirect", `main = withPort (\port -> apply identity port)`, "RESOURCE ESCAPES"},
+main = saved()`, ""},
+		{"ADT", `main = withPort (\port -> Just port)`, ""},
+		{"indirect", `main = withPort (\port -> apply identity port)`, ""},
 		{"nested polymorphic callback", `main = withPort (\port ->
-    apply (\_ -> apply identity port) 0)`, "RESOURCE ESCAPES"},
+    apply (\_ -> apply identity port) 0)`, ""},
 		{"outer state Unit result", `main = State.run Nothing (\_ ->
     withPort (\port -> State.put (Just port))
-    ())`, "RESOURCE ESCAPES"},
+    ())`, ""},
 		{"outer user handler", `main =
     handle withPort (\port -> save (Just port)) with saved = Nothing of
         save next -> resume () with next
-        return _ -> ()`, "RESOURCE ESCAPES"},
+        return _ -> ()`, ""},
 		{"indirect store", `retain port = save (Just port)
 main =
     handle withPort (\port -> apply retain port) with saved = Nothing of
         save next -> resume () with next
-        return _ -> ()`, "RESOURCE ESCAPES"},
+        return _ -> ()`, ""},
 		{"dictionary store", `class SaveValue a
     saveValue : a ->{Store a} ()
 instance SaveValue Port
@@ -101,7 +101,7 @@ throughDictionary port = saveValue port
 main =
     handle withPort (\port -> throughDictionary port) with saved = Nothing of
         save next -> resume () with Just next
-        return _ -> ()`, "RESOURCE ESCAPES"},
+        return _ -> ()`, ""},
 		{"distinct nested owners", `main = withPort (\outer ->
     withPort (\inner -> readPort outer + readPort inner))`, ""},
 		{"inner abort consumed", `main = withPort (\port ->
@@ -112,22 +112,22 @@ main =
         save port ->
             n = readPort port
             resume ()`, ""},
-		{"inner state", `main = withPort (\port -> State.run (Just port) (\_ -> ()))`, "RESOURCE ESCAPES"},
+		{"inner state", `main = withPort (\port -> State.run (Just port) (\_ -> ()))`, ""},
 		{"inner state consumed", `main = withPort (\port ->
     ignored = State.run (Just port) (\_ -> ())
     42)`, ""},
-		{"abort payload", `main = attempt (\_ -> withPort (\port -> fail port))`, "RESOURCE ESCAPES"},
+		{"abort payload", `main = attempt (\_ -> withPort (\port -> fail port))`, ""},
 		{"release retention", `main =
     handle Runtime.Scope.bracket openPort (\port -> save port) (\_ -> ()) with saved = Nothing of
         save port -> resume () with Just port
-        return _ -> ()`, "RESOURCE ESCAPES"},
+        return _ -> ()`, ""},
 		{"callback ADT", `type Box a = Box a
 main = withPort (\port ->
     box = Box identity
     case box of
-        Box callback -> callback port)`, "RESOURCE ESCAPES"},
+        Box callback -> callback port)`, ""},
 		{"partial wrapper", `later = withPort
-main = later (\port -> port)`, "RESOURCE ESCAPES"},
+main = later (\port -> port)`, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -153,7 +153,7 @@ func TestIndependentResourceLibrary(t *testing.T) {
 	runDifferentialCase(t, path, cliRunner(path))
 }
 
-func TestResourceLibraryRejectsIndirectEscape(t *testing.T) {
+func TestResourceLibraryAllowsIndirectRetention(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"Connection.fango", "Connection.native.go", "Consumer.fango"} {
 		content, err := os.ReadFile(filepath.Join("..", "..", "testdata", "modules", "resources", name))
@@ -181,7 +181,7 @@ main() =
 		t.Fatal(err)
 	}
 	var diagnostics bytes.Buffer
-	if _, _, ok := compileFile(path, &diagnostics); ok || !strings.Contains(diagnostics.String(), "RESOURCE ESCAPES") {
-		t.Fatalf("indirect library escape accepted: %s", diagnostics.String())
+	if _, _, ok := compileFile(path, &diagnostics); !ok {
+		t.Fatalf("indirect library retention rejected: %s", diagnostics.String())
 	}
 }

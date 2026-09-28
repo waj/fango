@@ -1,6 +1,8 @@
 package elaborate_test
 
 import (
+	"testing"
+
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/elaborate"
 	"github.com/waj/fango/internal/infer"
@@ -9,7 +11,6 @@ import (
 	"github.com/waj/fango/internal/source"
 	"github.com/waj/fango/internal/staging"
 	"github.com/waj/fango/internal/types"
-	"testing"
 )
 
 func TestClassEvidence(t *testing.T) {

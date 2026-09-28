@@ -1,0 +1,42 @@
+import Result exposing (Result(..))
+import Async
+import Fail exposing (Fail)
+
+effect Database
+    lookup : Int -> String
+
+effect Stop
+    abort stop : String -> value
+
+withDatabase body =
+    handle body() of
+        lookup id -> resume "Alice"
+
+withBrokenDatabase body =
+    handle body() of
+        lookup id -> Fail.fail "unavailable"
+
+withStoppingDatabase body =
+    handle body() of
+        lookup id -> stop "stopped"
+
+withStop body =
+    handle body() of
+        stop reason -> Err reason
+        return value -> Ok value
+
+query : () ->{Database, Fail String} String
+query () =
+    name = lookup 42
+    if name == "" then Fail.fail "empty" else name
+
+parallel action = Async.await (Async.spawn action)
+
+main() =
+    print (withDatabase (\_ -> Async.run (\_ -> parallel query)))
+    print (Fail.attempt (\_ -> withBrokenDatabase (\_ -> Async.run (\_ -> parallel query))))
+    print (Async.run (\_ -> parallel (\_ ->
+        result = withStop (\_ -> withStoppingDatabase query)
+        case result of
+            Ok value -> value
+            Err reason -> reason)))

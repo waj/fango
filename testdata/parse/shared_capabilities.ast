@@ -1,5 +1,0 @@
-(module
-  (import Runtime.Native)
-  (import Runtime.Service)
-  (type Shared (pragma shared-resource) (params a) (ctor Shared Runtime.Native.Any))
-  (effect Dispatch (pragma service) (op submit (-> Int (effects (Runtime.Service.Invocation Int ())) ()))))

@@ -25,14 +25,17 @@ class Invoke a
 instance Invoke (Box IO)
     invoke = runBox
 
-emit : Invoke a => a -> Stream.Stream Int IO
-emit stored = Stream.generate (\_ -> Stream.yield (invoke stored 4))
+once action = Stream.unfold False (\done ->
+    if done then Nothing else Just (action(), True))
+
+emit : Invoke a => a -> Stream.Stream Bool Int IO
+emit stored = once (\_ -> invoke stored 4)
 
 main() =
     box = makeBox()
-    source = Stream.generate (\_ -> Stream.yield (runBox box 4))
+    source = once (\_ -> runBox box 4)
     Stream.forEach print source
     Stream.forEach print source
     chain = Link box (Link box End)
-    Stream.forEach print (Stream.generate (\_ -> Stream.yield (runChain chain 6)))
+    Stream.forEach print (once (\_ -> runChain chain 6))
     Stream.forEach print (emit box)

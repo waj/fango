@@ -2,23 +2,12 @@ package eval
 
 import (
 	"fmt"
+
 	"github.com/waj/fango/internal/types"
 	"github.com/waj/fango/runtime/fangort"
 )
 
 type descriptorEnv map[int]*fangort.TypeDescriptor
-
-func (f *Frame) descriptors() descriptorEnv {
-	result := descriptorEnv{}
-	for frame := f; frame != nil; frame = frame.parent {
-		for id, descriptor := range frame.types {
-			if result[id] == nil {
-				result[id] = descriptor
-			}
-		}
-	}
-	return result
-}
 
 func (in *interp) typeDescriptor(t types.Type, fr *Frame) (*fangort.TypeDescriptor, error) {
 	switch t := t.(type) {
@@ -30,7 +19,16 @@ func (in *interp) typeDescriptor(t types.Type, fr *Frame) (*fangort.TypeDescript
 		}
 		return nil, fmt.Errorf("eval: missing descriptor for type parameter %d", t.ID)
 	case *types.TFun:
-		return fangort.NominalType("<function>", false), nil
+		name, parts := types.FunctionDescriptorShape(t)
+		args := make([]*fangort.TypeDescriptor, len(parts))
+		for i, part := range parts {
+			d, err := in.typeDescriptor(part, fr)
+			if err != nil {
+				return nil, err
+			}
+			args[i] = d
+		}
+		return fangort.NominalType(name, false, args...), nil
 	case *types.TCon:
 		args := make([]*fangort.TypeDescriptor, len(t.Args))
 		for i, arg := range t.Args {

@@ -1,20 +1,16 @@
 import Stream
-import Runtime.Coroutine
 import Iterator
 import Maybe exposing (Maybe(..))
 import Meta exposing (Code)
 
-foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator a e ->{Runtime.Coroutine.Drive | e} b
+foldCursor : (a -> b ->{e} b) -> b -> Iterator.Iterator state a e ->{e} b
 foldCursor combine initial cursor = case Iterator.next cursor of
     Nothing -> initial
-    Just value -> foldCursor combine (combine value initial) cursor
+    Just (value, next) -> foldCursor combine (combine value initial) next
 
-spin : () ->{Stream.Yield Int} ()
-spin() =
-    Stream.yield 0
-    spin()
+spin = Stream.unfold () (\_ -> Just (0, ()))
 
 count : () -> Int
-count() = Stream.withCursor (Stream.generate spin) (\cursor -> foldCursor (\element acc -> element + acc) 0 cursor)
+count() = Stream.withCursor spin (\cursor -> foldCursor (\element acc -> element + acc) 0 cursor)
 
 main() = print $(Meta.lift (count()))

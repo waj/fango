@@ -19,38 +19,26 @@ func captureScopeNames(summaries map[string]types.CaptureSummary) map[types.Scop
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		contract := summaries[name].Contract
-		if contract == nil {
-			continue
-		}
-		var visit func(*types.CaptureFlow)
-		visit = func(node *types.CaptureFlow) {
-			if node == nil {
-				return
-			}
-			if node.Scope != 0 {
-				if _, known := out[node.Scope]; !known {
-					out[node.Scope] = fmt.Sprintf("%s#%d", name, node.ID)
-				}
-			}
-			for _, child := range node.Children {
-				visit(child)
-			}
-			for _, clause := range node.Clauses {
-				visit(clause.Body)
+		for i, id := range summaries[name].Captures.Scopes {
+			if _, known := out[id]; !known {
+				out[id] = fmt.Sprintf("%s#%d", name, i)
 			}
 		}
-		visit(contract.Body)
 	}
 	return out
 }
 
 func foreignScopeNames(all, own map[string]types.CaptureSummary, referenced any) map[types.ScopeID]string {
-	allNames := captureScopeNames(all)
-	for id := range captureScopeNames(own) {
-		delete(allNames, id)
+	// An owned definition may return captures introduced by an import. Its
+	// summary does not make those scopes locally owned.
+	imported := map[string]types.CaptureSummary{}
+	for name, summary := range all {
+		if _, local := own[name]; !local {
+			imported[name] = summary
+		}
 	}
-	ids := &remapIDs{vars: map[int]*types.TVar{}, captures: map[types.CaptureVar]bool{}, scopes: map[types.ScopeID]bool{}, resumes: map[types.ResumeID]bool{}}
+	allNames := captureScopeNames(imported)
+	ids := &remapIDs{permissions: map[int]bool{}, vars: map[int]*types.TVar{}, captures: map[types.CaptureVar]bool{}, scopes: map[types.ScopeID]bool{}, resumes: map[types.ResumeID]bool{}}
 	collectRemapIDs(reflect.ValueOf(referenced), map[uintptr]bool{}, ids)
 	for id := range allNames {
 		if !ids.scopes[id] {

@@ -7,7 +7,7 @@ import (
 
 // Binding a closure to a handler activation. A closure written in a handler's
 // subject performs the handled effect, so its row names that label. Where the
-// position it flows into omits the label, the label is replaced by what the
+// position it flows into omits the label, the label is replaced by a fresh local permission and what the
 // handler's clauses perform: the closure then reaches this activation at every
 // call instead of whichever handler is innermost when it is called.
 // Elaboration completes the binding by substituting the activation's captures
@@ -112,9 +112,6 @@ func solveBound(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply) 
 	if !ok {
 		return mismatchError(c, &mismatch{a: c.Left, b: c.Right, effect: true, note: "effect inclusion requires two rows"}, sub), true
 	}
-	// The label reached a position that can still take it, so nothing was ever
-	// addressed to this activation: the diversion only held the question open
-	// until the surrounding row was decided.
 	if rowAbsorbs(right) {
 		if m := includeRows(left, right, sub, bi, sup); m != nil {
 			return mismatchError(c, m, sub), true
@@ -133,7 +130,7 @@ func solveBound(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply) 
 				"This closure performs `%s`, an abort-only effect, and the position it goes to\ndoes not allow that effect. Binding it to the handler whose subject holds it\nwould be the only way to accept it, and an abort cannot be bound.\n\nAn abort unwinds to its own handler activation, so a bound abort called after\nthat activation finished would unwind to a target nothing awaits. Keep `%s`\nin this arrow's row, or handle it where it is performed.",
 				types.SurfaceName(info.Effect.Name), types.SurfaceName(info.Effect.Name)), true
 		}
-		row := clauseRow(info, sub)
+		row := info.Permission.Within(clauseRow(info, sub))
 		for _, cl := range row.Labels {
 			if !rowHasLabel(clauses, cl.Unique) {
 				clauses.Labels = append(clauses.Labels, cl)
@@ -157,7 +154,7 @@ func solveBound(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply) 
 		return diag.Error{}, false
 	}
 	p := types.NewPrinter()
-	return diag.Errorf(c.Span, "HANDLER CLAUSE EFFECTS",
-		"Binding this closure to the handler whose subject holds it makes every call to it\nrun that handler's clauses, which perform:\n\n    %s\n\nbut only these effects are available here:\n\n    %s",
+	return diag.Errorf(c.Span, "HANDLER BINDING EFFECTS",
+		"Binding this closure to the handler whose subject holds it makes every call to it\nrequire its scoped permission and run its clauses, which perform:\n\n    %s\n\nbut only these effects are available here:\n\n    %s",
 		p.Type(clauses), p.Type(sub.Apply(c.Right))), true
 }

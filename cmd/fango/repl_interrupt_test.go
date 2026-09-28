@@ -70,14 +70,37 @@ func TestREPLAsyncInterruptAndInputRecovery(t *testing.T) {
 		}
 	}
 	waitFor("> ")
-	write("import Async\nimport Async.IO\n")
-	waitFor("loaded Async.IO")
-	write("work() = Async.run (\\_ ->\n    print \"started\"\n    Async.IO.sleep 3000\n    1)\n\nwork()\n")
+	write("import Async\n")
+	waitFor("loaded Async")
+	waitFor("> ")
+	write("import Result\n")
+	waitFor("> ")
+	write("import Runtime.Scope\n")
+	waitFor("> ")
+	write("count n = if n <= 0 then 0 else count (n - 1)\n")
+	waitFor("> ")
+	write("worker : Int -> () ->{IO, Async.Async String} Int\nworker value () = Runtime.Scope.bracket (\\_ -> ()) (\\_ ->\n    ignore (count 10000)\n    print \"child cleaned\") (\\_ ->\n    print \"started\"\n    Async.sleep 60000\n    value)\n\nwork() = Async.run (\\_ -> Async.await (Async.spawn (worker 1)))\nwork()\n")
 	waitFor("started")
 	if err := cmd.Process.Signal(os.Interrupt); err != nil {
 		t.Fatal(err)
 	}
-	waitFor("Err Interrupted")
+	waitFor("child cleaned")
+	waitFor("Cancelled")
+	// A root with no spawned task must also own host cancellation and cleanup.
+	write("root : () ->{IO} Async.Outcome (Result.Result String ())\nroot() = Async.run (\\_ -> Runtime.Scope.bracket (\\_ -> ()) (\\_ ->\n    ignore (Async.parMap count [10000, 10000])\n    print \"root cleaned\") (\\_ ->\n    print \"root sleeping\"\n    Async.sleep 60000))\n\nroot()\n")
+	waitFor("root sleeping")
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("root cleaned")
+	waitFor("Cancelled")
+	// Pure parallel mapping reports host interruption back to the evaluator.
+	write("mapped() =\n    print \"mapping\"\n    ignore (Async.parMap (\\_ -> count 1000000000) [1, 2, 3, 4])\n\nmapped()\n")
+	waitFor("mapping")
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("interrupted")
 	write("line() =\n    print \"reading\"\n    readLine()\n\nline()\n")
 	waitFor("reading")
 	if err := cmd.Process.Signal(os.Interrupt); err != nil {

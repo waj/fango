@@ -104,25 +104,11 @@ polymorphic box by an untyped ID. Same-index aliases between opaque wrapper type
 are supported. Writes return Unit or Bool. These contracts apply to value
 natives; ordinary Fango effect handlers can wrap them.
 
-Storage preserves the payload's captures. Retaining a borrowed value beyond
-its owner is rejected, including through helper functions and opaque writes.
-Storage alone grants no sharing permission. The bundled
-[write-once cells](library-cells.md) combine this boundary with a scope owner.
-
-## Shared native resources
-
-`{-# shared-resource #-}` implies `resource` and requires exactly one constructor
-with one canonical `Runtime.Native.Any` field. It declares that the native operations
-provide their own synchronization. Sharing is nominal: another resource type
-with the same Go representation remains unshared. Native implementations are
-trusted to honor this declaration.
-
-Cooperative children may retain such a handle when its owner outlives their
-registry. The scope drains the children before releasing the shared handle.
-Parent mutable handler state, borrowed cursor/pause authority, and unshared
-native resources remain `WORK CAPABILITY TRANSFER` errors, including when hidden
-in closures, ADTs, dictionaries, or handler evidence. This declaration does not
-authorize concurrent Fango callbacks or background retention of `FangoHost`.
+Storage keeps its typed payload alive but does not extend the lifetime of any
+external resource it references. Native resource operations check validity at
+runtime. [Async](library-async.md) callbacks may share native handles and
+functions.
+Native code must honor its declaration and may not invoke opaque Fango payloads.
 
 ## Native effect operations
 
@@ -141,7 +127,8 @@ operation.
 
 Every materialized sidecar package receives the reserved process-global
 `FangoHost`. Its `HasInput`, `ReadInputLine`, `WriteOutput`, `Arguments`,
-`WorkingDirectory`, and `Exit` methods expose the surrounding Fango process.
+`WorkingDirectory`, `Exit`, and `ExecutionContext` methods expose the surrounding
+Fango process.
 Compiled programs install the system host; the interpreter worker installs a
 proxy to the active interpreter session. Native function signatures never gain
 a hidden context argument. Sidecars may use `FangoHost` only during a native
@@ -149,10 +136,13 @@ call and must not replace it or retain it for asynchronous work. Host input
 buffer access and individual output writes are serialized. In the interpreter
 worker, concurrent host calls keep each request paired with its own reply.
 
-Background work instead uses [NativeRequest's scoped token protocol](library-native-requests.md).
-The canonical `Runtime.NativeRequest.Registration` is an imported boundary wrapper for
-checked Unit-returning submissions. Its `FangoRequest` support alias carries
-readiness and quiescence authority, never a Fango callback or process host.
+`ExecutionContext` returns the current evaluation's cancellation context; the
+system host returns a background context. A native operation may derive a context
+for work owned and drained by that evaluation, as the Async root does. This does
+not grant permission to retain the process-global host itself.
+
+Concurrent Fango invocation uses the checked [Async boundary](library-async.md).
+Arbitrary native background callbacks are not supported.
 
 ## Build and interpreter lifecycle
 

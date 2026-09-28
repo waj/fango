@@ -199,6 +199,9 @@ func (ck *Checker) resolveTypeExpr(te ast.TypeExpr, tv *TypeVars, want types.Var
 				for i, a := range te.Args {
 					at, aErrs := ck.resolveTypeExpr(a, tv, types.General)
 					errs = append(errs, aErrs...)
+					if at == nil {
+						return nil, errs
+					}
 					args[i] = at
 				}
 				return types.Row{Labels: []types.EffLabel{{Unique: effect.Unique, Name: effect.Name, Args: args}}}, errs
@@ -261,13 +264,18 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 			continue
 		}
 		args := make([]types.Type, len(l.Args))
+		valid := true
 		for i, a := range l.Args {
 			at, aErrs := ck.resolveTypeExpr(a, tv, types.General)
 			errs = append(errs, aErrs...)
+			valid = valid && at != nil
 			args[i] = at
 		}
+		if !valid {
+			continue
+		}
 		abort := len(info.Ops) > 0 && info.Ops[0].Abort
-		result.Labels = append(result.Labels, types.EffLabel{Unique: info.Unique, Name: info.Name, Args: args, Abort: abort, Suspension: info.Suspension})
+		result.Labels = append(result.Labels, types.EffLabel{Unique: info.Unique, Name: info.Name, Args: args, Abort: abort})
 	}
 	if row.Tail != "" {
 		if old, ok := tv.vars[row.Tail]; ok {

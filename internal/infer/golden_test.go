@@ -2,12 +2,13 @@ package infer_test
 
 import (
 	"fmt"
-	"github.com/waj/fango/internal/infer"
-	"github.com/waj/fango/internal/staging"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/waj/fango/internal/infer"
+	"github.com/waj/fango/internal/staging"
 
 	"github.com/waj/fango/internal/lexer"
 	"github.com/waj/fango/internal/parser"

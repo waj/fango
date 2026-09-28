@@ -1,10 +1,11 @@
 package codegen
 
 import (
-	"github.com/waj/fango/internal/core"
-	"github.com/waj/fango/internal/types"
 	goast "go/ast"
 	gotoken "go/token"
+
+	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/types"
 )
 
 func (g *gen) failureInspectExpr(e *core.FailureInspect) goast.Expr {

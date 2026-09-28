@@ -37,7 +37,7 @@ func RowCaptures(row *RowArgument) types.CaptureSet {
 
 // EqualValueRepresentation includes residual-row ABI metadata that ordinary
 // source type equality intentionally ignores. Execution transport is separate:
-// every stored function uses the same Direct/Exit/Machine family record.
+// every stored function uses the same Direct/Exit family record.
 func EqualValueRepresentation(a, b types.Type) bool {
 	if !types.Equal(a, b) {
 		return false
@@ -91,20 +91,16 @@ func FreeRows(expr Expr) map[types.CaptureVar]bool {
 
 func ExpressionRow(e Expr) *RowArgument {
 	switch e := e.(type) {
-	case *Completion:
-		return e.Row
+
 	case *App:
 		return e.Row
-	case *CoroutineScope:
-		return e.Row
-	case *CoroutineAdvance:
-		return e.Row
+
 	}
 	return nil
 }
 
 // CheckRowEvidence independently checks residual binding and call metadata.
-// The capture graph retains these arguments for interpretation checking.
+// Invocation rows must refer only to available lexical evidence.
 func CheckRowEvidence(p *Prog) []error {
 	var errors []error
 	report := func(format string, args ...any) { errors = append(errors, fmt.Errorf(format, args...)) }
@@ -180,15 +176,7 @@ func CheckRowEvidence(p *Prog) []error {
 				} else if e.CalleeKind == Value {
 					needsRow = ArrowOpenRow(e.Callee.Type(), 1)
 				}
-			case *CoroutineScope:
-				needsRow = ArrowOpenRow(e.Producer.Type(), 2)
-				if types.CoroutineScopeType(e.CursorTy) {
-					needsRow = ArrowOpenRow(e.Consumer.Type(), 1)
-				}
-			case *CoroutineAdvance:
-				needsRow = true
-			case *Completion:
-				needsRow = e.Name != types.CompletionFailureName && e.Name != types.CompletionFromFailureName && e.Name != types.CompletionDropSuspensionName && e.Name != types.CompletionDropDriveName
+
 			default:
 				return true
 			}

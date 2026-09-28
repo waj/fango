@@ -1,9 +1,0 @@
-module Helpers exposing (Callback(..), countdown, store, runStored)
-
-type Callback = Callback (() -> ())
-
-countdown n = if n == 0 then () else countdown (n - 1)
-
-store action = Callback action
-
-runStored value = case value of Callback action -> action()

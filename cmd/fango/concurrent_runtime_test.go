@@ -17,7 +17,7 @@ import (
 )
 
 // The same published Fango List is extended by independent interpreter
-// invocations and by emitted Direct and Machine workers. The generated leg
+// invocations and by emitted Direct workers. The generated leg
 // always uses the race detector, even when the parent test did not.
 func TestConcurrentSharedListBackends(t *testing.T) {
 	path := filepath.Join("..", "..", "testdata", "run", "c6d_shared_list.fango")
@@ -89,7 +89,6 @@ const generatedConcurrentListTest = `package main
 import (
     "sync"
     "testing"
-    "fangobuild/fangort"
 )
 
 func TestConcurrentSharedList(t *testing.T) {
@@ -102,16 +101,8 @@ func TestConcurrentSharedList(t *testing.T) {
             defer wg.Done()
             <-start
             direct := V_extend(int64(i))
-            machine := fangort.StartMachine(fangort.StartFrame(MachineStart_extend(int64(i))))
-            event, err := machine.Run()
-            if err != nil || !event.Done || event.Exit != nil {
-                t.Errorf("machine child %d: %v, %#v", i, err, event)
-                return
-            }
-            for name, list := range map[string]fangort.List[int64]{"Direct": direct, "Machine": event.Value.(fangort.List[int64])} {
-                if list.IsEmpty() || list.Head() != int64(i) || list.Tail().Head() != 1 {
-                    t.Errorf("%s child %d has wrong list", name, i)
-                }
+            if direct.IsEmpty() || direct.Head() != int64(i) || direct.Tail().Head() != 1 {
+                t.Errorf("child %d has wrong list", i)
             }
         }(i)
     }

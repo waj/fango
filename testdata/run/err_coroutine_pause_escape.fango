@@ -1,5 +1,0 @@
-import Runtime.Coroutine
-escape() = Runtime.Coroutine.with (\pause () ->
-    pause 1
-    \_ -> pause 2) (\work -> Runtime.Coroutine.advance work ())
-main() = print "unreachable"

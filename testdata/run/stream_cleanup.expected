@@ -4,6 +4,8 @@ close
 exhaust
 close
 [1, 2]
+unused
+close
 failed producer closed
 Err body
 Err cleanup

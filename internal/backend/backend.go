@@ -6,7 +6,6 @@
 package backend
 
 import (
-	"fmt"
 	"sort"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/waj/fango/internal/compilecache"
 	"github.com/waj/fango/internal/compileevent"
 	"github.com/waj/fango/internal/core"
-	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/modules"
 )
 
@@ -125,19 +123,8 @@ func (s *Session) EmitProject(entry string, result *check.Result, units []codege
 			}
 		}
 		unitProg := codegen.UnitProgram(result.Program, unit)
-		unitProg.ObserveFlow = check.FlowObserver(s.Observe, owner)
-		// Nothing rewrites installed Core before lowering, so the discharge
-		// the installer already made (or published) covers this owner. Lint
-		// still reconstructs and compares every contract and summary.
-		unitProg.CaptureFlowsProven = result.FlowsProven[unit.Name]
-		lowerStart := s.begin("lowering", owner)
-		mp, lowerErrs := machineir.LowerUnit(unitProg, unit.Name, result.Checker.B)
-		s.timed("lowering", owner, lowerStart)
-		if len(lowerErrs) != 0 {
-			return nil, fmt.Errorf("machine lowering failed in module %s: %v", owner, lowerErrs[0])
-		}
 		emitStart := s.begin("emission", owner)
-		file, err := codegen.EmitUnit(unitProg, mp, result.Checker.B, unit, printMain)
+		file, err := codegen.EmitUnit(unitProg, result.Checker.B, unit, printMain)
 		if err != nil {
 			return nil, err
 		}

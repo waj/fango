@@ -1,8 +1,0 @@
-import Fail exposing (attempt)
-import File
-
--- A handle is a capability: the scope's result may not be the handle itself.
-
-main() =
-    case attempt (\_ -> File.withFile "input.txt" (\file -> file)) of
-        _ -> print "unreachable"

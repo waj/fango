@@ -1,0 +1,3 @@
+{-# service #-}
+effect E
+    read : () -> Int

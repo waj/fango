@@ -52,7 +52,7 @@ func TestResidualRowProofRejectsMissingStaleAndNonlexicalArguments(t *testing.T)
 	}
 }
 
-func TestResidualRowsAndDeferredEvidenceSurviveRewriteAndContractChecks(t *testing.T) {
+func TestResidualRowsAndDeferredEvidenceSurviveRewrite(t *testing.T) {
 	p, lam, call := rowProofFixture()
 	ev := EffectInstance{Unique: 10, Name: "Reader", Captures: types.VarCapture(3)}
 	lam.RowEffects = []EffectInstance{ev}
@@ -60,15 +60,11 @@ func TestResidualRowsAndDeferredEvidenceSurviveRewriteAndContractChecks(t *testi
 	if errs := CheckRowEvidence(p); len(errs) != 0 {
 		t.Fatal(errs)
 	}
-	p.Defs[0].CaptureContract = inferCaptureContract(&p.Defs[0])
 	rewritten := SubstituteCaptureVars(lam, map[types.CaptureVar]types.CaptureSet{3: types.VarCapture(4)}, nil).(*Lambda)
 	if rewritten.RowEffects[0].Captures.Vars[0] != 4 || rewritten.Body.(*App).Row.Effects[0].Captures.Vars[0] != 4 || lam.RowEffects[0].Captures.Vars[0] != 3 {
 		t.Fatal("row evidence substitution was lost or mutated its source")
 	}
-	call.Row.From = 0
-	if CaptureContractCurrent(&p.Defs[0]) {
-		t.Fatal("stale residual flow contract accepted")
-	}
+
 }
 
 func TestFreeRowsExcludeInvocationBinders(t *testing.T) {

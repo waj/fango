@@ -7,6 +7,21 @@ The sections below do not imply a new global ordering. The coroutine and
 Async roadmaps name their stages and cross-document dependencies. Stage IDs and
 titles follow the [repository milestone rules](../AGENTS.md).
 
+## Simplification priority
+
+[The synchronous foundation and native tasks](roadmap-simplification.md) replace
+the coroutine-driven direction. This is a breaking redesign of the unpublished
+language. It takes priority over the coroutine, executor, STM, and capture-flow
+optimization roadmaps. Those topics retain their milestone identities but do not
+authorize further expansion of the old architecture.
+
+## Builder blocks and generators
+
+[Builder blocks and generators](roadmap-builders.md) propose a module-directed
+source lowering to ordinary delayed producer values. The proposal is separate
+from the deferred coroutine machinery and does not change current Stream or
+handler behavior.
+
 ## Standard library expansion
 
 Add APIs when programs need them, preferably in Fango; use bundled natives only
@@ -30,24 +45,26 @@ sequences](reference/library-bytes.md) owns `Bytes` and its `Source` and
 `Sink`, [buffered readers and writers](reference/library-readers.md) owns
 `Reader`, `Writer`, and every stage above them, and [IO and
 files](reference/library-io.md) owns the file and socket adapters. [HTTP and a
-server](roadmap-io.md) owns what is left. A concurrent server additionally depends
-on [Async with native readiness](roadmap-async.md#a3-native-readiness-and-io).
+server](roadmap-io.md) owns what is left. The [Async boundary](reference/library-async.md) supports shared native handles;
+server applications and cancellation-aware blocking IO remain unfinished.
+
+## Scoped readers and task effects
+
+[Scoped readers and effect-polymorphic tasks](roadmap-scoped-effects.md) owns
+deferred serial-runner and type-system extensions after implementing generic
+Async scheduling, checked handler inheritance, and cooperative host interruption. [Scoped memory readers](reference/library-readers.md#reader)
+are implemented.
 
 ## Addressing a specific handler
 
-The typing rule is implemented, including the row-indexed wrapper shape
-[`Reader` and `Writer`](reference/library-readers.md) are built from: inside a
-handler's subject, a closure performing the handled effect may be adapted to an
-arrow that omits it, which binds it to that activation rather than to whichever
-handler is innermost when it is called.
-[Effects](reference/effects.md#binding-a-closure-to-a-handler-activation) owns
-it. The questions it leaves open are with the other deferred effect work, in
-the [effects roadmap](roadmap-effects.md#handler-instances-open-questions).
+Scoped activation binding is implemented; see the
+[closure contract](reference/effects.md#closures-and-handler-effects). Further
+instance APIs remain in the [effects roadmap](roadmap-effects.md#handler-instances-open-questions).
 
 ## List representation
 
-[Lists](roadmap-list.md) owns chunk-size/growth experiments, length/indexing
-exposure, and chunk-aware native combinators. Callback and recursion costs
+[Lists](roadmap-list.md) owns private bulk-allocation experiments and possible
+length/indexing APIs over immutable storage. Callback and recursion costs
 belong to [calling conventions](roadmap-calls.md).
 
 ## Distributing the bundled sources
@@ -130,45 +147,15 @@ Deferred until a consumer needs them:
 - Capture-excluded self loops could copy changed parameters into per-iteration locals.
 - A diagnostic/LSP hint could explain near-miss tail-loop eligibility.
 
-## Effects, state, and resource scopes
+## Deferred concurrency and analysis proposals
 
-[Effects](roadmap-effects.md) owns general handler and language extensions.
-[Owned coroutines](roadmap-coroutines.md) details the shared suspension API,
-implemented dynamic scope ownership, suspending cleanup, native
-retention/transfer contracts, and execution checkpoints.
-Preserve checked ownership and ordinary calls/explicit machines; Stream and Async
-names do not become compiler primitives.
-
-## Structured Async and executors
-
-[Async](roadmap-async.md) owns library task/context semantics, cooperative
-scheduling, native readiness, parallel and mixed worker-pool executors,
-and bounded concurrent streams/events. It builds on the coroutine stages.
-The cooperative executor also schedules generated CPU work at
-[automatic checkpoints](reference/library-async-cooperative.md). Both concurrent executors require the general
-runtime safety gate. Goroutines drive coroutines rather than represent effect
-continuations.
-
-## Shared state and transactional memory
-
-[Transactional memory](roadmap-stm.md) owns the proposed answer to shared
-mutable state: transactional variables, atomic transactions with an abort-only
-`retry`, and the one native boundary they need. The control layer is ordinary
-Fango over the implemented handler rules; scheduling dependencies belong to
-[Async](roadmap-async.md#implementation-stages), and a general `TVar a` also needs
-the [typed opaque-value boundary](roadmap-coroutines.md#c6a-typed-opaque-values).
-Scalar STM already needs checked shared-capability and phantom-wrapper contracts;
-cooperative scheduling does not remove those prerequisites.
-
-## Capture-flow analysis cost
-
-[Compile latency](roadmap-compile-latency.md) owns the cold-build cost of the
-compiler. The capture-flow analysis is most of it: every definition is its
-own root, so a helper reached from many definitions is interpreted once per
-root.
-[Sharing work across roots](roadmap-compile-latency.md#cl5-sharing-interpretation-across-roots)
-is a redesign, because object identities, owners, and allocation ancestry are
-relative to the root being checked.
+[Synchronous effects](design/effects.md) and [native tasks](design/tasks.md)
+are implemented. The [coroutine](roadmap-coroutines.md),
+[Async/executor](roadmap-async.md), [STM](roadmap-stm.md), and
+[capture-flow optimization](roadmap-compile-latency.md) proposals retain their
+stage identities as deferred historical directions. They do not mandate
+reintroducing suspension or lifetime analysis. New concurrency APIs must justify
+their complexity against the [remaining simplification work](roadmap-simplification.md).
 
 ## Operator fixity scope
 

@@ -178,6 +178,11 @@ func (w *canonicalWriter) write(v reflect.Value, field string) {
 	}
 	if v.Kind() == reflect.Struct {
 		w.token(v.Type().String())
+		if v.Type() == effLabelReflectType && v.FieldByName("Scoped").Bool() {
+			// Permission identity is alpha-renamable, but two distinct local scopes
+			// must not hash as if they were one merely because their names agree.
+			w.token(strconv.Itoa(w.logicalID(effLabelReflectType, v.FieldByName("Unique").Int())))
+		}
 		for i := 0; i < v.NumField(); i++ {
 			f := v.Type().Field(i)
 			if f.PkgPath != "" || f.Tag.Get("object") == "omit" ||

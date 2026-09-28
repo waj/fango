@@ -2,14 +2,20 @@ import Stream
 import Iterator
 import Fail
 import Runtime.Scope
+import Result exposing (Result(..))
 
-source = Stream.generate (\_ ->
-    Runtime.Scope.finally (\_ ->
-        Stream.yield 9
-        Fail.fail "producer failed") (\_ -> print "closed"))
+source = Stream.unfold 0 (\state ->
+    if state == 0 then Just (9, 1) else Fail.fail "producer failed")
 
-main() =
-    print (Fail.attempt (\_ -> Stream.withCursor source (\cursor ->
-        print (Fail.attempt (\_ -> Iterator.next cursor))
-        print (Fail.attempt (\_ -> Iterator.next cursor))
-        print (Fail.attempt (\_ -> Iterator.next cursor)))))
+main() = print (Fail.attempt (\_ -> Runtime.Scope.finally (\_ ->
+    Stream.withCursor source (\cursor ->
+        case Iterator.next cursor of
+            Nothing -> print "empty"
+            Just (value, next) ->
+                print value
+                print (case Fail.attempt (\_ -> Iterator.next next) of
+                    Err error -> error
+                    Ok _ -> "unexpected success")
+                print (case Fail.attempt (\_ -> Iterator.next next) of
+                    Err error -> error
+                    Ok _ -> "unexpected success"))) (\_ -> print "closed")))

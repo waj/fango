@@ -1,9 +1,0 @@
-import Fail exposing (Fail, attempt)
-import File
-import IO exposing (Error)
-
--- A closure over the handle would read the file after its release.
-
-main() =
-    case attempt (\_ -> File.withFile "input.txt" (\file -> \_ -> File.readLine file)) of
-        _ -> print "unreachable"

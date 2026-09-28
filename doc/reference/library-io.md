@@ -122,25 +122,30 @@ failure, and after a failed body it is recorded alongside the body's failure.
 otherwise the text and its exact terminator — and `write` writes a string as
 given. `readBytes file count` answers `Nothing` at end of file and otherwise up
 to `count` bytes, which may be fewer; a non-positive count answers an empty
-`Bytes`, which is not end of file. It shares the handle's buffered reader with
+`Bytes` while input remains, and `Nothing` at end of file. It shares the handle's buffered reader with
 `readLine`, so counted reads and line reads interleave on one handle, and it is
 the only read that can carry a byte no `String` holds. `writeBytes` writes a
 `Bytes` as given. All four raise `Fail IO.Error` on a system failure, so a body
 that only reads and writes needs no `case` of its own; `attempt` around the
 scope collects the failure.
 
+A handle serializes complete read operations, including access to its buffer.
+Concurrent readers consume successive input; there is no separate public
+peek/read window. Closing does not wait for a blocked read's lock: it closes
+the underlying file, which may interrupt that read. Later operations report a
+closed-resource error.
+
 `source` and `sink` adapt an open file to the leaves a
 [buffered reader and writer](library-readers.md) are built over, so a file and
-a memory buffer drive the same parsing code. Both capture the handle and are
-therefore bound to its scope; neither closes anything, because closing belongs
-to the scope. A pull answers whatever the file had, which may be short. `read` and `writeAll` handle a whole file without a
+a memory buffer drive the same parsing code. Both capture the handle. Calls after the owning scope closes report
+a closed-resource error; closing belongs to the scope. A pull answers whatever the file had, which may be short. `read` and `writeAll` handle a whole file without a
 handle and answer a `Result` instead. `listDirectory` names a directory's
 entries in sorted order, and `isDirectory` answers whether a path names one;
 a missing path is an `Err` with kind `NotFound` for both.
 
 `File.Handle` is abstract, with no accessible constructor, `Show`, or `Eq`.
-It is available only inside a `with*` scope and obeys the ordinary
-[resource escape and wrapper rules](resources.md#resource-escape-checks).
+A `with*` scope owns its lifetime. Returning a handle does not extend that
+lifetime; [resource validity](resources.md) is checked at runtime.
 Named callbacks may perform fewer effects than the wrapper permits.
 
 ## Net
@@ -177,3 +182,9 @@ on port 8000 by default, or on the port passed as its sole argument:
 fango run examples/echo.fango -- 8000
 telnet 127.0.0.1 8000
 ```
+
+Connection reads serialize access to the shared input buffer. Writes have a
+separate lock covering the whole byte sequence. Closing a connection can
+interrupt a blocked read or write and makes later operations fail. These
+runtime guarantees support shared handles in [Async tasks](library-async.md).
+Task cancellation does not automatically close the connection.

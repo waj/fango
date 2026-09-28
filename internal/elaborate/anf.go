@@ -153,29 +153,39 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		return &core.ControlExit{Origin: e.Origin, Effect: e.Effect, Op: e.Op, Payload: payload, Ty: e.Ty}, hoists
 	case *core.Neg:
 		return &core.Neg{Operand: slot(e.Operand), Ty: e.Ty}, hoists
+	case *core.ParallelMap:
+		return &core.ParallelMap{Function: slot(e.Function), Input: slot(e.Input), Ty: e.Ty}, hoists
+	case *core.AsyncLaunch:
+		n := *e
+		c := *e.Call
+		c.Callee = slot(c.Callee)
+		c.Args = []core.Expr{slot(c.Args[0])}
+		n.Call = &c
+		return &n, hoists
+	case *core.AsyncRebase:
+		c := *e.Call
+		c.Callee = slot(c.Callee)
+		c.Args = []core.Expr{slot(c.Args[0])}
+		return &core.AsyncRebase{Call: &c}, hoists
+	case *core.AsyncSupervise:
+		c := *e.Call
+		c.Callee = slot(c.Callee)
+		c.Args = []core.Expr{slot(c.Args[0])}
+		return &core.AsyncSupervise{Call: &c}, hoists
 	case *core.NativeCall:
 		args := make([]core.Expr, len(e.Args))
 		for i, a := range e.Args {
 			args[i] = slot(a)
 		}
-		return &core.NativeCall{Name: e.Name, Module: e.Module, Storage: e.Storage, RetainsRequest: e.RetainsRequest, Args: args, Ty: e.Ty}, hoists
-	case *core.Work:
-		n := *e
-		n.Args = make([]core.Expr, len(e.Args))
-		for i, a := range e.Args {
-			n.Args[i] = slot(a)
-		}
-		return &n, hoists
+		return &core.NativeCall{Name: e.Name, Module: e.Module, Storage: e.Storage, Args: args, Ty: e.Ty}, hoists
+
 	case *core.FailureInspect:
 		args := make([]core.Expr, len(e.Args))
 		for i, a := range e.Args {
 			args[i] = slot(a)
 		}
 		return &core.FailureInspect{Name: e.Name, Args: args, Result: e.Result, Ty: e.Ty}, hoists
-	case *core.Completion:
-		n := *e
-		n.Value = slot(e.Value)
-		return &n, hoists
+
 	case *core.Quote:
 		holes := make([]core.Expr, len(e.Holes))
 		for i, h := range e.Holes {
@@ -188,12 +198,6 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 			args[i] = slot(a)
 		}
 		return &core.Perform{Origin: e.Origin, Op: e.Op, Effect: e.Effect, Args: args, Ty: e.Ty, Control: e.Control}, hoists
-	case *core.Suspend:
-		return &core.Suspend{Request: slot(e.Request), Ty: e.Ty}, hoists
-	case *core.CoroutineAdvance:
-		return &core.CoroutineAdvance{Cursor: slot(e.Cursor), Reply: slot(e.Reply), Close: e.Close, Result: e.Result, Access: e.Access, Ty: e.Ty, Row: e.Row}, hoists
-	case *core.CoroutineScope:
-		return &core.CoroutineScope{Yield: e.Yield, Traversal: e.Traversal, Scope: e.Scope, Producer: slot(e.Producer), Consumer: slot(e.Consumer), CursorTy: e.CursorTy, Ty: e.Ty, Control: e.Control, Row: e.Row}, hoists
 
 	case *core.ResumeTail:
 		var next core.Expr

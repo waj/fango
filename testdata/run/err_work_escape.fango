@@ -1,7 +1,0 @@
-import Runtime.Coroutine
-import Runtime.Work
-
-main() =
-    Runtime.Coroutine.with (\_ () -> ()) (\cursor ->
-        item = Runtime.Work.run (\owner -> Runtime.Work.pack (Runtime.Work.facet owner) cursor)
-        ())

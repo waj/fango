@@ -27,13 +27,13 @@ import Writer exposing (Writer)
 lineLimit : Int
 lineLimit = 65536
 
-writeLine : Writer {IO, Fail Net.Error} -> Bytes.Bytes ->{IO, Fail Net.Error} ()
+writeLine : Writer e -> Bytes.Bytes ->{e} ()
 writeLine writer line =
     Writer.write writer line
     Writer.writeString writer "\n"
     writer.flush()
 
-echoLines : Reader {IO, Fail Net.Error} -> Writer {IO, Fail Net.Error} ->{IO, Fail Net.Error} ()
+echoLines : Reader e -> Writer e ->{e} ()
 echoLines reader writer =
     case Reader.readLine reader lineLimit of
         Found line ->
@@ -47,7 +47,7 @@ echoLines reader writer =
                 writer.flush()
         Overflowed -> ()
 
-echoReader : Net.Connection -> Reader {IO, Fail Net.Error} ->{IO, Fail Net.Error} ()
+echoReader : Net.Connection -> Reader e ->{IO, Fail Net.Error | e} ()
 echoReader connection reader = Writer.over (Net.sink connection) 8192 (echoLines reader)
 
 echoConnection : Net.Connection ->{IO, Fail Net.Error} ()

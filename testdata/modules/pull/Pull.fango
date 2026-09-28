@@ -1,22 +1,13 @@
-module Pull exposing (Emit, Pull, emit, read, withValues)
+module Pull exposing (Pull, read, withValues)
+import Iterator
 
-import Runtime.Coroutine exposing (Coroutine, Drive, Step(..))
+type Pull state a e = Pull (Iterator.Iterator state a e)
 
-effect Emit a
-    emit : a -> ()
+withValues values consumer = consumer (Pull (Iterator.start values (\pending ->
+    case pending of
+        [] -> Nothing
+        [value | rest] -> Just (value, rest))))
 
-{-# resource #-}
-type Pull a e = Pull (Coroutine a () () e)
-
-withValues : (() ->{Emit a | e} ()) -> (Pull a e ->{Drive | e} result) ->{e} result
-withValues producer consumer = Runtime.Coroutine.with
-    (\pause _ -> handle producer () of
-        emit value -> resume (pause value))
-    (\work -> consumer (Pull work))
-
-read : Pull a e ->{Drive | e} Maybe a
-read (Pull work) = case Runtime.Coroutine.advance work () of
-    Suspended value -> Just value
-    Finished () -> Nothing
-    Closed -> Nothing
-    Polled -> read (Pull work)
+read (Pull cursor) = case Iterator.next cursor of
+    Nothing -> Nothing
+    Just (value, next) -> Just (value, Pull next)

@@ -1,10 +1,10 @@
 package infer
 
 import (
-	"github.com/waj/fango/internal/core"
+	"maps"
+
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/types"
-	"maps"
 )
 
 func (g *generator) solveConstraints(ps []types.Pred) (Subst, []types.Pred, []diag.Error) {
@@ -15,58 +15,8 @@ func (g *generator) solveConstraints(ps []types.Pred) (Subst, []types.Pred, []di
 	for i := range g.cs {
 		g.cs[i].Invariant = invariant
 	}
-	base := maps.Clone(g.ck.Sub)
-	cs := append([]Constraint(nil), g.cs...)
-	var execution []Constraint
-	for {
-		sub, preds, errs := Solve(cs, ps, maps.Clone(base), g.ck.B, g.ck.Sup)
-		grew := false
-		flowReady := true
-		for _, err := range errs {
-			if err.Title != "EFFECT MISMATCH" {
-				flowReady = false
-			}
-		}
-		if flowReady {
-			needs := g.executionNeeds(sub)
-			for _, row := range g.workRows {
-				needs = append(needs, executionNeed{WorkNeed: core.WorkNeed{Need: row, Immediate: true}})
-			}
-			for _, need := range needs {
-				if need.Immediate {
-					for i := range cs {
-						if cs[i].Include && !cs[i].WorkCharge && (sharesWorkRow(cs[i].Left, need.Need) || (!hasSuspension(sub.Apply(cs[i].Left)) && sharesWorkRow(sub.Apply(cs[i].Left), sub.Apply(need.Need)))) {
-							cs[i].WorkCharge = true
-							grew = true
-						}
-					}
-					continue
-				}
-				if v, ok := need.Need.(*types.TVar); ok && v.Kind == types.RowVar {
-					need.Need = types.Row{Tail: v}
-				}
-				if v, ok := need.Budget.(*types.TVar); ok && v.Kind == types.RowVar {
-					need.Budget = types.Row{Tail: v}
-				}
-				known := false
-				for _, c := range execution {
-					if types.Equal(c.Left, need.Need) && types.Equal(c.Right, need.Budget) {
-						known = true
-						break
-					}
-				}
-				if !known {
-					c := Constraint{Left: need.Need, Right: need.Budget, Span: need.Span, Why: Why{Kind: WhyCall}, Include: true, WorkCharge: !need.control, ControlNeed: need.control}
-					execution = append(execution, c)
-					cs = append(cs, c)
-					grew = true
-				}
-			}
-		}
-		if !grew {
-			return sub, preds, errs
-		}
-	}
+	cs := append(append([]Constraint(nil), g.cs...), g.scopeObligations...)
+	return Solve(cs, ps, maps.Clone(g.ck.Sub), g.ck.B, g.ck.Sup)
 }
 
 // Polarity is a set of occurrences: absent, positive, negative, or both.
@@ -175,14 +125,6 @@ func subsumption(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply,
 			return t
 		case types.Row:
 			r := types.Row{Tail: sup.FreshVar(types.RowVar)}
-			// A variance view changes the residual budget, not the explicitly
-			// declared owner protocol of a callback. Keep these labels visible
-			// while flexible residual tails are solved independently.
-			for _, label := range t.Labels {
-				if label.Name == types.CoroutineDriveName || label.Name == types.CoroutineSuspensionName {
-					r.Labels = append(r.Labels, label)
-				}
-			}
 			if p == positive {
 				row(t, r)
 			} else {
@@ -277,21 +219,4 @@ func subsumption(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply,
 	}
 	m := check(c.Left, c.Right)
 	return rows, m
-}
-
-// Solver aliases can connect a producer-local pause row with its residual row.
-// They are not provenance for a deferred registration charge: doing so exports
-// the producer's own Suspension. Concrete foreign control is projected by the
-// owner-flow constraints separately.
-func hasSuspension(t types.Type) bool {
-	r, ok := t.(types.Row)
-	if !ok {
-		return false
-	}
-	for _, label := range r.Labels {
-		if label.Name == types.CoroutineSuspensionName {
-			return true
-		}
-	}
-	return false
 }

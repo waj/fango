@@ -4,81 +4,48 @@ module Writer exposing (Writer(..), collecting, over, write, writeString)
 import Basics exposing (..)
 import Bytes exposing (Bytes, Sink(..))
 import List exposing (List)
-
-{- Buffered writing over an abstract byte sink.
-
-A `Writer e` is a record of closures bound to one `over` or `collecting`
-activation, so a response assembled from a status line, several headers, and a
-body costs one underlying write per flush window rather than one per part. `e`
-is what a call actually performs: nothing for `collecting`, `IO` and
-`Fail IO.Error` for a file or a socket.
-
-The buffer is the activation's own state cell. Clauses see an immutable
-snapshot and the commit happens on `resume`, so no new mutable primitive is
-introduced and none is wanted.
-
-`Writing` is private and named apart from `Writer` because a module may not
-declare a type and an effect of one name. Its labels reach no signature: the
-effect is discharged inside the scopes below and a consumer sees only `e`.
-Because an operation name occupies the module's value namespace, `emit` and
-`flush` are not also functions here; a caller writes `writer.flush()`. -}
+import Runtime.Local
 
 type Writer e =
     { emit : Bytes ->{e} ()
     , flush : () ->{e} ()
     }
 
-effect Writing
-    emit : Bytes -> ()
-    flush : () -> ()
-
--- A window below one byte would buffer forever, so it clamps to one and every
--- emit goes straight through.
-windowOf : Int -> Int
 windowOf size = if size < 1 then 1 else size
 
--- over writes whenever the buffer reaches the window, and once more from its
--- `return` clause. The final flush lives there rather than in a release
--- because `return` runs only on normal completion: a body that aborts emits
--- nothing further, so no reader ever receives a truncated message it would
--- have to guess at. `collecting` is the spelling for a caller that wants that
--- guarantee for the whole body.
---
--- An emit is never split, so a single chunk larger than the window is one
--- oversized write rather than several.
-over : Sink e -> Int -> (Writer e ->{e} a) ->{e} a
+-- Flush on normal completion only; a failed body does not emit a partial message.
+{-# scoped s #-}
+over : Sink e -> Int -> (Writer s ->{s} a) ->{e} a
 over sink size use =
-    handle use { emit = \chunk -> emit chunk, flush = \_ -> flush() } with pending = Bytes.empty of
-        emit chunk ->
-            grown = Bytes.append pending chunk
-            if Bytes.length grown >= windowOf size then
-                sink.write grown
-                resume () with Bytes.empty
-            else
-                resume () with grown
-        flush () ->
-            if Bytes.length pending > 0 then
-                sink.write pending
-                resume () with Bytes.empty
-            else
-                resume () with pending
-        return value ->
-            if Bytes.length pending > 0 then sink.write pending else ()
-            value
+    Runtime.Local.run Bytes.empty (\pending ->
+        writer =
+            { emit = \chunk ->
+                grown = Bytes.append (pending.read()) chunk
+                if Bytes.length grown >= windowOf size then
+                    sink.write grown
+                    pending.write Bytes.empty
+                else pending.write grown
+            , flush = \_ ->
+                buffered = pending.read()
+                if Bytes.length buffered > 0 then sink.write buffered else ()
+                pending.write Bytes.empty
+            }
+        result = use writer
+        writer.flush()
+        result)
 
--- collecting performs nothing at all, so the same writing code runs in a
--- fixture with no effects and the caller receives everything or nothing. The
--- chunks are kept in reverse and joined once, which is what keeps assembling a
--- large body linear rather than quadratic; `flush` has nowhere to push to.
-collecting : (Writer e ->{e} a) ->{e} (a, Bytes)
+{-# scoped s #-}
+collecting : (Writer s ->{s} a) ->{e} (a, Bytes)
 collecting use =
-    handle use { emit = \chunk -> emit chunk, flush = \_ -> flush() } with parts = [] of
-        emit chunk -> resume () with [chunk | parts]
-        flush () -> resume () with parts
-        return value -> (value, Bytes.concat (List.reverse parts))
+    Runtime.Local.run [] (\parts ->
+        result = use
+            { emit = \chunk -> parts.write [chunk | parts.read()]
+            , flush = \_ -> ()
+            }
+        (result, Bytes.concat (List.reverse (parts.read()))))
 
 write : Writer e -> Bytes ->{e} ()
-write writer chunk = writer.emit chunk
+write writer text = writer.emit text
 
 writeString : Writer e -> String ->{e} ()
 writeString writer text = writer.emit (Bytes.fromString text)

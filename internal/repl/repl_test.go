@@ -90,16 +90,21 @@ func TestListSyntax(t *testing.T) {
 	}
 }
 
-func TestOwnedStreamRunsInREPL(t *testing.T) {
+func TestImportAsyncFromCheckoutRoot(t *testing.T) {
+	var out strings.Builder
+	RunWith(strings.NewReader("import Async\n:quit\n"), &out, Options{Root: filepath.Join("..", "..")})
+	got := out.String()
+	if !strings.Contains(got, "loaded Async\n") || strings.Contains(got, "RESERVED MODULE") {
+		t.Fatalf("Async import failed from source root containing runtime/:\n%s", got)
+	}
+}
+
+func TestExplicitStreamRunsInREPL(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader(`import Stream
 import Iterator
-produce : () ->{Stream.Yield Int} ()
-produce _ =
-    Stream.yield 10
-    Stream.yield 20
-    Stream.yield 30
-Stream.forEach print (Stream.generate produce)
+produce = Stream.fromList [10, 20, 30]
+Stream.forEach print produce
 :quit
 `), &out)
 	got := out.String()
@@ -114,15 +119,10 @@ func TestStreamResidualRowsInREPLAndStaging(t *testing.T) {
 import Iterator
 import Fail
 import Meta
-source : Stream.Stream Int (Fail.Fail String)
-source = Stream.generate (\_ ->
-    Stream.yield 7
-    Fail.fail "finished")
-readAll() = Fail.attempt (\_ -> Stream.withCursor source (\cursor ->
-    first = Fail.attempt (\_ -> Iterator.next cursor)
-    second = Fail.attempt (\_ -> Iterator.next cursor)
-    third = Fail.attempt (\_ -> Iterator.next cursor)
-    (first, second, third)))
+source : Stream.Stream Int Int (Fail.Fail String)
+source = Stream.unfold 0 (\state ->
+    if state == 0 then Just (7, 1) else Fail.fail "finished")
+readAll() = Fail.attempt (\_ -> Stream.toList source)
 readAll()
 answer : String
 answer = $(Meta.lift (show (readAll())))
@@ -131,24 +131,21 @@ readAll()
 :quit
 `), &out)
 	got := out.String()
-	if strings.Contains(got, "INTERNAL") || strings.Contains(got, "runtime error") || strings.Count(got, "Ok Just 7, Err finished, Ok Nothing") < 3 {
+	if strings.Contains(got, "INTERNAL") || strings.Contains(got, "runtime error") || strings.Count(got, "Err finished") < 3 {
 		t.Fatalf("latent row traversal did not survive REPL/staging boundaries:\n%s", got)
 	}
 }
 
-func TestOwnedStreamStagesAndRollsBackInREPL(t *testing.T) {
+func TestExplicitStreamStagesAndRollsBackInREPL(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader(`import Meta
 early : Bool
 early = $(Meta.lift True)
 import Stream
 import Iterator
-produce : () ->{Stream.Yield Int} ()
-produce() =
-    Stream.yield 10
-    Stream.yield 20
+produce = Stream.fromList [10, 20]
 total : () -> Int
-total() = Stream.fold (\element acc -> element + acc) 0 (Stream.generate produce)
+total() = Stream.fold (\element acc -> element + acc) 0 produce
 bad : String
 bad = $(Meta.lift (total()))
 :type bad
@@ -167,21 +164,19 @@ $(Meta.lift (total()))
 	}
 }
 
-func TestSuspendingCleanupAvailableInREPL(t *testing.T) {
+func TestStreamCleanupAvailableInREPL(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader(`import Stream
 import Iterator
 import Runtime.Scope
-pause : () ->{Stream.Yield Int} ()
-pause() = Stream.yield 1
 withCleanup action cleanup = Runtime.Scope.finally action cleanup
-bad() = Stream.forEach print (Stream.generate (\_ -> withCleanup (\_ -> ()) pause))
-:type bad
-Stream.forEach print (Stream.generate pause)
+run() = withCleanup (\_ -> Stream.forEach print (Stream.fromList [1])) (\_ -> print "closed")
+:type run
+run()
 :quit
 `), &out)
 	got := out.String()
-	if !strings.Contains(got, "bad : () ->{IO} ()") || !strings.Contains(got, "1\n") {
+	if !strings.Contains(got, "run : () ->{IO} ()") || !strings.Contains(got, "1\n") {
 		t.Fatalf("cleanup contract or following traversal failed:\n%s", got)
 	}
 	if strings.Contains(got, "INTERNAL") || strings.Contains(got, "CAPTURE CHECK ERROR") {

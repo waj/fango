@@ -1,0 +1,8 @@
+import Bytes
+import Reader
+import Stream
+
+
+main() =
+    stream = Reader.overBytes (Bytes.fromString "abc") Reader.chunks
+    print (Stream.toList stream)

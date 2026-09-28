@@ -36,25 +36,23 @@ func ExprControl(e Expr) types.Control {
 		return types.Control{}
 	case *ControlExit:
 		return types.Control{Transport: types.Exit}
-	case *Suspend:
-		return types.JoinControl(types.Control{Transport: types.Machine}, ExprControl(e.Request))
-	case *CoroutineAdvance:
-		return types.JoinControl(types.Control{Transport: types.Machine}, ExprControl(e.Cursor), ExprControl(e.Reply))
-	case *CoroutineScope:
-		// Producer's latent Machine protocol is consumed by this owner rather
-		// than joined into the enclosing computation.
-		return types.JoinControl(e.Control, ExprControl(e.Producer), ExprControl(e.Consumer))
 
 	case *Neg:
 		return ExprControl(e.Operand)
+	case *ParallelMap:
+		return join(e.Function, e.Input)
+	case *AsyncLaunch:
+		return join(e.Call.Callee, e.Call.Args[0])
+	case *AsyncRebase:
+		return ExprControl(e.Call)
+	case *AsyncSupervise:
+		return ExprControl(e.Call)
 	case *NativeCall:
 		return join(e.Args...)
-	case *Work:
-		return join(e.Args...)
+
 	case *FailureInspect:
 		return join(e.Args...)
-	case *Completion:
-		return types.JoinControl(e.Control, ExprControl(e.Value))
+
 	case *Quote:
 		return join(e.Holes...)
 	case *If:
@@ -131,8 +129,7 @@ func ControlName(c types.Control) string {
 	switch c.Transport {
 	case types.Exit:
 		name = "exit"
-	case types.Machine:
-		name = "machine"
+
 	}
 	if c.Polymorphic {
 		if c.Transport == types.Direct {

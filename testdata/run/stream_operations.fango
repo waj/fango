@@ -9,6 +9,13 @@ main() =
     Stream.forEach print (Stream.take 2 source)
     print (Stream.toList (Stream.zip source (Stream.fromList [10, 20])))
     Stream.withCursor (Stream.fromList [42]) (\cursor ->
-        print (Iterator.next cursor)
-        print (Iterator.next cursor)
-        print (Iterator.next cursor))
+        case Iterator.next cursor of
+            Nothing -> print "empty"
+            Just (value, next) ->
+                print (Just value)
+                print (case Iterator.next next of
+                    Nothing -> True
+                    Just _ -> False)
+                print (case Iterator.next next of
+                    Nothing -> True
+                    Just _ -> False))

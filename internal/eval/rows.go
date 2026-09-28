@@ -20,16 +20,6 @@ func (f *Frame) row(id types.CaptureVar) (*fangort.EvidenceRow, bool) {
 	return nil, false
 }
 
-func (f *Frame) closureRows(lam *core.Lambda) rowEnv {
-	rows := rowEnv{}
-	for id := range core.FreeRows(lam) {
-		if row, ok := f.row(id); ok {
-			rows[id] = row
-		}
-	}
-	return rows
-}
-
 func (in *interp) argumentRow(argument *core.RowArgument, fr *Frame) (*fangort.EvidenceRow, error) {
 	if argument == nil {
 		return nil, nil
@@ -48,7 +38,7 @@ func (in *interp) argumentRow(argument *core.RowArgument, fr *Frame) (*fangort.E
 		if ev == nil {
 			return nil, fmt.Errorf("eval: missing residual evidence %s", effect.Name)
 		}
-		bindings[i] = fangort.EvidenceBinding{Name: strconv.Itoa(effect.Unique), Family: fangort.EvidenceFamily{Direct: ev, Exit: ev, Machine: ev}}
+		bindings[i] = fangort.EvidenceBinding{Name: strconv.Itoa(effect.Unique), Family: fangort.EvidenceFamily{Origin: projectedEvidenceOrigin(ev, effect.Name), Direct: ev, Exit: ev}}
 	}
 	return fangort.ExtendEvidenceRow(tail, bindings...), nil
 }
@@ -65,7 +55,7 @@ func bindInvocationRow(param types.CaptureVar, effects []core.EffectInstance, ro
 
 func resolveEvidence(ev *evidence) *evidence {
 	for ev != nil && ev.rowEffect != 0 {
-		ev = fangort.RowEvidence[*evidence](ev.row, strconv.Itoa(ev.rowEffect), fangort.MachineEvidence)
+		ev = fangort.RowEvidence[*evidence](ev.row, strconv.Itoa(ev.rowEffect), fangort.DirectEvidence)
 	}
 	return ev
 }

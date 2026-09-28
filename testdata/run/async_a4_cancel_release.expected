@@ -1,7 +1,0 @@
-body first
-body second
-release start first
-release start second
-release end second
-release end first
-Err stop

@@ -80,6 +80,9 @@ func dumpDecl(d Decl) string {
 	case *ValueDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(def %s", d.Name)
+		if d.ScopedRow != "" {
+			fmt.Fprintf(&b, " (pragma scoped %s)", d.ScopedRow)
+		}
 		if p := dumpPatternParams(d.Params); p != "" && len(d.Equations) == 0 {
 			fmt.Fprintf(&b, " %s", p)
 		}
@@ -108,9 +111,8 @@ func dumpDecl(d Decl) string {
 	case *TypeDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(type %s", d.Name)
-		if d.Shared {
-			b.WriteString(" (pragma shared-resource)")
-		} else if d.Resource {
+
+		if d.Resource {
 			b.WriteString(" (pragma resource)")
 		}
 		if p := dumpParams(d.Params); p != "" {
@@ -142,9 +144,7 @@ func dumpDecl(d Decl) string {
 	case *EffectDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(effect %s", d.Name)
-		if d.Service {
-			b.WriteString(" (pragma service)")
-		}
+
 		if p := dumpParams(d.Params); p != "" {
 			fmt.Fprintf(&b, " %s", p)
 		}

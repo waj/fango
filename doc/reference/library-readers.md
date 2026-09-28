@@ -22,8 +22,7 @@ type Sink e = { write : Bytes ->{e} () }
 which may be short; an empty chunk is not end of input, and a reader pulls
 through it. `write chunk` accepts a chunk and writes all of it before
 returning. Neither carries a close: closing belongs to the scope owning the
-file or socket, and a leaf outliving that scope is already rejected because it
-captures the handle.
+file or socket. Native operations reject use of a closed handle.
 
 `e` is what the leaf performs, so a memory leaf is pure and a socket leaf is
 not. The row is an ordinary [row-kinded
@@ -32,11 +31,9 @@ argument](functions.md#row-kinded-parameters): `Source {IO, Fail IO.Error}` and
 
 ## Reader
 
-A `Reader e` is a record of closures bound to one `over` activation, so two
-readers are two records and each `refill` reaches its own source rather than
-whichever handler is innermost when it is called. The buffer is the
-activation's own state cell, which is why nothing here needs a mutable
-primitive.
+A `Reader e` is a record whose operations perform exactly `e`. Parsing helpers
+propagate that row without adding IO. The `withBytes`, `over`, `overBytes`, and
+`limited` constructors use scoped local state. Separate readers advance independently.
 
 ```fango
 import Reader exposing (Read(..), Reader)
@@ -49,9 +46,15 @@ type Reader e =
 
 type Read = Found Bytes | Ended Bytes | Overflowed deriving (Eq, Show)
 
-over : Source e -> (Reader e ->{e} a) ->{e} a
-overBytes : Bytes -> (Reader e ->{e} a) ->{e} a
-limited : Reader e -> Int -> (Reader e ->{e} a) ->{e} a
+{-# scoped s #-}
+withBytes : Bytes -> (Reader s ->{s} a) ->{e} a
+
+{-# scoped s #-}
+over : Source e -> (Reader s ->{s} a) ->{e} a
+{-# scoped s #-}
+overBytes : Bytes -> (Reader s ->{s} a) ->{e} a
+{-# scoped s #-}
+limited : Reader e -> Int -> (Reader s ->{s} a) ->{e} a
 ensure : Reader e -> Int ->{e} Bool
 atEnd : Reader e ->{e} Bool
 readUpTo : Reader e -> Int ->{e} Bytes
@@ -59,26 +62,44 @@ readExactly : Reader e -> Int ->{e} Maybe Bytes
 readUntil : Reader e -> Bytes -> Int ->{e} Read
 readLine : Reader e -> Int ->{e} Read
 forEachChunk : Reader e -> (Bytes ->{e} ()) ->{e} ()
-chunks : Reader e -> Stream Bytes e
+chunks : Reader e -> Stream () Bytes {e}
 ```
 
 The three fields are the primitives and carry no policy. `buffered()` answers
-what is in hand and performs no IO. `refill()` pulls until the buffer grows,
+what is in hand, using the effects in `e`. `refill()` pulls until the buffer grows,
 answering `True`, or the source ends, answering `False`; it never answers
 `True` without growing, so a loop on it makes progress. `skip n` consumes from
 the buffer and answers how many bytes it took, which is `n` clamped to what was
 there. A caller projects them off the reader — they are operation names, so
 they are not module functions.
 
+`withBytes contents use` creates a private advancing cursor over memory. Its
+[scoped callback](functions.md#scoped-callbacks) may read it and return parsed
+data. A consumer with no other effects gives a pure result:
+
+```fango
+prefix : Bytes -> Bytes
+prefix contents = Reader.withBytes contents (\reader -> Reader.readUpTo reader 4)
+```
+
+The callback row `s` extends the remaining row `e` with a fresh local permission.
+Database, network, IO, or other consumer effects remain in `e`; the runner only
+discharges its own cursor permission. Readers, their operation callbacks, and
+streams that advance them cannot escape this callback. Nested `withBytes` calls
+can pass independent readers to one parser; see the executable
+[two-reader example](../../testdata/run/reader_scoped_memory.fango).
+
 `over source use` runs `use` with a reader over `source`. `overBytes contents
-use` reads a value already in memory: the activation's cell is the buffer, so
-the whole value is the starting buffer over a source that has already ended.
-Nothing in that path performs anything, so a memory reader stands at any row,
-including the pure `Reader {}`, and parsing code written against `Reader e`
-runs unchanged over memory and over a file.
+use` starts with the contents in its buffer over an exhausted source. These
+constructors follow the same scoped callback rule as `withBytes`: the local
+permission is discharged, while source and consumer effects remain visible.
+A `Reader {}` has pure operations, such as an exhausted reader with
+constant fields. Domain-specific readers can expose a domain effect without IO.
+Parsing code written against `Reader e` works with all these implementations;
+its effect row describes the reader operations, not just the underlying source.
 
 `limited parent n use` stages a reader over a parent, clamping every answer to
-a remaining allowance held in its own activation state. Every byte it hands out
+a remaining allowance held in its own scoped cell. Every byte it hands out
 is skipped through the parent, so when the scope ends the parent is positioned
 after what was consumed rather than after the allowance; a caller that wants
 the rest of a frame discarded skips it before leaving. Because a reader is a
@@ -109,15 +130,13 @@ is the caller's question.
 `forEachChunk reader action` hands each buffered chunk to `action` until the
 source ends, so a consumer sees the source's own chunking rather than a size
 this module invented. `chunks` is the same thing as a
-[`Stream`](library-streams.md); `Stream`'s rule that a yielded value may not
-retain producer-local resources holds trivially, because `Bytes` captures
-nothing.
+[`Stream`](library-streams.md) with unit state whose step advances the reader.
+Repeated traversals share the current reader position.
 
 ## Writer
 
-A `Writer e` is a record of closures bound to one `over` or `collecting`
-activation, so a response assembled from a status line, several headers, and a
-body costs one underlying write per flush window rather than one per part.
+A `Writer e` is a record whose operations perform exactly `e`. Its scoped buffer
+combines several emits into one underlying write per flush window.
 
 ```fango
 import Writer exposing (Writer)
@@ -127,8 +146,10 @@ type Writer e =
     , flush : () ->{e} ()
     }
 
-over : Sink e -> Int -> (Writer e ->{e} a) ->{e} a
-collecting : (Writer e ->{e} a) ->{e} (a, Bytes)
+{-# scoped s #-}
+over : Sink e -> Int -> (Writer s ->{s} a) ->{e} a
+{-# scoped s #-}
+collecting : (Writer s ->{s} a) ->{e} (a, Bytes)
 write : Writer e -> Bytes ->{e} ()
 writeString : Writer e -> String ->{e} ()
 ```
@@ -146,19 +167,17 @@ a body that fails emits nothing further, so no reader receives a truncated
 message it would have to guess at.
 
 `collecting use` answers the body's value together with everything written,
-and performs nothing of its own, so the same writing code runs in a test with
-no effects at all and a caller that wants all-or-nothing gets it for the whole
-body. Its `flush()` has nowhere to push to and does nothing.
+using scoped local storage. A consumer with no other effects gives a pure
+result. Its bytes become available only on successful completion. Its `flush()` has nowhere to push to and does nothing.
 
 ## Lifetimes
 
-A reader and a writer are [bound to their
-activation](effects.md#binding-a-closure-to-a-handler-activation), so the
-handler lifetime rules apply unchanged: reporting one as a result, storing it
-in an ADT, capturing it in a returned closure, or storing it in an outer
-handler is rejected with `STATE RESULT ESCAPES`. A `Stream` from `chunks`
-retains the reader and obeys the same rule — it may be consumed inside the
-scope and not carried out of it. A `Source` built over an open file captures
-the handle and cannot outlive the scope that owns it, which reports
-`RESOURCE ESCAPES`. Passing a reader inward, including into an inner activation
-of the same effect, is permitted.
+Readers and writers created by these constructors must stay inside their scoped
+callbacks. Parsed values, collected bytes, and other permission-independent
+results may leave. Their streams and operation callbacks retain the same local
+permission and cannot escape through containers or storage.
+
+A source or sink backed by a file or socket still depends on that handle being
+open; operations after its scope closes fail at runtime. Consume resource-backed
+streams inside the resource's cleanup scope. Each task constructs its own scoped
+buffered objects.

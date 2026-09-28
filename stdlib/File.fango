@@ -16,7 +16,7 @@ import Runtime.Scope
 A `Handle` is an open file. Its constructor is private and it derives neither
 Show nor Eq, so a program can neither build, inspect, nor compare one; the
 only way to obtain a handle is inside a `with*` scope, and the compiler treats
-the type as a capability so the handle cannot outlive that scope.
+the representation as opaque. Calls after the scope closes fail at runtime.
 
 Both `Handle` and `Directory` wrap an opaque Go value. The compiler erases the
 wrapper to `any` at the Go boundary and nowhere else. -}
@@ -103,11 +103,8 @@ withAppend path use = withOpened openAppend path use
 -- otherwise the line and its exact terminator.
 readLine : Handle ->{IO, Fail Error} Maybe Line
 readLine file =
-    if fromResult (handleHasInput file) then
-        raw = fromResult (readHandleLine file)
-        Just ({ text = IO.lineText raw, ending = IO.lineEnding raw })
-    else
-        Nothing
+    raw = fromResult (readHandleLine file)
+    if raw == "" then Nothing else Just ({ text = IO.lineText raw, ending = IO.lineEnding raw })
 
 write : Handle -> String ->{IO, Fail Error} ()
 write file text = fromResult (writeHandle file text)
@@ -118,10 +115,11 @@ write file text = fromResult (writeHandle file text)
 -- Bytes.Source needs.
 readBytes : Handle -> Int ->{IO, Fail Error} Maybe Bytes
 readBytes file count =
-    if fromResult (handleHasInput file) then
-        Just (fromResult (readHandleBytes file count))
+    if count <= 0 then
+        if fromResult (handleHasInput file) then Just Bytes.empty else Nothing
     else
-        Nothing
+        data = fromResult (readHandleBytes file count)
+        if Bytes.length data == 0 then Nothing else Just data
 
 writeBytes : Handle -> Bytes ->{IO, Fail Error} ()
 writeBytes file data = fromResult (writeHandleBytes file data)
@@ -132,8 +130,8 @@ chunk : Int
 chunk = 8192
 
 -- source and sink adapt an open file to the leaves a Reader and a Writer are
--- built over. Each captures the handle, so neither can outlive the scope that
--- owns it, and neither closes anything: closing belongs to that scope.
+-- built over. Each captures the handle and checks its validity on use.
+-- Neither closes it: closing belongs to the scope.
 source : Handle -> Source {IO, Fail Error}
 source file = Source { pull = \_ -> readBytes file chunk }
 

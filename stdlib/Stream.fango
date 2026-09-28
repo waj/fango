@@ -1,108 +1,71 @@
 {-# no-prelude #-}
-module Stream exposing (Stream, Yield, filter, fold, forEach, fromList, generate, map, take, toList, withCursor, yield, zip)
+module Stream exposing (Stream(..), filter, fold, forEach, fromList, map, take, toList, unfold, withCursor, zip)
 
 import Basics exposing (..)
-import Iterator exposing (Iterator, next)
+import Iterator exposing (Iterator)
 import List exposing (List)
 import Maybe exposing (Maybe(..))
-import Runtime.Coroutine exposing (Coroutine, Drive)
 
-effect Yield a
-    yield : a -> ()
+-- A reusable traversal description. Each step returns its next state explicitly.
+-- Resource acquisition and cleanup belong to the scope consuming the stream.
+type Stream state a e = { initial : state, step : state ->{e} Maybe (a, state) }
 
-type Stream a e = Stream (() ->{Yield a | e} ())
+unfold : state -> (state ->{e} Maybe (a, state)) -> Stream state a e
+unfold initial step = { initial = initial, step = step }
 
-generate : (() ->{Yield a | e} ()) -> Stream a e
-generate producer = Stream producer
+withCursor : Stream state a e -> (Iterator state a e ->{e} result) ->{e} result
+withCursor source consumer = consumer (Iterator.start source.initial source.step)
 
-withProducer : (() ->{Yield a | e} ()) -> (Iterator a e ->{Drive | e} result) ->{e} result
-withProducer producer consumer = Runtime.Coroutine.with
-    (\pause _ -> handle producer () of
-        yield value -> resume (pause value))
-    (\work ->
-        result = consumer (Iterator.fromCoroutine work)
-        drain work
-        result)
+listStep values = case values of
+    [] -> Nothing
+    [value | rest] -> Just (value, rest)
 
-drain : Coroutine a () () e ->{Drive | e} ()
-drain work =
-    case Runtime.Coroutine.stop work of
-        Runtime.Coroutine.Suspended _ -> finishDrain work
-        Runtime.Coroutine.Polled -> finishDrain work
-        _ -> ()
+fromList : List a -> Stream (List a) a e
+fromList values = unfold values listStep
 
-finishDrain : Coroutine a () () e ->{Drive | e} ()
-finishDrain work =
-    case Runtime.Coroutine.advance work () of
-        Runtime.Coroutine.Suspended _ -> finishDrain work
-        Runtime.Coroutine.Polled -> finishDrain work
-        _ -> ()
+mapStep action step state = case step state of
+    Nothing -> Nothing
+    Just (value, next) -> Just (action value, next)
 
-withCursor : Stream a e -> (Iterator a e ->{Drive | e} result) ->{e} result
-withCursor source consumer = case source of
-    Stream producer -> withProducer producer consumer
+map : (a ->{e} b) -> Stream state a e -> Stream state b e
+map action source = unfold source.initial (mapStep action source.step)
 
-fromList : List a -> Stream a e
-fromList values = generate (\_ -> List.each yield values)
+filterStep predicate step state = case step state of
+    Nothing -> Nothing
+    Just (value, next) ->
+        if predicate value then Just (value, next)
+        else filterStep predicate step next
 
-mapCursor : (a ->{e} b) -> Iterator a e ->{Drive, Yield b | e} ()
-mapCursor action cursor = case next cursor of
-    Nothing -> ()
-    Just value ->
-        yield (action value)
-        mapCursor action cursor
+filter : (a ->{e} Bool) -> Stream state a e -> Stream state a e
+filter predicate source = unfold source.initial (filterStep predicate source.step)
 
-map : (a ->{e} b) -> Stream a e -> Stream b e
-map action source = generate (\_ -> withCursor source (mapCursor action))
+takeStep step (remaining, state) =
+    if remaining <= 0 then Nothing
+    else case step state of
+        Nothing -> Nothing
+        Just (value, next) -> Just (value, (remaining - 1, next))
 
-filterCursor : (a ->{e} Bool) -> Iterator a e ->{Drive, Yield a | e} ()
-filterCursor predicate cursor = case next cursor of
-    Nothing -> ()
-    Just value ->
-        if predicate value then yield value else ()
-        filterCursor predicate cursor
+take : Int -> Stream state a e -> Stream (Int, state) a e
+take count source = unfold (count, source.initial) (takeStep source.step)
 
-filter : (a ->{e} Bool) -> Stream a e -> Stream a e
-filter predicate source = generate (\_ -> withCursor source (filterCursor predicate))
-
-takeCursor : Int -> Iterator a e ->{Drive, Yield a | e} ()
-takeCursor count cursor =
-    if count <= 0 then ()
-    else
-        case next cursor of
-            Nothing -> ()
-            Just value ->
-                yield value
-                takeCursor (count - 1) cursor
-
-take : Int -> Stream a e -> Stream a e
-take count source = generate (\_ -> if count <= 0 then () else withCursor source (takeCursor count))
-
-foldCursor : (a -> b ->{e} b) -> b -> Iterator a e ->{Drive | e} b
-foldCursor combine accumulator cursor = case next cursor of
+foldStep combine step accumulator state = case step state of
     Nothing -> accumulator
-    Just value -> foldCursor combine (combine value accumulator) cursor
+    Just (value, next) -> foldStep combine step (combine value accumulator) next
 
-fold : (a -> b ->{e} b) -> b -> Stream a e ->{e} b
-fold combine initial source = withCursor source (foldCursor combine initial)
+fold : (a -> b ->{e} b) -> b -> Stream state a e ->{e} b
+fold combine initial source = foldStep combine source.step initial source.initial
 
-forEach : (a ->{e} ()) -> Stream a e ->{e} ()
+forEach : (a ->{e} ()) -> Stream state a e ->{e} ()
 forEach action source = fold (\value _ -> action value) () source
 
-toList : Stream a e ->{e} List a
+toList : Stream state a e ->{e} List a
 toList source = List.reverse (fold (\value values -> [value | values]) [] source)
 
-zipCursors : Iterator a e -> Iterator b e ->{Drive, Yield (a, b) | e} ()
-zipCursors left right = case next left of
-    Nothing -> ()
-    Just a -> case next right of
-        Nothing -> ()
-        Just b ->
-            yield (a, b)
-            zipCursors left right
+zipStep left right (leftState, rightState) = case left leftState of
+    Nothing -> Nothing
+    Just (a, leftNext) -> case right rightState of
+        Nothing -> Nothing
+        Just (b, rightNext) -> Just ((a, b), (leftNext, rightNext))
 
-zipLeft : Stream b e -> Iterator a e ->{Drive, Yield (a, b) | e} ()
-zipLeft right leftCursor = withCursor right (zipCursors leftCursor)
-
-zip : Stream a e -> Stream b e -> Stream (a, b) e
-zip left right = generate (\_ -> withCursor left (zipLeft right))
+zip : Stream left a e -> Stream right b e -> Stream (left, right) (a, b) e
+zip left right = unfold (left.initial, right.initial) (zipStep left.step right.step)

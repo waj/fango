@@ -202,21 +202,6 @@ var Table = func() map[string]Spec {
 			return nil, fmt.Errorf("native %s requires the sidecar worker", name)
 		}}
 	}
-	for name, arity := range cellNatives {
-		t[name] = Spec{Arity: arity, Eval: func(_ *Runtime, _ []any) (any, error) {
-			return nil, fmt.Errorf("native %s requires the sidecar worker", name)
-		}}
-	}
-	for name, arity := range requestNatives {
-		t[name] = Spec{Arity: arity, Eval: func(_ *Runtime, _ []any) (any, error) {
-			return nil, fmt.Errorf("native %s requires the sidecar worker", name)
-		}}
-	}
-	for name, arity := range asyncNativeNatives {
-		t[name] = Spec{Arity: arity, Eval: func(_ *Runtime, _ []any) (any, error) {
-			return nil, fmt.Errorf("native %s requires the sidecar worker", name)
-		}}
-	}
 	// Bundled natives are compile-time-safe by default: they are pure
 	// functions of their arguments. System entropy is Random's one exclusion,
 	// and the File natives observe the file system; seeded draws now use
@@ -224,10 +209,7 @@ var Table = func() map[string]Spec {
 	for name, spec := range t {
 		_, file := fileNatives[name]
 		_, network := netNatives[name]
-		_, cell := cellNatives[name]
-		_, request := requestNatives[name]
-		_, asyncNative := asyncNativeNatives[name]
-		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed" && !file && !network && !cell && !request && !asyncNative
+		spec.CompileTimeSafe = !spec.Effect && name != "Random.entropySeed" && !file && !network
 		t[name] = spec
 	}
 	return t
@@ -247,35 +229,6 @@ var netNatives = map[string]int{
 	"Net.listen": 1, "Net.closeListener": 1, "Net.acceptConnection": 1,
 	"Net.dial": 2, "Net.closeConnection": 1, "Net.connectionHasInput": 1,
 	"Net.readConnectionBytes": 2, "Net.writeConnectionBytes": 2,
-}
-
-var cellNatives = map[string]int{
-	"Runtime.Cell.cellNew": 1, "Runtime.Cell.cellReader": 1, "Runtime.Cell.cellPublish": 2,
-	"Runtime.Cell.cellReady": 1, "Runtime.Cell.cellRead": 1,
-}
-
-var requestNatives = map[string]int{
-	"Runtime.NativeRequest.hostNew": 1, "Runtime.NativeRequest.hostClose": 1,
-	"Runtime.NativeRequest.reserve": 1, "Runtime.NativeRequest.admitted": 1,
-	"Runtime.NativeRequest.claim": 2, "Runtime.NativeRequest.cancelRegistration": 1,
-	"Runtime.NativeRequest.drainRegistration": 1, "Runtime.NativeRequest.finishRegistration": 1,
-	"Runtime.NativeRequest.liveCount":         1,
-	"Runtime.NativeRequest.registrationCount": 1,
-}
-
-var asyncNativeNatives = map[string]int{
-	"Runtime.Async.Native.new": 1, "Runtime.Async.Native.close": 1,
-	"Runtime.Async.Native.reserve": 1, "Runtime.Async.Native.available": 1,
-	"Runtime.Async.Native.ready":   2,
-	"Runtime.Async.Native.release": 2, "Runtime.Async.Native.take": 1,
-	"Runtime.Async.Native.wait":      1,
-	"Runtime.Async.Native.takeDrain": 1, "Runtime.Async.Native.waitDrain": 1,
-	"Async.IO.newState": 1, "Async.IO.closeState": 1,
-	"Async.IO.submitSleep": 5, "Async.IO.submitGet": 5,
-	"Async.IO.ok": 1, "Async.IO.body": 1, "Async.IO.errorText": 1,
-	"Async.Events.eventNew": 4, "Async.Events.eventClose": 1,
-	"Async.Events.start": 2, "Async.Events.takeEvent": 1,
-	"Async.Events.arm": 2, "Async.Events.disarm": 2,
 }
 
 func Lookup(name string) (Spec, bool) { spec, ok := Table[name]; return spec, ok }

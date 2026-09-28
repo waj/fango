@@ -46,6 +46,12 @@ map : (a ->{e} b) -> List a ->{e} List b
 A pure callback instantiates `e` to empty; an effectful callback propagates its
 row to the traversal call.
 
+A row holds one label per effect. When solving brings one effect into a row
+under two argument lists — a function whose own row names `Ctx p` passing a
+callback that performs `Ctx e` to a helper whose residual row it shares —
+the two argument lists are unified, because a nominal row means one instance
+of each effect, and an `EFFECT MISMATCH` names both when they cannot agree.
+
 A body may call arrows that carry the bare tail alongside arrows that add
 labels to it, in either order:
 
@@ -142,10 +148,6 @@ The compiler adds the declaring effect to each operation's type. Functions may
 annotate closed or open effect rows. An operation with a Unit argument is
 called explicitly with `()`.
 
-An effect marked `{-# service #-}` separates retained handler context from
-the caller's implicit invocation authority. See [shared service contexts](library-services.md)
-for its protocol and handler restrictions.
-
 ## Abort-only effects
 
 An abort-only effect marks every operation with `abort`:
@@ -189,6 +191,11 @@ bypasses the handler's `return` clause; normal completion runs `return` once.
 An abort raised by an abort clause or return clause propagates outward rather
 than re-entering that activation.
 
+Handler clauses execute outside their own activation. They may use an enclosing
+handler, including another handler of the same effect. A function annotation
+does not need to expose effects discharged by those enclosing handlers;
+unhandled effects in clauses must still be permitted by the annotation.
+
 ## Stateful handlers
 
 A parameterized handler inserts `with snapshot = initial` between its subject
@@ -209,6 +216,18 @@ ordinary handlers continue to use `resume value`. The value and next-state
 expressions evaluate left to right exactly once, and the state is committed
 only after both finish successfully. The `return` clause sees the final state.
 
+State snapshots and commits are individually synchronized to publish complete
+values. The clause runs between them without an operation-wide lock: concurrent
+operations can read the same snapshot, and a later commit can overwrite an
+earlier update. Handlers are responsible for operation-level serialization.
+The snapshot is taken before the clause starts, so a lock acquired inside the
+clause cannot protect that implicit read. For atomic updates, keep state in an
+explicit reference and protect its read and write together, or serialize calls
+to the handler.
+
+Child-task inheritance is not exposed yet; its remaining contract is in the
+[task roadmap](../roadmap-scoped-effects.md#async-orchestration-and-task-results).
+
 ## Resume discipline
 
 Resumptive handlers are deliberately restricted: every normally completing
@@ -225,121 +244,30 @@ expression and name the owning operation clause's location. Nested operation
 clauses bind their own resume, while nested handled bodies and return groups
 retain the surrounding resume binding.
 
-## Binding a closure to a handler activation
+## Closures and handler effects
 
-An operation resolves to the innermost handler at the moment it is performed,
-whenever the effect is still named in the performing closure's row. Inside the
-subject of a `handle`, a closure whose row names the handled effect may instead
-be adapted to an arrow that does not name it. The adaptation binds every
-performance of that effect in the closure to the activation this `handle`
-installs, so the closure reaches that activation however many handlers of the
-same effect are installed when it is finally called:
+A closure's effect row describes the effects performed when it is called.
+Creating it inside a handler does not make an effectful arrow pure. A closure
+passed to a callback or record field inside a resumptive handler's subject may
+bind to that activation when the expected row omits the handled label. Calling
+it then requires a fresh local permission and the effects of the handler's
+clauses. The permission cannot leave the handler through its result, residual
+row, or outer storage. Abort-only effects cannot be bound this way.
 
-```fango
-effect Counter
-    tick : () -> Int
+A scoped runner can pass such a closure to its consumer through a row-indexed
+record. The [scoped binding fixture](../../testdata/run/handler_scoped_binding.fango)
+shows a counter retaining its original activation beneath another Counter
+handler. Attempting to pass the stateful operation as `() -> Int` is rejected
+with `HANDLER BINDING EFFECTS`; the local permission is never erased to claim
+purity. Ordinary closures that retain the nominal effect in their row still
+receive an interpretation at invocation.
 
-type Cell = Cell (() -> Int)
+The scoped [Reader and Writer constructors](library-readers.md) discharge their
+private buffer permissions while preserving source, sink, and consumer effects.
 
-counter : Int -> (Cell ->{IO} a) ->{IO} a
-counter start use =
-    handle use (Cell (\_ -> tick())) with n = start of
-        tick () -> resume n with n + 1
-```
+Handlers remain synchronous: a resumptive clause finishes with its owning tail
+`resume`, and an abort clause abandons the subject. Handlers do not capture a
+resumable stack and cannot implement general coroutine suspension.
 
-Two nested counters answer independently, and the outer cell keeps counting
-from inside the inner activation:
-
-```fango
-main() =
-    counter 0 (\a ->
-        counter 100 (\b ->
-            case (a, b) of
-                (Cell ta, Cell tb) ->
-                    print (ta())
-                    print (tb())
-                    print (ta())))
-```
-
-prints `0`, `100`, `1`. Nothing else changes: a bare `tick()` written in the
-same subject still resolves to whichever handler is innermost when it runs, and
-the instance type is an ordinary user-declared type. There is no keyword and no
-new type former.
-
-The adaptation replaces the handled label with what the handler's clauses
-perform, because calling the bound closure runs those clauses. A closure bound
-in a handler whose clauses print cannot be adapted to a pure arrow; that is a
-`HANDLER CLAUSE EFFECTS` error naming the clause effects and the effects the
-position allows. A `resume` is not one of them: it returns to the perform site,
-whose remaining effects belong to that site.
-
-The arrow the closure is adapted to may be indexed by a row rather than fixed,
-which is how one wrapper type serves every source its handler can run over:
-
-```fango
-type Reader e =
-    { buffered : () ->{e} String
-    , refill : () ->{e} Bool
-    }
-
-over : Source e -> (Reader e ->{e} a) ->{e} a
-over source use =
-    handle use (Reader { buffered = \_ -> buffered(), refill = \_ -> refill() })
-        with pending = "" of
-        buffered () -> resume pending with pending
-        refill () ->
-            chunk = source.pull()
-            resume (chunk /= "") with pending ++ chunk
-```
-
-Each field binds to the activation whose subject built the record, and the
-label it loses is replaced by `e` — what the clauses perform through the
-source. Two `over` activations therefore hand out two readers with separate
-buffers, drivable at once. The container may equally be a constructor, and a
-record literal need not name its type: an inferred `{ buffered = ..., refill =
-... }` binds the same way.
-
-An abort-only operation cannot be bound. An abort unwinds to its own
-activation, so a bound abort called after that activation finished would
-unwind to a target nothing awaits; binding one is a `BOUND ABORT OPERATION`
-error.
-
-Binding changes nothing about lifetimes. A bound closure retains its
-activation's capability, so the [handler lifetimes](#handler-lifetimes) below
-apply unchanged: a parameterized handler is scoped, and its bound closure
-reported as a result, inside an ADT, captured by a closure, or stored in an
-outer handler is rejected with `STATE RESULT ESCAPES` or `RESOURCE ESCAPES`.
-Passing it inward to the handled computation, including into an inner
-activation of the same effect, is an inner owner retaining an outer resource
-and is permitted.
-
-Rows stay exact about the effects a bound closure performs, not about the
-handler's own state: a bound `() -> Int` is typed pure and still answers
-differently on each call, the same gap
-[`Stream.withCursor`](library-streams.md) leaves for a cursor.
-
-## Handler lifetimes
-
-Ordinary stateless user-declared effects have durable evidence: returning a pure closure
-that captures an immutable Reader-style handler remains legal. There is no
-scope annotation in source syntax. Parameterized handlers are scoped: a result
-that can retain their local capability is rejected with `STATE RESULT ESCAPES`
-or `RESOURCE ESCAPES`. Inferred contracts distinguish functions that capture
-local evidence from functions that are independent of it. A partial operation
-that receives fresh evidence on its next application does not by itself retain
-the preceding handler. This does not shorten the lifetime of existing stateless
-handler values.
-
-Nested handlers of the same effect remain distinct. Stored callbacks use their
-nearest lexical binding and do not retain unrelated handler evidence.
-
-A reusable handler wrapper may annotate that residual flow with an open row
-tail. The handled label disappears from the callback's row while every other
-effect the callback performs passes through the wrapper's own row:
-
-```fango
-run : (() ->{Ask | e} a) ->{e} a
-run action =
-    handle action() of
-        ask () -> resume "yes"
-```
+Resources that outlive their acquiring scope are checked by native operations
+at runtime; see [cleanup scopes](resources.md).

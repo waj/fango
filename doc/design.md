@@ -22,9 +22,9 @@ Exact language rules are in the [reference topics](reference.md).
 ## Functions and effects
 
 [Effect execution](design/effects.md) — per-arrow timing, handler activation,
-abort routing, state, cleanup, and Direct/Exit/Machine transport.
-[Capture and ownership](design/ownership.md) — flow graphs, sharing/fixed points,
-non-escape, retention, synchronous callbacks, and exclusive cursor advancement.
+abort routing, state, cleanup, and Direct/Exit transport.
+[Resources and evidence](design/ownership.md) — runtime resource validity and
+structural evidence summaries.
 
 ## Compiler pipeline
 
@@ -45,20 +45,8 @@ completion order, stage-only values, evaluator integration, and rollback.
 
 [Core](design/core.md) — typed nodes, dictionaries, residual evidence rows,
 adapters, specialization, ANF, and independent lint.
-[Machines and cursors](design/machines.md) — selective lowering, liveness,
-dispatch, cleanup, pull owners, residual-row forwarding, and failure snapshots.
-[Typed coroutines](design/coroutines.md) — owner-sensitive control, typed exchange,
-dynamic scope registries, and private abandonment.
-[Typed completion](design/completion.md) — detached outcomes, checked replay,
-and capture-preserving execution boundaries.
-[Shared capabilities](design/shared-capabilities.md) — indexed native storage,
-synchronized values, and split service evidence.
-[Cooperative task driver](design/async-cooperative.md) — structured contexts,
-FIFO tasks, typed failure selection, native readiness, and driver authority.
-[Concurrent combinators](design/async-combinators.md) — completion selection,
-targeted drain, bounded Stream batches, and event subscription ownership.
-[Native requests](design/native-requests.md) — scoped retention, quiescent drain,
-and driver-owned callback completion.
+[Native tasks and explicit streams](design/tasks.md) — closure invocation,
+handler inheritance, goroutine scopes, and library traversal.
 
 ## Go backend and runtime
 

@@ -1,0 +1,21 @@
+{-# no-prelude #-}
+module Runtime.Local exposing (Cell(..), run)
+
+import Basics exposing (..)
+-- Each handler activation owns its own state. The row records permission to
+-- access that activation; it has no runtime identity.
+type Cell e a =
+    { read : () ->{e} a
+    , write : a ->{e} ()
+    }
+
+effect LocalState a
+    readState : () -> a
+    writeState : a -> ()
+
+{-# scoped s #-}
+run : a -> (Cell s a ->{s} b) ->{e} b
+run initial use =
+    handle use { read = \_ -> readState(), write = \value -> writeState value } with state = initial of
+        readState () -> resume state with state
+        writeState value -> resume () with value

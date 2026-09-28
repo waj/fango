@@ -1,0 +1,24 @@
+import Fail
+
+effect Counter
+    next : Bool -> Int
+
+sequence() =
+    first = next False
+    last = next True
+    (first, last)
+
+rejectingRunner() =
+    handle sequence() with count = 10 of
+        next reject ->
+            if reject then Fail.fail "rejected" else resume count with count + 1
+        return value -> (value, count)
+
+success() =
+    handle (next False, next False) with count = 1 of
+        next _ -> resume count with count + 1
+        return value -> (value, count)
+
+main() =
+    print (Fail.attempt rejectingRunner)
+    print (success())

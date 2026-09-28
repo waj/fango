@@ -16,6 +16,11 @@ row written in one resolves as itself; the parameter's kind, which its use in
 the declaration fixes, decides which reading a type argument gets, so a row at
 a general-kinded parameter is a kind error rather than a name lookup.
 
+Inside a handler subject, the annotation effect budget includes the enclosing
+handled labels. Nested handler clauses use that lexical budget; a handler's own
+clauses remain outside its activation. Restoring the outer budget before
+checking those clauses prevents a handler from authorizing itself or ambient IO.
+
 Annotation variables are rigid skolems. A label-free open row normalizes to
 its tail, allowing the fresh row of a call to unify with an annotated tail.
 Row inclusion preserves rigid residual tails while combining effects around
@@ -44,14 +49,43 @@ A pure handler runner may still need a polymorphic transport contract. Infer
 this from controlled parameter types and executed call contracts, including
 calls inside handlers but excluding latent lambda bodies. Handling an effect
 does not convert an Exit-family callback into a Direct value.
-Work-budget and coroutine-control obligations come from one interpretation of
-the source capture contracts per execution root. Both use the same symbolic
-arguments and flow contexts; their resulting row constraints are
-solved together, repeating the interpretation only when the constraint set
-grows. A repeat whose definitions, built under the new substitution, are
-identical to the previous iteration's — same installed contracts, same
-variable identities and spans — reuses its needs; one that refined a root's
-type is interpreted again.
+Async callbacks retain their effect requirements. Known unsupported aborts and
+scoped local permissions are rejected at the spawn boundary; dependencies hidden
+inside inherited handlers are checked when rebuilding child evidence. Functions
+and native handles may be shared. See [tasks](tasks.md).
+
+## Scoped callback rows
+
+The [scoped declaration](../reference/functions.md#scoped-callbacks) marks a
+restricted universal row binder on a named runner's final callback. The runner
+implementation instantiates that callback's row independently at each use,
+with its residual effect row as a lower bound. The binder cannot occur in the
+runner's other parameters, result, residual effects, or callback result.
+Recursive scoped runners and first-class runner values are rejected; ordinary
+rank-one schemes cannot preserve this callback contract on those paths.
+
+Each saturated source call allocates a rigid permission label from the session
+supply and extends the runner's residual row with it. Distinct allocations
+coexist in ordinary effect rows. Expected scoped callback types are available
+while checking lambda parameters, so nested scopes do not infer an outer
+reader's row from the inner reader. In constraint groups containing scopes,
+explicit label lower bounds propagate before fixed-tail upper bounds close
+flexible rows. Known record projections contribute their rows before closure,
+so a source effect cannot hide a later local-state or failure requirement.
+
+A persistent `ScopeBoundary` rejects its label anywhere in the solved result,
+residual effects, or outer environment types. Its structural walk includes
+latent arrows, abstract and phantom type arguments, and effect arguments.
+Outer roots include storage slots, predicates, recursive bindings, earlier
+runner arguments, and pending record obligations. Obligations survive local
+generalization and record solving and are rechecked before the enclosing
+declaration group is published. This checks type-level permissions; it does not
+analyze which objects a closure physically retains.
+
+[Core](core.md#scoped-state-boundary) retains source signatures for contract
+validation and erases permission labels from runtime types and evidence. Calls
+under an abstract scoped callback still forward the invocation evidence row: a
+runner may have installed domain handlers hidden behind that callback binder.
 
 ## Dependency groups and generalization
 

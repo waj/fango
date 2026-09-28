@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestNativeStorageTypeAndLifetimeContracts(t *testing.T) {
+func TestNativeStorageTypeContracts(t *testing.T) {
 	const cell = `module StorageFixture exposing (Box, box, read, write)
 import Runtime.Native
 {-# resource #-}
@@ -48,7 +48,7 @@ bad() = handle StorageFixture.box (freeze (\_ -> State.get())) with current = 0 
     State.get () -> resume current with current
     State.put next -> resume () with next
 main() = ()
-`, "ESCAPE"},
+`, "HANDLER BINDING EFFECTS"},
 		{"borrowed stored payload", `save cell value = StorageFixture.write cell value
 main() =
     target : StorageFixture.Box (() -> Int)
@@ -57,7 +57,7 @@ main() =
         State.get () -> resume current with current
         State.put next -> resume () with next
     ()
-`, "ESCAPE"},
+`, "HANDLER BINDING EFFECTS"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -80,57 +80,6 @@ main() =
 				if tc.want == "" && got != "" || tc.want != "" && !strings.Contains(got, tc.want) {
 					t.Fatalf("got %s, want %q", got, tc.want)
 				}
-			}
-		})
-	}
-}
-
-func TestCompletionCellContracts(t *testing.T) {
-	for _, tc := range []struct{ name, source, want string }{
-		{"one index", `main() = Runtime.Coroutine.scope (\scope ->
-    cell : Runtime.Cell.Publisher Int
-    cell = Runtime.Cell.create scope
-    first = Runtime.Cell.publish cell 1
-    second = Runtime.Cell.publish cell "wrong"
-    ())
-`, "TYPE MISMATCH"},
-		{"owner escape", `bad() = Runtime.Coroutine.scope (\scope -> Runtime.Cell.create scope)
-main() = ()
-`, "ESCAPE"},
-		{"reader escape", `bad() = Runtime.Coroutine.scope (\scope -> Runtime.Cell.reader (Runtime.Cell.create scope))
-main() = ()
-`, "ESCAPE"},
-		{"private publisher", `main() = Runtime.Cell.cellNew()
-`, "PRIVATE OR UNKNOWN NAME"},
-		{"borrowed payload", `main() = Runtime.Coroutine.scope (\scope ->
-    cell : Runtime.Cell.Publisher (() -> Int)
-    cell = Runtime.Cell.create scope
-    stored = handle Runtime.Cell.publish cell (\_ -> State.get()) with current = 0 of
-        State.get () -> resume current with current
-        State.put next -> resume () with next
-    ())
-`, "ESCAPE"},
-		{"row index", `write : Runtime.Cell.Publisher (Runtime.Completion.Completion Int e) -> Runtime.Completion.Completion Int f ->{IO} Bool
-write cell value = Runtime.Cell.publish cell value
-main() = ()
-`, "EFFECT MISMATCH"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "Main.fango")
-			if err := os.WriteFile(path, []byte("import Runtime.Cell\nimport Runtime.Coroutine\nimport State\nimport Runtime.Completion\n"+tc.source), 0600); err != nil {
-				t.Fatal(err)
-			}
-			_, diagnostics, err := (&Session{}).Compile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var messages []string
-			for _, d := range diagnostics {
-				messages = append(messages, d.Title+" "+d.Body)
-			}
-			got := strings.Join(messages, "\n")
-			if !strings.Contains(got, tc.want) {
-				t.Fatalf("got %s, want %s", got, tc.want)
 			}
 		})
 	}

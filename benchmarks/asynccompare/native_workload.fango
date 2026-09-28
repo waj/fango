@@ -1,0 +1,31 @@
+import Async
+import Result exposing (Result(..))
+
+countTo n total =
+    if n <= 0 then total
+    else if Async.cancelled() then total
+    else countTo (n - 1) (total + 1)
+
+countPure : Int -> Int -> Int
+countPure n total = if n <= 0 then total else countPure (n - 1) (total + 1)
+
+worker : Int -> Bool -> () ->{Async.Async String} Int
+worker limit checking () =
+    if checking then countTo limit 0 else countPure limit 0
+
+spawnMany n limit checking =
+    if n <= 0 then []
+    else
+        child = Async.spawn (worker limit checking)
+        [child | spawnMany (n - 1) limit checking]
+
+awaitSum tasks = case tasks of
+    [] -> 0
+    [task | rest] -> Async.await task + awaitSum rest
+
+probe : Int -> Int -> Bool ->{IO} Int
+probe workers limit checking = case Async.run (\_ -> awaitSum (spawnMany workers limit checking)) of
+    Async.Completed (Ok value) -> value
+    _ -> -1
+
+main() = print (probe 16 20000 True)

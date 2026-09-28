@@ -1,4 +1,3 @@
-import Runtime.Coroutine
 import Stream
 import Iterator
 import String
@@ -8,42 +7,35 @@ digit char = case String.toInt (String.fromChar char) of
     Just value -> value
     Nothing -> 0
 
-numberTail : Int -> Iterator.Iterator Char e ->{Runtime.Coroutine.Drive | e} (Int, Maybe Char)
 numberTail value cursor = case Iterator.next cursor of
-    Nothing -> (value, Nothing)
-    Just char ->
-        if isDigit char then
-            numberTail (value * 10 + digit char) cursor
-        else
-            (value, Just char)
+    Nothing -> (value, Nothing, cursor)
+    Just (char, next) ->
+        if isDigit char then numberTail (value * 10 + digit char) next
+        else (value, Just char, next)
 
--- The parser retains one lookahead character and one numeric accumulator.
-parseNumbers : Maybe Char -> Iterator.Iterator Char e ->{Runtime.Coroutine.Drive, Stream.Yield Int | e} ()
-parseNumbers pending cursor =
+numberStep (pending, cursor) =
     token = case pending of
-        Just char -> Just char
+        Just char -> Just (char, cursor)
         Nothing -> Iterator.next cursor
     case token of
-        Nothing -> ()
-        Just char ->
+        Nothing -> Nothing
+        Just (char, next) ->
             if isDigit char then
-                (value, lookahead) = numberTail (digit char) cursor
-                Stream.yield value
-                parseNumbers lookahead cursor
-            else
-                parseNumbers Nothing cursor
+                (value, lookahead, rest) = numberTail (digit char) next
+                Just (value, (lookahead, rest))
+            else numberStep (Nothing, next)
 
-numbers source = Stream.generate (\_ -> Stream.withCursor source (parseNumbers Nothing))
+numbers : Stream.Stream state Char e -> Stream.Stream (Maybe Char, Iterator.Iterator state Char e) Int e
+numbers source = Stream.unfold (Nothing, Iterator.start source.initial source.step) numberStep
 
-expandCursor : Iterator.Iterator Int e ->{Runtime.Coroutine.Drive, Stream.Yield Int | e} ()
-expandCursor cursor = case Iterator.next cursor of
-    Nothing -> ()
-    Just value ->
-        Stream.yield value
-        Stream.yield (value * 10)
-        expandCursor cursor
+expandStep (pending, cursor) = case pending of
+    Just value -> Just (value, (Nothing, cursor))
+    Nothing -> case Iterator.next cursor of
+        Nothing -> Nothing
+        Just (value, next) -> Just (value, (Just (value * 10), next))
 
-expand source = Stream.generate (\_ -> Stream.withCursor source expandCursor)
+expand : Stream.Stream state Int e -> Stream.Stream (Maybe Int, Iterator.Iterator state Int e) Int e
+expand source = Stream.unfold (Nothing, Iterator.start source.initial source.step) expandStep
 
 main() =
     input = Stream.fromList ['1', '2', '+', '3', ' ', '4', '5']

@@ -11,8 +11,7 @@ func memberName(mode types.Transport) string {
 	switch mode {
 	case types.Exit:
 		return "Exit"
-	case types.Machine:
-		return "Machine"
+
 	default:
 		return "Direct"
 	}
@@ -35,15 +34,13 @@ func (g *gen) callbackMemberType(fn *types.TFun, mode types.Transport) *goast.Fu
 	result := g.goType(fn.Ret)
 	if mode == types.Exit {
 		result = g.outcomeType(fn.Ret)
-	} else if mode == types.Machine {
-		result = selector("fangort", "MachineStart")
 	}
+
 	return &goast.FuncType{Params: paramFields(params), Results: &goast.FieldList{List: []*goast.Field{{Type: result}}}}
 }
 func (g *gen) callbackType(fn *types.TFun) goast.Expr {
 	fields := []*goast.Field{}
-	fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("PauseOwner")}, Type: &goast.StarExpr{X: selector("fangort", "YieldOwner")}})
-	for _, mode := range []types.Transport{types.Direct, types.Exit, types.Machine} {
+	for _, mode := range []types.Transport{types.Direct, types.Exit} {
 		fields = append(fields, &goast.Field{Names: []*goast.Ident{ident(memberName(mode))}, Type: g.callbackMemberType(fn, mode)})
 	}
 	g.usesFangort = true
@@ -53,58 +50,12 @@ func (g *gen) callbackValue(lam *core.Lambda) goast.Expr {
 	fn := lam.Ty.(*types.TFun)
 	minimum := g.callbackMinimum(lam)
 	var fields []goast.Expr
-	if closure := g.machineClosures[lam]; closure != nil {
-		if target, request := forwardedPause(g.machineWorkers[closure.Worker]); target != nil {
-			arg, identity := request.(*core.VarRef)
-			callee := target.(*core.VarRef)
-			calleeType := callee.Ty.(*types.TFun)
-			if identity && arg.Name == lam.Param && callee.Name != lam.Param && types.Equal(fn.Arg, calleeType.Arg) && types.Equal(fn.Ret, calleeType.Ret) {
-				// Identity adapters may widen an unused row, but cannot change
-				// the request/reply protocol or perform work before forwarding.
-				fields = append(fields, &goast.KeyValueExpr{Key: ident("PauseOwner"), Value: &goast.SelectorExpr{X: g.machineExpr(callee), Sel: ident("PauseOwner")}})
-			}
-		}
-	}
 	for _, mode := range []types.Transport{types.Direct, types.Exit} {
 		if minimum > mode {
 			continue
 		}
 		fields = append(fields, &goast.KeyValueExpr{Key: ident(memberName(mode)), Value: g.directLambdaMember(lam, mode)})
 	}
-	var machine goast.Expr
-	if g.machineClosures[lam] != nil {
-		machine = g.machineLambdaExpr(lam)
-	} else {
-		mode := minimum
-		member := g.directLambdaMember(lam, mode)
-		var params []paramSpec
-		var args []goast.Expr
-		for _, label := range types.SortedRow(fn.Eff).Labels {
-			if !types.RuntimeEvidenceEffect(label) {
-				continue
-			}
-			name := g.evidenceName(label.Name)
-			ev := core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Control: types.Control{Transport: types.Machine}}
-			params = append(params, paramSpec{name: name, typ: g.callbackMemberType(fn, types.Machine).Params.List[len(params)].Type})
-			args = append(args, g.evidenceArg(ev, ident(name), types.Machine, mode))
-		}
-		if types.FunctionOpenRow(fn) {
-			params = append(params, paramSpec{name: "rowEvidence", typ: g.rowType()})
-			args = append(args, ident("rowEvidence"))
-		}
-		params = append(params, paramSpec{name: "value", typ: g.goType(fn.Arg)})
-		args = append(args, ident("value"))
-		invoke := callExpr(member, args...)
-		var body []goast.Stmt
-		if mode == types.Exit {
-			body = []goast.Stmt{varDeclStmt("result", g.outcomeType(fn.Ret), invoke), &goast.ReturnStmt{Results: []goast.Expr{selector("result", "Value"), selector("result", "Exit")}}}
-		} else {
-			body = []goast.Stmt{&goast.ReturnStmt{Results: []goast.Expr{invoke, ident("nil")}}}
-		}
-		run := &goast.FuncLit{Type: &goast.FuncType{Params: &goast.FieldList{}, Results: &goast.FieldList{List: []*goast.Field{{Type: ident("any")}, {Type: &goast.StarExpr{X: selector("fangort", "ExitRequest")}}}}}, Body: &goast.BlockStmt{List: body}}
-		machine = funcLitParams(params, selector("fangort", "MachineStart"), []goast.Stmt{returnStmt(callExpr(selector("fangort", "ImmediateStart"), run))})
-	}
-	fields = append(fields, &goast.KeyValueExpr{Key: ident("Machine"), Value: machine})
 	return &goast.CompositeLit{Type: g.callbackType(fn), Elts: fields}
 }
 
@@ -125,7 +76,7 @@ func (g *gen) callbackMinimum(lam *core.Lambda) types.Transport {
 		if bound[ev.Unique] != 0 {
 			return
 		}
-		if effect := g.effects[ev.Unique]; effect != nil && (effect.Suspension || len(effect.Ops) > 0 && effect.Ops[0].Abort) {
+		if effect := g.effects[ev.Unique]; effect != nil && (len(effect.Ops) > 0 && effect.Ops[0].Abort) {
 			return
 		}
 		if mode := g.currentEvidenceMode(ev.Unique); mode > minimum {

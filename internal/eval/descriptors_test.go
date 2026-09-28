@@ -2,10 +2,11 @@ package eval
 
 import (
 	"context"
+	"testing"
+
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/types"
 	"github.com/waj/fango/runtime/fangort"
-	"testing"
 )
 
 func TestGenericFailureDescriptorsSurviveReturnedClosure(t *testing.T) {

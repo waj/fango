@@ -16,7 +16,6 @@ import (
 	"github.com/waj/fango/internal/ast"
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/execcodec"
-	machineir "github.com/waj/fango/internal/machine"
 	"github.com/waj/fango/internal/meta"
 	"github.com/waj/fango/internal/natives"
 	"github.com/waj/fango/internal/types"
@@ -100,7 +99,6 @@ type CtorVal struct {
 // never materialize as values — elaboration eta-expanded every first-class
 // use, so *Partial from the doc/design.md, "Interpreter and REPL" sketch is not needed.
 type Closure struct {
-	pauseOwner *fangort.YieldOwner
 	Param      string
 	Body       core.Expr
 	Env        *Frame
@@ -108,10 +106,6 @@ type Closure struct {
 	control    types.Control
 	rowParam   types.CaptureVar
 	rowEffects []core.EffectInstance
-	// A transport-polymorphic value retains both its ordinary interpretation
-	// and its checked Machine factory. Choosing a call protocol does not change
-	// the representation of a stored callback.
-	machine *machineClosure
 }
 
 type IOContext struct {
@@ -195,14 +189,14 @@ func (c *IOContext) Arguments() []string { return c.Args }
 func (c *IOContext) WorkingDirectory() string { return c.Dir }
 
 type evidence struct {
-	row        *fangort.EvidenceRow
-	rowEffect  int
-	yieldOwner *fangort.YieldOwner
-	handler    *core.Handle
-	frame      *Frame
-	outer      map[int]*evidence
-	state      Value
-	machineOps map[int]*machineOperation
+	origin    *fangort.EvidenceOrigin
+	typeArgs  []*fangort.TypeDescriptor
+	row       *fangort.EvidenceRow
+	rowEffect int
+	handler   *core.Handle
+	frame     *Frame
+	outer     map[int]*evidence
+	state     *fangort.HandlerState[Value]
 }
 
 // Env holds top-level cells and workers.
@@ -213,12 +207,10 @@ type Env struct {
 	adts    map[int]*types.ADTInfo
 	cells   map[string]*Cell
 	workers map[string]*core.Def
-	machine *machineir.Prog
 	// machineClosures preserves the semantic Lambda identity used by the
 	// selective lowerer. Direct evaluation can therefore materialize a frame
 	// factory when such a callback crosses a structured owner boundary.
-	machineClosures map[*core.Lambda]*machineir.Closure
-	entry           string
+	entry string
 	// tails caches core.DetectTailLoop per *core.Def (nil = ineligible).
 	// Pointer identity means REPL redefinition invalidates naturally: a new
 	// generation is a new *core.Def.
@@ -249,58 +241,14 @@ func (e *Env) Expand(c *meta.Code) ast.Expr {
 // Frame holds block-local bindings (doc/design.md, "Language semantics") — eager values, unlike the lazy
 // top-level cells. Function parameters extend the same chain.
 type Frame struct {
-	rows    rowEnv
-	types   descriptorEnv
-	parent  *Frame
-	vars    map[string]Value
-	mutable bool // Machine locals are pruned and overwritten between transitions.
+	rows   rowEnv
+	types  descriptorEnv
+	parent *Frame
+	vars   map[string]Value
 }
 
-// closureFrame snapshots only referenced locals when a closure crosses a
-// mutable Machine frame. Ordinary Core environments remain immutable chains.
-// Core forbids shadowing, so a body-local reference cannot select an outer
-// binding of the same name here.
-func closureFrame(lam *core.Lambda, fr *Frame) *Frame {
-	mutable := false
-	for f := fr; f != nil; f = f.parent {
-		mutable = mutable || f.mutable
-	}
-	if !mutable {
-		return fr
-	}
-	vars := map[string]Value{}
-	core.Inspect(lam.Body, func(e core.Expr) {
-		if ref, ok := e.(*core.VarRef); ok && ref.Local && ref.Name != lam.Param {
-			if value, found := fr.lookup(ref.Name); found {
-				vars[ref.Name] = value
-			}
-		}
-	})
-	return &Frame{vars: vars, types: fr.descriptors(), rows: fr.closureRows(lam)}
-}
-
-func (in *interp) makeClosure(lam *core.Lambda, fr *Frame, desc *machineir.Closure) (*Closure, error) {
-	closure := in.plainClosure(lam, closureFrame(lam, fr))
-	if desc == nil {
-		return closure, nil
-	}
-	values := make([]Value, len(desc.Captures))
-	for i, capture := range desc.Captures {
-		value, ok := fr.lookup(capture.Name)
-		if !ok {
-			return nil, fmt.Errorf("eval: Machine callback capture `%s` is unavailable", capture.Name)
-		}
-		values[i] = value
-	}
-	captured := make(map[int]*evidence, len(desc.CapturedEvidence))
-	for _, ev := range desc.CapturedEvidence {
-		if in.evidence[ev.Unique] == nil {
-			return nil, fmt.Errorf("eval: Machine callback evidence `%s` is unavailable", ev.Name)
-		}
-		captured[ev.Unique] = in.evidence[ev.Unique]
-	}
-	closure.machine = &machineClosure{desc: desc, values: values, evidence: captured, types: fr.descriptors(), rows: fr.closureRows(lam)}
-	return closure, nil
+func (in *interp) makeClosure(lam *core.Lambda, fr *Frame) (*Closure, error) {
+	return in.plainClosure(lam, fr), nil
 }
 
 func (f *Frame) lookup(name string) (Value, bool) {
@@ -313,7 +261,7 @@ func (f *Frame) lookup(name string) (Value, bool) {
 }
 
 func NewEnv() *Env {
-	return &Env{adts: map[int]*types.ADTInfo{}, cells: map[string]*Cell{}, workers: map[string]*core.Def{}, machineClosures: map[*core.Lambda]*machineir.Closure{}, tails: map[*core.Def]*core.TailLoop{}, natives: map[string]*types.NativeInfo{}, defs: map[string]core.Def{}, effects: map[int]*types.EffectInfo{}, intrinsics: map[string]bool{}}
+	return &Env{adts: map[int]*types.ADTInfo{}, cells: map[string]*Cell{}, workers: map[string]*core.Def{}, tails: map[*core.Def]*core.TailLoop{}, natives: map[string]*types.NativeInfo{}, defs: map[string]core.Def{}, effects: map[int]*types.EffectInfo{}, intrinsics: map[string]bool{}}
 }
 
 // tailLoop reports (and caches) whether def executes as a frame-reuse loop.
@@ -400,22 +348,6 @@ func (e *Env) program() *core.Prog {
 	return &core.Prog{ADTs: adts, Effects: effects, Defs: defs, Natives: e.natives, Intrinsics: e.intrinsics, Entry: e.entry}
 }
 
-// DefineMachineProg installs the selective lowering that corresponds to the
-// semantic Core definitions already in this environment. It does not replace
-// Direct/Exit workers; it supplies frame factories for Machine callbacks held
-// by structured owner nodes.
-func (e *Env) DefineMachineProg(p *machineir.Prog) error {
-	if errs := machineir.Lint(p); len(errs) != 0 {
-		return fmt.Errorf("eval: malformed machine IR: %v", errs[0])
-	}
-	e.machine = p
-	e.machineClosures = make(map[*core.Lambda]*machineir.Closure, len(p.Closures))
-	for i := range p.Closures {
-		e.machineClosures[p.Closures[i].Expr] = &p.Closures[i]
-	}
-	return nil
-}
-
 // interp carries the cancellation context and the print destination; ctx is
 // polled every pollEvery evaluation steps so Ctrl-C interrupts runaway REPL
 // expressions.
@@ -428,9 +360,10 @@ type interp struct {
 	forcing  map[*Cell]bool
 	stack    []*Cell
 	steps    int
-	// Scheduled Work reports interruption through its driver so cleanup drains.
-	// Ordinary and staged evaluation keep the host interruption check.
-	pollOwned int
+	// Task CPU loops use explicit source cancellation. Ordinary and staged
+	// evaluation also support host interruption checkpoints.
+	pollOwned   int
+	hostContext context.Context
 
 	// compileTime restricts the interpreter to what a compiler may run: a
 	// step budget, and no native that observes external state or lives in a Go
@@ -477,7 +410,7 @@ func Eval(ctx context.Context, e core.Expr, env *Env, out io.Writer) (Value, err
 
 func EvalIO(ctx context.Context, e core.Expr, env *Env, ioctx *IOContext) (Value, error) {
 	if executor, ok := ioctx.Natives.(programExecutor); ok {
-		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Machine: env.machine, Expr: e})
+		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Expr: e})
 	}
 	return (&interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[int]*evidence{}}).eval(e, nil)
 }
@@ -503,7 +436,7 @@ func Force(ctx context.Context, name string, env *Env, out io.Writer) (Value, er
 
 func ForceIO(ctx context.Context, name string, env *Env, ioctx *IOContext) (Value, error) {
 	if executor, ok := ioctx.Natives.(programExecutor); ok {
-		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Machine: env.machine, Force: name})
+		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Force: name})
 	}
 	return (&interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[int]*evidence{}}).force(name)
 }
@@ -558,10 +491,9 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			if !ok {
 				return nil, fmt.Errorf("eval: recursive Let `%s` without a Lambda RHS", e.Name)
 			}
-			frame := &Frame{parent: closureFrame(lam, fr), vars: map[string]Value{}}
+			frame := &Frame{parent: fr, vars: map[string]Value{}}
 			frame.vars[e.Name] = in.plainClosure(lam, frame)
-			// Only the escaping closure uses the restricted snapshot. The
-			// surrounding body can still refer to every current Machine local.
+			// The body and closure share the recursive lexical binding.
 			return in.eval(e.Body, &Frame{parent: fr, vars: frame.vars})
 		}
 		// Eager, in order — identical to the compiled backend's locals.
@@ -574,7 +506,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		}
 		return in.eval(e.Body, &Frame{parent: fr, vars: map[string]Value{e.Name: v}})
 	case *core.Lambda:
-		return in.makeClosure(e, fr, in.env.machineClosures[e])
+		return in.makeClosure(e, fr)
 	case *core.Neg:
 		v, err := in.eval(e.Operand, fr)
 		if err != nil {
@@ -612,12 +544,18 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		return &meta.Code{Template: e.Template, Holes: holes}, nil
 	case *core.TypeOf:
 		return e.Repr, nil
-	case *core.Work:
-		return in.evalWork(e, fr)
+
 	case *core.FailureInspect:
 		return in.inspectFailure(e, fr)
-	case *core.Completion:
-		return in.evalCompletion(e, fr)
+
+	case *core.ParallelMap:
+		return in.parallelMap(e, fr)
+	case *core.AsyncLaunch:
+		return in.asyncLaunch(e, fr)
+	case *core.AsyncSupervise:
+		return in.asyncSupervise(e, fr)
+	case *core.AsyncRebase:
+		return in.asyncRebase(e, fr)
 	case *core.NativeCall:
 		args := make([]Value, len(e.Args))
 		for i, a := range e.Args {
@@ -699,7 +637,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			vars := map[string]Value{}
 			if ev.handler.State != nil {
-				vars[ev.handler.State.Name] = ev.state
+				vars[ev.handler.State.Name] = ev.state.Snapshot()
 			}
 			for i, p := range clause.Params {
 				if p != "_" && p != "()" {
@@ -757,10 +695,6 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			return nil, fmt.Errorf("eval: missing abort evidence for `%s.%s`", e.Effect.Name, e.Op.Name)
 		}
 		return &ExitRequest{Target: target, Op: e.Op, Payload: payload, PayloadTypes: descriptors}, nil
-	case *core.Suspend:
-		return nil, fmt.Errorf("eval: compiler-only suspension reached recursive evaluator")
-	case *core.CoroutineScope:
-		return in.evalCoroutineScope(e, fr)
 
 	case *core.ResumeTail:
 		return nil, fmt.Errorf("eval: ResumeTail outside verified handler-clause evaluation")
@@ -817,8 +751,17 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 		}
 		outer := cloneEvidence(in.evidence)
-		in.evidence[e.Effect.Unique] = &evidence{handler: e, frame: fr, outer: outer, state: state}
+		in.evidence[e.Effect.Unique] = &evidence{handler: e, frame: fr, outer: outer, state: fangort.NewHandlerState(state)}
 		installed := in.evidence[e.Effect.Unique]
+		for _, arg := range e.Effect.Args {
+			descriptor, err := in.typeDescriptor(arg, fr)
+			if err != nil {
+				in.evidence = outer
+				return nil, err
+			}
+			installed.typeArgs = append(installed.typeArgs, descriptor)
+		}
+		installEvidenceOrigin(installed)
 		v, err := in.eval(e.Body, fr)
 		in.evidence = outer
 		if err != nil {
@@ -843,7 +786,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 				vars[clause.SuppressedParam] = failureList(snapshotFailure(exit).Suppressed())
 			}
 			if e.State != nil {
-				vars[e.State.Name] = installed.state
+				vars[e.State.Name] = installed.state.Snapshot()
 			}
 			for i, p := range clause.Params {
 				if p != "_" && p != "()" {
@@ -857,7 +800,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 		}
 		vars := map[string]Value{}
 		if e.State != nil {
-			vars[e.State.Name] = installed.state
+			vars[e.State.Name] = installed.state.Snapshot()
 		}
 		if e.Return.Param != "_" && e.Return.Param != "()" {
 			vars[e.Return.Param] = v
@@ -914,30 +857,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			// Workers see no caller locals — matching compiled scoping.
 			var out Value
 			var err error
-			if def.Control.Transport == types.Machine && in.env.machine != nil {
-				args := make([]Value, len(def.Params))
-				for i, name := range def.Params {
-					args[i] = vars[name]
-				}
-				var session *MachineSession
-				session, err = startMachine(in.ctx, in.env.machine, def.Name, args, callEvidence, in.env, in.ioctx, false)
-				if err == nil {
-					session.interp = in
-					session.frames[0].types, session.frames[0].rows = descriptors, rows
-					var event MachineEvent
-					event, err = session.Run()
-					if err == nil {
-						if event.Exit != nil {
-							out = event.Exit
-						} else if event.Done {
-							out = event.Value
-						} else {
-							_, _ = session.Abandon()
-							err = fmt.Errorf("eval: Machine worker suspended outside a producer")
-						}
-					}
-				}
-			} else if in.env.tailLoop(def) != nil {
+
+			if in.env.tailLoop(def) != nil {
 				// Self tail calls run as a frame-reuse loop (doc/design.md,
 				// "Interpreter and REPL") — constant Go stack, like the
 				// compiled backend's for-loop rewrite.
@@ -1061,7 +982,7 @@ func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID, e
 			if _, ok := asExit(next); ok {
 				return next, nil
 			}
-			ev.state = next
+			ev.state.Store(next)
 		}
 		return value, nil
 	case *core.Let:
@@ -1070,7 +991,7 @@ func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID, e
 			if !ok {
 				return nil, fmt.Errorf("eval: recursive Let `%s` without a Lambda RHS", e.Name)
 			}
-			frame := &Frame{parent: closureFrame(lam, fr), vars: map[string]Value{}}
+			frame := &Frame{parent: fr, vars: map[string]Value{}}
 			frame.vars[e.Name] = in.plainClosure(lam, frame)
 			return in.evalResumeTail(e.Body, &Frame{parent: fr, vars: frame.vars}, owner, ev)
 		}
@@ -1349,27 +1270,9 @@ func (in *interp) force(name string) (Value, error) {
 		close(cell.ready)
 		cell.mu.Unlock()
 	}()
-	if def := in.env.defs[name]; def.Control.Transport == types.Machine && in.env.machine != nil {
-		var session *MachineSession
-		session, err = startMachine(in.ctx, in.env.machine, name, nil, nil, in.env, in.ioctx, true)
-		if err == nil {
-			session.interp = in
-			var event MachineEvent
-			event, err = session.Run()
-			if err == nil {
-				if event.Exit != nil {
-					v = event.Exit
-				} else if event.Done {
-					v = event.Value
-				} else {
-					_, _ = session.Abandon()
-					err = fmt.Errorf("eval: Machine value suspended outside a producer")
-				}
-			}
-		}
-	} else {
-		v, err = in.eval(cell.Body, nil)
-	}
+
+	v, err = in.eval(cell.Body, nil)
+
 	if err != nil {
 		return nil, err
 	}

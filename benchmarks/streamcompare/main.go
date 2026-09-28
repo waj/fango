@@ -27,6 +27,9 @@ import (
 //go:embed workload.fango
 var workload string
 
+//go:embed legacy_workload.fango
+var legacyWorkload string
+
 //go:embed diagnostic.fango
 var diagnostic string
 
@@ -114,7 +117,7 @@ func run() error {
 	if err = os.WriteFile(filepath.Join(dest, "working.patch"), diff, 0644); err != nil {
 		return err
 	}
-	h := sha256.Sum256([]byte(workload + diagnostic + pullLibrary + goControls + harness))
+	h := sha256.Sum256([]byte(workload + legacyWorkload + diagnostic + pullLibrary + goControls + harness))
 	r := report{Started: time.Now(), GoVersion: strings.TrimSpace(string(goVersion)), Platform: runtime.GOOS + "/" + runtime.GOARCH, Hardware: strings.TrimSpace(string(hardware)), SourceHash: hex.EncodeToString(h[:]), WorkingDiff: "working.patch", N: *n, Samples: *count, Rounds: *rounds, Procs: *procs}
 	selected := []int{}
 	for i, name := range names {
@@ -186,10 +189,17 @@ func run() error {
 			// abstraction; retain their unchanged primary Stream cases only.
 			b.Modern = bytes.Contains(iteratorSource, []byte("fromCoroutine :"))
 		}
-		sourceText := workload
+		sourceText := legacyWorkload
+		iteratorSource, err := os.ReadFile(filepath.Join(srcRoot, "stdlib", "Iterator.fango"))
+		if err != nil {
+			return err
+		}
+		if bytes.Contains(iteratorSource, []byte("start :")) {
+			sourceText = workload
+		}
 		controls := "package main\nfunc probe(which,n int64)int64{return V_run(which,n)}\n"
 		if b.Modern {
-			sourceText = "import Runtime.Coroutine\nimport Pull\n" + workload + diagnostic
+			sourceText = "import Runtime.Coroutine\nimport Pull\n" + legacyWorkload + diagnostic
 			controls = goControls
 			if err = os.WriteFile(filepath.Join(b.Root, "Pull.fango"), []byte(pullLibrary), 0644); err != nil {
 				return err

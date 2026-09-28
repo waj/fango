@@ -2,15 +2,8 @@ package fangort
 
 import "testing"
 
-// What the list representation costs, and which of those costs a chunk-aware
-// implementation can actually remove. These arbitrate the open decisions in
-// doc/roadmap-calls.md and doc/roadmap-list.md, so they live here rather than
-// being re-derived each time the question comes up.
-//
-// The headline: chunk-awareness is worth little on its own once a per-element
-// callback is in the loop, and worth a great deal when it replaces recursion.
-// ListMap is the prototype of the planned native, kept honest by
-// TestMapChunkMatchesMapRec.
+// Compare accessor and direct-node traversal, and recursive, forward-building,
+// and accumulate/reverse mapping. Historical chunk measurements remain in Git.
 
 const benchN = 100000
 
@@ -61,15 +54,13 @@ func BenchmarkSumAccessors(b *testing.B) {
 	}
 }
 
-func BenchmarkSumChunkWalk(b *testing.B) {
+func BenchmarkSumNodeWalk(b *testing.B) {
 	l := mkList()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		var acc int64
-		for n, off := l.node, l.off; n != nil; n, off = n.next.node, n.next.off {
-			for _, x := range n.elems[off:] {
-				acc += x
-			}
+		for n := l.node; n != nil; n = n.tail.node {
+			acc += n.head
 		}
 		sinkI = acc
 	}
@@ -89,15 +80,13 @@ func BenchmarkFoldAccessorsPlain(b *testing.B) {
 	}
 }
 
-func BenchmarkFoldChunkWalkPlain(b *testing.B) {
+func BenchmarkFoldNodeWalkPlain(b *testing.B) {
 	l := mkList()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		var acc int64
-		for n, off := l.node, l.off; n != nil; n, off = n.next.node, n.next.off {
-			for _, x := range n.elems[off:] {
-				acc += plainCB(x)
-			}
+		for n := l.node; n != nil; n = n.tail.node {
+			acc += plainCB(n.head)
 		}
 		sinkI = acc
 	}
@@ -116,22 +105,20 @@ func BenchmarkFoldAccessorsCurried(b *testing.B) {
 	}
 }
 
-func BenchmarkFoldChunkWalkCurried(b *testing.B) {
+func BenchmarkFoldNodeWalkCurried(b *testing.B) {
 	l := mkList()
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		var acc int64
-		for n, off := l.node, l.off; n != nil; n, off = n.next.node, n.next.off {
-			for _, x := range n.elems[off:] {
-				acc = curriedCB(x)(acc)
-			}
+		for n := l.node; n != nil; n = n.tail.node {
+			acc = curriedCB(n.head)(acc)
 		}
 		sinkI = acc
 	}
 }
 
-// --- map: recursion + accessors, versus one forward chunk-wise pass --------
+// --- map: recursion + accessors, versus one forward forward pass --------
 
 // What Fango emits today: non-tail recursion through the accessors.
 func mapRec(f func(int64) int64, l List[int64]) List[int64] {
@@ -152,7 +139,7 @@ func BenchmarkMapRecursive(b *testing.B) {
 	}
 }
 
-func BenchmarkMapChunkForward(b *testing.B) {
+func BenchmarkMapForward(b *testing.B) {
 	l := mkList()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -161,8 +148,8 @@ func BenchmarkMapChunkForward(b *testing.B) {
 	}
 }
 
-func TestMapChunkMatchesMapRec(t *testing.T) {
-	for _, n := range []int{0, 1, listChunk - 1, listChunk, listChunk + 1, 500} {
+func TestMapForwardMatchesMapRec(t *testing.T) {
+	for _, n := range []int{0, 1, 32 - 1, 32, 32 + 1, 500} {
 		l := ListNil[int64]()
 		for i := int64(1); i <= int64(n); i++ {
 			l = ListCons(i, l)
@@ -173,7 +160,7 @@ func TestMapChunkMatchesMapRec(t *testing.T) {
 			}
 			want, got := mapRec(plainCB, src), ListMap(plainCB, src)
 			if !ListEq(func(a, b int64) bool { return a == b }, want, got) {
-				t.Fatalf("n=%d: chunk-wise map disagrees with the recursive one", n)
+				t.Fatalf("n=%d: forward map disagrees with the recursive one", n)
 			}
 		}
 	}
@@ -203,7 +190,7 @@ func BenchmarkMapAccumReverse(b *testing.B) {
 }
 
 func TestMapAccumReverseMatchesListMap(t *testing.T) {
-	for _, n := range []int{0, 1, listChunk - 1, listChunk, listChunk + 1, 500} {
+	for _, n := range []int{0, 1, 32 - 1, 32, 32 + 1, 500} {
 		l := ListNil[int64]()
 		for i := int64(1); i <= int64(n); i++ {
 			l = ListCons(i, l)

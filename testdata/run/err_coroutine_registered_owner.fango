@@ -1,7 +1,0 @@
-import Runtime.Coroutine
-import Runtime.Work
-main() = Runtime.Coroutine.scope (\outer ->
-    work = Runtime.Work.register (Runtime.Coroutine.facet outer) (\_ () -> 42)
-    Runtime.Coroutine.scope (\inner ->
-        ignored = Runtime.Work.advance (Runtime.Work.owner inner) work ()
-        ()))

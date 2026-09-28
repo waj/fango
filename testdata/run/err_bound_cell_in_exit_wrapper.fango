@@ -1,0 +1,29 @@
+-- A handled closure cannot be coerced to an arrow that hides its effect.
+effect Oops error
+    abort oops : error -> value
+
+effect Counter
+    tick : () -> Int
+
+type Cell = Cell (() -> Int)
+
+counter : Int -> (Cell ->{Oops String, IO} a) ->{Oops String, IO} a
+counter start use =
+    handle use (Cell (\_ -> tick())) with n = start of
+        tick () -> resume n with n + 1
+
+body : () ->{Oops String, IO} Int
+body() =
+    counter 0 (\c ->
+        case c of
+            Cell ta ->
+                print (ta())
+                print (ta())
+                1)
+
+main() =
+    answer =
+        handle body() of
+            oops _ -> 0 - 1
+            return v -> v
+    print answer

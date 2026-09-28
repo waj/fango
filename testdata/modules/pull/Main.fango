@@ -1,22 +1,14 @@
 import Pull
-import Runtime.Coroutine
 import Runtime.Scope
 
-readAll : Pull.Pull a e ->{Runtime.Coroutine.Drive | e} List a
 readAll cursor = case Pull.read cursor of
     Nothing -> []
-    Just value -> [value | readAll cursor]
+    Just (value, next) -> [value | readAll next]
 
 main() =
-    print (Pull.withValues (\_ ->
-        Runtime.Scope.finally (\_ ->
-            Pull.emit "first"
-            Pull.emit "second") (\_ -> print "closed")) readAll)
-    Pull.withValues (\_ ->
-        Runtime.Scope.finally (\_ ->
-            Pull.emit 42
-            print "unreached") (\_ -> print "early close")) (\cursor -> print (Pull.read cursor))
-    handle Pull.emit 7 of
-        Pull.emit value ->
-            print value
-            resume ()
+    print (Runtime.Scope.finally (\_ -> Pull.withValues ["first", "second"] readAll) (\_ -> print "closed"))
+    Runtime.Scope.finally (\_ -> Pull.withValues [42] (\cursor ->
+        case Pull.read cursor of
+            Nothing -> print "empty"
+            Just (value, _) -> print (Just value))) (\_ -> print "early close")
+    print 7
