@@ -74,9 +74,12 @@ recordShow bound =
                 appendCode sofar
                     (appendCode
                         (lift ((if field.index == 0 then " " else ", ") ++ field.name ++ " = "))
-                        (showCode field.value)))
+                        (showCode field.value)
+                    )
+            )
             (lift (bound.ctor.name ++ " {"))
-            bound.fields)
+            bound.fields
+        )
         (lift " }")
 
 showBound : TypeInfo -> Bound -> Code
@@ -103,7 +106,8 @@ ordFields whenLess whenGreater whenEqual lhs rhs =
                 Item rhsField rhsRest ->
                     ifCode (lessCode lhsField.value rhsField.value) (lift whenLess)
                         (ifCode (lessCode rhsField.value lhsField.value) (lift whenGreater)
-                            (ordFields whenLess whenGreater whenEqual lhsRest rhsRest))
+                            (ordFields whenLess whenGreater whenEqual lhsRest rhsRest)
+                        )
 
 ordBound : Bool -> Bool -> Bool -> Bound -> Bound -> Code
 ordBound whenLess whenGreater whenEqual lhs rhs =

@@ -28,6 +28,10 @@ type parser struct {
 	pos  int
 	errs []diag.Error
 	lay  layout
+	// exprParenDepth tracks grouping parentheses while their contents are parsed.
+	// A lambda inside one may start its body at any column; the closing
+	// parenthesis supplies its boundary.
+	exprParenDepth int
 
 	// stmtStart is the index of a token allowed to sit exactly at the
 	// innermost layout column: a block statement's opening token (and, in
@@ -933,6 +937,8 @@ func (p *parser) parseBodyAfter(introTok token.Token, missing string) ast.Expr {
 	case t.Pos().Line == introTok.Pos().Line:
 		return p.parseInlineBlock()
 	case p.lay.checkOffside(t.Pos()) == offContinue:
+		return p.parseBlock(t.Pos().Col)
+	case introTok.Kind == token.ARROW && p.exprParenDepth > 0:
 		return p.parseBlock(t.Pos().Col)
 	default:
 		p.errorAt(p.prevSpan(), "SYNTAX PROBLEM", missing)
@@ -2364,6 +2370,8 @@ func (p *parser) parseAtom() ast.Expr {
 			rp := p.next()
 			return &ast.Var{Name: op.Text, Sp: lp.Span.Merge(rp.Span)}
 		}
+		p.exprParenDepth++
+		defer func() { p.exprParenDepth-- }()
 		e := p.parseExpr()
 		if e == nil {
 			return nil

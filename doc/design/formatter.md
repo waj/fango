@@ -18,20 +18,23 @@ adjacency distinguishes `f()` from `f ()`, and lookahead indexes the token slice
 
 ## Layout and source fidelity
 
-Author line breaks are preserved; the printer does not search for a page width.
+Author line breaks are preserved except when a multiline closing parenthesis
+needs its own line; the printer does not search for a page width.
 Spans identify multiline constructs, while source bytes locate keywords and the
 definition name when AST NameSpan points at an annotation. Explicit semicolon
 blocks retain separators and line structure, with each separator owned by its
 left item.
 
-Layout children indent below their owner; case/handler branches and block items
+Layout children indent below their owner, including parenthesized lambda bodies
+that the parser accepts at any column. Case/handler branches and block items
 align. Then/else anchor to their own if. Composite commas, pipes, and closing
-delimiters align with their opener; the parser admits that punctuation at an
-enclosing layout boundary. Failed printing rolls back the buffer before copying
-the declaration verbatim.
-Application parentheses retain a source break before the closing token. The
-printer consults the matching token because grouping parentheses are absent
-from expression spans.
+delimiters align with their opener; the parser admits
+that punctuation at an enclosing layout boundary. Failed printing rolls back
+the buffer before copying the declaration verbatim.
+Application parentheses spanning lines close on a separate line. Consecutive
+closings share that line when their openers share a line. The printer consults
+the matching tokens because grouping parentheses are absent from expression
+spans.
 
 A broken nominal type body is a layout exception: its deriving clause is emitted
 as a separate indented line. A line break solely before `deriving` does not make

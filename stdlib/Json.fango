@@ -69,7 +69,8 @@ recordField sofar field =
     appendCode sofar
         (appendCode
             (lift (separator ++ jsonString field.name ++ ":"))
-            (encodeCode field.value))
+            (encodeCode field.value)
+        )
 
 recordBody : Bound -> Code
 recordBody bound =
@@ -88,8 +89,10 @@ unionBody bound =
         (appendCode
             (appendCode
                 (lift ("{\"$tag\":" ++ jsonString bound.ctor.name ++ ",\"$fields\":["))
-                (Meta.foldItems unionField (lift "") bound.fields))
-            (lift "]}"))
+                (Meta.foldItems unionField (lift "") bound.fields)
+            )
+            (lift "]}")
+        )
         (lift "")
 
 derivedBody : TypeInfo -> Bound -> Code
@@ -123,4 +126,5 @@ parseString text =
         Just (StringToken
             { value = stringTokenValue token
             , rest = String.slice size (String.length text) text
-            })
+            }
+        )

@@ -52,6 +52,50 @@ func TestClosingParenthesesKeepTheirLine(t *testing.T) {
 	}
 }
 
+func TestParenthesizedLambdaBodyIndented(t *testing.T) {
+	want := "main =\n" +
+		"    map (\\value ->\n" +
+		"        spawn (\\_ ->\n" +
+		"            answer = value\n" +
+		"            answer\n" +
+		"        )\n" +
+		"    ) values\n"
+	for _, input := range []string{
+		strings.ReplaceAll(want, "            answer", "        answer"),
+		strings.ReplaceAll(want, "            answer", "    answer"),
+	} {
+		out, errs := Source(source.NewFile("<test>", []byte(input)))
+		if len(errs) > 0 {
+			t.Fatalf("formatting failed: %v", errs)
+		}
+		if string(out) != want {
+			t.Errorf("body not indented:\n%s", out)
+		}
+	}
+}
+
+func TestMultilineParenthesisClosings(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{
+			"main =\n    foo (bar (\\x ->\n        x)) baz\n",
+			"main =\n    foo (bar (\\x ->\n        x\n    )) baz\n",
+		},
+		{
+			"main =\n    foo (\n        bar (\\x ->\n            x)) baz\n",
+			"main =\n    foo (\n        bar (\\x ->\n            x\n        )\n    ) baz\n",
+		},
+	} {
+		out, errs := Source(source.NewFile("<test>", []byte(tc.input)))
+		if len(errs) > 0 {
+			t.Errorf("formatting %q failed: %v", tc.input, errs)
+			continue
+		}
+		if string(out) != tc.want {
+			t.Errorf("formatting %q:\n got: %s\nwant: %s", tc.input, out, tc.want)
+		}
+	}
+}
+
 // corpus is every .fango file the formatter should be able to handle: the
 // fixtures, the bundled standard library, the examples, and the test data for
 // the other stages. Files that do not lex or parse are skipped, since the

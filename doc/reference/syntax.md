@@ -35,6 +35,11 @@ There is no `let ... in` expression.
 A closing parenthesis may align with the indentation of the line containing
 its opening parenthesis, even when an indented body ends immediately before it.
 Several closing parentheses may share that line.
+When a lambda is inside parentheses, its body may begin at any column on the
+next line, including left of the surrounding block. The closing parenthesis
+ends that body, so a following statement at the surrounding block's column
+belongs to that block. Without such parentheses, a multiline body must begin
+further right than the surrounding block's column.
 
 A call answering anything other than Unit is not a statement, and binding it
 would need a name nothing reads. `ignore : a -> ()`, declared in `Basics` and

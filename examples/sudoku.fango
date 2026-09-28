@@ -99,10 +99,12 @@ searchOptions board index options =
                 Nothing -> searchOptions board index rest
 
 startBranches board index options answers =
-    List.map (\value -> Async.spawn (\_ ->
-        answer = search (setCell index value board)
-        ignore (Async.send answers answer)
-    )) options
+    List.map (\value ->
+        Async.spawn (\_ ->
+            answer = search (setCell index value board)
+            ignore (Async.send answers answer)
+        )
+    ) options
 
 firstAnswer answers remaining =
     if remaining == 0 then

@@ -12,8 +12,7 @@ import (
 // a block's statements align, a `case` or `handle` aligns its branches, and an
 // `if` anchors its `then` and `else` at its own column. Rendering them is
 // therefore a matter of choosing indents rather than of fitting text to a
-// width, and the indent a construct hands its children is always deeper than
-// its own — which is what keeps the output parsing as the input did.
+// width. Layout children indent below their owner.
 
 // renderExpr writes e continuing the current line. Lines after the first start
 // at ind or deeper. It reports false when it cannot render e faithfully, and
@@ -433,27 +432,40 @@ func (p *printer) renderApp(e *ast.App, ind int) bool {
 	contInd := ind + Indent
 	prevEnd := fn.Span().End
 	for _, a := range args {
-		if brokeBetween(f, prevEnd, a.Span().Start) {
-			p.start(contInd)
-		} else {
-			p.emit(" ")
-		}
 		// An argument with its own line structure is rendered rather than
-		// inlined, so a nest stays a nest. A source break before its closing
-		// parenthesis is retained.
+		// inlined, so a nest stays a nest. A multiline parenthesis closes
+		// on its own line; closes share a line when their openers do.
 		if brokeWithin(a.Span()) {
 			if atomic(a) {
+				if brokeBetween(f, prevEnd, a.Span().Start) {
+					p.start(contInd)
+				} else {
+					p.emit(" ")
+				}
 				if !p.renderExpr(a, contInd) {
 					return false
 				}
 			} else {
+				open, close, hasClose := p.argumentClose(prevEnd, a.Span().Start)
+				openStart := a.Span().Start
+				if hasClose {
+					openStart = p.toks[open].Span.Start
+				}
+				if brokeBetween(f, prevEnd, openStart) {
+					p.start(contInd)
+				} else {
+					p.emit(" ")
+				}
 				openIndent := p.lineIndent(ind)
-				close, hasClose := p.argumentClose(prevEnd, a.Span().Start)
 				p.emit("(")
+				if hasClose && brokeBetween(f, p.toks[open].Span.End, a.Span().Start) {
+					p.start(contInd)
+				}
 				if !p.renderExpr(a, contInd) {
 					return false
 				}
-				if hasClose && p.toks[close-1].Span.EndPos().Line < p.toks[close].Span.StartPos().Line {
+				if !hasClose || (p.toks[open].Pos().Line < p.toks[close].Pos().Line &&
+					!p.closeSharesLine(open, close)) {
 					p.start(openIndent)
 				}
 				p.emit(")")
@@ -464,6 +476,11 @@ func (p *printer) renderApp(e *ast.App, ind int) bool {
 			}
 			prevEnd = a.Span().End
 			continue
+		}
+		if brokeBetween(f, prevEnd, a.Span().Start) {
+			p.start(contInd)
+		} else {
+			p.emit(" ")
 		}
 		s, argOK := exprAtomInline(a)
 		if !argOK {
@@ -478,7 +495,7 @@ func (p *printer) renderApp(e *ast.App, ind int) bool {
 // argumentClose follows the source opening parenthesis for an application
 // argument. Expression spans omit grouping parentheses, so the matching token
 // supplies both the source break and the end of the argument for the next one.
-func (p *printer) argumentClose(prevEnd, argStart int) (int, bool) {
+func (p *printer) argumentClose(prevEnd, argStart int) (int, int, bool) {
 	open := -1
 	for i, t := range p.toks {
 		if t.Span.Start >= argStart {
@@ -489,7 +506,7 @@ func (p *printer) argumentClose(prevEnd, argStart int) (int, bool) {
 		}
 	}
 	if open < 0 {
-		return 0, false
+		return 0, 0, false
 	}
 	depth := 0
 	for i := open; i < len(p.toks); i++ {
@@ -499,11 +516,37 @@ func (p *printer) argumentClose(prevEnd, argStart int) (int, bool) {
 		case token.RPAREN:
 			depth--
 			if depth == 0 {
-				return i, true
+				return open, i, true
 			}
 		}
 	}
-	return 0, false
+	return 0, 0, false
+}
+
+// closeSharesLine keeps consecutive closes together only when their openers
+// were written on the same source line and no content follows the first close.
+func (p *printer) closeSharesLine(open, close int) bool {
+	if close == 0 || p.toks[close-1].Kind != token.RPAREN || len(p.cur) == 0 {
+		return false
+	}
+	for _, b := range p.cur {
+		if b != ')' {
+			return false
+		}
+	}
+	depth := 0
+	for i := close - 1; i >= 0; i-- {
+		switch p.toks[i].Kind {
+		case token.RPAREN:
+			depth++
+		case token.LPAREN:
+			depth--
+			if depth == 0 {
+				return p.toks[i].Pos().Line == p.toks[open].Pos().Line
+			}
+		}
+	}
+	return false
 }
 
 // renderList writes a broken bracket list in the same leading-comma block

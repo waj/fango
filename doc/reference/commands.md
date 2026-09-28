@@ -205,15 +205,20 @@ parentheses. Literal spelling is preserved exactly — `1.50` and `1e3` are not
 rewritten — as is the difference between `f()` and `f ()`.
 
 The formatter keeps the author's line breaks rather than reflowing to a width,
-so a construct written across several lines stays that way and one written
-inline stays inline. That extends to where a keyword sits: a body moved below
+except when moving a multiline closing parenthesis onto its own line. A
+construct written across several lines stays that way and one written inline
+stays inline. That extends to where a keyword sits: a body moved below
 its `=` or `->` stays below it, a `case` written on its declaration's own line
 keeps its branches one level in from there, and a `then` or `else` given a line
 of its own is anchored at the column of its `if`, so a chain of arms lines up
 instead of staircasing rightward. An `exposing` list the author moved below
 its keyword is printed in the leading-comma block form.
-Closing parentheses in a multiline application keep their source line; when
-they start a line, they use the indentation of the line containing the opener.
+In a multiline application, a parenthesized argument closes on a new line.
+Consecutive closings share a line when their openers share a line; otherwise
+each closes on a separate line. A later argument may follow the closing
+parentheses on that line, as in `)) options`. Closing lines use the indentation
+of their opening lines. A parenthesized lambda body is indented below its
+enclosing statement, regardless of the source column the parser accepted.
 
 A multiline nominal type is the exception: its `deriving` clause is always an
 indented line after its constructor alternatives or record schema. An inline

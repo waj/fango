@@ -165,4 +165,6 @@ listDirectory : String ->{IO} Result Error (List String)
 listDirectory path =
     attempt (\_ ->
         Runtime.Scope.bracket (\_ -> fromResult (openDirectory path)) closeListing (\directory ->
-            collectEntries directory []))
+            collectEntries directory []
+        )
+    )

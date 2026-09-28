@@ -74,6 +74,33 @@ func TestTrailingLambdaNeedsParameterAndBody(t *testing.T) {
 	}
 }
 
+func TestParenthesizedLambdaBodyAtEnclosingBlockColumn(t *testing.T) {
+	for _, src := range []string{
+		"main =\n    apply (\\x ->\n    value = x\n    value)\n    done",
+		"main =\n    apply (\\x ->\nvalue = x\nvalue)\n    done",
+		"main =\n    apply (\n        \\x ->\nvalue = x\nvalue\n    )\n    done",
+		"main =\n    map (\\x ->\n        spawn (\\_ ->\n        value = x\n        value\n    )) values",
+	} {
+		f := source.NewFile("<test>", []byte(src))
+		toks, lexErrs := lexer.Lex(f)
+		if len(lexErrs) > 0 {
+			t.Fatalf("unexpected lex errors for %q: %v", src, lexErrs)
+		}
+		_, errs := Parse(toks, f)
+		if len(errs) > 0 {
+			t.Errorf("could not parse %q: %v", src, errs)
+		}
+	}
+
+	src := "main =\n    apply \\x ->\n    x"
+	f := source.NewFile("<test>", []byte(src))
+	toks, _ := lexer.Lex(f)
+	_, errs := Parse(toks, f)
+	if len(errs) == 0 {
+		t.Errorf("accepted unparenthesized lambda at the enclosing block column")
+	}
+}
+
 func TestMalformedSemicolonBlocks(t *testing.T) {
 	for _, src := range []string{
 		"main = ; 1",

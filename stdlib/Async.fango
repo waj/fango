@@ -123,7 +123,8 @@ finish owner outcome =
 runIn owner body =
     Runtime.Scope.bracket (\_ -> ()) (\_ -> finishScope owner 2) (\_ ->
         outcome = capture owner body
-        finish owner outcome)
+        finish owner outcome
+    )
 
 run : (() ->{Async err, IO, Fail err | effects} value) ->{IO | effects} Outcome (Result err value)
 run body = supervise (\_ -> runIn (newRoot()) body)
