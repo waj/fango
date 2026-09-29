@@ -17,6 +17,7 @@ language (`.fango` files).
 - Editing affordances: comment toggling, bracket matching/auto-closing, indent heuristics
 - Formatting, by running `fango fmt` over the buffer
 - Go to Definition for named declarations, imports, local bindings, and record fields
+- Find References across workspace `.fango` files, including unopened modules
 - Type and adjacent leading-comment hover for named symbols
 - Live compiler errors from unsaved buffers
 
@@ -24,9 +25,9 @@ language (`.fango` files).
 
 The extension starts `fango lsp` when a `.fango` file opens. It uses the same
 `fango.path` lookup described below for formatting. The server checks open
-buffers and imported local modules, then updates errors after edits. Definition
-and hover use the last valid analysis during a broken edit when the symbol at
-the queried range still matches. It uses the existing `--` and `{- … -}`
+buffers and imported local modules, then updates errors after edits. Definition,
+hover, and references use the last valid analysis during a broken edit when the
+symbol at the queried range still matches. It uses the existing `--` and `{- … -}`
 comments immediately above a declaration as hover documentation.
 
 The extension now needs its runtime dependency installed before using a local

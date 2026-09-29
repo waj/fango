@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,6 +173,42 @@ func TestLocalBinderNavigation(t *testing.T) {
 	}
 	if xDefinition == "" || xUse != xDefinition || yDefinition == "" || yUse != yDefinition {
 		t.Fatalf("local targets: x %q/%q, y %q/%q", xDefinition, xUse, yDefinition, yUse)
+	}
+	for _, target := range []string{xDefinition, yDefinition} {
+		got, err := references(context.Background(), map[string]*index{entry: idx}, nil, target, idx.symbols[target], false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || got[0].URI != pathURI(entry) {
+			t.Fatalf("local references for %s = %#v", target, got)
+		}
+	}
+}
+
+func TestReferencesKeepProjectIdentity(t *testing.T) {
+	good := map[string]*index{}
+	for range 2 {
+		root := t.TempDir()
+		entry := filepath.Join(root, "Main.fango")
+		data := "module Main exposing (main)\nvalue = 1\nmain = value\n"
+		if err := os.WriteFile(entry, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		result, errs, internal := (&check.Session{DisableObjectCache: true}).Compile(entry)
+		if internal != nil || len(errs) > 0 {
+			t.Fatalf("check: %v %v", internal, errs)
+		}
+		good[entry] = newIndex(root, result)
+	}
+	for path, idx := range good {
+		sym := idx.symbols["value:Main.value"]
+		got, err := references(context.Background(), good, nil, "value:Main.value", sym, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || got[0].URI != pathURI(path) || got[0].Range.Start.Line != 2 {
+			t.Fatalf("references for %s = %#v", path, got)
+		}
 	}
 }
 

@@ -41,9 +41,8 @@ The editor checker collects errors from independent modules after a module
 fails, but the parser does not recover a failed file into a partial AST.
 Future recovery could report syntax and type errors across an invalid graph
 without cascaded errors from missing declarations. Other possible features are
-inferred types on arbitrary expressions, Find References, document symbols,
-completion, and semantic tokens. Non-VS Code client configuration can be
-documented when tested.
+inferred types on arbitrary expressions, document symbols, completion, and
+semantic tokens. Non-VS Code client configuration can be documented when tested.
 
 ## REPL hardening
 

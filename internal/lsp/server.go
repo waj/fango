@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +43,12 @@ type textPosition struct {
 	TextDocument textID   `json:"textDocument"`
 	Position     position `json:"position"`
 }
+type referenceParams struct {
+	textPosition
+	Context struct {
+		IncludeDeclaration bool `json:"includeDeclaration"`
+	} `json:"context"`
+}
 type textItem struct {
 	URI     string `json:"uri"`
 	Version int    `json:"version"`
@@ -72,17 +79,24 @@ type publishParams struct {
 }
 
 type server struct {
-	mu         sync.Mutex
-	analysisMu sync.Mutex
-	conn       jsonrpc2.Conn
-	open       map[string][]byte
-	good       map[string]*index
-	published  map[string]bool
-	generation uint64
-	timer      *time.Timer
-	exit       chan struct{}
-	shutdown   bool
-	cancels    map[jsonrpc2.ID]context.CancelFunc
+	mu             sync.Mutex
+	analysisMu     sync.Mutex
+	workspaceMu    sync.Mutex
+	conn           jsonrpc2.Conn
+	open           map[string][]byte
+	roots          []string
+	workspace      map[string]*index
+	workspaceGen   uint64
+	workspaceKey   string
+	workspaceReady bool
+	entries        map[string]*index
+	good           map[string]*index
+	published      map[string]bool
+	generation     uint64
+	timer          *time.Timer
+	exit           chan struct{}
+	shutdown       bool
+	cancels        map[jsonrpc2.ID]context.CancelFunc
 }
 
 type stdio struct {
@@ -101,9 +115,9 @@ func (s stdio) Close() error {
 // callers may use stderr for startup and compiler failures.
 func Serve(in io.Reader, out io.Writer) error {
 	conn := jsonrpc2.NewConn(jsonrpc2.NewStream(stdio{in, out}))
-	s := &server{conn: conn, open: map[string][]byte{}, good: map[string]*index{}, published: map[string]bool{}, cancels: map[jsonrpc2.ID]context.CancelFunc{}, exit: make(chan struct{})}
+	s := &server{conn: conn, open: map[string][]byte{}, entries: map[string]*index{}, good: map[string]*index{}, published: map[string]bool{}, cancels: map[jsonrpc2.ID]context.CancelFunc{}, exit: make(chan struct{})}
 	conn.Go(context.Background(), func(ctx context.Context, req *jsonrpc2.Request) (any, error) {
-		if req.Method() == "textDocument/definition" || req.Method() == "textDocument/hover" {
+		if req.Method() == "textDocument/definition" || req.Method() == "textDocument/hover" || req.Method() == "textDocument/references" {
 			queryCtx, cancel := context.WithCancel(jsonrpc2.DetachContext(ctx))
 			id := req.ID()
 			s.mu.Lock()
@@ -126,7 +140,15 @@ func Serve(in io.Reader, out io.Writer) error {
 func (s *server) handle(ctx context.Context, req *jsonrpc2.Request) (any, error) {
 	switch req.Method() {
 	case "initialize":
-		return map[string]any{"capabilities": map[string]any{"textDocumentSync": 1, "definitionProvider": true, "hoverProvider": true}, "serverInfo": map[string]string{"name": "fango"}}, nil
+		var p initializeParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		s.roots = initializeRoots(p)
+		s.workspaceReady = false
+		s.mu.Unlock()
+		return map[string]any{"capabilities": map[string]any{"textDocumentSync": 1, "definitionProvider": true, "hoverProvider": true, "referencesProvider": true}, "serverInfo": map[string]string{"name": "fango"}}, nil
 	case "initialized":
 		return nil, nil
 	case "$/cancelRequest":
@@ -188,6 +210,8 @@ func (s *server) handle(ctx context.Context, req *jsonrpc2.Request) (any, error)
 		if path, ok := uriPath(p.TextDocument.URI); ok {
 			s.mu.Lock()
 			delete(s.open, path)
+			delete(s.entries, path)
+			s.good = selectGood(s.entries)
 			s.schedule()
 			s.mu.Unlock()
 		}
@@ -197,8 +221,18 @@ func (s *server) handle(ctx context.Context, req *jsonrpc2.Request) (any, error)
 		s.schedule()
 		s.mu.Unlock()
 		return nil, nil
-	case "textDocument/definition", "textDocument/hover":
-		var p textPosition
+	case "workspace/didChangeWorkspaceFolders":
+		var p workspaceFoldersChangeParams
+		if err := json.Unmarshal(req.Params(), &p); err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		s.roots = changedRoots(s.roots, p)
+		s.schedule()
+		s.mu.Unlock()
+		return nil, nil
+	case "textDocument/definition", "textDocument/hover", "textDocument/references":
+		var p referenceParams
 		if err := json.Unmarshal(req.Params(), &p); err != nil {
 			return nil, err
 		}
@@ -209,12 +243,16 @@ func (s *server) handle(ctx context.Context, req *jsonrpc2.Request) (any, error)
 		s.mu.Lock()
 		idx := s.good[path]
 		current, opened := s.open[path]
+		good := s.good
+		open := copyOpen(s.open)
 		s.mu.Unlock()
 		if idx == nil {
 			s.analyze()
 			s.mu.Lock()
 			idx = s.good[path]
 			current, opened = s.open[path]
+			good = s.good
+			open = copyOpen(s.open)
 			s.mu.Unlock()
 		}
 		if err := ctx.Err(); err != nil {
@@ -235,19 +273,8 @@ func (s *server) handle(ctx context.Context, req *jsonrpc2.Request) (any, error)
 		if !valid {
 			return nil, nil
 		}
-		var chosen *occurrence
-		for n := range doc.uses {
-			u := &doc.uses[n]
-			if u.span.Start <= offset && offset < u.span.End {
-				if chosen == nil || u.span.End-u.span.Start < chosen.span.End-chosen.span.Start {
-					chosen = u
-				}
-			}
-		}
+		chosen := occurrenceAt(doc, file, offset)
 		if chosen == nil {
-			return nil, nil
-		}
-		if chosen.span.End > len(file.Content) || chosen.span.End > len(doc.file.Content) || string(file.Content[chosen.span.Start:chosen.span.End]) != string(doc.file.Content[chosen.span.Start:chosen.span.End]) {
 			return nil, nil
 		}
 		sym, exists := idx.symbols[chosen.target]
@@ -256,6 +283,20 @@ func (s *server) handle(ctx context.Context, req *jsonrpc2.Request) (any, error)
 		}
 		if req.Method() == "textDocument/definition" {
 			return location{URI: pathURI(sym.path), Range: spanRange(sym.span)}, nil
+		}
+		if req.Method() == "textDocument/references" {
+			spelling := sym.span.File.Content[sym.span.Start:sym.span.End]
+			workspace, err := s.workspaceIndexes(ctx, path, spelling)
+			if err != nil {
+				return nil, err
+			}
+			good = copyIndexes(good)
+			for candidate, candidateIndex := range selectGood(workspace) {
+				if good[candidate] == nil {
+					good[candidate] = candidateIndex
+				}
+			}
+			return references(ctx, good, open, chosen.target, sym, p.Context.IncludeDeclaration)
 		}
 		if sym.typeText == "" && sym.docs == "" {
 			return nil, nil
@@ -274,6 +315,88 @@ func (s *server) handle(ctx context.Context, req *jsonrpc2.Request) (any, error)
 		}
 		return nil, nil
 	}
+}
+
+func occurrenceAt(doc *documentIndex, current *source.File, offset int) *occurrence {
+	var chosen *occurrence
+	for n := range doc.uses {
+		u := &doc.uses[n]
+		if u.span.Start <= offset && offset < u.span.End && (chosen == nil || u.span.End-u.span.Start < chosen.span.End-chosen.span.Start) {
+			chosen = u
+		}
+	}
+	if chosen != nil && sameOccurrenceText(doc.file, current, chosen.span) {
+		return chosen
+	}
+	return nil
+}
+
+func copyOpen(open map[string][]byte) map[string][]byte {
+	out := make(map[string][]byte, len(open))
+	for path, content := range open {
+		out[path] = content
+	}
+	return out
+}
+
+func copyIndexes(indexes map[string]*index) map[string]*index {
+	out := make(map[string]*index, len(indexes))
+	for path, idx := range indexes {
+		out[path] = idx
+	}
+	return out
+}
+
+func sameOccurrenceText(indexed, current *source.File, span source.Span) bool {
+	return span.Start >= 0 && span.End <= len(indexed.Content) && span.End <= len(current.Content) &&
+		string(indexed.Content[span.Start:span.End]) == string(current.Content[span.Start:span.End]) &&
+		positionAt(indexed, span.Start) == positionAt(current, span.Start) &&
+		positionAt(indexed, span.End) == positionAt(current, span.End)
+}
+
+func references(ctx context.Context, good map[string]*index, open map[string][]byte, target string, definition symbol, includeDeclaration bool) ([]location, error) {
+	out := []location{}
+	seen := map[location]bool{}
+	for path, idx := range good {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		sym, ok := idx.symbols[target]
+		if !ok || sym.path != definition.path || sym.span.Start != definition.span.Start || sym.span.End != definition.span.End {
+			continue
+		}
+		doc := idx.documents[path]
+		if doc == nil {
+			continue
+		}
+		current := doc.file
+		if content, opened := open[path]; opened {
+			current = source.NewFile(doc.file.Name, content)
+		}
+		for _, use := range doc.uses {
+			if use.target != target || !sameOccurrenceText(doc.file, current, use.span) {
+				continue
+			}
+			if !includeDeclaration && path == definition.path && use.span.Start == definition.span.Start && use.span.End == definition.span.End {
+				continue
+			}
+			loc := location{URI: pathURI(path), Range: spanRange(use.span)}
+			if !seen[loc] {
+				seen[loc] = true
+				out = append(out, loc)
+			}
+		}
+	}
+	sort.Slice(out, func(a, b int) bool {
+		if out[a].URI != out[b].URI {
+			return out[a].URI < out[b].URI
+		}
+		if out[a].Range.Start.Line != out[b].Range.Start.Line {
+			return out[a].Range.Start.Line < out[b].Range.Start.Line
+		}
+		return out[a].Range.Start.Character < out[b].Range.Start.Character
+	})
+	return out, nil
 }
 
 func (s *server) cancelRequest(id jsonrpc2.ID) {
@@ -309,23 +432,17 @@ func (s *server) analyzeGeneration(gen uint64) {
 		open[k] = append([]byte(nil), v...)
 	}
 	previous := s.published
+	entries := make(map[string]*index, len(s.entries))
+	for path, idx := range s.entries {
+		if _, ok := s.open[path]; ok {
+			entries[path] = idx
+		}
+	}
 	s.mu.Unlock()
 	diagnostics := map[string][]diagnostic{}
-	good := map[string]*index{}
 	for entry, content := range open {
 		root := sourceRoot(entry, content)
-		fresh := map[string]bool{}
-		for path := range open {
-			if lib, err := libroot.Root(); err == nil {
-				stdlib := filepath.Join(lib, "stdlib") + string(filepath.Separator)
-				if strings.HasPrefix(path, stdlib) {
-					fresh["<stdlib>/"+filepath.ToSlash(strings.TrimPrefix(path, stdlib))] = true
-				}
-			}
-			if rel, err := filepath.Rel(root, path); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-				fresh[filepath.ToSlash(rel)] = true
-			}
-		}
+		fresh := freshSources(root, entry, open)
 		result, errs, internal := (&check.Session{LoadOptions: modules.LoadOptions{Root: root, Overlays: open, AllowBundledEntry: true}, FreshSources: fresh, AccumulateDiagnostics: true}).Compile(entry)
 		if internal != nil {
 			errs = append(errs, diag.Error{Title: "INTERNAL COMPILER ERROR", Body: internal.Error()})
@@ -359,12 +476,7 @@ func (s *server) analyzeGeneration(gen uint64) {
 			}
 		}
 		if result != nil {
-			idx := newIndex(root, result)
-			for path := range idx.documents {
-				if path == entry || good[path] == nil {
-					good[path] = idx
-				}
-			}
+			entries[entry] = newIndex(root, result)
 		}
 	}
 	s.mu.Lock()
@@ -372,9 +484,8 @@ func (s *server) analyzeGeneration(gen uint64) {
 		s.mu.Unlock()
 		return
 	}
-	for path, idx := range good {
-		s.good[path] = idx
-	}
+	s.entries = entries
+	s.good = selectGood(entries)
 	newPublished := map[string]bool{}
 	for path := range diagnostics {
 		newPublished[path] = true
@@ -397,6 +508,30 @@ func (s *server) analyzeGeneration(gen uint64) {
 	for path, items := range diagnostics {
 		_ = s.conn.Notify(context.Background(), "textDocument/publishDiagnostics", publishParams{URI: pathURI(path), Diagnostics: items})
 	}
+}
+
+// Each open entry contributes its last valid graph. Its own analysis wins for
+// that file; imported files use a deterministic graph when several are open.
+func selectGood(entries map[string]*index) map[string]*index {
+	good := map[string]*index{}
+	paths := make([]string, 0, len(entries))
+	for path := range entries {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if entries[path].documents[path] != nil {
+			good[path] = entries[path]
+		}
+	}
+	for _, entry := range paths {
+		for path := range entries[entry].documents {
+			if good[path] == nil {
+				good[path] = entries[entry]
+			}
+		}
+	}
+	return good
 }
 
 var headerLine = regexp.MustCompile(`(?m)^module\s+([A-Z][A-Za-z0-9_.]*)\b`)

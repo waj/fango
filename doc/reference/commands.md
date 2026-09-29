@@ -288,15 +288,21 @@ type where one is available. A contiguous group of `--` or `{- … -}` comments
 immediately above a declaration appears below its type; a declaration pragma
 may sit between the comments and annotation. A blank line ends the group.
 Bundled library files can also be opened directly for navigation and hover.
-Hover does not infer the type of an arbitrary expression, and Find References
-and document symbols are not available yet.
+Find References searches `.fango` files in the workspace folders, including
+unopened modules that import the queried symbol, and reachable bundled library
+modules. It uses unsaved open buffers and includes the declaration when the
+client requests it. Files that fail to check have no new reference index until
+they are fixed. Hover does not infer the type of an arbitrary expression, and
+document symbols are not available yet.
 
 Open buffers, including unsaved local imports, are checked after a short
 debounce. Errors appear as editor diagnostics and are cleared when resolved.
 Errors in independent modules are reported together; a module depending on an
 invalid one waits for that dependency to be fixed.
-During an invalid edit, navigation and hover can use the last successful
-result if the queried symbol still occupies the same range with the same text.
+During an invalid edit, navigation, hover, and references can use the last
+successful result where indexed symbols still occupy the same range with the
+same text.
+Workspace references refresh after open-buffer edits and watched file changes.
 Diagnostics always describe the current buffer. The server uses full-document
 sync and UTF-16 protocol positions.
 

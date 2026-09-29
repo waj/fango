@@ -329,9 +329,16 @@ The editor index records source spans from a successful resolved and checked
 graph. Canonical names identify module declarations; lexical binder spans
 identify locals. Inferred record uses identify a field by its nominal owner,
 since a field spelling alone does not select a schema. The server retains the
-last successful index across an invalid edit and checks the current token text
-at the indexed range before answering. Protocol positions are UTF-16 code
-units; source spans and compilation remain byte based.
+last successful graph index for each open entry across an invalid edit. Each
+file uses its own entry index when open, or an importing entry's index when
+unopened. Find References also scans workspace `.fango` files on demand,
+checking candidate files from source with open-buffer overlays. The result is
+cached until an editor or watched-file change, and unopened files are not
+published as diagnostics. Reference search compares both symbol identity and
+its declaration path/span across file indexes, and drops duplicate locations.
+Before answering, the server checks the current token text and position at
+indexed ranges. Protocol positions are UTF-16 code units; source spans and
+compilation remain byte based.
 
 ## Elaboration boundary
 
