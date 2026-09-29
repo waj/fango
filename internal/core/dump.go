@@ -106,6 +106,8 @@ func DumpTree(t Tree) string { return dumpTree(t, types.NewPrinter()) }
 
 func dumpExpr(e Expr, pr *types.Printer) string {
 	switch e := e.(type) {
+	case *AttributeLookup:
+		return fmt.Sprintf("(attributes %s %s : %s)", pr.Type(e.Requested), dumpExpr(e.Bag, pr), pr.Type(e.Ty))
 	case *ParallelMap:
 		return fmt.Sprintf("(parallel-map %s %s : %s)", dumpExpr(e.Function, pr), dumpExpr(e.Input, pr), pr.Type(e.Ty))
 	case *AsyncLaunch:

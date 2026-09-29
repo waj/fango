@@ -229,6 +229,11 @@ func (ck *Checker) derivedInstance(td *ast.TypeDecl, adt *types.ADTInfo, cl *typ
 		// The traversal skeleton has no source of its own; quoted fragments
 		// keep the spans they were written with.
 		meta.FillSpans(body, sp)
+		if ck.moduleCheck != nil {
+			before := len(ck.moduleCheck.errs)
+			ck.moduleCheck.ensureExpr(&ast.Lambda{Params: params, Body: body})
+			errs = append(errs, ck.moduleCheck.errs[before:]...)
+		}
 		methods = append(methods, &ast.ValueDecl{Name: surface, NameSpan: sp, Params: params, Body: body})
 	}
 	if len(errs) > 0 {

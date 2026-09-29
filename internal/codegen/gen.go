@@ -1436,6 +1436,8 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return g.unitValue()
 	case *core.BoolLit:
 		return ident(strconv.FormatBool(e.Val))
+	case *core.AttributeLookup:
+		panic("codegen: attributes in emitted code")
 	case *core.Quote:
 		// Compile-time-only definitions are never emitted and the Core linter
 		// runs before this, so reaching here means both rules were bypassed.

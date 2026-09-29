@@ -544,6 +544,25 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			holes[i] = code
 		}
 		return &meta.Code{Template: e.Template, Holes: holes}, nil
+	case *core.AttributeLookup:
+		value, err := in.eval(e.Bag, fr)
+		if err != nil {
+			return nil, err
+		}
+		bag, ok := value.(*meta.Attributes)
+		if !ok {
+			return nil, fmt.Errorf("eval: invalid attribute collection")
+		}
+		var result Value = &CtorVal{Ctor: e.NilCtor}
+		for i := len(bag.Entries) - 1; i >= 0; i-- {
+			entry := bag.Entries[i]
+			if !core.EqualValueRepresentation(entry.Type, e.Requested) {
+				continue
+			}
+			attached := &CtorVal{Ctor: e.AttachedCtor, Fields: []Value{thawAttribute(entry.Value.(*meta.Data)), &meta.Site{Span: entry.Span}}}
+			result = &CtorVal{Ctor: e.ItemCtor, Fields: []Value{attached, result}}
+		}
+		return result, nil
 	case *core.TypeOf:
 		return e.Repr, nil
 

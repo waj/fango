@@ -103,6 +103,10 @@ func (r rewriter) expr(e Expr) Expr {
 		n.Args = r.exprs(e.Args)
 		out = &n
 
+	case *AttributeLookup:
+		n := *e
+		n.Ty, n.Requested, n.Bag = r.typ(e.Ty), r.typ(e.Requested), r.expr(e.Bag)
+		out = &n
 	case *Quote:
 		n := *e
 		n.Ty = r.typ(e.Ty)

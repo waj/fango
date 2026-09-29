@@ -53,6 +53,8 @@ func ExprControl(e Expr) types.Control {
 	case *FailureInspect:
 		return join(e.Args...)
 
+	case *AttributeLookup:
+		return ExprControl(e.Bag)
 	case *Quote:
 		return join(e.Holes...)
 	case *If:

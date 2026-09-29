@@ -80,7 +80,7 @@ The bundled library is experimental and versioned with the compiler.
 
 ## Compile-time metaprogramming
 
-[Compile-time metaprogramming](reference/metaprogramming.md) — Meta API, reflection, quotes, splices, and derivers.
+[Compile-time metaprogramming](reference/metaprogramming.md) — Meta API, typed attributes, reflection, quotes, splices, and derivers.
 
 ### Derivers
 

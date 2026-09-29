@@ -5,7 +5,10 @@
 // future module system).
 package types
 
-import "sort"
+import (
+	"github.com/waj/fango/internal/source"
+	"sort"
+)
 
 // ResumeID identifies one source handler operation clause. It is compiler-only
 // proof data: resumes with different owners may be nested without being
@@ -380,10 +383,12 @@ const (
 // CtorInfo is one constructor's row in the constructor table (doc/design.md, "Type inference"), shared
 // by pattern checking, exhaustiveness checking, and codegen.
 type CtorInfo struct {
-	Name   string
-	Index  int    // declaration position; drives layout and tree ordering
-	Fields []Type // solved constructor field types
-	Result *TCon  // the ADT this constructor belongs to
+	Attributes      []AttributeInfo
+	FieldAttributes [][]AttributeInfo
+	Name            string
+	Index           int    // declaration position; drives layout and tree ordering
+	Fields          []Type // solved constructor field types
+	Result          *TCon  // the ADT this constructor belongs to
 	// Repr mirrors the owning ADT's representation, because the interpreter
 	// discriminates a construction from the CtorInfo alone.
 	Repr Repr
@@ -404,7 +409,9 @@ func (c *CtorInfo) ValueType() Type {
 // vars (empty for monomorphic types); constructor Fields and Result are
 // expressed over them.
 type ADTInfo struct {
-	NativeIndexed bool // phantom native handle; its representation cannot be opened by Fango
+	Attributes        []AttributeInfo
+	AttributesPending bool
+	NativeIndexed     bool // phantom native handle; its representation cannot be opened by Fango
 	// Resource marks opaque native storage regardless of representation.
 	Resource bool
 	Con      *TCon
@@ -422,12 +429,17 @@ type ADTInfo struct {
 	RecordFields []RecordFieldInfo
 }
 
+// AttributeInfo stores a checked type and immutable meta.Data payload.
+// Value stays opaque to keep types below meta in the package graph.
+type AttributeInfo struct {
+	Type  Type
+	Value any
+	Span  source.Span
+}
 type RecordFieldInfo struct {
-	Name        string
-	Type        Type
-	JSONKey     string
-	JSONSkip    bool
-	JSONDefault any // resolved ast.Expr; kept opaque to avoid a types -> ast cycle
+	Name       string
+	Type       Type
+	Attributes []AttributeInfo
 }
 
 func (a *ADTInfo) IsRecord() bool { return a.RecordFields != nil }

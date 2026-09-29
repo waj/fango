@@ -39,20 +39,31 @@ is an array, such as `{"RGB":[1,2,3]}`. Unit and `Nothing` use `null`; `Just`
 uses its payload's representation. Nested `Maybe` cannot distinguish outer
 `Nothing` from an inner `Nothing` in this wire format.
 
-Record fields can carry JSON pragmas before the field name:
+Record fields can carry [typed attributes](metaprogramming.md#attributes):
 
 ```fango
 type Settings =
-    { {-# json key "full_name" #-} name : String
-    , {-# json default 7 #-} count : Int
-    , {-# json skip #-} {-# json default "local" #-} secret : String
-    } deriving (Encode, Decode)
+    { name : String    #[Json.Key "full_name"]
+    , count : Int      #[Json.Default (quote 7)]
+    , secret : String  #[Json.Skip, Json.Default (quote "local")]
+    }
+    deriving (Encode, Decode)
 ```
 
-`key` changes the wire key, `default` supplies a value when the key is absent,
-and `skip` omits the field while encoding and ignores it while decoding.
-`skip` requires `default`. A default expression is resolved in the declaring
-module. Keys must be unique among emitted fields.
+`Json.FieldOption = Key String | Skip | Default Meta.Code` is an ordinary
+library type. `Key` changes the wire key, `Default` supplies code for a value
+when the key is absent, and `Skip` omits the field while encoding and ignores it
+while decoding. `Skip` requires `Default` and cannot combine with `Key`. Each
+option may occur once per field, and keys must be unique among emitted fields.
+Defaults preserve declaration-site resolution and are checked against the
+field type when the decoder is generated. Their expressions run only when the
+decoder needs the fallback.
+
+Both JSON derivers validate these rules in Fango. `FieldOption` attributes on
+types, constructors, or positional union fields are rejected when consumed.
+Failures point to the offending attribute with `COMPILE-TIME FAILURE`; no JSON
+validation runs for a declaration that derives neither JSON class. The old
+`{-# json ... #-}` pragmas are no longer supported.
 
 ## Pull parser and value tree
 

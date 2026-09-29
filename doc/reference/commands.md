@@ -209,7 +209,8 @@ parentheses when removing them would change how the arguments are read.
 
 The formatter keeps the author's line breaks rather than reflowing to a width,
 except when placing a multiline closing parenthesis or lambda brace, or when
-making a lambda consistently inline or multiline. A
+making a lambda consistently inline or multiline, or expanding a record
+schema with attributed fields. A
 construct written across several lines stays that way and one written inline
 stays inline. That extends to where a keyword sits: a body moved below
 its `=` or `->` stays below it, a `case` written on its declaration's own line
@@ -235,6 +236,30 @@ A multiline nominal type is the exception: its `deriving` clause is always an
 indented line after its constructor alternatives or record schema. An inline
 type may instead keep `deriving` on the declaration line or on a following
 indented line, matching the source.
+
+A record schema containing attributes is multiline. The formatter preserves
+whether tags precede or follow a field. Leading tags each occupy a separate
+line: the leading `{` or `,` introduces the first tag, and subsequent tags and
+the field declaration align two columns farther right.
+
+The first inline trailing tag aligns across fields that have one, leaving two
+spaces after the longest participating field declaration. Unattributed fields
+and fields whose trailing tags begin on separate lines do not affect that
+column. Field names, colons, and types keep their ordinary spacing:
+
+```fango
+type Config =
+    { name : String    #[Json.Key "full_name"]
+    , count : Int      #[Json.Default (quote 7)]
+    , secret : String  #[Json.Skip, Json.Default (quote "local")]
+    }
+    deriving (Encode, Decode)
+```
+
+Repeated inline tags have one space between them. Trailing tags starting on
+separate lines are indented one level below the field name. Tag grouping and
+line breaks are preserved, with multiline contents indented relative to their
+tag's starting column. Tags are not automatically wrapped to a line width.
 
 A bracket list or tuple written across lines uses that same leading-separator
 style. Its separators and closing delimiter align with its opening delimiter;

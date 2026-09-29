@@ -1627,6 +1627,11 @@ func (r *resolver) resolveDecls(decls []ast.Decl) []ast.Decl {
 			out = append(out, d)
 		case *ast.TypeDecl:
 			d.Name = r.canon(d.Name)
+			d.VisitAttributes(func(group *ast.AttributeGroup) {
+				for _, e := range group.Exprs {
+					r.expr(e, r.vals, map[string]bool{})
+				}
+			})
 			for i := range d.Deriving {
 				d.Deriving[i].Name = r.qualified(d.Deriving[i].Name, r.tys, "type", d.Deriving[i].Sp)
 			}
@@ -1638,9 +1643,7 @@ func (r *resolver) resolveDecls(decls []ast.Decl) []ast.Decl {
 			}
 			for i := range d.RecordFields {
 				r.typ(d.RecordFields[i].Type)
-				if d.RecordFields[i].JSONDefault != nil {
-					r.expr(d.RecordFields[i].JSONDefault, r.vals, map[string]bool{})
-				}
+
 			}
 			out = append(out, d)
 		case *ast.EffectDecl:

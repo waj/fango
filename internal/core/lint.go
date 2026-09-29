@@ -416,6 +416,31 @@ func (l *linter) expr(e Expr, where string) {
 				l.stageType(hole.Type(), "Meta.Code", where)
 			}
 		}
+	case *AttributeLookup:
+		if !l.allowStage {
+			l.errorf("%s: attribute lookup in emitted code", where)
+		}
+		l.expr(e.Bag, where)
+		l.stageType(e.Bag.Type(), "Meta.Attributes", where)
+		result, ok := e.Ty.(*types.TCon)
+		if !ok || result.Name != "Meta.Items" || len(result.Args) != 1 {
+			l.errorf("%s: invalid attribute lookup result", where)
+			break
+		}
+		attached, ok := result.Args[0].(*types.TCon)
+		if !ok || attached.Name != "Meta.Attached" || len(attached.Args) != 1 || !EqualValueRepresentation(attached.Args[0], e.Requested) {
+			l.errorf("%s: attribute lookup type differs from requested type", where)
+			break
+		}
+		itemsADT, attachedADT := l.adts[result.Unique], l.adts[attached.Unique]
+		if itemsADT == nil || attachedADT == nil || itemsADT.Con.Name != "Meta.Items" || attachedADT.Con.Name != "Meta.Attached" ||
+			len(itemsADT.Ctors) != 2 || len(attachedADT.Ctors) != 1 || e.NilCtor != itemsADT.Ctors[0] || e.ItemCtor != itemsADT.Ctors[1] || e.AttachedCtor != attachedADT.Ctors[0] {
+			l.errorf("%s: invalid attribute lookup constructors", where)
+		}
+		l.typ(e.Requested, where)
+		if !l.closedAttributeType(e.Requested) {
+			l.errorf("%s: attribute lookup requires a closed type", where)
+		}
 	case *TypeOf:
 		if !l.allowStage {
 			l.errorf("%s: typeOf in emitted code — a compile-time-only value escaped", where)
@@ -432,6 +457,28 @@ func (l *linter) expr(e Expr, where string) {
 				l.stageType(e.Ty, "Meta.Code", where)
 				if repr == nil {
 					l.errorf("%s: stage code constant is nil", where)
+				}
+			case *meta.Attributes:
+				l.stageType(e.Ty, "Meta.Attributes", where)
+				if repr == nil {
+					l.errorf("%s: nil attribute collection", where)
+				} else {
+					for _, entry := range repr.Entries {
+						if !l.closedAttributeType(entry.Type) {
+							l.errorf("%s: attribute stored type is not closed", where)
+						}
+						d, ok := entry.Value.(*meta.Data)
+						if !ok {
+							l.errorf("%s: invalid stored attribute payload", where)
+						} else {
+							l.attributeData(entry.Type, d, where)
+						}
+					}
+				}
+			case *meta.Site:
+				l.stageType(e.Ty, "Meta.Site", where)
+				if repr == nil {
+					l.errorf("%s: nil attribute site", where)
 				}
 			default:
 				l.errorf("%s: invalid stage constant %T", where, e.Repr)

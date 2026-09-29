@@ -11,6 +11,10 @@ starts a line comment, and `{- ... -}` comments may nest. `{-#` opens a
 pragma rather than a comment, so a block comment whose first character is `#`
 must be written `{- #`.
 
+`#[` opens a [typed attribute group](metaprogramming.md#attributes), closed by
+`]`. Its contents use ordinary expression tokens; `#` elsewhere remains an
+operator character.
+
 Lowercase names identify values, parameters, type variables, operations, and
 effect-row tails. Uppercase names identify types, effects, and constructors.
 Values cannot be shadowed, including by parameters, patterns, or local

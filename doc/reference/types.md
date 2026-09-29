@@ -14,9 +14,10 @@ bump : Counts -> Counts
 bump counts = { counts | lines = counts.lines + 1 }
 ```
 
-Record fields may also carry `json` pragmas before their names. These affect
-[JSON derivation](library-json.md#typed-values) and leave the record's Fango
-field names and types unchanged.
+Record fields may carry [typed attributes](metaprogramming.md#attributes)
+before their names or after their types. Consumers such as
+[JSON derivation](library-json.md#typed-values) interpret this metadata; it does
+not change the record's Fango field names or types.
 
 A record literal provides every declared field exactly once; source field order
 does not affect its type. `value.field` projects a field, and

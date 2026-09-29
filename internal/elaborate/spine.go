@@ -277,6 +277,9 @@ func (el *elab) operationValue(op *types.EffectOp, ty, raw types.Type) core.Expr
 }
 
 func (el *elab) nativeApply(n *types.NativeInfo, nativeTy, raw types.Type, args []ast.Expr) core.Expr {
+	if n.Name == "Meta.attributes" {
+		return el.attributeLookup(nativeTy, raw, args)
+	}
 	if len(args) > n.Arity {
 		res := el.nativeApply(n, nativeTy, raw, args[:n.Arity])
 		for _, a := range args[n.Arity:] {

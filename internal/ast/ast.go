@@ -599,6 +599,7 @@ func (*PatternDecl) isDecl() {}
 // types and matching"). Its RHS is either constructor alternatives or a
 // standalone record schema. Params declare polymorphic types.
 type TypeDecl struct {
+	Attributes   []AttributeGroup
 	Resource     bool
 	ResourceSpan source.Span
 	Name         string
@@ -613,23 +614,27 @@ type TypeDecl struct {
 	Sp                source.Span
 }
 
+// AttributeGroup preserves source grouping; consumers flatten it in order.
+type AttributeGroup struct {
+	Exprs []Expr
+	Sp    source.Span
+}
+
 type RecordFieldDef struct {
-	Name        string
-	NameSpan    source.Span
-	Type        TypeExpr
-	JSONKey     string
-	JSONKeySet  bool
-	JSONSkip    bool
-	JSONDefault Expr
-	JSONSpan    source.Span
+	Name       string
+	NameSpan   source.Span
+	Type       TypeExpr
+	Attributes []AttributeGroup
 }
 
 // CtorDef is one constructor alternative. Args are type atoms: named types
 // or parenthesized type expressions.
 type CtorDef struct {
-	Name     string
-	NameSpan source.Span
-	Args     []TypeExpr
+	Attributes      []AttributeGroup
+	FieldAttributes [][]AttributeGroup
+	Name            string
+	NameSpan        source.Span
+	Args            []TypeExpr
 }
 
 func (*TypeDecl) isDecl() {}
@@ -821,5 +826,24 @@ func SetDeclSpan(d Decl, sp source.Span) {
 		d.Sp = sp
 	case *FixityDecl:
 		d.Sp = sp
+	}
+}
+
+// VisitAttributes visits attachments in source order, preserving writable groups.
+func (d *TypeDecl) VisitAttributes(f func(*AttributeGroup)) {
+	visit := func(groups []AttributeGroup) {
+		for i := range groups {
+			f(&groups[i])
+		}
+	}
+	visit(d.Attributes)
+	for i := range d.RecordFields {
+		visit(d.RecordFields[i].Attributes)
+	}
+	for i := range d.Ctors {
+		visit(d.Ctors[i].Attributes)
+		for _, groups := range d.Ctors[i].FieldAttributes {
+			visit(groups)
+		}
 	}
 }

@@ -277,6 +277,14 @@ type TypeOf struct {
 	Ty   types.Type
 }
 
+// AttributeLookup performs a stage-only typed projection from an opaque bag.
+type AttributeLookup struct {
+	Bag                             Expr
+	Requested                       types.Type
+	NilCtor, ItemCtor, AttachedCtor *types.CtorInfo
+	Ty                              types.Type
+}
+
 // NativeCall is a saturated call to a declaration-backed primitive.
 type NativeCall struct {
 	Storage types.NativeStorage
@@ -377,53 +385,55 @@ func (*Leaf) isTree()       {}
 func (*SwitchCtor) isTree() {}
 func (*SwitchLit) isTree()  {}
 
-func (*IntLit) isExpr()         {}
-func (*FloatLit) isExpr()       {}
-func (*StringLit) isExpr()      {}
-func (*CharLit) isExpr()        {}
-func (*UnitLit) isExpr()        {}
-func (*BoolLit) isExpr()        {}
-func (*VarRef) isExpr()         {}
-func (*Neg) isExpr()            {}
-func (*NativeCall) isExpr()     {}
-func (*Quote) isExpr()          {}
-func (*TypeOf) isExpr()         {}
-func (*If) isExpr()             {}
-func (*Perform) isExpr()        {}
-func (*ControlExit) isExpr()    {}
-func (*FailureInspect) isExpr() {}
-func (*Handle) isExpr()         {}
-func (*Bracket) isExpr()        {}
-func (*ResumeTail) isExpr()     {}
-func (*Seq) isExpr()            {}
-func (*Let) isExpr()            {}
-func (*Lambda) isExpr()         {}
-func (*App) isExpr()            {}
-func (*Case) isExpr()           {}
+func (*IntLit) isExpr()          {}
+func (*FloatLit) isExpr()        {}
+func (*StringLit) isExpr()       {}
+func (*CharLit) isExpr()         {}
+func (*UnitLit) isExpr()         {}
+func (*BoolLit) isExpr()         {}
+func (*VarRef) isExpr()          {}
+func (*Neg) isExpr()             {}
+func (*NativeCall) isExpr()      {}
+func (*Quote) isExpr()           {}
+func (*AttributeLookup) isExpr() {}
+func (*TypeOf) isExpr()          {}
+func (*If) isExpr()              {}
+func (*Perform) isExpr()         {}
+func (*ControlExit) isExpr()     {}
+func (*FailureInspect) isExpr()  {}
+func (*Handle) isExpr()          {}
+func (*Bracket) isExpr()         {}
+func (*ResumeTail) isExpr()      {}
+func (*Seq) isExpr()             {}
+func (*Let) isExpr()             {}
+func (*Lambda) isExpr()          {}
+func (*App) isExpr()             {}
+func (*Case) isExpr()            {}
 
-func (e *IntLit) Type() types.Type         { return e.Ty }
-func (e *FloatLit) Type() types.Type       { return e.Ty }
-func (e *StringLit) Type() types.Type      { return e.Ty }
-func (e *CharLit) Type() types.Type        { return e.Ty }
-func (e *UnitLit) Type() types.Type        { return e.Ty }
-func (e *BoolLit) Type() types.Type        { return e.Ty }
-func (e *VarRef) Type() types.Type         { return e.Ty }
-func (e *Neg) Type() types.Type            { return e.Ty }
-func (e *NativeCall) Type() types.Type     { return e.Ty }
-func (e *Quote) Type() types.Type          { return e.Ty }
-func (e *TypeOf) Type() types.Type         { return e.Ty }
-func (e *If) Type() types.Type             { return e.Ty }
-func (e *Perform) Type() types.Type        { return e.Ty }
-func (e *ControlExit) Type() types.Type    { return e.Ty }
-func (e *FailureInspect) Type() types.Type { return e.Ty }
-func (e *Handle) Type() types.Type         { return e.Ty }
-func (e *Bracket) Type() types.Type        { return e.Ty }
-func (e *ResumeTail) Type() types.Type     { return e.ClauseResult }
-func (e *Seq) Type() types.Type            { return e.Ty }
-func (e *Let) Type() types.Type            { return e.Ty }
-func (e *Lambda) Type() types.Type         { return e.Ty }
-func (e *App) Type() types.Type            { return e.Ty }
-func (e *Case) Type() types.Type           { return e.Ty }
+func (e *IntLit) Type() types.Type          { return e.Ty }
+func (e *FloatLit) Type() types.Type        { return e.Ty }
+func (e *StringLit) Type() types.Type       { return e.Ty }
+func (e *CharLit) Type() types.Type         { return e.Ty }
+func (e *UnitLit) Type() types.Type         { return e.Ty }
+func (e *BoolLit) Type() types.Type         { return e.Ty }
+func (e *VarRef) Type() types.Type          { return e.Ty }
+func (e *Neg) Type() types.Type             { return e.Ty }
+func (e *NativeCall) Type() types.Type      { return e.Ty }
+func (e *Quote) Type() types.Type           { return e.Ty }
+func (e *AttributeLookup) Type() types.Type { return e.Ty }
+func (e *TypeOf) Type() types.Type          { return e.Ty }
+func (e *If) Type() types.Type              { return e.Ty }
+func (e *Perform) Type() types.Type         { return e.Ty }
+func (e *ControlExit) Type() types.Type     { return e.Ty }
+func (e *FailureInspect) Type() types.Type  { return e.Ty }
+func (e *Handle) Type() types.Type          { return e.Ty }
+func (e *Bracket) Type() types.Type         { return e.Ty }
+func (e *ResumeTail) Type() types.Type      { return e.ClauseResult }
+func (e *Seq) Type() types.Type             { return e.Ty }
+func (e *Let) Type() types.Type             { return e.Ty }
+func (e *Lambda) Type() types.Type          { return e.Ty }
+func (e *App) Type() types.Type             { return e.Ty }
+func (e *Case) Type() types.Type            { return e.Ty }
 
 // Mentions reports whether name occurs in e. No-shadowing makes a plain
 // occurrence check exact: nothing inside e can rebind name. Used by the
@@ -466,6 +476,8 @@ func Mentions(e Expr, name string) bool {
 			}
 		}
 		return false
+	case *AttributeLookup:
+		return Mentions(e.Bag, name)
 	case *Quote:
 		for _, h := range e.Holes {
 			if Mentions(h, name) {

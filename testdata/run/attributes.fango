@@ -1,0 +1,55 @@
+import Meta exposing (Code, Items(..))
+
+type Label = Label String
+type Detail a = Detail a
+
+decorate : String -> Label
+decorate text = Label (text ++ "!")
+
+labels : Meta.Attributes -> String
+labels attached =
+    Meta.foldItems { previous item ->
+        case item.value of
+            Label text -> previous ++ text ++ ";"
+    } "" (Meta.attributes @Label attached)
+
+class Describe a
+    describe : a -> String
+
+deriver Describe
+    describe subject value =
+        Meta.match subject value { bound ->
+            fields = Meta.foldItems { previous field -> previous ++ labels field.attributes } "" bound.fields
+            Meta.lift (labels subject.attributes ++ "/" ++ labels bound.ctor.attributes ++ "/" ++ fields)
+        }
+
+#[decorate "type", Detail "ignored", Label "second"]
+type Choice = #[Label "constructor"] Choice #[Label "payload"] Int deriving (Describe)
+
+#[Label "record"]
+type Entry =
+    { #[Label "field", Detail True]
+      value : Int  #[decorate "extra"]
+    }
+    deriving (Describe)
+
+stringLookup : Meta.Attributes -> Items (Meta.Attached (Detail String))
+stringLookup = Meta.attributes @(Detail String)
+
+stringDetails : Meta.Attributes -> String
+stringDetails attached =
+    Meta.foldItems { previous item ->
+        case item.value of
+            Detail text -> previous ++ text
+    } "" (stringLookup attached)
+
+reflectedDetails : Code
+reflectedDetails =
+    case Meta.info (typeOf Choice) of
+        Meta.Visible info -> Meta.lift (stringDetails info.attributes)
+        Meta.Opaque -> Meta.fail "expected visible schema"
+
+main() =
+    print (describe (Choice 3))
+    print (describe (Entry { value = 4 }))
+    print $(reflectedDetails)

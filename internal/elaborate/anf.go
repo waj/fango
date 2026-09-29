@@ -186,6 +186,10 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		}
 		return &core.FailureInspect{Name: e.Name, Args: args, Result: e.Result, Ty: e.Ty}, hoists
 
+	case *core.AttributeLookup:
+		n := *e
+		n.Bag = slot(e.Bag)
+		return &n, hoists
 	case *core.Quote:
 		holes := make([]core.Expr, len(e.Holes))
 		for i, h := range e.Holes {

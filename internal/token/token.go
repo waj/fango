@@ -21,6 +21,7 @@ const (
 	// lexical rules. The parser places directives before the module header
 	// or an adjacent declaration according to their meaning.
 	PRAGMA
+	ATTRIBUTE // #[ starts a group of compile-time metadata expressions
 
 	// OP is a run of operator characters that is not one of the reserved
 	// lexemes below. Its Text is the spelling, which is also the operator's
@@ -85,7 +86,8 @@ const (
 )
 
 var kindNames = map[Kind]string{
-	EOF: "EOF", INT: "INT", FLOAT: "FLOAT", STRING: "STRING", CHAR: "CHAR",
+	ATTRIBUTE: "ATTRIBUTE",
+	EOF:       "EOF", INT: "INT", FLOAT: "FLOAT", STRING: "STRING", CHAR: "CHAR",
 	LIDENT: "LIDENT", UIDENT: "UIDENT", PRAGMA: "PRAGMA",
 	OP:     "OP",
 	LPAREN: "LPAREN", RPAREN: "RPAREN", COMMA: "COMMA", SEMICOLON: "SEMICOLON", DOT: "DOT", DOTDOT: "DOTDOT",

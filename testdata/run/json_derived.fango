@@ -5,10 +5,11 @@ type Shade = Red | RGB Int Int Int deriving (Encode, Decode)
 type Person = { name : String, shade : Shade } deriving (Encode, Decode)
 type Person2 = { name : String, age : Int } deriving (Encode, Decode)
 type Config =
-    { {-# json key "full_name" #-} name : String
-    , {-# json default 7 #-} count : Int
-    , {-# json skip #-} {-# json default "local" #-} secret : String
-    } deriving (Encode, Decode)
+    { name : String    #[Json.Key "full_name"]
+    , count : Int      #[Json.Default (quote 7)]
+    , secret : String  #[Json.Skip, Json.Default (quote "local")]
+    }
+    deriving (Encode, Decode)
 
 decoded : Result Json.Error Person2
 decoded = Json.parse @Person2 "{\"age\":4,\"name\":\"Ada\"}"

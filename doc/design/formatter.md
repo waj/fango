@@ -20,8 +20,16 @@ adjacency distinguishes `f()` from `f ()`, and lookahead indexes the token slice
 
 Author line breaks are preserved except when a multiline closing parenthesis
 or lambda brace needs its own line, or a lambda's body and closing brace are
-split across lines while its body starts on the arrow's line. The printer
-does not search for a page width.
+split across lines while its body starts on the arrow's line. Attributed nominal
+records normalize to a multiline schema while preserving tag placement. Group
+spans relative to the field name distinguish leading and trailing tags without
+splitting the semantic attribute collection. Leading tags occupy separate lines
+aligned with their following field declaration after the leading brace or comma.
+The first inline trailing tag aligns using the longest participating rendered
+field declaration plus two spaces; other fields do not affect that column.
+Source gaps determine whether later tags share a line or continue one indentation
+level below the field name. Attribute group boundaries and multiline contents
+are retained. The printer does not search for a page width.
 Spans identify multiline constructs, while source bytes locate keywords and the
 definition name when AST NameSpan points at an annotation. Explicit semicolon
 blocks retain separators and line structure, with each separator owned by its

@@ -76,7 +76,7 @@ func (ck *Checker) IsCompileTimeOnly(t types.Type) bool {
 		return false
 	}
 	roots := map[int]bool{}
-	for _, name := range []string{CodeTypeName, TypeReprName} {
+	for _, name := range []string{CodeTypeName, TypeReprName, "Meta.Attributes", "Meta.Site"} {
 		if con, ok := ck.TypeNames[name].(*types.TCon); ok {
 			roots[con.Unique] = true
 		}
@@ -603,7 +603,12 @@ func (ck *Checker) runSplice(operand ast.Expr, sp source.Span) (*meta.Code, []di
 // splice site deserves.
 func CompileTimeError(err error, sp source.Span) diag.Error {
 	var unsafe *eval.UnsafeNativeError
+	var located *meta.Failure
 	switch {
+	case errors.As(err, &located):
+		d := diag.Errorf(located.Site.Span, "COMPILE-TIME FAILURE", "%s", located.Message)
+		d.Notes = append(d.Notes, "While evaluating compile-time code at "+sp.StartPos().String()+".")
+		return d
 	case errors.Is(err, eval.ErrStepBudget):
 		return diag.Errorf(sp, "COMPILE-TIME LIMIT",
 			"This splice ran for %d evaluation steps without finishing.\nCompile-time code is bounded so a build cannot hang.", eval.DefaultBudget)

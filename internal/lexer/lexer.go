@@ -407,6 +407,11 @@ func UnescapeChar(raw string) rune {
 // beyond a fixed table could be lexed at all.
 func (l *lexer) lexOperator(start int) {
 	c := l.f.Content[l.pos]
+	if c == '#' && l.peekAt(1) == '[' {
+		l.pos += 2
+		l.emit(token.ATTRIBUTE, start, l.pos)
+		return
+	}
 	if c == '@' && (isUpper(l.peekAt(1)) || l.peekAt(1) == '(') {
 		l.pos++
 		l.emit(token.ATTYPE, start, l.pos)

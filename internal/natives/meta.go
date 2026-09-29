@@ -21,6 +21,9 @@ import (
 )
 
 func installMeta(t map[string]Spec) {
+	t["Meta.attributes"] = Spec{Arity: 2, Eval: func(_ *Runtime, _ []any) (any, error) {
+		return nil, fmt.Errorf("Attribute lookup must be specialized during elaboration.")
+	}}
 	t["Meta.liftInt"] = liftSpec(func(v any) ast.Expr { return &ast.IntLit{Value: v.(int64), Raw: true} })
 	t["Meta.liftFloat"] = liftSpec(func(v any) ast.Expr { return &ast.FloatLit{Value: v.(float64)} })
 	t["Meta.liftString"] = liftSpec(func(v any) ast.Expr { return &ast.StringLit{Value: v.(string)} })
@@ -137,39 +140,44 @@ func installMeta(t map[string]Spec) {
 		}
 		return r.Derive(types.SubstRigid(c.Fields[n], adt.ParamSubst(argsOf(r))))
 	})
-	fieldInfo := func(a, i, j any) *types.RecordFieldInfo {
-		r := repr(a)
-		adt := r.ADT()
-		n := int(j.(int64))
-		if adt == nil || !adt.IsRecord() || int(i.(int64)) != 0 || n < 0 || n >= len(adt.RecordFields) {
-			return nil
+	collection := func(r *meta.TypeRepr, entries []types.AttributeInfo) (any, error) {
+		if adt := r.ADT(); adt != nil && adt.AttributesPending {
+			return nil, fmt.Errorf("Cannot read attributes before their declaration is complete.")
 		}
-		return &adt.RecordFields[n]
+		return &meta.Attributes{Entries: entries}, nil
 	}
-	t["Meta.fieldJSONKey"] = pure3(func(a, i, j any) any {
-		if f := fieldInfo(a, i, j); f != nil {
-			return f.JSONKey
+	t["Meta.typeAttributes"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		r := repr(args[0])
+		var entries []types.AttributeInfo
+		if adt := r.ADT(); adt != nil {
+			entries = adt.Attributes
 		}
-		return ""
-	})
-	t["Meta.fieldJSONSkip"] = pure3(func(a, i, j any) any {
-		if f := fieldInfo(a, i, j); f != nil {
-			return f.JSONSkip
+		return collection(r, entries)
+	}}
+	t["Meta.ctorAttributes"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
+		r := repr(args[0])
+		var entries []types.AttributeInfo
+		if c := ctorAt(r, args[1]); c != nil {
+			entries = c.Attributes
 		}
-		return false
-	})
-	t["Meta.fieldHasJSONDefault"] = pure3(func(a, i, j any) any {
-		if f := fieldInfo(a, i, j); f != nil {
-			return f.JSONDefault != nil
+		return collection(r, entries)
+	}}
+	t["Meta.fieldAttributes"] = Spec{Arity: 3, Eval: func(_ *Runtime, args []any) (any, error) {
+		r := repr(args[0])
+		var entries []types.AttributeInfo
+		i, j := int(args[1].(int64)), int(args[2].(int64))
+		if adt := r.ADT(); adt != nil && j >= 0 {
+			if adt.IsRecord() && i == 0 && j < len(adt.RecordFields) {
+				entries = adt.RecordFields[j].Attributes
+			} else if c := ctorAt(r, args[1]); c != nil && j < len(c.FieldAttributes) {
+				entries = c.FieldAttributes[j]
+			}
 		}
-		return false
-	})
-	t["Meta.fieldJSONDefault"] = pure3(func(a, i, j any) any {
-		if f := fieldInfo(a, i, j); f != nil && f.JSONDefault != nil {
-			return &meta.Code{Template: -1, Direct: f.JSONDefault.(ast.Expr)}
-		}
-		return &meta.Code{Template: -1, Direct: &ast.UnitLit{}}
-	})
+		return collection(r, entries)
+	}}
+	t["Meta.failAt"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
+		return nil, &meta.Failure{Site: args[0].(*meta.Site), Message: args[1].(string)}
+	}}
 
 	// --- code construction --------------------------------------------
 

@@ -285,6 +285,22 @@ func (p *parser) parseDecl() ast.Decl {
 		p.recoverToTopLevel(false)
 		return nil
 	}
+	if t.Kind == token.ATTRIBUTE {
+		groups := p.parseAttributes()
+		var d ast.Decl
+		if p.peek().Kind == token.KwType {
+			d = p.parseTypeDecl()
+		} else {
+			d = p.parseDecl()
+		}
+		if td, ok := d.(*ast.TypeDecl); ok {
+			td.Attributes = groups
+			td.Sp = t.Span.Merge(td.Sp)
+			return td
+		}
+		p.errorAt(t.Span, "ATTRIBUTE TARGET", "An attribute here must precede a type declaration.")
+		return d
+	}
 	if t.Kind == token.PRAGMA {
 		p.next()
 
@@ -485,7 +501,7 @@ func (p *parser) parseDeriverDecl() ast.Decl {
 		if !p.expect(token.EQ, "I expect `=` after the deriver method parameters.") {
 			return nil
 		}
-		body := p.parseBindBody(p.peek())
+		body := p.parseBindBody(p.toks[p.pos-1])
 		if body == nil {
 			return nil
 		}
@@ -812,52 +828,8 @@ func (p *parser) parseRecordTypeFields() ([]ast.RecordFieldDef, bool) {
 		return nil, false
 	}
 	var fields []ast.RecordFieldDef
-	jsonKeys := map[string]bool{}
-	jsonExplicit := map[string]bool{}
 	for {
-		field := ast.RecordFieldDef{}
-		for p.peek().Kind == token.PRAGMA {
-			pragma := p.next()
-			parts := strings.Fields(pragma.Text)
-			if len(parts) < 2 || parts[0] != "json" {
-				p.errorAt(pragma.Span, "JSON ATTRIBUTE", "A record field accepts `json key`, `json default`, or `json skip` here.")
-				return nil, false
-			}
-			field.JSONSpan = pragma.Span
-			switch parts[1] {
-			case "key":
-				if field.JSONKeySet {
-					p.errorAt(pragma.Span, "JSON ATTRIBUTE", "This field already has a JSON key attribute.")
-					return nil, false
-				}
-				value := strings.TrimSpace(strings.TrimPrefix(pragma.Text, "json key"))
-				key, err := strconv.Unquote(value)
-				if err != nil {
-					p.errorAt(pragma.Span, "JSON ATTRIBUTE", "Write a quoted string after `json key`.")
-					return nil, false
-				}
-				field.JSONKey, field.JSONKeySet = key, true
-			case "skip":
-				if field.JSONSkip || len(parts) != 2 {
-					p.errorAt(pragma.Span, "JSON ATTRIBUTE", "Write `{-# json skip #-}` once for this field.")
-					return nil, false
-				}
-				field.JSONSkip = true
-			case "default":
-				if field.JSONDefault != nil {
-					p.errorAt(pragma.Span, "JSON ATTRIBUTE", "This field already has a JSON default.")
-					return nil, false
-				}
-				expr := p.parseJSONDefault(pragma)
-				if expr == nil {
-					return nil, false
-				}
-				field.JSONDefault = expr
-			default:
-				p.errorAt(pragma.Span, "JSON ATTRIBUTE", "Unknown JSON field attribute.")
-				return nil, false
-			}
-		}
+		field := ast.RecordFieldDef{Attributes: p.parseAttributes()}
 		name := p.peekInExpr()
 		if name.Kind != token.LIDENT {
 			p.errorAt(name.Span, "SYNTAX PROBLEM", "I expect a lowercase record field name.")
@@ -872,26 +844,7 @@ func (p *parser) parseRecordTypeFields() ([]ast.RecordFieldDef, bool) {
 			return nil, false
 		}
 		field.Name, field.NameSpan, field.Type = name.Text, name.Span, ty
-		if field.JSONSkip && field.JSONDefault == nil {
-			p.errorAt(field.JSONSpan, "JSON ATTRIBUTE", "A skipped JSON field requires a default expression.")
-			return nil, false
-		}
-		if field.JSONSkip && field.JSONKeySet {
-			p.errorAt(field.JSONSpan, "JSON ATTRIBUTE", "A skipped JSON field cannot also rename its key.")
-			return nil, false
-		}
-		key := field.Name
-		if field.JSONKeySet {
-			key = field.JSONKey
-		}
-		if !field.JSONSkip && jsonKeys[key] && (field.JSONKeySet || jsonExplicit[key]) {
-			p.errorAt(field.NameSpan, "JSON ATTRIBUTE", "Two fields use the same JSON key `"+key+"`.")
-			return nil, false
-		}
-		if !field.JSONSkip {
-			jsonKeys[key] = true
-			jsonExplicit[key] = jsonExplicit[key] || field.JSONKeySet
-		}
+		field.Attributes = append(field.Attributes, p.parseAttributes()...)
 		fields = append(fields, field)
 		if p.peek().Kind != token.COMMA {
 			break
@@ -906,41 +859,47 @@ func (p *parser) parseRecordTypeFields() ([]ast.RecordFieldDef, bool) {
 	return fields, true
 }
 
-func (p *parser) parseJSONDefault(pragma token.Token) ast.Expr {
-	raw := p.f.Content[pragma.Span.Start+3 : pragma.Span.End-3]
-	marker := strings.Index(string(raw), "default")
-	if marker < 0 {
-		p.errorAt(pragma.Span, "JSON ATTRIBUTE", "Write an expression after `json default`.")
-		return nil
+// parseAttributes uses normal expression tokens and delimiter-aware parsing.
+func (p *parser) parseAttributes() []ast.AttributeGroup {
+	var groups []ast.AttributeGroup
+	for p.peek().Kind == token.ATTRIBUTE {
+		start := p.next()
+		p.usesStaging = true
+		p.exprParenDepth++
+		p.lay.push(ctxParen, 0)
+		group := ast.AttributeGroup{}
+		if p.peek().Kind == token.RBRACKET {
+			p.errorAt(p.peek().Span, "ATTRIBUTE", "An attribute group needs at least one expression.")
+		} else {
+			for {
+				e := p.parseExpr()
+				if e == nil {
+					break
+				}
+				group.Exprs = append(group.Exprs, e)
+				if p.peek().Kind != token.COMMA {
+					break
+				}
+				p.next()
+				if p.peek().Kind == token.RBRACKET {
+					break
+				}
+			}
+		}
+		end := p.peek().Span
+		p.expectRaw(token.RBRACKET, "I expect `]` to close this attribute group.")
+		p.lay.pop()
+		p.exprParenDepth--
+		group.Sp = start.Span.Merge(end)
+		groups = append(groups, group)
 	}
-	start := pragma.Span.Start + 3 + marker + len("default")
-	end := pragma.Span.End - 3
-	for start < end && (p.f.Content[start] == ' ' || p.f.Content[start] == '\n') {
-		start++
-	}
-	if start == end {
-		p.errorAt(pragma.Span, "JSON ATTRIBUTE", "Write an expression after `json default`.")
-		return nil
-	}
-	fragment := source.NewFile(p.f.Name, p.f.Content[start:end])
-	toks, errs := lexer.Lex(fragment)
-	if len(errs) > 0 {
-		p.errorAt(pragma.Span, "JSON ATTRIBUTE", "The JSON default is not a valid Fango expression.")
-		return nil
-	}
-	for i := range toks {
-		toks[i].Span.File = p.f
-		toks[i].Span.Start += start
-		toks[i].Span.End += start
-	}
-	expr, parseErrs := ParseExprInput(toks, p.f)
-	p.errs = append(p.errs, parseErrs...)
-	return expr
+	return groups
 }
 
 // parseCtorDef parses one constructor alternative: a capitalized name
 // followed by zero or more type atoms (applications need parens: `Cons a (List a)`).
 func (p *parser) parseCtorDef() (ast.CtorDef, bool) {
+	attrs := p.parseAttributes()
 	t := p.peekInExpr()
 	if t.Kind != token.UIDENT {
 		switch {
@@ -961,14 +920,16 @@ func (p *parser) parseCtorDef() (ast.CtorDef, bool) {
 	}
 	p.next()
 	var args []ast.TypeExpr
-	for isTypeAtomStart(p.peekInExpr().Kind) {
+	var fieldAttrs [][]ast.AttributeGroup
+	for isTypeAtomStart(p.peekInExpr().Kind) || p.peekInExpr().Kind == token.ATTRIBUTE {
+		fieldAttrs = append(fieldAttrs, p.parseAttributes())
 		a := p.parseTypeAtom()
 		if a == nil {
 			return ast.CtorDef{}, false
 		}
 		args = append(args, a)
 	}
-	return ast.CtorDef{Name: t.Text, NameSpan: t.Span, Args: args}, true
+	return ast.CtorDef{Name: t.Text, NameSpan: t.Span, Args: args, Attributes: attrs, FieldAttributes: fieldAttrs}, true
 }
 
 // parseParams consumes zero or more parameter identifiers.

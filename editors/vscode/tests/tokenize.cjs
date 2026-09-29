@@ -63,9 +63,23 @@ async function main() {
   assert(!sharedPragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
   assert(!grammar.tokenizeLine('{-# service #-}').tokens.some(t => t.scopes.includes('keyword.control.directive.fango')));
   assert(grammar.tokenizeLine('resource = 1').tokens.every(t => !t.scopes.includes('keyword.control.directive.fango')));
-  for (const pragmaText of ['{-# json key "full_name" #-}', '{-# json default 7 #-}', '{-# json skip #-}']) {
-    assert(grammar.tokenizeLine(pragmaText).tokens.some(t => t.scopes.includes('keyword.control.directive.fango')), pragmaText);
-  }
+  const attribute = '#[Json.Key "foo", Json.Default (quote [1, 2])]';
+  const attributeTokens = grammar.tokenizeLine(attribute).tokens;
+  const attributeScopeAt = index => attributeTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+  assert(attributeScopeAt(0).includes('punctuation.definition.attribute.begin.fango'));
+  assert(attributeScopeAt(attribute.length - 1).includes('punctuation.definition.attribute.end.fango'));
+  assert(attributeScopeAt(attribute.indexOf('"foo"')).some(scope => scope.startsWith('string.')));
+  const afterAttribute = grammar.tokenizeLine('#[Example.Tags ["a", "b"]] field : String').tokens;
+  assert(!afterAttribute.find(t => t.startIndex <= 26 && t.endIndex > 26).scopes.includes('meta.attribute.fango'));
+  const trailingField = '    , count : Int  #[Json.Default (quote 7)]';
+  const trailingTokens = grammar.tokenizeLine(trailingField).tokens;
+  const trailingScopeAt = index => trailingTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+  assert(!trailingScopeAt(trailingField.indexOf('count')).includes('meta.attribute.fango'));
+  assert(trailingScopeAt(trailingField.indexOf('#[')).includes('punctuation.definition.attribute.begin.fango'));
+  assert(trailingScopeAt(trailingField.length - 1).includes('punctuation.definition.attribute.end.fango'));
+  const multilineAttribute = grammar.tokenizeLine('#[Json.Key "foo",');
+  const attributeEnd = grammar.tokenizeLine('  Json.Default (quote 0)] field : Int', multilineAttribute.ruleStack).tokens;
+  assert(attributeEnd.some(t => t.scopes.includes('punctuation.definition.attribute.end.fango')));
   for (const witness of ['parse @Person input', 'parse @(List Person) input']) {
     const witnessTokens = grammar.tokenizeLine(witness).tokens;
     const at = witness.indexOf('@');

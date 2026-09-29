@@ -131,6 +131,9 @@ func fixityText(d *ast.FixityDecl) string {
 // a leading `=` and `|`, exactly when the author wrote them that way. A broken
 // right-hand side always gives its deriving clause a line of its own.
 func (p *printer) typeDeclLines(d *ast.TypeDecl, sp source.Span) {
+	for _, group := range d.Attributes {
+		p.attributeGroupLine(group, 0, "")
+	}
 
 	if d.Resource {
 		p.line(0, "{-# resource #-}")
@@ -147,32 +150,10 @@ func (p *printer) typeDeclLines(d *ast.TypeDecl, sp source.Span) {
 	if d.RecordFields != nil {
 		attributed := false
 		for _, f := range d.RecordFields {
-			attributed = attributed || f.JSONKeySet || f.JSONSkip || f.JSONDefault != nil
+			attributed = attributed || len(f.Attributes) > 0
 		}
 		if attributed {
-			p.line(0, head+" =")
-			for i, f := range d.RecordFields {
-				lead := ", "
-				if i == 0 {
-					lead = "{ "
-				}
-				attrs := ""
-				if f.JSONKeySet {
-					attrs += "{-# json key " + strconv.Quote(f.JSONKey) + " #-} "
-				}
-				if f.JSONSkip {
-					attrs += "{-# json skip #-} "
-				}
-				if f.JSONDefault != nil {
-					attrs += "{-# json default " + strings.TrimSpace(raw(f.JSONDefault.Span())) + " #-} "
-				}
-				p.line(Indent, lead+attrs+f.Name+" : "+typeText(f.Type))
-			}
-			closing := "}"
-			if tail != "" {
-				closing += " " + strings.TrimSpace(tail)
-			}
-			p.line(Indent, closing)
+			p.attributedRecord(d, head, tail)
 			return
 		}
 		fields := make([]string, len(d.RecordFields))
@@ -203,8 +184,17 @@ func (p *printer) typeDeclLines(d *ast.TypeDecl, sp source.Span) {
 
 	alts := make([]string, len(d.Ctors))
 	for i, c := range d.Ctors {
-		parts := []string{c.Name}
-		for _, a := range c.Args {
+		parts := []string{}
+		for _, g := range c.Attributes {
+			parts = append(parts, attributeGroupText(g))
+		}
+		parts = append(parts, c.Name)
+		for j, a := range c.Args {
+			if j < len(c.FieldAttributes) {
+				for _, g := range c.FieldAttributes[j] {
+					parts = append(parts, attributeGroupText(g))
+				}
+			}
 			parts = append(parts, typeArgText(a))
 		}
 		alts[i] = strings.Join(parts, " ")
@@ -407,4 +397,114 @@ func predsText(preds []ast.PredExpr) string {
 		return parts[0]
 	}
 	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+func attributeGroupText(g ast.AttributeGroup) string {
+	parts := make([]string, len(g.Exprs))
+	for i, e := range g.Exprs {
+		value, ok := exprInline(e)
+		if !ok {
+			return raw(g.Sp)
+		}
+		parts[i] = value
+	}
+	return "#[" + strings.Join(parts, ", ") + "]"
+}
+
+// leadingFieldAttributes derives presentation from spans; consumers keep one
+// ordered collection regardless of which side of the field a group occupies.
+func leadingFieldAttributes(f ast.RecordFieldDef) int {
+	for i, group := range f.Attributes {
+		if group.Sp.Start > f.NameSpan.Start {
+			return i
+		}
+	}
+	return len(f.Attributes)
+}
+
+func (p *printer) inlineFieldAttribute(from int, group ast.AttributeGroup) bool {
+	return !brokeBetween(p.f, from, group.Sp.Start) &&
+		!p.cs.holdsComment(source.Span{File: p.f, Start: from, End: group.Sp.Start})
+}
+
+func (p *printer) attributedRecord(d *ast.TypeDecl, head, tail string) {
+	width := 0
+	for _, f := range d.RecordFields {
+		n := leadingFieldAttributes(f)
+		if n < len(f.Attributes) && p.inlineFieldAttribute(f.Type.Span().End, f.Attributes[n]) {
+			width = max(width, len(f.Name+" : "+typeText(f.Type)))
+		}
+	}
+	tagColumn := Indent + 2 + width + 2
+	p.line(0, head+" =")
+	for i, f := range d.RecordFields {
+		lead := ", "
+		if i == 0 {
+			lead = "{ "
+		}
+		n := leadingFieldAttributes(f)
+		for j, group := range f.Attributes[:n] {
+			if j == 0 {
+				p.attributeGroupLine(group, Indent, lead)
+			} else {
+				p.attributeGroupLine(group, Indent+2, "")
+			}
+		}
+		fieldIndent := Indent
+		if n > 0 {
+			fieldIndent += 2
+			lead = ""
+		}
+		p.cs.emitBefore(p, f.NameSpan.Start, fieldIndent)
+		p.start(fieldIndent)
+		p.emit(lead + f.Name + " : " + typeText(f.Type))
+		from := f.Type.Span().End
+		for j, group := range f.Attributes[n:] {
+			if p.inlineFieldAttribute(from, group) {
+				padding := 1
+				if j == 0 {
+					padding = tagColumn - p.column()
+				}
+				p.emit(strings.Repeat(" ", padding))
+			} else {
+				p.cs.emitBefore(p, group.Sp.Start, Indent+2+Indent)
+				p.start(Indent + 2 + Indent)
+			}
+			p.attributeGroup(group)
+			from = group.Sp.End
+		}
+		p.flush()
+	}
+	p.line(Indent, "}")
+	if tail != "" {
+		p.line(Indent, strings.TrimSpace(tail))
+	}
+}
+
+func (p *printer) attributeGroupLine(g ast.AttributeGroup, ind int, lead string) {
+	p.cs.emitBefore(p, g.Sp.Start, ind+len(lead))
+	p.start(ind)
+	p.emit(lead)
+	p.attributeGroup(g)
+	p.flush()
+}
+
+// attributeGroup appends at the current cursor, retaining multiline contents
+// relative to the tag's new starting column. It leaves its last line open so
+// a following inline group or comment can share that line.
+func (p *printer) attributeGroup(g ast.AttributeGroup) {
+	text := attributeGroupText(g)
+	if bytes.ContainsRune(g.Sp.File.Content[g.Sp.Start:g.Sp.End], '\n') || p.cs.holdsComment(g.Sp) {
+		text = raw(g.Sp)
+	}
+	lines := strings.Split(text, "\n")
+	delta := p.column() - (g.Sp.StartPos().Col - 1)
+	p.emit(lines[0])
+	for _, line := range lines[1:] {
+		whitespace := len(line) - len(strings.TrimLeft(line, " "))
+		indent := max(0, whitespace+delta)
+		p.start(indent)
+		p.emit(strings.TrimLeft(line, " "))
+	}
+	p.cs.skipTo(g.Sp.End)
 }

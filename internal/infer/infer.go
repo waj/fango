@@ -915,6 +915,9 @@ func (ck *Checker) TypeDecl(td *ast.TypeDecl) []diag.Error {
 		return errs
 	}
 	errs = append(errs, ck.declareTypeCtors(td, adt, false)...)
+	if len(errs) == 0 {
+		errs = append(errs, ck.checkAttributes(td)...)
+	}
 	return append(errs, ck.checkRegularity(map[*ast.TypeDecl]*types.ADTInfo{td: adt})...)
 }
 
@@ -940,7 +943,9 @@ func (ck *Checker) declareTypeHeader(td *ast.TypeDecl) (*types.ADTInfo, []diag.E
 		params[i] = ck.Sup.FreshRigid(types.General)
 	}
 	con := &types.TCon{Unique: ck.Sup.NextUnique(), Name: td.Name}
-	adt := &types.ADTInfo{Resource: td.Resource, Con: con, Params: params, ParamKindsKnown: make([]bool, len(params))}
+	pendingAttrs := false
+	td.VisitAttributes(func(*ast.AttributeGroup) { pendingAttrs = true })
+	adt := &types.ADTInfo{AttributesPending: pendingAttrs, Resource: td.Resource, Con: con, Params: params, ParamKindsKnown: make([]bool, len(params))}
 	ck.TypeNames[td.Name] = con
 	ck.ADTs[con.Unique] = adt
 	ck.ADTOrder = append(ck.ADTOrder, adt)
@@ -983,13 +988,7 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 				ty = ck.B.Unit
 			}
 			fields[i] = ty
-			key := f.Name
-			if f.JSONKeySet {
-				key = f.JSONKey
-			}
-			adt.RecordFields = append(adt.RecordFields, types.RecordFieldInfo{
-				Name: f.Name, Type: ty, JSONKey: key, JSONSkip: f.JSONSkip, JSONDefault: f.JSONDefault,
-			})
+			adt.RecordFields = append(adt.RecordFields, types.RecordFieldInfo{Name: f.Name, Type: ty})
 		}
 		ctor := &types.CtorInfo{Name: td.Name + ".__record", Index: 0, Fields: fields, Result: result}
 		adt.Ctors = append(adt.Ctors, ctor)

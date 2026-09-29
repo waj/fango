@@ -4,6 +4,7 @@
   "scopeName": "source.fango",
   "patterns": [
     { "include": "#comments" },
+    { "include": "#attributes" },
     { "include": "#module_decl" },
     { "include": "#import_decl" },
     { "include": "#type_decl" },
@@ -29,6 +30,29 @@
         }
       ]
     },
+    "attributes": {
+      "name": "meta.attribute.fango",
+      "begin": "#\\[",
+      "end": "\\]",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.attribute.begin.fango"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.attribute.end.fango"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#expressions"
+        }
+      ]
+    },
     "pragma": {
       "name": "meta.preprocessor.fango",
       "begin": "\\{-#",
@@ -42,7 +66,7 @@
       "patterns": [
         {
           "name": "keyword.control.directive.fango",
-          "match": "(?<![\\w-])(?:no-prelude|resource|scoped|json|key|default|skip)(?![\\w-])"
+          "match": "(?<![\\w-])(?:no-prelude|resource|scoped)(?![\\w-])"
         }
       ]
     },
@@ -307,6 +331,7 @@
     },
     "expressions": {
       "patterns": [
+        { "include": "#attributes" },
         { "include": "#comments" },
         {
           "name": "punctuation.separator.statement.fango",

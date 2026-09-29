@@ -38,7 +38,7 @@ instance environments, deriving, and deferred record obligations.
 
 ## Compile-time metaprogramming
 
-[Metaprogramming](design/metaprogramming.md) — reflection visibility, hygiene,
+[Metaprogramming](design/metaprogramming.md) — typed attributes, reflection visibility, hygiene,
 completion order, stage-only values, evaluator integration, and rollback.
 
 ## Core and evidence invariants

@@ -234,6 +234,10 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			r.value = types.CaptureSet{}
 		}
 		return r
+	case *AttributeLookup:
+		r := children(e.Bag)
+		r.value = types.CaptureSet{}
+		return r
 	case *Quote:
 		r := children(e.Holes...)
 		if !a.canCarry(e.Ty, nil) {

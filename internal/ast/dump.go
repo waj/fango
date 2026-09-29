@@ -111,6 +111,7 @@ func dumpDecl(d Decl) string {
 	case *TypeDecl:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(type %s", d.Name)
+		b.WriteString(dumpAttributes(d.Attributes))
 
 		if d.Resource {
 			b.WriteString(" (pragma resource)")
@@ -128,13 +129,16 @@ func dumpDecl(d Decl) string {
 		if d.RecordFields != nil {
 			b.WriteString(" (record")
 			for _, f := range d.RecordFields {
-				fmt.Fprintf(&b, " (field %s %s)", f.Name, DumpTypeExpr(f.Type))
+				fmt.Fprintf(&b, " (field %s%s %s)", f.Name, dumpAttributes(f.Attributes), DumpTypeExpr(f.Type))
 			}
 			b.WriteString(")")
 		}
 		for _, c := range d.Ctors {
-			fmt.Fprintf(&b, " (ctor %s", c.Name)
-			for _, a := range c.Args {
+			fmt.Fprintf(&b, " (ctor %s%s", c.Name, dumpAttributes(c.Attributes))
+			for i, a := range c.Args {
+				if i < len(c.FieldAttributes) {
+					b.WriteString(dumpAttributes(c.FieldAttributes[i]))
+				}
 				fmt.Fprintf(&b, " %s", DumpTypeExpr(a))
 			}
 			b.WriteString(")")
@@ -496,4 +500,16 @@ func DumpExpr(e Expr) string {
 	default:
 		panic(fmt.Sprintf("ast.DumpExpr: unhandled %T", e))
 	}
+}
+
+func dumpAttributes(groups []AttributeGroup) string {
+	var b strings.Builder
+	for _, g := range groups {
+		b.WriteString(" (attributes")
+		for _, e := range g.Exprs {
+			b.WriteString(" " + DumpExpr(e))
+		}
+		b.WriteString(")")
+	}
+	return b.String()
 }

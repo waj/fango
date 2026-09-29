@@ -69,3 +69,39 @@ func TestStageCoreLintRejectsMalformedConstants(t *testing.T) {
 		})
 	}
 }
+
+func TestStageAttributeLookupChecksProjectionAndStoredTypes(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	nominal := func(name string) *types.TCon { return &types.TCon{Unique: sup.NextUnique(), Name: name} }
+	bagTy, siteTy, itemsTy, attachedTy := nominal("Meta.Attributes"), nominal("Meta.Site"), nominal("Meta.Items"), nominal("Meta.Attached")
+	itemVar, attachedVar := sup.FreshRigid(types.General), sup.FreshRigid(types.General)
+	nilCtor := &types.CtorInfo{Name: "Meta.NoItems", Index: 0, Result: itemsTy}
+	itemCtor := &types.CtorInfo{Name: "Meta.Item", Index: 1, Fields: []types.Type{itemVar, &types.TCon{Unique: itemsTy.Unique, Name: itemsTy.Name, Args: []types.Type{itemVar}}}, Result: itemsTy}
+	attachedCtor := &types.CtorInfo{Name: "Meta.Attached.__record", Fields: []types.Type{attachedVar, siteTy}, Result: attachedTy}
+	adts := []*types.ADTInfo{{Con: bagTy}, {Con: siteTy}, {Con: itemsTy, Params: []*types.TVar{itemVar}, Ctors: []*types.CtorInfo{nilCtor, itemCtor}}, {Con: attachedTy, Params: []*types.TVar{attachedVar}, Ctors: []*types.CtorInfo{attachedCtor}}}
+	resultTy := &types.TCon{Unique: itemsTy.Unique, Name: itemsTy.Name, Args: []types.Type{&types.TCon{Unique: attachedTy.Unique, Name: attachedTy.Name, Args: []types.Type{b.Int}}}}
+	for _, tc := range []struct {
+		name      string
+		requested types.Type
+		kind      string
+		stageOK   bool
+	}{
+		{"valid", b.Int, "int", true},
+		{"retagged projection", b.String, "int", false},
+		{"retagged payload", b.Int, "string", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bag := &TypeOf{Ty: bagTy, Repr: &meta.Attributes{Entries: []types.AttributeInfo{{Type: b.Int, Value: &meta.Data{Kind: tc.kind, Integer: 42}}}}}
+			body := &AttributeLookup{Bag: bag, Requested: tc.requested, NilCtor: nilCtor, ItemCtor: itemCtor, AttachedCtor: attachedCtor, Ty: resultTy}
+			p := &Prog{ADTs: adts, Defs: []Def{{Name: "lookup", Type: resultTy, Body: body}}}
+			errors := LintStage(p, b)
+			if (len(errors) == 0) != tc.stageOK {
+				t.Fatalf("stage errors: %v", errors)
+			}
+			if len(Lint(p, b)) == 0 {
+				t.Fatal("runtime lint accepted attribute operation")
+			}
+		})
+	}
+}

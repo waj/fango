@@ -32,8 +32,39 @@ facts; there is no ambient name reification or instance-existence query.
 Pure reflection/code-building natives return scalars and opaque handles. Meta's
 Fango code assembles schema records and its own Items list, keeping natives below
 eval in the package graph and avoiding Meta -> List -> Derive -> Meta cycles.
-The loader adds Meta for quote/splice/typeOf and Derive for deriving. Meta depends
+The loader adds Meta for attributes and quote/splice/typeOf and Derive for deriving. Meta depends
 only on Basics; Derive supplies ordinary Fango Eq/Ord/Show generators.
+
+## Attribute storage and lookup
+
+Attribute groups preserve expression spans and source grouping in the AST.
+Record fields store leading and trailing groups in one source-ordered collection;
+spans retain their placement for formatting. Resolution and fixity traverse their ordinary expressions. Source-ordered type
+registration checks and evaluates attachments through the staging seam before
+running any deriver; type headers and constructors are already installed.
+Metadata reads reject unfinished declarations, preventing forward and cyclic
+metadata observation. Generated deriver bodies complete their ordinary source
+dependencies before checking, including private names supplied by quoted
+attribute values.
+
+Schemas store ordered attributes with checked closed types, source spans, and
+immutable `meta.Data` payloads. Freezing admits only data and the existing Code
+and TypeRepr handles, never interpreter closures or native resources. List
+storage is copied into portable data. Module objects serialize the frozen
+values; installation remaps nominal identities, quote templates, reflected
+visibility, and source provenance using the ordinary object machinery. Source
+checking records the executable closure of attachment evaluation as stage
+cache dependencies. Cached imports reuse their stored metadata without replay.
+
+Meta exposes opaque collections and source sites. Lookup elaborates to a
+stage-only `core.AttributeLookup` carrying the closed requested type and
+checked Items/Attached constructors. Core lint verifies the typed projection;
+the evaluator reconstructs only matching stored values. Requested types use
+nominal identities and complete arguments. The public witness remains a
+singleton at runtime; lookup obtains its type during elaboration. Attributes
+and Site are compile-time-only roots, while schema metadata is deliberately
+excluded from the annotated type's runtime field representation and stage-only
+classification. Existing checker transactions discard failed attachment state.
 
 ## Compile-time-only values
 
@@ -103,4 +134,4 @@ Json.Encode and Json.Decode exercise reflection and quotes without declaration
 generation. Derivers emit specialized field and constructor code. The JSON
 scanner, pull protocol, and emitter live in Fango; the existing buffered
 Reader and Writer primitives provide byte I/O. The wire format and field
-pragmas are specified in [JSON](../reference/library-json.md).
+attributes are specified in [JSON](../reference/library-json.md).

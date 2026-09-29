@@ -16,7 +16,8 @@ memory cost proportional to the entire input except for the result itself.
 
 Encode derivation emits straight-line record and union output through the
 `Emit` effect. The effect handler writes chunks to a `Writer`. The declarative
-field key, skip flag, and default expression are part of the resolved record
-schema exposed through `Meta.Field`. Both interpreter and Go compilation see
+field options are ordinary `Json.FieldOption` values in each `Meta.Field`
+attribute collection. Shared Fango helpers interpret and validate options for
+both derivers; the compiler has no JSON-specific schema fields or rules. Both interpreter and Go compilation see
 the same generated syntax tree. The observable format and errors are in the
 [JSON reference](../reference/library-json.md).

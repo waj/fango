@@ -5,7 +5,7 @@ Meta reflection, quotes, splices, derivers, hygiene, and stage restrictions.
 [Reference index](../reference.md).
 
 Fango has one compile-time stage. `quote` goes up a stage and `$(…)` comes
-back down, and together they are the whole staging surface. `quote` is a
+back down. Attributes also evaluate expressions at that compile-time stage. `quote` is a
 reserved word; `$` is a token only as part of `$(`.
 
 ## Type reflection
@@ -33,26 +33,99 @@ constructor patterns and record fields. A type variable and a scalar are
 `Opaque` too — neither has a schema to read.
 
 ```fango
-type TypeInfo = { name : String, moduleName : String, ty : TypeRepr, params : Items TypeRepr, shape : Shape }
+type TypeInfo = { name : String, moduleName : String, ty : TypeRepr, params : Items TypeRepr, shape : Shape, attributes : Attributes }
 type Shape = Union (Items Ctor) | Record Ctor
-type Ctor = { name : String, symbol : String, index : Int, owner : TypeRepr, fields : Items Field }
-type Field = { name : String, index : Int, ty : TypeRepr, jsonKey : String, jsonSkip : Bool, jsonDefault : Default }
-type Default = NoDefault | Default Code
+type Ctor = { name : String, symbol : String, index : Int, owner : TypeRepr, fields : Items Field, attributes : Attributes }
+type Field = { name : String, index : Int, ty : TypeRepr, attributes : Attributes }
 ```
 
 A union constructor's fields are positional, so their `name` is empty; a
 record's sole constructor carries the type's own name and its fields' names.
 Field types come back instantiated at the reflected type's arguments, so a
 generator sees `Int` rather than the declaration's parameter.
-Record fields also expose their JSON key, skip flag, and optional default code
-for [JSON derivation](library-json.md). Positional union fields have no JSON
-configuration.
+Types, constructors, and fields expose their generic attribute collections.
+The synthetic record constructor has no attributes of its own; attributes
+before `type` belong to `TypeInfo`. Attributes on a parent do not propagate to
+its children.
 `Meta.ctorsIn` flattens the two shapes into one constructor list.
 
 `Items` is `Meta`'s own list — `NoItems | Item a (Items a)`, with
 `Meta.foldItems`, `Meta.mapItems`, and `Meta.lengthItems`. `Meta` cannot import
 `List`, because `List` derives its own instances and so depends on the module
 that depends on `Meta`.
+
+## Attributes
+
+An attribute is an ordinary Fango expression inside `#[...]`. Libraries define
+attribute types with ordinary declarations; no registration is required:
+
+```fango
+type Label = Label String
+
+#[Label "configuration"]
+type Config =
+    { count : Int  #[Label "wire", Json.Default (quote 0)]
+    }
+```
+
+Each tag contains one or more comma-separated expressions, with an optional
+trailing comma. Empty tags and missing items are rejected. Repeated tags and a
+single grouped tag have identical semantics: expressions are evaluated left to
+right, and the resulting attributes retain source order. Nested commas belong
+to their list, tuple, or record expressions. Formatting preserves tag grouping.
+
+Tags attach before `type`, before a union constructor name, or before a
+positional constructor field's type atom. Record-field tags may appear before
+the field name or after its complete type, before the comma or closing brace.
+A trailing tag on a separate line still belongs to that field; the comma starts
+the next field. Both placements may occur on one field, with leading tags
+followed by trailing tags in the attribute collection. Formatting preserves
+placement; see the [layout rules](commands.md#formatting).
+Tags do not attach to value declarations or expressions. Qualified names and
+aliases obey ordinary import rules; attributes do not make libraries implicit
+imports.
+
+Every expression is checked and evaluated when its declaration is checked,
+before deriving, even if nothing reads the attributes. The existing purity,
+source-order, safe-native, and step-budget restrictions apply. Types must be
+closed and fully applied, with ordinary numeric defaulting. Attributes on a
+generic declaration are shared by its instantiations; attribute payloads cannot
+depend on the declaration's type parameters.
+
+Payloads may contain scalars, records, unions, Lists, `Code`, and `TypeRepr`.
+Function, resource, and native-handle payload types are rejected (`ATTRIBUTE
+TYPE`); unsupported stored representations report `ATTRIBUTE VALUE`. Pure
+helpers may compute attribute data. Quotes store code without executing their
+bodies, retaining the declaring module's resolution and hygiene; generated code
+is checked when spliced.
+
+`Attributes` and `Site` are opaque compile-time-only types:
+
+```fango
+type Attached a = { value : a, site : Site }
+
+attributes : Type a -> Attributes -> Items (Attached a)
+failAt : Site -> String -> a
+```
+
+`Meta.attributes @Label field.attributes` retrieves exact matches by nominal
+type identity and type arguments, in source order. No matches return `NoItems`.
+The requested type must be closed at elaboration (`ATTRIBUTE TYPE`); concrete
+partial applications work, and generic helpers can accept a specialized lookup
+function. Attribute collections inherit reflection visibility: an abstract
+import does not expose its hidden schema or metadata. Reading metadata before
+its declaration completes fails at compile time.
+
+The compiler permits repeated attributes. Their consumers decide whether
+particular combinations and attachment sites are valid. `Meta.failAt` reports
+`COMPILE-TIME FAILURE` at the individual expression's attachment site, including
+when several expressions share a tag. JSON's rules are in the
+[JSON reference](library-json.md#typed-values). Unconsumed, well-typed options do
+not receive consumer-specific validation.
+
+Metadata and source handles cannot reach runtime code. Attaching metadata to a
+type does not make that type compile-time-only. Attributes work in the REPL;
+failed attachment evaluation or derivation rolls back the declaration.
 
 ## Derivers
 
@@ -84,7 +157,7 @@ The compiler owns the traversal, so a deriver never invents a binder:
 - `Meta.match : TypeInfo -> Code -> (Bound -> Code) -> Code` builds the
   exhaustive case over the type's constructors and binds every field, handing
   each branch a `Bound { ctor : Ctor, fields : Items BoundField }` whose
-  fields carry `{ name, index, ty, value : Code, jsonKey, jsonSkip }`. Nesting two calls produces
+  fields carry `{ name, index, ty, value : Code, attributes }`. Nesting two calls produces
   the nested case a two-argument method needs.
 - `Meta.construct : Ctor -> Items Code -> Code` goes the other way, for a
   method that produces an `a`. A record constructor produces a record literal.

@@ -39,6 +39,8 @@ func InspectPruned(e Expr, visit func(Expr) bool) {
 		for _, arg := range e.Args {
 			walk(arg)
 		}
+	case *AttributeLookup:
+		walk(e.Bag)
 	case *Quote:
 		for _, hole := range e.Holes {
 			walk(hole)

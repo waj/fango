@@ -1,9 +1,10 @@
 {-# no-prelude #-}
 module Meta exposing
-    ( Bound(..), BoundField(..), Code, Ctor(..), Default(..), Field(..)
-    , Items(..), Lift(..), Reflected(..), Shape(..), TypeInfo(..), TypeRepr
-    , args, construct, ctorsIn, fail, foldItems, head, info, isVar, lambda
-    , lengthItems, mapItems, match, sameType, typeName
+    ( Attached(..), Attributes, Bound(..), BoundField(..), Code, Ctor(..)
+    , Field(..), Items(..), Lift(..), Reflected(..), Shape(..), Site
+    , TypeInfo(..), TypeRepr
+    , args, attributes, construct, ctorsIn, fail, failAt, foldItems, head, info
+    , isVar, lambda, lengthItems, mapItems, match, sameType, typeName
     )
 
 import Basics exposing (..)
@@ -137,37 +138,40 @@ fieldName = native "$1 == $2 == $3"
 fieldType : TypeRepr -> Int -> Int -> TypeRepr
 fieldType = native "$1 == $2 == $3"
 
-fieldJSONKey : TypeRepr -> Int -> Int -> String
-fieldJSONKey = native "$1 == $2 == $3"
+-- Generic, typed metadata. The lookup primitive is specialized by the compiler.
+type Attributes = Attributes
 
-fieldJSONSkip : TypeRepr -> Int -> Int -> Bool
-fieldJSONSkip = native "$1 == $2 == $3"
+type Site = Site
 
-fieldHasJSONDefault : TypeRepr -> Int -> Int -> Bool
-fieldHasJSONDefault = native "$1 == $2 == $3"
+type Attached a = { value : a, site : Site }
 
-fieldJSONDefault : TypeRepr -> Int -> Int -> Code
-fieldJSONDefault = native "$1 == $2 == $3"
+attributes : Type a -> Attributes -> Items (Attached a)
+attributes = native "$1 == $2"
 
--- A schema: one field, one constructor, and the type as a whole. A union
--- constructor's fields are positional, so their names are empty.
+failAt : Site -> String -> a
+failAt = native "$1 == $2"
 
-type Default = NoDefault | Default Code
+typeAttributes : TypeRepr -> Attributes
+typeAttributes = native "$1"
+
+ctorAttributes : TypeRepr -> Int -> Attributes
+ctorAttributes = native "$1 == $2"
+
+fieldAttributes : TypeRepr -> Int -> Int -> Attributes
+fieldAttributes = native "$1 == $2 == $3"
 
 type Field =
     { name : String
     , index : Int
     , ty : TypeRepr
-    , jsonKey : String
-    , jsonSkip : Bool
-    , jsonDefault : Default
+    , attributes : Attributes
     }
 
-type Ctor = { name : String, symbol : String, index : Int, owner : TypeRepr, fields : Items Field }
+type Ctor = { name : String, symbol : String, index : Int, owner : TypeRepr, fields : Items Field, attributes : Attributes }
 
 type Shape = Union (Items Ctor) | Record Ctor
 
-type TypeInfo = { name : String, moduleName : String, ty : TypeRepr, params : Items TypeRepr, shape : Shape }
+type TypeInfo = { name : String, moduleName : String, ty : TypeRepr, params : Items TypeRepr, shape : Shape, attributes : Attributes }
 
 -- info answers Opaque unless the type's schema is visible where `typeOf` was
 -- written: `exposing (T)` reflects opaque and `exposing (T(..))` reflects in
@@ -189,14 +193,11 @@ fieldsFrom repr ctorIndex index =
     if index >= fieldCount repr ctorIndex then
         NoItems
     else
-        fallback = if fieldHasJSONDefault repr ctorIndex index then Default (fieldJSONDefault repr ctorIndex index) else NoDefault
         entry = Field
             { name = fieldName repr ctorIndex index
             , index = index
             , ty = fieldType repr ctorIndex index
-            , jsonKey = fieldJSONKey repr ctorIndex index
-            , jsonSkip = fieldJSONSkip repr ctorIndex index
-            , jsonDefault = fallback
+            , attributes = fieldAttributes repr ctorIndex index
             }
         Item entry (fieldsFrom repr ctorIndex (index + 1))
 
@@ -206,6 +207,7 @@ ctorFor repr index =
     , symbol = ctorSymbol repr index
     , index = index
     , owner = repr
+    , attributes = ctorAttributes repr index
     , fields = fieldsFrom repr index 0
     }
 
@@ -231,6 +233,7 @@ infoOf repr =
     , moduleName = typeModuleName repr
     , ty = repr
     , params = args repr
+    , attributes = typeAttributes repr
     , shape = shapeOf repr
     }
 
@@ -254,8 +257,7 @@ type BoundField =
     , index : Int
     , ty : TypeRepr
     , value : Code
-    , jsonKey : String
-    , jsonSkip : Bool
+    , attributes : Attributes
     }
 
 type Bound = { ctor : Ctor, fields : Items BoundField }
@@ -299,8 +301,7 @@ bindField scrutinee ctor field =
     , index = field.index
     , ty = field.ty
     , value = varCode (binderName scrutinee ctor.index field.index)
-    , jsonKey = field.jsonKey
-    , jsonSkip = field.jsonSkip
+    , attributes = field.attributes
     }
 
 boundOf : Code -> Ctor -> Bound

@@ -137,6 +137,10 @@ func (b *moduleCheck) registerThrough(end int) {
 			}
 			delete(b.deriverBusy, d.Class)
 		case *ast.TypeDecl:
+			b.context(i, symbolModule(d.Name), func() { b.errs = append(b.errs, b.ck.checkAttributes(d)...) })
+			if len(b.errs) > 0 {
+				continue
+			}
 			if len(d.Deriving) > 0 {
 				for _, dr := range d.Deriving {
 					if b.deriverBusy[dr.Name] {
