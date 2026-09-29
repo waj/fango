@@ -1,13 +1,15 @@
-// A formatting provider for Fango, implemented by running `fango fmt -` over
-// the buffer. The extension has no dependencies and no build step: `vscode` is
-// supplied by the host at runtime and everything else is a Node builtin.
+// Fango's formatter runs over the buffer; its language server supplies
+// navigation, hover, and diagnostics for open files.
 
 const vscode = require("vscode");
 const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const { LanguageClient } = require("vscode-languageclient/node");
 
 let output;
+const clients = new Map();
+const watchers = new Map();
 
 function log(message) {
   if (!output) {
@@ -91,6 +93,53 @@ function wholeDocument(document) {
   );
 }
 
+function clientKey(document) {
+  const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+  return folder ? folder.uri.fsPath : path.dirname(document.uri.fsPath);
+}
+
+async function startClient(document) {
+  if (document.languageId !== "fango" || document.uri.scheme !== "file") return;
+  const key = clientKey(document);
+  if (clients.has(key)) return;
+  const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+  const selector = folder
+    ? [{ scheme: "file", language: "fango", pattern: new vscode.RelativePattern(folder, "**/*.fango") }]
+    : [{ scheme: "file", language: "fango" }];
+  const options = { cwd: cwdFor(document) };
+  const executable = binaryFor(document);
+  const watcher = folder
+    ? vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, "**/*.fango"))
+    : vscode.workspace.createFileSystemWatcher("**/*.fango");
+  watchers.set(key, watcher);
+  const client = new LanguageClient(
+    "fango",
+    "Fango",
+    { run: { command: executable, args: ["lsp"], options }, debug: { command: executable, args: ["lsp"], options } },
+    { documentSelector: selector, synchronize: { fileEvents: watcher }, outputChannel: output || (output = vscode.window.createOutputChannel("Fango")) }
+  );
+  clients.set(key, client);
+  try {
+    await client.start();
+  } catch (error) {
+    clients.delete(key);
+    watchers.delete(key);
+    watcher.dispose();
+    log(`Could not start Fango language server (${executable} lsp): ${error}`);
+  }
+}
+
+async function restartClients() {
+  const running = [...clients.values()];
+  clients.clear();
+  await Promise.all(running.map(client => client.stop()));
+  for (const watcher of watchers.values()) watcher.dispose();
+  watchers.clear();
+  for (const document of vscode.workspace.textDocuments) {
+    await startClient(document);
+  }
+}
+
 function activate(context) {
   context.subscriptions.push(
     vscode.languages.registerDocumentFormattingEditProvider("fango", {
@@ -101,10 +150,23 @@ function activate(context) {
         }
         return [vscode.TextEdit.replace(wholeDocument(document), text)];
       },
+    }),
+    vscode.workspace.onDidOpenTextDocument(startClient),
+    vscode.workspace.onDidChangeConfiguration(event => {
+      if (event.affectsConfiguration("fango.path")) void restartClients();
     })
   );
+  for (const document of vscode.workspace.textDocuments) {
+    void startClient(document);
+  }
 }
 
-function deactivate() {}
+async function deactivate() {
+  const running = [...clients.values()];
+  clients.clear();
+  await Promise.all(running.map(client => client.stop()));
+  for (const watcher of watchers.values()) watcher.dispose();
+  watchers.clear();
+}
 
 module.exports = { activate, deactivate };

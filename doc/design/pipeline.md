@@ -311,6 +311,25 @@ field uses and inferred patterns/literals; labels filter visibility but never
 select a type. Named records first resolve their type name. Inference settles
 the receiver before checking the visible schema.
 
+## Editor analysis
+
+`fango lsp` uses the same loader and `internal/check` session as the batch
+commands. Its source provider overlays open buffers at their ordinary local
+module paths; the entry path and the module root remain explicit. Open modules
+are checked from source so transient inferred record-use and local-binding
+types are available, while unopened dependencies may use checked objects.
+Overlay checks never publish persistent objects for the open modules.
+The editor diagnostic path rolls back a failed owner and checks other modules
+whose dependencies succeeded; dependents of a failed owner are skipped.
+
+The editor index records source spans from a successful resolved and checked
+graph. Canonical names identify module declarations; lexical binder spans
+identify locals. Inferred record uses identify a field by its nominal owner,
+since a field spelling alone does not select a schema. The server retains the
+last successful index across an invalid edit and checks the current token text
+at the indexed range before answering. Protocol positions are UTF-16 code
+units; source spans and compilation remain byte based.
+
 ## Elaboration boundary
 
 Inference determines types and contracts. Elaboration resolves defaulting,

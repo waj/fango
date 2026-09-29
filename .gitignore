@@ -12,6 +12,7 @@ result-*
 # Fango build directories
 .fango/
 *.out/
+editors/vscode/node_modules/
 
 # Claude
 /.claude

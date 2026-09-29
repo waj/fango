@@ -1,4 +1,4 @@
-// Command fango is the compiler CLI: build | run | check | repl | clean.
+// Command fango is the compiler CLI and language-server entry point.
 package main
 
 import (
@@ -13,6 +13,7 @@ import (
 
 	"github.com/waj/fango/internal/build"
 	"github.com/waj/fango/internal/codegen"
+	"github.com/waj/fango/internal/lsp"
 	"github.com/waj/fango/internal/modules"
 )
 
@@ -54,6 +55,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdRepl(args[1:], stdout, stderr)
 	case "clean":
 		return cmdClean(args[1:], stderr)
+	case "lsp":
+		// The server has no command-line options; stdout is reserved for LSP.
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "usage: fango lsp")
+			return 2
+		}
+		if err := lsp.Serve(os.Stdin, stdout); err != nil {
+			fmt.Fprintf(stderr, "fango lsp: %v\n", err)
+			return 1
+		}
+		return 0
 	default:
 		fmt.Fprintf(stderr, "fango: unknown command %q\n", args[0])
 		usage(stderr)
@@ -69,6 +81,7 @@ func usage(w io.Writer) {
   fango fmt [-w] [-l] [file...]
   fango repl [dir]
   fango clean main.fango
+  fango lsp
 
 verbosity, on build, run, and check:
   -v            report each module as it is compiled or reused

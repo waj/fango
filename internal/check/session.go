@@ -20,6 +20,13 @@ type Session struct {
 	Observe            Observer
 	Cache              ObjectCache
 	DisableObjectCache bool
+	LoadOptions        modules.LoadOptions
+	// FreshSources bypasses the checked-object cache for these source names,
+	// retaining the checker's transient AST type and record-use information.
+	FreshSources map[string]bool
+	// AccumulateDiagnostics checks modules independent of a failed owner.
+	// Batch commands retain their existing fail-fast behavior.
+	AccumulateDiagnostics bool
 }
 
 type Result struct {
@@ -34,7 +41,9 @@ type Result struct {
 // owner at a time. Diagnostic errors are source-facing; internalErr denotes a
 // violated compiler invariant and is kept separate from rendering.
 func (s *Session) Compile(entry string) (*Result, []diag.Error, error) {
-	loaded, errs := modules.LoadWithOptions(entry, modules.LoadOptions{Observe: modules.StageObserver(s.Observe)})
+	options := s.LoadOptions
+	options.Observe = modules.StageObserver(s.Observe)
+	loaded, errs := modules.LoadWithOptions(entry, options)
 	if len(errs) != 0 {
 		return nil, errs, nil
 	}
@@ -48,7 +57,15 @@ func (s *Session) Compile(entry string) (*Result, []diag.Error, error) {
 		objectCache = compilecache.NewModuleStore(entry)
 	}
 	installer := NewInstaller(ck, stageSession, objectCache, s.Observe)
-	defs, diagnostics, err := installer.Install(loaded.Modules, loaded.FixityHash)
+	installer.FreshSources = s.FreshSources
+	var defs []core.Def
+	var diagnostics []diag.Error
+	var err error
+	if s.AccumulateDiagnostics {
+		defs, diagnostics, err = installer.InstallCollect(loaded.Modules, loaded.FixityHash)
+	} else {
+		defs, diagnostics, err = installer.Install(loaded.Modules, loaded.FixityHash)
+	}
 	if len(diagnostics) != 0 || err != nil {
 		return nil, diagnostics, err
 	}

@@ -26,12 +26,13 @@ type Installer struct {
 	cache   ObjectCache
 	observe Observer
 
-	summaries map[string]moduleSummary
-	sources   map[string]*source.File
-	installed []core.Def
-	states    []*infer.ModuleState
-	objects   []*ModuleObject
-	infos     []infer.DeclInfo
+	summaries    map[string]moduleSummary
+	sources      map[string]*source.File
+	installed    []core.Def
+	states       []*infer.ModuleState
+	objects      []*ModuleObject
+	infos        []infer.DeclInfo
+	FreshSources map[string]bool
 }
 
 // NewInstaller adopts an existing checker and staging session. cache may be
@@ -98,6 +99,51 @@ func (i *Installer) Install(group []modules.ResolvedModule, fixityHash string) (
 	return added, nil, nil
 }
 
+// InstallCollect continues past source diagnostics in independent modules.
+// Failed owners and their dependents are skipped, so missing declarations do
+// not produce cascaded errors. The batch compiler uses Install instead.
+func (i *Installer) InstallCollect(group []modules.ResolvedModule, fixityHash string) ([]core.Def, []diag.Error, error) {
+	mono := i.ck.MonoValues
+	i.ck.MonoValues = false
+	defer func() { i.ck.MonoValues = mono }()
+	for _, module := range group {
+		if module.Source != nil {
+			i.sources[module.Source.Name] = module.Source
+		}
+	}
+	failed := map[string]bool{}
+	var added []core.Def
+	var diagnostics []diag.Error
+	for _, module := range group {
+		skip := false
+		for _, dependency := range module.Dependencies {
+			if failed[dependency] {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			failed[module.Name] = true
+			continue
+		}
+		restore := i.ck.Checkpoint()
+		beforeInfos := len(i.infos)
+		defs, errs, err := i.installOne(module, fixityHash)
+		if len(errs) > 0 || err != nil {
+			restore()
+			i.infos = i.infos[:beforeInfos]
+			if err != nil {
+				return nil, diagnostics, err
+			}
+			failed[module.Name] = true
+			diagnostics = append(diagnostics, errs...)
+			continue
+		}
+		added = append(added, defs...)
+	}
+	return added, diagnostics, nil
+}
+
 func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string) ([]core.Def, []diag.Error, error) {
 	templateStart := i.ck.Templates.Len()
 	owner := module.Name
@@ -110,7 +156,7 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 	}
 	baseKey, hasBase := moduleBaseKey(module, fixityHash, i.summaries)
 	slot, hasSlot := objectSlot(module)
-	cacheable := hasBase && hasSlot && i.cache != nil
+	cacheable := hasBase && hasSlot && i.cache != nil && (module.Source == nil || !i.FreshSources[module.Source.Name])
 	if cacheable {
 		lookupStart := time.Now()
 		object, read, hit := loadCachedObject(i.cache, slot, baseKey, module, i.summaries, i.sources)

@@ -8,7 +8,7 @@ relevant to the task. [Reference](reference.md) owns observable behavior;
 ## Goals and constraints
 
 Fango is strict, statically typed, and purely functional, with nominal ADTs,
-inference, and direct-style algebraic effects. The compiler uses one Go toolchain,
+inference, and direct-style algebraic effects. The language pipeline uses one Go toolchain,
 no compiler framework dependencies, local modules, and an experimental library
 shipped beside it. Generated representations and calls aim to stay close to ordinary Go.
 Laziness, self-hosting, a package manager, and a general optimizer are not implemented.
@@ -29,7 +29,7 @@ structural evidence summaries.
 ## Compiler pipeline
 
 [Pipeline and resolution](design/pipeline.md) — parsing, fixity, module graph,
-Prelude, canonical names, and incremental loading.
+Prelude, canonical names, incremental loading, and editor analysis.
 
 ## Type inference
 

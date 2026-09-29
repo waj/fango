@@ -33,83 +33,17 @@ the `ci` gate then holds.
 
 ## Language server
 
-Scope for a first version: diagnostics, formatting, and coarse hover, as a
-`fango lsp` subcommand of the same binary.
+The first server and VS Code client are implemented; see [editor
+behavior](reference/commands.md#language-server-and-editor-support) and
+[editor analysis](design/pipeline.md#editor-analysis).
 
-### Prerequisite: extract the check path
-
-Compilation stops at the first stage that produces errors, so a single syntax
-error anywhere in the graph hides every type error everywhere. The shared
-session already exists: `internal/check` installs modules dependency-first for
-the batch commands and the REPL alike, and the language server should reuse it
-rather than growing a third path. Accumulating diagnostics across failed stages
-is the remaining language-server work; reusing checked modules does not imply
-error recovery or diagnostic accumulation.
-
-### What a useful first version needs
-
-An overlay provider for unsaved buffers, over that new seam — without it the
-server reports diagnostics for the last saved state. Position conversion,
-because `source.Pos` counts bytes while the protocol defaults to UTF-16 code
-units; the conversion belongs in the server, and the only thing `source` needs
-is the inverse direction from a position back to a byte offset. Publishing
-hygiene, since diagnostics are per-URI and sticky and must be cleared for
-files that no longer have errors, including dependency files the user never
-opened. Full-document sync with a short debounce; incremental change
-application is not worth implementing.
-
-### What it does not need
-
-Severity stays unmodeled: the compiler has no warnings, so the field would
-have one value. Diagnostic codes need no schema change either — the existing
-title maps onto the protocol's code field and the Elm-style prose onto the
-message, so the rendering the compiler already produces survives into the
-editor.
-
-Hover ships in its cheap form first: match the hovered offset against
-identifier spans and look the name up in the declaration table the checker
-already returns, rendering with the existing type printer. That is the REPL's
-`:type` promoted into the editor, and it needs no checker change. A real
-span-to-type index — a checker observer recording spans against types, with
-the final substitution applied at query time rather than record time — is a
-later version, and once it exists go-to-definition is nearly free, since the
-declaration table already carries name spans.
-
-### Dependencies
-
-The protocol layer will use a library rather than hand-rolled JSON-RPC. This
-introduces the repository's first external Go dependency, which sits against
-the design's stated goal of one Go toolchain and no compiler framework
-dependencies. Two things keep that honest: the dependency is scoped to the
-server package, so the compiler and the formatter stay dependency-free and no
-existing subcommand gains a transitive dependency; and the lighter the
-dependency tree the better — a full protocol package pulls in a logging stack
-and its own encoder, where transport-only framing plus hand-written structs
-for the handful of methods actually answered would not.
-
-The design's wording needs restating when this lands, so that the invariant
-reads as "the compiler is dependency-free" rather than being quietly
-contradicted.
-
-### Editor clients
-
-No VS Code language client at first. Helix, Neovim, and Zed attach to an
-arbitrary server binary with a few lines of declarative configuration and no
-build step, so documenting those is enough to get the server real use while
-its surface is still changing. The VS Code extension carries a formatting client
-already, but that is a few dozen lines of plain JavaScript against Node
-builtins and the `vscode` module the host supplies. A language client is a
-different proposition — a TypeScript toolchain, a lockfile, and a bundler — and
-should wait until the server has earned it. The TextMate grammar stays either
-way: it is the pre-server-start fallback and coexists with semantic tokens.
-
-### Open decisions
-
-- Which protocol library, or transport-only plus hand-written structs.
-- Whether to advertise position-encoding negotiation or always convert to
-  UTF-16.
-- Feature order after the first version: go-to-definition, document symbols,
-  completion, semantic tokens.
+The editor checker collects errors from independent modules after a module
+fails, but the parser does not recover a failed file into a partial AST.
+Future recovery could report syntax and type errors across an invalid graph
+without cascaded errors from missing declarations. Other possible features are
+inferred types on arbitrary expressions, Find References, document symbols,
+completion, and semantic tokens. Non-VS Code client configuration can be
+documented when tested.
 
 ## REPL hardening
 

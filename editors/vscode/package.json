@@ -1,8 +1,8 @@
 {
   "name": "fango-lang",
   "displayName": "Fango",
-  "description": "Syntax highlighting and formatting for the Fango programming language",
-  "version": "0.2.0",
+  "description": "Syntax highlighting, formatting, navigation, hover, and diagnostics for the Fango programming language",
+  "version": "0.3.0",
   "publisher": "fango",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -11,11 +11,13 @@
   },
   "categories": [
     "Programming Languages",
-    "Formatters"
+    "Formatters",
+    "Linters"
   ],
   "main": "./extension.js",
   "scripts": {
-    "test:grammar": "node tests/tokenize.cjs"
+    "test:grammar": "node tests/tokenize.cjs",
+    "test:extension": "node tests/extension.cjs"
   },
   "devDependencies": {
     "vscode-oniguruma": "2.0.1",
@@ -65,5 +67,8 @@
         "editor.defaultFormatter": "fango.fango-lang"
       }
     }
+  },
+  "dependencies": {
+    "vscode-languageclient": "8.1.0"
   }
 }

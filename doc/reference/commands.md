@@ -274,6 +274,31 @@ The VS Code extension in `editors/vscode/` registers `fmt` as the formatter for
 the user can override. It runs the executable named by `fango.path`, or one
 built at the workspace root, or `fango` from `PATH`.
 
+## Language server and editor support
+
+`fango lsp` runs a Language Server Protocol server on standard input and
+output. It accepts no paths or flags. The VS Code extension starts it for
+`.fango` files using the same `fango.path` setting as the formatter. Install
+the extension's npm dependencies before loading it from a local symlink.
+
+Go to Definition follows values, functions, operators, types, constructors,
+effect operations, imported modules, local binders, and nominal record fields
+across local modules and the bundled library. Hover shows a named symbol's
+type where one is available. A contiguous group of `--` or `{- … -}` comments
+immediately above a declaration appears below its type; a declaration pragma
+may sit between the comments and annotation. A blank line ends the group.
+Hover does not infer the type of an arbitrary expression, and Find References
+and document symbols are not available yet.
+
+Open buffers, including unsaved local imports, are checked after a short
+debounce. Errors appear as editor diagnostics and are cleared when resolved.
+Errors in independent modules are reported together; a module depending on an
+invalid one waits for that dependency to be fixed.
+During an invalid edit, navigation and hover can use the last successful
+result if the queried symbol still occupies the same range with the same text.
+Diagnostics always describe the current buffer. The server uses full-document
+sync and UTF-16 protocol positions.
+
 ## Generated Go projects
 
 `build --emit-go` writes a complete Go project instead of an executable. For

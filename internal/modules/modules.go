@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	goast "go/ast"
 	goparser "go/parser"
@@ -42,6 +43,28 @@ type Provider interface {
 type StageObserver = compileevent.Observer
 
 type FSProvider struct{ Root string }
+
+// OverlayProvider reads unsaved editor content at the same logical paths as
+// FSProvider. Keys are absolute, cleaned filesystem paths.
+type OverlayProvider struct {
+	FSProvider
+	Overlays map[string][]byte
+}
+
+func (p OverlayProvider) Source(module string) (string, []byte, error) {
+	rel := filepath.FromSlash(strings.ReplaceAll(module, ".", "/") + ".fango")
+	if b, ok := p.Overlays[filepath.Clean(filepath.Join(p.Root, rel))]; ok {
+		if _, err := readExact(p.Root, rel); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return filepath.ToSlash(rel), nil, err
+		}
+		return filepath.ToSlash(rel), b, nil
+	}
+	return p.FSProvider.Source(module)
+}
+
+func (p OverlayProvider) Native(module string) (string, []byte, error) {
+	return p.FSProvider.Native(module)
+}
 
 type pathCaseError struct{ want, found string }
 
@@ -182,6 +205,8 @@ func (g *Graph) resolvedModule(name, owner string, role ModuleRole, entry string
 	return ResolvedModule{Name: owner, Role: role, Entry: entry, Source: moduleSource, SourceHash: n.sourceHash,
 		NativeModule: n.nativeModule, NativeHash: nativeHash, Dependencies: deps, Interface: exportInterface(n.iface),
 		Module: &ast.Module{
+			Header:          n.mod.Header,
+			Imports:         append([]ast.Import(nil), n.mod.Imports...),
 			Decls:           append([]ast.Decl(nil), n.resolved...),
 			InstanceImports: map[string]map[string]bool{owner: g.visible[name]},
 		}}
@@ -255,6 +280,11 @@ func LoadObserved(entry string, observe StageObserver) (*Result, []diag.Error) {
 
 type LoadOptions struct {
 	Observe StageObserver
+	// Root defaults to the entry file's directory. Editor clients may set it
+	// when opening an imported module in a nested directory.
+	Root string
+	// Overlays override disk content for open local files, including entry.
+	Overlays map[string][]byte
 }
 
 // LoadWithOptions loads a batch graph with optional test instrumentation.
@@ -263,12 +293,26 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 	if err != nil {
 		return nil, []diag.Error{{Title: "SOURCE ERROR", Body: err.Error()}}
 	}
-	content, err := os.ReadFile(abs)
+	content, present := options.Overlays[filepath.Clean(abs)]
+	if !present {
+		content, err = os.ReadFile(abs)
+	}
 	if err != nil {
 		return nil, []diag.Error{{Title: "SOURCE ERROR", Body: err.Error()}}
 	}
-	root := filepath.Dir(abs)
-	f := source.NewFile(filepath.Base(abs), content)
+	root := options.Root
+	if root == "" {
+		root = filepath.Dir(abs)
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return nil, []diag.Error{{Title: "SOURCE ERROR", Body: err.Error()}}
+	}
+	relEntry, err := filepath.Rel(root, abs)
+	if err != nil || relEntry == ".." || strings.HasPrefix(relEntry, ".."+string(filepath.Separator)) {
+		return nil, []diag.Error{{Title: "SOURCE ERROR", Body: "entry is outside its source root"}}
+	}
+	f := source.NewFile(filepath.ToSlash(relEntry), content)
 	parseStart := time.Now()
 	m, errs := parse(f)
 	if len(errs) > 0 {
@@ -279,7 +323,11 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 		entryName = m.Header.Name
 	}
 	options.Observe.Timed("parse", entryName, parseStart)
-	g := newGraph(FSProvider{Root: root})
+	var provider Provider = FSProvider{Root: root}
+	if options.Overlays != nil {
+		provider = OverlayProvider{FSProvider: FSProvider{Root: root}, Overlays: options.Overlays}
+	}
+	g := newGraph(provider)
 	g.observe = options.Observe
 	if !private {
 		if path, _, bundleErr := g.bundled.Source(entryName); bundleErr == nil {
@@ -287,11 +335,14 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 		}
 	}
 	wantEntry := strings.TrimSuffix(filepath.Base(abs), filepath.Ext(abs))
+	if options.Root != "" {
+		wantEntry = strings.ReplaceAll(strings.TrimSuffix(filepath.ToSlash(relEntry), ".fango"), "/", ".")
+	}
 	if !private && m.Header.Name != wantEntry {
 		return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "MODULE/PATH MISMATCH", "The entry file `%s` must declare module `%s`, but declares `%s`.", filepath.Base(abs), wantEntry, m.Header.Name)}
 	}
-	rootNode := &node{name: entryName, path: filepath.Base(abs), content: content, mod: m, sourceHash: hashBytes(content), private: private, deps: syntaxDependencies(m, entryName), nativeModule: wantEntry}
-	rootNativePath := wantEntry + ".native.go"
+	rootNode := &node{name: entryName, path: filepath.ToSlash(relEntry), content: content, mod: m, sourceHash: hashBytes(content), private: private, deps: syntaxDependencies(m, entryName), nativeModule: wantEntry}
+	rootNativePath := strings.TrimSuffix(relEntry, ".fango") + ".native.go"
 	if nb, ne := os.ReadFile(filepath.Join(root, rootNativePath)); ne == nil {
 		rootNode.nativePath, rootNode.native = rootNativePath, nb
 	}

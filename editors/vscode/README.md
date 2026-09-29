@@ -1,6 +1,6 @@
 # Fango for VS Code
 
-Syntax highlighting and formatting for the [Fango](../../README.md) programming
+Syntax highlighting, formatting, navigation, hover, and diagnostics for the [Fango](../../README.md) programming
 language (`.fango` files).
 
 ## What's covered
@@ -16,6 +16,22 @@ language (`.fango` files).
 - Semicolon-separated statement bodies, such as `{ x -> print x; x + 1 }`
 - Editing affordances: comment toggling, bracket matching/auto-closing, indent heuristics
 - Formatting, by running `fango fmt` over the buffer
+- Go to Definition for named declarations, imports, local bindings, and record fields
+- Type and adjacent leading-comment hover for named symbols
+- Live compiler errors from unsaved buffers
+
+## Language server
+
+The extension starts `fango lsp` when a `.fango` file opens. It uses the same
+`fango.path` lookup described below for formatting. The server checks open
+buffers and imported local modules, then updates errors after edits. Definition
+and hover use the last valid analysis during a broken edit when the symbol at
+the queried range still matches. It uses the existing `--` and `{- … -}`
+comments immediately above a declaration as hover documentation.
+
+The extension now needs its runtime dependency installed before using a local
+symlink: run `npm install` in this directory. It remains plain JavaScript and
+has no build step. Run `npm run test:extension` to check server startup wiring.
 
 ## Formatting
 
@@ -39,9 +55,8 @@ rather than guessing, which is what you want while a file is mid-edit — and th
 reason goes to the `Fango` output channel rather than interrupting the save. A
 missing executable is reported the same way.
 
-The extension has no runtime dependencies and no build step: `vscode` is supplied by the
-host and everything else is a Node builtin, so the directory is loadable as it
-stands.
+The formatter continues to work through its existing provider; the language
+server supplies navigation, hover, and diagnostics.
 
 For grammar changes, run `npm install` and `npm run test:grammar` in this
 directory. The development dependencies tokenize stdlib, testdata, and examples
@@ -55,7 +70,8 @@ VS Code loads extensions from `~/.vscode/extensions`, so a symlink is enough:
 ln -s "$(pwd)/editors/vscode" ~/.vscode/extensions/fango-lang
 ```
 
-Then reload VS Code (`Developer: Reload Window`) and open any `.fango` file.
+Run `npm install` in `editors/vscode`, then reload VS Code
+(`Developer: Reload Window`) and open any `.fango` file.
 
 Alternatively, package it with [`vsce`](https://github.com/microsoft/vscode-vsce):
 
@@ -63,4 +79,4 @@ Alternatively, package it with [`vsce`](https://github.com/microsoft/vscode-vsce
 cd editors/vscode && npx @vscode/vsce package
 ```
 
-and install the resulting `.vsix` via `code --install-extension fango-lang-0.1.0.vsix`.
+and install the resulting `.vsix` via `code --install-extension fango-lang-0.3.0.vsix`.
