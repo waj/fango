@@ -44,10 +44,12 @@ func (s FreshEffect) Within(outer types.Row) types.Row {
 // intermediate Solve may leave metas open; later Solve calls must retain the
 // obligation. It is deliberately a constraint rather than an eager check.
 type ScopeBoundary struct {
-	Effect   FreshEffect
-	Result   types.Type
-	Residual types.Row
-	Outer    []types.Type
+	Effect    FreshEffect
+	LocalVars []*types.TVar // operation-local skolems forbidden outside their clause
+	Operation string
+	Result    types.Type
+	Residual  types.Row
+	Outer     []types.Type
 }
 
 func (s *ScopeBoundary) check(sub Subst, sp source.Span) []diag.Error {
@@ -63,10 +65,22 @@ func (s *ScopeBoundary) check(sub Subst, sp source.Span) []diag.Error {
 	}
 	var errs []diag.Error
 	for _, root := range roots {
-		if types.ContainsScopedEffect(sub.Apply(root.ty), s.Effect.label.Unique) {
+		resolved := sub.Apply(root.ty)
+		if s.Effect.label.Unique != 0 && types.ContainsScopedEffect(resolved, s.Effect.label.Unique) {
 			errs = append(errs, diag.Errorf(sp, "SCOPE ESCAPE",
 				"The local effect `%s` occurs in the scope's %s. Keep values and callbacks that require it inside the scope.",
 				s.Effect.label.Name, root.name))
+		}
+		if len(s.LocalVars) != 0 {
+			used := types.RigidVarsIn(resolved)
+			for _, local := range s.LocalVars {
+				for _, found := range used {
+					if found.ID == local.ID {
+						errs = append(errs, diag.Errorf(sp, "OPERATION TYPE ESCAPES",
+							"The operation-local type of `%s` occurs in the handler's %s.", s.Operation, root.name))
+					}
+				}
+			}
 		}
 	}
 	return errs

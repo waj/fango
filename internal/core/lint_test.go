@@ -34,6 +34,16 @@ func lintText(p *Prog, b *types.Builtins) string {
 	return out.String()
 }
 
+func TestLintRejectsMissingOperationLocalBinder(t *testing.T) {
+	p, b := resumeFixture(func(b *types.Builtins) Expr {
+		return &ResumeTail{Owner: 1, Value: &IntLit{Val: 1, Ty: b.Int}, ClauseResult: b.Int}
+	})
+	p.Effects[0].Ops[0].LocalVars = []*types.TVar{{ID: 900, Kind: types.General, Rigid: true}}
+	if got := lintText(p, b); !strings.Contains(got, "operation-local binder arity mismatch") {
+		t.Fatalf("malformed polymorphic clause was accepted: %s", got)
+	}
+}
+
 func TestLintRejectsRetaggedCallbackBinding(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)

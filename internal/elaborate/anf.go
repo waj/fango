@@ -197,7 +197,7 @@ func (el *elab) anfExprChildren(e core.Expr) (core.Expr, []hoist) {
 		for i, a := range e.Args {
 			args[i] = slot(a)
 		}
-		return &core.Perform{Origin: e.Origin, Op: e.Op, Effect: e.Effect, Args: args, Ty: e.Ty, Control: e.Control}, hoists
+		return &core.Perform{Origin: e.Origin, Op: e.Op, Effect: e.Effect, LocalTypes: e.LocalTypes, Args: args, Ty: e.Ty, Control: e.Control}, hoists
 
 	case *core.ResumeTail:
 		var next core.Expr

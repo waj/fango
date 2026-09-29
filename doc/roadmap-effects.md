@@ -150,13 +150,12 @@ and representative tokenization fixtures in the same implementation change.
 
 These are not automatically prerequisites for the first coroutine milestone:
 
-- **Operation-local polymorphism.** A declaration such as `fetch : Key a -> a`
-  instantiated independently at each operation is different from an effect
-  parameter fixed for its handler. General support needs checked request
-  packaging, clause skolems, dictionary transport, answer types, and indirect
-  calls. Go generic-field/method restrictions cannot be bypassed by unchecked
-  casts. Typed coroutine replies use a callback whose types are fixed when
-  the owner is opened. The current task API uses a
+- **Operation-local polymorphism follow-up.** Source-defined resumptive
+  operations use checked request packaging and clause skolems; see the
+  [implemented contract](reference/effects.md#effects-and-handlers). Class
+  constraints still need dictionary transport, and native operations need a
+  checked sidecar ABI. Typed coroutine replies use a callback whose types are
+  fixed when the owner is opened. The current task API uses a
   [native closure invocation boundary](design/tasks.md#async-runtime-foundation).
 - **Rows keyed by effect arguments.** `{Box Int, Box Bool}` is rejected today.
   Supporting it introduces questions such as whether `{Box a, Box Int}` names

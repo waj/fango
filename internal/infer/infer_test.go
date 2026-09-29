@@ -326,8 +326,8 @@ func TestEffectRows(t *testing.T) {
 	}
 
 	_, _, errs = check(t, "effect Fail e\n    throw : e -> a\n\nfailString text = throw text")
-	if len(errs) == 0 || errs[0].(checkErr).title != "OPERATION POLYMORPHISM NOT READY" {
-		t.Fatalf("parameterized effect runtime staging: %v", errs)
+	if len(errs) != 0 {
+		t.Fatalf("polymorphic operation inference: %v", errs)
 	}
 
 	ck, infos, errs = check(t, "effect Db\n    query : String -> Int -> String\n\nrun sql count = query sql count")

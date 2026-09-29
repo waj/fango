@@ -1,0 +1,10 @@
+type Key a = Key a
+
+effect Echo
+    echo : Key a -> Key a
+
+main() =
+    result = handle echo (Key 42) of
+        echo (Key n) -> resume (Key n)
+    case result of
+        Key n -> print n

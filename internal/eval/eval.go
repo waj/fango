@@ -644,9 +644,13 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 					vars[p] = args[i]
 				}
 			}
+			localTypes, err := in.instantiateDescriptors(clause.LocalVars, e.LocalTypes, fr)
+			if err != nil {
+				return nil, err
+			}
 			saved := in.evidence
 			in.evidence = cloneEvidence(ev.outer)
-			v, err := in.evalResumeTail(clause.Body, &Frame{parent: ev.frame, vars: vars}, clause.ResumeID, ev)
+			v, err := in.evalResumeTail(clause.Body, &Frame{parent: ev.frame, vars: vars, types: localTypes}, clause.ResumeID, ev)
 			in.evidence = saved
 			return v, err
 		}

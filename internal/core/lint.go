@@ -594,7 +594,15 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: Perform `%s` arity mismatch", where, e.Op.Name)
 		}
 		if e.Op != nil && len(e.Args) == len(e.Op.RuntimeParamTypes()) {
-			wantArgs, wantResult := l.operationTypes(e.Op, e.Effect)
+			if len(e.LocalTypes) != len(e.Op.LocalVars) {
+				l.errorf("%s: Perform `%s` operation-local type arity mismatch", where, e.Op.Name)
+			}
+			for _, local := range e.LocalTypes {
+				if local != nil {
+					l.typ(local, where)
+				}
+			}
+			wantArgs, wantResult := l.operationTypes(e.Op, e.Effect, e.LocalTypes...)
 			isPrint := types.SurfaceName(e.Op.Owner.Name) == "IO" && types.SurfaceName(e.Op.Name) == "print"
 			for i, a := range e.Args {
 				if !isPrint && i < len(wantArgs) && !EqualValueRepresentation(a.Type(), wantArgs[i]) {
@@ -605,8 +613,6 @@ func (l *linter) expr(e Expr, where string) {
 				if len(e.Args) == 1 && !l.printable(e.Args[0].Type()) {
 					l.errorf("%s: IO.print argument typed %s, not printable", where, types.Show(e.Args[0].Type()))
 				}
-			} else if len(e.Op.LocalVars) > 0 {
-				l.errorf("%s: operation-local polymorphism survived into Core for `%s`", where, e.Op.Name)
 			}
 			if wantResult != nil && !EqualValueRepresentation(e.Ty, wantResult) {
 				l.errorf("%s: Perform `%s` typed %s, want %s", where, e.Op.Name, types.Show(e.Ty), types.Show(wantResult))
@@ -808,7 +814,21 @@ func (l *linter) expr(e Expr, where string) {
 				l.errorf("%s: duplicate handler clause for `%s`", where, c.Op.Name)
 			}
 			seen[c.Op.Name] = true
-			wantParams, opResult := l.operationTypes(c.Op, e.Effect)
+			if !c.Op.Abort && len(c.LocalVars) != len(c.Op.LocalVars) {
+				l.errorf("%s: handler clause `%s` operation-local binder arity mismatch", where, c.Op.Name)
+			}
+			localTypes := make([]types.Type, len(c.LocalVars))
+			var addedLocalVars []int
+			for i, v := range c.LocalVars {
+				if v == nil || !v.Rigid || l.tyParams[v.ID] {
+					l.errorf("%s: handler clause `%s` has an invalid operation-local type binder", where, c.Op.Name)
+					continue
+				}
+				l.tyParams[v.ID] = true
+				addedLocalVars = append(addedLocalVars, v.ID)
+				localTypes[i] = v
+			}
+			wantParams, opResult := l.operationTypes(c.Op, e.Effect, localTypes...)
 			if len(c.Params) != len(c.Op.RuntimeParamTypes()) || len(c.ParamTypes) != len(c.Op.RuntimeParamTypes()) {
 				l.errorf("%s: handler clause `%s` arity mismatch", where, c.Op.Name)
 			}
@@ -870,6 +890,9 @@ func (l *linter) expr(e Expr, where string) {
 				l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = c.ResumeID, opResult, e.Ty, state
 			}
 			l.expr(c.Body, where)
+			for _, id := range addedLocalVars {
+				delete(l.tyParams, id)
+			}
 			delete(l.scope, c.SuppressedParam)
 			delete(l.localTypes, c.SuppressedParam)
 			l.resumeOwner, l.resumeArg, l.resumeRet, l.resumeState = oldOwner, oldArg, oldRet, oldState
@@ -1433,11 +1456,16 @@ func (l *linter) evidenceAvailable(e EffectInstance, where string) {
 	}
 }
 
-func (l *linter) operationTypes(op *types.EffectOp, inst EffectInstance) ([]types.Type, types.Type) {
-	m := make(map[int]types.Type, len(op.Owner.Params))
+func (l *linter) operationTypes(op *types.EffectOp, inst EffectInstance, locals ...types.Type) ([]types.Type, types.Type) {
+	m := make(map[int]types.Type, len(op.Owner.Params)+len(locals))
 	for i, p := range op.Owner.Params {
 		if i < len(inst.Args) {
 			m[p.ID] = inst.Args[i]
+		}
+	}
+	for i, v := range op.LocalVars {
+		if i < len(locals) && locals[i] != nil {
+			m[v.ID] = locals[i]
 		}
 	}
 	args := make([]types.Type, len(op.RuntimeParamTypes()))

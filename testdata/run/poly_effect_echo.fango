@@ -1,0 +1,8 @@
+effect Echo
+    echo : a -> a
+
+apply f x = f x
+
+main() =
+    print (handle (if apply echo True then apply echo 42 else 0) of
+        echo x -> resume x)

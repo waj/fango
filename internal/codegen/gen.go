@@ -9,6 +9,7 @@ import (
 	"go/format"
 	goparser "go/parser"
 	gotoken "go/token"
+	"maps"
 	"math"
 	"path/filepath"
 	"sort"
@@ -325,7 +326,8 @@ type gen struct {
 	// tyParamNames maps the rigid vars of the definition (or derived
 	// function) currently being emitted to their Go type-parameter names
 	// (positional: A0, A1, …). Reset per definition.
-	tyParamNames map[int]string
+	tyParamNames        map[int]string
+	polyDescriptorNames map[int]string // clause-local descriptors supplied by PolyRequest
 
 	// eqParamNames/showParamNames map an ADT's rigid params to the element-
 	// operation parameters of the derived eq/show being emitted (doc/design.md, "Go backend and runtime").
@@ -1528,6 +1530,9 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		if len(stack) == 0 {
 			panic("codegen: custom Perform without evidence")
 		}
+		if len(e.Op.LocalVars) > 0 && e.Op.Native == nil {
+			return g.polymorphicPerformExpr(e, stack[len(stack)-1])
+		}
 		args := make([]goast.Expr, 0, len(e.Args))
 		needPrelude := false
 		for i, a := range e.Args {
@@ -2047,6 +2052,10 @@ type handlerState struct {
 func (g *gen) handlerEvidence(e *core.Handle, mode types.Transport, state *handlerState) (goast.Expr, goast.Expr) {
 	elts := make([]goast.Expr, len(e.Clauses))
 	for i, c := range e.Clauses {
+		if len(c.LocalVars) > 0 && !c.Op.Abort && c.Op.Native == nil {
+			elts[i] = &goast.KeyValueExpr{Key: ident("Op_" + linkName(c.Op.Name)), Value: g.polymorphicHandlerClause(e, c, mode, state)}
+			continue
+		}
 		params := make([]paramSpec, 0, len(c.Params))
 		for j, p := range c.Params {
 			if p == "()" || p == "_" {
@@ -2083,6 +2092,77 @@ func (g *gen) handlerEvidence(e *core.Handle, mode types.Transport, state *handl
 	}
 	st := g.effectTypeMode(e.Effect, mode)
 	return st, &goast.CompositeLit{Type: st, Elts: elts}
+}
+
+func (g *gen) polymorphicHandlerClause(e *core.Handle, c core.HandlerClause, mode types.Transport, state *handlerState) goast.Expr {
+	oldNames, oldDescriptors := g.tyParamNames, g.polyDescriptorNames
+	g.tyParamNames = maps.Clone(oldNames)
+	g.polyDescriptorNames = maps.Clone(oldDescriptors)
+	if g.tyParamNames == nil {
+		g.tyParamNames = make(map[int]string)
+	}
+	if g.polyDescriptorNames == nil {
+		g.polyDescriptorNames = make(map[int]string)
+	}
+	defer func() { g.tyParamNames, g.polyDescriptorNames = oldNames, oldDescriptors }()
+	var prefix []goast.Stmt
+	for i, v := range c.LocalVars {
+		g.tyParamNames[v.ID] = "any"
+		name := fmt.Sprintf("t_poly_type%d", g.tmp)
+		g.tmp++
+		g.polyDescriptorNames[v.ID] = name
+		prefix = append(prefix, varDeclStmt(name, g.descriptorType(), &goast.IndexExpr{X: selector("t_request", "Types"), Index: intLit(int64(i))}))
+	}
+	for i, p := range c.Params {
+		if p == "_" || p == "()" {
+			continue
+		}
+		name := mangleValue(p)
+		value := &goast.IndexExpr{X: selector("t_request", "Args"), Index: intLit(int64(i))}
+		var decoded goast.Expr = value
+		if _, isAny := c.ParamTypes[i].(*types.TVar); !isAny {
+			decoded = &goast.TypeAssertExpr{X: value, Type: g.goType(c.ParamTypes[i])}
+		}
+		prefix = append(prefix, varDeclStmt(name, g.goType(c.ParamTypes[i]), decoded))
+		if !core.Mentions(c.Body, p) {
+			prefix = append(prefix, assignBlank(ident(name)))
+		}
+	}
+	if e.State != nil {
+		prefix = append(prefix, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), state.read()), assignBlank(ident(mangleValue(e.State.Name))))
+	}
+	oldControl, oldResult := g.control, g.resultType
+	g.control, g.resultType = mode, c.ResultType
+	body := g.resumeStmtsFor(c.Body, c.ResumeID, g.isUnit(c.Op.ResultType), state, func() types.Type {
+		if e.State != nil {
+			return e.State.Ty
+		}
+		return nil
+	}())
+	g.control, g.resultType = oldControl, oldResult
+	resultType := g.goType(c.ResultType)
+	descriptor := g.typeDescriptor(c.ResultType)
+	if mode == types.Exit {
+		outcome := callExpr(funcLit(g.outcomeType(c.ResultType), body))
+		prefix = append(prefix, returnStmt(callExpr(selector("fangort", "PolyOutcome"), outcome, descriptor)))
+	} else if g.isUnit(c.Op.ResultType) {
+		prefix = append(prefix, exprStmt(callExpr(funcLit(nil, body))))
+		prefix = append(prefix, returnStmt(&goast.CompositeLit{Type: selector("fangort", "PolyReply"), Elts: []goast.Expr{
+			&goast.KeyValueExpr{Key: ident("Type"), Value: descriptor},
+			&goast.KeyValueExpr{Key: ident("Value"), Value: g.unitValue()},
+		}}))
+	} else {
+		value := callExpr(funcLit(resultType, body))
+		prefix = append(prefix, returnStmt(&goast.CompositeLit{Type: selector("fangort", "PolyReply"), Elts: []goast.Expr{
+			&goast.KeyValueExpr{Key: ident("Type"), Value: descriptor},
+			&goast.KeyValueExpr{Key: ident("Value"), Value: value},
+		}}))
+	}
+	result := goast.Expr(selector("fangort", "PolyReply"))
+	if mode == types.Exit {
+		result = indexExpr(selector("fangort", "Outcome"), []goast.Expr{result})
+	}
+	return funcLitParams([]paramSpec{{name: "t_request", typ: selector("fangort", "PolyRequest")}}, result, prefix)
 }
 
 func (g *gen) resumeStmtsFor(e core.Expr, owner types.ResumeID, unitResult bool, state *handlerState, stateType types.Type) []goast.Stmt {
@@ -2209,6 +2289,16 @@ func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want
 		}
 	}
 	for _, op := range eff.Ops {
+		if len(op.LocalVars) > 0 && op.Native == nil {
+			request := ident("t_request")
+			call := callExpr(&goast.SelectorExpr{X: value, Sel: ident("Op_" + linkName(op.Name))}, request)
+			wrapped := callExpr(indexExpr(selector("fangort", "Normal"), []goast.Expr{selector("fangort", "PolyReply")}), call)
+			fn := funcLitParams([]paramSpec{{name: "t_request", typ: selector("fangort", "PolyRequest")}},
+				indexExpr(selector("fangort", "Outcome"), []goast.Expr{selector("fangort", "PolyReply")}),
+				[]goast.Stmt{returnStmt(wrapped)})
+			elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + linkName(op.Name)), Value: fn})
+			continue
+		}
 		var params []paramSpec
 		var args []goast.Expr
 		for i, raw := range op.RuntimeParamTypes() {
@@ -2250,9 +2340,8 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 			for i, p := range eff.Params {
 				g.tyParamNames[p.ID] = fmt.Sprintf("E%d", i)
 			}
-			// Operation-local polymorphism is rejected at every runtime use in
-			// the current tail-resumptive handler runtime. Keeping its otherwise-unrepresentable field slots as
-			// any lets unused declarations still have deterministic named structs.
+			// Clause-local variables have a uniform Go representation. The
+			// request/reply ABI carries their source type descriptors separately.
 			for _, op := range eff.Ops {
 				for _, v := range op.LocalVars {
 					g.tyParamNames[v.ID] = "any"
@@ -2264,6 +2353,17 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 			}
 			for _, op := range eff.Ops {
 				if op.Abort {
+					continue
+				}
+				if len(op.LocalVars) > 0 && op.Native == nil {
+					result := goast.Expr(selector("fangort", "PolyReply"))
+					if mode == types.Exit {
+						result = indexExpr(selector("fangort", "Outcome"), []goast.Expr{result})
+					}
+					fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Op_" + linkName(op.Name))}, Type: &goast.FuncType{
+						Params:  &goast.FieldList{List: []*goast.Field{{Type: selector("fangort", "PolyRequest")}}},
+						Results: &goast.FieldList{List: []*goast.Field{{Type: result}}},
+					}})
 					continue
 				}
 				ps := make([]paramSpec, 0, len(op.RuntimeParamTypes()))

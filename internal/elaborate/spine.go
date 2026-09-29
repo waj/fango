@@ -141,6 +141,73 @@ func (el *elab) effectInstance(op *types.EffectOp, ty types.Type) core.EffectIns
 	return core.EffectInstance{Unique: op.Owner.Unique, Name: op.Owner.Name, Captures: el.evidenceCaptures(op.Owner.Unique), Control: el.evidenceControl(op.Owner.Unique)}
 }
 
+// operationLocalTypes recovers the solved instantiation of the operation's
+// own quantified variables. Effect parameters are carried separately by the
+// selected evidence instance. Rows are inspected as well because a local
+// variable can occur inside a callback's effect arguments.
+func (el *elab) operationLocalTypes(op *types.EffectOp, occurrence types.Type) []types.Type {
+	if len(op.LocalVars) == 0 {
+		return nil
+	}
+	local := make(map[int]int, len(op.LocalVars))
+	for i, v := range op.LocalVars {
+		local[v.ID] = i
+	}
+	result := make([]types.Type, len(op.LocalVars))
+	var walk func(types.Type, types.Type)
+	walk = func(pattern, actual types.Type) {
+		actual = el.zonkDefault(actual)
+		switch p := pattern.(type) {
+		case *types.TVar:
+			if i, ok := local[p.ID]; ok {
+				result[i] = actual
+			}
+		case *types.TCon:
+			a, ok := actual.(*types.TCon)
+			if !ok || p.Unique != a.Unique || len(p.Args) != len(a.Args) {
+				return
+			}
+			for i := range p.Args {
+				walk(p.Args[i], a.Args[i])
+			}
+		case *types.TFun:
+			a, ok := actual.(*types.TFun)
+			if !ok {
+				return
+			}
+			walk(p.Arg, a.Arg)
+			walk(p.Eff, a.Eff)
+			walk(p.Ret, a.Ret)
+		case types.Row:
+			a, ok := actual.(types.Row)
+			if !ok {
+				return
+			}
+			for _, pl := range p.Labels {
+				for _, al := range a.Labels {
+					if pl.Unique != al.Unique || len(pl.Args) != len(al.Args) {
+						continue
+					}
+					for i := range pl.Args {
+						walk(pl.Args[i], al.Args[i])
+					}
+				}
+			}
+			if p.Tail != nil && a.Tail != nil {
+				walk(p.Tail, a.Tail)
+			}
+		}
+	}
+	walk(op.Scheme.Body, occurrence)
+	for i, t := range result {
+		if t == nil {
+			panic("elaborate: missing operation-local type instantiation")
+		}
+		result[i] = el.zonkDefault(t)
+	}
+	return result
+}
+
 func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args []ast.Expr) core.Expr {
 	if len(args) > op.Arity {
 		res := el.operationCall(op, opTy, rawTy, args[:op.Arity])
@@ -170,7 +237,7 @@ func (el *elab) operationCall(op *types.EffectOp, opTy, rawTy types.Type, args [
 		body = &core.ControlExit{Effect: inst, Op: op, Payload: coreArgs, Ty: ret}
 	} else {
 		inst := el.effectInstance(op, rawTy)
-		body = &core.Perform{Op: op, Effect: inst, Args: coreArgs, Ty: ret, Control: inst.Control}
+		body = &core.Perform{Op: op, Effect: inst, LocalTypes: el.operationLocalTypes(op, rawTy), Args: coreArgs, Ty: ret, Control: inst.Control}
 	}
 	if len(effectParams) > 0 {
 		el.popEvidence(effectParams)

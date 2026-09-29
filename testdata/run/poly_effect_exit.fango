@@ -1,0 +1,12 @@
+import Fail
+
+effect Echo
+    echo : a -> a
+
+run good value =
+    handle echo value of
+        echo x -> if good then resume x else Fail.fail "stopped"
+
+main() =
+    print (Fail.attempt ({ _ -> run True 42 }))
+    print (Fail.attempt ({ _ -> run False 42 }))

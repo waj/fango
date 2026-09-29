@@ -126,12 +126,13 @@ type If struct {
 }
 
 type Perform struct {
-	Origin  source.Span
-	Op      *types.EffectOp
-	Effect  EffectInstance
-	Args    []Expr
-	Ty      types.Type
-	Control types.Control
+	Origin     source.Span
+	Op         *types.EffectOp
+	Effect     EffectInstance
+	LocalTypes []types.Type // call-site instantiations of Op.LocalVars
+	Args       []Expr
+	Ty         types.Type
+	Control    types.Control
 }
 
 // ControlExit is an abort-only operation. Effect selects the lexical evidence
@@ -166,6 +167,7 @@ type HandlerClause struct {
 	Params          []string
 	ParamTypes      []types.Type
 	ResultType      types.Type
+	LocalVars       []*types.TVar // rigid operation-local binders scoped to this clause
 	Body            Expr
 }
 type ReturnClause struct {

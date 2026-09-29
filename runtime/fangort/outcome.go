@@ -62,6 +62,13 @@ func RequireNormal[A any](outcome Outcome[A]) A {
 
 func Propagate[A any](exit *ExitRequest) Outcome[A] { return Outcome[A]{Exit: exit} }
 
+func MapOutcome[A, B any](out Outcome[A], convert func(A) B) Outcome[B] {
+	if out.Exit != nil {
+		return Propagate[B](out.Exit)
+	}
+	return Normal(convert(out.Value))
+}
+
 // Suppress returns primary carrying secondary as a suppressed exit. It
 // copies: the primary request is reachable from the frame that raised it,
 // so a cleanup scope must not edit an exit it is only forwarding.

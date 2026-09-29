@@ -396,6 +396,7 @@ type HandlerClauseInfo struct {
 	Op         *types.EffectOp
 	ParamTypes []types.Type
 	OpResult   types.Type
+	LocalVars  []*types.TVar
 	ResumeID   types.ResumeID
 }
 
@@ -842,6 +843,16 @@ func (ck *Checker) declareEffectOps(ed *ast.EffectDecl, batch bool) []diag.Error
 			params[i] = a.Arg
 		}
 		local := append([]*types.TVar(nil), scope.Minted()...)
+		if len(local) > 0 && !op.Abort {
+			if op.Native != nil {
+				errs = append(errs, diag.Errorf(op.NameSpan, "POLYMORPHIC NATIVE OPERATION",
+					"Operation-local type variables on native operation `%s` are not supported by the native ABI.", op.Name))
+			}
+			if len(scope.Preds()) > 0 {
+				errs = append(errs, diag.Errorf(op.NameSpan, "CONSTRAINED EFFECT OPERATION",
+					"Operation-local class constraints on `%s` need dictionary transport and are not supported yet.", op.Name))
+			}
+		}
 		if op.Abort {
 			if op.Native != nil {
 				errs = append(errs, diag.Errorf(op.NameSpan, "ABORT NATIVE", "Abort-only operation `%s` must be handled in Fango and cannot be native.", op.Name))
@@ -1532,9 +1543,6 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			} else {
 				ty = g.instantiateAt(scheme, e.Sp, e.Name)
 			}
-			if op := g.ck.Operations[e.Name]; op != nil && len(op.LocalVars) > 0 && !op.Abort && op.Native == nil && !g.isDefaultPrint(op) {
-				g.errs = append(g.errs, diag.Errorf(e.Sp, "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has operation-local polymorphism that cannot be used at runtime until checkpoint 3.", op.Name))
-			}
 		}
 	case *ast.Ctor:
 		info, ok := g.ck.Ctors[e.Name]
@@ -1673,9 +1681,6 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			g.performs(last.Eff, e.Span(), false)
 			ty = result
 			g.ck.OpCalls[e] = op
-			if len(op.LocalVars) > 0 && !op.Abort && op.Native == nil && !g.isDefaultPrint(op) {
-				g.errs = append(g.errs, diag.Errorf(e.Span(), "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has result polymorphism that is staged until checkpoint 3.", op.Name))
-			}
 			break
 		}
 		fnTy := g.expr(e.Fn)
@@ -1955,9 +1960,6 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "MIXED HANDLER EFFECTS", "All clauses in a handler must belong to `%s`.", first.Owner.Name))
 			continue
 		}
-		if len(op.LocalVars) > 0 && !op.Abort && op.Native == nil && !g.isDefaultPrint(op) {
-			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "OPERATION POLYMORPHISM NOT READY", "The operation `%s` has operation-local polymorphism that cannot be used at runtime until checkpoint 3.", op.Name))
-		}
 		if seen[op.Name] {
 			g.errs = append(g.errs, diag.Errorf(cl.OpSpan, "DUPLICATE HANDLER CLAUSE", "The operation `%s` is handled more than once.", op.Name))
 			continue
@@ -1968,7 +1970,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 			resumeID = g.ck.ResumeGen
 		}
 		seen[op.Name] = true
-		inst := g.instantiate(op.Scheme)
+		inst, localVars := g.instantiateOperationClause(op)
 		paramTys, opResult := peelOperation(inst, op.Arity)
 		cur := inst
 		var last *types.TFun
@@ -2042,7 +2044,16 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 				}
 			}
 		}
-		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, ParamTypes: paramTys, OpResult: opResult, ResumeID: resumeID})
+		info.Clauses = append(info.Clauses, HandlerClauseInfo{Op: op, ParamTypes: paramTys, OpResult: opResult, LocalVars: localVars, ResumeID: resumeID})
+		if len(localVars) != 0 {
+			roots := append([]types.Type(nil), outer...)
+			if stateTy != nil {
+				roots = append(roots, stateTy)
+			}
+			g.scopeObligations = append(g.scopeObligations, Constraint{Scope: &ScopeBoundary{
+				LocalVars: localVars, Operation: op.Name, Result: result, Residual: residual, Outer: roots,
+			}, Span: cl.OpSpan})
+		}
 	}
 	g.ambient = clauseAmbient
 	for _, op := range first.Owner.Ops {
@@ -3078,6 +3089,27 @@ func (g *generator) instantiate(s types.Scheme) types.Type {
 		m[v.ID] = g.ck.Sup.FreshVar(v.Kind)
 	}
 	return types.SubstRigid(s.Body, m)
+}
+
+// A handler clause must work for every instantiation of an operation's local
+// variables. Fresh rigid variables express that universal requirement while
+// effect parameters and residual rows retain their ordinary inference metas.
+func (g *generator) instantiateOperationClause(op *types.EffectOp) (types.Type, []*types.TVar) {
+	m := make(map[int]types.Type, len(op.Scheme.Vars))
+	local := make([]*types.TVar, len(op.LocalVars))
+	localIDs := make(map[int]int, len(op.LocalVars))
+	for i, v := range op.LocalVars {
+		localIDs[v.ID] = i
+	}
+	for _, v := range op.Scheme.Vars {
+		if i, ok := localIDs[v.ID]; ok {
+			local[i] = g.ck.Sup.FreshRigid(v.Kind)
+			m[v.ID] = local[i]
+		} else {
+			m[v.ID] = g.ck.Sup.FreshVar(v.Kind)
+		}
+	}
+	return types.SubstRigid(op.Scheme.Body, m), local
 }
 
 func (g *generator) instantiateCaptures(s types.Scheme) types.CaptureSet {

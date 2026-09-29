@@ -1,0 +1,6 @@
+effect Apply
+    apply : (a ->{IO} a) -> a -> a
+
+main() =
+    print (handle apply ({ x -> print "called"; x }) 42 of
+        apply f x -> resume (f x))

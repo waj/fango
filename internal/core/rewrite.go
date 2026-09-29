@@ -152,6 +152,7 @@ func (r rewriter) expr(e Expr) Expr {
 	case *Perform:
 		n := *e
 		n.Ty = r.typ(e.Ty)
+		n.LocalTypes = r.types(e.LocalTypes)
 		n.Args = r.exprs(e.Args)
 		n.Effect = r.effect(e.Effect)
 		out = &n
@@ -186,6 +187,7 @@ func (r rewriter) expr(e Expr) Expr {
 			c.Params = append([]string(nil), c.Params...)
 			c.ParamTypes = r.types(c.ParamTypes)
 			c.ResultType = r.typ(c.ResultType)
+			c.LocalVars = append([]*types.TVar(nil), c.LocalVars...)
 			c.Body = r.expr(c.Body)
 			n.Clauses[i] = c
 		}

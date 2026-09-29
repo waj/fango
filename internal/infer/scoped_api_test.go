@@ -108,11 +108,6 @@ func TestScopedAPIUnimplementedTypeBoundaries(t *testing.T) {
 both : () ->{Local Int, Local Bool} ()
 both() = ()
 `, "DUPLICATE EFFECT"},
-		{"generic task operation", `effect Scheduling
-    submit : (() -> a) -> Int
-
-bad() = submit { _ -> 1 }
-`, "OPERATION POLYMORPHISM NOT READY"},
 		{"effect row parameter", `type Job e = { run : () ->{e} () }
 
 effect Scheduling e

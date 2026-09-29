@@ -1,0 +1,9 @@
+module Poly exposing (Key(..), run)
+
+type Key a = Key a
+
+effect Fetch
+    fetch : Key a -> a
+
+run key = handle fetch key of
+    fetch (Key x) -> resume x

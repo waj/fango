@@ -53,7 +53,7 @@ func TestAsyncFeasibilityCurrentLanguageBoundaries(t *testing.T) {
 effect Scheduling
     start : (() -> a) -> a
 bad = start { _ -> 1 }
-`, "OPERATION POLYMORPHISM NOT READY"},
+`, "UNHANDLED EFFECT"},
 		{"confused result", `
 type Task a e = { read : () ->{e} a }
 observe : Task a e ->{e} a

@@ -85,6 +85,18 @@ func (g *gen) deferredEvidence(ev core.EffectInstance, row goast.Expr, mode type
 			sub[param.ID] = ev.Args[i]
 		}
 		for _, op := range effect.Ops {
+			if len(op.LocalVars) > 0 && op.Native == nil {
+				request := ident("t_poly_request")
+				invoke := callExpr(&goast.SelectorExpr{X: lookup, Sel: ident("Op_" + linkName(op.Name))}, request)
+				result := goast.Expr(selector("fangort", "PolyReply"))
+				if mode == types.Exit {
+					result = indexExpr(selector("fangort", "Outcome"), []goast.Expr{result})
+				}
+				fields = append(fields, &goast.KeyValueExpr{Key: ident("Op_" + linkName(op.Name)), Value: funcLitParams(
+					[]paramSpec{{name: "t_poly_request", typ: selector("fangort", "PolyRequest")}}, result,
+					[]goast.Stmt{returnStmt(invoke)})})
+				continue
+			}
 			var params []paramSpec
 			var args []goast.Expr
 			for i, raw := range op.RuntimeParamTypes() {

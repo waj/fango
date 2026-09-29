@@ -15,9 +15,20 @@ although their scalar sidecar ABI has no hidden evidence parameter.
 Rows contain distinct nominal labels and an optional tail; binding a row
 variable can place an effect into a row that already carries it under other
 arguments, and the solver reconciles every row a constraint mentions once
-the group is solved, unifying the two argument lists. Operation-local
-polymorphism is limited to an abort-only operation's caller-selected result
-variable, absent from payloads. Partial operations are pure closures.
+the group is solved, unifying the two argument lists. Source-defined
+resumptive operations may quantify unconstrained variables independently at
+each call, including variables inside nominal payloads and callbacks. A
+handler clause checks those variables as rigid skolems; they may not escape
+through the handler result, residual effects, state, or outer bindings.
+Abort-only operations retain their caller-selected result-variable rule.
+Partial operations are pure closures.
+
+The interpreter passes the call's type descriptors into the clause frame. The
+Go backend uses a checked request/reply envelope because an evidence record
+cannot contain a Go function field polymorphic at each invocation. Request
+values are adapted to the clause's uniform representation and replies back
+to the caller's representation; nominal ADTs, Lists, and callback values are
+adapted recursively. The reply descriptor is checked before reconstruction.
 
 Each source effect is uniformly tail-resumptive or abort-only. Source checking
 and Core lint separately prove that every normal resumptive-clause path ends

@@ -1228,7 +1228,7 @@ func (el *elab) handleExpr(e *ast.Handle, ty types.Type) core.Expr {
 		}
 		el.popScope(pushed)
 		clauses[i] = core.HandlerClause{Op: ci.Op, ResumeID: ci.ResumeID, Params: params, ParamTypes: pts,
-			ResultType: el.zonkDefault(ci.OpResult), Body: clauseBody}
+			ResultType: el.zonkDefault(ci.OpResult), LocalVars: ci.LocalVars, Body: clauseBody}
 	}
 	var ret *core.ReturnClause
 	if e.Return != nil {

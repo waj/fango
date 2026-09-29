@@ -1,0 +1,5 @@
+module Main exposing (main)
+
+import Poly exposing (Key(..), run)
+
+main = run (Key 42)

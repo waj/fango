@@ -66,6 +66,9 @@ func (g *gen) typeDescriptorExpr(t types.Type) goast.Expr {
 	g.usesFangort = true
 	switch t := t.(type) {
 	case *types.TVar:
+		if name, ok := g.polyDescriptorNames[t.ID]; ok {
+			return ident(name)
+		}
 		name, ok := g.tyParamNames[t.ID]
 		if !ok {
 			panic(fmt.Sprintf("codegen: missing descriptor for type parameter %d", t.ID))
