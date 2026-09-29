@@ -393,6 +393,9 @@ func (i *index) expr(e ast.Expr, s scope) {
 		if !e.Sugared {
 			i.use(e.Sp, global("ctor", e.Name))
 		}
+		if e.Witness != nil {
+			i.typ(e.Witness)
+		}
 	case *ast.RecordLit:
 		if e.Name != "" {
 			i.use(e.NameSpan, global("type", e.Name))

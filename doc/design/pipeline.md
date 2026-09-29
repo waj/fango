@@ -328,9 +328,10 @@ whose dependencies succeeded; dependents of a failed owner are skipped.
 The editor index records source spans from a successful resolved and checked
 graph. Canonical names identify module declarations; lexical binder spans
 identify locals. Inferred record uses identify a field by its nominal owner,
-since a field spelling alone does not select a schema. The index traverses
-attribute expressions on every attachment target with the ordinary expression
-visitor, including quoted bodies and lexical binders. Leading attribute spans
+since a field spelling alone does not select a schema. Type witnesses traverse
+their embedded type expressions even though their constructor is sugared.
+The index traverses attribute expressions on every attachment target with the
+ordinary expression visitor, including quoted bodies and lexical binders. Leading attribute spans
 let documentation lookup cross complete tags without inspecting their payloads;
 trailing tags do not bridge documentation for their fields. The server retains the
 last successful graph index for each open entry across an invalid edit. Each

@@ -77,6 +77,64 @@ func TestUTF16PositionConversion(t *testing.T) {
 	}
 }
 
+func TestTypeWitnessNavigation(t *testing.T) {
+	root := t.TempDir()
+	entry := filepath.Join(root, "Main.fango")
+	main := `module Main exposing (main)
+import Shapes as S exposing (Box)
+type Local = Local
+local = @Local
+imported = @Box
+qualified = @S.Box
+nested = @(List S.Box)
+main = "ok"
+`
+	for name, data := range map[string]string{
+		"Main.fango":   main,
+		"Shapes.fango": "module Shapes exposing (Box(..))\ntype Box = Box\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, errs, internal := (&check.Session{DisableObjectCache: true}).Compile(entry)
+	if internal != nil || len(errs) > 0 {
+		t.Fatalf("check: %v %v", internal, errs)
+	}
+	idx := newIndex(root, result)
+	doc := idx.documents[entry]
+	for _, tc := range []struct{ marker, name, target string }{
+		{"@Local", "Local", "type:Main.Local"},
+		{"@Box", "Box", "type:Shapes.Box"},
+		{"@S.Box", "S.Box", "type:Shapes.Box"},
+		{"@(List S.Box)", "List", "type:List.List"},
+		{"@(List S.Box)", "S.Box", "type:Shapes.Box"},
+	} {
+		t.Run(tc.marker+"/"+tc.name, func(t *testing.T) {
+			offset := strings.Index(main, tc.marker) + strings.Index(tc.marker, tc.name)
+			use := occurrenceAt(doc, doc.file, offset)
+			if use == nil || use.target != tc.target {
+				t.Fatalf("witness occurrence = %#v, want %s", use, tc.target)
+			}
+			sym := idx.symbols[use.target]
+			if sym.span.File == nil || sym.typeText == "" {
+				t.Fatalf("missing definition or hover type: %#v", sym)
+			}
+			refs, err := references(context.Background(), map[string]*index{entry: idx}, nil, use.target, sym, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := location{URI: pathURI(entry), Range: spanRange(use.span)}
+			for _, ref := range refs {
+				if ref == want {
+					return
+				}
+			}
+			t.Fatalf("witness missing from references: %#v", refs)
+		})
+	}
+}
+
 func TestNestedUnsavedModuleOverlay(t *testing.T) {
 	root := t.TempDir()
 	entry := filepath.Join(root, "Main.fango")
