@@ -1,0 +1,43 @@
+import Json exposing (Decode(..), Encode(..))
+import Result exposing (Result(..))
+
+type Shade = Red | RGB Int Int Int deriving (Encode, Decode)
+type Person = { name : String, shade : Shade } deriving (Encode, Decode)
+type Person2 = { name : String, age : Int } deriving (Encode, Decode)
+type Config =
+    { {-# json key "full_name" #-} name : String
+    , {-# json default 7 #-} count : Int
+    , {-# json skip #-} {-# json default "local" #-} secret : String
+    } deriving (Encode, Decode)
+
+decoded : Result Json.Error Person2
+decoded = Json.parse @Person2 "{\"age\":4,\"name\":\"Ada\"}"
+
+decodedUnion : Result Json.Error Person
+decodedUnion = Json.parse @Person "{\"shade\":{\"RGB\":[3,4,5]},\"name\":\"Jay\"}"
+
+decodedConfig : Result Json.Error Config
+decodedConfig = Json.parse @Config "{\"full_name\":\"Sam\",\"extra\":[1,2]}"
+
+main() =
+    case Json.stringify (Person { name = "A \"friend\"", shade = RGB 1 2 3 }) of
+        Ok text -> print text
+        Err error -> print error.message
+    case decodedConfig of
+        Ok config ->
+            case Json.stringify config of
+                Ok text -> print (text ++ ":" ++ config.secret ++ ":" ++ show config.count)
+                Err error -> print error.message
+        Err error -> print error.message
+    case decodedUnion of
+        Ok person ->
+            case Json.stringify person of
+                Ok text -> print text
+                Err error -> print error.message
+        Err error -> print error.message
+    case decoded of
+        Ok person ->
+            case Json.stringify person of
+                Ok text -> print text
+                Err error -> print error.message
+        Err error -> print error.message

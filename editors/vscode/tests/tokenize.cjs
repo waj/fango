@@ -63,6 +63,16 @@ async function main() {
   assert(!sharedPragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
   assert(!grammar.tokenizeLine('{-# service #-}').tokens.some(t => t.scopes.includes('keyword.control.directive.fango')));
   assert(grammar.tokenizeLine('resource = 1').tokens.every(t => !t.scopes.includes('keyword.control.directive.fango')));
+  for (const pragmaText of ['{-# json key "full_name" #-}', '{-# json default 7 #-}', '{-# json skip #-}']) {
+    assert(grammar.tokenizeLine(pragmaText).tokens.some(t => t.scopes.includes('keyword.control.directive.fango')), pragmaText);
+  }
+  for (const witness of ['parse @Person input', 'parse @(List Person) input']) {
+    const witnessTokens = grammar.tokenizeLine(witness).tokens;
+    const at = witness.indexOf('@');
+    assert(witnessTokens.find(t => t.startIndex <= at && t.endIndex > at).scopes.includes('keyword.operator.type-witness.fango'), witness);
+  }
+  const ordinaryAt = grammar.tokenizeLine('x @ y').tokens;
+  assert(!ordinaryAt.some(t => t.scopes.includes('keyword.operator.type-witness.fango')));
 
   const handler = 'handle action() with state = 0 of';
   const handlerTokens = grammar.tokenizeLine(handler).tokens;

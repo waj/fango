@@ -48,6 +48,7 @@ adapters, specialization, ANF, and independent lint.
 [Native tasks and explicit streams](design/tasks.md) — closure invocation,
 handler inheritance, goroutine scopes, and library traversal.
 [HTTP over streams](design/http.md) — framing, connection ownership, and middleware composition.
+[JSON](design/json.md) — pull tokens, generated codecs, and streaming memory bounds.
 
 ## Go backend and runtime
 

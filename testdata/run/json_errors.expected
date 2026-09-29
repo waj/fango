@@ -1,0 +1,15 @@
+Duplicate JSON field: age @/age 1:29
+Missing JSON field: age @/age 1:15
+Expected JSON string @/name 1:10
+Leading zero in JSON number @/extra 1:33
+Expected JSON number @/1 1:9
+ok
+Expected one JSON character @ 1:5
+Leading zero in JSON number @ 1:3
+Invalid JSON literal @ 1:9
+Trailing array comma @ 1:8
+Trailing JSON input @ 1:4
+Invalid UTF-8 in JSON string @ 1:3
+JSON nesting exceeds 256 levels 1:258
+1.20e+3
+ok

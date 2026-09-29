@@ -34,7 +34,7 @@ for otherwise unavailable semantics or measured performance needs.
 
 - New file operations belong in File. Deprecating legacy IO.readFile/writeFile/exit
   and migrating examples waits for a deprecation mechanism.
-- Dict filter/union/intersect/partition, Ord, and Json.Encode; floored division to
+- Dict filter/union/intersect/partition and Ord; floored division to
   pair with modBy; Tuple mapFirst/mapSecond and Triple accessors await consumers.
 - Unicode normalization, grapheme segmentation, and Unicode-aware word/case APIs
   remain deferred. Add differential, diagnostic, documentation, and appropriate
@@ -142,56 +142,11 @@ designed against the current [task architecture](design/tasks.md) when needed.
 
 ## Directing a type-polymorphic call
 
-A call whose type variable appears only in its result — a decoder, a bound, a
-class method with a phantom parameter — can be directed today only by
-introducing a named binding and annotating it, because annotations are separate
-declarations and there is no inline expression annotation. The same gap leaves
-`AMBIGUOUS CONSTRAINT` on an undetermined phantom with no remedy but
-restructuring the program.
+DONE
 
-The proposal is a type witness: an indexed, erasable singleton passed as an
-ordinary argument.
-
-```fango
-decode : Decodable a => Type a -> String -> Result a
-
-decode @Foo input
-decode @(List Int) input
-```
-
-`Type a` has one inhabitant, so it carries nothing but its index. Unifying
-`Type a` with `Type Foo` fixes the variable and instance resolution then runs
-unchanged, which is why this needs no new judgment and no kinds — the index is
-an ordinary fully applied type. Both backends represent the witness as Unit and
-neither drops the parameter, so arities agree.
-
-`Type a` is runtime-legal and has no eliminators. `TypeRepr` stays
-compile-time-only and inspectable, and a stage-only `Meta.repr : Type a ->
-TypeRepr` is the single door between them, so the compile-time-only rule keeps
-its current roots and the boundary remains "can you look inside it".
-
-Open decisions:
-
-- The surface costs a lexer carve-out. `@` is an operator character, so it
-  would begin a witness only when immediately followed by an uppercase letter
-  or `(`, leaving `@@` and spaced `x @ y` alone while forcing `x @ Foo` for a
-  user-defined `@` with a constructor argument. Fango already distinguishes
-  `foo()` from `foo ()` and already bans a run beginning `--`, so this is the
-  same kind of rule. The spellings that need no lexer change are the existing
-  `typeOf` keyword and `(type Foo)`.
-- A bare `parse Foo` is rejected. Constructors have their own namespace and
-  `type Code = Code` is idiomatic, so a bare name would need type-directed
-  resolution against resolution-before-inference, and it cannot spell an
-  applied type.
-- Visible type application on undeclared parameters is not the goal. It would
-  require publishing an order for quantified variables that inferred
-  definitions do not have, making variable order in an annotation a breaking
-  change.
-- No forcing consumer exists. JSON decoding, which remains application Fango
-  code, is the candidate.
-
-Delivery would change surface syntax, so it must update the TextMate grammar
-and tokenize fixtures that mix a witness with a user-defined `@` operator.
+Type witnesses and their use in JSON decoding are specified in the
+[JSON reference](reference/library-json.md#type-witnesses). A compile-time
+conversion from `Type a` to `Meta.TypeRepr` remains a separate future feature.
 
 ## Longer-term candidates
 

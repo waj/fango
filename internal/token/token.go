@@ -43,6 +43,7 @@ const (
 	RBRACKET    // ]
 	UNDERSCORE  // _ (wildcard pattern)
 	DOLLARPAREN // $( — opens a splice; `$` is never a token on its own
+	ATTYPE      // @ before an uppercase type name or a parenthesized type
 
 	// Reserved operator lexemes: operator runs the grammar recognizes by
 	// kind rather than by spelling. A run becomes one of these only when it
@@ -89,7 +90,7 @@ var kindNames = map[Kind]string{
 	OP:     "OP",
 	LPAREN: "LPAREN", RPAREN: "RPAREN", COMMA: "COMMA", SEMICOLON: "SEMICOLON", DOT: "DOT", DOTDOT: "DOTDOT",
 	LBRACE: "LBRACE", RBRACE: "RBRACE", LBRACKET: "LBRACKET", RBRACKET: "RBRACKET",
-	UNDERSCORE: "UNDERSCORE", DOLLARPAREN: "DOLLARPAREN",
+	UNDERSCORE: "UNDERSCORE", DOLLARPAREN: "DOLLARPAREN", ATTYPE: "ATTYPE",
 	EQ: "EQ", ARROW: "ARROW", DARROW: "DARROW", COLON: "COLON", PIPE: "PIPE", CARET: "CARET",
 	KwModule: "module", KwImport: "import", KwAs: "as", KwExposing: "exposing", KwLet: "let", KwIn: "in",
 	KwIf: "if", KwThen: "then", KwElse: "else", KwCase: "case", KwOf: "of",

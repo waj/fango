@@ -36,6 +36,12 @@ func exprInline(e ast.Expr) (string, bool) {
 	case *ast.Var:
 		return e.Name, true
 	case *ast.Ctor:
+		if e.Witness != nil {
+			if _, applied := e.Witness.(*ast.TApp); applied {
+				return "@(" + typeText(e.Witness) + ")", true
+			}
+			return "@" + typeText(e.Witness), true
+		}
 		if e.Sugared && e.Name == "List.Nil" {
 			return "[]", true
 		}

@@ -186,6 +186,11 @@ punctuation. A backslash outside a string or character literal is rejected.
 So `(.)`, `($)`, and `(<$>)` are unavailable, while `(<+>)`, `(|>)`, `(>>=)`,
 and `(:::)` are all ordinary names.
 
+`@` immediately followed by an uppercase type name or `(` begins a
+[type witness](library-json.md#type-witnesses) instead of an operator.
+Other `@` runs retain ordinary operator parsing. Thus `x @ y` is an operator
+application and `@Person` is a witness.
+
 Operator characters group greedily: the longest run is one operator. So
 `a<-b` is the operator `<-` rather than `a < -b`, and `x =-1` is the operator
 `=-` rather than an assignment — put spaces around operators. A run may not

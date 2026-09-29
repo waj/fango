@@ -36,13 +36,17 @@ constructor patterns and record fields. A type variable and a scalar are
 type TypeInfo = { name : String, moduleName : String, ty : TypeRepr, params : Items TypeRepr, shape : Shape }
 type Shape = Union (Items Ctor) | Record Ctor
 type Ctor = { name : String, symbol : String, index : Int, owner : TypeRepr, fields : Items Field }
-type Field = { name : String, index : Int, ty : TypeRepr }
+type Field = { name : String, index : Int, ty : TypeRepr, jsonKey : String, jsonSkip : Bool, jsonDefault : Default }
+type Default = NoDefault | Default Code
 ```
 
 A union constructor's fields are positional, so their `name` is empty; a
 record's sole constructor carries the type's own name and its fields' names.
 Field types come back instantiated at the reflected type's arguments, so a
 generator sees `Int` rather than the declaration's parameter.
+Record fields also expose their JSON key, skip flag, and optional default code
+for [JSON derivation](library-json.md). Positional union fields have no JSON
+configuration.
 `Meta.ctorsIn` flattens the two shapes into one constructor list.
 
 `Items` is `Meta`'s own list — `NoItems | Item a (Items a)`, with
@@ -80,10 +84,12 @@ The compiler owns the traversal, so a deriver never invents a binder:
 - `Meta.match : TypeInfo -> Code -> (Bound -> Code) -> Code` builds the
   exhaustive case over the type's constructors and binds every field, handing
   each branch a `Bound { ctor : Ctor, fields : Items BoundField }` whose
-  fields carry `{ name, index, ty, value : Code }`. Nesting two calls produces
+  fields carry `{ name, index, ty, value : Code, jsonKey, jsonSkip }`. Nesting two calls produces
   the nested case a two-argument method needs.
 - `Meta.construct : Ctor -> Items Code -> Code` goes the other way, for a
   method that produces an `a`. A record constructor produces a record literal.
+- `Meta.lambda : String -> (Code -> Code) -> Code` builds a lambda and supplies
+  its binder as `Code` to the callback. The caller must choose a private name.
 
 A `deriver` must precede, in source order, any `deriving` clause that uses it
 — including on a type declared earlier in the same file. The bundled `Derive`

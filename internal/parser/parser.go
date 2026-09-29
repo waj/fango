@@ -812,7 +812,52 @@ func (p *parser) parseRecordTypeFields() ([]ast.RecordFieldDef, bool) {
 		return nil, false
 	}
 	var fields []ast.RecordFieldDef
+	jsonKeys := map[string]bool{}
+	jsonExplicit := map[string]bool{}
 	for {
+		field := ast.RecordFieldDef{}
+		for p.peek().Kind == token.PRAGMA {
+			pragma := p.next()
+			parts := strings.Fields(pragma.Text)
+			if len(parts) < 2 || parts[0] != "json" {
+				p.errorAt(pragma.Span, "JSON ATTRIBUTE", "A record field accepts `json key`, `json default`, or `json skip` here.")
+				return nil, false
+			}
+			field.JSONSpan = pragma.Span
+			switch parts[1] {
+			case "key":
+				if field.JSONKeySet {
+					p.errorAt(pragma.Span, "JSON ATTRIBUTE", "This field already has a JSON key attribute.")
+					return nil, false
+				}
+				value := strings.TrimSpace(strings.TrimPrefix(pragma.Text, "json key"))
+				key, err := strconv.Unquote(value)
+				if err != nil {
+					p.errorAt(pragma.Span, "JSON ATTRIBUTE", "Write a quoted string after `json key`.")
+					return nil, false
+				}
+				field.JSONKey, field.JSONKeySet = key, true
+			case "skip":
+				if field.JSONSkip || len(parts) != 2 {
+					p.errorAt(pragma.Span, "JSON ATTRIBUTE", "Write `{-# json skip #-}` once for this field.")
+					return nil, false
+				}
+				field.JSONSkip = true
+			case "default":
+				if field.JSONDefault != nil {
+					p.errorAt(pragma.Span, "JSON ATTRIBUTE", "This field already has a JSON default.")
+					return nil, false
+				}
+				expr := p.parseJSONDefault(pragma)
+				if expr == nil {
+					return nil, false
+				}
+				field.JSONDefault = expr
+			default:
+				p.errorAt(pragma.Span, "JSON ATTRIBUTE", "Unknown JSON field attribute.")
+				return nil, false
+			}
+		}
 		name := p.peekInExpr()
 		if name.Kind != token.LIDENT {
 			p.errorAt(name.Span, "SYNTAX PROBLEM", "I expect a lowercase record field name.")
@@ -826,7 +871,28 @@ func (p *parser) parseRecordTypeFields() ([]ast.RecordFieldDef, bool) {
 		if ty == nil {
 			return nil, false
 		}
-		fields = append(fields, ast.RecordFieldDef{Name: name.Text, NameSpan: name.Span, Type: ty})
+		field.Name, field.NameSpan, field.Type = name.Text, name.Span, ty
+		if field.JSONSkip && field.JSONDefault == nil {
+			p.errorAt(field.JSONSpan, "JSON ATTRIBUTE", "A skipped JSON field requires a default expression.")
+			return nil, false
+		}
+		if field.JSONSkip && field.JSONKeySet {
+			p.errorAt(field.JSONSpan, "JSON ATTRIBUTE", "A skipped JSON field cannot also rename its key.")
+			return nil, false
+		}
+		key := field.Name
+		if field.JSONKeySet {
+			key = field.JSONKey
+		}
+		if !field.JSONSkip && jsonKeys[key] && (field.JSONKeySet || jsonExplicit[key]) {
+			p.errorAt(field.NameSpan, "JSON ATTRIBUTE", "Two fields use the same JSON key `"+key+"`.")
+			return nil, false
+		}
+		if !field.JSONSkip {
+			jsonKeys[key] = true
+			jsonExplicit[key] = jsonExplicit[key] || field.JSONKeySet
+		}
+		fields = append(fields, field)
 		if p.peek().Kind != token.COMMA {
 			break
 		}
@@ -838,6 +904,38 @@ func (p *parser) parseRecordTypeFields() ([]ast.RecordFieldDef, bool) {
 	}
 	p.next()
 	return fields, true
+}
+
+func (p *parser) parseJSONDefault(pragma token.Token) ast.Expr {
+	raw := p.f.Content[pragma.Span.Start+3 : pragma.Span.End-3]
+	marker := strings.Index(string(raw), "default")
+	if marker < 0 {
+		p.errorAt(pragma.Span, "JSON ATTRIBUTE", "Write an expression after `json default`.")
+		return nil
+	}
+	start := pragma.Span.Start + 3 + marker + len("default")
+	end := pragma.Span.End - 3
+	for start < end && (p.f.Content[start] == ' ' || p.f.Content[start] == '\n') {
+		start++
+	}
+	if start == end {
+		p.errorAt(pragma.Span, "JSON ATTRIBUTE", "Write an expression after `json default`.")
+		return nil
+	}
+	fragment := source.NewFile(p.f.Name, p.f.Content[start:end])
+	toks, errs := lexer.Lex(fragment)
+	if len(errs) > 0 {
+		p.errorAt(pragma.Span, "JSON ATTRIBUTE", "The JSON default is not a valid Fango expression.")
+		return nil
+	}
+	for i := range toks {
+		toks[i].Span.File = p.f
+		toks[i].Span.Start += start
+		toks[i].Span.End += start
+	}
+	expr, parseErrs := ParseExprInput(toks, p.f)
+	p.errs = append(p.errs, parseErrs...)
+	return expr
 }
 
 // parseCtorDef parses one constructor alternative: a capitalized name
@@ -1690,7 +1788,7 @@ func (p *parser) parseApply() ast.Expr {
 	}
 	for {
 		switch p.peekInExpr().Kind {
-		case token.INT, token.FLOAT, token.STRING, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.LBRACKET, token.KwResume, token.KwQuote, token.DOLLARPAREN:
+		case token.INT, token.FLOAT, token.STRING, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.LBRACKET, token.KwResume, token.KwQuote, token.DOLLARPAREN, token.ATTYPE:
 			arg := p.parsePostfixAtom()
 			if arg == nil {
 				return nil
@@ -2256,6 +2354,22 @@ func (p *parser) allowAtAnchor(anchor int, k token.Kind) {
 func (p *parser) parseAtom() ast.Expr {
 	t := p.peekInExpr()
 	switch t.Kind {
+	case token.ATTYPE:
+		p.next()
+		var ty ast.TypeExpr
+		if p.peekInExpr().Kind == token.LPAREN {
+			p.next()
+			ty = p.parseTypeExpr()
+			if ty == nil || !p.expect(token.RPAREN, "I expect `)` after the type witness.") {
+				return nil
+			}
+		} else {
+			ty = p.parseTypeAtom()
+			if ty == nil {
+				return nil
+			}
+		}
+		return &ast.Ctor{Name: "Basics.Type", Sugared: true, Witness: ty, Sp: t.Span.Merge(ty.Span())}
 	case token.INT:
 		p.next()
 		v, err := strconv.ParseInt(t.Text, 10, 64)

@@ -972,7 +972,13 @@ func (ck *Checker) declareTypeCtors(td *ast.TypeDecl, adt *types.ADTInfo, batch 
 				ty = ck.B.Unit
 			}
 			fields[i] = ty
-			adt.RecordFields = append(adt.RecordFields, types.RecordFieldInfo{Name: f.Name, Type: ty})
+			key := f.Name
+			if f.JSONKeySet {
+				key = f.JSONKey
+			}
+			adt.RecordFields = append(adt.RecordFields, types.RecordFieldInfo{
+				Name: f.Name, Type: ty, JSONKey: key, JSONSkip: f.JSONSkip, JSONDefault: f.JSONDefault,
+			})
 		}
 		ctor := &types.CtorInfo{Name: td.Name + ".__record", Index: 0, Fields: fields, Result: result}
 		adt.Ctors = append(adt.Ctors, ctor)
@@ -1539,6 +1545,18 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 			break
 		}
 		fields, result := g.instantiateCtor(info)
+		if e.Witness != nil {
+			if e.Name != "Basics.Type" || len(fields) != 0 {
+				g.errs = append(g.errs, diag.Errorf(e.Sp, "TYPE WITNESS", "A type witness must use the bundled `Type` constructor."))
+			} else {
+				witness, es := g.ck.ResolveTypeExpr(e.Witness, g.ck.NewAnnScope())
+				g.errs = append(g.errs, es...)
+				if !g.ck.reflectionClosed(witness) {
+					g.errs = append(g.errs, diag.Errorf(e.Sp, "TYPE WITNESS", "A type witness requires a closed, fully applied type."))
+				}
+				result = &types.TCon{Unique: info.Result.Unique, Name: info.Result.Name, Args: []types.Type{witness}}
+			}
+		}
 		if g.ck.ADTs[info.Result.Unique] != nil && g.ck.ADTs[info.Result.Unique].NativeIndexed {
 			g.errs = append(g.errs, diag.Errorf(e.Span(), "NATIVE HANDLE REPRESENTATION", "An indexed native handle's representation cannot be constructed in Fango."))
 		}

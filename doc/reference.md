@@ -29,7 +29,7 @@ The bundled library is experimental and versioned with the compiler.
 | Runtime.Scope | [Cleanup scopes](reference/resources.md) |
 | Async | [Tasks, handlers, cancellation, and channels](reference/library-async.md) |
 | Runtime.Native | [Native Go sidecars](reference/native.md) |
-| Json | [Encoding and string tokens](reference/library-json.md) |
+| Json | [Streaming parsing and encoding](reference/library-json.md) |
 | Meta, Derive | [Metaprogramming](reference/metaprogramming.md) |
 
 ### Streams and cursors

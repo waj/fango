@@ -357,6 +357,9 @@ func DumpExpr(e Expr) string {
 	case *Var:
 		return fmt.Sprintf("(var %s)", e.Name)
 	case *Ctor:
+		if e.Witness != nil {
+			return fmt.Sprintf("(witness %s)", DumpTypeExpr(e.Witness))
+		}
 		return fmt.Sprintf("(ctor %s)", e.Name)
 	case *RecordLit:
 		var b strings.Builder

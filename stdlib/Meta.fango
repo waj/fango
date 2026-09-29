@@ -1,9 +1,9 @@
 {-# no-prelude #-}
 module Meta exposing
-    ( Bound(..), BoundField(..), Code, Ctor(..), Field(..), Items(..), Lift(..)
-    , Reflected(..), Shape(..), TypeInfo(..), TypeRepr
-    , args, construct, ctorsIn, fail, foldItems, head, info, isVar, lengthItems
-    , mapItems, match, sameType, typeName
+    ( Bound(..), BoundField(..), Code, Ctor(..), Default(..), Field(..)
+    , Items(..), Lift(..), Reflected(..), Shape(..), TypeInfo(..), TypeRepr
+    , args, construct, ctorsIn, fail, foldItems, head, info, isVar, lambda
+    , lengthItems, mapItems, match, sameType, typeName
     )
 
 import Basics exposing (..)
@@ -137,10 +137,31 @@ fieldName = native "$1 == $2 == $3"
 fieldType : TypeRepr -> Int -> Int -> TypeRepr
 fieldType = native "$1 == $2 == $3"
 
+fieldJSONKey : TypeRepr -> Int -> Int -> String
+fieldJSONKey = native "$1 == $2 == $3"
+
+fieldJSONSkip : TypeRepr -> Int -> Int -> Bool
+fieldJSONSkip = native "$1 == $2 == $3"
+
+fieldHasJSONDefault : TypeRepr -> Int -> Int -> Bool
+fieldHasJSONDefault = native "$1 == $2 == $3"
+
+fieldJSONDefault : TypeRepr -> Int -> Int -> Code
+fieldJSONDefault = native "$1 == $2 == $3"
+
 -- A schema: one field, one constructor, and the type as a whole. A union
 -- constructor's fields are positional, so their names are empty.
 
-type Field = { name : String, index : Int, ty : TypeRepr }
+type Default = NoDefault | Default Code
+
+type Field =
+    { name : String
+    , index : Int
+    , ty : TypeRepr
+    , jsonKey : String
+    , jsonSkip : Bool
+    , jsonDefault : Default
+    }
 
 type Ctor = { name : String, symbol : String, index : Int, owner : TypeRepr, fields : Items Field }
 
@@ -168,9 +189,16 @@ fieldsFrom repr ctorIndex index =
     if index >= fieldCount repr ctorIndex then
         NoItems
     else
-        Item
-            (Field { name = fieldName repr ctorIndex index, index = index, ty = fieldType repr ctorIndex index })
-            (fieldsFrom repr ctorIndex (index + 1))
+        fallback = if fieldHasJSONDefault repr ctorIndex index then Default (fieldJSONDefault repr ctorIndex index) else NoDefault
+        entry = Field
+            { name = fieldName repr ctorIndex index
+            , index = index
+            , ty = fieldType repr ctorIndex index
+            , jsonKey = fieldJSONKey repr ctorIndex index
+            , jsonSkip = fieldJSONSkip repr ctorIndex index
+            , jsonDefault = fallback
+            }
+        Item entry (fieldsFrom repr ctorIndex (index + 1))
 
 ctorFor : TypeRepr -> Int -> Ctor
 ctorFor repr index =
@@ -221,7 +249,14 @@ ctorsIn subject =
 -- introduces, so a deriver never invents a name and exhaustiveness is
 -- structural rather than checked after the fact.
 
-type BoundField = { name : String, index : Int, ty : TypeRepr, value : Code }
+type BoundField =
+    { name : String
+    , index : Int
+    , ty : TypeRepr
+    , value : Code
+    , jsonKey : String
+    , jsonSkip : Bool
+    }
 
 type Bound = { ctor : Ctor, fields : Items BoundField }
 
@@ -230,6 +265,15 @@ binderName = native "$1 == $2 == $3"
 
 varCode : String -> Code
 varCode = native "$1"
+
+lambdaCode : String -> Code -> Code
+lambdaCode = native "$1 == $2"
+
+-- Give a generator a reference to a local binder and wrap its result in a
+-- lambda. The caller supplies a private name; generated bodies can then keep
+-- one typed slot per reflected field without generating declarations.
+lambda : String -> (Code -> Code) -> Code
+lambda name build = lambdaCode name (build (varCode name))
 
 matchStart : Code -> Code
 matchStart = native "$1"
@@ -255,6 +299,8 @@ bindField scrutinee ctor field =
     , index = field.index
     , ty = field.ty
     , value = varCode (binderName scrutinee ctor.index field.index)
+    , jsonKey = field.jsonKey
+    , jsonSkip = field.jsonSkip
     }
 
 boundOf : Code -> Ctor -> Bound

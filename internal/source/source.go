@@ -45,8 +45,16 @@ type Span struct {
 func (s Span) StartPos() Pos { return s.File.pos(s.Start) }
 func (s Span) EndPos() Pos   { return s.File.pos(s.End) }
 
-// Merge returns the smallest span covering both s and o (same file assumed).
+// Merge returns the smallest span covering both spans in one file. Generated
+// code may combine fragments from a library quote and a user declaration; a
+// span cannot cover two files, so keep the receiver in that case.
 func (s Span) Merge(o Span) Span {
+	if s.File == nil {
+		return o
+	}
+	if o.File == nil || s.File != o.File {
+		return s
+	}
 	r := s
 	if o.Start < r.Start {
 		r.Start = o.Start

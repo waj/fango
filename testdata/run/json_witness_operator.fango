@@ -1,0 +1,12 @@
+import Json
+import Result exposing (Result(..))
+
+(@) : Int -> Int -> Int
+(@) left right = left + right
+infixl 5 (@)
+
+main() =
+    print (1 @ 2)
+    case Json.parse @Int "4" of
+        Ok value -> print value
+        Err error -> print error.message

@@ -423,8 +423,11 @@ type ADTInfo struct {
 }
 
 type RecordFieldInfo struct {
-	Name string
-	Type Type
+	Name        string
+	Type        Type
+	JSONKey     string
+	JSONSkip    bool
+	JSONDefault any // resolved ast.Expr; kept opaque to avoid a types -> ast cycle
 }
 
 func (a *ADTInfo) IsRecord() bool { return a.RecordFields != nil }

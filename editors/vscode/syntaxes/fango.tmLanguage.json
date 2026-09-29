@@ -42,7 +42,7 @@
       "patterns": [
         {
           "name": "keyword.control.directive.fango",
-          "match": "(?<![\\w-])(?:no-prelude|resource|scoped)(?![\\w-])"
+          "match": "(?<![\\w-])(?:no-prelude|resource|scoped|json|key|default|skip)(?![\\w-])"
         }
       ]
     },
@@ -325,6 +325,10 @@
         { "include": "#booleans" },
         { "include": "#numbers" },
         { "include": "#list_expression" },
+        {
+          "name": "keyword.operator.type-witness.fango",
+          "match": "@(?=[A-Z]|\\()"
+        },
         { "include": "#qualified_module" },
         { "include": "#record_accessor" },
         {

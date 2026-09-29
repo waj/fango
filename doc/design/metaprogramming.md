@@ -10,7 +10,9 @@ Splices expand during inference so both backends see identical generated code.
 Quotes use the quoting module's resolved AST with original spans plus ordered
 hole expressions; internal/meta owns templates and opaque Code values. Scalar
 lifting builds AST fragments through the same expansion path. Generator spans
-remain available for diagnostics.
+remain available for diagnostics. Generated expressions can combine spans
+from a user declaration and a library quote. Span merging keeps one file's
+coordinates rather than constructing a range across files.
 
 Resolution canonicalizes module references before inference. Generated names
 therefore use the quoting module's scope and neither capture nor are captured
@@ -97,7 +99,8 @@ Checker checkpoints restore the completion log, capture summaries, and declarati
 environment and invalidate corresponding evaluator state. Failed splices/derivers
 leave no prompt declaration or derived type behind.
 
-Json.Encode exercises ordinary reflection/quotes without declaration generation.
-Only escaping, finite-float formatting, and leading-string validation cross its
-native boundary. Deterministic schema-order/tagged output is specified in
-[JSON](../reference/library-json.md); decoding remains application Fango code.
+Json.Encode and Json.Decode exercise reflection and quotes without declaration
+generation. Derivers emit specialized field and constructor code. The JSON
+scanner, pull protocol, and emitter live in Fango; the existing buffered
+Reader and Writer primitives provide byte I/O. The wire format and field
+pragmas are specified in [JSON](../reference/library-json.md).

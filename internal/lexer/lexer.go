@@ -407,6 +407,11 @@ func UnescapeChar(raw string) rune {
 // beyond a fixed table could be lexed at all.
 func (l *lexer) lexOperator(start int) {
 	c := l.f.Content[l.pos]
+	if c == '@' && (isUpper(l.peekAt(1)) || l.peekAt(1) == '(') {
+		l.pos++
+		l.emit(token.ATTYPE, start, l.pos)
+		return
+	}
 	// `$(` is one token: a splice always opens with it, and `$` is not an
 	// operator character, so nothing else can consume the dollar.
 	if c == '$' {

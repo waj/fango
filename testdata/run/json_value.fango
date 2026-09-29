@@ -1,0 +1,10 @@
+import Json
+import Result exposing (Result(..))
+
+main() =
+    case Json.parseValue "{\"x\": [1, true, null]}" of
+        Ok value ->
+            case Json.stringifyValue value of
+                Ok text -> print text
+                Err error -> print error.message
+        Err error -> print error.message

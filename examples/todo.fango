@@ -6,76 +6,31 @@
 --
 -- State is compact JSON in todo.json in the current working directory.
 
-import Json exposing (Encode(..))
+import Json exposing (Decode(..), Encode(..))
+import Result exposing (Result(..))
 import String
 
-type Todo = { text : String, done : Bool } deriving (Encode)
-
-type TodoToken = { todo : Todo, rest : String }
-
-type TodosToken = { todos : List Todo, rest : String }
+type Todo = { text : String, done : Bool } deriving (Encode, Decode)
 
 storagePath : String
 storagePath = "todo.json"
-
-dropPrefix : String -> String -> Maybe String
-dropPrefix prefix text =
-    if String.startsWith prefix text then
-        Just (String.slice (String.length prefix) (String.length text) text)
-    else
-        Nothing
-
-parseTodo : String -> Maybe TodoToken
-parseTodo input =
-    case dropPrefix "{\"text\":" input of
-        Nothing -> Nothing
-        Just afterKey ->
-            case Json.parseString afterKey of
-                Nothing -> Nothing
-                Just (Json.StringToken { value = text, rest = afterText }) ->
-                    case dropPrefix ",\"done\":true}" afterText of
-                        Just rest -> Just (TodoToken { todo = Todo { text = text, done = True }, rest = rest })
-                        Nothing ->
-                            case dropPrefix ",\"done\":false}" afterText of
-                                Just rest -> Just (TodoToken { todo = Todo { text = text, done = False }, rest = rest })
-                                Nothing -> Nothing
-
-parseTodos : String -> Maybe TodosToken
-parseTodos input =
-    case dropPrefix "]" input of
-        Just rest -> Just (TodosToken { todos = [], rest = rest })
-        Nothing ->
-            case parseTodo input of
-                Nothing -> Nothing
-                Just (TodoToken { todo = todo, rest = afterTodo }) ->
-                    case dropPrefix "]" afterTodo of
-                        Just rest -> Just (TodosToken { todos = [todo], rest = rest })
-                        Nothing ->
-                            case dropPrefix "," afterTodo of
-                                Nothing -> Nothing
-                                Just afterComma ->
-                                    case parseTodos afterComma of
-                                        Nothing -> Nothing
-                                        Just (TodosToken { todos = restTodos, rest = rest }) ->
-                                            Just (TodosToken { todos = [todo | restTodos], rest = rest })
-
-decodeTodos : String -> Maybe (List Todo)
-decodeTodos input =
-    case dropPrefix "[" input of
-        Nothing -> Nothing
-        Just body ->
-            case parseTodos body of
-                Just (TodosToken { todos = todos, rest = "" }) -> Just todos
-                _ -> Nothing
 
 load : () ->{IO} Maybe (List Todo)
 load() =
     case IO.readFile storagePath of
         Nothing -> Just []
-        Just text -> decodeTodos text
+        Just text ->
+            parsed : Result Json.Error (List Todo)
+            parsed = Json.parse @(List Todo) text
+            case parsed of
+                Ok todos -> Just todos
+                Err _ -> Nothing
 
 save : List Todo ->{IO} ()
-save todos = IO.writeFile storagePath (encode todos)
+save todos =
+    case Json.stringify todos of
+        Ok text -> IO.writeFile storagePath text
+        Err _ -> IO.exit 1
 
 append : List Todo -> Todo -> List Todo
 append todos todo =

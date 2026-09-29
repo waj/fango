@@ -137,6 +137,39 @@ func installMeta(t map[string]Spec) {
 		}
 		return r.Derive(types.SubstRigid(c.Fields[n], adt.ParamSubst(argsOf(r))))
 	})
+	fieldInfo := func(a, i, j any) *types.RecordFieldInfo {
+		r := repr(a)
+		adt := r.ADT()
+		n := int(j.(int64))
+		if adt == nil || !adt.IsRecord() || int(i.(int64)) != 0 || n < 0 || n >= len(adt.RecordFields) {
+			return nil
+		}
+		return &adt.RecordFields[n]
+	}
+	t["Meta.fieldJSONKey"] = pure3(func(a, i, j any) any {
+		if f := fieldInfo(a, i, j); f != nil {
+			return f.JSONKey
+		}
+		return ""
+	})
+	t["Meta.fieldJSONSkip"] = pure3(func(a, i, j any) any {
+		if f := fieldInfo(a, i, j); f != nil {
+			return f.JSONSkip
+		}
+		return false
+	})
+	t["Meta.fieldHasJSONDefault"] = pure3(func(a, i, j any) any {
+		if f := fieldInfo(a, i, j); f != nil {
+			return f.JSONDefault != nil
+		}
+		return false
+	})
+	t["Meta.fieldJSONDefault"] = pure3(func(a, i, j any) any {
+		if f := fieldInfo(a, i, j); f != nil && f.JSONDefault != nil {
+			return &meta.Code{Template: -1, Direct: f.JSONDefault.(ast.Expr)}
+		}
+		return &meta.Code{Template: -1, Direct: &ast.UnitLit{}}
+	})
 
 	// --- code construction --------------------------------------------
 
@@ -157,6 +190,15 @@ func installMeta(t map[string]Spec) {
 	t["Meta.varCode"] = pure1(func(a any) any {
 		return &meta.Code{Template: -1, Direct: &ast.Var{Name: a.(string)}}
 	})
+	t["Meta.lambdaCode"] = Spec{Arity: 2, Eval: func(rt *Runtime, args []any) (any, error) {
+		body, err := expand(rt, args[1])
+		if err != nil {
+			return nil, err
+		}
+		return &meta.Code{Template: -1, Direct: &ast.Lambda{
+			Params: []ast.Pattern{&ast.PVar{Name: args[0].(string)}}, Body: body,
+		}}, nil
+	}}
 	t["Meta.matchStart"] = expand1(func(scrutinee ast.Expr) (any, error) {
 		return &meta.Code{Template: -1, Direct: &ast.Case{Scrutinee: scrutinee}}, nil
 	})

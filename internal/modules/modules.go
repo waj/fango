@@ -1638,6 +1638,9 @@ func (r *resolver) resolveDecls(decls []ast.Decl) []ast.Decl {
 			}
 			for i := range d.RecordFields {
 				r.typ(d.RecordFields[i].Type)
+				if d.RecordFields[i].JSONDefault != nil {
+					r.expr(d.RecordFields[i].JSONDefault, r.vals, map[string]bool{})
+				}
 			}
 			out = append(out, d)
 		case *ast.EffectDecl:
@@ -1843,6 +1846,9 @@ func (r *resolver) expr(e ast.Expr, vals map[string]string, locals map[string]bo
 	case *ast.Ctor:
 		if !e.Sugared {
 			e.Name = r.qualified(e.Name, r.ctors, "ctor", e.Sp)
+		}
+		if e.Witness != nil {
+			r.typ(e.Witness)
 		}
 	case *ast.RecordLit:
 		// An inferred literal has no name to resolve; its field labels carry the

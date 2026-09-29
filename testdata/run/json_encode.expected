@@ -1,2 +1,2 @@
-{"name":"A \"friend\"","active":true,"favourite":{"$tag":"RGB","$fields":[3,4,5]}}
-[{"$tag":"Red","$fields":[]},{"$tag":"RGB","$fields":[1,2,3]}]
+{"name":"A \"friend\"","active":true,"favourite":{"RGB":[3,4,5]}}
+["Red",{"RGB":[1,2,3]}]

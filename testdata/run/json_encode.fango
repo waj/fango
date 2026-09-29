@@ -1,10 +1,14 @@
 import Json exposing (Encode(..))
+import Result exposing (Result(..))
 
 type Colour = Red | RGB Int Int Int deriving (Encode)
 
 type Person = { name : String, active : Bool, favourite : Maybe Colour } deriving (Encode)
 
-main =
-    encode (Person { name = "A \"friend\"", active = True, favourite = Just (RGB 3 4 5) })
-        ++ "\n"
-        ++ encode [Red, RGB 1 2 3]
+main() =
+    case Json.stringify (Person { name = "A \"friend\"", active = True, favourite = Just (RGB 3 4 5) }) of
+        Ok text -> print text
+        Err error -> print error.message
+    case Json.stringify [Red, RGB 1 2 3] of
+        Ok text -> print text
+        Err error -> print error.message

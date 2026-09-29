@@ -45,7 +45,8 @@ type Var struct {
 type Ctor struct {
 	Name    string
 	Sp      source.Span
-	Sugared bool // parser-generated bundled ctor (list or tuple); bypasses import lookup
+	Sugared bool     // parser-generated bundled ctor (list or tuple); bypasses import lookup
+	Witness TypeExpr // non-nil for `@T`, which constructs the bundled Type T witness
 }
 
 // RecordLit is keyed construction of a nominal record, `Counts { lines = 1 }`.
@@ -613,9 +614,14 @@ type TypeDecl struct {
 }
 
 type RecordFieldDef struct {
-	Name     string
-	NameSpan source.Span
-	Type     TypeExpr
+	Name        string
+	NameSpan    source.Span
+	Type        TypeExpr
+	JSONKey     string
+	JSONKeySet  bool
+	JSONSkip    bool
+	JSONDefault Expr
+	JSONSpan    source.Span
 }
 
 // CtorDef is one constructor alternative. Args are type atoms: named types

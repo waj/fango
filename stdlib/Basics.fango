@@ -1,5 +1,8 @@
 {-# no-prelude #-}
-module Basics exposing (Eq(..), Num(..), Ord(..), Show(..), ignore, modBy, quotientBy, remainderBy, (++), (/), (/=), (<|), (|>))
+module Basics exposing (Eq(..), Num(..), Ord(..), Show(..), Type, ignore, modBy, quotientBy, remainderBy, (++), (/), (/=), (<|), (|>))
+
+-- A runtime witness of a type argument. `@T` is its only public constructor.
+type Type a = Type
 
 class Num a
     fromInt : Int -> a

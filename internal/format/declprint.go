@@ -145,6 +145,36 @@ func (p *printer) typeDeclLines(d *ast.TypeDecl, sp source.Span) {
 	separateDeriving := len(d.Deriving) > 0 && !broken && brokeBetween(sp.File, bodyEnd, derivingStart)
 
 	if d.RecordFields != nil {
+		attributed := false
+		for _, f := range d.RecordFields {
+			attributed = attributed || f.JSONKeySet || f.JSONSkip || f.JSONDefault != nil
+		}
+		if attributed {
+			p.line(0, head+" =")
+			for i, f := range d.RecordFields {
+				lead := ", "
+				if i == 0 {
+					lead = "{ "
+				}
+				attrs := ""
+				if f.JSONKeySet {
+					attrs += "{-# json key " + strconv.Quote(f.JSONKey) + " #-} "
+				}
+				if f.JSONSkip {
+					attrs += "{-# json skip #-} "
+				}
+				if f.JSONDefault != nil {
+					attrs += "{-# json default " + strings.TrimSpace(raw(f.JSONDefault.Span())) + " #-} "
+				}
+				p.line(Indent, lead+attrs+f.Name+" : "+typeText(f.Type))
+			}
+			closing := "}"
+			if tail != "" {
+				closing += " " + strings.TrimSpace(tail)
+			}
+			p.line(Indent, closing)
+			return
+		}
 		fields := make([]string, len(d.RecordFields))
 		for i, f := range d.RecordFields {
 			fields[i] = f.Name + " : " + typeText(f.Type)

@@ -751,7 +751,7 @@ func TestProjectMaterializesBundledNativeSidecars(t *testing.T) {
 	jsonPath := filepath.Join("..", "..", "testdata", "run", "json_encode.fango")
 	files := emittedProject(t, jsonPath)
 	again := emittedProject(t, jsonPath)
-	for _, path := range []string{"native/IO/native.go", "native/Json/native.go", "native/String/native.go"} {
+	for _, path := range []string{"native/IO/native.go", "native/String/native.go"} {
 		src := generatedFile(t, files, path)
 		if !bytes.HasPrefix(src, []byte("package native\n")) {
 			t.Errorf("%s was not materialized as package native:\n%s", path, src)

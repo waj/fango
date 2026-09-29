@@ -1,0 +1,48 @@
+import Bytes
+import Json exposing (Decode(..), Encode(..))
+import Maybe exposing (Maybe(..))
+import Reader
+import Result exposing (Result(..))
+import Runtime.Local
+import String
+
+type Person = { name : String, age : Int } deriving (Encode, Decode)
+
+report : Result Json.Error a -> String
+report result =
+    case result of
+        Ok _ -> "ok"
+        Err error -> error.message ++ " @" ++ error.path ++ " " ++ show error.line ++ ":" ++ show error.column
+
+main() =
+    print (report (Json.parse @Person "{\"name\":\"Ada\",\"age\":4,\"age\":5}"))
+    print (report (Json.parse @Person "{\"name\":\"Ada\"}"))
+    print (report (Json.parse @Person "{\"name\":9,\"age\":4}"))
+    print (report (Json.parse @Person "{\"name\":\"Ada\",\"age\":4,\"extra\":[01]}"))
+    print (report (Json.parse @(List Int) "[1, true]"))
+    print (report (Json.parse @Char "\"ø\""))
+    print (report (Json.parse @Char "\"ab\""))
+    print (report (Json.parseValue "[01]"))
+    print (report (Json.parseValue "[\"\\uD800\"]"))
+    print (report (Json.parseValue "[true,]"))
+    print (report (Json.parseValue "1 2"))
+    print (report (Json.parseBytesValue (Bytes.fromList [34, 255, 34])))
+    case Json.parseValue (String.padLeft 257 '[' "" ++ "0" ++ String.padLeft 257 ']' "") of
+        Ok _ -> print "ok"
+        Err error -> print (error.message ++ " " ++ show error.line ++ ":" ++ show error.column)
+    case Json.number "1.20e+3" of
+        Ok value -> print (Json.numberText value)
+        Err error -> print error.message
+    result = Runtime.Local.run (Bytes.fromString "[1,2,3]") { cell ->
+        source = Bytes.Source
+            { pull = {
+                remaining = cell.read()
+                if Bytes.length remaining == 0 then Nothing
+                else
+                    cell.write (Bytes.slice 1 (Bytes.length remaining) remaining)
+                    Just (Bytes.slice 0 1 remaining)
+              }
+            }
+        Reader.over source { reader -> Json.read @(List Int) reader }
+    }
+    print (report result)

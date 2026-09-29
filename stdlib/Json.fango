@@ -1,130 +1,927 @@
 {-# no-prelude #-}
-module Json exposing (Encode(..), StringToken(..), parseString)
+module Json exposing
+    ( Decode(..), Emit(..), Encode(..), Error(..), Number, Pull(..), Token(..)
+    , Value(..)
+    , beginArray, beginObject, next, nextElement, nextKey, number, numberText
+    , parse, parseBytes, parseBytesValue, parseValue, peek, read, readValue
+    , skipValue, stringify, stringifyValue, syntaxError, withPath, withPull
+    , withWriter, write
+    )
 
 import Basics exposing (..)
+import Bytes exposing (Bytes)
+import Fail exposing (Fail, fail)
 import List exposing (List)
 import Maybe exposing (Maybe(..))
-import Meta exposing (Bound(..), BoundField(..), Code, Items(..), Lift(..), Shape(..), TypeInfo(..))
+import Meta exposing (Bound(..), BoundField(..), Code, Ctor(..), Default(..), Field(..), Items(..), Lift(..), Shape(..), TypeInfo(..))
+import Reader exposing (Reader)
+import Result exposing (Result(..))
+import Runtime.Local
 import String
+import Writer exposing (Writer)
 
-{- Compact, deterministic JSON encoding.
+type Error = { message : String, offset : Int, line : Int, column : Int, path : String }
 
-Records encode as objects in field declaration order. Ordinary union types
-encode uniformly as {"$tag": "Ctor", "$fields": [...]}; the dollar-prefixed
-keys cannot collide with Fango record fields. List and Maybe have the familiar
-JSON array/null representations through their handwritten instances. -}
+type Token
+    = BeginObject
+    | EndObject
+    | BeginArray
+    | EndArray
+    | Colon
+    | Comma
+    | StringTokenValue String
+    | NumberToken String
+    | BooleanToken Bool
+    | NullToken
+    | EndInput
+
+type Number = Number String
+
+type Value
+    = Null
+    | Boolean Bool
+    | Numeric Number
+    | Text String
+    | Array (List Value)
+    | Object (List (String, Value))
+
+effect Pull
+    next : () -> Token
+    peek : () -> Token
+    at : () -> Error
+    enter : String -> ()
+    leave : () -> ()
+
+effect Emit
+    emit : String -> ()
+
+class Decode a
+    decodeValue : () ->{Pull, Fail Error} a
 
 class Encode a
-    encode : a -> String
+    encodeValue : a ->{Emit, Fail Error} ()
 
-jsonString : String -> String
-jsonString = native
+type Cursor e = { reader : Reader e, offset : Int, line : Int, column : Int, path : String }
 
-jsonFloat : Float -> String
-jsonFloat = native
+errorAt : Cursor e -> String -> Error
+errorAt cursor message =
+    Error { message = message, offset = cursor.offset, line = cursor.line, column = cursor.column, path = cursor.path }
 
-instance Encode Int
-    encode value = show value
+peekByte : Cursor e ->{e} Maybe Int
+peekByte cursor =
+    if Reader.ensure cursor.reader 1 then
+        Bytes.byteAt 0 cursor.reader.buffered()
+    else
+        Nothing
 
-instance Encode Float
-    encode value = jsonFloat value
+takeByte : Cursor e ->{e} (Maybe Int, Cursor e)
+takeByte cursor =
+    case peekByte cursor of
+        Nothing -> (Nothing, cursor)
+        Just byte ->
+            ignore (cursor.reader.skip 1)
+            if byte == 10 then
+                (Just byte, { cursor | offset = cursor.offset + 1, line = cursor.line + 1, column = 1 })
+            else
+                (Just byte, { cursor | offset = cursor.offset + 1, column = cursor.column + 1 })
+
+white : Int -> Bool
+white byte = byte == 32 || byte == 9 || byte == 10 || byte == 13
+
+skipWhite : Cursor e ->{e} Cursor e
+skipWhite cursor =
+    case peekByte cursor of
+        Just byte ->
+            if white byte then
+                (_, after) = takeByte cursor
+                skipWhite after
+            else
+                cursor
+        Nothing -> cursor
+
+bad : Cursor e -> String ->{Fail Error} a
+bad cursor message = fail (errorAt cursor message)
+
+expectByte : Cursor {Fail Error | e} -> Int ->{Fail Error | e} Cursor {Fail Error | e}
+expectByte cursor wanted =
+    (got, after) = takeByte cursor
+    if got == Just wanted then after else bad cursor "Invalid JSON literal"
+
+literal : Cursor {Fail Error | e} -> String ->{Fail Error | e} Cursor {Fail Error | e}
+literal cursor text =
+    case String.uncons text of
+        Nothing -> cursor
+        Just part ->
+            byte = Bytes.byteAt 0 (Bytes.fromString (String.fromChar part.first))
+            case byte of
+                Nothing -> bad cursor "Invalid JSON literal"
+                Just code -> literal (expectByte cursor code) part.rest
+
+hex : Int -> Int
+hex byte =
+    if byte >= 48 && byte <= 57 then byte - 48
+    else if byte >= 65 && byte <= 70 then byte - 55
+    else if byte >= 97 && byte <= 102 then byte - 87
+    else -1
+
+readHex : Cursor {Fail Error | e} -> Int -> Int ->{Fail Error | e} (Int, Cursor {Fail Error | e})
+readHex cursor remaining acc =
+    if remaining == 0 then (acc, cursor)
+    else
+        (got, after) = takeByte cursor
+        case got of
+            Nothing -> bad cursor "Incomplete Unicode escape"
+            Just byte ->
+                nibble = hex byte
+                if nibble < 0 then bad cursor "Invalid Unicode escape"
+                else readHex after (remaining - 1) (acc * 16 + nibble)
+
+utf8 : Int -> List Int
+utf8 code =
+    if code < 128 then [code]
+    else if code < 2048 then [192 + quotientBy 64 code, 128 + remainderBy 64 code]
+    else if code < 65536 then
+        [224 + quotientBy 4096 code, 128 + remainderBy 64 (quotientBy 64 code), 128 + remainderBy 64 code]
+    else
+        [ 240 + quotientBy 262144 code, 128 + remainderBy 64 (quotientBy 4096 code)
+        , 128 + remainderBy 64 (quotientBy 64 code), 128 + remainderBy 64 code
+        ]
+
+appendReverse : List Int -> List Int -> List Int
+appendReverse bytes reverse =
+    case bytes of
+        [] -> reverse
+        [byte | rest] -> appendReverse rest [byte | reverse]
+
+escaped : Cursor {Fail Error | e} ->{Fail Error | e} (List Int, Cursor {Fail Error | e})
+escaped cursor =
+    (got, after) = takeByte cursor
+    case got of
+        Just 34 -> ([34], after)
+        Just 92 -> ([92], after)
+        Just 47 -> ([47], after)
+        Just 98 -> ([8], after)
+        Just 102 -> ([12], after)
+        Just 110 -> ([10], after)
+        Just 114 -> ([13], after)
+        Just 116 -> ([9], after)
+        Just 117 ->
+            (code, afterHex) = readHex after 4 0
+            if code >= 56320 && code <= 57343 then bad cursor "Unexpected low surrogate"
+            else if code >= 55296 && code <= 56319 then
+                afterSlash = expectByte afterHex 92
+                afterU = expectByte afterSlash 117
+                (low, rest) = readHex afterU 4 0
+                if low < 56320 || low > 57343 then bad afterU "Invalid surrogate pair"
+                else (utf8 (65536 + (code - 55296) * 1024 + low - 56320), rest)
+            else (utf8 code, afterHex)
+        _ -> bad cursor "Invalid JSON escape"
+
+scanString : Cursor {Fail Error | e} -> List Int ->{Fail Error | e} (String, Cursor {Fail Error | e})
+scanString cursor reverse =
+    (got, after) = takeByte cursor
+    case got of
+        Nothing -> bad cursor "Unterminated JSON string"
+        Just 34 ->
+            case Bytes.toString (Bytes.fromList (List.reverse reverse)) of
+                Nothing -> bad cursor "Invalid UTF-8 in JSON string"
+                Just text -> (text, after)
+        Just 92 ->
+            (codes, rest) = escaped after
+            scanString rest (appendReverse codes reverse)
+        Just byte ->
+            if byte < 32 then bad cursor "Unescaped control character in JSON string"
+            else scanString after [byte | reverse]
+
+digit : Int -> Bool
+digit byte = byte >= 48 && byte <= 57
+
+digits : Cursor e -> List Int ->{e} (List Int, Cursor e)
+digits cursor reverse =
+    case peekByte cursor of
+        Just byte ->
+            if digit byte then
+                (_, after) = takeByte cursor
+                digits after [byte | reverse]
+            else (reverse, cursor)
+        Nothing -> (reverse, cursor)
+
+requiredDigits : Cursor {Fail Error | e} -> List Int ->{Fail Error | e} (List Int, Cursor {Fail Error | e})
+requiredDigits cursor reverse =
+    case peekByte cursor of
+        Just byte -> if digit byte then digits cursor reverse else bad cursor "Expected JSON digit"
+        Nothing -> bad cursor "Expected JSON digit"
+
+scanNumber : Cursor {Fail Error | e} -> Int ->{Fail Error | e} (String, Cursor {Fail Error | e})
+scanNumber cursor first =
+    if first == 45 then
+        (got, after) = takeByte cursor
+        case got of
+            Just byte -> if digit byte then numberTail after byte [byte, 45] else bad cursor "Expected digit after minus"
+            Nothing -> bad cursor "Expected digit after minus"
+    else numberTail cursor first [first]
+
+numberTail : Cursor {Fail Error | e} -> Int -> List Int ->{Fail Error | e} (String, Cursor {Fail Error | e})
+numberTail cursor first reverse =
+    (whole, afterWhole) =
+        if first == 48 then (reverse, cursor) else digits cursor reverse
+    case peekByte afterWhole of
+        Just byte -> if digit byte then bad afterWhole "Leading zero in JSON number" else ()
+        Nothing -> ()
+    (fraction, afterFraction) =
+        case peekByte afterWhole of
+            Just 46 ->
+                (_, afterDot) = takeByte afterWhole
+                requiredDigits afterDot [46 | whole]
+            _ -> (whole, afterWhole)
+    (complete, afterExponent) =
+        case peekByte afterFraction of
+            Just 101 -> exponent afterFraction fraction
+            Just 69 -> exponent afterFraction fraction
+            _ -> (fraction, afterFraction)
+    case Bytes.toString (Bytes.fromList (List.reverse complete)) of
+        Nothing -> bad cursor "Invalid JSON number"
+        Just text -> (text, afterExponent)
+
+exponent : Cursor {Fail Error | e} -> List Int ->{Fail Error | e} (List Int, Cursor {Fail Error | e})
+exponent cursor reverse =
+    (marker, afterMarker) = takeByte cursor
+    case marker of
+        Nothing -> bad cursor "Invalid JSON exponent"
+        Just mark ->
+            (prefix, afterSign) =
+                case peekByte afterMarker of
+                    Just 43 ->
+                        (_, rest) = takeByte afterMarker
+                        ([43, mark | reverse], rest)
+                    Just 45 ->
+                        (_, rest) = takeByte afterMarker
+                        ([45, mark | reverse], rest)
+                    _ -> ([mark | reverse], afterMarker)
+            requiredDigits afterSign prefix
+
+lex : Cursor {Fail Error | e} ->{Fail Error | e} (Token, Cursor {Fail Error | e})
+lex before =
+    cursor = skipWhite before
+    (got, after) = takeByte cursor
+    case got of
+        Nothing -> (EndInput, cursor)
+        Just 123 -> (BeginObject, after)
+        Just 125 -> (EndObject, after)
+        Just 91 -> (BeginArray, after)
+        Just 93 -> (EndArray, after)
+        Just 58 -> (Colon, after)
+        Just 44 -> (Comma, after)
+        Just 34 ->
+            (value, rest) = scanString after []
+            (StringTokenValue value, rest)
+        Just 116 -> (BooleanToken True, literal after "rue")
+        Just 102 -> (BooleanToken False, literal after "alse")
+        Just 110 -> (NullToken, literal after "ull")
+        Just byte ->
+            if byte == 45 || digit byte then
+                (value, rest) = scanNumber after byte
+                (NumberToken value, rest)
+            else bad cursor "Unexpected byte in JSON"
+
+type PullState e = { cursor : Cursor e, pending : Maybe Token, depth : Int, paths : List String }
+
+tokenDepth : Token -> Int -> Cursor e ->{Fail Error} Int
+tokenDepth token depth cursor =
+    case token of
+        BeginArray -> if depth >= 256 then bad cursor "JSON nesting exceeds 256 levels" else depth + 1
+        BeginObject -> if depth >= 256 then bad cursor "JSON nesting exceeds 256 levels" else depth + 1
+        EndArray -> depth - 1
+        EndObject -> depth - 1
+        _ -> depth
+
+withPull : Reader e -> (() ->{Pull, Fail Error} a) ->{e} Result Error a
+withPull reader action =
+    Fail.attempt {
+        handle action() with state = PullState { cursor = Cursor { reader = reader, offset = 0, line = 1, column = 1, path = "" }, pending = Nothing, depth = 0, paths = [] } of
+            peek () ->
+                case state.pending of
+                    Just token -> resume token with state
+                    Nothing ->
+                        (token, cursor) = lex state.cursor
+                        resume token with { state | cursor = cursor, pending = Just token }
+            next () ->
+                case state.pending of
+                    Just token ->
+                        depth = tokenDepth token state.depth state.cursor
+                        resume token with { state | pending = Nothing, depth = depth }
+                    Nothing ->
+                        (token, cursor) = lex state.cursor
+                        depth = tokenDepth token state.depth cursor
+                        resume token with { state | cursor = cursor, pending = Nothing, depth = depth }
+            at () -> resume (errorAt state.cursor "") with state
+            enter segment ->
+                before = state.cursor.path
+                resume () with { state | cursor = { state.cursor | path = before ++ "/" ++ segment }, paths = [before | state.paths] }
+            leave () ->
+                case state.paths of
+                    [] -> resume () with state
+                    [before | rest] -> resume () with { state | cursor = { state.cursor | path = before }, paths = rest }
+            return value -> value
+    }
+
+syntaxError : String ->{Pull, Fail Error} a
+syntaxError message = fail { at() | message = message }
+
+withPath : String -> (() ->{Pull, Fail Error} a) ->{Pull, Fail Error} a
+withPath segment action =
+    enter segment
+    outcome = Fail.attempt action
+    leave()
+    case outcome of
+        Ok value -> value
+        Err problem -> fail problem
+
+beginArray : () ->{Pull, Fail Error} ()
+beginArray() =
+    case next() of
+        BeginArray -> ()
+        _ -> syntaxError "Expected JSON array"
+
+nextElement : Bool ->{Pull, Fail Error} Bool
+nextElement first =
+    case peek() of
+        EndArray ->
+            ignore next()
+            False
+        _ ->
+            if first then True
+            else
+                case next() of
+                    Comma ->
+                        case peek() of
+                            EndArray -> syntaxError "Trailing array comma"
+                            _ -> True
+                    _ -> syntaxError "Expected comma or array end"
+
+beginObject : () ->{Pull, Fail Error} ()
+beginObject() =
+    case next() of
+        BeginObject -> ()
+        _ -> syntaxError "Expected JSON object"
+
+nextKey : Bool ->{Pull, Fail Error} Maybe String
+nextKey first =
+    case peek() of
+        EndObject ->
+            ignore next()
+            Nothing
+        _ ->
+            if first then readKey()
+            else
+                case next() of
+                    Comma ->
+                        case peek() of
+                            EndObject -> syntaxError "Trailing object comma"
+                            _ -> readKey()
+                    _ -> syntaxError "Expected comma or object end"
+
+readKey : () ->{Pull, Fail Error} Maybe String
+readKey() =
+    key = case next() of
+        StringTokenValue text -> text
+        _ -> syntaxError "Expected object key"
+    case next() of
+        Colon -> Just key
+        _ -> syntaxError "Expected colon"
+
+readFields : (String ->{Pull, Fail Error | e} ()) ->{Pull, Fail Error | e} ()
+readFields onKey =
+    beginObject()
+    readFieldsMore onKey True
+
+readFieldsMore : (String ->{Pull, Fail Error | e} ()) -> Bool ->{Pull, Fail Error | e} ()
+readFieldsMore onKey first =
+    case nextKey first of
+        Nothing -> ()
+        Just key ->
+            onKey key
+            readFieldsMore onKey False
+
+expectComma : () ->{Pull, Fail Error} ()
+expectComma() =
+    case next() of
+        Comma -> ()
+        _ -> syntaxError "Expected union field separator"
+
+finishPayload : a ->{Pull, Fail Error} a
+finishPayload value =
+    case next() of
+        EndArray -> ()
+        _ -> syntaxError "Expected end of union field array"
+    case next() of
+        EndObject -> value
+        _ -> syntaxError "Expected end of tagged union object"
+
+decodeUnion : (String ->{Pull, Fail Error} a) -> (String ->{Pull, Fail Error} a) ->{Pull, Fail Error} a
+decodeUnion nullary payload =
+    case next() of
+        StringTokenValue tag -> nullary tag
+        BeginObject ->
+            tag = case next() of
+                StringTokenValue text -> text
+                _ -> syntaxError "Expected union tag"
+            case next() of
+                Colon -> ()
+                _ -> syntaxError "Expected colon after union tag"
+            beginArray()
+            payload tag
+        _ -> syntaxError "Expected tagged JSON union"
+
+readValue : () ->{Pull, Fail Error} Value
+readValue() =
+    case next() of
+        NullToken -> Null
+        BooleanToken value -> Boolean value
+        NumberToken text -> Numeric (Number text)
+        StringTokenValue text -> Text text
+        BeginArray -> Array (readArray 0 [])
+        BeginObject -> Object (readObject [])
+        _ -> syntaxError "Expected JSON value"
+
+readArray : Int -> List Value ->{Pull, Fail Error} List Value
+readArray index reverse =
+    case peek() of
+        EndArray ->
+            ignore next()
+            List.reverse reverse
+        _ ->
+            value = withPath (show index) { readValue() }
+            case next() of
+                Comma -> readArrayAfterComma (index + 1) [value | reverse]
+                EndArray -> List.reverse [value | reverse]
+                _ -> syntaxError "Expected comma or array end"
+
+readArrayAfterComma : Int -> List Value ->{Pull, Fail Error} List Value
+readArrayAfterComma index reverse =
+    case peek() of
+        EndArray -> syntaxError "Trailing array comma"
+        _ -> readArray index reverse
+
+readObject : List (String, Value) ->{Pull, Fail Error} List (String, Value)
+readObject reverse =
+    case peek() of
+        EndObject ->
+            ignore next()
+            List.reverse reverse
+        _ ->
+            key = case next() of
+                StringTokenValue text -> text
+                _ -> syntaxError "Expected object key"
+            case next() of
+                Colon -> ()
+                _ -> syntaxError "Expected colon"
+            value = withPath key { readValue() }
+            case next() of
+                Comma -> readObjectAfterComma [(key, value) | reverse]
+                EndObject -> List.reverse [(key, value) | reverse]
+                _ -> syntaxError "Expected comma or object end"
+
+readObjectAfterComma : List (String, Value) ->{Pull, Fail Error} List (String, Value)
+readObjectAfterComma reverse =
+    case peek() of
+        EndObject -> syntaxError "Trailing object comma"
+        _ -> readObject reverse
+
+skipValue : () ->{Pull, Fail Error} ()
+skipValue() =
+    case next() of
+        BeginArray -> skipArray True
+        BeginObject -> skipObject True
+        StringTokenValue _ -> ()
+        NumberToken _ -> ()
+        BooleanToken _ -> ()
+        NullToken -> ()
+        _ -> syntaxError "Expected JSON value"
+
+skipArray : Bool ->{Pull, Fail Error} ()
+skipArray first =
+    if nextElement first then
+        skipValue()
+        skipArray False
+    else ()
+
+skipObject : Bool ->{Pull, Fail Error} ()
+skipObject first =
+    case nextKey first of
+        Nothing -> ()
+        Just _ ->
+            skipValue()
+            skipObject False
+
+parseBytes : Decode a => Type a -> Bytes -> Result Error a
+parseBytes _ input =
+    Reader.withBytes input { reader ->
+        withPull reader {
+            value = decodeValue()
+            case next() of
+                EndInput -> value
+                _ -> syntaxError "Trailing JSON input"
+        }
+    }
+
+parse : Decode a => Type a -> String -> Result Error a
+parse witness text = parseBytes witness (Bytes.fromString text)
+
+read : Decode a => Type a -> Reader e ->{e} Result Error a
+read _ reader =
+    withPull reader {
+        value = decodeValue()
+        case next() of
+            EndInput -> value
+            _ -> syntaxError "Trailing JSON input"
+    }
+
+instance Decode String
+    decodeValue() =
+        case next() of
+            StringTokenValue text -> text
+            _ -> syntaxError "Expected JSON string"
+
+instance Decode Char
+    decodeValue() =
+        case next() of
+            StringTokenValue text ->
+                case String.uncons text of
+                    Just part -> if part.rest == "" then part.first else syntaxError "Expected one JSON character"
+                    Nothing -> syntaxError "Expected one JSON character"
+            _ -> syntaxError "Expected JSON string"
+
+instance Decode Int
+    decodeValue() =
+        case next() of
+            NumberToken text ->
+                case String.toInt text of
+                    Just value -> value
+                    Nothing -> syntaxError "Expected 64-bit JSON integer"
+            _ -> syntaxError "Expected JSON number"
+
+instance Decode Float
+    decodeValue() =
+        case next() of
+            NumberToken text ->
+                case String.toFloat text of
+                    Just value -> value
+                    Nothing -> syntaxError "JSON number is outside Float range"
+            _ -> syntaxError "Expected JSON number"
+
+instance Decode Bool
+    decodeValue() =
+        case next() of
+            BooleanToken value -> value
+            _ -> syntaxError "Expected JSON boolean"
+
+instance Decode ()
+    decodeValue() =
+        case next() of
+            NullToken -> ()
+            _ -> syntaxError "Expected JSON null"
+
+decodeList : Decode a => Int -> Bool -> List a ->{Pull, Fail Error} List a
+decodeList index first reverse =
+    if nextElement first then
+        value = withPath (show index) { decodeValue() }
+        decodeList (index + 1) False [value | reverse]
+    else List.reverse reverse
+
+instance Decode a => Decode (List a)
+    decodeValue() =
+        beginArray()
+        decodeList 0 True []
+
+instance Decode a => Decode (Maybe a)
+    decodeValue() =
+        case peek() of
+            NullToken ->
+                ignore next()
+                Nothing
+            _ -> Just decodeValue()
+
+instance Decode Value
+    decodeValue() = readValue()
+
+withWriter : Writer e -> (() ->{Emit, Fail Error} a) ->{e} Result Error a
+withWriter writer action =
+    Fail.attempt {
+        handle action() of
+            emit text ->
+                Writer.writeString writer text
+                resume ()
+            return value -> value
+    }
+
+write : Encode a => Writer e -> a ->{e} Result Error ()
+write writer value = withWriter writer { encodeValue value }
+
+stringify : Encode a => a -> Result Error String
+stringify value =
+    (outcome, bytes) = Writer.collecting { writer -> write writer value }
+    case outcome of
+        Err problem -> Err problem
+        Ok _ ->
+            case Bytes.toString bytes of
+                Just text -> Ok text
+                Nothing -> Err (Error { message = "Invalid UTF-8 output", offset = -1, line = 0, column = 0, path = "" })
+
+hexChar : Int -> String
+hexChar value = String.slice value (value + 1) "0123456789abcdef"
+
+escapeByte : Int -> String
+escapeByte byte =
+    if byte == 34 then "\\\""
+    else if byte == 92 then "\\\\"
+    else if byte == 8 then "\\b"
+    else if byte == 12 then "\\f"
+    else if byte == 10 then "\\n"
+    else if byte == 13 then "\\r"
+    else if byte == 9 then "\\t"
+    else "\\u00" ++ hexChar (quotientBy 16 byte) ++ hexChar (remainderBy 16 byte)
+
+emitRun : Bytes -> Int -> Int ->{Emit} ()
+emitRun bytes start end =
+    if start == end then ()
+    else
+        case Bytes.toString (Bytes.slice start end bytes) of
+            Just text -> emit text
+            Nothing -> ()
+
+emitStringBody : Bytes -> Int -> Int ->{Emit} ()
+emitStringBody bytes start index =
+    case Bytes.byteAt index bytes of
+        Nothing -> emitRun bytes start index
+        Just byte ->
+            if byte == 34 || byte == 92 || byte < 32 then
+                emitRun bytes start index
+                emit (escapeByte byte)
+                emitStringBody bytes (index + 1) (index + 1)
+            else emitStringBody bytes start (index + 1)
+
+emitString : String ->{Emit} ()
+emitString text =
+    emit "\""
+    emitStringBody (Bytes.fromString text) 0 0
+    emit "\""
 
 instance Encode String
-    encode value = jsonString value
+    encodeValue value = emitString value
 
 instance Encode Char
-    encode value = jsonString (String.fromChar value)
+    encodeValue value = emitString (String.fromChar value)
+
+instance Encode Int
+    encodeValue value = emit (show value)
+
+instance Encode Float
+    encodeValue value =
+        text = show value
+        if text == "NaN" || text == "Infinity" || text == "-Infinity" then
+            fail (Error { message = "Non-finite Float is not JSON", offset = -1, line = 0, column = 0, path = "" })
+        else emit text
 
 instance Encode Bool
-    encode value = if value then "true" else "false"
+    encodeValue value = emit (if value then "true" else "false")
 
 instance Encode ()
-    encode _ = "null"
+    encodeValue _ = emit "null"
 
-encodeListItems : Encode a => List a -> String
-encodeListItems values =
+emitList : Encode a => List a -> Bool ->{Emit, Fail Error} ()
+emitList values first =
     case values of
-        [] -> ""
-        [value] -> encode value
-        [value | rest] -> encode value ++ "," ++ encodeListItems rest
+        [] -> ()
+        [value | rest] ->
+            if first then () else emit ","
+            encodeValue value
+            emitList rest False
 
 instance Encode a => Encode (List a)
-    encode values = "[" ++ encodeListItems values ++ "]"
+    encodeValue values =
+        emit "["
+        emitList values True
+        emit "]"
 
 instance Encode a => Encode (Maybe a)
-    encode value =
+    encodeValue value =
         case value of
-            Nothing -> "null"
-            Just present -> encode present
+            Nothing -> emit "null"
+            Just present -> encodeValue present
 
-appendCode : Code -> Code -> Code
-appendCode lhs rhs = quote ($(lhs) ++ $(rhs))
+instance Encode Value
+    encodeValue value = emitValue value
 
-encodeCode : Code -> Code
-encodeCode value = quote (encode $(value))
+emitValue : Value ->{Emit, Fail Error} ()
+emitValue value =
+    case value of
+        Null -> emit "null"
+        Boolean item -> encodeValue item
+        Numeric (Number text) -> emit text
+        Text text -> emitString text
+        Array items ->
+            emit "["
+            emitValueList items True
+            emit "]"
+        Object entries ->
+            emit "{"
+            emitObject entries True
+            emit "}"
 
-recordField : Code -> BoundField -> Code
-recordField sofar field =
-    separator = if field.index == 0 then "" else ","
-    appendCode sofar
-        (appendCode
-            (lift (separator ++ jsonString field.name ++ ":"))
-            (encodeCode field.value)
+emitValueList : List Value -> Bool ->{Emit, Fail Error} ()
+emitValueList items first =
+    case items of
+        [] -> ()
+        [item | rest] ->
+            if first then () else emit ","
+            emitValue item
+            emitValueList rest False
+
+emitObject : List (String, Value) -> Bool ->{Emit, Fail Error} ()
+emitObject entries first =
+    case entries of
+        [] -> ()
+        [(key, value) | rest] ->
+            if first then () else emit ","
+            emitString key
+            emit ":"
+            emitValue value
+            emitObject rest False
+
+stringifyValue : Value -> Result Error String
+stringifyValue value = stringify value
+
+sequenceCode : Code -> Code -> Code
+sequenceCode left right = quote { $(left); $(right) }()
+
+emitCode : String -> Code
+emitCode text = quote (emit $(lift text))
+
+quotedCode : String -> Code
+quotedCode text = quote (emitString $(lift text))
+
+recordField : (Code, Bool) -> BoundField -> (Code, Bool)
+recordField (prefix, first) field =
+    if field.jsonSkip then (prefix, first)
+    else
+        separator = if first then "" else ","
+        ( sequenceCode prefix
+            (sequenceCode (emitCode separator)
+                (sequenceCode (quotedCode field.jsonKey)
+                    (sequenceCode (emitCode ":") (quote (encodeValue $(field.value))))
+                )
+            )
+        , False
         )
 
 recordBody : Bound -> Code
 recordBody bound =
-    appendCode
-        (Meta.foldItems recordField (lift "{") bound.fields)
-        (lift "}")
+    (fields, _) = Meta.foldItems recordField (emitCode "", True) bound.fields
+    sequenceCode (emitCode "{")
+        (sequenceCode fields (emitCode "}"))
 
 unionField : Code -> BoundField -> Code
-unionField sofar field =
+unionField prefix field =
     separator = if field.index == 0 then "" else ","
-    appendCode sofar (appendCode (lift separator) (encodeCode field.value))
+    sequenceCode prefix
+        (sequenceCode (emitCode separator) (quote (encodeValue $(field.value))))
 
 unionBody : Bound -> Code
 unionBody bound =
-    appendCode
-        (appendCode
-            (appendCode
-                (lift ("{\"$tag\":" ++ jsonString bound.ctor.name ++ ",\"$fields\":["))
-                (Meta.foldItems unionField (lift "") bound.fields)
-            )
-            (lift "]}")
-        )
-        (lift "")
+    case bound.fields of
+        NoItems -> quotedCode bound.ctor.name
+        _ ->
+            sequenceCode (emitCode "{")
+                (sequenceCode (quotedCode bound.ctor.name)
+                    (sequenceCode (emitCode ":[")
+                        (sequenceCode (Meta.foldItems unionField (emitCode "") bound.fields)
+                            (emitCode "]}")
+                        )
+                    )
+                )
 
-derivedBody : TypeInfo -> Bound -> Code
-derivedBody subject bound =
+derivedEncode : TypeInfo -> Bound -> Code
+derivedEncode subject bound =
     case subject.shape of
         Record _ -> recordBody bound
         Union _ -> unionBody bound
 
 deriver Encode
-    encode subject valueCode =
-        Meta.match subject valueCode (derivedBody subject)
+    encodeValue subject valueCode = Meta.match subject valueCode (derivedEncode subject)
 
--- A deliberately small decoding aid, not a Decode class. Todo owns its
--- schema parser by hand; this helper only applies JSON's string escape rules.
+type Slot = { field : Field, cell : Code }
 
-type StringToken = { value : String, rest : String }
+reverseSlots : Items Slot -> Items Slot -> Items Slot
+reverseSlots remaining result =
+    case remaining of
+        NoItems -> result
+        Item slot rest -> reverseSlots rest (Item slot result)
 
-stringTokenLength : String -> Int
-stringTokenLength = native
+slotValue : Slot -> Code
+slotValue slot =
+    case slot.field.jsonDefault of
+        NoDefault ->
+            quote (case $(slot.cell).read() of
+                Just value -> value
+                Nothing -> withPath $(lift slot.field.jsonKey) { syntaxError $(lift ("Missing JSON field: " ++ slot.field.jsonKey)) })
+        Default fallback ->
+            if slot.field.jsonSkip then fallback
+            else
+                quote (case $(slot.cell).read() of
+                    Just value -> value
+                    Nothing -> $(fallback))
 
-stringTokenValue : String -> String
-stringTokenValue = native
-
-parseString : String -> Maybe StringToken
-parseString text =
-    size = stringTokenLength text
-    if size < 0 then
-        Nothing
+slotHandler : Code -> Code -> Slot -> Code
+slotHandler keyCode fallback slot =
+    if slot.field.jsonSkip then fallback
     else
-        token = String.slice 0 size text
-        Just (StringToken
-            { value = stringTokenValue token
-            , rest = String.slice size (String.length text) text
+        quote (if $(keyCode) == $(lift slot.field.jsonKey) then
+            case $(slot.cell).read() of
+                Nothing -> $(slot.cell).write (Just (withPath $(lift slot.field.jsonKey) { decodeValue() }))
+                Just _ -> withPath $(lift slot.field.jsonKey) { syntaxError $(lift ("Duplicate JSON field: " ++ slot.field.jsonKey)) }
+            else $(fallback))
+
+recordParser : Ctor -> Items Slot -> Code
+recordParser ctor slots =
+    action = Meta.lambda "_json_key" { keyCode ->
+        Meta.foldItems (slotHandler keyCode) (quote (withPath $(keyCode) { skipValue() })) slots
+    }
+    values = Meta.mapItems slotValue slots
+    sequenceCode (quote (readFields $(action))) (Meta.construct ctor values)
+
+slotScope : Ctor -> Items Field -> Items Slot -> Code
+slotScope ctor remaining reversed =
+    case remaining of
+        NoItems -> recordParser ctor (reverseSlots reversed NoItems)
+        Item field rest ->
+            name = "_json_slot_" ++ show field.index
+            callback = Meta.lambda name { cellCode ->
+                slotScope ctor rest (Item (Slot { field = field, cell = cellCode }) reversed)
             }
-        )
+            quote (Runtime.Local.run Nothing $(callback))
+
+nullaryBranch : Code -> Code -> Ctor -> Code
+nullaryBranch tagCode fallback ctor =
+    case ctor.fields of
+        NoItems ->
+            quote (if $(tagCode) == $(lift ctor.name) then
+                $(Meta.construct ctor NoItems)
+            else $(fallback))
+        _ -> fallback
+
+fieldDecoder : Field -> Code
+fieldDecoder field =
+    if field.index == 0 then quote (withPath $(lift (show field.index)) { decodeValue() })
+    else sequenceCode (quote expectComma()) (quote (withPath $(lift (show field.index)) { decodeValue() }))
+
+payloadBranch : Code -> Code -> Ctor -> Code
+payloadBranch tagCode fallback ctor =
+    case ctor.fields of
+        NoItems -> fallback
+        _ ->
+            values = Meta.mapItems fieldDecoder ctor.fields
+            result = Meta.construct ctor values
+            quote (if $(tagCode) == $(lift ctor.name) then
+                finishPayload $(result)
+            else $(fallback))
+
+unionParser : Items Ctor -> Code
+unionParser ctors =
+    nullary = Meta.lambda "_json_nullary_tag" { tagCode ->
+        Meta.foldItems (nullaryBranch tagCode) (quote (syntaxError "Unknown nullary union tag")) ctors
+    }
+    payload = Meta.lambda "_json_payload_tag" { tagCode ->
+        Meta.foldItems (payloadBranch tagCode) (quote (syntaxError "Unknown payload union tag")) ctors
+    }
+    quote (decodeUnion $(nullary) $(payload))
+
+deriver Decode
+    decodeValue subject _ =
+        case subject.shape of
+            Record ctor -> slotScope ctor ctor.fields NoItems
+            Union ctors -> unionParser ctors
+
+parseBytesValue : Bytes -> Result Error Value
+parseBytesValue input =
+    Reader.withBytes input { reader ->
+        withPull reader {
+            value = readValue()
+            case next() of
+                EndInput -> value
+                _ -> syntaxError "Trailing JSON input"
+        }
+    }
+
+parseValue : String -> Result Error Value
+parseValue text = parseBytesValue (Bytes.fromString text)
+
+number : String -> Result Error Number
+number text =
+    case parseValue text of
+        Ok (Numeric value) -> Ok value
+        Ok _ -> Err (Error { message = "Expected JSON number", offset = 0, line = 1, column = 1, path = "" })
+        Err problem -> Err problem
+
+numberText : Number -> String
+numberText (Number text) = text
