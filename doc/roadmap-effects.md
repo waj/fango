@@ -1,16 +1,14 @@
 # Roadmap: effects, instances, and owned coroutines
 
 The coroutine direction below is deferred by the
-[synchronous simplification](roadmap-simplification.md). It describes a historical
-proposal, not the current compiler. Active scoped Reader and Task API work lives
-in [scoped effects](roadmap-scoped-effects.md).
+[synchronous effect design](design/effects.md). It describes a historical
+proposal, not the current compiler. Current reader and task behavior belongs in
+[readers](reference/library-readers.md) and [Async](reference/library-async.md).
 
-This document retains unfinished general effect-language work. The shared
-[coroutine roadmap](roadmap-coroutines.md) owns the proposed control API,
-Iterator reuse, Stream migration, and their implementation stages. The
-[Async roadmap](roadmap-async.md) owns tasks, schedulers, native readiness,
-executors, and concurrent combinators. The [main roadmap](roadmap.md) is the
-navigation entry point, not another specification of these contracts.
+This document retains unfinished general effect-language work and the
+historical owned-coroutine proposal. The
+[Async reference](reference/library-async.md) owns current task behavior. The
+[main roadmap](roadmap.md) is the navigation entry point.
 
 Everything proposed here remains unimplemented. Implemented behavior belongs
 to [effects](reference/effects.md), [resources](reference/resources.md), and
@@ -58,14 +56,9 @@ not by recognizing a scheduler's name.
 
 ## Shared foundation and delivery order
 
-The [coroutine stages](roadmap-coroutines.md#implementation-stages) define
-the control implementation sequence; the [Async dependency table](roadmap-async.md#implementation-stages)
-defines its consumers. The joint C0/A0/C4-design feasibility contract is selected;
-review it before C1. [C0](roadmap-coroutines.md#c0-control-and-ownership-contracts)
-owns the additional general prerequisites, and
-[A0](roadmap-async.md#a0-library-representation-contract) records the evidence
-and its limits. Revalidate the proposed encoding against real compiler support
-before the C2 Stream migration; the test-only models do not implement the APIs.
+The proposed control sequence depends on checked ownership, typed completion,
+dynamic scope registration, and native retention. The test-only models did not
+implement those APIs.
 
 The first usable control delivery is scoped typed coroutines, ordinary
 Stream/Iterator wrappers, and a deterministic cooperative scheduling example
@@ -79,19 +72,9 @@ and checked native retention/transfer. These are separate obligations:
 lexically nesting two coroutines does not prove that a dynamic task registry
 is safe, and safe sequential advancement does not prove safe goroutine transfer.
 The native work is split into typed values, scoped requests, shared/transferable
-capabilities, and concurrent invocation/runtime safety. Consumers depend only
-on the contracts they use, while every independently scheduled child must meet
-the same capture rules. The Async roadmap links to these stages instead of
-defining a competing owner or cleanup model.
-
-The first practical Async release is cooperative structured IO at A3. It does
-not wait for all three executors or generated CPU polling. Suspending cleanup
-then supports bounded concurrent combinators and events without requiring
-parallel execution. Both concurrent executors consume the same C6d safety gate;
-neither is an architectural prerequisite for the other. C7/A8 subsequently
-complete the CPU responsiveness contract, and can proceed before parallelism
-when their own prerequisites are ready. Exact dependencies and acceptance live
-in the two stage tables, not in a second global milestone numbering here.
+capabilities, and concurrent invocation/runtime safety. This sequence belongs
+to the historical coroutine proposal. The current [native task architecture](design/tasks.md)
+and [Async API](reference/library-async.md) use a different execution boundary.
 
 Keep Direct and Exit fast paths. Select explicit Machine execution only where
 control requires it; do not require a scheduler, goroutine, or channel for a
@@ -144,10 +127,8 @@ stateful callable is pure. See the
 [reference rule](reference/effects.md#closures-and-handler-effects).
 Handler clauses run outside their own activation and may use enclosing handlers.
 
-The active proposal for explicit instance identities and local escape checking
-is [scoped readers and tasks](roadmap-scoped-effects.md). It owns the fresh
-quantification, identity-aware rows, and erased representation gates. The
-historical coroutine proposal does not settle those questions.
+Further explicit instance APIs have no selected design. The historical
+coroutine proposal does not settle those questions.
 
 ## Explicit capture and borrowing annotations
 
@@ -175,8 +156,8 @@ These are not automatically prerequisites for the first coroutine milestone:
   packaging, clause skolems, dictionary transport, answer types, and indirect
   calls. Go generic-field/method restrictions cannot be bypassed by unchecked
   casts. Typed coroutine replies use a callback whose types are fixed when
-  the owner is opened. The task API must separately resolve its
-  [polymorphic packaging gate](roadmap-async.md#api-representation-gate).
+  the owner is opened. The current task API uses a
+  [native closure invocation boundary](design/tasks.md#async-runtime-foundation).
 - **Rows keyed by effect arguments.** `{Box Int, Box Bool}` is rejected today.
   Supporting it introduces questions such as whether `{Box a, Box Int}` names
   one or two labels before `a` is known. A rigid/ground restriction is a possible
@@ -184,8 +165,8 @@ These are not automatically prerequisites for the first coroutine milestone:
   avoid requiring this extension for heterogeneous coroutines.
 - **Row-kinded effect parameters.** Unlike row-indexed ADTs, effect headers
   currently fix parameters to value kind. Generalizing them is not required by
-  the nullary Async encoding; its hidden budgets use the
-  [scoped work contract](roadmap-execution-contracts.md#scoped-effects-and-work-packages).
+  the current [Async API](reference/library-async.md), which uses native task
+  invocation rather than hidden scoped work budgets.
   Invalid use of an effect parameter as both an ordinary type and a row
   reports a kind mismatch; declaration acceptance alone does not establish
   support for row-kinded effect parameters.
@@ -197,13 +178,9 @@ These are not automatically prerequisites for the first coroutine milestone:
   from every owner. Raw resume escape and continuation cloning are not included.
 - **General fallible sidecars.** Extend the bundled File/Net shape only with
   resolved error identities or a declared marker and a documented error
-  vocabulary. The necessary callback/value contracts are described in the
-  [general native stage](roadmap-coroutines.md#c6-native-retention-and-transfer);
-  they do not imply a universal foreign-function interface.
-- **Shared mutable state.** [STM](roadmap-stm.md) owns that proposed protocol.
-  Cooperative `get; wait; put` is not atomic, and the coroutine owner itself
-  is not a shared cell. Scheduling policy and its exclusions belong to
-  [Async](roadmap-async.md#boundaries-and-non-goals).
+  vocabulary. The [native reference](reference/native.md) owns implemented
+  callback and value contracts; they do not imply a universal foreign-function
+  interface.
 
 Handlers do not roll back arbitrary external writes. Search may replay fresh
 actions without cloning continuations. Cleanup guarantees an attempt, not
@@ -211,9 +188,7 @@ successful external close or termination of user release code.
 
 ## Verification and documentation lifecycle
 
-The detailed [coroutine acceptance matrix](roadmap-coroutines.md#acceptance-and-verification)
-and [Async acceptance matrix](roadmap-async.md#acceptance-and-verification)
-own their fixtures. Preserve the [repository gates](../AGENTS.md) and
+Preserve the [repository gates](../AGENTS.md) and
 [verification contracts](design/verification.md), including independent lint,
 malformed-IR rejection, differential and functional tests, deterministic
 emission, and `go vet`.

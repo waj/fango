@@ -8,7 +8,7 @@ import (
 	"github.com/waj/fango/internal/elaborate"
 )
 
-// These are representation probes for C0/A0, not an implementation of Async.
+// These are historical task representation probes, not an implementation of Async.
 // In particular, wrapping a value below does not implement completion storage.
 func TestAsyncFeasibilityOrdinaryTypedPackaging(t *testing.T) {
 	ck, infos, errs := check(t, `

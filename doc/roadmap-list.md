@@ -28,5 +28,5 @@ comparison has not been completed.
 ## Library operations
 
 Length/indexing exposure and native bulk combinators still await concrete
-consumers. Callback and recursion costs belong to [calling conventions](roadmap-calls.md).
-Compare allocations and runtime on an idle host before accepting optimizations.
+consumers. Compare allocations and runtime on an idle host before accepting
+optimizations.

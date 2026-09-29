@@ -3,17 +3,22 @@
 Priorities, unfinished work, and open decisions. Follow topic links only as
 needed; [design](design.md) and [reference](reference.md) own implemented contracts.
 Library growth follows [concrete example programs](roadmap-examples.md).
-The sections below do not imply a new global ordering. The coroutine and
-Async roadmaps name their stages and cross-document dependencies. Stage IDs and
+The sections below do not imply a new global ordering. Stage IDs and
 titles follow the [repository milestone rules](../AGENTS.md).
 
-## Simplification priority
+## Current foundation
 
-[The synchronous foundation and native tasks](roadmap-simplification.md) replace
-the coroutine-driven direction. This is a breaking redesign of the unpublished
-language. It takes priority over the coroutine, executor, STM, and capture-flow
-optimization roadmaps. Those topics retain their milestone identities but do not
-authorize further expansion of the old architecture.
+[Synchronous effects](design/effects.md), [explicit streams](design/tasks.md#library-state-and-traversal),
+and [native tasks](design/tasks.md#async-runtime-foundation) replace the
+coroutine-driven direction. The retired coroutine design and deferred
+capture-flow proposal do not authorize expansion of the old architecture.
+
+Measure immutable cons allocation and task overhead on an idle host using the
+retained historical comparisons. Improve private bulk List construction only
+when measurements justify it, preserving immutable published nodes. Add task
+combinators when concrete applications need them, using the existing closure
+invocation boundary. Cancellation-aware blocking IO for concurrent servers is
+tracked under [HTTP and a concurrent server](roadmap-io.md#concurrent-server).
 
 ## Builder blocks and generators
 
@@ -48,13 +53,6 @@ files](reference/library-io.md) owns the file and socket adapters. [HTTP and a
 server](roadmap-io.md) owns what is left. The [Async boundary](reference/library-async.md) supports shared native handles;
 server applications and cancellation-aware blocking IO remain unfinished.
 
-## Scoped readers and task effects
-
-[Scoped readers and effect-polymorphic tasks](roadmap-scoped-effects.md) owns
-deferred serial-runner and type-system extensions after implementing generic
-Async scheduling, checked handler inheritance, and cooperative host interruption. [Scoped memory readers](reference/library-readers.md#reader)
-are implemented.
-
 ## Addressing a specific handler
 
 Scoped activation binding is implemented; see the
@@ -64,16 +62,10 @@ instance APIs remain in the [effects roadmap](roadmap-effects.md#handler-instanc
 ## List representation
 
 [Lists](roadmap-list.md) owns private bulk-allocation experiments and possible
-length/indexing APIs over immutable storage. Callback and recursion costs
-belong to [calling conventions](roadmap-calls.md).
-
-## Distributing the bundled sources
-
-The library is now a tree on disk beside the compiler. [Modules and
-distribution](roadmap-modules.md#distributing-the-bundled-sources) owns what is
-left: precompiled library artifacts, the one uncovered skew case, and a
-project-supplied Prelude. Package fetching and independent library versioning
-remain deferred.
+length/indexing APIs over immutable storage. Curried higher-order callbacks may
+allocate an intermediate closure per element, as `List.foldl` illustrates.
+Measure that cost on the current runtime before selecting a calling-convention
+change.
 
 ## Compilation cache
 
@@ -132,11 +124,6 @@ check path. [Formatter behavior](reference/commands.md#formatting) is implemente
 [Testing](roadmap-testing.md) proposes Expect, a row-indexed Test tree, Test.run,
 and call-site failure positions. A test command and fuzzing remain deferred.
 
-## Calling conventions and recursion shapes
-
-[Calls](roadmap-calls.md) owns uncurried worker callback parameters and loops for
-list-building recursion, with measurements and acceptance gates for both.
-
 ## Tail calls beyond the self-call loop
 
 Deferred until a consumer needs them:
@@ -147,22 +134,13 @@ Deferred until a consumer needs them:
 - Capture-excluded self loops could copy changed parameters into per-iteration locals.
 - A diagnostic/LSP hint could explain near-miss tail-loop eligibility.
 
-## Deferred concurrency and analysis proposals
+## Deferred analysis proposal
 
 [Synchronous effects](design/effects.md) and [native tasks](design/tasks.md)
-are implemented. The [coroutine](roadmap-coroutines.md),
-[Async/executor](roadmap-async.md), [STM](roadmap-stm.md), and
-[capture-flow optimization](roadmap-compile-latency.md) proposals retain their
-stage identities as deferred historical directions. They do not mandate
-reintroducing suspension or lifetime analysis. New concurrency APIs must justify
-their complexity against the [remaining simplification work](roadmap-simplification.md).
-
-## Operator fixity scope
-
-[Modules and distribution](roadmap-modules.md#scoping-operator-fixity-to-its-module)
-proposes attaching fixity to the operator's own declaration, so a module's
-artifact key names its dependencies' contracts rather than the whole program's
-operator table. Nothing forces it while only `Basics` declares operators.
+are implemented. [Capture-flow optimization](roadmap-compile-latency.md)
+retains its stage identities as a deferred historical direction; it does not
+mandate reintroducing lifetime analysis. Future concurrency APIs should be
+designed against the current [task architecture](design/tasks.md) when needed.
 
 ## Directing a type-polymorphic call
 

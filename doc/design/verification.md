@@ -140,8 +140,8 @@ be at most 1.00, its bootstrapped upper 95% bound at most 1.03, and no increase
 in bytes or allocations, in both rounds. Partial runs are inconclusive. These
 are manual same-host evidence requirements, not portable CI timing thresholds.
 The runner reports full parity independently of a project decision to accept
-specific remaining costs; that decision and unfinished optimization work belong
-to the [coroutine roadmap](../roadmap-coroutines.md#performance-prerequisite).
+specific remaining costs. Future optimization work belongs in the
+[current roadmap](../roadmap.md#current-foundation).
 Keep the historical baseline and compare against the accepted implementation
 as well when evaluating subsequent changes.
 The original checked Core remains the semantic reference; an internal

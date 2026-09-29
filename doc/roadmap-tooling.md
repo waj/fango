@@ -145,9 +145,9 @@ changes no declaration a live session has already accepted.
   cannot be confused with old values or closures.
 - Decide dependency invalidation and whether removed declarations remain
   addressable by existing closures only.
-- Repeat interruption coverage when the later
-  [CPU responsiveness stage](roadmap-async.md#a8-cpu-responsiveness) adds generated
-  checkpoints, including interactions with handlers and non-yielding code.
+- Extend interruption coverage if CPU loops gain automatic checkpoints;
+  current [cancellation](reference/library-async.md#cancellation) requires an
+  explicit checkpoint in such loops.
 - Add transcript coverage for reload, cross-generation errors, handler
   interaction, and recovery after failures.
 

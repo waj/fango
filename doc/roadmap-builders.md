@@ -5,7 +5,7 @@ explains a small source-level translation that would let a library offer
 generator notation without restoring compiler-generated coroutine machines.
 The [current Stream](reference/library-streams.md) has an explicit state and
 step function; the [current handlers](reference/effects.md#resume-discipline)
-cannot retain a resume for the next pull. The [synchronous foundation](roadmap-simplification.md)
+cannot retain a resume for the next pull. The [synchronous foundation](design/effects.md)
 remains the architecture for ordinary calls and effects.
 
 The proposed `build` form is also useful to libraries other than generators.
@@ -328,7 +328,7 @@ deferred closure must still satisfy the current effect and scope rules.
 This proposal does not make a direct-style `Yield` operation work through an
 arbitrary ordinary call. That would require retaining the rest of that call's
 execution, with different control, cleanup, and evidence contracts. Nor does
-it revive the [deferred coroutine roadmap](roadmap-coroutines.md).
+it restore owned coroutine execution.
 
 ## Delivery and verification
 

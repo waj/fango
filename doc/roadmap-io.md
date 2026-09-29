@@ -39,11 +39,10 @@ serialization. It should not introduce compiler or runtime primitives.
 `Net.withListener`, `Net.accept`, `Net.withClient`, `Net.source`, and `Net.sink`
 are implemented with scoped `Runtime.Native.Any` resources and typed `Net.Error`
 failures. They are sufficient for a listener that handles one connection at a
-time. A connection per task still depends on
-[cooperative Async with native readiness](roadmap-async.md#a3-native-readiness-and-io).
-The deterministic task stages alone do not make the current blocking socket
-calls cooperative; the adapter must use the documented readiness or bounded
-blocking-bridge protocol.
+time. The [Async boundary](reference/library-async.md) permits a connection per
+task and shared native handles, but cancellation does not automatically interrupt
+blocking socket calls. The server needs an explicit cancellation-aware IO
+contract for those operations.
 
 ## Delivery and acceptance
 
@@ -52,7 +51,8 @@ a body shorter than its declared length, chunked bodies, and a keep-alive
 sequence on one connection. Each case runs against an in-memory reader and over
 a loopback socket with identical results. A loopback proxy drives two readers
 at once. The sequential server requires no async support; the concurrent form
-is accepted with Async stage A3, including cancellation and native-request drain.
+must drain child tasks and define how cancellation interrupts or waits for each
+blocking socket operation before releasing its connection.
 
 Alongside these, move a line-oriented example to the buffered path and add the
 [unimplemented grep-lite comparison against Go](roadmap-examples.md), with

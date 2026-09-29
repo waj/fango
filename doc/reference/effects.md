@@ -228,8 +228,8 @@ clause cannot protect that implicit read. For atomic updates, keep state in an
 explicit reference and protect its read and write together, or serialize calls
 to the handler.
 
-Child-task inheritance is not exposed yet; its remaining contract is in the
-[task roadmap](../roadmap-scoped-effects.md#async-orchestration-and-task-results).
+Children inherit resumptive handler activations and their state cells; see the
+[Async contract](library-async.md#handler-inheritance-and-aborts).
 
 ## Resume discipline
 
