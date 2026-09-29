@@ -5,6 +5,6 @@ roll : Int
 roll = Random.runSeeded 1 ({ _ -> Random.int 1 6 })
 
 pick : Int -> Code
-pick n = if n > 3 then quote "high" else quote "low"
+pick n = if n > 3 then `"high"` else `"low"`
 
 main = print $(pick roll)

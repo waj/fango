@@ -574,22 +574,22 @@ main = print (Dep.double 2.5)
 
 func TestModuleWideFunctions(t *testing.T) {
 	for _, tc := range []struct{ name, src, want, diagnostic string }{
-		{name: "deriver later dependency", src: `import Meta
-class Tag a
-    tag : a -> String
-deriver Tag
-    tag _ _ = later()
-type T = T deriving (Tag)
-later() = quote "ok"
-main = tag T`, diagnostic: "STAGE ERROR"},
-		{name: "deriver completed dependency", src: `import Meta
-class Tag a
-    tag : a -> String
-deriver Tag
-    tag _ _ = later()
-later() = quote "ok"
-type T = T deriving (Tag)
-main = tag T`, want: "ok"},
+		{name: "deriver later dependency", src: "import Meta\n" +
+			"class Tag a\n" +
+			"    tag : a -> String\n" +
+			"deriver Tag\n" +
+			"    tag _ _ = later()\n" +
+			"type T = T deriving (Tag)\n" +
+			"later() = `\"ok\"`\n" +
+			"main = tag T", diagnostic: "STAGE ERROR"},
+		{name: "deriver completed dependency", src: "import Meta\n" +
+			"class Tag a\n" +
+			"    tag : a -> String\n" +
+			"deriver Tag\n" +
+			"    tag _ _ = later()\n" +
+			"later() = `\"ok\"`\n" +
+			"type T = T deriving (Tag)\n" +
+			"main = tag T", want: "ok"},
 		{name: "class function collision", src: `class C a
     same : a -> a
 same x = x
@@ -618,34 +618,32 @@ main = left (Point { x = 42 }) True`, want: "42"},
 		{name: "destructuring cycle", src: `(a, b) = later()
 later() = (a, b)
 main = a`, diagnostic: "CYCLIC VALUE DEFINITION"},
-		{name: "stage through instance", src: `import Meta
-class CodeFor a
-    codeFor : a -> Meta.Code
-instance CodeFor ()
-    codeFor _ = later()
-main = $(codeFor ())
-later() = quote 42`, diagnostic: "STAGE ERROR"},
+		{name: "stage through instance", src: "import Meta\n" +
+			"class CodeFor a\n" +
+			"    codeFor : a -> Meta.Code\n" +
+			"instance CodeFor ()\n" +
+			"    codeFor _ = later()\n" +
+			"main = $(codeFor ())\n" +
+			"later() = `42`", diagnostic: "STAGE ERROR"},
 		{name: "annotated recursion", src: `left : a -> Bool -> a
 left x stop = if stop then x else right x True
 right : a -> Bool -> a
 right x stop = if stop then x else left x True
 main = show (left 42 False) ++ right "yes" False`, want: "42yes"},
-		{name: "earlier stage group", src: `import Meta
-left n = if n == 0 then quote 42 else right (n - 1)
-right n = left n
-main = $(left 2)`, want: "42"},
-		{name: "generated forward reference", src: `import Meta
-code() = quote (later 21)
-first() = $(code())
-later x = x * 2
-main = first()`, want: "42"},
-		{name: "direct later stage", src: `import Meta
-main = $(later())
-later() = quote 42`, diagnostic: "STAGE ERROR"},
-		{name: "transitive later stage", src: `import Meta
-early() = later()
-main = $(early())
-later() = quote 42`, diagnostic: "STAGE ERROR"},
+		{name: "earlier stage group", src: "import Meta\n" +
+			"left n = if n == 0 then `42` else right (n - 1)\n" +
+			"right n = left n\n" +
+			"main = $(left 2)", want: "42"},
+		{name: "generated forward reference", src: "import Meta\n" +
+			"code() = `later 21`\n" +
+			"first() = $(code())\n" +
+			"later x = x * 2\n" +
+			"main = first()", want: "42"},
+		{name: "direct later stage", src: "import Meta\nmain = $(later())\nlater() = `42`", diagnostic: "STAGE ERROR"},
+		{name: "transitive later stage", src: "import Meta\n" +
+			"early() = later()\n" +
+			"main = $(early())\n" +
+			"later() = `42`", diagnostic: "STAGE ERROR"},
 		{name: "cycle through value", src: `value = function()
 function() = value
 main = value`, diagnostic: "CYCLIC VALUE DEFINITION"},

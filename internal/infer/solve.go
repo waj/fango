@@ -333,7 +333,7 @@ func mismatchError(c Constraint, m *mismatch, sub Subst) diag.Error {
 		}
 	case WhySpliceOperand:
 		e = diag.Errorf(c.Span, "TYPE MISMATCH",
-			"A splice pastes generated code, so `$(…)` needs an operand that builds\ncode with `quote`, but this one is:\n\n    %s", left)
+			"A splice pastes generated code, so `$(…)` needs an operand that builds\ncode with a backtick quotation, but this one is:\n\n    %s", left)
 	case WhyEffectEscapes:
 		e = diag.Errorf(c.Span, "UNHANDLED EFFECT",
 			"This top-level value performs an effect that is not handled.\nTop-level bindings must be pure; move the call into a function or add a handler.")

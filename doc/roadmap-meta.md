@@ -12,21 +12,22 @@ declaration group, including generated types.
 
 ## Proposed surface
 
-A declaration quote is `quote` followed by an indented declaration block. The
-block shape distinguishes it from the existing `quote atom`: the former
-produces `Meta.Decls`, while the latter continues to produce `Meta.Code`.
+A declaration quote would produce `Meta.Decls`, while expression quotations
+produce `Meta.Code`. Its spelling remains unsettled now that expression
+quotations use paired backticks and `quote` is an ordinary identifier. The
+example below uses `DECL_QUOTE` as a pseudocode placeholder, not Fango syntax.
 
 Names introduced by a declaration quote are explicit `Meta.Name` values. A
 generator creates public names from strings and splices them wherever a name
 is required:
 
-```fango
+```text
 makeChoice : String -> Meta.Decls
 makeChoice stem =
     ty = Meta.publicName stem
     yes = Meta.publicName (stem ++ "Yes")
     no = Meta.publicName (stem ++ "No")
-    quote
+    DECL_QUOTE
         type $(ty) = $(yes) | $(no)
 
 $(makeChoice "Choice")
@@ -103,3 +104,12 @@ release gates.
 
 Preserve the existing stage-safety, step-budget, and completion-group rules.
 Measure elaboration cost when a forcing consumer justifies declaration generation.
+
+## Expression quotation blocks
+
+Deferred: allow a quotation to directly contain local bindings and statements
+followed by a result expression, using ordinary Fango block rules. Today such
+computations require an existing expression wrapper, such as an immediately
+invoked lambda; see [quotes and splices](reference/metaprogramming.md#quotes-and-splices).
+This extension is separate from the backtick syntax replacement and from
+declaration generation.

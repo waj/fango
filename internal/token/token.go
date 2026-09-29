@@ -45,6 +45,8 @@ const (
 	UNDERSCORE  // _ (wildcard pattern)
 	DOLLARPAREN // $( — opens a splice; `$` is never a token on its own
 	ATTYPE      // @ before an uppercase type name or a parenthesized type
+	LQUOTE      // backtick opening an expression quotation
+	RQUOTE      // backtick closing an expression quotation
 
 	// Reserved operator lexemes: operator runs the grammar recognizes by
 	// kind rather than by spelling. A run becomes one of these only when it
@@ -81,7 +83,6 @@ const (
 	KwInstance
 	KwDeriver
 	KwDeriving
-	KwQuote
 	KwTypeOf
 )
 
@@ -93,13 +94,14 @@ var kindNames = map[Kind]string{
 	LPAREN: "LPAREN", RPAREN: "RPAREN", COMMA: "COMMA", SEMICOLON: "SEMICOLON", DOT: "DOT", DOTDOT: "DOTDOT",
 	LBRACE: "LBRACE", RBRACE: "RBRACE", LBRACKET: "LBRACKET", RBRACKET: "RBRACKET",
 	UNDERSCORE: "UNDERSCORE", DOLLARPAREN: "DOLLARPAREN", ATTYPE: "ATTYPE",
+	LQUOTE: "LQUOTE", RQUOTE: "RQUOTE",
 	EQ: "EQ", ARROW: "ARROW", DARROW: "DARROW", COLON: "COLON", PIPE: "PIPE", CARET: "CARET",
 	KwModule: "module", KwImport: "import", KwAs: "as", KwExposing: "exposing", KwLet: "let", KwIn: "in",
 	KwIf: "if", KwThen: "then", KwElse: "else", KwCase: "case", KwOf: "of",
 	KwType: "type", KwEffect: "effect", KwAbort: "abort", KwHandle: "handle", KwResume: "resume",
 	KwNative: "native", KwInfix: "infix", KwInfixL: "infixl", KwInfixR: "infixr",
 	KwClass: "class", KwInstance: "instance", KwDeriver: "deriver", KwDeriving: "deriving",
-	KwQuote: "quote", KwTypeOf: "typeOf",
+	KwTypeOf: "typeOf",
 }
 
 func (k Kind) String() string { return kindNames[k] }
@@ -113,7 +115,7 @@ var Keywords = map[string]Kind{
 	"type": KwType, "effect": KwEffect, "abort": KwAbort, "handle": KwHandle, "resume": KwResume,
 	"native": KwNative, "infix": KwInfix, "infixl": KwInfixL, "infixr": KwInfixR,
 	"class": KwClass, "instance": KwInstance, "deriver": KwDeriver, "deriving": KwDeriving,
-	"quote": KwQuote, "typeOf": KwTypeOf,
+	"typeOf": KwTypeOf,
 }
 
 // opChars is the operator character class. An operator name is a non-empty

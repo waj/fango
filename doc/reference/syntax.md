@@ -119,6 +119,9 @@ following `then` or `else` even when the block sits at that keyword's column.
 
 ## Values and operators
 
+Backticks delimit [expression quotations](metaprogramming.md#quotes-and-splices);
+their contents are Fango code rather than string text.
+
 Built-in value types are `Int`, `Float`, `String`, `Char`, `Bool`, and Unit `()`.
 Integers are signed 64-bit decimal literals. Floats include `1.25`, `1e3`, and
 `1.0e-2`; `.5` and `1.` are not float literals. Strings are single-line,

@@ -44,8 +44,8 @@ Record fields can carry [typed attributes](metaprogramming.md#attributes):
 ```fango
 type Settings =
     { name : String    #[Json.Key "full_name"]
-    , count : Int      #[Json.Default (quote 7)]
-    , secret : String  #[Json.Skip, Json.Default (quote "local")]
+    , count : Int      #[Json.Default `7`]
+    , secret : String  #[Json.Skip, Json.Default `"local"`]
     }
     deriving (Encode, Decode)
 ```

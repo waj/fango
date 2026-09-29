@@ -337,6 +337,8 @@
           "name": "punctuation.separator.statement.fango",
           "match": ";"
         },
+        { "include": "#quote" },
+        { "include": "#splice" },
         { "include": "#native_expr" },
         { "include": "#string" },
         { "include": "#char" },
@@ -369,8 +371,44 @@
         {
           "name": "constant.language.unit.fango",
           "match": "\\(\\)"
-        }
+        },
+        { "include": "#group" }
       ]
+    },
+    "quote": {
+      "name": "meta.quote.fango",
+      "begin": "`",
+      "end": "`",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.quote.begin.fango" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.quote.end.fango" }
+      },
+      "patterns": [ { "include": "#expressions" } ]
+    },
+    "splice": {
+      "name": "meta.splice.fango",
+      "begin": "\\$\\(",
+      "end": "\\)",
+      "beginCaptures": {
+        "0": { "name": "keyword.operator.splice.fango" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.section.parens.end.fango" }
+      },
+      "patterns": [ { "include": "#expressions" } ]
+    },
+    "group": {
+      "begin": "\\(",
+      "end": "\\)",
+      "beginCaptures": {
+        "0": { "name": "punctuation.section.parens.begin.fango" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.section.parens.end.fango" }
+      },
+      "patterns": [ { "include": "#expressions" } ]
     },
     "lambda": {
       "comment": "A braced lambda is an expression atom. A parameter header, when present, ends at the exact arrow token.",
@@ -498,7 +536,7 @@
       "patterns": [
         {
           "name": "keyword.control.fango",
-          "match": "\\b(if|then|else|case|of|handle|resume|quote|typeOf)\\b"
+          "match": "\\b(if|then|else|case|of|handle|resume|typeOf)\\b"
         },
         {
           "name": "keyword.other.fango",
@@ -632,10 +670,6 @@
     "operators": {
       "comment": "Operator runs munch maximally in the lexer, so every reserved lexeme is bounded by non-operator characters — otherwise `-->` would highlight an arrow inside a comment and `|>` a pipe. The final catch-all carries user-declared operators, which have no fixed meaning to scope.",
       "patterns": [
-        {
-          "name": "keyword.operator.splice.fango",
-          "match": "\\$\\("
-        },
         {
           "name": "keyword.operator.range.fango",
           "match": "\\.\\."

@@ -23,9 +23,9 @@ deriver Tag
 zeroFor : Field -> Code
 zeroFor field =
     if Meta.sameType field.ty (typeOf Int) then
-        quote 0
+        `0`
     else if Meta.sameType field.ty (typeOf String) then
-        quote "-"
+        `"-"`
     else
         Meta.fail "Blank only handles Int and String fields"
 

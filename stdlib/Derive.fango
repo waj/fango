@@ -20,19 +20,19 @@ scope for `List` and `Maybe`, neither of which imports anything. -}
 -- method points at the line here that generated it.
 
 appendCode : Code -> Code -> Code
-appendCode lhs rhs = quote ($(lhs) ++ $(rhs))
+appendCode lhs rhs = `$(lhs) ++ $(rhs)`
 
 showCode : Code -> Code
-showCode value = quote (show $(value))
+showCode value = `show $(value)`
 
 equalsCode : Code -> Code -> Code
-equalsCode lhs rhs = quote ($(lhs) == $(rhs))
+equalsCode lhs rhs = `$(lhs) == $(rhs)`
 
 lessCode : Code -> Code -> Code
-lessCode lhs rhs = quote ($(lhs) < $(rhs))
+lessCode lhs rhs = `$(lhs) < $(rhs)`
 
 ifCode : Code -> Code -> Code -> Code
-ifCode condition yes no = quote (if $(condition) then $(yes) else $(no))
+ifCode condition yes no = `if $(condition) then $(yes) else $(no)`
 
 -- Eq: constructors must agree, then every field pair must.
 

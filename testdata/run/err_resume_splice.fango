@@ -1,4 +1,4 @@
-bad = quote (resume 1)
+bad = `resume 1`
 
 effect Ask
     ask : () -> Int

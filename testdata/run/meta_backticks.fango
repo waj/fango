@@ -1,0 +1,47 @@
+import Meta exposing (Code)
+
+quote x = x
+
+add : Code -> Code -> Code
+add left right = `$(left) + $(right)`
+
+withHole : Code
+withHole = `$(`6`) * 7`
+
+withBinding : Code
+withBinding = `{
+    x = 6
+    x * 7
+}()`
+
+withCase : Code
+withCase = `case True of
+    True ->
+        value = 42
+        value
+    False -> 0
+`
+
+withIf : Code
+withIf = `if True then
+    42
+else
+    0
+`
+
+withComments : Code
+withComments = `
+    -- A comment containing ` does not close the quotation.
+    {- Nor does a block comment containing `. -}
+    "`"
+`
+
+main() =
+    print (quote 42)
+    print $(add `20` `22`)
+    print $(withHole)
+    print $(withBinding)
+    print $(withCase)
+    print $(withIf)
+    print $(withComments)
+    print $(`'`'`)

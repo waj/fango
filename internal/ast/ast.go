@@ -355,7 +355,7 @@ type Resume struct {
 // metaprogramming").
 type Quote struct {
 	Body Expr
-	Sp   source.Span // the `quote` keyword through the quoted atom
+	Sp   source.Span // opening through closing backtick
 }
 
 // Splice goes down a stage. At quote depth 0 it evaluates Operand during

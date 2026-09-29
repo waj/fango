@@ -244,19 +244,18 @@ tag : String -> Label
 tag text = Label text
 fallback = 7
 `
-	main := `module Main exposing (main)
-import Options as O
-import Json
-#[O.tag "type"]
-type Choice = #[O.Label "constructor"] Choice #[O.Label "payload"] Int
-type Config =
-    { #[O.tag "leading"]
-      x : Int #[O.Label "trailing", Json.Default (quote O.fallback)]
-    , y : Int #[O.tag ({ text -> text } "lambda")]
-    , z : Int #[typeOf O.Label]
-    }
-main = "ok"
-`
+	main := "module Main exposing (main)\n" +
+		"import Options as O\n" +
+		"import Json\n" +
+		"#[O.tag \"type\"]\n" +
+		"type Choice = #[O.Label \"constructor\"] Choice #[O.Label \"payload\"] Int\n" +
+		"type Config =\n" +
+		"    { #[O.tag \"leading\"]\n" +
+		"      x : Int #[O.Label \"trailing\", Json.Default `O.fallback`]\n" +
+		"    , y : Int #[O.tag ({ text -> text } \"lambda\")]\n" +
+		"    , z : Int #[typeOf O.Label]\n" +
+		"    }\n" +
+		"main = \"ok\"\n"
 	for name, data := range map[string]string{"Options.fango": options, "Main.fango": main} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(data), 0o644); err != nil {
 			t.Fatal(err)

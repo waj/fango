@@ -29,7 +29,8 @@ type parser struct {
 	errs []diag.Error
 	lay  layout
 	// exprParenDepth tracks expression delimiters that reset layout: grouping
-	// parentheses and braced lambdas. Their closing token supplies the boundary.
+	// parentheses, braced lambdas, and quotations. Their closing token supplies
+	// the boundary.
 	exprParenDepth int
 
 	// stmtStart is the index of a token allowed to sit exactly at the
@@ -1070,9 +1071,9 @@ func hasStatementEqual(toks []token.Token, start, col int) bool {
 			return false
 		}
 		switch t.Kind {
-		case token.LPAREN, token.LBRACKET, token.LBRACE:
+		case token.LPAREN, token.LBRACKET, token.LBRACE, token.DOLLARPAREN, token.ATTRIBUTE, token.LQUOTE:
 			depth++
-		case token.RPAREN, token.RBRACKET, token.RBRACE:
+		case token.RPAREN, token.RBRACKET, token.RBRACE, token.RQUOTE:
 			if depth > 0 {
 				depth--
 			}
@@ -1112,7 +1113,7 @@ func (p *parser) classifyInlineStmt() stmtKind {
 			}
 			if depth == 0 {
 				switch t.Kind {
-				case token.RPAREN, token.RBRACKET, token.RBRACE, token.COMMA,
+				case token.RPAREN, token.RBRACKET, token.RBRACE, token.RQUOTE, token.COMMA,
 					token.ARROW, token.KwThen, token.KwElse, token.KwOf,
 					token.KwIf, token.KwCase, token.KwHandle:
 					return false
@@ -1122,9 +1123,9 @@ func (p *parser) classifyInlineStmt() stmtKind {
 				}
 			}
 			switch t.Kind {
-			case token.LPAREN, token.LBRACKET, token.LBRACE:
+			case token.LPAREN, token.LBRACKET, token.LBRACE, token.DOLLARPAREN, token.ATTRIBUTE, token.LQUOTE:
 				depth++
-			case token.RPAREN, token.RBRACKET, token.RBRACE:
+			case token.RPAREN, token.RBRACKET, token.RBRACE, token.RQUOTE:
 				if depth > 0 {
 					depth--
 				}
@@ -1348,7 +1349,7 @@ func (p *parser) parseInlineBlock() ast.Expr {
 // with its own `then`/`else` puts that keyword at the body block's column,
 // and neither keyword can begin a statement.
 func closesBlock(k token.Kind) bool {
-	return k == token.KwThen || k == token.KwElse || k == token.COMMA || k == token.RPAREN || k == token.RBRACKET || k == token.RBRACE
+	return k == token.KwThen || k == token.KwElse || k == token.COMMA || k == token.RPAREN || k == token.RBRACKET || k == token.RBRACE || k == token.RQUOTE
 }
 
 func (p *parser) blockMissingResult(binds []ast.LocalBind, items []ast.BlockItem, at source.Span) ast.Expr {
@@ -1749,7 +1750,7 @@ func (p *parser) parseApply() ast.Expr {
 	}
 	for {
 		switch p.peekInExpr().Kind {
-		case token.INT, token.FLOAT, token.STRING, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.LBRACKET, token.KwResume, token.KwQuote, token.DOLLARPAREN, token.ATTYPE:
+		case token.INT, token.FLOAT, token.STRING, token.CHAR, token.LIDENT, token.UIDENT, token.LPAREN, token.LBRACE, token.LBRACKET, token.KwResume, token.LQUOTE, token.DOLLARPAREN, token.ATTYPE:
 			arg := p.parsePostfixAtom()
 			if arg == nil {
 				return nil
@@ -2399,17 +2400,32 @@ func (p *parser) parseAtom() ast.Expr {
 	case token.KwResume:
 		p.next()
 		return &ast.Resume{Sp: t.Span}
-	case token.KwQuote:
-		// `quote` takes exactly one atom, so `quote (f x)` needs its parens
-		// the way every other argument position does. Nothing about the
-		// quoted text is parsed differently — it is ordinary Fango syntax.
+	case token.LQUOTE:
+		// A quotation encloses one ordinary expression, with the same fresh
+		// layout boundary as grouping parentheses. Its close is not an atom.
 		p.next()
 		p.usesStaging = true
-		body := p.parsePostfixAtom()
+		p.exprParenDepth++
+		defer func() { p.exprParenDepth-- }()
+		p.lay.push(ctxParen, 0)
+		defer p.lay.pop()
+		if p.peek().Kind == token.RQUOTE {
+			p.errorAt(t.Span.Merge(p.next().Span), "SYNTAX PROBLEM", "A quotation needs an expression between its backticks.")
+			return nil
+		}
+		body := p.parseExpr()
 		if body == nil {
 			return nil
 		}
-		return &ast.Quote{Body: body, Sp: t.Span.Merge(body.Span())}
+		if p.peek().Kind != token.RQUOTE {
+			if p.peek().Kind == token.EOF {
+				p.errorAt(t.Span, TitleUnexpectedEOF, "I got to the end of the input while looking for the backtick that closes this quotation.")
+			} else {
+				p.errorAt(p.peek().Span, "SYNTAX PROBLEM", "I expect the backtick that closes this quotation. A quotation contains one expression, not a binding block.")
+			}
+			return nil
+		}
+		return &ast.Quote{Body: body, Sp: t.Span.Merge(p.next().Span)}
 	case token.KwTypeOf:
 		p.usesStaging = true
 		p.next()
@@ -2532,9 +2548,9 @@ func (p *parser) braceIsRecordLiteral() bool {
 				afterComma = false
 			}
 		}
-		if t.Kind == token.LPAREN || t.Kind == token.LBRACKET || t.Kind == token.LBRACE {
+		if t.Kind == token.LPAREN || t.Kind == token.LBRACKET || t.Kind == token.LBRACE || t.Kind == token.DOLLARPAREN || t.Kind == token.ATTRIBUTE || t.Kind == token.LQUOTE {
 			depth++
-		} else if t.Kind == token.RPAREN || t.Kind == token.RBRACKET || t.Kind == token.RBRACE {
+		} else if t.Kind == token.RPAREN || t.Kind == token.RBRACKET || t.Kind == token.RBRACE || t.Kind == token.RQUOTE {
 			depth--
 		}
 		previousLine = t.Pos().Line
@@ -2556,9 +2572,9 @@ func (p *parser) braceHasUpdatePipe() bool {
 	depth := 0
 	for i := p.pos + 1; i < len(p.toks); i++ {
 		switch p.toks[i].Kind {
-		case token.LPAREN, token.LBRACKET, token.LBRACE:
+		case token.LPAREN, token.LBRACKET, token.LBRACE, token.DOLLARPAREN, token.ATTRIBUTE, token.LQUOTE:
 			depth++
-		case token.RPAREN, token.RBRACKET, token.RBRACE:
+		case token.RPAREN, token.RBRACKET, token.RBRACE, token.RQUOTE:
 			if depth == 0 {
 				return false
 			}
@@ -2785,7 +2801,7 @@ func (p *parser) branchBoundaryAt(i int) bool {
 		return false
 	}
 	t := p.peek()
-	if t.Kind == token.EOF || p.toks[p.pos-1].Pos().Line == t.Pos().Line {
+	if t.Kind == token.EOF || t.Kind == token.RQUOTE || p.toks[p.pos-1].Pos().Line == t.Pos().Line {
 		return false
 	}
 	ctx := p.lay.stack[i]

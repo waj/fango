@@ -7,36 +7,35 @@ import (
 
 func TestAttributesStageAndRollbackInREPL(t *testing.T) {
 	var out strings.Builder
-	Run(strings.NewReader(`import Meta
-import Json
-import Result
-type Label = Label String
-#[Label "first"] type Box = Box
-readLabel : Meta.TypeRepr -> Meta.Code
-readLabel repr =
-    case Meta.info repr of
-        Meta.Visible info ->
-            case Meta.attributes @Label info.attributes of
-                Meta.Item attached _ ->
-                    case attached.value of
-                        Label text -> Meta.lift text
-                Meta.NoItems -> Meta.fail "missing attribute"
-        Meta.Opaque -> Meta.fail "hidden"
-
-$(readLabel (typeOf Box))
-#[Meta.fail "attachment failed"] type Broken = Broken
-:type Broken
-#[Label "second"] type Box = Box
-$(readLabel (typeOf Box))
-type Bad = { #[Json.Skip] x : Int } deriving (Json.Encode)
-:type Bad
-type Good = { x : Int #[Json.Default (quote 4)] } deriving (Json.Decode)
-case Json.parse @Good "{}" of
-    Result.Ok good -> good.x
-    Result.Err error -> -1
-
-:quit
-`), &out)
+	Run(strings.NewReader("import Meta\n"+
+		"import Json\n"+
+		"import Result\n"+
+		"type Label = Label String\n"+
+		"#[Label \"first\"] type Box = Box\n"+
+		"readLabel : Meta.TypeRepr -> Meta.Code\n"+
+		"readLabel repr =\n"+
+		"    case Meta.info repr of\n"+
+		"        Meta.Visible info ->\n"+
+		"            case Meta.attributes @Label info.attributes of\n"+
+		"                Meta.Item attached _ ->\n"+
+		"                    case attached.value of\n"+
+		"                        Label text -> Meta.lift text\n"+
+		"                Meta.NoItems -> Meta.fail \"missing attribute\"\n"+
+		"        Meta.Opaque -> Meta.fail \"hidden\"\n"+
+		"\n"+
+		"$(readLabel (typeOf Box))\n"+
+		"#[Meta.fail \"attachment failed\"] type Broken = Broken\n"+
+		":type Broken\n"+
+		"#[Label \"second\"] type Box = Box\n"+
+		"$(readLabel (typeOf Box))\n"+
+		"type Bad = { #[Json.Skip] x : Int } deriving (Json.Encode)\n"+
+		":type Bad\n"+
+		"type Good = { x : Int #[Json.Default `4`] } deriving (Json.Decode)\n"+
+		"case Json.parse @Good \"{}\" of\n"+
+		"    Result.Ok good -> good.x\n"+
+		"    Result.Err error -> -1\n"+
+		"\n"+
+		":quit\n"), &out)
 	got := out.String()
 	if strings.Contains(got, "INTERNAL") || strings.Contains(got, "runtime error") {
 		t.Fatalf("unexpected failure:\n%s", got)

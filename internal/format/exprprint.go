@@ -93,8 +93,8 @@ func exprInline(e ast.Expr) (string, bool) {
 		next, ok := exprAtomInline(e.NextState)
 		return "resume with " + next, ok
 	case *ast.Quote:
-		body, ok := exprAtomInline(e.Body)
-		return "quote " + body, ok
+		body, ok := exprInline(e.Body)
+		return "`" + body + "`", ok
 	case *ast.Splice:
 		operand, ok := exprInline(e.Operand)
 		return "$(" + operand + ")", ok
@@ -172,7 +172,7 @@ func localBindInline(b ast.LocalBind) ([]string, bool) {
 func atomic(e ast.Expr) bool {
 	switch e := e.(type) {
 	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.CharLit, *ast.UnitLit,
-		*ast.Var, *ast.RecordGet, *ast.Splice:
+		*ast.Var, *ast.RecordGet, *ast.Splice, *ast.Quote:
 		return true
 	case *ast.RecordLit:
 		// `{ x = 1 }` brackets itself; `Named { x = 1 }` is two tokens and is

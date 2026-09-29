@@ -5,8 +5,8 @@ instance Inspect a
     inspect _ = "fallback"
 
 early() = inspect True
-fixedCode() = if early() == "fallback" then quote "fallback" else quote "show"
-callerCode x = if inspect x == "fallback" then quote "fallback" else quote "show"
+fixedCode() = if early() == "fallback" then `"fallback"` else `"show"`
+callerCode x = if inspect x == "fallback" then `"fallback"` else `"show"`
 
 before = $(callerCode True)
 

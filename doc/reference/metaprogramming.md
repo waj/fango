@@ -4,9 +4,10 @@ Meta reflection, quotes, splices, derivers, hygiene, and stage restrictions.
 
 [Reference index](../reference.md).
 
-Fango has one compile-time stage. `quote` goes up a stage and `$(…)` comes
-back down. Attributes also evaluate expressions at that compile-time stage. `quote` is a
-reserved word; `$` is a token only as part of `$(`.
+Fango has one compile-time stage. A backtick-delimited quotation goes up a
+stage and `$(…)` comes back down. Attributes also evaluate expressions at that
+compile-time stage. `quote` is an ordinary identifier; `$` is a token only as
+part of `$(`.
 
 ## Type reflection
 
@@ -64,7 +65,7 @@ type Label = Label String
 
 #[Label "configuration"]
 type Config =
-    { count : Int  #[Label "wire", Json.Default (quote 0)]
+    { count : Int  #[Label "wire", Json.Default `0`]
     }
 ```
 
@@ -167,20 +168,22 @@ The compiler owns the traversal, so a deriver never invents a binder:
 A `deriver` must precede, in source order, any `deriving` clause that uses it
 — including on a type declared earlier in the same file. The bundled `Derive`
 module supplies the derivers for `Eq`, `Ord`, and `Show`; a file that writes
-`deriving` depends on it automatically, the way a file that writes `quote`
+`deriving` depends on it automatically, the way a file that writes a quotation
 depends on `Meta`.
 
 ## Quotes and splices
 
-`quote atom` builds a value of the abstract type `Meta.Code`. It does not
-evaluate the quoted expression — it describes it. The quoted text is ordinary
-Fango and takes exactly one atom, so anything larger is parenthesized:
+A quotation written as `` `expression` `` builds a value of the abstract type
+`Meta.Code`. It does not evaluate the quoted expression — it describes it.
+The contents are one ordinary Fango expression; the backticks supply grouping
+and a fresh layout boundary like parentheses. Quotations are atoms, including
+when passed as function arguments:
 
 ```fango
 import Meta exposing (Code)
 
 answer : Code
-answer = quote (6 * 7)
+answer = `6 * 7`
 ```
 
 `$(expression)` inside a quote is a **hole**: the expression is evaluated
@@ -189,7 +192,7 @@ produce `Code`, which is pasted into the quoted text:
 
 ```fango
 twice : Code -> Code
-twice c = quote ($(c) + $(c))
+twice c = `$(c) + $(c)`
 ```
 
 `$(expression)` in ordinary program text is a **splice**: the compiler
@@ -200,8 +203,34 @@ splice's place and is checked there:
 main() = print $(twice answer)     -- prints 84
 ```
 
-Nesting is limited to one level in each direction. A quote inside a quote and
-a splice inside a splice are both `STAGE ERROR`.
+Quotations may span lines and contain conditionals, cases, lambdas, strings,
+and comments. Backticks inside strings, character literals, or comments do not
+close a quotation. An empty quotation is a `SYNTAX PROBLEM`; an unclosed
+quotation is an `UNFINISHED PROGRAM` and the REPL waits for more input.
+
+The contents must be an expression, not a standalone binding or statement
+block. To describe a computation with local bindings, quote an immediately
+invoked lambda:
+
+```fango
+withBinding = `{
+    x = 6
+    x * 7
+}()`
+```
+
+Nesting is limited to one level in each direction. A quotation nested in
+quoted code and a splice inside a splice are both `STAGE ERROR`. A hole
+steps out of the quoted stage, so its operand may construct a quotation:
+
+```fango
+withHole = `$(`6`) * 7`
+```
+
+No escape syntax is added to quoted code. Parentheses, braces, brackets, and
+splice operands retain their own delimiter boundaries; a backtick inside one
+of these opens a quotation, while a backtick at the current quotation's
+boundary closes it.
 
 Quoted code is resolved in the module that wrote it and checked at the site
 that splices it. Because names are resolved before inference, generated code

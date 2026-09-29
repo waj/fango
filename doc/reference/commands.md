@@ -208,9 +208,9 @@ arguments, so `foo bar()` stays `foo bar()`; other nested applications retain
 parentheses when removing them would change how the arguments are read.
 
 The formatter keeps the author's line breaks rather than reflowing to a width,
-except when placing a multiline closing parenthesis or lambda brace, or when
-making a lambda consistently inline or multiline, or expanding a record
-schema with attributed fields. A
+except when placing a multiline closing parenthesis, lambda brace, or quotation
+backtick, or when making a lambda consistently inline or multiline, or expanding
+a record schema with attributed fields. A
 construct written across several lines stays that way and one written inline
 stays inline. That extends to where a keyword sits: a body moved below
 its `=` or `->` stays below it, a `case` written on its declaration's own line
@@ -250,8 +250,8 @@ column. Field names, colons, and types keep their ordinary spacing:
 ```fango
 type Config =
     { name : String    #[Json.Key "full_name"]
-    , count : Int      #[Json.Default (quote 7)]
-    , secret : String  #[Json.Skip, Json.Default (quote "local")]
+    , count : Int      #[Json.Default `7`]
+    , secret : String  #[Json.Skip, Json.Default `"local"`]
     }
     deriving (Encode, Decode)
 ```

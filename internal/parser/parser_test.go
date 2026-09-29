@@ -293,7 +293,7 @@ func TestMalformedLists(t *testing.T) {
 }
 
 func TestParseReflectionAndDeriver(t *testing.T) {
-	f := source.NewFile("<test>", []byte("deriver Show\n    show info value = quote value\nx = typeOf (List Int)\n"))
+	f := source.NewFile("<test>", []byte("deriver Show\n    show info value = `value`\nx = typeOf (List Int)\n"))
 	toks, lexErrs := lexer.Lex(f)
 	if len(lexErrs) > 0 {
 		t.Fatal(lexErrs)

@@ -19,7 +19,7 @@ firstField : Bound -> Code
 firstField bound =
     case bound.fields of
         NoItems -> Meta.lift bound.ctor.name
-        Item field _ -> quote (show $(field.value))
+        Item field _ -> `show $(field.value)`
 
 deriver Head
     headOf subject valueCode = Meta.match subject valueCode firstField

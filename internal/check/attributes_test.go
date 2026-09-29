@@ -38,7 +38,7 @@ func TestAttributeDiagnostics(t *testing.T) {
 		{"json skip", "type T = { #[Json.Skip] x : Int } deriving (Json.Encode)", "COMPILE-TIME FAILURE"},
 		{"json keys", "type T = { #[Json.Key \"y\"] x : Int, y : Int } deriving (Json.Decode)", "COMPILE-TIME FAILURE"},
 		{"json site", "#[Json.Skip]\ntype T = T deriving (Json.Encode)", "COMPILE-TIME FAILURE"},
-		{"json default", "type T = { #[Json.Default (quote \"wrong\")] x : Int } deriving (Json.Decode)", "TYPE MISMATCH"},
+		{"json default", "type T = { #[Json.Default `\"wrong\"`] x : Int } deriving (Json.Decode)", "TYPE MISMATCH"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			text := "import Meta\nimport Json\ntype Label = Label String\n" + tc.body + "\n"
@@ -87,13 +87,12 @@ func TestCachedAttributesPreserveValuesAndHygiene(t *testing.T) {
 	attributeSource(t, root, "Options", `module Options exposing (Label(..))
 type Label = Label String
 `)
-	lib := attributeSource(t, root, "Lib", `module Lib exposing (Config(..))
-import Options
-import Json
-privateDefault = 7
-#[Options.Label "first"]
-type Config = { value : Int #[Json.Default (quote privateDefault)] } deriving (Json.Encode, Json.Decode)
-`)
+	lib := attributeSource(t, root, "Lib", "module Lib exposing (Config(..))\n"+
+		"import Options\n"+
+		"import Json\n"+
+		"privateDefault = 7\n"+
+		"#[Options.Label \"first\"]\n"+
+		"type Config = { value : Int #[Json.Default `privateDefault`] } deriving (Json.Encode, Json.Decode)\n")
 	entry := attributeSource(t, root, "Main", `module Main exposing (main)
 import Lib
 import Options

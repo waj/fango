@@ -499,14 +499,14 @@ func hashBytes(data []byte) string {
 const PreludeModule = "Prelude"
 
 // MetaModule is the bundled module that owns the abstract compile-time code
-// type. A file using `quote` or `$(…)` needs it in the graph to have a type
+// type. A file using a backtick quotation or `$(…)` needs it in the graph to have a type
 // for its quotes, so the loader adds the dependency where the syntax appears
 // rather than taxing every program with it.
 const MetaModule = "Meta"
 
 // DeriveModule supplies the derivers for the standard classes. A file that
 // writes `deriving` needs them in the graph for the same reason a file that
-// writes `quote` needs Meta: the loader adds the edge where the syntax
+// writes a quotation needs Meta: the loader adds the edge where the syntax
 // appears rather than taxing every program with it.
 const DeriveModule = "Derive"
 

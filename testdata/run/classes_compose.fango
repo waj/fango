@@ -30,7 +30,7 @@ type Tree a = Tree (List a) deriving (Eq, Show)
 -- Composition runs during compilation too, where the same resolution feeds
 -- the compile-time evaluator rather than the emitted program.
 chosen : Code
-chosen = if sameLists [1, 2] [1, 2] then quote "staged same" else quote "staged different"
+chosen = if sameLists [1, 2] [1, 2] then `"staged same"` else `"staged different"`
 
 main() =
     print (sameLists [1, 2] [1, 2])

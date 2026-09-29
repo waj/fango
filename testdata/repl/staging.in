@@ -1,12 +1,12 @@
 import Meta
-answer = quote (6 * 7)
+answer = `6 * 7`
 $(answer)
-twice c = quote ($(c) + $(c))
+twice c = `$(c) + $(c)`
 big = twice answer
 $(big)
-n = $(twice (quote 10))
+n = $(twice (`10`))
 n
-$(quote (print "no"))
+$(`print "no"`)
 class Tag a
     tag : a -> String
 deriver Tag

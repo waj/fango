@@ -19,13 +19,22 @@ func TestFieldAttributes(t *testing.T) {
 		module, errs := Parse(tokens, file)
 		return module, len(errs)
 	}
-	module, count := parse("type Settings = { #[Json.Key \"full_name\"] name : String, #[Json.Skip, Json.Default (quote \"local\")] secret : String }\n")
+	module, count := parse("type Settings = { #[Json.Key \"full_name\"] name : String, #[Json.Skip, Json.Default `\"local\"`] secret : String }\n")
 	if count != 0 {
 		t.Fatalf("valid attributes: %d parse errors", count)
 	}
 	fields := module.Decls[0].(*ast.TypeDecl).RecordFields
 	if len(fields[0].Attributes) != 1 || len(fields[0].Attributes[0].Exprs) != 1 || len(fields[1].Attributes[0].Exprs) != 2 {
 		t.Fatalf("attributes lost: %+v", fields)
+	}
+	for _, src := range []string{
+		"type T = { #[Json.Default `$(`1`) + 2`] x : Int }\nfollowing = `3`\n",
+		"type T = { x : Int #[Json.Default `$(`1`) + 2`] }\nfollowing = `3`\n",
+	} {
+		module, count := parse(src)
+		if count != 0 || len(module.Decls) != 2 {
+			t.Fatalf("quotation/attribute boundaries changed: %d errors, %s", count, ast.Dump(module))
+		}
 	}
 	for _, src := range []string{
 		"type T = { #[] x : Int }\n",

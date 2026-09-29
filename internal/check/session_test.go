@@ -126,7 +126,9 @@ func TestCheckedCacheInvalidatesTransitiveStageClosure(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (make)\nmake = quote 1\n")
+	write(lib, "{-# no-prelude #-}\n"+
+		"module Lib exposing (make)\n"+
+		"make = `1`\n")
 	write(relay, "{-# no-prelude #-}\nmodule Relay exposing (make)\nimport Lib\nmake = Lib.make\n")
 	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Relay\nmain = $(Relay.make)\n")
 	cache := newMemoryObjectCache()
@@ -134,7 +136,9 @@ func TestCheckedCacheInvalidatesTransitiveStageClosure(t *testing.T) {
 	if got := intDefinition(t, first, "Main.main"); got != 1 {
 		t.Fatalf("first splice = %d", got)
 	}
-	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (make)\nmake = quote 2\n")
+	write(lib, "{-# no-prelude #-}\n"+
+		"module Lib exposing (make)\n"+
+		"make = `2`\n")
 	second, events := compileEvents(t, main, cache)
 	if events["checked-cache-hit"]["Relay"] != 1 || events["check"]["Main"] != 1 {
 		t.Fatalf("events after stage edit: %#v", events)
@@ -144,7 +148,9 @@ func TestCheckedCacheInvalidatesTransitiveStageClosure(t *testing.T) {
 	}
 	// A module keeps one artifact, so restoring its earlier source recompiles
 	// it rather than finding the artifact that source once had.
-	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (make)\nmake = quote 1\n")
+	write(lib, "{-# no-prelude #-}\n"+
+		"module Lib exposing (make)\n"+
+		"make = `1`\n")
 	third, events := compileEvents(t, main, cache)
 	if events["checked-cache-miss"]["Lib"] != 1 || events["check"]["Lib"] != 1 || events["check"]["Main"] != 1 {
 		t.Fatalf("a restored source was served from a superseded artifact: %#v", events)
@@ -218,11 +224,16 @@ func TestCheckedCacheIgnoresDependencyCommentPositions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (make)\nmake = quote \"same\"\n")
+	write(lib, "{-# no-prelude #-}\n"+
+		"module Lib exposing (make)\n"+
+		"make = `\"same\"`\n")
 	write(main, "{-# no-prelude #-}\nmodule Main exposing (main)\nimport Lib\nmain = $(Lib.make)\n")
 	cache := newMemoryObjectCache()
 	compileEvents(t, main, cache)
-	write(lib, "{-# no-prelude #-}\nmodule Lib exposing (make)\n-- shifted source positions\nmake = quote \"same\"\n")
+	write(lib, "{-# no-prelude #-}\n"+
+		"module Lib exposing (make)\n"+
+		"-- shifted source positions\n"+
+		"make = `\"same\"`\n")
 	_, events := compileEvents(t, main, cache)
 	if events["check"]["Lib"] != 1 || events["checked-cache-hit"]["Main"] != 1 {
 		t.Fatalf("comment edit invalidated downstream stage consumer: %#v", events)
@@ -314,13 +325,12 @@ func TestDependencyStateIsConsumerIndependent(t *testing.T) {
 
 func TestInstalledStageCoreSupportsSplicesAndDeriving(t *testing.T) {
 	d := t.TempDir()
-	baseContent := []byte(`{-# no-prelude #-}
-module Base exposing (make)
-import Basics exposing (Show(..))
-type Seed = Seed deriving (Show)
-identity code = quote $(code)
-make = identity (quote ())
-`)
+	baseContent := []byte("{-# no-prelude #-}\n" +
+		"module Base exposing (make)\n" +
+		"import Basics exposing (Show(..))\n" +
+		"type Seed = Seed deriving (Show)\n" +
+		"identity code = `$(code)`\n" +
+		"make = identity (`()`)\n")
 	basePath := filepath.Join(d, "Base.fango")
 	if err := os.WriteFile(basePath, baseContent, 0o644); err != nil {
 		t.Fatal(err)

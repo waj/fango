@@ -7,8 +7,8 @@ Expansion, reflection visibility, stage execution, and rollback invariants.
 ## Expansion and hygiene
 
 Splices expand during inference so both backends see identical generated code.
-Quotes use the quoting module's resolved AST with original spans plus ordered
-hole expressions; internal/meta owns templates and opaque Code values. Scalar
+Backtick-delimited quotes use the quoting module's resolved AST with original
+spans plus ordered hole expressions; internal/meta owns templates and opaque Code values. Scalar
 lifting builds AST fragments through the same expansion path. Generator spans
 remain available for diagnostics. Generated expressions can combine spans
 from a user declaration and a library quote. Span merging keeps one file's

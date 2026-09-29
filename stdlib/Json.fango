@@ -859,13 +859,13 @@ stringifyValue : Value -> Result Error String
 stringifyValue value = stringify value
 
 sequenceCode : Code -> Code -> Code
-sequenceCode left right = quote { $(left); $(right) }()
+sequenceCode left right = `{ $(left); $(right) }()`
 
 emitCode : String -> Code
-emitCode text = quote (emit $(lift text))
+emitCode text = `emit $(lift text)`
 
 quotedCode : String -> Code
-quotedCode text = quote (emitString $(lift text))
+quotedCode text = `emitString $(lift text)`
 
 recordField : (Code, Bool) -> BoundField -> (Code, Bool)
 recordField (prefix, first) field =
@@ -876,7 +876,7 @@ recordField (prefix, first) field =
         ( sequenceCode prefix
             (sequenceCode (emitCode separator)
                 (sequenceCode (quotedCode settings.key)
-                    (sequenceCode (emitCode ":") (quote (encodeValue $(field.value))))
+                    (sequenceCode (emitCode ":") `encodeValue $(field.value)`)
                 )
             )
         , False
@@ -892,7 +892,7 @@ unionField : Code -> BoundField -> Code
 unionField prefix field =
     separator = if field.index == 0 then "" else ","
     sequenceCode prefix
-        (sequenceCode (emitCode separator) (quote (encodeValue $(field.value))))
+        (sequenceCode (emitCode separator) `encodeValue $(field.value)`)
 
 unionBody : Bound -> Code
 unionBody bound =
@@ -932,34 +932,34 @@ slotValue slot =
     settings = fieldSettings slot.field.name slot.field.attributes
     case settings.fallback of
         Nothing ->
-            quote (case $(slot.cell).read() of
-                Just value -> value
-                Nothing -> withPath $(lift settings.key) { syntaxError $(lift ("Missing JSON field: " ++ settings.key)) })
+            `case $(slot.cell).read() of
+                    Just value -> value
+                    Nothing -> withPath $(lift settings.key) { syntaxError $(lift ("Missing JSON field: " ++ settings.key)) }`
         Just fallback ->
             if settings.skip then fallback
             else
-                quote (case $(slot.cell).read() of
-                    Just value -> value
-                    Nothing -> $(fallback))
+                `case $(slot.cell).read() of
+                        Just value -> value
+                        Nothing -> $(fallback)`
 
 slotHandler : Code -> Code -> Slot -> Code
 slotHandler keyCode fallback slot =
     settings = fieldSettings slot.field.name slot.field.attributes
     if settings.skip then fallback
     else
-        quote (if $(keyCode) == $(lift settings.key) then
-            case $(slot.cell).read() of
-                Nothing -> $(slot.cell).write (Just (withPath $(lift settings.key) { decodeValue() }))
-                Just _ -> withPath $(lift settings.key) { syntaxError $(lift ("Duplicate JSON field: " ++ settings.key)) }
-            else $(fallback))
+        `if $(keyCode) == $(lift settings.key) then
+                case $(slot.cell).read() of
+                    Nothing -> $(slot.cell).write (Just (withPath $(lift settings.key) { decodeValue() }))
+                    Just _ -> withPath $(lift settings.key) { syntaxError $(lift ("Duplicate JSON field: " ++ settings.key)) }
+            else $(fallback)`
 
 recordParser : Ctor -> Items Slot -> Code
 recordParser ctor slots =
     action = Meta.lambda "_json_key" { keyCode ->
-        Meta.foldItems (slotHandler keyCode) (quote (withPath $(keyCode) { skipValue() })) slots
+        Meta.foldItems (slotHandler keyCode) `withPath $(keyCode) { skipValue() }` slots
     }
     values = Meta.mapItems slotValue slots
-    sequenceCode (quote (readFields $(action))) (Meta.construct ctor values)
+    sequenceCode `readFields $(action)` (Meta.construct ctor values)
 
 slotScope : Ctor -> Items Field -> Items Slot -> Code
 slotScope ctor remaining reversed =
@@ -970,21 +970,21 @@ slotScope ctor remaining reversed =
             callback = Meta.lambda name { cellCode ->
                 slotScope ctor rest (Item (Slot { field = field, cell = cellCode }) reversed)
             }
-            quote (Runtime.Local.run Nothing $(callback))
+            `Runtime.Local.run Nothing $(callback)`
 
 nullaryBranch : Code -> Code -> Ctor -> Code
 nullaryBranch tagCode fallback ctor =
     case ctor.fields of
         NoItems ->
-            quote (if $(tagCode) == $(lift ctor.name) then
-                $(Meta.construct ctor NoItems)
-            else $(fallback))
+            `if $(tagCode) == $(lift ctor.name) then
+                    $(Meta.construct ctor NoItems)
+                else $(fallback)`
         _ -> fallback
 
 fieldDecoder : Field -> Code
 fieldDecoder field =
-    if field.index == 0 then quote (withPath $(lift (show field.index)) { decodeValue() })
-    else sequenceCode (quote expectComma()) (quote (withPath $(lift (show field.index)) { decodeValue() }))
+    if field.index == 0 then `withPath $(lift (show field.index)) { decodeValue() }`
+    else sequenceCode `expectComma()` `withPath $(lift (show field.index)) { decodeValue() }`
 
 payloadBranch : Code -> Code -> Ctor -> Code
 payloadBranch tagCode fallback ctor =
@@ -993,19 +993,19 @@ payloadBranch tagCode fallback ctor =
         _ ->
             values = Meta.mapItems fieldDecoder ctor.fields
             result = Meta.construct ctor values
-            quote (if $(tagCode) == $(lift ctor.name) then
-                finishPayload $(result)
-            else $(fallback))
+            `if $(tagCode) == $(lift ctor.name) then
+                    finishPayload $(result)
+                else $(fallback)`
 
 unionParser : Items Ctor -> Code
 unionParser ctors =
     nullary = Meta.lambda "_json_nullary_tag" { tagCode ->
-        Meta.foldItems (nullaryBranch tagCode) (quote (syntaxError "Unknown nullary union tag")) ctors
+        Meta.foldItems (nullaryBranch tagCode) `syntaxError "Unknown nullary union tag"` ctors
     }
     payload = Meta.lambda "_json_payload_tag" { tagCode ->
-        Meta.foldItems (payloadBranch tagCode) (quote (syntaxError "Unknown payload union tag")) ctors
+        Meta.foldItems (payloadBranch tagCode) `syntaxError "Unknown payload union tag"` ctors
     }
-    quote (decodeUnion $(nullary) $(payload))
+    `decodeUnion $(nullary) $(payload)`
 
 deriver Decode
     decodeValue subject _ =

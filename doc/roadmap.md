@@ -94,6 +94,7 @@ Artifact framing, the binary object encoding, and deferred stage sections are
 [Declaration generation](roadmap-meta.md) waits for a concrete consumer and
 must keep public names discoverable without executing generators. Expression
 staging and deriving are already [reference contracts](reference/metaprogramming.md).
+[Direct quotation blocks](roadmap-meta.md#expression-quotation-blocks) remain deferred.
 
 ## REPL hardening
 

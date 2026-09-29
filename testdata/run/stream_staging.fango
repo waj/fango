@@ -16,10 +16,10 @@ total() = Stream.withCursor produce ({ cursor -> foldCursor ({ element acc -> el
 -- A producer factory may already be memoized by an earlier expansion. Its
 -- next traversal must use the lowering installed for the current operand.
 first : Code
-first = quote $(Meta.lift (total()))
+first = `$(Meta.lift (total()))`
 
 answer : Code
-answer = quote ($(first) + $(Meta.lift (total())))
+answer = `$(first) + $(Meta.lift (total()))`
 
 seven : Int
 seven = 7

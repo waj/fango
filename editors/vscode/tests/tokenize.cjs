@@ -63,7 +63,7 @@ async function main() {
   assert(!sharedPragma.some(t => t.scopes.includes('keyword.control.directive.fango')));
   assert(!grammar.tokenizeLine('{-# service #-}').tokens.some(t => t.scopes.includes('keyword.control.directive.fango')));
   assert(grammar.tokenizeLine('resource = 1').tokens.every(t => !t.scopes.includes('keyword.control.directive.fango')));
-  const attribute = '#[Json.Key "foo", Json.Default (quote [1, 2])]';
+  const attribute = '#[Json.Key "foo", Json.Default `[1, 2]`]';
   const attributeTokens = grammar.tokenizeLine(attribute).tokens;
   const attributeScopeAt = index => attributeTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
   assert(attributeScopeAt(0).includes('punctuation.definition.attribute.begin.fango'));
@@ -71,14 +71,14 @@ async function main() {
   assert(attributeScopeAt(attribute.indexOf('"foo"')).some(scope => scope.startsWith('string.')));
   const afterAttribute = grammar.tokenizeLine('#[Example.Tags ["a", "b"]] field : String').tokens;
   assert(!afterAttribute.find(t => t.startIndex <= 26 && t.endIndex > 26).scopes.includes('meta.attribute.fango'));
-  const trailingField = '    , count : Int  #[Json.Default (quote 7)]';
+  const trailingField = '    , count : Int  #[Json.Default `7`]';
   const trailingTokens = grammar.tokenizeLine(trailingField).tokens;
   const trailingScopeAt = index => trailingTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
   assert(!trailingScopeAt(trailingField.indexOf('count')).includes('meta.attribute.fango'));
   assert(trailingScopeAt(trailingField.indexOf('#[')).includes('punctuation.definition.attribute.begin.fango'));
   assert(trailingScopeAt(trailingField.length - 1).includes('punctuation.definition.attribute.end.fango'));
   const multilineAttribute = grammar.tokenizeLine('#[Json.Key "foo",');
-  const attributeEnd = grammar.tokenizeLine('  Json.Default (quote 0)] field : Int', multilineAttribute.ruleStack).tokens;
+  const attributeEnd = grammar.tokenizeLine('  Json.Default `0`] field : Int', multilineAttribute.ruleStack).tokens;
   assert(attributeEnd.some(t => t.scopes.includes('punctuation.definition.attribute.end.fango')));
   for (const witness of ['parse @Person input', 'parse @(List Person) input']) {
     const witnessTokens = grammar.tokenizeLine(witness).tokens;
@@ -87,6 +87,33 @@ async function main() {
   }
   const ordinaryAt = grammar.tokenizeLine('x @ y').tokens;
   assert(!ordinaryAt.some(t => t.scopes.includes('keyword.operator.type-witness.fango')));
+
+  const quotation = 'build `show $(value)` `"`"`';
+  const quotationTokens = grammar.tokenizeLine(quotation).tokens;
+  const quoteScopeAt = index => quotationTokens.find(t => t.startIndex <= index && t.endIndex > index).scopes;
+  assert(quoteScopeAt(quotation.indexOf('`')).includes('punctuation.definition.quote.begin.fango'));
+  assert(quoteScopeAt(quotation.indexOf('$(')).includes('keyword.operator.splice.fango'));
+  assert(quoteScopeAt(quotation.lastIndexOf('`')).includes('punctuation.definition.quote.end.fango'));
+  assert(!quoteScopeAt(quotation.indexOf('show')).some(scope => scope.startsWith('string.')));
+  assert(quoteScopeAt(quotation.indexOf('"')).some(scope => scope.startsWith('string.')));
+  assert(!grammar.tokenizeLine('quote = 1').tokens.some(t => t.scopes.includes('keyword.control.fango')));
+
+  const holeQuotation = '`$(`1`) + 2`';
+  const holeTokens = grammar.tokenizeLine(holeQuotation).tokens;
+  const delimiters = holeTokens.filter(t => t.scopes.some(scope => scope.startsWith('punctuation.definition.quote.')));
+  assert.deepEqual(delimiters.map(t => t.scopes.at(-1)), [
+    'punctuation.definition.quote.begin.fango',
+    'punctuation.definition.quote.begin.fango',
+    'punctuation.definition.quote.end.fango',
+    'punctuation.definition.quote.end.fango',
+  ]);
+  let quotationStack = textmate.INITIAL;
+  for (const line of ['code = `case True of', '    True -> "`" -- `', "    False -> '`' {- ` -}", '`', 'following = 1']) {
+    const result = grammar.tokenizeLine(line, quotationStack);
+    assert(!result.stoppedEarly);
+    quotationStack = result.ruleStack;
+    if (line === 'following = 1') assert(result.tokens.every(t => !t.scopes.includes('meta.quote.fango')));
+  }
 
   const handler = 'handle action() with state = 0 of';
   const handlerTokens = grammar.tokenizeLine(handler).tokens;

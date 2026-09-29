@@ -1,5 +1,5 @@
-answer = quote (6 * 7)
+answer = `6 * 7`
 
-twice c = quote ($(c) + $(c))
+twice c = `$(c) + $(c)`
 
 main = print $(twice answer)

@@ -1,5 +1,5 @@
-wrap c = quote ($(c) + 1)
+wrap c = `$(c) + 1`
 
 main() =
     n = 1
-    print $(wrap (quote n))
+    print $(wrap (`n`))

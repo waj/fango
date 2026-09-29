@@ -1,6 +1,6 @@
 package infer
 
-// The compile-time stage. `quote` goes up a stage and `$(…)` comes back
+// The compile-time stage. A backtick quotation goes up a stage and `$(…)` comes back
 // down, and the two are the entire staging surface (doc/design.md,
 // "Compile-time metaprogramming").
 //

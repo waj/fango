@@ -7,8 +7,16 @@ import (
 )
 
 func TestAttributedFieldsUseSeparateAlignedLines(t *testing.T) {
-	input := "type Config = { #[Json.Key \"foo\"] #[Db.Column \"foo\"] foo : String, #[Json.Key \"bar\", Json.Default (quote 0)] bar : Int, plain : Bool } deriving (Show)\n"
-	want := "type Config =\n    { #[Json.Key \"foo\"]\n      #[Db.Column \"foo\"]\n      foo : String\n    , #[Json.Key \"bar\", Json.Default (quote 0)]\n      bar : Int\n    , plain : Bool\n    }\n    deriving (Show)\n"
+	input := "type Config = { #[Json.Key \"foo\"] #[Db.Column \"foo\"] foo : String, #[Json.Key \"bar\", Json.Default `0`] bar : Int, plain : Bool } deriving (Show)\n"
+	want := "type Config =\n" +
+		"    { #[Json.Key \"foo\"]\n" +
+		"      #[Db.Column \"foo\"]\n" +
+		"      foo : String\n" +
+		"    , #[Json.Key \"bar\", Json.Default `0`]\n" +
+		"      bar : Int\n" +
+		"    , plain : Bool\n" +
+		"    }\n" +
+		"    deriving (Show)\n"
 	for _, text := range []string{input, want} {
 		out, errs := Source(source.NewFile("attributes.fango", []byte(text)))
 		if len(errs) > 0 {
@@ -43,15 +51,14 @@ func TestAttributeGroupsPreserveExpressionsAndComments(t *testing.T) {
 }
 
 func TestTrailingFieldAttributesAlign(t *testing.T) {
-	input := "type Config = { name : String #[Json.Key \"full_name\"], count : Int #[Json.Default (quote 7)], secret : String #[Json.Skip, Json.Default (quote \"local\")], muchLongerPlainField : List String } deriving (Encode, Decode)\n"
-	want := `type Config =
-    { name : String    #[Json.Key "full_name"]
-    , count : Int      #[Json.Default (quote 7)]
-    , secret : String  #[Json.Skip, Json.Default (quote "local")]
-    , muchLongerPlainField : List String
-    }
-    deriving (Encode, Decode)
-`
+	input := "type Config = { name : String #[Json.Key \"full_name\"], count : Int #[Json.Default `7`], secret : String #[Json.Skip, Json.Default `\"local\"`], muchLongerPlainField : List String } deriving (Encode, Decode)\n"
+	want := "type Config =\n" +
+		"    { name : String    #[Json.Key \"full_name\"]\n" +
+		"    , count : Int      #[Json.Default `7`]\n" +
+		"    , secret : String  #[Json.Skip, Json.Default `\"local\"`]\n" +
+		"    , muchLongerPlainField : List String\n" +
+		"    }\n" +
+		"    deriving (Encode, Decode)\n"
 	for _, text := range []string{input, want} {
 		out, errs := Source(source.NewFile("attributes.fango", []byte(text)))
 		if len(errs) > 0 || string(out) != want {
@@ -61,26 +68,24 @@ func TestTrailingFieldAttributesAlign(t *testing.T) {
 }
 
 func TestFieldAttributePlacementAndContinuation(t *testing.T) {
-	input := `type Config =
-    { #[Leading "a"]
-      name : String #[Trailing "a"] #[Other "a"]
-    , count : Int
-      #[Default (quote 7)]
-      #[Note "b"]
-    , #[Leading "c"]
-      secret : String
-    }
-`
-	want := `type Config =
-    { #[Leading "a"]
-      name : String  #[Trailing "a"] #[Other "a"]
-    , count : Int
-          #[Default (quote 7)]
-          #[Note "b"]
-    , #[Leading "c"]
-      secret : String
-    }
-`
+	input := "type Config =\n" +
+		"    { #[Leading \"a\"]\n" +
+		"      name : String #[Trailing \"a\"] #[Other \"a\"]\n" +
+		"    , count : Int\n" +
+		"      #[Default `7`]\n" +
+		"      #[Note \"b\"]\n" +
+		"    , #[Leading \"c\"]\n" +
+		"      secret : String\n" +
+		"    }\n"
+	want := "type Config =\n" +
+		"    { #[Leading \"a\"]\n" +
+		"      name : String  #[Trailing \"a\"] #[Other \"a\"]\n" +
+		"    , count : Int\n" +
+		"          #[Default `7`]\n" +
+		"          #[Note \"b\"]\n" +
+		"    , #[Leading \"c\"]\n" +
+		"      secret : String\n" +
+		"    }\n"
 	for _, text := range []string{input, want} {
 		out, errs := Source(source.NewFile("attributes.fango", []byte(text)))
 		if len(errs) > 0 || string(out) != want {

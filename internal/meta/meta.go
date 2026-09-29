@@ -67,7 +67,7 @@ func (r *TypeRepr) Derive(t types.Type) *TypeRepr {
 	return &TypeRepr{Type: t, Visible: r.Visible, Schema: r.Schema}
 }
 
-// Template is one `quote` occurrence: the resolved expression it describes
+// Template is one quotation occurrence: the resolved expression it describes
 // plus its holes in source order. Holes are the `$(…)` nodes inside Body;
 // splicing replaces each with the code its hole evaluated to.
 type Template struct {

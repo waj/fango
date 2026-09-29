@@ -20,6 +20,9 @@ type lexer struct {
 	toks     []token.Token
 	comments []token.Comment
 	errs     []diag.Error
+	// Expected closing punctuation distinguishes symmetric backticks. A
+	// parenthesized splice operand can open a quotation inside another quote.
+	delimiters []token.Kind
 }
 
 // Lex scans the entire file, discarding comments. The returned slice always
@@ -412,6 +415,15 @@ func (l *lexer) lexOperator(start int) {
 		l.emit(token.ATTRIBUTE, start, l.pos)
 		return
 	}
+	if c == '`' {
+		kind := token.LQUOTE
+		if n := len(l.delimiters); n > 0 && l.delimiters[n-1] == token.RQUOTE {
+			kind = token.RQUOTE
+		}
+		l.pos++
+		l.emit(kind, start, l.pos)
+		return
+	}
 	if c == '@' && (isUpper(l.peekAt(1)) || l.peekAt(1) == '(') {
 		l.pos++
 		l.emit(token.ATTYPE, start, l.pos)
@@ -462,6 +474,20 @@ func (l *lexer) lexOperator(start int) {
 }
 
 func (l *lexer) emit(k token.Kind, start, end int) {
+	switch k {
+	case token.LPAREN, token.DOLLARPAREN:
+		l.delimiters = append(l.delimiters, token.RPAREN)
+	case token.LBRACKET, token.ATTRIBUTE:
+		l.delimiters = append(l.delimiters, token.RBRACKET)
+	case token.LBRACE:
+		l.delimiters = append(l.delimiters, token.RBRACE)
+	case token.LQUOTE:
+		l.delimiters = append(l.delimiters, token.RQUOTE)
+	case token.RPAREN, token.RBRACKET, token.RBRACE, token.RQUOTE:
+		if n := len(l.delimiters); n > 0 && l.delimiters[n-1] == k {
+			l.delimiters = l.delimiters[:n-1]
+		}
+	}
 	l.toks = append(l.toks, token.Token{
 		Kind: k,
 		Text: string(l.f.Content[start:end]),

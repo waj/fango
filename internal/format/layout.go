@@ -54,6 +54,8 @@ func (p *printer) renderExpr(e ast.Expr, ind int) bool {
 		return p.renderIf(e, ind)
 	case *ast.Lambda:
 		return p.renderLambda(e, ind)
+	case *ast.Quote:
+		return p.renderQuote(e, ind)
 	case *ast.OpChain:
 		return p.renderOpChain(e, ind)
 	case *ast.App:
@@ -72,6 +74,36 @@ func (p *printer) renderExpr(e ast.Expr, ind int) bool {
 	// A break inside an application, an operator run, or a record literal is
 	// not reproduced yet.
 	return false
+}
+
+// renderQuote preserves the body's line breaks and gives a multiline close
+// the same alignment as other expression delimiters. The AST retains both
+// backticks, including when grouping parentheses inside the body were omitted.
+func (p *printer) renderQuote(e *ast.Quote, ind int) bool {
+	open, close, ok := p.delimiterTokens(e.Sp, token.LQUOTE, token.RQUOTE)
+	if !ok {
+		return false
+	}
+	f := e.Sp.File
+	base := ind
+	p.emit("`")
+	if brokeBetween(f, p.toks[open].Span.End, e.Body.Span().Start) {
+		if !p.placeBefore(e.Body.Span().Start, ind+Indent) {
+			return false
+		}
+		p.start(ind + Indent)
+	}
+	if !p.renderExpr(e.Body, ind+Indent) {
+		return false
+	}
+	if !p.placeBefore(p.toks[close].Span.Start, ind+Indent) {
+		return false
+	}
+	if brokeBetween(f, e.Body.Span().End, p.toks[close].Span.Start) {
+		p.start(base)
+	}
+	p.emit("`")
+	return true
 }
 
 // renderBlock writes statement lines followed by the result, all aligned at

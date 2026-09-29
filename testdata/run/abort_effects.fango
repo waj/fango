@@ -83,7 +83,7 @@ recursiveFailure n =
 compileChoice : () -> Code
 compileChoice() =
     handle fail "compile-time" of
-        fail _ -> quote 17
+        fail _ -> `17`
         return code -> code
 
 markedError() =

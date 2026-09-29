@@ -50,6 +50,10 @@ lines, it starts below the arrow or, for a Unit lambda, below the opening brace.
 For a lambda used directly as a list item, tuple item, or record field value,
 the closing brace aligns with the item or field name after its leading
 punctuation. The container's own closing delimiter keeps its usual alignment.
+Quotation spans retain both backticks. The printer renders their contents as
+ordinary expressions, preserving body line breaks; a closing backtick written
+on its own line aligns with the enclosing expression layout. Quotations are
+atoms and do not require parentheses in argument position.
 The printer consults matching tokens because grouping parentheses are absent
 from expression spans.
 
