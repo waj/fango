@@ -234,3 +234,169 @@ func TestLeadingCommentsAcrossPragma(t *testing.T) {
 		t.Fatalf("trailing comment became docs = %q", got)
 	}
 }
+
+func TestAttributeExpressionNavigation(t *testing.T) {
+	root := t.TempDir()
+	options := `module Options exposing (Label(..), tag, fallback)
+type Label = Label String
+-- Computes a label.
+tag : String -> Label
+tag text = Label text
+fallback = 7
+`
+	main := `module Main exposing (main)
+import Options as O
+import Json
+#[O.tag "type"]
+type Choice = #[O.Label "constructor"] Choice #[O.Label "payload"] Int
+type Config =
+    { #[O.tag "leading"]
+      x : Int #[O.Label "trailing", Json.Default (quote O.fallback)]
+    , y : Int #[O.tag ({ text -> text } "lambda")]
+    , z : Int #[typeOf O.Label]
+    }
+main = "ok"
+`
+	for name, data := range map[string]string{"Options.fango": options, "Main.fango": main} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entry := filepath.Join(root, "Main.fango")
+	result, errs, internal := (&check.Session{DisableObjectCache: true}).Compile(entry)
+	if internal != nil || len(errs) > 0 {
+		t.Fatalf("check: %v %v", internal, errs)
+	}
+	idx := newIndex(root, result)
+	for _, tc := range []struct{ marker, target string }{
+		{`O.tag "type"`, "value:Options.tag"},
+		{`O.Label "constructor"`, "ctor:Options.Label"},
+		{`O.Label "payload"`, "ctor:Options.Label"},
+		{`O.tag "leading"`, "value:Options.tag"},
+		{`O.Label "trailing"`, "ctor:Options.Label"},
+		{`Json.Default`, "ctor:Json.Default"},
+		{`O.fallback`, "value:Options.fallback"},
+		{`O.tag ({`, "value:Options.tag"},
+		{`O.Label]`, "type:Options.Label"},
+	} {
+		offset := strings.Index(main, tc.marker)
+		found := false
+		for _, use := range idx.documents[entry].uses {
+			if use.span.Start == offset && use.target == tc.target {
+				found = true
+				if sym := idx.symbols[use.target]; sym.span.File == nil || sym.typeText == "" {
+					t.Errorf("missing definition or hover type for %s", tc.marker)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("no navigation target for %s", tc.marker)
+		}
+	}
+	if got := idx.symbols["value:Options.tag"].docs; got != "Computes a label." {
+		t.Fatalf("helper hover docs = %q", got)
+	}
+	binder := strings.Index(main, "text ->")
+	useOffset := strings.Index(main, "text }")
+	var binderID, useID string
+	for _, use := range idx.documents[entry].uses {
+		if use.span.Start == binder {
+			binderID = use.target
+		}
+		if use.span.Start == useOffset {
+			useID = use.target
+		}
+	}
+	if binderID == "" || binderID != useID || !strings.HasPrefix(binderID, "local:") {
+		t.Fatalf("attribute local binder = %q, use = %q", binderID, useID)
+	}
+	// Find References uses the same index, including references from modules
+	// that are not open and only mention a helper inside an attribute.
+	otherPath := filepath.Join(root, "Other.fango")
+	other := "module Other exposing (T)\nimport Options\ntype T = { x : Int #[Options.tag \"unopened\"] }\n"
+	if err := os.WriteFile(otherPath, []byte(other), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	indexes, err := scanWorkspace(context.Background(), []string{root}, nil, nil, []byte("tag"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs, err := references(context.Background(), indexes, nil, "value:Options.tag", idx.symbols["value:Options.tag"], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, ref := range refs {
+		counts[ref.URI]++
+	}
+	if counts[pathURI(entry)] != 3 || counts[pathURI(otherPath)] != 1 {
+		t.Fatalf("attribute references = %#v", refs)
+	}
+}
+
+func TestDocumentationAcrossLeadingAttributes(t *testing.T) {
+	root := t.TempDir()
+	entry := filepath.Join(root, "Main.fango")
+	text := `module Main exposing (main)
+type Label = Label String
+-- Type documentation.
+#[Label "first"]
+#[Label
+    -- Payload comment, not documentation.
+    "second"
+]
+type Config =
+    {
+      -- Leading field documentation.
+      #[Label "field"]
+      x : Int
+    , -- Not documentation.
+      -- Trailing field documentation.
+      y : Int #[Label "trailing"]
+    , -- Not documentation.
+      -- Detached field documentation.
+
+      #[Label "detached"]
+      z : Int
+    }
+-- Union documentation.
+#[Label "union"]
+type Choice =
+    -- Constructor documentation.
+    #[Label
+        "constructor"
+    ]
+    Choice Int
+-- Resource documentation.
+#[Label "resource"]
+{-# resource #-}
+type Handle = Handle
+-- Detached type documentation.
+#[Label "detached"]
+
+type Detached = Detached
+main = "ok"
+`
+	if err := os.WriteFile(entry, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, errs, internal := (&check.Session{DisableObjectCache: true}).Compile(entry)
+	if internal != nil || len(errs) > 0 {
+		t.Fatalf("check: %v %v", internal, errs)
+	}
+	idx := newIndex(root, result)
+	for name, want := range map[string]string{
+		"type:Main.Config":    "Type documentation.",
+		"field:Main.Config.x": "Leading field documentation.",
+		"field:Main.Config.y": "Trailing field documentation.",
+		"field:Main.Config.z": "",
+		"type:Main.Choice":    "Union documentation.",
+		"ctor:Main.Choice":    "Constructor documentation.",
+		"type:Main.Handle":    "Resource documentation.",
+		"type:Main.Detached":  "",
+	} {
+		if got := idx.symbols[name].docs; got != want {
+			t.Errorf("%s docs = %q, want %q", name, got, want)
+		}
+	}
+}

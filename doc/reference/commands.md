@@ -308,10 +308,12 @@ the extension's npm dependencies before loading it from a local symlink.
 
 Go to Definition follows values, functions, operators, types, constructors,
 effect operations, imported modules, local binders, and nominal record fields
-across local modules and the bundled library. Hover shows a named symbol's
-type where one is available. A contiguous group of `--` or `{- … -}` comments
-immediately above a declaration appears below its type; a declaration pragma
-may sit between the comments and annotation. A blank line ends the group.
+across local modules and the bundled library, including names in attribute
+expressions and their quoted code. Hover shows a named symbol's type where one
+is available. A contiguous group of `--` or `{- … -}` comments immediately above
+a declaration appears below its type; declaration pragmas and leading attribute
+tags may sit between the comments and declaration or annotation. Multiline tag
+contents do not become hover documentation. A blank line ends the group.
 Bundled library files can also be opened directly for navigation and hover.
 Find References searches `.fango` files in the workspace folders, including
 unopened modules that import the queried symbol, and reachable bundled library

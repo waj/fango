@@ -87,7 +87,7 @@ func (i *index) path(f *source.File) string {
 func global(kind, name string) string { return kind + ":" + name }
 func local(sp source.Span) string     { return "local:" + sp.File.Name + ":" + itoa(sp.Start) }
 
-func (i *index) define(id string, sp source.Span, typeText string, ann *ast.TypeAnn) {
+func (i *index) define(id string, sp source.Span, typeText string, ann *ast.TypeAnn, attributes ...ast.AttributeGroup) {
 	if sp.File == nil {
 		return
 	}
@@ -95,7 +95,7 @@ func (i *index) define(id string, sp source.Span, typeText string, ann *ast.Type
 	if ann != nil {
 		anchor = ann.Sp
 	}
-	i.symbols[id] = symbol{span: sp, path: i.path(sp.File), typeText: typeText, docs: i.commentBefore(anchor)}
+	i.symbols[id] = symbol{span: sp, path: i.path(sp.File), typeText: typeText, docs: i.commentBefore(anchor, attributes...)}
 	i.use(sp, id)
 }
 
@@ -118,13 +118,13 @@ func (i *index) declare(decl ast.Decl) {
 		}
 		i.define(global("value", d.Name), d.NameSpan, text, d.Ann)
 	case *ast.TypeDecl:
-		i.define(global("type", d.Name), d.NameSpan, typeHead("type", d.Name, d.Params), nil)
+		i.define(global("type", d.Name), d.NameSpan, typeHead("type", d.Name, d.Params), nil, d.Attributes...)
 		for _, c := range d.Ctors {
 			text := ""
 			if info := ck.Ctors[c.Name]; info != nil {
 				text = types.SurfaceName(c.Name) + " : " + types.Show(info.ValueType())
 			}
-			i.define(global("ctor", c.Name), c.NameSpan, text, nil)
+			i.define(global("ctor", c.Name), c.NameSpan, text, nil, c.Attributes...)
 		}
 		var adt *types.ADTInfo
 		if tc, ok := ck.TypeNames[d.Name].(*types.TCon); ok {
@@ -137,7 +137,7 @@ func (i *index) declare(decl ast.Decl) {
 					text = f.Name + " : " + types.Show(field.Type)
 				}
 			}
-			i.define(global("field", d.Name+"."+f.Name), f.NameSpan, text, nil)
+			i.define(global("field", d.Name+"."+f.Name), f.NameSpan, text, nil, f.Attributes...)
 		}
 	case *ast.EffectDecl:
 		i.define(global("type", d.Name), d.NameSpan, typeHead("effect", d.Name, d.Params), nil)
@@ -201,6 +201,11 @@ func (i *index) module(m *ast.Module) {
 			i.pattern(d.Pattern, nil, false)
 			i.expr(d.Body, nil)
 		case *ast.TypeDecl:
+			d.VisitAttributes(func(group *ast.AttributeGroup) {
+				for _, expression := range group.Exprs {
+					i.expr(expression, nil)
+				}
+			})
 			for _, c := range d.Ctors {
 				for _, arg := range c.Args {
 					i.typ(arg)
@@ -530,7 +535,7 @@ func (i *index) expr(e ast.Expr, s scope) {
 	}
 }
 
-func (i *index) commentBefore(anchor source.Span) string {
+func (i *index) commentBefore(anchor source.Span, attributes ...ast.AttributeGroup) string {
 	if anchor.File == nil {
 		return ""
 	}
@@ -539,6 +544,24 @@ func (i *index) commentBefore(anchor source.Span) string {
 	comments := i.docs[f]
 	var chunks []string
 	for line > 0 {
+		// Skip only this declaration's leading tags, using parsed spans so
+		// nested brackets and comments inside multiline payloads stay opaque.
+		// Trailing field tags cannot bridge documentation from another field.
+		skipped := false
+		for _, group := range attributes {
+			if group.Sp.Start >= anchor.Start {
+				continue
+			}
+			start, end := group.Sp.StartPos().Line, group.Sp.EndPos().Line
+			if start <= line && line <= end {
+				line = start - 1
+				skipped = true
+				break
+			}
+		}
+		if skipped {
+			continue
+		}
 		trim := strings.TrimSpace(f.Line(line))
 		if strings.HasPrefix(trim, "{-#") && strings.HasSuffix(trim, "#-}") {
 			line--
