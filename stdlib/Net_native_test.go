@@ -1,9 +1,29 @@
 package native
 
 import (
+	"bufio"
 	"net"
 	"testing"
 )
+
+func TestConnectionReadUsesAvailableBytes(t *testing.T) {
+	local, peer := net.Pipe()
+	t.Cleanup(func() { _ = local.Close(); _ = peer.Close() })
+	connection := &connection{value: local, reader: bufio.NewReader(local)}
+	go func() {
+		_, _ = peer.Write([]byte("hello"))
+		_ = peer.Close()
+	}()
+	for _, check := range []struct {
+		max  int64
+		want string
+	}{{2, "he"}, {8, "llo"}, {8, ""}} {
+		got, err := ReadConnectionBytes(connection, check.max)
+		if err != nil || string(got) != check.want || cap(got) != len(got) {
+			t.Fatalf("read(max=%d) = %q len=%d cap=%d, err=%v; want %q", check.max, got, len(got), cap(got), err, check.want)
+		}
+	}
+}
 
 func TestSocketOpaqueValuesRoundTrip(t *testing.T) {
 	listenerValue, err := Listen(0)

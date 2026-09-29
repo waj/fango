@@ -24,6 +24,7 @@ The bundled library is experimental and versioned with the compiler.
 | Bytes | [Byte sequences](reference/library-bytes.md) |
 | Reader, Writer, Bytes.Source, Bytes.Sink | [Buffered readers and writers](reference/library-readers.md) |
 | IO, File, Net | [Console, process, files, sockets, and structured errors](reference/library-io.md) |
+| Http, Http.Server, Http.Route, Http.GZip | [HTTP/1.1 server and middleware](reference/library-http.md) |
 | Fail, Failure, State, Random, Runtime.Local | [Effect APIs](reference/library-effects.md) |
 | Runtime.Scope | [Cleanup scopes](reference/resources.md) |
 | Async | [Tasks, handlers, cancellation, and channels](reference/library-async.md) |

@@ -1,0 +1,19 @@
+import Async
+import Bytes
+import Http exposing (ResponseBody(..))
+import Http.Server
+
+hello : Http.Request e ->{e} Http.Response e
+hello request = Http.Response
+    { status = 200
+    , headers = []
+    , body = BytesBody (Bytes.fromString request.target)
+    }
+
+main() =
+    print (Async.run {
+        stop = Async.channel 1
+        ignore (Async.send stop ())
+        config = Http.Server.defaultConfig 0
+        Http.Server.serve { config | workers = 2 } stop hello
+    })

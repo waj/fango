@@ -17,8 +17,8 @@ Measure immutable cons allocation and task overhead on an idle host using the
 retained historical comparisons. Improve private bulk List construction only
 when measurements justify it, preserving immutable published nodes. Add task
 combinators when concrete applications need them, using the existing closure
-invocation boundary. Cancellation-aware blocking IO for concurrent servers is
-tracked under [HTTP and a concurrent server](roadmap-io.md#concurrent-server).
+invocation boundary. Cancellation-aware socket IO is implemented through
+[Net](reference/library-io.md#net).
 
 ## Builder blocks and generators
 
@@ -45,13 +45,11 @@ for otherwise unavailable semantics or measured performance needs.
 
 ## HTTP and a concurrent server
 
-Byte IO is implemented through files and sockets: [byte
-sequences](reference/library-bytes.md) owns `Bytes` and its `Source` and
-`Sink`, [buffered readers and writers](reference/library-readers.md) owns
-`Reader`, `Writer`, and every stage above them, and [IO and
-files](reference/library-io.md) owns the file and socket adapters. [HTTP and a
-server](roadmap-io.md) owns what is left. The [Async boundary](reference/library-async.md) supports shared native handles;
-server applications and cancellation-aware blocking IO remain unfinished.
+[HTTP/1.1 framing and the concurrent server](reference/library-http.md) are
+implemented over [buffered readers and writers](reference/library-readers.md),
+[Net](reference/library-io.md#net), and [Async](reference/library-async.md).
+[HTTP follow-up work](roadmap-io.md) tracks transport acceptance coverage and
+future protocol variants.
 
 ## Addressing a specific handler
 

@@ -55,6 +55,8 @@ over : Source e -> (Reader s ->{s} a) ->{e} a
 overBytes : Bytes -> (Reader s ->{s} a) ->{e} a
 {-# scoped s #-}
 limited : Reader e -> Int -> (Reader s ->{s} a) ->{e} a
+{-# scoped s #-}
+limitedRemaining : Reader e -> Int -> (Reader s ->{s} a) ->{e} (a, Int, Bool)
 ensure : Reader e -> Int ->{e} Bool
 atEnd : Reader e ->{e} Bool
 readUpTo : Reader e -> Int ->{e} Bytes
@@ -105,6 +107,8 @@ after what was consumed rather than after the allowance; a caller that wants
 the rest of a frame discarded skips it before leaving. Because a reader is a
 value the parent stays reachable, so both the framed and the raw reader can be
 held at once.
+`limitedRemaining` also returns the unused allowance and whether the parent
+reported end of input before that allowance was consumed.
 
 `ensure reader n` grows the buffer until it holds `n` bytes, answering whether
 it does; it consumes nothing. `atEnd` is `ensure` for one byte, inverted.

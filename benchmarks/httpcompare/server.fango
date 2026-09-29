@@ -1,0 +1,25 @@
+import Async
+import Bytes
+import Http exposing (ResponseBody(..))
+import Http.Server
+import IO
+import String
+
+respond : Http.Request e ->{e} Http.Response e
+respond _ = Http.Response
+    { status = 200
+    , headers = []
+    , body = BytesBody (Bytes.fromString "Hello, world")
+    }
+
+main() =
+    case IO.args() of
+        [raw] ->
+            case String.toInt raw of
+                Just port ->
+                    print (Async.run {
+                            stop = Async.channel 1
+                            Http.Server.serve (Http.Server.defaultConfig port) stop respond
+                    })
+                Nothing -> IO.exit 2
+        _ -> IO.exit 2

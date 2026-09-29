@@ -45,7 +45,7 @@ func (ck *Checker) checkScopedDeclaration(d *ast.ValueDecl, ty types.Type, tv *T
 	if !ok || len(fn.Eff.Labels) != 0 || !types.Equal(fn.Eff.Tail, v) {
 		return fail("The final callback must have one argument and perform exactly the scoped row.")
 	}
-	outside := append(append([]types.Type(nil), args[:arity-1]...), result, fn.Ret)
+	outside := append(append([]types.Type(nil), args[:arity-1]...), result)
 	cursor := ty
 	for range arity {
 		arrow := cursor.(*types.TFun)
@@ -56,7 +56,7 @@ func (ck *Checker) checkScopedDeclaration(d *ast.ValueDecl, ty types.Type, tv *T
 		ids := map[int]bool{}
 		collectVarIDs(t, ids)
 		if ids[v.ID] {
-			return fail("The scoped row may occur only in the final callback's argument and effect row.")
+			return fail("The scoped row may occur only in the final callback's argument, effect row, and result.")
 		}
 	}
 	if len(d.Ann.Preds) != 0 {

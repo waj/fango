@@ -26,7 +26,7 @@ func NewEvidenceFork(overrides *EvidenceRow) *EvidenceFork {
 
 func evidenceFamily(row *EvidenceRow, name string) (EvidenceFamily, bool) {
 	for ; row != nil; row = row.tail {
-		if family, ok := row.fields[name]; ok {
+		if family, ok := row.find(name); ok {
 			return family, true
 		}
 	}
@@ -85,18 +85,23 @@ func ForkEvidence[T any](fork *EvidenceFork, origin *EvidenceOrigin, mode Eviden
 
 // Row rebuilds visible bindings only. A shadowed tail entry is not inherited.
 func (f *EvidenceFork) Row(row *EvidenceRow) *EvidenceRow {
-	fields := make(map[string]EvidenceFamily)
+	seen := make(map[string]bool)
+	var bindings []EvidenceBinding
 	for ; row != nil; row = row.tail {
-		for name, family := range row.fields {
-			if _, exists := fields[name]; !exists {
-				fields[name] = f.Family(family.Origin)
+		for index := 0; index < row.count; index++ {
+			var binding EvidenceBinding
+			if index < len(row.inline) {
+				binding = row.inline[index]
+			} else {
+				binding = row.extra[index-len(row.inline)]
+			}
+			if !seen[binding.Name] {
+				seen[binding.Name] = true
+				bindings = append(bindings, EvidenceBinding{Name: binding.Name, Family: f.Family(binding.Family.Origin)})
 			}
 		}
 	}
-	if len(fields) == 0 {
-		return nil
-	}
-	return &EvidenceRow{fields: fields}
+	return ExtendEvidenceRow(nil, bindings...)
 }
 
 // DeferredEvidenceOrigin follows the same immutable row projection as the

@@ -60,6 +60,13 @@ callbacks merely because the handler can supply them. Elaboration captures the
 activation evidence when adapting a bound callable. [Resources and
 evidence](ownership.md) describes the retained structural metadata.
 
+A scoped runner may receive a callback whose result also mentions its fresh
+permission. The runner can consume that result while the permission is active;
+its own result, residual effects, and reachable outer bindings remain outside
+the scope. Source inference checks those boundaries after solving the group,
+and Core lint checks that a scoped call's outward signature has no fresh
+permission.
+
 ## Abort and cleanup protocol
 
 Abort evidence carries a fresh runtime target pointer to a non-zero-sized

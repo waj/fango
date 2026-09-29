@@ -2,7 +2,8 @@
 module Async exposing
     ( Async, Channel, Outcome(..), Task
     , await, awaitResult, cancel, cancelScope, cancelled, channel, checkpoint
-    , close, completed, parMap, receive, run, send, sleep, spawn, wait, within
+    , close, completed, contextToken, parMap, receive, run, send, sleep, spawn
+    , wait, within
     )
 
 import Basics exposing (..)
@@ -45,6 +46,12 @@ childScope : Scope err -> Scope err
 childScope = native
 scopeContext : Scope err -> Context
 scopeContext = native
+
+-- Opaque cancellation token for blocking native IO owned by this task.
+contextToken : () ->{Async err} Runtime.Native.Any
+contextToken() =
+    case scopeContext current() of
+        Context value -> value
 scopeCancelled : Scope err -> Bool
 scopeCancelled = native
 cancelOwner : Scope err -> ()

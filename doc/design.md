@@ -47,6 +47,7 @@ completion order, stage-only values, evaluator integration, and rollback.
 adapters, specialization, ANF, and independent lint.
 [Native tasks and explicit streams](design/tasks.md) — closure invocation,
 handler inheritance, goroutine scopes, and library traversal.
+[HTTP over streams](design/http.md) — framing, connection ownership, and middleware composition.
 
 ## Go backend and runtime
 

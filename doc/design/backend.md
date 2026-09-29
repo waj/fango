@@ -25,6 +25,12 @@ erase to Unit. Class dictionaries and factories use the ordinary typed internal
 ABI. [Effect transport](effects.md#direct-exit-and-machine) and
 [Core](core.md) own family/evidence contracts.
 
+Residual effect evidence rows are immutable linked layers. The common layer
+with one or two bindings stores them inline; wider layers store additional
+bindings in a slice. Lookup walks the layers from the innermost outward so
+shadowing and child task inheritance retain their lexical meaning without
+allocating a Go map for every ordinary extension.
+
 
 ## List representation
 

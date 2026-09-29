@@ -188,3 +188,12 @@ separate lock covering the whole byte sequence. Closing a connection can
 interrupt a blocked read or write and makes later operations fail. These
 runtime guarantees support shared handles in [Async tasks](library-async.md).
 Task cancellation does not automatically close the connection.
+
+`acceptAsync` scopes an accepted connection like `accept` and closes the
+listener when its waiting task is cancelled. `sourceAsync` and `sinkAsync`
+expose the same byte interfaces while closing the connection when a blocked
+operation's task is cancelled. `stopListener` closes a listener idempotently;
+`listenerStopped` reports whether it has closed. `setReadDeadline` and
+`setWriteDeadline` set socket deadlines in milliseconds from now; a
+nonpositive value clears the deadline. These operations support the
+[HTTP server](library-http.md#server).

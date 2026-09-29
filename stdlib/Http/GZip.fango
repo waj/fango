@@ -1,0 +1,137 @@
+{-# no-prelude #-}
+module Http.GZip exposing (wrap)
+
+import Basics exposing (..)
+import Bytes exposing (Bytes)
+import Http exposing (Request(..), Response(..), ResponseBody(..))
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Runtime.Native
+import String
+import Writer exposing (Writer(..))
+
+type Compressor = Compressor Runtime.Native.Any
+
+newCompressor : () -> Compressor
+newCompressor = native
+
+push : Compressor -> Bytes -> Bytes
+push = native
+
+flush : Compressor -> Bytes
+flush = native
+
+finish : Compressor -> Bytes
+finish = native
+
+weight : String -> Int
+weight raw =
+    value = String.trim raw
+    case String.split "." value of
+        ["0"] -> 0
+        ["1"] -> 1000
+        ["0", fraction] ->
+            size = String.length fraction
+            if size > 3 then 0
+            else
+                case String.toInt fraction of
+                    Nothing -> 0
+                    Just digits ->
+                        if size == 0 then 0
+                        else if size == 1 then digits * 100
+                        else if size == 2 then digits * 10
+                        else digits
+        ["1", fraction] ->
+            if fraction == "" || fraction == "0" || fraction == "00" || fraction == "000" then 1000 else 0
+        _ -> 0
+
+quality : List String -> Int
+quality parameters =
+    case parameters of
+        [] -> 1000
+        [parameter] ->
+            case String.split "=" (String.trim parameter) of
+                [name, value] -> if Http.equalAscii (String.trim name) "q" then weight value else 0
+                _ -> 0
+        _ -> 0
+
+codingQuality : String -> List String -> Maybe Int
+codingQuality wanted tokens =
+    case tokens of
+        [] -> Nothing
+        [token | rest] ->
+            case String.split ";" (String.trim token) of
+                [] -> codingQuality wanted rest
+                [name | parameters] ->
+                    if Http.equalAscii (String.trim name) wanted then Just (quality parameters)
+                    else codingQuality wanted rest
+
+hasToken : String -> List String -> Bool
+hasToken wanted tokens =
+    case tokens of
+        [] -> False
+        [token | rest] ->
+            if Http.equalAscii wanted (String.trim token) then True else hasToken wanted rest
+
+acceptsGzip : List Http.Header -> Bool
+acceptsGzip headers =
+    case Http.getHeaders "accept-encoding" headers of
+        [] -> False
+        values ->
+            tokens = String.split "," (joinComma values)
+            case codingQuality "gzip" tokens of
+                Just q -> q > 0
+                Nothing ->
+                    case codingQuality "*" tokens of
+                        Just q -> q > 0
+                        Nothing -> False
+
+joinComma : List String -> String
+joinComma values =
+    case values of
+        [] -> ""
+        [value] -> value
+        [value | rest] -> value ++ "," ++ joinComma rest
+
+vary : List Http.Header -> List Http.Header
+vary headers =
+    existing = joinComma (Http.getHeaders "vary" headers)
+    if hasToken "accept-encoding" (String.split "," existing) || hasToken "*" (String.split "," existing) then headers
+    else [Http.Header { name = "Vary", value = "Accept-Encoding" } | headers]
+
+compressBody : ResponseBody e -> Writer e ->{e} ()
+compressBody original output =
+    compressor = newCompressor()
+    encoded = Writer
+        { emit = { bytes ->
+            data = push compressor bytes
+            if Bytes.length data > 0 then Writer.write output data else ()
+          }
+        , flush = {
+            data = flush compressor
+            if Bytes.length data > 0 then Writer.write output data else ()
+            output.flush()
+          }
+        }
+    case original of
+        Empty -> ()
+        BytesBody bytes -> Writer.write encoded bytes
+        StreamBody body -> body encoded
+    tail = finish compressor
+    Writer.write output tail
+
+wrap : (Request e ->{e} Response e) -> Request e ->{e} Response e
+wrap handler request =
+    response = handler request
+    eligible = request.method /= "HEAD" && response.status /= 204 && response.status /= 304
+        && acceptsGzip request.headers && Http.hasHeader "content-encoding" response.headers == False
+    if eligible then
+        case response.body of
+            Empty -> response
+            body ->
+                Response
+                    { status = response.status
+                    , headers = Http.setHeader "Content-Encoding" "gzip" (vary response.headers)
+                    , body = StreamBody (compressBody body)
+                    }
+    else response

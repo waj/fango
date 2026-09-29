@@ -1,0 +1,164 @@
+{-# no-prelude #-}
+module Http.Server exposing (Config(..), defaultConfig, serve)
+
+import Async exposing (Async, Channel, Outcome(..), Task)
+import Basics exposing (..)
+import Fail exposing (Fail, attempt, fromResult)
+import Http exposing (ErrorKind(..), Protocol(..), Request, Response)
+import IO exposing (IO)
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Net
+import Reader exposing (Reader)
+import Result exposing (Result(..))
+import String
+import Writer exposing (Writer(..))
+
+type Config =
+    { port : Int
+    , workers : Int
+    , requestLineLimit : Int
+    , headerLimit : Int
+    , bodyLimit : Int
+    , headerDeadlineMs : Int
+    , bodyDeadlineMs : Int
+    , writeDeadlineMs : Int
+    , shutdownGraceMs : Int
+    }
+
+defaultConfig : Int -> Config
+defaultConfig port = Config
+    { port = port
+    , workers = 64
+    , requestLineLimit = 8192
+    , headerLimit = 65536
+    , bodyLimit = 16777216
+    , headerDeadlineMs = 10000
+    , bodyDeadlineMs = 30000
+    , writeDeadlineMs = 30000
+    , shutdownGraceMs = 5000
+    }
+
+errorStatus : Http.ErrorKind -> Int
+errorStatus kind =
+    case kind of
+        RequestLineTooLong -> 414
+        HeadersTooLarge -> 431
+        BodyTooLarge -> 413
+        Unsupported -> 501
+        InvalidResponse -> 500
+        BadRequest -> 400
+
+sendError : Writer e -> Int ->{e} ()
+sendError output status =
+    Writer.writeString output
+        ("HTTP/1.1 " ++ show status ++ " \r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+    output.flush()
+
+isClose : List Http.Header -> Bool
+isClose headers =
+    case Http.getHeader "connection" headers of
+        Nothing -> False
+        Just raw ->
+            List.foldl { part found -> found || Http.equalAscii (String.trim part) "close" }
+                False (String.split "," raw)
+
+writeSuccessful : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} Bool
+writeSuccessful method output response =
+    Http.writeResponse method output response
+    True
+
+{-# scoped s #-}
+serveConnection : Config -> Net.Connection -> (Request s ->{s} Response s)
+    ->{Async Net.Error, IO, Fail Net.Error, Protocol | e} ()
+serveConnection config connection handler =
+    source = Net.sourceAsync connection
+    sink = Net.sinkAsync connection
+    Reader.over source { input ->
+        Writer.over sink 8192 { output ->
+            loop() =
+                fromResult (Net.setReadDeadline connection config.headerDeadlineMs)
+                handle
+                    case Http.withRequest config.requestLineLimit config.headerLimit config.bodyLimit input { request ->
+                        fromResult (Net.setReadDeadline connection config.bodyDeadlineMs)
+                        response = handler request
+                        fromResult (Net.setWriteDeadline connection config.writeDeadlineMs)
+                        sent = handle writeSuccessful request.method output response of
+                            Http.invalid _ -> False
+                        (sent, isClose request.headers, isClose response.headers)
+                    } of
+                        Nothing -> ()
+                        Just ((sent, requestClose, responseClose), complete) ->
+                            if sent && complete && requestClose == False && responseClose == False then loop()
+                            else () of
+                    Http.invalid error -> sendError output (errorStatus error.kind)
+            loop()
+        }
+    }
+
+worker : Net.Listener -> Channel (Maybe Net.Error) -> (Net.Connection ->{Async Net.Error, IO, Fail Net.Error | e} ()) ->{Async Net.Error, IO | e} ()
+worker listener events process =
+    outcome = attempt {
+        Net.acceptAsync listener { connection ->
+            ignored = attempt { process connection }
+            ()
+        }
+    }
+    case outcome of
+        Ok _ -> worker listener events process
+        Err error ->
+            if Net.listenerStopped listener then ()
+            else ignore (Async.send events (Just error))
+
+spawnWorkers : Int -> Net.Listener -> Channel (Maybe Net.Error) -> (Net.Connection ->{Async Net.Error, IO, Fail Net.Error | e} ()) ->{Async Net.Error | e} List (Task Net.Error ())
+spawnWorkers count listener events process =
+    if count <= 0 then []
+    else [ Async.spawn { worker listener events process }
+         | spawnWorkers (count - 1) listener events process
+         ]
+
+awaitWorkers : List (Task Net.Error ()) ->{Async Net.Error} ()
+awaitWorkers tasks =
+    case tasks of
+        [] -> ()
+        [task | rest] ->
+            ignore (Async.awaitResult task)
+            awaitWorkers rest
+
+cancelWorkers : List (Task Net.Error ()) ->{Async Net.Error} ()
+cancelWorkers tasks = List.each Async.cancel tasks
+
+runListener : Config -> Channel () -> Net.Listener -> (Net.Connection ->{Async Net.Error, IO, Fail Net.Error | e} ()) ->{Async Net.Error, IO, Fail Net.Error | e} ()
+runListener config stop listener process =
+    Async.within {
+        events = Async.channel (config.workers + 1)
+        watcher = Async.spawn {
+            ignore (Async.receive stop)
+            ignore (Async.send events Nothing)
+        }
+        tasks = spawnWorkers config.workers listener events process
+        first = Async.receive events
+        fromResult (Net.stopListener listener)
+        Async.cancel watcher
+        timer = Async.spawn {
+            Async.sleep config.shutdownGraceMs
+            cancelWorkers tasks
+        }
+        awaitWorkers tasks
+        Async.cancel timer
+        ignore (Async.awaitResult timer)
+        ignore (Async.awaitResult watcher)
+        case first of
+            Just (Just error) -> Fail.fail error
+            _ -> ()
+    }
+
+{-# scoped s #-}
+serve : Config -> Channel () -> (Request s ->{s} Response s) ->{Async Net.Error, IO, Fail Net.Error | e} ()
+serve config stop handler =
+    Net.withListener config.port { listener ->
+        process connection =
+            handle serveConnection config connection handler of
+                Http.invalid _ -> ()
+        runListener config stop listener process
+    }

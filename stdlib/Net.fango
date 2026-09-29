@@ -1,6 +1,7 @@
 {-# no-prelude #-}
-module Net exposing (Connection, Error(..), Kind(..), Listener, accept, sink, source, withClient, withListener)
+module Net exposing (Connection, Error(..), Kind(..), Listener, accept, acceptAsync, listenerStopped, setReadDeadline, setWriteDeadline, sink, sinkAsync, source, sourceAsync, stopListener, withClient, withListener)
 
+import Async
 import Basics exposing (..)
 import Bytes exposing (Bytes, Sink(..), Source(..))
 import Fail exposing (Fail, fromResult)
@@ -29,8 +30,17 @@ listen = native
 closeListener : Listener ->{IO} Result Error ()
 closeListener = native
 
+stopListener : Listener ->{IO} Result Error ()
+stopListener listener = closeListener listener
+
+listenerStopped : Listener ->{IO} Bool
+listenerStopped = native
+
 acceptConnection : Listener ->{IO} Result Error Connection
 acceptConnection = native
+
+acceptConnectionAsync : Runtime.Native.Any -> Listener ->{IO} Result Error Connection
+acceptConnectionAsync = native
 
 dial : String -> Int ->{IO} Result Error Connection
 dial = native
@@ -44,8 +54,20 @@ connectionHasInput = native
 readConnectionBytes : Connection -> Int ->{IO} Result Error Bytes
 readConnectionBytes = native
 
+readConnectionBytesAsync : Runtime.Native.Any -> Connection -> Int ->{IO} Result Error Bytes
+readConnectionBytesAsync = native
+
 writeConnectionBytes : Connection -> Bytes ->{IO} Result Error ()
 writeConnectionBytes = native
+
+writeConnectionBytesAsync : Runtime.Native.Any -> Connection -> Bytes ->{IO} Result Error ()
+writeConnectionBytesAsync = native
+
+setReadDeadline : Connection -> Int ->{IO} Result Error ()
+setReadDeadline = native
+
+setWriteDeadline : Connection -> Int ->{IO} Result Error ()
+setWriteDeadline = native
 
 closeListenerFail : Listener ->{IO, Fail Error} ()
 closeListenerFail listener = fromResult (closeListener listener)
@@ -64,6 +86,11 @@ accept : Listener -> (Connection ->{IO, Fail Error | e} a) ->{IO, Fail Error | e
 accept listener use =
     Runtime.Scope.bracket { fromResult (acceptConnection listener) } closeConnectionFail use
 
+acceptAsync : Listener -> (Connection ->{IO, Fail Error, Async.Async err | e} a) ->{IO, Fail Error, Async.Async err | e} a
+acceptAsync listener use =
+    token = Async.contextToken()
+    Runtime.Scope.bracket { fromResult (acceptConnectionAsync token listener) } closeConnectionFail use
+
 -- withClient connects to host and port and scopes the connection.
 withClient : String -> Int -> (Connection ->{IO, Fail Error | e} a) ->{IO, Fail Error | e} a
 withClient host port use =
@@ -80,5 +107,20 @@ readBytes connection =
 source : Connection -> Source {IO, Fail Error}
 source connection = Source { pull = { readBytes connection } }
 
+readBytesAsync : Runtime.Native.Any -> Connection ->{IO, Fail Error} Maybe Bytes
+readBytesAsync token connection =
+    data = fromResult (readConnectionBytesAsync token connection chunk)
+    if Bytes.length data == 0 then Nothing else Just data
+
+sourceAsync : Connection ->{Async.Async err} Source {IO, Fail Error}
+sourceAsync connection =
+    token = Async.contextToken()
+    Source { pull = { readBytesAsync token connection } }
+
 sink : Connection -> Sink {IO, Fail Error}
 sink connection = Sink { write = { data -> fromResult (writeConnectionBytes connection data) } }
+
+sinkAsync : Connection ->{Async.Async err} Sink {IO, Fail Error}
+sinkAsync connection =
+    token = Async.contextToken()
+    Sink { write = { data -> fromResult (writeConnectionBytesAsync token connection data) } }

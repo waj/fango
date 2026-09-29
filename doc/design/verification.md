@@ -133,6 +133,25 @@ independently compiled Pull abstraction, handwritten frames using the same
 runtime, and a specialized Go pull state machine. These diagnostic controls do not replace the historical
 Stream gate. Instrumented binaries count dispatcher steps, frame factories and
 nonempty evidence extensions separately; their timings never enter comparisons.
+
+### HTTP response comparison
+
+```sh
+go run ./benchmarks/httpcompare -out /tmp/fango-http-evidence.json
+```
+
+This opt-in tool builds a static-response Fango HTTP server and a plain Go
+`net/http` server with the same body. It excludes compilation and startup from
+timing, warms persistent loopback connections, checks every response, and times
+complete request/response exchanges with one and sixteen clients. Three paired
+rounds alternate server order. The report shows mean, p50, p95, p99, and
+aggregate requests per second; optional JSON retains every latency and the
+source checksum. Both servers use the same `GOMAXPROCS` setting. The shared Go
+client and loopback transport contribute to both measurements, so the numbers
+describe end-to-end response time, not isolated server CPU cost. Run on an
+otherwise idle host; these measurements are not a CI threshold.
+`-server-gogc off` is a diagnostic run that disables GC in both server processes
+while leaving the client unchanged; it is not a production comparison.
 Allocation profiles and raw JSON are retained beside the source snapshots.
 
 Full parity requires every primary case's median optimized/baseline ratio to

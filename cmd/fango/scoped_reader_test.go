@@ -12,6 +12,8 @@ func TestScopedReaderEscapes(t *testing.T) {
 		{"callback", `bad = Reader.withBytes Bytes.empty ({ r -> { _ -> Reader.readUpTo r 1 } })`},
 		{"wrapper", `type Box a = Box a
 bad = Reader.withBytes Bytes.empty ({ r -> Box ({ _ -> Reader.readUpTo r 1 }) })`},
+		{"returned response body", `type Reply e = { render : () ->{e} Bytes.Bytes }
+bad = Reader.withBytes Bytes.empty ({ r -> Reply { render = { Reader.readUpTo r 1 } } })`},
 		{"outer scoped storage", `bad = Runtime.Local.run Nothing ({ slot ->
     Reader.withBytes Bytes.empty ({ r -> slot.write (Just r) }) })`},
 		{"latent storage callback", `bad = Runtime.Local.run Nothing ({ slot ->

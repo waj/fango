@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Reader exposing (Read(..), Reader(..), atEnd, chunks, ensure, forEachChunk, limited, over, overBytes, readExactly, readLine, readUntil, readUpTo, withBytes)
+module Reader exposing (Read(..), Reader(..), atEnd, chunks, ensure, forEachChunk, limited, limitedRemaining, over, overBytes, readExactly, readLine, readUntil, readUpTo, withBytes)
 
 import Basics exposing (..)
 import Bytes exposing (Bytes, Source(..))
@@ -54,23 +54,38 @@ buffering initial source use =
 {-# scoped s #-}
 limited : Reader e -> Int -> (Reader s ->{s} a) ->{e} a
 limited parent allowance use =
-    Runtime.Local.run (clamp allowance allowance) { remaining ->
-        use
+    (result, _, _) = limitedRemaining parent allowance use
+    result
+
+-- Return the unconsumed allowance without pulling from the parent. Framed
+-- protocols can decide whether to reuse a connection after their consumer.
+{-# scoped s #-}
+limitedRemaining : Reader e -> Int -> (Reader s ->{s} a) ->{e} (a, Int, Bool)
+limitedRemaining parent allowance use =
+    Runtime.Local.run (clamp allowance allowance, False) { state ->
+        result = use
             { buffered = {
                 window = parent.buffered()
-                Bytes.slice 0 (clamp remaining.read() (Bytes.length window)) window
+                (left, _) = state.read()
+                Bytes.slice 0 (clamp left (Bytes.length window)) window
               }
             , refill = {
-                if Bytes.length parent.buffered() >= remaining.read() then False
-                else parent.refill()
+                (left, _) = state.read()
+                if Bytes.length parent.buffered() >= left then False
+                else
+                    grew = parent.refill()
+                    if grew == False then state.write (left, True) else ()
+                    grew
               }
             , skip = { n ->
-                before = remaining.read()
+                (before, ended) = state.read()
                 taken = parent.skip (clamp n before)
-                remaining.write (before - taken)
+                state.write (before - taken, ended)
                 taken
               }
             }
+        (left, ended) = state.read()
+        (result, left, ended)
     }
 
 {-# scoped s #-}

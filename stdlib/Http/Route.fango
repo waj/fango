@@ -1,0 +1,125 @@
+{-# no-prelude #-}
+module Http.Route exposing (Param(..), Route(..), dispatch, lookup, path)
+
+import Basics exposing (..)
+import Bytes
+import Http exposing (Error(..), ErrorKind(..), Header(..), Protocol(..), Request(..), Response(..), ResponseBody(..))
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import String
+
+type Param = { name : String, value : String } deriving (Eq, Show)
+type Route e =
+    { method : String
+    , pattern : String
+    , handler : List Param -> Request e ->{e} Response e
+    }
+
+lookup : String -> List Param -> Maybe String
+lookup name params =
+    case params of
+        [] -> Nothing
+        [param | rest] -> if param.name == name then Just param.value else lookup name rest
+
+beforeQuery : String -> String
+beforeQuery target =
+    case String.split "?" target of
+        [] -> target
+        [part | _] -> part
+
+-- Absolute-form is accepted by the HTTP parser. Route it by its path as well.
+absolutePath : String -> String
+absolutePath target =
+    scheme =
+        if String.startsWith "http://" target then String.slice 7 (String.length target) target
+        else if String.startsWith "https://" target then String.slice 8 (String.length target) target
+        else target
+    if scheme == target then target
+    else
+        case String.split "/" scheme of
+            [] -> "/"
+            [_] -> "/"
+            [_ | rest] -> "/" ++ joinSlash rest
+
+joinSlash : List String -> String
+joinSlash parts =
+    case parts of
+        [] -> ""
+        [part] -> part
+        [part | rest] -> part ++ "/" ++ joinSlash rest
+
+path : String -> String
+path target = absolutePath (beforeQuery target)
+
+hexValue : Int -> Int
+hexValue code =
+    if code >= 48 && code <= 57 then code - 48
+    else if code >= 65 && code <= 70 then code - 55
+    else if code >= 97 && code <= 102 then code - 87
+    else -1
+
+decodeBytes : List Int -> List Int ->{Protocol} List Int
+decodeBytes bytes reversed =
+    case bytes of
+        [] -> List.reverse reversed
+        [37, hi, lo | rest] ->
+            first = hexValue hi
+            second = hexValue lo
+            decoded = first * 16 + second
+            if first < 0 || second < 0 || decoded == 47 || decoded == 92 then
+                invalid (Error { kind = BadRequest, message = "invalid path escape" })
+            else decodeBytes rest [decoded | reversed]
+        [37 | _] -> invalid (Error { kind = BadRequest, message = "invalid path escape" })
+        [byte | rest] -> decodeBytes rest [byte | reversed]
+
+decodeSegment : String ->{Protocol} String
+decodeSegment segment =
+    decoded = Bytes.fromList (decodeBytes (Bytes.toList (Bytes.fromString segment)) [])
+    case Bytes.toString decoded of
+        Just text -> text
+        Nothing -> invalid (Error { kind = BadRequest, message = "path segment is not UTF-8" })
+
+segments : String ->{Protocol} List String
+segments raw = List.map decodeSegment (String.split "/" raw)
+
+matchSegments : List String -> List String -> List Param -> Maybe (List Param)
+matchSegments pattern actual reversed =
+    case (pattern, actual) of
+        ([], []) -> Just (List.reverse reversed)
+        ([part | parts], [value | values]) ->
+            if String.startsWith ":" part then
+                name = String.slice 1 (String.length part) part
+                if name == "" then Nothing
+                else matchSegments parts values [Param { name = name, value = value } | reversed]
+            else if part == value then matchSegments parts values reversed
+            else Nothing
+        _ -> Nothing
+
+allowMethods : List String -> String
+allowMethods methods =
+    case methods of
+        [] -> ""
+        [method] -> method
+        [method | rest] -> method ++ ", " ++ allowMethods rest
+
+dispatchHelp : List (Route e) -> (Request e ->{e} Response e) -> Request e -> List String -> List String ->{e} Response e
+dispatchHelp routes fallback request actual allowed =
+    case routes of
+        [] ->
+            if allowed == [] then fallback request
+            else Response
+                { status = 405
+                , headers = [Header { name = "Allow", value = allowMethods (List.reverse allowed) }]
+                , body = Empty
+                }
+        [route | rest] ->
+            case matchSegments (String.split "/" route.pattern) actual [] of
+                Nothing -> dispatchHelp rest fallback request actual allowed
+                Just params ->
+                    if route.method == request.method then route.handler params request
+                    else dispatchHelp rest fallback request actual [route.method | allowed]
+
+dispatch : List (Route e) -> (Request e ->{e} Response e) -> Request e ->{Protocol | e} Response e
+dispatch routes fallback request =
+    actual = segments (path request.target)
+    dispatchHelp routes fallback request actual []

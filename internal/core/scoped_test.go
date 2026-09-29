@@ -21,7 +21,7 @@ func TestScopedCallProof(t *testing.T) {
 			cb.Eff.Labels = append(cb.Eff.Labels, types.EffLabel{Unique: 1001, Name: "local", Scoped: true})
 		}},
 		{"returned callback", "scope escapes", func(_ *App, fn, cb *types.TFun) { fn.Ret = cb }},
-		{"callback result", "scope escapes", func(_ *App, _ *types.TFun, cb *types.TFun) {
+		{"callback result consumed inside scope", "", func(_ *App, _ *types.TFun, cb *types.TFun) {
 			cb.Ret = &types.TFun{Arg: cb.Arg, Eff: cb.Eff, Ret: cb.Ret}
 		}},
 	} {

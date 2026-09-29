@@ -1,0 +1,25 @@
+import Bytes
+import Http exposing (Protocol(..))
+import Reader
+import Writer
+
+inspect : String -> String
+inspect wire =
+    handle
+        Reader.overBytes (Bytes.fromString wire) { input ->
+            result = Http.withRequest 8192 65536 1024 input { request ->
+                (_, body) = Writer.collecting { output ->
+                    Reader.forEachChunk request.body (Writer.write output)
+                }
+                (request.method, request.target, body)
+            }
+            show result
+        } of
+            Http.invalid error -> show error.kind ++ ": " ++ error.message
+
+main() =
+    print (inspect "GET /a HTTP/1.1\r\nHost: x\r\n\r\n")
+    print (inspect "POST /fixed HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\nabc")
+    print (inspect "POST /chunk HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\n1\r\nc\r\n0\r\n\r\n")
+    print (inspect "POST /short HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\nabc")
+    print (inspect "GET /bad HTTP/1.1\r\nHost: x\r\nHost: y\r\n\r\n")

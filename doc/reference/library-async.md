@@ -84,6 +84,7 @@ cancelScope : () ->{Async err} ()
 cancelled : () ->{Async err} Bool
 checkpoint : () ->{Async err} ()
 sleep : Int ->{Async err} ()
+contextToken : () ->{Async err} Runtime.Native.Any
 ```
 
 Cancellation is cooperative and follows the child tree. Cancelling a child
@@ -104,6 +105,10 @@ finishes language cleanup and drains children before returning `Cancelled`
 (subject to the usual failure precedence). This remains cooperative, including
 in the root body: CPU loops need a checkpoint and arbitrary blocking IO may delay
 completion. Later prompt evaluations receive a fresh host context.
+
+`contextToken()` exposes the current task's opaque native cancellation context
+for library sidecars that must interrupt a blocking operation. It is intended
+for native adapters such as the cancellation-aware `Net` operations.
 
 ## Channels
 

@@ -158,10 +158,12 @@ use multiple readers together through ordinary row inclusion.
 
 The annotated declaration must bind its final callback to a name. That callback
 has one argument and exactly the annotated scoped row on its arrow. The binder
-may occur in the callback argument, but not its result, earlier runner
-parameters, the runner result, or the runner's own arrow effects. Within the
-implementation the callback can be instantiated at different rows extending
-the runner's residual row.
+may occur in the callback argument and result, but not in earlier runner
+parameters, the runner result, or the runner's own arrow effects. A callback
+may therefore return a value that uses a scoped reader or writer later in the
+same runner. The runner must consume that value before its scope ends. Within
+the implementation the callback can be instantiated at different rows
+extending the runner's residual row.
 
 Runners must be called by name with all parameters supplied. Partial application,
 first-class aliases, recursion, mutual recursion, class-constrained runner

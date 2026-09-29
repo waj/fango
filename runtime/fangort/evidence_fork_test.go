@@ -69,3 +69,21 @@ func TestEvidenceForkIgnoresShadowedRows(t *testing.T) {
 		t.Fatal("wrong shadowed activation")
 	}
 }
+
+func TestEvidenceForkPreservesAllInlineAndOverflowBindings(t *testing.T) {
+	var bindings []EvidenceBinding
+	for index, name := range []string{"A", "B", "C"} {
+		origin := &EvidenceOrigin{Name: name}
+		value := index + 1
+		origin.Rebuild = func(*EvidenceFork) EvidenceFamily {
+			return EvidenceFamily{Origin: origin, Direct: value}
+		}
+		bindings = append(bindings, EvidenceBinding{Name: name, Family: EvidenceFamily{Origin: origin}})
+	}
+	row := NewEvidenceFork(nil).Row(ExtendEvidenceRow(nil, bindings...))
+	for index, binding := range bindings {
+		if got := RowEvidence[int](row, binding.Name, DirectEvidence); got != index+1 {
+			t.Fatalf("%s = %d", binding.Name, got)
+		}
+	}
+}

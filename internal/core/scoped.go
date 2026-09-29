@@ -51,7 +51,7 @@ func checkScopedCalls(p *Prog, context []Def) []error {
 				fail("missing callback signature")
 				return
 			}
-			outside := append(append([]types.Type(nil), args[:len(args)-1]...), raw, base, callback.Ret)
+			outside := append(append([]types.Type(nil), args[:len(args)-1]...), raw, base)
 			var fresh []types.EffLabel
 			for _, label := range callback.Eff.Labels {
 				if label.Scoped && !types.ContainsScopedEffect(base, label.Unique) {
