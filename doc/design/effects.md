@@ -12,10 +12,13 @@ returning a lambda may instead perform on its outer arrow. Function values
 execute only through application. Native value annotations retain their rows
 although their scalar sidecar ABI has no hidden evidence parameter.
 
-Rows contain distinct nominal labels and an optional tail; binding a row
-variable can place an effect into a row that already carries it under other
-arguments, and the solver reconciles every row a constraint mentions once
-the group is solved, unifying the two argument lists. Source-defined
+Rows contain distinct applied effect labels and an optional tail. Two fully
+resolved applications of one nominal effect may coexist. Occurrences whose
+arguments still contain type variables overlap until inference resolves them;
+the solver unifies their arguments and reconciles rows after the group is
+solved. Core keys lexical evidence by the full application. Residual rows and
+inherited handler evidence carry type descriptors so runtime projection makes
+the same distinction across module boundaries. Source-defined
 resumptive operations may quantify unconstrained variables independently at
 each call, including variables inside nominal payloads and callbacks. A
 handler clause checks those variables as rigid skolems; they may not escape

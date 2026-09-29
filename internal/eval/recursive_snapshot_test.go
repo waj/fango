@@ -11,7 +11,7 @@ import (
 
 func TestRecursiveClosurePreservesSurroundingLocals(t *testing.T) {
 	for _, tail := range []bool{false, true} {
-		in := &interp{ctx: context.Background(), env: NewEnv(), out: io.Discard, evidence: map[int]*evidence{}}
+		in := &interp{ctx: context.Background(), env: NewEnv(), out: io.Discard, evidence: map[types.EffectKey]*evidence{}}
 		fr := &Frame{vars: map[string]Value{"saved": int64(17), "bodyOnly": int64(42)}}
 		fn := &types.TFun{Arg: unitTy(), Ret: intTy()}
 		lambda := &core.Lambda{Param: "unit", Ty: fn, Body: &core.VarRef{Name: "saved", Local: true, Ty: intTy()}}

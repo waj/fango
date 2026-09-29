@@ -1,0 +1,7 @@
+module Main exposing (main)
+
+import Applied exposing (Put(..), both)
+
+main = if handle (handle both() of
+    put text -> resume ()) of
+    put flag -> resume () then 42 else 0

@@ -161,9 +161,9 @@ func (a *captureAnalyzer) definition(d *Def) captureResult {
 			env[name] = types.VarCapture(d.ParamCaptures[i])
 		}
 	}
-	evidence := map[int][]types.CaptureSet{}
+	evidence := map[types.EffectKey][]types.CaptureSet{}
 	for _, ev := range append(append([]EffectInstance(nil), d.EffectParams...), d.RowEffects...) {
-		evidence[ev.Unique] = append(evidence[ev.Unique], ev.Captures)
+		evidence[ev.Key()] = append(evidence[ev.Key()], ev.Captures)
 	}
 	return a.expr(d.Body, env, evidence)
 }
@@ -176,15 +176,15 @@ func cloneCaptureEnv(src map[string]types.CaptureSet) map[string]types.CaptureSe
 	return dst
 }
 
-func cloneCaptureEvidence(src map[int][]types.CaptureSet) map[int][]types.CaptureSet {
-	dst := make(map[int][]types.CaptureSet, len(src))
+func cloneCaptureEvidence(src map[types.EffectKey][]types.CaptureSet) map[types.EffectKey][]types.CaptureSet {
+	dst := make(map[types.EffectKey][]types.CaptureSet, len(src))
 	for k, v := range src {
 		dst[k] = append([]types.CaptureSet(nil), v...)
 	}
 	return dst
 }
 
-func captureEvidence(evidence map[int][]types.CaptureSet, unique int) types.CaptureSet {
+func captureEvidence(evidence map[types.EffectKey][]types.CaptureSet, unique types.EffectKey) types.CaptureSet {
 	stack := evidence[unique]
 	if len(stack) == 0 {
 		return types.CaptureSet{}
@@ -192,7 +192,7 @@ func captureEvidence(evidence map[int][]types.CaptureSet, unique int) types.Capt
 	return stack[len(stack)-1]
 }
 
-func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence map[int][]types.CaptureSet) captureResult {
+func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence map[types.EffectKey][]types.CaptureSet) captureResult {
 	if e == nil {
 		return captureResult{}
 	}
@@ -265,7 +265,7 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		innerEvidence := cloneCaptureEvidence(evidence)
 		bound := map[types.CaptureVar]bool{e.ParamCapture: true, e.RowParam: true}
 		for _, ev := range append(append([]EffectInstance(nil), e.EffectParams...), e.RowEffects...) {
-			innerEvidence[ev.Unique] = append(innerEvidence[ev.Unique], ev.Captures)
+			innerEvidence[ev.Key()] = append(innerEvidence[ev.Key()], ev.Captures)
 			for _, v := range ev.Captures.Vars {
 				bound[v] = true
 			}
@@ -283,7 +283,7 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 		}
 		ev := e.Effect.Captures
 		if ev.Empty() {
-			ev = captureEvidence(evidence, e.Effect.Unique)
+			ev = captureEvidence(evidence, e.Effect.Key())
 		}
 		r.uses = types.UnionCaptures(r.uses, ev)
 		if e.Op != nil && e.Op.BorrowsEvidence {
@@ -387,7 +387,7 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 			initial = a.expr(e.State.Initial, env, evidence)
 		}
 		innerEvidence := cloneCaptureEvidence(evidence)
-		innerEvidence[e.Effect.Unique] = append(innerEvidence[e.Effect.Unique], e.Effect.Captures)
+		innerEvidence[e.Effect.Key()] = append(innerEvidence[e.Effect.Key()], e.Effect.Captures)
 		body := a.expr(e.Body, env, innerEvidence)
 		result := body
 		result.uses = types.UnionCaptures(initial.uses, result.uses)
@@ -455,7 +455,7 @@ func (a *captureAnalyzer) expr(e Expr, env map[string]types.CaptureSet, evidence
 	}
 }
 
-func (a *captureAnalyzer) tree(t Tree, env map[string]types.CaptureSet, evidence map[int][]types.CaptureSet, scrut types.CaptureSet) captureResult {
+func (a *captureAnalyzer) tree(t Tree, env map[string]types.CaptureSet, evidence map[types.EffectKey][]types.CaptureSet, scrut types.CaptureSet) captureResult {
 	switch t := t.(type) {
 	case *Unreachable:
 		return captureResult{}

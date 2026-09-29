@@ -27,7 +27,7 @@ func (g *gen) evidenceFamily(ev core.EffectInstance, value goast.Expr, actual ty
 // view, and its Rebuild closure calls the same factory with rebased dependencies.
 // State and immutable lexical values stay captured by the factory itself.
 func (g *gen) forkableHandlerEvidence(e *core.Handle, mode types.Transport, state *handlerState) (goast.Expr, goast.Expr) {
-	free := map[int]core.EffectInstance{}
+	free := map[types.EffectKey]core.EffectInstance{}
 	rows := map[types.CaptureVar]bool{}
 	for _, clause := range e.Clauses {
 		for id, ev := range core.FreeEvidence(clause.Body) {
@@ -37,11 +37,16 @@ func (g *gen) forkableHandlerEvidence(e *core.Handle, mode types.Transport, stat
 			rows[id] = true
 		}
 	}
-	ids := make([]int, 0, len(free))
+	ids := make([]types.EffectKey, 0, len(free))
 	for id := range free {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return free[ids[i]].Name < free[ids[j]].Name })
+	sort.Slice(ids, func(i, j int) bool {
+		if free[ids[i]].Name != free[ids[j]].Name {
+			return free[ids[i]].Name < free[ids[j]].Name
+		}
+		return ids[i] < ids[j]
+	})
 	rowIDs := make([]types.CaptureVar, 0, len(rows))
 	for id := range rows {
 		rowIDs = append(rowIDs, id)

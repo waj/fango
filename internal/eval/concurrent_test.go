@@ -50,7 +50,7 @@ func TestParallelMapHostCancellationOwnership(t *testing.T) {
 		Input:    &core.VarRef{Name: "input", Local: true},
 	}
 	for _, supervised := range []bool{false, true} {
-		in := &interp{ctx: ctx, env: NewEnv(), out: io.Discard, evidence: map[int]*evidence{}, forcing: map[*Cell]bool{}}
+		in := &interp{ctx: ctx, env: NewEnv(), out: io.Discard, evidence: map[types.EffectKey]*evidence{}, forcing: map[*Cell]bool{}}
 		if supervised {
 			in.pollOwned = 1
 		}

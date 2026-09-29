@@ -67,6 +67,20 @@ func TestResidualRowsAndDeferredEvidenceSurviveRewrite(t *testing.T) {
 
 }
 
+func TestResidualEvidenceRequiresMatchingEffectArguments(t *testing.T) {
+	p, lam, call := rowProofFixture()
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	bound := EffectInstance{Unique: 10, Name: "Reader", Args: []types.Type{b.Bool}, Captures: types.VarCapture(3)}
+	lam.RowEffects = []EffectInstance{bound}
+	other := bound
+	other.Args = []types.Type{b.String}
+	call.Row.Effects = []EffectInstance{other}
+	if errs := CheckRowEvidence(p); len(errs) == 0 || !strings.Contains(errs[0].Error(), "lexical activation") {
+		t.Fatalf("wrong application accepted: %v", errs)
+	}
+}
+
 func TestFreeRowsExcludeInvocationBinders(t *testing.T) {
 	_, lam, call := rowProofFixture()
 	if len(FreeRows(lam)) != 0 {

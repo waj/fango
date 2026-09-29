@@ -32,7 +32,7 @@ func LintStage(p *Prog, b *types.Builtins) []error { return lint(p, nil, b, true
 func lint(p *Prog, context []Def, b *types.Builtins, allowStage bool) []error {
 	l := &linter{b: b, scope: map[string]bool{}, localTypes: map[string]types.Type{}, workers: map[string]*Def{},
 		adts: map[int]*types.ADTInfo{}, effects: map[int]*types.EffectInfo{},
-		tyParams: map[int]bool{}, evidence: map[int]int{}, evidenceCaptures: map[int][]types.CaptureSet{},
+		tyParams: map[int]bool{}, evidence: map[types.EffectKey]int{}, evidenceCaptures: map[types.EffectKey][]types.CaptureSet{},
 		captureVars: map[types.CaptureVar]bool{}, scopeIDs: map[types.ScopeID]bool{}, activeScopes: map[types.ScopeID]bool{},
 		resumeIDs: map[types.ResumeID]bool{}, natives: p.Natives, intrinsics: p.Intrinsics,
 		allowStage: allowStage}
@@ -108,14 +108,14 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowStage bool) []error {
 			}
 			l.captureVars[v] = true
 		}
-		lastEffect := -1
+		var lastEffect types.EffectKey
 		for _, ev := range d.EffectParams {
 			l.effectInstance(ev, where)
-			if ev.Unique <= lastEffect {
-				l.errorf("%s: evidence parameters are not in increasing effect-Unique order", where)
+			if ev.Key() <= lastEffect {
+				l.errorf("%s: evidence parameters are not in increasing effect-application order", where)
 			}
-			lastEffect = ev.Unique
-			l.evidence[ev.Unique]++
+			lastEffect = ev.Key()
+			l.evidence[ev.Key()]++
 			l.bindEvidenceCaptures(ev, where)
 		}
 		if d.RowParam != 0 {
@@ -126,7 +126,7 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowStage bool) []error {
 		}
 		for _, ev := range d.RowEffects {
 			l.effectInstance(ev, where)
-			l.evidence[ev.Unique]++
+			l.evidence[ev.Key()]++
 			l.bindEvidenceCaptures(ev, where)
 		}
 		// Every declared type parameter must be used by the value type or by
@@ -195,11 +195,11 @@ func lint(p *Prog, context []Def, b *types.Builtins, allowStage bool) []error {
 			}
 		}
 		for _, ev := range d.EffectParams {
-			l.evidence[ev.Unique]--
+			l.evidence[ev.Key()]--
 			l.unbindEvidenceCaptures(ev)
 		}
 		for _, ev := range d.RowEffects {
-			l.evidence[ev.Unique]--
+			l.evidence[ev.Key()]--
 			l.unbindEvidenceCaptures(ev)
 		}
 		delete(l.captureVars, d.RowParam)
@@ -286,8 +286,8 @@ type linter struct {
 	adts             map[int]*types.ADTInfo // declared ADTs: equatable via derived eq
 	effects          map[int]*types.EffectInfo
 	tyParams         map[int]bool // the enclosing def's declared rigid vars
-	evidence         map[int]int
-	evidenceCaptures map[int][]types.CaptureSet
+	evidence         map[types.EffectKey]int
+	evidenceCaptures map[types.EffectKey][]types.CaptureSet
 	captureVars      map[types.CaptureVar]bool
 	scopeIDs         map[types.ScopeID]bool
 	activeScopes     map[types.ScopeID]bool
@@ -540,7 +540,7 @@ func (l *linter) expr(e Expr, where string) {
 			if i < len(wantEvidence) && !equalEffectInstance(ev, wantEvidence[i]) {
 				l.errorf("%s: Lambda evidence parameter %d disagrees with its function type", where, i+1)
 			}
-			l.evidence[ev.Unique]++
+			l.evidence[ev.Key()]++
 			l.bindEvidenceCaptures(ev, where)
 		}
 		if e.RowParam != 0 {
@@ -551,7 +551,7 @@ func (l *linter) expr(e Expr, where string) {
 		}
 		for _, ev := range e.RowEffects {
 			l.effectInstance(ev, where)
-			l.evidence[ev.Unique]++
+			l.evidence[ev.Key()]++
 			l.bindEvidenceCaptures(ev, where)
 		}
 		l.expr(e.Body, where)
@@ -559,11 +559,11 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: Lambda body control %s is not representable by arrow %s", where, ControlName(bodyControl), ControlName(types.FunctionControl(fn)))
 		}
 		for _, ev := range e.EffectParams {
-			l.evidence[ev.Unique]--
+			l.evidence[ev.Key()]--
 			l.unbindEvidenceCaptures(ev)
 		}
 		for _, ev := range e.RowEffects {
-			l.evidence[ev.Unique]--
+			l.evidence[ev.Key()]--
 			l.unbindEvidenceCaptures(ev)
 		}
 		delete(l.captureVars, e.RowParam)
@@ -585,7 +585,7 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: Perform operation `%s` is not declared by its effect", where, e.Op.Name)
 		}
 		l.effectInstance(e.Effect, where)
-		if e.Op != nil && !e.Op.Builtin && e.Op.Native == nil && l.evidence[e.Effect.Unique] == 0 {
+		if e.Op != nil && !e.Op.Builtin && e.Op.Native == nil && l.evidence[e.Effect.Key()] == 0 {
 			l.errorf("%s: Perform `%s` has no lexical evidence", where, e.Op.Name)
 		} else if e.Op != nil && !e.Op.Builtin && e.Op.Native == nil {
 			l.evidenceAvailable(e.Effect, where)
@@ -662,7 +662,7 @@ func (l *linter) expr(e Expr, where string) {
 		} else if !e.Op.Abort {
 			l.errorf("%s: ControlExit operation `%s` is resumptive", where, e.Op.Name)
 		} else {
-			if l.evidence[e.Effect.Unique] == 0 {
+			if l.evidence[e.Effect.Key()] == 0 {
 				l.errorf("%s: ControlExit `%s` has no lexical evidence", where, e.Op.Name)
 			} else {
 				l.evidenceAvailable(e.Effect, where)
@@ -773,11 +773,11 @@ func (l *linter) expr(e Expr, where string) {
 			l.errorf("%s: handler scoped policy disagrees with effect `%s`", where, eff.Name)
 		}
 		l.activeScopes[e.Scope] = true
-		l.evidence[e.Effect.Unique]++
-		l.evidenceCaptures[e.Effect.Unique] = append(l.evidenceCaptures[e.Effect.Unique], e.Effect.Captures)
+		l.evidence[e.Effect.Key()]++
+		l.evidenceCaptures[e.Effect.Key()] = append(l.evidenceCaptures[e.Effect.Key()], e.Effect.Captures)
 		l.expr(e.Body, where)
-		l.evidence[e.Effect.Unique]--
-		l.evidenceCaptures[e.Effect.Unique] = l.evidenceCaptures[e.Effect.Unique][:len(l.evidenceCaptures[e.Effect.Unique])-1]
+		l.evidence[e.Effect.Key()]--
+		l.evidenceCaptures[e.Effect.Key()] = l.evidenceCaptures[e.Effect.Key()][:len(l.evidenceCaptures[e.Effect.Key()])-1]
 		delete(l.activeScopes, e.Scope)
 		seen := map[string]bool{}
 		for _, c := range e.Clauses {
@@ -996,7 +996,7 @@ func (l *linter) expr(e Expr, where string) {
 					l.errorf("%s: App{Worker} `%s` evidence arg %d disagrees with the callee (got %s/%s, want %s/%s)", where, ref.Name, i+1,
 						effectArgsText(ev), ControlName(ev.Control), effectArgsText(want), ControlName(want.Control))
 				}
-				if l.evidence[ev.Unique] == 0 {
+				if l.evidence[ev.Key()] == 0 {
 					l.errorf("%s: App{Worker} `%s` passes unavailable lexical evidence `%s`", where, ref.Name, ev.Name)
 				} else {
 					l.evidenceAvailable(ev, where)
@@ -1050,7 +1050,7 @@ func (l *linter) expr(e Expr, where string) {
 				if i < len(wantEvidence) && !equalEffectInstance(ev, wantEvidence[i]) {
 					l.errorf("%s: App{Value} evidence arg %d disagrees with its function type", where, i+1)
 				}
-				if l.evidence[ev.Unique] == 0 {
+				if l.evidence[ev.Key()] == 0 {
 					l.errorf("%s: App{Value} passes unavailable lexical evidence `%s`", where, ev.Name)
 				} else {
 					l.evidenceAvailable(ev, where)
@@ -1278,6 +1278,7 @@ func matchNativeType(pattern, actual types.Type, sub map[int]types.Type) bool {
 		if !ok || len(p.Labels) != len(a.Labels) {
 			return false
 		}
+		p, a = types.SortedRow(p), types.SortedRow(a)
 		for i := range p.Labels {
 			if p.Labels[i].Unique != a.Labels[i].Unique || len(p.Labels[i].Args) != len(a.Labels[i].Args) {
 				return false
@@ -1436,13 +1437,13 @@ func (l *linter) bindEvidenceCaptures(e EffectInstance, where string) {
 		}
 		l.captureVars[v] = true
 	}
-	l.evidenceCaptures[e.Unique] = append(l.evidenceCaptures[e.Unique], e.Captures)
+	l.evidenceCaptures[e.Key()] = append(l.evidenceCaptures[e.Key()], e.Captures)
 }
 
 func (l *linter) unbindEvidenceCaptures(e EffectInstance) {
-	stack := l.evidenceCaptures[e.Unique]
+	stack := l.evidenceCaptures[e.Key()]
 	if len(stack) > 0 {
-		l.evidenceCaptures[e.Unique] = stack[:len(stack)-1]
+		l.evidenceCaptures[e.Key()] = stack[:len(stack)-1]
 	}
 	for _, v := range e.Captures.Vars {
 		delete(l.captureVars, v)
@@ -1450,7 +1451,7 @@ func (l *linter) unbindEvidenceCaptures(e EffectInstance) {
 }
 
 func (l *linter) evidenceAvailable(e EffectInstance, where string) {
-	stack := l.evidenceCaptures[e.Unique]
+	stack := l.evidenceCaptures[e.Key()]
 	if len(stack) == 0 || !types.EqualCaptures(stack[len(stack)-1], e.Captures) {
 		l.errorf("%s: evidence `%s` names an unavailable scope/capture", where, e.Name)
 	}

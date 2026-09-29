@@ -24,9 +24,9 @@ func NewEvidenceFork(overrides *EvidenceRow) *EvidenceFork {
 	return &EvidenceFork{overrides: overrides, memo: make(map[*EvidenceOrigin]EvidenceFamily), building: make(map[*EvidenceOrigin]bool)}
 }
 
-func evidenceFamily(row *EvidenceRow, name string) (EvidenceFamily, bool) {
+func evidenceFamily(row *EvidenceRow, name string, args []*TypeDescriptor) (EvidenceFamily, bool) {
 	for ; row != nil; row = row.tail {
-		if family, ok := row.find(name); ok {
+		if family, ok := row.find(name, args); ok {
 			return family, true
 		}
 	}
@@ -40,7 +40,7 @@ func (f *EvidenceFork) Family(origin *EvidenceOrigin) EvidenceFamily {
 	if origin == nil {
 		panic("Async: inherited handler has no activation identity")
 	}
-	if replacement, ok := evidenceFamily(f.overrides, origin.Name); ok {
+	if replacement, ok := evidenceFamily(f.overrides, origin.Name, origin.Arguments); ok {
 		target := replacement.Origin
 		for target != nil && target.Resolve != nil {
 			target = target.Resolve()
@@ -85,7 +85,7 @@ func ForkEvidence[T any](fork *EvidenceFork, origin *EvidenceOrigin, mode Eviden
 
 // Row rebuilds visible bindings only. A shadowed tail entry is not inherited.
 func (f *EvidenceFork) Row(row *EvidenceRow) *EvidenceRow {
-	seen := make(map[string]bool)
+	var seen []EvidenceBinding
 	var bindings []EvidenceBinding
 	for ; row != nil; row = row.tail {
 		for index := 0; index < row.count; index++ {
@@ -95,9 +95,16 @@ func (f *EvidenceFork) Row(row *EvidenceRow) *EvidenceRow {
 			} else {
 				binding = row.extra[index-len(row.inline)]
 			}
-			if !seen[binding.Name] {
-				seen[binding.Name] = true
-				bindings = append(bindings, EvidenceBinding{Name: binding.Name, Family: f.Family(binding.Family.Origin)})
+			shadowed := false
+			for _, prior := range seen {
+				if sameEvidenceBinding(binding.Name, binding.Arguments, prior) {
+					shadowed = true
+					break
+				}
+			}
+			if !shadowed {
+				seen = append(seen, binding)
+				bindings = append(bindings, EvidenceBinding{Name: binding.Name, Arguments: binding.Arguments, Family: f.Family(binding.Family.Origin)})
 			}
 		}
 	}
@@ -106,9 +113,9 @@ func (f *EvidenceFork) Row(row *EvidenceRow) *EvidenceRow {
 
 // DeferredEvidenceOrigin follows the same immutable row projection as the
 // deferred operation record; it never captures a current goroutine context.
-func DeferredEvidenceOrigin(row *EvidenceRow, name string) *EvidenceOrigin {
-	return &EvidenceOrigin{Name: name, Resolve: func() *EvidenceOrigin {
-		family, ok := evidenceFamily(row, name)
+func DeferredEvidenceOrigin(row *EvidenceRow, name string, args ...*TypeDescriptor) *EvidenceOrigin {
+	return &EvidenceOrigin{Name: name, Arguments: args, Resolve: func() *EvidenceOrigin {
+		family, ok := evidenceFamily(row, name, args)
 		if !ok {
 			panic("Async: missing inherited handler " + name)
 		}

@@ -167,8 +167,8 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		scalarEq:      map[int]bool{},
 		scalarShow:    map[int]bool{},
 		caseVarTys:    map[string]types.Type{},
-		evidence:      map[int][]goast.Expr{},
-		evidenceModes: map[int][]types.Transport{},
+		evidence:      map[types.EffectKey][]goast.Expr{},
+		evidenceModes: map[types.EffectKey][]types.Transport{},
 		defs:          map[string]*core.Def{},
 		unit:          unit.Name,
 		imports:       map[string]bool{},
@@ -344,8 +344,8 @@ type gen struct {
 	// constructor field temporaries. Multi-column pattern matrices may test
 	// any parameter directly, so constructor switches need all of them here.
 	caseVarTys    map[string]types.Type
-	evidence      map[int][]goast.Expr
-	evidenceModes map[int][]types.Transport
+	evidence      map[types.EffectKey][]goast.Expr
+	evidenceModes map[types.EffectKey][]types.Transport
 	rows          map[types.CaptureVar][]goast.Expr
 	defs          map[string]*core.Def
 	unit          string
@@ -734,11 +734,16 @@ func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
 		}
 	}()
 	params := g.descriptorParams(d.TyParams)
+	evidenceNames := map[string]int{}
 	for _, ev := range d.EffectParams {
 		name := g.evidenceName(ev.Name)
+		if n := evidenceNames[name]; n > 0 {
+			name = fmt.Sprintf("%s_%d", name, n)
+		}
+		evidenceNames[g.evidenceName(ev.Name)]++
 		params = append(params, paramSpec{name: name, typ: g.effectType(ev)})
-		g.evidence[ev.Unique] = append(g.evidence[ev.Unique], ident(name))
-		g.evidenceModes[ev.Unique] = append(g.evidenceModes[ev.Unique], mode)
+		g.evidence[ev.Key()] = append(g.evidence[ev.Key()], ident(name))
+		g.evidenceModes[ev.Key()] = append(g.evidenceModes[ev.Key()], mode)
 	}
 	if d.RowParam != 0 {
 		name := fmt.Sprintf("rowParam%d", g.tmp)
@@ -780,8 +785,8 @@ func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
 
 	decl := workerDecl(name, params, result, body).(*goast.FuncDecl)
 	for _, ev := range d.EffectParams {
-		g.evidence[ev.Unique] = g.evidence[ev.Unique][:len(g.evidence[ev.Unique])-1]
-		g.evidenceModes[ev.Unique] = g.evidenceModes[ev.Unique][:len(g.evidenceModes[ev.Unique])-1]
+		g.evidence[ev.Key()] = g.evidence[ev.Key()][:len(g.evidence[ev.Key()])-1]
+		g.evidenceModes[ev.Key()] = g.evidenceModes[ev.Key()][:len(g.evidenceModes[ev.Key()])-1]
 	}
 	decl.Type.TypeParams = g.typeParamFields(d.TyParams)
 	return decl
@@ -903,11 +908,11 @@ func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
 	abi := g.workerCallABI(g.defs[ref.Name], mode)
 	args := g.typeDescriptorArgs(e.TyArgs)
 	for _, ev := range e.EvidenceArgs {
-		stack := g.evidence[ev.Unique]
+		stack := g.evidence[ev.Key()]
 		if len(stack) == 0 {
 			panic("codegen: missing lexical evidence")
 		}
-		args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), mode))
+		args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Key()), mode))
 	}
 	if e.Row != nil {
 		args = append(args, g.rowArgument(e.Row))
@@ -1464,11 +1469,11 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			mode := e.Control.Resolve(g.control)
 			args := make([]goast.Expr, 0, len(e.EvidenceArgs)+1)
 			for _, ev := range e.EvidenceArgs {
-				stack := g.evidence[ev.Unique]
+				stack := g.evidence[ev.Key()]
 				if len(stack) == 0 {
 					panic("codegen: missing lexical evidence")
 				}
-				args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), mode))
+				args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Key()), mode))
 			}
 			if e.Row != nil {
 				args = append(args, g.rowArgument(e.Row))
@@ -1523,10 +1528,10 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			return g.caseStmts(e, g.retStmts)
 		})
 	case *core.Perform:
-		if e.Op.Native != nil && len(g.evidence[e.Effect.Unique]) == 0 {
+		if e.Op.Native != nil && len(g.evidence[e.Effect.Key()]) == 0 {
 			return g.nativeExpr(&core.NativeCall{Name: e.Op.Native.Name, Module: e.Op.Native.Module, Args: e.Args, Ty: e.Ty}, parentPrec)
 		}
-		stack := g.evidence[e.Effect.Unique]
+		stack := g.evidence[e.Effect.Key()]
 		if len(stack) == 0 {
 			panic("codegen: custom Perform without evidence")
 		}
@@ -1553,7 +1558,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		// same adaptation evidenceArg applies when Direct evidence is passed
 		// to an Exit worker.
 		exit := e.Control.Resolve(g.control) == types.Exit
-		directEvidence := g.currentEvidenceMode(e.Effect.Unique) != types.Exit
+		directEvidence := g.currentEvidenceMode(e.Effect.Key()) != types.Exit
 		unitResult := g.isUnit(e.Op.ResultType)
 		call := callOp(args)
 		if needPrelude {
@@ -1595,7 +1600,7 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		return call
 	case *core.ControlExit:
 		g.usesFangort = true
-		stack := g.evidence[e.Effect.Unique]
+		stack := g.evidence[e.Effect.Key()]
 		if len(stack) == 0 {
 			panic("codegen: ControlExit without lexical evidence")
 		}
@@ -1649,11 +1654,11 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 	abi := g.workerCallABI(g.defs[ref.Name], mode)
 	args := g.typeDescriptorArgs(e.TyArgs)
 	for _, ev := range e.EvidenceArgs {
-		stack := g.evidence[ev.Unique]
+		stack := g.evidence[ev.Key()]
 		if len(stack) == 0 {
 			panic("codegen: missing lexical evidence")
 		}
-		args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique), mode))
+		args = append(args, g.evidenceArg(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Key()), mode))
 	}
 	if e.Row != nil {
 		args = append(args, g.rowArgument(e.Row))
@@ -1748,11 +1753,11 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	name := fmt.Sprintf("ev%d", g.tmp)
 	g.tmp++
 	decl := varDeclStmt(name, st, record)
-	g.evidence[e.Effect.Unique] = append(g.evidence[e.Effect.Unique], ident(name))
-	g.evidenceModes[e.Effect.Unique] = append(g.evidenceModes[e.Effect.Unique], evidenceMode)
+	g.evidence[e.Effect.Key()] = append(g.evidence[e.Effect.Key()], ident(name))
+	g.evidenceModes[e.Effect.Key()] = append(g.evidenceModes[e.Effect.Key()], evidenceMode)
 	body := g.expr(e.Body, 0)
-	g.evidence[e.Effect.Unique] = g.evidence[e.Effect.Unique][:len(g.evidence[e.Effect.Unique])-1]
-	g.evidenceModes[e.Effect.Unique] = g.evidenceModes[e.Effect.Unique][:len(g.evidenceModes[e.Effect.Unique])-1]
+	g.evidence[e.Effect.Key()] = g.evidence[e.Effect.Key()][:len(g.evidence[e.Effect.Key()])-1]
+	g.evidenceModes[e.Effect.Key()] = g.evidenceModes[e.Effect.Key()][:len(g.evidenceModes[e.Effect.Key()])-1]
 	// A handler whose subject does not perform the handled effect still
 	// constructs valid lexical evidence; keep the local legal in Go even
 	// when no generated operation call refers to it.
@@ -1943,14 +1948,14 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 	}}
 	stmts = append(stmts, varDeclStmt(evidenceName, st, evidenceValue), assignBlank(ident(evidenceName)))
 
-	g.evidence[e.Effect.Unique] = append(g.evidence[e.Effect.Unique], ident(evidenceName))
-	g.evidenceModes[e.Effect.Unique] = append(g.evidenceModes[e.Effect.Unique], types.Exit)
+	g.evidence[e.Effect.Key()] = append(g.evidence[e.Effect.Key()], ident(evidenceName))
+	g.evidenceModes[e.Effect.Key()] = append(g.evidenceModes[e.Effect.Key()], types.Exit)
 	oldControl, oldResult := g.control, g.resultType
 	g.control, g.resultType = types.Exit, e.Body.Type()
 	body := callExpr(funcLit(g.outcomeType(e.Body.Type()), g.retStmtsFor(e.Body, g.isUnit(e.Body.Type()))))
 	g.control, g.resultType = oldControl, oldResult
-	g.evidence[e.Effect.Unique] = g.evidence[e.Effect.Unique][:len(g.evidence[e.Effect.Unique])-1]
-	g.evidenceModes[e.Effect.Unique] = g.evidenceModes[e.Effect.Unique][:len(g.evidenceModes[e.Effect.Unique])-1]
+	g.evidence[e.Effect.Key()] = g.evidence[e.Effect.Key()][:len(g.evidence[e.Effect.Key()])-1]
+	g.evidenceModes[e.Effect.Key()] = g.evidenceModes[e.Effect.Key()][:len(g.evidenceModes[e.Effect.Key()])-1]
 	stmts = append(stmts, varDeclStmt(outcomeName, g.outcomeType(e.Body.Type()), body))
 
 	exit := &goast.SelectorExpr{X: ident(outcomeName), Sel: ident("Exit")}
@@ -2254,7 +2259,7 @@ func (g *gen) effectTypeMode(e core.EffectInstance, mode types.Transport) goast.
 // evidenceArg widens a Direct evidence record to its Exit ABI family when an
 // enclosing aborting call needs Outcome-returning operation callbacks. The
 // reverse conversion is intentionally absent.
-func (g *gen) currentEvidenceMode(unique int) types.Transport {
+func (g *gen) currentEvidenceMode(unique types.EffectKey) types.Transport {
 	stack := g.evidenceModes[unique]
 	if len(stack) == 0 {
 		return types.Direct
@@ -2544,11 +2549,11 @@ func (g *gen) stmts(e core.Expr) []goast.Stmt {
 		if g.control == types.Exit && core.ExprControl(e).Resolve(g.control) == types.Exit {
 			return g.exitPrefix(e)
 		}
-		if e.Op.Native != nil && len(g.evidence[e.Effect.Unique]) == 0 {
+		if e.Op.Native != nil && len(g.evidence[e.Effect.Key()]) == 0 {
 			return g.nativeStmts(&core.NativeCall{Name: e.Op.Native.Name, Module: e.Op.Native.Module, Args: e.Args, Ty: e.Ty})
 		}
 		if g.isUnit(e.Op.ResultType) {
-			stack := g.evidence[e.Effect.Unique]
+			stack := g.evidence[e.Effect.Key()]
 			if len(stack) == 0 {
 				panic("codegen: custom Perform without evidence")
 			}
@@ -2664,17 +2669,22 @@ func (g *gen) directLambdaMember(e *core.Lambda, mode types.Transport) goast.Exp
 	oldControl, oldResult := g.control, g.resultType
 	g.control, g.resultType = mode, fn.Ret
 	params := make([]paramSpec, 0, len(fn.Eff.Labels)+1)
-	var pushed []int
+	var pushed []types.EffectKey
+	evidenceNames := map[string]int{}
 	for _, l := range types.SortedRow(fn.Eff).Labels {
 		if !types.RuntimeEvidenceEffect(l) {
 			continue
 		}
 		name := g.evidenceName(l.Name)
+		if n := evidenceNames[name]; n > 0 {
+			name = fmt.Sprintf("%s_%d", name, n)
+		}
+		evidenceNames[g.evidenceName(l.Name)]++
 		inst := core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: l.Args, Control: types.Control{Transport: mode}}
 		params = append(params, paramSpec{name: name, typ: g.effectType(inst)})
-		g.evidence[l.Unique] = append(g.evidence[l.Unique], ident(name))
-		g.evidenceModes[l.Unique] = append(g.evidenceModes[l.Unique], mode)
-		pushed = append(pushed, l.Unique)
+		g.evidence[types.EffectLabelKey(l)] = append(g.evidence[types.EffectLabelKey(l)], ident(name))
+		g.evidenceModes[types.EffectLabelKey(l)] = append(g.evidenceModes[types.EffectLabelKey(l)], mode)
+		pushed = append(pushed, types.EffectLabelKey(l))
 	}
 	if e.RowParam != 0 {
 		name := fmt.Sprintf("rowParam%d", g.tmp)

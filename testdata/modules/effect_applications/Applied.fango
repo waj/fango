@@ -1,0 +1,10 @@
+module Applied exposing (Put(..), both)
+
+effect Put a
+    put : a -> ()
+
+both : () ->{Put Bool, Put String} Bool
+both() =
+    put True
+    put "answer"
+    True

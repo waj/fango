@@ -20,14 +20,14 @@ func TestGenericFailureDescriptorsSurviveReturnedClosure(t *testing.T) {
 		return core.EffectInstance{Unique: effect.Unique, Name: effect.Name, Args: []types.Type{arg}}
 	}
 	raiseTy := &types.TFun{Arg: a, Ret: b.Unit}
-	raise := core.Def{Name: "raise", Type: raiseTy, TyParams: []*types.TVar{a}, Params: []string{"error"}, Body: &core.ControlExit{Effect: ev(a), Op: op, Payload: []core.Expr{&core.VarRef{Name: "error", Local: true, Ty: a}}, Ty: b.Unit}}
+	raise := core.Def{Name: "raise", Type: raiseTy, TyParams: []*types.TVar{a}, Params: []string{"error"}, EffectParams: []core.EffectInstance{ev(a)}, Body: &core.ControlExit{Effect: ev(a), Op: op, Payload: []core.Expr{&core.VarRef{Name: "error", Local: true, Ty: a}}, Ty: b.Unit}}
 	callbackTy := &types.TFun{Arg: b.Unit, Ret: b.Unit}
 	body := &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: raise.Name, Ty: &types.TFun{Arg: c, Ret: b.Unit}}, TyArgs: []types.Type{c}, EvidenceArgs: []core.EffectInstance{ev(c)}, Args: []core.Expr{&core.VarRef{Name: "value", Local: true, Ty: c}}, Ty: b.Unit}
 	makeTy := &types.TFun{Arg: c, Ret: callbackTy}
-	make := core.Def{Name: "make", Type: makeTy, TyParams: []*types.TVar{c}, Params: []string{"value"}, Body: &core.Lambda{Param: "unit", Body: body, Ty: callbackTy}}
+	make := core.Def{Name: "make", Type: makeTy, TyParams: []*types.TVar{c}, Params: []string{"value"}, Body: &core.Lambda{Param: "unit", EffectParams: []core.EffectInstance{ev(c)}, Body: body, Ty: callbackTy}}
 	env := NewEnv()
 	env.DefineProg(&core.Prog{Defs: []core.Def{raise, make}})
-	in := &interp{ctx: context.Background(), env: env, evidence: map[int]*evidence{effect.Unique: {}}}
+	in := &interp{ctx: context.Background(), env: env, evidence: map[types.EffectKey]*evidence{ev(b.Int).Key(): {}}}
 	factory := &core.App{CalleeKind: core.Worker, Callee: &core.VarRef{Name: make.Name, Ty: makeTy}, TyArgs: []types.Type{b.Int}, Args: []core.Expr{&core.IntLit{Val: 42, Ty: b.Int}}, Ty: callbackTy}
 	closure, err := in.eval(factory, nil)
 	if err != nil {

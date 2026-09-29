@@ -4,6 +4,21 @@ import (
 	"testing"
 )
 
+func TestEvidenceRowsDistinguishAppliedEffects(t *testing.T) {
+	intType := NominalType("Int", true)
+	stringType := NominalType("String", true)
+	row := ExtendEvidenceRow(nil,
+		EvidenceBinding{Name: "Read", Arguments: []*TypeDescriptor{intType}, Family: EvidenceFamily{Direct: 42}},
+		EvidenceBinding{Name: "Read", Arguments: []*TypeDescriptor{stringType}, Family: EvidenceFamily{Direct: "text"}},
+	)
+	if got := RowEvidence[int](row, "Read", DirectEvidence, intType); got != 42 {
+		t.Fatalf("Int = %d", got)
+	}
+	if got := RowEvidence[string](row, "Read", DirectEvidence, stringType); got != "text" {
+		t.Fatalf("String = %q", got)
+	}
+}
+
 func TestEvidenceRowsShadowWithoutMutatingLexicalBindings(t *testing.T) {
 	outer := ExtendEvidenceRow(nil, EvidenceBinding{Name: "Reader", Family: EvidenceFamily{Direct: 1}})
 	inner := ExtendEvidenceRow(outer, EvidenceBinding{Name: "Reader", Family: EvidenceFamily{Direct: 2}})

@@ -34,33 +34,49 @@ func (in *interp) argumentRow(argument *core.RowArgument, fr *Frame) (*fangort.E
 	}
 	bindings := make([]fangort.EvidenceBinding, len(argument.Effects))
 	for i, effect := range argument.Effects {
-		ev := in.evidence[effect.Unique]
+		ev := in.evidence[effect.Key()]
 		if ev == nil {
 			return nil, fmt.Errorf("eval: missing residual evidence %s", effect.Name)
 		}
-		bindings[i] = fangort.EvidenceBinding{Name: strconv.Itoa(effect.Unique), Family: fangort.EvidenceFamily{Origin: projectedEvidenceOrigin(ev, effect.Name), Direct: ev, Exit: ev}}
+		args := make([]*fangort.TypeDescriptor, len(effect.Args))
+		for j, arg := range effect.Args {
+			var err error
+			args[j], err = in.typeDescriptor(arg, fr)
+			if err != nil {
+				return nil, err
+			}
+		}
+		bindings[i] = fangort.EvidenceBinding{Name: strconv.Itoa(effect.Unique), Arguments: args, Family: fangort.EvidenceFamily{Origin: projectedEvidenceOrigin(ev, effect.Name), Direct: ev, Exit: ev}}
 	}
 	return fangort.ExtendEvidenceRow(tail, bindings...), nil
 }
 
-func bindInvocationRow(param types.CaptureVar, effects []core.EffectInstance, row *fangort.EvidenceRow, evidenceMap map[int]*evidence) rowEnv {
+func (in *interp) bindInvocationRow(param types.CaptureVar, effects []core.EffectInstance, row *fangort.EvidenceRow, evidenceMap map[types.EffectKey]*evidence, fr *Frame) (rowEnv, error) {
 	if param == 0 {
-		return nil
+		return nil, nil
 	}
 	for _, effect := range effects {
-		evidenceMap[effect.Unique] = &evidence{row: row, rowEffect: effect.Unique}
+		args := make([]*fangort.TypeDescriptor, len(effect.Args))
+		for i, arg := range effect.Args {
+			var err error
+			args[i], err = in.typeDescriptor(arg, fr)
+			if err != nil {
+				return nil, err
+			}
+		}
+		evidenceMap[effect.Key()] = &evidence{row: row, rowEffect: strconv.Itoa(effect.Unique), rowArgs: args}
 	}
-	return rowEnv{param: row}
+	return rowEnv{param: row}, nil
 }
 
 func resolveEvidence(ev *evidence) *evidence {
-	for ev != nil && ev.rowEffect != 0 {
-		ev = fangort.RowEvidence[*evidence](ev.row, strconv.Itoa(ev.rowEffect), fangort.DirectEvidence)
+	for ev != nil && ev.rowEffect != "" {
+		ev = fangort.RowEvidence[*evidence](ev.row, ev.rowEffect, fangort.DirectEvidence, ev.rowArgs...)
 	}
 	return ev
 }
 
 func (in *interp) plainClosure(lam *core.Lambda, fr *Frame) *Closure {
-	return &Closure{Param: lam.Param, Body: lam.Body, Env: fr, Evidence: in.closureEvidence(lam),
+	return &Closure{Param: lam.Param, Body: lam.Body, Env: fr, Evidence: in.closureEvidence(lam), effectParams: lam.EffectParams,
 		control: types.FunctionControl(lam.Ty.(*types.TFun)), rowParam: lam.RowParam, rowEffects: lam.RowEffects}
 }

@@ -107,7 +107,7 @@ func TestScopedAPIUnimplementedTypeBoundaries(t *testing.T) {
 
 both : () ->{Local Int, Local Bool} ()
 both() = ()
-`, "DUPLICATE EFFECT"},
+`, "EFFECT MISMATCH"},
 		{"effect row parameter", `type Job e = { run : () ->{e} () }
 
 effect Scheduling e

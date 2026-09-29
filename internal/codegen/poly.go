@@ -47,7 +47,7 @@ func (g *gen) polymorphicPerformExpr(e *core.Perform, evidence goast.Expr) goast
 		[]goast.Stmt{returnStmt(g.polyConvert(raw, erasedResult, e.Ty))})
 	want := g.typeDescriptor(e.Ty)
 	exit := e.Control.Resolve(g.control) == types.Exit
-	directEvidence := g.currentEvidenceMode(e.Effect.Unique) != types.Exit
+	directEvidence := g.currentEvidenceMode(e.Effect.Key()) != types.Exit
 	decode := func(value goast.Expr) goast.Expr {
 		return callExpr(indexExpr(selector("fangort", "DecodePoly"), []goast.Expr{g.goType(e.Ty)}), value, want, decoder)
 	}
@@ -112,13 +112,16 @@ func (g *gen) polyConvert(value goast.Expr, from, to types.Type) goast.Expr {
 func (g *gen) polyConvertCallback(value goast.Expr, from, to *types.TFun) goast.Expr {
 	toLabels := types.SortedRow(to.Eff).Labels
 	fromLabels := types.SortedRow(from.Eff).Labels
-	if len(toLabels) != len(fromLabels) {
+	if len(toLabels) != len(fromLabels) || len(to.Eff.Labels) != len(from.Eff.Labels) {
 		panic("codegen: polymorphic callback changed effect labels")
 	}
-	for i := range toLabels {
-		if toLabels[i].Unique != fromLabels[i].Unique || len(toLabels[i].Args) != len(fromLabels[i].Args) {
+	paired := map[types.EffectKey]types.EffLabel{}
+	for i, label := range to.Eff.Labels {
+		other := from.Eff.Labels[i]
+		if label.Unique != other.Unique || len(label.Args) != len(other.Args) {
 			panic("codegen: polymorphic callback changed effect labels")
 		}
+		paired[types.EffectLabelKey(label)] = other
 	}
 	param := fmt.Sprintf("t_poly_callback%d", g.tmp)
 	g.tmp++
@@ -132,15 +135,30 @@ func (g *gen) polyConvertCallback(value goast.Expr, from, to *types.TFun) goast.
 		g.tmp++
 		params := []paramSpec{}
 		callArgs := []goast.Expr{}
-		for i, label := range toLabels {
+		convertedEvidence := map[types.EffectKey]goast.Expr{}
+		for _, label := range toLabels {
 			if !types.RuntimeEvidenceEffect(label) {
 				continue
+			}
+			fromLabel, ok := paired[types.EffectLabelKey(label)]
+			if !ok {
+				panic("codegen: polymorphic callback lost effect label")
 			}
 			name := fmt.Sprintf("t_poly_evidence%d", g.tmp)
 			g.tmp++
 			instance := core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Control: types.Control{Transport: mode}}
 			params = append(params, paramSpec{name: name, typ: g.effectTypeMode(instance, mode)})
-			callArgs = append(callArgs, g.polyConvertEvidence(ident(name), label, fromLabels[i], mode))
+			convertedEvidence[types.EffectLabelKey(fromLabel)] = g.polyConvertEvidence(ident(name), label, fromLabel, mode)
+		}
+		for _, label := range fromLabels {
+			if !types.RuntimeEvidenceEffect(label) {
+				continue
+			}
+			converted, ok := convertedEvidence[types.EffectLabelKey(label)]
+			if !ok {
+				panic("codegen: polymorphic callback lost converted effect")
+			}
+			callArgs = append(callArgs, converted)
 		}
 		if types.FunctionOpenRow(to) {
 			rowName := fmt.Sprintf("t_poly_row%d", g.tmp)

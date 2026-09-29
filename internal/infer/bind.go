@@ -21,9 +21,9 @@ import (
 // boundHandler is the innermost handler of label u whose subject contains the
 // closure this constraint adapts. Nested activations of one effect are
 // distinct, and the innermost one is the evidence elaboration will capture.
-func boundHandler(bind []*HandlerInfo, u int) *HandlerInfo {
+func boundHandler(bind []*HandlerInfo, label types.EffLabel) *HandlerInfo {
 	for i := len(bind) - 1; i >= 0; i-- {
-		if bind[i].Effect.Unique == u {
+		if sameOrUnresolvedEffect(bind[i].Effect, label) {
 			return bind[i]
 		}
 	}
@@ -37,6 +37,19 @@ func rowHasLabel(r types.Row, u int) bool {
 		}
 	}
 	return false
+}
+
+func rowHasApplication(r types.Row, label types.EffLabel) bool {
+	for _, l := range r.Labels {
+		if sameOrUnresolvedEffect(l, label) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameOrUnresolvedEffect(a, b types.EffLabel) bool {
+	return a.Unique == b.Unique && (types.EffectLabelKey(a) == types.EffectLabelKey(b) || unresolvedEffectArgs(a.Args) || unresolvedEffectArgs(b.Args))
 }
 
 // rowAbsorbs reports whether a row can still gain a label it does not name.
@@ -74,7 +87,7 @@ func bindable(c Constraint, sub Subst) bool {
 		return false
 	}
 	for _, l := range left.Labels {
-		if !rowHasLabel(right, l.Unique) && boundHandler(c.Bind, l.Unique) != nil {
+		if !rowHasApplication(right, l) && boundHandler(c.Bind, l) != nil {
 			return true
 		}
 	}
@@ -92,7 +105,7 @@ func clauseRow(info *HandlerInfo, sub Subst) types.Row {
 			continue
 		}
 		for _, l := range r.Labels {
-			if !rowHasLabel(out, l.Unique) {
+			if !rowHasApplication(out, l) {
 				out.Labels = append(out.Labels, l)
 			}
 		}
@@ -120,8 +133,8 @@ func solveBound(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply) 
 	}
 	var adapted, clauses types.Row
 	for _, l := range left.Labels {
-		info := boundHandler(c.Bind, l.Unique)
-		if info == nil || rowHasLabel(right, l.Unique) {
+		info := boundHandler(c.Bind, l)
+		if info == nil || rowHasApplication(right, l) {
 			adapted.Labels = append(adapted.Labels, l)
 			continue
 		}
@@ -132,7 +145,7 @@ func solveBound(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply) 
 		}
 		row := info.Permission.Within(clauseRow(info, sub))
 		for _, cl := range row.Labels {
-			if !rowHasLabel(clauses, cl.Unique) {
+			if !rowHasApplication(clauses, cl) {
 				clauses.Labels = append(clauses.Labels, cl)
 			}
 		}
@@ -141,7 +154,7 @@ func solveBound(c Constraint, sub Subst, bi *types.Builtins, sup *types.Supply) 
 		}
 	}
 	for _, l := range clauses.Labels {
-		if !rowHasLabel(adapted, l.Unique) {
+		if !rowHasApplication(adapted, l) {
 			adapted.Labels = append(adapted.Labels, l)
 		}
 	}

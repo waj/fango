@@ -13,6 +13,63 @@ import (
 // This sentinel exists only between elaboration and lexical row binding.
 const pendingRow types.CaptureVar = -1
 
+func explicitApplication(want, actual types.EffLabel) bool {
+	if want.Unique != actual.Unique || len(want.Args) != len(actual.Args) {
+		return false
+	}
+	for i := range want.Args {
+		if !typeMayInstantiate(want.Args[i], actual.Args[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func typeMayInstantiate(pattern, actual types.Type) bool {
+	if types.Equal(pattern, actual) {
+		return true
+	}
+	switch pattern := pattern.(type) {
+	case *types.TVar:
+		return true
+	case *types.TCon:
+		other, ok := actual.(*types.TCon)
+		if !ok || pattern.Unique != other.Unique || len(pattern.Args) != len(other.Args) {
+			return false
+		}
+		for i := range pattern.Args {
+			if !typeMayInstantiate(pattern.Args[i], other.Args[i]) {
+				return false
+			}
+		}
+		return true
+	case *types.TFun:
+		other, ok := actual.(*types.TFun)
+		return ok && typeMayInstantiate(pattern.Arg, other.Arg) && typeMayInstantiate(pattern.Eff, other.Eff) && typeMayInstantiate(pattern.Ret, other.Ret)
+	case types.Row:
+		other, ok := actual.(types.Row)
+		if !ok || len(pattern.Labels) > len(other.Labels) || pattern.Tail == nil && len(pattern.Labels) != len(other.Labels) {
+			return false
+		}
+		used := make([]bool, len(other.Labels))
+		for _, label := range pattern.Labels {
+			found := false
+			for i, candidate := range other.Labels {
+				if used[i] || !explicitApplication(label, candidate) {
+					continue
+				}
+				used[i], found = true, true
+				break
+			}
+			if !found {
+				return false
+			}
+		}
+		return pattern.Tail != nil || other.Tail == nil
+	}
+	return false
+}
+
 func (el *elab) residualArgument(actual, explicit types.Row) *core.RowArgument {
 	row := &core.RowArgument{}
 	if actual.Tail != nil {
@@ -28,14 +85,14 @@ func (el *elab) residualArgument(actual, explicit types.Row) *core.RowArgument {
 		if !types.RuntimeEvidenceEffect(label) {
 			continue
 		}
-		if slices.ContainsFunc(explicit.Labels, func(want types.EffLabel) bool { return want.Unique == label.Unique }) {
+		if slices.ContainsFunc(explicit.Labels, func(want types.EffLabel) bool { return explicitApplication(want, label) }) {
 			continue
 		}
 		args := make([]types.Type, len(label.Args))
 		for i, arg := range label.Args {
 			args[i] = el.eraseRuntimeKinds(eraseRows(arg))
 		}
-		row.Effects = append(row.Effects, core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: args, Captures: el.evidenceCaptures(label.Unique), Control: el.evidenceControl(label.Unique)})
+		row.Effects = append(row.Effects, core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: args, Captures: el.evidenceCaptures(label.Unique, label.Args), Control: el.evidenceControl(label.Unique, label.Args)})
 	}
 	return row
 }
@@ -58,17 +115,17 @@ func bindRows(defs []core.Def, ck *infer.Checker) {
 		if core.ArrowOpenRow(d.Type, len(d.Params)) && d.RowParam == 0 {
 			d.RowParam = ck.Sup.FreshCapture()
 		}
-		evidence := map[int]core.EffectInstance{}
+		evidence := map[types.EffectKey]core.EffectInstance{}
 		for _, ev := range append(append([]core.EffectInstance(nil), d.EffectParams...), d.RowEffects...) {
-			evidence[ev.Unique] = ev
+			evidence[ev.Key()] = ev
 		}
 		bindExpressionRows(d.Body, d.RowParam, evidence, ck)
 	}
 }
 
-func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[int]core.EffectInstance, ck *infer.Checker) {
+func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[types.EffectKey]core.EffectInstance, ck *infer.Checker) {
 	resolve := func(ev *core.EffectInstance) {
-		if actual, found := evidence[ev.Unique]; found && ev.Captures.Empty() {
+		if actual, found := evidence[ev.Key()]; found && ev.Captures.Empty() {
 			ev.Captures, ev.Control = actual.Captures, actual.Control
 		}
 	}
@@ -85,7 +142,7 @@ func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[i
 		}
 		var kept []core.EffectInstance
 		for _, ev := range argument.Effects {
-			if _, found := evidence[ev.Unique]; !found && current != 0 {
+			if _, found := evidence[ev.Key()]; !found && current != 0 {
 				// An abstract callback receives this interpretation through its
 				// invocation row rather than capturing it during construction.
 				argument.From = current
@@ -108,13 +165,13 @@ func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[i
 			}
 			inner := maps.Clone(evidence)
 			for _, ev := range append(append([]core.EffectInstance(nil), e.EffectParams...), e.RowEffects...) {
-				inner[ev.Unique] = ev
+				inner[ev.Key()] = ev
 			}
 			bindExpressionRows(e.Body, row, inner, ck)
 			return false
 		case *core.Handle:
 			inner := maps.Clone(evidence)
-			inner[e.Effect.Unique] = e.Effect
+			inner[e.Effect.Key()] = e.Effect
 			bindExpressionRows(e.Body, current, inner, ck)
 			for _, clause := range e.Clauses {
 				bindExpressionRows(clause.Body, current, evidence, ck)
@@ -194,10 +251,14 @@ func (el *elab) callbackResidual(name string, arity int, args []ast.Expr, fallba
 		}
 		found = true
 		for _, label := range actual.Labels {
-			if slices.ContainsFunc(fn.Eff.Labels, func(explicit types.EffLabel) bool { return explicit.Unique == label.Unique }) {
+			if slices.ContainsFunc(fn.Eff.Labels, func(explicit types.EffLabel) bool {
+				return explicitApplication(explicit, label)
+			}) {
 				continue
 			}
-			if !slices.ContainsFunc(needed.Labels, func(existing types.EffLabel) bool { return existing.Unique == label.Unique }) {
+			if !slices.ContainsFunc(needed.Labels, func(existing types.EffLabel) bool {
+				return types.EffectLabelKey(existing) == types.EffectLabelKey(label)
+			}) {
 				needed.Labels = append(needed.Labels, label)
 			}
 		}
@@ -223,7 +284,9 @@ func (el *elab) callbackRequirements(expr ast.Expr) (types.Row, bool) {
 					return actual, true
 				}
 				for _, label := range actual.Labels {
-					if !slices.ContainsFunc(row.Labels, func(existing types.EffLabel) bool { return existing.Unique == label.Unique }) {
+					if !slices.ContainsFunc(row.Labels, func(existing types.EffLabel) bool {
+						return types.EffectLabelKey(existing) == types.EffectLabelKey(label)
+					}) {
 						row.Labels = append(row.Labels, label)
 					}
 				}

@@ -1,6 +1,7 @@
 package infer
 
 import (
+	"maps"
 	"strconv"
 	"strings"
 
@@ -102,31 +103,42 @@ func matchRow(pat, t types.Row, m map[int]types.Type) headMatch {
 		return headNo
 	}
 	ps, ts := types.SortedRow(pat), types.SortedRow(t)
-	byUnique := map[int]types.EffLabel{}
-	for _, l := range ps.Labels {
-		byUnique[l.Unique] = l
-	}
+	used := make([]bool, len(ps.Labels))
 	res := headYes
 	if t.Tail != nil {
 		res = headBlocked
 	}
-	matched := 0
 	for _, tl := range ts.Labels {
-		pl, ok := byUnique[tl.Unique]
-		if !ok || len(pl.Args) != len(tl.Args) {
-			return headNo
-		}
-		matched++
-		for i := range pl.Args {
-			if r := matchHead(pl.Args[i], tl.Args[i], m); r < res {
-				res = r
-				if res == headNo {
-					return headNo
+		best, bestResult := -1, headNo
+		var bestBindings map[int]types.Type
+		for i, pl := range ps.Labels {
+			if used[i] || pl.Unique != tl.Unique || len(pl.Args) != len(tl.Args) {
+				continue
+			}
+			trial := maps.Clone(m)
+			answer := headYes
+			for j := range pl.Args {
+				if r := matchHead(pl.Args[j], tl.Args[j], trial); r < answer {
+					answer = r
+				}
+				if answer == headNo {
+					break
 				}
 			}
+			if answer > bestResult || answer == bestResult && best >= 0 && types.EffectLabelKey(pl) == types.EffectLabelKey(tl) {
+				best, bestResult, bestBindings = i, answer, trial
+			}
+		}
+		if best < 0 || bestResult == headNo {
+			return headNo
+		}
+		used[best] = true
+		maps.Copy(m, bestBindings)
+		if bestResult < res {
+			res = bestResult
 		}
 	}
-	if matched < len(ps.Labels) {
+	if len(ts.Labels) < len(ps.Labels) {
 		if t.Tail == nil {
 			return headNo
 		}

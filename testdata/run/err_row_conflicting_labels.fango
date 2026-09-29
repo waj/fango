@@ -1,7 +1,5 @@
--- A row holds one label per effect. `reprovide` performs `Ctx p` itself and
--- hands `provide` a callback that performs `Ctx e`; solving the inclusion
--- of provide's residual row into reprovide's row would put both labels in
--- one row, which the checker must reject rather than let through.
+-- `Ctx p` and `Ctx e` still overlap while their arguments are unknown.
+-- The shared open row cannot assume they are distinct applications.
 
 effect Ctx e
     current : () -> e

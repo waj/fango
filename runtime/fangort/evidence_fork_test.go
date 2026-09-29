@@ -44,10 +44,10 @@ func TestEvidenceForkRejectsUnsupportedAndMismatchedAborts(t *testing.T) {
 				origin = &EvidenceOrigin{Name: "Fail", Arguments: []*TypeDescriptor{NominalType("Int", true)}}
 				replacement := &EvidenceOrigin{Name: "Fail", Arguments: []*TypeDescriptor{NominalType("String", true)}}
 				overrides = ExtendEvidenceRow(nil, EvidenceBinding{Name: "Fail", Family: EvidenceFamily{Origin: replacement}})
-				want = "incompatible inherited handler Fail"
+				want = "cannot inherit abort handler Fail"
 			}
 			row := ExtendEvidenceRow(nil, EvidenceBinding{Name: origin.Name, Family: EvidenceFamily{Origin: origin}})
-			deferred := DeferredEvidenceOrigin(row, origin.Name)
+			deferred := DeferredEvidenceOrigin(row, origin.Name, origin.Arguments...)
 			defer func() {
 				if got := fmt.Sprint(recover()); !strings.Contains(got, want) {
 					t.Fatalf("panic %q, want %q", got, want)
@@ -85,5 +85,23 @@ func TestEvidenceForkPreservesAllInlineAndOverflowBindings(t *testing.T) {
 		if got := RowEvidence[int](row, binding.Name, DirectEvidence); got != index+1 {
 			t.Fatalf("%s = %d", binding.Name, got)
 		}
+	}
+}
+
+func TestEvidenceForkPreservesDistinctApplicationsOfOneEffect(t *testing.T) {
+	intType, stringType := NominalType("Int", true), NominalType("String", true)
+	makeOrigin := func(arg *TypeDescriptor, value int) *EvidenceOrigin {
+		origin := &EvidenceOrigin{Name: "Read", Arguments: []*TypeDescriptor{arg}}
+		origin.Rebuild = func(*EvidenceFork) EvidenceFamily { return EvidenceFamily{Origin: origin, Direct: value} }
+		return origin
+	}
+	first, second := makeOrigin(intType, 1), makeOrigin(stringType, 2)
+	row := ExtendEvidenceRow(nil,
+		EvidenceBinding{Name: "Read", Arguments: first.Arguments, Family: EvidenceFamily{Origin: first, Direct: 1}},
+		EvidenceBinding{Name: "Read", Arguments: second.Arguments, Family: EvidenceFamily{Origin: second, Direct: 2}},
+	)
+	child := NewEvidenceFork(nil).Row(row)
+	if RowEvidence[int](child, "Read", DirectEvidence, intType) != 1 || RowEvidence[int](child, "Read", DirectEvidence, stringType) != 2 {
+		t.Fatal("fork merged distinct effect applications")
 	}
 }

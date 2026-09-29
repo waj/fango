@@ -1,0 +1,5 @@
+effect Tick a
+    tick : () -> ()
+
+both : () ->{Tick Bool, Tick String} ()
+both() = tick()

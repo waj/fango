@@ -452,15 +452,16 @@ func executingEffects(t types.Type, arity int) []core.EffectInstance {
 	}
 	row := types.SortedRow(f.Eff)
 	out := make([]core.EffectInstance, 0, len(row.Labels))
-	seen := map[int]bool{}
+	seen := map[types.EffectKey]bool{}
 	for _, l := range row.Labels {
-		if types.RuntimeEvidenceEffect(l) && !seen[l.Unique] {
+		key := types.EffectLabelKey(l)
+		if types.RuntimeEvidenceEffect(l) && !seen[key] {
 			control := types.Control{Polymorphic: true}
 			if l.Abort {
 				control = types.Control{Transport: types.Exit}
 			}
 			out = append(out, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Control: control})
-			seen[l.Unique] = true
+			seen[key] = true
 		}
 	}
 	return out
@@ -587,7 +588,7 @@ type elab struct {
 	// evidence is a lexical stack per nominal effect. Concrete handler
 	// activations carry a scope identity; function/lambda parameters carry a
 	// capture variable. This metadata is erased by both runtime backends.
-	evidence      map[int][]core.EffectInstance
+	evidence      map[types.EffectKey][]core.EffectInstance
 	valueAdapters []valueAdapter
 }
 
@@ -595,7 +596,7 @@ func newElab(ck *infer.Checker, declName string, declScheme types.Scheme) *elab 
 	return &elab{ck: ck, declName: declName, declScheme: declScheme,
 		instanceLimit: ck.StageInstanceLimit(),
 		owner:         symbolOwner(declName),
-		scopeIdx:      map[string]int{}, lifted: map[string]*liftedLocal{}, evidence: map[int][]core.EffectInstance{}}
+		scopeIdx:      map[string]int{}, lifted: map[string]*liftedLocal{}, evidence: map[types.EffectKey][]core.EffectInstance{}}
 }
 
 func (el *elab) bindEffectParams(effects []core.EffectInstance) []core.EffectInstance {
@@ -608,34 +609,34 @@ func (el *elab) bindEffectParams(effects []core.EffectInstance) []core.EffectIns
 			ev.Control.Polymorphic = true
 		}
 		out[i] = ev
-		el.evidence[ev.Unique] = append(el.evidence[ev.Unique], ev)
+		el.evidence[ev.Key()] = append(el.evidence[ev.Key()], ev)
 	}
 	return out
 }
 
 func (el *elab) pushEvidence(effects []core.EffectInstance) {
 	for _, ev := range effects {
-		el.evidence[ev.Unique] = append(el.evidence[ev.Unique], ev)
+		el.evidence[ev.Key()] = append(el.evidence[ev.Key()], ev)
 	}
 }
 
 func (el *elab) popEvidence(effects []core.EffectInstance) {
 	for i := len(effects) - 1; i >= 0; i-- {
-		u := effects[i].Unique
+		u := effects[i].Key()
 		el.evidence[u] = el.evidence[u][:len(el.evidence[u])-1]
 	}
 }
 
-func (el *elab) evidenceCaptures(unique int) types.CaptureSet {
-	stack := el.evidence[unique]
+func (el *elab) evidenceCaptures(unique int, args []types.Type) types.CaptureSet {
+	stack := el.evidence[types.AppliedEffectKey(unique, args)]
 	if len(stack) == 0 {
 		return types.CaptureSet{}
 	}
 	return stack[len(stack)-1].Captures
 }
 
-func (el *elab) evidenceControl(unique int) types.Control {
-	stack := el.evidence[unique]
+func (el *elab) evidenceControl(unique int, args []types.Type) types.Control {
+	stack := el.evidence[types.AppliedEffectKey(unique, args)]
 	if len(stack) == 0 {
 		return types.Control{}
 	}
@@ -1461,7 +1462,7 @@ func eraseRowsFrom(origin, t types.Type) types.Type {
 			}
 			keep := false
 			for _, ol := range of.Eff.Labels {
-				if ol.Unique == l.Unique {
+				if explicitApplication(ol, l) {
 					keep = true
 					break
 				}

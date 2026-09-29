@@ -115,14 +115,14 @@ type TFun struct {
 
 func FunctionOpenRow(fn *TFun) bool { return fn.OpenRow || fn.Eff.Tail != nil }
 
-// Row is a distinct-label effect row, optionally ending in an open tail.
+// Row contains distinct effect applications, optionally ending in an open tail.
 type Row struct {
 	Labels []EffLabel
 	Tail   Type // nil for a closed row; *TVar{Kind: RowVar} when open
 }
 
-// EffLabel identifies an effect by its generation-stable Unique. Name is
-// diagnostic syntax; Args instantiate parameterized effects such as Fail e.
+// EffLabel identifies an effect application by its generation-stable Unique
+// and its arguments. Name is diagnostic syntax.
 type EffLabel struct {
 	Scoped  bool // compiler-only generative permission; no runtime evidence
 	Binding bool // optional permission available for binding to an activation
@@ -139,7 +139,7 @@ func (r Row) Empty() bool { return len(r.Labels) == 0 && r.Tail == nil }
 // SortedRow returns a deterministic copy ordered by effect identity.
 func SortedRow(r Row) Row {
 	labels := append([]EffLabel(nil), r.Labels...)
-	sort.Slice(labels, func(i, j int) bool { return labels[i].Unique < labels[j].Unique })
+	sort.Slice(labels, func(i, j int) bool { return EffectLabelKey(labels[i]) < EffectLabelKey(labels[j]) })
 	return Row{Labels: labels, Tail: r.Tail}
 }
 

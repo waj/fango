@@ -247,18 +247,13 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 	}
 	var result types.Row
 	var errs []diag.Error
-	seen := map[int]bool{}
+	seen := map[types.EffectKey]bool{}
 	for _, l := range row.Labels {
 		info := ck.Effects[l.Name]
 		if info == nil {
 			errs = append(errs, diag.Errorf(l.NameSp, "NAMING ERROR", "I don't know an effect named `%s`.", l.Name))
 			continue
 		}
-		if seen[info.Unique] {
-			errs = append(errs, diag.Errorf(l.NameSp, "DUPLICATE EFFECT", "The effect `%s` appears twice in this row; effect labels are distinct.", l.Name))
-			continue
-		}
-		seen[info.Unique] = true
 		if len(l.Args) != len(info.Params) {
 			errs = append(errs, diag.Errorf(l.NameSp, "EFFECT ARITY", "`%s` takes %d type argument(s), but %d are given.", l.Name, len(info.Params), len(l.Args)))
 			continue
@@ -274,6 +269,12 @@ func (ck *Checker) resolveEffRow(row *ast.EffRow, tv *TypeVars) (types.Row, []di
 		if !valid {
 			continue
 		}
+		key := types.AppliedEffectKey(info.Unique, args)
+		if seen[key] {
+			errs = append(errs, diag.Errorf(l.NameSp, "DUPLICATE EFFECT", "The effect application `%s` appears twice in this row.", l.Name))
+			continue
+		}
+		seen[key] = true
 		abort := len(info.Ops) > 0 && info.Ops[0].Abort
 		result.Labels = append(result.Labels, types.EffLabel{Unique: info.Unique, Name: info.Name, Args: args, Abort: abort})
 	}

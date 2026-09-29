@@ -73,7 +73,7 @@ func (s Subst) applyRow(r types.Row) types.Row {
 	sorted := types.SortedRow(types.Row{Labels: labels, Tail: tail})
 	// Row-tail expansion can expose the same label through both the prefix
 	// and the substituted tail. Canonicalize identical occurrences; retain
-	// conflicting parameterizations so unifyRows can diagnose them.
+	// other applications so reconciliation can resolve uncertain overlaps.
 	canonical := sorted.Labels[:0]
 	for _, label := range sorted.Labels {
 		if len(canonical) > 0 && equalEffLabel(canonical[len(canonical)-1], label) {
@@ -254,29 +254,35 @@ func occurs(v *types.TVar, t types.Type, sub Subst) bool {
 
 func unifyRows(a, b types.Row, sub Subst, bi *types.Builtins, sup *types.Supply) *mismatch {
 	a, b = sub.applyRow(a), sub.applyRow(b)
-	am, bm := map[int]types.EffLabel{}, map[int]types.EffLabel{}
-	for _, l := range a.Labels {
-		if _, dup := am[l.Unique]; dup {
-			return &mismatch{a: a, b: b, effect: true, note: "an effect may appear at most once in a row (distinct-label rule)"}
-		}
-		am[l.Unique] = l
-	}
-	for _, l := range b.Labels {
-		if _, dup := bm[l.Unique]; dup {
-			return &mismatch{a: a, b: b, effect: true, note: "an effect may appear at most once in a row (distinct-label rule)"}
-		}
-		bm[l.Unique] = l
-	}
+	// A fully resolved application has its own identity. An unresolved
+	// application still overlaps another occurrence of its nominal effect:
+	// unify its arguments before deciding whether it is the same label.
+	used := make([]bool, len(b.Labels))
 	var left, right []types.EffLabel
-	for u, al := range am {
-		if bl, ok := bm[u]; ok {
+	for _, al := range a.Labels {
+		match := -1
+		for j, bl := range b.Labels {
+			if used[j] || al.Unique != bl.Unique {
+				continue
+			}
+			if equalEffLabel(al, bl) {
+				match = j
+				break
+			}
+			if match < 0 && (unresolvedEffectArgs(al.Args) || unresolvedEffectArgs(bl.Args)) {
+				match = j
+			}
+		}
+		if match >= 0 {
+			bl := b.Labels[match]
+			used[match] = true
 			if len(al.Args) != len(bl.Args) {
 				return &mismatch{a: a, b: b, effect: true, note: "the same effect label has different arity"}
 			}
 			for i := range al.Args {
 				if m := unify(al.Args[i], bl.Args[i], sub, bi, sup); m != nil {
 					m.effect = true
-					m.note = "a parameterized effect may appear only once in a row, with one consistent set of arguments (distinct-label rule)"
+					m.note = "unresolved applications of the same effect must have consistent arguments"
 					return m
 				}
 			}
@@ -284,13 +290,13 @@ func unifyRows(a, b types.Row, sub Subst, bi *types.Builtins, sup *types.Supply)
 			left = append(left, al)
 		}
 	}
-	for u, bl := range bm {
-		if _, ok := am[u]; !ok {
+	for j, bl := range b.Labels {
+		if !used[j] {
 			right = append(right, bl)
 		}
 	}
-	sort.Slice(left, func(i, j int) bool { return left[i].Unique < left[j].Unique })
-	sort.Slice(right, func(i, j int) bool { return right[i].Unique < right[j].Unique })
+	sort.Slice(left, func(i, j int) bool { return types.EffectLabelKey(left[i]) < types.EffectLabelKey(left[j]) })
+	sort.Slice(right, func(i, j int) bool { return types.EffectLabelKey(right[i]) < types.EffectLabelKey(right[j]) })
 	lt, rt := a.Tail, b.Tail
 	if len(left) == 0 && len(right) == 0 {
 		switch {
@@ -334,6 +340,38 @@ func unifyRows(a, b types.Row, sub Subst, bi *types.Builtins, sup *types.Supply)
 	}
 }
 
+func unresolvedEffectArgs(args []types.Type) bool {
+	for _, arg := range args {
+		if containsEffectVariable(arg) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsEffectVariable(t types.Type) bool {
+	switch t := t.(type) {
+	case *types.TVar:
+		return true
+	case *types.TCon:
+		for _, arg := range t.Args {
+			if containsEffectVariable(arg) {
+				return true
+			}
+		}
+	case *types.TFun:
+		return containsEffectVariable(t.Arg) || containsEffectVariable(t.Eff) || containsEffectVariable(t.Ret)
+	case types.Row:
+		for _, label := range t.Labels {
+			if unresolvedEffectArgs(label.Args) {
+				return true
+			}
+		}
+		return t.Tail != nil && containsEffectVariable(t.Tail)
+	}
+	return false
+}
+
 // includeRows constrains every effect in subrow to occur in superrow while
 // preserving any effects already present in superrow. An open subrow may be
 // weakened to the complete surrounding row; a closed subrow contributes
@@ -343,12 +381,13 @@ func includeRows(subrow, superrow types.Row, sub Subst, bi *types.Builtins, sup 
 	if left, ok := subrow.Tail.(*types.TVar); ok {
 		if right, ok := superrow.Tail.(*types.TVar); ok && left.ID == right.ID {
 			for _, row := range []types.Row{subrow, superrow} {
-				seen := map[int]bool{}
+				seen := map[types.EffectKey]bool{}
 				for _, label := range row.Labels {
-					if seen[label.Unique] {
-						return &mismatch{a: subrow, b: superrow, effect: true, note: "an effect may appear at most once in a row (distinct-label rule)"}
+					key := types.EffectLabelKey(label)
+					if seen[key] {
+						return &mismatch{a: subrow, b: superrow, effect: true, note: "an effect application may appear at most once in a row"}
 					}
-					seen[label.Unique] = true
+					seen[key] = true
 				}
 			}
 			// A shared tail is an inclusion bound, not an equality. A callback
@@ -358,7 +397,7 @@ func includeRows(subrow, superrow types.Row, sub Subst, bi *types.Builtins, sup 
 			for _, label := range subrow.Labels {
 				found := false
 				for _, allowed := range superrow.Labels {
-					if label.Unique != allowed.Unique {
+					if label.Unique != allowed.Unique || (!equalEffLabel(label, allowed) && !unresolvedEffectArgs(label.Args) && !unresolvedEffectArgs(allowed.Args)) {
 						continue
 					}
 					found = true
@@ -398,18 +437,19 @@ func includeRows(subrow, superrow types.Row, sub Subst, bi *types.Builtins, sup 
 		allowed := superrow
 		allowed.Labels = nil
 		for _, label := range superrow.Labels {
-			if !label.Binding || rowHasLabel(subrow, label.Unique) {
+			if !label.Binding || rowHasApplication(subrow, label) {
 				allowed.Labels = append(allowed.Labels, label)
 			}
 		}
 		return unifyRows(subrow, allowed, sub, bi, sup)
 	}
-	seen := map[int]bool{}
+	seen := map[types.EffectKey]bool{}
 	for _, label := range subrow.Labels {
-		if seen[label.Unique] {
-			return &mismatch{a: subrow, b: superrow, effect: true, note: "an effect may appear at most once in a row (distinct-label rule)"}
+		key := types.EffectLabelKey(label)
+		if seen[key] {
+			return &mismatch{a: subrow, b: superrow, effect: true, note: "an effect application may appear at most once in a row"}
 		}
-		seen[label.Unique] = true
+		seen[key] = true
 		rest := sup.FreshVar(types.RowVar)
 		if m := unifyRows(superrow, types.Row{Labels: []types.EffLabel{label}, Tail: rest}, sub, bi, sup); m != nil {
 			return m

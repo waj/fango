@@ -120,24 +120,24 @@ func CheckRowEvidence(p *Prog) []error {
 			seen[id], rows[id] = true, true
 		}
 	}
-	addEffects := func(effects map[int]EffectInstance, explicit, deferred []EffectInstance, row types.CaptureVar, where string) {
+	addEffects := func(effects map[types.EffectKey]EffectInstance, explicit, deferred []EffectInstance, row types.CaptureVar, where string) {
 		for _, ev := range explicit {
-			effects[ev.Unique] = ev
+			effects[ev.Key()] = ev
 		}
-		ids := map[int]bool{}
+		ids := map[types.EffectKey]bool{}
 		for _, ev := range explicit {
-			ids[ev.Unique] = true
+			ids[ev.Key()] = true
 		}
 		for _, ev := range deferred {
-			if row == 0 || ids[ev.Unique] || ev.Unique == 0 {
+			if row == 0 || ids[ev.Key()] || ev.Unique == 0 {
 				report("%s: invalid deferred evidence binder", where)
 			}
-			ids[ev.Unique] = true
-			effects[ev.Unique] = ev
+			ids[ev.Key()] = true
+			effects[ev.Key()] = ev
 		}
 	}
-	var visit func(Expr, map[types.CaptureVar]bool, map[int]EffectInstance, string)
-	visit = func(expr Expr, rows map[types.CaptureVar]bool, effects map[int]EffectInstance, where string) {
+	var visit func(Expr, map[types.CaptureVar]bool, map[types.EffectKey]EffectInstance, string)
+	visit = func(expr Expr, rows map[types.CaptureVar]bool, effects map[types.EffectKey]EffectInstance, where string) {
 		InspectPruned(expr, func(e Expr) bool {
 			switch e := e.(type) {
 			case *Lambda:
@@ -148,7 +148,7 @@ func CheckRowEvidence(p *Prog) []error {
 				return false
 			case *Handle:
 				inner := maps.Clone(effects)
-				inner[e.Effect.Unique] = e.Effect
+				inner[e.Effect.Key()] = e.Effect
 				visit(e.Body, rows, inner, where)
 				for _, clause := range e.Clauses {
 					visit(clause.Body, rows, effects, where)
@@ -189,13 +189,13 @@ func CheckRowEvidence(p *Prog) []error {
 			if row.From != 0 && !rows[row.From] {
 				report("%s: residual argument references unavailable row %d", where, row.From)
 			}
-			last := 0
+			var last types.EffectKey
 			for _, ev := range row.Effects {
-				if ev.Unique <= last {
+				if ev.Key() <= last {
 					report("%s: residual evidence is duplicated or unordered", where)
 				}
-				last = ev.Unique
-				actual, ok := effects[ev.Unique]
+				last = ev.Key()
+				actual, ok := effects[ev.Key()]
 				if !ok || !sameRowEffect(actual, ev) {
 					report("%s: residual evidence has no matching lexical activation", where)
 				}
@@ -205,7 +205,7 @@ func CheckRowEvidence(p *Prog) []error {
 	}
 	for _, def := range p.Defs {
 		where := "def " + def.Name
-		rows, effects := map[types.CaptureVar]bool{}, map[int]EffectInstance{}
+		rows, effects := map[types.CaptureVar]bool{}, map[types.EffectKey]EffectInstance{}
 		bind(where, def.RowParam, ArrowOpenRow(def.Type, len(def.Params)), rows)
 		addEffects(effects, def.EffectParams, def.RowEffects, def.RowParam, where)
 		visit(def.Body, rows, effects, where)

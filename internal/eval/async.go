@@ -14,11 +14,18 @@ func (in *interp) asyncRebase(e *core.AsyncRebase, fr *Frame) (Value, error) {
 	}
 	bindings := []fangort.EvidenceBinding{}
 	for _, arg := range e.Call.EvidenceArgs {
-		ev := resolveEvidence(in.evidence[arg.Unique])
+		ev := resolveEvidence(in.evidence[arg.Key()])
 		if ev == nil {
 			return nil, fmt.Errorf("Async: missing child handler %s", arg.Name)
 		}
-		bindings = append(bindings, fangort.EvidenceBinding{Name: arg.Name, Family: fangort.EvidenceFamily{Origin: ev.origin, Direct: ev, Exit: ev}})
+		args := make([]*fangort.TypeDescriptor, len(arg.Args))
+		for i, ty := range arg.Args {
+			args[i], err = in.typeDescriptor(ty, fr)
+			if err != nil {
+				return nil, err
+			}
+		}
+		bindings = append(bindings, fangort.EvidenceBinding{Name: arg.Name, Arguments: args, Family: fangort.EvidenceFamily{Origin: ev.origin, Direct: ev, Exit: ev}})
 	}
 	fork := fangort.NewEvidenceFork(fangort.ExtendEvidenceRow(nil, bindings...))
 	row = fork.Row(row)
@@ -56,8 +63,11 @@ func (in *interp) asyncLaunch(e *core.AsyncLaunch, fr *Frame) (Value, error) {
 	}
 	task := fangort.SpawnAsync(owner.(*CtorVal).Fields[0].(*fangort.AsyncScope), func(scope *fangort.AsyncScope) fangort.AsyncCompletion {
 		evidence := cloneEvidence(body.Evidence)
-		rows := bindInvocationRow(body.rowParam, body.rowEffects, row, evidence)
 		child := &interp{ctx: hostContext, hostContext: hostContext, env: in.env, ioctx: in.ioctx, out: in.out, evidence: evidence, forcing: map[*Cell]bool{}, pollOwned: 1}
+		rows, rowErr := child.bindInvocationRow(body.rowParam, body.rowEffects, row, evidence, body.Env)
+		if rowErr != nil {
+			panic(rowErr)
+		}
 		result, err := child.eval(body.Body, &Frame{parent: body.Env, vars: map[string]Value{body.Param: &CtorVal{Ctor: e.ScopeCtor, Fields: []Value{scope}}}, rows: rows})
 		if err != nil {
 			panic(err)

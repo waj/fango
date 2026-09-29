@@ -99,13 +99,14 @@ type CtorVal struct {
 // never materialize as values — elaboration eta-expanded every first-class
 // use, so *Partial from the doc/design.md, "Interpreter and REPL" sketch is not needed.
 type Closure struct {
-	Param      string
-	Body       core.Expr
-	Env        *Frame
-	Evidence   map[int]*evidence
-	control    types.Control
-	rowParam   types.CaptureVar
-	rowEffects []core.EffectInstance
+	Param        string
+	Body         core.Expr
+	Env          *Frame
+	Evidence     map[types.EffectKey]*evidence
+	effectParams []core.EffectInstance
+	control      types.Control
+	rowParam     types.CaptureVar
+	rowEffects   []core.EffectInstance
 }
 
 type IOContext struct {
@@ -192,10 +193,11 @@ type evidence struct {
 	origin    *fangort.EvidenceOrigin
 	typeArgs  []*fangort.TypeDescriptor
 	row       *fangort.EvidenceRow
-	rowEffect int
+	rowEffect string
+	rowArgs   []*fangort.TypeDescriptor
 	handler   *core.Handle
 	frame     *Frame
-	outer     map[int]*evidence
+	outer     map[types.EffectKey]*evidence
 	state     *fangort.HandlerState[Value]
 }
 
@@ -356,7 +358,7 @@ type interp struct {
 	env      *Env
 	out      io.Writer
 	ioctx    *IOContext
-	evidence map[int]*evidence
+	evidence map[types.EffectKey]*evidence
 	forcing  map[*Cell]bool
 	stack    []*Cell
 	steps    int
@@ -398,7 +400,7 @@ const DefaultBudget = 10_000_000
 func EvalCompileTime(ctx context.Context, e core.Expr, env *Env, budget int) (Value, error) {
 	ioctx := NewIOContext(strings.NewReader(""), io.Discard)
 	in := &interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx,
-		evidence: map[int]*evidence{}, compileTime: true, budget: budget}
+		evidence: map[types.EffectKey]*evidence{}, compileTime: true, budget: budget}
 	return in.eval(e, nil)
 }
 
@@ -412,7 +414,7 @@ func EvalIO(ctx context.Context, e core.Expr, env *Env, ioctx *IOContext) (Value
 	if executor, ok := ioctx.Natives.(programExecutor); ok {
 		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Expr: e})
 	}
-	return (&interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[int]*evidence{}}).eval(e, nil)
+	return (&interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[types.EffectKey]*evidence{}}).eval(e, nil)
 }
 
 // EvalOutcome exposes the interpreter's control protocol to compiler tests and
@@ -438,7 +440,7 @@ func ForceIO(ctx context.Context, name string, env *Env, ioctx *IOContext) (Valu
 	if executor, ok := ioctx.Natives.(programExecutor); ok {
 		return executor.Execute(ctx, ioctx, &execcodec.Payload{Program: env.program(), Force: name})
 	}
-	return (&interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[int]*evidence{}}).force(name)
+	return (&interp{ctx: ctx, env: env, out: ioctx, ioctx: ioctx, evidence: map[types.EffectKey]*evidence{}}).force(name)
 }
 
 // tick is shared by Core evaluation, tail loops, and producer machines. A
@@ -621,7 +623,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			args[i] = v
 		}
-		if ev := resolveEvidence(in.evidence[e.Effect.Unique]); ev != nil && ev.handler != nil {
+		if ev := resolveEvidence(in.evidence[e.Effect.Key()]); ev != nil && ev.handler != nil {
 			if e.Op.Abort {
 				return nil, fmt.Errorf("eval: abort-only operation `%s` reached Perform", e.Op.Name)
 			}
@@ -694,7 +696,7 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			descriptors[i] = descriptor
 		}
-		target := resolveEvidence(in.evidence[e.Effect.Unique])
+		target := resolveEvidence(in.evidence[e.Effect.Key()])
 		if target == nil {
 			return nil, fmt.Errorf("eval: missing abort evidence for `%s.%s`", e.Effect.Name, e.Op.Name)
 		}
@@ -755,8 +757,8 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 		}
 		outer := cloneEvidence(in.evidence)
-		in.evidence[e.Effect.Unique] = &evidence{handler: e, frame: fr, outer: outer, state: fangort.NewHandlerState(state)}
-		installed := in.evidence[e.Effect.Unique]
+		in.evidence[e.Effect.Key()] = &evidence{handler: e, frame: fr, outer: outer, state: fangort.NewHandlerState(state)}
+		installed := in.evidence[e.Effect.Key()]
 		for _, arg := range e.Effect.Args {
 			descriptor, err := in.typeDescriptor(arg, fr)
 			if err != nil {
@@ -838,26 +840,28 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			// represents their values as a map. Restricting the worker to that
 			// map gives it the same lexical (not dynamically scoped) behavior
 			// as the generated Go parameters.
-			callEvidence := make(map[int]*evidence, len(e.EvidenceArgs))
-			for _, arg := range e.EvidenceArgs {
-				ev := in.evidence[arg.Unique]
+			callEvidence := make(map[types.EffectKey]*evidence, len(e.EvidenceArgs))
+			for i, arg := range e.EvidenceArgs {
+				ev := in.evidence[arg.Key()]
 				if ev == nil {
 					return nil, fmt.Errorf("eval: missing evidence `%s` for worker `%s`", arg.Name, ref.Name)
 				}
-				callEvidence[arg.Unique] = ev
+				callEvidence[def.EffectParams[i].Key()] = ev
 			}
 			row, rowErr := in.argumentRow(e.Row, fr)
 			if rowErr != nil {
 				return nil, rowErr
 			}
-			rows := bindInvocationRow(def.RowParam, def.RowEffects, row, callEvidence)
-			saved := in.evidence
-			in.evidence = callEvidence
 			descriptors, typeErr := in.instantiateDescriptors(def.TyParams, e.TyArgs, fr)
 			if typeErr != nil {
-				in.evidence = saved
 				return nil, typeErr
 			}
+			rows, rowErr := in.bindInvocationRow(def.RowParam, def.RowEffects, row, callEvidence, &Frame{types: descriptors})
+			if rowErr != nil {
+				return nil, rowErr
+			}
+			saved := in.evidence
+			in.evidence = callEvidence
 			// Workers see no caller locals — matching compiled scoping.
 			var out Value
 			var err error
@@ -896,18 +900,21 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 			}
 			saved := in.evidence
 			callEvidence := cloneEvidence(c.Evidence)
-			for _, arg := range e.EvidenceArgs {
-				ev := in.evidence[arg.Unique]
+			for i, arg := range e.EvidenceArgs {
+				ev := in.evidence[arg.Key()]
 				if ev == nil {
 					return nil, fmt.Errorf("eval: missing evidence `%s` for function call", arg.Name)
 				}
-				callEvidence[arg.Unique] = ev
+				callEvidence[c.effectParams[i].Key()] = ev
 			}
 			row, rowErr := in.argumentRow(e.Row, fr)
 			if rowErr != nil {
 				return nil, rowErr
 			}
-			rows := bindInvocationRow(c.rowParam, c.rowEffects, row, callEvidence)
+			rows, rowErr := in.bindInvocationRow(c.rowParam, c.rowEffects, row, callEvidence, c.Env)
+			if rowErr != nil {
+				return nil, rowErr
+			}
 			in.evidence = callEvidence
 			out, err := in.eval(c.Body, &Frame{parent: c.Env, vars: map[string]Value{c.Param: v}, rows: rows})
 			in.evidence = saved
@@ -1045,8 +1052,8 @@ func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID, e
 	}
 }
 
-func cloneEvidence(src map[int]*evidence) map[int]*evidence {
-	dst := make(map[int]*evidence, len(src))
+func cloneEvidence(src map[types.EffectKey]*evidence) map[types.EffectKey]*evidence {
+	dst := make(map[types.EffectKey]*evidence, len(src))
 	for k, v := range src {
 		dst[k] = v
 	}

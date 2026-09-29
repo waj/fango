@@ -1,0 +1,13 @@
+type Key a = Key a
+
+effect Put a
+    put : a -> ()
+
+both : () ->{Put (Key Bool), Put (Key String)} ()
+both() =
+    put (Key True)
+    put (Key "answer")
+
+main() = handle (handle both() of
+    put (Key text) -> print text; resume ()) of
+    put (Key flag) -> print flag; resume ()

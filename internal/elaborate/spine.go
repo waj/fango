@@ -126,19 +126,33 @@ func (el *elab) app(e *ast.App) core.Expr {
 }
 
 func (el *elab) effectInstance(op *types.EffectOp, ty types.Type) core.EffectInstance {
+	bindings := map[int]types.Type{}
+	parameters, result := core.PeelFun(ty, op.Arity)
+	for i, parameter := range op.ParamTypes {
+		if i < len(parameters) {
+			matchType(parameter, parameters[i], bindings)
+		}
+	}
+	matchType(op.ResultType, result, bindings)
+	var ownerArgs []types.Type
+	for _, param := range op.Owner.Params {
+		if arg := bindings[param.ID]; arg != nil {
+			ownerArgs = append(ownerArgs, arg)
+		}
+	}
 	t := ty
 	for i := 0; i < op.Arity; i++ {
 		f := t.(*types.TFun)
 		if i == op.Arity-1 {
 			for _, l := range f.Eff.Labels {
-				if l.Unique == op.Owner.Unique {
-					return core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Captures: el.evidenceCaptures(l.Unique), Control: el.evidenceControl(l.Unique)}
+				if l.Unique == op.Owner.Unique && (len(ownerArgs) != len(op.Owner.Params) || types.EffectLabelKey(l) == types.AppliedEffectKey(l.Unique, ownerArgs)) {
+					return core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Captures: el.evidenceCaptures(l.Unique, l.Args), Control: el.evidenceControl(l.Unique, l.Args)}
 				}
 			}
 		}
 		t = f.Ret
 	}
-	return core.EffectInstance{Unique: op.Owner.Unique, Name: op.Owner.Name, Captures: el.evidenceCaptures(op.Owner.Unique), Control: el.evidenceControl(op.Owner.Unique)}
+	return core.EffectInstance{Unique: op.Owner.Unique, Name: op.Owner.Name, Args: ownerArgs, Captures: el.evidenceCaptures(op.Owner.Unique, ownerArgs), Control: el.evidenceControl(op.Owner.Unique, ownerArgs)}
 }
 
 // operationLocalTypes recovers the solved instantiation of the operation's
@@ -183,13 +197,13 @@ func (el *elab) operationLocalTypes(op *types.EffectOp, occurrence types.Type) [
 			if !ok {
 				return
 			}
+			used := make([]bool, len(a.Labels))
 			for _, pl := range p.Labels {
-				for _, al := range a.Labels {
-					if pl.Unique != al.Unique || len(pl.Args) != len(al.Args) {
-						continue
-					}
+				j := matchAppliedRowLabel(pl, a.Labels, used)
+				if j >= 0 {
+					used[j] = true
 					for i := range pl.Args {
-						walk(pl.Args[i], al.Args[i])
+						walk(pl.Args[i], a.Labels[j].Args[i])
 					}
 				}
 			}
@@ -310,7 +324,7 @@ func (el *elab) valueApp(callee, arg core.Expr) core.Expr {
 	}
 	for _, l := range types.SortedRow(fn.Eff).Labels {
 		if types.RuntimeEvidenceEffect(l) {
-			app.EvidenceArgs = append(app.EvidenceArgs, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Captures: el.evidenceCaptures(l.Unique), Control: el.evidenceControl(l.Unique)})
+			app.EvidenceArgs = append(app.EvidenceArgs, core.EffectInstance{Unique: l.Unique, Name: l.Name, Args: append([]types.Type(nil), l.Args...), Captures: el.evidenceCaptures(l.Unique, l.Args), Control: el.evidenceControl(l.Unique, l.Args)})
 		}
 	}
 	return app
@@ -439,18 +453,31 @@ func matchType(gen, occ types.Type, m map[int]types.Type) {
 		if !ok {
 			panic(fmt.Sprintf("elaborate: occurrence type %s does not match generic %s", types.Show(occ), types.Show(gen)))
 		}
-		for _, gl := range g.Labels {
-			for _, ol := range o.Labels {
-				if gl.Unique != ol.Unique || len(gl.Args) != len(ol.Args) {
-					continue
-				}
+		used := make([]bool, len(o.Labels))
+		for _, gl := range types.SortedRow(g).Labels {
+			j := matchAppliedRowLabel(gl, o.Labels, used)
+			if j >= 0 {
+				used[j] = true
 				for i := range gl.Args {
-					matchType(gl.Args[i], ol.Args[i], m)
+					matchType(gl.Args[i], o.Labels[j].Args[i], m)
 				}
-				break
 			}
 		}
 	}
+}
+
+func matchAppliedRowLabel(pattern types.EffLabel, actual []types.EffLabel, used []bool) int {
+	for i, label := range actual {
+		if !used[i] && types.EffectLabelKey(pattern) == types.EffectLabelKey(label) {
+			return i
+		}
+	}
+	for i, label := range actual {
+		if !used[i] && pattern.Unique == label.Unique && len(pattern.Args) == len(label.Args) {
+			return i
+		}
+	}
+	return -1
 }
 
 // nullaryValueUse is a use of a polymorphic top-level value — a nullary
@@ -518,8 +545,8 @@ func (el *elab) workerEvidence(name string, arity int, tyArgs []types.Type) []co
 		}
 	}
 	for i := range effects {
-		effects[i].Captures = el.evidenceCaptures(effects[i].Unique)
-		effects[i].Control = el.evidenceControl(effects[i].Unique)
+		effects[i].Captures = el.evidenceCaptures(effects[i].Unique, effects[i].Args)
+		effects[i].Control = el.evidenceControl(effects[i].Unique, effects[i].Args)
 	}
 	return effects
 }
@@ -620,7 +647,7 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...
 			}
 			found := false
 			for _, ev := range e.EffectParams {
-				found = found || ev.Unique == label.Unique
+				found = found || ev.Key() == types.EffectLabelKey(label)
 			}
 			needsEvidence = needsEvidence || !found
 		}
@@ -633,7 +660,7 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...
 		for _, ev := range e.EffectParams {
 			retained := false
 			for _, label := range wantFn.Eff.Labels {
-				if label.Unique == ev.Unique {
+				if types.EffectLabelKey(label) == ev.Key() {
 					retained = true
 					break
 				}
@@ -642,13 +669,13 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...
 				kept = append(kept, ev)
 				continue
 			}
-			if (len(el.evidence[ev.Unique]) == 0 || forwards(ev.Unique)) && types.FunctionOpenRow(wantFn) {
+			if (len(el.evidence[ev.Key()]) == 0 || forwards(ev.Unique)) && types.FunctionOpenRow(wantFn) {
 				e.RowEffects = append(e.RowEffects, ev)
 				continue
 			}
 			for _, v := range ev.Captures.Vars {
-				sub[v] = el.evidenceCaptures(ev.Unique)
-				control[v] = el.evidenceControl(ev.Unique)
+				sub[v] = el.evidenceCaptures(ev.Unique, ev.Args)
+				control[v] = el.evidenceControl(ev.Unique, ev.Args)
 			}
 		}
 		e.Body = core.SubstituteCaptureVars(e.Body, sub, control)
@@ -683,13 +710,13 @@ func (el *elab) adaptFunctionValue(e core.Expr, want types.Type, sourceTypes ...
 	for _, label := range actualFn.Eff.Labels {
 		explicit := false
 		for _, ev := range effectParams {
-			explicit = explicit || ev.Unique == label.Unique
+			explicit = explicit || ev.Key() == types.EffectLabelKey(label)
 		}
 		if explicit {
 			continue
 		}
-		if types.RuntimeEvidenceEffect(label) && (len(el.evidence[label.Unique]) == 0 || forwards(label.Unique)) && types.FunctionOpenRow(wantFn) {
-			rowEffects = append(rowEffects, core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Control: el.evidenceControl(label.Unique)})
+		if types.RuntimeEvidenceEffect(label) && (len(el.evidence[types.EffectLabelKey(label)]) == 0 || forwards(label.Unique)) && types.FunctionOpenRow(wantFn) {
+			rowEffects = append(rowEffects, core.EffectInstance{Unique: label.Unique, Name: label.Name, Args: label.Args, Control: el.evidenceControl(label.Unique, label.Args)})
 		}
 	}
 	rowEffects = el.bindEffectParams(rowEffects)
@@ -766,7 +793,7 @@ func (el *elab) partial(c callee, given []ast.Expr) core.Expr {
 		effectParams = el.bindEffectParams(executingEffects(lamTy, missing))
 		for i := range c.evidence {
 			for _, ev := range effectParams {
-				if c.evidence[i].Unique == ev.Unique {
+				if c.evidence[i].Key() == ev.Key() {
 					c.evidence[i].Captures = ev.Captures
 					c.evidence[i].Control = ev.Control
 				}

@@ -164,14 +164,40 @@ func TestInclusionWithSharedTail(t *testing.T) {
 	}
 }
 
-func TestSharedTailStillRejectsConflictingEffectArguments(t *testing.T) {
+func TestSharedTailKeepsDistinctResolvedEffectApplications(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	tail := sup.FreshVar(types.RowVar)
 	label := types.EffLabel{Unique: sup.NextUnique(), Name: "Read", Args: []types.Type{b.Int}}
 	other := label
 	other.Args = []types.Type{b.String}
-	if m := includeRows(types.Row{Labels: []types.EffLabel{label}, Tail: tail}, types.Row{Labels: []types.EffLabel{other}, Tail: tail}, Subst{}, b, sup); m == nil {
-		t.Fatal("conflicting nominal effect arguments accepted")
+	if m := includeRows(types.Row{Labels: []types.EffLabel{label}, Tail: tail}, types.Row{Labels: []types.EffLabel{other}, Tail: tail}, Subst{}, b, sup); m != nil {
+		t.Fatalf("distinct resolved effect applications rejected: %v", m)
+	}
+}
+
+func TestAppliedEffectRowIdentityAndUnresolvedOverlap(t *testing.T) {
+	sup := &types.Supply{}
+	b := types.NewBuiltins(sup)
+	u := sup.NextUnique()
+	boolean := types.EffLabel{Unique: u, Name: "Put", Args: []types.Type{b.Bool}}
+	stringLabel := types.EffLabel{Unique: u, Name: "Put", Args: []types.Type{b.String}}
+	left := types.Row{Labels: []types.EffLabel{boolean, stringLabel}}
+	right := types.Row{Labels: []types.EffLabel{stringLabel, boolean}}
+	if m := unifyRows(left, right, Subst{}, b, sup); m != nil {
+		t.Fatalf("distinct resolved applications did not match: %v", m)
+	}
+	variable := sup.FreshVar(types.General)
+	unknown := types.EffLabel{Unique: u, Name: "Put", Args: []types.Type{variable}}
+	sub := Subst{}
+	if m := unifyRows(types.Row{Labels: []types.EffLabel{unknown}}, types.Row{Labels: []types.EffLabel{boolean}}, sub, b, sup); m != nil {
+		t.Fatalf("unresolved overlap rejected: %v", m)
+	}
+	if !types.Equal(sub.Apply(variable), b.Bool) {
+		t.Fatalf("unresolved argument = %s", types.Show(sub.Apply(variable)))
+	}
+	rigid := sup.FreshRigid(types.General)
+	if m := reconcileRows(types.Row{Labels: []types.EffLabel{{Unique: u, Name: "Put", Args: []types.Type{rigid}}, boolean}}, Subst{}, b, sup); m == nil {
+		t.Fatal("overlapping rigid application accepted")
 	}
 }

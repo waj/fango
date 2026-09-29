@@ -4,11 +4,11 @@ import "github.com/waj/fango/internal/types"
 
 // FreeEvidence identifies evidence used by an expression, including its
 // nested closures, after removing lexical handler and invocation binders.
-func FreeEvidence(expr Expr) map[int]EffectInstance {
-	free, bound := map[int]EffectInstance{}, map[int]int{}
+func FreeEvidence(expr Expr) map[types.EffectKey]EffectInstance {
+	free, bound := map[types.EffectKey]EffectInstance{}, map[types.EffectKey]int{}
 	use := func(ev EffectInstance) {
-		if ev.Unique != 0 && types.SurfaceName(ev.Name) != "IO" && bound[ev.Unique] == 0 {
-			free[ev.Unique] = ev
+		if ev.Unique != 0 && types.SurfaceName(ev.Name) != "IO" && bound[ev.Key()] == 0 {
+			free[ev.Key()] = ev
 		}
 	}
 	var visit func(Expr)
@@ -17,17 +17,17 @@ func FreeEvidence(expr Expr) map[int]EffectInstance {
 			switch e := e.(type) {
 			case *Lambda:
 				for _, ev := range append(append([]EffectInstance(nil), e.EffectParams...), e.RowEffects...) {
-					bound[ev.Unique]++
+					bound[ev.Key()]++
 				}
 				visit(e.Body)
 				for _, ev := range append(append([]EffectInstance(nil), e.EffectParams...), e.RowEffects...) {
-					bound[ev.Unique]--
+					bound[ev.Key()]--
 				}
 				return false
 			case *Handle:
-				bound[e.Effect.Unique]++
+				bound[e.Effect.Key()]++
 				visit(e.Body)
-				bound[e.Effect.Unique]--
+				bound[e.Effect.Key()]--
 				for _, clause := range e.Clauses {
 					visit(clause.Body)
 				}

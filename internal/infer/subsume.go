@@ -16,7 +16,45 @@ func (g *generator) solveConstraints(ps []types.Pred) (Subst, []types.Pred, []di
 		g.cs[i].Invariant = invariant
 	}
 	cs := append(append([]Constraint(nil), g.cs...), g.scopeObligations...)
-	return Solve(cs, ps, maps.Clone(g.ck.Sub), g.ck.B, g.ck.Sup)
+	sub, residual, errs := Solve(cs, ps, maps.Clone(g.ck.Sub), g.ck.B, g.ck.Sup)
+	for _, use := range g.operationUses {
+		ambient, ok := sub.Apply(use.ambient).(types.Row)
+		if !ok {
+			continue
+		}
+		candidates := map[types.EffectKey]bool{}
+		for _, label := range append(append([]types.EffLabel(nil), ambient.Labels...), use.annotation.Labels...) {
+			if label.Unique == use.op.Owner.Unique && !unresolvedEffectArgs(label.Args) {
+				candidates[types.EffectLabelKey(label)] = true
+			}
+		}
+		if len(candidates) < 2 {
+			continue
+		}
+		ty := sub.Apply(use.ty)
+		for i := 0; i < use.op.Arity; i++ {
+			fn, ok := ty.(*types.TFun)
+			if !ok {
+				break
+			}
+			if i == use.op.Arity-1 {
+				for _, label := range fn.Eff.Labels {
+					if label.Unique != use.op.Owner.Unique {
+						continue
+					}
+					for _, arg := range label.Args {
+						if containsMeta(arg) {
+							errs = append(errs, diag.Errorf(use.span, "AMBIGUOUS EFFECT APPLICATION", "The type arguments for `%s` cannot be determined at this operation call.", types.SurfaceName(use.op.Owner.Name)))
+							break
+						}
+					}
+					break
+				}
+			}
+			ty = fn.Ret
+		}
+	}
+	return sub, residual, errs
 }
 
 // Polarity is a set of occurrences: absent, positive, negative, or both.

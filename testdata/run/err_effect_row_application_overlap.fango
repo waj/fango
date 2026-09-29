@@ -1,0 +1,5 @@
+effect Put a
+    put : a -> ()
+
+bad : a ->{Put a, Put Bool} ()
+bad x = put x

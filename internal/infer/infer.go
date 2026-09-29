@@ -1437,9 +1437,18 @@ type generator struct {
 	lambdaBinders     map[ast.Expr][]*HandlerInfo
 	clauseEffects     *[]types.Type
 	localAnnotations  []localAnnotation
+	operationUses     []operationUse
 	// Keep package row provenance before a local binding can solve/generalize
 	// a partial application; whole-definition flow adds imported obligations.
 
+}
+
+type operationUse struct {
+	op         *types.EffectOp
+	ty         types.Type
+	ambient    types.Row
+	annotation types.Row
+	span       source.Span
 }
 
 // performs records that the ambient row absorbs eff, and that the handler
@@ -1665,6 +1674,11 @@ func (g *generator) exprWant(e ast.Expr, want types.Type) types.Type {
 		}
 		if op, n := g.operationSpine(e); op != nil && n == op.Arity {
 			inst := g.instantiateAt(op.Scheme, e.Span(), op.Name)
+			use := operationUse{op: op, ty: inst, ambient: g.ambient, span: e.Span()}
+			if g.annotationAmbient != nil {
+				use.annotation = *g.annotationAmbient
+			}
+			g.operationUses = append(g.operationUses, use)
 			g.ck.ExprTypes[appHead(e)] = inst
 			params, result := peelOperation(inst, op.Arity)
 			args := appArgs(e)
@@ -1925,7 +1939,7 @@ func (g *generator) handle(e *ast.Handle) types.Type {
 		bodyAnnotation.Labels = append([]types.EffLabel(nil), savedAnnotation.Labels...)
 		found := false
 		for i, existing := range bodyAnnotation.Labels {
-			if existing.Unique == label.Unique {
+			if types.EffectLabelKey(existing) == types.EffectLabelKey(label) {
 				bodyAnnotation.Labels[i], found = label, true
 				break
 			}

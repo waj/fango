@@ -157,11 +157,6 @@ These are not automatically prerequisites for the first coroutine milestone:
   checked sidecar ABI. Typed coroutine replies use a callback whose types are
   fixed when the owner is opened. The current task API uses a
   [native closure invocation boundary](design/tasks.md#async-runtime-foundation).
-- **Rows keyed by effect arguments.** `{Box Int, Box Bool}` is rejected today.
-  Supporting it introduces questions such as whether `{Box a, Box Int}` names
-  one or two labels before `a` is known. A rigid/ground restriction is a possible
-  answer, not an implemented rule. Nullary control markers and typed callbacks
-  avoid requiring this extension for heterogeneous coroutines.
 - **Row-kinded effect parameters.** Unlike row-indexed ADTs, effect headers
   currently fix parameters to value kind. Generalizing them is not required by
   the current [Async API](reference/library-async.md), which uses native task

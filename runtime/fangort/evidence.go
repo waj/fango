@@ -8,8 +8,21 @@ type EvidenceFamily struct {
 }
 
 type EvidenceBinding struct {
-	Name   string
-	Family EvidenceFamily
+	Name      string
+	Arguments []*TypeDescriptor
+	Family    EvidenceFamily
+}
+
+func sameEvidenceBinding(name string, args []*TypeDescriptor, binding EvidenceBinding) bool {
+	if name != binding.Name || len(args) != len(binding.Arguments) {
+		return false
+	}
+	for i := range args {
+		if !sameDescriptor(args[i], binding.Arguments[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // EvidenceRow is an explicit residual argument, never a global handler stack.
@@ -27,8 +40,12 @@ func ExtendEvidenceRow(tail *EvidenceRow, bindings ...EvidenceBinding) *Evidence
 	}
 	row := &EvidenceRow{tail: tail, count: len(bindings)}
 	for index, binding := range bindings {
+		if binding.Arguments == nil && binding.Family.Origin != nil {
+			binding.Arguments = binding.Family.Origin.Arguments
+			bindings[index].Arguments = binding.Arguments
+		}
 		for previous := 0; previous < index; previous++ {
-			if bindings[previous].Name == binding.Name {
+			if sameEvidenceBinding(binding.Name, binding.Arguments, bindings[previous]) {
 				panic("fangort: duplicate residual evidence binding")
 			}
 		}
@@ -41,15 +58,15 @@ func ExtendEvidenceRow(tail *EvidenceRow, bindings ...EvidenceBinding) *Evidence
 	return row
 }
 
-func (row *EvidenceRow) find(name string) (EvidenceFamily, bool) {
+func (row *EvidenceRow) find(name string, args []*TypeDescriptor) (EvidenceFamily, bool) {
 	for index := 0; index < row.count && index < len(row.inline); index++ {
 		binding := row.inline[index]
-		if binding.Name == name {
+		if sameEvidenceBinding(name, args, binding) {
 			return binding.Family, true
 		}
 	}
 	for _, binding := range row.extra {
-		if binding.Name == name {
+		if sameEvidenceBinding(name, args, binding) {
 			return binding.Family, true
 		}
 	}
@@ -65,9 +82,9 @@ const (
 
 // RowEvidence projects a representation whose nominal type and availability
 // have been proved by Core. A mismatch is an internal compiler invariant.
-func RowEvidence[T any](row *EvidenceRow, name string, mode EvidenceMode) T {
+func RowEvidence[T any](row *EvidenceRow, name string, mode EvidenceMode, args ...*TypeDescriptor) T {
 	for row != nil {
-		if family, ok := row.find(name); ok {
+		if family, ok := row.find(name, args); ok {
 			var value any
 			switch mode {
 			case DirectEvidence:

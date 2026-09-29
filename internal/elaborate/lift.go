@@ -128,8 +128,8 @@ func (el *elab) liftedCallee(lf *liftedLocal, occTy, rawOccTy types.Type) callee
 	evidence := append([]core.EffectInstance(nil), lf.effects...)
 	for i := range evidence {
 		evidence[i].Args = append([]types.Type(nil), evidence[i].Args...)
-		evidence[i].Captures = el.evidenceCaptures(evidence[i].Unique)
-		evidence[i].Control = el.evidenceControl(evidence[i].Unique)
+		evidence[i].Captures = el.evidenceCaptures(evidence[i].Unique, evidence[i].Args)
+		evidence[i].Control = el.evidenceControl(evidence[i].Unique, evidence[i].Args)
 	}
 	if len(lf.vars) > 0 {
 		tyArgs = matchTyArgs(lf.rawGenTy, lf.vars, rawTy)

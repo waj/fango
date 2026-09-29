@@ -18,7 +18,7 @@ import (
 
 func TestMultiModuleDifferential(t *testing.T) {
 	t.Parallel()
-	for _, fixture := range []string{"basic", "effects", "poly_effects", "classes", "records", "blanket", "reflection", "deriver", "operators", "patterns", "no_prelude", "subsumption"} {
+	for _, fixture := range []string{"basic", "effects", "poly_effects", "effect_applications", "classes", "records", "blanket", "reflection", "deriver", "operators", "patterns", "no_prelude", "subsumption"} {
 		t.Run(fixture, func(t *testing.T) {
 			t.Parallel()
 			testMultiModule(t, fixture)

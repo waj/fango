@@ -31,8 +31,9 @@ adding source-level row inequalities. Class-constrained types remain invariant.
 Nominal variance is the least fixed point of positive/negative occurrences in
 fields. Mixed occurrences and effect-label arguments are invariant. Abstract
 imports use the same proof because the checker retains their schemas; row kind
-alone does not establish covariance. Definition annotations compare known arrow
-effects exactly before annotation equality can populate inferred rows.
+alone does not establish covariance. Definition annotations compare the count
+and nominal names of known arrow effects before annotation equality can
+populate inferred rows; type constraints check their arguments.
 
 For `{L | e} ⊆ ρ` with rigid `e` and open `ρ`, include labels immediately but
 defer the bare tail until another constraint closes `ρ`, or solve it last.
@@ -42,7 +43,11 @@ Applications separate callee-shape equality from directional argument checks;
 fresh expected types and covariant ADT row arguments get their own row views.
 For bounds sharing a tail, extra permitted labels need no equality, missing
 required labels can extend a flexible tail, and rigid tails cannot gain labels.
-Conflicting arguments of one nominal effect fail the distinct-label check.
+Fully resolved applications of one nominal effect are distinct labels. An
+application containing a type variable can overlap another occurrence, so
+inference unifies their arguments before deciding whether the labels coincide.
+Identical applications collapse to one label; incompatible unresolved overlaps
+report an effect mismatch. Source annotations reject duplicate applications.
 Solve shapes before row bounds; never retag a named binding while widening a use.
 
 A pure handler runner may still need a polymorphic transport contract. Infer

@@ -79,7 +79,7 @@ func (g *gen) callbackMinimum(lam *core.Lambda) types.Transport {
 		if effect := g.effects[ev.Unique]; effect != nil && (len(effect.Ops) > 0 && effect.Ops[0].Abort) {
 			return
 		}
-		if mode := g.currentEvidenceMode(ev.Unique); mode > minimum {
+		if mode := g.currentEvidenceMode(ev.Key()); mode > minimum {
 			minimum = mode
 		}
 	}

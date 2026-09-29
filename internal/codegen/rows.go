@@ -42,11 +42,11 @@ func (g *gen) rowArgument(row *core.RowArgument) goast.Expr {
 	}
 	args := []goast.Expr{tail}
 	for _, ev := range row.Effects {
-		stack := g.evidence[ev.Unique]
+		stack := g.evidence[ev.Key()]
 		if len(stack) == 0 {
 			panic("codegen: missing residual evidence")
 		}
-		value, actual := stack[len(stack)-1], g.currentEvidenceMode(ev.Unique)
+		value, actual := stack[len(stack)-1], g.currentEvidenceMode(ev.Key())
 		members := []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: value, Sel: ident("Origin")}}}
 		effect := g.effects[ev.Unique]
 		lossless := effect != nil && (len(effect.Ops) > 0 && effect.Ops[0].Abort)
@@ -58,6 +58,7 @@ func (g *gen) rowArgument(row *core.RowArgument) goast.Expr {
 		}
 		args = append(args, &goast.CompositeLit{Type: selector("fangort", "EvidenceBinding"), Elts: []goast.Expr{
 			&goast.KeyValueExpr{Key: ident("Name"), Value: stringLit(ev.Name)},
+			&goast.KeyValueExpr{Key: ident("Arguments"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: g.descriptorType()}, Elts: g.typeDescriptorArgs(ev.Args)}},
 			&goast.KeyValueExpr{Key: ident("Family"), Value: &goast.CompositeLit{Type: selector("fangort", "EvidenceFamily"), Elts: members}},
 		}})
 	}
@@ -69,13 +70,16 @@ func (g *gen) deferredEvidence(ev core.EffectInstance, row goast.Expr, mode type
 	desired := ev
 	desired.Control = types.Control{Transport: mode}
 	effectType := g.effectTypeMode(desired, mode)
-	lookup := callExpr(indexExpr(selector("fangort", "RowEvidence"), []goast.Expr{effectType}), row, stringLit(ev.Name), selector("fangort", memberName(mode)+"Evidence"))
+	lookupArgs := []goast.Expr{row, stringLit(ev.Name), selector("fangort", memberName(mode)+"Evidence")}
+	lookupArgs = append(lookupArgs, g.typeDescriptorArgs(ev.Args)...)
+	lookup := callExpr(indexExpr(selector("fangort", "RowEvidence"), []goast.Expr{effectType}), lookupArgs...)
 	effect := g.effects[ev.Unique]
 	if effect == nil {
 		panic("codegen: deferred evidence has no declaration")
 	}
 
-	fields := []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: callExpr(selector("fangort", "DeferredEvidenceOrigin"), row, stringLit(ev.Name))}}
+	originArgs := append([]goast.Expr{row, stringLit(ev.Name)}, g.typeDescriptorArgs(ev.Args)...)
+	fields := []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: callExpr(selector("fangort", "DeferredEvidenceOrigin"), originArgs...)}}
 	if len(effect.Ops) > 0 && effect.Ops[0].Abort {
 		resolver := funcLitParams(nil, &goast.StarExpr{X: selector("fangort", "ExitTarget")}, []goast.Stmt{returnStmt(&goast.SelectorExpr{X: lookup, Sel: ident("Target")})})
 		fields = append(fields, &goast.KeyValueExpr{Key: ident("Target"), Value: callExpr(selector("fangort", "DeferredExitTarget"), resolver)})
@@ -126,13 +130,13 @@ func (g *gen) deferredEvidence(ev core.EffectInstance, row goast.Expr, mode type
 
 func (g *gen) bindDeferredEffects(effects []core.EffectInstance, row goast.Expr, mode types.Transport) func() {
 	for _, ev := range effects {
-		g.evidence[ev.Unique] = append(g.evidence[ev.Unique], g.deferredEvidence(ev, row, mode))
-		g.evidenceModes[ev.Unique] = append(g.evidenceModes[ev.Unique], mode)
+		g.evidence[ev.Key()] = append(g.evidence[ev.Key()], g.deferredEvidence(ev, row, mode))
+		g.evidenceModes[ev.Key()] = append(g.evidenceModes[ev.Key()], mode)
 	}
 	return func() {
 		for _, ev := range effects {
-			g.evidence[ev.Unique] = g.evidence[ev.Unique][:len(g.evidence[ev.Unique])-1]
-			g.evidenceModes[ev.Unique] = g.evidenceModes[ev.Unique][:len(g.evidenceModes[ev.Unique])-1]
+			g.evidence[ev.Key()] = g.evidence[ev.Key()][:len(g.evidence[ev.Key()])-1]
+			g.evidenceModes[ev.Key()] = g.evidenceModes[ev.Key()][:len(g.evidenceModes[ev.Key()])-1]
 		}
 	}
 }

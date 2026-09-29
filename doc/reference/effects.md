@@ -46,11 +46,27 @@ map : (a ->{e} b) -> List a ->{e} List b
 A pure callback instantiates `e` to empty; an effectful callback propagates its
 row to the traversal call.
 
-A row holds one label per effect. When solving brings one effect into a row
-under two argument lists — a function whose own row names `Ctx p` passing a
-callback that performs `Ctx e` to a helper whose residual row it shares —
-the two argument lists are unified, because a nominal row means one instance
-of each effect, and an `EFFECT MISMATCH` names both when they cannot agree.
+A row holds one label per applied effect. Fully resolved applications such as
+`{Put Bool, Put String}` may appear together and select separate handlers:
+
+```fango
+effect Put a
+    put : a -> ()
+
+both : () ->{Put Bool, Put String} ()
+both() =
+    put True
+    put "answer"
+```
+
+The same application cannot appear twice. When an argument still contains a
+type variable, inference treats occurrences of the same nominal effect as
+potentially overlapping and unifies their arguments. An incompatible overlap,
+such as `{Put a, Put Bool}` for an unknown `a`, reports `EFFECT MISMATCH`.
+Operation calls still use their argument and result types to select an
+application. If these types leave an effect argument unknown while multiple
+applications are available, the checker reports `AMBIGUOUS EFFECT APPLICATION`.
+No additional source syntax is required.
 
 A body may call arrows that carry the bare tail alongside arrows that add
 labels to it, in either order:

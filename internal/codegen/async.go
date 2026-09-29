@@ -11,10 +11,11 @@ func (g *gen) asyncRebase(e *core.AsyncRebase) goast.Expr {
 	g.usesFangort = true
 	args := []goast.Expr{ident("nil")}
 	for _, ev := range e.Call.EvidenceArgs {
-		stack := g.evidence[ev.Unique]
+		stack := g.evidence[ev.Key()]
 		args = append(args, &goast.CompositeLit{Type: selector("fangort", "EvidenceBinding"), Elts: []goast.Expr{
 			&goast.KeyValueExpr{Key: ident("Name"), Value: stringLit(ev.Name)},
-			&goast.KeyValueExpr{Key: ident("Family"), Value: g.evidenceFamily(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Unique))},
+			&goast.KeyValueExpr{Key: ident("Arguments"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: g.descriptorType()}, Elts: g.typeDescriptorArgs(ev.Args)}},
+			&goast.KeyValueExpr{Key: ident("Family"), Value: g.evidenceFamily(ev, stack[len(stack)-1], g.currentEvidenceMode(ev.Key()))},
 		}})
 	}
 	overrides := callExpr(selector("fangort", "ExtendEvidenceRow"), args...)

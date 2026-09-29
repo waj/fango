@@ -33,6 +33,8 @@ type EffectInstance struct {
 	Control  types.Control
 }
 
+func (e EffectInstance) Key() types.EffectKey { return types.AppliedEffectKey(e.Unique, e.Args) }
+
 // RowArgument forwards a lexically bound residual row and overlays checked
 // effect instances. A zero From denotes the empty row, never ambient lookup.
 type RowArgument struct {

@@ -11,7 +11,7 @@ func installEvidenceOrigin(ev *evidence) {
 	if len(ev.handler.Clauses) > 0 && ev.handler.Clauses[0].Op.Abort {
 		return
 	}
-	deps := map[int]core.EffectInstance{}
+	deps := map[types.EffectKey]core.EffectInstance{}
 	rows := map[types.CaptureVar]bool{}
 	for _, clause := range ev.handler.Clauses {
 		for id, dependency := range core.FreeEvidence(clause.Body) {
@@ -23,7 +23,7 @@ func installEvidenceOrigin(ev *evidence) {
 	}
 	ev.origin.Rebuild = func(fork *fangort.EvidenceFork) fangort.EvidenceFamily {
 		child := *ev
-		child.outer = make(map[int]*evidence, len(deps))
+		child.outer = make(map[types.EffectKey]*evidence, len(deps))
 		for id := range deps {
 			parent := resolveEvidence(ev.outer[id])
 			child.outer[id] = fangort.ForkEvidence[*evidence](fork, parent.origin, fangort.DirectEvidence)

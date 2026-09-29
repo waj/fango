@@ -18,7 +18,7 @@ func TestDeferredAbortEvidenceIsSuppliedWhenClosureIsInvoked(t *testing.T) {
 	formal := core.EffectInstance{Unique: effect.Unique, Name: effect.Name, Captures: types.VarCapture(2), Control: types.Control{Transport: types.Exit}}
 	fn := &types.TFun{Arg: b.Unit, Ret: b.String, OpenRow: true, Control: types.Control{Polymorphic: true, Transport: types.Exit}}
 	lam := &core.Lambda{Param: "unit", Ty: fn, RowParam: 1, RowEffects: []core.EffectInstance{formal}, Body: &core.ControlExit{Effect: formal, Op: op, Payload: []core.Expr{&core.StringLit{Val: "payload", Ty: b.String}}, Ty: b.String}}
-	in := &interp{ctx: context.Background(), env: NewEnv(), out: io.Discard, evidence: map[int]*evidence{}}
+	in := &interp{ctx: context.Background(), env: NewEnv(), out: io.Discard, evidence: map[types.EffectKey]*evidence{}}
 	value, err := in.eval(lam, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -40,13 +40,13 @@ func TestDeferredAbortEvidenceIsSuppliedWhenClosureIsInvoked(t *testing.T) {
 	// Explicit definition-site evidence remains fixed even when an invocation
 	// supplies another interpretation in its residual row.
 	outer := &evidence{}
-	in.evidence[effect.Unique] = outer
+	in.evidence[formal.Key()] = outer
 	lam.RowEffects = nil
 	fixed, err := in.eval(lam, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	in.evidence[effect.Unique] = &evidence{}
+	in.evidence[formal.Key()] = &evidence{}
 	call := &core.App{CalleeKind: core.Value, Callee: &core.VarRef{Name: "callback", Local: true, Ty: fn}, Args: []core.Expr{&core.UnitLit{Ty: b.Unit}}, Ty: b.String, Row: &core.RowArgument{Effects: []core.EffectInstance{formal}}}
 	got, err := in.eval(call, &Frame{vars: map[string]Value{"callback": fixed}})
 	exit, ok := asExit(got)

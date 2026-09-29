@@ -1,0 +1,9 @@
+effect Put a
+    put : a -> ()
+
+run : (() ->{Put Bool | e} ()) ->{Put Bool | e} ()
+run action = action()
+
+main() = handle (handle run ({ _ -> put True; put "answer" }) of
+    put text -> print text; resume ()) of
+    put flag -> print flag; resume ()
