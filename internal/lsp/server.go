@@ -313,9 +313,6 @@ func (s *server) analyzeGeneration(gen uint64) {
 	diagnostics := map[string][]diagnostic{}
 	good := map[string]*index{}
 	for entry, content := range open {
-		if lib, err := libroot.Root(); err == nil && strings.HasPrefix(entry, filepath.Join(lib, "stdlib")+string(filepath.Separator)) {
-			continue
-		}
 		root := sourceRoot(entry, content)
 		fresh := map[string]bool{}
 		for path := range open {
@@ -329,7 +326,7 @@ func (s *server) analyzeGeneration(gen uint64) {
 				fresh[filepath.ToSlash(rel)] = true
 			}
 		}
-		result, errs, internal := (&check.Session{LoadOptions: modules.LoadOptions{Root: root, Overlays: open}, FreshSources: fresh, AccumulateDiagnostics: true}).Compile(entry)
+		result, errs, internal := (&check.Session{LoadOptions: modules.LoadOptions{Root: root, Overlays: open, AllowBundledEntry: true}, FreshSources: fresh, AccumulateDiagnostics: true}).Compile(entry)
 		if internal != nil {
 			errs = append(errs, diag.Error{Title: "INTERNAL COMPILER ERROR", Body: internal.Error()})
 		}
@@ -364,7 +361,9 @@ func (s *server) analyzeGeneration(gen uint64) {
 		if result != nil {
 			idx := newIndex(root, result)
 			for path := range idx.documents {
-				good[path] = idx
+				if path == entry || good[path] == nil {
+					good[path] = idx
+				}
 			}
 		}
 	}

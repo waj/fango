@@ -285,6 +285,9 @@ type LoadOptions struct {
 	Root string
 	// Overlays override disk content for open local files, including entry.
 	Overlays map[string][]byte
+	// AllowBundledEntry lets editor analysis open a file at its actual bundled
+	// stdlib path without treating its module name as a local collision.
+	AllowBundledEntry bool
 }
 
 // LoadWithOptions loads a batch graph with optional test instrumentation.
@@ -329,10 +332,21 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 	}
 	g := newGraph(provider)
 	g.observe = options.Observe
+	bundledEntry := false
 	if !private {
 		if path, _, bundleErr := g.bundled.Source(entryName); bundleErr == nil {
-			return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; local modules cannot use bundled names.", entryName, path)}
+			if options.AllowBundledEntry {
+				if lib, libErr := libroot.Root(); libErr == nil {
+					bundledEntry = filepath.Clean(abs) == filepath.Join(lib, "stdlib", filepath.FromSlash(strings.TrimPrefix(path, "<stdlib>/")))
+				}
+			}
+			if !bundledEntry {
+				return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "RESERVED MODULE", "Module `%s` is bundled with Fango as `%s`; local modules cannot use bundled names.", entryName, path)}
+			}
 		}
+	}
+	if bundledEntry {
+		g.local = nil
 	}
 	wantEntry := strings.TrimSuffix(filepath.Base(abs), filepath.Ext(abs))
 	if options.Root != "" {
@@ -342,8 +356,15 @@ func LoadWithOptions(entry string, options LoadOptions) (*Result, []diag.Error) 
 		return nil, []diag.Error{diag.Errorf(m.Header.NameSpan, "MODULE/PATH MISMATCH", "The entry file `%s` must declare module `%s`, but declares `%s`.", filepath.Base(abs), wantEntry, m.Header.Name)}
 	}
 	rootNode := &node{name: entryName, path: filepath.ToSlash(relEntry), content: content, mod: m, sourceHash: hashBytes(content), private: private, deps: syntaxDependencies(m, entryName), nativeModule: wantEntry}
+	if bundledEntry {
+		rootNode.path = "<stdlib>/" + filepath.ToSlash(relEntry)
+		rootNode.bundled = true
+	}
 	rootNativePath := strings.TrimSuffix(relEntry, ".fango") + ".native.go"
 	if nb, ne := os.ReadFile(filepath.Join(root, rootNativePath)); ne == nil {
+		if bundledEntry {
+			rootNativePath = "<stdlib>/" + filepath.ToSlash(rootNativePath)
+		}
 		rootNode.nativePath, rootNode.native = rootNativePath, nb
 	}
 	pending := map[string]*node{entryName: rootNode}

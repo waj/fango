@@ -287,6 +287,7 @@ across local modules and the bundled library. Hover shows a named symbol's
 type where one is available. A contiguous group of `--` or `{- … -}` comments
 immediately above a declaration appears below its type; a declaration pragma
 may sit between the comments and annotation. A blank line ends the group.
+Bundled library files can also be opened directly for navigation and hover.
 Hover does not infer the type of an arbitrary expression, and Find References
 and document symbols are not available yet.
 

@@ -319,6 +319,9 @@ module paths; the entry path and the module root remain explicit. Open modules
 are checked from source so transient inferred record-use and local-binding
 types are available, while unopened dependencies may use checked objects.
 Overlay checks never publish persistent objects for the open modules.
+An opened file at its actual bundled library path is checked as a bundled
+entry, so its imports resolve through the bundled provider and it can have
+its own navigation index without an application importing it.
 The editor diagnostic path rolls back a failed owner and checks other modules
 whose dependencies succeeded; dependents of a failed owner are skipped.
 
