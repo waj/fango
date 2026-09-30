@@ -9,7 +9,7 @@ Leading zero in JSON number @ 1:3
 Invalid JSON literal @ 1:9
 Trailing array comma @ 1:8
 Trailing JSON input @ 1:4
-Invalid UTF-8 in JSON string @ 1:3
+Invalid UTF-8 in JSON input @ 1:2
 JSON nesting exceeds 256 levels 1:258
 1.20e+3
 ok

@@ -1,0 +1,80 @@
+import Bytes exposing (Bytes)
+import Encoding exposing (Error(..))
+import Fail
+import List
+import Reader
+import Result exposing (Result(..))
+import Runtime.Local
+import Stream
+import String
+import Text.Reader as TextReader
+
+{-# scoped s #-}
+drive : List Bytes -> (TextReader.Reader s ->{s} a) ->{Fail.Fail Encoding.Error | e} a
+drive chunks use =
+    Runtime.Local.run chunks { remaining ->
+        source = Bytes.Source
+            { pull = {
+                case remaining.read() of
+                    [] -> Nothing
+                    [chunk | rest] ->
+                        remaining.write rest
+                        Just chunk
+              }
+            }
+        Reader.over source { bytes -> TextReader.over bytes use }
+    }
+
+splitAt index =
+    bytes = Bytes.fromString "é😀二"
+    Fail.attempt {
+        drive [Bytes.empty, Bytes.slice 0 index bytes, Bytes.empty, Bytes.slice index 9 bytes] { text ->
+            (TextReader.readExactly text 3, TextReader.position text, TextReader.atEnd text)
+        }
+    }
+
+main() =
+    print (List.map splitAt (List.range 0 9) == List.map { _ -> Ok (Just "é😀二", 9, True) } (List.range 0 9))
+    print (Fail.attempt { drive [Bytes.fromList [195], Bytes.empty, Bytes.fromList [169], Bytes.fromList [240, 159], Bytes.fromList [152, 128]] { text ->
+        first = TextReader.peekChar text
+        before = TextReader.position text
+        got = TextReader.readChar text
+        (first == Just 'é' && before == 0 && got == first && TextReader.position text == 2,
+            TextReader.readChar text == Just '😀', TextReader.atEnd text) } } == Ok (True, True, True))
+    print (Fail.attempt { drive [Bytes.fromString "a", Bytes.fromString "é😀"] { text ->
+        (TextReader.readUpTo text 99, TextReader.readUpTo text 1, TextReader.readUpTo text 99) } } == Ok ("a", "é", "😀"))
+    print (Fail.attempt { drive [Bytes.fromString "a", Bytes.fromList [226, 130]] { text ->
+        first = TextReader.readUpTo text 99
+        next = Fail.attempt { TextReader.readChar text }
+        (first, next, TextReader.position text) } } == Ok ("a", Err (IncompleteSequence 1), 1))
+    print (Fail.attempt { TextReader.withString "é😀" { text ->
+        refused = TextReader.readExactly text 3
+        (refused, TextReader.position text, TextReader.readExactly text 2) } } == Ok (Nothing, 0, Just "é😀"))
+    print (Fail.attempt { TextReader.withString "é😀" { text ->
+        (TextReader.readUpTo text 0, TextReader.readExactly text (-1), TextReader.position text) } } == Ok ("", Just "", 0))
+    print (Fail.attempt { TextReader.withString "é二😀tail" { text ->
+        (TextReader.readUntil text "😀" 2, TextReader.position text, TextReader.readUntil text "😀" 3) } } == Ok (TextReader.Overflowed, 0, TextReader.Found "é二"))
+    print (Fail.attempt { drive (List.map { byte -> Bytes.fromList [byte] } (Bytes.toList (Bytes.fromString "é二😀tail"))) { text ->
+        (TextReader.readUntil text "二😀" 3, TextReader.position text, TextReader.readExactly text 4) } } == Ok (TextReader.Found "é", 9, Just "tail"))
+    print (Fail.attempt { TextReader.withString "baaa" { text ->
+        (TextReader.readUntil text "aa" 9, TextReader.readUpTo text 9) } } == Ok (TextReader.Found "b", "a"))
+    print (Fail.attempt { TextReader.withString "ab\r\ncd\ne\rf" { text ->
+        (TextReader.readLine text 9, TextReader.readLine text 9, TextReader.readLine text 9) } } == Ok (TextReader.Found "ab", TextReader.Found "cd", TextReader.Ended "e\rf"))
+    print (Fail.attempt { TextReader.withString "" { text ->
+        (TextReader.readChar text, TextReader.readLine text 9, TextReader.readUntil text "" 1) } } == Ok (Nothing, TextReader.Ended "", TextReader.Found ""))
+    print (Fail.attempt { Reader.withBytes (Bytes.fromList [97, 255]) { bytes ->
+        result = TextReader.over bytes { text ->
+            (Fail.attempt { TextReader.readExactly text 2 }, TextReader.position text) }
+        (result, Reader.readUpTo bytes 2) } } == Ok ((Err (InvalidSequence 1), 0), Bytes.fromList [97, 255]))
+    print (Fail.attempt { Reader.withBytes (Bytes.fromString "é😀tail") { bytes ->
+        got = TextReader.over bytes { text ->
+            ignore (TextReader.peekChar text)
+            TextReader.readExactly text 2 }
+        (got, Reader.readUpTo bytes 9) } } == Ok (Just "é😀", Bytes.fromString "tail"))
+    print (Fail.attempt { drive [Bytes.fromString "é", Bytes.fromList [240], Bytes.fromList [159, 152], Bytes.fromList [128]] { text ->
+        Stream.toList (TextReader.chunks text) } } == Ok ["é", "😀"])
+    print (Fail.attempt { Reader.withBytes (Bytes.fromString "é😀") { bytes ->
+        Reader.limited bytes 3 { frame -> TextReader.over frame { text -> TextReader.readExactly text 2 } } } } == Err (IncompleteSequence 2))
+    print (Fail.attempt { Reader.withBytes (Bytes.fromList [233, 255]) { bytes ->
+        TextReader.overWith Encoding.latin1 bytes { text ->
+            (TextReader.readExactly text 2, TextReader.position text) } } } == Ok (Just "éÿ", 2))

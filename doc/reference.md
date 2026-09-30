@@ -20,9 +20,10 @@ The bundled library is experimental and versioned with the compiler.
 | API | Reference |
 | --- | --- |
 | List, Range, Maybe, Tuple, Dict, Result | [Collections](reference/library-collections.md) |
-| String, Basics integer helpers | [Text and numeric helpers](reference/library-text.md) |
+| String, Char, Basics integer helpers | [Text and numeric helpers](reference/library-text.md) |
 | Bytes | [Byte sequences](reference/library-bytes.md) |
 | Reader, Writer, Bytes.Source, Bytes.Sink | [Buffered readers and writers](reference/library-readers.md) |
+| Encoding, Text.Reader, Text.Writer | [Encodings and text I/O](reference/library-text-io.md) |
 | IO, File, Net | [Console, process, files, sockets, and structured errors](reference/library-io.md) |
 | Http, Http.Server, Http.Route, Http.GZip | [HTTP/1.1 server and middleware](reference/library-http.md) |
 | Fail, Failure, State, Random, Runtime.Local | [Effect APIs](reference/library-effects.md) |

@@ -95,7 +95,22 @@ var Table = func() map[string]Spec {
 	t["String.firstChar"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.FirstChar(args[0].(string)), nil }}
 	t["String.restString"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.RestString(args[0].(string)), nil }}
 	t["String.fromChar"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.FromChar(args[0].(rune)), nil }}
+	t["String.fromList"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		return fangort.StringFromValueList(args[0].(fangort.List[any])), nil
+	}}
+	t["String.concat"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		return fangort.StringConcatValues(args[0].(fangort.List[any])), nil
+	}}
 	t["String.toFloatNative"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) { return stdlib.ToFloatNative(args[0].(string)), nil }}
+	t["Char.toCode"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.ToCode(args[0].(rune)), nil
+	}}
+	t["Char.scalar"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.Scalar(args[0].(int64)), nil
+	}}
+	t["Encoding.utf8CodeAt"] = Spec{Arity: 2, Eval: func(_ *Runtime, args []any) (any, error) {
+		return stdlib.Utf8CodeAt(args[0].(fangort.Bytes), args[1].(int64)), nil
+	}}
 	t["IO.lineText"] = Spec{Arity: 1, Eval: func(_ *Runtime, args []any) (any, error) {
 		return lineText(args[0].(string)), nil
 	}}

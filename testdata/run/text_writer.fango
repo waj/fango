@@ -1,0 +1,44 @@
+import Bytes
+import Encoding exposing (Error(..))
+import Fail
+import Result exposing (Result(..))
+import Runtime.Local
+import Text.Writer as TextWriter
+import Writer
+
+stop : () ->{Fail.Fail String} ()
+stop() = Fail.fail "stopped"
+
+main() =
+    print (Writer.collecting { bytes -> TextWriter.over bytes { text ->
+        TextWriter.write text "é\r\n"
+        TextWriter.writeChar text '😀'
+        TextWriter.flush text
+        7 } } == (7, Bytes.fromString "é\r\n😀"))
+    print (TextWriter.collecting { text ->
+        TextWriter.write text "é"
+        TextWriter.writeChar text '😀'
+        TextWriter.flush text
+        7 } == (7, "é😀"))
+    print (Fail.attempt { Writer.collecting { bytes -> TextWriter.overWith Encoding.latin1 bytes { text ->
+        TextWriter.write text "é"
+        rejected = TextWriter.tryWrite text "a😀"
+        TextWriter.writeChar text 'ÿ'
+        rejected } } } == Ok (Err (Unrepresentable '😀'), Bytes.fromList [233, 255]))
+    print (Fail.attempt { Writer.collecting { bytes -> TextWriter.overWith Encoding.latin1 bytes { text ->
+        TextWriter.write text "a😀" } } } == Err (Unrepresentable '😀'))
+    print (Runtime.Local.run (0, 0) { counts ->
+        parent = Writer.Writer
+            { emit = { _ ->
+                (writes, flushes) = counts.read()
+                counts.write (writes + 1, flushes)
+              }
+            , flush = {
+                (writes, flushes) = counts.read()
+                counts.write (writes, flushes + 1)
+              }
+            }
+        outcome = Fail.attempt { TextWriter.over parent { text ->
+            TextWriter.write text "ok"
+            stop() } }
+        (outcome, counts.read()) } == (Err "stopped", (1, 0)))

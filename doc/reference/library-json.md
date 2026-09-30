@@ -1,7 +1,7 @@
 # JSON
 
 `Json` parses and emits JSON in Fango. It uses the bundled `Bytes`, `Reader`,
-and `Writer` primitives but has no JSON native. Parsing from a `Reader` consumes
+and `Writer` primitives through [text adapters](library-text-io.md), but has no JSON native. Parsing from a `Reader` consumes
 tokens as needed; a typed decoder does not build an intermediate `Json.Value`.
 
 [Reference index](../reference.md). Source: [Json](../../stdlib/Json.fango).
@@ -67,6 +67,16 @@ validation runs for a declaration that derives neither JSON class. The old
 
 ## Pull parser and value tree
 
+Byte-reader/writer entry points select UTF-8. `readText` and `writeText` accept
+`Text.Reader.Reader e` and `Text.Writer.Writer e` respectively, with the same
+type-witness, result, and source/sink effect contracts as `read` and `write`.
+`withTextPull` and `withTextWriter` are the corresponding handlers for custom
+decoders and encoders. Their caller selects the text adapter's encoding;
+Latin-1 text adapters, for example, can decode Latin-1 JSON input or report
+unrepresentable output characters. Encoding errors become `Json.Error` values;
+unrelated source/sink effects propagate.
+`write` and `withWriter` leave flushing to the byte writer's owner.
+
 `withPull reader { ... }` installs the `Json.Pull` effect. `next()` consumes a
 token, `peek()` reads ahead without consuming it, and `at()` returns the
 current source position. `beginArray`, `nextElement`, `beginObject`, `nextKey`,
@@ -81,10 +91,13 @@ numbers without Float conversion. `Json.Number` is opaque to callers;
 `Json.number` validates a number lexeme and `Json.numberText` retrieves it.
 
 `Json.Error` contains `message`, zero-based byte `offset`, one-based `line`
-and `column`, and a slash-separated `path` for failures inside decoded
+and byte-based `column`, and a slash-separated `path` for failures inside decoded
 records, lists, or generic value containers. Emission errors have no input
 position. Parsing rejects invalid UTF-8, malformed escapes, trailing input,
-and nesting deeper than 256 arrays or objects.
+and nesting deeper than 256 arrays or objects. Malformed and incomplete encoded
+input is reported at the first offending sequence, without consuming that
+sequence. Paths follow the active decoder context; errors found while scanning
+a lookahead token can precede entry into a field or element path.
 
 ## Type witnesses
 

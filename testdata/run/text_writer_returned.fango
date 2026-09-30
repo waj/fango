@@ -1,0 +1,3 @@
+import Text.Writer as TextWriter
+
+main = TextWriter.collecting { text -> text }

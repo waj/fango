@@ -1,0 +1,24 @@
+import Bytes
+import Encoding
+import Fail
+import File
+import Reader
+import Result exposing (Result(..))
+import Text.Reader as TextReader
+import Text.Writer as TextWriter
+import Writer
+
+readContents : TextReader.Reader e ->{e} Result Encoding.Error (TextReader.Read, Int, String)
+readContents text = Fail.attempt {
+    (TextReader.readLine text 4, TextReader.position text, TextReader.readUpTo text 9)
+}
+
+main() =
+    print (case Fail.attempt { File.withOutput "text.txt" { file -> Writer.over (File.sink file) 4 { bytes -> TextWriter.over bytes { text -> TextWriter.write text "é😀\r\ntail" } } } } of
+            Err _ -> False
+            Ok _ -> True
+    )
+    print (case Fail.attempt { File.withFile "text.txt" { file -> Reader.over (File.source file) { bytes -> TextReader.over bytes { text -> readContents text } } } } of
+            Err _ -> False
+            Ok outcome -> outcome == Ok (TextReader.Found "é😀", 8, "tail")
+    )

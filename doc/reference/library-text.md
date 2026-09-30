@@ -2,7 +2,7 @@
 
 Unicode text operations and integer division/modulus helpers.
 
-[Reference index](../reference.md). Sources: [String](../../stdlib/String.fango), [Basics](../../stdlib/Basics.fango).
+[Reference index](../reference.md). Sources: [String](../../stdlib/String.fango), [Char](../../stdlib/Char.fango), [Basics](../../stdlib/Basics.fango).
 
 ## String
 
@@ -18,6 +18,8 @@ startsWith : String -> String -> Bool
 contains : String -> String -> Bool
 uncons : String -> Maybe String.Uncons
 fromChar : Char -> String
+fromList : List Char -> String
+concat : List String -> String
 span : (Char ->{e} Bool) -> String ->{e} (String, String)
 split : String -> String -> List String
 trim : String -> String
@@ -34,6 +36,9 @@ greater than its start. `startsWith prefix text` tests an exact prefix and
 `contains needle text` tests for an occurrence anywhere, with the empty needle
 found in every string; `uncons` returns the first scalar and remaining string, or `Nothing` for the
 empty string. `fromChar` makes the corresponding one-scalar string.
+`fromList` constructs text from characters in list order; `concat` joins string
+chunks in list order. Both return `""` for an empty list and size the output
+once before construction.
 `String.span keep text` returns the longest prefix whose scalars satisfy `keep`
 and the remaining suffix. It calls `keep` once per scalar from left to right,
 including the first rejected scalar, then stops; callback effects propagate.
@@ -59,6 +64,21 @@ trailing bytes from the same ASCII whitespace set `words` splits on, so an
 all-whitespace string trims to `""`. `padLeft` and `padRight` measure width
 in Unicode scalars, like `length`, and return a string that is already that
 wide unchanged; a zero or negative width never truncates.
+
+## Char
+
+`Char` is a Unicode scalar value. Code-point conversion belongs here rather
+than in a byte encoder or a format parser:
+
+```fango
+toCode : Char -> Int
+fromCode : Int -> Maybe Char
+```
+
+`toCode` returns the scalar's code point. `fromCode` accepts 0 through
+U+10FFFF except the surrogate range U+D800–U+DFFF; all other integers produce
+`Nothing`. Neither operation normalizes characters or interprets an encoding.
+[Encoding and text I/O](library-text-io.md) convert between text and bytes.
 
 ## Basics: integer arithmetic
 

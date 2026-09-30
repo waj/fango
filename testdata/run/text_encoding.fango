@@ -1,0 +1,33 @@
+import Bytes
+import Char
+import Encoding exposing (Error(..))
+import List
+import Result exposing (Result(..))
+import String
+
+main() =
+    print (Char.toCode '😀' == 128512)
+    print (Char.fromCode 128512 == Just '😀')
+    print (List.map Char.fromCode [-1, 55296, 57343, 1114112] == [Nothing, Nothing, Nothing, Nothing])
+    print (case List.map Char.fromCode [0, 55295, 57344, 1114111] of
+            [Just a, Just b, Just c, Just d] -> List.map Char.toCode [a, b, c, d] == [0, 55295, 57344, 1114111]
+            _ -> False
+    )
+    print (String.fromList ['é', '😀', '二'] == "é😀二")
+    print (String.concat ["", "é", "😀", "", "二"] == "é😀二")
+    print (String.fromList [] == "" && String.concat [] == "")
+    bytes = Bytes.fromList (List.range 0 255)
+    roundtrip = case Encoding.decode Encoding.latin1 bytes of
+        Err _ -> False
+        Ok text -> String.length text == 256 && Encoding.encode Encoding.latin1 text == Ok bytes
+    print roundtrip
+    print (Encoding.encode Encoding.latin1 "é😀" == Err (Unrepresentable '😀'))
+    print (Encoding.decode Encoding.utf8 (Bytes.fromList [97, 255]) == Err (InvalidSequence 1))
+    print (Encoding.decode Encoding.utf8 (Bytes.fromList [97, 226, 130]) == Err (IncompleteSequence 1))
+    print (Encoding.decode Encoding.utf8 (Bytes.fromString "�") == Ok "�")
+    print (case Encoding.decode Encoding.utf8 (Bytes.append (Bytes.fromList [239, 187, 191]) (Bytes.fromString "é")) of
+            Err _ -> False
+            Ok text -> case String.uncons text of
+                Nothing -> False
+                Just part -> Char.toCode part.first == 65279 && part.rest == "é"
+    )

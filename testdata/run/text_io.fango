@@ -1,0 +1,36 @@
+import Bytes
+import Char
+import Encoding
+import Fail
+import Reader
+import Stream
+import String
+import Text.Reader as TextReader
+import Text.Writer as TextWriter
+import Writer
+
+main() =
+    print (Encoding.decode Encoding.utf8 (Bytes.fromString "é😀"))
+    print (Encoding.decode Encoding.latin1 (Bytes.fromList [0, 233, 255]))
+    print (Encoding.encode Encoding.latin1 "éÿ")
+    print (Encoding.encode Encoding.latin1 "a😀")
+    print (Fail.attempt {
+            TextReader.withString "é😀\r\ntail" { text ->
+                ((TextReader.peekChar text, TextReader.readLine text 4), TextReader.position text, TextReader.readUpTo text 4)
+            }
+    })
+    print (Fail.attempt {
+            Reader.withBytes (Bytes.fromString "é😀") { bytes ->
+                TextReader.over bytes { text -> Stream.toList (TextReader.chunks text) }
+            }
+    })
+    print (TextWriter.collecting { text ->
+            TextWriter.write text "é"
+            TextWriter.writeChar text '😀'
+            7
+    })
+    print (Fail.attempt {
+            Writer.collecting { bytes ->
+                TextWriter.overWith Encoding.latin1 bytes { text -> TextWriter.write text "éÿ" }
+            }
+    })

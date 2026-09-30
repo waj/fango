@@ -1,0 +1,16 @@
+{-# no-prelude #-}
+module Char exposing (fromCode, toCode)
+
+import Basics exposing (..)
+import Maybe exposing (Maybe(..))
+
+toCode : Char -> Int
+toCode = native
+
+scalar : Int -> Char
+scalar = native
+
+fromCode : Int -> Maybe Char
+fromCode code =
+    if code < 0 || code > 1114111 || (code >= 55296 && code <= 57343) then Nothing
+    else Just (scalar code)

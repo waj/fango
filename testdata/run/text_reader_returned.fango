@@ -1,0 +1,3 @@
+import Text.Reader as TextReader
+
+main = TextReader.withString "a" { text -> text }

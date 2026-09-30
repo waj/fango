@@ -1,0 +1,83 @@
+{-# no-prelude #-}
+module Encoding exposing (Encoding, Error(..), decode, decodeAt, encode, latin1, message, utf8)
+
+import Basics exposing (..)
+import Bytes exposing (Bytes)
+import Char
+import List
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+import String
+
+type Encoding = Utf8 | Latin1
+
+type Error = InvalidSequence Int | IncompleteSequence Int | Unrepresentable Char deriving (Eq, Show)
+
+utf8 : Encoding
+utf8 = Utf8
+
+latin1 : Encoding
+latin1 = Latin1
+
+message : Error -> String
+message error =
+    case error of
+        InvalidSequence offset -> "Invalid encoded sequence at byte " ++ show offset
+        IncompleteSequence offset -> "Incomplete encoded sequence at byte " ++ show offset
+        Unrepresentable char -> "Character is not representable in the selected encoding: " ++ show char
+
+-- The native returns a scalar, or -1 (end), -2 (invalid), -3 (incomplete).
+utf8CodeAt : Bytes -> Int -> Int
+utf8CodeAt = native
+
+width : Int -> Int
+width code = if code < 128 then 1 else if code < 2048 then 2 else if code < 65536 then 3 else 4
+
+-- Inspect one scalar without consuming bytes. IncompleteSequence can be
+-- retried after appending more input; offsets are relative to these bytes.
+decodeAt : Encoding -> Bytes -> Int -> Result Error (Maybe (Char, Int))
+decodeAt encoding bytes offset =
+    code =
+        case encoding of
+            Utf8 -> utf8CodeAt bytes offset
+            Latin1 -> case Bytes.byteAt offset bytes of
+                Nothing -> -1
+                Just byte -> byte
+    if code == -1 then Ok Nothing
+    else if code == -2 then Err (InvalidSequence offset)
+    else if code == -3 then Err (IncompleteSequence offset)
+    else
+        case Char.fromCode code of
+            Nothing -> Err (InvalidSequence offset)
+            Just char -> Ok (Just ( char, case encoding of
+                                      Utf8 -> width code
+                                      Latin1 -> 1
+                                  ))
+
+decodeHelp encoding bytes offset reverse =
+    case decodeAt encoding bytes offset of
+        Err error -> Err error
+        Ok Nothing -> Ok (String.fromList (List.reverse reverse))
+        Ok (Just (char, size)) -> decodeHelp encoding bytes (offset + size) [char | reverse]
+
+decode : Encoding -> Bytes -> Result Error String
+decode encoding bytes =
+    case encoding of
+        Utf8 -> case Bytes.toString bytes of
+            Just text -> Ok text
+            Nothing -> decodeHelp encoding bytes 0 []
+        Latin1 -> decodeHelp encoding bytes 0 []
+
+latin1Help text reverse =
+    case String.uncons text of
+        Nothing -> Ok (Bytes.fromList (List.reverse reverse))
+        Just part ->
+            code = Char.toCode part.first
+            if code > 255 then Err (Unrepresentable part.first)
+            else latin1Help part.rest [code | reverse]
+
+encode : Encoding -> String -> Result Error Bytes
+encode encoding text =
+    case encoding of
+        Utf8 -> Ok (Bytes.fromString text)
+        Latin1 -> latin1Help text []

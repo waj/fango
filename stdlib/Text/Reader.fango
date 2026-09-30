@@ -1,0 +1,186 @@
+{-# no-prelude #-}
+module Text.Reader exposing (Read(..), Reader, atEnd, chunks, over, overWith, peekChar, position, readChar, readExactly, readLine, readUntil, readUpTo, tryPeekChar, tryReadChar, withString)
+
+import Basics exposing (..)
+import Bytes
+import Encoding exposing (Encoding, Error(..))
+import Fail exposing (Fail, fromResult)
+import List
+import Maybe exposing (Maybe(..))
+import Reader as ByteReader
+import Result exposing (Result(..))
+import Runtime.Local
+import Stream exposing (Stream)
+import String
+
+-- Offsets passed to at/ready and consume are bytes; only this module sees
+-- them. Staging a read before consuming makes refusal and failure atomic.
+type Input e =
+    { at : Int ->{e} Result Encoding.Error (Maybe (Char, Int))
+    , peek : () ->{e} Result Encoding.Error (Maybe Char)
+    , ready : Int ->{e} Bool
+    , consume : Int ->{e} ()
+    , position : () ->{e} Int
+    }
+
+type Reader e = Reader (Input e)
+
+type Read = Found String | Ended String | Overflowed deriving (Eq, Show)
+
+inspect encoding parent base offset =
+    ignore (ByteReader.ensure parent (offset + 1))
+    case Encoding.decodeAt encoding parent.buffered() offset of
+        Ok value -> Ok value
+        Err (IncompleteSequence _) ->
+            if parent.refill() then inspect encoding parent base offset
+            else Err (IncompleteSequence (base + offset))
+        Err (InvalidSequence _) -> Err (InvalidSequence (base + offset))
+        Err error -> Err error
+
+peekResult result =
+    case result of
+        Err error -> Err error
+        Ok Nothing -> Ok Nothing
+        Ok (Just (char, _)) -> Ok (Just char)
+
+readyAt encoding bytes offset =
+    case Encoding.decodeAt encoding bytes offset of
+        Ok Nothing -> False
+        Err (IncompleteSequence _) -> False
+        _ -> True
+
+{-# scoped s #-}
+overWith : Encoding -> ByteReader.Reader e -> (Reader s ->{s} a) ->{e} a
+overWith encoding parent use =
+    Runtime.Local.run 0 { consumed ->
+        use (Reader (Input
+            { at = { offset -> inspect encoding parent consumed.read() offset }
+            , peek = { peekResult (inspect encoding parent consumed.read() 0) }
+            , ready = { offset -> readyAt encoding parent.buffered() offset }
+            , consume = { size ->
+                ignore (parent.skip size)
+                consumed.write (consumed.read() + size)
+              }
+            , position = consumed.read
+            }
+        ))
+    }
+
+{-# scoped s #-}
+over : ByteReader.Reader e -> (Reader s ->{s} a) ->{e} a
+over parent use = overWith Encoding.utf8 parent use
+
+-- Memory starts with valid text. The common read operations still expose
+-- their decoding failure effect, which consumers can handle locally.
+{-# scoped s #-}
+withString : String -> (Reader s ->{s} a) ->{e} a
+withString text use =
+    bytes = Bytes.fromString text
+    Runtime.Local.run 0 { consumed ->
+        use (Reader (Input
+            { at = { offset -> Encoding.decodeAt Encoding.utf8 bytes (consumed.read() + offset) }
+            , peek = { peekResult (Encoding.decodeAt Encoding.utf8 bytes consumed.read()) }
+            , ready = { offset -> consumed.read() + offset < Bytes.length bytes }
+            , consume = { size -> consumed.write (consumed.read() + size) }
+            , position = consumed.read
+            }
+        ))
+    }
+
+position : Reader e ->{e} Int
+position (Reader input) = input.position()
+
+peekChar : Reader e ->{Fail Encoding.Error | e} Maybe Char
+peekChar reader = fromResult (tryPeekChar reader)
+
+tryPeekChar : Reader e ->{e} Result Encoding.Error (Maybe Char)
+tryPeekChar (Reader input) = input.peek()
+
+tryReadChar : Reader e ->{e} Result Encoding.Error (Maybe Char)
+tryReadChar (Reader input) =
+    case input.at 0 of
+        Err error -> Err error
+        Ok Nothing -> Ok Nothing
+        Ok (Just (char, size)) ->
+            input.consume size
+            Ok (Just char)
+
+readChar : Reader e ->{Fail Encoding.Error | e} Maybe Char
+readChar reader = fromResult (tryReadChar reader)
+
+atEnd : Reader e ->{Fail Encoding.Error | e} Bool
+atEnd reader = peekChar reader == Nothing
+
+finish : Input e -> Int -> List.List Char ->{e} String
+finish input offset reverse =
+    input.consume offset
+    String.fromList (List.reverse reverse)
+
+upTo : Input e -> Int -> Int -> List.List Char ->{Fail Encoding.Error | e} String
+upTo input remaining offset reverse =
+    if remaining <= 0 || (offset > 0 && input.ready offset == False) then
+        finish input offset reverse
+    else case fromResult (input.at offset) of
+        Nothing -> finish input offset reverse
+        Just (char, size) -> upTo input (remaining - 1) (offset + size) [char | reverse]
+
+readUpTo : Reader e -> Int ->{Fail Encoding.Error | e} String
+readUpTo (Reader input) count = upTo input count 0 []
+
+exactly : Input e -> Int -> Int -> List.List Char ->{Fail Encoding.Error | e} Maybe String
+exactly input remaining offset reverse =
+    if remaining <= 0 then Just (finish input offset reverse)
+    else case fromResult (input.at offset) of
+        Nothing -> Nothing
+        Just (char, size) -> exactly input (remaining - 1) (offset + size) [char | reverse]
+
+readExactly : Reader e -> Int ->{Fail Encoding.Error | e} Maybe String
+readExactly (Reader input) count = exactly input count 0 []
+
+reverseChars text reverse =
+    case String.uncons text of
+        Nothing -> reverse
+        Just part -> reverseChars part.rest [part.first | reverse]
+
+prefix expected actual =
+    case expected of
+        [] -> True
+        [char | rest] -> case actual of
+            [] -> False
+            [got | tail] -> char == got && prefix rest tail
+
+drop count values =
+    if count <= 0 then values
+    else case values of
+        [] -> []
+        [_ | rest] -> drop (count - 1) rest
+
+until : Input e -> List.List Char -> Int -> Int -> Int -> Int -> List.List Char ->{Fail Encoding.Error | e} Read
+until input delimiter delimiterLength limit count offset reverse =
+    if prefix delimiter reverse then
+        input.consume offset
+        Found (String.fromList (List.reverse (drop delimiterLength reverse)))
+    else if count >= limit then Overflowed
+    else case fromResult (input.at offset) of
+        Nothing -> Ended (finish input offset reverse)
+        Just (char, size) -> until input delimiter delimiterLength limit (count + 1) (offset + size) [char | reverse]
+
+readUntil : Reader e -> String -> Int ->{Fail Encoding.Error | e} Read
+readUntil (Reader input) delimiter limit =
+    if limit <= 0 then Overflowed
+    else until input (reverseChars delimiter []) (String.length delimiter) limit 0 0 []
+
+readLine : Reader e -> Int ->{Fail Encoding.Error | e} Read
+readLine reader limit =
+    case readUntil reader "\n" limit of
+        Found text ->
+            size = String.length text
+            Found (if String.slice (size - 1) size text == "\r" then String.slice 0 (size - 1) text else text)
+        other -> other
+
+chunkStep reader _ =
+    text = readUpTo reader 9223372036854775807
+    if text == "" then Nothing else Just (text, ())
+
+chunks : Reader e -> Stream () String {Fail Encoding.Error | e}
+chunks reader = Stream.unfold () (chunkStep reader)

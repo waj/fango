@@ -47,6 +47,8 @@ completion order, stage-only values, evaluator integration, and rollback.
 adapters, specialization, ANF, and independent lint.
 [Native tasks and explicit streams](design/tasks.md) — closure invocation,
 handler inheritance, goroutine scopes, and library traversal.
+[Text over byte streams](design/text-io.md) — encoding adapters, character boundaries,
+atomic reads, and text writer lifetimes.
 [HTTP over streams](design/http.md) — framing, connection ownership, and middleware composition.
 [JSON](design/json.md) — pull tokens, generated codecs, and streaming memory bounds.
 

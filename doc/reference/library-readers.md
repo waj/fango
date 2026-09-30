@@ -3,6 +3,9 @@
 Byte sources and sinks, the buffered `Reader` and `Writer` scopes over them,
 and the read and write operations they carry.
 
+For `String` and `Char` operations with UTF-8 or Latin-1 encoding, put
+[Text.Reader and Text.Writer](library-text-io.md) over these byte interfaces.
+
 [Reference index](../reference.md). Sources: [Reader](../../stdlib/Reader.fango), [Writer](../../stdlib/Writer.fango), [Bytes](../../stdlib/Bytes.fango).
 
 ## Source and Sink

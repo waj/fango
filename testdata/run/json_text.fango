@@ -1,0 +1,83 @@
+import Bytes
+import Encoding
+import Fail
+import Json
+import List
+import Reader
+import Result exposing (Result(..))
+import Runtime.Local
+import String
+import Text.Reader as TextReader
+import Text.Writer as TextWriter
+import Writer
+
+decoded : String -> Result Json.Error String -> Bool
+decoded expected result = case result of
+    Err _ -> False
+    Ok text -> text == expected
+
+main() =
+    print (decoded "😀" (Json.parse @String "\"\\uD83D\\uDE00\""))
+    print (decoded "é二😀�" (Json.parse @String "\"é二😀�\""))
+    print (case Json.stringify "é\n二\t😀\"\\" of
+            Err _ -> False
+            Ok encoded -> decoded "é\n二\t😀\"\\" (Json.parse @String encoded)
+    )
+    print (Reader.withBytes (Bytes.fromList [34, 233, 255, 34]) { bytes ->
+            TextReader.overWith Encoding.latin1 bytes { text -> decoded "éÿ" (Json.readText @String text) }
+    })
+    print (case Fail.attempt { Writer.collecting { bytes -> TextWriter.overWith Encoding.latin1 bytes { text -> Json.writeText text "éÿ" } } } of
+            Err _ -> False
+            Ok (outcome, bytes) -> case outcome of
+                Err _ -> False
+                Ok _ -> bytes == Bytes.fromList [34, 233, 255, 34]
+    )
+    print (case Fail.attempt { Writer.collecting { bytes -> TextWriter.overWith Encoding.latin1 bytes { text -> Json.writeText text "😀" } } } of
+            Err _ -> False
+            Ok (outcome, _) -> case outcome of
+                Ok _ -> False
+                Err error -> String.contains "not representable" error.message && error.offset == -1
+    )
+    print (Runtime.Local.run (Bytes.toList (Bytes.fromString "[\"é二😀\",\"\\uD83D\\uDE00\"]")) { remaining ->
+            source = Bytes.Source
+                { pull = {
+                    case remaining.read() of
+                        [] -> Nothing
+                        [byte | rest] ->
+                            remaining.write rest
+                            Just (Bytes.fromList [byte])
+                  }
+                }
+            Reader.over source { bytes ->
+                case Json.read @(List String) bytes of
+                    Err _ -> False
+                    Ok values -> values == ["é二😀", "😀"]
+            }
+    })
+    print (case Json.parseBytesValue (Bytes.fromList [91, 34, 195, 169, 34, 44, 255, 93]) of
+            Ok _ -> False
+            Err error -> error.offset == 6 && error.line == 1 && error.column == 7
+    )
+    print (case Json.parseBytesValue (Bytes.fromList [91, 34, 195, 169, 240, 159]) of
+            Ok _ -> False
+            Err error -> error.offset == 4 && error.line == 1 && error.column == 5 && error.path == ""
+    )
+    print (case Fail.attempt { Reader.over (Bytes.Source { pull = { Fail.fail "source" } }) { bytes -> Json.read @String bytes } } of
+            Err error -> error == "source"
+            Ok _ -> False
+    )
+    print (Runtime.Local.run (0, 0) { counts ->
+            parent = Writer.Writer
+                { emit = { _ ->
+                    (writes, flushes) = counts.read()
+                    counts.write (writes + 1, flushes)
+                  }
+                , flush = {
+                    (writes, flushes) = counts.read()
+                    counts.write (writes, flushes + 1)
+                  }
+                }
+            case Json.write parent "é" of
+                Err _ -> False
+                Ok _ -> counts.read() == (3, 0)
+    })

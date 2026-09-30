@@ -3,13 +3,15 @@ module Json exposing
     ( Decode(..), Emit(..), Encode(..), Error(..), FieldOption(..), Number
     , Pull(..), Token(..), Value(..)
     , beginArray, beginObject, next, nextElement, nextKey, number, numberText
-    , parse, parseBytes, parseBytesValue, parseValue, peek, read, readValue
-    , skipValue, stringify, stringifyValue, syntaxError, withPath, withPull
-    , withWriter, write
+    , parse, parseBytes, parseBytesValue, parseValue, peek, read, readText
+    , readValue, skipValue, stringify, stringifyValue, syntaxError, withPath
+    , withPull, withTextPull, withTextWriter, withWriter, write, writeText
     )
 
 import Basics exposing (..)
 import Bytes exposing (Bytes)
+import Char
+import Encoding
 import Fail exposing (Fail, fail)
 import List exposing (List)
 import Maybe exposing (Maybe(..))
@@ -18,6 +20,8 @@ import Reader exposing (Reader)
 import Result exposing (Result(..))
 import Runtime.Local
 import String
+import Text.Reader as TextReader
+import Text.Writer as TextWriter
 import Writer exposing (Writer)
 
 type Error = { message : String, offset : Int, line : Int, column : Int, path : String }
@@ -167,228 +171,220 @@ validateJSONSchema subject =
             validateRecordFields NoItems ctor.fields
         Union ctors -> validateUnionCtors ctors
 
-type Cursor e = { reader : Reader e, offset : Int, line : Int, column : Int, path : String }
+type Cursor e = { reader : TextReader.Reader e, offset : Int, line : Int, column : Int, path : String }
 
 errorAt : Cursor e -> String -> Error
 errorAt cursor message =
     Error { message = message, offset = cursor.offset, line = cursor.line, column = cursor.column, path = cursor.path }
 
-peekByte : Cursor e ->{e} Maybe Int
-peekByte cursor =
-    if Reader.ensure cursor.reader 1 then
-        Bytes.byteAt 0 cursor.reader.buffered()
-    else
-        Nothing
-
-takeByte : Cursor e ->{e} (Maybe Int, Cursor e)
-takeByte cursor =
-    case peekByte cursor of
-        Nothing -> (Nothing, cursor)
-        Just byte ->
-            ignore (cursor.reader.skip 1)
-            if byte == 10 then
-                (Just byte, { cursor | offset = cursor.offset + 1, line = cursor.line + 1, column = 1 })
-            else
-                (Just byte, { cursor | offset = cursor.offset + 1, column = cursor.column + 1 })
-
-white : Int -> Bool
-white byte = byte == 32 || byte == 9 || byte == 10 || byte == 13
-
-skipWhite : Cursor e ->{e} Cursor e
-skipWhite cursor =
-    case peekByte cursor of
-        Just byte ->
-            if white byte then
-                (_, after) = takeByte cursor
-                skipWhite after
-            else
-                cursor
-        Nothing -> cursor
-
 bad : Cursor e -> String ->{Fail Error} a
 bad cursor message = fail (errorAt cursor message)
 
-expectByte : Cursor {Fail Error | e} -> Int ->{Fail Error | e} Cursor {Fail Error | e}
-expectByte cursor wanted =
-    (got, after) = takeByte cursor
+encodingError : Cursor e -> Encoding.Error ->{Fail Error} a
+encodingError cursor problem =
+    bad cursor (case problem of
+            Encoding.InvalidSequence _ -> "Invalid UTF-8 in JSON input"
+            Encoding.IncompleteSequence _ -> "Incomplete UTF-8 in JSON input"
+            _ -> Encoding.message problem
+    )
+
+peekChar : Cursor e ->{Fail Error | e} Maybe Char
+peekChar cursor =
+    case TextReader.tryPeekChar cursor.reader of
+        Ok value -> value
+        Err problem -> encodingError cursor problem
+
+takeChar : Cursor e ->{Fail Error | e} (Maybe Char, Cursor e)
+takeChar cursor =
+    case peekChar cursor of
+        Nothing -> (Nothing, cursor)
+        Just char ->
+            before = TextReader.position cursor.reader
+            ignore (case TextReader.tryReadChar cursor.reader of
+                    Ok value -> value
+                    Err problem -> encodingError cursor problem
+            )
+            size = TextReader.position cursor.reader - before
+            if char == '\n' then
+                (Just char, { cursor | offset = cursor.offset + size, line = cursor.line + 1, column = 1 })
+            else
+                (Just char, { cursor | offset = cursor.offset + size, column = cursor.column + size })
+
+white : Char -> Bool
+white char = char == ' ' || char == '\t' || char == '\n' || char == '\r'
+
+skipWhite : Cursor e ->{Fail Error | e} Cursor e
+skipWhite cursor =
+    case peekChar cursor of
+        Just char ->
+            if white char then
+                (_, after) = takeChar cursor
+                skipWhite after
+            else cursor
+        Nothing -> cursor
+
+expectChar : Cursor e -> Char ->{Fail Error | e} Cursor e
+expectChar cursor wanted =
+    (got, after) = takeChar cursor
     if got == Just wanted then after else bad cursor "Invalid JSON literal"
 
-literal : Cursor {Fail Error | e} -> String ->{Fail Error | e} Cursor {Fail Error | e}
+literal : Cursor e -> String ->{Fail Error | e} Cursor e
 literal cursor text =
     case String.uncons text of
         Nothing -> cursor
-        Just part ->
-            byte = Bytes.byteAt 0 (Bytes.fromString (String.fromChar part.first))
-            case byte of
-                Nothing -> bad cursor "Invalid JSON literal"
-                Just code -> literal (expectByte cursor code) part.rest
+        Just part -> literal (expectChar cursor part.first) part.rest
 
-hex : Int -> Int
-hex byte =
-    if byte >= 48 && byte <= 57 then byte - 48
-    else if byte >= 65 && byte <= 70 then byte - 55
-    else if byte >= 97 && byte <= 102 then byte - 87
+hex : Char -> Int
+hex char =
+    code = Char.toCode char
+    if char >= '0' && char <= '9' then code - Char.toCode '0'
+    else if char >= 'A' && char <= 'F' then code - Char.toCode 'A' + 10
+    else if char >= 'a' && char <= 'f' then code - Char.toCode 'a' + 10
     else -1
 
-readHex : Cursor {Fail Error | e} -> Int -> Int ->{Fail Error | e} (Int, Cursor {Fail Error | e})
+readHex : Cursor e -> Int -> Int ->{Fail Error | e} (Int, Cursor e)
 readHex cursor remaining acc =
     if remaining == 0 then (acc, cursor)
     else
-        (got, after) = takeByte cursor
+        (got, after) = takeChar cursor
         case got of
             Nothing -> bad cursor "Incomplete Unicode escape"
-            Just byte ->
-                nibble = hex byte
+            Just char ->
+                nibble = hex char
                 if nibble < 0 then bad cursor "Invalid Unicode escape"
                 else readHex after (remaining - 1) (acc * 16 + nibble)
 
-utf8 : Int -> List Int
-utf8 code =
-    if code < 128 then [code]
-    else if code < 2048 then [192 + quotientBy 64 code, 128 + remainderBy 64 code]
-    else if code < 65536 then
-        [224 + quotientBy 4096 code, 128 + remainderBy 64 (quotientBy 64 code), 128 + remainderBy 64 code]
-    else
-        [ 240 + quotientBy 262144 code, 128 + remainderBy 64 (quotientBy 4096 code)
-        , 128 + remainderBy 64 (quotientBy 64 code), 128 + remainderBy 64 code
-        ]
+scalar : Cursor e -> Int ->{Fail Error} Char
+scalar cursor code =
+    case Char.fromCode code of
+        Just char -> char
+        Nothing -> bad cursor "Invalid Unicode scalar"
 
-appendReverse : List Int -> List Int -> List Int
-appendReverse bytes reverse =
-    case bytes of
-        [] -> reverse
-        [byte | rest] -> appendReverse rest [byte | reverse]
-
-escaped : Cursor {Fail Error | e} ->{Fail Error | e} (List Int, Cursor {Fail Error | e})
+escaped : Cursor e ->{Fail Error | e} (Char, Cursor e)
 escaped cursor =
-    (got, after) = takeByte cursor
+    (got, after) = takeChar cursor
     case got of
-        Just 34 -> ([34], after)
-        Just 92 -> ([92], after)
-        Just 47 -> ([47], after)
-        Just 98 -> ([8], after)
-        Just 102 -> ([12], after)
-        Just 110 -> ([10], after)
-        Just 114 -> ([13], after)
-        Just 116 -> ([9], after)
-        Just 117 ->
+        Just '"' -> ('"', after)
+        Just '\\' -> ('\\', after)
+        Just '/' -> ('/', after)
+        Just 'b' -> (scalar cursor 8, after)
+        Just 'f' -> (scalar cursor 12, after)
+        Just 'n' -> ('\n', after)
+        Just 'r' -> ('\r', after)
+        Just 't' -> ('\t', after)
+        Just 'u' ->
             (code, afterHex) = readHex after 4 0
             if code >= 56320 && code <= 57343 then bad cursor "Unexpected low surrogate"
             else if code >= 55296 && code <= 56319 then
-                afterSlash = expectByte afterHex 92
-                afterU = expectByte afterSlash 117
+                afterSlash = expectChar afterHex '\\'
+                afterU = expectChar afterSlash 'u'
                 (low, rest) = readHex afterU 4 0
                 if low < 56320 || low > 57343 then bad afterU "Invalid surrogate pair"
-                else (utf8 (65536 + (code - 55296) * 1024 + low - 56320), rest)
-            else (utf8 code, afterHex)
+                else (scalar cursor (65536 + (code - 55296) * 1024 + low - 56320), rest)
+            else (scalar cursor code, afterHex)
         _ -> bad cursor "Invalid JSON escape"
 
-scanString : Cursor {Fail Error | e} -> List Int ->{Fail Error | e} (String, Cursor {Fail Error | e})
+scanString : Cursor e -> List Char ->{Fail Error | e} (String, Cursor e)
 scanString cursor reverse =
-    (got, after) = takeByte cursor
+    (got, after) = takeChar cursor
     case got of
         Nothing -> bad cursor "Unterminated JSON string"
-        Just 34 ->
-            case Bytes.toString (Bytes.fromList (List.reverse reverse)) of
-                Nothing -> bad cursor "Invalid UTF-8 in JSON string"
-                Just text -> (text, after)
-        Just 92 ->
-            (codes, rest) = escaped after
-            scanString rest (appendReverse codes reverse)
-        Just byte ->
-            if byte < 32 then bad cursor "Unescaped control character in JSON string"
-            else scanString after [byte | reverse]
+        Just '"' -> (String.fromList (List.reverse reverse), after)
+        Just '\\' ->
+            (char, rest) = escaped after
+            scanString rest [char | reverse]
+        Just char ->
+            if Char.toCode char < 32 then bad cursor "Unescaped control character in JSON string"
+            else scanString after [char | reverse]
 
-digit : Int -> Bool
-digit byte = byte >= 48 && byte <= 57
+digit : Char -> Bool
+digit char = char >= '0' && char <= '9'
 
-digits : Cursor e -> List Int ->{e} (List Int, Cursor e)
+digits : Cursor e -> List Char ->{Fail Error | e} (List Char, Cursor e)
 digits cursor reverse =
-    case peekByte cursor of
-        Just byte ->
-            if digit byte then
-                (_, after) = takeByte cursor
-                digits after [byte | reverse]
+    case peekChar cursor of
+        Just char ->
+            if digit char then
+                (_, after) = takeChar cursor
+                digits after [char | reverse]
             else (reverse, cursor)
         Nothing -> (reverse, cursor)
 
-requiredDigits : Cursor {Fail Error | e} -> List Int ->{Fail Error | e} (List Int, Cursor {Fail Error | e})
+requiredDigits : Cursor e -> List Char ->{Fail Error | e} (List Char, Cursor e)
 requiredDigits cursor reverse =
-    case peekByte cursor of
-        Just byte -> if digit byte then digits cursor reverse else bad cursor "Expected JSON digit"
+    case peekChar cursor of
+        Just char -> if digit char then digits cursor reverse else bad cursor "Expected JSON digit"
         Nothing -> bad cursor "Expected JSON digit"
 
-scanNumber : Cursor {Fail Error | e} -> Int ->{Fail Error | e} (String, Cursor {Fail Error | e})
+scanNumber : Cursor e -> Char ->{Fail Error | e} (String, Cursor e)
 scanNumber cursor first =
-    if first == 45 then
-        (got, after) = takeByte cursor
+    if first == '-' then
+        (got, after) = takeChar cursor
         case got of
-            Just byte -> if digit byte then numberTail after byte [byte, 45] else bad cursor "Expected digit after minus"
+            Just char -> if digit char then numberTail after char [char, '-'] else bad cursor "Expected digit after minus"
             Nothing -> bad cursor "Expected digit after minus"
     else numberTail cursor first [first]
 
-numberTail : Cursor {Fail Error | e} -> Int -> List Int ->{Fail Error | e} (String, Cursor {Fail Error | e})
+numberTail : Cursor e -> Char -> List Char ->{Fail Error | e} (String, Cursor e)
 numberTail cursor first reverse =
     (whole, afterWhole) =
-        if first == 48 then (reverse, cursor) else digits cursor reverse
-    case peekByte afterWhole of
-        Just byte -> if digit byte then bad afterWhole "Leading zero in JSON number" else ()
+        if first == '0' then (reverse, cursor) else digits cursor reverse
+    case peekChar afterWhole of
+        Just char -> if digit char then bad afterWhole "Leading zero in JSON number" else ()
         Nothing -> ()
     (fraction, afterFraction) =
-        case peekByte afterWhole of
-            Just 46 ->
-                (_, afterDot) = takeByte afterWhole
-                requiredDigits afterDot [46 | whole]
+        case peekChar afterWhole of
+            Just '.' ->
+                (_, afterDot) = takeChar afterWhole
+                requiredDigits afterDot ['.' | whole]
             _ -> (whole, afterWhole)
     (complete, afterExponent) =
-        case peekByte afterFraction of
-            Just 101 -> exponent afterFraction fraction
-            Just 69 -> exponent afterFraction fraction
+        case peekChar afterFraction of
+            Just 'e' -> exponent afterFraction fraction
+            Just 'E' -> exponent afterFraction fraction
             _ -> (fraction, afterFraction)
-    case Bytes.toString (Bytes.fromList (List.reverse complete)) of
-        Nothing -> bad cursor "Invalid JSON number"
-        Just text -> (text, afterExponent)
+    (String.fromList (List.reverse complete), afterExponent)
 
-exponent : Cursor {Fail Error | e} -> List Int ->{Fail Error | e} (List Int, Cursor {Fail Error | e})
+exponent : Cursor e -> List Char ->{Fail Error | e} (List Char, Cursor e)
 exponent cursor reverse =
-    (marker, afterMarker) = takeByte cursor
+    (marker, afterMarker) = takeChar cursor
     case marker of
         Nothing -> bad cursor "Invalid JSON exponent"
         Just mark ->
             (prefix, afterSign) =
-                case peekByte afterMarker of
-                    Just 43 ->
-                        (_, rest) = takeByte afterMarker
-                        ([43, mark | reverse], rest)
-                    Just 45 ->
-                        (_, rest) = takeByte afterMarker
-                        ([45, mark | reverse], rest)
+                case peekChar afterMarker of
+                    Just '+' ->
+                        (_, rest) = takeChar afterMarker
+                        (['+', mark | reverse], rest)
+                    Just '-' ->
+                        (_, rest) = takeChar afterMarker
+                        (['-', mark | reverse], rest)
                     _ -> ([mark | reverse], afterMarker)
             requiredDigits afterSign prefix
 
-lex : Cursor {Fail Error | e} ->{Fail Error | e} (Token, Cursor {Fail Error | e})
+lex : Cursor e ->{Fail Error | e} (Token, Cursor e)
 lex before =
     cursor = skipWhite before
-    (got, after) = takeByte cursor
+    (got, after) = takeChar cursor
     case got of
         Nothing -> (EndInput, cursor)
-        Just 123 -> (BeginObject, after)
-        Just 125 -> (EndObject, after)
-        Just 91 -> (BeginArray, after)
-        Just 93 -> (EndArray, after)
-        Just 58 -> (Colon, after)
-        Just 44 -> (Comma, after)
-        Just 34 ->
+        Just '{' -> (BeginObject, after)
+        Just '}' -> (EndObject, after)
+        Just '[' -> (BeginArray, after)
+        Just ']' -> (EndArray, after)
+        Just ':' -> (Colon, after)
+        Just ',' -> (Comma, after)
+        Just '"' ->
             (value, rest) = scanString after []
             (StringTokenValue value, rest)
-        Just 116 -> (BooleanToken True, literal after "rue")
-        Just 102 -> (BooleanToken False, literal after "alse")
-        Just 110 -> (NullToken, literal after "ull")
-        Just byte ->
-            if byte == 45 || digit byte then
-                (value, rest) = scanNumber after byte
+        Just 't' -> (BooleanToken True, literal after "rue")
+        Just 'f' -> (BooleanToken False, literal after "alse")
+        Just 'n' -> (NullToken, literal after "ull")
+        Just char ->
+            if char == '-' || digit char then
+                (value, rest) = scanNumber after char
                 (NumberToken value, rest)
-            else bad cursor "Unexpected byte in JSON"
+            else bad cursor "Unexpected character in JSON"
 
 type PullState e = { cursor : Cursor e, pending : Maybe Token, depth : Int, paths : List String }
 
@@ -403,6 +399,10 @@ tokenDepth token depth cursor =
 
 withPull : Reader e -> (() ->{Pull, Fail Error} a) ->{e} Result Error a
 withPull reader action =
+    TextReader.over reader { text -> withTextPull text action }
+
+withTextPull : TextReader.Reader e -> (() ->{Pull, Fail Error} a) ->{e} Result Error a
+withTextPull reader action =
     Fail.attempt {
         handle action() with state = PullState { cursor = Cursor { reader = reader, offset = 0, line = 1, column = 1, path = "" }, pending = Nothing, depth = 0, paths = [] } of
             peek () ->
@@ -643,6 +643,15 @@ read _ reader =
             _ -> syntaxError "Trailing JSON input"
     }
 
+readText : Decode a => Type a -> TextReader.Reader e ->{e} Result Error a
+readText _ reader =
+    withTextPull reader {
+        value = decodeValue()
+        case next() of
+            EndInput -> value
+            _ -> syntaxError "Trailing JSON input"
+    }
+
 instance Decode String
     decodeValue() =
         case next() of
@@ -712,65 +721,64 @@ instance Decode Value
     decodeValue() = readValue()
 
 withWriter : Writer e -> (() ->{Emit, Fail Error} a) ->{e} Result Error a
-withWriter writer action =
+withWriter writer action = TextWriter.borrow writer { text -> withTextWriter text action }
+
+withTextWriter : TextWriter.Writer e -> (() ->{Emit, Fail Error} a) ->{e} Result Error a
+withTextWriter writer action =
     Fail.attempt {
         handle action() of
             emit text ->
-                Writer.writeString writer text
-                resume ()
+                case TextWriter.tryWrite writer text of
+                    Ok _ -> resume ()
+                    Err problem -> fail (Error { message = Encoding.message problem, offset = -1, line = 0, column = 0, path = "" })
             return value -> value
     }
 
 write : Encode a => Writer e -> a ->{e} Result Error ()
 write writer value = withWriter writer { encodeValue value }
 
+writeText : Encode a => TextWriter.Writer e -> a ->{e} Result Error ()
+writeText writer value = withTextWriter writer { encodeValue value }
+
 stringify : Encode a => a -> Result Error String
 stringify value =
-    (outcome, bytes) = Writer.collecting { writer -> write writer value }
+    (outcome, text) = TextWriter.collecting { writer -> writeText writer value }
     case outcome of
         Err problem -> Err problem
-        Ok _ ->
-            case Bytes.toString bytes of
-                Just text -> Ok text
-                Nothing -> Err (Error { message = "Invalid UTF-8 output", offset = -1, line = 0, column = 0, path = "" })
+        Ok _ -> Ok text
 
 hexChar : Int -> String
 hexChar value = String.slice value (value + 1) "0123456789abcdef"
 
-escapeByte : Int -> String
-escapeByte byte =
-    if byte == 34 then "\\\""
-    else if byte == 92 then "\\\\"
-    else if byte == 8 then "\\b"
-    else if byte == 12 then "\\f"
-    else if byte == 10 then "\\n"
-    else if byte == 13 then "\\r"
-    else if byte == 9 then "\\t"
-    else "\\u00" ++ hexChar (quotientBy 16 byte) ++ hexChar (remainderBy 16 byte)
+escapeChar : Char -> String
+escapeChar char =
+    code = Char.toCode char
+    if char == '"' then "\\\""
+    else if char == '\\' then "\\\\"
+    else if code == 8 then "\\b"
+    else if code == 12 then "\\f"
+    else if char == '\n' then "\\n"
+    else if char == '\r' then "\\r"
+    else if char == '\t' then "\\t"
+    else "\\u00" ++ hexChar (quotientBy 16 code) ++ hexChar (remainderBy 16 code)
 
-emitRun : Bytes -> Int -> Int ->{Emit} ()
-emitRun bytes start end =
-    if start == end then ()
-    else
-        case Bytes.toString (Bytes.slice start end bytes) of
-            Just text -> emit text
-            Nothing -> ()
+plainChar : Char -> Bool
+plainChar char = char /= '"' && char /= '\\' && Char.toCode char >= 32
 
-emitStringBody : Bytes -> Int -> Int ->{Emit} ()
-emitStringBody bytes start index =
-    case Bytes.byteAt index bytes of
-        Nothing -> emitRun bytes start index
-        Just byte ->
-            if byte == 34 || byte == 92 || byte < 32 then
-                emitRun bytes start index
-                emit (escapeByte byte)
-                emitStringBody bytes (index + 1) (index + 1)
-            else emitStringBody bytes start (index + 1)
+emitStringBody : String ->{Emit} ()
+emitStringBody text =
+    (run, rest) = String.span plainChar text
+    if run == "" then () else emit run
+    case String.uncons rest of
+        Nothing -> ()
+        Just part ->
+            emit (escapeChar part.first)
+            emitStringBody part.rest
 
 emitString : String ->{Emit} ()
 emitString text =
     emit "\""
-    emitStringBody (Bytes.fromString text) 0 0
+    emitStringBody text
     emit "\""
 
 instance Encode String

@@ -1,0 +1,104 @@
+{-# no-prelude #-}
+module Text.Writer exposing (Writer, borrow, collecting, flush, over, overWith, tryWrite, write, writeChar)
+
+import Basics exposing (..)
+import Encoding exposing (Encoding)
+import Fail exposing (Fail, fromResult)
+import List
+import Result exposing (Result(..))
+import Runtime.Local
+import String
+import Writer as ByteWriter
+
+type Output e = { emit : String ->{e} (), attempt : String ->{e} Result Encoding.Error (), flush : () ->{e} () }
+
+type Writer e = Writer (Output e)
+
+{-# scoped s #-}
+overWith : Encoding -> ByteWriter.Writer e -> (Writer s ->{s} a) ->{Fail Encoding.Error | e} a
+overWith encoding parent use =
+    Runtime.Local.run () { local ->
+        writer = Writer (Output
+            { emit = { text ->
+                ignore local.read()
+                ByteWriter.write parent (fromResult (Encoding.encode encoding text))
+              }
+            , attempt = { text ->
+                ignore local.read()
+                case Encoding.encode encoding text of
+                    Err error -> Err error
+                    Ok bytes ->
+                        ByteWriter.write parent bytes
+                        Ok ()
+              }
+            , flush = {
+                ignore local.read()
+                parent.flush()
+              }
+            }
+        )
+        result = use writer
+        flush writer
+        result
+    }
+
+{-# scoped s #-}
+over : ByteWriter.Writer e -> (Writer s ->{s} a) ->{e} a
+over parent use =
+    borrow parent { writer ->
+        result = use writer
+        flush writer
+        result
+    }
+
+-- A nested encoder borrows a writer without taking over its flush boundary.
+{-# scoped s #-}
+borrow : ByteWriter.Writer e -> (Writer s ->{s} a) ->{e} a
+borrow parent use =
+    Runtime.Local.run () { local ->
+        writer = Writer (Output
+            { emit = { text ->
+                ignore local.read()
+                ByteWriter.writeString parent text
+              }
+            , attempt = { text ->
+                ignore local.read()
+                ByteWriter.writeString parent text
+                Ok ()
+              }
+            , flush = {
+                ignore local.read()
+                parent.flush()
+              }
+            }
+        )
+        use writer
+    }
+
+{-# scoped s #-}
+collecting : (Writer s ->{s} a) ->{e} (a, String)
+collecting use =
+    Runtime.Local.run [] { parts ->
+        result = use (Writer (Output
+            { emit = { text -> parts.write [text | parts.read()] }
+            , attempt = { text ->
+                parts.write [text | parts.read()]
+                Ok ()
+              }
+            , flush = { () }
+            }
+        ))
+        (result, String.concat (List.reverse parts.read()))
+    }
+
+write : Writer e -> String ->{e} ()
+write (Writer output) text = output.emit text
+
+tryWrite : Writer e -> String ->{e} Result Encoding.Error ()
+tryWrite (Writer output) text = output.attempt text
+
+writeChar : Writer e -> Char ->{e} ()
+writeChar writer char = write writer (String.fromChar char)
+
+flush : Writer e ->{e} ()
+flush (Writer output) = output.flush()

@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module String exposing (Uncons(..), byteLength, contains, fromChar, length, padLeft, padRight, slice, span, split, startsWith, toFloat, toInt, trim, uncons, words)
+module String exposing (Uncons(..), byteLength, concat, contains, fromChar, fromList, length, padLeft, padRight, slice, span, split, startsWith, toFloat, toInt, trim, uncons, words)
 
 import Basics exposing (..)
 import List exposing (List)
@@ -35,6 +35,12 @@ restString = native
 fromChar : Char -> String
 fromChar = native
 
+fromList : List Char -> String
+fromList = native "fangort.StringFromList($1)"
+
+concat : List String -> String
+concat = native "fangort.StringConcat($1)"
+
 uncons : String -> Maybe Uncons
 uncons text =
     if text == "" then
@@ -43,18 +49,18 @@ uncons text =
         Just (Uncons { first = firstChar text, rest = restString text })
 
 -- Stop at the first rejected scalar, keeping it in the remaining suffix.
-spanHelp : (Char ->{e} Bool) -> String -> String -> Int ->{e} (String, String)
-spanHelp keep original rest count =
+spanHelp : (Char ->{e} Bool) -> String -> String ->{e} (String, String)
+spanHelp keep original rest =
     case uncons rest of
         Nothing -> (original, "")
         Just part ->
             if keep part.first then
-                spanHelp keep original part.rest (count + 1)
+                spanHelp keep original part.rest
             else
-                (slice 0 count original, rest)
+                (byteSlice 0 (byteLength original - byteLength rest) original, rest)
 
 span : (Char ->{e} Bool) -> String ->{e} (String, String)
-span keep text = spanHelp keep text text 0
+span keep text = spanHelp keep text text
 
 startsWith : String -> String -> Bool
 startsWith prefix text = slice 0 (length prefix) text == prefix
