@@ -19,9 +19,11 @@ import Meta exposing (Bound(..), BoundField(..), Code, Ctor(..), Field(..), Item
 import Reader exposing (Reader)
 import Result exposing (Result(..))
 import Runtime.Local
+import Runtime.Scope
 import String
 import Text.Reader as TextReader
 import Text.Writer as TextWriter
+import Tuple
 import Writer exposing (Writer)
 
 type Error = { message : String, offset : Int, line : Int, column : Int, path : String }
@@ -196,15 +198,10 @@ peekChar cursor =
 
 takeChar : Cursor e ->{Fail Error | e} (Maybe Char, Cursor e)
 takeChar cursor =
-    case peekChar cursor of
-        Nothing -> (Nothing, cursor)
-        Just char ->
-            before = TextReader.position cursor.reader
-            ignore (case TextReader.tryReadChar cursor.reader of
-                    Ok value -> value
-                    Err problem -> encodingError cursor problem
-            )
-            size = TextReader.position cursor.reader - before
+    case TextReader.tryReadScalar cursor.reader of
+        Err problem -> encodingError cursor problem
+        Ok Nothing -> (Nothing, cursor)
+        Ok (Just (char, size)) ->
             if char == '\n' then
                 (Just char, { cursor | offset = cursor.offset + size, line = cursor.line + 1, column = 1 })
             else
@@ -284,33 +281,58 @@ escaped cursor =
             else (scalar cursor code, afterHex)
         _ -> bad cursor "Invalid JSON escape"
 
-scanString : Cursor e -> List Char ->{Fail Error | e} (String, Cursor e)
-scanString cursor reverse =
+plainStringChar : Char -> Bool
+plainStringChar char = case char of
+    '"' -> False
+    '\\' -> False
+    _ -> Char.toCode char >= 32
+
+-- Keep the current fragment outside the list so one-window strings need no
+-- list nodes or concatenation. Longer strings still concatenate only once.
+stringFragments : String -> List String -> String
+stringFragments current reverse =
+    case reverse of
+        [] -> current
+        _ -> String.concat (List.reverse [current | reverse])
+
+priorFragment : String -> List String -> List String
+priorFragment current reverse = if current == "" then reverse else [current | reverse]
+
+scanString : Cursor e -> String -> List String ->{Fail Error | e} (String, Cursor e)
+scanString cursor current reverse =
+    case TextReader.tryReadSpan cursor.reader plainStringChar of
+        Err problem -> encodingError cursor problem
+        Ok (text, width) ->
+            if text == "" then scanStringSpecial cursor current reverse
+            else
+                scanStringSpecial { cursor | offset = cursor.offset + width, column = cursor.column + width } text (priorFragment current reverse)
+
+scanStringSpecial : Cursor e -> String -> List String ->{Fail Error | e} (String, Cursor e)
+scanStringSpecial cursor current reverse =
     (got, after) = takeChar cursor
     case got of
         Nothing -> bad cursor "Unterminated JSON string"
-        Just '"' -> (String.fromList (List.reverse reverse), after)
+        Just '"' -> (stringFragments current reverse, after)
         Just '\\' ->
             (char, rest) = escaped after
-            scanString rest [char | reverse]
+            scanString rest (String.fromChar char) (priorFragment current reverse)
         Just char ->
             if Char.toCode char < 32 then bad cursor "Unescaped control character in JSON string"
-            else scanString after [char | reverse]
+            else scanString after (String.fromChar char) (priorFragment current reverse)
 
 digit : Char -> Bool
 digit char = char >= '0' && char <= '9'
 
-digits : Cursor e -> List Char ->{Fail Error | e} (List Char, Cursor e)
+digits : Cursor e -> List String ->{Fail Error | e} (List String, Cursor e)
 digits cursor reverse =
-    case peekChar cursor of
-        Just char ->
-            if digit char then
-                (_, after) = takeChar cursor
-                digits after [char | reverse]
-            else (reverse, cursor)
-        Nothing -> (reverse, cursor)
+    case TextReader.tryReadSpan cursor.reader digit of
+        Err problem -> encodingError cursor problem
+        Ok (text, width) ->
+            if text == "" then (reverse, cursor)
+            else
+                digits { cursor | offset = cursor.offset + width, column = cursor.column + width } [text | reverse]
 
-requiredDigits : Cursor e -> List Char ->{Fail Error | e} (List Char, Cursor e)
+requiredDigits : Cursor e -> List String ->{Fail Error | e} (List String, Cursor e)
 requiredDigits cursor reverse =
     case peekChar cursor of
         Just char -> if digit char then digits cursor reverse else bad cursor "Expected JSON digit"
@@ -321,11 +343,11 @@ scanNumber cursor first =
     if first == '-' then
         (got, after) = takeChar cursor
         case got of
-            Just char -> if digit char then numberTail after char [char, '-'] else bad cursor "Expected digit after minus"
+            Just char -> if digit char then numberTail after char [String.fromChar char, "-"] else bad cursor "Expected digit after minus"
             Nothing -> bad cursor "Expected digit after minus"
-    else numberTail cursor first [first]
+    else numberTail cursor first [String.fromChar first]
 
-numberTail : Cursor e -> Char -> List Char ->{Fail Error | e} (String, Cursor e)
+numberTail : Cursor e -> Char -> List String ->{Fail Error | e} (String, Cursor e)
 numberTail cursor first reverse =
     (whole, afterWhole) =
         if first == '0' then (reverse, cursor) else digits cursor reverse
@@ -336,16 +358,22 @@ numberTail cursor first reverse =
         case peekChar afterWhole of
             Just '.' ->
                 (_, afterDot) = takeChar afterWhole
-                requiredDigits afterDot ['.' | whole]
+                requiredDigits afterDot ["." | whole]
             _ -> (whole, afterWhole)
     (complete, afterExponent) =
         case peekChar afterFraction of
             Just 'e' -> exponent afterFraction fraction
             Just 'E' -> exponent afterFraction fraction
             _ -> (fraction, afterFraction)
-    (String.fromList (List.reverse complete), afterExponent)
+    ( case complete of
+        [] -> ""
+        [single] -> single
+        [lastPart, firstPart] -> firstPart ++ lastPart
+        _ -> String.concat (List.reverse complete)
+    , afterExponent
+    )
 
-exponent : Cursor e -> List Char ->{Fail Error | e} (List Char, Cursor e)
+exponent : Cursor e -> List String ->{Fail Error | e} (List String, Cursor e)
 exponent cursor reverse =
     (marker, afterMarker) = takeChar cursor
     case marker of
@@ -355,11 +383,11 @@ exponent cursor reverse =
                 case peekChar afterMarker of
                     Just '+' ->
                         (_, rest) = takeChar afterMarker
-                        (['+', mark | reverse], rest)
+                        (["+", String.fromChar mark | reverse], rest)
                     Just '-' ->
                         (_, rest) = takeChar afterMarker
-                        (['-', mark | reverse], rest)
-                    _ -> ([mark | reverse], afterMarker)
+                        (["-", String.fromChar mark | reverse], rest)
+                    _ -> ([String.fromChar mark | reverse], afterMarker)
             requiredDigits afterSign prefix
 
 lex : Cursor e ->{Fail Error | e} (Token, Cursor e)
@@ -375,7 +403,7 @@ lex before =
         Just ':' -> (Colon, after)
         Just ',' -> (Comma, after)
         Just '"' ->
-            (value, rest) = scanString after []
+            (value, rest) = scanString after "" []
             (StringTokenValue value, rest)
         Just 't' -> (BooleanToken True, literal after "rue")
         Just 'f' -> (BooleanToken False, literal after "alse")
@@ -436,12 +464,7 @@ syntaxError message = fail { at() | message = message }
 
 withPath : String -> (() ->{Pull, Fail Error} a) ->{Pull, Fail Error} a
 withPath segment action =
-    enter segment
-    outcome = Fail.attempt action
-    leave()
-    case outcome of
-        Ok value -> value
-        Err problem -> fail problem
+    Runtime.Scope.bracket { enter segment } { leave() } { action() }
 
 beginArray : () ->{Pull, Fail Error} ()
 beginArray() =
@@ -927,26 +950,20 @@ deriver Encode
         validateJSONSchema subject
         Meta.match subject valueCode (derivedEncode subject)
 
-type Slot = { field : Field, cell : Code }
-
-reverseSlots : Items Slot -> Items Slot -> Items Slot
-reverseSlots remaining result =
-    case remaining of
-        NoItems -> result
-        Item slot rest -> reverseSlots rest (Item slot result)
+type Slot = { field : Field, read : Code, write : Code }
 
 slotValue : Slot -> Code
 slotValue slot =
     settings = fieldSettings slot.field.name slot.field.attributes
     case settings.fallback of
         Nothing ->
-            `case $(slot.cell).read() of
+            `case $(slot.read) of
                     Just value -> value
                     Nothing -> withPath $(lift settings.key) { syntaxError $(lift ("Missing JSON field: " ++ settings.key)) }`
         Just fallback ->
             if settings.skip then fallback
             else
-                `case $(slot.cell).read() of
+                `case $(slot.read) of
                         Just value -> value
                         Nothing -> $(fallback)`
 
@@ -956,8 +973,8 @@ slotHandler keyCode fallback slot =
     if settings.skip then fallback
     else
         `if $(keyCode) == $(lift settings.key) then
-                case $(slot.cell).read() of
-                    Nothing -> $(slot.cell).write (Just (withPath $(lift settings.key) { decodeValue() }))
+                case $(slot.read) of
+                    Nothing -> $(slot.write) (Just (withPath $(lift settings.key) { decodeValue() }))
                     Just _ -> withPath $(lift settings.key) { syntaxError $(lift ("Duplicate JSON field: " ++ settings.key)) }
             else $(fallback)`
 
@@ -969,16 +986,44 @@ recordParser ctor slots =
     values = Meta.mapItems slotValue slots
     sequenceCode `readFields $(action)` (Meta.construct ctor values)
 
-slotScope : Ctor -> Items Field -> Items Slot -> Code
-slotScope ctor remaining reversed =
-    case remaining of
-        NoItems -> recordParser ctor (reverseSlots reversed NoItems)
-        Item field rest ->
-            name = "_json_slot_" ++ show field.index
-            callback = Meta.lambda name { cellCode ->
-                slotScope ctor rest (Item (Slot { field = field, cell = cellCode }) reversed)
+-- A typed tuple of optional fields uses one local activation per record.
+-- Generate projections and updates rather than allocating a cell per field.
+slotInitial : Items Field -> Code
+slotInitial fields =
+    case fields of
+        NoItems -> `()`
+        Item _ rest -> `(Nothing, $(slotInitial rest))`
+
+slotProjection : Int -> Code -> Code
+slotProjection index values =
+    if index == 0 then `Tuple.first $(values)`
+    else slotProjection (index - 1) `Tuple.second $(values)`
+
+slotUpdate : Int -> Code -> Code -> Code
+slotUpdate index value values =
+    if index == 0 then `($(value), Tuple.second $(values))`
+    else `(Tuple.first $(values), $(slotUpdate (index - 1) value `Tuple.second $(values)`))`
+
+aggregateSlot : Code -> Field -> Slot
+aggregateSlot cell field =
+    readCode = slotProjection field.index `$(cell).read()`
+    writeCode = Meta.lambda ("_json_value_" ++ show field.index) { value ->
+        update = Meta.lambda ("_json_state_" ++ show field.index) { values ->
+            `$(cell).write $(slotUpdate field.index value values)`
+        }
+        `$(update) $(cell).read()`
+    }
+    Slot { field = field, read = readCode, write = writeCode }
+
+slotScope : Ctor -> Code
+slotScope ctor =
+    case ctor.fields of
+        NoItems -> recordParser ctor NoItems
+        _ ->
+            callback = Meta.lambda "_json_slots" { cell ->
+                recordParser ctor (Meta.mapItems (aggregateSlot cell) ctor.fields)
             }
-            `Runtime.Local.run Nothing $(callback)`
+            `Runtime.Local.run $(slotInitial ctor.fields) $(callback)`
 
 nullaryBranch : Code -> Code -> Ctor -> Code
 nullaryBranch tagCode fallback ctor =
@@ -1019,7 +1064,7 @@ deriver Decode
     decodeValue subject _ =
         validateJSONSchema subject
         case subject.shape of
-            Record ctor -> slotScope ctor ctor.fields NoItems
+            Record ctor -> slotScope ctor
             Union ctors -> unionParser ctors
 
 parseBytesValue : Bytes -> Result Error Value

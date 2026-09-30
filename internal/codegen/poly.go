@@ -273,12 +273,18 @@ func (g *gen) polyConvertEvidence(value goast.Expr, from, to types.EffLabel, mod
 			fields = append(fields, &goast.KeyValueExpr{Key: ident(field), Value: funcLitParams(params, result, body)})
 		}
 	}
-	converted := &goast.CompositeLit{Type: g.effectTypeMode(toInstance, mode), Elts: fields}
+	converted := &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: g.effectTypeMode(toInstance, mode).(*goast.StarExpr).X, Elts: fields}}
 	return callExpr(funcLitParams([]paramSpec{{name: param, typ: g.effectTypeMode(fromInstance, mode)}},
-		g.effectTypeMode(toInstance, mode), []goast.Stmt{returnStmt(converted)}), value)
+		g.effectTypeMode(toInstance, mode), []goast.Stmt{returnStmt(g.completeEvidence(toInstance, converted, mode))}), value)
 }
 
 func (g *gen) polyConvertADT(value goast.Expr, from, to *types.TCon, adt *types.ADTInfo) goast.Expr {
+	if taggedADT(adt) {
+		return g.convertTagged(value, from, to, adt)
+	}
+	if productADT(adt) {
+		return g.convertProduct(value, from, to, adt)
+	}
 	param := fmt.Sprintf("t_poly_value%d", g.tmp)
 	g.tmp++
 	variant := fmt.Sprintf("t_poly_variant%d", g.tmp)

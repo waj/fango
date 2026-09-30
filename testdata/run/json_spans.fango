@@ -1,0 +1,71 @@
+import Bytes
+import Encoding exposing (Error(..))
+import Fail
+import Json
+import List
+import Reader
+import Result exposing (Result(..))
+import Runtime.Local
+import String
+import Text.Reader as TextReader
+
+all predicate values = List.foldl { value result -> predicate value && result } True values
+
+decoded expected result = case result of
+    Ok text -> text == expected
+    Err _ -> False
+
+decodeChunks : Json.Decode a => Type a -> List Bytes.Bytes -> Result Json.Error a
+decodeChunks witness chunks = Runtime.Local.run chunks { remaining ->
+    Reader.over (Bytes.Source
+        { pull = {
+            case remaining.read() of
+                [] -> Nothing
+                [chunk | rest] ->
+                    remaining.write rest
+                    Just chunk
+          }
+        }
+    ) { reader -> Json.read witness reader }
+}
+
+splitDecode bytes index = decodeChunks @String [Bytes.slice 0 index bytes, Bytes.empty, Bytes.slice index (Bytes.length bytes) bytes]
+
+main() =
+    encoded = Bytes.fromString "\"é😀plain\\n\\uD834\\uDD1Etail\""
+    print (all (decoded "é😀plain\n𝄞tail") (List.map (splitDecode encoded) (List.range 0 (Bytes.length encoded))))
+    print (decoded "é😀plain\n𝄞tail" (decodeChunks @String (List.map { byte -> Bytes.fromList [byte] } (Bytes.toList encoded))))
+    malformed = Bytes.fromList [34, 97, 195, 169, 255, 34]
+    print (all { result -> case result of
+        Err error -> error.offset == 4 && error.column == 5 && error.line == 1
+        Ok _ -> False
+    } (List.map (splitDecode malformed) (List.range 0 (Bytes.length malformed))))
+    print (TextReader.withString "abc!é" { reader ->
+        first = TextReader.tryReadWhile reader { char -> char /= '!' }
+        stopped = TextReader.tryReadWhile reader { char -> char /= '!' }
+        marker = TextReader.tryReadChar reader
+        rest = TextReader.tryReadWhile reader { _ -> True }
+        (first, stopped, (marker, rest, TextReader.position reader))
+    } == (Ok "abc", Ok "", (Ok (Just '!'), Ok "é", 6)))
+    print (Reader.withBytes (Bytes.fromList [97, 255]) { bytes -> TextReader.over bytes { reader ->
+        first = TextReader.tryReadWhile reader { _ -> True }
+        error = TextReader.tryReadWhile reader { _ -> True }
+        (first, error, TextReader.position reader)
+    } } == (Ok "a", Err (InvalidSequence 1), 1))
+    print (Reader.withBytes (Bytes.fromList [34, 233, 34]) { bytes -> TextReader.overWith Encoding.latin1 bytes { reader ->
+        decoded "é" (Json.readText @String reader)
+    } })
+    number = Bytes.fromString "-12345.625e-2"
+    print (all { index -> decoded (-123.45625) (decodeChunks @Float [Bytes.slice 0 index number, Bytes.empty, Bytes.slice index (Bytes.length number) number]) } (List.range 0 (Bytes.length number)))
+    print (Reader.withBytes Bytes.empty { reader ->
+        case Json.withPull reader {
+            caught : Result Json.Error ()
+            caught = Fail.attempt { Json.withPath "outer" { Json.withPath "inner" { Json.syntaxError "problem" } } }
+            location = Json.at()
+            case caught of
+                Err error -> error.path == "/outer/inner" && location.path == ""
+                Ok _ -> False
+        } of
+            Ok value -> value
+            Err _ -> False
+    })

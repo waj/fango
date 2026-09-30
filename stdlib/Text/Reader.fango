@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Text.Reader exposing (Read(..), Reader, atEnd, chunks, over, overWith, peekChar, position, readChar, readExactly, readLine, readUntil, readUpTo, tryPeekChar, tryReadChar, withString)
+module Text.Reader exposing (Read(..), Reader, atEnd, chunks, over, overWith, peekChar, position, readChar, readExactly, readLine, readUntil, readUpTo, tryPeekChar, tryReadChar, tryReadScalar, tryReadSpan, tryReadWhile, withString)
 
 import Basics exposing (..)
 import Bytes
@@ -21,15 +21,20 @@ type Input e =
     , ready : Int ->{e} Bool
     , consume : Int ->{e} ()
     , position : () ->{e} Int
+    , buffered : () ->{e} Bytes.Bytes
+    , encoding : Encoding
     }
 
 type Reader e = Reader (Input e)
 
 type Read = Found String | Ended String | Overflowed deriving (Eq, Show)
 
+inspect : Encoding -> ByteReader.Reader e -> Int -> Int ->{e} Result Encoding.Error (Maybe (Char, Int))
 inspect encoding parent base offset =
-    ignore (ByteReader.ensure parent (offset + 1))
     case Encoding.decodeAt encoding parent.buffered() offset of
+        Ok Nothing ->
+            if parent.refill() then inspect encoding parent base offset
+            else Ok Nothing
         Ok value -> Ok value
         Err (IncompleteSequence _) ->
             if parent.refill() then inspect encoding parent base offset
@@ -62,6 +67,8 @@ overWith encoding parent use =
                 consumed.write (consumed.read() + size)
               }
             , position = consumed.read
+            , buffered = parent.buffered
+            , encoding = encoding
             }
         ))
     }
@@ -83,6 +90,8 @@ withString text use =
             , ready = { offset -> consumed.read() + offset < Bytes.length bytes }
             , consume = { size -> consumed.write (consumed.read() + size) }
             , position = consumed.read
+            , buffered = { Bytes.slice consumed.read() (Bytes.length bytes) bytes }
+            , encoding = Encoding.utf8
             }
         ))
     }
@@ -97,16 +106,49 @@ tryPeekChar : Reader e ->{e} Result Encoding.Error (Maybe Char)
 tryPeekChar (Reader input) = input.peek()
 
 tryReadChar : Reader e ->{e} Result Encoding.Error (Maybe Char)
-tryReadChar (Reader input) =
+tryReadChar reader = peekResult (tryReadScalar reader)
+
+tryReadScalar : Reader e ->{e} Result Encoding.Error (Maybe (Char, Int))
+tryReadScalar (Reader input) =
     case input.at 0 of
         Err error -> Err error
         Ok Nothing -> Ok Nothing
         Ok (Just (char, size)) ->
             input.consume size
-            Ok (Just char)
+            Ok (Just (char, size))
 
 readChar : Reader e ->{Fail Encoding.Error | e} Maybe Char
 readChar reader = fromResult (tryReadChar reader)
+
+-- Scan one immutable window without performing state operations per scalar.
+-- A later malformed or incomplete scalar belongs to the next read, so a
+-- successful prefix retains the precise position of a subsequent error.
+prefixWidth : Encoding -> Bytes.Bytes -> (Char -> Bool) -> Int -> Int
+prefixWidth encoding bytes keep offset =
+    case Encoding.decodeAt encoding bytes offset of
+        Ok (Just (char, width)) ->
+            if keep char then prefixWidth encoding bytes keep (offset + width)
+            else offset
+        _ -> offset
+
+tryReadWhile : Reader e -> (Char -> Bool) ->{e} Result Encoding.Error String
+tryReadWhile reader keep =
+    case tryReadSpan reader keep of
+        Err error -> Err error
+        Ok (text, _) -> Ok text
+
+tryReadSpan : Reader e -> (Char -> Bool) ->{e} Result Encoding.Error (String, Int)
+tryReadSpan (Reader input) keep =
+    case input.at 0 of
+        Err error -> Err error
+        Ok _ ->
+            bytes = input.buffered()
+            width = prefixWidth input.encoding bytes keep 0
+            case Encoding.decode input.encoding (Bytes.slice 0 width bytes) of
+                Err error -> Err error
+                Ok text ->
+                    if width > 0 then input.consume width else ()
+                    Ok (text, width)
 
 atEnd : Reader e ->{Fail Encoding.Error | e} Bool
 atEnd reader = peekChar reader == Nothing

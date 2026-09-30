@@ -826,6 +826,35 @@ func TestGeneratedGoHasNoContinuationRuntime(t *testing.T) {
 	}
 }
 
+// Deriver-generated sequence blocks must not create callable values merely
+// to execute their bodies. The differential fixture checks their results.
+func TestJsonEncoderImmediateLambdasEmitStatements(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join("..", "..", "testdata", "run", "json_derived.fango")
+	src := entryFile(t, emittedProject(t, path))
+	file, err := goparser.ParseFile(gotoken.NewFileSet(), "json_derived.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoders := 0
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*goast.FuncDecl)
+		if !ok || !strings.HasSuffix(fn.Name.Name, "_encodeValue_exit") {
+			continue
+		}
+		encoders++
+		goast.Inspect(fn.Body, func(node goast.Node) bool {
+			if _, ok := node.(*goast.FuncLit); ok {
+				t.Errorf("%s still constructs a function for its immediate sequence", fn.Name.Name)
+			}
+			return true
+		})
+	}
+	if encoders != 4 {
+		t.Fatalf("checked %d generated encoders, want 4", encoders)
+	}
+}
+
 // Self tail calls compile to loops (doc/design.md, "Go backend and runtime"):
 // an eligible worker's FuncDecl contains a ForStmt and no self call, while a
 // capture-excluded worker keeps the self call and gains no ForStmt. Codegen
@@ -838,6 +867,8 @@ func TestTailLoopGeneratedShape(t *testing.T) {
 	}{
 		{"tail_loop_deep.fango", "V_loop", true},
 		{"tail_loop_unit.fango", "V_countdown", true},
+		{"tail_loop_exit.fango", "V_count_exit", true},
+		{"tail_loop_exit.fango", "V_units_exit", true},
 		// Equation dispatch happens inside the worker, so a grouped
 		// definition is still eligible for the loop rewrite.
 		{"tail_loop_equations.fango", "V_total", true},

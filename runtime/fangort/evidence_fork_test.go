@@ -6,6 +6,23 @@ import (
 	"testing"
 )
 
+func TestFixedEvidenceForkPreservesStateAndHonorsOverrides(t *testing.T) {
+	origin := &EvidenceOrigin{Name: "Local"}
+	shared := NewHandlerState(1)
+	origin.Fixed = NewEvidenceBinding(EvidenceFamily{Origin: origin, Direct: shared})
+	row := ExtendEvidenceValue(EvidenceValue{}, origin.Fixed)
+	child := NewEvidenceFork(nil).Value(row)
+	if ValueEvidence[*HandlerState[int]](child, "Local", DirectEvidence) != shared {
+		t.Fatal("fixed state was copied")
+	}
+	replacement := &EvidenceOrigin{Name: "Local"}
+	other := NewHandlerState(2)
+	overrides := ExtendEvidenceRow(nil, EvidenceBinding{Name: "Local", Family: EvidenceFamily{Origin: replacement, Direct: other}})
+	if ForkEvidence[*HandlerState[int]](NewEvidenceFork(overrides), origin, DirectEvidence) != other {
+		t.Fatal("fixed family bypassed an override")
+	}
+}
+
 func TestEvidenceForkRebasesDependenciesAndPreservesAliases(t *testing.T) {
 	parentFail := &EvidenceOrigin{Name: "Fail", Arguments: []*TypeDescriptor{NominalType("String", true)}}
 	childFail := &EvidenceOrigin{Name: "Fail", Arguments: []*TypeDescriptor{NominalType("String", true)}}

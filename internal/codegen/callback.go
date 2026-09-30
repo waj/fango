@@ -17,6 +17,9 @@ func memberName(mode types.Transport) string {
 	}
 }
 func callbackMember(value goast.Expr, mode types.Transport) goast.Expr {
+	if _, literal := value.(*goast.CompositeLit); literal {
+		value = &goast.ParenExpr{X: value}
+	}
 	return &goast.SelectorExpr{X: value, Sel: ident(memberName(mode))}
 }
 func (g *gen) callbackMemberType(fn *types.TFun, mode types.Transport) *goast.FuncType {
@@ -44,7 +47,7 @@ func (g *gen) callbackType(fn *types.TFun) goast.Expr {
 		fields = append(fields, &goast.Field{Names: []*goast.Ident{ident(memberName(mode))}, Type: g.callbackMemberType(fn, mode)})
 	}
 	g.usesFangort = true
-	return &goast.StructType{Fields: &goast.FieldList{List: fields}}
+	return g.callableAlias(&goast.StructType{Fields: &goast.FieldList{List: fields}})
 }
 func (g *gen) callbackValue(lam *core.Lambda) goast.Expr {
 	fn := lam.Ty.(*types.TFun)

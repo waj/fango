@@ -43,3 +43,33 @@ func TestEvidenceRowsWithMoreThanTwoBindings(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedEvidenceBindingReuseAndShadowing(t *testing.T) {
+	a := &EvidenceBinding{Name: "Read", Family: EvidenceFamily{Direct: 1}}
+	b := &EvidenceBinding{Name: "Read", Family: EvidenceFamily{Direct: 2}}
+	outer := ExtendEvidenceBindings(nil, a)
+	if got := ExtendEvidenceBindings(outer, a); got != outer {
+		t.Fatal("identical visible binding allocated an overlay")
+	}
+	if allocs := testing.AllocsPerRun(100, func() { _ = ExtendEvidenceBindings(outer, a) }); allocs != 0 {
+		t.Fatalf("forwarding allocated %g times", allocs)
+	}
+	inner := ExtendEvidenceBindings(outer, b)
+	if got := ExtendEvidenceBindings(inner, a); got == inner || RowEvidence[int](got, "Read", DirectEvidence) != 1 {
+		t.Fatal("shadowed binding incorrectly reused")
+	}
+	if RowEvidence[int](inner, "Read", DirectEvidence) != 2 || RowEvidence[int](outer, "Read", DirectEvidence) != 1 {
+		t.Fatal("extension mutated published rows")
+	}
+}
+
+func TestDuplicateSharedBindingRejectedBeforeReuse(t *testing.T) {
+	binding := &EvidenceBinding{Name: "Read", Family: EvidenceFamily{Direct: 1}}
+	row := ExtendEvidenceBindings(nil, binding)
+	defer func() {
+		if recover() == nil {
+			t.Fatal("duplicate binding bypassed validation")
+		}
+	}()
+	ExtendEvidenceBindings(row, binding, binding)
+}

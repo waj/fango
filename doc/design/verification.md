@@ -85,6 +85,92 @@ Run performance comparisons only on an idle host. Existing thresholds and
 historical sources remain available; passing build and correctness checks does
 not establish performance parity.
 
+### Typed JSON comparison
+
+```sh
+nix develop -c go run ./benchmarks/jsoncompare -out /tmp/fango-json-evidence -profile -probes
+```
+
+The opt-in harness generates a deterministic 10 MB nested order array and
+compares Fango's derived `Json.Decode` with Go's `encoding/json.Decoder`.
+Both retain the complete typed result, then verify independently generated
+record, ID, money, quantity, and UTF-8 byte checksums. `-bytes 500000000`
+selects the larger fixture; `-input FILE` reuses a fixture and its adjacent
+`.meta.json`. Output directories must be new. Run from the Nix development
+shell so the generator uses its Python interpreter.
+
+Three fresh processes per implementation run sequentially in alternating order.
+Wall time includes startup, file IO, decoding, verification, and exit; generation
+and compilation are excluded. Blocking process waits avoid polling delay.
+The harness records every sample, user/system CPU, peak RSS, runtime settings,
+revision, working-tree patch, new implementation sources, exported Go project,
+and checksums. Each subprocess has a ten-minute timeout. These are manual
+same-host measurements, not portable timing gates.
+
+`-profile` builds a separate executable and records CPU/allocation profiles and
+MemStats. Its decode boundary precedes the checksum fold, with the decoded
+output still needed by that fold. A forced GC there measures retained heap;
+profile timings include instrumentation and must not replace ordinary timings.
+`gc_available_cpu_fraction` measures GC's share of available CPU, not elapsed
+wall time. `-probes` checks that state callback invocation and typed
+product/Maybe/Result construction have no allocation growth between one and
+one thousand operations; fixed activation allocations are reported separately.
+
+On the original Apple M5 Max/macOS arm64 host with Go 1.26.7 and default GC
+settings, the 10,000,260-byte fixture measured as follows. The baseline is the
+original diagnostic at revision `49685999fa953b33cbe4c09ea13b25a11a31889f`;
+its polling runner could add up to 50 ms. Allocation totals come from separate
+profiled runs, not the timing samples.
+
+| Measurement | Original | Measured optimized decoder |
+| --- | ---: | ---: |
+| Whole-process wall time | 15.159 s | 1.163 / 1.179 / 1.174 s |
+| Cumulative allocated bytes | 27,084,442,272 | 141,412,216 |
+| Allocation events | 650,664,856 | 5,045,371 |
+| GC cycles | 3,016 | 26 |
+
+The median improvement is 12.9× over the original. The current Go control
+median is 0.0718 s, leaving a 16.4× gap. The retained decoded heap is 13.3 MB
+at the pre-verification snapshot. Decode alone allocates 134,383,864 bytes in
+4,909,041 events; the table includes the subsequent checksum fold and profiling
+overhead. Product construction allocates zero objects in the probe; state
+execution allocates 12 objects per
+activation for both one and one thousand operations. Remaining optimization
+work belongs in the [roadmap](../roadmap.md#json-and-generated-code-performance).
+
+Five fresh alternating runs of saved binaries isolate
+[immediate-application lowering](backend.md#representations-and-abi) from
+between-session variation: median time changes from 1.133 s to 1.099 s,
+a 3.0% improvement, with the new binary faster in every pair. Allocation totals
+are effectively unchanged. This workload derives and invokes Decode; it does
+not exercise the encoder's immediate sequence lambdas.
+
+String-list nodes account for roughly a quarter of sampled allocation bytes.
+Other sources include decoder callbacks, token constructors, text spans, file
+chunks, and retained result lists. Residual row extensions no longer dominate.
+A diagnostic run with `GOGC=off` took 1.056 s, so eliminating GC alone would
+not close the remaining gap. CPU samples include reader state access, copying,
+and substantial Darwin/runtime activity; they do not establish precise
+wall-time percentages for GC or disk IO.
+
+A single 500,000,417-byte run completed with all checksums correct in 53.137 s
+(1.26 GB peak RSS); the Go control took 2.719 s (1.72 GB peak RSS). This larger
+sample predates immediate-application lowering. The original
+Fango run was interrupted at 172.339 s before decoding finished, so it provides
+no completed-run speedup ratio. Retaining the complete decoded document still
+has substantial memory cost.
+
+The last deliberate performance-gate run, before the latest forwarding and
+aggregate-slot changes, reported missing `capture-pure` and `capture-fail`
+compile-latency baselines and failing sum/mapfilter/state runtime ceilings.
+The original revision reproduced all three runtime failures on the same host
+(58.1/67.2/105.8 ms). Those timing gates have not been rerun for the latest
+implementation. Thresholds remain unchanged; this JSON comparison does not
+waive those gates. The full correctness/differential suite, runtime race tests,
+Go vet, source formatting, and editor grammar checks pass. The Go formatting
+check excludes the original unformatted diagnostic sources in `json-benchmark/`,
+which remain untouched.
+
 ### Task comparison
 
 ```sh

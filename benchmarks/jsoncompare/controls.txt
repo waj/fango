@@ -1,0 +1,63 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"runtime"
+)
+
+type Shipping struct {
+	City      string  `json:"city"`
+	Postal    string  `json:"postal"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+type Item struct {
+	SKU       string `json:"sku"`
+	Quantity  int64  `json:"quantity"`
+	UnitCents int64  `json:"unit_cents"`
+}
+type Order struct {
+	ID          int64    `json:"id"`
+	Customer    string   `json:"customer"`
+	Active      bool     `json:"active"`
+	TotalCents  int64    `json:"total_cents"`
+	Discount    *string  `json:"discount"`
+	Shipping    Shipping `json:"shipping"`
+	Tags        []string `json:"tags"`
+	Items       []Item   `json:"items"`
+	Description string   `json:"description"`
+}
+
+func main() {
+	if len(os.Args) != 2 {
+		panic("usage: go-json FILE")
+	}
+	f, err := os.Open(os.Args[1])
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	var orders []Order
+	decoder := json.NewDecoder(f)
+	if err = decoder.Decode(&orders); err != nil {
+		panic(err)
+	}
+	var extra any
+	if err = decoder.Decode(&extra); err != io.EOF {
+		panic("expected EOF")
+	}
+	var ids, cents, units, text int64
+	for _, o := range orders {
+		ids += o.ID
+		cents += o.TotalCents
+		text += int64(len(o.Description))
+		for _, i := range o.Items {
+			units += i.Quantity
+		}
+	}
+	fmt.Printf("%d %d %d %d %d\n", len(orders), ids, cents, units, text)
+	runtime.KeepAlive(orders)
+}

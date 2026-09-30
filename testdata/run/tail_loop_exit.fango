@@ -1,0 +1,20 @@
+import Fail
+import Result exposing (Result(..))
+
+count : Int -> Int ->{Fail.Fail String} Int
+count n total =
+    if n < 0 then Fail.fail "negative"
+    else if n == 0 then total
+    else count (n - 1) (total + 1)
+
+units : Int ->{Fail.Fail String} ()
+units n =
+    if n < 0 then Fail.fail "negative"
+    else if n == 0 then ()
+    else units (n - 1)
+
+main() =
+    print (Fail.attempt { count 200000 0 } == Ok 200000)
+    print (Fail.attempt { count (-1) 0 } == Err "negative")
+    print (Fail.attempt { units 200000 } == Ok ())
+    print (Fail.attempt { units (-1) } == Err "negative")

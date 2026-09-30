@@ -4,12 +4,16 @@ import "fmt"
 
 // EvidenceOrigin identifies one lexical activation. Rebuild reconstructs its
 // operation closures against child evidence while retaining its shared state.
-// Abort activations have no rebuild function: a child must supply a replacement.
+// Abort activations have neither a fixed family nor a rebuild function: a child
+// must supply a replacement.
 type EvidenceOrigin struct {
 	Name      string
 	Arguments []*TypeDescriptor
 	Resolve   func() *EvidenceOrigin
 	Rebuild   func(*EvidenceFork) EvidenceFamily
+	// Fixed is safe when operation closures have no evidence/row dependencies
+	// to rebase. Their state and immutable lexical values are already shared.
+	Fixed *EvidenceBinding
 }
 
 // EvidenceFork belongs to one child invocation, not a goroutine-global stack.
@@ -58,6 +62,9 @@ func (f *EvidenceFork) Family(origin *EvidenceOrigin) EvidenceFamily {
 	if family, ok := f.memo[origin]; ok {
 		return family
 	}
+	if origin.Fixed != nil {
+		return origin.Fixed.Family
+	}
 	if origin.Rebuild == nil {
 		panic(fmt.Sprintf("Async: cannot inherit abort handler %s; handle it inside the task", origin.Name))
 	}
@@ -88,12 +95,15 @@ func (f *EvidenceFork) Row(row *EvidenceRow) *EvidenceRow {
 	var seen []EvidenceBinding
 	var bindings []EvidenceBinding
 	for ; row != nil; row = row.tail {
-		for index := 0; index < row.count; index++ {
-			var binding EvidenceBinding
+		for index := 0; index < len(row.inline)+len(row.extra); index++ {
+			var binding *EvidenceBinding
 			if index < len(row.inline) {
 				binding = row.inline[index]
 			} else {
 				binding = row.extra[index-len(row.inline)]
+			}
+			if binding == nil {
+				continue
 			}
 			shadowed := false
 			for _, prior := range seen {
@@ -103,7 +113,7 @@ func (f *EvidenceFork) Row(row *EvidenceRow) *EvidenceRow {
 				}
 			}
 			if !shadowed {
-				seen = append(seen, binding)
+				seen = append(seen, *binding)
 				bindings = append(bindings, EvidenceBinding{Name: binding.Name, Arguments: binding.Arguments, Family: f.Family(binding.Family.Origin)})
 			}
 		}

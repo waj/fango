@@ -44,7 +44,7 @@ func TestExitWorkerEmitsOutcomePropagationWhileDirectWorkerStaysPlain(t *testing
 	got := string(data)
 	for _, want := range []string{
 		"func V_Main_dot_id(v_x int64) int64",
-		"func V_Main_dot_main_exit(ev_Main_dot_Fail Eff_Main_dot_Fail_exit) fangort.Outcome[int64]",
+		"func V_Main_dot_main_exit(ev_Main_dot_Fail *Eff_Main_dot_Fail_exit) fangort.Outcome[int64]",
 		"fangort.Propagate[int64]",
 		`Effect: "Main.Fail"`,
 		"if t_outcome0.Exit != nil",
@@ -99,8 +99,8 @@ func TestCleanupScopeEmitsBothFamiliesWithoutAContinuation(t *testing.T) {
 	}
 	got := string(data)
 	for _, want := range []string{
-		"func V_Main_dot_bracket[A0 any](type_A0 *fangort.TypeDescriptor, t_acquire struct",
-		"func V_Main_dot_bracket_exit[A0 any](type_A0 *fangort.TypeDescriptor, t_acquire struct",
+		"func V_Main_dot_bracket[A0 any](type_A0 *fangort.TypeDescriptor, t_acquire Fn",
+		"func V_Main_dot_bracket_exit[A0 any](type_A0 *fangort.TypeDescriptor, t_acquire Fn",
 		"_ = t_release.Direct(t_resource)",
 		"fangort.Suppress(",
 	} {

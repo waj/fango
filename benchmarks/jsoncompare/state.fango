@@ -1,0 +1,14 @@
+import Runtime.Local
+
+repeat : (() ->{e} ()) -> Int ->{e} ()
+repeat action n = if n <= 0 then () else
+    action()
+    repeat action (n - 1)
+
+probe : Int -> Int
+probe n = Runtime.Local.run 0 { cell ->
+    repeat { cell.write (cell.read() + 1) } n
+    cell.read()
+}
+
+main() = print (probe 1000)

@@ -59,6 +59,9 @@ snapshot and commit separately, including the return clause's snapshot; it is
 never held while executing a clause. This provides safe publication of complete
 values, not atomic read–modify–write operations. Handler implementations own
 operation-level synchronization. No continuation is captured.
+The Go backend omits a clause's initial snapshot when its Core body never
+mentions the state binder, as in an unconditional cell write. State commits
+and their synchronization remain unchanged.
 
 An installed activation's evidence carries the transport its own clauses need.
 A Direct handler inside an Exit worker still uses Direct evidence; calls adapt
@@ -124,8 +127,15 @@ Direct.
 
 ADTs and dictionaries share one value representation across transport families;
 exported family type names are aliases. Pure factories run once and return
-complete callback records without executing their bodies. Evidence records also
-carry separate members and preserve explicit and captured lexical evidence.
+complete callback records without executing their bodies. Each handler
+activation constructs linked Direct/Exit evidence record pointers and its
+immutable row binding once. Calls select the corresponding record instead of
+rebuilding adapters. These views share the activation origin and preserve
+explicit and captured lexical evidence. Child-task rebuilding still creates
+the family against rebased dependencies while sharing the inherited activation's
+state. When operation closures have no captured evidence or residual rows,
+the activation records its immutable family directly and tasks reuse it.
+Explicit child overrides take precedence over this reuse.
 Names use nominal declarations, not graph-local numbers.
 
 A checked Direct call may select a polymorphic worker's Exit member in an Exit

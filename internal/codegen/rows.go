@@ -3,14 +3,45 @@ package codegen
 import (
 	"fmt"
 	goast "go/ast"
+	"strings"
 
 	"github.com/waj/fango/internal/core"
 	"github.com/waj/fango/internal/types"
 )
 
+type rowPreparation struct {
+	inputs     map[goast.Expr]bool
+	values     map[string]goast.Expr
+	statements []goast.Stmt
+}
+
+// Only immutable row/evidence binders available at function entry may be
+// commoned there. A nested handler or invocation binder is a different input.
+func (g *gen) prepareRows() func([]goast.Stmt) []goast.Stmt {
+	old := g.rowPreparation
+	p := &rowPreparation{inputs: map[goast.Expr]bool{}, values: map[string]goast.Expr{}}
+	for _, stack := range g.rows {
+		if len(stack) != 0 {
+			p.inputs[stack[len(stack)-1]] = true
+		}
+	}
+	for _, stack := range g.evidence {
+		if len(stack) != 0 {
+			if _, ok := stack[len(stack)-1].(*goast.Ident); ok {
+				p.inputs[stack[len(stack)-1]] = true
+			}
+		}
+	}
+	g.rowPreparation = p
+	return func(body []goast.Stmt) []goast.Stmt {
+		g.rowPreparation = old
+		return append(p.statements, body...)
+	}
+}
+
 func (g *gen) rowType() goast.Expr {
 	g.usesFangort = true
-	return &goast.StarExpr{X: selector("fangort", "EvidenceRow")}
+	return selector("fangort", "EvidenceValue")
 }
 
 func (g *gen) rowValue(id types.CaptureVar) goast.Expr {
@@ -30,7 +61,7 @@ func (g *gen) pushRow(id types.CaptureVar, value goast.Expr) func() {
 }
 
 func (g *gen) rowArgument(row *core.RowArgument) goast.Expr {
-	var tail goast.Expr = ident("nil")
+	var tail goast.Expr = &goast.CompositeLit{Type: g.rowType()}
 	if row == nil {
 		return tail
 	}
@@ -41,91 +72,46 @@ func (g *gen) rowArgument(row *core.RowArgument) goast.Expr {
 		return tail
 	}
 	args := []goast.Expr{tail}
+	p := g.rowPreparation
+	eligible := p != nil && (row.From == 0 || p.inputs[tail])
+	var key strings.Builder
+	fmt.Fprintf(&key, "%d", row.From)
+	if row.From != 0 {
+		fmt.Fprintf(&key, ":%p", tail)
+	}
 	for _, ev := range row.Effects {
 		stack := g.evidence[ev.Key()]
 		if len(stack) == 0 {
 			panic("codegen: missing residual evidence")
 		}
-		value, actual := stack[len(stack)-1], g.currentEvidenceMode(ev.Key())
-		members := []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: value, Sel: ident("Origin")}}}
-		effect := g.effects[ev.Unique]
-		lossless := effect != nil && (len(effect.Ops) > 0 && effect.Ops[0].Abort)
-		for _, mode := range []types.Transport{types.Direct, types.Exit} {
-			if mode < actual && !lossless {
-				continue
-			}
-			members = append(members, &goast.KeyValueExpr{Key: ident(memberName(mode)), Value: g.evidenceArg(ev, value, actual, mode)})
-		}
-		args = append(args, &goast.CompositeLit{Type: selector("fangort", "EvidenceBinding"), Elts: []goast.Expr{
-			&goast.KeyValueExpr{Key: ident("Name"), Value: stringLit(ev.Name)},
-			&goast.KeyValueExpr{Key: ident("Arguments"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: g.descriptorType()}, Elts: g.typeDescriptorArgs(ev.Args)}},
-			&goast.KeyValueExpr{Key: ident("Family"), Value: &goast.CompositeLit{Type: selector("fangort", "EvidenceFamily"), Elts: members}},
-		}})
+		args = append(args, &goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Binding")})
+		eligible = eligible && p.inputs[stack[len(stack)-1]]
+		fmt.Fprintf(&key, ":%s:%p", ev.Key(), stack[len(stack)-1])
 	}
 	g.usesFangort = true
-	return callExpr(selector("fangort", "ExtendEvidenceRow"), args...)
+	value := callExpr(selector("fangort", "ExtendEvidenceValue"), args...)
+	if !eligible {
+		return value
+	}
+	if prior := p.values[key.String()]; prior != nil {
+		return prior
+	}
+	name := fmt.Sprintf("t_row%d", g.tmp)
+	g.tmp++
+	result := ident(name)
+	p.values[key.String()] = result
+	p.statements = append(p.statements, varDeclStmt(name, g.rowType(), value))
+	return result
 }
 
+// Projection remains an expression: a callback's invocation row is not read
+// when the callback is constructed. Its operations need no wrapper closures.
 func (g *gen) deferredEvidence(ev core.EffectInstance, row goast.Expr, mode types.Transport) goast.Expr {
 	desired := ev
 	desired.Control = types.Control{Transport: mode}
-	effectType := g.effectTypeMode(desired, mode)
-	lookupArgs := []goast.Expr{row, stringLit(ev.Name), selector("fangort", memberName(mode)+"Evidence")}
-	lookupArgs = append(lookupArgs, g.typeDescriptorArgs(ev.Args)...)
-	lookup := callExpr(indexExpr(selector("fangort", "RowEvidence"), []goast.Expr{effectType}), lookupArgs...)
-	effect := g.effects[ev.Unique]
-	if effect == nil {
-		panic("codegen: deferred evidence has no declaration")
-	}
-
-	originArgs := append([]goast.Expr{row, stringLit(ev.Name)}, g.typeDescriptorArgs(ev.Args)...)
-	fields := []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: callExpr(selector("fangort", "DeferredEvidenceOrigin"), originArgs...)}}
-	if len(effect.Ops) > 0 && effect.Ops[0].Abort {
-		resolver := funcLitParams(nil, &goast.StarExpr{X: selector("fangort", "ExitTarget")}, []goast.Stmt{returnStmt(&goast.SelectorExpr{X: lookup, Sel: ident("Target")})})
-		fields = append(fields, &goast.KeyValueExpr{Key: ident("Target"), Value: callExpr(selector("fangort", "DeferredExitTarget"), resolver)})
-	} else {
-		sub := map[int]types.Type{}
-		for i, param := range effect.Params {
-			sub[param.ID] = ev.Args[i]
-		}
-		for _, op := range effect.Ops {
-			if len(op.LocalVars) > 0 && op.Native == nil {
-				request := ident("t_poly_request")
-				invoke := callExpr(&goast.SelectorExpr{X: lookup, Sel: ident("Op_" + linkName(op.Name))}, request)
-				result := goast.Expr(selector("fangort", "PolyReply"))
-				if mode == types.Exit {
-					result = indexExpr(selector("fangort", "Outcome"), []goast.Expr{result})
-				}
-				fields = append(fields, &goast.KeyValueExpr{Key: ident("Op_" + linkName(op.Name)), Value: funcLitParams(
-					[]paramSpec{{name: "t_poly_request", typ: selector("fangort", "PolyRequest")}}, result,
-					[]goast.Stmt{returnStmt(invoke)})})
-				continue
-			}
-			var params []paramSpec
-			var args []goast.Expr
-			for i, raw := range op.RuntimeParamTypes() {
-				ty := types.SubstRigid(raw, sub)
-				if g.isUnit(ty) {
-					continue
-				}
-				name := fmt.Sprintf("rowArg%d", i)
-				params = append(params, paramSpec{name: name, typ: g.goType(ty)})
-				args = append(args, ident(name))
-			}
-			resultTy := types.SubstRigid(op.ResultType, sub)
-			var result goast.Expr = g.goType(resultTy)
-			invoke := callExpr(&goast.SelectorExpr{X: lookup, Sel: ident("Op_" + linkName(op.Name))}, args...)
-			body := []goast.Stmt{returnStmt(invoke)}
-
-			if mode == types.Exit {
-				result = g.outcomeType(resultTy)
-			} else if g.isUnit(resultTy) {
-				result, body = nil, []goast.Stmt{exprStmt(invoke)}
-			}
-			fields = append(fields, &goast.KeyValueExpr{Key: ident("Op_" + linkName(op.Name)), Value: funcLitParams(params, result, body)})
-		}
-	}
-	return &goast.CompositeLit{Type: effectType, Elts: fields}
+	args := []goast.Expr{row, stringLit(ev.Name), selector("fangort", memberName(mode)+"Evidence")}
+	args = append(args, g.typeDescriptorArgs(ev.Args)...)
+	return callExpr(indexExpr(selector("fangort", "ValueEvidence"), []goast.Expr{g.effectTypeMode(desired, mode)}), args...)
 }
 
 func (g *gen) bindDeferredEffects(effects []core.EffectInstance, row goast.Expr, mode types.Transport) func() {

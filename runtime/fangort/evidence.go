@@ -25,48 +25,97 @@ func sameEvidenceBinding(name string, args []*TypeDescriptor, binding EvidenceBi
 	return true
 }
 
+// NewEvidenceBinding owns immutable metadata for one activation view. Compiled
+// evidence records and their transport adapters share this binding.
+func NewEvidenceBinding(family EvidenceFamily) *EvidenceBinding {
+	if family.Origin == nil {
+		panic("fangort: evidence binding has no activation")
+	}
+	return &EvidenceBinding{Name: family.Origin.Name, Arguments: family.Origin.Arguments, Family: family}
+}
+
 // EvidenceRow is an explicit residual argument, never a global handler stack.
 // Extensions and bindings are immutable.
 type EvidenceRow struct {
 	tail   *EvidenceRow
-	inline [2]EvidenceBinding
-	count  int
-	extra  []EvidenceBinding
+	inline [2]*EvidenceBinding
+	extra  []*EvidenceBinding
 }
 
 func ExtendEvidenceRow(tail *EvidenceRow, bindings ...EvidenceBinding) *EvidenceRow {
 	if len(bindings) == 0 {
 		return tail
 	}
-	row := &EvidenceRow{tail: tail, count: len(bindings)}
+	pointers := make([]*EvidenceBinding, len(bindings))
 	for index, binding := range bindings {
 		if binding.Arguments == nil && binding.Family.Origin != nil {
 			binding.Arguments = binding.Family.Origin.Arguments
 			bindings[index].Arguments = binding.Arguments
 		}
-		for previous := 0; previous < index; previous++ {
-			if sameEvidenceBinding(binding.Name, binding.Arguments, bindings[previous]) {
+		pointers[index] = &binding
+	}
+	return ExtendEvidenceBindings(tail, pointers...)
+}
+
+// ExtendEvidenceBindings shares activation metadata rather than copying and
+// boxing it on every call. An identical visible binding needs no overlay.
+func ExtendEvidenceBindings(tail *EvidenceRow, bindings ...*EvidenceBinding) *EvidenceRow {
+	for index, binding := range bindings {
+		if binding == nil {
+			panic("fangort: nil residual evidence binding")
+		}
+		for _, previous := range bindings[:index] {
+			if sameEvidenceBinding(binding.Name, binding.Arguments, *previous) {
 				panic("fangort: duplicate residual evidence binding")
 			}
 		}
-		if index < len(row.inline) {
-			row.inline[index] = binding
+	}
+	var row *EvidenceRow
+	count := 0
+	for _, binding := range bindings {
+		if visible := visibleBinding(tail, binding.Name, binding.Arguments); visible == binding {
+			continue
+		}
+		if row == nil {
+			row = &EvidenceRow{tail: tail}
+		}
+		if count < len(row.inline) {
+			row.inline[count] = binding
 		} else {
 			row.extra = append(row.extra, binding)
 		}
+		count++
+	}
+	if row == nil {
+		return tail
 	}
 	return row
 }
 
+func visibleBinding(row *EvidenceRow, name string, args []*TypeDescriptor) *EvidenceBinding {
+	for ; row != nil; row = row.tail {
+		for _, binding := range row.inline {
+			if binding != nil && sameEvidenceBinding(name, args, *binding) {
+				return binding
+			}
+		}
+		for _, binding := range row.extra {
+			if sameEvidenceBinding(name, args, *binding) {
+				return binding
+			}
+		}
+	}
+	return nil
+}
+
 func (row *EvidenceRow) find(name string, args []*TypeDescriptor) (EvidenceFamily, bool) {
-	for index := 0; index < row.count && index < len(row.inline); index++ {
-		binding := row.inline[index]
-		if sameEvidenceBinding(name, args, binding) {
+	for _, binding := range row.inline {
+		if binding != nil && sameEvidenceBinding(name, args, *binding) {
 			return binding.Family, true
 		}
 	}
 	for _, binding := range row.extra {
-		if sameEvidenceBinding(name, args, binding) {
+		if sameEvidenceBinding(name, args, *binding) {
 			return binding.Family, true
 		}
 	}

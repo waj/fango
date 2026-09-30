@@ -281,6 +281,7 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 	decls = append(decls, g.derivedDecls(adts)...)
 	decls = append(decls, g.scalarHelperDecls()...)
 	decls = append(decls, g.descriptorDecls...)
+	decls = append(decls, g.callableDecls...)
 	// Imports come from emission (fangort for prints, math for float
 	// specials), so they are prepended last — in a fixed order, for
 	// deterministic output.
@@ -293,6 +294,7 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		packageName = "fangomod"
 	}
 	file := &goast.File{Name: ident(packageName), Decls: decls}
+	g.inlineReturnCalls(file)
 	var buf bytes.Buffer
 	if err := format.Node(&buf, gotoken.NewFileSet(), file); err != nil {
 		return nil, fmt.Errorf("codegen: printing generated Go: %w", err)
@@ -322,6 +324,10 @@ type gen struct {
 	usesMath        bool
 	descriptorNames map[string]string
 	descriptorDecls []goast.Decl
+	callableNames   map[string]string
+	callableDecls   []goast.Decl
+	rowPreparation  *rowPreparation
+	forwarders      map[string]*core.Lambda
 
 	// tyParamNames maps the rigid vars of the definition (or derived
 	// function) currently being emitted to their Go type-parameter names
@@ -717,6 +723,9 @@ func (g *gen) printFn(t types.Type) string {
 // TyParams become Go type parameters — `any` for General vars,
 // fangort.Number for Number-kinded ones (doc/design.md, "Type inference", doc/design.md, "Go backend and runtime").
 func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
+	oldForwarders := g.forwarders
+	g.forwarders = nil
+	defer func() { g.forwarders = oldForwarders }()
 	oldControl, oldABI, oldResult := g.control, g.abi, g.resultType
 	g.control, g.abi, g.resultType = mode, abi, func() types.Type {
 		_, ret := core.PeelFun(d.Type, len(d.Params))
@@ -773,11 +782,13 @@ func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
 	// statement in Go, so no trailing return is needed in either result
 	// shape.
 	var body []goast.Stmt
-	if _, ok := core.DetectTailLoop(d); ok && mode == types.Direct {
+	finishRows := g.prepareRows()
+	if _, ok := core.DetectTailLoop(d); ok {
 		body = []goast.Stmt{&goast.ForStmt{Body: &goast.BlockStmt{List: g.loopStmts(d, d.Body, g.isUnit(ret))}}}
 	} else {
 		body = g.retStmtsFor(d.Body, g.isUnit(ret))
 	}
+	body = finishRows(body)
 	name := g.topValueName(d.Name)
 	if abi == types.Exit {
 		name += "_exit"
@@ -985,6 +996,11 @@ func (g *gen) retStmts(e core.Expr) []goast.Stmt {
 }
 
 func (g *gen) retStmtsFor(e core.Expr, unitResult bool) []goast.Stmt {
+	if stmts, ok := g.immediateUnitApplication(e, func(body core.Expr) []goast.Stmt {
+		return g.retStmtsFor(body, unitResult)
+	}); ok {
+		return stmts
+	}
 	switch e := e.(type) {
 	case *core.Let:
 		return append(g.letBindingStmts(e), g.retStmtsFor(e.Body, unitResult)...)
@@ -1216,6 +1232,9 @@ func (g *gen) boundaryTypeArgs(wrapper *types.CtorInfo, ty types.Type) []types.T
 }
 
 func (g *gen) unwrapBoundaryAt(wrapper *types.CtorInfo, ty types.Type, value goast.Expr) goast.Expr {
+	if productADT(g.adts[wrapper.Result.Unique]) {
+		return &goast.SelectorExpr{X: value, Sel: ident(fieldName(0))}
+	}
 	ctor := indexExpr(g.ctorRef(wrapper), g.goTypes(g.boundaryTypeArgs(wrapper, ty)))
 	asserted := &goast.TypeAssertExpr{X: value, Type: &goast.StarExpr{X: ctor}}
 	return &goast.SelectorExpr{X: asserted, Sel: ident(fieldName(0))}
@@ -1481,6 +1500,14 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 				args = append(args, g.rowArgument(e.Row))
 			}
 			args = append(args, g.expr(e.Args[0], 0))
+			if lam, ok := e.Callee.(*core.Lambda); ok {
+				return callExpr(g.directLambdaMember(lam, mode), args...)
+			}
+			if ref, ok := e.Callee.(*core.VarRef); ok && ref.Local {
+				if lam := g.forwarders[ref.Name]; lam != nil {
+					return callExpr(g.directLambdaMember(lam, mode), args...)
+				}
+			}
 			return callExpr(callbackMember(g.expr(e.Callee, 0), mode), args...)
 		case core.Ctor:
 			return g.ctorLit(e)
@@ -1944,11 +1971,11 @@ func (g *gen) abortHandleExpr(e *core.Handle) goast.Expr {
 	}}}
 	stmts = append(stmts, varDeclStmt(targetName, &goast.StarExpr{X: selector("fangort", "ExitTarget")}, target))
 	st := g.effectType(e.Effect)
-	evidenceValue := &goast.CompositeLit{Type: st, Elts: []goast.Expr{
+	evidenceValue := &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: st.(*goast.StarExpr).X, Elts: []goast.Expr{
 		&goast.KeyValueExpr{Key: ident("Origin"), Value: g.evidenceOrigin(e.Effect)},
 		&goast.KeyValueExpr{Key: ident("Target"), Value: ident(targetName)},
-	}}
-	stmts = append(stmts, varDeclStmt(evidenceName, st, evidenceValue), assignBlank(ident(evidenceName)))
+	}}}
+	stmts = append(stmts, varDeclStmt(evidenceName, st, g.completeEvidence(e.Effect, evidenceValue, types.Exit)), assignBlank(ident(evidenceName)))
 
 	g.evidence[e.Effect.Key()] = append(g.evidence[e.Effect.Key()], ident(evidenceName))
 	g.evidenceModes[e.Effect.Key()] = append(g.evidenceModes[e.Effect.Key()], types.Exit)
@@ -2086,9 +2113,11 @@ func (g *gen) handlerEvidence(e *core.Handle, mode types.Transport, state *handl
 		var stateType types.Type
 		if e.State != nil {
 			stateType = e.State.Ty
-			clausePrefix = append(clausePrefix,
-				varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), state.read()),
-				assignBlank(ident(mangleValue(e.State.Name))))
+			if core.Mentions(c.Body, e.State.Name) {
+				clausePrefix = append(clausePrefix,
+					varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), state.read()),
+					assignBlank(ident(mangleValue(e.State.Name))))
+			}
 		}
 		oldControl, oldResult := g.control, g.resultType
 		g.control, g.resultType = mode, c.ResultType
@@ -2098,7 +2127,7 @@ func (g *gen) handlerEvidence(e *core.Handle, mode types.Transport, state *handl
 		elts[i] = &goast.KeyValueExpr{Key: ident("Op_" + linkName(c.Op.Name)), Value: fn}
 	}
 	st := g.effectTypeMode(e.Effect, mode)
-	return st, &goast.CompositeLit{Type: st, Elts: elts}
+	return st, &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: st.(*goast.StarExpr).X, Elts: elts}}
 }
 
 func (g *gen) polymorphicHandlerClause(e *core.Handle, c core.HandlerClause, mode types.Transport, state *handlerState) goast.Expr {
@@ -2135,7 +2164,7 @@ func (g *gen) polymorphicHandlerClause(e *core.Handle, c core.HandlerClause, mod
 			prefix = append(prefix, assignBlank(ident(name)))
 		}
 	}
-	if e.State != nil {
+	if e.State != nil && core.Mentions(c.Body, e.State.Name) {
 		prefix = append(prefix, varDeclStmt(mangleValue(e.State.Name), g.goType(e.State.Ty), state.read()), assignBlank(ident(mangleValue(e.State.Name))))
 	}
 	oldControl, oldResult := g.control, g.resultType
@@ -2255,7 +2284,7 @@ func (g *gen) effectTypeMode(e core.EffectInstance, mode types.Transport) goast.
 		name += "_exit"
 
 	}
-	return indexExpr(g.qualified(symbolOwner(e.Name), name), g.goTypes(e.Args))
+	return &goast.StarExpr{X: indexExpr(g.qualified(symbolOwner(e.Name), name), g.goTypes(e.Args))}
 }
 
 // evidenceArg widens a Direct evidence record to its Exit ABI family when an
@@ -2270,10 +2299,27 @@ func (g *gen) currentEvidenceMode(unique types.EffectKey) types.Transport {
 }
 
 func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want types.Transport) goast.Expr {
+	if actual == want {
+		return value
+	}
+	effect := g.effects[ev.Unique]
+	abort := effect != nil && len(effect.Ops) > 0 && effect.Ops[0].Abort
+	if actual == types.Direct && want == types.Exit {
+		return &goast.SelectorExpr{X: value, Sel: ident("Exit")}
+	}
+	if abort && want == types.Direct {
+		return &goast.SelectorExpr{X: value, Sel: ident("Direct")}
+	}
+	return value
+}
+
+// rawEvidenceAdapter constructs the other transport once, before publishing
+// the immutable activation family. Ordinary calls only select its pointer.
+func (g *gen) rawEvidenceAdapter(ev core.EffectInstance, value goast.Expr, actual, want types.Transport) goast.Expr {
 	if eff := g.effects[ev.Unique]; actual != want && eff != nil && len(eff.Ops) > 0 && eff.Ops[0].Abort {
 		desired := ev
 		desired.Control = types.Control{Transport: want}
-		return &goast.CompositeLit{Type: g.effectTypeMode(desired, want), Elts: []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: value, Sel: ident("Origin")}}, &goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: value, Sel: ident("Target")}}}}
+		return &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: g.effectTypeMode(desired, want).(*goast.StarExpr).X, Elts: []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: value, Sel: ident("Origin")}}, &goast.KeyValueExpr{Key: ident("Target"), Value: &goast.SelectorExpr{X: value, Sel: ident("Target")}}}}}
 	}
 	if actual == want || want == types.Direct {
 		return value
@@ -2328,7 +2374,7 @@ func (g *gen) evidenceArg(ev core.EffectInstance, value goast.Expr, actual, want
 		fn := funcLitParams(params, g.outcomeType(resultTy), body)
 		elts = append(elts, &goast.KeyValueExpr{Key: ident("Op_" + linkName(op.Name)), Value: fn})
 	}
-	return &goast.CompositeLit{Type: g.effectType(desired), Elts: elts}
+	return &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: g.effectType(desired).(*goast.StarExpr).X, Elts: elts}}
 }
 
 func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
@@ -2343,7 +2389,19 @@ func (g *gen) effectDecls(effects []*types.EffectInfo) []goast.Decl {
 			g.tyParamNames, g.control, g.abi = map[int]string{}, mode, mode
 			var fields []*goast.Field
 			g.usesFangort = true
-			fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Origin")}, Type: &goast.StarExpr{X: selector("fangort", "EvidenceOrigin")}})
+			fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Origin")}, Type: &goast.StarExpr{X: selector("fangort", "EvidenceOrigin")}},
+				&goast.Field{Names: []*goast.Ident{ident("Binding")}, Type: &goast.StarExpr{X: selector("fangort", "EvidenceBinding")}})
+			otherName := "Eff_" + linkName(eff.Name)
+			otherMember := "Direct"
+			if mode == types.Direct {
+				otherName += "_exit"
+				otherMember = "Exit"
+			}
+			var otherArgs []goast.Expr
+			for i := range eff.Params {
+				otherArgs = append(otherArgs, ident(fmt.Sprintf("E%d", i)))
+			}
+			fields = append(fields, &goast.Field{Names: []*goast.Ident{ident(otherMember)}, Type: &goast.StarExpr{X: indexExpr(ident(otherName), otherArgs)}})
 			for i, p := range eff.Params {
 				g.tyParamNames[p.ID] = fmt.Sprintf("E%d", i)
 			}
@@ -2496,14 +2554,21 @@ func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
 			assignStmt(name, g.expr(let.Rhs, 0)),
 		}
 	}
+	if stmts, ok := g.immediateUnitApplication(let.Rhs, g.stmts); ok {
+		return stmts
+	}
 	if g.control == types.Exit && core.ExprControl(let.Rhs).Resolve(g.control) == types.Exit {
 		outcome := fmt.Sprintf("t_outcome%d", g.tmp)
 		g.tmp++
 		propagate := returnStmt(g.propagateOutcome(g.resultType, selector(outcome, "Exit")))
-		stmts := []goast.Stmt{
-			varDeclStmt(outcome, g.outcomeType(let.Rhs.Type()), g.expr(let.Rhs, 0)),
-			&goast.IfStmt{Cond: &goast.BinaryExpr{X: selector(outcome, "Exit"), Op: gotoken.NEQ, Y: ident("nil")}, Body: &goast.BlockStmt{List: []goast.Stmt{propagate}}},
+		var stmts []goast.Stmt
+		switch let.Rhs.(type) {
+		case *core.If, *core.Case, *core.Let, *core.Seq:
+			stmts = append([]goast.Stmt{varDeclNoValue(outcome, g.outcomeType(let.Rhs.Type()))}, g.assignOutcomeStmts(let.Rhs, outcome)...)
+		default:
+			stmts = []goast.Stmt{varDeclStmt(outcome, g.outcomeType(let.Rhs.Type()), g.expr(let.Rhs, 0))}
 		}
+		stmts = append(stmts, &goast.IfStmt{Cond: &goast.BinaryExpr{X: selector(outcome, "Exit"), Op: gotoken.NEQ, Y: ident("nil")}, Body: &goast.BlockStmt{List: []goast.Stmt{propagate}}})
 		if g.isUnit(let.Rhs.Type()) {
 			return stmts
 		}
@@ -2528,7 +2593,7 @@ func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
 	default:
 		stmts = []goast.Stmt{varDeclStmt(name, g.goType(let.Rhs.Type()), g.expr(let.Rhs, 0))}
 	}
-	if !core.Mentions(let.Body, let.Name) {
+	if g.rememberForwarder(let) || !core.Mentions(let.Body, let.Name) {
 		stmts = append(stmts, assignBlank(ident(name)))
 	}
 	return stmts
@@ -2538,6 +2603,9 @@ func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
 // body. Prints become fangort calls; ifs become genuine Go if statements;
 // Let bindings become plain locals.
 func (g *gen) stmts(e core.Expr) []goast.Stmt {
+	if stmts, ok := g.immediateUnitApplication(e, g.stmts); ok {
+		return stmts
+	}
 	switch e := e.(type) {
 	case *core.App:
 		if g.control == types.Exit && core.ExprControl(e).Resolve(g.control) == types.Exit {
@@ -2667,6 +2735,10 @@ func linkName(name string) string {
 }
 
 func (g *gen) directLambdaMember(e *core.Lambda, mode types.Transport) goast.Expr {
+	oldForwarders := g.forwarders
+	g.forwarders = maps.Clone(oldForwarders)
+	delete(g.forwarders, e.Param)
+	defer func() { g.forwarders = oldForwarders }()
 	fn := e.Ty.(*types.TFun)
 	oldControl, oldResult := g.control, g.resultType
 	g.control, g.resultType = mode, fn.Ret
@@ -2703,7 +2775,8 @@ func (g *gen) directLambdaMember(e *core.Lambda, mode types.Transport) goast.Exp
 	}(), typ: g.goType(fn.Arg)})
 	oldParamTy, hadParamTy := g.caseVarTys[e.Param]
 	g.caseVarTys[e.Param] = fn.Arg
-	body := g.retStmts(e.Body)
+	finishRows := g.prepareRows()
+	body := finishRows(g.retStmts(e.Body))
 	if hadParamTy {
 		g.caseVarTys[e.Param] = oldParamTy
 	} else {

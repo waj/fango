@@ -103,6 +103,9 @@ reuse requires forwarding the identical row without overlays. Lint rejects
 missing call rows and stale evidence. Direct and Exit members share this ABI.
 Abort projections select a fixed activation before unwinding.
 
+The Go backend preserves these semantics while sharing immutable bindings and
+commoning entry-scope extensions; see [backend representations](backend.md#representations-and-abi).
+
 ## Adapters and specialization
 
 A higher-order worker's erased callback row may differ from the concrete

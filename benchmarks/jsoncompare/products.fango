@@ -1,0 +1,16 @@
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+
+type Product = { value : Result Int (Maybe (Int, Int)) }
+
+loop : Int -> Int -> Int
+loop n total = if n <= 0 then total else
+    product = Product { value = Ok (Just (n, 1)) }
+    case product.value of
+        Ok (Just (_, value)) -> loop (n - 1) (total + value)
+        _ -> -1
+
+probe : Int -> Int
+probe n = loop n 0
+
+main() = print (probe 1000)

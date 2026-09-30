@@ -20,6 +20,24 @@ combinators when concrete applications need them, using the existing closure
 invocation boundary. Cancellation-aware socket IO is implemented through
 [Net](reference/library-io.md#net).
 
+## JSON and generated-code performance
+
+Use the [typed JSON comparison](design/verification.md#typed-json-comparison)
+to close the remaining gap with Go after the first tenfold speedup over the
+original 10 MB whole-document run (15.159 seconds on its recorded host).
+Shared evidence families, product structs, tagged Maybe/Result, compact enums,
+and value rows are [implemented](design/backend.md#representations-and-abi).
+Derived record decoders use one [aggregate slot activation](design/json.md).
+
+Measure handler activation construction, residual-row lookup, and remaining
+reader dispatch after buffered scalar/span reads. Reduce token/fragment
+construction and assess copies through large typed Outcomes. Reduce dictionary
+closure construction for nonnumeric scalar comparisons; the string-scanner experiment
+exposed per-character closure allocation through generic inequality. Preserve
+invocation-time handler selection, lexical shadowing, and state synchronization.
+Parsing and codec derivation remain in Fango. Reassess retained output size and
+copy costs for large products before expanding tagged layouts to other sums.
+
 ## Builder blocks and generators
 
 [Builder blocks and generators](roadmap-builders.md) propose a module-directed

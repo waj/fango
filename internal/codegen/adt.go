@@ -9,10 +9,9 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// ADT lowering (doc/design.md, "Go backend and runtime"): one marker interface per declared type, one
-// struct per constructor with typed fields, construction by pointer,
-// discrimination by type switch (no tag field), derived eq/show emitted on
-// demand only.
+// ADT lowering uses value products, pointer products for recursive layouts,
+// tagged bundled sums, and marker interfaces for other unions. See
+// doc/design/backend.md, "Representations and ABI".
 
 func mangleType(name string) string   { return "T_" + linkName(name) }
 func mangleCtor(name string) string   { return "C_" + linkName(name) }
@@ -20,16 +19,12 @@ func markerMethod(name string) string { return "isT_" + linkName(name) }
 
 func fieldName(i int) string { return fmt.Sprintf("F%d", i) }
 
-// adtDecls emits the marker interface, constructor structs, and marker
-// methods for every declared type, in declaration order. Parameterized types
-// emit as Go generics (`type T_List[A0 any] interface{ isT_List() }`,
-// `func (C_Cons[A0]) isT_List() {}`), doc/design.md, "Go backend and runtime".
+// adtDecls emits module-owned generic types in declaration order. Transport
+// variants alias the same value layout.
 func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 	var decls []goast.Decl
 	for _, adt := range adts {
 		if adt.Repr != types.ReprADT {
-			// The bundled List and Bytes have runtime types instead of emitted
-			// ones (doc/design/backend.md); there is nothing to declare for them.
 			continue
 		}
 		runtimeParams := runtimeADTParams(adt)
@@ -41,64 +36,45 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 			oldControl, oldABI := g.control, g.abi
 			g.control, g.abi = mode, mode
 			g.tyParamNames = tyParamNames(runtimeParams)
-			paramIdents := make([]goast.Expr, len(runtimeParams))
-			for i, v := range runtimeParams {
-				paramIdents[i] = ident(g.tyParamNames[v.ID])
+			var args []goast.Expr
+			for _, v := range runtimeParams {
+				args = append(args, ident(g.tyParamNames[v.ID]))
 			}
-			suffix := ""
+			name, marker := mangleType(adt.Con.Name), markerMethod(adt.Con.Name)
 			if mode == types.Exit {
-				suffix = "_exit"
-			}
-
-			iface := mangleType(adt.Con.Name) + suffix
-			marker := markerMethod(adt.Con.Name) + suffix
-			if mode != types.Direct {
-				// Function fields carry their callable members together. Alias
-				// the nominal families so capture never converts an ADT graph.
-				names := []string{mangleType(adt.Con.Name)}
+				names := []string{name}
 				for _, ctor := range adt.Ctors {
 					names = append(names, mangleCtor(ctor.Name))
 				}
-				for _, name := range names {
-					decls = append(decls, &goast.GenDecl{Tok: gotoken.TYPE, Specs: []goast.Spec{&goast.TypeSpec{Name: ident(name + suffix), TypeParams: g.typeParamFields(runtimeParams), Assign: 1, Type: indexExpr(ident(name), paramIdents)}}})
+				for _, n := range names {
+					decls = append(decls, &goast.GenDecl{Tok: gotoken.TYPE, Specs: []goast.Spec{&goast.TypeSpec{Name: ident(n + "_exit"), TypeParams: g.typeParamFields(runtimeParams), Assign: 1, Type: indexExpr(ident(n), args)}}})
 				}
-				g.control, g.abi = oldControl, oldABI
-				continue
-			}
-			decls = append(decls, &goast.GenDecl{
-				Tok: gotoken.TYPE,
-				Specs: []goast.Spec{&goast.TypeSpec{
-					Name:       ident(iface),
-					TypeParams: g.typeParamFields(runtimeParams),
-					Type: &goast.InterfaceType{Methods: &goast.FieldList{List: []*goast.Field{{
-						Names: []*goast.Ident{ident(marker)},
-						Type:  &goast.FuncType{Params: &goast.FieldList{}},
-					}}}},
-				}},
-			})
-			for _, c := range adt.Ctors {
-				fields := make([]*goast.Field, len(c.Fields))
-				for i, ft := range c.Fields {
-					fields[i] = &goast.Field{Names: []*goast.Ident{ident(fieldName(i))}, Type: g.goType(ft)}
+			} else if taggedADT(adt) {
+				decls = append(decls, g.taggedDecl(adt, args)...)
+			} else {
+				var nominal goast.Expr
+				alias := gotoken.Pos(0)
+				if productADT(adt) {
+					nominal = indexExpr(ident(mangleCtor(adt.Ctors[0].Name)), args)
+					if !g.valueProduct(adt) {
+						nominal = &goast.StarExpr{X: nominal}
+					}
+					alias = 1
+				} else {
+					nominal = &goast.InterfaceType{Methods: &goast.FieldList{List: []*goast.Field{{Names: []*goast.Ident{ident(marker)}, Type: &goast.FuncType{Params: &goast.FieldList{}}}}}}
 				}
-				ctorName := mangleCtor(c.Name) + suffix
-				decls = append(decls,
-					&goast.GenDecl{
-						Tok: gotoken.TYPE,
-						Specs: []goast.Spec{&goast.TypeSpec{
-							Name:       ident(ctorName),
-							TypeParams: g.typeParamFields(runtimeParams),
-							Type:       &goast.StructType{Fields: &goast.FieldList{List: fields}},
-						}},
-					},
-					&goast.FuncDecl{
-						Recv: &goast.FieldList{List: []*goast.Field{{
-							Type: indexExpr(ident(ctorName), paramIdents),
-						}}},
-						Name: ident(marker),
-						Type: &goast.FuncType{Params: &goast.FieldList{}},
-						Body: &goast.BlockStmt{},
-					})
+				decls = append(decls, &goast.GenDecl{Tok: gotoken.TYPE, Specs: []goast.Spec{&goast.TypeSpec{Name: ident(name), TypeParams: g.typeParamFields(runtimeParams), Assign: alias, Type: nominal}}})
+				for _, ctor := range adt.Ctors {
+					var fields []*goast.Field
+					for i, f := range ctor.Fields {
+						fields = append(fields, &goast.Field{Names: []*goast.Ident{ident(fieldName(i))}, Type: g.goType(f)})
+					}
+					ctorName := mangleCtor(ctor.Name)
+					decls = append(decls, &goast.GenDecl{Tok: gotoken.TYPE, Specs: []goast.Spec{&goast.TypeSpec{Name: ident(ctorName), TypeParams: g.typeParamFields(runtimeParams), Type: &goast.StructType{Fields: &goast.FieldList{List: fields}}}}})
+					if !productADT(adt) {
+						decls = append(decls, &goast.FuncDecl{Name: ident(marker), Recv: &goast.FieldList{List: []*goast.Field{{Type: indexExpr(ident(ctorName), args)}}}, Type: &goast.FuncType{Params: &goast.FieldList{}}, Body: &goast.BlockStmt{}})
+					}
+				}
 			}
 			g.control, g.abi = oldControl, oldABI
 		}
@@ -107,10 +83,8 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 	return decls
 }
 
-// ctorLit is a saturated constructor application: `&C_Name{args…}` —
-// construction by pointer (doc/design.md, "Go backend and runtime": value receivers make the pointer implement
-// the marker; zero-field constructors hit Go's zerobase). Parameterized
-// constructors instantiate at the result type's arguments.
+// ctorLit is a saturated constructor application. Parameterized constructors
+// instantiate at the result type's runtime arguments.
 func (g *gen) ctorLit(e *core.App) goast.Expr {
 	args := make([]goast.Expr, len(e.Args))
 	for i, a := range e.Args {
@@ -143,18 +117,30 @@ func (g *gen) ctorLit(e *core.App) goast.Expr {
 	return g.ctorValue(e.Ctor, typeArgs, args...)
 }
 
-// ctorValue builds `&C_Name[typeArgs]{elts…}` for an ordinary ADT
-// constructor. typeArgs are already reduced to the runtime parameters.
+// ctorValue builds a constructor in its selected layout.
+// typeArgs are already reduced to the runtime parameters.
 // Native-boundary emission shares this with ctorLit so a Result or a wrapper
 // built at a sidecar call has exactly the representation a literal has.
 func (g *gen) ctorValue(ctor *types.CtorInfo, typeArgs []types.Type, elts ...goast.Expr) goast.Expr {
 	if ctor.Repr == types.ReprNativeAny {
 		return ident("nil")
 	}
+	adt := g.adts[ctor.Result.Unique]
+	if taggedADT(adt) {
+		fields := []goast.Expr{&goast.KeyValueExpr{Key: ident("Tag"), Value: intLit(int64(ctor.Index))}}
+		for i, elt := range elts {
+			fields = append(fields, &goast.KeyValueExpr{Key: ident(representationField(adt, ctor, i)), Value: elt})
+		}
+		return &goast.CompositeLit{Type: indexExpr(g.typeRef(adt), g.goTypes(typeArgs)), Elts: fields}
+	}
 	litType := indexExpr(g.ctorRef(ctor), g.goTypes(typeArgs))
+	literal := &goast.CompositeLit{Type: litType, Elts: elts}
+	if g.valueProduct(g.adts[ctor.Result.Unique]) {
+		return literal
+	}
 	return &goast.UnaryExpr{
 		Op: gotoken.AND,
-		X:  &goast.CompositeLit{Type: litType, Elts: elts},
+		X:  literal,
 	}
 }
 
@@ -198,6 +184,12 @@ func (g *gen) treeStmts(t core.Tree, leaf func(core.Expr) []goast.Stmt) []goast.
 		}
 		if t.ADT.Repr == types.ReprBytes {
 			return g.bytesSwitch(t, leaf)
+		}
+		if taggedADT(t.ADT) {
+			return g.taggedSwitch(t, leaf)
+		}
+		if productADT(t.ADT) {
+			return g.productSwitch(t, leaf)
 		}
 		return g.ctorSwitch(t, leaf)
 	case *core.SwitchLit:
@@ -438,6 +430,29 @@ func (g *gen) assignStmts(e core.Expr, name string) []goast.Stmt {
 	}
 }
 
+// Exit-valued assignments use the enclosing function's propagation boundary.
+// Branching no longer needs a function literal merely to return an Outcome.
+func (g *gen) assignOutcomeStmts(e core.Expr, name string) []goast.Stmt {
+	switch e := e.(type) {
+	case *core.Let:
+		return append(g.letBindingStmts(e), g.assignOutcomeStmts(e.Body, name)...)
+	case *core.If:
+		return []goast.Stmt{ifStmt(g.expr(e.Cond, 0), g.assignOutcomeStmts(e.Then, name), g.assignOutcomeStmts(e.Else, name))}
+	case *core.Case:
+		return g.caseStmts(e, func(b core.Expr) []goast.Stmt { return g.assignOutcomeStmts(b, name) })
+	case *core.Seq:
+		return append(g.stmts(e.First), g.assignOutcomeStmts(e.Then, name)...)
+	default:
+		if core.ExprControl(e).Resolve(g.control) == types.Exit {
+			return []goast.Stmt{assignStmt(name, g.expr(e, 0))}
+		}
+		if g.isUnit(e.Type()) {
+			return append(g.stmts(e), assignStmt(name, g.normalOutcome(e.Type(), g.unitValue())))
+		}
+		return []goast.Stmt{assignStmt(name, g.normalOutcome(e.Type(), g.expr(e, 0)))}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Derived operations (doc/design.md, "Go backend and runtime"): eq and show per ADT, generated only when a
 // program uses `==`/`print` at that type; needs propagate through ADT-typed
@@ -644,6 +659,12 @@ func (g *gen) eqDecl(adt *types.ADTInfo) goast.Decl {
 		&goast.TypeSwitchStmt{Assign: tag, Body: &goast.BlockStmt{List: clauses}},
 		returnStmt(ident("false")), // unreachable: the switch is total
 	}
+	if productADT(adt) {
+		body = g.productEq(adt)
+	}
+	if taggedADT(adt) {
+		body = g.taggedEq(adt)
+	}
 	params := make([]*goast.Field, 0, len(runtimeParams)+1)
 	for i, v := range runtimeParams {
 		pv := ident(g.tyParamNames[v.ID])
@@ -742,6 +763,12 @@ func (g *gen) showDecl(adt *types.ADTInfo) goast.Decl {
 	body := []goast.Stmt{
 		&goast.TypeSwitchStmt{Assign: tag, Body: &goast.BlockStmt{List: clauses}},
 		returnStmt(stringLit("")), // unreachable: the switch is total
+	}
+	if productADT(adt) {
+		body = g.constructorShow(adt.Ctors[0], "v")
+	}
+	if taggedADT(adt) {
+		body = g.taggedShow(adt)
 	}
 	params := make([]*goast.Field, 0, len(runtimeParams)+2)
 	for i, v := range runtimeParams {

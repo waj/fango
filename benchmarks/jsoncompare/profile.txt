@@ -1,0 +1,71 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"runtime"
+	"runtime/pprof"
+	"time"
+)
+
+var decodedStats runtime.MemStats
+var decodedElapsed time.Duration
+var started time.Time
+
+func snapshotDecodedOutput() {
+	decodedElapsed = time.Since(started)
+	// The result must remain live: verification uses it after this call.
+	runtime.GC()
+	runtime.ReadMemStats(&decodedStats)
+}
+
+func main() {
+	runtime.MemProfileRate = 65536
+	cpu, err := os.Create("cpu.pprof")
+	if err != nil {
+		panic(err)
+	}
+	if err = pprof.StartCPUProfile(cpu); err != nil {
+		panic(err)
+	}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	started = time.Now()
+	benchmarkMain()
+	elapsed := time.Since(started)
+	runtime.ReadMemStats(&after)
+	pprof.StopCPUProfile()
+	if err = cpu.Close(); err != nil {
+		panic(err)
+	}
+	runtime.GC()
+	alloc, err := os.Create("allocs.pprof")
+	if err != nil {
+		panic(err)
+	}
+	if err = pprof.Lookup("allocs").WriteTo(alloc, 0); err != nil {
+		panic(err)
+	}
+	if err = alloc.Close(); err != nil {
+		panic(err)
+	}
+	stats := map[string]any{
+		"wall_seconds": elapsed.Seconds(), "decode_seconds": decodedElapsed.Seconds(),
+		"allocated_bytes": after.TotalAlloc - before.TotalAlloc, "allocations": after.Mallocs - before.Mallocs,
+		"decode_allocated_bytes":  decodedStats.TotalAlloc - before.TotalAlloc,
+		"decode_allocations":      decodedStats.Mallocs - before.Mallocs,
+		"decoded_live_heap_bytes": decodedStats.HeapAlloc,
+		"gc_cycles":               after.NumGC - before.NumGC, "gc_pause_seconds": float64(after.PauseTotalNs-before.PauseTotalNs) / 1e9,
+		"gc_available_cpu_fraction": after.GCCPUFraction, "gomaxprocs": runtime.GOMAXPROCS(0), "mem_profile_rate": runtime.MemProfileRate,
+	}
+	f, err := os.Create("profile.json")
+	if err != nil {
+		panic(err)
+	}
+	if err = json.NewEncoder(f).Encode(stats); err != nil {
+		panic(err)
+	}
+	if err = f.Close(); err != nil {
+		panic(err)
+	}
+}

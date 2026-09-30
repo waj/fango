@@ -1,0 +1,27 @@
+import Maybe exposing (Maybe(..))
+import Result exposing (Result(..))
+
+type Box a = Box a deriving (Eq, Show)
+type Tree = { label : Int, children : List Tree }
+type Chain = Chain (Maybe Chain)
+type Callback = Callback (() -> Callback)
+type Direction = North | South | East | West deriving (Eq, Ord, Show)
+
+sumTree : Tree -> Int
+sumTree tree = tree.label + List.foldl { child total -> sumTree child + total } 0 tree.children
+
+length (Chain tail) = case tail of
+    Nothing -> 0
+    Just rest -> 1 + length rest
+
+main() =
+    value : Box (Maybe (Result String (Int, String)))
+    value = Box (Just (Ok (1, "one")))
+    print (value == value)
+    print (show value)
+    print (North == North && North /= South && North < South && show East == "East")
+    print (sumTree (Tree { label = 1, children = [Tree { label = 2, children = [] }] }))
+    print (length (Chain (Just (Chain Nothing))))
+    case Box (Err "problem") of
+        Box (Err error) -> print error
+        Box (Ok _) -> print "unexpected"

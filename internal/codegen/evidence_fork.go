@@ -11,16 +11,7 @@ import (
 )
 
 func (g *gen) evidenceFamily(ev core.EffectInstance, value goast.Expr, actual types.Transport) goast.Expr {
-	fields := []goast.Expr{&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: value, Sel: ident("Origin")}}}
-	effect := g.effects[ev.Unique]
-	abort := effect != nil && len(effect.Ops) > 0 && effect.Ops[0].Abort
-	for _, mode := range []types.Transport{types.Direct, types.Exit} {
-		if mode < actual && !abort {
-			continue
-		}
-		fields = append(fields, &goast.KeyValueExpr{Key: ident(memberName(mode)), Value: g.evidenceArg(ev, value, actual, mode)})
-	}
-	return &goast.CompositeLit{Type: selector("fangort", "EvidenceFamily"), Elts: fields}
+	return &goast.SelectorExpr{X: &goast.SelectorExpr{X: value, Sel: ident("Binding")}, Sel: ident("Family")}
 }
 
 // The factory is recursive only as a Go value: each call builds one activation
@@ -52,6 +43,19 @@ func (g *gen) forkableHandlerEvidence(e *core.Handle, mode types.Transport, stat
 		rowIDs = append(rowIDs, id)
 	}
 	sort.Slice(rowIDs, func(i, j int) bool { return rowIDs[i] < rowIDs[j] })
+	if len(ids) == 0 && len(rowIDs) == 0 {
+		serial := g.tmp
+		g.tmp++
+		name := fmt.Sprintf("t_fixedEvidence%d", serial)
+		typ, record := g.handlerEvidence(e, mode, state)
+		literal := record.(*goast.UnaryExpr).X.(*goast.CompositeLit)
+		literal.Elts = append(literal.Elts, &goast.KeyValueExpr{Key: ident("Origin"), Value: g.evidenceOrigin(e.Effect)})
+		return typ, callExpr(funcLit(typ, []goast.Stmt{
+			varDeclStmt(name, typ, g.completeEvidence(e.Effect, record, mode)),
+			&goast.AssignStmt{Lhs: []goast.Expr{&goast.SelectorExpr{X: selector(name, "Origin"), Sel: ident("Fixed")}}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{selector(name, "Binding")}},
+			returnStmt(ident(name)),
+		}))
+	}
 	serial := g.tmp
 	g.tmp++
 	builder := fmt.Sprintf("t_buildEvidence%d", serial)
@@ -82,7 +86,7 @@ func (g *gen) forkableHandlerEvidence(e *core.Handle, mode types.Transport, stat
 		name := fmt.Sprintf("t_parentRow%d_%d", serial, i)
 		params = append(params, paramSpec{name: name, typ: g.rowType()})
 		originalArgs = append(originalArgs, g.rowValue(id))
-		forkArgs = append(forkArgs, callExpr(selector(fork, "Row"), ident(name)))
+		forkArgs = append(forkArgs, callExpr(selector(fork, "Value"), ident(name)))
 		restoreRows = append(restoreRows, g.pushRow(id, ident(name)))
 	}
 	st, record := g.handlerEvidence(e, mode, state)
@@ -93,7 +97,7 @@ func (g *gen) forkableHandlerEvidence(e *core.Handle, mode types.Transport, stat
 		g.evidence[id] = g.evidence[id][:len(g.evidence[id])-1]
 		g.evidenceModes[id] = g.evidenceModes[id][:len(g.evidenceModes[id])-1]
 	}
-	literal := record.(*goast.CompositeLit)
+	literal := record.(*goast.UnaryExpr).X.(*goast.CompositeLit)
 	literal.Elts = append(literal.Elts, &goast.KeyValueExpr{Key: ident("Origin"), Value: ident(origin)})
 	originType := &goast.StarExpr{X: selector("fangort", "EvidenceOrigin")}
 	originValue := g.evidenceOrigin(e.Effect)
@@ -103,7 +107,7 @@ func (g *gen) forkableHandlerEvidence(e *core.Handle, mode types.Transport, stat
 	})
 	factory := funcLitParams(params, st, []goast.Stmt{
 		varDeclStmt(origin, originType, originValue),
-		varDeclStmt(result, st, record),
+		varDeclStmt(result, st, g.completeEvidence(e.Effect, record, mode)),
 		&goast.AssignStmt{Lhs: []goast.Expr{selector(origin, "Rebuild")}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{rebuild}},
 		returnStmt(ident(result)),
 	}).(*goast.FuncLit)
@@ -120,4 +124,82 @@ func (g *gen) evidenceOrigin(ev core.EffectInstance) goast.Expr {
 		&goast.KeyValueExpr{Key: ident("Name"), Value: stringLit(ev.Name)},
 		&goast.KeyValueExpr{Key: ident("Arguments"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: g.descriptorType()}, Elts: g.typeDescriptorArgs(ev.Args)}},
 	}}}
+}
+
+// completeEvidence initializes both typed transport views and their common
+// immutable row binding. No operation runs during this construction.
+func (g *gen) completeEvidence(ev core.EffectInstance, value goast.Expr, actual types.Transport) goast.Expr {
+	serial := g.tmp
+	g.tmp++
+	name := fmt.Sprintf("t_family%d", serial)
+	storage := fmt.Sprintf("t_familyStorage%d", serial)
+	own := ident(name)
+	desired := ev
+	desired.Control = types.Control{Transport: actual}
+	typ := g.effectTypeMode(desired, actual)
+	effect := g.effects[ev.Unique]
+	abort := effect != nil && len(effect.Ops) > 0 && effect.Ops[0].Abort
+	// Keep the typed records and binding in one allocation. Interior pointers
+	// retain the same immutable family identity without separate heap objects.
+	fields := []*goast.Field{
+		{Names: []*goast.Ident{ident("Own")}, Type: typ.(*goast.StarExpr).X},
+		{Names: []*goast.Ident{ident("Binding")}, Type: selector("fangort", "EvidenceBinding")},
+	}
+	if actual == types.Direct || abort {
+		other := types.Exit
+		if actual == types.Exit {
+			other = types.Direct
+		}
+		otherInstance := ev
+		otherInstance.Control = types.Control{Transport: other}
+		fields = append(fields, &goast.Field{Names: []*goast.Ident{ident("Other")}, Type: g.effectTypeMode(otherInstance, other).(*goast.StarExpr).X})
+	}
+	storageType := &goast.StructType{Fields: &goast.FieldList{List: fields}}
+	literal := value.(*goast.UnaryExpr).X.(*goast.CompositeLit)
+	body := []goast.Stmt{
+		varDeclStmt(storage, &goast.StarExpr{X: storageType}, &goast.UnaryExpr{Op: gotoken.AND, X: &goast.CompositeLit{Type: storageType, Elts: []goast.Expr{
+			&goast.KeyValueExpr{Key: ident("Own"), Value: literal},
+		}}}),
+		varDeclStmt(name, typ, &goast.UnaryExpr{Op: gotoken.AND, X: selector(storage, "Own")}),
+	}
+	var direct, exit goast.Expr = ident("nil"), own
+	if actual == types.Direct || abort {
+		other := types.Exit
+		member, back := "Exit", "Direct"
+		if actual == types.Exit {
+			other = types.Direct
+			member, back = "Direct", "Exit"
+		}
+		adapted := &goast.SelectorExpr{X: own, Sel: ident(member)}
+		adapter := g.rawEvidenceAdapter(ev, own, actual, other).(*goast.UnaryExpr).X
+		body = append(body,
+			&goast.AssignStmt{Lhs: []goast.Expr{selector(storage, "Other")}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{adapter}},
+			&goast.AssignStmt{Lhs: []goast.Expr{adapted}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{&goast.UnaryExpr{Op: gotoken.AND, X: selector(storage, "Other")}}},
+			&goast.AssignStmt{Lhs: []goast.Expr{&goast.SelectorExpr{X: adapted, Sel: ident(back)}}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{own}})
+		if actual == types.Direct {
+			direct, exit = own, adapted
+		} else {
+			direct = adapted
+		}
+	}
+	family := &goast.CompositeLit{Type: selector("fangort", "EvidenceFamily"), Elts: []goast.Expr{
+		&goast.KeyValueExpr{Key: ident("Origin"), Value: &goast.SelectorExpr{X: own, Sel: ident("Origin")}},
+		&goast.KeyValueExpr{Key: ident("Direct"), Value: direct}, &goast.KeyValueExpr{Key: ident("Exit"), Value: exit},
+	}}
+	binding := &goast.SelectorExpr{X: own, Sel: ident("Binding")}
+	body = append(body,
+		&goast.AssignStmt{Lhs: []goast.Expr{selector(storage, "Binding")}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{&goast.CompositeLit{Type: selector("fangort", "EvidenceBinding"), Elts: []goast.Expr{
+			&goast.KeyValueExpr{Key: ident("Name"), Value: &goast.SelectorExpr{X: selector(name, "Origin"), Sel: ident("Name")}},
+			&goast.KeyValueExpr{Key: ident("Arguments"), Value: &goast.SelectorExpr{X: selector(name, "Origin"), Sel: ident("Arguments")}},
+			&goast.KeyValueExpr{Key: ident("Family"), Value: family},
+		}}}},
+		&goast.AssignStmt{Lhs: []goast.Expr{binding}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{&goast.UnaryExpr{Op: gotoken.AND, X: selector(storage, "Binding")}}})
+	if actual == types.Direct || abort {
+		other := "Exit"
+		if actual == types.Exit {
+			other = "Direct"
+		}
+		body = append(body, &goast.AssignStmt{Lhs: []goast.Expr{&goast.SelectorExpr{X: &goast.SelectorExpr{X: own, Sel: ident(other)}, Sel: ident("Binding")}}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{binding}})
+	}
+	return callExpr(funcLit(typ, append(body, returnStmt(own))))
 }

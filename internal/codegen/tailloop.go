@@ -40,10 +40,7 @@ func (g *gen) loopStmts(d *core.Def, e core.Expr, unitResult bool) []goast.Stmt 
 			return g.tailJumpStmts(d, e)
 		}
 	}
-	if unitResult {
-		return append(g.stmts(e), bareReturnStmt())
-	}
-	return []goast.Stmt{returnStmt(g.expr(e, 0))}
+	return g.retStmtsFor(e, unitResult)
 }
 
 // tailJumpStmts emits one rewritable self call as parameter reassignment

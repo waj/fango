@@ -1,0 +1,17 @@
+package main
+
+import "testing"
+
+var probeSink int64
+
+func TestSteadyStateAllocation(t *testing.T) {
+	small := testing.AllocsPerRun(20, func() { probeSink = V_probe(1) })
+	large := testing.AllocsPerRun(20, func() { probeSink = V_probe(1000) })
+	if probeSink != 1000 {
+		t.Fatalf("wrong checksum: %d", probeSink)
+	}
+	t.Logf("activation allocations: %.0f; 1000 operations: %.0f", small, large)
+	if large != small {
+		t.Fatalf("per-operation allocations: one=%.0f, thousand=%.0f", small, large)
+	}
+}

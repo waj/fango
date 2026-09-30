@@ -21,6 +21,16 @@ position. Incomplete characters stay in the byte buffer across refills.
 There is no separate decoded buffer to reconcile when the adapter ends.
 The parent must not be advanced independently during an adapter scope.
 
+Scalar reads can return their encoded byte width alongside the character.
+Prefix reads snapshot one immutable byte window and run a pure scalar predicate
+over it, committing a single skip. They return a complete valid prefix before
+a later malformed or incomplete sequence; the next read diagnoses that sequence
+at its original offset. They refill only to obtain the first complete scalar,
+then stop at the current window boundary. This permits domain scanners to
+retain their own grammar and diagnostic cursor without per-character state
+dispatch. Capability records holding the reader callbacks are shared by pointer
+in compiled code; see [backend layouts](backend.md#representations-and-abi).
+
 Decoder callbacks return error values. Public read operations raise the
 decoding failure at the operation's call site, so a locally installed handler
 can catch it without aborting the adapter scope. Result-returning character

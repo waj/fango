@@ -71,6 +71,9 @@ chunks : Text.Reader.Reader e -> Stream () String {Fail Encoding.Error | e}
 
 tryPeekChar : Text.Reader.Reader e ->{e} Result Encoding.Error (Maybe Char)
 tryReadChar : Text.Reader.Reader e ->{e} Result Encoding.Error (Maybe Char)
+tryReadScalar : Text.Reader.Reader e ->{e} Result Encoding.Error (Maybe (Char, Int))
+tryReadWhile : Text.Reader.Reader e -> (Char -> Bool) ->{e} Result Encoding.Error String
+tryReadSpan : Text.Reader.Reader e -> (Char -> Bool) ->{e} Result Encoding.Error (String, Int)
 ```
 
 `over parent use` selects UTF-8; `overWith encoding parent use` selects an
@@ -92,6 +95,17 @@ readPair text = Fail.attempt { Text.Reader.readExactly text 2 }
 scalar; both answer `Nothing` at EOF. A character split across source chunks
 is completed by refilling. An incomplete sequence at EOF fails rather than
 becoming EOF or a replacement character.
+
+`tryReadScalar` also returns the character's encoded byte width. `tryReadWhile`
+consumes the available prefix satisfying a pure predicate; `tryReadSpan` returns
+the same text together with the number of source bytes consumed. Byte widths
+refer to the selected encoding, so they can differ from the returned String's
+UTF-8 byte length. Prefix reads wait for the first complete scalar, then stop
+at the current buffer boundary or the first rejected scalar. An empty success
+can mean EOF or a rejected first scalar. A valid prefix before malformed or
+incomplete input succeeds; a later call reports that error without consuming
+the offending bytes. No later source chunks are pulled merely to extend an
+already nonempty prefix.
 
 `readUpTo reader n` reads at most `n` scalars. It waits for the first complete
 character, then returns complete characters already available without waiting

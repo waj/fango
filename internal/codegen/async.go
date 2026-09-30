@@ -19,7 +19,7 @@ func (g *gen) asyncRebase(e *core.AsyncRebase) goast.Expr {
 		}})
 	}
 	overrides := callExpr(selector("fangort", "ExtendEvidenceRow"), args...)
-	row := callExpr(&goast.SelectorExpr{X: callExpr(selector("fangort", "NewEvidenceFork"), overrides), Sel: ident("Row")}, g.rowArgument(e.Call.Row))
+	row := callExpr(&goast.SelectorExpr{X: callExpr(selector("fangort", "NewEvidenceFork"), overrides), Sel: ident("Value")}, g.rowArgument(e.Call.Row))
 	// Negative binders are private emission temporaries, never serialized Core.
 	restore := g.pushRow(-2, ident("asyncRow"))
 	defer restore()
@@ -60,9 +60,11 @@ func (g *gen) asyncLaunch(e *core.AsyncLaunch) goast.Expr {
 	if mode == types.Exit {
 		invoke = callExpr(selector("fangort", "RequireNormal"), invoke)
 	}
+	failed := binExpr(gotoken.EQL, selector("result", "Tag"), intLit(int64(e.ErrCtor.Index)))
+	failure := selector("result", representationField(g.adts[e.ErrCtor.Result.Unique], e.ErrCtor, 0))
 	success := []goast.Stmt{
 		varDeclStmt("result", g.goType(resultTy), selector("completed", "F0")),
-		&goast.IfStmt{Init: &goast.AssignStmt{Lhs: []goast.Expr{ident("failure"), ident("failed")}, Tok: gotoken.DEFINE, Rhs: []goast.Expr{&goast.TypeAssertExpr{X: ident("result"), Type: ctorType(e.ErrCtor, resultTy.Args)}}}, Cond: ident("failed"), Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(completion(kv("Value", callExpr(selector("fangort", "PackNativeValue"), ident("result"))), kv("Failure", callExpr(selector("fangort", "PackNativeValue"), selector("failure", "F0"))), kv("Failed", ident("true"))))}}},
+		ifStmt(failed, []goast.Stmt{returnStmt(completion(kv("Value", callExpr(selector("fangort", "PackNativeValue"), ident("result"))), kv("Failure", callExpr(selector("fangort", "PackNativeValue"), failure)), kv("Failed", ident("true"))))}, nil),
 		returnStmt(completion(kv("Value", callExpr(selector("fangort", "PackNativeValue"), ident("result"))))),
 	}
 	run := funcLitParams([]paramSpec{{name: "child", typ: &goast.StarExpr{X: selector("fangort", "AsyncScope")}}}, selector("fangort", "AsyncCompletion"), []goast.Stmt{
