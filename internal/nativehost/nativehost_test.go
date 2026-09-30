@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -54,6 +57,17 @@ func Nothing() []byte { return nil }
 		if err != nil || got != want {
 			t.Fatalf("state call = %v, %v; want %d", got, err, want)
 		}
+	}
+	if runtime.GOOS != "windows" {
+		addr := executor.conn.LocalAddr()
+		if addr.Network() != "unix" {
+			t.Fatalf("worker transport = %s; want unix", addr.Network())
+		}
+		if _, err := os.Stat(filepath.Dir(addr.String())); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("worker socket directory remains after startup: %v", err)
+		}
+	} else if got := executor.conn.LocalAddr().Network(); got != "tcp" {
+		t.Fatalf("worker transport = %s; want tcp", got)
 	}
 	if got, err := executor.Call(context.Background(), host, "Probe.inf", nil); err != nil || !math.IsInf(got.(float64), 1) {
 		t.Fatalf("non-finite float = %v, %v", got, err)

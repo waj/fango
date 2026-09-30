@@ -50,6 +50,12 @@ including the Core linter, interpreter/compiler differential suite, functional
 tests, benchmarks, and `go vet`; update relevant goldens with intentional
 language changes.
 
+The native interpreter worker uses Unix sockets on macOS/Linux and can run in
+the filesystem sandbox. Tests exercising Net/HTTP still open TCP listeners.
+When the sandbox blocks TCP binds, request an escalated run on the first attempt
+for the full correctness suite or known network tests, using an existing approved
+command prefix where available; do not repeat a known sandbox failure first.
+
 Do not run the benchmarks during ordinary development. `make test` and `make ci`
 already exclude them, and `make test-perf` measures elapsed time against
 thresholds recorded on one machine, so under a normal working load it reports

@@ -338,9 +338,12 @@ function as the original object and never crosses IPC. Support sources come
 from the library root, and cache keys hash their sorted paths and exact bytes.
 
 A framed protocol carries serialized executable Core, scalar results, and
-reverse host requests over a dedicated loopback connection. The object codec
-drops source spans but preserves shared identities needed by checked Core and
-Core closures. Process stdio stays outside the control channel. The active
+reverse host requests over a dedicated Unix socket on macOS and Linux, with a
+loopback TCP connection on Windows. The Unix endpoint lives in a private temporary
+directory removed after startup; the established connection lasts for the worker's
+lifetime. Both transports retain the startup handshake and accept deadline.
+The object codec drops source spans but preserves shared identities needed by
+checked Core and Core closures. Process stdio stays outside the control channel. The active
 interpreter host answers requests, sharing one buffered reader with the prompt.
 Globals persist across calls, but importing new sidecars rebuilds the worker.
 Panics are reported and reproduced; host exit becomes an interpreter exit error.

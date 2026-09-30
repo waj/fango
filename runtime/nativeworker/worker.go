@@ -254,7 +254,7 @@ func Run(functions map[string]any, installHost func(fangort.NativeHost)) {
 			}
 		}
 	}()
-	conn, err := net.Dial("tcp", os.Getenv("FANGO_NATIVE_ADDR"))
+	conn, err := net.Dial(os.Getenv("FANGO_NATIVE_NETWORK"), os.Getenv("FANGO_NATIVE_ADDR"))
 	if err != nil {
 		panic(err)
 	}

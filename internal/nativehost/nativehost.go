@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -420,20 +421,33 @@ func (e *Executor) start() error {
 	if err != nil {
 		return err
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	network, address := "tcp", "127.0.0.1:0"
+	if runtime.GOOS != "windows" {
+		// Keep the path short: Unix socket addresses have a small fixed limit,
+		// especially on macOS. The private directory protects the endpoint.
+		dir, err := os.MkdirTemp("", "fn-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(dir)
+		network, address = "unix", filepath.Join(dir, "ipc")
+	}
+	listener, err := net.Listen(network, address)
 	if err != nil {
 		return err
 	}
 	defer listener.Close()
 	token := e.digest[:24]
 	cmd := exec.Command(binary)
-	cmd.Env = append(os.Environ(), "FANGO_NATIVE_ADDR="+listener.Addr().String(), "FANGO_NATIVE_TOKEN="+token)
+	cmd.Env = append(os.Environ(), "FANGO_NATIVE_NETWORK="+network, "FANGO_NATIVE_ADDR="+listener.Addr().String(), "FANGO_NATIVE_TOKEN="+token)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	if tcp, ok := listener.(*net.TCPListener); ok {
 		_ = tcp.SetDeadline(time.Now().Add(10 * time.Second))
+	} else if unix, ok := listener.(*net.UnixListener); ok {
+		_ = unix.SetDeadline(time.Now().Add(10 * time.Second))
 	}
 	conn, err := listener.Accept()
 	if err != nil {
