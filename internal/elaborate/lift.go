@@ -143,7 +143,7 @@ func (el *elab) liftedCallee(lf *liftedLocal, occTy, rawOccTy types.Type) callee
 			}
 		}
 	}
-	ty = el.eraseRuntimeKinds(eraseRowsFrom(lf.rawGenTy, rawTy))
+	ty = el.eraseRuntimeKinds(eraseRowsFrom(instantiateRuntimeParams(lf.rawGenTy, tyArgs), rawTy))
 	c := callee{kind: core.Worker, name: lf.defName, ty: ty, raw: rawTy,
 		arity: lf.arity, tyArgs: tyArgs, pre: pre, evidence: evidence}
 	if core.ArrowOpenRow(ty, lf.arity) {

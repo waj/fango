@@ -355,12 +355,24 @@ func (el *elab) workerCallee(name string, workerTy, rawTy types.Type, arity int)
 	if name == el.declName {
 		sch = el.declScheme
 	}
-	c.ty = el.eraseRuntimeKinds(eraseRowsFrom(el.ck.Sub.Apply(sch.Body), rawTy))
+	origin := instantiateRuntimeParams(el.ck.Sub.Apply(sch.Body), c.tyArgs)
+	c.ty = el.eraseRuntimeKinds(eraseRowsFrom(origin, rawTy))
 	c.raw = rawTy
 	if core.ArrowOpenRow(c.ty, arity) {
 		c.row = el.residualArgument(arrowAt(rawTy, arity-1).(*types.TFun).Eff, arrowAt(c.ty, arity-1).(*types.TFun).Eff)
 	}
 	return el.addEvidence(c, sch, rawTy)
+}
+
+// Instantiate value parameters before selecting explicit effect applications.
+// Row binders stay abstract so labels contributed by their tails still erase.
+func instantiateRuntimeParams(origin types.Type, args []types.Type) types.Type {
+	vars := runtimeRigidVars(origin)
+	m := make(map[int]types.Type, len(vars))
+	for i, v := range vars {
+		m[v.ID] = args[i]
+	}
+	return types.SubstRigid(origin, m)
 }
 
 // ctorCallee builds a constructor callee at its occurrence type — the
@@ -518,7 +530,7 @@ func (c callee) saturatedApp(args []core.Expr) *core.App {
 func (el *elab) workerCall(name string, workerTy, rawTy types.Type, arity int, args []ast.Expr) core.Expr {
 	c := el.workerCallee(name, workerTy, rawTy, arity)
 	c.evidence = el.workerEvidence(name, arity, c.tyArgs)
-	c.row = el.callbackResidual(name, arity, args, c.row)
+	c.row = el.callbackResidual(name, arity, args, c.tyArgs, c.row)
 	return el.calleeCall(c, args)
 }
 

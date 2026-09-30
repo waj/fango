@@ -206,7 +206,7 @@ func bindExpressionRows(expr core.Expr, current types.CaptureVar, evidence map[t
 // requirements of a closed callback. A shared quantified tail is the union of
 // the concrete callback rows supplying it, less each callback's explicit row.
 // Open or structurally indirect sources retain ordinary abstract forwarding.
-func (el *elab) callbackResidual(name string, arity int, args []ast.Expr, fallback *core.RowArgument) *core.RowArgument {
+func (el *elab) callbackResidual(name string, arity int, args []ast.Expr, tyArgs []types.Type, fallback *core.RowArgument) *core.RowArgument {
 	if fallback == nil || len(args) < arity {
 		return fallback
 	}
@@ -214,8 +214,9 @@ func (el *elab) callbackResidual(name string, arity int, args []ast.Expr, fallba
 	if !ok {
 		return fallback
 	}
-	params, _ := core.PeelFun(scheme.Body, arity)
-	final := arrowAt(scheme.Body, arity-1).(*types.TFun)
+	origin := instantiateRuntimeParams(el.ck.Sub.Apply(scheme.Body), tyArgs)
+	params, _ := core.PeelFun(origin, arity)
+	final := arrowAt(origin, arity-1).(*types.TFun)
 	tail, ok := final.Eff.Tail.(*types.TVar)
 	if !ok {
 		return fallback

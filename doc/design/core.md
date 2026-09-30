@@ -83,6 +83,10 @@ reconstruct that source environment.
 Source row tails erase after evidence requirements are derived. Each arrow
 retains whether its ABI had a residual row, independently of transport
 polymorphism; pure factories do not inherit their returned callbacks' rows.
+At worker uses, value type parameters are instantiated before explicit effect
+applications are selected for erasure or subtracted from callback requirements.
+Thus `Db Production` remains distinct from `Db Staging` when a runner's
+generic callback row is `{Db db | e}`; the other application travels in `e`.
 Substitution, field instantiation, adapters, and synchronous lowering preserve
 this metadata recursively through returned arrows and nominal arguments.
 

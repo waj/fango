@@ -1,0 +1,11 @@
+effect Read a
+    read : Type a -> Int
+
+action() = read @Int + read @Bool
+
+withValue : Type a -> Int -> (() ->{Read a | e} Int) ->{e} Int
+withValue witness value body =
+    handle body() of
+        read _ -> resume value
+
+main = withValue @Int 1 { withValue @Bool 2 action }
