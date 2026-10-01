@@ -57,7 +57,9 @@ uses linked rows directly. Task creation materializes and rebases a compiled
 row through the same activation memo as captured evidence, preserving aliases.
 Each activation owns immutable bindings shared by its transport views. Its
 typed transport records and binding share one allocation, with interior
-pointers retaining their identity. An extension returns its existing row when
+pointers retaining their identity. Applied-name comparisons take those immutable
+bindings by pointer rather than copying their transport families. An extension
+returns its existing row when
 every requested binding is already
 visible by pointer identity. Duplicate applied effect names are checked before
 this shortcut. Generated workers and callable members common row extensions

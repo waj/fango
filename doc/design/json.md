@@ -3,14 +3,29 @@
 The JSON implementation is in [Json.fango](../../stdlib/Json.fango). It uses
 UTF-8 [text adapters](text-io.md) over the existing `Reader` and `Writer`
 interfaces for byte I/O, or explicitly supplied text readers and writers.
-The scanner consumes scalar values and buffered text spans. JSON owns escape
-syntax and surrogate-pair assembly, while Encoding owns byte decoding and Char
-owns scalar construction. `TextReader.tryReadScalar` returns a character and
-its encoded width. `tryReadSpan` scans ordinary string runs and digits without
-reader state operations per character; fragments are joined once per token.
-An ordinary string contained in one buffered span returns that span without
-fragment-list allocation or concatenation. Escaped and chunked strings retain
-fragments and join them once.
+The scanner stages the common token path over an immutable `Text.Reader.Window`.
+Whitespace, literals, string escapes, surrogate pairs, and number grammar run
+in pure Fango without reader state dispatch per scalar. Successful scanning
+commits the token's prefix once, preserving unconsumed parent bytes. Ordinary
+strings return one buffered span without fragment-list allocation or
+concatenation; escaped strings collect fragments and join them once. Buffered
+numbers validate their grammar with a compact phase loop and materialize one
+source slice, preserving their original lexeme without digit fragment lists.
+
+A window boundary, malformed encoding, or malformed token declines the pure
+path without consuming anything. The incremental scanner then handles that
+token, performing refills and retaining the established grammar-error positions
+and consumption. A number requires a following complete scalar to establish its
+end on the pure path; a number ending at source EOF takes the incremental path.
+Speculation examines at most the initial buffered window, so a long token is
+rescanned at most once before incremental processing continues across chunks.
+Windows are local to each lexing operation, rather than stored in Pull state;
+large cursor copies do not enter the scalar loop.
+
+JSON owns escape syntax and surrogate-pair assembly, while Encoding owns byte
+decoding and Char owns scalar construction. The incremental path uses
+`TextReader.tryReadScalar` and `tryReadSpan`; both return encoded byte widths,
+and span reads batch ordinary string runs and digits across reader operations.
 Escapes, control characters, and number grammar remain checked in Fango.
 Cursor offsets and columns advance by returned byte widths, preserving the
 byte-based diagnostic contract even with a Latin-1 adapter. Decoding errors are translated at the current

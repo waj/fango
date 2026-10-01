@@ -74,6 +74,15 @@ tryReadChar : Text.Reader.Reader e ->{e} Result Encoding.Error (Maybe Char)
 tryReadScalar : Text.Reader.Reader e ->{e} Result Encoding.Error (Maybe (Char, Int))
 tryReadWhile : Text.Reader.Reader e -> (Char -> Bool) ->{e} Result Encoding.Error String
 tryReadSpan : Text.Reader.Reader e -> (Char -> Bool) ->{e} Result Encoding.Error (String, Int)
+
+type Window -- opaque
+window : Text.Reader.Reader e ->{e} Window
+windowPosition : Window -> Int
+peekWindow : Window -> Result Encoding.Error (Maybe (Char, Int))
+readWindow : Window -> Result Encoding.Error (Maybe (Char, Int, Window))
+spanWindow : Window -> (Char -> Bool) -> Result Encoding.Error (String, Int, Window)
+windowText : Window -> Window -> Result Encoding.Error String
+commitWindow : Text.Reader.Reader e -> Window ->{e} ()
 ```
 
 `over parent use` selects UTF-8; `overWith encoding parent use` selects an
@@ -106,6 +115,24 @@ can mean EOF or a rejected first scalar. A valid prefix before malformed or
 incomplete input succeeds; a later call reports that error without consuming
 the offending bytes. No later source chunks are pulled merely to extend an
 already nonempty prefix.
+
+`window` snapshots currently buffered bytes without consuming or refilling.
+`peekWindow`, `readWindow`, and `spanWindow` are pure: they inspect only that
+snapshot. `readWindow` returns the scalar, its encoded width, and a derived
+window advanced past it. `spanWindow` returns a valid matching prefix, its byte
+width, and the derived window; a later malformed or incomplete scalar ends that
+prefix, and the next window read reports the error. `windowPosition` counts bytes
+from the original snapshot start. Decoding error offsets are also relative to
+that start. An empty window is not necessarily source EOF; incomplete sequences
+are reported without pulling more input.
+
+`windowText start end` decodes the bytes between two positions derived from the
+same snapshot, with `start` preceding or equal to `end`. `commitWindow reader end`
+consumes the prefix from the snapshot start to `end`. Commit only once, against
+the originating reader before any other operation advances it; afterward,
+obtain a new snapshot for further commits. Abandoning a window consumes nothing.
+These operations support speculative domain scans while keeping byte decoding
+inside the selected text encoding.
 
 `readUpTo reader n` reads at most `n` scalars. It waits for the first complete
 character, then returns complete characters already available without waiting

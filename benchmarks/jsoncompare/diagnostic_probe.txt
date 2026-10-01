@@ -1,0 +1,40 @@
+package native
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"runtime"
+	"time"
+
+	"fangobuild/fangort"
+)
+
+var launched = time.Now()
+var began time.Time
+var before runtime.MemStats
+
+func Begin() {
+	runtime.ReadMemStats(&before)
+	began = time.Now()
+}
+
+func Finish() {
+	elapsed := time.Since(began)
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	data := map[string]any{
+		"setup_seconds":   began.Sub(launched).Seconds(),
+		"compute_seconds": elapsed.Seconds(),
+		"allocated_bytes": after.TotalAlloc - before.TotalAlloc,
+		"allocations":     after.Mallocs - before.Mallocs,
+	}
+	if counters := fangort.JSONDiagnosticCounters(); counters != nil {
+		data["counters"] = counters
+	}
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Fprintln(os.Stderr, string(encoded))
+}

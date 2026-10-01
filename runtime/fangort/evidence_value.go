@@ -9,7 +9,7 @@ type EvidenceValue struct {
 
 func (row EvidenceValue) visible(name string, args []*TypeDescriptor) *EvidenceBinding {
 	for _, binding := range row.inline {
-		if binding != nil && sameEvidenceBinding(name, args, *binding) {
+		if binding != nil && sameEvidenceBinding(name, args, binding) {
 			return binding
 		}
 	}
@@ -22,7 +22,7 @@ func ExtendEvidenceValue(row EvidenceValue, bindings ...*EvidenceBinding) Eviden
 			panic("fangort: nil residual evidence binding")
 		}
 		for _, prior := range bindings[:i] {
-			if sameEvidenceBinding(binding.Name, binding.Arguments, *prior) {
+			if sameEvidenceBinding(binding.Name, binding.Arguments, prior) {
 				panic("fangort: duplicate residual evidence binding")
 			}
 		}
@@ -33,7 +33,7 @@ func ExtendEvidenceValue(row EvidenceValue, bindings ...*EvidenceBinding) Eviden
 		}
 		placed := false
 		for i, prior := range row.inline {
-			if prior == nil || sameEvidenceBinding(binding.Name, binding.Arguments, *prior) {
+			if prior == nil || sameEvidenceBinding(binding.Name, binding.Arguments, prior) {
 				row.inline[i], placed = binding, true
 				break
 			}

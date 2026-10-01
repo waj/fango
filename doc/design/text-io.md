@@ -28,8 +28,19 @@ a later malformed or incomplete sequence; the next read diagnoses that sequence
 at its original offset. They refill only to obtain the first complete scalar,
 then stop at the current window boundary. This permits domain scanners to
 retain their own grammar and diagnostic cursor without per-character state
-dispatch. Capability records holding the reader callbacks are shared by pointer
-in compiled code; see [backend layouts](backend.md#representations-and-abi).
+dispatch.
+
+An opaque `Window` snapshots the current immutable bytes and encoding without
+refilling. Pure scalar and span operations derive windows whose private index
+advances only across validated complete scalars. A scanner can abandon a derived
+window without changing the reader, extract text between two positions, or
+commit its consumed prefix with one skip. A commit is valid only once, against
+the originating reader at its unchanged snapshot position. Window operations do
+not own reader state or perform source effects; end of a window is not proof of
+source EOF. This lets [JSON](json.md) keep its common token path pure while
+leaving refills and diagnostic consumption to its incremental path.
+Capability records holding the reader callbacks are shared by pointer in
+compiled code; see [backend layouts](backend.md#representations-and-abi).
 
 Decoder callbacks return error values. Public read operations raise the
 decoding failure at the operation's call site, so a locally installed handler

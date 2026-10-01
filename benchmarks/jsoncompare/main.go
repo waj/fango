@@ -80,6 +80,7 @@ func run() error {
 	size := flag.Int("bytes", 10000000, "approximate generated input size")
 	runs := flag.Int("runs", 3, "fresh processes per program")
 	compiler := flag.String("compiler", "", "existing compiler binary; otherwise build working tree")
+	diagnostics := flag.Bool("diagnostics", false, "also isolate reader layers and generated state/evidence dispatch on this fixture")
 	prof := flag.Bool("profile", false, "also build and run a separate instrumented Fango binary")
 	probes := flag.Bool("probes", false, "also check steady-state state/product allocations")
 	flag.Parse()
@@ -244,6 +245,11 @@ func run() error {
 			if !s.Verified {
 				return fmt.Errorf("%s failed: %v; see preserved output", stem, e)
 			}
+		}
+	}
+	if *diagnostics {
+		if err = runDiagnostics(repo, env, dest, compilerPath, fixture, *runs, expected); err != nil {
+			return err
 		}
 	}
 	if *prof {

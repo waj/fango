@@ -1,0 +1,166 @@
+import Bytes
+import Encoding exposing (Error(..))
+import Fail
+import Json
+import List
+import Reader
+import Result exposing (Result(..))
+import Runtime.Local
+import Stream
+import String
+import Text.Reader as TextReader
+
+all predicate values = List.foldl { value result -> predicate value && result } True values
+
+isTrue : Result Json.Error Bool -> Bool
+isTrue result = case result of
+    Ok value -> value
+    Err _ -> False
+
+signature : Result Json.Error Json.Value -> String
+signature result = case result of
+    Ok value -> case Json.stringifyValue value of
+        Ok text -> "ok " ++ text
+        Err _ -> "encoding failed"
+    Err error -> error.message ++ " " ++ show error.offset ++ " " ++ show error.line ++ " " ++ show error.column ++ " " ++ error.path
+
+-- Include remaining bytes so every split checks error consumption as well as
+-- the result and byte-based diagnostic cursor. One-byte chunks force the
+-- incremental path; contiguous input exercises the buffered path.
+runChunks chunks = Runtime.Local.run chunks { remaining ->
+    Reader.over (Bytes.Source
+        { pull = {
+            case remaining.read() of
+                [] -> Nothing
+                [chunk | rest] ->
+                    remaining.write rest
+                    Just chunk
+          }
+        }
+    ) { reader ->
+        result = Json.withPull reader {
+            value = Json.readValue()
+            case Json.next() of
+                Json.EndInput -> value
+                _ -> Json.syntaxError "Trailing JSON input"
+        }
+        (signature result, Bytes.concat (Stream.toList (Reader.chunks reader)))
+    }
+}
+
+sameSplits bytes =
+    expected = runChunks (List.map { byte -> Bytes.fromList [byte] } (Bytes.toList bytes))
+    all { index ->
+        actual = runChunks [Bytes.slice 0 index bytes, Bytes.empty, Bytes.slice index (Bytes.length bytes) bytes]
+        actual == expected
+    } (List.range 0 (Bytes.length bytes))
+
+main() =
+    print (all { text -> sameSplits (Bytes.fromString text) }
+        [ " \n\t{\"é\":[true,false,null,{},[],\"�😀\"]} \r\n"
+        , "[0,-0,1,-12,1.25,-0.5,0e1,12E+3,1e-3,1.2e4]"
+        , "[\"\",\"plain\",\"\\\"\\\\\\/\\b\\f\\n\\r\\t\",\"\\u0000\\u00e9\\uD834\\uDD1E\"]"
+        , " \n[01]", "[-]", "[-x]", "[1.]", "[1.e2]", "[1e]", "[1e+]", "[1e-x]"
+        , "[truX]", "[fals]", "[nulx]", "[?]", "[true,]", "[1 2]"
+        , "[\"\\x\"]", "[\"\\u12X4\"]", "[\"\\u12", "[\"\\uDC00\"]"
+        , "[\"\\uD800\"]", "[\"\\uD800\\u0041\"]", "[\"abc", "[\"abc\\", "[\"a\nb\"]"
+        , "{\"é\":\n[\"good\",\"\\uD800\\uDC00\",?]}", "true false"
+        ])
+    print (all sameSplits
+        [ Bytes.fromList [91, 34, 97, 195, 169, 255, 34, 93]
+        , Bytes.fromList [91, 34, 97, 240, 159]
+        , Bytes.fromList [91, 49, 255, 93]
+        , Bytes.fromList [32, 195]
+        ])
+    print (runChunks [Bytes.fromString "[0,-12,1.25,1e+3,\"\\uD834\\uDD1E\",true,null]"]
+        == ("ok [0,-12,1.25,1e+3,\"𝄞\",true,null]", Bytes.empty))
+    -- A token larger than one normal file window and a number with many
+    -- digits must remain linear and preserve token text across chunk changes.
+    large = String.padLeft 20000 'a' ""
+    print (sameSplits (Bytes.fromString "\"é😀\\n\\uD834\\uDD1E\""))
+    longTokens = Bytes.fromString ("[\"" ++ large ++ "\",-" ++ String.padLeft 10000 '7' "" ++ ".25e-2]")
+    print (runChunks [Bytes.slice 0 8192 longTokens, Bytes.slice 8192 16384 longTokens, Bytes.slice 16384 24576 longTokens, Bytes.slice 24576 (Bytes.length longTokens) longTokens] == runChunks [longTokens])
+    print (Reader.withBytes (Bytes.fromString ("\"" ++ large ++ "\"!")) { reader ->
+        got = Json.withPull reader {
+            case Json.next() of
+                Json.StringTokenValue text -> text
+                _ -> Json.syntaxError "Expected string"
+        }
+        case got of
+            Ok text -> text == large && Reader.readUpTo reader 1 == Bytes.fromString "!"
+            Err _ -> False
+    })
+    print (Reader.withBytes (Bytes.fromString " \n1234567890.25e-2!tail") { reader ->
+        outcome = Json.withPull reader {
+            token = Json.peek()
+            location = Json.at()
+            consumed = Json.next()
+            valid = case (token, consumed) of
+                (Json.NumberToken first, Json.NumberToken second) -> first == "1234567890.25e-2" && first == second
+                _ -> False
+            valid && location.offset == 18 && location.line == 2 && location.column == 17
+        }
+        isTrue outcome && Reader.readUpTo reader 5 == Bytes.fromString "!tail"
+    })
+    print (Reader.withBytes (Bytes.fromList [32, 10, 34, 233, 255, 34, 33]) { bytes ->
+        outcome = TextReader.overWith Encoding.latin1 bytes { text ->
+            Json.withTextPull text {
+                got = Json.next()
+                location = Json.at()
+                case got of
+                    Json.StringTokenValue value -> value == "éÿ" && location.offset == 6 && location.line == 2 && location.column == 5
+                    _ -> False
+            }
+        }
+        isTrue outcome && Reader.readUpTo bytes 1 == Bytes.fromString "!"
+    })
+    -- A declined speculative scan leaves failure handling and consumption to
+    -- the incremental scanner, including the invalid escape's character.
+    print (Reader.withBytes (Bytes.fromString "\"\\x,true") { reader ->
+        outcome = Json.withPull reader { Json.next() }
+        valid = case outcome of
+            Err error -> error.message == "Invalid JSON escape" && error.offset == 2
+            Ok _ -> False
+        valid && Reader.readUpTo reader 5 == Bytes.fromString ",true"
+    })
+    -- A complete buffered literal must not request its following source chunk.
+    print (case Fail.attempt { Runtime.Local.run 0 { stage ->
+        Reader.over (Bytes.Source { pull = {
+            current = stage.read()
+            stage.write (current + 1)
+            if current == 0 then Just (Bytes.fromString "true")
+            else Fail.fail "premature source pull"
+        } }) { reader ->
+            first = Json.withPull reader {
+                case Json.next() of
+                    Json.BooleanToken value -> value
+                    _ -> Json.syntaxError "Expected boolean"
+            }
+            isTrue first && stage.read() == 1
+        }
+    } } of
+        Ok valid -> valid
+        Err error -> error == "")
+    print (TextReader.withString "é12!" { reader ->
+        start = TextReader.window reader
+        case TextReader.readWindow start of
+            Ok (Just ('é', 2, afterChar)) -> case TextReader.spanWindow afterChar { char -> char >= '0' && char <= '9' } of
+                Ok ("12", 2, afterDigits) ->
+                    staged = TextReader.position reader == 0 && TextReader.windowPosition afterDigits == 4 && TextReader.windowText start afterDigits == Ok "é12"
+                    TextReader.commitWindow reader afterDigits
+                    staged && TextReader.position reader == 4 && TextReader.tryPeekChar reader == Ok (Just '!')
+                _ -> False
+            _ -> False
+    })
+    print (Reader.withBytes (Bytes.fromList [97, 195]) { bytes -> TextReader.over bytes { reader ->
+        start = TextReader.window reader
+        case TextReader.spanWindow start { _ -> True } of
+            Ok ("a", 1, after) ->
+                before = TextReader.position reader
+                declined = case TextReader.readWindow after of
+                    Err (IncompleteSequence 1) -> True
+                    _ -> False
+                TextReader.commitWindow reader after
+                before == 0 && declined && TextReader.tryReadChar reader == Err (IncompleteSequence 1) && TextReader.position reader == 1
+            _ -> False
+    } })

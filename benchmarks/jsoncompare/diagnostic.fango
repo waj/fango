@@ -1,0 +1,40 @@
+import Bytes
+import Char
+import Encoding
+import Fail
+import File
+import IO
+import Json exposing (Decode(..), Token(..))
+import List
+import Probe
+import Reader
+import Result exposing (Result(..))
+import String
+import Text.Reader as TextReader
+
+-- The harness adds the same derived products and checksum fold as workload.fango.
+type ScanTotals = { count : Int, strings : Int, numbers : Int, trues : Int, nulls : Int }
+
+scanTokens : ScanTotals ->{Json.Pull} ScanTotals
+scanTokens totals =
+    case Json.next() of
+        EndInput -> totals
+        StringTokenValue text -> scanTokens { totals | count = totals.count + 1, strings = totals.strings + String.byteLength text }
+        NumberToken text -> scanTokens { totals | count = totals.count + 1, numbers = totals.numbers + String.byteLength text }
+        BooleanToken True -> scanTokens { totals | count = totals.count + 1, trues = totals.trues + 1 }
+        NullToken -> scanTokens { totals | count = totals.count + 1, nulls = totals.nulls + 1 }
+        _ -> scanTokens { totals | count = totals.count + 1 }
+
+scanScalars : TextReader.Reader e -> Int -> Int -> Int ->{e} (Int, Int, Int)
+scanScalars reader count codes bytes =
+    case TextReader.tryReadScalar reader of
+        Err _ -> (-1, -1, -1)
+        Ok Nothing -> (count, codes, bytes)
+        Ok (Just (char, width)) -> scanScalars reader (count + 1) (codes + Char.toCode char) (bytes + width)
+
+scanEncoding : Bytes.Bytes -> Int -> Int -> Int -> (Int, Int, Int)
+scanEncoding bytes offset count codes =
+    case Encoding.decodeAt Encoding.utf8 bytes offset of
+        Err _ -> (-1, -1, -1)
+        Ok Nothing -> (count, codes, offset)
+        Ok (Just (char, width)) -> scanEncoding bytes (offset + width) (count + 1) (codes + Char.toCode char)

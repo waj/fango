@@ -29,9 +29,13 @@ Shared evidence families, product structs, tagged Maybe/Result, compact enums,
 and value rows are [implemented](design/backend.md#representations-and-abi).
 Derived record decoders use one [aggregate slot activation](design/json.md).
 
-Measure handler activation construction, residual-row lookup, and remaining
-reader dispatch after buffered scalar/span reads. Reduce token/fragment
-construction and assess remaining copies of large product values after
+The [buffered token path](design/json.md) batches scanner work over immutable
+text windows and materializes buffered numbers once. Reduce remaining
+reader/state dispatch at token boundaries and repeated residual-row work;
+[10 MB layer comparisons](design/verification.md#typed-json-comparison) isolate
+that overhead from raw UTF-8 decoding. Assess handler activation construction,
+retaining snapshot/commit synchronization. Reduce token/fragment construction
+and remaining copies of large product values after
 [split Exit result lowering](design/lowering.md#exit-results). Reduce dictionary
 closure construction for nonnumeric scalar comparisons; the string-scanner experiment
 exposed per-character closure allocation through generic inequality. Preserve

@@ -107,7 +107,7 @@ func (f *EvidenceFork) Row(row *EvidenceRow) *EvidenceRow {
 			}
 			shadowed := false
 			for _, prior := range seen {
-				if sameEvidenceBinding(binding.Name, binding.Arguments, prior) {
+				if sameEvidenceBinding(binding.Name, binding.Arguments, &prior) {
 					shadowed = true
 					break
 				}

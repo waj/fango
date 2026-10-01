@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Text.Reader exposing (Read(..), Reader, atEnd, chunks, over, overWith, peekChar, position, readChar, readExactly, readLine, readUntil, readUpTo, tryPeekChar, tryReadChar, tryReadScalar, tryReadSpan, tryReadWhile, withString)
+module Text.Reader exposing (Read(..), Reader, Window, atEnd, chunks, commitWindow, over, overWith, peekChar, peekWindow, position, readChar, readExactly, readLine, readUntil, readUpTo, readWindow, spanWindow, tryPeekChar, tryReadChar, tryReadScalar, tryReadSpan, tryReadWhile, window, windowPosition, windowText, withString)
 
 import Basics exposing (..)
 import Bytes
@@ -26,6 +26,9 @@ type Input e =
     }
 
 type Reader e = Reader (Input e)
+
+-- Immutable staged bytes. Only scalar/span reads advance the private index.
+type Window = { encoding : Encoding, bytes : Bytes.Bytes, index : Int }
 
 type Read = Found String | Ended String | Overflowed deriving (Eq, Show)
 
@@ -130,6 +133,39 @@ prefixWidth encoding bytes keep offset =
             if keep char then prefixWidth encoding bytes keep (offset + width)
             else offset
         _ -> offset
+
+window : Reader e ->{e} Window
+window (Reader input) = Window { encoding = input.encoding, bytes = input.buffered(), index = 0 }
+
+windowPosition : Window -> Int
+windowPosition snapshot = snapshot.index
+
+peekWindow : Window -> Result Encoding.Error (Maybe (Char, Int))
+peekWindow snapshot = Encoding.decodeAt snapshot.encoding snapshot.bytes snapshot.index
+
+readWindow : Window -> Result Encoding.Error (Maybe (Char, Int, Window))
+readWindow snapshot =
+    case peekWindow snapshot of
+        Err error -> Err error
+        Ok Nothing -> Ok Nothing
+        Ok (Just (char, width)) -> Ok (Just (char, width, { snapshot | index = snapshot.index + width }))
+
+spanWindow : Window -> (Char -> Bool) -> Result Encoding.Error (String, Int, Window)
+spanWindow snapshot keep =
+    case peekWindow snapshot of
+        Err error -> Err error
+        Ok _ ->
+            end = prefixWidth snapshot.encoding snapshot.bytes keep snapshot.index
+            case Encoding.decode snapshot.encoding (Bytes.slice snapshot.index end snapshot.bytes) of
+                Err error -> Err error
+                Ok text -> Ok (text, end - snapshot.index, { snapshot | index = end })
+
+windowText : Window -> Window -> Result Encoding.Error String
+windowText start end = Encoding.decode start.encoding (Bytes.slice start.index end.index start.bytes)
+
+-- Commit a derived window once, before any independent reader movement.
+commitWindow : Reader e -> Window ->{e} ()
+commitWindow (Reader input) snapshot = if snapshot.index > 0 then input.consume snapshot.index else ()
 
 tryReadWhile : Reader e -> (Char -> Bool) ->{e} Result Encoding.Error String
 tryReadWhile reader keep =

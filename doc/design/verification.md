@@ -193,6 +193,80 @@ execution allocates 12 objects per
 activation for both one and one thousand operations. Remaining optimization
 work belongs in the [roadmap](../roadmap.md#json-and-generated-code-performance).
 
+`-diagnostics -runs 5` isolates the reader layers on the same fixture. It times
+an `Encoding.decodeAt` traversal, scalar reads, pull-token traversal, and typed
+decoding through file, preloaded-byte, and preloaded-text readers. Loading and
+adapter construction precede the compute timer; typed verification follows it.
+Go independently checks source scalar counts/code sums and token counts/decoded
+string bytes/number bytes/boolean/null totals. Counters and generated-code
+experiments live only in exported copies, with no changes to the compiler or
+stdlib. Counter runs are separate from timing samples. The experiments simplify
+bound local-state callbacks, pass immutable evidence bindings by pointer, and
+short-circuit an extension by its already-visible first binding. They retain
+snapshot/commit synchronization; counter comparisons require unchanged state
+and reader operations. Rewrite counts record which changes an exported runtime
+still needs; an implemented pointer representation is left as-is, so that
+variant then measures only the first-binding shortcut. Existing evidence shadowing and task-rebasing tests run
+against the changed exported runtime after timing ends.
+
+On the same host at `f10775e`, five runs of the 10,000,260-byte fixture give
+these approximate median compute times:
+
+| Traversal | File reader | Preloaded bytes | Preloaded text |
+| --- | ---: | ---: | ---: |
+| Scalar reads | 0.646 s | 0.647 s | 0.339 s |
+| JSON tokens | 0.633 s | 0.621 s | 0.576 s |
+| Typed JSON | 0.915 s | 0.889 s | 0.893 s |
+
+The pure Encoding traversal takes 0.053 s, with no allocation. Typed file
+decoding performs 22,352,628 state snapshots, 28,978,680 state commits,
+6,932,599 value-row extensions, and 32,899,179 binding comparisons, against
+only 1,223 native file reads. Source preloading therefore has little effect
+on JSON timing. Token traversal already accounts for most of the typed run;
+reader/state bookkeeping is a larger target than raw UTF-8 scalar decoding.
+The callback experiment saves about 4%, the binding experiment about 6%, and
+their combination about 11% in five alternating baseline/variant pairs. These
+experiments isolate removable overhead; binding comparisons now pass the
+existing immutable pointer in the production runtime. The binding experiment
+leaves almost all comparisons in place: its gain comes
+from changing their argument representation, while repeated lookup remains.
+Preloaded text also allocates about 389 MB versus 146 MB for typed file input,
+so a shorter reader stack alone does not establish a better implementation.
+On this Darwin/arm64 host, Go CPU profiles report syscall/madvise percentages
+inconsistent with process system CPU accounting. Native sampling and controlled
+layer comparisons provide the cross-check; do not interpret those profiles as
+evidence that file I/O dominates.
+
+The [buffered token scanner](json.md) and pointer comparisons were measured
+against saved `f10775e` binaries on this same 10 MB fixture. Seven fresh,
+alternating whole-process samples per implementation, all with matching typed
+checksums, give the following medians. Allocation totals are from separate
+profiled runs; operation counts are from separate diagnostic runs.
+
+| Measurement | `f10775e` | Buffered token scanner |
+| --- | ---: | ---: |
+| Whole-process wall time | 0.916 s | 0.681 s |
+| Go control wall time | 0.066 s | 0.066 s |
+| Cumulative allocated bytes | 146,473,296 | 131,434,512 |
+| Allocation events | 5,211,987 | 4,337,072 |
+| State snapshots + commits | 51,331,308 | 21,505,932 |
+| Byte-reader skips | 3,145,798 | 1,559,497 |
+| Native file reads | 1,223 | 1,223 |
+
+Elapsed time falls 25.6%, allocations 10.3%, and allocation events 16.8%.
+The retained typed result remains about 13.3 MB. Three diagnostic layer rounds
+put token traversal at 0.415 / 0.399 / 0.397 s for file / bytes / text, and
+typed traversal at 0.662 / 0.655 / 0.641 s. The pure Encoding traversal remains
+0.053 s. The remaining whole-process gap with Go is 10.3×; dispatch at token
+boundaries and derived decoding still cost much more than byte decoding.
+Window/token-attempt/commit and incremental-token counters report 1,543,774
+buffered commits and 1,222 incremental scans: 99.92% of lexing operations use
+the buffered path on this fixture. Correctness coverage compares
+one-byte chunks with every split of valid and malformed examples, including
+remaining parent bytes, and covers long tokens, Latin-1, escaped surrogate
+pairs, precise byte positions, and source effects. This comparison uses only
+the 10 MB fixture; it does not establish timing for other input shapes.
+
 Five fresh alternating runs of saved binaries isolate
 [immediate-application lowering](backend.md#representations-and-abi) from
 between-session variation: median time changes from 1.133 s to 1.099 s,

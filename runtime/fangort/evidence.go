@@ -13,7 +13,7 @@ type EvidenceBinding struct {
 	Family    EvidenceFamily
 }
 
-func sameEvidenceBinding(name string, args []*TypeDescriptor, binding EvidenceBinding) bool {
+func sameEvidenceBinding(name string, args []*TypeDescriptor, binding *EvidenceBinding) bool {
 	if name != binding.Name || len(args) != len(binding.Arguments) {
 		return false
 	}
@@ -65,7 +65,7 @@ func ExtendEvidenceBindings(tail *EvidenceRow, bindings ...*EvidenceBinding) *Ev
 			panic("fangort: nil residual evidence binding")
 		}
 		for _, previous := range bindings[:index] {
-			if sameEvidenceBinding(binding.Name, binding.Arguments, *previous) {
+			if sameEvidenceBinding(binding.Name, binding.Arguments, previous) {
 				panic("fangort: duplicate residual evidence binding")
 			}
 		}
@@ -95,12 +95,12 @@ func ExtendEvidenceBindings(tail *EvidenceRow, bindings ...*EvidenceBinding) *Ev
 func visibleBinding(row *EvidenceRow, name string, args []*TypeDescriptor) *EvidenceBinding {
 	for ; row != nil; row = row.tail {
 		for _, binding := range row.inline {
-			if binding != nil && sameEvidenceBinding(name, args, *binding) {
+			if binding != nil && sameEvidenceBinding(name, args, binding) {
 				return binding
 			}
 		}
 		for _, binding := range row.extra {
-			if sameEvidenceBinding(name, args, *binding) {
+			if sameEvidenceBinding(name, args, binding) {
 				return binding
 			}
 		}
@@ -110,12 +110,12 @@ func visibleBinding(row *EvidenceRow, name string, args []*TypeDescriptor) *Evid
 
 func (row *EvidenceRow) find(name string, args []*TypeDescriptor) (EvidenceFamily, bool) {
 	for _, binding := range row.inline {
-		if binding != nil && sameEvidenceBinding(name, args, *binding) {
+		if binding != nil && sameEvidenceBinding(name, args, binding) {
 			return binding.Family, true
 		}
 	}
 	for _, binding := range row.extra {
-		if sameEvidenceBinding(name, args, *binding) {
+		if sameEvidenceBinding(name, args, binding) {
 			return binding.Family, true
 		}
 	}

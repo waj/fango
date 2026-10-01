@@ -390,8 +390,163 @@ exponent cursor reverse =
                     _ -> ([String.fromChar mark | reverse], afterMarker)
             requiredDigits afterSign prefix
 
+-- The buffered path is pure and publishes its consumed prefix once. A window
+-- boundary or malformed token declines without changing the reader; the
+-- incremental scanner below then owns refills, failure positions and effects.
+fastWhite : TextReader.Window -> Int -> Int -> Maybe (TextReader.Window, Int, Int)
+fastWhite snapshot line column =
+    case TextReader.readWindow snapshot of
+        Ok (Just (char, width, rest)) ->
+            if white char then
+                if char == '\n' then fastWhite rest (line + 1) 1
+                else fastWhite rest line (column + width)
+            else Just (snapshot, line, column)
+        _ -> Nothing
+
+fastLiteral : TextReader.Window -> String -> Maybe TextReader.Window
+fastLiteral snapshot text =
+    case String.uncons text of
+        Nothing -> Just snapshot
+        Just part ->
+            case TextReader.readWindow snapshot of
+                Ok (Just (char, _, rest)) ->
+                    if char == part.first then fastLiteral rest part.rest else Nothing
+                _ -> Nothing
+
+fastHex : TextReader.Window -> Int -> Int -> Maybe (Int, TextReader.Window)
+fastHex snapshot remaining acc =
+    if remaining == 0 then Just (acc, snapshot)
+    else case TextReader.readWindow snapshot of
+        Ok (Just (char, _, rest)) ->
+            nibble = hex char
+            if nibble < 0 then Nothing else fastHex rest (remaining - 1) (acc * 16 + nibble)
+        _ -> Nothing
+
+fastScalar : Int -> TextReader.Window -> Maybe (Char, TextReader.Window)
+fastScalar code snapshot =
+    case Char.fromCode code of
+        Nothing -> Nothing
+        Just char -> Just (char, snapshot)
+
+fastEscape : TextReader.Window -> Maybe (Char, TextReader.Window)
+fastEscape snapshot =
+    case TextReader.readWindow snapshot of
+        Ok (Just (char, _, rest)) -> case char of
+            '"' -> Just ('"', rest)
+            '\\' -> Just ('\\', rest)
+            '/' -> Just ('/', rest)
+            'b' -> fastScalar 8 rest
+            'f' -> fastScalar 12 rest
+            'n' -> Just ('\n', rest)
+            'r' -> Just ('\r', rest)
+            't' -> Just ('\t', rest)
+            'u' -> case fastHex rest 4 0 of
+                Nothing -> Nothing
+                Just (code, afterHex) ->
+                    if code >= 56320 && code <= 57343 then Nothing
+                    else if code >= 55296 && code <= 56319 then
+                        case fastLiteral afterHex "\\u" of
+                            Nothing -> Nothing
+                            Just afterU -> case fastHex afterU 4 0 of
+                                Nothing -> Nothing
+                                Just (low, afterLow) ->
+                                    if low < 56320 || low > 57343 then Nothing
+                                    else fastScalar (65536 + (code - 55296) * 1024 + low - 56320) afterLow
+                    else fastScalar code afterHex
+            _ -> Nothing
+        _ -> Nothing
+
+fastString : TextReader.Window -> String -> List String -> Maybe (String, TextReader.Window)
+fastString snapshot current reverse =
+    case TextReader.spanWindow snapshot plainStringChar of
+        Err _ -> Nothing
+        Ok (text, _, afterPlain) ->
+            fragment = if text == "" then current else text
+            fragments = if text == "" then reverse else priorFragment current reverse
+            case TextReader.readWindow afterPlain of
+                Ok (Just ('"', _, rest)) -> Just (stringFragments fragment fragments, rest)
+                Ok (Just ('\\', _, rest)) -> case fastEscape rest of
+                    Nothing -> Nothing
+                    Just (char, afterEscape) -> fastString afterEscape (String.fromChar char) (priorFragment fragment fragments)
+                _ -> Nothing
+
+type NumberPhase = MinusDigit | ZeroEnd | WholeDigits | FractionDigit | FractionDigits | ExponentSign | ExponentDigit | ExponentDigits
+
+fastNumber : TextReader.Window -> TextReader.Window -> NumberPhase -> Maybe (String, TextReader.Window)
+fastNumber start snapshot phase =
+    -- A number needs a following scalar: buffer end cannot prove token end.
+    case TextReader.readWindow snapshot of
+        Ok (Just (char, _, rest)) ->
+            nextPhase = case phase of
+                MinusDigit -> if char == '0' then Just ZeroEnd else if digit char then Just WholeDigits else Nothing
+                ZeroEnd -> if char == '.' then Just FractionDigit else if char == 'e' || char == 'E' then Just ExponentSign else Nothing
+                WholeDigits -> if digit char then Just WholeDigits else if char == '.' then Just FractionDigit else if char == 'e' || char == 'E' then Just ExponentSign else Nothing
+                FractionDigit -> if digit char then Just FractionDigits else Nothing
+                FractionDigits -> if digit char then Just FractionDigits else if char == 'e' || char == 'E' then Just ExponentSign else Nothing
+                ExponentSign -> if char == '+' || char == '-' then Just ExponentDigit else if digit char then Just ExponentDigits else Nothing
+                ExponentDigit -> if digit char then Just ExponentDigits else Nothing
+                ExponentDigits -> if digit char then Just ExponentDigits else Nothing
+            case nextPhase of
+                Just following -> fastNumber start rest following
+                Nothing ->
+                    complete = case phase of
+                        ZeroEnd -> digit char == False
+                        WholeDigits -> True
+                        FractionDigits -> True
+                        ExponentDigits -> True
+                        _ -> False
+                    if complete then
+                        case TextReader.windowText start snapshot of
+                            Ok text -> Just (text, snapshot)
+                            Err _ -> Nothing
+                    else Nothing
+        _ -> Nothing
+
+fastToken : TextReader.Window -> Maybe (Token, TextReader.Window)
+fastToken snapshot =
+    case TextReader.readWindow snapshot of
+        Ok (Just (char, _, after)) -> case char of
+            '{' -> Just (BeginObject, after)
+            '}' -> Just (EndObject, after)
+            '[' -> Just (BeginArray, after)
+            ']' -> Just (EndArray, after)
+            ':' -> Just (Colon, after)
+            ',' -> Just (Comma, after)
+            '"' -> case fastString after "" [] of
+                Nothing -> Nothing
+                Just (text, rest) -> Just (StringTokenValue text, rest)
+            't' -> case fastLiteral after "rue" of
+                Nothing -> Nothing
+                Just rest -> Just (BooleanToken True, rest)
+            'f' -> case fastLiteral after "alse" of
+                Nothing -> Nothing
+                Just rest -> Just (BooleanToken False, rest)
+            'n' -> case fastLiteral after "ull" of
+                Nothing -> Nothing
+                Just rest -> Just (NullToken, rest)
+            _ ->
+                phase = if char == '-' then MinusDigit else if char == '0' then ZeroEnd else WholeDigits
+                if char == '-' || digit char then
+                    case fastNumber snapshot after phase of
+                        Nothing -> Nothing
+                        Just (text, rest) -> Just (NumberToken text, rest)
+                else Nothing
+        _ -> Nothing
+
 lex : Cursor e ->{Fail Error | e} (Token, Cursor e)
 lex before =
+    snapshot = TextReader.window before.reader
+    case fastWhite snapshot before.line before.column of
+        Nothing -> lexIncremental before
+        Just (start, line, column) -> case fastToken start of
+            Nothing -> lexIncremental before
+            Just (token, rest) ->
+                width = TextReader.windowPosition rest
+                TextReader.commitWindow before.reader rest
+                (token, { before | offset = before.offset + width, line = line, column = column + width - TextReader.windowPosition start })
+
+lexIncremental : Cursor e ->{Fail Error | e} (Token, Cursor e)
+lexIncremental before =
     cursor = skipWhite before
     (got, after) = takeChar cursor
     case got of
