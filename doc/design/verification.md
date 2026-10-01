@@ -329,6 +329,17 @@ decode, versus 77.22 MB and 2,595,259 before; the full typed result still
 retains about 13.4 MB. The large outer list uses the constant-stack path;
 the short `tags` and `items` lists avoid building a second spine.
 
+The next isolated change removes bound-callable forwarding in generated Go for
+the local state cell, while retaining the operation dispatch itself. Ten
+alternating pairs of the saved short-list binary and the new compiler output,
+with the same 10 MB input and matching checksums, measured medians of 0.3231 s
+and 0.3143 s respectively (2.7% less time). The final guarded pass emits the
+same direct operation calls and verified at 0.314–0.315 s in three more runs;
+the Go control took 0.065–0.067 s. These measurements leave roughly a 4.8×
+whole-process gap. The remaining pull handler still dispatches an operation,
+copies its state at snapshot/store, and carries the token and cursor returned
+by the lexer.
+
 Five fresh alternating runs of saved binaries isolate
 [immediate-application lowering](backend.md#representations-and-abi) from
 between-session variation: median time changes from 1.133 s to 1.099 s,

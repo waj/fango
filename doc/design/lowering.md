@@ -79,6 +79,14 @@ for residual-row lookup and task rebuilding. Invocation evidence, deferred looku
 shadowed handlers, child overrides, and polymorphic operations retain dispatch.
 State operations retain their existing snapshot/store synchronization.
 
+When a local callable's Direct and Exit members do nothing except forward to
+the same effect operation, bound callbacks call that operation slot on their
+captured evidence directly. The Go AST rewrite requires stable local binding,
+fixed arity, and arguments whose discarded evaluation cannot have effects or
+panic; otherwise it keeps the callable. This removes a forwarding invocation,
+not the handler operation or its state synchronization. The
+optimization-disabled backend keeps the original callable path.
+
 ## Verification
 
 The optimization-disabled backend retains the general callable and Outcome
