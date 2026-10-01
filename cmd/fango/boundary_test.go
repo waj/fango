@@ -30,7 +30,7 @@ func TestFallibleNativeEmitsStraightLineGo(t *testing.T) {
 		"t_payload, t_err := n_File.OpenRead(",
 		"var t_failure fangort.IOFailure = fangort.ClassifyIOError(t_err)",
 		"t_failure.Path, t_failure.Message",
-		"n_File.CloseHandle(t_native0.F0)",
+		"n_File.CloseHandle(v_file.F0)",
 		"F1_0: C_File_dot_Handle{t_payload}",
 	} {
 		if !strings.Contains(src, want) {

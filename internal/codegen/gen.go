@@ -303,6 +303,7 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 	file := &goast.File{Name: ident(packageName), Decls: decls}
 	g.splitOutcomeABI(file)
 	g.inlineReturnCalls(file)
+	g.elideCopies(file)
 	var buf bytes.Buffer
 	if err := format.Node(&buf, gotoken.NewFileSet(), file); err != nil {
 		return nil, fmt.Errorf("codegen: printing generated Go: %w", err)

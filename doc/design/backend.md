@@ -47,7 +47,13 @@ evaluate left to right before parameter binding; fresh bindings preserve values
 captured by escaping closures, including inside loops. Typed result temporaries
 preserve boxing and conversion at assignments. Defer, recover, named-result, and
 variadic callees retain their function boundary. Expression positions that require
-a Go value retain an ordinary literal call.
+a Go value retain an ordinary literal call. A temporary that only renames a
+local of the same declared type is elided after these passes: projection,
+pattern, and call-result binders read their source directly. The source must
+not be addressed, reassigned after the binder other than by a tail-loop jump
+with no closure capturing the binder, or shadowed within the binder's scope.
+Go copies large products through memory on every such declaration, so this
+removes several state copies per handler operation.
 
 Compiled residual effect rows are small values with two inline binding pointers
 and an optional immutable overflow chain. Extending or shadowing a row that

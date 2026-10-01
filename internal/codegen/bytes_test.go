@@ -94,8 +94,8 @@ func TestBytesUsesTheRuntimeRepresentationEverywhere(t *testing.T) {
 		}
 	}
 	// A match on the one nullary constructor emits the branch itself, with no
-	// discrimination of any kind.
-	if !strings.Contains(bytes, "func V_Bytes_dot_width(v_xs fangort.Bytes) int64 {\n\tvar v_scrut fangort.Bytes = v_xs\n\treturn 7\n}") {
+	// discrimination of any kind; the scrutinee binder aliases the argument.
+	if !strings.Contains(bytes, "func V_Bytes_dot_width(v_xs fangort.Bytes) int64 {\n\treturn 7\n}") {
 		t.Errorf("a match on Bytes did not compile to its only branch:\n%s", bytes)
 	}
 	for _, unwanted := range []string{"type T_Bytes_dot_Bytes", "isT_Bytes_dot_Bytes", "C_Bytes_dot_Bytes"} {
