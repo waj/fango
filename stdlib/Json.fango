@@ -649,19 +649,21 @@ beginArray() =
 
 nextElement : Bool ->{Pull, Fail Error} Bool
 nextElement first =
-    case peek() of
-        EndArray ->
-            ignore next()
-            False
-        _ ->
-            if first then True
-            else
-                case next() of
-                    Comma ->
-                        case peek() of
-                            EndArray -> syntaxError "Trailing array comma"
-                            _ -> True
-                    _ -> syntaxError "Expected comma or array end"
+    if first then
+        case peek() of
+            EndArray ->
+                ignore next()
+                False
+            _ -> True
+    else
+        case next() of
+            EndArray -> False
+            Comma ->
+                -- The element decoder must see this token.
+                case peek() of
+                    EndArray -> syntaxError "Trailing array comma"
+                    _ -> True
+            _ -> syntaxError "Expected comma or array end"
 
 beginObject : () ->{Pull, Fail Error} ()
 beginObject() =
@@ -669,27 +671,26 @@ beginObject() =
         BeginObject -> ()
         _ -> syntaxError "Expected JSON object"
 
+-- A key and its colon never need lookahead: consume them directly.
 nextKey : Bool ->{Pull, Fail Error} Maybe String
 nextKey first =
-    case peek() of
-        EndObject ->
-            ignore next()
-            Nothing
-        _ ->
-            if first then readKey()
-            else
+    if first then
+        case next() of
+            EndObject -> Nothing
+            StringTokenValue key -> keyColon key
+            _ -> syntaxError "Expected object key"
+    else
+        case next() of
+            EndObject -> Nothing
+            Comma ->
                 case next() of
-                    Comma ->
-                        case peek() of
-                            EndObject -> syntaxError "Trailing object comma"
-                            _ -> readKey()
-                    _ -> syntaxError "Expected comma or object end"
+                    EndObject -> syntaxError "Trailing object comma"
+                    StringTokenValue key -> keyColon key
+                    _ -> syntaxError "Expected object key"
+            _ -> syntaxError "Expected comma or object end"
 
-readKey : () ->{Pull, Fail Error} Maybe String
-readKey() =
-    key = case next() of
-        StringTokenValue text -> text
-        _ -> syntaxError "Expected object key"
+keyColon : String ->{Pull, Fail Error} Maybe String
+keyColon key =
     case next() of
         Colon -> Just key
         _ -> syntaxError "Expected colon"
