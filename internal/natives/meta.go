@@ -207,6 +207,40 @@ func installMeta(t map[string]Spec) {
 			Params: []ast.Pattern{&ast.PVar{Name: args[0].(string)}}, Body: body,
 		}}, nil
 	}}
+	t["Meta.localFunctionStart"] = Spec{Arity: 3, Eval: func(rt *Runtime, args []any) (any, error) {
+		body, err := expand(rt, args[1])
+		if err != nil {
+			return nil, err
+		}
+		result, err := expand(rt, args[2])
+		if err != nil {
+			return nil, err
+		}
+		return &meta.Code{Template: -1, Direct: &ast.Block{
+			Binds: []ast.LocalBind{{Name: args[0].(string), Body: body}}, Result: result,
+		}}, nil
+	}}
+	t["Meta.localFunctionParam"] = pure2(func(a, b any) any {
+		block := a.(*meta.Code).Direct.(*ast.Block)
+		next := *block
+		next.Binds = append([]ast.LocalBind(nil), block.Binds...)
+		bind := &next.Binds[0]
+		bind.Params = append(append([]ast.Pattern(nil), bind.Params...), &ast.PVar{Name: b.(string)})
+		return &meta.Code{Template: -1, Direct: &next}
+	})
+	t["Meta.sequence"] = Spec{Arity: 2, Eval: func(rt *Runtime, args []any) (any, error) {
+		first, err := expand(rt, args[0])
+		if err != nil {
+			return nil, err
+		}
+		result, err := expand(rt, args[1])
+		if err != nil {
+			return nil, err
+		}
+		return &meta.Code{Template: -1, Direct: &ast.Block{
+			Items: []ast.BlockItem{{Expr: first}}, Result: result,
+		}}, nil
+	}}
 	t["Meta.matchStart"] = expand1(func(scrutinee ast.Expr) (any, error) {
 		return &meta.Code{Template: -1, Direct: &ast.Case{Scrutinee: scrutinee}}, nil
 	})

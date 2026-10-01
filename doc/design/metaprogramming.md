@@ -21,6 +21,15 @@ distinguishes compile time from runtime. Each has one level. Locals belong to
 their introduced stage; top-level definitions are stage-polymorphic. Source
 rules and builders live in [the reference](../reference/metaprogramming.md).
 
+The local-function builder constructs a block containing a named function
+binding with explicit parameter patterns and a result expression. It supplies
+self and parameter references to generator callbacks; ordinary inference and
+elaboration check the assembled block and lift the function into a worker.
+The sequence builder constructs an ordered Unit statement followed by a result,
+so generated key loops keep recursive calls in the Core tail skeleton instead
+of placing them inside immediately invoked lambdas. Both builders copy AST
+containers when extending them, retaining immutable Code values.
+
 ## Reflection and dependency boundaries
 
 Meta.TypeRepr carries nominal identity and structural type, including arguments

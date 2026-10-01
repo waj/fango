@@ -1,0 +1,28 @@
+import Meta exposing (Code, Items(..))
+
+counter : Code
+counter = Meta.lambda "_offset" { offset ->
+    Meta.localFunction "_count" (Item "_remaining" (Item "_total" NoItems)) { self parameters ->
+        case parameters of
+            Item remaining (Item total NoItems) ->
+                `if $(remaining) == 0 then $(total)
+                    else $(self) ($(remaining) - 1) ($(total) + $(offset))`
+            _ -> Meta.fail "Expected two counter parameters"
+    } { self -> Meta.sequence `print "count"` `$(self) 2000000 0` }
+}
+
+identityCode : Code
+identityCode = Meta.localFunction "_identity" (Item "_value" NoItems) { _ parameters ->
+    case parameters of
+        Item value NoItems -> value
+        _ -> Meta.fail "Expected one identity parameter"
+} { self -> self }
+
+count : Int ->{IO} Int
+count = $(counter)
+
+identity = $(identityCode)
+
+main() =
+    print (count 3)
+    print (identity 42, identity "generic")

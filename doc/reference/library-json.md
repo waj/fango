@@ -83,8 +83,9 @@ remaining nesting allowance. It cannot refill or execute consumer effects.
 and transform their results, or decline. Manual instances must provide both
 methods. To retain an existing decoder, add `scanValue _ = Nothing`.
 
-Generated record scans optimize required fields in declaration order using
-the encoder's key spelling. Other orders, extra keys, alternative escapes,
+Generated record scans support required fields in any order using the encoder's
+key spelling. Declaration order takes a straight-line path; an order change
+continues scanning with the fields already read. Extra keys, alternative escapes,
 buffer boundaries, and type or syntax failures use the streaming decoder with
 the same errors and consumption. Defaults and skipped fields use streaming
 decoding so their expressions execute only when required.

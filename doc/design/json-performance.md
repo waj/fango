@@ -13,6 +13,10 @@ record, ID, money, quantity, and UTF-8 byte checksums. `-bytes 500000000`
 selects the larger fixture; `-input FILE` reuses a fixture and its adjacent
 `.meta.json`. Output directories must be new. Run from the Nix development
 shell so the generator uses its Python interpreter.
+`-field-order reverse` reverses every record's keys, including nested shipping
+and item records, while preserving values, byte count, and expected checksums.
+The fixture metadata records its field order. This option selects generated
+fixtures; reuse the resulting input with `-input` for paired comparisons.
 
 One unmeasured warmup per implementation precedes three fresh measured
 processes per implementation, run sequentially with rotating order.
@@ -23,6 +27,12 @@ The harness records every sample, user/system CPU, peak RSS, runtime settings,
 revision, working-tree patch, new implementation sources, exported Go project,
 and checksums. Each subprocess has a ten-minute timeout. These are manual
 same-host measurements, not portable timing gates.
+
+`-no-scan` measures streaming decoding alone. The harness copies the standard
+library into the evidence directory and changes only `attemptScan` to invoke
+its fallback directly, disabling speculative scans for every generated record
+and list. Buffered scalar reads remain enabled. The working library is unchanged;
+the retained snapshot and `scan_enabled` result field identify the variant.
 
 The optional `jsoncompare` Nix shell adds GHC and Aeson without changing the
 ordinary development shell. Include `-aeson` for the Haskell workload and
@@ -62,8 +72,8 @@ outside the timed samples.
 Aeson takes about 2.0× the Go control's time; Fango LLVM takes about 25% less
 time than Aeson, while Fango Go takes about 1.2× Aeson's time. The fixture's
 required record fields arrive in declaration order, exercising generated
-straight-line scanning and bulk encoded key matches. Other record layouts
-use the streaming decoder; these results do not establish their timing.
+straight-line scanning and bulk encoded key matches. These results precede
+pure scan continuation for reordered keys and do not establish its timing.
 Peak RSS is whole-process residency, not retained decoded heap. The Aeson
 input is read into a strict ByteString,
 whereas the other implementations read through buffered readers. The result
@@ -76,6 +86,49 @@ Fango Go changes from 0.2661 s to 0.1662 s (37.6% less time), and LLVM from
 are excluded from the samples. The change combines pure buffered record/list
 decoding, direct integer accumulation, and encoded key matching, rather than
 isolating their individual contributions.
+
+Seven rotated fresh-process runs of that same fixture compare the tuple-based
+streaming record decoder at `5ad6073` with the generated
+[field-argument key loop](json.md). Both streaming variants bypass every record
+and list scan attempt; buffered scalar reads remain enabled. They use the same
+current compiler and remaining library, restoring only the earlier Json source
+for the tuple variant. Compilation, library snapshot construction, and correctness
+tests precede the samples, with one warmup per binary. All checksums match.
+
+| Backend | Tuple slots, Scan disabled | Field arguments, Scan disabled | Field arguments, Scan enabled |
+| --- | ---: | ---: | ---: |
+| Go | 0.2547 s | 0.2212 s | 0.1579 s |
+| LLVM | 0.1581 s | 0.1316 s | 0.0968 s |
+
+Field arguments reduce streaming time by 13.2% on Go and 16.8% on LLVM.
+The same rotated runs measure plain Go at 0.0661 s and Aeson at 0.1251 s.
+Streaming LLVM takes about 5% more time than Aeson's median; keeping Scan
+enabled reduces LLVM time by a further 26.4% and Go time by 28.6%. The fixture
+still has fields in declaration order, so these comparisons measure forced
+streaming of the same data, not the timing of alternative object layouts.
+
+The [pure field-argument scan loop](json.md) is measured against the preceding
+ordered-only scanner with the field-argument streaming decoder unchanged.
+Seven rotated paired fresh-process runs, following one warmup per binary and
+layout, compare the original 10,000,260-byte fixture with `-field-order reverse`.
+Reversal applies to every object, including nested records; values, byte count,
+and expected checksums remain identical. The reversed fixture's SHA-256 is
+`be2044cbff343b735009d36339b623f024ea05aa67e839be093f087d76f2e045`.
+Both variants use the same compiler and runtime settings. All checksums match;
+compilation and correctness suites finish before the measurements.
+
+| Backend | Field order | Ordered-only Scan | Scan with continuation |
+| --- | --- | ---: | ---: |
+| Go | Declaration | 0.1586 s | 0.1589 s |
+| LLVM | Declaration | 0.0962 s | 0.0949 s |
+| Go | Reversed | 0.2291 s | 0.2009 s |
+| LLVM | Reversed | 0.1305 s | 0.1063 s |
+
+Continuation reduces reversed-key time by 12.3% on Go and 18.5% on LLVM.
+Declaration-order timings remain within the observed run variation. On the
+reversed fixture, the same runs measure plain Go at 0.0674 s and Aeson at
+0.1262 s; LLVM takes about 16% less time than Aeson. This comparison measures
+fully reversed keys, rather than the timing of every supported permutation.
 
 `-profile` builds a separate executable and records CPU/allocation profiles and
 MemStats. Its decode boundary precedes the checksum fold, with the decoded

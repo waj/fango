@@ -1,0 +1,40 @@
+import Json exposing (Decode(..))
+import List
+import Result exposing (Result(..))
+import String
+
+type Wide =
+    { a : Int
+    , b : String
+    , c : Bool
+    , d : Maybe Int
+    , e : List Int
+    , f : Float
+    }
+    deriving (Decode, Eq)
+
+type Skipped =
+    { hidden : Int  #[Json.Skip, Json.Default `7`]
+    }
+    deriving (Decode, Eq)
+
+same expected result = case result of
+    Ok value -> value == expected
+    Err _ -> False
+
+main() =
+    expected = Wide { a = 3, b = "wide", c = True, d = Nothing, e = [1, 2], f = 1.5 }
+    print (same expected (Json.parse @Wide "{\"f\":1.5,\"e\":[1,2],\"d\":null,\"c\":true,\"b\":\"wide\",\"a\":3}"))
+    -- Repeated unknown fields exercise the generated loop's skip branch.
+    prefix = String.concat (List.map { _ -> "\"unknown\":null," } (List.range 1 20000))
+    print (same expected (Json.parse @Wide ("{" ++ prefix ++ "\"a\":3,\"b\":\"wide\",\"c\":true,\"d\":null,\"e\":[1,2],\"f\":1.5}")))
+    print (case Json.parse @Wide "{\"f\":1.5,\"e\":[],\"d\":null,\"c\":true,\"b\":\"wide\",\"a\":3,\"d\":null}" of
+            Err error -> error.path == "/d" && error.message == "Duplicate JSON field: d"
+            Ok _ -> False
+    )
+    print (case Json.parse @Wide "{\"f\":1.5,\"e\":[],\"d\":null,\"c\":true,\"b\":\"wide\"}" of
+            Err error -> error.path == "/a" && error.message == "Missing JSON field: a"
+            Ok _ -> False
+    )
+    print (same (Skipped { hidden = 7 }) (Json.parse @Skipped "{}"))
+    print (same (Skipped { hidden = 7 }) (Json.parse @Skipped "{\"hidden\":[{},null]}"))

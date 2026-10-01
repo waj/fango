@@ -63,23 +63,33 @@ Record derivation emits straight-line scanning for required fields in
 declaration order. It matches the serialized key spelling through the text
 reader's bulk `matchWindow`, then scans the value directly into the final
 record. This avoids key decoding, field dispatch callbacks, and optional slots.
-Other key orders, extra fields, alternative escape spellings, unsupported child
-scanners, and incomplete records decline directly to the streaming decoder;
-there is no second speculative record pass. Schemas with defaults or skipped
+On the first unexpected key order, scanning continues from that cursor in a
+generated named local loop, with the already decoded fields passed as `Just`
+arguments and the remaining fields as `Nothing`. The loop consumes object
+separators once, dispatches through bulk encoded key matches, and tail-calls
+itself with the cursor and only the matching field argument replaced. At the
+closing brace it requires every field before constructing the record. Previously
+scanned values are never rescanned by the order transition, and neither path
+constructs decoded key strings. Duplicate or extra fields, alternative escape
+spellings, unsupported child scanners, and incomplete records decline to the
+streaming decoder; there is no second speculative record pass. Schemas with defaults or skipped
 fields always decline, preserving invocation of effectful default expressions.
 Union and generic Value instances also decline. Custom instances can decline
 or compose bundled scan methods while preserving their decode semantics.
 
-The streaming record decoder passes a typed tuple of
-optional field slots through its sequential key loop. Field dispatch returns
-an updated immutable tuple after successful decoding; unknown keys call
-`skipValue` and retain the tuple. These privately owned slots need no local
-handler activation. The decoder never constructs a generic value tree.
+The streaming record decoder generates a named local key loop with a first-key
+flag and one optional argument per field. Key dispatch tail-calls that worker
+with only the matching argument replaced after successful decoding; unknown
+keys call `skipValue` and pass every field argument through unchanged. The
+Meta local-function and sequence builders keep all recursion in tail position,
+including unknown-key handling. The loop needs no aggregate tuple, per-key
+callback, or local handler activation. The decoder never constructs a generic
+value tree.
 List decoding constructs up to eight elements directly in source order, so
 short lists need one spine. Longer lists switch to a tail loop with an
 accumulator and reversal, keeping stack use bounded for large documents.
-Tuple projections and updates are generated in Fango, preserving duplicate,
-required-field, and default checks. Path tracking uses a
+Field dispatch and record construction are generated in Fango, preserving
+duplicate, required-field, and default checks. Path tracking uses a
 cleanup region to restore the enclosing path after normal or exiting decoding.
 The path is a stack of key and index segments, rendered as the slash-separated
 string only when an error is built, so entering a field or element costs one

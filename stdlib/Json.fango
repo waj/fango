@@ -878,6 +878,25 @@ scanObjectEnd cursor = case scanMark '}' cursor of
     Nothing -> Nothing
     Just rest -> Just { rest | allowance = rest.allowance + 1 }
 
+-- Leave the next key at its opening quote, so generated dispatch can compare
+-- encoded spellings without constructing a String for each key.
+scanObjectField : Bool -> Scan -> Maybe (Bool, Scan)
+scanObjectField first cursor = case fastWhite cursor.window cursor.line cursor.column of
+    Nothing -> Nothing
+    Just (start, line, column) -> case TextReader.readWindow start of
+        Ok (Just ('}', width, rest)) -> Just (False, { cursor | window = rest, line = line, column = column + width, allowance = cursor.allowance + 1 })
+        Ok (Just ('"', _, _)) ->
+            if first then Just (True, { cursor | window = start, line = line, column = column })
+            else Nothing
+        Ok (Just (',', width, rest)) ->
+            if first then Nothing
+            else case fastWhite rest line (column + width) of
+                Nothing -> Nothing
+                Just (key, keyLine, keyColumn) -> case TextReader.readWindow key of
+                    Ok (Just ('"', _, _)) -> Just (True, { cursor | window = key, line = keyLine, column = keyColumn })
+                    _ -> Nothing
+        _ -> Nothing
+
 scanElement : Bool -> Scan -> Maybe (Bool, Scan)
 scanElement first cursor = case fastElement cursor.window first cursor.line cursor.column of
     Nothing -> Nothing
@@ -1492,7 +1511,7 @@ deriver Encode
         validateJSONSchema subject
         Meta.match subject valueCode (derivedEncode subject)
 
-type Slot = { field : Field, read : Code, write : Code }
+type Slot = { field : Field, read : Code }
 
 slotValue : Slot -> Code
 slotValue slot =
@@ -1509,44 +1528,56 @@ slotValue slot =
                         Just value -> value
                         Nothing -> $(fallback)`
 
-slotHandler : Code -> Code -> Slot -> Code
-slotHandler keyCode fallback slot =
+callFields : Code -> Code -> Items Code -> Code
+callFields loop first values = Meta.foldItems { call value -> `$(call) $(value)` } `$(loop) $(first)` values
+
+slotHandler : Code -> Items Slot -> Code -> Code -> Slot -> Code
+slotHandler loop slots keyCode fallback slot =
     settings = fieldSettings slot.field.name slot.field.attributes
     if settings.skip then fallback
     else
+        values = Meta.mapItems { candidate ->
+            if candidate.field.index == slot.field.index then
+                `Just (withPath $(lift settings.key) { decodeValue() })`
+            else candidate.read
+        } slots
         `if $(keyCode) == $(lift settings.key) then
                 case $(slot.read) of
-                    Nothing -> $(slot.write) (Just (withPath $(lift settings.key) { decodeValue() }))
+                    Nothing -> $(callFields loop `False` values)
                     Just _ -> withPath $(lift settings.key) { syntaxError $(lift ("Duplicate JSON field: " ++ settings.key)) }
             else $(fallback)`
 
--- A record owns its typed slot tuple; only its sequential key loop can update
--- it. Pass that immutable state through the loop instead of installing a cell.
-readFieldsState : (String -> state ->{Pull, Fail Error} state) -> state ->{Pull, Fail Error} state
-readFieldsState onKey initial =
-    beginObject()
-    readFieldsStateMore onKey True initial
-
-readFieldsStateMore : (String -> state ->{Pull, Fail Error} state) -> Bool -> state ->{Pull, Fail Error} state
-readFieldsStateMore onKey first state =
-    case nextKey first of
-        Nothing -> state
-        Just key -> readFieldsStateMore onKey False (onKey key state)
+fieldSlots : Items Field -> Items Code -> Items Slot
+fieldSlots fields values = case (fields, values) of
+    (NoItems, NoItems) -> NoItems
+    (Item field rest, Item value more) -> Item (Slot { field = field, read = value }) (fieldSlots rest more)
+    _ ->
+        ignore (Meta.fail "Generated JSON field arguments do not match the record fields.")
+        NoItems
 
 recordParser : Ctor -> Code
 recordParser ctor =
-    action = Meta.lambda "_json_key" { keyCode ->
-        Meta.lambda "_json_state" { state ->
-            slots = Meta.mapItems (aggregateSlot state) ctor.fields
-            fallback = sequenceCode `withPath $(keyCode) { skipValue() }` state
-            Meta.foldItems (slotHandler keyCode) fallback slots
-        }
+    parameters = Item "_json_first" (Meta.mapItems { field -> "_json_slot_" ++ show field.index } ctor.fields)
+    body = Meta.localFunction "_json_fields" parameters { loop arguments ->
+        case arguments of
+            NoItems -> Meta.fail "Generated JSON key loop requires its first-key argument."
+            Item first values ->
+                slots = fieldSlots ctor.fields values
+                finish = Meta.construct ctor (Meta.mapItems slotValue slots)
+                case Meta.info (typeOf (Maybe String)) of
+                    Meta.Opaque -> Meta.fail "Expected visible Maybe constructors"
+                    Meta.Visible schema -> Meta.match schema `nextKey $(first)` { bound ->
+                        case bound.fields of
+                            NoItems -> finish
+                            Item key NoItems ->
+                                fallback = Meta.sequence `withPath $(key.value) { skipValue() }` (callFields loop `False` values)
+                                Meta.foldItems (slotHandler loop slots key.value) fallback slots
+                            _ -> Meta.fail "Expected one object key"
+                    }
+    } { loop ->
+        Meta.sequence `beginObject()` (callFields loop `True` (Meta.mapItems { _ -> `Nothing` } ctor.fields))
     }
-    finish = Meta.lambda "_json_slots" { state ->
-        slots = Meta.mapItems (aggregateSlot state) ctor.fields
-        Meta.construct ctor (Meta.mapItems slotValue slots)
-    }
-    `attemptScan scanValue { $(finish) (readFieldsState $(action) $(slotInitial ctor.fields)) }`
+    `attemptScan scanValue { $(body) }`
 
 -- Defaults may execute consumer effects. Leave those schemas on the streaming
 -- decoder rather than speculatively evaluating a default in a pure scan.
@@ -1563,14 +1594,17 @@ appendCode values value = case values of
     NoItems -> Item value NoItems
     Item first rest -> Item first (appendCode rest value)
 
-scanBind : Code -> (Code -> Code) -> Code
-scanBind expression build = case Meta.info (typeOf (Maybe ())) of
+scanOr : Code -> Code -> (Code -> Code) -> Code
+scanOr expression fallback build = case Meta.info (typeOf (Maybe ())) of
     Meta.Opaque -> Meta.fail "Expected visible Maybe constructors"
     Meta.Visible schema -> Meta.match schema expression { bound ->
         case bound.fields of
-            NoItems -> `Nothing`
+            NoItems -> fallback
             Item value _ -> build value.value
     }
+
+scanBind : Code -> (Code -> Code) -> Code
+scanBind expression build = scanOr expression `Nothing` build
 
 scanBindPair : Code -> (Code -> Code -> Code) -> Code
 scanBindPair expression build = scanBind expression { pair ->
@@ -1583,19 +1617,45 @@ scanBindPair expression build = scanBind expression { pair ->
         }
 }
 
-scanOrderedFields : Ctor -> Items Field -> Items Code -> Bool -> Code -> Code
-scanOrderedFields ctor fields values first cursor = case fields of
+scanQuotedKey : Field -> Code
+scanQuotedKey field = case stringify (fieldSettings field.name field.attributes).key of
+    Ok text -> lift text
+    Err _ -> Meta.fail "Invalid JSON field key"
+
+callScanFields : Code -> Code -> Code -> Items Code -> Code
+callScanFields loop cursor first values = callFields `$(loop) $(cursor)` first values
+
+scanFinishFields : Ctor -> Items Slot -> Items Code -> Code -> Code
+scanFinishFields ctor slots values cursor = case slots of
+    NoItems -> `Just ($(Meta.construct ctor values), $(cursor))`
+    Item slot tail -> scanBind slot.read { value -> scanFinishFields ctor tail (appendCode values value) cursor }
+
+scanSlotHandler : Code -> Items Slot -> Code -> Code -> Slot -> Code
+scanSlotHandler loop slots cursor fallback slot =
+    quoted = scanQuotedKey slot.field
+    scanOr `scanExpectedKey True $(quoted) $(cursor)` fallback { start ->
+        scanOr slot.read (scanBindPair `scanValue $(start)` { value rest ->
+                values = Meta.mapItems { candidate ->
+                    if candidate.field.index == slot.field.index then `Just $(value)` else candidate.read
+                } slots
+                callScanFields loop rest `False` values
+        })
+            { _ -> `Nothing` }
+    }
+
+scanOrderedFields : Ctor -> Code -> Items Field -> Items Code -> Bool -> Code -> Code
+scanOrderedFields ctor loop fields values first cursor = case fields of
     NoItems -> scanBind `scanObjectEnd $(cursor)` { rest ->
         `Just ($(Meta.construct ctor values), $(rest))`
     }
     Item field tail ->
-        settings = fieldSettings field.name field.attributes
-        quoted = case stringify settings.key of
-            Ok text -> lift text
-            Err _ -> Meta.fail "Invalid JSON field key"
-        scanBind `scanExpectedKey $(lift first) $(quoted) $(cursor)` { start ->
+        quoted = scanQuotedKey field
+        saved = Meta.mapItems { value -> `Just $(value)` } values
+        pending = Meta.mapItems { _ -> `Nothing` } fields
+        fallback = callScanFields loop cursor (lift first) (Meta.foldItems appendCode saved pending)
+        scanOr `scanExpectedKey $(lift first) $(quoted) $(cursor)` fallback { start ->
             scanBindPair `scanValue $(start)` { value rest ->
-                scanOrderedFields ctor tail (appendCode values value) False rest
+                scanOrderedFields ctor loop tail (appendCode values value) False rest
             }
         }
 
@@ -1604,32 +1664,20 @@ recordScanner ctor =
     if scanRecordSupported ctor.fields == False then `{ _ -> Nothing }`
     else
         Meta.lambda "_json_scan_start" { cursor ->
-            scanBind `scanOpen '{' $(cursor)` { start -> scanOrderedFields ctor ctor.fields NoItems True start }
+            parameters = Item "_json_scan_cursor" (Item "_json_scan_first" (Meta.mapItems { field -> "_json_scan_slot_" ++ show field.index } ctor.fields))
+            Meta.localFunction "_json_scan_fields" parameters { loop arguments ->
+                case arguments of
+                    Item position (Item first values) ->
+                        slots = fieldSlots ctor.fields values
+                        scanBindPair `scanObjectField $(first) $(position)` { more start ->
+                            dispatch = Meta.foldItems (scanSlotHandler loop slots start) `Nothing` slots
+                            `if $(more) then $(dispatch) else $(scanFinishFields ctor slots NoItems start)`
+                        }
+                    _ -> Meta.fail "Generated JSON scan loop requires cursor and first-key arguments."
+            } { loop ->
+                scanBind `scanOpen '{' $(cursor)` { start -> scanOrderedFields ctor loop ctor.fields NoItems True start }
+            }
         }
-
-slotInitial : Items Field -> Code
-slotInitial fields =
-    case fields of
-        NoItems -> `()`
-        Item _ rest -> `(Nothing, $(slotInitial rest))`
-
-slotProjection : Int -> Code -> Code
-slotProjection index values =
-    if index == 0 then `Tuple.first $(values)`
-    else slotProjection (index - 1) `Tuple.second $(values)`
-
-slotUpdate : Int -> Code -> Code -> Code
-slotUpdate index value values =
-    if index == 0 then `($(value), Tuple.second $(values))`
-    else `(Tuple.first $(values), $(slotUpdate (index - 1) value `Tuple.second $(values)`))`
-
-aggregateSlot : Code -> Field -> Slot
-aggregateSlot state field =
-    readCode = slotProjection field.index state
-    writeCode = Meta.lambda ("_json_value_" ++ show field.index) { value ->
-        slotUpdate field.index value state
-    }
-    Slot { field = field, read = readCode, write = writeCode }
 
 nullaryBranch : Code -> Code -> Ctor -> Code
 nullaryBranch tagCode fallback ctor =

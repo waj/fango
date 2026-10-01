@@ -4,7 +4,8 @@ module Meta exposing
     , Field(..), Items(..), Lift(..), Reflected(..), Shape(..), Site
     , TypeInfo(..), TypeRepr
     , args, attributes, construct, ctorsIn, fail, failAt, foldItems, head, info
-    , isVar, lambda, lengthItems, mapItems, match, sameType, typeName
+    , isVar, lambda, lengthItems, localFunction, mapItems, match, sameType
+    , sequence, typeName
     )
 
 import Basics exposing (..)
@@ -277,6 +278,32 @@ lambdaCode = native "$1 == $2"
 lambda : String -> (Code -> Code) -> Code
 lambda name build = lambdaCode name (build (varCode name))
 
+localFunctionStart : String -> Code -> Code -> Code
+localFunctionStart = native "$1 == $2 == $3"
+
+localFunctionParam : Code -> String -> Code
+localFunctionParam = native "$1 == $2"
+
+-- fail stops expansion and reports COMPILE-TIME FAILURE at the splice site.
+fail : String -> Code
+fail = native "$1"
+
+-- Build a named local function, including self-recursive references, and an
+-- expression that uses it. Names must be private and parameters nonempty.
+localFunction : String -> Items String -> (Code -> Items Code -> Code) -> (Code -> Code) -> Code
+localFunction name parameters build use =
+    case parameters of
+        NoItems -> fail "A generated local function requires at least one parameter."
+        Item _ _ ->
+            self = varCode name
+            foldItems localFunctionParam
+                (localFunctionStart name (build self (mapItems varCode parameters)) (use self))
+                parameters
+
+-- Sequence a Unit expression before a result without introducing a lambda.
+sequence : Code -> Code -> Code
+sequence = native "$1 == $2"
+
 matchStart : Code -> Code
 matchStart = native "$1"
 
@@ -328,7 +355,3 @@ match subject scrutinee build =
 -- construct is the other direction, for a method that produces an `a`.
 construct : Ctor -> Items Code -> Code
 construct ctor values = foldItems constructPush (constructStart ctor.owner ctor.index) values
-
--- fail stops expansion and reports COMPILE-TIME FAILURE at the splice site.
-fail : String -> Code
-fail = native "$1"

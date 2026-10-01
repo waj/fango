@@ -153,7 +153,8 @@ ordinary inference. It must supply exactly the class's methods
 (`MISSING METHOD`, `UNKNOWN METHOD`), a class may have only one deriver
 (`DUPLICATE DERIVER`), and — like an instance — it is visible by dependency.
 
-The compiler owns the traversal, so a deriver never invents a binder:
+The compiler supplies reflected field binders; builders provide references
+for any additional private locals:
 
 - `Meta.match : TypeInfo -> Code -> (Bound -> Code) -> Code` builds the
   exhaustive case over the type's constructors and binds every field, handing
@@ -164,6 +165,17 @@ The compiler owns the traversal, so a deriver never invents a binder:
   method that produces an `a`. A record constructor produces a record literal.
 - `Meta.lambda : String -> (Code -> Code) -> Code` builds a lambda and supplies
   its binder as `Code` to the callback. The caller must choose a private name.
+- `Meta.localFunction : String -> Items String -> (Code -> Items Code -> Code) -> (Code -> Code) -> Code`
+  builds a named local function and an expression that uses it. The first
+  callback receives its self-reference and parameter references in order;
+  the second receives its reference for calls, partial applications, or returning
+  the function. Names must be private and distinct. An empty parameter list
+  reports `COMPILE-TIME FAILURE`; a Unit argument can represent a thunk.
+  Saturated self tail calls follow the ordinary
+  [tail-call guarantee](functions.md#tail-call-guarantee).
+- `Meta.sequence : Code -> Code -> Code` builds a block that evaluates the
+  first expression, which must have type Unit, then returns the second.
+  It introduces no lambda, preserving tail position in the second expression.
 
 A `deriver` must precede, in source order, any `deriving` clause that uses it
 — including on a type declared earlier in the same file. The bundled `Derive`

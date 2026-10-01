@@ -27,7 +27,7 @@ to close the remaining gap with Go after the first tenfold speedup over the
 original 10 MB whole-document run (15.159 seconds on its recorded host).
 Shared evidence families, product structs, tagged Maybe/Result, compact enums,
 and value rows are [implemented](design/backend.md#representations-and-abi).
-Derived record decoders pass [immutable field slots](design/json.md) through
+Derived record decoders pass [separate field arguments](design/json.md) through
 their key loop without a local handler activation. State cells synchronize
 only once a task inherits them, the text reader decodes ASCII inline, error
 paths are a segment stack, keys and separators are consumed without
@@ -50,9 +50,10 @@ custom token and generic value consumers, rescanning the first window of a
 boundary-spanning string or literal, and element callbacks that allocate a
 closure over a decoding dictionary. Investigate resumable string/escape phases
 and nonmaterializing string validation for `skipValue` when measurements justify
-them. Investigate continuation from an already scanned record prefix for
-unordered or additional fields, preserving errors and avoiding repeated
-speculative passes over nested values. Reduce dictionary closure construction for nonnumeric scalar comparisons;
+them. Required fields in any order now use [pure scan continuation](design/json.md)
+from the already scanned record prefix. Investigate scanning additional unknown
+fields, preserving validation and avoiding repeated speculative passes over
+nested values. Reduce dictionary closure construction for nonnumeric scalar comparisons;
 the string-scanner experiment exposed per-character closure allocation through
 generic inequality. Preserve invocation-time handler selection, lexical
 shadowing, and gated state synchronization. Parsing and codec derivation remain

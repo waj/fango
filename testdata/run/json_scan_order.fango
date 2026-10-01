@@ -1,0 +1,172 @@
+import Bytes
+import Encoding
+import Json exposing (Decode(..))
+import List
+import Reader
+import Result exposing (Result(..))
+import Runtime.Local
+import Stream
+import String
+import Text.Reader as TextReader
+
+type Wide =
+    { a : Int
+    , b : String
+    , c : Bool
+    , d : Maybe Int
+    , e : List Int
+    , f : Float
+    }
+    deriving (Decode, Eq)
+
+type Named =
+    { a : Int
+    , value : String  #[Json.Key "é\"key"]
+    }
+    deriving (Decode, Eq)
+type Nested = { a : Int, child : Named } deriving (Decode, Eq)
+
+expected = Wide { a = 3, b = "wide", c = True, d = Nothing, e = [1, 2], f = 1.5 }
+fields = ["\"a\":3", "\"b\":\"wide\"", "\"c\":true", "\"d\":null", "\"e\":[1,2]", "\"f\":1.5"]
+
+-- Check all 720 permutations by calling scanValue directly: successful parse
+-- alone would not distinguish pure scanning from streaming fallback.
+orders : List String -> List (List String)
+orders remaining = case remaining of
+    [] -> [[]]
+    _ -> List.foldl { field acc ->
+        List.foldl { tail more -> [[field | tail] | more] } acc (orders (List.filter { other -> other /= field } remaining))
+    } [] remaining
+
+objectFields values = case values of
+    [] -> ""
+    [first | tail] -> List.foldl { field acc -> acc ++ "," ++ field } first tail
+
+scans source = Reader.withBytes (Bytes.fromString (source ++ " 9")) { reader ->
+    case Json.withPull reader {
+        case Json.bufferedScan() of
+            Nothing -> False
+            Just start ->
+                scanned : Maybe (Wide, Json.Scan)
+                scanned = scanValue start
+                case scanned of
+                    Nothing -> False
+                    Just (value, rest) ->
+                        Json.acceptScan rest
+                        position = Json.at()
+                        next : Int
+                        next = decodeValue()
+                        value == expected && position.offset == String.byteLength source && next == 9
+    } of
+        Ok valid -> valid
+        Err _ -> False
+}
+
+declines source = Reader.withBytes (Bytes.fromString source) { reader ->
+    case Json.withPull reader {
+        case Json.bufferedScan() of
+            Nothing -> False
+            Just start ->
+                scanned : Maybe (Wide, Json.Scan)
+                scanned = scanValue start
+                case scanned of
+                    Nothing -> Json.at().offset == 0
+                    Just _ -> False
+    } of
+        Ok valid -> valid
+        Err _ -> False
+}
+
+runChunks chunks = Runtime.Local.run chunks { remaining ->
+    Reader.over (Bytes.Source
+        { pull = {
+            case remaining.read() of
+                [] -> Nothing
+                [chunk | tail] ->
+                    remaining.write tail
+                    Just chunk
+          }
+        }) { reader ->
+        outcome = Json.withPull reader {
+            value : Wide
+            value = decodeValue()
+            value == expected
+        }
+        signature = case outcome of
+            Ok valid -> show valid
+            Err error -> error.message ++ " " ++ show error.offset ++ " " ++ show error.line ++ " " ++ show error.column ++ " " ++ error.path
+        (signature, Bytes.concat (Stream.toList (Reader.chunks reader)))
+        }
+}
+
+sameSplits source =
+    bytes = Bytes.fromString (source ++ "!tail")
+    baseline = runChunks [bytes]
+    List.foldl { index valid ->
+        valid && runChunks [Bytes.slice 0 index bytes, Bytes.slice index (Bytes.length bytes) bytes] == baseline
+    } True (List.range 0 (Bytes.length bytes))
+
+openArrays depth =
+    if depth == 0 then ()
+    else
+        Json.beginArray()
+        openArrays (depth - 1)
+
+scanAtLimit depth = Reader.withBytes (Bytes.fromString (String.padLeft depth '[' "" ++ "{\"é\\\"key\":\"ok\",\"a\":2}{\"a\":3,\"é\\\"key\":\"next\"}")) { reader ->
+    case Json.withPull reader {
+        openArrays depth
+        case Json.bufferedScan() of
+            Nothing -> False
+            Just start ->
+                scanned : Maybe (Named, Json.Scan)
+                scanned = scanValue start
+                case scanned of
+                    Nothing -> Json.at().offset == depth && depth == 256
+                    Just (value, rest) ->
+                        Json.acceptScan rest
+                        next : Named
+                        next = decodeValue()
+                        depth == 255 && value == Named { a = 2, value = "ok" } && next == Named { a = 3, value = "next" }
+    } of
+        Ok valid -> valid
+        Err _ -> False
+}
+
+main() =
+    print (List.foldl { order valid -> valid && scans ("{" ++ objectFields order ++ "}") } True (orders fields))
+    print (scans "{\n\"a\":3,\"f\":1.5,\"b\":\"wide\",\"e\":[1,2],\"c\":true,\"d\":null\n}")
+    print (declines "{\"f\":1.5,\"e\":[1,2],\"d\":null,\"c\":true,\"b\":\"wide\",\"a\":3,\"d\":null}")
+    print (declines "{\"f\":1.5,\"e\":[1,2],\"d\":null,\"c\":true,\"b\":\"wide\"}")
+    print (declines "{\"a\":3,\"f\":1.5,\"b\":\"wide\",\"e\":[1,2],\"c\":true,\"d\":null,}")
+    print (declines "{\"f\":1.5,\"e\":[1,2],\"d\":null,\"c\":true,\"b\":\"wide\",\"a\":3,\"other\":0}")
+    print (Reader.withBytes (Bytes.fromList [123,34,233,92,34,107,101,121,34,58,34,233,34,44,34,97,34,58,51,125]) { reader ->
+        TextReader.overWith Encoding.latin1 reader { text ->
+            case Json.withTextPull text {
+                case Json.bufferedScan() of
+                    Nothing -> False
+                    Just start ->
+                        scanned : Maybe (Named, Json.Scan)
+                        scanned = scanValue start
+                        case scanned of
+                            Nothing -> False
+                            Just (value, rest) ->
+                                Json.acceptScan rest
+                                value == Named { a = 3, value = "é" } && Json.at().offset == 20
+            } of
+                Ok valid -> valid
+                Err _ -> False
+        }
+    })
+    print (case Json.parse @Nested "{\"child\":{\"é\\\"key\":\"ok\",\"a\":2},\"a\":1}" of
+        Ok value -> value == Nested { a = 1, child = Named { a = 2, value = "ok" } }
+        Err _ -> False
+    )
+    print (List.foldl { source valid -> valid && sameSplits source } True
+        [ "{\"a\":3,\"f\":1.5,\"b\":\"wide\",\"e\":[1,2],\"c\":true,\"d\":null}"
+        , "{\"f\":1.5,\"e\":[1,2],\"d\":null,\"c\":true,\"b\":\"wide\",\"a\":3,\"d\":null}"
+        , "{\"f\":1.5,\"e\":[1,2],\"d\":null,\"c\":true,\"b\":\"wide\"}"
+        , "{\"f\":1.5,\"e\":[1,2],\"d\":null,\"c\":true,\"b\":\"wide\",\"a\":3,}"
+        , "{\"f\":1.5,\"e\":[1,2],\"d\":null,\"c\":true,\"b\":\"\\x\",\"a\":3}"
+        , "{\"f\":1.5,\"e\":[1,2],\"d\":null,\"c\":true,\"b\":\"wide\",\"\\u0061\":3}"
+        ])
+    print (scanAtLimit 255 && scanAtLimit 256)
