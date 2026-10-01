@@ -267,6 +267,25 @@ remaining parent bytes, and covers long tokens, Latin-1, escaped surrogate
 pairs, precise byte positions, and source effects. This comparison uses only
 the 10 MB fixture; it does not establish timing for other input shapes.
 
+Passing the derived record's immutable slot tuple through its key loop removes
+the private local handler allocation and its state operations. An ASCII fast
+path in Encoding also avoids the general UTF-8 decoder for single-byte scalars.
+Seven fresh alternating whole-process runs per implementation on the same
+fixture give medians of 0.684 s for the committed buffered scanner (`ff48710`)
+and 0.554 s with loop-carried slots; Go takes 0.068 s. Every checksum matches.
+A separate profiled run allocates 75,081,344 bytes in 3,049,573 events, while
+retaining the same 13.3 MB typed result. Elapsed time falls 19.0%, and allocated
+bytes fall 42.9%. Actual handler snapshot/commit synchronization is
+unchanged.
+
+Three diagnostic layer rounds put typed traversal at 0.537 / 0.526 / 0.519 s
+for file / bytes / text and token traversal at 0.411 / 0.395 / 0.388 s. Pure
+Encoding traversal takes about 0.048 s. Typed file traversal performs
+19,173,294 state snapshots and commits, with the same 1,559,497 byte skips and
+1,223 native reads. All 61 diagnostic samples match their expected checksums.
+The remaining whole-process gap with Go is about 8.2×; token-boundary dispatch
+and token construction remain larger costs than UTF-8 decoding.
+
 Five fresh alternating runs of saved binaries isolate
 [immediate-application lowering](backend.md#representations-and-abi) from
 between-session variation: median time changes from 1.133 s to 1.099 s,

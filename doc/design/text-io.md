@@ -11,7 +11,9 @@ is text. Text operations count Unicode scalars; positions count consumed
 bytes. The opaque encoding type selects UTF-8 or Latin-1 behind a common
 prefix decoder and whole-string encoder. The native UTF-8 scalar probe
 distinguishes end, incomplete input, malformed input, and a valid U+FFFD;
-the sentinel codes stay private to Encoding. JSON has no encoding native.
+ASCII bytes return their scalar value directly, while non-ASCII input uses
+the strict UTF-8 decoder. The sentinel codes stay private to Encoding.
+JSON has no encoding native.
 
 A text reader owns a scoped consumed-byte counter and borrows its parent
 buffer. It stages characters and byte widths without skipping the parent,

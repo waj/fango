@@ -27,7 +27,8 @@ to close the remaining gap with Go after the first tenfold speedup over the
 original 10 MB whole-document run (15.159 seconds on its recorded host).
 Shared evidence families, product structs, tagged Maybe/Result, compact enums,
 and value rows are [implemented](design/backend.md#representations-and-abi).
-Derived record decoders use one [aggregate slot activation](design/json.md).
+Derived record decoders pass [immutable field slots](design/json.md) through
+their key loop without a local handler activation.
 
 The [buffered token path](design/json.md) batches scanner work over immutable
 text windows and materializes buffered numbers once. Reduce remaining

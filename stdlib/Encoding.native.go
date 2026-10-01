@@ -8,6 +8,9 @@ func Utf8CodeAt(bytes []byte, offset int64) int64 {
 	if offset < 0 || offset >= int64(len(bytes)) {
 		return -1
 	}
+	if first := bytes[offset]; first < utf8.RuneSelf {
+		return int64(first)
+	}
 	remaining := bytes[offset:]
 	if !utf8.FullRune(remaining) {
 		return -3

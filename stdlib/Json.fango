@@ -18,7 +18,6 @@ import Maybe exposing (Maybe(..))
 import Meta exposing (Bound(..), BoundField(..), Code, Ctor(..), Field(..), Items(..), Lift(..), Shape(..), TypeInfo(..))
 import Reader exposing (Reader)
 import Result exposing (Result(..))
-import Runtime.Local
 import Runtime.Scope
 import String
 import Text.Reader as TextReader
@@ -674,19 +673,6 @@ readKey() =
         Colon -> Just key
         _ -> syntaxError "Expected colon"
 
-readFields : (String ->{Pull, Fail Error | e} ()) ->{Pull, Fail Error | e} ()
-readFields onKey =
-    beginObject()
-    readFieldsMore onKey True
-
-readFieldsMore : (String ->{Pull, Fail Error | e} ()) -> Bool ->{Pull, Fail Error | e} ()
-readFieldsMore onKey first =
-    case nextKey first of
-        Nothing -> ()
-        Just key ->
-            onKey key
-            readFieldsMore onKey False
-
 expectComma : () ->{Pull, Fail Error} ()
 expectComma() =
     case next() of
@@ -1133,16 +1119,34 @@ slotHandler keyCode fallback slot =
                     Just _ -> withPath $(lift settings.key) { syntaxError $(lift ("Duplicate JSON field: " ++ settings.key)) }
             else $(fallback)`
 
-recordParser : Ctor -> Items Slot -> Code
-recordParser ctor slots =
-    action = Meta.lambda "_json_key" { keyCode ->
-        Meta.foldItems (slotHandler keyCode) `withPath $(keyCode) { skipValue() }` slots
-    }
-    values = Meta.mapItems slotValue slots
-    sequenceCode `readFields $(action)` (Meta.construct ctor values)
+-- A record owns its typed slot tuple; only its sequential key loop can update
+-- it. Pass that immutable state through the loop instead of installing a cell.
+readFieldsState : (String -> state ->{Pull, Fail Error} state) -> state ->{Pull, Fail Error} state
+readFieldsState onKey initial =
+    beginObject()
+    readFieldsStateMore onKey True initial
 
--- A typed tuple of optional fields uses one local activation per record.
--- Generate projections and updates rather than allocating a cell per field.
+readFieldsStateMore : (String -> state ->{Pull, Fail Error} state) -> Bool -> state ->{Pull, Fail Error} state
+readFieldsStateMore onKey first state =
+    case nextKey first of
+        Nothing -> state
+        Just key -> readFieldsStateMore onKey False (onKey key state)
+
+recordParser : Ctor -> Code
+recordParser ctor =
+    action = Meta.lambda "_json_key" { keyCode ->
+        Meta.lambda "_json_state" { state ->
+            slots = Meta.mapItems (aggregateSlot state) ctor.fields
+            fallback = sequenceCode `withPath $(keyCode) { skipValue() }` state
+            Meta.foldItems (slotHandler keyCode) fallback slots
+        }
+    }
+    finish = Meta.lambda "_json_slots" { state ->
+        slots = Meta.mapItems (aggregateSlot state) ctor.fields
+        Meta.construct ctor (Meta.mapItems slotValue slots)
+    }
+    `$(finish) (readFieldsState $(action) $(slotInitial ctor.fields))`
+
 slotInitial : Items Field -> Code
 slotInitial fields =
     case fields of
@@ -1160,25 +1164,12 @@ slotUpdate index value values =
     else `(Tuple.first $(values), $(slotUpdate (index - 1) value `Tuple.second $(values)`))`
 
 aggregateSlot : Code -> Field -> Slot
-aggregateSlot cell field =
-    readCode = slotProjection field.index `$(cell).read()`
+aggregateSlot state field =
+    readCode = slotProjection field.index state
     writeCode = Meta.lambda ("_json_value_" ++ show field.index) { value ->
-        update = Meta.lambda ("_json_state_" ++ show field.index) { values ->
-            `$(cell).write $(slotUpdate field.index value values)`
-        }
-        `$(update) $(cell).read()`
+        slotUpdate field.index value state
     }
     Slot { field = field, read = readCode, write = writeCode }
-
-slotScope : Ctor -> Code
-slotScope ctor =
-    case ctor.fields of
-        NoItems -> recordParser ctor NoItems
-        _ ->
-            callback = Meta.lambda "_json_slots" { cell ->
-                recordParser ctor (Meta.mapItems (aggregateSlot cell) ctor.fields)
-            }
-            `Runtime.Local.run $(slotInitial ctor.fields) $(callback)`
 
 nullaryBranch : Code -> Code -> Ctor -> Code
 nullaryBranch tagCode fallback ctor =
@@ -1219,7 +1210,7 @@ deriver Decode
     decodeValue subject _ =
         validateJSONSchema subject
         case subject.shape of
-            Record ctor -> slotScope ctor
+            Record ctor -> recordParser ctor
             Union ctors -> unionParser ctors
 
 parseBytesValue : Bytes -> Result Error Value
