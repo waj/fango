@@ -4,8 +4,9 @@ module Json exposing
     , Pull(..), Token(..), Value(..)
     , beginArray, beginObject, next, nextElement, nextKey, number, numberText
     , parse, parseBytes, parseBytesValue, parseValue, peek, read, readText
-    , readValue, skipValue, stringify, stringifyValue, syntaxError, withPath
-    , withPull, withTextPull, withTextWriter, withWriter, write, writeText
+    , readValue, skipValue, stringify, stringifyValue, syntaxError, withIndex
+    , withPath, withPull, withTextPull, withTextWriter, withWriter, write
+    , writeText
     )
 
 import Basics exposing (..)
@@ -55,6 +56,7 @@ effect Pull
     peek : () -> Token
     at : () -> Error
     enter : String -> ()
+    enterIndex : Int -> ()
     leave : () -> ()
 
 effect Emit
@@ -172,11 +174,25 @@ validateJSONSchema subject =
             validateRecordFields NoItems ctor.fields
         Union ctors -> validateUnionCtors ctors
 
-type Cursor e = { reader : TextReader.Reader e, offset : Int, line : Int, column : Int, path : String }
+-- One segment of the error path: an object key, or an element index.
+type Segment = { key : String, index : Maybe Int }
+
+-- The path is a stack, innermost segment first. It is rendered only when an
+-- error is built, so entering a field or element allocates one cons.
+type Cursor e = { reader : TextReader.Reader e, offset : Int, line : Int, column : Int, path : List Segment }
+
+segmentText : Segment -> String
+segmentText segment =
+    case segment.index of
+        Just index -> show index
+        Nothing -> segment.key
+
+renderPath : List Segment -> String
+renderPath segments = List.foldl { segment rendered -> "/" ++ segmentText segment ++ rendered } "" segments
 
 errorAt : Cursor e -> String -> Error
 errorAt cursor message =
-    Error { message = message, offset = cursor.offset, line = cursor.line, column = cursor.column, path = cursor.path }
+    Error { message = message, offset = cursor.offset, line = cursor.line, column = cursor.column, path = renderPath cursor.path }
 
 bad : Cursor e -> String ->{Fail Error} a
 bad cursor message = fail (errorAt cursor message)
@@ -568,7 +584,7 @@ lexIncremental before =
                 (NumberToken value, rest)
             else bad cursor "Unexpected character in JSON"
 
-type PullState e = { cursor : Cursor e, pending : Maybe Token, depth : Int, paths : List String }
+type PullState e = { cursor : Cursor e, pending : Maybe Token, depth : Int }
 
 tokenDepth : Token -> Int -> Cursor e ->{Fail Error} Int
 tokenDepth token depth cursor =
@@ -586,7 +602,7 @@ withPull reader action =
 withTextPull : TextReader.Reader e -> (() ->{Pull, Fail Error} a) ->{e} Result Error a
 withTextPull reader action =
     Fail.attempt {
-        handle action() with state = PullState { cursor = Cursor { reader = reader, offset = 0, line = 1, column = 1, path = "" }, pending = Nothing, depth = 0, paths = [] } of
+        handle action() with state = PullState { cursor = Cursor { reader = reader, offset = 0, line = 1, column = 1, path = [] }, pending = Nothing, depth = 0 } of
             peek () ->
                 case state.pending of
                     Just token -> resume token with state
@@ -604,12 +620,13 @@ withTextPull reader action =
                         resume token with { state | cursor = cursor, pending = Nothing, depth = depth }
             at () -> resume (errorAt state.cursor "") with state
             enter segment ->
-                before = state.cursor.path
-                resume () with { state | cursor = { state.cursor | path = before ++ "/" ++ segment }, paths = [before | state.paths] }
+                resume () with { state | cursor = { state.cursor | path = [Segment { key = segment, index = Nothing } | state.cursor.path] } }
+            enterIndex index ->
+                resume () with { state | cursor = { state.cursor | path = [Segment { key = "", index = Just index } | state.cursor.path] } }
             leave () ->
-                case state.paths of
+                case state.cursor.path of
                     [] -> resume () with state
-                    [before | rest] -> resume () with { state | cursor = { state.cursor | path = before }, paths = rest }
+                    [_ | rest] -> resume () with { state | cursor = { state.cursor | path = rest } }
             return value -> value
     }
 
@@ -619,6 +636,10 @@ syntaxError message = fail { at() | message = message }
 withPath : String -> (() ->{Pull, Fail Error} a) ->{Pull, Fail Error} a
 withPath segment action =
     Runtime.Scope.bracket { enter segment } { leave() } { action() }
+
+withIndex : Int -> (() ->{Pull, Fail Error} a) ->{Pull, Fail Error} a
+withIndex index action =
+    Runtime.Scope.bracket { enterIndex index } { leave() } { action() }
 
 beginArray : () ->{Pull, Fail Error} ()
 beginArray() =
@@ -721,7 +742,7 @@ readArray index reverse =
             ignore next()
             List.reverse reverse
         _ ->
-            value = withPath (show index) { readValue() }
+            value = withIndex index { readValue() }
             case next() of
                 Comma -> readArrayAfterComma (index + 1) [value | reverse]
                 EndArray -> List.reverse [value | reverse]
@@ -864,7 +885,7 @@ instance Decode ()
 decodeList : Decode a => Int -> Bool -> List a ->{Pull, Fail Error} List a
 decodeList index first reverse =
     if nextElement first then
-        value = withPath (show index) { decodeValue() }
+        value = withIndex index { decodeValue() }
         decodeList (index + 1) False [value | reverse]
     else List.reverse reverse
 
@@ -1182,8 +1203,8 @@ nullaryBranch tagCode fallback ctor =
 
 fieldDecoder : Field -> Code
 fieldDecoder field =
-    if field.index == 0 then `withPath $(lift (show field.index)) { decodeValue() }`
-    else sequenceCode `expectComma()` `withPath $(lift (show field.index)) { decodeValue() }`
+    if field.index == 0 then `withIndex $(lift field.index) { decodeValue() }`
+    else sequenceCode `expectComma()` `withIndex $(lift field.index) { decodeValue() }`
 
 payloadBranch : Code -> Code -> Ctor -> Code
 payloadBranch tagCode fallback ctor =

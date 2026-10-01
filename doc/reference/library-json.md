@@ -81,7 +81,8 @@ unrelated source/sink effects propagate.
 token, `peek()` reads ahead without consuming it, and `at()` returns the
 current source position. `beginArray`, `nextElement`, `beginObject`, `nextKey`,
 and `skipValue` help decoders consume a container. `withPath segment { ... }`
-adds a segment to errors raised while a custom decoder handles a nested value.
+adds a key segment, and `withIndex index { ... }` an element index, to errors
+raised while a custom decoder handles a nested value.
 `skipValue` validates and
 discards a value without building a tree. `readValue()` builds the generic
 `Json.Value` tree from the current token. `parseValue`, `parseBytesValue`, and

@@ -39,6 +39,9 @@ handler activation. The decoder never constructs a generic value tree.
 Tuple projections and updates are generated in Fango, preserving duplicate,
 required-field, and default checks. Path tracking uses a
 cleanup region to restore the enclosing path after normal or exiting decoding.
+The path is a stack of key and index segments, rendered as the slash-separated
+string only when an error is built, so entering a field or element costs one
+cons and no string construction.
 
 The generic `Json.Value` parser uses the same token stream and is explicitly
 opted into. Numbers in this tree retain their validated source lexeme.
