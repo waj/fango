@@ -22,7 +22,7 @@ invocation boundary. Cancellation-aware socket IO is implemented through
 
 ## JSON and generated-code performance
 
-Use the [typed JSON comparison](design/verification.md#typed-json-comparison)
+Use the [typed JSON comparison](design/json-performance.md)
 to close the remaining gap with Go after the first tenfold speedup over the
 original 10 MB whole-document run (15.159 seconds on its recorded host).
 Shared evidence families, product structs, tagged Maybe/Result, compact enums,
@@ -35,25 +35,30 @@ lookahead, renaming temporaries are elided from emitted Go, and cleanup
 scopes over literal callbacks lower at their call sites. Short decoded lists
 build directly without a reversal, and bound callbacks for simple local
 effect forwarders call the captured operation slot directly; the measured series
-is in the [verification notes](design/verification.md#typed-json-comparison).
+is in the [comparison notes](design/json-performance.md).
 
-The remaining per-token cost is the handler operation itself: an indirect
-closure call, a snapshot and a store of the pull state, and the tuple
-returned by `lex`. Two directions were measured and rejected on this fixture:
-keeping the staged window in the pull state to commit lazily removed every
-per-token reader operation but made the state larger than the chain it
-saved, and a tagged value layout for `Json.Token` (per-constructor or shared
-slots) copied more than the allocation it removed. Any further gain must
-shrink what an operation moves rather than what it allocates: smaller pull
-state, fewer copies of the token and cursor through the operation, and a
-cheaper element-decoder callback (each list element allocates a closure over
-its dictionary). Reduce dictionary closure construction for nonnumeric scalar
-comparisons; the string-scanner experiment exposed per-character closure
-allocation through generic inequality. Preserve invocation-time handler
-selection, lexical shadowing, and gated state synchronization. Parsing and
-codec derivation remain in Fango. Tagged layouts for other sums stay gated on
-a measurement that shows copy cost below allocation cost for the values that
-flow through hot operations.
+The [buffered pull cursor](design/json.md) shares its text window's buffer
+description, defers reader commits to refills and scope exit, and fuses record
+keys and typed scalar reads. Array iteration leaves values for their decoders
+rather than eagerly constructing tokens. These changes replace the earlier
+large-window-in-state experiment; the smaller shared representation is what
+makes deferred commits useful.
+
+Measure remaining costs against the [shared cursor and pure value scans](design/json.md).
+They include handler snapshot/store traffic, token construction for
+custom token and generic value consumers, rescanning the first window of a
+boundary-spanning string or literal, and element callbacks that allocate a
+closure over a decoding dictionary. Investigate resumable string/escape phases
+and nonmaterializing string validation for `skipValue` when measurements justify
+them. Investigate continuation from an already scanned record prefix for
+unordered or additional fields, preserving errors and avoiding repeated
+speculative passes over nested values. Reduce dictionary closure construction for nonnumeric scalar comparisons;
+the string-scanner experiment exposed per-character closure allocation through
+generic inequality. Preserve invocation-time handler selection, lexical
+shadowing, and gated state synchronization. Parsing and codec derivation remain
+in Fango. Tagged value layouts for `Json.Token` copied more than the allocation
+they removed on the recorded fixture; further sum-layout changes remain gated
+on measurements of the values flowing through hot operations.
 
 ## Builder blocks and generators
 

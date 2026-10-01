@@ -19,7 +19,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -27,6 +26,9 @@ import (
 
 //go:embed workload.fango
 var workload string
+
+//go:embed workload.hs
+var haskellWorkload string
 
 //go:embed controls.txt
 var controls string
@@ -79,13 +81,17 @@ func run() error {
 	input := flag.String("input", "", "existing JSON fixture with adjacent .meta.json; otherwise generate")
 	size := flag.Int("bytes", 10000000, "approximate generated input size")
 	runs := flag.Int("runs", 3, "fresh processes per program")
+	warmups := flag.Int("warmups", 1, "unmeasured fresh processes per program")
 	compiler := flag.String("compiler", "", "existing compiler binary; otherwise build working tree")
+
+	aeson := flag.Bool("aeson", false, "also compare Haskell/Aeson (requires the jsoncompare Nix shell)")
+	llvm := flag.Bool("llvm", false, "also compare Fango's LLVM backend")
 	diagnostics := flag.Bool("diagnostics", false, "also isolate reader layers and generated state/evidence dispatch on this fixture")
 	prof := flag.Bool("profile", false, "also build and run a separate instrumented Fango binary")
 	probes := flag.Bool("probes", false, "also check steady-state state/product allocations")
 	flag.Parse()
-	if *out == "" || *runs < 1 || *size < 1000 {
-		return fmt.Errorf("require -out, -runs >= 1 and -bytes >= 1000")
+	if *out == "" || *runs < 1 || *warmups < 0 || *size < 1000 {
+		return fmt.Errorf("require -out, -runs >= 1, -warmups >= 0 and -bytes >= 1000")
 	}
 	repoBytes, err := command("", os.Environ(), "git", "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -167,6 +173,42 @@ func run() error {
 	if _, err = command(repo, env, "go", "build", "-o", filepath.Join(dest, "go"), filepath.Join(dest, "control.go")); err != nil {
 		return err
 	}
+	programs := []string{"go", "fango"}
+	toolchain := map[string]string{}
+	if *llvm {
+		if _, err = command(repo, env, compilerPath, "build", "--backend", "llvm", "-o", filepath.Join(dest, "fango-llvm"), filepath.Join(dest, "main.fango")); err != nil {
+			return err
+		}
+		version, e := command(repo, env, "clang", "--version")
+		if e != nil {
+			return e
+		}
+		toolchain["clang"] = strings.SplitN(strings.TrimSpace(string(version)), "\n", 2)[0]
+		programs = append(programs, "fango-llvm")
+	}
+	if *aeson {
+		source := filepath.Join(dest, "main.hs")
+		if err = os.WriteFile(source, []byte(haskellWorkload), 0644); err != nil {
+			return err
+		}
+		if _, err = command(repo, env, "ghc", "-O2", "-Wall", "-rtsopts", "-package", "aeson", "-outputdir", filepath.Join(dest, "haskell-build"), "-o", filepath.Join(dest, "haskell-aeson"), source); err != nil {
+			return err
+		}
+		version, e := command(repo, env, "ghc", "--numeric-version")
+		if e != nil {
+			return e
+		}
+		toolchain["ghc"] = strings.TrimSpace(string(version))
+		for _, pkg := range []string{"aeson", "text", "bytestring"} {
+			version, e = command(repo, env, "ghc-pkg", "field", pkg, "version", "--simple-output")
+			if e != nil {
+				return e
+			}
+			toolchain[pkg] = strings.TrimSpace(string(version))
+		}
+		toolchain["ghc_flags"] = "-O2 -Wall -rtsopts -package aeson"
+		programs = append(programs, "haskell-aeson")
+	}
 	revision, _ := command(repo, env, "git", "rev-parse", "HEAD")
 	diff, _ := command(repo, env, "git", "diff", "--binary", "HEAD")
 	if err = os.WriteFile(filepath.Join(dest, "working.patch"), diff, 0644); err != nil {
@@ -197,20 +239,44 @@ func run() error {
 	for _, key := range []string{"GOGC", "GOMEMLIMIT", "GOMAXPROCS"} {
 		settings[key] = os.Getenv(key)
 	}
+	if *aeson {
+		settings["GHCRTS"] = os.Getenv("GHCRTS")
+	}
+	binaryHashes := map[string]string{}
+	for _, program := range programs {
+		binary, e := os.ReadFile(filepath.Join(dest, program))
+		if e != nil {
+			return e
+		}
+		binaryHashes[program] = fmt.Sprintf("%x", sha256.Sum256(binary))
+		for warmup := 0; warmup < *warmups; warmup++ {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			c := exec.CommandContext(ctx, filepath.Join(dest, program), fixture)
+			c.Dir, c.Env = repo, env
+			var stderr bytes.Buffer
+			c.Stderr = &stderr
+			output, e := c.Output()
+			cancel()
+			if e != nil {
+				return fmt.Errorf("%s warmup: %w\n%s", program, e, &stderr)
+			}
+			if strings.TrimSpace(string(output)) != expected {
+				return fmt.Errorf("%s warmup checksum mismatch: %s", program, output)
+			}
+		}
+	}
 	var samples []observation
 	save := func() error {
-		data, e := json.MarshalIndent(map[string]any{"revision": strings.TrimSpace(string(revision)), "go_version": runtime.Version(), "platform": runtime.GOOS + "/" + runtime.GOARCH, "environment": settings, "fixture": fixture, "dataset": json.RawMessage(metaBytes), "samples": samples}, "", "  ")
+		data, e := json.MarshalIndent(map[string]any{"revision": strings.TrimSpace(string(revision)), "go_version": runtime.Version(), "toolchain": toolchain, "platform": runtime.GOOS + "/" + runtime.GOARCH, "environment": settings, "fixture": fixture, "dataset": json.RawMessage(metaBytes), "binary_sha256": binaryHashes, "warmups": *warmups, "samples": samples}, "", "  ")
 		if e != nil {
 			return e
 		}
 		return os.WriteFile(filepath.Join(dest, "results.json"), append(data, '\n'), 0644)
 	}
 	for round := 0; round < *runs; round++ {
-		programs := []string{"go", "fango"}
-		if round%2 != 0 {
-			slices.Reverse(programs)
-		}
-		for _, program := range programs {
+		order := append([]string(nil), programs[round%len(programs):]...)
+		order = append(order, programs[:round%len(programs)]...)
+		for _, program := range order {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			c := exec.CommandContext(ctx, filepath.Join(dest, program), fixture)
 			c.Env = env

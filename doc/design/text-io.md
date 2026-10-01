@@ -36,14 +36,30 @@ encodings map them to the same one-byte scalars; any other byte goes through
 revisit this shortcut.
 
 An opaque `Window` snapshots the current immutable bytes and encoding without
-refilling. Pure scalar and span operations derive windows whose private index
-advances only across validated complete scalars. A scanner can abandon a derived
-window without changing the reader, extract text between two positions, or
-commit its consumed prefix with one skip. A commit is valid only once, against
-the originating reader at its unchanged snapshot position. Window operations do
-not own reader state or perform source effects; end of a window is not proof of
-source EOF. This lets [JSON](json.md) keep its common token path pure while
-leaving refills and diagnostic consumption to its incremental path.
+refilling. Its buffer description also records the consumed-byte base and is
+shared across derived windows; only a byte index changes during scanning.
+Pure scalar and span operations advance across validated complete scalars. A
+bulk `matchWindow` encodes the requested valid text using the adapter's encoding
+and compares its prefix directly with the immutable source bytes. An exact
+match is already valid encoded text, so it requires no scalar decoding or
+source-string construction. Mismatch, insufficient bytes, or an unrepresentable
+request declines without inspecting the suffix or advancing the reader. A
+scanner can abandon a derived window without changing the reader, or extract
+text between two positions from the same snapshot. `commitWindow` compares the
+snapshot's absolute position with the reader's consumed-byte counter and skips
+only the new prefix. Equal or earlier commits consume nothing. This permits
+incremental commits against one snapshot without resnapshotting each token.
+
+`refillWindow` first commits the supplied position, then asks the parent to
+grow and returns a fresh snapshot with a source-growth flag. Unconsumed bytes,
+including an incomplete scalar, remain in the parent and precede the new
+chunk. A false flag proves source EOF, even if unconsumed bytes remain; the
+pure window operations alone cannot establish EOF. A source failure during
+refill leaves the committed prefix consumed. Subsequent scanning and commits
+use the new snapshot, while older snapshots remain immutable text values.
+Consumers must not independently advance the reader while using a window
+cursor. [JSON](json.md) keeps a small window in its pull state and publishes
+consumption at boundaries and scope exit.
 Capability records holding the reader callbacks are shared by pointer in
 compiled code; see [backend layouts](backend.md#representations-and-abi).
 

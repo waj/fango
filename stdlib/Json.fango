@@ -1,7 +1,7 @@
 {-# no-prelude #-}
 module Json exposing
     ( Decode(..), Emit(..), Encode(..), Error(..), FieldOption(..), Number
-    , Pull(..), Token(..), Value(..)
+    , Pull(..), Scan, Token(..), Value(..)
     , beginArray, beginObject, next, nextElement, nextKey, number, numberText
     , parse, parseBytes, parseBytesValue, parseValue, peek, read, readText
     , readValue, skipValue, stringify, stringifyValue, syntaxError, withIndex
@@ -55,6 +55,13 @@ effect Pull
     next : () -> Token
     peek : () -> Token
     at : () -> Error
+    arrayElement : Bool -> Bool
+    objectKey : Bool -> Maybe String
+    decodedString : () -> Result String String
+    decodedInt : () -> Result String Int
+    decodedFloat : () -> Result String Float
+    bufferedScan : () -> Maybe Scan
+    acceptScan : Scan -> ()
     enter : String -> ()
     enterIndex : Int -> ()
     leave : () -> ()
@@ -64,6 +71,7 @@ effect Emit
 
 class Decode a
     decodeValue : () ->{Pull, Fail Error} a
+    scanValue : Scan -> Maybe (a, Scan)
 
 class Encode a
     encodeValue : a ->{Emit, Fail Error} ()
@@ -179,7 +187,7 @@ type Segment = { key : String, index : Maybe Int }
 
 -- The path is a stack, innermost segment first. It is rendered only when an
 -- error is built, so entering a field or element allocates one cons.
-type Cursor e = { reader : TextReader.Reader e, offset : Int, line : Int, column : Int, path : List Segment }
+type Cursor = { window : TextReader.Window, ended : Bool, offset : Int, line : Int, column : Int, path : List Segment }
 
 segmentText : Segment -> String
 segmentText segment =
@@ -190,61 +198,93 @@ segmentText segment =
 renderPath : List Segment -> String
 renderPath segments = List.foldl { segment rendered -> "/" ++ segmentText segment ++ rendered } "" segments
 
-errorAt : Cursor e -> String -> Error
+errorAt : Cursor -> String -> Error
 errorAt cursor message =
     Error { message = message, offset = cursor.offset, line = cursor.line, column = cursor.column, path = renderPath cursor.path }
 
-bad : Cursor e -> String ->{Fail Error} a
-bad cursor message = fail (errorAt cursor message)
+-- Grammar and decoding errors publish only the prefix already consumed by the
+-- scanner. A stale outer cleanup position cannot consume that prefix twice.
+badAt : TextReader.Reader e -> Cursor -> Cursor -> String ->{Fail Error | e} a
+badAt reader site consumed message =
+    TextReader.commitWindow reader consumed.window
+    fail (errorAt site message)
 
-encodingError : Cursor e -> Encoding.Error ->{Fail Error} a
-encodingError cursor problem =
-    bad cursor (case problem of
+bad : TextReader.Reader e -> Cursor -> String ->{Fail Error | e} a
+bad reader cursor message = badAt reader cursor cursor message
+
+encodingError : TextReader.Reader e -> Cursor -> Encoding.Error ->{Fail Error | e} a
+encodingError reader cursor problem =
+    bad reader cursor (case problem of
             Encoding.InvalidSequence _ -> "Invalid UTF-8 in JSON input"
             Encoding.IncompleteSequence _ -> "Incomplete UTF-8 in JSON input"
             _ -> Encoding.message problem
     )
 
-peekChar : Cursor e ->{Fail Error | e} Maybe Char
-peekChar cursor =
-    case TextReader.tryPeekChar cursor.reader of
-        Ok value -> value
-        Err problem -> encodingError cursor problem
+-- A complete scalar is obtained by growing the immutable window only at a
+-- boundary. Refill commits its consumed prefix and retains incomplete bytes.
+readyCursor : TextReader.Reader e -> Cursor ->{e} Cursor
+readyCursor reader cursor =
+    needsInput = case TextReader.peekWindow cursor.window of
+        Ok Nothing -> True
+        Err (Encoding.IncompleteSequence _) -> True
+        _ -> False
+    if needsInput && cursor.ended == False then
+        (snapshot, grew) = TextReader.refillWindow reader cursor.window
+        readyCursor reader { cursor | window = snapshot, ended = grew == False }
+    else cursor
 
-takeChar : Cursor e ->{Fail Error | e} (Maybe Char, Cursor e)
-takeChar cursor =
-    case TextReader.tryReadScalar cursor.reader of
-        Err problem -> encodingError cursor problem
-        Ok Nothing -> (Nothing, cursor)
-        Ok (Just (char, size)) ->
+peekChar : TextReader.Reader e -> Cursor ->{Fail Error | e} (Maybe Char, Cursor)
+peekChar reader cursor =
+    case TextReader.peekWindow cursor.window of
+        Ok Nothing ->
+            if cursor.ended then (Nothing, cursor)
+            else peekChar reader (readyCursor reader cursor)
+        Ok (Just (char, _)) -> (Just char, cursor)
+        Err (Encoding.IncompleteSequence _) ->
+            if cursor.ended then encodingError reader cursor (Encoding.IncompleteSequence cursor.offset)
+            else peekChar reader (readyCursor reader cursor)
+        Err problem -> encodingError reader cursor problem
+
+takeChar : TextReader.Reader e -> Cursor ->{Fail Error | e} (Maybe Char, Cursor)
+takeChar reader cursor =
+    case TextReader.readWindow cursor.window of
+        Err (Encoding.IncompleteSequence _) ->
+            if cursor.ended then encodingError reader cursor (Encoding.IncompleteSequence cursor.offset)
+            else takeChar reader (readyCursor reader cursor)
+        Err problem -> encodingError reader cursor problem
+        Ok Nothing ->
+            if cursor.ended then (Nothing, cursor)
+            else takeChar reader (readyCursor reader cursor)
+        Ok (Just (char, size, snapshot)) ->
             if char == '\n' then
-                (Just char, { cursor | offset = cursor.offset + size, line = cursor.line + 1, column = 1 })
+                (Just char, { cursor | window = snapshot, offset = cursor.offset + size, line = cursor.line + 1, column = 1 })
             else
-                (Just char, { cursor | offset = cursor.offset + size, column = cursor.column + size })
+                (Just char, { cursor | window = snapshot, offset = cursor.offset + size, column = cursor.column + size })
 
 white : Char -> Bool
 white char = char == ' ' || char == '\t' || char == '\n' || char == '\r'
 
-skipWhite : Cursor e ->{Fail Error | e} Cursor e
-skipWhite cursor =
-    case peekChar cursor of
+skipWhite : TextReader.Reader e -> Cursor ->{Fail Error | e} Cursor
+skipWhite reader cursor =
+    (got, ready) = peekChar reader cursor
+    case got of
         Just char ->
             if white char then
-                (_, after) = takeChar cursor
-                skipWhite after
-            else cursor
-        Nothing -> cursor
+                (_, after) = takeChar reader ready
+                skipWhite reader after
+            else ready
+        Nothing -> ready
 
-expectChar : Cursor e -> Char ->{Fail Error | e} Cursor e
-expectChar cursor wanted =
-    (got, after) = takeChar cursor
-    if got == Just wanted then after else bad cursor "Invalid JSON literal"
+expectChar : TextReader.Reader e -> Cursor -> Char ->{Fail Error | e} Cursor
+expectChar reader cursor wanted =
+    (got, after) = takeChar reader cursor
+    if got == Just wanted then after else badAt reader cursor after "Invalid JSON literal"
 
-literal : Cursor e -> String ->{Fail Error | e} Cursor e
-literal cursor text =
+literal : TextReader.Reader e -> Cursor -> String ->{Fail Error | e} Cursor
+literal reader cursor text =
     case String.uncons text of
         Nothing -> cursor
-        Just part -> literal (expectChar cursor part.first) part.rest
+        Just part -> literal reader (expectChar reader cursor part.first) part.rest
 
 hex : Char -> Int
 hex char =
@@ -254,47 +294,47 @@ hex char =
     else if char >= 'a' && char <= 'f' then code - Char.toCode 'a' + 10
     else -1
 
-readHex : Cursor e -> Int -> Int ->{Fail Error | e} (Int, Cursor e)
-readHex cursor remaining acc =
+readHex : TextReader.Reader e -> Cursor -> Int -> Int ->{Fail Error | e} (Int, Cursor)
+readHex reader cursor remaining acc =
     if remaining == 0 then (acc, cursor)
     else
-        (got, after) = takeChar cursor
+        (got, after) = takeChar reader cursor
         case got of
-            Nothing -> bad cursor "Incomplete Unicode escape"
+            Nothing -> bad reader after "Incomplete Unicode escape"
             Just char ->
                 nibble = hex char
-                if nibble < 0 then bad cursor "Invalid Unicode escape"
-                else readHex after (remaining - 1) (acc * 16 + nibble)
+                if nibble < 0 then badAt reader cursor after "Invalid Unicode escape"
+                else readHex reader after (remaining - 1) (acc * 16 + nibble)
 
-scalar : Cursor e -> Int ->{Fail Error} Char
-scalar cursor code =
+scalar : TextReader.Reader e -> Cursor -> Int ->{Fail Error | e} Char
+scalar reader cursor code =
     case Char.fromCode code of
         Just char -> char
-        Nothing -> bad cursor "Invalid Unicode scalar"
+        Nothing -> bad reader cursor "Invalid Unicode scalar"
 
-escaped : Cursor e ->{Fail Error | e} (Char, Cursor e)
-escaped cursor =
-    (got, after) = takeChar cursor
+escaped : TextReader.Reader e -> Cursor ->{Fail Error | e} (Char, Cursor)
+escaped reader cursor =
+    (got, after) = takeChar reader cursor
     case got of
         Just '"' -> ('"', after)
         Just '\\' -> ('\\', after)
         Just '/' -> ('/', after)
-        Just 'b' -> (scalar cursor 8, after)
-        Just 'f' -> (scalar cursor 12, after)
+        Just 'b' -> (scalar reader after 8, after)
+        Just 'f' -> (scalar reader after 12, after)
         Just 'n' -> ('\n', after)
         Just 'r' -> ('\r', after)
         Just 't' -> ('\t', after)
         Just 'u' ->
-            (code, afterHex) = readHex after 4 0
-            if code >= 56320 && code <= 57343 then bad cursor "Unexpected low surrogate"
+            (code, afterHex) = readHex reader after 4 0
+            if code >= 56320 && code <= 57343 then badAt reader cursor afterHex "Unexpected low surrogate"
             else if code >= 55296 && code <= 56319 then
-                afterSlash = expectChar afterHex '\\'
-                afterU = expectChar afterSlash 'u'
-                (low, rest) = readHex afterU 4 0
-                if low < 56320 || low > 57343 then bad afterU "Invalid surrogate pair"
-                else (scalar cursor (65536 + (code - 55296) * 1024 + low - 56320), rest)
-            else (scalar cursor code, afterHex)
-        _ -> bad cursor "Invalid JSON escape"
+                afterSlash = expectChar reader afterHex '\\'
+                afterU = expectChar reader afterSlash 'u'
+                (low, rest) = readHex reader afterU 4 0
+                if low < 56320 || low > 57343 then badAt reader afterU rest "Invalid surrogate pair"
+                else (scalar reader rest (65536 + (code - 55296) * 1024 + low - 56320), rest)
+            else (scalar reader afterHex code, afterHex)
+        _ -> badAt reader cursor after "Invalid JSON escape"
 
 plainStringChar : Char -> Bool
 plainStringChar char = case char of
@@ -302,8 +342,6 @@ plainStringChar char = case char of
     '\\' -> False
     _ -> Char.toCode char >= 32
 
--- Keep the current fragment outside the list so one-window strings need no
--- list nodes or concatenation. Longer strings still concatenate only once.
 stringFragments : String -> List String -> String
 stringFragments current reverse =
     case reverse of
@@ -313,101 +351,99 @@ stringFragments current reverse =
 priorFragment : String -> List String -> List String
 priorFragment current reverse = if current == "" then reverse else [current | reverse]
 
-scanString : Cursor e -> String -> List String ->{Fail Error | e} (String, Cursor e)
-scanString cursor current reverse =
-    case TextReader.tryReadSpan cursor.reader plainStringChar of
-        Err problem -> encodingError cursor problem
-        Ok (text, width) ->
-            if text == "" then scanStringSpecial cursor current reverse
-            else
-                scanStringSpecial { cursor | offset = cursor.offset + width, column = cursor.column + width } text (priorFragment current reverse)
-
-scanStringSpecial : Cursor e -> String -> List String ->{Fail Error | e} (String, Cursor e)
-scanStringSpecial cursor current reverse =
-    (got, after) = takeChar cursor
-    case got of
-        Nothing -> bad cursor "Unterminated JSON string"
-        Just '"' -> (stringFragments current reverse, after)
-        Just '\\' ->
-            (char, rest) = escaped after
-            scanString rest (String.fromChar char) (priorFragment current reverse)
-        Just char ->
-            if Char.toCode char < 32 then bad cursor "Unescaped control character in JSON string"
-            else scanString after (String.fromChar char) (priorFragment current reverse)
+scanString : TextReader.Reader e -> Cursor -> String -> List String ->{Fail Error | e} (String, Cursor)
+scanString reader cursor current reverse =
+    case TextReader.spanWindow cursor.window plainStringChar of
+        Err (Encoding.IncompleteSequence _) ->
+            if cursor.ended then encodingError reader cursor (Encoding.IncompleteSequence cursor.offset)
+            else scanString reader (readyCursor reader cursor) current reverse
+        Err problem -> encodingError reader cursor problem
+        Ok (text, width, snapshot) ->
+            afterPlain = { cursor | window = snapshot, offset = cursor.offset + width, column = cursor.column + width }
+            fragment = if text == "" then current else text
+            fragments = if text == "" then reverse else priorFragment current reverse
+            (got, after) = takeChar reader afterPlain
+            case got of
+                Nothing -> bad reader after "Unterminated JSON string"
+                Just '"' -> (stringFragments fragment fragments, after)
+                Just '\\' ->
+                    (char, rest) = escaped reader after
+                    scanString reader rest (String.fromChar char) (priorFragment fragment fragments)
+                Just char ->
+                    if Char.toCode char < 32 then badAt reader afterPlain after "Unescaped control character in JSON string"
+                    else scanString reader after (String.fromChar char) (priorFragment fragment fragments)
 
 digit : Char -> Bool
 digit char = char >= '0' && char <= '9'
 
-digits : Cursor e -> List String ->{Fail Error | e} (List String, Cursor e)
-digits cursor reverse =
-    case TextReader.tryReadSpan cursor.reader digit of
-        Err problem -> encodingError cursor problem
-        Ok (text, width) ->
-            if text == "" then (reverse, cursor)
-            else
-                digits { cursor | offset = cursor.offset + width, column = cursor.column + width } [text | reverse]
+type NumberPhase = MinusDigit | ZeroEnd | WholeDigits | FractionDigit | FractionDigits | ExponentSign | ExponentDigit | ExponentDigits | NumberEnd | BadMinus | BadDigit | BadZero
 
-requiredDigits : Cursor e -> List String ->{Fail Error | e} (List String, Cursor e)
-requiredDigits cursor reverse =
-    case peekChar cursor of
-        Just char -> if digit char then digits cursor reverse else bad cursor "Expected JSON digit"
-        Nothing -> bad cursor "Expected JSON digit"
+type NumberRun = { window : TextReader.Window, phase : NumberPhase, done : Bool, message : String, site : Int }
 
-scanNumber : Cursor e -> Char ->{Fail Error | e} (String, Cursor e)
-scanNumber cursor first =
-    if first == '-' then
-        (got, after) = takeChar cursor
-        case got of
-            Just char -> if digit char then numberTail after char [String.fromChar char, "-"] else bad cursor "Expected digit after minus"
-            Nothing -> bad cursor "Expected digit after minus"
-    else numberTail cursor first [String.fromChar first]
+-- A pure loop over one text window. Only scalar positions and a small enum
+-- move through the digit loop; the reader and JSON cursor stay outside it.
+numberRun : TextReader.Window -> NumberPhase -> NumberRun
+numberRun snapshot phase =
+    case TextReader.readWindow snapshot of
+        Ok (Just (char, _, rest)) ->
+            following = case phase of
+                MinusDigit -> if char == '0' then ZeroEnd else if digit char then WholeDigits else BadMinus
+                ZeroEnd -> if digit char then BadZero else if char == '.' then FractionDigit else if char == 'e' || char == 'E' then ExponentSign else NumberEnd
+                WholeDigits -> if digit char then WholeDigits else if char == '.' then FractionDigit else if char == 'e' || char == 'E' then ExponentSign else NumberEnd
+                FractionDigit -> if digit char then FractionDigits else BadDigit
+                FractionDigits -> if digit char then FractionDigits else if char == 'e' || char == 'E' then ExponentSign else NumberEnd
+                ExponentSign -> if char == '+' || char == '-' then ExponentDigit else if digit char then ExponentDigits else BadDigit
+                ExponentDigit -> if digit char then ExponentDigits else BadDigit
+                ExponentDigits -> if digit char then ExponentDigits else NumberEnd
+                _ -> NumberEnd
+            case following of
+                NumberEnd -> NumberRun { window = snapshot, phase = phase, done = True, message = "", site = 0 }
+                BadMinus -> NumberRun { window = rest, phase = phase, done = False, message = "Expected digit after minus", site = TextReader.windowPosition snapshot }
+                BadDigit -> NumberRun { window = snapshot, phase = phase, done = False, message = "Expected JSON digit", site = TextReader.windowPosition snapshot }
+                BadZero -> NumberRun { window = snapshot, phase = phase, done = False, message = "Leading zero in JSON number", site = TextReader.windowPosition snapshot }
+                _ -> numberRun rest following
+        _ -> NumberRun { window = snapshot, phase = phase, done = False, message = "", site = 0 }
 
-numberTail : Cursor e -> Char -> List String ->{Fail Error | e} (String, Cursor e)
-numberTail cursor first reverse =
-    (whole, afterWhole) =
-        if first == '0' then (reverse, cursor) else digits cursor reverse
-    case peekChar afterWhole of
-        Just char -> if digit char then bad afterWhole "Leading zero in JSON number" else ()
-        Nothing -> ()
-    (fraction, afterFraction) =
-        case peekChar afterWhole of
-            Just '.' ->
-                (_, afterDot) = takeChar afterWhole
-                requiredDigits afterDot ["." | whole]
-            _ -> (whole, afterWhole)
-    (complete, afterExponent) =
-        case peekChar afterFraction of
-            Just 'e' -> exponent afterFraction fraction
-            Just 'E' -> exponent afterFraction fraction
-            _ -> (fraction, afterFraction)
-    ( case complete of
-        [] -> ""
-        [single] -> single
-        [lastPart, firstPart] -> firstPart ++ lastPart
-        _ -> String.concat (List.reverse complete)
-    , afterExponent
-    )
+numberComplete : NumberPhase -> Bool
+numberComplete phase = case phase of
+    ZeroEnd -> True
+    WholeDigits -> True
+    FractionDigits -> True
+    ExponentDigits -> True
+    _ -> False
 
-exponent : Cursor e -> List String ->{Fail Error | e} (List String, Cursor e)
-exponent cursor reverse =
-    (marker, afterMarker) = takeChar cursor
-    case marker of
-        Nothing -> bad cursor "Invalid JSON exponent"
-        Just mark ->
-            (prefix, afterSign) =
-                case peekChar afterMarker of
-                    Just '+' ->
-                        (_, rest) = takeChar afterMarker
-                        (["+", String.fromChar mark | reverse], rest)
-                    Just '-' ->
-                        (_, rest) = takeChar afterMarker
-                        (["-", String.fromChar mark | reverse], rest)
-                    _ -> ([String.fromChar mark | reverse], afterMarker)
-            requiredDigits afterSign prefix
+numberWindows : TextReader.Reader e -> TextReader.Window -> Cursor -> NumberPhase -> List String ->{Fail Error | e} (String, Cursor)
+numberWindows reader start cursor phase reverse =
+    scanned = numberRun cursor.window phase
+    base = TextReader.windowPosition cursor.window
+    width = TextReader.windowPosition scanned.window - base
+    after = { cursor | window = scanned.window, offset = cursor.offset + width, column = cursor.column + width }
+    if scanned.message == "" then
+        text = case TextReader.windowText start scanned.window of
+            Ok value -> value
+            Err problem -> encodingError reader after problem
+        if scanned.done then (stringFragments text reverse, after)
+        else
+            ready = readyCursor reader after
+            case TextReader.peekWindow ready.window of
+                Err problem -> encodingError reader ready problem
+                Ok Nothing ->
+                    if numberComplete scanned.phase then (stringFragments text reverse, ready)
+                    else bad reader ready (case scanned.phase of
+                            MinusDigit -> "Expected digit after minus"
+                            _ -> "Expected JSON digit"
+                    )
+                Ok (Just _) -> numberWindows reader ready.window ready scanned.phase (priorFragment text reverse)
+    else
+        siteWidth = scanned.site - base
+        site = { cursor | offset = cursor.offset + siteWidth, column = cursor.column + siteWidth }
+        badAt reader site after scanned.message
 
--- The buffered path is pure and publishes its consumed prefix once. A window
--- boundary or malformed token declines without changing the reader; the
--- incremental scanner below then owns refills, failure positions and effects.
+scanNumber : TextReader.Reader e -> TextReader.Window -> Cursor -> Char ->{Fail Error | e} (String, Cursor)
+scanNumber reader start cursor first =
+    phase = if first == '-' then MinusDigit else if first == '0' then ZeroEnd else WholeDigits
+    numberWindows reader start cursor phase []
+
 fastWhite : TextReader.Window -> Int -> Int -> Maybe (TextReader.Window, Int, Int)
 fastWhite snapshot line column =
     case TextReader.readWindow snapshot of
@@ -485,37 +521,14 @@ fastString snapshot current reverse =
                     Just (char, afterEscape) -> fastString afterEscape (String.fromChar char) (priorFragment fragment fragments)
                 _ -> Nothing
 
-type NumberPhase = MinusDigit | ZeroEnd | WholeDigits | FractionDigit | FractionDigits | ExponentSign | ExponentDigit | ExponentDigits
-
 fastNumber : TextReader.Window -> TextReader.Window -> NumberPhase -> Maybe (String, TextReader.Window)
 fastNumber start snapshot phase =
-    -- A number needs a following scalar: buffer end cannot prove token end.
-    case TextReader.readWindow snapshot of
-        Ok (Just (char, _, rest)) ->
-            nextPhase = case phase of
-                MinusDigit -> if char == '0' then Just ZeroEnd else if digit char then Just WholeDigits else Nothing
-                ZeroEnd -> if char == '.' then Just FractionDigit else if char == 'e' || char == 'E' then Just ExponentSign else Nothing
-                WholeDigits -> if digit char then Just WholeDigits else if char == '.' then Just FractionDigit else if char == 'e' || char == 'E' then Just ExponentSign else Nothing
-                FractionDigit -> if digit char then Just FractionDigits else Nothing
-                FractionDigits -> if digit char then Just FractionDigits else if char == 'e' || char == 'E' then Just ExponentSign else Nothing
-                ExponentSign -> if char == '+' || char == '-' then Just ExponentDigit else if digit char then Just ExponentDigits else Nothing
-                ExponentDigit -> if digit char then Just ExponentDigits else Nothing
-                ExponentDigits -> if digit char then Just ExponentDigits else Nothing
-            case nextPhase of
-                Just following -> fastNumber start rest following
-                Nothing ->
-                    complete = case phase of
-                        ZeroEnd -> digit char == False
-                        WholeDigits -> True
-                        FractionDigits -> True
-                        ExponentDigits -> True
-                        _ -> False
-                    if complete then
-                        case TextReader.windowText start snapshot of
-                            Ok text -> Just (text, snapshot)
-                            Err _ -> Nothing
-                    else Nothing
-        _ -> Nothing
+    scanned = numberRun snapshot phase
+    if scanned.done then
+        case TextReader.windowText start scanned.window of
+            Ok text -> Just (text, scanned.window)
+            Err _ -> Nothing
+    else Nothing
 
 fastToken : TextReader.Window -> Maybe (Token, TextReader.Window)
 fastToken snapshot =
@@ -548,24 +561,24 @@ fastToken snapshot =
                 else Nothing
         _ -> Nothing
 
-lex : Cursor e ->{Fail Error | e} (Token, Cursor e)
-lex before =
-    snapshot = TextReader.window before.reader
-    case fastWhite snapshot before.line before.column of
-        Nothing -> lexIncremental before
+-- Buffered tokens need no reader movement. Boundary and error cases resume
+-- with the source-aware scanner, preserving precise diagnostic consumption.
+lex : TextReader.Reader e -> Cursor ->{Fail Error | e} (Token, Cursor)
+lex reader before =
+    case fastWhite before.window before.line before.column of
+        Nothing -> lexStreaming reader before
         Just (start, line, column) -> case fastToken start of
-            Nothing -> lexIncremental before
+            Nothing -> lexStreaming reader before
             Just (token, rest) ->
-                width = TextReader.windowPosition rest
-                TextReader.commitWindow before.reader rest
-                (token, { before | offset = before.offset + width, line = line, column = column + width - TextReader.windowPosition start })
+                width = TextReader.windowPosition rest - TextReader.windowPosition before.window
+                (token, { before | window = rest, offset = before.offset + width, line = line, column = column + TextReader.windowPosition rest - TextReader.windowPosition start })
 
-lexIncremental : Cursor e ->{Fail Error | e} (Token, Cursor e)
-lexIncremental before =
-    cursor = skipWhite before
-    (got, after) = takeChar cursor
+lexStreaming : TextReader.Reader e -> Cursor ->{Fail Error | e} (Token, Cursor)
+lexStreaming reader before =
+    cursor = skipWhite reader before
+    (got, after) = takeChar reader cursor
     case got of
-        Nothing -> (EndInput, cursor)
+        Nothing -> (EndInput, after)
         Just '{' -> (BeginObject, after)
         Just '}' -> (EndObject, after)
         Just '[' -> (BeginArray, after)
@@ -573,27 +586,322 @@ lexIncremental before =
         Just ':' -> (Colon, after)
         Just ',' -> (Comma, after)
         Just '"' ->
-            (value, rest) = scanString after "" []
+            (value, rest) = scanString reader after "" []
             (StringTokenValue value, rest)
-        Just 't' -> (BooleanToken True, literal after "rue")
-        Just 'f' -> (BooleanToken False, literal after "alse")
-        Just 'n' -> (NullToken, literal after "ull")
+        Just 't' -> (BooleanToken True, literal reader after "rue")
+        Just 'f' -> (BooleanToken False, literal reader after "alse")
+        Just 'n' -> (NullToken, literal reader after "ull")
         Just char ->
             if char == '-' || digit char then
-                (value, rest) = scanNumber after char
+                (value, rest) = scanNumber reader cursor.window after char
                 (NumberToken value, rest)
-            else bad cursor "Unexpected character in JSON"
+            else badAt reader cursor after "Unexpected character in JSON"
 
-type PullState e = { cursor : Cursor e, pending : Maybe Token, depth : Int }
+type PullState = { cursor : Cursor, pending : Maybe Token, depth : Int }
 
-tokenDepth : Token -> Int -> Cursor e ->{Fail Error} Int
-tokenDepth token depth cursor =
+-- A pure, bounded view of one immutable text window. A completed value keeps
+-- its container allowance unchanged; errors and boundaries decline the view.
+type Scan = { window : TextReader.Window, line : Int, column : Int, allowance : Int }
+
+attemptScan : (Scan -> Maybe (a, Scan)) -> (() ->{Pull, Fail Error} a) ->{Pull, Fail Error} a
+attemptScan scan fallback =
+    case bufferedScan() of
+        Nothing -> fallback()
+        Just start -> case scan start of
+            Nothing -> fallback()
+            Just (value, rest) ->
+                acceptScan rest
+                value
+
+tokenDepth : TextReader.Reader e -> Token -> Int -> Cursor ->{Fail Error | e} Int
+tokenDepth reader token depth cursor =
     case token of
-        BeginArray -> if depth >= 256 then bad cursor "JSON nesting exceeds 256 levels" else depth + 1
-        BeginObject -> if depth >= 256 then bad cursor "JSON nesting exceeds 256 levels" else depth + 1
+        BeginArray -> if depth >= 256 then bad reader cursor "JSON nesting exceeds 256 levels" else depth + 1
+        BeginObject -> if depth >= 256 then bad reader cursor "JSON nesting exceeds 256 levels" else depth + 1
         EndArray -> depth - 1
         EndObject -> depth - 1
         _ -> depth
+
+consumeToken : TextReader.Reader e -> PullState ->{Fail Error | e} (Token, PullState)
+consumeToken reader state =
+    (token, cursor) = case state.pending of
+        Just token -> (token, state.cursor)
+        Nothing -> lex reader state.cursor
+    depth = tokenDepth reader token state.depth cursor
+    (token, { state | cursor = cursor, pending = Nothing, depth = depth })
+
+elementStart : TextReader.Reader e -> Bool -> PullState ->{Fail Error | e} (Bool, PullState)
+elementStart reader trailing state =
+    case state.pending of
+        Just EndArray ->
+            (_, after) = consumeToken reader state
+            if trailing then bad reader after.cursor "Trailing array comma" else (False, after)
+        Just _ -> (True, state)
+        Nothing ->
+            ready = skipWhite reader state.cursor
+            (got, cursor) = peekChar reader ready
+            if got == Just ']' then
+                (_, rest) = takeChar reader cursor
+                after = { state | cursor = rest, depth = state.depth - 1 }
+                if trailing then bad reader rest "Trailing array comma" else (False, after)
+            else (True, { state | cursor = cursor })
+
+elementState : TextReader.Reader e -> Bool -> PullState ->{Fail Error | e} (Bool, PullState)
+elementState reader first state =
+    if first then elementStart reader False state
+    else
+        (separator, after) = consumeToken reader state
+        case separator of
+            EndArray -> (False, after)
+            Comma -> elementStart reader True after
+            _ -> bad reader after.cursor "Expected comma or array end"
+
+type ElementRun = { more : Bool, window : TextReader.Window, line : Int, column : Int }
+
+fastElementStart : TextReader.Window -> Bool -> Int -> Int -> Maybe ElementRun
+fastElementStart snapshot trailing line column =
+    case fastWhite snapshot line column of
+        Nothing -> Nothing
+        Just (start, nextLine, nextColumn) -> case TextReader.readWindow start of
+            Ok (Just (']', width, rest)) ->
+                if trailing then Nothing else Just (ElementRun { more = False, window = rest, line = nextLine, column = nextColumn + width })
+            Ok (Just _) -> Just (ElementRun { more = True, window = start, line = nextLine, column = nextColumn })
+            _ -> Nothing
+
+fastElement : TextReader.Window -> Bool -> Int -> Int -> Maybe ElementRun
+fastElement snapshot first line column =
+    if first then fastElementStart snapshot False line column
+    else case fastWhite snapshot line column of
+        Nothing -> Nothing
+        Just (start, nextLine, nextColumn) -> case TextReader.readWindow start of
+            Ok (Just (']', width, rest)) -> Just (ElementRun { more = False, window = rest, line = nextLine, column = nextColumn + width })
+            Ok (Just (',', width, rest)) -> fastElementStart rest True nextLine (nextColumn + width)
+            _ -> Nothing
+
+colonState : TextReader.Reader e -> String -> PullState ->{Fail Error | e} (Maybe String, PullState)
+colonState reader key state =
+    (token, after) = consumeToken reader state
+    case token of
+        Colon -> (Just key, after)
+        _ -> bad reader after.cursor "Expected colon"
+
+keyState : TextReader.Reader e -> Bool -> PullState ->{Fail Error | e} (Maybe String, PullState)
+keyState reader first state =
+    (token, after) = consumeToken reader state
+    case token of
+        EndObject -> (Nothing, after)
+        StringTokenValue key ->
+            if first then colonState reader key after
+            else bad reader after.cursor "Expected comma or object end"
+        Comma ->
+            if first then bad reader after.cursor "Expected object key"
+            else
+                (keyToken, afterKey) = consumeToken reader after
+                case keyToken of
+                    EndObject -> bad reader afterKey.cursor "Trailing object comma"
+                    StringTokenValue key -> colonState reader key afterKey
+                    _ -> bad reader afterKey.cursor "Expected object key"
+        _ -> bad reader after.cursor (if first then "Expected object key" else "Expected comma or object end")
+
+type KeyRun = { key : Maybe String, window : TextReader.Window, line : Int, column : Int }
+
+fastKeyColon : TextReader.Window -> String -> Int -> Int -> Maybe KeyRun
+fastKeyColon snapshot key line column =
+    case fastWhite snapshot line column of
+        Nothing -> Nothing
+        Just (start, nextLine, nextColumn) -> case TextReader.readWindow start of
+            Ok (Just (':', width, rest)) -> Just (KeyRun { key = Just key, window = rest, line = nextLine, column = nextColumn + width })
+            _ -> Nothing
+
+fastKeyString : TextReader.Window -> Int -> Int -> Maybe KeyRun
+fastKeyString snapshot line column =
+    case fastString snapshot "" [] of
+        Nothing -> Nothing
+        Just (key, rest) -> fastKeyColon rest key line (column + TextReader.windowPosition rest - TextReader.windowPosition snapshot)
+
+fastKeyName : TextReader.Window -> Int -> Int -> Maybe KeyRun
+fastKeyName snapshot line column =
+    case fastWhite snapshot line column of
+        Nothing -> Nothing
+        Just (start, nextLine, nextColumn) -> case TextReader.readWindow start of
+            Ok (Just ('"', width, rest)) -> fastKeyString rest nextLine (nextColumn + width)
+            _ -> Nothing
+
+-- A record key, separator and colon form one buffered grammar operation. The
+-- common path returns the key directly, without punctuation or string tokens.
+fastKey : TextReader.Window -> Bool -> Int -> Int -> Maybe KeyRun
+fastKey snapshot first line column =
+    case fastWhite snapshot line column of
+        Nothing -> Nothing
+        Just (start, nextLine, nextColumn) -> case TextReader.readWindow start of
+            Ok (Just ('}', width, rest)) -> Just (KeyRun { key = Nothing, window = rest, line = nextLine, column = nextColumn + width })
+            Ok (Just ('"', width, rest)) ->
+                if first then fastKeyString rest nextLine (nextColumn + width) else Nothing
+            Ok (Just (',', width, rest)) ->
+                if first then Nothing else fastKeyName rest nextLine (nextColumn + width)
+            _ -> Nothing
+
+type ScalarRun a = { value : a, window : TextReader.Window, line : Int, column : Int }
+
+fastTextValue : TextReader.Window -> Int -> Int -> Maybe (ScalarRun String)
+fastTextValue snapshot line column =
+    case fastWhite snapshot line column of
+        Nothing -> Nothing
+        Just (start, nextLine, nextColumn) -> case TextReader.readWindow start of
+            Ok (Just ('"', _, afterQuote)) -> case fastString afterQuote "" [] of
+                Nothing -> Nothing
+                Just (text, rest) -> Just (ScalarRun { value = text, window = rest, line = nextLine, column = nextColumn + TextReader.windowPosition rest - TextReader.windowPosition start })
+            _ -> Nothing
+
+fastNumericValue : TextReader.Window -> Int -> Int -> Maybe (ScalarRun String)
+fastNumericValue snapshot line column =
+    case fastWhite snapshot line column of
+        Nothing -> Nothing
+        Just (start, nextLine, nextColumn) -> case TextReader.readWindow start of
+            Ok (Just (char, _, after)) ->
+                if char == '-' || digit char then
+                    phase = if char == '-' then MinusDigit else if char == '0' then ZeroEnd else WholeDigits
+                    case fastNumber start after phase of
+                        Nothing -> Nothing
+                        Just (text, rest) -> Just (ScalarRun { value = text, window = rest, line = nextLine, column = nextColumn + TextReader.windowPosition rest - TextReader.windowPosition start })
+                else Nothing
+            _ -> Nothing
+
+-- Keep the magnitude negative so the full signed range, including minInt,
+-- can be accumulated without overflow or a temporary decimal string.
+integerDigits : TextReader.Window -> Bool -> Bool -> Int -> Maybe (Int, TextReader.Window)
+integerDigits snapshot negative zero value = case TextReader.readWindow snapshot of
+    Ok (Just (char, _, rest)) ->
+        if digit char then
+            code = Char.toCode char - Char.toCode '0'
+            if zero || value < -922337203685477580 || (value == -922337203685477580 && code > (if negative then 8 else 7)) then Nothing
+            else integerDigits rest negative False (value * 10 - code)
+        else if char == '.' || char == 'e' || char == 'E' then Nothing
+        else Just (if negative then value else -value, snapshot)
+    _ -> Nothing
+
+integerFirst : TextReader.Window -> Bool -> Maybe (Int, TextReader.Window)
+integerFirst snapshot negative = case TextReader.readWindow snapshot of
+    Ok (Just (char, _, rest)) ->
+        if digit char then integerDigits rest negative (char == '0') (Char.toCode '0' - Char.toCode char)
+        else Nothing
+    _ -> Nothing
+
+fastIntegerValue : TextReader.Window -> Int -> Int -> Maybe (ScalarRun Int)
+fastIntegerValue snapshot line column = case fastWhite snapshot line column of
+    Nothing -> Nothing
+    Just (start, nextLine, nextColumn) -> case TextReader.readWindow start of
+        Ok (Just (char, _, after)) ->
+            scanned =
+                if char == '-' then integerFirst after True
+                else if digit char then integerDigits after False (char == '0') (Char.toCode '0' - Char.toCode char)
+                else Nothing
+            case scanned of
+                Nothing -> Nothing
+                Just (value, rest) -> Just (ScalarRun { value = value, window = rest, line = nextLine, column = nextColumn + TextReader.windowPosition rest - TextReader.windowPosition start })
+        _ -> Nothing
+
+scalarCursor : Cursor -> ScalarRun a -> Cursor
+scalarCursor before scanned =
+    width = TextReader.windowPosition scanned.window - TextReader.windowPosition before.window
+    { before | window = scanned.window, offset = before.offset + width, line = scanned.line, column = scanned.column }
+
+integerResult : String -> Result String Int
+integerResult text = case String.toInt text of
+    Just value -> Ok value
+    Nothing -> Err "Expected 64-bit JSON integer"
+
+floatResult : String -> Result String Float
+floatResult text = case String.toFloat text of
+    Just value -> Ok value
+    Nothing -> Err "JSON number is outside Float range"
+
+scanScalar : Scan -> ScalarRun a -> (a, Scan)
+scanScalar before scanned =
+    (scanned.value, { before | window = scanned.window, line = scanned.line, column = scanned.column })
+
+scanText : Scan -> Maybe (String, Scan)
+scanText cursor = case fastTextValue cursor.window cursor.line cursor.column of
+    Nothing -> Nothing
+    Just scanned -> Just (scanScalar cursor scanned)
+
+scanNumeric : Scan -> Maybe (String, Scan)
+scanNumeric cursor = case fastNumericValue cursor.window cursor.line cursor.column of
+    Nothing -> Nothing
+    Just scanned -> Just (scanScalar cursor scanned)
+
+scanLiteral : Char -> String -> a -> Scan -> Maybe (a, Scan)
+scanLiteral first suffix value cursor =
+    case fastWhite cursor.window cursor.line cursor.column of
+        Nothing -> Nothing
+        Just (start, line, column) -> case TextReader.readWindow start of
+            Ok (Just (char, _, after)) ->
+                if char == first then case fastLiteral after suffix of
+                    Nothing -> Nothing
+                    Just rest -> Just (value, { cursor | window = rest, line = line, column = column + TextReader.windowPosition rest - TextReader.windowPosition start })
+                else Nothing
+            _ -> Nothing
+
+scanOpen : Char -> Scan -> Maybe Scan
+scanOpen wanted cursor =
+    if cursor.allowance <= 0 then Nothing
+    else case fastWhite cursor.window cursor.line cursor.column of
+        Nothing -> Nothing
+        Just (start, line, column) -> case TextReader.readWindow start of
+            Ok (Just (char, width, rest)) ->
+                if char == wanted then Just { cursor | window = rest, line = line, column = column + width, allowance = cursor.allowance - 1 }
+                else Nothing
+            _ -> Nothing
+
+scanMark : Char -> Scan -> Maybe Scan
+scanMark wanted cursor = case fastWhite cursor.window cursor.line cursor.column of
+    Nothing -> Nothing
+    Just (start, line, column) -> case TextReader.readWindow start of
+        Ok (Just (char, width, rest)) ->
+            if char == wanted then Just { cursor | window = rest, line = line, column = column + width }
+            else Nothing
+        _ -> Nothing
+
+scanExpectedKey : Bool -> String -> Scan -> Maybe Scan
+scanExpectedKey first quoted cursor =
+    separated = if first then Just cursor else scanMark ',' cursor
+    case separated of
+        Nothing -> Nothing
+        Just before -> case fastWhite before.window before.line before.column of
+            Nothing -> Nothing
+            Just (start, line, column) -> case TextReader.matchWindow start quoted of
+                Nothing -> Nothing
+                Just rest -> scanMark ':' { before | window = rest, line = line, column = column + TextReader.windowPosition rest - TextReader.windowPosition start }
+
+scanObjectEnd : Scan -> Maybe Scan
+scanObjectEnd cursor = case scanMark '}' cursor of
+    Nothing -> Nothing
+    Just rest -> Just { rest | allowance = rest.allowance + 1 }
+
+scanElement : Bool -> Scan -> Maybe (Bool, Scan)
+scanElement first cursor = case fastElement cursor.window first cursor.line cursor.column of
+    Nothing -> Nothing
+    Just scanned -> Just (scanned.more, { cursor | window = scanned.window, line = scanned.line, column = scanned.column, allowance = if scanned.more then cursor.allowance else cursor.allowance + 1 })
+
+scanListMore : (Scan -> Maybe (a, Scan)) -> Bool -> List a -> Scan -> Maybe (List a, Scan)
+scanListMore scan first reverse cursor = case scanElement first cursor of
+    Nothing -> Nothing
+    Just (False, rest) -> Just (List.reverse reverse, rest)
+    Just (True, start) -> case scan start of
+        Nothing -> Nothing
+        Just (value, rest) -> scanListMore scan False [value | reverse] rest
+
+scanListShort : (Scan -> Maybe (a, Scan)) -> Bool -> Int -> Scan -> Maybe (List a, Scan)
+scanListShort scan first remaining cursor =
+    if remaining == 0 then scanListMore scan first [] cursor
+    else case scanElement first cursor of
+        Nothing -> Nothing
+        Just (False, rest) -> Just ([], rest)
+        Just (True, start) -> case scan start of
+            Nothing -> Nothing
+            Just (value, after) -> case scanListShort scan False (remaining - 1) after of
+                Nothing -> Nothing
+                Just (tail, rest) -> Just ([value | tail], rest)
 
 withPull : Reader e -> (() ->{Pull, Fail Error} a) ->{e} Result Error a
 withPull reader action =
@@ -601,24 +909,100 @@ withPull reader action =
 
 withTextPull : TextReader.Reader e -> (() ->{Pull, Fail Error} a) ->{e} Result Error a
 withTextPull reader action =
+    initial = TextReader.window reader
     Fail.attempt {
-        handle action() with state = PullState { cursor = Cursor { reader = reader, offset = 0, line = 1, column = 1, path = [] }, pending = Nothing, depth = 0 } of
+        handle Runtime.Scope.finally action { ignore at() } with state = PullState { cursor = Cursor { window = initial, ended = False, offset = 0, line = 1, column = 1, path = [] }, pending = Nothing, depth = 0 } of
             peek () ->
                 case state.pending of
                     Just token -> resume token with state
                     Nothing ->
-                        (token, cursor) = lex state.cursor
+                        (token, cursor) = lex reader state.cursor
                         resume token with { state | cursor = cursor, pending = Just token }
             next () ->
                 case state.pending of
                     Just token ->
-                        depth = tokenDepth token state.depth state.cursor
+                        depth = tokenDepth reader token state.depth state.cursor
                         resume token with { state | pending = Nothing, depth = depth }
                     Nothing ->
-                        (token, cursor) = lex state.cursor
-                        depth = tokenDepth token state.depth cursor
+                        (token, cursor) = lex reader state.cursor
+                        depth = tokenDepth reader token state.depth cursor
                         resume token with { state | cursor = cursor, pending = Nothing, depth = depth }
-            at () -> resume (errorAt state.cursor "") with state
+            arrayElement first ->
+                buffered = case state.pending of
+                    Just _ -> Nothing
+                    Nothing -> fastElement state.cursor.window first state.cursor.line state.cursor.column
+                case buffered of
+                    Nothing ->
+                        (more, after) = elementState reader first state
+                        resume more with after
+                    Just scanned ->
+                        width = TextReader.windowPosition scanned.window - TextReader.windowPosition state.cursor.window
+                        cursor = { state.cursor | window = scanned.window, offset = state.cursor.offset + width, line = scanned.line, column = scanned.column }
+                        depth = if scanned.more then state.depth else state.depth - 1
+                        resume scanned.more with { state | cursor = cursor, depth = depth }
+            objectKey first ->
+                buffered = case state.pending of
+                    Just _ -> Nothing
+                    Nothing -> fastKey state.cursor.window first state.cursor.line state.cursor.column
+                case buffered of
+                    Nothing ->
+                        (key, after) = keyState reader first state
+                        resume key with after
+                    Just scanned ->
+                        width = TextReader.windowPosition scanned.window - TextReader.windowPosition state.cursor.window
+                        cursor = { state.cursor | window = scanned.window, offset = state.cursor.offset + width, line = scanned.line, column = scanned.column }
+                        depth = case scanned.key of
+                            Nothing -> state.depth - 1
+                            Just _ -> state.depth
+                        resume scanned.key with { state | cursor = cursor, depth = depth }
+            decodedString () ->
+                buffered = case state.pending of
+                    Just _ -> Nothing
+                    Nothing -> fastTextValue state.cursor.window state.cursor.line state.cursor.column
+                case buffered of
+                    Just scanned -> resume (Ok scanned.value) with { state | cursor = scalarCursor state.cursor scanned }
+                    Nothing ->
+                        (token, after) = consumeToken reader state
+                        value = case token of
+                            StringTokenValue text -> Ok text
+                            _ -> Err "Expected JSON string"
+                        resume value with after
+            decodedInt () ->
+                buffered = case state.pending of
+                    Just _ -> Nothing
+                    Nothing -> fastIntegerValue state.cursor.window state.cursor.line state.cursor.column
+                case buffered of
+                    Just scanned -> resume (Ok scanned.value) with { state | cursor = scalarCursor state.cursor scanned }
+                    Nothing ->
+                        (token, after) = consumeToken reader state
+                        value = case token of
+                            NumberToken text -> integerResult text
+                            _ -> Err "Expected JSON number"
+                        resume value with after
+            decodedFloat () ->
+                buffered = case state.pending of
+                    Just _ -> Nothing
+                    Nothing -> fastNumericValue state.cursor.window state.cursor.line state.cursor.column
+                case buffered of
+                    Just scanned -> resume (floatResult scanned.value) with { state | cursor = scalarCursor state.cursor scanned }
+                    Nothing ->
+                        (token, after) = consumeToken reader state
+                        value = case token of
+                            NumberToken text -> floatResult text
+                            _ -> Err "Expected JSON number"
+                        resume value with after
+            bufferedScan () ->
+                view = case state.pending of
+                    Just _ -> Nothing
+                    Nothing -> Just (Scan { window = state.cursor.window, line = state.cursor.line, column = state.cursor.column, allowance = 256 - state.depth })
+                resume view with state
+            acceptScan scanned ->
+                width = TextReader.windowPosition scanned.window - TextReader.windowPosition state.cursor.window
+                cursor = { state.cursor | window = scanned.window, offset = state.cursor.offset + width, line = scanned.line, column = scanned.column }
+                resume () with { state | cursor = cursor }
+            at () ->
+                TextReader.commitWindow reader state.cursor.window
+                resume (errorAt state.cursor "") with state
             enter segment ->
                 resume () with { state | cursor = { state.cursor | path = [Segment { key = segment, index = Nothing } | state.cursor.path] } }
             enterIndex index ->
@@ -647,23 +1031,8 @@ beginArray() =
         BeginArray -> ()
         _ -> syntaxError "Expected JSON array"
 
-nextElement : Bool ->{Pull, Fail Error} Bool
-nextElement first =
-    if first then
-        case peek() of
-            EndArray ->
-                ignore next()
-                False
-            _ -> True
-    else
-        case next() of
-            EndArray -> False
-            Comma ->
-                -- The element decoder must see this token.
-                case peek() of
-                    EndArray -> syntaxError "Trailing array comma"
-                    _ -> True
-            _ -> syntaxError "Expected comma or array end"
+nextElement : Bool ->{Pull} Bool
+nextElement first = arrayElement first
 
 beginObject : () ->{Pull, Fail Error} ()
 beginObject() =
@@ -672,28 +1041,8 @@ beginObject() =
         _ -> syntaxError "Expected JSON object"
 
 -- A key and its colon never need lookahead: consume them directly.
-nextKey : Bool ->{Pull, Fail Error} Maybe String
-nextKey first =
-    if first then
-        case next() of
-            EndObject -> Nothing
-            StringTokenValue key -> keyColon key
-            _ -> syntaxError "Expected object key"
-    else
-        case next() of
-            EndObject -> Nothing
-            Comma ->
-                case next() of
-                    EndObject -> syntaxError "Trailing object comma"
-                    StringTokenValue key -> keyColon key
-                    _ -> syntaxError "Expected object key"
-            _ -> syntaxError "Expected comma or object end"
-
-keyColon : String ->{Pull, Fail Error} Maybe String
-keyColon key =
-    case next() of
-        Colon -> Just key
-        _ -> syntaxError "Expected colon"
+nextKey : Bool ->{Pull} Maybe String
+nextKey first = objectKey first
 
 expectComma : () ->{Pull, Fail Error} ()
 expectComma() =
@@ -839,10 +1188,10 @@ readText _ reader =
     }
 
 instance Decode String
-    decodeValue() =
-        case next() of
-            StringTokenValue text -> text
-            _ -> syntaxError "Expected JSON string"
+    decodeValue() = case decodedString() of
+        Ok text -> text
+        Err message -> syntaxError message
+    scanValue cursor = scanText cursor
 
 instance Decode Char
     decodeValue() =
@@ -852,36 +1201,45 @@ instance Decode Char
                     Just part -> if part.rest == "" then part.first else syntaxError "Expected one JSON character"
                     Nothing -> syntaxError "Expected one JSON character"
             _ -> syntaxError "Expected JSON string"
+    scanValue cursor = case scanText cursor of
+        Nothing -> Nothing
+        Just (text, rest) -> case String.uncons text of
+            Just part -> if part.rest == "" then Just (part.first, rest) else Nothing
+            Nothing -> Nothing
 
 instance Decode Int
-    decodeValue() =
-        case next() of
-            NumberToken text ->
-                case String.toInt text of
-                    Just value -> value
-                    Nothing -> syntaxError "Expected 64-bit JSON integer"
-            _ -> syntaxError "Expected JSON number"
+    decodeValue() = case decodedInt() of
+        Ok value -> value
+        Err message -> syntaxError message
+    scanValue cursor = case fastIntegerValue cursor.window cursor.line cursor.column of
+        Nothing -> Nothing
+        Just scanned -> Just (scanScalar cursor scanned)
 
 instance Decode Float
-    decodeValue() =
-        case next() of
-            NumberToken text ->
-                case String.toFloat text of
-                    Just value -> value
-                    Nothing -> syntaxError "JSON number is outside Float range"
-            _ -> syntaxError "Expected JSON number"
+    decodeValue() = case decodedFloat() of
+        Ok value -> value
+        Err message -> syntaxError message
+    scanValue cursor = case scanNumeric cursor of
+        Nothing -> Nothing
+        Just (text, rest) -> case floatResult text of
+            Ok value -> Just (value, rest)
+            Err _ -> Nothing
 
 instance Decode Bool
     decodeValue() =
         case next() of
             BooleanToken value -> value
             _ -> syntaxError "Expected JSON boolean"
+    scanValue cursor = case scanLiteral 't' "rue" True cursor of
+        Just value -> Just value
+        Nothing -> scanLiteral 'f' "alse" False cursor
 
 instance Decode ()
     decodeValue() =
         case next() of
             NullToken -> ()
             _ -> syntaxError "Expected JSON null"
+    scanValue cursor = scanLiteral 'n' "ull" () cursor
 
 decodeList : Decode a => Int -> Bool -> List a ->{Pull, Fail Error} List a
 decodeList index first reverse =
@@ -902,8 +1260,13 @@ decodeListShort index first remaining =
 
 instance Decode a => Decode (List a)
     decodeValue() =
-        beginArray()
-        decodeListShort 0 True 8
+        attemptScan scanValue {
+            beginArray()
+            decodeListShort 0 True 8
+        }
+    scanValue cursor = case scanOpen '[' cursor of
+        Nothing -> Nothing
+        Just start -> scanListShort scanValue True 8 start
 
 instance Decode a => Decode (Maybe a)
     decodeValue() =
@@ -912,9 +1275,15 @@ instance Decode a => Decode (Maybe a)
                 ignore next()
                 Nothing
             _ -> Just decodeValue()
+    scanValue cursor = case scanLiteral 'n' "ull" () cursor of
+        Just (_, rest) -> Just (Nothing, rest)
+        Nothing -> case scanValue cursor of
+            Nothing -> Nothing
+            Just (value, rest) -> Just (Just value, rest)
 
 instance Decode Value
     decodeValue() = readValue()
+    scanValue _ = Nothing
 
 withWriter : Writer e -> (() ->{Emit, Fail Error} a) ->{e} Result Error a
 withWriter writer action = TextWriter.borrow writer { text -> withTextWriter text action }
@@ -1177,7 +1546,66 @@ recordParser ctor =
         slots = Meta.mapItems (aggregateSlot state) ctor.fields
         Meta.construct ctor (Meta.mapItems slotValue slots)
     }
-    `$(finish) (readFieldsState $(action) $(slotInitial ctor.fields))`
+    `attemptScan scanValue { $(finish) (readFieldsState $(action) $(slotInitial ctor.fields)) }`
+
+-- Defaults may execute consumer effects. Leave those schemas on the streaming
+-- decoder rather than speculatively evaluating a default in a pure scan.
+scanRecordSupported : Items Field -> Bool
+scanRecordSupported fields = Meta.foldItems { supported field ->
+    settings = fieldSettings field.name field.attributes
+    supported && settings.skip == False && (case settings.fallback of
+            Nothing -> True
+            Just _ -> False)
+} True fields
+
+appendCode : Items Code -> Code -> Items Code
+appendCode values value = case values of
+    NoItems -> Item value NoItems
+    Item first rest -> Item first (appendCode rest value)
+
+scanBind : Code -> (Code -> Code) -> Code
+scanBind expression build = case Meta.info (typeOf (Maybe ())) of
+    Meta.Opaque -> Meta.fail "Expected visible Maybe constructors"
+    Meta.Visible schema -> Meta.match schema expression { bound ->
+        case bound.fields of
+            NoItems -> `Nothing`
+            Item value _ -> build value.value
+    }
+
+scanBindPair : Code -> (Code -> Code -> Code) -> Code
+scanBindPair expression build = scanBind expression { pair ->
+    case Meta.info (typeOf ((), ())) of
+        Meta.Opaque -> Meta.fail "Expected visible tuple constructor"
+        Meta.Visible schema -> Meta.match schema pair { bound ->
+            case bound.fields of
+                Item value (Item cursor NoItems) -> build value.value cursor.value
+                _ -> Meta.fail "Expected pair fields"
+        }
+}
+
+scanOrderedFields : Ctor -> Items Field -> Items Code -> Bool -> Code -> Code
+scanOrderedFields ctor fields values first cursor = case fields of
+    NoItems -> scanBind `scanObjectEnd $(cursor)` { rest ->
+        `Just ($(Meta.construct ctor values), $(rest))`
+    }
+    Item field tail ->
+        settings = fieldSettings field.name field.attributes
+        quoted = case stringify settings.key of
+            Ok text -> lift text
+            Err _ -> Meta.fail "Invalid JSON field key"
+        scanBind `scanExpectedKey $(lift first) $(quoted) $(cursor)` { start ->
+            scanBindPair `scanValue $(start)` { value rest ->
+                scanOrderedFields ctor tail (appendCode values value) False rest
+            }
+        }
+
+recordScanner : Ctor -> Code
+recordScanner ctor =
+    if scanRecordSupported ctor.fields == False then `{ _ -> Nothing }`
+    else
+        Meta.lambda "_json_scan_start" { cursor ->
+            scanBind `scanOpen '{' $(cursor)` { start -> scanOrderedFields ctor ctor.fields NoItems True start }
+        }
 
 slotInitial : Items Field -> Code
 slotInitial fields =
@@ -1244,6 +1672,11 @@ deriver Decode
         case subject.shape of
             Record ctor -> recordParser ctor
             Union ctors -> unionParser ctors
+    scanValue subject cursor =
+        validateJSONSchema subject
+        case subject.shape of
+            Record ctor -> `$(recordScanner ctor) $(cursor)`
+            Union _ -> `Nothing`
 
 parseBytesValue : Bytes -> Result Error Value
 parseBytesValue input =

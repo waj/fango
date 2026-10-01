@@ -1,0 +1,104 @@
+import Bytes
+import Encoding exposing (Error(..))
+import List
+import Reader
+import Result exposing (Result(..))
+import Runtime.Local
+import Text.Reader as TextReader
+
+declined value = case value of
+    Nothing -> True
+    Just _ -> False
+
+main() =
+    -- One snapshot supports advancing commits; equal or earlier commits do
+    -- not consume the same prefix twice. Its text remains immutable.
+    print (TextReader.withString "!é12tail" { reader ->
+            ignore (TextReader.tryReadChar reader)
+            start = TextReader.window reader
+            case TextReader.readWindow start of
+                Ok (Just ('é', 2, afterChar)) -> case TextReader.spanWindow afterChar { char -> char >= '0' && char <= '9' } of
+                    Ok ("12", 2, afterDigits) ->
+                        TextReader.commitWindow reader afterChar
+                        first = TextReader.position reader
+                        TextReader.commitWindow reader afterChar
+                        TextReader.commitWindow reader start
+                        unchanged = TextReader.position reader
+                        TextReader.commitWindow reader afterDigits
+                        final = TextReader.position reader
+                        TextReader.commitWindow reader afterDigits
+                        first == 3 && unchanged == 3 && final == 5 && TextReader.windowText start afterDigits == Ok "é12" && TextReader.tryPeekChar reader == Ok (Just 't')
+                    _ -> False
+                _ -> False
+    })
+    -- EOF preserves incomplete bytes and resets the snapshot's local offset.
+    print (Reader.withBytes (Bytes.fromList [97, 195]) { bytes ->
+            TextReader.over bytes { reader ->
+                start = TextReader.window reader
+                case TextReader.readWindow start of
+                    Ok (Just ('a', 1, after)) ->
+                        (rest, grew) = TextReader.refillWindow reader after
+                        incomplete = case TextReader.readWindow rest of
+                            Err (IncompleteSequence 0) -> True
+                            _ -> False
+                        grew == False && incomplete && TextReader.position reader == 1 && TextReader.windowPosition rest == 0 && bytes.buffered() == Bytes.fromList [195]
+                    _ -> False
+            }
+    })
+    -- A refill joins an incomplete scalar with later chunks after committing
+    -- only the valid prefix. Empty source chunks are passed through.
+    print (Runtime.Local.run [Bytes.fromList [97, 195], Bytes.empty, Bytes.fromList [169, 98]] { remaining ->
+            Reader.over (Bytes.Source
+                { pull = {
+                    case remaining.read() of
+                        [] -> Nothing
+                        [chunk | rest] ->
+                            remaining.write rest
+                            Just chunk
+                  }
+                }
+            ) { bytes ->
+                TextReader.over bytes { reader ->
+                    initial = TextReader.window reader
+                    (first, grew) = TextReader.refillWindow reader initial
+                    case TextReader.readWindow first of
+                        Ok (Just ('a', 1, after)) ->
+                            TextReader.commitWindow reader after
+                            (joined, more) = TextReader.refillWindow reader after
+                            case TextReader.readWindow joined of
+                                Ok (Just ('é', 2, rest)) ->
+                                    TextReader.commitWindow reader rest
+                                    grew && more && TextReader.position reader == 3 && TextReader.tryReadChar reader == Ok (Just 'b') && TextReader.position reader == 4
+                                _ -> False
+                        _ -> False
+                }
+            }
+    })
+    -- Exact prefix matching operates in the selected encoding. Refusal is
+    -- atomic; a match can be inspected or committed like any derived window.
+    print (TextReader.withString "é😀tail" { reader ->
+            start = TextReader.window reader
+            case TextReader.matchWindow start "é😀" of
+                Nothing -> False
+                Just rest ->
+                    valid = TextReader.windowPosition rest == 6 && declined (TextReader.matchWindow start "éx") && declined (TextReader.matchWindow start "é😀tail!") && TextReader.position reader == 0
+                    TextReader.commitWindow reader rest
+                    valid && TextReader.tryReadChar reader == Ok (Just 't')
+    })
+    print (Reader.withBytes (Bytes.fromList [233, 97]) { bytes ->
+            TextReader.overWith Encoding.latin1 bytes { reader ->
+                start = TextReader.window reader
+                case TextReader.matchWindow start "é" of
+                    Nothing -> False
+                    Just rest -> TextReader.windowPosition rest == 1 && declined (TextReader.matchWindow start "😀") && TextReader.position reader == 0
+            }
+    })
+    print (Reader.withBytes (Bytes.fromList [195]) { bytes ->
+            TextReader.over bytes { reader ->
+                start = TextReader.window reader
+                empty = case TextReader.matchWindow start "" of
+                    Nothing -> False
+                    Just rest -> TextReader.windowPosition rest == 0
+                declined (TextReader.matchWindow start "é") && empty && TextReader.position reader == 0
+            }
+    })

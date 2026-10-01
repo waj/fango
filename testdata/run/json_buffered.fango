@@ -1,0 +1,126 @@
+import Bytes
+import Encoding
+import Fail
+import Json exposing (Decode(..))
+import List
+import Reader
+import Result exposing (Result(..))
+import Runtime.Local
+import Runtime.Scope
+import Stream
+import Text.Reader as TextReader
+
+type Row = { text : String, count : Int, amount : Float, tags : List String } deriving (Decode, Eq)
+
+all predicate values = List.foldl { value result -> predicate value && result } True values
+
+runChunks chunks = Runtime.Local.run chunks { remaining ->
+    Reader.over (Bytes.Source
+        { pull = {
+            case remaining.read() of
+                [] -> Nothing
+                [chunk | rest] ->
+                    remaining.write rest
+                    Just chunk
+          }
+        }) { reader ->
+        result = Json.read @(List Row) reader
+        tail = Bytes.concat (Stream.toList (Reader.chunks reader))
+        case result of
+            Ok rows -> (Ok rows, tail)
+            Err error -> (Err (error.message, error.offset, (error.line, error.column, error.path)), tail)
+        }
+}
+
+sameSplits bytes =
+    expected = runChunks [bytes]
+    all { index ->
+        runChunks [Bytes.slice 0 index bytes, Bytes.empty, Bytes.slice index (Bytes.length bytes) bytes] == expected
+    } (List.range 0 (Bytes.length bytes))
+
+main() =
+    print (all { text -> sameSplits (Bytes.fromString text) }
+        [ " [{\"text\":\"é😀\\n\\uD834\\uDD1E\",\"count\":-9223372036854775808,\"amount\":-12.5e+2,\"tags\":[\"a\",\"二\"]}]"
+        , "[{\"text\":\"max\",\"count\":9223372036854775807,\"amount\":0,\"tags\":[]}]"
+        , "[{\"tags\":[],\"amount\":0,\"extra\":{\"x\":[true,null,{}]},\"count\":-0,\"text\":\"unordered\"}]"
+        , "[{\"te\\u0078t\":\"escaped key\",\"count\":0,\"amount\":0,\"tags\":[]}]"
+        , "[{\"text\":\"bad\",\"count\":-9223372036854775809,\"amount\":0,\"tags\":[]}]"
+        , "[{\"text\":\"bad\",\"count\":01,\"amount\":0,\"tags\":[]}]"
+        , "[{\"text\":\"bad\",\"count\":1e0,\"amount\":0,\"tags\":[]}]"
+        , "[{\"text\":\"duplicate\",\"count\":0,\"amount\":0,\"tags\":[],\"count\":1}]"
+        , "[]", "[{}]", "[?]", "[01]", "[\"\\x\"]", "[true,]"
+        , "[{\"text\":\"ok\",\"count\":9223372036854775808}]"
+        , "[{\"text\":\"ok\",\"count\":1.25}]", "[{\"text\":\"ok\",\"count\":true}]"
+        , "[{\"text\":\"ok\",\"count\":1,\"amount\":1e9999}]"
+        , "[{\"text\":\"ok\",\"count\":1,\"amount\":1,\"tags\":[\"\\x\"]}]"
+        , "[{\"text\":\"ok\",\"count\":1,\"amount\":1,\"tags\":[\"a\",]}]"
+        , "[{\"text\":\"ok\",\"count\":1,\"amount\":1,\"tags\":[]},]"
+        , "[{\"text\":\"ok\" \"count\":1}]", "[{\"text\" 1}]", "[{,}]"
+        ])
+    -- Iteration checks the delimiter but does not tokenize the next value.
+    -- A decoder enters the index before lexical errors in that value occur.
+    print (case Json.parse @(List Int) "[01]" of
+        Err error -> error.message == "Leading zero in JSON number" && error.offset == 2 && error.path == "/0"
+        Ok _ -> False)
+    print (case Fail.attempt { Runtime.Local.run 0 { stage ->
+        Reader.over (Bytes.Source { pull = {
+            current = stage.read()
+            stage.write (current + 1)
+            if current == 0 then Just (Bytes.fromString "[\"a")
+            else Fail.fail "value was scanned early"
+        } }) { reader ->
+            result = Json.withPull reader {
+                Json.beginArray()
+                Json.nextElement True
+            }
+            case result of
+                Ok True -> stage.read() == 1
+                _ -> False
+        }
+    } } of
+        Ok valid -> valid
+        Err _ -> False)
+    -- Typed fast reads and explicit lookahead can be mixed. Repeated at()
+    -- commits must leave every token and the enclosing text cursor intact.
+    print (TextReader.withString "é\"abc\" 123 -1.25!" { text ->
+        ignore (TextReader.tryReadChar text)
+        result = Json.withTextPull text {
+            ignore (Json.peek())
+            string : String
+            string = decodeValue()
+            first = Json.at()
+            ignore (Json.at())
+            integer : Int
+            integer = decodeValue()
+            ignore (Json.at())
+            floating : Float
+            floating = decodeValue()
+            string == "abc" && integer == 123 && floating == -1.25 && first.offset == 5
+        }
+        case result of
+            Ok True -> TextReader.position text == 17 && TextReader.tryReadChar text == Ok (Just '!')
+            _ -> False
+    })
+    print (Reader.withBytes (Bytes.fromList [91, 34, 233, 34, 93]) { bytes ->
+        TextReader.overWith Encoding.latin1 bytes { text -> case Json.readText @(List String) text of
+            Ok value -> value == ["é"]
+            Err _ -> False
+        }
+    })
+    -- A source failure on refill still publishes all previously scanned bytes.
+    print (case Fail.attempt { Runtime.Local.run (Bytes.fromString "[1,") { buffered ->
+        reader = Reader.Reader
+            { buffered = buffered.read
+            , skip = { count ->
+                before = buffered.read()
+                buffered.write (Bytes.slice count (Bytes.length before) before)
+                count
+              }
+            , refill = { Fail.fail "source failed" }
+            }
+        Runtime.Scope.finally { Json.read @(List Int) reader } {
+            if buffered.read() == Bytes.empty then () else Fail.fail "uncommitted prefix"
+        }
+    } } of
+        Err message -> message == "source failed"
+        Ok _ -> False)

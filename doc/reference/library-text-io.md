@@ -83,6 +83,7 @@ readWindow : Window -> Result Encoding.Error (Maybe (Char, Int, Window))
 spanWindow : Window -> (Char -> Bool) -> Result Encoding.Error (String, Int, Window)
 windowText : Window -> Window -> Result Encoding.Error String
 commitWindow : Text.Reader.Reader e -> Window ->{e} ()
+refillWindow : Text.Reader.Reader e -> Window ->{e} (Window, Bool)
 ```
 
 `over parent use` selects UTF-8; `overWith encoding parent use` selects an
@@ -126,13 +127,32 @@ from the original snapshot start. Decoding error offsets are also relative to
 that start. An empty window is not necessarily source EOF; incomplete sequences
 are reported without pulling more input.
 
+`matchWindow snapshot text : Maybe Window` compares an exact text prefix in the
+snapshot's selected encoding and returns the position after a match. It is pure
+and never refills or consumes. A mismatch, insufficient buffered bytes, or text
+unrepresentable in that encoding returns `Nothing`; an empty text matches at
+the original position. It validates only the matched prefix, so malformed
+bytes after it do not prevent a match. Refusal does not diagnose malformed or
+incomplete source text; use scalar reads to report those errors.
+
 `windowText start end` decodes the bytes between two positions derived from the
 same snapshot, with `start` preceding or equal to `end`. `commitWindow reader end`
-consumes the prefix from the snapshot start to `end`. Commit only once, against
-the originating reader before any other operation advances it; afterward,
-obtain a new snapshot for further commits. Abandoning a window consumes nothing.
-These operations support speculative domain scans while keeping byte decoding
-inside the selected text encoding.
+publishes consumption through `end` on the originating reader. It consumes only
+the prefix beyond the reader's last committed position: repeated commits of
+the same or an earlier derived position consume nothing. Positions can be
+committed progressively without obtaining a new snapshot. Abandoning an
+uncommitted window consumes nothing. Do not advance the reader through ordinary
+reads, another scanner, or its parent while using these derived positions.
+
+`refillWindow reader end` commits through `end`, refills the parent, and returns
+`(fresh, grew)`. The fresh window starts at position zero over the remaining
+bytes followed by any new source bytes. `grew == False` proves source EOF;
+remaining bytes may still contain complete scalars or an incomplete sequence.
+An incomplete scalar is retained for a later chunk rather than consumed.
+Subsequent scanning and commits must use the fresh snapshot. Old snapshots
+remain valid for pure inspection and text extraction. Source failures propagate
+with the committed prefix consumed. These operations keep byte decoding inside
+the selected text encoding while allowing domain scanners to batch consumption.
 
 `readUpTo reader n` reads at most `n` scalars. It waits for the first complete
 character, then returns complete characters already available without waiting

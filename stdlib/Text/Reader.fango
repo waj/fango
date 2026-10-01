@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Text.Reader exposing (Read(..), Reader, Window, atEnd, chunks, commitWindow, over, overWith, peekChar, peekWindow, position, readChar, readExactly, readLine, readUntil, readUpTo, readWindow, spanWindow, tryPeekChar, tryReadChar, tryReadScalar, tryReadSpan, tryReadWhile, window, windowPosition, windowText, withString)
+module Text.Reader exposing (Read(..), Reader, Window, atEnd, chunks, commitWindow, matchWindow, over, overWith, peekChar, peekWindow, position, readChar, readExactly, readLine, readUntil, readUpTo, readWindow, refillWindow, spanWindow, tryPeekChar, tryReadChar, tryReadScalar, tryReadSpan, tryReadWhile, window, windowPosition, windowText, withString)
 
 import Basics exposing (..)
 import Bytes
@@ -23,13 +23,16 @@ type Input e =
     , consume : Int ->{e} ()
     , position : () ->{e} Int
     , buffered : () ->{e} Bytes.Bytes
+    , refill : () ->{e} Bool
     , encoding : Encoding
     }
 
 type Reader e = Reader (Input e)
 
--- Immutable staged bytes. Only scalar/span reads advance the private index.
-type Window = { encoding : Encoding, bytes : Bytes.Bytes, index : Int }
+-- Immutable buffer storage is shared across derived positions and tokens.
+-- Empty windows need no buffer object; byte decoding remains private here.
+type Buffer = EmptyBuffer | Buffered Encoding Bytes.Bytes Int
+type Window = { buffer : Buffer, index : Int }
 
 type Read = Found String | Ended String | Overflowed deriving (Eq, Show)
 
@@ -87,6 +90,7 @@ overWith encoding parent use =
               }
             , position = consumed.read
             , buffered = parent.buffered
+            , refill = parent.refill
             , encoding = encoding
             }
         ))
@@ -110,6 +114,7 @@ withString text use =
             , consume = { size -> consumed.write (consumed.read() + size) }
             , position = consumed.read
             , buffered = { Bytes.slice consumed.read() (Bytes.length bytes) bytes }
+            , refill = { False }
             , encoding = Encoding.utf8
             }
         ))
@@ -159,48 +164,82 @@ prefixWidth encoding bytes keep offset =
                     _ -> offset
 
 window : Reader e ->{e} Window
-window (Reader input) = Window { encoding = input.encoding, bytes = input.buffered(), index = 0 }
+window (Reader input) =
+    bytes = input.buffered()
+    Window
+        { buffer = if Bytes.length bytes == 0 then EmptyBuffer else Buffered input.encoding bytes input.position()
+        , index = 0
+        }
 
 windowPosition : Window -> Int
 windowPosition snapshot = snapshot.index
 
 peekWindow : Window -> Result Encoding.Error (Maybe (Char, Int))
-peekWindow snapshot = decodeScalar snapshot.encoding snapshot.bytes snapshot.index
+peekWindow snapshot =
+    case snapshot.buffer of
+        EmptyBuffer -> Ok Nothing
+        Buffered encoding bytes _ -> decodeScalar encoding bytes snapshot.index
 
 readWindow : Window -> Result Encoding.Error (Maybe (Char, Int, Window))
 readWindow snapshot =
-    case Bytes.byteAt snapshot.index snapshot.bytes of
-        Nothing -> Ok Nothing
-        Just code ->
-            if code < 128 then
-                case Char.fromCode code of
-                    Just char -> Ok (Just (char, 1, { snapshot | index = snapshot.index + 1 }))
-                    Nothing -> readWindowAt snapshot
-            else readWindowAt snapshot
-
-readWindowAt : Window -> Result Encoding.Error (Maybe (Char, Int, Window))
-readWindowAt snapshot =
-    case Encoding.decodeAt snapshot.encoding snapshot.bytes snapshot.index of
+    case peekWindow snapshot of
         Err error -> Err error
         Ok Nothing -> Ok Nothing
         Ok (Just (char, width)) -> Ok (Just (char, width, { snapshot | index = snapshot.index + width }))
+
+-- An exact encoded prefix of valid text can be compared in bulk without
+-- decoding each scalar or materializing the source substring. A mismatch,
+-- short buffer, or unrepresentable requested text leaves the view unchanged.
+matchWindow : Window -> String -> Maybe Window
+matchWindow snapshot text =
+    if text == "" then Just snapshot
+    else case snapshot.buffer of
+        EmptyBuffer -> Nothing
+        Buffered encoding bytes _ -> case Encoding.encode encoding text of
+            Err _ -> Nothing
+            Ok expected ->
+                if Bytes.startsWith expected (Bytes.slice snapshot.index (Bytes.length bytes) bytes) then
+                    Just { snapshot | index = snapshot.index + Bytes.length expected }
+                else Nothing
 
 spanWindow : Window -> (Char -> Bool) -> Result Encoding.Error (String, Int, Window)
 spanWindow snapshot keep =
     case peekWindow snapshot of
         Err error -> Err error
         Ok _ ->
-            end = prefixWidth snapshot.encoding snapshot.bytes keep snapshot.index
-            case Encoding.decode snapshot.encoding (Bytes.slice snapshot.index end snapshot.bytes) of
-                Err error -> Err error
-                Ok text -> Ok (text, end - snapshot.index, { snapshot | index = end })
+            case snapshot.buffer of
+                EmptyBuffer -> Ok ("", 0, snapshot)
+                Buffered encoding bytes _ ->
+                    end = prefixWidth encoding bytes keep snapshot.index
+                    case Encoding.decode encoding (Bytes.slice snapshot.index end bytes) of
+                        Err error -> Err error
+                        Ok text -> Ok (text, end - snapshot.index, { snapshot | index = end })
 
 windowText : Window -> Window -> Result Encoding.Error String
-windowText start end = Encoding.decode start.encoding (Bytes.slice start.index end.index start.bytes)
+windowText start end =
+    case start.buffer of
+        EmptyBuffer -> Ok ""
+        Buffered encoding bytes _ -> Encoding.decode encoding (Bytes.slice start.index end.index bytes)
 
--- Commit a derived window once, before any independent reader movement.
+-- Publish only the newly consumed prefix. Derived positions from one window
+-- may be committed repeatedly, in increasing order, on their original reader.
 commitWindow : Reader e -> Window ->{e} ()
-commitWindow (Reader input) snapshot = if snapshot.index > 0 then input.consume snapshot.index else ()
+commitWindow (Reader input) snapshot =
+    case snapshot.buffer of
+        EmptyBuffer -> ()
+        Buffered _ _ base ->
+            width = base + snapshot.index - input.position()
+            if width > 0 then input.consume width else ()
+
+-- Reconcile consumption before growing the parent buffer. A False result is
+-- proof of source EOF, unlike an empty immutable window. Incomplete scalars
+-- remain in the parent and can be completed by the next chunk.
+refillWindow : Reader e -> Window ->{e} (Window, Bool)
+refillWindow reader snapshot =
+    commitWindow reader snapshot
+    Reader input = reader
+    grew = input.refill()
+    (window reader, grew)
 
 tryReadWhile : Reader e -> (Char -> Bool) ->{e} Result Encoding.Error String
 tryReadWhile reader keep =

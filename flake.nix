@@ -36,6 +36,13 @@
             inherit (pkgs) nodejs;
           }}/node_modules";
         };
+
+        # Opt-in tools for the whole-document JSON comparison. Keep GHC and
+        # Aeson out of the ordinary compiler development shell.
+        jsoncompare = pkgs.mkShell {
+          inputsFrom = [ self.devShells.${pkgs.stdenv.hostPlatform.system}.default ];
+          packages = [ (pkgs.haskellPackages.ghcWithPackages (p: [ p.aeson ])) ];
+        };
       });
 
       formatter = forAllSystems (pkgs: pkgs.nixpkgs-fmt);
