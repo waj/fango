@@ -21,6 +21,19 @@ func installEvidenceOrigin(ev *evidence) {
 			rows[id] = true
 		}
 	}
+	ev.origin.Share = func() {
+		ev.state.Share()
+		for id := range deps {
+			if parent := resolveEvidence(ev.outer[id]); parent != nil {
+				fangort.ShareOrigin(parent.origin)
+			}
+		}
+		for id := range rows {
+			if row, ok := ev.frame.row(id); ok {
+				fangort.ShareEvidenceRow(row)
+			}
+		}
+	}
 	ev.origin.Rebuild = func(fork *fangort.EvidenceFork) fangort.EvidenceFamily {
 		child := *ev
 		child.outer = make(map[types.EffectKey]*evidence, len(deps))

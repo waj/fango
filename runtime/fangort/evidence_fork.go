@@ -14,6 +14,54 @@ type EvidenceOrigin struct {
 	// Fixed is safe when operation closures have no evidence/row dependencies
 	// to rebase. Their state and immutable lexical values are already shared.
 	Fixed *EvidenceBinding
+	// Share publishes the activation's state cell and, transitively, the
+	// activations its clauses depend on. The parent calls it through
+	// ShareEvidenceValue before a task that inherits the activation starts.
+	Share  func()
+	shared bool
+}
+
+// ShareOrigin publishes one activation once. The flag also terminates
+// dependency cycles, as building does for Family.
+func ShareOrigin(origin *EvidenceOrigin) {
+	for origin != nil && origin.Resolve != nil {
+		origin = origin.Resolve()
+	}
+	if origin == nil || origin.shared {
+		return
+	}
+	origin.shared = true
+	if origin.Share != nil {
+		origin.Share()
+	}
+}
+
+// ShareEvidenceRow publishes every activation a row makes visible, including
+// shadowed entries: a shadowed activation may still be reached through a
+// captured lexical value.
+func ShareEvidenceRow(row *EvidenceRow) {
+	for ; row != nil; row = row.tail {
+		for _, binding := range row.inline {
+			if binding != nil {
+				ShareOrigin(binding.Family.Origin)
+			}
+		}
+		for _, binding := range row.extra {
+			ShareOrigin(binding.Family.Origin)
+		}
+	}
+}
+
+// ShareEvidenceValue publishes the activations of a compiled launch row. It
+// runs in the parent before the task's goroutine starts, which is the only
+// happens-before edge the parent has to the child.
+func ShareEvidenceValue(row EvidenceValue) {
+	for _, binding := range row.inline {
+		if binding != nil {
+			ShareOrigin(binding.Family.Origin)
+		}
+	}
+	ShareEvidenceRow(row.tail)
 }
 
 // EvidenceFork belongs to one child invocation, not a goroutine-global stack.
@@ -61,6 +109,9 @@ func (f *EvidenceFork) Family(origin *EvidenceOrigin) EvidenceFamily {
 	}
 	if family, ok := f.memo[origin]; ok {
 		return family
+	}
+	if origin.Share != nil && !origin.shared {
+		panic("Async: inherited handler " + origin.Name + " was not published before the task started")
 	}
 	if origin.Fixed != nil {
 		return origin.Fixed.Family

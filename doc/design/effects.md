@@ -54,11 +54,15 @@ evidence installation. Clauses see immutable snapshots; the body does not. A
 stateful resume evaluates result then next state, commits only after both
 succeed, and returns through the existing evidence call. Core retains the state
 binder/type and update expressions for lint/capture checks. The interpreter
-and Go backend use the same generic activation cell. Its lock protects each
-snapshot and commit separately, including the return clause's snapshot; it is
-never held while executing a clause. This provides safe publication of complete
-values, not atomic read–modify–write operations. Handler implementations own
-operation-level synchronization. No continuation is captured.
+and Go backend use the same generic activation cell. While only the installing
+invocation can reach the cell, snapshots and commits are plain accesses. A task
+launch publishes every activation its row makes visible, transitively through
+clause dependencies, before the task's goroutine starts; from then on the
+cell's lock protects each snapshot and commit separately, including the return
+clause's snapshot, and is never held while executing a clause. This provides
+safe publication of complete values, not atomic read–modify–write operations.
+Handler implementations own operation-level synchronization. No continuation
+is captured.
 The Go backend omits a clause's initial snapshot when its Core body never
 mentions the state binder, as in an unconditional cell write. State commits
 and their synchronization remain unchanged.

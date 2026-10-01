@@ -49,6 +49,8 @@ func (g *gen) asyncLaunch(e *core.AsyncLaunch) goast.Expr {
 		varDeclStmt("asyncOwner", g.goType(scopeTy), g.expr(call.Args[0], 0)),
 		varDeclStmt("asyncBody", g.goType(call.Callee.Type()), g.expr(call.Callee, 0)),
 		varDeclStmt("asyncRow", g.rowType(), g.rowArgument(call.Row)),
+		// Publish inherited activations before the goroutine exists.
+		exprStmt(callExpr(selector("fangort", "ShareEvidenceValue"), ident("asyncRow"))),
 	}
 	invokeArgs := []goast.Expr{}
 	if call.Row != nil {

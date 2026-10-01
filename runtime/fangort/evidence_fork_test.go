@@ -122,3 +122,42 @@ func TestEvidenceForkPreservesDistinctApplicationsOfOneEffect(t *testing.T) {
 		t.Fatal("fork merged distinct effect applications")
 	}
 }
+
+func TestShareEvidencePublishesDependenciesAndGuardsInheritance(t *testing.T) {
+	cell := NewHandlerState(0)
+	dependency := &EvidenceOrigin{Name: "Dependency"}
+	dependency.Share = cell.Share
+	dependency.Fixed = NewEvidenceBinding(EvidenceFamily{Origin: dependency, Direct: cell})
+	shares := 0
+	database := &EvidenceOrigin{Name: "Database"}
+	database.Share = func() {
+		shares++
+		ShareOrigin(dependency)
+	}
+	database.Rebuild = func(*EvidenceFork) EvidenceFamily {
+		return EvidenceFamily{Origin: database, Direct: cell, Exit: cell}
+	}
+	row := ExtendEvidenceValue(EvidenceValue{}, NewEvidenceBinding(EvidenceFamily{Origin: database}))
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("inherited an unpublished activation")
+			}
+		}()
+		NewEvidenceFork(nil).Family(database)
+	}()
+	ShareEvidenceValue(row)
+	ShareEvidenceValue(row)
+	if shares != 1 || !cell.shared || !dependency.shared {
+		t.Fatalf("publication ran %d times; cell %v dependency %v", shares, cell.shared, dependency.shared)
+	}
+	fork := NewEvidenceFork(nil)
+	if fork.Family(database).Direct != cell || fork.Family(dependency).Direct != cell {
+		t.Fatal("published activations were not inherited")
+	}
+	deferred := DeferredEvidenceOrigin(ExtendEvidenceRow(nil, EvidenceBinding{Name: "Local", Family: EvidenceFamily{Origin: &EvidenceOrigin{Name: "Local", Share: cell.Share}}}), "Local")
+	ShareOrigin(deferred)
+	if resolved := deferred.Resolve(); !resolved.shared {
+		t.Fatal("deferred origin was not followed")
+	}
+}

@@ -1129,3 +1129,19 @@ func TestCsvExampleFailures(t *testing.T) {
 		})
 	}
 }
+
+// A stateful activation publishes its cell through its origin, and a task
+// launch publishes the launch row before the goroutine exists.
+func TestStatefulHandlersPublishTheirCellsBeforeTaskLaunch(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join("..", "..", "testdata", "run", "async_shared_handler_state.fango")
+	files := emittedProject(t, path)
+	entry := entryFile(t, files)
+	if !bytes.Contains(entry, []byte(".Origin.Share = t_state")) {
+		t.Errorf("stateful handler has no publication hook:\n%s", entry)
+	}
+	async := generatedFile(t, files, "modules/Async/module.go")
+	if !bytes.Contains(async, []byte("fangort.ShareEvidenceValue(asyncRow)")) {
+		t.Errorf("task launch does not publish its row:\n%s", async)
+	}
+}

@@ -38,9 +38,12 @@ the user's callback. `AsyncLaunch` owns the concurrent call and seals the comple
 inherited evidence. `ParallelMap` invokes pure callbacks with bounded concurrency
 and preserves order without exposing task handles.
 
-Each handler activation carries an origin and a factory for rebuilding its
-operation closures. Rebuilding preserves the shared state cell and immutable
-lexical values; it substitutes child Async, cancellation, and matching Fail
+Each handler activation carries an origin, a factory for rebuilding its
+operation closures, and a publication hook. The parent invokes the hooks of
+every activation visible in the launch row before the task starts, which
+switches those state cells and their dependencies to synchronized access;
+inheriting an unpublished activation fails deterministically. Rebuilding
+preserves the shared state cell and immutable lexical values; it substitutes child Async, cancellation, and matching Fail
 boundaries transitively. Origin memoization preserves activation aliases, and
 row shadowing retains the visible activation. Return clauses are not rebuilt.
 Abort origins have no factory: an unsupported abort dependency fails at runtime

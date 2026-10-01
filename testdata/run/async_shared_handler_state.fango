@@ -1,0 +1,33 @@
+import Async exposing (Outcome(..))
+import Fail exposing (Fail)
+import List
+import Result exposing (Result(..))
+
+effect Counter
+    next : () -> Int
+
+withCounter body =
+    handle body() with count = 0 of
+        next () -> resume count with count + 1
+        return value -> (value, count)
+
+runStrings : (() ->{Async.Async String, IO, Fail String | e} a) ->{IO | e} Outcome (Result String a)
+runStrings body = Async.run body
+
+bump : Int ->{Counter} Int
+bump n =
+    if n == 0 then n
+    else
+        ignore next()
+        bump (n - 1)
+
+-- Tasks inherit the parent's counter cell and update it concurrently. Lost
+-- updates are allowed by the cell contract, so only ordering facts are shown.
+main() =
+    (outcome, count) = withCounter ({ _ -> runStrings ({ _ ->
+        before = next()
+        tasks = List.map { _ -> Async.spawn ({ _ -> bump 100 }) } (List.range 1 8)
+        awaited = List.map Async.await tasks
+        after = next()
+        (before, List.length awaited, after > before) }) })
+    print (outcome, count > 1)

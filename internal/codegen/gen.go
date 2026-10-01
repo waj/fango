@@ -1810,6 +1810,7 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 		g.tmp++
 		g.usesFangort = true
 		state = &handlerState{
+			cell:  stateCell,
 			read:  func() goast.Expr { return callExpr(selector(stateCell, "Snapshot")) },
 			write: func(next goast.Expr) goast.Stmt { return exprStmt(callExpr(selector(stateCell, "Store"), next)) },
 		}
@@ -2117,6 +2118,7 @@ func (g *gen) zeroReturn(t types.Type) []goast.Stmt {
 // handlerState supplies the snapshot and commit operations for an activation.
 // Each access publishes a complete value; no lock spans clause evaluation.
 type handlerState struct {
+	cell  string
 	read  func() goast.Expr
 	write func(goast.Expr) goast.Stmt
 }

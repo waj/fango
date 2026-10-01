@@ -63,11 +63,16 @@ func (g *gen) forkableHandlerEvidence(e *core.Handle, mode types.Transport, stat
 		}
 		g.fixedOperations[e] = operations
 		literal.Elts = append(literal.Elts, &goast.KeyValueExpr{Key: ident("Origin"), Value: g.evidenceOrigin(e.Effect)})
-		return typ, callExpr(funcLit(typ, []goast.Stmt{
+		stmts := []goast.Stmt{
 			varDeclStmt(name, typ, g.completeEvidence(e.Effect, record, mode)),
 			&goast.AssignStmt{Lhs: []goast.Expr{&goast.SelectorExpr{X: selector(name, "Origin"), Sel: ident("Fixed")}}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{selector(name, "Binding")}},
-			returnStmt(ident(name)),
-		}))
+		}
+		if state != nil {
+			// A fixed activation shares its cell with tasks directly; the
+			// parent publishes it through this hook before launching them.
+			stmts = append(stmts, &goast.AssignStmt{Lhs: []goast.Expr{&goast.SelectorExpr{X: selector(name, "Origin"), Sel: ident("Share")}}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{selector(state.cell, "Share")}})
+		}
+		return typ, callExpr(funcLit(typ, append(stmts, returnStmt(ident(name)))))
 	}
 	serial := g.tmp
 	g.tmp++
@@ -118,10 +123,24 @@ func (g *gen) forkableHandlerEvidence(e *core.Handle, mode types.Transport, stat
 		varDeclStmt(forked, st, callExpr(ident(builder), forkArgs...)),
 		returnStmt(g.evidenceFamily(e.Effect, ident(forked), mode)),
 	})
+	// Publishing the activation publishes its own cell and, transitively,
+	// every captured dependency; a rebuilt view's parameters name the forked
+	// dependencies, which are already published.
+	var shareBody []goast.Stmt
+	if state != nil {
+		shareBody = append(shareBody, exprStmt(callExpr(selector(state.cell, "Share"))))
+	}
+	for i := range ids {
+		shareBody = append(shareBody, exprStmt(callExpr(selector("fangort", "ShareOrigin"), selector(fmt.Sprintf("t_parentEvidence%d_%d", serial, i), "Origin"))))
+	}
+	for i := range rowIDs {
+		shareBody = append(shareBody, exprStmt(callExpr(selector("fangort", "ShareEvidenceValue"), ident(fmt.Sprintf("t_parentRow%d_%d", serial, i)))))
+	}
 	factory := funcLitParams(params, st, []goast.Stmt{
 		varDeclStmt(origin, originType, originValue),
 		varDeclStmt(result, st, g.completeEvidence(e.Effect, record, mode)),
 		&goast.AssignStmt{Lhs: []goast.Expr{selector(origin, "Rebuild")}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{rebuild}},
+		&goast.AssignStmt{Lhs: []goast.Expr{selector(origin, "Share")}, Tok: gotoken.ASSIGN, Rhs: []goast.Expr{&goast.FuncLit{Type: &goast.FuncType{Params: &goast.FieldList{}}, Body: &goast.BlockStmt{List: shareBody}}}},
 		returnStmt(ident(result)),
 	}).(*goast.FuncLit)
 	g.usesFangort = true

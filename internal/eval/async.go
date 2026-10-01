@@ -57,6 +57,8 @@ func (in *interp) asyncLaunch(e *core.AsyncLaunch, fr *Frame) (Value, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Publish inherited activations before the goroutine exists.
+	fangort.ShareEvidenceRow(row)
 	hostContext := in.hostContext
 	if hostContext == nil {
 		hostContext = in.ctx

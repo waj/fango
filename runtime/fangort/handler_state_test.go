@@ -8,6 +8,7 @@ import (
 func TestHandlerStatePublishesWholeValues(t *testing.T) {
 	type pair struct{ left, right int }
 	state := NewHandlerState(pair{})
+	state.Share()
 	var workers sync.WaitGroup
 	for i := range 8 {
 		workers.Go(func() {
@@ -27,6 +28,7 @@ func TestHandlerStatePublishesWholeValues(t *testing.T) {
 
 func TestHandlerStateDoesNotSerializeOperations(t *testing.T) {
 	state := NewHandlerState(0)
+	state.Share()
 	ready := make(chan struct{}, 2)
 	release := make(chan struct{})
 	var workers sync.WaitGroup
@@ -49,6 +51,7 @@ func TestHandlerStateDoesNotSerializeOperations(t *testing.T) {
 
 func TestHandlerStateExplicitSerialization(t *testing.T) {
 	state := NewHandlerState(0)
+	state.Share()
 	var operation sync.Mutex
 	var workers sync.WaitGroup
 	for range 8 {
@@ -63,5 +66,32 @@ func TestHandlerStateExplicitSerialization(t *testing.T) {
 	workers.Wait()
 	if got := state.Snapshot(); got != 8000 {
 		t.Fatalf("lost explicitly serialized update: %d", got)
+	}
+}
+
+// An unpublished cell is plain storage; publication is idempotent and switches
+// the cell to synchronized access without losing its value.
+func TestHandlerStateShareIsIdempotentAndKeepsValue(t *testing.T) {
+	cell := NewHandlerState(1)
+	cell.Store(2)
+	if cell.shared || cell.Snapshot() != 2 {
+		t.Fatal("unshared cell misbehaved")
+	}
+	cell.Share()
+	cell.Share()
+	if !cell.shared || cell.Snapshot() != 2 {
+		t.Fatal("publication lost the value")
+	}
+	var workers sync.WaitGroup
+	for i := range 8 {
+		workers.Go(func() {
+			for range 1000 {
+				cell.Store(cell.Snapshot() + i)
+			}
+		})
+	}
+	workers.Wait()
+	if cell.Snapshot() < 2 {
+		t.Fatal("published cell lost its value")
 	}
 }
