@@ -338,7 +338,12 @@ same direct operation calls and verified at 0.314–0.315 s in three more runs;
 the Go control took 0.065–0.067 s. These measurements leave roughly a 4.8×
 whole-process gap. The remaining pull handler still dispatches an operation,
 copies its state at snapshot/store, and carries the token and cursor returned
-by the lexer.
+by the lexer. A final profiled run allocates 73.96 MB in 2,504,360 decode
+allocations, retaining 13.39 MB of typed output: this change saves call time,
+not allocation. Two final diagnostic rounds put token/file traversal at
+0.239 s and typed/file traversal at 0.298 s; pure Encoding takes 0.042–0.043 s.
+The diagnostic harness includes the bound-cell exported-Go variant only when
+the compiler output still contains the forwarding adapters.
 
 Five fresh alternating runs of saved binaries isolate
 [immediate-application lowering](backend.md#representations-and-abi) from

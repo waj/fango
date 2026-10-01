@@ -182,7 +182,16 @@ func runDiagnostics(repo string, env []string, dest, compiler, fixture string, r
 	if err = os.WriteFile(filepath.Join(project, "fangort", "json_diagnostic.go"), []byte(emptyDiagnosticCounters), 0644); err != nil {
 		return err
 	}
-	variants := []string{"baseline", "bound-cell", "row-pointer", "combined", "counters"}
+	variants := []string{"baseline", "row-pointer", "counters"}
+	// Older compiler output still has the two bound cell adapters. Once the
+	// compiler has removed them, the diagnostic rewrite has no work to do.
+	localModule, err := os.ReadFile(filepath.Join(project, "modules", "Runtime", "Local", "module.go"))
+	if err != nil {
+		return err
+	}
+	if strings.Contains(string(localModule), "t_record0.Direct(") || strings.Contains(string(localModule), "t_record1.Direct(") {
+		variants = []string{"baseline", "bound-cell", "row-pointer", "combined", "counters"}
+	}
 	rewrites := map[string]map[string]int{}
 	for _, variant := range variants {
 		target := filepath.Join(dir, variant)
@@ -322,7 +331,10 @@ func runDiagnostics(repo string, env []string, dest, compiler, fixture string, r
 	}
 	// Exercise the diagnostic row changes against the runtime's existing
 	// shadowing, applied-effect, and task-rebasing contracts after timing ends.
-	for _, variant := range []string{"row-pointer", "combined"} {
+	for _, variant := range variants {
+		if variant != "row-pointer" && variant != "combined" {
+			continue
+		}
 		target := filepath.Join(dir, variant)
 		for _, name := range []string{"evidence_test.go", "evidence_value_test.go", "evidence_fork_test.go"} {
 			data, e := os.ReadFile(filepath.Join(repo, "runtime", "fangort", name))
