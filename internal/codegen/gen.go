@@ -922,6 +922,9 @@ func (g *gen) workerNeedsControlledArgTypes(args []types.Type) bool {
 }
 
 func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
+	if scope, ok := g.scopeBracketCall(e); ok {
+		return assignBlank(scope)
+	}
 	ref := e.Callee.(*core.VarRef)
 	formal, voidResult := g.workerABI(ref.Name)
 	if !voidResult {
@@ -1699,6 +1702,9 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 }
 
 func (g *gen) workerCallExpr(e *core.App) goast.Expr {
+	if scope, ok := g.scopeBracketCall(e); ok {
+		return scope
+	}
 	ref := e.Callee.(*core.VarRef)
 	formal, voidResult := g.workerABI(ref.Name)
 	mode := e.Control.Resolve(g.control)

@@ -1,0 +1,36 @@
+import Fail exposing (Fail)
+import Result exposing (Result(..))
+import Runtime.Scope
+
+-- A cleanup scope whose callbacks use a lexical effect and the open row of
+-- the enclosing function, and one whose release is a callback value: both
+-- keep the ordinary intrinsic call, while the lexical case inlines.
+
+effect Log
+    log : String -> ()
+
+withLog action =
+    handle action() with lines = [] of
+        log line -> resume () with [line | lines]
+        return value -> (value, lines)
+
+traced : String -> (() ->{e} a) ->{Log | e} a
+traced label action =
+    Runtime.Scope.bracket { log ("enter " ++ label) } { log ("leave " ++ label) } { action() }
+
+release : String ->{Log} ()
+release token = log ("release " ++ token)
+
+acquired : String ->{Log, Fail String} String
+acquired label =
+    Runtime.Scope.bracket { log ("acquire " ++ label); label } release { token ->
+        if token == "bad" then Fail.fail "rejected" else token ++ "!" }
+
+main() =
+    (result, lines) = withLog { _ ->
+        first = Fail.attempt { traced "outer" { traced "inner" { acquired "ok" } } }
+        second = Fail.attempt { traced "again" { acquired "bad" } }
+        (first, second)
+    }
+    print result
+    print lines

@@ -1145,3 +1145,28 @@ func TestStatefulHandlersPublishTheirCellsBeforeTaskLaunch(t *testing.T) {
 		t.Errorf("task launch does not publish its row:\n%s", async)
 	}
 }
+
+// A cleanup scope over literal callbacks performs its operations with the
+// evidence in scope; the intrinsic call, its row, and its callback records
+// disappear from the derived decoders' path tracking.
+func TestCleanupScopesOverLiteralCallbacksInlineAtTheCallSite(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join("..", "..", "testdata", "run", "json_errors.fango")
+	src := string(generatedFile(t, emittedProject(t, path), "modules/Json/module.go"))
+	start := strings.Index(src, "func V_Json_dot_withPath_exit")
+	if start < 0 {
+		t.Fatal("generated Json has no withPath_exit")
+	}
+	body := src[start:]
+	body = body[:strings.Index(body, "\n}\n")]
+	for _, want := range []string{"ev_Json_dot_Pull.Op_Json_dot_enter(v_segment)", "ev_Json_dot_Pull.Op_Json_dot_leave()", "v_action.Exit(ev_Fail_dot_Fail, ev_Json_dot_Pull, fangort.UnitValue)", "fangort.Suppress("} {
+		if !strings.Contains(body, want) {
+			t.Errorf("withPath_exit is missing %q:\n%s", want, body)
+		}
+	}
+	for _, unwanted := range []string{"V_Runtime_dot_Scope_dot_bracket", "ValueEvidence", "ExtendEvidenceValue", "func("} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("withPath_exit still contains %q:\n%s", unwanted, body)
+		}
+	}
+}

@@ -103,7 +103,12 @@ results. Exit execution checks each child result: failed acquisition releases no
 a body failure remains primary and a failed release is appended through the
 copying Suppress operation. Successful-body cleanup failure becomes primary.
 Nested cleanup is inner-to-outer. Go defer is not used because ordering depends
-on the body's language-level result, not on host function return.
+on the body's language-level result, not on host function return. A call of
+the intrinsic whose three callbacks are literal lambdas over the call's own
+lexical evidence is lowered to that sequence at the call site: the lambdas'
+row effects bind to the evidence in scope, so no row, callback record, or
+evidence lookup is constructed. A call that forwards an open row, passes a
+callback value, or whose callback reads its row keeps the ordinary call.
 
 Acquisition, body, and release are synchronous calls and may perform effects.
 [Resource semantics](../reference/resources.md) owns failure ordering.
