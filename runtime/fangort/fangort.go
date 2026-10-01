@@ -28,7 +28,9 @@ func RequireValidString(name, s string) string {
 }
 
 func RequireValidChar(name string, r rune) rune {
-	if !utf8.ValidRune(r) {
+	// The unsigned comparisons are utf8.ValidRune, written so that the check
+	// stays within Go's inlining budget for the small callers it guards.
+	if uint32(r) > utf8.MaxRune || uint32(r)-0xD800 < 0x800 {
 		panic("native " + name + " returned invalid Char")
 	}
 	return r

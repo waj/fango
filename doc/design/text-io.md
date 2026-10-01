@@ -30,7 +30,10 @@ a later malformed or incomplete sequence; the next read diagnoses that sequence
 at its original offset. They refill only to obtain the first complete scalar,
 then stop at the current window boundary. This permits domain scanners to
 retain their own grammar and diagnostic cursor without per-character state
-dispatch.
+dispatch. The text reader decodes bytes below 128 itself, since both bundled
+encodings map them to the same one-byte scalars; any other byte goes through
+`Encoding.decodeAt`. An encoding that is not ASCII-compatible would have to
+revisit this shortcut.
 
 An opaque `Window` snapshots the current immutable bytes and encoding without
 refilling. Pure scalar and span operations derive windows whose private index

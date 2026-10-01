@@ -3,6 +3,7 @@ module Text.Reader exposing (Read(..), Reader, Window, atEnd, chunks, commitWind
 
 import Basics exposing (..)
 import Bytes
+import Char
 import Encoding exposing (Encoding, Error(..))
 import Fail exposing (Fail, fromResult)
 import List
@@ -32,9 +33,24 @@ type Window = { encoding : Encoding, bytes : Bytes.Bytes, index : Int }
 
 type Read = Found String | Ended String | Overflowed deriving (Eq, Show)
 
+-- Bytes below 128 are one-byte scalars with the same code under every bundled
+-- encoding, so the common ASCII case needs no encoding dispatch. Everything
+-- else, including end of window, is decided by Encoding. The window scanners
+-- below repeat the check inline so their ASCII paths perform no calls.
+decodeScalar : Encoding -> Bytes.Bytes -> Int -> Result Encoding.Error (Maybe (Char, Int))
+decodeScalar encoding bytes offset =
+    case Bytes.byteAt offset bytes of
+        Just code ->
+            if code < 128 then
+                case Char.fromCode code of
+                    Just char -> Ok (Just (char, 1))
+                    Nothing -> Encoding.decodeAt encoding bytes offset
+            else Encoding.decodeAt encoding bytes offset
+        Nothing -> Encoding.decodeAt encoding bytes offset
+
 inspect : Encoding -> ByteReader.Reader e -> Int -> Int ->{e} Result Encoding.Error (Maybe (Char, Int))
 inspect encoding parent base offset =
-    case Encoding.decodeAt encoding parent.buffered() offset of
+    case decodeScalar encoding parent.buffered() offset of
         Ok Nothing ->
             if parent.refill() then inspect encoding parent base offset
             else Ok Nothing
@@ -52,7 +68,7 @@ peekResult result =
         Ok (Just (char, _)) -> Ok (Just char)
 
 readyAt encoding bytes offset =
-    case Encoding.decodeAt encoding bytes offset of
+    case decodeScalar encoding bytes offset of
         Ok Nothing -> False
         Err (IncompleteSequence _) -> False
         _ -> True
@@ -88,8 +104,8 @@ withString text use =
     bytes = Bytes.fromString text
     Runtime.Local.run 0 { consumed ->
         use (Reader (Input
-            { at = { offset -> Encoding.decodeAt Encoding.utf8 bytes (consumed.read() + offset) }
-            , peek = { peekResult (Encoding.decodeAt Encoding.utf8 bytes consumed.read()) }
+            { at = { offset -> decodeScalar Encoding.utf8 bytes (consumed.read() + offset) }
+            , peek = { peekResult (decodeScalar Encoding.utf8 bytes consumed.read()) }
             , ready = { offset -> consumed.read() + offset < Bytes.length bytes }
             , consume = { size -> consumed.write (consumed.read() + size) }
             , position = consumed.read
@@ -128,11 +144,19 @@ readChar reader = fromResult (tryReadChar reader)
 -- successful prefix retains the precise position of a subsequent error.
 prefixWidth : Encoding -> Bytes.Bytes -> (Char -> Bool) -> Int -> Int
 prefixWidth encoding bytes keep offset =
-    case Encoding.decodeAt encoding bytes offset of
-        Ok (Just (char, width)) ->
-            if keep char then prefixWidth encoding bytes keep (offset + width)
-            else offset
-        _ -> offset
+    case Bytes.byteAt offset bytes of
+        Nothing -> offset
+        Just code ->
+            if code < 128 then
+                case Char.fromCode code of
+                    Just char -> if keep char then prefixWidth encoding bytes keep (offset + 1) else offset
+                    Nothing -> offset
+            else
+                case Encoding.decodeAt encoding bytes offset of
+                    Ok (Just (char, width)) ->
+                        if keep char then prefixWidth encoding bytes keep (offset + width)
+                        else offset
+                    _ -> offset
 
 window : Reader e ->{e} Window
 window (Reader input) = Window { encoding = input.encoding, bytes = input.buffered(), index = 0 }
@@ -141,11 +165,22 @@ windowPosition : Window -> Int
 windowPosition snapshot = snapshot.index
 
 peekWindow : Window -> Result Encoding.Error (Maybe (Char, Int))
-peekWindow snapshot = Encoding.decodeAt snapshot.encoding snapshot.bytes snapshot.index
+peekWindow snapshot = decodeScalar snapshot.encoding snapshot.bytes snapshot.index
 
 readWindow : Window -> Result Encoding.Error (Maybe (Char, Int, Window))
 readWindow snapshot =
-    case peekWindow snapshot of
+    case Bytes.byteAt snapshot.index snapshot.bytes of
+        Nothing -> Ok Nothing
+        Just code ->
+            if code < 128 then
+                case Char.fromCode code of
+                    Just char -> Ok (Just (char, 1, { snapshot | index = snapshot.index + 1 }))
+                    Nothing -> readWindowAt snapshot
+            else readWindowAt snapshot
+
+readWindowAt : Window -> Result Encoding.Error (Maybe (Char, Int, Window))
+readWindowAt snapshot =
+    case Encoding.decodeAt snapshot.encoding snapshot.bytes snapshot.index of
         Err error -> Err error
         Ok Nothing -> Ok Nothing
         Ok (Just (char, width)) -> Ok (Just (char, width, { snapshot | index = snapshot.index + width }))
