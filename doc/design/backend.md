@@ -15,7 +15,8 @@ It does not depend on Go runtime internals, stack maps, barriers, or scheduler A
 | String, Char | Valid UTF-8 string, Unicode-scalar rune |
 | Bool | bool; treated as True/False ADT by checking |
 | Unit | Shared fangort.Unit/UnitValue when represented |
-| Function | Structural generic alias for a typed Direct/Exit callable record |
+| Function value | Structural generic alias for a typed Direct/Exit callable record |
+| Invocation-only callback parameter | Selected Go function member with a verified saturated arity |
 | Single-constructor ADT | Typed constructor struct; pointer for recursive layouts or larger callable bundles |
 | Maybe, Result | Tagged struct with typed payload fields |
 | Payload-free enum (2–256 constructors) | One-byte tagged struct |
@@ -37,24 +38,16 @@ three direct function fields use pointers: reader-like capability records are
 constructed infrequently and otherwise copied through every cursor and result.
 Their callers share the immutable bundle. Callable aliases are
 interned by structural Go type within each module, preserving compatibility
-between independently emitted modules. Branches in Exit let bindings assign
-their Outcome using ordinary Go statements. Direct calls to small, nonrecursive
-local forwarding lambdas emit a Go function call that can inline. This applies
-only when the lambda has no captured evidence or residual rows; callbacks
-passed as values retain their callable records and invocation ABI.
-An immediately applied lambda emits only the selected Direct/Exit body, without
-constructing a callable record. Unit-to-Unit immediate applications in statement,
-binding, and return positions emit their bodies directly, supplying invocation
-evidence and residual rows while retaining captured lexical bindings. Projected
-invocation arguments evaluate once before the erased Unit argument and body.
-Return-position literal calls with exactly the
-enclosing Go result type become lexical statement blocks, recursively removing
-nested invocation boundaries. Arguments evaluate left to right before parameter
-binding; fresh bindings preserve values captured by escaping closures, including
-inside loops. Defer, recover, named-result, and variadic callees retain their
-function boundary. Expression positions that require a Go value retain an
-ordinary literal call. Small runtime helpers such as Normal and Propagate remain
-ordinary Go functions eligible for Go's own inliner.
+between independently emitted modules. [Structured lowering](lowering.md) selects
+plain callback parameters and split Exit results where the owner can prove the
+invocation contract. General function values retain compatible callable records.
+Immediate literal calls in binding, statement, and return positions become lexical
+statement blocks when their function boundary can be removed safely. Arguments
+evaluate left to right before parameter binding; fresh bindings preserve values
+captured by escaping closures, including inside loops. Typed result temporaries
+preserve boxing and conversion at assignments. Defer, recover, named-result, and
+variadic callees retain their function boundary. Expression positions that require
+a Go value retain an ordinary literal call.
 
 Compiled residual effect rows are small values with two inline binding pointers
 and an optional immutable overflow chain. Extending or shadowing a row that
@@ -161,8 +154,9 @@ Project emission is the single generation path used by CLI and tests.
 
 Emission does not inspect dependency bodies to rediscover calling conventions.
 Owner-scoped Core elaboration records an ABI summary on every definition:
-whether its type needs a Direct/Exit representation family and whether it
-invokes a controlled callback. Classification uses the owning module's body
+whether its type needs a Direct/Exit representation family, whether it
+invokes a controlled callback, and each parameter's saturated callback contract.
+Classification uses the owning module's body
 and consults only these summaries for installed dependencies.
 
 Each owner is lowered and emitted alone. Its unit program holds its own Core
@@ -171,7 +165,8 @@ are withheld; the only exposed bodies are the bounded
 [execution templates](core.md#adapters-and-specialization), explicitly included
 in the dependency ABI fingerprint. The backend therefore cannot depend on an
 implementation its key does not name. Each module independently validates its
-owned Core and emits the Direct/Exit families recorded in its ABI summaries.
+owned Core and its [structured lowering](lowering.md), then emits the Direct/Exit
+families recorded in its ABI summaries.
 
 The whole-program lowering and emission
 path remains as the differential reference the module backend is compared
@@ -303,10 +298,10 @@ parameters may be captured. The reference owns the
 [public guarantee](../reference/functions.md#tail-call-guarantee).
 
 Go emits one for loop and simultaneous reassignment of changed arguments plus
-continue in both Direct and Exit workers. Exit loops retain ordinary Outcome
-checks before the next iteration and return a checked Outcome at terminal
-leaves. A dedicated return-position walker keeps continue out of nested
-function literals. Seq tails do not introduce IIFEs; erased Unit arguments use
+continue in both Direct and Exit workers. Exit loops check the separate exit
+result before the next iteration and return split results at terminal leaves.
+The structured lowering keeps continue out of nested function literals. Seq tails
+do not introduce IIFEs; erased Unit arguments use
 the ordinary ordered temporary prelude. Unchanged arguments, including dictionaries,
 are omitted from jumps; a fully unchanged call is bare continue. No unreachable
 return is needed after an infinite loop. The interpreter uses the same predicate,

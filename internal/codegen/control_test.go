@@ -8,7 +8,7 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-func TestExitWorkerEmitsOutcomePropagationWhileDirectWorkerStaysPlain(t *testing.T) {
+func TestExitWorkerEmitsSplitResultWhileDirectWorkerStaysPlain(t *testing.T) {
 	sup := &types.Supply{}
 	b := types.NewBuiltins(sup)
 	eff := &types.EffectInfo{Unique: sup.NextUnique(), Name: "Main.Fail"}
@@ -44,11 +44,11 @@ func TestExitWorkerEmitsOutcomePropagationWhileDirectWorkerStaysPlain(t *testing
 	got := string(data)
 	for _, want := range []string{
 		"func V_Main_dot_id(v_x int64) int64",
-		"func V_Main_dot_main_exit(ev_Main_dot_Fail *Eff_Main_dot_Fail_exit) fangort.Outcome[int64]",
-		"fangort.Propagate[int64]",
+		"func V_Main_dot_main_exit(ev_Main_dot_Fail *Eff_Main_dot_Fail_exit) (int64, *fangort.ExitRequest)",
+		"func V_Main_dot_unitMain_exit(ev_Main_dot_Fail *Eff_Main_dot_Fail_exit) *fangort.ExitRequest",
 		`Effect: "Main.Fail"`,
-		"if t_outcome0.Exit != nil",
-		"V_Main_dot_tick()\n\treturn fangort.Normal[fangort.Unit](fangort.UnitValue)",
+		"if t_exit3 != nil",
+		"V_Main_dot_tick()",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("generated Go missing %q:\n%s", want, got)

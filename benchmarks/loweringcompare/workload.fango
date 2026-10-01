@@ -1,0 +1,82 @@
+import Fail
+import List
+import Result
+import Runtime.Scope
+import State
+
+input : Int -> List.List Int
+input n = List.range 1 n
+
+fold : List.List Int -> Int
+fold values = List.foldl { value total -> value + total } 0 values
+
+applyLoop : (Int -> Int) -> Int -> Int -> Int
+applyLoop action remaining total =
+    if remaining <= 0 then total
+    else applyLoop action (remaining - 1) (action total)
+
+unary : Int -> Int
+unary n = applyLoop { value -> value + 1 } n 0
+
+exitFold : List.List Int -> Int
+exitFold values =
+    case Fail.attempt { _ -> List.foldl { value total -> if value < 0 then Fail.fail "negative" else value + total } 0 values } of
+        Result.Err _ -> -1
+        Result.Ok result -> result
+
+advance : Int ->{State.State Int} Int
+advance n =
+    if n <= 0 then State.get()
+    else
+        current = State.get()
+        State.put (current + 1)
+        advance (n - 1)
+
+state : Int -> Int
+state n = (State.run 0 { _ -> advance n }).state
+
+bracketLoop : Int -> Int -> Int
+bracketLoop remaining total =
+    if remaining <= 0 then total
+    else
+        next = Runtime.Scope.bracket { 1 } { _ -> () } { value -> total + value }
+        bracketLoop (remaining - 1) next
+
+bracket : Int -> Int
+bracket n = bracketLoop n 0
+
+sameLoop : Eq a => Int -> a -> a -> Int -> Int
+sameLoop remaining first second total =
+    if remaining <= 0 then total
+    else sameLoop (remaining - 1) first second (if first == second then total + 1 else total)
+
+dictionary : Int -> Int
+dictionary n = sameLoop n "same" "same" 0
+
+combine : Int -> Int -> Int
+combine first second = first + second
+
+partial : List.List Int -> Int
+partial values = List.foldl { action total -> action 1 + total } 0 (List.map combine values)
+
+type Wide = { a : Int, b : Int, c : Int, d : Int, e : Int, f : Int, g : Int, h : Int }
+
+product : Int ->{Fail.Fail String} Wide
+product value =
+    if value < 0 then Fail.fail "negative"
+    else { a = value, b = value, c = value, d = value, e = value, f = value, g = value, h = value }
+
+wideLoop : Int -> Int ->{Fail.Fail String} Int
+wideLoop remaining total =
+    if remaining <= 0 then total
+    else
+        value = product 1
+        wideLoop (remaining - 1) (total + value.a)
+
+wide : Int -> Int
+wide n =
+    case Fail.attempt { wideLoop n 0 } of
+        Result.Err _ -> -1
+        Result.Ok result -> result
+
+main() = ()

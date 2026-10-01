@@ -85,6 +85,61 @@ Run performance comparisons only on an idle host. Existing thresholds and
 historical sources remain available; passing build and correctness checks does
 not establish performance parity.
 
+### Go lowering comparison
+
+```sh
+go run ./benchmarks/loweringcompare -out /tmp/lowering-evidence \
+  -baseline 30f8148 -samples 7 -rounds 2 -profile
+```
+
+The command snapshots the baseline revision and current working tree, builds
+independent compilers/projects, and retains generated source, build timings, binary sizes, checksums, alternating runtime samples, allocation counts,
+bootstrap ratio intervals, Go compiler diagnostics, CPU/allocation profiles,
+and the existing macro programs compared between compilers.
+Run it on an otherwise idle host after correctness checks finish. The baseline
+must be a revision preceding the lowering change.
+
+Input lists are built before timing. Cases cover known and unknown curried
+callbacks, unary invocation, Direct/Exit folds, handler state, brackets, generic
+string dictionaries, large product results, and handwritten Go loop baselines.
+Structural and allocation checks run in correctness CI without timing thresholds.
+Macro samples include process startup; focused samples time the computation
+inside one process. `-reuse` repeats only macro comparisons using the retained
+snapshots. The comparison does not replace the existing runtime and latency gates.
+
+On 2026-09-30, Go 1.26.7 on darwin/arm64, GOMAXPROCS=1, the idle comparison
+against `30f8148297263f41e78d0e5afe9fba98f9562af4` used seven alternating
+samples in each of two rounds. Current/original median runtime ratios were:
+
+| Focused case (10,000 elements/iterations) | Round 1 | Round 2 | Allocations per invocation, original → current |
+| --- | ---: | ---: | ---: |
+| Known fold | 0.056 | 0.059 | 20,000 → 0 |
+| Unary callback | 0.378 | 0.360 | 0 → 0 |
+| Exit fold | 0.161 | 0.164 | 10,004 → 4 |
+| State | 0.999 | 0.998 | 8 → 8 |
+| Bracket | 0.510 | 0.507 | 0 → 0 |
+| Generic String Eq dictionary | 0.997 | 1.005 | 20,000 → 20,000 |
+| Large product Exit result | 0.678 | 0.680 | 4 → 4 |
+| Escaping partial callbacks | 0.615 | 0.616 | 60,000 → 40,000 |
+
+Callback/control geometric mean ratios were 0.324 and 0.326. Complete cold,
+warm, and changed build ratios were 1.014, 1.004, and 0.996; cold means a cold
+Fango cache with Go's shared compilation cache retained. Focused generated source
+was 156,925 → 153,684 bytes, and the measurement binary 4,720,178 → 4,716,546
+bytes. The handwritten Go controls stayed near parity. No focused or macro case
+had a reproducible regression above 5% across both rounds' bootstrap intervals.
+Macro map/filter ratios were 0.850 and 0.860; bracket ratios 0.434 and 0.439.
+Other macro programs remained near parity.
+
+Allocation profiles attribute the original fold's per-element allocation to its
+curried callback factory. The generic dictionary case still allocates in the
+String Eq factory; selected saturated parameters do not specialize an abstract
+dictionary's methods. Existing handwritten-Go runtime gates still fail for sum
+and state, and compile-latency gates lack capture-pure/capture-fail baselines.
+All three conditions reproduce on the original revision. Current map/filter and
+bracket pass their existing gates, which fail on that original revision; thresholds
+and stored baselines were left intact.
+
 ### Typed JSON comparison
 
 ```sh

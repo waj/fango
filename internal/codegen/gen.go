@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/waj/fango/internal/core"
+	"github.com/waj/fango/internal/lower"
 	"github.com/waj/fango/internal/types"
 )
 
@@ -159,25 +160,31 @@ func UnitProgram(p *core.Prog, unit Unit) *core.Prog {
 }
 
 func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byte, error) {
+	lowered, err := lower.Module(p, unit.Name)
+	if err != nil {
+		return nil, err
+	}
 	g := &gen{
-		b:             b,
-		adts:          map[int]*types.ADTInfo{},
-		neededEq:      map[int]bool{},
-		neededShow:    map[int]bool{},
-		scalarEq:      map[int]bool{},
-		scalarShow:    map[int]bool{},
-		caseVarTys:    map[string]types.Type{},
-		evidence:      map[types.EffectKey][]goast.Expr{},
-		evidenceModes: map[types.EffectKey][]types.Transport{},
-		defs:          map[string]*core.Def{},
-		unit:          unit.Name,
-		imports:       map[string]bool{},
-		nativeImports: map[string]bool{},
-		direct:        map[string]bool{},
-		natives:       p.Natives,
-		effects:       map[int]*types.EffectInfo{},
-		control:       types.Direct,
-		abi:           types.Direct,
+		disableOptimizations: p.DisableOptimizations,
+		lowered:              lowered,
+		b:                    b,
+		adts:                 map[int]*types.ADTInfo{},
+		neededEq:             map[int]bool{},
+		neededShow:           map[int]bool{},
+		scalarEq:             map[int]bool{},
+		scalarShow:           map[int]bool{},
+		caseVarTys:           map[string]types.Type{},
+		evidence:             map[types.EffectKey][]goast.Expr{},
+		evidenceModes:        map[types.EffectKey][]types.Transport{},
+		defs:                 map[string]*core.Def{},
+		unit:                 unit.Name,
+		imports:              map[string]bool{},
+		nativeImports:        map[string]bool{},
+		direct:               map[string]bool{},
+		natives:              p.Natives,
+		effects:              map[int]*types.EffectInfo{},
+		control:              types.Direct,
+		abi:                  types.Direct,
 	}
 	for _, name := range unit.Imports {
 		g.direct[name] = true
@@ -294,6 +301,7 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		packageName = "fangomod"
 	}
 	file := &goast.File{Name: ident(packageName), Decls: decls}
+	g.splitOutcomeABI(file)
 	g.inlineReturnCalls(file)
 	var buf bytes.Buffer
 	if err := format.Node(&buf, gotoken.NewFileSet(), file); err != nil {
@@ -349,18 +357,25 @@ type gen struct {
 	// decision tree: worker/lambda parameters, case scrutinee binders, and
 	// constructor field temporaries. Multi-column pattern matrices may test
 	// any parameter directly, so constructor switches need all of them here.
-	caseVarTys    map[string]types.Type
-	evidence      map[types.EffectKey][]goast.Expr
-	evidenceModes map[types.EffectKey][]types.Transport
-	rows          map[types.CaptureVar][]goast.Expr
-	defs          map[string]*core.Def
-	unit          string
-	imports       map[string]bool
-	nativeImports map[string]bool
-	direct        map[string]bool
-	natives       map[string]*types.NativeInfo
-	effects       map[int]*types.EffectInfo
-	control       types.Transport
+	caseVarTys           map[string]types.Type
+	evidence             map[types.EffectKey][]goast.Expr
+	evidenceModes        map[types.EffectKey][]types.Transport
+	rows                 map[types.CaptureVar][]goast.Expr
+	defs                 map[string]*core.Def
+	unit                 string
+	imports              map[string]bool
+	nativeImports        map[string]bool
+	direct               map[string]bool
+	natives              map[string]*types.NativeInfo
+	effects              map[int]*types.EffectInfo
+	control              types.Transport
+	flatCallbacks        map[string]flatCallback
+	lowered              *lower.Program
+	outcomeCalls         map[*goast.CallExpr]goast.Expr
+	unitOutcomeCalls     map[*goast.CallExpr]bool
+	fixedOperations      map[*core.Handle]map[string]*goast.FuncLit
+	knownOperations      map[goast.Expr]map[string]*goast.FuncLit
+	disableOptimizations bool
 	// abi selects the Direct/Exit representation family for controlled
 	// function and ADT values in the declaration currently being emitted.
 	// Unlike control, it does not change when emission enters a pure nested
@@ -723,6 +738,9 @@ func (g *gen) printFn(t types.Type) string {
 // TyParams become Go type parameters — `any` for General vars,
 // fangort.Number for Number-kinded ones (doc/design.md, "Type inference", doc/design.md, "Go backend and runtime").
 func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
+	oldCallbacks := g.flatCallbacks
+	g.flatCallbacks = map[string]flatCallback{}
+	defer func() { g.flatCallbacks = oldCallbacks }()
 	oldForwarders := g.forwarders
 	g.forwarders = nil
 	defer func() { g.forwarders = oldForwarders }()
@@ -768,7 +786,12 @@ func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
 		if name != "_" {
 			name = mangleValue(name)
 		}
-		params = append(params, paramSpec{name: name, typ: g.goType(argTys[i])})
+		typ := g.goType(argTys[i])
+		if contract, selected, ok := g.callbackContract(d, i, mode); ok {
+			typ = g.flatCallbackType(argTys[i], contract.Arity, selected)
+			g.flatCallbacks[d.Params[i]] = flatCallback{contract.Arity, selected}
+		}
+		params = append(params, paramSpec{name: name, typ: typ})
 	}
 	var result goast.Expr
 	if mode == types.Exit {
@@ -783,11 +806,7 @@ func (g *gen) workerDef(d *core.Def, mode, abi types.Transport) goast.Decl {
 	// shape.
 	var body []goast.Stmt
 	finishRows := g.prepareRows()
-	if _, ok := core.DetectTailLoop(d); ok {
-		body = []goast.Stmt{&goast.ForStmt{Body: &goast.BlockStmt{List: g.loopStmts(d, d.Body, g.isUnit(ret))}}}
-	} else {
-		body = g.retStmtsFor(d.Body, g.isUnit(ret))
-	}
+	body = g.loweredStmts(d, g.lowered.Functions[d.Name].Body, false, g.isUnit(ret))
 	body = finishRows(body)
 	name := g.topValueName(d.Name)
 	if abi == types.Exit {
@@ -932,7 +951,7 @@ func (g *gen) workerCallStmt(e *core.App) goast.Stmt {
 		if i < len(formal) && g.isUnit(formal[i]) {
 			continue
 		}
-		args = append(args, g.expr(a, 0))
+		args = append(args, g.workerArgument(g.defs[ref.Name], i, a, mode))
 	}
 	return exprStmt(callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...))
 }
@@ -1484,6 +1503,9 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 		case core.Worker:
 			return g.workerCallExpr(e)
 		case core.Value:
+			if call, ok := g.flatCallbackCall(e); ok {
+				return call
+			}
 			// One typed indirect call per application; chains render
 			// e(a)(b). Call is a Go primary expression — no parens needed,
 			// and a func-literal callee called in place is legal Go.
@@ -1508,7 +1530,11 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 					return callExpr(g.directLambdaMember(lam, mode), args...)
 				}
 			}
-			return callExpr(callbackMember(g.expr(e.Callee, 0), mode), args...)
+			call := callExpr(callbackMember(g.expr(e.Callee, 0), mode), args...)
+			if mode == types.Exit {
+				g.markOutcomeCall(call.(*goast.CallExpr), g.goType(e.Ty))
+			}
+			return call
 		case core.Ctor:
 			return g.ctorLit(e)
 		default:
@@ -1579,7 +1605,11 @@ func (g *gen) expr(e core.Expr, parentPrec int) goast.Expr {
 			args = append(args, g.expr(a, 0))
 		}
 		callOp := func(as []goast.Expr) goast.Expr {
-			return callExpr(&goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Op_" + linkName(e.Op.Name))}, as...)
+			call := callExpr(g.operationCallee(stack[len(stack)-1], "Op_"+linkName(e.Op.Name)), as...)
+			if g.currentEvidenceMode(e.Effect.Key()) == types.Exit {
+				g.markOutcomeCall(call.(*goast.CallExpr), g.goType(e.Ty))
+			}
+			return call
 		}
 		// A perform that resolves to Exit in this context but reaches a
 		// Direct handler activation gets a plain result back — a void call
@@ -1701,7 +1731,7 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 			}
 			continue
 		}
-		args = append(args, g.expr(a, 0))
+		args = append(args, g.workerArgument(g.defs[ref.Name], i, a, mode))
 	}
 	if needPrelude {
 		var body []goast.Stmt
@@ -1713,10 +1743,13 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 			}
 			name := fmt.Sprintf("t_u%d", g.tmp)
 			g.tmp++
-			body = append(body, varDeclStmt(name, g.goType(a.Type()), g.expr(a, 0)))
+			body = append(body, varDeclStmt(name, g.workerArgumentType(g.defs[ref.Name], i, a.Type(), mode), g.workerArgument(g.defs[ref.Name], i, a, mode)))
 			args = append(args, ident(name))
 		}
 		call := callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...)
+		if mode == types.Exit {
+			g.markWorkerOutcomeCall(call.(*goast.CallExpr), g.goType(e.Ty), g.defs[ref.Name])
+		}
 		if mode == types.Exit {
 			body = append(body, returnStmt(call))
 		} else if voidResult {
@@ -1735,6 +1768,9 @@ func (g *gen) workerCallExpr(e *core.App) goast.Expr {
 		return wrapped
 	}
 	call := callExpr(indexExpr(g.topValueRefMode(ref.Name, abi), g.goTypes(e.TyArgs)), args...)
+	if mode == types.Exit {
+		g.markWorkerOutcomeCall(call.(*goast.CallExpr), g.goType(e.Ty), g.defs[ref.Name])
+	}
 	if normalProjection {
 		return callExpr(selector("fangort", "RequireNormal"), call)
 	}
@@ -1782,7 +1818,14 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 	name := fmt.Sprintf("ev%d", g.tmp)
 	g.tmp++
 	decl := varDeclStmt(name, st, record)
-	g.evidence[e.Effect.Key()] = append(g.evidence[e.Effect.Key()], ident(name))
+	evidenceValue := ident(name)
+	if operations := g.fixedOperations[e]; len(operations) != 0 {
+		if g.knownOperations == nil {
+			g.knownOperations = map[goast.Expr]map[string]*goast.FuncLit{}
+		}
+		g.knownOperations[evidenceValue] = operations
+	}
+	g.evidence[e.Effect.Key()] = append(g.evidence[e.Effect.Key()], evidenceValue)
 	g.evidenceModes[e.Effect.Key()] = append(g.evidenceModes[e.Effect.Key()], evidenceMode)
 	body := g.expr(e.Body, 0)
 	g.evidence[e.Effect.Key()] = g.evidence[e.Effect.Key()][:len(g.evidence[e.Effect.Key()])-1]
@@ -2545,6 +2588,9 @@ func (g *gen) letIIFE(e *core.Let) goast.Expr {
 // rest of the chain never mentions them (Go rejects unused locals; Fango
 // bindings still evaluate eagerly).
 func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
+	if g.rememberForwarder(let) {
+		return nil
+	}
 	if let.Rec {
 		// A Go local is not in scope inside its own initializer:
 		// declare, then assign — the standard recursive-closure idiom.
@@ -2593,7 +2639,7 @@ func (g *gen) letBindingStmts(let *core.Let) []goast.Stmt {
 	default:
 		stmts = []goast.Stmt{varDeclStmt(name, g.goType(let.Rhs.Type()), g.expr(let.Rhs, 0))}
 	}
-	if g.rememberForwarder(let) || !core.Mentions(let.Body, let.Name) {
+	if !core.Mentions(let.Body, let.Name) {
 		stmts = append(stmts, assignBlank(ident(name)))
 	}
 	return stmts
@@ -2637,7 +2683,7 @@ func (g *gen) stmts(e core.Expr) []goast.Stmt {
 				args = append(args, g.expr(a, 0))
 			}
 			if !needPrelude {
-				call := callExpr(&goast.SelectorExpr{X: stack[len(stack)-1], Sel: ident("Op_" + linkName(e.Op.Name))}, args...)
+				call := callExpr(g.operationCallee(stack[len(stack)-1], "Op_"+linkName(e.Op.Name)), args...)
 				return []goast.Stmt{exprStmt(call)}
 			}
 		}
@@ -2735,6 +2781,10 @@ func linkName(name string) string {
 }
 
 func (g *gen) directLambdaMember(e *core.Lambda, mode types.Transport) goast.Expr {
+	oldCallbacks := g.flatCallbacks
+	g.flatCallbacks = maps.Clone(oldCallbacks)
+	delete(g.flatCallbacks, e.Param)
+	defer func() { g.flatCallbacks = oldCallbacks }()
 	oldForwarders := g.forwarders
 	g.forwarders = maps.Clone(oldForwarders)
 	delete(g.forwarders, e.Param)

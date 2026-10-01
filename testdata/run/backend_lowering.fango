@@ -1,0 +1,43 @@
+import Fail
+import List
+import Result
+
+combine : Int -> Int -> Int
+combine x y = x + y
+
+known values = List.foldl { x total -> x + total } 0 values
+
+unknown f values = List.foldl f 0 values
+
+make x =
+    print x
+    { y -> x + y }
+
+argument() =
+    print 2
+    3
+
+staged f = f 1 (argument())
+
+local n =
+    offset = 3
+    next = { x -> if x < 0 then offset else x + offset }
+    next n
+
+forwarded offset values =
+    action x = x + offset
+    List.map action values
+
+checked values =
+    Fail.attempt { _ ->
+        List.foldl { x total -> if x < 0 then Fail.fail "negative" else total + x } 0 values }
+
+main() =
+    print (known [1, 2, 3])
+    print (unknown combine [1, 2, 3])
+    print (staged make)
+    print (local 4)
+    print (forwarded 3 [1, 2])
+    print (List.map { f -> f 10 } (List.map combine [1, 2, 3]))
+    print (checked [1, 2, 3])
+    print (checked [1, -1, 3])

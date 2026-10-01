@@ -32,9 +32,7 @@ foldl combine result values =
         [] -> result
         [value | rest] -> foldl combine (combine value result) rest
 
--- reverse and length are written out rather than expressed through foldl.
--- foldl takes its callback curried, so routing through it would allocate a
--- closure per element; these have no callback at all.
+-- reverse and length use direct loops with no callback invocation.
 reverseHelp : List a -> List a -> List a
 reverseHelp values acc =
     case values of

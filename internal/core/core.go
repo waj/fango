@@ -77,6 +77,42 @@ type ABISummary struct {
 	Valid              bool
 	NeedsFamily        bool
 	CallsControlledArg bool
+	Callbacks          []CallbackABI
+}
+
+// CallbackABI describes a parameter consumed only by saturated calls or by
+// forwarding to an equally restricted parameter. Arity zero retains the
+// general value ABI. DirectUses and ExitUses record demanded members in each worker
+// execution context: bit 0 is Direct and bit 1 is Exit.
+type CallbackABI struct {
+	Arity      int
+	DirectUses uint8
+	ExitUses   uint8
+}
+
+func (c CallbackABI) Mode(context types.Transport) (types.Transport, bool) {
+	switch c.Uses(context) {
+	case 1:
+		return types.Direct, c.Arity > 0
+	case 2:
+		return types.Exit, c.Arity > 0
+	default:
+		return types.Direct, false
+	}
+}
+
+func (c CallbackABI) Uses(context types.Transport) uint8 {
+	if context == types.Exit {
+		return c.ExitUses
+	}
+	return c.DirectUses
+}
+func (c *CallbackABI) AddUses(context types.Transport, uses uint8) {
+	if context == types.Exit {
+		c.ExitUses |= uses
+	} else {
+		c.DirectUses |= uses
+	}
 }
 
 // IsWorker reports whether the definition emits as a function: it has term

@@ -8,41 +8,7 @@ import (
 	"github.com/waj/fango/internal/core"
 )
 
-// Self tail calls compile to loops (doc/design.md, "Go backend and runtime"):
-// when core.DetectTailLoop accepts a worker, its body emits as `for { … }`
-// and every rewritable self call becomes a parameter reassignment plus
-// `continue`. loopStmts is a separate walker rather than a flag consulted by
-// retStmtsFor, so a `continue` can never leak into a func literal — lambda
-// and expression-context emission still go through retStmts, which stays
-// loop-free. `continue` inside the Go switch/type-switch that decision trees
-// emit targets the enclosing `for`, so case leaves need no labels.
-
-// loopStmts mirrors retStmtsFor exactly — same Let/If/Case statement shapes,
-// so ineligible leaves and non-tail subtrees emit byte-identically — plus two
-// cases: Seq runs its first part as statements and stays in the walker (no
-// IIFE inside loops), and a rewritable self call emits the jump.
-func (g *gen) loopStmts(d *core.Def, e core.Expr, unitResult bool) []goast.Stmt {
-	switch e := e.(type) {
-	case *core.Let:
-		return append(g.letBindingStmts(e), g.loopStmts(d, e.Body, unitResult)...)
-	case *core.If:
-		stmts := []goast.Stmt{&goast.IfStmt{
-			Cond: g.expr(e.Cond, 0),
-			Body: &goast.BlockStmt{List: g.loopStmts(d, e.Then, unitResult)},
-		}}
-		return append(stmts, g.loopStmts(d, e.Else, unitResult)...)
-	case *core.Case:
-		return g.caseStmts(e, func(x core.Expr) []goast.Stmt { return g.loopStmts(d, x, unitResult) })
-	case *core.Seq:
-		return append(g.stmts(e.First), g.loopStmts(d, e.Then, unitResult)...)
-	case *core.App:
-		if core.IsTailLoopCall(d, e) {
-			return g.tailJumpStmts(d, e)
-		}
-	}
-	return g.retStmtsFor(e, unitResult)
-}
-
+// Tail-loop eligibility and jumps are decided by internal/lower.
 // tailJumpStmts emits one rewritable self call as parameter reassignment
 // plus continue. The fast path is a single simultaneous tuple assignment: Go
 // evaluates every right-hand side before assigning — exactly the
@@ -86,7 +52,7 @@ func (g *gen) tailJumpStmts(d *core.Def, e *core.App) []goast.Stmt {
 			}
 			name := fmt.Sprintf("t_u%d", g.tmp)
 			g.tmp++
-			stmts = append(stmts, varDeclStmt(name, g.goType(a.Type()), g.expr(a, 0)))
+			stmts = append(stmts, varDeclStmt(name, g.workerArgumentType(d, i, a.Type(), g.control), g.workerArgument(d, i, a, g.control)))
 			lhs, rhs = append(lhs, ident(mangleValue(param))), append(rhs, ident(name))
 			continue
 		}
@@ -94,7 +60,7 @@ func (g *gen) tailJumpStmts(d *core.Def, e *core.App) []goast.Stmt {
 		if param != "_" {
 			target = mangleValue(param)
 		}
-		lhs, rhs = append(lhs, ident(target)), append(rhs, g.expr(a, 0))
+		lhs, rhs = append(lhs, ident(target)), append(rhs, g.workerArgument(d, i, a, g.control))
 	}
 	if len(lhs) > 0 {
 		stmts = append(stmts, &goast.AssignStmt{Lhs: lhs, Tok: gotoken.ASSIGN, Rhs: rhs})

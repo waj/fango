@@ -31,7 +31,8 @@ Derived record decoders use one [aggregate slot activation](design/json.md).
 
 Measure handler activation construction, residual-row lookup, and remaining
 reader dispatch after buffered scalar/span reads. Reduce token/fragment
-construction and assess copies through large typed Outcomes. Reduce dictionary
+construction and assess remaining copies of large product values after
+[split Exit result lowering](design/lowering.md#exit-results). Reduce dictionary
 closure construction for nonnumeric scalar comparisons; the string-scanner experiment
 exposed per-character closure allocation through generic inequality. Preserve
 invocation-time handler selection, lexical shadowing, and state synchronization.
@@ -78,10 +79,10 @@ instance APIs remain in the [effects roadmap](roadmap-effects.md#handler-instanc
 ## List representation
 
 [Lists](roadmap-list.md) owns private bulk-allocation experiments and possible
-length/indexing APIs over immutable storage. Curried higher-order callbacks may
-allocate an intermediate closure per element, as `List.foldl` illustrates.
-Measure that cost on the current runtime before selecting a calling-convention
-change.
+length/indexing APIs over immutable storage.
+[Selected saturated callbacks](design/lowering.md#callback-contracts) remove
+intermediate currying for known fold lambdas. Unknown curried values retain a
+conservative adapter; measure these residual cases before expanding the contract.
 
 ## Compilation cache
 

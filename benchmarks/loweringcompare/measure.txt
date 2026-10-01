@@ -1,0 +1,47 @@
+package main
+
+import (
+ "encoding/json"
+ "fmt"
+ "os"
+ "runtime"
+ "strconv"
+ "testing"
+ "time"
+)
+
+var measureSink int64
+
+func TestMeasure(t *testing.T) {
+ read := func(key string) int { value, err := strconv.Atoi(os.Getenv(key)); if err != nil || value < 1 { t.Fatalf("invalid %s", key) }; return value }
+ size, reps := read("SIZE"), read("REPS")
+ values := V_input(int64(size))
+ name := os.Getenv("CASE")
+ var invoke func() int64
+ want := int64(size)
+ switch name {
+ case "fold": invoke = func() int64 { return V_fold(values) }; want = int64(size)*(int64(size)+1)/2
+ case "exit": invoke = func() int64 { return V_exitFold(values) }; want = int64(size)*(int64(size)+1)/2
+ case "unary": invoke = func() int64 { return V_unary(int64(size)) }
+ case "state": invoke = func() int64 { return V_state(int64(size)) }
+ case "bracket": invoke = func() int64 { return V_bracket(int64(size)) }
+ case "dictionary": invoke = func() int64 { return V_dictionary(int64(size)) }
+ case "wide": invoke = func() int64 { return V_wide(int64(size)) }
+ case "partial": invoke = func() int64 { return V_partial(values) }; want = int64(size)*(int64(size)+1)/2 + int64(size)
+ case "go-fold": invoke = func() int64 { var total int64; for list := values; !list.IsEmpty(); list = list.Tail() { total += list.Head() }; return total }; want = int64(size)*(int64(size)+1)/2
+ case "go-unary": invoke = func() int64 { var total int64; for range size { total++ }; return total }
+ default: t.Fatalf("unknown case %s", name)
+ }
+ if got := invoke(); got != want { t.Fatalf("checksum %d, want %d", got, want) }
+ runtime.GC()
+ var before, after runtime.MemStats
+ runtime.ReadMemStats(&before)
+ start := time.Now()
+ for range reps { measureSink = invoke() }
+ elapsed := time.Since(start)
+ runtime.ReadMemStats(&after)
+ if measureSink != want { t.Fatalf("checksum %d, want %d", measureSink, want) }
+ data, err := json.Marshal(struct { NS, Bytes, Allocs uint64; Reps int; Checksum int64 }{uint64(elapsed), after.TotalAlloc-before.TotalAlloc, after.Mallocs-before.Mallocs, reps, measureSink})
+ if err != nil { t.Fatal(err) }
+ fmt.Printf("MEASURE %s\n", data)
+}

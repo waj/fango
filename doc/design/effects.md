@@ -95,7 +95,7 @@ Canonical effect names keep generated envelopes independent of graph-local IDs.
 
 Runtime.Scope.bracket introduces a separate cleanup region. Its release closure retains
 definition-site evidence. Direct execution is acquire/body/release with plain
-results. Exit execution checks each Outcome: failed acquisition releases nothing;
+results. Exit execution checks each child result: failed acquisition releases nothing;
 a body failure remains primary and a failed release is appended through the
 copying Suppress operation. Successful-body cleanup failure becomes primary.
 Nested cleanup is inner-to-outer. Go defer is not used because ordering depends
@@ -113,14 +113,16 @@ and whether its mode is selected by an enclosing control context.
 | Transport | Execution |
 | --- | --- |
 | Direct | Plain value/void result |
-| Exit | Checked Outcome carrying a normal value or targeted exit |
+| Exit | Normal value or targeted exit; split Go results internally, Outcome at runtime boundaries |
 
 Open rows and abstract custom evidence are transport-polymorphic because their
 interpretations may exit. Contracts are per arrow and joined, not
 one variant for each combination of callback modes. Each defining module emits
 its available Direct/Exit workers independently of downstream consumers.
 
-Function values carry typed callable members together in a Go record. Members
+General function values carry typed callable members together in a Go record.
+[Invocation-only callback parameters](lowering.md#callback-contracts) can carry
+just the selected member with all verified saturated arguments. Members
 below the body's/captured evidence's minimum mode are absent; checked contracts
 prevent selecting them. Construction runs no body. Pure curried arrows remain
 Direct.
@@ -140,7 +142,11 @@ Names use nominal declarations, not graph-local numbers.
 
 A checked Direct call may select a polymorphic worker's Exit member in an Exit
 context. RequireNormal projects it and treats an unexpected exit as a compiler
-invariant failure. Calling Direct evidence from Exit code wraps a normal result;
-a Unit call is sequenced before producing its Unit Outcome. A polymorphic Exit
+invariant failure. Calling Direct evidence from Exit code supplies a normal
+value and nil exit; a Unit call is sequenced before its normal result. Generated
+Exit workers and callable members return `(T, *ExitRequest)`. A concrete Unit
+worker returns only `*ExitRequest`; generic members retain two results even when
+instantiated at Unit. Runtime helpers and native adapters retain `Outcome[T]`,
+with explicit conversions at those boundaries. A polymorphic Exit
 lower-bound call can target a polymorphic Direct contract because mode selection
 chooses the available Exit member.

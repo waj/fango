@@ -34,12 +34,34 @@ func captures() []func() int {
  }
  return values
 }
+func assigned() {
+ var a, b int
+ a, b = func(x, y int) (int, int) { if x > y { return y, x }; return x, y }(mark(5), mark(4))
+ var boxed any = func() int64 { return 8 }()
+ func(x int) { order = append(order, x) }(6)
+ var values []func() int
+ for i := 0; i < 3; i++ {
+  var value func() int = func(n int) func() int { return func() int { return n } }(i)
+  values = append(values, value)
+ }
+ outer := 9
+ { var outer int = func() int { return outer }(); if outer != 9 { panic("initializer shadowed") } }
+ fmt.Printf("%d %d %T %v %v %d %d %d\n", a, b, boxed, boxed, order, values[0](), values[1](), values[2]())
+}
+func indexedAssignment() {
+ order = nil
+ var values [1]int
+ values[mark(0)] = func() int { mark(7); return 9 }()
+ fmt.Println(values[0], order)
+}
 func main() {
  fmt.Println(shadow(2), order)
  fmt.Printf("%T %v\n", boxed(), boxed())
  fmt.Println(deferred(), order)
  values := captures()
  fmt.Println(values[0](), values[1](), values[2](), recovered())
+ assigned()
+ indexedAssignment()
 }`
 	file, err := parser.ParseFile(token.NewFileSet(), "main.go", source, 0)
 	if err != nil {
@@ -71,7 +93,7 @@ func main() {
 	if err != nil {
 		t.Fatalf("running flattened Go: %v\n%s\n%s", err, got, output.Bytes())
 	}
-	const want = "32 [3 2]\nint64 7\n3 [3 2 9]\n0 1 2 <nil>\n"
+	const want = "32 [3 2]\nint64 7\n3 [3 2 9]\n0 1 2 <nil>\n4 5 int64 8 [3 2 9 5 4 6] 0 1 2\n9 [0 7]\n"
 	if string(got) != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}

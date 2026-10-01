@@ -58,6 +58,7 @@ func (g *gen) asyncLaunch(e *core.AsyncLaunch) goast.Expr {
 	mode := call.Control.Resolve(types.Exit)
 	invoke := callExpr(callbackMember(ident("asyncBody"), mode), invokeArgs...)
 	if mode == types.Exit {
+		g.markOutcomeCall(invoke.(*goast.CallExpr), g.goType(call.Ty))
 		invoke = callExpr(selector("fangort", "RequireNormal"), invoke)
 	}
 	failed := binExpr(gotoken.EQL, selector("result", "Tag"), intLit(int64(e.ErrCtor.Index)))

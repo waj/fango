@@ -49,6 +49,19 @@ func (g *gen) forkableHandlerEvidence(e *core.Handle, mode types.Transport, stat
 		name := fmt.Sprintf("t_fixedEvidence%d", serial)
 		typ, record := g.handlerEvidence(e, mode, state)
 		literal := record.(*goast.UnaryExpr).X.(*goast.CompositeLit)
+		operations := map[string]*goast.FuncLit{}
+		for i, clause := range e.Clauses {
+			count := 0
+			core.Inspect(clause.Body, func(core.Expr) { count++ })
+			if len(clause.LocalVars) == 0 && count <= 16 {
+				field := literal.Elts[i].(*goast.KeyValueExpr)
+				operations[field.Key.(*goast.Ident).Name] = field.Value.(*goast.FuncLit)
+			}
+		}
+		if g.fixedOperations == nil {
+			g.fixedOperations = map[*core.Handle]map[string]*goast.FuncLit{}
+		}
+		g.fixedOperations[e] = operations
 		literal.Elts = append(literal.Elts, &goast.KeyValueExpr{Key: ident("Origin"), Value: g.evidenceOrigin(e.Effect)})
 		return typ, callExpr(funcLit(typ, []goast.Stmt{
 			varDeclStmt(name, typ, g.completeEvidence(e.Effect, record, mode)),

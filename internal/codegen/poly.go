@@ -38,6 +38,9 @@ func (g *gen) polymorphicPerformExpr(e *core.Perform, evidence goast.Expr) goast
 		&goast.KeyValueExpr{Key: ident("Args"), Value: &goast.CompositeLit{Type: &goast.ArrayType{Elt: ident("any")}, Elts: values}},
 	}}
 	call := callExpr(&goast.SelectorExpr{X: evidence, Sel: ident("Op_" + linkName(e.Op.Name))}, request)
+	if g.currentEvidenceMode(e.Effect.Key()) == types.Exit {
+		g.markOutcomeCall(call.(*goast.CallExpr), selector("fangort", "PolyReply"))
+	}
 	erasedResult := types.SubstRigid(e.Op.ResultType, owner)
 	raw := goast.Expr(ident("t_poly_raw"))
 	if _, isAny := erasedResult.(*types.TVar); !isAny {
@@ -172,6 +175,7 @@ func (g *gen) polyConvertCallback(value goast.Expr, from, to *types.TFun) goast.
 		var resultType goast.Expr = g.goType(to.Ret)
 		var converted goast.Expr
 		if mode == types.Exit {
+			g.markOutcomeCall(call.(*goast.CallExpr), g.goType(from.Ret))
 			resultType = g.outcomeType(to.Ret)
 			item := fmt.Sprintf("t_poly_result%d", g.tmp)
 			g.tmp++
@@ -227,6 +231,9 @@ func (g *gen) polyConvertEvidence(value goast.Expr, from, to types.EffLabel, mod
 					result = indexExpr(selector("fangort", "Outcome"), []goast.Expr{result})
 				}
 				call := callExpr(&goast.SelectorExpr{X: ident(param), Sel: ident(field)}, ident(request))
+				if mode == types.Exit {
+					g.markOutcomeCall(call.(*goast.CallExpr), selector("fangort", "PolyReply"))
+				}
 				fields = append(fields, &goast.KeyValueExpr{Key: ident(field), Value: funcLitParams(
 					[]paramSpec{{name: request, typ: selector("fangort", "PolyRequest")}}, result, []goast.Stmt{returnStmt(call)})})
 				continue
@@ -251,6 +258,7 @@ func (g *gen) polyConvertEvidence(value goast.Expr, from, to types.EffLabel, mod
 			var body []goast.Stmt
 			var result goast.Expr
 			if mode == types.Exit {
+				g.markOutcomeCall(call.(*goast.CallExpr), g.goType(fromResult))
 				result = g.outcomeType(toResult)
 				name := fmt.Sprintf("t_poly_result%d", g.tmp)
 				g.tmp++

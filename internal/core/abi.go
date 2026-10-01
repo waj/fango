@@ -45,4 +45,5 @@ func SummarizeABI(p *Prog, context []Def) {
 			return true
 		})
 	}
+	summarizeCallbacks(p.Defs, context)
 }

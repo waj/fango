@@ -57,6 +57,9 @@ atomic reads, and text writer lifetimes.
 [Backend and native runtime](design/backend.md) — representations, List storage,
 module-owned output, tail loops, build caching, scalar sidecars, and native workers.
 
+[Structured Go lowering](design/lowering.md) — verified statements, callback contracts,
+selected invocation modes, and split Exit results.
+
 ## Formatting
 
 [Formatter](design/formatter.md) — pre-fixity printing, source layout,
