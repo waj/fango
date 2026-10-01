@@ -168,8 +168,6 @@ and call-site failure positions. A test command and fuzzing remain deferred.
 Deferred until a consumer needs them:
 
 - Mutual tail calls require fused dispatch/trampolines and a cross-module strategy.
-- Monomorphic local recursive closures need a captured-local transform; annotating
-  for generalization/lifting or moving the function top-level can avoid this case.
 - Capture-excluded self loops could copy changed parameters into per-iteration locals.
 - A diagnostic/LSP hint could explain near-miss tail-loop eligibility.
 

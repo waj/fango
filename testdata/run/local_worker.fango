@@ -1,0 +1,76 @@
+import Fail exposing (Fail)
+import Result exposing (Result(..))
+import Runtime.Local
+
+effect Probe
+    value : () -> Int
+
+type Fns = Done | Push (() -> Int) Fns
+
+capture : Int -> Fns
+capture step =
+    loop : Int -> Fns -> Fns
+    loop n fs =
+        if n == 0 then fs
+        else
+            saved : () -> Int
+            saved() = n + step
+            loop (n - 1) (Push saved fs)
+    loop 3 Done
+
+collect : Fns -> Int -> Int
+collect fs acc =
+    case fs of
+        Done -> acc
+        Push f rest -> collect rest (acc + f())
+
+count : Int -> Int
+count step =
+    loop : Int -> Int -> Int
+    loop n acc = if n == 0 then acc else loop (n - 1) (acc + step)
+    loop 2000000 0
+
+make : Int -> Int -> Int -> Int
+make step =
+    loop : Int -> Int -> Int
+    loop n acc = if n == 0 then acc else loop (n - 1) (acc + step)
+    loop
+
+makePartial : Int -> Int -> Int
+makePartial step =
+    loop : Int -> Int -> Int
+    loop n acc = if n == 0 then acc else loop (n - 1) (acc + step)
+    loop 100
+
+exitLoop() =
+    loop : Int ->{Probe, Fail Int} Int
+    loop n = if n == 0 then Fail.fail value() else loop (n - 1)
+    loop 2000000
+
+makeReader() =
+    handle {
+        saved : () ->{Probe} Int
+        saved() = value()
+        saved
+    }() of
+        value () -> resume 1
+
+main() =
+    print (count 3)
+    print (collect (capture 10) 0)
+    first = make 3
+    second = make 7
+    print (first 10 1, second 10 1)
+    print (makePartial 2 10)
+    print (Fail.attempt { handle exitLoop() of value () -> resume 9 })
+    saved = makeReader()
+    print (handle saved() of value () -> resume 2)
+    print (Runtime.Local.run 0 { cell ->
+        stop = cell.read()
+        loop n =
+            if n == stop then cell.read()
+            else
+                cell.write (cell.read() + 1)
+                loop (n - 1)
+        loop 10000
+    })

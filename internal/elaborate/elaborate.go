@@ -718,40 +718,6 @@ func (el *elab) lambda(params []ast.Pattern, body ast.Expr, funTy types.Type) co
 	return inner
 }
 
-func (el *elab) lambdaEquations(eqs []ast.Equation, funTy types.Type, at source.Span, context string) core.Expr {
-	argTys, _ := core.PeelFun(funTy, len(eqs[0].Params))
-	effectParams := el.bindEffectParams(executingEffects(funTy, len(eqs[0].Params)))
-	names := make([]string, len(argTys))
-	occs := make([]occurrence, len(argTys))
-	for i, ty := range argTys {
-		names[i] = fmt.Sprintf("_arg%d", el.tmp)
-		el.tmp++
-		occs[i] = occurrence{name: names[i], ty: ty}
-	}
-	patterns := make([][]ast.Pattern, len(eqs))
-	bodies := make([]ast.Expr, len(eqs))
-	spans := make([]source.Span, len(eqs))
-	for i, eq := range eqs {
-		patterns[i], bodies[i], spans[i] = eq.Params, eq.Body, eq.NameSpan
-	}
-	inner := el.matchPatternRows(patterns, bodies, spans, occs, at, context)
-	el.popEvidence(effectParams)
-	cur := funTy
-	funs := make([]*types.TFun, len(names))
-	for i := range names {
-		funs[i] = cur.(*types.TFun)
-		cur = funs[i].Ret
-	}
-	for i := len(names) - 1; i >= 0; i-- {
-		lam := &core.Lambda{Param: names[i], Body: inner, Ty: funs[i], ParamCapture: el.ck.Sup.FreshCapture()}
-		if i == len(names)-1 {
-			lam.EffectParams = effectParams
-		}
-		inner = lam
-	}
-	return inner
-}
-
 // equationRows normalizes a definition's rows: an ungrouped definition is the
 // one-row group its single parameter vector and body describe.
 func equationRows(eqs []ast.Equation, params []ast.Pattern, body ast.Expr, at source.Span) []ast.Equation {
@@ -990,10 +956,9 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 	case *ast.Block:
 		// Fold bindings into a right-nested Let chain; every level carries
 		// the block's (result) type. RHSs elaborate in source order so
-		// defaulting is deterministic. Local functions become (possibly
-		// recursive) Lets of nested Lambdas. Generalized bindings do not
-		// become Lets at all: they lambda-lift to top-level generic
-		// definitions (doc/design.md, "Go backend and runtime", lift.go) and their uses rewrite to calls.
+		// defaulting is deterministic. Named local functions and generalized
+		// bindings lift to workers with explicit captured-local parameters.
+		// Other bindings remain Lets, preserving strict evaluate-once behavior.
 		var order []any
 		pushed := 0
 		var liftedHere []string
@@ -1018,41 +983,18 @@ func (el *elab) expr(e ast.Expr) (out core.Expr) {
 				order = append(order, localPatternLet{pattern: bind.Pattern, rhs: rhs, subject: subject, ty: rhs.Type(), names: el.patternNames(n)})
 				continue
 			}
-			bindTy := el.ck.BindTypes[bind]
-			if sch := el.ck.BindSchemes[bind]; hasRuntimeVars(sch) {
+			if sch := el.ck.BindSchemes[bind]; len(bind.Params) > 0 || hasRuntimeVars(sch) {
 				el.liftBinding(bind, sch)
 				liftedHere = append(liftedHere, bind.Name)
 				continue
 			}
-			zonked := el.zonkDefault(bindTy)
-			isFn := len(bind.Params) > 0
-			if isFn {
-				// In scope inside its own body (recursion) — and inside any
-				// lift the body contains.
-				el.pushScope(bind.Name, zonked)
-				pushed++
-			}
-			var rhs core.Expr
-			if len(bind.Params) > 0 {
-				if len(bind.Equations) > 0 {
-					rhs = el.lambdaEquations(bind.Equations, zonked, bind.NameSpan, "local function")
-				} else {
-					rhs = el.lambda(bind.Params, bind.Body, zonked)
-				}
-			} else {
-				rhs = el.expr(bind.Body)
-			}
-			if len(bind.Params) > 0 {
-				rhs = sourceLambdas(rhs, el.apply(bindTy), len(bind.Params))
-			}
-			if !isFn {
-				el.pushScope(bind.Name, rhs.Type())
-				pushed++
-			}
+			el.defaultFree(el.apply(el.ck.BindTypes[bind]))
+			rhs := el.expr(bind.Body)
+			el.pushScope(bind.Name, rhs.Type())
+			pushed++
 			let := &core.Let{
 				Name: bind.Name,
 				Rhs:  rhs,
-				Rec:  isFn && core.Mentions(rhs, bind.Name),
 			}
 			order = append(order, let)
 		}

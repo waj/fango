@@ -349,8 +349,9 @@ compilation remain byte based.
 
 Inference determines types and contracts. Elaboration resolves defaulting,
 builds evidence, collapses application spines, chooses direct/indirect calls,
-lifts polymorphic locals, compiles pattern matrices, and introduces ANF where
-Go requires statements. Core lint checks the result before execution.
+lifts named local functions and polymorphic local bindings, compiles pattern
+matrices, and introduces ANF where Go requires statements. Core lint checks
+the result before execution.
 
 Native declaration validation and materialization are described in
 [backend and runtime](backend.md#native-boundaries); surface syntax belongs in

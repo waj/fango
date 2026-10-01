@@ -8,13 +8,12 @@ import (
 	"github.com/waj/fango/internal/types"
 )
 
-// Lambda-lifting of polymorphic block bindings (doc/design.md, "Go backend and runtime"): Go has no generic
-// func literals, so a block binding whose generalized scheme quantifies a
-// variable becomes an auxiliary top-level generic definition. Its free local
-// variables become leading parameters, and every use rewrites to a call
-// (through the ordinary saturation machinery — partial uses eta-expand like
-// any worker). Monomorphic locals stay ordinary Lets; purity + strictness
-// make capture-by-value trivially sound.
+// Named local functions and polymorphic block bindings become auxiliary
+// top-level workers. Go requires lifting for generic function literals; lifting
+// monomorphic named functions also exposes saturated calls and self tail loops.
+// Free locals become leading parameters. Partial and first-class uses retain
+// the ordinary worker adapters, capturing those locals at the use site.
+// Other monomorphic values remain Lets to preserve strict evaluation.
 
 type liftedLocal struct {
 	scheme   types.Scheme
@@ -27,7 +26,7 @@ type liftedLocal struct {
 	effects  []core.EffectInstance
 }
 
-// liftBinding lifts one generalized block binding into el.aux and registers
+// liftBinding lifts one block binding into el.aux and registers
 // it so subsequent uses (use-after-define scoping guarantees they elaborate
 // later — including self-calls, registered before the body elaborates)
 // rewrite to calls.
@@ -215,6 +214,11 @@ func (el *elab) freeLocals(bind *ast.LocalBind) []scopeVar {
 			visitPatterns(e.Params)
 			visit(e.Body)
 		case *ast.Block:
+			for _, item := range e.Items {
+				if item.Expr != nil {
+					visit(item.Expr)
+				}
+			}
 			for i := range e.Binds {
 				b := &e.Binds[i]
 				if b.Pattern != nil {

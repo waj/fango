@@ -183,9 +183,10 @@ in constant stack in both backends. A recursive call is optimized when all of
 the following hold; programs may rely on it, and arbitrarily deep tail
 recursion of this shape never overflows:
 
-- the call invokes the *same* top-level function it appears in (a local
-  function that generalizes counts: it is hoisted to the top level), directly
-  and with all its arguments;
+- the call invokes the *same* named function it appears in, directly and
+  with all its arguments; named local functions count, including monomorphic
+  ones, because they are hoisted to workers with captured values as leading
+  arguments;
 - the call is in tail position: the returned expression of the body, of an
   `if` branch, of a `case` branch, or the final expression of a block,
   including through any nesting of those — but not inside a lambda body, not
@@ -197,7 +198,6 @@ recursion of this shape never overflows:
   the recursion changes; parameters passed through unchanged (such as a
   callback threaded through a driver loop) are always safe to capture.
 
-Mutually recursive functions (`f` calls `g` calls `f`) and monomorphic local
-recursive bindings are *not* optimized and consume stack proportional to
-depth. A tail call that never terminates, such as `f x = f x`, spins instead
-of eventually overflowing.
+Mutually recursive functions (`f` calls `g` calls `f`) are *not* optimized and
+consume stack proportional to depth. A tail call that never terminates,
+such as `f x = f x`, spins instead of eventually overflowing.

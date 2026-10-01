@@ -295,6 +295,13 @@ and validation.
 
 ## Self tail-call loops
 
+Elaboration lifts named local functions, including monomorphic ones, into
+workers with captured enclosing values as leading parameters. Saturated uses
+call these workers directly; partial and first-class uses capture those values
+in the ordinary worker adapters. Other monomorphic local values retain strict
+evaluate-once semantics. Capture analysis includes standalone Unit statements,
+pattern pins, and captures needed by already-lifted local functions.
+
 Both backends use the pure Core eligibility predicate. It requires a saturated
 self-worker call at identity type instantiation with unchanged evidence, reached
 through the tail skeleton (Let body, If branches, Case leaves, Seq tail), never
