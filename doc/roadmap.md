@@ -28,21 +28,30 @@ original 10 MB whole-document run (15.159 seconds on its recorded host).
 Shared evidence families, product structs, tagged Maybe/Result, compact enums,
 and value rows are [implemented](design/backend.md#representations-and-abi).
 Derived record decoders pass [immutable field slots](design/json.md) through
-their key loop without a local handler activation.
+their key loop without a local handler activation. State cells synchronize
+only once a task inherits them, the text reader decodes ASCII inline, error
+paths are a segment stack, keys and separators are consumed without
+lookahead, renaming temporaries are elided from emitted Go, and cleanup
+scopes over literal callbacks lower at their call sites; the measured series
+is in the [verification notes](design/verification.md#typed-json-comparison).
 
-The [buffered token path](design/json.md) batches scanner work over immutable
-text windows and materializes buffered numbers once. Reduce remaining
-reader/state dispatch at token boundaries and repeated residual-row work;
-[10 MB layer comparisons](design/verification.md#typed-json-comparison) isolate
-that overhead from raw UTF-8 decoding. Assess handler activation construction,
-retaining snapshot/commit synchronization. Reduce token/fragment construction
-and remaining copies of large product values after
-[split Exit result lowering](design/lowering.md#exit-results). Reduce dictionary
-closure construction for nonnumeric scalar comparisons; the string-scanner experiment
-exposed per-character closure allocation through generic inequality. Preserve
-invocation-time handler selection, lexical shadowing, and state synchronization.
-Parsing and codec derivation remain in Fango. Reassess retained output size and
-copy costs for large products before expanding tagged layouts to other sums.
+The remaining per-token cost is the handler operation itself: an indirect
+closure call, a snapshot and a store of the pull state, and the tuple
+returned by `lex`. Two directions were measured and rejected on this fixture:
+keeping the staged window in the pull state to commit lazily removed every
+per-token reader operation but made the state larger than the chain it
+saved, and a tagged value layout for `Json.Token` (per-constructor or shared
+slots) copied more than the allocation it removed. Any further gain must
+shrink what an operation moves rather than what it allocates: smaller pull
+state, fewer copies of the token and cursor through the operation, and a
+cheaper element-decoder callback (each list element allocates a closure over
+its dictionary). Reduce dictionary closure construction for nonnumeric scalar
+comparisons; the string-scanner experiment exposed per-character closure
+allocation through generic inequality. Preserve invocation-time handler
+selection, lexical shadowing, and gated state synchronization. Parsing and
+codec derivation remain in Fango. Tagged layouts for other sums stay gated on
+a measurement that shows copy cost below allocation cost for the values that
+flow through hot operations.
 
 ## Builder blocks and generators
 

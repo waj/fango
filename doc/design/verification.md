@@ -286,6 +286,41 @@ Encoding traversal takes about 0.048 s. Typed file traversal performs
 The remaining whole-process gap with Go is about 8.2×; token-boundary dispatch
 and token construction remain larger costs than UTF-8 decoding.
 
+On this host the CPU profiler is unreliable for compiled Fango: SIGPROF lands
+on idle threads, so most samples report syscalls and madvise while process
+system time stays near two percent. Ablation builds of the harness's exported
+project, one construct changed at a time and timed over alternating fresh
+runs, give dependable deltas; a looped decode profiled with idle-thread
+samples ignored gives a usable distribution. Allocation profiles are
+unaffected. A round of structural changes measured this way, three fresh
+alternating runs per step on the 10 MB fixture with matching checksums,
+gives these medians:
+
+| Change | Whole-process wall time |
+| --- | ---: |
+| loop-carried slots (`7623816`) | 0.545 s |
+| state cells synchronize only once a task inherits them | 0.497 s |
+| ASCII decoded inline by the window scanners | 0.430 s |
+| error paths as a segment stack | 0.434 s |
+| keys and separators consumed without lookahead | 0.411 s |
+| renaming temporaries elided from emitted Go | 0.372 s |
+| cleanup scopes over literal callbacks lowered at the call | 0.345 s |
+| Go control | 0.065 s |
+
+The segment stack removes 15% of allocation events without changing time:
+a field's remaining cost is its two handler operations, not its allocation.
+A separate profiled run of the final state allocates 77,215,808 bytes in
+2,595,258 events and retains the same 13.4 MB typed result; three fresh runs
+of that build measured 0.324 to 0.329 s. The remaining gap with Go is about
+5×. Two further changes were measured and rejected: keeping the staged
+window in the pull state and committing lazily removed every per-token reader
+operation yet ran slower, because the larger state cost more to snapshot,
+store, and return than the reader chain it replaced; and a tagged value
+layout for `Json.Token`, with one slot per payload or with same-typed slots
+shared across constructors, copied more than the allocation it removed. Both
+point at the same conclusion as the copy-elision gain: what an operation
+moves now matters more than what it allocates.
+
 Five fresh alternating runs of saved binaries isolate
 [immediate-application lowering](backend.md#representations-and-abi) from
 between-session variation: median time changes from 1.133 s to 1.099 s,
