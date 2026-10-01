@@ -321,6 +321,14 @@ shared across constructors, copied more than the allocation it removed. Both
 point at the same conclusion as the copy-elision gain: what an operation
 moves now matters more than what it allocates.
 
+A further 10 MB same-host comparison isolates bounded direct construction for
+short decoded lists. Ten alternating pairs of saved binaries with matching
+checksums measured medians of 0.3353 s before and 0.3229 s after (3.7% less
+time). A separate profile measured 73.96 MB and 2,505,077 allocations during
+decode, versus 77.22 MB and 2,595,259 before; the full typed result still
+retains about 13.4 MB. The large outer list uses the constant-stack path;
+the short `tags` and `items` lists avoid building a second spine.
+
 Five fresh alternating runs of saved binaries isolate
 [immediate-application lowering](backend.md#representations-and-abi) from
 between-session variation: median time changes from 1.133 s to 1.099 s,

@@ -3,6 +3,9 @@ Missing JSON field: age @/age 1:15
 Expected JSON string @/name 1:10
 Leading zero in JSON number @/extra 1:33
 Expected JSON number @/1 1:9
+ok
+ok
+Expected JSON number @/8 1:22
 Expected JSON number @/0/1 1:8
 Leading zero in JSON number @/ 1:7
 Expected object key @ 1:3

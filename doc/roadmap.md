@@ -32,7 +32,8 @@ their key loop without a local handler activation. State cells synchronize
 only once a task inherits them, the text reader decodes ASCII inline, error
 paths are a segment stack, keys and separators are consumed without
 lookahead, renaming temporaries are elided from emitted Go, and cleanup
-scopes over literal callbacks lower at their call sites; the measured series
+scopes over literal callbacks lower at their call sites. Short decoded lists
+build directly without a reversal; the measured series
 is in the [verification notes](design/verification.md#typed-json-comparison).
 
 The remaining per-token cost is the handler operation itself: an indirect

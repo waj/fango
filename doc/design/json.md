@@ -36,6 +36,9 @@ optional field slots through its sequential key loop. Field dispatch returns
 an updated immutable tuple after successful decoding; unknown keys call
 `skipValue` and retain the tuple. These privately owned slots need no local
 handler activation. The decoder never constructs a generic value tree.
+List decoding constructs up to eight elements directly in source order, so
+short lists need one spine. Longer lists switch to a tail loop with an
+accumulator and reversal, keeping stack use bounded for large documents.
 Tuple projections and updates are generated in Fango, preserving duplicate,
 required-field, and default checks. Path tracking uses a
 cleanup region to restore the enclosing path after normal or exiting decoding.

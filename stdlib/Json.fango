@@ -890,10 +890,20 @@ decodeList index first reverse =
         decodeList (index + 1) False [value | reverse]
     else List.reverse reverse
 
+-- Small lists build in source order. The bound keeps large documents on the
+-- constant-stack path while avoiding a second spine for common short lists.
+decodeListShort : Decode a => Int -> Bool -> Int ->{Pull, Fail Error} List a
+decodeListShort index first remaining =
+    if remaining == 0 then decodeList index first []
+    else if nextElement first then
+        value = withIndex index { decodeValue() }
+        [value | decodeListShort (index + 1) False (remaining - 1)]
+    else []
+
 instance Decode a => Decode (List a)
     decodeValue() =
         beginArray()
-        decodeList 0 True []
+        decodeListShort 0 True 8
 
 instance Decode a => Decode (Maybe a)
     decodeValue() =
