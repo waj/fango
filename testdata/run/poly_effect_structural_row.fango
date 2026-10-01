@@ -1,0 +1,9 @@
+effect Read a
+    read : () -> a
+
+effect Apply
+    apply : a -> (() ->{Read (List a)} List a) -> List a
+
+main() = print (handle apply 42 ({ _ -> read() }) of
+    apply value f -> resume (handle f() of
+        read () -> resume [value]))

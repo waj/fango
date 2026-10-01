@@ -30,6 +30,7 @@ type stageEvent = compileevent.Event
 type compilationSession struct {
 	observe compileevent.Observer
 	noCache bool
+	nativeC bool
 }
 
 func (s *compilationSession) disableCache() bool { return s != nil && s.noCache }
@@ -61,7 +62,11 @@ func compileFileGraphSession(entry string, stderr io.Writer, session *compilatio
 }
 
 func checkGraph(entry string, stderr io.Writer, session *compilationSession) (*compilecheck.Result, bool) {
-	result, checkErrs, internalErr := (&compilecheck.Session{Observe: session.observer(), DisableObjectCache: session.disableCache()}).Compile(entry)
+	options := modules.LoadOptions{}
+	if session != nil {
+		options.NativeC = session.nativeC
+	}
+	result, checkErrs, internalErr := (&compilecheck.Session{Observe: session.observer(), DisableObjectCache: session.disableCache(), LoadOptions: options}).Compile(entry)
 	if report(stderr, checkErrs) {
 		return nil, false
 	}
@@ -163,12 +168,20 @@ func emitProjectManifestSession(entry, tree string, printMain bool, stderr io.Wr
 func cmdCheck(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	backend := fs.String("backend", "go", "code generation backend: go or llvm")
 	observed := reporting(fs, stderr)
 	if fs.Parse(args) != nil || fs.NArg() != 1 {
 		usage(stderr)
 		return 2
 	}
 	session, report := observed()
+	if *backend == "llvm" {
+		return llvmCheck(fs.Args()[0], stderr, session, report)
+	}
+	if *backend != "go" {
+		fmt.Fprintf(stderr, "unknown backend %q\n", *backend)
+		return 2
+	}
 	code := cmdCheckSession(fs.Args(), stderr, session)
 	if code == 0 {
 		// check stops before emission, so it reports discovery and the

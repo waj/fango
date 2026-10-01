@@ -30,6 +30,9 @@ func Crc32(text string) int64 {
 
 ## Boundary types
 
+The [LLVM experiment](llvm.md#c-sidecars) selects parallel C sidecars and defines
+their C representations. This topic describes the default Go boundary.
+
 The supported boundary types are `Int`/`int64`, `Float`/`float64`,
 `String`/`string`, `Char`/`rune`, `Bool`/`bool`, and Unit. String and Char
 results are validated, and an invalid UTF-8 string or non-scalar rune panics at

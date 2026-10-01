@@ -8,6 +8,11 @@ type ModuleStore struct {
 
 func NewModuleStore(entry string) *ModuleStore { return &ModuleStore{store: newStore(entry)} }
 
+// NewLLVMModuleStore isolates checked objects whose native boundary is C.
+func NewLLVMModuleStore(entry string) *ModuleStore {
+	return &ModuleStore{store: newStoreNamespace(entry, "llvm")}
+}
+
 func (s *ModuleStore) LoadObject(slot string) ([]byte, bool) {
 	if s == nil {
 		return nil, false

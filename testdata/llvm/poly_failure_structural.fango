@@ -1,0 +1,26 @@
+import Fail
+import Failure
+import Runtime.Scope
+import Result exposing (Result(..))
+
+type Box a = Box a deriving (Show)
+
+effect Close a
+    abort close : Box (List a) -> ()
+
+effect Cleanup
+    cleanup : a -> ()
+
+main() =
+    report : Result (Fail.Report String) ()
+    report = Fail.attemptReport ({ _ ->
+        handle cleanup 42 of
+            cleanup value -> resume (handle
+                Runtime.Scope.finally ({ _ -> Fail.fail "body" }) ({ _ -> close (Box [value]) }) of
+                    close _ -> ()) })
+    case report of
+        Err failure -> List.each ({ suppressed ->
+            argument : Maybe (Box (List Int))
+            argument = Failure.argument 0 suppressed
+            print argument }) failure.suppressed
+        Ok _ -> print "unexpected success"

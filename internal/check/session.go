@@ -55,6 +55,9 @@ func (s *Session) Compile(entry string) (*Result, []diag.Error, error) {
 	objectCache := s.Cache
 	if objectCache == nil && !s.DisableObjectCache {
 		objectCache = compilecache.NewModuleStore(entry)
+		if options.NativeC {
+			objectCache = compilecache.NewLLVMModuleStore(entry)
+		}
 	}
 	installer := NewInstaller(ck, stageSession, objectCache, s.Observe)
 	installer.FreshSources = s.FreshSources

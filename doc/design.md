@@ -8,10 +8,11 @@ relevant to the task. [Reference](reference.md) owns observable behavior;
 ## Goals and constraints
 
 Fango is strict, statically typed, and purely functional, with nominal ADTs,
-inference, and direct-style algebraic effects. The language pipeline uses one Go toolchain,
-no compiler framework dependencies, local modules, and an experimental library
+inference, and direct-style algebraic effects. The default pipeline uses the Go toolchain,
+local modules, and an experimental library
 shipped beside it. Generated representations and calls aim to stay close to ordinary Go.
-Laziness, self-hosting, a package manager, and a general optimizer are not implemented.
+Laziness, self-hosting, and a package manager are not implemented. The Fango
+compiler has no general optimizer of its own.
 
 ## Language semantics
 
@@ -59,6 +60,11 @@ module-owned output, tail loops, build caching, scalar sidecars, and native work
 
 [Structured Go lowering](design/lowering.md) — verified statements, callback contracts,
 selected invocation modes, and split Exit results.
+
+## Experimental LLVM backend
+
+[LLVM backend](design/llvm.md) — typed Clang lowering, native representations,
+BDWGC, C sidecars, and isolated artifacts.
 
 ## Formatting
 

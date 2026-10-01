@@ -27,7 +27,7 @@ var stageOrder = []string{
 	"checked lookup", "checked store", "stage Core",
 	"check", "elaborate", "stage snapshot", "semantic-lint",
 	"emitted lookup", "emitted store", "lowering", "emission",
-	"write + sync", "go build",
+	"write + sync", "go build", "LLVM check", "LLVM build",
 }
 
 // stageLabel maps the pipeline's event vocabulary onto the rows the table
