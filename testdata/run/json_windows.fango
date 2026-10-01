@@ -123,6 +123,37 @@ main() =
             Ok _ -> False
         valid && Reader.readUpTo reader 5 == Bytes.fromString ",true"
     })
+    -- Every exit leaves the reader after the last scanned token: a decoder
+    -- failure raised directly, a lookahead kept at normal return, and a
+    -- nesting failure raised by the handler itself.
+    print (Reader.withBytes (Bytes.fromString "[1,2]!") { reader ->
+        outcome = Json.withPull reader {
+            ignore (Json.next())
+            case Json.next() of
+                Json.NumberToken _ -> Fail.fail (Json.Error { message = "custom", offset = 0, line = 0, column = 0, path = "" })
+                _ -> False
+        }
+        failed = case outcome of
+            Err error -> error.message == "custom"
+            Ok _ -> False
+        failed && Reader.readUpTo reader 4 == Bytes.fromString ",2]!"
+    })
+    print (Reader.withBytes (Bytes.fromString "[1]!") { reader ->
+        outcome = Json.withPull reader {
+            ignore (Json.next())
+            case Json.peek() of
+                Json.NumberToken text -> text == "1"
+                _ -> False
+        }
+        isTrue outcome && Reader.readUpTo reader 2 == Bytes.fromString "]!"
+    })
+    print (Reader.withBytes (Bytes.fromString (String.padLeft 300 '[' "")) { reader ->
+        outcome = Json.withPull reader { Json.readValue() }
+        failed = case outcome of
+            Err error -> error.message == "JSON nesting exceeds 256 levels" && error.offset == 257
+            Ok _ -> False
+        failed && Reader.readUpTo reader 300 == Bytes.fromString (String.padLeft 43 '[' "")
+    })
     -- A complete buffered literal must not request its following source chunk.
     print (case Fail.attempt { Runtime.Local.run 0 { stage ->
         Reader.over (Bytes.Source { pull = {

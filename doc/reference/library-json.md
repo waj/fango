@@ -84,7 +84,9 @@ and `skipValue` help decoders consume a container. `withPath segment { ... }`
 adds a key segment, and `withIndex index { ... }` an element index, to errors
 raised while a custom decoder handles a nested value.
 `skipValue` validates and
-discards a value without building a tree. `readValue()` builds the generic
+discards a value without building a tree. When `withPull` or `withTextPull`
+returns, normally or with `Err`, the reader is positioned after the last token
+the parser scanned, including a lookahead token obtained by `peek`. `readValue()` builds the generic
 `Json.Value` tree from the current token. `parseValue`, `parseBytesValue`, and
 `stringifyValue` are the whole-input tree helpers. `Json.Numeric` holds a
 `Json.Number` with the original number lexeme, so a value tree can round-trip
