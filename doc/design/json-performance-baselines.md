@@ -31,7 +31,12 @@ each function, and the nested result values moved through memory. An
 Clang then stopped inlining `fastWhite` at its call sites; re-optimizing the
 same bitcode with `-inline-threshold=600` recovered the earlier LLVM time,
 so the loss is an inlining decision that depends on the size of the
-generated record and sum code. Whitespace keeps its scalar loop. The span
+generated record and sum code.
+
+Removing the tag from LLVM single-constructor products, and the unreachable
+panic default from exhaustive switches, then took LLVM from 59.7 to 57.7 ms
+(11 pairs). With that change the ASCII whitespace loop helps both backends:
+Go 95.9 → 89.3 ms and LLVM 57.5 → 53.4 ms (11 pairs). The span
 change costs LLVM one more call per string, where the predicate loop was
 already inlined. Before the chunk change the C file handle answered at most
 4096 bytes per pull whatever the request.

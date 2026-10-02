@@ -459,18 +459,20 @@ scanNumber reader start cursor first =
     phase = if first == '-' then MinusDigit else if first == '0' then ZeroEnd else WholeDigits
     numberWindows reader start cursor phase []
 
--- JSON punctuation and digits are ASCII, so the buffered scanners below
--- branch on asciiAt codes: 34 quote, 44 comma, 45 minus, 46 period,
--- 48-57 digits, 69/101 exponent, 93 bracket, 125 brace.
+-- JSON punctuation, whitespace and digits are ASCII, so the buffered
+-- scanners below branch on asciiAt codes: 9 tab, 10 newline, 13 return,
+-- 32 space, 34 quote, 44 comma, 45 minus, 46 period, 48-57 digits,
+-- 69/101 exponent, 93 bracket, 125 brace.
+-- Whitespace stops at any other byte, valid or not: the token scanner that
+-- follows reads it and declines a malformed sequence for the source-aware
+-- path to diagnose.
 fastWhite : TextReader.Window -> Int -> Int -> Maybe (TextReader.Window, Int, Int)
 fastWhite snapshot line column =
-    case TextReader.readWindow snapshot of
-        Ok (Just (char, width, rest)) ->
-            if white char then
-                if char == '\n' then fastWhite rest (line + 1) 1
-                else fastWhite rest line (column + width)
-            else Just (snapshot, line, column)
-        _ -> Nothing
+    code = TextReader.asciiAt snapshot
+    if code == 32 || code == 9 || code == 13 then fastWhite (TextReader.skipAscii snapshot) line (column + 1)
+    else if code == 10 then fastWhite (TextReader.skipAscii snapshot) (line + 1) 1
+    else if code == -1 then Nothing
+    else Just (snapshot, line, column)
 
 literalRun : TextReader.Window -> String -> Result (TextReader.Window, String) TextReader.Window
 literalRun snapshot text =

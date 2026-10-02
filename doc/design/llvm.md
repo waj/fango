@@ -23,8 +23,11 @@ checked-object and executable reuse.
 ## Typed representations
 
 Scalars use native machine values. Strings and Bytes have distinct pointer and
-length structures; immutable lists use typed cons cells. Products use typed
-fields. Sums use a tag and a union of constructor payloads. Recursive data and
+length structures; immutable lists use typed cons cells. Single-constructor
+products use typed fields and no tag: matching, projection, and update bind
+fields directly, as in the Go backend. Sums use a tag and a union of
+constructor payloads; an exhaustive match makes its last constructor the
+switch default rather than emitting an unreachable panic. Recursive data and
 ordinary nonempty sums use GC pointers, while Maybe and Result remain inline.
 Dictionary products with several function fields use pointers. Clang templates
 instantiate type parameters; effect-row type parameters erase.

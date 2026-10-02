@@ -170,13 +170,20 @@ func (g *generator) adtConversion(a *types.ADTInfo) {
 		toTy += " *"
 		fromTy += " *"
 	}
-	g.line("template<%s> struct fg_conversion<%s,%s>{static %s apply(%s value){switch(%s){", strings.Join(declarations, ","), toTy, fromTy, toTy, fromTy, g.tag("value", a))
-	for _, c := range a.Ctors {
+	convert := func(c *types.CtorInfo) string {
 		var args []string
 		for i, t := range c.Fields {
 			args = append(args, "fg_convert<"+g.typ(t)+">("+g.member("value", a, c.Index, i)+")")
 		}
-		g.line("case %d:return %s(%s);", c.Index, typeApply(symbol(c.Name), to), strings.Join(args, ","))
+		return typeApply(symbol(c.Name), to) + "(" + strings.Join(args, ",") + ")"
+	}
+	if product(a) {
+		g.line("template<%s> struct fg_conversion<%s,%s>{static %s apply(%s value){return %s;}};", strings.Join(declarations, ","), toTy, fromTy, toTy, fromTy, convert(a.Ctors[0]))
+		return
+	}
+	g.line("template<%s> struct fg_conversion<%s,%s>{static %s apply(%s value){switch(%s){", strings.Join(declarations, ","), toTy, fromTy, toTy, fromTy, g.tag("value", a))
+	for _, c := range a.Ctors {
+		g.line("case %d:return %s;", c.Index, convert(c))
 	}
 	g.line("}fango_panic(\"invalid conversion tag\");return {};}};")
 }
@@ -255,6 +262,11 @@ func (g *generator) member(value string, a *types.ADTInfo, c, i int) string {
 	}
 	return "(" + value + ")" + sep + field(c, i)
 }
+
+// product reports a single-constructor ADT. It has no tag at runtime, as in the
+// Go backend: matching binds its fields directly and construction sets them.
+func product(a *types.ADTInfo) bool { return a.Repr == types.ReprADT && len(a.Ctors) == 1 }
+
 func (g *generator) tag(value string, a *types.ADTInfo) string {
 	sep := "."
 	if g.pointer[a.Con.Unique] {
@@ -267,7 +279,9 @@ func (g *generator) adt(a *types.ADTInfo) {
 	templ, args := g.params(a.Params)
 	base := symbol(a.Con.Name) + "_ad"
 	g.line("%s struct %s {", templ, base)
-	g.line("uint32_t tag=0;")
+	if !product(a) {
+		g.line("uint32_t tag=0;")
+	}
 	union := len(a.Ctors) > 1
 	hasPayload := false
 	for _, c := range a.Ctors {
@@ -298,7 +312,11 @@ func (g *generator) adt(a *types.ADTInfo) {
 			ps = append(ps, g.typ(t)+fmt.Sprintf(" fg_a%d", i))
 		}
 		g.line("%s %s %s(%s){", templ, ty, symbol(c.Name), strings.Join(ps, ","))
-		g.line("%s fg_value{};fg_value.tag=%d;", typeApply(base, args), c.Index)
+		if product(a) {
+			g.line("%s fg_value{};", typeApply(base, args))
+		} else {
+			g.line("%s fg_value{};fg_value.tag=%d;", typeApply(base, args), c.Index)
+		}
 		if union && len(c.Fields) > 0 {
 			g.line("new(&fg_value.payload.c%d) decltype(fg_value.payload.c%d){};", c.Index, c.Index)
 		}
@@ -321,31 +339,46 @@ func (g *generator) adtOps(a *types.ADTInfo) {
 	g.reset()
 	templ, _ := g.params(a.Params)
 	ty := g.typ(&types.TCon{Unique: a.Con.Unique, Name: a.Con.Name, Args: varTypes(a.Params)})
-	g.line("%s bool fg_eq(%s a,%s b){if(%s!=%s)return false;switch(%s){", templ, ty, ty, g.tag("a", a), g.tag("b", a), g.tag("a", a))
-	for _, c := range a.Ctors {
+	equal := func(c *types.CtorInfo) string {
 		var xs []string
 		for i := range c.Fields {
 			xs = append(xs, "fg_eq("+g.member("a", a, c.Index, i)+","+g.member("b", a, c.Index, i)+")")
 		}
 		if len(xs) == 0 {
-			xs = []string{"true"}
+			return "true"
 		}
-		g.line("case %d:return %s;", c.Index, strings.Join(xs, "&&"))
+		return strings.Join(xs, "&&")
 	}
-	g.line("}fango_panic(\"invalid constructor tag\");return false;}")
-	name := symbol(a.Con.Name) + "_show"
-	g.line("%s fg_string %s(%s value,bool nested){switch(%s){", templ, name, ty, g.tag("value", a))
-	for _, c := range a.Ctors {
-		g.line("case %d:{fg_string s=%s;", c.Index, stringValue(types.SurfaceName(c.Name)))
+	show := func(c *types.CtorInfo) {
+		g.line("fg_string s=%s;", stringValue(types.SurfaceName(c.Name)))
 		for i := range c.Fields {
 			g.line("s=fg_append(fg_append(s,%s),fg_show_nested(%s));", stringValue(" "), g.member("value", a, c.Index, i))
 		}
 		if len(c.Fields) > 0 {
 			g.line("if(nested)s=fg_append(fg_append(%s,s),%s);", stringValue("("), stringValue(")"))
 		}
-		g.line("return s;}")
+		g.line("return s;")
 	}
-	g.line("}fango_panic(\"invalid constructor tag\");return {};}")
+	name := symbol(a.Con.Name) + "_show"
+	if product(a) {
+		g.line("%s bool fg_eq(%s a,%s b){return %s;}", templ, ty, ty, equal(a.Ctors[0]))
+		g.line("%s fg_string %s(%s value,bool nested){", templ, name, ty)
+		show(a.Ctors[0])
+		g.line("}")
+	} else {
+		g.line("%s bool fg_eq(%s a,%s b){if(%s!=%s)return false;switch(%s){", templ, ty, ty, g.tag("a", a), g.tag("b", a), g.tag("a", a))
+		for _, c := range a.Ctors {
+			g.line("case %d:return %s;", c.Index, equal(c))
+		}
+		g.line("}fango_panic(\"invalid constructor tag\");return false;}")
+		g.line("%s fg_string %s(%s value,bool nested){switch(%s){", templ, name, ty, g.tag("value", a))
+		for _, c := range a.Ctors {
+			g.line("case %d:{", c.Index)
+			show(c)
+			g.line("}")
+		}
+		g.line("}fango_panic(\"invalid constructor tag\");return {};}")
+	}
 	g.line("%s fg_string fg_show(%s value){return %s(value,false);}", templ, ty, name)
 	g.line("%s fg_string fg_show_nested(%s value){return %s(value,true);}", templ, ty, name)
 }

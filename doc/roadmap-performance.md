@@ -13,39 +13,6 @@ with alternating fresh-process pairs of the previous commit's binaries on the
 helps one backend and costs the other states both numbers in its commit and
 in the baselines.
 
-## P1 — LLVM products without tags
-
-**Problem.** The LLVM backend gives every ADT struct a `uint32_t tag`, and
-every match, including record projection and update (`recordGet` and
-`recordUpdate` in elaboration lower to a one-case `SwitchCtor`), switches on
-it with a `fango_panic` default. A small scanner such as `Json.fastWhite`
-becomes hundreds of IR instructions, which changes Clang's inlining decisions:
-an ASCII whitespace loop that is smaller in source stopped being inlined at
-its call sites and cost 11%, while `-inline-threshold=600` recovered the time.
-
-**Change.** Mirror the Go backend's product classification
-(`codegen/representation.go`, `productADT`/`productSwitch`):
-
-- A single-constructor ADT has no `tag` member. Construction sets fields only,
-  and `SwitchCtor` over it binds fields directly, with no switch and no
-  default.
-- An exhaustive `SwitchCtor` over a sum without a `Default` makes its last
-  case the C++ `default`, as `taggedSwitch` does in Go, rather than emitting
-  an unreachable panic. Core lint already proves coverage.
-- Generated equality, show, and conversion helpers follow the same rules.
-
-Nothing outside generated code reads the tag of a product (natives use
-`member()`, and C sidecars see only scalars, strings, bytes, and opaque
-handles), so this is not an ABI change. Update the LLVM design's
-"Typed representations" section.
-
-**Then retry** the ASCII-code whitespace loop in `Json.fastWhite`, which saved
-about 7% on Go, and keep it only if LLVM no longer regresses.
-
-**Acceptance.** An emission-shape test in `cmd/fango/llvm_test.go` (no
-toolchain needed, like `TestLLVMUnchangedStateCommitsNothing`) asserts that a
-record projection emits no tag switch. The LLVM differential suite passes.
-
 ## P2 — a text builder for escaped strings and collectors
 
 **Problem.** Escaped JSON strings cost about 15% of Go decode time on the

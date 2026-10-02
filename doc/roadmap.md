@@ -41,7 +41,7 @@ place, and file pulls are 64 KiB; the measured series is in the
 [comparison baselines](design/json-performance-baselines.md).
 
 [Generated-code performance](roadmap-performance.md) owns the next measured
-round: tagless LLVM products, a text builder for escapes and collectors,
+round: a text builder for escapes and collectors,
 smaller scan cursors, a Core inliner, and static-argument specialization.
 
 The [buffered pull cursor](design/json.md) shares its text window's buffer

@@ -226,17 +226,7 @@ func (g *generator) tree(t core.Tree, leaf func(core.Expr)) {
 		default:
 			tag = g.tag(value, a)
 		}
-		g.line("switch(%s){", tag)
-		for _, c := range t.Cases {
-			index := c.Ctor.Index
-			if a.Con.Unique == g.b.Bool.Unique {
-				if c.Ctor.Name == "True" {
-					index = 1
-				} else {
-					index = 0
-				}
-			}
-			g.line("case %d:{", index)
+		binds := func(c core.CtorCase) {
 			con := g.localTypes[t.Scrut].(*types.TCon)
 			fields := a.InstFields(c.Ctor, con.Args)
 			for i, name := range c.Binds {
@@ -253,16 +243,47 @@ func (g *generator) tree(t core.Tree, leaf func(core.Expr)) {
 				}
 				g.bind(name, fields[i], g.temp(fields[i], source))
 			}
+		}
+		// A product has no tag to test: bind its fields and continue.
+		if product(a) && len(t.Cases) == 1 {
+			g.line("{")
+			binds(t.Cases[0])
+			g.tree(t.Cases[0].Tree, leaf)
+			g.line("}")
+			return
+		}
+		g.line("switch(%s){", tag)
+		// Core proves an exhaustive switch covers every tag, so without a
+		// Default its last case becomes the C++ default, as in the Go backend.
+		exhaustive := t.Default == nil && len(t.Cases) > 0
+		for n, c := range t.Cases {
+			index := c.Ctor.Index
+			if a.Con.Unique == g.b.Bool.Unique {
+				if c.Ctor.Name == "True" {
+					index = 1
+				} else {
+					index = 0
+				}
+			}
+			if exhaustive && n == len(t.Cases)-1 {
+				g.line("default:{")
+			} else {
+				g.line("case %d:{", index)
+			}
+			binds(c)
 			g.tree(c.Tree, leaf)
 			g.line("break;}")
 		}
-		g.line("default:{")
-		if t.Default != nil {
-			g.tree(t.Default, leaf)
-		} else {
-			g.line("fango_panic(\"invalid constructor tag\");")
+		if !exhaustive {
+			g.line("default:{")
+			if t.Default != nil {
+				g.tree(t.Default, leaf)
+			} else {
+				g.line("fango_panic(\"invalid constructor tag\");")
+			}
+			g.line("break;}")
 		}
-		g.line("break;}\n}")
+		g.line("}")
 	default:
 		panic(fmt.Sprintf("unsupported decision tree %T", t))
 	}

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -327,5 +328,49 @@ func TestLLVMCommands(t *testing.T) {
 	}
 	if out, err := invoke("check", "--backend", "llvm", entry); err == nil || !strings.Contains(out, "UNSUPPORTED LLVM FEATURE: Async") {
 		t.Fatalf("reachable Async: %v %s", err, out)
+	}
+}
+
+// A single-constructor record has no runtime tag: projection binds its field
+// without a switch, and its struct declares no tag member.
+func TestLLVMProductsHaveNoTag(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "point.fango")
+	source := `type Point = { x : Int, y : Int }
+
+sumPoint : Point -> Int
+sumPoint point = point.x + point.y
+
+main() = print (sumPoint (Point { x = 1, y = 2 }))
+`
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var diagnostics bytes.Buffer
+	result, ok := checkGraph(path, &diagnostics, &compilationSession{nativeC: true})
+	if !ok {
+		t.Fatal(diagnostics.String())
+	}
+	emitted, _, err := llvmgen.Emit(result.Program, result.Checker.B, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(emitted)
+	symbol := func(name string) string { return "fg_s" + hex.EncodeToString([]byte(name)) }
+	definition := func(marker string) string {
+		for _, line := range strings.SplitAfter(text, "\n") {
+			if strings.Contains(line, marker) && strings.HasSuffix(strings.TrimSpace(line), "{") {
+				start := strings.Index(text, line)
+				end := strings.Index(text[start:], "\n}\n")
+				return text[start : start+end]
+			}
+		}
+		t.Fatalf("no definition containing %s emitted", marker)
+		return ""
+	}
+	if body := definition(symbol("sumPoint") + "("); strings.Contains(body, "switch") || strings.Contains(body, "fango_panic") {
+		t.Errorf("record projection switches on a tag:\n%s", body)
+	}
+	if layout := definition(symbol("Point") + "_ad {"); strings.Contains(layout, "tag") {
+		t.Errorf("record struct declares a tag:\n%s", layout)
 	}
 }
