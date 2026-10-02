@@ -102,6 +102,12 @@ func (el *elab) dictionary(p types.Pred) core.Expr {
 	sch, _ := el.ck.Env.Lookup(in.Name)
 	ty := el.eraseRuntimeKinds(eraseRows(in.Class.DictType(p.Ty)))
 	if len(sch.Vars) == 0 && len(sch.Preds) == 0 {
+		// A nullary instance's dictionary is a package-level value built from
+		// its methods, so a method needing its own dictionary (to call a
+		// class default) builds it afresh rather than closing a value cycle.
+		if in == el.selfInstance {
+			return el.dictionaryValue(in)
+		}
 		return &core.VarRef{Name: in.Name, Ty: ty}
 	}
 	return el.nullaryValueUse(in.Name, sch, ty, in.Class.DictType(p.Ty))
@@ -171,12 +177,9 @@ func (el *elab) valueReference(name string, raw types.Type) core.Expr {
 	return &core.VarRef{Name: name, Ty: ty}
 }
 
-func instanceDefinition(in *infer.InstanceInfo, ck *infer.Checker) (core.Def, []diag.Error) {
-	sch, _ := ck.Env.Lookup(in.Name)
-	el := newElab(ck, in.Name, sch)
-	el.owner = in.Owner
-	el.instanceLimit = in.Limit
-	params, dictTypes := el.bindDictionaries(in.Preds)
+// dictionaryValue constructs an instance's dictionary from its method
+// definitions, under whatever context dictionaries are already bound.
+func (el *elab) dictionaryValue(in *infer.InstanceInfo) core.Expr {
 	ty := el.eraseRuntimeKinds(eraseRows(in.Class.DictType(in.Head)))
 	ctor := in.Class.Dict.Ctors[0]
 	var fields []core.Expr
@@ -189,7 +192,17 @@ func instanceDefinition(in *infer.InstanceInfo, ck *infer.Checker) (core.Def, []
 	for i := len(fields) - 1; i >= 0; i-- {
 		ct = &types.TFun{Arg: fields[i].Type(), Ret: ct}
 	}
-	body := &core.App{CalleeKind: core.Ctor, Callee: &core.VarRef{Name: ctor.Name, Ty: ct}, Args: fields, Ty: ty, TyArgs: []types.Type{el.eraseRuntimeKinds(eraseRows(in.Head))}, Ctor: ctor}
+	return &core.App{CalleeKind: core.Ctor, Callee: &core.VarRef{Name: ctor.Name, Ty: ct}, Args: fields, Ty: ty, TyArgs: []types.Type{el.eraseRuntimeKinds(eraseRows(in.Head))}, Ctor: ctor}
+}
+
+func instanceDefinition(in *infer.InstanceInfo, ck *infer.Checker) (core.Def, []diag.Error) {
+	sch, _ := ck.Env.Lookup(in.Name)
+	el := newElab(ck, in.Name, sch)
+	el.owner = in.Owner
+	el.instanceLimit = in.Limit
+	params, dictTypes := el.bindDictionaries(in.Preds)
+	ty := el.eraseRuntimeKinds(eraseRows(in.Class.DictType(in.Head)))
+	body := el.dictionaryValue(in)
 	paramCaptures := make([]types.CaptureVar, len(params))
 	for i := range paramCaptures {
 		paramCaptures[i] = ck.Sup.FreshCapture()

@@ -60,7 +60,7 @@ The bundled library is experimental and versioned with the compiler.
 
 ## Type classes and instances
 
-[Type classes and instances](reference/classes.md) — Constraints, instance selection, visibility, and defaulting.
+[Type classes and instances](reference/classes.md) — Default methods, constraints, instance selection, visibility, and defaulting.
 
 ## Algebraic data types and matching
 

@@ -108,6 +108,10 @@ func TestClassDiagnostics(t *testing.T) {
 		{"deriver missing a method", "class C a\n    c : a -> Bool\n    d : a -> Bool\nderiver C\n    c info x = x", "MISSING METHOD"},
 		{"deriver for an unknown method", "class C a\n    c : a -> Bool\nderiver C\n    c info x = x\n    d info x = x", "UNKNOWN METHOD"},
 		{"function deriving", "type T = T (Int -> Int) deriving (Show)", "MISSING INSTANCE"},
+		{"default needs an absent constraint", "class C a\n    c : a -> Bool\n    c x = x == x", "MISSING CONSTRAINT"},
+		{"default with a wrong type", "class C a\n    c : a -> Bool\n    c x = \"no\"", "TYPE MISMATCH"},
+		{"duplicate default", "class C a\n    c : a -> Bool\n    c x = True\n    d : a -> Bool\n    c y = False", "DUPLICATE METHOD"},
+		{"defaulted method still checked in instance", "class C a\n    c : a -> Bool\n    c x = True\n    d : a -> Bool\ninstance C Int\n    c x = False", "MISSING METHOD"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, errs := check(t, tc.src)

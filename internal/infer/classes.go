@@ -66,6 +66,21 @@ func (ck *Checker) ClassDecl(d *ast.ClassDecl) []diag.Error {
 		}
 		cl.Methods = append(cl.Methods, types.MethodInfo{Name: m.Name, Type: ty, Class: cl, Index: i})
 	}
+	defaulted := map[string]bool{}
+	for _, m := range d.Defaults {
+		switch {
+		case !seen[m.Name]:
+			errs = append(errs, diag.Errorf(m.NameSpan, "UNKNOWN METHOD", "Class `%s` has no method `%s`.", types.SurfaceName(d.Name), types.SurfaceName(m.Name)))
+		case defaulted[m.Name]:
+			errs = append(errs, diag.Errorf(m.NameSpan, "DUPLICATE METHOD", "Method `%s` has two default implementations.", types.SurfaceName(m.Name)))
+		}
+		defaulted[m.Name] = true
+	}
+	for i := range cl.Methods {
+		if defaulted[cl.Methods[i].Name] {
+			cl.Methods[i].Default = DefaultSymbol(cl.Methods[i].Name)
+		}
+	}
 	if len(errs) > 0 {
 		return errs
 	}
@@ -81,6 +96,62 @@ func (ck *Checker) ClassDecl(d *ast.ClassDecl) []diag.Error {
 	ck.ADTs[con.Unique] = adt
 	ck.ADTOrder = append(ck.ADTOrder, adt)
 	return nil
+}
+
+// DefaultSymbol names the top-level function holding a method's default.
+// It lives in the class's module, beside the method itself.
+func DefaultSymbol(method string) string {
+	name := "_default_" + types.SurfaceName(method)
+	if owner := symbolModule(method); owner != "" {
+		return owner + "." + name
+	}
+	return name
+}
+
+// ClassDefaultDecls turns a class's default implementations into ordinary
+// top-level functions, annotated with the method's type under the class's
+// own constraint. They are checked once, where the class is written, and an
+// instance that omits a method forwards to the function with itself as the
+// evidence.
+func ClassDefaultDecls(d *ast.ClassDecl) []*ast.ValueDecl {
+	sigs := map[string]ast.OpSig{}
+	for _, m := range d.Methods {
+		sigs[m.Name] = m
+	}
+	var out []*ast.ValueDecl
+	for _, m := range d.Defaults {
+		// ClassDecl reports an unknown or repeated default; only the first
+		// becomes a function, so the report is not a name collision.
+		sig, ok := sigs[m.Name]
+		if !ok {
+			continue
+		}
+		delete(sigs, m.Name)
+		pred := ast.PredExpr{Class: d.Name, Ty: &ast.TVarName{Name: d.Param.Name, Sp: d.Param.Sp}, Sp: sig.NameSpan}
+		out = append(out, &ast.ValueDecl{
+			Name: DefaultSymbol(m.Name), NameSpan: m.NameSpan,
+			Params: m.Params, Equations: m.Equations, Body: m.Body,
+			Ann: &ast.TypeAnn{Type: sig.Type, Preds: []ast.PredExpr{pred}, Sp: sig.NameSpan},
+			Sp:  m.Sp,
+		})
+	}
+	return out
+}
+
+// forwardDefault is the method an instance receives when it omits a
+// defaulted one: `method x1 … xn = _default_method x1 … xn`. The forwarding
+// is eta-expanded so the instance's dictionary and its methods never form a
+// value cycle; self evidence resolves the default's constraint to this
+// instance.
+func forwardDefault(cm types.MethodInfo, sp source.Span) *ast.ValueDecl {
+	var body ast.Expr = &ast.Var{Name: cm.Default, Sp: sp}
+	params := make([]ast.Pattern, methodArity(cm.Type))
+	for i := range params {
+		name := "_default" + strconv.Itoa(i)
+		params[i] = &ast.PVar{Name: name, Sp: sp}
+		body = &ast.App{Fn: body, Arg: &ast.Var{Name: name, Sp: sp}}
+	}
+	return &ast.ValueDecl{Name: types.SurfaceName(cm.Name), NameSpan: sp, Params: params, Body: body}
 }
 
 func hasOpenRow(t types.Type) bool {
@@ -192,9 +263,20 @@ func (ck *Checker) registerInstance(d *ast.InstanceDecl) (*InstanceInfo, []diag.
 		methods[n] = m
 	}
 	for _, m := range cl.Methods {
-		if methods[types.SurfaceName(m.Name)] == nil {
-			errs = append(errs, diag.Errorf(d.Head.Sp, "MISSING METHOD", "Instance requires method `%s`.", types.SurfaceName(m.Name)))
+		if methods[types.SurfaceName(m.Name)] != nil {
+			continue
 		}
+		if m.Default == "" {
+			errs = append(errs, diag.Errorf(d.Head.Sp, "MISSING METHOD", "Instance requires method `%s`.", types.SurfaceName(m.Name)))
+			continue
+		}
+		forward := forwardDefault(m, d.Head.Sp)
+		if b := ck.moduleCheck; b != nil {
+			// A default in this module is checked before an instance needs it.
+			b.ensureExpr(forward.Body)
+		}
+		d.Methods = append(d.Methods, forward)
+		methods[forward.Name] = forward
 	}
 	for n, m := range methods {
 		found := false

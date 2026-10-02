@@ -1,0 +1,8 @@
+(module)
+-- errors --
+-- CLASS METHOD ----------------- err_class_default_inline.fango
+
+A default implementation goes on its own line below the signature, like an instance method.
+
+3|     size : a -> Int = 0
+                       ^

@@ -214,16 +214,15 @@ These are directions, not commitments or an ordering:
   string. A second instance head specializing a constructor's arguments is
   rejected, so the composition-consistent form is a hook method on the
   element's class that the constructed instance consults: `Show a` would gain
-  a `showList`, and `Show (List a)` would call it. That works already when
-  every instance writes the hook; what it waits on is default methods, so only
-  the types that differ from the generic answer declare one, and derivers that
-  supply it.
+  a [defaulted](reference/classes.md#default-methods) `showList`, overridden
+  only by the types that differ from the generic answer, and
+  `Show (List a)` would call it.
 - Hoisting composed dictionaries. A composed dictionary inside a recursive body
   is rebuilt per call: ANF lifts only non-Direct or polymorphic slots and there
   is no CSE pass. Memoizing per definition and binding at entry is the fix, once
   a consumer shows it matters.
-- Superclasses, method-local polymorphism, higher kinds, default methods, mutually
-  recursive deriving groups, and richer Show-deriver precedence/display.
+- Superclasses, method-local polymorphism, higher kinds, mutually recursive
+  deriving groups, and richer Show-deriver precedence/display.
 - Inline native instance methods: stable method identity, class-specialized ABI,
   registry agreement, and a choice of parameter-bearing or template-only syntax.
 - Broader scalar specialization (multiple numeric parameters, effects, custom

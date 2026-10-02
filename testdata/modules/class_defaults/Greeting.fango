@@ -1,0 +1,9 @@
+module Greeting exposing (Greet(..))
+
+class Greet a
+    name : a -> String
+    greet : a -> String
+    greet value = decorate (name value)
+
+decorate : String -> String
+decorate text = "hello, " ++ text

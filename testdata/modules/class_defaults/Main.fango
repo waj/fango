@@ -1,0 +1,11 @@
+module Main exposing (main)
+
+import Greeting exposing (Greet(..))
+
+type Person = Person String
+
+instance Greet Person
+    name person = case person of
+        Person who -> who
+
+main = greet (Person "Ada")

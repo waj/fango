@@ -120,13 +120,17 @@ func (r *resolver) decl(d ast.Decl) {
 		for _, m := range d.Methods {
 			r.value(m)
 		}
+	case *ast.ClassDecl:
+		for _, m := range d.Defaults {
+			r.value(m)
+		}
 	case *ast.TypeDecl:
 		d.VisitAttributes(func(group *ast.AttributeGroup) {
 			for i, e := range group.Exprs {
 				group.Exprs[i] = r.expr(e)
 			}
 		})
-	case *ast.ClassDecl, *ast.EffectDecl, *ast.FixityDecl:
+	case *ast.EffectDecl, *ast.FixityDecl:
 		// Signatures and type declarations hold no expressions.
 	default:
 		panic(fmt.Sprintf("fixity: unhandled declaration %T", d))

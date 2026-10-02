@@ -1,0 +1,2 @@
+(module
+  (class Size a (size (-> a Int)) (isEmpty (-> a Bool)) (<#> (-> a (-> a Int))) (def isEmpty (params x) (binop == (app (var size) (var x)) (int 0))) (def <#> (params x y) (binop + (app (var size) (var x)) (app (var size) (var y))))))

@@ -1,0 +1,3 @@
+-- A default goes on its own line, not after the signature.
+class Size a
+    size : a -> Int = 0

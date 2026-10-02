@@ -1684,6 +1684,12 @@ func (r *resolver) resolveDecls(decls []ast.Decl) []ast.Decl {
 				d.Methods[i].Name = r.canon(d.Methods[i].Name)
 				r.typ(d.Methods[i].Type)
 			}
+			// A default resolves in the class's scope, like an instance
+			// method; an instance elsewhere receives the resolved copy.
+			for _, m := range d.Defaults {
+				m.Name = r.canon(m.Name)
+				r.resolveValueRows(m, r.vals)
+			}
 			out = append(out, d)
 		case *ast.DeriverDecl:
 			// A deriver resolves in its own module's scope, exactly as an

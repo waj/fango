@@ -25,8 +25,7 @@ func (p *printer) printDecl(d ast.Decl, sp source.Span) bool {
 		p.sigBlock("effect "+d.Name, paramNames(d.Params), d.Ops)
 		return true
 	case *ast.ClassDecl:
-		p.sigBlock("class "+d.Name, []string{d.Param.Name}, d.Methods)
-		return true
+		return p.classLines(d)
 	case *ast.ValueDecl:
 		return p.valueDeclLines(d, 0)
 	case *ast.PatternDecl:
@@ -269,8 +268,8 @@ func derivingText(names []ast.TName) string {
 	return " deriving (" + strings.Join(out, ", ") + ")"
 }
 
-// sigBlock renders a `class` or `effect` header and its indented signature
-// lines, which is the only shape either declaration has.
+// sigBlock renders an `effect` header and its indented signature lines,
+// which is the only shape the declaration has.
 func (p *printer) sigBlock(head string, params []string, sigs []ast.OpSig) {
 	for _, param := range params {
 		if param != "" {
@@ -281,6 +280,24 @@ func (p *printer) sigBlock(head string, params []string, sigs []ast.OpSig) {
 	for _, s := range sigs {
 		p.line(Indent, opSigText(s))
 	}
+}
+
+// classLines renders a class header and its signatures, each signature
+// followed by its default implementation when the class gives one.
+func (p *printer) classLines(d *ast.ClassDecl) bool {
+	p.line(0, "class "+d.Name+" "+d.Param.Name)
+	defaults := map[string]*ast.ValueDecl{}
+	for _, m := range d.Defaults {
+		defaults[m.Name] = m
+	}
+	for _, s := range d.Methods {
+		p.line(Indent, opSigText(s))
+		if m := defaults[s.Name]; m != nil && !p.valueDeclLines(m, Indent) {
+			return false
+		}
+	}
+	p.flush()
+	return true
 }
 
 func opSigText(s ast.OpSig) string {

@@ -714,8 +714,6 @@ func (p *parser) parseEffectDecl() ast.Decl {
 			abort = true
 			p.next()
 		}
-		// Class declarations share this loop, and a class method may be an
-		// operator: `class Num a` declares `(+) : a -> a -> a`.
 		opName, opSpan, ok := p.parseMethodName("SYNTAX PROBLEM",
 			"I expect an operation name here, like `print : String -> ()`.")
 		if !ok {

@@ -1,0 +1,10 @@
+module Sizes exposing (Size(..))
+
+import Basics exposing (..)
+
+class Size a
+    size : a -> Int
+    isEmpty : a -> Bool
+    isEmpty x = size x == 0
+    (<#>) : a -> a -> Int
+    (<#>) x y = size x + size y

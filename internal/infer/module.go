@@ -178,8 +178,14 @@ func (b *moduleCheck) completeInstances(before int) {
 			}
 			ds, es := b.ck.checkInstance(d, in)
 			b.add(i, ds, es)
-			for j, m := range d.Methods {
-				if j < len(ds) && !b.ck.IsCompileTimeOnly(ds[j].Type) {
+			// checkInstance answers in class order and renames each method
+			// to its definition, so pair by that name rather than position.
+			checked := map[string]DeclInfo{}
+			for _, info := range ds {
+				checked[info.Name] = info
+			}
+			for _, m := range d.Methods {
+				if info, ok := checked[m.Name]; ok && !b.ck.IsCompileTimeOnly(info.Type) {
 					b.errs = append(b.errs, b.ck.checkStageLeaks(m, nil, types.SurfaceName(m.Name))...)
 				}
 			}

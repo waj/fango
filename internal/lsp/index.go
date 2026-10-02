@@ -230,6 +230,9 @@ func (i *index) module(m *ast.Module) {
 			for _, method := range d.Methods {
 				i.typ(method.Type)
 			}
+			for _, method := range d.Defaults {
+				i.value(method, nil)
+			}
 		case *ast.InstanceDecl:
 			i.use(d.Head.Sp, global("type", d.Head.Class))
 			i.typ(d.Head.Ty)

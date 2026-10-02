@@ -34,8 +34,8 @@ hypotenuse =
     x * x + y * y
 ```
 
-The same outdent rule applies to indented effect and class signatures and to
-instance and deriver methods. The formatter aligns all items in each group.
+The same outdent rule applies to indented effect signatures, class
+signatures and defaults, and instance and deriver methods. The formatter aligns all items in each group.
 If a block ends after a binding, parsing and formatting still succeed; checking
 reports `BLOCK RESULT` because the block has no expression to return.
 

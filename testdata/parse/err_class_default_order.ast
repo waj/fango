@@ -1,0 +1,9 @@
+(module
+  (class Size a (size (-> a Int)) (isEmpty (-> a Bool)) (def isEmpty (params x) (binop == (app (var size) (var x)) (int 0)))))
+-- errors --
+-- CLASS METHOD ------------------ err_class_default_order.fango
+
+A default implementation of `isEmpty` must follow its signature in this class.
+
+3|     isEmpty x = size x == 0
+       ^^^^^^^

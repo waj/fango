@@ -1,0 +1,8 @@
+-- A class block mixes signatures with defaults; a default's adjacent
+-- equations group, and a signature between rows separates them.
+class Size a
+    size : a -> Int
+    isEmpty : a -> Bool
+    isEmpty x = size x == 0
+    (<#>) : a -> a -> Int
+    (<#>) x y = size x + size y

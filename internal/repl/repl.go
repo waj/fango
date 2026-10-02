@@ -425,7 +425,13 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	if cl, ok := m.Decls[0].(*ast.ClassDecl); ok {
-		if errs := s.ck.ClassDecl(cl); len(errs) > 0 {
+		errs := s.ck.ClassDecl(cl)
+		for _, vd := range infer.ClassDefaultDecls(cl) {
+			if len(errs) == 0 {
+				_, _, errs = s.defineValue(vd)
+			}
+		}
+		if len(errs) > 0 {
 			restore()
 			diag.Render(s.out, errs)
 		} else {
@@ -531,21 +537,36 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 		return inputDone
 	}
 	redefining := s.ck.Env.Has(vd.Name)
+	info, def, errs := s.defineValue(vd)
+	if len(errs) > 0 {
+		restore()
+		diag.Render(s.out, errs)
+		return inputDone
+	}
+	if redefining {
+		s.gen++
+	}
+	sch := info.Scheme
+	sch.Body = s.ck.Sub.Apply(sch.Body)
+	sch.Preds = s.ck.NormalizePreds(sch.Preds)
+	fmt.Fprintf(s.out, "%s : %s\n", def.Name, types.ShowScheme(sch))
+	return inputDone
+}
+
+// defineValue checks, elaborates, and installs one top-level definition. A
+// failed definition installs nothing; the caller restores its checkpoint.
+func (s *Session) defineValue(vd *ast.ValueDecl) (infer.DeclInfo, *core.Def, []diag.Error) {
 	// A failed input leaves nothing behind, expansion included: a splice that
 	// fails half way through has already checked whatever preceded it.
-	if stageErrs := s.ck.StageDecl(vd); len(stageErrs) > 0 {
-		restore()
-		diag.Render(s.out, stageErrs)
-		return inputDone
+	if errs := s.ck.StageDecl(vd); len(errs) > 0 {
+		return infer.DeclInfo{}, nil, errs
 	}
 	// Check the body BEFORE binding: a failed definition must not install
 	// a broken name into the session. REPL declarations are required to be
 	// pure; effectful expressions can be evaluated directly at the prompt.
-	info, inferErrs := s.ck.DeclWhere(vd, false)
-	if len(inferErrs) > 0 {
-		restore()
-		diag.Render(s.out, inferErrs)
-		return inputDone
+	info, errs := s.ck.DeclWhere(vd, false)
+	if len(errs) > 0 {
+		return infer.DeclInfo{}, nil, errs
 	}
 	// The elaborator's spine analysis needs the worker table to include
 	// THIS definition (a prompt-defined fib must self-call directly), so
@@ -556,11 +577,9 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	} else {
 		delete(s.ck.Workers, vd.Name)
 	}
-	defs, elabErrs := elaborate.DeclIn(info, s.activeExecutionDefs(), s.ck)
-	if len(elabErrs) > 0 {
-		restore()
-		diag.Render(s.out, elabErrs)
-		return inputDone
+	defs, errs := elaborate.DeclIn(info, s.activeExecutionDefs(), s.ck)
+	if len(errs) > 0 {
+		return infer.DeclInfo{}, nil, errs
 	}
 	s.ck.BindDecl(info)
 	// A later splice may name this definition, so the compile-time
@@ -578,14 +597,7 @@ func (s *Session) declInput(toks []token.Token, f *source.File, force bool) inpu
 	} else {
 		s.env.Define(def.Name, def.Body)
 	}
-	if redefining {
-		s.gen++
-	}
-	sch := info.Scheme
-	sch.Body = s.ck.Sub.Apply(sch.Body)
-	sch.Preds = s.ck.NormalizePreds(sch.Preds)
-	fmt.Fprintf(s.out, "%s : %s\n", def.Name, types.ShowScheme(sch))
-	return inputDone
+	return info, def, nil
 }
 
 // importInput brings modules into the session. Each import loads what the

@@ -1,0 +1,5 @@
+-- A default must follow its signature, which it implements.
+class Size a
+    isEmpty x = size x == 0
+    size : a -> Int
+    isEmpty : a -> Bool

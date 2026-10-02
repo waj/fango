@@ -78,7 +78,11 @@ func (ck *Checker) DeriverDecl(d *ast.DeriverDecl) []diag.Error {
 		surface := types.SurfaceName(cm.Name)
 		m := given[surface]
 		if m == nil {
-			errs = append(errs, diag.Errorf(d.ClassSpan, "MISSING METHOD", "A deriver for `%s` requires method `%s`.", types.SurfaceName(cl.Name), surface))
+			// A derived instance omitting a defaulted method receives the
+			// class's default, exactly as a handwritten one does.
+			if cm.Default == "" {
+				errs = append(errs, diag.Errorf(d.ClassSpan, "MISSING METHOD", "A deriver for `%s` requires method `%s`.", types.SurfaceName(cl.Name), surface))
+			}
 			continue
 		}
 		delete(given, surface)
@@ -198,7 +202,15 @@ func (ck *Checker) derivedInstance(td *ast.TypeDecl, adt *types.ADTInfo, cl *typ
 	var methods []*ast.ValueDecl
 	for _, cm := range cl.Methods {
 		surface := types.SurfaceName(cm.Name)
-		generator := deriver.Methods[surface]
+		generator, ok := deriver.Methods[surface]
+		if !ok {
+			// The class's default fills the method in. Check it now, outside
+			// the context probe, whose rollback would discard its binding.
+			if ck.moduleCheck != nil {
+				ck.moduleCheck.ensureExpr(&ast.Var{Name: cm.Default, Sp: sp})
+			}
+			continue
+		}
 		arity := methodArity(cm.Type)
 		params := make([]ast.Pattern, arity)
 		var operand ast.Expr = &ast.Var{Name: generator, Sp: sp}

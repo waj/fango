@@ -133,6 +133,18 @@ async function main() {
     const head = line.indexOf("return");
     assert(tokens.find(t => t.startIndex <= head && t.endIndex > head).scopes.includes("keyword.control.return.fango"));
   }
+  // A class block mixes signatures with default implementations; a default
+  // line names a function, as an instance method does.
+  let classStack = textmate.INITIAL;
+  for (const line of ["class Size a", "    size : a -> Int", "    isEmpty x = size x == 0"]) {
+    const result = grammar.tokenizeLine(line, classStack);
+    assert(!result.stoppedEarly);
+    if (line.includes("isEmpty")) {
+      const head = line.indexOf("isEmpty");
+      assert(result.tokens.find(t => t.startIndex <= head && t.endIndex > head).scopes.includes("entity.name.function.fango"));
+    }
+    classStack = result.ruleStack;
+  }
   let parenthesizedStack = textmate.INITIAL;
   for (const line of ["main =", "    foo { _ ->", "        foo", "    bar", "    }"]) {
     const result = grammar.tokenizeLine(line, parenthesizedStack);

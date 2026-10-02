@@ -186,6 +186,9 @@ type MethodInfo struct {
 	Type  Type
 	Class *ClassInfo
 	Index int
+	// Default names the generic top-level function implementing the class's
+	// default for this method, or is empty when instances must supply it.
+	Default string
 }
 
 func (c *ClassInfo) DictType(t Type) *TCon {

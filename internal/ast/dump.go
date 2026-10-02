@@ -64,6 +64,9 @@ func dumpDecl(d Decl) string {
 		for _, m := range d.Methods {
 			parts = append(parts, "("+m.Name+" "+DumpTypeExpr(m.Type)+")")
 		}
+		for _, m := range d.Defaults {
+			parts = append(parts, dumpDecl(m))
+		}
 		return strings.Join(parts, " ") + ")"
 	case *InstanceDecl:
 		parts := []string{"(instance", dumpPreds(d.Preds), d.Head.Class, DumpTypeExpr(d.Head.Ty)}

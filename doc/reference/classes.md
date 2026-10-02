@@ -7,7 +7,7 @@ Class declarations, dictionary constraints, instance selection, and defaulting.
 A class has exactly one type parameter and an indented block of method
 signatures. Later signatures and instance methods may outdent from the first
 while staying indented under the declaration; the formatter aligns them. An
-instance supplies every method exactly once:
+instance supplies every method without a default exactly once:
 
 ```fango
 class Label a
@@ -24,11 +24,36 @@ describe value = label value
 ```
 
 Each method must be a function mentioning the class parameter. Additional
-method type variables, open effect rows, superclasses, higher kinds, and
-default methods are unsupported. Closed effect rows are allowed: a method
+method type variables, open effect rows, superclasses, and higher kinds are
+unsupported. Closed effect rows are allowed: a method
 `read : a ->{Ask} Int` performs `Ask` when applied. Constructing a method
 value must be pure, including implementations written as `method = expression`;
 IO during construction is rejected with `UNHANDLED EFFECT`.
+
+## Default methods
+
+A class may give a method a default implementation, written like an instance
+method on its own line anywhere after the method's signature:
+
+```fango
+class Describe a
+    name : a -> String
+    describe : a -> String
+    describe value = "a " ++ name value
+```
+
+An instance that omits `describe` uses the default; one that defines it
+overrides it, and the class's other defaults then see the override. A default
+is checked once, at the class, with the class's own constraint as its only
+evidence: it may call any method of the class, including other defaulted
+ones, and needing anything else about the parameter reports
+`MISSING CONSTRAINT` there. It resolves names in the class's module, so it
+may use that module's private helpers even when the instance lives
+elsewhere. A default for a method the class does not declare is
+`UNKNOWN METHOD`; a second default for one method is `DUPLICATE METHOD`; a
+default written before its signature, or on the signature's line, is
+`CLASS METHOD`. A [deriver](metaprogramming.md#derivers) may likewise leave
+defaulted methods to the class.
 
 ## Constraints
 

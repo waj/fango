@@ -1,0 +1,11 @@
+class Describe a
+    name : a -> String
+    describe : a -> String
+    describe value = "a " ++ name value
+
+type Cat = Cat
+instance Describe Cat
+    name _ = "cat"
+
+describe Cat
+:quit

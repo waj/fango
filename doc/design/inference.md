@@ -175,6 +175,16 @@ public self constraint or perform fresh polymorphic lookup. Other polymorphic
 method calls use supplied dictionaries, including partial applications and
 lifted locals. Specialization cannot replace that evidence.
 
+A class default is an ordinary top-level function, `_default_<method>` in the
+class's module, annotated with the method's type under the class's own
+constraint and placed directly after the class in source order. It is checked
+and emitted once. An instance omitting the method receives an eta-expanded
+forwarding method whose self evidence supplies that constraint, so defaults
+add nothing to dictionary construction. Forwarding is eta-expanded and a
+nullary instance's method rebuilds its own dictionary inline rather than
+naming the package-level value, so dictionaries and methods never form a
+value-initialization cycle.
+
 ## Deriving
 
 A deriver supplies method bodies as Code; the compiler owns the instance head,

@@ -1,0 +1,58 @@
+import Meta
+
+-- A class may give a method a default; instances that omit it receive it.
+class Describe a
+    name : a -> String
+    describe : a -> String
+    describe value = "a " ++ name value
+    loud : a -> String
+    loud value = describe value ++ "!"
+
+type Cat = Cat
+type Dog = Dog
+type Box a = Box a
+
+instance Describe Cat
+    name _ = "cat"
+
+-- An override is what the other defaults see.
+instance Describe Dog
+    name _ = "dog"
+    describe _ = "the dog"
+
+-- A conditional instance reaches its defaults through its context.
+instance Describe a => Describe (Box a)
+    name box = case box of
+        Box x -> "box of " ++ name x
+
+-- Operator methods and point-free defaults.
+class Combine a
+    (<+>) : a -> a -> a
+    twice : a -> a
+    twice = { x -> x <+> x }
+
+instance Combine Int
+    (<+>) x y = x + y
+
+-- A deriver may leave defaulted methods to the class.
+class Tag a
+    tag : a -> String
+    tagged : a -> String
+    tagged value = "<" ++ tag value ++ ">"
+
+deriver Tag
+    tag subject valueCode =
+        Meta.match subject valueCode { bound -> Meta.lift bound.ctor.name }
+
+type Colour = Red | Green deriving (Tag)
+
+half : Int
+half = 21
+
+main() =
+    print (loud Cat)
+    print (loud Dog)
+    print (loud (Box Dog))
+    print (describe (Box Cat))
+    print (twice half)
+    print (tagged Green)

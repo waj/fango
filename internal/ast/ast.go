@@ -159,11 +159,15 @@ type PredExpr struct {
 	Sp    source.Span
 }
 
+// ClassDecl declares method signatures and, optionally, default
+// implementations. A default is written like an instance method below its
+// signature; an instance that omits the method receives a copy of it.
 type ClassDecl struct {
 	Name     string
 	NameSpan source.Span
 	Param    Param
 	Methods  []OpSig
+	Defaults []*ValueDecl
 	Sp       source.Span
 }
 

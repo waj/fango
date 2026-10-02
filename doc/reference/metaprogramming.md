@@ -149,8 +149,10 @@ Later deriver methods may outdent from the first while staying indented under
 A deriver method's type is dictated by the class: for a class method with *n*
 arrows, its deriver method takes a `TypeInfo` plus *n* `Code` arguments and
 returns `Code`. A deriver is otherwise an ordinary Fango function, checked by
-ordinary inference. It must supply exactly the class's methods
-(`MISSING METHOD`, `UNKNOWN METHOD`), a class may have only one deriver
+ordinary inference. It must supply every class method without a
+[default](classes.md#default-methods) and may supply defaulted ones
+(`MISSING METHOD`, `UNKNOWN METHOD`); a derived instance uses the class's
+default for any method the deriver omits. A class may have only one deriver
 (`DUPLICATE DERIVER`), and — like an instance — it is visible by dependency.
 
 The compiler supplies reflected field binders; builders provide references

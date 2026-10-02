@@ -497,7 +497,7 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 			errs = append(errs, ck.Fixity.Add(fd)...)
 		}
 	}
-	batch := newModuleCheck(ck, m.Decls)
+	batch := newModuleCheck(ck, withClassDefaults(m.Decls))
 	previous := ck.moduleCheck
 	ck.moduleCheck = batch
 	defer func() { ck.moduleCheck = previous }()
@@ -505,6 +505,22 @@ func (ck *Checker) Module(m *ast.Module) ([]DeclInfo, []diag.Error) {
 	infos = append(infos, ds...)
 	errs = append(errs, es...)
 	return infos, errs
+}
+
+// withClassDefaults places each class's default implementations, as
+// top-level functions, directly after the class: they follow it in source
+// order, which is what their constraint on the class requires.
+func withClassDefaults(decls []ast.Decl) []ast.Decl {
+	var out []ast.Decl
+	for _, d := range decls {
+		out = append(out, d)
+		if cl, ok := d.(*ast.ClassDecl); ok {
+			for _, v := range ClassDefaultDecls(cl) {
+				out = append(out, v)
+			}
+		}
+	}
+	return out
 }
 
 // PatternDecl checks and installs one top-level destructuring group. It is
