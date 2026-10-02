@@ -17,7 +17,7 @@ call (Box action) = action()
 	var original []byte
 	for _, test := range []struct{ name, imports, body, output string }{
 		{"Direct", "", `print (Callbacks.call (Callbacks.make { _ -> 7 }))`, "7\n"},
-		{"Exit", "import Fail\n", `print (Fail.attempt { _ -> Callbacks.call (Callbacks.make { _ -> if True then Fail.fail "failed" else 7 }) })`, "Err failed\n"},
+		{"Exit", "import Fail\n", `print (Fail.attempt { _ -> Callbacks.call (Callbacks.make { _ -> if True then Fail.fail "failed" else 7 }) })`, "Err \"failed\"\n"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			entry := writeModuleFile(t, root, "Main.fango", "import Callbacks\n"+test.imports+"main() = "+test.body+"\n")

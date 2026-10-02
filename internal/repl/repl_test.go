@@ -69,7 +69,7 @@ func TestRedefinition(t *testing.T) {
 func TestPromptAndReadLineShareReader(t *testing.T) {
 	var out strings.Builder
 	Run(strings.NewReader("readLine ()\nhello\n:quit\n"), &out)
-	if !strings.Contains(out.String(), `Just Line { text = hello`) {
+	if !strings.Contains(out.String(), `Just (Line { text = "hello"`) {
 		t.Fatalf("readLine did not consume the line following the prompt expression:\n%s", out.String())
 	}
 }
@@ -131,7 +131,7 @@ readAll()
 :quit
 `), &out)
 	got := out.String()
-	if strings.Contains(got, "INTERNAL") || strings.Contains(got, "runtime error") || strings.Count(got, "Err finished") < 3 {
+	if strings.Contains(got, "INTERNAL") || strings.Contains(got, "runtime error") || strings.Count(got, `Err "finished" :`) < 2 || !strings.Contains(got, `"Err \"finished\"" : String`) {
 		t.Fatalf("latent row traversal did not survive REPL/staging boundaries:\n%s", got)
 	}
 }
@@ -291,7 +291,7 @@ forward True
 			t.Fatalf("missing %q:\n%s", want, got)
 		}
 	}
-	for value, count := range map[string]int{"fallback : String": 2, "show : String": 1, "eq : String": 2} {
+	for value, count := range map[string]int{`"fallback" : String`: 2, `"show" : String`: 1, `"eq" : String`: 2} {
 		if strings.Count(got, value) != count {
 			t.Fatalf("wrong count for %q:\n%s", value, got)
 		}

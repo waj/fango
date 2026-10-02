@@ -54,8 +54,8 @@ readLine() =
             raw = readRawLine()
             Just (Line { text = lineText raw, ending = lineEnding raw })
 
-print : Show a => a ->{IO} ()
-print value = write (show value ++ "\n")
+print : Display a => a ->{IO} ()
+print value = write (display value ++ "\n")
 
 argsFrom : Int -> Int ->{IO} List String
 argsFrom index count =

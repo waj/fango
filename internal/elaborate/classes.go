@@ -219,17 +219,28 @@ func instanceDefinition(in *infer.InstanceInfo, ck *infer.Checker) (core.Def, []
 		Params: params, ParamCaptures: paramCaptures, Control: core.ArrowControl(fullType, len(params)), Body: el.anf(body)}, el.errs
 }
 
-// Display evaluates its argument once and renders through the ordinary Show
-// instance. Values without Show remain inspectable without adding a constraint.
+// Represent evaluates its argument once and renders it through the ordinary
+// Show instance, as the REPL echoes a result. Values without Show remain
+// inspectable without adding a constraint.
+func Represent(e core.Expr, ck *infer.Checker, owner string) core.Expr {
+	return observe(e, ck, owner, "Show", "Basics.show")
+}
+
+// Display evaluates its argument once and renders it through the ordinary
+// Display instance, as `print` would, for a program whose entry is a value.
 func Display(e core.Expr, ck *infer.Checker, owner string) core.Expr {
+	return observe(e, ck, owner, "Display", "Basics.display")
+}
+
+func observe(e core.Expr, ck *infer.Checker, owner, class, method string) core.Expr {
 	el := newElab(ck, "", types.Scheme{})
 	el.owner = owner
 	ty := e.Type()
 	name := "_displayValue"
 	var body core.Expr
-	if ck.CanResolve(ck.StandardPred("Show", ty), owner) {
-		method := el.methodValue(ck.Methods["Basics.show"], &types.TFun{Arg: ty, Ret: ck.B.String})
-		body = el.valueApp(method, &core.VarRef{Name: name, Ty: ty, Local: true})
+	if ck.CanResolve(ck.StandardPred(class, ty), owner) {
+		m := el.methodValue(ck.Methods[method], &types.TFun{Arg: ty, Ret: ck.B.String})
+		body = el.valueApp(m, &core.VarRef{Name: name, Ty: ty, Local: true})
 	} else {
 		text := "<value : " + types.Show(ty) + ">"
 		if _, ok := ty.(*types.TFun); ok {

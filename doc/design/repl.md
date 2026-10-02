@@ -23,11 +23,12 @@ Both backends share observable formatting and the
 [self tail-loop predicate](backend.md#self-tail-call-loops). The differential suite
 checks agreement. Native call forms use the [persistent worker](backend.md#interpreter-native-worker).
 
-Print is ordinary Show-constrained Fango over show and IO.write. Tooling evaluates
-an observed expression once and uses available Show evidence, otherwise an opaque
-typed placeholder or `<function>`. Show renders String/Char raw even inside derived
-ADTs; tooling literal forms are quoted. Display never adds a Show constraint to the
-observed expression.
+Print is ordinary Display-constrained Fango over display and IO.write. Tooling
+evaluates an observed expression once. The REPL echoes a result through available
+Show evidence, the representation, so a String result is quoted; a program whose
+entry is a value prints it through Display evidence, as `print` would. Without
+evidence either one shows an opaque typed placeholder or `<function>`, and
+observation never adds a constraint to the observed expression.
 
 ## Persistent stores and generations
 

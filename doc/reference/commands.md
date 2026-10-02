@@ -366,7 +366,7 @@ The host supplies a filesystem holding a [library root](#the-library-root)
 the only argument (default `/src/main.fango`). Standard input is the
 program's, output goes to stdout and diagnostics to stderr. The exit status is
 the program's own, `1` for a compile error, and `2` for an internal error. A
-non-Unit `main` value is printed, as in the REPL.
+non-Unit `main` value is printed as `print` would, through `Display`.
 
 The interpreter runs without a native worker, so natives that need one (File,
 Net, and Async) and user sidecars fail with an error rather than building one. The

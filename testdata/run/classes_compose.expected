@@ -5,6 +5,6 @@ Just [5]
 True
 False
 True
-Tree [x]
+Tree ["x"]
 True
 staged same

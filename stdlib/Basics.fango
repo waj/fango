@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Basics exposing (Eq(..), Num(..), Ord(..), Show(..), Type, ignore, modBy, quotientBy, remainderBy, (++), (/), (/=), (<|), (|>))
+module Basics exposing (Display(..), Eq(..), Num(..), Ord(..), Show(..), Type, ignore, modBy, quotientBy, remainderBy, (++), (/), (/=), (<|), (|>))
 
 -- A runtime witness of a type argument. `@T` is its only public constructor.
 type Type a = Type
@@ -20,8 +20,22 @@ class Ord a
     (<=) : a -> a -> Bool
     (>=) : a -> a -> Bool
 
+-- A value's representation: source-like text that reads back as the value,
+-- so strings are quoted. `showArg` is the representation in constructor-
+-- argument position, parenthesized where juxtaposition would misread it.
 class Show a
     show : a -> String
+    showArg : a -> String
+    showArg value = show value
+
+-- Text for output. It differs from the representation only where a type
+-- deliberately renders as itself, as String and Char do; everything else
+-- displays its representation.
+class Display a
+    display : a -> String
+
+(++) : String -> String -> String
+(++) = native "$1 + $2"
 
 intAdd : Int -> Int -> Int
 intAdd = native "$1 + $2"
@@ -101,6 +115,9 @@ stringGe = native "$1 >= $2"
 stringShow : String -> String
 stringShow = native "fangort.ShowString($1)"
 
+stringShowLiteral : String -> String
+stringShowLiteral = native "fangort.ShowStringLiteral($1)"
+
 boolEq : Bool -> Bool -> Bool
 boolEq = native "$1 == $2"
 
@@ -124,6 +141,9 @@ charGe = native "$1 >= $2"
 
 charShow : Char -> String
 charShow = native "fangort.ShowChar($1)"
+
+charShowLiteral : Char -> String
+charShowLiteral = native "fangort.ShowCharLiteral($1)"
 
 floatFromInt : Int -> Float
 floatFromInt = native "float64($1)"
@@ -153,6 +173,7 @@ instance Ord Int
 
 instance Show Int
     show x = intShow x
+    showArg x = if intLt x 0 then "(" ++ intShow x ++ ")" else intShow x
 
 instance Eq Float
     (==) x y = floatEq x y
@@ -165,6 +186,7 @@ instance Ord Float
 
 instance Show Float
     show x = floatShow x
+    showArg x = if floatLt x 0.0 then "(" ++ floatShow x ++ ")" else floatShow x
 
 instance Eq String
     (==) x y = stringEq x y
@@ -176,7 +198,7 @@ instance Ord String
     (>=) x y = stringGe x y
 
 instance Show String
-    show x = stringShow x
+    show x = stringShowLiteral x
 
 instance Eq Bool
     (==) x y = boolEq x y
@@ -194,7 +216,7 @@ instance Ord Char
     (>=) x y = charGe x y
 
 instance Show Char
-    show x = charShow x
+    show x = charShowLiteral x
 
 instance Eq ()
     (==) x y = True
@@ -202,14 +224,20 @@ instance Eq ()
 instance Show ()
     show x = "()"
 
+instance Show a => Display a
+    display value = show value
+
+instance Display String
+    display x = stringShow x
+
+instance Display Char
+    display x = charShow x
+
 (/=) : Eq a => a -> a -> Bool
 (/=) x y = if x == y then False else True
 
 (/) : Float -> Float -> Float
 (/) = native "$1 / $2"
-
-(++) : String -> String -> String
-(++) = native "$1 + $2"
 
 -- The precedences the language used to fix in its parser, now declared
 -- like any other operator's.

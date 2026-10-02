@@ -63,9 +63,10 @@ Classes cannot be redefined. Type redefinition creates a fresh identity and
 can install fresh instances for that identity. Failed instance, deriver, and
 deriving declarations do not modify the persistent declaration environment,
 and neither does a declaration whose splice fails part way through. Types are
-printed with their class contexts. Expression display uses available `Show`
-evidence; otherwise it prints `<value : T>` or `<function>` without adding a
-Show constraint to the expression.
+printed with their class contexts. An expression's result shows its
+[representation](classes.md#standard-classes) through available `Show`
+evidence, so a String result is quoted; otherwise it prints `<value : T>` or
+`<function>` without adding a Show constraint to the expression.
 
 ## Evaluation and commands
 

@@ -413,7 +413,7 @@ main() =
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Token 42\nTrue\nBox Token 42\n"
+	want := "Token 42\nTrue\nBox (Token 42)\n"
 	if string(stdout) != want {
 		t.Fatalf("output %q, want %q", stdout, want)
 	}

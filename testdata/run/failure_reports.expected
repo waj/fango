@@ -2,7 +2,7 @@ body
 Fail.Fail
 Fail.fail
 1
-Just close
+Just "close"
 Nothing
 Nothing
 Nothing
@@ -11,26 +11,26 @@ close after take
 heterogeneous body
 Just 42
 1
-[before failure, body after value, cleanup after value]
+["before failure", "body after value", "cleanup after value"]
 nested body
 Fail.Fail
 Fail.fail
 1
-Just inner close
+Just "inner close"
 Nothing
 Nothing
 Nothing
 Fail.Fail
 Fail.fail
 1
-Just outer close
+Just "outer close"
 Nothing
 Nothing
 Nothing
 Fail.Fail
 Fail.fail
 1
-Just outer nested close
+Just "outer nested close"
 Nothing
 Nothing
 Nothing
@@ -38,7 +38,7 @@ first cleanup
 Fail.Fail
 Fail.fail
 1
-Just second cleanup
+Just "second cleanup"
 Nothing
 Nothing
 Nothing

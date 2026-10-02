@@ -25,6 +25,9 @@ appendCode lhs rhs = `$(lhs) ++ $(rhs)`
 showCode : Code -> Code
 showCode value = `show $(value)`
 
+showArgCode : Code -> Code
+showArgCode value = `showArg $(value)`
+
 equalsCode : Code -> Code -> Code
 equalsCode lhs rhs = `$(lhs) == $(rhs)`
 
@@ -56,13 +59,15 @@ deriver Eq
     (==) subject leftCode rightCode =
         Meta.match subject leftCode { lhs -> Meta.match subject rightCode { rhs -> eqBound lhs rhs } }
 
--- Show: a union constructor prints its name then its fields; a record prints
--- its type name then `field = value` pairs.
+-- Show: a union constructor prints its name then its fields in argument
+-- position; a record prints its type name then `field = value` pairs, whose
+-- values the braces and commas already delimit. As an argument itself, a
+-- constructor with fields or a record is parenthesized.
 
 unionShow : Bound -> Code
 unionShow bound =
     Meta.foldItems
-        { sofar field -> appendCode sofar (appendCode (lift " ") (showCode field.value)) }
+        { sofar field -> appendCode sofar (appendCode (lift " ") (showArgCode field.value)) }
         (lift bound.ctor.name)
         bound.fields
 
@@ -88,9 +93,23 @@ showBound subject bound =
         Record _ -> recordShow bound
         Union _ -> unionShow bound
 
+parenthesize : Code -> Code
+parenthesize code = appendCode (lift "(") (appendCode code (lift ")"))
+
+showArgBound : TypeInfo -> Bound -> Code
+showArgBound subject bound =
+    case subject.shape of
+        Record _ -> parenthesize (recordShow bound)
+        Union _ ->
+            case bound.fields of
+                NoItems -> unionShow bound
+                Item _ _ -> parenthesize (unionShow bound)
+
 deriver Show
     show subject valueCode =
         Meta.match subject valueCode { bound -> showBound subject bound }
+    showArg subject valueCode =
+        Meta.match subject valueCode { bound -> showArgBound subject bound }
 
 -- Ord: constructors order by declaration position, then fields
 -- lexicographically. The three outcomes — less, greater, and equal — are what

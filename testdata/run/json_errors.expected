@@ -25,7 +25,7 @@ Expected 64-bit JSON integer @/1 1:5
 Expected 64-bit JSON integer @/1 1:5
 Expected JSON number @/1 1:5
 JSON number is outside Float range @/1 1:5
-Err Error { message = Expected JSON number, offset = 0, line = 1, column = 1, path =  }
+Err (Error { message = "Expected JSON number", offset = 0, line = 1, column = 1, path = "" })
 True
 Ok [BeginArray, BooleanToken True, EndArray, EndInput]
 True

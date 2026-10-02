@@ -1,0 +1,6 @@
+-- Show does not imply Display inside a polymorphic body: the caller may
+-- hold a more specific Display instance.
+report : Show a => a ->{IO} ()
+report value = print value
+
+main() = report 1

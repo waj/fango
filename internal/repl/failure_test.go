@@ -29,7 +29,7 @@ List.map readOld saved
 :quit
 `), &out)
 	got := out.String()
-	if strings.Contains(got, "INTERNAL") || strings.Count(got, "[Just Token 2] :") != 2 || !strings.Contains(got, "[Nothing] :") {
+	if strings.Contains(got, "INTERNAL") || strings.Count(got, "[Just (Token 2)] :") != 2 || !strings.Contains(got, "[Nothing] :") {
 		t.Fatalf("failure inspection confused REPL generations:\n%s", got)
 	}
 }
@@ -61,7 +61,7 @@ good
 :quit
 `), &out)
 	got := out.String()
-	if strings.Contains(got, "INTERNAL") || !strings.Contains(got, "I don't know a value named `bad`.") || !strings.Contains(got, "close : String") {
+	if strings.Contains(got, "INTERNAL") || !strings.Contains(got, "I don't know a value named `bad`.") || !strings.Contains(got, `"close" : String`) {
 		t.Fatalf("failure report staging or rollback failed:\n%s", got)
 	}
 }

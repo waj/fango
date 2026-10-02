@@ -85,8 +85,8 @@ func TestInstallPreludeUsesDeclaredMetadata(t *testing.T) {
 	if !ok || ck.Operations["print"] != nil {
 		t.Fatal("ambient print must be an ordinary constrained function")
 	}
-	if len(print.Preds) != 1 || print.Preds[0].Class != "Basics.Show" {
-		t.Fatalf("print predicates = %+v, want one Show obligation", print.Preds)
+	if len(print.Preds) != 1 || print.Preds[0].Class != "Basics.Display" {
+		t.Fatalf("print predicates = %+v, want one Display obligation", print.Preds)
 	}
 	write := ck.Operations["IO.write"]
 	if write == nil || write.Native == nil || write.Native.Name != "IO.write" {

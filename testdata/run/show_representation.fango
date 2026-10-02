@@ -1,0 +1,38 @@
+import Dict
+
+-- Show is the representation: strings and characters quoted and escaped,
+-- nested constructors and negative numbers parenthesized as arguments.
+-- Display is output: strings and characters as themselves, everything else
+-- through Show.
+type Person = { name : String, initial : Char, age : Int } deriving (Eq, Show)
+type Shape = Circle Float | Labeled String Shape | Origin deriving (Show)
+
+-- A type may display differently from its representation.
+type Money = Money Int deriving (Show)
+
+instance Display Money
+    display money = case money of
+        Money cents -> "$" ++ show cents
+
+report : Display a => a ->{IO} ()
+report value = print value
+
+main() =
+    print "raw\ttext"
+    print 'c'
+    print (show "quoted \"x\"\n")
+    print (show 'q')
+    print (Person { name = "Ada", initial = 'A', age = -3 })
+    print (Just (Just (-1)))
+    print (Just (-1.5))
+    print ["a", ""]
+    print (Just (Person { name = "B", initial = 'b', age = 2 }))
+    print (Labeled "x" (Circle (-2.0)))
+    print (Labeled "x" Origin)
+    print (Just [Just 1])
+    print (Just (Dict.fromList [("k", "v")]))
+    print ("pair", 'p')
+    print (Money 250)
+    print (Just (Money 250))
+    report "reported"
+    report (Money 5)

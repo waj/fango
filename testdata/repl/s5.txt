@@ -4,7 +4,7 @@ Some : a -> Opt a
 > Some 3 : Num a => Opt a
 > a -> Opt a
 > id : a -> a
-> hi : String
+> "hi" : String
 > 1.5 : Float
 > double : Num a => a -> a
 > 8 : Num a => a

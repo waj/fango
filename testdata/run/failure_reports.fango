@@ -37,7 +37,7 @@ showFailure failure =
     print negative
     List.each showFailure (Failure.suppressed failure)
 
-showReport : Show value => Result (Fail.Report String) value ->{IO} ()
+showReport : Display value => Result (Fail.Report String) value ->{IO} ()
 showReport result =
     case result of
         Err report ->

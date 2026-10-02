@@ -19,7 +19,8 @@ main() =
 `IO.write : String ->{IO} ()` writes the string exactly as provided without a
 trailing newline. It is a native operation; the prelude imports `IO`, so
 `IO.write` is reachable without an import of your own, while reaching it
-unqualified takes one. `print : Show a => a ->{IO} ()` and `readLine` are
+unqualified takes one. `print : Display a => a ->{IO} ()` (see
+[Standard classes](classes.md#standard-classes)) and `readLine` are
 unqualified already, from the prelude. `IO` also exposes these legacy
 operations, kept for existing programs; new code reads and writes files
 through the `File` module below, which reports failures as values:

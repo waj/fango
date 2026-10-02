@@ -2,4 +2,4 @@ read skip
 read alpha
 read skip
 read beta
-Ok [alpha, beta]
+Ok ["alpha", "beta"]

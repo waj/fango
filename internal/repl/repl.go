@@ -783,7 +783,7 @@ func (s *Session) exprInput(toks []token.Token, f *source.File, force bool) inpu
 		diag.Render(s.out, elabErrs)
 		return inputDone
 	}
-	display := elaborate.Display(coreExpr, s.ck, "")
+	display := elaborate.Represent(coreExpr, s.ck, "")
 	for i := range aux {
 		s.env.DefineWorker(&aux[i])
 	}

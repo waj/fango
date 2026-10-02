@@ -309,6 +309,7 @@ showEntries entries =
 
 instance (Show k, Show v) => Show (Dict k v)
     show dict = "Dict [" ++ showEntries (toList dict)
+    showArg dict = "(" ++ show dict ++ ")"
 
 -- Equality compares entries in key order, never tree shape: the same entries
 -- inserted in different orders build differently shaped trees. Deriving Eq

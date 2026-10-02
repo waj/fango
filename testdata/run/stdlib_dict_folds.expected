@@ -11,9 +11,9 @@ c3
 b2
 a1
 --
-Dict [a = a1, b = b2, c = c3]
+Dict ["a" = "a1", "b" = "b2", "c" = "c3"]
 3
-[a, b, c]
+["a", "b", "c"]
 Dict []
 a
 b

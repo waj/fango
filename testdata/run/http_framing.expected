@@ -1,5 +1,5 @@
-Just ((GET, /a, ""), True)
-Just ((POST, /fixed, "abc"), True)
-Just ((POST, /chunk, "abc"), True)
+Just (("GET", "/a", ""), True)
+Just (("POST", "/fixed", "abc"), True)
+Just (("POST", "/chunk", "abc"), True)
 BadRequest: incomplete request body
 BadRequest: HTTP/1.1 requires one Host header

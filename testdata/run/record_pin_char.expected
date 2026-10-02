@@ -1,4 +1,4 @@
 empty
 unicode
 other
-Item { marker = λ, count = 3, label = line }
+Item { marker = 'λ', count = 3, label = "line" }

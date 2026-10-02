@@ -3,5 +3,5 @@
 ((), "")
 write "headtail"
 Ok ()
-Err stopped
-Err stopped
+Err "stopped"
+Err "stopped"

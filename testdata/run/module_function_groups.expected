@@ -6,7 +6,7 @@ independent
 42
 mutual
 42
-Err zero
-Err self
-Err annotated
-Err returned
+Err "zero"
+Err "self"
+Err "annotated"
+Err "returned"

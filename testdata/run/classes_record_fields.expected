@@ -1,4 +1,4 @@
 Point { x = 1, y = 2 }
 "origin" at Point { x = 0, y = 0 }
 Point { x = 2, y = 2 }
-Named { label = a, point = Point { x = 2, y = 2 } }
+Named { label = "a", point = Point { x = 2, y = 2 } }

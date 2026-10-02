@@ -6,11 +6,11 @@ loaded Fail
 loaded Runtime.Native
 loaded Runtime.Scope
 loaded File
-> > > > Err Error { kind = NotFound, path = missing.txt, message = no such file or directory } : Result Error String
+> > > > Err (Error { kind = NotFound, path = "missing.txt", message = "no such file or directory" }) : Result Error String
 > Ok False : Result Error Bool
-> Err Error { kind = IsDirectory, path = ., message = is a directory } : Result Error (Maybe Line)
+> Err (Error { kind = IsDirectory, path = ".", message = "is a directory" }) : Result Error (Maybe Line)
 > <value : Result Error Handle> : Result Error Handle
 > | | | | describe : Result Error a -> String
-> missing.txt: no such file or directory : String
-> .: is a directory : String
+> "missing.txt: no such file or directory" : String
+> ".: is a directory" : String
 > 

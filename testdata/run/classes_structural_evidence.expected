@@ -1,10 +1,10 @@
-box value
-box value
-box value!
-box value
-box value
-Derived box value
-Record { value = box value }
+box "value"
+box "value"
+box "value"!
+box "value"
+box "value"
+Derived box "value"
+Record { value = box "value" }
 box 42
-Branch Leaf 1 Leaf 2
+Branch (Leaf 1) (Leaf 2)
 True

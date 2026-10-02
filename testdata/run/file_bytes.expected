@@ -1,4 +1,4 @@
-mixed: (alpha, Just "\xFF\xFE binary \x00\nomega")
+mixed: ("alpha", Just "\xFF\xFE binary \x00\nomega")
 counted: ["alph", "a\n\xFF\xFE", " bin", "ary ", "\x00\nom", "ega"]
 empty: Just ""
 roundtrip: Just "\xFF\x00A"

@@ -221,8 +221,8 @@ These are directions, not commitments or an ordering:
   is rebuilt per call: ANF lifts only non-Direct or polymorphic slots and there
   is no CSE pass. Memoizing per definition and binding at entry is the fix, once
   a consumer shows it matters.
-- Superclasses, method-local polymorphism, higher kinds, mutually recursive
-  deriving groups, and richer Show-deriver precedence/display.
+- Superclasses, method-local polymorphism, higher kinds, and mutually
+  recursive deriving groups.
 - Inline native instance methods: stable method identity, class-specialized ABI,
   registry agreement, and a choice of parameter-bearing or template-only syntax.
 - Broader scalar specialization (multiple numeric parameters, effects, custom

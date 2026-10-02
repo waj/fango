@@ -2,8 +2,8 @@ import IO
 import List
 import String
 
--- show does not quote strings, so an empty piece is invisible in a list
--- display. Count the pieces as well, or [""] and [] would look alike.
+-- Counting the pieces checks the split independently of how a list of
+-- strings is shown.
 sizes : List.List String -> Int
 sizes pieces = List.length pieces
 

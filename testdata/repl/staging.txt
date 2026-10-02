@@ -12,7 +12,7 @@ Fango 0.1 — :help for commands
 | | deriver Tag
 Red : Colour
 Blue : Colour
-> Blue : String
+> "Blue" : String
 > | | Never : class
 | | deriver Never
 -- COMPILE-TIME FAILURE --------------------------------- <repl>

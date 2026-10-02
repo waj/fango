@@ -1,0 +1,18 @@
+raw	text
+c
+"quoted \"x\"\n"
+'q'
+Person { name = "Ada", initial = 'A', age = -3 }
+Just (Just (-1))
+Just (-1.5)
+["a", ""]
+Just (Person { name = "B", initial = 'b', age = 2 })
+Labeled "x" (Circle (-2))
+Labeled "x" Origin
+Just [Just 1]
+Just (Dict ["k" = "v"])
+("pair", 'p')
+$250
+Just (Money 250)
+reported
+$5

@@ -254,19 +254,37 @@ The standard classes are independent (in particular, `Ord` does not imply
 | `Num a` | `fromInt : Int -> a`, `(+)`, `(-)`, `(*) : a -> a -> a`, `negate : a -> a` | `Int`, `Float` |
 | `Eq a` | `(==) : a -> a -> Bool` | `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
 | `Ord a` | `(<)`, `(>)`, `(<=)`, `(>=) : a -> a -> Bool` | `Int`, `Float`, `String`, `Char` |
-| `Show a` | `show : a -> String` | `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
+| `Show a` | `show : a -> String`, `showArg : a -> String` (defaulted) | `Int`, `Float`, `String`, `Char`, `Bool`, `()` |
+| `Display a` | `display : a -> String` | `Show a => Display a`, `String`, `Char` |
 
-Their operator-named methods are in the prelude, as is `show`. The named ones —
-`fromInt` and `negate` — are not, so using them unqualified takes a `Basics`
-import. `print` is an ordinary
-Show-constrained function that writes `show value` followed by a newline.
-Strings display raw, not quoted.
+Their operator-named methods are in the prelude, as are `show` and `display`.
+The named ones — `fromInt` and `negate` — are not, so using them unqualified
+takes a `Basics` import.
+
+`Show` is a value's representation: text that reads like the source of the
+value. Strings and characters are quoted and escaped (`"a\n"`, `'x'`), and
+lists, tuples, records, and constructors show their parts' representations.
+`showArg` is the representation in constructor-argument position. Its default
+is `show`; an instance overrides it where juxtaposition would misread the
+text: a negative `Int` or `Float` gives `(-1)`, a `Dict` and a derived
+constructor with fields or record are parenthesized, so
+`show (Just (Just (-1)))` is `Just (Just (-1))`. A handwritten instance that
+writes only `show` is never parenthesized as an argument.
+
+`Display` is text for output. A blanket instance displays every `Show` type
+by its representation; `String` and `Char` display as themselves. `print` is
+an ordinary Display-constrained function that writes `display value`
+followed by a newline, so `print "hi"` writes `hi` and `print ["hi"]` writes
+`["hi"]`. A type can override the blanket with its own `Display` instance. A
+polymorphic body that prints its argument needs `Display a` rather than
+`Show a`: the blanket gives `Display` from `Show` only once the type is
+known, and `MISSING CONSTRAINT` notes this when the annotation lists `Show a`.
 
 ## Defaulting
 
 When evaluation requires a concrete type, an unresolved variable defaults to
 `Int` only if its defaulting requirements include standard `Num` and no classes
-outside standard `Num`, `Eq`, `Ord`, and `Show`. Eligibility may expand general
+outside standard `Num`, `Eq`, `Ord`, `Show`, and `Display`. Eligibility may expand general
 instance contexts: `Num a, LogValue a` qualifies through `Num a, Show a` in the
 example above. This does not choose evidence; the original constraints are
 resolved after defaulting, so concrete specializations still win. A custom

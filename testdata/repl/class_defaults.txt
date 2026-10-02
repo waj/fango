@@ -2,5 +2,5 @@ Fango 0.1 — :help for commands
 > | | | | Describe : class
 > Cat : Cat
 > | | instance Describe Cat
-> a cat : String
+> "a cat" : String
 > 

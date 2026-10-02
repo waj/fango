@@ -1,11 +1,11 @@
 True
 Nothing
-Completed Ok Just 42
-Just a
-Just b
+Completed (Ok (Just 42))
+Just "a"
+Just "b"
 False
-Completed Ok Nothing
-Completed Ok 7
-Completed Ok 7
-Completed Ok Cancelled
+Completed (Ok Nothing)
+Completed (Ok 7)
+Completed (Ok 7)
+Completed (Ok Cancelled)
 Cancelled

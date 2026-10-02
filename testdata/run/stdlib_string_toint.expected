@@ -1,6 +1,6 @@
 Just 7
 Just 0
-Just -42
+Just (-42)
 Just 17
 Nothing
 Nothing
@@ -9,7 +9,7 @@ Nothing
 Nothing
 Just 9223372036854775807
 Nothing
-Just -9223372036854775808
+Just (-9223372036854775808)
 Nothing
 Nothing
 0

@@ -40,7 +40,7 @@ func TestAttributesStageAndRollbackInREPL(t *testing.T) {
 	if strings.Contains(got, "INTERNAL") || strings.Contains(got, "runtime error") {
 		t.Fatalf("unexpected failure:\n%s", got)
 	}
-	for _, want := range []string{"first : String", "second : String", "attachment failed", "I don't know a constructor named `Broken`", "I don't know a constructor named `Bad`", "4 : Int"} {
+	for _, want := range []string{`"first" : String`, `"second" : String`, "attachment failed", "I don't know a constructor named `Broken`", "I don't know a constructor named `Bad`", "4 : Int"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q:\n%s", want, got)
 		}

@@ -220,7 +220,7 @@ func TestFailedInputPreparesNoNativeWorker(t *testing.T) {
 	out.Reset()
 	session.submit("import Sided\n")
 	session.submit("Sided.tag \"x\"\n")
-	if !strings.Contains(out.String(), "loaded Sided") || !strings.Contains(out.String(), "x : String") {
+	if !strings.Contains(out.String(), "loaded Sided") || !strings.Contains(out.String(), `"x" : String`) {
 		t.Fatalf("retrying after the failure did not behave like a clean session:\n%s", out.String())
 	}
 	if len(session.natives) != 1 || session.exec == nil {

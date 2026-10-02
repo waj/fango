@@ -2,6 +2,7 @@ package infer
 
 import (
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -483,6 +484,41 @@ func (ck *Checker) StandardPred(name string, t types.Type) types.Pred {
 	return types.Pred{Class: "Basics." + name, Ty: t}
 }
 
+// withBlanketNote explains a missing constraint that a blanket instance
+// would derive from constraints the annotation already lists: the blanket
+// applies once the type is known, but a polymorphic body must leave the
+// choice to its caller, who may hold a more specific instance.
+func (ck *Checker) withBlanketNote(err diag.Error, p types.Pred, given []types.Pred) diag.Error {
+	for _, in := range ck.Instances {
+		if in.Class.Name != p.Class || len(in.Preds) == 0 {
+			continue
+		}
+		if _, blanket := in.Head.(*types.TVar); !blanket {
+			continue
+		}
+		var from []string
+		for _, q := range in.Preds {
+			found := false
+			for _, g := range given {
+				if g.Class == q.Class && types.Equal(ck.Sub.Apply(g.Ty), ck.Sub.Apply(p.Ty)) {
+					found = true
+				}
+			}
+			if !found {
+				from = nil
+				break
+			}
+			from = append(from, "`"+types.ShowPred(q.Class, p.Ty)+"`")
+		}
+		if len(from) > 0 {
+			err.Notes = append(err.Notes, fmt.Sprintf("A blanket instance gives `%s` from %s only once the type is\nknown; a polymorphic body leaves that choice to its caller, who may\nhave a more specific instance. Write `%s` in the annotation.",
+				types.ShowPred(p.Class, p.Ty), strings.Join(from, " and "), types.ShowPred(p.Class, p.Ty)))
+			return err
+		}
+	}
+	return err
+}
+
 func (ck *Checker) qualify(sch types.Scheme, obs []predObligation, given []types.Pred, annotated bool, sp source.Span) (types.Scheme, []diag.Error) {
 	left, errs := ck.reduceObligations(obs, given)
 	quant := map[int]bool{}
@@ -497,7 +533,8 @@ func (ck *Checker) qualify(sch types.Scheme, obs []predObligation, given []types
 				// rather than declaring a context up front.
 				*ck.inferringContext = append(*ck.inferringContext, p)
 			} else if annotated {
-				errs = append(errs, diag.Errorf(sp, "MISSING CONSTRAINT", "The annotation requires the additional constraint `%s`.", types.ShowPred(p.Class, p.Ty)))
+				err := diag.Errorf(sp, "MISSING CONSTRAINT", "The annotation requires the additional constraint `%s`.", types.ShowPred(p.Class, p.Ty))
+				errs = append(errs, ck.withBlanketNote(err, p, given))
 			} else {
 				sch.Preds = append(sch.Preds, p)
 			}
@@ -646,7 +683,7 @@ func (ck *Checker) defaultEligible(p types.Pred, id int, path []types.Pred) (boo
 		switch p.Class {
 		case "Basics.Num":
 			return true, true
-		case "Basics.Eq", "Basics.Ord", "Basics.Show":
+		case "Basics.Eq", "Basics.Ord", "Basics.Show", "Basics.Display":
 			return true, false
 		}
 	}

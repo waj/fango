@@ -90,7 +90,7 @@ W { x = x }` is a record pattern named `W`.
 Records participate in module abstraction. An exposing item `Counts` makes
 only the type name available, while `Counts(..)` additionally exposes its field
 schema for construction, projection, and update. Derived equality
-compares fields in declaration order. Derived display has the form
+compares fields in declaration order. Derived `Show` has the form
 `Counts { lines = 1, words = 2, bytes = 3 }`.
 
 ## Union types
@@ -183,9 +183,12 @@ line of the generator that produced it, with a note naming the `deriving`
 clause that ran it.
 
 Derived equality compares constructors and corresponding fields. Derived
-display concatenates the constructor name and field displays with spaces,
-without added parentheses or string quotes; a record displays as
-`Name { field = value, … }`. Derived ordering compares constructors by
+`Show` writes the constructor name followed by each field's
+[argument-position representation](classes.md#standard-classes), so nested
+constructors and negative numbers are parenthesized and strings quoted:
+`Labeled "x" (Circle (-2))`. A record shows as `Name { field = value, … }`,
+its field values unparenthesized, and is itself parenthesized as an
+argument. Derived ordering compares constructors by
 declaration position, then fields left to right; all four of `<`, `>`, `<=`,
 and `>=` are generated together.
 

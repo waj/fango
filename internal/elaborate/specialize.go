@@ -52,7 +52,7 @@ func specializeScalars(p *core.Prog, infos []infer.DeclInfo, ck *infer.Checker) 
 			switch pred.Class {
 			case "Basics.Num":
 				numeric = true
-			case "Basics.Eq", "Basics.Ord", "Basics.Show":
+			case "Basics.Eq", "Basics.Ord", "Basics.Show", "Basics.Display":
 			default:
 				eligible = false
 			}
