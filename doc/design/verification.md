@@ -57,6 +57,11 @@ and seed files live under [examples/fixtures](../../examples/fixtures/), with
 coverage in the CLI tests; the
 [example roadmap](../roadmap-examples.md) contains only unfinished work.
 
+The HTTP server example's socket client sends a write-side EOF only for the
+truncated-body case. Complete requests are framed by HTTP, and rejected requests
+can close the peer before a client half-close; response parsing and body reads
+check their outcomes without racing that shutdown.
+
 Runnable fixtures share one generated Go project: each entry has its own package,
 shared dependencies are emitted once and asserted byte-identical across consumers,
 and one Go build creates fixture binaries. The build overlaps interpreter legs;

@@ -58,7 +58,7 @@ func TestHTTPServerExample(t *testing.T) {
 	if !strings.Contains(oversized, "HTTP/1.1 431") {
 		t.Fatalf("oversized headers: %q", oversized)
 	}
-	short := socketHTTP(t, port, "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\nabc")
+	short := socketHTTPWithEOF(t, port, "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\nabc")
 	if !strings.Contains(short, "HTTP/1.1 400") {
 		t.Fatalf("short request body: %q", short)
 	}
@@ -102,6 +102,16 @@ func TestHTTPServerExample(t *testing.T) {
 
 func socketHTTP(t *testing.T, port int, request string) string {
 	t.Helper()
+	return socketHTTPResponse(t, port, request, false)
+}
+
+func socketHTTPWithEOF(t *testing.T, port int, request string) string {
+	t.Helper()
+	return socketHTTPResponse(t, port, request, true)
+}
+
+func socketHTTPResponse(t *testing.T, port int, request string, sendEOF bool) string {
+	t.Helper()
 	connection := dialEcho(t, port)
 	defer connection.Close()
 	if err := connection.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
@@ -110,8 +120,12 @@ func socketHTTP(t *testing.T, port int, request string) string {
 	if _, err := io.WriteString(connection, request); err != nil {
 		t.Fatal(err)
 	}
-	if err := connection.(*net.TCPConn).CloseWrite(); err != nil {
-		t.Fatal(err)
+	// Only truncated bodies need EOF. A complete or rejected request can
+	// already have closed the peer, making CloseWrite race with its shutdown.
+	if sendEOF {
+		if err := connection.(*net.TCPConn).CloseWrite(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	response, err := http.ReadResponse(bufio.NewReader(connection), nil)
 	if err != nil {
