@@ -87,6 +87,8 @@ window : Text.Reader.Reader e ->{e} Window
 windowPosition : Window -> Int
 peekWindow : Window -> Result Encoding.Error (Maybe (Char, Int))
 readWindow : Window -> Result Encoding.Error (Maybe (Char, Int, Window))
+asciiAt : Window -> Int
+skipAscii : Window -> Window
 spanWindow : Window -> (Char -> Bool) -> Result Encoding.Error (String, Int, Window)
 windowText : Window -> Window -> Result Encoding.Error String
 commitWindow : Text.Reader.Reader e -> Window ->{e} ()
@@ -133,6 +135,15 @@ prefix, and the next window read reports the error. `windowPosition` counts byte
 from the original snapshot start. Decoding error offsets are also relative to
 that start. An empty window is not necessarily source EOF; incomplete sequences
 are reported without pulling more input.
+
+`asciiAt snapshot` returns the code of a one-byte ASCII character at the
+window position, `-1` at the end of the window, and `-2` for any other byte,
+whether it begins a valid scalar or not. Every bundled encoding maps bytes
+below 128 to the same ASCII scalars, so a scanner for an ASCII-spelled grammar
+can branch on these codes and use `readWindow` only for the `-2` case.
+`skipAscii snapshot` advances one byte past the character `asciiAt` just
+returned a code for; it repeats no check, so applying it anywhere else derives
+a window whose next read can report a malformed sequence.
 
 `matchWindow snapshot text : Maybe Window` compares an exact text prefix in the
 snapshot's selected encoding and returns the position after a match. It is pure

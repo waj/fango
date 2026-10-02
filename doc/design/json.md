@@ -9,6 +9,9 @@ and handler updates copy positions without copying the encoding, byte slice,
 and snapshot base. The reader capability is captured once by the handler.
 Whitespace, literals, string escapes, surrogate pairs, and number grammar run
 in pure Fango over available text, without reader state dispatch per scalar.
+Buffered punctuation, element and field separators, and typed integer digits
+branch on `Text.Reader.asciiAt` codes and fall back to scalar reads only for a
+non-ASCII byte, so the common path builds no decoded-character result.
 Consumption is published at refill boundaries, explicit `at()` calls, and
 scope exit. Cleanup reconciles the cursor on normal return and on exiting
 consumer or source effects. Scanner failures publish their consumed prefix

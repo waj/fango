@@ -456,6 +456,9 @@ scanNumber reader start cursor first =
     phase = if first == '-' then MinusDigit else if first == '0' then ZeroEnd else WholeDigits
     numberWindows reader start cursor phase []
 
+-- JSON punctuation and digits are ASCII, so the buffered scanners below
+-- branch on asciiAt codes: 34 quote, 44 comma, 45 minus, 46 period,
+-- 48-57 digits, 69/101 exponent, 93 bracket, 125 brace.
 fastWhite : TextReader.Window -> Int -> Int -> Maybe (TextReader.Window, Int, Int)
 fastWhite snapshot line column =
     case TextReader.readWindow snapshot of
@@ -672,21 +675,21 @@ fastElementStart : TextReader.Window -> Bool -> Int -> Int -> Maybe ElementRun
 fastElementStart snapshot trailing line column =
     case fastWhite snapshot line column of
         Nothing -> Nothing
-        Just (start, nextLine, nextColumn) -> case TextReader.readWindow start of
-            Ok (Just (']', width, rest)) ->
-                if trailing then Nothing else Just (ElementRun { more = False, window = rest, line = nextLine, column = nextColumn + width })
-            Ok (Just _) -> Just (ElementRun { more = True, window = start, line = nextLine, column = nextColumn })
-            _ -> Nothing
+        Just (start, nextLine, nextColumn) ->
+            if TextReader.asciiAt start == 93 then
+                if trailing then Nothing else Just (ElementRun { more = False, window = TextReader.skipAscii start, line = nextLine, column = nextColumn + 1 })
+            else Just (ElementRun { more = True, window = start, line = nextLine, column = nextColumn })
 
 fastElement : TextReader.Window -> Bool -> Int -> Int -> Maybe ElementRun
 fastElement snapshot first line column =
     if first then fastElementStart snapshot False line column
     else case fastWhite snapshot line column of
         Nothing -> Nothing
-        Just (start, nextLine, nextColumn) -> case TextReader.readWindow start of
-            Ok (Just (']', width, rest)) -> Just (ElementRun { more = False, window = rest, line = nextLine, column = nextColumn + width })
-            Ok (Just (',', width, rest)) -> fastElementStart rest True nextLine (nextColumn + width)
-            _ -> Nothing
+        Just (start, nextLine, nextColumn) ->
+            code = TextReader.asciiAt start
+            if code == 93 then Just (ElementRun { more = False, window = TextReader.skipAscii start, line = nextLine, column = nextColumn + 1 })
+            else if code == 44 then fastElementStart (TextReader.skipAscii start) True nextLine (nextColumn + 1)
+            else Nothing
 
 colonState : TextReader.Reader e -> String -> PullState ->{Fail Error | e} (Maybe String, PullState)
 colonState reader key state =
@@ -770,33 +773,35 @@ integerStopped snapshot negative zero value = IntegerRun { value = value, window
 -- Keep the magnitude negative so the full signed range, including minInt,
 -- can be accumulated without overflow or a temporary decimal string.
 integerDigits : TextReader.Window -> Bool -> Bool -> Int -> IntegerRun
-integerDigits snapshot negative zero value = case TextReader.readWindow snapshot of
-    Ok (Just (char, _, rest)) ->
-        if digit char then
-            code = Char.toCode char - Char.toCode '0'
-            if zero || value < -922337203685477580 || (value == -922337203685477580 && code > (if negative then 8 else 7)) then integerStopped snapshot negative zero value
-            else integerDigits rest negative False (value * 10 - code)
-        else if char == '.' || char == 'e' || char == 'E' then integerStopped snapshot negative zero value
-        else IntegerRun { value = if negative then value else -value, window = snapshot, phase = 4 }
-    _ -> integerStopped snapshot negative zero value
+integerDigits snapshot negative zero value =
+    code = TextReader.asciiAt snapshot
+    if code >= 48 && code <= 57 then
+        if zero || value < -922337203685477580 || (value == -922337203685477580 && code - 48 > (if negative then 8 else 7)) then integerStopped snapshot negative zero value
+        else integerDigits (TextReader.skipAscii snapshot) negative False (value * 10 - (code - 48))
+    else if code == 46 || code == 101 || code == 69 || code == -1 then integerStopped snapshot negative zero value
+    else if code == -2 then
+        -- A malformed byte stays in the window for the source-aware driver.
+        case TextReader.readWindow snapshot of
+            Ok (Just _) -> IntegerRun { value = if negative then value else -value, window = snapshot, phase = 4 }
+            _ -> integerStopped snapshot negative zero value
+    else IntegerRun { value = if negative then value else -value, window = snapshot, phase = 4 }
 
 integerFirst : TextReader.Window -> Bool -> IntegerRun
-integerFirst snapshot negative = case TextReader.readWindow snapshot of
-    Ok (Just (char, _, rest)) ->
-        if digit char then integerDigits rest negative (char == '0') (Char.toCode '0' - Char.toCode char)
-        else IntegerRun { value = 0, window = snapshot, phase = if negative then 5 else 6 }
-    _ -> IntegerRun { value = 0, window = snapshot, phase = if negative then 5 else 6 }
+integerFirst snapshot negative =
+    code = TextReader.asciiAt snapshot
+    if code >= 48 && code <= 57 then integerDigits (TextReader.skipAscii snapshot) negative (code == 48) (48 - code)
+    else IntegerRun { value = 0, window = snapshot, phase = if negative then 5 else 6 }
 
 fastIntegerValue : TextReader.Window -> Int -> Int -> Maybe (IntegerRun, Int, Int)
 fastIntegerValue snapshot line column = case fastWhite snapshot line column of
     Nothing -> Nothing
-    Just (start, nextLine, nextColumn) -> case TextReader.readWindow start of
-        Ok (Just (char, _, after)) ->
-            if char == '-' || digit char then
-                scanned = if char == '-' then integerFirst after True else integerDigits after False (char == '0') (Char.toCode '0' - Char.toCode char)
-                Just (scanned, nextLine, nextColumn + TextReader.windowPosition scanned.window - TextReader.windowPosition start)
-            else Nothing
-        _ -> Nothing
+    Just (start, nextLine, nextColumn) ->
+        code = TextReader.asciiAt start
+        if code == 45 || (code >= 48 && code <= 57) then
+            after = TextReader.skipAscii start
+            scanned = if code == 45 then integerFirst after True else integerDigits after False (code == 48) (48 - code)
+            Just (scanned, nextLine, nextColumn + TextReader.windowPosition scanned.window - TextReader.windowPosition start)
+        else Nothing
 
 integerWindows : TextReader.Reader e -> Cursor -> IntegerRun ->{Fail Error | e} (Result String Int, Cursor)
 integerWindows reader before scanned =
@@ -882,20 +887,16 @@ scanOpen wanted cursor =
     if cursor.allowance <= 0 then Nothing
     else case fastWhite cursor.window cursor.line cursor.column of
         Nothing -> Nothing
-        Just (start, line, column) -> case TextReader.readWindow start of
-            Ok (Just (char, width, rest)) ->
-                if char == wanted then Just { cursor | window = rest, line = line, column = column + width, allowance = cursor.allowance - 1 }
-                else Nothing
-            _ -> Nothing
+        Just (start, line, column) ->
+            if TextReader.asciiAt start == Char.toCode wanted then Just { cursor | window = TextReader.skipAscii start, line = line, column = column + 1, allowance = cursor.allowance - 1 }
+            else Nothing
 
 scanMark : Char -> Scan -> Maybe Scan
 scanMark wanted cursor = if cursor.allowance < 0 then Nothing else case fastWhite cursor.window cursor.line cursor.column of
     Nothing -> Nothing
-    Just (start, line, column) -> case TextReader.readWindow start of
-        Ok (Just (char, width, rest)) ->
-            if char == wanted then Just { cursor | window = rest, line = line, column = column + width }
-            else Nothing
-        _ -> Nothing
+    Just (start, line, column) ->
+        if TextReader.asciiAt start == Char.toCode wanted then Just { cursor | window = TextReader.skipAscii start, line = line, column = column + 1 }
+        else Nothing
 
 scanExpectedKey : Bool -> String -> Scan -> Maybe Scan
 scanExpectedKey first quoted cursor =
@@ -918,19 +919,20 @@ scanObjectEnd cursor = case scanMark '}' cursor of
 scanObjectField : Bool -> Scan -> Maybe (Bool, Scan)
 scanObjectField first cursor = if cursor.allowance < 0 then Nothing else case fastWhite cursor.window cursor.line cursor.column of
     Nothing -> Nothing
-    Just (start, line, column) -> case TextReader.readWindow start of
-        Ok (Just ('}', width, rest)) -> Just (False, { cursor | window = rest, line = line, column = column + width, allowance = cursor.allowance + 1 })
-        Ok (Just ('"', _, _)) ->
+    Just (start, line, column) ->
+        code = TextReader.asciiAt start
+        if code == 125 then Just (False, { cursor | window = TextReader.skipAscii start, line = line, column = column + 1, allowance = cursor.allowance + 1 })
+        else if code == 34 then
             if first then Just (True, { cursor | window = start, line = line, column = column })
             else Nothing
-        Ok (Just (',', width, rest)) ->
+        else if code == 44 then
             if first then Nothing
-            else case fastWhite rest line (column + width) of
+            else case fastWhite (TextReader.skipAscii start) line (column + 1) of
                 Nothing -> Nothing
-                Just (key, keyLine, keyColumn) -> case TextReader.readWindow key of
-                    Ok (Just ('"', _, _)) -> Just (True, { cursor | window = key, line = keyLine, column = keyColumn })
-                    _ -> Nothing
-        _ -> Nothing
+                Just (key, keyLine, keyColumn) ->
+                    if TextReader.asciiAt key == 34 then Just (True, { cursor | window = key, line = keyLine, column = keyColumn })
+                    else Nothing
+        else Nothing
 
 scanElement : Bool -> Scan -> Maybe (Bool, Scan)
 scanElement first cursor = if cursor.allowance < 0 then Nothing else case fastElement cursor.window first cursor.line cursor.column of

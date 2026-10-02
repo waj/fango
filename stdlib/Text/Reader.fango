@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Text.Reader exposing (Read(..), Reader, Window, atEnd, chunks, commitWindow, matchWindow, over, overWith, peekChar, peekWindow, position, readChar, readExactly, readLine, readUntil, readUpTo, readWindow, refillWindow, spanWindow, tryPeekChar, tryReadChar, tryReadScalar, tryReadSpan, tryReadWhile, window, windowPosition, windowText, withString)
+module Text.Reader exposing (Read(..), Reader, Window, asciiAt, atEnd, chunks, commitWindow, matchWindow, over, overWith, peekChar, peekWindow, position, readChar, readExactly, readLine, readUntil, readUpTo, readWindow, refillWindow, skipAscii, spanWindow, tryPeekChar, tryReadChar, tryReadScalar, tryReadSpan, tryReadWhile, window, windowPosition, windowText, withString)
 
 import Basics exposing (..)
 import Bytes
@@ -201,6 +201,22 @@ readDecoded encoding bytes snapshot =
         Err error -> Err error
         Ok Nothing -> Ok Nothing
         Ok (Just (char, width)) -> Ok (Just (char, width, { snapshot | index = snapshot.index + width }))
+
+-- Grammars spelled in ASCII can branch on plain codes: every bundled encoding
+-- maps bytes below 128 to the same one-byte scalars. The answer is -1 at the
+-- end of the window and -2 for any other byte, valid or not.
+asciiAt : Window -> Int
+asciiAt snapshot =
+    case snapshot.buffer of
+        EmptyBuffer -> -1
+        Buffered _ bytes _ -> case Bytes.byteAt snapshot.index bytes of
+            Nothing -> -1
+            Just code -> if code < 128 then code else -2
+
+-- Advance past the one-byte character asciiAt answered at this position. The
+-- caller has already inspected it, so the advance repeats no check.
+skipAscii : Window -> Window
+skipAscii snapshot = { snapshot | index = snapshot.index + 1 }
 
 -- An exact encoded prefix of valid text can be compared in bulk without
 -- decoding each scalar or materializing the source substring. A mismatch,
