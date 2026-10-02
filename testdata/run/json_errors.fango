@@ -1,5 +1,6 @@
 import Bytes
 import Json exposing (Decode, Encode(..))
+import Json.Pull
 import Maybe exposing (Maybe(..))
 import Reader
 import Result exposing (Result(..))
@@ -54,3 +55,10 @@ main() =
         Reader.over source { reader -> Json.read @(List Int) reader }
     }
     print (report result)
+    print (Json.parse @Int "true")
+    print (Json.parse @Int "true" == Err (Json.Error { message = "Expected JSON number", offset = 4, line = 1, column = 5, path = "" }))
+    tokens = Reader.withBytes (Bytes.fromString "[true]") { reader ->
+        Json.Pull.withReader reader { [Json.Pull.next(), Json.Pull.next(), Json.Pull.next(), Json.Pull.next()] }
+    }
+    print tokens
+    print (tokens == Ok [Json.Pull.BeginArray, Json.Pull.BooleanToken True, Json.Pull.EndArray, Json.Pull.EndInput])

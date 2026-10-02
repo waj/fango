@@ -66,10 +66,10 @@ across refills. A refill does not restart a completed scalar prefix.
 `withReader reader { ... }` installs the `Pull` effect over a byte `Reader`,
 decoding UTF-8; `withTextReader` takes a `Text.Reader.Reader e`, whose adapter
 selects the encoding. Both return `Result Json.Error a`. `next()` consumes a
-`Token`, `peek()` reads ahead without consuming it, and `at()` returns the
-current source position as a `Json.Error` with an empty message, publishing
-buffered consumption. `fail message` raises a `Json.Error` with that message
-at the current position and path.
+`Token`, which derives `Eq` and `Show`; `peek()` reads ahead without consuming
+it, and `at()` returns the current source position as a `Json.Error` with an
+empty message, publishing buffered consumption. `fail message` raises a
+`Json.Error` with that message at the current position and path.
 
 `beginArray`, `nextElement`, `beginObject`, `nextKey`,
 and `skipValue` help decoders consume a container. `nextElement first` consumes

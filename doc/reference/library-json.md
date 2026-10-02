@@ -110,7 +110,8 @@ input is reported at the first offending sequence, without consuming that
 sequence. Paths follow the active decoder context; errors found while scanning
 a lookahead token can precede entry into a field or element path. Typed array
 decoding enters the element's index before scanning its value, so lexical errors
-in that value include the index.
+in that value include the index. `Json.Error` derives `Eq` and `Show`, so tests
+can compare a parse result against an expected `Err`.
 
 ## Type witnesses
 

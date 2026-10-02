@@ -31,7 +31,14 @@ and for consuming a document token by token: the `Pull` effect and its
 handlers, the container and path helpers, and the buffered `Scan` protocol
 that generated decoders run on. -}
 
-type Error = { message : String, offset : Int, line : Int, column : Int, path : String }
+type Error =
+    { message : String
+    , offset : Int
+    , line : Int
+    , column : Int
+    , path : String
+    }
+    deriving (Eq, Show)
 
 type Token
     = BeginObject
@@ -45,6 +52,7 @@ type Token
     | BooleanToken Bool
     | NullToken
     | EndInput
+    deriving (Eq, Show)
 
 type Number = Number String
 

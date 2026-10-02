@@ -21,3 +21,7 @@ Invalid UTF-8 in JSON input @ 1:2
 JSON nesting exceeds 256 levels 1:258
 1.20e+3
 ok
+Err Error { message = Expected JSON number, offset = 4, line = 1, column = 5, path =  }
+True
+Ok [BeginArray, BooleanToken True, EndArray, EndInput]
+True
