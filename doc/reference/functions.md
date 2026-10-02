@@ -157,9 +157,22 @@ all other effects remain in `e`. Nested calls have distinct permissions and can
 use multiple readers together through ordinary row inclusion.
 
 The annotated declaration must bind its final callback to a name. That callback
-has one argument and exactly the annotated scoped row on its arrow. The binder
+has one argument and the annotated scoped row as its arrow's tail. The binder
 may occur in the callback argument and result, but not in earlier runner
-parameters, the runner result, or the runner's own arrow effects. A callback
+parameters, the runner result, or the runner's own arrow effects.
+
+Effects listed before the tail are granted to the callback by the runner, which
+must handle them:
+
+```fango
+{-# scoped s #-}
+guarded : String -> (Reader s ->{Fail String | s} a) ->{e} Result String a
+guarded text use = Reader.withBytes (Bytes.fromString text) { reader -> Fail.attempt { use reader } }
+```
+
+At each call the callback may perform `Fail String` besides its scope's
+permission and the residual row; the runner's caller never sees it. Granted
+effects' type arguments may not mention the binder. A callback
 may therefore return a value that uses a scoped reader or writer later in the
 same runner. The runner must consume that value before its scope ends. Within
 the implementation the callback can be instantiated at different rows

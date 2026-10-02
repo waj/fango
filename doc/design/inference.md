@@ -64,8 +64,11 @@ and native handles may be shared. See [tasks](tasks.md).
 The [scoped declaration](../reference/functions.md#scoped-callbacks) marks a
 restricted universal row binder on a named runner's final callback. The runner
 implementation instantiates that callback's row independently at each use,
-with its residual effect row as a lower bound. The binder cannot occur in the
-runner's other parameters, result, residual effects, or callback result.
+with its residual effect row as a lower bound. Effects listed before the
+binder in the callback's arrow stay in that row at every instantiation, so the
+runner's own effect checking requires it to handle them. The binder cannot
+occur in the runner's other parameters, result, residual effects, or those
+effects' type arguments.
 Recursive scoped runners and first-class runner values are rejected; ordinary
 rank-one schemes cannot preserve this callback contract on those paths.
 

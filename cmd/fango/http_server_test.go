@@ -54,6 +54,10 @@ func TestHTTPServerExample(t *testing.T) {
 	if !strings.Contains(malformed, "HTTP/1.1 400") {
 		t.Fatalf("malformed request: %q", malformed)
 	}
+	escape := socketHTTP(t, port, "GET /hello/%ZZ HTTP/1.1\r\nHost: localhost\r\n\r\n")
+	if !strings.Contains(escape, "HTTP/1.1 400") {
+		t.Fatalf("malformed path escape: %q", escape)
+	}
 	oversized := socketHTTP(t, port, "GET /hello/Ada HTTP/1.1\r\nHost: localhost\r\nX-Fill: "+strings.Repeat("a", 70000)+"\r\n\r\n")
 	if !strings.Contains(oversized, "HTTP/1.1 431") {
 		t.Fatalf("oversized headers: %q", oversized)
@@ -153,6 +157,21 @@ func TestHTTPServerResponseBodies(t *testing.T) {
 	invalid := socketHTTP(t, port, "GET /invalid HTTP/1.1\r\nHost: localhost\r\n\r\n")
 	if !strings.Contains(invalid, "HTTP/1.1 500") {
 		t.Fatalf("invalid response: %q", invalid)
+	}
+	aborted := dialEcho(t, port)
+	defer aborted.Close()
+	if err := aborted.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(aborted, "GET /abort HTTP/1.1\r\nHost: localhost\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	wire, err := io.ReadAll(aborted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(string(wire), "\r\n\r\n7\r\npartial\r\n") {
+		t.Fatalf("aborted body was not truncated after its flushed chunk: %q", wire)
 	}
 	sized := socketHTTP(t, port, "GET /sized HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
 	if !strings.Contains(sized, "HTTP/1.1 200") || !strings.HasSuffix(sized, "\r\n\r\nhello") {

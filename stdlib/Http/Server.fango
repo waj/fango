@@ -263,8 +263,10 @@ runListener config stop listener process =
             _ -> ()
     }
 
+-- Handlers and their bodies may raise `Protocol`; the connection then ends as
+-- for any other protocol failure.
 {-# scoped s #-}
-serve : Config -> Channel () -> (Request s ->{s} Response s) ->{Async Net.Error, IO, Fail Net.Error | e} ()
+serve : Config -> Channel () -> (Request {Protocol | s} ->{Protocol | s} Response {Protocol | s}) ->{Async Net.Error, IO, Fail Net.Error | e} ()
 serve config stop handler =
     Net.withListener config.port { listener ->
         process connection =

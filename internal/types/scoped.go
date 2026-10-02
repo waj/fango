@@ -1,8 +1,10 @@
 package types
 
 // ScopedCallback describes the deliberately restricted rank-two row contract:
-// the final parameter is a unary callback, its row is universally bound, and
-// the runner's arguments/result/residual row are independent of that binder.
+// the final parameter is a unary callback whose row ends in a universally
+// bound tail, after any effects the runner handles for it, and the runner's
+// arguments/result/residual row and those effects' arguments are independent
+// of that binder.
 // The callback's result may mention the row because the runner consumes it
 // inside the scope; the runner's own result may not.
 func ScopedCallback(t Type, arity int) (*TVar, Row, Type, bool) {
@@ -20,7 +22,7 @@ func ScopedCallback(t Type, arity int) (*TVar, Row, Type, bool) {
 		args, rows, rest = append(args, fn.Arg), append(rows, fn.Eff), fn.Ret
 	}
 	callback, ok := args[arity-1].(*TFun)
-	if !ok || len(callback.Eff.Labels) != 0 {
+	if !ok {
 		return nil, Row{}, nil, false
 	}
 	row, ok := callback.Eff.Tail.(*TVar)
@@ -28,6 +30,9 @@ func ScopedCallback(t Type, arity int) (*TVar, Row, Type, bool) {
 		return nil, Row{}, nil, false
 	}
 	outside := append(append([]Type(nil), args[:arity-1]...), rest)
+	for _, label := range callback.Eff.Labels {
+		outside = append(outside, label.Args...)
+	}
 	for _, r := range rows {
 		outside = append(outside, r)
 	}

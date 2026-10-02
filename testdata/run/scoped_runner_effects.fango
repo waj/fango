@@ -1,0 +1,37 @@
+import Bytes
+import Fail exposing (Fail)
+import Reader exposing (Reader)
+import Result exposing (Result(..))
+
+-- The runner hands its callback `Fail String` and handles it itself, so the
+-- failure never reaches the runner's caller.
+{-# scoped s #-}
+guarded : String -> (Reader s ->{Fail String | s} a) ->{e} Result String a
+guarded text use =
+    Reader.withBytes (Bytes.fromString text) { reader ->
+        Fail.attempt { use reader }
+    }
+
+effect Log
+    log : String -> ()
+
+-- The callback still sees the caller's own effects through the residual row.
+outer : () ->{Log} Result String Bytes.Bytes
+outer() =
+    guarded "abc" { reader ->
+        first = Reader.readUpTo reader 1
+        log "read one byte"
+        first
+    }
+
+main() =
+    print (guarded "hello" { reader -> Reader.readUpTo reader 3 })
+    print (guarded "hello" { reader ->
+        first = Reader.readUpTo reader 2
+        if Bytes.length first == 2 then Fail.fail "stop" else first
+    })
+    result = handle outer() of
+        log message ->
+            print message
+            resume ()
+    print result

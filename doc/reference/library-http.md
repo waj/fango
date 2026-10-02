@@ -35,8 +35,8 @@ that returns short fails when it returns. Both failures raise `InvalidMessage`.
 
 The server returns this value from the application handler and serializes it.
 The handler's effect row includes its own failures; it must handle them before
-returning. The server handles `Http.Protocol.invalid` for malformed HTTP and
-invalid responses.
+returning. The server handles `Http.Protocol.invalid` for malformed HTTP,
+invalid responses, and protocol failures the handler or its body raise.
 
 `Http.Server.writeResponse method output response` accepts final status codes
 200–599 except 101. It supplies `Content-Length` for empty, byte, and sized
@@ -100,10 +100,14 @@ Cancellation closes their blocking sockets. A response that fails its checks
 gets a 500 and the connection closes. A body that fails after the head was
 written closes the connection without completing the response.
 
-A handler has the shape `Request e ->{e} Response e`, where the server instantiates
-`e` with IO, network failure, and HTTP protocol effects plus the application's
-row. Application errors should be handled inside the handler; the server does
-not require a `Result appError Response` value.
+`serve` takes a handler of shape `Request {Protocol | s} ->{Protocol | s} Response {Protocol | s}`,
+where `s` is the connection's scope plus the application's row; a handler of
+shape `Request e ->{e} Response e` also fits. Handlers and their bodies may
+raise `Protocol`: before the head is written the server answers with the status
+for the error, and afterwards it closes the connection. So `Route.dispatch` and
+`abortBody` work without a local handler. Application errors should be handled
+inside the handler; the server does not require a `Result appError Response`
+value.
 
 The runnable [server example](../../examples/http_server.fango) combines a
 parameter route with streaming GZip and accepts a port argument.

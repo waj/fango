@@ -1,6 +1,6 @@
 import Async
 import Bytes
-import Http exposing (Body(..))
+import Http exposing (Body(..), Protocol(..))
 import Http.GZip
 import Http.Server
 import Http.Server.Route as Route
@@ -32,15 +32,16 @@ stream _ request = Http.Server.Response
     , body = StreamBody { output -> Reader.forEachChunk request.body (Writer.write output) }
     }
 
-route : Http.Server.Request e ->{e} Http.Server.Response e
+-- A path with a malformed escape raises Protocol, which the server answers
+-- with 400.
+route : Http.Server.Request {Protocol | e} ->{Protocol | e} Http.Server.Response {Protocol | e}
 route request =
     helloRoute = Route.Route { method = "GET", pattern = "/hello/:name", handler = hello }
     echoRoute = Route.Route { method = "POST", pattern = "/echo", handler = echo }
     streamRoute = Route.Route { method = "POST", pattern = "/stream", handler = stream }
-    handle Route.dispatch [helloRoute, echoRoute, streamRoute] missing request of
-        Http.invalid _ -> Http.Server.Response { status = 400, headers = [], body = Empty }
+    Route.dispatch [helloRoute, echoRoute, streamRoute] missing request
 
-app : Http.Server.Request e ->{e} Http.Server.Response e
+app : Http.Server.Request {Protocol | e} ->{Protocol | e} Http.Server.Response {Protocol | e}
 app request = Http.GZip.wrap route request
 
 main() =

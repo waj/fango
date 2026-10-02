@@ -498,11 +498,6 @@ connection closed by the bracket, and the abort reaches the caller of `send`
 unchanged, through `e`, not wrapped in `Client.Error`. Retrying, or keeping a
 database consistent, is the caller's responsibility.
 
-A server body stops on purpose with `Http.abortBody`, but under `serve` a
-handler cannot yet raise `Protocol`: a scoped runner can't grant its callback an
-effect the runner handles. [HC8](#hc8-runner-handled-effects-in-scoped-callbacks)
-lifts that restriction.
-
 **Proxying.** A server handler can stream its request body into a client
 request and the client's response back:
 
@@ -659,7 +654,7 @@ follow allocation order, not that order.
 | Milestone | Depends on |
 | --- | --- |
 | HC1 Module split | — (DONE) |
-| HC8 Runner-handled effects in scoped callbacks | HC1 |
+| HC8 Runner-handled effects in scoped callbacks | HC1 (DONE) |
 | HC6 URL | — |
 | HC2 Client core over plain HTTP | HC1, HC6 |
 | HC7 GZip | HC2 |
@@ -674,13 +669,8 @@ DONE. See the [HTTP reference](reference/library-http.md) and the
 
 ### HC8 Runner-handled effects in scoped callbacks
 
-A scoped runner may list effects it handles on its callback's arrow, as in
-`(Request s ->{Protocol | s} Response s)`, the way `Fail.attempt` takes
-`() ->{Fail error | e} value`. The runner discharges them, so they don't reach
-its residual row. `Http.Server.serve` then lets handlers and their bodies use
-`Protocol`, so `abortBody` and `Http.Server.Route.dispatch` work in a handler
-without a local `handle`. Add a loopback check that an aborted body closes the
-connection without the final chunk.
+DONE. See [scoped callbacks](reference/functions.md#scoped-callbacks) and the
+[server reference](reference/library-http.md#server).
 
 ### HC6 URL
 

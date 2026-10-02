@@ -14,9 +14,19 @@ main() =
                     print (Async.run {
                             stop = Async.channel 1
                             Http.Server.serve (Http.Server.defaultConfig port) stop { request ->
-                                -- An invalid response, then one whose body is sized.
+                                -- An invalid response, an aborted body, and a sized body.
                                 if request.target == "/invalid" then
                                     Http.Server.Response { status = 204, headers = [], body = BytesBody (Bytes.fromString "x") }
+                                else if request.target == "/abort" then
+                                    Http.Server.Response
+                                        { status = 200
+                                        , headers = []
+                                        , body = StreamBody { w ->
+                                            Writer.writeString w "partial"
+                                            w.flush()
+                                            Http.abortBody "source failed"
+                                        }
+                                        }
                                 else
                                     Http.Server.Response
                                         { status = 200
