@@ -40,15 +40,9 @@ on ASCII codes, string spans are a single validating pass, keys match in
 place, and file pulls are 64 KiB; the measured series is in the
 [comparison baselines](design/json-performance-baselines.md).
 
-Remaining measured costs: escaped strings (about 15% of Go decode time on the
-fixture, from per-escape fragment strings, list cells, and the final reverse
-and join); the 6-word `Scan` cursor and its interface-backed `Window` buffer
-copied through every scan result; Go's inliner rejecting small generated
-functions, which a Core-level inliner with known-constructor simplification
-and static-argument specialization would address in both backends; and LLVM
-record/sum lowering, whose per-access tag checks inflate function size enough
-to change Clang's inlining decisions (an ASCII whitespace loop is held back
-for that reason).
+[Generated-code performance](roadmap-performance.md) owns the next measured
+round: tagless LLVM products, a text builder for escapes and collectors,
+smaller scan cursors, a Core inliner, and static-argument specialization.
 
 The [buffered pull cursor](design/json.md) shares its text window's buffer
 description, defers reader commits to refills and scope exit, and fuses record
