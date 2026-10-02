@@ -1,4 +1,4 @@
-import Json exposing (Decode(..))
+import Json exposing (Decode)
 import List
 import Result exposing (Result(..))
 import String

@@ -1,4 +1,4 @@
-import Json exposing (Decode(..), Encode(..))
+import Json exposing (Decode, Encode(..))
 import Result exposing (Result(..))
 
 type Shade = Red | RGB Int Int Int deriving (Encode, Decode)

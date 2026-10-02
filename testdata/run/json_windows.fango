@@ -2,6 +2,7 @@ import Bytes
 import Encoding exposing (Error(..))
 import Fail
 import Json
+import Json.Pull
 import List
 import Reader
 import Result exposing (Result(..))
@@ -19,7 +20,7 @@ isTrue result = case result of
 
 signature : Result Json.Error Json.Value -> String
 signature result = case result of
-    Ok value -> case Json.stringifyValue value of
+    Ok value -> case Json.stringify value of
         Ok text -> "ok " ++ text
         Err _ -> "encoding failed"
     Err error -> error.message ++ " " ++ show error.offset ++ " " ++ show error.line ++ " " ++ show error.column ++ " " ++ error.path
@@ -38,11 +39,11 @@ runChunks chunks = Runtime.Local.run chunks { remaining ->
           }
         }
     ) { reader ->
-        result = Json.withPull reader {
-            value = Json.readValue()
-            case Json.next() of
-                Json.EndInput -> value
-                _ -> Json.syntaxError "Trailing JSON input"
+        result = Json.Pull.withReader reader {
+            value = Json.Pull.readValue()
+            case Json.Pull.next() of
+                Json.Pull.EndInput -> value
+                _ -> Json.Pull.fail "Trailing JSON input"
         }
         (signature result, Bytes.concat (Stream.toList (Reader.chunks reader)))
     }
@@ -81,22 +82,22 @@ main() =
     longTokens = Bytes.fromString ("[\"" ++ large ++ "\",-" ++ String.padLeft 10000 '7' "" ++ ".25e-2]")
     print (runChunks [Bytes.slice 0 8192 longTokens, Bytes.slice 8192 16384 longTokens, Bytes.slice 16384 24576 longTokens, Bytes.slice 24576 (Bytes.length longTokens) longTokens] == runChunks [longTokens])
     print (Reader.withBytes (Bytes.fromString ("\"" ++ large ++ "\"!")) { reader ->
-        got = Json.withPull reader {
-            case Json.next() of
-                Json.StringTokenValue text -> text
-                _ -> Json.syntaxError "Expected string"
+        got = Json.Pull.withReader reader {
+            case Json.Pull.next() of
+                Json.Pull.StringToken text -> text
+                _ -> Json.Pull.fail "Expected string"
         }
         case got of
             Ok text -> text == large && Reader.readUpTo reader 1 == Bytes.fromString "!"
             Err _ -> False
     })
     print (Reader.withBytes (Bytes.fromString " \n1234567890.25e-2!tail") { reader ->
-        outcome = Json.withPull reader {
-            token = Json.peek()
-            location = Json.at()
-            consumed = Json.next()
+        outcome = Json.Pull.withReader reader {
+            token = Json.Pull.peek()
+            location = Json.Pull.at()
+            consumed = Json.Pull.next()
             valid = case (token, consumed) of
-                (Json.NumberToken first, Json.NumberToken second) -> first == "1234567890.25e-2" && first == second
+                (Json.Pull.NumberToken first, Json.Pull.NumberToken second) -> first == "1234567890.25e-2" && first == second
                 _ -> False
             valid && location.offset == 18 && location.line == 2 && location.column == 17
         }
@@ -104,11 +105,11 @@ main() =
     })
     print (Reader.withBytes (Bytes.fromList [32, 10, 34, 233, 255, 34, 33]) { bytes ->
         outcome = TextReader.overWith Encoding.latin1 bytes { text ->
-            Json.withTextPull text {
-                got = Json.next()
-                location = Json.at()
+            Json.Pull.withTextReader text {
+                got = Json.Pull.next()
+                location = Json.Pull.at()
                 case got of
-                    Json.StringTokenValue value -> value == "éÿ" && location.offset == 6 && location.line == 2 && location.column == 5
+                    Json.Pull.StringToken value -> value == "éÿ" && location.offset == 6 && location.line == 2 && location.column == 5
                     _ -> False
             }
         }
@@ -117,7 +118,7 @@ main() =
     -- A declined speculative scan leaves failure handling and consumption to
     -- the incremental scanner, including the invalid escape's character.
     print (Reader.withBytes (Bytes.fromString "\"\\x,true") { reader ->
-        outcome = Json.withPull reader { Json.next() }
+        outcome = Json.Pull.withReader reader { Json.Pull.next() }
         valid = case outcome of
             Err error -> error.message == "Invalid JSON escape" && error.offset == 2
             Ok _ -> False
@@ -127,10 +128,10 @@ main() =
     -- failure raised directly, a lookahead kept at normal return, and a
     -- nesting failure raised by the handler itself.
     print (Reader.withBytes (Bytes.fromString "[1,2]!") { reader ->
-        outcome = Json.withPull reader {
-            ignore (Json.next())
-            case Json.next() of
-                Json.NumberToken _ -> Fail.fail (Json.Error { message = "custom", offset = 0, line = 0, column = 0, path = "" })
+        outcome = Json.Pull.withReader reader {
+            ignore (Json.Pull.next())
+            case Json.Pull.next() of
+                Json.Pull.NumberToken _ -> Fail.fail (Json.Error { message = "custom", offset = 0, line = 0, column = 0, path = "" })
                 _ -> False
         }
         failed = case outcome of
@@ -139,16 +140,16 @@ main() =
         failed && Reader.readUpTo reader 4 == Bytes.fromString ",2]!"
     })
     print (Reader.withBytes (Bytes.fromString "[1]!") { reader ->
-        outcome = Json.withPull reader {
-            ignore (Json.next())
-            case Json.peek() of
-                Json.NumberToken text -> text == "1"
+        outcome = Json.Pull.withReader reader {
+            ignore (Json.Pull.next())
+            case Json.Pull.peek() of
+                Json.Pull.NumberToken text -> text == "1"
                 _ -> False
         }
         isTrue outcome && Reader.readUpTo reader 2 == Bytes.fromString "]!"
     })
     print (Reader.withBytes (Bytes.fromString (String.padLeft 300 '[' "")) { reader ->
-        outcome = Json.withPull reader { Json.readValue() }
+        outcome = Json.Pull.withReader reader { Json.Pull.readValue() }
         failed = case outcome of
             Err error -> error.message == "JSON nesting exceeds 256 levels" && error.offset == 257
             Ok _ -> False
@@ -162,10 +163,10 @@ main() =
             if current == 0 then Just (Bytes.fromString "true")
             else Fail.fail "premature source pull"
         } }) { reader ->
-            first = Json.withPull reader {
-                case Json.next() of
-                    Json.BooleanToken value -> value
-                    _ -> Json.syntaxError "Expected boolean"
+            first = Json.Pull.withReader reader {
+                case Json.Pull.next() of
+                    Json.Pull.BooleanToken value -> value
+                    _ -> Json.Pull.fail "Expected boolean"
             }
             isTrue first && stage.read() == 1
         }

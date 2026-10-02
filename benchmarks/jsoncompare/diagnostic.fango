@@ -4,7 +4,8 @@ import Encoding
 import Fail
 import File
 import IO
-import Json exposing (Decode(..), Token(..))
+import Json
+import Json.Pull exposing (Decode(..), Token(..))
 import List
 import Probe
 import Reader
@@ -15,11 +16,11 @@ import Text.Reader as TextReader
 -- The harness adds the same derived products and checksum fold as workload.fango.
 type ScanTotals = { count : Int, strings : Int, numbers : Int, trues : Int, nulls : Int }
 
-scanTokens : ScanTotals ->{Json.Pull} ScanTotals
+scanTokens : ScanTotals ->{Json.Pull.Pull} ScanTotals
 scanTokens totals =
-    case Json.next() of
+    case Json.Pull.next() of
         EndInput -> totals
-        StringTokenValue text -> scanTokens { totals | count = totals.count + 1, strings = totals.strings + String.byteLength text }
+        StringToken text -> scanTokens { totals | count = totals.count + 1, strings = totals.strings + String.byteLength text }
         NumberToken text -> scanTokens { totals | count = totals.count + 1, numbers = totals.numbers + String.byteLength text }
         BooleanToken True -> scanTokens { totals | count = totals.count + 1, trues = totals.trues + 1 }
         NullToken -> scanTokens { totals | count = totals.count + 1, nulls = totals.nulls + 1 }

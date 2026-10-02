@@ -1,7 +1,8 @@
 import Bytes
 import Encoding
 import Fail exposing (Fail)
-import Json exposing (Decode(..), Pull, decodeValue)
+import Json
+import Json.Pull exposing (Decode(..), Pull, decodeValue)
 import List
 import Reader
 import Result exposing (Result(..))
@@ -13,15 +14,15 @@ type Count = Count Int deriving (Eq)
 -- Custom decoders can defer buffered scanning without changing their
 -- streaming semantics, including when nested in generated records/lists.
 instance Decode Count
-    scanValue cursor = Json.scanFromPull cursor { Count (decodeValue() + 1) }
+    scanValue cursor = Json.Pull.scanFromPull cursor { Count (decodeValue() + 1) }
 
 type FastCount = FastCount Int deriving (Eq)
 
 instance Decode FastCount
     scanValue cursor =
-        scanned : Result (() ->{Pull, Fail Json.Error} Json.ScanStep Int) (Int, Json.Scan)
+        scanned : Result (() ->{Pull, Fail Json.Error} Json.Pull.ScanStep Int) (Int, Json.Pull.Scan)
         scanned = scanValue cursor
-        Json.mapScan { value -> FastCount (value + 1) } scanned
+        Json.Pull.mapScan { value -> FastCount (value + 1) } scanned
 
 type Packet = { count : Count, more : List Count } deriving (Decode, Eq)
 type FastPacket = { count : FastCount, more : List FastCount } deriving (Decode, Eq)
@@ -30,17 +31,17 @@ type Named =
     }
     deriving (Decode, Eq)
 type Defaults =
-    { value : Int  #[Json.Default `Json.at().offset`]
+    { value : Int  #[Json.Default `Json.Pull.at().offset`]
     }
     deriving (Decode, Eq)
 openArrays count =
     if count == 0 then ()
     else
-        Json.beginArray()
+        Json.Pull.beginArray()
         openArrays (count - 1)
 
 nested depth = Reader.withBytes (Bytes.fromString (String.padLeft depth '[' "" ++ "{\"é\\\"key\":\"ok\"}")) { reader ->
-    Json.withPull reader {
+    Json.Pull.withReader reader {
         openArrays depth
         named : Named
         named = decodeValue()

@@ -1,5 +1,5 @@
 import Bytes
-import Json exposing (Decode(..), Encode(..))
+import Json exposing (Decode, Encode(..))
 import Maybe exposing (Maybe(..))
 import Reader
 import Result exposing (Result(..))
@@ -24,18 +24,18 @@ main() =
     print (report (Json.parse @(List Int) "[0,1,2,3,4,5,6,7,8]"))
     print (report (Json.parse @(List Int) "[0,1,2,3,4,5,6,7,true]"))
     print (report (Json.parse @(List (List Int)) "[[1,\"x\"]]"))
-    print (report (Json.parseValue "{\"\":[01]}"))
+    print (report (Json.parse @Json.Value "{\"\":[01]}"))
     print (report (Json.parse @Person "{1:2}"))
     print (report (Json.parse @Person "{\"name\":\"Ada\",\"age\":4,}"))
     print (report (Json.parse @Person "{\"name\":\"Ada\" \"age\":4}"))
     print (report (Json.parse @Char "\"ø\""))
     print (report (Json.parse @Char "\"ab\""))
-    print (report (Json.parseValue "[01]"))
-    print (report (Json.parseValue "[\"\\uD800\"]"))
-    print (report (Json.parseValue "[true,]"))
-    print (report (Json.parseValue "1 2"))
-    print (report (Json.parseBytesValue (Bytes.fromList [34, 255, 34])))
-    case Json.parseValue (String.padLeft 257 '[' "" ++ "0" ++ String.padLeft 257 ']' "") of
+    print (report (Json.parse @Json.Value "[01]"))
+    print (report (Json.parse @Json.Value "[\"\\uD800\"]"))
+    print (report (Json.parse @Json.Value "[true,]"))
+    print (report (Json.parse @Json.Value "1 2"))
+    print (report (Json.parseBytes @Json.Value (Bytes.fromList [34, 255, 34])))
+    case Json.parse @Json.Value (String.padLeft 257 '[' "" ++ "0" ++ String.padLeft 257 ']' "") of
         Ok _ -> print "ok"
         Err error -> print (error.message ++ " " ++ show error.line ++ ":" ++ show error.column)
     case Json.number "1.20e+3" of

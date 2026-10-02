@@ -54,7 +54,7 @@ func TestJSONRecordFieldArgumentLoop(t *testing.T) {
 	if !foundWideScan {
 		t.Fatal("missing generated six-field scan loop")
 	}
-	for _, name := range []string{"Json.runScan", "Json.scanListMore"} {
+	for _, name := range []string{"Json.Pull.runScan", "Json.Pull.scanListMore"} {
 		found := false
 		for i := range result.Program.Defs {
 			def := &result.Program.Defs[i]

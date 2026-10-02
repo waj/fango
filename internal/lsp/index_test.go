@@ -371,7 +371,7 @@ fallback = 7
 		{`O.Label "payload"`, "ctor:Options.Label"},
 		{`O.tag "leading"`, "value:Options.tag"},
 		{`O.Label "trailing"`, "ctor:Options.Label"},
-		{`Json.Default`, "ctor:Json.Default"},
+		{`Json.Default`, "ctor:Json.Field.Default"},
 		{`O.fallback`, "value:Options.fallback"},
 		{`O.tag ({`, "value:Options.tag"},
 		{`O.Label]`, "type:Options.Label"},

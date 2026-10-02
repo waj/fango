@@ -43,7 +43,7 @@ runTask kind reader =
             Probe.finish()
             reportTyped result
         "tokens" ->
-            result = Json.withTextPull reader { scanTokens (ScanTotals { count = 0, strings = 0, numbers = 0, trues = 0, nulls = 0 }) }
+            result = Json.Pull.withTextReader reader { scanTokens (ScanTotals { count = 0, strings = 0, numbers = 0, trues = 0, nulls = 0 }) }
             Probe.finish()
             case result of
                 Err error ->

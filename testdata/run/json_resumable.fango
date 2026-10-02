@@ -1,5 +1,6 @@
 import Bytes
-import Json exposing (Decode(..), decodeValue)
+import Json
+import Json.Pull exposing (Decode(..), decodeValue)
 import List
 import Reader
 import Result exposing (Result(..))
@@ -9,16 +10,16 @@ import String
 type Peeked = Peeked Int deriving (Eq)
 
 instance Decode Peeked
-    scanValue cursor = Json.scanFromPull cursor {
+    scanValue cursor = Json.Pull.scanFromPull cursor {
         value : Int
         value = decodeValue()
-        ignore Json.peek()
+        ignore Json.Pull.peek()
         Peeked value
     }
 
 type Packet = { first : Int, peeked : Peeked, rest : List String } deriving (Decode, Eq)
 type Defaulted =
-    { value : Int  #[Json.Default `Json.at().offset`]
+    { value : Int  #[Json.Default `Json.Pull.at().offset`]
     }
     deriving (Decode, Eq)
 type Skipped =
@@ -51,8 +52,8 @@ sameFailure first second = case (first, second) of
 
 peekedDecode : Decode a => Type a -> String -> Result Json.Error a
 peekedDecode _ source = Reader.withBytes (Bytes.fromString source) { reader ->
-    Json.withPull reader {
-        ignore Json.peek()
+    Json.Pull.withReader reader {
+        ignore Json.Pull.peek()
         decodeValue()
     }
 }

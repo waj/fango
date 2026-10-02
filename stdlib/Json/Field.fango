@@ -1,0 +1,149 @@
+{-# no-prelude #-}
+module Json.Field exposing (FieldOption(..), FieldSettings(..), escapeChar, fieldSettings, plainChar, quote, validateJSONSchema)
+
+import Basics exposing (..)
+import Char
+import Maybe exposing (Maybe(..))
+import Meta exposing (Code, Ctor(..), Field(..), Items(..), Shape(..), TypeInfo(..))
+import String
+
+{- The JSON field options, `#[Json.Key …]`, `#[Json.Skip]`, and
+`#[Json.Default …]`, and their interpretation. Both JSON derivers read field
+settings and validate a type's options through this module; `Json` re-exports
+`FieldOption`. It also owns the JSON string escaping rule, so a decoder can
+match a key exactly as the encoder writes it. -}
+
+-- Options interpreted by the JSON derivers, using generic Meta attributes.
+type FieldOption = Key String | Skip | Default Code
+
+type FieldSettings =
+    { key : String
+    , skip : Bool
+    , fallback : Maybe Code
+    , keySite : Maybe Meta.Site
+    , skipSite : Maybe Meta.Site
+    , defaultSite : Maybe Meta.Site
+    }
+
+addFieldOption : FieldSettings -> Meta.Attached FieldOption -> FieldSettings
+addFieldOption settings attached =
+    case attached.value of
+        Key text ->
+            case settings.keySite of
+                Just _ -> Meta.failAt attached.site "This field already has a JSON key option."
+                Nothing -> { settings | key = text, keySite = Just attached.site }
+        Skip ->
+            case settings.skipSite of
+                Just _ -> Meta.failAt attached.site "This field already has a JSON skip option."
+                Nothing -> { settings | skip = True, skipSite = Just attached.site }
+        Default code ->
+            case settings.defaultSite of
+                Just _ -> Meta.failAt attached.site "This field already has a JSON default option."
+                Nothing -> { settings | fallback = Just code, defaultSite = Just attached.site }
+
+fieldSettings : String -> Meta.Attributes -> FieldSettings
+fieldSettings name attached =
+    initial = FieldSettings { key = name, skip = False, fallback = Nothing, keySite = Nothing, skipSite = Nothing, defaultSite = Nothing }
+    settings = Meta.foldItems addFieldOption initial (Meta.attributes @FieldOption attached)
+    case settings.skipSite of
+        Nothing -> settings
+        Just site ->
+            case settings.fallback of
+                Nothing -> Meta.failAt site "A skipped JSON field requires a default expression."
+                Just _ ->
+                    case settings.keySite of
+                        Just keySite -> Meta.failAt keySite "A skipped JSON field cannot also rename its key."
+                        Nothing -> settings
+
+rejectFieldOptions : Meta.Attributes -> ()
+rejectFieldOptions attached =
+    case Meta.attributes @FieldOption attached of
+        NoItems -> ()
+        Item option _ -> Meta.failAt option.site "JSON field options belong on record fields."
+
+findKey : String -> Items Field -> Maybe Meta.Site
+findKey key fields =
+    case fields of
+        NoItems -> Nothing
+        Item field rest ->
+            settings = fieldSettings field.name field.attributes
+            if settings.key == key then settings.keySite else findKey key rest
+
+hasKey : String -> Items Field -> Bool
+hasKey key fields =
+    case fields of
+        NoItems -> False
+        Item field rest ->
+            settings = fieldSettings field.name field.attributes
+            settings.key == key || hasKey key rest
+
+validateRecordFields : Items Field -> Items Field -> ()
+validateRecordFields previous fields =
+    case fields of
+        NoItems -> ()
+        Item field rest ->
+            settings = fieldSettings field.name field.attributes
+            if settings.skip then validateRecordFields previous rest
+            else if hasKey settings.key previous then
+                case settings.keySite of
+                    Just site -> Meta.failAt site ("Two fields use the same JSON key: " ++ settings.key)
+                    Nothing ->
+                        case findKey settings.key previous of
+                            Just site -> Meta.failAt site ("Two fields use the same JSON key: " ++ settings.key)
+                            Nothing -> ()
+            else validateRecordFields (Item field previous) rest
+
+validateUnionFields : Items Field -> ()
+validateUnionFields fields =
+    case fields of
+        NoItems -> ()
+        Item field rest ->
+            rejectFieldOptions field.attributes
+            validateUnionFields rest
+
+validateUnionCtors : Items Ctor -> ()
+validateUnionCtors ctors =
+    case ctors of
+        NoItems -> ()
+        Item ctor rest ->
+            rejectFieldOptions ctor.attributes
+            validateUnionFields ctor.fields
+            validateUnionCtors rest
+
+validateJSONSchema : TypeInfo -> ()
+validateJSONSchema subject =
+    rejectFieldOptions subject.attributes
+    case subject.shape of
+        Record ctor ->
+            rejectFieldOptions ctor.attributes
+            validateRecordFields NoItems ctor.fields
+        Union ctors -> validateUnionCtors ctors
+
+hexChar : Int -> String
+hexChar value = String.slice value (value + 1) "0123456789abcdef"
+
+escapeChar : Char -> String
+escapeChar char =
+    code = Char.toCode char
+    if char == '"' then "\\\""
+    else if char == '\\' then "\\\\"
+    else if code == 8 then "\\b"
+    else if code == 12 then "\\f"
+    else if char == '\n' then "\\n"
+    else if char == '\r' then "\\r"
+    else if char == '\t' then "\\t"
+    else "\\u00" ++ hexChar (quotientBy 16 code) ++ hexChar (remainderBy 16 code)
+
+plainChar : Char -> Bool
+plainChar char = char /= '"' && char /= '\\' && Char.toCode char >= 32
+
+-- A JSON string literal, quotes included.
+quote : String -> String
+quote text = "\"" ++ quoteBody text "" ++ "\""
+
+quoteBody : String -> String -> String
+quoteBody text done =
+    (run, rest) = String.span plainChar text
+    case String.uncons rest of
+        Nothing -> done ++ run
+        Just part -> quoteBody part.rest (done ++ run ++ escapeChar part.first)

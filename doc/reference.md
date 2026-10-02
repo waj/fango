@@ -31,6 +31,7 @@ The bundled library is experimental and versioned with the compiler.
 | Async | [Tasks, handlers, cancellation, and channels](reference/library-async.md) |
 | Runtime.Native | [Native Go sidecars](reference/native.md) |
 | Json | [Streaming parsing and encoding](reference/library-json.md) |
+| Json.Pull | [Pull parser and custom decoders](reference/library-json-pull.md) |
 | Meta, Derive | [Metaprogramming](reference/metaprogramming.md) |
 
 ### Streams and cursors

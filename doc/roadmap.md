@@ -66,7 +66,7 @@ closure construction for nonnumeric scalar comparisons;
 the string-scanner experiment exposed per-character closure allocation through
 generic inequality. Preserve invocation-time handler selection, lexical
 shadowing, and gated state synchronization. Parsing and codec derivation remain
-in Fango. Tagged value layouts for `Json.Token` copied more than the allocation
+in Fango. Tagged value layouts for `Json.Pull.Token` copied more than the allocation
 they removed on the recorded fixture; further sum-layout changes remain gated
 on measurements of the values flowing through hot operations.
 

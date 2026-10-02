@@ -6,7 +6,7 @@
 --
 -- State is compact JSON in todo.json in the current working directory.
 
-import Json exposing (Decode(..), Encode(..))
+import Json exposing (Decode, Encode(..))
 import Result exposing (Result(..))
 import String
 

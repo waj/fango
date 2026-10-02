@@ -1,6 +1,24 @@
 # JSON implementation
 
-The JSON implementation is in [Json.fango](../../stdlib/Json.fango). It uses
+The JSON implementation is three modules, each importing the ones before it:
+
+- [Json.Field](../../stdlib/Json/Field.fango) interprets `FieldOption`
+  attributes for both derivers and owns the string escaping rule, so the
+  decoder matches a key in exactly the bytes the encoder writes.
+- [Json.Pull](../../stdlib/Json/Pull.fango) holds everything the pull handler
+  touches: `Error`, `Token`, the `Pull` effect, `Scan`, the `Decode` class,
+  its primitive instances and deriver, and `Value`, since `readValue` builds it.
+  Keeping the `Decode` deriver here leaves the scan helpers its generated code
+  calls private, because quoted code resolves in the module that wrote it.
+- [Json](../../stdlib/Json.fango) holds whole-document entry points and the
+  `Encode`/`Emit` side, and re-exports `Error`, `Decode`, `Value`, `Number`,
+  and `FieldOption` through the [module re-export rule](../reference/modules.md#exports-and-visibility).
+
+`parse` runs the pull handler, which returns `Result Error a`, and `Decode`'s
+only method is the scan protocol, so those types cannot sit above `Json.Pull`;
+re-exporting them is what keeps the everyday spelling `Json.Error`.
+
+The parser uses
 UTF-8 [text adapters](text-io.md) over the existing `Reader` and `Writer`
 interfaces for byte I/O, or explicitly supplied text readers and writers.
 The pull handler owns a cursor over an immutable `Text.Reader.Window`. A
@@ -130,7 +148,7 @@ Encode derivation emits straight-line record and union output through the
 String escaping scans character runs rather than UTF-8 bytes; stringify
 collects text directly without a byte validation round trip. The declarative
 field options are ordinary `Json.FieldOption` values in each `Meta.Field`
-attribute collection. Shared Fango helpers interpret and validate options for
+attribute collection. `Json.Field` interprets and validates options for
 both derivers; the compiler has no JSON-specific schema fields or rules. Both interpreter and Go compilation see
 the same generated syntax tree. The observable format and errors are in the
 [JSON reference](../reference/library-json.md).

@@ -1,7 +1,8 @@
 import Bytes
 import Encoding
 import Fail exposing (Fail)
-import Json exposing (Decode(..), Pull, decodeValue)
+import Json
+import Json.Pull exposing (Decode(..), Pull, decodeValue)
 import List
 import Reader
 import Result exposing (Result(..))
@@ -44,17 +45,17 @@ objectFields values = case values of
     [first | tail] -> List.foldl { field acc -> acc ++ "," ++ field } first tail
 
 scans source = Reader.withBytes (Bytes.fromString (source ++ " 9")) { reader ->
-    case Json.withPull reader {
-        case Json.bufferedScan() of
+    case Json.Pull.withReader reader {
+        case Json.Pull.bufferedScan() of
             Nothing -> False
             Just start ->
-                scanned : Result (() ->{Pull, Fail Json.Error} Json.ScanStep Wide) (Wide, Json.Scan)
+                scanned : Result (() ->{Pull, Fail Json.Error} Json.Pull.ScanStep Wide) (Wide, Json.Pull.Scan)
                 scanned = scanValue start
                 case scanned of
                     Err _ -> False
                     Ok (value, rest) ->
-                        Json.acceptScan rest
-                        position = Json.at()
+                        Json.Pull.acceptScan rest
+                        position = Json.Pull.at()
                         next : Int
                         next = decodeValue()
                         value == expected && position.offset == String.byteLength source && next == 9
@@ -64,14 +65,14 @@ scans source = Reader.withBytes (Bytes.fromString (source ++ " 9")) { reader ->
 }
 
 declines source = Reader.withBytes (Bytes.fromString source) { reader ->
-    case Json.withPull reader {
-        case Json.bufferedScan() of
+    case Json.Pull.withReader reader {
+        case Json.Pull.bufferedScan() of
             Nothing -> False
             Just start ->
-                scanned : Result (() ->{Pull, Fail Json.Error} Json.ScanStep Wide) (Wide, Json.Scan)
+                scanned : Result (() ->{Pull, Fail Json.Error} Json.Pull.ScanStep Wide) (Wide, Json.Pull.Scan)
                 scanned = scanValue start
                 case scanned of
-                    Err _ -> Json.at().offset == 0
+                    Err _ -> Json.Pull.at().offset == 0
                     Ok _ -> False
     } of
         Ok valid -> valid
@@ -89,7 +90,7 @@ runChunks chunks = Runtime.Local.run chunks { remaining ->
           }
         }
     ) { reader ->
-        outcome = Json.withPull reader {
+        outcome = Json.Pull.withReader reader {
             value : Wide
             value = decodeValue()
             value == expected
@@ -111,21 +112,21 @@ sameSplits source =
 openArrays depth =
     if depth == 0 then ()
     else
-        Json.beginArray()
+        Json.Pull.beginArray()
         openArrays (depth - 1)
 
 scanAtLimit depth = Reader.withBytes (Bytes.fromString (String.padLeft depth '[' "" ++ "{\"é\\\"key\":\"ok\",\"a\":2}{\"a\":3,\"é\\\"key\":\"next\"}")) { reader ->
-    case Json.withPull reader {
+    case Json.Pull.withReader reader {
         openArrays depth
-        case Json.bufferedScan() of
+        case Json.Pull.bufferedScan() of
             Nothing -> False
             Just start ->
-                scanned : Result (() ->{Pull, Fail Json.Error} Json.ScanStep Named) (Named, Json.Scan)
+                scanned : Result (() ->{Pull, Fail Json.Error} Json.Pull.ScanStep Named) (Named, Json.Pull.Scan)
                 scanned = scanValue start
                 case scanned of
-                    Err _ -> Json.at().offset == depth && depth == 256
+                    Err _ -> Json.Pull.at().offset == depth && depth == 256
                     Ok (value, rest) ->
-                        Json.acceptScan rest
+                        Json.Pull.acceptScan rest
                         next : Named
                         next = decodeValue()
                         depth == 255 && value == Named { a = 2, value = "ok" } && next == Named { a = 3, value = "next" }
@@ -143,17 +144,17 @@ main() =
     print (declines "{\"f\":1.5,\"e\":[1,2],\"d\":null,\"c\":true,\"b\":\"wide\",\"a\":3,\"other\":0}")
     print (Reader.withBytes (Bytes.fromList [123,34,233,92,34,107,101,121,34,58,34,233,34,44,34,97,34,58,51,125]) { reader ->
         TextReader.overWith Encoding.latin1 reader { text ->
-            case Json.withTextPull text {
-                case Json.bufferedScan() of
+            case Json.Pull.withTextReader text {
+                case Json.Pull.bufferedScan() of
                     Nothing -> False
                     Just start ->
-                        scanned : Result (() ->{Pull, Fail Json.Error} Json.ScanStep Named) (Named, Json.Scan)
+                        scanned : Result (() ->{Pull, Fail Json.Error} Json.Pull.ScanStep Named) (Named, Json.Pull.Scan)
                         scanned = scanValue start
                         case scanned of
                             Err _ -> False
                             Ok (value, rest) ->
-                                Json.acceptScan rest
-                                value == Named { a = 3, value = "é" } && Json.at().offset == 20
+                                Json.Pull.acceptScan rest
+                                value == Named { a = 3, value = "é" } && Json.Pull.at().offset == 20
             } of
                 Ok valid -> valid
                 Err _ -> False

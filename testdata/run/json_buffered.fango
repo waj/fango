@@ -1,7 +1,8 @@
 import Bytes
 import Encoding
 import Fail
-import Json exposing (Decode(..), decodeValue)
+import Json
+import Json.Pull exposing (Decode(..), decodeValue)
 import List
 import Reader
 import Result exposing (Result(..))
@@ -70,9 +71,9 @@ main() =
             if current == 0 then Just (Bytes.fromString "[\"a")
             else Fail.fail "value was scanned early"
         } }) { reader ->
-            result = Json.withPull reader {
-                Json.beginArray()
-                Json.nextElement True
+            result = Json.Pull.withReader reader {
+                Json.Pull.beginArray()
+                Json.Pull.nextElement True
             }
             case result of
                 Ok True -> stage.read() == 1
@@ -85,15 +86,15 @@ main() =
     -- commits must leave every token and the enclosing text cursor intact.
     print (TextReader.withString "é\"abc\" 123 -1.25!" { text ->
         ignore (TextReader.tryReadChar text)
-        result = Json.withTextPull text {
-            ignore (Json.peek())
+        result = Json.Pull.withTextReader text {
+            ignore (Json.Pull.peek())
             string : String
             string = decodeValue()
-            first = Json.at()
-            ignore (Json.at())
+            first = Json.Pull.at()
+            ignore (Json.Pull.at())
             integer : Int
             integer = decodeValue()
-            ignore (Json.at())
+            ignore (Json.Pull.at())
             floating : Float
             floating = decodeValue()
             string == "abc" && integer == 123 && floating == -1.25 && first.offset == 5

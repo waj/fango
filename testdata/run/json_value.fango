@@ -2,9 +2,9 @@ import Json
 import Result exposing (Result(..))
 
 main() =
-    case Json.parseValue "{\"x\": [1, true, null]}" of
+    case Json.parse @Json.Value "{\"x\": [1, true, null]}" of
         Ok value ->
-            case Json.stringifyValue value of
+            case Json.stringify value of
                 Ok text -> print text
                 Err error -> print error.message
         Err error -> print error.message

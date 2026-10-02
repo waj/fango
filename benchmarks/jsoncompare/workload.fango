@@ -1,7 +1,7 @@
 import Fail
 import File
 import IO
-import Json exposing (Decode(..))
+import Json exposing (Decode)
 import List
 import Reader
 import Result exposing (Result(..))

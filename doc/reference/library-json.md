@@ -3,6 +3,7 @@
 `Json` parses and emits JSON in Fango. It uses the bundled `Bytes`, `Reader`,
 and `Writer` primitives through [text adapters](library-text-io.md), but has no JSON native. Parsing from a `Reader` consumes
 tokens as needed; a typed decoder does not build an intermediate `Json.Value`.
+Custom decoders and token-level parsing use [`Json.Pull`](library-json-pull.md).
 
 [Reference index](../reference.md). Source: [Json](../../stdlib/Json.fango).
 
@@ -16,7 +17,7 @@ decoder accepts JSON numbers that fit in a finite Float. A nonfinite Float
 cannot be encoded.
 
 ```fango
-import Json exposing (Decode(..), Encode(..))
+import Json exposing (Decode, Encode(..))
 
 type Person = { name : String, age : Int } deriving (Encode, Decode)
 
@@ -24,8 +25,12 @@ person = Json.parse @Person "{\"name\":\"Ada\",\"age\":4}"
 json = Json.stringify (Person { name = "Ada", age = 4 })
 ```
 
-`parse : Decode a => Type a -> String -> Result Json.Error a` takes a type
-witness because its result alone does not determine the decoder. `parseBytes`
+`Json` exposes `Decode` without its method, which is enough to derive it and
+to write `Decode a =>` constraints; a handwritten instance imports
+`Decode(..)` from [`Json.Pull`](library-json-pull.md#custom-decoders).
+
+`parse : Decode a => Type a -> String -> Result Json.Error a` takes a
+[type witness](#type-witnesses) because its result alone does not determine the decoder. `parseBytes`
 accepts `Bytes`; `read` accepts a `Reader e` and has the reader's effect row.
 `write : Encode a => Writer e -> a ->{e} Result Json.Error ()` emits to a
 writer. `stringify` collects output in a `String`. The writer may already
@@ -65,104 +70,36 @@ Failures point to the offending attribute with `COMPILE-TIME FAILURE`; no JSON
 validation runs for a declaration that derives neither JSON class. The old
 `{-# json ... #-}` pragmas are no longer supported.
 
-`Decode` has one method:
-
-```fango
-class Decode a
-    scanValue : Json.Scan -> Result (() ->{Json.Pull, Fail Json.Error} Json.ScanStep a) (a, Json.Scan)
-```
-
-`Json.decodeValue : Decode a => () ->{Json.Pull, Fail Json.Error} a` is the
-common driver for every instance. Import it separately from `Decode(..)` when
-using it unqualified. It starts `scanValue` at the current cursor, runs suspended
-work, and publishes the completed position. `scanValue` starts a
-pure buffered scan. `Ok (value, rest)` represents the same complete value and
-remaining nesting allowance as `decodeValue`, at the position immediately
-after that value. `Err action` suspends work; it is not a JSON error. Creating
-that action consumes nothing, refills nothing, and performs no consumer effects.
-`Json.runScan result` executes suspended work until it returns a value and
-position, or raises a JSON or source failure. A suspended action returns
-`Json.ScanDone value rest` or `Json.ScanContinue nextResult`. The driver runs
-continuations with bounded stack use.
-
-`Json.Scan` is opaque. Manual instances provide only `scanValue`. A decoder
-written with Pull operations can use `scanValue cursor = Json.scanFromPull cursor { ... }`,
-with its token-consuming body in the suspended action. The helper defers
-publication of the supplied cursor and execution of the
-decoder until `runScan` reaches it. Custom wrappers can compose a bundled scan
-with `Json.mapScan transform result`, which transforms both buffered and resumed
-results while preserving the decoder's semantics. Calling `decodeValue`
-for a child invokes that child's single parser through the common driver.
-
-Generated records retain previously decoded fields across buffer boundaries,
-extra keys, alternative key escapes, and children that defer scanning. After
-handling the suspended part, they continue scanning the current window. Pending
-lookahead at entry is honored by that same parser. There is no second record
-or list decoder selected at a buffer boundary.
-Required fields in declaration order take a straight-line path; other orders
-use a key loop. Defaults and skipped fields share the resumable loop, and
-default expressions execute only when required. Lists likewise retain their
-completed elements. JSON errors preserve their positions, paths, and consumed
-input across these transitions.
-Strings retain completed fragments, numeric tokens retain their grammar phase,
-integers retain their accumulator, and literals retain their remaining suffix
-across refills. A refill does not restart a completed scalar prefix.
-
-## Pull parser and value tree
+## Text adapters and custom encoders
 
 Byte-reader/writer entry points select UTF-8. `readText` and `writeText` accept
 `Text.Reader.Reader e` and `Text.Writer.Writer e` respectively, with the same
 type-witness, result, and source/sink effect contracts as `read` and `write`.
-`withTextPull` and `withTextWriter` are the corresponding handlers for custom
-decoders and encoders. Their caller selects the text adapter's encoding;
+Their caller selects the text adapter's encoding;
 Latin-1 text adapters, for example, can decode Latin-1 JSON input or report
 unrepresentable output characters. Encoding errors become `Json.Error` values;
 unrelated source/sink effects propagate.
 `write` and `withWriter` leave flushing to the byte writer's owner.
 
-`withPull reader { ... }` installs the `Json.Pull` effect. `next()` consumes a
-token, `peek()` reads ahead without consuming it, and `at()` returns the
-current source position and publishes buffered consumption. `beginArray`, `nextElement`, `beginObject`, `nextKey`,
-and `skipValue` help decoders consume a container. `nextElement first` consumes
-an array separator or closing bracket, returning whether another value follows;
-it leaves that value unscanned for the decoder. `nextKey first` consumes an
-object separator, key, and colon, returning the key or `Nothing` at the end.
-Both honor an existing token from `peek()`. `withPath segment { ... }`
-adds a key segment, and `withIndex index { ... }` an element index, to errors
-raised while a custom decoder handles a nested value.
-`skipValue` validates and
-discards a value without building a tree. When `withPull` or `withTextPull`
-returns, normally or with `Err`, the reader is positioned after the last token
-the parser scanned, including a lookahead token obtained by `peek`. The same
-reconciliation occurs when an unrelated effect exits the scope. Within the
-scope, the underlying text and byte reader positions can lag behind the JSON
-cursor until a refill or `at()`; advance them only after leaving the pull scope.
+`Encode` has one method, `encodeValue : a ->{Json.Emit, Fail Json.Error} ()`.
+A handwritten instance writes raw JSON text with `Json.emit` or delegates to
+`encodeValue` for its parts. `Json.withWriter writer { ... }` and
+`Json.withTextWriter` install the `Emit` handler over a byte or text writer.
 
-`Json.arrayElement` and `Json.objectKey` implement the corresponding container
-helpers. `Json.decodedString()`, `Json.decodedInt()`, and `Json.decodedFloat()`
-consume a scalar and return `Result String a`: a type or conversion mismatch
-returns its diagnostic message after consuming the token. Lexical and encoding
-failures are handled by `withPull` or `withTextPull` as usual. The primitive
-`Decode` instances turn these mismatch messages into `Json.Error` at the
-current position and path.
+## Value tree
 
-`Json.bufferedScan()` obtains a speculative view of the current Pull cursor,
-or `Nothing` when a lookahead token is pending. `Json.currentScan()` also
-represents pending lookahead so that resumed scans can honor it. Neither
-operation consumes input. Abandoning a scan result without running it consumes
-nothing.
-`Json.acceptScan rest` publishes the position returned by a completed scan or
-`Json.runScan`. Publish it immediately, before other parser operations. A
-suspension may have already published its prefix and refilled the reader;
-publication of the final position reconciles the remaining buffered work.
-The reader is committed at the usual refill, `at()`, or scope boundary.
+`Json.Value` is the generic document tree: `Null`, `Boolean`, `Numeric`,
+`Text`, `Array`, and `Object`, with object members as an ordered key/value
+list. It is opted into by type, like any decoded value:
+`Json.parse @Json.Value text`, `Json.parseBytes @Json.Value bytes`,
+`Json.read @Json.Value reader`, and `Json.stringify value`.
 
-`readValue()` builds the generic
-`Json.Value` tree from the current token. `parseValue`, `parseBytesValue`, and
-`stringifyValue` are the whole-input tree helpers. `Json.Numeric` holds a
-`Json.Number` with the original number lexeme, so a value tree can round-trip
-numbers without Float conversion. `Json.Number` is opaque to callers;
-`Json.number` validates a number lexeme and `Json.numberText` retrieves it.
+`Json.Numeric` holds a `Json.Number` with the original number lexeme, so a
+value tree can round-trip numbers without Float conversion. `Json.Number` is
+opaque; `Json.number` validates a number lexeme and `Json.numberText`
+retrieves it.
+
+## Errors
 
 `Json.Error` contains `message`, zero-based byte `offset`, one-based `line`
 and byte-based `column`, and a slash-separated `path` for failures inside decoded
