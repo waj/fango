@@ -1,0 +1,21 @@
+module Main exposing (main)
+
+import Shapes exposing (Named(..), Shape(..))
+
+instance Named Shape
+    name shape =
+        case shape of
+            Square _ -> "square"
+            Rect _ _ -> "rect"
+
+corner : Shapes.Point
+corner = Shapes.Point { x = 3, y = 4 }
+
+asked : () ->{Shapes.Ask} Int
+asked() = Shapes.ask() + corner.x
+
+answer =
+    handle asked() of
+        Shapes.ask () -> resume (Shapes.area (Rect 2 3))
+
+main = Shapes.describe (Square 2) ++ " " ++ show (Shapes.area (Square 2)) ++ " " ++ show answer ++ " " ++ show corner.y

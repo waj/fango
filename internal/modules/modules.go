@@ -1202,7 +1202,7 @@ func topo(nodes map[string]*node) []string {
 
 func canonical(module, name string) string { return module + "." + name }
 
-func buildInterface(n *node, errs []diag.Error) (*iface, []diag.Error) {
+func buildInterface(n *node, nodes map[string]*node, errs []diag.Error) (*iface, []diag.Error) {
 	if n.private {
 		return newIface(), errs
 	}
@@ -1286,6 +1286,7 @@ func buildInterface(n *node, errs []diag.Error) (*iface, []diag.Error) {
 		return pub, errs
 	}
 	seen := map[string]bool{}
+	var imported *iface
 	for _, item := range ex.Items {
 		if seen[item.Name] {
 			errs = append(errs, diag.Errorf(item.Sp, "DUPLICATE EXPORT", "`%s` appears more than once in the exposing list.", item.Name))
@@ -1334,9 +1335,132 @@ func buildInterface(n *node, errs []diag.Error) (*iface, []diag.Error) {
 			errs = append(errs, diag.Errorf(item.Sp, "INVALID EXPORT", "Constructors cannot be exported individually; expose their type with `%s(..)`.", owner(all.typeMembers, item.Name)))
 			continue
 		}
-		errs = append(errs, diag.Errorf(item.Sp, "UNKNOWN EXPORT", "Module `%s` has no declaration named `%s`.", n.name, item.Name))
+		if imported == nil {
+			imported = importedScope(n, nodes)
+		}
+		if reexport(pub, imported, item) {
+			continue
+		}
+		if _, ctor := imported.ctors[item.Name]; ctor {
+			errs = append(errs, diag.Errorf(item.Sp, "INVALID EXPORT", "Constructors cannot be exported individually; expose their type with `%s(..)`.", owner(imported.typeMembers, item.Name)))
+			continue
+		}
+		if imported.types[item.Name] != "" {
+			errs = append(errs, diag.Errorf(item.Sp, "NON-PUBLIC EXPORT", "`%s` is imported without its members; import it as `%s(..)` to re-export them.", item.Name, item.Name))
+			continue
+		}
+		if from := qualifiedOnly(n, nodes, item.Name); from != "" {
+			errs = append(errs, diag.Errorf(item.Sp, "UNKNOWN EXPORT", "`%s` is reachable only as `%s.%s`; a module re-exports only names its imports expose unqualified.", item.Name, from, item.Name))
+			continue
+		}
+		errs = append(errs, diag.Errorf(item.Sp, "UNKNOWN EXPORT", "Module `%s` has no declaration named `%s`, and its imports do not expose one unqualified.", n.name, item.Name))
 	}
 	return pub, errs
+}
+
+// importedScope is the union of what this module's own imports expose
+// unqualified. The prelude's implicit imports are not part of it, so a
+// module re-exports only names it chose to import.
+func importedScope(n *node, nodes map[string]*node) *iface {
+	out := newIface()
+	for _, im := range n.mod.Imports {
+		dep := nodes[im.Module]
+		if dep == nil || dep.iface == nil {
+			continue
+		}
+		// Selection errors are the resolver's to report, once.
+		sel, _ := dep.iface.selection(im.Exposing, im.ModuleSpan)
+		for k, v := range sel.values {
+			out.values[k] = v
+		}
+		for k, v := range sel.types {
+			out.types[k] = v
+		}
+		for k, v := range sel.ctors {
+			out.ctors[k] = v
+		}
+		for k, v := range sel.ops {
+			out.ops[k] = v
+		}
+		for k, v := range sel.records {
+			out.records[k] = v
+			out.recordFields[k] = sel.recordFields[k]
+		}
+		for k := range sel.openTypes {
+			out.openTypes[k] = true
+			out.typeMembers[k] = dep.iface.typeMembers[k]
+		}
+		for k := range sel.openEffects {
+			out.openEffects[k] = true
+			out.effectMembers[k] = dep.iface.effectMembers[k]
+		}
+	}
+	return out
+}
+
+// qualifiedOnly names an import that publishes name without exposing it
+// to this module unqualified.
+func qualifiedOnly(n *node, nodes map[string]*node, name string) string {
+	for _, im := range n.mod.Imports {
+		dep := nodes[im.Module]
+		if dep == nil || dep.iface == nil {
+			continue
+		}
+		if dep.iface.values[name] != "" || dep.iface.types[name] != "" {
+			return im.Module
+		}
+	}
+	return ""
+}
+
+// reexport adds one exposing item that names an imported binding. The item
+// carries exactly what the import brought into scope: `T(..)` requires that
+// the import exposed T's members too.
+func reexport(pub, in *iface, item ast.ExposeItem) bool {
+	if v, ok := in.values[item.Name]; ok && !item.All {
+		pub.values[item.Name] = v
+		if op := in.ops[item.Name]; op != "" {
+			pub.ops[item.Name] = op
+		}
+		return true
+	}
+	v, ok := in.types[item.Name]
+	if !ok {
+		return false
+	}
+	if !item.All {
+		pub.types[item.Name] = v
+		return true
+	}
+	if rv, ok := in.records[item.Name]; ok {
+		pub.types[item.Name] = v
+		pub.records[item.Name] = rv
+		pub.recordFields[item.Name] = append([]string(nil), in.recordFields[item.Name]...)
+		pub.openTypes[item.Name] = true
+		return true
+	}
+	if !in.openTypes[item.Name] && !in.openEffects[item.Name] {
+		return false
+	}
+	pub.types[item.Name] = v
+	if in.openTypes[item.Name] {
+		pub.typeMembers[item.Name] = in.typeMembers[item.Name]
+		pub.openTypes[item.Name] = true
+		for _, x := range in.typeMembers[item.Name] {
+			pub.ctors[x] = in.ctors[x]
+		}
+	}
+	if in.openEffects[item.Name] {
+		pub.effectMembers[item.Name] = in.effectMembers[item.Name]
+		pub.openEffects[item.Name] = true
+		for _, x := range in.effectMembers[item.Name] {
+			if op := in.ops[x]; op != "" {
+				pub.ops[x] = op
+			}
+			pub.values[x] = in.values[x]
+		}
+	}
+	return true
 }
 
 func owner(m map[string][]string, member string) string {

@@ -1,0 +1,7 @@
+module Shapes exposing (Ask(..), Named(..), Point(..), Shape(..), area, describe)
+
+import Shapes.Core exposing (Ask(..), Named(..), Point(..), Shape(..), area)
+
+-- The facade re-exports the core's declarations next to its own.
+describe : Named a => a -> String
+describe value = "<" ++ name value ++ ">"

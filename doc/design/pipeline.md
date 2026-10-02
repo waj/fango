@@ -271,7 +271,10 @@ headers, reserved bundled names, and native sidecars. Validation detects cycles
 and collects the complete effective fixity table, including builtins, before any
 fresh tree is rewritten; the sorted table also has a stable SHA-256 fingerprint.
 Resolution then processes modules in dependency-first order with lexical
-tie-breaking. Local modules come from the
+tie-breaking. Public interfaces are built in the same order, so an exposing
+list can re-export what the module's imports expose unqualified; the entry
+keeps the defining module's canonical name, and only the interface map changes.
+Local modules come from the
 entry directory; bundled sources come from the [library root](#the-library-root)
 and reserve their module names. Imported scopes expose only direct public interfaces,
 although instance visibility includes transitive dependencies.

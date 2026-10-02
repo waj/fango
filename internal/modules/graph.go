@@ -276,15 +276,17 @@ func (g *Graph) resolvePending(pending map[string]*node, names []string, fixitie
 		return nil, errs
 	}
 
-	for _, name := range names {
-		pending[name].iface, errs = buildInterface(pending[name], errs)
+	// Interfaces are built dependency-first, because an exposing list may
+	// re-export names that an import brought into scope.
+	order := topo(pending)
+	all := maps.Clone(g.nodes)
+	maps.Copy(all, pending)
+	for _, name := range order {
+		pending[name].iface, errs = buildInterface(pending[name], all, errs)
 	}
 	if len(errs) > 0 {
 		return nil, errs
 	}
-	order := topo(pending)
-	all := maps.Clone(g.nodes)
-	maps.Copy(all, pending)
 	visible := map[string]map[string]bool{}
 	for _, name := range order {
 		n := pending[name]

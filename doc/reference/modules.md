@@ -31,9 +31,25 @@ constructors and `Effect(..)` all operations. `Class` exposes a class name;
 `Class(..)` also exposes all its methods. Individual methods can be exposed as
 lowercase values. Declaring an instance requires access to all class methods
 (qualified access counts). Constructors cannot be selected
-individually, member lists cannot be partial, and imported declarations cannot
-be re-exported. Qualified names are accepted for values, operations,
-constructors, patterns, types, effect rows, and handler clauses.
+individually, and member lists cannot be partial. Qualified names are accepted
+for values, operations, constructors, patterns, types, effect rows, and handler
+clauses.
+
+An explicit exposing list may also name what the module's own imports expose
+unqualified, re-exporting it under the importing module's qualifier:
+
+```fango
+module Shapes exposing (Shape(..), area, describe)
+
+import Shapes.Core exposing (Shape(..), area)
+```
+
+A re-exported name keeps its identity, so `Shapes.area` and
+`Shapes.Core.area` are the same declaration, with the same instances and
+diagnostics. `T(..)` re-exports members only when the import exposed
+`T(..)` (`NON-PUBLIC EXPORT` otherwise). A name reachable only qualified, or
+only through the prelude, is not re-exportable (`UNKNOWN EXPORT`), and
+`exposing (..)` exports only the module's own declarations.
 
 ## Source roots and module identity
 

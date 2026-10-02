@@ -179,7 +179,15 @@ func typeHead(kind, name string, params []ast.Param) string {
 func (i *index) module(m *ast.Module) {
 	if h := m.Header; h != nil {
 		for _, item := range h.Exposing.Items {
-			i.exposed(item, h.Name)
+			if i.exposed(item, h.Name) {
+				continue
+			}
+			// A re-exported name links to the import that supplied it.
+			for _, im := range m.Imports {
+				if im.Exposing != nil && i.exposed(item, im.Module) {
+					break
+				}
+			}
 		}
 	}
 	for _, im := range m.Imports {
@@ -241,14 +249,15 @@ func (i *index) module(m *ast.Module) {
 	}
 }
 
-func (i *index) exposed(item ast.ExposeItem, module string) {
+func (i *index) exposed(item ast.ExposeItem, module string) bool {
 	for _, kind := range []string{"value", "type", "ctor"} {
 		id := global(kind, module+"."+item.Name)
 		if _, ok := i.symbols[id]; ok {
 			i.use(item.Sp, id)
-			return
+			return true
 		}
 	}
+	return false
 }
 
 type scope map[string]string

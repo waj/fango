@@ -407,3 +407,25 @@ func TestLocalBytesTypeKeepsItsOwnBoundary(t *testing.T) {
 		}
 	})
 }
+
+func TestReexportDiagnostics(t *testing.T) {
+	for _, tt := range []struct {
+		name, facade, title, body string
+	}{
+		{"qualified only", "module Facade exposing (b)\nimport Base\n", "UNKNOWN EXPORT", "reachable only as `Base.b`"},
+		{"members not imported", "module Facade exposing (T(..))\nimport Base exposing (T)\n", "NON-PUBLIC EXPORT", "import it as `T(..)`"},
+		{"constructor", "module Facade exposing (A)\nimport Base exposing (T(..))\n", "INVALID EXPORT", "`T(..)`"},
+		{"prelude", "module Facade exposing (print)\n", "UNKNOWN EXPORT", "has no declaration named `print`"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d := t.TempDir()
+			entry := write(t, d, "Main.fango", "module Main exposing (main)\nimport Facade\nmain = 0\n")
+			write(t, d, "Base.fango", "module Base exposing (T(..), b)\ntype T = A | B\nb = 1\n")
+			write(t, d, "Facade.fango", tt.facade)
+			_, errs := Load(entry)
+			if len(errs) == 0 || errs[0].Title != tt.title || !strings.Contains(errs[0].Body, tt.body) {
+				t.Fatalf("errors: %#v", errs)
+			}
+		})
+	}
+}

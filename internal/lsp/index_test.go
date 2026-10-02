@@ -63,6 +63,46 @@ func TestIndexAcrossModulesAndRecordFields(t *testing.T) {
 	}
 }
 
+func TestReexportNavigation(t *testing.T) {
+	root := t.TempDir()
+	base := "module Base exposing (Box(..), mk)\n\ntype Box = Box Int\n\nmk : Box\nmk = Box 1\n"
+	facade := "module Facade exposing (Box(..), mk)\n\nimport Base exposing (Box(..), mk)\n"
+	main := "module Main exposing (main)\n\nimport Facade\n\nmain = case Facade.mk of\n    Facade.Box n -> n\n"
+	for name, data := range map[string]string{"Base.fango": base, "Facade.fango": facade, "Main.fango": main} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entry := filepath.Join(root, "Main.fango")
+	result, errs, internal := (&check.Session{DisableObjectCache: true, LoadOptions: modules.LoadOptions{Root: root}}).Compile(entry)
+	if internal != nil || len(errs) > 0 {
+		t.Fatalf("check: %v %v", internal, errs)
+	}
+	idx := newIndex(root, result)
+	targets := func(path string) map[string]bool {
+		out := map[string]bool{}
+		for _, use := range idx.documents[filepath.Join(root, path)].uses {
+			out[use.target] = true
+		}
+		return out
+	}
+	for _, want := range []string{"value:Base.mk", "ctor:Base.Box"} {
+		if !targets("Main.fango")[want] {
+			t.Errorf("Main does not link %s", want)
+		}
+	}
+	// The facade's export list names the originals, not only its import.
+	header := map[string]bool{}
+	for _, use := range idx.documents[filepath.Join(root, "Facade.fango")].uses {
+		if use.span.StartPos().Line == 1 {
+			header[use.target] = true
+		}
+	}
+	if !header["value:Base.mk"] || !header["type:Base.Box"] {
+		t.Errorf("facade header uses = %v", header)
+	}
+}
+
 func TestUTF16PositionConversion(t *testing.T) {
 	f := source.NewFile("u.fango", []byte("-- 😀x\r\nmain = 1\n"))
 	offset := strings.Index(string(f.Content), "x")

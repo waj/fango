@@ -1,0 +1,20 @@
+module Shapes.Core exposing (Ask(..), Named(..), Point(..), Shape(..), area, unit)
+
+effect Ask
+    ask : () -> Int
+
+class Named a
+    name : a -> String
+
+type Point = { x : Int, y : Int }
+
+type Shape = Square Int | Rect Int Int
+
+area : Shape -> Int
+area shape =
+    case shape of
+        Square side -> side * side
+        Rect w h -> w * h
+
+unit : Shape
+unit = Square 1
