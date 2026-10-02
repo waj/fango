@@ -7,6 +7,7 @@ import (
 	"github.com/waj/fango/internal/diag"
 	"github.com/waj/fango/internal/libroot"
 	"github.com/waj/fango/internal/repl"
+	"golang.org/x/term"
 )
 
 // cmdRepl starts a session whose source root is the given directory, or the
@@ -27,6 +28,11 @@ func cmdRepl(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 1 {
 		opts.Root = args[0]
 	}
+	// Line editing needs the process's own terminal on both ends; piped or
+	// redirected sessions read plain lines.
+	opts.Interactive = stdout == io.Writer(os.Stdout) && isTerminal(os.Stdin) && isTerminal(os.Stdout)
 	repl.RunWith(os.Stdin, stdout, opts)
 	return 0
 }
+
+func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }

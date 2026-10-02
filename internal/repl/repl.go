@@ -49,6 +49,12 @@ type Options struct {
 	// compiles without reusing or publishing artifacts.
 	Cache        check.ObjectCache
 	DisableCache bool
+	// Interactive edits prompt and program lines with a terminal line
+	// editor that reads the process's stdin in place of RunWith's reader;
+	// the writer must be that terminal's stdout.
+	Interactive bool
+	// lineEditor replaces the terminal editor of an Interactive session.
+	lineEditor func(out *tailWriter, cancel func()) lineEditor
 }
 
 func (o Options) objectCache(root string) check.ObjectCache {
@@ -174,6 +180,11 @@ func Run(in io.Reader, out io.Writer) {
 // blank line, a column-1 line (necessarily a new declaration or expression),
 // or EOF submits the buffer.
 func RunWith(in io.Reader, out io.Writer, opts Options) {
+	var tail *tailWriter
+	if opts.Interactive {
+		tail = &tailWriter{w: out}
+		out = tail
+	}
 	s := NewSessionWith(out, opts)
 	defer s.Close()
 	fmt.Fprintln(out, banner)
@@ -181,6 +192,11 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 	signals := make(chan os.Signal, 1)
 	interrupts := make(chan struct{}, 1)
 	stopped := make(chan struct{})
+	cancelEval := func() {
+		if executor := s.evalExec.Load(); executor != nil {
+			executor.Interrupt()
+		}
+	}
 	signal.Notify(signals, os.Interrupt)
 	defer signal.Stop(signals)
 	defer close(stopped)
@@ -188,9 +204,7 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 		for {
 			select {
 			case <-signals:
-				if executor := s.evalExec.Load(); executor != nil {
-					executor.Interrupt()
-				}
+				cancelEval()
 				select {
 				case interrupts <- struct{}{}:
 				default:
@@ -200,7 +214,18 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 			}
 		}
 	}()
-	input := newLinePump(reader, interrupts)
+	var source lineSource = plainSource{reader}
+	var ed lineEditor
+	if opts.Interactive {
+		if opts.lineEditor != nil {
+			ed = opts.lineEditor(tail, cancelEval)
+		} else {
+			ed = newEditor(tail, cancelEval)
+		}
+		defer ed.Close()
+		source = ed
+	}
+	input := newLinePump(source, interrupts)
 	defer input.Close()
 	s.interrupts = interrupts
 	s.ioctx = &eval.IOContext{Reader: reader, Input: input, Writer: out, Natives: s.ioctx.Natives}
@@ -212,15 +237,22 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 		}
 	}
 	for {
-		if buf.Len() == 0 {
-			fmt.Fprint(out, "> ")
-		} else {
-			fmt.Fprint(out, "| ")
+		req := lineRequest{prompt: "> "}
+		if buf.Len() > 0 {
+			req.prompt = "| "
+			// Continuation lines start at the previous line's indentation.
+			last := buf.String()[strings.LastIndexByte(buf.String(), '\n')+1:]
+			req.suggestion = last[:len(last)-len(strings.TrimLeft(last, " "))]
 		}
-		data, err := input.next()
+		if ed == nil {
+			fmt.Fprint(out, req.prompt)
+		}
+		data, err := input.next(req)
 		if errors.Is(err, errInterruptedInput) {
 			buf.Reset()
-			fmt.Fprintln(out)
+			if !errors.Is(err, errAbortedInput) {
+				fmt.Fprintln(out)
+			}
 			continue
 		}
 		line := string(data)
@@ -232,6 +264,9 @@ func RunWith(in io.Reader, out io.Writer, opts Options) {
 		line = strings.TrimSuffix(line, "\n")
 		line = strings.TrimSuffix(line, "\r")
 		trimmed := strings.TrimSpace(line)
+		if ed != nil && trimmed != "" {
+			ed.record(line)
+		}
 
 		if buf.Len() > 0 {
 			if trimmed == "" {

@@ -1,6 +1,6 @@
 # REPL
 
-Persistent prompt scope, imports, transactions, redefinition, and commands.
+Persistent prompt scope, imports, transactions, redefinition, commands, and line editing.
 
 [Reference index](../reference.md).
 
@@ -91,5 +91,25 @@ next line to the old expression. Native operations and task CPU loops that do
 not cooperate can delay the prompt; source task cancellation does not insert
 compiler polling into those loops.
 
-`:reload` and interactive history are not implemented; a module edited on disk
-after it was imported is not re-read in the same session.
+`:reload` is not implemented; a module edited on disk after it was imported is
+not re-read in the same session.
+
+## Line editing
+
+When both stdin and stdout are a terminal, the REPL edits input with an
+Emacs-style line editor: cursor and word movement, kill and yank, Up/Down
+through history, and Ctrl-R reverse search. Submitted prompt lines, one entry
+per physical line and without an immediate repeat, are kept in
+`~/.fango_history` across sessions; lines a program reads are not. A `| `
+continuation line starts at the previous line's indentation, and a line left
+holding only that indentation submits like a blank one.
+
+A program's `readLine` is edited too. The editor redraws the program's partial
+output line (`Name? `) as that read's prompt unless it is long or holds control
+characters such as colour codes, in which case typing may overwrite it.
+Ctrl-C there interrupts the evaluation, as it does elsewhere, and Ctrl-D ends
+only that read: the program sees end of input and the session continues. Ctrl-D
+on an empty prompt line exits as before.
+
+Piped or redirected input reads plain lines, with the prompt printed to stdout,
+and keeps no history.

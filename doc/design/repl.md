@@ -39,10 +39,13 @@ old memoized values or closures. Class redefinition is rejected; type redefiniti
 has fresh nominal identity and may install new instances. Identity allocations are
 not reused on rollback.
 
-The prompt and its native host RPCs consume one line pump. Ctrl-C revokes the
-current prompt input or signals the active worker. A host read interrupted in
-the middle leaves the line pump as the sole reader; the next prompt receives
-the next line. The worker handles the signal without discarding its persistent
+The prompt and its native host RPCs consume one line pump. Its one reader is a
+line source: plain buffered stdin, or in a terminal the line editor, which then
+reads program lines as well as prompt lines so no second reader competes for
+the terminal. Ctrl-C revokes the current prompt input or signals the active
+worker; the editor reads Ctrl-C as a key and cancels the evaluation through the
+same path as the signal. A host read interrupted in the middle leaves the line
+pump as the sole reader; the next prompt receives the next line. The worker handles the signal without discarding its persistent
 heap. Each evaluation owns a fresh host context. Interruption cancels that
 context and all Async roots derived from it. Outside an Async runner, evaluator
 checkpoints restore the prompt. Inside a runner, the [supervisor](tasks.md#async-runtime-foundation)

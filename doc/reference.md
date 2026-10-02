@@ -94,4 +94,4 @@ The bundled library is experimental and versioned with the compiler.
 
 ## REPL
 
-[REPL](reference/repl.md) — Prompt scope, imports, redefinition, rollback, and commands.
+[REPL](reference/repl.md) — Prompt scope, imports, redefinition, rollback, commands, and line editing.
