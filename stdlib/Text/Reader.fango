@@ -180,9 +180,24 @@ peekWindow snapshot =
         EmptyBuffer -> Ok Nothing
         Buffered encoding bytes _ -> decodeScalar encoding bytes snapshot.index
 
+-- Scanners read most characters through here, so the ASCII path stays a
+-- short sequence of small calls the Go backend inlines; every other byte
+-- leaves for the decoding path in a separate function.
 readWindow : Window -> Result Encoding.Error (Maybe (Char, Int, Window))
 readWindow snapshot =
-    case peekWindow snapshot of
+    case snapshot.buffer of
+        EmptyBuffer -> Ok Nothing
+        Buffered encoding bytes _ -> case Bytes.byteAt snapshot.index bytes of
+            Nothing -> Ok Nothing
+            Just code ->
+                if code < 128 then case Char.fromCode code of
+                    Just char -> Ok (Just (char, 1, { snapshot | index = snapshot.index + 1 }))
+                    Nothing -> readDecoded encoding bytes snapshot
+                else readDecoded encoding bytes snapshot
+
+readDecoded : Encoding -> Bytes.Bytes -> Window -> Result Encoding.Error (Maybe (Char, Int, Window))
+readDecoded encoding bytes snapshot =
+    case Encoding.decodeAt encoding bytes snapshot.index of
         Err error -> Err error
         Ok Nothing -> Ok Nothing
         Ok (Just (char, width)) -> Ok (Just (char, width, { snapshot | index = snapshot.index + width }))
