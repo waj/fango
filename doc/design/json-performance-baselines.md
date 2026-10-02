@@ -40,7 +40,16 @@ Go 95.9 → 89.3 ms and LLVM 57.5 → 53.4 ms (11 pairs).
 
 Accumulating escaped strings in a `Text.Builder` instead of a reversed
 fragment list took Go from 88.6 to 81.1 ms and LLVM from 52.8 to 51.0 ms
-(11 pairs). The span
+(11 pairs).
+
+Two cursor reductions were measured with timing-only library copies and
+rejected. Removing every per-token column addition from the scanners, an
+upper bound for deriving columns from a line start, measured 81.9 → 81.7 ms
+on Go and 50.0 → 51.0 ms on LLVM: the additions cost nothing measurable, and
+a line-start field would not shrink the cursor. Making the window buffer a
+single-constructor product, with empty bytes in place of the empty case,
+measured 82.7 → 125.7 ms on Go and 50.5 → 54.2 ms on LLVM, because the
+product is stored inline in every window while the sum is one pointer. The span
 change costs LLVM one more call per string, where the predicate loop was
 already inlined. Before the chunk change the C file handle answered at most
 4096 bytes per pull whatever the request.

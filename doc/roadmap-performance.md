@@ -13,25 +13,6 @@ with alternating fresh-process pairs of the previous commit's binaries on the
 helps one backend and costs the other states both numbers in its commit and
 in the baselines.
 
-## P3 — smaller window and scan cursors
-
-**Problem.** Every buffered scan returns its advanced cursor, usually inside a
-`Maybe` or `Result`. `Text.Reader.Window` is an interface-backed buffer sum
-plus an index, and `Json.Scan` adds line, column, and nesting allowance: six
-words copied through every token's result.
-
-**Change.** Measure two independent reductions and keep what pays:
-
-- The scan cursor derives its column from a line-start position instead of
-  updating the column for every token. Columns are byte-based, so the
-  diagnostic is identical; only newlines touch line state.
-- The window's buffer becomes a representation without the empty/buffered
-  sum check, chosen so that `Window` does not grow. Zero-length bytes stand
-  in for the empty buffer.
-
-**Acceptance.** All JSON diagnostic fixtures report identical offsets, lines,
-and columns, including across refills and with Latin-1 input.
-
 ## P4 — a Core inliner
 
 **Problem.** Small helpers are not inlined: Go's inliner rejects most

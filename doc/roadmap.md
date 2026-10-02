@@ -41,7 +41,7 @@ place, and file pulls are 64 KiB; the measured series is in the
 [comparison baselines](design/json-performance-baselines.md).
 
 [Generated-code performance](roadmap-performance.md) owns the next measured
-round: smaller scan cursors, a Core inliner, and static-argument specialization.
+round: a Core inliner and static-argument specialization.
 
 The [buffered pull cursor](design/json.md) shares its text window's buffer
 description, defers reader commits to refills and scope exit, and fuses record
