@@ -1,12 +1,12 @@
 import Async
 import Bytes
-import Http exposing (ResponseBody(..))
+import Http exposing (Body(..))
 import Http.Server
 import IO
 import String
 
-respond : Http.Request e ->{e} Http.Response e
-respond _ = Http.Response
+respond : Http.Server.Request e ->{e} Http.Server.Response e
+respond _ = Http.Server.Response
     { status = 200
     , headers = []
     , body = BytesBody (Bytes.fromString "Hello, world")

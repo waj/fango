@@ -1,9 +1,10 @@
 {-# no-prelude #-}
-module Http.Route exposing (Param(..), Route(..), dispatch, lookup, path)
+module Http.Server.Route exposing (Param(..), Route(..), dispatch, lookup, path)
 
 import Basics exposing (..)
 import Bytes
-import Http exposing (Error(..), ErrorKind(..), Header(..), Protocol(..), Request(..), Response(..), ResponseBody(..))
+import Http exposing (Body(..), Error(..), Header(..), Protocol(..))
+import Http.Server exposing (Request(..), Response(..))
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 import String
@@ -67,9 +68,9 @@ decodeBytes bytes reversed =
             second = hexValue lo
             decoded = first * 16 + second
             if first < 0 || second < 0 || decoded == 47 || decoded == 92 then
-                invalid (Error { kind = BadRequest, message = "invalid path escape" })
+                invalid (Malformed "invalid path escape")
             else decodeBytes rest [decoded | reversed]
-        [37 | _] -> invalid (Error { kind = BadRequest, message = "invalid path escape" })
+        [37 | _] -> invalid (Malformed "invalid path escape")
         [byte | rest] -> decodeBytes rest [byte | reversed]
 
 decodeSegment : String ->{Protocol} String
@@ -77,7 +78,7 @@ decodeSegment segment =
     decoded = Bytes.fromList (decodeBytes (Bytes.toList (Bytes.fromString segment)) [])
     case Bytes.toString decoded of
         Just text -> text
-        Nothing -> invalid (Error { kind = BadRequest, message = "path segment is not UTF-8" })
+        Nothing -> invalid (Malformed "path segment is not UTF-8")
 
 segments : String ->{Protocol} List String
 segments raw = List.map decodeSegment (String.split "/" raw)

@@ -138,3 +138,24 @@ func socketHTTPResponse(t *testing.T, port int, request string, sendEOF bool) st
 	}
 	return response.Proto + " " + response.Status + "\r\n\r\n" + string(body)
 }
+
+func TestHTTPServerResponseBodies(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join("testdata", "http_bodies.fango")
+	port := unusedTCPPort(t)
+	cmd := exec.Command(cliCompiledBinary(t, path), strconv.Itoa(port))
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+
+	dialEcho(t, port).Close()
+	invalid := socketHTTP(t, port, "GET /invalid HTTP/1.1\r\nHost: localhost\r\n\r\n")
+	if !strings.Contains(invalid, "HTTP/1.1 500") {
+		t.Fatalf("invalid response: %q", invalid)
+	}
+	sized := socketHTTP(t, port, "GET /sized HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+	if !strings.Contains(sized, "HTTP/1.1 200") || !strings.HasSuffix(sized, "\r\n\r\nhello") {
+		t.Fatalf("sized response: %q", sized)
+	}
+}

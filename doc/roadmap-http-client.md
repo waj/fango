@@ -55,34 +55,20 @@ Errors come in three levels, each with its own type:
   doesn't meet the caller's expectation. Only the helpers and `expectSuccess`
   raise it.
 
-```fango
--- Http
-type Error = Malformed String | LineTooLong | HeadersTooLarge | BodyTooLarge
-           | Unsupported String | InvalidMessage String | BodyAborted String
+`Http.Error` is [implemented](reference/library-http.md#errors). The client
+adds two types:
 
--- Http.Client
+```fango
 type Error      = InvalidUrl String | Transport Net.Error | Timeout | Protocol Http.Error
                 | TooManyRedirects
 type Unexpected = BadStatus Reply | BadBody Json.Error
 ```
 
-All three are plain unions, and each constructor carries only the data its case
+Both are plain unions, and each constructor carries only the data its case
 needs. The caller already knows which URL it requested, so errors don't repeat
-it.
-
-`Http.Error` replaces the current `{ kind : ErrorKind, message : String }`
-record. The constructors keep a message only where the case varies. The server
-maps them to statuses as it does today:
-
-| Constructor | Meaning | Server status |
-| --- | --- | --- |
-| `Malformed` | Invalid syntax in a request line, status line, header, chunk, or gzip stream; a fixed body that ends early | 400 |
-| `LineTooLong` | Request or status line over its limit | 414 |
-| `HeadersTooLarge` | Header block or trailers over the limit | 431 |
-| `BodyTooLarge` | Body over the limit, decompressed size included | 413 |
-| `Unsupported` | Unknown transfer or content coding | 501 for a transfer coding, 415 for a content coding |
-| `InvalidMessage` | A message the application built is invalid: a managed header set by the caller, a body on a status that can't carry one, a sized body whose length doesn't match | 500 when nothing has been sent yet |
-| `BodyAborted` | A streaming body stopped on purpose, through `abortBody` | none; the head has already been sent |
+it. A malformed status line, a malformed gzip stream, and a status line over
+`maxHeaderBytes` reuse `Malformed` and `LineTooLong`; a decompressed body over
+its limit is `BodyTooLarge`.
 
 `Client.Error` reports what can go wrong with a request regardless of how the
 caller reads the response:
@@ -503,46 +489,19 @@ A general copy helper, `Writer.copy : Reader e -> Writer e ->{e} ()`, serves
 any reader. `Writer` imports `Reader` for it, which is safe because `Reader`
 doesn't import `Writer`.
 
-**Known and unknown length.**
+**Known and unknown length, chunk sizes, and failures.** `SizedBody`, chunk
+collection, and the rule that a body failing partway leaves its message
+truncated are [implemented](reference/library-http.md#messages-and-bodies) for
+the server. The client follows the same rules through `Http.Wire`. A request
+body that raises any abort (a `Fail` in the caller's row, for instance) has the
+connection closed by the bracket, and the abort reaches the caller of `send`
+unchanged, through `e`, not wrapped in `Client.Error`. Retrying, or keeping a
+database consistent, is the caller's responsibility.
 
-- `StreamBody` is sent with chunked encoding.
-- `SizedBody n` is sent with `Content-Length: n`. Many upload targets reject
-  chunked request bodies (S3 presigned PUTs and many APIs), and a download
-  with a length lets the client show progress.
-- The library counts the bytes of a `SizedBody`. A write that goes past `n`
-  raises `InvalidMessage` at that write. A body that returns having written
-  fewer than `n` bytes raises `InvalidMessage` at the end.
-- A `HEAD` response with a `SizedBody` sends the `Content-Length` and doesn't
-  run the body. 204 and 304 responses can't carry any body, as today.
-
-**Chunk sizes.** Today `chunkWriter` frames every `emit` call as its own
-chunk, and `TextWriter.borrow` doesn't buffer. A JSON body therefore sends
-each token as a separate chunk, `1\r\n"\r\n` for a quote. The chunked writer
-in `Http.Wire` collects writes up to a window (8 KiB, the same as
-`Writer.over`) and frames one chunk per window. An explicit `flush` from the
-body frames whatever is pending and flushes the socket. Streaming responses
-such as server-sent events rely on that. This changes the server's output,
-so it is part of HC1. Server goldens change only where a streamed body's
-chunk boundaries move.
-
-**A body that fails partway.** Both directions follow one rule: the message is
-aborted, never completed. The library never writes the final zero-length
-chunk and never pads a sized body. It closes the connection, which is
-therefore never reused. The other side sees a truncated message and rejects
-it.
-
-- **Client:** a request body that raises any abort (a `Fail` in the caller's
-  row, for instance) has the connection closed by the bracket. The abort
-  reaches the caller of `send` unchanged, through `e`, and is not wrapped in
-  `Client.Error`. Retrying, or keeping a database consistent, is the caller's
-  responsibility.
-- **Server:** a handler must handle its own failures before returning, so a
-  failure in the middle of the body has nowhere to propagate. A streaming
-  response body stops on purpose by calling
-  `Http.abortBody : String ->{Protocol} a`, which raises `BodyAborted`. The
-  server already skips the final chunk when a body aborts through `Protocol`.
-  With `abortBody` that becomes a stated guarantee rather than a side effect
-  of raising `InvalidMessage`.
+A server body stops on purpose with `Http.abortBody`, but under `serve` a
+handler cannot yet raise `Protocol`: a scoped runner can't grant its callback an
+effect the runner handles. [HC8](#hc8-runner-handled-effects-in-scoped-callbacks)
+lifts that restriction.
 
 **Proxying.** A server handler can stream its request body into a client
 request and the client's response back:
@@ -699,7 +658,8 @@ follow allocation order, not that order.
 
 | Milestone | Depends on |
 | --- | --- |
-| HC1 Module split | — |
+| HC1 Module split | — (DONE) |
+| HC8 Runner-handled effects in scoped callbacks | HC1 |
 | HC6 URL | — |
 | HC2 Client core over plain HTTP | HC1, HC6 |
 | HC7 GZip | HC2 |
@@ -709,24 +669,18 @@ follow allocation order, not that order.
 
 ### HC1 Module split
 
-This milestone covers the shared types and the server-side changes:
+DONE. See the [HTTP reference](reference/library-http.md) and the
+[HTTP design](design/http.md).
 
-- Rename `ResponseBody` to `Body` and add `SizedBody`, with the length check
-  and the HEAD rule.
-- Turn `Http.Error` into the plain union from [errors](#errors), with the
-  status table, and add `abortBody`.
-- Add `Http.Wire` with the buffered chunked writer: one chunk per 8 KiB window
-  or explicit flush.
-- Move the server message types and codec into `Http.Server`.
-- Move `Http.Route` to `Http.Server.Route`.
-- Let `Http.GZip.wrap` handle `SizedBody`.
-- Update `examples/http_server.fango` and the `testdata/run/http_*.fango`
-  fixtures. Server goldens change only where a streamed body's chunk boundaries
-  move. Add fixtures for a `SizedBody` length mismatch in both directions, for
-  `abortBody` truncating a chunked response, and for a body made of
-  single-byte writes producing one chunk.
-- Update the [HTTP reference](reference/library-http.md) and the
-  [HTTP design](design/http.md).
+### HC8 Runner-handled effects in scoped callbacks
+
+A scoped runner may list effects it handles on its callback's arrow, as in
+`(Request s ->{Protocol | s} Response s)`, the way `Fail.attempt` takes
+`() ->{Fail error | e} value`. The runner discharges them, so they don't reach
+its residual row. `Http.Server.serve` then lets handlers and their bodies use
+`Protocol`, so `abortBody` and `Http.Server.Route.dispatch` work in a handler
+without a local `handle`. Add a loopback check that an aborted body closes the
+connection without the final chunk.
 
 ### HC6 URL
 

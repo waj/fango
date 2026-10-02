@@ -1,0 +1,32 @@
+import Async
+import Bytes
+import Http exposing (Body(..))
+import Http.Server
+import IO
+import String
+import Writer
+
+main() =
+    case IO.args() of
+        [raw] ->
+            case String.toInt raw of
+                Just port ->
+                    print (Async.run {
+                            stop = Async.channel 1
+                            Http.Server.serve (Http.Server.defaultConfig port) stop { request ->
+                                -- An invalid response, then one whose body is sized.
+                                if request.target == "/invalid" then
+                                    Http.Server.Response { status = 204, headers = [], body = BytesBody (Bytes.fromString "x") }
+                                else
+                                    Http.Server.Response
+                                        { status = 200
+                                        , headers = []
+                                        , body = SizedBody 5 { w ->
+                                            Writer.writeString w "hel"
+                                            Writer.writeString w "lo"
+                                        }
+                                        }
+                            }
+                    })
+                Nothing -> IO.exit 2
+        _ -> IO.exit 2

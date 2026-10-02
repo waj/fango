@@ -1,17 +1,24 @@
 {-# no-prelude #-}
-module Http exposing (Error(..), ErrorKind(..), Header(..), Protocol(..), Request(..), Response(..), ResponseBody(..), Version(..), equalAscii, getHeader, getHeaders, hasHeader, removeHeader, setHeader, withRequest, writeResponse)
+module Http exposing (Body(..), Error(..), Header(..), Protocol(..), Version(..), abortBody, equalAscii, getHeader, getHeaders, hasHeader, removeHeader, setHeader)
 
 import Basics exposing (..)
-import Bytes exposing (Bytes, Source(..))
+import Bytes exposing (Bytes)
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
-import Reader exposing (Read(..), Reader(..))
-import Runtime.Local
-import String
-import Writer exposing (Writer(..))
+import Writer exposing (Writer)
 
-type ErrorKind = BadRequest | RequestLineTooLong | HeadersTooLarge | BodyTooLarge | Unsupported | InvalidResponse deriving (Eq, Show)
-type Error = { kind : ErrorKind, message : String } deriving (Eq, Show)
+{- Types both HTTP directions share. Framing lives in `Http.Wire`, the server
+in `Http.Server`. -}
+
+type Error
+    = Malformed String
+    | LineTooLong
+    | HeadersTooLarge
+    | BodyTooLarge
+    | Unsupported String
+    | InvalidMessage String
+    | BodyAborted String
+    deriving (Eq, Show)
 
 effect Protocol
     abort invalid : Error -> value
@@ -19,29 +26,17 @@ effect Protocol
 type Version = Http11 deriving (Eq, Show)
 type Header = { name : String, value : String } deriving (Eq, Show)
 
-type Request e =
-    { method : String
-    , target : String
-    , version : Version
-    , headers : List Header
-    , body : Reader e
-    }
+-- A streaming body pushes into the writer; a sized one declares its length.
+type Body e
+    = Empty
+    | BytesBody Bytes
+    | StreamBody (Writer e ->{e} ())
+    | SizedBody Int (Writer e ->{e} ())
 
-type ResponseBody e = Empty | BytesBody Bytes | StreamBody (Writer e ->{e} ())
-
-type Response e =
-    { status : Int
-    , headers : List Header
-    , body : ResponseBody e
-    }
-
-type Framing = NoBody | Fixed Int | Chunked
-type Head = { method : String, target : String, headers : List Header, framing : Framing }
-type ChunkState = { remaining : Int, done : Bool, total : Int }
-type ChunkCell e = { read : () ->{e} ChunkState, write : ChunkState ->{e} () }
-
-bad : ErrorKind -> String ->{Protocol} a
-bad kind message = invalid (Error { kind = kind, message = message })
+-- Stops a streaming body on purpose. The message is left truncated and the
+-- connection is closed, so the peer cannot mistake it for a complete one.
+abortBody : String ->{Protocol} a
+abortBody reason = invalid (BodyAborted reason)
 
 asciiLower : Int -> Int
 asciiLower code = if code >= 65 && code <= 90 then code + 32 else code
@@ -87,330 +82,3 @@ removeHeader name headers = List.filter { header -> if equalAscii name header.na
 
 setHeader : String -> String -> List Header -> List Header
 setHeader name value headers = [Header { name = name, value = value } | removeHeader name headers]
-
-tokenByte : Int -> Bool
-tokenByte code = (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
-    || code == 33 || code == 35 || code == 36 || code == 37 || code == 38
-    || code == 39 || code == 42 || code == 43 || code == 45 || code == 46
-    || code == 94 || code == 95 || code == 96 || code == 124 || code == 126
-
-allToken : Bytes -> Int -> Bool
-allToken bytes index =
-    if index >= Bytes.length bytes then index > 0
-    else
-        case Bytes.byteAt index bytes of
-            Just code -> if tokenByte code then allToken bytes (index + 1) else False
-            Nothing -> False
-
-fieldByte : Int -> Bool
-fieldByte code = code == 9 || (code >= 32 && code /= 127)
-
-targetByte : Int -> Bool
-targetByte code = code >= 33 && code <= 126
-
-allField : Bytes -> Int -> Bool
-allField bytes index =
-    if index >= Bytes.length bytes then True
-    else
-        case Bytes.byteAt index bytes of
-            Just code -> if fieldByte code then allField bytes (index + 1) else False
-            Nothing -> False
-
-allTarget : Bytes -> Int -> Bool
-allTarget bytes index =
-    if index >= Bytes.length bytes then index > 0
-    else
-        case Bytes.byteAt index bytes of
-            Just code -> if targetByte code then allTarget bytes (index + 1) else False
-            Nothing -> False
-
-owsStart : Bytes -> Int -> Int
-owsStart bytes index =
-    case Bytes.byteAt index bytes of
-        Just code -> if code == 32 || code == 9 then owsStart bytes (index + 1) else index
-        Nothing -> index
-
-owsEnd : Bytes -> Int -> Int
-owsEnd bytes end =
-    if end <= 0 then 0
-    else
-        case Bytes.byteAt (end - 1) bytes of
-            Just code -> if code == 32 || code == 9 then owsEnd bytes (end - 1) else end
-            Nothing -> end
-
-decode : Bytes ->{Protocol} String
-decode bytes =
-    case Bytes.toString bytes of
-        Just value -> value
-        Nothing -> bad BadRequest "header value is not UTF-8"
-
-requestLine : Bytes ->{Protocol} (String, String)
-requestLine bytes =
-    case Bytes.indexOf (Bytes.fromString " ") bytes of
-        Nothing -> bad BadRequest "malformed request line"
-        Just first ->
-            case Bytes.indexOfFrom (first + 1) (Bytes.fromString " ") bytes of
-                Nothing -> bad BadRequest "malformed request line"
-                Just second ->
-                    method = Bytes.slice 0 first bytes
-                    target = Bytes.slice (first + 1) second bytes
-                    version = Bytes.slice (second + 1) (Bytes.length bytes) bytes
-                    if allToken method 0 == False || allTarget target 0 == False || version /= Bytes.fromString "HTTP/1.1" then
-                        bad BadRequest "invalid HTTP/1.1 request line"
-                    else
-                        (decode method, decode target)
-
-headerLine : Bytes ->{Protocol} Header
-headerLine bytes =
-    case Bytes.indexOf (Bytes.fromString ":") bytes of
-        Nothing -> bad BadRequest "malformed header"
-        Just colon ->
-            name = Bytes.slice 0 colon bytes
-            value = Bytes.slice (colon + 1) (Bytes.length bytes) bytes
-            if allToken name 0 == False || allField value 0 == False then
-                bad BadRequest "invalid header"
-            else
-                trimmed = Bytes.slice (owsStart value 0) (owsEnd value (Bytes.length value)) value
-                Header { name = decode name, value = decode trimmed }
-
-headerLines : Reader e -> Int -> List Header ->{Protocol | e} List Header
-headerLines reader remaining reversed =
-    if remaining < 2 then bad HeadersTooLarge "header block exceeds limit"
-    else
-        case Reader.readUntil reader (Bytes.fromString "\r\n") remaining of
-            Found line ->
-                if Bytes.length line == 0 then List.reverse reversed
-                else headerLines reader (remaining - Bytes.length line - 2) [headerLine line | reversed]
-            Ended _ -> bad BadRequest "incomplete header block"
-            Overflowed -> bad HeadersTooLarge "header block exceeds limit"
-
-decimalBytes : Bytes -> Int -> Bool
-decimalBytes bytes index =
-    if index >= Bytes.length bytes then index > 0
-    else
-        case Bytes.byteAt index bytes of
-            Just code -> if code >= 48 && code <= 57 then decimalBytes bytes (index + 1) else False
-            Nothing -> False
-
-framing : List Header -> Int ->{Protocol} Framing
-framing headers maxBody =
-    lengths = getHeaders "content-length" headers
-    transfers = getHeaders "transfer-encoding" headers
-    case (lengths, transfers) of
-        ([], []) -> NoBody
-        ([raw], []) ->
-            if decimalBytes (Bytes.fromString raw) 0 == False then bad BadRequest "invalid Content-Length"
-            else
-                case String.toInt raw of
-                    Nothing -> bad BadRequest "invalid Content-Length"
-                    Just size -> if size > maxBody then bad BodyTooLarge "request body exceeds limit" else Fixed size
-        ([], [raw]) ->
-            if equalAscii raw "chunked" then Chunked else bad Unsupported "unsupported transfer coding"
-        _ -> bad BadRequest "ambiguous request framing"
-
-readHead : Reader e -> Int -> Int -> Int ->{Protocol | e} Maybe Head
-readHead reader lineLimit headersLimit bodyLimit =
-    case Reader.readUntil reader (Bytes.fromString "\r\n") lineLimit of
-        Ended line ->
-            if Bytes.length line == 0 then Nothing else bad BadRequest "incomplete request line"
-        Overflowed -> bad RequestLineTooLong "request line exceeds limit"
-        Found line ->
-            (method, target) = requestLine line
-            headers = headerLines reader headersLimit []
-            case getHeaders "host" headers of
-                [_] ->
-                    bodyFraming = framing headers bodyLimit
-                    Just (Head { method = method, target = target, headers = headers, framing = bodyFraming })
-                _ -> bad BadRequest "HTTP/1.1 requires one Host header"
-
-hexValue : Int -> Int
-hexValue code =
-    if code >= 48 && code <= 57 then code - 48
-    else if code >= 65 && code <= 70 then code - 55
-    else if code >= 97 && code <= 102 then code - 87
-    else -1
-
-chunkDigits : Bytes -> Int -> Int -> Int ->{Protocol} Int
-chunkDigits bytes index limit value =
-    if index >= Bytes.length bytes then
-        if index == 0 then bad BadRequest "empty chunk size" else value
-    else
-        case Bytes.byteAt index bytes of
-            Nothing -> bad BadRequest "invalid chunk size"
-            Just code ->
-                digit = hexValue code
-                if digit < 0 then bad BadRequest "invalid chunk size"
-                else if value > quotientBy 16 limit || value * 16 + digit > limit then
-                    bad BodyTooLarge "request body exceeds limit"
-                else chunkDigits bytes (index + 1) limit (value * 16 + digit)
-
-chunkSize : Bytes -> Int ->{Protocol} Int
-chunkSize line limit =
-    case Bytes.indexOf (Bytes.fromString ";") line of
-        Nothing -> chunkDigits line 0 limit 0
-        Just at ->
-            extension = Bytes.slice (at + 1) (Bytes.length line) line
-            if allField extension 0 == False then bad BadRequest "invalid chunk extension"
-            else chunkDigits (Bytes.slice 0 at line) 0 limit 0
-
-chunkTerminator : Reader e ->{Protocol | e} ()
-chunkTerminator input =
-    case Reader.readExactly input 2 of
-        Just bytes -> if bytes == Bytes.fromString "\r\n" then () else bad BadRequest "invalid chunk terminator"
-        Nothing -> bad BadRequest "incomplete chunk"
-
-chunkPull : Reader e -> ChunkCell e -> Int -> Int ->{Protocol | e} Maybe Bytes
-chunkPull input state maxBody headersLimit =
-    current = state.read()
-    if current.done then Nothing
-    else if current.remaining > 0 then
-        wanted = if current.remaining > 8192 then 8192 else current.remaining
-        data = Reader.readUpTo input wanted
-        size = Bytes.length data
-        if size == 0 then bad BadRequest "incomplete chunk"
-        else
-            left = current.remaining - size
-            state.write (ChunkState { remaining = left, done = False, total = current.total })
-            if left == 0 then chunkTerminator input else ()
-            Just data
-    else
-        case Reader.readUntil input (Bytes.fromString "\r\n") 8192 of
-            Found line ->
-                size = chunkSize line (maxBody - current.total)
-                if size == 0 then
-                    ignored = headerLines input headersLimit []
-                    state.write (ChunkState { remaining = 0, done = True, total = current.total })
-                    Nothing
-                else
-                    state.write (ChunkState { remaining = size, done = False, total = current.total + size })
-                    chunkPull input state maxBody headersLimit
-            Ended _ -> bad BadRequest "incomplete chunk size"
-            Overflowed -> bad BadRequest "chunk size line exceeds limit"
-
-{-# scoped s #-}
-withChunked : Reader e -> Int -> Int -> (Reader s ->{s} a) ->{Protocol | e} (a, Bool)
-withChunked input maxBody headersLimit use =
-    Runtime.Local.run (ChunkState { remaining = 0, done = False, total = 0 }) { state ->
-        cell = ChunkCell { read = state.read, write = state.write }
-        Reader.over (Source { pull = { chunkPull input cell maxBody headersLimit } }) { body ->
-            value = use body
-            finished = state.read().done && Bytes.length body.buffered() == 0
-            (value, finished)
-        }
-    }
-
-emptyBody : Reader e
-emptyBody = Reader
-    { buffered = { Bytes.empty }
-    , refill = { False }
-    , skip = { _ -> 0 }
-    }
-
--- A protocol scope retains the request reader until the response body has run.
--- The Bool reports whether the handler consumed the whole framed body.
-{-# scoped s #-}
-withRequest : Int -> Int -> Int -> Reader e -> (Request s ->{s} a) ->{Protocol | e} Maybe (a, Bool)
-withRequest lineLimit headersLimit bodyLimit input use =
-    case readHead input lineLimit headersLimit bodyLimit of
-        Nothing -> Nothing
-        Just head ->
-            case head.framing of
-                NoBody ->
-                    value = use (Request { method = head.method, target = head.target, version = Http11, headers = head.headers, body = emptyBody })
-                    Just (value, True)
-                Fixed size ->
-                    (value, remaining, _) = Runtime.Local.run size { left ->
-                        Reader.limitedRemaining input size { body ->
-                            strict = Reader
-                                { buffered = body.buffered
-                                , refill = {
-                                    grew = body.refill()
-                                    if grew == False && left.read() > 0 && Bytes.length body.buffered() == 0 then
-                                        bad BadRequest "incomplete request body"
-                                    else grew
-                                  }
-                                , skip = { count ->
-                                    taken = body.skip count
-                                    left.write (left.read() - taken)
-                                    taken
-                                  }
-                                }
-                            use (Request { method = head.method, target = head.target, version = Http11, headers = head.headers, body = strict })
-                        }
-                    }
-                    Just (value, remaining == 0)
-                Chunked ->
-                    (value, complete) = withChunked input bodyLimit headersLimit { body ->
-                        use (Request { method = head.method, target = head.target, version = Http11, headers = head.headers, body = body })
-                    }
-                    Just (value, complete)
-
-validResponseHeader : Header ->{Protocol} ()
-validResponseHeader header =
-    name = Bytes.fromString header.name
-    value = Bytes.fromString header.value
-    if allToken name 0 == False || allField value 0 == False then
-        bad InvalidResponse "invalid response header"
-    else if equalAscii header.name "content-length" || equalAscii header.name "transfer-encoding" then
-        bad InvalidResponse "response framing headers are managed by Http"
-    else ()
-
-hexDigit : Int -> String
-hexDigit digit = String.slice digit (digit + 1) "0123456789ABCDEF"
-
-hexSize : Int -> String
-hexSize size =
-    if size < 16 then hexDigit size
-    else hexSize (quotientBy 16 size) ++ hexDigit (modBy 16 size)
-
-chunkWriter : Writer e -> Writer e
-chunkWriter output =
-    Writer
-        { emit = { bytes ->
-            if Bytes.length bytes > 0 then
-                Writer.writeString output (hexSize (Bytes.length bytes) ++ "\r\n")
-                Writer.write output bytes
-                Writer.writeString output "\r\n"
-            else ()
-          }
-        , flush = output.flush
-        }
-
-writeHeaders : Writer e -> List Header ->{e} ()
-writeHeaders output headers =
-    List.each { header -> Writer.writeString output (header.name ++ ": " ++ header.value ++ "\r\n") } headers
-
-writeResponse : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} ()
-writeResponse method output response =
-    if response.status < 200 || response.status > 599 || response.status == 101 then
-        bad InvalidResponse "response status must be a final non-upgrade status"
-    else
-        List.each validResponseHeader response.headers
-        noBody = response.status == 204 || response.status == 304
-        isHead = method == "HEAD"
-        case response.body of
-            Empty ->
-                Writer.writeString output ("HTTP/1.1 " ++ show response.status ++ " \r\n")
-                writeHeaders output response.headers
-                if noBody == False then Writer.writeString output "Content-Length: 0\r\n" else ()
-                Writer.writeString output "\r\n"
-                output.flush()
-            BytesBody bytes ->
-                if noBody && Bytes.length bytes > 0 then bad InvalidResponse "status cannot carry a body" else ()
-                Writer.writeString output ("HTTP/1.1 " ++ show response.status ++ " \r\n")
-                writeHeaders output response.headers
-                if noBody == False then Writer.writeString output ("Content-Length: " ++ show (Bytes.length bytes) ++ "\r\n") else ()
-                Writer.writeString output "\r\n"
-                if isHead == False && noBody == False then Writer.write output bytes else ()
-                output.flush()
-            StreamBody body ->
-                if noBody then bad InvalidResponse "status cannot carry a body" else ()
-                Writer.writeString output ("HTTP/1.1 " ++ show response.status ++ " \r\n")
-                writeHeaders output response.headers
-                if isHead == False then Writer.writeString output "Transfer-Encoding: chunked\r\n" else ()
-                Writer.writeString output "\r\n"
-                if isHead == False then
-                    body (chunkWriter output)
-                    Writer.writeString output "0\r\n\r\n"
-                else ()
-                output.flush()

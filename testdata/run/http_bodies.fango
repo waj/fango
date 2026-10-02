@@ -1,0 +1,49 @@
+import Bytes exposing (Bytes)
+import Http exposing (Body(..), Protocol(..))
+import Http.Server
+import List
+import Writer exposing (Writer)
+
+written : String -> Writer {Protocol | e} -> Http.Server.Response {Protocol | e} ->{Protocol | e} String
+written method output response =
+    Http.Server.writeResponse method output response
+    "ok"
+
+-- Reports a protocol failure after whatever was written before it.
+attempt : String -> Writer {Protocol | e} -> Http.Server.Response {Protocol | e} ->{e} String
+attempt method output response =
+    handle written method output response of
+        Http.invalid error -> show error
+
+report : (String, Bytes) -> String
+report (outcome, wire) = outcome ++ " " ++ show wire
+
+respond : Int -> Body e -> Http.Server.Response e
+respond status body = Http.Server.Response { status = status, headers = [], body = body }
+
+main() =
+    print (report (Writer.collecting { o -> attempt "GET" o (respond 200 (SizedBody 5 { w ->
+        Writer.writeString w "ab"
+        Writer.writeString w "cde"
+    })) }))
+    print (report (Writer.collecting { o -> attempt "GET" o (respond 200 (SizedBody 3 { w ->
+        Writer.writeString w "ab"
+        Writer.writeString w "cd"
+    })) }))
+    print (report (Writer.collecting { o -> attempt "GET" o (respond 200 (SizedBody 3 { w -> Writer.writeString w "ab" })) }))
+    print (report (Writer.collecting { o -> attempt "HEAD" o (respond 200 (SizedBody 3 { _ -> Http.abortBody "HEAD runs no body" })) }))
+    print (report (Writer.collecting { o -> attempt "GET" o (respond 204 (SizedBody 0 { _ -> () })) }))
+    print (report (Writer.collecting { o -> attempt "GET" o (respond 200 (SizedBody (0 - 1) { _ -> () })) }))
+    print (report (Writer.collecting { o -> attempt "GET" o (respond 200 (StreamBody { w ->
+        Writer.writeString w "partial"
+        w.flush()
+        Http.abortBody "source failed"
+    })) }))
+    print (report (Writer.collecting { o -> attempt "GET" o (respond 200 (StreamBody { w ->
+        List.each { piece -> Writer.writeString w piece } ["a", "b", "c", "d"]
+    })) }))
+    print (report (Writer.collecting { o -> attempt "GET" o (respond 200 (StreamBody { w ->
+        Writer.writeString w "a"
+        w.flush()
+        Writer.writeString w "b"
+    })) }))

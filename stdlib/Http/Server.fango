@@ -1,18 +1,110 @@
 {-# no-prelude #-}
-module Http.Server exposing (Config(..), defaultConfig, serve)
+module Http.Server exposing (Config(..), Request(..), Response(..), defaultConfig, serve, withRequest, writeResponse)
 
 import Async exposing (Async, Channel, Outcome(..), Task)
 import Basics exposing (..)
+import Bytes exposing (Bytes)
 import Fail exposing (Fail, attempt, fromResult)
-import Http exposing (ErrorKind(..), Protocol(..), Request, Response)
+import Http exposing (Body(..), Error(..), Header(..), Protocol(..), Version(..))
+import Http.Wire as Wire exposing (Framing(..))
 import IO exposing (IO)
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 import Net
-import Reader exposing (Reader)
+import Reader exposing (Read(..), Reader(..))
 import Result exposing (Result(..))
 import String
 import Writer exposing (Writer(..))
+
+type Request e =
+    { method : String
+    , target : String
+    , version : Version
+    , headers : List Header
+    , body : Reader e
+    }
+
+type Response e =
+    { status : Int
+    , headers : List Header
+    , body : Body e
+    }
+
+type Head = { method : String, target : String, headers : List Header, framing : Framing }
+
+targetByte : Int -> Bool
+targetByte code = code >= 33 && code <= 126
+
+allTarget : Bytes -> Int -> Bool
+allTarget bytes index =
+    if index >= Bytes.length bytes then index > 0
+    else
+        case Bytes.byteAt index bytes of
+            Just code -> if targetByte code then allTarget bytes (index + 1) else False
+            Nothing -> False
+
+requestLine : Bytes ->{Protocol} (String, String)
+requestLine bytes =
+    case Bytes.indexOf (Bytes.fromString " ") bytes of
+        Nothing -> invalid (Malformed "malformed request line")
+        Just first ->
+            case Bytes.indexOfFrom (first + 1) (Bytes.fromString " ") bytes of
+                Nothing -> invalid (Malformed "malformed request line")
+                Just second ->
+                    method = Bytes.slice 0 first bytes
+                    target = Bytes.slice (first + 1) second bytes
+                    version = Bytes.slice (second + 1) (Bytes.length bytes) bytes
+                    if Wire.allToken method 0 == False || allTarget target 0 == False || version /= Bytes.fromString "HTTP/1.1" then
+                        invalid (Malformed "invalid HTTP/1.1 request line")
+                    else
+                        (Wire.decodeField method, Wire.decodeField target)
+
+readHead : Reader e -> Int -> Int -> Int ->{Protocol | e} Maybe Head
+readHead reader lineLimit headersLimit bodyLimit =
+    case Reader.readUntil reader (Bytes.fromString "\r\n") lineLimit of
+        Ended line ->
+            if Bytes.length line == 0 then Nothing else invalid (Malformed "incomplete request line")
+        Overflowed -> invalid LineTooLong
+        Found line ->
+            (method, target) = requestLine line
+            headers = Wire.headerLines reader headersLimit []
+            case Http.getHeaders "host" headers of
+                [_] ->
+                    bodyFraming = Wire.framing headers bodyLimit
+                    Just (Head { method = method, target = target, headers = headers, framing = bodyFraming })
+                _ -> invalid (Malformed "HTTP/1.1 requires one Host header")
+
+-- A protocol scope retains the request reader until the response body has run.
+-- The Bool reports whether the handler consumed the whole framed body.
+{-# scoped s #-}
+withRequest : Int -> Int -> Int -> Reader e -> (Request s ->{s} a) ->{Protocol | e} Maybe (a, Bool)
+withRequest lineLimit headersLimit bodyLimit input use =
+    case readHead input lineLimit headersLimit bodyLimit of
+        Nothing -> Nothing
+        Just head ->
+            result = Wire.withBody head.framing input bodyLimit headersLimit { body ->
+                use (Request { method = head.method, target = head.target, version = Http11, headers = head.headers, body = body })
+            }
+            Just result
+
+framedStatus : Int -> Bool
+framedStatus status = status /= 204 && status /= 304
+
+checkResponse : Response e ->{Protocol} ()
+checkResponse response =
+    if response.status < 200 || response.status > 599 || response.status == 101 then
+        invalid (InvalidMessage "response status must be a final non-upgrade status")
+    else Wire.checkMessage response.headers response.body (framedStatus response.status)
+
+writeChecked : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} ()
+writeChecked method output response =
+    Wire.writeCheckedMessage output ("HTTP/1.1 " ++ show response.status ++ " ") response.headers response.body
+        (framedStatus response.status) (method /= "HEAD")
+
+writeResponse : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} ()
+writeResponse method output response =
+    checkResponse response
+    writeChecked method output response
 
 type Config =
     { port : Int
@@ -39,15 +131,16 @@ defaultConfig port = Config
     , shutdownGraceMs = 5000
     }
 
-errorStatus : Http.ErrorKind -> Int
-errorStatus kind =
-    case kind of
-        RequestLineTooLong -> 414
+errorStatus : Http.Error -> Int
+errorStatus error =
+    case error of
+        Malformed _ -> 400
+        LineTooLong -> 414
         HeadersTooLarge -> 431
         BodyTooLarge -> 413
-        Unsupported -> 501
-        InvalidResponse -> 500
-        BadRequest -> 400
+        Unsupported _ -> 501
+        InvalidMessage _ -> 500
+        BodyAborted _ -> 500
 
 sendError : Writer e -> Int ->{e} ()
 sendError output status =
@@ -55,7 +148,7 @@ sendError output status =
         ("HTTP/1.1 " ++ show status ++ " \r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
     output.flush()
 
-isClose : List Http.Header -> Bool
+isClose : List Header -> Bool
 isClose headers =
     case Http.getHeader "connection" headers of
         Nothing -> False
@@ -63,10 +156,28 @@ isClose headers =
             List.foldl { part found -> found || Http.equalAscii (String.trim part) "close" }
                 False (String.split "," raw)
 
+validResponse : Response e ->{Protocol} Bool
+validResponse response =
+    checkResponse response
+    True
+
 writeSuccessful : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} Bool
 writeSuccessful method output response =
-    Http.writeResponse method output response
+    writeChecked method output response
     True
+
+-- An invalid response gets a 500 before anything is written. A body that fails
+-- afterwards leaves the response truncated, and the connection closes.
+respond : String -> Writer {Protocol | e} -> Response {Protocol | e} ->{Protocol | e} Bool
+respond method output response =
+    valid = handle validResponse response of
+        Http.invalid _ -> False
+    if valid then
+        handle writeSuccessful method output response of
+            Http.invalid _ -> False
+    else
+        sendError output 500
+        False
 
 {-# scoped s #-}
 serveConnection : Config -> Net.Connection -> (Request s ->{s} Response s)
@@ -79,19 +190,18 @@ serveConnection config connection handler =
             loop() =
                 fromResult (Net.setReadDeadline connection config.headerDeadlineMs)
                 handle
-                    case Http.withRequest config.requestLineLimit config.headerLimit config.bodyLimit input { request ->
+                    case withRequest config.requestLineLimit config.headerLimit config.bodyLimit input { request ->
                         fromResult (Net.setReadDeadline connection config.bodyDeadlineMs)
                         response = handler request
                         fromResult (Net.setWriteDeadline connection config.writeDeadlineMs)
-                        sent = handle writeSuccessful request.method output response of
-                            Http.invalid _ -> False
+                        sent = respond request.method output response
                         (sent, isClose request.headers, isClose response.headers)
                     } of
                         Nothing -> ()
                         Just ((sent, requestClose, responseClose), complete) ->
                             if sent && complete && requestClose == False && responseClose == False then loop()
                             else () of
-                    Http.invalid error -> sendError output (errorStatus error.kind)
+                    Http.invalid error -> sendError output (errorStatus error)
             loop()
         }
     }

@@ -1,5 +1,6 @@
 import Bytes
 import Http exposing (Protocol(..))
+import Http.Server
 import Reader
 import Writer
 
@@ -7,7 +8,7 @@ inspect : String -> String
 inspect wire =
     handle
         Reader.overBytes (Bytes.fromString wire) { input ->
-            result = Http.withRequest 8192 65536 1024 input { request ->
+            result = Http.Server.withRequest 8192 65536 1024 input { request ->
                 (_, body) = Writer.collecting { output ->
                     Reader.forEachChunk request.body (Writer.write output)
                 }
@@ -15,7 +16,7 @@ inspect wire =
             }
             show result
         } of
-            Http.invalid error -> show error.kind ++ ": " ++ error.message
+            Http.invalid error -> show error
 
 main() =
     print (inspect "GET /a HTTP/1.1\r\nHost: x\r\n\r\n")

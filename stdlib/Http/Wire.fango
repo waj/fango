@@ -1,0 +1,348 @@
+{-# no-prelude #-}
+module Http.Wire exposing (Framing(..), allToken, checkMessage, decodeField, emptyBody, framing, headerLines, withBody, writeCheckedMessage, writeMessage)
+
+import Basics exposing (..)
+import Bytes exposing (Bytes, Source(..))
+import Http exposing (Body(..), Error(..), Header(..), Protocol(..), equalAscii, getHeaders)
+import List exposing (List(..))
+import Maybe exposing (Maybe(..))
+import Reader exposing (Read(..), Reader(..))
+import Runtime.Local
+import Runtime.Native
+import String
+import Writer exposing (Writer(..))
+
+{- HTTP/1.1 framing shared by both directions: header blocks, body framing,
+and message serialization. Start lines belong to the direction. -}
+
+type Framing = NoBody | Fixed Int | Chunked
+type ChunkState = { remaining : Int, done : Bool, total : Int }
+type ChunkCell e = { read : () ->{e} ChunkState, write : ChunkState ->{e} () }
+
+-- Pending output kept across the writes of a body whose row has no room for
+-- local state. Each operation's answer is consumed, so no call can be dropped.
+type Batch = Batch Runtime.Native.Any
+
+newBatch : Int -> Batch
+newBatch = native
+
+batchPush : Batch -> Bytes -> Bytes
+batchPush = native
+
+batchTake : Batch -> Bytes
+batchTake = native
+
+batchTotal : Batch -> Int
+batchTotal = native
+
+-- Bytes per chunk of a streamed body, unless the body flushes first.
+chunkWindow : Int
+chunkWindow = 8192
+
+tokenByte : Int -> Bool
+tokenByte code = (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+    || code == 33 || code == 35 || code == 36 || code == 37 || code == 38
+    || code == 39 || code == 42 || code == 43 || code == 45 || code == 46
+    || code == 94 || code == 95 || code == 96 || code == 124 || code == 126
+
+allToken : Bytes -> Int -> Bool
+allToken bytes index =
+    if index >= Bytes.length bytes then index > 0
+    else
+        case Bytes.byteAt index bytes of
+            Just code -> if tokenByte code then allToken bytes (index + 1) else False
+            Nothing -> False
+
+fieldByte : Int -> Bool
+fieldByte code = code == 9 || (code >= 32 && code /= 127)
+
+allField : Bytes -> Int -> Bool
+allField bytes index =
+    if index >= Bytes.length bytes then True
+    else
+        case Bytes.byteAt index bytes of
+            Just code -> if fieldByte code then allField bytes (index + 1) else False
+            Nothing -> False
+
+owsStart : Bytes -> Int -> Int
+owsStart bytes index =
+    case Bytes.byteAt index bytes of
+        Just code -> if code == 32 || code == 9 then owsStart bytes (index + 1) else index
+        Nothing -> index
+
+owsEnd : Bytes -> Int -> Int
+owsEnd bytes end =
+    if end <= 0 then 0
+    else
+        case Bytes.byteAt (end - 1) bytes of
+            Just code -> if code == 32 || code == 9 then owsEnd bytes (end - 1) else end
+            Nothing -> end
+
+decodeField : Bytes ->{Protocol} String
+decodeField bytes =
+    case Bytes.toString bytes of
+        Just value -> value
+        Nothing -> invalid (Malformed "header value is not UTF-8")
+
+headerLine : Bytes ->{Protocol} Header
+headerLine bytes =
+    case Bytes.indexOf (Bytes.fromString ":") bytes of
+        Nothing -> invalid (Malformed "malformed header")
+        Just colon ->
+            name = Bytes.slice 0 colon bytes
+            value = Bytes.slice (colon + 1) (Bytes.length bytes) bytes
+            if allToken name 0 == False || allField value 0 == False then
+                invalid (Malformed "invalid header")
+            else
+                trimmed = Bytes.slice (owsStart value 0) (owsEnd value (Bytes.length value)) value
+                Header { name = decodeField name, value = decodeField trimmed }
+
+headerLines : Reader e -> Int -> List Header ->{Protocol | e} List Header
+headerLines reader remaining reversed =
+    if remaining < 2 then invalid HeadersTooLarge
+    else
+        case Reader.readUntil reader (Bytes.fromString "\r\n") remaining of
+            Found line ->
+                if Bytes.length line == 0 then List.reverse reversed
+                else headerLines reader (remaining - Bytes.length line - 2) [headerLine line | reversed]
+            Ended _ -> invalid (Malformed "incomplete header block")
+            Overflowed -> invalid HeadersTooLarge
+
+decimalBytes : Bytes -> Int -> Bool
+decimalBytes bytes index =
+    if index >= Bytes.length bytes then index > 0
+    else
+        case Bytes.byteAt index bytes of
+            Just code -> if code >= 48 && code <= 57 then decimalBytes bytes (index + 1) else False
+            Nothing -> False
+
+framing : List Header -> Int ->{Protocol} Framing
+framing headers maxBody =
+    lengths = getHeaders "content-length" headers
+    transfers = getHeaders "transfer-encoding" headers
+    case (lengths, transfers) of
+        ([], []) -> NoBody
+        ([raw], []) ->
+            if decimalBytes (Bytes.fromString raw) 0 == False then invalid (Malformed "invalid Content-Length")
+            else
+                case String.toInt raw of
+                    Nothing -> invalid (Malformed "invalid Content-Length")
+                    Just size -> if size > maxBody then invalid BodyTooLarge else Fixed size
+        ([], [raw]) ->
+            if equalAscii raw "chunked" then Chunked else invalid (Unsupported "unsupported transfer coding")
+        _ -> invalid (Malformed "ambiguous message framing")
+
+hexValue : Int -> Int
+hexValue code =
+    if code >= 48 && code <= 57 then code - 48
+    else if code >= 65 && code <= 70 then code - 55
+    else if code >= 97 && code <= 102 then code - 87
+    else -1
+
+chunkDigits : Bytes -> Int -> Int -> Int ->{Protocol} Int
+chunkDigits bytes index limit value =
+    if index >= Bytes.length bytes then
+        if index == 0 then invalid (Malformed "empty chunk size") else value
+    else
+        case Bytes.byteAt index bytes of
+            Nothing -> invalid (Malformed "invalid chunk size")
+            Just code ->
+                digit = hexValue code
+                if digit < 0 then invalid (Malformed "invalid chunk size")
+                else if value > quotientBy 16 limit || value * 16 + digit > limit then invalid BodyTooLarge
+                else chunkDigits bytes (index + 1) limit (value * 16 + digit)
+
+chunkSize : Bytes -> Int ->{Protocol} Int
+chunkSize line limit =
+    case Bytes.indexOf (Bytes.fromString ";") line of
+        Nothing -> chunkDigits line 0 limit 0
+        Just at ->
+            extension = Bytes.slice (at + 1) (Bytes.length line) line
+            if allField extension 0 == False then invalid (Malformed "invalid chunk extension")
+            else chunkDigits (Bytes.slice 0 at line) 0 limit 0
+
+chunkTerminator : Reader e ->{Protocol | e} ()
+chunkTerminator input =
+    case Reader.readExactly input 2 of
+        Just bytes -> if bytes == Bytes.fromString "\r\n" then () else invalid (Malformed "invalid chunk terminator")
+        Nothing -> invalid (Malformed "incomplete chunk")
+
+chunkPull : Reader e -> ChunkCell e -> Int -> Int ->{Protocol | e} Maybe Bytes
+chunkPull input state maxBody headersLimit =
+    current = state.read()
+    if current.done then Nothing
+    else if current.remaining > 0 then
+        wanted = if current.remaining > 8192 then 8192 else current.remaining
+        data = Reader.readUpTo input wanted
+        size = Bytes.length data
+        if size == 0 then invalid (Malformed "incomplete chunk")
+        else
+            left = current.remaining - size
+            state.write (ChunkState { remaining = left, done = False, total = current.total })
+            if left == 0 then chunkTerminator input else ()
+            Just data
+    else
+        case Reader.readUntil input (Bytes.fromString "\r\n") 8192 of
+            Found line ->
+                size = chunkSize line (maxBody - current.total)
+                if size == 0 then
+                    ignored = headerLines input headersLimit []
+                    state.write (ChunkState { remaining = 0, done = True, total = current.total })
+                    Nothing
+                else
+                    state.write (ChunkState { remaining = size, done = False, total = current.total + size })
+                    chunkPull input state maxBody headersLimit
+            Ended _ -> invalid (Malformed "incomplete chunk size")
+            Overflowed -> invalid (Malformed "chunk size line exceeds limit")
+
+{-# scoped s #-}
+withChunked : Reader e -> Int -> Int -> (Reader s ->{s} a) ->{Protocol | e} (a, Bool)
+withChunked input maxBody headersLimit use =
+    Runtime.Local.run (ChunkState { remaining = 0, done = False, total = 0 }) { state ->
+        cell = ChunkCell { read = state.read, write = state.write }
+        Reader.over (Source { pull = { chunkPull input cell maxBody headersLimit } }) { body ->
+            value = use body
+            finished = state.read().done && Bytes.length body.buffered() == 0
+            (value, finished)
+        }
+    }
+
+emptyBody : Reader e
+emptyBody = Reader
+    { buffered = { Bytes.empty }
+    , refill = { False }
+    , skip = { _ -> 0 }
+    }
+
+-- Scopes a framed body reader to `use`. The Bool reports whether the consumer
+-- reached the end of the framed body.
+{-# scoped s #-}
+withBody : Framing -> Reader e -> Int -> Int -> (Reader s ->{s} a) ->{Protocol | e} (a, Bool)
+withBody bodyFraming input bodyLimit headersLimit use =
+    case bodyFraming of
+        NoBody -> (use emptyBody, True)
+        Fixed size ->
+            (value, remaining, _) = Runtime.Local.run size { left ->
+                Reader.limitedRemaining input size { body ->
+                    strict = Reader
+                        { buffered = body.buffered
+                        , refill = {
+                            grew = body.refill()
+                            if grew == False && left.read() > 0 && Bytes.length body.buffered() == 0 then
+                                invalid (Malformed "incomplete body")
+                            else grew
+                          }
+                        , skip = { count ->
+                            taken = body.skip count
+                            left.write (left.read() - taken)
+                            taken
+                          }
+                        }
+                    use strict
+                }
+            }
+            (value, remaining == 0)
+        Chunked -> withChunked input bodyLimit headersLimit use
+
+validHeader : Header ->{Protocol} ()
+validHeader header =
+    name = Bytes.fromString header.name
+    value = Bytes.fromString header.value
+    if allToken name 0 == False || allField value 0 == False then
+        invalid (InvalidMessage "invalid header")
+    else if equalAscii header.name "content-length" || equalAscii header.name "transfer-encoding" then
+        invalid (InvalidMessage "framing headers are managed by Http")
+    else ()
+
+hexDigit : Int -> String
+hexDigit digit = String.slice digit (digit + 1) "0123456789ABCDEF"
+
+hexSize : Int -> String
+hexSize size =
+    if size < 16 then hexDigit size
+    else hexSize (quotientBy 16 size) ++ hexDigit (modBy 16 size)
+
+writeChunk : Writer e -> Bytes ->{e} ()
+writeChunk output bytes =
+    if Bytes.length bytes > 0 then
+        Writer.writeString output (hexSize (Bytes.length bytes) ++ "\r\n")
+        Writer.write output bytes
+        Writer.writeString output "\r\n"
+    else ()
+
+-- Collects writes into chunks of `chunkWindow` bytes; a flush frames what is
+-- pending. The final chunk is written only when the body returns normally.
+chunked : Writer e -> (Writer e ->{e} ()) ->{e} ()
+chunked output body =
+    batch = newBatch chunkWindow
+    body (Writer
+        { emit = { bytes -> writeChunk output (batchPush batch bytes) }
+        , flush = {
+            writeChunk output (batchTake batch)
+            output.flush()
+          }
+        }
+    )
+    writeChunk output (batchTake batch)
+    Writer.writeString output "0\r\n\r\n"
+
+-- Passes writes through and checks them against the declared length.
+sized : Int -> Writer {Protocol | e} -> (Writer {Protocol | e} ->{Protocol | e} ()) ->{Protocol | e} ()
+sized length output body =
+    batch = newBatch 0
+    body (Writer
+        { emit = { bytes ->
+            if batchTotal batch + Bytes.length bytes > length then invalid (InvalidMessage "body exceeds its declared length")
+            else Writer.write output (batchPush batch bytes)
+          }
+        , flush = output.flush
+        }
+    )
+    if batchTotal batch < length then invalid (InvalidMessage "body is shorter than its declared length") else ()
+
+writeHeaders : Writer e -> List Header ->{e} ()
+writeHeaders output headers =
+    List.each { header -> Writer.writeString output (header.name ++ ": " ++ header.value ++ "\r\n") } headers
+
+-- Rejects a message before any of it is written. An unframed message (204,
+-- 304) carries no framing headers and no body.
+checkMessage : List Header -> Body e -> Bool ->{Protocol} ()
+checkMessage headers body framed =
+    List.each validHeader headers
+    case body of
+        Empty -> ()
+        BytesBody bytes ->
+            if framed == False && Bytes.length bytes > 0 then invalid (InvalidMessage "message cannot carry a body") else ()
+        StreamBody _ -> if framed then () else invalid (InvalidMessage "message cannot carry a body")
+        SizedBody length _ ->
+            if framed == False then invalid (InvalidMessage "message cannot carry a body")
+            else if length < 0 then invalid (InvalidMessage "declared body length is negative")
+            else ()
+
+writeMessage : Writer {Protocol | e} -> String -> List Header -> Body {Protocol | e} -> Bool -> Bool ->{Protocol | e} ()
+writeMessage output startLine headers body framed sendBody =
+    checkMessage headers body framed
+    writeCheckedMessage output startLine headers body framed sendBody
+
+-- Writes a message that passed `checkMessage`, after its start line.
+-- `sendBody` False writes only the head, as for HEAD.
+writeCheckedMessage : Writer {Protocol | e} -> String -> List Header -> Body {Protocol | e} -> Bool -> Bool ->{Protocol | e} ()
+writeCheckedMessage output startLine headers body framed sendBody =
+    Writer.writeString output (startLine ++ "\r\n")
+    writeHeaders output headers
+    case body of
+        Empty ->
+            if framed then Writer.writeString output "Content-Length: 0\r\n" else ()
+            Writer.writeString output "\r\n"
+        BytesBody bytes ->
+            if framed then Writer.writeString output ("Content-Length: " ++ show (Bytes.length bytes) ++ "\r\n") else ()
+            Writer.writeString output "\r\n"
+            if sendBody && framed then Writer.write output bytes else ()
+        StreamBody stream ->
+            if sendBody then Writer.writeString output "Transfer-Encoding: chunked\r\n" else ()
+            Writer.writeString output "\r\n"
+            if sendBody then chunked output stream else ()
+        SizedBody length stream ->
+            Writer.writeString output ("Content-Length: " ++ show length ++ "\r\n\r\n")
+            if sendBody then sized length output stream else ()
+    output.flush()

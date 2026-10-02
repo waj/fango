@@ -1,29 +1,30 @@
 import Bytes
-import Http exposing (ResponseBody(..))
-import Http.Route
+import Http exposing (Body(..))
+import Http.Server
+import Http.Server.Route as Route
 import Http.GZip
 import List exposing (List)
 import Reader
 import Writer
 
-hello : List Http.Route.Param -> Http.Request e ->{e} Http.Response e
-hello params _ = Http.Response { status = 200, headers = [], body = BytesBody (Bytes.fromString (show params)) }
+hello : List Route.Param -> Http.Server.Request e ->{e} Http.Server.Response e
+hello params _ = Http.Server.Response { status = 200, headers = [], body = BytesBody (Bytes.fromString (show params)) }
 
-missing : Http.Request e ->{e} Http.Response e
-missing _ = Http.Response { status = 404, headers = [], body = Empty }
+missing : Http.Server.Request e ->{e} Http.Server.Response e
+missing _ = Http.Server.Response { status = 404, headers = [], body = Empty }
 
 main() =
     handle
         Reader.overBytes (Bytes.fromString "GET /hello HTTP/1.1\r\nHost: example\r\nAccept-Encoding: gzip\r\n\r\n") { input ->
             (_, rendered) = Writer.collecting { output ->
-                Http.withRequest 8192 65536 1024 input { request ->
-                    route = Http.Route.Route
+                Http.Server.withRequest 8192 65536 1024 input { request ->
+                    route = Route.Route
                         { method = "GET"
                         , pattern = "/:name"
                         , handler = hello
                         }
-                    response = Http.GZip.wrap (Http.Route.dispatch [route] missing) request
-                    Http.writeResponse request.method output response
+                    response = Http.GZip.wrap (Route.dispatch [route] missing) request
+                    Http.Server.writeResponse request.method output response
                 }
             }
             print rendered

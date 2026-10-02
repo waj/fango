@@ -21,7 +21,7 @@ func TestNavigationInOpenedBundledModule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(root, "stdlib", "Http", "Route.fango")
+	path := filepath.Join(root, "stdlib", "Http", "Server", "Route.fango")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

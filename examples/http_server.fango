@@ -1,46 +1,46 @@
 import Async
 import Bytes
-import Http exposing (ResponseBody(..))
+import Http exposing (Body(..))
 import Http.GZip
-import Http.Route
 import Http.Server
+import Http.Server.Route as Route
 import IO
 import List exposing (List)
 import Reader
 import String
 import Writer
 
-hello : List Http.Route.Param -> Http.Request e ->{e} Http.Response e
+hello : List Route.Param -> Http.Server.Request e ->{e} Http.Server.Response e
 hello params _ =
-    name = case Http.Route.lookup "name" params of
+    name = case Route.lookup "name" params of
         Just value -> value
         Nothing -> "world"
-    Http.Response { status = 200, headers = [], body = BytesBody (Bytes.fromString ("Hello, " ++ name ++ "!")) }
+    Http.Server.Response { status = 200, headers = [], body = BytesBody (Bytes.fromString ("Hello, " ++ name ++ "!")) }
 
-missing : Http.Request e ->{e} Http.Response e
-missing _ = Http.Response { status = 404, headers = [], body = Empty }
+missing : Http.Server.Request e ->{e} Http.Server.Response e
+missing _ = Http.Server.Response { status = 404, headers = [], body = Empty }
 
-echo : List Http.Route.Param -> Http.Request e ->{e} Http.Response e
+echo : List Route.Param -> Http.Server.Request e ->{e} Http.Server.Response e
 echo _ request =
     (_, body) = Writer.collecting { output -> Reader.forEachChunk request.body (Writer.write output) }
-    Http.Response { status = 200, headers = [], body = BytesBody body }
+    Http.Server.Response { status = 200, headers = [], body = BytesBody body }
 
-stream : List Http.Route.Param -> Http.Request e ->{e} Http.Response e
-stream _ request = Http.Response
+stream : List Route.Param -> Http.Server.Request e ->{e} Http.Server.Response e
+stream _ request = Http.Server.Response
     { status = 200
     , headers = []
     , body = StreamBody { output -> Reader.forEachChunk request.body (Writer.write output) }
     }
 
-route : Http.Request e ->{e} Http.Response e
+route : Http.Server.Request e ->{e} Http.Server.Response e
 route request =
-    helloRoute = Http.Route.Route { method = "GET", pattern = "/hello/:name", handler = hello }
-    echoRoute = Http.Route.Route { method = "POST", pattern = "/echo", handler = echo }
-    streamRoute = Http.Route.Route { method = "POST", pattern = "/stream", handler = stream }
-    handle Http.Route.dispatch [helloRoute, echoRoute, streamRoute] missing request of
-        Http.invalid _ -> Http.Response { status = 400, headers = [], body = Empty }
+    helloRoute = Route.Route { method = "GET", pattern = "/hello/:name", handler = hello }
+    echoRoute = Route.Route { method = "POST", pattern = "/echo", handler = echo }
+    streamRoute = Route.Route { method = "POST", pattern = "/stream", handler = stream }
+    handle Route.dispatch [helloRoute, echoRoute, streamRoute] missing request of
+        Http.invalid _ -> Http.Server.Response { status = 400, headers = [], body = Empty }
 
-app : Http.Request e ->{e} Http.Response e
+app : Http.Server.Request e ->{e} Http.Server.Response e
 app request = Http.GZip.wrap route request
 
 main() =

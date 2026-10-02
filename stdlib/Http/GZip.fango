@@ -3,7 +3,8 @@ module Http.GZip exposing (wrap)
 
 import Basics exposing (..)
 import Bytes exposing (Bytes)
-import Http exposing (Request(..), Response(..), ResponseBody(..))
+import Http exposing (Body(..))
+import Http.Server exposing (Request(..), Response(..))
 import List exposing (List(..))
 import Maybe exposing (Maybe(..))
 import Runtime.Native
@@ -99,7 +100,7 @@ vary headers =
     if hasToken "accept-encoding" (String.split "," existing) || hasToken "*" (String.split "," existing) then headers
     else [Http.Header { name = "Vary", value = "Accept-Encoding" } | headers]
 
-compressBody : ResponseBody e -> Writer e ->{e} ()
+compressBody : Body e -> Writer e ->{e} ()
 compressBody original output =
     compressor = newCompressor()
     encoded = Writer
@@ -117,6 +118,7 @@ compressBody original output =
         Empty -> ()
         BytesBody bytes -> Writer.write encoded bytes
         StreamBody body -> body encoded
+        SizedBody _ body -> body encoded
     tail = finish compressor
     Writer.write output tail
 
