@@ -1,7 +1,7 @@
 # Convenience wrappers for the repository verification gates; see
 # doc/design.md, "Testing and performance".
 
-.PHONY: build install test test-short test-grammar test-perf update-goldens update-baselines fmt fmt-fango vet check-files ci clean
+.PHONY: build install install-lib test test-short test-grammar test-perf update-goldens update-baselines fmt fmt-fango vet check-files ci clean
 
 build:
 	go build -o fango ./cmd/fango
@@ -15,9 +15,13 @@ PREFIX ?= /usr/local
 LIBDIR = $(PREFIX)/lib/fango
 FANGO_SOURCES = $(shell find stdlib examples -name '*.fango' -type f -print)
 
-install: build
-	install -d $(PREFIX)/bin $(LIBDIR)/stdlib
+install: build install-lib
+	install -d $(PREFIX)/bin
 	install -m 755 fango $(PREFIX)/bin/fango
+
+# The library tree alone, for packagers that build the executable themselves.
+install-lib:
+	install -d $(LIBDIR)/stdlib
 	find stdlib -type f \( -name '*.fango' -o -name '*.native.go' -o -name 'native_support.go' \) -print | while IFS= read -r f; do \
 		rel=$${f#stdlib/}; \
 		case "$$rel" in */*) dest=$(LIBDIR)/stdlib/$${rel%/*};; *) dest=$(LIBDIR)/stdlib;; esac; \

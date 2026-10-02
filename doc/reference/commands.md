@@ -12,6 +12,13 @@ nix develop
 go build -o fango ./cmd/fango
 ```
 
+The flake also packages the compiler. `nix run github:waj/fango -- run
+main.fango` runs it without a checkout, and `nix flake init -t
+github:waj/fango` starts a project whose development shell provides `fango`.
+The package installs the [library root](#the-library-root) layout and wraps the
+executable so the Go it was built with comes first on `PATH`, since builds and
+the interpreter's native worker run `go build`.
+
 Repository test, vet, golden-update, and manual benchmark commands are in
 [verification](../design/verification.md#verification-commands). GitHub Actions
 runs `make ci` on pushes to master and on pull requests.
@@ -112,7 +119,8 @@ command that needs one fails with `MISSING LIBRARY` naming where it looked.
 `FANGO_ROOT` names the library; `FANGO_BUILD_DIR` redirects generated build
 output; neither selects the compilation cache.
 
-An installed layout therefore looks like:
+`make install PREFIX=<prefix>` produces this layout, and `make install-lib`
+installs only the library for packagers that build the executable themselves:
 
 ```text
 <prefix>/bin/fango

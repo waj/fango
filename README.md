@@ -22,6 +22,14 @@ make
 ./fango run examples/guess.fango
 ```
 
+With Nix, run it without a checkout, or start a project with `fango` in its
+development shell:
+
+```sh
+nix run github:waj/fango -- run main.fango
+nix flake init -t github:waj/fango
+```
+
 Find more runnable programs and their expected outputs in [examples](examples/).
 
 ## Documentation

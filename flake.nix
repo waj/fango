@@ -11,6 +11,54 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in
     {
+      packages = forAllSystems (pkgs: {
+        default = self.packages.${pkgs.stdenv.hostPlatform.system}.fango;
+
+        fango = pkgs.buildGoModule {
+          pname = "fango";
+          version = "0-unstable-${self.shortRev or self.dirtyShortRev or "dev"}";
+          src = self;
+          vendorHash = "sha256-rjwyCO3fsA4rgX7/zDqZWsQJ+l2SHqcQrfgO8TJOJXM=";
+          subPackages = [ "cmd/fango" ];
+
+          # The correctness suite is `make test` in the development shell; it
+          # opens TCP listeners and takes minutes, so it does not gate a build.
+          doCheck = false;
+
+          nativeBuildInputs = [ pkgs.gnumake pkgs.makeWrapper ];
+          allowGoReference = true;
+
+          # The compiler finds its library at ../lib/fango beside the
+          # executable (doc/reference/commands.md, "The library root"), and
+          # both compiled programs and the interpreter's native worker are
+          # built with `go build`. Wrap it with the Go it was built with, so
+          # the toolchain matches the generated go.mod on any machine.
+          postInstall = ''
+            make install-lib PREFIX=$out
+            wrapProgram $out/bin/fango --prefix PATH : ${pkgs.go}/bin
+          '';
+
+          meta = {
+            description = "A statically compiled functional language on the Go runtime";
+            homepage = "https://github.com/waj/fango";
+            mainProgram = "fango";
+          };
+        };
+      });
+
+      apps = forAllSystems (pkgs: {
+        default = {
+          type = "app";
+          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.fango}/bin/fango";
+          meta.description = "The Fango compiler, interpreter, REPL, and language server";
+        };
+      });
+
+      templates.default = {
+        path = ./templates/default;
+        description = "A Fango project with the compiler in its development shell";
+      };
+
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = with pkgs; [
