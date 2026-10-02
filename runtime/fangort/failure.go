@@ -8,6 +8,7 @@ type TypeDescriptor struct {
 	name        string
 	arguments   []*TypeDescriptor
 	inspectable bool
+	rebuild     Rebuilder
 }
 
 // NominalType constructs immutable descriptor data. safe describes the whole
@@ -18,6 +19,14 @@ func NominalType(name string, safe bool, arguments ...*TypeDescriptor) *TypeDesc
 		safe = safe && arg != nil && arg.inspectable
 	}
 	return &TypeDescriptor{name: name, arguments: args, inspectable: safe}
+}
+
+// RebuildableType is an inspectable descriptor that also carries its
+// representation at the Go instantiation chosen where it was constructed.
+func RebuildableType(name string, rebuild Rebuilder, arguments ...*TypeDescriptor) *TypeDescriptor {
+	descriptor := NominalType(name, true, arguments...)
+	descriptor.rebuild = rebuild
+	return descriptor
 }
 
 func sameDescriptor(left, right *TypeDescriptor) bool {
@@ -100,16 +109,12 @@ func (failure *Failure) Suppressed() List[*Failure] {
 }
 
 // FailureArgument projects only after checking the complete source descriptor.
-// A failed Go assertion after a descriptor match means the compiler packaged an
-// invalid proof; it is not an alternate type-inspection mechanism.
+// The match decides the type; Rebuild only changes the Go representation of a
+// payload built where some of its type arguments were erased.
 func FailureArgument[A any](index int64, failure *Failure, expected *TypeDescriptor) (A, bool) {
 	var zero A
 	if failure == nil || index < 0 || index >= int64(len(failure.arguments)) || index >= int64(len(failure.descriptors)) || expected == nil || !expected.inspectable || failure.descriptors[index] == nil || !failure.descriptors[index].inspectable || !sameDescriptor(expected, failure.descriptors[index]) {
 		return zero, false
 	}
-	value, ok := failure.arguments[index].(A)
-	if !ok {
-		panic("fango: failure payload disagrees with its checked type descriptor")
-	}
-	return value, true
+	return Rebuild[A](expected, failure.arguments[index]), true
 }

@@ -32,6 +32,12 @@ cannot contain a Go function field polymorphic at each invocation. Request
 values are adapted to the clause's uniform representation and replies back
 to the caller's representation; nominal ADTs, Lists, and callback values are
 adapted recursively. The reply descriptor is checked before reconstruction.
+A value built at the clause's uniform representation can also leave through
+an abort payload into a failure snapshot. Descriptors of parameterized
+inspectable types carry a zero-size rebuilder for the Go instantiation in scope
+where they are constructed, and generated constructors expose their fields
+independently of instantiation. After `Failure.argument` matches descriptors,
+the reader's rebuilder converts the payload to the reader's representation.
 
 Each source effect is uniformly tail-resumptive or abort-only. Source checking
 and Core lint separately prove that every normal resumptive-clause path ends

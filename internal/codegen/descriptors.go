@@ -80,7 +80,14 @@ func (g *gen) typeDescriptorExpr(t types.Type) goast.Expr {
 		args = append(args, g.typeDescriptorArgs(parts)...)
 		return callExpr(selector("fangort", "NominalType"), args...)
 	case *types.TCon:
-		args := []goast.Expr{stringLit(t.Name), ident(fmt.Sprint(types.InspectionShapeSafe(t, g.adts)))}
+		safe := types.InspectionShapeSafe(t, g.adts)
+		if safe {
+			if rebuild := g.descriptorRebuilder(t); rebuild != nil {
+				args := append([]goast.Expr{stringLit(t.Name), rebuild}, g.typeDescriptorArgs(t.Args)...)
+				return callExpr(selector("fangort", "RebuildableType"), args...)
+			}
+		}
+		args := []goast.Expr{stringLit(t.Name), ident(fmt.Sprint(safe))}
 		args = append(args, g.typeDescriptorArgs(t.Args)...)
 		return callExpr(selector("fangort", "NominalType"), args...)
 	default:

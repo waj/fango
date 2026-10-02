@@ -1,0 +1,58 @@
+import Fail
+import Failure
+import Runtime.Scope
+import Result exposing (Result(..))
+
+type Shape a = Circle a | Square a a | Empty deriving (Show)
+
+type Pair a b = Pair a b deriving (Show)
+
+effect Close a
+    abort closeShape : Shape (List a) -> ()
+    abort closePair : Maybe (Pair Int a) -> ()
+
+effect Cleanup
+    cleanupShape : a -> ()
+    cleanupPair : a -> ()
+
+effect Outer
+    outer : b -> ()
+
+suppressedArguments : Result (Fail.Report String) () -> List Failure.Failure
+suppressedArguments report =
+    case report of
+        Err failure -> failure.suppressed
+        Ok _ -> []
+
+cleanups action =
+    handle action () of
+        cleanupShape value -> resume (handle
+            Runtime.Scope.finally ({ _ -> Fail.fail "body" }) ({ _ -> closeShape (Square [value] [value, value]) }) of
+                closeShape _ -> ()
+                closePair _ -> ())
+        cleanupPair value -> resume (handle
+            Runtime.Scope.finally ({ _ -> Fail.fail "body" }) ({ _ -> closePair (Just (Pair 1 value)) }) of
+                closeShape _ -> ()
+                closePair _ -> ())
+
+main() =
+    shapes = suppressedArguments (Fail.attemptReport ({ _ -> cleanups ({ _ -> cleanupShape 42 }) }))
+    List.each ({ failure ->
+        argument : Maybe (Shape (List Int))
+        argument = Failure.argument 0 failure
+        print argument
+        erased : Maybe (Shape (List String))
+        erased = Failure.argument 0 failure
+        print erased }) shapes
+    pairs = suppressedArguments (Fail.attemptReport ({ _ -> cleanups ({ _ -> cleanupPair "text" }) }))
+    List.each ({ failure ->
+        argument : Maybe (Maybe (Pair Int String))
+        argument = Failure.argument 0 failure
+        print argument }) pairs
+    nested = suppressedArguments (Fail.attemptReport ({ _ -> cleanups ({ _ ->
+        handle outer 7 of
+            outer value -> resume (cleanupShape [value]) }) }))
+    List.each ({ failure ->
+        argument : Maybe (Shape (List (List Int)))
+        argument = Failure.argument 0 failure
+        print argument }) nested

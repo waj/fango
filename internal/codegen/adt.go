@@ -76,6 +76,9 @@ func (g *gen) adtDecls(adts []*types.ADTInfo) []goast.Decl {
 					}
 				}
 			}
+			if mode == types.Direct && g.rebuildableADT(adt) {
+				decls = append(decls, g.rebuildDecls(adt, args)...)
+			}
 			g.control, g.abi = oldControl, oldABI
 		}
 	}

@@ -199,12 +199,6 @@ conversion from `Type a` to `Meta.TypeRepr` remains a separate future feature.
 
 ## Longer-term candidates
 
-The [polymorphic cleanup regression](../testdata/pending/poly_failure_structural.fango)
-passes in the interpreter. Generated Go panics when inspecting its nested
-structural payload because the payload disagrees with the checked type
-descriptor. Repairing the Go representation at that boundary remains
-unfinished; once it passes, move the fixture into `testdata/run`.
-
 These are directions, not commitments or an ordering:
 
 - A second, native backend. An experimental LLVM backend for macOS ARM64 was
