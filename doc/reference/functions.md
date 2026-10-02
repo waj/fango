@@ -194,9 +194,11 @@ recursion of this shape never overflows:
   else;
 - the function calls itself at its own type (polymorphic recursion at a
   different instantiation is not optimized);
-- no lambda or handler clause anywhere in the body captures a parameter that
-  the recursion changes; parameters passed through unchanged (such as a
-  callback threaded through a driver loop) are always safe to capture.
+- no lambda or handler clause on a path to another self tail call captures a
+  parameter that the recursion changes; a closure returned from a terminal
+  branch is safe because that branch ends the loop. Parameters passed through
+  unchanged (such as a callback threaded through a driver loop) are always
+  safe to capture.
 
 Mutually recursive functions (`f` calls `g` calls `f`) are *not* optimized and
 consume stack proportional to depth. A tail call that never terminates,

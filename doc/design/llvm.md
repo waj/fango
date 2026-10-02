@@ -54,6 +54,9 @@ inspection checks exact type identity and safe shape, excluding functions and
 resource-bearing types. Suppressed reports detach their handler target.
 
 BDWGC scans object and closure storage. String/byte buffers use atomic allocations.
+Allocated object and closure construction keeps its input aggregate address
+reachable through initialization, so captured pointers remain visible to
+conservative stack scanning across the collecting allocation.
 Native storage retains boxed tokens, never borrowed stack pointers. File, socket,
 and zlib handles register fallback finalizers; scope release supplies deterministic
 cleanup.

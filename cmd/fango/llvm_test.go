@@ -53,6 +53,12 @@ func TestLLVMDifferential(t *testing.T) {
 			}
 			runDifferentialCase(t, path, func(t *testing.T, in fixtureInputs, dir string) (string, int) {
 				cmd := exec.Command(binary, in.args...)
+				if filepath.Base(path) == "json_gc_resume.fango" {
+					// Frequent collection exposes captured windows that an
+					// optimized allocation could otherwise leave only in SIMD
+					// registers outside BDWGC's conservative root scan.
+					cmd.Env = append(os.Environ(), "GC_FREE_SPACE_DIVISOR=100")
+				}
 				var stderr bytes.Buffer
 				cmd.Stderr = &stderr
 				cmd.Stdin = strings.NewReader(in.stdin)

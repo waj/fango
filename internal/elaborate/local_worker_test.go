@@ -79,3 +79,23 @@ main = outer 3
 	}
 	t.Fatalf("missing lifted local worker:\n%s", core.Dump(prog))
 }
+
+func TestLocalWorkerTerminalClosureAllowsTailLoop(t *testing.T) {
+	prog := elabPoly(t, `outer : Int -> (() -> Int)
+outer step =
+    loop : Int -> (() -> Int)
+    loop n = if n < 1 then { n + step } else loop (n - 1)
+    loop 10000
+main = print ((outer 3)())
+`)
+	for i := range prog.Defs {
+		d := &prog.Defs[i]
+		if strings.HasSuffix(d.Name, "_loop") {
+			if _, ok := core.DetectTailLoop(d); !ok {
+				t.Fatalf("terminal closure cannot survive another iteration:\n%s", core.Dump(prog))
+			}
+			return
+		}
+	}
+	t.Fatalf("missing lifted local worker:\n%s", core.Dump(prog))
+}

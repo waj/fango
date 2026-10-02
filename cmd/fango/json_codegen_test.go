@@ -15,13 +15,14 @@ func TestJSONRecordFieldArgumentLoop(t *testing.T) {
 	if !ok {
 		t.Fatal(diagnostics.String())
 	}
-	foundWide := false
 	foundWideScan := false
 	for i := range result.Program.Defs {
 		def := &result.Program.Defs[i]
-		streaming := strings.HasSuffix(def.Name, "_json_fields")
+		if strings.HasSuffix(def.Name, "_json_fields") {
+			t.Fatalf("generated duplicate streaming record parser: %s", def.Name)
+		}
 		scanning := strings.HasSuffix(def.Name, "_json_scan_fields")
-		if !streaming && !scanning {
+		if !scanning {
 			continue
 		}
 		if scanning && len(def.Params) == 8 && def.Params[0] == "_json_scan_cursor" && def.Params[1] == "_json_scan_first" {
@@ -32,22 +33,40 @@ func TestJSONRecordFieldArgumentLoop(t *testing.T) {
 				}
 			}
 		}
-		if _, ok := core.DetectTailLoop(def); !ok {
-			t.Fatalf("generated record key loop is not eligible for constant-stack recursion: %s", def.Name)
-		}
-		if len(def.Params) == 7 && def.Params[0] == "_json_first" {
-			foundWide = true
-			for j := 1; j < len(def.Params); j++ {
-				if !strings.HasPrefix(def.Params[j], "_json_slot_") {
-					t.Fatalf("expected separate field arguments, got %v", def.Params)
+		pureRecursion := false
+		core.InspectPruned(def.Body, func(expr core.Expr) bool {
+			if _, ok := expr.(*core.Lambda); ok {
+				return false
+			}
+			if app, ok := expr.(*core.App); ok {
+				if ref, ok := app.Callee.(*core.VarRef); ok && ref.Name == def.Name {
+					pureRecursion = true
 				}
 			}
+			return true
+		})
+		// A schema containing only skipped fields returns a suspension for
+		// each key; runScan drives those steps without recursive execution.
+		if _, ok := core.DetectTailLoop(def); !ok && pureRecursion {
+			t.Fatalf("generated record key loop is not eligible for constant-stack recursion: %s", def.Name)
 		}
-	}
-	if !foundWide {
-		t.Fatal("missing generated six-field key loop")
 	}
 	if !foundWideScan {
 		t.Fatal("missing generated six-field scan loop")
+	}
+	for _, name := range []string{"Json.runScan", "Json.scanListMore"} {
+		found := false
+		for i := range result.Program.Defs {
+			def := &result.Program.Defs[i]
+			if def.Name == name {
+				found = true
+				if _, ok := core.DetectTailLoop(def); !ok {
+					t.Fatalf("resumable scan driver is not a tail loop: %s", name)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("missing resumable scan driver: %s", name)
+		}
 	}
 }

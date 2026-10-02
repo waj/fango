@@ -1,6 +1,7 @@
 import Bytes
 import Encoding
-import Json exposing (Decode(..))
+import Fail exposing (Fail)
+import Json exposing (Decode(..), Pull, decodeValue)
 import List
 import Reader
 import Result exposing (Result(..))
@@ -47,11 +48,11 @@ scans source = Reader.withBytes (Bytes.fromString (source ++ " 9")) { reader ->
         case Json.bufferedScan() of
             Nothing -> False
             Just start ->
-                scanned : Maybe (Wide, Json.Scan)
+                scanned : Result (() ->{Pull, Fail Json.Error} Json.ScanStep Wide) (Wide, Json.Scan)
                 scanned = scanValue start
                 case scanned of
-                    Nothing -> False
-                    Just (value, rest) ->
+                    Err _ -> False
+                    Ok (value, rest) ->
                         Json.acceptScan rest
                         position = Json.at()
                         next : Int
@@ -67,11 +68,11 @@ declines source = Reader.withBytes (Bytes.fromString source) { reader ->
         case Json.bufferedScan() of
             Nothing -> False
             Just start ->
-                scanned : Maybe (Wide, Json.Scan)
+                scanned : Result (() ->{Pull, Fail Json.Error} Json.ScanStep Wide) (Wide, Json.Scan)
                 scanned = scanValue start
                 case scanned of
-                    Nothing -> Json.at().offset == 0
-                    Just _ -> False
+                    Err _ -> Json.at().offset == 0
+                    Ok _ -> False
     } of
         Ok valid -> valid
         Err _ -> False
@@ -86,7 +87,8 @@ runChunks chunks = Runtime.Local.run chunks { remaining ->
                     remaining.write tail
                     Just chunk
           }
-        }) { reader ->
+        }
+    ) { reader ->
         outcome = Json.withPull reader {
             value : Wide
             value = decodeValue()
@@ -96,7 +98,7 @@ runChunks chunks = Runtime.Local.run chunks { remaining ->
             Ok valid -> show valid
             Err error -> error.message ++ " " ++ show error.offset ++ " " ++ show error.line ++ " " ++ show error.column ++ " " ++ error.path
         (signature, Bytes.concat (Stream.toList (Reader.chunks reader)))
-        }
+    }
 }
 
 sameSplits source =
@@ -118,11 +120,11 @@ scanAtLimit depth = Reader.withBytes (Bytes.fromString (String.padLeft depth '['
         case Json.bufferedScan() of
             Nothing -> False
             Just start ->
-                scanned : Maybe (Named, Json.Scan)
+                scanned : Result (() ->{Pull, Fail Json.Error} Json.ScanStep Named) (Named, Json.Scan)
                 scanned = scanValue start
                 case scanned of
-                    Nothing -> Json.at().offset == depth && depth == 256
-                    Just (value, rest) ->
+                    Err _ -> Json.at().offset == depth && depth == 256
+                    Ok (value, rest) ->
                         Json.acceptScan rest
                         next : Named
                         next = decodeValue()
@@ -145,11 +147,11 @@ main() =
                 case Json.bufferedScan() of
                     Nothing -> False
                     Just start ->
-                        scanned : Maybe (Named, Json.Scan)
+                        scanned : Result (() ->{Pull, Fail Json.Error} Json.ScanStep Named) (Named, Json.Scan)
                         scanned = scanValue start
                         case scanned of
-                            Nothing -> False
-                            Just (value, rest) ->
+                            Err _ -> False
+                            Ok (value, rest) ->
                                 Json.acceptScan rest
                                 value == Named { a = 3, value = "é" } && Json.at().offset == 20
             } of

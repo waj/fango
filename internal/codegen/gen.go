@@ -901,7 +901,7 @@ func (g *gen) workerCallsControlledArg(d *core.Def) bool {
 		if _, ok := e.(*core.Lambda); ok {
 			return false
 		}
-		if app, ok := e.(*core.App); ok {
+		if app, ok := e.(*core.App); ok && app.Control != (types.Control{}) {
 			for name := range controlled {
 				if core.Mentions(app.Callee, name) {
 					called = true

@@ -19,7 +19,10 @@ installed dependency summaries, and rejects stale contracts. Its verifier checks
 typed operands, worker result types, decision-tree leaves, terminating control
 flow, and continues within an eligible self-tail loop. A deterministic dump
 records transport, loop eligibility, callback arity/modes, and statements without
-graph-local IDs. This representation does not modify Core.
+graph-local IDs. This representation does not modify Core. A pure call returning a
+controlled callback needs that callback's representation family, but does not
+execute its latent effects. ABI summaries distinguish this case from invoking
+a controlled arrow; the factory still returns normally in an Exit context.
 
 Go emission preserves lexical evidence and row scopes. Eligible immediately
 invoked literals are expanded into statement blocks. Arguments are evaluated

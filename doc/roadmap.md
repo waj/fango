@@ -35,7 +35,7 @@ lookahead, renaming temporaries are elided from emitted Go, and cleanup
 scopes over literal callbacks lower at their call sites. Short decoded lists
 build directly without a reversal, and bound callbacks for simple local
 effect forwarders call the captured operation slot directly; the measured series
-is in the [comparison notes](design/json-performance.md).
+is in the [comparison baselines](design/json-performance-baselines.md).
 
 The [buffered pull cursor](design/json.md) shares its text window's buffer
 description, defers reader commits to refills and scope exit, and fuses record
@@ -46,14 +46,17 @@ makes deferred commits useful.
 
 Measure remaining costs against the [shared cursor and pure value scans](design/json.md).
 They include handler snapshot/store traffic, token construction for
-custom token and generic value consumers, rescanning the first window of a
-boundary-spanning string or literal, and element callbacks that allocate a
-closure over a decoding dictionary. Investigate resumable string/escape phases
-and nonmaterializing string validation for `skipValue` when measurements justify
-them. Required fields in any order now use [pure scan continuation](design/json.md)
-from the already scanned record prefix. Investigate scanning additional unknown
-fields, preserving validation and avoiding repeated speculative passes over
-nested values. Reduce dictionary closure construction for nonnumeric scalar comparisons;
+custom token and generic value consumers, bounded retries of a split escape,
+partial key comparisons before a source-aware key read, and
+element callbacks that allocate a closure over a decoding dictionary. Typed
+record/list scans now [suspend and resume](design/json.md) across
+boundaries, unknown or escaped keys, and custom children without reparsing the
+container prefix. Typed scanned strings retain their fragment/escape position.
+The decoder class has one resumable parser per type; scalar window phases
+continue through refills, and the common driver replaces the duplicate streaming
+record/list parsers. Investigate nonmaterializing string validation for
+`skipValue` when measurements justify it. Reduce dictionary
+closure construction for nonnumeric scalar comparisons;
 the string-scanner experiment exposed per-character closure allocation through
 generic inequality. Preserve invocation-time handler selection, lexical
 shadowing, and gated state synchronization. Parsing and codec derivation remain

@@ -169,6 +169,9 @@ template <class T> T *fg_new(T value) {
   static_assert(std::is_trivially_destructible_v<T>);
   auto *p = static_cast<T *>(fango_alloc(sizeof(T)));
   new (p) T(value);
+  // Keep aggregate inputs visible on the stack across a collecting allocation.
+  // Optimized copies can otherwise retain their pointers only in SIMD registers.
+  GC_reachable_here(&value);
   return p;
 }
 struct fg_evidence {

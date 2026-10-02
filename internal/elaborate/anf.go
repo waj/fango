@@ -108,9 +108,15 @@ func (el *elab) anfSlot(e core.Expr) (core.Expr, []hoist) {
 		el.tmp++
 		return &core.VarRef{Name: name, Local: true, Ty: norm.Type()}, append(hoists, hoist{name: name, rhs: norm})
 	case *core.Let:
-		// A Let in an expression slot stays put (codegen's IIFE handles it);
-		// normalize inside without leaking hoists across the binding.
-		return el.anf(e), nil
+		// Keep the binding region intact, but lift a control-producing region
+		// into statements so its exit is checked before the enclosing call.
+		out := el.anf(e)
+		if control := core.ExprControl(out); control.Transport != types.Direct || control.Polymorphic {
+			name := fmt.Sprintf("_control%d", el.tmp)
+			el.tmp++
+			return &core.VarRef{Name: name, Local: true, Ty: out.Type()}, []hoist{{name: name, rhs: out}}
+		}
+		return out, nil
 	case *core.Lambda:
 		return &core.Lambda{SourceType: e.SourceType, Param: e.Param, Body: el.anf(e.Body), Ty: e.Ty,
 			ParamCapture: e.ParamCapture, EffectParams: e.EffectParams, RowParam: e.RowParam, RowEffects: e.RowEffects}, nil

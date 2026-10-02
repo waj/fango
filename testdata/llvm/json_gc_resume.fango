@@ -1,0 +1,31 @@
+import Bytes
+import Json exposing (Decode(..))
+import List
+import Reader
+import Result exposing (Result(..))
+import Runtime.Local
+import String
+
+type Row = { amount : Float, other : Float, name : String } deriving (Decode)
+
+main() =
+    row = "{\"amount\":12.5,\"other\":-1.25e-2,\"name\":\"window\"}"
+    source = "[" ++ String.concat (List.map { _ -> row ++ "," } (List.range 1 511)) ++ row ++ "]"
+    result = Runtime.Local.run (Bytes.fromString source) { remaining ->
+        Reader.over (Bytes.Source
+            { pull = {
+                bytes = remaining.read()
+                if Bytes.length bytes == 0 then Nothing
+                else
+                    chunk = Bytes.slice 0 64 bytes
+                    remaining.write (Bytes.slice 64 (Bytes.length bytes) bytes)
+                    Just chunk
+              }
+            }) { reader -> Json.read @(List Row) reader }
+    }
+    print (case result of
+            Err _ -> False
+            Ok rows ->
+                List.foldl { _ count -> count + 1 } 0 rows == 512
+                    && List.foldl { value valid -> valid && value.amount == 12.5 && value.other == (0.0 - 0.0125) && value.name == "window" } True rows
+    )

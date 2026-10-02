@@ -1,0 +1,37 @@
+import Fail exposing (Fail)
+import List
+import Result exposing (Result(..))
+
+make : () -> () ->{Fail String} Int
+make() = { Fail.fail "deferred" }
+
+-- Invoking the pure factory returns an effectful value without performing
+-- that value's effects. Exit-family callers still get a normal factory result.
+factory : (() -> () ->{Fail String} Int) -> Int -> () ->{Fail String} Int
+factory build count = if count == 0 then build() else factory build (count - 1)
+
+terminal : Int -> () -> Int
+terminal count =
+    if count == 0 then
+        saved : () -> Int
+        saved() = count
+        saved
+    else terminal (count - 1)
+
+-- Unlike a terminal closure, these closures survive another loop iteration.
+retained : Int -> List (() -> Int) -> List (() -> Int)
+retained count reverse =
+    if count == 0 then reverse
+    else
+        saved : () -> Int
+        saved() = count
+        retained (count - 1) [saved | reverse]
+
+main() =
+    print (Fail.attempt {
+        deferred = factory make 10000
+        deferred()
+    } == Err "deferred")
+    finished = terminal 10000
+    print (finished() == 0)
+    print (List.map { action -> action() } (retained 3 []) == [1, 2, 3])

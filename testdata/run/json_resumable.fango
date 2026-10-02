@@ -1,0 +1,87 @@
+import Bytes
+import Json exposing (Decode(..), decodeValue)
+import List
+import Reader
+import Result exposing (Result(..))
+import Runtime.Local
+import String
+
+type Peeked = Peeked Int deriving (Eq)
+
+instance Decode Peeked
+    scanValue cursor = Json.scanFromPull cursor {
+        value : Int
+        value = decodeValue()
+        ignore Json.peek()
+        Peeked value
+    }
+
+type Packet = { first : Int, peeked : Peeked, rest : List String } deriving (Decode, Eq)
+type Defaulted =
+    { value : Int  #[Json.Default `Json.at().offset`]
+    }
+    deriving (Decode, Eq)
+type Skipped =
+    { value : Int  #[Json.Skip, Json.Default `7`]
+    }
+    deriving (Decode, Eq)
+
+chunksDecode : Decode a => Type a -> String -> Result Json.Error a
+chunksDecode witness source = Runtime.Local.run (Bytes.toList (Bytes.fromString source)) { remaining ->
+    Reader.over (Bytes.Source
+        { pull = {
+            case remaining.read() of
+                [] -> Nothing
+                [byte | tail] ->
+                    remaining.write tail
+                    Just (Bytes.fromList [byte])
+          }
+        }
+    ) { reader -> Json.read witness reader }
+}
+
+decoded expected outcome = case outcome of
+    Ok value -> value == expected
+    Err _ -> False
+
+sameFailure : Result Json.Error a -> Result Json.Error b -> Bool
+sameFailure first second = case (first, second) of
+    (Err a, Err b) -> a.message == b.message && a.offset == b.offset && a.line == b.line && a.column == b.column && a.path == b.path
+    _ -> False
+
+peekedDecode : Decode a => Type a -> String -> Result Json.Error a
+peekedDecode _ source = Reader.withBytes (Bytes.fromString source) { reader ->
+    Json.withPull reader {
+        ignore Json.peek()
+        decodeValue()
+    }
+}
+
+main() =
+    source = "{\"first\":1,\"peeked\":2,\"rest\":[\"a\",\"é😀\\n\\uD834\\uDD1Etail\"]}"
+    expected = Packet { first = 1, peeked = Peeked 2, rest = ["a", "é😀\n𝄞tail"] }
+    print (decoded expected (Json.parse @Packet source))
+    print (decoded expected (chunksDecode @Packet source))
+    print (decoded (List.map Peeked (List.range 1 10)) (chunksDecode @(List Peeked) "[1,2,3,4,5,6,7,8,9,10]"))
+    print (sameFailure (chunksDecode @Packet "{\"first\":1,\"peeked\":2,\"rest\":[\"a\",\"\\x\"]}") (Json.parse @Packet "{\"first\":1,\"peeked\":2,\"rest\":[\"a\",\"\\x\"]}"))
+    print (decoded (Defaulted { value = 17 }) (chunksDecode @Defaulted "{\"ignored\":[1,2]}"))
+    many = "{" ++ String.concat (List.map { _ -> "\"ignored\":0," } (List.range 1 2048)) ++ "\"last\":0}"
+    print (decoded (Skipped { value = 7 }) (chunksDecode @Skipped many))
+    print (decoded (List.foldl { _ tail -> [1 | tail] } [2] (List.range 1 2048)) (chunksDecode @(List Int) ("[" ++ String.concat (List.map { _ -> "1," } (List.range 1 2048)) ++ "2]")))
+    print (decoded (-9223372036854775807 - 1) (chunksDecode @Int "-9223372036854775808")
+        && decoded 9223372036854775807 (chunksDecode @Int "9223372036854775807")
+        && decoded (0.0 - 1250.0) (chunksDecode @Float "-12.5e+2")
+        && decoded True (chunksDecode @Bool "true")
+        && decoded False (chunksDecode @Bool "false")
+        && decoded () (chunksDecode @(()) "null")
+        && decoded Nothing (chunksDecode @(Maybe Int) "null")
+        && decoded (Just 123) (chunksDecode @(Maybe Int) "123"))
+    print (List.foldl { text valid ->
+            valid && sameFailure (chunksDecode @Int text) (Json.parse @Int text)
+          } True ["-", "-?", "01", "1.25", "1e0", "1e+", "9223372036854775808", "-9223372036854775809", "truX"]
+        && sameFailure (chunksDecode @Float "1e9999") (Json.parse @Float "1e9999")
+        && sameFailure (chunksDecode @Bool "truX") (Json.parse @Bool "truX"))
+    print (decoded expected (peekedDecode @Packet source)
+        && decoded [1, 2, 3] (peekedDecode @(List Int) "[1,2,3]")
+        && decoded (Just [1, 2]) (peekedDecode @(Maybe (List Int)) "[1,2]")
+        && decoded Nothing (peekedDecode @(Maybe Int) "null"))

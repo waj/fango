@@ -24,15 +24,17 @@ magnitude directly while validating digits, leading zeros, and signed 64-bit
 limits; the negative accumulator permits the minimum Int without overflow.
 They produce no decimal string or second conversion pass. A token boundary
 resumes the number phase over the next window without reparsing consumed digits.
-Strings and literals that
-cannot finish in the initial window fall back to the source-aware scanner;
-the token scanner examines its initial window at most twice, then continues across
-chunks. The source-aware scanner also preserves grammar-error positions and
-consumption when the buffered path declines malformed input. Empty windows
+Strings retain their spans and fragments, literals retain their remaining
+suffix, and typed integers retain their sign, grammar phase, and negative
+accumulator across refills. The source-aware drivers run the same pure window
+loops after each refill. There is one lexer dispatch; it does not restart a
+token because its initial window was incomplete. Escape handling can retry the
+current escape to preserve its exact diagnostic site, without rescanning the
+completed string prefix. Empty windows
 are distinct from source EOF; only a refill returning `False` proves EOF.
 
 JSON owns escape syntax and surrogate-pair assembly, while Encoding owns byte
-decoding and Char owns scalar construction. Both scanning paths use opaque
+decoding and Char owns scalar construction. Window loops and source drivers use opaque
 text windows and encoded byte widths; JSON never inspects raw bytes or selects
 a byte decoder. Cursor offsets and columns advance by those widths, preserving
 byte-based diagnostics with Latin-1 as well as UTF-8. Decoding errors are
@@ -43,48 +45,57 @@ The `Pull` effect retains one optional lookahead token for custom token users.
 Typed String, Int, and Float decoding reads buffered scalars directly, and a
 record key operation consumes its separator, string, and colon together.
 These paths avoid intermediate tokens and repeated handler calls. Existing
-lookahead is honored, and boundary or error cases use the common token scanner.
+lookahead is honored through the common token consumer.
 Array iteration consumes separators and closing brackets but leaves the next
 value for its decoder, rather than tokenizing it in advance. Lexical errors
 in a typed array element therefore occur inside that element's index path.
 
-`Decode.scanValue` is a pure optional decoder over an opaque `Scan`, containing
-one text window, line/column, and the remaining container-depth allowance.
-Success returns one complete value and a derived position with the same
-allowance. Failure or a boundary returns `Nothing` without publishing any
-consumption, refilling, or raising effects. Generated records and lists attempt
-this path once, then either publish the completed cursor through `acceptScan`
-or execute their streaming decoder. Existing lookahead disables the attempt.
-Nested values use pure scan methods rather than entering the Pull handler or
-constructing path segments; only the enclosing success updates handler state.
-The streaming path owns all failures and retains their paths and consumption.
+`Decode` has one parser method, `scanValue`, pure over an opaque `Scan`
+containing one text window, line/column, and the remaining container-depth
+allowance. The cursor stays the
+same size as the original optional scanner: a negative allowance marks pending
+lookahead, which must be handled through Pull before buffered scanning can
+continue. It does not carry offset, source EOF, or a path stack; the handler
+owns those fields. `acceptScan` advances offset by the window-index difference
+and updates depth from the allowance, while a pending view leaves state intact.
+
+A scan returns either `Ok (value, rest)` or `Err` containing a suspended action.
+The action returns `ScanDone value rest` or `ScanContinue` with the next scan
+result. `runScan` is a tail loop over these steps. Suspension publishes exactly
+the cursor needed by the source-aware operation, then resumes pure scanning
+from the handler's new window. Completed record fields and list elements stay
+in continuation arguments; a boundary does not restart the enclosing value.
+The common `decodeValue` driver always starts this parser at `currentScan`,
+runs its steps, and publishes the completed position. Pending lookahead uses
+the same parser entry and continuation flow. There is no separate streaming
+record/list parser or container restart fallback.
+Nested scans build no diagnostic path on success. Only executing a child's
+suspended action enters its key/index path, and cleanup restores it on normal
+or exiting completion. Source effects propagate through the same boundary.
+
+The typed String scanner retains its current span, completed fragments, and
+stopped window when a string cannot finish in that window. `stringTail` resumes
+the source-aware string phase from that position, including a split escape or
+encoded character. It does not rescan the initial span. Numeric scans pass the
+completed window run to their driver; the driver preserves grammar diagnostics,
+refills, and runs the next window from that phase. Typed integers avoid decimal
+string construction on success. A decimal, exponent, or overflowing magnitude
+continues number validation before returning the integer type mismatch.
 
 Record derivation emits straight-line scanning for required fields in
-declaration order. It matches the serialized key spelling through the text
-reader's bulk `matchWindow`, then scans the value directly into the final
-record. This avoids key decoding, field dispatch callbacks, and optional slots.
-On the first unexpected key order, scanning continues from that cursor in a
-generated named local loop, with the already decoded fields passed as `Just`
-arguments and the remaining fields as `Nothing`. The loop consumes object
-separators once, dispatches through bulk encoded key matches, and tail-calls
-itself with the cursor and only the matching field argument replaced. At the
-closing brace it requires every field before constructing the record. Previously
-scanned values are never rescanned by the order transition, and neither path
-constructs decoded key strings. Duplicate or extra fields, alternative escape
-spellings, unsupported child scanners, and incomplete records decline to the
-streaming decoder; there is no second speculative record pass. Schemas with defaults or skipped
-fields always decline, preserving invocation of effectful default expressions.
-Union and generic Value instances also decline. Custom instances can decline
-or compose bundled scan methods while preserving their decode semantics.
+declaration order. It matches serialized keys through the text reader's bulk
+`matchWindow`, then scans values directly into the final record. On the first
+unexpected order it continues in a named local key loop, passing decoded fields
+as `Just` arguments and the remaining fields as `Nothing`. This loop keeps bulk
+encoded matches for known keys and tail-calls itself with the matching field
+argument replaced. A child suspension returns to that loop with the new value
+and saved fields. Split, escaped, or unknown keys use the source-aware key
+operation, dispatch or validate/skip the value, then return the next pure scan
+step. Defaults and skipped fields use the same loop; final construction defers
+effectful defaults until needed. Duplicate and missing fields retain their
+source-aware diagnostics. Union and generic Value scanners defer to their
+token decoders, and custom instances can use `scanFromPull` or `mapScan`.
 
-The streaming record decoder generates a named local key loop with a first-key
-flag and one optional argument per field. Key dispatch tail-calls that worker
-with only the matching argument replaced after successful decoding; unknown
-keys call `skipValue` and pass every field argument through unchanged. The
-Meta local-function and sequence builders keep all recursion in tail position,
-including unknown-key handling. The loop needs no aggregate tuple, per-key
-callback, or local handler activation. The decoder never constructs a generic
-value tree.
 List decoding constructs up to eight elements directly in source order, so
 short lists need one spine. Longer lists switch to a tail loop with an
 accumulator and reversal, keeping stack use bounded for large documents.
@@ -99,9 +110,12 @@ The generic `Json.Value` parser uses the same token stream and is explicitly
 opted into. Numbers in this tree retain their validated source lexeme.
 Container depth is counted when a token is consumed, including through
 lookahead, and capped before entering level 257. Pure scans inherit that budget
-and decline if a nested opener would exceed it. The scanner retains one
-lookahead token and the Reader's current buffer; typed parsing therefore has no
-memory cost proportional to the entire input except for the result itself.
+and suspend for the source-aware diagnostic if a nested opener would exceed it.
+The handler retains one lookahead token and the Reader's current buffer. A
+suspended parent can retain its entry window until its child completes;
+continuation steps release prior windows. Scanner memory is bounded by nesting,
+the short-list budget, and the current token's fragments, in addition to the
+decoded result.
 
 Encode derivation emits straight-line record and union output through the
 `Emit` effect. The effect handler writes string chunks to a `Text.Writer`.

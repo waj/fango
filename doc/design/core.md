@@ -139,7 +139,8 @@ also independently reconstructs [structural evidence summaries](ownership.md)
 and compares lexical evidence stacks after transforms.
 
 Transport-polymorphic calls/operations in arguments, guards, fields, prefixes,
-and return transformations are ANF-hoisted. Exit emission must inspect its
+and return transformations are ANF-hoisted. A control-producing local binding
+region in an expression slot is hoisted as a whole, preserving its scope. Exit emission must inspect its
 exit result before evaluating the next source expression; generated Go uses
 [split results](lowering.md#exit-results), with Outcome at runtime boundaries.
 Lint checks conventions on callees/evidence and rejects control-producing nodes in unhandled slots.

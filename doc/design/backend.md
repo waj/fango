@@ -307,8 +307,10 @@ self-worker call at identity type instantiation with unchanged evidence, reached
 through the tail skeleton (Let body, If branches, Case leaves, Seq tail), never
 through a lambda, handler, RHS, scrutinee, guard, or argument.
 
-A definition is excluded if a lambda or handler clause/return captures a parameter
-the loop mutates; Go closures capture locals by reference. Unchanged threaded
+A definition is excluded if a lambda or handler clause/return on a path to a
+self tail call captures a parameter the loop mutates; Go closures capture locals
+by reference. A closure returned from a terminal branch is safe because that
+branch cannot execute another iteration. Unchanged threaded
 parameters may be captured. The reference owns the
 [public guarantee](../reference/functions.md#tail-call-guarantee).
 

@@ -76,64 +76,6 @@ func command(dir string, env []string, name string, args ...string) ([]byte, err
 	return out, nil
 }
 
-// Keep the public decoder contract unchanged while measuring the streaming
-// path alone. The snapshot is retained alongside the benchmark evidence.
-func streamingLibrary(repo, dest string) (string, error) {
-	root := filepath.Join(dest, "streaming-library")
-	if err := os.Mkdir(root, 0755); err != nil {
-		return "", err
-	}
-	for _, name := range []string{"go.mod", "go.sum"} {
-		data, err := os.ReadFile(filepath.Join(repo, name))
-		if err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(filepath.Join(root, name), data, 0644); err != nil {
-			return "", err
-		}
-	}
-	for _, name := range []string{"stdlib", "runtime", "internal"} {
-		source := filepath.Join(repo, name)
-		err := filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			rel, err := filepath.Rel(source, path)
-			if err != nil {
-				return err
-			}
-			target := filepath.Join(root, name, rel)
-			if entry.IsDir() {
-				if entry.Name() == ".fango" {
-					return filepath.SkipDir
-				}
-				return os.MkdirAll(target, 0755)
-			}
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if name == "stdlib" && rel == "Json.fango" {
-				start := bytes.Index(data, []byte("attemptScan scan fallback =\n"))
-				if start < 0 {
-					return fmt.Errorf("cannot locate JSON scan attempt in library snapshot")
-				}
-				body := start + len("attemptScan scan fallback =\n")
-				end := bytes.Index(data[body:], []byte("\n\ntokenDepth :"))
-				if end < 0 {
-					return fmt.Errorf("cannot locate end of JSON scan attempt in library snapshot")
-				}
-				data = append(append(append([]byte(nil), data[:body]...), []byte("    fallback()")...), data[body+end:]...)
-			}
-			return os.WriteFile(target, data, 0644)
-		})
-		if err != nil {
-			return "", err
-		}
-	}
-	return root, nil
-}
-
 func run() error {
 	out := flag.String("out", "", "new evidence directory (required)")
 	input := flag.String("input", "", "existing JSON fixture with adjacent .meta.json; otherwise generate")
@@ -144,7 +86,7 @@ func run() error {
 
 	aeson := flag.Bool("aeson", false, "also compare Haskell/Aeson (requires the jsoncompare Nix shell)")
 	llvm := flag.Bool("llvm", false, "also compare Fango's LLVM backend")
-	noScan := flag.Bool("no-scan", false, "disable record/list Scan attempts in a private library snapshot")
+	noScan := flag.Bool("no-scan", false, "obsolete: the separate streaming decoder has been removed")
 	fieldOrder := flag.String("field-order", "declaration", "generated fixture's record keys: declaration or reverse")
 	diagnostics := flag.Bool("diagnostics", false, "also isolate reader layers and generated state/evidence dispatch on this fixture")
 	prof := flag.Bool("profile", false, "also build and run a separate instrumented Fango binary")
@@ -152,6 +94,9 @@ func run() error {
 	flag.Parse()
 	if *out == "" || *runs < 1 || *warmups < 0 || *size < 1000 {
 		return fmt.Errorf("require -out, -runs >= 1, -warmups >= 0 and -bytes >= 1000")
+	}
+	if *noScan {
+		return fmt.Errorf("-no-scan is unavailable: JSON uses a single resumable parser; compare saved baseline binaries instead")
 	}
 	if *fieldOrder != "declaration" && *fieldOrder != "reverse" {
 		return fmt.Errorf("require -field-order declaration or reverse")
@@ -172,12 +117,6 @@ func run() error {
 		return err
 	}
 	libraryRoot := repo
-	if *noScan {
-		libraryRoot, err = streamingLibrary(repo, dest)
-		if err != nil {
-			return err
-		}
-	}
 	env := append(os.Environ(), "FANGO_ROOT="+libraryRoot)
 	for name, data := range map[string]string{"main.fango": workload, "control.go": controls, "generate.py": generator} {
 		if err = os.WriteFile(filepath.Join(dest, name), []byte(data), 0644); err != nil {
@@ -340,7 +279,7 @@ func run() error {
 	}
 	var samples []observation
 	save := func() error {
-		data, e := json.MarshalIndent(map[string]any{"revision": strings.TrimSpace(string(revision)), "go_version": runtime.Version(), "toolchain": toolchain, "platform": runtime.GOOS + "/" + runtime.GOARCH, "environment": settings, "fixture": fixture, "dataset": json.RawMessage(metaBytes), "binary_sha256": binaryHashes, "scan_enabled": !*noScan, "library_root": libraryRoot, "warmups": *warmups, "samples": samples}, "", "  ")
+		data, e := json.MarshalIndent(map[string]any{"revision": strings.TrimSpace(string(revision)), "go_version": runtime.Version(), "toolchain": toolchain, "platform": runtime.GOOS + "/" + runtime.GOARCH, "environment": settings, "fixture": fixture, "dataset": json.RawMessage(metaBytes), "binary_sha256": binaryHashes, "scan_enabled": true, "parser": "resumable", "library_root": libraryRoot, "warmups": *warmups, "samples": samples}, "", "  ")
 		if e != nil {
 			return e
 		}

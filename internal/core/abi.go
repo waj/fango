@@ -35,7 +35,7 @@ func SummarizeABI(p *Prog, context []Def) {
 			if _, ok := e.(*Lambda); ok {
 				return false
 			}
-			if app, ok := e.(*App); ok {
+			if app, ok := e.(*App); ok && app.Control != (types.Control{}) {
 				for name := range controlled {
 					if Mentions(app.Callee, name) {
 						d.ABI.CallsControlledArg = true

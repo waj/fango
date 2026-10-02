@@ -24,8 +24,8 @@ type TailLoop struct {
 //     (Let.Body, If branches, Case leaf bodies, Seq.Then — never Lambda
 //     bodies, Handle, Let.Rhs, Seq.First, scrutinees, or guard conditions)
 //     satisfies IsTailLoopCall, and
-//  2. no Lambda body or Handle clause/return anywhere in d.Body mentions a
-//     mutated param: generated Go closures capture locals by reference, so
+//  2. no Lambda body or Handle clause/return on a path to a self tail call
+//     mentions a mutated param: generated Go closures capture locals by reference, so
 //     an escaping closure would observe later-iteration reassignment.
 //     Params passed through unchanged are safe to capture — this is what
 //     keeps eta-expansion wrappers around callback params from
@@ -87,10 +87,74 @@ func DetectTailLoop(d *Def) (*TailLoop, bool) {
 		}
 	}
 	walk(d.Body)
-	if !found || capturesMutated(d.Body, tl.Mutated) {
+	if !found || capturesOnLoopPaths(d, d.Body, tl.Mutated) {
 		return nil, false
 	}
 	return tl, true
+}
+
+// A closure returned from a terminal branch cannot observe another iteration:
+// that branch exits the worker. Prefixes of a looping branch and tail-call
+// arguments can retain a closure across reassignment and remain conservative.
+func capturesOnLoopPaths(d *Def, body Expr, mutated map[string]bool) bool {
+	var walk func(Expr) (bool, bool)
+	var tree func(Tree) (bool, bool)
+	join := func(a, b Expr) (bool, bool) {
+		at, ac := walk(a)
+		bt, bc := walk(b)
+		return at || bt, ac || bc
+	}
+	prefix := func(e Expr, tail, capture bool) (bool, bool) {
+		return tail, capture || tail && capturesMutated(e, mutated)
+	}
+	walk = func(e Expr) (bool, bool) {
+		switch e := e.(type) {
+		case *Let:
+			tail, capture := walk(e.Body)
+			return prefix(e.Rhs, tail, capture)
+		case *Seq:
+			tail, capture := walk(e.Then)
+			return prefix(e.First, tail, capture)
+		case *If:
+			tail, capture := join(e.Then, e.Else)
+			return prefix(e.Cond, tail, capture)
+		case *Case:
+			tail, capture := tree(e.Tree)
+			return prefix(e.Scrut, tail, capture)
+		case *App:
+			if IsTailLoopCall(d, e) {
+				return true, capturesMutated(e, mutated)
+			}
+		}
+		return false, false
+	}
+	tree = func(t Tree) (bool, bool) {
+		switch t := t.(type) {
+		case *Leaf:
+			return walk(t.Body)
+		case *Guard:
+			at, ac := tree(t.Then)
+			bt, bc := tree(t.Else)
+			return prefix(t.Cond, at || bt, ac || bc)
+		case *SwitchCtor:
+			tail, capture := tree(t.Default)
+			for _, arm := range t.Cases {
+				at, ac := tree(arm.Tree)
+				tail, capture = tail || at, capture || ac
+			}
+			return tail, capture
+		case *SwitchLit:
+			tail, capture := tree(t.Default)
+			for _, arm := range t.Cases {
+				at, ac := tree(arm.Tree)
+				tail, capture = tail || at, capture || ac
+			}
+			return tail, capture
+		}
+		return false, false
+	}
+	_, capture := walk(body)
+	return capture
 }
 
 // IsTailLoopCall reports whether e, reached via the tail skeleton, is a

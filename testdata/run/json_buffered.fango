@@ -1,7 +1,7 @@
 import Bytes
 import Encoding
 import Fail
-import Json exposing (Decode(..))
+import Json exposing (Decode(..), decodeValue)
 import List
 import Reader
 import Result exposing (Result(..))
@@ -23,13 +23,14 @@ runChunks chunks = Runtime.Local.run chunks { remaining ->
                     remaining.write rest
                     Just chunk
           }
-        }) { reader ->
+        }
+    ) { reader ->
         result = Json.read @(List Row) reader
         tail = Bytes.concat (Stream.toList (Reader.chunks reader))
         case result of
             Ok rows -> (Ok rows, tail)
             Err error -> (Err (error.message, error.offset, (error.line, error.column, error.path)), tail)
-        }
+    }
 }
 
 sameSplits bytes =

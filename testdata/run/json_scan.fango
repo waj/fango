@@ -1,6 +1,7 @@
 import Bytes
 import Encoding
-import Json exposing (Decode(..))
+import Fail exposing (Fail)
+import Json exposing (Decode(..), Pull, decodeValue)
 import List
 import Reader
 import Result exposing (Result(..))
@@ -9,22 +10,18 @@ import Text.Reader as TextReader
 
 type Count = Count Int deriving (Eq)
 
--- Custom decoders can decline speculative scanning without changing their
+-- Custom decoders can defer buffered scanning without changing their
 -- streaming semantics, including when nested in generated records/lists.
 instance Decode Count
-    decodeValue() = Count (decodeValue() + 1)
-    scanValue _ = Nothing
+    scanValue cursor = Json.scanFromPull cursor { Count (decodeValue() + 1) }
 
 type FastCount = FastCount Int deriving (Eq)
 
 instance Decode FastCount
-    decodeValue() = FastCount (decodeValue() + 1)
     scanValue cursor =
-        scanned : Maybe (Int, Json.Scan)
+        scanned : Result (() ->{Pull, Fail Json.Error} Json.ScanStep Int) (Int, Json.Scan)
         scanned = scanValue cursor
-        case scanned of
-            Nothing -> Nothing
-            Just (value, rest) -> Just (FastCount (value + 1), rest)
+        Json.mapScan { value -> FastCount (value + 1) } scanned
 
 type Packet = { count : Count, more : List Count } deriving (Decode, Eq)
 type FastPacket = { count : FastCount, more : List FastCount } deriving (Decode, Eq)
