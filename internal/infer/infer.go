@@ -1293,6 +1293,11 @@ func sameKnownRowEffects(a, b types.Row) bool {
 // closeSingleRows makes an inferred arrow pure when its open row occurs only
 // once in the type. A row shared between a callback and the surrounding call
 // remains quantified, preserving inferred higher-order effect polymorphism.
+//
+// Only an arrow's own effect tail closes. A row variable whose single
+// occurrence is a type argument, as in `Box e -> Int`, stays quantified:
+// closing it would narrow what callers may pass rather than simplify what the
+// function performs.
 func (ck *Checker) closeSingleRows(t types.Type) {
 	ck.closeSingleRowsExcept(t, nil)
 }
@@ -1300,35 +1305,39 @@ func (ck *Checker) closeSingleRows(t types.Type) {
 func (ck *Checker) closeSingleRowsExcept(t types.Type, avoid map[int]bool) {
 	t = ck.Sub.Apply(t)
 	counts := map[int]int{}
-	var count func(types.Type)
-	count = func(t types.Type) {
+	arrowTail := map[int]bool{}
+	var count func(types.Type, bool)
+	count = func(t types.Type, inArrowEff bool) {
 		switch t := t.(type) {
 		case *types.TVar:
 			if t.Kind == types.RowVar && !t.Rigid {
 				counts[t.ID]++
+				if inArrowEff {
+					arrowTail[t.ID] = true
+				}
 			}
 		case *types.TCon:
 			for _, a := range t.Args {
-				count(a)
+				count(a, false)
 			}
 		case *types.TFun:
-			count(t.Arg)
-			count(t.Eff)
-			count(t.Ret)
+			count(t.Arg, false)
+			count(t.Eff, true)
+			count(t.Ret, false)
 		case types.Row:
 			for _, l := range t.Labels {
 				for _, a := range l.Args {
-					count(a)
+					count(a, false)
 				}
 			}
 			if t.Tail != nil {
-				count(t.Tail)
+				count(t.Tail, inArrowEff)
 			}
 		}
 	}
-	count(t)
+	count(t, false)
 	for id, n := range counts {
-		if n == 1 && !avoid[id] {
+		if n == 1 && arrowTail[id] && !avoid[id] {
 			ck.Sub[id] = types.Row{}
 		}
 	}

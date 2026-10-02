@@ -1,6 +1,7 @@
 package infer_test
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -336,5 +337,40 @@ func TestEffectRows(t *testing.T) {
 	}
 	if got := types.Show(ck.Sub.Apply(infos[0].Type)); got != "String -> Int ->{Db} String" {
 		t.Fatalf("run type = %s", got)
+	}
+}
+
+// A row variable that occurs once as a type argument stays quantified; only an
+// arrow's own unshared effect tail closes to pure.
+func TestSingleRowInTypeArgumentStaysPolymorphic(t *testing.T) {
+	src := "type Box e = Box (() ->{e} ())\n\n" +
+		"sizeBox : Box e -> Int\nsizeBox b = 1\n\n" +
+		"useBox b = sizeBox b\n\n" +
+		"useBoth b1 b2 = sizeBox b1 + sizeBox b2\n\n" +
+		"ioBox : Box {IO}\nioBox = Box { print \"x\" }\n\n" +
+		"n = useBox ioBox + useBoth ioBox (Box { () })"
+	ck, infos, errs := check(t, src)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	got := map[string]string{}
+	for _, info := range infos {
+		got[info.Name] = types.Show(ck.Sub.Apply(info.Type))
+	}
+	if got["useBox"] != "Box {e} -> Int" {
+		t.Fatalf("useBox type = %s, want Box {e} -> Int", got["useBox"])
+	}
+	// The two boxes keep independent rows; their fresh names are not pinned.
+	both := regexp.MustCompile(`^Box \{(e\d*)\} -> Box \{(e\d*)\} -> Int$`).FindStringSubmatch(got["useBoth"])
+	if both == nil || both[1] == both[2] {
+		t.Fatalf("useBoth type = %s, want Box {e} -> Box {e'} -> Int with distinct rows", got["useBoth"])
+	}
+
+	ck, infos, errs = check(t, "pureArrow x = (x, x)")
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if got := types.Show(ck.Sub.Apply(infos[0].Type)); got != "a -> (a, a)" {
+		t.Fatalf("pureArrow type = %s, want a -> (a, a)", got)
 	}
 }

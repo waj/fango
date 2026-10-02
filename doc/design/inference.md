@@ -104,9 +104,13 @@ ones in each body's source context. Independent components stay independently
 polymorphic. Cycles containing ordinary values are rejected.
 
 Variables absent from one member's public scheme are instantiated/defaulted in
-that member's body without specializing a sibling. A local single-occurrence
-effect tail closes only when not free in an enclosing scope or unfinished
-component. A local annotation sharing such a tail checks argument/result shape
+that member's body without specializing a sibling. An unannotated definition's
+arrow becomes pure when its effect tail occurs nowhere else in the inferred
+type; a tail whose single occurrence is a type argument, as in `Box e -> Int`,
+stays quantified because closing it would narrow the callers rather than the
+body. A local single-occurrence effect tail closes only when not free in an
+enclosing scope or unfinished component. A local annotation sharing such a
+tail checks argument/result shape
 immediately but defers effect comparison and row equality until the component
 is solved. Comparison precedes equality so annotations cannot invent effects.
 
