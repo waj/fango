@@ -11,7 +11,8 @@ Correctness gates, differential fixtures, generated-code stability, and manual p
 | make test | Correctness, including full interpreter/compiler differential tests |
 | make test-short | Short-mode tests without compiled differential legs |
 | make test-grammar | TextMate tokenization of every .fango file under stdlib, testdata, and examples |
-| make ci | Go/Fango formatting, go vet, and correctness |
+| make check-files | Reject executable or oversized files in the Git index |
+| make ci | Indexed-file check, Go/Fango formatting, go vet, and correctness |
 | make update-goldens | Intentional lexer/parser/infer/elaborate/REPL/formatter golden updates |
 | go vet ./benchmarks | Build-check benchmarks without timing them |
 | go test -race ./runtime/fangort ./runtime/nativeworker ./internal/eval ./internal/nativehost ./stdlib/... | Race checks for shared storage, callback drain, native hosts, and bundled adapters |
@@ -22,6 +23,13 @@ Timing gates are excluded from correctness and CI. Do not run them during ordina
 development. Syntax changes also require `make test-grammar`, whose Node and grammar
 packages come from the Nix development shell; see
 [repository instructions](../../AGENTS.md). No documentation change weakens these gates.
+
+`make check-files` keeps build outputs out of history: no indexed file outside
+`.githooks/` may be executable or exceed 512 KiB. `fango build` writes its
+executable to the current directory, and every Go executable is larger than
+the limit. The check is `.githooks/pre-commit`; the Nix development shell sets
+`core.hooksPath` to `.githooks`, so it also runs before each commit from that
+shell, and `make ci` repeats it in case the hook was bypassed.
 
 ## Differential fixtures and examples
 

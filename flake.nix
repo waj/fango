@@ -30,6 +30,14 @@
             npmRoot = ./editors/vscode;
             inherit (pkgs) nodejs;
           }}/node_modules";
+
+          # Run .githooks/pre-commit, which rejects build outputs, on commits
+          # from this checkout. `make ci` runs the same check.
+          shellHook = ''
+            if git rev-parse --git-dir >/dev/null 2>&1; then
+              git config core.hooksPath .githooks
+            fi
+          '';
         };
 
         # Opt-in tools for the whole-document JSON comparison. Keep GHC and

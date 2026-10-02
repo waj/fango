@@ -1,7 +1,7 @@
 # Convenience wrappers for the repository verification gates; see
 # doc/design.md, "Testing and performance".
 
-.PHONY: build install test test-short test-grammar test-perf update-goldens update-baselines fmt fmt-fango vet ci clean
+.PHONY: build install test test-short test-grammar test-perf update-goldens update-baselines fmt fmt-fango vet check-files ci clean
 
 build:
 	go build -o fango ./cmd/fango
@@ -82,7 +82,12 @@ fmt-fango:
 vet:
 	go vet ./...
 
-ci:
+# Rejects executable and oversized files in the index; the same script is the
+# pre-commit hook the Nix development shell installs.
+check-files:
+	sh .githooks/pre-commit
+
+ci: check-files
 	test -z "$$(gofmt -l .)"
 	go run ./cmd/fango fmt -l $(FANGO_SOURCES)
 	go vet ./...

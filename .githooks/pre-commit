@@ -1,0 +1,39 @@
+#!/bin/sh
+# Keeps build outputs out of history. `fango build main.fango` writes its
+# executable to the current directory, where `git add -A` picks it up, so every
+# indexed file must be non-executable (hooks aside) and below a size no source
+# file approaches but every Go executable exceeds.
+#
+# The Nix development shell installs this as the pre-commit hook, where it
+# checks what is about to be committed. `make ci` runs it over a fresh
+# checkout, whose index matches HEAD.
+set -eu
+
+limit=524288
+
+executables=$(git ls-files -s | awk -F '\t' '{
+	split($1, entry, " ")
+	if (entry[1] == "100755" && $2 !~ /^\.githooks\//) print "  " $2
+}')
+
+oversized=$(git ls-files -s | awk -F '\t' '{
+	split($1, entry, " ")
+	if (entry[1] != "160000") print entry[2] " " $2
+}' | git cat-file --batch-check='%(objectsize) %(rest)' | awk -v limit="$limit" '
+	$1 > limit { size = $1; sub(/^[0-9]+ /, ""); print "  " $0 " (" size " bytes)" }')
+
+status=0
+if [ -n "$executables" ]; then
+	echo "Executable files are staged; build outputs do not belong in the repository:" >&2
+	echo "$executables" >&2
+	status=1
+fi
+if [ -n "$oversized" ]; then
+	echo "Files larger than $limit bytes are staged:" >&2
+	echo "$oversized" >&2
+	status=1
+fi
+if [ "$status" -ne 0 ]; then
+	echo "Unstage them with 'git rm --cached <path>'. See doc/design/verification.md." >&2
+fi
+exit "$status"
