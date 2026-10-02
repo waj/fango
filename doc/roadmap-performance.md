@@ -29,3 +29,14 @@ distinct arguments cannot multiply clones without limit.
 **Acceptance.** Fixtures for a specialized fold and a loop with an unchanged
 predicate, a recursive call that changes the argument (not specialized), and
 the clone bound.
+
+**Status: deferred on measurement.** The motivating calls do not fit this
+change. The bundled folds and maps are effect-polymorphic (`List.foldl`,
+`List.map`, and `filterHelp` carry a row variable), so a clone would have to
+specialize the row and its evidence too. JSON's `scanListShort` receives the
+element decoder as a method of a class dictionary, not as a known worker, so
+it needs instance specialization instead. On the typed JSON fixture that
+indirect call runs about once per list element, roughly a hundred thousand
+times per decode, which bounds its cost well under one percent. Revisit with
+row-polymorphic clones or dictionary specialization when a workload shows the
+indirect calls.
