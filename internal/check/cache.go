@@ -52,15 +52,18 @@ func moduleBaseKey(module modules.ResolvedModule, fixityHash string, summaries m
 		if !ok {
 			return "", false
 		}
-		parts = append(parts, dep, summary.Semantic)
+		// Inlining copies a dependency's candidate bodies into this module's
+		// Core, so a change to them must miss even when its interface holds.
+		parts = append(parts, dep, summary.Semantic, summary.Unfolding)
 	}
 	return digest(parts...), true
 }
 
 type moduleSummary struct {
-	Semantic string
-	ABI      string
-	Stage    string
+	Semantic  string
+	ABI       string
+	Stage     string
+	Unfolding string
 }
 
 func dependencyFingerprints(names []string, summaries map[string]moduleSummary, field func(moduleSummary) string) ([]string, bool) {
@@ -151,9 +154,11 @@ func loadCachedObject(cache ObjectCache, slot, base string, module modules.Resol
 	semanticDeps, semanticOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.Semantic })
 	abiDeps, abiOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.ABI })
 	stageDeps, stageOK := dependencyFingerprints(object.StageDependencies, summaries, func(s moduleSummary) string { return s.Stage })
-	if !semanticOK || !abiOK || !stageOK || ownSemantic == "" || ownABI == "" || ownStage == "" || object.Implementation == "" {
+	unfoldingDeps, unfoldingOK := dependencyFingerprints(module.Dependencies, summaries, func(s moduleSummary) string { return s.Unfolding })
+	if !semanticOK || !abiOK || !stageOK || !unfoldingOK || ownSemantic == "" || ownABI == "" || ownStage == "" || object.OwnUnfolding == "" || object.Implementation == "" {
 		return nil, read, false
 	}
+	object.Unfolding = combinedFingerprint("unfolding", object.OwnUnfolding, unfoldingDeps)
 	if object.Semantic != combinedFingerprint("semantic", ownSemantic, semanticDeps) ||
 		object.ABI != combinedFingerprint("abi", ownABI, abiDeps) {
 		return nil, read, false

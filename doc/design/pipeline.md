@@ -138,7 +138,8 @@ order. An owner keeps one checked object, at a slot named after the owner
 rather than after a hash of its inputs, and a later check replaces it. The
 artifact leads with the record of what it was built from: a base key over the
 exact parsed source and native-sidecar identity, module role, effective fixity
-hash, and ordered dependency semantic fingerprints, plus the compile-time
+hash, and ordered dependency semantic and
+[unfolding](core.md#inlining) fingerprints, plus the compile-time
 dependencies the prior successful check discovered and the stage fingerprints
 they had. Only the artifact can report that second set, which is why it is
 recorded rather than keyed; a lookup that had to name it in advance could not

@@ -115,6 +115,47 @@ func TestCheckedCacheKeepsRuntimeOnlyImporterHit(t *testing.T) {
 	}
 }
 
+// Main inlines Lib.bump, so a change to that body alone, with Lib's
+// interface unchanged, must recheck Main rather than reuse the stale copy.
+func TestCheckedCacheInvalidatesInlinedBodies(t *testing.T) {
+	d := t.TempDir()
+	lib := filepath.Join(d, "Lib.fango")
+	main := filepath.Join(d, "Main.fango")
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	library := func(step string) string {
+		return "module Lib exposing (bump)\n\nbump : Int -> Int\nbump n = n + " + step + "\n"
+	}
+	write(lib, library("1"))
+	write(main, "module Main exposing (main)\nimport Lib\n\nmain = print (Lib.bump 40)\n")
+	cache := newMemoryObjectCache()
+	first, _ := compileEvents(t, main, cache)
+	mainBody := func(result *Result) string {
+		for _, def := range result.Program.Defs {
+			if def.Name == "Main.main" {
+				return core.Dump(&core.Prog{Defs: []core.Def{def}})
+			}
+		}
+		t.Fatal("Main.main missing")
+		return ""
+	}
+	if body := mainBody(first); !strings.Contains(body, "(int 1 Int)") || strings.Contains(body, "Lib.bump") {
+		t.Fatalf("Lib.bump was not inlined into Main:\n%s", body)
+	}
+	write(lib, library("2"))
+	second, events := compileEvents(t, main, cache)
+	if events["check"]["Main"] != 1 || events["checked-cache-hit"]["Main"] != 0 {
+		t.Fatalf("an inlined body change reused Main's artifact: %#v", events)
+	}
+	if body := mainBody(second); !strings.Contains(body, "(int 2 Int)") {
+		t.Fatalf("Main kept the stale inlined body:\n%s", body)
+	}
+}
+
 func TestCheckedCacheInvalidatesTransitiveStageClosure(t *testing.T) {
 	d := t.TempDir()
 	lib := filepath.Join(d, "Lib.fango")

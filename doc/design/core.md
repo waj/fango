@@ -130,6 +130,35 @@ Both variants are emitted by the defining module regardless of consumers.
 Strict Let bindings prevent duplication and preserve beta-reduction order.
 The generic worker remains available and all variants pass ordinary lint.
 
+## Inlining
+
+Elaboration inlines saturated calls to small first-order pure workers after
+scalar specialization, so the interpreter and both backends run the same
+result. A candidate has Direct control, no evidence, effect, or row
+parameters, no function in its type or in the constructors of its parameter
+types, and a body of literals, variables, negation, natives, conditionals,
+sequencing, non-recursive bindings, worker and constructor applications, and
+matches, within a node budget. Such a body has no lambdas, capture variables,
+scopes, or resumptions, so a copy needs only fresh binder names, following
+lexical scope, and the call's type arguments. Workers in a call cycle are not
+candidates, and an owner's candidates are optimized callees first.
+
+A copy binds each parameter to its argument with a strict Let. Normalization
+then floats bindings and matches out of expression slots, first binding any
+earlier non-atomic sibling so evaluation order is unchanged. Simplification
+substitutes local aliases, floats a single-constructor match out of a
+binding's right-hand side, resolves a match on a variable bound to a
+constructor with atomic fields, drops unused bindings that cannot fail, and
+clears field binders their subtree no longer mentions.
+
+Candidates come from the owner and from installed dependencies, so an owner's
+checked object can contain a dependency's code. Each module therefore records
+an unfolding fingerprint over its inline-eligible bodies, combined with its
+dependencies' fingerprints, and an owner's checked-object key includes the
+combined fingerprint of each direct dependency. Changing an eligible body
+rechecks the modules that may have inlined it; other implementation changes
+still leave dependents' artifacts in place.
+
 ## Lint boundaries and control normalization
 
 Core lint rejects unsolved metavariables, malformed instantiations, mismatched

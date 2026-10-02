@@ -168,7 +168,9 @@ Classification uses the owning module's body
 and consults only these summaries for installed dependencies.
 
 Each owner is lowered and emitted alone. Its unit program holds its own Core
-plus the installed declarations it links against. Ordinary dependency bodies
+plus the installed declarations it links against. Bodies inlined from
+dependencies are already part of the owner's Core, copied during elaboration
+under the owner's checked-object key. Ordinary dependency bodies
 are withheld; the only exposed bodies are the bounded
 [execution templates](core.md#adapters-and-specialization), explicitly included
 in the dependency ABI fingerprint. The backend therefore cannot depend on an

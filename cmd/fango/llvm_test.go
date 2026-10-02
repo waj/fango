@@ -332,7 +332,8 @@ func TestLLVMCommands(t *testing.T) {
 }
 
 // A single-constructor record has no runtime tag: projection binds its field
-// without a switch, and its struct declares no tag member.
+// without a switch, and its struct declares no tag member. The projection is
+// inlined into the recursive sumPoints, which therefore stays emitted.
 func TestLLVMProductsHaveNoTag(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "point.fango")
 	source := `type Point = { x : Int, y : Int }
@@ -340,7 +341,13 @@ func TestLLVMProductsHaveNoTag(t *testing.T) {
 sumPoint : Point -> Int
 sumPoint point = point.x + point.y
 
-main() = print (sumPoint (Point { x = 1, y = 2 }))
+sumPoints : List Point -> Int -> Int
+sumPoints points total =
+    case points of
+        [] -> total
+        [point | rest] -> sumPoints rest (total + sumPoint point)
+
+main() = print (sumPoints [Point { x = 1, y = 2 }] 0)
 `
 	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
@@ -367,7 +374,7 @@ main() = print (sumPoint (Point { x = 1, y = 2 }))
 		t.Fatalf("no definition containing %s emitted", marker)
 		return ""
 	}
-	if body := definition(symbol("sumPoint") + "("); strings.Contains(body, "switch") || strings.Contains(body, "fango_panic") {
+	if body := definition(symbol("sumPoints") + "("); strings.Contains(body, ".tag") || strings.Contains(body, "fango_panic") {
 		t.Errorf("record projection switches on a tag:\n%s", body)
 	}
 	if layout := definition(symbol("Point") + "_ad {"); strings.Contains(layout, "tag") {

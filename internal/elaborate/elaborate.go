@@ -101,6 +101,7 @@ func Module(infos []infer.DeclInfo, ck *infer.Checker) (*core.Prog, []diag.Error
 	}
 	if len(errs) == 0 {
 		specializeScalars(p, infos, ck)
+		inlineDefs(p.Defs, nil, ck)
 		bindRows(p.Defs, ck)
 		errs = append(errs, captureDiagnostics(core.InferCaptures(p, ck.B), ck, source.Span{})...)
 		installCaptureSummaries(p.Defs, ck)
@@ -163,6 +164,7 @@ func Increment(infos []infer.DeclInfo, instances []*infer.InstanceInfo, intrinsi
 	}
 	p := &core.Prog{ADTs: ck.ADTOrder, Effects: effectList(ck), Defs: defs, Natives: ck.Natives}
 	specializeScalars(p, kept, ck)
+	inlineDefs(p.Defs, context, ck)
 	bindRows(p.Defs, ck)
 	errs = append(errs, captureDiagnostics(core.InferCapturesIn(p, context, ck.B), ck, source.Span{})...)
 	installCaptureSummaries(p.Defs, ck)

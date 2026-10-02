@@ -166,7 +166,7 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 				i.states = append(i.states, object.State)
 				i.objects = append(i.objects, object)
 				i.installed = append(i.installed, object.Runtime...)
-				i.summaries[module.Name] = moduleSummary{Semantic: object.Semantic, ABI: object.ABI, Stage: object.StageFingerprint}
+				i.summaries[module.Name] = moduleSummary{Semantic: object.Semantic, ABI: object.ABI, Stage: object.StageFingerprint, Unfolding: object.Unfolding}
 				return object.Runtime, nil, nil
 			}
 		}
@@ -234,12 +234,14 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 	object.ScopeNames = foreignScopeNames(i.ck.CaptureSummaries, state.Captures, object)
 	ownSemantic, ownABI, ownImplementation := ownFingerprints(object)
 	ownStage := ownStageFingerprint(object, object.Stage)
+	ownUnfolding := canonicalDigest(elaborate.Unfoldable(owned, i.ck), object)
 	semanticDeps, semanticOK := dependencyFingerprints(module.Dependencies, i.summaries, func(s moduleSummary) string { return s.Semantic })
 	abiDeps, abiOK := dependencyFingerprints(module.Dependencies, i.summaries, func(s moduleSummary) string { return s.ABI })
 	stageDeps, stageOK := dependencyFingerprints(object.StageDependencies, i.summaries, func(s moduleSummary) string { return s.Stage })
+	unfoldingDeps, unfoldingOK := dependencyFingerprints(module.Dependencies, i.summaries, func(s moduleSummary) string { return s.Unfolding })
 	// A dependency outside the summarized graph leaves this owner, and every
 	// later consumer of it, unsummarized rather than uncompilable.
-	if semanticOK && abiOK && stageOK {
+	if semanticOK && abiOK && stageOK && unfoldingOK {
 		object.OwnSemantic = ownSemantic
 		object.OwnABI = ownABI
 		object.Semantic = combinedFingerprint("semantic", ownSemantic, semanticDeps)
@@ -247,7 +249,9 @@ func (i *Installer) installOne(module modules.ResolvedModule, fixityHash string)
 		object.StageImplementation = ownStage
 		object.Implementation = ownImplementation
 		object.StageFingerprint = combinedFingerprint("stage", ownStage, stageDeps)
-		i.summaries[module.Name] = moduleSummary{Semantic: object.Semantic, ABI: object.ABI, Stage: object.StageFingerprint}
+		object.OwnUnfolding = ownUnfolding
+		object.Unfolding = combinedFingerprint("unfolding", ownUnfolding, unfoldingDeps)
+		i.summaries[module.Name] = moduleSummary{Semantic: object.Semantic, ABI: object.ABI, Stage: object.StageFingerprint, Unfolding: object.Unfolding}
 		if cacheable {
 			publishStart := time.Now()
 			i.artifact("checked-cache-store", owner, publishStart, publishCachedObject(i.cache, slot, baseKey, object, i.summaries))

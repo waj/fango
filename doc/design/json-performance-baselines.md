@@ -42,6 +42,10 @@ Accumulating escaped strings in a `Text.Builder` instead of a reversed
 fragment list took Go from 88.6 to 81.1 ms and LLVM from 52.8 to 51.0 ms
 (11 pairs).
 
+The [Core inliner](core.md#inlining) then took Go from 82.0 to 75.1 ms
+(11 pairs). LLVM measured 51.5 → 52.0 ms over 21 pairs, within run
+variation: Clang already inlined these helpers across the linked program.
+
 Two cursor reductions were measured with timing-only library copies and
 rejected. Removing every per-token column addition from the scanners, an
 upper bound for deriving columns from a line start, measured 81.9 → 81.7 ms

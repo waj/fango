@@ -12,7 +12,8 @@ inference, and direct-style algebraic effects. The default pipeline uses the Go 
 local modules, and an experimental library
 shipped beside it. Generated representations and calls aim to stay close to ordinary Go.
 Laziness, self-hosting, and a package manager are not implemented. The Fango
-compiler has no general optimizer of its own.
+compiler's own optimization is limited to scalar specialization and
+[inlining](design/core.md#inlining) of small first-order pure workers.
 
 ## Language semantics
 

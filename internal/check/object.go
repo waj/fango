@@ -25,15 +25,19 @@ const (
 
 // ModuleObject is the typed installable and persistent checked-module boundary.
 type ModuleObject struct {
-	State                  *infer.ModuleState
-	Resolver               modules.Interface
-	OwnSemantic            string
-	OwnABI                 string
-	Semantic               string
-	ABI                    string
-	Implementation         string
-	StageImplementation    string
-	StageFingerprint       string
+	State               *infer.ModuleState
+	Resolver            modules.Interface
+	OwnSemantic         string
+	OwnABI              string
+	Semantic            string
+	ABI                 string
+	Implementation      string
+	StageImplementation string
+	StageFingerprint    string
+	// OwnUnfolding digests the bodies other modules may inline from this one,
+	// and Unfolding combines it with the dependencies' (see moduleBaseKey).
+	OwnUnfolding           string
+	Unfolding              string
 	StageDependencies      []string
 	CheckStageDependencies []string
 	Nominals               map[int]string
