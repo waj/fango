@@ -1,6 +1,7 @@
 //go:build ignore
 
 #include "fango_native.h"
+#include <string.h>
 int64_t FANGO_NATIVE(Utf8CodeAt)(fango_bytes bytes, int64_t offset) {
   if (offset < 0 || (uint64_t)offset >= bytes.length)
     return -1;
@@ -25,4 +26,10 @@ int64_t FANGO_NATIVE(Utf8CodeAt)(fango_bytes bytes, int64_t offset) {
   size_t width;
   uint32_t r = fango_decode_utf8(p, n, &width);
   return r == 0xFFFD && width == 1 ? -2 : r;
+}
+
+bool FANGO_NATIVE(Utf8MatchAt)(fango_bytes bytes, int64_t offset, fango_string text) {
+  if (offset < 0 || (uint64_t)offset > bytes.length || text.length > bytes.length - offset)
+    return false;
+  return text.length == 0 || memcmp(bytes.data + offset, text.data, text.length) == 0;
 }

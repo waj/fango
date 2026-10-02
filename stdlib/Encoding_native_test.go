@@ -36,3 +36,20 @@ func TestUtf8CodeAt(t *testing.T) {
 		t.Errorf("past end: got %d, want end", got)
 	}
 }
+
+func TestUtf8MatchAt(t *testing.T) {
+	bytes := []byte(`{"café":1}`)
+	for _, c := range []struct {
+		offset int64
+		text   string
+		want   bool
+	}{
+		{1, `"café"`, true}, {2, "café", true}, {1, `"cafe"`, false}, {0, "", true},
+		{int64(len(bytes)), "", true}, {int64(len(bytes)), "}", false}, {9, "}}", false},
+		{-1, "", false}, {int64(len(bytes)) + 1, "", false},
+	} {
+		if got := Utf8MatchAt(bytes, c.offset, c.text); got != c.want {
+			t.Errorf("Utf8MatchAt(%d, %q) = %v, want %v", c.offset, c.text, got, c.want)
+		}
+	}
+}

@@ -1,5 +1,5 @@
 {-# no-prelude #-}
-module Encoding exposing (Encoding, Error(..), decode, decodeAt, encode, latin1, message, utf8)
+module Encoding exposing (Encoding, Error(..), decode, decodeAt, encode, latin1, matchAt, message, utf8)
 
 import Basics exposing (..)
 import Bytes exposing (Bytes)
@@ -81,3 +81,20 @@ encode encoding text =
     case encoding of
         Utf8 -> Ok (Bytes.fromString text)
         Latin1 -> latin1Help text []
+
+-- The native compares text's own UTF-8 bytes in place, so matching a known
+-- spelling allocates nothing.
+utf8MatchAt : Bytes -> Int -> String -> Bool
+utf8MatchAt = native
+
+-- matchAt answers the encoded width of text when its encoding occurs in bytes
+-- at offset. Text the encoding cannot represent never matches.
+matchAt : Encoding -> Bytes -> Int -> String -> Maybe Int
+matchAt encoding bytes offset text =
+    case encoding of
+        Utf8 -> if utf8MatchAt bytes offset text then Just (String.byteLength text) else Nothing
+        Latin1 -> case latin1Help text [] of
+            Err _ -> Nothing
+            Ok expected ->
+                if Bytes.startsWith expected (Bytes.slice offset (Bytes.length bytes) bytes) then Just (Bytes.length expected)
+                else Nothing

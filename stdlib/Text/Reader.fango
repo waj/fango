@@ -195,12 +195,9 @@ matchWindow snapshot text =
     if text == "" then Just snapshot
     else case snapshot.buffer of
         EmptyBuffer -> Nothing
-        Buffered encoding bytes _ -> case Encoding.encode encoding text of
-            Err _ -> Nothing
-            Ok expected ->
-                if Bytes.startsWith expected (Bytes.slice snapshot.index (Bytes.length bytes) bytes) then
-                    Just { snapshot | index = snapshot.index + Bytes.length expected }
-                else Nothing
+        Buffered encoding bytes _ -> case Encoding.matchAt encoding bytes snapshot.index text of
+            Nothing -> Nothing
+            Just width -> Just { snapshot | index = snapshot.index + width }
 
 spanWindow : Window -> (Char -> Bool) -> Result Encoding.Error (String, Int, Window)
 spanWindow snapshot keep =

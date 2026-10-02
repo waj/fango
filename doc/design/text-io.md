@@ -39,8 +39,9 @@ An opaque `Window` snapshots the current immutable bytes and encoding without
 refilling. Its buffer description also records the consumed-byte base and is
 shared across derived windows; only a byte index changes during scanning.
 Pure scalar and span operations advance across validated complete scalars. A
-bulk `matchWindow` encodes the requested valid text using the adapter's encoding
-and compares its prefix directly with the immutable source bytes. An exact
+bulk `matchWindow` compares the requested valid text's encoding directly with
+the immutable source bytes through `Encoding.matchAt`; for UTF-8 the text's own
+bytes are compared in place, so a match allocates nothing. An exact
 match is already valid encoded text, so it requires no scalar decoding or
 source-string construction. Mismatch, insufficient bytes, or an unrepresentable
 request declines without inspecting the suffix or advancing the reader. A

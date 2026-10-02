@@ -20,6 +20,7 @@ encode : Encoding -> String -> Result Error Bytes
 decode : Encoding -> Bytes -> Result Error String
 message : Error -> String
 decodeAt : Encoding -> Bytes -> Int -> Result Error (Maybe (Char, Int))
+matchAt : Encoding -> Bytes -> Int -> String -> Maybe Int
 ```
 
 UTF-8 decoding rejects malformed sequences, including overlong forms,
@@ -43,6 +44,12 @@ An index outside the bytes returns `Ok Nothing`; an index inside a UTF-8
 continuation sequence is invalid. Incomplete input can be retried after more
 bytes are appended. The text reader uses this operation to distinguish a
 refill from a decoding failure.
+
+`matchAt encoding bytes offset text` returns the encoded byte width of `text`
+when its encoding occurs in `bytes` starting at `offset`, and `Nothing`
+otherwise, including for text the encoding cannot represent or an offset
+outside the bytes. Empty text matches at any offset from zero through the
+length. Bytes after the match are not inspected.
 
 ## Text.Reader
 

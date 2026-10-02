@@ -21,3 +21,12 @@ func Utf8CodeAt(bytes []byte, offset int64) int64 {
 	}
 	return int64(char)
 }
+
+// Utf8MatchAt reports whether text's UTF-8 bytes occur at offset. The
+// comparison converts nothing, so it allocates nothing.
+func Utf8MatchAt(bytes []byte, offset int64, text string) bool {
+	if offset < 0 || offset > int64(len(bytes)) || int64(len(text)) > int64(len(bytes))-offset {
+		return false
+	}
+	return string(bytes[offset:offset+int64(len(text))]) == text
+}
