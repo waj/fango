@@ -377,6 +377,7 @@ type gen struct {
 	unitOutcomeCalls     map[*goast.CallExpr]bool
 	fixedOperations      map[*core.Handle]map[string]*goast.FuncLit
 	knownOperations      map[goast.Expr]map[string]*goast.FuncLit
+	directActivations    map[string]map[string]directOperation
 	disableOptimizations bool
 	// abi selects the Direct/Exit representation family for controlled
 	// function and ADT values in the declaration currently being emitted.
@@ -1819,6 +1820,7 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 		g.usesFangort = true
 		state = &handlerState{
 			cell:  stateCell,
+			name:  e.State.Name,
 			read:  func() goast.Expr { return callExpr(selector(stateCell, "Snapshot")) },
 			write: func(next goast.Expr) goast.Stmt { return exprStmt(callExpr(selector(stateCell, "Store"), next)) },
 		}
@@ -1833,6 +1835,9 @@ func (g *gen) handleExpr(e *core.Handle) goast.Expr {
 			g.knownOperations = map[goast.Expr]map[string]*goast.FuncLit{}
 		}
 		g.knownOperations[evidenceValue] = operations
+	}
+	if evidenceMode == types.Direct {
+		g.recordDirectActivation(name, e)
 	}
 	g.evidence[e.Effect.Key()] = append(g.evidence[e.Effect.Key()], evidenceValue)
 	g.evidenceModes[e.Effect.Key()] = append(g.evidenceModes[e.Effect.Key()], evidenceMode)
@@ -2127,8 +2132,17 @@ func (g *gen) zeroReturn(t types.Type) []goast.Stmt {
 // Each access publishes a complete value; no lock spans clause evaluation.
 type handlerState struct {
 	cell  string
+	name  string
 	read  func() goast.Expr
 	write func(goast.Expr) goast.Stmt
+}
+
+// unchanged reports a next state that is the clause's own snapshot. Core
+// never shadows, so the binder still holds what the cell held at clause
+// entry; the commit would store that value back and is omitted.
+func (s *handlerState) unchanged(next core.Expr) bool {
+	ref, ok := next.(*core.VarRef)
+	return ok && ref.Name == s.name
 }
 
 // handlerEvidence builds an installed activation's record of operation
@@ -2269,7 +2283,7 @@ func (g *gen) resumeStmtsFor(e core.Expr, owner types.ResumeID, unitResult bool,
 		if e.Owner != owner {
 			panic("codegen: ResumeTail owner does not match handler clause")
 		}
-		if e.NextState != nil {
+		if e.NextState != nil && !state.unchanged(e.NextState) {
 			resultName := fmt.Sprintf("t_resume%d", g.tmp)
 			g.tmp++
 			nextName := fmt.Sprintf("t_next%d", g.tmp)

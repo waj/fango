@@ -986,6 +986,11 @@ func (in *interp) eval(e core.Expr, fr *Frame) (Value, error) {
 	}
 }
 
+func (ev *evidence) unchangedState(next core.Expr) bool {
+	ref, ok := next.(*core.VarRef)
+	return ok && ev.handler != nil && ev.handler.State != nil && ref.Name == ev.handler.State.Name
+}
+
 // evalResumeTail is the interpreter counterpart of codegen's clause emitter.
 // It accepts only the control skeleton proved by Core lint and returns the
 // operation result carried by the terminal ResumeTail.
@@ -1004,7 +1009,9 @@ func (in *interp) evalResumeTail(e core.Expr, fr *Frame, owner types.ResumeID, e
 		if _, ok := asExit(value); ok {
 			return value, nil
 		}
-		if e.NextState != nil {
+		// Resuming with the clause's own snapshot commits nothing; codegen
+		// omits the same store.
+		if e.NextState != nil && !ev.unchangedState(e.NextState) {
 			next, err := in.eval(e.NextState, fr)
 			if err != nil {
 				return nil, err

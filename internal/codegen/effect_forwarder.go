@@ -3,7 +3,10 @@ package codegen
 import (
 	goast "go/ast"
 	gotoken "go/token"
+	"reflect"
 	"strings"
+
+	"github.com/waj/fango/internal/core"
 )
 
 // A bound operation callback sometimes passes its fixed evidence through an
@@ -26,7 +29,7 @@ func (g *gen) inlineBoundOperations(file *goast.File) {
 			}
 			changed := false
 			for _, following := range block.List[i+1:] {
-				changed = rewriteBoundOperation(following, name, members) || changed
+				changed = g.rewriteBoundOperation(following, name, members) || changed
 			}
 			if changed {
 				// The declaration is pure, and Go still needs it marked as used.
@@ -110,6 +113,7 @@ type operationForward struct {
 	op       string
 	argParam []int
 	params   int
+	results  int
 	voidUnit bool
 }
 
@@ -215,6 +219,9 @@ func forwardedOperation(fn *goast.FuncLit) (operationForward, bool) {
 		return operationForward{}, false
 	}
 	forward := operationForward{op: selector.Sel.Name, params: len(names), voidUnit: voidUnit}
+	if fn.Type.Results != nil {
+		forward.results = fn.Type.Results.NumFields()
+	}
 	for _, arg := range call.Args {
 		ref, ok := arg.(*goast.Ident)
 		if !ok {
@@ -244,7 +251,7 @@ func unitValue(expr goast.Expr) bool {
 	return ok && pkg.Name == "fangort"
 }
 
-func rewriteBoundOperation(root goast.Node, name string, members map[string]operationForward) bool {
+func (g *gen) rewriteBoundOperation(root goast.Node, name string, members map[string]operationForward) bool {
 	changed := false
 	goast.Inspect(root, func(node goast.Node) bool {
 		block, ok := node.(*goast.BlockStmt)
@@ -275,6 +282,11 @@ func rewriteBoundOperation(root goast.Node, name string, members map[string]oper
 			args := make([]goast.Expr, 0, len(forward.argParam))
 			for _, index := range forward.argParam {
 				args = append(args, call.Args[index])
+			}
+			if stmts := g.directBoundOperation(call.Args[0], forward, args); stmts != nil {
+				block.List[i] = &goast.BlockStmt{List: stmts}
+				changed = true
+				continue
 			}
 			direct := callExpr(&goast.SelectorExpr{X: call.Args[0], Sel: ident(forward.op)}, args...).(*goast.CallExpr)
 			if forward.voidUnit {
@@ -311,4 +323,68 @@ func boundOperationArgsSafe(args []goast.Expr) bool {
 		return false
 	}
 	return true
+}
+
+// directOperation describes one monomorphic clause of a Direct activation:
+// whether its Direct slot returns nothing, and its body when the activation
+// is fixed and the clause small enough to expand.
+type directOperation struct {
+	void  bool
+	fixed *goast.FuncLit
+}
+
+func (g *gen) recordDirectActivation(name string, e *core.Handle) {
+	operations := map[string]directOperation{}
+	for _, c := range e.Clauses {
+		if len(c.LocalVars) > 0 || c.Op.Abort || c.Op.Native != nil {
+			continue
+		}
+		slot := "Op_" + linkName(c.Op.Name)
+		operations[slot] = directOperation{void: g.isUnit(c.Op.ResultType), fixed: g.fixedOperations[e][slot]}
+	}
+	if g.directActivations == nil {
+		g.directActivations = map[string]map[string]directOperation{}
+	}
+	g.directActivations[name] = operations
+}
+
+// A bound callback's evidence is often a Direct activation installed in the
+// same function. Its Exit view only wraps each Direct slot as a normal result,
+// so an Exit member calls the Direct slot and supplies the nil exit itself.
+// A fixed activation's small clause is expanded in place of the slot, as a
+// Perform against the same lexical evidence would be. Activation names are
+// unique and assigned once, so the receiver still denotes that activation.
+func (g *gen) directBoundOperation(receiver goast.Expr, forward operationForward, args []goast.Expr) []goast.Stmt {
+	evidence, _ := receiver.(*goast.Ident)
+	exitView := false
+	if view, ok := receiver.(*goast.SelectorExpr); ok && view.Sel.Name == "Exit" {
+		evidence, _ = view.X.(*goast.Ident)
+		exitView = true
+	}
+	if evidence == nil {
+		return nil
+	}
+	op, ok := g.directActivations[evidence.Name][forward.op]
+	if !ok || !exitView && op.fixed == nil {
+		return nil
+	}
+	var callee goast.Expr = &goast.SelectorExpr{X: ident(evidence.Name), Sel: ident(forward.op)}
+	if op.fixed != nil {
+		callee = g.cloneOperation(reflect.ValueOf(op.fixed)).Interface().(*goast.FuncLit)
+	}
+	call := callExpr(callee, args...)
+	unit := &goast.SelectorExpr{X: ident("fangort"), Sel: ident("UnitValue")}
+	switch {
+	case !exitView && forward.voidUnit && op.void:
+		return []goast.Stmt{exprStmt(call), returnStmt(unit)}
+	case !exitView && !forward.voidUnit && !op.void:
+		return []goast.Stmt{returnStmt(call)}
+	case exitView && op.void && forward.results == 1:
+		return []goast.Stmt{exprStmt(call), returnStmt(ident("nil"))}
+	case exitView && op.void && forward.results == 2:
+		return []goast.Stmt{exprStmt(call), &goast.ReturnStmt{Results: []goast.Expr{unit, ident("nil")}}}
+	case exitView && !op.void && forward.results == 2:
+		return []goast.Stmt{&goast.ReturnStmt{Results: []goast.Expr{call, ident("nil")}}}
+	}
+	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/waj/fango/internal/build"
@@ -53,6 +54,44 @@ func TestLoweredFoldHasNoIntermediateCallable(t *testing.T) {
 	}
 	if found != 2 {
 		t.Fatalf("found %d fold workers", found)
+	}
+}
+
+// Local's read resumes with its own snapshot, and the Cell members it hands
+// out forward to its Direct activation: neither a store nor the Exit view
+// survives in the generated module.
+func TestLocalCellReadsStateDirectly(t *testing.T) {
+	files := emittedProject(t, filepath.Join("..", "..", "testdata", "run", "reader_short_pulls.fango"))
+	file, err := parser.ParseFile(token.NewFileSet(), "Local.go", generatedFile(t, files, "modules/Runtime/Local/module.go"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads := 0
+	goast.Inspect(file, func(n goast.Node) bool {
+		if field, ok := n.(*goast.KeyValueExpr); ok {
+			if key, ok := field.Key.(*goast.Ident); ok && key.Name == "Op_Runtime_dot_Local_dot_readState" {
+				if fn, ok := field.Value.(*goast.FuncLit); ok {
+					reads++
+					goast.Inspect(fn.Body, func(n goast.Node) bool {
+						if sel, ok := n.(*goast.SelectorExpr); ok && sel.Sel.Name == "Store" {
+							t.Errorf("readState commits its unchanged snapshot")
+						}
+						return true
+					})
+				}
+			}
+		}
+		if sel, ok := n.(*goast.SelectorExpr); ok && strings.HasPrefix(sel.Sel.Name, "Op_") {
+			if view, ok := sel.X.(*goast.SelectorExpr); ok && view.Sel.Name == "Exit" {
+				if id, ok := view.X.(*goast.Ident); ok && strings.HasPrefix(id.Name, "ev") && !strings.HasPrefix(id.Name, "ev_") {
+					t.Errorf("bound member calls %s.Exit.%s", id.Name, sel.Sel.Name)
+				}
+			}
+		}
+		return true
+	})
+	if reads == 0 {
+		t.Fatal("no readState clause found")
 	}
 }
 

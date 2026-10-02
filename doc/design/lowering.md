@@ -87,7 +87,11 @@ the same effect operation, bound callbacks call that operation slot on their
 captured evidence directly. The Go AST rewrite requires stable local binding,
 fixed arity, and arguments whose discarded evaluation cannot have effects or
 panic; otherwise it keeps the callable. This removes a forwarding invocation,
-not the handler operation or its state synchronization. The
+not the handler operation or its state synchronization. When that evidence is
+a Direct activation installed in the same function, an Exit member calls the
+Direct slot and supplies the nil exit itself instead of entering the Exit view,
+and a small clause of a fixed activation is expanded in place of the slot under
+the same conditions as an expanded Perform. The
 optimization-disabled backend keeps the original callable path.
 
 ## Verification

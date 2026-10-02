@@ -254,7 +254,9 @@ only after both finish successfully. The `return` clause sees the final state.
 State snapshots and commits are individually synchronized to publish complete
 values. The clause runs between them without an operation-wide lock: concurrent
 operations can read the same snapshot, and a later commit can overwrite an
-earlier update. Handlers are responsible for operation-level serialization.
+earlier update. A clause that resumes with its own snapshot binder, as in
+`resume current with current`, commits nothing and so never overwrites another
+task's update. Handlers are responsible for operation-level serialization.
 The snapshot is taken before the clause starts, so a lock acquired inside the
 clause cannot protect that implicit read. For atomic updates, keep state in an
 explicit reference and protect its read and write together, or serialize calls

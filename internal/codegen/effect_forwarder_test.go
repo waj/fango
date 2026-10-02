@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"bytes"
+	goast "go/ast"
 	"go/format"
 	"go/parser"
 	"go/token"
@@ -22,12 +23,17 @@ func f(ev *Evidence) {
 
 func lowerBoundOperation(t *testing.T, source string) string {
 	t.Helper()
+	return lowerBoundOperationWith(t, &gen{}, source)
+}
+
+func lowerBoundOperationWith(t *testing.T, g *gen, source string) string {
+	t.Helper()
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "", source, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	(&gen{}).inlineBoundOperations(file)
+	g.inlineBoundOperations(file)
 	var formatted bytes.Buffer
 	if err := format.Node(&formatted, fset, file); err != nil {
 		t.Fatal(err)
@@ -93,5 +99,43 @@ func TestBoundOperationForwardingGuards(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBoundOperationDirectActivation(t *testing.T) {
+	g := &gen{directActivations: map[string]map[string]directOperation{"ev": {"Op_write": {void: true}}}}
+	got := lowerBoundOperationWith(t, g, boundOperationSource)
+	if strings.Count(got, "ev.Op_write(value)") != 2 || !strings.Contains(got, "return fangort.UnitValue, nil") {
+		t.Errorf("members should call the Direct slot:\n%s", got)
+	}
+	if strings.Contains(got, "ev.Exit.Op_write") {
+		t.Errorf("Exit member still calls the Exit view:\n%s", got)
+	}
+}
+
+func TestBoundOperationFixedActivation(t *testing.T) {
+	expr, err := parser.ParseExpr("func(v_value int) { t_state.Store(v_value) }")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixed := expr.(*goast.FuncLit)
+	g := &gen{directActivations: map[string]map[string]directOperation{"ev": {"Op_write": {void: true, fixed: fixed}}}}
+	got := lowerBoundOperationWith(t, g, boundOperationSource)
+	if strings.Count(got, "t_state.Store(v_value)") != 2 {
+		t.Errorf("each member should expand the clause:\n%s", got)
+	}
+	if strings.Contains(got, "ev.Op_write(") || strings.Contains(got, "ev.Exit.Op_write(") {
+		t.Errorf("expanded member still dispatches through the slot:\n%s", got)
+	}
+	if len(fixed.Body.List) != 1 {
+		t.Errorf("expansion mutated the installed clause")
+	}
+}
+
+func TestBoundOperationOtherEvidenceKeepsExitView(t *testing.T) {
+	g := &gen{directActivations: map[string]map[string]directOperation{"ev2": {"Op_write": {void: true}}}}
+	got := lowerBoundOperationWith(t, g, boundOperationSource)
+	if !strings.Contains(got, "ev.Exit.Op_write(value)") {
+		t.Errorf("unrelated evidence was rewritten:\n%s", got)
 	}
 }
