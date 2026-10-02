@@ -32,7 +32,7 @@ ABI. [Effect transport](effects.md#direct-and-exit) and
 Product layout expands generic fields to detect cycles, including through
 Maybe and Result. Lists, functions, native values, and interface-represented
 unions break layout recursion. Construction and matching use typed fields
-directly; tagged unions initialize only the selected payload. Eq, Show, and
+directly; tagged unions initialize only the selected payload. Derived eq and
 polymorphic boundary conversion follow the same layout. Products with at least
 three direct function fields use pointers: reader-like capability records are
 constructed infrequently and otherwise copied through every cursor and result.
@@ -87,8 +87,8 @@ Traversal allocates nothing. This uses one allocation per element; the previous
 chunk representation's lower linear-build allocation count is not preserved.
 
 List construction uses runtime calls and matching uses emptiness/head/tail.
-Eq/show retain ordinary exported names and generic signatures, delegating to
-runtime support. Equality remains structural even for identical list pointers,
+Derived eq retains its ordinary exported name and generic signature, delegating
+to runtime support. Equality remains structural even for identical list pointers,
 so a list containing NaN does not compare equal to itself.
 `ListMap` builds an unpublished spine in a forward pass, invoking callbacks in
 source order, then publishes the complete result. Public complexity belongs in
@@ -110,8 +110,8 @@ and without a second compiler-known primitive: a nullary constructor binds
 nothing, so a match on it — possible only inside the module, since the
 constructor is not exposed — discriminates nothing and observes nothing the
 representation hides. Bytes emits no marker interface or constructor struct,
-takes no type arguments, and its eq/show keep the exported names ordinary
-lowering gives them while delegating to runtime support, exactly as List's do.
+takes no type arguments, and its derived eq keeps the exported name ordinary
+lowering gives it while delegating to runtime support, exactly as List's does.
 
 The invariant the layer rests on is that a Bytes never aliases storage anything
 will write again. Slicing therefore shares its backing array, capped so nothing
@@ -333,8 +333,10 @@ every loop iteration.
 Primitives are declared in bundled Fango modules rather than a compiler catalog.
 Inline native templates are bundled-only and retained for scalar primitives and
 compiler-only representations. Validation requires a Go expression with each
-positional placeholder exactly once, using only placeholders, compiler intrinsics,
-predeclared names, and fangort. Emission reparses, scrubs positions, and substitutes
+positional placeholder exactly once, using only placeholders, the `$eq` structural
+equality intrinsic, predeclared names, and fangort. Display is never a template
+intrinsic: it belongs to the Show and Display classes, which both backends
+evaluate as ordinary Fango. Emission reparses, scrubs positions, and substitutes
 typed AST expressions with precedence intact.
 
 Bundled and user call-form sidecars follow the same declaration correspondence,

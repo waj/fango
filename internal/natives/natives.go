@@ -25,7 +25,6 @@ type Runtime struct {
 	Args   []string
 	Dir    string
 	Equal  func(any, any) bool
-	Show   func(any) (string, error)
 
 	// Expand renders a compile-time code value as surface AST. Only the
 	// compiler's own evaluator supplies it: the Meta natives that build code

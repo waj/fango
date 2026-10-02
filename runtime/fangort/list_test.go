@@ -2,7 +2,6 @@ package fangort
 
 import (
 	"math"
-	"strconv"
 	"sync"
 	"testing"
 )
@@ -236,28 +235,6 @@ func TestListEqHasNoIdentityShortCircuit(t *testing.T) {
 	ok := ListCons(2.0, ListCons(1.0, ListNil[float64]()))
 	if !ListEq(eq, ok, ok) {
 		t.Fatal("a NaN-free list must compare equal to itself")
-	}
-}
-
-func TestListShow(t *testing.T) {
-	show := func(v int, nested bool) string { return strconv.Itoa(v) }
-	cases := []struct {
-		list   List[int]
-		nested bool
-		want   string
-	}{
-		{ListNil[int](), false, "Nil"},
-		{ListNil[int](), true, "Nil"},
-		{listOf(1), false, "Cons 1 Nil"},
-		{listOf(1), true, "(Cons 1 Nil)"},
-		{listOf(1, 2), false, "Cons 1 (Cons 2 Nil)"},
-		{listOf(1, 2, 3), false, "Cons 1 (Cons 2 (Cons 3 Nil))"},
-		{listOf(1, 2), true, "(Cons 1 (Cons 2 Nil))"},
-	}
-	for _, c := range cases {
-		if got := ListShow(show, c.list, c.nested); got != c.want {
-			t.Errorf("ListShow(%v, nested=%v) = %q, want %q", elems(c.list), c.nested, got, c.want)
-		}
 	}
 }
 

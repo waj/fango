@@ -61,12 +61,9 @@ func TestShowStringLiteral(t *testing.T) {
 	}
 }
 
-func TestShowBoolUnit(t *testing.T) {
+func TestShowBool(t *testing.T) {
 	if ShowBool(true) != "True" || ShowBool(false) != "False" {
 		t.Error("ShowBool wrong")
-	}
-	if ShowUnit() != "()" {
-		t.Error("ShowUnit wrong")
 	}
 }
 

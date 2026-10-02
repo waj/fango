@@ -131,18 +131,6 @@ func (g *gen) productEq(adt *types.ADTInfo) []goast.Stmt {
 	return []goast.Stmt{returnStmt(result)}
 }
 
-func (g *gen) constructorShow(ctor *types.CtorInfo, value string) []goast.Stmt {
-	var text goast.Expr = stringLit(types.SurfaceName(ctor.Name))
-	for i, f := range ctor.Fields {
-		text = binExpr(gotoken.ADD, binExpr(gotoken.ADD, text, stringLit(" ")), g.showField(f, selector(value, representationField(g.adts[ctor.Result.Unique], ctor, i))))
-	}
-	if len(ctor.Fields) == 0 {
-		return []goast.Stmt{returnStmt(text)}
-	}
-	return []goast.Stmt{varDeclStmt("s", ident("string"), text),
-		ifStmt(ident("nested"), []goast.Stmt{returnStmt(binExpr(gotoken.ADD, binExpr(gotoken.ADD, stringLit("("), ident("s")), stringLit(")")))}, nil), returnStmt(ident("s"))}
-}
-
 func (g *gen) taggedDecl(adt *types.ADTInfo, args []goast.Expr) []goast.Decl {
 	fields := []*goast.Field{{Names: []*goast.Ident{ident("Tag")}, Type: ident("uint8")}}
 	for _, ctor := range adt.Ctors {
@@ -198,14 +186,6 @@ func (g *gen) taggedEq(adt *types.ADTInfo) []goast.Stmt {
 		cases = append(cases, &goast.CaseClause{List: []goast.Expr{intLit(int64(ctor.Index))}, Body: []goast.Stmt{returnStmt(equal)}})
 	}
 	return []goast.Stmt{ifStmt(binExpr(gotoken.NEQ, selector("a", "Tag"), selector("b", "Tag")), []goast.Stmt{returnStmt(ident("false"))}, nil), &goast.SwitchStmt{Tag: selector("a", "Tag"), Body: &goast.BlockStmt{List: cases}}, returnStmt(ident("false"))}
-}
-
-func (g *gen) taggedShow(adt *types.ADTInfo) []goast.Stmt {
-	var cases []goast.Stmt
-	for _, ctor := range adt.Ctors {
-		cases = append(cases, &goast.CaseClause{List: []goast.Expr{intLit(int64(ctor.Index))}, Body: g.constructorShow(ctor, "v")})
-	}
-	return []goast.Stmt{&goast.SwitchStmt{Tag: selector("v", "Tag"), Body: &goast.BlockStmt{List: cases}}, returnStmt(stringLit(""))}
 }
 
 func (g *gen) convertTagged(value goast.Expr, from, to *types.TCon, adt *types.ADTInfo) goast.Expr {

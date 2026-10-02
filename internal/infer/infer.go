@@ -1490,10 +1490,6 @@ func (g *generator) enterAmbient(row types.Row) (types.Row, *[]types.Type) {
 	return saved, sink
 }
 
-func (g *generator) isDefaultPrint(op *types.EffectOp) bool {
-	return op.Owner == g.ck.IO && types.SurfaceName(op.Name) == "print"
-}
-
 // blockScope is a block's local bindings, as schemes: parameters and
 // pre-bound recursive names are trivial (monotype) schemes, while generalized
 // generalized block bindings instantiate per use like top-level names.

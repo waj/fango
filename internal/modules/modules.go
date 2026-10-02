@@ -720,7 +720,7 @@ func validateTemplate(template string, arity int, sp source.Span) []diag.Error {
 			errs = append(errs, diag.Errorf(sp, "NATIVE TEMPLATE PLACEHOLDER", "Template must use `$%d` exactly once; found %d uses.", i+1, count))
 		}
 	}
-	s := strings.ReplaceAll(strings.ReplaceAll(template, "$eq", "__fango_eq"), "$show", "__fango_show")
+	s := strings.ReplaceAll(template, "$eq", "__fango_eq")
 	for i := arity; i >= 1; i-- {
 		s = strings.ReplaceAll(s, fmt.Sprintf("$%d", i), fmt.Sprintf("__fango_p%d", i))
 	}
@@ -741,8 +741,6 @@ func validateTemplate(template string, arity int, sp source.Span) []diag.Error {
 				want := -1
 				if id.Name == "__fango_eq" {
 					want = 2
-				} else if id.Name == "__fango_show" {
-					want = 1
 				}
 				if want >= 0 && len(call.Args) != want {
 					errs = append(errs, diag.Errorf(sp, "NATIVE TEMPLATE INTRINSIC", "Template intrinsic requires %d argument(s).", want))
@@ -760,7 +758,7 @@ func validateTemplate(template string, arity int, sp source.Span) []diag.Error {
 		return true
 	})
 	allowed := map[string]bool{
-		"fangort": true, "__fango_eq": true, "__fango_show": true,
+		"fangort": true, "__fango_eq": true,
 		"true": true, "false": true, "nil": true,
 		"append": true, "cap": true, "clear": true, "close": true, "complex": true,
 		"copy": true, "delete": true, "imag": true, "len": true, "make": true,

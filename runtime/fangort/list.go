@@ -1,7 +1,5 @@
 package fangort
 
-import "strings"
-
 // List is an immutable cons list. Construction never writes to a published
 // node, so independent branches can share a tail without synchronization.
 // The zero value is empty. The uncomparable field prevents accidental Go
@@ -44,33 +42,6 @@ func ListEq[T any](eq func(T, T) bool, a, b List[T]) bool {
 		a, b = a.Tail(), b.Tail()
 	}
 	return a.IsEmpty() && b.IsEmpty()
-}
-
-// ListShow renders the structural derived form — `Cons 1 (Cons 2 Nil)`, nested
-// field-taking constructors parenthesized — which the interpreter's showCtorVal
-// mirrors byte for byte. The bracket display users see comes from the
-// handwritten `Show` instance in stdlib/List.fango, not from here.
-//
-// It is iterative because the nesting is as deep as the list is long.
-func ListShow[T any](show func(T, bool) string, v List[T], nested bool) string {
-	if v.IsEmpty() {
-		return "Nil"
-	}
-	var b strings.Builder
-	opened := 0
-	for first := true; !v.IsEmpty(); first = false {
-		if nested || !first {
-			b.WriteByte('(')
-			opened++
-		}
-		b.WriteString("Cons ")
-		b.WriteString(show(v.Head(), true))
-		b.WriteByte(' ')
-		v = v.Tail()
-	}
-	b.WriteString("Nil")
-	b.WriteString(strings.Repeat(")", opened))
-	return b.String()
 }
 
 // ListMap visits elements in source order and builds a private result spine.

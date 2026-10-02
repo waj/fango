@@ -136,13 +136,6 @@ func ShowBool(v bool) string {
 	return "False"
 }
 
-func ShowUnit() string { return "()" }
-
-// The Print* family writes ShowX(v) and a newline to stdout: the compiled
-// backend's `print`, and (for non-Unit main) the test-internal print-main
-// observation mode.
-func PrintInt(v int64)     { fmt.Println(ShowInt(v)) }
-func PrintFloat(v float64) { fmt.Println(ShowFloat(v)) }
-func PrintString(v string) { fmt.Println(ShowString(v)) }
-func PrintChar(v rune)     { fmt.Println(ShowChar(v)) }
-func PrintBool(v bool)     { fmt.Println(ShowBool(v)) }
+// PrintString writes a program's value-style main, already rendered through
+// Display, and a newline to stdout.
+func PrintString(v string) { fmt.Println(v) }

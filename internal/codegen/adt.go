@@ -457,8 +457,8 @@ func (g *gen) assignOutcomeStmts(e core.Expr, name string) []goast.Stmt {
 }
 
 // ---------------------------------------------------------------------------
-// Derived operations (doc/design.md, "Go backend and runtime"): eq and show per ADT, generated only when a
-// program uses `==`/`print` at that type; needs propagate through ADT-typed
+// Derived operations (doc/design.md, "Go backend and runtime"): eq per ADT, generated only when a
+// native template uses `$eq` at that type; needs propagate through ADT-typed
 // fields.
 
 func (g *gen) adtOf(t types.Type) *types.ADTInfo {
@@ -468,7 +468,7 @@ func (g *gen) adtOf(t types.Type) *types.ADTInfo {
 	return nil
 }
 
-// derivedDecls emits the needed eq/show functions in declaration order.
+// derivedDecls emits the needed eq functions in declaration order.
 func (g *gen) derivedDecls(adts []*types.ADTInfo) []goast.Decl {
 	var decls []goast.Decl
 	for _, adt := range adts {
@@ -485,25 +485,11 @@ func (g *gen) derivedDecls(adts []*types.ADTInfo) []goast.Decl {
 		}
 		decls = append(decls, g.eqDecl(adt))
 	}
-	for _, adt := range adts {
-		if !g.neededShow[adt.Con.Unique] {
-			continue
-		}
-		if adt.Repr == types.ReprList {
-			decls = append(decls, g.listShowDecl(adt))
-			continue
-		}
-		if adt.Repr == types.ReprBytes {
-			decls = append(decls, g.bytesShowDecl(adt))
-			continue
-		}
-		decls = append(decls, g.showDecl(adt))
-	}
 	return decls
 }
 
-// listEqDecl and listShowDecl keep the exported name, owner, and generic
-// signature the emitted versions have, and only change the body to the runtime
+// listEqDecl keeps the exported name, owner, and generic signature the
+// emitted version has, and only changes the body to the runtime
 // implementation. That is what lets the element-op synthesis in generic.go
 // stay untouched: a call site builds the same instantiated call and the same
 // element operations whatever the type's representation is.
@@ -532,36 +518,10 @@ func (g *gen) listEqDecl(adt *types.ADTInfo) goast.Decl {
 	}
 }
 
-func (g *gen) listShowDecl(adt *types.ADTInfo) goast.Decl {
-	runtimeParams := runtimeADTParams(adt)
-	g.tyParamNames = tyParamNames(runtimeParams)
-	defer func() { g.tyParamNames = nil }()
-	g.usesFangort = true
-	elem := ident(g.tyParamNames[runtimeParams[0].ID])
-	show := showParamName(0)
-	return &goast.FuncDecl{
-		Name: ident(g.showName(adt)),
-		Type: &goast.FuncType{
-			TypeParams: g.typeParamFields(runtimeParams),
-			Params: &goast.FieldList{List: []*goast.Field{
-				{Names: []*goast.Ident{ident(show)}, Type: &goast.FuncType{
-					Params:  &goast.FieldList{List: []*goast.Field{{Type: elem}, {Type: ident("bool")}}},
-					Results: &goast.FieldList{List: []*goast.Field{{Type: ident("string")}}},
-				}},
-				{Names: []*goast.Ident{ident("v")}, Type: indexExpr(selector("fangort", "List"), []goast.Expr{elem})},
-				{Names: []*goast.Ident{ident("nested")}, Type: ident("bool")},
-			}},
-			Results: &goast.FieldList{List: []*goast.Field{{Type: ident("string")}}},
-		},
-		Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(
-			callExpr(selector("fangort", "ListShow"), ident(show), ident("v"), ident("nested")))}},
-	}
-}
-
-// bytesEqDecl and bytesShowDecl do for Bytes what listEqDecl and
-// listShowDecl do for List: keep the exported name and signature the emitted
-// derivations have, and only change the body to the runtime implementation.
-// Bytes takes no type parameters, so neither takes an element operation.
+// bytesEqDecl does for Bytes what listEqDecl does for List: keep the
+// exported name and signature the emitted derivation has, and only change the
+// body to the runtime implementation. Bytes takes no type parameters, so it
+// takes no element operation.
 func (g *gen) bytesEqDecl(adt *types.ADTInfo) goast.Decl {
 	g.usesFangort = true
 	return &goast.FuncDecl{
@@ -574,24 +534,6 @@ func (g *gen) bytesEqDecl(adt *types.ADTInfo) goast.Decl {
 		},
 		Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(
 			callExpr(selector("fangort", "BytesEq"), ident("a"), ident("b")))}},
-	}
-}
-
-// The `nested` parameter is accepted and ignored: the quoted escaped form
-// needs no parentheses at any depth.
-func (g *gen) bytesShowDecl(adt *types.ADTInfo) goast.Decl {
-	g.usesFangort = true
-	return &goast.FuncDecl{
-		Name: ident(g.showName(adt)),
-		Type: &goast.FuncType{
-			Params: &goast.FieldList{List: []*goast.Field{
-				{Names: []*goast.Ident{ident("v")}, Type: selector("fangort", "Bytes")},
-				{Names: []*goast.Ident{ident("_")}, Type: ident("bool")},
-			}},
-			Results: &goast.FieldList{List: []*goast.Field{{Type: ident("string")}}},
-		},
-		Body: &goast.BlockStmt{List: []goast.Stmt{returnStmt(
-			callExpr(selector("fangort", "BytesShow"), ident("v")))}},
 	}
 }
 
@@ -701,129 +643,4 @@ func (g *gen) eqField(f types.Type, af, bf goast.Expr) goast.Expr {
 		return g.eqCall(f, af, bf)
 	}
 	return binExpr(gotoken.EQL, af, bf)
-}
-
-// showDecl: func showT_X(v T_X, nested bool) string — `Circle 2.5`, nested
-// field-taking constructors parenthesized (`Just (Circle 2.5)`), String
-// fields as source literals. Both backends must format identically; the
-// interpreter mirrors this in eval's show.
-func (g *gen) showDecl(adt *types.ADTInfo) goast.Decl {
-	runtimeParams := runtimeADTParams(adt)
-	g.tyParamNames = tyParamNames(runtimeParams)
-	g.showParamNames = map[int]string{}
-	paramIdents := make([]goast.Expr, len(runtimeParams))
-	for i, v := range runtimeParams {
-		g.showParamNames[v.ID] = showParamName(i)
-		paramIdents[i] = ident(g.tyParamNames[v.ID])
-	}
-	defer func() { g.showParamNames = nil }()
-	ctorTag := func(name string) goast.Expr {
-		return &goast.StarExpr{X: indexExpr(g.ctorRef(adt.CtorNamed(name)), paramIdents)}
-	}
-
-	var clauses []goast.Stmt
-	usesBinding := false
-	for _, c := range adt.Ctors {
-		if len(c.Fields) == 0 {
-			clauses = append(clauses, &goast.CaseClause{
-				List: []goast.Expr{ctorTag(c.Name)},
-				Body: []goast.Stmt{returnStmt(stringLit(types.SurfaceName(c.Name)))},
-			})
-			continue
-		}
-		usesBinding = true
-		s := goast.Expr(stringLit(types.SurfaceName(c.Name)))
-		for i, f := range c.Fields {
-			field := &goast.SelectorExpr{X: ident("v"), Sel: ident(fieldName(i))}
-			s = binExpr(gotoken.ADD, s, stringLit(" "))
-			s = binExpr(gotoken.ADD, s, g.showField(f, field))
-		}
-		body := []goast.Stmt{
-			varDeclStmt("s", ident("string"), s),
-			&goast.IfStmt{
-				Cond: ident("nested"),
-				Body: &goast.BlockStmt{List: []goast.Stmt{
-					returnStmt(binExpr(gotoken.ADD, binExpr(gotoken.ADD, stringLit("("), ident("s")), stringLit(")"))),
-				}},
-			},
-			returnStmt(ident("s")),
-		}
-		clauses = append(clauses, &goast.CaseClause{
-			List: []goast.Expr{ctorTag(c.Name)},
-			Body: body,
-		})
-	}
-	var tag goast.Stmt
-	if usesBinding {
-		tag = &goast.AssignStmt{
-			Lhs: []goast.Expr{ident("v")},
-			Tok: gotoken.DEFINE,
-			Rhs: []goast.Expr{&goast.TypeAssertExpr{X: ident("v"), Type: nil}},
-		}
-	} else {
-		tag = exprStmt(&goast.TypeAssertExpr{X: ident("v"), Type: nil})
-	}
-	body := []goast.Stmt{
-		&goast.TypeSwitchStmt{Assign: tag, Body: &goast.BlockStmt{List: clauses}},
-		returnStmt(stringLit("")), // unreachable: the switch is total
-	}
-	if productADT(adt) {
-		body = g.constructorShow(adt.Ctors[0], "v")
-	}
-	if taggedADT(adt) {
-		body = g.taggedShow(adt)
-	}
-	params := make([]*goast.Field, 0, len(runtimeParams)+2)
-	for i, v := range runtimeParams {
-		params = append(params, &goast.Field{
-			Names: []*goast.Ident{ident(showParamName(i))},
-			Type: &goast.FuncType{
-				Params: &goast.FieldList{List: []*goast.Field{
-					{Type: ident(g.tyParamNames[v.ID])}, {Type: ident("bool")},
-				}},
-				Results: &goast.FieldList{List: []*goast.Field{{Type: ident("string")}}},
-			},
-		})
-	}
-	params = append(params,
-		&goast.Field{Names: []*goast.Ident{ident("v")}, Type: indexExpr(g.typeRef(adt), paramIdents)},
-		&goast.Field{Names: []*goast.Ident{ident("nested")}, Type: ident("bool")})
-	return &goast.FuncDecl{
-		Name: ident(g.showName(adt)),
-		Type: &goast.FuncType{
-			TypeParams: g.typeParamFields(runtimeParams),
-			Params:     &goast.FieldList{List: params},
-			Results:    &goast.FieldList{List: []*goast.Field{{Type: ident("string")}}},
-		},
-		Body: &goast.BlockStmt{List: body},
-	}
-}
-
-// showField renders one constructor field by its type: element-op param at a
-// type parameter, derived (possibly instantiated) show at an ADT, fangort at
-// a scalar.
-func (g *gen) showField(t types.Type, field goast.Expr) goast.Expr {
-	if v, ok := t.(*types.TVar); ok && v.Rigid {
-		return callExpr(ident(g.showParamNames[v.ID]), field, ident("true"))
-	}
-	if g.adtOf(t) != nil {
-		return g.showCall(t, field, ident("true"))
-	}
-	g.usesFangort = true
-	switch g.unique(t) {
-	case g.b.Int.Unique:
-		return callExpr(selector("fangort", "ShowInt"), field)
-	case g.b.Float.Unique:
-		return callExpr(selector("fangort", "ShowFloat"), field)
-	case g.b.String.Unique:
-		return callExpr(selector("fangort", "ShowStringLiteral"), field)
-	case g.b.Char.Unique:
-		return callExpr(selector("fangort", "ShowCharLiteral"), field)
-	case g.b.Bool.Unique:
-		return callExpr(selector("fangort", "ShowBool"), field)
-	case g.b.Unit.Unique:
-		return callExpr(selector("fangort", "ShowUnit"))
-	default:
-		panic("codegen: unshowable field type " + types.Show(t))
-	}
 }

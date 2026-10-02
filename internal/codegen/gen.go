@@ -170,9 +170,7 @@ func emitUnit(p *core.Prog, b *types.Builtins, unit Unit, printMain bool) ([]byt
 		b:                    b,
 		adts:                 map[int]*types.ADTInfo{},
 		neededEq:             map[int]bool{},
-		neededShow:           map[int]bool{},
 		scalarEq:             map[int]bool{},
-		scalarShow:           map[int]bool{},
 		caseVarTys:           map[string]types.Type{},
 		evidence:             map[types.EffectKey][]goast.Expr{},
 		evidenceModes:        map[types.EffectKey][]types.Transport{},
@@ -328,7 +326,6 @@ type gen struct {
 	b               *types.Builtins
 	adts            map[int]*types.ADTInfo
 	neededEq        map[int]bool
-	neededShow      map[int]bool
 	tmp             int // type-switch binding counter (ts0, ts1, …)
 	usesFangort     bool
 	usesMath        bool
@@ -345,15 +342,13 @@ type gen struct {
 	tyParamNames        map[int]string
 	polyDescriptorNames map[int]string // clause-local descriptors supplied by PolyRequest
 
-	// eqParamNames/showParamNames map an ADT's rigid params to the element-
-	// operation parameters of the derived eq/show being emitted (doc/design.md, "Go backend and runtime").
-	eqParamNames   map[int]string
-	showParamNames map[int]string
+	// eqParamNames maps an ADT's rigid params to the element-operation
+	// parameters of the derived eq being emitted (doc/design.md, "Go backend and runtime").
+	eqParamNames map[int]string
 
-	// scalarEq/scalarShow track which scalar element-op helpers (eqInt,
-	// showInt, …) call-site synthesis demanded.
-	scalarEq   map[int]bool
-	scalarShow map[int]bool
+	// scalarEq tracks which scalar element-op helpers (eqInt, …) call-site
+	// synthesis demanded.
+	scalarEq map[int]bool
 
 	// caseVarTys records the (instantiated) types of locals visible to a
 	// decision tree: worker/lambda parameters, case scrutinee binders, and
@@ -549,16 +544,8 @@ func (g *gen) eqName(adt *types.ADTInfo) string {
 	return "EqT_" + linkName(adt.Con.Name)
 }
 
-func (g *gen) showName(adt *types.ADTInfo) string {
-	return "ShowT_" + linkName(adt.Con.Name)
-}
-
 func (g *gen) eqRef(adt *types.ADTInfo) goast.Expr {
 	return g.qualified(symbolOwner(adt.Con.Name), g.eqName(adt))
-}
-
-func (g *gen) showRef(adt *types.ADTInfo) goast.Expr {
-	return g.qualified(symbolOwner(adt.Con.Name), g.showName(adt))
 }
 
 func (g *gen) evidenceName(name string) string {
@@ -704,35 +691,6 @@ func (g *gen) unitType() goast.Expr {
 func (g *gen) unitValue() goast.Expr {
 	g.usesFangort = true
 	return selector("fangort", "UnitValue")
-}
-
-// printCall builds the print of a value: fangort.PrintX for scalars, the
-// derived show piped through fangort.PrintString for ADTs.
-func (g *gen) printCall(arg goast.Expr, t types.Type) goast.Expr {
-	g.usesFangort = true
-	if g.adtOf(t) != nil {
-		return callExpr(selector("fangort", "PrintString"),
-			g.showCall(t, arg, ident("false")))
-	}
-	return callExpr(selector("fangort", g.printFn(t)), arg)
-}
-
-// printFn picks the fangort printer for a ground scalar type.
-func (g *gen) printFn(t types.Type) string {
-	switch g.unique(t) {
-	case g.b.Int.Unique:
-		return "PrintInt"
-	case g.b.Float.Unique:
-		return "PrintFloat"
-	case g.b.String.Unique:
-		return "PrintString"
-	case g.b.Char.Unique:
-		return "PrintChar"
-	case g.b.Bool.Unique:
-		return "PrintBool"
-	default:
-		panic("codegen: no printer for type " + types.Show(t))
-	}
 }
 
 // workerDef emits a top-level function definition as an uncurried Go func
@@ -1338,7 +1296,7 @@ func (g *gen) fallibleNativeResult(call *core.NativeCall, n *types.NativeInfo, i
 }
 
 func (g *gen) nativeTemplateExpr(call *core.NativeCall, template string, parentPrec int) goast.Expr {
-	s := strings.ReplaceAll(strings.ReplaceAll(template, "$eq", "__fango_eq"), "$show", "__fango_show")
+	s := strings.ReplaceAll(template, "$eq", "__fango_eq")
 	for i := len(call.Args); i >= 1; i-- {
 		s = strings.ReplaceAll(s, fmt.Sprintf("$%d", i), fmt.Sprintf("__fango_p%d", i))
 	}
@@ -1375,10 +1333,6 @@ func (g *gen) nativeTemplateExpr(call *core.NativeCall, template string, parentP
 					return g.eqCall(call.Args[i].Type(), a, b)
 				}
 				return binExpr(gotoken.EQL, a, b)
-			}
-			if id, ok := x.Fun.(*goast.Ident); ok && id.Name == "__fango_show" {
-				i := nativePlaceholderIndex(x.Args[0])
-				return g.nativeShow(call.Args[i].Type(), splice(x.Args[0], 0))
 			}
 			args := make([]goast.Expr, len(x.Args))
 			for i, a := range x.Args {
@@ -1437,22 +1391,6 @@ func nativePlaceholderIndex(x goast.Expr) int {
 	id := x.(*goast.Ident) // validated by modules.validateTemplate
 	i, _ := strconv.Atoi(strings.TrimPrefix(id.Name, "__fango_p"))
 	return i - 1
-}
-
-func (g *gen) nativeShow(t types.Type, value goast.Expr) goast.Expr {
-	g.usesFangort = true
-	if g.adtOf(t) != nil {
-		return g.showCall(t, value, ident("false"))
-	}
-	name := map[int]string{
-		g.b.Int.Unique: "ShowInt", g.b.Float.Unique: "ShowFloat",
-		g.b.String.Unique: "ShowString", g.b.Bool.Unique: "ShowBool",
-		g.b.Char.Unique: "ShowChar",
-	}[g.unique(t)]
-	if name == "" {
-		panic("codegen: no native show implementation for " + types.Show(t))
-	}
-	return callExpr(selector("fangort", name), value)
 }
 
 func exportNativeName(name string) string {

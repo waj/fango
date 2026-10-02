@@ -1086,33 +1086,8 @@ func cloneEvidence(src map[types.EffectKey]*evidence) map[types.EffectKey]*evide
 	return dst
 }
 
-func (in *interp) showValue(v Value) (string, error) {
-	var s string
-	switch v := v.(type) {
-	case int64:
-		s = fangort.ShowInt(v)
-	case float64:
-		s = fangort.ShowFloat(v)
-	case string:
-		s = fangort.ShowString(v)
-	case rune:
-		s = fangort.ShowChar(v)
-	case bool:
-		s = fangort.ShowBool(v)
-	case *CtorVal:
-		s = showCtorVal(v, false)
-	case fangort.Bytes:
-		s = fangort.BytesShow(v)
-	case fangort.List[Value]:
-		s = fangort.ListShow(showFieldValueNested, v, false)
-	default:
-		return "", fmt.Errorf("eval: printing a %T", v)
-	}
-	return s, nil
-}
-
 func (in *interp) nativeRuntime() *natives.Runtime {
-	return &natives.Runtime{Reader: in.ioctx.Reader, Host: in.ioctx, Writer: in.ioctx, Args: in.ioctx.Args, Dir: in.ioctx.Dir, Equal: eqValue, Show: in.showValue, Expand: in.env.Expand}
+	return &natives.Runtime{Reader: in.ioctx.Reader, Host: in.ioctx, Writer: in.ioctx, Args: in.ioctx.Args, Dir: in.ioctx.Dir, Equal: eqValue, Expand: in.env.Expand}
 }
 
 // tree walks a decision tree, mirroring the compiled backend's switches.
